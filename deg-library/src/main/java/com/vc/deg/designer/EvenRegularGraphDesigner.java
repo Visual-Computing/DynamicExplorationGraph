@@ -1,7 +1,6 @@
 package com.vc.deg.designer;
 
-import com.vc.deg.data.DataComparator;
-import com.vc.deg.designer.GraphDesigner;
+import com.vc.deg.MemoryView;
 import com.vc.deg.graph.EvenRegularWeightedUndirectedGraph;
 
 /**
@@ -13,11 +12,9 @@ import com.vc.deg.graph.EvenRegularWeightedUndirectedGraph;
 public class EvenRegularGraphDesigner implements GraphDesigner {
 	
 	protected EvenRegularWeightedUndirectedGraph graph;
-	protected DataComparator comparator;
 
-	public EvenRegularGraphDesigner(EvenRegularWeightedUndirectedGraph graph, DataComparator comparator) {
+	public EvenRegularGraphDesigner(EvenRegularWeightedUndirectedGraph graph) {
 		this.graph = graph;
-		this.comparator = comparator;
 	}
 
 	/**
@@ -25,7 +22,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 	 * 
 	 * @param id
 	 */
-	public void add(int id) {
+	public void add(int id, MemoryView data) {
 
 
 	}

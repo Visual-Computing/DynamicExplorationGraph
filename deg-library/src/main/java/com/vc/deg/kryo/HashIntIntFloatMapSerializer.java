@@ -1,6 +1,10 @@
 package com.vc.deg.kryo;
 
 
+import java.io.BufferedInputStream;
+import java.io.InputStream;
+import java.io.ObjectInputStream;
+
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.Serializer;
 import com.esotericsoftware.kryo.io.Input;
@@ -18,12 +22,12 @@ public class HashIntIntFloatMapSerializer extends Serializer<IntObjMap<IntFloatM
 	
 	@Override
 	public void write(Kryo kryo, Output output, IntObjMap<IntFloatMap> object) {
-		store(kryo, output, object);
+		store(output, object);
 	}
 
 	@Override
 	public IntObjMap<IntFloatMap> read(Kryo kryo, Input input, Class<? extends IntObjMap<IntFloatMap>> type) {
-		return loadMutable(kryo, input);
+		return loadMutable(input);
 	}
 	
 	// ------------------------------------------------------------------------------------------------------------------
@@ -31,12 +35,12 @@ public class HashIntIntFloatMapSerializer extends Serializer<IntObjMap<IntFloatM
 	// ------------------------------------------------------------------------------------------------------------------
 	
 	
-	public static void store(Kryo kryo, Output output, IntObjMap<IntFloatMap> obj) {
+	public static void store(Output output, IntObjMap<IntFloatMap> obj) {
 
 		SeparateIntObjAdapter adapter = new SeparateIntObjAdapter(obj);
 		output.writeInt(adapter.keys().length);
 		output.writeInts(adapter.keys(), 0, adapter.keys().length);
-		saveIntFloatMapArray(kryo, output, cast(adapter.valueArray()));
+		saveIntFloatMapArray(output, cast(adapter.valueArray()));
 		output.writeInt(adapter.freeValue());
 		output.writeInt(adapter.size());
 		output.writeInt(adapter.capacity());
@@ -50,7 +54,7 @@ public class HashIntIntFloatMapSerializer extends Serializer<IntObjMap<IntFloatM
 		return result;
 	}
 	
-	private static void saveIntFloatMapArray(Kryo kryo, Output output,  HashIntFloatMap[] arr) {
+	private static void saveIntFloatMapArray(Output output,  HashIntFloatMap[] arr) {
 		
 		output.writeInt(arr.length, true);
 		for (HashIntFloatMap map : arr) {
@@ -60,7 +64,7 @@ public class HashIntIntFloatMapSerializer extends Serializer<IntObjMap<IntFloatM
 			if(map == null)
 				continue;
 		
-			HashIntFloatMapSerializer.store(kryo, output, map);
+			HashIntFloatMapSerializer.store(output, map);
 		}
 	}
 	
@@ -69,23 +73,22 @@ public class HashIntIntFloatMapSerializer extends Serializer<IntObjMap<IntFloatM
 	// ------------------------------------------------------------------------------------------------------------------
 	// ------------------------------------------------------------------------------------------------------------------
 
-	public static IntObjMap<IntFloatMap> loadMutable(Kryo kryo, Input input) {		
-		return load(kryo, input).mutableIntObjMap();
+	public static IntObjMap<IntFloatMap> loadMutable(Input input) {		
+		return load(input).mutableIntObjMap();
 	}
 	
-	public static IntObjMap<IntFloatMap> loadMutable(Kryo kryo, Input input, IntObjMap<IntFloatMap> map) {
+	public static IntObjMap<IntFloatMap> loadMutable(Input input, IntObjMap<IntFloatMap> map) {
 		final MutableLHashSeparateKVIntObjMapGO<IntFloatMap> res = (MutableLHashSeparateKVIntObjMapGO<IntFloatMap>) map;
-		return load(kryo, input).mutableIntObjMap(res);
+		return load(input).mutableIntObjMap(res);
 	}
 	
-	private static SeparateIntObjAdapter load(Kryo kryo, Input input) {
-
+	private static SeparateIntObjAdapter load(Input input) {
 		SeparateIntObjAdapter adapter = new SeparateIntObjAdapter();
 
 		// read the data from file
 		int tableSize = input.readInt();
 		adapter.setKeys(input.readInts(tableSize));
-		adapter.setValueArray(loadIntFloatMapArray(kryo, input));
+		adapter.setValueArray(loadIntFloatMapArray(input));
 		adapter.setFreeValue(input.readInt());
 		adapter.setSize(input.readInt());
 		adapter.setCapacity(input.readInt());
@@ -94,7 +97,7 @@ public class HashIntIntFloatMapSerializer extends Serializer<IntObjMap<IntFloatM
 		return adapter;
 	}
 	
-	private static IntFloatMap[] loadIntFloatMapArray(Kryo kryo, Input input) {
+	private static IntFloatMap[] loadIntFloatMapArray(Input input) {
 		
 		int length = input.readInt(true);
 		if (length == 0) return null;
@@ -106,7 +109,7 @@ public class HashIntIntFloatMapSerializer extends Serializer<IntObjMap<IntFloatM
 			if(input.readByte() == NULL)
 				continue;
 			
-			result[i] = HashIntFloatMapSerializer.load(kryo, input);
+			result[i] = HashIntFloatMapSerializer.load(input);
 		}
 		
 		return result;

@@ -1,7 +1,5 @@
 package com.vc.deg.graph;
 
-import java.util.Random;
-
 /**
  * A weighted undirected graph.
  * 

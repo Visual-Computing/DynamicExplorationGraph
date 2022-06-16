@@ -14,8 +14,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-import com.vc.deg.data.FeatureRepository;
-import com.vc.deg.data.FeatureSpace;
 import com.vc.deg.designer.EvenRegularGraphDesigner;
 import com.vc.deg.graph.EvenRegularWeightedUndirectedGraph;
 import com.vc.deg.navigation.EvenRegularGraphNavigator;
@@ -24,15 +22,12 @@ import com.vc.deg.navigation.EvenRegularGraphNavigator;
  * This class wraps the main functions of the library
  * 
  * @author Nico Hezel
- *
- * @param <T>
  */
-public class DynamicExplorationGraph<T> {
+public class DynamicExplorationGraphImpl implements DynamicExplorationGraph {
 
-	protected EvenRegularWeightedUndirectedGraph interalGraph;
-	protected FeatureRepository<T> objectRepository;
-	protected EvenRegularGraphNavigator<T> navigator;
-	protected EvenRegularGraphDesigner<T> designer;
+	protected EvenRegularWeightedUndirectedGraph internalGraph;
+	protected EvenRegularGraphNavigator navigator;
+	protected EvenRegularGraphDesigner designer;
 	
 	/**
 	 * Define how the nodes of the graph will be compared and how many edges each node has.
@@ -40,34 +35,30 @@ public class DynamicExplorationGraph<T> {
 	 * @param space
 	 * @param edgesPerNode
 	 */
-	public DynamicExplorationGraph(FeatureSpace<T> space, int edgesPerNode) {
-		this.objectRepository = new FeatureRepository<>(space);
-		this.interalGraph = new EvenRegularWeightedUndirectedGraph(edgesPerNode);
-		this.designer = new EvenRegularGraphDesigner<>(interalGraph, objectRepository); 
-		this.navigator = new EvenRegularGraphNavigator<>(interalGraph, objectRepository); 
+	public DynamicExplorationGraphImpl(FeatureSpace space, int edgesPerNode) {
+		this.internalGraph = new EvenRegularWeightedUndirectedGraph(edgesPerNode, space);
+		this.designer = new EvenRegularGraphDesigner(internalGraph); 
+		this.navigator = new EvenRegularGraphNavigator(internalGraph); 
 	}
 	
-	public void add(int id, T data) {
-		this.objectRepository.add(id, data);
-		this.designer.add(id);
+	public void add(int id, MemoryView data) {
+		this.designer.add(id, data);
 	}
 	
 	public void writeToFile(Path file) throws ClassNotFoundException, IOException {
 		Path tempFile = Paths.get(file.getParent().toString(), "~$" + file.getFileName().toString());
 		
 		try(OutputStream os = Files.newOutputStream(tempFile, TRUNCATE_EXISTING, CREATE, WRITE)) {
-			ObjectOutputStream output  = new ObjectOutputStream(os);
-			this.objectRepository.writeObject(output);
-			this.interalGraph.writeObject(output);
+			ObjectOutputStream output = new ObjectOutputStream(os);
+			this.internalGraph.writeObject(output);
 		}
 		Files.move(tempFile, file, REPLACE_EXISTING);
 	}
 	
 	public void readFromFile(Path file) throws ClassNotFoundException, IOException {
 		try(InputStream os = Files.newInputStream(file)) {
-			ObjectInputStream input  = new ObjectInputStream(os);
-			this.objectRepository.readObject(input);
-			this.interalGraph.readObject(input);
+			ObjectInputStream input = new ObjectInputStream(os);
+			this.internalGraph.readObject(input);
 		} 
 	}
 }

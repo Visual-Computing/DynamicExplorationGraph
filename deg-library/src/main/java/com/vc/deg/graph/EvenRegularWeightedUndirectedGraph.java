@@ -9,6 +9,7 @@ import com.koloboke.collect.map.IntObjMap;
 import com.koloboke.collect.map.hash.HashIntFloatMaps;
 import com.koloboke.collect.map.hash.HashIntObjMaps;
 import com.koloboke.collect.set.IntSet;
+import com.vc.deg.FeatureSpace;
 import com.vc.deg.kryo.HashIntIntFloatMapSerializer;
 
 /**
@@ -21,21 +22,32 @@ import com.vc.deg.kryo.HashIntIntFloatMapSerializer;
 public class EvenRegularWeightedUndirectedGraph implements KryoSerializable {
 
 	protected final IntObjMap<IntFloatMap> nodes;
+	protected final FeatureSpace featureSpace;
 	protected int edgesPerNode;
 	
-	public EvenRegularWeightedUndirectedGraph(int edgesPerNode) {
+	public EvenRegularWeightedUndirectedGraph(int edgesPerNode, FeatureSpace featureSpace) {
 		this.edgesPerNode = edgesPerNode;
 		this.nodes = HashIntObjMaps.newMutableMap();
+		this.featureSpace = featureSpace;
 		
 	}
 
-	public EvenRegularWeightedUndirectedGraph(int edgesPerNode, int expectedSize) {
+	public EvenRegularWeightedUndirectedGraph(int edgesPerNode, int expectedSize, FeatureSpace featureSpace) {
 		this.edgesPerNode = edgesPerNode;
-		this.nodes = HashIntObjMaps.newMutableMap(expectedSize);		
+		this.nodes = HashIntObjMaps.newMutableMap(expectedSize);	
+		this.featureSpace = featureSpace;
 	}
 	
 	public void addNode(int id) {
 		nodes.put(id, HashIntFloatMaps.newMutableMap(edgesPerNode));
+	}
+	
+	public FeatureSpace getFeatureSpace() {
+		return featureSpace;
+	}
+	
+	public NodeView getNodeView(int id) {
+		return null;
 	}
 	
 	public IntSet getEdgeIds(int id) {
@@ -44,12 +56,12 @@ public class EvenRegularWeightedUndirectedGraph implements KryoSerializable {
 
 	@Override
 	public void write(Kryo kryo, Output output) {
-		HashIntIntFloatMapSerializer.store(kryo, output, nodes);
+		HashIntIntFloatMapSerializer.store(output, nodes);
 		
 	}
 
 	@Override
 	public void read(Kryo kryo, Input input) {
-		HashIntIntFloatMapSerializer.loadMutable(kryo, input, nodes);
+		HashIntIntFloatMapSerializer.loadMutable(input, nodes);
 	}
 }

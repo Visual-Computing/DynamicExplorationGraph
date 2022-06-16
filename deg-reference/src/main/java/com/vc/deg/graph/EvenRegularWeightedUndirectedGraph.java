@@ -10,10 +10,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.IntConsumer;
 
-import com.vc.deg.graph.NodeIds;
-import com.vc.deg.graph.WeightedEdgeConsumer;
-import com.vc.deg.graph.WeightedEdges;
-import com.vc.deg.graph.WeightedUndirectedGraph;
+import com.vc.deg.FeatureSpace;
 
 
 
@@ -30,18 +27,34 @@ public class EvenRegularWeightedUndirectedGraph implements Serializable, Weighte
 	private static final long serialVersionUID = -9100450642805380353L;
 
 	protected final Map<Integer, Map<Integer,Float>> nodes;
+	protected FeatureSpace space;
 	protected int edgesPerNode;
 
-	public EvenRegularWeightedUndirectedGraph(int edgesPerNode) {
+	public EvenRegularWeightedUndirectedGraph(int edgesPerNode, FeatureSpace space) {
 		this.edgesPerNode = edgesPerNode;
 		this.nodes = new HashMap<>();
+		this.space = space;
 	}
 
-	public EvenRegularWeightedUndirectedGraph(int edgesPerNode, int expectedSize) {
+	public EvenRegularWeightedUndirectedGraph(int edgesPerNode, int expectedSize, FeatureSpace space) {
 		this.edgesPerNode = edgesPerNode;
-		this.nodes = new HashMap<>(expectedSize);		
+		this.nodes = new HashMap<>(expectedSize);	
+		this.space = space;
 	}
 
+
+
+	public FeatureSpace getFeatureSpace() {
+		return space;
+	}
+
+
+	public NodeView getNodeView(int id) {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+	
 	/**
 	 * Add and return a new node or return an existing one.
 	 * 
@@ -249,5 +262,4 @@ public class EvenRegularWeightedUndirectedGraph implements Serializable, Weighte
 			ids.forEach((id) -> consumer.accept(id));
 		}
 	}
-
 }

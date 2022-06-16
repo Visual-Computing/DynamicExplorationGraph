@@ -1,5 +1,4 @@
 dependencies {
-	implementation project(':deg-api')
 	implementation project(':deg-common')
 	
 	implementation group: 'com.esotericsoftware', name: 'kryo', version: "${KYRO_VERSION}" 

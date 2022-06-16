@@ -1,6 +1,6 @@
 package com.vc.deg.designer;
 
-import com.vc.deg.data.DataRepository;
+import com.vc.deg.MemoryView;
 import com.vc.deg.graph.WeightedUndirectedGraph;
 
 /**
@@ -9,14 +9,12 @@ import com.vc.deg.graph.WeightedUndirectedGraph;
  * @author Neiko
  *
  */
-public class EvenRegularGraphDesigner<T> {
+public class EvenRegularGraphDesigner {
 	
 	protected WeightedUndirectedGraph graph;
-	protected DataRepository<T> repository;
 
-	public EvenRegularGraphDesigner(WeightedUndirectedGraph graph, DataRepository<T> repository) {
+	public EvenRegularGraphDesigner(WeightedUndirectedGraph graph) {
 		this.graph = graph;
-		this.repository = repository;
 	}
 
 	/**
@@ -24,7 +22,7 @@ public class EvenRegularGraphDesigner<T> {
 	 * 
 	 * @param id
 	 */
-	public void add(int id) {
+	public void add(int id, MemoryView data) {
 
 
 	}

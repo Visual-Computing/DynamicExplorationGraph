@@ -23,8 +23,8 @@ subprojects {
     }
 
     dependencies {
-        implementation group: "org.slf4j", name: "slf4j-api", version: "${SLF4J_VERSION}"
-        implementation group: "org.slf4j", name: "log4j-over-slf4j", version: "${SLF4J_VERSION}"
+        //implementation group: "org.slf4j", name: "slf4j-api", version: "${SLF4J_VERSION}"
+        //implementation group: "org.slf4j", name: "log4j-over-slf4j", version: "${SLF4J_VERSION}"
 
 		testImplementation group: "junit", name: "junit", version: "${JUNIT_VERSION}"
     }

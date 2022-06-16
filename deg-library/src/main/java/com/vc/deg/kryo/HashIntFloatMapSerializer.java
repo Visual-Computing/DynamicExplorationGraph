@@ -12,15 +12,15 @@ public class HashIntFloatMapSerializer extends Serializer<IntFloatMap> {
 
 	@Override
 	public void write(Kryo kryo, Output output, IntFloatMap obj) {
-		store(kryo, output, obj);
+		store(output, obj);
 	}
 	
 	@Override
 	public IntFloatMap read(Kryo kryo, Input input, Class<? extends IntFloatMap> type) {
-		return load(kryo, input);
+		return load(input);
 	}
 	
-	public static void store(Kryo kryo, Output output, IntFloatMap obj) {
+	public static void store(Output output, IntFloatMap obj) {
 		
 		ParallelIntKeyAdapter adapter = new ParallelIntKeyAdapter(obj);
 		output.writeInt(adapter.table().length);
@@ -31,7 +31,7 @@ public class HashIntFloatMapSerializer extends Serializer<IntFloatMap> {
 		output.writeInt(adapter.modCount());
 	}
 
-	public static IntFloatMap load(Kryo kryo, Input input) {
+	public static IntFloatMap load(Input input) {
 
 		// create an adapter to fill everything in the final object
 		ParallelIntKeyAdapter adapter = new ParallelIntKeyAdapter();

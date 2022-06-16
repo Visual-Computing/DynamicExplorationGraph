@@ -5,9 +5,10 @@ import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.TreeSet;
 
-import com.vc.deg.data.DataRepository;
-import com.vc.deg.data.FeatureSpace;
+import com.vc.deg.FeatureSpace;
+import com.vc.deg.MemoryView;
 import com.vc.deg.graph.EvenRegularWeightedUndirectedGraph;
+import com.vc.deg.graph.NodeView;
 
 /**
  * 
@@ -16,8 +17,8 @@ import com.vc.deg.graph.EvenRegularWeightedUndirectedGraph;
  */
 public class GraphSearch {
 
-	public static <T> TreeSet<ObjectDistance<T>> search(T query, int k, float eps, int[] forbiddenIds, int[] entryPoints, EvenRegularWeightedUndirectedGraph graph, DataRepository<T> objectRepository) {
-		final FeatureSpace<T> featureSpace = objectRepository.getFeatureSpace();
+	public static <T> TreeSet<ObjectDistance> search(MemoryView query, int k, float eps, int[] forbiddenIds, int[] entryPoints, EvenRegularWeightedUndirectedGraph graph) {
+		final FeatureSpace featureSpace = graph.getFeatureSpace();
 		
 		// list of checked ids
 		final Set<Integer> C = new HashSet<>(forbiddenIds.length + entryPoints.length);
@@ -27,21 +28,21 @@ public class GraphSearch {
 			C.add(id);
 		
 		// items to traverse, start with the initial node
-		final PriorityQueue<ObjectDistance<T>> S = new PriorityQueue<>();
+		final PriorityQueue<ObjectDistance> S = new PriorityQueue<>();
 		for (int id : entryPoints) {
-			T obj = objectRepository.get(id);
-			S.add(new ObjectDistance<>(id, obj, featureSpace.computeDistance(query, obj)));
+			final NodeView obj = graph.getNodeView(id);
+			S.add(new ObjectDistance(id, obj, featureSpace.computeDistance(query, obj.getFeature())));
 		}
 
 		// result set
-		final TreeSet<ObjectDistance<T>> R = new TreeSet<>(S);
+		final TreeSet<ObjectDistance> R = new TreeSet<>(S);
 
 		// search radius
 		float r = Float.MAX_VALUE;
 		
 		// iterate as long as good elements are in S
 		while(S.size() > 0) {
-			final ObjectDistance<T> s = S.poll();
+			final ObjectDistance s = S.poll();
 
 			// max distance reached
 			if(s.dist > r * (1 + eps))
@@ -51,12 +52,12 @@ public class GraphSearch {
 			for(int neighborId : graph.getConnectedNodeIds(s.id).toArray()) {
 
 				if(C.add(neighborId) == false) {
-					final T n = objectRepository.get(neighborId);
-					final float nDist = featureSpace.computeDistance(query, n);
+					final NodeView n = graph.getNodeView(neighborId);
+					final float nDist = featureSpace.computeDistance(query, n.getFeature());
 
 					// follow this node further
 					if(nDist <= r * (1 + eps)) {
-						final ObjectDistance<T> candidate = new ObjectDistance<T>(neighborId, n, nDist);
+						final ObjectDistance candidate = new ObjectDistance(neighborId, n, nDist);
 						S.add(candidate);
 
 						// remember the node
@@ -81,20 +82,20 @@ public class GraphSearch {
 	 *
 	 * @param <T>
 	 */
-	public static class ObjectDistance<T> implements Comparable<ObjectDistance<T>> {
+	public static class ObjectDistance implements Comparable<ObjectDistance> {
 		
 		public final int id;
-		public final T obj;
+		public final NodeView obj;
 		public final float dist;
 		
-		public ObjectDistance(int id, T obj, float dist) {
+		public ObjectDistance(int id, NodeView obj, float dist) {
 			this.id = id;
 			this.obj = obj;
 			this.dist = dist;
 		}
 
 		@Override
-		public int compareTo(ObjectDistance<T> o) {
+		public int compareTo(ObjectDistance o) {
 			int cmp = Float.compare(-dist, -o.dist);
 			if(cmp == 0)
 				cmp = Integer.compare(obj.hashCode(), o.obj.hashCode());

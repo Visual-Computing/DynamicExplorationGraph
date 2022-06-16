@@ -1,5 +1,6 @@
 package com.vc.deg.designer;
 
+import com.vc.deg.MemoryView;
 
 /**
  * Verbessert und erweitert den Graphen
@@ -9,6 +10,6 @@ package com.vc.deg.designer;
  */
 public interface GraphDesigner {
 	
-	public void add(int id);
+	public void add(int id, MemoryView data);
 
 }

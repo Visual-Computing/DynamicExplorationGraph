@@ -1,4 +1,3 @@
 dependencies {
-	implementation project(':deg-api')
 	implementation project(':deg-common')
 }
