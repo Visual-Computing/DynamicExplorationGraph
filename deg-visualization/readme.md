@@ -1,0 +1,1 @@
+Sollte eine Visualisierung der Graphen Navigation und eine Debugging UI enthalten.

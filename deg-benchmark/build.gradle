@@ -1,0 +1,4 @@
+dependencies {
+	implementation project(':deg-common')
+	implementation project(':deg-library')
+}

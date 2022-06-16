@@ -1,0 +1,1 @@
+Enthält alle Klassen und Interfaces die sowohl von dem Referenz als auch dem Library Projekt benötigt werden, aber nicht teil der API sind

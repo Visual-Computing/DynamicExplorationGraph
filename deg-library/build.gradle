@@ -1,0 +1,10 @@
+dependencies {
+	implementation project(':deg-api')
+	implementation project(':deg-common')
+	
+	implementation group: 'com.esotericsoftware', name: 'kryo', version: "${KYRO_VERSION}" 
+        	
+    implementation group: 'com.koloboke', name: 'koloboke-api-jdk8', version: "${KOLOBOKE_VERSION}"
+	implementation group: 'com.koloboke', name: 'koloboke-impl-jdk8', version: "${KOLOBOKE_VERSION}"
+	implementation group: 'com.koloboke', name: 'koloboke-impl-common-jdk8', version: "${KOLOBOKE_VERSION}"
+}
