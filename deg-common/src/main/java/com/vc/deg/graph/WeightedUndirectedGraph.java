@@ -1,5 +1,7 @@
 package com.vc.deg.graph;
 
+import com.vc.deg.FeatureVector;
+
 /**
  * A weighted undirected graph.
  * 
@@ -20,9 +22,10 @@ public interface WeightedUndirectedGraph {
 	 * Returns false if a node with the same id already exists.
 	 * 
 	 * @param id
+	 * @param feature
 	 * @return
 	 */
-	public boolean addNode(int id);
+	public boolean addNode(int id, FeatureVector feature);
 	
 	/**
 	 * Removes a node from the graph.
@@ -41,6 +44,13 @@ public interface WeightedUndirectedGraph {
 	public NodeIds getNodeIds();
 	
 	
+	/**
+	 * Get the node data: label, feature and neighbors
+	 * 
+	 * @param id
+	 * @return
+	 */
+	public NodeView getNode(int id);
 	
 	/**
 	 * Does a directed edge between the two nodes exist?

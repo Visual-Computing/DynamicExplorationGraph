@@ -2,6 +2,7 @@ package com.vc.deg;
 
 /**
  * Eine Klasse die Features vergleichen kann und generell we
+ * The feature space knows how the data in the MemoryView is structured
  * 
  * @author Nico Hezel
  */
@@ -21,5 +22,5 @@ public interface FeatureSpace {
 	 * @param f2
 	 * @return
 	 */
-	public float computeDistance(MemoryView f1, MemoryView f2);
+	public float computeDistance(FeatureVector f1, FeatureVector f2);
 }

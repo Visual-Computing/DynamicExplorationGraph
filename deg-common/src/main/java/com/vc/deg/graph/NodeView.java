@@ -1,10 +1,10 @@
 package com.vc.deg.graph;
 
-import com.vc.deg.MemoryView;
+import com.vc.deg.FeatureVector;
 
 public interface NodeView {
 
 	public int getLabel();
-	public MemoryView getFeature();
+	public FeatureVector getFeature();
 	public WeightedEdges getNeighbors();
 }

@@ -2,8 +2,9 @@ package com.vc.deg.anns;
 
 import com.vc.deg.DynamicExplorationGraph;
 import com.vc.deg.FeatureSpace;
+import com.vc.deg.GraphDesigner;
 import com.vc.deg.GraphFactory;
-import com.vc.deg.MemoryView;
+import com.vc.deg.FeatureVector;
 import com.vc.deg.data.Describable;
 import com.vc.deg.data.FloatL2Space;
 import com.vc.deg.data.Identifiable;
@@ -15,10 +16,11 @@ public class Sift1mBenchmark {
 		SiftFeature[] data = loadSiftData();
 		FeatureSpace space = new FloatL2Space(128);
 		DynamicExplorationGraph deg = GraphFactory.getDefaultFactory().newGraph(space, edgesPerNode);
+		GraphDesigner builder = deg.designer();
 		
 		for (int i = 0; i < data.length; i++) {
 			final SiftFeature entry = data[i];
-			deg.add(entry.getId(), entry.getFeature());
+			builder.add(entry.getId(), entry.getFeature());
 		}
 	}
 
@@ -29,9 +31,9 @@ public class Sift1mBenchmark {
 
 	public static class SiftFeature implements Identifiable, Describable {
 		protected int id;
-		protected MemoryView feature;
+		protected FeatureVector feature;
 		
-		public SiftFeature(int id, MemoryView feature) {
+		public SiftFeature(int id, FeatureVector feature) {
 			this.id = id;
 			this.feature = feature;
 		}
@@ -42,7 +44,7 @@ public class Sift1mBenchmark {
 		}
 		
 		@Override
-		public MemoryView getFeature() {
+		public FeatureVector getFeature() {
 			return feature;
 		}
 	}

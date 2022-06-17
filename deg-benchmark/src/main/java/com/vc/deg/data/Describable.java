@@ -1,8 +1,8 @@
 package com.vc.deg.data;
 
-import com.vc.deg.MemoryView;
+import com.vc.deg.FeatureVector;
 
 public interface Describable {
-	public MemoryView getFeature();
+	public FeatureVector getFeature();
 }
 

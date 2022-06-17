@@ -1,14 +1,10 @@
 package com.vc.deg;
 
 import java.nio.file.Path;
-import java.util.Iterator;
 import java.util.ServiceLoader;
 
-
-
 /**
- * 
- * use ServiceLoader to register Dynamic Exploration Graphs
+ * Use ServiceLoader to register Dynamic Exploration Graphs
  * 
  * https://docs.oracle.com/javase/8/docs/api/java/util/ServiceLoader.html
  * https://riptutorial.com/java/example/19523/simple-serviceloader-example

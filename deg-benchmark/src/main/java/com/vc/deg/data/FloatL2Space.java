@@ -1,7 +1,7 @@
 package com.vc.deg.data;
 
 import com.vc.deg.FeatureSpace;
-import com.vc.deg.MemoryView;
+import com.vc.deg.FeatureVector;
 
 public class FloatL2Space implements FeatureSpace {
 
@@ -17,7 +17,7 @@ public class FloatL2Space implements FeatureSpace {
 	}
 	
 	@Override
-	public float computeDistance(MemoryView f1, MemoryView f2) {
+	public float computeDistance(FeatureVector f1, FeatureVector f2) {
 		float result = 0;
 		for (int i = 0; i < dims; i++) {
 			float diff = f1.readFloat(i) - f2.readFloat(i);
