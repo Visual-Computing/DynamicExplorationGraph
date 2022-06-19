@@ -1,9 +1,12 @@
 package com.vc.deg.ref.graph;
 
+import java.io.BufferedInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
+import java.io.InputStream;
 import java.io.Serializable;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
@@ -12,11 +15,14 @@ import java.util.function.IntConsumer;
 
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
+import com.vc.deg.feature.FeatureFactory;
 import com.vc.deg.graph.NodeIds;
 import com.vc.deg.graph.NodeView;
 import com.vc.deg.graph.WeightedEdgeConsumer;
 import com.vc.deg.graph.WeightedEdges;
 import com.vc.deg.graph.WeightedUndirectedGraph;
+import com.vc.deg.io.LittleEndianDataInputStream;
+import com.vc.deg.ref.feature.PrimitiveFeatureFactories;
 
 
 
@@ -33,9 +39,7 @@ import com.vc.deg.graph.WeightedUndirectedGraph;
  * @author Nico Hezel
  *
  */
-public class EvenRegularWeightedUndirectedGraph implements Serializable, WeightedUndirectedGraph {
-
-	private static final long serialVersionUID = -9100450642805380353L;
+public class EvenRegularWeightedUndirectedGraph implements WeightedUndirectedGraph {
 
 	/**
 	 * Label of the node is the identifier
@@ -61,6 +65,12 @@ public class EvenRegularWeightedUndirectedGraph implements Serializable, Weighte
 	public EvenRegularWeightedUndirectedGraph(int edgesPerNode, int expectedSize, FeatureSpace space) {
 		this.edgesPerNode = edgesPerNode;
 		this.nodes = new HashMap<>(expectedSize);	
+		this.space = space;
+	}
+	
+	public EvenRegularWeightedUndirectedGraph(int edgesPerNode, Map<Integer, NodeData> nodes, FeatureSpace space) {
+		this.edgesPerNode = edgesPerNode;
+		this.nodes = nodes;	
 		this.space = space;
 	}
 
@@ -201,19 +211,92 @@ public class EvenRegularWeightedUndirectedGraph implements Serializable, Weighte
 	 * @param out
 	 * @throws IOException
 	 */
-	public void writeObject(ObjectOutputStream out) throws IOException {
-
-	}
-
-	/**
-	 * @see Serializable
-	 * @param in
-	 * @throws IOException
-	 */
-	public void readObject(ObjectInputStream in) throws IOException {
-
+	public void writeObject(DataOutputStream out) throws IOException {
+		// TODO features need to be written with the help of the columnBasedFFeatureFactory in order to store only the data and no size
+		
+		// TODO the neighbor ids need to be stored in ascending order
 	}
 	
+	public static EvenRegularWeightedUndirectedGraph readFromFile(Path file) throws IOException {
+		String filename = file.getFileName().toString();
+		int extStart = filename.lastIndexOf('.');
+		int typeStart = filename.lastIndexOf('.', extStart-1);
+		String dType = filename.substring(typeStart+1, extStart);
+		return readFromFile(file, dType);
+	}
+	
+	public static EvenRegularWeightedUndirectedGraph readFromFile(Path file, String featureType) throws IOException {
+		try(InputStream is = Files.newInputStream(file)) {
+			BufferedInputStream bis = new BufferedInputStream(is);
+			LittleEndianDataInputStream input = new LittleEndianDataInputStream(bis);
+
+			// read meta data
+			int metric = Byte.toUnsignedInt(input.readByte());
+			int dims = Short.toUnsignedInt(input.readShort());
+			long nodeCount = Integer.toUnsignedLong(input.readInt());
+			int edgesPerNode = Byte.toUnsignedInt(input.readByte());
+			
+			// 	featureSize	=		    filesize - meta data - (edge data + label) * nodeCount  / nodeCount
+			int featureSize = (int)((Files.size(file) - 8 - ((edgesPerNode * 8 + 4) * nodeCount)) / nodeCount);
+
+			// factory to create FeatureVectors based on the featureType
+			FeatureFactory featureFactory = PrimitiveFeatureFactories.get(featureType, dims);
+			if(featureFactory == null)
+				featureFactory = FeatureFactory.findFactory(featureType, dims);
+			if(featureFactory == null)
+				throw new UnsupportedOperationException("No feature factory found for featureType="+featureType+" and dims="+dims);
+			if(featureSize != featureFactory.featureSize())
+				throw new UnsupportedOperationException("The feature factory for featureType="+featureType+" and dims="+dims+" produces features with "+featureFactory.featureSize()+" bytes but the graph contains features with "+featureSize+" bytes.");
+		
+			// find the feature space specified in the file
+			FeatureSpace space = FeatureSpace.findFeatureSpace(featureType, metric, false);
+			if(space == null)
+				throw new UnsupportedOperationException("No feature space found for featureType="+featureType+", metric="+metric+" and isNative=false");
+			if(featureSize != space.featureSize())
+				throw new UnsupportedOperationException("The feature space for featureType="+featureType+", metric="+metric+" and isNative=false expects features with "+space.featureSize()+" bytes but the graph contains features with "+featureSize+" bytes.");
+			if(dims != space.dims())
+				throw new UnsupportedOperationException("The feature space for featureType="+featureType+", metric="+metric+" and isNative=false expects features with "+space.dims()+" dimensions but the graph contains features with "+dims+" dimensions.");
+			
+			// the references implementation uses 
+			if(nodeCount > Integer.MAX_VALUE)
+				throw new UnsupportedOperationException("The reference implementation does not allow graphs with more than "+Integer.MAX_VALUE+" nodes");
+			
+			// read the node data
+			final Map<Integer, NodeData> nodes = new HashMap<>((int)nodeCount); 
+			for (int i = 0; i < nodeCount; i++) {			
+				
+				// read the feature vector
+				final FeatureVector feature = featureFactory.read(input);
+				
+				// read the edge dta
+				final int[] neighborIds = new int[edgesPerNode];
+				for (int e = 0; e < edgesPerNode; e++) 
+					neighborIds[e] = input.readInt();
+				final float[] weights = new float[edgesPerNode];
+				for (int e = 0; e < edgesPerNode; e++) 
+					weights[e] = input.readFloat();				
+				Map<Integer,Float> edges = new HashMap<>(edgesPerNode);
+				for (int e = 0; e < edgesPerNode; e++)
+					edges.put(neighborIds[e], weights[e]);
+				
+				// read the label
+				int label = input.readInt();
+				
+				// create the node data
+				nodes.put(label, new NodeData(label, feature, edges));
+				
+				if(i % 100_000 == 0)
+					System.out.println("loaded "+i+" nodes");
+			}
+			
+			return new EvenRegularWeightedUndirectedGraph(edgesPerNode, nodes, space);
+		}
+	}
+	
+	
+	/**
+	 * @author Nico Hezel
+	 */
 	protected static class NodeData implements NodeView {
 		
 		protected final int label;
@@ -224,6 +307,12 @@ public class EvenRegularWeightedUndirectedGraph implements Serializable, Weighte
 			this.label = label;
 			this.data = data;
 			this.edges = new HashMap<>(edgesPerNode);
+		}
+		
+		public NodeData(int label, FeatureVector data, Map<Integer,Float> edges) {
+			this.label = label;
+			this.data = data;
+			this.edges = edges;
 		}
 
 		@Override
@@ -243,7 +332,7 @@ public class EvenRegularWeightedUndirectedGraph implements Serializable, Weighte
 	}
 	
 	/**
-	 * Contains immutable edge information for a single node.
+	 * Contains edge information for a single node.
 	 *  
 	 * @author Nico Hezel
 	 */
@@ -270,6 +359,11 @@ public class EvenRegularWeightedUndirectedGraph implements Serializable, Weighte
 		}		
 	}
 	
+	/**
+	 * Set of node ids
+	 * 
+	 * @author Nico Hezel
+	 */
 	protected static class SetBasedIds implements NodeIds {
 		
 		protected final Set<Integer> ids;

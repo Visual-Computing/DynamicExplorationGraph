@@ -1,10 +1,14 @@
 package com.vc.deg;
 
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ServiceLoader;
 
+
 /**
  * Use ServiceLoader to register Dynamic Exploration Graphs
+ * 
+ * TODO move to DynamicExplorationGraph.Factory
  * 
  * https://docs.oracle.com/javase/8/docs/api/java/util/ServiceLoader.html
  * https://riptutorial.com/java/example/19523/simple-serviceloader-example
@@ -40,10 +44,21 @@ public interface GraphFactory {
 	public DynamicExplorationGraph newGraph(FeatureSpace space, int edgesPerNode);
 	
 	/**
-	 * Load an existing graph
+	 * Load an existing graph. Read the feature type from the filename.
+	 * e.g. sift1m_k30.float.deg 
 	 * 
 	 * @param file
 	 * @return
 	 */
-	public DynamicExplorationGraph loadGraph(Path file);
+	public DynamicExplorationGraph loadGraph(Path file) throws IOException;
+	
+	/**
+	 * Load an existing graph and expect a specific feature type
+	 * 
+	 * @param file
+	 * @param componentType
+	 * @return
+	 * @throws IOException
+	 */
+	public DynamicExplorationGraph loadGraph(Path file, String featureType) throws IOException;
 }

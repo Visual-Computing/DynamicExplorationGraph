@@ -1,11 +1,14 @@
 package com.vc.deg.feature;
 
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
 import java.util.Arrays;
 
 import com.vc.deg.FeatureVector;
 
 /**
- * Wraps an double-array
+ * Wraps an byte-array
  * 
  * @author Nico Hezel
  */
@@ -23,42 +26,62 @@ public class ByteFeature implements FeatureVector {
 	}
 
 	@Override
-	public boolean readBoolean(long index) {
-		throw new UnsupportedOperationException("IntFeature does not support readBoolean");
+	public byte readByte(int byteOffset) {
+		return feature[byteOffset];
 	}
 
 	@Override
-	public byte readByte(long index) {
-		return feature[(int)index];
+	public short readShort(int byteOffset) {
+		throw new UnsupportedOperationException(ByteFeature.class.getSimpleName() + " does not support readShort");
 	}
 
 	@Override
-	public short readShort(long index) {
-		throw new UnsupportedOperationException("IntFeature does not support readShort");
+	public int readInt(int byteOffset) {
+		throw new UnsupportedOperationException(ByteFeature.class.getSimpleName() + " does not support readInt");
 	}
 
 	@Override
-	public int readInt(long index) {
-		throw new UnsupportedOperationException("IntFeature does not support readInt");
+	public long readLong(int byteOffset) {
+		throw new UnsupportedOperationException(ByteFeature.class.getSimpleName() + " does not support readLong");
 	}
 
 	@Override
-	public long readLong(long index) {
-		throw new UnsupportedOperationException("IntFeature does not support readLong");
+	public float readFloat(int byteOffset) {
+		throw new UnsupportedOperationException(ByteFeature.class.getSimpleName() + " does not support readFloat");
 	}
 
 	@Override
-	public float readFloat(long index) {
-		throw new UnsupportedOperationException("IntFeature does not support readFloat");
-	}
-
-	@Override
-	public double readDouble(long index) {
-		throw new UnsupportedOperationException("IntFeature does not support readDouble");
+	public double readDouble(int byteOffset) {
+		throw new UnsupportedOperationException(ByteFeature.class.getSimpleName() + " does not support readDouble");
 	}
 
 	@Override
 	public byte[] toBytes() {
 		return Arrays.copyOf(feature, feature.length);
+	}
+	
+	@Override
+	public FeatureVector copy() {
+		return new ByteFeature(toBytes());
+	}
+
+	@Override
+	public void writeObject(DataOutputStream out) throws IOException {
+		out.write(feature);		
+	}
+
+	@Override
+	public void readObject(DataInputStream in) throws IOException {
+		in.read(feature);
+	}
+
+	@Override
+	public long nativeAddress() {
+		throw new UnsupportedOperationException(ByteFeature.class.getSimpleName() + " stores its values on-heap, using a native address is dangerous.");
+	}
+	
+	@Override
+	public boolean isNative() {
+		return false;
 	}
 }

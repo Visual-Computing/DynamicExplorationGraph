@@ -1,12 +1,16 @@
 package com.vc.deg.feature;
 
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Arrays;
 
 import com.vc.deg.FeatureVector;
 
 /**
- * Wraps an int-array
+ * Wraps an short-array
  * 
  * @author Nico Hezel
  */
@@ -24,38 +28,33 @@ public class ShortFeature implements FeatureVector {
 	}
 
 	@Override
-	public boolean readBoolean(long index) {
-		throw new UnsupportedOperationException("IntFeature does not support readBoolean");
+	public byte readByte(int byteOffset) {
+		throw new UnsupportedOperationException(ShortFeature.class.getSimpleName() + " does not support readByte");
 	}
 
 	@Override
-	public byte readByte(long index) {
-		throw new UnsupportedOperationException("IntFeature does not support readByte");
+	public short readShort(int byteOffset) {
+		return feature[byteOffset >> 1];
 	}
 
 	@Override
-	public short readShort(long index) {
-		return feature[(int)index];
+	public int readInt(int byteOffset) {
+		throw new UnsupportedOperationException(ShortFeature.class.getSimpleName() + " does not support readInt");
 	}
 
 	@Override
-	public int readInt(long index) {
-		throw new UnsupportedOperationException("IntFeature does not support readInt");
+	public long readLong(int byteOffset) {
+		throw new UnsupportedOperationException(ShortFeature.class.getSimpleName() + " does not support readLong");
 	}
 
 	@Override
-	public long readLong(long index) {
-		throw new UnsupportedOperationException("IntFeature does not support readLong");
+	public float readFloat(int byteOffset) {
+		throw new UnsupportedOperationException(ShortFeature.class.getSimpleName() + " does not support readFloat");
 	}
 
 	@Override
-	public float readFloat(long index) {
-		throw new UnsupportedOperationException("IntFeature does not support readFloat");
-	}
-
-	@Override
-	public double readDouble(long index) {
-		throw new UnsupportedOperationException("IntFeature does not support readDouble");
+	public double readDouble(int byteOffset) {
+		throw new UnsupportedOperationException(ShortFeature.class.getSimpleName() + " does not support readDouble");
 	}
 
 	@Override
@@ -64,5 +63,32 @@ public class ShortFeature implements FeatureVector {
 		for (short value : feature) 
 			bb.putShort(value);
 		return bb.array();
+	}
+	
+	@Override
+	public FeatureVector copy() {
+		return new ShortFeature(Arrays.copyOf(feature, feature.length));
+	}
+	
+	@Override
+	public void writeObject(DataOutputStream out) throws IOException {
+		for (short d : feature) 
+			out.writeShort(d);
+	}
+
+	@Override
+	public void readObject(DataInputStream in) throws IOException {
+		for (int i = 0; i < feature.length; i++) 
+			feature[i] = in.readShort();
+	}
+
+	@Override
+	public long nativeAddress() {
+		throw new UnsupportedOperationException(ShortFeature.class.getSimpleName() + " stores its values on-heap, using a native address is dangerous.");
+	}
+	
+	@Override
+	public boolean isNative() {
+		return false;
 	}
 }

@@ -1,12 +1,17 @@
 package com.vc.deg.feature;
 
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 import com.vc.deg.FeatureVector;
 
 /**
- * Generic feature vector and contain all kinds of data 
+ * Generic feature vector and contains all kinds of data 
+ * 
+ * TODO A Buffer Version is not needed, but a Chronical Bytes with offheap memory 
  * 
  * @author Nico Hezel
  */
@@ -28,42 +33,40 @@ public class ByteBufferFeature implements FeatureVector {
 	public int size() {
 		return feature.capacity();
 	}
-
+	
 	@Override
-	public boolean readBoolean(long index) {
-		final int longIndex = (int)(index / (Long.BYTES * 8));
-		final long mem = feature.getLong(longIndex);
-		return ((mem << (index - longIndex)) & 0x1) != 0;
+	public boolean isNative() {
+		return false;
 	}
 
 	@Override
-	public byte readByte(long index) {
-		return feature.get((int)index * Byte.BYTES);
+	public byte readByte(int byteOffset) {
+		return feature.get(byteOffset);
 	}
 
 	@Override
-	public short readShort(long index) {
-		return feature.getShort((int)index * Short.BYTES);
+	public short readShort(int byteOffset) {
+		return feature.getShort(byteOffset);
 	}
 
 	@Override
-	public int readInt(long index) {
-		return feature.getInt((int)index * Integer.BYTES);
+	public int readInt(int byteOffset) {
+		return feature.getInt(byteOffset);
 	}
 
 	@Override
-	public long readLong(long index) {
-		return feature.getLong((int)index * Long.BYTES);
+	public long readLong(int byteOffset) {
+		return feature.getLong(byteOffset);
 	}
 
 	@Override
-	public float readFloat(long index) {
-		return feature.getFloat((int)index * Float.BYTES);
+	public float readFloat(int byteOffset) {
+		return feature.getFloat(byteOffset);
 	}
 
 	@Override
-	public double readDouble(long index) {
-		return feature.getDouble((int)index * Double.BYTES);
+	public double readDouble(int byteOffset) {
+		return feature.getDouble(byteOffset);
 	}
 
 	@Override
@@ -72,5 +75,28 @@ public class ByteBufferFeature implements FeatureVector {
 		feature.rewind();
 		feature.get(dst, 0, size());
 		return dst;
+	}
+	
+	@Override
+	public FeatureVector copy() {
+		return new ByteBufferFeature(toBytes());
+	}
+
+	@Override
+	public long nativeAddress() {
+		// TODO Auto-generated method stub
+		return 0;
+	}
+
+	@Override
+	public void writeObject(DataOutputStream out) throws IOException {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public void readObject(DataInputStream in) throws IOException {
+		// TODO Auto-generated method stub
+		
 	}
 }

@@ -1,5 +1,6 @@
 package com.vc.deg;
 
+import java.io.IOException;
 import java.nio.file.Path;
 
 public interface DynamicExplorationGraph {
@@ -16,8 +17,7 @@ public interface DynamicExplorationGraph {
      * @return
      */
 	public static DynamicExplorationGraph newGraph(FeatureSpace space, int edgesPerNode) {
-		GraphFactory factory = GraphFactory.getDefaultFactory();
-		return factory.newGraph(space, edgesPerNode);
+		return GraphFactory.getDefaultFactory().newGraph(space, edgesPerNode);
 	}
 	
 	/**
@@ -26,8 +26,7 @@ public interface DynamicExplorationGraph {
 	 * @param file
 	 * @return
 	 */
-	public static DynamicExplorationGraph loadGraph(Path file) {
-		GraphFactory factory = GraphFactory.getDefaultFactory();
-		return factory.loadGraph(file);
+	public static DynamicExplorationGraph loadGraph(Path file) throws ClassNotFoundException, IOException {
+		return GraphFactory.getDefaultFactory().loadGraph(file);
 	}
 }
