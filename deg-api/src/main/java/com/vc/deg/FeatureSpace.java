@@ -9,8 +9,6 @@ import com.vc.deg.feature.FeatureFactory;
 /**
  * The {@link FeatureSpace} knows how the data in the {@link FeatureVector} is structured
  * 
- * TODO maybe add a featureType and remove featureSize from
- * 
  * @author Nico Hezel
  */
 public interface FeatureSpace {

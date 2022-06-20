@@ -9,7 +9,7 @@ import com.koloboke.collect.set.hash.HashIntSets;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.NodeView;
-import com.vc.deg.impl.graph.EvenRegularWeightedUndirectedGraph;
+import com.vc.deg.impl.graph.WeightedUndirectedGraph;
 
 /**
  * 
@@ -18,7 +18,7 @@ import com.vc.deg.impl.graph.EvenRegularWeightedUndirectedGraph;
  */
 public class GraphSearch {
 
-	public static TreeSet<ObjectDistance> search(FeatureVector query, int k, float eps, int[] forbiddenIds, int[] entryPoints, EvenRegularWeightedUndirectedGraph graph) {
+	public static TreeSet<ObjectDistance> search(FeatureVector query, int k, float eps, int[] forbiddenIds, int[] entryPoints, WeightedUndirectedGraph graph) {
 		final FeatureSpace featureSpace = graph.getFeatureSpace();
 		
 		// list of checked ids

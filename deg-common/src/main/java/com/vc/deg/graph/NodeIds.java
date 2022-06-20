@@ -7,7 +7,7 @@ import java.util.function.IntConsumer;
  * 
  * @author Nico Hezel
  */
-public interface NodeIds {
+public interface NodeIds extends Iterable<Integer> {
 
 	/**
 	 * Number of node ids in this collection

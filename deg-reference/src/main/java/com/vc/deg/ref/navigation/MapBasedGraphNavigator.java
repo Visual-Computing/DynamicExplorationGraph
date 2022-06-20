@@ -2,6 +2,7 @@ package com.vc.deg.ref.navigation;
 
 import com.vc.deg.GraphNavigator;
 import com.vc.deg.graph.WeightedUndirectedGraph;
+import com.vc.deg.ref.graph.MapBasedWeightedUndirectedGraph;
 
 /**
  * Erzeugt 2D projektionen von Subgraphen und übernimmt die Navigation davon.
@@ -10,11 +11,11 @@ import com.vc.deg.graph.WeightedUndirectedGraph;
  * @author Neiko
  *
  */
-public class EvenRegularGraphNavigator implements GraphNavigator {
+public class MapBasedGraphNavigator implements GraphNavigator {
 
-	protected WeightedUndirectedGraph graph;
+	protected MapBasedWeightedUndirectedGraph graph;
 
-	public EvenRegularGraphNavigator(WeightedUndirectedGraph graph) {
+	public MapBasedGraphNavigator(MapBasedWeightedUndirectedGraph graph) {
 		this.graph = graph;
 	}
 

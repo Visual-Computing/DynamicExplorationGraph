@@ -7,6 +7,28 @@ public interface DynamicExplorationGraph {
 	
 	public GraphDesigner designer();
 	public GraphNavigator navigator();
+	
+	/**
+	 * Search the graph for the best nodes matching the query
+	 * 
+	 * @param query
+	 * @param k
+	 * @return
+	 */
+	public default SearchResult search(FeatureVector query, int k) {
+		return search(query, k, 0.1f);
+	}
+	
+	/**
+	 * 
+	 * @param query
+	 * @param k
+	 * @param eps Is similar to a search radius factor 0 means low and 1 means high radius to scan
+	 * @return
+	 */
+	public SearchResult search(FeatureVector query, int k, float eps);
+	
+	
 //	public int[] search(MemoryView query, int top);
 //	public Node
 	

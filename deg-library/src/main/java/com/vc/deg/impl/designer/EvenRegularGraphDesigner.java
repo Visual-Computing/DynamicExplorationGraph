@@ -2,7 +2,7 @@ package com.vc.deg.impl.designer;
 
 import com.vc.deg.GraphDesigner;
 import com.vc.deg.FeatureVector;
-import com.vc.deg.impl.graph.EvenRegularWeightedUndirectedGraph;
+import com.vc.deg.impl.graph.WeightedUndirectedGraph;
 
 /**
  * Verbessert und erweitert den Graphen
@@ -12,9 +12,9 @@ import com.vc.deg.impl.graph.EvenRegularWeightedUndirectedGraph;
  */
 public class EvenRegularGraphDesigner implements GraphDesigner {
 	
-	protected EvenRegularWeightedUndirectedGraph graph;
+	protected WeightedUndirectedGraph graph;
 
-	public EvenRegularGraphDesigner(EvenRegularWeightedUndirectedGraph graph) {
+	public EvenRegularGraphDesigner(WeightedUndirectedGraph graph) {
 		this.graph = graph;
 	}
 

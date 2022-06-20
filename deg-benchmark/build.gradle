@@ -1,4 +1,9 @@
 dependencies {
-	implementation project(':deg-common')
-	implementation project(':deg-library')
+	implementation project(':deg-reference')
+	
+	implementation group: 'it.unimi.dsi', name: 'fastutil', version: "${FASTUTIL_VERSION}"
+	
+	implementation group: 'com.koloboke', name: 'koloboke-api-jdk8', version: "${KOLOBOKE_VERSION}"
+	implementation group: 'com.koloboke', name: 'koloboke-impl-jdk8', version: "${KOLOBOKE_VERSION}"
+	implementation group: 'com.koloboke', name: 'koloboke-impl-common-jdk8', version: "${KOLOBOKE_VERSION}"
 }

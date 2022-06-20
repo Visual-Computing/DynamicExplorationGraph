@@ -15,10 +15,12 @@ import com.esotericsoftware.kryo.KryoException;
 import com.esotericsoftware.kryo.unsafe.UnsafeInput;
 import com.esotericsoftware.kryo.unsafe.UnsafeOutput;
 import com.vc.deg.FeatureSpace;
+import com.vc.deg.FeatureVector;
 import com.vc.deg.GraphDesigner;
 import com.vc.deg.GraphNavigator;
+import com.vc.deg.SearchResult;
 import com.vc.deg.impl.designer.EvenRegularGraphDesigner;
-import com.vc.deg.impl.graph.EvenRegularWeightedUndirectedGraph;
+import com.vc.deg.impl.graph.WeightedUndirectedGraph;
 import com.vc.deg.impl.navigation.EvenRegularGraphNavigator;
 
 /**
@@ -28,7 +30,7 @@ import com.vc.deg.impl.navigation.EvenRegularGraphNavigator;
  */
 public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGraph {
 
-	protected EvenRegularWeightedUndirectedGraph internalGraph;
+	protected WeightedUndirectedGraph internalGraph;
 	protected EvenRegularGraphNavigator navigator;
 	protected EvenRegularGraphDesigner designer;
 	
@@ -40,9 +42,15 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	 * @param objectRepository
 	 */
 	public DynamicExplorationGraph(FeatureSpace space, int edgesPerNode) {
-		this.internalGraph = new EvenRegularWeightedUndirectedGraph(edgesPerNode, space);
+		this.internalGraph = new WeightedUndirectedGraph(edgesPerNode, space);
 		this.designer = new EvenRegularGraphDesigner(internalGraph); 
 		this.navigator = new EvenRegularGraphNavigator(internalGraph); 
+	}
+	
+	@Override
+	public SearchResult search(FeatureVector query, int k, float eps) {
+		// TODO Auto-generated method stub
+		return null;
 	}
 	
 	@Override

@@ -20,20 +20,20 @@ import com.vc.deg.impl.kryo.HashIntIntFloatMapSerializer;
  * @author Neiko
  *
  */
-public class EvenRegularWeightedUndirectedGraph implements KryoSerializable {
+public class WeightedUndirectedGraph implements KryoSerializable {
 
 	protected final IntObjMap<IntFloatMap> nodes;
 	protected final FeatureSpace featureSpace;
 	protected int edgesPerNode;
 	
-	public EvenRegularWeightedUndirectedGraph(int edgesPerNode, FeatureSpace featureSpace) {
+	public WeightedUndirectedGraph(int edgesPerNode, FeatureSpace featureSpace) {
 		this.edgesPerNode = edgesPerNode;
 		this.nodes = HashIntObjMaps.newMutableMap();
 		this.featureSpace = featureSpace;
 		
 	}
 
-	public EvenRegularWeightedUndirectedGraph(int edgesPerNode, int expectedSize, FeatureSpace featureSpace) {
+	public WeightedUndirectedGraph(int edgesPerNode, int expectedSize, FeatureSpace featureSpace) {
 		this.edgesPerNode = edgesPerNode;
 		this.nodes = HashIntObjMaps.newMutableMap(expectedSize);	
 		this.featureSpace = featureSpace;

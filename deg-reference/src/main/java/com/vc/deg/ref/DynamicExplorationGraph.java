@@ -7,18 +7,21 @@ import static java.nio.file.StandardOpenOption.WRITE;
 
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.ObjectOutputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.TreeSet;
 
 import com.vc.deg.FeatureSpace;
-import com.vc.deg.io.LittleEndianDataInputStream;
+import com.vc.deg.FeatureVector;
+import com.vc.deg.SearchResult;
 import com.vc.deg.ref.designer.EvenRegularGraphDesigner;
-import com.vc.deg.ref.graph.EvenRegularWeightedUndirectedGraph;
-import com.vc.deg.ref.navigation.EvenRegularGraphNavigator;
+import com.vc.deg.ref.graph.MapBasedWeightedUndirectedGraph;
+import com.vc.deg.ref.navigation.MapBasedGraphNavigator;
+import com.vc.deg.ref.search.ObjectDistance;
+import com.vc.deg.ref.search.ResultSet;
+
 
 /**
  * This class wraps the main functions of the library
@@ -27,8 +30,8 @@ import com.vc.deg.ref.navigation.EvenRegularGraphNavigator;
  */
 public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGraph {
 
-	protected EvenRegularWeightedUndirectedGraph internalGraph;
-	protected EvenRegularGraphNavigator navigator;
+	protected MapBasedWeightedUndirectedGraph internalGraph;
+	protected MapBasedGraphNavigator navigator;
 	protected EvenRegularGraphDesigner designer;
 
 	/**
@@ -38,9 +41,9 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	 * @param edgesPerNode
 	 */
 	public DynamicExplorationGraph(FeatureSpace space, int edgesPerNode) {
-		this.internalGraph = new EvenRegularWeightedUndirectedGraph(edgesPerNode, space);
+		this.internalGraph = new MapBasedWeightedUndirectedGraph(edgesPerNode, space);
 		this.designer = new EvenRegularGraphDesigner(internalGraph); 
-		this.navigator = new EvenRegularGraphNavigator(internalGraph); 
+		this.navigator = new MapBasedGraphNavigator(internalGraph); 
 	}
 
 	/**
@@ -51,9 +54,9 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	 * @param edgesPerNode
 	 */
 	public DynamicExplorationGraph(FeatureSpace space, int expectedSize, int edgesPerNode) {
-		this.internalGraph = new EvenRegularWeightedUndirectedGraph(edgesPerNode, expectedSize, space);
+		this.internalGraph = new MapBasedWeightedUndirectedGraph(edgesPerNode, expectedSize, space);
 		this.designer = new EvenRegularGraphDesigner(internalGraph); 
-		this.navigator = new EvenRegularGraphNavigator(internalGraph); 
+		this.navigator = new MapBasedGraphNavigator(internalGraph); 
 	}
 	
 	/**
@@ -61,14 +64,14 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	 * 
 	 * @param graph
 	 */
-	private DynamicExplorationGraph(EvenRegularWeightedUndirectedGraph graph) {
+	private DynamicExplorationGraph(MapBasedWeightedUndirectedGraph graph) {
 		this.internalGraph = graph;
 		this.designer = new EvenRegularGraphDesigner(internalGraph); 
-		this.navigator = new EvenRegularGraphNavigator(internalGraph); 
+		this.navigator = new MapBasedGraphNavigator(internalGraph); 
 	}
 
 	@Override
-	public EvenRegularGraphNavigator navigator() {
+	public MapBasedGraphNavigator navigator() {
 		return navigator;
 	}
 
@@ -76,7 +79,15 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	public EvenRegularGraphDesigner designer() {
 		return designer;
 	}
-
+	
+	@Override
+	public SearchResult search(FeatureVector query, int k, float eps) {
+		int[] forbiddenIds = new int[0];
+		int[] entryPoint = new int[] { internalGraph.getNodeIds().iterator().next() };
+		TreeSet<ObjectDistance> result = internalGraph.search(query, k, eps, forbiddenIds, entryPoint);
+	
+		return new ResultSet(result);
+	}
 
 
 	/**
@@ -117,10 +128,10 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	 * @throws IOException
 	 */
 	public static DynamicExplorationGraph readFromFile(Path file) throws IOException {
-		return new DynamicExplorationGraph(EvenRegularWeightedUndirectedGraph.readFromFile(file));
+		return new DynamicExplorationGraph(MapBasedWeightedUndirectedGraph.readFromFile(file));
 	}
 	
 	public static DynamicExplorationGraph readFromFile(Path file, String featureType) throws IOException {
-		return new DynamicExplorationGraph(EvenRegularWeightedUndirectedGraph.readFromFile(file, featureType));
+		return new DynamicExplorationGraph(MapBasedWeightedUndirectedGraph.readFromFile(file, featureType));
 	}
 }

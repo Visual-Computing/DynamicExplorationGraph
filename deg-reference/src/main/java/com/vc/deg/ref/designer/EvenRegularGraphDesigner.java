@@ -3,6 +3,7 @@ package com.vc.deg.ref.designer;
 import com.vc.deg.GraphDesigner;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.WeightedUndirectedGraph;
+import com.vc.deg.ref.graph.MapBasedWeightedUndirectedGraph;
 
 /**
  * Verbessert und erweitert den Graphen
@@ -12,9 +13,9 @@ import com.vc.deg.graph.WeightedUndirectedGraph;
  */
 public class EvenRegularGraphDesigner implements GraphDesigner {
 	
-	protected WeightedUndirectedGraph graph;
+	protected MapBasedWeightedUndirectedGraph graph;
 
-	public EvenRegularGraphDesigner(WeightedUndirectedGraph graph) {
+	public EvenRegularGraphDesigner(MapBasedWeightedUndirectedGraph graph) {
 		this.graph = graph;
 	}
 

@@ -1,4 +1,4 @@
-package com.vc.deg.data;
+package com.vc.deg.feature;
 
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;

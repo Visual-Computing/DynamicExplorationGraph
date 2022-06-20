@@ -8,9 +8,12 @@ import java.io.Serializable;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.IntConsumer;
 
 import com.vc.deg.FeatureSpace;
@@ -23,6 +26,7 @@ import com.vc.deg.graph.WeightedEdges;
 import com.vc.deg.graph.WeightedUndirectedGraph;
 import com.vc.deg.io.LittleEndianDataInputStream;
 import com.vc.deg.ref.feature.PrimitiveFeatureFactories;
+import com.vc.deg.ref.search.ObjectDistance;
 
 
 
@@ -39,7 +43,7 @@ import com.vc.deg.ref.feature.PrimitiveFeatureFactories;
  * @author Nico Hezel
  *
  */
-public class EvenRegularWeightedUndirectedGraph implements WeightedUndirectedGraph {
+public class MapBasedWeightedUndirectedGraph {
 
 	/**
 	 * Label of the node is the identifier
@@ -56,19 +60,19 @@ public class EvenRegularWeightedUndirectedGraph implements WeightedUndirectedGra
 	 */
 	protected final int edgesPerNode;
 
-	public EvenRegularWeightedUndirectedGraph(int edgesPerNode, FeatureSpace space) {
+	public MapBasedWeightedUndirectedGraph(int edgesPerNode, FeatureSpace space) {
 		this.edgesPerNode = edgesPerNode;
 		this.nodes = new HashMap<>();
 		this.space = space;
 	}
 
-	public EvenRegularWeightedUndirectedGraph(int edgesPerNode, int expectedSize, FeatureSpace space) {
+	public MapBasedWeightedUndirectedGraph(int edgesPerNode, int expectedSize, FeatureSpace space) {
 		this.edgesPerNode = edgesPerNode;
 		this.nodes = new HashMap<>(expectedSize);	
 		this.space = space;
 	}
 	
-	public EvenRegularWeightedUndirectedGraph(int edgesPerNode, Map<Integer, NodeData> nodes, FeatureSpace space) {
+	public MapBasedWeightedUndirectedGraph(int edgesPerNode, Map<Integer, NodeData> nodes, FeatureSpace space) {
 		this.edgesPerNode = edgesPerNode;
 		this.nodes = nodes;	
 		this.space = space;
@@ -80,13 +84,10 @@ public class EvenRegularWeightedUndirectedGraph implements WeightedUndirectedGra
 		return space;
 	}
 
-	@Override
-	public NodeView getNode(int label) {
+	public NodeData getNode(int label) {
 		return nodes.getOrDefault(label, null);
 	}
 
-	
-	@Override
 	public boolean addNode(int label, FeatureVector data) {
 		if(hasNode(label) == false) {
 			nodes.put(label, new NodeData(label, data, edgesPerNode+1));
@@ -95,17 +96,17 @@ public class EvenRegularWeightedUndirectedGraph implements WeightedUndirectedGra
 		return false;
 	}
 
-	@Override
-	public NodeIds getNodeIds() {
-		return new SetBasedIds(nodes.keySet());
+	public int getNodeCount() {
+		return nodes.size();
+	}
+	public Iterable<Integer> getNodeIds() {
+		return nodes.keySet();
 	}
 
-	@Override
 	public boolean hasNode(int id) {
 		return nodes.containsKey(id);
 	}
 
-	@Override
 	public boolean hasEdge(int id1, int id2) {
 		final NodeData nodeData = nodes.get(id1);
 		if(nodeData == null)
@@ -113,18 +114,14 @@ public class EvenRegularWeightedUndirectedGraph implements WeightedUndirectedGra
 		return nodeData.edges.containsKey(id2);
 	}
 
-	@Override
-	public NodeIds getConnectedNodeIds(int id) {
-		return new MapBasedWeighedEdes(id, nodes.get(id).edges);
-	}
+//	public NodeIds getConnectedNodeIds(int id) {
+//		return new MapBasedWeighedEdes(id, nodes.get(id).edges);
+//	}
 	
+//	public WeightedEdges getEdges(int id) {
+//		return new MapBasedWeighedEdes(id, nodes.get(id).edges);
+//	}
 
-	@Override
-	public WeightedEdges getEdges(int id) {
-		return new MapBasedWeighedEdes(id, nodes.get(id).edges);
-	}
-
-	@Override
 	public boolean addUndirectedEdge(int id1, int id2, float weight) {
 		boolean add1 = addDirectedEdge(id1, id2, weight);
 		boolean add2 = addDirectedEdge(id2, id1, weight);
@@ -145,7 +142,6 @@ public class EvenRegularWeightedUndirectedGraph implements WeightedUndirectedGra
 		return (nodeData.edges.put(toId, weight) == null);
 	}
 
-	@Override
 	public boolean removeNode(int id) {
 		
 		// remove all directed edges from this node to any other node
@@ -160,8 +156,6 @@ public class EvenRegularWeightedUndirectedGraph implements WeightedUndirectedGra
 		return false;
 	}
 
-
-	@Override
 	public boolean removeUndirectedEdge(int id1, int id2) {
 		boolean remove1 = removeDirectedEdge(id1, id2);
 		boolean remove2 = removeDirectedEdge(id2, id1);
@@ -183,16 +177,13 @@ public class EvenRegularWeightedUndirectedGraph implements WeightedUndirectedGra
 		return false;
 	}
 	
-
-	@Override
 	public float getEdgeWeight(int id1, int id2) {
 		final NodeData nodeData = nodes.get(id1);
 		if(nodeData == null)
 			return 0;
 		return nodeData.edges.get(id2);
 	}
-
-	@Override
+	
 	public void forEachEdge(WeightedEdgeConsumer consumer) {		
 		for (Map.Entry<Integer, NodeData> nodeData : nodes.entrySet()) {
 			final int nodeId = nodeData.getKey();			
@@ -204,6 +195,65 @@ public class EvenRegularWeightedUndirectedGraph implements WeightedUndirectedGra
 					consumer.accept(nodeId, neighborId, edge.getValue());
 			}
 		}
+	}
+	
+	public TreeSet<ObjectDistance> search(FeatureVector query, int k, float eps, int[] forbiddenIds, int[] entryPoints) {
+		
+		// list of checked ids
+		final Set<Integer> checkedIds = new HashSet<>(forbiddenIds.length + entryPoints.length + k*4);
+		for (int id : forbiddenIds)
+			checkedIds.add(id);
+		for (int id : entryPoints)
+			checkedIds.add(id);
+		
+		// items to traverse, start with the initial node
+		final PriorityQueue<ObjectDistance> nextNodes = new PriorityQueue<>(k * 10); 
+		for (int id : entryPoints) {
+			final NodeData obj = getNode(id);
+			nextNodes.add(new ObjectDistance(id, obj, space.computeDistance(query, obj.getFeature())));
+		}
+
+		// result set
+		final TreeSet<ObjectDistance> results = new TreeSet<>(nextNodes);
+
+		// search radius
+		float radius = Float.MAX_VALUE;
+		
+		// iterate as long as good elements are in S
+		while(nextNodes.size() > 0) {
+			final ObjectDistance s = nextNodes.poll();
+
+			// max distance reached
+			if(s.getDistance() > radius * (1 + eps))
+				break;
+
+			// traverse never seen nodes
+			for(Map.Entry<Integer, Float> edge : getNode(s.getNodeId()).getEdges().entrySet()) {
+				int neighborId = edge.getKey();
+			
+				if(checkedIds.add(neighborId)) {
+					final NodeData n = getNode(neighborId);
+					final float nDist = space.computeDistance(query, n.getFeature());
+
+					// follow this node further
+					if(nDist <= radius * (1 + eps)) {
+						final ObjectDistance candidate = new ObjectDistance(neighborId, n, nDist);
+						nextNodes.add(candidate);
+
+						// remember the node
+						if(nDist < radius) {
+							results.add(candidate);
+							if(results.size() > k) {
+								results.pollLast();
+								radius = results.last().getDistance();
+							}							
+						}
+					}					
+				}
+			}
+		}
+		
+		return results;
 	}
 
 	/**
@@ -217,7 +267,7 @@ public class EvenRegularWeightedUndirectedGraph implements WeightedUndirectedGra
 		// TODO the neighbor ids need to be stored in ascending order
 	}
 	
-	public static EvenRegularWeightedUndirectedGraph readFromFile(Path file) throws IOException {
+	public static MapBasedWeightedUndirectedGraph readFromFile(Path file) throws IOException {
 		String filename = file.getFileName().toString();
 		int extStart = filename.lastIndexOf('.');
 		int typeStart = filename.lastIndexOf('.', extStart-1);
@@ -225,7 +275,7 @@ public class EvenRegularWeightedUndirectedGraph implements WeightedUndirectedGra
 		return readFromFile(file, dType);
 	}
 	
-	public static EvenRegularWeightedUndirectedGraph readFromFile(Path file, String featureType) throws IOException {
+	public static MapBasedWeightedUndirectedGraph readFromFile(Path file, String featureType) throws IOException {
 		try(InputStream is = Files.newInputStream(file)) {
 			BufferedInputStream bis = new BufferedInputStream(is);
 			LittleEndianDataInputStream input = new LittleEndianDataInputStream(bis);
@@ -236,7 +286,7 @@ public class EvenRegularWeightedUndirectedGraph implements WeightedUndirectedGra
 			long nodeCount = Integer.toUnsignedLong(input.readInt());
 			int edgesPerNode = Byte.toUnsignedInt(input.readByte());
 			
-			// 	featureSize	=		    filesize - meta data - (edge data + label) * nodeCount  / nodeCount
+			// 	featureSize	=		     filesize - meta data - (edge data + label) * nodeCount   / nodeCount
 			int featureSize = (int)((Files.size(file) - 8 - ((edgesPerNode * 8 + 4) * nodeCount)) / nodeCount);
 
 			// factory to create FeatureVectors based on the featureType
@@ -289,7 +339,7 @@ public class EvenRegularWeightedUndirectedGraph implements WeightedUndirectedGra
 					System.out.println("loaded "+i+" nodes");
 			}
 			
-			return new EvenRegularWeightedUndirectedGraph(edgesPerNode, nodes, space);
+			return new MapBasedWeightedUndirectedGraph(edgesPerNode, nodes, space);
 		}
 	}
 	
@@ -297,7 +347,7 @@ public class EvenRegularWeightedUndirectedGraph implements WeightedUndirectedGra
 	/**
 	 * @author Nico Hezel
 	 */
-	protected static class NodeData implements NodeView {
+	public static class NodeData implements NodeView {
 		
 		protected final int label;
 		protected final FeatureVector data;
@@ -328,7 +378,11 @@ public class EvenRegularWeightedUndirectedGraph implements WeightedUndirectedGra
 		@Override
 		public WeightedEdges getNeighbors() {
 			return new MapBasedWeighedEdes(label, edges);
-		}		
+		}	
+		
+		public Map<Integer,Float> getEdges() {
+			return edges;
+		}	
 	}
 	
 	/**
@@ -398,6 +452,11 @@ public class EvenRegularWeightedUndirectedGraph implements WeightedUndirectedGra
 		@Override
 		public void forEach(IntConsumer consumer) {
 			ids.forEach((id) -> consumer.accept(id));
+		}
+
+		@Override
+		public Iterator<Integer> iterator() {
+			return ids.iterator();
 		}
 	}
 }
