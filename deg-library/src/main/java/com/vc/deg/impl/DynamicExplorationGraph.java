@@ -20,7 +20,7 @@ import com.vc.deg.GraphDesigner;
 import com.vc.deg.GraphNavigator;
 import com.vc.deg.SearchResult;
 import com.vc.deg.impl.designer.EvenRegularGraphDesigner;
-import com.vc.deg.impl.graph.WeightedUndirectedGraph;
+import com.vc.deg.impl.graph.WeightedUndirectedRegularGraph;
 import com.vc.deg.impl.navigation.EvenRegularGraphNavigator;
 
 /**
@@ -30,7 +30,7 @@ import com.vc.deg.impl.navigation.EvenRegularGraphNavigator;
  */
 public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGraph {
 
-	protected WeightedUndirectedGraph internalGraph;
+	protected WeightedUndirectedRegularGraph internalGraph;
 	protected EvenRegularGraphNavigator navigator;
 	protected EvenRegularGraphDesigner designer;
 	
@@ -42,7 +42,7 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	 * @param objectRepository
 	 */
 	public DynamicExplorationGraph(FeatureSpace space, int edgesPerNode) {
-		this.internalGraph = new WeightedUndirectedGraph(edgesPerNode, space);
+		this.internalGraph = new WeightedUndirectedRegularGraph(edgesPerNode, space);
 		this.designer = new EvenRegularGraphDesigner(internalGraph); 
 		this.navigator = new EvenRegularGraphNavigator(internalGraph); 
 	}
@@ -63,6 +63,7 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 		return designer;
 	}
 	
+	@Override
 	public void writeToFile(Path file) throws KryoException, IOException {
 		Path tempFile = Paths.get(file.getParent().toString(), "~$" + file.getFileName().toString());
 		Kryo kryo = new Kryo();

@@ -9,7 +9,7 @@ import java.util.function.IntConsumer;
  * @author Nico Hezel
  *
  */
-public interface WeightedEdges extends NodeIds {
+public interface WeightedEdges extends VertexIds {
 	
 	/**
 	 * The id of the node where the edges belong to.

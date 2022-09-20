@@ -1,7 +1,7 @@
 package com.vc.deg.feature;
 
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
+import java.io.DataInput;
+import java.io.DataOutput;
 import java.io.IOException;
 import java.util.Arrays;
 
@@ -66,13 +66,13 @@ public class ByteFeature implements FeatureVector {
 	}
 
 	@Override
-	public void writeObject(DataOutputStream out) throws IOException {
+	public void writeObject(DataOutput out) throws IOException {
 		out.write(feature);		
 	}
 
 	@Override
-	public void readObject(DataInputStream in) throws IOException {
-		in.read(feature);
+	public void readObject(DataInput in) throws IOException {
+		in.readFully(feature);
 	}
 
 	@Override

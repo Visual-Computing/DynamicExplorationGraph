@@ -1,7 +1,7 @@
 package com.vc.deg;
 
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
+import java.io.DataInput;
+import java.io.DataOutput;
 import java.io.IOException;
 
 import com.vc.deg.feature.ByteFeature;
@@ -115,7 +115,7 @@ public interface FeatureVector {
 	 * 
 	 * @param out
 	 */
-	public void writeObject(DataOutputStream out) throws IOException;
+	public void writeObject(DataOutput out) throws IOException;
 	
 	/**
 	 * Only the raw data should be read, no meta data like array size or type.
@@ -123,7 +123,7 @@ public interface FeatureVector {
 	 * 
 	 * @param in
 	 */
-	public void readObject(DataInputStream in) throws IOException;
+	public void readObject(DataInput in) throws IOException;
 	
 	
 	
@@ -189,6 +189,6 @@ public interface FeatureVector {
 	 * @param featureFactory
 	 */
 	public static void registerFeatureFactor(FeatureFactory featureFactory) {
-		throw new UnsupportedOperationException("registerin custom feature factories are not yet supported");
+		FeatureFactory.registerFactory(featureFactory);
 	}
 }

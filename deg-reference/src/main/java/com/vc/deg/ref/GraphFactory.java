@@ -22,5 +22,24 @@ public class GraphFactory implements com.vc.deg.GraphFactory {
 		return DynamicExplorationGraph.readFromFile(file, componentType);
 	}
 
+	
+	// --------------------------------------------------------------------------------------
+	// ---------------------------- Hierarchical Graph --------------------------------------
+	// --------------------------------------------------------------------------------------
+	
+	@Override
+	public HierarchicalDynamicExplorationGraph newHierchicalGraph(FeatureSpace space, int edgesPerNode, int topRankSize) {
+		return new HierarchicalDynamicExplorationGraph(space, edgesPerNode, topRankSize);
+	}
+
+	@Override
+	public HierarchicalDynamicExplorationGraph loadHierchicalGraph(Path file) throws IOException {
+		return HierarchicalDynamicExplorationGraph.readFromFile(file);
+	}
+	
+	@Override
+	public HierarchicalDynamicExplorationGraph loadHierchicalGraph(Path file, String componentType) throws IOException {
+		return HierarchicalDynamicExplorationGraph.readFromFile(file, componentType);
+	}
 }
 

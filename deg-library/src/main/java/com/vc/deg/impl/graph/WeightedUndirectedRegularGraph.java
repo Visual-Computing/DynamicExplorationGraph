@@ -10,7 +10,7 @@ import com.koloboke.collect.map.hash.HashIntFloatMaps;
 import com.koloboke.collect.map.hash.HashIntObjMaps;
 import com.koloboke.collect.set.IntSet;
 import com.vc.deg.FeatureSpace;
-import com.vc.deg.graph.NodeView;
+import com.vc.deg.graph.VertexView;
 import com.vc.deg.impl.kryo.HashIntIntFloatMapSerializer;
 
 /**
@@ -20,20 +20,20 @@ import com.vc.deg.impl.kryo.HashIntIntFloatMapSerializer;
  * @author Neiko
  *
  */
-public class WeightedUndirectedGraph implements KryoSerializable {
+public class WeightedUndirectedRegularGraph implements KryoSerializable {
 
 	protected final IntObjMap<IntFloatMap> nodes;
 	protected final FeatureSpace featureSpace;
 	protected int edgesPerNode;
 	
-	public WeightedUndirectedGraph(int edgesPerNode, FeatureSpace featureSpace) {
+	public WeightedUndirectedRegularGraph(int edgesPerNode, FeatureSpace featureSpace) {
 		this.edgesPerNode = edgesPerNode;
 		this.nodes = HashIntObjMaps.newMutableMap();
 		this.featureSpace = featureSpace;
 		
 	}
 
-	public WeightedUndirectedGraph(int edgesPerNode, int expectedSize, FeatureSpace featureSpace) {
+	public WeightedUndirectedRegularGraph(int edgesPerNode, int expectedSize, FeatureSpace featureSpace) {
 		this.edgesPerNode = edgesPerNode;
 		this.nodes = HashIntObjMaps.newMutableMap(expectedSize);	
 		this.featureSpace = featureSpace;
@@ -47,7 +47,7 @@ public class WeightedUndirectedGraph implements KryoSerializable {
 		return featureSpace;
 	}
 	
-	public NodeView getNodeView(int id) {
+	public VertexView getNodeView(int id) {
 		return null;
 	}
 	

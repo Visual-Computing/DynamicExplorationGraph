@@ -5,6 +5,11 @@ import java.util.TreeSet;
 
 import com.vc.deg.SearchResult;
 
+/**
+ * TODO Remove class
+ * @author Neiko
+ *
+ */
 public class ResultSet implements SearchResult {
 	
 	protected TreeSet<? extends SearchEntry> result;

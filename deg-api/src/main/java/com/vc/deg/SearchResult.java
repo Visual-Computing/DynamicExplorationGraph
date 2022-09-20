@@ -2,8 +2,6 @@ package com.vc.deg;
 
 import java.util.Iterator;
 
-import com.vc.deg.SearchResult.SearchEntry;
-
 /**
  * Ensures each {@link SearchEntry} in this list is unique by its {@link SearchEntry#nodeId}.
  * 
@@ -29,6 +27,8 @@ public interface SearchResult extends Iterable<com.vc.deg.SearchResult.SearchEnt
 	/**
 	 * Single entry in a {@link SearchResultSet}
 	 * 
+	 * TODO write complete class and move it to reference, by replacing the content of ObjectDistance
+	 * 
 	 * @author Nico Hezel
 	 */
 	public static interface SearchEntry extends Comparable<SearchEntry> {
@@ -41,7 +41,8 @@ public interface SearchResult extends Iterable<com.vc.deg.SearchResult.SearchEnt
 		public boolean equals(Object obj);
 
 		@Override
-		public default int compareTo(SearchEntry o) {			
+		public default int compareTo(SearchEntry o) {
+			// TODO replace with Integer.compare or Comperator.comparingInt().thanComparingInt();
 	        if (getDistance() == o.getDistance())
 	            return Integer.compare(getLabel(), o.getLabel());
 	        else

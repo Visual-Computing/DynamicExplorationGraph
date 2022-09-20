@@ -1,7 +1,7 @@
 package com.vc.deg.feature;
 
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
+import java.io.DataInput;
+import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -72,13 +72,13 @@ public class FloatFeature implements FeatureVector {
 	
 	
 	@Override
-	public void writeObject(DataOutputStream out) throws IOException {
+	public void writeObject(DataOutput out) throws IOException {
 		for (float d : feature) 
 			out.writeFloat(d);
 	}
 
 	@Override
-	public void readObject(DataInputStream in) throws IOException {
+	public void readObject(DataInput in) throws IOException {
 		for (int i = 0; i < feature.length; i++) 
 			feature[i] = in.readFloat();
 	}

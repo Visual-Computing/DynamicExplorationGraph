@@ -3,10 +3,9 @@ package com.vc.deg;
 import java.io.IOException;
 import java.nio.file.Path;
 
-public interface DynamicExplorationGraph {
-	
+public interface HierarchicalDynamicExplorationGraph {
+
 	public GraphDesigner designer();
-	public GraphNavigator navigator(); // TODO remove
 	
 	/**
 	 * Stores the graph structural data and the feature vectors into a file.
@@ -22,14 +21,12 @@ public interface DynamicExplorationGraph {
 	/**
 	 * Search the graph for the best nodes matching the query
 	 * 
-	 * TODO replace return value with SearchEntry[]
-	 * 
 	 * @param query
 	 * @param k
 	 * @return
 	 */
-	public default SearchResult search(FeatureVector query, int k) {
-		return search(query, k, 0.1f);
+	public default SearchResult search(FeatureVector query, int atLevel, int k) {
+		return search(query, atLevel, k, 0.1f);
 	}
 	
 	/**
@@ -39,11 +36,8 @@ public interface DynamicExplorationGraph {
 	 * @param eps Is similar to a search radius factor 0 means low and 1 means high radius to scan
 	 * @return
 	 */
-	public SearchResult search(FeatureVector query, int k, float eps);
+	public SearchResult search(FeatureVector query, int atLevel, int k, float eps);
 	
-	
-//	public int[] search(MemoryView query, int top);
-//	public Node
 	
 	/**
      * Create an empty new graph
@@ -51,8 +45,8 @@ public interface DynamicExplorationGraph {
      * @param space
      * @return
      */
-	public static DynamicExplorationGraph newGraph(FeatureSpace space, int edgesPerNode) {
-		return GraphFactory.getDefaultFactory().newGraph(space, edgesPerNode);
+	public static HierarchicalDynamicExplorationGraph newGraph(FeatureSpace space, int edgesPerNode, int topRankSize) {
+		return GraphFactory.getDefaultFactory().newHierchicalGraph(space, edgesPerNode, topRankSize);
 	}
 	
 	/**
@@ -61,8 +55,8 @@ public interface DynamicExplorationGraph {
 	 * @param file
 	 * @return
 	 */
-	public static DynamicExplorationGraph loadGraph(Path file) throws ClassNotFoundException, IOException {
-		return GraphFactory.getDefaultFactory().loadGraph(file);
+	public static HierarchicalDynamicExplorationGraph loadGraph(Path file) throws ClassNotFoundException, IOException {
+		return GraphFactory.getDefaultFactory().loadHierchicalGraph(file);
 	}
 	
 	/**
@@ -71,7 +65,7 @@ public interface DynamicExplorationGraph {
 	 * @param file
 	 * @return
 	 */
-	public static DynamicExplorationGraph loadGraph(Path file, String componentType) throws ClassNotFoundException, IOException {
-		return GraphFactory.getDefaultFactory().loadGraph(file, componentType);
+	public static HierarchicalDynamicExplorationGraph loadGraph(Path file, String componentType) throws ClassNotFoundException, IOException {
+		return GraphFactory.getDefaultFactory().loadHierchicalGraph(file, componentType);
 	}
 }

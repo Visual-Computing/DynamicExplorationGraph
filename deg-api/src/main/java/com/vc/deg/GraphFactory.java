@@ -25,8 +25,6 @@ public interface GraphFactory {
      * Returns the default {@link HashLongIntMapFactory} implementation, to which
      * all static methods in this class delegate.
      *
-     
-     
      * @return the default {@link HashLongIntMapFactory} implementation
      * @throws RuntimeException if no implementations
      *         of {@link HashLongIntMapFactory} are provided
@@ -35,10 +33,17 @@ public interface GraphFactory {
         return DefaultFactoryHolder.defaultFactory;
     }
     
+    
+    
+	// --------------------------------------------------------------------------------------
+	// -------------------------------- Simple Graph ----------------------------------------
+	// --------------------------------------------------------------------------------------
+    
     /**
      * Create an empty new graph
      * 
      * @param space
+     * @param edgesPerNode
      * @return
      */
 	public DynamicExplorationGraph newGraph(FeatureSpace space, int edgesPerNode);
@@ -61,4 +66,39 @@ public interface GraphFactory {
 	 * @throws IOException
 	 */
 	public DynamicExplorationGraph loadGraph(Path file, String featureType) throws IOException;
+	
+	
+	
+	// --------------------------------------------------------------------------------------
+	// ---------------------------- Hierarchical Graph --------------------------------------
+	// --------------------------------------------------------------------------------------
+	   
+    /**
+     * Create an empty new graph
+     * 
+	 * @param space
+	 * @param edgesPerNode
+	 * @param topRankSize
+	 * @return
+	 */
+	public HierarchicalDynamicExplorationGraph newHierchicalGraph(FeatureSpace space, int edgesPerNode, int topRankSize);
+	
+	/**
+	 * Load an existing graph. Read the feature type from the filename.
+	 * e.g. sift1m_k30.float.deg 
+	 * 
+	 * @param file
+	 * @return
+	 */
+	public HierarchicalDynamicExplorationGraph loadHierchicalGraph(Path file) throws IOException;
+	
+	/**
+	 * Load an existing graph and expect a specific feature type
+	 * 
+	 * @param file
+	 * @param componentType
+	 * @return
+	 * @throws IOException
+	 */
+	public HierarchicalDynamicExplorationGraph loadHierchicalGraph(Path file, String featureType) throws IOException;
 }

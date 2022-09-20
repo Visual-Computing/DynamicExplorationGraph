@@ -8,8 +8,8 @@ import com.koloboke.collect.set.IntSet;
 import com.koloboke.collect.set.hash.HashIntSets;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
-import com.vc.deg.graph.NodeView;
-import com.vc.deg.impl.graph.WeightedUndirectedGraph;
+import com.vc.deg.graph.VertexView;
+import com.vc.deg.impl.graph.WeightedUndirectedRegularGraph;
 
 /**
  * 
@@ -18,7 +18,7 @@ import com.vc.deg.impl.graph.WeightedUndirectedGraph;
  */
 public class GraphSearch {
 
-	public static TreeSet<ObjectDistance> search(FeatureVector query, int k, float eps, int[] forbiddenIds, int[] entryPoints, WeightedUndirectedGraph graph) {
+	public static TreeSet<ObjectDistance> search(FeatureVector query, int k, float eps, int[] forbiddenIds, int[] entryPoints, WeightedUndirectedRegularGraph graph) {
 		final FeatureSpace featureSpace = graph.getFeatureSpace();
 		
 		// list of checked ids
@@ -29,7 +29,7 @@ public class GraphSearch {
 		// items to traverse, start with the initial node
 		final PriorityQueue<ObjectDistance> S = new PriorityQueue<>();
 		for (int id : entryPoints) {
-			final NodeView obj = graph.getNodeView(id);
+			final VertexView obj = graph.getNodeView(id);
 			S.add(new ObjectDistance(id, obj, featureSpace.computeDistance(query, obj.getFeature())));
 		}
 
@@ -53,7 +53,7 @@ public class GraphSearch {
 				final int neighborId = topListCursor.elem();
 
 				if(C.add(neighborId) == false) {
-					final NodeView n = graph.getNodeView(neighborId);
+					final VertexView n = graph.getNodeView(neighborId);
 					final float nDist = featureSpace.computeDistance(query, n.getFeature());
 
 					// follow this node further
@@ -86,10 +86,10 @@ public class GraphSearch {
 	public static class ObjectDistance implements Comparable<ObjectDistance> {
 		
 		public final int id;
-		public final NodeView obj;
+		public final VertexView obj;
 		public final float dist;
 		
-		public ObjectDistance(int id, NodeView obj, float dist) {
+		public ObjectDistance(int id, VertexView obj, float dist) {
 			this.id = id;
 			this.obj = obj;
 			this.dist = dist;

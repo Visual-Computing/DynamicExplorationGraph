@@ -41,7 +41,7 @@ public interface WeightedUndirectedGraph {
 	 * 
 	 * @return
 	 */
-	public NodeIds getNodeIds();
+	public VertexIds getNodeIds();
 	
 	
 	/**
@@ -50,7 +50,7 @@ public interface WeightedUndirectedGraph {
 	 * @param id
 	 * @return
 	 */
-	public NodeView getNode(int id);
+	public VertexView getNode(int id);
 	
 	/**
 	 * Does a directed edge between the two nodes exist?
@@ -98,7 +98,7 @@ public interface WeightedUndirectedGraph {
 	 * @param id
 	 * @return
 	 */
-	public NodeIds getConnectedNodeIds(int id);
+	public VertexIds getConnectedNodeIds(int id);
 	
 	/**
 	 * Retrieve the edge information (id and weight) of connected edges for a specific node.

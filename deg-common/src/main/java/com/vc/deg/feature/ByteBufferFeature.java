@@ -1,7 +1,7 @@
 package com.vc.deg.feature;
 
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
+import java.io.DataInput;
+import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -89,13 +89,13 @@ public class ByteBufferFeature implements FeatureVector {
 	}
 
 	@Override
-	public void writeObject(DataOutputStream out) throws IOException {
+	public void writeObject(DataOutput out) throws IOException {
 		// TODO Auto-generated method stub
 		
 	}
 
 	@Override
-	public void readObject(DataInputStream in) throws IOException {
+	public void readObject(DataInput in) throws IOException {
 		// TODO Auto-generated method stub
 		
 	}

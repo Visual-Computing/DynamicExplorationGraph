@@ -13,7 +13,7 @@ public class FloatL2Space implements FeatureSpace {
 	
 	@Override
 	public int featureSize() {
-		return dims*4;
+		return Float.BYTES * dims();
 	}
 	
 	@Override

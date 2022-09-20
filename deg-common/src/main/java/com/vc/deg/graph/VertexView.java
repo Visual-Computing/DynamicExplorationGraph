@@ -2,9 +2,9 @@ package com.vc.deg.graph;
 
 import com.vc.deg.FeatureVector;
 
-public interface NodeView {
+public interface VertexView {
 
-	public int getLabel();
+	public int getId();
 	public FeatureVector getFeature();
 	public WeightedEdges getNeighbors();
 }
