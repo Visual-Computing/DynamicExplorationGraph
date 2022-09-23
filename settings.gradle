@@ -10,7 +10,6 @@
 rootProject.name = 'DynamicExplorationGraph'
 
 include "deg-api"
-include "deg-common"
 include "deg-library"
 include "deg-reference"
 include "deg-benchmark"

@@ -5,8 +5,11 @@ import java.nio.file.Path;
 
 public interface DynamicExplorationGraph {
 	
+	/**
+	 * 
+	 * @return
+	 */
 	public GraphDesigner designer();
-	public GraphNavigator navigator(); // TODO remove
 	
 	/**
 	 * Stores the graph structural data and the feature vectors into a file.
@@ -22,28 +25,32 @@ public interface DynamicExplorationGraph {
 	/**
 	 * Search the graph for the best nodes matching the query
 	 * 
-	 * TODO replace return value with SearchEntry[]
-	 * 
 	 * @param query
 	 * @param k
 	 * @return
 	 */
-	public default SearchResult search(FeatureVector query, int k) {
+	public default int[] search(FeatureVector query, int k) {
 		return search(query, k, 0.1f);
 	}
 	
 	/**
+	 * Search the graph for the best nodes matching the query
 	 * 
 	 * @param query
 	 * @param k
-	 * @param eps Is similar to a search radius factor 0 means low and 1 means high radius to scan
+	 * @param eps Is similar to a search radius factor
 	 * @return
 	 */
-	public SearchResult search(FeatureVector query, int k, float eps);
+	public int[] search(FeatureVector query, int k, float eps);
 	
 	
-//	public int[] search(MemoryView query, int top);
-//	public Node
+	/**
+	 * Create a copy of the graph
+	 * 
+	 * @return
+	 */
+	public DynamicExplorationGraph copy();
+	
 	
 	/**
      * Create an empty new graph

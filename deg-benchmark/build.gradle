@@ -1,4 +1,5 @@
 dependencies {
+	implementation project(':deg-api')
 	implementation project(':deg-reference')
 	
 	implementation group: 'it.unimi.dsi', name: 'fastutil', version: "${FASTUTIL_VERSION}"

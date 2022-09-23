@@ -10,7 +10,6 @@ import com.koloboke.collect.map.hash.HashIntFloatMaps;
 import com.koloboke.collect.map.hash.HashIntObjMaps;
 import com.koloboke.collect.set.IntSet;
 import com.vc.deg.FeatureSpace;
-import com.vc.deg.graph.VertexView;
 import com.vc.deg.impl.kryo.HashIntIntFloatMapSerializer;
 
 /**

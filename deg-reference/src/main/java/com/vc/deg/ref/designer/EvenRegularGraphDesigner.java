@@ -59,11 +59,11 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 		this.removeEntryQueue = new ConcurrentLinkedQueue<>();
 
 		// default hyper parameters
-		this.extendK = graph.getEdgesPerVertex() * 2;
-		this.extendEps = 0.2f;
-		this.improveK = graph.getEdgesPerVertex();
-		this.improveEps = 0.001f;
-		this.maxPathLength = 5;
+		setExtendK(graph.getEdgesPerVertex() * 2);
+		setExtendEps(0.2f);
+		setImproveK(graph.getEdgesPerVertex());
+		setImproveEps(0.001f);
+		setMaxPathLength(5);
 	}
 
 
@@ -124,9 +124,9 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 	@Override
 	public boolean checkGraphValidation(int expectedVertices, int expectedNeighbors) {
 
-		// check node count
+		// check vertex count
 		if(graph.getVertexCount() != expectedVertices)				
-			throw new RuntimeException("The graph has an unexpected number of nodes. expected "+expectedVertices+" got "+graph.getVertexCount());
+			throw new RuntimeException("The graph has an unexpected number of vertices. expected "+expectedVertices+" got "+graph.getVertexCount());
 
 		final int targetNeighborCount = Math.min(graph.getVertexCount() - 1, expectedNeighbors);
 		for(VertexData data : graph.getVertices()) {
@@ -209,10 +209,10 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 			while(newNeighbors.size() < edgesPerVertex) {
 				for (int i = 0; i < results.length && newNeighbors.size() < edgesPerVertex; i++) {
 					final ObjectDistance candidate = results[i];
-					final int candidateId = candidate.getVertexId();
+					final int candidateId = candidate.getLabel();
 					final float candidateWeight = candidate.getDistance();
 
-					// check if the node is already in the edge list of the new vertex (added during a previous loop-run)
+					// check if the vertex is already in the edge list of the new vertex (added during a previous loop-run)
 					// since all edges are undirected and the edge information of the new vertex does not yet exist, we search the other way around.
 					if(newNeighbors.containsKey(candidateId)) 
 						continue;
@@ -230,7 +230,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 						for(Map.Entry<Integer, Float> candiateNeighbor : graph.getVertex(candidateId).getEdges().entrySet()) {
 							final int candiateNeighborIndex = candiateNeighbor.getKey();
 
-							// the suggested neighbor might already be in the edge list of the new node
+							// the suggested neighbor might already be in the edge list of the new vertex
 							if(newNeighbors.containsKey(candiateNeighborIndex))
 								continue;
 
@@ -250,10 +250,10 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 					// remove edge between the candidate and its worst neighbor
 					graph.removeUndirectedEdge(candidateId, newNeighborIndex);
 
-					// place the new node in the edge list of the result-node
+					// place the new vertex in the edge list of the result-vertex
 					graph.addUndirectedEdge(newVertex.getId(), candidateId, candidateWeight);
 
-					// place the new node in the edge list of the best edge neighbor
+					// place the new vertex in the edge list of the best edge neighbor
 					graph.addUndirectedEdge(newVertex.getId(), newNeighborIndex, newNeighborDistance);
 
 				}				
@@ -261,7 +261,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 			}
 
 			if(newNeighbors.size() < edgesPerVertex) 
-				throw new RuntimeException("Could find only "+newNeighbors.size()+" good neighbors for the new node "+newVertex.getId()+" need "+edgesPerVertex);
+				throw new RuntimeException("Could find only "+newNeighbors.size()+" good neighbors for the new vertex "+newVertex.getId()+" need "+edgesPerVertex);
 
 			// try to improve some of the non-perfect edges
 			{
@@ -301,18 +301,18 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 
 
 	/**
-	 * Try to improve the existing edge between the two nodes
+	 * Try to improve the existing edge between the two vertices
 	 * 
 	 * @return true if a change could be made otherwise false
 	 */
-	private boolean improveEdges(final int node1, final int node2, final float dist12) {
+	private boolean improveEdges(final int vertex1, final int vertex2, final float dist12) {
 		final List<BuilderChange> changes = new ArrayList<>();
 
-		// remove the edge between node 1 and node 2
-		graph.removeUndirectedEdge(node1, node2);
-		changes.add(new BuilderChange(node1, node2, dist12, true));
+		// remove the edge between vertex 1 and vertex 2
+		graph.removeUndirectedEdge(vertex1, vertex2);
+		changes.add(new BuilderChange(vertex1, vertex2, dist12, true));
 
-		if(improveEdges(changes, node1, node2, node1, node1, dist12, 0) == false) {
+		if(improveEdges(changes, vertex1, vertex2, vertex1, vertex1, dist12, 0) == false) {
 
 			// undo all changes, in reverse order
 			final int size = changes.size();
@@ -334,23 +334,23 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 	 *  
 	 * This is the extended part of the optimization process.
 	 * The method takes an array where all graph changes will be documented.
-	 * Node1 and node2 might be in a separate subgraph than node3 and node4.
+	 * Vertex1 and vertex2 might be in a separate subgraph than vertex3 and vertex4.
 	 * Thru a series of edges swaps both subgraphs should be reconnected..
 	 * If those changes improve the graph this method returns true otherwise false. 
 	 * 
 	 * @return true if a good sequences of changes has been found
 	 */
-	private boolean improveEdges(final List<BuilderChange> changes, int node1, int node2, int node3, int node4, float totalGain, final int steps) {
+	private boolean improveEdges(final List<BuilderChange> changes, int vertex1, int vertex2, int vertex3, int vertex4, float totalGain, final int steps) {
 
-		// 1. Find an edge for node2 which connects to the subgraph of node3 and node4. 
-		//    Consider only nodes of the approximate nearest neighbor search. Since the 
-		//    search started from node3 and node4 all nodes in the result list are in 
+		// 1. Find an edge for vertex2 which connects to the subgraph of vertex3 and vertex4. 
+		//    Consider only vertices of the approximate nearest neighbor search. Since the 
+		//    search started from vertex3 and vertex4 all vertices in the result list are in 
 		//    their subgraph and would therefore connect the two potential subgraphs.	
 		{
-			final FeatureVector node2Feature = graph.getVertex(node2).getFeature();
-			final ObjectDistance[] results = graph.search(node2Feature, improveK, improveEps, new int[0], new int[] { node3, node4  }).toArray(new ObjectDistance[0]);
+			final FeatureVector vertex2Feature = graph.getVertex(vertex2).getFeature();
+			final ObjectDistance[] results = graph.search(vertex2Feature, improveK, improveEps, new int[0], new int[] { vertex3, vertex4  }).toArray(new ObjectDistance[0]);
 
-			// find a good new node3
+			// find a good new vertex3
 			float bestGain = totalGain;
 			float dist23 = -1;
 			float dist34 = -1;
@@ -358,96 +358,96 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 			// We use the descending order to find the worst swap combination with the best gain
 			// Sometimes the gain between the two best combinations is the same, its better to use one with the bad edges to make later improvements easier
 			for(final ObjectDistance result : results) {
-				final int newNode3 = result.getLabel();
+				final int newVertex3 = result.getLabel();
 
-				// node1 and node2 got tested in the recursive call before and node4 got just disconnected from node2
-				if(node1 != newNode3 && node2 != newNode3 && graph.hasEdge(node2, newNode3) == false) {
+				// vertex1 and vertex2 got tested in the recursive call before and vertex4 got just disconnected from vertex2
+				if(vertex1 != newVertex3 && vertex2 != newVertex3 && graph.hasEdge(vertex2, newVertex3) == false) {
 
-					// 1.1 When node2 and the new node 3 gets connected, the full graph connectivity is assured again, 
-					//     but the subgraph between node1/node2 and node3/node4 might just have one edge(node2, node3).
-					//     Furthermore Node 3 has now to many edges, find an good edge to remove to improve the overall graph distortion. 
-					//     FYI: If the just selected node3 is the same as the old node3, this process might cut its connection to node4 again.
+					// 1.1 When vertex2 and the new vertex 3 gets connected, the full graph connectivity is assured again, 
+					//     but the subgraph between vertex1/vertex2 and vertex3/vertex4 might just have one edge(vertex2, vertex3).
+					//     Furthermore Vertex 3 has now to many edges, find an good edge to remove to improve the overall graph distortion. 
+					//     FYI: If the just selected vertex3 is the same as the old vertex3, this process might cut its connection to vertex4 again.
 					//     This will be fixed in the next step or until the recursion reaches max_path_length.
-					for(Map.Entry<Integer, Float> edge : graph.getVertex(newNode3).getEdges().entrySet()) {
-						final int newNode4 = edge.getKey();
-						final float newNode4Weight = edge.getValue();
+					for(Map.Entry<Integer, Float> edge : graph.getVertex(newVertex3).getEdges().entrySet()) {
+						final int newVertex4 = edge.getKey();
+						final float newVertex4Weight = edge.getValue();
 
 						// compute the gain of the graph distortion if this change would be applied
-						final float gain = (totalGain - result.getDistance()) + newNode4Weight;
+						final float gain = (totalGain - result.getDistance()) + newVertex4Weight;
 
 						// do not remove the edge which was just added
-						if(newNode4 != node2 && bestGain < gain) {
+						if(newVertex4 != vertex2 && bestGain < gain) {
 							bestGain = gain;
-							node3 = newNode3;
-							node4 = newNode4;
+							vertex3 = newVertex3;
+							vertex4 = newVertex4;
 							dist23 = result.getDistance();
-							dist34 = newNode4Weight;    
+							dist34 = newVertex4Weight;    
 						}
 					}
 				}
 			}
 
-			// no new node3 was found
+			// no new vertex3 was found
 			if(dist23 == -1)
 				return false;
 
-			// connect node2 with node3. 
+			// connect vertex2 with vertex3. 
 			totalGain -= dist23;
-			graph.addUndirectedEdge(node2, node3, dist23);
-			changes.add(new BuilderChange(node2, node3, dist23, false));
+			graph.addUndirectedEdge(vertex2, vertex3, dist23);
+			changes.add(new BuilderChange(vertex2, vertex3, dist23, false));
 
-			// remove edge between node3 and node4
+			// remove edge between vertex3 and vertex4
 			totalGain += dist34;
-			graph.removeUndirectedEdge(node3, node4);
-			changes.add(new BuilderChange(node3, node4, dist34, true));
+			graph.removeUndirectedEdge(vertex3, vertex4);
+			changes.add(new BuilderChange(vertex3, vertex4, dist34, true));
 		}
 
-		// 2. Try to connect node1 with node4
+		// 2. Try to connect vertex1 with vertex4
 		{
 			final FeatureSpace space = graph.getFeatureSpace();
 
-			// 2.1a Node1 and node4 might be the same. This is quite the rare case, but would mean there are two edges missing.
+			// 2.1a Vertex1 and vertex4 might be the same. This is quite the rare case, but would mean there are two edges missing.
 			//     Proceed like extending the graph:
-			//     Search for a good node to connect to, remove its worst edge and connect
-			//     both nodes of the worst edge to the node4. Skip the edge any of the two
-			//     two nodes are already connected to node4.
-			if(node1 == node4) {
+			//     Search for a good vertex to connect to, remove its worst edge and connect
+			//     both vertices of the worst edge to the vertex4. Skip the edge any of the two
+			//     two vertices are already connected to vertex4.
+			if(vertex1 == vertex4) {
 
-				// find a good (not yet connected) node for node1/node4
-				final FeatureVector node4Feature = graph.getVertex(node4).getFeature();
-				final ObjectDistance[] results = graph.search(node4Feature, improveK, improveEps, new int[0], new int[] { node2, node3 }).toArray(new ObjectDistance[0]);
+				// find a good (not yet connected) vertex for vertex1/vertex4
+				final FeatureVector vertex4Feature = graph.getVertex(vertex4).getFeature();
+				final ObjectDistance[] results = graph.search(vertex4Feature, improveK, improveEps, new int[0], new int[] { vertex2, vertex3 }).toArray(new ObjectDistance[0]);
 
 				float bestGain = 0;
 				int bestSelectedNeighbor = 0;
 				float bestSelectedNeighborDist = 0;
 				float bestSelectedNeighborOldDist = 0;
-				int bestGoodNode = 0;
-				float bestGoodNodeDist = 0;
+				int bestGoodVertex = 0;
+				float bestGoodVertexDist = 0;
 				for(ObjectDistance result : results) {
-					final int goodNode = result.getLabel();
+					final int goodVertex = result.getLabel();
 
-					// the new node should not be connected to node4 yet
-					if(node4 != goodNode && graph.hasEdge(node4, goodNode) == false) {
-						final float goodNodeDist = result.getDistance();
+					// the new vertex should not be connected to vertex4 yet
+					if(vertex4 != goodVertex && graph.hasEdge(vertex4, goodVertex) == false) {
+						final float goodVertexDist = result.getDistance();
 
-						// select any edge of the good node which improves the graph quality when replaced with a connection to node 4
-						for(Map.Entry<Integer, Float> edge : graph.getVertex(goodNode).getEdges().entrySet()) {
+						// select any edge of the good vertex which improves the graph quality when replaced with a connection to vertex 4
+						for(Map.Entry<Integer, Float> edge : graph.getVertex(goodVertex).getEdges().entrySet()) {
 							final int selectedNeighbor = edge.getKey();
 
-							// ignore edges where the second node is already connect to node4
-							if(node4 != selectedNeighbor && graph.hasEdge(node4, selectedNeighbor) == false) {			                
+							// ignore edges where the second vertex is already connect to vertex4
+							if(vertex4 != selectedNeighbor && graph.hasEdge(vertex4, selectedNeighbor) == false) {			                
 								final float oldNeighborDist = edge.getValue();
-								final float newNeighborDist = space.computeDistance(node4Feature, graph.getVertex(selectedNeighbor).getFeature());
+								final float newNeighborDist = space.computeDistance(vertex4Feature, graph.getVertex(selectedNeighbor).getFeature());
 
 								// do all the changes improve the graph?
-								float newGain = (totalGain + oldNeighborDist) - (goodNodeDist + newNeighborDist);
+								float newGain = (totalGain + oldNeighborDist) - (goodVertexDist + newNeighborDist);
 								if(bestGain < newGain) {
 									bestGain = newGain;
 									bestSelectedNeighbor = selectedNeighbor;
 									bestSelectedNeighborDist = newNeighborDist;
 									bestSelectedNeighborOldDist = oldNeighborDist;
-									bestGoodNode = goodNode;
-									bestGoodNodeDist = goodNodeDist;
+									bestGoodVertex = goodVertex;
+									bestGoodVertexDist = goodVertexDist;
 								}
 							}
 						}
@@ -456,36 +456,36 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 
 				if(bestGain > 0)
 				{
-					// remove edge between the good node and one of its neighbors
-					graph.removeUndirectedEdge(bestGoodNode, bestSelectedNeighbor);
-					changes.add(new BuilderChange(bestGoodNode, bestSelectedNeighbor, bestSelectedNeighborOldDist, true));
+					// remove edge between the good vertex and one of its neighbors
+					graph.removeUndirectedEdge(bestGoodVertex, bestSelectedNeighbor);
+					changes.add(new BuilderChange(bestGoodVertex, bestSelectedNeighbor, bestSelectedNeighborOldDist, true));
 								
-					// connect node4/node1 with the good node and its selected neighbor
-					graph.addUndirectedEdge(node1, bestGoodNode, bestGoodNodeDist);
-					changes.add(new BuilderChange(node1, bestGoodNode, bestGoodNodeDist, false));
-					graph.addUndirectedEdge(node1, bestSelectedNeighbor, bestSelectedNeighborDist);
-					changes.add(new BuilderChange(node1, bestSelectedNeighbor, bestSelectedNeighborDist, false));
+					// connect vertex4/vertex1 with the good vertex and its selected neighbor
+					graph.addUndirectedEdge(vertex1, bestGoodVertex, bestGoodVertexDist);
+					changes.add(new BuilderChange(vertex1, bestGoodVertex, bestGoodVertexDist, false));
+					graph.addUndirectedEdge(vertex1, bestSelectedNeighbor, bestSelectedNeighborDist);
+					changes.add(new BuilderChange(vertex1, bestSelectedNeighbor, bestSelectedNeighborDist, false));
 
 					return true;
 				}
 
 			} else {
 
-				// 2.1b If there is a way from node2 or node3, to node1 or node4 then ...
-				//      Try to connect node1 with node4
+				// 2.1b If there is a way from vertex2 or vertex3, to vertex1 or vertex4 then ...
+				//      Try to connect vertex1 with vertex4
 				//      Much more likely than 2.1a 
-				if(graph.hasEdge(node1, node4) == false) {
+				if(graph.hasEdge(vertex1, vertex4) == false) {
 
 					// Is the total of all changes still beneficial?
-					final float dist14 = space.computeDistance(graph.getVertex(node1).getFeature(), graph.getVertex(node4).getFeature());
+					final float dist14 = space.computeDistance(graph.getVertex(vertex1).getFeature(), graph.getVertex(vertex4).getFeature());
 					if((totalGain - dist14) > 0) {
 
-						final int[] entryVertices = { node2, node3 }; 
-						if(graph.hasPath(entryVertices, node1, improveK, improveEps).size() > 0 || graph.hasPath(entryVertices, node4, improveK, improveEps).size() > 0) {
+						final int[] entryVertices = { vertex2, vertex3 }; 
+						if(graph.hasPath(entryVertices, vertex1, improveK, improveEps).size() > 0 || graph.hasPath(entryVertices, vertex4, improveK, improveEps).size() > 0) {
 
-							// connect node1 with node4
-							graph.addUndirectedEdge(node1, node4, dist14);
-							changes.add(new BuilderChange(node1, node4, dist14, false));
+							// connect vertex1 with vertex4
+							graph.addUndirectedEdge(vertex1, vertex4, dist14);
+							changes.add(new BuilderChange(vertex1, vertex4, dist14, false));
 
 							return true;
 						}
@@ -498,18 +498,18 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 		if(steps >= maxPathLength) 
 			return false;
 
-		// 4. swap node1 and node4 every second round, to give each a fair chance
+		// 4. swap vertex1 and vertex4 every second round, to give each a fair chance
 		if(steps % 2 == 1) {
-			final int b = node1;
-			node1 = node4;
-			node4 = b;
+			final int b = vertex1;
+			vertex1 = vertex4;
+			vertex4 = b;
 		}
 
 		// 5. early stop
 		if(totalGain < 0) 
 			return false;
 
-		return improveEdges(changes, node1, node4, node2, node3, totalGain, steps + 1);
+		return improveEdges(changes, vertex1, vertex4, vertex2, vertex3, totalGain, steps + 1);
 	}
 
 
@@ -545,7 +545,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 		final List<BuilderChange> changes = new ArrayList<>();
 
 		// 1 remove the vertex and collect the vertices which are missing an edge
-		final Set<Integer> involvedVertices = graph.removeNode(label).getEdges().keySet();
+		final Set<Integer> involvedVertices = graph.removeVertex(label).getEdges().keySet();
 		
 		// 1.1 handle the use case where the graph does not have enough vertices to fulfill the edgesPerVertex requirement
 		//     and just remove the vertex without reconnecting the involved vertices because they are all fully connected
@@ -757,7 +757,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 
 		while(stopBuilding == false) {
 
-			// add or delete a node
+			// add or delete a vertex
 			if(this.newEntryQueue.size() > 0 || this.removeEntryQueue.size() > 0) {
 				long addTaskManipulationIndex = Long.MAX_VALUE;
 				long delTaskManipulationIndex = Long.MAX_VALUE;
@@ -782,7 +782,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 			}
 
 			//try to improve the graph
-			//	        if(graph.getNodeCount() > graph.getEdgesPerNode() && improve_k_ > 0) {
+			//	        if(graph.getVertexCount() > graph.getEdgesPerVertex() && improve_k_ > 0) {
 			//	          for (int64_t swap_try = 0; swap_try < int64_t(this->swap_tries_); swap_try++) {
 			//	            tries++;
 			//
@@ -855,10 +855,10 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 	 * 
 	 * @author Nico Hezel
 	 */
-	protected static class BuilderAddTask {
-		protected final int label;
-		protected final long manipulationIndex;
-		protected final FeatureVector feature;
+	public static class BuilderAddTask {
+		public final int label;
+		public final long manipulationIndex;
+		public final FeatureVector feature;
 		public BuilderAddTask(int label, long manipulationIndex, FeatureVector feature) {
 			super();
 			this.label = label;
@@ -871,9 +871,9 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 	 * 
 	 * @author Nico Hezel
 	 */
-	protected static class BuilderRemoveTask {
-		protected final int label;
-		protected final long manipulationIndex;
+	public static class BuilderRemoveTask {
+		public final int label;
+		public final long manipulationIndex;
 		public BuilderRemoveTask(int label, long manipulationIndex) {
 			super();
 			this.label = label;

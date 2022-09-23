@@ -311,6 +311,5 @@ public class PrimitiveFeatureFactories {
 				feature[i] = is.readDouble();
 			return new DoubleFeature(feature);
 		}
-	}
-	
+	}	
 }

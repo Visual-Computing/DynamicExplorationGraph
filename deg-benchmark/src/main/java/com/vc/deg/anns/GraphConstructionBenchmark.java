@@ -45,38 +45,49 @@ public class GraphConstructionBenchmark {
 			}
 		};
 		
+		// hierarchical 
 		final int edgesPerNode = 30;
-		DynamicExplorationGraph deg = GraphFactory.getDefaultFactory().newGraph(space, edgesPerNode);
-		GraphDesigner designer = deg.designer();
+		final int topRankSize = 400;
+		final Path graphFile = Paths.get("c:\\Data\\Feature\\SIFT1M\\deg\\best_distortion_decisions\\java\\128D_L2_K30_AddK60Eps0.2High_RNGMinimalAdd\\");
+		final DynamicExplorationGraph deg = GraphFactory.getDefaultFactory().newHierchicalGraph(space, edgesPerNode, topRankSize);
+		
+		// simple DEG
+//		final int edgesPerNode = 30;
+//		final Path graphFile = Paths.get("c:\\Data\\Feature\\SIFT1M\\deg\\best_distortion_decisions\\java\\128D_L2_K30_AddK60Eps0.2High_RNGMinimalAdd.java.float.deg");
+//		final DynamicExplorationGraph deg = GraphFactory.getDefaultFactory().newGraph(space, edgesPerNode);
 		
 		// give all base data to the designer to be added to the graph during the build process 
-//		for (int i = 0; i < baseData.length; i++)
-//			designer.add(i, new FloatFeature(baseData[i]));
-		
+		int maxIndex = 0;
 		final Random rnd = new Random(7);
-		final int maxIndex = 1000;
-		final List<Integer> availableIdx = IntStream.range(0, maxIndex).mapToObj(Integer::valueOf).collect(Collectors.toList());
-		final List<Integer> unavailableIdx = new ArrayList<>();
-		for (int it = 0; it < 5; it++) {
-			
-			Collections.shuffle(availableIdx, rnd);
-			final int add = 600;//rnd.nextInt(availableIdx.size());
-			for (int i = 0; i < add; i++) {
-				final int index = availableIdx.remove(availableIdx.size()-1);
-				designer.add(index, new FloatFeature(baseData[index]));
-				unavailableIdx.add(index);
-			}
+		final GraphDesigner designer = deg.designer();
+		
+		// random add
+		if(maxIndex > 0) {
+			final List<Integer> availableIdx = IntStream.range(0, maxIndex).mapToObj(Integer::valueOf).collect(Collectors.toList());
+			final List<Integer> unavailableIdx = new ArrayList<>();
+			for (int it = 0; it < 100; it++) {
 				
-			Collections.shuffle(unavailableIdx, rnd);
-			final int remove = 500;//rnd.nextInt(unavailableIdx.size());
-			for (int i = 0; i < remove; i++)  {
-				final int index = unavailableIdx.remove(unavailableIdx.size()-1);
-				designer.remove(index);
-				availableIdx.add(index);
-			}
-		}		
-		for(int i : availableIdx)
-			designer.add(i, new FloatFeature(baseData[i]));
+				Collections.shuffle(availableIdx, rnd);
+				final int add = rnd.nextInt(availableIdx.size());
+				for (int i = 0; i < add; i++) {
+					final int index = availableIdx.remove(availableIdx.size()-1);
+					designer.add(index, new FloatFeature(baseData[index]));
+					unavailableIdx.add(index);
+				}
+					
+				Collections.shuffle(unavailableIdx, rnd);
+				final int remove = rnd.nextInt(unavailableIdx.size());
+				for (int i = 0; i < remove; i++)  {
+					final int index = unavailableIdx.remove(unavailableIdx.size()-1);
+					designer.remove(index);
+					availableIdx.add(index);
+				}
+			}		
+			for(int i : availableIdx)
+				designer.add(i, new FloatFeature(baseData[i]));
+		}
+		
+		// add all available data points to the graph
 		for (int i = maxIndex; i < baseData.length; i++)
 			designer.add(i, new FloatFeature(baseData[i]));
 		
@@ -90,17 +101,25 @@ public class GraphConstructionBenchmark {
 		designer.setMaxPathLength(5);
 		
 		// start the build process
-		AtomicLong start = new AtomicLong(System.currentTimeMillis());
-		AtomicLong durationMs = new AtomicLong(0);
-		designer.build((long step, long added, long removed, long improved, long tries, int lastAdd, int lastDelete) -> {			
+		final AtomicLong start = new AtomicLong(System.currentTimeMillis());
+		final AtomicLong durationMs = new AtomicLong(0);
+		designer.build((long step, long added, long removed, long improved, long tries, int lastAdd, int lastRemoved) -> {
 			final int size = (int)added-(int)removed;
-			if(size % 100 == 0) {
+			if(step % 100 == 0) {
 				durationMs.addAndGet(System.currentTimeMillis() - start.get());
 				final float avgEdgeWeight = designer.calcAvgEdgeWeight();
 				final boolean valid = designer.checkGraphValidation(size, edgesPerNode);
 				final int duration = (int)(durationMs.get() / 1000);
-				System.out.printf("Step %7d, %3ds, Q: %4.2f, Size %7d, Added %7d (last id %3d), Removed %7d (last id %3d), improved %3d, tries %3d, valid %s\n", step, duration, avgEdgeWeight, size, added, lastAdd, removed, lastDelete, improved, tries, Boolean.toString(valid));
+				System.out.printf("Step %7d, %3ds, Q: %4.2f, Size %7d, Added %7d (last id %3d), Removed %7d (last id %3d), improved %3d, tries %3d, valid %s\n", step, duration, avgEdgeWeight, size, added, lastAdd, removed, lastRemoved, improved, tries, Boolean.toString(valid));
 				start.set(System.currentTimeMillis());
+			}
+			
+			if(step % 1000 == 0) {
+				try {
+					deg.writeToFile(graphFile);
+				} catch (ClassNotFoundException | IOException e) {
+					e.printStackTrace();
+				}
 			}
 			
 			// stop the building process
@@ -109,7 +128,6 @@ public class GraphConstructionBenchmark {
 		});
 		
 		// store and test the graph
-		Path graphFile = Paths.get("c:\\Data\\Feature\\SIFT1M\\deg\\best_distortion_decisions\\java\\128D_L2_K30_AddK60Eps0.2High_RNGMinimalAdd.java.float.deg");
 		deg.writeToFile(graphFile);
 		GraphSearchBenchmark.testGraph(deg, siftBaseDir);
 		

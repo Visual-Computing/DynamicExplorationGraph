@@ -12,7 +12,6 @@ import com.koloboke.collect.set.hash.HashIntSets;
 import com.vc.deg.DynamicExplorationGraph;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.GraphFactory;
-import com.vc.deg.SearchResult;
 import com.vc.deg.data.Sift1M;
 import com.vc.deg.feature.FloatFeature;
 import com.vc.deg.feature.FloatL2Space;
@@ -61,12 +60,12 @@ public class GraphSearchBenchmark {
 				
 				// find nearest neighbors
 				final long start = System.currentTimeMillis();
-				final SearchResult bestList = deg.search(new FloatFeature(query), k, eps);
+				final int[] bestList = deg.search(new FloatFeature(query), k, eps);
 				final long stop = System.currentTimeMillis();
 				elapsedMilliseconds.addAndGet(stop-start);
 				
 				// check ground truth against
-				final IntSet bestIds = HashIntSets.newImmutableSet(c -> bestList.forEach(e -> c.accept(e.getLabel())));
+				final IntSet bestIds = HashIntSets.newImmutableSet(bestList);
 				for(int bestIndex : groundtruth)
 					if(bestIds.contains(bestIndex))
 						precisionAtK.incrementAndGet();

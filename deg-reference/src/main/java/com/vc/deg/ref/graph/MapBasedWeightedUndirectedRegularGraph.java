@@ -15,37 +15,29 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.function.IntConsumer;
 
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.feature.FeatureFactory;
-import com.vc.deg.graph.VertexIds;
-import com.vc.deg.graph.VertexView;
-import com.vc.deg.graph.WeightedEdgeConsumer;
-import com.vc.deg.graph.WeightedEdges;
 import com.vc.deg.io.LittleEndianDataInputStream;
 import com.vc.deg.io.LittleEndianDataOutputStream;
 import com.vc.deg.ref.feature.PrimitiveFeatureFactories;
 import com.vc.deg.ref.search.ObjectDistance;
 
-
-
-
-
 /**
- * This reference implementation uses the label of the data as its identifier for the nodes.
- * Every node contains of a label, data (stored in a MemoryView) and neighbors. The neighbors
- * are just the neighbor label and the edge weight.
+ * A weighted undirected regular graph based on HashMaps to store the vertices and edges.
+ * 
+ * This reference implementation uses the label of the data as its identifier for the vertices.
+ * Every vertex contains of a label, a feature vector and a set of edges. 
+ * Each edge know the neighbor label and the edge weight.
  *  
  * @author Nico Hezel
  *
@@ -53,87 +45,81 @@ import com.vc.deg.ref.search.ObjectDistance;
 public class MapBasedWeightedUndirectedRegularGraph {
 
 	/**
-	 * Label of the node is the identifier
+	 * Label of the vertex is the identifier
 	 */
-	protected final Map<Integer, VertexData> nodes;
+	protected final Map<Integer, VertexData> vertices;
 	
 	/**
-	 * The feature space knows who many bytes the node data (MemoryView) contains and how to compute the distance between two data objects.
+	 * The feature space knows who many bytes the vertex data contains and how to compute the distance between two data objects.
 	 */
 	protected final FeatureSpace space;
 	
 	/**
-	 * The number of edges per node is fixed and an even number
+	 * The number of edges per vertex is fixed and an even number
 	 */
-	protected final int edgesPerNode;
+	protected final int edgesPerVertex;
 
-	public MapBasedWeightedUndirectedRegularGraph(int edgesPerNode, FeatureSpace space) {
-		this.edgesPerNode = edgesPerNode;
-		this.nodes = new HashMap<>();
+	public MapBasedWeightedUndirectedRegularGraph(int edgesPerVertex, FeatureSpace space) {
+		this.edgesPerVertex = edgesPerVertex;
+		this.vertices = new HashMap<>();
 		this.space = space;
 	}
 
-	public MapBasedWeightedUndirectedRegularGraph(int edgesPerNode, int expectedSize, FeatureSpace space) {
-		this.edgesPerNode = edgesPerNode;
-		this.nodes = new HashMap<>(expectedSize);	
+	public MapBasedWeightedUndirectedRegularGraph(int edgesPerVertex, int expectedSize, FeatureSpace space) {
+		this.edgesPerVertex = edgesPerVertex;
+		this.vertices = new HashMap<>(expectedSize);	
 		this.space = space;
 	}
 	
-	public MapBasedWeightedUndirectedRegularGraph(int edgesPerNode, Map<Integer, VertexData> nodes, FeatureSpace space) {
-		this.edgesPerNode = edgesPerNode;
-		this.nodes = nodes;	
+	public MapBasedWeightedUndirectedRegularGraph(int edgesPerVertex, Map<Integer, VertexData> vertices, FeatureSpace space) {
+		this.edgesPerVertex = edgesPerVertex;
+		this.vertices = vertices;	
 		this.space = space;
 	}
-
-
 
 	public FeatureSpace getFeatureSpace() {
 		return space;
 	}
 
 	public VertexData getVertex(int id) {
-		return nodes.getOrDefault(id, null);
+		return vertices.getOrDefault(id, null);
 	}
 
 	public VertexData addVertex(int id, FeatureVector data) {
-		if(hasNode(id) == false) {
-			final VertexData newVertex = new VertexData(id, data, edgesPerNode+1);
-			nodes.put(id, newVertex);
+		if(hasVertex(id) == false) {
+			final VertexData newVertex = new VertexData(id, data, edgesPerVertex+1);
+			vertices.put(id, newVertex);
 			return newVertex;
 		}
 		return null;
 	}
 
 	public int getVertexCount() {
-		return nodes.size();
+		return vertices.size();
+	}
+	
+	public Collection<Integer> getVertexIds() {
+		return Collections.unmodifiableCollection(vertices.keySet());
 	}
 	
 	public Collection<VertexData> getVertices() {
-		return nodes.values();
+		return Collections.unmodifiableCollection(vertices.values());
 	}
 
-	public boolean hasNode(int id) {
-		return nodes.containsKey(id);
+	public boolean hasVertex(int id) {
+		return vertices.containsKey(id);
 	}
 
 	public boolean hasEdge(int id1, int id2) {
-		final VertexData nodeData = nodes.get(id1);
-		if(nodeData == null)
+		final VertexData vertexData = vertices.get(id1);
+		if(vertexData == null)
 			return false;
-		return nodeData.edges.containsKey(id2);
+		return vertexData.edges.containsKey(id2);
 	}
 	
 	public int getEdgesPerVertex() {
-		return edgesPerNode;
+		return edgesPerVertex;
 	}
-
-//	public NodeIds getConnectedNodeIds(int id) {
-//		return new MapBasedWeighedEdes(id, nodes.get(id).edges);
-//	}
-	
-//	public WeightedEdges getEdges(int id) {
-//		return new MapBasedWeighedEdes(id, nodes.get(id).edges);
-//	}
 
 	public boolean addUndirectedEdge(int id1, int id2, float weight) {		
 		boolean add1 = addDirectedEdge(id1, id2, weight);
@@ -142,7 +128,7 @@ public class MapBasedWeightedUndirectedRegularGraph {
 	}
 	
 	/**
-	 * Add a directed edge between the two nodes.
+	 * Add a directed edge between the two vertices.
 	 * Return true if this edges did not exists before.
 	 * 
 	 * @param fromId
@@ -151,20 +137,20 @@ public class MapBasedWeightedUndirectedRegularGraph {
 	 * @return
 	 */
 	private boolean addDirectedEdge(int fromId, int toId, float weight) {
-		final VertexData nodeData = nodes.get(fromId);
-		return (nodeData.edges.put(toId, weight) == null);
+		final VertexData vertexData = vertices.get(fromId);
+		return (vertexData.edges.put(toId, weight) == null);
 	}
 
-	public VertexData removeNode(int id) {
+	public VertexData removeVertex(int id) {
 		
-		// remove all directed edges from this node to any other node
-		final VertexData nodeData = nodes.remove(id);
+		// remove all directed edges from this vertex to any other vertex
+		final VertexData vertexData = vertices.remove(id);
 		
-		// if this nodes exists, remove all edges pointing to this node
-		if(nodeData != null) {
-			for(Integer otherId : nodeData.edges.keySet()) 
-				nodes.get(otherId).edges.remove(id);
-			return nodeData;
+		// if this vertices exists, remove all edges pointing to this vertex
+		if(vertexData != null) {
+			for(Integer otherId : vertexData.edges.keySet()) 
+				vertices.get(otherId).edges.remove(id);
+			return vertexData;
 		}
 		return null;
 	}
@@ -176,7 +162,7 @@ public class MapBasedWeightedUndirectedRegularGraph {
 	}
 	
 	/**
-	 * Remove a undirected edge between the two nodes.
+	 * Remove a undirected edge between the two vertices.
 	 * Return true if any of the edges existed before.
 	 * 
 	 * @param fromId
@@ -184,9 +170,9 @@ public class MapBasedWeightedUndirectedRegularGraph {
 	 * @return
 	 */
 	private boolean removeDirectedEdge(int fromId, int toId) {
-		final VertexData nodeData = nodes.get(fromId);
-		if(nodeData != null) 
-			return (nodeData.edges.remove(toId) != null);
+		final VertexData vertexData = vertices.get(fromId);
+		if(vertexData != null) 
+			return (vertexData.edges.remove(toId) != null);
 		return false;
 	}
 	
@@ -197,26 +183,13 @@ public class MapBasedWeightedUndirectedRegularGraph {
 	 * @return -1 if the edge does not exists
 	 */
 	public float getEdgeWeight(int id1, int id2) {
-		final VertexData nodeData = nodes.get(id1);
-		if(nodeData == null)
+		final VertexData vertexData = vertices.get(id1);
+		if(vertexData == null)
 			return -1;
-		final Float value = nodeData.edges.get(id2);
+		final Float value = vertexData.edges.get(id2);
 		if(value == null)
 			return -1;
 		return value;
-	}
-	
-	public void forEachEdge(WeightedEdgeConsumer consumer) {		
-		for (Map.Entry<Integer, VertexData> nodeData : nodes.entrySet()) {
-			final int nodeId = nodeData.getKey();			
-			for (Map.Entry<Integer, Float> edge : nodeData.getValue().edges.entrySet()) {
-				final int neighborId = edge.getKey();
-				
-				// implementation detail: all edges have a direction, ignore the edge in the other direction
-				if(nodeId < neighborId) 
-					consumer.accept(nodeId, neighborId, edge.getValue());
-			}
-		}
 	}
 
 	
@@ -237,38 +210,38 @@ public class MapBasedWeightedUndirectedRegularGraph {
 		// list of checked ids
 		final Set<Integer> checkedIds = new HashSet<>(fromVertices.length + k*4);
 
-		// items to traverse, start with the initial node
-		final PriorityQueue<ObjectDistance> nextNodes = new PriorityQueue<>(k * 10); 
+		// items to traverse, start with the initial vertex
+		final PriorityQueue<ObjectDistance> nextVertexs = new PriorityQueue<>(k * 10); 
 		for (int id : fromVertices) {
 			if(checkedIds.add(id)) {
 				final VertexData obj = getVertex(id);
 				final float distance = space.computeDistance(toVertexFeature, obj.getFeature());
-				nextNodes.add(new ObjectDistance(id, obj, distance));
-				trackback.put(id, new ObjectDistance(id, obj, distance));
+				nextVertexs.add(new ObjectDistance(id, distance));
+				trackback.put(id, new ObjectDistance(id, distance));
 			}
 		}
 
 		// result set
-		final TreeSet<ObjectDistance> results = new TreeSet<>(nextNodes);
+		final TreeSet<ObjectDistance> results = new TreeSet<>(nextVertexs);
 
 		// search radius
 		float radius = Float.MAX_VALUE;
 		
 		// iterate as long as good elements are in S
-		while(nextNodes.size() > 0) {
-			final ObjectDistance nextVertex = nextNodes.poll();
+		while(nextVertexs.size() > 0) {
+			final ObjectDistance nextVertex = nextVertexs.poll();
 
 			// max distance reached
 			if(nextVertex.getDistance() > radius * (1 + eps))
 				break;
 
-			// traverse never seen nodes
-			for(Map.Entry<Integer, Float> edge : getVertex(nextVertex.getVertexId()).getEdges().entrySet()) {
+			// traverse never seen vertices
+			for(Map.Entry<Integer, Float> edge : getVertex(nextVertex.getLabel()).getEdges().entrySet()) {
 				int neighborId = edge.getKey();
 			
 				if(checkedIds.add(neighborId)) {
 					
-				    // found our target node, create a path back to the entry node
+				    // found our target vertex, create a path back to the entry vertex
 			        if(neighborId == toVertex) {
 			          final List<ObjectDistance> path = new ArrayList<>();
 			          path.add(nextVertex);
@@ -280,15 +253,15 @@ public class MapBasedWeightedUndirectedRegularGraph {
 			          return path;
 			        }
 
-					// follow this node further
+					// follow this vertex further
 			        final VertexData neighborVertex = getVertex(neighborId);
 			        final float neighborDist = space.computeDistance(toVertexFeature, neighborVertex.getFeature());
 					if(neighborDist <= radius * (1 + eps)) {
-						final ObjectDistance candidate = new ObjectDistance(neighborId, neighborVertex, neighborDist);
-						nextNodes.add(candidate);
+						final ObjectDistance candidate = new ObjectDistance(neighborId, neighborDist);
+						nextVertexs.add(candidate);
 				        trackback.put(neighborId, nextVertex);
 
-						// remember the node
+						// remember the vertex
 						if(neighborDist < radius) {
 							results.add(candidate);
 							if(results.size() > k) {
@@ -320,44 +293,44 @@ public class MapBasedWeightedUndirectedRegularGraph {
 		for (int id : forbiddenIds)
 			checkedIds.add(id);
 		
-		// items to traverse, start with the initial node
-		final PriorityQueue<ObjectDistance> nextNodes = new PriorityQueue<>(k * 10); 
+		// items to traverse, start with the initial vertex
+		final PriorityQueue<ObjectDistance> nextVertexs = new PriorityQueue<>(k * 10); 
 		for (int id : entryPoints) {
 			if(checkedIds.contains(id) == false) {
 				checkedIds.add(id);
 				final VertexData obj = getVertex(id);
-				nextNodes.add(new ObjectDistance(id, obj, space.computeDistance(query, obj.getFeature())));
+				nextVertexs.add(new ObjectDistance(id, space.computeDistance(query, obj.getFeature())));
 			}
 		}
 
 		// result set
-		final TreeSet<ObjectDistance> results = new TreeSet<>(nextNodes);
+		final TreeSet<ObjectDistance> results = new TreeSet<>(nextVertexs);
 
 		// search radius
 		float radius = Float.MAX_VALUE;
 		
 		// iterate as long as good elements are in S
-		while(nextNodes.size() > 0) {
-			final ObjectDistance s = nextNodes.poll();
+		while(nextVertexs.size() > 0) {
+			final ObjectDistance s = nextVertexs.poll();
 
 			// max distance reached
 			if(s.getDistance() > radius * (1 + eps))
 				break;
 
-			// traverse never seen nodes
-			for(Map.Entry<Integer, Float> edge : getVertex(s.getVertexId()).getEdges().entrySet()) {
+			// traverse never seen vertices
+			for(Map.Entry<Integer, Float> edge : getVertex(s.getLabel()).getEdges().entrySet()) {
 				int neighborId = edge.getKey();
 			
 				if(checkedIds.add(neighborId)) {
 					final VertexData n = getVertex(neighborId);
 					final float nDist = space.computeDistance(query, n.getFeature());
 
-					// follow this node further
+					// follow this vertex further
 					if(nDist <= radius * (1 + eps)) {
-						final ObjectDistance candidate = new ObjectDistance(neighborId, n, nDist);
-						nextNodes.add(candidate);
+						final ObjectDistance candidate = new ObjectDistance(neighborId, nDist);
+						nextVertexs.add(candidate);
 
-						// remember the node
+						// remember the vertex
 						if(nDist < radius) {
 							results.add(candidate);
 							if(results.size() > k) {
@@ -372,6 +345,21 @@ public class MapBasedWeightedUndirectedRegularGraph {
 		
 		return results;
 	}
+	
+	/**
+	 * Create a deep copy of the graph. Only the Feature Vector will not be copied and their old reference will be used instead.
+	 * 
+	 * @return
+	 */
+	public MapBasedWeightedUndirectedRegularGraph copy() {
+		final Map<Integer, VertexData> copyVertices = new HashMap<>(vertices.size());
+		for (Map.Entry<Integer, VertexData> entry : vertices.entrySet()) {
+			final VertexData vertex = entry.getValue();
+			final Map<Integer, Float> copyEdges = new HashMap<>(vertex.getEdges());
+			copyVertices.put(entry.getKey(), new VertexData(entry.getKey(), vertex.getFeature(), copyEdges));
+		}
+		return new MapBasedWeightedUndirectedRegularGraph(edgesPerVertex, copyVertices, space);
+	}
 
 	/**
 	 * 
@@ -380,48 +368,47 @@ public class MapBasedWeightedUndirectedRegularGraph {
 	 * @throws IOException
 	 */
 	public void writeToFile(Path file) throws ClassNotFoundException, IOException {
-		Path tempFile = Paths.get(file.getParent().toString(), "~$" + file.getFileName().toString());
+		final Path tempFile = Paths.get(file.getParent().toString(), "~$" + file.getFileName().toString());
 
 		try(BufferedOutputStream bos = new BufferedOutputStream(Files.newOutputStream(tempFile, TRUNCATE_EXISTING, CREATE, WRITE))) {
-			// TODO support littleEndian files to be compatible with deglib in c-lang
+
 			// https://github.com/google/guava/blob/master/guava/src/com/google/common/io/LittleEndianDataOutputStream.java
 			// https://stackoverflow.com/questions/7024039/in-java-when-writing-to-a-file-with-dataoutputstream-how-do-i-define-the-endia
-			DataOutput out = new LittleEndianDataOutputStream(bos);
+			final DataOutput out = new LittleEndianDataOutputStream(bos);
 			
 			out.writeByte(space.metric());
 			out.writeShort(space.dims());
 			out.writeInt(getVertexCount());
-			out.writeByte(edgesPerNode);
+			out.writeByte(edgesPerVertex);
 			
-			for (int i = 0; i < getVertexCount(); i++) {
-				VertexData node = this.getVertex(i);
-				node.getFeature().writeObject(out);
+			for (VertexData vertex : vertices.values()) {
+				vertex.getFeature().writeObject(out);
 				
 				// get all edges in the graph, fill the remaining spots with self-loops and sort the result by the indices in ascending order
-				List<IntFloat> edges = new ArrayList<>();	
-				node.getEdges().forEach((neighborIdx, weight) -> {
-					edges.add(new IntFloat(neighborIdx, weight));
+				final List<ObjectDistance> edges = new ArrayList<>();	
+				vertex.getEdges().forEach((neighborIdx, weight) -> {
+					edges.add(new ObjectDistance(neighborIdx, weight));
 				});
-				for (int r = 0; r < edgesPerNode - node.getEdges().size(); r++)
-					edges.add(new IntFloat(i, 0));
-				edges.sort(IntFloat.asc());
+				for (int r = 0; r < edgesPerVertex - vertex.getEdges().size(); r++)
+					edges.add(new ObjectDistance(vertex.getId(), 0));
+				edges.sort(ObjectDistance.ascByIndex());
 				
 				// write the data to the drive
-				for (IntFloat edge : edges) 
-					out.writeInt(edge.getIndex());
-				for (IntFloat edge : edges) 
-					out.writeFloat(edge.getValue());
-				out.writeInt(node.getId());
+				for (ObjectDistance edge : edges) 
+					out.writeInt(edge.getLabel());
+				for (ObjectDistance edge : edges) 
+					out.writeFloat(edge.getDistance());
+				out.writeInt(vertex.getId());
 			}
 		}
 		Files.move(tempFile, file, REPLACE_EXISTING);
 	}
 	
 	public static MapBasedWeightedUndirectedRegularGraph readFromFile(Path file) throws IOException {
-		String filename = file.getFileName().toString();
-		int extStart = filename.lastIndexOf('.');
-		int typeStart = filename.lastIndexOf('.', extStart-1);
-		String dType = filename.substring(typeStart+1, extStart);
+		final String filename = file.getFileName().toString();
+		final int extStart = filename.lastIndexOf('.');
+		final int typeStart = filename.lastIndexOf('.', extStart-1);
+		final String dType = filename.substring(typeStart+1, extStart);
 		return readFromFile(file, dType);
 	}
 	
@@ -432,11 +419,11 @@ public class MapBasedWeightedUndirectedRegularGraph {
 			// read meta data
 			int metric = Byte.toUnsignedInt(input.readByte());
 			int dims = Short.toUnsignedInt(input.readShort());
-			long nodeCount = Integer.toUnsignedLong(input.readInt());
-			int edgesPerNode = Byte.toUnsignedInt(input.readByte());
+			long vertexCount = Integer.toUnsignedLong(input.readInt());
+			int edgesPerVertex = Byte.toUnsignedInt(input.readByte());
 			
-			// 	featureSize	=		     filesize - meta data - (edge data + label) * nodeCount   / nodeCount
-			int featureSize = (int)((Files.size(file) - 8 - ((edgesPerNode * 8 + 4) * nodeCount)) / nodeCount);
+			// 	featureSize	=		     filesize - meta data - (edge data + label) * vertexCount   / vertexCount
+			int featureSize = (int)((Files.size(file) - 8 - ((edgesPerVertex * 8 + 4) * vertexCount)) / vertexCount);
 
 			// factory to create FeatureVectors based on the featureType
 			FeatureFactory featureFactory = PrimitiveFeatureFactories.get(featureType, dims);
@@ -457,59 +444,57 @@ public class MapBasedWeightedUndirectedRegularGraph {
 				throw new UnsupportedOperationException("The feature space for featureType="+featureType+", metric="+metric+" and isNative=false expects features with "+space.dims()+" dimensions but the graph contains features with "+dims+" dimensions.");
 			
 			// the references implementation uses 
-			if(nodeCount > Integer.MAX_VALUE)
-				throw new UnsupportedOperationException("The reference implementation does not allow graphs with more than "+Integer.MAX_VALUE+" nodes");
+			if(vertexCount > Integer.MAX_VALUE)
+				throw new UnsupportedOperationException("The reference implementation does not allow graphs with more than "+Integer.MAX_VALUE+" vertices");
 			
-			// read the node data
+			// read the vertex data
 			System.out.println("Read graph from file "+file.toString());
-			final Map<Integer, VertexData> nodes = new HashMap<>((int)nodeCount); 
-			for (int i = 0; i < nodeCount; i++) {
+			final Map<Integer, VertexData> vertices = new HashMap<>((int)vertexCount); 
+			for (int i = 0; i < vertexCount; i++) {
 				
 				// read the feature vector
 				final FeatureVector feature = featureFactory.read(input);
 				
 				// read the edge data
-				final int[] neighborIds = new int[edgesPerNode];
-				for (int e = 0; e < edgesPerNode; e++) 
+				final int[] neighborIds = new int[edgesPerVertex];
+				for (int e = 0; e < edgesPerVertex; e++) 
 					neighborIds[e] = input.readInt();
-				final float[] weights = new float[edgesPerNode];
-				for (int e = 0; e < edgesPerNode; e++) 
+				final float[] weights = new float[edgesPerVertex];
+				for (int e = 0; e < edgesPerVertex; e++) 
 					weights[e] = input.readFloat();	
-				Map<Integer,Float> edges = new HashMap<>(edgesPerNode);
-				for (int e = 0; e < edgesPerNode; e++)
+				Map<Integer,Float> edges = new HashMap<>(edgesPerVertex);
+				for (int e = 0; e < edgesPerVertex; e++)
 					edges.put(neighborIds[e], weights[e]);
 				
 				// read the label
 				int label = input.readInt();
 				
-				// create the node data
-				nodes.put(label, new VertexData(label, feature, edges));
+				// create the vertex data
+				vertices.put(label, new VertexData(label, feature, edges));
 				
 				if(i % 100_000 == 0)
 					System.out.println("Loaded "+i+" vertices");
 			}
-			System.out.println("Loaded "+nodeCount+" vertices");
+			System.out.println("Loaded "+vertexCount+" vertices");
 			
-			return new MapBasedWeightedUndirectedRegularGraph(edgesPerNode, nodes, space);
+			return new MapBasedWeightedUndirectedRegularGraph(edgesPerVertex, vertices, space);
 		}
 	}
 	
 	
 	/**
 	 * @author Nico Hezel
-	 * 
-	 * TODO remove VertexView
 	 */
-	public static class VertexData implements VertexView {
+	public static class VertexData  {
 		
 		protected final int id;
 		protected final FeatureVector data;
 		protected final Map<Integer,Float> edges;
 		
-		public VertexData(int id, FeatureVector data, int edgesPerNode) {
+		public VertexData(int id, FeatureVector data, int edgesPerVertex) {
 			this.id = id;
 			this.data = data;
-			this.edges = new HashMap<>(edgesPerNode);
+			this.edges = new HashMap<>(edgesPerVertex);
 		}
 		
 		public VertexData(int id, FeatureVector data, Map<Integer,Float> edges) {
@@ -518,157 +503,16 @@ public class MapBasedWeightedUndirectedRegularGraph {
 			this.edges = edges;
 		}
 
-		@Override
 		public int getId() {
 			return id;
 		}
 
-		@Override
 		public FeatureVector getFeature() {
 			return data;
 		}
-
-		// TODO remove VertexView
-		@Override
-		public WeightedEdges getNeighbors() {
-			return new MapBasedWeighedEdes(id, edges);
-		}	
 		
 		public Map<Integer,Float> getEdges() {
 			return edges;
 		}	
-	}
-	
-	/**
-	 * Contains edge information for a single node.
-	 *  
-	 * TODO remove VertexView
-	 * 
-	 * @author Nico Hezel
-	 */
-	protected static class MapBasedWeighedEdes extends SetBasedIds implements WeightedEdges {
-		
-		protected final int refId;
-		protected final Map<Integer, Float> idWeights;
-		
-		public MapBasedWeighedEdes(int refId, Map<Integer, Float> idWeights) {
-			super(idWeights.keySet());
-			this.refId = refId;
-			this.idWeights = idWeights;
-		}
-
-		@Override
-		public int getNodeId() {
-			return refId;
-		}
-		
-		@Override
-		public void forEach(WeightedEdgeConsumer consumer) {
-			final int id1 = this.refId;
-			idWeights.forEach((id,weight) -> consumer.accept(id1, id, weight));
-		}		
-	}
-	
-	/**
-	 * Set of node ids
-	 * 
-	 * TODO remove VertexView
-	 * 
-	 * @author Nico Hezel
-	 */
-	protected static class SetBasedIds implements VertexIds {
-		
-		protected final Set<Integer> ids;
-		
-		public SetBasedIds(Set<Integer> ids) {
-			this.ids = ids;
-		}
-
-		@Override
-		public int size() {
-			return ids.size();
-		}
-		
-		@Override
-		public boolean contains(int id) {
-			return ids.contains(id);
-		}
-
-		@Override
-		public int[] toArray() {
-			final int[] result = new int[size()];
-			
-			int counter = 0;
-			final Iterator<Integer> it = this.ids.iterator();
-			while(it.hasNext()) 
-				result[counter++] = it.next();		
-			
-			return result;
-		}	
-		
-		@Override
-		public void forEach(IntConsumer consumer) {
-			ids.forEach((id) -> consumer.accept(id));
-		}
-
-		@Override
-		public Iterator<Integer> iterator() {
-			return ids.iterator();
-		}
-	}
-	
-	/**
-	 * Struct of int-float 
-	 *
-     * TODO move to common
-     * 
-	 * @author Nico Hezel
-	 */
-	protected static class IntFloat {
-		private int num;
-		private float val;
-
-		public IntFloat(int number, float value) {
-			num = number;
-			val = value;
-		}
-		
-		public int getIndex() {
-			return num;
-		}
-
-		public float getValue() {
-			return val;
-		}
-		
-		@Override
-		public String toString() {
-			return "int: "+num+", val: "+val;
-		}
-
-		@Override
-		public boolean equals(Object obj) {
-			if(obj instanceof IntFloat)
-				return ((IntFloat) obj).getIndex() == val;
-			return super.equals(obj);
-		}
-		
-		/**
-		 * Order in ascending order using the index
-		 *
-		 * @return
-		 */
-		public static Comparator<IntFloat> asc() {
-			return Comparator.comparingInt(IntFloat::getIndex).thenComparingDouble(IntFloat::getValue);
-		}
-
-		/**
-		 * Order in descending order using the index
-		 * 
-		 * @return
-		 */
-		public static Comparator<IntFloat> desc() {
-			return asc().reversed();
-		}
 	}
 }

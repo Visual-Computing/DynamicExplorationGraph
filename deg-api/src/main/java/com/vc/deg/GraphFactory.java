@@ -91,14 +91,4 @@ public interface GraphFactory {
 	 * @return
 	 */
 	public HierarchicalDynamicExplorationGraph loadHierchicalGraph(Path file) throws IOException;
-	
-	/**
-	 * Load an existing graph and expect a specific feature type
-	 * 
-	 * @param file
-	 * @param componentType
-	 * @return
-	 * @throws IOException
-	 */
-	public HierarchicalDynamicExplorationGraph loadHierchicalGraph(Path file, String featureType) throws IOException;
 }

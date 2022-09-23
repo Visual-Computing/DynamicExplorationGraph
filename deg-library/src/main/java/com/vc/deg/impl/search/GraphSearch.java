@@ -8,7 +8,7 @@ import com.koloboke.collect.set.IntSet;
 import com.koloboke.collect.set.hash.HashIntSets;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
-import com.vc.deg.graph.VertexView;
+import com.vc.deg.impl.graph.VertexView;
 import com.vc.deg.impl.graph.WeightedUndirectedRegularGraph;
 
 /**

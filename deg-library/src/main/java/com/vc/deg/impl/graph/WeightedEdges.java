@@ -1,4 +1,4 @@
-package com.vc.deg.graph;
+package com.vc.deg.impl.graph;
 
 import java.util.function.IntConsumer;
 
@@ -9,7 +9,7 @@ import java.util.function.IntConsumer;
  * @author Nico Hezel
  *
  */
-public interface WeightedEdges extends VertexIds {
+public interface WeightedEdges {
 	
 	/**
 	 * The id of the node where the edges belong to.
@@ -49,4 +49,22 @@ public interface WeightedEdges extends VertexIds {
 	 */
 	public void forEach(WeightedEdgeConsumer consumer);
 	
+	/**
+	 * Provides information about edges.
+	 * 
+	 * @author Nico Hezel
+	 */
+	public interface WeightedEdgeConsumer {
+
+		/**
+		 * Provides information about a single edge,
+		 * every time this method is called.
+		 * 
+		 * @param id1
+		 * @param id2
+		 * @param weight
+		 */
+	    void accept(int id1, int id2, float weight);
+	    
+	}
 }

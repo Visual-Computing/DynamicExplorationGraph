@@ -36,10 +36,5 @@ public class GraphFactory implements com.vc.deg.GraphFactory {
 	public HierarchicalDynamicExplorationGraph loadHierchicalGraph(Path file) throws IOException {
 		return HierarchicalDynamicExplorationGraph.readFromFile(file);
 	}
-	
-	@Override
-	public HierarchicalDynamicExplorationGraph loadHierchicalGraph(Path file, String componentType) throws IOException {
-		return HierarchicalDynamicExplorationGraph.readFromFile(file, componentType);
-	}
 }
 

@@ -37,11 +37,4 @@ public class GraphFactory implements com.vc.deg.GraphFactory {
 		// TODO Auto-generated method stub
 		return null;
 	}
-
-	@Override
-	public HierarchicalDynamicExplorationGraph loadHierchicalGraph(Path file, String featureType) throws IOException {
-		// TODO Auto-generated method stub
-		return null;
-	}
-
 }

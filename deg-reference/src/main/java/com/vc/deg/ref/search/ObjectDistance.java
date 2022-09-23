@@ -1,43 +1,59 @@
 package com.vc.deg.ref.search;
 
-import com.vc.deg.SearchResult.SearchEntry;
-import com.vc.deg.graph.VertexView;
+import java.util.Comparator;
 
 /**
- * TODO remove vertexId and nodeData
- * TODO move to common
+ * Natural order is ascending by distance.
  * 
- * @author Neiko
+ * @author Nico Hezel
  *
  */
-public class ObjectDistance implements SearchEntry {
+public class ObjectDistance implements Comparable<ObjectDistance> {
 	
-	protected final int nodeId;
-	protected final VertexView nodeData;
+	protected final int label;
 	protected final float distance;
 	
-	public ObjectDistance(int nodeId, VertexView nodeData, float distance) {
-		this.nodeId = nodeId;
-		this.nodeData = nodeData;
+	public ObjectDistance(int label, float distance) {
+		this.label = label;
 		this.distance = distance;
 	}
 	
-	public int getVertexId() {
-		return nodeId;
-	}
-
-	@Override
 	public int getLabel() {
-		return nodeData.getId();
+		return label;
 	}
 
-	@Override
 	public float getDistance() {
 		return distance;
 	}
 	
 	@Override
 	public String toString() {
-		return "nodeId:"+nodeId+", nodeData:"+nodeData.getId()+", distance:"+distance;
+		return "label:"+label+", distance:"+distance;
+	}
+	
+	@Override
+	public int compareTo(ObjectDistance o) {
+		int cmp = Float.compare(getDistance(), o.getDistance());
+        if (cmp == 0)
+        	cmp = Integer.compare(getLabel(), o.getLabel());
+        return cmp;
+	}	
+	
+	/**
+	 * Order in ascending order using the index
+	 *
+	 * @return
+	 */
+	public static Comparator<ObjectDistance> ascByIndex() {
+		return Comparator.comparingInt(ObjectDistance::getLabel).thenComparingDouble(ObjectDistance::getDistance);
+	}
+
+	/**
+	 * Order in descending order using the index
+	 * 
+	 * @return
+	 */
+	public static Comparator<ObjectDistance> descByIndex() {
+		return ascByIndex().reversed();
 	}
 }

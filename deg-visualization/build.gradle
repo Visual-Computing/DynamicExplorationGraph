@@ -1,3 +1,4 @@
 dependencies {
-	implementation project(':deg-library')
+	implementation project(':deg-api')
+	implementation project(':deg-reference')
 }

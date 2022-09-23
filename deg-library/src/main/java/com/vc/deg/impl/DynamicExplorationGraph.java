@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.function.IntConsumer;
 
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.KryoException;
@@ -17,11 +18,8 @@ import com.esotericsoftware.kryo.unsafe.UnsafeOutput;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.GraphDesigner;
-import com.vc.deg.GraphNavigator;
-import com.vc.deg.SearchResult;
 import com.vc.deg.impl.designer.EvenRegularGraphDesigner;
 import com.vc.deg.impl.graph.WeightedUndirectedRegularGraph;
-import com.vc.deg.impl.navigation.EvenRegularGraphNavigator;
 
 /**
  * This class wraps the main functions of the library
@@ -31,7 +29,6 @@ import com.vc.deg.impl.navigation.EvenRegularGraphNavigator;
 public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGraph {
 
 	protected WeightedUndirectedRegularGraph internalGraph;
-	protected EvenRegularGraphNavigator navigator;
 	protected EvenRegularGraphDesigner designer;
 	
 	
@@ -44,18 +41,12 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	public DynamicExplorationGraph(FeatureSpace space, int edgesPerNode) {
 		this.internalGraph = new WeightedUndirectedRegularGraph(edgesPerNode, space);
 		this.designer = new EvenRegularGraphDesigner(internalGraph); 
-		this.navigator = new EvenRegularGraphNavigator(internalGraph); 
 	}
 	
 	@Override
-	public SearchResult search(FeatureVector query, int k, float eps) {
+	public int[] search(FeatureVector query, int k, float eps) {
 		// TODO Auto-generated method stub
 		return null;
-	}
-	
-	@Override
-	public GraphNavigator navigator() {
-		return navigator;
 	}
 	
 	@Override
@@ -78,5 +69,11 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 		try(UnsafeInput input = new UnsafeInput(Files.newInputStream(file))) {
 			this.internalGraph.read(kryo, input);
 		} 
+	}
+
+	@Override
+	public DynamicExplorationGraph copy() {
+		// TODO Auto-generated method stub
+		return null;
 	}
 }

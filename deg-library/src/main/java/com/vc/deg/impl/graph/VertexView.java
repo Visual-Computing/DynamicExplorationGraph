@@ -1,4 +1,4 @@
-package com.vc.deg.graph;
+package com.vc.deg.impl.graph;
 
 import com.vc.deg.FeatureVector;
 

@@ -27,8 +27,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 	 * @param id
 	 */
 	public void add(int id, FeatureVector data) {
-
-
+		// TODO Auto-generated method stub
 	}
 	
 	public void extendGraph(int id, boolean randomPosition) {
@@ -47,7 +46,6 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 	@Override
 	public void remove(int label) {
 		// TODO Auto-generated method stub
-		
 	}
 
 	@Override

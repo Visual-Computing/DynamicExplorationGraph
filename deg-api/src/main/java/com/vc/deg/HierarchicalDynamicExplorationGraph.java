@@ -3,41 +3,54 @@ package com.vc.deg;
 import java.io.IOException;
 import java.nio.file.Path;
 
-public interface HierarchicalDynamicExplorationGraph {
+public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationGraph {
 
 	public GraphDesigner designer();
 	
 	/**
-	 * Stores the graph structural data and the feature vectors into a file.
-	 * It includes the FeatureSpace, Nodes, Edges, Features, Labels but not 
-	 * information about the Design process or Navigation settings.
+	 * Stores each layer of the graph into a separate file.
+	 * The target directory will be created if it does not exists.
 	 * 
-	 * @param file
+	 * @param targetDir
 	 * @throws ClassNotFoundException
 	 * @throws IOException
 	 */
-	public void writeToFile(Path file) throws ClassNotFoundException, IOException;
+	@Override
+	public void writeToFile(Path targetDir) throws ClassNotFoundException, IOException;
 	
 	/**
-	 * Search the graph for the best nodes matching the query
+	 * Search the graph for the best vertices matching the query at the given hierarchy level.
 	 * 
 	 * @param query
 	 * @param k
 	 * @return
 	 */
-	public default SearchResult search(FeatureVector query, int atLevel, int k) {
+	public default int[] search(FeatureVector query, int atLevel, int k) {
 		return search(query, atLevel, k, 0.1f);
 	}
 	
+	@Override
+	public default int[] search(FeatureVector query, int k, float eps) {
+		return search(query, 0, k, 0.1f);
+	}
+	
 	/**
+	 * Search the graph for the best vertices matching the query at the given hierarchy level.
 	 * 
 	 * @param query
 	 * @param k
-	 * @param eps Is similar to a search radius factor 0 means low and 1 means high radius to scan
+	 * @param eps Is similar to a search radius factor
 	 * @return
 	 */
-	public SearchResult search(FeatureVector query, int atLevel, int k, float eps);
+	public int[] search(FeatureVector query, int atLevel, int k, float eps);
 	
+	/**
+	 * Create a copy of the graph
+	 * 
+	 * @return
+	 */
+	@Override
+	public HierarchicalDynamicExplorationGraph copy();
 	
 	/**
      * Create an empty new graph
@@ -57,15 +70,5 @@ public interface HierarchicalDynamicExplorationGraph {
 	 */
 	public static HierarchicalDynamicExplorationGraph loadGraph(Path file) throws ClassNotFoundException, IOException {
 		return GraphFactory.getDefaultFactory().loadHierchicalGraph(file);
-	}
-	
-	/**
-	 * Load an existing graph
-	 * 
-	 * @param file
-	 * @return
-	 */
-	public static HierarchicalDynamicExplorationGraph loadGraph(Path file, String componentType) throws ClassNotFoundException, IOException {
-		return GraphFactory.getDefaultFactory().loadHierchicalGraph(file, componentType);
 	}
 }
