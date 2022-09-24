@@ -110,8 +110,7 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	}
 	
 	@Override
-	public int[] search(FeatureVector query, int k, float eps) {
-		final int[] forbiddenIds = new int[0];
+	public int[] search(FeatureVector query, int k, float eps, int[] forbiddenIds) {
 		final int[] entryPoint = new int[] { internalGraph.getVertices().iterator().next().getId() };
 		final TreeSet<ObjectDistance> topList = internalGraph.search(query, k, eps, forbiddenIds, entryPoint);
 		
@@ -121,6 +120,20 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 			result[i] = it.next().getLabel();
 		return result;
 	}
+	
+
+
+	@Override
+	public int[] explore(int entryLabel, int k, int maxDistanceCalcCount, int[] forbiddenIds) {
+		final TreeSet<ObjectDistance> topList = internalGraph.explore(entryLabel, k, maxDistanceCalcCount, forbiddenIds);
+		
+		final int[] result = new int[topList.size()];
+		final Iterator<ObjectDistance> it = topList.iterator();
+		for (int i = 0; i < topList.size(); i++) 
+			result[i] = it.next().getLabel();
+		return result;
+	}
+	
 	
 	@Override
 	public DynamicExplorationGraph copy() {

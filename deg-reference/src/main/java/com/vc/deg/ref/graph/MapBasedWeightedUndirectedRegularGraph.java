@@ -294,31 +294,31 @@ public class MapBasedWeightedUndirectedRegularGraph {
 			checkedIds.add(id);
 		
 		// items to traverse, start with the initial vertex
-		final PriorityQueue<ObjectDistance> nextVertexs = new PriorityQueue<>(k * 10); 
+		final PriorityQueue<ObjectDistance> nextVertices = new PriorityQueue<>(k * 10); 
 		for (int id : entryPoints) {
 			if(checkedIds.contains(id) == false) {
 				checkedIds.add(id);
 				final VertexData obj = getVertex(id);
-				nextVertexs.add(new ObjectDistance(id, space.computeDistance(query, obj.getFeature())));
+				nextVertices.add(new ObjectDistance(id, space.computeDistance(query, obj.getFeature())));
 			}
 		}
 
 		// result set
-		final TreeSet<ObjectDistance> results = new TreeSet<>(nextVertexs);
+		final TreeSet<ObjectDistance> results = new TreeSet<>(nextVertices);
 
 		// search radius
 		float radius = Float.MAX_VALUE;
 		
 		// iterate as long as good elements are in S
-		while(nextVertexs.size() > 0) {
-			final ObjectDistance s = nextVertexs.poll();
+		while(nextVertices.size() > 0) {
+			final ObjectDistance nextVertex = nextVertices.poll();
 
 			// max distance reached
-			if(s.getDistance() > radius * (1 + eps))
+			if(nextVertex.getDistance() > radius * (1 + eps))
 				break;
 
 			// traverse never seen vertices
-			for(Map.Entry<Integer, Float> edge : getVertex(s.getLabel()).getEdges().entrySet()) {
+			for(Map.Entry<Integer, Float> edge : getVertex(nextVertex.getLabel()).getEdges().entrySet()) {
 				int neighborId = edge.getKey();
 			
 				if(checkedIds.add(neighborId)) {
@@ -328,7 +328,7 @@ public class MapBasedWeightedUndirectedRegularGraph {
 					// follow this vertex further
 					if(nDist <= radius * (1 + eps)) {
 						final ObjectDistance candidate = new ObjectDistance(neighborId, nDist);
-						nextVertexs.add(candidate);
+						nextVertices.add(candidate);
 
 						// remember the vertex
 						if(nDist < radius) {
@@ -339,6 +339,79 @@ public class MapBasedWeightedUndirectedRegularGraph {
 							}							
 						}
 					}					
+				}
+			}
+		}
+		
+		return results;
+	}
+	
+	
+	/**
+	 * 
+	 * @param query
+	 * @param k
+	 * @param eps
+	 * @param forbiddenIds TODO replace with filter
+	 * @param entryPoints
+	 * @return
+	 */
+	public TreeSet<ObjectDistance> explore(int entryVertex, int k, int maxDistanceComputationCount, int[] forbiddenIds) {
+	    int distanceComputationCount = 0;
+
+		// list of checked ids
+		final Set<Integer> checkedIds = new HashSet<>(forbiddenIds.length + k*2);
+		for (int id : forbiddenIds)
+			checkedIds.add(id);
+		
+		// items to traverse, start with the initial vertex
+		final PriorityQueue<ObjectDistance> nextVertices = new PriorityQueue<>(k * 2); 
+		checkedIds.add(entryVertex);
+		nextVertices.add(new ObjectDistance(entryVertex, 0));
+		final FeatureVector query = getVertex(entryVertex).getFeature();
+
+		// result set
+		final TreeSet<ObjectDistance> results = new TreeSet<>(nextVertices);
+
+		// search radius
+		float radius = Float.MAX_VALUE;
+		
+		// iterate as long as good elements are in S
+		while(nextVertices.size() > 0) {
+			final ObjectDistance nextVertex = nextVertices.poll();
+
+			// max distance reached
+			if(nextVertex.getDistance() > radius)
+				break;
+
+			// traverse never seen vertices
+			for(Map.Entry<Integer, Float> edge : getVertex(nextVertex.getLabel()).getEdges().entrySet()) {
+				final int neighborId = edge.getKey();
+			
+				if(checkedIds.add(neighborId)) {
+					final VertexData n = getVertex(neighborId);
+					final float nDist = space.computeDistance(query, n.getFeature());
+
+					// follow this vertex further if its distance is better than the current radius
+					if(nDist < radius) {
+						
+						// check the neighborhood of this node later
+						final ObjectDistance candidate = new ObjectDistance(neighborId, nDist);
+						nextVertices.add(candidate);
+
+						 // remember the node, if its better than the worst in the result list
+						results.add(candidate);
+						
+						// update the search radius
+						if(results.size() > k) {
+							results.pollLast();
+							radius = results.last().getDistance();
+						}	
+					}
+					
+				      // early stop after to many computations
+			        if(++distanceComputationCount >= maxDistanceComputationCount)
+			          return results;
 				}
 			}
 		}

@@ -132,7 +132,5 @@ public class GraphConstructionBenchmark {
 		GraphSearchBenchmark.testGraph(deg, siftBaseDir);
 		
 		System.out.println("Finished");
-	}
-	
-	
+	}	
 }

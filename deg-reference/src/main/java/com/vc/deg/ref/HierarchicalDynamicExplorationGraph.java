@@ -60,17 +60,15 @@ public class HierarchicalDynamicExplorationGraph implements com.vc.deg.Hierarchi
 		return designer;
 	}
 
-	/**
-	 * Search the graph for the best vertices matching the query at the given hierarchy level.
-	 * 
-	 * @param query
-	 * @param k
-	 * @param eps Is similar to a search radius factor 0 means low and 1 means high radius to scan
-	 * @return
-	 */
 	@Override
-	public int[] search(FeatureVector query, int atLevel, int k, float eps) {
-		return this.layers.get(atLevel).search(query, k, eps);
+	public int[] search(FeatureVector query, int atLevel, int k, float eps, int[] forbiddenIds) {
+		return this.layers.get(atLevel).search(query, k, eps, forbiddenIds);
+	}
+	
+	
+	@Override
+	public int[] explore(int entryLabel, int atLevel, int k, int maxDistanceComputationCount, int[] forbiddenIds) {
+		return this.layers.get(atLevel).explore(entryLabel, k, maxDistanceComputationCount, forbiddenIds);
 	}
 	
 	@Override

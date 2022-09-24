@@ -14,10 +14,6 @@ import java.util.List;
 
 public class Sift1M {
 
-	public static final float[][] loadQueryData(Path baseDir) throws IOException {
-		return fvecs_read(baseDir.resolve("sift_query.fvecs"));
-	}
-	
 	public static final float[][] loadLearnData(Path baseDir) throws IOException {
 		return fvecs_read(baseDir.resolve("sift_learn.fvecs"));
 	}
@@ -25,9 +21,21 @@ public class Sift1M {
 	public static final float[][] loadBaseData(Path baseDir) throws IOException {
 		return fvecs_read(baseDir.resolve("sift_base.fvecs"));
 	}
+
+	public static final float[][] loadQueryData(Path baseDir) throws IOException {
+		return fvecs_read(baseDir.resolve("sift_query.fvecs"));
+	}
 	
 	public static final int[][] loadGroundtruthData(Path baseDir) throws IOException {
 		return ivecs_read(baseDir.resolve("sift_groundtruth.ivecs"));
+	}
+	
+	public static final int[][] loadExploreQueryData(Path baseDir) throws IOException {
+		return ivecs_read(baseDir.resolve("sift_explore_entry_node.ivecs"));
+	}
+	
+	public static final int[][] loadExploreGroundtruthData(Path baseDir) throws IOException {
+		return ivecs_read(baseDir.resolve("sift_explore_ground_truth.ivecs"));
 	}
 	
 	/**

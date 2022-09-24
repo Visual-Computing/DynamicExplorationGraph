@@ -27,10 +27,11 @@ public interface DynamicExplorationGraph {
 	 * 
 	 * @param query
 	 * @param k
+	 * @param eps
 	 * @return
 	 */
-	public default int[] search(FeatureVector query, int k) {
-		return search(query, k, 0.1f);
+	public default int[] search(FeatureVector query, int k, float eps) {
+		return search(query, k, eps, new int[0]);
 	}
 	
 	/**
@@ -41,7 +42,31 @@ public interface DynamicExplorationGraph {
 	 * @param eps Is similar to a search radius factor
 	 * @return
 	 */
-	public int[] search(FeatureVector query, int k, float eps);
+	public int[] search(FeatureVector query, int k, float eps, int[] forbiddenIds);
+	
+	/**
+	 * Start from the entry vertex and explore the neighborhood to find k-similar neighbors.
+	 * 
+	 * @param entryLabel
+	 * @param k
+	 * @param maxDistanceComputationCount
+	 * @return
+	 */
+	public default int[] explore(int entryLabel, int k, int maxDistanceComputationCount) {
+		return explore(entryLabel, k, maxDistanceComputationCount, new int[0]);
+	}
+	
+	/**
+	 * Start from the entry vertex and explore the neighborhood to find k-similar neighbors.
+	 * The number of distance calculation can be limited.
+	 * 
+	 * @param entryLabel
+	 * @param k
+	 * @param maxDistanceComputationCount
+	 * @param forbiddenIds
+	 * @return
+	 */
+	public int[] explore(int entryLabel, int k, int maxDistanceComputationCount, int[] forbiddenIds);
 	
 	
 	/**

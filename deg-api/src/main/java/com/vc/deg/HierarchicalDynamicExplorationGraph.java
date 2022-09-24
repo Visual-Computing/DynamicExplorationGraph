@@ -18,6 +18,11 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	@Override
 	public void writeToFile(Path targetDir) throws ClassNotFoundException, IOException;
 	
+	@Override
+	public default int[] search(FeatureVector query, int k, float eps, int[] forbiddenIds) {
+		return search(query, 0, k, 0.1f, forbiddenIds);
+	}
+	
 	/**
 	 * Search the graph for the best vertices matching the query at the given hierarchy level.
 	 * 
@@ -26,23 +31,38 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * @return
 	 */
 	public default int[] search(FeatureVector query, int atLevel, int k) {
-		return search(query, atLevel, k, 0.1f);
-	}
-	
-	@Override
-	public default int[] search(FeatureVector query, int k, float eps) {
-		return search(query, 0, k, 0.1f);
+		return search(query, atLevel, k, 0.1f, new int[0]);
 	}
 	
 	/**
 	 * Search the graph for the best vertices matching the query at the given hierarchy level.
 	 * 
 	 * @param query
+	 * @param atLevel
 	 * @param k
 	 * @param eps Is similar to a search radius factor
+	 * @param forbiddenIds
 	 * @return
 	 */
-	public int[] search(FeatureVector query, int atLevel, int k, float eps);
+	public int[] search(FeatureVector query, int atLevel, int k, float eps, int[] forbiddenIds);
+	
+	@Override
+	default int[] explore(int entryLabel, int k, int maxDistanceComputationCount, int[] forbiddenIds) {
+		return explore(entryLabel, 0, k, maxDistanceComputationCount, forbiddenIds);
+	}
+	
+	/**
+	 * Start from the entry vertex at the given hierarchical layer and explore the neighborhood to find k-similar neighbors.
+	 * The number of distance calculations can be limited.
+	 * 
+	 * @param entryLabel
+	 * @param atLevel
+	 * @param k
+	 * @param maxDistanceComputationCount
+	 * @return
+	 */
+	public int[] explore(int entryLabel, int atLevel, int k, int maxDistanceComputationCount, int[] forbiddenIds);
+	
 	
 	/**
 	 * Create a copy of the graph

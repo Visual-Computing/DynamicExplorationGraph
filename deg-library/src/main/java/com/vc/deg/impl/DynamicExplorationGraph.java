@@ -9,7 +9,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.function.IntConsumer;
 
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.KryoException;
@@ -44,7 +43,15 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	}
 	
 	@Override
-	public int[] search(FeatureVector query, int k, float eps) {
+	public int[] search(FeatureVector query, int k, float eps, int[] forbiddenIds) {
+		// TODO Auto-generated method stub
+		return null;
+	}
+	
+
+
+	@Override
+	public int[] explore(int entryLabel, int k, int maxDistanceCalcCount, int[] forbiddenIds) {
 		// TODO Auto-generated method stub
 		return null;
 	}
