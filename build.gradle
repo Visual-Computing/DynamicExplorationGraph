@@ -1,8 +1,3 @@
-allprojects {
-    group 'com.vc.deg'
-    version '1.0-SNAPSHOT'
-}
-
 subprojects {
 
     repositories {
@@ -10,10 +5,17 @@ subprojects {
         jcenter()
     }
 
-    apply plugin: 'java-library'
+	// use "apply plugin" here to allow "plugins { }" in the modules
+	apply plugin: 'java-library'
+	apply plugin: 'maven'
+	apply plugin: 'signing'
 
     sourceCompatibility = 1.8
     targetCompatibility = 1.8
+    
+    // group and version of the project 
+	version = '0.0.7'
+	group = 'com.vc'
 
     ext {
         SLF4J_VERSION = '2.0.0'
@@ -24,10 +26,7 @@ subprojects {
         JBLAS_VERSION = '1.2.5'
     }
 
-    dependencies {
-        //implementation group: "org.slf4j", name: "slf4j-api", version: "${SLF4J_VERSION}"
-        //implementation group: "org.slf4j", name: "log4j-over-slf4j", version: "${SLF4J_VERSION}"
-
+    dependencies {        
 		testImplementation group: "junit", name: "junit", version: "${JUNIT_VERSION}"
     }
 }

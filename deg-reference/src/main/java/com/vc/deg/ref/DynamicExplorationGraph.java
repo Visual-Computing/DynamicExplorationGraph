@@ -2,12 +2,16 @@ package com.vc.deg.ref;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.Iterator;
+import java.util.Random;
 import java.util.TreeSet;
-import java.util.function.BiConsumer;
+import java.util.function.IntConsumer;
 
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
+import com.vc.deg.GraphFilter;
+import com.vc.deg.VertexConsumer;
 import com.vc.deg.ref.designer.EvenRegularGraphDesigner;
 import com.vc.deg.ref.graph.MapBasedWeightedUndirectedRegularGraph;
 import com.vc.deg.ref.search.ObjectDistance;
@@ -56,81 +60,86 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 		this.designer = new EvenRegularGraphDesigner(internalGraph); 
 	}
 	
-	
-	
 	/**
-	 * Iterate all vertices and call the consumer with every vertex id
+	 * Any changes to the graph might destroy the Dynamic Exploration Graph properties.
 	 * 
 	 * @return
 	 */
-	public void forEachVertex(BiConsumer<Integer, FeatureVector> consumer) {
+	public MapBasedWeightedUndirectedRegularGraph getInternalGraph() {
+		return internalGraph;
+	}
+	
+	
+	/**
+	 * Iterate all vertices and call the consumer with every vertex label and feature vector
+	 * 
+	 * @param consumer
+	 */
+	@Override
+	public void forEachVertex(VertexConsumer consumer) {
 		this.internalGraph.getVertices().forEach(vertex -> consumer.accept(vertex.getId(), vertex.getFeature()));
 	}
 	
-	/**
-	 * Does this vertex exists?
-	 * 
-	 * @param label
-	 * @return
-	 */
-	public boolean hasVertex(int label) {
+	@Override
+	public void forEachNeighbor(int label, IntConsumer idConsumer) {
+		this.internalGraph.getVertex(label).getEdges().keySet().forEach(id -> idConsumer.accept(id));
+	}
+	
+	@Override
+	public int getRandomLabel(Random random) {
+		final int steps = random.nextInt(size());
+		final Iterator<Integer> it = this.internalGraph.getVertexIds().iterator();
+		for (int i = 0; i < steps; i++) 
+			it.next();		
+		return it.next();
+	}
+	
+	@Override
+	public FeatureVector getFeature(int label) {
+		return this.internalGraph.getVertex(label).getFeature();
+	}
+
+	@Override
+	public boolean hasLabel(int label) {
 		return this.internalGraph.hasVertex(label);
 	}
 
-	/**
-	 * 
-	 * @param id
-	 * @return
-	 */
-	public FeatureVector getFeature(int id) {
-		return this.internalGraph.getVertex(id).getFeature();
+	@Override
+	public FeatureSpace getFeatureSpace() {
+		return this.internalGraph.getFeatureSpace();
 	}
 	
-	/**
-	 * 
-	 * @return
-	 */
-	public Iterator<Integer> getVertexIds() {
-		return this.internalGraph.getVertexIds().iterator();
-	}
-
-	/**
-	 * Number of vertices
-	 * 
-	 * @return
-	 */
+	@Override
 	public int size() {
 		return this.internalGraph.getVertexCount();
 	}
-	
 	
 	@Override
 	public EvenRegularGraphDesigner designer() {
 		return designer;
 	}
 	
+
 	@Override
-	public int[] search(FeatureVector query, int k, float eps, int[] forbiddenIds) {
+	public int[] search(Collection<FeatureVector> queries, int k, float eps, GraphFilter filter) {
 		final int[] entryPoint = new int[] { internalGraph.getVertices().iterator().next().getId() };
-		final TreeSet<ObjectDistance> topList = internalGraph.search(query, k, eps, forbiddenIds, entryPoint);
+		final TreeSet<ObjectDistance> topList = internalGraph.search(queries, k, eps, filter, entryPoint);
 		
 		final int[] result = new int[topList.size()];
 		final Iterator<ObjectDistance> it = topList.iterator();
 		for (int i = 0; i < topList.size(); i++) 
-			result[i] = it.next().getLabel();
+			result[i] = it.next().getObjId();
 		return result;
 	}
-	
-
 
 	@Override
-	public int[] explore(int entryLabel, int k, int maxDistanceCalcCount, int[] forbiddenIds) {
-		final TreeSet<ObjectDistance> topList = internalGraph.explore(entryLabel, k, maxDistanceCalcCount, forbiddenIds);
+	public int[] explore(int[] entryLabels, int k, int maxDistanceComputationCount, GraphFilter filter) {
+	final TreeSet<ObjectDistance> topList = internalGraph.explore(entryLabels, k, maxDistanceComputationCount, filter);
 		
 		final int[] result = new int[topList.size()];
 		final Iterator<ObjectDistance> it = topList.iterator();
 		for (int i = 0; i < topList.size(); i++) 
-			result[i] = it.next().getLabel();
+			result[i] = it.next().getObjId();
 		return result;
 	}
 	
@@ -167,7 +176,6 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	 * 
 	 * @param file
 	 * @return
-	 * @throws ClassNotFoundException
 	 * @throws IOException
 	 */
 	public static DynamicExplorationGraph readFromFile(Path file) throws IOException {
@@ -185,4 +193,5 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	public static DynamicExplorationGraph readFromFile(Path file, String featureType) throws IOException {
 		return new DynamicExplorationGraph(MapBasedWeightedUndirectedRegularGraph.readFromFile(file, featureType));
 	}
+
 }

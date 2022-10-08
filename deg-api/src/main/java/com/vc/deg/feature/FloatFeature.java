@@ -21,6 +21,10 @@ public class FloatFeature implements FeatureVector {
 	public FloatFeature(float[] feature) {
 		this.feature = feature;
 	}
+	
+	public float get(int index) {
+		return feature[index];
+	}
 
 	@Override
 	public int size() {

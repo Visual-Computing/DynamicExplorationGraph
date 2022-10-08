@@ -21,6 +21,10 @@ public class LongFeature implements FeatureVector {
 	public LongFeature(long[] feature) {
 		this.feature = feature;
 	}
+	
+	public long get(int index) {
+		return feature[index];
+	}
 
 	@Override
 	public int size() {

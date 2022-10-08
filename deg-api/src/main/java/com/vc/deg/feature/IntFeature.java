@@ -21,6 +21,10 @@ public class IntFeature implements FeatureVector {
 	public IntFeature(int[] feature) {
 		this.feature = feature;
 	}
+	
+	public int get(int index) {
+		return feature[index];
+	}
 
 	@Override
 	public int size() {

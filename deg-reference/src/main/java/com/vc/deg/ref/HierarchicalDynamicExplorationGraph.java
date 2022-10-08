@@ -1,19 +1,24 @@
 package com.vc.deg.ref;
 
 import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
-import static java.nio.file.StandardOpenOption.WRITE;
 import static java.nio.file.StandardOpenOption.CREATE;
 import static java.nio.file.StandardOpenOption.TRUNCATE_EXISTING;
+import static java.nio.file.StandardOpenOption.WRITE;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.Random;
+import java.util.function.IntConsumer;
 
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
+import com.vc.deg.GraphFilter;
+import com.vc.deg.VertexConsumer;
 import com.vc.deg.ref.hierarchy.HierarchicalGraphDesigner;
 
 public class HierarchicalDynamicExplorationGraph implements com.vc.deg.HierarchicalDynamicExplorationGraph {
@@ -54,22 +59,72 @@ public class HierarchicalDynamicExplorationGraph implements com.vc.deg.Hierarchi
 		this.topRankSize = topRankSize;
 		this.designer = new HierarchicalGraphDesigner(layers, space, edgesPerVertex, topRankSize);
 	}
+
+	/**
+	 * Get the graph at the given layer level.
+	 * 
+	 * @return
+	 */
+	@Override
+	public DynamicExplorationGraph getGraph(int atLevel) {
+		return layers.get(atLevel);
+	}
 	
 	@Override
 	public HierarchicalGraphDesigner designer() {
 		return designer;
 	}
+	
+	@Override
+	public int[] searchAtLevel(Collection<FeatureVector> queries, int atLevel, int k, float eps, GraphFilter filter) {
+		return getGraph(atLevel).search(queries, k, eps, filter);
+	}
 
 	@Override
-	public int[] search(FeatureVector query, int atLevel, int k, float eps, int[] forbiddenIds) {
-		return this.layers.get(atLevel).search(query, k, eps, forbiddenIds);
+	public int[] exploreAtLevel(int[] entryLabels, int atLevel, int k, int maxDistanceComputationCount, GraphFilter filter) {
+		return getGraph(atLevel).explore(entryLabels, k, maxDistanceComputationCount, filter);
 	}
-	
 	
 	@Override
-	public int[] explore(int entryLabel, int atLevel, int k, int maxDistanceComputationCount, int[] forbiddenIds) {
-		return this.layers.get(atLevel).explore(entryLabel, k, maxDistanceComputationCount, forbiddenIds);
+	public boolean hasLabelAtLevel(int label, int atLevel) {
+		return getGraph(atLevel).hasLabel(label);
 	}
+
+	@Override
+	public FeatureSpace getFeatureSpace() {
+		return space;
+	}
+
+	@Override
+	public FeatureVector getFeature(int label) {
+		return getGraph(0).getFeature(label);
+	}
+
+	@Override
+	public int sizeAtLevel(int atLevel) {
+		return getGraph(atLevel).size();
+	}
+
+	@Override
+	public void forEachVertexAtLevel(int atLevel, VertexConsumer consumer) {
+		getGraph(atLevel).forEachVertex(consumer);
+	}
+	
+	@Override
+	public void forEachNeighborAtLevel(int atLevel, int label, IntConsumer idConsumer) {
+		getGraph(atLevel).forEachNeighbor(label, idConsumer);
+	}
+	
+	@Override
+	public int getRandomLabelAtLevel(Random random, int atLevel) {
+		return getGraph(atLevel).getRandomLabel(random);
+	}
+
+	@Override
+	public int levelCount() {
+		return layers.size();
+	}
+	
 	
 	@Override
 	public HierarchicalDynamicExplorationGraph copy() {
@@ -78,7 +133,19 @@ public class HierarchicalDynamicExplorationGraph implements com.vc.deg.Hierarchi
 			newLayers.add(dynamicExplorationGraph.copy());
 		return new HierarchicalDynamicExplorationGraph(newLayers, space, edgesPerVertex, topRankSize);
 	}
-	
+
+	@Override
+	public String toString() {
+		StringBuilder sb = new StringBuilder("Layers: "+this.layers.size());
+		sb.append('[');
+		for (DynamicExplorationGraph deg : layers) {
+			sb.append(deg.size());
+			sb.append(',');
+		}
+		sb.append(']');
+		return sb.toString();
+	}
+
 	
 	/**
 	 * Stores each layer of the graph into a separate file.
@@ -143,7 +210,6 @@ public class HierarchicalDynamicExplorationGraph implements com.vc.deg.Hierarchi
 	 * 
 	 * @param targetDir
 	 * @return
-	 * @throws ClassNotFoundException
 	 * @throws IOException
 	 */
 	public static HierarchicalDynamicExplorationGraph readFromFile(Path targetDir) throws IOException {
@@ -175,17 +241,5 @@ public class HierarchicalDynamicExplorationGraph implements com.vc.deg.Hierarchi
 		}	
 		
 		return new HierarchicalDynamicExplorationGraph(newLayers, space, edgesPerVertex, topRankSize);
-	}
-	
-	@Override
-	public String toString() {
-		StringBuilder sb = new StringBuilder("Layers: "+this.layers.size());
-		sb.append('[');
-		for (DynamicExplorationGraph deg : layers) {
-			sb.append(deg.size());
-			sb.append(',');
-		}
-		sb.append(']');
-		return sb.toString();
 	}
 }

@@ -1,3 +1,94 @@
 dependencies {
 
 }
+
+// group and version of the project 
+archivesBaseName = "deg-api"
+
+
+
+//--------------------------------------------------------------------------------------------------
+//------------------------------------- Publish to Maven -------------------------------------------
+//--------------------------------------------------------------------------------------------------
+
+task sourceJar(type: Jar) {
+	from sourceSets.main.allJava
+	classifier "sources"
+}
+
+task javadocJar(type: Jar, dependsOn: javadoc) {
+	from javadoc.destinationDir
+	classifier = 'javadoc'
+}   
+
+artifacts {
+    archives sourceJar
+    archives javadocJar
+}
+
+signing {
+    setRequired {
+        // signing is only required if the artifacts are to be published
+        gradle.taskGraph.allTasks.any { it.equals( PublishToMavenRepository) }
+    }
+    
+    sign configurations.archives
+}
+
+/**
+ * Publish to Maven Central Repository
+ */
+uploadArchives {
+  repositories {
+    mavenDeployer {
+      beforeDeployment { MavenDeployment deployment -> signing.signPom(deployment) }
+
+	  // local repository
+      repository(url: uri('build/publications/'))
+      
+      // Maven central repository
+      // http://central.maven.org/maven2/net/whenperformancematters/records/
+      //repository(url: "https://oss.sonatype.org/service/local/staging/deploy/maven2/") {
+      //  authentication(userName: ossrhUsername, password: ossrhPassword)
+      //}
+      
+      // Sonatype Snapshots
+      // https://oss.sonatype.org/content/repositories/snapshots/net/whenperformancematters/records/
+      //snapshotRepository(url: "https://oss.sonatype.org/content/repositories/snapshots/") {
+      //  authentication(userName: ossrhUsername, password: ossrhPassword)
+      //}     
+
+      pom.project {
+        packaging 'jar'
+        
+        // optionally artifactId can be defined here 
+        name 'deg-api'
+        description 'API for constructing and using Dynamic Exploration Graph in approximate nearest neighbor search tasks.'
+        url 'http://visual-computing.com'
+
+        scm {
+          connection 'scm:git:git://github.com:Visual-Computing/DynamicExplorationGraph.git'
+          developerConnection 'scm:git:ssh://github.com:Visual-Computing/DynamicExplorationGraph.git'
+          url 'https://github.com/Visual-Computing/DynamicExplorationGraph/tree/master/'
+        }
+
+        licenses {
+          license {
+            name 'MIT License'
+            url 'https://opensource.org/licenses/MIT'
+          }
+        }
+
+        developers {
+          developer {
+            id 'Neiko2002'
+            name 'Nico Hezel'
+            email 'hezel@visual-computing.com'
+            organization 'Visual Computing Group'
+            organizationUrl 'www.visual-computing.com'
+          }
+        }
+      }
+    }
+  }
+}

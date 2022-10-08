@@ -14,6 +14,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
+import java.util.function.IntPredicate;
 import java.util.stream.Stream;
 
 import com.vc.deg.FeatureSpace;
@@ -162,6 +163,13 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 		removeEntryQueue.offer(new BuilderRemoveTask(label, manipulationCounter.getAndIncrement()));
 	}
 
+	@Override
+	public void removeIf(IntPredicate filter) {
+		graph.getVertexIds().forEach(id -> {
+			if(filter.test(id))
+				remove(id);
+		});
+	}
 
 	/**
 	 * Add the new entry to the graph
@@ -196,7 +204,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 				entryVertex = it.next();
 
 			// find good neighbors for the new vertex
-			final ObjectDistance[] results = graph.search(newVertexFeature, extendK, extendEps, new int[0], new int[] { entryVertex.getId() }).toArray(new ObjectDistance[0]);
+			final ObjectDistance[] results = graph.search(Arrays.asList(newVertexFeature), extendK, extendEps, null, new int[] { entryVertex.getId() }).toArray(new ObjectDistance[0]);
 
 			// add an empty vertex to the graph (no neighbor information yet)
 			final VertexData newVertex = graph.addVertex(newVertexLabel, newVertexFeature);
@@ -209,7 +217,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 			while(newNeighbors.size() < edgesPerVertex) {
 				for (int i = 0; i < results.length && newNeighbors.size() < edgesPerVertex; i++) {
 					final ObjectDistance candidate = results[i];
-					final int candidateId = candidate.getLabel();
+					final int candidateId = candidate.getObjId();
 					final float candidateWeight = candidate.getDistance();
 
 					// check if the vertex is already in the edge list of the new vertex (added during a previous loop-run)
@@ -273,7 +281,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 					// is this neighbor in the result list of the initial search request
 					boolean isPerfect = false;
 					for (int i = 0; i < results.length && isPerfect == false; i++) 
-						if(results[i].getLabel() == neighborId) 
+						if(results[i].getObjId() == neighborId) 
 							isPerfect = true;
 
 					if(isPerfect == false) {
@@ -348,7 +356,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 		//    their subgraph and would therefore connect the two potential subgraphs.	
 		{
 			final FeatureVector vertex2Feature = graph.getVertex(vertex2).getFeature();
-			final ObjectDistance[] results = graph.search(vertex2Feature, improveK, improveEps, new int[0], new int[] { vertex3, vertex4  }).toArray(new ObjectDistance[0]);
+			final ObjectDistance[] results = graph.search(Arrays.asList(vertex2Feature), improveK, improveEps, null, new int[] { vertex3, vertex4  }).toArray(new ObjectDistance[0]);
 
 			// find a good new vertex3
 			float bestGain = totalGain;
@@ -358,7 +366,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 			// We use the descending order to find the worst swap combination with the best gain
 			// Sometimes the gain between the two best combinations is the same, its better to use one with the bad edges to make later improvements easier
 			for(final ObjectDistance result : results) {
-				final int newVertex3 = result.getLabel();
+				final int newVertex3 = result.getObjId();
 
 				// vertex1 and vertex2 got tested in the recursive call before and vertex4 got just disconnected from vertex2
 				if(vertex1 != newVertex3 && vertex2 != newVertex3 && graph.hasEdge(vertex2, newVertex3) == false) {
@@ -415,7 +423,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 
 				// find a good (not yet connected) vertex for vertex1/vertex4
 				final FeatureVector vertex4Feature = graph.getVertex(vertex4).getFeature();
-				final ObjectDistance[] results = graph.search(vertex4Feature, improveK, improveEps, new int[0], new int[] { vertex2, vertex3 }).toArray(new ObjectDistance[0]);
+				final ObjectDistance[] results = graph.search(Arrays.asList(vertex4Feature), improveK, improveEps, null, new int[] { vertex2, vertex3 }).toArray(new ObjectDistance[0]);
 
 				float bestGain = 0;
 				int bestSelectedNeighbor = 0;
@@ -424,7 +432,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 				int bestGoodVertex = 0;
 				float bestGoodVertexDist = 0;
 				for(ObjectDistance result : results) {
-					final int goodVertex = result.getLabel();
+					final int goodVertex = result.getObjId();
 
 					// the new vertex should not be connected to vertex4 yet
 					if(vertex4 != goodVertex && graph.hasEdge(vertex4, goodVertex) == false) {
@@ -598,7 +606,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 					}
 					
 					// the first vertex in the traceback path must be one of the other involved vertices
-					final int reachableVertex = traceback.get(traceback.size()-1).getLabel();
+					final int reachableVertex = traceback.get(traceback.size()-1).getObjId();
 					final Set<Integer> reachableVerticesOfReachableVertex = reachability.get(reachableVertex);
 
 					// add the involvedVertex to its reachable set and replace the reachable set of the involvedVertex 

@@ -21,6 +21,10 @@ public class ShortFeature implements FeatureVector {
 	public ShortFeature(short[] feature) {
 		this.feature = feature;
 	}
+	
+	public short get(int index) {
+		return feature[index];
+	}
 
 	@Override
 	public int size() {

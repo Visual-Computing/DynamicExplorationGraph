@@ -19,6 +19,10 @@ public class ByteFeature implements FeatureVector {
 	public ByteFeature(byte[] feature) {
 		this.feature = feature;
 	}
+	
+	public byte get(int index) {
+		return feature[index];
+	}
 
 	@Override
 	public int size() {

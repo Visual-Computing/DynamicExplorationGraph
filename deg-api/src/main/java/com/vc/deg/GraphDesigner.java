@@ -1,6 +1,7 @@
 package com.vc.deg;
 
 import java.util.Random;
+import java.util.function.IntPredicate;
 
 /**
  * Adds or removed graph nodes and improves the connections. 
@@ -31,6 +32,13 @@ public interface GraphDesigner {
 	 * @param label
 	 */
 	public void remove(int label);
+	
+	/**
+	 * Queue the removal of all vertices which are in the graph but do not pass the filter
+	 * 
+	 * @param filter
+	 */
+	public void removeIf(IntPredicate filter);	
 	
 	/**
 	 * Builds and improve the graph. All new data points or removal requests will be processed first

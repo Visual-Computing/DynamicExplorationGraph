@@ -1,8 +1,8 @@
 package com.vc.deg;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.HashSet;
 import java.util.ServiceLoader;
+import java.util.Set;
 
 import com.vc.deg.feature.FeatureFactory;
 
@@ -39,13 +39,15 @@ public interface FeatureSpace {
 	 */
     public static class DefaultFeatureSpaceHolder {
     	
+    	private final static Set<FeatureSpace> registeredFactories = serviceLoaderFactories();
+    	
     	/**
     	 * Get all {@link FeatureSpace}s registered via a service loader
     	 * 
     	 * @return
     	 */
-    	private static List<FeatureSpace> serviceLoaderFactories() {
-    		final List<FeatureSpace> serviceLoaderFactories = new ArrayList<>();
+    	private static Set<FeatureSpace> serviceLoaderFactories() {
+    		final Set<FeatureSpace> serviceLoaderFactories = new HashSet<>();
     		for (FeatureSpace featureFactory : ServiceLoader.load(FeatureSpace.class))
     			serviceLoaderFactories.add(featureFactory);
     		return serviceLoaderFactories;
@@ -84,7 +86,6 @@ public interface FeatureSpace {
 			return null;
     	}
     	
-    	private final static List<FeatureSpace> registeredFactories = serviceLoaderFactories();
     }
 
     /**

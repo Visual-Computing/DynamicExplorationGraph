@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.IntPredicate;
 
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
@@ -212,7 +213,7 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 	/**
 	 * Ensures there is enough ranks.
 	 * 
-	 * @param rank
+	 * @param rankCount
 	 */
 	protected void ensureRank(int rankCount) {
 		
@@ -299,10 +300,9 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 	
 	/**
 	 * Get a random id which only exists on this rank and return valid when checked 
-	 * 
+	 * 	 * 
 	 * @param graph
 	 * @param targetRank
-	 * @param validIdCheck
 	 * @return -1 if not valid id can be found
 	 */
 	protected int getRandomKey(DynamicExplorationGraph graph, int targetRank) {		
@@ -310,7 +310,7 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 		do {
 
 			final int steps = rnd.nextInt(graph.size());
-			final Iterator<Integer> it = graph.getVertexIds();
+			final Iterator<Integer> it = graph.getInternalGraph().getVertexIds().iterator();
 			for (int i = 0; i < steps; i++) 
 				it.next();		
 			id = it.next();
@@ -336,6 +336,14 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 	@Override
 	public void remove(int label) {
 		removeEntryQueue.offer(new BuilderRemoveTask(label, manipulationCounter.getAndIncrement()));
+	}
+	
+	@Override
+	public void removeIf(IntPredicate filter) {
+		keyToRank.keySet().forEach(id -> {
+			if(filter.test(id))
+				remove(id);
+		});
 	}
 	
 	/**

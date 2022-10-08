@@ -9,6 +9,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Collection;
+import java.util.Random;
+import java.util.function.IntConsumer;
 
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.KryoException;
@@ -17,6 +20,8 @@ import com.esotericsoftware.kryo.unsafe.UnsafeOutput;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.GraphDesigner;
+import com.vc.deg.GraphFilter;
+import com.vc.deg.VertexConsumer;
 import com.vc.deg.impl.designer.EvenRegularGraphDesigner;
 import com.vc.deg.impl.graph.WeightedUndirectedRegularGraph;
 
@@ -42,19 +47,6 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 		this.designer = new EvenRegularGraphDesigner(internalGraph); 
 	}
 	
-	@Override
-	public int[] search(FeatureVector query, int k, float eps, int[] forbiddenIds) {
-		// TODO Auto-generated method stub
-		return null;
-	}
-	
-
-
-	@Override
-	public int[] explore(int entryLabel, int k, int maxDistanceCalcCount, int[] forbiddenIds) {
-		// TODO Auto-generated method stub
-		return null;
-	}
 	
 	@Override
 	public GraphDesigner designer() {
@@ -82,5 +74,68 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	public DynamicExplorationGraph copy() {
 		// TODO Auto-generated method stub
 		return null;
+	}
+
+
+	@Override
+	public int[] search(Collection<FeatureVector> queries, int k, float eps, GraphFilter filter) {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+
+	@Override
+	public int[] explore(int[] entryLabel, int k, int maxDistanceComputationCount, GraphFilter filter) {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+
+	@Override
+	public boolean hasLabel(int label) {
+		// TODO Auto-generated method stub
+		return false;
+	}
+
+
+	@Override
+	public FeatureSpace getFeatureSpace() {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+
+	@Override
+	public FeatureVector getFeature(int label) {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+
+	@Override
+	public int size() {
+		// TODO Auto-generated method stub
+		return 0;
+	}
+
+
+	@Override
+	public void forEachVertex(VertexConsumer consumer) {
+		// TODO Auto-generated method stub
+		
+	}
+
+
+	@Override
+	public void forEachNeighbor(int label, IntConsumer idConsumer) {
+		// TODO Auto-generated method stub
+		
+	}
+
+
+	@Override
+	public int getRandomLabel(Random random) {
+		// TODO Auto-generated method stub
+		return 0;
 	}
 }

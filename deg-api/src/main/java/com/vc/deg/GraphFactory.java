@@ -8,7 +8,6 @@ import java.util.ServiceLoader;
 /**
  * Use ServiceLoader to register Dynamic Exploration Graphs
  * 
- * TODO move to DynamicExplorationGraph.Factory
  * 
  * https://docs.oracle.com/javase/8/docs/api/java/util/ServiceLoader.html
  * https://riptutorial.com/java/example/19523/simple-serviceloader-example
@@ -22,12 +21,9 @@ public interface GraphFactory {
     }
 
     /**
-     * Returns the default {@link HashLongIntMapFactory} implementation, to which
-     * all static methods in this class delegate.
-     *
-     * @return the default {@link HashLongIntMapFactory} implementation
-     * @throws RuntimeException if no implementations
-     *         of {@link HashLongIntMapFactory} are provided
+     * Returns the default {@link GraphFactory} implementation
+     * 
+     * @return the default {@link GraphFactory} implementation
      */
     public static GraphFactory getDefaultFactory() {
         return DefaultFactoryHolder.defaultFactory;
@@ -61,7 +57,7 @@ public interface GraphFactory {
 	 * Load an existing graph and expect a specific feature type
 	 * 
 	 * @param file
-	 * @param componentType
+	 * @param featureType
 	 * @return
 	 * @throws IOException
 	 */

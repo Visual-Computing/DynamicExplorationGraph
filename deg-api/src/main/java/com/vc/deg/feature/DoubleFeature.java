@@ -21,6 +21,10 @@ public class DoubleFeature implements FeatureVector {
 	public DoubleFeature(double[] feature) {
 		this.feature = feature;
 	}
+	
+	public double get(int index) {
+		return feature[index];
+	}
 
 	@Override
 	public int size() {

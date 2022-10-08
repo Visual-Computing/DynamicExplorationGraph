@@ -2,9 +2,9 @@ package com.vc.deg.feature;
 
 import java.io.DataInput;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.HashSet;
 import java.util.ServiceLoader;
+import java.util.Set;
 
 import com.vc.deg.FeatureVector;
 
@@ -28,14 +28,17 @@ public interface FeatureFactory {
 	 * @author Nico Hezel
 	 */
     public static class DefaultFactoryHolder {
+
+    	
+    	private final static Set<FeatureFactory> registeredFactories = serviceLoaderFactories();
     	
     	/**
     	 * Get all factories registered via a service loader
     	 * 
     	 * @return
     	 */
-    	private static List<FeatureFactory> serviceLoaderFactories() {
-    		final List<FeatureFactory> serviceLoaderFactories = new ArrayList<>();
+    	private static Set<FeatureFactory> serviceLoaderFactories() {
+    		final Set<FeatureFactory> serviceLoaderFactories = new HashSet<>();
     		for (FeatureFactory featureFactory : ServiceLoader.load(FeatureFactory.class))
     			serviceLoaderFactories.add(featureFactory);
     		return serviceLoaderFactories;
@@ -65,8 +68,6 @@ public interface FeatureFactory {
     				return registeredFactory;
 			return null;
     	}
-    	
-    	private final static List<FeatureFactory> registeredFactories = serviceLoaderFactories();
     }
 
     /**
@@ -81,11 +82,10 @@ public interface FeatureFactory {
     /**
 	 * Find a specific {@link FeatureFactory} based on the parameters
 	 * 
-	 * @param componentType
-	 * @param featureSize
-	 * @param dims
-	 * @return
-	 */
+     * @param componentType
+     * @param dims
+     * @return
+     */
     public static FeatureFactory findFactory(String componentType, int dims) {
         return DefaultFactoryHolder.findFactory(componentType, dims);
     }
@@ -115,7 +115,7 @@ public interface FeatureFactory {
      * Extract the feature from a pure byte array.
      * There is not length check between the expected dimensions and the length of the given array.
      * 
-     * @param feature
+     * @param featureByte
      * @return
      */
     public FeatureVector of(byte[] featureByte);
