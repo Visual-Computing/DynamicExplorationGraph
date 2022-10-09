@@ -1,11 +1,10 @@
 package com.vc.deg.impl.designer;
 
-import com.vc.deg.GraphDesigner;
-
 import java.util.Random;
 import java.util.function.IntPredicate;
 
 import com.vc.deg.FeatureVector;
+import com.vc.deg.graph.GraphDesigner;
 import com.vc.deg.impl.graph.WeightedUndirectedRegularGraph;
 
 /**

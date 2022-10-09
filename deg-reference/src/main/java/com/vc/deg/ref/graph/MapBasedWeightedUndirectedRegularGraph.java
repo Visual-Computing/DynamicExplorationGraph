@@ -29,10 +29,10 @@ import java.util.function.IntFunction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.vc.deg.FeatureFactory;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
-import com.vc.deg.GraphFilter;
-import com.vc.deg.feature.FeatureFactory;
+import com.vc.deg.graph.GraphFilter;
 import com.vc.deg.io.LittleEndianDataInputStream;
 import com.vc.deg.io.LittleEndianDataOutputStream;
 import com.vc.deg.ref.feature.PrimitiveFeatureFactories;
@@ -300,6 +300,13 @@ public class MapBasedWeightedUndirectedRegularGraph {
 		// allow all elements in the graph if the initial filter was null
 		if(filter == null)
 			filter = new GraphFilter.AllValidFilter(getVertexCount()); 
+		
+		// check the feature vector compatibility
+		for (FeatureVector query : queries) {
+			if(query.dims() != getFeatureSpace().dims() || query.getComponentType() != getFeatureSpace().getComponentType())
+				throw new RuntimeException("Invalid query component type "+query.getComponentType().getSimpleName()+" or dimension "+query.dims()+
+										   ", expected "+getFeatureSpace().getComponentType().getSimpleName()+" and "+getFeatureSpace().dims());
+		}
 		
 		// list of checked ids
 		final Set<Integer> checkedIds = new HashSet<>(entryPoints.length + k*4);
@@ -570,7 +577,7 @@ public class MapBasedWeightedUndirectedRegularGraph {
 			
 			// empty graph
 			if(vertexCount == 0) {
-				final FeatureSpace space = FeatureSpace.findFeatureSpace(featureType, metric, false);
+				final FeatureSpace space = FeatureSpace.findFeatureSpace(featureType, metric, dims, false);
 				return new MapBasedWeightedUndirectedRegularGraph(edgesPerVertex, space);
 			}
 			
@@ -578,7 +585,7 @@ public class MapBasedWeightedUndirectedRegularGraph {
 			int featureSize = (int)((Files.size(file) - 8 - ((edgesPerVertex * 8 + 4) * vertexCount)) / vertexCount);
 
 			// factory to create FeatureVectors based on the featureType
-			FeatureFactory featureFactory = PrimitiveFeatureFactories.get(featureType, dims);
+			FeatureFactory featureFactory = PrimitiveFeatureFactories.create(featureType, dims);
 			if(featureFactory == null)
 				featureFactory = FeatureFactory.findFactory(featureType, dims);
 			if(featureFactory == null)
@@ -587,13 +594,11 @@ public class MapBasedWeightedUndirectedRegularGraph {
 				throw new UnsupportedOperationException("The feature factory for featureType="+featureType+" and dims="+dims+" produces features with "+featureFactory.featureSize()+" bytes but the graph contains features with "+featureSize+" bytes.");
 		
 			// find the feature space specified in the file
-			FeatureSpace space = FeatureSpace.findFeatureSpace(featureType, metric, false);
+			FeatureSpace space = FeatureSpace.findFeatureSpace(featureType, metric, dims, false);
 			if(space == null)
 				throw new UnsupportedOperationException("No feature space found for featureType="+featureType+", metric="+metric+" and isNative=false");
 			if(featureSize != space.featureSize())
 				throw new UnsupportedOperationException("The feature space for featureType="+featureType+", metric="+metric+" and isNative=false expects features with "+space.featureSize()+" bytes but the graph contains features with "+featureSize+" bytes.");
-			if(dims != space.dims())
-				throw new UnsupportedOperationException("The feature space for featureType="+featureType+", metric="+metric+" and isNative=false expects features with "+space.dims()+" dimensions but the graph contains features with "+dims+" dimensions.");
 			
 			// the references implementation uses 
 			if(vertexCount > Integer.MAX_VALUE)

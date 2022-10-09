@@ -2,12 +2,11 @@ package com.vc.deg.ref.feature;
 
 import java.io.DataInput;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 
+import com.vc.deg.FeatureFactory;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.feature.ByteFeature;
 import com.vc.deg.feature.DoubleFeature;
-import com.vc.deg.feature.FeatureFactory;
 import com.vc.deg.feature.FloatFeature;
 import com.vc.deg.feature.IntFeature;
 import com.vc.deg.feature.LongFeature;
@@ -21,7 +20,7 @@ import com.vc.deg.feature.ShortFeature;
  */
 public class PrimitiveFeatureFactories {
 	
-	public static FeatureFactory get(String componentType, int dims) {
+	public static FeatureFactory create(String componentType, int dims) {
 		if(byte.class.getSimpleName().equalsIgnoreCase(componentType))
 			return new ByteFeatureFactory(dims);
 		else if(short.class.getSimpleName().equalsIgnoreCase(componentType))
@@ -33,6 +32,22 @@ public class PrimitiveFeatureFactories {
 		else if(float.class.getSimpleName().equalsIgnoreCase(componentType))
 			return new FloatFeatureFactory(dims);
 		else if(double.class.getSimpleName().equalsIgnoreCase(componentType))
+			return new DoubleFeatureFactory(dims);
+		return null;
+	}
+	
+	public static FeatureFactory create(Class<?> componentType, int dims) {
+		if(byte.class == componentType)
+			return new ByteFeatureFactory(dims);
+		else if(short.class == componentType)
+			return new ShortFeatureFactory(dims);
+		else if(int.class == componentType)
+			return new IntFeatureFactory(dims);
+		else if(long.class == componentType)
+			return new LongFeatureFactory(dims);
+		else if(float.class == componentType)
+			return new FloatFeatureFactory(dims);
+		else if(double.class == componentType)
 			return new DoubleFeatureFactory(dims);
 		return null;
 	}
@@ -53,8 +68,8 @@ public class PrimitiveFeatureFactories {
 		}
 
 		@Override
-		public String getComponentType() {
-			return byte.class.getSimpleName();
+		public Class<?> getComponentType() {
+			return byte.class;
 		}
 
 		@Override
@@ -67,12 +82,12 @@ public class PrimitiveFeatureFactories {
 			return dims;
 		}
 
-		@Override
-		public FeatureVector of(byte[] featureBytes) {
-			final byte[] feature = new byte[dims];
-			ByteBuffer.wrap(featureBytes).get(feature);
-			return new ByteFeature(feature);
-		}
+//		@Override
+//		public FeatureVector of(byte[] featureBytes) {
+//			final byte[] feature = new byte[dims];
+//			ByteBuffer.wrap(featureBytes).get(feature);
+//			return new ByteFeature(feature);
+//		}
 
 		@Override
 		public FeatureVector read(DataInput is) throws IOException {
@@ -99,8 +114,8 @@ public class PrimitiveFeatureFactories {
 		}
 
 		@Override
-		public String getComponentType() {
-			return short.class.getSimpleName();
+		public Class<?> getComponentType() {
+			return short.class;
 		}
 
 		@Override
@@ -113,12 +128,12 @@ public class PrimitiveFeatureFactories {
 			return dims;
 		}
 
-		@Override
-		public FeatureVector of(byte[] featureBytes) {
-			final short[] feature = new short[dims];
-			ByteBuffer.wrap(featureBytes).asShortBuffer().get(feature);
-			return new ShortFeature(feature);
-		}
+//		@Override
+//		public FeatureVector of(byte[] featureBytes) {
+//			final short[] feature = new short[dims];
+//			ByteBuffer.wrap(featureBytes).asShortBuffer().get(feature);
+//			return new ShortFeature(feature);
+//		}
 
 		@Override
 		public FeatureVector read(DataInput is) throws IOException {
@@ -145,8 +160,8 @@ public class PrimitiveFeatureFactories {
 		}
 
 		@Override
-		public String getComponentType() {
-			return int.class.getSimpleName();
+		public Class<?> getComponentType() {
+			return int.class;
 		}
 
 		@Override
@@ -159,12 +174,12 @@ public class PrimitiveFeatureFactories {
 			return dims;
 		}
 
-		@Override
-		public FeatureVector of(byte[] featureBytes) {
-			final int[] feature = new int[dims];
-			ByteBuffer.wrap(featureBytes).asIntBuffer().get(feature);
-			return new IntFeature(feature);
-		}
+//		@Override
+//		public FeatureVector of(byte[] featureBytes) {
+//			final int[] feature = new int[dims];
+//			ByteBuffer.wrap(featureBytes).asIntBuffer().get(feature);
+//			return new IntFeature(feature);
+//		}
 
 		@Override
 		public FeatureVector read(DataInput is) throws IOException {
@@ -191,8 +206,8 @@ public class PrimitiveFeatureFactories {
 		}
 
 		@Override
-		public String getComponentType() {
-			return long.class.getSimpleName();
+		public Class<?> getComponentType() {
+			return long.class;
 		}
 
 		@Override
@@ -205,12 +220,12 @@ public class PrimitiveFeatureFactories {
 			return dims;
 		}
 
-		@Override
-		public FeatureVector of(byte[] featureBytes) {
-			final long[] feature = new long[dims];
-			ByteBuffer.wrap(featureBytes).asLongBuffer().get(feature);
-			return new LongFeature(feature);
-		}
+//		@Override
+//		public FeatureVector of(byte[] featureBytes) {
+//			final long[] feature = new long[dims];
+//			ByteBuffer.wrap(featureBytes).asLongBuffer().get(feature);
+//			return new LongFeature(feature);
+//		}
 
 		@Override
 		public FeatureVector read(DataInput is) throws IOException {
@@ -237,8 +252,8 @@ public class PrimitiveFeatureFactories {
 		}
 
 		@Override
-		public String getComponentType() {
-			return float.class.getSimpleName();
+		public Class<?> getComponentType() {
+			return float.class;
 		}
 
 		@Override
@@ -251,12 +266,12 @@ public class PrimitiveFeatureFactories {
 			return dims;
 		}
 
-		@Override
-		public FeatureVector of(byte[] featureBytes) {
-			final float[] feature = new float[dims];
-			ByteBuffer.wrap(featureBytes).asFloatBuffer().get(feature);
-			return new FloatFeature(feature);
-		}
+//		@Override
+//		public FeatureVector of(byte[] featureBytes) {
+//			final float[] feature = new float[dims];
+//			ByteBuffer.wrap(featureBytes).asFloatBuffer().get(feature);
+//			return new FloatFeature(feature);
+//		}
 
 		@Override
 		public FeatureVector read(DataInput is) throws IOException {
@@ -283,8 +298,8 @@ public class PrimitiveFeatureFactories {
 		}
 
 		@Override
-		public String getComponentType() {
-			return double.class.getSimpleName();
+		public Class<?> getComponentType() {
+			return double.class;
 		}
 
 		@Override
@@ -297,12 +312,12 @@ public class PrimitiveFeatureFactories {
 			return dims;
 		}
 
-		@Override
-		public FeatureVector of(byte[] featureBytes) {
-			final double[] feature = new double[dims];
-			ByteBuffer.wrap(featureBytes).asDoubleBuffer().get(feature);
-			return new DoubleFeature(feature);
-		}
+//		@Override
+//		public FeatureVector of(byte[] featureBytes) {
+//			final double[] feature = new double[dims];
+//			ByteBuffer.wrap(featureBytes).asDoubleBuffer().get(feature);
+//			return new DoubleFeature(feature);
+//		}
 
 		@Override
 		public FeatureVector read(DataInput is) throws IOException {

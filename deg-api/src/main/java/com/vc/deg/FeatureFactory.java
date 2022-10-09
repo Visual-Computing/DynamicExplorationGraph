@@ -1,12 +1,10 @@
-package com.vc.deg.feature;
+package com.vc.deg;
 
 import java.io.DataInput;
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.ServiceLoader;
 import java.util.Set;
-
-import com.vc.deg.FeatureVector;
 
 /**
  * A {@link FeatureFactory} is needed when a graph is loaded from a drive and contains custom {@link FeatureVector}.
@@ -58,13 +56,26 @@ public interface FeatureFactory {
     	 * Find a specific {@link FeatureFactory} based on the parameters
     	 * 
     	 * @param componentType
-    	 * @param featureSize
     	 * @param dims
     	 * @return
     	 */
     	private static FeatureFactory findFactory(String componentType, int dims) {
     		for (FeatureFactory registeredFactory : registeredFactories) 
-    			if(componentType.equalsIgnoreCase(registeredFactory.getComponentType()) && dims == registeredFactory.dims())
+    			if(componentType.equalsIgnoreCase(registeredFactory.getComponentType().getSimpleName()) && dims == registeredFactory.dims())
+    				return registeredFactory;
+			return null;
+    	}
+    	
+    	/**
+    	 * Find a specific {@link FeatureFactory} based on the parameters
+    	 * 
+    	 * @param componentType
+    	 * @param dims
+    	 * @return
+    	 */
+    	private static FeatureFactory findFactory(Class<?> componentType, int dims) {
+    		for (FeatureFactory registeredFactory : registeredFactories) 
+    			if(componentType == registeredFactory.getComponentType() && dims == registeredFactory.dims())
     				return registeredFactory;
 			return null;
     	}
@@ -91,11 +102,22 @@ public interface FeatureFactory {
     }
     
     /**
+	 * Find a specific {@link FeatureFactory} based on the parameters
+	 * 
+     * @param componentType
+     * @param dims
+     * @return
+     */
+    public static FeatureFactory findFactory(Class<?> componentType, int dims) {
+        return DefaultFactoryHolder.findFactory(componentType, dims);
+    }
+    
+    /**
      * Either one of the primitives or an object
      * 
      * @return
      */
-    public String getComponentType();
+    public Class<?> getComponentType();
     
     /**
      * Size of the feature vectors in bytes
@@ -111,14 +133,19 @@ public interface FeatureFactory {
      */
     public int dims();
     
-    /**
-     * Extract the feature from a pure byte array.
-     * There is not length check between the expected dimensions and the length of the given array.
-     * 
-     * @param featureByte
-     * @return
-     */
-    public FeatureVector of(byte[] featureByte);
+//    /**
+//     * TODO should be (ByteOrder.LITTLE_ENDIAN) the method is the counterpart to FeatureVector#toBytes()
+//	   * TODO Having toBytes here requires the specification of a ByteOrder. 
+//	   *	  The API should be free from such prefefined rules.
+//     *	  Use read(...) instead
+//     *
+//     * Extract the feature from a pure byte array.
+//     * There is not length check between the expected dimensions and the length of the given array.
+//     * 
+//     * @param featureByte
+//     * @return
+//     */
+//    public FeatureVector of(byte[] featureByte);
     
     /**
      * Read the feature from a data input source

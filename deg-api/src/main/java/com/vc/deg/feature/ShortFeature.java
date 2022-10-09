@@ -3,8 +3,6 @@ package com.vc.deg.feature;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.Arrays;
 
 import com.vc.deg.FeatureVector;
@@ -26,6 +24,16 @@ public class ShortFeature implements FeatureVector {
 		return feature[index];
 	}
 
+	@Override
+	public int dims() {
+		return feature.length;
+	}
+	
+	@Override
+	public Class<?> getComponentType() {
+		return short.class;
+	}
+	
 	@Override
 	public int size() {
 		return feature.length * Short.BYTES;
@@ -61,13 +69,13 @@ public class ShortFeature implements FeatureVector {
 		throw new UnsupportedOperationException(ShortFeature.class.getSimpleName() + " does not support readDouble");
 	}
 
-	@Override
-	public byte[] toBytes() {
-		final ByteBuffer bb = ByteBuffer.allocate(size()).order(ByteOrder.LITTLE_ENDIAN);
-		for (short value : feature) 
-			bb.putShort(value);
-		return bb.array();
-	}
+//	@Override
+//	public byte[] toBytes() {
+//		final ByteBuffer bb = ByteBuffer.allocate(size()).order(ByteOrder.LITTLE_ENDIAN);
+//		for (short value : feature) 
+//			bb.putShort(value);
+//		return bb.array();
+//	}
 	
 	@Override
 	public FeatureVector copy() {

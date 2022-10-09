@@ -19,9 +19,9 @@ import com.esotericsoftware.kryo.unsafe.UnsafeInput;
 import com.esotericsoftware.kryo.unsafe.UnsafeOutput;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
-import com.vc.deg.GraphDesigner;
-import com.vc.deg.GraphFilter;
-import com.vc.deg.VertexConsumer;
+import com.vc.deg.graph.GraphDesigner;
+import com.vc.deg.graph.GraphFilter;
+import com.vc.deg.graph.VertexConsumer;
 import com.vc.deg.impl.designer.EvenRegularGraphDesigner;
 import com.vc.deg.impl.graph.WeightedUndirectedRegularGraph;
 

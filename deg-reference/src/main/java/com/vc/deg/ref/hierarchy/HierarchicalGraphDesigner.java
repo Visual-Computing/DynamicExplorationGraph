@@ -11,7 +11,7 @@ import java.util.function.IntPredicate;
 
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
-import com.vc.deg.GraphDesigner;
+import com.vc.deg.graph.GraphDesigner;
 import com.vc.deg.ref.DynamicExplorationGraph;
 import com.vc.deg.ref.designer.EvenRegularGraphDesigner.BuilderAddTask;
 import com.vc.deg.ref.designer.EvenRegularGraphDesigner.BuilderRemoveTask;
@@ -330,6 +330,13 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 
 	@Override
 	public void add(int label, FeatureVector data) {
+		
+		// check the feature vector compatibility
+		final FeatureSpace featureSpace = layers.get(0).getFeatureSpace();
+		if(data.dims() != featureSpace.dims() || data.getComponentType() != featureSpace.getComponentType())
+			throw new RuntimeException("Invalid data component type "+data.getComponentType().getSimpleName()+" or dimension "+data.dims()+
+									   ", expected "+featureSpace.getComponentType().getSimpleName()+" and "+featureSpace.dims());
+		
 		newEntryQueue.offer(new BuilderAddTask(label, manipulationCounter.getAndIncrement(), data));
 	}
 

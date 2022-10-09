@@ -1,4 +1,4 @@
-package com.vc.deg;
+package com.vc.deg.graph;
 
 /**
  * A filter to check labels used in a search or exploration task

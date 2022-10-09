@@ -1,4 +1,6 @@
-package com.vc.deg;
+package com.vc.deg.graph;
+
+import com.vc.deg.FeatureVector;
 
 /**
  * Iterates vertices in a collection

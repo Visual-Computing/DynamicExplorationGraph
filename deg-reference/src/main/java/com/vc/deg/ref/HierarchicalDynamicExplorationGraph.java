@@ -17,8 +17,8 @@ import java.util.function.IntConsumer;
 
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
-import com.vc.deg.GraphFilter;
-import com.vc.deg.VertexConsumer;
+import com.vc.deg.graph.GraphFilter;
+import com.vc.deg.graph.VertexConsumer;
 import com.vc.deg.ref.hierarchy.HierarchicalGraphDesigner;
 
 public class HierarchicalDynamicExplorationGraph implements com.vc.deg.HierarchicalDynamicExplorationGraph {
@@ -164,7 +164,7 @@ public class HierarchicalDynamicExplorationGraph implements com.vc.deg.Hierarchi
 		// setup a list of graph files
 		final List<String> graphFiles = new ArrayList<>();
 		for (int i = 0; i < layers.size(); i++) 
-			graphFiles.add("layer"+i+"."+space.getComponentType()+".deg");
+			graphFiles.add("layer"+i+"."+space.getComponentType().getSimpleName().toLowerCase()+".deg");
 		
 		// create graph files	
 		for (int i = 0; i < layers.size(); i++) {
@@ -193,7 +193,7 @@ public class HierarchicalDynamicExplorationGraph implements com.vc.deg.Hierarchi
 		
 		// create hierarchical information file
 		final List<String> info = new ArrayList<>();		
-		info.add("featureType:"+space.getComponentType());
+		info.add("featureType:"+space.getComponentType().getSimpleName().toLowerCase());
 		info.add("featureSize:"+space.featureSize());
 		info.add("featureDims:"+space.dims());
 		info.add("featureMetric:"+space.metric());
@@ -221,13 +221,11 @@ public class HierarchicalDynamicExplorationGraph implements com.vc.deg.Hierarchi
 		final int metric = Integer.parseInt(info.get(3).split(":")[1]);
 		
 		// find the feature space specified in the file
-		final FeatureSpace space = FeatureSpace.findFeatureSpace(featureType, metric, false);
+		final FeatureSpace space = FeatureSpace.findFeatureSpace(featureType, metric, dims, false);
 		if(space == null)
 			throw new UnsupportedOperationException("No feature space found for featureType="+featureType+", metric="+metric+" and isNative=false");
 		if(featureSize != space.featureSize())
 			throw new UnsupportedOperationException("The feature space for featureType="+featureType+", metric="+metric+" and isNative=false expects features with "+space.featureSize()+" bytes but the graph contains features with "+featureSize+" bytes.");
-		if(dims != space.dims())
-			throw new UnsupportedOperationException("The feature space for featureType="+featureType+", metric="+metric+" and isNative=false expects features with "+space.dims()+" dimensions but the graph contains features with "+dims+" dimensions.");
 		
 		
 		final int topRankSize = Integer.parseInt(info.get(4).split(":")[1]);

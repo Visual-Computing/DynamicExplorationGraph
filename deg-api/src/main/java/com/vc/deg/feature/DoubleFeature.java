@@ -3,8 +3,6 @@ package com.vc.deg.feature;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.Arrays;
 
 import com.vc.deg.FeatureVector;
@@ -24,6 +22,16 @@ public class DoubleFeature implements FeatureVector {
 	
 	public double get(int index) {
 		return feature[index];
+	}
+	
+	@Override
+	public int dims() {
+		return feature.length;
+	}
+	
+	@Override
+	public Class<?> getComponentType() {
+		return double.class;
 	}
 
 	@Override
@@ -61,13 +69,13 @@ public class DoubleFeature implements FeatureVector {
 		return feature[byteOffset >> 3];		
 	}
 
-	@Override
-	public byte[] toBytes() {
-		final ByteBuffer bb = ByteBuffer.allocate(size()).order(ByteOrder.LITTLE_ENDIAN);
-		for (double value : feature) 
-			bb.putDouble(value);
-		return bb.array();
-	}
+//	@Override
+//	public byte[] toBytes() {
+//		final ByteBuffer bb = ByteBuffer.allocate(size()).order(ByteOrder.LITTLE_ENDIAN);
+//		for (double value : feature) 
+//			bb.putDouble(value);
+//		return bb.array();
+//	}
 	
 	@Override
 	public FeatureVector copy() {

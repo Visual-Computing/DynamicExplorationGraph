@@ -3,8 +3,6 @@ package com.vc.deg.feature;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.Arrays;
 
 import com.vc.deg.FeatureVector;
@@ -24,6 +22,16 @@ public class FloatFeature implements FeatureVector {
 	
 	public float get(int index) {
 		return feature[index];
+	}
+	
+	@Override
+	public int dims() {
+		return feature.length;
+	}
+	
+	@Override
+	public Class<?> getComponentType() {
+		return float.class;
 	}
 
 	@Override
@@ -61,13 +69,13 @@ public class FloatFeature implements FeatureVector {
 		throw new UnsupportedOperationException(FloatFeature.class.getSimpleName() + " does not support readDouble");
 	}
 
-	@Override
-	public byte[] toBytes() {
-		final ByteBuffer bb = ByteBuffer.allocate(size()).order(ByteOrder.LITTLE_ENDIAN);
-		for (float value : feature) 
-			bb.putFloat(value);
-		return bb.array();
-	}
+//	@Override
+//	public byte[] toBytes() {
+//		final ByteBuffer bb = ByteBuffer.allocate(size()).order(ByteOrder.LITTLE_ENDIAN);
+//		for (float value : feature) 
+//			bb.putFloat(value);
+//		return bb.array();
+//	}
 	
 	@Override
 	public FeatureVector copy() {

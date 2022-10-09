@@ -10,8 +10,8 @@ import java.util.function.IntConsumer;
 
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
-import com.vc.deg.GraphFilter;
-import com.vc.deg.VertexConsumer;
+import com.vc.deg.graph.GraphFilter;
+import com.vc.deg.graph.VertexConsumer;
 import com.vc.deg.ref.designer.EvenRegularGraphDesigner;
 import com.vc.deg.ref.graph.MapBasedWeightedUndirectedRegularGraph;
 import com.vc.deg.ref.search.ObjectDistance;

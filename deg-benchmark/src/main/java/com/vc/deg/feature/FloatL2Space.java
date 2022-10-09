@@ -22,8 +22,8 @@ public class FloatL2Space implements FeatureSpace {
 	}
 	
 	@Override
-	public String getComponentType() {
-		return float.class.getSimpleName();
+	public Class<?> getComponentType() {
+		return float.class;
 	}
 
 

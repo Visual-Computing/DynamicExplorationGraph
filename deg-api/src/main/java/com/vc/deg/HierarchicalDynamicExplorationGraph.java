@@ -7,8 +7,18 @@ import java.util.Collection;
 import java.util.Random;
 import java.util.function.IntConsumer;
 
+import com.vc.deg.graph.GraphDesigner;
+import com.vc.deg.graph.GraphFilter;
+import com.vc.deg.graph.VertexConsumer;
+
 public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationGraph {
 
+	/**
+	 * Designer to change the graph
+	 * 
+	 * @return
+	 */
+	@Override
 	public GraphDesigner designer();
 	
 	/**

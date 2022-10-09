@@ -19,7 +19,7 @@ import java.util.stream.Stream;
 
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
-import com.vc.deg.GraphDesigner;
+import com.vc.deg.graph.GraphDesigner;
 import com.vc.deg.ref.graph.MapBasedWeightedUndirectedRegularGraph;
 import com.vc.deg.ref.graph.MapBasedWeightedUndirectedRegularGraph.VertexData;
 import com.vc.deg.ref.search.ObjectDistance;
@@ -155,6 +155,12 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 
 	@Override
 	public void add(int label, FeatureVector data) {
+		
+		// check the feature vector compatibility
+		if(data.dims() != graph.getFeatureSpace().dims() || data.getComponentType() != graph.getFeatureSpace().getComponentType())
+			throw new RuntimeException("Invalid data component type "+data.getComponentType().getSimpleName()+" or dimension "+data.dims()+
+									   ", expected "+graph.getFeatureSpace().getComponentType().getSimpleName()+" and "+graph.getFeatureSpace().dims());
+		
 		newEntryQueue.offer(new BuilderAddTask(label, manipulationCounter.getAndIncrement(), data));
 	}
 

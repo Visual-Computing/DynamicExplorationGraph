@@ -6,7 +6,6 @@ import java.io.IOException;
 
 import com.vc.deg.feature.ByteFeature;
 import com.vc.deg.feature.DoubleFeature;
-import com.vc.deg.feature.FeatureFactory;
 import com.vc.deg.feature.FloatFeature;
 import com.vc.deg.feature.IntFeature;
 import com.vc.deg.feature.ShortFeature;
@@ -31,6 +30,21 @@ public interface FeatureVector {
 	 * @return
 	 */
 	public int size();
+	
+    /**
+     * Feature data type, either one of the primitives or an object
+     * 
+     * @return
+     */
+    public Class<?> getComponentType();
+    
+    
+    /**
+     * Dimensions of the feature
+     * 
+     * @return
+     */
+    public int dims();
 	
 	/**
 	 * Is the feature vector in native memory?
@@ -95,12 +109,16 @@ public interface FeatureVector {
 	 */
 	public double readDouble(int byteOffset);
 	
-	/**
-	 * A copy of the feature vector in bytes (ByteOrder.LITTLE_ENDIAN)
-	 * 
-	 * @return
-	 */
-	public byte[] toBytes();
+//	/**
+//	 * TODO Having toBytes here requires the specification of a ByteOrder. 
+//	 *		The API should be free from such prefefined rules.
+//	 *		Use readObject instead
+//	 *
+//	 * A copy of the feature vector in bytes (ByteOrder.LITTLE_ENDIAN)
+//	 * 
+//	 * @return
+//	 */
+//	public byte[] toBytes();
 	
 	/**
 	 * Create a copy of the feature vector

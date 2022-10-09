@@ -4,8 +4,6 @@ import java.util.HashSet;
 import java.util.ServiceLoader;
 import java.util.Set;
 
-import com.vc.deg.feature.FeatureFactory;
-
 /**
  * The {@link FeatureSpace} knows how the data in the {@link FeatureVector} is structured
  * 
@@ -68,19 +66,44 @@ public interface FeatureSpace {
     	 * 
     	 * @param componentType
     	 * @param metric
+    	 * @param dims
     	 * @param isNative
     	 * @return
     	 */
-    	private static FeatureSpace findFeatureSpace(String componentType, int metric, boolean isNative) {
+    	private static FeatureSpace findFeatureSpace(String componentType, int metric, int dims, boolean isNative) {
     		
     		for (FeatureSpace registeredSpace : registeredFactories) 
-    			if(componentType.equalsIgnoreCase(registeredSpace.getComponentType()) && metric == registeredSpace.metric() && isNative == registeredSpace.isNative())
+    			if(componentType.equalsIgnoreCase(registeredSpace.getComponentType().getSimpleName()) && metric == registeredSpace.metric() && dims == registeredSpace.dims() && isNative == registeredSpace.isNative())
     				return registeredSpace;
     		
     		// try again but this time non-native and potential slower feature spaces are allowed
 	    	if(isNative) 
 	    		for (FeatureSpace registeredSpace : registeredFactories) 
-	    			if(componentType.equalsIgnoreCase(registeredSpace.getComponentType()) && metric == registeredSpace.metric())
+	    			if(componentType.equalsIgnoreCase(registeredSpace.getComponentType().getSimpleName()) && metric == registeredSpace.metric() && dims == registeredSpace.dims())
+	    				return registeredSpace;
+    		
+			return null;
+    	}
+    	
+    	/**
+    	 * Find a specific {@link FeatureSpace} based on the parameters
+    	 * 
+    	 * @param componentType
+    	 * @param metric
+    	 * @param dims
+    	 * @param isNative
+    	 * @return
+    	 */
+    	private static FeatureSpace findFeatureSpace(Class<?> componentType, int metric, int dims, boolean isNative) {
+    		
+    		for (FeatureSpace registeredSpace : registeredFactories) 
+    			if(componentType == registeredSpace.getComponentType() && metric == registeredSpace.metric() && dims == registeredSpace.dims() && isNative == registeredSpace.isNative())
+    				return registeredSpace;
+    		
+    		// try again but this time non-native and potential slower feature spaces are allowed
+	    	if(isNative) 
+	    		for (FeatureSpace registeredSpace : registeredFactories) 
+	    			if(componentType == registeredSpace.getComponentType() && metric == registeredSpace.metric() && dims == registeredSpace.dims())
 	    				return registeredSpace;
     		
 			return null;
@@ -106,10 +129,22 @@ public interface FeatureSpace {
      * @param isNative
      * @return
      */
-    public static FeatureSpace findFeatureSpace(String componentType, int metric, boolean isNative) {
-        return DefaultFeatureSpaceHolder.findFeatureSpace(componentType, metric, isNative);
+    public static FeatureSpace findFeatureSpace(String componentType, int metric, int dims, boolean isNative) {
+        return DefaultFeatureSpaceHolder.findFeatureSpace(componentType, metric, dims, isNative);
     }
     
+    /**
+	 * Find a specific {@link FeatureFactory} based on the parameters
+	 * Only used when loading a graph form drive and the correct {@link FeatureSpace} needs to be determined
+	 * 
+     * @param componentType
+     * @param metric
+     * @param isNative
+     * @return
+     */
+    public static FeatureSpace findFeatureSpace(Class<?> componentType, int metric, int dims, boolean isNative) {
+        return DefaultFeatureSpaceHolder.findFeatureSpace(componentType, metric, dims, isNative);
+    }
 
 	/**
 	 * Size in bytes per feature vector
@@ -130,7 +165,7 @@ public interface FeatureSpace {
      * 
      * @return
      */
-    public String getComponentType();
+    public Class<?> getComponentType();
 	
 	/**
 	 * Identifier of the metric, either one of {@link Metric} or a custom one

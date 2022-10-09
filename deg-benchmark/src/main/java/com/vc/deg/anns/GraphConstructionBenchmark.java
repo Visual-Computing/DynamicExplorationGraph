@@ -15,11 +15,11 @@ import java.util.stream.IntStream;
 import com.vc.deg.DynamicExplorationGraph;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
-import com.vc.deg.GraphDesigner;
 import com.vc.deg.GraphFactory;
 import com.vc.deg.data.Sift1M;
 import com.vc.deg.feature.FloatFeature;
 import com.vc.deg.feature.FloatL2Space;
+import com.vc.deg.graph.GraphDesigner;
 
 /**
  * 

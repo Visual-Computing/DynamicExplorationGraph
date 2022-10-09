@@ -185,8 +185,8 @@ public class MapBasedWeightedUndirectedGraphTest {
 		}
 		
 		@Override
-		public String getComponentType() {
-			return float.class.getSimpleName();
+		public Class<?> getComponentType() {
+			return float.class;
 		}
 
 		@Override

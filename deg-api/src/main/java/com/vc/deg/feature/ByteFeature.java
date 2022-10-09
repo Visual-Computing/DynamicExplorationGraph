@@ -23,6 +23,16 @@ public class ByteFeature implements FeatureVector {
 	public byte get(int index) {
 		return feature[index];
 	}
+	
+	@Override
+	public int dims() {
+		return feature.length;
+	}
+	
+	@Override
+	public Class<?> getComponentType() {
+		return byte.class;
+	}
 
 	@Override
 	public int size() {
@@ -59,14 +69,14 @@ public class ByteFeature implements FeatureVector {
 		throw new UnsupportedOperationException(ByteFeature.class.getSimpleName() + " does not support readDouble");
 	}
 
-	@Override
-	public byte[] toBytes() {
-		return Arrays.copyOf(feature, feature.length);
-	}
+//	@Override
+//	public byte[] toBytes() {
+//		return Arrays.copyOf(feature, feature.length);
+//	}
 	
 	@Override
 	public FeatureVector copy() {
-		return new ByteFeature(toBytes());
+		return new ByteFeature(Arrays.copyOf(feature, feature.length));
 	}
 
 	@Override

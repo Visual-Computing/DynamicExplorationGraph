@@ -1,7 +1,9 @@
-package com.vc.deg;
+package com.vc.deg.graph;
 
 import java.util.Random;
 import java.util.function.IntPredicate;
+
+import com.vc.deg.FeatureVector;
 
 /**
  * Adds or removed graph nodes and improves the connections. 
