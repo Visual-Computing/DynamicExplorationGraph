@@ -13,10 +13,10 @@ import javax.imageio.ImageIO;
 
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
-import com.vc.deg.ref.graph.MapBasedWeightedUndirectedRegularGraph;
-import com.vc.deg.ref.graph.MapBasedWeightedUndirectedRegularGraph.VertexData;
+import com.vc.deg.ref.graph.ArrayBasedWeightedUndirectedRegularGraph;
+import com.vc.deg.ref.graph.VertexData;
 
-public class MapBasedWeightedUndirectedGraphTest {
+public class ArrayBasedWeightedUndirectedGraphTest {
 
 	public static void main(String[] args) throws IOException, ClassNotFoundException {
 		Path graphInputFile = Paths.get("c:\\Data\\Feature\\2DGraph\\L2_K4_AddK10Eps0.2High.perfect_rng_add_only.deg");
@@ -25,7 +25,7 @@ public class MapBasedWeightedUndirectedGraphTest {
 		
 		FeatureSpace space = new FloatL2Space(2);
 		FeatureSpace.registerFeatureSpace(space);
-		MapBasedWeightedUndirectedRegularGraph graph = MapBasedWeightedUndirectedRegularGraph.readFromFile(graphInputFile, float.class.getSimpleName());
+		ArrayBasedWeightedUndirectedRegularGraph graph = ArrayBasedWeightedUndirectedRegularGraph.readFromFile(graphInputFile, float.class.getSimpleName());
 	
 		printGraph(graph);
 		paintGraph(graph, replaceExtension(graphInputFile, ".png"), 1000);
@@ -73,13 +73,13 @@ public class MapBasedWeightedUndirectedGraphTest {
 	 * @param vertexIdx
 	 * @param neighborIndices
 	 */
-	public static void changesEdgesOfVertex(MapBasedWeightedUndirectedRegularGraph graph, int vertexIdx, int ... neighborIndices) {
-		VertexData data = graph.getVertex(vertexIdx);
+	public static void changesEdgesOfVertex(ArrayBasedWeightedUndirectedRegularGraph graph, int vertexIdx, int ... neighborIndices) {
+		VertexData data = graph.getVertexById(vertexIdx);
 		Map<Integer,Float> edges = data.getEdges();
 		edges.clear();
 		
 		for (int neigborIndex : neighborIndices) {
-			VertexData neighbor = graph.getVertex(neigborIndex);
+			VertexData neighbor = graph.getVertexById(neigborIndex);
 			edges.put(neigborIndex, graph.getFeatureSpace().computeDistance(data.getFeature(), neighbor.getFeature()));
 		}		
 	}	
@@ -91,7 +91,7 @@ public class MapBasedWeightedUndirectedGraphTest {
 	 * @param pngFile
 	 * @throws IOException 
 	 */
-	public static void paintGraph(MapBasedWeightedUndirectedRegularGraph graph, Path pngFile, int imageSize) throws IOException {
+	public static void paintGraph(ArrayBasedWeightedUndirectedRegularGraph graph, Path pngFile, int imageSize) throws IOException {
 		final int border = 50;
 		final int nodeSize = 32;
 		final int strokeSize = 6;
@@ -118,7 +118,7 @@ public class MapBasedWeightedUndirectedGraphTest {
 
 			// compute end point of the line
 			for(Map.Entry<Integer, Float> edge : node.getEdges().entrySet()) {
-				final FeatureVector fvNeighbor = graph.getVertex(edge.getKey()).getFeature();
+				final FeatureVector fvNeighbor = graph.getVertexById(edge.getKey()).getFeature();
 				final float xEnd= fvNeighbor.readFloat(0) / maxPerDim[0] * imageSize + border - nodeSize/2;
 				final float yEnd = fvNeighbor.readFloat(4) / maxPerDim[1] * imageSize + border - nodeSize/2;				
 				g2d.drawLine((int)xStart, (int)yStart, (int)xEnd, (int)yEnd);
@@ -143,7 +143,7 @@ public class MapBasedWeightedUndirectedGraphTest {
 	 * 
 	 * @param graph
 	 */
-	public static void printGraph(MapBasedWeightedUndirectedRegularGraph graph) {
+	public static void printGraph(ArrayBasedWeightedUndirectedRegularGraph graph) {
 		for(VertexData data : graph.getVertices()) {		
 			Map<Integer,Float> edges = data.getEdges();
 			System.out.print("Neighbors of vertex "+data.getId()+": ");

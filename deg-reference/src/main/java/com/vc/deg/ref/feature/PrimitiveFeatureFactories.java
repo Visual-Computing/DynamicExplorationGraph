@@ -5,6 +5,7 @@ import java.io.IOException;
 
 import com.vc.deg.FeatureFactory;
 import com.vc.deg.FeatureVector;
+import com.vc.deg.feature.BinaryFeature;
 import com.vc.deg.feature.ByteFeature;
 import com.vc.deg.feature.DoubleFeature;
 import com.vc.deg.feature.FloatFeature;
@@ -33,6 +34,8 @@ public class PrimitiveFeatureFactories {
 			return new FloatFeatureFactory(dims);
 		else if(double.class.getSimpleName().equalsIgnoreCase(componentType))
 			return new DoubleFeatureFactory(dims);
+		else if(BinaryFeature.ComponentType.getSimpleName().equalsIgnoreCase(componentType))
+			return new BinaryFeatureFactory(dims);
 		return null;
 	}
 	
@@ -49,7 +52,50 @@ public class PrimitiveFeatureFactories {
 			return new FloatFeatureFactory(dims);
 		else if(double.class == componentType)
 			return new DoubleFeatureFactory(dims);
+		else if(BinaryFeature.ComponentType == componentType)
+			return new BinaryFeatureFactory(dims);
 		return null;
+	}
+	
+	/**
+	 * Factory for the {@link ByteFeature}
+	 * 
+	 * @author Nico Hezel
+	 */
+	public static class BinaryFeatureFactory implements FeatureFactory {
+		
+		protected final int dims;
+		protected final int longCount;
+		
+		public BinaryFeatureFactory(int dims) {
+			this.dims = dims;	
+			this.longCount =  (int) Math.ceil((float)dims / 64);
+			if(dims > 0xFFFF)
+				throw new UnsupportedOperationException("Features with more than "+0xFFFF+" dimensions are not supported");
+		}
+
+		@Override
+		public Class<?> getComponentType() {
+			return BinaryFeature.ComponentType;
+		}
+
+		@Override
+		public int featureSize() {
+			return longCount * Long.BYTES;
+		}
+
+		@Override
+		public int dims() {
+			return dims;
+		}
+
+		@Override
+		public FeatureVector read(DataInput is) throws IOException {
+			final long[] feature = new long[longCount];
+			for (int i = 0; i < feature.length; i++) 
+				feature[i] = is.readLong();
+			return new BinaryFeature(dims, feature);
+		}
 	}
 	
 	/**

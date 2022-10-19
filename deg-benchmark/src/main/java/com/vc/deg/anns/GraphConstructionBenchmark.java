@@ -48,7 +48,7 @@ public class GraphConstructionBenchmark {
 		// hierarchical 
 		final int edgesPerNode = 30;
 		final int topRankSize = 400;
-		final Path graphFile = Paths.get("c:\\Data\\Feature\\SIFT1M\\deg\\best_distortion_decisions\\java\\128D_L2_K30_AddK60Eps0.2High_RNGMinimalAdd\\");
+		final Path graphFile = Paths.get("c:\\Data\\Feature\\SIFT1M\\deg\\best_distortion_decisions\\java\\128D_L2_K30_AddK60Eps0.2High_RNGMinimalAdd4\\");
 		final DynamicExplorationGraph deg = GraphFactory.getDefaultFactory().newHierchicalGraph(space, edgesPerNode, topRankSize);
 		
 		// simple DEG

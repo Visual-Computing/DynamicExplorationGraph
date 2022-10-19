@@ -138,4 +138,11 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 		// TODO Auto-generated method stub
 		return 0;
 	}
+
+
+	@Override
+	public int getRandomLabel(Random random, GraphFilter filter) {
+		// TODO Auto-generated method stub
+		return 0;
+	}
 }

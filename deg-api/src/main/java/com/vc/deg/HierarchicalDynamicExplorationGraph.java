@@ -354,6 +354,22 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 		return getRandomLabelAtLevel(random, 0);
 	}
 	
+	
+	/**
+	 * Get a random label at the level which is allowed by the filter
+	 * 
+	 * @param random
+	 * @param atLevel
+	 * @param filter
+	 * @return
+	 */
+	public int getRandomLabelAtLevel(Random random, int atLevel, GraphFilter filter);
+	
+	@Override
+	default int getRandomLabel(Random random, GraphFilter filter) {
+		return getRandomLabelAtLevel(random, 0, filter);
+	}
+	
 	/**
 	 * Number of levels of the hierarchical graph
 	 * 

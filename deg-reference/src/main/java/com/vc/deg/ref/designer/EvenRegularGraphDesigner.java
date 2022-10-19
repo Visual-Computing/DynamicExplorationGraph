@@ -20,9 +20,9 @@ import java.util.stream.Stream;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.GraphDesigner;
-import com.vc.deg.ref.graph.MapBasedWeightedUndirectedRegularGraph;
-import com.vc.deg.ref.graph.MapBasedWeightedUndirectedRegularGraph.VertexData;
-import com.vc.deg.ref.search.ObjectDistance;
+import com.vc.deg.ref.graph.ArrayBasedWeightedUndirectedRegularGraph;
+import com.vc.deg.ref.graph.VertexData;
+import com.vc.deg.ref.graph.VertexDistance;
 
 
 /**
@@ -33,7 +33,7 @@ import com.vc.deg.ref.search.ObjectDistance;
  */
 public class EvenRegularGraphDesigner implements GraphDesigner {
 
-	protected final MapBasedWeightedUndirectedRegularGraph graph;
+	protected final ArrayBasedWeightedUndirectedRegularGraph graph;
 	
 	protected final AtomicLong manipulationCounter;
 	protected final ConcurrentLinkedQueue<BuilderAddTask> newEntryQueue;
@@ -52,7 +52,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 	
 	protected int maxPathLength;
 
-	public EvenRegularGraphDesigner(MapBasedWeightedUndirectedRegularGraph graph) {
+	public EvenRegularGraphDesigner(ArrayBasedWeightedUndirectedRegularGraph graph) {
 		this.graph = graph;
 		this.rnd = new Random(7);
 		this.manipulationCounter = new AtomicLong(0);
@@ -139,7 +139,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 		final FeatureSpace space = graph.getFeatureSpace();
 		for(VertexData data : graph.getVertices()) {
 			for(Map.Entry<Integer, Float> entry : data.getEdges().entrySet()) {
-				final float dist  =space.computeDistance(data.getFeature(), graph.getVertex(entry.getKey()).getFeature());
+				final float dist  =space.computeDistance(data.getFeature(), graph.getVertexById(entry.getKey()).getFeature());
 				if(entry.getValue() != dist)
 					throw new RuntimeException("The vertex "+data.getId()+" has a weight "+entry.getValue()+" which is not equal to its distance "+dist);
 			}
@@ -170,10 +170,10 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 	}
 
 	@Override
-	public void removeIf(IntPredicate filter) {
-		graph.getVertexIds().forEach(id -> {
-			if(filter.test(id))
-				remove(id);
+	public void removeIf(IntPredicate labelFilter) {
+		graph.getVertexLabels().forEach(label -> {
+			if(labelFilter.test(label))
+				remove(label);
 		});
 	}
 
@@ -182,21 +182,21 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 	 * 
 	 * @param addTask
 	 */
-	private void extendGraph(int newVertexLabel, FeatureVector newVertexFeature) {
+	private void extendGraphByLabel(int newVertexLabel, FeatureVector newVertexFeature) {
 		final FeatureSpace space = graph.getFeatureSpace();
 		final int edgesPerVertex = graph.getEdgesPerVertex();
 
-		if(graph.getVertex(newVertexLabel) != null)
+		if(graph.getVertexByLabel(newVertexLabel) != null)
 			throw new RuntimeException("Graph contains vertex "+newVertexLabel+" already. Can not add it again.");
 
 		// fully connect all vertices
 		if(graph.getVertexCount() < graph.getEdgesPerVertex()+1) {			
-			graph.addVertex(newVertexLabel, newVertexFeature);
+			final VertexData newVertex = graph.addVertex(newVertexLabel, newVertexFeature);
 
 			for(VertexData otherVertex : graph.getVertices()) {
-				if(otherVertex.getId() != newVertexLabel) {
+				if(otherVertex.getId() != newVertex.getId()) {
 					float weight = space.computeDistance(newVertexFeature, otherVertex.getFeature());
-					graph.addUndirectedEdge(newVertexLabel, otherVertex.getId(), weight);
+					graph.addUndirectedEdge(newVertex.getId(), otherVertex.getId(), weight);
 				}
 			}
 
@@ -210,7 +210,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 				entryVertex = it.next();
 
 			// find good neighbors for the new vertex
-			final ObjectDistance[] results = graph.search(Arrays.asList(newVertexFeature), extendK, extendEps, null, new int[] { entryVertex.getId() }).toArray(new ObjectDistance[0]);
+			final VertexDistance[] results = graph.search(Arrays.asList(newVertexFeature), extendK, extendEps, null, new int[] { entryVertex.getId() }).toArray(new VertexDistance[0]);
 
 			// add an empty vertex to the graph (no neighbor information yet)
 			final VertexData newVertex = graph.addVertex(newVertexLabel, newVertexFeature);
@@ -222,8 +222,8 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 			final Map<Integer, Float> newNeighbors = newVertex.getEdges();
 			while(newNeighbors.size() < edgesPerVertex) {
 				for (int i = 0; i < results.length && newNeighbors.size() < edgesPerVertex; i++) {
-					final ObjectDistance candidate = results[i];
-					final int candidateId = candidate.getObjId();
+					final VertexDistance candidate = results[i];
+					final int candidateId = candidate.getVertexId();
 					final float candidateWeight = candidate.getDistance();
 
 					// check if the vertex is already in the edge list of the new vertex (added during a previous loop-run)
@@ -241,7 +241,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 					{
 						// find the worst edge of the new neighbor
 						float newNeighborWeight = -1;						
-						for(Map.Entry<Integer, Float> candiateNeighbor : graph.getVertex(candidateId).getEdges().entrySet()) {
+						for(Map.Entry<Integer, Float> candiateNeighbor : graph.getVertexById(candidateId).getEdges().entrySet()) {
 							final int candiateNeighborIndex = candiateNeighbor.getKey();
 
 							// the suggested neighbor might already be in the edge list of the new vertex
@@ -258,7 +258,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 						if(newNeighborWeight == -1)
 							continue;
 
-						newNeighborDistance = space.computeDistance(newVertexFeature, graph.getVertex(newNeighborIndex).getFeature()); 
+						newNeighborDistance = space.computeDistance(newVertexFeature, graph.getVertexById(newNeighborIndex).getFeature()); 
 					}
 
 					// remove edge between the candidate and its worst neighbor
@@ -287,11 +287,11 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 					// is this neighbor in the result list of the initial search request
 					boolean isPerfect = false;
 					for (int i = 0; i < results.length && isPerfect == false; i++) 
-						if(results[i].getObjId() == neighborId) 
+						if(results[i].getVertexId() == neighborId) 
 							isPerfect = true;
 
 					if(isPerfect == false) {
-						final boolean rng = checkRNG(newVertexLabel, neighborId, newNeighbor.getValue());
+						final boolean rng = checkRNG(newVertex.getId(), neighborId, newNeighbor.getValue());
 						nonperfectNeighbors.add(new BoostedEdge(neighborId, newNeighbor.getValue(), rng));
 					}
 				}
@@ -306,8 +306,8 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 
 				for (int i = 0; i < nonperfectNeighbors.size(); i++) {
 					final BoostedEdge edge = nonperfectNeighbors.get(i);
-					if(graph.hasEdge(newVertexLabel, edge.vertexId) && (edge.rng == false || i < nonperfectNeighbors.size() / 2))
-						improveEdges(newVertexLabel, edge.vertexId, edge.weight);
+					if(graph.hasEdge(newVertex.getId(), edge.vertexId) && (edge.rng == false || i < nonperfectNeighbors.size() / 2))
+						improveEdges(newVertex.getId(), edge.vertexId, edge.weight);
 				}
 			}
 		}
@@ -361,8 +361,8 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 		//    search started from vertex3 and vertex4 all vertices in the result list are in 
 		//    their subgraph and would therefore connect the two potential subgraphs.	
 		{
-			final FeatureVector vertex2Feature = graph.getVertex(vertex2).getFeature();
-			final ObjectDistance[] results = graph.search(Arrays.asList(vertex2Feature), improveK, improveEps, null, new int[] { vertex3, vertex4  }).toArray(new ObjectDistance[0]);
+			final FeatureVector vertex2Feature = graph.getVertexById(vertex2).getFeature();
+			final VertexDistance[] results = graph.search(Arrays.asList(vertex2Feature), improveK, improveEps, null, new int[] { vertex3, vertex4 }).toArray(new VertexDistance[0]);
 
 			// find a good new vertex3
 			float bestGain = totalGain;
@@ -371,8 +371,8 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 
 			// We use the descending order to find the worst swap combination with the best gain
 			// Sometimes the gain between the two best combinations is the same, its better to use one with the bad edges to make later improvements easier
-			for(final ObjectDistance result : results) {
-				final int newVertex3 = result.getObjId();
+			for(final VertexDistance result : results) {
+				final int newVertex3 = result.getVertexId();
 
 				// vertex1 and vertex2 got tested in the recursive call before and vertex4 got just disconnected from vertex2
 				if(vertex1 != newVertex3 && vertex2 != newVertex3 && graph.hasEdge(vertex2, newVertex3) == false) {
@@ -382,7 +382,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 					//     Furthermore Vertex 3 has now to many edges, find an good edge to remove to improve the overall graph distortion. 
 					//     FYI: If the just selected vertex3 is the same as the old vertex3, this process might cut its connection to vertex4 again.
 					//     This will be fixed in the next step or until the recursion reaches max_path_length.
-					for(Map.Entry<Integer, Float> edge : graph.getVertex(newVertex3).getEdges().entrySet()) {
+					for(Map.Entry<Integer, Float> edge : graph.getVertexById(newVertex3).getEdges().entrySet()) {
 						final int newVertex4 = edge.getKey();
 						final float newVertex4Weight = edge.getValue();
 
@@ -428,8 +428,8 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 			if(vertex1 == vertex4) {
 
 				// find a good (not yet connected) vertex for vertex1/vertex4
-				final FeatureVector vertex4Feature = graph.getVertex(vertex4).getFeature();
-				final ObjectDistance[] results = graph.search(Arrays.asList(vertex4Feature), improveK, improveEps, null, new int[] { vertex2, vertex3 }).toArray(new ObjectDistance[0]);
+				final FeatureVector vertex4Feature = graph.getVertexById(vertex4).getFeature();
+				final VertexDistance[] results = graph.search(Arrays.asList(vertex4Feature), improveK, improveEps, null, new int[] { vertex2, vertex3 }).toArray(new VertexDistance[0]);
 
 				float bestGain = 0;
 				int bestSelectedNeighbor = 0;
@@ -437,21 +437,21 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 				float bestSelectedNeighborOldDist = 0;
 				int bestGoodVertex = 0;
 				float bestGoodVertexDist = 0;
-				for(ObjectDistance result : results) {
-					final int goodVertex = result.getObjId();
+				for(VertexDistance result : results) {
+					final int goodVertex = result.getVertexId();
 
 					// the new vertex should not be connected to vertex4 yet
 					if(vertex4 != goodVertex && graph.hasEdge(vertex4, goodVertex) == false) {
 						final float goodVertexDist = result.getDistance();
 
 						// select any edge of the good vertex which improves the graph quality when replaced with a connection to vertex 4
-						for(Map.Entry<Integer, Float> edge : graph.getVertex(goodVertex).getEdges().entrySet()) {
+						for(Map.Entry<Integer, Float> edge : graph.getVertexById(goodVertex).getEdges().entrySet()) {
 							final int selectedNeighbor = edge.getKey();
 
 							// ignore edges where the second vertex is already connect to vertex4
 							if(vertex4 != selectedNeighbor && graph.hasEdge(vertex4, selectedNeighbor) == false) {			                
 								final float oldNeighborDist = edge.getValue();
-								final float newNeighborDist = space.computeDistance(vertex4Feature, graph.getVertex(selectedNeighbor).getFeature());
+								final float newNeighborDist = space.computeDistance(vertex4Feature, graph.getVertexById(selectedNeighbor).getFeature());
 
 								// do all the changes improve the graph?
 								float newGain = (totalGain + oldNeighborDist) - (goodVertexDist + newNeighborDist);
@@ -491,7 +491,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 				if(graph.hasEdge(vertex1, vertex4) == false) {
 
 					// Is the total of all changes still beneficial?
-					final float dist14 = space.computeDistance(graph.getVertex(vertex1).getFeature(), graph.getVertex(vertex4).getFeature());
+					final float dist14 = space.computeDistance(graph.getVertexById(vertex1).getFeature(), graph.getVertexById(vertex4).getFeature());
 					if((totalGain - dist14) > 0) {
 
 						final int[] entryVertices = { vertex2, vertex3 }; 
@@ -539,7 +539,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 	 * @return
 	 */
 	private boolean checkRNG(int vertexId, int targetId, float vertexTargetWeight) {
-		for(Map.Entry<Integer, Float> neighbor : graph.getVertex(vertexId).getEdges().entrySet()) {
+		for(Map.Entry<Integer, Float> neighbor : graph.getVertexById(vertexId).getEdges().entrySet()) {
 			float neighborTargetWeight = graph.getEdgeWeight(neighbor.getKey(), targetId);
 			if(neighborTargetWeight >= 0 && vertexTargetWeight > Math.max(neighbor.getValue(), neighborTargetWeight)) 
 				return false;
@@ -553,13 +553,13 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 	 *  
 	 * @param removeTask
 	 */
-	private void shrinkGraph(int label) {
+	private void shrinkGraphByLabel(int label) {
 		final int edgesPerVertex = graph.getEdgesPerVertex();
 		final FeatureSpace space = graph.getFeatureSpace();
 		final List<BuilderChange> changes = new ArrayList<>();
 
 		// 1 remove the vertex and collect the vertices which are missing an edge
-		final Set<Integer> involvedVertices = graph.removeVertex(label).getEdges().keySet();
+		final Set<Integer> involvedVertices = graph.removeVertexByLabel(label).keySet();
 		
 		// 1.1 handle the use case where the graph does not have enough vertices to fulfill the edgesPerVertex requirement
 		//     and just remove the vertex without reconnecting the involved vertices because they are all fully connected
@@ -575,7 +575,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 				final Set<Integer> reachableVertices = reachability.computeIfAbsent(involvedVertex, k -> new HashSet<>(Arrays.asList(k)));
 				
 				// is any of the adjacent neighbors of involvedVertex also in the set of involvedVertices
-				for(int neighborId : graph.getVertex(involvedVertex).getEdges().keySet()) {
+				for(int neighborId : graph.getVertexById(involvedVertex).getEdges().keySet()) {
 					if(involvedVertices.contains(neighborId) && reachableVertices.contains(neighborId) == false) {
 						
 						// if this neighbor does not have a set of reachable vertices yet, share the current set reachableVertices
@@ -605,14 +605,14 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 					
 					// is there a path from any of the other involvedVertices to the lonely vertex?
 					final int[] fromVertices = involvedVertices.stream().mapToInt(Integer::intValue).filter(v -> v != involvedVertex).toArray();
-					List<ObjectDistance> traceback = graph.hasPath(fromVertices, involvedVertex, improveK, improveEps);
+					List<VertexDistance> traceback = graph.hasPath(fromVertices, involvedVertex, improveK, improveEps);
 					if(traceback.size() == 0) {
 						// TODO implement flood full to find an involved vertex without compute distances
 						traceback = graph.hasPath(fromVertices, involvedVertex, graph.getVertexCount(), 1);
 					}
 					
 					// the first vertex in the traceback path must be one of the other involved vertices
-					final int reachableVertex = traceback.get(traceback.size()-1).getObjId();
+					final int reachableVertex = traceback.get(traceback.size()-1).getVertexId();
 					final Set<Integer> reachableVerticesOfReachableVertex = reachability.get(reachableVertex);
 
 					// add the involvedVertex to its reachable set and replace the reachable set of the involvedVertex 
@@ -624,7 +624,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 		
 		// 3 reconnect the groups
 		{
-			final Function<Collection<Integer>, VertexData[]> idsToVertexArray = ids -> ids.stream().map(id -> graph.getVertex(id)).toArray(VertexData[]::new);
+			final Function<Collection<Integer>, VertexData[]> idsToVertexArray = ids -> ids.stream().map(id -> graph.getVertexById(id)).toArray(VertexData[]::new);
 			final VertexData[][] reachableGroups = reachability.values().stream().distinct().map(idsToVertexArray).toArray(VertexData[][]::new);
 						
 			// 3.1 find the biggest group and connect each of its vertices to one of the smaller groups
@@ -706,9 +706,9 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 					VertexData vertexB = null; 
 					float weightAB = Float.MAX_VALUE;
 					for (int neighborOfA : vertexA.getEdges().keySet()) {
-						for (int potentialVertexBId : graph.getVertex(neighborOfA).getEdges().keySet()) {
+						for (int potentialVertexBId : graph.getVertexById(neighborOfA).getEdges().keySet()) {
 							if(vertexA.getId() != potentialVertexBId && vertexA.getEdges().containsKey(potentialVertexBId) == false) {	
-								final VertexData potentialVertexB = graph.getVertex(potentialVertexBId);
+								final VertexData potentialVertexB = graph.getVertexById(potentialVertexBId);
 								final float weight = space.computeDistance(vertexA.getFeature(), potentialVertexB.getFeature());
 								if(weight < weightAB) {
 									weightAB = weight;
@@ -728,7 +728,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 							float weightCD = Float.MAX_VALUE;
 							for (int potentialVertexDId : vertexB.getEdges().keySet()) {
 								if(vertexA.getId() != potentialVertexDId && vertexC.getId() != potentialVertexDId && vertexC.getEdges().containsKey(potentialVertexDId) == false) {
-									final VertexData potentialVertexD = graph.getVertex(potentialVertexDId);
+									final VertexData potentialVertexD = graph.getVertexById(potentialVertexDId);
 									final float weight = space.computeDistance(vertexC.getFeature(), potentialVertexD.getFeature());
 									if(weight < weightCD) {
 										weightCD = weight;
@@ -784,12 +784,12 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 
 				if(addTaskManipulationIndex < delTaskManipulationIndex) {
 					BuilderAddTask addTask = this.newEntryQueue.poll();
-					extendGraph(addTask.label, addTask.feature);
+					extendGraphByLabel(addTask.label, addTask.feature);
 					added++;
 					lastAdd = addTask.label;
 				} else {
 					BuilderRemoveTask removeTask = this.removeEntryQueue.poll();
-					shrinkGraph(removeTask.label);
+					shrinkGraphByLabel(removeTask.label);
 					deleted++;
 					lastDelete = removeTask.label;
 				}

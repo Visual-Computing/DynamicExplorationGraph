@@ -7,14 +7,16 @@ import java.util.Iterator;
 import java.util.Random;
 import java.util.TreeSet;
 import java.util.function.IntConsumer;
+import java.util.stream.IntStream;
 
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.GraphFilter;
 import com.vc.deg.graph.VertexConsumer;
 import com.vc.deg.ref.designer.EvenRegularGraphDesigner;
-import com.vc.deg.ref.graph.MapBasedWeightedUndirectedRegularGraph;
-import com.vc.deg.ref.search.ObjectDistance;
+import com.vc.deg.ref.graph.ArrayBasedWeightedUndirectedRegularGraph;
+import com.vc.deg.ref.graph.VertexData;
+import com.vc.deg.ref.graph.VertexDistance;
 
 
 /**
@@ -24,7 +26,7 @@ import com.vc.deg.ref.search.ObjectDistance;
  */
 public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGraph {
 
-	protected final MapBasedWeightedUndirectedRegularGraph internalGraph;
+	protected final ArrayBasedWeightedUndirectedRegularGraph internalGraph;
 	protected final EvenRegularGraphDesigner designer;
 
 	/**
@@ -34,7 +36,7 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	 * @param edgesPerVertex
 	 */
 	public DynamicExplorationGraph(FeatureSpace space, int edgesPerVertex) {
-		this.internalGraph = new MapBasedWeightedUndirectedRegularGraph(edgesPerVertex, space);
+		this.internalGraph = new ArrayBasedWeightedUndirectedRegularGraph(edgesPerVertex, space);
 		this.designer = new EvenRegularGraphDesigner(internalGraph); 
 	}
 
@@ -46,7 +48,7 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	 * @param edgesPerVertex
 	 */
 	public DynamicExplorationGraph(FeatureSpace space, int expectedSize, int edgesPerVertex) {
-		this.internalGraph = new MapBasedWeightedUndirectedRegularGraph(edgesPerVertex, expectedSize, space);
+		this.internalGraph = new ArrayBasedWeightedUndirectedRegularGraph(edgesPerVertex, expectedSize, space);
 		this.designer = new EvenRegularGraphDesigner(internalGraph); 
 	}
 	
@@ -55,7 +57,7 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	 * 
 	 * @param graph
 	 */
-	private DynamicExplorationGraph(MapBasedWeightedUndirectedRegularGraph graph) {
+	private DynamicExplorationGraph(ArrayBasedWeightedUndirectedRegularGraph graph) {
 		this.internalGraph = graph;
 		this.designer = new EvenRegularGraphDesigner(internalGraph); 
 	}
@@ -65,7 +67,7 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	 * 
 	 * @return
 	 */
-	public MapBasedWeightedUndirectedRegularGraph getInternalGraph() {
+	public ArrayBasedWeightedUndirectedRegularGraph getInternalGraph() {
 		return internalGraph;
 	}
 	
@@ -77,26 +79,53 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	 */
 	@Override
 	public void forEachVertex(VertexConsumer consumer) {
-		this.internalGraph.getVertices().forEach(vertex -> consumer.accept(vertex.getId(), vertex.getFeature()));
+		this.internalGraph.getVertices().forEach(vertex -> consumer.accept(vertex.getLabel(), vertex.getFeature()));
 	}
 	
 	@Override
 	public void forEachNeighbor(int label, IntConsumer idConsumer) {
-		this.internalGraph.getVertex(label).getEdges().keySet().forEach(id -> idConsumer.accept(id));
+		this.internalGraph.getVertexByLabel(label).getEdges().keySet().forEach(neighborId -> 
+			idConsumer.accept(this.internalGraph.getVertexById(neighborId).getLabel())
+		);
 	}
 	
 	@Override
 	public int getRandomLabel(Random random) {
 		final int steps = random.nextInt(size());
-		final Iterator<Integer> it = this.internalGraph.getVertexIds().iterator();
+		final Iterator<VertexData> it = this.internalGraph.getVertices().iterator();
 		for (int i = 0; i < steps; i++) 
 			it.next();		
-		return it.next();
+		return it.next().getLabel();
+	}
+	
+	@Override
+	public int getRandomLabel(Random random, GraphFilter filter) {
+		int label = -1;
+		int lowestIndex = size();
+		do {
+
+			final int index = random.nextInt(lowestIndex);
+			final Iterator<VertexData> it = this.internalGraph.getVertices().iterator();
+			for (int i = 0; i < index; i++) 
+				it.next();		
+			label = it.next().getLabel();
+			
+			// test the next element if the random label does not pass the filter
+			while(filter.isValid(label) == false && it.hasNext())
+				label = it.next().getLabel();
+		
+			// all vertices after the lowestIndex have already been tested
+			lowestIndex = Math.min(lowestIndex, index);
+			
+		// if lowest index reaches 0 we have tested all elements against the filter
+		} while(lowestIndex > 0 && filter.isValid(label) == false);
+		
+		return label;
 	}
 	
 	@Override
 	public FeatureVector getFeature(int label) {
-		return this.internalGraph.getVertex(label).getFeature();
+		return this.internalGraph.getVertexByLabel(label).getFeature();
 	}
 
 	@Override
@@ -122,24 +151,25 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 
 	@Override
 	public int[] search(Collection<FeatureVector> queries, int k, float eps, GraphFilter filter) {
-		final int[] entryPoint = new int[] { internalGraph.getVertices().iterator().next().getId() };
-		final TreeSet<ObjectDistance> topList = internalGraph.search(queries, k, eps, filter, entryPoint);
+		final int[] entryVertexId = new int[] { internalGraph.getVertices().iterator().next().getId() };
+		final TreeSet<VertexDistance> topList = internalGraph.search(queries, k, eps, filter, entryVertexId);
 		
 		final int[] result = new int[topList.size()];
-		final Iterator<ObjectDistance> it = topList.iterator();
+		final Iterator<VertexDistance> it = topList.iterator();
 		for (int i = 0; i < topList.size(); i++) 
-			result[i] = it.next().getObjId();
+			result[i] = it.next().getVertexLabel();
 		return result;
 	}
 
 	@Override
 	public int[] explore(int[] entryLabels, int k, int maxDistanceComputationCount, GraphFilter filter) {
-	final TreeSet<ObjectDistance> topList = internalGraph.explore(entryLabels, k, maxDistanceComputationCount, filter);
+	final int[] entryIds = IntStream.of(entryLabels).map(label -> internalGraph.getVertexByLabel(label).getId()).toArray();
+	final TreeSet<VertexDistance> topList = internalGraph.explore(entryIds, k, maxDistanceComputationCount, filter);
 		
 		final int[] result = new int[topList.size()];
-		final Iterator<ObjectDistance> it = topList.iterator();
+		final Iterator<VertexDistance> it = topList.iterator();
 		for (int i = 0; i < topList.size(); i++) 
-			result[i] = it.next().getObjId();
+			result[i] = it.next().getVertexLabel();
 		return result;
 	}
 	
@@ -155,7 +185,14 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	}
 
 	/**
-	 * Goal: read and write should be compatible with deglib in c-lang. Problem is the endians and the FeatureVector object type written into the output file.
+	 * Goal: Write should be compatible with deglib in c-lang. 
+	 * 		- all internal id are between 0 to n where n is the number of vertices (no holes)
+	 * 		- the graph is stored in little endian format
+	 * 		-
+	 * 
+	 * 
+	 * 
+	 * Problem: is the endians and the FeatureVector object type written into the output file.
 	 * 		 We might want to store another file next to it with the FeatureVector object type information (e.g. storing a single FeatureVector object).
 	 * 		 - we use the FeatureVector and memory pool option to when reading from file 
 	 * 		 - we could write primitive types in the filename (good for c-lang too) 
@@ -179,7 +216,7 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	 * @throws IOException
 	 */
 	public static DynamicExplorationGraph readFromFile(Path file) throws IOException {
-		return new DynamicExplorationGraph(MapBasedWeightedUndirectedRegularGraph.readFromFile(file));
+		return new DynamicExplorationGraph(ArrayBasedWeightedUndirectedRegularGraph.readFromFile(file));
 	}
 	
 	/**
@@ -191,7 +228,7 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	 * @throws IOException
 	 */
 	public static DynamicExplorationGraph readFromFile(Path file, String featureType) throws IOException {
-		return new DynamicExplorationGraph(MapBasedWeightedUndirectedRegularGraph.readFromFile(file, featureType));
+		return new DynamicExplorationGraph(ArrayBasedWeightedUndirectedRegularGraph.readFromFile(file, featureType));
 	}
 
 }

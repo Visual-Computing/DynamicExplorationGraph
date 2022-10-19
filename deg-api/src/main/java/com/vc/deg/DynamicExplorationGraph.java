@@ -308,7 +308,14 @@ public interface DynamicExplorationGraph {
 	 */
 	public int getRandomLabel(Random random);
 	
-	
+	/**
+	 * Get a random label which is allowed by the filter
+	 * 
+	 * @param random
+	 * @param filter of valid labels
+	 * @return
+	 */
+	public int getRandomLabel(Random random, GraphFilter filter);
 	
 	
 	/**

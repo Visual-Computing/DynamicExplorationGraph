@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.function.IntConsumer;
 
+import com.vc.deg.DynamicExplorationGraph;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.GraphFilter;
@@ -118,6 +119,11 @@ public class HierarchicalDynamicExplorationGraph implements com.vc.deg.Hierarchi
 	@Override
 	public int getRandomLabelAtLevel(Random random, int atLevel) {
 		return getGraph(atLevel).getRandomLabel(random);
+	}
+	
+	@Override
+	public int getRandomLabelAtLevel(Random random, int atLevel, GraphFilter filter) {
+		return getGraph(atLevel).getRandomLabel(random, filter);
 	}
 
 	@Override
@@ -235,7 +241,7 @@ public class HierarchicalDynamicExplorationGraph implements com.vc.deg.Hierarchi
 		final List<DynamicExplorationGraph> newLayers = new ArrayList<>(layerCount);
 		for (int i = 0; i < layerCount; i++) {
 			final Path graphFile = targetDir.resolve(info.get(7 + i));
-			newLayers.add(DynamicExplorationGraph.readFromFile(graphFile));	
+			newLayers.add(com.vc.deg.ref.DynamicExplorationGraph.readFromFile(graphFile));	
 		}	
 		
 		return new HierarchicalDynamicExplorationGraph(newLayers, space, edgesPerVertex, topRankSize);

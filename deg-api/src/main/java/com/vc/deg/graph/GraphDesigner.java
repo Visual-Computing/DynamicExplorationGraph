@@ -38,9 +38,9 @@ public interface GraphDesigner {
 	/**
 	 * Queue the removal of all vertices which are in the graph but do not pass the filter
 	 * 
-	 * @param filter
+	 * @param labelFilter
 	 */
-	public void removeIf(IntPredicate filter);	
+	public void removeIf(IntPredicate labelFilter);	
 	
 	/**
 	 * Builds and improve the graph. All new data points or removal requests will be processed first

@@ -1,7 +1,6 @@
 package com.vc.deg.ref.hierarchy;
 
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -9,10 +8,11 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.IntPredicate;
 
+import com.vc.deg.DynamicExplorationGraph;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.GraphDesigner;
-import com.vc.deg.ref.DynamicExplorationGraph;
+import com.vc.deg.graph.GraphFilter;
 import com.vc.deg.ref.designer.EvenRegularGraphDesigner.BuilderAddTask;
 import com.vc.deg.ref.designer.EvenRegularGraphDesigner.BuilderRemoveTask;
 
@@ -22,7 +22,7 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 	
 	
 	protected final List<DynamicExplorationGraph> layers;
-	protected final Map<Integer, Integer> keyToRank;
+	protected final Map<Integer, Integer> labelToRank;
 	protected final FeatureSpace space;
 	protected final int edgesPerVertex;
 	protected final int topRankSize;
@@ -44,7 +44,7 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 	
 	public HierarchicalGraphDesigner(List<DynamicExplorationGraph> layers, FeatureSpace space, int edgesPerVertex, int topRankSize) {
 		this.layers = layers;
-		this.keyToRank = new HashMap<>();
+		this.labelToRank = new HashMap<>();
 		this.space = space;
 		this.edgesPerVertex = edgesPerVertex;
 		this.topRankSize = topRankSize;
@@ -66,7 +66,7 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 		// fill the rank map
 		for (int i = 0; i < layers.size(); i++) {
 			final int rank = i;
-			layers.get(i).forEachVertex((id, feature) -> this.keyToRank.put(id, rank));
+			layers.get(i).forEachVertex((label, feature) -> this.labelToRank.put(label, rank));
 		}		
 	}
 	
@@ -221,12 +221,12 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 		while(layers.size() < rankCount) {
 			
 			// add another rank at the bottom (new rank 0) and fill it with the keys from the rank above
-			final DynamicExplorationGraph deg = (layers.size() == 0) ? new DynamicExplorationGraph(space, edgesPerVertex) : layers.get(0).copy();
+			final DynamicExplorationGraph deg = (layers.size() == 0) ? new com.vc.deg.ref.DynamicExplorationGraph(space, edgesPerVertex) : layers.get(0).copy();
 			applyDesignerSettings(deg);
 			layers.add(0, deg);
 						
 			// promote all existing elements one rank up
-			for(Map.Entry<Integer, Integer> entry : keyToRank.entrySet()) 
+			for(Map.Entry<Integer, Integer> entry : labelToRank.entrySet()) 
 				entry.setValue(entry.getValue() + 1);
 		}
 	}
@@ -238,7 +238,7 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 	protected void balanceRanks() {
 
 		// how many elements are at each rank
-		final int[] rankSizes = rankDistribution(keyToRank.size(), topRankSize, desiredShrinkFactor);
+		final int[] rankSizes = rankDistribution(labelToRank.size(), topRankSize, desiredShrinkFactor);
 
 		// promote entire rank 0 to rank 1 and remove rank 0 afterwards
 		while(rankSizes.length < layers.size()) {
@@ -248,7 +248,7 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 			layers.remove(1);
 			
 			// degrade all existing elements one rank down
-			for(Map.Entry<Integer, Integer> entry : keyToRank.entrySet()) 
+			for(Map.Entry<Integer, Integer> entry : labelToRank.entrySet()) 
 				entry.setValue(Math.max(0, entry.getValue() - 1));
 		}
 		
@@ -263,9 +263,9 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 			while(newVertices.size() < requiredAdds) {
 				
 				// get random node from a rank below which does not exist at the current rank
-				int id = getRandomKey(lowerLayer, rank-1);
+				int label = getRandomLabel(lowerLayer, rank-1);
 				
-				newVertices.put(id, lowerLayer.getFeature(id));
+				newVertices.put(label, lowerLayer.getFeature(label));
 			}
 			
 			// add the vertices to promote to the next layer
@@ -275,7 +275,7 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 				// add the vertex to the designer
 				for (Map.Entry<Integer, FeatureVector> entry : newVertices.entrySet()) {					
 					designer.add(entry.getKey(), entry.getValue());
-					keyToRank.put(entry.getKey(), rank);
+					labelToRank.put(entry.getKey(), rank);
 				}
 
 				// start the design process to add the vertices to the graph
@@ -294,34 +294,31 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 	 * @param targetRank
 	 * @return
 	 */
-	protected int getRandomKey(int targetRank) {
-		return getRandomKey(layers.get(targetRank), targetRank);
+	protected int getRandomLabel(int targetRank) {
+		return getRandomLabel(layers.get(targetRank), targetRank);
 	}
 	
 	/**
-	 * Get a random id which only exists on this rank and return valid when checked 
-	 * 	 * 
+	 * Get a random id which only exists on this rank and below.
+	 * Return valid when checked 
+	 * 	
 	 * @param graph
 	 * @param targetRank
-	 * @return -1 if not valid id can be found
+	 * @return -1 i not valid id can be found
 	 */
-	protected int getRandomKey(DynamicExplorationGraph graph, int targetRank) {		
-		int id = -1;
-		do {
-
-			final int steps = rnd.nextInt(graph.size());
-			final Iterator<Integer> it = graph.getInternalGraph().getVertexIds().iterator();
-			for (int i = 0; i < steps; i++) 
-				it.next();		
-			id = it.next();
+	protected int getRandomLabel(DynamicExplorationGraph graph, int targetRank) {	
+		return graph.getRandomLabel(rnd, new GraphFilter() {
 			
-			// test the next element if the random id exists on this rank 
-			while(keyToRank.get(id) != targetRank && it.hasNext())
-				id = it.next();
-		
-		} while(keyToRank.get(id) != targetRank);
-		
-		return id;
+			@Override
+			public int size() {
+				return graph.size() - (int) ((float)graph.size() / desiredShrinkFactor);
+			}
+			
+			@Override
+			public boolean isValid(int label) {
+				return labelToRank.get(label) == targetRank;
+			}
+		});
 	}
 	
 	// ----------------------------------------------------------------------------------------------
@@ -347,7 +344,7 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 	
 	@Override
 	public void removeIf(IntPredicate filter) {
-		keyToRank.keySet().forEach(id -> {
+		labelToRank.keySet().forEach(id -> {
 			if(filter.test(id))
 				remove(id);
 		});
@@ -360,8 +357,8 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 	 * @param feature
 	 */
 	private boolean extendGraph(int label, FeatureVector feature) {
-		if(keyToRank.containsKey(label) == false) {
-			int newSize = keyToRank.size() + 1;
+		if(labelToRank.containsKey(label) == false) {
+			int newSize = labelToRank.size() + 1;
 			
 			// make sure there is enough space to add another element
 			ensureSize(newSize);
@@ -381,9 +378,9 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 			for (int r = targetRank; r > 0; r--) {
 				
 				// degrade random key which only exists on this rank
-				int keyToDegrade = getRandomKey(r);
+				int keyToDegrade = getRandomLabel(r);
 				removeVertexFromGraphAtRank(keyToDegrade, r);
-				keyToRank.put(keyToDegrade, r - 1);
+				labelToRank.put(keyToDegrade, r - 1);
 
 				// add new key at rank
 				addVertexToGraphAtRank(label, feature, r);
@@ -391,7 +388,7 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 			
 			// add new key to rank 0 and map of all keys
 			addVertexToGraphAtRank(label, feature, 0);
-			keyToRank.put(label, targetRank);
+			labelToRank.put(label, targetRank);
 			
 			return true;
 		}
@@ -424,10 +421,10 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 	 * @param label
 	 */
 	private boolean shrinkGraph(int label) {
-		if(keyToRank.containsKey(label) == true) {
+		if(labelToRank.containsKey(label) == true) {
 			
 			// remove key from all ranks
-			int maxRank = keyToRank.remove(label);
+			int maxRank = labelToRank.remove(label);
 			for (int rank = 0; rank <= maxRank; rank++) 
 				removeVertexFromGraphAtRank(label, rank);
 			
