@@ -131,15 +131,15 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 
 		final int targetNeighborCount = Math.min(graph.getVertexCount() - 1, expectedNeighbors);
 		for(VertexData data : graph.getVertices()) {
-			final Collection<Float> weights = data.getEdges().values();
-			if(weights.size() != targetNeighborCount) 
-				throw new RuntimeException("The vertex "+data.getId()+" has "+weights.size()+" neighbors, expected "+targetNeighborCount);
+			final int edgeCount = data.getEdges().size();
+			if(edgeCount != targetNeighborCount) 
+				throw new RuntimeException("The vertex "+data.getId()+" has "+edgeCount+" neighbors, expected "+targetNeighborCount);
 		}
 
 		final FeatureSpace space = graph.getFeatureSpace();
 		for(VertexData data : graph.getVertices()) {
 			for(Map.Entry<Integer, Float> entry : data.getEdges().entrySet()) {
-				final float dist  =space.computeDistance(data.getFeature(), graph.getVertexById(entry.getKey()).getFeature());
+				final float dist = space.computeDistance(data.getFeature(), graph.getVertexById(entry.getKey()).getFeature());
 				if(entry.getValue() != dist)
 					throw new RuntimeException("The vertex "+data.getId()+" has a weight "+entry.getValue()+" which is not equal to its distance "+dist);
 			}

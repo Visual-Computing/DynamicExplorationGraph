@@ -11,12 +11,15 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.koloboke.collect.map.IntFloatMap;
+import com.koloboke.collect.map.IntIntMap;
+import com.koloboke.collect.map.hash.HashIntFloatMaps;
+import com.koloboke.collect.map.hash.HashIntIntMaps;
 import com.vc.deg.FeatureFactory;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
@@ -28,8 +31,8 @@ import com.vc.deg.ref.graph.VertexData;
 public class GraphVersionConverter {
 	private static Logger log = LoggerFactory.getLogger(GraphVersionConverter.class);
 
-	private static final Path inputDir = Paths.get("c:\\Data\\Images\\navigu\\fashion_server\\graph\\");
-	private static final Path outputDir = Paths.get("c:\\Data\\Images\\navigu\\fashion_server\\graph_new\\");
+	private static final Path inputDir = Paths.get("c:\\Data\\Images\\navigu\\pixabay\\graph_old\\");
+	private static final Path outputDir = Paths.get("c:\\Data\\Images\\navigu\\pixabay\\graph\\");
 
 	public static void main(String[] args) throws IOException, ClassNotFoundException, NoSuchFieldException, SecurityException, IllegalArgumentException, IllegalAccessException {
 		try (Stream<Path> walk = Files.walk(inputDir)) {
@@ -136,7 +139,7 @@ public class GraphVersionConverter {
 				final float[] weights = new float[edgesPerVertex];
 				for (int e = 0; e < edgesPerVertex; e++) 
 					weights[e] = input.readFloat();	
-				Map<Integer,Float> edges = new HashMap<>(edgesPerVertex);
+				final IntFloatMap edges = HashIntFloatMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap(edgesPerVertex);
 				for (int e = 0; e < edgesPerVertex; e++)
 					edges.put(neighborIds[e], weights[e]);
 
@@ -153,7 +156,11 @@ public class GraphVersionConverter {
 
 			// convert old vertex design to new one
 			final List<VertexData> vertices = convertFrom0_1_2(oldVertices);
-			final Map<Integer, Integer> labelToId = vertices.stream().collect(Collectors.toMap(VertexData::getLabel, VertexData::getId));
+			final IntIntMap labelToId = HashIntIntMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap(c -> {
+				vertices.forEach(vertex -> {
+					c.accept(vertex.getLabel(), vertex.getId());
+				});
+			});
 			return new ArrayBasedWeightedUndirectedRegularGraph(edgesPerVertex, vertices, labelToId, space);
 		}
 	}
@@ -173,9 +180,7 @@ public class GraphVersionConverter {
 
 		final List<VertexData> output = new ArrayList<>();
 		for (VertexData vertex : input) {
-			final Map<Integer, Float> edges = new HashMap<>(vertex.getEdges().size());
-			for (Map.Entry<Integer, Float> edge : vertex.getEdges().entrySet()) 
-				edges.put(oldIdToId.get(edge.getKey()), edge.getValue());
+			final IntFloatMap edges = HashIntFloatMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap(vertex.getEdges());
 			output.add(new VertexData(vertex.getLabel(), oldIdToId.get(vertex.getId()), vertex.getFeature(), edges));
 		}
 

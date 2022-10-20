@@ -1,8 +1,7 @@
 package com.vc.deg.ref.graph;
 
-import java.util.HashMap;
-import java.util.Map;
-
+import com.koloboke.collect.map.IntFloatMap;
+import com.koloboke.collect.map.hash.HashIntFloatMaps;
 import com.vc.deg.FeatureVector;
 
 /**
@@ -10,19 +9,19 @@ import com.vc.deg.FeatureVector;
  */
 public class VertexData  {
 	
-	protected final int label;
-	protected final int internalId;
-	protected final FeatureVector data;
-	protected final Map<Integer,Float> edges;
+	private final int label;
+	private final int internalId;
+	private final FeatureVector data;
+	private final IntFloatMap edges;
 	
 	public VertexData(int label, int internalId, FeatureVector data, int edgesPerVertex) {
 		this.label = label;
 		this.internalId = internalId;
 		this.data = data;
-		this.edges = new HashMap<>(edgesPerVertex);
+		this.edges = HashIntFloatMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap(edgesPerVertex);
 	}
 	
-	public VertexData(int label, int internalId, FeatureVector data, Map<Integer,Float> edges) {
+	public VertexData(int label, int internalId, FeatureVector data, IntFloatMap edges) {
 		this.label = label;
 		this.internalId = internalId;
 		this.data = data;
@@ -41,7 +40,7 @@ public class VertexData  {
 		return data;
 	}
 	
-	public Map<Integer,Float> getEdges() {
+	public IntFloatMap getEdges() {
 		return edges;
 	}	
 }

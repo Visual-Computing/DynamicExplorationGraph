@@ -14,7 +14,7 @@ subprojects {
     targetCompatibility = 1.8
     
     // group and version of the project 
-	version = '0.1.5'
+	version = '0.1.6'
 	group = 'com.vc'
 
     ext {

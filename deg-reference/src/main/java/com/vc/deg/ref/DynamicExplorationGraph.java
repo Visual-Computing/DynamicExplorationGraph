@@ -84,7 +84,7 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	
 	@Override
 	public void forEachNeighbor(int label, IntConsumer idConsumer) {
-		this.internalGraph.getVertexByLabel(label).getEdges().keySet().forEach(neighborId -> 
+		this.internalGraph.getVertexByLabel(label).getEdges().keySet().forEach((int neighborId) -> 
 			idConsumer.accept(this.internalGraph.getVertexById(neighborId).getLabel())
 		);
 	}

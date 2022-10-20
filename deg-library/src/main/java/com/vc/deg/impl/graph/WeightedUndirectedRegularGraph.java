@@ -39,7 +39,7 @@ public class WeightedUndirectedRegularGraph implements KryoSerializable {
 	}
 	
 	public void addNode(int id) {
-		nodes.put(id, HashIntFloatMaps.newMutableMap(edgesPerNode));
+		nodes.put(id, HashIntFloatMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap(edgesPerNode));
 	}
 	
 	public FeatureSpace getFeatureSpace() {

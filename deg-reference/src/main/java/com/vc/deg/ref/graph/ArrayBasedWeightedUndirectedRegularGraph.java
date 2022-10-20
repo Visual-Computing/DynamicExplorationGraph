@@ -29,6 +29,10 @@ import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.koloboke.collect.map.IntFloatMap;
+import com.koloboke.collect.map.IntIntMap;
+import com.koloboke.collect.map.hash.HashIntFloatMaps;
+import com.koloboke.collect.map.hash.HashIntIntMaps;
 import com.vc.deg.FeatureFactory;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
@@ -60,7 +64,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	/**
 	 * Label to vertex id map
 	 */
-	protected final Map<Integer, Integer> labelToId;
+	protected final IntIntMap labelToId;
 	
 	/**
 	 * The feature space knows who many bytes the vertex data contains and how to compute the distance between two data objects.
@@ -75,18 +79,18 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	public ArrayBasedWeightedUndirectedRegularGraph(int edgesPerVertex, FeatureSpace space) {
 		this.edgesPerVertex = edgesPerVertex;
 		this.vertices = new ArrayList<>();	
-		this.labelToId = new HashMap<>();	
+		this.labelToId = HashIntIntMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap();
 		this.space = space;
 	}
 
 	public ArrayBasedWeightedUndirectedRegularGraph(int edgesPerVertex, int expectedSize, FeatureSpace space) {
 		this.edgesPerVertex = edgesPerVertex;
 		this.vertices = new ArrayList<>(expectedSize);	
-		this.labelToId = new HashMap<>(expectedSize);	
+		this.labelToId = HashIntIntMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap();
 		this.space = space;
 	}
 	
-	public ArrayBasedWeightedUndirectedRegularGraph(int edgesPerVertex, List<VertexData> vertices, Map<Integer, Integer> labelToId, FeatureSpace space) {
+	public ArrayBasedWeightedUndirectedRegularGraph(int edgesPerVertex, List<VertexData> vertices, IntIntMap labelToId, FeatureSpace space) {
 		this.edgesPerVertex = edgesPerVertex;
 		this.vertices = vertices;
 		this.labelToId = labelToId;		
@@ -110,8 +114,8 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	// ------------------------------------------------------------------------
 	
 	public VertexData getVertexByLabel(int label) {
-		Integer id = labelToId.getOrDefault(label, null);
-		return (id == null) ? null : vertices.get(id);
+		int id = labelToId.getOrDefault(label, -1);
+		return (id == -1) ? null : vertices.get(id);
 	}
 
 	public VertexData addVertex(int label, FeatureVector data) {
@@ -136,12 +140,12 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	 * @param label of the vertex to delete
 	 * @return the edges of the deleted vertex
 	 */
-	public Map<Integer, Float> removeVertexByLabel(int label) {
+	public IntFloatMap removeVertexByLabel(int label) {
 		
 		// remove all directed edges from this vertex to any other vertex
-		final Integer id = labelToId.remove(label);
-		if(id != null) {
-			final Map<Integer, Float> removedVertexEdges = vertices.get(id).getEdges();
+		final int id = labelToId.remove(label);
+		if(id != labelToId.defaultValue()) {
+			final IntFloatMap removedVertexEdges = vertices.get(id).getEdges();
 			
 			// remove all edges pointing to this vertex
 			for(int otherId : removedVertexEdges.keySet()) 
@@ -189,7 +193,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 		final VertexData vertexData = vertices.get(id1);
 		if(vertexData == null)
 			return false;
-		return vertexData.edges.containsKey(id2);
+		return vertexData.getEdges().containsKey(id2);
 	}
 	
 	public int getEdgesPerVertex() {
@@ -213,7 +217,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	 */
 	private boolean addDirectedEdge(int fromId, int toId, float weight) {
 		final VertexData vertexData = vertices.get(fromId);
-		return (vertexData.edges.put(toId, weight) == null);
+		return (vertexData.getEdges().put(toId, weight) == vertexData.getEdges().defaultValue());
 	}
 
 	public boolean removeUndirectedEdge(int id1, int id2) {
@@ -233,7 +237,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	private boolean removeDirectedEdge(int fromId, int toId) {
 		final VertexData vertexData = vertices.get(fromId);
 		if(vertexData != null) 
-			return (vertexData.edges.remove(toId) != null);
+			return (vertexData.getEdges().remove(toId) != vertexData.getEdges().defaultValue());
 		return false;
 	}
 	
@@ -247,10 +251,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 		final VertexData vertexData = vertices.get(id1);
 		if(vertexData == null)
 			return -1;
-		final Float value = vertexData.edges.get(id2);
-		if(value == null)
-			return -1;
-		return value;
+		return vertexData.getEdges().getOrDefault(id2, -1);
 	}
 
 	
@@ -299,8 +300,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 				break;
 
 			// traverse never seen vertices
-			for(Map.Entry<Integer, Float> edge : nextVertex.getVertex().getEdges().entrySet()) {
-				int neighborId = edge.getKey();			
+			for(final int neighborId : nextVertex.getVertex().getEdges().keySet()) {
 				if(checkedIds.get(neighborId) == false) {
 					checkedIds.set(neighborId);
 					
@@ -410,8 +410,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 				break;
 
 			// traverse never seen vertices
-			for(Map.Entry<Integer, Float> edge : nextVertex.getVertex().getEdges().entrySet()) {
-				final int neighborId = edge.getKey();			
+			for(final int neighborId : nextVertex.getVertex().getEdges().keySet()) {
 				if(checkedIds.get(neighborId) == false) {
 					checkedIds.set(neighborId);
 					
@@ -504,8 +503,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 				break;
 
 			// traverse never seen vertices
-			for(Map.Entry<Integer, Float> edge : nextVertex.getVertex().getEdges().entrySet()) {
-				final int neighborId = edge.getKey();			
+			for(final int neighborId : nextVertex.getVertex().getEdges().keySet()) {
 				if(checkedIds.get(neighborId) == false) {
 					checkedIds.set(neighborId);
 					
@@ -546,10 +544,10 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	 * @return
 	 */
 	public ArrayBasedWeightedUndirectedRegularGraph copy() {
-		final Map<Integer, Integer> copyLabelMap = new HashMap<>(labelToId.size());
+		final IntIntMap copyLabelMap = HashIntIntMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap(labelToId.size());
 		final List<VertexData> copyVertices = new ArrayList<>(vertices.size());
 		for (VertexData vertex : vertices) {
-			final Map<Integer, Float> copyEdges = new HashMap<>(vertex.getEdges());
+			final IntFloatMap copyEdges = HashIntFloatMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap(vertex.getEdges());
 			copyLabelMap.put(vertex.getLabel(), vertex.getId());
 			copyVertices.add(new VertexData(vertex.getLabel(), vertex.getId(), vertex.getFeature(), copyEdges));
 		}
@@ -600,7 +598,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 				
 				// get the edges of the vertex, fill the remaining spots with self-loops and sort the result by the indices in ascending order
 				final List<IntFloat> edges = new ArrayList<>();	
-				vertex.getEdges().forEach((neighborIdx, weight) -> {
+				vertex.getEdges().forEach((int neighborIdx, float weight) -> {
 					edges.add(new IntFloat(neighborIdx, weight));
 				});
 				for (int r = 0; r < edgesPerVertex - vertex.getEdges().size(); r++)
@@ -667,7 +665,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 			
 			// read the vertex data
 			log.debug("Read graph from file "+file.toString());
-			final Map<Integer, Integer> labelMap = new HashMap<>((int)vertexCount); 
+			final IntIntMap labelMap = HashIntIntMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap((int)vertexCount); 
 			final List<VertexData> vertices = new ArrayList<>((int)vertexCount); 
 			for (int i = 0; i < vertexCount; i++) {
 				
@@ -681,7 +679,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 				final float[] weights = new float[edgesPerVertex];
 				for (int e = 0; e < edgesPerVertex; e++) 
 					weights[e] = input.readFloat();	
-				Map<Integer,Float> edges = new HashMap<>(edgesPerVertex);
+				final IntFloatMap edges = HashIntFloatMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap(edgesPerVertex);
 				for (int e = 0; e < edgesPerVertex; e++)
 					edges.put(neighborIds[e], weights[e]);
 				
