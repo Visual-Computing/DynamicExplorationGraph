@@ -2,12 +2,12 @@ package com.vc.deg.ref;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.Random;
 import java.util.TreeSet;
 import java.util.function.IntConsumer;
-import java.util.stream.IntStream;
 
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
@@ -147,13 +147,13 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	public EvenRegularGraphDesigner designer() {
 		return designer;
 	}
-	
-
 	@Override
-	public int[] search(Collection<FeatureVector> queries, int k, float eps, GraphFilter filter) {
-		final int[] entryVertexId = new int[] { internalGraph.getVertices().iterator().next().getId() };
-		final TreeSet<VertexDistance> topList = internalGraph.search(queries, k, eps, filter, entryVertexId);
+	public int[] search(Collection<FeatureVector> queries, int k, float eps, GraphFilter filter, int[] seedVertexLabels) {
+		int[] seedVertexIds = Arrays.stream(seedVertexLabels).map(label -> this.internalGraph.getVertexByLabel(label).getId()).toArray();
+		if(seedVertexIds.length == 0)
+			seedVertexIds = new int[] { internalGraph.getVertices().iterator().next().getId() };
 		
+		final TreeSet<VertexDistance> topList = internalGraph.search(queries, k, eps, filter, seedVertexIds);
 		final int[] result = new int[topList.size()];
 		final Iterator<VertexDistance> it = topList.iterator();
 		for (int i = 0; i < topList.size(); i++) 
@@ -162,17 +162,20 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	}
 
 	@Override
-	public int[] explore(int[] entryLabels, int k, int maxDistanceComputationCount, GraphFilter filter) {
-	final int[] entryIds = IntStream.of(entryLabels).map(label -> internalGraph.getVertexByLabel(label).getId()).toArray();
-	final TreeSet<VertexDistance> topList = internalGraph.explore(entryIds, k, maxDistanceComputationCount, filter);
+	public int[] explore(int[] seedLabels, int k, int maxDistanceComputationCount, GraphFilter filter) {
+		final int[] entryIds = Arrays.stream(seedLabels).map(label -> internalGraph.getVertexByLabel(label).getId()).toArray();
+
+		if(entryIds.length == 0)
+			throw new RuntimeException("None of the seed labels "+Arrays.toString(seedLabels)+" is in the graph.");
 		
+		final TreeSet<VertexDistance> topList = internalGraph.explore(entryIds, k, maxDistanceComputationCount, filter);
 		final int[] result = new int[topList.size()];
 		final Iterator<VertexDistance> it = topList.iterator();
 		for (int i = 0; i < topList.size(); i++) 
 			result[i] = it.next().getVertexLabel();
 		return result;
 	}
-	
+
 	
 	@Override
 	public DynamicExplorationGraph copy() {

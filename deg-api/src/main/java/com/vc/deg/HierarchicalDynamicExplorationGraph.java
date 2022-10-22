@@ -40,11 +40,6 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	@Override
 	public HierarchicalDynamicExplorationGraph copy();
 	
-	@Override
-	public default int[] search(Collection<FeatureVector> queries, int k, float eps, GraphFilter filter) {
-		return searchAtLevel(queries, 0, k, eps, filter);
-	}
-	
 	/**
 	 * Get the Dynamic Exploration Graph at the level
 	 * 
@@ -52,6 +47,11 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * @return
 	 */
 	public DynamicExplorationGraph getGraph(int atLevel);
+	
+	@Override
+	public default int[] search(Collection<FeatureVector> queries, int k, float eps, GraphFilter filter, int[] seedVertexLabels) {
+		return searchAtLevel(queries, 0, k, eps, filter, seedVertexLabels);
+	}
 	
 	/**
 	 * Search the graph for the best vertices matching the query at the given hierarchy level.
@@ -154,8 +154,31 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * @param filter null disables the filter
 	 * @return
 	 */
-	public int[] searchAtLevel(Collection<FeatureVector> queries, int atLevel, int k, float eps, GraphFilter filter);
+	public default int[] searchAtLevel(Collection<FeatureVector> queries, int atLevel, int k, float eps, GraphFilter filter) {
+		return searchAtLevel(queries, atLevel, k, eps, filter, new int[0]);
+	}
 	
+	/**
+	 * Search the graph for the best vertices matching one of the queries at the given hierarchy level.
+	 * The distance to all queries is calculated but only the shortest is kept.
+	 * 
+	 * Find k good vertices and keep searching if any of there
+	 * neighbors is better than the worst vertex in the result list
+	 * or close to it (search radius: eps) 
+	 * 
+	 * Any entry in the returning result list must pass the filter.
+	 * 
+	 * The search starts at the seedVertexLabels.
+	 * 
+	 * @param queries
+	 * @param atLevel hierarchy level to search
+	 * @param k
+	 * @param eps factor expands the search radius based on the distance to the query. 0 disables the factor, 1 doubles the search radius
+	 * @param filter null disables the filter
+	 * @param seedVertexLabels if empty or filled with invalid ids, the default starting point will be used instead
+	 * @return
+	 */
+	public int[] searchAtLevel(Collection<FeatureVector> queries, int atLevel, int k, float eps, GraphFilter filter, int[] seedVertexLabels);
 	
 	
 	
@@ -165,8 +188,8 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	
 		
 	@Override
-	public default int[] explore(int[] entryLabel, int k, int maxDistanceComputationCount, GraphFilter filter) {
-		return exploreAtLevel(entryLabel, 0, k, maxDistanceComputationCount, filter);
+	public default int[] explore(int[] seedLabel, int k, int maxDistanceComputationCount, GraphFilter filter) {
+		return exploreAtLevel(seedLabel, 0, k, maxDistanceComputationCount, filter);
 	}
 	
 
@@ -176,13 +199,15 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * Find k good vertices and keep searching if any of there
 	 * neighbors is better than the worst vertex in the result list. 
 	 * 
-	 * @param entryLabel
+	 * Any entry in the returning result is not the seed label.
+	 * 
+	 * @param seedLabel
 	 * @param atLevel hierarchy level to search
 	 * @param k
 	 * @return
 	 */
-	public default int[] exploreAtLevel(int entryLabel, int atLevel, int k) {
-		return exploreAtLevel(new int[] { entryLabel }, atLevel, k);
+	public default int[] exploreAtLevel(int seedLabel, int atLevel, int k) {
+		return exploreAtLevel(new int[] { seedLabel }, atLevel, k);
 	}
 	
 	/**
@@ -193,13 +218,15 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * Find k good vertices and keep searching if any of there
 	 * neighbors is better than the worst vertex in the result list. 
 	 * 
-	 * @param entryLabels
+	 * Any entry in the returning result list is not in the list of seed labels.
+	 * 
+	 * @param seedLabels
 	 * @param atLevel hierarchy level to search
 	 * @param k
 	 * @return
 	 */
-	public default int[] exploreAtLevel(int[] entryLabels, int atLevel, int k) {
-		return exploreAtLevel(entryLabels, atLevel, k, Integer.MAX_VALUE);
+	public default int[] exploreAtLevel(int[] seedLabels, int atLevel, int k) {
+		return exploreAtLevel(seedLabels, atLevel, k, Integer.MAX_VALUE);
 	}
 		
 	/**
@@ -211,14 +238,16 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * Stop searching if the number of checks (distance calculations) will exceed the
 	 * max distance computation count.
 	 * 
-	 * @param entryLabel
+	 * Any entry in the returning result is not the seed label.
+	 * 
+	 * @param seedLabel
 	 * @param atLevel hierarchy level to search
 	 * @param k
 	 * @param maxDistanceComputationCount
 	 * @return
 	 */
-	public default int[] exploreAtLevel(int entryLabel, int atLevel, int k, int maxDistanceComputationCount) {
-		return exploreAtLevel(new int[] {entryLabel}, atLevel, k, maxDistanceComputationCount);
+	public default int[] exploreAtLevel(int seedLabel, int atLevel, int k, int maxDistanceComputationCount) {
+		return exploreAtLevel(new int[] {seedLabel}, atLevel, k, maxDistanceComputationCount);
 	}
 	
 	/**
@@ -232,14 +261,16 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * Stop searching if the number of checks (distance calculations) will exceed the
 	 * max distance computation count.
 	 * 
-	 * @param entryLabel
+	 * Any entry in the returning result list is not in the list of seed labels.
+	 * 
+	 * @param seedLabels
 	 * @param atLevel hierarchy level to search
 	 * @param k
 	 * @param maxDistanceComputationCount
 	 * @return
 	 */
-	public default int[] exploreAtLevel(int[] entryLabel, int atLevel, int k, int maxDistanceComputationCount) {
-		return exploreAtLevel(entryLabel, atLevel, k, maxDistanceComputationCount, null);
+	public default int[] exploreAtLevel(int[] seedLabels, int atLevel, int k, int maxDistanceComputationCount) {
+		return exploreAtLevel(seedLabels, atLevel, k, maxDistanceComputationCount, null);
 	}
 		
 	/**
@@ -251,17 +282,17 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * Stop searching if the number of checks (distance calculations) will exceed the
 	 * max distance computation count.
 	 * 
-	 * Any entry in the returning result list must pass the filter.
+	 * Any entry in the returning result list must pass the filter and is not the seed label.
 	 * 
-	 * @param entryLabel
+	 * @param seedLabel
 	 * @param atLevel hierarchy level to search
 	 * @param k
 	 * @param maxDistanceComputationCount
 	 * @param filter null disables the filter
 	 * @return
 	 */
-	public default int[] exploreAtLevel(int entryLabel, int atLevel, int k, int maxDistanceComputationCount, GraphFilter filter) {
-		return exploreAtLevel(new int[] { entryLabel }, atLevel, k, maxDistanceComputationCount, filter);
+	public default int[] exploreAtLevel(int seedLabel, int atLevel, int k, int maxDistanceComputationCount, GraphFilter filter) {
+		return exploreAtLevel(new int[] { seedLabel }, atLevel, k, maxDistanceComputationCount, filter);
 	}
 	
 	/**
@@ -275,16 +306,19 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * Stop searching if the number of checks (distance calculations) will exceed the
 	 * max distance computation count.
 	 * 
-	 * Any entry in the returning result list must pass the filter.
+	 * Any entry in the returning result list must pass the filter and is not in the list of seed labels.
 	 * 
-	 * @param entryLabel
+	 * @param seedLabels
 	 * @param atLevel hierarchy level to search
 	 * @param k
 	 * @param maxDistanceComputationCount
 	 * @param filter null disables the filter
 	 * @return
 	 */
-	public int[] exploreAtLevel(int[] entryLabel, int atLevel, int k, int maxDistanceComputationCount, GraphFilter filter);
+	public int[] exploreAtLevel(int[] seedLabels, int atLevel, int k, int maxDistanceComputationCount, GraphFilter filter);
+	
+	
+	
 	
 	/**
 	 * Size of the graph at the given level

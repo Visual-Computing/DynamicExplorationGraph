@@ -145,4 +145,12 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 		// TODO Auto-generated method stub
 		return 0;
 	}
+
+
+	@Override
+	public int[] search(Collection<FeatureVector> queries, int k, float eps, GraphFilter filter,
+			int[] seedVertexLabels) {
+		// TODO Auto-generated method stub
+		return null;
+	}
 }

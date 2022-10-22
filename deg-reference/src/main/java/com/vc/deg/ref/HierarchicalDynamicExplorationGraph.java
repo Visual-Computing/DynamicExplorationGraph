@@ -77,8 +77,8 @@ public class HierarchicalDynamicExplorationGraph implements com.vc.deg.Hierarchi
 	}
 	
 	@Override
-	public int[] searchAtLevel(Collection<FeatureVector> queries, int atLevel, int k, float eps, GraphFilter filter) {
-		return getGraph(atLevel).search(queries, k, eps, filter);
+	public int[] searchAtLevel(Collection<FeatureVector> queries, int atLevel, int k, float eps, GraphFilter filter, int[] seedVertexLabels) {
+		return getGraph(atLevel).search(queries, k, eps, filter, seedVertexLabels);
 	}
 
 	@Override

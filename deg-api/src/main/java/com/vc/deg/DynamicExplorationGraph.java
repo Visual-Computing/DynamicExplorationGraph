@@ -136,9 +136,30 @@ public interface DynamicExplorationGraph {
 	 * @param filter null disables the filter
 	 * @return
 	 */
-	public int[] search(Collection<FeatureVector> queries, int k, float eps, GraphFilter filter);
+	public default int[] search(Collection<FeatureVector> queries, int k, float eps, GraphFilter filter) {
+		return search(queries, k, eps, filter, new int[0]);
+	}
 	
-	
+	/**
+	 * Search the graph for the best vertices matching one of the queries.
+	 * The distance to all queries is calculated but only the shortest is kept.
+	 * 
+	 * Find k good vertices and keep searching if any of there
+	 * neighbors is better than the worst vertex in the result list
+	 * or close to it (search radius: eps) 
+	 * 
+	 * Any entry in the returning result list must pass the filter.
+	 * 
+	 * The search starts at the seedVertexLabels.
+	 * 
+	 * @param queries
+	 * @param k
+	 * @param eps factor expands the search radius based on the distance to the query. 0 disables the factor, 1 doubles the search radius
+	 * @param filter null disables the filter
+	 * @param seedVertexLabels if empty or filled with invalid ids, the default starting point will be used instead
+	 * @return
+	 */
+	public int[] search(Collection<FeatureVector> queries, int k, float eps, GraphFilter filter, int[] seedVertexLabels);
 	
 
 	
@@ -149,12 +170,14 @@ public interface DynamicExplorationGraph {
 	 * Find k good vertices and keep searching if any of there
 	 * neighbors is better than the worst vertex in the result list. 
 	 * 
-	 * @param entryLabel
+	 * Any entry in the returning result is not the seed label.
+	 * 
+	 * @param seedLabel
 	 * @param k
 	 * @return
 	 */
-	public default int[] explore(int entryLabel, int k) {
-		return explore(new int[] { entryLabel }, k);
+	public default int[] explore(int seedLabel, int k) {
+		return explore(new int[] { seedLabel }, k);
 	}
 	
 	/**
@@ -165,12 +188,14 @@ public interface DynamicExplorationGraph {
 	 * Find k good vertices and keep searching if any of there
 	 * neighbors is better than the worst vertex in the result list. 
 	 * 
-	 * @param entryLabels
+	 * Any entry in the returning result list is not in the list of seed labels.
+	 * 
+	 * @param seedLabels
 	 * @param k
 	 * @return
 	 */
-	public default int[] explore(int[] entryLabels, int k) {
-		return explore(entryLabels, k, Integer.MAX_VALUE);
+	public default int[] explore(int[] seedLabels, int k) {
+		return explore(seedLabels, k, Integer.MAX_VALUE);
 	}
 		
 	/**
@@ -182,13 +207,15 @@ public interface DynamicExplorationGraph {
 	 * Stop searching if the number of checks (distance calculations) will exceed the
 	 * max distance computation count.
 	 * 
-	 * @param entryLabel
+	 * Any entry in the returning result is not the seed label.
+	 * 
+	 * @param seedLabel
 	 * @param k
 	 * @param maxDistanceComputationCount
 	 * @return
 	 */
-	public default int[] explore(int entryLabel, int k, int maxDistanceComputationCount) {
-		return explore(new int[] {entryLabel}, k, maxDistanceComputationCount);
+	public default int[] explore(int seedLabel, int k, int maxDistanceComputationCount) {
+		return explore(new int[] {seedLabel}, k, maxDistanceComputationCount);
 	}
 	
 	/**
@@ -202,13 +229,15 @@ public interface DynamicExplorationGraph {
 	 * Stop searching if the number of checks (distance calculations) will exceed the
 	 * max distance computation count.
 	 * 
-	 * @param entryLabel
+	 * Any entry in the returning result list is not in the list of seed labels.
+	 * 
+	 * @param seedLabels
 	 * @param k
 	 * @param maxDistanceComputationCount
 	 * @return
 	 */
-	public default int[] explore(int[] entryLabel, int k, int maxDistanceComputationCount) {
-		return explore(entryLabel, k, maxDistanceComputationCount, null);
+	public default int[] explore(int[] seedLabels, int k, int maxDistanceComputationCount) {
+		return explore(seedLabels, k, maxDistanceComputationCount, null);
 	}
 		
 	/**
@@ -220,16 +249,16 @@ public interface DynamicExplorationGraph {
 	 * Stop searching if the number of checks (distance calculations) will exceed the
 	 * max distance computation count.
 	 * 
-	 * Any entry in the returning result list must pass the filter.
+	 * Any entry in the returning result list must pass the filter and is not the seed label.
 	 * 
-	 * @param entryLabel
+	 * @param seedLabel
 	 * @param k
 	 * @param maxDistanceComputationCount
 	 * @param filter null disables the filter
 	 * @return
 	 */
-	public default int[] explore(int entryLabel, int k, int maxDistanceComputationCount, GraphFilter filter) {
-		return explore(new int[] { entryLabel }, k, maxDistanceComputationCount, filter);
+	public default int[] explore(int seedLabel, int k, int maxDistanceComputationCount, GraphFilter filter) {
+		return explore(new int[] { seedLabel }, k, maxDistanceComputationCount, filter);
 	}
 	
 	/**
@@ -243,15 +272,15 @@ public interface DynamicExplorationGraph {
 	 * Stop searching if the number of checks (distance calculations) will exceed the
 	 * max distance computation count.
 	 * 
-	 * Any entry in the returning result list must pass the filter.
+	 * Any entry in the returning result list must pass the filter and is not in the list of seed labels.
 	 * 
-	 * @param entryLabel
+	 * @param seedLabels
 	 * @param k
 	 * @param maxDistanceComputationCount
 	 * @param filter null disables the filter
 	 * @return
 	 */
-	public int[] explore(int[] entryLabel, int k, int maxDistanceComputationCount, GraphFilter filter);
+	public int[] explore(int[] seedLabels, int k, int maxDistanceComputationCount, GraphFilter filter);
 	
 	/**
 	 * Does the graph has a vertex with this label
