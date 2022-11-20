@@ -31,11 +31,11 @@ public interface FeatureSpace {
 	}
 	
 	/**
-	 * Contains all registered {@link FeatureSpace} either via a service loader or manual
-	 * 
+	 * Contains all registered {@link FeatureSpace} either via a service loader or manual.
+	 *  
 	 * @author Nico Hezel
 	 */
-    public static class DefaultFeatureSpaceHolder {
+    public static class RegisteredFeatureSpaceHolder {
     	
     	private final static Set<FeatureSpace> registeredFactories = serviceLoaderFactories();
     	
@@ -117,7 +117,7 @@ public interface FeatureSpace {
 	 * @param factory
 	 */
     public static void registerFeatureSpace(FeatureSpace factory) {
-    	DefaultFeatureSpaceHolder.registerFeatureSpace(factory);
+    	RegisteredFeatureSpaceHolder.registerFeatureSpace(factory);
     }
     
     /**
@@ -130,7 +130,7 @@ public interface FeatureSpace {
      * @return
      */
     public static FeatureSpace findFeatureSpace(String componentType, int metric, int dims, boolean isNative) {
-        return DefaultFeatureSpaceHolder.findFeatureSpace(componentType, metric, dims, isNative);
+        return RegisteredFeatureSpaceHolder.findFeatureSpace(componentType, metric, dims, isNative);
     }
     
     /**
@@ -143,7 +143,7 @@ public interface FeatureSpace {
      * @return
      */
     public static FeatureSpace findFeatureSpace(Class<?> componentType, int metric, int dims, boolean isNative) {
-        return DefaultFeatureSpaceHolder.findFeatureSpace(componentType, metric, dims, isNative);
+        return RegisteredFeatureSpaceHolder.findFeatureSpace(componentType, metric, dims, isNative);
     }
 
 	/**

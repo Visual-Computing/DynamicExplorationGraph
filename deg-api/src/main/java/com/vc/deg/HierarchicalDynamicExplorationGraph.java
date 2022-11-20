@@ -418,8 +418,8 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
      * @param space
      * @return
      */
-	public static HierarchicalDynamicExplorationGraph newGraph(FeatureSpace space, int edgesPerNode, int topRankSize) {
-		return GraphFactory.getDefaultFactory().newHierchicalGraph(space, edgesPerNode, topRankSize);
+	public static HierarchicalDynamicExplorationGraph newGraph(FeatureSpace space, int edgesPerVertex, int topRankSize) {
+		return GraphFactory.getDefaultFactory().newHierchicalGraph(space, edgesPerVertex, topRankSize);
 	}
 	
 	/**

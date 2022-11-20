@@ -46,15 +46,15 @@ public class GraphConstructionBenchmark {
 		};
 		
 		// hierarchical 
-		final int edgesPerNode = 30;
-		final int topRankSize = 400;
-		final Path graphFile = Paths.get("c:\\Data\\Feature\\SIFT1M\\deg\\best_distortion_decisions\\java\\128D_L2_K30_AddK60Eps0.2High_RNGMinimalAdd4\\");
-		final DynamicExplorationGraph deg = GraphFactory.getDefaultFactory().newHierchicalGraph(space, edgesPerNode, topRankSize);
+//		final int edgesPerNode = 30;
+//		final int topRankSize = 400;
+//		final Path graphFile = Paths.get("c:\\Data\\Feature\\SIFT1M\\deg\\best_distortion_decisions\\java\\128D_L2_K30_AddK60Eps0.2High_RNGMinimalAdd1\\");
+//		final DynamicExplorationGraph deg = GraphFactory.getDefaultFactory().newHierchicalGraph(space, edgesPerNode, topRankSize);
 		
 		// simple DEG
-//		final int edgesPerNode = 30;
-//		final Path graphFile = Paths.get("c:\\Data\\Feature\\SIFT1M\\deg\\best_distortion_decisions\\java\\128D_L2_K30_AddK60Eps0.2High_RNGMinimalAdd.java.float.deg");
-//		final DynamicExplorationGraph deg = GraphFactory.getDefaultFactory().newGraph(space, edgesPerNode);
+		final int edgesPerNode = 4;
+		final Path graphFile = Paths.get("c:\\Data\\Feature\\SIFT1M\\deg\\best_distortion_decisions\\java\\128D_L2_K4_AddK60Eps0.2High_RNGMinimalAdd.java.float.deg");
+		final DynamicExplorationGraph deg = GraphFactory.getDefaultFactory().newGraph(space, edgesPerNode);
 		
 		// give all base data to the designer to be added to the graph during the build process 
 		int maxIndex = 0;
@@ -94,9 +94,9 @@ public class GraphConstructionBenchmark {
 		
 		// change designer settings
 		designer.setRandom(rnd);
-		designer.setExtendK(60);
+		designer.setExtendK(edgesPerNode*2);
 		designer.setExtendEps(0.2f);
-		designer.setImproveK(30);
+		designer.setImproveK(edgesPerNode);
 		designer.setImproveEps(0.001f);
 		designer.setMaxPathLength(5);
 		

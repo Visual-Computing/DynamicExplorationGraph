@@ -8,7 +8,8 @@ import java.util.Set;
 
 /**
  * A {@link FeatureFactory} is needed when a graph is loaded from a drive and contains custom {@link FeatureVector}.
- * 
+ * The factory must be registered before loading a graph via a ServiceLoader or the {@link FeatureFactory} class.
+ *
  * 
  * TODO rework or remove the following text
  * Can use native of on-heap memory depending on the implementation 
@@ -21,13 +22,12 @@ import java.util.Set;
 public interface FeatureFactory {
 	
 	/**
-	 * Contains all registered {@link FeatureFactory} either via a service loader or manual
-	 * 
+	 * Contains all {@link FeatureFactory}s registered either via a service loader or manually
+	 *  
 	 * @author Nico Hezel
 	 */
-    public static class DefaultFactoryHolder {
+    public static class RegisteredFactoryHolder {
 
-    	
     	private final static Set<FeatureFactory> registeredFactories = serviceLoaderFactories();
     	
     	/**
@@ -87,7 +87,7 @@ public interface FeatureFactory {
 	 * @param factory
 	 */
     public static void registerFactory(FeatureFactory factory) {
-        DefaultFactoryHolder.registerFactory(factory);
+        RegisteredFactoryHolder.registerFactory(factory);
     }
     
     /**
@@ -98,7 +98,7 @@ public interface FeatureFactory {
      * @return
      */
     public static FeatureFactory findFactory(String componentType, int dims) {
-        return DefaultFactoryHolder.findFactory(componentType, dims);
+        return RegisteredFactoryHolder.findFactory(componentType, dims);
     }
     
     /**
@@ -109,7 +109,7 @@ public interface FeatureFactory {
      * @return
      */
     public static FeatureFactory findFactory(Class<?> componentType, int dims) {
-        return DefaultFactoryHolder.findFactory(componentType, dims);
+        return RegisteredFactoryHolder.findFactory(componentType, dims);
     }
     
     /**

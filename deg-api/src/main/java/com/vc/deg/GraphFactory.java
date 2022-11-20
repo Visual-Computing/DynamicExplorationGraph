@@ -6,8 +6,11 @@ import java.util.ServiceLoader;
 
 
 /**
- * Use ServiceLoader to register Dynamic Exploration Graphs
+ * Factory to build or load graphs.
  * 
+ * Different implementation of the graph factory can be registered via a ServiceLoader.
+ * Depending on the runtime implementation the {@link #getDefaultFactory()} presents more
+ * readable or more efficient graph implementations.
  * 
  * https://docs.oracle.com/javase/8/docs/api/java/util/ServiceLoader.html
  * https://riptutorial.com/java/example/19523/simple-serviceloader-example
@@ -16,7 +19,7 @@ import java.util.ServiceLoader;
  */
 public interface GraphFactory {
 	
-    public static class DefaultFactoryHolder {
+    public static class RegisteredFactoryHolder {
         private static final GraphFactory defaultFactory = ServiceLoader.load(GraphFactory.class).iterator().next();
     }
 
@@ -26,7 +29,7 @@ public interface GraphFactory {
      * @return the default {@link GraphFactory} implementation
      */
     public static GraphFactory getDefaultFactory() {
-        return DefaultFactoryHolder.defaultFactory;
+        return RegisteredFactoryHolder.defaultFactory;
     }
     
     

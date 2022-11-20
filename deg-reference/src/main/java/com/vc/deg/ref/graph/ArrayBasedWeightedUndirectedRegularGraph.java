@@ -31,7 +31,9 @@ import org.slf4j.LoggerFactory;
 
 import com.koloboke.collect.map.IntFloatMap;
 import com.koloboke.collect.map.IntIntMap;
+import com.koloboke.collect.map.hash.HashIntFloatMapFactory;
 import com.koloboke.collect.map.hash.HashIntFloatMaps;
+import com.koloboke.collect.map.hash.HashIntIntMapFactory;
 import com.koloboke.collect.map.hash.HashIntIntMaps;
 import com.vc.deg.FeatureFactory;
 import com.vc.deg.FeatureSpace;
@@ -54,6 +56,9 @@ import com.vc.deg.ref.feature.PrimitiveFeatureFactories;
 public class ArrayBasedWeightedUndirectedRegularGraph {
 
 	private static Logger log = LoggerFactory.getLogger(ArrayBasedWeightedUndirectedRegularGraph.class);
+
+	private static final HashIntFloatMapFactory intFloatMapFactory = HashIntFloatMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE);
+	private static final HashIntIntMapFactory intIntMapFactory = HashIntIntMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE);
 
 	
 	/**
@@ -79,14 +84,14 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	public ArrayBasedWeightedUndirectedRegularGraph(int edgesPerVertex, FeatureSpace space) {
 		this.edgesPerVertex = edgesPerVertex;
 		this.vertices = new ArrayList<>();	
-		this.labelToId = HashIntIntMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap();
+		this.labelToId = intIntMapFactory.newMutableMap();
 		this.space = space;
 	}
 
 	public ArrayBasedWeightedUndirectedRegularGraph(int edgesPerVertex, int expectedSize, FeatureSpace space) {
 		this.edgesPerVertex = edgesPerVertex;
 		this.vertices = new ArrayList<>(expectedSize);	
-		this.labelToId = HashIntIntMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap();
+		this.labelToId = intIntMapFactory.newMutableMap();
 		this.space = space;
 	}
 	
@@ -544,10 +549,10 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	 * @return
 	 */
 	public ArrayBasedWeightedUndirectedRegularGraph copy() {
-		final IntIntMap copyLabelMap = HashIntIntMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap(labelToId.size());
+		final IntIntMap copyLabelMap = intIntMapFactory.newMutableMap(labelToId.size());
 		final List<VertexData> copyVertices = new ArrayList<>(vertices.size());
 		for (VertexData vertex : vertices) {
-			final IntFloatMap copyEdges = HashIntFloatMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap(vertex.getEdges());
+			final IntFloatMap copyEdges = intFloatMapFactory.newMutableMap(vertex.getEdges());
 			copyLabelMap.put(vertex.getLabel(), vertex.getId());
 			copyVertices.add(new VertexData(vertex.getLabel(), vertex.getId(), vertex.getFeature(), copyEdges));
 		}
@@ -634,28 +639,26 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 			long vertexCount = Integer.toUnsignedLong(input.readInt());
 			int edgesPerVertex = Byte.toUnsignedInt(input.readByte());
 			
-			// empty graph
-			if(vertexCount == 0) {
-				final FeatureSpace space = FeatureSpace.findFeatureSpace(featureType, metric, dims, false);
-				return new ArrayBasedWeightedUndirectedRegularGraph(edgesPerVertex, space);
-			}
-			
-			// 	featureSize	=		     filesize - meta data - (edge data + label) * vertexCount   / vertexCount
-			int featureSize = (int)((Files.size(file) - 8 - ((edgesPerVertex * 8 + 4) * vertexCount)) / vertexCount);
-
-			// factory to create FeatureVectors based on the featureType
-			FeatureFactory featureFactory = PrimitiveFeatureFactories.create(featureType, dims);
-			if(featureFactory == null)
-				featureFactory = FeatureFactory.findFactory(featureType, dims);
-			if(featureFactory == null)
-				throw new UnsupportedOperationException("No feature factory found for featureType="+featureType+" and dims="+dims);
-			if(featureSize != featureFactory.featureSize())
-				throw new UnsupportedOperationException("The feature factory for featureType="+featureType+" and dims="+dims+" produces features with "+featureFactory.featureSize()+" bytes but the graph contains features with "+featureSize+" bytes.");
-		
 			// find the feature space specified in the file
 			FeatureSpace space = FeatureSpace.findFeatureSpace(featureType, metric, dims, false);
 			if(space == null)
 				throw new UnsupportedOperationException("No feature space found for featureType="+featureType+", metric="+metric+" and isNative=false");
+			
+			// empty graph
+			if(vertexCount == 0) 
+				return new ArrayBasedWeightedUndirectedRegularGraph(edgesPerVertex, space);
+			
+			// factory to create FeatureVectors based on the featureType
+			FeatureFactory featureFactory = FeatureFactory.findFactory(featureType, dims);
+			if(featureFactory == null)
+				featureFactory = PrimitiveFeatureFactories.create(featureType, dims);
+			if(featureFactory == null)
+				throw new UnsupportedOperationException("No feature factory found for featureType="+featureType+" and dims="+dims);
+			
+			// 	featureSize	=		     filesize - meta data - (edge data   + label) * vertexCount   / vertexCount
+			int featureSize = (int)((Files.size(file) - 8 - ((edgesPerVertex * 8 + 4) * vertexCount)) / vertexCount);
+			if(featureSize != featureFactory.featureSize())
+				throw new UnsupportedOperationException("The feature factory for featureType="+featureType+" and dims="+dims+" produces features with "+featureFactory.featureSize()+" bytes but the graph contains features with "+featureSize+" bytes.");
 			if(featureSize != space.featureSize())
 				throw new UnsupportedOperationException("The feature space for featureType="+featureType+", metric="+metric+" and isNative=false expects features with "+space.featureSize()+" bytes but the graph contains features with "+featureSize+" bytes.");
 			
@@ -665,7 +668,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 			
 			// read the vertex data
 			log.debug("Read graph from file "+file.toString());
-			final IntIntMap labelMap = HashIntIntMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap((int)vertexCount); 
+			final IntIntMap labelMap = intIntMapFactory.newMutableMap((int)vertexCount); 
 			final List<VertexData> vertices = new ArrayList<>((int)vertexCount); 
 			for (int i = 0; i < vertexCount; i++) {
 				
@@ -679,7 +682,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 				final float[] weights = new float[edgesPerVertex];
 				for (int e = 0; e < edgesPerVertex; e++) 
 					weights[e] = input.readFloat();	
-				final IntFloatMap edges = HashIntFloatMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap(edgesPerVertex);
+				final IntFloatMap edges = intFloatMapFactory.newMutableMap(edgesPerVertex);
 				for (int e = 0; e < edgesPerVertex; e++)
 					edges.put(neighborIds[e], weights[e]);
 				

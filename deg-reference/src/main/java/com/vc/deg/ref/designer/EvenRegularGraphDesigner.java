@@ -702,7 +702,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 				final VertexData vertexA = remainingVertices[i];
 				if(vertexA.getEdges().size() < edgesPerVertex) {
 					
-					// scan the neighbors of the adjacent vertices of A and find a vertexB with the smallest distance to A
+					// scan the neighbors of the adjacent vertices of A and find a vertex B with the smallest distance to A
 					VertexData vertexB = null; 
 					float weightAB = Float.MAX_VALUE;
 					for (int neighborOfA : vertexA.getEdges().keySet()) {

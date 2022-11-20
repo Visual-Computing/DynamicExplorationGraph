@@ -18,7 +18,9 @@ import org.slf4j.LoggerFactory;
 
 import com.koloboke.collect.map.IntFloatMap;
 import com.koloboke.collect.map.IntIntMap;
+import com.koloboke.collect.map.hash.HashIntFloatMapFactory;
 import com.koloboke.collect.map.hash.HashIntFloatMaps;
+import com.koloboke.collect.map.hash.HashIntIntMapFactory;
 import com.koloboke.collect.map.hash.HashIntIntMaps;
 import com.vc.deg.FeatureFactory;
 import com.vc.deg.FeatureSpace;
@@ -30,6 +32,9 @@ import com.vc.deg.ref.graph.VertexData;
 
 public class GraphVersionConverter {
 	private static Logger log = LoggerFactory.getLogger(GraphVersionConverter.class);
+
+	private static final HashIntFloatMapFactory intFloatMapFactory = HashIntFloatMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE);
+	private static final HashIntIntMapFactory intIntMapFactory = HashIntIntMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE);
 
 	private static final Path inputDir = Paths.get("c:\\Data\\Images\\navigu\\pixabay\\graph_old\\");
 	private static final Path outputDir = Paths.get("c:\\Data\\Images\\navigu\\pixabay\\graph\\");
@@ -139,7 +144,7 @@ public class GraphVersionConverter {
 				final float[] weights = new float[edgesPerVertex];
 				for (int e = 0; e < edgesPerVertex; e++) 
 					weights[e] = input.readFloat();	
-				final IntFloatMap edges = HashIntFloatMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap(edgesPerVertex);
+				final IntFloatMap edges = intFloatMapFactory.newMutableMap(edgesPerVertex);
 				for (int e = 0; e < edgesPerVertex; e++)
 					edges.put(neighborIds[e], weights[e]);
 
@@ -156,7 +161,7 @@ public class GraphVersionConverter {
 
 			// convert old vertex design to new one
 			final List<VertexData> vertices = convertFrom0_1_2(oldVertices);
-			final IntIntMap labelToId = HashIntIntMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap(c -> {
+			final IntIntMap labelToId = intIntMapFactory.newMutableMap(c -> {
 				vertices.forEach(vertex -> {
 					c.accept(vertex.getLabel(), vertex.getId());
 				});
@@ -180,7 +185,7 @@ public class GraphVersionConverter {
 
 		final List<VertexData> output = new ArrayList<>();
 		for (VertexData vertex : input) {
-			final IntFloatMap edges = HashIntFloatMaps.getDefaultFactory().withDefaultValue(Integer.MIN_VALUE).newMutableMap(vertex.getEdges());
+			final IntFloatMap edges = intFloatMapFactory.newMutableMap(vertex.getEdges());
 			output.add(new VertexData(vertex.getLabel(), oldIdToId.get(vertex.getId()), vertex.getFeature(), edges));
 		}
 
