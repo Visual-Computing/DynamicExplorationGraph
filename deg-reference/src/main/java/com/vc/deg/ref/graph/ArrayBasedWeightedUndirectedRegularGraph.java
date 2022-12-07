@@ -139,8 +139,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	}
 
 	/**
-	 * Deleted a vertex from the graph and updates the edges list of all vertices pointing to the deleted vertex.
-	 * 
+	 * Deleted a vertex from the graph and update the edges list of all vertices pointing to the deleted vertex. 
 	 * 
 	 * @param label of the vertex to delete
 	 * @return the edges of the deleted vertex

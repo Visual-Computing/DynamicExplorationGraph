@@ -315,6 +315,13 @@ public interface DynamicExplorationGraph {
 	public int size();
 	
 	/**
+	 * The number of edges per vertex in the graph
+	 * 
+	 * @return
+	 */
+	public int edgePerVertex();
+	
+	/**
 	 * Iterate over all vertices in the graph
 	 * 
 	 * @param consumer

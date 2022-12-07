@@ -105,6 +105,11 @@ public class HierarchicalDynamicExplorationGraph implements com.vc.deg.Hierarchi
 	public int sizeAtLevel(int atLevel) {
 		return getGraph(atLevel).size();
 	}
+	
+	@Override
+	public int edgePerVertex() {
+		return edgesPerVertex;
+	}
 
 	@Override
 	public void forEachVertexAtLevel(int atLevel, VertexConsumer consumer) {

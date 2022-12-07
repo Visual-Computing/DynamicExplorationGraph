@@ -144,6 +144,11 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	}
 	
 	@Override
+	public int edgePerVertex() {
+		return this.internalGraph.getEdgesPerVertex();
+	}
+	
+	@Override
 	public EvenRegularGraphDesigner designer() {
 		return designer;
 	}

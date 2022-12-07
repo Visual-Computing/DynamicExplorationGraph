@@ -153,4 +153,11 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 		// TODO Auto-generated method stub
 		return null;
 	}
+
+
+	@Override
+	public int edgePerVertex() {
+		// TODO Auto-generated method stub
+		return 0;
+	}
 }
