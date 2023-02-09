@@ -7,7 +7,7 @@ import java.util.Arrays;
 import java.util.Random;
 import java.util.stream.IntStream;
 
-public class Sift1MTest {
+public class Sift1MTo2DGraphTest {
 
 	public static void main(String[] args) throws IOException {
 		Path baseDir = Paths.get("c:\\Data\\Feature\\2DGraph\\");
@@ -21,22 +21,6 @@ public class Sift1MTest {
 			baseData[i] = new float[] { rnd.nextFloat()*13, rnd.nextFloat()*13 };
 			System.out.println(Arrays.toString(baseData[i]));
 		}
-//		float[][] baseData = new float[][] { 
-//			{2.83f, 3.3f},
-//			{3.48f, 3.58f},
-//			{7.47f, 3.95f},
-//			{3.05f, 4.92f},
-//			{6.97f, 5.39f},
-//			{4.09f, 6.31f},
-//			{2.47f, 7.18f},
-//			{5.07f, 9.69f},
-//			{8.14f, 10.05f},
-//			{3.91f, 11.01f},
-//			{9.13f, 12.19f},
-//			{1.36f, 12.42f},
-//			{2.51f, 12.6f},
-//			{7.07f, 12.91f}
-//		};
 		Sift1M.fvecs_write(baseData, baseFile);
 		
 		Path baseTopFile = baseDir.resolve("base_top13.ivecs");

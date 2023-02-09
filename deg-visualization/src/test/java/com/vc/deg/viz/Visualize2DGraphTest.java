@@ -14,7 +14,7 @@ import com.vc.deg.DynamicExplorationGraph;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 
-public class Graph2DTest {
+public class Visualize2DGraphTest {
 
 	public static void main(String[] args) throws IOException, ClassNotFoundException {
 		Path graphInputFile = Paths.get("c:\\Data\\Feature\\2DGraph\\L2_K4_AddK10Eps0.2High.perfect_rng_add_only.deg");

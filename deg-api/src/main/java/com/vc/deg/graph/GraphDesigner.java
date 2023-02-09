@@ -138,6 +138,23 @@ public interface GraphDesigner {
 	public float calcAvgEdgeWeight();
 	
 	/**
+	 * Compute the average neighbor rank of all vertices.
+	 * @return
+	 */
+	public float calcAvgNeighborRank();
+	
+	/**
+	 * Compute the average neighbor rank of all vertices.
+	 * Use the top list containing the best neighbors of each vertex if possible.
+	 * Otherwise compute the top list per vertex. 
+	 * 
+	 * 
+	 * @param topList
+	 * @return
+	 */
+	public float calcAvgNeighborRank(int[][] topList);
+	
+	/**
 	 * Check if all vertices have a specific amount of neighbors and their edge weight corresponds to the
 	 * distance to the neighbor.
 	 * 

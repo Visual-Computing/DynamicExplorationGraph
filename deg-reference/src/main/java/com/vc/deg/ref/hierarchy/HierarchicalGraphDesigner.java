@@ -145,6 +145,23 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 			avg += graph.designer().calcAvgEdgeWeight();
 		return avg/layers.size();
 	}
+	
+	@Override
+	public float calcAvgNeighborRank() {
+		float avg = 0;
+		for (DynamicExplorationGraph graph : layers) 
+			avg += graph.designer().calcAvgNeighborRank();
+		return avg/layers.size();
+	}
+
+	@Override
+	public float calcAvgNeighborRank(int[][] topList) {
+		float avg = 0;
+		for (DynamicExplorationGraph graph : layers) 
+			avg += graph.designer().calcAvgNeighborRank(topList);
+		return avg/layers.size();
+	}
+	
 
 	@Override
 	public boolean checkGraphValidation(int expectedVertices, int expectedNeighbors) {

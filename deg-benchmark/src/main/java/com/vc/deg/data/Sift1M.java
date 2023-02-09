@@ -22,6 +22,10 @@ public class Sift1M {
 		return fvecs_read(baseDir.resolve("sift_base.fvecs"));
 	}
 
+	public static final int[][] loadBaseTop1000(Path baseDir) throws IOException {
+		return ivecs_read(baseDir.resolve("sift_base_top1000.ivecs"));
+	}
+	
 	public static final float[][] loadQueryData(Path baseDir) throws IOException {
 		return fvecs_read(baseDir.resolve("sift_query.fvecs"));
 	}

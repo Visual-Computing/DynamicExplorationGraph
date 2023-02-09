@@ -12,11 +12,14 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.IntPredicate;
 import java.util.stream.Stream;
 
+import com.koloboke.collect.map.IntFloatCursor;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.GraphDesigner;
@@ -114,12 +117,144 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 		double sum = 0;
 		int count = 0;
 		for(VertexData data : graph.getVertices()) {
-			final Collection<Float> weights = data.getEdges().values();
-			for(float weight : weights) 
-				sum += weight;
-			count += weights.size();
+			final IntFloatCursor edgeCursor = data.getEdges().cursor();
+			while(edgeCursor.moveNext()) {
+				if(edgeCursor.key() != data.getId()) {
+					sum += edgeCursor.value();
+					count++;
+				}
+			}
 		}
 		return (float)(sum/count);
+	}
+	
+	@Override
+	public float calcAvgNeighborRank() {
+		return calcAvgNeighborRank(null);		
+	}
+	
+	@Override
+	public float calcAvgNeighborRank(int[][] topLists) {
+		
+		// array of all vertex ids
+		final int[] testOrder = graph.getVertices().stream().mapToInt(VertexData::getId).toArray();
+		
+		// shuffle
+		final Random rand = new Random(7);
+		for (int i = 0; i < testOrder.length; i++) {
+			int randomIndexToSwap = rand.nextInt(testOrder.length);
+			int temp = testOrder[randomIndexToSwap];
+			testOrder[randomIndexToSwap] = testOrder[i];
+			testOrder[i] = temp;
+		}
+		
+
+		final AtomicInteger queryCount = new AtomicInteger(0);
+		final AtomicReference<Double> rankSum = new AtomicReference<>(new Double(0));
+		
+		Arrays.stream(testOrder).parallel().forEach(queryId -> {
+			double avgNeighborRank = calcAvgNeighborRank(queryId, topLists[queryId]);
+			if(avgNeighborRank == -1)
+				avgNeighborRank = calcAvgNeighborRank(queryId);
+			
+			final double currentRankSum = rankSum.accumulateAndGet(avgNeighborRank, (x, y) -> (x + y));
+			final int currentQueryCount = queryCount.incrementAndGet();
+			if(currentQueryCount % 100 == 0) 
+				System.out.println("AvgNeighborRank after "+currentQueryCount+" vertices is "+(currentRankSum/currentQueryCount));
+		});
+//		for (int queryId : testOrder) {
+//			
+//			double avgNeighborRank = calcAvgNeighborRank(queryId, topLists[queryId]);
+//			if(avgNeighborRank == -1)
+//				avgNeighborRank = calcAvgNeighborRank(queryId);
+//			
+//			rankSum.accumulateAndGet(avgNeighborRank, (x, y) -> (x + y));
+//			if(queryCount.incrementAndGet() % 100 == 0) 
+//				System.out.println("AvgNeighborRank after "+queryCount+" vertices is "+(rankSum.get()/queryCount.get()));
+//		}
+		return (float)(rankSum.get()/queryCount.get());
+	}
+	
+	/**
+	 * Compute the average neighbor rank of the vertex with the help of the top list.
+	 * If the top list is to short return -1;
+	 * 
+	 * @param queryId
+	 * @param topList
+	 * @return
+	 */
+	protected double calcAvgNeighborRank(int queryId, int[] topList) {
+		final VertexData query = graph.getVertexById(queryId);
+
+		// compute ranks of neighbors
+		long neighborCount = 0;
+		double neighborRankSum = 0;
+		for(int neighborId : query.getEdges().keySet()) {
+			if(neighborId != queryId) {
+				int rank = 0;
+				for (; rank < topList.length; rank++) {
+					if(neighborId == topList[rank]) 
+						break;
+				}
+				
+				if(rank == topList.length)
+					return -1;
+				
+				neighborRankSum += rank + 1; // rank 0 is always a self reference which is not included in the top list
+				neighborCount++;
+			}
+		}
+
+		return neighborRankSum / neighborCount;
+	}
+	
+
+	/**
+	 * Compute the average neighbor rank of the vertex
+	 * 
+	 * @param queryId
+	 * @return
+	 */
+	protected double calcAvgNeighborRank(int queryId) {
+
+		class IntFloat {
+			int index;
+			float distance;
+			public IntFloat(int index, float distance) {
+				this.index = index;
+				this.distance = distance;
+			}
+		}
+
+		final int size = graph.getVertices().size();
+		final VertexData query = graph.getVertexById(queryId);
+		final FeatureVector queryFeature = query.getFeature();
+
+		// compute sorted rank list
+		final FeatureSpace space = graph.getFeatureSpace();
+		final List<IntFloat> idDistanceList = new ArrayList<>(size);
+		for(VertexData data : graph.getVertices()) {
+			final float dist = space.computeDistance(queryFeature, data.getFeature());
+			idDistanceList.add(new IntFloat(data.getId(), dist));
+		}
+		idDistanceList.sort((o1, o2) -> Float.compare(o1.distance, o2.distance));
+
+		// compute ranks of neighbors
+		long neighborCount = 0;
+		double neighborRankSum = 0;
+		for(int neighborId : query.getEdges().keySet()) {
+			if(neighborId != queryId) {
+				int rank = 0;
+				for (; rank < size; rank++) {
+					if(neighborId == idDistanceList.get(rank).index)
+						break;
+				}
+				neighborRankSum += rank;
+				neighborCount++;
+			}
+		}
+
+		return neighborRankSum / neighborCount;
 	}
 
 	@Override
@@ -530,9 +665,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 
 	/**
 	 * Is the vertexId a RNG conform neighbor if it gets connected to targetId?
-	 * 
-	 * Does vertexId has a neighbor which is connected to the targetId and has a lower weight?
-	 * 
+	 *  
 	 * @param vertexId
 	 * @param targetId
 	 * @param vertexTargetWeight
@@ -541,6 +674,8 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 	private boolean checkRNG(int vertexId, int targetId, float vertexTargetWeight) {
 		for(Map.Entry<Integer, Float> neighbor : graph.getVertexById(vertexId).getEdges().entrySet()) {
 			float neighborTargetWeight = graph.getEdgeWeight(neighbor.getKey(), targetId);
+			
+			// Does vertexId has a neighbor which is connected to the targetId and has a lower weight?
 			if(neighborTargetWeight >= 0 && vertexTargetWeight > Math.max(neighbor.getValue(), neighborTargetWeight)) 
 				return false;
 		}

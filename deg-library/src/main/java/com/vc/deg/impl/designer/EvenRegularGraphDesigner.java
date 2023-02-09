@@ -113,4 +113,16 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 		
 	}
 
+	@Override
+	public float calcAvgNeighborRank() {
+		// TODO Auto-generated method stub
+		return 0;
+	}
+
+	@Override
+	public float calcAvgNeighborRank(int[][] topList) {
+		// TODO Auto-generated method stub
+		return 0;
+	}
+
 }
