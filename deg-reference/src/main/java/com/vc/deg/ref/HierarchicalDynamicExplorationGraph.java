@@ -13,12 +13,12 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Random;
-import java.util.function.IntConsumer;
 
 import com.vc.deg.DynamicExplorationGraph;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.GraphFilter;
+import com.vc.deg.graph.NeighborConsumer;
 import com.vc.deg.graph.VertexConsumer;
 import com.vc.deg.ref.hierarchy.HierarchicalGraphDesigner;
 
@@ -117,8 +117,8 @@ public class HierarchicalDynamicExplorationGraph implements com.vc.deg.Hierarchi
 	}
 	
 	@Override
-	public void forEachNeighborAtLevel(int atLevel, int label, IntConsumer idConsumer) {
-		getGraph(atLevel).forEachNeighbor(label, idConsumer);
+	public void forEachNeighborAtLevel(int atLevel, int label, NeighborConsumer neighborConsumer) {
+		getGraph(atLevel).forEachNeighbor(label, neighborConsumer);
 	}
 	
 	@Override

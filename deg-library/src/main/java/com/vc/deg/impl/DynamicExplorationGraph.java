@@ -11,7 +11,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collection;
 import java.util.Random;
-import java.util.function.IntConsumer;
 
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.KryoException;
@@ -21,6 +20,7 @@ import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.GraphDesigner;
 import com.vc.deg.graph.GraphFilter;
+import com.vc.deg.graph.NeighborConsumer;
 import com.vc.deg.graph.VertexConsumer;
 import com.vc.deg.impl.designer.EvenRegularGraphDesigner;
 import com.vc.deg.impl.graph.WeightedUndirectedRegularGraph;
@@ -127,7 +127,7 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 
 
 	@Override
-	public void forEachNeighbor(int label, IntConsumer idConsumer) {
+	public void forEachNeighbor(int label, NeighborConsumer neighborConsumer) {
 		// TODO Auto-generated method stub
 		
 	}

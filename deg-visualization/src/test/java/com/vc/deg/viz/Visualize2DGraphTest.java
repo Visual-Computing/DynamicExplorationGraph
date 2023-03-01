@@ -62,7 +62,7 @@ public class Visualize2DGraphTest {
 			final float yStart = fv.readFloat(4) / maxPerDim[1] * imageSize + border - nodeSize/2;
 
 			// compute end point of the line
-			graph.forEachNeighbor(vertexLabel, (int neighborLabel) -> {
+			graph.forEachNeighbor(vertexLabel, (int neighborLabel, float weight) -> {
 				final FeatureVector fvNeighbor = graph.getFeature(neighborLabel);
 				final float xEnd= fvNeighbor.readFloat(0) / maxPerDim[0] * imageSize + border - nodeSize/2;
 				final float yEnd = fvNeighbor.readFloat(4) / maxPerDim[1] * imageSize + border - nodeSize/2;				
@@ -91,7 +91,7 @@ public class Visualize2DGraphTest {
 	public static void printGraph(DynamicExplorationGraph graph) {
 		graph.forEachVertex((int vertexLabel, FeatureVector feature) -> {
 			System.out.print("Neighbors of vertex "+vertexLabel+": ");
-			graph.forEachNeighbor(vertexLabel, (int neighborLabel) -> {
+			graph.forEachNeighbor(vertexLabel, (int neighborLabel, float weight) -> {
 				System.out.print(neighborLabel+", ");
 			});	
 			System.out.println();

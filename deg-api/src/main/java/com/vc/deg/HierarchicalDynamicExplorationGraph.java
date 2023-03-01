@@ -5,10 +5,10 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Random;
-import java.util.function.IntConsumer;
 
 import com.vc.deg.graph.GraphDesigner;
 import com.vc.deg.graph.GraphFilter;
+import com.vc.deg.graph.NeighborConsumer;
 import com.vc.deg.graph.VertexConsumer;
 
 public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationGraph {
@@ -351,13 +351,13 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * 
 	 * @param atLevel
 	 * @param label
-	 * @param idConsumer
+	 * @param neighborConsumer
 	 */
-	public void forEachNeighborAtLevel(int atLevel, int label, IntConsumer idConsumer);
+	public void forEachNeighborAtLevel(int atLevel, int label, NeighborConsumer neighborConsumer);
 	
 	@Override
-	default void forEachNeighbor(int label, IntConsumer idConsumer) {
-		forEachNeighborAtLevel(0, label, idConsumer);
+	default void forEachNeighbor(int label, NeighborConsumer neighborConsumer) {
+		forEachNeighborAtLevel(0, label, neighborConsumer);
 	}
 	
 	/**

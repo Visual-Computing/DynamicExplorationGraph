@@ -5,10 +5,10 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Random;
-import java.util.function.IntConsumer;
 
 import com.vc.deg.graph.GraphDesigner;
 import com.vc.deg.graph.GraphFilter;
+import com.vc.deg.graph.NeighborConsumer;
 import com.vc.deg.graph.VertexConsumer;
 
 public interface DynamicExplorationGraph {
@@ -329,12 +329,12 @@ public interface DynamicExplorationGraph {
 	public void forEachVertex(VertexConsumer consumer);
 
 	/**
-	 * Iterate over all neighbors of a vertex (given by the label) and consume their ids
+	 * Iterate over all neighbors of a vertex (given by the label) and consume their ids and weights
 	 * 
 	 * @param label
-	 * @param idConsumer
+	 * @param neighborConsumer
 	 */
-	public void forEachNeighbor(int label, IntConsumer idConsumer);
+	public void forEachNeighbor(int label, NeighborConsumer neighborConsumer);
 	
 	/**
 	 * Get a random label

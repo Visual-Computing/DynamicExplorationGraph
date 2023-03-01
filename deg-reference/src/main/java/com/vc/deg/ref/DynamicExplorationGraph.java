@@ -7,11 +7,11 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.Random;
 import java.util.TreeSet;
-import java.util.function.IntConsumer;
 
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.GraphFilter;
+import com.vc.deg.graph.NeighborConsumer;
 import com.vc.deg.graph.VertexConsumer;
 import com.vc.deg.ref.designer.EvenRegularGraphDesigner;
 import com.vc.deg.ref.graph.ArrayBasedWeightedUndirectedRegularGraph;
@@ -83,9 +83,9 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	}
 	
 	@Override
-	public void forEachNeighbor(int label, IntConsumer idConsumer) {
-		this.internalGraph.getVertexByLabel(label).getEdges().keySet().forEach((int neighborId) -> 
-			idConsumer.accept(this.internalGraph.getVertexById(neighborId).getLabel())
+	public void forEachNeighbor(int label, NeighborConsumer neighborConsumer) {
+		this.internalGraph.getVertexByLabel(label).getEdges().forEach((int neighborId, float weight) -> 
+			neighborConsumer.accept(this.internalGraph.getVertexById(neighborId).getLabel(), weight)
 		);
 	}
 	

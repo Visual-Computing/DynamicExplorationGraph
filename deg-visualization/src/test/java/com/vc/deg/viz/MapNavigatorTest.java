@@ -42,7 +42,6 @@ public class MapNavigatorTest {
 	public static void main(String[] args) throws IOException {
 		
 		final IntObjMap<ImageData> idToImageData = getImageData(inputDir);
-		
 		final int edgesPerVertex = 4;
 		final int topRankSize = idToImageData.size();
 		final HierarchicalDynamicExplorationGraph hGraph = buildGraph(idToImageData.values(), edgesPerVertex, topRankSize) ;
