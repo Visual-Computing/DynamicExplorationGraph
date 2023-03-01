@@ -2,11 +2,9 @@ package com.vc.deg.viz;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.function.IntFunction;
-import java.util.function.Predicate;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,8 +22,7 @@ import com.vc.deg.viz.filter.PreparedGraphFilter;
 import com.vc.deg.viz.model.GridMap;
 import com.vc.deg.viz.model.MotionVector;
 import com.vc.deg.viz.model.WorldMap;
-import com.vc.deg.viz.om.SelfSwappingMap6Adapter;
-import com.vc.deg.viz.om.SelfSwappingMapAdapter;
+import com.vc.deg.viz.om.FastLinearAssignmentSorterAdapter;
 
 
 /**
@@ -40,8 +37,7 @@ public class MapDesigner {
 	public static final int MEDIAN_ELEMENT_COUNT = 3;
 	
 	protected final HierarchicalDynamicExplorationGraph graph;	
-	protected final SelfSwappingMap6Adapter omNew;
-	protected final SelfSwappingMapAdapter omOld;
+	protected final FastLinearAssignmentSorterAdapter flas;
 
 	public MapDesigner(HierarchicalDynamicExplorationGraph graph) {
 		this(graph, FeatureTransformer.findTransformer(graph.getFeatureSpace()), id -> graph.getFeature(id));
@@ -52,8 +48,7 @@ public class MapDesigner {
 	}
 	
 	public MapDesigner(HierarchicalDynamicExplorationGraph graph, IntFunction<float[]> idToFloatFeature) {		
-		this.omNew = new SelfSwappingMap6Adapter(idToFloatFeature);
-		this.omOld = new SelfSwappingMapAdapter(idToFloatFeature);
+		this.flas = new FastLinearAssignmentSorterAdapter(idToFloatFeature);
 		this.graph = graph;
 	}
 	
@@ -114,7 +109,7 @@ public class MapDesigner {
 		if(emptyTileCount > 0 && localMap.isEmpty() == false) {
 			
 			// welche Plätze[y][x] sind schon belegt
-			short[][] inUse = getUsedPositions(localMap);
+			boolean[][] inUse = getUsedPositions(localMap);
 			
 			// get all border images ignore there order
 			IntFloat[] borderPanelPos = getBorderPositions(localMap, new int[] {0,0});
@@ -133,7 +128,7 @@ public class MapDesigner {
 				
 				// sortiere alle Bilder
 				start = System.currentTimeMillis();
-				arrangeMap(localMap, inUse, (emptyTileCount - fillCount) > 0);
+				arrangeMap(localMap, inUse);
 				log.debug("Arranging the neighbourhood took "+(System.currentTimeMillis() - start)+"ms");
 
 				// die Sortierung auf die Weltkarte kopieren
@@ -200,11 +195,11 @@ public class MapDesigner {
 		localMap.set(targetPosX, targetPosY, selectedContent);
 				
 		// blockiere die gewünschten Position
-		short[][] blockedPanels = new short[localMap.rows()][localMap.columns()];
-		blockedPanels[targetPosY][targetPosX] = 255;
+		boolean[][] blockedPanels = new boolean[localMap.rows()][localMap.columns()];
+		blockedPanels[targetPosY][targetPosX] = true;
 		
 		// sortiere die Bilder
-		arrangeMap(localMap, blockedPanels, (localMap.size() - elements.length) > 0);
+		arrangeMap(localMap, blockedPanels);
 		
 		// die Sortierung auf die Weltkarte kopieren
 		worldMap.copyFrom(localMap, worldPosX, worldPosY);
@@ -239,7 +234,7 @@ public class MapDesigner {
 		if(emptyTileCount > 0 && localMap.isEmpty() == false) {
 			
 			// welche Plätze sind schon belegt
-			short[][] inUse = getUsedPositions(localMap);
+			boolean[][] inUse = getUsedPositions(localMap);
 			
 			// fülle die leeren Felder falls notwendig
 			long start = System.currentTimeMillis();
@@ -254,7 +249,7 @@ public class MapDesigner {
 				
 				// sortiere alle Bilder
 				start = System.currentTimeMillis();
-				arrangeMap(localMap, inUse, (emptyTileCount - fillCount) > 0);
+				arrangeMap(localMap, inUse);
 				log.debug("Arranging the neighbourhood took "+(System.currentTimeMillis() - start)+"ms");
 
 				// die Sortierung auf die Weltkarte kopieren
@@ -305,18 +300,10 @@ public class MapDesigner {
 	 * 
 	 * @param localMap
 	 * @param blockedPlaces[y][x]
-	 * @param hasHoles
 	 */
-	protected void arrangeMap(GridMap localMap, short[][] blockedPlaces, boolean hasHoles) {
-		
-		try {
-		
-			// old sorter is better, but only the new one can handle holes.
-			if(hasHoles)
-				omNew.arrangeWithHoles(localMap, blockedPlaces);
-			else
-				omOld.arrange(localMap, blockedPlaces);
-			
+	protected void arrangeMap(GridMap localMap, boolean[][] blockedPlaces) {		
+		try {		
+			flas.arrangeWithHoles(localMap, blockedPlaces);			
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
@@ -419,11 +406,11 @@ public class MapDesigner {
 	 * @param localMap
 	 * @return array of [y][x]
 	 */
-	protected static short[][] getUsedPositions(GridMap localMap) {
-		short[][] result = new short[localMap.rows()][localMap.columns()];
+	protected static boolean[][] getUsedPositions(GridMap localMap) {
+		boolean[][] result = new boolean[localMap.rows()][localMap.columns()];
 		for (int i = 0; i < localMap.size(); i++)
 			if(localMap.isEmpty(i) == false) // ist das Feld bereits belegt
-				result[i / localMap.columns()][i % localMap.columns()] = 255;		
+				result[i / localMap.columns()][i % localMap.columns()] = true;		
 		return result;
 	}
 	

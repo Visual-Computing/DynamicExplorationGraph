@@ -64,7 +64,7 @@ public class MapNavigatorTest {
 		// place the image 0 in the middle of the grid and arrange similar images from the graph around it
 		final int initialId = 0;
 		final PreparedGraphFilter filter = new PreparedGraphFilter(idToImageData.keySet());
-		mapNavigator.jump(localMap, initialId, 0, 0, 0, filter);
+		mapNavigator.jump(localMap, initialId, localMap.columns()/2, localMap.rows()/2, 0, filter);
 		final BufferedImage image1 = toGridToImage(localMap, idToImageData, 64);
 		
 		// move 3 steps to the right on the grid and fill the new empty grid cells with image from the graph
@@ -75,11 +75,11 @@ public class MapNavigatorTest {
 		final JFrame frame = new JFrame();
 		final JLabel label1=new JLabel();
 	    label1.setIcon(new ImageIcon(image1));
-	    frame.getContentPane().add(label1, BorderLayout.EAST);
+	    frame.getContentPane().add(label1, BorderLayout.WEST);
 	    frame.getContentPane().add(new JLabel("-----"), BorderLayout.CENTER);
 		final JLabel label2=new JLabel();
 	    label2.setIcon(new ImageIcon(image2));
-	    frame.getContentPane().add(label2, BorderLayout.WEST);	    
+	    frame.getContentPane().add(label2, BorderLayout.EAST);	    
 	    frame.setLocationRelativeTo(null);
 	    frame.pack();
 	    frame.setVisible(true);
