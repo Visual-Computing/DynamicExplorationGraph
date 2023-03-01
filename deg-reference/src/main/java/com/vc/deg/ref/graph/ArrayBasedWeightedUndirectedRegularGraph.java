@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 import org.slf4j.Logger;
@@ -41,6 +42,7 @@ import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.GraphFilter;
 import com.vc.deg.io.LittleEndianDataInputStream;
 import com.vc.deg.io.LittleEndianDataOutputStream;
+import com.vc.deg.ref.designer.EvenRegularGraphDesigner;
 import com.vc.deg.ref.feature.PrimitiveFeatureFactories;
 
 /**
@@ -80,6 +82,11 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	 * The number of edges per vertex is fixed and an even number
 	 */
 	protected final int edgesPerVertex;
+	
+	public static AtomicInteger ExploreDistCalcs = new AtomicInteger(0);
+	public static AtomicInteger ApproachDistCalcs = new AtomicInteger(0);
+	public static AtomicInteger ExploreHopCount = new AtomicInteger(0);
+	public static AtomicInteger ApproachHopCount = new AtomicInteger(0);
 
 	public ArrayBasedWeightedUndirectedRegularGraph(int edgesPerVertex, FeatureSpace space) {
 		this.edgesPerVertex = edgesPerVertex;
@@ -370,6 +377,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 		final BitSet checkedIds = new BitSet(getVertexCount());
 		
 		// compute the min distance between the given fv and all the queries
+		int[] DistCalcs = new int[] {0};
 		final Function<VertexData, VertexDistance> calcMinDistance = (VertexData vertex) -> {			
 			final FeatureVector fv = vertex.getFeature();
 			
@@ -379,6 +387,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 			
 			int index = 0;
 			for (FeatureVector query : queries) {
+				DistCalcs[0]++;
 				final float dist = space.computeDistance(query, fv);
 				if(dist < minDistance) {
 					minDistance = dist;
@@ -390,7 +399,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 			return new VertexDistance(minDistIndex, minDistQuery, vertex, minDistance);			
 		};
 	
-		// items to traverse, start with the initial vertex
+		// items to traverse, start with the initial vertices
 		final PriorityQueue<VertexDistance> nextVertices = new PriorityQueue<>(k * 10); 
 		for (int id : seedVertexIds) {
 			if(checkedIds.get(id) == false) {
@@ -406,7 +415,11 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 		float radius = Float.MAX_VALUE;
 		
 		// iterate as long as good elements are in S
+		boolean isApproaching = true;
+		int aDistCalcs = 0, eDistCalcs = 0;
+		int aHopCount = 0, eHopCount = 0;
 		while(nextVertices.size() > 0) {
+			final int InitialDistCalc = DistCalcs[0];
 			final VertexDistance nextVertex = nextVertices.poll();
 
 			// max distance reached
@@ -414,9 +427,19 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 				break;
 
 			// traverse never seen vertices
+			boolean foundNewTopK = false;
 			for(final int neighborId : nextVertex.getVertex().getEdges().keySet()) {
 				if(checkedIds.get(neighborId) == false) {
+					
+					// skip all none RNG conform edges during the approaching phase
+//					boolean rngConform = checkRNG(nextVertex.getVertex().getId(), neighborId, nextVertex.getVertex().getEdges().get(neighborId));
+					//if((isApproaching && rngConform == false) || (isApproaching == false && rngConform))
+//					if(isApproaching && rngConform == false)
+//						continue;
+//					if(isApproaching == false && nextVertex.getVertex().getEdges().get(neighborId) > nextVertex.getDistance())
+//						continue;
 					checkedIds.set(neighborId);
+					
 					
 					final VertexData neighbor = getVertexById(neighborId);
 					final VertexDistance candidate = calcMinDistance.apply(neighbor);
@@ -432,14 +455,62 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 							if(results.size() > k) {
 								results.pollLast();
 								radius = results.last().getDistance();
-							}							
+							}	
+							foundNewTopK = true;
 						}
 					}					
 				}
 			}
+			
+			if(foundNewTopK == false) 
+				isApproaching = false;
+			
+			if(isApproaching) {
+				aDistCalcs += DistCalcs[0] - InitialDistCalc;
+				aHopCount++;
+			} else {
+				eDistCalcs += DistCalcs[0] - InitialDistCalc;
+				eHopCount++;
+			}
+				
 		}
 		
+		ApproachHopCount.addAndGet(aHopCount);
+		ExploreHopCount.addAndGet(eHopCount);
+		ApproachDistCalcs.addAndGet(aDistCalcs);
+		ExploreDistCalcs.addAndGet(eDistCalcs);
+		
 		return results;
+	}
+	
+	/**
+	 * Check if the edge (vertexId, targetId) is RNG conform
+	 * 
+	 * @param vertexId
+	 * @param targetId
+	 * @param vertexTargetWeight
+	 * @return true if RNG conform
+	 */
+	private boolean checkRNG(int vertexId, int targetId, float vertexTargetWeight) {
+		for(Map.Entry<Integer, Float> neighbor : getVertexById(vertexId).getEdges().entrySet()) {
+			float neighborTargetWeight = getEdgeWeight(neighbor.getKey(), targetId);
+			
+			// Does vertexId has a neighbor which is connected to the targetId and has a lower weight?
+			if(neighborTargetWeight >= 0 && vertexTargetWeight > Math.max(neighbor.getValue(), neighborTargetWeight)) 
+				return false;
+		}
+		return true;
+	}
+	
+	private boolean checkRNGSimple(int vertexId, int targetId, float vertexTargetWeight) {
+		for(Map.Entry<Integer, Float> neighbor : getVertexById(vertexId).getEdges().entrySet()) {
+			float neighborTargetWeight = getEdgeWeight(neighbor.getKey(), targetId);
+			
+			// Does vertexId has a neighbor which is connected to the targetId and has a lower weight?
+			if(neighborTargetWeight >= 0 && vertexTargetWeight > neighborTargetWeight)
+				return false;
+		}
+		return true;
 	}
 	
 	
