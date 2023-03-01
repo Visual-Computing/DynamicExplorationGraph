@@ -7,6 +7,8 @@ import com.vc.deg.viz.om.SelfSwappingMap6.MapPlace;
 
 
 /** 
+ * Can handle holes
+ * 
  * @author barthel and hezel
  */
 public class SelfSwappingMap6Adapter {

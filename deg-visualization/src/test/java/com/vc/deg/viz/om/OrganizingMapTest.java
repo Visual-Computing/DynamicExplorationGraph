@@ -1,4 +1,4 @@
-package com.vc.deg.viz;
+package com.vc.deg.viz.om;
 
 import java.awt.BorderLayout;
 import java.awt.Graphics;
@@ -17,6 +17,7 @@ import javax.swing.ImageIcon;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 
+import com.koloboke.collect.IntCursor;
 import com.koloboke.collect.map.IntObjMap;
 import com.koloboke.collect.map.hash.HashIntObjMaps;
 import com.vc.deg.FeatureSpace;
@@ -24,27 +25,20 @@ import com.vc.deg.FeatureVector;
 import com.vc.deg.HierarchicalDynamicExplorationGraph;
 import com.vc.deg.feature.FloatFeature;
 import com.vc.deg.graph.GraphDesigner;
-import com.vc.deg.viz.filter.PreparedGraphFilter;
 import com.vc.deg.viz.model.GridMap;
-import com.vc.deg.viz.model.WorldMap;
 
 /**
- * Example on how to navigate and visualize a graph on a 2D grid.
- * The {@link MapDesigner} projects parts of the graph on a 2D grid
- * and the {@link MapNavigator} keeps track of the already places elements.
+ * Test the 2D mapping capability of FLAS
  * 
  * @author Nico Hezel
  */
-public class MapNavigatorTest {
+public class OrganizingMapTest {
 	
 	protected static Path inputDir = Paths.get("c:\\Data\\Images\\WebImages420\\");
 
 	public static void main(String[] args) throws IOException {
 		
 		final IntObjMap<ImageData> idToImageData = getImageData(inputDir);
-		final int edgesPerVertex = 4;
-		final int topRankSize = idToImageData.size();
-		final HierarchicalDynamicExplorationGraph hGraph = buildGraph(idToImageData.values(), edgesPerVertex, topRankSize) ;
 		
 		// map the feature vector to a simple float array
 		final IntFunction<float[]> idToFloatFeature = (int id) -> {
@@ -55,31 +49,89 @@ public class MapNavigatorTest {
 			return floatArray;
 		};
 		
-		// a map navigator and designer to explore the graph
-		final MapNavigator mapNavigator = new MapNavigator(new WorldMap(100, 100), new MapDesigner(hGraph, idToFloatFeature));
+		// 2D sorter
+		final boolean doWrap = false;
+		final FastLinearAssignmentSorterAdapter flas = new FastLinearAssignmentSorterAdapter(idToFloatFeature);
+		final SelfSwappingMap6Adapter ssm6 = new SelfSwappingMap6Adapter(idToFloatFeature);
+		final SelfSwappingMapAdapter ssm = new SelfSwappingMapAdapter(idToFloatFeature);
 
 		// empty grid to arrange the image of the graph onto
-		final GridMap localMap = new GridMap(10, 10);
+		final int mapSize = 20;
+		final GridMap flasMap = new GridMap(mapSize, mapSize);	
+		final GridMap ssm6Map = new GridMap(mapSize, mapSize);	
+		final GridMap ssmMap = new GridMap(mapSize, mapSize);	
+		final short[][] inUse = new short[mapSize][mapSize];
+		
+		// place some images on the grid
+		final IntCursor ids = idToImageData.keySet().cursor();
+		final float[][] data = new float[mapSize*mapSize][];
+		for (int y = 0; y < mapSize; y++) {
+			for (int x = 0; x < mapSize && ids.moveNext(); x++) { 
+				flasMap.set(x, y, ids.elem());
+				ssm6Map.set(x, y, ids.elem());
+				ssmMap.set(x, y, ids.elem());
+				data[y*mapSize+x] = idToFloatFeature.apply(ids.elem());
+			}
+		}
+		
+		final DistancePreservation dpqMetric = new DistancePreservation(data, 16);
+
+		
+		// sort the image on the map
+		final int runs = 100;
+		long flasStart = System.currentTimeMillis();
+		for (int i = 0; i < runs; i++) 
+			flas.arrangeWithHoles(flasMap, inUse);
+		long flasTime = System.currentTimeMillis() - flasStart;
+			
+		long ssm6Start = System.currentTimeMillis();
+		for (int i = 0; i < runs; i++) 
+			ssm6.arrangeWithHoles(ssm6Map, inUse);
+		long ssm6Time = System.currentTimeMillis() - ssm6Start;
+		
+		long ssmStart = System.currentTimeMillis();
+		for (int i = 0; i < runs; i++) 
+			ssm.arrange(ssmMap, inUse);
+		long ssmTime = System.currentTimeMillis() - ssmStart;
+		
+		System.out.printf("Time    FLAS: %6dms, SSM6: %6dms, SSM: %6dms\n", flasTime, ssm6Time, ssmTime);
+		
+	
+		float[][] flasResultMap = new float[mapSize*mapSize][];
+		for (int i = 0; i < flasResultMap.length; i++) 
+			flasResultMap[i] = idToFloatFeature.apply(flasMap.get(i));
+		final double flasQuality = dpqMetric.computeQuality(flasResultMap, mapSize, mapSize, doWrap);
+
+		float[][] ssm6ResultMap = new float[mapSize*mapSize][];
+		for (int i = 0; i < ssm6ResultMap.length; i++) 
+			ssm6ResultMap[i] = idToFloatFeature.apply(ssm6Map.get(i));
+		final double ssm6Quality = dpqMetric.computeQuality(ssm6ResultMap, mapSize, mapSize, doWrap);
+
+		float[][] ssmResultMap = new float[mapSize*mapSize][];
+		for (int i = 0; i < ssmResultMap.length; i++) 
+			ssmResultMap[i] = idToFloatFeature.apply(ssmMap.get(i));
+		final double ssmQuality = dpqMetric.computeQuality(ssmResultMap, mapSize, mapSize, doWrap);
+	
+		System.out.printf("Quality FLAS: %.6f, SSM6: %.6f, SSM: %.6f\n", flasQuality, ssm6Quality, ssmQuality);
+
 		
 		// place the image 0 in the middle of the grid and arrange similar images from the graph around it
-		final int initialId = 0;
-		final PreparedGraphFilter filter = new PreparedGraphFilter(idToImageData.keySet());
-		mapNavigator.jump(localMap, initialId, localMap.columns()/2, localMap.rows()/2, 0, filter);
-		final BufferedImage image1 = toGridToImage(localMap, idToImageData, 64);
-		
-		// move 3 steps to the right on the grid and fill the new empty grid cells with image from the graph
-		mapNavigator.move(localMap, 3, 0, 1, 0, filter);
-		final BufferedImage image2 = toGridToImage(localMap, idToImageData, 64);
+		final int thumbSize = 32; // 64
+		final BufferedImage image1 = toGridToImage(flasMap, idToImageData, thumbSize);
+		final BufferedImage image2 = toGridToImage(ssm6Map, idToImageData, thumbSize);
+		final BufferedImage image3 = toGridToImage(ssmMap, idToImageData, thumbSize);
 
 		// display the grid
 		final JFrame frame = new JFrame();
 		final JLabel label1=new JLabel();
 	    label1.setIcon(new ImageIcon(image1));
 	    frame.getContentPane().add(label1, BorderLayout.WEST);
-	    frame.getContentPane().add(new JLabel("-----"), BorderLayout.CENTER);
 		final JLabel label2=new JLabel();
 	    label2.setIcon(new ImageIcon(image2));
-	    frame.getContentPane().add(label2, BorderLayout.EAST);	    
+	    frame.getContentPane().add(label2, BorderLayout.CENTER);	
+	    final JLabel label3=new JLabel();
+	    label3.setIcon(new ImageIcon(image3));
+	    frame.getContentPane().add(label3, BorderLayout.EAST);	    
 	    frame.setLocationRelativeTo(null);
 	    frame.pack();
 	    frame.setVisible(true);

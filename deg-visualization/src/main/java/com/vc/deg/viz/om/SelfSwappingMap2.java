@@ -6,6 +6,8 @@ package com.vc.deg.viz.om;
 
 
 /**
+ * Can not handle holes
+ * 
  * @author barthel and hezel
  */
 public class SelfSwappingMap2 {
