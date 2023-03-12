@@ -113,6 +113,23 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 	// ----------------------------------------------------------------------------------------------
 
 	@Override
+	public float calcAvgNeighborIndexDistance() {
+		double sum = 0;
+		int count = 0;
+		for(VertexData data : graph.getVertices()) {
+			final int vertexIndex = data.getId();
+			final IntFloatCursor edgeCursor = data.getEdges().cursor();
+			while(edgeCursor.moveNext()) {
+				if(edgeCursor.key() != data.getId()) {
+					sum += Math.abs(edgeCursor.key() - vertexIndex);
+					count++;
+				}
+			}
+		}
+		return (float)(sum/count);
+	}
+	
+	@Override
 	public float calcAvgEdgeWeight() {
 		double sum = 0;
 		int count = 0;

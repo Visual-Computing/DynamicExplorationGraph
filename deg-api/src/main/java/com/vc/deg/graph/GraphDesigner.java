@@ -132,6 +132,14 @@ public interface GraphDesigner {
 	// ----------------------------------------------------------------------------------------------
 	
 	/**
+	 * Compute the average L1 distance between the vertex index and its neighbor indices.
+	 * Useful for estimating the closeness in memory
+	 * 
+	 * @return
+	 */
+	public float calcAvgNeighborIndexDistance();
+	
+	/**
 	 * Compute the average edge weight of all edges.
 	 * @return
 	 */

@@ -125,4 +125,10 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 		return 0;
 	}
 
+	@Override
+	public float calcAvgNeighborIndexDistance() {
+		// TODO Auto-generated method stub
+		return 0;
+	}
+
 }

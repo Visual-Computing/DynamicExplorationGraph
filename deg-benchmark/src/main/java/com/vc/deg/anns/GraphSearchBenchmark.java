@@ -23,9 +23,8 @@ import com.vc.deg.feature.FloatL2Space;
  */
 public class GraphSearchBenchmark {
 
-	protected final static Path siftBaseDir = Paths.get("C:/Data/Feature/SIFT1M/SIFT1M/");
-//	protected final static Path graphFile   = Paths.get("c:\\Data\\Feature\\SIFT1M\\deg\\best_distortion_decisions\\java\\128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd15+15_improveTheBetterHalfOfTheNonPerfectEdges_RNGAddMinimalSwapAtStep0.float.deg");
-	protected final static Path graphFile   = Paths.get("c:\\Data\\Feature\\SIFT1M\\deg\\best_distortion_decisions\\128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd3+2_improveNonRNGAndSecondHalfOfNonPerfectEdges_RNGAddMinimalSwapAtStep0.add_rng_opt.deg");
+	public final static Path siftBaseDir = Paths.get("e:/Data/Feature/SIFT1M/SIFT1M/");
+	public final static Path graphFile   = Paths.get("e:\\Data\\Feature\\SIFT1M\\deg\\best_distortion_decisions\\128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg");
 
 	public static void main(String[] args) throws IOException {
 		testGraph(graphFile, siftBaseDir);

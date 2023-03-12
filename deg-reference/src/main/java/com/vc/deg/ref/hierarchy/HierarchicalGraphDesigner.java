@@ -139,6 +139,14 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 	// ----------------------------------------------------------------------------------------------
 
 	@Override
+	public float calcAvgNeighborIndexDistance() {
+		float avg = 0;
+		for (DynamicExplorationGraph graph : layers) 
+			avg += graph.designer().calcAvgNeighborIndexDistance();
+		return avg/layers.size();
+	}
+	
+	@Override
 	public float calcAvgEdgeWeight() {
 		float avg = 0;
 		for (DynamicExplorationGraph graph : layers) 
