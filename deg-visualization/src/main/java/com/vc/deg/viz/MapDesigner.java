@@ -65,7 +65,7 @@ public class MapDesigner {
 		if(filter == null) {
 			final DynamicExplorationGraph deg = graph.getGraph(atLevel);		
 			final IntSet validIds = HashIntSets.newMutableSet(c -> {
-				deg.forEachVertex((id, fv) -> c.accept(id));			
+				deg.forEachVertex((label, fv) -> c.accept(label));			
 			}, deg.size());
 			
 			for (int i = 0; i < worldMap.size(); i++) {

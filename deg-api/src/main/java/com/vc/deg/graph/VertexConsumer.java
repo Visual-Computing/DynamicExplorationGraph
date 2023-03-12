@@ -12,8 +12,8 @@ public interface VertexConsumer {
     /**
      * Performs this operation on the given vertices.
      * 
-	 * @param id
+	 * @param label
 	 * @param feature
 	 */
-    void accept(int id, FeatureVector feature);
+    void accept(int label, FeatureVector feature);
 }
