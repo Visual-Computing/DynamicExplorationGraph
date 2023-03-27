@@ -119,7 +119,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	// ------------------------------------------------------------------------
 	
 	public VertexData getVertexByLabel(int label) {
-		int id = labelToId.getOrDefault(label, -1);
+		final int id = labelToId.getOrDefault(label, -1);
 		return (id == -1) ? null : vertices.get(id);
 	}
 
@@ -205,8 +205,8 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	}
 
 	public boolean addUndirectedEdge(int id1, int id2, float weight) {		
-		boolean add1 = addDirectedEdge(id1, id2, weight);
-		boolean add2 = addDirectedEdge(id2, id1, weight);
+		final boolean add1 = addDirectedEdge(id1, id2, weight);
+		final boolean add2 = addDirectedEdge(id2, id1, weight);
 		return add1 && add2;
 	}
 	
@@ -225,8 +225,8 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	}
 
 	public boolean removeUndirectedEdge(int id1, int id2) {
-		boolean remove1 = removeDirectedEdge(id1, id2);
-		boolean remove2 = removeDirectedEdge(id2, id1);
+		final boolean remove1 = removeDirectedEdge(id1, id2);
+		final boolean remove2 = removeDirectedEdge(id2, id1);
 		return remove1 && remove2;
 	}
 	
@@ -633,13 +633,13 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 			final DataInput input = new LittleEndianDataInputStream(bis);
 
 			// read meta data
-			int metric = Byte.toUnsignedInt(input.readByte());
-			int dims = Short.toUnsignedInt(input.readShort());
-			long vertexCount = Integer.toUnsignedLong(input.readInt());
-			int edgesPerVertex = Byte.toUnsignedInt(input.readByte());
+			final int metric = Byte.toUnsignedInt(input.readByte());
+			final int dims = Short.toUnsignedInt(input.readShort());
+			final long vertexCount = Integer.toUnsignedLong(input.readInt());
+			final int edgesPerVertex = Byte.toUnsignedInt(input.readByte());
 			
 			// find the feature space specified in the file
-			FeatureSpace space = FeatureSpace.findFeatureSpace(featureType, metric, dims, false);
+			final FeatureSpace space = FeatureSpace.findFeatureSpace(featureType, metric, dims, false);
 			if(space == null)
 				throw new UnsupportedOperationException("No feature space found for featureType="+featureType+", metric="+metric+" and isNative=false");
 			
@@ -655,7 +655,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 				throw new UnsupportedOperationException("No feature factory found for featureType="+featureType+" and dims="+dims);
 			
 			// 	featureSize	=		     filesize - meta data - (edge data   + label) * vertexCount   / vertexCount
-			int featureSize = (int)((Files.size(file) - 8 - ((edgesPerVertex * 8 + 4) * vertexCount)) / vertexCount);
+			final int featureSize = (int)((Files.size(file) - 8 - ((edgesPerVertex * 8 + 4) * vertexCount)) / vertexCount);
 			if(featureSize != featureFactory.featureSize())
 				throw new UnsupportedOperationException("The feature factory for featureType="+featureType+" and dims="+dims+" produces features with "+featureFactory.featureSize()+" bytes but the graph contains features with "+featureSize+" bytes.");
 			if(featureSize != space.featureSize())
@@ -686,7 +686,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 					edges.put(neighborIds[e], weights[e]);
 				
 				// read the label
-				int label = input.readInt();
+				final int label = input.readInt();
 				
 				// create the vertex data
 				labelMap.put(label, i);

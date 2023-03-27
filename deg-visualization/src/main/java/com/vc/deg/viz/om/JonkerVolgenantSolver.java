@@ -12,7 +12,7 @@ public class JonkerVolgenantSolver {
 	public static int[] computeAssignment(int[][] matrix) {
 		return computeAssignment(matrix, matrix.length);
 	}
-	
+
 	public static int[] computeAssignment(int[][] matrix, int dim) {
 		int i, imin, i0, freerow;
 		int j, j1, j2=0, endofpath=0, last=0, min=0;
