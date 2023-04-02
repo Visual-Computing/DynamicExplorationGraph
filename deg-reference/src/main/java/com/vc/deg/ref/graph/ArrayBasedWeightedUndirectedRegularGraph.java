@@ -400,10 +400,21 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 		}
 
 		// result set
-		final TreeSet<VertexDistance> results = new TreeSet<>(nextVertices);
-
+		final TreeSet<VertexDistance> results = new TreeSet<>();
+		
 		// search radius
 		float radius = Float.MAX_VALUE;
+		
+		// add seed vertices if they pass the filter
+		for (VertexDistance vertexDistance : nextVertices) {
+			if(labelFilter.isValid(vertexDistance.getVertexLabel())) {
+				results.add(vertexDistance);
+				if(results.size() > k) {
+					results.pollLast();
+					radius = results.last().getDistance();
+				}
+			}
+		}
 		
 		// iterate as long as good elements are in S
 		while(nextVertices.size() > 0) {
@@ -494,9 +505,20 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 
 		// result set
 		final TreeSet<VertexDistance> results = new TreeSet<>();
-
+		
 		// search radius
 		float radius = Float.MAX_VALUE;
+		
+		// add seed vertices if they pass the filter
+		for (VertexDistance vertexDistance : nextVertices) {
+			if(labelFilter.isValid(vertexDistance.getVertexLabel())) {
+				results.add(vertexDistance);
+				if(results.size() > k) {
+					results.pollLast();
+					radius = results.last().getDistance();
+				}
+			}
+		}
 		
 		// iterate as long as good elements are in S
 		while(nextVertices.size() > 0) {
@@ -578,7 +600,6 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 			out.writeInt(getVertexCount());
 			out.writeByte(edgesPerVertex);
 			
-			
 			class IntFloat {
 				public final int id;
 				public final float distance;
@@ -607,7 +628,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 				});
 				for (int r = 0; r < edgesPerVertex - vertex.getEdges().size(); r++)
 					edges.add(new IntFloat( vertex.getId(), 0));
-				edges.sort(Comparator.comparingInt(IntFloat::getId).thenComparingDouble(IntFloat::getDistance));
+				edges.sort(Comparator.comparingInt(IntFloat::getId).thenComparingDouble(IntFloat::getDistance)); // sort ids low to high
 				
 				// write the data to the drive
 				for (IntFloat edge : edges) 
