@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.TreeSet;
 import java.util.function.IntFunction;
 
 import org.slf4j.Logger;
@@ -97,41 +98,41 @@ public class MapDesigner {
 	 */
 	public void fill(WorldMap worldMap, GridMap localMap, int worldPosX, int worldPosY, int atLevel, MutableGraphFilter filter) {
 		
-		// kein Graph
+		// no graph is present yet
 		if(graph == null) 
 			return;
 		
-		// lade existierende Panels auf die lokale Karte
+		// copy the cell data from the world map to the local map
 		worldMap.copyTo(localMap, worldPosX, worldPosY);
 		
-		// finde Nachbarn im Graph die noch nicht auf der Karte sind 
+		// find neighbors in the graph for the free cells of the map 
 		int emptyTileCount = localMap.freeCount();
 		if(emptyTileCount > 0 && localMap.isEmpty() == false) {
 			
-			// welche Plätze[y][x] sind schon belegt
-			boolean[][] inUse = getUsedPositions(localMap);
+			// list of used and unused cells[y][x]
+			final boolean[][] inUse = getUsedPositions(localMap);
 			
 			// get all border images ignore there order
-			IntFloat[] borderPanelPos = getBorderPositions(localMap, new int[] {0,0});
-			int[] queryImages = Arrays.stream(borderPanelPos).mapToInt(p -> localMap.get(p.getIndex())).toArray();
+			final IntFloat[] borderPanelPos = getBorderPositions(localMap, new int[] {0,0});
+			final int[] queryImages = Arrays.stream(borderPanelPos).mapToInt(p -> localMap.get(p.getIndex())).toArray();
 			
-			// Besorge die Nachbarn der Randbilder
+			// get the most similar neighbors of the border images from the graph
 			long start = System.currentTimeMillis();
-			int[] images = getBestNeighborVertices(queryImages, atLevel, emptyTileCount, prepareFilter(filter, worldMap, atLevel));
+			final int[] images = getBestNeighborVertices(queryImages, atLevel, emptyTileCount, prepareFilter(filter, worldMap, atLevel));
 			
-			// fülle die fehlenden Felder mit den Nachbarn aus
-			int fillCount = fillFreePlaces(localMap, images);
+			// fill the new neighbors into the free cells of the map
+			final int fillCount = fillFreePlaces(localMap, images);
 			
-			// es sind neue element hinzu gekommen
+			// if new images where placed onto the map
 			if(fillCount > 0) {
 				log.debug("Fill free tiles ("+images.length+" elements) took "+(System.currentTimeMillis() - start)+"ms");
 				
-				// sortiere alle Bilder
+				// arrange them
 				start = System.currentTimeMillis();
 				arrangeMap(localMap, inUse);
 				log.debug("Arranging the neighbourhood took "+(System.currentTimeMillis() - start)+"ms");
 
-				// die Sortierung auf die Weltkarte kopieren
+				// copy the new local map to the world map
 				worldMap.copyFrom(localMap, worldPosX, worldPosY);
 			}
 		}
@@ -192,7 +193,7 @@ public class MapDesigner {
 	protected void arrange(WorldMap worldMap, GridMap localMap, int targetImageId, int targetPosX, int targetPosY, int worldPosX, int worldPosY, int[] elements) {
 		final long start = System.currentTimeMillis();
 		
-		// place the most similar images onto the local map without any order
+		// place the most similar images onto the local map from best to worst
 		localMap.clear();
 		for (int i = 0; i < elements.length; i++) 
 			localMap.set(i, elements[i]);
@@ -272,8 +273,7 @@ public class MapDesigner {
 	}
 	
 	/**
-	 * Besorge Nachbar Bilder aus dem Graph von all den Bildern auf die der ShiftVector zeigt oder die in der Nähe sind.
-	 * 
+	 * Acquire the neighbor images from the graph of all the image where the shift vector points to on the map.
 	 * 
 	 * @param localMap
 	 * @param shiftVector
@@ -291,19 +291,19 @@ public class MapDesigner {
 		final float cdx = (int)(nDirection.getX() * (columns/2f - Math.abs(shiftVector.getX())));
 		final float cdy = (int)(nDirection.getY() * (rows/2f - Math.abs(shiftVector.getY())));
 		
-		// das durch den Richtungs-Vector getroffene Tile im Viewport
+		// position of the tile hit by the direction vector
 		int arrayPosX = Math.round(columns/2f - cdx); 
 		int arrayPosY = Math.round(rows/2f    - cdy);
 		if(shiftVector.getY() > 0) arrayPosY--;
 		if(shiftVector.getX() > 0) arrayPosX--;
 		final int[] panelCoordinates = new int[] {arrayPosX, arrayPosY};
-						
-		// besorge Bilder entlang der Viewport Border, in der Nähe des Bewegungsvektors 
+						 
+		// get the images along the local map border near the hit tile
 		IntFloat[] borderPanelPos = getBorderPositions(localMap, panelCoordinates);
-		borderPanelPos = Arrays.copyOf(borderPanelPos, Math.max(1, borderPanelPos.length/2)); // halbiere dessen Anzahl
-		int[] queryImages = Arrays.stream(borderPanelPos).mapToInt(p -> localMap.get(p.getIndex())).toArray();
-		
-		// finde Nachbarn im Graph die noch nicht auf der Karte sind 
+		borderPanelPos = Arrays.copyOf(borderPanelPos, Math.max(1, borderPanelPos.length/2)); // ignore the ones far away
+		final int[] queryImages = Arrays.stream(borderPanelPos).mapToInt(p -> localMap.get(p.getIndex())).toArray();
+		 
+		// find neighbors in the graph not present on the world map and pass the filter
 		final int desiredCount = localMap.freeCount();	
 		return getBestNeighborVerticesMedian(queryImages, atLevel, desiredCount, filter);
 	}
@@ -366,8 +366,8 @@ public class MapDesigner {
 	}
 	
 	/**
-	 * Find the most similar neighbors of the query images. The max similarity decides 
-	 * which to chose and only images passing the filter are allowed.
+	 * Find the most similar neighbors of the query images. Only images passing the 
+	 * filter are allowed and the max similarity decides which to chose.
 	 * 
 	 * If a query image is not available at the given graph level, the most similar 
 	 * will be used.
@@ -386,15 +386,57 @@ public class MapDesigner {
 		// not enough images or invalid goal
 		if(desiredCount <= 0 || queryImageIds.length == 0) 
 			return new int[0];
-		
+				
 		// search for similar query images at the given level, for all query images which are not present at the level
 		final int[] queryIds = HashIntSets.newImmutableSet(c -> {			
-			for (int queryImageId : queryImageIds) 
+			for (int queryImageId : queryImageIds) {
 				c.accept(getSimilarVertexAtLevel(queryImageId, atLevel, 1, 0.6f));
-		}).toIntArray();
+			}
+		}, queryImageIds.length).toIntArray();
 		
 		// explore from the query ids other vertices in the graph which are valid in the filter
-		return graph.exploreAtLevel(queryIds, atLevel, desiredCount, Integer.MAX_VALUE, filter);
+		final int[] exploreResult = graph.exploreAtLevel(queryIds, atLevel, desiredCount, Integer.MAX_VALUE, filter);
+
+
+		
+		
+		// edge case: One of the initial query image ids where not present on the current level and an alternative
+		// was stored in the queryIds array. This alternative is not in exploreResult but might pass the filter and
+		// be better than any image in the exploreResult list.
+		final TreeSet<IntFloat> result = new TreeSet<>(IntFloat.asc());
+		{
+			// get the feature of the query ids
+			final FeatureSpace space = graph.getFeatureSpace();
+			final FeatureVector[] queryFeature = new FeatureVector[queryIds.length];
+			for (int i = 0; i < queryFeature.length; i++) 
+				queryFeature[i] = graph.getFeature(queryIds[i]);
+			
+			// a function to compute the smallest distance to any of the queries
+			final IntFunction<IntFloat> calcMinDistance = (int id) -> {
+				final FeatureVector fv = graph.getFeature(id);
+				
+				float minDistance = Float.MAX_VALUE;
+				for (FeatureVector query : queryFeature) {
+					final float dist = space.computeDistance(query, fv);
+					if(dist < minDistance) 
+						minDistance = dist;
+				}
+				return new IntFloat(id, minDistance);			
+			};
+		
+			// compute the distance to all the explore results
+			for (int id : exploreResult) 
+				result.add(calcMinDistance.apply(id));
+			
+			// add all the queries which a present on the current level, 
+			// pass the filter but where not in the original list of queries
+			final IntSet originalIds = HashIntSets.newImmutableSet(queryImageIds);
+			for (int id : queryIds) 
+				if(originalIds.contains(id) == false && filter.isValid(id)) 
+					result.add(calcMinDistance.apply(id));
+		}
+		
+		return result.stream().mapToInt(IntFloat::getIndex).limit(desiredCount).toArray();
 	}
 	
 	/**
@@ -408,7 +450,7 @@ public class MapDesigner {
 	 */
 	protected int getSimilarVertexAtLevel(int id, int atLevel, int k, float eps) {
 		
-		// shortcut: ist das selbe Bild auf dem Level
+		// shortcut: the same image is available on the target level
 		if(graph.getGraph(atLevel).hasLabel(id))
 			return id;
 		
@@ -430,7 +472,7 @@ public class MapDesigner {
 	protected static boolean[][] getUsedPositions(GridMap localMap) {
 		boolean[][] result = new boolean[localMap.rows()][localMap.columns()];
 		for (int i = 0; i < localMap.size(); i++)
-			if(localMap.isEmpty(i) == false) // ist das Feld bereits belegt
+			if(localMap.isEmpty(i) == false) // the cells is alreay taken
 				result[i / localMap.columns()][i % localMap.columns()] = true;		
 		return result;
 	}
@@ -458,8 +500,7 @@ public class MapDesigner {
 	
 	
 	/**
-	 * Liefert alle Bilder deren Nachbarn eine Lücke sind.
-	 * Und sortiert diese Anhand ihrer nähe zu den panelCoordinates.
+	 * Collect all image-cells which are adjacent to a hole and sort them by their spatial distance to the panelCoordinates
 	 * 
 	 * @param localMap
 	 * @param panelCoordinates
@@ -476,17 +517,17 @@ public class MapDesigner {
 		for (int y2 = 0; y2 < rows; y2++) {
 			for (int x2 = 0; x2 < columns; x2++) {
 				
-				// ignoriere Lücken
+				// ignore holes
 				if(localMap.isEmpty(x2, y2)) continue;
 				
-				// ist einer der Vier Himmelsrichtungen eine Lücke ...
+				// check if an adjacent cell is a hole ...
 				boolean isBorder = false;				
 				isBorder |= (x2 > 0 && localMap.isEmpty(x2-1, y2)); 			// check left
 				isBorder |= (x2 < columns-1 && localMap.isEmpty(x2+1, y2)); 	// check right
 				isBorder |= (y2 > 0 && localMap.isEmpty(x2, y2-1)); 			// check top 
 				isBorder |= (y2 < rows-1 && localMap.isEmpty(x2, y2+1)); 		// check bottom
 				
-				// ... dann merke die aktuelle Position
+				// ... remember the current cell
 				if(isBorder) {
 					int pos = y2 * columns + x2;
 					float dist = (float)Math.sqrt((x1-x2)*(x1-x2)+(y1-y2)*(y1-y2));

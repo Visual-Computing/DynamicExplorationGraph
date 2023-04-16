@@ -35,6 +35,8 @@ import com.koloboke.collect.map.hash.HashIntFloatMapFactory;
 import com.koloboke.collect.map.hash.HashIntFloatMaps;
 import com.koloboke.collect.map.hash.HashIntIntMapFactory;
 import com.koloboke.collect.map.hash.HashIntIntMaps;
+import com.koloboke.collect.set.IntSet;
+import com.koloboke.collect.set.hash.HashIntSets;
 import com.vc.deg.FeatureFactory;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
@@ -351,9 +353,10 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	 * @param eps
 	 * @param labelFilter of all valid ids. null disables the filter
 	 * @param seedVertexIds
+	 * @param allowSeedInResult
 	 * @return
 	 */
-	public TreeSet<QueryDistance> search(Collection<FeatureVector> queries, int k, float eps, GraphFilter labelFilter, int[] seedVertexIds) {
+	public TreeSet<QueryDistance> search(Collection<FeatureVector> queries, int k, float eps, GraphFilter labelFilter, int[] seedVertexIds, boolean allowSeedInResult) {
 		
 		// allow all elements in the graph if the initial filter was null
 		if(labelFilter == null)
@@ -390,6 +393,38 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 			return new QueryDistance(minDistIndex, minDistQuery, vertex, minDistance);			
 		};
 	
+
+		// result set
+		final TreeSet<QueryDistance> results = new TreeSet<>();
+		
+		// search radius
+		float radius = Float.MAX_VALUE;
+
+		// if the filter only contains few valid ids brute force them all
+		if(labelFilter.size() < 50000) {
+			
+			// check all vertices of the graph if they pass the filter and are not a seed id if required 
+			final IntSet seedIds = HashIntSets.newImmutableSet(seedVertexIds);			
+			for (VertexData vertex : vertices) {				
+				if(labelFilter.isValid(vertex.getLabel()) && (allowSeedInResult || seedIds.contains(vertex.getId()) == false)) {
+
+					// keep all distances better than the worst in the result list
+					final QueryDistance queryDistance = calcMinDistance.apply(vertex);
+					if(queryDistance.getDistance() < radius) {
+						results.add(queryDistance);
+
+						// remove the last from the result list if the list gets to long
+						if(results.size() > k) {
+							results.pollLast();
+							radius = results.last().getDistance();
+						}
+					}
+				}
+			}
+			return results;
+		}		
+		
+		
 		// items to traverse, start with the initial vertex
 		final PriorityQueue<QueryDistance> nextVertices = new PriorityQueue<>(k * 10); 
 		for (int id : seedVertexIds) {
@@ -399,20 +434,16 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 			}
 		}
 
-		// result set
-		final TreeSet<QueryDistance> results = new TreeSet<>();
-		
-		// search radius
-		float radius = Float.MAX_VALUE;
-		
 		// add seed vertices if they pass the filter
-		for (QueryDistance queryDistance : nextVertices) {
-			if(queryDistance.getDistance() < radius && labelFilter.isValid(queryDistance.getVertexLabel())) {
-				results.add(queryDistance);
-
-				if(results.size() > k) {
-					results.pollLast();
-					radius = results.last().getDistance();
+		if(allowSeedInResult) {
+			for (QueryDistance queryDistance : nextVertices) {
+				if(queryDistance.getDistance() < radius && labelFilter.isValid(queryDistance.getVertexLabel())) {
+					results.add(queryDistance);
+	
+					if(results.size() > k) {
+						results.pollLast();
+						radius = results.last().getDistance();
+					}
 				}
 			}
 		}
@@ -434,130 +465,23 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 					final QueryDistance candidate = calcMinDistance.apply(neighbor);
 					final float nDist = candidate.getDistance();
 
-					// follow this vertex further
-					if(nDist <= radius * (1 + eps)) {
-						nextVertices.add(candidate);
-
-						// remember the vertex
-						if(nDist < radius && labelFilter.isValid(neighbor.getLabel())) {
-							results.add(candidate);
-							if(results.size() > k) {
-								results.pollLast();
-								radius = results.last().getDistance();
-							}							
-						}
-					}					
-				}
-			}
-		}
-		
-		return results;
-	}
-	
-	
-	/**
-	 * 
-	 * @param seedVertexIds
-	 * @param k
-	 * @param maxDistanceComputationCount
-	 * @param labelFilter of all valid ids. Null disables the filter
-	 * @return
-	 */
-	public TreeSet<QueryDistance> explore(int[] seedVertexIds, int k, int maxDistanceComputationCount, GraphFilter labelFilter) {
-	    int distanceComputationCount = 0;
-	    
-		// allow all elements in the graph if the initial filter was null
-		if(labelFilter == null)
-			labelFilter = new GraphFilter.AllValidFilter(getVertexCount()); 
-		
-		// list of checked ids
-		final BitSet checkedIds = new BitSet(getVertexCount());
-		for (int entryVertex : seedVertexIds) 
-			checkedIds.set(entryVertex);	
-
-		// list of all entries vertices with their feature vectors
-		final FeatureVector[] queries = new FeatureVector[seedVertexIds.length];
-		for (int i = 0; i < queries.length; i++) 
-			queries[i] = getVertexById(seedVertexIds[i]).getFeature();
-		
-		// items to traverse, start with the initial vertex
-		final PriorityQueue<QueryDistance> nextVertices = new PriorityQueue<>(k * 2); 
-		for (int i = 0; i < queries.length; i++) {
-			VertexData vertex = getVertexById(seedVertexIds[i]);
-			nextVertices.add(new QueryDistance(vertex.getId(), vertex.getFeature(), vertex, 0));
-		}
-
-		// compute the min distance between the given fv and all the queries
-		final Function<VertexData, QueryDistance> calcMinDistance = (VertexData vertex) -> {
-			final FeatureVector fv = vertex.getFeature();
-			
-			int minDistIndex = -1;
-			float minDistance = Float.MAX_VALUE;
-			for (int i = 0; i < queries.length; i++) {
-				final FeatureVector query = queries[i];
-				final float dist = space.computeDistance(query, fv);
-				if(dist < minDistance) {
-					minDistIndex = i;
-					minDistance = dist;
-				}
-			}
-			return new QueryDistance(seedVertexIds[minDistIndex], queries[minDistIndex], vertex, minDistance);			
-		};
-
-		// result set
-		final TreeSet<QueryDistance> results = new TreeSet<>();
-		
-		// search radius
-		float radius = Float.MAX_VALUE;
-		
-		// add seed vertices if they pass the filter
-		for (QueryDistance queryDistance : nextVertices) {
-			if(queryDistance.getDistance() < radius && labelFilter.isValid(queryDistance.getVertexLabel())) {
-				results.add(queryDistance);
-				if(results.size() > k) {
-					results.pollLast();
-					radius = results.last().getDistance();
-				}
-			}
-		}
-		
-		// iterate as long as good elements are in S
-		while(nextVertices.size() > 0) {
-			final QueryDistance nextVertex = nextVertices.poll();
-
-			// max distance reached
-			if(nextVertex.getDistance() > radius)
-				break;
-
-			// traverse never seen vertices
-			for(final int neighborId : nextVertex.getVertex().getEdges().keySet()) {
-				if(checkedIds.get(neighborId) == false) {
-					checkedIds.set(neighborId);
-					
-					final VertexData neighbor = getVertexById(neighborId);
-					final QueryDistance candidate = calcMinDistance.apply(neighbor);
-
 					// follow this vertex further if its distance is better than the current radius
-					if(candidate.getDistance() < radius) {
+					if(nDist <= radius * (1 + eps)) {
 						
 						// check the neighborhood of this node later
 						nextVertices.add(candidate);
 
 						 // remember the node, if its better than the worst in the result list and not forbidden
-						if(labelFilter.isValid(neighbor.getLabel())) {
+						if(nDist < radius && labelFilter.isValid(neighbor.getLabel())) {
 							results.add(candidate);
 							
 							// update the search radius
 							if(results.size() > k) {
 								results.pollLast();
 								radius = results.last().getDistance();
-							}	
+							}							
 						}
-					}
-					
-				      // early stop after to many computations
-			        if(++distanceComputationCount >= maxDistanceComputationCount)
-			          return results;
+					}					
 				}
 			}
 		}

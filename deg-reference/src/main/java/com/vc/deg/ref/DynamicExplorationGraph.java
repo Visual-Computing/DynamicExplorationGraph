@@ -5,8 +5,11 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Objects;
 import java.util.Random;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
@@ -159,7 +162,7 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 		if(seedVertexIds.length == 0)
 			seedVertexIds = new int[] { internalGraph.getVertices().iterator().next().getId() };
 		
-		final TreeSet<QueryDistance> topList = internalGraph.search(queries, k, eps, filter, seedVertexIds);
+		final TreeSet<QueryDistance> topList = internalGraph.search(queries, k, eps, filter, seedVertexIds, true);
 		final int[] result = new int[topList.size()];
 		final Iterator<QueryDistance> it = topList.iterator();
 		for (int i = 0; i < topList.size(); i++) 
@@ -169,12 +172,18 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 
 	@Override
 	public int[] explore(int[] seedLabels, int k, int maxDistanceComputationCount, GraphFilter filter) {
-		final int[] entryIds = Arrays.stream(seedLabels).map(label -> internalGraph.getVertexByLabel(label).getId()).toArray();
-
-		if(entryIds.length == 0)
-			throw new RuntimeException("None of the seed labels "+Arrays.toString(seedLabels)+" is in the graph.");
 		
-		final TreeSet<QueryDistance> topList = internalGraph.explore(entryIds, k, maxDistanceComputationCount, filter);
+		// check seed labels
+		final VertexData[] entrys = Arrays.stream(seedLabels).mapToObj(internalGraph::getVertexByLabel).filter(Objects::nonNull).toArray(VertexData[]::new);
+		if(entrys.length == 0)
+			throw new RuntimeException("None of the seed labels "+Arrays.toString(seedLabels)+" are in the graph.");
+		
+		// prepare search
+		final int[] entryIds = Arrays.stream(entrys).mapToInt(VertexData::getId).toArray();
+		final List<FeatureVector> queries = Arrays.stream(entrys).map(VertexData::getFeature).collect(Collectors.toList());		
+		final TreeSet<QueryDistance> topList = internalGraph.search(queries, k, 0, filter, entryIds, false);
+		
+		// convert to int array
 		final int[] result = new int[topList.size()];
 		final Iterator<QueryDistance> it = topList.iterator();
 		for (int i = 0; i < topList.size(); i++) 

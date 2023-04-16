@@ -1,6 +1,6 @@
 dependencies {
 	implementation project(':deg-api')
-	implementation project(':deg-reference')
+	runtimeOnly project(':deg-reference')
 	
 	implementation group: 'com.koloboke', name: 'koloboke-api-jdk8', version: "${KOLOBOKE_VERSION}"
 	runtimeOnly group: 'com.koloboke', name: 'koloboke-impl-jdk8', version: "${KOLOBOKE_VERSION}"

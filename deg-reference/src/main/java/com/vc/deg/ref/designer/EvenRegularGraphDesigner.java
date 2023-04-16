@@ -345,7 +345,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 				entryVertex = it.next();
 
 			// find good neighbors for the new vertex
-			final QueryDistance[] results = graph.search(Arrays.asList(newVertexFeature), extendK, extendEps, null, new int[] { entryVertex.getId() }).toArray(new QueryDistance[0]);
+			final QueryDistance[] results = graph.search(Arrays.asList(newVertexFeature), extendK, extendEps, null, new int[] { entryVertex.getId() }, true).toArray(new QueryDistance[0]);
 
 			// add an empty vertex to the graph (no neighbor information yet)
 			final VertexData newVertex = graph.addVertex(newVertexLabel, newVertexFeature);
@@ -497,7 +497,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 		//    their subgraph and would therefore connect the two potential subgraphs.	
 		{
 			final FeatureVector vertex2Feature = graph.getVertexById(vertex2).getFeature();
-			final QueryDistance[] results = graph.search(Arrays.asList(vertex2Feature), improveK, improveEps, null, new int[] { vertex3, vertex4 }).toArray(new QueryDistance[0]);
+			final QueryDistance[] results = graph.search(Arrays.asList(vertex2Feature), improveK, improveEps, null, new int[] { vertex3, vertex4 }, true).toArray(new QueryDistance[0]);
 
 			// find a good new vertex3
 			float bestGain = totalGain;
@@ -564,7 +564,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 
 				// find a good (not yet connected) vertex for vertex1/vertex4
 				final FeatureVector vertex4Feature = graph.getVertexById(vertex4).getFeature();
-				final QueryDistance[] results = graph.search(Arrays.asList(vertex4Feature), improveK, improveEps, null, new int[] { vertex2, vertex3 }).toArray(new QueryDistance[0]);
+				final QueryDistance[] results = graph.search(Arrays.asList(vertex4Feature), improveK, improveEps, null, new int[] { vertex2, vertex3 }, true).toArray(new QueryDistance[0]);
 
 				float bestGain = 0;
 				int bestSelectedNeighbor = 0;

@@ -49,6 +49,11 @@ public class QueryDistance implements Comparable<QueryDistance> {
 	}
 	
 	@Override
+	public int hashCode() {
+		return getVertexId();
+	}
+	
+	@Override
 	public int compareTo(QueryDistance o) {
 		int cmp = Float.compare(getDistance(), o.getDistance());
         if (cmp == 0)
