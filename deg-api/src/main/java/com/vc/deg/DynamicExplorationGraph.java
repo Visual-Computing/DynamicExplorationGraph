@@ -150,7 +150,8 @@ public interface DynamicExplorationGraph {
 	 * 
 	 * Any entry in the returning result list must pass the filter.
 	 * 
-	 * The search starts at the seedVertexLabels.
+	 * The search starts at the seedVertexLabels. If empty or filled with invalid ids, 
+	 * a default starting point will be used instead.
 	 * 
 	 * @param queries
 	 * @param k

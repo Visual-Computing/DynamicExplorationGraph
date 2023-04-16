@@ -16,7 +16,7 @@ import com.vc.deg.graph.VertexConsumer;
 import com.vc.deg.ref.designer.EvenRegularGraphDesigner;
 import com.vc.deg.ref.graph.ArrayBasedWeightedUndirectedRegularGraph;
 import com.vc.deg.ref.graph.VertexData;
-import com.vc.deg.ref.graph.VertexDistance;
+import com.vc.deg.ref.graph.QueryDistance;
 
 
 /**
@@ -152,15 +152,16 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	public EvenRegularGraphDesigner designer() {
 		return designer;
 	}
+	
 	@Override
 	public int[] search(Collection<FeatureVector> queries, int k, float eps, GraphFilter filter, int[] seedVertexLabels) {
 		int[] seedVertexIds = Arrays.stream(seedVertexLabels).map(label -> this.internalGraph.getVertexByLabel(label).getId()).toArray();
 		if(seedVertexIds.length == 0)
 			seedVertexIds = new int[] { internalGraph.getVertices().iterator().next().getId() };
 		
-		final TreeSet<VertexDistance> topList = internalGraph.search(queries, k, eps, filter, seedVertexIds);
+		final TreeSet<QueryDistance> topList = internalGraph.search(queries, k, eps, filter, seedVertexIds);
 		final int[] result = new int[topList.size()];
-		final Iterator<VertexDistance> it = topList.iterator();
+		final Iterator<QueryDistance> it = topList.iterator();
 		for (int i = 0; i < topList.size(); i++) 
 			result[i] = it.next().getVertexLabel();
 		return result;
@@ -173,9 +174,9 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 		if(entryIds.length == 0)
 			throw new RuntimeException("None of the seed labels "+Arrays.toString(seedLabels)+" is in the graph.");
 		
-		final TreeSet<VertexDistance> topList = internalGraph.explore(entryIds, k, maxDistanceComputationCount, filter);
+		final TreeSet<QueryDistance> topList = internalGraph.explore(entryIds, k, maxDistanceComputationCount, filter);
 		final int[] result = new int[topList.size()];
-		final Iterator<VertexDistance> it = topList.iterator();
+		final Iterator<QueryDistance> it = topList.iterator();
 		for (int i = 0; i < topList.size(); i++) 
 			result[i] = it.next().getVertexLabel();
 		return result;

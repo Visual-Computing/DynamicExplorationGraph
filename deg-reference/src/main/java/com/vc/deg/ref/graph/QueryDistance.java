@@ -5,12 +5,13 @@ import java.util.Comparator;
 import com.vc.deg.FeatureVector;
 
 /**
+ * Distance between a query and a vertex.
  * Natural order is ascending by distance.
  * 
  * @author Nico Hezel
  *
  */
-public class VertexDistance implements Comparable<VertexDistance> {
+public class QueryDistance implements Comparable<QueryDistance> {
 	
 	protected final int queryId;
 	protected final FeatureVector queryFeature;
@@ -19,7 +20,7 @@ public class VertexDistance implements Comparable<VertexDistance> {
 	
 	protected final float distance;
 	
-	public VertexDistance(int queryId, FeatureVector queryFeature, VertexData vertex, float distance) {
+	public QueryDistance(int queryId, FeatureVector queryFeature, VertexData vertex, float distance) {
 		this.queryId = queryId;
 		this.queryFeature = queryFeature;
 		this.vertex = vertex;
@@ -48,7 +49,7 @@ public class VertexDistance implements Comparable<VertexDistance> {
 	}
 	
 	@Override
-	public int compareTo(VertexDistance o) {
+	public int compareTo(QueryDistance o) {
 		int cmp = Float.compare(getDistance(), o.getDistance());
         if (cmp == 0)
         	cmp = Integer.compare(getVertexLabel(), o.getVertexLabel());
@@ -60,8 +61,8 @@ public class VertexDistance implements Comparable<VertexDistance> {
 	 *
 	 * @return
 	 */
-	public static Comparator<VertexDistance> ascByIndex() {
-		return Comparator.comparingInt(VertexDistance::getVertexLabel).thenComparingDouble(VertexDistance::getDistance);
+	public static Comparator<QueryDistance> ascByIndex() {
+		return Comparator.comparingInt(QueryDistance::getVertexLabel).thenComparingDouble(QueryDistance::getDistance);
 	}
 
 	/**
@@ -69,7 +70,7 @@ public class VertexDistance implements Comparable<VertexDistance> {
 	 * 
 	 * @return
 	 */
-	public static Comparator<VertexDistance> descByIndex() {
+	public static Comparator<QueryDistance> descByIndex() {
 		return ascByIndex().reversed();
 	}
 }

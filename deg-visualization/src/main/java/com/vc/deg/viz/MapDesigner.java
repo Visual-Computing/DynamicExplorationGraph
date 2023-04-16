@@ -117,7 +117,7 @@ public class MapDesigner {
 			
 			// Besorge die Nachbarn der Randbilder
 			long start = System.currentTimeMillis();
-			int[] images = getBestNeighborNodes(queryImages, atLevel, emptyTileCount, prepareFilter(filter, worldMap, atLevel));
+			int[] images = getBestNeighborVertices(queryImages, atLevel, emptyTileCount, prepareFilter(filter, worldMap, atLevel));
 			
 			// fülle die fehlenden Felder mit den Nachbarn aus
 			int fillCount = fillFreePlaces(localMap, images);
@@ -138,12 +138,13 @@ public class MapDesigner {
 	}
 	
 	/**
-	 * Jump in the graph to a position most similar to the content. Place the content at the target position in the map.
-	 * Arrange other similar images from the graph around the image on the map. Use the graph at given the level. 
+	 * Jump in the graph to a position most similar to the targetImage. Place the image at the target position in the map.
+	 * Arrange other similar images from the graph around the image on the map. The targetImage might be not visible if it
+	 * does not pass the filter. Use the graph at given the level. 
 	 * 
 	 * @param worldMap
 	 * @param localMap
-	 * @param selectedContent
+	 * @param targetImageid
 	 * @param targetPosX (local coordinates)
 	 * @param targetPosY (local coordinates)
 	 * @param worldPosX (world coordinates)
@@ -151,57 +152,69 @@ public class MapDesigner {
 	 * @param atLevel
 	 * @param filter can be null
 	 */
-	public void jump(WorldMap worldMap, GridMap localMap, int selectedContent, int targetPosX, int targetPosY, int worldPosX, int worldPosY, int atLevel, MutableGraphFilter filter) {
+	public void jump(WorldMap worldMap, GridMap localMap, int targetImageid, int targetPosX, int targetPosY, int worldPosX, int worldPosY, int atLevel, MutableGraphFilter filter) {
 		
-		// kein Graph
+		// do nothing if the graph is not available
 		if(graph == null) 
 			return;
 		
-		// besorge die Nachbarschaft von dem selektierten Bild
+		// gather the most similar vertices from the neighborhood of the target image
 		final long start = System.currentTimeMillis();
-		int[] elements = getBestNeighborNodes(new int[] {selectedContent}, atLevel, localMap.size(), prepareFilter(filter, worldMap, atLevel));
+		final int[] elements = getBestNeighborVertices(new int[] {targetImageid}, atLevel, localMap.size(), prepareFilter(filter, worldMap, atLevel));
 		log.debug("Collecting neighbourhood ("+elements.length+" elements) took "+(System.currentTimeMillis() - start)+"ms");
 		
-		// sortiere die Bilder
-		arrange(worldMap, localMap, selectedContent, targetPosX, targetPosY, worldPosX, worldPosY, elements);
+		// does the target image pass the filter or should it be ignored
+		targetImageid = (filter != null && filter.isValid(targetImageid) == false) ? -1 : targetImageid;
+		
+		// arrange the images onto the local map
+		arrange(worldMap, localMap, targetImageid, targetPosX, targetPosY, worldPosX, worldPosY, elements);
 	}
 	
 	/**
 	 * Arranges the elements on the local map.
 	 * Stores the arrangement in the world map at the given position.
-	 * The provided elements do not have to be in the graph.
-	 * Place the selectedContent at the target position in the map.
+	 * 
+	 * The provided elements do not have to be in the graph in order 
+	 * to be arranged.
+	 * 
+	 * Place the targetImage at the target position in the map if 
+	 * its is a valid id (id higher or equal zero)
 	 * 
 	 * @param worldMap
 	 * @param localMap
-	 * @param selectedContent
+	 * @param targetImageId
 	 * @param targetPosX
 	 * @param targetPosY
 	 * @param worldPosX
 	 * @param worldPosY
 	 * @param elements
 	 */
-	protected void arrange(WorldMap worldMap, GridMap localMap, int selectedContent, int targetPosX, int targetPosY, int worldPosX, int worldPosY, int[] elements) {
+	protected void arrange(WorldMap worldMap, GridMap localMap, int targetImageId, int targetPosX, int targetPosY, int worldPosX, int worldPosY, int[] elements) {
 		final long start = System.currentTimeMillis();
 		
-		// platziere die Bilder auf der Karte 
+		// place the most similar images onto the local map without any order
 		localMap.clear();
 		for (int i = 0; i < elements.length; i++) 
 			localMap.set(i, elements[i]);
 		
-		// sorge dafür dass das selektierte Bild in der gewünschten Position ist		
-		int targetTile = localMap.get(targetPosX, targetPosY);
-		localMap.set(localMap.columns() - 1 , localMap.rows() - 1, targetTile);
-		localMap.set(targetPosX, targetPosY, selectedContent);
+		// move the image at the target position to the last place on the map 
+		// override the last map place  in the process (least similar image)
+		// place the target image id at the target position if its a valid id
+		if(targetImageId >= 0) {
+			final int targetTile = localMap.get(targetPosX, targetPosY);
+			localMap.set(localMap.columns() - 1 , localMap.rows() - 1, targetTile);
+			localMap.set(targetPosX, targetPosY, targetImageId);
+		}
 				
-		// blockiere die gewünschten Position
-		boolean[][] blockedPanels = new boolean[localMap.rows()][localMap.columns()];
-		blockedPanels[targetPosY][targetPosX] = true;
+		// block the target position from being swapped in the following arrangement process
+		final boolean[][] blockedPanels = new boolean[localMap.rows()][localMap.columns()];
+		if(targetImageId >= 0) 
+			blockedPanels[targetPosY][targetPosX] = true;
 		
-		// sortiere die Bilder
+		// arrange all non blocked map cells by their image similarity of its spatial neighbors
 		arrangeMap(localMap, blockedPanels);
 		
-		// die Sortierung auf die Weltkarte kopieren
+		// copy the arrangement onto the world map
 		worldMap.copyFrom(localMap, worldPosX, worldPosY);
 		log.debug("Arranging the neighbourhood took "+(System.currentTimeMillis() - start)+"ms");
 	}
@@ -292,7 +305,7 @@ public class MapDesigner {
 		
 		// finde Nachbarn im Graph die noch nicht auf der Karte sind 
 		final int desiredCount = localMap.freeCount();	
-		return getBestNeighborNodesMedian(queryImages, atLevel, desiredCount, filter);
+		return getBestNeighborVerticesMedian(queryImages, atLevel, desiredCount, filter);
 	}
 
 	/**
@@ -311,7 +324,7 @@ public class MapDesigner {
 
 	
 	/**
-	 * Find the three median images from the list of query images and find their best neighbors with {@link #getBestNeighborNodes(int[], int, int, GraphFilter)}}
+	 * Find the three median images from the list of query images and find their best neighbors with {@link #getBestNeighborVertices(int[], int, int, GraphFilter)}}
 	 * 
 	 * @param queryImages
 	 * @param atLevel
@@ -319,7 +332,7 @@ public class MapDesigner {
 	 * @param filter
 	 * @return
 	 */
-	public int[] getBestNeighborNodesMedian(int[] queryImages, int atLevel, int desiredCount, GraphFilter filter) {
+	public int[] getBestNeighborVerticesMedian(int[] queryImages, int atLevel, int desiredCount, GraphFilter filter) {
 		
 		if(desiredCount == 0) 
 			return new int[0];
@@ -349,43 +362,51 @@ public class MapDesigner {
 												 .toArray();		
 		
 		// normale Suche mit den Median Bildern
-		return getBestNeighborNodes(medianImages, atLevel, desiredCount, filter);
+		return getBestNeighborVertices(medianImages, atLevel, desiredCount, filter);
 	}
 	
 	/**
-	 * Finde alle Nachbarn von den Bildern in der Anfrage. Verwende aber nur die 
-	 * Nachbarn die besonders ähnlich zu eines der Query Bilder sind (max similarity)
-	 * und wo der angegebene Filter true zurück liefert.
-	 * 	 
-	 * Query Bilder sind nicht in der Ergebnismenge dieser Methode enthalten.
-	 * Besorge so viele Bilder bis desiredCount erreicht wurde.
-	 * Die Reihenfolge geht von den wichtigen zu den unwichtigsten.
+	 * Find the most similar neighbors of the query images. The max similarity decides 
+	 * which to chose and only images passing the filter are allowed.
 	 * 
-	 * Wobei nur Bilder betrachtet werde die durch den Filter kommen.
+	 * If a query image is not available at the given graph level, the most similar 
+	 * will be used.
 	 * 
-	 * @param desiredQueryImages
+	 * The query images are not included in the result list. The order is ascending 
+	 * from the most similar to the least similar.
+	 * 
+	 * @param queryImageIds
 	 * @param atLevel
 	 * @param desiredCount
 	 * @param filter
 	 * @return
 	 */
-	protected int[] getBestNeighborNodes(int[] desiredQueryImages, int atLevel, int desiredCount, GraphFilter filter) {
+	protected int[] getBestNeighborVertices(int[] queryImageIds, int atLevel, int desiredCount, GraphFilter filter) {
 		
 		// not enough images or invalid goal
-		if(desiredCount <= 0 || desiredQueryImages.length == 0) 
+		if(desiredCount <= 0 || queryImageIds.length == 0) 
 			return new int[0];
 		
 		// search for similar query images at the given level, for all query images which are not present at the level
 		final int[] queryIds = HashIntSets.newImmutableSet(c -> {			
-			for (int desiredQueryImage : desiredQueryImages) 
-				c.accept(getSimilarNodeAtLevel(desiredQueryImage, atLevel, 1, 0.6f));
+			for (int queryImageId : queryImageIds) 
+				c.accept(getSimilarVertexAtLevel(queryImageId, atLevel, 1, 0.6f));
 		}).toIntArray();
 		
 		// explore from the query ids other vertices in the graph which are valid in the filter
 		return graph.exploreAtLevel(queryIds, atLevel, desiredCount, Integer.MAX_VALUE, filter);
 	}
 	
-	protected int getSimilarNodeAtLevel(int id, int atLevel, int k, float eps) {
+	/**
+	 * Find a vertex a the given level similar to the image of the given id.
+	 * 
+	 * @param id
+	 * @param atLevel
+	 * @param k
+	 * @param eps
+	 * @return
+	 */
+	protected int getSimilarVertexAtLevel(int id, int atLevel, int k, float eps) {
 		
 		// shortcut: ist das selbe Bild auf dem Level
 		if(graph.getGraph(atLevel).hasLabel(id))

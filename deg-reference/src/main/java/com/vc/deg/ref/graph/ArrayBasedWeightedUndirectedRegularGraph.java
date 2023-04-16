@@ -269,35 +269,35 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	 * @param eps
 	 * @return
 	 */
-	public List<VertexDistance> hasPath(int[] fromVertexIds, int toVertexId, int k, float eps) {
-		final Map<Integer, VertexDistance> trackback = new HashMap<>();
+	public List<QueryDistance> hasPath(int[] fromVertexIds, int toVertexId, int k, float eps) {
+		final Map<Integer, QueryDistance> trackback = new HashMap<>();
 		final FeatureVector toVertexFeature = getVertexById(toVertexId).getFeature();
 
 		// list of checked ids
 		final BitSet checkedIds = new BitSet(getVertexCount());
 
 		// items to traverse, start with the initial vertex
-		final PriorityQueue<VertexDistance> nextVertexs = new PriorityQueue<>(k * 10); 
+		final PriorityQueue<QueryDistance> nextVertexs = new PriorityQueue<>(k * 10); 
 		for (int id : fromVertexIds) {
 			if(checkedIds.get(id) == false) {
 				checkedIds.set(id);
 				
 				final VertexData obj = getVertexById(id);
 				final float distance = space.computeDistance(toVertexFeature, obj.getFeature());
-				nextVertexs.add(new VertexDistance(toVertexId, toVertexFeature, obj, distance));
-				trackback.put(id, new VertexDistance(toVertexId, toVertexFeature, obj, distance));
+				nextVertexs.add(new QueryDistance(toVertexId, toVertexFeature, obj, distance));
+				trackback.put(id, new QueryDistance(toVertexId, toVertexFeature, obj, distance));
 			}
 		}
 
 		// result set
-		final TreeSet<VertexDistance> results = new TreeSet<>(nextVertexs);
+		final TreeSet<QueryDistance> results = new TreeSet<>(nextVertexs);
 
 		// search radius
 		float radius = Float.MAX_VALUE;
 		
 		// iterate as long as good elements are in S
 		while(nextVertexs.size() > 0) {
-			final VertexDistance nextVertex = nextVertexs.poll();
+			final QueryDistance nextVertex = nextVertexs.poll();
 
 			// max distance reached
 			if(nextVertex.getDistance() > radius * (1 + eps))
@@ -310,11 +310,11 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 					
 				    // found our target vertex, create a path back to the entry vertex
 			        if(neighborId == toVertexId) {
-			          final List<VertexDistance> path = new ArrayList<>();
+			          final List<QueryDistance> path = new ArrayList<>();
 			          path.add(nextVertex);
 
 			          int trackbackId = nextVertex.getVertexId();
-			          for (VertexDistance lastVertex = trackback.get(trackbackId); lastVertex != null && trackbackId != lastVertex.getVertexId(); trackbackId = lastVertex.getVertexId(), lastVertex = trackback.get(trackbackId)) 
+			          for (QueryDistance lastVertex = trackback.get(trackbackId); lastVertex != null && trackbackId != lastVertex.getVertexId(); trackbackId = lastVertex.getVertexId(), lastVertex = trackback.get(trackbackId)) 
 			        	  path.add(lastVertex);
 
 			          return path;
@@ -324,7 +324,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 			        final VertexData neighborVertex = getVertexById(neighborId);
 			        final float neighborDist = space.computeDistance(toVertexFeature, neighborVertex.getFeature());
 					if(neighborDist <= radius * (1 + eps)) {
-						final VertexDistance candidate = new VertexDistance(toVertexId, toVertexFeature, neighborVertex, neighborDist);
+						final QueryDistance candidate = new QueryDistance(toVertexId, toVertexFeature, neighborVertex, neighborDist);
 						nextVertexs.add(candidate);
 				        trackback.put(neighborId, nextVertex);
 
@@ -353,7 +353,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	 * @param seedVertexIds
 	 * @return
 	 */
-	public TreeSet<VertexDistance> search(Collection<FeatureVector> queries, int k, float eps, GraphFilter labelFilter, int[] seedVertexIds) {
+	public TreeSet<QueryDistance> search(Collection<FeatureVector> queries, int k, float eps, GraphFilter labelFilter, int[] seedVertexIds) {
 		
 		// allow all elements in the graph if the initial filter was null
 		if(labelFilter == null)
@@ -370,7 +370,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 		final BitSet checkedIds = new BitSet(getVertexCount());
 		
 		// compute the min distance between the given fv and all the queries
-		final Function<VertexData, VertexDistance> calcMinDistance = (VertexData vertex) -> {			
+		final Function<VertexData, QueryDistance> calcMinDistance = (VertexData vertex) -> {			
 			final FeatureVector fv = vertex.getFeature();
 			
 			int minDistIndex = -1;
@@ -387,11 +387,11 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 				}
 				index++;
 			}
-			return new VertexDistance(minDistIndex, minDistQuery, vertex, minDistance);			
+			return new QueryDistance(minDistIndex, minDistQuery, vertex, minDistance);			
 		};
 	
 		// items to traverse, start with the initial vertex
-		final PriorityQueue<VertexDistance> nextVertices = new PriorityQueue<>(k * 10); 
+		final PriorityQueue<QueryDistance> nextVertices = new PriorityQueue<>(k * 10); 
 		for (int id : seedVertexIds) {
 			if(checkedIds.get(id) == false) {
 				checkedIds.set(id);
@@ -400,15 +400,16 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 		}
 
 		// result set
-		final TreeSet<VertexDistance> results = new TreeSet<>();
+		final TreeSet<QueryDistance> results = new TreeSet<>();
 		
 		// search radius
 		float radius = Float.MAX_VALUE;
 		
 		// add seed vertices if they pass the filter
-		for (VertexDistance vertexDistance : nextVertices) {
-			if(labelFilter.isValid(vertexDistance.getVertexLabel())) {
-				results.add(vertexDistance);
+		for (QueryDistance queryDistance : nextVertices) {
+			if(queryDistance.getDistance() < radius && labelFilter.isValid(queryDistance.getVertexLabel())) {
+				results.add(queryDistance);
+
 				if(results.size() > k) {
 					results.pollLast();
 					radius = results.last().getDistance();
@@ -418,7 +419,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 		
 		// iterate as long as good elements are in S
 		while(nextVertices.size() > 0) {
-			final VertexDistance nextVertex = nextVertices.poll();
+			final QueryDistance nextVertex = nextVertices.poll();
 
 			// max distance reached
 			if(nextVertex.getDistance() > radius * (1 + eps))
@@ -430,7 +431,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 					checkedIds.set(neighborId);
 					
 					final VertexData neighbor = getVertexById(neighborId);
-					final VertexDistance candidate = calcMinDistance.apply(neighbor);
+					final QueryDistance candidate = calcMinDistance.apply(neighbor);
 					final float nDist = candidate.getDistance();
 
 					// follow this vertex further
@@ -462,7 +463,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	 * @param labelFilter of all valid ids. Null disables the filter
 	 * @return
 	 */
-	public TreeSet<VertexDistance> explore(int[] seedVertexIds, int k, int maxDistanceComputationCount, GraphFilter labelFilter) {
+	public TreeSet<QueryDistance> explore(int[] seedVertexIds, int k, int maxDistanceComputationCount, GraphFilter labelFilter) {
 	    int distanceComputationCount = 0;
 	    
 		// allow all elements in the graph if the initial filter was null
@@ -480,14 +481,14 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 			queries[i] = getVertexById(seedVertexIds[i]).getFeature();
 		
 		// items to traverse, start with the initial vertex
-		final PriorityQueue<VertexDistance> nextVertices = new PriorityQueue<>(k * 2); 
+		final PriorityQueue<QueryDistance> nextVertices = new PriorityQueue<>(k * 2); 
 		for (int i = 0; i < queries.length; i++) {
 			VertexData vertex = getVertexById(seedVertexIds[i]);
-			nextVertices.add(new VertexDistance(vertex.getId(), vertex.getFeature(), vertex, 0));
+			nextVertices.add(new QueryDistance(vertex.getId(), vertex.getFeature(), vertex, 0));
 		}
 
 		// compute the min distance between the given fv and all the queries
-		final Function<VertexData, VertexDistance> calcMinDistance = (VertexData vertex) -> {
+		final Function<VertexData, QueryDistance> calcMinDistance = (VertexData vertex) -> {
 			final FeatureVector fv = vertex.getFeature();
 			
 			int minDistIndex = -1;
@@ -500,19 +501,19 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 					minDistance = dist;
 				}
 			}
-			return new VertexDistance(seedVertexIds[minDistIndex], queries[minDistIndex], vertex, minDistance);			
+			return new QueryDistance(seedVertexIds[minDistIndex], queries[minDistIndex], vertex, minDistance);			
 		};
 
 		// result set
-		final TreeSet<VertexDistance> results = new TreeSet<>();
+		final TreeSet<QueryDistance> results = new TreeSet<>();
 		
 		// search radius
 		float radius = Float.MAX_VALUE;
 		
 		// add seed vertices if they pass the filter
-		for (VertexDistance vertexDistance : nextVertices) {
-			if(labelFilter.isValid(vertexDistance.getVertexLabel())) {
-				results.add(vertexDistance);
+		for (QueryDistance queryDistance : nextVertices) {
+			if(queryDistance.getDistance() < radius && labelFilter.isValid(queryDistance.getVertexLabel())) {
+				results.add(queryDistance);
 				if(results.size() > k) {
 					results.pollLast();
 					radius = results.last().getDistance();
@@ -522,7 +523,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 		
 		// iterate as long as good elements are in S
 		while(nextVertices.size() > 0) {
-			final VertexDistance nextVertex = nextVertices.poll();
+			final QueryDistance nextVertex = nextVertices.poll();
 
 			// max distance reached
 			if(nextVertex.getDistance() > radius)
@@ -534,7 +535,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 					checkedIds.set(neighborId);
 					
 					final VertexData neighbor = getVertexById(neighborId);
-					final VertexDistance candidate = calcMinDistance.apply(neighbor);
+					final QueryDistance candidate = calcMinDistance.apply(neighbor);
 
 					// follow this vertex further if its distance is better than the current radius
 					if(candidate.getDistance() < radius) {

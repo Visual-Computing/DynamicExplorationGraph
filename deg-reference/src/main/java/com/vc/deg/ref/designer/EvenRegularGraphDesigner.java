@@ -25,7 +25,7 @@ import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.GraphDesigner;
 import com.vc.deg.ref.graph.ArrayBasedWeightedUndirectedRegularGraph;
 import com.vc.deg.ref.graph.VertexData;
-import com.vc.deg.ref.graph.VertexDistance;
+import com.vc.deg.ref.graph.QueryDistance;
 
 
 /**
@@ -345,7 +345,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 				entryVertex = it.next();
 
 			// find good neighbors for the new vertex
-			final VertexDistance[] results = graph.search(Arrays.asList(newVertexFeature), extendK, extendEps, null, new int[] { entryVertex.getId() }).toArray(new VertexDistance[0]);
+			final QueryDistance[] results = graph.search(Arrays.asList(newVertexFeature), extendK, extendEps, null, new int[] { entryVertex.getId() }).toArray(new QueryDistance[0]);
 
 			// add an empty vertex to the graph (no neighbor information yet)
 			final VertexData newVertex = graph.addVertex(newVertexLabel, newVertexFeature);
@@ -357,7 +357,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 			final Map<Integer, Float> newNeighbors = newVertex.getEdges();
 			while(newNeighbors.size() < edgesPerVertex) {
 				for (int i = 0; i < results.length && newNeighbors.size() < edgesPerVertex; i++) {
-					final VertexDistance candidate = results[i];
+					final QueryDistance candidate = results[i];
 					final int candidateId = candidate.getVertexId();
 					final float candidateWeight = candidate.getDistance();
 
@@ -497,7 +497,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 		//    their subgraph and would therefore connect the two potential subgraphs.	
 		{
 			final FeatureVector vertex2Feature = graph.getVertexById(vertex2).getFeature();
-			final VertexDistance[] results = graph.search(Arrays.asList(vertex2Feature), improveK, improveEps, null, new int[] { vertex3, vertex4 }).toArray(new VertexDistance[0]);
+			final QueryDistance[] results = graph.search(Arrays.asList(vertex2Feature), improveK, improveEps, null, new int[] { vertex3, vertex4 }).toArray(new QueryDistance[0]);
 
 			// find a good new vertex3
 			float bestGain = totalGain;
@@ -506,7 +506,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 
 			// We use the descending order to find the worst swap combination with the best gain
 			// Sometimes the gain between the two best combinations is the same, its better to use one with the bad edges to make later improvements easier
-			for(final VertexDistance result : results) {
+			for(final QueryDistance result : results) {
 				final int newVertex3 = result.getVertexId();
 
 				// vertex1 and vertex2 got tested in the recursive call before and vertex4 got just disconnected from vertex2
@@ -564,7 +564,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 
 				// find a good (not yet connected) vertex for vertex1/vertex4
 				final FeatureVector vertex4Feature = graph.getVertexById(vertex4).getFeature();
-				final VertexDistance[] results = graph.search(Arrays.asList(vertex4Feature), improveK, improveEps, null, new int[] { vertex2, vertex3 }).toArray(new VertexDistance[0]);
+				final QueryDistance[] results = graph.search(Arrays.asList(vertex4Feature), improveK, improveEps, null, new int[] { vertex2, vertex3 }).toArray(new QueryDistance[0]);
 
 				float bestGain = 0;
 				int bestSelectedNeighbor = 0;
@@ -572,7 +572,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 				float bestSelectedNeighborOldDist = 0;
 				int bestGoodVertex = 0;
 				float bestGoodVertexDist = 0;
-				for(VertexDistance result : results) {
+				for(QueryDistance result : results) {
 					final int goodVertex = result.getVertexId();
 
 					// the new vertex should not be connected to vertex4 yet
@@ -740,7 +740,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 					
 					// is there a path from any of the other involvedVertices to the lonely vertex?
 					final int[] fromVertices = involvedVertices.stream().mapToInt(Integer::intValue).filter(v -> v != involvedVertex).toArray();
-					List<VertexDistance> traceback = graph.hasPath(fromVertices, involvedVertex, improveK, improveEps);
+					List<QueryDistance> traceback = graph.hasPath(fromVertices, involvedVertex, improveK, improveEps);
 					if(traceback.size() == 0) {
 						// TODO implement flood full to find an involved vertex without compute distances
 						traceback = graph.hasPath(fromVertices, involvedVertex, graph.getVertexCount(), 1);
