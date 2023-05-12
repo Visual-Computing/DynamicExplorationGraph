@@ -69,21 +69,15 @@ public class MapDesigner {
 				deg.forEachVertex((label, fv) -> c.accept(label));			
 			}, deg.size());
 			
-			for (int i = 0; i < worldMap.size(); i++) {
-				final int cell = worldMap.get(i);
-				if(cell != -1)
-					validIds.removeInt(cell);
-			}
+			// remove all ids which are on the world map from the list of valid ids
+			worldMap.foreachCell(cell -> {
+				validIds.removeInt(cell);
+			});
+
 			return new PreparedGraphFilter(validIds);
 		}
 		
-		return filter.remove(removeFunc -> {
-			for (int i = 0; i < worldMap.size(); i++) {
-				final int cell = worldMap.get(i);
-				if(cell != -1)
-					removeFunc.accept(cell);
-			}
-		});
+		return filter.remove(worldMap::foreachCell);
 	}
 	
 	/**

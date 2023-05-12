@@ -168,48 +168,6 @@ public class GridMap {
 		Arrays.fill(cells, -1);
 	}
 	
-
-	/**
-	 * Copy tile information from this GridMap at a specific offset to the given GridMap. 
-	 * 
-	 * @param destination
-	 * @param fromX
-	 * @param fromY
-	 */
-	public void copyTo(GridMap destination, int fromX, int fromY) {
-		int destinationRows = destination.rows();
-		int destinationColumns = destination.columns();
-		
-		for (int y = 0; y < destinationRows; y++) {
-			final int thisY = fromY + y;
-			for (int x = 0; x < destinationColumns; x++) {				
-				final int thisX = fromX + x;
-				destination.set(x, y, get(thisX, thisY));
-			}
-		}	
-	}
-	
-	/**
-	 * Copy tile information from the given GridMap to this GridMap at a specific offset.
-	 *  
-	 * @param source
-	 * @param toX
-	 * @param toY
-	 */
-	public void copyFrom(GridMap source, int toX, int toY) {
-		int sourceRows = source.rows();
-		int sourceColumns = source.columns();
-		
-		for (int y = 0; y < sourceRows; y++) {
-			final int thisY = toY + y;
-			for (int x = 0; x < sourceColumns; x++) {
-				final int content = source.get(x, y);
-				final int thisX = toX + x;
-				set(thisX, thisY, content);
-			}
-		}	
-	}
-	
 	/**
 	 * Create a copy of this map
 	 * @return
@@ -218,6 +176,7 @@ public class GridMap {
 		return new GridMap(rows, columns, Arrays.copyOf(cells, cells.length));
 	}
 	
+	@Override
 	public String toString() {
 		return "Grid with columns:"+columns()+", rows:"+rows();
 	}
