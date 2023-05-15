@@ -58,16 +58,16 @@ public class MapNavigator  {
 	 * @param y
 	 */
 	protected void setWorldPosition(int x, int y) {
-		this.worldPosX = worldMap.getValidX(x);
-		this.worldPosY = worldMap.getValidY(y);
+		this.worldPosX = x;
+		this.worldPosY = y;
 	}
 	
 	/**
 	 * Reset the entire world map and the position of the navigator
 	 */
 	public void reset() {
-		this.worldPosX = worldMap.columns() / 2;
-		this.worldPosY = worldMap.rows() / 2;
+		this.worldPosX = 0;
+		this.worldPosY = 0;
 		this.worldMap.clear();
 	}
 		
