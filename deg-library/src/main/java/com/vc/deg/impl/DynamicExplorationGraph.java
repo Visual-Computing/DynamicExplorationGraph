@@ -21,7 +21,7 @@ import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.GraphDesigner;
 import com.vc.deg.graph.GraphFilter;
 import com.vc.deg.graph.NeighborConsumer;
-import com.vc.deg.graph.VertexConsumer;
+import com.vc.deg.graph.VertexCursor;
 import com.vc.deg.impl.designer.EvenRegularGraphDesigner;
 import com.vc.deg.impl.graph.WeightedUndirectedRegularGraph;
 
@@ -117,22 +117,21 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 		// TODO Auto-generated method stub
 		return 0;
 	}
-
-
+	
+	
 	@Override
-	public void forEachVertex(VertexConsumer consumer) {
+	public VertexCursor vertexCursor() {
 		// TODO Auto-generated method stub
-		
+		return null;
 	}
-
-
+	
+	
 	@Override
 	public void forEachNeighbor(int label, NeighborConsumer neighborConsumer) {
 		// TODO Auto-generated method stub
 		
 	}
-
-
+	
 	@Override
 	public int getRandomLabel(Random random) {
 		// TODO Auto-generated method stub

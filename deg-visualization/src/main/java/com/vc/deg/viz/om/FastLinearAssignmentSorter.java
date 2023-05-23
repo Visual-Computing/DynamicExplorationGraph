@@ -165,6 +165,9 @@ public class FastLinearAssignmentSorter {
 
 	protected static void filterVmirror(float[][] input, float[][] output, int rows, int columns, int dims, int filterSize) {
 
+		if(rows == 1)
+			return;
+		
 		int ext = filterSize/2;		// size of the border extension
 
 		float[][] colExt = new float[rows + 2*ext][];  // extended row
@@ -203,6 +206,9 @@ public class FastLinearAssignmentSorter {
 
 	protected static void filterVmirror(float[] input, float[] output, int rows, int columns, int filterSize) {
 
+		if(rows == 1)
+			return;
+		
 		int ext = filterSize/2;		// size of the border extension
 
 		float[] colExt = new float[rows + 2*ext];  // extended row
@@ -238,6 +244,9 @@ public class FastLinearAssignmentSorter {
 
 	protected static void filterHmirror(float[][] input, float[][] output, int rows, int columns, int dims, int filterSize) {
 
+		if(columns == 1)
+			return;
+		
 		int ext = filterSize/2;							  // size of the border extension
 
 		float[][] rowExt = new float[columns + 2*ext][];  // extended row
@@ -278,6 +287,9 @@ public class FastLinearAssignmentSorter {
 
 	protected static void filterHmirror(float[] input, float[] output, int rows, int columns, int filterSize) {
 
+		if(columns == 1)
+			return;
+		
 		int ext = filterSize/2;							  // size of the border extension
 
 		float[] rowExt = new float[columns + 2*ext];  // extended row
@@ -314,6 +326,9 @@ public class FastLinearAssignmentSorter {
 
 	protected static void filterVwrap(float[][] input, float[][] output, int rows, int columns, int dims, int filterSize) {
 
+		if(rows == 1)
+			return;
+		
 		int ext = filterSize/2;		// size of the border extension
 
 		float[][] colExt = new float[rows + 2*ext][];  // extended row
@@ -352,6 +367,9 @@ public class FastLinearAssignmentSorter {
 
 	protected static void filterVwrap(float[] input, float[] output, int rows, int columns, int filterSize) {
 
+		if(rows == 1)
+			return;
+		
 		int ext = filterSize/2;		// size of the border extension
 
 		float[] colExt = new float[rows + 2*ext];  // extended row
@@ -386,6 +404,9 @@ public class FastLinearAssignmentSorter {
 
 	protected static void filterHwrap(float[][] input, float[][] output, int rows, int columns, int dims, int filterSize) {
 
+		if(columns == 1)
+			return;
+		
 		int ext = filterSize/2;							  // size of the border extension
 
 		float[][] rowExt = new float[columns + 2*ext][];  // extended row
@@ -426,6 +447,9 @@ public class FastLinearAssignmentSorter {
 
 	protected static void filterHwrap(float[] input, float[] output, int rows, int columns, int filterSize) {
 
+		if(columns == 1)
+			return;
+		
 		int ext = filterSize/2;							  // size of the border extension
 
 		float[] rowExt = new float[columns + 2*ext];  // extended row
@@ -478,15 +502,15 @@ public class FastLinearAssignmentSorter {
 
 	private void checkRandomSwaps(int radius, MapPlace[] imageGrid, float[][] som) {
 
-		// set swap size
+		// set swap size		
 		int swapAreaWidth = Math.min(2*radius+1, columns);
 		int swapAreaHeight = Math.min(2*radius+1, rows);
-		while (swapAreaHeight * swapAreaWidth < swapPositions.length) {
-			if (swapAreaHeight >= swapAreaWidth)
+		for (int k = 0; swapAreaHeight * swapAreaWidth < swapPositions.length; k++) {
+			if ((k & 0x1) == 0) // alternate the size increase
 				swapAreaWidth = Math.min(swapAreaWidth+1, columns);
 			else
 				swapAreaHeight = Math.min(swapAreaHeight+1, rows);
-		}	
+		}
 
 		// get all positions of the actual swap region
 		final int[] swapIndices = new int[swapAreaWidth*swapAreaHeight];

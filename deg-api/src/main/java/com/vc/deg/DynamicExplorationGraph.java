@@ -9,7 +9,7 @@ import java.util.Random;
 import com.vc.deg.graph.GraphDesigner;
 import com.vc.deg.graph.GraphFilter;
 import com.vc.deg.graph.NeighborConsumer;
-import com.vc.deg.graph.VertexConsumer;
+import com.vc.deg.graph.VertexCursor;
 
 public interface DynamicExplorationGraph {
 	
@@ -321,14 +321,14 @@ public interface DynamicExplorationGraph {
 	 * @return
 	 */
 	public int edgePerVertex();
-	
+		
 	/**
 	 * Iterate over all vertices in the graph
 	 * 
-	 * @param consumer
+	 * @return
 	 */
-	public void forEachVertex(VertexConsumer consumer);
-
+	public VertexCursor vertexCursor();
+		
 	/**
 	 * Iterate over all neighbors of a vertex (given by the label) and consume their ids and weights
 	 * 

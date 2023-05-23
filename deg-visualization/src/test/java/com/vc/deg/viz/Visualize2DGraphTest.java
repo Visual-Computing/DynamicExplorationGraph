@@ -13,6 +13,7 @@ import javax.imageio.ImageIO;
 import com.vc.deg.DynamicExplorationGraph;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
+import com.vc.deg.graph.VertexCursor;
 
 public class Visualize2DGraphTest {
 
@@ -45,10 +46,14 @@ public class Visualize2DGraphTest {
 		
 		// find the highest value per dimension
 		float[] maxPerDim = new float[2];
-		graph.forEachVertex((int vertexLabel, FeatureVector fv) -> {			
-			for (int dim = 0; dim < 2; dim++) 
-				maxPerDim[dim] = Math.max(maxPerDim[dim], fv.readFloat(dim*Float.BYTES));
-		});
+		{
+			final VertexCursor cursor = graph.vertexCursor();
+			while(cursor.moveNext()) {
+				final FeatureVector fv = cursor.getVertexFeature();		
+				for (int dim = 0; dim < 2; dim++) 
+					maxPerDim[dim] = Math.max(maxPerDim[dim], fv.readFloat(dim*Float.BYTES));
+			}
+		}
 		
 		// create the output image
 		final BufferedImage bi = new BufferedImage(imageSize+border*2, imageSize+border*2, BufferedImage.TYPE_INT_ARGB);
@@ -56,27 +61,35 @@ public class Visualize2DGraphTest {
 		g2d.setStroke(new BasicStroke(strokeSize));
 
 		// draw edges
-		g2d.setColor(new Color(91,155,213)); // blue
-		graph.forEachVertex((int vertexLabel, FeatureVector fv) -> {
-			final float xStart = fv.readFloat(0) / maxPerDim[0] * imageSize + border - nodeSize/2;
-			final float yStart = fv.readFloat(4) / maxPerDim[1] * imageSize + border - nodeSize/2;
-
-			// compute end point of the line
-			graph.forEachNeighbor(vertexLabel, (int neighborLabel, float weight) -> {
-				final FeatureVector fvNeighbor = graph.getFeature(neighborLabel);
-				final float xEnd= fvNeighbor.readFloat(0) / maxPerDim[0] * imageSize + border - nodeSize/2;
-				final float yEnd = fvNeighbor.readFloat(4) / maxPerDim[1] * imageSize + border - nodeSize/2;				
-				g2d.drawLine((int)xStart, (int)yStart, (int)xEnd, (int)yEnd);
-			});
-		});
+		{
+			g2d.setColor(new Color(91,155,213)); // blue
+			final VertexCursor cursor = graph.vertexCursor();
+			while(cursor.moveNext()) {
+				final FeatureVector fv = cursor.getVertexFeature();
+				final float xStart = fv.readFloat(0) / maxPerDim[0] * imageSize + border - nodeSize/2;
+				final float yStart = fv.readFloat(4) / maxPerDim[1] * imageSize + border - nodeSize/2;
+	
+				// compute end point of the line
+				cursor.forEachNeighbor((int neighborLabel, float weight) -> {
+					final FeatureVector fvNeighbor = graph.getFeature(neighborLabel);
+					final float xEnd= fvNeighbor.readFloat(0) / maxPerDim[0] * imageSize + border - nodeSize/2;
+					final float yEnd = fvNeighbor.readFloat(4) / maxPerDim[1] * imageSize + border - nodeSize/2;				
+					g2d.drawLine((int)xStart, (int)yStart, (int)xEnd, (int)yEnd);
+				});
+			}
+		}
 		
 		// draw nodes
-		g2d.setColor(Color.black);
-		graph.forEachVertex((int vertexLabel, FeatureVector fv) -> {
-			final float x = fv.readFloat(0) / maxPerDim[0] * imageSize + border - nodeSize;
-			final float y = fv.readFloat(4) / maxPerDim[1] * imageSize + border - nodeSize;
-			g2d.fillOval((int)x, (int)y, nodeSize, nodeSize);			
-		});
+		{
+			g2d.setColor(Color.black);
+			final VertexCursor cursor = graph.vertexCursor();
+			while(cursor.moveNext()) {
+				final FeatureVector fv = cursor.getVertexFeature();
+				final float x = fv.readFloat(0) / maxPerDim[0] * imageSize + border - nodeSize;
+				final float y = fv.readFloat(4) / maxPerDim[1] * imageSize + border - nodeSize;
+				g2d.fillOval((int)x, (int)y, nodeSize, nodeSize);			
+			}
+		}
 		
 		// store image
 		ImageIO.write(bi, "png", pngFile.toFile());
@@ -89,13 +102,14 @@ public class Visualize2DGraphTest {
 	 * @param graph
 	 */
 	public static void printGraph(DynamicExplorationGraph graph) {
-		graph.forEachVertex((int vertexLabel, FeatureVector feature) -> {
-			System.out.print("Neighbors of vertex "+vertexLabel+": ");
-			graph.forEachNeighbor(vertexLabel, (int neighborLabel, float weight) -> {
+		final VertexCursor cursor = graph.vertexCursor();
+		while(cursor.moveNext()) {
+			System.out.print("Neighbors of vertex "+cursor.getVertexLabel()+": ");
+			cursor.forEachNeighbor((int neighborLabel, float weight) -> {
 				System.out.print(neighborLabel+", ");
 			});	
 			System.out.println();
-		});
+		}
 	}
 	
 	

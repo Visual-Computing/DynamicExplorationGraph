@@ -19,7 +19,7 @@ import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.GraphFilter;
 import com.vc.deg.graph.NeighborConsumer;
-import com.vc.deg.graph.VertexConsumer;
+import com.vc.deg.graph.VertexCursor;
 import com.vc.deg.ref.hierarchy.HierarchicalGraphDesigner;
 
 public class HierarchicalDynamicExplorationGraph implements com.vc.deg.HierarchicalDynamicExplorationGraph {
@@ -110,10 +110,10 @@ public class HierarchicalDynamicExplorationGraph implements com.vc.deg.Hierarchi
 	public int edgePerVertex() {
 		return edgesPerVertex;
 	}
-
+	
 	@Override
-	public void forEachVertexAtLevel(int atLevel, VertexConsumer consumer) {
-		getGraph(atLevel).forEachVertex(consumer);
+	public VertexCursor vertexCursorAtLevel(int atLevel) {
+		return getGraph(atLevel).vertexCursor();
 	}
 	
 	@Override

@@ -9,7 +9,7 @@ import java.util.Random;
 import com.vc.deg.graph.GraphDesigner;
 import com.vc.deg.graph.GraphFilter;
 import com.vc.deg.graph.NeighborConsumer;
-import com.vc.deg.graph.VertexConsumer;
+import com.vc.deg.graph.VertexCursor;
 
 public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationGraph {
 
@@ -333,17 +333,17 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 		return sizeAtLevel(0);
 	}
 	
+	
 	/**
-	 * Iterate over all vertices in the graph
+	 * Iterate over all vertices at a specific level
 	 * 
 	 * @param atLevel
-	 * @param consumer
 	 */
-	public void forEachVertexAtLevel(int atLevel, VertexConsumer consumer);
+	public VertexCursor vertexCursorAtLevel(int atLevel);
 	
 	@Override
-	default void forEachVertex(VertexConsumer consumer) {
-		forEachVertexAtLevel(0, consumer);
+	default VertexCursor vertexCursor() {
+		return vertexCursorAtLevel(0);
 	}
 	
 	/**

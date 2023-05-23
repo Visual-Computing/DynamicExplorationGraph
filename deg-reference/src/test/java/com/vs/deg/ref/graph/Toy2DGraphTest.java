@@ -3,18 +3,34 @@ package com.vs.deg.ref.graph;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 
 import javax.imageio.ImageIO;
+import javax.swing.SwingUtilities;
 
+import com.koloboke.collect.IntCursor;
 import com.koloboke.collect.map.IntFloatCursor;
+import com.koloboke.collect.map.IntIntMap;
+import com.koloboke.collect.map.hash.HashIntIntMaps;
+import com.koloboke.collect.set.IntSet;
+import com.koloboke.collect.set.hash.HashIntSets;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.feature.FloatFeature;
@@ -25,6 +41,264 @@ import com.vc.deg.ref.graph.VertexData;
 public class Toy2DGraphTest {
 
 	public static void main(String[] args) throws IOException, ClassNotFoundException {
+		final int graphSize = 30;
+		final int edgesPerVertex = 4;
+		final Path graphInputFile = Paths.get("e:\\Data\\Feature\\2DGraph\\V"+graphSize+"_L2_K"+edgesPerVertex+"_AddK"+(edgesPerVertex*2)+"Eps0.2High_SwapK"+(edgesPerVertex*2)+"-0StepEps0.001Low.deg");
+		
+		final FeatureSpace space = new FloatL2Space(2);
+		FeatureSpace.registerFeatureSpace(space);
+		ArrayBasedWeightedUndirectedRegularGraph graph = new ArrayBasedWeightedUndirectedRegularGraph(edgesPerVertex, graphSize, space);
+		final EvenRegularGraphDesigner graphDesigner = new EvenRegularGraphDesigner(graph);
+		graphDesigner.setExtendK(edgesPerVertex*2);
+		graphDesigner.setExtendEps(0.2f);
+		graphDesigner.setImproveK(edgesPerVertex*2);
+		graphDesigner.setImproveEps(0.001f);
+		
+		// build graph
+		final float[][] datapoints = create2DPoints(graphSize, 100, 10);
+		for (int i = 0; i < graphSize; i++) 
+			graphDesigner.add(i, new FloatFeature(datapoints[i]));		
+		graphDesigner.build((long step, long added, long deleted, long improved, long tries, int lastAdd, int lastDelete) -> {
+			if(added == graphSize)
+				graphDesigner.stop();
+		});
+		System.out.println("DEG has an ANR of "+graphDesigner.calcAvgNeighborRank()+" and an AEW of "+graphDesigner.calcAvgEdgeWeight());
+		
+		graph.writeToFile(graphInputFile);
+		paintEdgeSelection(graph, replaceExtension(graphInputFile, ".png"), 1000);
+	}
+	
+
+	/**
+	 * Paint all nodes and their edges in an image file
+	 * 
+	 * @param graph
+	 * @param pngFile
+	 * @throws IOException 
+	 */
+	public static void paintEdgeSelection(ArrayBasedWeightedUndirectedRegularGraph graph, Path pngFile, int imageSize) throws IOException {
+		final int kneighbors = 3;
+		final int maxVertexCount = 8;
+		
+		class IntFloat {
+			int index;
+			float distance;
+			public IntFloat(int index, float distance) {
+				this.index = index;
+				this.distance = distance;
+			}
+			public float getDistance() {
+				return distance;
+			}
+			public int getIndex() {
+				return index;
+			}
+			@Override
+			public String toString() {
+				return ""+index+"("+distance+")";
+			}
+		}
+		
+		final int seedId = 3;
+		final FeatureVector seedFV = graph.getVertexById(seedId).getFeature();
+		final FeatureSpace space = graph.getFeatureSpace();
+		final IntIntMap selectedVertexIds = HashIntIntMaps.newMutableMap();
+		
+//		// start at radius 0 with the selected/initial image id
+//		Set<Integer> newIdsAtRadius = new LinkedHashSet<>();
+//		newIdsAtRadius.add(seedId);
+//
+//		// find the neighbors inside each radius and add them to the subgraph
+//		for (int r = 0; r <= hops && newIdsAtRadius.size() > 0 && selectedVertexIds.size() < maxVertexCount; r++) {
+//			final Set<Integer> newIdsAtNextRadius = new LinkedHashSet<>();
+//
+//			// check all neighbor ids at the current radius
+//			final Iterator<Integer> vertexIds = newIdsAtRadius.iterator();
+//			while(vertexIds.hasNext() && selectedVertexIds.size() < maxVertexCount) {
+//				final int vertexId = vertexIds.next();
+//				if(selectedVertexIds.containsKey(vertexId))
+//					continue;
+//				selectedVertexIds.put(vertexId, selectedVertexIds.size());
+//
+//				// collect all neighbors and sort them by their weights
+//				final List<IntFloat> neighbors = new ArrayList<>();
+//				for(Map.Entry<Integer, Float> neighbor : graph.getVertexById(vertexId).getEdges().entrySet()) 
+//					neighbors.add(new IntFloat(neighbor.getKey(), neighbor.getValue()));
+//				neighbors.sort(Comparator.comparingDouble(IntFloat::getDistance).thenComparingInt(IntFloat::getIndex));
+//
+//				// copy to subgraph
+//				final int size = Math.min(kneighbors, neighbors.size());
+//				for (int i = 0; i < size; i++) {
+//					final int neighborId = neighbors.get(i).getIndex();
+//					if(selectedVertexIds.containsKey(neighborId) == false)
+//						newIdsAtNextRadius.add(neighborId);
+//				}
+//			}
+//
+//			// replace the set of ids to check with the ids of the next radius
+//			newIdsAtRadius = newIdsAtNextRadius;
+//		}
+
+		final TreeSet<IntFloat> bestList = new TreeSet<>(Comparator.comparingDouble(IntFloat::getDistance).thenComparingInt(IntFloat::getIndex));
+		bestList.add(new IntFloat(seedId, 0));
+		selectedVertexIds.addValue(seedId, selectedVertexIds.size());
+		while(bestList.size() > 0 && selectedVertexIds.size() < maxVertexCount) { 
+			final int vertexId = bestList.pollFirst().getIndex();
+
+			// collect all neighbors and sort them by their weights			
+			final List<IntFloat> neighbors = new ArrayList<>();
+			for(Map.Entry<Integer, Float> neighbor : graph.getVertexById(vertexId).getEdges().entrySet()) {
+				final int neighborId = neighbor.getKey();
+				final float dist = space.computeDistance(seedFV, graph.getVertexById(neighborId).getFeature());
+				neighbors.add(new IntFloat(neighborId, dist));
+			}
+			neighbors.sort(Comparator.comparingDouble(IntFloat::getDistance).thenComparingInt(IntFloat::getIndex));
+
+			// copy to vertex induced subgraph
+			final int size = Math.min(kneighbors, neighbors.size());
+			for (int i = 0; i < size; i++) {
+				final int neighborId = neighbors.get(i).getIndex();
+				if(selectedVertexIds.containsKey(neighborId) == false) {
+					selectedVertexIds.put(neighborId, selectedVertexIds.size());
+					bestList.add(new IntFloat(neighborId, neighbors.get(i).getDistance()));
+				}
+			}
+		}
+		
+		
+		
+		final int border = 50;
+		final int nodeSize = 40;
+		final int strokeSize = 6;
+		
+		// find the highest value per dimension
+		float[] maxPerDim = new float[2];
+		for(VertexData node : graph.getVertices()) {
+			final FeatureVector fv = node.getFeature();
+			for (int dim = 0; dim < 2; dim++) 
+				maxPerDim[dim] = Math.max(maxPerDim[dim], fv.readFloat(dim*Float.BYTES));
+		}
+		
+		// create the output image
+		final BufferedImage bi = new BufferedImage(imageSize+border*2, imageSize+border*2, BufferedImage.TYPE_INT_ARGB);
+		final Graphics2D g2d = bi.createGraphics();
+		final RenderingHints rh = new RenderingHints(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+		g2d.setRenderingHints(rh);
+		g2d.setStroke(new BasicStroke(strokeSize));
+		
+		// draw edges
+		g2d.setColor(new Color(91,155,213)); // blue		
+		for(VertexData node : graph.getVertices()) {
+			final FeatureVector fv = node.getFeature();
+			final float xStart = fv.readFloat(0) / maxPerDim[0] * imageSize + border - nodeSize/2;
+			final float yStart = fv.readFloat(4) / maxPerDim[1] * imageSize + border - nodeSize/2;
+
+			// compute end point of the line
+			for(Map.Entry<Integer, Float> edge : node.getEdges().entrySet()) {
+				final FeatureVector fvNeighbor = graph.getVertexById(edge.getKey()).getFeature();
+				final float xEnd = fvNeighbor.readFloat(0) / maxPerDim[0] * imageSize + border - nodeSize/2;
+				final float yEnd = fvNeighbor.readFloat(4) / maxPerDim[1] * imageSize + border - nodeSize/2;				
+				g2d.drawLine((int)xStart, (int)yStart, (int)xEnd, (int)yEnd);
+			}
+		}
+		
+		// draw edges distances 
+	    final FontMetrics fm = g2d.getFontMetrics();
+		g2d.setFont(new Font("Arial", Font.ITALIC, 20));
+		for(VertexData node : graph.getVertices()) {
+			final FeatureVector fv = node.getFeature();
+			final float xStart = fv.readFloat(0) / maxPerDim[0] * imageSize + border - nodeSize/2;
+			final float yStart = fv.readFloat(4) / maxPerDim[1] * imageSize + border - nodeSize/2;
+
+			// compute end point of the line
+			for(Map.Entry<Integer, Float> edge : node.getEdges().entrySet()) {
+				final FeatureVector fvNeighbor = graph.getVertexById(edge.getKey()).getFeature();
+				final float xEnd = fvNeighbor.readFloat(0) / maxPerDim[0] * imageSize + border - nodeSize/2;
+				final float yEnd = fvNeighbor.readFloat(4) / maxPerDim[1] * imageSize + border - nodeSize/2;				
+				
+				// compute middle of line
+				final float dist = computeL2Distance(new float[] {xStart, yStart}, new float[] {xEnd, yEnd});
+				final String text = ""+(int)dist;
+				final Rectangle2D textBounds = fm.getStringBounds(text, g2d);
+			
+				final int xMiddle = (int)((Math.abs(xStart) + Math.abs(xEnd)) / 2 - textBounds.getWidth() / 2);
+				final int yMiddle = (int)((Math.abs(yStart) + Math.abs(yEnd)) / 2 - textBounds.getHeight() / 2);		
+				g2d.setColor(Color.black);
+				g2d.drawString(text, xMiddle, yMiddle);
+			}
+		}
+		
+		// draw vertices
+		g2d.setFont(new Font("Arial", Font.BOLD, 26));
+		for(VertexData vertex : graph.getVertices()) {
+			final FeatureVector fv = vertex.getFeature();
+			final float x = fv.readFloat(0) / maxPerDim[0] * imageSize + border - nodeSize;
+			final float y = fv.readFloat(4) / maxPerDim[1] * imageSize + border - nodeSize;
+			
+			if(vertex.getId() == seedId)
+				g2d.setColor(Color.green);
+			else if(selectedVertexIds.containsKey(vertex.getId())) {
+				final float order = selectedVertexIds.get(vertex.getId()) - 1;
+				final float blue = 1f - 0.6f * order / (selectedVertexIds.size() - 2);
+				g2d.setColor(new Color(blue, 0, 0));
+			} else
+				g2d.setColor(Color.gray);
+			g2d.fillOval((int)x, (int)y, nodeSize, nodeSize);
+
+			g2d.setColor(Color.white);
+			final String text = ""+vertex.getId();
+			final Rectangle2D textBounds = fm.getStringBounds(text, g2d);
+			g2d.drawString(text, (int)(x + textBounds.getWidth()*0.5), (int)(y + textBounds.getHeight()*1.8));
+		}
+		
+		// store image
+		ImageIO.write(bi, "png", pngFile.toFile());
+	}
+	
+	
+	
+		
+	/**
+	 * Create 2D data points
+	 * 
+	 * @param count
+	 * @param range
+	 * @param minDist
+	 * @return
+	 */
+	public static float[][] create2DPoints(int count, int range, int minDist) {
+		final List<float[]> points = new ArrayList<>(count);
+		
+		final Random rnd = new Random(9);
+		while(points.size() < count) {
+			final float x = rnd.nextFloat() * range;
+			final float y = rnd.nextFloat() * range;
+			final float[] fv = new float[] {x,y};
+			
+			// check if the new feature vector is too close to an existing one
+			float smallestDist = Float.MAX_VALUE;
+			for (float[] point : points) {
+				final float dist = computeL2Distance(fv, point);
+				smallestDist = Math.min(dist, smallestDist);
+			}
+			
+			if(smallestDist > minDist)
+				points.add(fv);
+		}
+		
+		return points.toArray(new float[count][]);
+	}
+	
+	public static float computeL2Distance(float[] fv1, float[] fv2) {
+		float sum = 0;
+		for (int i = 0; i < fv2.length; i++) {
+			final float diff = fv1[i] - fv2[i];
+			sum += diff * diff;
+		}
+		return (float)Math.sqrt(sum);
+	}
+		
+	public static void print2DGraph() throws IOException, ClassNotFoundException {
 		Path graphInputFile = Paths.get("c:\\Data\\Feature\\2DGraph\\L2_K4_AddK10Eps0.2High.perfect_rng_add_only.deg");
 //		Path graphInputFile = Paths.get("c:\\Data\\Feature\\2DGraph\\L2_K4_AddK10Eps0.2High_SwapK10-0StepEps0.001LowPath5Rnd100+0_improveNonRNGAndSecondHalfOfNonPerfectEdges_RNGAddMinimalSwapAtStep0.add_rng_opt.remove_non_rng_edges.deg");
 //		Path graphOutputFile = Paths.get("c:\\Data\\Feature\\2DGraph\\L2_KCloseTo4_AddK10Eps0.2High_SwapK10-0StepEps0.001LowPath5Rnd0+0_improveTheBetterHalfOfTheNonPerfectEdges_RNGAddMinimalSwapAtStep0.deg");
@@ -283,6 +557,7 @@ public class Toy2DGraphTest {
 		}		
 	}	
 	
+	
 	/**
 	 * Paint all nodes and their edges in an image file
 	 * 
@@ -292,7 +567,7 @@ public class Toy2DGraphTest {
 	 */
 	public static void paintGraph(ArrayBasedWeightedUndirectedRegularGraph graph, Path pngFile, int imageSize) throws IOException {
 		final int border = 50;
-		final int nodeSize = 32;
+		final int nodeSize = 40;
 		final int strokeSize = 6;
 		
 		// find the highest value per dimension
@@ -306,10 +581,12 @@ public class Toy2DGraphTest {
 		// create the output image
 		final BufferedImage bi = new BufferedImage(imageSize+border*2, imageSize+border*2, BufferedImage.TYPE_INT_ARGB);
 		final Graphics2D g2d = bi.createGraphics();
+		final RenderingHints rh = new RenderingHints(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+		g2d.setRenderingHints(rh);
 		g2d.setStroke(new BasicStroke(strokeSize));
-
+		
 		// draw edges
-		g2d.setColor(new Color(91,155,213)); // blue
+		g2d.setColor(new Color(91,155,213)); // blue		
 		for(VertexData node : graph.getVertices()) {
 			final FeatureVector fv = node.getFeature();
 			final float xStart = fv.readFloat(0) / maxPerDim[0] * imageSize + border - nodeSize/2;
@@ -318,24 +595,51 @@ public class Toy2DGraphTest {
 			// compute end point of the line
 			for(Map.Entry<Integer, Float> edge : node.getEdges().entrySet()) {
 				final FeatureVector fvNeighbor = graph.getVertexById(edge.getKey()).getFeature();
-				final float xEnd= fvNeighbor.readFloat(0) / maxPerDim[0] * imageSize + border - nodeSize/2;
+				final float xEnd = fvNeighbor.readFloat(0) / maxPerDim[0] * imageSize + border - nodeSize/2;
 				final float yEnd = fvNeighbor.readFloat(4) / maxPerDim[1] * imageSize + border - nodeSize/2;				
 				g2d.drawLine((int)xStart, (int)yStart, (int)xEnd, (int)yEnd);
 			}
 		}
 		
-		// draw nodes
-		g2d.setColor(Color.black);
+		// draw edges distances 
+	    final FontMetrics fm = g2d.getFontMetrics();
+		g2d.setFont(new Font("Arial", Font.ITALIC, 20));
+		for(VertexData node : graph.getVertices()) {
+			final FeatureVector fv = node.getFeature();
+			final float xStart = fv.readFloat(0) / maxPerDim[0] * imageSize + border - nodeSize/2;
+			final float yStart = fv.readFloat(4) / maxPerDim[1] * imageSize + border - nodeSize/2;
+
+			// compute end point of the line
+			for(Map.Entry<Integer, Float> edge : node.getEdges().entrySet()) {
+				final FeatureVector fvNeighbor = graph.getVertexById(edge.getKey()).getFeature();
+				final float xEnd = fvNeighbor.readFloat(0) / maxPerDim[0] * imageSize + border - nodeSize/2;
+				final float yEnd = fvNeighbor.readFloat(4) / maxPerDim[1] * imageSize + border - nodeSize/2;				
+				
+				// compute middle of line
+				final float dist = computeL2Distance(new float[] {xStart, yStart}, new float[] {xEnd, yEnd});
+				final String text = ""+(int)dist;
+				final Rectangle2D textBounds = fm.getStringBounds(text, g2d);
+			
+				final int xMiddle = (int)((Math.abs(xStart) + Math.abs(xEnd)) / 2 - textBounds.getWidth() / 2);
+				final int yMiddle = (int)((Math.abs(yStart) + Math.abs(yEnd)) / 2 - textBounds.getHeight() / 2);		
+				g2d.setColor(Color.black);
+				g2d.drawString(text, xMiddle, yMiddle);
+			}
+		}
+		
+		// draw vertices
 		g2d.setFont(new Font("Arial", Font.BOLD, 26));
-		int vertexId = 0;
 		for(VertexData vertex : graph.getVertices()) {
 			final FeatureVector fv = vertex.getFeature();
 			final float x = fv.readFloat(0) / maxPerDim[0] * imageSize + border - nodeSize;
-			final float y = fv.readFloat(4) / maxPerDim[1] * imageSize + border - nodeSize;
+			final float y = fv.readFloat(4) / maxPerDim[1] * imageSize + border - nodeSize;			
+			g2d.setColor(Color.gray);
 			g2d.fillOval((int)x, (int)y, nodeSize, nodeSize);
 
-			g2d.drawString(""+vertexId, (int)x-30, (int)y);
-			vertexId++;
+			g2d.setColor(Color.white);
+			final String text = ""+vertex.getId();
+			final Rectangle2D textBounds = fm.getStringBounds(text, g2d);
+			g2d.drawString(text, (int)(x + textBounds.getWidth()*0.5), (int)(y + textBounds.getHeight()*1.8));
 		}
 		
 		// store image
@@ -416,4 +720,44 @@ public class Toy2DGraphTest {
 			return result;
 		}
 	}
+	
+	
+//	protected static class IntFloat {
+//		private final int index;
+//		private final float distance;
+//	
+//		public IntFloat(int index, float distance) {
+//			this.index = index;
+//			this.distance = distance;
+//		}
+//	
+//		public int getIndex() {
+//			return index;
+//		}
+//	
+//		public float getDistance() {
+//			return distance;
+//		}
+//		
+//		@Override
+//		public String toString() {
+//			return "index: "+index+", distance: "+distance;
+//		}
+//	
+//		@Override
+//		public boolean equals(Object obj) {
+//			if(obj instanceof IntFloat)
+//				return ((IntFloat) obj).getIndex() == index;
+//			return super.equals(obj);
+//		}
+//		
+//		/**
+//		 * Sort the distances from lowest to highest, followed by the index
+//		 *
+//		 * @return
+//		 */
+//		public static Comparator<IntFloat> asc() {
+//			return Comparator.comparingDouble(IntFloat::getDistance).thenComparingInt(IntFloat::getIndex);
+//		}
+//	}
 }

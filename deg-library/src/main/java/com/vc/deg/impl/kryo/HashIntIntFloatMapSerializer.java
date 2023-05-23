@@ -1,10 +1,6 @@
 package com.vc.deg.impl.kryo;
 
 
-import java.io.BufferedInputStream;
-import java.io.InputStream;
-import java.io.ObjectInputStream;
-
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.Serializer;
 import com.esotericsoftware.kryo.io.Input;

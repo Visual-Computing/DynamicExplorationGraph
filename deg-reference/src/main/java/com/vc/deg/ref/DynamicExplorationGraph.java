@@ -15,11 +15,11 @@ import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.GraphFilter;
 import com.vc.deg.graph.NeighborConsumer;
-import com.vc.deg.graph.VertexConsumer;
+import com.vc.deg.graph.VertexCursor;
 import com.vc.deg.ref.designer.EvenRegularGraphDesigner;
 import com.vc.deg.ref.graph.ArrayBasedWeightedUndirectedRegularGraph;
-import com.vc.deg.ref.graph.VertexData;
 import com.vc.deg.ref.graph.QueryDistance;
+import com.vc.deg.ref.graph.VertexData;
 
 
 /**
@@ -74,15 +74,9 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 		return internalGraph;
 	}
 	
-	
-	/**
-	 * Iterate all vertices and call the consumer with every vertex label and feature vector
-	 * 
-	 * @param consumer
-	 */
 	@Override
-	public void forEachVertex(VertexConsumer consumer) {
-		this.internalGraph.getVertices().forEach(vertex -> consumer.accept(vertex.getLabel(), vertex.getFeature()));
+	public VertexCursor vertexCursor() {
+		return new com.vc.deg.ref.graph.VertexCursor(this.internalGraph);
 	}
 	
 	@Override
@@ -248,5 +242,4 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	public static DynamicExplorationGraph readFromFile(Path file, String featureType) throws IOException {
 		return new DynamicExplorationGraph(ArrayBasedWeightedUndirectedRegularGraph.readFromFile(file, featureType));
 	}
-
 }

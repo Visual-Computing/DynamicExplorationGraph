@@ -13,6 +13,7 @@ import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.GraphDesigner;
 import com.vc.deg.graph.GraphFilter;
+import com.vc.deg.graph.VertexCursor;
 import com.vc.deg.ref.designer.EvenRegularGraphDesigner.BuilderAddTask;
 import com.vc.deg.ref.designer.EvenRegularGraphDesigner.BuilderRemoveTask;
 
@@ -66,7 +67,9 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 		// fill the rank map
 		for (int i = 0; i < layers.size(); i++) {
 			final int rank = i;
-			layers.get(i).forEachVertex((label, feature) -> this.labelToRank.put(label, rank));
+			final VertexCursor cursor = layers.get(i).vertexCursor();
+			while(cursor.moveNext())
+				this.labelToRank.put(cursor.getVertexLabel(), rank);
 		}		
 	}
 	

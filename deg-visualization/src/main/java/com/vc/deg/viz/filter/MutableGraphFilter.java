@@ -11,9 +11,15 @@ public interface MutableGraphFilter extends GraphFilter {
 //	public MutableGraphFilter change(Consumer<IntConsumer> addProvider, Consumer<IntConsumer> removeProvider);
 
 	/**
+	 * For each valid id in the filter the action called
+	 * 
+	 * @param action
+	 */
+	public void forEachValidId(IntConsumer action);
+	
+	/**
 	 * Make a copy of the filter and removes the ids provided by the id provider.
 	 * The id provider gets a removeFunc of type {@link IntConsumer}
-	 * 
 	 * 
 	 * @param idProvider
 	 * @return

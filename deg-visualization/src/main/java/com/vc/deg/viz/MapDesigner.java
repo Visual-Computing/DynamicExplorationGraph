@@ -17,6 +17,7 @@ import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.HierarchicalDynamicExplorationGraph;
 import com.vc.deg.graph.GraphFilter;
+import com.vc.deg.graph.VertexCursor;
 import com.vc.deg.viz.feature.FeatureTransformer;
 import com.vc.deg.viz.filter.MutableGraphFilter;
 import com.vc.deg.viz.filter.PreparedGraphFilter;
@@ -57,27 +58,64 @@ public class MapDesigner {
 	 * Create a new graph filter with all the ids from the graph level minus the id from the world map
 	 * or use the existing filter and remove the ids from the world map
 	 * 
-	 * @param filter can be null
-	 * @param worldMap
+	 * @param globalFilter can be null
+	 * @param worldMap can be null
 	 * @param atLevel
 	 * @return
 	 */
-	protected GraphFilter prepareFilter(MutableGraphFilter filter, WorldMap worldMap, int atLevel) {
-		if(filter == null) {
-			final DynamicExplorationGraph deg = graph.getGraph(atLevel);		
-			final IntSet validIds = HashIntSets.newMutableSet(c -> {
-				deg.forEachVertex((label, fv) -> c.accept(label));			
+	protected MutableGraphFilter filterAtLevel(final MutableGraphFilter globalFilter, WorldMap worldMap, int atLevel) {
+		
+		final DynamicExplorationGraph deg = graph.getGraph(atLevel);
+		final IntSet validIds;
+		
+		if(globalFilter == null) {
+			validIds = HashIntSets.newMutableSet(c -> {
+				final VertexCursor cursor = deg.vertexCursor();
+				while(cursor.moveNext())
+					c.accept(cursor.getVertexLabel());			
 			}, deg.size());
+		
+		} else {
 			
-			// remove all ids which are on the world map from the list of valid ids
+			// the globalFilter contains valid ids of graph level 0
+			if(atLevel == 0) {
+				
+				// make a copy of the global filter and remove all ids which are on the world map from the copy
+				if(worldMap != null)
+					return globalFilter.remove(worldMap::foreachCell);
+				
+				return globalFilter;
+			}
+			
+			// performance optimization: Intersection of valid filter and graph ids. 
+			// 							 Iterate over the smaller one to reduce the number of cache misses.
+			if(globalFilter.size() < deg.size()) {
+				validIds = HashIntSets.newMutableSet(c -> {
+					globalFilter.forEachValidId((int label) -> {
+						if(deg.hasLabel(label))
+							c.accept(label);
+					});
+				}, globalFilter.size());
+			} else {				
+				validIds = HashIntSets.newMutableSet(c -> {
+					final VertexCursor cursor = deg.vertexCursor();
+					while(cursor.moveNext()) {
+						final int label = cursor.getVertexLabel();
+						if(globalFilter.isValid(label))
+							c.accept(label);
+					}
+				}, deg.size());
+			}			
+		}
+
+		// remove all ids which are on the world map from the list of valid ids
+		if(worldMap != null) {
 			worldMap.foreachCell(cell -> {
 				validIds.removeInt(cell);
 			});
-
-			return new PreparedGraphFilter(validIds);
 		}
-		
-		return filter.remove(worldMap::foreachCell);
+
+		return new PreparedGraphFilter(validIds);
 	}
 	
 	/**
@@ -88,9 +126,9 @@ public class MapDesigner {
 	 * @param worldPosX (world coordinates)
 	 * @param worldPosY (world coordinates)
 	 * @param atLevel
-	 * @param filter can be null
+	 * @param globalFilter can be null
 	 */
-	public void fill(WorldMap worldMap, GridMap localMap, int worldPosX, int worldPosY, int atLevel, MutableGraphFilter filter) {
+	public void fill(WorldMap worldMap, GridMap localMap, int worldPosX, int worldPosY, int atLevel, MutableGraphFilter globalFilter) {
 		
 		// no graph is present yet
 		if(graph == null) 
@@ -112,7 +150,7 @@ public class MapDesigner {
 			
 			// get the most similar neighbors of the border images from the graph
 			long start = System.currentTimeMillis();
-			final int[] images = getBestNeighborVertices(queryImages, atLevel, emptyTileCount, prepareFilter(filter, worldMap, atLevel));
+			final int[] images = getBestNeighborVertices(queryImages, atLevel, emptyTileCount, filterAtLevel(globalFilter, worldMap, atLevel));
 			
 			// fill the new neighbors into the free cells of the map
 			final int fillCount = fillFreePlaces(localMap, images);
@@ -139,30 +177,74 @@ public class MapDesigner {
 	 * 
 	 * @param worldMap
 	 * @param localMap
-	 * @param targetImageid
+	 * @param targetElementId
 	 * @param targetPosX (local coordinates)
 	 * @param targetPosY (local coordinates)
 	 * @param worldPosX (world coordinates)
 	 * @param worldPosY (world coordinates)
 	 * @param atLevel
-	 * @param filter can be null
+	 * @param globalFilter can be null
 	 */
-	public void jump(WorldMap worldMap, GridMap localMap, int targetImageid, int targetPosX, int targetPosY, int worldPosX, int worldPosY, int atLevel, MutableGraphFilter filter) {
+	public void jump(WorldMap worldMap, GridMap localMap, int targetElementId, int targetPosX, int targetPosY, int worldPosX, int worldPosY, int atLevel, MutableGraphFilter globalFilter) {
 		
 		// do nothing if the graph is not available
 		if(graph == null) 
 			return;
-		
-		// gather the most similar vertices from the neighborhood of the target image
+
+		// prepare filter of valid element ids
 		final long start = System.currentTimeMillis();
-		final int[] elements = getBestNeighborVertices(new int[] {targetImageid}, atLevel, localMap.size(), prepareFilter(filter, worldMap, atLevel));
-		log.debug("Collecting neighbourhood ("+elements.length+" elements) took "+(System.currentTimeMillis() - start)+"ms");
+		final MutableGraphFilter filterAtLevel = filterAtLevel(globalFilter, null, atLevel);
+				
+		// if the number of valid elements is too small just arrange them all at once on the world map
+		if(filterAtLevel.size() < 1000) {
+			
+			// does the target element pass the filter or should it be ignored
+			final int targetElement = (globalFilter != null && globalFilter.isValid(targetElementId) == false) ? -1 : targetElementId;
+						
+			// copy the element ids from the filter to an array, ignore the id identical to the target element
+			final int[] neighbors = new int[filterAtLevel.size() - (filterAtLevel.isValid(targetElement) ? 1 : 0)];
+			final int[] pos = new int[1];
+			filterAtLevel.forEachValidId(id -> {
+				if(id != targetElement)
+					neighbors[pos[0]++] = id;
+			});
+			
+			// arrange on a bigger map first and then copy parts of it to the local map
+			final GridMap map = findMapSize(neighbors.length + ((targetElement >= 0) ? 1 : 0));
+			final int mapCenterX = map.columns() / 2;
+			final int mapCenterY = map.rows() / 2;
+			arrange(worldMap, map, targetElement, mapCenterX, mapCenterY, targetPosX-mapCenterX, targetPosY-mapCenterY, neighbors);
+			worldMap.copyTo(localMap, worldPosX, worldPosY);
+			log.debug("Collecting and arranging "+neighbors.length+" elements took "+(System.currentTimeMillis() - start)+"ms");
+
+		} else {
+			
+			// gather the most similar vertices from the neighborhood of the target element
+			final int[] neighbors = getBestNeighborVertices(new int[] {targetElementId}, atLevel, localMap.size(), filterAtLevel);
+			
+			// does the target image pass the filter or should it be ignored
+			final int targetElement = (globalFilter != null && globalFilter.isValid(targetElementId) == false) ? -1 : targetElementId;
+			
+			// arrange the images onto the local map
+			arrange(worldMap, localMap, targetElement, targetPosX, targetPosY, worldPosX, worldPosY, neighbors);
+			log.debug("Collecting and arranging "+neighbors.length+" elements took "+(System.currentTimeMillis() - start)+"ms");
+		}
+	}
+	
+	
+	/**
+	 * Find a width/height combination which does have as few holes as possible and is close to quadratic.
+	 * 
+	 * @return the grid map of the width and height
+	 */
+	protected static GridMap findMapSize(int numOfElements) {
+		int width = (int) Math.sqrt(numOfElements+1);
+		int height = width;
 		
-		// does the target image pass the filter or should it be ignored
-		targetImageid = (filter != null && filter.isValid(targetImageid) == false) ? -1 : targetImageid;
+		while (width * height < numOfElements) 
+			width++;
 		
-		// arrange the images onto the local map
-		arrange(worldMap, localMap, targetImageid, targetPosX, targetPosY, worldPosX, worldPosY, elements);
+		return new GridMap(width, height);
 	}
 	
 	/**
@@ -226,9 +308,9 @@ public class MapDesigner {
 	 * @param worldPosX
 	 * @param worldPosY
 	 * @param atLevel
-	 * @param filter can be null
+	 * @param globalFilter can be null
 	 */
-	public void move(WorldMap worldMap, GridMap localMap, MotionVector shiftVector, MotionVector directionVector, int worldPosX, int worldPosY, int atLevel, MutableGraphFilter filter) {
+	public void move(WorldMap worldMap, GridMap localMap, MotionVector shiftVector, MotionVector directionVector, int worldPosX, int worldPosY, int atLevel, MutableGraphFilter globalFilter) {
 		
 		// gibt es überhaupt eine Verschiebung oder einen graph
 		if(graph == null || shiftVector.length() == 0) 
@@ -246,7 +328,7 @@ public class MapDesigner {
 			
 			// fülle die leeren Felder falls notwendig
 			long start = System.currentTimeMillis();
-			int[] images = getNeighbors(localMap, shiftVector, directionVector, atLevel, prepareFilter(filter, worldMap, atLevel));
+			int[] images = getNeighbors(localMap, shiftVector, directionVector, atLevel, filterAtLevel(globalFilter, worldMap, atLevel));
 			
 			// fülle die fehlenden Felder mit den Nachbarn der eben besorgten Bilder
 			int fillCount = fillFreePlaces(localMap, images);
@@ -273,10 +355,10 @@ public class MapDesigner {
 	 * @param shiftVector
 	 * @param directionVector
 	 * @param atLevel
-	 * @param filter
+	 * @param globalFilter
 	 * @return number of new elements
 	 */
-	protected int[] getNeighbors(GridMap localMap, MotionVector shiftVector, MotionVector directionVector, int atLevel, GraphFilter filter) {		
+	protected int[] getNeighbors(GridMap localMap, MotionVector shiftVector, MotionVector directionVector, int atLevel, GraphFilter globalFilter) {		
 		final float rows = localMap.rows();
 		final float columns = localMap.columns();
 		
@@ -299,7 +381,7 @@ public class MapDesigner {
 		 
 		// find neighbors in the graph not present on the world map and pass the filter
 		final int desiredCount = localMap.freeCount();	
-		return getBestNeighborVerticesMedian(queryImages, atLevel, desiredCount, filter);
+		return getBestNeighborVerticesMedian(queryImages, atLevel, desiredCount, globalFilter);
 	}
 
 	/**
@@ -323,10 +405,10 @@ public class MapDesigner {
 	 * @param queryImages
 	 * @param atLevel
 	 * @param desiredCount
-	 * @param filter
+	 * @param globalFilter
 	 * @return
 	 */
-	public int[] getBestNeighborVerticesMedian(int[] queryImages, int atLevel, int desiredCount, GraphFilter filter) {
+	public int[] getBestNeighborVerticesMedian(int[] queryImages, int atLevel, int desiredCount, GraphFilter globalFilter) {
 		
 		if(desiredCount == 0) 
 			return new int[0];
@@ -356,7 +438,7 @@ public class MapDesigner {
 												 .toArray();		
 		
 		// normale Suche mit den Median Bildern
-		return getBestNeighborVertices(medianImages, atLevel, desiredCount, filter);
+		return getBestNeighborVertices(medianImages, atLevel, desiredCount, globalFilter);
 	}
 	
 	/**
@@ -452,6 +534,7 @@ public class MapDesigner {
 		final FeatureVector fv = graph.getGraph(0).getFeature(id);
 		return graph.searchAtLevel(fv, atLevel, k, eps)[0];
 	}
+	
 	
 	// --------------------------------------------------------------------------------------------
 	// ---------------------------------- Helper Methods ------------------------------------------

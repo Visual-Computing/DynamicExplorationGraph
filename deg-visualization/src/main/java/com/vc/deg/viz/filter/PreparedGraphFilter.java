@@ -20,6 +20,11 @@ public class PreparedGraphFilter implements MutableGraphFilter {
 	}
 	
 	@Override
+	public void forEachValidId(IntConsumer action) {
+		validIds.forEach(action);
+	}
+	
+	@Override
 	public PreparedGraphFilter remove(Consumer<IntConsumer> idProvider) {
 		final IntSet copy = HashIntSets.newMutableSet(validIds); 
 		final IntConsumer removeFunc = id -> copy.removeInt(id);

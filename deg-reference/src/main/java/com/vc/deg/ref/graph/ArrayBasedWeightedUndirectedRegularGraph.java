@@ -119,7 +119,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	// ------------------------------------------------------------------------
 	// -------------------------- label based methods -------------------------
 	// ------------------------------------------------------------------------
-	
+		
 	public VertexData getVertexByLabel(int label) {
 		final int id = labelToId.getOrDefault(label, -1);
 		return (id == -1) ? null : vertices.get(id);
@@ -495,11 +495,10 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	 * @return
 	 */
 	public ArrayBasedWeightedUndirectedRegularGraph copy() {
-		final IntIntMap copyLabelMap = intIntMapFactory.newMutableMap(labelToId.size());
+		final IntIntMap copyLabelMap = intIntMapFactory.newMutableMap(labelToId);
 		final List<VertexData> copyVertices = new ArrayList<>(vertices.size());
 		for (VertexData vertex : vertices) {
 			final IntFloatMap copyEdges = intFloatMapFactory.newMutableMap(vertex.getEdges());
-			copyLabelMap.put(vertex.getLabel(), vertex.getId());
 			copyVertices.add(new VertexData(vertex.getLabel(), vertex.getId(), vertex.getFeature(), copyEdges));
 		}
 		return new ArrayBasedWeightedUndirectedRegularGraph(edgesPerVertex, copyVertices, copyLabelMap, space);
