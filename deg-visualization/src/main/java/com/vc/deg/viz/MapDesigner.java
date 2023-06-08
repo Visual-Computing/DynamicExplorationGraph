@@ -238,14 +238,38 @@ public class MapDesigner {
 	 * @return the grid map of the width and height
 	 */
 	protected static GridMap findMapSize(int numOfElements) {
-		int width = (int) Math.sqrt(numOfElements+1);
-		int height = width;
 		
-		while (width * height < numOfElements) 
-			width++;
+		int width=0, height=0;
+		int mid = (int) Math.sqrt(numOfElements+1);
+		
+		int minDiff = Integer.MAX_VALUE; 
+		double bestAngleDiff = Float.MAX_VALUE;
+				
+		for (int h = mid/2; h < 2*mid; h++) {
+			for (int w = mid; w < 2*mid; w++) {
+				int prod = w * h;
+				int diff = prod - numOfElements;
+
+				if (diff >= 0 && diff <= minDiff) {
+					double angle = Math.atan2(h, w);
+					double angleDiff = Math.abs(angle - Math.PI/4);
+
+					if (angleDiff < Math.PI/10 ) {
+						minDiff = diff;
+
+						if (angleDiff < bestAngleDiff) {
+							bestAngleDiff = angleDiff;
+							width = w;
+							height = h;
+						}
+					}
+				}
+			}
+		}
 		
 		return new GridMap(width, height);
 	}
+	
 	
 	/**
 	 * Arranges the elements on the local map.
