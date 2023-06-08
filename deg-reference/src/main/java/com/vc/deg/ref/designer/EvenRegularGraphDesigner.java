@@ -130,7 +130,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 	
 	@Override
 	public float calcAvgNeighborRank() {
-		return calcAvgNeighborRank(null);		
+		return calcAvgNeighborRank(null);
 	}
 	
 	@Override
@@ -153,9 +153,14 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 		final AtomicReference<Double> rankSum = new AtomicReference<>(new Double(0));
 		
 		Arrays.stream(testOrder).parallel().forEach(queryId -> {
-			double avgNeighborRank = calcAvgNeighborRank(queryId, topLists[queryId]);
-			if(avgNeighborRank == -1)
+			double avgNeighborRank;
+			if(topLists == null)
 				avgNeighborRank = calcAvgNeighborRank(queryId);
+			else {
+				avgNeighborRank = calcAvgNeighborRank(queryId, topLists[queryId]);
+				if(avgNeighborRank == -1)
+				avgNeighborRank = calcAvgNeighborRank(queryId);
+			}
 			
 			final double currentRankSum = rankSum.accumulateAndGet(avgNeighborRank, (x, y) -> (x + y));
 			final int currentQueryCount = queryCount.incrementAndGet();
