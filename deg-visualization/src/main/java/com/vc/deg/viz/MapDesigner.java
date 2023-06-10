@@ -77,35 +77,45 @@ public class MapDesigner {
 		
 		} else {
 			
-			// the globalFilter contains valid ids of graph level 0
-			if(atLevel == 0) {
-				
-				// make a copy of the global filter and remove all ids which are on the world map from the copy
-				if(worldMap != null)
-					return globalFilter.remove(worldMap::foreachCell);
-				
-				return globalFilter;
-			}
+			// the global filter can contains ids which are not in the graph
+			validIds = HashIntSets.newMutableSet(c -> {
+				final VertexCursor cursor = deg.vertexCursor();
+				while(cursor.moveNext()) {
+					final int label = cursor.getVertexLabel();
+					if(globalFilter.isValid(label))
+						c.accept(label);
+				}
+			}, deg.size());
 			
-			// performance optimization: Intersection of valid filter and graph ids. 
-			// 							 Iterate over the smaller one to reduce the number of cache misses.
-			if(globalFilter.size() < deg.size()) {
-				validIds = HashIntSets.newMutableSet(c -> {
-					globalFilter.forEachValidId((int label) -> {
-						if(deg.hasLabel(label))
-							c.accept(label);
-					});
-				}, globalFilter.size());
-			} else {				
-				validIds = HashIntSets.newMutableSet(c -> {
-					final VertexCursor cursor = deg.vertexCursor();
-					while(cursor.moveNext()) {
-						final int label = cursor.getVertexLabel();
-						if(globalFilter.isValid(label))
-							c.accept(label);
-					}
-				}, deg.size());
-			}			
+//			// the globalFilter contains valid ids of graph level 0
+//			if(atLevel == 0) {
+//				
+//				// make a copy of the global filter and remove all ids which are on the world map from the copy
+//				if(worldMap != null)
+//					return globalFilter.remove(worldMap::foreachCell);
+//				
+//				return globalFilter;
+//			}
+//			
+//			// performance optimization: Intersection of valid filter and graph ids. 
+//			// 							 Iterate over the smaller one to reduce the number of cache misses.
+//			if(globalFilter.size() < deg.size()) {
+//				validIds = HashIntSets.newMutableSet(c -> {
+//					globalFilter.forEachValidId((int label) -> {
+//						if(deg.hasLabel(label))
+//							c.accept(label);
+//					});
+//				}, globalFilter.size());
+//			} else {				
+//				validIds = HashIntSets.newMutableSet(c -> {
+//					final VertexCursor cursor = deg.vertexCursor();
+//					while(cursor.moveNext()) {
+//						final int label = cursor.getVertexLabel();
+//						if(globalFilter.isValid(label))
+//							c.accept(label);
+//					}
+//				}, deg.size());
+//			}			
 		}
 
 		// remove all ids which are on the world map from the list of valid ids
