@@ -505,7 +505,7 @@ public class MapDesigner {
 		}, queryImageIds.length).toIntArray();
 		
 		// explore from the query ids other vertices in the graph which are valid in the filter
-		final int[] exploreResult = graph.exploreAtLevel(queryIds, atLevel, desiredCount, Integer.MAX_VALUE, filter);
+		final int[] exploreResult = graph.exploreAtLevel(queryIds, atLevel, desiredCount, 0.0f, filter);
 
 
 		

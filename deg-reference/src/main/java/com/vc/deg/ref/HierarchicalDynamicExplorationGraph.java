@@ -82,8 +82,8 @@ public class HierarchicalDynamicExplorationGraph implements com.vc.deg.Hierarchi
 	}
 
 	@Override
-	public int[] exploreAtLevel(int[] entryLabels, int atLevel, int k, int maxDistanceComputationCount, GraphFilter filter) {
-		return getGraph(atLevel).explore(entryLabels, k, maxDistanceComputationCount, filter);
+	public int[] exploreAtLevel(int[] entryLabels, int atLevel, int k, float eps, GraphFilter filter) {
+		return getGraph(atLevel).explore(entryLabels, k, eps, filter);
 	}
 	
 	@Override

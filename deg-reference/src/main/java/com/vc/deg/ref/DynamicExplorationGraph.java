@@ -165,7 +165,7 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	}
 
 	@Override
-	public int[] explore(int[] seedLabels, int k, int maxDistanceComputationCount, GraphFilter filter) {
+	public int[] explore(int[] seedLabels, int k, float eps, GraphFilter filter) {
 		
 		// check seed labels
 		final VertexData[] entrys = Arrays.stream(seedLabels).mapToObj(internalGraph::getVertexByLabel).filter(Objects::nonNull).toArray(VertexData[]::new);
@@ -175,7 +175,7 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 		// prepare search
 		final int[] entryIds = Arrays.stream(entrys).mapToInt(VertexData::getId).toArray();
 		final List<FeatureVector> queries = Arrays.stream(entrys).map(VertexData::getFeature).collect(Collectors.toList());		
-		final TreeSet<QueryDistance> topList = internalGraph.search(queries, k, 0, filter, entryIds, false);
+		final TreeSet<QueryDistance> topList = internalGraph.search(queries, k, eps, filter, entryIds, false);
 		
 		// convert to int array
 		final int[] result = new int[topList.size()];

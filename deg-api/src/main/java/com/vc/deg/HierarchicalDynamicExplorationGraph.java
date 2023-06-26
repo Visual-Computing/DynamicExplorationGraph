@@ -188,8 +188,8 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	
 		
 	@Override
-	public default int[] explore(int[] seedLabel, int k, int maxDistanceComputationCount, GraphFilter filter) {
-		return exploreAtLevel(seedLabel, 0, k, maxDistanceComputationCount, filter);
+	public default int[] explore(int[] seedLabel, int k, float eps, GraphFilter filter) {
+		return exploreAtLevel(seedLabel, 0, k, eps, filter);
 	}
 	
 
@@ -243,11 +243,11 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * @param seedLabel
 	 * @param atLevel hierarchy level to search
 	 * @param k
-	 * @param maxDistanceComputationCount
+	 * @param eps
 	 * @return
 	 */
-	public default int[] exploreAtLevel(int seedLabel, int atLevel, int k, int maxDistanceComputationCount) {
-		return exploreAtLevel(new int[] {seedLabel}, atLevel, k, maxDistanceComputationCount);
+	public default int[] exploreAtLevel(int seedLabel, int atLevel, int k, float eps) {
+		return exploreAtLevel(new int[] {seedLabel}, atLevel, k, eps);
 	}
 	
 	/**
@@ -266,11 +266,11 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * @param seedLabels
 	 * @param atLevel hierarchy level to search
 	 * @param k
-	 * @param maxDistanceComputationCount
+	 * @param eps
 	 * @return
 	 */
-	public default int[] exploreAtLevel(int[] seedLabels, int atLevel, int k, int maxDistanceComputationCount) {
-		return exploreAtLevel(seedLabels, atLevel, k, maxDistanceComputationCount, null);
+	public default int[] exploreAtLevel(int[] seedLabels, int atLevel, int k, float eps) {
+		return exploreAtLevel(seedLabels, atLevel, k, eps, null);
 	}
 		
 	/**
@@ -287,12 +287,12 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * @param seedLabel
 	 * @param atLevel hierarchy level to search
 	 * @param k
-	 * @param maxDistanceComputationCount
+	 * @param eps
 	 * @param filter null disables the filter
 	 * @return
 	 */
-	public default int[] exploreAtLevel(int seedLabel, int atLevel, int k, int maxDistanceComputationCount, GraphFilter filter) {
-		return exploreAtLevel(new int[] { seedLabel }, atLevel, k, maxDistanceComputationCount, filter);
+	public default int[] exploreAtLevel(int seedLabel, int atLevel, int k, float eps, GraphFilter filter) {
+		return exploreAtLevel(new int[] { seedLabel }, atLevel, k, eps, filter);
 	}
 	
 	/**
@@ -311,11 +311,11 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * @param seedLabels
 	 * @param atLevel hierarchy level to search
 	 * @param k
-	 * @param maxDistanceComputationCount
+	 * @param eps
 	 * @param filter null disables the filter
 	 * @return
 	 */
-	public int[] exploreAtLevel(int[] seedLabels, int atLevel, int k, int maxDistanceComputationCount, GraphFilter filter);
+	public int[] exploreAtLevel(int[] seedLabels, int atLevel, int k, float eps, GraphFilter filter);
 	
 	
 	

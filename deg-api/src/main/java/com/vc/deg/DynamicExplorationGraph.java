@@ -212,11 +212,11 @@ public interface DynamicExplorationGraph {
 	 * 
 	 * @param seedLabel
 	 * @param k
-	 * @param maxDistanceComputationCount
+	 * @param eps
 	 * @return
 	 */
-	public default int[] explore(int seedLabel, int k, int maxDistanceComputationCount) {
-		return explore(new int[] {seedLabel}, k, maxDistanceComputationCount);
+	public default int[] explore(int seedLabel, int k, float eps) {
+		return explore(new int[] {seedLabel}, k, eps);
 	}
 	
 	/**
@@ -234,11 +234,11 @@ public interface DynamicExplorationGraph {
 	 * 
 	 * @param seedLabels
 	 * @param k
-	 * @param maxDistanceComputationCount
+	 * @param eps
 	 * @return
 	 */
-	public default int[] explore(int[] seedLabels, int k, int maxDistanceComputationCount) {
-		return explore(seedLabels, k, maxDistanceComputationCount, null);
+	public default int[] explore(int[] seedLabels, int k, float eps) {
+		return explore(seedLabels, k, eps, null);
 	}
 		
 	/**
@@ -254,12 +254,12 @@ public interface DynamicExplorationGraph {
 	 * 
 	 * @param seedLabel
 	 * @param k
-	 * @param maxDistanceComputationCount
+	 * @param eps
 	 * @param filter null disables the filter
 	 * @return
 	 */
-	public default int[] explore(int seedLabel, int k, int maxDistanceComputationCount, GraphFilter filter) {
-		return explore(new int[] { seedLabel }, k, maxDistanceComputationCount, filter);
+	public default int[] explore(int seedLabel, int k, float eps, GraphFilter filter) {
+		return explore(new int[] { seedLabel }, k, eps, filter);
 	}
 	
 	/**
@@ -277,11 +277,11 @@ public interface DynamicExplorationGraph {
 	 * 
 	 * @param seedLabels
 	 * @param k
-	 * @param maxDistanceComputationCount
+	 * @param eps
 	 * @param filter null disables the filter
 	 * @return
 	 */
-	public int[] explore(int[] seedLabels, int k, int maxDistanceComputationCount, GraphFilter filter);
+	public int[] explore(int[] seedLabels, int k, float eps, GraphFilter filter);
 	
 	/**
 	 * Does the graph has a vertex with this label

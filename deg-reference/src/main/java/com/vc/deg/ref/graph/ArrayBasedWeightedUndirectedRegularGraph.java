@@ -370,9 +370,11 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 		}
 		
 		// list of checked ids
-		final BitSet checkedIds = new BitSet(getVertexCount());
+		final int vertexCount = getVertexCount();
+		final BitSet checkedIds = new BitSet(vertexCount);
 		
 		// compute the min distance between the given fv and all the queries
+		int distanceComputationCount = 0;
 		final Function<VertexData, QueryDistance> calcMinDistance = (VertexData vertex) -> {			
 			final FeatureVector fv = vertex.getFeature();
 			
@@ -381,7 +383,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 			FeatureVector minDistQuery = null;
 			
 			int index = 0;
-			for (FeatureVector query : queries) {
+			for (FeatureVector query : queries) {				
 				final float dist = space.computeDistance(query, fv);
 				if(dist < minDistance) {
 					minDistance = dist;
@@ -401,7 +403,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 		float radius = Float.MAX_VALUE;
 
 		// if the filter only contains few valid ids brute force them all
-		if(labelFilter.size() / getVertexCount() < 0.05) {
+		if(labelFilter.size() / vertexCount < 0.05) {
 			
 			// check all vertices of the graph if they pass the filter and are not a seed id if required 
 			final IntSet seedIds = HashIntSets.newImmutableSet(seedVertexIds);			
@@ -409,6 +411,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 				if(labelFilter.isValid(vertex.getLabel()) && (allowSeedInResult || seedIds.contains(vertex.getId()) == false)) {
 
 					// keep all distances better than the worst in the result list
+					distanceComputationCount++;
 					final QueryDistance queryDistance = calcMinDistance.apply(vertex);
 					if(queryDistance.getDistance() < radius) {
 						results.add(queryDistance);
@@ -431,6 +434,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 			if(checkedIds.get(id) == false) {
 				checkedIds.set(id);
 				nextVertices.add(calcMinDistance.apply(getVertexById(id)));
+				distanceComputationCount++;
 			}
 		}
 
@@ -451,22 +455,26 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 		// iterate as long as good elements are in S
 		while(nextVertices.size() > 0) {
 			final QueryDistance nextVertex = nextVertices.poll();
+			
+			// eps goes to zero if distanceComputationCount gets close to 10% of the number of all vertices
+			final float epsMod = eps * Math.max(1.f - (float)distanceComputationCount/(0.1f * vertexCount), 0.f); 
 
 			// max distance reached
-			if(nextVertex.getDistance() > radius * (1 + eps))
+			if(nextVertex.getDistance() > radius * (1 + epsMod))
 				break;
 
 			// traverse never seen vertices
 			for(final int neighborId : nextVertex.getVertex().getEdges().keySet()) {
 				if(checkedIds.get(neighborId) == false) {
 					checkedIds.set(neighborId);
-					
+
 					final VertexData neighbor = getVertexById(neighborId);
 					final QueryDistance candidate = calcMinDistance.apply(neighbor);
-					final float nDist = candidate.getDistance();
+					distanceComputationCount++;
 
 					// follow this vertex further if its distance is better than the current radius
-					if(nDist <= radius * (1 + eps)) {
+					final float nDist = candidate.getDistance();
+					if(nDist <= radius * (1 + epsMod)) {
 						
 						// check the neighborhood of this node later
 						nextVertices.add(candidate);

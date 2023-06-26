@@ -85,7 +85,7 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 
 
 	@Override
-	public int[] explore(int[] entryLabel, int k, int maxDistanceComputationCount, GraphFilter filter) {
+	public int[] explore(int[] entryLabel, int k, float eps, GraphFilter filter) {
 		// TODO Auto-generated method stub
 		return null;
 	}
