@@ -83,6 +83,7 @@ public class MapNavigatorTest {
 		frame.setLocationRelativeTo(null);
 		frame.pack();
 		frame.setVisible(true);
+		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 	}
 
 	/**
