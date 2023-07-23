@@ -14,7 +14,7 @@ Download and extract the data set files from the main [readme](../readme.md) fil
 + GCC 10.0+ with OpenMP
 + CMake 3.19+
 
-IMPORTANT NOTE: this code uses AVX-256 instructions for fast distance computation, so your machine MUST support AVX-256 instructions, this can be checked using cat /proc/cpuinfo | grep avx2.
+IMPORTANT NOTE: this code uses AVX-256 instructions for fast distance computation, so your machine will need to support AVX-256 instructions, this can be checked using cat /proc/cpuinfo | grep avx2.
 
 ### Compile
 
@@ -23,7 +23,7 @@ IMPORTANT NOTE: this code uses AVX-256 instructions for fast distance computatio
 $ sudo apt-get install gcc-10 g++-10 cmake libboost-dev libgoogle-perftools-dev
 ```
 
-On older systems setup gcc8 as default:
+On older systems setup gcc10 as default:
 ```
 sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 1000 --slave /usr/bin/g++ g++ /usr/bin/g++-10
 sudo update-alternatives --config gcc
@@ -42,7 +42,7 @@ make -j
 
 ### Reproduce our results
 
-Modify and run the `/benchmark/src/deglib_build_benchmark.cpp` file to create a new graph. Existing graphs can be tested with `/benchmark/src/deglib_anns_benchmark.cpp` and `/benchmark/src/deglib_explore_benchmark.cpp`.
+To create a new graph, modify and run the `/benchmark/src/deglib_build_benchmark.cpp` file. Existing graphs can be tested with `/benchmark/src/deglib_anns_benchmark.cpp` and `/benchmark/src/deglib_explore_benchmark.cpp`.
 
 Parameters:
 
@@ -55,7 +55,7 @@ Parameters:
 
 ## Pre-build Dynamic Exploration Graphs
 
-Here we provide pre-built Dynamic Exploration Graphs used in our papar's experiments.
+The provided Dynamic Exploration Graphs are used in the experiments section of our paper.
 
 |  Dataset  |  DEG  |
 |:---------:|:---:|
