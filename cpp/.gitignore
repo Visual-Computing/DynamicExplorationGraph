@@ -1,0 +1,8 @@
+build/
+dist/
+tmp/
+var/
+.vscode/
+cmake-variants.yaml
+build-*
+data/
