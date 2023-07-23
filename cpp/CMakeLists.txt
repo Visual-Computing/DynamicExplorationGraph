@@ -31,6 +31,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU
     compile-options
     INTERFACE -DNDEBUG
               -march=native
+              -O2
               -fpic
               -fopenmp)
 elseif(MSVC)

@@ -4,6 +4,7 @@
 #include <limits>
 #include <queue>
 #include <math.h>
+#include <filesystem>
 
 #include <fmt/core.h>
 #include <tsl/robin_hash.h>
@@ -393,9 +394,12 @@ public:
   }
 
   const bool saveGraph(const char* path_to_graph) const override {
-    auto out = std::ofstream(path_to_graph, std::ios::out | std::ios::binary);
+    
+    // create parent dir
+    std::filesystem::create_directories(std::filesystem::path(path_to_graph).parent_path());
 
     // check open file for write
+    auto out = std::ofstream(path_to_graph, std::ios::out | std::ios::binary);
     if (!out.is_open()) {
       fmt::print(stderr, "Error in open file {}\n", path_to_graph);
       return false;

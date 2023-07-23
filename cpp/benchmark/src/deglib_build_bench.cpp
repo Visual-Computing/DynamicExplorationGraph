@@ -109,7 +109,7 @@ void test_graph(const std::string query_file, const std::string gt_file, const s
     deglib::benchmark::test_graph_anns(graph, query_repository, ground_truth, (uint32_t)dims_out, repeat, k);
 }
 
-int main() {
+int main(int argc, char *argv[]) {
 
     #if defined(USE_AVX)
         fmt::print("use AVX2  ...\n");
@@ -153,7 +153,7 @@ int main() {
     const auto repository_file      = (data_path / "SIFT1M" / "sift_base.fvecs").string();
     const auto query_file           = (data_path / "SIFT1M" / "sift_query.fvecs").string();
     const auto gt_file              = (data_path / "SIFT1M" / "sift_groundtruth.ivecs").string();
-    const auto graph_file           = (data_path / "deg" / "best_distortion_decisions" / "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge_a.deg").string();
+    const auto graph_file           = (data_path / "deg" / "best_distortion_decisions" / "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string();
 
     if(std::filesystem::exists(graph_file.c_str()) == false)
         create_graph(repository_file, graph_file, 30, 60, 0.2f, 30, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
