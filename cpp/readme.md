@@ -9,13 +9,32 @@ Header only C++ library of the Dynamic Exploration Graph (DEG) used in the paper
 
 Download and extract the data set files from the main [readme](../readme.md) file.
 
+### Prerequisites
+
++ GCC 10.0+ with OpenMP
++ CMake 3.19+
+
+IMPORTANT NOTE: this code uses AVX-256 instructions for fast distance computation, so your machine MUST support AVX-256 instructions, this can be checked using cat /proc/cpuinfo | grep avx2.
+
 ### Compile
 
+1. Install Dependencies:
+```
+$ sudo apt-get install gcc-10 g++-10 cmake libboost-dev libgoogle-perftools-dev
+```
+
+On older systems setup gcc8 as default:
+```
+sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 1000 --slave /usr/bin/g++ g++ /usr/bin/g++-10
+sudo update-alternatives --config gcc
+```
+
+2. Combile deglib
 After cloning the git repository, rename `cmake-variants.sample.yaml` to `cmake-variants.yaml` and change the `DATA_PATH` variable inside of the file to represent a directory where the dataset is located.
 
 ```
 git clone --recurse-submodules https://github.com/Visual-Computing/DynamicExplorationGraph.git
-cd cpp/
+cd DynamicExplorationGraph/cpp/
 mkdir build/ && cd build/
 cmake -DCMAKE_BUIKD_TYPE=Release ..
 make -j
