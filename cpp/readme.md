@@ -23,13 +23,13 @@ IMPORTANT NOTE: this code uses AVX-256 instructions for fast distance computatio
 $ sudo apt-get install gcc-10 g++-10 cmake libboost-dev libgoogle-perftools-dev
 ```
 
-On older systems setup gcc10 as default:
+On older systems setup gcc10 as the default compiler version:
 ```
 sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 1000 --slave /usr/bin/g++ g++ /usr/bin/g++-10
 sudo update-alternatives --config gcc
 ```
 
-2. Combile deglib
+2. Compile deglib
 After cloning the git repository, rename `cmake-variants.sample.yaml` to `cmake-variants.yaml` and change the `DATA_PATH` variable inside of the file to represent a directory where the dataset is located.
 
 ```
