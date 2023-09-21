@@ -94,7 +94,7 @@ class SearchGraph
 {
   public:    
     virtual const uint32_t size() const = 0;
-    virtual const uint8_t getEdgesPerNode() const = 0;
+    virtual const uint8_t getEdgesPerVertex() const = 0;
     virtual const deglib::SpaceInterface<float>& getFeatureSpace() const = 0;
 
     virtual const uint32_t getExternalLabel(const uint32_t internal_index) const = 0;
@@ -102,10 +102,10 @@ class SearchGraph
     virtual const uint32_t* getNeighborIndices(const uint32_t internal_index) const = 0;
     virtual const std::byte* getFeatureVector(const uint32_t internal_index) const = 0;
 
-    virtual const bool hasNode(const uint32_t external_label) const = 0;
+    virtual const bool hasVertex(const uint32_t external_label) const = 0;
     virtual const bool hasEdge(const uint32_t internal_index, const uint32_t neighbor_index) const = 0;
 
-    const std::vector<uint32_t> getEntryNodeIndices() const {
+    const std::vector<uint32_t> getEntryVertexIndices() const {
       return std::vector<uint32_t> { getInternalIndex(0) };
     }
 
@@ -128,7 +128,7 @@ class SearchGraph
      * The starting point of the search is determined be the graph
      */
     deglib::search::ResultSet search(const std::byte* query, const float eps, const uint32_t k, const uint32_t max_distance_computation_count = 0) const {
-      return search(getEntryNodeIndices(), query, eps,  k, max_distance_computation_count);
+      return search(getEntryVertexIndices(), query, eps,  k, max_distance_computation_count);
     };
 
     /**

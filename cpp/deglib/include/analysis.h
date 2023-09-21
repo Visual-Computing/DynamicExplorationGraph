@@ -25,8 +25,12 @@ namespace deglib::analysis
             return false;
         }
 
+        // skip if the graph is too small to check
+        auto edges_per_vertex = graph.getEdgesPerVertex();
+        if(vertex_count <= edges_per_vertex) 
+            return true;
+
         // check edges
-        auto edges_per_vertex = graph.getEdgesPerNode();
         for (uint32_t n = 0; n < vertex_count; n++) {
             auto neighbor_indices = graph.getNeighborIndices(n);
 
@@ -69,7 +73,7 @@ namespace deglib::analysis
         const auto& feature_space = graph.getFeatureSpace();
         const auto dist_func = feature_space.get_dist_func();
         const auto dist_func_param = feature_space.get_dist_func_param();
-        const auto edges_per_vertex = (int)graph.getEdgesPerNode();
+        const auto edges_per_vertex = (int)graph.getEdgesPerVertex();
         const auto vertex_count = (int)graph.size();
 
         auto perfect_neighbor_counts = std::vector<double>(vertex_count);
@@ -120,7 +124,7 @@ namespace deglib::analysis
         const auto& feature_space = graph.getFeatureSpace();
         const auto dist_func = feature_space.get_dist_func();
         const auto dist_func_param = feature_space.get_dist_func_param();
-        const auto edges_per_vertex = (int)graph.getEdgesPerNode();
+        const auto edges_per_vertex = (int)graph.getEdgesPerVertex();
         const auto vertex_count = (int) graph.size();
 
         auto average_neighbor_ranks = std::vector<double>(vertex_count);
@@ -171,7 +175,7 @@ namespace deglib::analysis
         double total_distance = 0;
         uint64_t count = 0;
 
-        const auto edges_per_vertex = graph.getEdgesPerNode();
+        const auto edges_per_vertex = graph.getEdgesPerVertex();
         const auto vertex_count = graph.size();
         for (uint32_t n = 0; n < vertex_count; n++) {
             const auto weights = graph.getNeighborWeights(n);
@@ -186,7 +190,7 @@ namespace deglib::analysis
 
     static auto calc_edge_weight_histogram(const deglib::graph::MutableGraph& graph, const bool sorted, const int scale = 1) {
  
-        const auto edges_per_vertex = graph.getEdgesPerNode();
+        const auto edges_per_vertex = graph.getEdgesPerVertex();
         const auto vertex_count = graph.size();
         auto all_edge_weights = std::vector<float>();
         all_edge_weights.reserve(edges_per_vertex*vertex_count);
@@ -216,11 +220,11 @@ namespace deglib::analysis
     /**
      * Check if the weights of the graph are still the same to the distance of the vertices
      */
-    static float check_graph_weights(const deglib::graph::MutableGraph& graph) {
+    static auto check_graph_weights(const deglib::graph::MutableGraph& graph) {
         const auto& feature_space = graph.getFeatureSpace();
         const auto dist_func = feature_space.get_dist_func();
         const auto dist_func_param = feature_space.get_dist_func_param();
-        const auto edges_per_vertex = graph.getEdgesPerNode();
+        const auto edges_per_vertex = graph.getEdgesPerVertex();
         const auto vertex_count = graph.size();
 
         for (uint32_t n = 0; n < vertex_count; n++) {
@@ -234,7 +238,7 @@ namespace deglib::analysis
                 const auto dist = dist_func(fv1, fv2, dist_func_param);
 
                 if(neighborWeights[e] != dist) {
-                    fmt::print(stderr, "Node {} at edge index {} has a weight of {} to vertex {} but its distance is {} \n", n, e, neighborWeights[e], neighborIds[e], dist);
+                    fmt::print(stderr, "Vertex {} at edge index {} has a weight of {} to vertex {} but its distance is {} \n", n, e, neighborWeights[e], neighborIds[e], dist);
                     return false;
                 }
             }
@@ -328,7 +332,7 @@ namespace deglib::analysis
 
     static uint32_t calc_non_rng_edges(const deglib::graph::MutableGraph& graph) {
         const auto vertex_count = graph.size();
-        const auto edge_per_vertex =graph.getEdgesPerNode();
+        const auto edge_per_vertex =graph.getEdgesPerVertex();
 
         uint32_t removed_rng_edges = 0;
         for (uint32_t i = 0; i < vertex_count; i++) {
@@ -355,7 +359,7 @@ namespace deglib::analysis
      */
     static bool check_graph_connectivity(const deglib::search::SearchGraph& graph) {
         const auto vertex_count = graph.size();
-        const auto edges_per_vertex = graph.getEdgesPerNode();
+        const auto edges_per_vertex = graph.getEdgesPerVertex();
 
         // already checked vertices
         auto checked_ids = std::vector<bool>(vertex_count);

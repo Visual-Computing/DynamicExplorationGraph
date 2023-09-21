@@ -10,6 +10,7 @@
 #include <atomic>
 
 #include <fmt/core.h>
+#include <tsl/robin_set.h>
 
 #include "analysis.h"
 #include "graph.h"
@@ -93,8 +94,8 @@ class EvenRegularGraphBuilder {
 
     EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, const uint32_t swaps) 
       : EvenRegularGraphBuilder(graph, rnd, 
-                                graph.getEdgesPerNode(), 0.2f, 
-                                graph.getEdgesPerNode(), 0.001f, 
+                                graph.getEdgesPerVertex(), 0.2f, 
+                                graph.getEdgesPerVertex(), 0.001f, 
                                 5, swaps, swaps) {
     }
 
@@ -154,7 +155,7 @@ class EvenRegularGraphBuilder {
       const auto external_label = add_task.label;
 
       // graph should not contain a vertex with the same label
-      if(graph.hasNode(external_label)) {
+      if(graph.hasVertex(external_label)) {
         fmt::print(stderr, "graph contains vertex {} already. can not add it again \n", external_label);
         perror("");
         abort();
@@ -162,11 +163,11 @@ class EvenRegularGraphBuilder {
 
       // fully connect all vertices
       const auto new_vertex_feature = add_task.feature.data();
-      const auto edges_per_vertex = uint32_t(graph.getEdgesPerNode());
+      const auto edges_per_vertex = uint32_t(graph.getEdgesPerVertex());
       if(graph.size() < edges_per_vertex+1) {
 
         // add an empty vertex to the graph (no neighbor information yet)
-        const auto internal_index = graph.addNode(external_label, new_vertex_feature);
+        const auto internal_index = graph.addVertex(external_label, new_vertex_feature);
 
         // connect the new vertex to all other vertices in the graph
         const auto dist_func = graph.getFeatureSpace().get_dist_func();
@@ -196,7 +197,7 @@ class EvenRegularGraphBuilder {
       }
 
       // add an empty vertex to the graph (no neighbor information yet)
-      const auto internal_index = graph.addNode(external_label, new_vertex_feature);
+      const auto internal_index = graph.addVertex(external_label, new_vertex_feature);
 
       // for computing distances to neighbors not in the result queue
       const auto dist_func = graph.getFeatureSpace().get_dist_func();
@@ -317,9 +318,9 @@ class EvenRegularGraphBuilder {
     /**
      * Removing a vertex from the graph.
      */
-    void shrinkGraph(const BuilderRemoveTask& del_task) {
+    void reduceGraph(const BuilderRemoveTask& del_task) {
       auto& graph = this->graph_;
-      const auto edges_per_vertex = std::min(graph.size(), uint32_t(graph.getEdgesPerNode()));
+      const auto edges_per_vertex = std::min(graph.size(), uint32_t(graph.getEdgesPerVertex()));
       
       // 1 collect the vertices which are missing an edge if the vertex gets deleted
       const auto internal_index = graph.getInternalIndex(del_task.label);
@@ -332,7 +333,7 @@ class EvenRegularGraphBuilder {
       // 1.2 handle the use case where the graph does not have enough vertices to fulfill the edgesPerVertex requirement
       //     and just remove the vertex without reconnecting the involved vertices because they are all fully connected
       if((graph.size()-1) <= edges_per_vertex) {
-        graph.removeNode(del_task.label);
+        graph.removeVertex(del_task.label);
         return;
       }
 
@@ -393,14 +394,14 @@ class EvenRegularGraphBuilder {
           const auto reachable_index = traceback.back().getInternalIndex();
           auto reachable_indices_of_reachable_index_ptr = reachability[reachable_index];
 
-        // add the involved_index to its reachable set and replace the reachable set of the involved_index 
+          // add the involved_index to its reachable set and replace the reachable set of the involved_index 
           reachable_indices_of_reachable_index_ptr.get()->insert(involved_index);
           vertex_reachability.value() = reachable_indices_of_reachable_index_ptr;
         }
       }
 
       // 3 reconnect the groups
-      auto new_edges = std::vector<BoostedEdge>();
+      auto new_edges = std::vector<BuilderChange>();
 		  {
         const auto& feature_space = graph.getFeatureSpace();
         const auto dist_func = feature_space.get_dist_func();
@@ -436,7 +437,7 @@ class EvenRegularGraphBuilder {
           std::sort(unique_reachable_groups.begin(), unique_reachable_groups.end(), compareBySize);
 
           // find the next biggest group
-				  for (int g = 0, n = 1; g < unique_reachable_groups.size() && n < unique_reachable_groups.size(); g++) {
+				  for (size_t g = 0, n = 1; g < unique_reachable_groups.size() && n < unique_reachable_groups.size(); g++) {
             const auto reachable_group = unique_reachable_groups[g];
 
             // iterate over all its entries to find a vertex which is still missing an edge
@@ -459,7 +460,7 @@ class EvenRegularGraphBuilder {
                       const auto new_neighbor_dist = dist_func(reachable_feature, other_feature, dist_func_param);
                       graph.changeEdge(reachable_index, reachable_index, other_index, new_neighbor_dist);
                       graph.changeEdge(other_index, other_index, reachable_index, new_neighbor_dist);
-                      new_edges.emplace_back(other_index, reachable_index, new_neighbor_dist, new_neighbor_dist, false);
+                      new_edges.emplace_back(other_index, reachable_index, new_neighbor_dist, 0, 0);
 
                       // repeat until all small groups are connected
                       n++;
@@ -564,14 +565,12 @@ class EvenRegularGraphBuilder {
       }
 
       // 4 remove the old vertex, which is no longer referenced by another vertex, from the graph
-      graph.removeNode(del_task.label);
+      graph.removeVertex(del_task.label);
 
       // 5 try to improve some of the new edges
-      for (size_t i = 0; i < new_edges.size(); i++) {
-        const auto edge = new_edges[i];
-        if(graph.hasEdge(edge.from_vertex, edge.to_vertex)) { 
-          improveEdges(edge.from_vertex, edge.to_vertex, edge.weight); 
-        }
+      for(auto edge : new_edges) {
+        if(graph.hasEdge(edge.internal_index, edge.from_neighbor_index)) 
+          improveEdges(edge.internal_index, edge.from_neighbor_index, edge.from_neighbor_weight); 
       }
     }
 
@@ -580,7 +579,7 @@ class EvenRegularGraphBuilder {
      *  
      * This is the extended part of the optimization process.
      * The method takes an array where all graph changes will be documented.
-	   * Node1 and vertex2 might be in a separate subgraph than vertex3 and vertex4.
+	   * Vertex1 and vertex2 might be in a separate subgraph than vertex3 and vertex4.
      * Thru a series of edges swaps both subgraphs should be reconnected..
      * If those changes improve the graph this method returns true otherwise false. 
      * 
@@ -588,7 +587,7 @@ class EvenRegularGraphBuilder {
      */
     bool improveEdges(std::vector<deglib::builder::BuilderChange>& changes, uint32_t vertex1, uint32_t vertex2, uint32_t vertex3, uint32_t vertex4, float total_gain, const uint8_t steps) {
       auto& graph = this->graph_;
-      const auto edges_per_vertex = graph.getEdgesPerNode();
+      const auto edges_per_vertex = graph.getEdgesPerVertex();
 
       // the settings are the same for the first two iterations
       const auto search_eps = this->improve_eps_; 
@@ -619,7 +618,7 @@ class EvenRegularGraphBuilder {
 
               // 1.1 When vertex2 and the new vertex 3 gets connected, the full graph connectivity is assured again, 
               //     but the subgraph between vertex1/vertex2 and vertex3/vertex4 might just have one edge(vertex2, vertex3).
-              //     Furthermore Node 3 has now to many edges, find an good edge to remove to improve the overall graph distortion. 
+              //     Furthermore Vertex 3 has now to many edges, find an good edge to remove to improve the overall graph distortion. 
               //     FYI: If the just selected vertex3 is the same as the old vertex3, this process might cut its connection to vertex4 again.
               //     This will be fixed in the next step or until the recursion reaches max_path_length.
               const auto neighbor_indices = graph.getNeighborIndices(new_vertex3);
@@ -667,7 +666,7 @@ class EvenRegularGraphBuilder {
         const auto dist_func = feature_space.get_dist_func();
         const auto dist_func_param = feature_space.get_dist_func_param();
 
-        // 2.1a Node1 and vertex4 might be the same. This is quite the rare case, but would mean there are two edges missing.
+        // 2.1a Vertex1 and vertex4 might be the same. This is quite the rare case, but would mean there are two edges missing.
         //     Proceed like extending the graph:
         //     Search for a good vertex to connect to, remove its worst edge and connect
         //     both vertices of the worst edge to the vertex4. Skip the edge any of the two
@@ -797,7 +796,7 @@ class EvenRegularGraphBuilder {
     bool improveEdges() {
 
       auto& graph = this->graph_;
-      const auto edges_per_vertex = graph.getEdgesPerNode();
+      const auto edges_per_vertex = graph.getEdgesPerVertex();
 
       // 1. remove the worst edge of a random vertex 
 
@@ -834,9 +833,13 @@ class EvenRegularGraphBuilder {
      * @return true if a change could be made otherwise false
      */
     bool improveEdges(uint32_t vertex1, uint32_t vertex2, float dist12) {
-      auto changes = std::vector<deglib::builder::BuilderChange>();
+
+      // improving edges is disabled
+      if(improve_k_ <= 0)
+        return false;
 
       // remove the edge between vertex 1 and vertex 2 (add temporary self-loops)
+      auto changes = std::vector<deglib::builder::BuilderChange>();
       auto& graph = this->graph_;
       graph.changeEdge(vertex1, vertex2, vertex1, 0.f);
       changes.emplace_back(vertex1, vertex2, dist12, vertex1, 0.f);
@@ -865,7 +868,7 @@ class EvenRegularGraphBuilder {
      */
     auto& build(std::function<void(deglib::builder::BuilderStatus&)> callback, const bool infinite = false) {
       auto status = BuilderStatus{};
-      const auto edge_per_vertex = this->graph_.getEdgesPerNode();
+      const auto edge_per_vertex = this->graph_.getEdgesPerVertex();
 
       // run a loop to add, delete and improve the graph
       do{
@@ -886,14 +889,14 @@ class EvenRegularGraphBuilder {
             status.added++;
             this->new_entry_queue_.pop_front();
           } else {
-            shrinkGraph(this->remove_entry_queue_.front());
+            reduceGraph(this->remove_entry_queue_.front());
             status.deleted++;
             this->remove_entry_queue_.pop();
           }
         }
 
         //try to improve the graph
-        if(improve_k_ > 0) {
+        if(graph_.size() > edge_per_vertex && improve_k_ > 0) {
           for (int64_t swap_try = 0; swap_try < int64_t(this->swap_tries_); swap_try++) {
             status.tries++;
 

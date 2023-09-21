@@ -317,7 +317,7 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
   /**
    * Number of edges per vertex 
    */
-  const uint8_t getEdgesPerNode() const override {
+  const uint8_t getEdgesPerVertex() const override {
     return this->edges_per_vertex_;
   }
 
@@ -382,15 +382,14 @@ public:
     return -1;
   }
 
-  inline const bool hasNode(const uint32_t external_label) const override {
+  inline const bool hasVertex(const uint32_t external_label) const override {
     return label_to_index_.contains(external_label);
   }
 
   inline const bool hasEdge(const uint32_t internal_index, const uint32_t neighbor_index) const override {
     auto neighbor_indices = neighbors_by_index(internal_index);
     auto neighbor_indices_end = neighbor_indices + this->edges_per_vertex_;  
-    auto neighbor_ptr = std::lower_bound(neighbor_indices, neighbor_indices_end, neighbor_index); 
-    return (*neighbor_ptr == neighbor_index);
+    return std::binary_search(neighbor_indices, neighbor_indices_end, neighbor_index);
   }
 
   const bool saveGraph(const char* path_to_graph) const override {
@@ -430,7 +429,7 @@ public:
    * 
    * @return the internal index of the new vertex
    */
-  uint32_t addNode(const uint32_t external_label, const std::byte* feature_vector) override {
+  uint32_t addVertex(const uint32_t external_label, const std::byte* feature_vector) override {
     const auto new_internal_index = static_cast<uint32_t>(label_to_index_.size());
     label_to_index_.emplace(external_label, new_internal_index);
 
@@ -441,6 +440,34 @@ public:
     std::memcpy(vertex_memory + external_label_offset_, &external_label, sizeof(uint32_t));
 
     return new_internal_index;
+  }
+
+    /**
+    * Remove an existing vertex.
+    */
+  void removeVertex(const uint32_t external_label) override {
+    const auto internal_index = getInternalIndex(external_label);
+
+    // the last index will be moved to the internal_index position and overwrite its content
+    const auto last_internal_index = static_cast<uint32_t>(this->label_to_index_.size() - 1);
+    if(internal_index != last_internal_index) {
+
+      // update the neighbor list of the last vertex to reflex its new vertex index
+      const auto neighbor_indices = neighbors_by_index(last_internal_index);
+      const auto neighbor_weights = weights_by_index(last_internal_index);
+      for (size_t index = 0; index < this->edges_per_vertex_; index++) 
+        changeEdge(neighbor_indices[index], last_internal_index, internal_index, neighbor_weights[index]);
+
+      // copy the last vertex to the vertex which needs to be removed
+      std::memcpy(vertex_by_index(internal_index), vertex_by_index(last_internal_index), this->byte_size_per_vertex_);
+
+      // update the index position of the last label
+      const auto last_label = label_by_index(last_internal_index);
+      label_to_index_[last_label] = internal_index;
+    }
+
+    // remove the external label from the hash map
+    label_to_index_.erase(external_label);
   }
 
   /**

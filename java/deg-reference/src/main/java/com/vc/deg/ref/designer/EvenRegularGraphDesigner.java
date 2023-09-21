@@ -734,6 +734,13 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 				}
 			}
 			
+			// TODO
+			// Groups of size 2 can chain together to form one big group as done in step 3.			
+			// Two groups of size 3 can connect to each other and the resulting group can still connect to 4 other groups.
+			// Several groups with size 3 or larger can connect to each other and create one large group
+			// If the number of vertices missing an edges in this group is larger than the number of the remaining size-2 groups + all not paired vertices we can skip 2.2
+			// Otherwise we need to run a few iteration until this threshold is reached an then stop.
+			
 			// 2.2 use graph.hasPath(...) to find a path for every not paired but involved vertex, to any other involved vertex 
 			for (Map.Entry<Integer, Set<Integer>> vertexReachability : reachability.entrySet()) {
 				final int involvedVertex = vertexReachability.getKey();
@@ -747,11 +754,11 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 					final int[] fromVertices = involvedVertices.stream().mapToInt(Integer::intValue).filter(v -> v != involvedVertex).toArray();
 					List<QueryDistance> traceback = graph.hasPath(fromVertices, involvedVertex, improveK, improveEps);
 					if(traceback.size() == 0) {
-						// TODO implement flood full to find an involved vertex without compute distances
+						// TODO replace with flood fill to find an involved vertex without compute distances
 						traceback = graph.hasPath(fromVertices, involvedVertex, graph.getVertexCount(), 1);
 					}
 					
-					// the first vertex in the traceback path must be one of the other involved vertices
+					// the last vertex in the traceback path must be one of the other involved vertices
 					final int reachableVertex = traceback.get(traceback.size()-1).getVertexId();
 					final Set<Integer> reachableVerticesOfReachableVertex = reachability.get(reachableVertex);
 
@@ -767,9 +774,9 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 			final Function<Collection<Integer>, VertexData[]> idsToVertexArray = ids -> ids.stream().map(id -> graph.getVertexById(id)).toArray(VertexData[]::new);
 			final VertexData[][] reachableGroups = reachability.values().stream().distinct().map(idsToVertexArray).toArray(VertexData[][]::new);
 						
-			// 3.1 find the biggest group and connect each of its vertices to one of the smaller groups
-			//      Stop when all groups are connected or every vertex in the big group got an additional edge.
-			//      In case of the later, repeat the process with the next biggest group.
+			// 3.1 Find the biggest group and connect each of its vertices to one of the smaller groups.
+			//     Stop when all groups are connected or every vertex in the big group has enough edges.
+			//     In case of the later, repeat the process with the next biggest group.
 			if(reachableGroups.length > 1) {
 				
 				// sort the groups by size 			
@@ -784,7 +791,8 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 						final VertexData vertex = reachableGroup[i];
 						if(vertex.getEdges().size() < edgesPerVertex) {
 							
-							// find another vertex in a smaller group, also missing an edge			
+							// Find another vertex in a smaller group, also missing an edge		
+							// The other vertex can not have an edge to vertex otherwise both of them would be in the same group due to step 2.1
 							for (; n < reachableGroups.length; n++) {								
 								final VertexData[] otherGroup = reachableGroups[n];
 								for (int j = 0; j < otherGroup.length; j++) {
@@ -807,7 +815,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 				}
 			}
 			
-			// 3.1 now all groups are reachable but still some vertices are missing edge, try to connect them to each other.
+			// 3.2 now all groups are reachable but still some vertices are missing edge, try to connect them to each other.
 			final VertexData[] remainingVertices = Stream.of(reachableGroups).flatMap(Stream::of).filter(v -> v.getEdges().size() < edgesPerVertex).toArray(VertexData[]::new);
 			for (int i = 0; i < remainingVertices.length; i++) {
 				final VertexData vertexA = remainingVertices[i];
@@ -837,7 +845,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 			}
 
 				
-			// 3.2 the remaining vertices can not be connected to any of the other involved vertices, because they already have an edge to all of them.
+			// 3.3 the remaining vertices can not be connected to any of the other involved vertices, because they already have an edge to all of them.
 			for (int i = 0; i < remainingVertices.length; i++) {
 				final VertexData vertexA = remainingVertices[i];
 				if(vertexA.getEdges().size() < edgesPerVertex) {

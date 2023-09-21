@@ -115,7 +115,7 @@ static void test_graph_anns(const deglib::search::SearchGraph& graph, const degl
 
     // reproduceable entry point for the graph search
     // const auto entry_vertex_indices = std::vector<uint32_t> { graph.getInternalIndex(entry_vertex_id) };
-    const auto entry_vertex_indices = graph.getEntryNodeIndices();
+    const auto entry_vertex_indices = graph.getEntryVertexIndices();
     fmt::print("internal id {} \n", graph.getInternalIndex(entry_vertex_indices[0]));
 
     // test ground truth

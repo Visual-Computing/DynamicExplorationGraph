@@ -317,7 +317,7 @@ public:
   /**
    * Number of edges per vertex 
    */
-  const uint8_t getEdgesPerNode() const override {
+  const uint8_t getEdgesPerVertex() const override {
     return edges_per_vertex_;
   }
 
@@ -364,7 +364,7 @@ public:
     return neighbors_by_index(internal_idx);
   }
 
-  inline const bool hasNode(const uint32_t external_label) const override {
+  inline const bool hasVertex(const uint32_t external_label) const override {
     return label_to_index_.contains(external_label);
   }
 
