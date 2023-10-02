@@ -3,6 +3,7 @@ package com.vc.deg.ref.designer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -17,9 +18,18 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.IntPredicate;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.koloboke.collect.map.IntFloatCursor;
+import com.koloboke.collect.map.IntIntMap;
+import com.koloboke.collect.map.IntObjMap;
+import com.koloboke.collect.map.hash.HashIntIntMaps;
+import com.koloboke.collect.map.hash.HashIntObjMaps;
+import com.koloboke.collect.set.IntSet;
+import com.koloboke.collect.set.ObjSet;
+import com.koloboke.collect.set.hash.HashIntSets;
+import com.koloboke.collect.set.hash.HashObjSets;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.GraphDesigner;
@@ -280,7 +290,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 		for(VertexData data : graph.getVertices()) {
 			for(Map.Entry<Integer, Float> entry : data.getEdges().entrySet()) {
 				final float dist = space.computeDistance(data.getFeature(), graph.getVertexById(entry.getKey()).getFeature());
-				if(entry.getValue() != dist)
+				if (Math.abs(entry.getValue() - dist) > 0.001f)
 					throw new RuntimeException("The vertex "+data.getId()+" has a weight "+entry.getValue()+" which is not equal to its distance "+dist);
 			}
 		}	
@@ -687,13 +697,449 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 		return true;
 	}
 
+	
+	private void shrinkGraphByLabel(int label) {
+		final int edgesPerVertex = graph.getEdgesPerVertex();
+		final FeatureSpace space = graph.getFeatureSpace();
+		final List<BuilderChange> changes = new ArrayList<>();
+
+		// 1 remove the vertex and collect the vertices which are missing an edge
+		final Set<Integer> involvedVertices = graph.removeVertexByLabel(label).keySet();
+		
+		// 1.1 handle the use case where the graph does not have enough vertices to fulfill the edgesPerVertex requirement
+		//     and just remove the vertex without reconnecting the involved vertices because they are all fully connected
+		if(graph.getVertexCount() <= edgesPerVertex)
+			return;
+		
+		// 2 find pairs or groups of vertices which can reach each other		
+		final ObjSet<ReachableGroup> uniqueGroups = HashObjSets.newMutableSet();		
+		{
+			{
+				final UnionFind pathMap = new UnionFind(edgesPerVertex); // TODO only use for neighbor check
+				final Map<Integer, ReachableGroup> reachableGroups = new HashMap<>(edgesPerVertex);
+				involvedVertices.forEach(involvedVertex -> {
+					reachableGroups.computeIfAbsent(involvedVertex, k -> new ReachableGroup(k));
+					pathMap.update(involvedVertex, involvedVertex);
+				});
+				
+				final Function<UnionFind, Boolean> enoughFreeConections = (parents) -> {
+					
+					int isolatedCount = 0;
+					int avaiableConnectionCount = 0;	
+					for (int involvedVertex : involvedVertices) {
+						final int reachableVertex = parents.find(involvedVertex);
+						if(involvedVertex == reachableVertex) {
+							final ReachableGroup group = reachableGroups.get(reachableVertex);
+							if(group.size() == 1)
+								isolatedCount++;
+							else if(group.getMissingEdges().size() > 2)
+								avaiableConnectionCount += group.getMissingEdges().size() - 2;
+						}
+					}
+					return avaiableConnectionCount < isolatedCount;
+				};	
+				
+//	        	long startNeighborCheck = System.currentTimeMillis();
+	
+				// 2.1 start with checking the adjacent neighbors
+				int neighborCheckDepth = 0;
+				IntSet check = HashIntSets.newMutableSet(involvedVertices);
+				IntSet checkNext = HashIntSets.newMutableSet();				
+				while(enoughFreeConections.apply(pathMap)) {
+					for (int checkVertex : check) {
+						final int involvedVertex = pathMap.find(checkVertex);
+						final ReachableGroup reachableGroup = reachableGroups.get(involvedVertex);
+						
+						// check only involved vertices and vertices which can only reach 1 involved vertex
+						// no need for big groups to find other groups at the expense of processing power
+						if(neighborCheckDepth > 0 && reachableGroup.size() > 1)
+							continue;
+						
+						// check the neighbors of checkVertex if they can reach another reachableGroup
+						for(int neighbor : graph.getVertexById(checkVertex).getEdges().keySet()) {
+							final int otherInvolvedVertex = pathMap.find(neighbor);
+							
+							// neighbor is not yet in the union find
+							if(otherInvolvedVertex == -1) {
+								
+								pathMap.update(neighbor, involvedVertex);
+								checkNext.add(neighbor);
+							}
+							// the neighbor can reach another involved vertex
+							else if(otherInvolvedVertex != involvedVertex) {							
+								pathMap.update(otherInvolvedVertex, involvedVertex);
+								reachableGroup.merge(reachableGroups.get(otherInvolvedVertex));
+							}
+						}
+					}
+					
+					// swap
+					IntSet buff = check;
+					check = checkNext;
+					checkNext = buff;
+					checkNext.clear();
+					
+					neighborCheckDepth++;
+				}
+				
+				for(int involvedVertex : involvedVertices) {
+					final ReachableGroup group = reachableGroups.get(pathMap.find(involvedVertex));
+//					reachableGroups.put(involvedVertex, group);
+					uniqueGroups.add(group);
+				}	
+				
+//				// TODO combine
+//				final Function<Collection<ReachableGroup>, Integer> avaiableConnectionCount = (groups) -> {
+//					
+//					int sum = 0;				
+//					for (int involvedVertex : involvedVertices) {
+//						final int reachableVertex = unionFind.find(involvedVertex);
+//						if(involvedVertex == reachableVertex) {
+//							final ReachableGroup group = reachability.get(reachableVertex);
+//							if(group.getMissingEdges().size() > 2)
+//								sum += group.getMissingEdges().size() - 2;
+//						}
+//					}
+//					return sum;
+//				};
+//	
+//				final Function<Collection<ReachableGroup>, Integer> isolatedCount = (groups) -> {
+//					int sum = 0;
+//					for (int involvedVertex : involvedVertices) {
+//						final int reachableVertex = unionFind.find(involvedVertex);
+//						if(involvedVertex == reachableVertex) {
+//							final ReachableGroup group = reachability.get(reachableVertex);
+//							if(group.size() == 1)
+//								sum++;
+//						}
+//					}
+//					return sum;
+//				};
+//				
+//				if(neighborCheckDepth > 2)
+//					System.out.println("Search for "+avaiableConnectionCount.apply(reachability.values())+" avaiable vertices to connect to "
+//										+isolatedCount.apply(reachability.values())+" vertices took "+(System.currentTimeMillis()-startNeighborCheck)
+//										+"ms with a search depth of "+neighborCheckDepth);	
+			}
+			
+			// 2.2 get all isolated vertices
+			final List<ReachableGroup> isolatedGroups = new ArrayList<>(edgesPerVertex);
+			for (ReachableGroup vertexReach : uniqueGroups) 
+				if(vertexReach.size() == 1)
+					isolatedGroups.add(vertexReach);
+
+		    // 2.3 find for every isolated vertex the best other involved vertex which is part of a reachable group
+			for (ReachableGroup isolatedVertexGroup : isolatedGroups) {
+				
+				// are you still isolated?
+				if(isolatedVertexGroup.size() > 1) 
+					continue;
+				
+				final int isolatedVertex = isolatedVertexGroup.getVertexIndex();
+				final FeatureVector isolatedVertexFeature = graph.getVertexById(isolatedVertex).getFeature();
+				
+				// check the reachable groups for good candidates which can connect to the isolated vertex
+				float bestCandidateDistance = Float.MAX_VALUE;
+				ReachableGroup bestCandidateGroup = null;
+				int bestCandidateIndex = -1;
+				for (ReachableGroup candidateGroup : uniqueGroups) {
+			
+				    // skip all groups which do not have enough vertices missing an edge
+					final Set<Integer> missingEdges = candidateGroup.getMissingEdges();
+					if(missingEdges.size() <= 2)
+						continue;
+					
+					// find the candidate with the best distance to the isolated vertex
+					for (int candidate : missingEdges) {
+//						if(graph.hasEdge(isolatedVertex, candidate) == false) {
+							final FeatureVector candidateFeature = graph.getVertexById(candidate).getFeature();
+							final float distance = space.computeDistance(candidateFeature, isolatedVertexFeature);
+							if(distance < bestCandidateDistance) {
+								bestCandidateDistance = distance;
+								bestCandidateIndex = candidate;
+								bestCandidateGroup = candidateGroup;
+							}
+//						}
+					}
+				}
+				
+				// found a good candidate, add the isolated vertex to its reachable group and an edge between them
+				graph.addUndirectedEdge(isolatedVertex, bestCandidateIndex, bestCandidateDistance);
+				changes.add(new BuilderChange(isolatedVertex, bestCandidateIndex, bestCandidateDistance, false));
+
+				// merge groups
+				bestCandidateGroup.hasEdge(bestCandidateIndex);
+				isolatedVertexGroup.hasEdge(isolatedVertex);
+				bestCandidateGroup.merge(isolatedVertexGroup);
+
+				uniqueGroups.remove(isolatedVertexGroup);
+			}
+		}
+		
+		// 3 reconnect the groups
+		{
+		    // Sort the unique groups by size in ascending order
+			final List<ReachableGroup> reachableGroups = new ArrayList<>(uniqueGroups);
+			Collections.sort(reachableGroups, Comparator.comparingInt((ReachableGroup g) -> g.size()).reversed());
+	     
+			// 3.1 Find the biggest group and one of its vertices to one vertex of a smaller group. Repeat until only one group is left.
+			while(reachableGroups.size() >= 2) {
+				final ReachableGroup reachableGroup = reachableGroups.get(reachableGroups.size()-1);
+				final ReachableGroup otherGroup = reachableGroups.get(reachableGroups.size()-2);
+				final Set<Integer> reachableVertices = reachableGroup.getMissingEdges();
+				final Set<Integer> otherVertices = otherGroup.getMissingEdges();
+				
+				float bestDistance = Float.MAX_VALUE;
+				int bestOtherVertex = -1;
+				int bestReachableVertex = -1;
+				
+				// find another vertex in a smaller group, also missing an edge
+	            // the other vertex and reachableIndex can not share an edge yet,
+				// otherwise they would be in the same group
+				for (int reachableIndex : reachableVertices) {
+					final FeatureVector reachableFeature = graph.getVertexById(reachableIndex).getFeature();					
+					for (int otherIndex : otherVertices) {
+						final FeatureVector otherFeature = graph.getVertexById(otherIndex).getFeature();
+						final float distance = space.computeDistance(otherFeature, reachableFeature); 
+						
+						if(distance < bestDistance) {
+							bestDistance = distance;
+							bestOtherVertex = otherIndex;
+							bestReachableVertex = reachableIndex;
+						}
+					}
+				}
+				
+				// connect reachableIndex and otherIndex
+	        	graph.addUndirectedEdge(bestReachableVertex, bestOtherVertex, bestDistance);
+				changes.add(new BuilderChange(bestReachableVertex, bestOtherVertex, bestDistance, false));
+
+	        	// move the element from the list of missing edges
+	        	reachableGroup.hasEdge(bestReachableVertex);
+	        	otherGroup.hasEdge(bestOtherVertex);
+	        	
+	        	// merge both groups
+	        	otherGroup.merge(reachableGroup);
+	        	
+	        	// remove the current group from the list of group since its merged
+	        	reachableGroups.remove(reachableGroups.size()-1);	        	
+			}
+
+			// 3.2 now all groups are reachable but still some vertices are missing edge, try to connect them to each other.
+			final VertexData[] remainingVertices = reachableGroups.get(0).getMissingEdges().stream().map(graph::getVertexById).toArray(VertexData[]::new);
+			for (int i = 0; i < remainingVertices.length; i++) {
+				final VertexData vertexA = remainingVertices[i];
+				if(vertexA.getEdges().size() < edgesPerVertex) {
+
+					// find a vertexB with the smallest distance to A
+					int bestVertexBId = -1;
+					float bestDistance = Float.MAX_VALUE;
+					for (int j = i+1; j < remainingVertices.length; j++) {
+						final VertexData vertexB = remainingVertices[j];
+						if(vertexB.getEdges().size() < edgesPerVertex && vertexA.getEdges().containsKey(vertexB.getId()) == false) {
+
+							final float weight = space.computeDistance(vertexA.getFeature(), vertexB.getFeature());
+							if(weight < bestDistance) {
+								bestDistance = weight;
+								bestVertexBId = vertexB.getId();
+							}
+						}
+					}
+
+					// connect vertexA and vertexB
+					if(bestVertexBId >= 0) {
+						graph.addUndirectedEdge(vertexA.getId(), bestVertexBId, bestDistance);
+						changes.add(new BuilderChange(vertexA.getId(), bestVertexBId, bestDistance, false));
+						
+						if(label == 591798 && (vertexA.getId() == 157255 || bestVertexBId == 157255))
+							System.out.println("overflow");
+					}
+				}
+			}
+
+
+			// 3.3 the remaining vertices can not be connected to any of the other involved vertices, because they already have an edge to all of them.
+			for (int i = 0; i < remainingVertices.length; i++) {
+				final VertexData vertexA = remainingVertices[i];
+				if(vertexA.getEdges().size() < edgesPerVertex) {
+
+					// scan the neighbors of the adjacent vertices of A and find a vertex B with the smallest distance to A
+					VertexData vertexB = null; 
+					float weightAB = Float.MAX_VALUE;
+					for (int neighborOfA : vertexA.getEdges().keySet()) {
+						for (int potentialVertexBId : graph.getVertexById(neighborOfA).getEdges().keySet()) {
+							if(vertexA.getId() != potentialVertexBId && vertexA.getEdges().containsKey(potentialVertexBId) == false) {	
+								final VertexData potentialVertexB = graph.getVertexById(potentialVertexBId);
+								final float weight = space.computeDistance(vertexA.getFeature(), potentialVertexB.getFeature());
+								if(weight < weightAB) {
+									weightAB = weight;
+									vertexB = potentialVertexB;
+								}
+							}
+						}
+					}
+
+					// Get another vertex missing an edge called C and at this point sharing an edge with A (by definition of 3.2)
+					for (int j = i+1; j < remainingVertices.length; j++) {
+						final VertexData vertexC = remainingVertices[j];
+						if(vertexC.getEdges().size() < edgesPerVertex) {
+
+							// check the neighborhood of B to find a vertex D not yet adjacent to C but with the smallest possible distance to D
+							VertexData vertexD = null; 
+							float weightCD = Float.MAX_VALUE;
+							for (int potentialVertexDId : vertexB.getEdges().keySet()) {
+								if(vertexA.getId() != potentialVertexDId && vertexC.getId() != potentialVertexDId && vertexC.getEdges().containsKey(potentialVertexDId) == false) {
+									final VertexData potentialVertexD = graph.getVertexById(potentialVertexDId);
+									final float weight = space.computeDistance(vertexC.getFeature(), potentialVertexD.getFeature());
+									if(weight < weightCD) {
+										weightCD = weight;
+										vertexD = potentialVertexD;
+									}
+								}
+							}
+
+
+							// replace edge between B and D, with one between A and B as well as C and D
+							changes.add(new BuilderChange(vertexB.getId(), vertexD.getId(), graph.getEdgeWeight(vertexB.getId(), vertexD.getId()), true));
+							graph.removeUndirectedEdge(vertexB.getId(), vertexD.getId());
+
+							changes.add(new BuilderChange(vertexA.getId(), vertexB.getId(), weightAB, false));
+							graph.addUndirectedEdge(vertexA.getId(), vertexB.getId(), weightAB);
+
+							changes.add(new BuilderChange(vertexC.getId(), vertexD.getId(), weightCD, false));
+							graph.addUndirectedEdge(vertexC.getId(), vertexD.getId(), weightCD);
+							
+							if(label == 591798 && (vertexA.getId() == 157255 || vertexB.getId() == 157255))
+								System.out.println("overflow");
+														
+							if(label == 591798 && (vertexC.getId() == 157255 || vertexD.getId() == 157255))
+								System.out.println("overflow");
+
+							break;
+						}
+					}
+				}
+			}
+		}
+		
+		for (int involvedVertex : involvedVertices) {
+			if(graph.getVertexById(involvedVertex).getEdges().size() != edgesPerVertex)
+				System.out.println(involvedVertex+" has too many edges "+graph.getVertexById(involvedVertex).getEdges().size());
+		}
+		
+	}
+		
+	
+	protected static class UnionFind  {
+
+		protected final IntIntMap parents;
+
+		public UnionFind(int expectedSize) {
+			parents = HashIntIntMaps.newMutableMap(expectedSize);
+		}
+
+		/**
+		 * Find the root of the set in which element belongs
+		 * 
+		 * @param element
+		 * @return
+		 */
+		public int find(int element) {
+			final int entry = parents.getOrDefault(element, -1);
+			if (entry == element) // if element is root
+				return element;
+			return find(entry); // recurs for parent till we find root
+		}
+
+//		/**
+//		 * perform Union of two subsets element1 and element2  
+//		 * 
+//		 * @param element1
+//		 * @param element2
+//		 */
+//		public void union(int element1, int element2) {
+//			int x = find(element1);
+//			int y = find(element2);
+//			update(x, y);
+//		}
+		
+		/**
+		 * If the parents are known via find this method can be called instead of union
+		 * 
+		 * @param parent1
+		 * @param parent2
+		 */
+		public void update(int parent1, int parent2) {
+			parents.put(parent1, parent2);
+		}
+	}
+
+	protected static class ReachableGroup implements Iterable<Integer> {
+		
+		protected final int vertexIndex;
+		protected final Set<Integer> missingEdges = new HashSet<>();
+		protected final Set<Integer> reachableVertices = new HashSet<>();
+		
+		public ReachableGroup(int vertexIndex) {
+			this.vertexIndex = vertexIndex;
+			this.missingEdges.add(vertexIndex);
+			this.reachableVertices.add(vertexIndex);
+		}
+		
+		public int getVertexIndex() {
+			return vertexIndex;
+		}
+		
+		public Set<Integer> getMissingEdges() {
+			return missingEdges;
+		}
+		
+		public int size() { 
+			return reachableVertices.size();
+		}
+		
+		@Override
+		public int hashCode() {
+			return getVertexIndex();
+		}
+		
+		@Override
+		public String toString() {
+			return "Group of "+vertexIndex+" with "+reachableVertices.size() +" vertices " + reachableVertices.stream().map(n -> String.valueOf(n)).collect(Collectors.joining(", ", "{", "}"));
+		}
+		
+		/**
+		 * Merge both groups vertex sets and let both reference the same set
+		 * 
+		 * @param otherGroup
+		 */
+		public void merge(ReachableGroup otherGroup) {
+			
+			// skip if both are the same object
+			if(getVertexIndex() == otherGroup.getVertexIndex())
+				return;
+			
+			// merge
+			missingEdges.addAll(otherGroup.missingEdges);
+			reachableVertices.addAll(otherGroup.reachableVertices);
+		}
+		
+		public void hasEdge(int vertexIndex) {
+			missingEdges.remove(vertexIndex);
+		}
+
+		@Override
+		public Iterator<Integer> iterator() {
+			return reachableVertices.iterator();
+		}
+	}
 
 	/**
 	 * Remove the entry from the graph
 	 *  
 	 * @param removeTask
 	 */
-	private void shrinkGraphByLabel(int label) {
+	private void shrinkGraphByLabel2(int label) {
 		final int edgesPerVertex = graph.getEdgesPerVertex();
 		final FeatureSpace space = graph.getFeatureSpace();
 		final List<BuilderChange> changes = new ArrayList<>();
@@ -707,7 +1153,7 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 			return;
 
 		// 2 find pairs or groups of vertices which can reach each other
-		final Map<Integer, Set<Integer>> reachability = new HashMap<>();
+		final Map<Integer, Set<Integer>> reachability = new HashMap<>(edgesPerVertex);
 		{
 			
 			// 2.1 start with checking the adjacent neighbors

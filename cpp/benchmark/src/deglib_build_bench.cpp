@@ -36,10 +36,19 @@ void create_graph(const std::string repository_file,  const std::string graph_fi
     auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, k_ext, eps_ext, k_opt, eps_opt, i_opt, swap_tries, additional_swap_tries);
     
     // provide all features to the graph builder at once. In an online system this will be called multiple times
-    for (uint32_t i = 0; i < repository.size(); i++) {
+    auto base_size = uint32_t(repository.size()/2); // HALF
+    for (uint32_t i = 0; i < base_size; i++) { 
+    // for (uint32_t i = 0; i < repository.size(); i++) {
         auto feature = reinterpret_cast<const std::byte*>(repository.getFeature(i));
         auto feature_vector = std::vector<std::byte>{feature, feature + dims * sizeof(float)};
         builder.addEntry(i, std::move(feature_vector));
+
+        // add from second half
+        auto second_label = base_size+(i-1);
+        auto second_feature = reinterpret_cast<const std::byte*>(repository.getFeature(second_label));
+        auto second_feature_vector = std::vector<std::byte>{second_feature, second_feature + dims * sizeof(float)};
+        builder.addEntry(second_label, std::move(second_feature_vector));
+        builder.removeEntry(second_label);
     }
     repository.clear();
     fmt::print("Actual memory usage: {} Mb, Max memory usage: {} Mb after setup graph builder\n", getCurrentRSS() / 1000000, getPeakRSS() / 1000000);
@@ -51,22 +60,23 @@ void create_graph(const std::string repository_file,  const std::string graph_fi
     auto start = std::chrono::steady_clock::now();
     uint64_t duration_ms = 0;
     const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
+        const auto size = graph.size();
 
-        if(status.added % log_after == 0 || status.added == max_vertex_count) {    
+        if(status.step % log_after == 0 || size == base_size) {    
             duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
             auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 1);
             auto weight_histogram_sorted = deglib::analysis::calc_edge_weight_histogram(graph, true, 1);
             auto weight_histogram = deglib::analysis::calc_edge_weight_histogram(graph, false, 1);
-            auto valid_weights = deglib::analysis::check_graph_weights(graph);
+            auto valid_weights = deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_validation(graph, uint32_t(size), true);
             auto connected = deglib::analysis::check_graph_connectivity(graph);
             auto duration = duration_ms / 1000;
             auto currRSS = getCurrentRSS() / 1000000;
             auto peakRSS = getPeakRSS() / 1000000;
             fmt::print("{:7} vertices, {:5}s, {:8} / {:8} improv, Q: {:4.2f} -> Sorted:{:.1f}, InOrder:{:.1f}, {} connected & {}, RSS {} & peakRSS {}\n", 
-                        status.added, duration, status.improved, status.tries, avg_edge_weight, fmt::join(weight_histogram_sorted, " "), fmt::join(weight_histogram, " "), connected ? "" : "not", valid_weights ? "valid" : "invalid", currRSS, peakRSS);
+                        size, duration, status.improved, status.tries, avg_edge_weight, fmt::join(weight_histogram_sorted, " "), fmt::join(weight_histogram, " "), connected ? "" : "not", valid_weights ? "valid" : "invalid", currRSS, peakRSS);
             start = std::chrono::steady_clock::now();
         }
-        else if(status.added % (log_after/10) == 0) {    
+        else if(status.step % (log_after/10) == 0) {    
             duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
             auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 1);
             auto duration = duration_ms / 1000;
@@ -152,8 +162,8 @@ int main(int argc, char *argv[]) {
     // ------------------------------- SIFT1M -----------------------------------------
     const auto repository_file      = (data_path / "SIFT1M" / "sift_base.fvecs").string();
     const auto query_file           = (data_path / "SIFT1M" / "sift_query.fvecs").string();
-    const auto gt_file              = (data_path / "SIFT1M" / "sift_groundtruth.ivecs").string();
-    const auto graph_file           = (data_path / "deg" / "best_distortion_decisions" / "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string();
+    const auto gt_file              = (data_path / "SIFT1M" / "sift_groundtruth500k.ivecs").string();
+    const auto graph_file           = (data_path / "deg" / "best_distortion_decisions" / "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge1.deg").string();
 
     if(std::filesystem::exists(graph_file.c_str()) == false)
         create_graph(repository_file, graph_file, 30, 60, 0.2f, 30, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt

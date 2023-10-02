@@ -371,8 +371,7 @@ public:
   inline const bool hasEdge(const uint32_t internal_index, const uint32_t neighbor_index) const override {
     auto neighbor_indices = getNeighborIndices(internal_index);
     auto neighbor_indices_end = neighbor_indices + this->edges_per_vertex_;  
-    auto neighbor_ptr = std::lower_bound(neighbor_indices, neighbor_indices_end, neighbor_index); 
-    return (*neighbor_ptr == neighbor_index);
+    return std::binary_search(neighbor_indices, neighbor_indices_end, neighbor_index); 
   }
 
   /**
@@ -528,7 +527,6 @@ public:
         results.emplace(index, distance);
 
         // early stop after to many computations
-        distance_computation_count++;
         if constexpr (use_max_distance_count) {
           if(++distance_computation_count >= max_distance_computation_count)
             return results;
@@ -589,7 +587,6 @@ public:
         }
 
         // early stop after to many computations
-        distance_computation_count++;
         if constexpr (use_max_distance_count) {
           if(++distance_computation_count >= max_distance_computation_count)
             return results;
