@@ -403,7 +403,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 		float radius = Float.MAX_VALUE;
 
 		// if the filter only contains few valid ids brute force them all
-		if(labelFilter.size() / vertexCount < 0.05) {
+		if(((float)labelFilter.size() / vertexCount) < 0.05f) {
 			
 			// check all vertices of the graph if they pass the filter and are not a seed id if required 
 			final IntSet seedIds = HashIntSets.newImmutableSet(seedVertexIds);			

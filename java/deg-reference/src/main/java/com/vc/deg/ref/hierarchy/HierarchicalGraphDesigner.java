@@ -308,8 +308,7 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 	}
 		
 	/**
-	 * Get a random id which only exists on this rank
-	 * TODO build a data structure which contains a set of ids for each rank of the graph. the set only has ids which exists only on this rank.
+	 * Get a random id which only exists on this rank and below.
 	 * 
 	 * @param targetRank
 	 * @return
@@ -320,13 +319,13 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 	
 	/**
 	 * Get a random id which only exists on this rank and below.
-	 * Return valid when checked 
 	 * 	
 	 * @param graph
 	 * @param targetRank
-	 * @return -1 i not valid id can be found
+	 * @return -1 = no valid id can be found
 	 */
 	protected int getRandomLabel(DynamicExplorationGraph graph, int targetRank) {	
+		// TODO build a data structure which contains a set of ids for each rank of the graph. the set only has ids which exists only on this rank or below.
 		return graph.getRandomLabel(rnd, new GraphFilter() {
 			
 			@Override
@@ -454,7 +453,6 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 			return true;
 		}
 		throw new RuntimeException("Label:"+label+" does not exists in the graph");
-//		return false;	
 	}
 	
 	/**
