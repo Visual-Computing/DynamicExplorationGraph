@@ -63,7 +63,7 @@ public class MapNavigatorTest {
 
 		// place the image 0 in the middle of the grid and arrange similar images from the graph around it
 		final int initialId = 0;
-		final PreparedGraphFilter filter = new PreparedGraphFilter(idToImageData.keySet());
+		final PreparedGraphFilter filter = new PreparedGraphFilter(idToImageData.keySet(), topRankSize);
 		mapNavigator.jump(localMap, initialId, localMap.columns()/2, localMap.rows()/2, 0, filter);
 		final BufferedImage image1 = toGridToImage(localMap, idToImageData, 64);
 

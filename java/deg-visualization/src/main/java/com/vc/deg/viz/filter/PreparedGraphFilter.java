@@ -13,10 +13,12 @@ import com.koloboke.collect.set.hash.HashIntSets;
  */
 public class PreparedGraphFilter implements MutableGraphFilter {
 	
-	protected IntSet validIds;
+	protected final IntSet validIds;
+	protected final int allElementCount;
 	
-	public PreparedGraphFilter(IntSet validIds) {
+	public PreparedGraphFilter(IntSet validIds, int allElementCount) {
 		this.validIds = validIds;
+		this.allElementCount = allElementCount;
 	}
 	
 	@Override
@@ -29,7 +31,7 @@ public class PreparedGraphFilter implements MutableGraphFilter {
 		final IntSet copy = HashIntSets.newMutableSet(validIds); 
 		final IntConsumer removeFunc = id -> copy.removeInt(id);
 		idProvider.accept(removeFunc);
-		return new PreparedGraphFilter(copy);
+		return new PreparedGraphFilter(copy, allElementCount);
 	}
 	
 	@Override
@@ -41,10 +43,15 @@ public class PreparedGraphFilter implements MutableGraphFilter {
 	public int size() {
 		return validIds.size();
 	}
+
+	@Override
+	public float getInclusionRate() {
+		return Math.max(0, Math.min(1, ((float)size()) / allElementCount));
+	}
 	
 	@Override
 	public String toString() {
-		return this.getClass().getSimpleName() + " with "+size()+" valid ids.";
+		return this.getClass().getSimpleName() + " with "+getInclusionRate()+" valid ids.";
 	}
 	
 	

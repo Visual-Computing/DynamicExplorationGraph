@@ -152,7 +152,7 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	
 	@Override
 	public int[] search(Collection<FeatureVector> queries, int k, float eps, GraphFilter filter, int[] seedVertexLabels) {
-		int[] seedVertexIds = Arrays.stream(seedVertexLabels).map(label -> this.internalGraph.getVertexByLabel(label).getId()).toArray();
+		int[] seedVertexIds = Arrays.stream(seedVertexLabels).mapToObj(internalGraph::getVertexByLabel).filter(Objects::nonNull).mapToInt(VertexData::getId).toArray();
 		if(seedVertexIds.length == 0)
 			seedVertexIds = new int[] { internalGraph.getVertices().iterator().next().getId() };
 		
@@ -165,12 +165,12 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	}
 
 	@Override
-	public int[] explore(int[] seedLabels, int k, float eps, GraphFilter filter) {
+	public int[] explore(int[] seedVertexLabels, int k, float eps, GraphFilter filter) {
 		
 		// check seed labels
-		final VertexData[] entrys = Arrays.stream(seedLabels).mapToObj(internalGraph::getVertexByLabel).filter(Objects::nonNull).toArray(VertexData[]::new);
+		final VertexData[] entrys = Arrays.stream(seedVertexLabels).mapToObj(internalGraph::getVertexByLabel).filter(Objects::nonNull).toArray(VertexData[]::new);
 		if(entrys.length == 0)
-			throw new RuntimeException("None of the seed labels "+Arrays.toString(seedLabels)+" are in the graph.");
+			throw new RuntimeException("None of the seed labels "+Arrays.toString(seedVertexLabels)+" are in the graph.");
 		
 		// prepare search
 		final int[] entryIds = Arrays.stream(entrys).mapToInt(VertexData::getId).toArray();

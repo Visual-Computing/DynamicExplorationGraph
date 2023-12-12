@@ -25,6 +25,7 @@ import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
+import java.util.function.IntConsumer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,10 +38,12 @@ import com.koloboke.collect.map.hash.HashIntIntMapFactory;
 import com.koloboke.collect.map.hash.HashIntIntMaps;
 import com.koloboke.collect.set.IntSet;
 import com.koloboke.collect.set.hash.HashIntSets;
+import com.vc.deg.DynamicExplorationGraph;
 import com.vc.deg.FeatureFactory;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.GraphFilter;
+import com.vc.deg.graph.VertexCursor;
 import com.vc.deg.io.LittleEndianDataInputStream;
 import com.vc.deg.io.LittleEndianDataOutputStream;
 import com.vc.deg.ref.feature.PrimitiveFeatureFactories;
@@ -346,6 +349,42 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 		return new ArrayList<>();
 	}
 	
+	
+	/**
+	 * This filter always return true when asked for validity
+	 * 
+	 * @author Nico Hezel
+	 */
+	public static class GraphAllValidFilter implements GraphFilter {
+		
+		protected final List<VertexData> data;
+		
+		public GraphAllValidFilter(List<VertexData> data) {
+			this.data = data;
+		}
+		
+		@Override
+		public float getInclusionRate() {
+			return 0;
+		}
+		
+		@Override
+		public int size() {
+			return data.size();
+		}
+		
+		@Override
+		public boolean isValid(int label) {
+			return true;
+		}
+
+		@Override
+		public void forEachValidId(IntConsumer action) {
+			for (VertexData vertexData : data) 
+				action.accept(vertexData.getLabel());
+		}
+	};
+	
 	/**
 	 * 
 	 * @param queries
@@ -360,7 +399,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 		
 		// allow all elements in the graph if the initial filter was null
 		if(labelFilter == null)
-			labelFilter = new GraphFilter.AllValidFilter(getVertexCount()); 
+			labelFilter = new GraphAllValidFilter(this.vertices);
 		
 		// check the feature vector compatibility
 		for (FeatureVector query : queries) {
@@ -369,12 +408,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 										   ", expected "+getFeatureSpace().getComponentType().getSimpleName()+" and "+getFeatureSpace().dims());
 		}
 		
-		// list of checked ids
-		final int vertexCount = getVertexCount();
-		final BitSet checkedIds = new BitSet(vertexCount);
-		
 		// compute the min distance between the given fv and all the queries
-		int distanceComputationCount = 0;
 		final Function<VertexData, QueryDistance> calcMinDistance = (VertexData vertex) -> {			
 			final FeatureVector fv = vertex.getFeature();
 			
@@ -395,40 +429,71 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 			return new QueryDistance(minDistIndex, minDistQuery, vertex, minDistance);			
 		};
 	
-
 		// result set
 		final TreeSet<QueryDistance> results = new TreeSet<>();
 		
-		// search radius
-		float radius = Float.MAX_VALUE;
-
+		// there is no valid element in the filter
+		if(labelFilter.size() <= 0)
+			return results;
+			
 		// if the filter only contains few valid ids brute force them all
-		if(((float)labelFilter.size() / vertexCount) < 0.05f) {
+		final int vertexCount = getVertexCount();
+		if(vertexCount < 1_000 || labelFilter.getInclusionRate()*vertexCount < 10_000 || labelFilter.getInclusionRate() < 0.10f) {
 			
 			// check all vertices of the graph if they pass the filter and are not a seed id if required 
-			final IntSet seedIds = HashIntSets.newImmutableSet(seedVertexIds);			
-			for (VertexData vertex : vertices) {				
-				if(labelFilter.isValid(vertex.getLabel()) && (allowSeedInResult || seedIds.contains(vertex.getId()) == false)) {
+			final IntSet seedIds = HashIntSets.newImmutableSet(seedVertexIds);
+			if(vertexCount < labelFilter.size()) {
+				float radius = Float.MAX_VALUE;
+				for (VertexData vertex : vertices) {				
+					if(labelFilter.isValid(vertex.getLabel()) && (allowSeedInResult || seedIds.contains(vertex.getId()) == false)) {
 
-					// keep all distances better than the worst in the result list
-					distanceComputationCount++;
-					final QueryDistance queryDistance = calcMinDistance.apply(vertex);
-					if(queryDistance.getDistance() < radius) {
-						results.add(queryDistance);
+						// keep all distances better than the worst in the result list
+						final QueryDistance queryDistance = calcMinDistance.apply(vertex);
+						if(queryDistance.getDistance() < radius) {
+							results.add(queryDistance);
 
-						// remove the last from the result list if the list gets to long
-						if(results.size() > k) {
-							results.pollLast();
-							radius = results.last().getDistance();
+							// remove the last from the result list if the list gets to long
+							if(results.size() > k) {
+								results.pollLast();
+								radius = results.last().getDistance();
+							}
 						}
 					}
 				}
+			} 
+			else 
+			{ 		
+				final float[] radius = new float[] {Float.MAX_VALUE};
+				labelFilter.forEachValidId(validlabel -> {
+					final VertexData vertex = getVertexByLabel(validlabel);
+					if(vertex != null && (allowSeedInResult || seedIds.contains(vertex.getId()) == false)) {
+	
+						// keep all distances better than the worst in the result list
+						final QueryDistance queryDistance = calcMinDistance.apply(vertex);
+						if(queryDistance.getDistance() < radius[0]) {
+							results.add(queryDistance);
+	
+							// remove the last from the result list if the list gets to long
+							if(results.size() > k) {
+								results.pollLast();
+								radius[0] = results.last().getDistance();
+							}
+						}
+					}
+				});
 			}
 			return results;
 		}		
 		
 		
+		// search radius
+		float radius = Float.MAX_VALUE;
+		
+		// list of checked ids
+		final BitSet checkedIds = new BitSet(vertexCount);
+		
 		// items to traverse, start with the initial vertex
+		int distanceComputationCount = 0;
 		final PriorityQueue<QueryDistance> nextVertices = new PriorityQueue<>(k * 10); 
 		for (int id : seedVertexIds) {
 			if(checkedIds.get(id) == false) {
@@ -457,7 +522,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 			final QueryDistance nextVertex = nextVertices.poll();
 			
 			// eps goes to zero if distanceComputationCount gets close to 10% of the number of all vertices
-			final float epsMod = eps * Math.max(1.f - (float)distanceComputationCount/(0.1f * vertexCount), 0.f); 
+			final float epsMod = eps;// * Math.max(1.f - (float)distanceComputationCount/(0.1f * vertexCount), 0.f); 
 
 			// max distance reached
 			if(nextVertex.getDistance() > radius * (1 + epsMod))

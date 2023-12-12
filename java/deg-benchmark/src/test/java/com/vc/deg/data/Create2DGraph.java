@@ -7,7 +7,7 @@ import java.util.Arrays;
 import java.util.Random;
 import java.util.stream.IntStream;
 
-public class Sift1MTo2DGraphTest {
+public class Create2DGraph {
 
 	public static void main(String[] args) throws IOException {
 		Path baseDir = Paths.get("c:\\Data\\Feature\\2DGraph\\");

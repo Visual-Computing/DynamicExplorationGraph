@@ -77,7 +77,7 @@ public class MapDesigner {
 		
 		} else {
 			
-			// the global filter can contains ids which are not in the graph
+			// the global filter might contains ids which are not in the given graph level
 			validIds = HashIntSets.newMutableSet(c -> {
 				final VertexCursor cursor = deg.vertexCursor();
 				while(cursor.moveNext()) {
@@ -125,7 +125,7 @@ public class MapDesigner {
 			});
 		}
 
-		return new PreparedGraphFilter(validIds);
+		return new PreparedGraphFilter(validIds, deg.size());
 	}
 	
 	/**
@@ -206,12 +206,13 @@ public class MapDesigner {
 		final MutableGraphFilter filterAtLevel = filterAtLevel(globalFilter, null, atLevel);
 				
 		// if the number of valid elements is too small just arrange them all at once on the world map
-		if(filterAtLevel.size() < 1000) {
+		if(filterAtLevel.getInclusionRate() < 1000) {
 			
 			// does the target element pass the filter or should it be ignored
 			final int targetElement = (globalFilter != null && globalFilter.isValid(targetElementId) == false) ? -1 : targetElementId;
 						
 			// copy the element ids from the filter to an array, ignore the id identical to the target element
+			final DynamicExplorationGraph deg = graph.getGraph(atLevel);
 			final int[] neighbors = new int[filterAtLevel.size() - (filterAtLevel.isValid(targetElement) ? 1 : 0)];
 			final int[] pos = new int[1];
 			filterAtLevel.forEachValidId(id -> {
@@ -507,8 +508,6 @@ public class MapDesigner {
 		// explore from the query ids other vertices in the graph which are valid in the filter
 		final int[] exploreResult = graph.exploreAtLevel(queryIds, atLevel, desiredCount, 0.0f, filter);
 
-
-		
 		
 		// edge case: One of the initial query image ids where not present on the current level and an alternative
 		// was stored in the queryIds array. This alternative is not in exploreResult but might pass the filter and
@@ -538,7 +537,7 @@ public class MapDesigner {
 			for (int id : exploreResult) 
 				result.add(calcMinDistance.apply(id));
 			
-			// add all the queries which a present on the current level, 
+			// add all the queries which are present on the current level, 
 			// pass the filter but where not in the original list of queries
 			final IntSet originalIds = HashIntSets.newImmutableSet(queryImageIds);
 			for (int id : queryIds) 

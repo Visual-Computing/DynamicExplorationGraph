@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.IntConsumer;
 import java.util.function.IntPredicate;
 
 import com.vc.deg.DynamicExplorationGraph;
@@ -334,8 +335,17 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 			}
 			
 			@Override
+			public float getInclusionRate() {
+				return Math.max(0, Math.min(1, ((float)size()) / graph.size()));
+			}
+			
+			@Override
 			public boolean isValid(int label) {
 				return labelToRank.get(label) == targetRank;
+			}
+			
+			@Override
+			public void forEachValidId(IntConsumer action) {
 			}
 		});
 	}

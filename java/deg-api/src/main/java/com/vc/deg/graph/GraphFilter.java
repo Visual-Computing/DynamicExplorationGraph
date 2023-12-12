@@ -1,5 +1,7 @@
 package com.vc.deg.graph;
 
+import java.util.function.IntConsumer;
+
 /**
  * A filter to check labels used in a search or exploration task
  * 
@@ -22,28 +24,17 @@ public interface GraphFilter {
 	 */
 	public int size();
 	
+	/**
+	 * Include rate
+	 * 
+	 * @return
+	 */
+	public float getInclusionRate();
 	
 	/**
-	 * This filter always return true when asked for validity
+	 * For each valid id in the filter the action called
 	 * 
-	 * @author Nico Hezel
+	 * @param action
 	 */
-	public static class AllValidFilter implements GraphFilter {
-		
-		protected final int size;
-		
-		public AllValidFilter(int size) {
-			this.size = size;
-		}
-		
-		@Override
-		public int size() {
-			return size;
-		}
-		
-		@Override
-		public boolean isValid(int label) {
-			return true;
-		}
-	};
+	public void forEachValidId(IntConsumer action);
 }
