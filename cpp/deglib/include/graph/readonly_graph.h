@@ -3,9 +3,7 @@
 #include <cstdint>
 #include <limits>
 #include <math.h>
-
-#include <fmt/core.h>
-#include <tsl/robin_map.h>
+#include <unordered_map>
 
 #include "deglib.h"
 #include "distances.h"
@@ -243,7 +241,7 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
   }
 
   // alignment of vertex information in bytes (all feature vectors will be 256bit aligned for faster SIMD processing)
-  static const uint8_t object_alignment = 16; 
+  static const uint8_t object_alignment = 32; // deglib::memory::L1_CACHE_LINE_SIZE; // 32; // no effect on modern hardware
 
   const uint32_t max_vertex_count_;
   const uint8_t edges_per_vertex_;
@@ -258,7 +256,7 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
   std::byte* vertices_memory_;
 
   // map from the label of a vertex to the internal vertex index
-  tsl::robin_map<uint32_t, uint32_t> label_to_index_;
+  std::unordered_map<uint32_t, uint32_t> label_to_index_;
 
   // internal search function with embedded distances function
   const SEARCHFUNC search_func_;
@@ -278,9 +276,8 @@ public:
         neighbor_indices_offset_(uint32_t(feature_space.get_data_size())), 
         external_label_offset_(neighbor_indices_offset_ + uint32_t(edges_per_vertex) * sizeof(uint32_t)), 
         vertices_(std::make_unique<std::byte[]>(size_t(max_vertex_count) * byte_size_per_vertex_ + object_alignment)), 
-        vertices_memory_(compute_aligned_pointer(vertices_, object_alignment)) { 
-
-        label_to_index_.reserve(max_vertex_count);
+        vertices_memory_(compute_aligned_pointer(vertices_, object_alignment)),
+        label_to_index_(max_vertex_count) { 
   }
 
   /**
@@ -294,9 +291,9 @@ public:
     for (uint32_t i = 0; i < max_vertex_count; i++) {
       auto vertex = reinterpret_cast<char*>(this->vertex_by_index(i));
       ifstream.read(vertex, vertex_without_external);                     // read the feature vector and neighbor indices
-      ifstream.ignore(uint32_t(edges_per_vertex) * sizeof(float));      // skip the weights
+      ifstream.ignore(uint32_t(edges_per_vertex) * sizeof(float));        // skip the weights
       ifstream.read(vertex + vertex_without_external, sizeof(uint32_t));  // read the external label
-      label_to_index_.insert(tsl::robin_map<uint32_t, uint32_t>::value_type(this->getExternalLabel(i), i));
+      label_to_index_.emplace(this->getExternalLabel(i), i);
     }
   }
 
@@ -390,7 +387,7 @@ public:
     auto next_vertices = deglib::search::UncheckedSet();
 
     // trackable information 
-    auto trackback = tsl::robin_map<uint32_t, deglib::search::ObjectDistance>();
+    auto trackback = std::unordered_map<uint32_t, deglib::search::ObjectDistance>();
 
     // result set
     auto results = deglib::search::ResultSet();   
@@ -404,7 +401,7 @@ public:
         const auto distance = dist_func(query, feature, dist_func_param);
         results.emplace(index, distance);
         next_vertices.emplace(index, distance);
-        trackback.insert({index, deglib::search::ObjectDistance(index, distance)});
+        trackback.emplace(index, deglib::search::ObjectDistance(index, distance));
       } 
     }
 
@@ -452,9 +449,9 @@ public:
       if (good_neighbor_count == 0)
         continue;
 
-      MemoryCache::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])));
+      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])));
       for (size_t i = 0; i < good_neighbor_count; i++) {
-        MemoryCache::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])));
+        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])));
 
         const auto neighbor_index = good_neighbors[i];
         const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
@@ -562,9 +559,9 @@ public:
       if (good_neighbor_count == 0)
         continue;
 
-      MemoryCache::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])));
+      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])));
       for (size_t i = 0; i < good_neighbor_count; i++) {
-        MemoryCache::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])));
+        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])));
 
         const auto neighbor_index = good_neighbors[i];
         const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
@@ -655,9 +652,9 @@ public:
       if (good_neighbor_count == 0)
         continue;
 
-      MemoryCache::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])));
+      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])));
       for (uint8_t i = 0; i < good_neighbor_count; i++) {
-        MemoryCache::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])));
+        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])));
 
         const auto neighbor_index = good_neighbors[i];
         const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
@@ -699,7 +696,7 @@ auto load_readonly_graph(const char* path_graph)
   auto file_size = std::filesystem::file_size(path_graph, ec);
   if (ec != std::error_code{})
   {
-    fmt::print(stderr, "error when accessing graph file {}, size is: {} message: {} \n", path_graph, file_size, ec.message());
+    std::fprintf(stderr, "error when accessing graph file %s, size is: %llu message: %s \n", path_graph, file_size, ec.message().c_str());
     perror("");
     abort();
   }
@@ -707,7 +704,7 @@ auto load_readonly_graph(const char* path_graph)
   auto ifstream = std::ifstream(path_graph, std::ios::binary);
   if (!ifstream.is_open())
   {
-    fmt::print(stderr, "could not open {}\n", path_graph);
+    std::fprintf(stderr, "could not open %s\n", path_graph);
     perror("");
     abort();
   }

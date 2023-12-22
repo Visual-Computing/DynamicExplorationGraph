@@ -8,9 +8,8 @@
 #include <span>
 #include <array>
 #include <atomic>
-
-#include <fmt/core.h>
-#include <tsl/robin_set.h>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "analysis.h"
 #include "graph.h"
@@ -156,10 +155,14 @@ class EvenRegularGraphBuilder {
 
       // graph should not contain a vertex with the same label
       if(graph.hasVertex(external_label)) {
-        fmt::print(stderr, "graph contains vertex {} already. can not add it again \n", external_label);
+        std::fprintf(stderr, "graph contains vertex %u already. can not add it again \n", external_label);
         perror("");
         abort();
       }
+
+      // for computing distances to neighbors not in the result queue
+      const auto dist_func = graph.getFeatureSpace().get_dist_func();
+      const auto dist_func_param = graph.getFeatureSpace().get_dist_func_param();
 
       // fully connect all vertices
       const auto new_vertex_feature = add_task.feature.data();
@@ -170,8 +173,6 @@ class EvenRegularGraphBuilder {
         const auto internal_index = graph.addVertex(external_label, new_vertex_feature);
 
         // connect the new vertex to all other vertices in the graph
-        const auto dist_func = graph.getFeatureSpace().get_dist_func();
-        const auto dist_func_param = graph.getFeatureSpace().get_dist_func_param();
         for (size_t i = 0; i < graph.size(); i++) {
           if(i != internal_index) {
             const auto dist = dist_func(new_vertex_feature, graph.getFeatureVector(i), dist_func_param);
@@ -191,17 +192,13 @@ class EvenRegularGraphBuilder {
 
       // their should always be enough neighbors (search results), otherwise the graph would be broken
       if(results.size() < edges_per_vertex) {
-        fmt::print(stderr, "the graph search for the new vertex {} did only provided {} results \n", external_label, results.size());
+        std::fprintf(stderr, "the graph search for the new vertex %u did only provided %u results \n", external_label, results.size());
         perror("");
         abort();
       }
 
       // add an empty vertex to the graph (no neighbor information yet)
       const auto internal_index = graph.addVertex(external_label, new_vertex_feature);
-
-      // for computing distances to neighbors not in the result queue
-      const auto dist_func = graph.getFeatureSpace().get_dist_func();
-      const auto dist_func_param = graph.getFeatureSpace().get_dist_func_param();
      
       // adding neighbors happens in two phases, the first tries to retain RNG, the second adds them without checking
       int check_rng_phase = 1; // 1 = activated, 2 = deactived
@@ -218,8 +215,9 @@ class EvenRegularGraphBuilder {
           if(graph.hasEdge(candidate_index, internal_index)) 
             continue;
 
-          // // does the candidate has a neighbor which is connected to the new vertex and has a lower distance?
+          // does the candidate has a neighbor which is connected to the new vertex and has a lower distance?
           if(check_rng_phase <= 1 && deglib::analysis::checkRNG(graph, edges_per_vertex, candidate_index, internal_index, candidate_weight) == false) 
+          // if(check_rng_phase <= 1 && deglib::analysis::checkRNG(graph, candidate_index, candidate_weight, new_neighbors) == false) 
             continue;
 
           // This version is good for high LID datasets or small graphs with low distance count limit during ANNS
@@ -268,7 +266,7 @@ class EvenRegularGraphBuilder {
       }
 
       if(new_neighbors.size() < edges_per_vertex) {
-        fmt::print(stderr, "could find only {} good neighbors for the new vertex {} need {}\n", new_neighbors.size(), internal_index, edges_per_vertex);
+        std::fprintf(stderr, "could find only %u good neighbors for the new vertex %u need %u\n", new_neighbors.size(), internal_index, edges_per_vertex);
         perror("");
         abort();
       }
@@ -287,7 +285,7 @@ class EvenRegularGraphBuilder {
       }
 
       // try to improve some of the non-perfect edges (not part of the range-search)
-      {
+      if(improve_k_ > 0) {
         auto nonperfect_neighbors = std::vector<std::pair<uint32_t, float>>();
         for (size_t i = 0; i < new_neighbors.size(); i++) {
           const auto& neighbor = new_neighbors[i];
@@ -338,13 +336,13 @@ class EvenRegularGraphBuilder {
       }
 
       // 2 find pairs or groups of vertices which can reach each other
-      auto reachability = tsl::robin_map<uint32_t, std::shared_ptr<tsl::robin_set<uint32_t>>>();
+      auto reachability = std::unordered_map<uint32_t, std::shared_ptr<std::unordered_set<uint32_t>>>();
   
       // 2.1 start with checking the adjacent neighbors of the involved vertices
       for (auto&& involved_index : involved_indices) {
         auto it = reachability.find(involved_index);
         if (it == reachability.end())
-          it = reachability.emplace(involved_index, std::make_shared<tsl::robin_set<uint32_t>>(tsl::robin_set<uint32_t> { involved_index })).first;
+          it = reachability.emplace(involved_index, std::make_shared<std::unordered_set<uint32_t>>(std::unordered_set<uint32_t> { involved_index })).first;
 
         // is any of the adjacent neighbors of involved_index also in the sorted array of involved_indices
         auto reachable_indices_ptr = it->second;
@@ -375,11 +373,11 @@ class EvenRegularGraphBuilder {
   
       // 2.2 use graph.hasPath(...) to find a path for every not paired but involved vertex, to any other involved vertex 
       for (auto vertex_reachability = reachability.begin(); vertex_reachability != reachability.end(); ++vertex_reachability) {
-        const auto involved_index = vertex_reachability.key();
+        const auto involved_index = vertex_reachability->first;
 
         // during 2.1 each vertex got a set of reachable vertices with at least one entry (the vertex itself)
 				// all vertices containing only one element still need to find one other reachable vertex 
-				if(vertex_reachability.value().get()->size() <= 1) {
+				if(vertex_reachability->second.get()->size() <= 1) {
 
           // is there a path from any of the other involved_indices to the lonely vertex?
           auto from_indices = std::vector<uint32_t>();
@@ -396,7 +394,7 @@ class EvenRegularGraphBuilder {
 
           // add the involved_index to its reachable set and replace the reachable set of the involved_index 
           reachable_indices_of_reachable_index_ptr.get()->insert(involved_index);
-          vertex_reachability.value() = reachable_indices_of_reachable_index_ptr;
+          vertex_reachability->second = reachable_indices_of_reachable_index_ptr;
         }
       }
 
@@ -408,14 +406,14 @@ class EvenRegularGraphBuilder {
         const auto dist_func_param = feature_space.get_dist_func_param();
 
         // 3.1 get all unique groups of reachable vertex indices
-        auto unique_reachable_groups = std::vector<tsl::robin_set<uint32_t>>();
+        auto unique_reachable_groups = std::vector<std::unordered_set<uint32_t>>();
         {
-          auto reachable_groups = std::vector<std::shared_ptr<tsl::robin_set<uint32_t>>>();
+          auto reachable_groups = std::vector<std::shared_ptr<std::unordered_set<uint32_t>>>();
           reachable_groups.reserve(reachability.size());
           for (const auto& reachable_vertex : reachability) 
             reachable_groups.push_back(reachable_vertex.second);
 
-          auto unique_groups = std::vector<std::shared_ptr<tsl::robin_set<uint32_t>>>();
+          auto unique_groups = std::vector<std::shared_ptr<std::unordered_set<uint32_t>>>();
           unique_groups.reserve(reachability.size());
           std::unique_copy(reachable_groups.begin(), reachable_groups.end(), std::back_inserter(unique_groups));
 
@@ -429,7 +427,7 @@ class EvenRegularGraphBuilder {
         if(unique_reachable_groups.size() > 1) {
 
           // Define a custom comparison function based on the size of the sets
-          auto compareBySize = [](const tsl::robin_set<uint32_t>& a, const tsl::robin_set<uint32_t>& b) {
+          auto compareBySize = [](const std::unordered_set<uint32_t>& a, const std::unordered_set<uint32_t>& b) {
               return a.size() < b.size();
           };
 
@@ -441,8 +439,8 @@ class EvenRegularGraphBuilder {
             const auto reachable_group = unique_reachable_groups[g];
 
             // iterate over all its entries to find a vertex which is still missing an edge
-            next_vertex: for(auto it = reachable_group.begin(); it != reachable_group.end() && n < unique_reachable_groups.size(); ++it) {
-              const auto reachable_index = it.key();
+            next_vertex: for(auto it = reachable_group.cbegin(); it != reachable_group.cend() && n < unique_reachable_groups.size(); ++it) {
+              const auto reachable_index = (*it);
 
               // has reachable_index still an self-reference?
               if(graph.hasEdge(reachable_index, reachable_index)) {
@@ -588,11 +586,7 @@ class EvenRegularGraphBuilder {
     bool improveEdges(std::vector<deglib::builder::BuilderChange>& changes, uint32_t vertex1, uint32_t vertex2, uint32_t vertex3, uint32_t vertex4, float total_gain, const uint8_t steps) {
       auto& graph = this->graph_;
       const auto edges_per_vertex = graph.getEdgesPerVertex();
-
-      // the settings are the same for the first two iterations
-      const auto search_eps = this->improve_eps_; 
-      const auto search_k = this->improve_k_;
-
+      
       {
         // 1. Find an edge for vertex2 which connects to the subgraph of vertex3 and vertex4. 
         //    Consider only vertices of the approximate nearest neighbor search. Since the 
@@ -700,7 +694,6 @@ class EvenRegularGraphBuilder {
                 // ignore edges where the second vertex is already connect to vertex4
                 if(vertex4 != selected_neighbor && graph.hasEdge(vertex4, selected_neighbor) == false) {
                   const auto factor = 1;
-                  // const auto factor = deglib::analysis::checkRNG(graph, edges_per_vertex, good_vertex, selected_neighbor, neighbor_weights[i]) ? 1.0f : rng_factor_;
                   const auto old_neighbor_dist = neighbor_weights[i];
                   const auto new_neighbor_dist = dist_func(vertex4_feature, graph.getFeatureVector(selected_neighbor), dist_func_param);
 

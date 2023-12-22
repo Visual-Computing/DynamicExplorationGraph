@@ -5,10 +5,7 @@
 #include <queue>
 #include <math.h>
 #include <filesystem>
-
-#include <fmt/core.h>
-#include <tsl/robin_hash.h>
-#include <tsl/robin_map.h>
+#include <unordered_map>
 
 #include "graph.h"
 #include "repository.h"
@@ -245,7 +242,7 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
   }
 
   // alignment of vertex information in bytes (all feature vectors will be 256bit aligned for faster SIMD processing)
-  static const uint8_t object_alignment = 32; 
+  static const uint8_t object_alignment = 32; // deglib::memory::L1_CACHE_LINE_SIZE; // 32; // no effect on modern hardware
 
   const uint32_t max_vertex_count_;
   const uint8_t edges_per_vertex_;
@@ -261,7 +258,7 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
   std::byte* vertices_memory_;
 
   // map from the label of a vertex to the internal vertex index
-  tsl::robin_map<uint32_t, uint32_t> label_to_index_;
+  std::unordered_map<uint32_t, uint32_t> label_to_index_;
 
   // internal search function with embedded distances function
   const SEARCHFUNC search_func_;
@@ -400,7 +397,7 @@ public:
     // check open file for write
     auto out = std::ofstream(path_to_graph, std::ios::out | std::ios::binary);
     if (!out.is_open()) {
-      fmt::print(stderr, "Error in open file {}\n", path_to_graph);
+      std::fprintf(stderr, "Error in open file %s\n", path_to_graph);
       return false;
     }
 
@@ -539,7 +536,7 @@ public:
     auto next_vertices = deglib::search::UncheckedSet();
 
     // trackable information 
-    auto trackback = tsl::robin_map<uint32_t, deglib::search::ObjectDistance>();
+    auto trackback = std::unordered_map<uint32_t, deglib::search::ObjectDistance>();
 
     // result set
     auto results = deglib::search::ResultSet();   
@@ -552,7 +549,7 @@ public:
       const auto distance = dist_func(query, feature, dist_func_param);
       results.emplace(index, distance);
       next_vertices.emplace(index, distance);
-      trackback.insert({index, deglib::search::ObjectDistance(index, distance)});
+      trackback.emplace(index, deglib::search::ObjectDistance(index, distance));
     }
 
     // search radius
@@ -600,9 +597,9 @@ public:
       if (good_neighbor_count == 0)
         continue;
 
-      MemoryCache::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])));
+      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])));
       for (size_t i = 0; i < good_neighbor_count; i++) {
-        MemoryCache::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])));
+        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])));
 
         const auto neighbor_index = good_neighbors[i];
         const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
@@ -712,9 +709,9 @@ public:
       if (good_neighbor_count == 0)
         continue;
 
-      MemoryCache::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])));
+      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])));
       for (size_t i = 0; i < good_neighbor_count; i++) {
-        MemoryCache::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])));
+        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])));
 
         const auto neighbor_index = good_neighbors[i];
         const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
@@ -816,8 +813,8 @@ public:
       {
         const auto neighbor_indices = this->neighbors_by_index(next_vertex.getInternalIndex());
         const auto neighbor_weights = this->weights_by_index(next_vertex.getInternalIndex());
-        MemoryCache::prefetch(reinterpret_cast<const char*>(neighbor_indices));
-        MemoryCache::prefetch(reinterpret_cast<const char*>(neighbor_weights));
+        memory::prefetch(reinterpret_cast<const char*>(neighbor_indices));
+        memory::prefetch(reinterpret_cast<const char*>(neighbor_weights));
         for (uint8_t i = 0; i < this->edges_per_vertex_; i++) {
           const auto neighbor_index = neighbor_indices[i];
 
@@ -835,9 +832,9 @@ public:
       if (good_neighbor_count == 0)
         continue;
 
-      MemoryCache::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])));
+      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])));
       for (uint8_t i = 0; i < good_neighbor_count; i++) {
-        MemoryCache::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])));
+        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])));
 
         const auto neighbor_index = good_neighbors[i];
         const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
@@ -877,7 +874,7 @@ auto load_sizebounded_graph(const char* path_graph, uint32_t new_max_size = 0)
   auto file_size = std::filesystem::file_size(path_graph, ec);
   if (ec != std::error_code{})
   {
-    fmt::print(stderr, "error when accessing test file, size is: {} message: {} \n", file_size, ec.message());
+    std::fprintf(stderr, "error when accessing test file, size is: %llu message: %s \n", file_size, ec.message().c_str());
     perror("");
     abort();
   }
@@ -885,7 +882,7 @@ auto load_sizebounded_graph(const char* path_graph, uint32_t new_max_size = 0)
   auto ifstream = std::ifstream(path_graph, std::ios::binary);
   if (!ifstream.is_open())
   {
-    fmt::print(stderr, "could not open {}\n", path_graph);
+    std::fprintf(stderr, "could not open %s\n", path_graph);
     perror("");
     abort();
   }
@@ -909,7 +906,7 @@ auto load_sizebounded_graph(const char* path_graph, uint32_t new_max_size = 0)
   
   // if there is a max size is should be higher than the needed graph size from disk
   if(new_max_size < size) {
-    fmt::print(stderr, "The graph in the {} file has {} vertices but the new max size is {}\n", path_graph, size, new_max_size);
+    std::fprintf(stderr, "The graph in the %s file has %u vertices but the new max size is %u\n", path_graph, size, new_max_size);
     perror("");
     abort();
   }

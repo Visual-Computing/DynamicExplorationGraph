@@ -37,19 +37,3 @@
     #include <x86intrin.h>
   #endif
 #endif
-
-//#ifdef _WINDOWS
-//  #include <malloc.h>
-//#else
-//  #include <alloca.h>
-//#endif
-//#define vla(dtype, size) static_cast<type*>(alloca(sizeof(dtype) * size))
-
-#ifdef _WINDOWS
-  #include <malloc.h>  
-  #define vla(var_name, dtype, size) auto var_name = (dtype*) _malloca(size*sizeof(dtype));
-  #define free_vla(arr) _freea(arr);
-#else
-  #define vla(var_name, dtype, size) dtype var_name[size];
-  #define free_vla(arr) 
-#endif

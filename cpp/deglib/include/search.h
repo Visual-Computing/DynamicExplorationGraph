@@ -109,8 +109,6 @@ class SearchGraph
       return std::vector<uint32_t> { getInternalIndex(0) };
     }
 
-    //virtual const bool saveGraph(const char* path_to_graph) const = 0;
-
     /**
      * Perform a search but stops when the to_vertex was found.
      */

@@ -1,11 +1,8 @@
 #pragma once
 
 #include <assert.h>
-#include <fmt/core.h>
-#include <fmt/format.h>
-#include <fmt/ranges.h>
 #include <stdio.h>
-#include <tsl/robin_map.h>
+#include <unordered_map>
 
 #include <filesystem>
 #include <fstream>
@@ -56,7 +53,7 @@ class DynamicFeatureRepository : public FeatureRepository
 {
   public:
     DynamicFeatureRepository(std::unique_ptr<float[]> contiguous_features,
-                             tsl::robin_map<uint32_t, const float*> features, const size_t dims)
+                             std::unordered_map<uint32_t, const float*> features, const size_t dims)
         : contiguous_features_{std::move(contiguous_features)}, features_{std::move(features)}, dims_{dims}
     {
     }
@@ -85,7 +82,7 @@ class DynamicFeatureRepository : public FeatureRepository
   private:
     const size_t dims_;
     std::unique_ptr<float[]> contiguous_features_;
-    tsl::robin_map<uint32_t, const float*> features_;
+    std::unordered_map<uint32_t, const float*> features_;
 };
 
 /*****************************************************
@@ -100,7 +97,7 @@ auto fvecs_read(const char* fname, size_t& d_out, size_t& n_out)
     auto file_size = std::filesystem::file_size(fname, ec);
     if (ec != std::error_code{})
     {
-        fmt::print(stderr, "error when accessing file {}, size is: {} message: {} \n", fname, file_size, ec.message());
+        std::fprintf(stderr, "error when accessing file %s, size is: %llu message: %s \n", fname, file_size, ec.message().c_str());
         perror("");
         abort();
     }
@@ -108,7 +105,7 @@ auto fvecs_read(const char* fname, size_t& d_out, size_t& n_out)
     auto ifstream = std::ifstream(fname, std::ios::binary);
     if (!ifstream.is_open())
     {
-        fmt::print(stderr, "could not open {}\n", fname);
+        std::fprintf(stderr, "could not open %s\n", fname);
         perror("");
         abort();
     }
@@ -117,7 +114,7 @@ auto fvecs_read(const char* fname, size_t& d_out, size_t& n_out)
     ifstream.read(reinterpret_cast<char*>(&dims), sizeof(int));
     assert((dims > 0 && dims < 1000000) || !"unreasonable dimension");
     assert(file_size % ((dims + 1) * 4) == 0 || !"weird file size");
-    size_t n = file_size / ((dims + 1) * 4);
+    size_t n = (size_t)file_size / ((dims + 1) * 4);
 
     d_out = dims;
     n_out = n;
@@ -156,7 +153,7 @@ DynamicFeatureRepository load_repository(const char* path_repository)
     auto contiguous_features = fvecs_read(path_repository, dims, count);
 
     // TODO use shared_ptr in the map
-    auto feature_map = tsl::robin_map<uint32_t, const float*>(count);
+    auto feature_map = std::unordered_map<uint32_t, const float*>(count);
     for (uint32_t i = 0; i < count; i++)
     {
         feature_map[i] = &contiguous_features[i * dims];

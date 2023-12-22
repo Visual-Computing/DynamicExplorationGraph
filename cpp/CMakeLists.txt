@@ -64,7 +64,6 @@ message("C++ compiler flags: ${CMAKE_CXX_FLAGS}")
 message("C++ compiler flags release: ${CMAKE_CXX_FLAGS_RELEASE}")
 
 add_subdirectory(external/fmt)
-add_subdirectory(external/robin-map)
 
 add_subdirectory(deglib)
 add_subdirectory(benchmark)
