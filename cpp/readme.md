@@ -59,7 +59,7 @@ Refinement Parameters:
 | Audio     |  20   |  0.001  |   5   |    20,000  |
 | Deep1M    |  30   |  0.001  |   5   |   400,000  |
 | SIFT1M    |  30   |  0.001  |   5   |   200,000  |
-| GloVe-100 |  30   |  0.001  |   5   |   400,000  |
+| GloVe-100 |  30   |  0.001  |   5   | 2,000,000  |
 
 
 ## Pre-build continuous refining Exploration Graph 
@@ -67,7 +67,7 @@ Refinement Parameters:
 The provided continuous refining Exploration Graph are used in the experiments section of our paper.
 
 |  Dataset  |  EG  |  crEG  |
-|:---------:|:---:|
+|:---------:|:----:|:------:|
 | Audio     | [audio_192D_L2_EG20.deg](https://static.visual-computing.com/paper/DEG/audio_192D_L2_EG20.deg.gz) | [audio_192D_L2_crEG20.deg](https://static.visual-computing.com/paper/DEG/audio_192D_L2_crEG20.deg.gz) |
 | Deep1M    | [deep1m_96D_L2_EG30.deg](https://static.visual-computing.com/paper/DEG/deep1m_96D_L2_EG30.deg.gz) | [deep1m_96D_L2_crEG30.deg](https://static.visual-computing.com/paper/DEG/deep1m_96D_L2_crEG30.deg.gz) |
 | SIFT1M    | [sift_128D_L2_EG30.deg](https://static.visual-computing.com/paper/DEG/sift_128D_L2_EG30.deg.gz) | [sift_128D_L2_crEG30.deg](https://static.visual-computing.com/paper/DEG/sift_128D_L2_crEG30.deg.gz) |
