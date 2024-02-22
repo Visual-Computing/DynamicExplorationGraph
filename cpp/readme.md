@@ -1,7 +1,6 @@
-# deglib: C++ library of the Dynamic Exploration Graph
+# crEG: C++ library of the continuous refining Exploration Graph 
 
-Header only C++ library of the Dynamic Exploration Graph (DEG) used in the paper:
-[Fast Approximate Nearest Neighbor Search with a Dynamic Exploration Graph using Continuous Refinement](https://arxiv.org/abs/2307.10479)
+Header only C++ library of the continuous refining Exploration Graph.
 
 ## How to use
 
@@ -33,8 +32,8 @@ sudo update-alternatives --config gcc
 After cloning the git repository, rename `cmake-variants.sample.yaml` to `cmake-variants.yaml` and change the `DATA_PATH` variable inside of the file to represent a directory where the dataset is located.
 
 ```
-git clone --recurse-submodules https://github.com/Visual-Computing/DynamicExplorationGraph.git
-cd DynamicExplorationGraph/cpp/
+git clone --recurse-submodules https://github.com/Visual-Computing/DynamicExplorationGraph.git ExplorationGraph
+cd ExplorationGraph/cpp/
 mkdir build/ && cd build/
 cmake -DCMAKE_BUIKD_TYPE=Release ..
 make -j
@@ -44,23 +43,33 @@ make -j
 
 To create a new graph, modify and run the `/benchmark/src/deglib_build_benchmark.cpp` file. Existing graphs can be tested with `/benchmark/src/deglib_anns_benchmark.cpp` and `/benchmark/src/deglib_explore_benchmark.cpp`.
 
-Parameters:
+Construction Parameters:
 
-|  Dataset  |  d  | k_ext | eps_ext | k_opt | eps_opt | i_opt |
-|:---------:|:---:|:------:|:------:|:-----:|:-------:|:-----:|
-| Audio     | 20  |  40   |   0.3   |  20   |  0.001  |   5   |
-| Enron     | 30  |  60   |   0.3   |  30   |  0.001  |   5   |
-| SIFT1M    | 30  |  60   |   0.2   |  30   |  0.001  |   5   |
-| GloVe-100 | 30  |  30   |   0.2   |  30   |  0.001  |   5   |
+|  Dataset  |  d  | k_ext | eps_ext | scheme |
+|:---------:|:---:|:------:|:------:|:------:|
+| Audio     | 20  |  40   |   0.1   |    D   |
+| Deep1M    | 30  |  60   |   0.1   |    D   |
+| SIFT1M    | 30  |  60   |   0.1   |    D   |
+| GloVe-100 | 30  |  60   |   0.1   |    C   |
 
-## Pre-build Dynamic Exploration Graphs
+Refinement Parameters:
 
-The provided Dynamic Exploration Graphs are used in the experiments section of our paper.
+|  Dataset  | k_opt | eps_opt | i_opt | iterations |
+|:---------:|:-----:|:-------:|:-----:|:----------:|
+| Audio     |  20   |  0.001  |   5   |    20,000  |
+| Deep1M    |  30   |  0.001  |   5   |   400,000  |
+| SIFT1M    |  30   |  0.001  |   5   |   200,000  |
+| GloVe-100 |  30   |  0.001  |   5   |   400,000  |
 
-|  Dataset  |  DEG  |
+
+## Pre-build continuous refining Exploration Graph 
+
+The provided continuous refining Exploration Graph are used in the experiments section of our paper.
+
+|  Dataset  |  EG  |  crEG  |
 |:---------:|:---:|
-| Audio     | [audio_192D_L2_DEG20.deg](https://static.visual-computing.com/paper/DEG/audio_192D_L2_DEG20.deg.gz) |
-| Enron     | [enron_1369D_L2_DEG30.deg](https://static.visual-computing.com/paper/DEG/enron_1369D_L2_DEG30.deg.gz) |
-| SIFT1M    | [sift_128D_L2_DEG30.deg](https://static.visual-computing.com/paper/DEG/sift_128D_L2_DEG30.deg.gz) |
-| GloVe-100 | [glove_100D_L2_DEG30.deg](https://static.visual-computing.com/paper/DEG/glove_100D_L2_DEG30.deg.gz) |
+| Audio     | [audio_192D_L2_EG20.deg](https://static.visual-computing.com/paper/DEG/audio_192D_L2_EG20.deg.gz) | [audio_192D_L2_crEG20.deg](https://static.visual-computing.com/paper/DEG/audio_192D_L2_crEG20.deg.gz) |
+| Deep1M    | [deep1m_96D_L2_EG30.deg](https://static.visual-computing.com/paper/DEG/deep1m_96D_L2_EG30.deg.gz) | [deep1m_96D_L2_crEG30.deg](https://static.visual-computing.com/paper/DEG/deep1m_96D_L2_crEG30.deg.gz) |
+| SIFT1M    | [sift_128D_L2_EG30.deg](https://static.visual-computing.com/paper/DEG/sift_128D_L2_EG30.deg.gz) | [sift_128D_L2_crEG30.deg](https://static.visual-computing.com/paper/DEG/sift_128D_L2_crEG30.deg.gz) |
+| GloVe-100 | [glove_100D_L2_EG30.deg](https://static.visual-computing.com/paper/DEG/glove_100D_L2_EG30.deg.gz) | [glove_100D_L2_crEG30.deg](https://static.visual-computing.com/paper/DEG/glove_100D_L2_crEG30.deg.gz) |
 

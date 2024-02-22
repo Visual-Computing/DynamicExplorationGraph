@@ -1,7 +1,6 @@
-# DEG: Fast Approximate nearest neighbor search with the Dynamic Exploration Graph using continuous refinement
+# crEG: An Exploration Graph with Continuous Refinement for Efficient Multimedia Retrieval
 
-The Dynamic Exploration Graph (DEG) is a graph-based approximate nearest neighbor search (ANNS) algorithm. It can index static and dynamic data set using an incremental extension, a continuous edge optimization and a deletion algorithm. The resulting graph is highly efficient in regards to the queries per seconds in relation to the received recall rate. DEG delivers state-of-the-art performance for indexed and unindexed queries (query is not part of the index). For more details please refere to our paper:
-[Fast Approximate nearest neighbor search with the Dynamic Exploration Graph using continuous refinement](https://arxiv.org/abs/2307.10479)
+The continuous refining Exploration Graph (crEG) is a graph-based approximate nearest neighbor search (ANNS) algorithm. It can index static data set using an incremental extension, a continuous edge optimization. The resulting graph is highly efficient in regards to the queries per seconds in relation to the received recall rate. crEG delivers state-of-the-art performance for indexed and unindexed queries (query is not part of the index). 
 
 ## Benchmark datasets incl. exploration queries
 
@@ -9,6 +8,7 @@ The Dynamic Exploration Graph (DEG) is a graph-based approximate nearest neighbo
 |-----------|--------------------------|-----------|-----------------|------------------|----------------------------------------------------------------|
 | Audio    |[audio.tar.gz](https://static.visual-computing.com/paper/DEG/audio.tar.gz)| 192       | 53,387       | 200           | [original website](https://www.cs.princeton.edu/cass/)             |
 | Enron    |[enron.tar.gz](https://static.visual-computing.com/paper/DEG/enron.tar.gz)| 1369       | 94,987       | 200           | [original website](https://www.cs.cmu.edu/~enron/)             |
+| Deep1M    |[deep1m.tar.gz](https://static.visual-computing.com/paper/DEG/deep1m.tar.gz)| 96       | 1,000,000       | 10,000           | [original website](https://research.yandex.com/blog/benchmarks-for-billion-scale-similarity-search)             |
 | SIFT1M    |[sift.tar.gz](https://static.visual-computing.com/paper/DEG/sift.tar.gz)| 128       | 1,000,000       | 10,000           | [original website](http://corpus-texmex.irisa.fr/)             |
 | GloVe-100 | [glove-100.tar.gz](https://static.visual-computing.com/paper/DEG/glove-100.tar.gz) | 100       | 1,183,514       | 10,000           | [original website](https://nlp.stanford.edu/projects/glove/)   |
 
@@ -21,8 +21,16 @@ In order to reproduce our results please checkout the `\cpp\` directory and its 
 **Approximate Nearest Neighbor Search**
 ![ANNS](figures/anns_qps_vs_recall.jpg)
 
-**Exploratory Search (indexed queries)**
+**Exploratory Search (indexed queries and ideal start seed of for the graph search)**
 ![Exploration](figures/exploration_qps_vs_recall.jpg)
+
+**Statistics of the graphs used in the experiments**
+![Exploration](figures/indexing_stats.jpg)
+
+
+## Reproduction
+
+Please visit the cpp directory for more information about the parameters settings of the graphs and how to reproduce the crEG values.
 
 ## Reference
 
