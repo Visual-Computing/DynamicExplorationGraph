@@ -41,7 +41,7 @@ make -j
 
 ### Reproduce our results
 
-To create a new graph, modify and run the `/benchmark/src/deglib_build_benchmark.cpp` file. Existing graphs can be tested with `/benchmark/src/deglib_anns_benchmark.cpp` and `/benchmark/src/deglib_explore_benchmark.cpp`.
+To create a new graph, modify and run the `/benchmark/src/deglib_build_bench.cpp` file. Existing graphs can be tested with `/benchmark/src/deglib_anns_bench.cpp` and `/benchmark/src/deglib_explore_bench.cpp`.
 
 Construction Parameters:
 

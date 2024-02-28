@@ -13,7 +13,7 @@ The continuous refining Exploration Graph (crEG) is a graph-based approximate ne
 
 ## Performance
 
-In order to reproduce our results please checkout the `\cpp\` directory and its readme file. For the four data set above DEG delievered the best ANNS and exploration efficiency amoung all the tested graph-based algorithms.
+In order to reproduce our results please checkout the `\cpp\` directory and its readme file. For the four data set above crEG delievered the best ANNS and exploration efficiency amoung all the tested graph-based algorithms.
 
 ***NOTE:** All experiments where conduced single threaded on a Ryzen 2700x CPU, operating at a constant core clock speed of 4GHz, and 64GB of DDR4 memory running at 2133MHz.
 
