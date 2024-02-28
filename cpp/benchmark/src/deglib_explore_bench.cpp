@@ -23,22 +23,22 @@ int main(int argc, char *argv[]) {
     const uint32_t k = 1000; 
 
     // ------------------------------------------ SIFT1M ---------------------------------------------
-    const auto graph_file               = (data_path / "deg" / "best_distortion_decisions" / "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string(); 
+    const auto graph_file               = (data_path / "crEG" / "sift_128D_L2_crEG30.deg").string(); 
     const auto gt_file   = (data_path / "SIFT1M" / "sift_explore_ground_truth.ivecs").string();
     const auto query_file        = (data_path / "SIFT1M" / "sift_explore_entry_vertex.ivecs").string();
 
     // ------------------------------------------ Glove ---------------------------------------------
-    // const auto graph_file               = (data_path / "deg" / "100D_L2_K30_AddK30Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string(); 
+    // const auto graph_file               = (data_path / "crEG" / "glove_100D_L2_crEG30.deg").string(); 
     // const auto gt_file   = (data_path / "glove-100" / "glove-100_explore_ground_truth.ivecs").string();
     // const auto query_file        = (data_path / "glove-100" / "glove-100_explore_entry_vertex.ivecs").string();
 
-    // ------------------------------------------ Enron ---------------------------------------------
-    // const auto graph_file               = (data_path / "deg" / "1369D_L2_K30_AddK60Eps0.3High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string(); 
-    // const auto gt_file   = (data_path / "enron" / "enron_explore_ground_truth.ivecs").string();
-    // const auto query_file        = (data_path / "enron" / "enron_explore_entry_vertex.ivecs").string();
+    // ------------------------------------------ Deep1M ---------------------------------------------
+    // const auto graph_file               = (data_path / "crEG" / "deep1m_96D_L2_crEG30.deg").string(); 
+    // const auto gt_file   = (data_path / "deep1m" / "deep1m_explore_ground_truth.ivecs").string();
+    // const auto query_file        = (data_path / "deep1m" / "deep1m_explore_entry_vertex.ivecs").string();
 
     // ------------------------------------------ Audio ---------------------------------------------
-    // const auto graph_file               = (data_path / "deg" / "192D_L2_K20_AddK40Eps0.3High_SwapK20-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string(); 
+    // const auto graph_file               = (data_path / "crEG" / "audio_192D_L2_crEG20.deg").string(); 
     // const auto gt_file   = (data_path / "audio" / "audio_explore_ground_truth.ivecs").string();
     // const auto query_file        = (data_path / "audio" / "audio_explore_entry_vertex.ivecs").string();
     

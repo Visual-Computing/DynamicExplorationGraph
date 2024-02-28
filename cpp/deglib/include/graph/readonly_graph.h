@@ -241,7 +241,7 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
   }
 
   // alignment of vertex information in bytes (all feature vectors will be 256bit aligned for faster SIMD processing)
-  static const uint8_t object_alignment = 32; // deglib::memory::L1_CACHE_LINE_SIZE; // 32; // no effect on modern hardware
+  static const uint8_t object_alignment = 16; // deglib::memory::L1_CACHE_LINE_SIZE; // 32; // no effect on modern hardware
 
   const uint32_t max_vertex_count_;
   const uint8_t edges_per_vertex_;
@@ -276,8 +276,9 @@ public:
         neighbor_indices_offset_(uint32_t(feature_space.get_data_size())), 
         external_label_offset_(neighbor_indices_offset_ + uint32_t(edges_per_vertex) * sizeof(uint32_t)), 
         vertices_(std::make_unique<std::byte[]>(size_t(max_vertex_count) * byte_size_per_vertex_ + object_alignment)), 
-        vertices_memory_(compute_aligned_pointer(vertices_, object_alignment)),
-        label_to_index_(max_vertex_count) { 
+        vertices_memory_(compute_aligned_pointer(vertices_, object_alignment)) { 
+
+    label_to_index_.reserve(max_vertex_count);
   }
 
   /**
@@ -325,7 +326,7 @@ public:
     
 private:  
   inline std::byte* vertex_by_index(const uint32_t internal_idx) const {
-    return vertices_memory_ + internal_idx * byte_size_per_vertex_;
+    return vertices_memory_ + size_t(internal_idx) * byte_size_per_vertex_;
   }
 
   inline const uint32_t label_by_index(const uint32_t internal_idx) const {

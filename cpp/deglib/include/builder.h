@@ -64,6 +64,7 @@ class EvenRegularGraphBuilder {
 
     const uint8_t extend_k_;            // k value for extending the graph
     const float extend_eps_;            // eps value for extending the graph
+    const bool schemeC_;
     const uint8_t improve_k_;           // k value for improving the graph
     const float improve_eps_;           // eps value for improving the graph
     const uint8_t max_path_length_;     // max amount of changes before canceling an improvement try
@@ -83,17 +84,17 @@ class EvenRegularGraphBuilder {
   public:
 
     EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, 
-                            const uint8_t extend_k, const float extend_eps,  
+                            const uint8_t extend_k, const float extend_eps, const bool schemeC, 
                             const uint8_t improve_k, const float improve_eps, 
                             const uint8_t max_path_length = 10, const uint32_t swap_tries = 3, const uint32_t additional_swap_tries = 3) 
-      : graph_(graph), rnd_(rnd), extend_k_(extend_k), extend_eps_(extend_eps),  
+      : graph_(graph), rnd_(rnd), extend_k_(extend_k), extend_eps_(extend_eps), schemeC_(schemeC),
         improve_k_(improve_k), improve_eps_(improve_eps), 
         max_path_length_(max_path_length), swap_tries_(swap_tries), additional_swap_tries_(additional_swap_tries) {
     }
 
     EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, const uint32_t swaps) 
       : EvenRegularGraphBuilder(graph, rnd, 
-                                graph.getEdgesPerVertex(), 0.2f, 
+                                graph.getEdgesPerVertex(), 0.2f, false,
                                 graph.getEdgesPerVertex(), 0.001f, 
                                 5, swaps, swaps) {
     }
@@ -217,13 +218,12 @@ class EvenRegularGraphBuilder {
 
           // does the candidate has a neighbor which is connected to the new vertex and has a lower distance?
           if(check_rng_phase <= 1 && deglib::analysis::checkRNG(graph, edges_per_vertex, candidate_index, internal_index, candidate_weight) == false) 
-          // if(check_rng_phase <= 1 && deglib::analysis::checkRNG(graph, candidate_index, candidate_weight, new_neighbors) == false) 
             continue;
 
           // This version is good for high LID datasets or small graphs with low distance count limit during ANNS
           uint32_t new_neighbor_index = 0;
           float new_neighbor_distance = -1;
-          {
+          if(schemeC_) {
 
             // find the worst edge of the new neighbor
             float new_neighbor_weight = -1;
@@ -252,6 +252,31 @@ class EvenRegularGraphBuilder {
 
             new_neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(new_neighbor_index), dist_func_param); 
           }
+          else
+          {
+            // find the edge which improves the distortion the most: (distance_new_edge1 + distance_new_edge2) - distance_removed_edge       
+            float best_distortion = std::numeric_limits<float>::max();
+            const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
+            const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
+            for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
+              const auto neighbor_index = neighbor_indices[edge_idx];
+              if(graph.hasEdge(neighbor_index, internal_index) == false) {
+                const auto neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(neighbor_index), dist_func_param);
+
+                // take the neighbor with the best distance to the new vertex, which might already be in its edge list
+                float distortion = (candidate_weight + neighbor_distance) - neighbor_weights[edge_idx];   // version D in the paper
+                if(distortion < best_distortion) {
+                  best_distortion = distortion;
+                  new_neighbor_index = neighbor_index;
+                  new_neighbor_distance = neighbor_distance;
+                }          
+              }
+            }
+          }
+
+          // this should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
+          if(new_neighbor_distance == -1) 
+            continue;
 
           // place the new vertex in the edge list of the result-vertex
           graph.changeEdge(candidate_index, new_neighbor_index, internal_index, candidate_weight);
@@ -282,34 +307,6 @@ class EvenRegularGraphBuilder {
           neighbor_weights[i] = neighbor.second;
         }
         graph.changeEdges(internal_index, neighbor_indices.data(), neighbor_weights.data());  
-      }
-
-      // try to improve some of the non-perfect edges (not part of the range-search)
-      if(improve_k_ > 0) {
-        auto nonperfect_neighbors = std::vector<std::pair<uint32_t, float>>();
-        for (size_t i = 0; i < new_neighbors.size(); i++) {
-          const auto& neighbor = new_neighbors[i];
-
-          // was the new neighbor found by the range-search or is just a neighbor of a neighbor
-          bool perfect = false;
-          for (size_t r = 0; r < results.size(); r++) {
-            const auto& result = results[r];
-            if(result.getInternalIndex() == neighbor.first) {
-              perfect = true;
-              break;
-            }
-          } 
-
-          if(perfect == false && graph.hasEdge(internal_index, neighbor.first)) 
-            nonperfect_neighbors.emplace_back(neighbor.first, neighbor.second);
-        }
-
-        std::sort(nonperfect_neighbors.begin(), nonperfect_neighbors.end(), [](const auto& x, const auto& y){return x.second < y.second;}); // low to high
-        for (size_t i = 0; i < nonperfect_neighbors.size(); i++) {
-          if(graph.hasEdge(internal_index, nonperfect_neighbors[i].first) && (i % 2 == 0)) { 
-            improveEdges(internal_index, nonperfect_neighbors[i].first, nonperfect_neighbors[i].second); 
-          }
-        }
       }
     }
 
@@ -791,33 +788,21 @@ class EvenRegularGraphBuilder {
       auto& graph = this->graph_;
       const auto edges_per_vertex = graph.getEdgesPerVertex();
 
-      // 1. remove the worst edge of a random vertex 
-
       // 1.1 select a random vertex
       auto distrib = std::uniform_int_distribution<uint32_t>(0, uint32_t(graph.size() - 1));
-      uint32_t vertex1 = distrib(this->rnd_);
+      const uint32_t vertex1 = distrib(this->rnd_);
 
-      // 1.2 find the worst edge of this vertex
+      // 1.2 improve all edges which are not RNG conform
       const auto neighbor_weights = graph.getNeighborWeights(vertex1);
       const auto neighbor_indices = graph.getNeighborIndices(vertex1);
-      for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++)
-        if(deglib::analysis::checkRNG(graph, edges_per_vertex, vertex1, neighbor_indices[edge_idx], neighbor_weights[edge_idx]) == false) 
-          improveEdges(vertex1, neighbor_indices[edge_idx], neighbor_weights[edge_idx]);
-
-      uint32_t bad_neighbor_index = 0;
-      float bad_neighbor_weight = -1.0f;
+      auto success = false;
       for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
-        if(bad_neighbor_weight < neighbor_weights[edge_idx]) {
-          bad_neighbor_index = neighbor_indices[edge_idx];
-          bad_neighbor_weight = neighbor_weights[edge_idx];
-        }     
+        const auto vertex2 = neighbor_indices[edge_idx];
+        if(graph.hasEdge(vertex1, vertex2) && deglib::analysis::checkRNG(graph, edges_per_vertex, vertex2, vertex1, neighbor_weights[edge_idx]) == false) 
+          success |= improveEdges(vertex1, vertex2, neighbor_weights[edge_idx]);
       }
 
-      // nothing found
-      if(bad_neighbor_weight < 0)
-        return false;
-
-      return improveEdges(vertex1, bad_neighbor_index, bad_neighbor_weight);
+      return success;
     }
 
     /**

@@ -68,8 +68,8 @@ The provided continuous refining Exploration Graph are used in the experiments s
 
 |  Dataset  |  EG  |  crEG  |
 |:---------:|:----:|:------:|
-| Audio     | [audio_192D_L2_EG20.deg](https://static.visual-computing.com/paper/DEG/audio_192D_L2_EG20.deg.gz) | [audio_192D_L2_crEG20.deg](https://static.visual-computing.com/paper/DEG/audio_192D_L2_crEG20.deg.gz) |
-| Deep1M    | [deep1m_96D_L2_EG30.deg](https://static.visual-computing.com/paper/DEG/deep1m_96D_L2_EG30.deg.gz) | [deep1m_96D_L2_crEG30.deg](https://static.visual-computing.com/paper/DEG/deep1m_96D_L2_crEG30.deg.gz) |
-| SIFT1M    | [sift_128D_L2_EG30.deg](https://static.visual-computing.com/paper/DEG/sift_128D_L2_EG30.deg.gz) | [sift_128D_L2_crEG30.deg](https://static.visual-computing.com/paper/DEG/sift_128D_L2_crEG30.deg.gz) |
-| GloVe-100 | [glove_100D_L2_EG30.deg](https://static.visual-computing.com/paper/DEG/glove_100D_L2_EG30.deg.gz) | [glove_100D_L2_crEG30.deg](https://static.visual-computing.com/paper/DEG/glove_100D_L2_crEG30.deg.gz) |
+| Audio     | [audio_192D_L2_EG20.zip](https://static.visual-computing.com/paper/DEG/audio_192D_L2_EG20.zip) | [audio_192D_L2_crEG20.zip](https://static.visual-computing.com/paper/DEG/audio_192D_L2_crEG20.zip) |
+| Deep1M    | [deep1m_96D_L2_EG30.zip](https://static.visual-computing.com/paper/DEG/deep1m_96D_L2_EG30.zip) | [deep1m_96D_L2_crEG30.zip](https://static.visual-computing.com/paper/DEG/deep1m_96D_L2_crEG30.zip) |
+| SIFT1M    | [sift_128D_L2_EG30.zip](https://static.visual-computing.com/paper/DEG/sift_128D_L2_EG30.zip) | [sift_128D_L2_crEG30.zip](https://static.visual-computing.com/paper/DEG/sift_128D_L2_crEG30.zip) |
+| GloVe-100 | [glove_100D_L2_EG30.zip](https://static.visual-computing.com/paper/DEG/glove_100D_L2_EG30.zip) | [glove_100D_L2_crEG30.zip](https://static.visual-computing.com/paper/DEG/glove_100D_L2_crEG30.zip) |
 

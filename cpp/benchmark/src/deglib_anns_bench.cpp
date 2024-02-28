@@ -22,10 +22,25 @@ int main(int argc, char *argv[]) {
     uint32_t k = 100; 
     uint32_t repeat_test = 1;
 
-    // SIFT1M
-    const auto graph_file   = (data_path / "deg" / "best_distortion_decisions" / "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string();
-    const auto query_file   = (data_path / "SIFT1M" / "sift_query.fvecs").string();
+    // ------------------------------------------ SIFT1M ---------------------------------------------
+    const auto graph_file   = (data_path / "crEG" / "sift_128D_L2_crEG30.deg").string(); 
     const auto gt_file      = (data_path / "SIFT1M" / "sift_groundtruth.ivecs").string();
+    const auto query_file   = (data_path / "SIFT1M" / "sift_query.fvecs").string();
+
+    // ------------------------------------------ Glove ---------------------------------------------
+    // const auto graph_file   = (data_path / "crEG" / "glove_100D_L2_crEG30.deg").string(); 
+    // const auto gt_file      = (data_path / "glove-100" / "glove-100_groundtruth.ivecs").string();
+    // const auto query_file   = (data_path / "glove-100" / "glove-100_query.fvecs").string();
+
+    // ------------------------------------------ Deep1M ---------------------------------------------
+    // const auto graph_file    = (data_path / "crEG" / "deep1m_96D_L2_crEG30.deg").string(); 
+    // const auto gt_file       = (data_path / "deep1m" / "deep1m_groundtruth.ivecs").string();
+    // const auto query_file    = (data_path / "deep1m" / "deep1m_query.fvecs").string();
+
+    // ------------------------------------------ Audio ---------------------------------------------
+    // const auto graph_file    = (data_path / "crEG" / "audio_192D_L2_crEG20.deg").string(); 
+    // const auto gt_file       = (data_path / "audio" / "audio_groundtruth.ivecs").string();
+    // const auto query_file    = (data_path / "audio" / "audio_query.fvecs").string();
 
     fmt::print("Load graph {} \n", graph_file);
     fmt::print("Actual memory usage: {} Mb\n", getCurrentRSS() / 1000000);

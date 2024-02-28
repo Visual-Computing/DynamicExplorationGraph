@@ -31,16 +31,14 @@ static std::vector<std::unordered_set<uint32_t>> get_ground_truth(const uint32_t
 
 static float test_approx_anns(const deglib::search::SearchGraph& graph, const std::vector<uint32_t>& entry_vertex_indices,
                          const deglib::FeatureRepository& query_repository, const std::vector<std::unordered_set<uint32_t>>& ground_truth, 
-                         const float eps, const uint32_t k)
+                         const float eps, const uint32_t k, const uint32_t test_size)
 {
     size_t total = 0;
     size_t correct = 0;
-    for (uint32_t i = 0; i < uint32_t(query_repository.size()); i++)
+    for (uint32_t i = 0; i < test_size; i++)
     {
         auto query = reinterpret_cast<const std::byte*>(query_repository.getFeature(i));
-        auto result_queue = graph.search(entry_vertex_indices, query, eps, k);
-        // auto result_queue = graph.search(entry_vertex_indices, query, eps, k, graph.size()); // max distance calcs
-        
+        auto result_queue = graph.search(entry_vertex_indices, query, eps, k);        
 
         if (result_queue.size() != k) {
             fmt::print(stderr, "ANNS with k={} got only {} results for query {}\n", k, result_queue.size(), i);
@@ -49,20 +47,13 @@ static float test_approx_anns(const deglib::search::SearchGraph& graph, const st
 
         total += result_queue.size();
         const auto gt = ground_truth[i];
-        // auto checked_ids = std::unordered_set<uint32_t>(); // additional check
         while (result_queue.empty() == false)
         {
             const auto internal_index = result_queue.top().getInternalIndex();
             const auto external_id = graph.getExternalLabel(internal_index);
             if (gt.find(external_id) != gt.end()) correct++;
             result_queue.pop();
-            // checked_ids.insert(internal_index);
         }
-
-        // if (checked_ids.size() != k) {
-        //     fmt::print(stderr, "ANNS with k={} got only {} unique ids \n", k, checked_ids.size());
-        //     abort();
-        // }
     }
 
     return 1.0f * correct / total;
@@ -93,30 +84,9 @@ static float test_approx_explore(const deglib::search::SearchGraph& graph, const
 
 static void test_graph_anns(const deglib::search::SearchGraph& graph, const deglib::FeatureRepository& query_repository, const uint32_t* ground_truth, const uint32_t ground_truth_dims, const uint32_t repeat, const uint32_t k)
 {
-    // find vertex closest to the average feature vector
-    uint32_t entry_vertex_id;
-    {
-        const auto feature_dims = graph.getFeatureSpace().dim();
-        const auto graph_size = (uint32_t) graph.size();
-        auto avg_fv = std::vector<float>(feature_dims);
-        for (uint32_t i = 0; i < graph_size; i++) {
-            auto fv = reinterpret_cast<const float*>(graph.getFeatureVector(i));
-            for (size_t dim = 0; dim < feature_dims; dim++) 
-                avg_fv[dim] += fv[dim];
-        }
-
-        for (size_t dim = 0; dim < feature_dims; dim++) 
-            avg_fv[dim] /= graph_size;
-
-        const auto seed = std::vector<uint32_t> { graph.getInternalIndex(0) };
-        auto result_queue = graph.search(seed, reinterpret_cast<const std::byte*>(avg_fv.data()), 0.1f, 30);
-        entry_vertex_id = result_queue.top().getInternalIndex();
-    }
-
     // reproduceable entry point for the graph search
-    // const auto entry_vertex_indices = std::vector<uint32_t> { graph.getInternalIndex(entry_vertex_id) };
     const auto entry_vertex_indices = graph.getEntryVertexIndices();
-    fmt::print("internal id {} \n", graph.getInternalIndex(entry_vertex_indices[0]));
+    fmt::print("external id {} \n", graph.getInternalIndex(entry_vertex_indices[0]));
 
     // test ground truth
     fmt::print("Parsing gt:\n");
@@ -124,25 +94,19 @@ static void test_graph_anns(const deglib::search::SearchGraph& graph, const degl
     fmt::print("Loaded gt:\n");
 
     // try different eps values for the search radius
-    // std::vector<float> eps_parameter = { 0.05f, 0.06f, 0.07f, 0.08f, 0.09f, 0.11f, 0.15f, 0.2f };       // crawl
-    // std::vector<float> eps_parameter = { 0.05f, 0.06f, 0.07f, 0.08f, 0.1f, 0.12f, 0.18f, 0.2f,   };             // enron
-    // std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.2f, 0.4f, 0.8f  };             // UQ-V
-    // std::vector<float> eps_parameter = { 0.00f, 0.03f, 0.05f, 0.07f, 0.09f, 0.12f, 0.2f, 0.3f, };             // audio
-    // std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f  };     // SIFT1M k=100
-    std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f  };     // SIFT1M k=100
-    // std::vector<float> eps_parameter = {  100, 140, 171, 206, 249, 500, 1000 };     // greeedy search SIFT1M k=100
-    // std::vector<float> eps_parameter = { 0.00f, 0.01f, 0.05f, 0.1f, 0.15f, 0.2f };     // SIFT1M k=1
-    // std::vector<float> eps_parameter = { 0.01f, 0.02f, 0.03f, 0.04f, 0.05f, 0.06f, 0.07f, 0.08f, 0.09f, 0.1f, 0.2f  };     // clipfv
-    // std::vector<float> eps_parameter = { 0.01f, 0.02f, 0.03f, 0.04f, 0.05f, 0.06f, 0.07f, 0.08f, 0.09f, 0.1f, 0.2f  };     // gpret
+    // std::vector<float> eps_parameter = { 0.00f, 0.03f, 0.05f, 0.07f, 0.09f, 0.12f, 0.2f, 0.3f, };    // audio
+    std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f  };       // SIFT1M k=100
     // std::vector<float> eps_parameter = { 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f, 0.4f };             // GloVe
-    // std::vector<float> eps_parameter = {  0.01f, 0.06f, 0.07f, 0.08f, 0.09f, 0.11f, 0.13f, 0.15f, 0.20f };             // GloVe DEG90
+    // std::vector<float> eps_parameter = { 0.01f, 0.02f, 0.03f, 0.04f, 0.06f, 0.1f, 0.2f, };          // Deep1M
+
+    const auto test_size = uint32_t(query_repository.size());
     for (float eps : eps_parameter)
     {
         StopW stopw = StopW();
         float recall = 0;
         for (size_t i = 0; i < repeat; i++) 
-            recall = deglib::benchmark::test_approx_anns(graph, entry_vertex_indices, query_repository, answer, eps, k);
-        uint64_t time_us_per_query = (stopw.getElapsedTimeMicro() / query_repository.size()) / repeat;
+            recall = deglib::benchmark::test_approx_anns(graph, entry_vertex_indices, query_repository, answer, eps, k, test_size);
+        uint64_t time_us_per_query = (stopw.getElapsedTimeMicro() / test_size) / repeat;
 
         fmt::print("eps {:.2f} \t recall {:.5f} \t time_us_per_query {:6}us\n", eps, recall, time_us_per_query);
         if (recall > 1.0)

@@ -6,22 +6,65 @@
 #include "benchmark.h"
 #include "deglib.h"
 
-/**
- * The last three types are used to reproduce the deletion tests in our paper
- */
-enum DataStreamType { AddAll, AddHalf, AddAllRemoveHalf, AddHalfRemoveAndAddOneAtATime };
-
 
 /**
  * Load the data repository and create a dynamic exploratino graph with it.
  * Store the graph in the graph file.
  */
-void create_graph(const std::string repository_file, const DataStreamType data_stream_type, const std::string graph_file, const uint8_t d, const uint8_t k_ext, const float eps_ext, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt) {
+void opt_graph(const std::string initial_graph_file, const std::string graph_file, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt, const uint32_t iterations) {
     
     auto rnd = std::mt19937(7);                         // default 7
     const deglib::Metric metric = deglib::Metric::L2;   // defaul metric
-    const uint32_t swap_tries = 0;                      // additional swap tries between the next graph extension
-    const uint32_t additional_swap_tries = 0;           // increse swap try count for each successful swap
+
+    fmt::print("Load graph {} \n", initial_graph_file);
+    auto graph = deglib::graph::load_sizebounded_graph(initial_graph_file.c_str());
+    fmt::print("Graph with {} vertices and an avg edge weight of {} \n", graph.size(), deglib::analysis::calc_avg_edge_weight(graph, 1));
+
+    // create a graph builder to add vertices to the new graph and improve its edges
+    fmt::print("Start graph builder \n");   
+    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, 0, 0, false, k_opt, eps_opt, i_opt, 1, 0);
+    
+    // check the integrity of the graph during the graph build process
+    auto start = std::chrono::steady_clock::now();
+    uint64_t duration_ms = 0;
+    const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
+        const auto size = graph.size();
+
+        if(status.step % (iterations/10) == 0) {    
+            duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+            auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 1);
+            auto connected = deglib::analysis::check_graph_connectivity(graph);
+            auto valid_weights = deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_regularity(graph, uint32_t(size), true);
+
+            auto duration = duration_ms / 1000;
+            auto currRSS = getCurrentRSS() / 1000000;
+            auto peakRSS = getPeakRSS() / 1000000;
+            fmt::print("{:7} step, {:5}s, AEW: {:4.2f}, {} connected, {}, RSS {} & peakRSS {}\n", status.step, duration, avg_edge_weight, connected ? "" : "not", valid_weights ? "valid" : "invalid", currRSS, peakRSS);
+            start = std::chrono::steady_clock::now();
+        }
+
+        if(status.step > iterations)
+            builder.stop();
+    };
+
+    // start the build process
+    builder.build(improvement_callback, true);
+    fmt::print("Actual memory usage: {} Mb, Max memory usage: {} Mb after building the graph in {} secs\n", getCurrentRSS() / 1000000, getPeakRSS() / 1000000, duration_ms / 1000);
+
+    // store the graph
+    graph.saveGraph(graph_file.c_str());
+
+    fmt::print("The graph contains {} non-RNG edges\n", deglib::analysis::calc_non_rng_edges(graph));
+}
+
+/**
+ * Load the data repository and create a dynamic exploratino graph with it.
+ * Store the graph in the graph file.
+ */
+void create_graph(const std::string repository_file, const std::string graph_file, const uint8_t d, const uint8_t k_ext, const float eps_ext, const bool schemeC) {
+    
+    auto rnd = std::mt19937(7);                         // default 7
+    const deglib::Metric metric = deglib::Metric::L2;   // defaul metric
 
     // load data
     fmt::print("Load Data \n");
@@ -38,38 +81,16 @@ void create_graph(const std::string repository_file, const DataStreamType data_s
 
     // create a graph builder to add vertices to the new graph and improve its edges
     fmt::print("Start graph builder \n");   
-    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, k_ext, eps_ext, k_opt, eps_opt, i_opt, swap_tries, additional_swap_tries);
+    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, k_ext, eps_ext, schemeC, 0, 0, 0, 0, 0);
     
     // provide all features to the graph builder at once. In an online system this will be called multiple times
     auto base_size = uint32_t(repository.size());
-    auto addEntry = [&builder, &repository, dims] (auto label)
-    {
-        auto feature = reinterpret_cast<const std::byte*>(repository.getFeature(label));
+    for (uint32_t i = 0; i < base_size; i++) {
+        auto feature = reinterpret_cast<const std::byte*>(repository.getFeature(i));
         auto feature_vector = std::vector<std::byte>{feature, feature + dims * sizeof(float)};
-        builder.addEntry(label, std::move(feature_vector));
-    };
-    if(data_stream_type == AddHalfRemoveAndAddOneAtATime) {
-        auto base_size_half = base_size / 2;
-        auto base_size_fourth = base_size / 4;
-        for (uint32_t i = 0; i < base_size_fourth; i++) { 
-            addEntry(0 + i);
-            addEntry(base_size_half + i);
-        }
-        for (uint32_t i = 0; i < base_size_fourth; i++) { 
-            addEntry(base_size_fourth + i);
-            addEntry(base_size_half + base_size_fourth + i);
-            builder.removeEntry(base_size_half + (i * 2) + 0);
-            builder.removeEntry(base_size_half + (i * 2) + 1);
-        }
-    } else {
-        base_size /= (data_stream_type == AddHalf) ? 2 : 1;
-        for (uint32_t i = 0; i < base_size; i++) 
-            addEntry(i);
-
-        if(data_stream_type == AddAllRemoveHalf) 
-            for (uint32_t i = base_size/2; i < base_size; i++) 
-                builder.removeEntry(i);
+        builder.addEntry(i, std::move(feature_vector));
     }
+
     repository.clear();
     fmt::print("Actual memory usage: {} Mb, Max memory usage: {} Mb after setup graph builder\n", getCurrentRSS() / 1000000, getPeakRSS() / 1000000);
 
@@ -92,8 +113,8 @@ void create_graph(const std::string repository_file, const DataStreamType data_s
             auto duration = duration_ms / 1000;
             auto currRSS = getCurrentRSS() / 1000000;
             auto peakRSS = getPeakRSS() / 1000000;
-            fmt::print("{:7} vertices, {:5}s, {:8} / {:8} improv, Q: {:4.2f} -> Sorted:{:.1f}, InOrder:{:.1f}, {} connected & {}, RSS {} & peakRSS {}\n", 
-                        size, duration, status.improved, status.tries, avg_edge_weight, fmt::join(weight_histogram_sorted, " "), fmt::join(weight_histogram, " "), connected ? "" : "not", valid_weights ? "valid" : "invalid", currRSS, peakRSS);
+            fmt::print("{:7} vertices, {:5}s, Q: {:4.2f} -> Sorted:{:.1f}, InOrder:{:.1f}, {} connected & {}, RSS {} & peakRSS {}\n", 
+                        size, duration, avg_edge_weight, fmt::join(weight_histogram_sorted, " "), fmt::join(weight_histogram, " "), connected ? "" : "not", valid_weights ? "valid" : "invalid", currRSS, peakRSS);
             start = std::chrono::steady_clock::now();
         }
         else if(status.step % (log_after/10) == 0) {    
@@ -104,7 +125,7 @@ void create_graph(const std::string repository_file, const DataStreamType data_s
             auto duration = duration_ms / 1000;
             auto currRSS = getCurrentRSS() / 1000000;
             auto peakRSS = getPeakRSS() / 1000000;
-            fmt::print("{:7} vertices, {:5}s, {:8} / {:8} improv, AEW: {:4.2f}, {} connected, RSS {} & peakRSS {}\n", size, duration, status.improved, status.tries, avg_edge_weight, connected ? "" : "not", currRSS, peakRSS);
+            fmt::print("{:7} vertices, {:5}s, AEW: {:4.2f}, {} connected, RSS {} & peakRSS {}\n", size, duration, avg_edge_weight, connected ? "" : "not", currRSS, peakRSS);
             start = std::chrono::steady_clock::now();
         }
     };
@@ -152,60 +173,94 @@ int main() {
     #endif
     fmt::print("Actual memory usage: {} Mb, Max memory usage: {} Mb \n", getCurrentRSS() / 1000000, getPeakRSS() / 1000000);
 
-    omp_set_num_threads(8);
-    std::cout << "_OPENMP " << omp_get_num_threads() << " threads" << std::endl;
-
     const auto data_path = std::filesystem::path(DATA_PATH);
   
-    // // ------------------------------- audio -----------------------------------------
-    // const auto repository_file      = (data_path / "audio" / "audio_base.fvecs").string();
-    // const auto query_file           = (data_path / "enron" / "enron_query.fvecs").string();
-    // const auto gt_file              = (data_path / "enron" / "enron_groundtruth.ivecs").string();
-    // const auto graph_file           = (data_path / "deg" / "neighbor_choice" / "192D_L2_K20_AddK40Eps0.3Low_schemeA.deg").string();
-
-    // if(std::filesystem::exists(graph_file.c_str()) == false)
-    //     create_graph(repository_file, DataStreamType::AddAll, graph_file, 20, 40, 0.3f, 20, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
-    // test_graph(query_file, gt_file, graph_file, 50, 20); // repeat_test, k
 
 
+    // // ------------------------------- SIFT1M -----------------------------------------
+    // const auto repository_file      = (data_path / "SIFT1M" / "sift_base.fvecs").string();
+    // const auto query_file           = (data_path / "SIFT1M" / "sift_query.fvecs").string();
+    // const auto gt_file              = (data_path / "SIFT1M" / "sift_groundtruth.ivecs").string();
+    // const uint32_t repeat_test      = 1;
 
-    // // ------------------------------- enron -----------------------------------------
-    // const auto repository_file      = (data_path / "enron" / "enron_base.fvecs").string();
-    // const auto query_file           = (data_path / "audio" / "audio_query.fvecs").string();
-    // const auto gt_file              = (data_path / "audio" / "audio_groundtruth.ivecs").string();
-    // const auto graph_file           = (data_path / "deg" / "neighbor_choice" / "1369D_L2_K30_AddK60Eps0.3High_schemeC.deg").string();
+    // const auto eg_graph_file        = (data_path / "crEG" / "sift_128D_L2_EG30.deg").string();
+    // const uint8_t d                 = 30;
+    // const uint8_t k_ext             = 60;
+    // const float eps_ext             = 0.1f;
+    // const bool schemeC              = false;
 
-    // if(std::filesystem::exists(graph_file.c_str()) == false)
-    //     create_graph(repository_file, DataStreamType::AddAll, graph_file, 30, 60, 0.3f, 30, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
-    // test_graph(query_file, gt_file, graph_file, 20, 20); // repeat_test, k
-
-
-
-    // ------------------------------- SIFT1M -----------------------------------------
-    const auto data_stream_type     = DataStreamType::AddAllRemoveHalf;
-    const auto repository_file      = (data_path / "SIFT1M" / "sift_base.fvecs").string();
-    const auto query_file           = (data_path / "SIFT1M" / "sift_query.fvecs").string();
-    const auto gt_file              = (data_path / "SIFT1M" / (data_stream_type == AddAll ? "sift_groundtruth.ivecs" : "sift_groundtruth_base500000.ivecs" )).string();
-    const auto graph_file           = (data_path / "deg" / "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge3.deg").string();
-
-    if(std::filesystem::exists(graph_file.c_str()) == false)
-        create_graph(repository_file, data_stream_type, graph_file, 30, 60, 0.2f, 30, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
-    test_graph(query_file, gt_file, graph_file, 1, 100); // repeat_test, k
-
+    // const auto creg_graph_file      = (data_path / "crEG" / "sift_128D_L2_crEG30.deg").string();
+    // const uint8_t k_opt             = 30;
+    // const float eps_opt             = 0.001f;
+    // const uint8_t i_opt             = 5;
+    // const uint32_t iterations       = 200000;
 
 
     // // ------------------------------- GLOVE -----------------------------------------
-    // const auto data_stream_type = DataStreamType::AddAll;
-    // const auto repository_file  = (data_path / "glove-100" / "glove-100_base.fvecs").string();    
-    // const auto query_file       = (data_path / "glove-100" / "glove-100_query.fvecs").string();
-    // const auto gt_file          = (data_path / "glove-100" / (data_stream_type == AddAll ? "glove-100_groundtruth.ivecs" : "glove-100_groundtruth_base591757.ivecs" )).string();
-    // const auto graph_file       = (data_path / "deg" / "100D_L2_K40_AddK40Eps0.2High_SwapK40-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string();
+    // const auto repository_file      = (data_path / "glove-100" / "glove-100_base.fvecs").string();
+    // const auto query_file           = (data_path / "glove-100" / "glove-100_query.fvecs").string();
+    // const auto gt_file              = (data_path / "glove-100" / "glove-100_groundtruth.ivecs").string();
+    // const uint32_t repeat_test      = 1;
+    
+    // const auto eg_graph_file        = (data_path / "crEG" / "glove_100D_L2_EG30.deg").string();
+    // const uint8_t d                 = 30;
+    // const uint8_t k_ext             = 60;
+    // const float eps_ext             = 0.1f;
+    // const bool schemeC              = false;
 
-    // if(std::filesystem::exists(graph_file.c_str()) == false)
-    //     create_graph(repository_file, data_stream_type, graph_file, 30, 30, 0.2f, 30, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
-    // test_graph(query_file, gt_file, graph_file, 1, 100); // repeat_test, k
+    // const auto creg_graph_file      = (data_path / "crEG" / "glove_100D_L2_crEG30.deg").string();
+    // const uint8_t k_opt             = 30;
+    // const float eps_opt             = 0.001f;
+    // const uint8_t i_opt             = 5;
+    // const uint32_t iterations       = 2000000;
 
- 
+
+    // ------------------------------- Deep1M -----------------------------------------
+    const auto repository_file      = (data_path / "deep1m" / "deep1m_base.fvecs").string();
+    const auto query_file           = (data_path / "deep1m" / "deep1m_query.fvecs").string();
+    const auto gt_file              = (data_path / "deep1m" / "deep1m_groundtruth.ivecs").string();
+    const uint32_t repeat_test      = 1;
+
+    const auto eg_graph_file        = (data_path / "crEG" / "deep1m_96D_L2_EG30.deg").string();
+    const uint8_t d                 = 30;
+    const uint8_t k_ext             = 60;
+    const float eps_ext             = 0.1f;
+    const bool schemeC              = false;
+
+    const auto creg_graph_file      = (data_path / "crEG" / "deep1m_96D_L2_crEG30.deg").string();
+    const uint8_t k_opt             = 30;
+    const float eps_opt             = 0.001f;
+    const uint8_t i_opt             = 5;
+    const uint32_t iterations       = 400000;
+
+
+    // // ------------------------------- audio -----------------------------------------
+    // const auto repository_file      = (data_path / "audio" / "audio_base.fvecs").string();
+    // const auto query_file           = (data_path / "audio" / "audio_query.fvecs").string();
+    // const auto gt_file              = (data_path / "audio" / "audio_groundtruth.ivecs").string();
+    // const uint32_t repeat_test      = 100;
+
+    // const auto eg_graph_file        = (data_path / "crEG" / "audio_192D_L2_EG20.deg").string();
+    // const uint8_t d                 = 20;
+    // const uint8_t k_ext             = 40;
+    // const float eps_ext             = 0.1f;
+    // const bool schemeC              = false;
+
+    // const auto creg_graph_file      = (data_path / "crEG" / "audio_192D_L2_crEG20.deg").string();
+    // const uint8_t k_opt             = 20;
+    // const float eps_opt             = 0.001f;
+    // const uint8_t i_opt             = 5;
+    // const uint32_t iterations       = 20000;
+
+
+    // build, optimize and test
+    if(std::filesystem::exists(eg_graph_file.c_str()) == false)
+        create_graph(repository_file, eg_graph_file, d, k_ext, eps_ext, schemeC); 
+    test_graph(query_file, gt_file, eg_graph_file, repeat_test, 100); // repeat_test, k
+
+    if(std::filesystem::exists(creg_graph_file.c_str()) == false)
+        opt_graph(eg_graph_file, creg_graph_file, k_opt, eps_opt, i_opt, iterations); 
+    test_graph(query_file, gt_file, creg_graph_file, repeat_test, 100); // repeat_test, k
 
     fmt::print("Test OK\n");
     return 0;
