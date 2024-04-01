@@ -6,10 +6,10 @@ The continuous refining Exploration Graph (crEG) is a graph-based approximate ne
 
 | Data set  | Download                 | dimension | nb base vectors | nb query vectors | original website                                               |
 |-----------|--------------------------|-----------|-----------------|------------------|----------------------------------------------------------------|
-| Audio    |[audio.tar.gz](https://static.visual-computing.com/paper/DEG/audio.tar.gz)| 192       | 53,387       | 200           | [original website](https://www.cs.princeton.edu/cass/)             |           |
-| Deep1M    |[deep1m.tar.gz](https://static.visual-computing.com/paper/DEG/deep1m.tar.gz)| 96       | 1,000,000       | 10,000           | [original website](https://research.yandex.com/blog/benchmarks-for-billion-scale-similarity-search)             |
-| SIFT1M    |[sift.tar.gz](https://static.visual-computing.com/paper/DEG/sift.tar.gz)| 128       | 1,000,000       | 10,000           | [original website](http://corpus-texmex.irisa.fr/)             |
-| GloVe-100 | [glove-100.tar.gz](https://static.visual-computing.com/paper/DEG/glove-100.tar.gz) | 100       | 1,183,514       | 10,000           | [original website](https://nlp.stanford.edu/projects/glove/)   |
+| Audio    |[audio.tar.gz](http://static.visual-computing.com/paper/DEG/audio.tar.gz)| 192       | 53,387       | 200           | [original website](https://www.cs.princeton.edu/cass/)             |           |
+| Deep1M    |[deep1m.tar.gz](http://static.visual-computing.com/paper/DEG/deep1m.tar.gz)| 96       | 1,000,000       | 10,000           | [original website](https://research.yandex.com/blog/benchmarks-for-billion-scale-similarity-search)             |
+| SIFT1M    |[sift.tar.gz](http://static.visual-computing.com/paper/DEG/sift.tar.gz)| 128       | 1,000,000       | 10,000           | [original website](http://corpus-texmex.irisa.fr/)             |
+| GloVe-100 | [glove-100.tar.gz](http://static.visual-computing.com/paper/DEG/glove-100.tar.gz) | 100       | 1,183,514       | 10,000           | [original website](https://nlp.stanford.edu/projects/glove/)   |
 
 ## Performance
 
