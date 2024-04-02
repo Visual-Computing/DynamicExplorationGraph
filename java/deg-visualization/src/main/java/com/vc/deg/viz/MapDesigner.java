@@ -18,13 +18,12 @@ import com.vc.deg.FeatureVector;
 import com.vc.deg.HierarchicalDynamicExplorationGraph;
 import com.vc.deg.graph.GraphFilter;
 import com.vc.deg.graph.VertexCursor;
-import com.vc.deg.viz.feature.FeatureTransformer;
 import com.vc.deg.viz.filter.MutableGraphFilter;
 import com.vc.deg.viz.filter.PreparedGraphFilter;
 import com.vc.deg.viz.model.GridMap;
 import com.vc.deg.viz.model.MotionVector;
 import com.vc.deg.viz.model.WorldMap;
-import com.vc.deg.viz.om.FastLinearAssignmentSorterAdapter;
+import com.vc.deg.viz.om.FLASnoMapSorterAdapter;
 
 
 /**
@@ -39,18 +38,16 @@ public class MapDesigner {
 	public static final int MEDIAN_ELEMENT_COUNT = 3;
 	
 	protected final HierarchicalDynamicExplorationGraph graph;	
-	protected final FastLinearAssignmentSorterAdapter flas;
-
-	public MapDesigner(HierarchicalDynamicExplorationGraph graph) {
-		this(graph, FeatureTransformer.findTransformer(graph.getFeatureSpace()), id -> graph.getFeature(id));
-	}
-		
-	public MapDesigner(HierarchicalDynamicExplorationGraph graph, FeatureTransformer transformer, IntFunction<FeatureVector> idToFeature) {
-		this(graph, id -> transformer.transform(idToFeature.apply(id)));
+	protected final FLASnoMapSorterAdapter flas;
+	
+	public MapDesigner(HierarchicalDynamicExplorationGraph graph) {		
+		this.flas = new FLASnoMapSorterAdapter((id) -> graph.getFeature(id), graph.getFeatureSpace());
+		this.graph = graph;
 	}
 	
-	public MapDesigner(HierarchicalDynamicExplorationGraph graph, IntFunction<float[]> idToFloatFeature) {		
-		this.flas = new FastLinearAssignmentSorterAdapter(idToFloatFeature);
+
+	public <T> MapDesigner(HierarchicalDynamicExplorationGraph graph, IntFunction<FeatureVector> idToFloatFeature, FeatureSpace distFunc) {		
+		this.flas = new FLASnoMapSorterAdapter(idToFloatFeature, distFunc);
 		this.graph = graph;
 	}
 	
@@ -68,6 +65,7 @@ public class MapDesigner {
 		final DynamicExplorationGraph deg = graph.getGraph(atLevel);
 		final IntSet validIds;
 		
+		// all valid
 		if(globalFilter == null) {
 			validIds = HashIntSets.newMutableSet(c -> {
 				final VertexCursor cursor = deg.vertexCursor();
@@ -172,7 +170,7 @@ public class MapDesigner {
 				// arrange them
 				start = System.currentTimeMillis();
 				arrangeMap(localMap, inUse);
-				log.debug("Arranging the neighbourhood took "+(System.currentTimeMillis() - start)+"ms");
+				log.debug("Arranging the neighborhood took "+(System.currentTimeMillis() - start)+"ms");
 
 				// copy the new local map to the world map
 				worldMap.copyFrom(localMap, worldPosX, worldPosY);
@@ -206,13 +204,12 @@ public class MapDesigner {
 		final MutableGraphFilter filterAtLevel = filterAtLevel(globalFilter, null, atLevel);
 				
 		// if the number of valid elements is too small just arrange them all at once on the world map
-		if(filterAtLevel.getInclusionRate() < 1000) {
+		if(filterAtLevel.size() < 1000) {
 			
 			// does the target element pass the filter or should it be ignored
 			final int targetElement = (globalFilter != null && globalFilter.isValid(targetElementId) == false) ? -1 : targetElementId;
 						
 			// copy the element ids from the filter to an array, ignore the id identical to the target element
-			final DynamicExplorationGraph deg = graph.getGraph(atLevel);
 			final int[] neighbors = new int[filterAtLevel.size() - (filterAtLevel.isValid(targetElement) ? 1 : 0)];
 			final int[] pos = new int[1];
 			filterAtLevel.forEachValidId(id -> {
@@ -226,7 +223,7 @@ public class MapDesigner {
 			final int mapCenterY = map.rows() / 2;
 			arrange(worldMap, map, targetElement, mapCenterX, mapCenterY, targetPosX-mapCenterX, targetPosY-mapCenterY, neighbors);
 			worldMap.copyTo(localMap, worldPosX, worldPosY);
-			log.debug("Collecting and arranging "+neighbors.length+" elements took "+(System.currentTimeMillis() - start)+"ms");
+			log.debug("Collecting and arranging all elements ("+neighbors.length+") took "+(System.currentTimeMillis() - start)+"ms");
 
 		} else {
 			
@@ -328,7 +325,7 @@ public class MapDesigner {
 		
 		// copy the arrangement onto the world map
 		worldMap.copyFrom(localMap, worldPosX, worldPosY);
-		log.debug("Arranging the neighbourhood took "+(System.currentTimeMillis() - start)+"ms");
+		log.debug("Arranging the neighborhood took "+(System.currentTimeMillis() - start)+"ms");
 	}
 
 	
@@ -375,7 +372,7 @@ public class MapDesigner {
 				// sortiere alle Bilder
 				start = System.currentTimeMillis();
 				arrangeMap(localMap, inUse);
-				log.debug("Arranging the neighbourhood took "+(System.currentTimeMillis() - start)+"ms");
+				log.debug("Arranging the neighborhood took "+(System.currentTimeMillis() - start)+"ms");
 
 				// die Sortierung auf die Weltkarte kopieren
 				worldMap.copyFrom(localMap, worldPosX, worldPosY);

@@ -3,8 +3,10 @@ package com.vc.deg.viz.om;
 import java.util.Random;
 import java.util.function.IntFunction;
 
+import com.vc.deg.FeatureSpace;
+import com.vc.deg.FeatureVector;
 import com.vc.deg.viz.model.GridMap;
-import com.vc.deg.viz.om.FastLinearAssignmentSorter.MapPlace;
+import com.vc.deg.viz.om.FLASnoMapSorter.MapPlace;
 
 
 /** 
@@ -12,12 +14,14 @@ import com.vc.deg.viz.om.FastLinearAssignmentSorter.MapPlace;
  * 
  * @author barthel and hezel
  */
-public class FastLinearAssignmentSorterAdapter {
+public class FLASnoMapSorterAdapter {
 
-	private IntFunction<float[]> idToFloatFeature;
+	private final IntFunction<FeatureVector> idToFloatFeature;
+	private final FeatureSpace distFunc;
 
-	public FastLinearAssignmentSorterAdapter(IntFunction<float[]> idToFloatFeature) {
+	public FLASnoMapSorterAdapter(IntFunction<FeatureVector> idToFloatFeature, FeatureSpace distFunc) {
 		this.idToFloatFeature = idToFloatFeature;
+		this.distFunc = distFunc;
 	}
 	
 	/**
@@ -34,17 +38,17 @@ public class FastLinearAssignmentSorterAdapter {
 		final MapPlace[] mapPlaces = new MapPlace[columns * rows];
 		for (int y = 0; y < rows; y++) {		
 			for (int x = 0; x < columns; x++) {
-				int content = map.get(x, y);
-				if(content != -1) {
-					final float[] floatFeature = idToFloatFeature.apply(content);
-					mapPlaces[x + y * columns] = new MapPlace(content, floatFeature, inUse[y][x] == false);
+				final int id = map.get(x, y);
+				if(id != -1) {
+					final FeatureVector feature = idToFloatFeature.apply(id);
+					mapPlaces[x + y * columns] = new MapPlace(id, feature, inUse[y][x]);
 				}
 			}
 		}
 		
 		final Random rnd = new Random(7);
-		final FastLinearAssignmentSorter flas = new FastLinearAssignmentSorter(rnd, false);
-		flas.doSorting(mapPlaces, columns, rows);
+		final FLASnoMapSorter flas = new FLASnoMapSorter(rnd);
+		flas.doSorting(mapPlaces, columns, rows, distFunc);
 		
 		// apply the new order to the map
 		for (int y = 0; y < rows; y++) {

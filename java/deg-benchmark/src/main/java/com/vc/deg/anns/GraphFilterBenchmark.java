@@ -45,22 +45,27 @@ public class GraphFilterBenchmark {
 		final HierarchicalDynamicExplorationGraph hdeg = GraphFactory.getDefaultFactory().loadHierchicalGraph(graphFile);
 		final DynamicExplorationGraph deg = hdeg.getGraph(0);
 		System.out.println("loading graph took "+(System.currentTimeMillis()-start)+"ms");
-
-		final int gloabelMapElementCount = 20000;
+		
+		// represents elements on the global map
+		final int globalMapElementCount = 20000;
 		final Random rnd = new Random(7);
 		final IntSet globalMapIds = HashIntSets.newMutableSet();
-		while(globalMapIds.size() < gloabelMapElementCount) 
+		while(globalMapIds.size() < globalMapElementCount) 
 			globalMapIds.add(deg.getRandomLabel(rnd));
-		final int[] gloabelMapIdArray = globalMapIds.toIntArray();
+		final int[] globalMapIdArray = globalMapIds.toIntArray();
 
+		// prepare query data in order to compare the results
+		final int desiredCount = 1000;
+		final float eps = 0.0f;
+		final int queryCount = 3;
 		final IntSet queryIdsSet = HashIntSets.newMutableSet();
-		while(queryIdsSet.size() < 3) 
+		while(queryIdsSet.size() < queryCount) 
 			queryIdsSet.add(hdeg.getGraph(hdeg.levelCount()-1).getRandomLabel(rnd));
 		final int[] queryIds = queryIdsSet.toIntArray(); // new int[] { 1551664, 959394, 1675402 };
 
-		final int desiredCount = 1000;
-		final float eps = 0.0f;
+		// how many time should the test be repeated?
 		final int testCount = 50;
+		
 
 //		filterChainHashSetTest(testCount, hdeg, gloabelMapIdArray, queryIds, eps, desiredCount);
 //		System.out.println("\n\n---------------------------------------------------------------------------------------------------------\n\n");
@@ -70,11 +75,11 @@ public class GraphFilterBenchmark {
 //		System.out.println("\n\n---------------------------------------------------------------------------------------------------------\n\n");
 //		bitsetTest(testCount, deg, gloabelMapIdArray, queryIds, eps, desiredCount);
 //		System.out.println("\n\n---------------------------------------------------------------------------------------------------------\n\n");
-		hashSetTest(testCount, deg, gloabelMapIdArray, queryIds, eps, desiredCount);
+		hashSetTest(testCount, deg, globalMapIdArray, queryIds, eps, desiredCount);
 		System.out.println();
-		noGlobalFilterHashSetTest(testCount, deg, gloabelMapIdArray, queryIds, eps, desiredCount);
+		noGlobalFilterHashSetTest(testCount, deg, globalMapIdArray, queryIds, eps, desiredCount);
 		System.out.println();
-		noGlobalFilterExcludingHashSetTest(testCount, deg, gloabelMapIdArray, queryIds, eps, desiredCount);
+		noGlobalFilterExcludingHashSetTest(testCount, deg, globalMapIdArray, queryIds, eps, desiredCount);
 	}
 
 	// ---------------------------------------------------------------------------------------------------

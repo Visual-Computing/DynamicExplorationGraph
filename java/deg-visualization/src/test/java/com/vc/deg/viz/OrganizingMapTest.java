@@ -9,7 +9,7 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Collection;
+import java.util.function.IntFunction;
 
 import javax.imageio.ImageIO;
 import javax.swing.ImageIcon;
@@ -20,12 +20,9 @@ import com.koloboke.collect.map.IntObjMap;
 import com.koloboke.collect.map.hash.HashIntObjMaps;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
-import com.vc.deg.HierarchicalDynamicExplorationGraph;
 import com.vc.deg.feature.FloatFeature;
-import com.vc.deg.graph.GraphDesigner;
-import com.vc.deg.viz.filter.PreparedGraphFilter;
 import com.vc.deg.viz.model.GridMap;
-import com.vc.deg.viz.model.WorldMap;
+import com.vc.deg.viz.om.FLASnoMapSorterAdapter;
 
 /**
  * Example on how to navigate and visualize a graph on a 2D grid.
@@ -34,42 +31,45 @@ import com.vc.deg.viz.model.WorldMap;
  * 
  * @author Nico Hezel
  */
-public class MapNavigatorTest {
+public class OrganizingMapTest {
 
-	protected static Path inputDir = Paths.get("c:\\Data\\Images\\WebImages420\\");
+	protected static Path inputDir = Paths.get("c:\\Data\\Images\\WebImages400\\");
 	protected static int fvImageSize = 3;
+	protected static int thumbSize = 32;
+	protected static int runs = 32;
 	
 	public static void main(String[] args) throws IOException {
 
 		final IntObjMap<ImageData> idToImageData = getImageData(inputDir);
-		final int edgesPerVertex = 4;
-		final int topRankSize = idToImageData.size();
-		final HierarchicalDynamicExplorationGraph hGraph = buildGraph(idToImageData.values(), edgesPerVertex, topRankSize) ;
+		final int featureSize = idToImageData.values().iterator().next().getFeature().dims();
+		final FeatureSpace distFunc = new FloatL2Space(featureSize);
+		final IntFunction<FeatureVector> idToFloatFeature = (int id) -> {
+			return idToImageData.get(id).getFeature();
+		};
+		
+		// create random grid
+		final GridMap localMap = new GridMap(20, 20, idToImageData.keySet().toIntArray());
+		
+		// sort map
+		final FLASnoMapSorterAdapter adapter = new FLASnoMapSorterAdapter(idToFloatFeature, distFunc);
+//		final FastLinearAssignmentSorterAdapter adapter = new FastLinearAssignmentSorterAdapter(idToFloatFeature);
+		final boolean[][] inUse = new boolean[20][20];
+		final long start = System.currentTimeMillis();
+		for (int i = 0; i < runs; i++) 
+			adapter.arrangeWithHoles(localMap, inUse);
+		final long runtime = ((System.currentTimeMillis()-start)/runs);
+		
+		// visualize grid
+		final BufferedImage image1 = toGridToImage(localMap, idToImageData, thumbSize);
 
-		// a map navigator and designer to explore the graph
-		final MapNavigator mapNavigator = new MapNavigator(new WorldMap(100, 100), new MapDesigner(hGraph));
-
-		// empty grid to arrange the image of the graph onto
-		final GridMap localMap = new GridMap(10, 10);
-
-		// place the image 0 in the middle of the grid and arrange similar images from the graph around it
-		final int initialId = 0;
-		final PreparedGraphFilter filter = new PreparedGraphFilter(idToImageData.keySet(), topRankSize);
-		mapNavigator.jump(localMap, initialId, localMap.columns()/2, localMap.rows()/2, 0, filter);
-		final BufferedImage image1 = toGridToImage(localMap, idToImageData, 64);
-
-		// move 3 steps to the right on the grid and fill the new empty grid cells with image from the graph
-		mapNavigator.move(localMap, 3, 0, 1, 0, filter);
-		final BufferedImage image2 = toGridToImage(localMap, idToImageData, 64);
-
-		// display the grid
-		final JFrame frame = new JFrame();
+		// display the grid image
+		final JFrame frame = new JFrame("runtime="+runtime+"ms");
 		final JLabel label1=new JLabel();
 		label1.setIcon(new ImageIcon(image1));
 		frame.getContentPane().add(label1, BorderLayout.WEST);
 		frame.getContentPane().add(new JLabel("-----"), BorderLayout.CENTER);
 		final JLabel label2=new JLabel();
-		label2.setIcon(new ImageIcon(image2));
+		label2.setIcon(new ImageIcon(image1));
 		frame.getContentPane().add(label2, BorderLayout.EAST);	    
 		frame.setLocationRelativeTo(null);
 		frame.pack();
@@ -93,54 +93,23 @@ public class MapNavigatorTest {
 		final Graphics g = result.getGraphics();
 		for (int r = 0; r < rows; r++) {
 			for (int c = 0; c < columns; c++) {
-				final BufferedImage imageOrig = idToImageData.get(grid.get(c, r)).getImage();
-				final Image fvImage = imageOrig.getScaledInstance(fvImageSize, fvImageSize, Image.SCALE_DEFAULT);
-				final Image outImage = fvImage.getScaledInstance(thumbSize, thumbSize, Image.SCALE_DEFAULT);
-				final int x = c * thumbSize;
-				final int y = r * thumbSize;
-				g.drawImage(outImage, x, y, x+thumbSize, y+thumbSize, 0, 0, thumbSize, thumbSize, null);
-				
-//				final BufferedImage image = idToImageData.get(grid.get(c, r)).getImage();
+//				final BufferedImage imageOrig = idToImageData.get(grid.get(c, r)).getImage();				
+//				final Image fvImage = imageOrig.getScaledInstance(fvImageSize, fvImageSize, Image.SCALE_AREA_AVERAGING);
+//				final Image outImage = fvImage.getScaledInstance(thumbSize, thumbSize, Image.SCALE_AREA_AVERAGING);
 //				final int x = c * thumbSize;
 //				final int y = r * thumbSize;
-//				g.drawImage(image, x, y, x+thumbSize, y+thumbSize, 0, 0, image.getWidth(), image.getHeight(), null);
+//				g.drawImage(outImage, x, y, x+thumbSize, y+thumbSize, 0, 0, thumbSize, thumbSize, null);
+				
+				final BufferedImage image = idToImageData.get(grid.get(c, r)).getImage();
+				final int x = c * thumbSize;
+				final int y = r * thumbSize;
+				g.drawImage(image, x, y, x+thumbSize, y+thumbSize, 0, 0, image.getWidth(), image.getHeight(), null);
 			}
 		}
 
 		return result;
 	}
-
-	/**
-	 * Build a new hierarchical graph
-	 * 
-	 * @param data
-	 * @param edgesPerVertex
-	 * @param topRankSize
-	 * @return
-	 */
-	protected static HierarchicalDynamicExplorationGraph buildGraph(Collection<ImageData> data, int edgesPerVertex, int topRankSize) {
-		System.out.println("Build graph ...");
-		final long start = System.currentTimeMillis();
-
-		final int featureSize = data.iterator().next().getFeature().dims();
-		final FeatureSpace space = new FloatL2Space(featureSize);
-		final HierarchicalDynamicExplorationGraph hGraph = HierarchicalDynamicExplorationGraph.newGraph(space, edgesPerVertex, topRankSize) ;
-		final GraphDesigner designer = hGraph.designer();
-
-		// offer new data to the graph designer
-		for (ImageData imageData : data) 
-			designer.add(imageData.getId(), imageData.getFeature());
-
-		// build graph
-		designer.build((long step, long added, long removed, long improved, long tries, int lastAdd, int lastRemoved) -> {
-
-			if(added == topRankSize)
-				designer.stop();
-		});
-
-		System.out.println("Building graph with "+hGraph.size()+" elements and "+hGraph.levelCount()+" levels took "+(System.currentTimeMillis()-start)+"ms");
-		return hGraph;
-	}
+	
 
 	/**
 	 * Find all JPEG images in the directory and compute their mean color to be used as a feature vector
@@ -167,6 +136,7 @@ public class MapNavigatorTest {
 		return result;
 	}
 
+	
 	/**
 	 * Compute the mean color of the image
 	 * 
@@ -175,8 +145,8 @@ public class MapNavigatorTest {
 	 */
 	protected static FloatFeature computeMeanColorGrid(BufferedImage image, int gridSize) {
 
-		Image resultingImage = image.getScaledInstance(gridSize, gridSize, Image.SCALE_DEFAULT);
-		BufferedImage outputImage = new BufferedImage(gridSize, gridSize, BufferedImage.TYPE_INT_RGB);
+		final Image resultingImage = image.getScaledInstance(gridSize, gridSize, Image.SCALE_AREA_AVERAGING);
+		final BufferedImage outputImage = new BufferedImage(gridSize, gridSize, BufferedImage.TYPE_INT_BGR);
 		outputImage.getGraphics().drawImage(resultingImage, 0, 0, null);
 
 		final int[] rgbArray = new int[gridSize*gridSize];

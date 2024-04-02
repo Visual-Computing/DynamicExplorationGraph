@@ -16,9 +16,9 @@ public interface FeatureTransformer {
 	 *  
 	 * @author Nico Hezel
 	 */
-    public static class RegisteredTransformerHolder {
+    public static class TransformerFactory {
 
-    	private final static Map<FeatureSpace, FeatureTransformer> registeredFactories = new HashMap<>();
+    	private final static Map<FeatureSpace, FeatureTransformer> registeredTransformers = new HashMap<>();
     	    	
     	/**
     	 * Register a new {@link FeatureFactory} manual
@@ -27,7 +27,7 @@ public interface FeatureTransformer {
     	 * @param space
     	 */
     	private static void registerTransformer(FeatureTransformer factory, FeatureSpace space) {
-    		registeredFactories.put(space, factory);
+    		registeredTransformers.put(space, factory);
     	}
     	
     	/**
@@ -37,7 +37,7 @@ public interface FeatureTransformer {
     	 * @return
     	 */
     	private static FeatureTransformer findTransformer(FeatureSpace featureSpace) {
-			return registeredFactories.getOrDefault(featureSpace, null);
+			return registeredTransformers.getOrDefault(featureSpace, null);
     	}
     }
 
@@ -48,7 +48,7 @@ public interface FeatureTransformer {
      * @param space
      */
     public static void registerTransformer(FeatureTransformer factory, FeatureSpace space) {
-        RegisteredTransformerHolder.registerTransformer(factory, space);
+    	TransformerFactory.registerTransformer(factory, space);
     }
     
     /**
@@ -58,7 +58,7 @@ public interface FeatureTransformer {
      * @return
      */
     public static FeatureTransformer findTransformer(FeatureSpace space) {
-    	final FeatureTransformer transformer = RegisteredTransformerHolder.findTransformer(space);
+    	final FeatureTransformer transformer = TransformerFactory.findTransformer(space);
     	if(transformer != null)
     		return transformer;
     	else if(byte.class == space.getComponentType())
@@ -88,7 +88,7 @@ public interface FeatureTransformer {
 	
 	public static class BinaryToFloatTransformer implements FeatureTransformer {
 				
-		public static final int StepSize = 8;
+		public static final int StepSize = 1;
 		protected final int dims;
 		
 		public BinaryToFloatTransformer(int dims) {

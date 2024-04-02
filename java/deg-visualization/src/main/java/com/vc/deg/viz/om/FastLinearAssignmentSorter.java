@@ -15,7 +15,7 @@ public class FastLinearAssignmentSorter {
 	// hyper parameter 
 	public static int   MaxSwapPositions = 9;
 	public static float SampleFactor = 1.0f;	// 1 the fraction of swaps per iteration
-	public static float RadiusDecay = 0.93f;
+	public static float RadiusDecay = 0.99f;
 	public static float EndRadius = 1.0f; 
 	public static float InitialRadiusFactor = 0.5f;
 	public static int   NumFilters = 1;

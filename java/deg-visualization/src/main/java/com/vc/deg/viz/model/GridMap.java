@@ -1,6 +1,7 @@
 package com.vc.deg.viz.model;
 
 import java.util.Arrays;
+import java.util.Random;
 
 
 /**
@@ -44,7 +45,7 @@ public class GridMap {
 	 * @param columns must be greater than zero
 	 * @param cells can not be null
 	 */
-	protected GridMap(int rows, int columns, int[] cells) {
+	public GridMap(int rows, int columns, int[] cells) {
 		this.rows = rows;
 		this.columns = columns;
 		this.cells = cells;
@@ -159,6 +160,20 @@ public class GridMap {
 			if(get(i) == -1)
 				freeCount++;
 		return freeCount;
+	}
+	
+	/**
+	 * Shuffle the map cells
+	 * 
+	 * @param rand
+	 */
+	public void shuffle(Random rand) {		
+		for (int i = 0; i < cells.length; i++) {
+			int randomIndexToSwap = rand.nextInt(cells.length);
+			int temp = cells[randomIndexToSwap];
+			cells[randomIndexToSwap] = cells[i];
+			cells[i] = temp;
+		}
 	}
 
 	/**
