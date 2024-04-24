@@ -1,3 +1,6 @@
+// Use the build script defined in buildSrc
+apply from: rootProject.file('buildSrc/shared.gradle')
+
 dependencies {
 	implementation project(':deg-api')
 	
