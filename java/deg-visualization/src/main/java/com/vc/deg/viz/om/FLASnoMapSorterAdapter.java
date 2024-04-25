@@ -36,13 +36,11 @@ public class FLASnoMapSorterAdapter {
 				
 		// copy the data
 		final MapPlace[] mapPlaces = new MapPlace[columns * rows];
-		for (int y = 0; y < rows; y++) {		
+		for (int y = 0; y < rows; y++) {
 			for (int x = 0; x < columns; x++) {
 				final int id = map.get(x, y);
-				if(id != -1) {
-					final FeatureVector feature = idToFloatFeature.apply(id);
-					mapPlaces[x + y * columns] = new MapPlace(id, feature, inUse[y][x]);
-				}
+				final FeatureVector feature = (id == -1) ? null : idToFloatFeature.apply(id);
+				mapPlaces[x + y * columns] = new MapPlace(id, feature, inUse[y][x]);
 			}
 		}
 		
@@ -54,11 +52,7 @@ public class FLASnoMapSorterAdapter {
 		for (int y = 0; y < rows; y++) {
 			for (int x = 0; x < columns; x++) {
 				final MapPlace mapPlace = mapPlaces[x + y * columns];
-				if(mapPlace != null) {
-					map.set(x, y, mapPlace.getId());
-				} else {
-					map.set(x, y, -1);
-				}
+				map.set(x, y, mapPlace.getId());
 			}
 		}
 	}	

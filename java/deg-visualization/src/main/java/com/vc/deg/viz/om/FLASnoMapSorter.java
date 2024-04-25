@@ -73,8 +73,8 @@ public class FLASnoMapSorter {
 		final List<MapPlace> elements = new ArrayList<>();
 		for (int i = 0; i < grid.length; i++) {
 			final MapPlace element = grid[i];
-			if(element != null) {
-				element.interalIndex = elements.size();
+			if(element.getId() != -1) {
+				element.interalIndex = elements.size(); // all none hole cells get an internal index
 				elements.add(element);
 			}
 		}
@@ -234,7 +234,7 @@ public class FLASnoMapSorter {
 	
 	private int[][] calcDistLut(MapPlace[] swapCandidates, int[] swapCandidatesPos, int numSwapCandidates, MapPlace[] imageGrid, int rad) {
 		
-		boolean testFixedElements = fixedPos != null && random.nextInt(5) == 0; // only 20% of the time
+		boolean testFixedElements = (fixedPos != null) && (random.nextInt(5) == 0); // only 20% of the time
 		if(testFixedElements) {
 			for (int i = 0; i < numSwapCandidates; i++) {
 				final int xi = swapCandidatesPos[i] % columns;
@@ -247,7 +247,7 @@ public class FLASnoMapSorter {
 					final int y0 = pos0 / columns;
 					final MapPlace pos0Element = imageGrid[pos0];
 					
-					if (pos0Element != null && swapCandidate != null) {
+					if (pos0Element.getId() != -1 && swapCandidate.getId() != -1) {
 						invGeoDist0[i][f] = 100f / ((x0 - xi) * (x0 - xi) + (y0 - yi) * (y0 - yi)); 
 						featureDist0[i][f] = distMatrix[swapCandidate.interalIndex][pos0Element.interalIndex];
 					}
@@ -269,57 +269,61 @@ public class FLASnoMapSorter {
 			int yjp = Math.min(yj + delta, rows-1);
 			
 			for (int i = 0; i < numSwapCandidates; i++) {           // elements
-				final float[] candidateDistLUT = distMatrix[swapCandidates[i].interalIndex];
-				
-				int pos;
 				float val = 0;
 				int counter = 0;
-				pos = yj  * columns + xjm;  // West
-				if (imageGrid[pos] != null) {
-					val += candidateDistLUT[imageGrid[pos].interalIndex];
-					counter++;
+				
+				// holes have a distance of 0 to all other elements
+				if(swapCandidates[i].getId() != -1) {
+					final float[] candidateDistLUT = distMatrix[swapCandidates[i].interalIndex];
+					
+					int pos;
+					pos = yj  * columns + xjm;  // West
+					if (imageGrid[pos].getId() != -1) {
+						val += candidateDistLUT[imageGrid[pos].interalIndex];
+						counter++;
+					}
+					pos = yj  * columns + xjp;  // East
+					if (imageGrid[pos].getId() != -1) {
+						val += candidateDistLUT[imageGrid[pos].interalIndex];
+						counter++;
+					}
+					pos = yjm * columns + xj;   // North
+					if (imageGrid[pos].getId() != -1) {
+						val += candidateDistLUT[imageGrid[pos].interalIndex];
+						counter++;
+					}
+					pos = yjp * columns + xj;   // South
+					if (imageGrid[pos].getId() != -1) {
+						val += candidateDistLUT[imageGrid[pos].interalIndex];
+						counter++;
+					}
+					pos = yjm * columns + xjm;  // North West
+					if (imageGrid[pos].getId() != -1) {
+						val += candidateDistLUT[imageGrid[pos].interalIndex];
+						counter++;
+					}
+					pos = yjm * columns + xjp;  // North East
+					if (imageGrid[pos].getId() != -1) {
+						val += candidateDistLUT[imageGrid[pos].interalIndex];
+						counter++;
+					}
+					pos = yjp * columns + xjm;  // South West
+					if (imageGrid[pos].getId() != -1) {
+						val += candidateDistLUT[imageGrid[pos].interalIndex];
+						counter++;
+					}
+					pos = yjp * columns + xjp;  // South East 
+					if (imageGrid[pos].getId() != -1) {
+						val += candidateDistLUT[imageGrid[pos].interalIndex];
+						counter++;
+					}
+					val = 8 * val / counter;
+	
+					// additional costs
+					if(testFixedElements)
+						for (int f = 0; f < fixedPos.length; f++) 
+							val += featureDist0[i][f] * invGeoDist0[j][f];
 				}
-				pos = yj  * columns + xjp;  // East
-				if (imageGrid[pos] != null) {
-					val += candidateDistLUT[imageGrid[pos].interalIndex];
-					counter++;
-				}
-				pos = yjm * columns + xj;   // North
-				if (imageGrid[pos] != null) {
-					val += candidateDistLUT[imageGrid[pos].interalIndex];
-					counter++;
-				}
-				pos = yjp * columns + xj;   // South
-				if (imageGrid[pos] != null) {
-					val += candidateDistLUT[imageGrid[pos].interalIndex];
-					counter++;
-				}
-				pos = yjm * columns + xjm;  // North West
-				if (imageGrid[pos] != null) {
-					val += candidateDistLUT[imageGrid[pos].interalIndex];
-					counter++;
-				}
-				pos = yjm * columns + xjp;  // North East
-				if (imageGrid[pos] != null) {
-					val += candidateDistLUT[imageGrid[pos].interalIndex];
-					counter++;
-				}
-				pos = yjp * columns + xjm;  // South West
-				if (imageGrid[pos] != null) {
-					val += candidateDistLUT[imageGrid[pos].interalIndex];
-					counter++;
-				}
-				pos = yjp * columns + xjp;  // South East 
-				if (imageGrid[pos] != null) {
-					val += candidateDistLUT[imageGrid[pos].interalIndex];
-					counter++;
-				}
-				val = 8 * val / counter;
-
-				// additional costs
-				if(testFixedElements)
-					for (int f = 0; f < fixedPos.length; f++) 
-						val += featureDist0[i][f] * invGeoDist0[j][f];
 				
 				swapDistLutF[i][j] = val;
 				if (val > max)
@@ -350,7 +354,7 @@ public class FLASnoMapSorter {
 		private final FeatureVector feature;
 		private final boolean isFixed;
 		
-		private int interalIndex;
+		private int interalIndex = -1;
 
 		public MapPlace(int id, FeatureVector feature, boolean isFixed) {
 			this.id = id;
