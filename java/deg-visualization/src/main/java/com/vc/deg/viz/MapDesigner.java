@@ -223,7 +223,7 @@ public class MapDesigner {
 			final int mapCenterY = map.rows() / 2;
 			arrange(worldMap, map, targetElement, mapCenterX, mapCenterY, targetPosX-mapCenterX, targetPosY-mapCenterY, neighbors);
 			worldMap.copyTo(localMap, worldPosX, worldPosY);
-			log.debug("Collecting and arranging all elements ("+neighbors.length+") took "+(System.currentTimeMillis() - start)+"ms");
+			log.debug("Collecting and arranging all elements (" + (neighbors.length + (targetElement == -1 ? 0 : 1)) +") took "+(System.currentTimeMillis() - start)+"ms");
 
 		} else {
 			
@@ -235,7 +235,7 @@ public class MapDesigner {
 			
 			// arrange the images onto the local map
 			arrange(worldMap, localMap, targetElement, targetPosX, targetPosY, worldPosX, worldPosY, neighbors);
-			log.debug("Collecting and arranging "+neighbors.length+" elements took "+(System.currentTimeMillis() - start)+"ms");
+			log.debug("Collecting and arranging " + (neighbors.length + (targetElement == -1 ? 0 : 1)) + " elements took "+(System.currentTimeMillis() - start)+"ms");
 		}
 	}
 	
