@@ -76,6 +76,12 @@ public class EvenRegularGraphDesigner implements GraphDesigner {
 		// TODO Auto-generated method stub
 		
 	}
+	
+	@Override
+	public void setExtendSchema(boolean useSchemaC) {
+		// TODO Auto-generated method stub
+		
+	}
 
 	@Override
 	public float calcAvgEdgeWeight() {

@@ -43,6 +43,7 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 	protected int improveK;
 	protected float improveEps;	
 	protected int maxPathLength;
+	protected boolean schemaC;
 	
 	public HierarchicalGraphDesigner(List<DynamicExplorationGraph> layers, FeatureSpace space, int edgesPerVertex, int topRankSize) {
 		this.layers = layers;
@@ -61,6 +62,7 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 		setRandom(new Random(7));
 		setExtendK(edgesPerVertex * 2);
 		setExtendEps(0.2f);
+		setExtendSchema(true);
 		setImproveK(edgesPerVertex);
 		setImproveEps(0.001f);
 		setMaxPathLength(5);
@@ -113,6 +115,13 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 		this.extendEps = eps;
 		for (DynamicExplorationGraph graph : layers) 
 			graph.designer().setExtendEps(extendEps);
+	}
+
+	@Override
+	public void setExtendSchema(boolean useSchemaC) {
+		schemaC = useSchemaC;
+		for (DynamicExplorationGraph graph : layers) 
+			graph.designer().setExtendSchema(schemaC);
 	}
 
 	@Override

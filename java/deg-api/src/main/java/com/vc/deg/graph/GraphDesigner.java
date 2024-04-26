@@ -6,7 +6,7 @@ import java.util.function.IntPredicate;
 import com.vc.deg.FeatureVector;
 
 /**
- * Adds or removed graph nodes and improves the connections. 
+ * Adds or removed graph vertices and improves the connections. 
  * 
  * @author Nico Hezel
  *
@@ -29,7 +29,7 @@ public interface GraphDesigner {
 	public void add(int label, FeatureVector data);
 	
 	/**
-	 * Queue the removal of an existing node
+	 * Queue the removal of an existing vertex
 	 * 
 	 * @param label
 	 */
@@ -65,19 +65,19 @@ public interface GraphDesigner {
 
 		/**
 		 * The method gets called after every change: 
-		 * - adding a node
-		 * - removing a node
+		 * - adding a vertex
+		 * - removing a vertex
 		 * - improving a path of edges
 		 * 
 		 * @param step number of graph manipulation steps
-		 * @param added number of added nodes
-		 * @param deleted number of deleted nodes
+		 * @param added number of added vertices
+		 * @param removed number of removed vertices
 		 * @param improved number of successful improvement
 		 * @param tries number of improvement tries
 		 * @param lastAdd label of the vertex added in this change
-		 * @param lastDelete label of the vertex deleted in this change
+		 * @param lastRemoved label of the vertex deleted in this change
 		 */
-		public void onChange(long step, long added, long deleted, long improved, long tries, int lastAdd, int lastDelete);
+		public void onChange(long step, long added, long removed, long improved, long tries, int lastAdd, int lastRemoved);
 	}
 
 	
@@ -101,6 +101,14 @@ public interface GraphDesigner {
 	 * @param eps
 	 */
 	public void setExtendEps(float eps);
+
+	/**
+	 * Hyper parameter when adding new vertices
+	 * When adding neighbors to the new vertex schema C or D can be used.
+	 * 
+	 * @param useSchemaC
+	 */
+	public void setExtendSchema(boolean useSchemaC);
 	
 	/**
 	 * Hyper parameter when improving the edges
