@@ -365,7 +365,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 		
 		@Override
 		public float getInclusionRate() {
-			return 0;
+			return 1;
 		}
 		
 		@Override
