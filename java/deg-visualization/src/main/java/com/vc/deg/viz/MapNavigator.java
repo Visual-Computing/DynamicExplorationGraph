@@ -1,6 +1,6 @@
 package com.vc.deg.viz;
 
-import com.vc.deg.viz.filter.MutableGraphFilter;
+import com.vc.deg.graph.VertexFilter;
 import com.vc.deg.viz.model.GridMap;
 import com.vc.deg.viz.model.MotionVector;
 import com.vc.deg.viz.model.WorldMap;
@@ -83,7 +83,7 @@ public class MapNavigator  {
 	 * @param filter can be null
 	 * @return
 	 */
-	public boolean move(GridMap map, int x, int y, double directionX, double directionY, MutableGraphFilter filter) {
+	public boolean move(GridMap map, int x, int y, double directionX, double directionY, VertexFilter filter) {
 		
 		if(x != 0 || y != 0) {
 			setWorldPosition(worldPosX - x, worldPosY - y);
@@ -111,7 +111,7 @@ public class MapNavigator  {
 	 * @param toLevel
 	 * @param filter can be null
 	 */
-	public void jump(GridMap map, int content, int posX, int posY, int toLevel, MutableGraphFilter filter) {	
+	public void jump(GridMap map, int content, int posX, int posY, int toLevel, VertexFilter filter) {	
 		this.currentLevel = toLevel;
 		reset();
 		designer.jump(worldMap, map, content, posX, posY, worldPosX, worldPosY, toLevel, filter);
@@ -127,7 +127,7 @@ public class MapNavigator  {
 	 * @param worldPosY
 	 * @param filter can be null
 	 */
-	public void explore(GridMap map, int worldPosX, int worldPosY, MutableGraphFilter filter) {
+	public void explore(GridMap map, int worldPosX, int worldPosY, VertexFilter filter) {
 		setWorldPosition(worldPosX, worldPosY);
 		designer.fill(worldMap, map, worldPosX, worldPosY, this.currentLevel, filter);
 	}

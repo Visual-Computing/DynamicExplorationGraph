@@ -11,5 +11,5 @@ dependencies {
 	implementation group: 'com.koloboke', name: 'koloboke-impl-jdk8', version: "${KOLOBOKE_VERSION}"
 	implementation group: 'com.koloboke', name: 'koloboke-impl-common-jdk8', version: "${KOLOBOKE_VERSION}"
 	
-	implementation group: 'org.roaringbitmap', name: 'RoaringBitmap', version: '1.0.0'
+	implementation group: 'org.roaringbitmap', name: 'RoaringBitmap', version: "${ROARING_VERSION}"
 }

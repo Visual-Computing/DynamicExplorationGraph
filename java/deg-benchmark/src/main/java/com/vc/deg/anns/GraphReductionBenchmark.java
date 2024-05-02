@@ -3,22 +3,14 @@ package com.vc.deg.anns;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import com.vc.deg.DynamicExplorationGraph;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.GraphFactory;
-import com.vc.deg.data.GloVe;
-import com.vc.deg.data.Sift1M;
-import com.vc.deg.feature.FloatFeature;
 import com.vc.deg.feature.FloatL2Space;
 import com.vc.deg.graph.GraphDesigner;
 

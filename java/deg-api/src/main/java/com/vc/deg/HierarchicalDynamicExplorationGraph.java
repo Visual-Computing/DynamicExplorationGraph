@@ -7,7 +7,7 @@ import java.util.Collection;
 import java.util.Random;
 
 import com.vc.deg.graph.GraphDesigner;
-import com.vc.deg.graph.GraphFilter;
+import com.vc.deg.graph.VertexFilter;
 import com.vc.deg.graph.NeighborConsumer;
 import com.vc.deg.graph.VertexCursor;
 
@@ -49,7 +49,7 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	public DynamicExplorationGraph getGraph(int atLevel);
 	
 	@Override
-	public default int[] search(Collection<FeatureVector> queries, int k, float eps, GraphFilter filter, int[] seedVertexLabels) {
+	public default int[] search(Collection<FeatureVector> queries, int k, float eps, VertexFilter filter, int[] seedVertexLabels) {
 		return searchAtLevel(queries, 0, k, eps, filter, seedVertexLabels);
 	}
 	
@@ -133,7 +133,7 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * @param filter null will be ignored
 	 * @return
 	 */
-	public default int[] searchAtLevel(FeatureVector query, int atLevel, int k, float eps, GraphFilter filter) {
+	public default int[] searchAtLevel(FeatureVector query, int atLevel, int k, float eps, VertexFilter filter) {
 		return searchAtLevel(Arrays.asList(query), atLevel, k, eps, filter);
 	}
 	
@@ -154,7 +154,7 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * @param filter null disables the filter
 	 * @return
 	 */
-	public default int[] searchAtLevel(Collection<FeatureVector> queries, int atLevel, int k, float eps, GraphFilter filter) {
+	public default int[] searchAtLevel(Collection<FeatureVector> queries, int atLevel, int k, float eps, VertexFilter filter) {
 		return searchAtLevel(queries, atLevel, k, eps, filter, new int[0]);
 	}
 	
@@ -178,7 +178,7 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * @param seedVertexLabels if empty or filled with invalid ids, the default starting point will be used instead
 	 * @return
 	 */
-	public int[] searchAtLevel(Collection<FeatureVector> queries, int atLevel, int k, float eps, GraphFilter filter, int[] seedVertexLabels);
+	public int[] searchAtLevel(Collection<FeatureVector> queries, int atLevel, int k, float eps, VertexFilter filter, int[] seedVertexLabels);
 	
 	
 	
@@ -188,7 +188,7 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	
 		
 	@Override
-	public default int[] explore(int[] seedLabel, int k, float eps, GraphFilter filter) {
+	public default int[] explore(int[] seedLabel, int k, float eps, VertexFilter filter) {
 		return exploreAtLevel(seedLabel, 0, k, eps, filter);
 	}
 	
@@ -291,7 +291,7 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * @param filter null disables the filter
 	 * @return
 	 */
-	public default int[] exploreAtLevel(int seedLabel, int atLevel, int k, float eps, GraphFilter filter) {
+	public default int[] exploreAtLevel(int seedLabel, int atLevel, int k, float eps, VertexFilter filter) {
 		return exploreAtLevel(new int[] { seedLabel }, atLevel, k, eps, filter);
 	}
 	
@@ -315,7 +315,7 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * @param filter null disables the filter
 	 * @return
 	 */
-	public int[] exploreAtLevel(int[] seedLabels, int atLevel, int k, float eps, GraphFilter filter);
+	public int[] exploreAtLevel(int[] seedLabels, int atLevel, int k, float eps, VertexFilter filter);
 	
 	
 	
@@ -345,6 +345,19 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	default VertexCursor vertexCursor() {
 		return vertexCursorAtLevel(0);
 	}
+	
+	/**
+	 * This filter object contains all labels at a specific level
+	 * 
+	 * @param atLevel
+	 */
+	public VertexFilter labelFilterAtLevel(int atLevel);
+	
+	@Override
+	default VertexFilter labelFilter() {
+		return labelFilterAtLevel(0);
+	}
+	
 	
 	/**
 	 * Iterate over all neighbors of a vertex at a specific level and consume their ids
@@ -397,10 +410,10 @@ public interface HierarchicalDynamicExplorationGraph extends DynamicExplorationG
 	 * @param filter
 	 * @return
 	 */
-	public int getRandomLabelAtLevel(Random random, int atLevel, GraphFilter filter);
+	public int getRandomLabelAtLevel(Random random, int atLevel, VertexFilter filter);
 	
 	@Override
-	default int getRandomLabel(Random random, GraphFilter filter) {
+	default int getRandomLabel(Random random, VertexFilter filter) {
 		return getRandomLabelAtLevel(random, 0, filter);
 	}
 	

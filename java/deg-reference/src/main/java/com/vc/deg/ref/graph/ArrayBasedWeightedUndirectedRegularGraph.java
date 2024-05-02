@@ -38,12 +38,10 @@ import com.koloboke.collect.map.hash.HashIntIntMapFactory;
 import com.koloboke.collect.map.hash.HashIntIntMaps;
 import com.koloboke.collect.set.IntSet;
 import com.koloboke.collect.set.hash.HashIntSets;
-import com.vc.deg.DynamicExplorationGraph;
 import com.vc.deg.FeatureFactory;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
-import com.vc.deg.graph.GraphFilter;
-import com.vc.deg.graph.VertexCursor;
+import com.vc.deg.graph.VertexFilter;
 import com.vc.deg.io.LittleEndianDataInputStream;
 import com.vc.deg.io.LittleEndianDataOutputStream;
 import com.vc.deg.ref.feature.PrimitiveFeatureFactories;
@@ -70,6 +68,11 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	 * Id of the vertex is the index
 	 */
 	protected final List<VertexData> vertices;
+
+	/**
+	 * Filter object containing all valid ids
+	 */
+	protected final MutableVertexFilter allLabelsFilter;
 	
 	/**
 	 * Label to vertex id map
@@ -85,26 +88,22 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	 * The number of edges per vertex is fixed and an even number
 	 */
 	protected final int edgesPerVertex;
+	
 
 	public ArrayBasedWeightedUndirectedRegularGraph(int edgesPerVertex, FeatureSpace space) {
-		this.edgesPerVertex = edgesPerVertex;
-		this.vertices = new ArrayList<>();	
-		this.labelToId = intIntMapFactory.newMutableMap();
-		this.space = space;
+		this(edgesPerVertex, 0, space);
 	}
 
 	public ArrayBasedWeightedUndirectedRegularGraph(int edgesPerVertex, int expectedSize, FeatureSpace space) {
-		this.edgesPerVertex = edgesPerVertex;
-		this.vertices = new ArrayList<>(expectedSize);	
-		this.labelToId = intIntMapFactory.newMutableMap();
-		this.space = space;
+		this(edgesPerVertex, new ArrayList<>(expectedSize), intIntMapFactory.newMutableMap(), space, new MutableVertexFilter());
 	}
 	
-	public ArrayBasedWeightedUndirectedRegularGraph(int edgesPerVertex, List<VertexData> vertices, IntIntMap labelToId, FeatureSpace space) {
+	public ArrayBasedWeightedUndirectedRegularGraph(int edgesPerVertex, List<VertexData> vertices, IntIntMap labelToId, FeatureSpace space, MutableVertexFilter filter) {
 		this.edgesPerVertex = edgesPerVertex;
 		this.vertices = vertices;
 		this.labelToId = labelToId;		
 		this.space = space;
+		this.allLabelsFilter = filter;
 	}
 
 	public FeatureSpace getFeatureSpace() {
@@ -123,6 +122,15 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	// -------------------------- label based methods -------------------------
 	// ------------------------------------------------------------------------
 		
+	/**
+	 * Copy of the internal filter
+	 * 
+	 * @return
+	 */
+	public MutableVertexFilter labelsFilter() {
+		return allLabelsFilter.clone();
+	}
+	
 	public VertexData getVertexByLabel(int label) {
 		final int id = labelToId.getOrDefault(label, -1);
 		return (id == -1) ? null : vertices.get(id);
@@ -134,6 +142,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 			final VertexData newVertex = new VertexData(label, vertexId, data, edgesPerVertex+1);
 			vertices.add(newVertex);
 			labelToId.put(label, vertexId);
+			allLabelsFilter.add(label);
 			return newVertex;
 		}
 		return null;
@@ -355,7 +364,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	 * 
 	 * @author Nico Hezel
 	 */
-	public static class GraphAllValidFilter implements GraphFilter {
+	public static class GraphAllValidFilter implements VertexFilter {
 		
 		protected final List<VertexData> data;
 		
@@ -395,7 +404,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	 * @param allowSeedInResult
 	 * @return
 	 */
-	public TreeSet<QueryDistance> search(Collection<FeatureVector> queries, int k, float eps, GraphFilter labelFilter, int[] seedVertexIds, boolean allowSeedInResult) {
+	public TreeSet<QueryDistance> search(Collection<FeatureVector> queries, int k, float eps, VertexFilter labelFilter, int[] seedVertexIds, boolean allowSeedInResult) {
 		
 		// allow all elements in the graph if the initial filter was null
 		if(labelFilter == null)
@@ -574,7 +583,8 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 			final IntFloatMap copyEdges = intFloatMapFactory.newMutableMap(vertex.getEdges());
 			copyVertices.add(new VertexData(vertex.getLabel(), vertex.getId(), vertex.getFeature(), copyEdges));
 		}
-		return new ArrayBasedWeightedUndirectedRegularGraph(edgesPerVertex, copyVertices, copyLabelMap, space);
+		final MutableVertexFilter filter = this.allLabelsFilter.clone();
+		return new ArrayBasedWeightedUndirectedRegularGraph(edgesPerVertex, copyVertices, copyLabelMap, space, filter);
 	}
 
 	/**
@@ -687,6 +697,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 			log.debug("Read graph from file "+file.toString());
 			final IntIntMap labelMap = intIntMapFactory.newMutableMap((int)vertexCount); 
 			final List<VertexData> vertices = new ArrayList<>((int)vertexCount); 
+			final MutableVertexFilter filter = new MutableVertexFilter();
 			for (int i = 0; i < vertexCount; i++) {
 				
 				// read the feature vector
@@ -707,6 +718,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 				final int label = input.readInt();
 				
 				// create the vertex data
+				filter.add(label);
 				labelMap.put(label, i);
 				vertices.add(new VertexData(label, i, feature, edges));
 				
@@ -715,7 +727,7 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 			}
 			log.debug("Loaded "+vertexCount+" vertices");
 			
-			return new ArrayBasedWeightedUndirectedRegularGraph(edgesPerVertex, vertices, labelMap, space);
+			return new ArrayBasedWeightedUndirectedRegularGraph(edgesPerVertex, vertices, labelMap, space, filter);
 		}
 	}
 }

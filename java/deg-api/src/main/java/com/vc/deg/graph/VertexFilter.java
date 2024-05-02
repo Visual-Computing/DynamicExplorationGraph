@@ -7,7 +7,7 @@ import java.util.function.IntConsumer;
  * 
  * @author Nico Hezel
  */
-public interface GraphFilter {
+public interface VertexFilter {
 
 	/**
 	 * Is the label valid
@@ -36,5 +36,5 @@ public interface GraphFilter {
 	 * 
 	 * @param action
 	 */
-	public void forEachValidId(IntConsumer action);
+	public void forEachValidId(IntConsumer action);	
 }

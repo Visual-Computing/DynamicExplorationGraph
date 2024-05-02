@@ -13,8 +13,8 @@ import com.vc.deg.DynamicExplorationGraph;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.GraphDesigner;
-import com.vc.deg.graph.GraphFilter;
 import com.vc.deg.graph.VertexCursor;
+import com.vc.deg.graph.VertexFilter;
 import com.vc.deg.ref.designer.EvenRegularGraphDesigner.BuilderAddTask;
 import com.vc.deg.ref.designer.EvenRegularGraphDesigner.BuilderRemoveTask;
 
@@ -336,7 +336,8 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 	 */
 	protected int getRandomLabel(DynamicExplorationGraph graph, int targetRank) {	
 		// TODO build a data structure which contains a set of ids for each rank of the graph. the set only has ids which exists only on this rank or below.
-		return graph.getRandomLabel(rnd, new GraphFilter() {
+		// TODO use layers.get(targetRank).labelFilter() instead of the new filter object
+		return graph.getRandomLabel(rnd, new VertexFilter() {
 			
 			@Override
 			public int size() {

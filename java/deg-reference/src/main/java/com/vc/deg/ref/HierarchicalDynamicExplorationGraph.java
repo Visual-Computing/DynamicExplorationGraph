@@ -17,7 +17,7 @@ import java.util.Random;
 import com.vc.deg.DynamicExplorationGraph;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
-import com.vc.deg.graph.GraphFilter;
+import com.vc.deg.graph.VertexFilter;
 import com.vc.deg.graph.NeighborConsumer;
 import com.vc.deg.graph.VertexCursor;
 import com.vc.deg.ref.hierarchy.HierarchicalGraphDesigner;
@@ -77,12 +77,12 @@ public class HierarchicalDynamicExplorationGraph implements com.vc.deg.Hierarchi
 	}
 	
 	@Override
-	public int[] searchAtLevel(Collection<FeatureVector> queries, int atLevel, int k, float eps, GraphFilter filter, int[] seedVertexLabels) {
+	public int[] searchAtLevel(Collection<FeatureVector> queries, int atLevel, int k, float eps, VertexFilter filter, int[] seedVertexLabels) {
 		return getGraph(atLevel).search(queries, k, eps, filter, seedVertexLabels);
 	}
 
 	@Override
-	public int[] exploreAtLevel(int[] entryLabels, int atLevel, int k, float eps, GraphFilter filter) {
+	public int[] exploreAtLevel(int[] entryLabels, int atLevel, int k, float eps, VertexFilter filter) {
 		return getGraph(atLevel).explore(entryLabels, k, eps, filter);
 	}
 	
@@ -115,6 +115,12 @@ public class HierarchicalDynamicExplorationGraph implements com.vc.deg.Hierarchi
 	public VertexCursor vertexCursorAtLevel(int atLevel) {
 		return getGraph(atLevel).vertexCursor();
 	}
+
+
+	@Override
+	public VertexFilter labelFilterAtLevel(int atLevel) {
+		return getGraph(atLevel).labelFilter();
+	}
 	
 	@Override
 	public void forEachNeighborAtLevel(int atLevel, int label, NeighborConsumer neighborConsumer) {
@@ -127,7 +133,7 @@ public class HierarchicalDynamicExplorationGraph implements com.vc.deg.Hierarchi
 	}
 	
 	@Override
-	public int getRandomLabelAtLevel(Random random, int atLevel, GraphFilter filter) {
+	public int getRandomLabelAtLevel(Random random, int atLevel, VertexFilter filter) {
 		return getGraph(atLevel).getRandomLabel(random, filter);
 	}
 

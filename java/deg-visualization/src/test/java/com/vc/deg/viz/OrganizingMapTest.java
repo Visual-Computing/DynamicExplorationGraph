@@ -35,7 +35,7 @@ import com.vc.deg.viz.om.FLASnoMapSorterAdapter;
 public class OrganizingMapTest {
 
 	protected static Path inputDir = Paths.get("c:\\Data\\ImageSet\\WebImages\\");
-	protected static int fvImageSize = 1;
+	protected static int fvImageSize = 32;
 	protected static int thumbSize = 32;
 	protected static int runs = 32;
 	
@@ -54,7 +54,10 @@ public class OrganizingMapTest {
 		for (int i = 0; idsCursor.moveNext(); i++) 
 			localMap.set(i, idsCursor.elem());
 		final boolean[][] inUse = new boolean[localMap.rows()][localMap.columns()];
-		
+		for (int i = 0; i < 5; i++) 
+			for (int j = 0; j < 5; j++) 
+				inUse[i][j] = true;
+				
 		// sort map
 		final FLASnoMapSorterAdapter adapter1 = new FLASnoMapSorterAdapter(idToFloatFeature, distFunc);
 		final long start1 = System.currentTimeMillis();

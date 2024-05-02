@@ -19,7 +19,7 @@ import com.esotericsoftware.kryo.unsafe.UnsafeOutput;
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
 import com.vc.deg.graph.GraphDesigner;
-import com.vc.deg.graph.GraphFilter;
+import com.vc.deg.graph.VertexFilter;
 import com.vc.deg.graph.NeighborConsumer;
 import com.vc.deg.graph.VertexCursor;
 import com.vc.deg.impl.designer.EvenRegularGraphDesigner;
@@ -78,14 +78,14 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 
 
 	@Override
-	public int[] search(Collection<FeatureVector> queries, int k, float eps, GraphFilter filter) {
+	public int[] search(Collection<FeatureVector> queries, int k, float eps, VertexFilter filter) {
 		// TODO Auto-generated method stub
 		return null;
 	}
 
 
 	@Override
-	public int[] explore(int[] entryLabel, int k, float eps, GraphFilter filter) {
+	public int[] explore(int[] entryLabel, int k, float eps, VertexFilter filter) {
 		// TODO Auto-generated method stub
 		return null;
 	}
@@ -140,14 +140,14 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 
 
 	@Override
-	public int getRandomLabel(Random random, GraphFilter filter) {
+	public int getRandomLabel(Random random, VertexFilter filter) {
 		// TODO Auto-generated method stub
 		return 0;
 	}
 
 
 	@Override
-	public int[] search(Collection<FeatureVector> queries, int k, float eps, GraphFilter filter,
+	public int[] search(Collection<FeatureVector> queries, int k, float eps, VertexFilter filter,
 			int[] seedVertexLabels) {
 		// TODO Auto-generated method stub
 		return null;
@@ -158,5 +158,12 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	public int edgePerVertex() {
 		// TODO Auto-generated method stub
 		return 0;
+	}
+
+
+	@Override
+	public VertexFilter labelFilter() {
+		// TODO Auto-generated method stub
+		return null;
 	}
 }

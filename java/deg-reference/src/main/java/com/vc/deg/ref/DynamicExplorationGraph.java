@@ -13,7 +13,7 @@ import java.util.stream.Collectors;
 
 import com.vc.deg.FeatureSpace;
 import com.vc.deg.FeatureVector;
-import com.vc.deg.graph.GraphFilter;
+import com.vc.deg.graph.VertexFilter;
 import com.vc.deg.graph.NeighborConsumer;
 import com.vc.deg.graph.VertexCursor;
 import com.vc.deg.ref.designer.EvenRegularGraphDesigner;
@@ -80,6 +80,11 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	}
 	
 	@Override
+	public VertexFilter labelFilter() {
+		return this.internalGraph.labelsFilter();
+	}
+	
+	@Override
 	public void forEachNeighbor(int label, NeighborConsumer neighborConsumer) {
 		this.internalGraph.getVertexByLabel(label).getEdges().forEach((int neighborId, float weight) -> 
 			neighborConsumer.accept(this.internalGraph.getVertexById(neighborId).getLabel(), weight)
@@ -96,7 +101,7 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	}
 	
 	@Override
-	public int getRandomLabel(Random random, GraphFilter filter) {
+	public int getRandomLabel(Random random, VertexFilter filter) {
 		int label = -1;
 		int lowestIndex = size();
 		do {
@@ -151,7 +156,7 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	}
 	
 	@Override
-	public int[] search(Collection<FeatureVector> queries, int k, float eps, GraphFilter filter, int[] seedVertexLabels) {
+	public int[] search(Collection<FeatureVector> queries, int k, float eps, VertexFilter filter, int[] seedVertexLabels) {
 		int[] seedVertexIds = Arrays.stream(seedVertexLabels).mapToObj(internalGraph::getVertexByLabel).filter(Objects::nonNull).mapToInt(VertexData::getId).toArray();
 		if(seedVertexIds.length == 0)
 			seedVertexIds = new int[] { internalGraph.getVertices().iterator().next().getId() };
@@ -165,7 +170,7 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	}
 
 	@Override
-	public int[] explore(int[] seedVertexLabels, int k, float eps, GraphFilter filter) {
+	public int[] explore(int[] seedVertexLabels, int k, float eps, VertexFilter filter) {
 		
 		// check seed labels
 		final VertexData[] entrys = Arrays.stream(seedVertexLabels).mapToObj(internalGraph::getVertexByLabel).filter(Objects::nonNull).toArray(VertexData[]::new);

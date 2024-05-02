@@ -8,6 +8,8 @@ dependencies {
 	runtimeOnly group: 'com.koloboke', name: 'koloboke-impl-jdk8', version: "${KOLOBOKE_VERSION}"
 	runtimeOnly group: 'com.koloboke', name: 'koloboke-impl-common-jdk8', version: "${KOLOBOKE_VERSION}"
 	
+	implementation group: 'org.roaringbitmap', name: 'RoaringBitmap', version: "${ROARING_VERSION}"
+	
 	implementation group: "org.slf4j", name: "slf4j-api", version: "${SLF4J_VERSION}"
     testImplementation group: "org.slf4j", name: "log4j-over-slf4j", version: "${SLF4J_VERSION}"
 }

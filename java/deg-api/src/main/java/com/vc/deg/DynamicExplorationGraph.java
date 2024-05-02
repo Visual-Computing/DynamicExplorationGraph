@@ -7,7 +7,7 @@ import java.util.Collection;
 import java.util.Random;
 
 import com.vc.deg.graph.GraphDesigner;
-import com.vc.deg.graph.GraphFilter;
+import com.vc.deg.graph.VertexFilter;
 import com.vc.deg.graph.NeighborConsumer;
 import com.vc.deg.graph.VertexCursor;
 
@@ -116,7 +116,7 @@ public interface DynamicExplorationGraph {
 	 * @param filter null will be ignored
 	 * @return
 	 */
-	public default int[] search(FeatureVector query, int k, float eps, GraphFilter filter) {
+	public default int[] search(FeatureVector query, int k, float eps, VertexFilter filter) {
 		return search(Arrays.asList(query), k, eps, filter);
 	}
 	
@@ -136,7 +136,7 @@ public interface DynamicExplorationGraph {
 	 * @param filter null disables the filter
 	 * @return
 	 */
-	public default int[] search(Collection<FeatureVector> queries, int k, float eps, GraphFilter filter) {
+	public default int[] search(Collection<FeatureVector> queries, int k, float eps, VertexFilter filter) {
 		return search(queries, k, eps, filter, new int[0]);
 	}
 	
@@ -160,7 +160,7 @@ public interface DynamicExplorationGraph {
 	 * @param seedVertexLabels if empty or filled with invalid ids, the default starting point will be used instead
 	 * @return
 	 */
-	public int[] search(Collection<FeatureVector> queries, int k, float eps, GraphFilter filter, int[] seedVertexLabels);
+	public int[] search(Collection<FeatureVector> queries, int k, float eps, VertexFilter filter, int[] seedVertexLabels);
 	
 
 	
@@ -258,7 +258,7 @@ public interface DynamicExplorationGraph {
 	 * @param filter null disables the filter
 	 * @return
 	 */
-	public default int[] explore(int seedLabel, int k, float eps, GraphFilter filter) {
+	public default int[] explore(int seedLabel, int k, float eps, VertexFilter filter) {
 		return explore(new int[] { seedLabel }, k, eps, filter);
 	}
 	
@@ -281,7 +281,7 @@ public interface DynamicExplorationGraph {
 	 * @param filter null disables the filter
 	 * @return
 	 */
-	public int[] explore(int[] seedLabels, int k, float eps, GraphFilter filter);
+	public int[] explore(int[] seedLabels, int k, float eps, VertexFilter filter);
 	
 	/**
 	 * Does the graph has a vertex with this label
@@ -328,6 +328,13 @@ public interface DynamicExplorationGraph {
 	 * @return
 	 */
 	public VertexCursor vertexCursor();
+	
+	/**
+	 * This filter object contains all labels which are used in this graph.
+	 * 
+	 * @return 
+	 */
+	public VertexFilter labelFilter();
 		
 	/**
 	 * Iterate over all neighbors of a vertex (given by the label) and consume their ids and weights
@@ -352,7 +359,7 @@ public interface DynamicExplorationGraph {
 	 * @param filter of valid labels
 	 * @return
 	 */
-	public int getRandomLabel(Random random, GraphFilter filter);
+	public int getRandomLabel(Random random, VertexFilter filter);
 	
 	
 	/**

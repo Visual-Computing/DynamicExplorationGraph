@@ -30,7 +30,7 @@ public class FLASnoMapSorter {
 	protected final float radiusEnd;
 	protected final float initialRadFactor;
 
-	protected final float weightHole = 0.01f;    	// TODO adjust to the amount of holes
+	protected final float weightHole = 0.01f;    	// adjust to the amount of holes
 	protected final float weightSwappable = 1f;  
 	protected final float weightNonSwappable = 100f;  
 
@@ -40,8 +40,11 @@ public class FLASnoMapSorter {
 	private int columns = 0;
 	
 	private float[][] distMatrix;
-	private int[] fixedPos = null;        
-    private boolean[] isFixedPosition = null;
+	private boolean hasFixedPositions = false;
+	private byte[] positionStatus = null;  // indicates the state of the position (swappable=0, border=1, fixed=2)
+	private int[] borderPositions = null;
+	private static final int FIXED  = 2;
+	private static final int BORDER = 1;
     
     // temporary variables
     private int[] swapPositions;
@@ -69,7 +72,7 @@ public class FLASnoMapSorter {
 	 * @param grid
 	 * @return
 	 */
-	public static float[][] precomputedDistFunc(MapPlace[] grid, FeatureSpace distFunc) {
+	public static float[][] precomputedDistFunc(MapPlace[] grid, FeatureSpace distFunc, byte[] positionStatus) {
 		final List<MapPlace> elements = new ArrayList<>();
 		for (int i = 0; i < grid.length; i++) {
 			final MapPlace element = grid[i];
@@ -89,7 +92,8 @@ public class FLASnoMapSorter {
 		final float[][] distMatrix = new float[elementCount][elementCount];
 		for (int i = 0; i < elementCount-1; i++) 
 			for (int j = i + 1; j < elementCount; j++) 
-				distMatrix[i][j] = distMatrix[j][i] = distFunc.computeDistance(sortedElements[i].feature, sortedElements[j].feature);
+				if (positionStatus[i] + positionStatus[j] <= BORDER)
+					distMatrix[i][j] = distMatrix[j][i] = distFunc.computeDistance(sortedElements[i].feature, sortedElements[j].feature);
 		
 		return distMatrix;
 	}
@@ -99,35 +103,68 @@ public class FLASnoMapSorter {
 		this.columns = columns;
 		this.rows = rows;
 
-		// prepare fixed positions
-		int fixedPosCount = 0;
-		{
+		// prepare auxiliary data for fixed positions
+		this.hasFixedPositions = Arrays.stream(imageGrid).anyMatch(MapPlace::isFixed);
+		this.positionStatus = new byte[imageGrid.length]; // prefilled with status SWAPPABLE		
+		if(hasFixedPositions) {
+
+			// mark all fixed positions
+			final boolean[] isFixedPosition = new boolean[imageGrid.length];
 			for (int i = 0; i < imageGrid.length; i++) 
-				if(imageGrid[i].isFixed)
-					fixedPosCount++;
-			
-			// gather all positions of the fixed elements 
-			if(fixedPosCount > 0) {			
-				this.isFixedPosition = new boolean[imageGrid.length];
-				this.fixedPos = new int[fixedPosCount];
-				for (int i = 0, p = 0; i < imageGrid.length; i++) { 
-					final MapPlace mapPlace = imageGrid[i];
-					this.isFixedPosition[i] = mapPlace.isFixed;
-					if(imageGrid[i].isFixed)
-						this.fixedPos[p++] = i;
+				isFixedPosition[i] = imageGrid[i].isFixed;
+
+			// gather all positions of the fixed elements 			
+			int fixedPosCount = 0;
+			final int[] fixedPositionCheck = new int[imageGrid.length];				
+			for (int i = 0; i < isFixedPosition.length; i++) { 
+				if(isFixedPosition[i]) {
+					byte status = FIXED;
+
+					// check if surrounded by other fiexed elements
+					boolean check = false;
+
+					// north 
+					int j = i - columns;	
+					if (j >= 0 && !isFixedPosition[j])
+						check = true;
+
+					// south 
+					j = i + columns;	
+					if (j < columns*rows && !isFixedPosition[j])
+						check = true;
+
+					// east 
+					j = i + 1;	
+					if (j / columns == i / columns  && !isFixedPosition[j])
+						check = true;
+
+					// west 
+					j = i - 1;	
+					if (j >= 0 && j / columns == i / columns  && !isFixedPosition[j])
+						check = true;
+
+					if (check) {
+						status = BORDER;
+						fixedPositionCheck[fixedPosCount++] = i;
+					}
+
+					positionStatus[i] = status;
 				}
 			}
-		}
-		
-		this.distMatrix = precomputedDistFunc(imageGrid, distFunc);
+			this.borderPositions = Arrays.copyOf(fixedPositionCheck, fixedPosCount);
+		}		
+		this.distMatrix = precomputedDistFunc(imageGrid, distFunc, positionStatus);
 		
 		// temporary variables using the maximal swap position count
 		this.swapPositions = new int[Math.min(maxSwapPositions, rows*columns)];
 		this.swapCandidates = Arrays.copyOf(imageGrid, swapPositions.length);
 		this.swapDistLut  = new int[swapPositions.length][swapPositions.length];
 		this.swapDistLutF  = new float[swapPositions.length][swapPositions.length];
-		this.invGeoDist0 = new float[swapCandidates.length][fixedPosCount];
-		this.featureDist0 = new float[swapCandidates.length][fixedPosCount];
+		
+		if(borderPositions != null) {
+			this.invGeoDist0 = new float[swapCandidates.length][borderPositions.length];
+			this.featureDist0 = new float[swapCandidates.length][borderPositions.length];
+		}
 		
 		// setup the initial radius
 		float rad = Math.max(columns, rows)*initialRadFactor;	
@@ -183,13 +220,13 @@ public class FLASnoMapSorter {
 
 		final int numSwapTries = (int) Math.max(1, (sampleFactor * rows * columns / swapPositions.length));
 		for (int n = 0; n < numSwapTries; n++) {			
-			final int numSwapPositions = findSwapPositions(swapIndices, swapPositions, swapAreaWidth, swapAreaHeight); 
+			final int numSwapPositions = findSwappablePositions(swapIndices, swapPositions, swapAreaWidth, swapAreaHeight); 
 			doSwaps(swapPositions, numSwapPositions, imageGrid, radius);
 		}	
 	}
 	
 
-	private int findSwapPositions(int[] swapIndices, int[] swapPositions, int swapAreaWidth, int swapAreaHeight) {
+	private int findSwappablePositions(int[] swapIndices, int[] swapPositions, int swapAreaWidth, int swapAreaHeight) {
 		
 		// calculate start position of swap area
 		int pos0 = random.nextInt(rows*columns);
@@ -212,7 +249,7 @@ public class FLASnoMapSorter {
 
 			int pos = (pos0 + swapIndices[j]) % (rows * columns); 
 			
-			if (isFixedPosition == null || isFixedPosition[pos] == false) 
+			if (hasFixedPositions == false || positionStatus[pos] == 0) 
 				swapPositions[numSwapPositions++] = pos;
 		}
 	
@@ -234,15 +271,15 @@ public class FLASnoMapSorter {
 	
 	private int[][] calcDistLut(MapPlace[] swapCandidates, int[] swapCandidatesPos, int numSwapCandidates, MapPlace[] imageGrid, int rad) {
 		
-		boolean testFixedElements = (fixedPos != null) && (random.nextInt(5) == 0); // only 20% of the time
+		final boolean testFixedElements = hasFixedPositions && random.nextInt(10) == 0; // only 10% of the time
 		if(testFixedElements) {
 			for (int i = 0; i < numSwapCandidates; i++) {
 				final int xi = swapCandidatesPos[i] % columns;
 				final int yi = swapCandidatesPos[i] / columns;
 				final MapPlace swapCandidate = swapCandidates[i];
 				
-				for (int f = 0; f < fixedPos.length; f++) {
-					final int pos0 = fixedPos[f];
+				for (int f = 0; f < borderPositions.length; f++) {
+					final int pos0 = borderPositions[f];
 					final int x0 = pos0 % columns;
 					final int y0 = pos0 / columns;
 					final MapPlace pos0Element = imageGrid[pos0];
@@ -278,42 +315,42 @@ public class FLASnoMapSorter {
 					
 					int pos;
 					pos = yj  * columns + xjm;  // West
-					if (imageGrid[pos].getId() != -1) {
+					if (positionStatus[pos] <= BORDER && imageGrid[pos].getId() != -1) {
 						val += candidateDistLUT[imageGrid[pos].interalIndex];
 						counter++;
 					}
 					pos = yj  * columns + xjp;  // East
-					if (imageGrid[pos].getId() != -1) {
+					if (positionStatus[pos] <= BORDER && imageGrid[pos].getId() != -1) {
 						val += candidateDistLUT[imageGrid[pos].interalIndex];
 						counter++;
 					}
 					pos = yjm * columns + xj;   // North
-					if (imageGrid[pos].getId() != -1) {
+					if (positionStatus[pos] <= BORDER && imageGrid[pos].getId() != -1) {
 						val += candidateDistLUT[imageGrid[pos].interalIndex];
 						counter++;
 					}
 					pos = yjp * columns + xj;   // South
-					if (imageGrid[pos].getId() != -1) {
+					if (positionStatus[pos] <= BORDER && imageGrid[pos].getId() != -1) {
 						val += candidateDistLUT[imageGrid[pos].interalIndex];
 						counter++;
 					}
 					pos = yjm * columns + xjm;  // North West
-					if (imageGrid[pos].getId() != -1) {
+					if (positionStatus[pos] <= BORDER && imageGrid[pos].getId() != -1) {
 						val += candidateDistLUT[imageGrid[pos].interalIndex];
 						counter++;
 					}
 					pos = yjm * columns + xjp;  // North East
-					if (imageGrid[pos].getId() != -1) {
+					if (positionStatus[pos] <= BORDER && imageGrid[pos].getId() != -1) {
 						val += candidateDistLUT[imageGrid[pos].interalIndex];
 						counter++;
 					}
 					pos = yjp * columns + xjm;  // South West
-					if (imageGrid[pos].getId() != -1) {
+					if (positionStatus[pos] <= BORDER && imageGrid[pos].getId() != -1) {
 						val += candidateDistLUT[imageGrid[pos].interalIndex];
 						counter++;
 					}
 					pos = yjp * columns + xjp;  // South East 
-					if (imageGrid[pos].getId() != -1) {
+					if (positionStatus[pos] <= BORDER && imageGrid[pos].getId() != -1) {
 						val += candidateDistLUT[imageGrid[pos].interalIndex];
 						counter++;
 					}
@@ -321,7 +358,7 @@ public class FLASnoMapSorter {
 	
 					// additional costs
 					if(testFixedElements)
-						for (int f = 0; f < fixedPos.length; f++) 
+						for (int f = 0; f < borderPositions.length; f++) 
 							val += featureDist0[i][f] * invGeoDist0[j][f];
 				}
 				
@@ -364,6 +401,10 @@ public class FLASnoMapSorter {
 		
 		public int getId() {
 			return id;
+		}
+		
+		public boolean isFixed() {
+			return isFixed;
 		}
 	}
 }

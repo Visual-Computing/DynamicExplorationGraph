@@ -21,7 +21,7 @@ import com.vc.deg.FeatureVector;
 import com.vc.deg.GraphFactory;
 import com.vc.deg.HierarchicalDynamicExplorationGraph;
 import com.vc.deg.feature.BinaryFeature;
-import com.vc.deg.graph.GraphFilter;
+import com.vc.deg.graph.VertexFilter;
 import com.vc.deg.graph.VertexCursor;
 
 /**
@@ -96,7 +96,7 @@ public class GraphFilterBenchmark {
 
 			for (int p : new int[] {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,30,40,50,60,70,80,90,100}) {
 				final IntSet filteredIds = HashIntSets.newMutableSet(Arrays.copyOf(allIdsShuffled, (int)((float)(p)/100f*deg.size())));
-				final GraphFilter globalFilter = new GraphFilter() {
+				final VertexFilter globalFilter = new VertexFilter() {
 
 					@Override
 					public int size() {
@@ -119,11 +119,11 @@ public class GraphFilterBenchmark {
 					}
 				};
 
-				final Supplier<GraphFilter> filterBuilder = () -> {
+				final Supplier<VertexFilter> filterBuilder = () -> {
 
 					// the global filter might contains ids which are not in the given graph level
 					final IntSet invalidIds = HashIntSets.newImmutableSet(excludeIds);
-					final GraphFilter filterChain = new GraphFilter() {
+					final VertexFilter filterChain = new VertexFilter() {
 
 						@Override
 						public int size() {
@@ -178,7 +178,7 @@ public class GraphFilterBenchmark {
 				final int[] subsetIds = Arrays.copyOf(allIdsShuffled, (int)((float)(p)/100f*deg.size()));
 				final RoaringBitmap filteredIds = RoaringBitmap.bitmapOfUnordered(subsetIds);
 				final int filteredIdsSize = filteredIds.getCardinality();
-				final GraphFilter globalFilter = new GraphFilter() {
+				final VertexFilter globalFilter = new VertexFilter() {
 
 					@Override
 					public int size() {
@@ -201,14 +201,14 @@ public class GraphFilterBenchmark {
 					}
 				};
 				
-				final Supplier<GraphFilter> filterBuilder = () -> {
+				final Supplier<VertexFilter> filterBuilder = () -> {
 
 					// the global filter might contains ids which are not in the given graph level
 					final RoaringBitmap validIds = filteredIds.clone(); 
 					for (int excludeId : excludeIds) 
 						validIds.remove(excludeId);
 					final int validIdsSize = validIds.getCardinality();
-					final GraphFilter filter = new GraphFilter() {
+					final VertexFilter filter = new VertexFilter() {
 
 						@Override
 						public int size() {
@@ -255,12 +255,12 @@ public class GraphFilterBenchmark {
 			}
 		}
 
-		final Supplier<GraphFilter> filterBuilder = () -> {
+		final Supplier<VertexFilter> filterBuilder = () -> {
 			final RoaringBitmap validIds = degLabelsBitmap.clone();
 			for (int excludeId : excludeIds) 
 				validIds.remove(excludeId);
 			final int validIdsSize = validIds.getCardinality();
-			final GraphFilter filter = new GraphFilter() {
+			final VertexFilter filter = new VertexFilter() {
 
 				@Override
 				public int size() {
@@ -306,7 +306,7 @@ public class GraphFilterBenchmark {
 			for (int id : subsetIds)
 				filteredIds.set(id);
 			final int filteredIdsSize = filteredIds.cardinality();
-			final GraphFilter globalFilter = new GraphFilter() {
+			final VertexFilter globalFilter = new VertexFilter() {
 
 				@Override
 				public int size() {
@@ -329,14 +329,14 @@ public class GraphFilterBenchmark {
 				}
 			};
 
-			final Supplier<GraphFilter> filterBuilder = () -> {
+			final Supplier<VertexFilter> filterBuilder = () -> {
 
 				// the global filter might contains ids which are not in the given graph level
 				final BitSet validIds = (BitSet) filteredIds.clone();
 				for (int excludeId : excludeIds) 
 					validIds.clear(excludeId);
 				final int validIdsSize = validIds.cardinality();
-				final GraphFilter filter = new GraphFilter() {
+				final VertexFilter filter = new VertexFilter() {
 
 					@Override
 					public int size() {
@@ -380,7 +380,7 @@ public class GraphFilterBenchmark {
 		final int[] allIdsShuffled = shuffle(getAllIds(deg), 5);
 		for (int p : new int[] {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,30,40,50,60,70,80,90,100}) {
 			final IntSet filteredIds = HashIntSets.newMutableSet(Arrays.copyOf(allIdsShuffled, (int)((float)(p)/100f*deg.size())));
-			final GraphFilter globalFilter = new GraphFilter() {
+			final VertexFilter globalFilter = new VertexFilter() {
 
 				@Override
 				public int size() {
@@ -403,7 +403,7 @@ public class GraphFilterBenchmark {
 				}
 			};
 
-			final Supplier<GraphFilter> filterBuilder = () -> {
+			final Supplier<VertexFilter> filterBuilder = () -> {
 
 				// the global filter might contains ids which are not in the given graph level
 				final IntSet validIds = HashIntSets.newMutableSet(c -> {
@@ -416,7 +416,7 @@ public class GraphFilterBenchmark {
 				}, globalFilter.size());
 				for (int excludeId : excludeIds) 
 					validIds.removeInt(excludeId);
-				final GraphFilter filter = new GraphFilter() {
+				final VertexFilter filter = new VertexFilter() {
 
 					@Override
 					public int size() {
@@ -459,7 +459,7 @@ public class GraphFilterBenchmark {
 	public static void noGlobalFilterHashSetTest(int testCount, DynamicExplorationGraph deg, int[] excludeIds, int[] queryIds, float eps, int desiredCount) throws IOException {
 		System.out.println("noGlobalFilterHashSetTest (Graph size: "+deg.size()+") exlude "+excludeIds.length+" ids, with "+queryIds.length+" queries, eps "+eps+" and Top"+desiredCount+" results");
 
-		final Supplier<GraphFilter> filterBuilder = () -> {
+		final Supplier<VertexFilter> filterBuilder = () -> {
 			final IntSet validIds = HashIntSets.newMutableSet(c -> {
 				final VertexCursor cursor = deg.vertexCursor();
 				while(cursor.moveNext())
@@ -467,7 +467,7 @@ public class GraphFilterBenchmark {
 			}, deg.size());
 			for (int excludeId : excludeIds) 
 				validIds.removeInt(excludeId);
-			final GraphFilter filter = new GraphFilter() {
+			final VertexFilter filter = new VertexFilter() {
 
 				@Override
 				public int size() {
@@ -497,9 +497,9 @@ public class GraphFilterBenchmark {
 	public static void noGlobalFilterExcludingHashSetTest(int testCount, DynamicExplorationGraph deg, int[] excludeIds, int[] queryIds, float eps, int desiredCount) throws IOException {
 		System.out.println("noGlobalFilterExcludingHashSetTest (Graph size: "+deg.size()+") exlude "+excludeIds.length+" ids, with "+queryIds.length+" queries, eps "+eps+" and Top"+desiredCount+" results");
 
-		final Supplier<GraphFilter> filterBuilder = () -> {
+		final Supplier<VertexFilter> filterBuilder = () -> {
 			final IntSet invalidIds = HashIntSets.newMutableSet(excludeIds);
-			final GraphFilter filter = new GraphFilter() {
+			final VertexFilter filter = new VertexFilter() {
 
 				@Override
 				public int size() {
@@ -560,7 +560,7 @@ public class GraphFilterBenchmark {
 		return ids;
 	}
 
-	public static void filterTest(Supplier<GraphFilter> filterBuilder, GraphFilter globalFilter, int testCount, DynamicExplorationGraph deg, int[] excludeIds, int[] queryIds, float eps, int desiredCount) throws IOException {
+	public static void filterTest(Supplier<VertexFilter> filterBuilder, VertexFilter globalFilter, int testCount, DynamicExplorationGraph deg, int[] excludeIds, int[] queryIds, float eps, int desiredCount) throws IOException {
 		long sumFilterBuildTime = 0;
 		long sumExploreTime = 0;
 		long sumIsRight = 0;
@@ -568,7 +568,7 @@ public class GraphFilterBenchmark {
 		for (int i = 0; i < testCount*2; i++) {
 
 			long start = System.currentTimeMillis();
-			final GraphFilter filter = filterBuilder.get();
+			final VertexFilter filter = filterBuilder.get();
 			if(i > testCount)
 				sumFilterBuildTime += System.currentTimeMillis()-start;
 
@@ -613,11 +613,11 @@ public class GraphFilterBenchmark {
 	 * @param desiredCount
 	 * @return
 	 */
-	public static int[] computeGroundTruth(DynamicExplorationGraph deg, int[] excludeIds, int[] queryIds, float eps, int desiredCount, GraphFilter globalFilter) {
+	public static int[] computeGroundTruth(DynamicExplorationGraph deg, int[] excludeIds, int[] queryIds, float eps, int desiredCount, VertexFilter globalFilter) {
 		final IntSet invalidIds = HashIntSets.newMutableSet(excludeIds);
-		final GraphFilter filter;
+		final VertexFilter filter;
 		if(globalFilter == null) {
-			filter = new GraphFilter() {
+			filter = new VertexFilter() {
 	
 				@Override
 				public int size() {
@@ -639,7 +639,7 @@ public class GraphFilterBenchmark {
 				}
 			};
 		} else {
-			filter = new GraphFilter() {
+			filter = new VertexFilter() {
 
 				@Override
 				public int size() {

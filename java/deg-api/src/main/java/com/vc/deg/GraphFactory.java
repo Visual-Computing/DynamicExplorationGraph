@@ -82,6 +82,7 @@ public interface GraphFactory {
 	 */
 	public HierarchicalDynamicExplorationGraph newHierchicalGraph(FeatureSpace space, int edgesPerNode, int topRankSize);
 	
+	
 	/**
 	 * Load an existing graph. Read the feature type from the filename.
 	 * e.g. sift1m_k30.float.deg 

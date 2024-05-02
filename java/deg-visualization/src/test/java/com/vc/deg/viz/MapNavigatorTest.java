@@ -23,7 +23,8 @@ import com.vc.deg.FeatureVector;
 import com.vc.deg.HierarchicalDynamicExplorationGraph;
 import com.vc.deg.feature.FloatFeature;
 import com.vc.deg.graph.GraphDesigner;
-import com.vc.deg.viz.filter.PreparedGraphFilter;
+import com.vc.deg.graph.VertexFilter;
+import com.vc.deg.graph.VertexFilterFactory;
 import com.vc.deg.viz.model.GridMap;
 import com.vc.deg.viz.model.WorldMap;
 
@@ -53,8 +54,8 @@ public class MapNavigatorTest {
 		final GridMap localMap = new GridMap(10, 10);
 
 		// place the image 0 in the middle of the grid and arrange similar images from the graph around it
-		final int initialId = 0;
-		final PreparedGraphFilter filter = new PreparedGraphFilter(idToImageData.keySet(), topRankSize);
+		final int initialId = 0;		
+		final VertexFilter filter = VertexFilterFactory.getDefaultFactory().of(c -> idToImageData.keySet().forEach(c), topRankSize);
 		mapNavigator.jump(localMap, initialId, localMap.columns()/2, localMap.rows()/2, 0, filter);
 		final BufferedImage image1 = toGridToImage(localMap, idToImageData, 64);
 
