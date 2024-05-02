@@ -6,7 +6,11 @@ public class RoaringBitmapAdapter {
 		return rm.highLowContainer;
 	}
 	
+	public static void move(RoaringArray obj, RoaringBitmap to) {
+		to.highLowContainer = obj;
+	}
+	
 	public static void move(RoaringBitmap from, RoaringBitmap to) {
-		to.highLowContainer = getHighLowContainer(from);
+		move(getHighLowContainer(from), to);
 	}
 }

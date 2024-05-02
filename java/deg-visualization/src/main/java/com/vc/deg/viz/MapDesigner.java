@@ -65,11 +65,11 @@ public class MapDesigner {
 		final VertexFilter graphFilter = deg.labelFilter();
 		
 		// graph might contains labels which are not in the global filter
-		if(globalFilter != null) 		
+		if(globalFilter != null)
 			VertexFilterFactory.getDefaultFactory().and(graphFilter, globalFilter);
 
 		// remove all ids which are on the world map from the list of valid ids
-		if(worldMap != null) 
+		if(worldMap != null)
 			VertexFilterFactory.getDefaultFactory().remove(graphFilter, worldMap::foreachCell);
 
 		log.debug("Create filterAtLevel took "+(System.currentTimeMillis() - start)+"ms");
@@ -160,11 +160,13 @@ public class MapDesigner {
 						
 			// copy the element ids from the filter to an array, ignore the id identical to the target element
 			final int[] neighbors = new int[filterAtLevel.size() - (filterAtLevel.isValid(targetElement) ? 1 : 0)];
-			final int[] pos = new int[1];
-			filterAtLevel.forEachValidId(id -> {
-				if(id != targetElement)
-					neighbors[pos[0]++] = id;
-			});
+			{
+				final int[] pos = new int[1];
+				filterAtLevel.forEachValidId(id -> {
+					if(id != targetElement)
+						neighbors[pos[0]++] = id;
+				});
+			}
 			
 			// arrange on a bigger map first and then copy parts of it to the local map
 			final GridMap map = findMapSize(neighbors.length + ((targetElement >= 0) ? 1 : 0));

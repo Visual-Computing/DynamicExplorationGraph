@@ -37,7 +37,8 @@ import com.vc.deg.viz.model.WorldMap;
  */
 public class MapNavigatorTest {
 
-	protected static Path inputDir = Paths.get("c:\\Data\\Images\\WebImages420\\");
+	protected static Path inputDir = Paths.get("c:\\Data\\ImageSet\\WebImages\\");
+
 	protected static int fvImageSize = 3;
 	
 	public static void main(String[] args) throws IOException {
@@ -57,11 +58,11 @@ public class MapNavigatorTest {
 		final int initialId = 0;		
 		final VertexFilter filter = VertexFilterFactory.getDefaultFactory().of(c -> idToImageData.keySet().forEach(c), topRankSize);
 		mapNavigator.jump(localMap, initialId, localMap.columns()/2, localMap.rows()/2, 0, filter);
-		final BufferedImage image1 = toGridToImage(localMap, idToImageData, 64);
+		final BufferedImage image1 = toGridToImage(localMap, idToImageData, 64, false);
 
 		// move 3 steps to the right on the grid and fill the new empty grid cells with image from the graph
 		mapNavigator.move(localMap, 3, 0, 1, 0, filter);
-		final BufferedImage image2 = toGridToImage(localMap, idToImageData, 64);
+		final BufferedImage image2 = toGridToImage(localMap, idToImageData, 64, false);
 
 		// display the grid
 		final JFrame frame = new JFrame();
@@ -86,7 +87,7 @@ public class MapNavigatorTest {
 	 * @param thumbSize
 	 * @return
 	 */
-	protected static BufferedImage toGridToImage(GridMap grid, IntObjMap<ImageData> idToImageData, int thumbSize) {
+	protected static BufferedImage toGridToImage(GridMap grid, IntObjMap<ImageData> idToImageData, int thumbSize, boolean visualizeFV) {
 		final int rows = grid.rows();
 		final int columns = grid.columns();
 		final BufferedImage result = new BufferedImage(columns * thumbSize, rows * thumbSize, BufferedImage.TYPE_INT_ARGB);
@@ -94,17 +95,20 @@ public class MapNavigatorTest {
 		final Graphics g = result.getGraphics();
 		for (int r = 0; r < rows; r++) {
 			for (int c = 0; c < columns; c++) {
-				final BufferedImage imageOrig = idToImageData.get(grid.get(c, r)).getImage();
-				final Image fvImage = imageOrig.getScaledInstance(fvImageSize, fvImageSize, Image.SCALE_DEFAULT);
-				final Image outImage = fvImage.getScaledInstance(thumbSize, thumbSize, Image.SCALE_DEFAULT);
-				final int x = c * thumbSize;
-				final int y = r * thumbSize;
-				g.drawImage(outImage, x, y, x+thumbSize, y+thumbSize, 0, 0, thumbSize, thumbSize, null);
-				
-//				final BufferedImage image = idToImageData.get(grid.get(c, r)).getImage();
-//				final int x = c * thumbSize;
-//				final int y = r * thumbSize;
-//				g.drawImage(image, x, y, x+thumbSize, y+thumbSize, 0, 0, image.getWidth(), image.getHeight(), null);
+				final int id = grid.get(c, r);
+				if(id != -1) {
+					final BufferedImage imageOrig = idToImageData.get(id).getImage();				
+					final int x = c * thumbSize;
+					final int y = r * thumbSize;
+					if(visualizeFV) { 
+						
+						// draw fv
+						final Image fvImage = imageOrig.getScaledInstance(fvImageSize, fvImageSize, Image.SCALE_AREA_AVERAGING);
+						final Image outImage = fvImage.getScaledInstance(thumbSize, thumbSize, Image.SCALE_AREA_AVERAGING);
+						g.drawImage(outImage, x, y, x+thumbSize, y+thumbSize, 0, 0, thumbSize, thumbSize, null);				
+					} else
+						g.drawImage(imageOrig, x, y, x+thumbSize, y+thumbSize, 0, 0, imageOrig.getWidth(), imageOrig.getHeight(), null);
+				}
 			}
 		}
 

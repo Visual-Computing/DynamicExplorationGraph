@@ -124,10 +124,11 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 		
 	/**
 	 * Copy of the internal filter
-	 * 
+	 * TODO: should return an view in an immutable filter object
 	 * @return
 	 */
 	public MutableVertexFilter labelsFilter() {
+		allLabelsFilter.setAllElementCount(getVertexCount());
 		return allLabelsFilter.clone();
 	}
 	

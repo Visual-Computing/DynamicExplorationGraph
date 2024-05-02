@@ -61,6 +61,10 @@ public class MutableVertexFilter extends RoaringBitmap implements VertexFilter {
 		v.accept(label -> remove(label));
 	}
 	
+	public void setAllElementCount(int allElementCount) {
+		this.allElementCount = allElementCount;
+	}
+	
 	@Override
 	public void add(int x) {
 		validIdCount++;
@@ -95,11 +99,11 @@ public class MutableVertexFilter extends RoaringBitmap implements VertexFilter {
 	
 	@Override
 	public String toString() {
-		return this.getClass().getSimpleName() + " with "+getInclusionRate()+" valid ids.";
+		return this.getClass().getSimpleName() + " with "+size()+" valid ids.";
 	}
 	
 	@Override
 	public MutableVertexFilter clone() {
-		return new MutableVertexFilter(((RoaringBitmap)this).clone(), allElementCount);
+		return (MutableVertexFilter) super.clone();
 	}
 }

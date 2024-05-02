@@ -5,7 +5,7 @@ import java.util.function.IntConsumer;
 
 import com.vc.deg.graph.VertexFilter;
 
-public class VertexFilterFactory implements com.vc.deg.graph.VertexFilterFactory{
+public class VertexFilterFactory implements com.vc.deg.graph.VertexFilterFactory {
 
 	@Override
 	public VertexFilter of(int[] validIds, int allElementCount) {
