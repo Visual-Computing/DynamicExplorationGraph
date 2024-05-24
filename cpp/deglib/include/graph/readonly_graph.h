@@ -4,6 +4,7 @@
 #include <limits>
 #include <math.h>
 #include <unordered_map>
+#include <array>
 
 #include "deglib.h"
 #include "distances.h"
