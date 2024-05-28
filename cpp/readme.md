@@ -30,13 +30,14 @@ sudo update-alternatives --config gcc
 ```
 
 2. Compile deglib
-After cloning the git repository, rename `cmake-variants.sample.yaml` to `cmake-variants.yaml` and change the `DATA_PATH` variable inside of the file to represent a directory where the dataset is located.
+
+After cloning the git repository, rename `CMakePresets.json.sample` to `CMakePresets.json` and change the `DATA_PATH` variable inside of the file to represent a directory where the dataset is located.
 
 ```
 git clone --recurse-submodules https://github.com/Visual-Computing/DynamicExplorationGraph.git
 cd DynamicExplorationGraph/cpp/
 mkdir build/ && cd build/
-cmake -DCMAKE_BUIKD_TYPE=Release ..
+cmake -DCMAKE_BUILD_TYPE=Release --preset default ..
 make -j
 ```
 
@@ -47,7 +48,7 @@ To create a new graph, modify and run the `/benchmark/src/deglib_build_benchmark
 Parameters:
 
 |  Dataset  |  d  | k_ext | eps_ext | k_opt | eps_opt | i_opt |
-|:---------:|:---:|:------:|:------:|:-----:|:-------:|:-----:|
+|:---------:|:---:|:-----:|:-------:|:-----:|:-------:|:-----:|
 | Audio     | 20  |  40   |   0.3   |  20   |  0.001  |   5   |
 | Enron     | 30  |  60   |   0.3   |  30   |  0.001  |   5   |
 | SIFT1M    | 30  |  60   |   0.2   |  30   |  0.001  |   5   |
