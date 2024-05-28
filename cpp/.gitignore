@@ -3,6 +3,6 @@ dist/
 tmp/
 var/
 .vscode/
-cmake-variants.yaml
+CMakePresets.json
 build-*
 data/

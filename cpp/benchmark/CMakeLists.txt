@@ -4,6 +4,10 @@ project(benchmark)
 include_directories(${PROJECT_SOURCE_DIR}/include)
 set(DATA_PATH "" CACHE PATH "Path to data sets")
 
+if(DATA_PATH STREQUAL "")
+    message(WARNING "DATA_PATH is empty")
+endif()
+
 # build DEG benchmark files
 find_package(OpenMP REQUIRED)
 
