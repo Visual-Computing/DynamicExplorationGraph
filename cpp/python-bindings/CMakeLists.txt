@@ -16,5 +16,7 @@ find_package(pybind11 REQUIRED)
 # Create a Python module
 pybind11_add_module(deglib_cpp MODULE ${PYBIND_SOURCES})
 
+target_link_libraries(deglib_cpp PRIVATE compile-options)
+
 # Link necessary libraries (if any)
 # target_link_libraries(deglib_cpp PRIVATE <libraries>)
