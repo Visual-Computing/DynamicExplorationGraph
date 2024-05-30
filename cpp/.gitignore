@@ -5,4 +5,6 @@ var/
 .vscode/
 CMakePresets.json
 build-*
+cmake-build-default/
 data/
+python-bindings/.venv
