@@ -18,7 +18,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_library(compile-options INTERFACE)
+add_library(compile-options INTERFACE
+        python-bindings/deg_cpp/deglib_cpp.cpp)
 target_compile_features(compile-options INTERFACE cxx_std_20)
 target_compile_definitions(compile-options INTERFACE $<$<PLATFORM_ID:Windows>:NOMINMAX>)
 
@@ -66,3 +67,4 @@ add_subdirectory(external/fmt)
 
 add_subdirectory(deglib)
 add_subdirectory(benchmark)
+add_subdirectory(python-bindings)
