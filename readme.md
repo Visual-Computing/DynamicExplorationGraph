@@ -31,6 +31,17 @@ In order to reproduce our results please checkout the `\cpp\` directory and its 
 
 Please visit the cpp directory for more information about the parameters settings of the graphs and how to reproduce the crEG values.
 
+## Pre-build continuous refining Exploration Graph 
+
+The provided continuous refining Exploration Graph are used in the experiments section of our paper.
+
+|  Dataset  |  EG  |  crEG  |
+|:---------:|:----:|:------:|
+| Audio     | [audio_192D_L2_EG20.zip](https://static.visual-computing.com/paper/DEG/audio_192D_L2_EG20.zip) | [audio_192D_L2_crEG20.zip](https://static.visual-computing.com/paper/DEG/audio_192D_L2_crEG20.zip) |
+| Deep1M    | [deep1m_96D_L2_EG30.zip](https://static.visual-computing.com/paper/DEG/deep1m_96D_L2_EG30.zip) | [deep1m_96D_L2_crEG30.zip](https://static.visual-computing.com/paper/DEG/deep1m_96D_L2_crEG30.zip) |
+| SIFT1M    | [sift_128D_L2_EG30.zip](https://static.visual-computing.com/paper/DEG/sift_128D_L2_EG30.zip) | [sift_128D_L2_crEG30.zip](https://static.visual-computing.com/paper/DEG/sift_128D_L2_crEG30.zip) |
+| GloVe-100 | [glove_100D_L2_EG30.zip](https://static.visual-computing.com/paper/DEG/glove_100D_L2_EG30.zip) | [glove_100D_L2_crEG30.zip](https://static.visual-computing.com/paper/DEG/glove_100D_L2_crEG30.zip) |
+
 ## Reference
 
 Please cite our work in your publications if it helps your research:
