@@ -36,13 +36,16 @@ Please visit the cpp directory for more information about the parameters setting
 Please cite our work in your publications if it helps your research:
 
 ```
-@article{Hezel2023,
-  author = {Hezel, Nico and Barthel, Uwe Kai and Schall, Konstantin and Jung, Klaus},
-  ee = {https://arxiv.org/abs/2307.10479},
-  journal = {CoRR},
-  title = {Fast Approximate nearest neighbor search with the Dynamic Exploration Graph using continuous refinement.},
-  volume = {abs/2307.10479},
-  year = 2023
+@inproceedings{crEG,
+  author = {Hezel, Nico and Barthel, Kai Uwe and Schall, Konstantin and Jung, Klaus},
+  title = {An Exploration Graph with Continuous Refinement for Efficient Multimedia Retrieval},
+  year = 2024,
+  booktitle = {Proc. International Conference on Multimedia Retrieval (ICMR’24)},
+  ublisher = {Association for Computing Machinery},
+  address = {New York, NY, USA},
+  booktitle = {Proceedings of the 2024 International Conference on Multimedia Retrieval},
+  location = {Phuket, Thailand},
+  series = {ICMR '24}
 }
 ```
 
