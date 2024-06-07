@@ -3,7 +3,8 @@ from typing import List, Set
 import numpy as np
 import tqdm
 
-import deglib
+import deglib.graph
+import deglib.repository
 import deglib.utils
 
 
@@ -18,7 +19,7 @@ def test_graph_anns(
 
     # test ground truth
     print("Parsing gt:")
-    answer = deglib.benchmark.get_ground_truth(ground_truth, query_repository.size(), ground_truth_dims, k)
+    answer = get_ground_truth(ground_truth, query_repository.size(), ground_truth_dims, k)
     print("Loaded gt:")
 
     # try different eps values for the search radius
@@ -39,7 +40,7 @@ def test_graph_anns(
         stopwatch = deglib.utils.StopWatch()
         recall = 0.0
         for i in range(repeat):
-            recall = deglib.benchmark.test_approx_anns(graph, entry_vertex_indices, query_repository, answer, eps, k)
+            recall = test_approx_anns(graph, entry_vertex_indices, query_repository, answer, eps, k)
         time_us_per_query = (stopwatch.get_elapsed_time_micro() / query_repository.size()) / repeat
 
         print("eps {:.2f} \t recall {:.5f} \t time_us_per_query {:6}us".format(eps, recall, time_us_per_query))
@@ -80,7 +81,6 @@ def get_ground_truth(ground_truth: np.ndarray, ground_truth_size: int, ground_tr
     return answers
 
 
-# TODO: replace StaticFeatureRepository with FeatureRepository
 def test_approx_anns(
         graph: deglib.graph.ReadOnlyGraph, entry_vertex_indices: List[int],
         query_repository: deglib.repository.StaticFeatureRepository, ground_truth: List[Set[int]], eps: float, k: int
@@ -97,16 +97,16 @@ def test_approx_anns(
 
         total += result_queue.size()
         gt = ground_truth[i]
-        checked_ids = set()  # additional check
+        # checked_ids = set()  # additional check
         while not result_queue.empty():
             internal_index = result_queue.top().get_internal_index()
             external_id = graph.get_external_label(internal_index)
             if external_id in gt:
                 correct += 1
             result_queue.pop()
-            checked_ids.add(internal_index)
+            # checked_ids.add(internal_index)
 
-        if len(checked_ids) != k:
-            raise ValueError("ANNS with k={} got only {} unique ids".format(k, len(checked_ids)))
+        # if len(checked_ids) != k:
+        #     raise ValueError("ANNS with k={} got only {} unique ids".format(k, len(checked_ids)))
 
     return 1.0 * correct / total

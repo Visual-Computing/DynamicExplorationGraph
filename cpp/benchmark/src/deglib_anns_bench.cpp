@@ -30,10 +30,13 @@ int main(int argc, char *argv[]) {
     fmt::print("Load graph {} \n", graph_file);
     fmt::print("Actual memory usage: {} Mb\n", getCurrentRSS() / 1000000);
     fmt::print("Max memory usage: {} Mb\n", getPeakRSS() / 1000000);
+    StopW stopW;
     const auto graph = deglib::graph::load_readonly_graph(graph_file.c_str());
+    long long int elapsed_us = stopW.getElapsedTimeMicro();
     fmt::print("Graph with {} vertices \n", graph.size());
     fmt::print("Actual memory usage: {} Mb\n", getCurrentRSS() / 1000000);
     fmt::print("Max memory usage: {} Mb\n", getPeakRSS() / 1000000);
+    fmt::print("Loading Graph took {} us\n", elapsed_us);
 
     // load the test data and run several ANNS on the graph   
     const auto query_repository = deglib::load_static_repository(query_file.c_str());
