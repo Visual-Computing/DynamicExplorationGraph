@@ -18,6 +18,8 @@ def test_deglib_anns_bench():
         print("use arch  ...")
 
     data_path: pathlib.Path = pathlib.Path(sys.argv[1])
+    repeat_test = 1
+    k = 100
 
     query_file: pathlib.Path = data_path / "SIFT1M" / "sift_query.fvecs"
     graph_file: pathlib.Path = (data_path / "deg" / "best_distortion_decisions" /
@@ -29,12 +31,23 @@ def test_deglib_anns_bench():
     assert graph_file.is_file(), 'Could not find graph file: {}'.format(graph_file)
     assert gt_file.is_file(), 'Could not find ground truth file: {}'.format(gt_file)
 
+    print("Load graph {}".format(graph_file))
+    print("Actual memory usage: {} Mb".format(0))  # TODO
+    print("Max memory usage: {} Mb".format(0))  # TODO
     graph = deglib.graph.load_readonly_graph(graph_file)
-
     print("Graph with {} vertices".format(graph.size()))
+    print("Actual memory usage: {} Mb".format(0))
+    print("Max memory usage: {} Mb".format(0))
 
-    query_repository = deglib::load_static_repository(query_file.c_str());
-    fmt::print("{} Query Features with {} dimensions \n", query_repository.size(), query_repository.dims());
+    query_repository = deglib.load_static_repository(query_file)
+    print("{} Query Features with {} dimensions".format(query_repository.size(), query_repository.dims()))
+
+    ground_truth = deglib.datasets.ivecs_read(gt_file)  # TODO: deglib.load_static_repository and ivecs_read are similar
+    print(ground_truth.shape)
+
+    print("Test with k={} and repeat_test={}".format(k, repeat_test))
+
+    deglib.benchmark.test_graph_anns(graph, query_repository, ground_truth, ground_truth.shape[1], repeat_test, k)
 
 
 if __name__ == '__main__':
