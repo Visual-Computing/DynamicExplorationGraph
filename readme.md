@@ -1,9 +1,15 @@
-# DEG: Fast Approximate nearest neighbor search with the Dynamic Exploration Graph using continuous refinement
+# DEG: Fast Approximate Nearest Neighbor Search
 
-The Dynamic Exploration Graph (DEG) is a graph-based approximate nearest neighbor search (ANNS) algorithm. It can index static and dynamic data set using an incremental extension, a continuous edge optimization and a deletion algorithm. The resulting graph is highly efficient in regards to the queries per seconds in relation to the received recall rate. DEG delivers state-of-the-art performance for indexed and unindexed queries (query is not part of the index). For more details please refere to our paper:
+The Dynamic Exploration Graph (DEG) is a graph-based algorithm for approximate nearest neighbor search (ANNS). It indexes both static and dynamic datasets using three algorithms: incremental extension, continuous edge optimization, and vertex deletion. The resulting graph demonstrates high efficiency in terms of queries per second relative to the achieved recall rate. DEG provides state-of-the-art performance for both indexed and unindexed queries (where the query is not part of the index).
+
+## Release
+
+- [2024/05/01] Our paper [An Exploration Graph with Continuous Refinement for Efficient Multimedia Retrieval](https://doi.org/10.1145/3652583.3658117) is accepted by ICMR2024 as **oral presentation**
+- [2023/12/02] New continuous refining Exploration Graph (crEG) containing a more efficient and thread-safe way to extend DEG. Currently found in the [crEG branch](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/crEG) of this repository.
+- [2023/07/19] First version of Dynamic Exploration Graph is out! For more details please refere to our paper: 
 [Fast Approximate nearest neighbor search with the Dynamic Exploration Graph using continuous refinement](https://arxiv.org/abs/2307.10479)
 
-## Benchmark datasets incl. exploration queries
+## Benchmark datasets including exploration queries and ground truth data
 
 | Data set  | Download                 | dimension | nb base vectors | nb query vectors | original website                                               |
 |-----------|--------------------------|-----------|-----------------|------------------|----------------------------------------------------------------|
