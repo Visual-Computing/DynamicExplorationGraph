@@ -5,6 +5,7 @@ import sys
 import pathlib
 
 import deglib
+from deglib.utils import StopWatch
 
 
 def test_deglib_anns_bench():
@@ -34,16 +35,19 @@ def test_deglib_anns_bench():
     print("Load graph {}".format(graph_file))
     print("Actual memory usage: {} Mb".format(0))  # TODO
     print("Max memory usage: {} Mb".format(0))  # TODO
+    stop_watch = StopWatch()
     graph = deglib.graph.load_readonly_graph(graph_file)
+    elapsed_us = stop_watch.get_elapsed_time_micro()
     print("Graph with {} vertices".format(graph.size()))
     print("Actual memory usage: {} Mb".format(0))
     print("Max memory usage: {} Mb".format(0))
+    print("Loading Graph took {} us".format(elapsed_us))
 
     query_repository = deglib.load_static_repository(query_file)
     print("{} Query Features with {} dimensions".format(query_repository.size(), query_repository.dims()))
 
     ground_truth = deglib.datasets.ivecs_read(gt_file)  # TODO: deglib.load_static_repository and ivecs_read are similar
-    print(ground_truth.shape)
+    print("{} ground truth {} dimensions \n", ground_truth.shape[0], ground_truth.shape[1])
 
     print("Test with k={} and repeat_test={}".format(k, repeat_test))
 

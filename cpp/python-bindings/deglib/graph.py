@@ -37,6 +37,12 @@ class ReadOnlyGraph:
         query = assure_array(query, 'query', np.float32)
         return self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_computation_count)
 
+    def get_entry_vertex_indices(self) -> List[int]:
+        return self.graph_cpp.get_entry_vertex_indices()
+
+    def get_external_label(self, index: int) -> int:
+        return self.graph_cpp.get_external_label(index)
+
 
 def load_readonly_graph(path: pathlib.Path | str) -> ReadOnlyGraph:
     return ReadOnlyGraph(deglib_cpp.load_readonly_graph(str(path)))

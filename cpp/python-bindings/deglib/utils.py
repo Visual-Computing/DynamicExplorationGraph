@@ -1,3 +1,4 @@
+import time
 import warnings
 import numpy as np
 
@@ -35,3 +36,20 @@ def assure_array(arr: np.ndarray, name: str, dtype: np.dtype) -> np.ndarray:
     """
     assure_dtype(arr, name, dtype)
     return assure_contiguous(arr, name)
+
+
+def noop(*_args, **_kwargs):
+    pass
+
+
+def no_tqdm(iterable, *_args, **_kwargs):
+    return iterable
+
+
+class StopWatch:
+    def __init__(self):
+        self.start_time = time.perf_counter_ns()
+
+    def get_elapsed_time_micro(self) -> int:
+        end_time = time.perf_counter_ns()
+        return (end_time - self.start_time) // 1000

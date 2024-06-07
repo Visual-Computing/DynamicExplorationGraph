@@ -34,7 +34,8 @@ bool sse_usable() {
 deglib::search::ResultSet read_only_graph_search_wrapper(
     const deglib::graph::ReadOnlyGraph &graph, const std::vector<uint32_t> &entry_vertex_indices,
     const py::array_t<float, py::array::c_style> query, const float eps, const uint32_t k,
-    const uint32_t max_distance_computation_count) {
+    const uint32_t max_distance_computation_count)
+{
   py::buffer_info query_info = query.request();
   return graph.search(entry_vertex_indices, static_cast<std::byte *>(query_info.ptr), eps, k,
                       max_distance_computation_count);
@@ -59,7 +60,10 @@ PYBIND11_MODULE(deglib_cpp, m) {
       .def("get_internal_index", &deglib::search::ObjectDistance::getInternalIndex);
 
   py::class_<deglib::search::ResultSet>(m, "ResultSet")
-      .def("top", &deglib::search::ResultSet::top);
+      .def("top", &deglib::search::ResultSet::top)
+      .def("pop", &deglib::search::ResultSet::pop)
+      .def("size", [](const deglib::search::ResultSet& rs) { return rs.size(); }) // TODO: why can't I bind function reference directly?
+      .def("empty", [](const deglib::search::ResultSet& rs) { return rs.empty(); });
 
   // TODO: SpaceInterface in c++ is general over datatype, here we use float always
   py::class_<deglib::SpaceInterface<float>>(m, "SpaceInterface")
@@ -80,12 +84,21 @@ PYBIND11_MODULE(deglib_cpp, m) {
            }, py::return_value_policy::reference
       )
       .def("get_internal_index", &deglib::graph::ReadOnlyGraph::getInternalIndex)
-      .def("search", &read_only_graph_search_wrapper);
+      .def("search", &read_only_graph_search_wrapper)
+      .def("get_entry_vertex_indices", &deglib::graph::ReadOnlyGraph::getEntryVertexIndices)
+      .def("get_external_label", &deglib::graph::ReadOnlyGraph::getExternalLabel);
 
   m.def("load_readonly_graph", &deglib::graph::load_readonly_graph);
 
   // repository
   py::class_<deglib::StaticFeatureRepository>(m, "StaticFeatureRepository")
+      .def("get_feature",
+           [](const deglib::StaticFeatureRepository &fr, const uint32_t vertex_id) {
+             return py::memoryview::from_buffer(
+                 fr.getFeature(vertex_id),
+                 sizeof(float), "f", {static_cast<ssize_t>(fr.dims())}, {sizeof(float)});
+           }, py::return_value_policy::reference
+      )
       .def("size", &deglib::StaticFeatureRepository::size)
       .def("dims", &deglib::StaticFeatureRepository::dims);
 
