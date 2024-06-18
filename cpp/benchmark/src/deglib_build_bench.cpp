@@ -159,8 +159,8 @@ int main() {
   
     // // ------------------------------- audio -----------------------------------------
     // const auto repository_file      = (data_path / "audio" / "audio_base.fvecs").string();
-    // const auto query_file           = (data_path / "enron" / "enron_query.fvecs").string();
-    // const auto gt_file              = (data_path / "enron" / "enron_groundtruth.ivecs").string();
+    // const auto query_file           = (data_path / "audio" / "audio_query.fvecs").string();
+    // const auto gt_file              = (data_path / "audio" / "audio_groundtruth.ivecs").string();
     // const auto graph_file           = (data_path / "deg" / "neighbor_choice" / "192D_L2_K20_AddK40Eps0.3Low_schemeA.deg").string();
 
     // if(std::filesystem::exists(graph_file.c_str()) == false)
@@ -171,8 +171,8 @@ int main() {
 
     // // ------------------------------- enron -----------------------------------------
     // const auto repository_file      = (data_path / "enron" / "enron_base.fvecs").string();
-    // const auto query_file           = (data_path / "audio" / "audio_query.fvecs").string();
-    // const auto gt_file              = (data_path / "audio" / "audio_groundtruth.ivecs").string();
+    // const auto query_file           = (data_path / "enron" / "enron_query.fvecs").string();
+    // const auto gt_file              = (data_path / "enron" / "enron_groundtruth.ivecs").string();
     // const auto graph_file           = (data_path / "deg" / "neighbor_choice" / "1369D_L2_K30_AddK60Eps0.3High_schemeC.deg").string();
 
     // if(std::filesystem::exists(graph_file.c_str()) == false)

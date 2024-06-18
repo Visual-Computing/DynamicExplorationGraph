@@ -1,7 +1,7 @@
 import pathlib
-import random
 import sys
 import enum
+import time
 
 import deglib
 
@@ -35,22 +35,21 @@ def main():
 
     data_path: pathlib.Path = pathlib.Path(sys.argv[1])
 
-    dataset_name = DatasetName.Sift1m
+    dataset_name = DatasetName.Audio
     if dataset_name == DatasetName.Audio:
         repository_file = data_path / "audio" / "audio_base.fvecs"
-        query_file = data_path / "enron" / "enron_query.fvecs"
-        gt_file = data_path / "enron" / "enron_groundtruth.ivecs"
+        query_file = data_path / "audio" / "audio_query.fvecs"
+        gt_file = data_path / "audio" / "audio_groundtruth.ivecs"
         graph_file = data_path / "deg" / "neighbor_choice" / "192D_L2_K20_AddK40Eps0.3Low_schemeA.deg"
 
         if not graph_file.is_file():
-            create_graph(repository_file, DataStreamType.AddAll, graph_file, d=20, k_ext=40, eps_ext=0.3, k_opt=20,
-                         eps_opt=0.001, i_opt=5)
+            create_graph(repository_file, DataStreamType.AddAll, graph_file, d=20, k_ext=40, eps_ext=0.3, k_opt=20, eps_opt=0.001, i_opt=5)
         test_graph(query_file, gt_file, graph_file, repeat=50, k=20)
 
     elif dataset_name == DatasetName.Enron:
         repository_file = data_path / "enron" / "enron_base.fvecs"
-        query_file = data_path / "audio" / "audio_query.fvecs"
-        gt_file = data_path / "audio" / "audio_groundtruth.ivecs"
+        query_file = data_path / "enron" / "enron_query.fvecs"
+        gt_file = data_path / "enron" / "enron_groundtruth.ivecs"
         graph_file = data_path / "deg" / "neighbor_choice" / "1369D_L2_K30_AddK60Eps0.3High_schemeC.deg"
 
         if not graph_file.is_file():
@@ -71,8 +70,7 @@ def main():
                       "+0_improveEvery2ndNonPerfectEdge3.deg")
 
         if not graph_file.is_file():
-            create_graph(repository_file, data_stream_type, graph_file, d=30, k_ext=60, eps_ext=0.2, k_opt=30,
-                         eps_opt=0.001, i_opt=5)
+            create_graph(repository_file, data_stream_type, graph_file, d=30, k_ext=60, eps_ext=0.2, k_opt=30, eps_opt=0.001, i_opt=5)
         test_graph(query_file, gt_file, graph_file, repeat=1, k=100)
 
     elif dataset_name == DatasetName.Glove:
@@ -95,7 +93,7 @@ def create_graph(
         repository_file: pathlib.Path, data_stream_type: DataStreamType, graph_file: pathlib.Path, d: int, k_ext: int,
         eps_ext: float, k_opt: int, eps_opt: float, i_opt: int
 ):
-    rnd = random.Random(7)  # default 7
+    rnd = deglib.Mt19937()  # default 7
     metric = deglib.Metric.L2  # default metric
     swap_tries = 0  # additional swap tries between the next graph extension
     additional_swap_tries = 0  # increase swap try count for each successful swap
@@ -110,93 +108,96 @@ def create_graph(
     dims = repository.dims()
     max_vertex_count = repository.size()
     feature_space = deglib.FloatSpace(dims, metric)
-    # graph = deglib.graph.SizeBoundedGraph(max_vertex_count, d, feature_space)
+    graph = deglib.graph.SizeBoundedGraph(max_vertex_count, d, feature_space)
     # TODO: report actual mem usage
     print("Actual memory usage: {} Mb, Max memory usage: {} Mb after setup empty graph".format(0, 0))
 
-    """
-    // create a graph builder to add vertices to the new graph and improve its edges
-    fmt::print("Start graph builder \n");   
-    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, k_ext, eps_ext, k_opt, eps_opt, i_opt, swap_tries, additional_swap_tries);
-    
-    // provide all features to the graph builder at once. In an online system this will be called multiple times
-    auto base_size = uint32_t(repository.size());
-    auto addEntry = [&builder, &repository, dims] (auto label)
-    {
-        auto feature = reinterpret_cast<const std::byte*>(repository.getFeature(label));
-        auto feature_vector = std::vector<std::byte>{feature, feature + dims * sizeof(float)};
-        builder.addEntry(label, std::move(feature_vector));
-    };
-    if(data_stream_type == AddHalfRemoveAndAddOneAtATime) {
-        auto base_size_half = base_size / 2;
-        auto base_size_fourth = base_size / 4;
-        for (uint32_t i = 0; i < base_size_fourth; i++) { 
-            addEntry(0 + i);
-            addEntry(base_size_half + i);
-        }
-        for (uint32_t i = 0; i < base_size_fourth; i++) { 
-            addEntry(base_size_fourth + i);
-            addEntry(base_size_half + base_size_fourth + i);
-            builder.removeEntry(base_size_half + (i * 2) + 0);
-            builder.removeEntry(base_size_half + (i * 2) + 1);
-        }
-    } else {
-        base_size /= (data_stream_type == AddHalf) ? 2 : 1;
-        for (uint32_t i = 0; i < base_size; i++) 
-            addEntry(i);
+    # create a graph builder to add vertices to the new graph and improve its edges
+    print("Start graph builder")
+    builder = deglib.builder.EvenRegularGraphBuilder(
+        graph, rnd, k_ext, eps_ext, k_opt, eps_opt, i_opt, swap_tries, additional_swap_tries
+    )
 
-        if(data_stream_type == AddAllRemoveHalf) 
-            for (uint32_t i = base_size/2; i < base_size; i++) 
-                builder.removeEntry(i);
-    }
-    repository.clear();
-    fmt::print("Actual memory usage: {} Mb, Max memory usage: {} Mb after setup graph builder\n", getCurrentRSS() / 1000000, getPeakRSS() / 1000000);
+    # provide all features to the graph builder at once. In an online system this will be called multiple times
+    base_size = repository.size()
 
-    // check the integrity of the graph during the graph build process
-    const auto log_after = 100000;
+    def add_entry(label):
+        feature = repository.get_feature(label)
+        # feature_vector = std::vector<std::byte>{feature, feature + dims * sizeof(float)};
+        builder.add_entry(label, feature)
+    if data_stream_type == DataStreamType.AddHalfRemoveAndAddOneAtATime:
+        base_size_half = base_size // 2
+        base_size_fourth = base_size // 4
+        for i in range(base_size_fourth):
+            add_entry(0 + i)
+            add_entry(base_size_half + i)
+        for i in range(base_size_fourth):
+            add_entry(base_size_fourth + i)
+            add_entry(base_size_half + base_size_fourth + i)
+            builder.remove_entry(base_size_half + (i * 2) + 0)
+            builder.remove_entry(base_size_half + (i * 2) + 1)
 
-    fmt::print("Start building \n");    
-    auto start = std::chrono::steady_clock::now();
-    uint64_t duration_ms = 0;
-    const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
-        const auto size = graph.size();
+    else:
+        base_size //= 2 if (data_stream_type == DataStreamType.AddHalf) else 1
+        for i in range(base_size):
+            add_entry(i)
 
-        if(status.step % log_after == 0 || size == base_size) {    
-            duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
-            auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 1);
-            auto weight_histogram_sorted = deglib::analysis::calc_edge_weight_histogram(graph, true, 1);
-            auto weight_histogram = deglib::analysis::calc_edge_weight_histogram(graph, false, 1);
-            auto valid_weights = deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_regularity(graph, uint32_t(size), true);
-            auto connected = deglib::analysis::check_graph_connectivity(graph);
-            auto duration = duration_ms / 1000;
-            auto currRSS = getCurrentRSS() / 1000000;
-            auto peakRSS = getPeakRSS() / 1000000;
-            fmt::print("{:7} vertices, {:5}s, {:8} / {:8} improv, Q: {:4.2f} -> Sorted:{:.1f}, InOrder:{:.1f}, {} connected & {}, RSS {} & peakRSS {}\n", 
-                        size, duration, status.improved, status.tries, avg_edge_weight, fmt::join(weight_histogram_sorted, " "), fmt::join(weight_histogram, " "), connected ? "" : "not", valid_weights ? "valid" : "invalid", currRSS, peakRSS);
-            start = std::chrono::steady_clock::now();
-        }
-        else if(status.step % (log_after/10) == 0) {    
-            duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
-            auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 1);
-                        auto connected = deglib::analysis::check_graph_connectivity(graph);
+        if data_stream_type == DataStreamType.AddAllRemoveHalf:
+            for i in range(base_size//2, base_size):
+                builder.remove_entry(i)
 
-            auto duration = duration_ms / 1000;
-            auto currRSS = getCurrentRSS() / 1000000;
-            auto peakRSS = getPeakRSS() / 1000000;
-            fmt::print("{:7} vertices, {:5}s, {:8} / {:8} improv, AEW: {:4.2f}, {} connected, RSS {} & peakRSS {}\n", size, duration, status.improved, status.tries, avg_edge_weight, connected ? "" : "not", currRSS, peakRSS);
-            start = std::chrono::steady_clock::now();
-        }
-    };
+    repository.clear()
+    print("Actual memory usage: {} Mb, Max memory usage: {} Mb after setup graph builder".format(0, 0))
 
-    // start the build process
-    builder.build(improvement_callback, false);
-    fmt::print("Actual memory usage: {} Mb, Max memory usage: {} Mb after building the graph in {} secs\n", getCurrentRSS() / 1000000, getPeakRSS() / 1000000, duration_ms / 1000);
+    # check the integrity of the graph during the graph build process
+    log_after = 100000
 
-    // store the graph
-    graph.saveGraph(graph_file.c_str());
+    print("Start building")
+    start = time.perf_counter()
+    duration_ms = 0  # TODO: rename to duration
 
-    fmt::print("The graph contains {} non-RNG edges\n", deglib::analysis::calc_non_rng_edges(graph));
-    """
+    def improvement_callback(status):
+        size = graph.size()
+        nonlocal duration_ms
+        nonlocal start
+
+        if status.step % log_after == 0 or size == base_size:
+            duration_ms += time.perf_counter() - start
+            avg_edge_weight = deglib.analysis.calc_avg_edge_weight(graph, 1)
+            weight_histogram_sorted = deglib.analysis.calc_edge_weight_histogram(graph, True, 1)
+            weight_histogram = deglib.analysis.calc_edge_weight_histogram(graph, False, 1)
+            valid_weights = deglib.analysis.check_graph_weights(graph) and deglib.analysis.check_graph_regularity(graph, size, True)
+            connected = deglib.analysis.check_graph_connectivity(graph)
+            # duration = duration_ms / 1000
+            currRSS = 0
+            peakRSS = 0
+            print("{:7} vertices, {:5}s, {:8} / {:8} improv, Q: {:4.2f} -> Sorted:{}, InOrder:{}, {} connected & {}, RSS {} & peakRSS {}".format(
+                    size, duration_ms, status.improved, status.tries, avg_edge_weight,
+                    " ".join(str(h) for h in weight_histogram_sorted), " ".join(str(h) for h in weight_histogram),
+                    "" if connected else "not", "valid" if valid_weights else "invalid",
+                    currRSS, peakRSS
+                )
+            )
+            start = time.perf_counter()
+        elif status.step % (log_after//10) == 0:
+            duration_ms += time.perf_counter() - start
+            avg_edge_weight = deglib.analysis.calc_avg_edge_weight(graph, 1)
+            connected = deglib.analysis.check_graph_connectivity(graph)
+
+            duration = duration_ms
+            currRSS = 0
+            peakRSS = 0
+            print("{:7} vertices, {:5}s, {:8} / {:8} improv, AEW: {:4.2f}, {} connected, RSS {} & peakRSS {}".format(size, duration, status.improved, status.tries, avg_edge_weight, "" if connected else "not", currRSS, peakRSS))
+            start = time.perf_counter()
+
+    # start the build process
+    builder.build(improvement_callback, False)
+    print("Actual memory usage: {} Mb, Max memory usage: {} Mb after building the graph in {} secs".format(0, 0, duration_ms))
+
+    # store the graph
+    graph.save_graph(graph_file)
+
+    print("The graph contains {} non-RNG edges".format(deglib.analysis.calc_non_rng_edges(graph)))
 
 
 def test_graph(query_file: pathlib.Path, gt_file: pathlib.Path, graph_file: pathlib.Path, repeat: int, k: int):
