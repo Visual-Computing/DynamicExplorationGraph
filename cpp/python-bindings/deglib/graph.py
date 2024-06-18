@@ -5,6 +5,7 @@ import numpy as np
 import deglib_cpp
 import pathlib
 
+from .distances import FloatSpace, Metric
 from .utils import assure_array
 
 
@@ -19,8 +20,9 @@ class ReadOnlyGraph:
     def size(self) -> int:
         return self.graph_cpp.size()
 
-    def get_feature_space(self) -> deglib_cpp.FloatSpace:
-        return self.graph_cpp.get_feature_space()
+    def get_feature_space(self) -> FloatSpace:
+        # first two parameters get ignored
+        return FloatSpace(0, Metric.L2, float_space_cpp=self.graph_cpp.get_feature_space())
 
     # TODO: copy=True parameter
     def get_feature_vector(self, index) -> np.ndarray:
