@@ -8,6 +8,9 @@ import deglib
 from deglib.utils import StopWatch
 
 
+# TODO: check slow performance
+
+
 def test_deglib_anns_bench():
     print("Testing ...")
 

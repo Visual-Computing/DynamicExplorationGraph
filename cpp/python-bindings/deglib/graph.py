@@ -22,6 +22,7 @@ class ReadOnlyGraph:
     def get_feature_space(self) -> deglib_cpp.FloatSpace:
         return self.graph_cpp.get_feature_space()
 
+    # TODO: copy=True parameter
     def get_feature_vector(self, index) -> np.ndarray:
         memory_view = self.graph_cpp.get_feature_vector(index)
         feature_vector = np.asarray(memory_view)
