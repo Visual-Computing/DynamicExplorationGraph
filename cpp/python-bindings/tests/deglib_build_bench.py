@@ -201,24 +201,18 @@ def create_graph(
 
 
 def test_graph(query_file: pathlib.Path, gt_file: pathlib.Path, graph_file: pathlib.Path, repeat: int, k: int):
-    print('test_graph')
     # load an existing graph
-    """
-    fmt::print("Load graph {} \n", graph_file);
-    const auto graph = deglib::graph::load_readonly_graph(graph_file.c_str());
-    fmt::print("Actual memory usage: {} Mb, Max memory usage: {} Mb after loading the graph\n", getCurrentRSS() / 1000000, getPeakRSS() / 1000000);
+    print("Load graph {}".format(graph_file))
+    graph = deglib.graph.load_readonly_graph(graph_file)
+    print("Actual memory usage: {} Mb, Max memory usage: {} Mb after loading the graph".format(0, 0))
 
-    const auto query_repository = deglib::load_static_repository(query_file.c_str());
-    fmt::print("{} Query Features with {} dimensions \n", query_repository.size(), query_repository.dims());
+    query_repository = deglib.load_static_repository(query_file)
+    print("{} Query Features with {} dimensions".format(query_repository.size(), query_repository.dims()))
 
-    size_t dims_out;
-    size_t count_out;
-    const auto ground_truth_f = deglib::fvecs_read(gt_file.c_str(), dims_out, count_out);
-    const auto ground_truth = (uint32_t*)ground_truth_f.get(); // not very clean, works as long as sizeof(int) == sizeof(float)
-    fmt::print("{} ground truth {} dimensions \n", count_out, dims_out);
+    ground_truth = deglib.datasets.ivecs_read(gt_file)  # dims_out, count_out
+    print("{} ground truth {} dimensions".format(ground_truth.shape[0], ground_truth.shape[1]))
 
-    deglib::benchmark::test_graph_anns(graph, query_repository, ground_truth, (uint32_t)dims_out, repeat, k);
-    """
+    deglib.benchmark.test_graph_anns(graph, query_repository, ground_truth, ground_truth.shape[1], repeat, k)
 
 
 if __name__ == '__main__':
