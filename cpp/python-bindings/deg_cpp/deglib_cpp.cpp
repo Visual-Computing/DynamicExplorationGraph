@@ -97,6 +97,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
       )
       .def("get_internal_index", &deglib::graph::ReadOnlyGraph::getInternalIndex)
       .def("search", &read_only_graph_search_wrapper)
+      .def("explore", &deglib::graph::ReadOnlyGraph::explore)
       .def("get_entry_vertex_indices", &deglib::graph::ReadOnlyGraph::getEntryVertexIndices)
       .def("get_external_label", &deglib::graph::ReadOnlyGraph::getExternalLabel);
 

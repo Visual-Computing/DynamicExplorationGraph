@@ -209,7 +209,7 @@ def test_graph(query_file: pathlib.Path, gt_file: pathlib.Path, graph_file: path
     query_repository = deglib.load_static_repository(query_file)
     print("{} Query Features with {} dimensions".format(query_repository.size(), query_repository.dims()))
 
-    ground_truth = deglib.datasets.ivecs_read(gt_file)  # dims_out, count_out
+    ground_truth = deglib.datasets.ivecs_read(gt_file)
     print("{} ground truth {} dimensions".format(ground_truth.shape[0], ground_truth.shape[1]))
 
     deglib.benchmark.test_graph_anns(graph, query_repository, ground_truth, ground_truth.shape[1], repeat, k)

@@ -110,3 +110,65 @@ def test_approx_anns(
         #     raise ValueError("ANNS with k={} got only {} unique ids".format(k, len(checked_ids)))
 
     return 1.0 * correct / total
+
+
+# TODO: replace ReadOnlyGraph with SearchGraph
+def test_graph_explore(
+        graph: deglib.graph.ReadOnlyGraph, query_count: int, ground_truth: np.ndarray, ground_truth_dims: int,
+        entry_vertices: np.ndarray, entry_vertex_dims: int, repeat: int, k: int
+):
+    if ground_truth_dims < k:
+        raise ValueError("ground truth data does not have enough dimensions, expected {} got {}".format(k, ground_truth_dims))
+
+    # reproducible entry point for the graph search
+    entry_vertex_indices: List[np.ndarray] = []
+    for i in range(query_count):
+        entry_vertex = entry_vertices[i]
+        entry_vertex_indices.append(entry_vertex)
+
+    # ground truth data
+    answer = deglib.benchmark.get_ground_truth(ground_truth, query_count, ground_truth_dims, k)
+
+    # try different k values
+    k_factor = 10
+    for f in range(3+1):
+        k_factor *= 10
+        for i in range(1 if (f == 0) else 2, 11):
+            max_distance_count = (k + k_factor * (i-1)) if (f == 0) else (k_factor * i)
+
+            #  for (uint32_t i = 1; i < 14; i++) {
+            #      const auto max_distance_count = i;
+
+            stopwatch = deglib.utils.StopWatch()
+            recall = 0.0
+            for r in range(repeat):
+                recall = deglib.benchmark.test_approx_explore(graph, entry_vertex_indices, answer, k, max_distance_count)
+            time_us_per_query = stopwatch.get_elapsed_time_micro() // (query_count * repeat)
+
+            print("max_distance_count {:5}, k {:4}, recall {:.5f}, time_us_per_query {:4}us\n", max_distance_count, k, recall, time_us_per_query)
+            if recall > 1.0:
+                break
+
+    print("Actual memory usage: {} Mb".format(0))
+    print("Max memory usage: {} Mb".format(0))
+
+
+# TODO: replace ReadOnlyGraph with SearchGraph
+def test_approx_explore(graph: deglib.graph.ReadOnlyGraph, entry_vertex_indices: np.ndarray, ground_truth: np.ndarray,
+                        k: int, max_distance_count: int) -> float:
+    total = 0
+    correct = 0
+    for i in range(entry_vertex_indices.shape[0]):
+        entry_vertex_index = entry_vertex_indices[i][0]
+        result_queue = graph.explore(entry_vertex_index, k, max_distance_count)
+
+        total += k
+        gt = ground_truth[i]
+        while not result_queue.empty():
+            internal_index = result_queue.top().getInternalIndex()
+            external_id = graph.get_external_label(internal_index)
+            if external_id in gt:
+                correct += 1
+            result_queue.pop()
+
+    return 1.0 * correct / total
