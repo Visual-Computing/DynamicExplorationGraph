@@ -19,6 +19,9 @@ class StaticFeatureRepository:
     def dims(self) -> int:
         return self.repository_cpp.dims()
 
+    def clear(self):
+        self.repository_cpp.clear()
+
 
 def load_static_repository(path: pathlib.Path | str) -> StaticFeatureRepository:
     repo_cpp = deglib_cpp.load_static_repository(str(path))
