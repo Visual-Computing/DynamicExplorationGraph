@@ -46,6 +46,9 @@ class ReadOnlyGraph:
     def get_external_label(self, index: int) -> int:
         return self.graph_cpp.get_external_label(index)
 
+    def explore(self, entry_vertex_index: int, k: int, max_distance_count: int):
+        self.graph_cpp.explore(entry_vertex_index, k, max_distance_count)
+
 
 def load_readonly_graph(path: pathlib.Path | str) -> ReadOnlyGraph:
     return ReadOnlyGraph(deglib_cpp.load_readonly_graph(str(path)))
