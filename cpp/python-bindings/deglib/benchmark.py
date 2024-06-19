@@ -8,6 +8,41 @@ import deglib.repository
 import deglib.utils
 
 
+def get_near_avg_entry_index(graph: deglib.graph.ReadOnlyGraph, verbose: bool = False) -> int:
+    """
+    Get the internal index of the graph, that is closest to the average vector in the graph.
+    """
+    feature_dims = graph.get_feature_space().dim()
+    graph_size = graph.size()
+    avg_fv = np.zeros(feature_dims, dtype=np.float32)
+    progress_func = tqdm.tqdm if verbose else deglib.utils.no_tqdm
+    for i in progress_func(range(graph_size), desc='calculating average vector'):
+        fv = graph.get_feature_vector(i)
+        avg_fv += fv
+
+    avg_fv /= graph_size
+    seed = [graph.get_internal_index(0)]
+    result_queue = graph.search(seed, avg_fv, 0.1, 30)
+    entry_vertex_id = result_queue.top().get_internal_index()
+
+    return entry_vertex_id
+
+
+def get_ground_truth(
+        ground_truth: np.ndarray, ground_truth_size: int, ground_truth_dims: int, k: int
+) -> List[Set[int]]:
+    if ground_truth_dims < k:
+        raise ValueError("Ground truth data has only {} elements but need {}".format(ground_truth_dims, k))
+
+    answers = [set() for _ in range(ground_truth_size)]
+    for i in range(ground_truth_size):
+        gt = answers[i]
+        for j in range(k):
+            gt.add(ground_truth[i, j])
+
+    return answers
+
+
 def test_graph_anns(
         graph: deglib.graph.ReadOnlyGraph, query_repository: np.ndarray,
         ground_truth: np.ndarray, ground_truth_dims: int, repeat: int, k: int
@@ -46,41 +81,6 @@ def test_graph_anns(
         print("eps {:.2f} \t recall {:.5f} \t time_us_per_query {:6}us".format(eps, recall, time_us_per_query))
         if recall > 1.0:
             break
-
-
-def get_near_avg_entry_index(graph: deglib.graph.ReadOnlyGraph, verbose: bool = False) -> int:
-    """
-    Get the internal index of the graph, that is closest to the average vector in the graph.
-    """
-    feature_dims = graph.get_feature_space().dim()
-    graph_size = graph.size()
-    avg_fv = np.zeros(feature_dims, dtype=np.float32)
-    progress_func = tqdm.tqdm if verbose else deglib.utils.no_tqdm
-    for i in progress_func(range(graph_size), desc='calculating average vector'):
-        fv = graph.get_feature_vector(i)
-        avg_fv += fv
-
-    avg_fv /= graph_size
-    seed = [graph.get_internal_index(0)]
-    result_queue = graph.search(seed, avg_fv, 0.1, 30)
-    entry_vertex_id = result_queue.top().get_internal_index()
-
-    return entry_vertex_id
-
-
-def get_ground_truth(
-        ground_truth: np.ndarray, ground_truth_size: int, ground_truth_dims: int, k: int
-) -> List[Set[int]]:
-    if ground_truth_dims < k:
-        raise ValueError("Ground truth data has only {} elements but need {}".format(ground_truth_dims, k))
-
-    answers = [set() for _ in range(ground_truth_size)]
-    for i in range(ground_truth_size):
-        gt = answers[i]
-        for j in range(k):
-            gt.add(ground_truth[i, j])
-
-    return answers
 
 
 def test_approx_anns(
