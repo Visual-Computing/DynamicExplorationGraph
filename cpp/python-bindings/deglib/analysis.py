@@ -12,29 +12,29 @@ from .graph import SizeBoundedGraph
 
 # TODO: replace SizeBoundedGraph with MutableGraph interface
 def calc_avg_edge_weight(graph: SizeBoundedGraph, scale: int = 1) -> float:
-    return calc_avg_edge_weight_cpp(graph._to_cpp(), scale)
+    return calc_avg_edge_weight_cpp(graph.to_cpp(), scale)
 
 
 # TODO: replace SizeBoundedGraph with MutableGraph interface
 def calc_edge_weight_histogram(graph: SizeBoundedGraph, sort: bool, scale: int = 1) -> List[float]:
-    return calc_edge_weight_histogram_cpp(graph._to_cpp(), sort, scale)
+    return calc_edge_weight_histogram_cpp(graph.to_cpp(), sort, scale)
 
 
 # TODO: replace SizeBoundedGraph with MutableGraph interface
 def check_graph_weights(graph: SizeBoundedGraph) -> bool:
-    return check_graph_weights_cpp(graph._to_cpp())
+    return check_graph_weights_cpp(graph.to_cpp())
 
 
 # TODO: replace SizeBoundedGraph with SearchGraph interface
 def check_graph_regularity(graph: SizeBoundedGraph, expected_vertices: int, check_back_link: bool = False) -> bool:
-    return check_graph_regularity_cpp(graph._to_cpp(), expected_vertices, check_back_link)
+    return check_graph_regularity_cpp(graph.to_cpp(), expected_vertices, check_back_link)
 
 
 # TODO: replace SizeBoundedGraph with SearchGraph interface
 def check_graph_connectivity(graph: SizeBoundedGraph) -> bool:
-    return check_graph_connectivity_cpp(graph._to_cpp())
+    return check_graph_connectivity_cpp(graph.to_cpp())
 
 
 # TODO: replace SizeBoundedGraph with MutableGraph interface
 def calc_non_rng_edges(graph: SizeBoundedGraph) -> int:
-    return calc_non_rng_edges_cpp(graph._to_cpp())
+    return calc_non_rng_edges_cpp(graph.to_cpp())

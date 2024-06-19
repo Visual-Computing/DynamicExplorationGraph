@@ -11,7 +11,7 @@ class EvenRegularGraphBuilder:
             improve_eps: float, max_path_length: int = 10, swap_tries: int = 3, additional_swap_tries: int = 3
     ):
         self.builder_cpp = deglib_cpp.EvenRegularGraphBuilder(
-            graph._to_cpp(), rng._to_cpp(), extend_k, extend_eps, improve_k, improve_eps, max_path_length, swap_tries,
+            graph.to_cpp(), rng.to_cpp(), extend_k, extend_eps, improve_k, improve_eps, max_path_length, swap_tries,
             additional_swap_tries
         )
 
