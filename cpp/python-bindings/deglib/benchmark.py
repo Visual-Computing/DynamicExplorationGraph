@@ -77,9 +77,9 @@ def test_graph_anns(
         recall = 0.0
         for i in range(repeat):
             recall = test_approx_anns(graph, entry_vertex_indices, query_repository, answer, eps, k)
-        time_us_per_query = (stopwatch.get_elapsed_time_micro() / query_repository.shape[0]) / repeat
+        time_us_per_query = (stopwatch.get_elapsed_time_micro() // query_repository.shape[0]) // repeat
 
-        print("eps {:.2f} \t recall {:.5f} \t time_us_per_query {:6}us".format(eps, recall, time_us_per_query))
+        print("eps {:.2f}    recall {:.5f}    time_us_per_query {:4} us".format(eps, recall, time_us_per_query))
         if recall > 1.0:
             break
 
@@ -151,8 +151,7 @@ def test_graph_explore(
             if recall > 1.0:
                 break
 
-    print("Actual memory usage: {} Mb".format(0))
-    print("Max memory usage: {} Mb".format(0))
+    print("Actual memory usage: {} Mb".format(deglib.utils.get_current_rss_mb()))
 
 
 # TODO: replace ReadOnlyGraph with SearchGraph

@@ -1,6 +1,7 @@
 import time
 import warnings
 import numpy as np
+import psutil
 
 
 class NonContiguousWarning(Warning):
@@ -53,3 +54,7 @@ class StopWatch:
     def get_elapsed_time_micro(self) -> int:
         end_time = time.perf_counter_ns()
         return (end_time - self.start_time) // 1000
+
+
+def get_current_rss_mb():
+    return psutil.Process().memory_info().rss // 1000_000
