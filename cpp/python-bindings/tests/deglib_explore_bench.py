@@ -63,10 +63,7 @@ def main():
     print("{} ground truth {} dimensions".format(ground_truth.shape[0], ground_truth.shape[1]))
 
     # explore the graph
-    deglib.benchmark.test_graph_explore(
-        graph, ground_truth.shape[0], ground_truth, ground_truth.shape[1], entry_vertex, entry_vertex.shape[1],
-        repeat_test, k
-    )
+    deglib.benchmark.test_graph_explore(graph, ground_truth, entry_vertex, repeat_test, k)
 
     print("Test OK")
 

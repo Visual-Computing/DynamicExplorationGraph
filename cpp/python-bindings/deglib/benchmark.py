@@ -29,7 +29,7 @@ def test_graph_anns(
     # eps_parameter = [0.00, 0.03, 0.05, 0.07, 0.09, 0.12, 0.2, 0.3]                    # audio
     eps_parameter = [0.01, 0.05, 0.1, 0.12, 0.14, 0.16, 0.18, 0.2]                    # SIFT1M k=100
     # eps_parameter = [0.01, 0.05, 0.1, 0.12, 0.14, 0.16, 0.18, 0.2]                    # SIFT1M k=100
-    # eps_parameter = [100, 140, 171, 206, 249, 500, 1000]                              # greeedy search SIFT1M k=100
+    # eps_parameter = [100, 140, 171, 206, 249, 500, 1000]                              # greedy search SIFT1M k=100
     # eps_parameter = [0.00, 0.01, 0.05, 0.1, 0.15, 0.2]                                # SIFT1M k=1
     # eps_parameter = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.2]  # clipfv
     # eps_parameter = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08 0.09, 0.1, 0.2]   # gpret
@@ -68,11 +68,13 @@ def get_near_avg_entry_index(graph: deglib.graph.ReadOnlyGraph, verbose: bool = 
     return entry_vertex_id
 
 
-def get_ground_truth(ground_truth: np.ndarray, ground_truth_size: int, ground_truth_dims: int, k: int) -> List[Set[int]]:
+def get_ground_truth(
+        ground_truth: np.ndarray, ground_truth_size: int, ground_truth_dims: int, k: int
+) -> List[Set[int]]:
     if ground_truth_dims < k:
         raise ValueError("Ground truth data has only {} elements but need {}".format(ground_truth_dims, k))
 
-    answers = [set() for i in range(ground_truth_size)]
+    answers = [set() for _ in range(ground_truth_size)]
     for i in range(ground_truth_size):
         gt = answers[i]
         for j in range(k):
@@ -114,20 +116,17 @@ def test_approx_anns(
 
 # TODO: replace ReadOnlyGraph with SearchGraph
 def test_graph_explore(
-        graph: deglib.graph.ReadOnlyGraph, query_count: int, ground_truth: np.ndarray, ground_truth_dims: int,
-        entry_vertices: np.ndarray, entry_vertex_dims: int, repeat: int, k: int
+        graph: deglib.graph.ReadOnlyGraph, ground_truth: np.ndarray, entry_vertices: np.ndarray, repeat: int, k: int
 ):
-    if ground_truth_dims < k:
-        raise ValueError("ground truth data does not have enough dimensions, expected {} got {}".format(k, ground_truth_dims))
+    if ground_truth.shape[1] < k:
+        raise ValueError(
+            "ground truth data does not have enough dimensions, expected {} got {}".format(k, ground_truth.shape[1])
+        )
 
-    # reproducible entry point for the graph search
-    entry_vertex_indices: List[np.ndarray] = []
-    for i in range(query_count):
-        entry_vertex = entry_vertices[i]
-        entry_vertex_indices.append(entry_vertex)
+    # replaced entry_vertex_indices with entry vertices as it is the same
 
     # ground truth data
-    answer = deglib.benchmark.get_ground_truth(ground_truth, query_count, ground_truth_dims, k)
+    answer = deglib.benchmark.get_ground_truth(ground_truth, ground_truth.shape[0], ground_truth.shape[1], k)
 
     # try different k values
     k_factor = 10
@@ -142,10 +141,12 @@ def test_graph_explore(
             stopwatch = deglib.utils.StopWatch()
             recall = 0.0
             for r in range(repeat):
-                recall = deglib.benchmark.test_approx_explore(graph, entry_vertex_indices, answer, k, max_distance_count)
-            time_us_per_query = stopwatch.get_elapsed_time_micro() // (query_count * repeat)
+                recall = deglib.benchmark.test_approx_explore(graph, entry_vertices, answer, k, max_distance_count)
+            time_us_per_query = stopwatch.get_elapsed_time_micro() // (ground_truth.shape[0] * repeat)
 
-            print("max_distance_count {:5}, k {:4}, recall {:.5f}, time_us_per_query {:4}us\n", max_distance_count, k, recall, time_us_per_query)
+            print("max_distance_count {:6}, k {:4}, recall {:.5f}, time_us_per_query {:4}us".format(
+                max_distance_count, k, recall, time_us_per_query)
+            )
             if recall > 1.0:
                 break
 
@@ -154,18 +155,21 @@ def test_graph_explore(
 
 
 # TODO: replace ReadOnlyGraph with SearchGraph
-def test_approx_explore(graph: deglib.graph.ReadOnlyGraph, entry_vertex_indices: np.ndarray, ground_truth: np.ndarray,
-                        k: int, max_distance_count: int) -> float:
+def test_approx_explore(
+        graph: deglib.graph.ReadOnlyGraph, entry_vertex_indices: np.ndarray, ground_truth: List[Set[int]], k: int,
+        max_distance_count: int
+) -> float:
     total = 0
     correct = 0
     for i in range(entry_vertex_indices.shape[0]):
-        entry_vertex_index = entry_vertex_indices[i][0]
+        # noinspection PyTypeChecker
+        entry_vertex_index: int = entry_vertex_indices[i][0]
         result_queue = graph.explore(entry_vertex_index, k, max_distance_count)
 
         total += k
         gt = ground_truth[i]
         while not result_queue.empty():
-            internal_index = result_queue.top().getInternalIndex()
+            internal_index = result_queue.top().get_internal_index()
             external_id = graph.get_external_label(internal_index)
             if external_id in gt:
                 correct += 1
