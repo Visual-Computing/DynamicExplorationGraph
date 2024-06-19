@@ -99,14 +99,14 @@ def create_graph(
     additional_swap_tries = 0  # increase swap try count for each successful swap
     # load data
     print("Load Data")
-    repository = deglib.load_static_repository(repository_file)
+    repository = deglib.repository.fvecs_read(repository_file)
     # TODO: report actual mem usage
-    print("Actual memory usage: {} Mb, Max memory usage: {} Mb after loading data\n", 0, 0)
+    print("Actual memory usage: {} Mb, Max memory usage: {} Mb after loading data".format(0, 0))
 
     # create a new graph
-    print("Setup empty graph with {} vertices in {}D feature space".format(repository.size(), repository.dims()))
-    dims = repository.dims()
-    max_vertex_count = repository.size()
+    print("Setup empty graph with {} vertices in {}D feature space".format(repository.shape[0], repository.shape[1]))
+    dims = repository.shape[1]
+    max_vertex_count = repository.shape[0]
     feature_space = deglib.FloatSpace(dims, metric)
     graph = deglib.graph.SizeBoundedGraph(max_vertex_count, d, feature_space)
     # TODO: report actual mem usage
@@ -119,10 +119,10 @@ def create_graph(
     )
 
     # provide all features to the graph builder at once. In an online system this will be called multiple times
-    base_size = repository.size()
+    base_size = repository.shape[0]
 
     def add_entry(label):
-        feature = repository.get_feature(label)
+        feature = repository[label]
         # feature_vector = std::vector<std::byte>{feature, feature + dims * sizeof(float)};
         builder.add_entry(label, feature)
     if data_stream_type == DataStreamType.AddHalfRemoveAndAddOneAtATime:
@@ -146,7 +146,7 @@ def create_graph(
             for i in range(base_size//2, base_size):
                 builder.remove_entry(i)
 
-    repository.clear()
+    del repository
     print("Actual memory usage: {} Mb, Max memory usage: {} Mb after setup graph builder".format(0, 0))
 
     # check the integrity of the graph during the graph build process
@@ -206,10 +206,10 @@ def test_graph(query_file: pathlib.Path, gt_file: pathlib.Path, graph_file: path
     graph = deglib.graph.load_readonly_graph(graph_file)
     print("Actual memory usage: {} Mb, Max memory usage: {} Mb after loading the graph".format(0, 0))
 
-    query_repository = deglib.load_static_repository(query_file)
-    print("{} Query Features with {} dimensions".format(query_repository.size(), query_repository.dims()))
+    query_repository = deglib.repository.fvecs_read(query_file)
+    print("{} Query Features with {} dimensions".format(query_repository.shape[0], query_repository.shape[1]))
 
-    ground_truth = deglib.datasets.ivecs_read(gt_file)
+    ground_truth = deglib.repository.ivecs_read(gt_file)
     print("{} ground truth {} dimensions".format(ground_truth.shape[0], ground_truth.shape[1]))
 
     deglib.benchmark.test_graph_anns(graph, query_repository, ground_truth, ground_truth.shape[1], repeat, k)

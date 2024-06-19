@@ -9,7 +9,7 @@ import deglib.utils
 
 
 def test_graph_anns(
-        graph: deglib.graph.ReadOnlyGraph, query_repository: deglib.repository.StaticFeatureRepository,
+        graph: deglib.graph.ReadOnlyGraph, query_repository: np.ndarray,
         ground_truth: np.ndarray, ground_truth_dims: int, repeat: int, k: int
 ):
     # entry_vertex_id = get_near_avg_entry_index(graph)
@@ -19,7 +19,7 @@ def test_graph_anns(
 
     # test ground truth
     print("Parsing gt:")
-    answer = get_ground_truth(ground_truth, query_repository.size(), ground_truth_dims, k)
+    answer = get_ground_truth(ground_truth, query_repository.shape[0], ground_truth_dims, k)
     print("Loaded gt:")
 
     # try different eps values for the search radius
@@ -41,7 +41,7 @@ def test_graph_anns(
         recall = 0.0
         for i in range(repeat):
             recall = test_approx_anns(graph, entry_vertex_indices, query_repository, answer, eps, k)
-        time_us_per_query = (stopwatch.get_elapsed_time_micro() / query_repository.size()) / repeat
+        time_us_per_query = (stopwatch.get_elapsed_time_micro() / query_repository.shape[0]) / repeat
 
         print("eps {:.2f} \t recall {:.5f} \t time_us_per_query {:6}us".format(eps, recall, time_us_per_query))
         if recall > 1.0:
@@ -85,12 +85,12 @@ def get_ground_truth(
 
 def test_approx_anns(
         graph: deglib.graph.ReadOnlyGraph, entry_vertex_indices: List[int],
-        query_repository: deglib.repository.StaticFeatureRepository, ground_truth: List[Set[int]], eps: float, k: int
+        query_repository: np.ndarray, ground_truth: List[Set[int]], eps: float, k: int
 ):
     total = 0
     correct = 0
-    for i in range(query_repository.size()):
-        query = query_repository.get_feature(i)
+    for i in range(query_repository.shape[0]):
+        query = query_repository[i]
         result_queue = graph.search(entry_vertex_indices, query, eps, k)
         # result_queue = graph.search(entry_vertex_indices, query, eps, k, graph.size())  # max distance calcs
 

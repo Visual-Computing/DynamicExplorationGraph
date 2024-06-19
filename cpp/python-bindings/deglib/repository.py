@@ -1,28 +1,18 @@
-import pathlib
+from pathlib import Path
 import numpy as np
 
-import deglib_cpp
+
+def ivecs_read(filename: str | Path) -> np.ndarray:
+    """
+    Taken from https://github.com/facebookresearch/faiss/blob/main/benchs/datasets.py#L12
+    """
+    a = np.fromfile(filename, dtype='int32')
+    d = a[0]
+    return a.reshape(-1, d + 1)[:, 1:].copy()
 
 
-class StaticFeatureRepository:
-    def __init__(self, repository_cpp: deglib_cpp.StaticFeatureRepository):
-        self.repository_cpp = repository_cpp
-
-    def get_feature(self, vertex_id: int) -> np.ndarray:
-        memory_view = self.repository_cpp.get_feature(vertex_id)
-        feature_vector = np.asarray(memory_view)
-        return feature_vector
-
-    def size(self) -> int:
-        return self.repository_cpp.size()
-
-    def dims(self) -> int:
-        return self.repository_cpp.dims()
-
-    def clear(self):
-        self.repository_cpp.clear()
-
-
-def load_static_repository(path: pathlib.Path | str) -> StaticFeatureRepository:
-    repo_cpp = deglib_cpp.load_static_repository(str(path))
-    return StaticFeatureRepository(repo_cpp)
+def fvecs_read(filename: str | Path) -> np.ndarray:
+    """
+    Taken from https://github.com/facebookresearch/faiss/blob/main/benchs/datasets.py#L12
+    """
+    return ivecs_read(filename).view('float32')
