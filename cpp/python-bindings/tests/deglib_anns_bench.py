@@ -5,7 +5,7 @@ import sys
 import pathlib
 
 import deglib
-from deglib.utils import StopWatch
+from deglib.utils import StopWatch, get_current_rss_mb
 
 
 # TODO: check slow performance
@@ -36,14 +36,12 @@ def test_deglib_anns_bench():
     assert gt_file.is_file(), 'Could not find ground truth file: {}'.format(gt_file)
 
     print("Load graph {}".format(graph_file))
-    print("Actual memory usage: {} Mb".format(0))  # TODO
-    print("Max memory usage: {} Mb".format(0))  # TODO
+    print("Actual memory usage: {} Mb".format(get_current_rss_mb()))
     stop_watch = StopWatch()
     graph = deglib.graph.load_readonly_graph(graph_file)
     elapsed_us = stop_watch.get_elapsed_time_micro()
     print("Graph with {} vertices".format(graph.size()))
-    print("Actual memory usage: {} Mb".format(0))
-    print("Max memory usage: {} Mb".format(0))
+    print("Actual memory usage: {} Mb".format(get_current_rss_mb()))
     print("Loading Graph took {} us".format(elapsed_us))
 
     query_repository = deglib.repository.fvecs_read(query_file)
