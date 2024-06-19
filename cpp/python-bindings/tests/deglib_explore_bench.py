@@ -55,11 +55,11 @@ def main():
     graph = deglib.graph.load_readonly_graph(graph_file)
 
     # load starting vertex data
-    entry_vertex = deglib.datasets.ivecs_read(query_file)
+    entry_vertex = deglib.repository.ivecs_read(query_file)
     print("{} entry vertex {} dimensions".format(entry_vertex.shape[0], entry_vertex.shape[1]))
 
     # load ground truth data (nearest neighbors of the starting vertices)
-    ground_truth = deglib.datasets.ivecs_read(gt_file)
+    ground_truth = deglib.repository.ivecs_read(gt_file)
     print("{} ground truth {} dimensions".format(ground_truth.shape[0], ground_truth.shape[1]))
 
     # explore the graph

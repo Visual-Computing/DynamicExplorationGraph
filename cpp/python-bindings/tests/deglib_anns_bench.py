@@ -46,11 +46,11 @@ def test_deglib_anns_bench():
     print("Max memory usage: {} Mb".format(0))
     print("Loading Graph took {} us".format(elapsed_us))
 
-    query_repository = deglib.load_static_repository(query_file)
-    print("{} Query Features with {} dimensions".format(query_repository.size(), query_repository.dims()))
+    query_repository = deglib.repository.fvecs_read(query_file)
+    print("{} Query Features with {} dimensions".format(query_repository.shape[0], query_repository.shape[1]))
 
-    ground_truth = deglib.datasets.ivecs_read(gt_file)  # TODO: deglib.load_static_repository and ivecs_read are similar
-    print("{} ground truth {} dimensions \n", ground_truth.shape[0], ground_truth.shape[1])
+    ground_truth = deglib.repository.ivecs_read(gt_file)
+    print("{} ground truth {} dimensions".format(ground_truth.shape[0], ground_truth.shape[1]))
 
     print("Test with k={} and repeat_test={}".format(k, repeat_test))
 
