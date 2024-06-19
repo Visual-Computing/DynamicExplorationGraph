@@ -15,3 +15,12 @@ TODO
 
 ## Referencing c++ memory
 TODO
+
+## TODO
+- complete api
+  - write some tests
+- check bad performance
+- documentation
+  - code comments
+  - readme
+- copy argument for functions with numpy arrays
