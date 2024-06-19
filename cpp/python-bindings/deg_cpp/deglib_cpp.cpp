@@ -63,7 +63,9 @@ PYBIND11_MODULE(deglib_cpp, m) {
 
   py::class_<deglib::FloatSpace>(m, "FloatSpace")
       .def(py::init<const size_t, const deglib::Metric>())
-      .def("dim", &deglib::FloatSpace::dim);
+      .def("dim", &deglib::FloatSpace::dim)
+      .def("metric", &deglib::FloatSpace::metric)
+      .def("get_data_size", &deglib::FloatSpace::get_data_size);
 
   py::class_<deglib::search::ObjectDistance>(m, "ObjectDistance")
       .def("get_internal_index", &deglib::search::ObjectDistance::getInternalIndex);
@@ -124,6 +126,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
       // .def("search", &read_only_graph_search_wrapper)
       .def("get_entry_vertex_indices", &deglib::graph::SizeBoundedGraph::getEntryVertexIndices)
       .def("get_external_label", &deglib::graph::SizeBoundedGraph::getExternalLabel)
+      .def("get_edges_per_vertex", &deglib::graph::SizeBoundedGraph::getEdgesPerVertex)
       .def("save_graph", &deglib::graph::SizeBoundedGraph::saveGraph);
 
   // repository

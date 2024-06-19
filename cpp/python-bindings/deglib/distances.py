@@ -1,4 +1,6 @@
 import enum
+from abc import ABC, abstractmethod
+from typing import Optional
 
 import deglib_cpp
 
@@ -14,14 +16,34 @@ class Metric(enum.IntEnum):
             return deglib_cpp.Metric.InnerProduct
 
 
-class FloatSpace:
-    def __init__(self, dim: int, metric: Metric, float_space_cpp=None):
+class SpaceInterface(ABC):
+    @abstractmethod
+    def dim(self) -> int:
+        return NotImplemented()
+
+    @abstractmethod
+    def metric(self) -> Metric:
+        return NotImplemented()
+
+    @abstractmethod
+    def get_data_size(self) -> int:
+        return NotImplemented()
+
+
+class FloatSpace(SpaceInterface):
+    def __init__(self, dim: int, metric: Metric, float_space_cpp: Optional[deglib_cpp.FloatSpace] = None):
         if float_space_cpp is None:
             float_space_cpp = deglib_cpp.FloatSpace(dim, metric.to_cpp())
         self.float_space_cpp = float_space_cpp
 
     def dim(self) -> int:
         return self.float_space_cpp.dim()
+
+    def metric(self) -> deglib_cpp.Metric:
+        return self.float_space_cpp.metric()
+
+    def get_data_size(self) -> int:
+        return self.float_space_cpp.get_data_size()
 
     def to_cpp(self) -> deglib_cpp.FloatSpace:
         return self.float_space_cpp
