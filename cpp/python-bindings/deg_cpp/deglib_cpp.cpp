@@ -32,8 +32,9 @@ bool sse_usable() {
 }
 
 
-deglib::search::ResultSet read_only_graph_search_wrapper(
-    const deglib::graph::ReadOnlyGraph &graph, const std::vector<uint32_t> &entry_vertex_indices,
+template<typename G>
+deglib::search::ResultSet graph_search_wrapper(
+    const G& graph, const std::vector<uint32_t> &entry_vertex_indices,
     const py::array_t<float, py::array::c_style> query, const float eps, const uint32_t k,
     const uint32_t max_distance_computation_count)
 {
@@ -98,9 +99,13 @@ PYBIND11_MODULE(deglib_cpp, m) {
            }, py::return_value_policy::reference
       )
       .def("get_internal_index", &deglib::graph::ReadOnlyGraph::getInternalIndex)
-      .def("search", &read_only_graph_search_wrapper)
+      .def("search", &graph_search_wrapper<deglib::graph::ReadOnlyGraph>)
       .def("explore", &deglib::graph::ReadOnlyGraph::explore)
       .def("get_entry_vertex_indices", &deglib::graph::ReadOnlyGraph::getEntryVertexIndices)
+      .def("get_edges_per_vertex", &deglib::graph::ReadOnlyGraph::getEdgesPerVertex)
+      .def("get_neighbor_indices", &deglib::graph::ReadOnlyGraph::getNeighborIndices)
+      .def("has_vertex", &deglib::graph::ReadOnlyGraph::hasVertex)
+      .def("has_edge", &deglib::graph::ReadOnlyGraph::hasEdge)
       .def("get_external_label", &deglib::graph::ReadOnlyGraph::getExternalLabel);
 
   m.def("load_readonly_graph", &deglib::graph::load_readonly_graph);
@@ -110,37 +115,73 @@ PYBIND11_MODULE(deglib_cpp, m) {
 
   // size bounded graph
   py::class_<deglib::graph::SizeBoundedGraph, deglib::graph::MutableGraph>(m, "SizeBoundedGraph")
-      .def(py::init<const uint32_t, const uint8_t, const deglib::FloatSpace>())
-      .def("size", &deglib::graph::SizeBoundedGraph::size)
-      .def("get_feature_space",
-           [](const deglib::graph::SizeBoundedGraph &g) -> const deglib::SpaceInterface<float> & { return g.getFeatureSpace(); },
-           py::return_value_policy::reference)
-      .def("get_feature_vector",
-           [](const deglib::graph::SizeBoundedGraph &g, const uint32_t internal_idx) {
-             return py::memoryview::from_buffer(
-                 g.getFeatureVector(internal_idx),
-                 sizeof(float), "f", {static_cast<ssize_t>(g.getFeatureSpace().dim())}, {sizeof(float)});
-           }, py::return_value_policy::reference
-      )
-      .def("get_internal_index", &deglib::graph::SizeBoundedGraph::getInternalIndex)
-      // .def("search", &read_only_graph_search_wrapper)
-      .def("get_entry_vertex_indices", &deglib::graph::SizeBoundedGraph::getEntryVertexIndices)
-      .def("get_external_label", &deglib::graph::SizeBoundedGraph::getExternalLabel)
-      .def("get_edges_per_vertex", &deglib::graph::SizeBoundedGraph::getEdgesPerVertex)
-      .def("save_graph", &deglib::graph::SizeBoundedGraph::saveGraph);
+    .def(py::init<const uint32_t, const uint8_t, const deglib::FloatSpace>())
+    .def("size", &deglib::graph::SizeBoundedGraph::size)
+    .def("get_feature_space",
+         [](const deglib::graph::SizeBoundedGraph &g) -> const deglib::SpaceInterface<float> & { return g.getFeatureSpace(); },
+         py::return_value_policy::reference)
+    .def("get_feature_vector",
+         [](const deglib::graph::SizeBoundedGraph &g, const uint32_t internal_idx) {
+           return py::memoryview::from_buffer(
+               g.getFeatureVector(internal_idx),
+               sizeof(float), "f", {static_cast<ssize_t>(g.getFeatureSpace().dim())}, {sizeof(float)});
+         }, py::return_value_policy::reference
+    )
+    .def("get_internal_index", &deglib::graph::SizeBoundedGraph::getInternalIndex)
+    // .def("search", &read_only_graph_search_wrapper)
+    .def("get_entry_vertex_indices", &deglib::graph::SizeBoundedGraph::getEntryVertexIndices)
+    .def("get_external_label", &deglib::graph::SizeBoundedGraph::getExternalLabel)
+    .def("get_edges_per_vertex", &deglib::graph::SizeBoundedGraph::getEdgesPerVertex)
+    .def("save_graph", &deglib::graph::SizeBoundedGraph::saveGraph)
+    .def("add_vertex", [] (deglib::graph::SizeBoundedGraph& g, const uint32_t external_label, const py::array_t<std::byte, py::array::c_style> feature_vector) -> uint32_t {
+        const py::buffer_info feature_info = feature_vector.request();
+        const std::byte* ptr = static_cast<std::byte*>(feature_info.ptr);
+        // only allow one dimensional arrays
+        assert((feature_info.ndim == 1) && std::format("Expected feature to have only one dimension, got {}\n", feature_info.ndim));
+        return g.addVertex(external_label, ptr);
+    })
+    .def("remove_vertex", &deglib::graph::SizeBoundedGraph::removeVertex)
+    .def("change_edge", &deglib::graph::SizeBoundedGraph::changeEdge)
+    .def("change_edges", [] (deglib::graph::SizeBoundedGraph& g, const uint32_t internal_index, const py::array_t<uint32_t, py::array::c_style> neighbor_indices, const py::array_t<float, py::array::c_style> neighbor_weights) {
+      const py::buffer_info neighbor_info = neighbor_indices.request();
+      const uint32_t* neighbor_ptr = static_cast<uint32_t*>(neighbor_info.ptr);
+      // only allow one dimensional arrays
+      assert((neighbor_info.ndim == 1) && std::format("Expected neighbor_indices to have only one dimension, got {}\n", neighbor_info.ndim));
+
+      const py::buffer_info weight_info = neighbor_weights.request();
+      const float* weight_ptr = static_cast<float*>(weight_info.ptr);
+      // only allow one dimensional arrays
+      assert((weight_info.ndim == 1) && std::format("Expected neighbor_weights to have only one dimension, got {}\n", weight_info.ndim));
+
+      g.changeEdges(internal_index, neighbor_ptr, weight_ptr);
+    })
+    .def("get_neighbor_weights", &deglib::graph::SizeBoundedGraph::getNeighborWeights)
+    .def("get_edge_weight", &deglib::graph::SizeBoundedGraph::getEdgeWeight)
+    .def("get_neighbor_indices",
+      [](const deglib::graph::SizeBoundedGraph &g, const uint32_t internal_idx) {
+        return py::memoryview::from_buffer(
+            g.getNeighborIndices(internal_idx),
+            sizeof(uint32_t), "I", {static_cast<ssize_t>(g.getEdgesPerVertex())}, {sizeof(uint32_t)});
+      }, py::return_value_policy::reference
+    )
+    .def("has_vertex", &deglib::graph::SizeBoundedGraph::hasVertex)
+    .def("has_edge", &deglib::graph::SizeBoundedGraph::hasEdge)
+    .def("search", &graph_search_wrapper<deglib::graph::SizeBoundedGraph>)
+    .def("explore", &deglib::graph::SizeBoundedGraph::explore)
+    ;
 
   // repository
   py::class_<deglib::StaticFeatureRepository>(m, "StaticFeatureRepository")
-      .def("get_feature",
-           [](const deglib::StaticFeatureRepository &fr, const uint32_t vertex_id) {
-             return py::memoryview::from_buffer(
-                 fr.getFeature(vertex_id),
-                 sizeof(float), "f", {static_cast<ssize_t>(fr.dims())}, {sizeof(float)});
-           }, py::return_value_policy::reference
-      )
-      .def("size", &deglib::StaticFeatureRepository::size)
-      .def("dims", &deglib::StaticFeatureRepository::dims)
-      .def("clear", &deglib::StaticFeatureRepository::clear);
+    .def("get_feature",
+         [](const deglib::StaticFeatureRepository &fr, const uint32_t vertex_id) {
+           return py::memoryview::from_buffer(
+               fr.getFeature(vertex_id),
+               sizeof(float), "f", {static_cast<ssize_t>(fr.dims())}, {sizeof(float)});
+         }, py::return_value_policy::reference
+    )
+    .def("size", &deglib::StaticFeatureRepository::size)
+    .def("dims", &deglib::StaticFeatureRepository::dims)
+    .def("clear", &deglib::StaticFeatureRepository::clear);
 
   m.def("load_static_repository", &deglib::load_static_repository);
 
@@ -150,21 +191,21 @@ PYBIND11_MODULE(deglib_cpp, m) {
 
   // even regular builder
   py::class_<deglib::builder::EvenRegularGraphBuilder>(m, "EvenRegularGraphBuilder")
-      .def(py::init<deglib::graph::MutableGraph&, std::mt19937&, const uint8_t, const float, const uint8_t, const float, const uint8_t, const uint32_t, const uint32_t>())
-      .def("add_entry", [] (deglib::builder::EvenRegularGraphBuilder& builder, const uint32_t label, py::array_t<float, py::array::c_style> feature) {
-        // request buffer info
-        const py::buffer_info feature_info = feature.request();
-        const std::byte* ptr = static_cast<std::byte*>(feature_info.ptr);
-        // only allow one dimensional arrays
-        assert((feature_info.ndim == 1) && std::format("Expected feature to have only one dimension, got {}\n", feature_info.ndim));
-        // copy to vector
-        std::vector<std::byte> feature_vec(ptr, ptr + feature_info.itemsize * feature_info.shape[0]);
-        builder.addEntry(label, std::move(feature_vec));
-      })
-      .def("remove_entry", &deglib::builder::EvenRegularGraphBuilder::removeEntry)
-      .def("build", [] (deglib::builder::EvenRegularGraphBuilder& builder, std::function<void(deglib::builder::BuilderStatus&)> callback, const bool infinite) -> deglib::graph::MutableGraph& {
-        return builder.build(callback, infinite);
-      });
+    .def(py::init<deglib::graph::MutableGraph&, std::mt19937&, const uint8_t, const float, const uint8_t, const float, const uint8_t, const uint32_t, const uint32_t>())
+    .def("add_entry", [] (deglib::builder::EvenRegularGraphBuilder& builder, const uint32_t label, py::array_t<float, py::array::c_style> feature) {
+      // request buffer info
+      const py::buffer_info feature_info = feature.request();
+      const std::byte* ptr = static_cast<std::byte*>(feature_info.ptr);
+      // only allow one dimensional arrays
+      assert((feature_info.ndim == 1) && std::format("Expected feature to have only one dimension, got {}\n", feature_info.ndim));
+      // copy to vector
+      std::vector<std::byte> feature_vec(ptr, ptr + feature_info.itemsize * feature_info.shape[0]);
+      builder.addEntry(label, std::move(feature_vec));
+    })
+    .def("remove_entry", &deglib::builder::EvenRegularGraphBuilder::removeEntry)
+    .def("build", [] (deglib::builder::EvenRegularGraphBuilder& builder, std::function<void(deglib::builder::BuilderStatus&)> callback, const bool infinite) -> deglib::graph::MutableGraph& {
+      return builder.build(callback, infinite);
+    });
 
   m.def("calc_avg_edge_weight", &deglib::analysis::calc_avg_edge_weight);
   m.def("calc_edge_weight_histogram", &deglib::analysis::calc_edge_weight_histogram);
@@ -174,13 +215,17 @@ PYBIND11_MODULE(deglib_cpp, m) {
   m.def("calc_non_rng_edges", &deglib::analysis::calc_non_rng_edges);
 
   py::class_<deglib::builder::BuilderStatus>(m, "BuilderStatus")
-      .def_readwrite("step", &deglib::builder::BuilderStatus::step)
-      .def_readwrite("added", &deglib::builder::BuilderStatus::added)
-      .def_readwrite("deleted", &deglib::builder::BuilderStatus::deleted)
-      .def_readwrite("improved", &deglib::builder::BuilderStatus::improved)
-      .def_readwrite("tries", &deglib::builder::BuilderStatus::tries);
+    .def_readwrite("step", &deglib::builder::BuilderStatus::step)
+    .def_readwrite("added", &deglib::builder::BuilderStatus::added)
+    .def_readwrite("deleted", &deglib::builder::BuilderStatus::deleted)
+    .def_readwrite("improved", &deglib::builder::BuilderStatus::improved)
+    .def_readwrite("tries", &deglib::builder::BuilderStatus::tries);
 
   // tests TODO: remove
   m.def("test_take_graph", [] (deglib::graph::MutableGraph& g) { std::cout << g.size() << std::endl; });
   m.def("test_callback", &test_callback);
+  m.def("print_py_buffer", [](const py::array buffer) {
+    const py::buffer_info info = buffer.request();
+    std::cout << "format: " << info.format << std::endl;
+  });
 }

@@ -22,7 +22,7 @@ def get_near_avg_entry_index(graph: deglib.graph.ReadOnlyGraph, verbose: bool = 
 
     avg_fv /= graph_size
     seed = [graph.get_internal_index(0)]
-    result_queue = graph.search(seed, avg_fv, 0.1, 30)
+    result_queue = graph.search(avg_fv, 0.1, 30, entry_vertex_indices=seed)
     entry_vertex_id = result_queue.top().get_internal_index()
 
     return entry_vertex_id
@@ -91,7 +91,7 @@ def test_approx_anns(
     correct = 0
     for i in range(query_repository.shape[0]):
         query = query_repository[i]
-        result_queue = graph.search(entry_vertex_indices, query, eps, k)
+        result_queue = graph.search(query, eps, k, entry_vertex_indices=entry_vertex_indices)
         # result_queue = graph.search(entry_vertex_indices, query, eps, k, graph.size())  # max distance calcs
 
         if result_queue.size() != k:
