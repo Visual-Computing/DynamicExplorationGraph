@@ -61,7 +61,7 @@ class SizeBoundedGraph:
             graph_cpp: Optional[deglib_cpp.SizeBoundedGraph] = None
     ):
         if graph_cpp is None:
-            graph_cpp = deglib_cpp.SizeBoundedGraph(max_vertex_count, edges_per_vertex, feature_space._to_cpp())
+            graph_cpp = deglib_cpp.SizeBoundedGraph(max_vertex_count, edges_per_vertex, feature_space.to_cpp())
         self.graph_cpp = graph_cpp
 
     def size(self) -> int:
@@ -94,7 +94,7 @@ class SizeBoundedGraph:
     def get_external_label(self, index: int) -> int:
         return self.graph_cpp.get_external_label(index)
 
-    def _to_cpp(self) -> deglib_cpp.SizeBoundedGraph:
+    def to_cpp(self) -> deglib_cpp.SizeBoundedGraph:
         return self.graph_cpp
 
     def save_graph(self, graph_file: pathlib.Path | str):
