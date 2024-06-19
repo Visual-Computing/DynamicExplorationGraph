@@ -55,21 +55,24 @@ class SearchGraph(ABC):
         return [self.get_internal_index(0)]
 
     # @abstractmethod
-    # def has_path(self, _entry_vertex_indices: List[int], _to_vertex: int, _eps: float, _k: int) -> List[deglib_cpp.ObjectDistance]:
+    # def has_path(
+    # self, _entry_vertex_indices: List[int], _to_vertex: int, _eps: float, _k: int) -> List[deglib_cpp.ObjectDistance]:
     #     """
     #     Perform a search but stops when the to_vertex was found.
     #     """
     #     return NotImplemented()
 
     @abstractmethod
-    def search(self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0, entry_vertex_indices: Optional[List[int]] = None) -> deglib_cpp.ResultSet:
+    def search(self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
+               entry_vertex_indices: Optional[List[int]] = None) -> deglib_cpp.ResultSet:
         """
         Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
 
         Eps greater 0 extends the search range and takes additional graph vertices into account.
 
-        It is possible to limit the amount of work by specifing a maximal number of distances to be calculated.
-        For lower numbers it is recommended to set eps to 0 since its very unlikly the method can make use of the extended the search range.
+        It is possible to limit the amount of work by specifying a maximal number of distances to be calculated.
+        For lower numbers it is recommended to set eps to 0 since its very unlikely the method can make use of the
+        extended the search range.
         """
         raise NotImplementedError()
 
@@ -78,6 +81,10 @@ class SearchGraph(ABC):
         """
         A exploration for similar element, limited by max_distance_computation_count
         """
+        raise NotImplementedError()
+
+    @abstractmethod
+    def to_cpp(self):
         raise NotImplementedError()
 
 
@@ -129,6 +136,9 @@ class ReadOnlyGraph(SearchGraph):
     def has_edge(self, internal_index: int, neighbor_index: int) -> bool:
         return self.graph_cpp.has_edge(internal_index, neighbor_index)
 
+    def to_cpp(self) -> deglib_cpp.ReadOnlyGraph:
+        return self.graph_cpp
+
 
 def load_readonly_graph(path: pathlib.Path | str) -> ReadOnlyGraph:
     return ReadOnlyGraph(deglib_cpp.load_readonly_graph(str(path)))
@@ -151,7 +161,8 @@ class MutableGraph(SearchGraph, ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def change_edge(self, internal_index: int, from_neighbor_index: int, to_neighbor_index: int, to_neighbor_weight: float) -> bool:
+    def change_edge(self, internal_index: int, from_neighbor_index: int, to_neighbor_index: int,
+                    to_neighbor_weight: float) -> bool:
         """
         Swap a neighbor with another neighbor and its weight.
 
@@ -185,6 +196,10 @@ class MutableGraph(SearchGraph, ABC):
     def save_graph(self, path_to_graph: str | pathlib.Path) -> bool:
         raise NotImplementedError()
 
+    @abstractmethod
+    def to_cpp(self):
+        raise NotImplementedError()
+
 
 class SizeBoundedGraph(MutableGraph):
     def __init__(
@@ -203,7 +218,7 @@ class SizeBoundedGraph(MutableGraph):
         return FloatSpace(0, Metric.L2, float_space_cpp=self.graph_cpp.get_feature_space())
 
     # TODO: copy=True parameter
-    def get_feature_vector(self, index) -> np.ndarray:
+    def get_feature_vector(self, index: int) -> np.ndarray:
         memory_view = self.graph_cpp.get_feature_vector(index)
         feature_vector = np.asarray(memory_view)
         return feature_vector
@@ -276,4 +291,4 @@ class SizeBoundedGraph(MutableGraph):
         return self.graph_cpp.explore(entry_vertex_index, k, max_distance_computation_count)
 
 
-__all__ = ['load_readonly_graph', 'ReadOnlyGraph', 'SizeBoundedGraph']
+__all__ = ['load_readonly_graph', 'ReadOnlyGraph', 'SizeBoundedGraph', 'MutableGraph', 'SearchGraph']

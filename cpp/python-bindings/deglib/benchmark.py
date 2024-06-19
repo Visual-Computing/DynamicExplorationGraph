@@ -1,6 +1,7 @@
 from typing import List, Set
 
 import numpy as np
+# noinspection PyPackageRequirements
 import tqdm
 
 import deglib.graph

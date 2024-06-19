@@ -3,13 +3,13 @@ from typing import Optional
 import numpy as np
 import deglib_cpp
 from .std import Mt19937
-from .graph import SizeBoundedGraph
+from .graph import MutableGraph
 
 
 class EvenRegularGraphBuilder:
     # TODO: add MutableGraph Interface
     def __init__(
-            self, graph: SizeBoundedGraph, rng: Mt19937, extend_k: Optional[int] = None, extend_eps: float = 0.2,
+            self, graph: MutableGraph, rng: Mt19937, extend_k: Optional[int] = None, extend_eps: float = 0.2,
             improve_k: Optional[int] = None, improve_eps: float = 0.001, max_path_length: int = 10, swap_tries: int = 3,
             additional_swap_tries: int = 3
     ):
@@ -30,3 +30,6 @@ class EvenRegularGraphBuilder:
 
     def build(self, improvement_callback, infinite: bool = False):
         self.builder_cpp.build(improvement_callback, infinite)
+
+    def stop(self):
+        self.builder_cpp.stop()

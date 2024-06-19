@@ -2,8 +2,6 @@ import time
 import warnings
 import numpy as np
 
-import deglib_cpp
-
 
 class NonContiguousWarning(Warning):
     pass
