@@ -167,8 +167,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
     .def("has_vertex", &deglib::graph::SizeBoundedGraph::hasVertex)
     .def("has_edge", &deglib::graph::SizeBoundedGraph::hasEdge)
     .def("search", &graph_search_wrapper<deglib::graph::SizeBoundedGraph>)
-    .def("explore", &deglib::graph::SizeBoundedGraph::explore)
-    ;
+    .def("explore", &deglib::graph::SizeBoundedGraph::explore);
 
   // repository
   py::class_<deglib::StaticFeatureRepository>(m, "StaticFeatureRepository")
@@ -205,7 +204,8 @@ PYBIND11_MODULE(deglib_cpp, m) {
     .def("remove_entry", &deglib::builder::EvenRegularGraphBuilder::removeEntry)
     .def("build", [] (deglib::builder::EvenRegularGraphBuilder& builder, std::function<void(deglib::builder::BuilderStatus&)> callback, const bool infinite) -> deglib::graph::MutableGraph& {
       return builder.build(callback, infinite);
-    });
+    })
+    .def("stop", &deglib::builder::EvenRegularGraphBuilder::stop);
 
   m.def("calc_avg_edge_weight", &deglib::analysis::calc_avg_edge_weight);
   m.def("calc_edge_weight_histogram", &deglib::analysis::calc_edge_weight_histogram);

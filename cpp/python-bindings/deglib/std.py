@@ -7,5 +7,3 @@ class Mt19937:
 
     def to_cpp(self) -> Mt19937cpp:
         return self.mt19937_cpp
-
-
