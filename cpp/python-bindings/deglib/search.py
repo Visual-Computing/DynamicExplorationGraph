@@ -7,4 +7,5 @@ class ResultSet:
             raise TypeError('result_set_cpp must be of type deglib_cpp.ResultSet')
         self.result_set_cpp = result_set_cpp
 
-    def top(self) -> :
+    def top(self) -> None:
+        pass  # TODO
