@@ -123,6 +123,7 @@ def create_graph(
         feature = repository[label]
         # feature_vector = std::vector<std::byte>{feature, feature + dims * sizeof(float)};
         builder.add_entry(label, feature)
+
     if data_stream_type == DataStreamType.AddHalfRemoveAndAddOneAtATime:
         base_size_half = base_size // 2
         base_size_fourth = base_size // 4
