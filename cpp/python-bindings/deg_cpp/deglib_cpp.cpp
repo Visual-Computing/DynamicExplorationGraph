@@ -69,13 +69,20 @@ PYBIND11_MODULE(deglib_cpp, m) {
       .def("get_data_size", &deglib::FloatSpace::get_data_size);
 
   py::class_<deglib::search::ObjectDistance>(m, "ObjectDistance")
-      .def("get_internal_index", &deglib::search::ObjectDistance::getInternalIndex);
+    .def(py::init<const uint32_t, const float>())
+    .def("get_internal_index", &deglib::search::ObjectDistance::getInternalIndex)
+    .def("get_distance", &deglib::search::ObjectDistance::getDistance)
+    .def("__eq__", &deglib::search::ObjectDistance::operator==)
+    .def("__lt__", &deglib::search::ObjectDistance::operator<)
+    .def("__gt__", &deglib::search::ObjectDistance::operator>);
 
   py::class_<deglib::search::ResultSet>(m, "ResultSet")
-      .def("top", &deglib::search::ResultSet::top)
-      .def("pop", &deglib::search::ResultSet::pop)
-      .def("size", [](const deglib::search::ResultSet& rs) { return rs.size(); }) // TODO: why can't I bind function reference directly?
-      .def("empty", [](const deglib::search::ResultSet& rs) { return rs.empty(); });
+    .def("top", &deglib::search::ResultSet::top)
+    .def("pop", &deglib::search::ResultSet::pop)
+    .def("size", [](const deglib::search::ResultSet& rs) { return rs.size(); }) // TODO: why can't I bind function reference directly?
+    .def("empty", [](const deglib::search::ResultSet& rs) { return rs.empty(); })
+    .def("__getitem__", [](const deglib::search::ResultSet& rs, std::size_t index) { return rs[index]; })
+  ;
 
   // TODO: SpaceInterface in c++ is general over datatype, here we use float always
   py::class_<deglib::SpaceInterface<float>>(m, "SpaceInterface")
