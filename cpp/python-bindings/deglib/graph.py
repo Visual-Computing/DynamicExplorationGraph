@@ -90,6 +90,8 @@ class SearchGraph(ABC):
 
 class ReadOnlyGraph(SearchGraph):
     def __init__(self, graph_cpp: deglib_cpp.ReadOnlyGraph):
+        if not isinstance(graph_cpp, deglib_cpp.ReadOnlyGraph):
+            raise TypeError("expected ReadOnlyGraph but got {}".format(type(graph_cpp)))
         self.graph_cpp = graph_cpp
 
     def size(self) -> int:
@@ -244,7 +246,6 @@ class SizeBoundedGraph(MutableGraph):
         return self.graph_cpp
 
     def save_graph(self, graph_file: pathlib.Path | str):
-        print('save to:', graph_file)
         self.graph_cpp.save_graph(str(graph_file))
 
     def get_edges_per_vertex(self) -> int:

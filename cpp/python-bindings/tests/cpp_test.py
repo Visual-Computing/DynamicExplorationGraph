@@ -1,4 +1,3 @@
-import gc
 import pathlib
 import sys
 
@@ -7,20 +6,19 @@ import deglib
 import numpy as np
 
 
-def print_helper(a):
-    print('dtype:', a.dtype)
-    deglib_cpp.print_py_buffer(a)
-
-
 def test_simple():
-    a = np.arange(12, dtype=np.int32).reshape(4, 3)
+    def print_helper(a):
+        print('dtype:', a.dtype)
+        deglib_cpp.print_py_buffer(a)
 
-    print_helper(a.astype(np.int32))
-    print_helper(a.astype(np.uint32))
-    print_helper(a.astype(np.float32))
-    print_helper(a.astype(np.int64))
-    print_helper(a.astype(np.uint64))
-    print_helper(a.astype(np.float64))
+    buffer = np.arange(12, dtype=np.int32).reshape(4, 3)
+
+    print_helper(buffer.astype(np.int32))
+    print_helper(buffer.astype(np.uint32))
+    print_helper(buffer.astype(np.float32))
+    print_helper(buffer.astype(np.int64))
+    print_helper(buffer.astype(np.uint64))
+    print_helper(buffer.astype(np.float64))
 
 
 def test_transpose():
@@ -52,18 +50,7 @@ def test_slice():
     deglib_cpp.print_py_buffer(a_sliced)
 
 
-def test_buffer():
-    buffer = deglib_cpp.MyBuffer(10)
-    buffer.print_buffer()
-    memview = buffer.get_memory_view()
-    arr = np.asarray(memview)
-    print(arr)
-    arr[0] = 42
-    print(arr)
-    buffer.print_buffer()
-
-
-def test_free_graph():
+def crash_free_graph():
     data_path: pathlib.Path = pathlib.Path(sys.argv[1])
     graph_file: pathlib.Path = (data_path / "deg" / "best_distortion_decisions" /
                                 "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0"
@@ -77,7 +64,7 @@ def test_free_graph():
     print(fv)
 
 
-def test_take_graph():
+def take_graph():
     data_path: pathlib.Path = pathlib.Path(sys.argv[1])
     repository_file = data_path / "SIFT1M" / "sift_base.fvecs"
     repository = deglib.repository.fvecs_read(repository_file)
@@ -107,7 +94,7 @@ if __name__ == '__main__':
     test_simple()
     # test_transpose()
     # test_slice()
-    # test_buffer()
     # test_free_graph()
     # test_take_graph()
     # test_callback()
+    # graph_file()
