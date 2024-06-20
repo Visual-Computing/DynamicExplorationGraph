@@ -102,7 +102,9 @@ class ReadOnlyGraph(SearchGraph):
         return FloatSpace(0, Metric.L2, float_space_cpp=self.graph_cpp.get_feature_space())
 
     # TODO: copy=True parameter
-    def get_feature_vector(self, index) -> np.ndarray:
+    def get_feature_vector(self, index: int) -> np.ndarray:
+        if index < 0 or index >= self.size():
+            raise IndexError("Index {} out of range for size {}".format(index, self.size()))
         memory_view = self.graph_cpp.get_feature_vector(index)
         feature_vector = np.asarray(memory_view)
         return feature_vector

@@ -77,8 +77,33 @@ def read_only_graph():
     return get_read_only_graph(DEFAULT_SAMPLES, DEFAULT_DIMS)
 
 
+def get_ranking(graph: deglib.graph.SearchGraph, query: np.ndarray) -> np.ndarray:
+    """
+    Returns the ranking for each feature vector in the graph
+    """
+    features = np.empty((graph.size(), graph.get_feature_space().dim()), dtype=np.float32)
+
+    for i in range(graph.size()):
+        features[i] = graph.get_feature_vector(i)
+
+    query = query.reshape(1, graph.get_feature_space().dim())
+
+    l2_distances = np.sum(np.square(features - query), axis=1)
+    return np.argsort(l2_distances)
+
+
 def test_get_feature_vector(read_only_graph):
     for i in range(read_only_graph.size()):
         fv = read_only_graph.get_feature_vector(i)
         assert fv.shape == (DEFAULT_DIMS,)
         assert fv.dtype == np.float32
+
+    with pytest.raises(IndexError):
+        fv = read_only_graph.get_feature_vector(read_only_graph.size())
+        print(fv)
+
+
+def test_search(read_only_graph):
+    query = np.random.random((DEFAULT_DIMS,))
+    graph_result = read_only_graph.search(query, eps=0.1, k=10)
+    correct_result = get_ranking(read_only_graph, query)[:10]
