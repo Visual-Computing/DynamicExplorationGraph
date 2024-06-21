@@ -250,6 +250,7 @@ class SizeBoundedGraph(MutableGraph):
         return self.graph_cpp.get_edges_per_vertex()
 
     def add_vertex(self, external_label: int, feature_vector: np.ndarray) -> int:
+        feature_vector = assure_array(feature_vector, 'feature_vector', np.float32)
         return self.graph_cpp.add_vertex(external_label, feature_vector)
 
     def remove_vertex(self, external_label: int):

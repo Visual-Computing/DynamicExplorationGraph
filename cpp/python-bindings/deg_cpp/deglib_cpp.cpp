@@ -147,7 +147,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
     .def("get_external_label", &deglib::graph::SizeBoundedGraph::getExternalLabel)
     .def("get_edges_per_vertex", &deglib::graph::SizeBoundedGraph::getEdgesPerVertex)
     .def("save_graph", &deglib::graph::SizeBoundedGraph::saveGraph)
-    .def("add_vertex", [] (deglib::graph::SizeBoundedGraph& g, const uint32_t external_label, const py::array_t<std::byte, py::array::c_style> feature_vector) -> uint32_t {
+    .def("add_vertex", [] (deglib::graph::SizeBoundedGraph& g, const uint32_t external_label, const py::array_t<float, py::array::c_style> feature_vector) -> uint32_t {
         const py::buffer_info feature_info = feature_vector.request();
         const std::byte* ptr = static_cast<std::byte*>(feature_info.ptr);
         // only allow one dimensional arrays

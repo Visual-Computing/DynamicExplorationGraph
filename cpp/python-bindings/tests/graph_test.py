@@ -145,6 +145,9 @@ class TestGraphs:
     def test_get_neighbor_weights(self):
         weights = self.size_bounded_graph.get_neighbor_weights(0)
         assert isinstance(weights, np.ndarray)
-        print(type(weights))
-        print(weights)
         assert len(weights) == self.edges_per_vertex
+
+    def test_modify_graph(self):
+        self.size_bounded_graph.remove_vertex(self.size_bounded_graph.size()-1)
+        assert self.size_bounded_graph.size() == self.samples - 1
+        self.size_bounded_graph.add_vertex(self.samples-1, self.data[-1])
