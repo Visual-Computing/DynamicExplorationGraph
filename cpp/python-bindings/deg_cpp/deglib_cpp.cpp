@@ -169,7 +169,13 @@ PYBIND11_MODULE(deglib_cpp, m) {
 
       g.changeEdges(internal_index, neighbor_ptr, weight_ptr);
     })
-    .def("get_neighbor_weights", &deglib::graph::SizeBoundedGraph::getNeighborWeights)
+    .def("get_neighbor_weights",
+         [](const deglib::graph::SizeBoundedGraph &g, const uint32_t internal_idx) {
+           return py::memoryview::from_buffer(
+               g.getNeighborWeights(internal_idx),
+               sizeof(float), "f", {static_cast<ssize_t>(g.getEdgesPerVertex())}, {sizeof(float)});
+         }, py::return_value_policy::reference
+    )
     .def("get_edge_weight", &deglib::graph::SizeBoundedGraph::getEdgeWeight)
     .def("get_neighbor_indices",
       [](const deglib::graph::SizeBoundedGraph &g, const uint32_t internal_idx) {
