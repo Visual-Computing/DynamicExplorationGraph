@@ -76,7 +76,7 @@ class SearchGraph(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def explore(self, entry_vertex_index: int, k: int, max_distance_computation_count: int) -> ResultSet:
+    def explore(self, entry_vertex_index: int, k: int, max_distance_count: int) -> ResultSet:
         """
         A exploration for similar element, limited by max_distance_computation_count
         """
@@ -266,7 +266,10 @@ class SizeBoundedGraph(MutableGraph):
         return self.graph_cpp.change_edges(internal_index, neighbor_indices, neighbor_weights)
 
     def get_neighbor_weights(self, internal_index: int) -> np.ndarray:
-        return self.graph_cpp.get_neighbor_weights(internal_index)
+        if internal_index < 0 or internal_index >= self.size():
+            raise IndexError("Index {} out of range for size {}".format(internal_index, self.size()))
+        memory_view = self.graph_cpp.get_neighbor_weights(internal_index)
+        return np.asarray(memory_view)
 
     def get_edge_weight(self, from_neighbor_index: int, to_neighbor_index: int) -> float:
         return self.graph_cpp.get_edge_weight(from_neighbor_index, to_neighbor_index)

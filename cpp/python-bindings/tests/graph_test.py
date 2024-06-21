@@ -1,5 +1,6 @@
 import os
 import random
+from typing import Callable, Self
 
 import pytest
 import pathlib
@@ -74,7 +75,7 @@ class TestGraphs:
         self.read_only_graph = deglib.graph.load_readonly_graph(self.graph_path)
 
     @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
-    def test_get_feature_vector(self, graph_getter):
+    def test_get_feature_vector(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
         graph = graph_getter(self)
         for i in range(graph.size()):
             fv = graph.get_feature_vector(i)
@@ -85,7 +86,7 @@ class TestGraphs:
             _fv = self.read_only_graph.get_feature_vector(self.read_only_graph.size())
 
     @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
-    def test_search(self, graph_getter):
+    def test_search(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
         graph = graph_getter(self)
         k = 10
         query = np.random.random((self.dims,)).astype(np.float32)
@@ -96,7 +97,7 @@ class TestGraphs:
         assert len(matches) >= k-2, 'expected at least {} matching results, but got only {}'.format(k-2, len(matches))
 
     @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
-    def test_has_path(self, graph_getter):
+    def test_has_path(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
         graph = graph_getter(self)
         entry_vertex_indices = graph.get_entry_vertex_indices()
         path = graph.has_path(entry_vertex_indices, 70, 0.001, 10)
@@ -104,7 +105,7 @@ class TestGraphs:
             assert isinstance(p, deglib.search.ObjectDistance)
 
     @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
-    def test_explore(self, graph_getter):
+    def test_explore(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
         graph = graph_getter(self)
         k = 10
         entry_vertex_index = random.randint(0, self.samples)
@@ -113,12 +114,12 @@ class TestGraphs:
         assert all(isinstance(od, deglib.search.ObjectDistance) for od in result)
 
     @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
-    def test_get_edges_per_vertex(self, graph_getter):
+    def test_get_edges_per_vertex(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
         graph = graph_getter(self)
         assert graph.get_edges_per_vertex() == self.edges_per_vertex
 
     @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
-    def test_get_neighbor_indices(self, graph_getter):
+    def test_get_neighbor_indices(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
         graph = graph_getter(self)
         for i in range(graph.size()):
             neighbor_indices = graph.get_neighbor_indices(i)
@@ -127,16 +128,23 @@ class TestGraphs:
             assert neighbor_indices.dtype == np.uint32
 
     @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
-    def test_has_vertex(self, graph_getter):
+    def test_has_vertex(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
         graph = graph_getter(self)
         assert graph.has_vertex(0)
         assert not graph.has_vertex(graph.size())
 
     @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
-    def test_has_edge(self, graph_getter):
+    def test_has_edge(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
         graph = graph_getter(self)
         counter = 0
         for e in range(graph.size()):
             if graph.has_edge(0, e):
                 counter += 1
         assert counter == graph.get_edges_per_vertex()
+
+    def test_get_neighbor_weights(self):
+        weights = self.size_bounded_graph.get_neighbor_weights(0)
+        assert isinstance(weights, np.ndarray)
+        print(type(weights))
+        print(weights)
+        assert len(weights) == self.edges_per_vertex
