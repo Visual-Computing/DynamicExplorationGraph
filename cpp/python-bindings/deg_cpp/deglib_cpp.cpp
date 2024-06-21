@@ -79,7 +79,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
   py::class_<deglib::search::ResultSet>(m, "ResultSet")
     .def("top", &deglib::search::ResultSet::top)
     .def("pop", &deglib::search::ResultSet::pop)
-    .def("size", [](const deglib::search::ResultSet& rs) { return rs.size(); }) // TODO: why can't I bind function reference directly?
+    .def("size", [](const deglib::search::ResultSet& rs) { return rs.size(); })
     .def("empty", [](const deglib::search::ResultSet& rs) { return rs.empty(); })
     .def("__getitem__", [](const deglib::search::ResultSet& rs, std::size_t index) { return rs[index]; })
   ;

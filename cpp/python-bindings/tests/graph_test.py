@@ -104,6 +104,10 @@ def test_get_feature_vector(read_only_graph):
 
 
 def test_search(read_only_graph):
-    query = np.random.random((DEFAULT_DIMS,))
-    graph_result = read_only_graph.search(query, eps=0.1, k=10)
-    correct_result = get_ranking(read_only_graph, query)[:10]
+    k = 10
+    query = np.random.random((DEFAULT_DIMS,)).astype(np.float32)
+    graph_result = read_only_graph.search(query, eps=0.1, k=k)
+    correct_result = get_ranking(read_only_graph, query)[:k]
+
+    matches = set(g.get_internal_index() for g in graph_result).intersection(set(correct_result))
+    assert len(matches) >= k-2, 'expected at least {} matching results, but got only {}'.format(k-2, len(matches))
