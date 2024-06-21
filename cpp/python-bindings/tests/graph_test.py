@@ -52,6 +52,14 @@ def get_ranking(graph: deglib.graph.SearchGraph, query: np.ndarray) -> np.ndarra
     return np.argsort(l2_distances)
 
 
+def get_read_only_graph(test_graphs):
+    return test_graphs.read_only_graph
+
+
+def get_size_bounded_graph(test_graphs):
+    return test_graphs.size_bounded_graph
+
+
 class TestGraphs:
     def setup_method(self):
         self.samples = 100
@@ -65,54 +73,70 @@ class TestGraphs:
         self.size_bounded_graph.save_graph(self.graph_path)
         self.read_only_graph = deglib.graph.load_readonly_graph(self.graph_path)
 
-    def test_get_feature_vector(self):
-        for i in range(self.read_only_graph.size()):
-            fv = self.read_only_graph.get_feature_vector(i)
+    @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
+    def test_get_feature_vector(self, graph_getter):
+        graph = graph_getter(self)
+        for i in range(graph.size()):
+            fv = graph.get_feature_vector(i)
             assert fv.shape == (self.dims,)
             assert fv.dtype == np.float32
 
         with pytest.raises(IndexError):
             _fv = self.read_only_graph.get_feature_vector(self.read_only_graph.size())
 
-    def test_search(self):
+    @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
+    def test_search(self, graph_getter):
+        graph = graph_getter(self)
         k = 10
         query = np.random.random((self.dims,)).astype(np.float32)
-        graph_result = self.read_only_graph.search(query, eps=0.1, k=k)
-        correct_result = get_ranking(self.read_only_graph, query)[:k]
+        graph_result = graph.search(query, eps=0.1, k=k)
+        correct_result = get_ranking(graph, query)[:k]
 
         matches = set(g.get_internal_index() for g in graph_result).intersection(set(correct_result))
         assert len(matches) >= k-2, 'expected at least {} matching results, but got only {}'.format(k-2, len(matches))
 
-    def test_has_path(self):
-        entry_vertex_indices = self.read_only_graph.get_entry_vertex_indices()
-        path = self.read_only_graph.has_path(entry_vertex_indices, 70, 0.001, 10)
+    @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
+    def test_has_path(self, graph_getter):
+        graph = graph_getter(self)
+        entry_vertex_indices = graph.get_entry_vertex_indices()
+        path = graph.has_path(entry_vertex_indices, 70, 0.001, 10)
         for p in path:
             assert isinstance(p, deglib.search.ObjectDistance)
 
-    def test_explore(self):
+    @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
+    def test_explore(self, graph_getter):
+        graph = graph_getter(self)
         k = 10
         entry_vertex_index = random.randint(0, self.samples)
-        result = self.read_only_graph.explore(entry_vertex_index, k, max_distance_count=k*10)
+        result = graph.explore(entry_vertex_index, k, max_distance_count=k*10)
         assert len(result) == k
         assert all(isinstance(od, deglib.search.ObjectDistance) for od in result)
 
-    def test_get_edges_per_vertex(self):
-        assert self.read_only_graph.get_edges_per_vertex() == self.edges_per_vertex
+    @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
+    def test_get_edges_per_vertex(self, graph_getter):
+        graph = graph_getter(self)
+        assert graph.get_edges_per_vertex() == self.edges_per_vertex
 
-    def test_get_neighbor_indices(self):
-        for i in range(self.read_only_graph.size()):
-            neighbor_indices = self.read_only_graph.get_neighbor_indices(i)
+    @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
+    def test_get_neighbor_indices(self, graph_getter):
+        graph = graph_getter(self)
+        for i in range(graph.size()):
+            neighbor_indices = graph.get_neighbor_indices(i)
             assert isinstance(neighbor_indices, np.ndarray)
             assert len(neighbor_indices) == self.edges_per_vertex
             assert neighbor_indices.dtype == np.uint32
 
-    def test_has_vertex(self):
-        assert self.read_only_graph.has_vertex(0)
-        assert not self.read_only_graph.has_vertex(self.read_only_graph.size())
+    @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
+    def test_has_vertex(self, graph_getter):
+        graph = graph_getter(self)
+        assert graph.has_vertex(0)
+        assert not graph.has_vertex(graph.size())
 
-    def test_has_edge(self):
+    @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
+    def test_has_edge(self, graph_getter):
+        graph = graph_getter(self)
         counter = 0
-        for e in range(self.read_only_graph.size()):
-            if self.read_only_graph.has_edge(0, e):
+        for e in range(graph.size()):
+            if graph.has_edge(0, e):
                 counter += 1
-        assert counter == self.read_only_graph.get_edges_per_vertex()
+        assert counter == graph.get_edges_per_vertex()

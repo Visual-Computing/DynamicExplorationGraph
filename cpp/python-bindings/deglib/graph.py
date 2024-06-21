@@ -243,9 +243,6 @@ class SizeBoundedGraph(MutableGraph):
     def get_external_label(self, index: int) -> int:
         return self.graph_cpp.get_external_label(index)
 
-    def to_cpp(self) -> deglib_cpp.SizeBoundedGraph:
-        return self.graph_cpp
-
     def save_graph(self, graph_file: pathlib.Path | str):
         self.graph_cpp.save_graph(str(graph_file))
 
@@ -258,8 +255,9 @@ class SizeBoundedGraph(MutableGraph):
     def remove_vertex(self, external_label: int):
         self.graph_cpp.remove_vertex(external_label)
 
-    def change_edge(self, internal_index: int, from_neighbor_index: int, to_neighbor_index: int,
-                    to_neighbor_weight: float) -> bool:
+    def change_edge(
+            self, internal_index: int, from_neighbor_index: int, to_neighbor_index: int, to_neighbor_weight: float
+    ) -> bool:
         return self.graph_cpp.change_edge(internal_index, from_neighbor_index, to_neighbor_index, to_neighbor_weight)
 
     def change_edges(self, internal_index: int, neighbor_indices: np.ndarray, neighbor_weights: np.ndarray):
@@ -274,7 +272,10 @@ class SizeBoundedGraph(MutableGraph):
         return self.graph_cpp.get_edge_weight(from_neighbor_index, to_neighbor_index)
 
     def get_neighbor_indices(self, internal_index: int) -> np.ndarray:
-        return self.graph_cpp.get_neighbor_indices(internal_index)
+        if internal_index < 0 or internal_index >= self.size():
+            raise IndexError("Index {} out of range for size {}".format(internal_index, self.size()))
+        memory_view = self.graph_cpp.get_neighbor_indices(internal_index)
+        return np.asarray(memory_view)
 
     def has_vertex(self, external_label: int) -> bool:
         return self.graph_cpp.has_vertex(external_label)
@@ -291,8 +292,11 @@ class SizeBoundedGraph(MutableGraph):
             entry_vertex_indices = self.get_entry_vertex_indices()
         return ResultSet(self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_computation_count))
 
-    def explore(self, entry_vertex_index: int, k: int, max_distance_computation_count: int) -> ResultSet:
-        return ResultSet(self.graph_cpp.explore(entry_vertex_index, k, max_distance_computation_count))
+    def explore(self, entry_vertex_index: int, k: int, max_distance_count: int) -> ResultSet:
+        return ResultSet(self.graph_cpp.explore(entry_vertex_index, k, max_distance_count))
+
+    def to_cpp(self) -> deglib_cpp.SizeBoundedGraph:
+        return self.graph_cpp
 
 
 __all__ = ['load_readonly_graph', 'ReadOnlyGraph', 'SizeBoundedGraph', 'MutableGraph', 'SearchGraph']
