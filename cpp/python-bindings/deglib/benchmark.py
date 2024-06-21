@@ -115,16 +115,13 @@ def test_approx_anns(
     return 1.0 * correct / total
 
 
-# TODO: replace ReadOnlyGraph with SearchGraph
 def test_graph_explore(
-        graph: deglib.graph.ReadOnlyGraph, ground_truth: np.ndarray, entry_vertices: np.ndarray, repeat: int, k: int
+        graph: deglib.graph.SearchGraph, ground_truth: np.ndarray, entry_vertices: np.ndarray, repeat: int, k: int
 ):
     if ground_truth.shape[1] < k:
         raise ValueError(
             "ground truth data does not have enough dimensions, expected {} got {}".format(k, ground_truth.shape[1])
         )
-
-    # replaced entry_vertex_indices with entry vertices as it is the same
 
     # ground truth data
     answer = deglib.benchmark.get_ground_truth(ground_truth, ground_truth.shape[0], ground_truth.shape[1], k)
@@ -135,9 +132,6 @@ def test_graph_explore(
         k_factor *= 10
         for i in range(1 if (f == 0) else 2, 11):
             max_distance_count = (k + k_factor * (i-1)) if (f == 0) else (k_factor * i)
-
-            #  for (uint32_t i = 1; i < 14; i++) {
-            #      const auto max_distance_count = i;
 
             stopwatch = deglib.utils.StopWatch()
             recall = 0.0
@@ -154,9 +148,8 @@ def test_graph_explore(
     print("Actual memory usage: {} Mb".format(deglib.utils.get_current_rss_mb()))
 
 
-# TODO: replace ReadOnlyGraph with SearchGraph
 def test_approx_explore(
-        graph: deglib.graph.ReadOnlyGraph, entry_vertex_indices: np.ndarray, ground_truth: List[Set[int]], k: int,
+        graph: deglib.graph.SearchGraph, entry_vertex_indices: np.ndarray, ground_truth: List[Set[int]], k: int,
         max_distance_count: int
 ) -> float:
     total = 0

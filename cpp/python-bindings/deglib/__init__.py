@@ -1,9 +1,11 @@
 from deglib_cpp import avx_usable, sse_usable
-from . import graph
+
+from . import analysis
 from . import benchmark
 from . import builder
-from . import analysis
+from . import graph
 from . import repository
+from . import search
 from .std import Mt19937
 from .distances import Metric, FloatSpace
 

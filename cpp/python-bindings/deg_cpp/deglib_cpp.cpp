@@ -111,7 +111,13 @@ PYBIND11_MODULE(deglib_cpp, m) {
       .def("has_path", &deglib::graph::ReadOnlyGraph::hasPath)
       .def("get_entry_vertex_indices", &deglib::graph::ReadOnlyGraph::getEntryVertexIndices)
       .def("get_edges_per_vertex", &deglib::graph::ReadOnlyGraph::getEdgesPerVertex)
-      .def("get_neighbor_indices", &deglib::graph::ReadOnlyGraph::getNeighborIndices)
+      .def("get_neighbor_indices",
+           [](const deglib::graph::ReadOnlyGraph &g, const uint32_t internal_idx) {
+             return py::memoryview::from_buffer(
+                 g.getNeighborIndices(internal_idx),
+                 sizeof(uint32_t), "I", {static_cast<ssize_t>(g.getEdgesPerVertex())}, {sizeof(uint32_t)});
+           }, py::return_value_policy::reference
+      )
       .def("has_vertex", &deglib::graph::ReadOnlyGraph::hasVertex)
       .def("has_edge", &deglib::graph::ReadOnlyGraph::hasEdge)
       .def("get_external_label", &deglib::graph::ReadOnlyGraph::getExternalLabel);

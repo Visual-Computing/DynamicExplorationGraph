@@ -19,8 +19,10 @@ TODO
 ## TODO
 - complete api
   - write some tests
+  - add __repr__ functions
 - check bad performance
 - documentation
   - code comments
   - readme
 - copy argument for functions with numpy arrays
+- check internal_index, external_label
