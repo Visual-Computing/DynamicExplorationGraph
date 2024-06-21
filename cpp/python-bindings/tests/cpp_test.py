@@ -10,6 +10,7 @@ def test_simple():
     def print_helper(a):
         print('dtype:', a.dtype)
         deglib_cpp.print_py_buffer(a)
+        print('')
 
     buffer = np.arange(12, dtype=np.int32).reshape(4, 3)
 

@@ -105,8 +105,7 @@ class ReadOnlyGraph(SearchGraph):
         if index < 0 or index >= self.size():
             raise IndexError("Index {} out of range for size {}".format(index, self.size()))
         memory_view = self.graph_cpp.get_feature_vector(index)
-        feature_vector = np.asarray(memory_view)
-        return feature_vector
+        return np.asarray(memory_view)
 
     def get_internal_index(self, index: int) -> int:
         return self.graph_cpp.get_internal_index(index)
@@ -127,14 +126,17 @@ class ReadOnlyGraph(SearchGraph):
     def get_external_label(self, index: int) -> int:
         return self.graph_cpp.get_external_label(index)
 
-    def explore(self, entry_vertex_index: int, k: int, max_distance_count: int):
-        return self.graph_cpp.explore(entry_vertex_index, k, max_distance_count)
+    def explore(self, entry_vertex_index: int, k: int, max_distance_count: int) -> ResultSet:
+        return ResultSet(self.graph_cpp.explore(entry_vertex_index, k, max_distance_count))
 
     def get_edges_per_vertex(self) -> int:
         return self.graph_cpp.get_edges_per_vertex()
 
     def get_neighbor_indices(self, internal_index: int) -> np.ndarray:
-        return self.graph_cpp.get_neighbor_indices(internal_index)
+        if internal_index < 0 or internal_index >= self.size():
+            raise IndexError("Index {} out of range for size {}".format(internal_index, self.size()))
+        memory_view = self.graph_cpp.get_neighbor_indices(internal_index)
+        return np.asarray(memory_view)
 
     def has_vertex(self, external_label: int) -> bool:
         return self.graph_cpp.has_vertex(external_label)

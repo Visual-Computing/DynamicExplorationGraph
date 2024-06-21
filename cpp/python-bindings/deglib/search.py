@@ -34,6 +34,9 @@ class ResultSet:
     def top(self) -> ObjectDistance:
         return ObjectDistance(self.result_set_cpp.top())
 
+    def pop(self):
+        self.result_set_cpp.pop()
+
     def size(self) -> int:
         return self.result_set_cpp.size()
 
