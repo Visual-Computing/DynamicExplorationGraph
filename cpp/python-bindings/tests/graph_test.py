@@ -151,3 +151,18 @@ class TestGraphs:
         self.size_bounded_graph.remove_vertex(self.size_bounded_graph.size()-1)
         assert self.size_bounded_graph.size() == self.samples - 1
         self.size_bounded_graph.add_vertex(self.samples-1, self.data[-1])
+
+    def test_load_graph(self):
+        graph = deglib.graph.load_readonly_graph(self.graph_path)
+        assert isinstance(graph, deglib.graph.ReadOnlyGraph)
+
+        with pytest.raises(FileNotFoundError):
+            _graph = deglib.graph.load_readonly_graph(pathlib.Path('path') / 'does' / 'not' / 'exist')
+
+    def test_save_graph(self, tmp_path):
+        target_path = tmp_path / "save_path.deg"
+        if target_path.is_file():
+            os.remove(target_path)
+        self.size_bounded_graph.save_graph(target_path)
+        assert target_path.is_file()
+        os.remove(target_path)

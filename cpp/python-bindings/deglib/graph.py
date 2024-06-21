@@ -1,3 +1,4 @@
+import os
 from typing import List, Optional
 from abc import ABC, abstractmethod
 
@@ -149,6 +150,8 @@ class ReadOnlyGraph(SearchGraph):
 
 
 def load_readonly_graph(path: pathlib.Path | str) -> ReadOnlyGraph:
+    if not os.path.isfile(path):
+        raise FileNotFoundError('File "{}" could not be found'.format(path))
     return ReadOnlyGraph(deglib_cpp.load_readonly_graph(str(path)))
 
 

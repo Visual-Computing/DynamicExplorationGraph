@@ -7,7 +7,6 @@ from .graph import MutableGraph
 
 
 class EvenRegularGraphBuilder:
-    # TODO: add MutableGraph Interface
     def __init__(
             self, graph: MutableGraph, rng: Mt19937, extend_k: Optional[int] = None, extend_eps: float = 0.2,
             improve_k: Optional[int] = None, improve_eps: float = 0.001, max_path_length: int = 10, swap_tries: int = 3,

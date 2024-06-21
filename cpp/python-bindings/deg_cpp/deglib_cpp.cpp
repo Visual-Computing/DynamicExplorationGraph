@@ -1,7 +1,8 @@
 //
 // Created by Bruno Schilling on 29.05.24.
 //
-#define PYBIND11_DETAILED_ERROR_MESSAGES  // TODO: remove
+
+// #define PYBIND11_DETAILED_ERROR_MESSAGES
 
 #include <filesystem>
 #include <pybind11/pybind11.h>
