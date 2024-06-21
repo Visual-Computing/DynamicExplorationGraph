@@ -7,7 +7,7 @@ import deglib_cpp
 import pathlib
 
 from .distances import FloatSpace, Metric, SpaceInterface
-from .search import ResultSet
+from .search import ResultSet, ObjectDistance
 from .utils import assure_array
 
 
@@ -54,13 +54,12 @@ class SearchGraph(ABC):
     def get_entry_vertex_indices(self) -> List[int]:
         return [self.get_internal_index(0)]
 
-    # @abstractmethod
-    # def has_path(
-    # self, _entry_vertex_indices: List[int], _to_vertex: int, _eps: float, _k: int) -> List[deglib_cpp.ObjectDistance]:
-    #     """
-    #     Perform a search but stops when the to_vertex was found.
-    #     """
-    #     return NotImplemented()
+    @abstractmethod
+    def has_path(self, _entry_vertex_indices: List[int], _to_vertex: int, _eps: float, _k: int) -> List[ObjectDistance]:
+        """
+        Perform a search but stops when the to_vertex was found.
+        """
+        return NotImplemented()
 
     @abstractmethod
     def search(self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
@@ -118,6 +117,9 @@ class ReadOnlyGraph(SearchGraph):
         if entry_vertex_indices is None:
             entry_vertex_indices = self.get_entry_vertex_indices()
         return ResultSet(self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_computation_count))
+
+    def has_path(self, entry_vertex_indices: List[int], to_vertex: int, eps: float, k: int) -> List[ObjectDistance]:
+        return [ObjectDistance(od) for od in self.graph_cpp.has_path(entry_vertex_indices, to_vertex, eps, k)]
 
     def get_entry_vertex_indices(self) -> List[int]:
         return self.graph_cpp.get_entry_vertex_indices()
@@ -221,7 +223,7 @@ class SizeBoundedGraph(MutableGraph):
         # first two parameters get ignored
         return FloatSpace(0, Metric.L2, float_space_cpp=self.graph_cpp.get_feature_space())
 
-    # TODO: copy=True parameter
+    # TODO: copy=False parameter
     def get_feature_vector(self, index: int) -> np.ndarray:
         memory_view = self.graph_cpp.get_feature_vector(index)
         feature_vector = np.asarray(memory_view)
@@ -230,13 +232,8 @@ class SizeBoundedGraph(MutableGraph):
     def get_internal_index(self, index: int) -> int:
         return self.graph_cpp.get_internal_index(index)
 
-    # TODO: add search function
-    # def search(
-    #         self, entry_vertex_indices: List[int], query: np.ndarray, eps: float, k: int,
-    #         max_computation_count: int = 0
-    # ) -> ResultSet:
-    #     query = assure_array(query, 'query', np.float32)
-    #     return self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_computation_count)
+    def has_path(self, entry_vertex_indices: List[int], to_vertex: int, eps: float, k: int) -> List[ObjectDistance]:
+        return [ObjectDistance(od) for od in self.graph_cpp.has_path(entry_vertex_indices, to_vertex, eps, k)]
 
     def get_entry_vertex_indices(self) -> List[int]:
         return self.graph_cpp.get_entry_vertex_indices()
@@ -261,7 +258,7 @@ class SizeBoundedGraph(MutableGraph):
 
     def change_edge(self, internal_index: int, from_neighbor_index: int, to_neighbor_index: int,
                     to_neighbor_weight: float) -> bool:
-        return self.graph_cpp.change_edge(internal_index, from_neighbor_index, to_neighbor_index)
+        return self.graph_cpp.change_edge(internal_index, from_neighbor_index, to_neighbor_index, to_neighbor_weight)
 
     def change_edges(self, internal_index: int, neighbor_indices: np.ndarray, neighbor_weights: np.ndarray):
         neighbor_indices = assure_array(neighbor_indices, 'neighbor_indices', np.uint32)
@@ -283,8 +280,10 @@ class SizeBoundedGraph(MutableGraph):
     def has_edge(self, internal_index: int, neighbor_index: int) -> bool:
         return self.graph_cpp.has_edge(internal_index, neighbor_index)
 
-    def search(self, query: np.ndarray, eps: float, k: int, max_computation_count: int = 0,
-               entry_vertex_indices: Optional[List[int]] = None) -> ResultSet:
+    def search(
+            self, query: np.ndarray, eps: float, k: int, max_computation_count: int = 0,
+            entry_vertex_indices: Optional[List[int]] = None
+    ) -> ResultSet:
         query = assure_array(query, 'query', np.float32)
         if entry_vertex_indices is None:
             entry_vertex_indices = self.get_entry_vertex_indices()

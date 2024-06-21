@@ -108,6 +108,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
       .def("get_internal_index", &deglib::graph::ReadOnlyGraph::getInternalIndex)
       .def("search", &graph_search_wrapper<deglib::graph::ReadOnlyGraph>)
       .def("explore", &deglib::graph::ReadOnlyGraph::explore)
+      .def("has_path", &deglib::graph::ReadOnlyGraph::hasPath)
       .def("get_entry_vertex_indices", &deglib::graph::ReadOnlyGraph::getEntryVertexIndices)
       .def("get_edges_per_vertex", &deglib::graph::ReadOnlyGraph::getEdgesPerVertex)
       .def("get_neighbor_indices", &deglib::graph::ReadOnlyGraph::getNeighborIndices)
@@ -135,7 +136,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
          }, py::return_value_policy::reference
     )
     .def("get_internal_index", &deglib::graph::SizeBoundedGraph::getInternalIndex)
-    // .def("search", &read_only_graph_search_wrapper)
+    .def("has_path", &deglib::graph::SizeBoundedGraph::hasPath)
     .def("get_entry_vertex_indices", &deglib::graph::SizeBoundedGraph::getEntryVertexIndices)
     .def("get_external_label", &deglib::graph::SizeBoundedGraph::getExternalLabel)
     .def("get_edges_per_vertex", &deglib::graph::SizeBoundedGraph::getEdgesPerVertex)
