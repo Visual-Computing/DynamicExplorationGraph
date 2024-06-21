@@ -112,7 +112,7 @@ def test_approx_anns(
         # if len(checked_ids) != k:
         #     raise ValueError("ANNS with k={} got only {} unique ids".format(k, len(checked_ids)))
 
-    return 1.0 * correct / total
+    return correct / total
 
 
 def test_graph_explore(
