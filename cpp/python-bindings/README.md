@@ -25,4 +25,6 @@ TODO
   - code comments
   - readme
 - copy argument for functions with numpy arrays
-- check internal_index, external_label
+- check:
+  - internal_index, external_label
+  - always float feature vectors
