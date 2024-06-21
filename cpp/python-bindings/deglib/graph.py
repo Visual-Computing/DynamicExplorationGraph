@@ -7,11 +7,11 @@ import deglib_cpp
 import pathlib
 
 from .distances import FloatSpace, Metric, SpaceInterface
+from .search import ResultSet
 from .utils import assure_array
 
 
 # TODO: safety checks
-# TODO: wrap ResultSet in python
 
 
 class SearchGraph(ABC):
@@ -64,7 +64,7 @@ class SearchGraph(ABC):
 
     @abstractmethod
     def search(self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
-               entry_vertex_indices: Optional[List[int]] = None) -> deglib_cpp.ResultSet:
+               entry_vertex_indices: Optional[List[int]] = None) -> ResultSet:
         """
         Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
 
@@ -77,7 +77,7 @@ class SearchGraph(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def explore(self, entry_vertex_index: int, k: int, max_distance_computation_count: int) -> deglib_cpp.ResultSet:
+    def explore(self, entry_vertex_index: int, k: int, max_distance_computation_count: int) -> ResultSet:
         """
         A exploration for similar element, limited by max_distance_computation_count
         """
@@ -113,11 +113,11 @@ class ReadOnlyGraph(SearchGraph):
         return self.graph_cpp.get_internal_index(index)
 
     def search(self, query: np.ndarray, eps: float, k: int, max_computation_count: int = 0,
-               entry_vertex_indices: Optional[List[int]] = None) -> deglib_cpp.ResultSet:
+               entry_vertex_indices: Optional[List[int]] = None) -> ResultSet:
         query = assure_array(query, 'query', np.float32)
         if entry_vertex_indices is None:
             entry_vertex_indices = self.get_entry_vertex_indices()
-        return self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_computation_count)
+        return ResultSet(self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_computation_count))
 
     def get_entry_vertex_indices(self) -> List[int]:
         return self.graph_cpp.get_entry_vertex_indices()
@@ -234,7 +234,7 @@ class SizeBoundedGraph(MutableGraph):
     # def search(
     #         self, entry_vertex_indices: List[int], query: np.ndarray, eps: float, k: int,
     #         max_computation_count: int = 0
-    # ) -> deglib_cpp.ResultSet:
+    # ) -> ResultSet:
     #     query = assure_array(query, 'query', np.float32)
     #     return self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_computation_count)
 
@@ -284,14 +284,14 @@ class SizeBoundedGraph(MutableGraph):
         return self.graph_cpp.has_edge(internal_index, neighbor_index)
 
     def search(self, query: np.ndarray, eps: float, k: int, max_computation_count: int = 0,
-               entry_vertex_indices: Optional[List[int]] = None) -> deglib_cpp.ResultSet:
+               entry_vertex_indices: Optional[List[int]] = None) -> ResultSet:
         query = assure_array(query, 'query', np.float32)
         if entry_vertex_indices is None:
             entry_vertex_indices = self.get_entry_vertex_indices()
-        return self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_computation_count)
+        return ResultSet(self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_computation_count))
 
-    def explore(self, entry_vertex_index: int, k: int, max_distance_computation_count: int) -> deglib_cpp.ResultSet:
-        return self.graph_cpp.explore(entry_vertex_index, k, max_distance_computation_count)
+    def explore(self, entry_vertex_index: int, k: int, max_distance_computation_count: int) -> ResultSet:
+        return ResultSet(self.graph_cpp.explore(entry_vertex_index, k, max_distance_computation_count))
 
 
 __all__ = ['load_readonly_graph', 'ReadOnlyGraph', 'SizeBoundedGraph', 'MutableGraph', 'SearchGraph']
