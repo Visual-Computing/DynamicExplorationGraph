@@ -31,8 +31,8 @@ class ResultSet:
             raise TypeError('result_set_cpp must be of type deglib_cpp.ResultSet')
         self.result_set_cpp = result_set_cpp
 
-    def top(self) -> deglib_cpp.ObjectDistance:
-        return self.result_set_cpp.top()
+    def top(self) -> ObjectDistance:
+        return ObjectDistance(self.result_set_cpp.top())
 
     def size(self) -> int:
         return self.result_set_cpp.size()
@@ -40,8 +40,8 @@ class ResultSet:
     def empty(self) -> bool:
         return self.result_set_cpp.empty()
 
-    def __getitem__(self, index: int):
-        return self.result_set_cpp[index]
+    def __getitem__(self, index: int) -> ObjectDistance:
+        return ObjectDistance(self.result_set_cpp[index])
 
     def __len__(self) -> int:
         return self.result_set_cpp.size()
