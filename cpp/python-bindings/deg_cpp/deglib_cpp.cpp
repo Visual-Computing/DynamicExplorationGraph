@@ -226,6 +226,9 @@ PYBIND11_MODULE(deglib_cpp, m) {
     .def("build", [] (deglib::builder::EvenRegularGraphBuilder& builder, std::function<void(deglib::builder::BuilderStatus&)> callback, const bool infinite) -> deglib::graph::MutableGraph& {
       return builder.build(callback, infinite);
     })
+    .def("build_silent", [] (deglib::builder::EvenRegularGraphBuilder& builder, const bool infinite) -> deglib::graph::MutableGraph& {
+      return builder.build([] (deglib::builder::BuilderStatus&) {}, infinite);
+    })
     .def("stop", &deglib::builder::EvenRegularGraphBuilder::stop);
 
   m.def("calc_avg_edge_weight", &deglib::analysis::calc_avg_edge_weight);

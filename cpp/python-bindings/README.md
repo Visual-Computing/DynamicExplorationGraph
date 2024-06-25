@@ -16,18 +16,26 @@ TODO
 ## Referencing c++ memory
 TODO
 
+## Internal Index vs External Label
+- internal index is dense (no holes)
+- external label is just going upwards
+- only matters when removing elements
+
 ## TODO
 - complete api
   - write some tests
   - add __repr__ functions
-- check bad performance
+  - remove tqdm
 - documentation
   - code comments
   - readme
-- make pypi/conda package
+- setup
+  - make pypi/conda package
+  - continuous integration
 - copy argument for functions with numpy arrays
 - check:
   - internal_index, external_label
   - always float feature vectors
 - Questions:
-  - What is RNG conform?
+  - What is RNG conform? -> Relative Neighborhood Graph
+  - builder options (eps, k)
