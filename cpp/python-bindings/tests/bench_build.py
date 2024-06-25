@@ -209,7 +209,7 @@ def test_graph(query_file: pathlib.Path, gt_file: pathlib.Path, graph_file: path
     ground_truth = deglib.repository.ivecs_read(gt_file)
     print("{} ground truth {} dimensions".format(ground_truth.shape[0], ground_truth.shape[1]))
 
-    deglib.benchmark.test_graph_anns(graph, query_repository, ground_truth, ground_truth.shape[1], repeat, k)
+    deglib.benchmark.test_graph_anns(graph, query_repository, ground_truth, repeat, k)
 
 
 if __name__ == '__main__':

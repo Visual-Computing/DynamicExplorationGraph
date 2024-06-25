@@ -30,23 +30,16 @@ def get_near_avg_entry_index(graph: deglib.graph.ReadOnlyGraph, verbose: bool = 
 
 
 def get_ground_truth(
-        ground_truth: np.ndarray, ground_truth_size: int, ground_truth_dims: int, k: int
+        ground_truth: np.ndarray, k: int
 ) -> List[Set[int]]:
-    if ground_truth_dims < k:
-        raise ValueError("Ground truth data has only {} elements but need {}".format(ground_truth_dims, k))
-
-    answers = [set() for _ in range(ground_truth_size)]
-    for i in range(ground_truth_size):
-        gt = answers[i]
-        for j in range(k):
-            gt.add(ground_truth[i, j])
-
-    return answers
+    if ground_truth.shape[1] < k:
+        raise ValueError("Ground truth data has only {} elements but need {}".format(ground_truth.shape[1], k))
+    return [set(gt) for gt in ground_truth]
 
 
 def test_graph_anns(
         graph: deglib.graph.ReadOnlyGraph, query_repository: np.ndarray,
-        ground_truth: np.ndarray, ground_truth_dims: int, repeat: int, k: int
+        ground_truth: np.ndarray, repeat: int, k: int
 ):
     # entry_vertex_id = get_near_avg_entry_index(graph)
 
@@ -55,7 +48,7 @@ def test_graph_anns(
 
     # test ground truth
     print("Parsing gt:")
-    answer = get_ground_truth(ground_truth, query_repository.shape[0], ground_truth_dims, k)
+    answer = get_ground_truth(ground_truth, k)
     print("Loaded gt:")
 
     # try different eps values for the search radius
@@ -118,13 +111,8 @@ def test_approx_anns(
 def test_graph_explore(
         graph: deglib.graph.SearchGraph, ground_truth: np.ndarray, entry_vertices: np.ndarray, repeat: int, k: int
 ):
-    if ground_truth.shape[1] < k:
-        raise ValueError(
-            "ground truth data does not have enough dimensions, expected {} got {}".format(k, ground_truth.shape[1])
-        )
-
     # ground truth data
-    answer = deglib.benchmark.get_ground_truth(ground_truth, ground_truth.shape[0], ground_truth.shape[1], k)
+    answer = get_ground_truth(ground_truth, k)
 
     # try different k values
     k_factor = 10
