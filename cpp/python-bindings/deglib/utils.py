@@ -39,14 +39,6 @@ def assure_array(arr: np.ndarray, name: str, dtype: np.dtype) -> np.ndarray:
     return assure_contiguous(arr, name)
 
 
-def noop(*_args, **_kwargs):
-    pass
-
-
-def no_tqdm(iterable, *_args, **_kwargs):
-    return iterable
-
-
 class StopWatch:
     def __init__(self):
         self.start_time = time.perf_counter_ns()

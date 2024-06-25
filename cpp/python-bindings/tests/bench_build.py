@@ -4,7 +4,7 @@ import enum
 import time
 
 import deglib
-from deglib.utils import get_current_rss_mb
+from deglib.utils import get_current_rss_mb, StopWatch
 
 
 class DataStreamType(enum.Enum):
@@ -188,8 +188,12 @@ def create_graph(
             start = time.perf_counter()
 
     # start the build process
+    stopwatch = StopWatch()
     builder.build(improvement_callback, False)
-    print("Actual memory usage: {} Mb after building the graph in {} secs".format(get_current_rss_mb(), duration))
+    duration = stopwatch.get_elapsed_time_micro() / 1000000
+    print("Actual memory usage: {} Mb after building the graph in {:.4} secs".format(
+        get_current_rss_mb(), float(duration)
+    ))
 
     # store the graph
     graph.save_graph(graph_file)

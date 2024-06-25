@@ -1,23 +1,20 @@
 from typing import List, Set
 
 import numpy as np
-# noinspection PyPackageRequirements
-import tqdm
 
 import deglib.graph
 import deglib.repository
 import deglib.utils
 
 
-def get_near_avg_entry_index(graph: deglib.graph.ReadOnlyGraph, verbose: bool = False) -> int:
+def get_near_avg_entry_index(graph: deglib.graph.ReadOnlyGraph) -> int:
     """
     Get the internal index of the graph, that is closest to the average vector in the graph.
     """
     feature_dims = graph.get_feature_space().dim()
     graph_size = graph.size()
     avg_fv = np.zeros(feature_dims, dtype=np.float32)
-    progress_func = tqdm.tqdm if verbose else deglib.utils.no_tqdm
-    for i in progress_func(range(graph_size), desc='calculating average vector'):
+    for i in range(graph_size):
         fv = graph.get_feature_vector(i)
         avg_fv += fv
 
