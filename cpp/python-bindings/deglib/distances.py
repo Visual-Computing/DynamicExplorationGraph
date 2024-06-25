@@ -62,3 +62,6 @@ class FloatSpace(SpaceInterface):
 
     def to_cpp(self) -> deglib_cpp.FloatSpace:
         return self.float_space_cpp
+
+    def __repr__(self):
+        return f'FloatSpace(size={self.get_data_size()} dim={self.dim()}, metric={self.metric()})'

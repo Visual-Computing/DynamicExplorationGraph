@@ -1,6 +1,6 @@
 # deglib: Python bindings for the Dynamic Exploration Graph
 
-Python bindings for the c++ library Dynamic Exploration Graph used in the paper:
+Python bindings for the C++ library Dynamic Exploration Graph used in the paper:
 [Fast Approximate Nearest Neighbor Search with a Dynamic Exploration Graph using Continuous Refinement](https://arxiv.org/abs/2307.10479)
 
 ## Installation
@@ -13,29 +13,33 @@ TODO
 ## How to use
 TODO
 
-## Referencing c++ memory
+### Referencing c++ memory
 TODO
 
-## Internal Index vs External Label
+## Naming
+- Vertex = Feature Vector
+
+### Internal Index vs External Label
 - internal index is dense (no holes)
-- external label is just going upwards
+- external label is user defined identifier
 - only matters when removing elements
+
+## Limitations
+- only float spaces
+- ResultSet ordering
 
 ## TODO
 - complete api
-  - write some tests
-  - add __repr__ functions
-  - remove tqdm
+  - copy argument for functions with numpy arrays
 - documentation
   - code comments
   - readme
 - setup
   - make pypi/conda package
   - continuous integration
-- copy argument for functions with numpy arrays
 - check:
   - internal_index, external_label
-  - always float feature vectors
+  - always float feature vectors (is ok)
 - Questions:
   - What is RNG conform? -> Relative Neighborhood Graph
   - builder options (eps, k)

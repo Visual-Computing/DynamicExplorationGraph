@@ -36,6 +36,7 @@ class EvenRegularGraphBuilder:
             graph.to_cpp(), rng.to_cpp(), extend_k, extend_eps, improve_k, improve_eps, max_path_length, swap_tries,
             additional_swap_tries
         )
+        self.graph = graph
 
     def add_entry(self, label: int, feature: np.ndarray):
         """
@@ -73,3 +74,6 @@ class EvenRegularGraphBuilder:
 
     def stop(self):
         self.builder_cpp.stop()
+
+    def __repr__(self):
+        return 'EvenRegularGraphBuilder(vertices_added={})'.format(self.graph.size())

@@ -121,13 +121,13 @@ class SearchGraph(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def explore(self, entry_vertex_index: int, k: int, max_distance_count: int) -> ResultSet:
+    def explore(self, entry_vertex_index: int, k: int, max_distance_computation_count: int) -> ResultSet:
         """
         A exploration for similar element, limited by max_distance_computation_count
 
         :param entry_vertex_index: The start point for which similar feature vectors should be searched
         :param k: The number of similar feature vectors to return
-        :param max_distance_count: TODO
+        :param max_distance_computation_count: TODO
         """
         raise NotImplementedError()
 
@@ -267,6 +267,10 @@ class ReadOnlyGraph(SearchGraph):
 
     def to_cpp(self) -> deglib_cpp.ReadOnlyGraph:
         return self.graph_cpp
+
+    def __repr__(self) -> str:
+        return (f'ReadOnlyGraph(size={self.size()} edges_per_vertex={self.get_edges_per_vertex()} '
+                f'dim={self.get_feature_space().dim()})')
 
 
 def load_readonly_graph(path: pathlib.Path | str) -> ReadOnlyGraph:
@@ -588,6 +592,10 @@ class SizeBoundedGraph(MutableGraph):
 
     def to_cpp(self) -> deglib_cpp.SizeBoundedGraph:
         return self.graph_cpp
+
+    def __repr__(self) -> str:
+        return (f'SizeBoundedGraph(size={self.size()} edges_per_vertex={self.get_edges_per_vertex()} '
+                f'dim={self.get_feature_space().dim()})')
 
 
 __all__ = ['load_readonly_graph', 'ReadOnlyGraph', 'SizeBoundedGraph', 'MutableGraph', 'SearchGraph']
