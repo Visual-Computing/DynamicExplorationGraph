@@ -95,3 +95,6 @@ class ResultSet:
         """
         for i in range(self.size()):
             yield self[i]
+
+    def __repr__(self):
+        return f'ResultSet(size={self.size()} best_dist={self.top().get_distance():.3f})'
