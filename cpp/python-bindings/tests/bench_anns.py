@@ -52,7 +52,7 @@ def test_deglib_anns_bench():
 
     print("Test with k={} and repeat_test={}".format(k, repeat_test))
 
-    deglib.benchmark.test_graph_anns(graph, query_repository, ground_truth, ground_truth.shape[1], repeat_test, k)
+    deglib.benchmark.test_graph_anns(graph, query_repository, ground_truth, repeat_test, k)
 
 
 if __name__ == '__main__':

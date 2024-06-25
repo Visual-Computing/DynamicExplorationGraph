@@ -24,7 +24,10 @@ TODO
 - documentation
   - code comments
   - readme
+- make pypi/conda package
 - copy argument for functions with numpy arrays
 - check:
   - internal_index, external_label
   - always float feature vectors
+- Questions:
+  - What is RNG conform?
