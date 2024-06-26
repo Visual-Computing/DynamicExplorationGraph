@@ -91,11 +91,24 @@ def test_callback():
         print(sys.getsizeof(bi.added))
 
 
+def del_graph_test():
+    data_path: pathlib.Path = pathlib.Path(sys.argv[1])
+    graph_file: pathlib.Path = (data_path / "deg" / "best_distortion_decisions" /
+                                "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0"
+                                "+0_improveEvery2ndNonPerfectEdge.deg")
+    new_graph = deglib.graph.load_readonly_graph(graph_file)
+    fv = new_graph.get_feature_vector(0, copy=True)
+
+    del new_graph
+
+    print(np.sum(fv))
+
+
 if __name__ == '__main__':
     test_simple()
     # test_transpose()
     # test_slice()
-    # test_free_graph()
     # test_take_graph()
     # test_callback()
     # graph_file()
+    # del_graph_test()

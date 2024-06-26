@@ -167,3 +167,11 @@ class TestGraphs:
         self.size_bounded_graph.save_graph(target_path)
         assert target_path.is_file()
         os.remove(target_path)
+
+    def test_del_graph(self):
+        graph = deglib.graph.load_readonly_graph(self.graph_path)
+        fv = graph.get_feature_vector(0, copy=True)
+
+        del graph
+
+        print(np.sum(fv))  # try to access data, after graph is deleted
