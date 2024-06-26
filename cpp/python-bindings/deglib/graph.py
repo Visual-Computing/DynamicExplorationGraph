@@ -41,6 +41,7 @@ class SearchGraph(ABC):
     def get_external_label(self, internal_index: int) -> int:
         """
         Translates external labels to internal index
+
         :param internal_index: The internal index to translate
         :returns: The external label
         """
@@ -50,25 +51,30 @@ class SearchGraph(ABC):
     def get_internal_index(self, external_label: int) -> int:
         """
         Translates internal index to external label
+
         :param external_label: The external label to translate
         :returns: The internal index
         """
         raise NotImplementedError()
 
     @abstractmethod
-    def get_neighbor_indices(self, internal_index: int) -> np.ndarray:
+    def get_neighbor_indices(self, internal_index: int, copy: bool = False) -> np.ndarray:
         """
         Get the indices (internal index) of the given vertex.
+
         :param internal_index: The internal index to get the neighbors of
+        :param copy: If True the returned neighbor indices are a copy, otherwise they reference internal graph data.
         :returns: The internal index
         """
         raise NotImplementedError()
 
     @abstractmethod
-    def get_feature_vector(self, internal_index: int) -> np.ndarray:
+    def get_feature_vector(self, internal_index: int, copy: bool = False) -> np.ndarray:
         """
         Get the feature vector of the given internal index.
+
         :param internal_index: The internal index to get the feature vector of.
+        :param copy: If True the returned feature vector is a copy, otherwise a reference to the graph data is returned.
         :returns: The feature vector of the given index
         """
         raise NotImplementedError()
@@ -155,18 +161,21 @@ class ReadOnlyGraph(SearchGraph):
         # first two parameters get ignored
         return FloatSpace(0, Metric.L2, float_space_cpp=self.graph_cpp.get_feature_space())
 
-    # TODO: copy=True parameter
-    def get_feature_vector(self, index: int) -> np.ndarray:
+    def get_feature_vector(self, index: int, copy: bool = False) -> np.ndarray:
         """
         Get the feature vector of the given internal index.
 
         :param index: The internal index to get the feature vector of
+        :param copy: If True the returned feature vector is a copy, otherwise a reference to the graph data is returned.
         :returns: The feature vector of the given index
         """
         if index < 0 or index >= self.size():
             raise IndexError("Index {} out of range for size {}".format(index, self.size()))
         memory_view = self.graph_cpp.get_feature_vector(index)
-        return np.asarray(memory_view)
+        feature_vector = np.asarray(memory_view)
+        if copy:
+            feature_vector = np.copy(feature_vector)
+        return feature_vector
 
     def get_internal_index(self, external_label: int) -> int:
         """
@@ -241,17 +250,20 @@ class ReadOnlyGraph(SearchGraph):
         """
         return self.graph_cpp.get_edges_per_vertex()
 
-    def get_neighbor_indices(self, internal_index: int) -> np.ndarray:
+    def get_neighbor_indices(self, internal_index: int, copy: bool = False) -> np.ndarray:
         """
-        Get the indices (internal index) of the given vertex.
+        Get the neighbor indices (internal index) of the given vertex.
 
         :param internal_index: The internal index to get the neighbors of
-        :returns: The internal index
+        :param copy: If True the returned neighbor indices are a copy, otherwise they reference internal graph data.
         """
         if internal_index < 0 or internal_index >= self.size():
             raise IndexError("Index {} out of range for size {}".format(internal_index, self.size()))
         memory_view = self.graph_cpp.get_neighbor_indices(internal_index)
-        return np.asarray(memory_view)
+        neighbors = np.asarray(memory_view)
+        if copy:
+            neighbors = np.copy(neighbors)
+        return neighbors
 
     def has_vertex(self, external_label: int) -> bool:
         """
@@ -336,11 +348,12 @@ class MutableGraph(SearchGraph, ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def get_neighbor_weights(self, internal_index: int) -> np.ndarray:
+    def get_neighbor_weights(self, internal_index: int, copy: bool = False) -> np.ndarray:
         """
         Get weights for each neighbor of the vertex defined by the given index.
 
         :param internal_index: The index that specifies the vertex
+        :param copy: If True the returned neighbor weights are copied, otherwise they reference internal graph data.
         :returns: The weights of the neighbors
         """
         raise NotImplementedError()
@@ -400,16 +413,18 @@ class SizeBoundedGraph(MutableGraph):
         # first two parameters get ignored
         return FloatSpace(0, Metric.L2, float_space_cpp=self.graph_cpp.get_feature_space())
 
-    # TODO: copy=False parameter
-    def get_feature_vector(self, index: int) -> np.ndarray:
+    def get_feature_vector(self, index: int, copy: bool = False) -> np.ndarray:
         """
         Get the feature vector of the given internal index.
 
         :param index: The internal index to get the feature vector of
+        :param copy: If True the returned feature vector is a copy, otherwise a reference to the graph data is returned.
         :returns: The feature vector of the given index
         """
         memory_view = self.graph_cpp.get_feature_vector(index)
         feature_vector = np.asarray(memory_view)
+        if copy:
+            feature_vector = np.copy(feature_vector)
         return feature_vector
 
     def get_internal_index(self, external_label: int) -> int:
@@ -510,17 +525,21 @@ class SizeBoundedGraph(MutableGraph):
         neighbor_weights = assure_array(neighbor_weights, 'neighbor_weights', np.float32)
         return self.graph_cpp.change_edges(internal_index, neighbor_indices, neighbor_weights)
 
-    def get_neighbor_weights(self, internal_index: int) -> np.ndarray:
+    def get_neighbor_weights(self, internal_index: int, copy: bool = False) -> np.ndarray:
         """
         Get weights for each neighbor of the vertex defined by the given index.
 
         :param internal_index: The index that specifies the vertex
+        :param copy: If True the returned neighbor weights are copied, otherwise they reference internal graph data.
         :returns: The weights of the neighbors
         """
         if internal_index < 0 or internal_index >= self.size():
             raise IndexError("Index {} out of range for size {}".format(internal_index, self.size()))
         memory_view = self.graph_cpp.get_neighbor_weights(internal_index)
-        return np.asarray(memory_view)
+        weights = np.asarray(memory_view)
+        if copy:
+            weights = np.copy(weights)
+        return weights
 
     def get_edge_weight(self, from_neighbor_index: int, to_neighbor_index: int) -> float:
         """
@@ -532,17 +551,21 @@ class SizeBoundedGraph(MutableGraph):
         """
         return self.graph_cpp.get_edge_weight(from_neighbor_index, to_neighbor_index)
 
-    def get_neighbor_indices(self, internal_index: int) -> np.ndarray:
+    def get_neighbor_indices(self, internal_index: int, copy: bool = False) -> np.ndarray:
         """
         Get the indices (internal index) of the given vertex.
 
         :param internal_index: The internal index to get the neighbors of
+        :param copy: If True the returned neighbor indices are a copy, otherwise they reference internal graph data.
         :returns: The internal index
         """
         if internal_index < 0 or internal_index >= self.size():
             raise IndexError("Index {} out of range for size {}".format(internal_index, self.size()))
         memory_view = self.graph_cpp.get_neighbor_indices(internal_index)
-        return np.asarray(memory_view)
+        indices = np.asarray(memory_view)
+        if copy:
+            indices = np.copy(indices)
+        return indices
 
     def has_vertex(self, external_label: int) -> bool:
         """
