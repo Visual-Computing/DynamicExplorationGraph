@@ -399,6 +399,7 @@ class SizeBoundedGraph(MutableGraph):
         if graph_cpp is None:
             graph_cpp = deglib_cpp.SizeBoundedGraph(max_vertex_count, edges_per_vertex, feature_space.to_cpp())
         self.graph_cpp = graph_cpp
+        self.feature_space = feature_space
 
     @staticmethod
     def create_empty(capacity: int, dims: int, edges_per_vertex: int = 32, metric: Metric = Metric.L2):
