@@ -25,6 +25,13 @@ target_compile_definitions(compile-options INTERFACE $<$<PLATFORM_ID:Windows>:NO
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
 include(DetectCPUFeatures)
 
+# detecting openmp
+find_package(OpenMP)
+if(OPENMP_FOUND)
+  message("Found OpenMP")
+  target_link_libraries(compile-options INTERFACE OpenMP::OpenMP_CXX)
+endif()
+
 # setup compiler flags
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   target_compile_options(
@@ -35,16 +42,11 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU
               -fpic
               -fopenmp)
 elseif(MSVC)
-  # https://stackoverflow.com/questions/54114287/visual-studio-not-recognizing-avx2-or-avx/54137338#54137338
-  # use /fsanitize=address if needed
+
+  # warning level 4 (show all)
   target_compile_options(compile-options INTERFACE /W4)
 
-  option(KEEP_DEBUG_SYMBOLS "Whether to compile with /Zi and /DEBUG" off)
-  if(KEEP_DEBUG_SYMBOLS)
-    target_compile_options(compile-options INTERFACE /Zi)
-    target_link_options(compile-options INTERFACE /DEBUG)
-  endif()
-
+  # https://stackoverflow.com/questions/54114287/visual-studio-not-recognizing-avx2-or-avx/54137338#54137338
   # detecting SUPPORT_AVX2 or SSE2 support
   cmake_host_system_information(RESULT SUPPORT_SSE2 QUERY HAS_SSE2)
   if(SUPPORT_AVX2)
