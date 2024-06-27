@@ -18,27 +18,6 @@ def get_tmp_graph_file(samples: int, dims: int) -> pathlib.Path:
     return pathlib.Path(os.path.join(tmpdir, 'test_graph_S{}_D{}.deg'.format(samples, dims)))
 
 
-def create_size_bounded_graph(data: np.ndarray, edges_per_vertex: int):
-    samples, dims = data.shape
-
-    rnd = deglib.Mt19937()
-    feature_space = deglib.FloatSpace(dims, deglib.Metric.L2)
-    graph = deglib.graph.SizeBoundedGraph(samples, edges_per_vertex, feature_space)
-
-    builder = deglib.builder.EvenRegularGraphBuilder(graph, rnd, extend_k=30, extend_eps=0.2, improve_k=30)
-
-    for i, vec in enumerate(data):
-        vec: np.ndarray
-        builder.add_entry(i, vec)
-
-    def improvement_callback(_status):
-        pass
-
-    builder.build(improvement_callback, False)
-
-    return graph
-
-
 def get_ranking(graph: deglib.graph.SearchGraph, query: np.ndarray) -> np.ndarray:
     """
     Returns the ranking for each feature vector in the graph
@@ -69,7 +48,9 @@ class TestGraphs:
         self.edges_per_vertex = self.samples // 10
 
         self.data = np.random.random((self.samples, self.dims)).astype(np.float32)
-        self.size_bounded_graph = create_size_bounded_graph(self.data, edges_per_vertex=self.edges_per_vertex)
+        self.size_bounded_graph = deglib.builder.EvenRegularGraphBuilder.build_from_data(
+            self.data, edges_per_vertex=self.edges_per_vertex
+        )
 
         self.graph_path = get_tmp_graph_file(self.samples, self.dims)
         self.size_bounded_graph.save_graph(self.graph_path)
