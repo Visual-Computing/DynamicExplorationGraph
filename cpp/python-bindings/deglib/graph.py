@@ -400,6 +400,18 @@ class SizeBoundedGraph(MutableGraph):
             graph_cpp = deglib_cpp.SizeBoundedGraph(max_vertex_count, edges_per_vertex, feature_space.to_cpp())
         self.graph_cpp = graph_cpp
 
+    @staticmethod
+    def create_empty(capacity: int, dims: int, edges_per_vertex: int = 32, metric: Metric = Metric.L2):
+        """
+        Create an empty SizeBoundedGraph.
+
+        :param capacity: The maximal number of vertices of this graph.
+        :param dims: The number of dimensions of each feature vector
+        :param edges_per_vertex: Number of neighbors for each vertex. Defaults to 32.
+        :param metric: The metric to measure distances between features. Defaults to L2-Metric.
+        """
+        return SizeBoundedGraph(capacity, edges_per_vertex, FloatSpace(dims, metric))
+
     def size(self) -> int:
         """
         :return: the number of vertices in the graph

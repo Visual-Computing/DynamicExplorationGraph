@@ -2,8 +2,10 @@ from typing import Optional, Callable
 
 import numpy as np
 import deglib_cpp
+
+from .distances import Metric
 from .std import Mt19937
-from .graph import MutableGraph
+from .graph import MutableGraph, SizeBoundedGraph
 from .utils import assure_array
 
 
@@ -37,6 +39,27 @@ class EvenRegularGraphBuilder:
             additional_swap_tries
         )
         self.graph = graph
+        self.rng = rng
+
+    @staticmethod
+    def build_from_data(data: np.ndarray, edges_per_vertex: int = 32) -> SizeBoundedGraph:
+        """
+        Create a new graph built from the given data.
+
+        :param data: numpy array with shape [N, D], where N is the number of samples and D is the number of dimensions
+                     per feature.
+        :param edges_per_vertex: The number of edges per vertex for the graph. Defaults to 32.
+        """
+        graph = SizeBoundedGraph.create_empty(data.shape[0], data.shape[1], edges_per_vertex, Metric.L2)
+        builder = EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+
+        for i, vec in enumerate(data):
+            vec: np.ndarray
+            builder.add_entry(i, vec)
+
+        builder.build()
+
+        return graph
 
     def add_entry(self, label: int, feature: np.ndarray):
         """
