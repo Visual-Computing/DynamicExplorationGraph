@@ -247,7 +247,7 @@ class EvenRegularGraphBuilder {
               const auto neighbor_weight = neighbor_weights[edge_idx];
               if(neighbor_weight > new_neighbor_weight) {
                 new_neighbor_weight = neighbor_weight;
-                new_neighbor_weight_orig = neighbor_weights[edge_idx];
+                // new_neighbor_weight_orig = neighbor_weights[edge_idx];
                 new_neighbor_index = neighbor_index;
               }
             }

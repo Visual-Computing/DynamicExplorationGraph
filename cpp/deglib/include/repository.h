@@ -30,7 +30,7 @@ class StaticFeatureRepository : public FeatureRepository
 {
   public:
     StaticFeatureRepository(std::unique_ptr<float[]> contiguous_features, const size_t dims, const size_t count)
-        : contiguous_features_{std::move(contiguous_features)}, dims_{dims}, count_{count}
+        : dims_{dims}, count_{count}, contiguous_features_{std::move(contiguous_features)}
     {
     }
 
@@ -54,7 +54,7 @@ class DynamicFeatureRepository : public FeatureRepository
   public:
     DynamicFeatureRepository(std::unique_ptr<float[]> contiguous_features,
                              std::unordered_map<uint32_t, const float*> features, const size_t dims)
-        : contiguous_features_{std::move(contiguous_features)}, features_{std::move(features)}, dims_{dims}
+        : dims_{dims}, contiguous_features_{std::move(contiguous_features)}, features_{std::move(features)}
     {
     }
 
@@ -97,7 +97,7 @@ auto fvecs_read(const char* fname, size_t& d_out, size_t& n_out)
     auto file_size = std::filesystem::file_size(fname, ec);
     if (ec != std::error_code{})
     {
-        std::fprintf(stderr, "error when accessing file %s, size is: %llu message: %s \n", fname, file_size, ec.message().c_str());
+        std::fprintf(stderr, "error when accessing file %s, size is: %lu message: %s \n", fname, file_size, ec.message().c_str());
         perror("");
         abort();
     }

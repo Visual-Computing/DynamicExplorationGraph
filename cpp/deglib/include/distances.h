@@ -480,7 +480,7 @@ namespace deglib {
 
     public:
         FloatSpace(const size_t dim, const deglib::Metric metric) 
-            : metric_(metric), dim_(dim), data_size_(dim * sizeof(float)), fstdistfunc_(select_dist_func(dim, metric)) {
+            : fstdistfunc_(select_dist_func(dim, metric)), data_size_(dim * sizeof(float)), dim_(dim), metric_(metric) {
         }
 
         const size_t dim() const {

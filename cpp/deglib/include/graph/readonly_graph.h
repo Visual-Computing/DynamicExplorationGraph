@@ -269,7 +269,7 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
 
 public:
   ReadOnlyGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::FloatSpace feature_space)
-      : max_vertex_count_(max_vertex_count), 
+      : max_vertex_count_(max_vertex_count),
         edges_per_vertex_(edges_per_vertex), 
         feature_byte_size_(uint16_t(feature_space.get_data_size())), 
 
@@ -703,7 +703,7 @@ auto load_readonly_graph(const char* path_graph)
   auto file_size = std::filesystem::file_size(path_graph, ec);
   if (ec != std::error_code{})
   {
-    std::fprintf(stderr, "error when accessing graph file %s, size is: %llu message: %s \n", path_graph, file_size, ec.message().c_str());
+    std::fprintf(stderr, "error when accessing graph file %s, size is: %lu message: %s \n", path_graph, file_size, ec.message().c_str());
     perror("");
     abort();
   }

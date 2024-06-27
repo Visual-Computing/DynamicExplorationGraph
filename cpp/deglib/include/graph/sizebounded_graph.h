@@ -270,11 +270,11 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
 
  public:
   SizeBoundedGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::FloatSpace feature_space)
-      : max_vertex_count_(max_vertex_count), 
+      : max_vertex_count_(max_vertex_count),
         edges_per_vertex_(edges_per_vertex), 
         feature_byte_size_(uint16_t(feature_space.get_data_size())), 
 
-        byte_size_per_vertex_(compute_aligned_byte_size_per_vertex(edges_per_vertex, uint16_t(feature_space.get_data_size()), object_alignment)), 
+        byte_size_per_vertex_(compute_aligned_byte_size_per_vertex(edges_per_vertex, uint16_t(feature_space.get_data_size()), object_alignment)),
         neighbor_indices_offset_(uint32_t(feature_space.get_data_size())),
         neighbor_weights_offset_(neighbor_indices_offset_ + uint32_t(edges_per_vertex) * sizeof(uint32_t)),
         external_label_offset_(neighbor_weights_offset_ + uint32_t(edges_per_vertex) * sizeof(float)), 
@@ -894,7 +894,7 @@ auto load_sizebounded_graph(const char* path_graph, uint32_t new_max_size = 0)
   auto file_size = std::filesystem::file_size(path_graph, ec);
   if (ec != std::error_code{})
   {
-    std::fprintf(stderr, "error when accessing test file, size is: %llu message: %s \n", file_size, ec.message().c_str());
+    std::fprintf(stderr, "error when accessing test file, size is: %lu message: %s \n", file_size, ec.message().c_str());
     perror("");
     abort();
   }
