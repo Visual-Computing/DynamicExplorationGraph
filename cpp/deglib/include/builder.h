@@ -86,9 +86,10 @@ class EvenRegularGraphBuilder {
                             const uint8_t extend_k, const float extend_eps,  
                             const uint8_t improve_k, const float improve_eps, 
                             const uint8_t max_path_length = 10, const uint32_t swap_tries = 3, const uint32_t additional_swap_tries = 3) 
-      : graph_(graph), rnd_(rnd), extend_k_(extend_k), extend_eps_(extend_eps),  
-        improve_k_(improve_k), improve_eps_(improve_eps), 
-        max_path_length_(max_path_length), swap_tries_(swap_tries), additional_swap_tries_(additional_swap_tries) {
+      :
+        extend_k_(extend_k), extend_eps_(extend_eps), improve_k_(improve_k),
+        improve_eps_(improve_eps), max_path_length_(max_path_length), swap_tries_(swap_tries),
+        additional_swap_tries_(additional_swap_tries), rnd_(rnd), graph_(graph) {
     }
 
     EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, const uint32_t swaps) 
@@ -192,7 +193,7 @@ class EvenRegularGraphBuilder {
 
       // their should always be enough neighbors (search results), otherwise the graph would be broken
       if(results.size() < edges_per_vertex) {
-        std::fprintf(stderr, "the graph search for the new vertex %u did only provided %u results \n", external_label, results.size());
+        std::fprintf(stderr, "the graph search for the new vertex %u did only provided %lu results \n", external_label, results.size());
         perror("");
         abort();
       }
@@ -227,7 +228,7 @@ class EvenRegularGraphBuilder {
 
             // find the worst edge of the new neighbor
             float new_neighbor_weight = -1;
-            float new_neighbor_weight_orig = -1;
+            // float new_neighbor_weight_orig = -1;
             const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
             const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
 
@@ -241,7 +242,7 @@ class EvenRegularGraphBuilder {
               const auto neighbor_weight = neighbor_weights[edge_idx];
               if(neighbor_weight > new_neighbor_weight) {
                 new_neighbor_weight = neighbor_weight;
-                new_neighbor_weight_orig = neighbor_weights[edge_idx];
+                // new_neighbor_weight_orig = neighbor_weights[edge_idx];
                 new_neighbor_index = neighbor_index;
               }
             }
@@ -266,7 +267,7 @@ class EvenRegularGraphBuilder {
       }
 
       if(new_neighbors.size() < edges_per_vertex) {
-        std::fprintf(stderr, "could find only %u good neighbors for the new vertex %u need %u\n", new_neighbors.size(), internal_index, edges_per_vertex);
+        std::fprintf(stderr, "could find only %lu good neighbors for the new vertex %u need %u\n", new_neighbors.size(), internal_index, edges_per_vertex);
         perror("");
         abort();
       }

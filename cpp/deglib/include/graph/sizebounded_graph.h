@@ -269,18 +269,18 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
 
  public:
   SizeBoundedGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::FloatSpace feature_space)
-      : edges_per_vertex_(edges_per_vertex), 
-        max_vertex_count_(max_vertex_count), 
-        feature_space_(feature_space),
-        search_func_(getSearchFunction(feature_space)), explore_func_(getExploreFunction(feature_space)),
-        feature_byte_size_(uint16_t(feature_space.get_data_size())), 
+      : max_vertex_count_(max_vertex_count),
+        edges_per_vertex_(edges_per_vertex),
+        feature_byte_size_(uint16_t(feature_space.get_data_size())),
         byte_size_per_vertex_(compute_aligned_byte_size_per_vertex(edges_per_vertex, uint16_t(feature_space.get_data_size()), object_alignment)), 
         neighbor_indices_offset_(uint32_t(feature_space.get_data_size())),
         neighbor_weights_offset_(neighbor_indices_offset_ + uint32_t(edges_per_vertex) * sizeof(uint32_t)),
         external_label_offset_(neighbor_weights_offset_ + uint32_t(edges_per_vertex) * sizeof(float)), 
         vertices_(std::make_unique<std::byte[]>(size_t(max_vertex_count) * byte_size_per_vertex_ + object_alignment)), 
         vertices_memory_(compute_aligned_pointer(vertices_, object_alignment)), 
-        label_to_index_(max_vertex_count) {
+        label_to_index_(max_vertex_count),
+        search_func_(getSearchFunction(feature_space)), explore_func_(getExploreFunction(feature_space)),
+        feature_space_(feature_space) {
   }
 
   /**
@@ -874,7 +874,7 @@ auto load_sizebounded_graph(const char* path_graph, uint32_t new_max_size = 0)
   auto file_size = std::filesystem::file_size(path_graph, ec);
   if (ec != std::error_code{})
   {
-    std::fprintf(stderr, "error when accessing test file, size is: %llu message: %s \n", file_size, ec.message().c_str());
+    std::fprintf(stderr, "error when accessing test file, size is: %lu message: %s \n", file_size, ec.message().c_str());
     perror("");
     abort();
   }
