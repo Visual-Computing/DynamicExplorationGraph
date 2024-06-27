@@ -29,13 +29,10 @@ TODO
 - ResultSet ordering
 
 ## TODO
-- complete api
-  - copy argument for functions with numpy arrays
 - documentation
-  - code comments
   - readme
 - setup
-  - make pypi/conda package
+  - make pypi package
   - continuous integration
 - check:
   - internal_index, external_label
@@ -43,3 +40,5 @@ TODO
 - Questions:
   - What is RNG conform? -> Relative Neighborhood Graph
   - builder options (eps, k)
+- add License
+- remove test functions from deglib_cpp.cpp
