@@ -10,6 +10,9 @@ from .std import Mt19937
 from .distances import Metric, FloatSpace
 
 
+__version__ = "0.1.14"
+
+
 __all__ = [
     'avx_usable', 'sse_usable', 'graph', 'benchmark', 'Metric', 'FloatSpace',
     'builder', 'Mt19937', 'analysis', 'repository'
