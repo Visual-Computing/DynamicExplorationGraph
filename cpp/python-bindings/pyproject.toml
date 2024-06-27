@@ -1,0 +1,31 @@
+[build-system]
+requires = [
+    "setuptools",
+    # "pybind11==2.12.0"  # Not needed, as we ship our own version of pybind
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deglib"
+dynamic = ["version"]
+dependencies = [
+    "numpy",
+    "psutil",
+]
+requires-python = ">= 3.11"
+authors = [
+    {name = "Bruno Schilling", email = "bruno.schilling@htw-berlin.de"},
+    {name = "Nico Hezel"},
+]
+description = "Python bindings for the Dynamic Exploration Graph library by Nico Hezel"
+readme = "README.md"
+# license = TODO
+keywords = ["anns-search", "graph", "python"]
+
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+]
+[project.urls]
+Homepage = "https://github.com/Visual-Computing/DynamicExplorationGraph"
