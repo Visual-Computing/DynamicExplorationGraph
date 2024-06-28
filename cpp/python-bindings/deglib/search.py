@@ -26,7 +26,7 @@ class ObjectDistance:
 
     def __eq__(self, other: Self):
         """
-        Checks equality with other. Two ObjectDistances are equal, if the the found vertex and the distance is equal.
+        Checks equality with other. Two ObjectDistances are equal, if the found vertex and the distance is equal.
         """
         return self.object_distance_cpp == other.object_distance_cpp
 
