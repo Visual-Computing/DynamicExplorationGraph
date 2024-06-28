@@ -7,9 +7,10 @@ cmake_policy(SET CMP0054 NEW)
 project(
   deg_lib
   HOMEPAGE_URL "https://github.com/Neiko2002/DEG"
-  DESCRIPTION
-    "Dynamic Exploration Graphs for fast approximate nearest neighbor search and navigation in large image datasets"
-  VERSION 0.0.1)
+  DESCRIPTION "Dynamic Exploration Graphs for fast approximate nearest neighbor search and navigation in large image datasets"
+  VERSION 0.0.1
+  LANGUAGES CXX
+  )
 
 # https://cmake.org/cmake/help/latest/prop_tgt/CXX_STANDARD.html
 set(CMAKE_CXX_STANDARD 20)
@@ -26,7 +27,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
 include(DetectCPUFeatures)
 
 # detecting openmp
-find_package(OpenMP)
+find_package(OpenMP REQUIRED COMPONENTS CXX)
 if(OPENMP_FOUND)
   message("Found OpenMP")
   target_link_libraries(compile-options INTERFACE OpenMP::OpenMP_CXX)
@@ -36,11 +37,8 @@ endif()
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   target_compile_options(
     compile-options
-    INTERFACE -DNDEBUG
-              -march=native
-              -O2
-              -fpic
-              -fopenmp)
+    INTERFACE -march=native
+              -fpic)
 elseif(MSVC)
 
   # warning level 4 (show all)
@@ -53,8 +51,6 @@ elseif(MSVC)
     target_compile_options(compile-options INTERFACE /arch:AVX2)
   elseif(SUPPORT_SSE2)
     target_compile_options(compile-options INTERFACE /arch:SSE2)
-  else()
-    target_compile_options(compile-options INTERFACE /arch:native)
   endif()
 
   # disable string optimizations and function level linking
