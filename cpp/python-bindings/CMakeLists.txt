@@ -11,8 +11,6 @@ set(PYBIND_SOURCES deg_cpp/deglib_cpp.cpp)
 # Specify the include directories
 include_directories(${CMAKE_SOURCE_DIR}/deglib/include)
 
-find_package(pybind11 REQUIRED)
-
 # Create a Python module
 pybind11_add_module(deglib_cpp MODULE ${PYBIND_SOURCES})
 

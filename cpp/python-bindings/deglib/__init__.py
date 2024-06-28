@@ -15,5 +15,5 @@ __version__ = "0.1.15"
 
 __all__ = [
     'avx_usable', 'sse_usable', 'graph', 'benchmark', 'Metric', 'FloatSpace',
-    'builder', 'Mt19937', 'analysis', 'repository'
+    'builder', 'Mt19937', 'analysis', 'repository', 'search'
 ]
