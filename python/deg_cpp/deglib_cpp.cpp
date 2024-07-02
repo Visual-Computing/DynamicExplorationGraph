@@ -92,6 +92,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
   // graphs
   py::class_<deglib::search::SearchGraph>(m, "SearchGraph");
 
+
   // read only graph
   py::class_<deglib::graph::ReadOnlyGraph, deglib::search::SearchGraph>(m, "ReadOnlyGraph")
       .def(py::init<const uint32_t, const uint8_t, const deglib::FloatSpace>())
@@ -103,7 +104,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
            [](const deglib::graph::ReadOnlyGraph &g, const uint32_t internal_idx) {
              return py::memoryview::from_buffer(
                  g.getFeatureVector(internal_idx),
-                 sizeof(float), "f", {static_cast<ssize_t>(g.getFeatureSpace().dim())}, {sizeof(float)});
+                 sizeof(float), "f", {g.getFeatureSpace().dim()}, {sizeof(float)});
            }, py::return_value_policy::reference
       )
       .def("get_internal_index", &deglib::graph::ReadOnlyGraph::getInternalIndex)
@@ -116,7 +117,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
            [](const deglib::graph::ReadOnlyGraph &g, const uint32_t internal_idx) {
              return py::memoryview::from_buffer(
                  g.getNeighborIndices(internal_idx),
-                 sizeof(uint32_t), "I", {static_cast<ssize_t>(g.getEdgesPerVertex())}, {sizeof(uint32_t)});
+                 sizeof(uint32_t), "I", {g.getEdgesPerVertex()}, {sizeof(uint32_t)});
            }, py::return_value_policy::reference
       )
       .def("has_vertex", &deglib::graph::ReadOnlyGraph::hasVertex)
@@ -124,7 +125,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
       .def("get_external_label", &deglib::graph::ReadOnlyGraph::getExternalLabel);
 
   m.def("load_readonly_graph", &deglib::graph::load_readonly_graph);
-
+  
   // mutable graph
   py::class_<deglib::graph::MutableGraph, deglib::search::SearchGraph>(m, "MutableGraph");
 
@@ -139,7 +140,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
          [](const deglib::graph::SizeBoundedGraph &g, const uint32_t internal_idx) {
            return py::memoryview::from_buffer(
                g.getFeatureVector(internal_idx),
-               sizeof(float), "f", {static_cast<ssize_t>(g.getFeatureSpace().dim())}, {sizeof(float)});
+               sizeof(float), "f", {g.getFeatureSpace().dim()}, {sizeof(float)});
          }, py::return_value_policy::reference
     )
     .def("get_internal_index", &deglib::graph::SizeBoundedGraph::getInternalIndex)
@@ -174,7 +175,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
          [](const deglib::graph::SizeBoundedGraph &g, const uint32_t internal_idx) {
            return py::memoryview::from_buffer(
                g.getNeighborWeights(internal_idx),
-               sizeof(float), "f", {static_cast<ssize_t>(g.getEdgesPerVertex())}, {sizeof(float)});
+               sizeof(float), "f", {g.getEdgesPerVertex()}, {sizeof(float)});
          }, py::return_value_policy::reference
     )
     .def("get_edge_weight", &deglib::graph::SizeBoundedGraph::getEdgeWeight)
@@ -182,7 +183,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
       [](const deglib::graph::SizeBoundedGraph &g, const uint32_t internal_idx) {
         return py::memoryview::from_buffer(
             g.getNeighborIndices(internal_idx),
-            sizeof(uint32_t), "I", {static_cast<ssize_t>(g.getEdgesPerVertex())}, {sizeof(uint32_t)});
+            sizeof(uint32_t), "I", {g.getEdgesPerVertex()}, {sizeof(uint32_t)});
       }, py::return_value_policy::reference
     )
     .def("has_vertex", &deglib::graph::SizeBoundedGraph::hasVertex)
@@ -196,7 +197,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
          [](const deglib::StaticFeatureRepository &fr, const uint32_t vertex_id) {
            return py::memoryview::from_buffer(
                fr.getFeature(vertex_id),
-               sizeof(float), "f", {static_cast<ssize_t>(fr.dims())}, {sizeof(float)});
+               sizeof(float), "f", {fr.dims()}, {sizeof(float)});
          }, py::return_value_policy::reference
     )
     .def("size", &deglib::StaticFeatureRepository::size)
