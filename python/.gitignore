@@ -1,4 +1,5 @@
 /deglib.egg-info
 __pycache__
-/include
+/lib
 /dist
+*.egg-info

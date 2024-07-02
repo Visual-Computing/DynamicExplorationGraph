@@ -5,10 +5,10 @@ import codecs
 import os
 import shutil
 import sys
-import pybind
+import pybind11
 
-from setuptools import Extension, setup
-
+from setuptools import Extension, setup, Command, find_packages
+from setuptools.command.sdist import sdist as sdist_class
 
 INCLUDE_DIR = 'include'
 
@@ -28,36 +28,34 @@ def get_version(rel_path):
         raise RuntimeError("Unable to find version string.")
 
 
-def is_tmp_build():
-    top_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    return 'DynamicExplorationGraph' != os.path.basename(top_dir)
+class CopyBuildCommand(Command):
+    description = 'Copy necessary build files'
+    user_options = []
+
+    def initialize_options(self):
+        pass
+
+    def finalize_options(self):
+        pass
+
+    def run(self):
+        copy_dirs = [
+            (os.path.join('..', 'cpp'), 'lib')
+        ]
+
+        for src, dst in copy_dirs:
+            if os.path.isdir(dst):
+                print(f"Removing {dst}")
+                shutil.rmtree(dst)
+            print(f"Copying {src} to {dst}")
+            shutil.copytree(src, dst)
+        print("Files copied successfully.")
 
 
-def prepare_include_dir():
-    if is_tmp_build():
-        return
-    os.makedirs(INCLUDE_DIR, exist_ok=True)
-    to_copy = [
-        (os.path.join('..', 'deglib', 'include'), 'deglib')
-    ]
-
-    for source_path, target_path in to_copy:
-        target_path = os.path.join(INCLUDE_DIR, target_path)
-        if os.path.exists(target_path):
-            if os.path.isdir(target_path):
-                shutil.rmtree(target_path)
-            if os.path.isfile(target_path):
-                os.remove(target_path)
-
-        if os.path.isdir(source_path):
-            print('-- copy dir {} -> {}'.format(source_path, target_path))
-            shutil.copytree(source_path, target_path)
-        elif os.path.isfile(source_path):
-            print('-- copy file {} -> {}'.format(source_path, target_path))
-            shutil.copy(source_path, target_path)
-
-
-prepare_include_dir()
+class CopySDist(sdist_class):
+    def run(self):
+        self.run_command('copy_build_files')
+        super().run()
 
 
 def get_compile_args():
@@ -72,18 +70,25 @@ def get_compile_args():
 
 
 setup(
-    version=get_version('deglib/__init__.py'),
+    version=get_version(os.path.join('src', 'deglib', '__init__.py')),
     ext_modules=[
         Extension(
             name="deglib_cpp",
-            sources=["deg_cpp/deglib_cpp.cpp"],
-            # TODO: maybe replace with pybind11.get_include() and remove pybind11 from local include directory
-            include_dirs=[pybind11.get_include(), os.path.join('.', INCLUDE_DIR, 'deglib'), os.path.join('.', INCLUDE_DIR)],
-	    language='c++',
+            sources=[os.path.join('src', 'deg_cpp', 'deglib_cpp.cpp')],
+            include_dirs=[
+                os.path.join('lib', 'deglib', 'include'),
+                pybind11.get_include(),
+            ],
+            language='c++',
             extra_compile_args=get_compile_args()
         ),
     ],
-    packages=['deglib'],
+    cmdclass={
+        'copy_build_files': CopyBuildCommand,
+        'sdist': CopySDist,
+    },
+    package_dir={'': 'src'},
+    packages=find_packages(where='src'),
     # package_data={
     #     '': [os.path.join(INCLUDE_DIR, '*.h')]
     # },
