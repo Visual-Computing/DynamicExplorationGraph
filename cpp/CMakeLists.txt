@@ -9,7 +9,9 @@ project(
   HOMEPAGE_URL "https://github.com/Neiko2002/DEG"
   DESCRIPTION
     "Dynamic Exploration Graphs for fast approximate nearest neighbor search and navigation in large image datasets"
-  VERSION 0.0.1)
+  VERSION 0.0.1
+  LANGUAGES CXX
+  )
 
 # https://cmake.org/cmake/help/latest/prop_tgt/CXX_STANDARD.html
 set(CMAKE_CXX_STANDARD 20)
@@ -25,25 +27,24 @@ target_compile_definitions(compile-options INTERFACE $<$<PLATFORM_ID:Windows>:NO
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
 include(DetectCPUFeatures)
 
+# detecting openmp
+find_package(OpenMP REQUIRED COMPONENTS CXX)
+if(OPENMP_FOUND)
+  message("Found OpenMP")
+  target_link_libraries(compile-options INTERFACE OpenMP::OpenMP_CXX)
+endif()
+
 # setup compiler flags
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   target_compile_options(
     compile-options
-    INTERFACE -DNDEBUG
-              -march=native
-              -O2
+    INTERFACE -march=native
               -fpic
               -fopenmp)
 elseif(MSVC)
-  # https://stackoverflow.com/questions/54114287/visual-studio-not-recognizing-avx2-or-avx/54137338#54137338
-  # use /fsanitize=address if needed
+  
+  # warning level 4 (show all)
   target_compile_options(compile-options INTERFACE /W4)
-
-  option(KEEP_DEBUG_SYMBOLS "Whether to compile with /Zi and /DEBUG" off)
-  if(KEEP_DEBUG_SYMBOLS)
-    target_compile_options(compile-options INTERFACE /Zi)
-    target_link_options(compile-options INTERFACE /DEBUG)
-  endif()
 
   # detecting SUPPORT_AVX2 or SSE2 support
   cmake_host_system_information(RESULT SUPPORT_SSE2 QUERY HAS_SSE2)
@@ -51,8 +52,6 @@ elseif(MSVC)
     target_compile_options(compile-options INTERFACE /arch:AVX2)
   elseif(SUPPORT_SSE2)
     target_compile_options(compile-options INTERFACE /arch:SSE2)
-  else()
-    target_compile_options(compile-options INTERFACE /arch:native)
   endif()
 
   # disable string optimizations and function level linking

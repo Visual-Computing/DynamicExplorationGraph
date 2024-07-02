@@ -37,21 +37,21 @@ namespace deglib::analysis
 
             // check if the neighbor indizizes of the vertices are in ascending order and unique
             int64_t last_index = -1;
-            for (size_t e = 0; e < edges_per_vertex; e++) {
+            for (int64_t e = 0; e < edges_per_vertex; e++) {
                 auto neighbor_index = neighbor_indices[e];
 
                 if(n == neighbor_index) {
-                    std::fprintf(stderr, "vertex %u has a self-loop at position %u \n", n, e);
+                    std::fprintf(stderr, "vertex %u has a self-loop at position %lld \n", n, e);
                     return false;
                 }
 
                 if(last_index == neighbor_index) {
-                    std::fprintf(stderr, "vertex %u has a duplicate neighbor at position %u with the neighbor index %u \n", n, e, neighbor_index);
+                    std::fprintf(stderr, "vertex %u has a duplicate neighbor at position %lld with the neighbor index %u \n", n, e, neighbor_index);
                     return false;
                 }
 
                 if(last_index > neighbor_index) {
-                    std::fprintf(stderr, "the neighbor order for vertex %u is invalid: pos %d has index %lld while pos %u has index %u \n", n, e-1, last_index, e, neighbor_index);
+                    std::fprintf(stderr, "the neighbor order for vertex %u is invalid: pos %lld has index %lld while pos %lld has index %u \n", n, e-1, last_index, e, neighbor_index);
                     return false;
                 }
 

@@ -173,7 +173,7 @@ class EvenRegularGraphBuilder {
         const auto internal_index = graph.addVertex(external_label, new_vertex_feature);
 
         // connect the new vertex to all other vertices in the graph
-        for (size_t i = 0; i < graph.size(); i++) {
+        for (uint32_t i = 0; i < graph.size(); i++) {
           if(i != internal_index) {
             const auto dist = dist_func(new_vertex_feature, graph.getFeatureVector(i), dist_func_param);
             graph.changeEdge(i, i, internal_index, dist);
@@ -192,7 +192,7 @@ class EvenRegularGraphBuilder {
 
       // their should always be enough neighbors (search results), otherwise the graph would be broken
       if(results.size() < edges_per_vertex) {
-        std::fprintf(stderr, "the graph search for the new vertex %u did only provided %u results \n", external_label, results.size());
+        std::fprintf(stderr, "the graph search for the new vertex %u did only provided %zu results \n", external_label, results.size());
         perror("");
         abort();
       }
@@ -222,12 +222,12 @@ class EvenRegularGraphBuilder {
 
           // This version is good for high LID datasets or small graphs with low distance count limit during ANNS
           uint32_t new_neighbor_index = 0;
-          float new_neighbor_distance = -1;
+          float new_neighbor_distance = -1.0f;
           {
 
             // find the worst edge of the new neighbor
-            float new_neighbor_weight = -1;
-            float new_neighbor_weight_orig = -1;
+            float new_neighbor_weight = -1.0f;
+            float new_neighbor_weight_orig = -1.0f;
             const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
             const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
 
@@ -246,7 +246,7 @@ class EvenRegularGraphBuilder {
               }
             }
 
-            if(new_neighbor_weight == -1) {
+            if(new_neighbor_weight == -1.0f) {
               continue;
             }
 
@@ -266,7 +266,7 @@ class EvenRegularGraphBuilder {
       }
 
       if(new_neighbors.size() < edges_per_vertex) {
-        std::fprintf(stderr, "could find only %u good neighbors for the new vertex %u need %u\n", new_neighbors.size(), internal_index, edges_per_vertex);
+        std::fprintf(stderr, "could find only %zu good neighbors for the new vertex %u need %u\n", new_neighbors.size(), internal_index, edges_per_vertex);
         perror("");
         abort();
       }
@@ -599,8 +599,8 @@ class EvenRegularGraphBuilder {
 
           // find a good new vertex3
           float best_gain = total_gain;
-          float dist23 = -1;
-          float dist34 = -1;
+          float dist23 = -1.0f;
+          float dist34 = -1.0f;
 
           // We use the descending order to find the worst swap combination with the best gain
           // Sometimes the gain between the two best combinations is the same, its better to use one with the bad edges to make later improvements easier
@@ -637,7 +637,7 @@ class EvenRegularGraphBuilder {
           }
 
           // no new vertex3 was found
-          if(dist23 == -1)
+          if(dist23 == -1.0f)
             return false;
 
           // replace the temporary self-loop of vertex2 with a connection to vertex3. 
