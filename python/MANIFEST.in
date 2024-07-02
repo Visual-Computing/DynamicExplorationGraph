@@ -1,2 +1,1 @@
-recursive-include include *.h
-exclude scripts
+recursive-include lib *.h
