@@ -5,6 +5,7 @@ import codecs
 import os
 import shutil
 import sys
+import pybind
 
 from setuptools import Extension, setup
 
@@ -37,8 +38,7 @@ def prepare_include_dir():
         return
     os.makedirs(INCLUDE_DIR, exist_ok=True)
     to_copy = [
-        (os.path.join('..', 'deglib', 'include'), 'deglib'),
-        (os.path.join('external', 'pybind11', 'include', 'pybind11'), 'pybind11')
+        (os.path.join('..', 'deglib', 'include'), 'deglib')
     ]
 
     for source_path, target_path in to_copy:
@@ -78,7 +78,8 @@ setup(
             name="deglib_cpp",
             sources=["deg_cpp/deglib_cpp.cpp"],
             # TODO: maybe replace with pybind11.get_include() and remove pybind11 from local include directory
-            include_dirs=[os.path.join('.', INCLUDE_DIR, 'deglib'), os.path.join('.', INCLUDE_DIR)],
+            include_dirs=[pybind11.get_include(), os.path.join('.', INCLUDE_DIR, 'deglib'), os.path.join('.', INCLUDE_DIR)],
+	    language='c++',
             extra_compile_args=get_compile_args()
         ),
     ],
