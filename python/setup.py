@@ -44,11 +44,8 @@ class CopyBuildCommand(Command):
         ]
 
         for src, dst in copy_dirs:
-            if os.path.isdir(dst):
-                print(f"Removing {dst}")
-                shutil.rmtree(dst)
             print(f"Copying {src} to {dst}")
-            shutil.copytree(src, dst)
+            shutil.copytree(src, dst, dirs_exist_ok=True)
         print("Files copied successfully.")
 
 
