@@ -13,6 +13,8 @@ project(
   LANGUAGES CXX
   )
 
+option(ENABLE_BENCHMARKS "compile benchmarks" ON)
+
 # https://cmake.org/cmake/help/latest/prop_tgt/CXX_STANDARD.html
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -62,7 +64,9 @@ endif()
 message("C++ compiler flags: ${CMAKE_CXX_FLAGS}")
 message("C++ compiler flags release: ${CMAKE_CXX_FLAGS_RELEASE}")
 
-add_subdirectory(external/fmt)
-
 add_subdirectory(deglib)
-add_subdirectory(benchmark)
+
+if (ENABLE_BENCHMARKS)
+	add_subdirectory(external/fmt)
+	add_subdirectory(benchmark)
+endif()

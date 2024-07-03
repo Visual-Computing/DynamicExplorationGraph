@@ -1,20 +1,21 @@
 # python-bindings/CMakeLists.txt
 cmake_minimum_required(VERSION 3.19)
-project(python-bindings)
+project(deglib_cpp)
+
+# Add python TODO: maybe remove
+find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 
 # Add pybind11
-add_subdirectory(${CMAKE_SOURCE_DIR}/python-bindings/external/pybind11/)
+find_package(pybind11 CONFIG REQUIRED)
 
-# Specify the source files
-set(PYBIND_SOURCES deg_cpp/deglib_cpp.cpp)
+# disable benchmark building
+set(ENABLE_BENCHMARKS OFF CACHE BOOL "Disable benchmarks" FORCE)
+
+# Add cpp-deglib
+add_subdirectory(${CMAKE_SOURCE_DIR}/lib/)
+pybind11_add_module(deglib_cpp src/deg_cpp/deglib_cpp.cpp)
 
 # Specify the include directories
-include_directories(${CMAKE_SOURCE_DIR}/deglib/include)
-
-# Create a Python module
-pybind11_add_module(deglib_cpp MODULE ${PYBIND_SOURCES})
+include_directories(${CMAKE_SOURCE_DIR}/lib/deglib/include)
 
 target_link_libraries(deglib_cpp PRIVATE compile-options)
-
-# Link necessary libraries (if any)
-# target_link_libraries(deglib_cpp PRIVATE <libraries>)

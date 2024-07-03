@@ -118,12 +118,12 @@ TODO
 ## TODO
 - documentation
   - readme
+    - rework installation
 - setup
   - make pypi package
   - continuous integration
 - check:
   - internal_index, external_label
-  - always float feature vectors (is ok)
 - Questions:
   - What is RNG conform? -> Relative Neighborhood Graph
   - builder options (eps, k)

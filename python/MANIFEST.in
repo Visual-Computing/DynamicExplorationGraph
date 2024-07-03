@@ -1,1 +1,2 @@
 recursive-include lib *.h
+global-include CMakeLists.txt *.cmake
