@@ -166,7 +166,21 @@ namespace deglib {
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
-                
+
+                // TODO add NEON: https://github.com/ashvardanian/SimSIMD/blob/main/include/simsimd/spatial.h#L180
+                // https://github.com/ashvardanian/SimSIMD/blob/main/include/simsimd/types.h#L156
+                // #include <arm_neon.h>
+                // const float *last = a + size;
+                // float32x4_t sum128 = _mm_setzero_ps();
+                // float32x4_t v;
+                // while (a < last) {
+                //     v = vsubq_f32(vld1q_f32(a), vld1q_f32(b));
+                //     sum128 = vfmaq_f32(sum128, v, v);
+                //     a += 4;
+                //     b += 4;
+                // }
+                // return vaddvq_f32(sum128);
+
                 const float *last = a + size;
                 __m128 sum128 = _mm_setzero_ps();
                 __m128 v;

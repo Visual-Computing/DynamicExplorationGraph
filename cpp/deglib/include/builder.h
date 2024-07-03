@@ -86,9 +86,15 @@ class EvenRegularGraphBuilder {
                             const uint8_t extend_k, const float extend_eps,  
                             const uint8_t improve_k, const float improve_eps, 
                             const uint8_t max_path_length = 10, const uint32_t swap_tries = 3, const uint32_t additional_swap_tries = 3) 
-      : graph_(graph), rnd_(rnd), extend_k_(extend_k), extend_eps_(extend_eps),  
-        improve_k_(improve_k), improve_eps_(improve_eps), 
-        max_path_length_(max_path_length), swap_tries_(swap_tries), additional_swap_tries_(additional_swap_tries) {
+      : extend_k_(extend_k),
+        extend_eps_(extend_eps),  
+        improve_k_(improve_k), 
+        improve_eps_(improve_eps), 
+        max_path_length_(max_path_length), 
+        swap_tries_(swap_tries), 
+        additional_swap_tries_(additional_swap_tries),
+        rnd_(rnd),  
+        graph_(graph) {
     }
 
     EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, const uint32_t swaps) 
