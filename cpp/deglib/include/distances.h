@@ -45,6 +45,7 @@ namespace deglib {
             // https://stackoverflow.com/questions/52147378/choice-between-aligned-vs-unaligned-x86-simd-instructions
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) 
             {
+            #if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
@@ -118,12 +119,17 @@ namespace deglib {
                 alignas(32) float f[4];
                 _mm_store_ps(f, sum128);
                 return f[0] + f[1] + f[2] + f[3];
+            #else
+                return L2Float.compare(pVect1v, pVect2v, qty_ptr);
+            #endif 
             }
         };
         
         class L2Float8Ext {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+
+            #if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
@@ -157,12 +163,16 @@ namespace deglib {
                 alignas(32) float f[4];
                 _mm_store_ps(f, sum128);
                 return f[0] + f[1] + f[2] + f[3];
+            #else
+                return L2Float.compare(pVect1v, pVect2v, qty_ptr);
+            #endif 
             }
         };
 
         class L2Float4Ext {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+            #if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
@@ -194,6 +204,9 @@ namespace deglib {
                 alignas(32) float f[4];
                 _mm_store_ps(f, sum128);
                 return f[0] + f[1] + f[2] + f[3];
+            #else
+                return L2Float.compare(pVect1v, pVect2v, qty_ptr);
+            #endif 
             }
         };
 
@@ -268,8 +281,8 @@ namespace deglib {
         public:
             // AVX instructions don't require their memory operands to be aligned, but SSE does
             // https://stackoverflow.com/questions/52147378/choice-between-aligned-vs-unaligned-x86-simd-instructions
-            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) 
-            {
+            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+            #if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
@@ -317,12 +330,16 @@ namespace deglib {
                 alignas(32) float f[4];
                 _mm_store_ps(f, sum128);
                 return f[0] + f[1] + f[2] + f[3];
+            #else
+                return InnerProductFloat.compare(pVect1v, pVect2v, qty_ptr);
+            #endif 
             }
         };
         
         class InnerProductFloat8Ext {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+            #if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
@@ -351,12 +368,16 @@ namespace deglib {
                 alignas(32) float f[4];
                 _mm_store_ps(f, sum128);
                 return f[0] + f[1] + f[2] + f[3];
+            #else
+                return InnerProductFloat.compare(pVect1v, pVect2v, qty_ptr);
+            #endif 
             }
         };
 
         class InnerProductFloat4Ext {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+            #if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
@@ -372,6 +393,9 @@ namespace deglib {
                 alignas(32) float f[4];
                 _mm_store_ps(f, sum128);
                 return abs(f[0] + f[1] + f[2] + f[3]);
+            #else
+                return InnerProductFloat.compare(pVect1v, pVect2v, qty_ptr);
+            #endif 
             }
         };
 
