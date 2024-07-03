@@ -120,7 +120,7 @@ namespace deglib {
                 _mm_store_ps(f, sum128);
                 return f[0] + f[1] + f[2] + f[3];
             #else
-                return L2Float.compare(pVect1v, pVect2v, qty_ptr);
+                return L2Float::compare(pVect1v, pVect2v, qty_ptr);
             #endif 
             }
         };
@@ -164,7 +164,7 @@ namespace deglib {
                 _mm_store_ps(f, sum128);
                 return f[0] + f[1] + f[2] + f[3];
             #else
-                return L2Float.compare(pVect1v, pVect2v, qty_ptr);
+                return L2Float::compare(pVect1v, pVect2v, qty_ptr);
             #endif 
             }
         };
@@ -205,7 +205,7 @@ namespace deglib {
                 _mm_store_ps(f, sum128);
                 return f[0] + f[1] + f[2] + f[3];
             #else
-                return L2Float.compare(pVect1v, pVect2v, qty_ptr);
+                return L2Float::compare(pVect1v, pVect2v, qty_ptr);
             #endif 
             }
         };
