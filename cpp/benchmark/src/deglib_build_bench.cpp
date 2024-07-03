@@ -2,6 +2,7 @@
 #include <chrono>
 
 #include <fmt/core.h>
+#include <omp.h>
 
 #include "benchmark.h"
 #include "deglib.h"
