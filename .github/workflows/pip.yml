@@ -17,7 +17,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [windows-latest, macos-latest, ubuntu-latest]
+        # platform: [windows-latest, macos-13, ubuntu-latest]
+        platform: [macos-latest]
         # python-version: ["3.11", "3.12"]  TODO: use both versions
         python-version: ["3.11"]
 

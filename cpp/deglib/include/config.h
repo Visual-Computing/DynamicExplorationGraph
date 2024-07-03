@@ -23,7 +23,11 @@
     #define USE_SSE
 
   #else
-    #error "neither SSE, AVX nor AVX512 are defined"
+    #ifdef _MSC_VER
+      #pragma message ( "warning: neither SSE, AVX nor AVX512 are defined" )
+    #else
+      #warning "neither SSE, AVX nor AVX512 are defined"
+    #endif
 
   #endif
 #endif
