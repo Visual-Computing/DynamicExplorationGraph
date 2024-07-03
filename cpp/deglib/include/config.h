@@ -13,18 +13,19 @@
     #endif
   #endif
 
-  #ifdef __SSE__
-    #define USE_SSE
-  #endif
-
-  #ifdef __AVX__
-    #define USE_AVX
-  #endif
-
-  #ifdef __AVX512F__
+  #if defined(__AVX512F__)
     #define USE_AVX512
-  #endif
 
+  #elif defined(__AVX__) || defined(__AVX2__)
+    #define USE_AVX
+
+  #elif defined(__SSE__) || defined(__SSE2__)
+    #define USE_SSE
+
+  #else
+    #error "neither SSE, AVX nor AVX512 are defined"
+
+  #endif
 #endif
 
 // TODO switch to only #include <immintrin.h>
