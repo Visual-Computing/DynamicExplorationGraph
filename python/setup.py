@@ -89,9 +89,9 @@ class CMakeExtension(Extension):
 def call_cmake_checked(command, cwd):
     result = subprocess.run(command, cwd=cwd, capture_output=True)
 
+    print('STDOUT: ' + '-'*33 + '\n', result.stdout.decode('utf-8'), '-'*42)
+    print('STDERR: ' + '-'*33 + '\n', result.stderr.decode('utf-8'), '-'*42)
     if result.returncode != 0:
-        print('STDOUT:\n', result.stdout.decode('utf-8'))
-        print('STDERR:\n', result.stderr.decode('utf-8'))
         result.check_returncode()
 
 

@@ -26,6 +26,10 @@ target_compile_definitions(compile-options INTERFACE $<$<PLATFORM_ID:Windows>:NO
 
 # detecting CPU instruction support
 # https://github.com/lemire/FastPFor/blob/master/CMakeLists.txt
+if (APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+  message(WARNING "You are compiling on an Apple M chip. At the moment deglib does not support ARM optimizations, so using deglib will be slow!")
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
 include(DetectCPUFeatures)
 
