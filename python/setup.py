@@ -59,6 +59,17 @@ class CopyBuildCommand(Command):
             shutil.copytree(src, dst, dirs_exist_ok=True)
         print("Files copied successfully.")
 
+        rm_dirs = [
+            os.path.join('lib', 'external'),
+            os.path.join('lib', 'cmake-build-default'),
+            os.path.join('lib', 'build'),
+            os.path.join('lib', 'benchmark'),
+        ]
+        for rm_dir in rm_dirs:
+            if os.path.isdir(rm_dir):
+                print(f'Removing "{rm_dir}"')
+                shutil.rmtree(rm_dir)
+
 
 class CopySDist(sdist_class):
     def run(self):
