@@ -1,7 +1,6 @@
 #pragma once
 
 #ifndef NO_MANUAL_VECTORIZATION
-
   // Microsoft Visual C++ does not define __SSE__ or __SSE2__ but _M_IX86_FP instead
   // https://docs.microsoft.com/en-us/cpp/preprocessor/predefined-macros?view=msvc-170
   #ifdef _MSC_VER
@@ -30,6 +29,9 @@
     #endif
 
   #endif
+  // #undef USE_AVX512  // for testing arm processors
+  // #undef USE_AVX
+  // #undef USE_SSE
 #endif
 
 // TODO switch to only #include <immintrin.h>

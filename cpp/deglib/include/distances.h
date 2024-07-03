@@ -331,7 +331,7 @@ namespace deglib {
                 _mm_store_ps(f, sum128);
                 return f[0] + f[1] + f[2] + f[3];
             #else
-                return InnerProductFloat.compare(pVect1v, pVect2v, qty_ptr);
+                return InnerProductFloat::compare(pVect1v, pVect2v, qty_ptr);
             #endif 
             }
         };
@@ -369,7 +369,7 @@ namespace deglib {
                 _mm_store_ps(f, sum128);
                 return f[0] + f[1] + f[2] + f[3];
             #else
-                return InnerProductFloat.compare(pVect1v, pVect2v, qty_ptr);
+                return InnerProductFloat::compare(pVect1v, pVect2v, qty_ptr);
             #endif 
             }
         };
@@ -394,7 +394,7 @@ namespace deglib {
                 _mm_store_ps(f, sum128);
                 return abs(f[0] + f[1] + f[2] + f[3]);
             #else
-                return InnerProductFloat.compare(pVect1v, pVect2v, qty_ptr);
+                return InnerProductFloat::compare(pVect1v, pVect2v, qty_ptr);
             #endif 
             }
         };
@@ -485,7 +485,7 @@ namespace deglib {
                         distfunc = deglib::distances::InnerProductFloat16ExtResiduals::compare;
                     else if (dim > 4)
                         distfunc = deglib::distances::InnerProductFloat4ExtResiduals::compare;
-                #elif
+                #else
                     distfunc = deglib::distances::InnerProductFloat::compare;
                 #endif
             }
