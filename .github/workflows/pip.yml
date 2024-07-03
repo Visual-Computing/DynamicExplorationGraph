@@ -1,0 +1,43 @@
+name: Pip
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - feat/python_bindings
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, macos-13, ubuntu-latest]
+        python-version: ["3.11", "3.12"]
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: false
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Add requirements
+      run: python -m pip install --upgrade wheel setuptools
+      working-directory: python
+
+    - name: Prepare Build
+      run: python3 setup.py copy_build_files
+      working-directory: python
+
+    - name: Build and install
+      run: pip install --verbose .[test]
+      working-directory: python
+
+    - name: Test
+      run: python -m pytest
+      working-directory: python

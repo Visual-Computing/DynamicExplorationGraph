@@ -194,17 +194,6 @@ class CMakeBuild(build_ext):
         call_cmake_checked(["cmake", "--build", ".", *build_args], cwd=build_temp)
 
 
-def get_compile_args():
-    if sys.platform.startswith('linux'):
-        return ['-std=c++20', '-fopenmp', '-mavx', '-march=native']
-    elif sys.platform.startswith('darwin'):
-        return ['-std=c++20', '-Xpreprocessor', '-fopenmp', '-lomp', '-mavx']
-    elif sys.platform.startswith('win32'):
-        return ['/std:c++20', '/openmp', '/arch:AVX']
-    else:
-        raise OSError('deglib does not support platform "{}".'.format(sys.platform))
-
-
 setup(
     version=get_version(os.path.join('src', 'deglib', '__init__.py')),
     ext_modules=[CMakeExtension("deglib_cpp")],
