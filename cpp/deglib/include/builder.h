@@ -24,6 +24,9 @@ struct BuilderAddTask {
   uint32_t label;
   uint64_t manipulation_index;
   std::vector<std::byte> feature;
+
+  BuilderAddTask(uint32_t lbl, uint64_t index, std::vector<std::byte> feat)
+    : label(lbl), manipulation_index(index), feature(std::move(feat)) {}
 };
 
 /**
@@ -32,6 +35,9 @@ struct BuilderAddTask {
 struct BuilderRemoveTask {
   uint32_t label;
   uint64_t manipulation_index;
+
+  BuilderRemoveTask(uint32_t lbl, uint64_t index)
+    : label(lbl), manipulation_index(index) {}
 };
 
 /**
@@ -43,6 +49,10 @@ struct BuilderChange {
   float from_neighbor_weight;
   uint32_t to_neighbor_index;
   float to_neighbor_weight;
+
+  BuilderChange(uint32_t internalIdx, uint32_t fromIdx, float fromWeight, uint32_t toIdx, float toWeight)
+    : internal_index(internalIdx), from_neighbor_index(fromIdx), from_neighbor_weight(fromWeight),
+      to_neighbor_index(toIdx), to_neighbor_weight(toWeight) {}
 };
 
 /**
@@ -464,7 +474,7 @@ class EvenRegularGraphBuilder {
                       const auto new_neighbor_dist = dist_func(reachable_feature, other_feature, dist_func_param);
                       graph.changeEdge(reachable_index, reachable_index, other_index, new_neighbor_dist);
                       graph.changeEdge(other_index, other_index, reachable_index, new_neighbor_dist);
-                      new_edges.emplace_back(other_index, reachable_index, new_neighbor_dist, 0, 0);
+                      new_edges.emplace_back(other_index, reachable_index, new_neighbor_dist, (uint32_t)0, 0.f);
 
                       // repeat until all small groups are connected
                       n++;
