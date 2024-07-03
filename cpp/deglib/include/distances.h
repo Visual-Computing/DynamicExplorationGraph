@@ -451,6 +451,7 @@ namespace deglib {
         virtual const size_t get_data_size() const = 0;
         virtual const DISTFUNC<MTYPE> get_dist_func() const = 0;
         virtual const void* get_dist_func_param() const = 0;
+		virtual ~SpaceInterface() = default;
     };
 
 

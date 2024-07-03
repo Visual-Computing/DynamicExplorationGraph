@@ -93,6 +93,7 @@ typedef PQV<std::greater<ObjectDistance>, ObjectDistance> UncheckedSet;
 class SearchGraph
 {
   public:    
+    virtual ~SearchGraph() = default;
     virtual const uint32_t size() const = 0;
     virtual const uint8_t getEdgesPerVertex() const = 0;
     virtual const deglib::SpaceInterface<float>& getFeatureSpace() const = 0;
