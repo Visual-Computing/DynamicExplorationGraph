@@ -30,5 +30,23 @@ classifiers = [
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
 ]
+
 [project.urls]
 Homepage = "https://github.com/Visual-Computing/DynamicExplorationGraph"
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
+xfail_strict = true
+filterwarnings = [
+    "error",
+    "ignore:(ast.Str|Attribute s|ast.NameConstant|ast.Num) is deprecated:DeprecationWarning:_pytest",
+]
+testpaths = ["tests"]
+
+[tool.cibuildwheel]
+test-command = "pytest {project}/tests"
+test-extras = ["test"]
