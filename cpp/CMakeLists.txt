@@ -30,8 +30,50 @@ if (APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
   message(WARNING "You are compiling on an Apple M chip. At the moment deglib does not support ARM optimizations, so using deglib will be slow!")
 endif()
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
-include(DetectCPUFeatures)
+if (FORCE_AVX2)
+  message(NOTICE "Compiling for avx2, ignoring native optimizations.")
+  # setup compiler flags
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(
+      compile-options
+      INTERFACE -DNDEBUG
+                -mavx2
+                -mfma
+                -O2
+                -fpic
+                -fopenmp)
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    target_compile_options(
+      compile-options
+      INTERFACE -DNDEBUG
+                -mavx2
+                -mfma
+                -O2
+                -fpic)
+  elseif(MSVC)
+    # https://stackoverflow.com/questions/54114287/visual-studio-not-recognizing-avx2-or-avx/54137338#54137338
+    # use /fsanitize=address if needed
+    target_compile_options(compile-options INTERFACE /W4)
+
+    option(KEEP_DEBUG_SYMBOLS "Whether to compile with /Zi and /DEBUG" off)
+    if(KEEP_DEBUG_SYMBOLS)
+      target_compile_options(compile-options INTERFACE /Zi)
+      target_link_options(compile-options INTERFACE /DEBUG)
+    endif()
+
+    # always use AVX2
+    target_compile_options(compile-options INTERFACE /arch:AVX2)
+
+    # disable string optimizations and function level linking
+    # https://stackoverflow.com/questions/5063334/what-is-the-difference-between-the-ox-and-o2-compiler-options
+    target_compile_options(compile-options INTERFACE $<$<CONFIG:Release>:/Ox>)
+  else()
+    message(WARNING "Unknown compiler for AVX2 Build: ${CMAKE_CXX_COMPILER_ID}")
+  endif()
+
+else()  # Native build
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
+  include(DetectCPUFeatures)
 
 # detecting openmp
 find_package(OpenMP REQUIRED COMPONENTS CXX)
@@ -57,9 +99,15 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
               -fpic
               -mfma)
 elseif(MSVC)
-  
+
   # warning level 4 (show all)
   target_compile_options(compile-options INTERFACE /W4)
+
+  option(KEEP_DEBUG_SYMBOLS "Whether to compile with /Zi and /DEBUG" off)
+  if(KEEP_DEBUG_SYMBOLS)
+    target_compile_options(compile-options INTERFACE /Zi)
+    target_link_options(compile-options INTERFACE /DEBUG)
+  endif()
 
   # detecting SUPPORT_AVX2 or SSE2 support
   cmake_host_system_information(RESULT SUPPORT_SSE2 QUERY HAS_SSE2)
@@ -67,6 +115,8 @@ elseif(MSVC)
     target_compile_options(compile-options INTERFACE /arch:AVX2)
   elseif(SUPPORT_SSE2)
     target_compile_options(compile-options INTERFACE /arch:SSE2)
+  else()
+    target_compile_options(compile-options INTERFACE /arch:native)
   endif()
 
   # disable string optimizations and function level linking

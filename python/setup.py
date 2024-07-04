@@ -125,17 +125,22 @@ class CMakeBuild(build_ext):
         if "CMAKE_ARGS" in os.environ:
             cmake_args += [item for item in os.environ["CMAKE_ARGS"].split(" ") if item]
 
+        if os.environ.get("FORCE_AVX2") is not None and os.environ["FORCE_AVX2"] == "1":
+            cmake_args.append("-DFORCE_AVX2=ON")
+            print('Enabling FORCE_AVX2')
+
         # In this example, we pass in the version to C++. You might not need to.
         # cmake_args += [f"-DEXAMPLE_VERSION_INFO={self.distribution.get_version()}"]
 
         if self.compiler.compiler_type != "msvc":
             # Using Ninja-build since it a) is available as a wheel and b)
-            # multithreads automatically. MSVC would require all variables be
+            # multi-threads automatically. MSVC would require all variables be
             # exported for Ninja to pick it up, which is a little tricky to do.
             # Users can override the generator with CMAKE_GENERATOR in CMake
             # 3.15+.
             if not cmake_generator or cmake_generator == "Ninja":
                 try:
+                    # noinspection PyUnresolvedReferences
                     import ninja
 
                     ninja_executable_path = Path(ninja.BIN_DIR) / "ninja"
@@ -200,7 +205,7 @@ setup(
     cmdclass={
         'copy_build_files': CopyBuildCommand,
         'sdist': CopySDist,
-        "build_ext": CMakeBuild,
+        'build_ext': CMakeBuild,
     },
     package_dir={'': 'src'},
     packages=find_packages(where='src'),

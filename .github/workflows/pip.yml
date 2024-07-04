@@ -17,8 +17,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # platform: [windows-latest, macos-latest, macos-13, ubuntu-latest]
-        platform: [macos-13]
+        platform: [windows-latest, macos-latest, macos-13, ubuntu-latest]
+        # platform: [macos-13]
         python-version: ["3.11", "3.12"]
 
     runs-on: ${{ matrix.platform }}
@@ -40,6 +40,8 @@ jobs:
       run: python3 setup.py copy_build_files
 
     - name: Build and install
+      env:
+        FORCE_AVX2: "1"
       run: pip install --verbose .[test]
 
     - name: Test
