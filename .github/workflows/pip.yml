@@ -35,18 +35,26 @@ jobs:
         python-version: ${{ matrix.python-version }}
 
     - name: Add requirements
-      run: python -m pip install --upgrade wheel setuptools pybind11>=2.12.0
-
-    - name: Prepare Build
-      run: python3 setup.py copy_build_files
+      run: python -m pip install --upgrade wheel setuptools pybind11>=2.12.0 build
 
     - name: Build and install
       env:
         FORCE_AVX2: "1"
-      run: pip install --verbose .[test]
+      run: python3 -m build
 
     - name: Test
       run: python -m pytest
+
+    - name: Test dist
+      run: |
+        ls
+        ls dist
+
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-dists
+        path: dist/
 
   pypi-publish:
     runs-on: "ubuntu-latest"
