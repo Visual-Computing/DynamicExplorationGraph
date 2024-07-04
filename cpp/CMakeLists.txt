@@ -46,7 +46,8 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU
     compile-options
     INTERFACE -march=native
               -fpic
-              -fopenmp)
+              -fopenmp
+              -mfma)
 elseif(MSVC)
   
   # warning level 4 (show all)
