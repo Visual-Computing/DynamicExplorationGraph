@@ -41,12 +41,20 @@ if(OPENMP_FOUND)
 endif()
 
 # setup compiler flags
-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   target_compile_options(
     compile-options
     INTERFACE -march=native
               -fpic
               -fopenmp
+              -mfma)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+  target_compile_options(
+    compile-options
+    INTERFACE -DNDEBUG
+              -march=native
+              -O2
+              -fpic
               -mfma)
 elseif(MSVC)
   
