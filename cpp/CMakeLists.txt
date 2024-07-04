@@ -64,6 +64,8 @@ elseif(MSVC)
   # disable string optimizations and function level linking
   # https://stackoverflow.com/questions/5063334/what-is-the-difference-between-the-ox-and-o2-compiler-options
   target_compile_options(compile-options INTERFACE $<$<CONFIG:Release>:/Ox>)
+else()
+  message(WARNING "Unknown compiler: ${CMAKE_CXX_COMPILER_ID}")
 endif()
 
 message("C++ compiler flags: ${CMAKE_CXX_FLAGS}")
