@@ -1,4 +1,4 @@
-name: Pip
+name: CiBuildWheel
 
 on:
   workflow_dispatch:
@@ -10,7 +10,6 @@ on:
 defaults:
   run:
     working-directory: python
-
 
 jobs:
   build:
@@ -35,31 +34,18 @@ jobs:
         python-version: ${{ matrix.python-version }}
 
     - name: Add requirements
-      run: python -m pip install --upgrade wheel setuptools pybind11>=2.12.0 build pytest
+      run: python -m pip install --upgrade cibuildwheel
 
     - name: Build
       env:
         FORCE_AVX2: "1"
-      run: python3 -m build
-
-    - name: Install
-      run: pip install dist/*.whl
-
-    - name: Convert ManyLinux
-      run: |
-        python3 -m pip install --upgrade auditwheel
-        auditwheel repair dist/deglib-*linux_x86_64.whl
-        ls dist
-      if: runner.os == 'Linux'
-
-    - name: Test
-      run: python -m pytest
+      run: cibuildwheel
 
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: release-dists
-        path: python/dist/
+        path: python/wheelhouse/
 
   pypi-publish:
     runs-on: "ubuntu-latest"
