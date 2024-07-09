@@ -42,7 +42,7 @@ jobs:
       run: python3 setup.py copy_build_files
 
     # building package on linux
-    - name: Build
+    - name: Build CiBuildWheel
       env:
         FORCE_AVX2: "1"
       run: cibuildwheel --archs auto64 --output-dir dist
@@ -57,6 +57,7 @@ jobs:
 
     - name: Install
       run: pip install --verbose .[test]
+      if: runner.os != 'Linux'
 
     - name: Test
       run: python -m pytest
