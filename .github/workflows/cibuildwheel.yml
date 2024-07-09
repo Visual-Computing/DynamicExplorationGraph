@@ -18,8 +18,6 @@ jobs:
       matrix:
         # platform: [windows-latest, macos-latest, macos-13, ubuntu-latest]
         platform: [ubuntu-latest]
-        # python-version: ["3.11", "3.12"]
-        python-version: ["3.11"]
 
     runs-on: ${{ matrix.platform }}
     if: "contains(github.event.head_commit.message, '+ci')"
@@ -31,7 +29,7 @@ jobs:
 
     - uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: "3.12"
 
     - name: Add requirements
       run: python -m pip install --upgrade cibuildwheel setuptools pybind11
@@ -42,7 +40,7 @@ jobs:
     - name: Build
       env:
         FORCE_AVX2: "1"
-      run: cibuildwheel
+      run: cibuildwheel --archs auto64
 
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
