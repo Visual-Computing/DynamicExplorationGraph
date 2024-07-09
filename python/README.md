@@ -4,7 +4,6 @@ Python bindings for the C++ library Dynamic Exploration Graph used in the paper:
 [Fast Approximate Nearest Neighbor Search with a Dynamic Exploration Graph using Continuous Refinement](https://arxiv.org/abs/2307.10479)
 
 ## Installation
-TODO
 
 ### Using pip
 ```shell
@@ -27,45 +26,32 @@ python -m venv /path/to/deglib_env && . /path/to/deglib_env/bin/activate
 # clone git repository
 mkdir install_dir && cd install_dir
 # TODO: "-b feat/python_bindings" not necessary after merge
-git clone -b feat/python_bindings --recurse-submodules git@github.com:Visual-Computing/DynamicExplorationGraph.git
+git clone -b feat/python_bindings git@github.com:Visual-Computing/DynamicExplorationGraph.git
 cd DynamicExplorationGraph
 ```
 
-**Install the Package (easy)**
+**Install the Package from Source**
 ```shell
-cd cpp/python-bindings
+cd python
+pip install setuptools pybind11 build
+python3 setup.py copy_build_files  # copy c++ library to ./lib/
 pip install .
 ```
 This will compile the C++ code and install deglib into your virtual environment, so it may take a while.
 
-**Install the Package (manually for development)**
+**Building Packages**
+
+Build packages (sdist and wheels):
 ```shell
-cd cpp
-
-# compile deglib C++ sources, which will also create the python bindings
-# shared-object-file (see build/python-bindings/deglib_cpp.cpython-3*.so
-mkdir -p build
-cmake -B build -DCMAKE_BUILD_TYPE=Release -G "Unix Makefiles"
-(cd build; make -j $(nproc))  # if you encounter errors, see Troubleshooting
-
-# link deglib_cpp in your virtual environment
-cd python-bindings
-./scripts/link-lib.sh  # create symlink in virtual env (unix only)
-
-# install python dependencies
-pip install -r requirements.txt
+python3 -m build
 ```
-This will compile the C++ code and link that compiled shared-object-file into your python environment.
-The python-deglib library will only be available when executing python3 from the `python-bindings` directory.
 
-### Troubleshooting
+Note: If you want to publish linux wheels to pypi you have to convert
+the wheel to musllinux-/manylinux-wheels.
+This can be easily done using `cibuildwheel` (if docker is installed):
 
-`pybind11/typing.h:104:58: error: ‘copy_n’ is not a member of ‘std’`
-
-This is a pybind11 bug, that occurs when compiling it with gcc-14. Change the pybind version to 2.12:
 ```shell
-cd cpp/python-bindings/external/pybind11
-git checkout v2.12
+cibuildwheel --archs auto64 --output-dir dist
 ```
 
 ## Examples
@@ -77,7 +63,6 @@ import numpy as np
 
 dataset: np.ndarray = deglib.repository.fvecs_read("path/to/data.fvecs")
 num_samples, dims = dataset.shape
-print(num_samples, dims)
 ```
 The dataset is a numpy array with shape (N, D), where N is the number of feature
 vectors and D is the number of dimensions of each feature vector.
@@ -85,7 +70,7 @@ vectors and D is the number of dimensions of each feature vector.
 ### Building a Graph
 
 ```python
-import deglib.graph
+import deglib
 
 graph = deglib.builder.EvenRegularGraphBuilder.build_from_data(dataset, edges_per_vertex=32)
 graph.save_graph("/path/to/graph.deg")
@@ -101,44 +86,61 @@ for r in result:
 ```
 
 ### Referencing C++ memory
-TODO
+Consider the following example:
+```python
+feature_vector = graph.get_feature_vector(42)
+del graph
+print(feature_vector)
+```
+This will crash as `feature_vector` is holding a reference to memory that is owned by `graph`. This can lead to segmentation faults.
+Be careful to keep objects in memory that are referenced. If you need it use the `copy=True` option:
+
+```python
+feature_vector = graph.get_feature_vector(10, copy=True)
+del graph
+print(feature_vector)  # no problem
+```
+
+Copying feature vectors will be slower.
 
 ## Naming
-- Vertex = Feature Vector
+### Vertex = Feature Vector
+Each vertex in the graph corresponds to a feature vector of the dataset.
 
 ### Internal Index vs External Label
-- internal index is dense (no holes)
-- external label is user defined identifier
-- only matters when removing elements
+There are two kinds of indices used in a graph: `internal_index` and `external_label`. Both are integers and specify
+a vertex in a graph.
+
+Internal Indices are dense, which means that every `internal_index < len(graph)` can be used.
+For example: If you add 100 vertices and remove the vertex with internal_index 42, the last vertex in the graph will
+be moved to index 42.
+
+In contrast, external label is a user defined identifier for each added vertex
+(see `builder.add_entry(external_label, feature_vector)`). Adding or Removing vertices to the graph will keep the
+connection between external labels and associated feature vector.
+
+When you create the external labels by starting with `0` and increasing it for each entry by `1` and don't remove
+elements from the graph, external labels and internal indices are equal.
+
+```python
+# as long as no elements are removed
+# external labels and internal indices are equal
+for i, vec in enumerate(data):
+  builder.add_entry(i, vec)
+```
+
+### Eps
+TODO
+
+### Relative Neighborhood Graph / RNG-conform
+TODO
 
 ## Limitations
-- only float spaces
-- ResultSet ordering
+- The python wrapper at the moment only supports `float32` feature vectors.
+- The elements of a `ResultSet` are not sorted by distance.
 
-## TODO
-- documentation
-  - readme
-    - rework installation
-- setup
-  - make pypi package
-  - continuous integration
-- check:
-  - internal_index, external_label
-- Questions:
-  - What is RNG conform? -> Relative Neighborhood Graph
-  - builder options (eps, k)
-- add License
-- remove test functions from deglib_cpp.cpp
-- pybind11 v2.12 branch
-- use nanobind
+## Troubleshooting
 
-- Python Packaging
-  - Try packaging with cmake: https://github.com/pybind/cmake_example/tree/master, pybind-example: https://github.com/pybind/pybind11/blob/master/pyproject.toml, scikit-examples: https://github.com/scikit-build/scikit-build-sample-projects/tree/main/projects/hello-cpp
-    - Add option to set instruction set to avx2 (for wheels)
-    - try with build directory; otherwise move setup.py/pyproject into cpp/
-  - nanobind
-  - create GitHub workflow for wheels
-    - build wheel with avx2
-    - warning for users who could use avx512 (+ install instructions)
-    - error for users who don't support avx2 (+ install instructions)
-  - 3 libs in a package for different cpu instructions (maybe ignore)
+### BuildError: `pybind11/typing.h:104:58: error: ‘copy_n’ is not a member of ‘std’`
+
+This is a pybind11 bug, that occurs when compiling it with gcc-14. Change the pybind version to 2.12:

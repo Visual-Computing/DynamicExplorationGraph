@@ -61,15 +61,15 @@ class EvenRegularGraphBuilder:
 
         return graph
 
-    def add_entry(self, label: int, feature: np.ndarray):
+    def add_entry(self, external_label: int, feature: np.ndarray):
         """
         Add entry that should be added to the graph.
 
-        :param label: The label, that names the added vertex
+        :param external_label: The label, that names the added vertex
         :param feature: The feature that should be added to the graph.
         """
         feature = assure_array(feature, 'feature', np.float32)
-        self.builder_cpp.add_entry(label, feature)
+        self.builder_cpp.add_entry(external_label, feature)
 
     def remove_entry(self, label: int):
         """

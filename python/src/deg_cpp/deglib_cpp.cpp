@@ -43,14 +43,6 @@ deglib::search::ResultSet graph_search_wrapper(
                       max_distance_computation_count);
 }
 
-void test_callback(std::function<void(deglib::builder::BuilderStatus&)> callback, int start, int end) {
-  deglib::builder::BuilderStatus bs {};
-  for (int i = start; i < end; i++) {
-    bs.added = i;
-    callback(bs);
-  }
-}
-
 PYBIND11_MODULE(deglib_cpp, m) {
   m.doc() = "Python bindings for Dynamic Exploration Graph";
 
@@ -244,12 +236,4 @@ PYBIND11_MODULE(deglib_cpp, m) {
     .def_readwrite("deleted", &deglib::builder::BuilderStatus::deleted)
     .def_readwrite("improved", &deglib::builder::BuilderStatus::improved)
     .def_readwrite("tries", &deglib::builder::BuilderStatus::tries);
-
-  // tests TODO: remove
-  m.def("test_take_graph", [] (deglib::graph::MutableGraph& g) { std::cout << g.size() << std::endl; });
-  m.def("test_callback", &test_callback);
-  m.def("print_py_buffer", [](const py::array buffer) {
-    const py::buffer_info info = buffer.request();
-    std::cout << "format: " << info.format << std::endl;
-  });
 }
