@@ -34,7 +34,10 @@ jobs:
         python-version: ${{ matrix.python-version }}
 
     - name: Add requirements
-      run: python -m pip install --upgrade cibuildwheel
+      run: python -m pip install --upgrade cibuildwheel setuptools pybind11
+
+    - name: Copy Build Files
+      run: python3 setup.py copy_build_files
 
     - name: Build
       env:
