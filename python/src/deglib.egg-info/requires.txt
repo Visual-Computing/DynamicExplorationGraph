@@ -1,5 +1,0 @@
-numpy>=1.21
-psutil
-
-[test]
-pytest>=8.0

@@ -1,2 +1,0 @@
-deglib
-deglib_cpp

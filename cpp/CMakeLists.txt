@@ -14,6 +14,7 @@ project(
   )
 
 option(ENABLE_BENCHMARKS "compile benchmarks" ON)
+option(FORCE_AVX2 "compile for avx2 support. Otherwise compile for this machine." OFF)
 
 # https://cmake.org/cmake/help/latest/prop_tgt/CXX_STANDARD.html
 set(CMAKE_CXX_STANDARD 20)
@@ -23,6 +24,13 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(compile-options INTERFACE)
 target_compile_features(compile-options INTERFACE cxx_std_20)
 target_compile_definitions(compile-options INTERFACE $<$<PLATFORM_ID:Windows>:NOMINMAX>)
+
+# detecting openmp
+find_package(OpenMP REQUIRED COMPONENTS CXX)
+if(OPENMP_FOUND)
+  message("Found OpenMP")
+  target_link_libraries(compile-options INTERFACE OpenMP::OpenMP_CXX)
+endif()
 
 # detecting CPU instruction support
 # https://github.com/lemire/FastPFor/blob/master/CMakeLists.txt
@@ -36,23 +44,21 @@ if (FORCE_AVX2)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(
       compile-options
-      INTERFACE -DNDEBUG
+      INTERFACE -O2
                 -mavx2
                 -mfma
-                -O2
                 -fpic
                 -fopenmp)
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
     target_compile_options(
       compile-options
-      INTERFACE -DNDEBUG
+      INTERFACE -O2
                 -mavx2
                 -mfma
                 -O2
                 -fpic)
   elseif(MSVC)
-    # https://stackoverflow.com/questions/54114287/visual-studio-not-recognizing-avx2-or-avx/54137338#54137338
-    # use /fsanitize=address if needed
+    # warning level 4 (show all)
     target_compile_options(compile-options INTERFACE /W4)
 
     option(KEEP_DEBUG_SYMBOLS "Whether to compile with /Zi and /DEBUG" off)
@@ -75,55 +81,47 @@ else()  # Native build
   list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
   include(DetectCPUFeatures)
 
-# detecting openmp
-find_package(OpenMP REQUIRED COMPONENTS CXX)
-if(OPENMP_FOUND)
-  message("Found OpenMP")
-  target_link_libraries(compile-options INTERFACE OpenMP::OpenMP_CXX)
-endif()
+  # setup compiler flags
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(
+      compile-options
+      INTERFACE -O2
+                -march=native
+                -fpic
+                -fopenmp)
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    target_compile_options(
+      compile-options
+      INTERFACE -O2
+                -DNDEBUG
+                -march=native
+                -fpic)
+  elseif(MSVC)
+    # warning level 4 (show all)
+    target_compile_options(compile-options INTERFACE /W4)
 
-# setup compiler flags
-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  target_compile_options(
-    compile-options
-    INTERFACE -march=native
-              -fpic
-              -fopenmp
-              -mfma)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-  target_compile_options(
-    compile-options
-    INTERFACE -DNDEBUG
-              -march=native
-              -O2
-              -fpic
-              -mfma)
-elseif(MSVC)
+    option(KEEP_DEBUG_SYMBOLS "Whether to compile with /Zi and /DEBUG" off)
+    if(KEEP_DEBUG_SYMBOLS)
+      target_compile_options(compile-options INTERFACE /Zi)
+      target_link_options(compile-options INTERFACE /DEBUG)
+    endif()
 
-  # warning level 4 (show all)
-  target_compile_options(compile-options INTERFACE /W4)
+    # detecting SUPPORT_AVX2 or SSE2 support
+    cmake_host_system_information(RESULT SUPPORT_SSE2 QUERY HAS_SSE2)
+    if(SUPPORT_AVX2)
+      target_compile_options(compile-options INTERFACE /arch:AVX2)
+    elseif(SUPPORT_SSE2)
+      target_compile_options(compile-options INTERFACE /arch:SSE2)
+    else()
+      target_compile_options(compile-options INTERFACE /arch:native)
+    endif()
 
-  option(KEEP_DEBUG_SYMBOLS "Whether to compile with /Zi and /DEBUG" off)
-  if(KEEP_DEBUG_SYMBOLS)
-    target_compile_options(compile-options INTERFACE /Zi)
-    target_link_options(compile-options INTERFACE /DEBUG)
-  endif()
-
-  # detecting SUPPORT_AVX2 or SSE2 support
-  cmake_host_system_information(RESULT SUPPORT_SSE2 QUERY HAS_SSE2)
-  if(SUPPORT_AVX2)
-    target_compile_options(compile-options INTERFACE /arch:AVX2)
-  elseif(SUPPORT_SSE2)
-    target_compile_options(compile-options INTERFACE /arch:SSE2)
+    # disable string optimizations and function level linking
+    # https://stackoverflow.com/questions/5063334/what-is-the-difference-between-the-ox-and-o2-compiler-options
+    target_compile_options(compile-options INTERFACE $<$<CONFIG:Release>:/Ox>)
   else()
-    target_compile_options(compile-options INTERFACE /arch:native)
+    message(WARNING "Unknown compiler: ${CMAKE_CXX_COMPILER_ID}")
   endif()
-
-  # disable string optimizations and function level linking
-  # https://stackoverflow.com/questions/5063334/what-is-the-difference-between-the-ox-and-o2-compiler-options
-  target_compile_options(compile-options INTERFACE $<$<CONFIG:Release>:/Ox>)
-else()
-  message(WARNING "Unknown compiler: ${CMAKE_CXX_COMPILER_ID}")
 endif()
 
 message("C++ compiler flags: ${CMAKE_CXX_FLAGS}")
