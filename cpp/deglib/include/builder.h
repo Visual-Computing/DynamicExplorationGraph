@@ -586,14 +586,14 @@ class EvenRegularGraphBuilder {
         }
       }
 
-      // 4 remove the old vertex, which is no longer referenced by another vertex, from the graph
-      graph.removeVertex(del_task.label);
-
-      // 5 try to improve some of the new edges
+      // 4 try to improve some of the new edges
       for(auto edge : new_edges) {
         if(graph.hasEdge(edge.internal_index, edge.from_neighbor_index)) 
           improveEdges(edge.internal_index, edge.from_neighbor_index, edge.from_neighbor_weight); 
       }
+
+      // 5 remove the old vertex, which is no longer referenced by another vertex, from the graph
+      graph.removeVertex(del_task.label);
     }
 
     /**
