@@ -89,7 +89,7 @@ class TestGraphs:
     def test_explore(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
         graph: deglib.graph.SearchGraph = graph_getter(self)
         k = 10
-        entry_vertex_index = random.randint(0, self.samples)
+        entry_vertex_index = random.randint(0, self.samples-1)
         result = graph.explore(entry_vertex_index, k, max_distance_computation_count=k*10)
         assert len(result) == k
         assert all(isinstance(od, deglib.search.ObjectDistance) for od in result)
