@@ -25,13 +25,6 @@ add_library(compile-options INTERFACE)
 target_compile_features(compile-options INTERFACE cxx_std_20)
 target_compile_definitions(compile-options INTERFACE $<$<PLATFORM_ID:Windows>:NOMINMAX>)
 
-# detecting openmp
-find_package(OpenMP REQUIRED COMPONENTS CXX)
-if(OPENMP_FOUND)
-  message("Found OpenMP")
-  target_link_libraries(compile-options INTERFACE OpenMP::OpenMP_CXX)
-endif()
-
 # detecting CPU instruction support
 # https://github.com/lemire/FastPFor/blob/master/CMakeLists.txt
 if (APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
