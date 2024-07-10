@@ -5,7 +5,7 @@ on:
   pull_request:
   push:
     branches:
-      - feat/python_bindings
+      - main
 
 defaults:
   run:
@@ -73,6 +73,7 @@ jobs:
 
   pypi-publish:
     runs-on: "ubuntu-latest"
+    if: "contains(github.event.head_commit.message, '+ci')"
 
     needs:
       - build
