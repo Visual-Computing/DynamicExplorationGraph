@@ -1,3 +1,4 @@
+import sys
 from typing import Optional, Callable
 
 import numpy as np
@@ -46,10 +47,12 @@ class EvenRegularGraphBuilder:
             data: np.ndarray, edges_per_vertex: int = 32, capacity: int = -1, metric: Metric = Metric.L2,
             rng: Mt19937 | None = None, extend_k: Optional[int] = None, extend_eps: float = 0.2,
             improve_k: Optional[int] = None, improve_eps: float = 0.001, max_path_length: int = 10, swap_tries: int = 3,
-            additional_swap_tries: int = 3
+            additional_swap_tries: int = 3, callback: Callable[[deglib_cpp.BuilderStatus], None] | str | None = None
     ) -> SizeBoundedGraph:
         """
         Create a new graph built from the given data.
+        Infinite building is not supported, as you dont have any reference to the builder to stop it using this
+        function.
 
         :param data: numpy array with shape [N, D], where N is the number of samples and D is the number of dimensions
                      per feature.
@@ -64,6 +67,10 @@ class EvenRegularGraphBuilder:
         :param max_path_length: TODO
         :param swap_tries: TODO
         :param additional_swap_tries: TODO
+        :param callback: The callback that is called after each step of the build process. A BuilderStatus
+                                     is the only argument to the function.
+                                     If None nothing is printed.
+                                     If callback is the string "progress", a simple progress bar is printed to stdout.
         """
         if capacity <= 0:
             capacity = data.shape[0]
@@ -77,7 +84,7 @@ class EvenRegularGraphBuilder:
             vec: np.ndarray
             builder.add_entry(i, vec)
 
-        builder.build()
+        builder.build(callback=callback)
 
         return graph
 
@@ -91,32 +98,68 @@ class EvenRegularGraphBuilder:
         feature = assure_array(feature, 'feature', np.float32)
         self.builder_cpp.add_entry(external_label, feature)
 
-    def remove_entry(self, label: int):
+    def remove_entry(self, external_label: int):
         """
         Remove an entry from the graph.
 
-        :param label: The label, that names the graph vertex
+        :param external_label: The external label, that names the graph vertex
         """
-        self.builder_cpp.remove_entry(label)
+        self.builder_cpp.remove_entry(external_label)
+
+    def get_num_new_entries(self) -> int:
+        """
+        :returns: the number of entries to add
+        """
+        return self.builder_cpp.get_num_new_entries()
+
+    def get_num_remove_entries(self) -> int:
+        """
+        :returns: the number of entries to remove
+        """
+        return self.builder_cpp.get_num_remove_entries()
 
     def build(
-            self, improvement_callback: Callable[[deglib_cpp.BuilderStatus], None] | None = None, infinite: bool = False
+            self, callback: Callable[[deglib_cpp.BuilderStatus], None] | str | None = None,
+            infinite: bool = False
     ):
         """
         Build the graph. This could be run on a separate thread in an infinite loop. Call stop() to end this process.
 
-        :param improvement_callback: The callback that is called after each step of the build process. A BuilderStatus
+        :param callback: The callback that is called after each step of the build process. A BuilderStatus
                                      is the only argument to the function.
+                                     If None nothing is printed.
+                                     If callback is the string "progress", a simple progress bar is printed to stdout.
         :param infinite: If set to True, blocks indefinitely, until the stop() function is called. Can be used, if
                          build() is run in a separate thread.
         """
-        if improvement_callback is None:
+        if callback is None:
             self.builder_cpp.build_silent(infinite)
         else:
-            self.builder_cpp.build(improvement_callback, infinite)
+            if not infinite and callback == 'progress':
+                callback = ProgressCallback(self.get_num_new_entries(), self.get_num_remove_entries())
+            self.builder_cpp.build(callback, infinite)
 
     def stop(self):
         self.builder_cpp.stop()
 
     def __repr__(self):
         return 'EvenRegularGraphBuilder(vertices_added={})'.format(self.graph.size())
+
+
+class ProgressCallback:
+    def __init__(self, num_new_entries: int, num_remove_entries: int, bar_length: int = 60):
+        self.num_new_entries = num_new_entries
+        self.num_remove_entries = num_remove_entries
+        self.bar_length = bar_length
+        self.maximal = self.num_new_entries + self.num_remove_entries
+        self.len_max = len(str(self.maximal))
+
+    def __call__(self, builder_status: deglib_cpp.BuilderStatus):
+        progress = builder_status.step / self.maximal
+        block = int(self.bar_length * progress)
+        bar = '#' * block + '-' * (self.bar_length - block)
+        percentage = progress * 100
+        sys.stdout.write(f'\r{percentage:6.2f}% [{bar}] ({builder_status.step:{self.len_max}} / {self.maximal})')
+        if builder_status.step == self.maximal:
+            sys.stdout.write('\n')  # newline at the end
+        sys.stdout.flush()

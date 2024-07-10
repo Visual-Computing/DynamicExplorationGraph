@@ -8,7 +8,6 @@ import tempfile
 import numpy as np
 
 import deglib
-from deglib.graph import SearchGraph
 
 
 def get_tmp_graph_file(samples: int, dims: int) -> pathlib.Path:
@@ -88,7 +87,7 @@ class TestGraphs:
 
     @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
     def test_explore(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
-        graph: SearchGraph = graph_getter(self)
+        graph: deglib.graph.SearchGraph = graph_getter(self)
         k = 10
         entry_vertex_index = random.randint(0, self.samples)
         result = graph.explore(entry_vertex_index, k, max_distance_computation_count=k*10)

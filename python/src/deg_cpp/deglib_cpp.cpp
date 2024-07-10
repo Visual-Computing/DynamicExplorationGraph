@@ -215,6 +215,8 @@ PYBIND11_MODULE(deglib_cpp, m) {
       builder.addEntry(label, std::move(feature_vec));
     })
     .def("remove_entry", &deglib::builder::EvenRegularGraphBuilder::removeEntry)
+    .def("get_num_new_entries", &deglib::builder::EvenRegularGraphBuilder::getNumNewEntries)
+    .def("get_num_remove_entries", &deglib::builder::EvenRegularGraphBuilder::getNumRemoveEntries)
     .def("build", [] (deglib::builder::EvenRegularGraphBuilder& builder, std::function<void(deglib::builder::BuilderStatus&)> callback, const bool infinite) -> deglib::graph::MutableGraph& {
       return builder.build(callback, infinite);
     })

@@ -134,6 +134,14 @@ class EvenRegularGraphBuilder {
       remove_entry_queue_.emplace(label, manipulation_index);
     }
 
+    uint32_t getNumNewEntries() {
+      return new_entry_queue_.size();
+    }
+
+    uint32_t getNumRemoveEntries() {
+      return remove_entry_queue_.size();
+    }
+
   private:
 
     /**
