@@ -42,16 +42,36 @@ class EvenRegularGraphBuilder:
         self.rng = rng
 
     @staticmethod
-    def build_from_data(data: np.ndarray, edges_per_vertex: int = 32) -> SizeBoundedGraph:
+    def build_from_data(
+            data: np.ndarray, edges_per_vertex: int = 32, capacity: int = -1, metric: Metric = Metric.L2,
+            rng: Mt19937 | None = None, extend_k: Optional[int] = None, extend_eps: float = 0.2,
+            improve_k: Optional[int] = None, improve_eps: float = 0.001, max_path_length: int = 10, swap_tries: int = 3,
+            additional_swap_tries: int = 3
+    ) -> SizeBoundedGraph:
         """
         Create a new graph built from the given data.
 
         :param data: numpy array with shape [N, D], where N is the number of samples and D is the number of dimensions
                      per feature.
+        :param capacity: The maximal number of vertices of this graph. Defaults to the number of samples in data.
         :param edges_per_vertex: The number of edges per vertex for the graph. Defaults to 32.
+        :param metric: The metric to measure distances between features. Defaults to L2-Metric.
+        :param rng: An rng generator. Will be constructed, if set to None (default)
+        :param extend_k: TODO
+        :param extend_eps: TODO
+        :param improve_k: TODO
+        :param improve_eps: TODO
+        :param max_path_length: TODO
+        :param swap_tries: TODO
+        :param additional_swap_tries: TODO
         """
-        graph = SizeBoundedGraph.create_empty(data.shape[0], data.shape[1], edges_per_vertex, Metric.L2)
-        builder = EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        if capacity <= 0:
+            capacity = data.shape[0]
+        graph = SizeBoundedGraph.create_empty(capacity, data.shape[1], edges_per_vertex, metric)
+        builder = EvenRegularGraphBuilder(
+            graph, rng, extend_k=extend_k, extend_eps=extend_eps, improve_k=improve_k, improve_eps=improve_eps,
+            max_path_length=max_path_length, swap_tries=swap_tries, additional_swap_tries=additional_swap_tries
+        )
 
         for i, vec in enumerate(data):
             vec: np.ndarray
