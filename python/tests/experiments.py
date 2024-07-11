@@ -37,14 +37,14 @@ def dump_data(seed):
 
 
 def do_build_with_remove(seed, edges_per_vertex):
-    # np.random.seed(seed)
+    np.random.seed(seed)
 
-    # samples = 100
-    # dims = 128
+    samples = 100
+    dims = 128
     # edges_per_vertex = 2  # samples // 10
-    # data = np.random.random((samples, dims)).astype(np.float32)
+    data = np.random.random((samples, dims)).astype(np.float32)
 
-    data = deglib.repository.fvecs_read('crash_data.fvecs')
+    # data = deglib.repository.fvecs_read('crash_data.fvecs')
     graph = deglib.graph.SizeBoundedGraph.create_empty(
         data.shape[0], data.shape[1], edges_per_vertex, deglib.Metric.L2
     )
@@ -73,7 +73,7 @@ def do_all():
                 print('skipping seed:', i, ' epv:', epv)
             else:
                 print('seed:', i, ' epv:', epv)
-                test_build_with_remove(i, epv)
+                do_build_with_remove(i, epv)
 
 
 if __name__ == '__main__':
