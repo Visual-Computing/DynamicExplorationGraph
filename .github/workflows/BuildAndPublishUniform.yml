@@ -48,10 +48,10 @@ jobs:
       run: python3 setup.py copy_build_files
 
     # building package on linux
-    - uses: pypa/cibuildwheel@v2.19.2
+    - name: Build Wheels (cibuildwheel)
+      run: cibuildwheel --archs auto64 --output-dir dist
       env:
         FORCE_AVX2: "1"
-      # run: cibuildwheel --archs auto64 --output-dir dist
       # if: runner.os == 'Linux'
 
     # building package on windows / osx
