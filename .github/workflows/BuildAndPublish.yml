@@ -1,4 +1,4 @@
-name: CiBuildWheel
+name: BuildAndPublish
 
 on:
   workflow_dispatch:
