@@ -48,5 +48,5 @@ filterwarnings = [
 testpaths = ["tests"]
 
 [tool.cibuildwheel]
-test-command = "pytest"
+test-command = "pytest {project}"
 test-extras = ["test"]
