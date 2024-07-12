@@ -77,7 +77,7 @@ jobs:
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: release-sdist
+        name: release-dists-sdist
         path: python/dist
 
 
