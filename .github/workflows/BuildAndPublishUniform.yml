@@ -42,6 +42,7 @@ jobs:
         CIBW_ARCHS: auto64
         CIBW_BUILD_FRONTEND: "pip; args: --verbose"
         CIBW_ENVIRONMENT: "FORCE_AVX2=1"
+        CIBW_ENVIRONMENT_MACOS: "FORCE_AVX2=1 MACOSX_DEPLOYMENT_TARGET=10.15"
 
     # upload artifacts
     - name: Upload Build Artifacts
