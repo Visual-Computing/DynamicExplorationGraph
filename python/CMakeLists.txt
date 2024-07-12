@@ -2,7 +2,10 @@
 cmake_minimum_required(VERSION 3.19)
 project(deglib_cpp)
 
-# Add python TODO: maybe remove
+# Add python executable
+if(DEFINED PYTHON_EXECUTABLE)
+    set(Python_EXECUTABLE ${PYTHON_EXECUTABLE})
+endif()
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 
 # Add pybind11

@@ -116,7 +116,7 @@ class CMakeBuild(build_ext):
         # from Python.
         cmake_args = [
             f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}{os.sep}",
-            # f"-DPYTHON_EXECUTABLE={sys.executable}",
+            f"-DPYTHON_EXECUTABLE={sys.executable}",
             f"-DCMAKE_BUILD_TYPE={cfg}",  # not used on MSVC, but no harm
         ]
         build_args = []
@@ -190,6 +190,7 @@ class CMakeBuild(build_ext):
         if not build_temp.exists():
             build_temp.mkdir(parents=True)
 
+        print('python interpreter in setup.py:', sys.executable, sys.version)
         print('calling cmake')
         call_cmake_checked(
             ["cmake", ext.sourcedir, '-Dpybind11_DIR={}'.format(pybind11.get_cmake_dir()), *cmake_args],
