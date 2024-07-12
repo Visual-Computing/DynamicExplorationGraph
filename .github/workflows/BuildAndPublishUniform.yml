@@ -54,7 +54,7 @@ jobs:
 
   pypi-publish:
     runs-on: "ubuntu-latest"
-    if: "contains(github.event.head_commit.message, '+ci')"
+    if: "contains(github.event.head_commit.message, '+publish')"
 
     needs:
       - build
