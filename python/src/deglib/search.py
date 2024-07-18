@@ -44,6 +44,9 @@ class ObjectDistance:
         """
         return self.object_distance_cpp > other.object_distance_cpp
 
+    def __repr__(self):
+        return f'ObjectDistance(internal_index={self.internal_index} distance={self.distance})'
+
 
 class ResultSet:
     def __init__(self, result_set_cpp: deglib_cpp.ResultSet):
