@@ -74,8 +74,19 @@ class TestGraphs:
         graph_result = graph.search(query, eps=0.1, k=k)
         correct_result = get_ranking(graph, query)[:k]
 
+        # test matches are good
         matches = set(g.get_internal_index() for g in graph_result).intersection(set(correct_result))
         assert len(matches) >= k-2, 'expected at least {} matching results, but got only {}'.format(k-2, len(matches))
+
+        # test result is sorted
+        last_distance = -1.0
+        for index, res in enumerate(graph_result):
+            assert last_distance <= res.distance, (
+                'ResultSet is not sorted.\ndistance {} at index {} larger than\ndistance {} at index {}'.format(
+                    last_distance, index-1, res.distance, index
+                )
+            )
+            last_distance = res.distance
 
     @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
     def test_has_path(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):

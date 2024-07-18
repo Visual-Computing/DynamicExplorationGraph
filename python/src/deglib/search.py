@@ -11,18 +11,20 @@ class ObjectDistance:
         if not isinstance(object_distance_cpp, deglib_cpp.ObjectDistance):
             raise TypeError('Expected type deglib_cpp.ObjectDistance, got {}'.format(type(object_distance_cpp)))
         self.object_distance_cpp = object_distance_cpp
+        self.distance: float = self.object_distance_cpp.get_distance()
+        self.internal_index: int = self.object_distance_cpp.get_internal_index()
 
     def get_internal_index(self) -> int:
         """
         The internal index of the found vertex.
         """
-        return self.object_distance_cpp.get_internal_index()
+        return self.internal_index
 
     def get_distance(self) -> float:
         """
         The distance of the found vertex to the query.
         """
-        return self.object_distance_cpp.get_distance()
+        return self.distance
 
     def __eq__(self, other: Self):
         """
@@ -51,50 +53,54 @@ class ResultSet:
         if not isinstance(result_set_cpp, deglib_cpp.ResultSet):
             raise TypeError('result_set_cpp must be of type deglib_cpp.ResultSet')
         self.result_set_cpp = result_set_cpp
+        self.result_list = sorted(
+            [ObjectDistance(self.result_set_cpp[i]) for i in range(self.result_set_cpp.size())],
+            key=lambda obj_dist: obj_dist.distance
+        )
 
     def top(self) -> ObjectDistance:
         """
         Get the "best" result of the search.
         """
-        return ObjectDistance(self.result_set_cpp.top())
+        return self.result_list[0]
 
     def pop(self):
         """
         Get the "best" result of the search and remove it from the set.
         """
-        self.result_set_cpp.pop()
+        result = self.result_list[0]
+        del self.result_list[0]
+        return result
 
     def size(self) -> int:
         """
         :returns: the number of results
         """
-        return self.result_set_cpp.size()
+        return len(self.result_list)
 
     def empty(self) -> bool:
         """
         Whether the set is empty
         """
-        return self.result_set_cpp.empty()
+        return not bool(self.result_list)
 
     def __getitem__(self, index: int) -> ObjectDistance:
         """
         Get item by index.
         """
-        return ObjectDistance(self.result_set_cpp[index])
+        return self.result_list[index]
 
     def __len__(self) -> int:
         """
         Same as size().
         """
-        return self.result_set_cpp.size()
+        return self.size()
 
     def __iter__(self) -> Iterator[ObjectDistance]:
         """
-        Iterator over all elements of the set. The results are NOT ordered by quality!
-        TODO: order by quality
+        Iterator over all elements of the set sorted by distance (first entry has lowest distance).
         """
-        for i in range(self.size()):
-            yield self[i]
+        return iter(self.result_list)
 
     def __repr__(self):
-        return f'ResultSet(size={self.size()} best_dist={self.top().get_distance():.3f})'
+        return f'ResultSet(size={self.size()} best_dist={self.top().distance:.3f})'
