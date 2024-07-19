@@ -332,7 +332,7 @@ public:
     
 private:  
   inline std::byte* vertex_by_index(const uint32_t internal_idx) const {
-    return vertices_memory_ + internal_idx * byte_size_per_vertex_;
+    return vertices_memory_ + size_t(internal_idx) * byte_size_per_vertex_;
   }
 
   inline const uint32_t label_by_index(const uint32_t internal_idx) const {
@@ -703,7 +703,7 @@ auto load_readonly_graph(const char* path_graph)
   auto file_size = std::filesystem::file_size(path_graph, ec);
   if (ec != std::error_code{})
   {
-    std::fprintf(stderr, "error when accessing graph file %s, size is: %lu message: %s \n", path_graph, file_size, ec.message().c_str());
+    std::fprintf(stderr, "error when accessing graph file %s, size is: %ju message: %s \n", path_graph, file_size, ec.message().c_str());
     perror("");
     abort();
   }

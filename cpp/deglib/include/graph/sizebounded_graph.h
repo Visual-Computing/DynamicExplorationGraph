@@ -344,7 +344,7 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
 
 private:  
   inline std::byte* vertex_by_index(const uint32_t internal_idx) const {
-    return vertices_memory_ + internal_idx * byte_size_per_vertex_;
+    return vertices_memory_ + size_t(internal_idx) * byte_size_per_vertex_;
   }
 
   inline const uint32_t label_by_index(const uint32_t internal_idx) const {
@@ -680,7 +680,7 @@ public:
     // result set
     // TODO: custom priority queue with an internal Variable Length Array wrapped in a macro with linear-scan search and memcopy 
     auto results = deglib::search::ResultSet();   
-    results.reserve(k);
+    results.reserve(k+1);
 
     // copy the initial entry vertices and their distances to the query into the three containers
     for (auto&& index : entry_vertex_indices) {
@@ -894,7 +894,7 @@ auto load_sizebounded_graph(const char* path_graph, uint32_t new_max_size = 0)
   auto file_size = std::filesystem::file_size(path_graph, ec);
   if (ec != std::error_code{})
   {
-    std::fprintf(stderr, "error when accessing test file, size is: %lu message: %s \n", file_size, ec.message().c_str());
+    std::fprintf(stderr, "error when accessing test file, size is: %ju message: %s \n", file_size, ec.message().c_str());
     perror("");
     abort();
   }

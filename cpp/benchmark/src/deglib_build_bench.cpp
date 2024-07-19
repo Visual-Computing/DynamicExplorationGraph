@@ -17,7 +17,7 @@ enum DataStreamType { AddAll, AddHalf, AddAllRemoveHalf, AddHalfRemoveAndAddOneA
  * Load the data repository and create a dynamic exploratino graph with it.
  * Store the graph in the graph file.
  */
-void create_graph(const std::string repository_file, const DataStreamType data_stream_type, const std::string graph_file, const uint8_t d, const uint8_t k_ext, const float eps_ext, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt) {
+void create_graph(const std::string repository_file, const DataStreamType data_stream_type, const std::string graph_file, const uint8_t d, const uint8_t k_ext, const float eps_ext, const bool use_schemeC_ext, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt) {
     
     auto rnd = std::mt19937(7);                         // default 7
     const deglib::Metric metric = deglib::Metric::L2;   // defaul metric
@@ -39,7 +39,7 @@ void create_graph(const std::string repository_file, const DataStreamType data_s
 
     // create a graph builder to add vertices to the new graph and improve its edges
     fmt::print("Start graph builder \n");   
-    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, k_ext, eps_ext, k_opt, eps_opt, i_opt, swap_tries, additional_swap_tries);
+    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, k_ext, eps_ext, use_schemeC_ext, k_opt, eps_opt, i_opt, swap_tries, additional_swap_tries);
     
     // provide all features to the graph builder at once. In an online system this will be called multiple times
     auto base_size = uint32_t(repository.size());
@@ -165,7 +165,7 @@ int main() {
     // const auto graph_file           = (data_path / "deg" / "neighbor_choice" / "192D_L2_K20_AddK40Eps0.3Low_schemeA.deg").string();
 
     // if(std::filesystem::exists(graph_file.c_str()) == false)
-    //     create_graph(repository_file, DataStreamType::AddAll, graph_file, 20, 40, 0.3f, 20, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
+    //     create_graph(repository_file, DataStreamType::AddAll, graph_file, 20, 40, 0.3f, true, 20, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
     // test_graph(query_file, gt_file, graph_file, 50, 20); // repeat_test, k
 
 
@@ -177,7 +177,7 @@ int main() {
     // const auto graph_file           = (data_path / "deg" / "neighbor_choice" / "1369D_L2_K30_AddK60Eps0.3High_schemeC.deg").string();
 
     // if(std::filesystem::exists(graph_file.c_str()) == false)
-    //     create_graph(repository_file, DataStreamType::AddAll, graph_file, 30, 60, 0.3f, 30, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
+    //     create_graph(repository_file, DataStreamType::AddAll, graph_file, 30, 60, 0.3f, true, 30, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
     // test_graph(query_file, gt_file, graph_file, 20, 20); // repeat_test, k
 
 
@@ -187,10 +187,10 @@ int main() {
     const auto repository_file      = (data_path / "SIFT1M" / "sift_base.fvecs").string();
     const auto query_file           = (data_path / "SIFT1M" / "sift_query.fvecs").string();
     const auto gt_file              = (data_path / "SIFT1M" / (data_stream_type == AddAll ? "sift_groundtruth.ivecs" : "sift_groundtruth_base500000.ivecs" )).string();
-    const auto graph_file           = (data_path / "deg" / "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge3.deg").string();
+    const auto graph_file           = (data_path / "deg" / "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0.deg").string();
 
     if(std::filesystem::exists(graph_file.c_str()) == false)
-        create_graph(repository_file, data_stream_type, graph_file, 30, 60, 0.2f, 30, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
+        create_graph(repository_file, data_stream_type, graph_file, 30, 60, 0.2f, true, 30, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
     test_graph(query_file, gt_file, graph_file, 1, 100); // repeat_test, k
 
 
@@ -203,7 +203,7 @@ int main() {
     // const auto graph_file       = (data_path / "deg" / "100D_L2_K40_AddK40Eps0.2High_SwapK40-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string();
 
     // if(std::filesystem::exists(graph_file.c_str()) == false)
-    //     create_graph(repository_file, data_stream_type, graph_file, 30, 30, 0.2f, 30, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
+    //     create_graph(repository_file, data_stream_type, graph_file, 30, 30, 0.2f, false, 30, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
     // test_graph(query_file, gt_file, graph_file, 1, 100); // repeat_test, k
 
  
