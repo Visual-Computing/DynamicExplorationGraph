@@ -161,7 +161,8 @@ class ProgressCallback:
 
     def __call__(self, builder_status: deglib_cpp.BuilderStatus):
         current_time = time.time()
-        if current_time - self.last_print_time >= self.min_print_interval:
+        last_step = builder_status.step == self.maximal
+        if current_time - self.last_print_time >= self.min_print_interval or last_step:
             self.last_print_time = current_time
 
             progress = builder_status.step / self.maximal
@@ -169,6 +170,6 @@ class ProgressCallback:
             bar = '#' * block + '-' * (self.bar_length - block)
             percentage = progress * 100
             sys.stdout.write(f'\r{percentage:6.2f}% [{bar}] ({builder_status.step:{self.len_max}} / {self.maximal})')
-            if builder_status.step == self.maximal:
+            if last_step:
                 sys.stdout.write('\n')  # newline at the end
             sys.stdout.flush()
