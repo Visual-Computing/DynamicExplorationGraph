@@ -47,7 +47,7 @@ class TestGraphs:
         self.edges_per_vertex = self.samples // 10
 
         self.data = np.random.random((self.samples, self.dims)).astype(np.float32)
-        self.size_bounded_graph = deglib.builder.EvenRegularGraphBuilder.build_from_data(
+        self.size_bounded_graph = deglib.builder.build_from_data(
             self.data, edges_per_vertex=self.edges_per_vertex
         )
 
