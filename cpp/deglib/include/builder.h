@@ -256,11 +256,11 @@ class EvenRegularGraphBuilder {
 
           // SchemeC: This version is good for high LID datasets or small graphs with low distance count limit during ANNS
           uint32_t new_neighbor_index = 0;
-          float new_neighbor_distance = -1.0f;
+          float new_neighbor_distance = std::numeric_limits<float>::lowest();
           if(this->extend_schemeC_) {
 
             // find the worst edge of the new neighbor
-            float new_neighbor_weight = -1.0f;
+            float new_neighbor_weight = std::numeric_limits<float>::lowest();
             const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
             const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
 
@@ -278,7 +278,7 @@ class EvenRegularGraphBuilder {
               }
             }
 
-            if(new_neighbor_weight < 0) 
+            if(new_neighbor_weight == std::numeric_limits<float>::lowest()) 
               continue;
 
             new_neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(new_neighbor_index), dist_func_param); 
@@ -306,7 +306,7 @@ class EvenRegularGraphBuilder {
           }
 
           // this should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
-          if(new_neighbor_distance < 0) 
+          if(new_neighbor_distance == std::numeric_limits<float>::lowest()) 
             continue;
 
           // place the new vertex in the edge list of the result-vertex
@@ -627,8 +627,8 @@ class EvenRegularGraphBuilder {
 
           // find a good new vertex3
           float best_gain = total_gain;
-          float dist23 = -1.0f;
-          float dist34 = -1.0f;
+          float dist23 = std::numeric_limits<float>::lowest();
+          float dist34 = std::numeric_limits<float>::lowest();
 
           // We use the descending order to find the worst swap combination with the best gain
           // Sometimes the gain between the two best combinations is the same, its better to use one with the bad edges to make later improvements easier
@@ -665,7 +665,7 @@ class EvenRegularGraphBuilder {
           }
 
           // no new vertex3 was found
-          if(dist23 == -1.0f)
+          if(dist23 == std::numeric_limits<float>::lowest())
             return false;
 
           // replace the temporary self-loop of vertex2 with a connection to vertex3. 
