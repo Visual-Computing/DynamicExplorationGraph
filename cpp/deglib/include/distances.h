@@ -246,7 +246,11 @@ namespace deglib {
 
         class InnerProductFloat {
         public:
-            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) 
+            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                return 1.0f - ip_naive(pVect1v, pVect2v, qty_ptr);
+            }
+
+            inline static float ip_naive(const void *pVect1v, const void *pVect2v, const void *qty_ptr) 
             {
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
@@ -279,9 +283,14 @@ namespace deglib {
 
         class InnerProductFloat16Ext {
         public:
+
+            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                return 1.0f - ip_16ext(pVect1v, pVect2v, qty_ptr);
+            }
+
             // AVX instructions don't require their memory operands to be aligned, but SSE does
             // https://stackoverflow.com/questions/52147378/choice-between-aligned-vs-unaligned-x86-simd-instructions
-            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+            inline static float ip_16ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
             #if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
@@ -339,6 +348,10 @@ namespace deglib {
         class InnerProductFloat8Ext {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                return 1.0f - ip_8ext(pVect1v, pVect2v, qty_ptr);
+            }
+
+            inline static float ip_8ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
             #if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
@@ -377,6 +390,10 @@ namespace deglib {
         class InnerProductFloat4Ext {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                return 1.0f - ip_4ext(pVect1v, pVect2v, qty_ptr);
+            }
+
+            inline static float ip_4ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
             #if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
@@ -405,13 +422,13 @@ namespace deglib {
                 size_t qty = *((size_t *) qty_ptr);
 
                 size_t qty16 = qty >> 4 << 4;
-                float res = deglib::distances::InnerProductFloat16Ext::compare(pVect1v, pVect2v, &qty16);
+                float res = deglib::distances::InnerProductFloat16Ext::ip_16ext(pVect1v, pVect2v, &qty16);
                 float *pVect1 = (float *) pVect1v + qty16;
                 float *pVect2 = (float *) pVect2v + qty16;
 
                 size_t qty_left = qty - qty16;
-                float res_tail = deglib::distances::InnerProductFloat::compare(pVect1, pVect2, &qty_left);
-                return (res + res_tail);
+                float res_tail = deglib::distances::InnerProductFloat::ip_naive(pVect1, pVect2, &qty_left);
+                return 1.0f - (res + res_tail);
             }
         };
 
@@ -421,13 +438,13 @@ namespace deglib {
                 size_t qty = *((size_t *) qty_ptr);
 
                 size_t qty4 = qty >> 2 << 2;
-                float res = deglib::distances::InnerProductFloat4Ext::compare(pVect1v, pVect2v, &qty4);
+                float res = deglib::distances::InnerProductFloat4Ext::ip_4ext(pVect1v, pVect2v, &qty4);
                 float *pVect1 = (float *) pVect1v + qty4;
                 float *pVect2 = (float *) pVect2v + qty4;
 
                 size_t qty_left = qty - qty4;
-                float res_tail = deglib::distances::InnerProductFloat::compare(pVect1, pVect2, &qty_left);
-                return (res + res_tail);
+                float res_tail = deglib::distances::InnerProductFloat::ip_naive(pVect1, pVect2, &qty_left);
+                return 1.0f - (res + res_tail);
             }
         };
 
