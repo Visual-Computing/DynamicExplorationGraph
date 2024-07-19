@@ -38,8 +38,8 @@ class EvenRegularGraphBuilder:
         if extend_k is None:
             extend_k = graph.get_edges_per_vertex()
         self.builder_cpp = deglib_cpp.EvenRegularGraphBuilder(
-            graph.to_cpp(), rng.to_cpp(), extend_k, extend_eps, improve_k, improve_eps, max_path_length, swap_tries,
-            additional_swap_tries
+            graph.to_cpp(), rng.to_cpp(), extend_k, extend_eps, extend_schemeC, improve_k, improve_eps, max_path_length,
+            swap_tries, additional_swap_tries
         )
         self.graph = graph
         self.rng = rng
@@ -137,8 +137,9 @@ def build_from_data(
         capacity = data.shape[0]
     graph = SizeBoundedGraph.create_empty(capacity, data.shape[1], edges_per_vertex, metric)
     builder = EvenRegularGraphBuilder(
-        graph, rng, extend_k=extend_k, extend_eps=extend_eps, improve_k=improve_k, improve_eps=improve_eps,
-        max_path_length=max_path_length, swap_tries=swap_tries, additional_swap_tries=additional_swap_tries
+        graph, rng, extend_k=extend_k, extend_eps=extend_eps, extend_schemeC=extend_schemeC, improve_k=improve_k,
+        improve_eps=improve_eps, max_path_length=max_path_length, swap_tries=swap_tries,
+        additional_swap_tries=additional_swap_tries
     )
 
     for i, vec in enumerate(data):
