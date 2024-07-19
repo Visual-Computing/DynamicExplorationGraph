@@ -13,6 +13,7 @@ project(
   LANGUAGES CXX
   )
 
+# build options
 option(ENABLE_BENCHMARKS "compile benchmarks" ON)
 option(FORCE_AVX2 "compile for avx2 support. Otherwise compile for this machine." OFF)
 
@@ -33,6 +34,7 @@ endif()
 
 if (FORCE_AVX2)
   message(NOTICE "Compiling for avx2, ignoring native optimizations.")
+
   # setup compiler flags
   if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(
@@ -40,25 +42,17 @@ if (FORCE_AVX2)
       INTERFACE -O2
                 -mavx2
                 -mfma
-                -fpic
-                -fopenmp)
+                -fpic)
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
     target_compile_options(
       compile-options
       INTERFACE -O2
                 -mavx2
                 -mfma
-                -O2
                 -fpic)
   elseif(MSVC)
     # warning level 4 (show all)
     target_compile_options(compile-options INTERFACE /W4)
-
-    option(KEEP_DEBUG_SYMBOLS "Whether to compile with /Zi and /DEBUG" off)
-    if(KEEP_DEBUG_SYMBOLS)
-      target_compile_options(compile-options INTERFACE /Zi)
-      target_link_options(compile-options INTERFACE /DEBUG)
-    endif()
 
     # always use AVX2
     target_compile_options(compile-options INTERFACE /arch:AVX2)
@@ -92,12 +86,6 @@ else()  # Native build
   elseif(MSVC)
     # warning level 4 (show all)
     target_compile_options(compile-options INTERFACE /W4)
-
-    option(KEEP_DEBUG_SYMBOLS "Whether to compile with /Zi and /DEBUG" off)
-    if(KEEP_DEBUG_SYMBOLS)
-      target_compile_options(compile-options INTERFACE /Zi)
-      target_link_options(compile-options INTERFACE /DEBUG)
-    endif()
 
     # detecting SUPPORT_AVX2 or SSE2 support
     cmake_host_system_information(RESULT SUPPORT_SSE2 QUERY HAS_SSE2)

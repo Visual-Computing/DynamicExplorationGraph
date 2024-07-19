@@ -97,7 +97,7 @@ auto fvecs_read(const char* fname, size_t& d_out, size_t& n_out)
     auto file_size = std::filesystem::file_size(fname, ec);
     if (ec != std::error_code{})
     {
-        std::fprintf(stderr, "error when accessing file %s, size is: %lu message: %s \n", fname, file_size, ec.message().c_str());
+        std::fprintf(stderr, "error when accessing file %s, size is: %ju message: %s \n", fname, file_size, ec.message().c_str());
         perror("");
         abort();
     }

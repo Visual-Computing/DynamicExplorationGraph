@@ -894,7 +894,7 @@ auto load_sizebounded_graph(const char* path_graph, uint32_t new_max_size = 0)
   auto file_size = std::filesystem::file_size(path_graph, ec);
   if (ec != std::error_code{})
   {
-    std::fprintf(stderr, "error when accessing test file, size is: %lu message: %s \n", file_size, ec.message().c_str());
+    std::fprintf(stderr, "error when accessing test file, size is: %ju message: %s \n", file_size, ec.message().c_str());
     perror("");
     abort();
   }

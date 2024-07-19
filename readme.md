@@ -9,18 +9,13 @@ The Dynamic Exploration Graph (DEG) is a graph-based algorithm for approximate n
 - [2023/07/19] First version of Dynamic Exploration Graph is out! For more details please refere to our paper: 
 [Fast Approximate nearest neighbor search with the Dynamic Exploration Graph using continuous refinement](https://arxiv.org/abs/2307.10479)
 
-## Benchmark datasets including exploration queries and ground truth data
+## Reproduction
 
-| Data set  | Download                 | dimension | nb base vectors | nb query vectors | original website                                               |
-|-----------|--------------------------|-----------|-----------------|------------------|----------------------------------------------------------------|
-| Audio    |[audio.tar.gz](http://static.visual-computing.com/paper/DEG/audio.tar.gz)| 192       | 53,387       | 200           | [original website](https://www.cs.princeton.edu/cass/)             |
-| Enron    |[enron.tar.gz](http://static.visual-computing.com/paper/DEG/enron.tar.gz)| 1369       | 94,987       | 200           | [original website](https://www.cs.cmu.edu/~enron/)             |
-| SIFT1M    |[sift.tar.gz](http://static.visual-computing.com/paper/DEG/sift.tar.gz)| 128       | 1,000,000       | 10,000           | [original website](http://corpus-texmex.irisa.fr/)             |
-| GloVe-100 | [glove-100.tar.gz](http://static.visual-computing.com/paper/DEG/glove-100.tar.gz) | 100       | 1,183,514       | 10,000           | [original website](https://nlp.stanford.edu/projects/glove/)   |
+In order to reproduce the results in our papers, please visit the corresponding github branch.
+- [crEG branch](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/crEG) for "An Exploration Graph with Continuous Refinement for Efficient Multimedia Retrieval"
+- [arxiv branch](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/arxiv) for "Fast Approximate nearest neighbor search with the Dynamic Exploration Graph using continuous refinement"
 
 ## Performance
-
-In order to reproduce our results please checkout the `\cpp\` directory and its readme file. For the four data set above DEG delievered the best ANNS and exploration efficiency amoung all the tested graph-based algorithms.
 
 ***NOTE:** All experiments where conduced single threaded on a Ryzen 2700x CPU, operating at a constant core clock speed of 4GHz, and 64GB of DDR4 memory running at 2133MHz.
 
