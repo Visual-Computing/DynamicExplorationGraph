@@ -203,7 +203,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
 
   // even regular builder
   py::class_<deglib::builder::EvenRegularGraphBuilder>(m, "EvenRegularGraphBuilder")
-    .def(py::init<deglib::graph::MutableGraph&, std::mt19937&, const uint8_t, const float, const uint8_t, const float, const uint8_t, const uint32_t, const uint32_t>())
+    .def(py::init<deglib::graph::MutableGraph&, std::mt19937&, const uint8_t, const float, const bool, const uint8_t, const float, const uint8_t, const uint32_t, const uint32_t>())
     .def("add_entry", [] (deglib::builder::EvenRegularGraphBuilder& builder, const uint32_t label, py::array_t<float, py::array::c_style> feature) {
       // request buffer info
       const py::buffer_info feature_info = feature.request();

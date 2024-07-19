@@ -14,8 +14,8 @@ from .utils import assure_array
 class EvenRegularGraphBuilder:
     def __init__(
             self, graph: MutableGraph, rng: Mt19937 | None = None, extend_k: Optional[int] = None,
-            extend_eps: float = 0.2, improve_k: Optional[int] = None, improve_eps: float = 0.001,
-            max_path_length: int = 10, swap_tries: int = 3, additional_swap_tries: int = 3
+            extend_eps: float = 0.2, extend_schemeC: bool = True, improve_k: Optional[int] = None,
+            improve_eps: float = 0.001, max_path_length: int = 10, swap_tries: int = 3, additional_swap_tries: int = 3
     ):
         """
         Create an EvenRegularBuilder that can be used to construct a graph.
@@ -24,6 +24,7 @@ class EvenRegularGraphBuilder:
         :param rng: An rng generator. Will be constructed, if set to None (default)
         :param extend_k: TODO
         :param extend_eps: TODO
+        :param extend_schemeC: TODO
         :param improve_k: TODO
         :param improve_eps: TODO
         :param max_path_length: TODO
@@ -104,8 +105,9 @@ class EvenRegularGraphBuilder:
 def build_from_data(
         data: np.ndarray, edges_per_vertex: int = 32, capacity: int = -1, metric: Metric = Metric.L2,
         rng: Mt19937 | None = None, extend_k: Optional[int] = None, extend_eps: float = 0.2,
-        improve_k: Optional[int] = None, improve_eps: float = 0.001, max_path_length: int = 10, swap_tries: int = 3,
-        additional_swap_tries: int = 3, callback: Callable[[deglib_cpp.BuilderStatus], None] | str | None = None
+        extend_schemeC: bool = True, improve_k: Optional[int] = None, improve_eps: float = 0.001,
+        max_path_length: int = 10, swap_tries: int = 3, additional_swap_tries: int = 3,
+        callback: Callable[[deglib_cpp.BuilderStatus], None] | str | None = None
 ) -> SizeBoundedGraph:
     """
     Create a new graph built from the given data.
@@ -120,6 +122,7 @@ def build_from_data(
     :param rng: An rng generator. Will be constructed, if set to None (default)
     :param extend_k: TODO
     :param extend_eps: TODO
+    :param extend_schemeC: TODO
     :param improve_k: TODO
     :param improve_eps: TODO
     :param max_path_length: TODO
