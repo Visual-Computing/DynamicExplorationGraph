@@ -17,6 +17,55 @@ enum DataStreamType { AddAll, AddHalf, AddAllRemoveHalf, AddHalfRemoveAndAddOneA
  * Load the data repository and create a dynamic exploratino graph with it.
  * Store the graph in the graph file.
  */
+void optimze_graph(const std::string initial_graph_file, const std::string graph_file, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt, const uint32_t iterations) {
+    
+    auto rnd = std::mt19937(7);                         // default 7
+
+    fmt::print("Load graph {} \n", initial_graph_file);
+    auto graph = deglib::graph::load_sizebounded_graph(initial_graph_file.c_str());
+    fmt::print("Graph with {} vertices and an avg edge weight of {} \n", graph.size(), deglib::analysis::calc_avg_edge_weight(graph, 1));
+
+    // create a graph builder to add vertices to the new graph and improve its edges
+    fmt::print("Start graph builder \n");   
+    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::Unknown, 0, 0.0f, k_opt, eps_opt, i_opt, 1, 0);
+    
+    // check the integrity of the graph during the graph build process
+    auto start = std::chrono::steady_clock::now();
+    uint64_t duration_ms = 0;
+    const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
+        const auto size = graph.size();
+
+        if(status.step % (iterations/10) == 0) {    
+            duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+            auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 1);
+            auto valid_weights = deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_regularity(graph, uint32_t(size), true);
+            auto connected = deglib::analysis::check_graph_connectivity(graph);
+
+            auto duration = duration_ms / 1000;
+            auto currRSS = getCurrentRSS() / 1000000;
+            auto peakRSS = getPeakRSS() / 1000000;
+            fmt::print("{:7} step, {:5}s, AEW: {:4.2f}, {} connected, {}, RSS {} & peakRSS {}\n", status.step, duration, avg_edge_weight, connected ? "" : "not", valid_weights ? "valid" : "invalid", currRSS, peakRSS);
+            start = std::chrono::steady_clock::now();
+        }
+
+        if(status.step > iterations)
+            builder.stop();
+    };
+
+    // start the build process
+    builder.build(improvement_callback, true);
+    fmt::print("Actual memory usage: {} Mb, Max memory usage: {} Mb after building the graph in {} secs\n", getCurrentRSS() / 1000000, getPeakRSS() / 1000000, duration_ms / 1000);
+
+    // store the graph
+    graph.saveGraph(graph_file.c_str());
+
+    fmt::print("The graph contains {} non-RNG edges\n", deglib::analysis::calc_non_rng_edges(graph));
+}
+
+/**
+ * Load the data repository and create a dynamic exploratino graph with it.
+ * Store the graph in the graph file.
+ */
 void create_graph(const std::string repository_file, const DataStreamType data_stream_type, const std::string graph_file, deglib::builder::LID lid, const uint8_t d, const uint8_t k_ext, const float eps_ext, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt) {
     
     auto rnd = std::mt19937(7);                         // default 7
@@ -100,8 +149,7 @@ void create_graph(const std::string repository_file, const DataStreamType data_s
         else if(status.step % (log_after/10) == 0) {    
             duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
             auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 1);
-                        auto connected = deglib::analysis::check_graph_connectivity(graph);
-
+            auto connected = deglib::analysis::check_graph_connectivity(graph);
             auto duration = duration_ms / 1000;
             auto currRSS = getCurrentRSS() / 1000000;
             auto peakRSS = getPeakRSS() / 1000000;
@@ -162,11 +210,14 @@ int main() {
     // const auto repository_file      = (data_path / "audio" / "audio_base.fvecs").string();
     // const auto query_file           = (data_path / "audio" / "audio_query.fvecs").string();
     // const auto gt_file              = (data_path / "audio" / "audio_groundtruth.ivecs").string();
-    // const auto graph_file           = (data_path / "deg" / "neighbor_choice" / "192D_L2_K20_AddK40Eps0.3Low_schemeA.deg").string();
+    // const auto graph_file           = (data_path / "deg" / "192D_L2_K20_AddK40Eps0.1_schemeD.deg").string();
+    // const auto opt_graph_file       = (data_path / "deg" / "192D_L2_K20_AddK40Eps0.1_schemeD_OptK20Eps0.001Path5_it20000.deg").string();
 
-    // if(std::filesystem::exists(graph_file.c_str()) == false)
-    //     create_graph(repository_file, DataStreamType::AddAll, graph_file, deglib::builder::LID::Low, 20, 40, 0.3f, true, 20, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
-    // test_graph(query_file, gt_file, graph_file, 50, 20); // repeat_test, k
+    // if(std::filesystem::exists(graph_file.c_str()) == false) {
+    //     create_graph(repository_file, DataStreamType::AddAll, graph_file, deglib::builder::LID::Low, 20, 40, 0.1f, 20, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
+    //     optimze_graph(graph_file, opt_graph_file, 20, 0.001f, 5, 20000); // k_opt, eps_opt, i_opt, iteration
+    // }
+    // test_graph(query_file, gt_file, opt_graph_file, 50, 20); // repeat_test, k
 
 
 
@@ -174,11 +225,28 @@ int main() {
     // const auto repository_file      = (data_path / "enron" / "enron_base.fvecs").string();
     // const auto query_file           = (data_path / "enron" / "enron_query.fvecs").string();
     // const auto gt_file              = (data_path / "enron" / "enron_groundtruth.ivecs").string();
-    // const auto graph_file           = (data_path / "deg" / "neighbor_choice" / "1369D_L2_K30_AddK60Eps0.3High_schemeC.deg").string();
+    // const auto graph_file           = (data_path / "deg" / "1369D_L2_K30_AddK60Eps0.1_schemeD.deg").string();
+    // const auto opt_graph_file       = (data_path / "deg" / "1369D_L2_K30_AddK60Eps0.1_schemeD_OptK30Eps0.001Path5_it400000.deg").string();
 
-    // if(std::filesystem::exists(graph_file.c_str()) == false)
-    //     create_graph(repository_file, DataStreamType::AddAll, graph_file, deglib::builder::LID::Low, 30, 60, 0.3f, true, 30, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
-    // test_graph(query_file, gt_file, graph_file, 20, 20); // repeat_test, k
+    // if(std::filesystem::exists(graph_file.c_str()) == false) {
+    //     create_graph(repository_file, DataStreamType::AddAll, graph_file, deglib::builder::LID::Low, 30, 60, 0.1f, 30, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
+    //     optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 20000); // k_opt, eps_opt, i_opt, iteration
+    // }
+    // test_graph(query_file, gt_file, opt_graph_file, 20, 20); // repeat_test, k
+
+
+    // // ------------------------------- Deep1M -----------------------------------------
+    // const auto repository_file      = (data_path / "deep1m" / "deep1m_base.fvecs").string();
+    // const auto query_file           = (data_path / "deep1m" / "deep1m_query.fvecs").string();
+    // const auto gt_file              = (data_path / "deep1m" / "deep1m_groundtruth.ivecs").string();
+    // const auto graph_file           = (data_path / "deg" / "96D_L2_K30_AddK60Eps0.1_schemeD.deg").string();
+    // const auto opt_graph_file       = (data_path / "deg" / "96D_L2_K30_AddK60Eps0.1_schemeD_OptK30Eps0.001Path5_it400000.deg").string();
+
+    // if(std::filesystem::exists(graph_file.c_str()) == false) {
+    //     create_graph(repository_file, DataStreamType::AddAll, graph_file, deglib::builder::LID::Low, 30, 60, 0.1f, 30, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
+    //     optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 400000); // k_opt, eps_opt, i_opt, iteration
+    // }
+    // test_graph(query_file, gt_file, opt_graph_file, 20, 20); // repeat_test, k
 
 
 
@@ -187,12 +255,15 @@ int main() {
     const auto repository_file      = (data_path / "SIFT1M" / "sift_base.fvecs").string();
     const auto query_file           = (data_path / "SIFT1M" / "sift_query.fvecs").string();
     const auto gt_file              = (data_path / "SIFT1M" / (data_stream_type == AddAll ? "sift_groundtruth.ivecs" : "sift_groundtruth_base500000.ivecs" )).string();
-    const auto graph_file           = (data_path / "deg" / "test" / "128D_L2_K30_AddK60Eps0.2_SwapK30Eps0.001_add1m.deg").string();
+    const auto graph_file           = (data_path / "deg" / "test" / "128D_L2_K30_AddK60Eps0.2_schemeD.deg").string();
+    const auto opt_graph_file       = (data_path / "deg" / "test" / "128D_L2_K30_AddK60Eps0.2_schemeD_OptK30Eps0.001Path5_it200000.deg").string();
     const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::LID::Low : deglib::builder::LID::Unknown;
 
-    if(std::filesystem::exists(graph_file.c_str()) == false)
-        create_graph(repository_file, data_stream_type, graph_file, lid, 30, 60, 0.2f, 30, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
-    test_graph(query_file, gt_file, graph_file, 1, 100); // repeat_test, k
+    // if(std::filesystem::exists(graph_file.c_str()) == false) {
+        // create_graph(repository_file, data_stream_type, graph_file, lid, 30, 60, 0.2f, 30, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
+        optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 200000); // k_opt, eps_opt, i_opt, iteration
+    // }
+    test_graph(query_file, gt_file, opt_graph_file, 1, 100); // repeat_test, k
 
 
 
@@ -201,12 +272,15 @@ int main() {
     // const auto repository_file  = (data_path / "glove-100" / "glove-100_base.fvecs").string();    
     // const auto query_file       = (data_path / "glove-100" / "glove-100_query.fvecs").string();
     // const auto gt_file          = (data_path / "glove-100" / (data_stream_type == AddAll ? "glove-100_groundtruth.ivecs" : "glove-100_groundtruth_base591757.ivecs" )).string();
-    // const auto graph_file       = (data_path / "deg" / "100D_L2_K40_AddK40Eps0.2High_SwapK40-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string();
-    // const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::LID::High : deglib::builder::LID::Unknown;
+    // const auto graph_file       = (data_path / "deg" / "100D_L2_K30_AddK60Eps0.1_schemeC.deg").string();
+    // const auto opt_graph_file   = (data_path / "deg" / "100D_L2_K30_AddK60Eps0.1_schemeC_OptK30Eps0.001Path5_it2000000.deg").string();
+    // const auto lid              = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::LID::High : deglib::builder::LID::Unknown;
 
-    // if(std::filesystem::exists(graph_file.c_str()) == false)
-    //     create_graph(repository_file, data_stream_type, graph_file, lid, 30, 30, 0.2f, false, 30, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
-    // test_graph(query_file, gt_file, graph_file, 1, 100); // repeat_test, k
+    // if(std::filesystem::exists(graph_file.c_str()) == false) {
+    //     create_graph(repository_file, data_stream_type, graph_file, lid, 30, 60, 0.1f, 30, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
+    //     optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 2000000); // k_opt, eps_opt, i_opt, iteration
+    // }
+    // test_graph(query_file, gt_file, opt_graph_file, 1, 100); // repeat_test, k
 
  
 
