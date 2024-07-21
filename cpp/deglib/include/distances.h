@@ -247,7 +247,7 @@ namespace deglib {
         class InnerProductFloat {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return 1.0f - ip_naive(pVect1v, pVect2v, qty_ptr);
+                return -ip_naive(pVect1v, pVect2v, qty_ptr);
             }
 
             inline static float ip_naive(const void *pVect1v, const void *pVect2v, const void *qty_ptr) 
@@ -260,7 +260,7 @@ namespace deglib {
                 const float* last = a + size;
                 const float* unroll_group = last - 3;
 
-                // Process 4 items with each loop for efficiency. 
+                // Process 4 entries at each loop for efficiency. 
                 float result = 0;
                 while (a < unroll_group) {
                     dot0 = a[0] * b[0];
@@ -272,7 +272,7 @@ namespace deglib {
                     b += 4;
                 }
 
-                // Process last 0-3 pixels.  Not needed for standard vector lengths. 
+                // Process last 0-3 entries
                 while (a < last) {
                     result += *a++ * *b++;
                 }
@@ -285,7 +285,7 @@ namespace deglib {
         public:
 
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return 1.0f - ip_16ext(pVect1v, pVect2v, qty_ptr);
+                return -ip_16ext(pVect1v, pVect2v, qty_ptr);
             }
 
             // AVX instructions don't require their memory operands to be aligned, but SSE does
@@ -348,7 +348,7 @@ namespace deglib {
         class InnerProductFloat8Ext {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return 1.0f - ip_8ext(pVect1v, pVect2v, qty_ptr);
+                return -ip_8ext(pVect1v, pVect2v, qty_ptr);
             }
 
             inline static float ip_8ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
@@ -390,7 +390,7 @@ namespace deglib {
         class InnerProductFloat4Ext {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return 1.0f - ip_4ext(pVect1v, pVect2v, qty_ptr);
+                return -ip_4ext(pVect1v, pVect2v, qty_ptr);
             }
 
             inline static float ip_4ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
@@ -428,7 +428,7 @@ namespace deglib {
 
                 size_t qty_left = qty - qty16;
                 float res_tail = deglib::distances::InnerProductFloat::ip_naive(pVect1, pVect2, &qty_left);
-                return 1.0f - (res + res_tail);
+                return -(res + res_tail);
             }
         };
 
@@ -444,7 +444,7 @@ namespace deglib {
 
                 size_t qty_left = qty - qty4;
                 float res_tail = deglib::distances::InnerProductFloat::ip_naive(pVect1, pVect2, &qty_left);
-                return 1.0f - (res + res_tail);
+                return -(res + res_tail);
             }
         };
 

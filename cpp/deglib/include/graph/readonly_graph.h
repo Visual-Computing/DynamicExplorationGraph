@@ -413,7 +413,8 @@ public:
     }
 
     // search radius
-    auto r = std::numeric_limits<float>::max();
+    auto radius = std::numeric_limits<float>::max();
+    auto exploration_radius = radius;
 
     // iterate as long as good elements are in the next_vertices queue     
     auto good_neighbors = std::array<uint32_t, 256>();
@@ -424,7 +425,7 @@ public:
       next_vertices.pop();
 
       // max distance reached
-      if (next_vertex.getDistance() > r * (1 + eps)) 
+      if (next_vertex.getDistance() > exploration_radius) 
         break;
 
       size_t good_neighbor_count = 0;
@@ -465,18 +466,19 @@ public:
         const auto neighbor_distance = dist_func(query, neighbor_feature_vector, dist_func_param);
              
         // check the neighborhood of this vertex later, if its good enough
-        if (neighbor_distance <= r * (1 + eps)) {
+        if (neighbor_distance <= exploration_radius) {
           next_vertices.emplace(neighbor_index, neighbor_distance);
           trackback.insert({neighbor_index, deglib::search::ObjectDistance(next_vertex.getInternalIndex(), next_vertex.getDistance())});
 
           // remember the vertex, if its better than the worst in the result list
-          if (neighbor_distance < r) {
+          if (neighbor_distance < radius) {
             results.emplace(neighbor_index, neighbor_distance);
 
             // update the search radius
             if (results.size() > k) {
               results.pop();
-              r = results.top().getDistance();
+              radius = results.top().getDistance();
+              exploration_radius = radius * ((radius < 0) ? (1 - eps) : (1 + eps));
             }
           }
         }
@@ -539,7 +541,8 @@ public:
     }
 
     // search radius
-    auto r = std::numeric_limits<float>::max();
+    auto radius = std::numeric_limits<float>::max();
+    auto exploration_radius = radius;
 
     // iterate as long as good elements are in the next_vertices queue
     auto good_neighbors = std::array<uint32_t, 256>();    // this limits the neighbor count to 256 using Variable Length Array wrapped in a macro
@@ -550,7 +553,7 @@ public:
       next_vertices.pop();
 
       // max distance reached
-      if (next_vertex.getDistance() > r * (1 + eps)) 
+      if (next_vertex.getDistance() > exploration_radius) 
         break;
 
       size_t good_neighbor_count = 0;
@@ -575,17 +578,18 @@ public:
         const auto neighbor_distance = COMPARATOR::compare(query, neighbor_feature_vector, dist_func_param);
              
         // check the neighborhood of this vertex later, if its good enough
-        if (neighbor_distance <= r * (1 + eps)) {
+        if (neighbor_distance <= exploration_radius) {
           next_vertices.emplace(neighbor_index, neighbor_distance);
 
           // remember the vertex, if its better than the worst in the result list
-          if (neighbor_distance < r) {
+          if (neighbor_distance < radius) {
             results.emplace(neighbor_index, neighbor_distance);
 
             // update the search radius
             if (results.size() > k) {
               results.pop();
-              r = results.top().getDistance();
+              radius = results.top().getDistance();
+              exploration_radius = radius * ((radius < 0) ? (1 - eps) : (1 + eps));
             }
           }
         }
@@ -636,7 +640,8 @@ public:
     const auto query = this->feature_by_index(entry_vertex_index);
 
     // search radius
-    auto r = std::numeric_limits<float>::max();
+    auto radius = std::numeric_limits<float>::max();
+    auto exploration_radius = radius;
 
     // iterate as long as good elements are in the next_vertices queue and max_calcs is not yet reached
     auto good_neighbors = std::array<uint32_t, 256>();    // this limits the neighbor count to 256 using Variable Length Array wrapped in a macro
@@ -667,7 +672,7 @@ public:
         const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
         const auto neighbor_distance = COMPARATOR::compare(query, neighbor_feature_vector, dist_func_param);
 
-        if (neighbor_distance < r) {
+        if (neighbor_distance < radius) {
 
           // check the neighborhood of this vertex later
           next_vertices.emplace(neighbor_index, neighbor_distance);
@@ -678,7 +683,7 @@ public:
           // update the search radius
           if (results.size() > k) {
             results.pop();
-            r = results.top().getDistance();
+            radius = results.top().getDistance();
           }
         }
 
