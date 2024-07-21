@@ -459,23 +459,38 @@ public:
     return new_internal_index;
   }
 
-    /**
-    * Remove an existing vertex.
-    */
-  void removeVertex(const uint32_t external_label) override {
+  /**
+   * Remove an existing vertex.
+   */
+  std::vector<uint32_t> removeVertex(const uint32_t external_label) override {
     const auto internal_index = getInternalIndex(external_label);
+    const auto last_internal_index = static_cast<uint32_t>(this->label_to_index_.size() - 1);
+
+    // since the last_internal_index will be moved to the internal_index, 
+    // update the current neighbor list if the last_internal_index is present
+    if(hasEdge(internal_index, last_internal_index)) {
+      changeEdge(internal_index, last_internal_index, internal_index, 0);
+      changeEdge(last_internal_index, internal_index, last_internal_index, 0);
+    }
+
+    // copy the neighbor list to return it later
+    const auto neighbor_indices = neighbors_by_index(internal_index);
+    const auto involved_indices = std::vector<uint32_t>(neighbor_indices, neighbor_indices + this->edges_per_vertex_);
+
+    // replace all references to the internal_index with a self-reference of the corresponding vertex
+    for (size_t index = 0; index < this->edges_per_vertex_; index++) 
+      changeEdge(neighbor_indices[index], internal_index, neighbor_indices[index], 0);
 
     // the last index will be moved to the internal_index position and overwrite its content
-    const auto last_internal_index = static_cast<uint32_t>(this->label_to_index_.size() - 1);
     if(internal_index != last_internal_index) {
 
       // update the neighbor list of the last vertex to reflex its new vertex index
-      const auto neighbor_indices = neighbors_by_index(last_internal_index);
-      const auto neighbor_weights = weights_by_index(last_internal_index);
+      const auto last_neighbor_indices = neighbors_by_index(last_internal_index);
+      const auto last_neighbor_weights = weights_by_index(last_internal_index);
       for (size_t index = 0; index < this->edges_per_vertex_; index++) 
-        changeEdge(neighbor_indices[index], last_internal_index, internal_index, neighbor_weights[index]);
-
-      // copy the last vertex to the vertex which needs to be removed
+        changeEdge(last_neighbor_indices[index], last_internal_index, internal_index, last_neighbor_weights[index]);
+      
+      // copy the last vertex to the vertex which gets removed
       std::memcpy(vertex_by_index(internal_index), vertex_by_index(last_internal_index), this->byte_size_per_vertex_);
 
       // update the index position of the last label
@@ -485,6 +500,9 @@ public:
 
     // remove the external label from the hash map
     label_to_index_.erase(external_label);
+
+    // return all neighbors of the deleted vertex
+    return involved_indices;
   }
 
   /**

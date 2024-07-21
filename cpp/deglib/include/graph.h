@@ -17,9 +17,9 @@ class MutableGraph : public deglib::search::SearchGraph
     virtual uint32_t addVertex(const uint32_t external_label, const std::byte* feature_vector) = 0;
 
    /**
-    * Remove an existing vertex.
+    * Remove an existing vertex and returns its list of neighbors
     */
-    virtual void removeVertex(const uint32_t external_labelr) = 0;
+    virtual std::vector<uint32_t> removeVertex(const uint32_t external_labelr) = 0;
 
    /**
     * Swap a neighbor with another neighbor and its weight.

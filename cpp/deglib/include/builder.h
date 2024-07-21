@@ -17,6 +17,141 @@
 namespace deglib::builder
 {
 
+
+/**
+ * A UnionFind class to represent disjoint set.
+ * https://www.tutorialspoint.com/cplusplus-program-to-implement-disjoint-set-data-structure
+ **/
+class UnionFind { 
+  private:
+    uint32_t default_value;
+    std::unordered_map<uint32_t, uint32_t> parents; // TODO replace with robin_map
+
+  public:
+
+    /**
+     * Reserves space in the internal map
+     */
+    UnionFind(int expected_size) {
+      parents.reserve(expected_size);
+      default_value = std::numeric_limits<uint32_t>::max();
+    }
+
+    /**
+     * get the default value if an element in not in the unsion
+     */
+    uint32_t getDefaultValue() {
+      return default_value;
+    }
+
+    /**
+     * Find the root of the set in which element belongs
+     */
+    uint32_t Find(uint32_t l) const {
+      auto it = parents.find(l);
+      if(it == parents.end())
+        return default_value;
+
+      auto entry = it->second;
+      if (entry == l) // if l is root
+         return l;
+      return Find(entry); // recurs for parent till we find root
+    }
+
+    /**
+     * perform Union of two subsets element1 and element2  
+     */
+    void Union(uint32_t m, uint32_t n) {
+      uint32_t x = Find(m);
+      uint32_t y = Find(n);
+      Update(x, y);
+    }
+
+    /**
+     * If the parents are known via find this method can be called instead of union
+     */
+    void Update(uint32_t element, uint32_t parent) {
+      parents[element] = parent;
+    }
+};
+
+/**
+ * A group of vertices which can reach each other. Some of them might be missing edges.
+ * A vertex index is associated with this group to make it unique.
+ */
+struct ReachableGroup {
+  uint32_t vertex_index_;
+  std::unordered_set<uint32_t> missing_edges_;      // TODO replace with robin_set
+  std::unordered_set<uint32_t> reachable_vertices_; // TODO replace with robin_set
+
+  ReachableGroup(uint32_t vertex_index, uint32_t expected_size) : vertex_index_(vertex_index) {
+    missing_edges_.reserve(expected_size);
+    reachable_vertices_.reserve(expected_size);
+    missing_edges_.insert(vertex_index);
+    reachable_vertices_.insert(vertex_index);
+  }
+
+   /**
+   * removed the element from the list of vertices with missing edges
+   */
+  void hasEdge(uint32_t element) {
+    missing_edges_.erase(element);
+  }
+
+  /**
+   * return the vertex associated with this group
+   */
+  uint32_t getVertexIndex() const {
+    return vertex_index_;
+  }
+
+  /**
+   * get the number of vertices which can be reached by this group
+   */
+  size_t size() const {
+    return reachable_vertices_.size();
+  }
+
+  /**
+   * get the number of vertices in this group which are missing an edge
+   */
+  size_t getMissingEdgeSize() const {
+    return missing_edges_.size();
+  }
+
+  /**
+   * get the vertices which are missing an edges
+   */
+  const auto& getMissingEdges() {
+    return missing_edges_;
+  }
+
+  /**
+   * Copy the data from the other group to this group
+   */
+  void copyFrom(ReachableGroup& otherGroup) {
+
+	  // skip if both are the same object
+		if(vertex_index_ == otherGroup.vertex_index_)
+			return;
+
+    missing_edges_.insert(otherGroup.missing_edges_.begin(), otherGroup.missing_edges_.end());
+    reachable_vertices_.insert(otherGroup.reachable_vertices_.begin(), otherGroup.reachable_vertices_.end());
+    // std::copy(otherGroup.missing_edges_.begin(), otherGroup.missing_edges_.end(), std::back_inserter(missing_edges_));
+    // std::copy(otherGroup.reachable_vertices_.begin(), otherGroup.reachable_vertices_.end(), std::back_inserter(reachable_vertices_));
+  }
+};
+
+/**
+ * Information about an graph edge. The edge might be no longer part of the graph
+ */
+struct GraphEdge {
+  uint32_t from_vertex;
+  uint32_t to_vertex;
+  float weight;
+  bool rng_conform;
+};
+
 /**
  * Task to add a vertex to the graph
  */
@@ -70,11 +205,19 @@ struct BuilderStatus {
   uint64_t tries;     // number of improvement tries
 };
 
+/**
+ * Information about the data distribution help to switch between different graph extension strategies.
+ * Below 15 = Low
+ * Above 15 = Hight
+ * For data with distribution Shifts Unknown is better. 
+ */
+enum LID { Unknown, High, Low };
+
 class EvenRegularGraphBuilder {
 
+    const LID lid_;
     const uint8_t extend_k_;            // k value for extending the graph
     const float extend_eps_;            // eps value for extending the graph
-    const bool extend_schemeC_;         // use scheme C for extending the graph
 
     const uint8_t improve_k_;           // k value for improving the graph
     const float improve_eps_;           // eps value for improving the graph
@@ -95,13 +238,13 @@ class EvenRegularGraphBuilder {
 
   public:
 
-    EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, 
-                            const uint8_t extend_k, const float extend_eps, const bool extend_schemeC,  
+    EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, const LID lid,
+                            const uint8_t extend_k, const float extend_eps, 
                             const uint8_t improve_k, const float improve_eps, 
                             const uint8_t max_path_length = 5, const uint32_t swap_tries = 0, const uint32_t additional_swap_tries = 0) 
-      : extend_k_(extend_k),
-        extend_eps_(extend_eps),  
-        extend_schemeC_(extend_schemeC),
+      : lid_(lid),
+        extend_k_(extend_k),
+        extend_eps_(extend_eps),
         improve_k_(improve_k), 
         improve_eps_(improve_eps), 
         max_path_length_(max_path_length), 
@@ -109,12 +252,12 @@ class EvenRegularGraphBuilder {
         additional_swap_tries_(additional_swap_tries),
         rnd_(rnd),  
         graph_(graph),
-        build_status_() {
+        build_status_() { 
     }
 
     EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, const uint32_t swaps) 
-      : EvenRegularGraphBuilder(graph, rnd, 
-                                graph.getEdgesPerVertex(), 0.2f, true,
+      : EvenRegularGraphBuilder(graph, rnd, LID::Unknown,
+                                graph.getEdgesPerVertex(), 0.2f, 
                                 graph.getEdgesPerVertex(), 0.001f, 
                                 5, swaps, swaps) {
     }
@@ -191,13 +334,9 @@ class EvenRegularGraphBuilder {
       // graph should not contain a vertex with the same label
       if(graph.hasVertex(external_label)) {
         std::fprintf(stderr, "graph contains vertex %u already. can not add it again \n", external_label);
-        perror("");
-        abort();
+        std::perror("");
+        std::abort();
       }
-
-      // for computing distances to neighbors not in the result queue
-      const auto dist_func = graph.getFeatureSpace().get_dist_func();
-      const auto dist_func_param = graph.getFeatureSpace().get_dist_func_param();
 
       // fully connect all vertices
       const auto new_vertex_feature = add_task.feature.data();
@@ -206,6 +345,10 @@ class EvenRegularGraphBuilder {
 
         // add an empty vertex to the graph (no neighbor information yet)
         const auto internal_index = graph.addVertex(external_label, new_vertex_feature);
+
+        // for computing distances to neighbors not in the result queue
+        const auto dist_func = graph.getFeatureSpace().get_dist_func();
+        const auto dist_func_param = graph.getFeatureSpace().get_dist_func_param();
 
         // connect the new vertex to all other vertices in the graph
         for (uint32_t i = 0; i < graph.size(); i++) {
@@ -219,6 +362,134 @@ class EvenRegularGraphBuilder {
         return;
       }
 
+      if(this->lid_ == Unknown)
+        extendGraphUnknownLID(add_task);
+      else
+        extendGraphKnownLID(add_task);
+    }
+
+    /**
+     * The LID of the dataset is unknown, add the new data one-by-one single threaded.
+     */
+    void extendGraphUnknownLID(const BuilderAddTask& add_task) {
+      auto& graph = this->graph_;
+      const auto external_label = add_task.label;
+      const auto new_vertex_feature = add_task.feature.data();
+      const auto edges_per_vertex = uint32_t(graph.getEdgesPerVertex());
+      
+      // find good neighbor candidates for the new vertex
+      auto distrib = std::uniform_int_distribution<uint32_t>(0, uint32_t(graph.size() - 1));
+      const std::vector<uint32_t> entry_vertex_indices = { distrib(this->rnd_) };
+      auto top_list = graph.search(entry_vertex_indices, new_vertex_feature, this->extend_eps_, std::max(uint32_t(this->extend_k_), edges_per_vertex*2)); // need 2x otherwise it might lock during neighbor selection
+      const auto candidates = topListAscending(top_list);
+
+      // their should always be enough neighbors (search candidates), otherwise the graph would be broken
+      if(candidates.size() < edges_per_vertex) {
+        fmt::print(stderr, "the graph search for the new vertex {} did only provided {} candidates \n", external_label, candidates.size());
+        std::perror("");
+        std::abort();
+      }
+
+      // add an empty vertex to the graph (no neighbor information yet)
+      const auto internal_index = graph.addVertex(external_label, new_vertex_feature);
+     
+      // adding neighbors happens in two phases, the first tries to retain RNG, the second adds them without checking
+      bool check_rng_phase = true; // true = activated, false = deactived
+
+      // list of potential isolates vertices
+      auto isolated_vertices = std::vector<uint32_t>();
+      isolated_vertices.emplace_back(internal_index);  // self loop needed for restore phase
+
+      // remove an edge of a good neighbor candidate and connect the candidate with the new vertex
+      auto slots = (uint32_t) edges_per_vertex - 1; // the new vertex will get an additional neighbor during the restore phase
+      while(slots > 0) {
+        for (size_t i = 0; i < candidates.size() && slots > 0; i++) {
+          const auto candidate_index = candidates[i].getInternalIndex();
+          const auto candidate_weight = candidates[i].getDistance();
+
+          // check if the vertex is already in the edge list of the new vertex (added during a previous loop-run)
+          // since all edges are undirected and the edge information of the new vertex does not yet exist, we search the other way around.
+          if(graph.hasEdge(candidate_index, internal_index)) 
+            continue;
+
+          // does the candidate has a neighbor which is connected to the new vertex and has a lower distance?
+          if(check_rng_phase && deglib::analysis::checkRNG(graph, edges_per_vertex, candidate_index, internal_index, candidate_weight) == false) 
+            continue;
+
+          // the vertex is already missing an edge (one of its longer edges was removed during a previous iteration), 
+          // just add an new edge between the candidate and the new vertex
+          if(graph.hasEdge(candidate_index, candidate_index)) {
+            graph.changeEdge(candidate_index, candidate_index, internal_index, candidate_weight);
+            graph.changeEdge(internal_index, internal_index, candidate_index, candidate_weight);
+            slots--;
+            continue;
+          }
+
+          // This version is good for high LID datasets or small graphs with low distance count limit during ANNS
+          uint32_t new_neighbor_index = 0;
+          {
+            // find the worst edge of the new neighbor
+            float new_neighbor_weight = std::numeric_limits<float>::lowest();
+            const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
+            const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
+
+            for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
+              const auto neighbor_index = neighbor_indices[edge_idx];
+
+              // the suggested neighbor might already be in the edge list of the new vertex
+              if(graph.hasEdge(neighbor_index, internal_index))
+                continue;
+
+              // is the neighbor already missing an edge?
+              if(graph.hasEdge(neighbor_index, neighbor_index)) 
+                continue;
+
+              // find heightest weighted neighbor
+              const auto neighbor_weight = neighbor_weights[edge_idx];
+              if(neighbor_weight > new_neighbor_weight) {
+                new_neighbor_weight = neighbor_weight;
+                new_neighbor_index = neighbor_index;
+              }
+            }
+
+            // this should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the candidate-vertex and still has space for more
+            if(new_neighbor_weight == std::numeric_limits<float>::lowest()) 
+              continue;
+          }
+
+          // place the new vertex in the edge list of the candidate_index and the new vertex internal_index
+          graph.changeEdge(candidate_index, new_neighbor_index, internal_index, candidate_weight);
+          graph.changeEdge(internal_index, internal_index, candidate_index, candidate_weight);
+          slots--;
+
+          // replace the edge to the candidate_index from the edge list of new_neighbor_index with a self-reference
+          graph.changeEdge(new_neighbor_index, candidate_index, new_neighbor_index, 0);
+          isolated_vertices.emplace_back(new_neighbor_index);
+        }
+        
+        check_rng_phase = false;
+      }
+
+      // get all vertices which are missing an edge
+      isolated_vertices.erase(std::remove_if(isolated_vertices.begin(), isolated_vertices.end(), [&graph](int val) { return graph.hasEdge(val, val) == false; }), isolated_vertices.end());
+
+      // restore the potential disconnected graph componenten
+      restoreGraph(isolated_vertices, false);
+    }
+
+    /**
+     * The LID of the dataset is known and defined, use multi threading to build the graph.
+     */
+    void extendGraphKnownLID(const BuilderAddTask& add_task) {
+      auto& graph = this->graph_;
+      const auto external_label = add_task.label;
+      const auto new_vertex_feature = add_task.feature.data();
+      const auto edges_per_vertex = uint32_t(graph.getEdgesPerVertex());
+
+      // for computing distances to neighbors not in the result queue
+      const auto dist_func = graph.getFeatureSpace().get_dist_func();
+      const auto dist_func_param = graph.getFeatureSpace().get_dist_func_param();
+
       // find good neighbors for the new vertex
       auto distrib = std::uniform_int_distribution<uint32_t>(0, uint32_t(graph.size() - 1));
       const std::vector<uint32_t> entry_vertex_indices = { distrib(this->rnd_) };
@@ -228,8 +499,8 @@ class EvenRegularGraphBuilder {
       // their should always be enough neighbors (search results), otherwise the graph would be broken
       if(results.size() < edges_per_vertex) {
         std::fprintf(stderr, "the graph search for the new vertex %u did only provided %zu results \n", external_label, results.size());
-        perror("");
-        abort();
+        std::perror("");
+        std::abort();
       }
 
       // add an empty vertex to the graph (no neighbor information yet)
@@ -257,7 +528,7 @@ class EvenRegularGraphBuilder {
           // SchemeC: This version is good for high LID datasets or small graphs with low distance count limit during ANNS
           uint32_t new_neighbor_index = 0;
           float new_neighbor_distance = std::numeric_limits<float>::lowest();
-          if(this->extend_schemeC_) {
+          if(this->lid_ == High) {
 
             // find the worst edge of the new neighbor
             float new_neighbor_weight = std::numeric_limits<float>::lowest();
@@ -323,8 +594,8 @@ class EvenRegularGraphBuilder {
 
       if(new_neighbors.size() < edges_per_vertex) {
         std::fprintf(stderr, "could find only %zu good neighbors for the new vertex %u need %u\n", new_neighbors.size(), internal_index, edges_per_vertex);
-        perror("");
-        abort();
+        std::perror("");
+        std::abort();
       }
 
       // sort the neighbors by their neighbor indices and store them in the new vertex
@@ -348,174 +619,264 @@ class EvenRegularGraphBuilder {
       auto& graph = this->graph_;
       const auto edges_per_vertex = std::min(graph.size(), uint32_t(graph.getEdgesPerVertex()));
       
-      // 1 collect the vertices which are missing an edge if the vertex gets deleted
-      const auto internal_index = graph.getInternalIndex(del_task.label);
-      const auto involved_indices = std::vector<uint32_t>(graph.getNeighborIndices(internal_index), graph.getNeighborIndices(internal_index) + edges_per_vertex);
+      // 1 remove the vertex and collect the vertices which are missing an edge
+      const auto involved_indices = graph.removeVertex(del_task.label);
 
-      // 1.1 remove from the edge list of the involved vertices the internal_index (vertex to remove)
-      for (size_t n = 0; n < edges_per_vertex; n++) 
-        graph.changeEdge(involved_indices[n], internal_index, involved_indices[n], 0); // add self-reference
-
-      // 1.2 handle the use case where the graph does not have enough vertices to fulfill the edgesPerVertex requirement
-      //     and just remove the vertex without reconnecting the involved vertices because they are all fully connected
-      if((graph.size()-1) <= edges_per_vertex) {
-        graph.removeVertex(del_task.label);
+      // 1.1 handle the use case where the graph does not have enough vertices to fulfill the edgesPerVertex requirement
+		  //     and just remove the vertex without reconnecting the involved vertices because they are all fully connected
+      if(graph.size() <= edges_per_vertex) 
         return;
-      }
 
-      // 2 find pairs or groups of vertices which can reach each other
-      auto reachability = std::unordered_map<uint32_t, std::shared_ptr<std::unordered_set<uint32_t>>>();
-  
-      // 2.1 start with checking the adjacent neighbors of the involved vertices
-      for (auto&& involved_index : involved_indices) {
-        auto it = reachability.find(involved_index);
-        if (it == reachability.end())
-          it = reachability.emplace(involved_index, std::make_shared<std::unordered_set<uint32_t>>(std::unordered_set<uint32_t> { involved_index })).first;
+      restoreGraph(involved_indices, true);
+    }
 
-        // is any of the adjacent neighbors of involved_index also in the sorted array of involved_indices
-        auto reachable_indices_ptr = it->second;
-        auto reachable_indices = reachable_indices_ptr.get();
-        const auto neighbor_indices = graph.getNeighborIndices(involved_index);
-        for (size_t n = 0; n < edges_per_vertex; n++) {
-          const auto neighbor_index = neighbor_indices[n];
-          const auto is_involved = std::binary_search(involved_indices.begin(), involved_indices.end(), neighbor_index);
-          const auto is_loop = neighbor_index == involved_index; // is self reference from 1.2
-          if(is_involved && is_loop == false && reachable_indices->contains(neighbor_index) == false) {
+    /**
+     * Reconnect the vertices indicated in the list of involved_indices.
+     * All these vertices are missing an edge.
+     */
+    void restoreGraph(const std::vector<uint32_t>& involved_indices, bool improve_edges) {
+      auto& graph = this->graph_;
+      const auto edges_per_vertex = std::min(graph.size(), uint32_t(graph.getEdgesPerVertex()));
+      
+      // 2 find pairs or groups of vertices which can reach each other		
+		  auto unique_groups = std::unordered_set<std::shared_ptr<ReachableGroup>>();	
+      {
+        auto path_map = UnionFind(edges_per_vertex);
+        auto reachable_groups = std::unordered_map<uint32_t, std::shared_ptr<ReachableGroup>>();	
+        reachable_groups.reserve(edges_per_vertex);
+        for (const auto involved_index : involved_indices) {
+          reachable_groups.emplace(involved_index, std::make_shared<ReachableGroup>(involved_index, edges_per_vertex));
+          path_map.Update(involved_index, involved_index);
+        }
 
-            // if this neighbor does not have a set of reachable vertices yet, share the current set reachableVertices
-            const auto neighbor_reachability = reachability.find(neighbor_index);
-            if (neighbor_reachability == reachability.end()) {
-              reachable_indices->insert(neighbor_index);
-              reachability[neighbor_index] = reachable_indices_ptr;
-            } else {
-
-              // if the neighbor already has a set of reachable vertices, copy them over and replace all their references to the new and bigger set
-              const auto neighbor_reachable_indices = *neighbor_reachability->second;
-              reachable_indices->insert(neighbor_reachable_indices.begin(), neighbor_reachable_indices.end());
-              for (const auto& neighbor_reachable_index : neighbor_reachable_indices) 
-                reachability[neighbor_reachable_index] = reachable_indices_ptr;
+        // helper function to check if we need to find more connected components
+        auto is_enough_free_connections = [](const std::vector<uint32_t>& vertices, const UnionFind& paths, const std::unordered_map<uint32_t, std::shared_ptr<ReachableGroup>>& groups) {
+          size_t isolated_vertex_counter = 0;
+          size_t available_connections_counter = 0;
+          for(const auto& involved_vertex : vertices) {
+            const auto reachable_Vertex = paths.Find(involved_vertex);
+            if(involved_vertex == reachable_Vertex) {
+              const auto& group = groups.at(reachable_Vertex);
+              if(group->size() == 1)
+                isolated_vertex_counter++;
+              else if(group->getMissingEdgeSize() > 2)
+                available_connections_counter += group->getMissingEdgeSize() - 2;
             }
           }
-        }
-      }
-  
-      // 2.2 use graph.hasPath(...) to find a path for every not paired but involved vertex, to any other involved vertex 
-      for (auto vertex_reachability = reachability.begin(); vertex_reachability != reachability.end(); ++vertex_reachability) {
-        const auto involved_index = vertex_reachability->first;
+          return available_connections_counter < isolated_vertex_counter;
+        };
 
-        // during 2.1 each vertex got a set of reachable vertices with at least one entry (the vertex itself)
-				// all vertices containing only one element still need to find one other reachable vertex 
-				if(vertex_reachability->second.get()->size() <= 1) {
+        // 2.1 start with checking the adjacent neighbors
+        size_t neighbor_check_depth = 0;
+        auto check = std::unordered_set<uint32_t>(involved_indices.begin(), involved_indices.end());
+        auto check_next = std::unordered_set<uint32_t>();
+        while(is_enough_free_connections(involved_indices, path_map, reachable_groups)) {
+          for(const auto check_vertex : check) {
+            auto involved_vertex = path_map.Find(check_vertex);
+            auto reachable_group = reachable_groups.at(involved_vertex);
 
-          // is there a path from any of the other involved_indices to the lonely vertex?
-          auto from_indices = std::vector<uint32_t>();
-          std::copy_if(involved_indices.begin(), involved_indices.end(), std::back_inserter(from_indices), [involved_index](uint32_t value) { return value != involved_index; });
-          std::vector<deglib::search::ObjectDistance> traceback = graph.hasPath(from_indices, involved_index, improve_eps_, improve_k_);
-          if(traceback.size() == 0) {
-            // TODO replace with flood fill to find an involved vertex without compute distances
-            traceback = graph.hasPath(from_indices, involved_index, 1, graph.size());
-          }
+            // check only involved vertices and vertices which can only reach 1 involved vertex
+						// no need for big groups to find other groups at the expense of processing power
+            if(neighbor_check_depth > 0 && reachable_group->size() > 1)
+              continue;
 
-          // the last vertex in the traceback path must be one of the other involved vertices
-          const auto reachable_index = traceback.back().getInternalIndex();
-          auto reachable_indices_of_reachable_index_ptr = reachability[reachable_index];
+            // check the neighbors of checkVertex if they can reach another reachableGroup
+            auto neighbor_indices = graph.getNeighborIndices(check_vertex);
+            for(uint32_t i = 0; i < edges_per_vertex; i++) {
+              auto neighbor_index = neighbor_indices[i];
 
-          // add the involved_index to its reachable set and replace the reachable set of the involved_index 
-          reachable_indices_of_reachable_index_ptr.get()->insert(involved_index);
-          vertex_reachability->second = reachable_indices_of_reachable_index_ptr;
-        }
-      }
+              // skip self references (loops)
+              if(neighbor_index == check_vertex)
+                continue;
 
-      // 3 reconnect the groups
-      auto new_edges = std::vector<BuilderChange>();
-		  {
-        const auto& feature_space = graph.getFeatureSpace();
-        const auto dist_func = feature_space.get_dist_func();
-        const auto dist_func_param = feature_space.get_dist_func_param();
+              // which other involved vertex can be reached by this neighbor
+              auto other_involved_vertex = path_map.Find(neighbor_index);
 
-        // 3.1 get all unique groups of reachable vertex indices
-        auto unique_reachable_groups = std::vector<std::unordered_set<uint32_t>>();
-        {
-          auto reachable_groups = std::vector<std::shared_ptr<std::unordered_set<uint32_t>>>();
-          reachable_groups.reserve(reachability.size());
-          for (const auto& reachable_vertex : reachability) 
-            reachable_groups.push_back(reachable_vertex.second);
-
-          auto unique_groups = std::vector<std::shared_ptr<std::unordered_set<uint32_t>>>();
-          unique_groups.reserve(reachability.size());
-          std::unique_copy(reachable_groups.begin(), reachable_groups.end(), std::back_inserter(unique_groups));
-
-          for (const auto& unique_group : unique_groups) 
-            unique_reachable_groups.push_back(*unique_group);
-        }
-
-      	// 3.2 find the biggest group and connect each of its vertices to one of the smaller groups
-        //      Stop when all groups are connected or every vertex in the big group got an additional edge.
-        //      In case of the later, repeat the process with the next biggest group.
-        if(unique_reachable_groups.size() > 1) {
-
-          // Define a custom comparison function based on the size of the sets
-          auto compareBySize = [](const std::unordered_set<uint32_t>& a, const std::unordered_set<uint32_t>& b) {
-              return a.size() < b.size();
-          };
-
-          // Sort the groups by size in ascending order
-          std::sort(unique_reachable_groups.begin(), unique_reachable_groups.end(), compareBySize);
-
-          // find the next biggest group
-				  for (size_t g = 0, n = 1; g < unique_reachable_groups.size() && n < unique_reachable_groups.size(); g++) {
-            const auto reachable_group = unique_reachable_groups[g];
-
-            // iterate over all its entries to find a vertex which is still missing an edge
-            next_vertex: for(auto it = reachable_group.cbegin(); it != reachable_group.cend() && n < unique_reachable_groups.size(); ++it) {
-              const auto reachable_index = (*it);
-
-              // has reachable_index still an self-reference?
-              if(graph.hasEdge(reachable_index, reachable_index)) {
-
-                // find another vertex in a smaller group, also missing an edge			
-                // the other vertex and reachable_index can not share an edge yet, otherwise they would be in the same group due to step 2.1
-							  for (; n < unique_reachable_groups.size(); n++) {	
-                  const auto other_group = unique_reachable_groups[n];
-                  for(const auto& other_index : other_group) {
-                    if(graph.hasEdge(other_index, other_index)) {
-
-                      // connect reachable_index and other_index
-                      const auto reachable_feature = graph.getFeatureVector(reachable_index);
-                      const auto other_feature = graph.getFeatureVector(other_index);
-                      const auto new_neighbor_dist = dist_func(reachable_feature, other_feature, dist_func_param);
-                      graph.changeEdge(reachable_index, reachable_index, other_index, new_neighbor_dist);
-                      graph.changeEdge(other_index, other_index, reachable_index, new_neighbor_dist);
-                      new_edges.emplace_back(other_index, reachable_index, new_neighbor_dist, (uint32_t)0, 0.f);
-
-                      // repeat until all small groups are connected
-                      n++;
-                      goto next_vertex;
-                    }
-                  }
-                }
+              // neighbor is not yet in the union find
+              if(other_involved_vertex == path_map.getDefaultValue()) {
+                path_map.Update(neighbor_index, involved_vertex);
+                check_next.emplace(neighbor_index);
+              }
+              // the neighbor can reach another involved vertex
+              else if(other_involved_vertex != involved_vertex) {
+                path_map.Update(other_involved_vertex, involved_vertex);
+                reachable_group->copyFrom(*reachable_groups.at(other_involved_vertex));
               }
             }
           }
+
+          // prepare for the next iteration
+          std::swap(check, check_next);
+          check_next.clear();
+          neighbor_check_depth++;
         }
 
-        // 3.3 now all groups are reachable but still some vertices are missing edge, try to connect them to each other.
-        auto remaining_indices = std::vector<uint32_t>();
-        remaining_indices.reserve(edges_per_vertex);
-        for(const auto& reachable_group : unique_reachable_groups) 
-          std::copy_if(reachable_group.begin(), reachable_group.end(), std::back_inserter(remaining_indices), [this](uint32_t value) { return graph_.hasEdge(value, value); });
-          
-        for (size_t i = 0; i < remaining_indices.size(); i++) {
-          const auto index_A = remaining_indices[i];
-          if(graph.hasEdge(index_A, index_A)) { // still missing an edge?
+        // copy the unique groups
+        for (const auto involved_index : involved_indices) 
+          unique_groups.emplace(reachable_groups.at(path_map.Find(involved_index)));
+      }
 
-            // find a index_B with the smallest distance to index_A
-            const auto feature_A = graph.getFeatureVector(index_A);
-            auto best_index_B = -1;
-            auto best_distance_AB = std::numeric_limits<float>::max();
-            for (size_t j = i+1; j < remaining_indices.size(); j++) {
-              const auto index_B = remaining_indices[j];
-              if(graph.hasEdge(index_B, index_B) && graph.hasEdge(index_A, index_B) == false) {
+      // 2.2 get all isolated vertices
+      auto isolated_groups = std::unordered_set<std::shared_ptr<ReachableGroup>>();	
+      for(const auto group : unique_groups)
+        if(group->size() == 1)
+          isolated_groups.emplace(group);
+
+      // 2.3 find for every isolated vertex the best other involved vertex which is part of a unique group      
+      auto new_edges = std::vector<GraphEdge>();
+      const auto& feature_space = graph.getFeatureSpace();
+      const auto dist_func = feature_space.get_dist_func();
+      const auto dist_func_param = feature_space.get_dist_func_param();
+      for(const auto isolated_group : isolated_groups) {
+
+        // are you still isolated?
+        if(isolated_group->size() > 1)
+          continue;
+
+        const auto isolated_vertex = isolated_group->getVertexIndex();
+        const auto isolated_vertex_feature = graph.getFeatureVector(isolated_vertex);
+
+        // check the reachable groups for good candidates which can connect to the isolated vertex
+        uint32_t best_candidate_index = 0;
+        float best_candidate_distance = std::numeric_limits<float>::max();
+        deglib::builder::ReachableGroup* best_candidate_group = nullptr;
+        for (const auto candidate_group : unique_groups) {
+
+          // skip all groups which do not have enough vertices missing an edge
+          const auto& missing_edges = candidate_group->getMissingEdges();
+          if(missing_edges.size() <= 2)
+            continue;
+
+          // find the candidate with the best distance to the isolated vertex
+          for (const auto candidate : missing_edges) {
+            const auto candidate_feature = graph.getFeatureVector(candidate);
+            const auto distance = dist_func(isolated_vertex_feature, candidate_feature, dist_func_param);
+            if(distance < best_candidate_distance) {
+              best_candidate_distance = distance;
+              best_candidate_index = candidate;
+              best_candidate_group = candidate_group.get();
+            }
+          }
+        }
+
+        // found a good candidate, add the isolated vertex to its reachable group and an edge between them
+        graph.changeEdge(isolated_vertex, isolated_vertex, best_candidate_index, best_candidate_distance);
+        graph.changeEdge(best_candidate_index, best_candidate_index, isolated_vertex, best_candidate_distance);
+        new_edges.emplace_back(isolated_vertex, best_candidate_index, best_candidate_distance, true);
+
+        // merge groups
+        best_candidate_group->hasEdge(best_candidate_index);
+        isolated_group->hasEdge(isolated_vertex);
+        best_candidate_group->copyFrom(*isolated_group);
+
+        unique_groups.erase(isolated_group);
+      }
+
+      // 3 reconnect the groups
+      auto reachable_groups = std::vector(unique_groups.begin(), unique_groups.end());
+
+      // Define a custom comparison function based on the size of the sets
+      auto compareBySize = [](const std::shared_ptr<deglib::builder::ReachableGroup>& a, const std::shared_ptr<deglib::builder::ReachableGroup>& b) {
+          return a->getMissingEdgeSize() < b->getMissingEdgeSize(); // < is ascending, > is descending
+      };
+
+      // Sort the groups by size in ascending order
+      std::sort(reachable_groups.begin(), reachable_groups.end(), compareBySize);
+
+      // 3.1 Find the biggest group and one of its vertices to one vertex of a smaller group. Repeat until only one group is left.
+      while(reachable_groups.size() >= 2) {
+        auto& reachable_group = *reachable_groups[reachable_groups.size()-1];
+        auto& other_group = *reachable_groups[reachable_groups.size()-2];
+        auto& reachable_vertices = reachable_group.getMissingEdges();
+        auto& other_vertices = other_group.getMissingEdges();
+
+        auto best_other_it = reachable_vertices.begin();
+        auto best_reachable_it = reachable_vertices.begin();
+        auto best_other_distance = std::numeric_limits<float>::max();
+
+        // iterate over all its entries to find a vertex which is still missing an edge
+        for(auto reachable_it = reachable_vertices.begin(); reachable_it != reachable_vertices.end(); ++reachable_it) {
+          const auto reachable_index = *reachable_it;
+          const auto reachable_feature = graph.getFeatureVector(reachable_index);
+
+          // find another vertex in a smaller group, also missing an edge			
+          // the other vertex and reachable_index can not share an edge yet, otherwise they would be in the same group due to step 2.1           
+          for(auto other_it = other_vertices.begin(); other_it != other_vertices.end(); ++other_it) {
+            const auto other_index = *other_it;
+            const auto other_feature = graph.getFeatureVector(other_index);
+            const auto candidate_dist = dist_func(reachable_feature, other_feature, dist_func_param);
+
+            if(candidate_dist < best_other_distance) {
+              best_other_it = other_it;
+              best_reachable_it = reachable_it;
+              best_other_distance = candidate_dist;
+            }
+          }
+        }
+
+        // connect reachable_index and other_index
+        const auto reachable_index = *best_reachable_it;
+        const auto other_index = *best_other_it;
+        graph.changeEdge(reachable_index, reachable_index, other_index, best_other_distance);
+        graph.changeEdge(other_index, other_index, reachable_index, best_other_distance);
+        new_edges.emplace_back(other_index, reachable_index, best_other_distance, false);
+
+        // move the element from the list of missing edges
+        reachable_group.hasEdge(reachable_index);
+        other_group.hasEdge(other_index);
+
+        // merge both groups
+	      other_group.copyFrom(reachable_group);
+
+        // remove the current group from the list of group since its merged
+        reachable_groups.pop_back();
+      }
+
+      // 3.4 now all groups are reachable but still some vertices are missing edge, try to connect them to each other.
+      auto remaining_indices = std::vector<uint32_t>(reachable_groups[0]->getMissingEdges().begin(), reachable_groups[0]->getMissingEdges().end());
+      for (size_t i = 0; i < remaining_indices.size(); i++) {
+        const auto index_A = remaining_indices[i];
+        if(graph.hasEdge(index_A, index_A)) { // still missing an edge?
+
+          // find a index_B with the smallest distance to index_A
+          const auto feature_A = graph.getFeatureVector(index_A);
+          auto best_index_B = -1;
+          auto best_distance_AB = std::numeric_limits<float>::max();
+          for (size_t j = i+1; j < remaining_indices.size(); j++) {
+            const auto index_B = remaining_indices[j];
+            if(graph.hasEdge(index_B, index_B) && graph.hasEdge(index_A, index_B) == false) {
+              const auto new_neighbor_dist = dist_func(feature_A, graph.getFeatureVector(index_B), dist_func_param);
+              if(new_neighbor_dist < best_distance_AB) {
+                best_distance_AB = new_neighbor_dist;
+                best_index_B = index_B;
+              }
+            }
+          }
+
+          // connect vertexA and vertexB
+          if(best_index_B >= 0) {
+            graph.changeEdge(index_A, index_A, best_index_B, best_distance_AB);
+            graph.changeEdge(best_index_B, best_index_B, index_A, best_distance_AB);
+            new_edges.emplace_back(best_index_B, index_A, best_distance_AB, false);
+          }
+        }
+      }
+
+      // 3.5 the remaining vertices can not be connected to any of the other involved vertices, because they already have an edge to all of them.
+      for (size_t i = 0; i < remaining_indices.size(); i++) {
+        const auto index_A = remaining_indices[i];
+        if(graph.hasEdge(index_A, index_A)) { // still missing an edge?
+
+          // scan the neighbors of the adjacent vertices of A and find a vertex B with the smallest distance to A
+          const auto feature_A = graph.getFeatureVector(index_A);
+          uint32_t best_index_B = 0;
+          auto best_distance_AB = std::numeric_limits<float>::max();
+          const auto neighbors_A = graph.getNeighborIndices(index_A);
+          for (size_t n = 0; n < edges_per_vertex; n++) {
+            const auto potential_indices = graph.getNeighborIndices(neighbors_A[n]);
+            for (size_t p = 0; p < edges_per_vertex; p++) {
+              const auto index_B = potential_indices[p];
+              if(index_A != index_B && graph.hasEdge(index_A, index_B) == false) {
                 const auto new_neighbor_dist = dist_func(feature_A, graph.getFeatureVector(index_B), dist_func_param);
                 if(new_neighbor_dist < best_distance_AB) {
                   best_distance_AB = new_neighbor_dist;
@@ -523,81 +884,61 @@ class EvenRegularGraphBuilder {
                 }
               }
             }
+          }
 
-            // connect vertexA and vertexB
-            if(best_index_B >= 0) {
+          // Get another vertex missing an edge called C and at this point sharing an edge with A (by definition of 3.2)
+          for (size_t j = i+1; j < remaining_indices.size(); j++) {
+            const auto index_C = remaining_indices[j];
+            if(graph.hasEdge(index_C, index_C)) { // still missing an edge?
+              const auto feature_C = graph.getFeatureVector(index_C);
+
+              // check the neighborhood of B to find a vertex D not yet adjacent to C but with the smallest possible distance to C
+              auto best_index_D = -1;
+              auto best_distance_CD = std::numeric_limits<float>::max();
+              const auto neighbors_B = graph.getNeighborIndices(best_index_B);
+              for (size_t n = 0; n < edges_per_vertex; n++) {
+                const auto index_D = neighbors_B[n];
+                if(index_A != index_D && best_index_B != index_D && graph.hasEdge(index_C, index_D) == false) {
+                  const auto new_neighbor_dist = dist_func(feature_C, graph.getFeatureVector(index_D), dist_func_param);
+                  if(new_neighbor_dist < best_distance_CD) {
+                    best_distance_CD = new_neighbor_dist;
+                    best_index_D = index_D;
+                  }
+                }
+              }
+
+              // replace edge between B and D, with one between A and B as well as C and D
+              graph.changeEdge(best_index_B, best_index_D, index_A, best_distance_AB);
               graph.changeEdge(index_A, index_A, best_index_B, best_distance_AB);
-              graph.changeEdge(best_index_B, best_index_B, index_A, best_distance_AB);
-            }
-          }
-        }
+              graph.changeEdge(best_index_D, best_index_B, index_C, best_distance_CD);
+              graph.changeEdge(index_C, index_C, best_index_D, best_distance_CD);
+              new_edges.emplace_back(index_A, best_index_B, best_distance_AB, false);
+              new_edges.emplace_back(index_C, best_index_D, best_distance_CD, false);
 
-        // 3.4 the remaining vertices can not be connected to any of the other involved vertices, because they already have an edge to all of them.
-        for (size_t i = 0; i < remaining_indices.size(); i++) {
-          const auto index_A = remaining_indices[i];
-          if(graph.hasEdge(index_A, index_A)) { // still missing an edge?
-
-            // scan the neighbors of the adjacent vertices of A and find a vertex B with the smallest distance to A
-            const auto feature_A = graph.getFeatureVector(index_A);
-            uint32_t best_index_B = 0;
-            auto best_distance_AB = std::numeric_limits<float>::max();
-            const auto neighbors_A = graph.getNeighborIndices(index_A);
-            for (size_t n = 0; n < edges_per_vertex; n++) {
-              const auto potential_indices = graph.getNeighborIndices(neighbors_A[n]);
-              for (size_t p = 0; p < edges_per_vertex; p++) {
-                const auto index_B = potential_indices[p];
-                if(index_A != index_B && graph.hasEdge(index_A, index_B) == false) {
-                   const auto new_neighbor_dist = dist_func(feature_A, graph.getFeatureVector(index_B), dist_func_param);
-                  if(new_neighbor_dist < best_distance_AB) {
-                    best_distance_AB = new_neighbor_dist;
-                    best_index_B = index_B;
-                  }
-                }
-              }
-            }
-
-            // Get another vertex missing an edge called C and at this point sharing an edge with A (by definition of 3.2)
-            for (size_t j = i+1; j < remaining_indices.size(); j++) {
-              const auto index_C = remaining_indices[j];
-              if(graph.hasEdge(index_C, index_C)) { // still missing an edge?
-                const auto feature_C = graph.getFeatureVector(index_C);
-
-                // check the neighborhood of B to find a vertex D not yet adjacent to C but with the smallest possible distance to C
-                auto best_index_D = -1;
-                auto best_distance_CD = std::numeric_limits<float>::max();
-                const auto neighbors_B = graph.getNeighborIndices(best_index_B);
-                for (size_t n = 0; n < edges_per_vertex; n++) {
-                  const auto index_D = neighbors_B[n];
-                  if(index_A != index_D && best_index_B != index_D && graph.hasEdge(index_C, index_D) == false) {
-                    const auto new_neighbor_dist = dist_func(feature_C, graph.getFeatureVector(index_D), dist_func_param);
-                    if(new_neighbor_dist < best_distance_CD) {
-                      best_distance_CD = new_neighbor_dist;
-                      best_index_D = index_D;
-                    }
-                  }
-                }
-
-                // replace edge between B and D, with one between A and B as well as C and D
-                graph.changeEdge(best_index_B, best_index_D, index_A, best_distance_AB);
-                graph.changeEdge(index_A, index_A, best_index_B, best_distance_AB);
-                graph.changeEdge(best_index_D, best_index_B, index_C, best_distance_CD);
-                graph.changeEdge(index_C, index_C, best_index_D, best_distance_CD);
-                
-                break;
-              }
+              break;
             }
           }
         }
       }
 
-      // 4 try to improve some of the new edges
-      for(auto edge : new_edges) {
-        if(graph.hasEdge(edge.internal_index, edge.from_neighbor_index)) 
-          improveEdges(edge.internal_index, edge.from_neighbor_index, edge.from_neighbor_weight); 
-      }
+      // improve some of the new edges which are not so good
+      if(improve_edges && this->improve_k_ > 0) {
 
-      // 5 remove the old vertex, which is no longer referenced by another vertex, from the graph
-      graph.removeVertex(del_task.label);
+        // Define a custom comparison function based on the size of the sets
+        auto compareByWeight = [](const GraphEdge& a, const GraphEdge& b) {
+          return a.weight > b.weight; // < is ascending, > is descending
+        };
+
+        // Sort the groups by size in ascending order
+        std::sort(new_edges.begin(), new_edges.end(), compareByWeight);
+
+        // 4 try to improve some of the new edges
+        for (size_t i = 0; i < new_edges.size(); i++) {
+          const auto edge = new_edges[i];
+          if(graph.hasEdge(edge.from_vertex, edge.to_vertex) && edge.rng_conform)
+            improveEdges(edge.from_vertex, edge.to_vertex, edge.weight); 
+        }
+      }
     }
 
     /**
