@@ -113,7 +113,8 @@ def create_graph(
     # create a graph builder to add vertices to the new graph and improve its edges
     print("Start graph builder")
     builder = deglib.builder.EvenRegularGraphBuilder(
-        graph, rnd, k_ext, eps_ext, k_opt, eps_opt, i_opt, swap_tries, additional_swap_tries
+        graph, rnd, extend_k=k_ext, extend_eps=eps_ext, improve_k=k_opt, improve_eps=eps_opt, max_path_length=i_opt,
+        swap_tries=swap_tries, additional_swap_tries=additional_swap_tries
     )
 
     # provide all features to the graph builder at once. In an online system this will be called multiple times
