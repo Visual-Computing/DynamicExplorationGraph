@@ -150,7 +150,9 @@ struct GraphEdge {
   uint32_t from_vertex;
   uint32_t to_vertex;
   float weight;
-  bool rng_conform;
+
+  GraphEdge(uint32_t from_vertex, uint32_t to_vertex, float weight)
+   : from_vertex(from_vertex), to_vertex(to_vertex), weight(weight) {}
 };
 
 /**
@@ -763,7 +765,7 @@ class EvenRegularGraphBuilder {
         // found a good candidate, add the isolated vertex to its reachable group and an edge between them
         graph.changeEdge(isolated_vertex, isolated_vertex, best_candidate_index, best_candidate_distance);
         graph.changeEdge(best_candidate_index, best_candidate_index, isolated_vertex, best_candidate_distance);
-        new_edges.emplace_back(isolated_vertex, best_candidate_index, best_candidate_distance, true);
+        new_edges.emplace_back(isolated_vertex, best_candidate_index, best_candidate_distance);
 
         // merge groups
         best_candidate_group->hasEdge(best_candidate_index);
@@ -820,7 +822,6 @@ class EvenRegularGraphBuilder {
         const auto other_index = *best_other_it;
         graph.changeEdge(reachable_index, reachable_index, other_index, best_other_distance);
         graph.changeEdge(other_index, other_index, reachable_index, best_other_distance);
-        new_edges.emplace_back(other_index, reachable_index, best_other_distance, false);
 
         // move the element from the list of missing edges
         reachable_group.hasEdge(reachable_index);
@@ -858,7 +859,6 @@ class EvenRegularGraphBuilder {
           if(best_index_B >= 0) {
             graph.changeEdge(index_A, index_A, best_index_B, best_distance_AB);
             graph.changeEdge(best_index_B, best_index_B, index_A, best_distance_AB);
-            new_edges.emplace_back(best_index_B, index_A, best_distance_AB, false);
           }
         }
       }
@@ -913,8 +913,6 @@ class EvenRegularGraphBuilder {
               graph.changeEdge(index_A, index_A, best_index_B, best_distance_AB);
               graph.changeEdge(best_index_D, best_index_B, index_C, best_distance_CD);
               graph.changeEdge(index_C, index_C, best_index_D, best_distance_CD);
-              new_edges.emplace_back(index_A, best_index_B, best_distance_AB, false);
-              new_edges.emplace_back(index_C, best_index_D, best_distance_CD, false);
 
               break;
             }
@@ -936,7 +934,7 @@ class EvenRegularGraphBuilder {
         // 4 try to improve some of the new edges
         for (size_t i = 0; i < new_edges.size(); i++) {
           const auto edge = new_edges[i];
-          if(graph.hasEdge(edge.from_vertex, edge.to_vertex) && edge.rng_conform)
+          if(graph.hasEdge(edge.from_vertex, edge.to_vertex))
             improveEdges(edge.from_vertex, edge.to_vertex, edge.weight); 
         }
       }
