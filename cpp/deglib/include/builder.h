@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iostream>
 #include <random>
 #include <chrono>
 #include <thread>
@@ -385,7 +386,7 @@ class EvenRegularGraphBuilder {
 
       // their should always be enough neighbors (search candidates), otherwise the graph would be broken
       if(candidates.size() < edges_per_vertex) {
-        fmt::print(stderr, "the graph search for the new vertex {} did only provided {} candidates \n", external_label, candidates.size());
+        std::cerr << "the graph search for the new vertex " << external_label << "did only provide " << candidates.size() << " candidates" << std::endl;
         std::perror("");
         std::abort();
       }
