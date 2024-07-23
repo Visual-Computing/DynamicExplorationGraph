@@ -3,7 +3,6 @@
 //
 
 // #define PYBIND11_DETAILED_ERROR_MESSAGES
-
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
@@ -33,14 +32,47 @@ bool sse_usable() {
 
 
 template<typename G>
-deglib::search::ResultSet graph_search_wrapper(
+std::tuple<py::array_t<uint32_t>, py::array_t<float>> graph_search_wrapper(
     const G& graph, const std::vector<uint32_t> &entry_vertex_indices,
     const py::array_t<float, py::array::c_style> query, const float eps, const uint32_t k,
     const uint32_t max_distance_computation_count)
 {
   py::buffer_info query_info = query.request();
-  return graph.search(entry_vertex_indices, static_cast<std::byte *>(query_info.ptr), eps, k,
-                      max_distance_computation_count);
+
+  assert((void(std::format("Expected query to have two dimensions, got {}\n", query_info.ndim)), (query_info.ndim == 2)));
+
+  uint32_t n_queries = query_info.shape[0];
+
+  py::array_t<uint32_t> result_indices({n_queries, k});
+  py::buffer_info result_indices_info = result_indices.request();
+
+  py::array_t<float> result_distances({n_queries, k});
+  py::buffer_info result_distances_info = result_distances.request();
+
+  for (int query_index = 0; query_index < query_info.shape[0]; query_index++) {
+    std::byte* query_ptr = static_cast<std::byte *>(query_info.ptr) + query_info.strides[0] * query_index;
+    deglib::search::ResultSet result = graph.search(entry_vertex_indices, query_ptr, eps, k, max_distance_computation_count);
+
+    assert((void(std::format("Expected result should have k={} entries, but got {} entries.\n", k, result.size())), (k == result.size())));
+
+    uint32_t k_index = result.size()-1;  // start by last index to reverse result order
+    while (!result.empty()) {
+      // location in result buffer
+      const uint32_t offset = k_index + query_index * k;
+      uint32_t* indices_target_ptr = static_cast<uint32_t*>(result_indices_info.ptr) + offset;
+      float* distances_target_ptr = static_cast<float*>(result_distances_info.ptr) + offset;
+
+      // get best result
+      deglib::search::ObjectDistance next_result = result.top();
+      *indices_target_ptr = graph.getExternalLabel(next_result.getInternalIndex());
+      *distances_target_ptr = next_result.getDistance();
+
+      result.pop();
+      k_index--;
+    }
+  }
+
+  return {result_indices, result_distances};
 }
 
 PYBIND11_MODULE(deglib_cpp, m) {
@@ -144,7 +176,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
         const py::buffer_info feature_info = feature_vector.request();
         const std::byte* ptr = static_cast<std::byte*>(feature_info.ptr);
         // only allow one dimensional arrays
-        assert((feature_info.ndim == 1) && std::format("Expected feature to have only one dimension, got {}\n", feature_info.ndim));
+        assert((void(std::format("Expected feature to have only one dimension, got {}\n", feature_info.ndim)), (feature_info.ndim == 1)));
         return g.addVertex(external_label, ptr);
     })
     .def("remove_vertex", &deglib::graph::SizeBoundedGraph::removeVertex)
@@ -153,12 +185,12 @@ PYBIND11_MODULE(deglib_cpp, m) {
       const py::buffer_info neighbor_info = neighbor_indices.request();
       const uint32_t* neighbor_ptr = static_cast<uint32_t*>(neighbor_info.ptr);
       // only allow one dimensional arrays
-      assert((neighbor_info.ndim == 1) && std::format("Expected neighbor_indices to have only one dimension, got {}\n", neighbor_info.ndim));
+      assert((void(std::format("Expected neighbor_indices to have only one dimension, got {}\n", neighbor_info.ndim)), (neighbor_info.ndim == 1)));
 
       const py::buffer_info weight_info = neighbor_weights.request();
       const float* weight_ptr = static_cast<float*>(weight_info.ptr);
       // only allow one dimensional arrays
-      assert((weight_info.ndim == 1) && std::format("Expected neighbor_weights to have only one dimension, got {}\n", weight_info.ndim));
+      assert((void(std::format("Expected neighbor_weights to have only one dimension, got {}\n", weight_info.ndim)), (weight_info.ndim == 1)));
 
       g.changeEdges(internal_index, neighbor_ptr, weight_ptr);
     })
@@ -214,7 +246,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
       const py::buffer_info feature_info = feature.request();
       const std::byte* ptr = static_cast<std::byte*>(feature_info.ptr);
       // only allow one dimensional arrays
-      assert((feature_info.ndim == 1) && std::format("Expected feature to have only one dimension, got {}\n", feature_info.ndim));
+      assert((void(std::format("Expected feature to have only one dimension, got {}\n", feature_info.ndim)), (feature_info.ndim == 1)));
       // copy to vector
       std::vector<std::byte> feature_vec(ptr, ptr + feature_info.itemsize * feature_info.shape[0]);
       builder.addEntry(label, std::move(feature_vec));

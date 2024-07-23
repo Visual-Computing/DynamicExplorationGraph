@@ -8,14 +8,20 @@ def main():
 
     data = np.random.random((samples, dims)).astype(np.float32)
 
-    graph = deglib.graph.SizeBoundedGraph.create_empty(data.shape[0], data.shape[1], 32, deglib.Metric.L2)
-    builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+    graph = deglib.graph.SizeBoundedGraph.create_empty(data.shape[0], data.shape[1], 16, deglib.Metric.InnerProduct)
+    builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=32, extend_eps=0.01, improve_k=0)
 
     for i, vec in enumerate(data):
         vec: np.ndarray
         builder.add_entry(i, vec)
 
     builder.build(callback='progress')
+
+    query = np.random.random((5, dims)).astype(np.float32)
+    # query = np.random.random((dims,)).astype(np.float32)
+    results, dists = graph.search(query, eps=0.0, k=3)
+    print(results, results.dtype, results.shape)
+    print(dists, dists.dtype, dists.shape)
 
 
 def dump_data(seed):
@@ -77,7 +83,7 @@ def do_all():
 
 
 if __name__ == '__main__':
-    # main()
-    do_build_with_remove(1, 10)
+    main()
+    # do_build_with_remove(1, 10)
     # do_all()
     # dump_data(1)

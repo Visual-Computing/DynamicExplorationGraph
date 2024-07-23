@@ -108,7 +108,7 @@ class SearchGraph(ABC):
 
     @abstractmethod
     def search(self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
-               entry_vertex_indices: Optional[List[int]] = None) -> ResultSet:
+               entry_vertex_indices: Optional[List[int]] = None) -> Tuple[np.ndarray, np.ndarray]:
         """
         Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
 
@@ -123,6 +123,7 @@ class SearchGraph(ABC):
         :param k: The number of results that will be returned
         :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
         :param entry_vertex_indices: Start point for exploratory search. If None, a reasonable default is used.
+        :returns: TODO
         """
         raise NotImplementedError()
 
@@ -187,7 +188,7 @@ class ReadOnlyGraph(SearchGraph):
         return self.graph_cpp.get_internal_index(external_label)
 
     def search(self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
-               entry_vertex_indices: Optional[List[int]] = None) -> ResultSet:
+               entry_vertex_indices: Optional[List[int]] = None) -> Tuple[np.ndarray, np.ndarray]:
         """
         Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
 
@@ -202,11 +203,19 @@ class ReadOnlyGraph(SearchGraph):
         :param k: The number of results that will be returned
         :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
         :param entry_vertex_indices: Start point for exploratory search. If None, a reasonable default is used.
+        :returns: TODO
         """
+        # handle query shapes
+        if len(query.shape) == 1:
+            query = query.reshape(1, -1)
+        if len(query.shape) != 2:
+            raise InvalidShapeException('invalid query shape: {}'.format(query.shape))
         query = assure_array(query, 'query', np.float32)
+
         if entry_vertex_indices is None:
             entry_vertex_indices = self.get_entry_vertex_indices()
-        return ResultSet(self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_distance_computation_count))
+
+        return self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_distance_computation_count)
 
     def has_path(self, entry_vertex_indices: List[int], to_vertex: int, eps: float, k: int) -> List[ObjectDistance]:
         """
@@ -595,7 +604,7 @@ class SizeBoundedGraph(MutableGraph):
     def search(
             self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
             entry_vertex_indices: Optional[List[int]] = None
-    ) -> ResultSet:
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
 
@@ -610,11 +619,19 @@ class SizeBoundedGraph(MutableGraph):
         :param k: The number of results that will be returned
         :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
         :param entry_vertex_indices: Start point for exploratory search. If None, a reasonable default is used.
+        :returns: TODO
         """
+        # handle query shapes
+        if len(query.shape) == 1:
+            query = query.reshape(1, -1)
+        if len(query.shape) != 2:
+            raise InvalidShapeException('invalid query shape: {}'.format(query.shape))
+
         query = assure_array(query, 'query', np.float32)
         if entry_vertex_indices is None:
             entry_vertex_indices = self.get_entry_vertex_indices()
-        return ResultSet(self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_distance_computation_count))
+
+        return self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_distance_computation_count)
 
     def explore(self, entry_vertex_index: int, k: int, max_distance_computation_count: int) -> ResultSet:
         """
