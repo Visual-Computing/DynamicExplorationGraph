@@ -226,6 +226,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
       return builder.build(callback, infinite);
     })
     .def("build_silent", [] (deglib::builder::EvenRegularGraphBuilder& builder, const bool infinite) -> deglib::graph::MutableGraph& {
+      py::gil_scoped_release release;
       return builder.build([] (deglib::builder::BuilderStatus&) {}, infinite);
     })
     .def("stop", &deglib::builder::EvenRegularGraphBuilder::stop);
