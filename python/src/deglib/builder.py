@@ -13,9 +13,9 @@ from .utils import assure_array
 
 
 class LID(enum.IntEnum):
-    Unknown = 0
-    High = 1
-    Low = 2
+    Unknown = deglib_cpp.LID.Unknown
+    High = deglib_cpp.LID.High
+    Low = deglib_cpp.LID.Low
 
     def to_cpp(self) -> deglib_cpp.LID:
         if self == LID.Unknown:

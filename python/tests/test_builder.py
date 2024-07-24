@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 import deglib
 import deglib_cpp
@@ -33,11 +34,12 @@ class TestGraphs:
             vec: np.ndarray
             builder.add_entry(i, vec)
 
-    def test_build_simple(self):
+    @pytest.mark.parametrize('lid', list(deglib.builder.LID))
+    def test_build_simple(self, lid):
         graph = deglib.graph.SizeBoundedGraph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.L2
         )
-        builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30, lid=lid)
         for i, vec in enumerate(self.data):
             vec: np.ndarray
             builder.add_entry(i, vec)
