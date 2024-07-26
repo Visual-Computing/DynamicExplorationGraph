@@ -1,5 +1,8 @@
+from concurrent.futures import ThreadPoolExecutor, wait
+
 import numpy as np
 import deglib
+from deglib.builder import EvenRegularGraphBuilder
 
 
 def main():
@@ -82,8 +85,48 @@ def do_all():
                 do_build_with_remove(i, epv)
 
 
+def build_graph(jobname, data, dim):
+    print('starting', jobname)
+    graph = deglib.graph.SizeBoundedGraph.create_empty(1_000_000, dim, edges_per_vertex=8)
+    print(graph)
+
+    builder = EvenRegularGraphBuilder(graph, improve_k=0, extend_eps=0, extend_k=8)
+    print(builder)
+
+    builder.add_entry(range(data.shape[0]), data)
+
+    builder.build()
+
+
+class FinishPrinter:
+    def __init__(self, jobname: str):
+        self.jobname = jobname
+
+    def __call__(self, fut):
+        print('finish', self.jobname)
+
+
+def test_free_memory():
+    dim = 512
+    data = np.random.random((100_000, dim)).astype(np.float32)
+
+    jobs = 2
+
+    with ThreadPoolExecutor(max_workers=jobs) as executor:
+        futures = []
+        for i in range(10):
+            jobname = 'job {}'.format(i)
+            print('start: {}'.format(jobname))
+            future = executor.submit(build_graph, jobname, data, dim)
+
+            future.add_done_callback(FinishPrinter(jobname))
+            futures.append(future)
+        wait(futures)
+
+
 if __name__ == '__main__':
-    main()
+    # main()
     # do_build_with_remove(1, 10)
     # do_all()
     # dump_data(1)
+    test_free_memory()
