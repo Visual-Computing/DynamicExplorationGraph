@@ -285,7 +285,7 @@ namespace deglib {
         public:
 
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return -ip_16ext(pVect1v, pVect2v, qty_ptr);
+                return 1.f - ip_16ext(pVect1v, pVect2v, qty_ptr);
             }
 
             // AVX instructions don't require their memory operands to be aligned, but SSE does
