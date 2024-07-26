@@ -1,7 +1,7 @@
 import enum
 import sys
 import time
-from typing import Optional, Callable
+from typing import Optional, Callable, List, Iterable
 
 import numpy as np
 import deglib_cpp
@@ -9,7 +9,7 @@ import deglib_cpp
 from .distances import Metric
 from .std import Mt19937
 from .graph import MutableGraph, SizeBoundedGraph
-from .utils import assure_array
+from .utils import assure_array, InvalidShapeException
 
 
 class LID(enum.IntEnum):
@@ -60,14 +60,34 @@ class EvenRegularGraphBuilder:
         self.rng = rng
         self.lid = lid
 
-    def add_entry(self, external_label: int, feature: np.ndarray):
+    def add_entry(self, external_label: int | Iterable[int] | np.ndarray, feature: np.ndarray):
         """
-        Add entry that should be added to the graph.
+        Add entry that should be added to the graph. Can also add a batch of entries with shape [N, D], where N is the
+        number of entries, D is the dimensionality. In this case external_label should be a list of ints (or numpy
+        array) with length N.
 
-        :param external_label: The label, that names the added vertex
-        :param feature: The feature that should be added to the graph.
+        :param external_label: The label or the batch of labels, that names the added vertex. If this is a numpy array,
+        it should have dtype uint32.
+        :param feature: The feature or the batch of features, that should be added to the graph.
         """
+        # standardize feature shape
+        if len(feature.shape) == 1:
+            feature = feature.reshape(1, -1)
+        if len(feature.shape) != 2:
+            raise InvalidShapeException('invalid feature shape: {}'.format(feature.shape))
         feature = assure_array(feature, 'feature', np.float32)
+
+        # standardize external label
+        if isinstance(external_label, int):
+            external_label = np.array([external_label], dtype=np.uint32)
+        elif isinstance(external_label, Iterable) and not isinstance(external_label, np.ndarray):
+            external_label = np.array(external_label, dtype=np.uint32)
+        assure_array(external_label, 'external_label', np.uint32)
+
+        assert feature.shape[0] == external_label.shape[0], 'Got {} features, but {} labels'.format(
+            feature.shape[0], external_label.shape[0]
+        )
+
         self.builder_cpp.add_entry(external_label, feature)
 
     def remove_entry(self, external_label: int):

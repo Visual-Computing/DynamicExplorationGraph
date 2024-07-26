@@ -46,6 +46,16 @@ class TestGraphs:
 
         builder.build()
 
+    @pytest.mark.parametrize('lid', list(deglib.builder.LID))
+    def test_build_batch(self, lid):
+        graph = deglib.graph.SizeBoundedGraph.create_empty(
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.L2
+        )
+        builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30, lid=lid)
+        builder.add_entry(range(self.data.shape[0]), self.data)
+
+        builder.build()
+
     def test_build_with_remove(self):
         graph = deglib.graph.SizeBoundedGraph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.L2

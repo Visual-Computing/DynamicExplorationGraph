@@ -241,15 +241,27 @@ PYBIND11_MODULE(deglib_cpp, m) {
 
   py::class_<deglib::builder::EvenRegularGraphBuilder>(m, "EvenRegularGraphBuilder")
     .def(py::init<deglib::graph::MutableGraph&, std::mt19937&, const deglib::builder::LID, const uint8_t, const float, const uint8_t, const float, const uint8_t, const uint32_t, const uint32_t>())
-    .def("add_entry", [] (deglib::builder::EvenRegularGraphBuilder& builder, const uint32_t label, py::array_t<float, py::array::c_style> feature) {
-      // request buffer info
+    .def("add_entry", [] (deglib::builder::EvenRegularGraphBuilder& builder, const py::array_t<uint32_t, py::array::c_style>& label, const py::array_t<float, py::array::c_style>& feature) {
+      py::gil_scoped_release release; // release the gil
+
+      // label buffer
+      const auto label_access = label.unchecked<1>();
+      // only allow one dimensional array
+      assert((void(std::format("Expected label to have one dimension, got {}\n", label_info.ndim)), (label_info.ndim == 1)));
+
+      // feature buffer
       const py::buffer_info feature_info = feature.request();
-      const std::byte* ptr = static_cast<std::byte*>(feature_info.ptr);
-      // only allow one dimensional arrays
-      assert((void(std::format("Expected feature to have only one dimension, got {}\n", feature_info.ndim)), (feature_info.ndim == 1)));
-      // copy to vector
-      std::vector<std::byte> feature_vec(ptr, ptr + feature_info.itemsize * feature_info.shape[0]);
-      builder.addEntry(label, std::move(feature_vec));
+      const std::byte* feature_ptr = static_cast<std::byte*>(feature_info.ptr);
+      // only allow two dimensional array
+      assert((void(std::format("Expected feature to have two dimensions, got {}\n", feature_info.ndim)), (feature_info.ndim == 2)));
+
+      // add entries
+      for (uint32_t i = 0; i < feature_info.shape[0]; i++) {
+        // copy to vector
+        std::vector<std::byte> feature_vec(feature_ptr, feature_ptr + feature_info.itemsize * feature_info.shape[1]);
+        const uint32_t current_label = label_access(i);
+        builder.addEntry(current_label, std::move(feature_vec));
+      }
     })
     .def("remove_entry", &deglib::builder::EvenRegularGraphBuilder::removeEntry)
     .def("get_num_new_entries", &deglib::builder::EvenRegularGraphBuilder::getNumNewEntries)

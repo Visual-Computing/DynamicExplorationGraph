@@ -9,7 +9,7 @@ import pathlib
 
 from .distances import FloatSpace, Metric, SpaceInterface
 from .search import ResultSet, ObjectDistance
-from .utils import assure_array
+from .utils import assure_array, InvalidShapeException
 
 
 # TODO: safety checks
