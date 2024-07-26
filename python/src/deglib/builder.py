@@ -139,10 +139,10 @@ class EvenRegularGraphBuilder:
 
 
 def build_from_data(
-        data: np.ndarray, edges_per_vertex: int = 32, capacity: int = -1, metric: Metric = Metric.L2,
-        rng: Mt19937 | None = None, lid: LID = LID.Unknown, extend_k: Optional[int] = None, extend_eps: float = 0.2,
-        improve_k: Optional[int] = None, improve_eps: float = 0.001,
-        max_path_length: int = 10, swap_tries: int = 3, additional_swap_tries: int = 3,
+        data: np.ndarray, labels: Iterable[int] | None = None, edges_per_vertex: int = 32, capacity: int = -1,
+        metric: Metric = Metric.L2, rng: Mt19937 | None = None, lid: LID = LID.Unknown, extend_k: Optional[int] = None,
+        extend_eps: float = 0.2, improve_k: Optional[int] = None, improve_eps: float = 0.001, max_path_length: int = 10,
+        swap_tries: int = 3, additional_swap_tries: int = 3,
         callback: Callable[[deglib_cpp.BuilderStatus], None] | str | None = None
 ) -> SizeBoundedGraph:
     """
@@ -152,6 +152,8 @@ def build_from_data(
 
     :param data: numpy array with shape [N, D], where N is the number of samples and D is the number of dimensions
                  per feature.
+    :param labels: The labels for each data entry. Should have shape [N]. If this is a numpy array it should have dtype
+                   uint32. If None labels starting from 0 will be created.
     :param capacity: The maximal number of vertices of this graph. Defaults to the number of samples in data.
     :param edges_per_vertex: The number of edges per vertex for the graph. Defaults to 32.
     :param metric: The metric to measure distances between features. Defaults to L2-Metric.
@@ -178,9 +180,10 @@ def build_from_data(
         additional_swap_tries=additional_swap_tries
     )
 
-    for i, vec in enumerate(data):
-        vec: np.ndarray
-        builder.add_entry(i, vec)
+    if labels is None:
+        labels = np.arange(data.shape[0], dtype=np.uint32)
+
+    builder.add_entry(labels, data)
 
     builder.build(callback=callback)
 

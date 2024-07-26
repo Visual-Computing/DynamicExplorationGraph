@@ -242,8 +242,6 @@ PYBIND11_MODULE(deglib_cpp, m) {
   py::class_<deglib::builder::EvenRegularGraphBuilder>(m, "EvenRegularGraphBuilder")
     .def(py::init<deglib::graph::MutableGraph&, std::mt19937&, const deglib::builder::LID, const uint8_t, const float, const uint8_t, const float, const uint8_t, const uint32_t, const uint32_t>())
     .def("add_entry", [] (deglib::builder::EvenRegularGraphBuilder& builder, const py::array_t<uint32_t, py::array::c_style>& label, const py::array_t<float, py::array::c_style>& feature) {
-      py::gil_scoped_release release; // release the gil
-
       // label buffer
       const auto label_access = label.unchecked<1>();
       // only allow one dimensional array
@@ -255,10 +253,16 @@ PYBIND11_MODULE(deglib_cpp, m) {
       // only allow two dimensional array
       assert((void(std::format("Expected feature to have two dimensions, got {}\n", feature_info.ndim)), (feature_info.ndim == 2)));
 
+      py::gil_scoped_release release; // release the gil
+
       // add entries
+      const size_t feature_len = feature_info.itemsize * feature_info.shape[1];
       for (uint32_t i = 0; i < feature_info.shape[0]; i++) {
         // copy to vector
-        std::vector<std::byte> feature_vec(feature_ptr, feature_ptr + feature_info.itemsize * feature_info.shape[1]);
+        std::vector<std::byte> feature_vec(
+          feature_ptr + (feature_len*i),
+          feature_ptr + (feature_len*(i+1))
+        );
         const uint32_t current_label = label_access(i);
         builder.addEntry(current_label, std::move(feature_vec));
       }
