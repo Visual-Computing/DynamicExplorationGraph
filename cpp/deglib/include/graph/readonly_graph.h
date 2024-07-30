@@ -305,6 +305,29 @@ public:
   }
 
   /**
+   *  Copy from input graph
+   */
+  ReadOnlyGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::FloatSpace feature_space, deglib::search::SearchGraph& input_graph)
+      : ReadOnlyGraph(max_vertex_count, edges_per_vertex, feature_space) {
+
+    for (uint32_t i = 0; i < max_vertex_count; i++) {
+        auto vertex = reinterpret_cast<char*>(this->vertex_by_index(i));
+
+        const auto feature = input_graph.getFeatureVector(i);
+        std::memcpy(vertex, feature, feature_space.get_data_size());
+        vertex += feature_space.get_data_size();
+
+        const auto neighbor_indices = input_graph.getNeighborIndices(i);
+        std::memcpy(vertex, neighbor_indices, sizeof(uint32_t) * uint32_t(edges_per_vertex));
+        vertex += sizeof(uint32_t) * uint32_t(edges_per_vertex);
+
+        const auto label = input_graph.getExternalLabel(i);
+        std::memcpy(vertex, &label, sizeof(uint32_t));
+        label_to_index_.emplace(label, i);
+    }
+  }
+
+  /**
    * Current maximal capacity of vertices
    */ 
   const auto capacity() const {
@@ -641,7 +664,6 @@ public:
 
     // search radius
     auto radius = std::numeric_limits<float>::max();
-    auto exploration_radius = radius;
 
     // iterate as long as good elements are in the next_vertices queue and max_calcs is not yet reached
     auto good_neighbors = std::array<uint32_t, 256>();    // this limits the neighbor count to 256 using Variable Length Array wrapped in a macro
@@ -738,6 +760,20 @@ auto load_readonly_graph(const char* path_graph)
   ifstream.close();
 
   return graph;
+}
+
+/**
+ * Convert the given graph to a readonly graph
+ */
+auto convert_to_readonly_graph(deglib::search::SearchGraph& input_graph)
+{
+  auto size = input_graph.size();
+  auto edges_per_vertex = input_graph.getEdgesPerVertex();
+  auto dim = input_graph.getFeatureSpace().dim();
+  auto metric_type = input_graph.getFeatureSpace().metric();
+  const auto feature_space = deglib::FloatSpace(dim, static_cast<deglib::Metric>(metric_type));
+
+  return deglib::graph::ReadOnlyGraph(size, edges_per_vertex, feature_space, input_graph);
 }
 
 }  // namespace deglib::graph
