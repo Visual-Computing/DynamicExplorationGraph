@@ -75,6 +75,10 @@ std::tuple<py::array_t<uint32_t>, py::array_t<float>> graph_search_wrapper(
   return {result_indices, result_distances};
 }
 
+deglib::graph::ReadOnlyGraph read_only_graph_from_search_graph(deglib::search::SearchGraph& search_graph, const uint32_t max_vertex_count, const deglib::FloatSpace& feature_space, const uint8_t edges_per_vertex) {
+  return {max_vertex_count, edges_per_vertex, feature_space, search_graph};
+}
+
 PYBIND11_MODULE(deglib_cpp, m) {
   m.doc() = "Python bindings for Dynamic Exploration Graph";
 
@@ -115,7 +119,6 @@ PYBIND11_MODULE(deglib_cpp, m) {
   // graphs
   py::class_<deglib::search::SearchGraph>(m, "SearchGraph");
 
-
   // read only graph
   py::class_<deglib::graph::ReadOnlyGraph, deglib::search::SearchGraph>(m, "ReadOnlyGraph")
       .def(py::init<const uint32_t, const uint8_t, const deglib::FloatSpace>())
@@ -146,6 +149,8 @@ PYBIND11_MODULE(deglib_cpp, m) {
       .def("has_vertex", &deglib::graph::ReadOnlyGraph::hasVertex)
       .def("has_edge", &deglib::graph::ReadOnlyGraph::hasEdge)
       .def("get_external_label", &deglib::graph::ReadOnlyGraph::getExternalLabel);
+
+  m.def("read_only_graph_from_graph", &read_only_graph_from_search_graph);
 
   m.def("load_readonly_graph", &deglib::graph::load_readonly_graph);
   

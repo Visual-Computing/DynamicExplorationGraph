@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Self
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -148,6 +148,25 @@ class ReadOnlyGraph(SearchGraph):
         if not isinstance(graph_cpp, deglib_cpp.ReadOnlyGraph):
             raise TypeError("expected ReadOnlyGraph but got {}".format(type(graph_cpp)))
         self.graph_cpp = graph_cpp
+
+    @staticmethod
+    def from_graph(input_graph: SearchGraph, max_vertex_count: int = -1, feature_space: FloatSpace | None = None, edges_per_vertex: int = -1) -> Self:
+        """
+        Create a read only graph from the given graph by only keeping information that is useful for searching.
+
+        :param input_graph: The graph to build from
+        :param max_vertex_count: If given the new size of the returned graph, otherwise will be taken from input graph
+        :param feature_space: If given the feature space for the graph, otherwise the same as the feature space of the
+                              input graph
+        :param edges_per_vertex: The number of edges for the new graph. Should not be smaller than the edges of the input graph
+        """
+        if max_vertex_count == -1:
+            max_vertex_count = input_graph.size()
+        if feature_space is None:
+            feature_space = input_graph.get_feature_space()
+        if edges_per_vertex == -1:
+            edges_per_vertex = input_graph.get_edges_per_vertex()
+        return ReadOnlyGraph(deglib_cpp.read_only_graph_from_graph(input_graph.to_cpp(), max_vertex_count, feature_space.to_cpp(), edges_per_vertex))
 
     def size(self) -> int:
         """

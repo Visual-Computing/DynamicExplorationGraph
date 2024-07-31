@@ -40,6 +40,13 @@ def get_size_bounded_graph(test_graphs):
     return test_graphs.size_bounded_graph
 
 
+def get_read_only_graph_converted(test_graphs):
+    return deglib.graph.ReadOnlyGraph.from_graph(test_graphs.size_bounded_graph)
+
+
+all_graph_getters = [get_read_only_graph, get_size_bounded_graph, get_read_only_graph_converted]
+
+
 class TestGraphs:
     def setup_method(self):
         self.samples = 100
@@ -55,7 +62,7 @@ class TestGraphs:
         self.size_bounded_graph.save_graph(self.graph_path)
         self.read_only_graph = deglib.graph.load_readonly_graph(self.graph_path)
 
-    @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
+    @pytest.mark.parametrize('graph_getter', all_graph_getters)
     def test_get_feature_vector(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
         graph = graph_getter(self)
         for i in range(graph.size()):
@@ -66,7 +73,7 @@ class TestGraphs:
         with pytest.raises(IndexError):
             _fv = self.read_only_graph.get_feature_vector(self.read_only_graph.size())
 
-    @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
+    @pytest.mark.parametrize('graph_getter', all_graph_getters)
     def test_search(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
         graph = graph_getter(self)
         k = 10
@@ -90,7 +97,7 @@ class TestGraphs:
             )
             last_distance = distance
 
-    @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
+    @pytest.mark.parametrize('graph_getter', all_graph_getters)
     def test_has_path(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
         graph = graph_getter(self)
         entry_vertex_indices = graph.get_entry_vertex_indices()
@@ -98,7 +105,7 @@ class TestGraphs:
         for p in path:
             assert isinstance(p, deglib.search.ObjectDistance)
 
-    @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
+    @pytest.mark.parametrize('graph_getter', all_graph_getters)
     def test_explore(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
         graph: deglib.graph.SearchGraph = graph_getter(self)
         k = 10
@@ -107,12 +114,12 @@ class TestGraphs:
         assert len(result) == k
         assert all(isinstance(od, deglib.search.ObjectDistance) for od in result)
 
-    @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
+    @pytest.mark.parametrize('graph_getter', all_graph_getters)
     def test_get_edges_per_vertex(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
         graph = graph_getter(self)
         assert graph.get_edges_per_vertex() == self.edges_per_vertex
 
-    @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
+    @pytest.mark.parametrize('graph_getter', all_graph_getters)
     def test_get_neighbor_indices(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
         graph = graph_getter(self)
         for i in range(graph.size()):
@@ -121,13 +128,13 @@ class TestGraphs:
             assert len(neighbor_indices) == self.edges_per_vertex
             assert neighbor_indices.dtype == np.uint32
 
-    @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
+    @pytest.mark.parametrize('graph_getter', all_graph_getters)
     def test_has_vertex(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
         graph = graph_getter(self)
         assert graph.has_vertex(0)
         assert not graph.has_vertex(graph.size())
 
-    @pytest.mark.parametrize('graph_getter', [get_read_only_graph, get_size_bounded_graph])
+    @pytest.mark.parametrize('graph_getter', all_graph_getters)
     def test_has_edge(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
         graph = graph_getter(self)
         counter = 0
@@ -168,3 +175,7 @@ class TestGraphs:
         del graph
 
         print(np.sum(fv))  # try to access data, after graph is deleted
+
+    def test_convert_graph(self):
+        rd_graph = deglib.graph.ReadOnlyGraph.from_graph(self.size_bounded_graph)
+        assert isinstance(rd_graph, deglib.graph.ReadOnlyGraph)
