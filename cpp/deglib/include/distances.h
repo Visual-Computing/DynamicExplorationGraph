@@ -247,7 +247,7 @@ namespace deglib {
         class InnerProductFloat {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return -ip_naive(pVect1v, pVect2v, qty_ptr);
+                return 1.f - ip_naive(pVect1v, pVect2v, qty_ptr);
             }
 
             inline static float ip_naive(const void *pVect1v, const void *pVect2v, const void *qty_ptr) 
@@ -348,7 +348,7 @@ namespace deglib {
         class InnerProductFloat8Ext {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return -ip_8ext(pVect1v, pVect2v, qty_ptr);
+                return 1.f - ip_8ext(pVect1v, pVect2v, qty_ptr);
             }
 
             inline static float ip_8ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
@@ -390,7 +390,7 @@ namespace deglib {
         class InnerProductFloat4Ext {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return -ip_4ext(pVect1v, pVect2v, qty_ptr);
+                return 1.f - ip_4ext(pVect1v, pVect2v, qty_ptr);
             }
 
             inline static float ip_4ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
@@ -428,7 +428,7 @@ namespace deglib {
 
                 size_t qty_left = qty - qty16;
                 float res_tail = deglib::distances::InnerProductFloat::ip_naive(pVect1, pVect2, &qty_left);
-                return -(res + res_tail);
+                return 1.f - (res + res_tail);
             }
         };
 
@@ -444,7 +444,7 @@ namespace deglib {
 
                 size_t qty_left = qty - qty4;
                 float res_tail = deglib::distances::InnerProductFloat::ip_naive(pVect1, pVect2, &qty_left);
-                return -(res + res_tail);
+                return 1.f - (res + res_tail);
             }
         };
 

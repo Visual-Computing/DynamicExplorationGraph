@@ -519,22 +519,24 @@ public:
 
     auto neighbor_indices = reinterpret_cast<uint32_t*>(vertex_memory + neighbor_indices_offset_);    // list of neighbor indizizes
     auto neighbor_indices_end = neighbor_indices + this->edges_per_vertex_;                           // end of the list
-    auto from_ptr = std::lower_bound(neighbor_indices, neighbor_indices_end, from_neighbor_index);  // possible position of the from_neighbor_index in the neighbor list
+    auto from_ptr = std::lower_bound(neighbor_indices, neighbor_indices_end, from_neighbor_index);    // possible position of the from_neighbor_index in the neighbor list
 
     // from_neighbor_index not found in the neighbor list
-    if(*from_ptr != from_neighbor_index)
+    if(*from_ptr != from_neighbor_index) {
+      std::cerr << "changeEdge: vertex " << internal_index << " does not have an edge to " << from_neighbor_index << " and therefore can not swap it with " << to_neighbor_index << " and with distance " << to_neighbor_weight << std::endl;
       return false;
+    }
 
-    auto neighbor_weights = reinterpret_cast<float*>(vertex_memory + neighbor_weights_offset_);         // list of neighbor weights
-    auto to_ptr = std::lower_bound(neighbor_indices, neighbor_indices_end, to_neighbor_index);      // neighbor in the list which has a lower index number than to_neighbor_index
+    auto to_ptr = std::lower_bound(neighbor_indices, neighbor_indices_end, to_neighbor_index);       // neighbor in the list which has a lower index number than to_neighbor_index
     auto from_list_idx = uint32_t(from_ptr - neighbor_indices);                                      // index of the from_neighbor_index in the neighbor list
     auto to_list_idx = uint32_t(to_ptr - neighbor_indices);                                          // index where to place the to_neighbor_index 
 
     // Make same space before inserting the new values
+    auto neighbor_weights = reinterpret_cast<float*>(vertex_memory + neighbor_weights_offset_);         // list of neighbor weights
     if(from_list_idx < to_list_idx) {
+      to_list_idx--;
       std::memmove(neighbor_indices + from_list_idx, neighbor_indices + from_list_idx + 1, (to_list_idx - from_list_idx) * sizeof(uint32_t)); 
       std::memmove(neighbor_weights + from_list_idx, neighbor_weights + from_list_idx + 1, (to_list_idx - from_list_idx) * sizeof(float)); 
-      to_list_idx--;
     } else if(to_list_idx < from_list_idx) {
       std::memmove(neighbor_indices + to_list_idx + 1, neighbor_indices + to_list_idx, (from_list_idx - to_list_idx) * sizeof(uint32_t));
       std::memmove(neighbor_weights + to_list_idx + 1, neighbor_weights + to_list_idx, (from_list_idx - to_list_idx) * sizeof(float));
@@ -568,7 +570,7 @@ public:
     const auto dist_func_param = this->feature_space_.get_dist_func_param();
 
     // set of checked vertex ids
-    auto checked_ids = std::vector<bool>(this->size());
+    auto checked_ids = std::vector<bool>(this->capacity());
 
     // items to traverse next
     auto next_vertices = deglib::search::UncheckedSet();
@@ -689,9 +691,10 @@ public:
   {
     const auto dist_func_param = this->feature_space_.get_dist_func_param();
     uint32_t distance_computation_count = 0;
+    // auto dist_sum = 0.f;
 
     // set of checked vertex ids
-    auto checked_ids = std::vector<bool>(this->size());
+    auto checked_ids = std::vector<bool>(this->capacity());
 
     // items to traverse next
     auto next_vertices = deglib::search::UncheckedSet();
@@ -805,7 +808,7 @@ public:
     const auto query = this->feature_by_index(entry_vertex_index);
 
     // set of checked vertex ids
-    auto checked_ids = std::vector<bool>(this->size());
+    auto checked_ids = std::vector<bool>(this->capacity());
 
     // items to traverse next
     auto next_vertices = deglib::search::UncheckedSet();
@@ -835,10 +838,10 @@ public:
 
     // search radius
     auto radius = std::numeric_limits<float>::max();
-    auto exploration_radius = radius;
 
     // experimental: eps replacement parameter
     const auto eps = std::log10(float(max_distance_computation_count)/k);
+    auto exploration_radius = radius * ((radius < 0) ? (1 - eps) : (1 + eps));
 
     // iterate as long as good elements are in the next_vertices queue and max_calcs is not yet reached
     auto good_neighbors = std::array<uint32_t, 256>();    // this limits the neighbor count to 256 using Variable Length Array wrapped in a macro
