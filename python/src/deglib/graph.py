@@ -1,4 +1,5 @@
 import os
+import multiprocessing
 from typing import List, Optional, Tuple, Self
 from abc import ABC, abstractmethod
 
@@ -108,7 +109,7 @@ class SearchGraph(ABC):
 
     @abstractmethod
     def search(self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
-               entry_vertex_indices: Optional[List[int]] = None) -> Tuple[np.ndarray, np.ndarray]:
+               entry_vertex_indices: Optional[List[int]] = None, threads: int = 1) -> Tuple[np.ndarray, np.ndarray]:
         """
         Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
 
@@ -123,6 +124,9 @@ class SearchGraph(ABC):
         :param k: The number of results that will be returned
         :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
         :param entry_vertex_indices: Start point for exploratory search. If None, a reasonable default is used.
+        :param threads: The number of threads to use for parallel processing. It should not excel the number of queries.
+                        If set to 0, the minimum of the number of cores of this machine and the number of queries is
+                        used.
         :returns: TODO
         """
         raise NotImplementedError()
@@ -149,8 +153,11 @@ class ReadOnlyGraph(SearchGraph):
             raise TypeError("expected ReadOnlyGraph but got {}".format(type(graph_cpp)))
         self.graph_cpp = graph_cpp
 
-    @staticmethod
-    def from_graph(input_graph: SearchGraph, max_vertex_count: int = -1, feature_space: FloatSpace | None = None, edges_per_vertex: int = -1) -> Self:
+    @classmethod
+    def from_graph(
+            cls, input_graph: SearchGraph, max_vertex_count: int = -1, feature_space: FloatSpace | None = None,
+            edges_per_vertex: int = -1
+    ) -> Self:
         """
         Create a read only graph from the given graph by only keeping information that is useful for searching.
 
@@ -158,7 +165,8 @@ class ReadOnlyGraph(SearchGraph):
         :param max_vertex_count: If given the new size of the returned graph, otherwise will be taken from input graph
         :param feature_space: If given the feature space for the graph, otherwise the same as the feature space of the
                               input graph
-        :param edges_per_vertex: The number of edges for the new graph. Should not be smaller than the edges of the input graph
+        :param edges_per_vertex: The number of edges for the new graph. Should not be smaller than the edges of the
+                                 input graph
         """
         if max_vertex_count == -1:
             max_vertex_count = input_graph.size()
@@ -166,7 +174,9 @@ class ReadOnlyGraph(SearchGraph):
             feature_space = input_graph.get_feature_space()
         if edges_per_vertex == -1:
             edges_per_vertex = input_graph.get_edges_per_vertex()
-        return ReadOnlyGraph(deglib_cpp.read_only_graph_from_graph(input_graph.to_cpp(), max_vertex_count, feature_space.to_cpp(), edges_per_vertex))
+        return ReadOnlyGraph(deglib_cpp.read_only_graph_from_graph(
+            input_graph.to_cpp(), max_vertex_count, feature_space.to_cpp(), edges_per_vertex
+        ))
 
     def size(self) -> int:
         """
@@ -207,7 +217,7 @@ class ReadOnlyGraph(SearchGraph):
         return self.graph_cpp.get_internal_index(external_label)
 
     def search(self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
-               entry_vertex_indices: Optional[List[int]] = None) -> Tuple[np.ndarray, np.ndarray]:
+               entry_vertex_indices: Optional[List[int]] = None, threads: int = 1) -> Tuple[np.ndarray, np.ndarray]:
         """
         Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
 
@@ -222,6 +232,9 @@ class ReadOnlyGraph(SearchGraph):
         :param k: The number of results that will be returned
         :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
         :param entry_vertex_indices: Start point for exploratory search. If None, a reasonable default is used.
+        :param threads: The number of threads to use for parallel processing. It should not excel the number of queries.
+                        If set to 0, the minimum of the number of cores of this machine and the number of queries is
+                        used.
         :returns: TODO
         """
         # handle query shapes
@@ -230,11 +243,12 @@ class ReadOnlyGraph(SearchGraph):
         if len(query.shape) != 2:
             raise InvalidShapeException('invalid query shape: {}'.format(query.shape))
         query = assure_array(query, 'query', np.float32)
+        threads = get_num_useful_threads(threads, query.shape[0])
 
         if entry_vertex_indices is None:
             entry_vertex_indices = self.get_entry_vertex_indices()
 
-        return self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_distance_computation_count)
+        return self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_distance_computation_count, threads)
 
     def has_path(self, entry_vertex_indices: List[int], to_vertex: int, eps: float, k: int) -> List[ObjectDistance]:
         """
@@ -622,7 +636,7 @@ class SizeBoundedGraph(MutableGraph):
 
     def search(
             self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
-            entry_vertex_indices: Optional[List[int]] = None
+            entry_vertex_indices: Optional[List[int]] = None, threads: int = 1
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
@@ -638,6 +652,9 @@ class SizeBoundedGraph(MutableGraph):
         :param k: The number of results that will be returned
         :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
         :param entry_vertex_indices: Start point for exploratory search. If None, a reasonable default is used.
+        :param threads: The number of threads to use for parallel processing. It should not excel the number of queries.
+                        If set to 0, the minimum of the number of cores of this machine and the number of queries is
+                        used.
         :returns: TODO
         """
         # handle query shapes
@@ -650,7 +667,9 @@ class SizeBoundedGraph(MutableGraph):
         if entry_vertex_indices is None:
             entry_vertex_indices = self.get_entry_vertex_indices()
 
-        return self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_distance_computation_count)
+        threads = get_num_useful_threads(threads, query.shape[0])
+
+        return self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_distance_computation_count, threads)
 
     def explore(self, entry_vertex_index: int, k: int, max_distance_computation_count: int) -> ResultSet:
         """
@@ -668,6 +687,12 @@ class SizeBoundedGraph(MutableGraph):
     def __repr__(self) -> str:
         return (f'SizeBoundedGraph(size={self.size()} edges_per_vertex={self.get_edges_per_vertex()} '
                 f'dim={self.get_feature_space().dim()})')
+
+
+def get_num_useful_threads(requested: int, max_limit: int):
+    if requested == 0:
+        requested = multiprocessing.cpu_count()
+    return min(requested, max_limit)  # dont use more threads than queries
 
 
 __all__ = ['load_readonly_graph', 'ReadOnlyGraph', 'SizeBoundedGraph', 'MutableGraph', 'SearchGraph']

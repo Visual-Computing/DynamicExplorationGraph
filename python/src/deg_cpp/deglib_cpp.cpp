@@ -31,11 +31,68 @@ bool sse_usable() {
 }
 
 
+// Multithreaded executor
+// The helper function copied from https://github.com/nmslib/hnswlib/blob/master/examples/cpp/example_mt_search.cpp (and that itself is copied from nmslib)
+// An alternative is using #pragme omp parallel for or any other C++ threading
+template<class Function>
+inline void parallel_for(size_t start, size_t end, size_t numThreads, Function fn) {
+  if (numThreads <= 0) {
+    numThreads = std::thread::hardware_concurrency();
+  }
+
+  if (numThreads == 1) {
+    for (size_t id = start; id < end; id++) {
+      fn(id, 0);
+    }
+  } else {
+    std::vector<std::thread> threads;
+    std::atomic<size_t> current(start);
+
+    // keep track of exceptions in threads
+    // https://stackoverflow.com/a/32428427/1713196
+    std::exception_ptr lastException = nullptr;
+    std::mutex lastExceptMutex;
+
+    for (size_t threadId = 0; threadId < numThreads; ++threadId) {
+      threads.push_back(std::thread([&, threadId] {
+        while (true) {
+          size_t id = current.fetch_add(1);
+
+          if (id >= end) {
+            break;
+          }
+
+          try {
+            fn(id, threadId);
+          } catch (...) {
+            std::unique_lock<std::mutex> lastExcepLock(lastExceptMutex);
+            lastException = std::current_exception();
+            /*
+             * This will work even when current is the largest value that
+             * size_t can fit, because fetch_add returns the previous value
+             * before the increment (what will result in overflow
+             * and produce 0 instead of current + 1).
+             */
+            current = end;
+            break;
+          }
+        }
+      }));
+    }
+    for (auto &thread : threads) {
+      thread.join();
+    }
+    if (lastException) {
+      std::rethrow_exception(lastException);
+    }
+  }
+}
+
 template<typename G>
 std::tuple<py::array_t<uint32_t>, py::array_t<float>> graph_search_wrapper(
     const G& graph, const std::vector<uint32_t> &entry_vertex_indices,
     const py::array_t<float, py::array::c_style> query, const float eps, const uint32_t k,
-    const uint32_t max_distance_computation_count)
+    const uint32_t max_distance_computation_count, const uint32_t threads)
 {
   py::buffer_info query_info = query.request();
 
@@ -49,7 +106,9 @@ std::tuple<py::array_t<uint32_t>, py::array_t<float>> graph_search_wrapper(
   py::array_t<float> result_distances({n_queries, k});
   py::buffer_info result_distances_info = result_distances.request();
 
-  for (int query_index = 0; query_index < query_info.shape[0]; query_index++) {
+  py::gil_scoped_release release; // release the gil
+
+  parallel_for(0, query_info.shape[0], threads, [&] (size_t query_index, size_t thread_id) {
     std::byte* query_ptr = static_cast<std::byte *>(query_info.ptr) + query_info.strides[0] * query_index;
     deglib::search::ResultSet result = graph.search(entry_vertex_indices, query_ptr, eps, k, max_distance_computation_count);
 
@@ -70,7 +129,7 @@ std::tuple<py::array_t<uint32_t>, py::array_t<float>> graph_search_wrapper(
       result.pop();
       k_index--;
     }
-  }
+  });
 
   return {result_indices, result_distances};
 }

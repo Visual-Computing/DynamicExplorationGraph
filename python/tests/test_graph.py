@@ -98,6 +98,19 @@ class TestGraphs:
             last_distance = distance
 
     @pytest.mark.parametrize('graph_getter', all_graph_getters)
+    def test_threaded_search(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
+        graph = graph_getter(self)
+        k = 10
+        query = np.random.random((self.dims,)).astype(np.float32)
+        graph_result, dists = graph.search(query, eps=0.1, k=k)
+        for n_threads in range(2, 8):
+            threaded_graph_result, threaded_dists = graph.search(query, eps=0.1, k=k, threads=n_threads)
+            assert np.allclose(threaded_graph_result, graph_result), \
+                'Threaded and non threaded results differ (n_threads={})'.format(n_threads)
+            assert np.allclose(threaded_dists, dists), \
+                'Threaded and non threaded dists differ (n_threads={})'.format(n_threads)
+
+    @pytest.mark.parametrize('graph_getter', all_graph_getters)
     def test_has_path(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
         graph = graph_getter(self)
         entry_vertex_indices = graph.get_entry_vertex_indices()
