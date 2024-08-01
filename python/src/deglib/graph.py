@@ -108,8 +108,10 @@ class SearchGraph(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def search(self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
-               entry_vertex_indices: Optional[List[int]] = None, threads: int = 1) -> Tuple[np.ndarray, np.ndarray]:
+    def search(
+            self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
+            entry_vertex_indices: Optional[List[int]] = None, threads: int = 1, thread_batch_size: int = 0
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
 
@@ -127,6 +129,7 @@ class SearchGraph(ABC):
         :param threads: The number of threads to use for parallel processing. It should not excel the number of queries.
                         If set to 0, the minimum of the number of cores of this machine and the number of queries is
                         used.
+        :param thread_batch_size: If threads != 1, the number of queries to search in the same thread.
         :returns: TODO
         """
         raise NotImplementedError()
@@ -216,8 +219,10 @@ class ReadOnlyGraph(SearchGraph):
         """
         return self.graph_cpp.get_internal_index(external_label)
 
-    def search(self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
-               entry_vertex_indices: Optional[List[int]] = None, threads: int = 1) -> Tuple[np.ndarray, np.ndarray]:
+    def search(
+            self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
+            entry_vertex_indices: Optional[List[int]] = None, threads: int = 1, thread_batch_size: int = 0
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
 
@@ -235,6 +240,8 @@ class ReadOnlyGraph(SearchGraph):
         :param threads: The number of threads to use for parallel processing. It should not excel the number of queries.
                         If set to 0, the minimum of the number of cores of this machine and the number of queries is
                         used.
+        :param thread_batch_size: If threads != 1, the number of queries to search in the same thread. If set <= 0, will
+                                  be set to a reasonable value.
         :returns: TODO
         """
         # handle query shapes
@@ -248,7 +255,12 @@ class ReadOnlyGraph(SearchGraph):
         if entry_vertex_indices is None:
             entry_vertex_indices = self.get_entry_vertex_indices()
 
-        return self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_distance_computation_count, threads)
+        if thread_batch_size <= 0:
+            thread_batch_size = query.shape[0] // (threads * 4)
+
+        return self.graph_cpp.search(
+            entry_vertex_indices, query, eps, k, max_distance_computation_count, threads, thread_batch_size
+        )
 
     def has_path(self, entry_vertex_indices: List[int], to_vertex: int, eps: float, k: int) -> List[ObjectDistance]:
         """
@@ -636,7 +648,7 @@ class SizeBoundedGraph(MutableGraph):
 
     def search(
             self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
-            entry_vertex_indices: Optional[List[int]] = None, threads: int = 1
+            entry_vertex_indices: Optional[List[int]] = None, threads: int = 1, thread_batch_size: int = 0
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
@@ -655,6 +667,7 @@ class SizeBoundedGraph(MutableGraph):
         :param threads: The number of threads to use for parallel processing. It should not excel the number of queries.
                         If set to 0, the minimum of the number of cores of this machine and the number of queries is
                         used.
+        :param thread_batch_size: If threads != 1, the number of queries to search in the same thread.
         :returns: TODO
         """
         # handle query shapes
@@ -669,7 +682,12 @@ class SizeBoundedGraph(MutableGraph):
 
         threads = get_num_useful_threads(threads, query.shape[0])
 
-        return self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_distance_computation_count, threads)
+        if thread_batch_size <= 0:
+            thread_batch_size = query.shape[0] // (threads * 4)
+
+        return self.graph_cpp.search(
+            entry_vertex_indices, query, eps, k, max_distance_computation_count, threads, thread_batch_size
+        )
 
     def explore(self, entry_vertex_index: int, k: int, max_distance_computation_count: int) -> ResultSet:
         """

@@ -3,6 +3,7 @@
 //
 
 // #define PYBIND11_DETAILED_ERROR_MESSAGES
+#include <algorithm>
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
@@ -89,10 +90,43 @@ inline void parallel_for(size_t start, size_t end, size_t numThreads, Function f
 }
 
 template<typename G>
+void search_one_query(const G& graph, size_t query_index, const py::buffer_info& query_info, const std::vector<uint32_t> &entry_vertex_indices, uint32_t k, const uint32_t max_distance_computation_count, const float eps, uint32_t* const result_indices_ptr, float* const result_distances_ptr) {
+  std::byte* query_ptr = static_cast<std::byte *>(query_info.ptr) + query_info.strides[0] * query_index;
+  deglib::search::ResultSet result = graph.search(entry_vertex_indices, query_ptr, eps, k, max_distance_computation_count);
+
+  assert((void(std::format("Expected result should have k={} entries, but got {} entries.\n", k, result.size())), (k == result.size())));
+
+  uint32_t k_index = result.size()-1;  // start by last index to reverse result order
+  while (!result.empty()) {
+    // location in result buffer
+    const uint32_t offset = k_index + query_index * k;
+    uint32_t* indices_target_ptr = static_cast<uint32_t*>(result_indices_ptr) + offset;
+    float* distances_target_ptr = static_cast<float*>(result_distances_ptr) + offset;
+
+    // get best result
+    deglib::search::ObjectDistance next_result = result.top();
+    *indices_target_ptr = graph.getExternalLabel(next_result.getInternalIndex());
+    *distances_target_ptr = next_result.getDistance();
+
+    result.pop();
+    k_index--;
+  }
+}
+
+template<typename G>
+void search_batch_of_queries(const G& graph, size_t batch_index, size_t batch_size, const py::buffer_info& query_info, const std::vector<uint32_t> &entry_vertex_indices, uint32_t k, const uint32_t max_distance_computation_count, const float eps, uint32_t* const result_indices_ptr, float* const result_distances_ptr) {
+  size_t num_queries = query_info.shape[0];
+  auto upper_bound = std::min(num_queries, (batch_index+1)*batch_size);
+  for (size_t query_index = batch_index*batch_size; query_index < upper_bound; query_index++) {
+    search_one_query(graph, query_index, query_info, entry_vertex_indices, k, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
+  }
+}
+
+template<typename G>
 std::tuple<py::array_t<uint32_t>, py::array_t<float>> graph_search_wrapper(
     const G& graph, const std::vector<uint32_t> &entry_vertex_indices,
     const py::array_t<float, py::array::c_style> query, const float eps, const uint32_t k,
-    const uint32_t max_distance_computation_count, const uint32_t threads)
+    const uint32_t max_distance_computation_count, const uint32_t threads, const uint32_t batch_size)
 {
   py::buffer_info query_info = query.request();
 
@@ -102,34 +136,25 @@ std::tuple<py::array_t<uint32_t>, py::array_t<float>> graph_search_wrapper(
 
   py::array_t<uint32_t> result_indices({n_queries, k});
   py::buffer_info result_indices_info = result_indices.request();
+  auto result_indices_ptr = static_cast<uint32_t*>(result_indices_info.ptr);
 
   py::array_t<float> result_distances({n_queries, k});
   py::buffer_info result_distances_info = result_distances.request();
+  auto result_distances_ptr = static_cast<float*>(result_distances_info.ptr);
 
   py::gil_scoped_release release; // release the gil
 
-  parallel_for(0, query_info.shape[0], threads, [&] (size_t query_index, size_t thread_id) {
-    std::byte* query_ptr = static_cast<std::byte *>(query_info.ptr) + query_info.strides[0] * query_index;
-    deglib::search::ResultSet result = graph.search(entry_vertex_indices, query_ptr, eps, k, max_distance_computation_count);
-
-    assert((void(std::format("Expected result should have k={} entries, but got {} entries.\n", k, result.size())), (k == result.size())));
-
-    uint32_t k_index = result.size()-1;  // start by last index to reverse result order
-    while (!result.empty()) {
-      // location in result buffer
-      const uint32_t offset = k_index + query_index * k;
-      uint32_t* indices_target_ptr = static_cast<uint32_t*>(result_indices_info.ptr) + offset;
-      float* distances_target_ptr = static_cast<float*>(result_distances_info.ptr) + offset;
-
-      // get best result
-      deglib::search::ObjectDistance next_result = result.top();
-      *indices_target_ptr = graph.getExternalLabel(next_result.getInternalIndex());
-      *distances_target_ptr = next_result.getDistance();
-
-      result.pop();
-      k_index--;
+  if (threads == 1) {
+    for (uint32_t query_index = 0; query_index < query_info.shape[0]; query_index++) {
+      search_one_query(graph, query_index, query_info, entry_vertex_indices, k, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
     }
-  });
+  } else {
+    size_t n_batches = (n_queries / batch_size) + (n_queries % batch_size);  // +1, if n_queries % batch_size != 0
+    parallel_for(0, n_batches, threads, [&] (size_t batch_index, size_t thread_id) {
+      // search_one_query(graph, query_index, query_info, entry_vertex_indices, k, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
+      search_batch_of_queries(graph, batch_index, batch_size, query_info, entry_vertex_indices, k, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
+    });
+  }
 
   return {result_indices, result_distances};
 }
