@@ -333,8 +333,6 @@ PYBIND11_MODULE(deglib_cpp, m) {
     .def("add_entry", [] (deglib::builder::EvenRegularGraphBuilder& builder, const py::array_t<uint32_t, py::array::c_style>& label, const py::array_t<float, py::array::c_style>& feature) {
       // label buffer
       const auto label_access = label.unchecked<1>();
-      // only allow one dimensional array
-      assert((void(std::format("Expected label to have one dimension, got {}\n", label_info.ndim)), (label_info.ndim == 1)));
 
       // feature buffer
       const py::buffer_info feature_info = feature.request();
