@@ -100,6 +100,21 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
   }
 
   template <bool use_max_distance_count = false>
+  inline static deglib::search::ResultSet searchL2Uint8(const SizeBoundedGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const uint32_t max_distance_computation_count = 0) {
+    return graph.searchImpl<deglib::distances::L2Uint8, use_max_distance_count>(entry_vertex_indices, query, eps, k, max_distance_computation_count);
+  }
+
+  template <bool use_max_distance_count = false>
+  inline static deglib::search::ResultSet searchL2Uint8Ext32(const SizeBoundedGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const uint32_t max_distance_computation_count = 0) {
+    return graph.searchImpl<deglib::distances::L2Uint8Ext32, use_max_distance_count>(entry_vertex_indices, query, eps, k, max_distance_computation_count);
+  }
+
+  template <bool use_max_distance_count = false>
+  inline static deglib::search::ResultSet searchL2Uint8Ext16(const SizeBoundedGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const uint32_t max_distance_computation_count = 0) {
+    return graph.searchImpl<deglib::distances::L2Uint8Ext16, use_max_distance_count>(entry_vertex_indices, query, eps, k, max_distance_computation_count);
+  }
+
+  template <bool use_max_distance_count = false>
   inline static SEARCHFUNC getSearchFunction(const deglib::FloatSpace& feature_space) {
     const auto dim = feature_space.dim();
     const auto metric = feature_space.metric();
@@ -115,10 +130,11 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
         return deglib::graph::SizeBoundedGraph::searchL2Ext16Residual<use_max_distance_count>;
       else if (dim > 4)
         return deglib::graph::SizeBoundedGraph::searchL2Ext4Residual<use_max_distance_count>;
+      else
+        return deglib::graph::SizeBoundedGraph::searchL2<use_max_distance_count>;
     }
     else if(metric == deglib::Metric::InnerProduct)
     {
-
       if (dim % 16 == 0)
         return deglib::graph::SizeBoundedGraph::searchInnerProductExt16<use_max_distance_count>;
       else if (dim % 8 == 0)
@@ -132,7 +148,19 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
       else
         return deglib::graph::SizeBoundedGraph::searchInnerProduct<use_max_distance_count>;
     }
-    return deglib::graph::SizeBoundedGraph::searchL2<use_max_distance_count>;
+    else if(metric == deglib::Metric::L2_Uint8)
+    {
+      if (dim % 32 == 0)
+        return deglib::graph::SizeBoundedGraph::searchL2Uint8Ext32<use_max_distance_count>;
+      else if (dim % 16 == 0)
+        return deglib::graph::SizeBoundedGraph::searchL2Uint8Ext16<use_max_distance_count>;
+      else
+        return deglib::graph::SizeBoundedGraph::searchL2Uint8<use_max_distance_count>;
+    }
+
+    std::fprintf(stderr, "Could not find metric %u for the sizebounded_graph search method \n", static_cast<int>(metric));
+    std::perror("");
+    std::abort();
   }
 
 
@@ -186,6 +214,19 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
     return graph.exploreImpl<deglib::distances::InnerProductFloat4ExtResiduals>(entry_vertex_index, k, max_distance_computation_count);
   }
 
+  inline static deglib::search::ResultSet exploreL2Uint8(const SizeBoundedGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const uint32_t max_distance_computation_count = 0) {
+    return graph.exploreImpl<deglib::distances::L2Uint8>(entry_vertex_index, k, max_distance_computation_count);
+  }
+
+  inline static deglib::search::ResultSet exploreL2Uint8Ext32(const SizeBoundedGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const uint32_t max_distance_computation_count = 0) {
+    return graph.exploreImpl<deglib::distances::L2Uint8Ext32>(entry_vertex_index, k, max_distance_computation_count);
+  }
+
+  inline static deglib::search::ResultSet exploreL2Uint8Ext16(const SizeBoundedGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const uint32_t max_distance_computation_count = 0) {
+    return graph.exploreImpl<deglib::distances::L2Uint8Ext16>(entry_vertex_index, k, max_distance_computation_count);
+  }
+
+
   inline static EXPLOREFUNC getExploreFunction(const deglib::FloatSpace& feature_space) {
     const auto dim = feature_space.dim();
     const auto metric = feature_space.metric();
@@ -201,6 +242,8 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
         return deglib::graph::SizeBoundedGraph::exploreL2Ext16Residual;
       else if (dim > 4)
         return deglib::graph::SizeBoundedGraph::exploreL2Ext4Residual;
+      else
+        return deglib::graph::SizeBoundedGraph::exploreL2;
     }
     else if(metric == deglib::Metric::InnerProduct)
     {
@@ -218,8 +261,20 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
       else
         return deglib::graph::SizeBoundedGraph::exploreInnerProduct;
     }
+    else if(metric == deglib::Metric::L2_Uint8)
+    {
 
-    return deglib::graph::SizeBoundedGraph::exploreL2;      
+      if (dim % 32 == 0)
+        return deglib::graph::SizeBoundedGraph::exploreL2Uint8Ext32;
+      else if (dim % 16 == 0)
+        return deglib::graph::SizeBoundedGraph::exploreL2Uint8Ext16;
+      else
+        return deglib::graph::SizeBoundedGraph::exploreL2Uint8;
+    }
+
+    std::fprintf(stderr, "Could not find metric %u for the sizebounded_graph explore method \n", static_cast<int>(metric));
+    std::perror("");
+    std::abort();      
   }
 
   static uint32_t compute_aligned_byte_size_per_vertex(const uint8_t edges_per_vertex, const uint16_t feature_byte_size, const uint8_t alignment) {
@@ -585,7 +640,7 @@ public:
     for (auto&& index : entry_vertex_indices) {
       checked_ids[index] = true;
 
-      const auto feature = reinterpret_cast<const float*>(this->feature_by_index(index));
+      const auto feature = this->feature_by_index(index);
       const auto distance = dist_func(query, feature, dist_func_param);
       results.emplace(index, distance);
       next_vertices.emplace(index, distance);
@@ -691,7 +746,6 @@ public:
   {
     const auto dist_func_param = this->feature_space_.get_dist_func_param();
     uint32_t distance_computation_count = 0;
-    // auto dist_sum = 0.f;
 
     // set of checked vertex ids
     auto checked_ids = std::vector<bool>(this->capacity());
@@ -710,7 +764,7 @@ public:
       if(checked_ids[index] == false) {
         checked_ids[index] = true;
 
-        const auto feature = reinterpret_cast<const float*>(this->feature_by_index(index));
+        const auto feature = this->feature_by_index(index);
         const auto distance = COMPARATOR::compare(query, feature, dist_func_param);
         next_vertices.emplace(index, distance);
         results.emplace(index, distance);
@@ -728,7 +782,7 @@ public:
     auto exploration_radius = radius;
 
     // iterate as long as good elements are in the next_vertices queue
-    auto good_neighbors = std::array<uint32_t, 256>();    // this limits the neighbor count to 256 using Variable Length Array wrapped in a macro
+    auto good_neighbors = std::array<uint32_t, 256>(); 
     while (next_vertices.empty() == false)
     {
 
@@ -760,6 +814,7 @@ public:
         const auto neighbor_index = good_neighbors[i];
         const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
         const auto neighbor_distance = COMPARATOR::compare(query, neighbor_feature_vector, dist_func_param);
+
              
         // check the neighborhood of this vertex later, if its good enough
         if (neighbor_distance <= exploration_radius) {

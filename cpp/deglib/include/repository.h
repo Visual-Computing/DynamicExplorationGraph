@@ -36,7 +36,7 @@ class StaticFeatureRepository : public FeatureRepository
 
     size_t dims() const override { return dims_; }
     size_t size() const override { return count_; }
-    const std::byte* getFeature(const uint32_t vertexid) const override { return &contiguous_features_[vertexid * dims_ * bytes_per_dim_]; }
+    const std::byte* getFeature(const uint32_t idx) const override { return &contiguous_features_[idx * dims_ * bytes_per_dim_]; }
     void clear() override { contiguous_features_.reset(); }
 
   private:

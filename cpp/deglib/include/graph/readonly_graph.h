@@ -99,6 +99,21 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
   }
 
   template <bool use_max_distance_count = false>
+  inline static deglib::search::ResultSet searchL2Uint8(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const uint32_t max_distance_computation_count = 0) {
+    return graph.searchImpl<deglib::distances::L2Uint8, use_max_distance_count>(entry_vertex_indices, query, eps, k, max_distance_computation_count);
+  }
+
+  template <bool use_max_distance_count = false>
+  inline static deglib::search::ResultSet searchL2Uint8Ext32(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const uint32_t max_distance_computation_count = 0) {
+    return graph.searchImpl<deglib::distances::L2Uint8Ext32, use_max_distance_count>(entry_vertex_indices, query, eps, k, max_distance_computation_count);
+  }
+
+  template <bool use_max_distance_count = false>
+  inline static deglib::search::ResultSet searchL2Uint8Ext16(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const uint32_t max_distance_computation_count = 0) {
+    return graph.searchImpl<deglib::distances::L2Uint8Ext16, use_max_distance_count>(entry_vertex_indices, query, eps, k, max_distance_computation_count);
+  }
+
+  template <bool use_max_distance_count = false>
   inline static SEARCHFUNC getSearchFunction(const deglib::FloatSpace& feature_space) {
     const auto dim = feature_space.dim();
     const auto metric = feature_space.metric();
@@ -114,10 +129,11 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
         return deglib::graph::ReadOnlyGraph::searchL2Ext16Residual<use_max_distance_count>;
       else if (dim > 4)
         return deglib::graph::ReadOnlyGraph::searchL2Ext4Residual<use_max_distance_count>;
+      else
+        return deglib::graph::ReadOnlyGraph::searchL2<use_max_distance_count>;
     }
     else if(metric == deglib::Metric::InnerProduct)
     {
-
       if (dim % 16 == 0)
         return deglib::graph::ReadOnlyGraph::searchInnerProductExt16<use_max_distance_count>;
       else if (dim % 8 == 0)
@@ -131,7 +147,19 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
       else
         return deglib::graph::ReadOnlyGraph::searchInnerProduct<use_max_distance_count>;
     }
-    return deglib::graph::ReadOnlyGraph::searchL2<use_max_distance_count>;
+    else if(metric == deglib::Metric::L2_Uint8)
+    {
+      if (dim % 32 == 0)
+        return deglib::graph::ReadOnlyGraph::searchL2Uint8Ext32<use_max_distance_count>;
+      else if (dim % 16 == 0)
+        return deglib::graph::ReadOnlyGraph::searchL2Uint8Ext16<use_max_distance_count>;
+      else
+        return deglib::graph::ReadOnlyGraph::searchL2Uint8<use_max_distance_count>;
+    }
+
+    std::fprintf(stderr, "Could not find metric %u for the readonly_graph search method \n", static_cast<int>(metric));
+    std::perror("");
+    std::abort();
   }
 
 
@@ -185,6 +213,18 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
     return graph.exploreImpl<deglib::distances::InnerProductFloat4ExtResiduals>(entry_vertex_index, k, max_distance_computation_count);
   }
 
+  inline static deglib::search::ResultSet exploreL2Uint8(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const uint32_t max_distance_computation_count = 0) {
+    return graph.exploreImpl<deglib::distances::L2Uint8>(entry_vertex_index, k, max_distance_computation_count);
+  }
+
+  inline static deglib::search::ResultSet exploreL2Uint8Ext32(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const uint32_t max_distance_computation_count = 0) {
+    return graph.exploreImpl<deglib::distances::L2Uint8Ext32>(entry_vertex_index, k, max_distance_computation_count);
+  }
+
+  inline static deglib::search::ResultSet exploreL2Uint8Ext16(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const uint32_t max_distance_computation_count = 0) {
+    return graph.exploreImpl<deglib::distances::L2Uint8Ext16>(entry_vertex_index, k, max_distance_computation_count);
+  }
+
   inline static EXPLOREFUNC getExploreFunction(const deglib::FloatSpace& feature_space) {
     const auto dim = feature_space.dim();
     const auto metric = feature_space.metric();
@@ -200,10 +240,11 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
         return deglib::graph::ReadOnlyGraph::exploreL2Ext16Residual;
       else if (dim > 4)
         return deglib::graph::ReadOnlyGraph::exploreL2Ext4Residual;
+      else
+        return deglib::graph::ReadOnlyGraph::exploreL2;      
     }
     else if(metric == deglib::Metric::InnerProduct)
     {
-
       if (dim % 16 == 0)
         return deglib::graph::ReadOnlyGraph::exploreInnerProductExt16;
       else if (dim % 8 == 0)
@@ -217,8 +258,20 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
       else
         return deglib::graph::ReadOnlyGraph::exploreInnerProduct;
     }
+    else if(metric == deglib::Metric::L2_Uint8)
+    {
 
-    return deglib::graph::ReadOnlyGraph::exploreL2;      
+      if (dim % 32 == 0)
+        return deglib::graph::ReadOnlyGraph::exploreL2Uint8Ext32;
+      else if (dim % 16 == 0)
+        return deglib::graph::ReadOnlyGraph::exploreL2Uint8Ext16;
+      else
+        return deglib::graph::ReadOnlyGraph::exploreL2Uint8;
+    }
+
+    std::fprintf(stderr, "Could not find metric %u for the readonly_graph explore method \n", static_cast<int>(metric));
+    std::perror("");
+    std::abort();
   }
 
 
@@ -427,7 +480,7 @@ public:
       if(checked_ids[index] == false) {
         checked_ids[index] = true;
 
-        const auto feature = reinterpret_cast<const float*>(this->feature_by_index(index));
+        const auto feature = this->feature_by_index(index);
         const auto distance = dist_func(query, feature, dist_func_param);
         results.emplace(index, distance);
         next_vertices.emplace(index, distance);

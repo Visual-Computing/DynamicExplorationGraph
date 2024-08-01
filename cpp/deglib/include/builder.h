@@ -210,8 +210,8 @@ struct BuilderStatus {
 
 /**
  * Information about the data distribution help to switch between different graph extension strategies.
- * Below 15 = Low
- * Above 15 = Hight
+ * Below 15 = Low (schemeD in the paper)
+ * Above 15 = High (schemeC in the paper)
  * For data with distribution Shifts Unknown is better. 
  */
 enum LID { Unknown, High, Low };
@@ -1271,5 +1271,79 @@ class EvenRegularGraphBuilder {
       this->stop_building_ = true;
     }
 };
+
+/**
+ * Remove all edges which are not MRNG conform
+ */
+void remove_non_mrng_edges(deglib::graph::MutableGraph& graph) {
+
+    const auto vertex_count = graph.size();
+    const auto edge_per_vertex = graph.getEdgesPerVertex();
+
+    const auto start = std::chrono::steady_clock::now();
+    uint32_t removed_rng_edges = 0;
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        const auto vertex_index = i;
+
+        const auto neighbor_indices = graph.getNeighborIndices(vertex_index);
+        const auto neighbor_weights = graph.getNeighborWeights(vertex_index);
+
+        // find all none rng conform neighbors
+        std::vector<uint32_t> remove_neighbor_ids;
+        for (uint32_t n = 0; n < edge_per_vertex; n++) {
+            const auto neighbor_index = neighbor_indices[n];
+            const auto neighbor_weight = neighbor_weights[n];
+
+            if(deglib::analysis::checkRNG(graph, edge_per_vertex, vertex_index, neighbor_index, neighbor_weight) == false) {
+                remove_neighbor_ids.emplace_back(neighbor_index);
+            }
+        }
+
+        for (uint32_t n = 0; n < remove_neighbor_ids.size(); n++) {
+            graph.changeEdge(vertex_index, remove_neighbor_ids[n], vertex_index, 0);
+            removed_rng_edges++;
+        }
+    }
+    const auto duration_ms = uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+
+    fmt::print("Removed {} edges in {} ms. Final graph contains {} non-RNG edges\n", removed_rng_edges, duration_ms, deglib::analysis::calc_non_rng_edges(graph));
+}
+
+
+/**
+ * Optimize the edges of the graph.
+ */
+void optimze_edges(deglib::graph::MutableGraph& graph, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt, const uint32_t iterations) {
+    
+    auto rnd = std::mt19937(7);                         // default 7
+
+    // create a graph builder to add vertices to the new graph and improve its edges
+    fmt::print("Start graph builder \n");   
+    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::Unknown, 0, 0.0f, k_opt, eps_opt, i_opt, 1, 0);
+    
+    // check the integrity of the graph during the graph build process
+    auto start = std::chrono::steady_clock::now();
+    uint64_t duration_ms = 0;
+    const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
+        const auto size = graph.size();
+
+        if(status.step % (iterations/10) == 0) {    
+            duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+            auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 100);
+            auto valid_weights = deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_regularity(graph, uint32_t(size), true);
+            auto connected = deglib::analysis::check_graph_connectivity(graph);
+
+            auto duration = duration_ms / 1000;
+            fmt::print("{:7} step, {:5}s, AEW: {:4.2f}, {} connected, {}\n", status.step, duration, avg_edge_weight, connected ? "" : "not", valid_weights ? "valid" : "invalid");
+            start = std::chrono::steady_clock::now();
+        }
+
+        if(status.step > iterations)
+            builder.stop();
+    };
+
+    // start the build process
+    builder.build(improvement_callback, true);
+}
 
 } // end namespace deglib::builder

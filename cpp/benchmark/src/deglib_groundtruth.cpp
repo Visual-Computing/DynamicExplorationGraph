@@ -67,14 +67,13 @@ void fvecs_write(const char *fname, uint32_t d, size_t n, const float* v) {
 /**
  * Compute the gt data
  */
-static std::vector<uint32_t> compute_gt(const deglib::StaticFeatureRepository& base_repo, const deglib::StaticFeatureRepository& query_repo, const uint32_t k_target) {
+static std::vector<uint32_t> compute_gt(const deglib::StaticFeatureRepository& base_repo, const deglib::StaticFeatureRepository& query_repo, const deglib::Metric metric, const uint32_t k_target) {
     const auto start = std::chrono::steady_clock::now();
 
     const auto base_size = (uint32_t)base_repo.size();
     const auto query_size = (uint32_t)query_repo.size();
     const auto dims = base_repo.dims();
 
-    const deglib::Metric metric = deglib::Metric::L2;
     const auto feature_space = deglib::FloatSpace(dims, metric);
     const auto dist_func = feature_space.get_dist_func();
     const auto dist_func_param = feature_space.get_dist_func_param();
@@ -134,64 +133,75 @@ int main() {
     #endif
     fmt::print("Actual memory usage: {} Mb, Max memory usage: {} Mb \n", getCurrentRSS() / 1000000, getPeakRSS() / 1000000);
 
-    omp_set_num_threads(8);
+    omp_set_num_threads(1);
     std::cout << "_OPENMP " << omp_get_num_threads() << " threads" << std::endl;
 
     const auto data_path = std::filesystem::path(DATA_PATH);
 
     // ------------------------------------------------------- laion -----------------------------------------------------------------
-    const auto repository_file      = (data_path / "laion2B" / "laion2B-en-clip768v2-n=300K_Kai512_again.fvecs").string();
-    const auto query_file           = (data_path / "laion2B" / "public-queries-2024-laion2B-en-clip768v2-n=10k_Kai512_again.fvecs").string();
-    const auto gt_file              = (data_path / "laion2B" / "gold-standard-dbsize=300K--public-queries-2024-laion2B-en-clip768v2-n=10k.ivecs").string();
+    const auto repository_file          = (data_path / "laion2B" / "laion2B-en-clip768v2-n=300K_512byteFloat.fvecs").string();
+    const auto query_file               = (data_path / "laion2B" / "public-queries-2024-laion2B-en-clip768v2-n=10k_512byteFloat.fvecs").string();
+    const auto gt_file                  = (data_path / "laion2B" / "gold-standard-dbsize=300K--public-queries-2024-laion2B-en-clip768v2-n=10k.ivecs").string();
 
+    const auto repository_file_uint8    = (data_path / "laion2B" / "laion2B-en-clip768v2-n=300K_512byte.u8vecs").string();
+    const auto query_file_uint8         = (data_path / "laion2B" / "public-queries-2024-laion2B-en-clip768v2-n=10k_512byte.u8vecs").string();
 
-    const auto test_file            = (data_path / "laion2B" / "public-queries-2024-laion2B-en-clip768v2-n=10k_Kai512_byte.u8vecs").string();
-
+    // compute ground truth using uint8 files 
+    std::vector<uint32_t> topListsUint8;
     {
-        auto file_size = std::filesystem::file_size(test_file.c_str());
-        std::cout << "file_size=" << file_size << std::endl;
+        const uint32_t k_target = 100;
+        const auto base_repository = deglib::load_static_repository(repository_file_uint8.c_str());
+        const auto query_repository = deglib::load_static_repository(query_file_uint8.c_str());
 
-        auto ifstream = std::ifstream(test_file.c_str(), std::ios::binary);
+        const auto start = std::chrono::system_clock::now();
+        const auto topLists = compute_gt(base_repository, query_repository, deglib::Metric::L2_Uint8, k_target);
+        auto duration = uint32_t(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - start).count());
+        fmt::print("Computing {:5} top lists of a {:8} base took {:5}s \n", query_repository.size(), base_repository.size(), duration);
+        topListsUint8 = topLists;
 
-        int dims;
-        ifstream.read(reinterpret_cast<char*>(&dims), sizeof(int));
-        std::cout << "dims=" << dims << std::endl;
-
-        size_t n = (size_t)file_size / ((dims + 4));
-        std::cout << "count=" << n << std::endl;
-
-        auto x = std::make_unique<uint8_t[]>(file_size);
-        ifstream.seekg(0);
-        ifstream.read(reinterpret_cast<char*>(x.get()), file_size);
-
-        // shift array to remove row headers
-        for (size_t i = 0; i < n; i++) std::memmove(&x[i * dims], &x[4 + i * (dims + 4)], dims);
-
-        ifstream.close();
-
-
-        std::cout << "x[0]=" << uint32_t(x[0]) << ", x[511]=" << uint32_t(x[511]) << ", x[512]=" << uint32_t(x[512]) << ", x[513]=" << uint32_t(x[513]) << std::endl;
+        // store ground truth
+        // ivecs_write(gt_file.c_str(), k_target, query_repository.size(), topListsUint8.data());
     }
 
-    size_t dims;
-    size_t count;
-    auto y = deglib::u8vecs_read(test_file.c_str(), dims, count);
-    std::cout << "x[0]=" << uint32_t(y[0]) << ", x[511]=" << uint32_t(y[511]) << ", x[512]=" << uint32_t(y[512]) << ", x[513]=" << uint32_t(y[513]) << std::endl;
+    // compute ground truth using float files 
+    std::vector<uint32_t> topListsFloat;
+    {
+        const uint32_t k_target = 100;
+        const auto base_repository = deglib::load_static_repository(repository_file.c_str());
+        const auto query_repository = deglib::load_static_repository(query_file.c_str());
 
+        const auto start = std::chrono::system_clock::now();
+        const auto topLists = compute_gt(base_repository, query_repository, deglib::Metric::L2, k_target);
+        auto duration = uint32_t(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - start).count());
+        fmt::print("Computing {:5} top lists of a {:8} base took {:5}s \n", query_repository.size(), base_repository.size(), duration);
+        topListsFloat = topLists;
 
-    // const auto base_repository = deglib::load_static_repository(repository_file.c_str());
+        // store ground truth
+        // ivecs_write(gt_file.c_str(), k_target, query_repository.size(), topListsFloat.data());
+    }
 
-    // compute ground truth    
-    // {
-    //     const uint32_t k_target = 100;
-    //     const auto query_repository = deglib::load_static_repository(query_file.c_str());
+    // compare ground truth
+    for (size_t g = 0; g < topListsFloat.size(); g++) {
+        if(topListsFloat[g] != topListsUint8[g]) {
+            fmt::print(stderr, "Found different gt information at index {}, expected {} got {}.\n", g, topListsFloat[g], topListsUint8[g]);
+            perror("");
+            abort();
+        }         
+    }
 
-    //     const auto start = std::chrono::system_clock::now();
-    //     const auto topLists = compute_gt(base_repository, query_repository, k_target);
-    //     auto duration = uint32_t(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - start).count());
-    //     fmt::print("Computing {:5} top lists of a {:8} base took {:5}s \n", query_repository.size(), base_repository.size(), duration);
+    // compare uint8 and uint8-in-float files
+    {
+        size_t dims_f;
+        size_t count_f;
+        auto y1 = deglib::fvecs_read(query_file.c_str(), dims_f, count_f);
+        auto y_f = reinterpret_cast<float*>(y1.get());
+        std::cout << "dims_f=" << dims_f << ", count_f=" << count_f << std::endl;
+        std::cout << "x[0]=" << uint32_t(y_f[0]) << ", x[511]=" << uint32_t(y_f[511]) << ", x[512]=" << uint32_t(y_f[512]) << ", x[513]=" << uint32_t(y_f[513]) << std::endl;
 
-    //     // store ground truth
-    //     // ivecs_write(gt_file.c_str(), k_target, query_repository.size(), topLists.data());
-    // }
+        size_t dims_u8;
+        size_t count_u8;
+        auto y = deglib::u8vecs_read(query_file_uint8.c_str(), dims_u8, count_u8);
+        std::cout << "dims_u8=" << dims_u8 << ", count_u8=" << count_u8 << std::endl;
+        std::cout << "x[0]=" << uint32_t(y[0]) << ", x[511]=" << uint32_t(y[511]) << ", x[512]=" << uint32_t(y[512]) << ", x[513]=" << uint32_t(y[513]) << std::endl;
+    }
 }
