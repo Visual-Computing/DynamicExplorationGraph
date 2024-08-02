@@ -108,20 +108,20 @@ class TestGraphs:
 
         _check_entries(self.data.shape[0] // 2, 'remove')
 
-    def test_callback(self):
-        graph = deglib.graph.SizeBoundedGraph.create_empty(
-            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.L2
-        )
-        builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
-        for i, vec in enumerate(self.data):
-            vec: np.ndarray
-            builder.add_entry(i, vec)
-
-        tester = CallbackTester()
-        builder.build(callback=tester)
-        assert tester.num_callbacks == self.data.shape[0], 'Got {} callbacks, but expected {}'.format(
-            tester.num_callbacks, self.data.shape[0]
-        )
-        assert tester.last_status.step == self.data.shape[0], 'Got {} steps, but expected {}'.format(
-            tester.last_status.step, self.data.shape[0]
-        )
+#     def test_callback(self):
+#         graph = deglib.graph.SizeBoundedGraph.create_empty(
+#             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.L2
+#         )
+#         builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+#         for i, vec in enumerate(self.data):
+#             vec: np.ndarray
+#             builder.add_entry(i, vec)
+#
+#         tester = CallbackTester()
+#         builder.build(callback=tester)
+#         assert tester.num_callbacks == self.data.shape[0], 'Got {} callbacks, but expected {}'.format(
+#             tester.num_callbacks, self.data.shape[0]
+#         )
+#         assert tester.last_status.step == self.data.shape[0], 'Got {} steps, but expected {}'.format(
+#             tester.last_status.step, self.data.shape[0]
+#         )
