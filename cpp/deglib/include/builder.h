@@ -1306,7 +1306,7 @@ void remove_non_mrng_edges(deglib::graph::MutableGraph& graph) {
     }
     const auto duration_ms = uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
 
-    fmt::print("Removed {} edges in {} ms. Final graph contains {} non-RNG edges\n", removed_rng_edges, duration_ms, deglib::analysis::calc_non_rng_edges(graph));
+	std::cout << "Removed " << removed_rng_edges << " edges in " << duration_ms << " ms. Final graph contains " << deglib::analysis::calc_non_rng_edges(graph) << " non-RNG edges\n";
 }
 
 
@@ -1318,7 +1318,7 @@ void optimze_edges(deglib::graph::MutableGraph& graph, const uint8_t k_opt, cons
     auto rnd = std::mt19937(7);                         // default 7
 
     // create a graph builder to add vertices to the new graph and improve its edges
-    fmt::print("Start graph builder \n");   
+	std::cout << "Start graph builder\n";
     auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::Unknown, 0, 0.0f, k_opt, eps_opt, i_opt, 1, 0);
     
     // check the integrity of the graph during the graph build process
@@ -1334,7 +1334,8 @@ void optimze_edges(deglib::graph::MutableGraph& graph, const uint8_t k_opt, cons
             auto connected = deglib::analysis::check_graph_connectivity(graph);
 
             auto duration = duration_ms / 1000;
-            fmt::print("{:7} step, {:5}s, AEW: {:4.2f}, {} connected, {}\n", status.step, duration, avg_edge_weight, connected ? "" : "not", valid_weights ? "valid" : "invalid");
+            // fmt::print("{:7} step, {:5}s, AEW: {:4.2f}, {} connected, {}\n", status.step, duration, avg_edge_weight, connected ? "" : "not", valid_weights ? "valid" : "invalid");
+			std::cout << std::setw(7) << status.step << " step, " << std::setw(5) << duration << "s, AEW: " << std::fixed << std::setprecision(2) << std::setw(4) << avg_edge_weight << ", " << (connected ? "" : "not") << " connected, " << (valid_weights ? "valid" : "invalid") << "\n";
             start = std::chrono::steady_clock::now();
         }
 

@@ -6,14 +6,17 @@ import deglib_cpp
 
 
 class Metric(enum.IntEnum):
-    L2 = 1
-    InnerProduct = 2
+    L2 = deglib_cpp.Metric.L2
+    InnerProduct = deglib_cpp.Metric.InnerProduct
+    L2_Uint8 = deglib_cpp.Metric.L2_Uint8
 
     def to_cpp(self) -> deglib_cpp.Metric:
         if self == Metric.L2:
             return deglib_cpp.Metric.L2
         elif self == Metric.InnerProduct:
             return deglib_cpp.Metric.InnerProduct
+        elif self == Metric.L2_Uint8:
+            return deglib_cpp.Metric.L2_Uint8
 
 
 class SpaceInterface(ABC):
