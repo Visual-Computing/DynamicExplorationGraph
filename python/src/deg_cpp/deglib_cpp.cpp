@@ -149,7 +149,7 @@ std::tuple<py::array_t<uint32_t>, py::array_t<float>> graph_search_wrapper(
       search_one_query(graph, query_index, query_info, entry_vertex_indices, k, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
     }
   } else {
-    size_t n_batches = (n_queries / batch_size) + (n_queries % batch_size);  // +1, if n_queries % batch_size != 0
+    size_t n_batches = (n_queries / batch_size) + ((n_queries % batch_size != 0) ? 1 : 0);  // +1, if n_queries % batch_size != 0
     parallel_for(0, n_batches, threads, [&] (size_t batch_index, size_t thread_id) {
       // search_one_query(graph, query_index, query_info, entry_vertex_indices, k, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
       search_batch_of_queries(graph, batch_index, batch_size, query_info, entry_vertex_indices, k, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);

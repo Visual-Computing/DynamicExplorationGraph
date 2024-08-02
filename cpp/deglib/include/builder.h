@@ -358,7 +358,7 @@ class EvenRegularGraphBuilder {
     /**
      * Extend the graph with a new vertex. Find good existing vertex to which this new vertex gets connected.
      */
-    void extendGraph(std::vector<BuilderAddTask>& add_tasks) {
+    void extendGraph(const std::vector<BuilderAddTask>& add_tasks) {
       auto& graph = this->graph_;
 
       // for computing distances to neighbors not in the result queue
@@ -399,14 +399,15 @@ class EvenRegularGraphBuilder {
       } else {
         const auto remaining_add_tasks = std::vector<BuilderAddTask>(add_tasks.begin() + index, add_tasks.end());
 
-        auto batchExtendGraphKnownLID = [&](const std::vector<BuilderAddTask>& add_tasks, size_t task_index) {
+        auto batchExtendGraphKnownLID = [&](const std::vector<BuilderAddTask>& tasks, size_t task_index) {
           const auto start_index = task_index * this->extend_thread_task_size;
-          const auto end_index = std::min(add_tasks.size(), (task_index+1) * this->extend_thread_task_size);
-          for (size_t i = start_index; i < end_index; i++)
-            extendGraphKnownLID(add_tasks[i]);
+          const auto end_index = std::min(tasks.size(), (task_index+1) * this->extend_thread_task_size);
+          for (size_t i = start_index; i < end_index; i++) 
+            extendGraphKnownLID(tasks[i]);
         };
 
-        parallel_for(0, remaining_add_tasks.size(), this->extend_thread_count, [&] (size_t task_index) {
+        size_t task_count = (remaining_add_tasks.size() / extend_thread_task_size) + ((remaining_add_tasks.size() % extend_thread_task_size != 0) ? 1 : 0);  // +1, if n_queries % batch_size != 0
+        parallel_for(0, task_count, extend_thread_count, [&] (size_t task_index) {
           batchExtendGraphKnownLID(remaining_add_tasks, task_index);
         });
       }
@@ -1370,7 +1371,7 @@ class EvenRegularGraphBuilder {
             // create batches
             auto batch = std::vector<BuilderAddTask>();
             batch.reserve(this->extend_batch_size);
-            while(batch.size() < this->extend_batch_size && this->new_entry_queue_.front().manipulation_index < del_task_manipulation_index) {
+            while(this->new_entry_queue_.size() > 0 && batch.size() < this->extend_batch_size && this->new_entry_queue_.front().manipulation_index < del_task_manipulation_index) {
               batch.push_back(std::move(this->new_entry_queue_.front()));
               this->new_entry_queue_.pop_front();
             }
@@ -1475,8 +1476,7 @@ void optimze_edges(deglib::graph::MutableGraph& graph, const uint8_t k_opt, cons
             auto connected = deglib::analysis::check_graph_connectivity(graph);
 
             auto duration = duration_ms / 1000;
-            // fmt::print("{:7} step, {:5}s, AEW: {:4.2f}, {} connected, {}\n", status.step, duration, avg_edge_weight, connected ? "" : "not", valid_weights ? "valid" : "invalid");
-			std::cout << std::setw(7) << status.step << " step, " << std::setw(5) << duration << "s, AEW: " << std::fixed << std::setprecision(2) << std::setw(4) << avg_edge_weight << ", " << (connected ? "" : "not") << " connected, " << (valid_weights ? "valid" : "invalid") << "\n";
+		        std::cout << std::setw(7) << status.step << " step, " << std::setw(5) << duration << "s, AEW: " << std::fixed << std::setprecision(2) << std::setw(4) << avg_edge_weight << ", " << (connected ? "" : "not") << " connected, " << (valid_weights ? "valid" : "invalid") << "\n";
             start = std::chrono::steady_clock::now();
         }
 
