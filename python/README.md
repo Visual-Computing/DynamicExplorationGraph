@@ -39,6 +39,12 @@ pip install .
 ```
 This will compile the C++ code and install deglib into your virtual environment, so it may take a while.
 
+**Testing**
+To execute all tests.
+```shell
+pytest
+```
+
 **Building Packages**
 
 Build packages (sdist and wheels):
