@@ -256,7 +256,7 @@ class ReadOnlyGraph(SearchGraph):
             entry_vertex_indices = self.get_entry_vertex_indices()
 
         if thread_batch_size <= 0:
-            thread_batch_size = query.shape[0] // (threads * 4)
+            thread_batch_size = max(query.shape[0] // (threads * 4), 1)
 
         return self.graph_cpp.search(
             entry_vertex_indices, query, eps, k, max_distance_computation_count, threads, thread_batch_size
@@ -689,7 +689,7 @@ class SizeBoundedGraph(MutableGraph):
         threads = get_num_useful_threads(threads, query.shape[0])
 
         if thread_batch_size <= 0:
-            thread_batch_size = query.shape[0] // (threads * 4)
+            thread_batch_size = max(query.shape[0] // (threads * 4), 1)
 
         return self.graph_cpp.search(
             entry_vertex_indices, query, eps, k, max_distance_computation_count, threads, thread_batch_size
