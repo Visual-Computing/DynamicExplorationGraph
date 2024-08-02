@@ -436,6 +436,12 @@ class MutableGraph(SearchGraph, ABC):
     def to_cpp(self):
         raise NotImplementedError()
 
+    def remove_non_mrng_edges(self):
+        """
+        Remove all edges which are not MRNG conform.
+        """
+        deglib_cpp.remove_non_mrng_edges(self.to_cpp())
+
 
 class SizeBoundedGraph(MutableGraph):
     def __init__(

@@ -97,6 +97,9 @@ class TestGraphs:
             )
             last_distance = distance
 
+    def test_remove_non_mrng_edges(self):
+        self.size_bounded_graph.remove_non_mrng_edges()
+
     @pytest.mark.parametrize('graph_getter', all_graph_getters)
     def test_threaded_search(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
         graph = graph_getter(self)

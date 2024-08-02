@@ -373,6 +373,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
   m.def("check_graph_regularity", &deglib::analysis::check_graph_regularity);
   m.def("check_graph_connectivity", &deglib::analysis::check_graph_connectivity);
   m.def("calc_non_rng_edges", &deglib::analysis::calc_non_rng_edges);
+  m.def("remove_non_mrng_edges", &deglib::builder::remove_non_mrng_edges);
 
   py::class_<deglib::builder::BuilderStatus>(m, "BuilderStatus")
     .def_readwrite("step", &deglib::builder::BuilderStatus::step)
