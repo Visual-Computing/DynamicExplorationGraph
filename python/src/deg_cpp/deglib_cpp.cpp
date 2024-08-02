@@ -125,7 +125,7 @@ void search_batch_of_queries(const G& graph, size_t batch_index, size_t batch_si
 template<typename G>
 std::tuple<py::array_t<uint32_t>, py::array_t<float>> graph_search_wrapper(
     const G& graph, const std::vector<uint32_t> &entry_vertex_indices,
-    const py::array_t<float, py::array::c_style> query, const float eps, const uint32_t k,
+    const py::array query, const float eps, const uint32_t k,
     const uint32_t max_distance_computation_count, const uint32_t threads, const uint32_t batch_size)
 {
   py::buffer_info query_info = query.request();
@@ -331,7 +331,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
 
   py::class_<deglib::builder::EvenRegularGraphBuilder>(m, "EvenRegularGraphBuilder")
     .def(py::init<deglib::graph::MutableGraph&, std::mt19937&, const deglib::builder::LID, const uint8_t, const float, const uint8_t, const float, const uint8_t, const uint32_t, const uint32_t>())
-    .def("add_entry", [] (deglib::builder::EvenRegularGraphBuilder& builder, const py::array_t<uint32_t, py::array::c_style>& label, const py::array_t<float, py::array::c_style>& feature) {
+    .def("add_entry", [] (deglib::builder::EvenRegularGraphBuilder& builder, const py::array_t<uint32_t, py::array::c_style>& label, const py::array& feature) {
       // label buffer
       const auto label_access = label.unchecked<1>();
 

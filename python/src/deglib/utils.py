@@ -39,7 +39,7 @@ def assure_array(arr: np.ndarray, name: str, dtype: np.dtype) -> np.ndarray:
     """
     Makes sure, that the given array fulfills the requirements for c++ api.
     """
-    assure_dtype(arr, name, dtype)
+    # assure_dtype(arr, name, dtype)
     return assure_contiguous(arr, name)
 
 
