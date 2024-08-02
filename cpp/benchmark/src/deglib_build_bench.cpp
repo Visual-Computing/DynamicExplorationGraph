@@ -50,7 +50,7 @@ void optimze_graph(const std::string initial_graph_file, const std::string graph
  * Load the data repository and create a dynamic exploratino graph with it.
  * Store the graph in the graph file.
  */
-void create_graph(const std::string repository_file, const DataStreamType data_stream_type, const std::string graph_file, deglib::Metric metric, deglib::builder::LID lid, const uint8_t d, const uint8_t k_ext, const float eps_ext, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt) {
+void create_graph(const std::string repository_file, const DataStreamType data_stream_type, const std::string graph_file, deglib::Metric metric, deglib::builder::LID lid, const uint8_t d, const uint8_t k_ext, const float eps_ext, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt, const uint32_t thread_count) {
     
     auto rnd = std::mt19937(7);                         // default 7
     const uint32_t swap_tries = 0;                      // additional swap tries between the next graph extension
@@ -74,6 +74,8 @@ void create_graph(const std::string repository_file, const DataStreamType data_s
     // create a graph builder to add vertices to the new graph and improve its edges
     fmt::print("Start graph builder \n");   
     auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, lid, k_ext, eps_ext, k_opt, eps_opt, i_opt, swap_tries, additional_swap_tries);
+    builder.setBatchSize(10000);
+    builder.setThreadCount(thread_count);
     
     // provide all features to the graph builder at once. In an online system this will be called multiple times
     auto base_size = uint32_t(repository.size());
@@ -109,7 +111,7 @@ void create_graph(const std::string repository_file, const DataStreamType data_s
     fmt::print("Actual memory usage: {} Mb, Max memory usage: {} Mb after setup graph builder\n", getCurrentRSS() / 1000000, getPeakRSS() / 1000000);
 
     // check the integrity of the graph during the graph build process
-    const auto log_after = 100000;
+    const auto log_after = 100;
 
     fmt::print("Start building \n");    
     auto start = std::chrono::steady_clock::now();
@@ -117,21 +119,22 @@ void create_graph(const std::string repository_file, const DataStreamType data_s
     const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
         const auto size = graph.size();
 
-        if(status.step % log_after == 0 || size == base_size) {    
-            duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
-            auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
-            auto weight_histogram_sorted = deglib::analysis::calc_edge_weight_histogram(graph, true, scale);
-            auto weight_histogram = deglib::analysis::calc_edge_weight_histogram(graph, false, scale);
-            auto valid_weights = deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_regularity(graph, uint32_t(size), true);
-            auto connected = deglib::analysis::check_graph_connectivity(graph);
-            auto duration = duration_ms / 1000;
-            auto currRSS = getCurrentRSS() / 1000000;
-            auto peakRSS = getPeakRSS() / 1000000;
-            fmt::print("{:7} vertices, {:5}s, {:8} / {:8} improv, Q: {:4.2f} -> Sorted:{:.1f}, InOrder:{:.1f}, {} connected & {}, RSS {} & peakRSS {}\n", 
-                        size, duration, status.improved, status.tries, avg_edge_weight, fmt::join(weight_histogram_sorted, " "), fmt::join(weight_histogram, " "), connected ? "" : "not", valid_weights ? "valid" : "invalid", currRSS, peakRSS);
-            start = std::chrono::steady_clock::now();
-        }
-        else if(status.step % (log_after/10) == 0) {    
+        // if(status.step % log_after == 0 || size == base_size) {    
+        //     duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+        //     auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
+        //     auto weight_histogram_sorted = deglib::analysis::calc_edge_weight_histogram(graph, true, scale);
+        //     auto weight_histogram = deglib::analysis::calc_edge_weight_histogram(graph, false, scale);
+        //     auto valid_weights = deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_regularity(graph, uint32_t(size), true);
+        //     auto connected = deglib::analysis::check_graph_connectivity(graph);
+        //     auto duration = duration_ms / 1000;
+        //     auto currRSS = getCurrentRSS() / 1000000;
+        //     auto peakRSS = getPeakRSS() / 1000000;
+        //     fmt::print("{:7} vertices, {:5}s, {:8} / {:8} improv, Q: {:4.2f} -> Sorted:{:.1f}, InOrder:{:.1f}, {} connected & {}, RSS {} & peakRSS {}\n", 
+        //                 size, duration, status.improved, status.tries, avg_edge_weight, fmt::join(weight_histogram_sorted, " "), fmt::join(weight_histogram, " "), connected ? "" : "not", valid_weights ? "valid" : "invalid", currRSS, peakRSS);
+        //     start = std::chrono::steady_clock::now();
+        // }
+        // else 
+        if(status.step % (log_after/10) == 0) {    
             duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
             auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
             auto connected = deglib::analysis::check_graph_connectivity(graph);
@@ -261,31 +264,37 @@ int main() {
 
     // ------------------------------- SIFT1M -----------------------------------------
     const auto data_stream_type     = DataStreamType::AddAll;
-    // const auto repository_file      = (data_path / "laion2B" / "laion2B-en-clip768v2-n=300K.fvecs").string();
-    // const auto query_file           = (data_path / "laion2B" / "public-queries-2024-laion2B-en-clip768v2-n=10k.fvecs").string();
-    const auto repository_file      = (data_path / "laion2B" / "laion2B-en-clip768v2-n=300K_512byte.u8vecs").string();
-    const auto query_file           = (data_path / "laion2B" / "public-queries-2024-laion2B-en-clip768v2-n=10k_512byte.u8vecs").string();
-    const auto gt_file              = (data_path / "laion2B" / "gold-standard-dbsize=300K--public-queries-2024-laion2B-en-clip768v2-n=10k.ivecs").string();
-    const auto graph_file           = (data_path / "deg" / "768D_L2_K30_AddK60Eps0.1_schemeD_t1_512byte.deg").string();
-    const auto opt_graph_file       = (data_path / "deg" / "768D_L2_K30_AddK60Eps0.1_schemeD_t1_512byte_200kAll.deg").string(); 
-    const auto mrng_graph_file       = (data_path / "deg" / "768D_L2_K30_AddK60Eps0.1_schemeD_t1_512byte_200kAll_removedNonMRNG.deg").string(); 
+    // const auto repository_file      = (data_path / "laion2B" / "laion2B-en-clip768v2-n=300K.fvecs").string();           // 300K 768float
+    // const auto repository_file      = (data_path / "laion2B" / "laion2B-en-clip768v2-n=300K_512float.fvecs").string();  // 300K 768float
+    // const auto repository_file      = (data_path / "laion2B" / "laion2B-en-clip768v2-n=300K_512byte.u8vecs").string();  // 300K 512uint8
+    const auto repository_file      = (data_path / "laion2B" / "laion2B-en-clip768v2-n=10M_512byte.u8vecs").string();   // 10M 512uint8
+
+    // const auto query_file           = (data_path / "laion2B" / "public-queries-2024-laion2B-en-clip768v2-n=10k.fvecs").string();         // 768float
+    // const auto query_file           = (data_path / "laion2B" / "public-queries-2024-laion2B-en-clip768v2-n=10k_512float.fvecs").string();   // 512float
+    const auto query_file           = (data_path / "laion2B" / "public-queries-2024-laion2B-en-clip768v2-n=10k_512byte.u8vecs").string();   // 512uint8
+
+    // const auto gt_file              = (data_path / "laion2B" / "gold-standard-dbsize=300K--public-queries-2024-laion2B-en-clip768v2-n=10k.ivecs").string(); // 300K
+    const auto gt_file              = (data_path / "laion2B" / "gold-standard-dbsize=10M--public-queries-2024-laion2B-en-clip768v2-n=10k.ivecs").string();  // 10M
+    const auto graph_file           = (data_path / "deg" / "10m" / "768D_L2_K30_AddK60Eps0.1_schemeD_t12_512byte.deg").string();
+    const auto opt_graph_file       = (data_path / "deg" / "10m" / "768D_L2_K30_AddK60Eps0.1_schemeD_t1_512byte_200kAll.deg").string(); 
+    const auto mrng_graph_file      = (data_path / "deg" / "10m" / "768D_L2_K30_AddK60Eps0.1_schemeD_t1_512byte_removedNonMRNG.deg").string(); 
     const auto lid                  = deglib::builder::LID::Low; // low=schemeD, high=schemeC
     const deglib::Metric metric     = deglib::Metric::L2_Uint8;
 
-    // if(std::filesystem::exists(graph_file.c_str()) == false) 
-    //     create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
-    // test_graph(query_file, gt_file, graph_file, 1, 30); // repeat_test, k
+    if(std::filesystem::exists(graph_file.c_str()) == false) 
+        create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5, 12); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt, thread_count
+    test_graph(query_file, gt_file, graph_file, 1, 30); // repeat_test, k
 
-    if(std::filesystem::exists(opt_graph_file.c_str()) == false) 
-        optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 200000); // k_opt, eps_opt, i_opt, iteration
-    test_graph(query_file, gt_file, opt_graph_file, 1, 30); // repeat_test, k
+    // if(std::filesystem::exists(opt_graph_file.c_str()) == false) 
+    //     optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 200000); // k_opt, eps_opt, i_opt, iteration
+    // test_graph(query_file, gt_file, opt_graph_file, 1, 30); // repeat_test, k
 
-    if(std::filesystem::exists(mrng_graph_file.c_str()) == false) {
-        // remove_non_mrng_edges(graph_file, mrng_graph_file);
-        remove_non_mrng_edges(opt_graph_file, mrng_graph_file);
+    // if(std::filesystem::exists(mrng_graph_file.c_str()) == false) {
+    //     remove_non_mrng_edges(graph_file, mrng_graph_file);
+        // remove_non_mrng_edges(opt_graph_file, mrng_graph_file);
         // change_features(graph_file, repository_file, metric, opt_graph_file);
-    }
-    test_graph(query_file, gt_file, mrng_graph_file, 1, 30); // repeat_test, k
+    // }
+    // test_graph(query_file, gt_file, mrng_graph_file, 1, 30); // repeat_test, k
 
 
     // // ------------------------------- GLOVE -----------------------------------------

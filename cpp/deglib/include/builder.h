@@ -4,6 +4,7 @@
 #include <random>
 #include <chrono>
 #include <thread>
+#include <mutex>
 #include <algorithm>
 #include <functional>
 #include <span>
@@ -236,6 +237,15 @@ class EvenRegularGraphBuilder {
     std::deque<BuilderAddTask> new_entry_queue_;
     std::queue<BuilderRemoveTask> remove_entry_queue_;
 
+    // the batch_size should be thread_count * thread_task_count thread_task_size
+    uint32_t extend_batch_size = 32;          // the overall number of elements per batch
+    uint32_t extend_thread_count = 1;         // number of concurrent threads
+    uint32_t extend_thread_task_size = 32;   // each thread processed 32 elements per task
+    uint32_t extend_thread_task_count = 10;  // there are 10 tasks per thread per batch
+
+
+    mutable std::mutex extend_mutex;
+
     // should the build loop run until the stop method is called
     bool stop_building_ = false;
 
@@ -256,6 +266,10 @@ class EvenRegularGraphBuilder {
         rnd_(rnd),  
         graph_(graph),
         build_status_() { 
+
+          // each core processes extend_thread_batch_size element per tasks, there are 10 tasks per threads
+          extend_thread_count = std::thread::hardware_concurrency();
+          extend_batch_size = extend_thread_count * extend_thread_task_count * extend_thread_task_size;
     }
 
     EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, const uint32_t swaps) 
@@ -299,6 +313,20 @@ class EvenRegularGraphBuilder {
       return remove_entry_queue_.size();
     }
 
+    /**
+     * Set the thread count
+     */
+    void setThreadCount(uint32_t thread_count) {
+      extend_thread_count = thread_count;
+    }
+
+    /**
+     * Set the batch size when adding multiple elements
+     */
+    void setBatchSize(uint32_t batch_size) {
+      extend_batch_size = batch_size;
+    }
+
   private:
 
     /**
@@ -308,7 +336,7 @@ class EvenRegularGraphBuilder {
       const auto size = (int32_t) queue.size();
       auto topList = std::vector<deglib::search::ObjectDistance>(size);
       for (int32_t i = size - 1; i >= 0; i--) {
-        topList[i] = std::move(const_cast<deglib::search::ObjectDistance&>(queue.top()));
+        topList[i] = queue.top();
         queue.pop();
       }
       return topList;
@@ -330,28 +358,30 @@ class EvenRegularGraphBuilder {
     /**
      * Extend the graph with a new vertex. Find good existing vertex to which this new vertex gets connected.
      */
-    void extendGraph(const BuilderAddTask& add_task) {
+    void extendGraph(std::vector<BuilderAddTask>& add_tasks) {
       auto& graph = this->graph_;
-      const auto external_label = add_task.label;
 
-      // graph should not contain a vertex with the same label
-      if(graph.hasVertex(external_label)) {
-        std::fprintf(stderr, "graph contains vertex %u already. can not add it again \n", external_label);
-        std::perror("");
-        std::abort();
-      }
+      // for computing distances to neighbors not in the result queue
+      const auto dist_func = graph.getFeatureSpace().get_dist_func();
+      const auto dist_func_param = graph.getFeatureSpace().get_dist_func_param();
 
       // fully connect all vertices
-      const auto new_vertex_feature = add_task.feature.data();
+      uint32_t index = 0;
       const auto edges_per_vertex = uint32_t(graph.getEdgesPerVertex());
-      if(graph.size() < edges_per_vertex+1) {
+      while(graph.size() < edges_per_vertex+1 && index < add_tasks.size()) {
+        const auto& add_task = add_tasks[index++];        
+        const auto external_label = add_task.label;
+
+        // graph should not contain a vertex with the same label
+        if(graph.hasVertex(external_label)) {
+          std::fprintf(stderr, "graph contains vertex %u already. can not add it again \n", external_label);
+          std::perror("");
+          std::abort();
+        }
 
         // add an empty vertex to the graph (no neighbor information yet)
+        const auto new_vertex_feature = add_task.feature.data();
         const auto internal_index = graph.addVertex(external_label, new_vertex_feature);
-
-        // for computing distances to neighbors not in the result queue
-        const auto dist_func = graph.getFeatureSpace().get_dist_func();
-        const auto dist_func_param = graph.getFeatureSpace().get_dist_func_param();
 
         // connect the new vertex to all other vertices in the graph
         for (uint32_t i = 0; i < graph.size(); i++) {
@@ -361,14 +391,82 @@ class EvenRegularGraphBuilder {
             graph.changeEdge(internal_index, internal_index, i, dist);
           }
         }
-
-        return;
       }
 
-      if(this->lid_ == Unknown)
-        extendGraphUnknownLID(add_task);
-      else
-        extendGraphKnownLID(add_task);
+      if(this->lid_ == Unknown) {
+        while(index < add_tasks.size()) 
+          extendGraphUnknownLID(add_tasks[index++]);
+      } else {
+        const auto remaining_add_tasks = std::vector<BuilderAddTask>(add_tasks.begin() + index, add_tasks.end());
+
+        auto batchExtendGraphKnownLID = [&](const std::vector<BuilderAddTask>& add_tasks, size_t task_index) {
+          const auto start_index = task_index * this->extend_thread_task_size;
+          const auto end_index = std::min(add_tasks.size(), (task_index+1) * this->extend_thread_task_size);
+          for (size_t i = start_index; i < end_index; i++)
+            extendGraphKnownLID(add_tasks[i]);
+        };
+
+        parallel_for(0, remaining_add_tasks.size(), this->extend_thread_count, [&] (size_t task_index) {
+          batchExtendGraphKnownLID(remaining_add_tasks, task_index);
+        });
+      }
+    }
+
+    // Multithreaded executor
+    // The helper function copied from https://github.com/nmslib/hnswlib/blob/master/examples/cpp/example_mt_search.cpp (and that itself is copied from nmslib)
+    // An alternative is using #pragme omp parallel for or any other C++ threading
+    template<class Function>
+    inline void parallel_for(size_t start, size_t end, size_t numThreads, Function fn) {
+      if (numThreads <= 0) {
+        numThreads = std::thread::hardware_concurrency();
+      }
+
+      if (numThreads == 1) {
+        for (size_t id = start; id < end; id++) {
+          fn(id);
+        }
+      } else {
+        std::vector<std::thread> threads;
+        std::atomic<size_t> current(start);
+
+        // keep track of exceptions in threads
+        // https://stackoverflow.com/a/32428427/1713196
+        std::exception_ptr lastException = nullptr;
+        std::mutex lastExceptMutex;
+
+        for (size_t threadId = 0; threadId < numThreads; ++threadId) {
+          threads.push_back(std::thread([&, threadId] {
+            while (true) {
+              size_t id = current.fetch_add(1);
+
+              if (id >= end) {
+                break;
+              }
+
+              try {
+                fn(id);
+              } catch (...) {
+                std::unique_lock<std::mutex> lastExcepLock(lastExceptMutex);
+                lastException = std::current_exception();
+                /*
+                * This will work even when current is the largest value that
+                * size_t can fit, because fetch_add returns the previous value
+                * before the increment (what will result in overflow
+                * and produce 0 instead of current + 1).
+                */
+                current = end;
+                break;
+              }
+            }
+          }));
+        }
+        for (auto &thread : threads) {
+          thread.join();
+        }
+        if (lastException) {
+          std::rethrow_exception(lastException);
+        }
+      }
     }
 
     /**
@@ -494,8 +592,9 @@ class EvenRegularGraphBuilder {
       const auto dist_func_param = graph.getFeatureSpace().get_dist_func_param();
 
       // find good neighbors for the new vertex
-      auto distrib = std::uniform_int_distribution<uint32_t>(0, uint32_t(graph.size() - 1));
-      const std::vector<uint32_t> entry_vertex_indices = { distrib(this->rnd_) };
+      //auto distrib = std::uniform_int_distribution<uint32_t>(0, uint32_t(graph.size() - 1));
+      //const std::vector<uint32_t> entry_vertex_indices = { distrib(this->rnd_) };
+      const std::vector<uint32_t> entry_vertex_indices = { 0 };
       auto top_list = graph.search(entry_vertex_indices, new_vertex_feature, this->extend_eps_, std::max(uint32_t(this->extend_k_), edges_per_vertex));
       const auto results = topListAscending(top_list);
 
@@ -506,9 +605,24 @@ class EvenRegularGraphBuilder {
         std::abort();
       }
 
-      // add an empty vertex to the graph (no neighbor information yet)
-      const auto internal_index = graph.addVertex(external_label, new_vertex_feature);
+      auto internal_index = 0;
+      {
+        std::lock_guard<std::mutex> lock(this->extend_mutex);
+        std::atomic_thread_fence(std::memory_order_acquire);
+        
+        // graph should not contain a vertex with the same label
+        if(graph.hasVertex(external_label)) {
+          std::fprintf(stderr, "graph contains vertex %u already. can not add it again\n", external_label);
+          perror("");
+          abort();
+        }
+
+        // add an empty vertex to the graph (no neighbor information yet)
+        internal_index = graph.addVertex(external_label, new_vertex_feature);
+        std::atomic_thread_fence(std::memory_order_release);
+      }
      
+
       // adding neighbors happens in two phases, the first tries to retain RNG, the second adds them without checking
       bool check_rng_phase = true; // true = activated, false = deactived
 
@@ -531,13 +645,12 @@ class EvenRegularGraphBuilder {
           // SchemeC: This version is good for high LID datasets or small graphs with low distance count limit during ANNS
           uint32_t new_neighbor_index = 0;
           float new_neighbor_distance = std::numeric_limits<float>::lowest();
-          if(this->lid_ == High) {
-
+          if(this->lid_ == High) 
+          {
             // find the worst edge of the new neighbor
             float new_neighbor_weight = std::numeric_limits<float>::lowest();
             const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
             const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
-
             for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
               const auto neighbor_index = neighbor_indices[edge_idx];
 
@@ -545,6 +658,7 @@ class EvenRegularGraphBuilder {
               if(graph.hasEdge(neighbor_index, internal_index))
                 continue;
 
+              // the weight of the neighbor might not be worst than the current worst one     
               const auto neighbor_weight = neighbor_weights[edge_idx];
               if(neighbor_weight > new_neighbor_weight) {
                 new_neighbor_weight = neighbor_weight;
@@ -552,6 +666,7 @@ class EvenRegularGraphBuilder {
               }
             }
 
+            // should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
             if(new_neighbor_weight == std::numeric_limits<float>::lowest()) 
               continue;
 
@@ -565,6 +680,7 @@ class EvenRegularGraphBuilder {
             const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
             for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
               const auto neighbor_index = neighbor_indices[edge_idx];
+
               if(graph.hasEdge(neighbor_index, internal_index) == false) {
                 const auto neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(neighbor_index), dist_func_param);
 
@@ -582,19 +698,36 @@ class EvenRegularGraphBuilder {
           // this should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
           if(new_neighbor_distance == std::numeric_limits<float>::lowest()) 
             continue;
+          
+          // update all edges
+          {
+            std::lock_guard<std::mutex> lock(this->extend_mutex); 
+            std::atomic_thread_fence(std::memory_order_acquire);
 
-          // place the new vertex in the edge list of the result-vertex
-          graph.changeEdge(candidate_index, new_neighbor_index, internal_index, candidate_weight);
-          new_neighbors.emplace_back(candidate_index, candidate_weight);
+            // other threads might have already changed the edges of the new_neighbor_index
+            if(graph.hasEdge(candidate_index, new_neighbor_index) && graph.hasEdge(new_neighbor_index, candidate_index) && 
+               graph.hasEdge(internal_index, candidate_index) == false && graph.hasEdge(candidate_index, internal_index) == false &&
+               graph.hasEdge(internal_index, new_neighbor_index) == false && graph.hasEdge(new_neighbor_index, internal_index) == false) {
 
-          // place the new vertex in the edge list of the best edge neighbor
-          graph.changeEdge(new_neighbor_index, candidate_index, internal_index, new_neighbor_distance);
-          new_neighbors.emplace_back(new_neighbor_index, new_neighbor_distance);
+              // update edge list of the new vertex
+              graph.changeEdge(internal_index, internal_index, candidate_index, candidate_weight);
+              graph.changeEdge(internal_index, internal_index, new_neighbor_index, new_neighbor_distance);   
+              new_neighbors.emplace_back(candidate_index, candidate_weight);
+              new_neighbors.emplace_back(new_neighbor_index, new_neighbor_distance);
+
+              // place the new vertex in the edge list of the result-vertex
+              graph.changeEdge(candidate_index, new_neighbor_index, internal_index, candidate_weight);
+
+              // place the new vertex in the edge list of the best edge neighbor
+              graph.changeEdge(new_neighbor_index, candidate_index, internal_index, new_neighbor_distance);
+            }
+            std::atomic_thread_fence(std::memory_order_release);
+          }
         }
-        
+
         check_rng_phase = false;
       }
-
+      
       if(new_neighbors.size() < edges_per_vertex) {
         std::fprintf(stderr, "could find only %zu good neighbors for the new vertex %u need %u\n", new_neighbors.size(), internal_index, edges_per_vertex);
         std::perror("");
@@ -602,17 +735,17 @@ class EvenRegularGraphBuilder {
       }
 
       // sort the neighbors by their neighbor indices and store them in the new vertex
-      {
-        std::sort(new_neighbors.begin(), new_neighbors.end(), [](const auto& x, const auto& y){return x.first < y.first;});
-        auto neighbor_indices = std::vector<uint32_t>(new_neighbors.size());
-        auto neighbor_weights = std::vector<float>(new_neighbors.size());
-        for (size_t i = 0; i < new_neighbors.size(); i++) {
-          const auto& neighbor = new_neighbors[i];
-          neighbor_indices[i] = neighbor.first;
-          neighbor_weights[i] = neighbor.second;
-        }
-        graph.changeEdges(internal_index, neighbor_indices.data(), neighbor_weights.data());  
-      }
+      // {
+      //   std::sort(new_neighbors.begin(), new_neighbors.end(), [](const auto& x, const auto& y){return x.first < y.first;});
+      //   auto neighbor_indices = std::vector<uint32_t>(new_neighbors.size());
+      //   auto neighbor_weights = std::vector<float>(new_neighbors.size());
+      //   for (size_t i = 0; i < new_neighbors.size(); i++) {
+      //     const auto& neighbor = new_neighbors[i];
+      //     neighbor_indices[i] = neighbor.first;
+      //     neighbor_weights[i] = neighbor.second;
+      //   }
+      //   graph.changeEdges(internal_index, neighbor_indices.data(), neighbor_weights.data());  
+      // }
     }
 
     /**
@@ -1233,9 +1366,17 @@ class EvenRegularGraphBuilder {
             del_task_manipulation_index = this->remove_entry_queue_.front().manipulation_index;
 
           if(add_task_manipulation_index < del_task_manipulation_index) {
-            extendGraph(this->new_entry_queue_.front());
-            this->build_status_.added++;
-            this->new_entry_queue_.pop_front();
+
+            // create batches
+            auto batch = std::vector<BuilderAddTask>();
+            batch.reserve(this->extend_batch_size);
+            while(batch.size() < this->extend_batch_size && this->new_entry_queue_.front().manipulation_index < del_task_manipulation_index) {
+              batch.push_back(std::move(this->new_entry_queue_.front()));
+              this->new_entry_queue_.pop_front();
+            }
+
+            extendGraph(batch);
+            this->build_status_.added+=batch.size();
           } else {
             reduceGraph(this->remove_entry_queue_.front());
             this->build_status_.deleted++;

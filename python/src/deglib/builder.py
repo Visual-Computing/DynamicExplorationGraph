@@ -110,6 +110,23 @@ class EvenRegularGraphBuilder:
         """
         return self.builder_cpp.get_num_remove_entries()
 
+    def set_thread_count(self, thread_count: int):
+        """
+        Set the number of thread used to build the graph.
+
+        :param thread_count: number of thread used to build the graph
+        """
+        return self.builder_cpp.set_thread_count(thread_count)
+
+    def set_batch_size(self, batch_size: int):
+        """
+        During construction several thread can build the graph. To minimize synchronization batches are used.
+        The batch size defines how many vertices should be added at once without calling the callback of the build method.
+
+        :param batch_size: size of the batch used to build the graph
+        """
+        return self.builder_cpp.set_batch_size(batch_size)
+
     def build(
             self, callback: Callable[[deglib_cpp.BuilderStatus], None] | str | None = None,
             infinite: bool = False
