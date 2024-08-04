@@ -4,6 +4,7 @@ tmp/
 var/
 .vscode/
 CMakePresets.json
+cmake-variants.yaml
 build-*
 cmake-build*
 data/
