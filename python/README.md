@@ -33,7 +33,7 @@ cd DynamicExplorationGraph
 ```shell
 cd python
 pip install setuptools pybind11 build
-python3 setup.py copy_build_files  # copy c++ library to ./lib/
+python setup.py copy_build_files  # copy c++ library to ./lib/
 pip install .
 ```
 This will compile the C++ code and install deglib into your virtual environment, so it may take a while.
@@ -48,7 +48,7 @@ pytest
 
 Build packages (sdist and wheels):
 ```shell
-python3 -m build
+python -m build
 ```
 
 Note: If you want to publish linux wheels to pypi you have to convert
