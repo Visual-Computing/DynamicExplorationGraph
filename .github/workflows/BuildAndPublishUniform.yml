@@ -34,7 +34,7 @@ jobs:
       run: python -m pip install --upgrade setuptools pybind11>=2.12.0 cibuildwheel
 
     - name: Copy Build Files
-      run: python3 setup.py copy_build_files
+      run: python setup.py copy_build_files
 
     - name: Build Packages
       run: cibuildwheel --output-dir "dist"
@@ -43,6 +43,7 @@ jobs:
         CIBW_BUILD_FRONTEND: "pip; args: --verbose"
         CIBW_ENVIRONMENT: "FORCE_AVX2=1"
         CIBW_ENVIRONMENT_MACOS: "FORCE_AVX2=1 MACOSX_DEPLOYMENT_TARGET=10.15"
+        CIBW_SKIP: "cp313-*"
 
     # upload artifacts
     - name: Upload Build Artifacts
@@ -50,7 +51,6 @@ jobs:
       with:
         name: release-dists-${{ matrix.platform }}
         path: python/dist
-
 
   build_sdist:
     runs-on: ubuntu-latest
@@ -69,7 +69,7 @@ jobs:
       run: python -m pip install --upgrade setuptools pybind11>=2.12.0
 
     - name: Copy Build Files
-      run: python3 setup.py copy_build_files
+      run: python setup.py copy_build_files
 
     - name: Build Source Distribution
       run: python setup.py sdist
@@ -79,7 +79,6 @@ jobs:
       with:
         name: release-dists-sdist
         path: python/dist
-
 
   pypi-publish:
     runs-on: "ubuntu-latest"
