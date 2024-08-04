@@ -21,6 +21,7 @@ int main(int argc, char *argv[]) {
     const auto data_path = std::filesystem::path(DATA_PATH);
     uint32_t k = 100; 
     uint32_t repeat_test = 1;
+    uint32_t test_threads = 1;
 
     // SIFT1M
     const auto graph_file   = (data_path / "deg" / "best_distortion_decisions" / "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string();
@@ -49,7 +50,7 @@ int main(int argc, char *argv[]) {
     fmt::print("{} ground truth {} dimensions \n", ground_truth_count, ground_truth_dims);
 
     fmt::print("Test with k={} and repeat_test={}\n", k, repeat_test);
-    deglib::benchmark::test_graph_anns(graph, query_repository, ground_truth, (uint32_t) ground_truth_dims, repeat_test, k);
+    deglib::benchmark::test_graph_anns(graph, query_repository, ground_truth, (uint32_t) ground_truth_dims, repeat_test, test_threads, k);
   
     fmt::print("Test OK\n");
     return 0;
