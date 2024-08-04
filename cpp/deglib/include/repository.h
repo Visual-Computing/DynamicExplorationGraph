@@ -156,6 +156,10 @@ StaticFeatureRepository load_static_repository(const char* path_repository)
     auto contiguous_features = u8vecs_read(path_repository, dims, count);
     return StaticFeatureRepository(std::move(contiguous_features), dims, count, sizeof(uint8_t));
   }
+
+  std::fprintf(stderr, "unsupported file extension, only fvecs and u8vecs are supported, but got %s \n", path_repository);
+  std::perror("");
+  std::abort();
 }
 
 }  // namespace deglib

@@ -606,7 +606,7 @@ class EvenRegularGraphBuilder {
         std::abort();
       }
 
-      auto internal_index = 0;
+      uint32_t internal_index = 0;
       {
         std::lock_guard<std::mutex> lock(this->extend_mutex);
         std::atomic_thread_fence(std::memory_order_acquire);
@@ -655,6 +655,10 @@ class EvenRegularGraphBuilder {
             for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
               const auto neighbor_index = neighbor_indices[edge_idx];
 
+              // if another thread is building the candidate_index at the moment, than its neighbor list contains self references
+              if(candidate_index == neighbor_index)
+                continue;
+
               // the suggested neighbor might already be in the edge list of the new vertex
               if(graph.hasEdge(neighbor_index, internal_index))
                 continue;
@@ -682,16 +686,21 @@ class EvenRegularGraphBuilder {
             for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
               const auto neighbor_index = neighbor_indices[edge_idx];
 
-              if(graph.hasEdge(neighbor_index, internal_index) == false) {
-                const auto neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(neighbor_index), dist_func_param);
+              // if another thread is building the candidate_index at the moment, than its neighbor list contains self references
+              if(candidate_index == neighbor_index)
+                continue;
 
-                // take the neighbor with the best distance to the new vertex, which might already be in its edge list
-                float distortion = (candidate_weight + neighbor_distance) - neighbor_weights[edge_idx];   // version D in the paper
-                if(distortion < best_distortion) {
-                  best_distortion = distortion;
-                  new_neighbor_index = neighbor_index;
-                  new_neighbor_distance = neighbor_distance;
-                }          
+              // the suggested neighbor might already be in the edge list of the new vertex
+              if(graph.hasEdge(neighbor_index, internal_index))
+                continue;
+
+              // take the neighbor with the best distance to the new vertex, which might already be in its edge list
+              const auto neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(neighbor_index), dist_func_param);
+              float distortion = (candidate_weight + neighbor_distance) - neighbor_weights[edge_idx];   // version D in the paper
+              if(distortion < best_distortion) {
+                best_distortion = distortion;
+                new_neighbor_index = neighbor_index;
+                new_neighbor_distance = neighbor_distance;
               }
             }
           }
@@ -712,7 +721,7 @@ class EvenRegularGraphBuilder {
 
               // update edge list of the new vertex
               graph.changeEdge(internal_index, internal_index, candidate_index, candidate_weight);
-              graph.changeEdge(internal_index, internal_index, new_neighbor_index, new_neighbor_distance);   
+              graph.changeEdge(internal_index, internal_index, new_neighbor_index, new_neighbor_distance);
               new_neighbors.emplace_back(candidate_index, candidate_weight);
               new_neighbors.emplace_back(new_neighbor_index, new_neighbor_distance);
 
@@ -734,19 +743,6 @@ class EvenRegularGraphBuilder {
         std::perror("");
         std::abort();
       }
-
-      // sort the neighbors by their neighbor indices and store them in the new vertex
-      // {
-      //   std::sort(new_neighbors.begin(), new_neighbors.end(), [](const auto& x, const auto& y){return x.first < y.first;});
-      //   auto neighbor_indices = std::vector<uint32_t>(new_neighbors.size());
-      //   auto neighbor_weights = std::vector<float>(new_neighbors.size());
-      //   for (size_t i = 0; i < new_neighbors.size(); i++) {
-      //     const auto& neighbor = new_neighbors[i];
-      //     neighbor_indices[i] = neighbor.first;
-      //     neighbor_weights[i] = neighbor.second;
-      //   }
-      //   graph.changeEdges(internal_index, neighbor_indices.data(), neighbor_weights.data());  
-      // }
     }
 
     /**
