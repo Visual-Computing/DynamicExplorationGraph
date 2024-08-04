@@ -30,6 +30,12 @@
     #else
       #warning "neither SSE, AVX nor AVX512 are defined"
     #endif
+  #elif !defined(__FMA__)
+    #ifdef _MSC_VER
+      #pragma message ( "warning: no FMA support or compile flag is missing" )
+    #else
+      #warning "no FMA support or compile flag is missing"
+    #endif
   #endif
 
   // #undef USE_AVX512  // for testing arm processors
