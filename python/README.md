@@ -24,7 +24,6 @@ python -m venv /path/to/deglib_env && . /path/to/deglib_env/bin/activate
 **Get the Source**
 ```shell
 # clone git repository
-mkdir install_dir && cd install_dir
 # TODO: "-b feat/python_bindings" not necessary after merge
 git clone -b feat/python_bindings git@github.com:Visual-Computing/DynamicExplorationGraph.git
 cd DynamicExplorationGraph
