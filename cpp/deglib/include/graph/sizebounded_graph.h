@@ -604,6 +604,8 @@ public:
     // Insert the new index and weight at the correct position
     neighbor_indices[insert_idx] = new_index;
     neighbor_weights[insert_idx] = new_weight;
+
+    return true;
   }
 
   /**
