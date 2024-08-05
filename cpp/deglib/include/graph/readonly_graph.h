@@ -591,9 +591,9 @@ public:
     uint32_t distance_computation_count = 0;
 
     // set of checked vertex ids
-    VisitedList *vl = visited_list_pool_->getFreeVisitedList();
-    vl_type *checked_ids = vl->mass;
-    vl_type checked_ids_tag = vl->curV;
+    const auto vl = visited_list_pool_->getFreeVisitedList();
+    auto* checked_ids = vl->get_visited();
+    const auto checked_ids_tag = vl->get_tag();
 
     // items to traverse next
     auto next_vertices = deglib::search::UncheckedSet();
@@ -617,7 +617,6 @@ public:
         // early stop after to many computations
         if constexpr (use_max_distance_count) {
           if(++distance_computation_count >= max_distance_computation_count) {
-            visited_list_pool_->releaseVisitedList(vl);
             return results;
           }
         }
@@ -682,14 +681,12 @@ public:
         // early stop after to many computations
         if constexpr (use_max_distance_count) {
           if(++distance_computation_count >= max_distance_computation_count) {
-            visited_list_pool_->releaseVisitedList(vl);
             return results;
           }
         }
       }
     }
 
-    visited_list_pool_->releaseVisitedList(vl);
     return results;
   }
 
@@ -789,7 +786,7 @@ public:
 /**
  * Load the graph
  */
-auto load_readonly_graph(const char* path_graph)
+inline auto load_readonly_graph(const char* path_graph)
 {
   std::error_code ec{};
   auto file_size = std::filesystem::file_size(path_graph, ec);
@@ -830,7 +827,7 @@ auto load_readonly_graph(const char* path_graph)
 /**
  * Convert the given graph to a readonly graph
  */
-auto convert_to_readonly_graph(deglib::search::SearchGraph& input_graph)
+inline auto convert_to_readonly_graph(deglib::search::SearchGraph& input_graph)
 {
   auto size = input_graph.size();
   auto edges_per_vertex = input_graph.getEdgesPerVertex();
