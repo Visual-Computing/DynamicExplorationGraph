@@ -83,17 +83,12 @@ private:
     };
 
     FreeVisitedList getFreeVisitedList() {
-        ListPtr rez;
-        {
-            std::unique_lock <std::mutex> lock(poolguard);
-            if (pool.size() > 0) {
-                rez = std::move(pool.front());
-                pool.pop_front();
-            } else {
-                rez = std::make_unique<VisitedList>(numelements);
-            }
+        ListPtr rez = popVisitedList();
+        if (rez) {
+            rez->reset();
+        } else {
+            rez = std::make_unique<VisitedList>(numelements);
         }
-        rez->reset();
         return {*this, std::move(rez)};
     }
 
@@ -101,6 +96,16 @@ private:
     void releaseVisitedList(ListPtr vl) {
         std::unique_lock <std::mutex> lock(poolguard);
         pool.push_back(std::move(vl));
+    }
+
+    ListPtr popVisitedList() {
+        ListPtr rez;
+        std::unique_lock <std::mutex> lock(poolguard);
+        if (!pool.empty()) {
+            rez = std::move(pool.front());
+            pool.pop_front();
+        }
+        return rez;
     }
 };
 
