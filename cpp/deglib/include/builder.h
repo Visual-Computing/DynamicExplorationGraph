@@ -1361,34 +1361,42 @@ class EvenRegularGraphBuilder {
  */
 void remove_non_mrng_edges(deglib::graph::MutableGraph& graph) {
 
-    const auto vertex_count = graph.size();
-    const auto edge_per_vertex = graph.getEdgesPerVertex();
+  const auto vertex_count = graph.size();
+  const auto edge_per_vertex = graph.getEdgesPerVertex();
 
-    const auto start = std::chrono::steady_clock::now();
+  const auto start = std::chrono::steady_clock::now();
+  const auto thread_count = std::thread::hardware_concurrency();
+  auto removed_rng_edges_per_thread = std::vector<uint32_t>(thread_count);
+  deglib::concurrent::parallel_for(0, vertex_count, thread_count, [&] (size_t vertex_index, size_t thread_id) {
     uint32_t removed_rng_edges = 0;
-    for (uint32_t i = 0; i < vertex_count; i++) {
-        const auto vertex_index = i;
 
-        const auto neighbor_indices = graph.getNeighborIndices(vertex_index);
-        const auto neighbor_weights = graph.getNeighborWeights(vertex_index);
+    const auto neighbor_indices = graph.getNeighborIndices(vertex_index);
+    const auto neighbor_weights = graph.getNeighborWeights(vertex_index);
 
-        // find all none rng conform neighbors
-        std::vector<uint32_t> remove_neighbor_ids;
-        for (uint32_t n = 0; n < edge_per_vertex; n++) {
-            const auto neighbor_index = neighbor_indices[n];
-            const auto neighbor_weight = neighbor_weights[n];
+    // find all none rng conform neighbors
+    std::vector<uint32_t> remove_neighbor_ids;
+    for (uint32_t n = 0; n < edge_per_vertex; n++) {
+      const auto neighbor_index = neighbor_indices[n];
+      const auto neighbor_weight = neighbor_weights[n];
 
-            if(deglib::analysis::checkRNG(graph, edge_per_vertex, vertex_index, neighbor_index, neighbor_weight) == false) {
-                remove_neighbor_ids.emplace_back(neighbor_index);
-            }
-        }
-
-        for (uint32_t n = 0; n < remove_neighbor_ids.size(); n++) {
-            graph.changeEdge(vertex_index, remove_neighbor_ids[n], vertex_index, 0);
-            removed_rng_edges++;
-        }
+      if(deglib::analysis::checkRNG(graph, edge_per_vertex, vertex_index, neighbor_index, neighbor_weight) == false) {
+        remove_neighbor_ids.emplace_back(neighbor_index);
+      }
     }
-    const auto duration_ms = uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+
+    for (uint32_t n = 0; n < remove_neighbor_ids.size(); n++) {
+      graph.changeEdge(vertex_index, remove_neighbor_ids[n], vertex_index, 0);
+      removed_rng_edges++;
+    }
+    removed_rng_edges_per_thread[thread_id] += removed_rng_edges;
+  });
+
+  // aggregate
+  uint32_t removed_rng_edges = 0;
+  for (uint32_t i = 0; i < thread_count; i++) 
+    removed_rng_edges += removed_rng_edges_per_thread[i];
+
+  const auto duration_ms = uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
 
 	std::cout << "Removed " << removed_rng_edges << " edges in " << duration_ms << " ms. Final graph contains " << deglib::analysis::calc_non_rng_edges(graph) << " non-RNG edges\n";
 }
@@ -1399,35 +1407,35 @@ void remove_non_mrng_edges(deglib::graph::MutableGraph& graph) {
  */
 void optimze_edges(deglib::graph::MutableGraph& graph, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt, const uint32_t iterations) {
     
-    auto rnd = std::mt19937(7);                         // default 7
+  auto rnd = std::mt19937(7);                         // default 7
 
-    // create a graph builder to add vertices to the new graph and improve its edges
+  // create a graph builder to add vertices to the new graph and improve its edges
 	std::cout << "Start graph builder\n";
-    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::Unknown, 0, 0.0f, k_opt, eps_opt, i_opt, 1, 0);
-    
-    // check the integrity of the graph during the graph build process
-    auto start = std::chrono::steady_clock::now();
-    uint64_t duration_ms = 0;
-    const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
-        const auto size = graph.size();
+  auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::Unknown, 0, 0.0f, k_opt, eps_opt, i_opt, 1, 0);
+  
+  // check the integrity of the graph during the graph build process
+  auto start = std::chrono::steady_clock::now();
+  uint64_t duration_ms = 0;
+  const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
+    const auto size = graph.size();
 
-        if(status.step % (iterations/10) == 0) {    
-            duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
-            auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 100);
-            auto valid_weights = deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_regularity(graph, uint32_t(size), true);
-            auto connected = deglib::analysis::check_graph_connectivity(graph);
+    if(status.step % (iterations/10) == 0) {    
+      duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+      auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 100);
+      auto valid_weights = deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_regularity(graph, uint32_t(size), true);
+      auto connected = deglib::analysis::check_graph_connectivity(graph);
 
-            auto duration = duration_ms / 1000;
-		        std::cout << std::setw(7) << status.step << " step, " << std::setw(5) << duration << "s, AEW: " << std::fixed << std::setprecision(2) << std::setw(4) << avg_edge_weight << ", " << (connected ? "" : "not") << " connected, " << (valid_weights ? "valid" : "invalid") << "\n";
-            start = std::chrono::steady_clock::now();
-        }
+      auto duration = duration_ms / 1000;
+	    std::cout << std::setw(7) << status.step << " step, " << std::setw(5) << duration << "s, AEW: " << std::fixed << std::setprecision(2) << std::setw(4) << avg_edge_weight << ", " << (connected ? "" : "not") << " connected, " << (valid_weights ? "valid" : "invalid") << "\n";
+      start = std::chrono::steady_clock::now();
+    }
 
-        if(status.step > iterations)
-            builder.stop();
-    };
+    if(status.step > iterations)
+      builder.stop();
+  };
 
-    // start the build process
-    builder.build(improvement_callback, true);
+  // start the build process
+  builder.build(improvement_callback, true);
 }
 
 } // end namespace deglib::builder
