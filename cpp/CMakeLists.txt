@@ -76,10 +76,16 @@ else()  # Native build
   if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(
       compile-options
-      INTERFACE -O2
+      INTERFACE -O3
                 -march=native
+                -mavx2
+                -mfma
                 -fpic
-                -fopenmp)
+                -w
+                -fopenmp
+                -pthread
+                -ftree-vectorize
+                -ftree-vectorizer-verbose=0)
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
     target_compile_options(
       compile-options
