@@ -6,6 +6,8 @@
 #include <math.h>
 #include <unordered_map>
 #include <array>
+#include <unordered_set>
+#include <random>
 
 #include "deglib.h"
 #include "distances.h"
@@ -338,10 +340,10 @@ public:
 
         search_func_(getSearchFunction(feature_space)), 
         explore_func_(getExploreFunction(feature_space)),
-        feature_space_(feature_space) { 
+        feature_space_(feature_space),
+        visited_list_pool_( std::make_unique<VisitedListPool>(1, max_vertex_count)) { 
 
     label_to_index_.reserve(max_vertex_count);
-    visited_list_pool_ = std::make_unique<VisitedListPool>(1, max_vertex_count);
   }
 
   /**
@@ -466,9 +468,12 @@ public:
     const auto query = this->feature_by_index(to_vertex);
     const auto dist_func = this->feature_space_.get_dist_func();
     const auto dist_func_param = this->feature_space_.get_dist_func_param();
+    const auto feature_size = this->feature_space_.get_data_size();
 
     // set of checked vertex ids
-    auto checked_ids = std::vector<bool>(this->size());
+    const auto vl = visited_list_pool_->getFreeVisitedList();
+    auto* checked_ids = vl->get_visited();
+    const auto checked_ids_tag = vl->get_tag();
 
     // items to traverse next
     auto next_vertices = deglib::search::UncheckedSet();
@@ -481,8 +486,8 @@ public:
 
     // copy the initial entry vertices and their distances to the query into the three containers
     for (auto&& index : entry_vertex_indices) {
-      if(checked_ids[index] == false) {
-        checked_ids[index] = true;
+      if(checked_ids[index] != checked_ids_tag) {
+        checked_ids[index] = checked_ids_tag;
 
         const auto feature = this->feature_by_index(index);
         const auto distance = dist_func(query, feature, dist_func_param);
@@ -528,8 +533,8 @@ public:
         }
 
         // collect 
-        if (checked_ids[neighbor_index] == false)  {
-          checked_ids[neighbor_index] = true;
+        if(checked_ids[neighbor_index] != checked_ids_tag) {
+          checked_ids[neighbor_index] = checked_ids_tag;
           good_neighbors[good_neighbor_count++] = neighbor_index;
         }
       }
@@ -537,9 +542,9 @@ public:
       if (good_neighbor_count == 0)
         continue;
 
-      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])));
+      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])), feature_size);
       for (size_t i = 0; i < good_neighbor_count; i++) {
-        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])));
+        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])), feature_size);
 
         const auto neighbor_index = good_neighbors[i];
         const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
@@ -588,6 +593,8 @@ public:
   deglib::search::ResultSet searchImpl(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const uint32_t max_distance_computation_count) const
   {
     const auto dist_func_param = this->feature_space_.get_dist_func_param();
+    const auto feature_size = this->feature_space_.get_data_size();
+    const size_t degree = this->edges_per_vertex_;
     uint32_t distance_computation_count = 0;
 
     // set of checked vertex ids
@@ -597,7 +604,7 @@ public:
 
     // items to traverse next
     auto next_vertices = deglib::search::UncheckedSet();
-    next_vertices.reserve(k*this->edges_per_vertex_);
+    next_vertices.reserve(k*degree);
 
     // result set
     // TODO: custom priority queue with an internal Variable Length Array wrapped in a macro with linear-scan search and memcopy 
@@ -635,14 +642,13 @@ public:
       const auto next_vertex = next_vertices.top();
       next_vertices.pop();
 
-      // max distance reached
+      // max distance reached 
       if (next_vertex.getDistance() > exploration_radius) 
         break;
 
       size_t good_neighbor_count = 0;
       const auto neighbor_indices = this->neighbors_by_index(next_vertex.getInternalIndex());
-      memory::prefetch(reinterpret_cast<const char*>(checked_ids[neighbor_indices[0]]));
-      for (size_t i = 0; i < this->edges_per_vertex_; i++) {
+      for (size_t i = 0; i < degree; i++) {
         const auto neighbor_index = neighbor_indices[i];
         if (checked_ids[neighbor_index] != checked_ids_tag)  {
           checked_ids[neighbor_index] = checked_ids_tag;
@@ -653,9 +659,9 @@ public:
       if (good_neighbor_count == 0)
         continue;
 
-      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])));
+      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])), feature_size);
       for (size_t i = 0; i < good_neighbor_count; i++) {
-        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])));
+        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])), feature_size);
 
         const auto neighbor_index = good_neighbors[i];
         const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
@@ -707,9 +713,12 @@ public:
   {
     uint32_t distance_computation_count = 0;
     const auto dist_func_param = this->feature_space_.get_dist_func_param();
+    const auto feature_size = this->feature_space_.get_data_size();
 
     // set of checked vertex ids
-    auto checked_ids = std::vector<bool>(this->size());
+    const auto vl = visited_list_pool_->getFreeVisitedList();
+    auto* checked_ids = vl->get_visited();
+    const auto checked_ids_tag = vl->get_tag();
 
     // items to traverse next
     auto next_vertices = deglib::search::UncheckedSet();
@@ -720,7 +729,7 @@ public:
     results.reserve(k);
 
     // add the entry vertex index to the vertices which gets checked next and ignore it for further checks
-    checked_ids[entry_vertex_index] = true;
+    checked_ids[entry_vertex_index] = checked_ids_tag;
     next_vertices.emplace(entry_vertex_index, 0);
     const auto query = this->feature_by_index(entry_vertex_index);
 
@@ -739,8 +748,8 @@ public:
       const auto neighbor_indices = this->neighbors_by_index(next_vertex.getInternalIndex());
       for (uint8_t i = 0; i < this->edges_per_vertex_; i++) {
         const auto neighbor_index = neighbor_indices[i];
-        if (checked_ids[neighbor_index] == false)  {
-          checked_ids[neighbor_index] = true;
+        if (checked_ids[neighbor_index] != checked_ids_tag)  {
+          checked_ids[neighbor_index] = checked_ids_tag;
           good_neighbors[good_neighbor_count++] = neighbor_index;
         }
       }
@@ -748,9 +757,9 @@ public:
       if (good_neighbor_count == 0)
         continue;
 
-      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])));
+      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])), feature_size);
       for (uint8_t i = 0; i < good_neighbor_count; i++) {
-        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])));
+        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])), feature_size);
 
         const auto neighbor_index = good_neighbors[i];
         const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);

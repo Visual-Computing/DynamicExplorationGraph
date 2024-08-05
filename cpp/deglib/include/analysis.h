@@ -122,6 +122,7 @@ namespace deglib::analysis
         const auto& feature_space = graph.getFeatureSpace();
         const auto dist_func = feature_space.get_dist_func();
         const auto dist_func_param = feature_space.get_dist_func_param();
+        const auto feature_size = feature_space.get_data_size();
         const auto edges_per_vertex = graph.getEdgesPerVertex();
         const auto vertex_count = graph.size();
 
@@ -129,9 +130,9 @@ namespace deglib::analysis
             const auto fv1 = graph.getFeatureVector(n);
             const auto neighborIds = graph.getNeighborIndices(n); 
             const auto neighborWeights = graph.getNeighborWeights(n); 
-            memory::prefetch(reinterpret_cast<const char*>(graph.getFeatureVector(neighborIds[0])));
+            deglib::memory::prefetch(reinterpret_cast<const char*>(graph.getFeatureVector(neighborIds[0])), feature_size);
             for (uint8_t e = 0; e < edges_per_vertex; e++) {
-                memory::prefetch(reinterpret_cast<const char*>(graph.getFeatureVector(neighborIds[std::min(e + 1, edges_per_vertex - 1)])));
+                deglib::memory::prefetch(reinterpret_cast<const char*>(graph.getFeatureVector(neighborIds[std::min(e + 1, edges_per_vertex - 1)])), feature_size);
                 const auto fv2 = graph.getFeatureVector(neighborIds[e]);
                 const auto dist = dist_func(fv1, fv2, dist_func_param);
 
