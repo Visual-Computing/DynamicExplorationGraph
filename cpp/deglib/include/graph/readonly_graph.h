@@ -10,6 +10,7 @@
 #include "deglib.h"
 #include "distances.h"
 #include "search.h"
+#include "visited_list_pool.h"
 
 namespace deglib::graph
 {
@@ -320,6 +321,8 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
   // distance calculation function between feature vectors of two graph vertices
   const deglib::FloatSpace feature_space_;
 
+  std::unique_ptr<VisitedListPool> visited_list_pool_;
+
 public:
   ReadOnlyGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::FloatSpace feature_space)
       : max_vertex_count_(max_vertex_count),
@@ -338,6 +341,7 @@ public:
         feature_space_(feature_space) { 
 
     label_to_index_.reserve(max_vertex_count);
+    visited_list_pool_ = std::make_unique<VisitedListPool>(1, max_vertex_count);
   }
 
   /**
@@ -587,7 +591,9 @@ public:
     uint32_t distance_computation_count = 0;
 
     // set of checked vertex ids
-    auto checked_ids = std::vector<bool>(this->size());
+    const auto vl = visited_list_pool_->getFreeVisitedList();
+    auto* checked_ids = vl->get_visited();
+    const auto checked_ids_tag = vl->get_tag();
 
     // items to traverse next
     auto next_vertices = deglib::search::UncheckedSet();
@@ -600,8 +606,8 @@ public:
 
     // copy the initial entry vertices and their distances to the query into the three containers
     for (auto&& index : entry_vertex_indices) {
-      if(checked_ids[index] == false) {
-        checked_ids[index] = true;
+      if(checked_ids[index] != checked_ids_tag) {
+        checked_ids[index] = checked_ids_tag;
 
         const auto feature = reinterpret_cast<const float*>(this->feature_by_index(index));
         const auto distance = COMPARATOR::compare(query, feature, dist_func_param);
@@ -610,8 +616,9 @@ public:
 
         // early stop after to many computations
         if constexpr (use_max_distance_count) {
-          if(++distance_computation_count >= max_distance_computation_count)
+          if(++distance_computation_count >= max_distance_computation_count) {
             return results;
+          }
         }
       }
     }
@@ -634,10 +641,11 @@ public:
 
       size_t good_neighbor_count = 0;
       const auto neighbor_indices = this->neighbors_by_index(next_vertex.getInternalIndex());
+      memory::prefetch(reinterpret_cast<const char*>(checked_ids[neighbor_indices[0]]));
       for (size_t i = 0; i < this->edges_per_vertex_; i++) {
         const auto neighbor_index = neighbor_indices[i];
-        if (checked_ids[neighbor_index] == false)  {
-          checked_ids[neighbor_index] = true;
+        if (checked_ids[neighbor_index] != checked_ids_tag)  {
+          checked_ids[neighbor_index] = checked_ids_tag;
           good_neighbors[good_neighbor_count++] = neighbor_index;
         }
       }
@@ -672,8 +680,9 @@ public:
 
         // early stop after to many computations
         if constexpr (use_max_distance_count) {
-          if(++distance_computation_count >= max_distance_computation_count)
+          if(++distance_computation_count >= max_distance_computation_count) {
             return results;
+          }
         }
       }
     }
@@ -777,7 +786,7 @@ public:
 /**
  * Load the graph
  */
-auto load_readonly_graph(const char* path_graph)
+inline auto load_readonly_graph(const char* path_graph)
 {
   std::error_code ec{};
   auto file_size = std::filesystem::file_size(path_graph, ec);
@@ -818,7 +827,7 @@ auto load_readonly_graph(const char* path_graph)
 /**
  * Convert the given graph to a readonly graph
  */
-auto convert_to_readonly_graph(deglib::search::SearchGraph& input_graph)
+inline auto convert_to_readonly_graph(deglib::search::SearchGraph& input_graph)
 {
   auto size = input_graph.size();
   auto edges_per_vertex = input_graph.getEdgesPerVertex();
