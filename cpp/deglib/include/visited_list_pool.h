@@ -1,9 +1,10 @@
 #pragma once
 
+#include "intrusive_list.h"
+
 #include <algorithm>
 #include <mutex>
-#include <vector>
-#include <deque>
+#include <memory>
 #include <cstdint>
 
 /**
@@ -11,14 +12,20 @@
  */
 namespace deglib::graph {
 
+class VisitedListPool;
+
 class VisitedList {
 private:
-    uint16_t current_tag_{1};
+    friend VisitedListPool;
+
+    VisitedList* next_;
+    VisitedList* prev_;
     std::unique_ptr<uint16_t[]> slots_;
-    unsigned int num_elements_;
+    uint32_t num_elements_;
+    uint16_t current_tag_{1};
 
 public:
-    explicit VisitedList(int numelements1) : slots_(std::make_unique<uint16_t[]>(numelements1)), num_elements_(numelements1) {}
+    explicit VisitedList(uint32_t numelements1) : slots_(std::make_unique<uint16_t[]>(numelements1)), num_elements_(numelements1) {}
 
     [[nodiscard]] auto* get_visited() const {
         return slots_.get();
@@ -31,7 +38,7 @@ public:
     void reset() {
         ++current_tag_;
         if (current_tag_ == 0) {
-            std::fill_n(slots_.get(), num_elements_, 0);
+            std::fill_n(slots_.get(), num_elements_, uint16_t{});
             ++current_tag_;
         }
     }
@@ -39,16 +46,20 @@ public:
 
 class VisitedListPool {
 private:
-    using ListPtr = std::unique_ptr<VisitedList>;
-
-    std::deque<ListPtr> pool_;
+    IntrusiveList<VisitedList, &VisitedList::next_, &VisitedList::prev_> pool_;
     std::mutex pool_guard_;
-    int num_elements_;
+    uint32_t num_elements_;
 
  public:
-    VisitedListPool(int initmaxpools, int numelements) : num_elements_(numelements) {
-        for (int i = 0; i < initmaxpools; i++)
-            pool_.push_front(std::make_unique<VisitedList>(numelements));
+    VisitedListPool(uint32_t initmaxpools, uint32_t numelements) : num_elements_(numelements) {
+        for (uint32_t i = 0; i < initmaxpools; i++)
+            pool_.push_back(new VisitedList(numelements));
+    }
+
+    ~VisitedListPool() noexcept {
+        while (!pool_.empty()) {
+            delete pool_.pop_front();
+        }
     }
 
     class FreeVisitedList {
@@ -56,9 +67,9 @@ private:
             friend VisitedListPool;
             
             VisitedListPool& pool_;
-            ListPtr list_;
+            VisitedList& list_;
 
-            FreeVisitedList(VisitedListPool& pool, ListPtr list) : pool_(pool), list_(std::move(list)) {}
+            FreeVisitedList(VisitedListPool& pool, VisitedList& list) : pool_(pool), list_(list) {}
 
         public:        
             FreeVisitedList(const FreeVisitedList& other) = delete;
@@ -67,36 +78,35 @@ private:
             FreeVisitedList& operator=(FreeVisitedList&& other) = delete;
 
             ~FreeVisitedList() noexcept {
-                pool_.releaseVisitedList(std::move(list_));
+                pool_.releaseVisitedList(list_);
             }
 
             auto operator->() const {
-                return list_.get();
+                return &list_;
             }
     };
 
-    FreeVisitedList getFreeVisitedList() {
-        ListPtr rez = popVisitedList();
+    [[nodiscard]] FreeVisitedList getFreeVisitedList() {
+        auto rez = popVisitedList();
         if (rez) {
             rez->reset();
         } else {
-            rez = std::make_unique<VisitedList>(num_elements_);
+            rez = new VisitedList(num_elements_);
         }
-        return {*this, std::move(rez)};
+        return {*this, *rez};
     }
 
 private:
-    void releaseVisitedList(ListPtr vl) {
+    void releaseVisitedList(VisitedList& vl) {
         std::unique_lock <std::mutex> lock(pool_guard_);
-        pool_.push_back(std::move(vl));
+        pool_.push_back(&vl);
     }
 
-    ListPtr popVisitedList() {
-        ListPtr rez;
+    VisitedList* popVisitedList() {
+        VisitedList* rez{};
         std::unique_lock <std::mutex> lock(pool_guard_);
         if (!pool_.empty()) {
-            rez = std::move(pool_.front());
-            pool_.pop_front();
+            rez = pool_.pop_front();
         }
         return rez;
     }
