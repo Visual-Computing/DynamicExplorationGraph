@@ -13,10 +13,10 @@ from .search import ResultSet, ObjectDistance
 from .utils import assure_array, InvalidShapeException
 
 
-# TODO: safety checks
-
-
 class SearchGraph(ABC):
+    def __init__(self, graph_cpp: deglib_cpp.SearchGraph):
+        self.graph_cpp = graph_cpp
+
     @abstractmethod
     def size(self) -> int:
         """
@@ -107,7 +107,6 @@ class SearchGraph(ABC):
         """
         raise NotImplementedError()
 
-    @abstractmethod
     def search(
             self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
             entry_vertex_indices: Optional[List[int]] = None, threads: int = 1, thread_batch_size: int = 0
@@ -132,7 +131,32 @@ class SearchGraph(ABC):
         :param thread_batch_size: If threads != 1, the number of queries to search in the same thread.
         :returns: TODO
         """
-        raise NotImplementedError()
+        # handle query shapes
+        if len(query.shape) == 1:
+            query = query.reshape(1, -1)
+        if len(query.shape) != 2:
+            raise InvalidShapeException('invalid query shape: {}'.format(query.shape))
+
+        metric = self.get_feature_space().metric()
+        if metric in (Metric.L2, Metric.InnerProduct):
+            valid_dtype = np.float32
+        elif metric == Metric.L2_Uint8:
+            valid_dtype = np.uint8
+        else:
+            raise ValueError('unknown metric: {} ({})  {}  {}'.format(metric, type(metric), metric == Metric.L2, metric in (Metric.L2,)))
+
+        query = assure_array(query, 'query', valid_dtype)
+        if entry_vertex_indices is None:
+            entry_vertex_indices = self.get_entry_vertex_indices()
+
+        threads = get_num_useful_threads(threads, query.shape[0])
+
+        if thread_batch_size <= 0:
+            thread_batch_size = max(query.shape[0] // (threads * 4), 1)
+
+        return self.graph_cpp.search(
+            entry_vertex_indices, query, eps, k, max_distance_computation_count, threads, thread_batch_size
+        )
 
     @abstractmethod
     def explore(self, entry_vertex_index: int, k: int, max_distance_computation_count: int) -> ResultSet:
@@ -152,9 +176,9 @@ class SearchGraph(ABC):
 
 class ReadOnlyGraph(SearchGraph):
     def __init__(self, graph_cpp: deglib_cpp.ReadOnlyGraph):
+        super().__init__(graph_cpp)
         if not isinstance(graph_cpp, deglib_cpp.ReadOnlyGraph):
             raise TypeError("expected ReadOnlyGraph but got {}".format(type(graph_cpp)))
-        self.graph_cpp = graph_cpp
 
     @classmethod
     def from_graph(
@@ -192,7 +216,7 @@ class ReadOnlyGraph(SearchGraph):
         :return: the feature space
         """
         # first two parameters get ignored
-        return FloatSpace(0, Metric.L2, float_space_cpp=self.graph_cpp.get_feature_space())
+        return FloatSpace(float_space_cpp=self.graph_cpp.get_feature_space())
 
     def get_feature_vector(self, index: int, copy: bool = False) -> np.ndarray:
         """
@@ -218,49 +242,6 @@ class ReadOnlyGraph(SearchGraph):
         :returns: The internal index
         """
         return self.graph_cpp.get_internal_index(external_label)
-
-    def search(
-            self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
-            entry_vertex_indices: Optional[List[int]] = None, threads: int = 1, thread_batch_size: int = 0
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
-
-        Eps greater 0 extends the search range and takes additional graph vertices into account.
-
-        It is possible to limit the amount of work by specifying a maximal number of distances to be calculated.
-        For lower numbers it is recommended to set eps to 0 since its very unlikely the method can make use of the
-        extended the search range.
-
-        :param query: A feature vector for which similar feature vectors should searched.
-        :param eps: TODO
-        :param k: The number of results that will be returned
-        :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
-        :param entry_vertex_indices: Start point for exploratory search. If None, a reasonable default is used.
-        :param threads: The number of threads to use for parallel processing. It should not excel the number of queries.
-                        If set to 0, the minimum of the number of cores of this machine and the number of queries is
-                        used.
-        :param thread_batch_size: If threads != 1, the number of queries to search in the same thread. If set <= 0, will
-                                  be set to a reasonable value.
-        :returns: TODO
-        """
-        # handle query shapes
-        if len(query.shape) == 1:
-            query = query.reshape(1, -1)
-        if len(query.shape) != 2:
-            raise InvalidShapeException('invalid query shape: {}'.format(query.shape))
-        query = assure_array(query, 'query', np.float32)
-        threads = get_num_useful_threads(threads, query.shape[0])
-
-        if entry_vertex_indices is None:
-            entry_vertex_indices = self.get_entry_vertex_indices()
-
-        if thread_batch_size <= 0:
-            thread_batch_size = max(query.shape[0] // (threads * 4), 1)
-
-        return self.graph_cpp.search(
-            entry_vertex_indices, query, eps, k, max_distance_computation_count, threads, thread_batch_size
-        )
 
     def has_path(self, entry_vertex_indices: List[int], to_vertex: int, eps: float, k: int) -> List[ObjectDistance]:
         """
@@ -458,7 +439,7 @@ class SizeBoundedGraph(MutableGraph):
         """
         if graph_cpp is None:
             graph_cpp = deglib_cpp.SizeBoundedGraph(max_vertex_count, edges_per_vertex, feature_space.to_cpp())
-        self.graph_cpp = graph_cpp
+        super().__init__(graph_cpp)
         self.feature_space = feature_space
 
     @staticmethod
@@ -471,7 +452,7 @@ class SizeBoundedGraph(MutableGraph):
         :param edges_per_vertex: Number of neighbors for each vertex. Defaults to 32.
         :param metric: The metric to measure distances between features. Defaults to L2-Metric.
         """
-        return SizeBoundedGraph(capacity, edges_per_vertex, FloatSpace(dims, metric))
+        return SizeBoundedGraph(capacity, edges_per_vertex, FloatSpace.create(dims, metric))
 
     def size(self) -> int:
         """
@@ -483,8 +464,7 @@ class SizeBoundedGraph(MutableGraph):
         """
         :return: the feature space
         """
-        # first two parameters get ignored
-        return FloatSpace(0, Metric.L2, float_space_cpp=self.graph_cpp.get_feature_space())
+        return FloatSpace(self.graph_cpp.get_feature_space())
 
     def get_feature_vector(self, index: int, copy: bool = False) -> np.ndarray:
         """
@@ -651,49 +631,6 @@ class SizeBoundedGraph(MutableGraph):
         :returns: whether the vertex at internal_index has an edge to the vertex at neighbor_index.
         """
         return self.graph_cpp.has_edge(internal_index, neighbor_index)
-
-    def search(
-            self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
-            entry_vertex_indices: Optional[List[int]] = None, threads: int = 1, thread_batch_size: int = 0
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
-
-        Eps greater 0 extends the search range and takes additional graph vertices into account.
-
-        It is possible to limit the amount of work by specifying a maximal number of distances to be calculated.
-        For lower numbers it is recommended to set eps to 0 since its very unlikely the method can make use of the
-        extended the search range.
-
-        :param query: A feature vector for which similar feature vectors should searched.
-        :param eps: TODO
-        :param k: The number of results that will be returned
-        :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
-        :param entry_vertex_indices: Start point for exploratory search. If None, a reasonable default is used.
-        :param threads: The number of threads to use for parallel processing. It should not excel the number of queries.
-                        If set to 0, the minimum of the number of cores of this machine and the number of queries is
-                        used.
-        :param thread_batch_size: If threads != 1, the number of queries to search in the same thread.
-        :returns: TODO
-        """
-        # handle query shapes
-        if len(query.shape) == 1:
-            query = query.reshape(1, -1)
-        if len(query.shape) != 2:
-            raise InvalidShapeException('invalid query shape: {}'.format(query.shape))
-
-        query = assure_array(query, 'query', np.float32)
-        if entry_vertex_indices is None:
-            entry_vertex_indices = self.get_entry_vertex_indices()
-
-        threads = get_num_useful_threads(threads, query.shape[0])
-
-        if thread_batch_size <= 0:
-            thread_batch_size = max(query.shape[0] // (threads * 4), 1)
-
-        return self.graph_cpp.search(
-            entry_vertex_indices, query, eps, k, max_distance_computation_count, threads, thread_batch_size
-        )
 
     def explore(self, entry_vertex_index: int, k: int, max_distance_computation_count: int) -> ResultSet:
         """

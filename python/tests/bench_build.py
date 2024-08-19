@@ -105,7 +105,7 @@ def create_graph(
     print("Setup empty graph with {} vertices in {}D feature space".format(repository.shape[0], repository.shape[1]))
     dims = repository.shape[1]
     max_vertex_count = repository.shape[0]
-    feature_space = deglib.FloatSpace(dims, metric)
+    feature_space = deglib.FloatSpace.create(dims, metric)
     graph = deglib.graph.SizeBoundedGraph(max_vertex_count, d, feature_space)
     # TODO: report actual mem usage
     print("Actual memory usage: {} Mb after setup empty graph".format(get_current_rss_mb()))

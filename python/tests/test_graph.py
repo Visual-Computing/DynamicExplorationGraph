@@ -41,7 +41,7 @@ def get_size_bounded_graph(test_graphs):
 
 
 def get_read_only_graph_converted(test_graphs):
-    return deglib.graph.ReadOnlyGraph.from_graph(test_graphs.size_bounded_graph)
+    return test_graphs.read_only_graph_converted
 
 
 all_graph_getters = [get_read_only_graph, get_size_bounded_graph, get_read_only_graph_converted]
@@ -61,6 +61,7 @@ class TestGraphs:
         self.graph_path = get_tmp_graph_file(self.samples, self.dims)
         self.size_bounded_graph.save_graph(self.graph_path)
         self.read_only_graph = deglib.graph.load_readonly_graph(self.graph_path)
+        self.read_only_graph_converted = deglib.graph.ReadOnlyGraph.from_graph(self.size_bounded_graph)
 
     @pytest.mark.parametrize('graph_getter', all_graph_getters)
     def test_get_feature_vector(self, graph_getter: Callable[[Self], deglib.graph.SearchGraph]):
