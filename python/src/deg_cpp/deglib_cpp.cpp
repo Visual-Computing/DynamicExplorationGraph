@@ -213,9 +213,12 @@ PYBIND11_MODULE(deglib_cpp, m) {
            py::return_value_policy::reference)
       .def("get_feature_vector",
            [](const deglib::graph::ReadOnlyGraph &g, const uint32_t internal_idx) {
+             const bool uint8_metric = g.getFeatureSpace().metric() == deglib::Metric::L2_Uint8;
+             const char* format_descriptor = uint8_metric ? "B" : "f";
+             const ssize_t item_size = uint8_metric ? sizeof(uint8_t) : sizeof(float);
              return py::memoryview::from_buffer(
                  g.getFeatureVector(internal_idx),
-                 sizeof(float), "f", {g.getFeatureSpace().dim()}, {sizeof(float)});
+                 item_size, format_descriptor, {g.getFeatureSpace().dim()}, {item_size});
            }, py::return_value_policy::reference
       )
       .def("get_internal_index", &deglib::graph::ReadOnlyGraph::getInternalIndex)
@@ -251,9 +254,12 @@ PYBIND11_MODULE(deglib_cpp, m) {
          py::return_value_policy::reference)
     .def("get_feature_vector",
          [](const deglib::graph::SizeBoundedGraph &g, const uint32_t internal_idx) {
+           const bool uint8_metric = g.getFeatureSpace().metric() == deglib::Metric::L2_Uint8;
+           const char* format_descriptor = uint8_metric ? "B" : "f";
+           const ssize_t item_size = uint8_metric ? sizeof(uint8_t) : sizeof(float);
            return py::memoryview::from_buffer(
                g.getFeatureVector(internal_idx),
-               sizeof(float), "f", {g.getFeatureSpace().dim()}, {sizeof(float)});
+               item_size, format_descriptor, {g.getFeatureSpace().dim()}, {item_size});
          }, py::return_value_policy::reference
     )
     .def("get_internal_index", &deglib::graph::SizeBoundedGraph::getInternalIndex)

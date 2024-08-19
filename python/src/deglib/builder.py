@@ -75,7 +75,8 @@ class EvenRegularGraphBuilder:
             feature = feature.reshape(1, -1)
         if len(feature.shape) != 2:
             raise InvalidShapeException('invalid feature shape: {}'.format(feature.shape))
-        feature = assure_array(feature, 'feature', np.float32)
+        valid_dtype = self.graph.get_feature_space().metric().get_dtype()
+        feature = assure_array(feature, 'feature', valid_dtype)
 
         # standardize external label
         if isinstance(external_label, int):

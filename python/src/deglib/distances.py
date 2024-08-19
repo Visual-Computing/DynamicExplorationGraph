@@ -2,6 +2,8 @@ import enum
 from abc import ABC, abstractmethod
 from typing import Self
 
+import numpy as np
+
 import deglib_cpp
 
 
@@ -17,6 +19,15 @@ class Metric(enum.IntEnum):
             return deglib_cpp.Metric.InnerProduct
         elif self == Metric.L2_Uint8:
             return deglib_cpp.Metric.L2_Uint8
+
+    def get_dtype(self):
+        if self in (Metric.L2, Metric.InnerProduct):
+            dtype = np.float32
+        elif self == Metric.L2_Uint8:
+            dtype = np.uint8
+        else:
+            raise ValueError('unknown metric: {}'.format(self))
+        return dtype
 
 
 class SpaceInterface(ABC):

@@ -69,16 +69,21 @@ class SearchGraph(ABC):
         """
         raise NotImplementedError()
 
-    @abstractmethod
-    def get_feature_vector(self, internal_index: int, copy: bool = False) -> np.ndarray:
+    def get_feature_vector(self, index: int, copy: bool = False) -> np.ndarray:
         """
         Get the feature vector of the given internal index.
 
-        :param internal_index: The internal index to get the feature vector of.
+        :param index: The internal index to get the feature vector of
         :param copy: If True the returned feature vector is a copy, otherwise a reference to the graph data is returned.
         :returns: The feature vector of the given index
         """
-        raise NotImplementedError()
+        if index < 0 or index >= self.size():
+            raise IndexError("Index {} out of range for size {}".format(index, self.size()))
+        memory_view = self.graph_cpp.get_feature_vector(index)
+        feature_vector = np.asarray(memory_view)
+        if copy:
+            feature_vector = np.copy(feature_vector)
+        return feature_vector
 
     @abstractmethod
     def has_vertex(self, external_label: int) -> bool:
@@ -137,13 +142,7 @@ class SearchGraph(ABC):
         if len(query.shape) != 2:
             raise InvalidShapeException('invalid query shape: {}'.format(query.shape))
 
-        metric = self.get_feature_space().metric()
-        if metric in (Metric.L2, Metric.InnerProduct):
-            valid_dtype = np.float32
-        elif metric == Metric.L2_Uint8:
-            valid_dtype = np.uint8
-        else:
-            raise ValueError('unknown metric: {} ({})  {}  {}'.format(metric, type(metric), metric == Metric.L2, metric in (Metric.L2,)))
+        valid_dtype = self.get_feature_space().metric().get_dtype()
 
         query = assure_array(query, 'query', valid_dtype)
         if entry_vertex_indices is None:
@@ -218,21 +217,6 @@ class ReadOnlyGraph(SearchGraph):
         # first two parameters get ignored
         return FloatSpace(float_space_cpp=self.graph_cpp.get_feature_space())
 
-    def get_feature_vector(self, index: int, copy: bool = False) -> np.ndarray:
-        """
-        Get the feature vector of the given internal index.
-
-        :param index: The internal index to get the feature vector of
-        :param copy: If True the returned feature vector is a copy, otherwise a reference to the graph data is returned.
-        :returns: The feature vector of the given index
-        """
-        if index < 0 or index >= self.size():
-            raise IndexError("Index {} out of range for size {}".format(index, self.size()))
-        memory_view = self.graph_cpp.get_feature_vector(index)
-        feature_vector = np.asarray(memory_view)
-        if copy:
-            feature_vector = np.copy(feature_vector)
-        return feature_vector
 
     def get_internal_index(self, external_label: int) -> int:
         """
@@ -466,20 +450,6 @@ class SizeBoundedGraph(MutableGraph):
         """
         return FloatSpace(self.graph_cpp.get_feature_space())
 
-    def get_feature_vector(self, index: int, copy: bool = False) -> np.ndarray:
-        """
-        Get the feature vector of the given internal index.
-
-        :param index: The internal index to get the feature vector of
-        :param copy: If True the returned feature vector is a copy, otherwise a reference to the graph data is returned.
-        :returns: The feature vector of the given index
-        """
-        memory_view = self.graph_cpp.get_feature_vector(index)
-        feature_vector = np.asarray(memory_view)
-        if copy:
-            feature_vector = np.copy(feature_vector)
-        return feature_vector
-
     def get_internal_index(self, external_label: int) -> int:
         """
         Translates internal index to external label
@@ -538,7 +508,8 @@ class SizeBoundedGraph(MutableGraph):
                                be reallocated.
         :return: the internal index of the new vertex
         """
-        feature_vector = assure_array(feature_vector, 'feature_vector', np.float32)
+        valid_dtype = self.get_feature_space().metric().get_dtype()
+        feature_vector = assure_array(feature_vector, 'feature_vector', valid_dtype)
         return self.graph_cpp.add_vertex(external_label, feature_vector)
 
     def remove_vertex(self, external_label: int):
