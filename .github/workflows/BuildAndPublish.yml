@@ -19,7 +19,7 @@ jobs:
         platform: [windows-latest, macos-latest, macos-13, ubuntu-latest]
 
     runs-on: ${{ matrix.platform }}
-    if: "github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v') && github.base_ref == 'refs/heads/main"
+    if: "github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v') && github.base_ref == 'refs/heads/main'"
 
     steps:
     - uses: actions/checkout@v4
