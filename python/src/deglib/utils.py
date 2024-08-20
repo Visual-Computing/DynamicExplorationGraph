@@ -23,6 +23,10 @@ class WrongDtypeException(Exception):
     pass
 
 
+class InvalidShapeException(Exception):
+    pass
+
+
 def assure_dtype(arr: np.ndarray, name: str, dtype: np.dtype):
     """
     Raise an exception, if the given numpy array has the wrong dtype

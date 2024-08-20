@@ -6,10 +6,13 @@
 #include <math.h>
 #include <unordered_map>
 #include <array>
+#include <unordered_set>
+#include <random>
 
 #include "deglib.h"
 #include "distances.h"
 #include "search.h"
+#include "visited_list_pool.h"
 
 namespace deglib::graph
 {
@@ -99,6 +102,21 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
   }
 
   template <bool use_max_distance_count = false>
+  inline static deglib::search::ResultSet searchL2Uint8(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const uint32_t max_distance_computation_count = 0) {
+    return graph.searchImpl<deglib::distances::L2Uint8, use_max_distance_count>(entry_vertex_indices, query, eps, k, max_distance_computation_count);
+  }
+
+  template <bool use_max_distance_count = false>
+  inline static deglib::search::ResultSet searchL2Uint8Ext32(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const uint32_t max_distance_computation_count = 0) {
+    return graph.searchImpl<deglib::distances::L2Uint8Ext32, use_max_distance_count>(entry_vertex_indices, query, eps, k, max_distance_computation_count);
+  }
+
+  template <bool use_max_distance_count = false>
+  inline static deglib::search::ResultSet searchL2Uint8Ext16(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const uint32_t max_distance_computation_count = 0) {
+    return graph.searchImpl<deglib::distances::L2Uint8Ext16, use_max_distance_count>(entry_vertex_indices, query, eps, k, max_distance_computation_count);
+  }
+
+  template <bool use_max_distance_count = false>
   inline static SEARCHFUNC getSearchFunction(const deglib::FloatSpace& feature_space) {
     const auto dim = feature_space.dim();
     const auto metric = feature_space.metric();
@@ -114,10 +132,11 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
         return deglib::graph::ReadOnlyGraph::searchL2Ext16Residual<use_max_distance_count>;
       else if (dim > 4)
         return deglib::graph::ReadOnlyGraph::searchL2Ext4Residual<use_max_distance_count>;
+      else
+        return deglib::graph::ReadOnlyGraph::searchL2<use_max_distance_count>;
     }
     else if(metric == deglib::Metric::InnerProduct)
     {
-
       if (dim % 16 == 0)
         return deglib::graph::ReadOnlyGraph::searchInnerProductExt16<use_max_distance_count>;
       else if (dim % 8 == 0)
@@ -131,7 +150,19 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
       else
         return deglib::graph::ReadOnlyGraph::searchInnerProduct<use_max_distance_count>;
     }
-    return deglib::graph::ReadOnlyGraph::searchL2<use_max_distance_count>;
+    else if(metric == deglib::Metric::L2_Uint8)
+    {
+      if (dim % 32 == 0)
+        return deglib::graph::ReadOnlyGraph::searchL2Uint8Ext32<use_max_distance_count>;
+      else if (dim % 16 == 0)
+        return deglib::graph::ReadOnlyGraph::searchL2Uint8Ext16<use_max_distance_count>;
+      else
+        return deglib::graph::ReadOnlyGraph::searchL2Uint8<use_max_distance_count>;
+    }
+
+    std::fprintf(stderr, "Could not find metric %u for the readonly_graph search method \n", static_cast<int>(metric));
+    std::perror("");
+    std::abort();
   }
 
 
@@ -185,6 +216,18 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
     return graph.exploreImpl<deglib::distances::InnerProductFloat4ExtResiduals>(entry_vertex_index, k, max_distance_computation_count);
   }
 
+  inline static deglib::search::ResultSet exploreL2Uint8(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const uint32_t max_distance_computation_count = 0) {
+    return graph.exploreImpl<deglib::distances::L2Uint8>(entry_vertex_index, k, max_distance_computation_count);
+  }
+
+  inline static deglib::search::ResultSet exploreL2Uint8Ext32(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const uint32_t max_distance_computation_count = 0) {
+    return graph.exploreImpl<deglib::distances::L2Uint8Ext32>(entry_vertex_index, k, max_distance_computation_count);
+  }
+
+  inline static deglib::search::ResultSet exploreL2Uint8Ext16(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const uint32_t max_distance_computation_count = 0) {
+    return graph.exploreImpl<deglib::distances::L2Uint8Ext16>(entry_vertex_index, k, max_distance_computation_count);
+  }
+
   inline static EXPLOREFUNC getExploreFunction(const deglib::FloatSpace& feature_space) {
     const auto dim = feature_space.dim();
     const auto metric = feature_space.metric();
@@ -200,10 +243,11 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
         return deglib::graph::ReadOnlyGraph::exploreL2Ext16Residual;
       else if (dim > 4)
         return deglib::graph::ReadOnlyGraph::exploreL2Ext4Residual;
+      else
+        return deglib::graph::ReadOnlyGraph::exploreL2;      
     }
     else if(metric == deglib::Metric::InnerProduct)
     {
-
       if (dim % 16 == 0)
         return deglib::graph::ReadOnlyGraph::exploreInnerProductExt16;
       else if (dim % 8 == 0)
@@ -217,8 +261,20 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
       else
         return deglib::graph::ReadOnlyGraph::exploreInnerProduct;
     }
+    else if(metric == deglib::Metric::L2_Uint8)
+    {
 
-    return deglib::graph::ReadOnlyGraph::exploreL2;      
+      if (dim % 32 == 0)
+        return deglib::graph::ReadOnlyGraph::exploreL2Uint8Ext32;
+      else if (dim % 16 == 0)
+        return deglib::graph::ReadOnlyGraph::exploreL2Uint8Ext16;
+      else
+        return deglib::graph::ReadOnlyGraph::exploreL2Uint8;
+    }
+
+    std::fprintf(stderr, "Could not find metric %u for the readonly_graph explore method \n", static_cast<int>(metric));
+    std::perror("");
+    std::abort();
   }
 
 
@@ -267,6 +323,8 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
   // distance calculation function between feature vectors of two graph vertices
   const deglib::FloatSpace feature_space_;
 
+  std::unique_ptr<VisitedListPool> visited_list_pool_;
+
 public:
   ReadOnlyGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::FloatSpace feature_space)
       : max_vertex_count_(max_vertex_count),
@@ -282,7 +340,8 @@ public:
 
         search_func_(getSearchFunction(feature_space)), 
         explore_func_(getExploreFunction(feature_space)),
-        feature_space_(feature_space) { 
+        feature_space_(feature_space),
+        visited_list_pool_( std::make_unique<VisitedListPool>(1, max_vertex_count)) { 
 
     label_to_index_.reserve(max_vertex_count);
   }
@@ -301,6 +360,29 @@ public:
       ifstream.ignore(uint32_t(edges_per_vertex) * sizeof(float));        // skip the weights
       ifstream.read(vertex + vertex_without_external, sizeof(uint32_t));  // read the external label
       label_to_index_.emplace(this->getExternalLabel(i), i);
+    }
+  }
+
+  /**
+   *  Copy from input graph
+   */
+  ReadOnlyGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::FloatSpace feature_space, deglib::search::SearchGraph& input_graph)
+      : ReadOnlyGraph(max_vertex_count, edges_per_vertex, feature_space) {
+
+    for (uint32_t i = 0; i < max_vertex_count; i++) {
+        auto vertex = reinterpret_cast<char*>(this->vertex_by_index(i));
+
+        const auto feature = input_graph.getFeatureVector(i);
+        std::memcpy(vertex, feature, feature_space.get_data_size());
+        vertex += feature_space.get_data_size();
+
+        const auto neighbor_indices = input_graph.getNeighborIndices(i);
+        std::memcpy(vertex, neighbor_indices, sizeof(uint32_t) * uint32_t(edges_per_vertex));
+        vertex += sizeof(uint32_t) * uint32_t(edges_per_vertex);
+
+        const auto label = input_graph.getExternalLabel(i);
+        std::memcpy(vertex, &label, sizeof(uint32_t));
+        label_to_index_.emplace(label, i);
     }
   }
 
@@ -386,9 +468,12 @@ public:
     const auto query = this->feature_by_index(to_vertex);
     const auto dist_func = this->feature_space_.get_dist_func();
     const auto dist_func_param = this->feature_space_.get_dist_func_param();
+    const auto feature_size = this->feature_space_.get_data_size();
 
     // set of checked vertex ids
-    auto checked_ids = std::vector<bool>(this->size());
+    const auto vl = visited_list_pool_->getFreeVisitedList();
+    auto* checked_ids = vl->get_visited();
+    const auto checked_ids_tag = vl->get_tag();
 
     // items to traverse next
     auto next_vertices = deglib::search::UncheckedSet();
@@ -401,10 +486,10 @@ public:
 
     // copy the initial entry vertices and their distances to the query into the three containers
     for (auto&& index : entry_vertex_indices) {
-      if(checked_ids[index] == false) {
-        checked_ids[index] = true;
+      if(checked_ids[index] != checked_ids_tag) {
+        checked_ids[index] = checked_ids_tag;
 
-        const auto feature = reinterpret_cast<const float*>(this->feature_by_index(index));
+        const auto feature = this->feature_by_index(index);
         const auto distance = dist_func(query, feature, dist_func_param);
         results.emplace(index, distance);
         next_vertices.emplace(index, distance);
@@ -413,7 +498,8 @@ public:
     }
 
     // search radius
-    auto r = std::numeric_limits<float>::max();
+    auto radius = std::numeric_limits<float>::max();
+    auto exploration_radius = radius;
 
     // iterate as long as good elements are in the next_vertices queue     
     auto good_neighbors = std::array<uint32_t, 256>();
@@ -424,7 +510,7 @@ public:
       next_vertices.pop();
 
       // max distance reached
-      if (next_vertex.getDistance() > r * (1 + eps)) 
+      if (next_vertex.getDistance() > exploration_radius) 
         break;
 
       size_t good_neighbor_count = 0;
@@ -447,8 +533,8 @@ public:
         }
 
         // collect 
-        if (checked_ids[neighbor_index] == false)  {
-          checked_ids[neighbor_index] = true;
+        if(checked_ids[neighbor_index] != checked_ids_tag) {
+          checked_ids[neighbor_index] = checked_ids_tag;
           good_neighbors[good_neighbor_count++] = neighbor_index;
         }
       }
@@ -456,27 +542,28 @@ public:
       if (good_neighbor_count == 0)
         continue;
 
-      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])));
+      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])), feature_size);
       for (size_t i = 0; i < good_neighbor_count; i++) {
-        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])));
+        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])), feature_size);
 
         const auto neighbor_index = good_neighbors[i];
         const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
         const auto neighbor_distance = dist_func(query, neighbor_feature_vector, dist_func_param);
              
         // check the neighborhood of this vertex later, if its good enough
-        if (neighbor_distance <= r * (1 + eps)) {
+        if (neighbor_distance <= exploration_radius) {
           next_vertices.emplace(neighbor_index, neighbor_distance);
           trackback.insert({neighbor_index, deglib::search::ObjectDistance(next_vertex.getInternalIndex(), next_vertex.getDistance())});
 
           // remember the vertex, if its better than the worst in the result list
-          if (neighbor_distance < r) {
+          if (neighbor_distance < radius) {
             results.emplace(neighbor_index, neighbor_distance);
 
             // update the search radius
             if (results.size() > k) {
               results.pop();
-              r = results.top().getDistance();
+              radius = results.top().getDistance();
+              exploration_radius = radius * ((radius < 0) ? (1 - eps) : (1 + eps));
             }
           }
         }
@@ -506,14 +593,18 @@ public:
   deglib::search::ResultSet searchImpl(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const uint32_t max_distance_computation_count) const
   {
     const auto dist_func_param = this->feature_space_.get_dist_func_param();
+    const auto feature_size = this->feature_space_.get_data_size();
+    const size_t degree = this->edges_per_vertex_;
     uint32_t distance_computation_count = 0;
 
     // set of checked vertex ids
-    auto checked_ids = std::vector<bool>(this->size());
+    const auto vl = visited_list_pool_->getFreeVisitedList();
+    auto* checked_ids = vl->get_visited();
+    const auto checked_ids_tag = vl->get_tag();
 
     // items to traverse next
     auto next_vertices = deglib::search::UncheckedSet();
-    next_vertices.reserve(k*this->edges_per_vertex_);
+    next_vertices.reserve(k*degree);
 
     // result set
     // TODO: custom priority queue with an internal Variable Length Array wrapped in a macro with linear-scan search and memcopy 
@@ -522,8 +613,8 @@ public:
 
     // copy the initial entry vertices and their distances to the query into the three containers
     for (auto&& index : entry_vertex_indices) {
-      if(checked_ids[index] == false) {
-        checked_ids[index] = true;
+      if(checked_ids[index] != checked_ids_tag) {
+        checked_ids[index] = checked_ids_tag;
 
         const auto feature = reinterpret_cast<const float*>(this->feature_by_index(index));
         const auto distance = COMPARATOR::compare(query, feature, dist_func_param);
@@ -532,14 +623,16 @@ public:
 
         // early stop after to many computations
         if constexpr (use_max_distance_count) {
-          if(++distance_computation_count >= max_distance_computation_count)
+          if(++distance_computation_count >= max_distance_computation_count) {
             return results;
+          }
         }
       }
     }
 
     // search radius
-    auto r = std::numeric_limits<float>::max();
+    auto radius = std::numeric_limits<float>::max();
+    auto exploration_radius = radius;
 
     // iterate as long as good elements are in the next_vertices queue
     auto good_neighbors = std::array<uint32_t, 256>();    // this limits the neighbor count to 256 using Variable Length Array wrapped in a macro
@@ -549,16 +642,16 @@ public:
       const auto next_vertex = next_vertices.top();
       next_vertices.pop();
 
-      // max distance reached
-      if (next_vertex.getDistance() > r * (1 + eps)) 
+      // max distance reached 
+      if (next_vertex.getDistance() > exploration_radius) 
         break;
 
       size_t good_neighbor_count = 0;
       const auto neighbor_indices = this->neighbors_by_index(next_vertex.getInternalIndex());
-      for (size_t i = 0; i < this->edges_per_vertex_; i++) {
+      for (size_t i = 0; i < degree; i++) {
         const auto neighbor_index = neighbor_indices[i];
-        if (checked_ids[neighbor_index] == false)  {
-          checked_ids[neighbor_index] = true;
+        if (checked_ids[neighbor_index] != checked_ids_tag)  {
+          checked_ids[neighbor_index] = checked_ids_tag;
           good_neighbors[good_neighbor_count++] = neighbor_index;
         }
       }
@@ -566,34 +659,36 @@ public:
       if (good_neighbor_count == 0)
         continue;
 
-      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])));
+      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])), feature_size);
       for (size_t i = 0; i < good_neighbor_count; i++) {
-        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])));
+        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])), feature_size);
 
         const auto neighbor_index = good_neighbors[i];
         const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
         const auto neighbor_distance = COMPARATOR::compare(query, neighbor_feature_vector, dist_func_param);
              
         // check the neighborhood of this vertex later, if its good enough
-        if (neighbor_distance <= r * (1 + eps)) {
+        if (neighbor_distance <= exploration_radius) {
           next_vertices.emplace(neighbor_index, neighbor_distance);
 
           // remember the vertex, if its better than the worst in the result list
-          if (neighbor_distance < r) {
+          if (neighbor_distance < radius) {
             results.emplace(neighbor_index, neighbor_distance);
 
             // update the search radius
             if (results.size() > k) {
               results.pop();
-              r = results.top().getDistance();
+              radius = results.top().getDistance();
+              exploration_radius = radius * ((radius < 0) ? (1 - eps) : (1 + eps));
             }
           }
         }
 
         // early stop after to many computations
         if constexpr (use_max_distance_count) {
-          if(++distance_computation_count >= max_distance_computation_count)
+          if(++distance_computation_count >= max_distance_computation_count) {
             return results;
+          }
         }
       }
     }
@@ -618,9 +713,12 @@ public:
   {
     uint32_t distance_computation_count = 0;
     const auto dist_func_param = this->feature_space_.get_dist_func_param();
+    const auto feature_size = this->feature_space_.get_data_size();
 
     // set of checked vertex ids
-    auto checked_ids = std::vector<bool>(this->size());
+    const auto vl = visited_list_pool_->getFreeVisitedList();
+    auto* checked_ids = vl->get_visited();
+    const auto checked_ids_tag = vl->get_tag();
 
     // items to traverse next
     auto next_vertices = deglib::search::UncheckedSet();
@@ -631,12 +729,12 @@ public:
     results.reserve(k);
 
     // add the entry vertex index to the vertices which gets checked next and ignore it for further checks
-    checked_ids[entry_vertex_index] = true;
+    checked_ids[entry_vertex_index] = checked_ids_tag;
     next_vertices.emplace(entry_vertex_index, 0);
     const auto query = this->feature_by_index(entry_vertex_index);
 
     // search radius
-    auto r = std::numeric_limits<float>::max();
+    auto radius = std::numeric_limits<float>::max();
 
     // iterate as long as good elements are in the next_vertices queue and max_calcs is not yet reached
     auto good_neighbors = std::array<uint32_t, 256>();    // this limits the neighbor count to 256 using Variable Length Array wrapped in a macro
@@ -650,8 +748,8 @@ public:
       const auto neighbor_indices = this->neighbors_by_index(next_vertex.getInternalIndex());
       for (uint8_t i = 0; i < this->edges_per_vertex_; i++) {
         const auto neighbor_index = neighbor_indices[i];
-        if (checked_ids[neighbor_index] == false)  {
-          checked_ids[neighbor_index] = true;
+        if (checked_ids[neighbor_index] != checked_ids_tag)  {
+          checked_ids[neighbor_index] = checked_ids_tag;
           good_neighbors[good_neighbor_count++] = neighbor_index;
         }
       }
@@ -659,15 +757,15 @@ public:
       if (good_neighbor_count == 0)
         continue;
 
-      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])));
+      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])), feature_size);
       for (uint8_t i = 0; i < good_neighbor_count; i++) {
-        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])));
+        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])), feature_size);
 
         const auto neighbor_index = good_neighbors[i];
         const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
         const auto neighbor_distance = COMPARATOR::compare(query, neighbor_feature_vector, dist_func_param);
 
-        if (neighbor_distance < r) {
+        if (neighbor_distance < radius) {
 
           // check the neighborhood of this vertex later
           next_vertices.emplace(neighbor_index, neighbor_distance);
@@ -678,7 +776,7 @@ public:
           // update the search radius
           if (results.size() > k) {
             results.pop();
-            r = results.top().getDistance();
+            radius = results.top().getDistance();
           }
         }
 
@@ -697,7 +795,7 @@ public:
 /**
  * Load the graph
  */
-auto load_readonly_graph(const char* path_graph)
+inline auto load_readonly_graph(const char* path_graph)
 {
   std::error_code ec{};
   auto file_size = std::filesystem::file_size(path_graph, ec);
@@ -733,6 +831,20 @@ auto load_readonly_graph(const char* path_graph)
   ifstream.close();
 
   return graph;
+}
+
+/**
+ * Convert the given graph to a readonly graph
+ */
+inline auto convert_to_readonly_graph(deglib::search::SearchGraph& input_graph)
+{
+  auto size = input_graph.size();
+  auto edges_per_vertex = input_graph.getEdgesPerVertex();
+  auto dim = input_graph.getFeatureSpace().dim();
+  auto metric_type = input_graph.getFeatureSpace().metric();
+  const auto feature_space = deglib::FloatSpace(dim, static_cast<deglib::Metric>(metric_type));
+
+  return deglib::graph::ReadOnlyGraph(size, edges_per_vertex, feature_space, input_graph);
 }
 
 }  // namespace deglib::graph

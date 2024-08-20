@@ -3,5 +3,6 @@ __pycache__
 /lib
 /dist
 /wheelhouse
+/cmake-build*
 *.egg-info
 *.so

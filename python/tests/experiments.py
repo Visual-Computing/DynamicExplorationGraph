@@ -1,5 +1,8 @@
+from concurrent.futures import ThreadPoolExecutor, wait
+
 import numpy as np
 import deglib
+from deglib.builder import EvenRegularGraphBuilder
 
 
 def main():
@@ -8,14 +11,20 @@ def main():
 
     data = np.random.random((samples, dims)).astype(np.float32)
 
-    graph = deglib.graph.SizeBoundedGraph.create_empty(data.shape[0], data.shape[1], 32, deglib.Metric.L2)
-    builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+    graph = deglib.graph.SizeBoundedGraph.create_empty(data.shape[0], data.shape[1], 16, deglib.Metric.InnerProduct)
+    builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=32, extend_eps=0.01, improve_k=0)
 
     for i, vec in enumerate(data):
         vec: np.ndarray
         builder.add_entry(i, vec)
 
     builder.build(callback='progress')
+
+    query = np.random.random((5, dims)).astype(np.float32)
+    # query = np.random.random((dims,)).astype(np.float32)
+    results, dists = graph.search(query, eps=0.0, k=3)
+    print(results, results.dtype, results.shape)
+    print(dists, dists.dtype, dists.shape)
 
 
 def dump_data(seed):
@@ -76,8 +85,48 @@ def do_all():
                 do_build_with_remove(i, epv)
 
 
+def build_graph(jobname, data, dim):
+    print('starting', jobname)
+    graph = deglib.graph.SizeBoundedGraph.create_empty(1_000_000, dim, edges_per_vertex=8)
+    print(graph)
+
+    builder = EvenRegularGraphBuilder(graph, improve_k=0, extend_eps=0, extend_k=8)
+    print(builder)
+
+    builder.add_entry(range(data.shape[0]), data)
+
+    builder.build()
+
+
+class FinishPrinter:
+    def __init__(self, jobname: str):
+        self.jobname = jobname
+
+    def __call__(self, fut):
+        print('finish', self.jobname)
+
+
+def test_free_memory():
+    dim = 512
+    data = np.random.random((100_000, dim)).astype(np.float32)
+
+    jobs = 2
+
+    with ThreadPoolExecutor(max_workers=jobs) as executor:
+        futures = []
+        for i in range(10):
+            jobname = 'job {}'.format(i)
+            print('start: {}'.format(jobname))
+            future = executor.submit(build_graph, jobname, data, dim)
+
+            future.add_done_callback(FinishPrinter(jobname))
+            futures.append(future)
+        wait(futures)
+
+
 if __name__ == '__main__':
     # main()
-    do_build_with_remove(1, 10)
+    # do_build_with_remove(1, 10)
     # do_all()
     # dump_data(1)
+    test_free_memory()

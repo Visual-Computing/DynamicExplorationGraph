@@ -4,7 +4,8 @@ tmp/
 var/
 .vscode/
 CMakePresets.json
+cmake-variants.yaml
 build-*
-cmake-build-default/
+cmake-build*
 data/
 python-bindings/.venv

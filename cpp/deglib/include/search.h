@@ -107,7 +107,7 @@ class SearchGraph
     virtual const bool hasEdge(const uint32_t internal_index, const uint32_t neighbor_index) const = 0;
 
     const std::vector<uint32_t> getEntryVertexIndices() const {
-      return std::vector<uint32_t> { getInternalIndex(0) };
+      return std::vector<uint32_t> { 0 };
     }
 
     /**

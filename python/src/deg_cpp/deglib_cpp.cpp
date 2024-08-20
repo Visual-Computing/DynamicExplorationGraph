@@ -3,7 +3,7 @@
 //
 
 // #define PYBIND11_DETAILED_ERROR_MESSAGES
-
+#include <algorithm>
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
@@ -32,15 +32,135 @@ bool sse_usable() {
 }
 
 
+// Multithreaded executor
+// The helper function copied from https://github.com/nmslib/hnswlib/blob/master/examples/cpp/example_mt_search.cpp (and that itself is copied from nmslib)
+// An alternative is using #pragme omp parallel for or any other C++ threading
+template<class Function>
+inline void parallel_for(size_t start, size_t end, size_t numThreads, Function fn) {
+  if (numThreads <= 0) {
+    numThreads = std::thread::hardware_concurrency();
+  }
+
+  if (numThreads == 1) {
+    for (size_t id = start; id < end; id++) {
+      fn(id, 0);
+    }
+  } else {
+    std::vector<std::thread> threads;
+    std::atomic<size_t> current(start);
+
+    // keep track of exceptions in threads
+    // https://stackoverflow.com/a/32428427/1713196
+    std::exception_ptr lastException = nullptr;
+    std::mutex lastExceptMutex;
+
+    for (size_t threadId = 0; threadId < numThreads; ++threadId) {
+      threads.push_back(std::thread([&, threadId] {
+        while (true) {
+          size_t id = current.fetch_add(1);
+
+          if (id >= end) {
+            break;
+          }
+
+          try {
+            fn(id, threadId);
+          } catch (...) {
+            std::unique_lock<std::mutex> lastExcepLock(lastExceptMutex);
+            lastException = std::current_exception();
+            /*
+             * This will work even when current is the largest value that
+             * size_t can fit, because fetch_add returns the previous value
+             * before the increment (what will result in overflow
+             * and produce 0 instead of current + 1).
+             */
+            current = end;
+            break;
+          }
+        }
+      }));
+    }
+    for (auto &thread : threads) {
+      thread.join();
+    }
+    if (lastException) {
+      std::rethrow_exception(lastException);
+    }
+  }
+}
+
 template<typename G>
-deglib::search::ResultSet graph_search_wrapper(
+void search_one_query(const G& graph, size_t query_index, const py::buffer_info& query_info, const std::vector<uint32_t> &entry_vertex_indices, uint32_t k, const uint32_t max_distance_computation_count, const float eps, uint32_t* const result_indices_ptr, float* const result_distances_ptr) {
+  std::byte* query_ptr = static_cast<std::byte *>(query_info.ptr) + query_info.strides[0] * query_index;
+  deglib::search::ResultSet result = graph.search(entry_vertex_indices, query_ptr, eps, k, max_distance_computation_count);
+
+  assert((void(std::format("Expected result should have k={} entries, but got {} entries.\n", k, result.size())), (k == result.size())));
+
+  uint32_t k_index = result.size()-1;  // start by last index to reverse result order
+  while (!result.empty()) {
+    // location in result buffer
+    const uint32_t offset = k_index + query_index * k;
+    uint32_t* indices_target_ptr = static_cast<uint32_t*>(result_indices_ptr) + offset;
+    float* distances_target_ptr = static_cast<float*>(result_distances_ptr) + offset;
+
+    // get best result
+    deglib::search::ObjectDistance next_result = result.top();
+    *indices_target_ptr = graph.getExternalLabel(next_result.getInternalIndex());
+    *distances_target_ptr = next_result.getDistance();
+
+    result.pop();
+    k_index--;
+  }
+}
+
+template<typename G>
+void search_batch_of_queries(const G& graph, size_t batch_index, size_t batch_size, const py::buffer_info& query_info, const std::vector<uint32_t> &entry_vertex_indices, uint32_t k, const uint32_t max_distance_computation_count, const float eps, uint32_t* const result_indices_ptr, float* const result_distances_ptr) {
+  size_t num_queries = query_info.shape[0];
+  auto upper_bound = std::min(num_queries, (batch_index+1)*batch_size);
+  for (size_t query_index = batch_index*batch_size; query_index < upper_bound; query_index++) {
+    search_one_query(graph, query_index, query_info, entry_vertex_indices, k, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
+  }
+}
+
+template<typename G>
+std::tuple<py::array_t<uint32_t>, py::array_t<float>> graph_search_wrapper(
     const G& graph, const std::vector<uint32_t> &entry_vertex_indices,
-    const py::array_t<float, py::array::c_style> query, const float eps, const uint32_t k,
-    const uint32_t max_distance_computation_count)
+    const py::array query, const float eps, const uint32_t k,
+    const uint32_t max_distance_computation_count, const uint32_t threads, const uint32_t batch_size)
 {
   py::buffer_info query_info = query.request();
-  return graph.search(entry_vertex_indices, static_cast<std::byte *>(query_info.ptr), eps, k,
-                      max_distance_computation_count);
+
+  assert((void(std::format("Expected query to have two dimensions, got {}\n", query_info.ndim)), (query_info.ndim == 2)));
+
+  uint32_t n_queries = query_info.shape[0];
+
+  py::array_t<uint32_t> result_indices({n_queries, k});
+  py::buffer_info result_indices_info = result_indices.request();
+  auto result_indices_ptr = static_cast<uint32_t*>(result_indices_info.ptr);
+
+  py::array_t<float> result_distances({n_queries, k});
+  py::buffer_info result_distances_info = result_distances.request();
+  auto result_distances_ptr = static_cast<float*>(result_distances_info.ptr);
+
+  py::gil_scoped_release release; // release the gil
+
+  if (threads == 1) {
+    for (uint32_t query_index = 0; query_index < query_info.shape[0]; query_index++) {
+      search_one_query(graph, query_index, query_info, entry_vertex_indices, k, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
+    }
+  } else {
+    size_t n_batches = (n_queries / batch_size) + ((n_queries % batch_size != 0) ? 1 : 0);  // +1, if n_queries % batch_size != 0
+    parallel_for(0, n_batches, threads, [&] (size_t batch_index, size_t thread_id) {
+      // search_one_query(graph, query_index, query_info, entry_vertex_indices, k, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
+      search_batch_of_queries(graph, batch_index, batch_size, query_info, entry_vertex_indices, k, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
+    });
+  }
+
+  return {result_indices, result_distances};
+}
+
+deglib::graph::ReadOnlyGraph read_only_graph_from_search_graph(deglib::search::SearchGraph& search_graph, const uint32_t max_vertex_count, const deglib::FloatSpace& feature_space, const uint8_t edges_per_vertex) {
+  return {max_vertex_count, edges_per_vertex, feature_space, search_graph};
 }
 
 PYBIND11_MODULE(deglib_cpp, m) {
@@ -52,6 +172,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
   // distances
   py::enum_<deglib::Metric>(m, "Metric")
       .value("L2", deglib::Metric::L2)
+      .value("L2_Uint8", deglib::Metric::L2_Uint8)
       .value("InnerProduct", deglib::Metric::InnerProduct);
 
   py::class_<deglib::FloatSpace>(m, "FloatSpace")
@@ -83,7 +204,6 @@ PYBIND11_MODULE(deglib_cpp, m) {
   // graphs
   py::class_<deglib::search::SearchGraph>(m, "SearchGraph");
 
-
   // read only graph
   py::class_<deglib::graph::ReadOnlyGraph, deglib::search::SearchGraph>(m, "ReadOnlyGraph")
       .def(py::init<const uint32_t, const uint8_t, const deglib::FloatSpace>())
@@ -93,9 +213,12 @@ PYBIND11_MODULE(deglib_cpp, m) {
            py::return_value_policy::reference)
       .def("get_feature_vector",
            [](const deglib::graph::ReadOnlyGraph &g, const uint32_t internal_idx) {
+             const bool uint8_metric = g.getFeatureSpace().metric() == deglib::Metric::L2_Uint8;
+             const char* format_descriptor = uint8_metric ? "B" : "f";
+             const size_t item_size = uint8_metric ? sizeof(uint8_t) : sizeof(float);
              return py::memoryview::from_buffer(
                  g.getFeatureVector(internal_idx),
-                 sizeof(float), "f", {g.getFeatureSpace().dim()}, {sizeof(float)});
+                 item_size, format_descriptor, {g.getFeatureSpace().dim()}, {item_size});
            }, py::return_value_policy::reference
       )
       .def("get_internal_index", &deglib::graph::ReadOnlyGraph::getInternalIndex)
@@ -115,6 +238,8 @@ PYBIND11_MODULE(deglib_cpp, m) {
       .def("has_edge", &deglib::graph::ReadOnlyGraph::hasEdge)
       .def("get_external_label", &deglib::graph::ReadOnlyGraph::getExternalLabel);
 
+  m.def("read_only_graph_from_graph", &read_only_graph_from_search_graph);
+
   m.def("load_readonly_graph", &deglib::graph::load_readonly_graph);
   
   // mutable graph
@@ -129,9 +254,12 @@ PYBIND11_MODULE(deglib_cpp, m) {
          py::return_value_policy::reference)
     .def("get_feature_vector",
          [](const deglib::graph::SizeBoundedGraph &g, const uint32_t internal_idx) {
+           const bool uint8_metric = g.getFeatureSpace().metric() == deglib::Metric::L2_Uint8;
+           const char* format_descriptor = uint8_metric ? "B" : "f";
+           const size_t item_size = uint8_metric ? sizeof(uint8_t) : sizeof(float);
            return py::memoryview::from_buffer(
                g.getFeatureVector(internal_idx),
-               sizeof(float), "f", {g.getFeatureSpace().dim()}, {sizeof(float)});
+               item_size, format_descriptor, {g.getFeatureSpace().dim()}, {item_size});
          }, py::return_value_policy::reference
     )
     .def("get_internal_index", &deglib::graph::SizeBoundedGraph::getInternalIndex)
@@ -144,7 +272,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
         const py::buffer_info feature_info = feature_vector.request();
         const std::byte* ptr = static_cast<std::byte*>(feature_info.ptr);
         // only allow one dimensional arrays
-        assert((feature_info.ndim == 1) && std::format("Expected feature to have only one dimension, got {}\n", feature_info.ndim));
+        assert((void(std::format("Expected feature to have only one dimension, got {}\n", feature_info.ndim)), (feature_info.ndim == 1)));
         return g.addVertex(external_label, ptr);
     })
     .def("remove_vertex", &deglib::graph::SizeBoundedGraph::removeVertex)
@@ -153,12 +281,12 @@ PYBIND11_MODULE(deglib_cpp, m) {
       const py::buffer_info neighbor_info = neighbor_indices.request();
       const uint32_t* neighbor_ptr = static_cast<uint32_t*>(neighbor_info.ptr);
       // only allow one dimensional arrays
-      assert((neighbor_info.ndim == 1) && std::format("Expected neighbor_indices to have only one dimension, got {}\n", neighbor_info.ndim));
+      assert((void(std::format("Expected neighbor_indices to have only one dimension, got {}\n", neighbor_info.ndim)), (neighbor_info.ndim == 1)));
 
       const py::buffer_info weight_info = neighbor_weights.request();
       const float* weight_ptr = static_cast<float*>(weight_info.ptr);
       // only allow one dimensional arrays
-      assert((weight_info.ndim == 1) && std::format("Expected neighbor_weights to have only one dimension, got {}\n", weight_info.ndim));
+      assert((void(std::format("Expected neighbor_weights to have only one dimension, got {}\n", weight_info.ndim)), (weight_info.ndim == 1)));
 
       g.changeEdges(internal_index, neighbor_ptr, weight_ptr);
     })
@@ -202,25 +330,47 @@ PYBIND11_MODULE(deglib_cpp, m) {
       .def(py::init<std::uint_fast32_t>());
 
   // even regular builder
+  py::enum_<deglib::builder::LID>(m, "LID")
+    .value("Unknown", deglib::builder::LID::Unknown)
+    .value("High", deglib::builder::LID::High)
+    .value("Low", deglib::builder::LID::Low);
+
   py::class_<deglib::builder::EvenRegularGraphBuilder>(m, "EvenRegularGraphBuilder")
-    .def(py::init<deglib::graph::MutableGraph&, std::mt19937&, const uint8_t, const float, const uint8_t, const float, const uint8_t, const uint32_t, const uint32_t>())
-    .def("add_entry", [] (deglib::builder::EvenRegularGraphBuilder& builder, const uint32_t label, py::array_t<float, py::array::c_style> feature) {
-      // request buffer info
+    .def(py::init<deglib::graph::MutableGraph&, std::mt19937&, const deglib::builder::LID, const uint8_t, const float, const uint8_t, const float, const uint8_t, const uint32_t, const uint32_t>())
+    .def("add_entry", [] (deglib::builder::EvenRegularGraphBuilder& builder, const py::array_t<uint32_t, py::array::c_style>& label, const py::array& feature) {
+      // label buffer
+      const auto label_access = label.unchecked<1>();
+
+      // feature buffer
       const py::buffer_info feature_info = feature.request();
-      const std::byte* ptr = static_cast<std::byte*>(feature_info.ptr);
-      // only allow one dimensional arrays
-      assert((feature_info.ndim == 1) && std::format("Expected feature to have only one dimension, got {}\n", feature_info.ndim));
-      // copy to vector
-      std::vector<std::byte> feature_vec(ptr, ptr + feature_info.itemsize * feature_info.shape[0]);
-      builder.addEntry(label, std::move(feature_vec));
+      const std::byte* feature_ptr = static_cast<std::byte*>(feature_info.ptr);
+      // only allow two dimensional array
+      assert((void(std::format("Expected feature to have two dimensions, got {}\n", feature_info.ndim)), (feature_info.ndim == 2)));
+
+      py::gil_scoped_release release; // release the gil
+
+      // add entries
+      const size_t feature_len = feature_info.itemsize * feature_info.shape[1];
+      for (uint32_t i = 0; i < feature_info.shape[0]; i++) {
+        // copy to vector
+        std::vector<std::byte> feature_vec(
+          feature_ptr + (feature_len*i),
+          feature_ptr + (feature_len*(i+1))
+        );
+        const uint32_t current_label = label_access(i);
+        builder.addEntry(current_label, std::move(feature_vec));
+      }
     })
     .def("remove_entry", &deglib::builder::EvenRegularGraphBuilder::removeEntry)
     .def("get_num_new_entries", &deglib::builder::EvenRegularGraphBuilder::getNumNewEntries)
     .def("get_num_remove_entries", &deglib::builder::EvenRegularGraphBuilder::getNumRemoveEntries)
+    .def("set_thread_count", &deglib::builder::EvenRegularGraphBuilder::setThreadCount)
+    .def("set_batch_size", &deglib::builder::EvenRegularGraphBuilder::setBatchSize)
     .def("build", [] (deglib::builder::EvenRegularGraphBuilder& builder, std::function<void(deglib::builder::BuilderStatus&)> callback, const bool infinite) -> deglib::graph::MutableGraph& {
       return builder.build(callback, infinite);
     })
     .def("build_silent", [] (deglib::builder::EvenRegularGraphBuilder& builder, const bool infinite) -> deglib::graph::MutableGraph& {
+      py::gil_scoped_release release;
       return builder.build([] (deglib::builder::BuilderStatus&) {}, infinite);
     })
     .def("stop", &deglib::builder::EvenRegularGraphBuilder::stop);
@@ -231,6 +381,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
   m.def("check_graph_regularity", &deglib::analysis::check_graph_regularity);
   m.def("check_graph_connectivity", &deglib::analysis::check_graph_connectivity);
   m.def("calc_non_rng_edges", &deglib::analysis::calc_non_rng_edges);
+  m.def("remove_non_mrng_edges", &deglib::builder::remove_non_mrng_edges);
 
   py::class_<deglib::builder::BuilderStatus>(m, "BuilderStatus")
     .def_readwrite("step", &deglib::builder::BuilderStatus::step)

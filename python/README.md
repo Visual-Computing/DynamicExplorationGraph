@@ -24,7 +24,6 @@ python -m venv /path/to/deglib_env && . /path/to/deglib_env/bin/activate
 **Get the Source**
 ```shell
 # clone git repository
-mkdir install_dir && cd install_dir
 # TODO: "-b feat/python_bindings" not necessary after merge
 git clone -b feat/python_bindings git@github.com:Visual-Computing/DynamicExplorationGraph.git
 cd DynamicExplorationGraph
@@ -34,16 +33,22 @@ cd DynamicExplorationGraph
 ```shell
 cd python
 pip install setuptools pybind11 build
-python3 setup.py copy_build_files  # copy c++ library to ./lib/
+python setup.py copy_build_files  # copy c++ library to ./lib/
 pip install .
 ```
 This will compile the C++ code and install deglib into your virtual environment, so it may take a while.
+
+**Testing**
+To execute all tests.
+```shell
+pytest
+```
 
 **Building Packages**
 
 Build packages (sdist and wheels):
 ```shell
-python3 -m build
+python -m build
 ```
 
 Note: If you want to publish linux wheels to pypi you have to convert
@@ -144,3 +149,4 @@ TODO
 ### BuildError: `pybind11/typing.h:104:58: error: ‘copy_n’ is not a member of ‘std’`
 
 This is a pybind11 bug, that occurs when compiling it with gcc-14. Change the pybind version to 2.12.
+

@@ -6,6 +6,9 @@ namespace deglib {
     
     namespace distances {
 
+        // ---------------------------------------------------------------------------------------------------------------------
+        // ----------------------------------------------- Float Dists ---------------------------------------------------------
+        // ---------------------------------------------------------------------------------------------------------------------
         class L2Float {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) 
@@ -29,7 +32,7 @@ namespace deglib {
                     a += 4;
                     b += 4;
                 }
-                // Process last 0-3 pixels.  Not needed for standard vector lengths. 
+                // Process last 0-3 elements.  Not needed for standard vector lengths. 
                 while (a < last) {
                     diff0 = *a++ - *b++;
                     result += diff0 * diff0;
@@ -247,7 +250,7 @@ namespace deglib {
         class InnerProductFloat {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return 1.0f - ip_naive(pVect1v, pVect2v, qty_ptr);
+                return 1.f - ip_naive(pVect1v, pVect2v, qty_ptr);
             }
 
             inline static float ip_naive(const void *pVect1v, const void *pVect2v, const void *qty_ptr) 
@@ -260,7 +263,7 @@ namespace deglib {
                 const float* last = a + size;
                 const float* unroll_group = last - 3;
 
-                // Process 4 items with each loop for efficiency. 
+                // Process 4 entries at each loop for efficiency. 
                 float result = 0;
                 while (a < unroll_group) {
                     dot0 = a[0] * b[0];
@@ -272,7 +275,7 @@ namespace deglib {
                     b += 4;
                 }
 
-                // Process last 0-3 pixels.  Not needed for standard vector lengths. 
+                // Process last 0-3 entries
                 while (a < last) {
                     result += *a++ * *b++;
                 }
@@ -285,7 +288,7 @@ namespace deglib {
         public:
 
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return 1.0f - ip_16ext(pVect1v, pVect2v, qty_ptr);
+                return 1.f - ip_16ext(pVect1v, pVect2v, qty_ptr);
             }
 
             // AVX instructions don't require their memory operands to be aligned, but SSE does
@@ -348,7 +351,7 @@ namespace deglib {
         class InnerProductFloat8Ext {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return 1.0f - ip_8ext(pVect1v, pVect2v, qty_ptr);
+                return 1.f - ip_8ext(pVect1v, pVect2v, qty_ptr);
             }
 
             inline static float ip_8ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
@@ -390,7 +393,7 @@ namespace deglib {
         class InnerProductFloat4Ext {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return 1.0f - ip_4ext(pVect1v, pVect2v, qty_ptr);
+                return 1.f - ip_4ext(pVect1v, pVect2v, qty_ptr);
             }
 
             inline static float ip_4ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
@@ -428,7 +431,7 @@ namespace deglib {
 
                 size_t qty_left = qty - qty16;
                 float res_tail = deglib::distances::InnerProductFloat::ip_naive(pVect1, pVect2, &qty_left);
-                return 1.0f - (res + res_tail);
+                return 1.f - (res + res_tail);
             }
         };
 
@@ -444,16 +447,185 @@ namespace deglib {
 
                 size_t qty_left = qty - qty4;
                 float res_tail = deglib::distances::InnerProductFloat::ip_naive(pVect1, pVect2, &qty_left);
-                return 1.0f - (res + res_tail);
+                return 1.f - (res + res_tail);
+            }
+        };
+
+
+
+        // ---------------------------------------------------------------------------------------------------------------------
+        // ----------------------------------------------- Uint8 Dists ---------------------------------------------------------
+        // ---------------------------------------------------------------------------------------------------------------------
+
+        class L2Uint8 {
+        public:
+            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) 
+            {
+                int64_t result = 0;
+                uint8_t *a = (uint8_t *) pVect1v;
+                uint8_t *b = (uint8_t *) pVect2v;
+
+                size_t size = *((size_t *) qty_ptr);
+                for(size_t i = 0; i < size; i++) {
+                    int32_t diff0 = int32_t(a[i]) - int32_t(b[i]);
+                    result += diff0 * diff0;
+                }
+
+                return float(result);
+            }
+        };
+
+        class L2Uint8Ext32 {
+        public:
+            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+
+            #if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
+                size_t size = *((size_t *) qty_ptr);
+                const unsigned char *a = (const unsigned char *) pVect1v;
+                const unsigned char *b = (const unsigned char *) pVect2v;
+
+             #if defined(USE_AVX)
+            
+                __m256i sum256 = _mm256_setzero_si256();
+                for (size_t i = 0; i + 16 <= size; i += 16) {
+                    __m128i v1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a + i));
+                    __m128i v2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b + i));
+
+                    __m256i v1_lo = _mm256_cvtepu8_epi16(v1);
+                    __m256i v2_lo = _mm256_cvtepu8_epi16(v2);
+
+                    __m256i diff_lo = _mm256_sub_epi16(v1_lo, v2_lo);
+                    __m256i sqr_lo = _mm256_madd_epi16(diff_lo, diff_lo);
+                    sum256 = _mm256_add_epi32(sum256, sqr_lo);
+                }
+                __m128i sum128 = _mm_add_epi32(_mm256_extracti128_si256(sum256, 0), _mm256_extracti128_si256(sum256, 1));
+
+                // __m256i d2_high_vec = _mm256_setzero_si256();
+                // __m256i d2_low_vec = _mm256_setzero_si256();
+                // for (size_t i = 0; i + 32 <= size; i += 32) {
+                //     __m256i a_vec = _mm256_loadu_si256((__m256i const*)(a + i));
+                //     __m256i b_vec = _mm256_loadu_si256((__m256i const*)(b + i));
+
+                //     // Sign extend int8 to int16
+                //     __m256i a_low = _mm256_cvtepu8_epi16(_mm256_castsi256_si128(a_vec));
+                //     __m256i a_high = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(a_vec, 1));
+                //     __m256i b_low = _mm256_cvtepu8_epi16(_mm256_castsi256_si128(b_vec));
+                //     __m256i b_high = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(b_vec, 1));
+
+                //     // Subtract and multiply
+                //     __m256i d_low = _mm256_sub_epi16(a_low, b_low);
+                //     __m256i d_high = _mm256_sub_epi16(a_high, b_high);
+                //     __m256i d2_low_part = _mm256_madd_epi16(d_low, d_low);
+                //     __m256i d2_high_part = _mm256_madd_epi16(d_high, d_high);
+
+                //     // Accumulate into int32 vectors
+                //     d2_low_vec = _mm256_add_epi32(d2_low_vec, d2_low_part);
+                //     d2_high_vec = _mm256_add_epi32(d2_high_vec, d2_high_part);
+                // }
+
+                // // Accumulate the 32-bit integers from `d2_high_vec` and `d2_low_vec`
+                // __m256i d2_vec = _mm256_add_epi32(d2_low_vec, d2_high_vec);
+                // __m128i sum128 = _mm_add_epi32(_mm256_extracti128_si256(d2_vec, 0), _mm256_extracti128_si256(d2_vec, 1));
+   
+            #elif defined(USE_SSE)
+
+                // __m128i sum128 = _mm_setzero_si128();
+                // for (size_t i = 0; i + 8 <= size; i += 8) {
+                //     __m128i v1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a + i));
+                //     __m128i v2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b + i));
+
+                //     __m128i v1_lo = _mm_cvtepu8_epi16(v1);
+                //     __m128i v2_lo = _mm_cvtepu8_epi16(v2);
+
+                //     __m128i diff_lo = _mm_sub_epi16(v1_lo, v2_lo);
+                //     __m128i sqr_lo = _mm_madd_epi16(diff_lo, diff_lo);
+                //     sum128 = _mm_add_epi32(sum128, sqr_lo);
+                // }
+
+                __m128i d2_low_vec = _mm_setzero_si128();
+                __m128i d2_high_vec = _mm_setzero_si128();
+                for (size_t i = 0; i + 16 <= size; i += 16) {
+                    __m128i v1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a + i));
+                    __m128i v2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b + i));
+                    
+                     // Sign extend int8 to int16
+                    __m128i v1_lo = _mm_cvtepu8_epi16(v1);
+                    __m128i v1_hi = _mm_cvtepu8_epi16(_mm_srli_si128(v1, 8));
+                    __m128i v2_lo = _mm_cvtepu8_epi16(v2);
+                    __m128i v2_hi = _mm_cvtepu8_epi16(_mm_srli_si128(v2, 8));
+
+                    // Subtract and multiply
+                    __m128i diff_lo = _mm_sub_epi16(v1_lo, v2_lo);
+                    __m128i diff_hi = _mm_sub_epi16(v1_hi, v2_hi);
+                    __m128i sqr_lo = _mm_madd_epi16(diff_lo, diff_lo);
+                    __m128i sqr_hi = _mm_madd_epi16(diff_hi, diff_hi);
+
+                    d2_low_vec = _mm_add_epi32(d2_low_vec, sqr_lo);
+                    d2_high_vec = _mm_add_epi32(d2_high_vec, sqr_hi);
+                }
+                __m128i sum128 = _mm_add_epi32(d2_low_vec, d2_high_vec);
+            #endif 
+
+                alignas(16) int sum_array[4];
+                _mm_store_si128(reinterpret_cast<__m128i*>(sum_array), sum128);
+                return static_cast<float>(sum_array[0] + sum_array[1] + sum_array[2] + sum_array[3]);
+
+            #else
+                return L2Uint8::compare(pVect1v, pVect2v, qty_ptr);
+            #endif 
+            }
+        };
+
+        class L2Uint8Ext16 {
+        public:
+            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+
+            #if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
+                size_t size = *((size_t *) qty_ptr);
+                const unsigned char *a = (const unsigned char *) pVect1v;
+                const unsigned char *b = (const unsigned char *) pVect2v;
+                
+                __m128i d2_low_vec = _mm_setzero_si128();
+                __m128i d2_high_vec = _mm_setzero_si128();
+                for (size_t i = 0; i + 16 <= size; i += 16) {
+                    __m128i v1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a + i));
+                    __m128i v2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b + i));
+                    
+                    __m128i v1_lo = _mm_cvtepu8_epi16(v1);
+                    __m128i v1_hi = _mm_cvtepu8_epi16(_mm_srli_si128(v1, 8));
+                    __m128i v2_lo = _mm_cvtepu8_epi16(v2);
+                    __m128i v2_hi = _mm_cvtepu8_epi16(_mm_srli_si128(v2, 8));
+
+                    __m128i diff_lo = _mm_sub_epi16(v1_lo, v2_lo);
+                    __m128i diff_hi = _mm_sub_epi16(v1_hi, v2_hi);
+
+                    __m128i sqr_lo = _mm_madd_epi16(diff_lo, diff_lo);
+                    __m128i sqr_hi = _mm_madd_epi16(diff_hi, diff_hi);
+
+                    d2_low_vec = _mm_add_epi32(d2_low_vec, sqr_lo);
+                    d2_high_vec = _mm_add_epi32(d2_high_vec, sqr_hi);
+                }
+                __m128i sum128 = _mm_add_epi32(d2_low_vec, d2_high_vec);
+
+                alignas(16) int sum_array[4];
+                _mm_store_si128(reinterpret_cast<__m128i*>(sum_array), sum128);
+                return static_cast<float>(sum_array[0] + sum_array[1] + sum_array[2] + sum_array[3]);
+            #else
+                return L2Uint8::compare(pVect1v, pVect2v, qty_ptr);
+            #endif 
             }
         };
 
     } // end namespace Distances
 
-
     enum class Metric {
-        L2 = 1,
-        InnerProduct = 2
+        // 0x00 = float
+        //L1 = 0x00 | 0,
+        L2 = 0x00 | 1,
+        InnerProduct = 0x00 | 2,
+
+        // 0x10 = uint8
+        L2_Uint8 = 0x10 | 1
     };
 
     template <typename MTYPE>
@@ -476,6 +648,7 @@ namespace deglib {
 
         static DISTFUNC<float> select_dist_func(const size_t dim, const deglib::Metric metric) {
             DISTFUNC<float> distfunc = deglib::distances::L2Float::compare;
+
             if(metric == deglib::Metric::L2) {
                 #if defined(USE_SSE) || defined(USE_AVX) || defined(USE_AVX512)
                     if (dim % 16 == 0)
@@ -488,9 +661,11 @@ namespace deglib {
                         distfunc = deglib::distances::L2Float16ExtResiduals::compare;
                     else if (dim > 4)
                         distfunc = deglib::distances::L2Float4ExtResiduals::compare;
+                #else
+                    distfunc = deglib::distances::L2Float::compare;
                 #endif
             }
-            else 
+            else if(metric == deglib::Metric::InnerProduct) 
             {
                 #if defined(USE_SSE) || defined(USE_AVX) || defined(USE_AVX512)
                     if (dim % 16 == 0)
@@ -506,6 +681,19 @@ namespace deglib {
                 #else
                     distfunc = deglib::distances::InnerProductFloat::compare;
                 #endif
+            } 
+            else if(metric == deglib::Metric::L2_Uint8) 
+            {
+                #if defined(USE_SSE) || defined(USE_AVX) || defined(USE_AVX512)
+                    if (dim % 32 == 0)
+                        distfunc = deglib::distances::L2Uint8Ext32::compare;
+                    else if (dim % 16 == 0)
+                        distfunc = deglib::distances::L2Uint8Ext16::compare;
+                    else
+                        distfunc = deglib::distances::L2Uint8::compare;
+                #else
+                    distfunc = deglib::distances::L2Uint8::compare;
+                #endif
             }
 
             // TODO add cosine but convert to a distance = 2 - (cosine + 1)
@@ -515,6 +703,10 @@ namespace deglib {
             return distfunc;
         }
 
+        static size_t calculate_data_size(const size_t dim, const deglib::Metric metric) {
+            return (static_cast<int>(metric) & 0x10) ? dim * sizeof(uint8_t) : dim * sizeof(float);
+        }
+
         const DISTFUNC<float> fstdistfunc_;
         const size_t data_size_;
         const size_t dim_;
@@ -522,7 +714,7 @@ namespace deglib {
 
     public:
         FloatSpace(const size_t dim, const deglib::Metric metric) 
-            : fstdistfunc_(select_dist_func(dim, metric)), data_size_(dim * sizeof(float)), dim_(dim), metric_(metric) {
+            : fstdistfunc_(select_dist_func(dim, metric)), data_size_(calculate_data_size(dim, metric)), dim_(dim), metric_(metric) {
         }
 
         const size_t dim() const {

@@ -39,10 +39,16 @@ if (FORCE_AVX2)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(
       compile-options
-      INTERFACE -O2
+      INTERFACE -O3
                 -mavx2
                 -mfma
-                -fpic)
+                -fpic
+                -w
+                -fopenmp
+                -pthread
+                -ftree-vectorize
+                -ftree-vectorizer-verbose=0
+                )
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
     target_compile_options(
       compile-options
@@ -51,15 +57,13 @@ if (FORCE_AVX2)
                 -mfma
                 -fpic)
   elseif(MSVC)
-    # warning level 4 (show all)
-    target_compile_options(compile-options INTERFACE /W4)
-
-    # always use AVX2
-    target_compile_options(compile-options INTERFACE /arch:AVX2)
-
-    # disable string optimizations and function level linking
-    # https://stackoverflow.com/questions/5063334/what-is-the-difference-between-the-ox-and-o2-compiler-options
-    target_compile_options(compile-options INTERFACE $<$<CONFIG:Release>:/Ox>)
+    target_compile_options(
+	  compile-options
+	  INTERFACE /O2
+				/arch:AVX2
+				/W1
+				/openmp
+				/EHsc)
   else()
     message(WARNING "Unknown compiler for AVX2 Build: ${CMAKE_CXX_COMPILER_ID}")
   endif()
@@ -72,10 +76,16 @@ else()  # Native build
   if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(
       compile-options
-      INTERFACE -O2
+      INTERFACE -O3
                 -march=native
+                -mavx2
+                -mfma
                 -fpic
-                -fopenmp)
+                -w
+                -fopenmp
+                -pthread
+                -ftree-vectorize
+                -ftree-vectorizer-verbose=0)
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
     target_compile_options(
       compile-options

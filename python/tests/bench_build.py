@@ -105,7 +105,7 @@ def create_graph(
     print("Setup empty graph with {} vertices in {}D feature space".format(repository.shape[0], repository.shape[1]))
     dims = repository.shape[1]
     max_vertex_count = repository.shape[0]
-    feature_space = deglib.FloatSpace(dims, metric)
+    feature_space = deglib.FloatSpace.create(dims, metric)
     graph = deglib.graph.SizeBoundedGraph(max_vertex_count, d, feature_space)
     # TODO: report actual mem usage
     print("Actual memory usage: {} Mb after setup empty graph".format(get_current_rss_mb()))
@@ -113,7 +113,8 @@ def create_graph(
     # create a graph builder to add vertices to the new graph and improve its edges
     print("Start graph builder")
     builder = deglib.builder.EvenRegularGraphBuilder(
-        graph, rnd, k_ext, eps_ext, k_opt, eps_opt, i_opt, swap_tries, additional_swap_tries
+        graph, rnd, extend_k=k_ext, extend_eps=eps_ext, improve_k=k_opt, improve_eps=eps_opt, max_path_length=i_opt,
+        swap_tries=swap_tries, additional_swap_tries=additional_swap_tries
     )
 
     # provide all features to the graph builder at once. In an online system this will be called multiple times

@@ -1,5 +1,6 @@
 import os
-from typing import List, Optional
+import multiprocessing
+from typing import List, Optional, Tuple, Self
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -9,13 +10,13 @@ import pathlib
 
 from .distances import FloatSpace, Metric, SpaceInterface
 from .search import ResultSet, ObjectDistance
-from .utils import assure_array
-
-
-# TODO: safety checks
+from .utils import assure_array, InvalidShapeException
 
 
 class SearchGraph(ABC):
+    def __init__(self, graph_cpp: deglib_cpp.SearchGraph):
+        self.graph_cpp = graph_cpp
+
     @abstractmethod
     def size(self) -> int:
         """
@@ -68,16 +69,21 @@ class SearchGraph(ABC):
         """
         raise NotImplementedError()
 
-    @abstractmethod
-    def get_feature_vector(self, internal_index: int, copy: bool = False) -> np.ndarray:
+    def get_feature_vector(self, index: int, copy: bool = False) -> np.ndarray:
         """
         Get the feature vector of the given internal index.
 
-        :param internal_index: The internal index to get the feature vector of.
+        :param index: The internal index to get the feature vector of
         :param copy: If True the returned feature vector is a copy, otherwise a reference to the graph data is returned.
         :returns: The feature vector of the given index
         """
-        raise NotImplementedError()
+        if index < 0 or index >= self.size():
+            raise IndexError("Index {} out of range for size {}".format(index, self.size()))
+        memory_view = self.graph_cpp.get_feature_vector(index)
+        feature_vector = np.asarray(memory_view)
+        if copy:
+            feature_vector = np.copy(feature_vector)
+        return feature_vector
 
     @abstractmethod
     def has_vertex(self, external_label: int) -> bool:
@@ -106,9 +112,10 @@ class SearchGraph(ABC):
         """
         raise NotImplementedError()
 
-    @abstractmethod
-    def search(self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
-               entry_vertex_indices: Optional[List[int]] = None) -> ResultSet:
+    def search(
+            self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
+            entry_vertex_indices: Optional[List[int]] = None, threads: int = 1, thread_batch_size: int = 0
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
 
@@ -123,8 +130,32 @@ class SearchGraph(ABC):
         :param k: The number of results that will be returned
         :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
         :param entry_vertex_indices: Start point for exploratory search. If None, a reasonable default is used.
+        :param threads: The number of threads to use for parallel processing. It should not excel the number of queries.
+                        If set to 0, the minimum of the number of cores of this machine and the number of queries is
+                        used.
+        :param thread_batch_size: If threads != 1, the number of queries to search in the same thread.
+        :returns: TODO
         """
-        raise NotImplementedError()
+        # handle query shapes
+        if len(query.shape) == 1:
+            query = query.reshape(1, -1)
+        if len(query.shape) != 2:
+            raise InvalidShapeException('invalid query shape: {}'.format(query.shape))
+
+        valid_dtype = self.get_feature_space().metric().get_dtype()
+
+        query = assure_array(query, 'query', valid_dtype)
+        if entry_vertex_indices is None:
+            entry_vertex_indices = self.get_entry_vertex_indices()
+
+        threads = get_num_useful_threads(threads, query.shape[0])
+
+        if thread_batch_size <= 0:
+            thread_batch_size = max(query.shape[0] // (threads * 4), 1)
+
+        return self.graph_cpp.search(
+            entry_vertex_indices, query, eps, k, max_distance_computation_count, threads, thread_batch_size
+        )
 
     @abstractmethod
     def explore(self, entry_vertex_index: int, k: int, max_distance_computation_count: int) -> ResultSet:
@@ -144,9 +175,34 @@ class SearchGraph(ABC):
 
 class ReadOnlyGraph(SearchGraph):
     def __init__(self, graph_cpp: deglib_cpp.ReadOnlyGraph):
+        super().__init__(graph_cpp)
         if not isinstance(graph_cpp, deglib_cpp.ReadOnlyGraph):
             raise TypeError("expected ReadOnlyGraph but got {}".format(type(graph_cpp)))
-        self.graph_cpp = graph_cpp
+
+    @classmethod
+    def from_graph(
+            cls, input_graph: SearchGraph, max_vertex_count: int = -1, feature_space: FloatSpace | None = None,
+            edges_per_vertex: int = -1
+    ) -> Self:
+        """
+        Create a read only graph from the given graph by only keeping information that is useful for searching.
+
+        :param input_graph: The graph to build from
+        :param max_vertex_count: If given the new size of the returned graph, otherwise will be taken from input graph
+        :param feature_space: If given the feature space for the graph, otherwise the same as the feature space of the
+                              input graph
+        :param edges_per_vertex: The number of edges for the new graph. Should not be smaller than the edges of the
+                                 input graph
+        """
+        if max_vertex_count == -1:
+            max_vertex_count = input_graph.size()
+        if feature_space is None:
+            feature_space = input_graph.get_feature_space()
+        if edges_per_vertex == -1:
+            edges_per_vertex = input_graph.get_edges_per_vertex()
+        return ReadOnlyGraph(deglib_cpp.read_only_graph_from_graph(
+            input_graph.to_cpp(), max_vertex_count, feature_space.to_cpp(), edges_per_vertex
+        ))
 
     def size(self) -> int:
         """
@@ -159,23 +215,8 @@ class ReadOnlyGraph(SearchGraph):
         :return: the feature space
         """
         # first two parameters get ignored
-        return FloatSpace(0, Metric.L2, float_space_cpp=self.graph_cpp.get_feature_space())
+        return FloatSpace(float_space_cpp=self.graph_cpp.get_feature_space())
 
-    def get_feature_vector(self, index: int, copy: bool = False) -> np.ndarray:
-        """
-        Get the feature vector of the given internal index.
-
-        :param index: The internal index to get the feature vector of
-        :param copy: If True the returned feature vector is a copy, otherwise a reference to the graph data is returned.
-        :returns: The feature vector of the given index
-        """
-        if index < 0 or index >= self.size():
-            raise IndexError("Index {} out of range for size {}".format(index, self.size()))
-        memory_view = self.graph_cpp.get_feature_vector(index)
-        feature_vector = np.asarray(memory_view)
-        if copy:
-            feature_vector = np.copy(feature_vector)
-        return feature_vector
 
     def get_internal_index(self, external_label: int) -> int:
         """
@@ -185,28 +226,6 @@ class ReadOnlyGraph(SearchGraph):
         :returns: The internal index
         """
         return self.graph_cpp.get_internal_index(external_label)
-
-    def search(self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
-               entry_vertex_indices: Optional[List[int]] = None) -> ResultSet:
-        """
-        Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
-
-        Eps greater 0 extends the search range and takes additional graph vertices into account.
-
-        It is possible to limit the amount of work by specifying a maximal number of distances to be calculated.
-        For lower numbers it is recommended to set eps to 0 since its very unlikely the method can make use of the
-        extended the search range.
-
-        :param query: A feature vector for which similar feature vectors should searched.
-        :param eps: TODO
-        :param k: The number of results that will be returned
-        :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
-        :param entry_vertex_indices: Start point for exploratory search. If None, a reasonable default is used.
-        """
-        query = assure_array(query, 'query', np.float32)
-        if entry_vertex_indices is None:
-            entry_vertex_indices = self.get_entry_vertex_indices()
-        return ResultSet(self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_distance_computation_count))
 
     def has_path(self, entry_vertex_indices: List[int], to_vertex: int, eps: float, k: int) -> List[ObjectDistance]:
         """
@@ -382,6 +401,12 @@ class MutableGraph(SearchGraph, ABC):
     def to_cpp(self):
         raise NotImplementedError()
 
+    def remove_non_mrng_edges(self):
+        """
+        Remove all edges which are not MRNG conform.
+        """
+        deglib_cpp.remove_non_mrng_edges(self.to_cpp())
+
 
 class SizeBoundedGraph(MutableGraph):
     def __init__(
@@ -398,7 +423,7 @@ class SizeBoundedGraph(MutableGraph):
         """
         if graph_cpp is None:
             graph_cpp = deglib_cpp.SizeBoundedGraph(max_vertex_count, edges_per_vertex, feature_space.to_cpp())
-        self.graph_cpp = graph_cpp
+        super().__init__(graph_cpp)
         self.feature_space = feature_space
 
     @staticmethod
@@ -411,7 +436,7 @@ class SizeBoundedGraph(MutableGraph):
         :param edges_per_vertex: Number of neighbors for each vertex. Defaults to 32.
         :param metric: The metric to measure distances between features. Defaults to L2-Metric.
         """
-        return SizeBoundedGraph(capacity, edges_per_vertex, FloatSpace(dims, metric))
+        return SizeBoundedGraph(capacity, edges_per_vertex, FloatSpace.create(dims, metric))
 
     def size(self) -> int:
         """
@@ -423,22 +448,7 @@ class SizeBoundedGraph(MutableGraph):
         """
         :return: the feature space
         """
-        # first two parameters get ignored
-        return FloatSpace(0, Metric.L2, float_space_cpp=self.graph_cpp.get_feature_space())
-
-    def get_feature_vector(self, index: int, copy: bool = False) -> np.ndarray:
-        """
-        Get the feature vector of the given internal index.
-
-        :param index: The internal index to get the feature vector of
-        :param copy: If True the returned feature vector is a copy, otherwise a reference to the graph data is returned.
-        :returns: The feature vector of the given index
-        """
-        memory_view = self.graph_cpp.get_feature_vector(index)
-        feature_vector = np.asarray(memory_view)
-        if copy:
-            feature_vector = np.copy(feature_vector)
-        return feature_vector
+        return FloatSpace(self.graph_cpp.get_feature_space())
 
     def get_internal_index(self, external_label: int) -> int:
         """
@@ -498,7 +508,8 @@ class SizeBoundedGraph(MutableGraph):
                                be reallocated.
         :return: the internal index of the new vertex
         """
-        feature_vector = assure_array(feature_vector, 'feature_vector', np.float32)
+        valid_dtype = self.get_feature_space().metric().get_dtype()
+        feature_vector = assure_array(feature_vector, 'feature_vector', valid_dtype)
         return self.graph_cpp.add_vertex(external_label, feature_vector)
 
     def remove_vertex(self, external_label: int):
@@ -592,30 +603,6 @@ class SizeBoundedGraph(MutableGraph):
         """
         return self.graph_cpp.has_edge(internal_index, neighbor_index)
 
-    def search(
-            self, query: np.ndarray, eps: float, k: int, max_distance_computation_count: int = 0,
-            entry_vertex_indices: Optional[List[int]] = None
-    ) -> ResultSet:
-        """
-        Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
-
-        Eps greater 0 extends the search range and takes additional graph vertices into account.
-
-        It is possible to limit the amount of work by specifying a maximal number of distances to be calculated.
-        For lower numbers it is recommended to set eps to 0 since its very unlikely the method can make use of the
-        extended the search range.
-
-        :param query: A feature vector for which similar feature vectors should searched.
-        :param eps: TODO
-        :param k: The number of results that will be returned
-        :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
-        :param entry_vertex_indices: Start point for exploratory search. If None, a reasonable default is used.
-        """
-        query = assure_array(query, 'query', np.float32)
-        if entry_vertex_indices is None:
-            entry_vertex_indices = self.get_entry_vertex_indices()
-        return ResultSet(self.graph_cpp.search(entry_vertex_indices, query, eps, k, max_distance_computation_count))
-
     def explore(self, entry_vertex_index: int, k: int, max_distance_computation_count: int) -> ResultSet:
         """
         An exploration for similar element, limited by max_distance_computation_count
@@ -632,6 +619,12 @@ class SizeBoundedGraph(MutableGraph):
     def __repr__(self) -> str:
         return (f'SizeBoundedGraph(size={self.size()} edges_per_vertex={self.get_edges_per_vertex()} '
                 f'dim={self.get_feature_space().dim()})')
+
+
+def get_num_useful_threads(requested: int, max_limit: int):
+    if requested == 0:
+        requested = multiprocessing.cpu_count()
+    return min(requested, max_limit)  # dont use more threads than queries
 
 
 __all__ = ['load_readonly_graph', 'ReadOnlyGraph', 'SizeBoundedGraph', 'MutableGraph', 'SearchGraph']

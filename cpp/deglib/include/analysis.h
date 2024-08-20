@@ -1,8 +1,10 @@
 #pragma once
 
 #include <math.h>
+#include <thread>
 #include <algorithm>
 
+#include "concurrent.h"
 #include "search.h"
 #include "graph.h"
 
@@ -122,6 +124,7 @@ namespace deglib::analysis
         const auto& feature_space = graph.getFeatureSpace();
         const auto dist_func = feature_space.get_dist_func();
         const auto dist_func_param = feature_space.get_dist_func_param();
+        const auto feature_size = feature_space.get_data_size();
         const auto edges_per_vertex = graph.getEdgesPerVertex();
         const auto vertex_count = graph.size();
 
@@ -129,9 +132,9 @@ namespace deglib::analysis
             const auto fv1 = graph.getFeatureVector(n);
             const auto neighborIds = graph.getNeighborIndices(n); 
             const auto neighborWeights = graph.getNeighborWeights(n); 
-            memory::prefetch(reinterpret_cast<const char*>(graph.getFeatureVector(neighborIds[0])));
+            deglib::memory::prefetch(reinterpret_cast<const char*>(graph.getFeatureVector(neighborIds[0])), feature_size);
             for (uint8_t e = 0; e < edges_per_vertex; e++) {
-                memory::prefetch(reinterpret_cast<const char*>(graph.getFeatureVector(neighborIds[std::min(e + 1, edges_per_vertex - 1)])));
+                deglib::memory::prefetch(reinterpret_cast<const char*>(graph.getFeatureVector(neighborIds[std::min(e + 1, edges_per_vertex - 1)])), feature_size);
                 const auto fv2 = graph.getFeatureVector(neighborIds[e]);
                 const auto dist = dist_func(fv1, fv2, dist_func_param);
 
@@ -164,12 +167,12 @@ namespace deglib::analysis
 
     static uint32_t calc_non_rng_edges(const deglib::graph::MutableGraph& graph) {
         const auto vertex_count = graph.size();
-        const auto edge_per_vertex =graph.getEdgesPerVertex();
+        const auto edge_per_vertex = graph.getEdgesPerVertex();
 
-        uint32_t removed_rng_edges = 0;
-        for (uint32_t i = 0; i < vertex_count; i++) {
-            const auto vertex_index = i;
-
+        const auto thread_count = std::thread::hardware_concurrency();
+        auto removed_rng_edges_per_thread = std::vector<uint32_t>(thread_count);
+        deglib::concurrent::parallel_for(0, vertex_count, thread_count, [&] (size_t vertex_index, size_t thread_id) {
+            uint32_t removed_rng_edges = 0;
             const auto neighbor_indices = graph.getNeighborIndices(vertex_index);
             const auto neighbor_weights = graph.getNeighborWeights(vertex_index);
 
@@ -181,7 +184,13 @@ namespace deglib::analysis
                 if(checkRNG(graph, edge_per_vertex, vertex_index, neighbor_index, neighbor_weight) == false) 
                     removed_rng_edges++;
             }
-        }
+            removed_rng_edges_per_thread[thread_id] += removed_rng_edges;
+        });
+
+        // aggregate
+        uint32_t removed_rng_edges = 0;
+        for (uint32_t i = 0; i < thread_count; i++) 
+            removed_rng_edges += removed_rng_edges_per_thread[i];
 
         return removed_rng_edges;
     }
