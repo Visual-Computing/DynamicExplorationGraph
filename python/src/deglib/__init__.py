@@ -10,7 +10,7 @@ from .std import Mt19937
 from .distances import Metric, FloatSpace
 
 
-__version__ = "0.1.55"
+__version__ = "0.1.56"
 
 
 __all__ = [
