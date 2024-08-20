@@ -54,7 +54,7 @@ jobs:
 
   build_sdist:
     runs-on: ubuntu-latest
-    if: "github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v') && github.base_ref == 'refs/heads/main"
+    if: "github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v') && github.base_ref == 'refs/heads/main'"
 
     steps:
     - uses: actions/checkout@v4
