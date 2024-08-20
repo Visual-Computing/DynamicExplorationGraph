@@ -1,4 +1,5 @@
 import os
+import platform
 import random
 from typing import Optional
 
@@ -8,6 +9,9 @@ import tempfile
 import numpy as np
 
 import deglib
+
+
+IS_MACOS_M1 = platform.system() == "Darwin" and platform.machine() == "arm64"
 
 
 def get_tmp_graph_file(samples: int, dims: int) -> pathlib.Path:
@@ -120,6 +124,9 @@ def test_get_feature_vector(conf: Configuration):
 
 @pytest.mark.parametrize('conf', configurations)
 def test_search(conf: Configuration):
+    if IS_MACOS_M1 and conf.metric == deglib.Metric.InnerProduct:
+        pytest.skip('This test is skipped on macOS with M1 chip, as avx2 is not supported on m1 chip.')
+
     k = 10
     graph_result, dists = conf.graph.search(conf.query, eps=0.1, k=k)
     dists = dists.flatten()
