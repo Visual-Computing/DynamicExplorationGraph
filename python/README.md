@@ -3,6 +3,13 @@
 Python bindings for the C++ library Dynamic Exploration Graph used in the paper:
 [Fast Approximate Nearest Neighbor Search with a Dynamic Exploration Graph using Continuous Refinement](https://arxiv.org/abs/2307.10479)
 
+## Table of Contents
+- [Installation](#installation)
+- [Examples](#examples)
+- [Naming](#naming)
+- [Limitations](#limitations)
+- [Troubleshooting](#troubleshooting)
+
 ## Installation
 
 ### Using pip
@@ -24,14 +31,12 @@ python -m venv /path/to/deglib_env && . /path/to/deglib_env/bin/activate
 **Get the Source**
 ```shell
 # clone git repository
-# TODO: "-b feat/python_bindings" not necessary after merge
-git clone -b feat/python_bindings git@github.com:Visual-Computing/DynamicExplorationGraph.git
-cd DynamicExplorationGraph
+git clone git@github.com:Visual-Computing/DynamicExplorationGraph.git
+cd DynamicExplorationGraph/python
 ```
 
 **Install the Package from Source**
 ```shell
-cd python
 pip install setuptools pybind11 build
 python setup.py copy_build_files  # copy c++ library to ./lib/
 pip install .
@@ -39,6 +44,7 @@ pip install .
 This will compile the C++ code and install deglib into your virtual environment, so it may take a while.
 
 **Testing**
+
 To execute all tests.
 ```shell
 pytest
@@ -75,20 +81,23 @@ vectors and D is the number of dimensions of each feature vector.
 ### Building a Graph
 
 ```python
-import deglib
-
-graph = deglib.builder.EvenRegularGraphBuilder.build_from_data(dataset, edges_per_vertex=32)
+graph = deglib.builder.build_from_data(dataset, edges_per_vertex=32, callback="progress")
 graph.save_graph("/path/to/graph.deg")
 rd_graph = deglib.graph.load_readonly_graph("/path/to/graph.deg")
 ```
 
 ### Searching the Graph
 ```python
+# query can have shape (D,) or (Q, D), where
+# D is the dimensionality of the dataset and
+# Q is the number of queries.
 query = np.random.random((dims,)).astype(np.float32)
-result = graph.search(query, eps=0.1, k=10)  # get 10 nearest features to query
-for r in result:
-    print(r.get_internal_index(), r.get_distance())
+result, dists = graph.search(query, eps=0.1, k=10)  # get 10 nearest features to query
+print('best dataset index:', result[0])
+best_match = dataset[result[0]]
 ```
+
+For more examples see [tests](tests).
 
 ### Referencing C++ memory
 Consider the following example:
@@ -97,7 +106,7 @@ feature_vector = graph.get_feature_vector(42)
 del graph
 print(feature_vector)
 ```
-This will crash as `feature_vector` is holding a reference to memory that is owned by `graph`. This can lead to segmentation faults.
+This will crash as `feature_vector` is holding a reference to memory that is owned by `graph`. This can lead to undefined behaviour (most likely segmentation fault).
 Be careful to keep objects in memory that are referenced. If you need it use the `copy=True` option:
 
 ```python
@@ -131,18 +140,19 @@ elements from the graph, external labels and internal indices are equal.
 # as long as no elements are removed
 # external labels and internal indices are equal
 for i, vec in enumerate(data):
-  builder.add_entry(i, vec)
+    builder.add_entry(i, vec)
 ```
 
 ### Eps
-TODO
+The eps-search-parameter controls how many nodes are checked during search.
+Lower eps values like 0.001 are faster but less accurate.
+Higher eps values like 0.1 are slower but more accurate. Should always be greater 0.
 
 ### Relative Neighborhood Graph / RNG-conform
 TODO
 
 ## Limitations
-- The python wrapper at the moment only supports `float32` feature vectors.
-- The elements of a `ResultSet` are not sorted by distance.
+- The python wrapper at the moment only supports `float32` and `uint8` feature vectors.
 
 ## Troubleshooting
 
