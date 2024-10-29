@@ -11,6 +11,7 @@ def ivecs_read(filename: str | Path) -> np.ndarray:
     d = a[0]
     return a.reshape(-1, d + 1)[:, 1:].copy()
 
+
 def u8vecs_read(filename: str | Path) -> np.ndarray:
     """
     The loaded dataset should be in the format described here: http://corpus-texmex.irisa.fr/
@@ -18,6 +19,7 @@ def u8vecs_read(filename: str | Path) -> np.ndarray:
     a = np.fromfile(filename, dtype=np.int32)
     b = a.view(np.uint8).reshape(-1, a[0] + 4)
     return b[:, 4:].copy()
+
 
 def fvecs_read(filename: str | Path) -> np.ndarray:
     """
