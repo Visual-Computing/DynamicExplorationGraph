@@ -3,6 +3,13 @@
 Python bindings for the C++ library Dynamic Exploration Graph used in the paper:
 [Fast Approximate Nearest Neighbor Search with a Dynamic Exploration Graph using Continuous Refinement](https://arxiv.org/abs/2307.10479)
 
+## Table of Contents
+- [Installation](#installation)
+- [Examples](#examples)
+- [Naming](#naming)
+- [Limitations](#limitations)
+- [Troubleshooting](#troubleshooting)
+
 ## Installation
 
 ### Using pip
@@ -145,8 +152,7 @@ Higher eps values like 0.1 are slower but more accurate. Should always be greate
 TODO
 
 ## Limitations
-- The python wrapper at the moment only supports `float32` feature vectors.
-- The elements of a `ResultSet` are not sorted by distance.
+- The python wrapper at the moment only supports `float32` and `uint8` feature vectors.
 
 ## Troubleshooting
 
