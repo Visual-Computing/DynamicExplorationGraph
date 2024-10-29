@@ -109,6 +109,11 @@ class SearchGraph(ABC):
     def has_path(self, entry_vertex_indices: List[int], to_vertex: int, eps: float, k: int) -> List[ObjectDistance]:
         """
         Returns a path from one of the entry vertex indices to the given to_vertex.
+
+        :param entry_vertex_indices: List of start vertices
+        :param to_vertex: The vertex to find a path to
+        :param eps: Controls how many nodes are checked during search. Lower eps values like 0.001 are faster but less
+                    accurate. Higher eps values like 0.1 are slower but more accurate. Should always be greater 0.
         """
         raise NotImplementedError()
 
@@ -126,7 +131,8 @@ class SearchGraph(ABC):
         extended the search range.
 
         :param query: A feature vector for which similar feature vectors should searched.
-        :param eps: TODO
+        :param eps: Controls how many nodes are checked during search. Lower eps values like 0.001 are faster but less
+                    accurate. Higher eps values like 0.1 are slower but more accurate. Should always be greater 0.
         :param k: The number of results that will be returned
         :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
         :param entry_vertex_indices: Start point for exploratory search. If None, a reasonable default is used.
@@ -134,7 +140,10 @@ class SearchGraph(ABC):
                         If set to 0, the minimum of the number of cores of this machine and the number of queries is
                         used.
         :param thread_batch_size: If threads != 1, the number of queries to search in the same thread.
-        :returns: TODO
+        :returns: A tuple containing (indices, distances) where indices is a numpy-array of shape [n_queries, k]
+                  containing the indices to the closest found neighbors to the queries.
+                  Distances is a numpy-array of shape [n_queries, k] containing the distances to the closest found
+                  neighbors.
         """
         # handle query shapes
         if len(query.shape) == 1:
@@ -160,11 +169,11 @@ class SearchGraph(ABC):
     @abstractmethod
     def explore(self, entry_vertex_index: int, k: int, max_distance_computation_count: int) -> ResultSet:
         """
-        A exploration for similar element, limited by max_distance_computation_count
+        An exploration for similar element, limited by max_distance_computation_count
 
         :param entry_vertex_index: The start point for which similar feature vectors should be searched
         :param k: The number of similar feature vectors to return
-        :param max_distance_computation_count: TODO
+        :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
         """
         raise NotImplementedError()
 
@@ -217,7 +226,6 @@ class ReadOnlyGraph(SearchGraph):
         # first two parameters get ignored
         return FloatSpace(float_space_cpp=self.graph_cpp.get_feature_space())
 
-
     def get_internal_index(self, external_label: int) -> int:
         """
         Translates internal index to external label
@@ -233,7 +241,8 @@ class ReadOnlyGraph(SearchGraph):
 
         :param entry_vertex_indices: List of start vertices
         :param to_vertex: The vertex to find a path to
-        :param eps: TODO
+        :param eps: Controls how many nodes are checked during search. Lower eps values like 0.001 are faster but less
+                    accurate. Higher eps values like 0.1 are slower but more accurate. Should always be greater 0.
         :param k: TODO
         """
         return [ObjectDistance(od) for od in self.graph_cpp.has_path(entry_vertex_indices, to_vertex, eps, k)]
@@ -465,7 +474,8 @@ class SizeBoundedGraph(MutableGraph):
 
         :param entry_vertex_indices: List of start vertices
         :param to_vertex: The vertex to find a path to
-        :param eps: TODO
+        :param eps: Controls how many nodes are checked during search. Lower eps values like 0.001 are faster but less
+                    accurate. Higher eps values like 0.1 are slower but more accurate. Should always be greater 0.
         :param k: TODO
         """
         return [ObjectDistance(od) for od in self.graph_cpp.has_path(entry_vertex_indices, to_vertex, eps, k)]
