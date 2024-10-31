@@ -91,9 +91,9 @@ jobs:
 
     # Dedicated environments with protections for publishing are strongly recommended.
     environment:
-      name: testpypi
+      name: pypi
       # OPTIONAL: uncomment and update to include your PyPI project URL in the deployment status:
-      url: https://test.pypi.org/project/deglib/
+      # url: https://test.pypi.org/project/deglib/
 
     steps:
       - name: Retrieve release distributions
@@ -105,5 +105,3 @@ jobs:
 
       - name: Publish release distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
