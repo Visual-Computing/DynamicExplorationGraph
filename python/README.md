@@ -31,7 +31,7 @@ python -m venv /path/to/deglib_env && . /path/to/deglib_env/bin/activate
 **Get the Source**
 ```shell
 # clone git repository
-git clone git@github.com:Visual-Computing/DynamicExplorationGraph.git
+git clone https://github.com/Visual-Computing/DynamicExplorationGraph.git
 cd DynamicExplorationGraph/python
 ```
 
