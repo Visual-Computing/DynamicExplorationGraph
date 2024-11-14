@@ -101,6 +101,11 @@ public:
 using UncheckedSet = PQV<std::greater<ObjectDistance>, ObjectDistance>;
 
 
+inline bool is_navigation_bit_set(const std::byte* navigation_mask, std::size_t pos) {
+  std::size_t byte_index = pos / 8; // Bestimmen des Byte-Index
+  std::size_t bit_position = pos % 8; // Bestimmen der Bit-Position im Byte
+  return static_cast<bool>(navigation_mask[byte_index] & (std::byte{1} << bit_position));
+}
 
 
 class SearchGraph

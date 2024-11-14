@@ -388,8 +388,8 @@ class EvenRegularGraphBuilder {
         for (uint32_t i = 0; i < graph.size(); i++) {
           if(i != internal_index) {
             const auto dist = dist_func(new_vertex_feature, graph.getFeatureVector(i), dist_func_param);
-            graph.changeEdge(i, i, internal_index, dist);
-            graph.changeEdge(internal_index, internal_index, i, dist);
+            graph.changeEdge(i, i, internal_index, dist, true);
+            graph.changeEdge(internal_index, internal_index, i, dist, true);
           }
         }
       }
@@ -665,17 +665,21 @@ class EvenRegularGraphBuilder {
                graph.hasEdge(internal_index, candidate_index) == false && graph.hasEdge(candidate_index, internal_index) == false &&
                graph.hasEdge(internal_index, new_neighbor_index) == false && graph.hasEdge(new_neighbor_index, internal_index) == false) {
 
+
+              auto is_candidate_mrng = deglib::analysis::checkRNG(graph, edges_per_vertex, candidate_index, internal_index, candidate_weight);
+              auto is_new_neighbor_mrng = deglib::analysis::checkRNG(graph, edges_per_vertex,  internal_index, new_neighbor_index, new_neighbor_distance);
+
               // update edge list of the new vertex
-              graph.changeEdge(internal_index, internal_index, candidate_index, candidate_weight);
-              graph.changeEdge(internal_index, internal_index, new_neighbor_index, new_neighbor_distance);
+              graph.changeEdge(internal_index, internal_index, candidate_index, candidate_weight, is_candidate_mrng);
+              graph.changeEdge(internal_index, internal_index, new_neighbor_index, new_neighbor_distance, is_new_neighbor_mrng);
               new_neighbors.emplace_back(candidate_index, candidate_weight);
               new_neighbors.emplace_back(new_neighbor_index, new_neighbor_distance);
 
               // place the new vertex in the edge list of the result-vertex
-              graph.changeEdge(candidate_index, new_neighbor_index, internal_index, candidate_weight);
+              graph.changeEdge(candidate_index, new_neighbor_index, internal_index, candidate_weight, is_candidate_mrng);
 
               // place the new vertex in the edge list of the best edge neighbor
-              graph.changeEdge(new_neighbor_index, candidate_index, internal_index, new_neighbor_distance);
+              graph.changeEdge(new_neighbor_index, candidate_index, internal_index, new_neighbor_distance, is_new_neighbor_mrng);
             }
             std::atomic_thread_fence(std::memory_order_release);
           }

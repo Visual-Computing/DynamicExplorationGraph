@@ -277,8 +277,12 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
     std::abort();      
   }
 
-  static uint32_t compute_aligned_byte_size_per_vertex(const uint8_t edges_per_vertex, const uint16_t feature_byte_size, const uint8_t alignment) {
-    const uint32_t byte_size = uint32_t(feature_byte_size) + uint32_t(edges_per_vertex) * (sizeof(uint32_t) + sizeof(float)) + sizeof(uint32_t);
+  static uint8_t compute_navigation_mask_byte_size(const uint8_t edges_per_vertex) {
+    return uint8_t(((uint32_t(edges_per_vertex) + 31) / 32) * 32);
+  }
+
+  static uint32_t compute_aligned_byte_size_per_vertex(const uint8_t edges_per_vertex, const uint8_t navigation_mask_byte_size, const uint16_t feature_byte_size, const uint8_t alignment) {
+    const uint32_t byte_size = uint32_t(feature_byte_size) + uint32_t(navigation_mask_byte_size) + uint32_t(edges_per_vertex) * (sizeof(uint32_t) + sizeof(float)) + sizeof(uint32_t);
     if (alignment == 0)
       return byte_size;
     else {
@@ -303,8 +307,10 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
   const uint32_t max_vertex_count_;
   const uint8_t edges_per_vertex_;
   const uint16_t feature_byte_size_;
+  const uint8_t navigation_mask_byte_size_;
 
   const uint32_t byte_size_per_vertex_;
+  const uint32_t navigation_mask_offset_;
   const uint32_t neighbor_indices_offset_;
   const uint32_t neighbor_weights_offset_;
   const uint32_t external_label_offset_;
@@ -330,9 +336,11 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
       : max_vertex_count_(max_vertex_count),
         edges_per_vertex_(edges_per_vertex), 
         feature_byte_size_(uint16_t(feature_space.get_data_size())), 
+        navigation_mask_byte_size_(compute_navigation_mask_byte_size(edges_per_vertex)),
 
-        byte_size_per_vertex_(compute_aligned_byte_size_per_vertex(edges_per_vertex, uint16_t(feature_space.get_data_size()), object_alignment)),
-        neighbor_indices_offset_(uint32_t(feature_space.get_data_size())),
+        byte_size_per_vertex_(compute_aligned_byte_size_per_vertex(edges_per_vertex, navigation_mask_byte_size_, uint16_t(feature_space.get_data_size()), object_alignment)), 
+        navigation_mask_offset_(uint32_t(feature_space.get_data_size())),
+        neighbor_indices_offset_(navigation_mask_offset_ + uint32_t(navigation_mask_byte_size_)),
         neighbor_weights_offset_(neighbor_indices_offset_ + uint32_t(edges_per_vertex) * sizeof(uint32_t)),
         external_label_offset_(neighbor_weights_offset_ + uint32_t(edges_per_vertex) * sizeof(float)), 
 
@@ -367,7 +375,7 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
       : SizeBoundedGraph(max_vertex_count, edges_per_vertex, std::move(feature_space)) {
 
     // copy the old data over
-    uint32_t file_byte_size_per_vertex = compute_aligned_byte_size_per_vertex(this->edges_per_vertex_, this->feature_byte_size_, 0);
+    uint32_t file_byte_size_per_vertex = compute_aligned_byte_size_per_vertex(this->edges_per_vertex_, this->navigation_mask_byte_size_, this->feature_byte_size_, 0);
     for (uint32_t i = 0; i < size; i++) {
       ifstream.read(reinterpret_cast<char*>(this->vertex_by_index(i)), file_byte_size_per_vertex);
       label_to_index_.emplace(this->getExternalLabel(i), i);
@@ -412,6 +420,10 @@ private:
     return vertex_by_index(internal_idx);
   }
 
+  inline const std::byte* navigation_mask_by_index(const uint32_t internal_idx) const {
+    return vertex_by_index(internal_idx) + navigation_mask_offset_;
+  }
+
   inline const uint32_t* neighbors_by_index(const uint32_t internal_idx) const {
     return reinterpret_cast<uint32_t*>(vertex_by_index(internal_idx) + neighbor_indices_offset_);
   }
@@ -435,6 +447,10 @@ public:
 
   inline const std::byte* getFeatureVector(const uint32_t internal_idx) const override{
     return feature_by_index(internal_idx);
+  }
+
+  inline const std::byte* getNavigationMask(const uint32_t internal_idx) const override {
+    return navigation_mask_by_index(internal_idx);
   }
 
   inline const uint32_t* getNeighborIndices(const uint32_t internal_idx) const override {
@@ -490,7 +506,7 @@ public:
     out.write(reinterpret_cast<const char*>(&this->edges_per_vertex_), sizeof(this->edges_per_vertex_));
 
     // store the existing vertices
-    uint32_t byte_size_per_vertex = compute_aligned_byte_size_per_vertex(this->edges_per_vertex_, this->feature_byte_size_, 0);
+    uint32_t byte_size_per_vertex = compute_aligned_byte_size_per_vertex(this->edges_per_vertex_,  this->navigation_mask_byte_size_, this->feature_byte_size_, 0);
     for (uint32_t i = 0; i < size; i++)
       out.write(reinterpret_cast<const char*>(this->vertex_by_index(i)), byte_size_per_vertex);    
     out.close();
@@ -569,12 +585,14 @@ public:
    * @param replace_index neighbor index to remove
    * @param new_index neighbor index to add
    * @param new_weight weight of the neighbor to add
+   * @param is_navigation_edge is the new edge an navigation edge
    * @return true if the from_neighbor_index was found and changed
    */
-  bool changeEdge(const uint32_t internal_index, const uint32_t replace_index, const uint32_t new_index, const float new_weight) override {
+  bool changeEdge(const uint32_t internal_index, const uint32_t replace_index, const uint32_t new_index, const float new_weight, const bool is_navigation_edge = false) override {
     auto vertex_memory = vertex_by_index(internal_index);
 
     // Find the position of the first index to be replaced
+    auto navigation_mask = vertex_memory + navigation_mask_offset_;
     auto neighbor_indices = reinterpret_cast<uint32_t*>(vertex_memory + neighbor_indices_offset_);    // list of neighbor indizizes
     auto neighbor_indices_end = neighbor_indices + edges_per_vertex_;                                 // end of the list
     uint32_t* replace_pos = std::lower_bound(neighbor_indices, neighbor_indices_end, replace_index);
@@ -596,16 +614,19 @@ public:
         // Shift elements left from replace_idx to insert_idx - 1
         std::memmove(neighbor_indices + replace_idx, neighbor_indices + replace_idx + 1, (insert_idx - replace_idx - 1) * sizeof(uint32_t));
         std::memmove(neighbor_weights + replace_idx, neighbor_weights + replace_idx + 1, (insert_idx - replace_idx - 1) * sizeof(float));
+        move_bits(navigation_mask, replace_idx + 1, replace_idx, insert_idx - replace_idx);
         --insert_idx;
     } else if (insert_idx < replace_idx) {
         // Shift elements right from insert_idx to replace_idx
         std::memmove(neighbor_indices + insert_idx + 1, neighbor_indices + insert_idx, (replace_idx - insert_idx) * sizeof(uint32_t));
         std::memmove(neighbor_weights + insert_idx + 1, neighbor_weights + insert_idx, (replace_idx - insert_idx) * sizeof(float));
+        move_bits(navigation_mask, insert_idx, insert_idx + 1, replace_idx - insert_idx);
     }
 
     // Insert the new index and weight at the correct position
     neighbor_indices[insert_idx] = new_index;
     neighbor_weights[insert_idx] = new_weight;
+    set_navigation_bit_at_index(navigation_mask, insert_idx, is_navigation_edge);
 
     return true;
   }

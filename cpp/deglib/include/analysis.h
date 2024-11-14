@@ -195,6 +195,23 @@ namespace deglib::analysis
         return removed_rng_edges;
     }
 
+    static float calc_avg_navigation_edge_count(const deglib::graph::MutableGraph& graph) {
+        uint64_t count = 0;
+        const auto edges_per_vertex = graph.getEdgesPerVertex();
+        const auto vertex_count = graph.size();
+        for (uint32_t n = 0; n < vertex_count; n++) {
+            const auto mask = graph.getNavigationMask(n);
+            for (std::size_t i = 0; i < edges_per_vertex; ++i) {
+                std::size_t byte_index = i / 8;
+                std::size_t bit_position = i % 8;
+                if (static_cast<bool>(mask[byte_index] & (std::byte{1} << bit_position))) {
+                    ++count;
+                }
+            }
+        }
+        return float(count) / vertex_count;
+    }
+
     /**
      * check if the graph is connected and contains only one graph component
      */

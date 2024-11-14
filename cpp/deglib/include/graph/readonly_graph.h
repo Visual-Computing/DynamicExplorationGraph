@@ -278,8 +278,12 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
   }
 
 
-  static uint32_t compute_aligned_byte_size_per_vertex(const uint8_t edges_per_vertex, const uint16_t feature_byte_size, const uint8_t alignment) {
-      const uint32_t byte_size = uint32_t(feature_byte_size) + uint32_t(edges_per_vertex) * sizeof(uint32_t) + sizeof(uint32_t);
+  static uint8_t compute_navigation_mask_byte_size(const uint8_t edges_per_vertex) {
+    return uint8_t(((uint32_t(edges_per_vertex) + 31) / 32) * 32);
+  }
+
+  static uint32_t compute_aligned_byte_size_per_vertex(const uint8_t edges_per_vertex, const uint8_t navigation_mask_byte_size, const uint16_t feature_byte_size, const uint8_t alignment) {
+      const uint32_t byte_size = uint32_t(feature_byte_size) + uint32_t(navigation_mask_byte_size) + uint32_t(edges_per_vertex) * sizeof(uint32_t) + sizeof(uint32_t);
     if (alignment == 0)
       return  byte_size;
     else {
@@ -304,8 +308,10 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
   const uint32_t max_vertex_count_;
   const uint8_t edges_per_vertex_;
   const uint16_t feature_byte_size_;
+  const uint8_t navigation_mask_byte_size_;
 
   const uint32_t byte_size_per_vertex_;
+  const uint32_t navigation_mask_offset_;
   const uint32_t neighbor_indices_offset_;
   const uint32_t external_label_offset_;
 
@@ -330,9 +336,11 @@ public:
       : max_vertex_count_(max_vertex_count),
         edges_per_vertex_(edges_per_vertex), 
         feature_byte_size_(uint16_t(feature_space.get_data_size())), 
+        navigation_mask_byte_size_(compute_navigation_mask_byte_size(edges_per_vertex)),
 
-        byte_size_per_vertex_(compute_aligned_byte_size_per_vertex(edges_per_vertex, uint16_t(feature_space.get_data_size()), object_alignment)), 
-        neighbor_indices_offset_(uint32_t(feature_space.get_data_size())), 
+        byte_size_per_vertex_(compute_aligned_byte_size_per_vertex(edges_per_vertex, navigation_mask_byte_size_, uint16_t(feature_space.get_data_size()), object_alignment)), 
+        navigation_mask_offset_(uint32_t(feature_space.get_data_size())),
+        neighbor_indices_offset_(navigation_mask_offset_ + uint32_t(navigation_mask_byte_size_)),
         external_label_offset_(neighbor_indices_offset_ + uint32_t(edges_per_vertex) * sizeof(uint32_t)), 
 
         vertices_(std::make_unique<std::byte[]>(size_t(max_vertex_count) * byte_size_per_vertex_ + object_alignment)), 
@@ -353,7 +361,7 @@ public:
       : ReadOnlyGraph(max_vertex_count, edges_per_vertex, feature_space) {
 
     // copy the old data over
-    uint32_t vertex_without_external = uint32_t(feature_space.get_data_size()) + uint32_t(edges_per_vertex) * sizeof(uint32_t);
+    uint32_t vertex_without_external = uint32_t(feature_byte_size_) + uint32_t(navigation_mask_byte_size_) + uint32_t(edges_per_vertex) * sizeof(uint32_t);
     for (uint32_t i = 0; i < max_vertex_count; i++) {
       auto vertex = reinterpret_cast<char*>(this->vertex_by_index(i));
       ifstream.read(vertex, vertex_without_external);                     // read the feature vector and neighbor indices
@@ -423,6 +431,10 @@ private:
 
   inline const std::byte* feature_by_index(const uint32_t internal_idx) const{
     return vertex_by_index(internal_idx);
+  }
+
+  inline const std::byte* navigation_mask_by_index(const uint32_t internal_idx) const {
+    return vertex_by_index(internal_idx) + navigation_mask_offset_;
   }
 
   inline const uint32_t* neighbors_by_index(const uint32_t internal_idx) const {
@@ -662,11 +674,18 @@ public:
         break;
 
       size_t good_neighbor_count = 0;
+      const auto navigation_mask = this->navigation_mask_by_index(next_vertex.getInternalIndex());
       const auto neighbor_indices = this->neighbors_by_index(next_vertex.getInternalIndex());
       for (size_t i = 0; i < degree; i++) {
         const auto neighbor_index = neighbor_indices[i];
         checked_vertices_count++;
-        if (checked_ids[neighbor_index] != checked_ids_tag)  {
+        // if (checked_ids[neighbor_index] != checked_ids_tag)  {
+        // if (checked_ids[neighbor_index] != checked_ids_tag && deglib::search::is_navigation_bit_set(navigation_mask, i) == false) {
+        if (checked_ids[neighbor_index] != checked_ids_tag && (navigation_phase == false || (navigation_phase && deglib::search::is_navigation_bit_set(navigation_mask, i))))  {
+        // if (checked_ids[neighbor_index] != checked_ids_tag && (navigation_phase == false || (navigation_phase && deglib::search::is_navigation_bit_set(navigation_mask, i) == false))) {
+        // if (checked_ids[neighbor_index] != checked_ids_tag && (navigation_phase || (navigation_phase == false && deglib::search::is_navigation_bit_set(navigation_mask, i) == false)))  { 
+        // if (checked_ids[neighbor_index] != checked_ids_tag && ((navigation_phase && deglib::search::is_navigation_bit_set(navigation_mask, i)) || (navigation_phase == false && deglib::search::is_navigation_bit_set(navigation_mask, i) == false))) {
+
           checked_ids[neighbor_index] = checked_ids_tag;
           good_neighbors[good_neighbor_count++] = neighbor_index;
         }
@@ -720,9 +739,9 @@ public:
       }
 
       // navigation phase is over
-      // if(navigation_phase && found_better == false) {
+      if(navigation_phase && found_better == false) {
       // if(next_vertex.getDistance() > radius * 0.9 * (1 + eps) && navigation_phase && found_better == false) {
-      if(next_vertex.getDistance() > radius && navigation_phase && found_better == false) {
+      // if(next_vertex.getDistance() > radius && navigation_phase && found_better == false) {
         navigation_phase = false;
         navi_hop_count = hop_count;
         navi_dist_cal_count = dist_cal_count;

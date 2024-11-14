@@ -338,6 +338,7 @@ void create_graph(const std::string repository_file, const DataStreamType data_s
         if(status.step % log_after == 0 || size == base_size) {    
             duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
             auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
+            auto avg_navigation_edge_count = deglib::analysis::calc_avg_navigation_edge_count(graph);
             auto weight_histogram_sorted = deglib::analysis::calc_edge_weight_histogram(graph, true, scale);
             auto weight_histogram = deglib::analysis::calc_edge_weight_histogram(graph, false, scale);
             auto valid_weights = deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_regularity(graph, uint32_t(size), true);
@@ -345,8 +346,8 @@ void create_graph(const std::string repository_file, const DataStreamType data_s
             auto duration = duration_ms;// / 1000;
             auto currRSS = getCurrentRSS() / 1000000;
             auto peakRSS = getPeakRSS() / 1000000;
-            fmt::print("{:7} vertices, {:8}ms, {:8} / {:8} improv, Q: {:4.2f} -> Sorted:{:.1f}, InOrder:{:.1f}, {} connected & {}, RSS {} & peakRSS {}\n", 
-                        size, duration, status.improved, status.tries, avg_edge_weight, fmt::join(weight_histogram_sorted, " "), fmt::join(weight_histogram, " "), connected ? "" : "not", valid_weights ? "valid" : "invalid", currRSS, peakRSS);
+            fmt::print("{:7} vertices, {:8}ms, {:8} / {:8} improv, Nav: {:4.2f}, Q: {:4.2f} -> Sorted:{:.1f}, InOrder:{:.1f}, {} connected & {}, RSS {} & peakRSS {}\n", 
+                        size, duration, status.improved, status.tries, avg_navigation_edge_count, avg_edge_weight, fmt::join(weight_histogram_sorted, " "), fmt::join(weight_histogram, " "), connected ? "" : "not", valid_weights ? "valid" : "invalid", currRSS, peakRSS);
             start = std::chrono::steady_clock::now();
         }
         else 
@@ -464,23 +465,24 @@ int main() {
 
 
     // ------------------------------- SIFT1M -----------------------------------------
-    const auto data_stream_type     = DataStreamType::AddAllRemoveHalf;
+    const auto data_stream_type     = DataStreamType::AddAll;
     const auto repository_file      = (data_path / "SIFT1M" / "sift_base.fvecs").string();
     const auto query_file           = (data_path / "SIFT1M" / "sift_query.fvecs").string();
     const auto gt_file              = (data_path / "SIFT1M" / (data_stream_type == AddAll ? "sift_groundtruth.ivecs" : "sift_groundtruth_base500000.ivecs" )).string();
     // const auto reduce_graph_file    = (data_path / "deg" / "online" / "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg ").string();
     const auto reduce_graph_file    = (data_path / "deg" / "schemes" / "128D_L2_K30_AddK60Eps0.1_schemeUnkown.deg").string();
-    const auto graph_file           = (data_path / "deg" / "dynamic" / "128D_L2_K30_AddK60Eps0.1_add500k_schemeD.deg").string();
+    // const auto graph_file           = (data_path / "gDEG" / "128D_L2_K30_AddK60Eps0.1_add500k_schemeD_guideMRNG.gdeg").string();
+    const auto graph_file           = (data_path / "gDEG" / "128D_L2_K30_AddK60Eps0.1_add500k_schemeD.gdeg").string();
     const auto opt_graph_file       = (data_path / "deg" / "dynamic" / "128D_L2_K30_AddK60Eps0.1_add500k_schemeD_OptAfterwardsWith_SwapK30-0StepEps0.001LowPath5_it100000.deg").string();
     const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::LID::Low : deglib::builder::LID::Unknown;
     const deglib::Metric metric     = deglib::Metric::L2;
 
-    // if(std::filesystem::exists(graph_file.c_str()) == false) {
-        // create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
+    if(std::filesystem::exists(graph_file.c_str()) == false) {
+        create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
         // optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 100000); // k_opt, eps_opt, i_opt, iteration
-    // }
+    }
     // reduce_graph(reduce_graph_file, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
-    test_graph(query_file, gt_file, opt_graph_file, 1, 1, 100);  // repeat_test, test_threads, k
+    test_graph(query_file, gt_file, graph_file, 1, 1, 100);  // repeat_test, test_threads, k
 
 
     // // ------------------------------- GLOVE -----------------------------------------
