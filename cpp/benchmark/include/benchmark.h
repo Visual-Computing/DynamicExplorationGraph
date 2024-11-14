@@ -29,34 +29,23 @@ static std::vector<std::unordered_set<uint32_t>> get_ground_truth(const uint32_t
     return answers;
 }
 
-static float test_approx_anns(const deglib::search::SearchGraph& graph, const std::vector<uint32_t>& entry_vertex_indices,
+struct EvalResult {
+    float recall;
+    float avg_hop;
+    float avg_dist_cal;
+    float avg_checked_vertices;
+};
+
+static EvalResult test_approx_anns(const deglib::search::SearchGraph& graph, const std::vector<uint32_t>& entry_vertex_indices,
                          const deglib::FeatureRepository& query_repository, const std::vector<std::unordered_set<uint32_t>>& ground_truth, 
                          const float eps, const uint32_t k, const uint32_t test_size, const uint32_t threads)
 {
 
-    // uint32_t correct = 0;
-    // for (size_t i = 0; i < test_size; i++)
-    // {
-    //     auto query = reinterpret_cast<const std::byte*>(query_repository.getFeature(uint32_t(i)));
-    //     auto result_queue = graph.search(entry_vertex_indices, query, eps, k);
-
-    //     if (result_queue.size() != k) {
-    //         fmt::print(stderr, "ANNS with k={} got only {} results for query {}\n", k, result_queue.size(), i);
-    //         abort();
-    //     }
-
-    //     const auto& gt = ground_truth[i];
-    //     while (result_queue.empty() == false)
-    //     {
-    //         const auto& result = result_queue.top();
-    //         const auto external_id = graph.getExternalLabel(result.getInternalIndex());
-    //         if (gt.find(external_id) != gt.end()) correct++;
-    //         result_queue.pop();
-    //     }
-    // }   
-    // return 1.0f * correct / (test_size*k);
-
-    auto corrects = std::vector<float>(threads);
+    auto total_counts = std::vector<float>(threads);
+    auto correct_counts = std::vector<float>(threads);
+    auto hop_counts = std::vector<float>(threads);
+    auto dist_cal_counts = std::vector<float>(threads);    
+    auto checked_vertices_counts = std::vector<float>(threads);
     deglib::concurrent::parallel_for(0, test_size, threads, [&] (size_t i, size_t thread_id) {
 
         auto query = reinterpret_cast<const std::byte*>(query_repository.getFeature(uint32_t(i)));
@@ -77,14 +66,27 @@ static float test_approx_anns(const deglib::search::SearchGraph& graph, const st
             result_queue.pop();
         }
 
-        corrects[thread_id] += correct;
+        total_counts[thread_id] += k;
+        correct_counts[thread_id] += correct;
+        hop_counts[thread_id] += result_queue.hop_count_;
+        dist_cal_counts[thread_id] += result_queue.dist_cal_count_;
+        checked_vertices_counts[thread_id] += result_queue.checked_vertices_count_;
     });
 
     // calc recall
-    float total_correct = 0;
-    for (size_t i = 0; i < threads; i++) 
-        total_correct += corrects[i];
-    return total_correct / (test_size*k);
+    float total = 0;
+    float correct = 0;
+    float hop_count = 0;
+    float dist_cal_count = 0;
+    float checked_vertices_count = 0;
+    for (size_t i = 0; i < threads; i++) {
+        total += total_counts[i];
+        correct += correct_counts[i];
+        hop_count += hop_counts[i];
+        dist_cal_count += dist_cal_counts[i];
+        checked_vertices_count += checked_vertices_counts[i];
+    }
+    return EvalResult(correct / total, hop_count / test_size, dist_cal_count / test_size, checked_vertices_count / test_size);
 }
 
 static float test_approx_explore(const deglib::search::SearchGraph& graph, const std::vector<std::vector<uint32_t>>& entry_vertex_indices, 
@@ -126,22 +128,22 @@ static void test_graph_anns(const deglib::search::SearchGraph& graph, const degl
     // std::vector<float> eps_parameter = { 0.05f, 0.06f, 0.07f, 0.08f, 0.1f, 0.12f, 0.18f, 0.2f,   };  // enron
     // std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.2f, 0.4f, 0.8f  };                    // UQ-V
     // std::vector<float> eps_parameter = { 0.00f, 0.03f, 0.05f, 0.07f, 0.09f, 0.12f, 0.2f, 0.3f, };    // audio
-    // std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f  };       // SIFT1M k=100
+    std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f  };       // SIFT1M k=100
     // std::vector<float> eps_parameter = { 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f, 0.4f };             // GloVe
-    std::vector<float> eps_parameter = { 0.01f, 0.02f, 0.03f, 0.04f, 0.06f, 0.1f, 0.2f, };           // Deep1M
+    // std::vector<float> eps_parameter = { 0.01f, 0.02f, 0.03f, 0.04f, 0.06f, 0.1f, 0.2f, };           // Deep1M
 
     fmt::print("Compute TOP{} for eps {}us\n", k, fmt::join(eps_parameter, ", "));
     const auto test_size = uint32_t(query_repository.size());
     for (float eps : eps_parameter)
     {
         StopW stopw = StopW();
-        float recall = 0;
+        EvalResult eval_result;
         for (size_t i = 0; i < repeat; i++) 
-            recall = deglib::benchmark::test_approx_anns(graph, entry_vertex_indices, query_repository, answer, eps, k, test_size, threads);
+            eval_result = deglib::benchmark::test_approx_anns(graph, entry_vertex_indices, query_repository, answer, eps, k, test_size, threads);
         uint64_t time_us_per_query = (stopw.getElapsedTimeMicro() / test_size) / repeat;
 
-        fmt::print("eps {:.3f} \t recall {:.5f} \t time_us_per_query {:6}us\n", eps, recall, time_us_per_query);
-        if (recall > 1.0)
+        fmt::print("eps {:3.3f} \t recall {:.5f} \t time_us_per_query {:6}us, hops {:4.1f}, dist cals {:5.1f}, checked vertices {:5.1f}\n", eps, eval_result.recall, time_us_per_query, eval_result.avg_hop, eval_result.avg_dist_cal, eval_result.avg_checked_vertices);
+        if (eval_result.recall > 1.0f)
             break;
     }
 

@@ -592,10 +592,13 @@ public:
   template <typename COMPARATOR, bool use_max_distance_count>
   deglib::search::ResultSet searchImpl(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const uint32_t max_distance_computation_count) const
   {
+    uint64_t hop_count = 0;
+    uint64_t dist_cal_count = 0;
+    uint64_t checked_vertices_count = 0;
+
     const auto dist_func_param = this->feature_space_.get_dist_func_param();
     const auto feature_size = this->feature_space_.get_data_size();
     const size_t degree = this->edges_per_vertex_;
-    uint32_t distance_computation_count = 0;
 
     // set of checked vertex ids
     const auto vl = visited_list_pool_->getFreeVisitedList();
@@ -613,6 +616,7 @@ public:
 
     // copy the initial entry vertices and their distances to the query into the three containers
     for (auto&& index : entry_vertex_indices) {
+      checked_vertices_count++;
       if(checked_ids[index] != checked_ids_tag) {
         checked_ids[index] = checked_ids_tag;
 
@@ -622,8 +626,12 @@ public:
         results.emplace(index, distance);
 
         // early stop after to many computations
+        dist_cal_count++;
         if constexpr (use_max_distance_count) {
-          if(++distance_computation_count >= max_distance_computation_count) {
+          if(dist_cal_count >= max_distance_computation_count) {
+            results.hop_count_ = hop_count;
+            results.dist_cal_count_ = dist_cal_count;
+            results.checked_vertices_count_ = checked_vertices_count;
             return results;
           }
         }
@@ -641,6 +649,7 @@ public:
       // next vertex to check
       const auto next_vertex = next_vertices.top();
       next_vertices.pop();
+      hop_count++;
 
       // max distance reached 
       if (next_vertex.getDistance() > exploration_radius) 
@@ -650,6 +659,7 @@ public:
       const auto neighbor_indices = this->neighbors_by_index(next_vertex.getInternalIndex());
       for (size_t i = 0; i < degree; i++) {
         const auto neighbor_index = neighbor_indices[i];
+        checked_vertices_count++;
         if (checked_ids[neighbor_index] != checked_ids_tag)  {
           checked_ids[neighbor_index] = checked_ids_tag;
           good_neighbors[good_neighbor_count++] = neighbor_index;
@@ -685,13 +695,21 @@ public:
         }
 
         // early stop after to many computations
+        dist_cal_count++;
         if constexpr (use_max_distance_count) {
-          if(++distance_computation_count >= max_distance_computation_count) {
+          if(dist_cal_count >= max_distance_computation_count) {
+            results.hop_count_ = hop_count;
+            results.dist_cal_count_ = dist_cal_count;
+            results.checked_vertices_count_ = checked_vertices_count;
             return results;
           }
         }
       }
     }
+
+    results.hop_count_ = hop_count;
+    results.dist_cal_count_ = dist_cal_count;
+    results.checked_vertices_count_ = checked_vertices_count;
 
     return results;
   }

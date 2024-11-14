@@ -479,8 +479,8 @@ int main() {
         // create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
         // optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 100000); // k_opt, eps_opt, i_opt, iteration
     // }
-    reduce_graph(reduce_graph_file, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
-    // test_graph(query_file, gt_file, opt_graph_file, 1, 1, 100);  // repeat_test, test_threads, k
+    // reduce_graph(reduce_graph_file, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
+    test_graph(query_file, gt_file, opt_graph_file, 1, 1, 100);  // repeat_test, test_threads, k
 
 
     // // ------------------------------- GLOVE -----------------------------------------

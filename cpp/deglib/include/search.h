@@ -81,11 +81,20 @@ class PQV : public std::vector<ObjectType> {
 };
 
 // search result set containing vertex ids and distances
-typedef PQV<std::less<ObjectDistance>, ObjectDistance> ResultSet;
+class ResultSet : public PQV<std::less<ObjectDistance>, ObjectDistance> {
+public:
+    uint64_t hop_count_ = 0;
+    uint64_t dist_cal_count_ = 0;
+    uint64_t checked_vertices_count_ = 0;
+
+    // Constructor that forwards the comparator to the base class
+    ResultSet(std::less<ObjectDistance> comp = std::less<ObjectDistance>())
+        : PQV<std::less<ObjectDistance>, ObjectDistance>(comp) {}
+};
 
 // set of unchecked vertex ids
 // typedef std::priority_queue<ObjectDistance, std::vector<ObjectDistance>, std::greater<ObjectDistance>> UncheckedSet;
-typedef PQV<std::greater<ObjectDistance>, ObjectDistance> UncheckedSet;
+using UncheckedSet = PQV<std::greater<ObjectDistance>, ObjectDistance>;
 
 
 
