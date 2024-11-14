@@ -596,6 +596,10 @@ public:
     uint64_t dist_cal_count = 0;
     uint64_t checked_vertices_count = 0;
 
+    uint64_t navi_hop_count = 0;
+    uint64_t navi_dist_cal_count = 0;
+    uint64_t navi_checked_vertices_count = 0;
+
     const auto dist_func_param = this->feature_space_.get_dist_func_param();
     const auto feature_size = this->feature_space_.get_data_size();
     const size_t degree = this->edges_per_vertex_;
@@ -629,14 +633,16 @@ public:
         dist_cal_count++;
         if constexpr (use_max_distance_count) {
           if(dist_cal_count >= max_distance_computation_count) {
-            results.hop_count_ = hop_count;
-            results.dist_cal_count_ = dist_cal_count;
-            results.checked_vertices_count_ = checked_vertices_count;
+            results.hop_count_ = results.navi_hop_count_ = hop_count;
+            results.dist_cal_count_ = results.navi_dist_cal_count_ = dist_cal_count;
+            results.checked_vertices_count_ = results.navi_checked_vertices_count_ = checked_vertices_count;
             return results;
           }
         }
       }
     }
+
+    auto navigation_phase = true;
 
     // search radius
     auto radius = std::numeric_limits<float>::max();
@@ -669,6 +675,7 @@ public:
       if (good_neighbor_count == 0)
         continue;
 
+      bool found_better = false;
       memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])), feature_size);
       for (size_t i = 0; i < good_neighbor_count; i++) {
         memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])), feature_size);
@@ -679,6 +686,7 @@ public:
              
         // check the neighborhood of this vertex later, if its good enough
         if (neighbor_distance <= exploration_radius) {
+          found_better = true;
           next_vertices.emplace(neighbor_index, neighbor_distance);
 
           // remember the vertex, if its better than the worst in the result list
@@ -701,9 +709,31 @@ public:
             results.hop_count_ = hop_count;
             results.dist_cal_count_ = dist_cal_count;
             results.checked_vertices_count_ = checked_vertices_count;
+
+            results.navi_hop_count_ = navi_hop_count;
+            results.navi_dist_cal_count_ = navi_dist_cal_count;
+            results.navi_checked_vertices_count_ = navi_checked_vertices_count;
+
             return results;
           }
         }
+      }
+
+      // navigation phase is over
+      // if(navigation_phase && found_better == false) {
+      // if(next_vertex.getDistance() > radius * 0.9 * (1 + eps) && navigation_phase && found_better == false) {
+      if(next_vertex.getDistance() > radius && navigation_phase && found_better == false) {
+        navigation_phase = false;
+        navi_hop_count = hop_count;
+        navi_dist_cal_count = dist_cal_count;
+        navi_checked_vertices_count = checked_vertices_count;
+
+        // next_vertices.clear();
+        // for (size_t i = 0; i < this->edges_per_vertex_; i++) {
+          // auto& val = results[i];
+          // checked_ids[val.getInternalIndex()] = false;
+          // next_vertices.emplace(val.getInternalIndex(), val.getDistance());
+        // }
       }
     }
 
@@ -711,6 +741,10 @@ public:
     results.dist_cal_count_ = dist_cal_count;
     results.checked_vertices_count_ = checked_vertices_count;
 
+    results.navi_hop_count_ = navi_hop_count;
+    results.navi_dist_cal_count_ = navi_dist_cal_count;
+    results.navi_checked_vertices_count_ = navi_checked_vertices_count;
+    
     return results;
   }
 

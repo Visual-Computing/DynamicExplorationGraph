@@ -87,6 +87,10 @@ public:
     uint64_t dist_cal_count_ = 0;
     uint64_t checked_vertices_count_ = 0;
 
+    uint64_t navi_hop_count_ = 0;
+    uint64_t navi_dist_cal_count_ = 0;
+    uint64_t navi_checked_vertices_count_ = 0;
+
     // Constructor that forwards the comparator to the base class
     ResultSet(std::less<ObjectDistance> comp = std::less<ObjectDistance>())
         : PQV<std::less<ObjectDistance>, ObjectDistance>(comp) {}
