@@ -506,14 +506,14 @@ public class HierarchicalGraphDesigner implements GraphDesigner {
 			while(stopBuilding == false) {
 	
 				// add or delete a vertex
-				if(this.newEntryQueue.size() > 0 || this.removeEntryQueue.size() > 0) {
+				if(this.newEntryQueue.isEmpty() == false || this.removeEntryQueue.isEmpty() == false) {
 					long addTaskManipulationIndex = Long.MAX_VALUE;
 					long delTaskManipulationIndex = Long.MAX_VALUE;
-	
-					if(this.newEntryQueue.size() > 0) 
+
+					if(this.newEntryQueue.isEmpty() == false) 
 						addTaskManipulationIndex = this.newEntryQueue.peek().manipulationIndex;
-	
-					if(this.removeEntryQueue.size() > 0) 
+
+					if(this.removeEntryQueue.isEmpty() == false) 
 						delTaskManipulationIndex = this.removeEntryQueue.peek().manipulationIndex;
 	
 					if(addTaskManipulationIndex < delTaskManipulationIndex) {

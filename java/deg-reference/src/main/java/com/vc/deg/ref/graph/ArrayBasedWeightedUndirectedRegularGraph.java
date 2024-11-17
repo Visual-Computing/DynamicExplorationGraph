@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
+import java.util.Random;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
@@ -117,6 +118,22 @@ public class ArrayBasedWeightedUndirectedRegularGraph {
 	public Collection<VertexData> getVertices() {
 		return Collections.unmodifiableCollection(vertices);
 	}
+	
+	public VertexData getRandomVertex(Random rnd) {
+		return vertices.get(rnd.nextInt(vertices.size()));
+	}
+	
+	public VertexData getRandomVertex(Random rnd, VertexFilter filter) {
+		final int size = vertices.size();
+		final int start_index = rnd.nextInt(size);
+		
+		VertexData vertex = vertices.get(start_index);
+		for (int offset = 1; filter.isValid(vertex.getLabel()) == false && offset < size; offset++) 
+			vertex = vertices.get((start_index + offset) % size);
+		
+		return (filter.isValid(vertex.getLabel())) ?  vertex : null;
+	}
+	
 	
 	// ------------------------------------------------------------------------
 	// -------------------------- label based methods -------------------------

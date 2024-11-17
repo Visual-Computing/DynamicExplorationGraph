@@ -93,36 +93,13 @@ public class DynamicExplorationGraph implements com.vc.deg.DynamicExplorationGra
 	
 	@Override
 	public int getRandomLabel(Random random) {
-		final int steps = random.nextInt(size());
-		final Iterator<VertexData> it = this.internalGraph.getVertices().iterator();
-		for (int i = 0; i < steps; i++) 
-			it.next();		
-		return it.next().getLabel();
+		return this.internalGraph.getRandomVertex(random).getLabel();
 	}
 	
 	@Override
 	public int getRandomLabel(Random random, VertexFilter filter) {
-		int label = -1;
-		int lowestIndex = size();
-		do {
-
-			final int index = random.nextInt(lowestIndex);
-			final Iterator<VertexData> it = this.internalGraph.getVertices().iterator();
-			for (int i = 0; i < index; i++) 
-				it.next();		
-			label = it.next().getLabel();
-			
-			// test the next element if the random label does not pass the filter
-			while(filter.isValid(label) == false && it.hasNext())
-				label = it.next().getLabel();
-		
-			// all vertices after the lowestIndex have already been tested
-			lowestIndex = Math.min(lowestIndex, index);
-			
-		// if lowest index reaches 0 we have tested all elements against the filter
-		} while(lowestIndex > 0 && filter.isValid(label) == false);
-		
-		return label;
+		final VertexData vertex = this.internalGraph.getRandomVertex(random, filter);
+		return (vertex == null) ? -1 : vertex.getLabel();
 	}
 	
 	@Override

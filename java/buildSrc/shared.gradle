@@ -14,7 +14,7 @@ sourceCompatibility = 1.8
 targetCompatibility = 1.8
     
 // group and version of the project 
-version = '0.1.55'
+version = '0.1.56'
 group = 'com.vc'
 
 ext {
