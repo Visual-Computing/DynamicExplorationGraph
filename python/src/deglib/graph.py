@@ -1,5 +1,6 @@
 import os
 import multiprocessing
+import warnings
 from typing import List, Optional, Tuple, Self
 from abc import ABC, abstractmethod
 
@@ -133,7 +134,8 @@ class SearchGraph(ABC):
         :param query: A feature vector for which similar feature vectors should searched.
         :param eps: Controls how many nodes are checked during search. Lower eps values like 0.001 are faster but less
                     accurate. Higher eps values like 0.1 are slower but more accurate. Should always be greater 0.
-        :param k: The number of results that will be returned
+        :param k: The number of results that will be returned. If k is smaller than the number of vertices in the graph,
+                  k is set to the number of vertices in the graph.
         :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
         :param entry_vertex_indices: Start point for exploratory search. If None, a reasonable default is used.
         :param threads: The number of threads to use for parallel processing. It should not excel the number of queries.
@@ -150,6 +152,11 @@ class SearchGraph(ABC):
             query = query.reshape(1, -1)
         if len(query.shape) != 2:
             raise InvalidShapeException('invalid query shape: {}'.format(query.shape))
+
+        if k > self.size():
+            warnings.warn(
+                'k is smaller than number of vertices in graph, setting k from {} to {}'.format(k, self.size()))
+            k = self.size()
 
         valid_dtype = self.get_feature_space().metric().get_dtype()
 
