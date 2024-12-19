@@ -1,7 +1,7 @@
 import os
 import multiprocessing
 import warnings
-from typing import List, Optional, Tuple, Self
+from typing import List, Optional, Tuple, Self, Union
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -10,7 +10,7 @@ import deglib_cpp
 import pathlib
 
 from .distances import FloatSpace, Metric, SpaceInterface
-from .search import ResultSet, ObjectDistance
+from .search import ResultSet, ObjectDistance, Filter
 from .utils import assure_array, InvalidShapeException, assure_contiguous
 
 
@@ -120,9 +120,9 @@ class SearchGraph(ABC):
         raise NotImplementedError()
 
     def search(
-            self, query: np.ndarray, eps: float, k: int, filter_labels: Optional[np.ndarray] = None,
-            n_filtered_data_hint: int = -1, max_distance_computation_count: int = 0,
-            entry_vertex_indices: Optional[List[int]] = None, threads: int = 1, thread_batch_size: int = 0
+            self, query: np.ndarray, eps: float, k: int, filter_labels: Union[None, np.ndarray, Filter] = None,
+            max_distance_computation_count: int = 0, entry_vertex_indices: Optional[List[int]] = None, threads: int = 1,
+            thread_batch_size: int = 0
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
@@ -138,10 +138,9 @@ class SearchGraph(ABC):
                     accurate. Higher eps values like 0.1 are slower but more accurate. Should always be greater 0.
         :param k: The number of results that will be returned. If k is smaller than the number of vertices in the graph,
                   k is set to the number of vertices in the graph.
-        :param filter_labels: A numpy array with dtype int32, that contains all labels that can be returned.
+        :param filter_labels: A numpy array with dtype int32, that contains all labels that can be returned or an object
+                              of type Filter, that limits the possible results to a given set.
                               All other labels will not be included in the result set.
-        :param n_filtered_data_hint: The number of data points that where checked to create filter_labels.
-                                     Only used if filter_labels is not None. If set to -1, graph.get_size() is assumed.
         :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
         :param entry_vertex_indices: Start point for exploratory search. If None, a reasonable default is used.
         :param threads: The number of threads to use for parallel processing. It should not excel the number of queries.
@@ -170,12 +169,7 @@ class SearchGraph(ABC):
         if entry_vertex_indices is None:
             entry_vertex_indices = self.get_entry_vertex_indices()
 
-        filter_obj = None
-        if filter_labels is not None:
-            if n_filtered_data_hint <= 0:
-                n_filtered_data_hint = self.size()
-            filter_labels = assure_contiguous(filter_labels.astype(np.int32, copy=False), 'filter_labels')
-            filter_obj = deglib_cpp.create_filter(filter_labels, np.max(filter_labels), n_filtered_data_hint)
+        filter_obj = Filter.create_filter(filter_labels, self.size())
 
         threads = get_num_useful_threads(threads, query.shape[0])
 

@@ -9,7 +9,7 @@ import tempfile
 import numpy as np
 
 import deglib
-
+from deglib.search import Filter
 
 IS_MACOS_M1 = platform.system() == "Darwin" and platform.machine() == "arm64"
 
@@ -273,7 +273,7 @@ def test_filters(conf: Configuration):
     k = 400
 
     valid_labels = np.random.choice(conf.graph.size(), size=12_000, replace=False)
-    results, _dists = conf.graph.search(conf.query, filter_labels=valid_labels, eps=0.01, k=k)
+    results, _dists = conf.graph.search(conf.query, filter_labels=Filter(valid_labels), eps=0.01, k=k)
 
     if not np.all(np.isin(results, valid_labels)):
         raise ValueError('Found results that should have been filtered out.')
