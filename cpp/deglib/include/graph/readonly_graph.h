@@ -600,12 +600,14 @@ public:
    * The result set contains internal indices. 
    */
   template <typename COMPARATOR, bool use_max_distance_count, bool use_filter>
-  deglib::search::ResultSet searchImpl(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter, const uint32_t max_distance_computation_count) const
+  deglib::search::ResultSet searchImpl(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t initial_k, const deglib::graph::Filter* filter, const uint32_t max_distance_computation_count) const
   {
     const auto dist_func_param = this->feature_space_.get_dist_func_param();
     const auto feature_size = this->feature_space_.get_data_size();
     const size_t degree = this->edges_per_vertex_;
     const size_t vertex_count = this->size();
+
+    size_t k = std::min(vertex_count, static_cast<size_t>(initial_k));
     uint32_t distance_computation_count = 0;
 
     // set of checked vertex ids
