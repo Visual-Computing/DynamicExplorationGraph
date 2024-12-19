@@ -57,9 +57,7 @@ template<class Compare, class ObjectType>
 class PQV : public std::vector<ObjectType> {
   Compare comp;
   public:
-    PQV(Compare cmp = Compare()) : comp(cmp) {
-      std::make_heap(this->begin(),this->end(), comp);
-    }
+    PQV(Compare cmp = Compare()) : comp(cmp) {}
 
     const ObjectType& top() { return this->front(); }
 
