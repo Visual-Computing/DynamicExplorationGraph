@@ -6,12 +6,13 @@ from deglib.builder import EvenRegularGraphBuilder
 
 
 def main():
-    samples = 1000
-    dims = 128
+    samples = 100_000
+    dims = 8
 
     data = np.random.random((samples, dims)).astype(np.float32)
+    # data = data / np.linalg.norm(data, axis=1)[:, None]  # L2 normalize
 
-    graph = deglib.graph.SizeBoundedGraph.create_empty(data.shape[0], data.shape[1], 16, deglib.Metric.InnerProduct)
+    graph = deglib.graph.SizeBoundedGraph.create_empty(data.shape[0], data.shape[1], 16, deglib.Metric.L2)
     builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=32, extend_eps=0.01, improve_k=0)
 
     for i, vec in enumerate(data):
@@ -20,12 +21,20 @@ def main():
 
     builder.build(callback='progress')
 
-    query = np.random.random((5, dims)).astype(np.float32)
-    # query = np.random.random((dims,)).astype(np.float32)
-    results, dists = graph.search(query, eps=0.0, k=3)
-    print(results, results.dtype, results.shape)
-    print(dists, dists.dtype, dists.shape)
+    valid_labels = np.random.choice(graph.size(), size=80000, replace=False)
 
+    query = np.random.random((2, dims)).astype(np.float32)
+
+    results, dists = graph.search(query, filter_labels=valid_labels, eps=0.0, k=400)
+
+    print('indices:', results.shape, results.dtype)
+    print('dists:', dists.shape, dists.dtype)
+    print('all results in labels:', np.all(np.isin(results, valid_labels)))
+
+
+    rd_graph = deglib.graph.ReadOnlyGraph.from_graph(graph)
+    results, dists = rd_graph.search(query, filter_labels=valid_labels, eps=0.0, k=4)
+    print('readonly_graph: all results in labels:', np.all(np.isin(results, valid_labels)))
 
 def dump_data(seed):
     np.random.seed(seed)
@@ -125,8 +134,8 @@ def test_free_memory():
 
 
 if __name__ == '__main__':
-    # main()
+    main()
     # do_build_with_remove(1, 10)
     # do_all()
     # dump_data(1)
-    test_free_memory()
+    # test_free_memory()

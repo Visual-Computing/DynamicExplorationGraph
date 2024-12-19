@@ -108,6 +108,12 @@ configurations = [
     *Configuration.generate(100, 128, deglib.Metric.InnerProduct, 10),
 ]
 
+large_configurations = [
+    *Configuration.generate(20_000, 2, deglib.Metric.L2, 10),
+    *Configuration.generate(20_000, 2, deglib.Metric.L2_Uint8, 10),
+    *Configuration.generate(20_000, 2, deglib.Metric.InnerProduct, 10),
+]
+
 mutable_configurations = [c for c in configurations if isinstance(c.graph, deglib.graph.MutableGraph)]
 
 
@@ -260,3 +266,14 @@ def test_del_graph(conf: Configuration):
 def test_convert_graph(conf: Configuration):
     rd_graph = deglib.graph.ReadOnlyGraph.from_graph(conf.graph)
     assert isinstance(rd_graph, deglib.graph.ReadOnlyGraph)
+
+
+@pytest.mark.parametrize('conf', large_configurations)
+def test_filters(conf: Configuration):
+    k = 400
+
+    valid_labels = np.random.choice(conf.graph.size(), size=12_000, replace=False)
+    results, _dists = conf.graph.search(conf.query, filter_labels=valid_labels, eps=0.01, k=k)
+
+    if not np.all(np.isin(results, valid_labels)):
+        raise ValueError('Found results that should have been filtered out.')
