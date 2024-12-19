@@ -3,6 +3,7 @@
 #include "config.h"
 #include "memory.h"
 #include "distances.h"
+#include "filter.h"
 #include "search.h"
 #include "repository.h"
 #include "graph.h"

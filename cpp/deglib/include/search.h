@@ -126,8 +126,8 @@ class SearchGraph
      * 
      * The starting point of the search is determined be the graph
      */
-    deglib::search::ResultSet search(const std::byte* query, const float eps, const uint32_t k, const uint32_t max_distance_computation_count = 0) const {
-      return search(getEntryVertexIndices(), query, eps,  k, max_distance_computation_count);
+    deglib::search::ResultSet search(const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) const {
+      return search(getEntryVertexIndices(), query, eps,  k, filter, max_distance_computation_count);
     };
 
     /**
@@ -138,7 +138,7 @@ class SearchGraph
      * It is possible to limit the amount of work by specifing a maximal number of distances to be calculated.
      * For lower numbers it is recommended to set eps to 0 since its very unlikly the method can make use of the extended the search range.
      */
-    virtual deglib::search::ResultSet search(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const uint32_t max_distance_computation_count = 0) const = 0;
+    virtual deglib::search::ResultSet search(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) const = 0;
 
     /**
      * A exploration for similar element, limited by max_distance_computation_count
