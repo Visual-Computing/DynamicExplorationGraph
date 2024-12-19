@@ -764,11 +764,13 @@ public:
    * The result set contains internal indices. 
    */
   template <typename COMPARATOR, bool use_max_distance_count, bool use_filter>
-  deglib::search::ResultSet searchImpl(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter, const uint32_t max_distance_computation_count) const
+  deglib::search::ResultSet searchImpl(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t initial_k, const deglib::graph::Filter* filter, const uint32_t max_distance_computation_count) const
   {
     const auto dist_func_param = this->feature_space_.get_dist_func_param();
     const auto feature_size = this->feature_space_.get_data_size();
     uint32_t distance_computation_count = 0;
+    const size_t vertex_count = this->size();
+    size_t k = std::min(vertex_count, static_cast<size_t>(initial_k));
 
     // set of checked vertex ids
     const auto vl = visited_list_pool_->getFreeVisitedList();
@@ -784,6 +786,30 @@ public:
     auto results = deglib::search::ResultSet();   
     results.reserve(k+1);
 
+    // if the filter only contains few valid ids brute force them all
+    if constexpr (use_filter) {
+      if (vertex_count < 1'000 || (filter->get_inclusion_rate() * vertex_count) < 10'000 || filter->get_inclusion_rate() < 0.10f) {
+        auto radius = std::numeric_limits<float>::max();
+        filter->for_each_valid_label([&](uint32_t valid_label) {
+          auto valid_index = this->getInternalIndex(valid_label);
+          const auto feature = reinterpret_cast<const float*>(this->feature_by_index(valid_index));
+          const auto distance = COMPARATOR::compare(query, feature, dist_func_param);
+
+          // remember the vertex, if its better than the worst in the result list
+          if (distance < radius) {
+            results.emplace(valid_index, distance);
+
+            // update the search radius
+            if (results.size() > k) {
+              results.pop();
+              radius = results.top().getDistance();
+            }
+          }
+        });
+        return results;
+      }
+    }
+
     // copy the initial entry vertices and their distances to the query into the three containers
     for (auto&& index : entry_vertex_indices) {
       if(checked_ids[index] != checked_ids_tag) {
@@ -792,7 +818,13 @@ public:
         const auto feature = this->feature_by_index(index);
         const auto distance = COMPARATOR::compare(query, feature, dist_func_param);
         next_vertices.emplace(index, distance);
-        results.emplace(index, distance);
+        if constexpr (use_filter) {
+          if(filter->is_valid(this->label_by_index(index)))  {
+            results.emplace(index, distance);
+          }
+        } else {
+          results.emplace(index, distance);
+        }
 
         // early stop after to many computations
         if constexpr (use_max_distance_count) {
@@ -847,7 +879,13 @@ public:
 
           // remember the vertex, if its better than the worst in the result list
           if (neighbor_distance < radius) {
-            results.emplace(neighbor_index, neighbor_distance);
+            if constexpr (use_filter) {
+              if(filter->is_valid(this->label_by_index(neighbor_index)))  {
+                results.emplace(neighbor_index, neighbor_distance);
+              }
+            } else {
+              results.emplace(neighbor_index, neighbor_distance);
+            }
 
             // update the search radius
             if (results.size() > k) {

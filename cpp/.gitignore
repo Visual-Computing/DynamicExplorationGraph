@@ -8,4 +8,3 @@ cmake-variants.yaml
 build-*
 cmake-build*
 data/
-python-bindings/.venv
