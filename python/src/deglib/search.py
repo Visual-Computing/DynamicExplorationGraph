@@ -148,7 +148,7 @@ class Filter:
         if filter_labels is None:
             return None
         if isinstance(filter_labels, np.ndarray):
-            filter_labels = Filter(filter_labels).create_filter_obj(graph_size)
+            filter_labels = Filter(filter_labels)
         if not isinstance(filter_labels, Filter):
             raise TypeError('filter_labels must be a None, numpy array or Filter, got {}'.format(type(filter_labels)))
         return filter_labels.create_filter_obj(graph_size)

@@ -3,10 +3,11 @@ from concurrent.futures import ThreadPoolExecutor, wait
 import numpy as np
 import deglib
 from deglib.builder import EvenRegularGraphBuilder
+from deglib.search import Filter
 
 
 def main():
-    samples = 100_000
+    samples = 1000
     dims = 8
 
     data = np.random.random((samples, dims)).astype(np.float32)
@@ -21,20 +22,20 @@ def main():
 
     builder.build(callback='progress')
 
-    valid_labels = np.random.choice(graph.size(), size=80000, replace=False)
+    valid_labels = np.random.choice(graph.size(), size=5, replace=False)
 
-    query = np.random.random((2, dims)).astype(np.float32)
+    query = np.random.random(dims).astype(np.float32)
 
-    results, dists = graph.search(query, filter_labels=valid_labels, eps=0.0, k=400)
+    print('benchmark')
+
+    results, dists = graph.search(query, filter_labels=valid_labels, eps=0.0, k=8)
+
+    print(results)
 
     print('indices:', results.shape, results.dtype)
     print('dists:', dists.shape, dists.dtype)
     print('all results in labels:', np.all(np.isin(results, valid_labels)))
 
-
-    rd_graph = deglib.graph.ReadOnlyGraph.from_graph(graph)
-    results, dists = rd_graph.search(query, filter_labels=valid_labels, eps=0.0, k=4)
-    print('readonly_graph: all results in labels:', np.all(np.isin(results, valid_labels)))
 
 def dump_data(seed):
     np.random.seed(seed)
