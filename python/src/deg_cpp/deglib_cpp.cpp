@@ -90,9 +90,9 @@ inline void parallel_for(size_t start, size_t end, size_t numThreads, Function f
 }
 
 template<typename G>
-void search_one_query(const G& graph, size_t query_index, const py::buffer_info& query_info, const std::vector<uint32_t> &entry_vertex_indices, uint32_t k, const uint32_t max_distance_computation_count, const float eps, uint32_t* const result_indices_ptr, float* const result_distances_ptr) {
+void search_one_query(const G& graph, size_t query_index, const py::buffer_info& query_info, const std::vector<uint32_t> &entry_vertex_indices, uint32_t k, const deglib::graph::Filter* filter, const uint32_t max_distance_computation_count, const float eps, uint32_t* const result_indices_ptr, float* const result_distances_ptr) {
   std::byte* query_ptr = static_cast<std::byte *>(query_info.ptr) + query_info.strides[0] * query_index;
-  deglib::search::ResultSet result = graph.search(entry_vertex_indices, query_ptr, eps, k, max_distance_computation_count);
+  deglib::search::ResultSet result = graph.search(entry_vertex_indices, query_ptr, eps, k, filter, max_distance_computation_count);
 
   assert((void(std::format("Expected result should have k={} entries, but got {} entries.\n", k, result.size())), (k == result.size())));
 
@@ -114,18 +114,18 @@ void search_one_query(const G& graph, size_t query_index, const py::buffer_info&
 }
 
 template<typename G>
-void search_batch_of_queries(const G& graph, size_t batch_index, size_t batch_size, const py::buffer_info& query_info, const std::vector<uint32_t> &entry_vertex_indices, uint32_t k, const uint32_t max_distance_computation_count, const float eps, uint32_t* const result_indices_ptr, float* const result_distances_ptr) {
+void search_batch_of_queries(const G& graph, size_t batch_index, size_t batch_size, const py::buffer_info& query_info, const std::vector<uint32_t> &entry_vertex_indices, uint32_t k, const deglib::graph::Filter* filter, const uint32_t max_distance_computation_count, const float eps, uint32_t* const result_indices_ptr, float* const result_distances_ptr) {
   size_t num_queries = query_info.shape[0];
   auto upper_bound = std::min(num_queries, (batch_index+1)*batch_size);
   for (size_t query_index = batch_index*batch_size; query_index < upper_bound; query_index++) {
-    search_one_query(graph, query_index, query_info, entry_vertex_indices, k, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
+    search_one_query(graph, query_index, query_info, entry_vertex_indices, k, filter, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
   }
 }
 
 template<typename G>
 std::tuple<py::array_t<uint32_t>, py::array_t<float>> graph_search_wrapper(
     const G& graph, const std::vector<uint32_t> &entry_vertex_indices,
-    const py::array query, const float eps, const uint32_t k,
+    const py::array query, const float eps, const uint32_t k, const deglib::graph::Filter* filter,
     const uint32_t max_distance_computation_count, const uint32_t threads, const uint32_t batch_size)
 {
   py::buffer_info query_info = query.request();
@@ -146,13 +146,13 @@ std::tuple<py::array_t<uint32_t>, py::array_t<float>> graph_search_wrapper(
 
   if (threads == 1) {
     for (uint32_t query_index = 0; query_index < query_info.shape[0]; query_index++) {
-      search_one_query(graph, query_index, query_info, entry_vertex_indices, k, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
+      search_one_query(graph, query_index, query_info, entry_vertex_indices, k, filter, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
     }
   } else {
     size_t n_batches = (n_queries / batch_size) + ((n_queries % batch_size != 0) ? 1 : 0);  // +1, if n_queries % batch_size != 0
     parallel_for(0, n_batches, threads, [&] (size_t batch_index, size_t thread_id) {
-      // search_one_query(graph, query_index, query_info, entry_vertex_indices, k, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
-      search_batch_of_queries(graph, batch_index, batch_size, query_info, entry_vertex_indices, k, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
+      // search_one_query(graph, query_index, query_info, entry_vertex_indices, k, filter, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
+      search_batch_of_queries(graph, batch_index, batch_size, query_info, entry_vertex_indices, k, filter, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
     });
   }
 
@@ -200,6 +200,19 @@ PYBIND11_MODULE(deglib_cpp, m) {
   // TODO: SpaceInterface in c++ is general over datatype, here we use float always
   py::class_<deglib::SpaceInterface<float>>(m, "SpaceInterface")
       .def("dim", &deglib::SpaceInterface<float>::dim);
+
+  py::class_<deglib::graph::Filter>(m, "Filter")
+      .def(py::init<const int*, size_t, size_t, size_t>());
+
+  m.def("create_filter", [](py::array_t<int, py::array::c_style> valid_labels, size_t max_value, size_t max_label_count) {
+    const py::buffer_info labels_info = valid_labels.request();
+    const int* ptr = static_cast<int*>(labels_info.ptr);
+    // only allow one dimensional arrays
+    assert((void(std::format("Expected feature to have only one dimension, got {}\n", labels_info.ndim)), (labels_info.ndim == 1)));
+
+    size_t size = labels_info.shape[0];
+    return new deglib::graph::Filter(ptr, size, max_value, max_label_count);
+  });
 
   // graphs
   py::class_<deglib::search::SearchGraph>(m, "SearchGraph");
