@@ -277,3 +277,23 @@ def test_filters(conf: Configuration):
 
     if not np.all(np.isin(results, valid_labels)):
         raise ValueError('Found results that should have been filtered out.')
+
+
+@pytest.mark.parametrize('conf', large_configurations)
+def test_small_filters(conf: Configuration):
+    for n_valid in [200, 400, 600]:
+        k = 400
+
+        valid_labels = np.random.choice(conf.graph.size(), size=n_valid, replace=False)
+        # if less valid labels are present, than k, a warning is expected
+        if n_valid < k:
+            with pytest.warns(UserWarning):
+                results, _dists = conf.graph.search(conf.query, filter_labels=Filter(valid_labels), eps=0.01, k=k)
+        else:
+            results, _dists = conf.graph.search(conf.query, filter_labels=Filter(valid_labels), eps=0.01, k=k)
+
+        if results.shape[-1] != min(k, n_valid):
+            raise ValueError('expected {} results, but got {}'.format(min(k, n_valid), results.shape[-1]))
+
+        if not np.all(np.isin(results, valid_labels)):
+            raise ValueError('Found results that should have been filtered out.')
