@@ -21,21 +21,16 @@ def get_tmp_graph_file(samples: int, dims: int) -> pathlib.Path:
     return pathlib.Path(os.path.join(tmpdir, 'test_graph_S{}_D{}.deg'.format(samples, dims)))
 
 
-def get_ranking(graph: deglib.graph.SearchGraph, query: np.ndarray) -> np.ndarray:
+def get_ranking(features: np.ndarray, graph: deglib.graph.SearchGraph, query: np.ndarray) -> np.ndarray:
     """
     Returns the ranking for each feature vector in the graph
     """
-    features = np.empty((graph.size(), graph.get_feature_space().dim()), dtype=np.float32)
-
-    for i in range(graph.size()):
-        features[i] = graph.get_feature_vector(i)
-
     query = query.reshape(1, graph.get_feature_space().dim())
 
     if features.dtype == np.uint8:
-        features = features.astype(np.int16)
+        features = features.astype(np.float32)
     if query.dtype == np.uint8:
-        query = query.astype(np.int16)
+        query = query.astype(np.float32)
 
     if graph.get_feature_space().metric() in (deglib.Metric.L2, deglib.Metric.L2_Uint8):
         distances = np.sum(np.square(features - query), axis=1)
@@ -48,7 +43,7 @@ def get_ranking(graph: deglib.graph.SearchGraph, query: np.ndarray) -> np.ndarra
 
 class Configuration:
     def __init__(
-            self, edges_per_vertex, samples: int, dims: int, data: np.ndarray, graph,
+            self, edges_per_vertex: int, samples: int, dims: int, data: np.ndarray, graph: deglib.graph.SearchGraph,
             graph_path: Optional[pathlib.Path], query: np.ndarray, metric: deglib.Metric
     ):
         self.edges_per_vertex = edges_per_vertex
@@ -79,7 +74,7 @@ class Configuration:
             raise ValueError(f'Unsupported metric: {metric}')
 
         size_bounded_graph = deglib.builder.build_from_data(
-            data, edges_per_vertex=edges_per_vertex, metric=metric
+            data, edges_per_vertex=edges_per_vertex, metric=metric, lid=deglib.builder.LID.Low,
         )
 
         graph_path = get_tmp_graph_file(samples, dims)
@@ -118,9 +113,10 @@ mutable_configurations = [c for c in configurations if isinstance(c.graph, degli
 @pytest.mark.parametrize('conf', configurations)
 def test_get_feature_vector(conf: Configuration):
     for i in range(conf.graph.size()):
+        l = conf.graph.get_external_label(i)
         fv = conf.graph.get_feature_vector(i)
         assert fv.shape == (conf.dims,)
-        assert np.allclose(fv, conf.data[i])
+        assert np.allclose(fv, conf.data[l])
 
     with pytest.raises(IndexError):
         _fv = conf.graph.get_feature_vector(conf.graph.size())
@@ -135,7 +131,7 @@ def test_search(conf: Configuration):
     graph_result, dists = conf.graph.search(conf.query, eps=0.1, k=k)
     dists = dists.flatten()
     graph_result = graph_result.flatten()
-    correct_result = get_ranking(conf.graph, conf.query)[:k]
+    correct_result = get_ranking(conf.data, conf.graph, conf.query)[:k]
 
     assert graph_result.shape[-1] == k, 'expected {} results, but got {}'.format(k, graph_result.shape[1])
 

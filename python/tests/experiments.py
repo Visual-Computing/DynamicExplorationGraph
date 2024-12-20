@@ -1,10 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor, wait
 
-import deglib_cpp
 import numpy as np
 import deglib
 from deglib.builder import EvenRegularGraphBuilder
-from deglib.search import Filter
 
 
 def main():
@@ -34,6 +32,22 @@ def main():
     print('indices:', results.shape, results.dtype)
     print('valid:', valid_labels.shape)
     print('all results in labels:', np.all(np.isin(results, valid_labels)))
+
+
+def main2():
+    # constants
+    samples, dims = 10_000, 256
+
+    # build index
+    data = np.random.random((samples, dims)).astype(np.float32)
+    index = deglib.builder.build_from_data(data, extend_eps=0.1, callback='progress')
+
+    # search
+    query = np.random.random(dims).astype(np.float32)
+    result_indices, dists = index.search(query, eps=0.1, k=16)
+
+    print(result_indices)
+    print(dists)
 
 
 def dump_data(seed):
@@ -135,6 +149,7 @@ def test_free_memory():
 
 if __name__ == '__main__':
     main()
+    # main()
     # do_build_with_remove(1, 10)
     # do_all()
     # dump_data(1)
