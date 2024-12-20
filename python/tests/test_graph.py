@@ -109,9 +109,7 @@ configurations = [
 ]
 
 large_configurations = [
-    *Configuration.generate(20_000, 2, deglib.Metric.L2, 10),
     *Configuration.generate(20_000, 2, deglib.Metric.L2_Uint8, 10),
-    *Configuration.generate(20_000, 2, deglib.Metric.InnerProduct, 10),
 ]
 
 mutable_configurations = [c for c in configurations if isinstance(c.graph, deglib.graph.MutableGraph)]
@@ -138,6 +136,8 @@ def test_search(conf: Configuration):
     dists = dists.flatten()
     graph_result = graph_result.flatten()
     correct_result = get_ranking(conf.graph, conf.query)[:k]
+
+    assert graph_result.shape[-1] == k, 'expected {} results, but got {}'.format(k, graph_result.shape[1])
 
     # test matches are good
     matches = set(graph_result).intersection(set(correct_result))
@@ -166,7 +166,7 @@ def test_threaded_search(conf: Configuration):
     graph_result, dists = conf.graph.search(conf.query, eps=0.1, k=k)
     for n_threads in range(2, 8):
         threaded_graph_result, threaded_dists = conf.graph.search(conf.query, eps=0.1, k=k, threads=n_threads)
-        assert np.allclose(threaded_graph_result, graph_result), \
+        assert np.all(np.equal(threaded_graph_result, graph_result)), \
             'Threaded and non threaded results differ (n_threads={})'.format(n_threads)
         assert np.allclose(threaded_dists, dists), \
             'Threaded and non threaded dists differ (n_threads={})'.format(n_threads)

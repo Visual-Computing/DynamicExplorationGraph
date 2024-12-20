@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor, wait
 
+import deglib_cpp
 import numpy as np
 import deglib
 from deglib.builder import EvenRegularGraphBuilder
@@ -26,14 +27,12 @@ def main():
 
     query = np.random.random(dims).astype(np.float32)
 
-    print('benchmark')
-
     results, dists = graph.search(query, filter_labels=valid_labels, eps=0.0, k=8)
 
     print(results)
 
     print('indices:', results.shape, results.dtype)
-    print('dists:', dists.shape, dists.dtype)
+    print('valid:', valid_labels.shape)
     print('all results in labels:', np.all(np.isin(results, valid_labels)))
 
 

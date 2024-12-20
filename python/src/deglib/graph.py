@@ -160,7 +160,7 @@ class SearchGraph(ABC):
 
         if k > self.size():
             warnings.warn(
-                'k is smaller than number of vertices in graph, setting k from {} to {}'.format(k, self.size()))
+                'k={} is smaller than number of vertices in graph={}. Setting k={}'.format(k, self.size(), self.size()))
             k = self.size()
 
         valid_dtype = self.get_feature_space().metric().get_dtype()
@@ -176,10 +176,15 @@ class SearchGraph(ABC):
         if thread_batch_size <= 0:
             thread_batch_size = max(query.shape[0] // (threads * 4), 1)
 
-        return self.graph_cpp.search(
+        indices, distances, num_results = self.graph_cpp.search(
             entry_vertex_indices, query, eps, k, filter_obj, max_distance_computation_count, threads,
             thread_batch_size
         )
+        if num_results != k:
+            warnings.warn('Number of results ({}) is smaller than k ({})'.format(num_results, k))
+            indices = indices[:, :num_results]
+            distances = distances[:, :num_results]
+        return indices, distances
 
     @abstractmethod
     def explore(self, entry_vertex_index: int, k: int, max_distance_computation_count: int) -> ResultSet:

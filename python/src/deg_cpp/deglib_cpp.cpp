@@ -4,6 +4,7 @@
 
 // #define PYBIND11_DETAILED_ERROR_MESSAGES
 #include <algorithm>
+#include <limits>
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
@@ -13,6 +14,7 @@
 
 
 namespace py = pybind11;
+constexpr int MAX_TRIES_SAME_RESULT_SIZE = 10;
 
 
 bool avx_usable() {
@@ -36,18 +38,25 @@ bool sse_usable() {
 // The helper function copied from https://github.com/nmslib/hnswlib/blob/master/examples/cpp/example_mt_search.cpp (and that itself is copied from nmslib)
 // An alternative is using #pragme omp parallel for or any other C++ threading
 template<class Function>
-inline void parallel_for(size_t start, size_t end, size_t numThreads, Function fn) {
+inline size_t parallel_for(size_t start, size_t end, size_t numThreads, Function fn) {
+  size_t all_num_results = std::numeric_limits<size_t>::max();
   if (numThreads <= 0) {
     numThreads = std::thread::hardware_concurrency();
   }
 
   if (numThreads == 1) {
     for (size_t id = start; id < end; id++) {
-      fn(id, 0);
+      size_t num_results = fn(id, 0);
+      if (all_num_results == std::numeric_limits<size_t>::max()) {
+        all_num_results = num_results;
+      } else if (all_num_results != num_results) {
+        return std::numeric_limits<size_t>::max(); // return error
+      }
     }
   } else {
     std::vector<std::thread> threads;
     std::atomic<size_t> current(start);
+    std::vector<size_t> all_results(numThreads);
 
     // keep track of exceptions in threads
     // https://stackoverflow.com/a/32428427/1713196
@@ -63,10 +72,11 @@ inline void parallel_for(size_t start, size_t end, size_t numThreads, Function f
             break;
           }
 
+          size_t num_results;
           try {
-            fn(id, threadId);
+            num_results = fn(id, threadId);
           } catch (...) {
-            std::unique_lock<std::mutex> lastExcepLock(lastExceptMutex);
+            std::unique_lock<std::mutex> lastExceptLock(lastExceptMutex);
             lastException = std::current_exception();
             /*
              * This will work even when current is the largest value that
@@ -77,6 +87,7 @@ inline void parallel_for(size_t start, size_t end, size_t numThreads, Function f
             current = end;
             break;
           }
+          all_results[threadId] = num_results;
         }
       }));
     }
@@ -86,17 +97,31 @@ inline void parallel_for(size_t start, size_t end, size_t numThreads, Function f
     if (lastException) {
       std::rethrow_exception(lastException);
     }
+    for (size_t num_results : all_results) {
+      if (num_results == std::numeric_limits<size_t>::max()) {
+        all_num_results = std::numeric_limits<size_t>::max(); // return error
+        break;
+      }
+      if (all_num_results == std::numeric_limits<size_t>::max()) {
+        all_num_results = num_results;
+      } else if (all_num_results != num_results) {
+        all_num_results = std::numeric_limits<size_t>::max(); // return error
+        break;
+      }
+    }
   }
+  return all_num_results;
 }
 
 template<typename G>
-void search_one_query(const G& graph, size_t query_index, const py::buffer_info& query_info, const std::vector<uint32_t> &entry_vertex_indices, uint32_t k, const deglib::graph::Filter* filter, const uint32_t max_distance_computation_count, const float eps, uint32_t* const result_indices_ptr, float* const result_distances_ptr) {
+size_t search_one_query(const G& graph, size_t query_index, const py::buffer_info& query_info, const std::vector<uint32_t> &entry_vertex_indices, uint32_t k, const deglib::graph::Filter* filter, const uint32_t max_distance_computation_count, const float eps, uint32_t* const result_indices_ptr, float* const result_distances_ptr) {
   std::byte* query_ptr = static_cast<std::byte *>(query_info.ptr) + query_info.strides[0] * query_index;
   deglib::search::ResultSet result = graph.search(entry_vertex_indices, query_ptr, eps, k, filter, max_distance_computation_count);
 
   assert((void(std::format("Expected result should have k={} entries, but got {} entries.\n", k, result.size())), (k == result.size())));
 
   uint32_t k_index = result.size()-1;  // start by last index to reverse result order
+  size_t num_results = result.size();
   while (!result.empty()) {
     // location in result buffer
     const uint32_t offset = k_index + query_index * k;
@@ -111,23 +136,45 @@ void search_one_query(const G& graph, size_t query_index, const py::buffer_info&
     result.pop();
     k_index--;
   }
+  return num_results;
 }
 
 template<typename G>
-void search_batch_of_queries(const G& graph, size_t batch_index, size_t batch_size, const py::buffer_info& query_info, const std::vector<uint32_t> &entry_vertex_indices, uint32_t k, const deglib::graph::Filter* filter, const uint32_t max_distance_computation_count, const float eps, uint32_t* const result_indices_ptr, float* const result_distances_ptr) {
+size_t search_batch_of_queries(const G& graph, size_t batch_index, size_t batch_size, const py::buffer_info& query_info, const std::vector<uint32_t> &entry_vertex_indices, uint32_t k, const deglib::graph::Filter* filter, const uint32_t max_distance_computation_count, const float eps, uint32_t* const result_indices_ptr, float* const result_distances_ptr) {
   size_t num_queries = query_info.shape[0];
   auto upper_bound = std::min(num_queries, (batch_index+1)*batch_size);
-  for (size_t query_index = batch_index*batch_size; query_index < upper_bound; query_index++) {
-    search_one_query(graph, query_index, query_info, entry_vertex_indices, k, filter, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
+  size_t all_num_results = std::numeric_limits<size_t>::max();
+
+  // repeat until all searches return same number of results
+  for (int try_counter = 0; try_counter < MAX_TRIES_SAME_RESULT_SIZE; try_counter++) {
+    for (size_t query_index = batch_index*batch_size; query_index < upper_bound; query_index++) {
+      size_t num_results = search_one_query(
+        graph, query_index, query_info, entry_vertex_indices, k, filter, max_distance_computation_count, eps,
+        result_indices_ptr, result_distances_ptr
+      );
+      // check if all have same number of results
+      if (all_num_results == std::numeric_limits<size_t>::max()) {
+        all_num_results = num_results;
+      } else if (all_num_results != num_results) {
+        // retry! this case should be extremely rare. Only if the graph is updated and searched simultaneously
+        all_num_results = std::numeric_limits<size_t>::max();
+        break;
+      }
+    }
   }
+  if (all_num_results == std::numeric_limits<size_t>::max()) {
+    throw std::runtime_error("Got queries with different number of results, after 10 tries. This should not happen.");
+  }
+  return all_num_results;
 }
 
 template<typename G>
-std::tuple<py::array_t<uint32_t>, py::array_t<float>> graph_search_wrapper(
+std::tuple<py::array_t<uint32_t>, py::array_t<float>, size_t> graph_search_wrapper(
     const G& graph, const std::vector<uint32_t> &entry_vertex_indices,
-    const py::array query, const float eps, const uint32_t k, const deglib::graph::Filter* filter,
-    const uint32_t max_distance_computation_count, const uint32_t threads, const uint32_t batch_size)
-{
+    const py::array query, const float eps, const uint32_t k,
+    const deglib::graph::Filter* filter, const uint32_t max_distance_computation_count, const uint32_t threads,
+    const uint32_t batch_size
+) {
   py::buffer_info query_info = query.request();
 
   assert((void(std::format("Expected query to have two dimensions, got {}\n", query_info.ndim)), (query_info.ndim == 2)));
@@ -144,19 +191,39 @@ std::tuple<py::array_t<uint32_t>, py::array_t<float>> graph_search_wrapper(
 
   py::gil_scoped_release release; // release the gil
 
+  size_t all_num_results = std::numeric_limits<size_t>::max();
   if (threads == 1) {
-    for (uint32_t query_index = 0; query_index < query_info.shape[0]; query_index++) {
-      search_one_query(graph, query_index, query_info, entry_vertex_indices, k, filter, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
+    for (int try_counter = 0; try_counter < MAX_TRIES_SAME_RESULT_SIZE; try_counter++) {
+      for (uint32_t query_index = 0; query_index < query_info.shape[0]; query_index++) {
+        size_t num_results = search_one_query(
+          graph, query_index, query_info, entry_vertex_indices, k, filter, max_distance_computation_count, eps,
+          result_indices_ptr, result_distances_ptr
+        );
+        if (all_num_results == std::numeric_limits<size_t>::max()) {
+          all_num_results = num_results;
+        } else if (all_num_results != num_results) {
+          all_num_results = std::numeric_limits<size_t>::max();
+          break;
+        }
+      }
     }
   } else {
     size_t n_batches = (n_queries / batch_size) + ((n_queries % batch_size != 0) ? 1 : 0);  // +1, if n_queries % batch_size != 0
-    parallel_for(0, n_batches, threads, [&] (size_t batch_index, size_t thread_id) {
-      // search_one_query(graph, query_index, query_info, entry_vertex_indices, k, filter, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
-      search_batch_of_queries(graph, batch_index, batch_size, query_info, entry_vertex_indices, k, filter, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
-    });
+    for (int i = 0; i < MAX_TRIES_SAME_RESULT_SIZE; i++) {
+      all_num_results = parallel_for(0, n_batches, threads, [&] (size_t batch_index, size_t thread_id) {
+        // search_one_query(graph, query_index, query_info, entry_vertex_indices, k, filter, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
+        return search_batch_of_queries(graph, batch_index, batch_size, query_info, entry_vertex_indices, k, filter, max_distance_computation_count, eps, result_indices_ptr, result_distances_ptr);
+      });
+      if (all_num_results != std::numeric_limits<size_t>::max()) {
+        break;
+      }
+    }
+  }
+  if (all_num_results == std::numeric_limits<size_t>::max()) {
+    throw std::runtime_error("Got queries with different number of results, after 10 tries. This should not happen.");
   }
 
-  return {result_indices, result_distances};
+  return {result_indices, result_distances, all_num_results};
 }
 
 deglib::graph::ReadOnlyGraph read_only_graph_from_search_graph(deglib::search::SearchGraph& search_graph, const uint32_t max_vertex_count, const deglib::FloatSpace& feature_space, const uint8_t edges_per_vertex) {
