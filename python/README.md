@@ -1,7 +1,6 @@
 # deglib: Python bindings for the Dynamic Exploration Graph
 
-Python bindings for the C++ library Dynamic Exploration Graph used in the paper:
-[Fast Approximate Nearest Neighbor Search with a Dynamic Exploration Graph using Continuous Refinement](https://arxiv.org/abs/2307.10479)
+Python bindings for the C++ library Dynamic Exploration Graph (DEG) and its predecessor continuous refining Exploration Graph (crEG).
 
 ## Table of Contents
 - [Installation](#installation)
@@ -81,7 +80,7 @@ vectors and D is the number of dimensions of each feature vector.
 ### Building a Graph
 
 ```python
-graph = deglib.builder.build_from_data(dataset, edges_per_vertex=32, callback="progress")
+graph = deglib.builder.build_from_data(dataset, edges_per_vertex=30, callback="progress")
 graph.save_graph("/path/to/graph.deg")
 rd_graph = deglib.graph.load_readonly_graph("/path/to/graph.deg")
 ```
@@ -150,8 +149,11 @@ The eps-search-parameter controls how many nodes are checked during search.
 Lower eps values like 0.001 are faster but less accurate.
 Higher eps values like 0.1 are slower but more accurate. Should always be greater 0.
 
-### Relative Neighborhood Graph / RNG-conform
-TODO
+### LID.Unknown vs LID.High or LID.Low
+The crEG paper introduces an additional parameter, *LIDType*, to determine whether a dataset exhibits high complexity and Local Intrinsic Dimensionality (LID) or if it is relatively low. In contrast, the DEG paper presents a new algorithm that does not rely on this information. Consequently, DEG defaults to *LID.Unknown*. However, if the LID is known, utilizing it can be beneficial, as multi-threaded graph construction is only possible with these parameters.
+
+
+
 
 ## Limitations
 - The python wrapper at the moment only supports `float32` and `uint8` feature vectors.
