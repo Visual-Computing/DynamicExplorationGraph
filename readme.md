@@ -7,8 +7,9 @@ For a short introduction on how to use deglib for vector search, see our [Python
 
 ## Release
 
+- [2025/01/09] The latest iteration of DEG uses a more efficient way of removing and adding a vertex. More details can be found in our new paper [Dynamic Exploration Graph: A Novel Approach for Efficient Nearest Neighbor Search in Evolving Multimedia Datasets](https://link.springer.com/chapter/10.1007/978-981-96-2054-8_25).
 - [2024/05/01] Our paper [An Exploration Graph with Continuous Refinement for Efficient Multimedia Retrieval](https://doi.org/10.1145/3652583.3658117) is accepted by ICMR2024 as **oral presentation**
-- [2023/12/02] New continuous refining Exploration Graph (crEG) containing a more efficient and thread-safe way to extend DEG. Currently found in the [crEG branch](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/crEG) of this repository.
+- [2023/12/02] The new continuous refining Exploration Graph (crEG) containing a more efficient and thread-safe way to extend DEG. Currently found in the [crEG branch](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/crEG) of this repository.
 - [2023/07/19] First version of Dynamic Exploration Graph is out! For more details please refere to our paper: 
 [Fast Approximate nearest neighbor search with the Dynamic Exploration Graph using continuous refinement](https://arxiv.org/abs/2307.10479)
 
@@ -25,6 +26,7 @@ The following files contain the datasets used in our paper. Including exploratio
 | GloVe-100 | [glove-100.tar.gz](https://static.visual-computing.com/paper/DEG/glove-100.tar.gz) | 100       | 1,183,514       | 10,000           | [original website](https://nlp.stanford.edu/projects/glove/)   |
 
 In order to reproduce the results in our older papers, please visit the corresponding github branch.
+- [main branch](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/main) for "Dynamic Exploration Graph: A Novel Approach for Efficient Nearest Neighbor Search in Evolving Multimedia Datasets"
 - [crEG branch](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/crEG) for "An Exploration Graph with Continuous Refinement for Efficient Multimedia Retrieval"
 - [arxiv branch](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/arxiv) for "Fast Approximate nearest neighbor search with the Dynamic Exploration Graph using continuous refinement"
 
