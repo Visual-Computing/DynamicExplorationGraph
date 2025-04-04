@@ -2,6 +2,11 @@
 
 set -e
 
+read -p "have you tested with BuildAndTest-Workflow? y/[n]: " answer
+if [ "$answer" != "y" ]; then
+	exit 0
+fi
+
 # get new version from __init__.py
 new_version=$(grep --color=never -oP '__version__\s*=\s*"\K[0-9]+\.[0-9]+\.[0-9]+' "src/deglib/__init__.py")
 echo "detected new version: $new_version"
@@ -18,13 +23,11 @@ if [ "$old_version" = "$new_version" ]; then
 	fi
 fi
 
-if [ "$1" = "--tag" ]; then
-	# publish tag
-	git tag -a "v$new_version" -m "v$new_version"
-	git push origin --tags
-else
-	# publish package
-	git add -A && git commit -m "v$new_version"
-	git push
-fi
+# publish package
+git add -A && git commit -m "v$new_version"
+git push
+
+# publish tag
+git tag -a "v$new_version" -m "v$new_version"
+git push origin --tags
 
