@@ -2,10 +2,6 @@ name: BuildAndTest
 
 on:
   workflow_dispatch:
-  pull_request:
-  push:
-    branches:
-      - dev
 
 defaults:
   run:
@@ -19,7 +15,6 @@ jobs:
         platform: [windows-latest, macos-latest, macos-13, ubuntu-latest]
 
     runs-on: ${{ matrix.platform }}
-    if: "contains(github.event.head_commit.message, '+ci')"
 
     steps:
     - uses: actions/checkout@v4
@@ -43,11 +38,11 @@ jobs:
         CIBW_BUILD_FRONTEND: "pip; args: --verbose"
         CIBW_ENVIRONMENT: "FORCE_AVX2=1"
         CIBW_ENVIRONMENT_MACOS: "FORCE_AVX2=1 MACOSX_DEPLOYMENT_TARGET=11.00"
-        CIBW_SKIP: "cp313-*"
+        # CIBW_SKIP: "cp313-*"
+        CIBW_SKIP: "pp*win*"
 
   build_sdist:
     runs-on: ubuntu-latest
-    if: "contains(github.event.head_commit.message, '+ci')"
 
     steps:
     - uses: actions/checkout@v4
