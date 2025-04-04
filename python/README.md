@@ -170,4 +170,3 @@ This is a pybind11 bug, that occurs when compiling it with gcc-14. Change the py
 - Edit version number in `python/src/deglib/__init__.py` to `x.y.z`
 - Run `git add -A`, `git commit -m 'vx.y.z'` and `git tag -a vx.y.z -m 'vx.y.z'`
 - Run `git push` and `git push origin --tags`
-
