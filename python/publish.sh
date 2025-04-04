@@ -18,6 +18,13 @@ if [ "$old_version" = "$new_version" ]; then
 	fi
 fi
 
-# publish
-git add -A && git commit -m "v$new_version" && git tag -a "v$new_version" -m "v$new_version"
-git push && git push origin --tags
+if [ "$1" = "--tag" ]; then
+	# publish tag
+	git tag -a "v$new_version" -m "v$new_version"
+	git push origin --tags
+else
+	# publish package
+	git add -A && git commit -m "v$new_version"
+	git push
+fi
+

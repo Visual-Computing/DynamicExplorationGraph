@@ -12,7 +12,7 @@ build-backend = "setuptools.build_meta"
 name = "deglib"
 dynamic = ["version"]
 dependencies = [
-    "numpy>=1.21",
+    "numpy>=2.2",
     "psutil",
 ]
 requires-python = ">= 3.11"
