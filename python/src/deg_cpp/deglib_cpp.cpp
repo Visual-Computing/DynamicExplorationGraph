@@ -161,6 +161,9 @@ size_t search_batch_of_queries(const G& graph, size_t batch_index, size_t batch_
         break;
       }
     }
+    if (all_num_results != std::numeric_limits<size_t>::max()) {
+      break;
+    }
   }
   if (all_num_results == std::numeric_limits<size_t>::max()) {
     throw std::runtime_error("Got queries with different number of results, after 10 tries. This should not happen.");
@@ -205,6 +208,9 @@ std::tuple<py::array_t<uint32_t>, py::array_t<float>, size_t> graph_search_wrapp
           all_num_results = std::numeric_limits<size_t>::max();
           break;
         }
+      }
+      if (all_num_results != std::numeric_limits<size_t>::max()) {
+        break;
       }
     }
   } else {
