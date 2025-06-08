@@ -216,11 +216,15 @@ struct BuilderStatus {
  * Above 15 = High (schemeC in the paper)
  * For data with distribution Shifts Unknown is better. 
  */
-enum LID { Unknown, High, Low };
+enum OptimizationTarget { 
+  StreamingData,  // Streaming or shifting distributions
+  HighLID,        // Optimized for datasets with high local intrinsic dimensionality
+  LowLID,         // Optimized for datasets with low local intrinsic dimensionality
+};
 
 class EvenRegularGraphBuilder {
 
-    const LID lid_;
+    const OptimizationTarget optimizationTarget_;
     const uint8_t extend_k_;            // k value for extending the graph
     const float extend_eps_;            // eps value for extending the graph
 
@@ -252,11 +256,11 @@ class EvenRegularGraphBuilder {
 
   public:
 
-    EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, const LID lid,
+    EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, const OptimizationTarget lid,
                             const uint8_t extend_k, const float extend_eps, 
                             const uint8_t improve_k, const float improve_eps, 
                             const uint8_t max_path_length = 5, const uint32_t swap_tries = 0, const uint32_t additional_swap_tries = 0) 
-      : lid_(lid),
+      : optimizationTarget_(lid),
         extend_k_(extend_k),
         extend_eps_(extend_eps),
         improve_k_(improve_k), 
@@ -274,7 +278,7 @@ class EvenRegularGraphBuilder {
     }
 
     EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, const uint32_t swaps) 
-      : EvenRegularGraphBuilder(graph, rnd, LID::Unknown,
+      : EvenRegularGraphBuilder(graph, rnd, OptimizationTarget::StreamingData,
                                 graph.getEdgesPerVertex(), 0.2f, 
                                 graph.getEdgesPerVertex(), 0.001f, 
                                 5, swaps, swaps) {
@@ -403,7 +407,7 @@ class EvenRegularGraphBuilder {
         }
       }
 
-      if(this->lid_ == Unknown) {
+      if(this->optimizationTarget_ == OptimizationTarget::StreamingData) {
         while(index < add_tasks.size()) 
           extendGraphUnknownLID(add_tasks[index++]);
       } else {
@@ -426,7 +430,7 @@ class EvenRegularGraphBuilder {
     
 
     /**
-     * The LID of the dataset is unknown, add the new data one-by-one single threaded.
+     * The OptimizationTarget of the dataset is unknown, add the new data one-by-one single threaded.
      */
     void extendGraphUnknownLID(const BuilderAddTask& add_task) {
       auto& graph = this->graph_;
@@ -482,7 +486,7 @@ class EvenRegularGraphBuilder {
             continue;
           }
 
-          // This version is good for high LID datasets or small graphs with low distance count limit during ANNS
+          // This version is good for high OptimizationTarget datasets or small graphs with low distance count limit during ANNS
           uint32_t new_neighbor_index = 0;
           {
             // find the worst edge of the new neighbor
@@ -535,7 +539,7 @@ class EvenRegularGraphBuilder {
     }
 
     /**
-     * The LID of the dataset is known and defined, use multi threading to build the graph.
+     * The OptimizationTarget of the dataset is known and defined, use multi threading to build the graph.
      */
     void extendGraphKnownLID(const BuilderAddTask& add_task) {
       auto& graph = this->graph_;
@@ -580,7 +584,7 @@ class EvenRegularGraphBuilder {
      
 
       // adding neighbors happens in two phases, the first tries to retain RNG, the second adds them without checking
-      bool check_rng_phase = true; // true = activated, false = deactived
+      bool check_rng_phase = (this->optimizationTarget_ == SelfJoins) ? false : true; // true = activated, false = deactived
 
       // remove an edge of the good neighbors and connect them with this new vertex
       auto new_neighbors = std::vector<std::pair<uint32_t, float>>();
@@ -598,10 +602,10 @@ class EvenRegularGraphBuilder {
           if(check_rng_phase && deglib::analysis::checkRNG(graph, edges_per_vertex, candidate_index, internal_index, candidate_weight) == false) 
             continue;
 
-          // SchemeC: This version is good for high LID datasets or small graphs with low distance count limit during ANNS
+          // SchemeC: This version is good for high OptimizationTarget datasets or small graphs with low distance count limit during ANNS
           uint32_t new_neighbor_index = 0;
           float new_neighbor_distance = std::numeric_limits<float>::lowest();
-          if(this->lid_ == High) 
+          if(this->optimizationTarget_ == HighLID) 
           {
             // find the worst edge of the new neighbor
             float new_neighbor_weight = std::numeric_limits<float>::lowest();
@@ -632,7 +636,7 @@ class EvenRegularGraphBuilder {
 
             new_neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(new_neighbor_index), dist_func_param); 
           } 
-          else
+          else if(this->optimizationTarget_ == LowLID) 
           {
             // find the edge which improves the distortion the most: (distance_new_edge1 + distance_new_edge2) - distance_removed_edge       
             float best_distortion = std::numeric_limits<float>::max();
@@ -658,7 +662,8 @@ class EvenRegularGraphBuilder {
                 new_neighbor_distance = neighbor_distance;
               }
             }
-          }
+          } 
+       
 
           // this should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
           if(new_neighbor_distance == std::numeric_limits<float>::lowest()) 
@@ -1420,7 +1425,7 @@ void optimze_edges(deglib::graph::MutableGraph& graph, const uint8_t k_opt, cons
 
   // create a graph builder to add vertices to the new graph and improve its edges
 	std::cout << "Start graph builder\n";
-  auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::Unknown, 0, 0.0f, k_opt, eps_opt, i_opt, 1, 0);
+  auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::StreamingData, 0, 0.0f, k_opt, eps_opt, i_opt, 1, 0);
   
   // check the integrity of the graph during the graph build process
   auto start = std::chrono::steady_clock::now();

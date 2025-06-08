@@ -195,7 +195,7 @@ void optimze_graph(const std::string initial_graph_file, const std::string graph
  * Load the data repository and create a dynamic exploratino graph with it.
  * Store the graph in the graph file.
  */
-void reduce_graph(const std::string graph_file, deglib::builder::LID lid, const uint8_t d, const uint8_t k_ext, const float eps_ext, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt, const uint32_t thread_count) {
+void reduce_graph(const std::string graph_file, deglib::builder::OptimizationTarget lid, const uint8_t d, const uint8_t k_ext, const float eps_ext, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt, const uint32_t thread_count) {
     
     auto rnd = std::mt19937(7);                         // default 7
     const uint32_t swap_tries = 0;                      // additional swap tries between the next graph extension
@@ -265,7 +265,7 @@ void reduce_graph(const std::string graph_file, deglib::builder::LID lid, const 
  * Load the data repository and create a dynamic exploratino graph with it.
  * Store the graph in the graph file.
  */
-void create_graph(const std::string repository_file, const DataStreamType data_stream_type, const std::string graph_file, deglib::Metric metric, deglib::builder::LID lid, const uint8_t d, const uint8_t k_ext, const float eps_ext, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt, const uint32_t thread_count) {
+void create_graph(const std::string repository_file, const DataStreamType data_stream_type, const std::string graph_file, deglib::Metric metric, deglib::builder::OptimizationTarget lid, const uint8_t d, const uint8_t k_ext, const float eps_ext, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt, const uint32_t thread_count) {
     
     auto rnd = std::mt19937(7);                         // default 7
     const uint32_t swap_tries = 0;                      // additional swap tries between the next graph extension
@@ -415,7 +415,7 @@ int main() {
     // const auto gt_file              = (data_path / "audio" / "audio_groundtruth.ivecs").string();
     // const auto graph_file           = (data_path / "deg" / "192D_L2_K20_AddK40Eps0.1_schemeD.deg").string();
     // const auto opt_graph_file       = (data_path / "deg" / "192D_L2_K20_AddK40Eps0.1_schemeD_OptK20Eps0.001Path5_it20000.deg").string();
-    // const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::LID::Low : deglib::builder::LID::Unknown;
+    // const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::OptimizationTarget::LowLID : deglib::builder::OptimizationTarget::StreamingData;
     // const deglib::Metric metric     = deglib::Metric::L2;
     
     // if(std::filesystem::exists(graph_file.c_str()) == false) {
@@ -432,7 +432,7 @@ int main() {
     // const auto gt_file              = (data_path / "enron" / "enron_groundtruth.ivecs").string();
     // const auto graph_file           = (data_path / "deg" / "1369D_L2_K30_AddK60Eps0.1_schemeD.deg").string();
     // const auto opt_graph_file       = (data_path / "deg" / "1369D_L2_K30_AddK60Eps0.1_schemeD_OptK30Eps0.001Path5_it400000.deg").string();
-    // const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::LID::Low : deglib::builder::LID::Unknown;
+    // const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::OptimizationTarget::LowLID : deglib::builder::OptimizationTarget::StreamingData;
     // const deglib::Metric metric     = deglib::Metric::L2;
     
     // if(std::filesystem::exists(graph_file.c_str()) == false) {
@@ -450,7 +450,7 @@ int main() {
     // const auto reduce_graph_file    = (data_path / "deg" / "96D_L2_K30_AddK60Eps0.1High_schemaD.deg").string();
     // const auto graph_file           = (data_path / "deg" / "dynamic" / "96D_L2_K30_AddK60Eps0.1_add500k_schemeD.deg").string();
     // const auto opt_graph_file       = (data_path / "deg" / "dynamic" / "96D_L2_K30_AddK60Eps0.1_add500k_schemeD_OptAfterwardsWith_SwapK30-0StepEps0.001LowPath5_it100000.deg").string();
-    // const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::LID::Low : deglib::builder::LID::Unknown;
+    // const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::OptimizationTarget::LowLID : deglib::builder::OptimizationTarget::StreamingData;
     // const deglib::Metric metric     = deglib::Metric::L2;
     
     // // if(std::filesystem::exists(graph_file.c_str()) == false) {
@@ -471,7 +471,7 @@ int main() {
     // // const auto reduce_graph_file    = (data_path / "deg" / "schemes" / "128D_L2_K30_AddK60Eps0.1_schemeUnkown.deg").string();
     // // const auto graph_file           = (data_path / "deg" / "dynamic" / "128D_L2_K30_AddK60Eps0.1_add500k_schemeD.deg").string();
     // // const auto opt_graph_file       = (data_path / "deg" / "dynamic" / "128D_L2_K30_AddK60Eps0.1_add500k_schemeD_OptAfterwardsWith_SwapK30-0StepEps0.001LowPath5_it100000.deg").string();
-    // const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::LID::Low : deglib::builder::LID::Unknown;
+    // const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::OptimizationTarget::LowLID : deglib::builder::OptimizationTarget::StreamingData;
     // const deglib::Metric metric     = deglib::Metric::L2;
 
     // // if(std::filesystem::exists(graph_file.c_str()) == false) {
@@ -489,7 +489,7 @@ int main() {
     // const auto query_file           = (data_path / "SIFT100K" / "sift_query.fvecs").string();
     // const auto gt_file              = (data_path / "SIFT100K" / (data_stream_type == AddAll ? "sift_groundtruth.ivecs" : "sift_groundtruth_base500000.ivecs" )).string();
     // const auto graph_file           = (data_path / "deg" / "128D_L2_K16_AddK32Eps0.1_schemeLow.deg").string();
-    // const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::LID::Low : deglib::builder::LID::Unknown;
+    // const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::OptimizationTarget::LowLID : deglib::builder::OptimizationTarget::StreamingData;
     // const deglib::Metric metric     = deglib::Metric::L2;
 
     // if(std::filesystem::exists(graph_file.c_str()) == false) 
@@ -504,12 +504,12 @@ int main() {
     const auto repository_file      = (data_path / "ccnews-small" / "ccnews-small_base.u8vecs").string();
     const auto query_file           = (data_path / "ccnews-small" / "ccnews-small_base.u8vecs").string();
     const auto gt_file              = (data_path / "ccnews-small" / "ccnews-small_explore_groundtruth.ivecs").string();
-    const auto graph_file           = (data_path / "deg" / "384D_uint8_L2_K16_AddK16Eps0.1_schemeLow.deg").string();
-    const auto lid                  = deglib::builder::LID::Low;
+    const auto graph_file           = (data_path / "deg" / "384D_uint8_L2_K16_AddK16Eps0.1_SelfJoin8.deg").string();
+    const auto lid                  = deglib::builder::OptimizationTarget::LowLID;
     const deglib::Metric metric     = deglib::Metric::L2_Uint8;
 
     if(std::filesystem::exists(graph_file.c_str()) == false) 
-        create_graph(repository_file, data_stream_type, graph_file, metric, lid, 16, 16, 0.1f, 0, 0, 0, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt, threads
+        create_graph(repository_file, data_stream_type, graph_file, metric, lid, 16, 32, 0.1f, 0, 0, 0, 8); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt, threads
     test_graph(query_file, gt_file, graph_file, 1, 8, 16);  // repeat_test, test_threads, k
 
 
@@ -521,7 +521,7 @@ int main() {
     // const auto reduce_graph_file    = (data_path / "deg" / "schemes" / "100D_L2_K30_AddK60Eps0.1_schemeC.deg").string();
     // const auto graph_file           = (data_path / "deg" / "dynamic" / "100D_L2_K30_AddK60Eps0.1_add500k_schemeC.deg").string();
     // const auto opt_graph_file       = (data_path / "deg" / "dynamic" / "100D_L2_K30_AddK60Eps0.1_add500k_schemeC_OptAfterwardsWith_SwapK30-0StepEps0.001LowPath5_it1000000.deg").string();
-    // const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::LID::High : deglib::builder::LID::Unknown;
+    // const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::OptimizationTarget::HighLID : deglib::builder::OptimizationTarget::StreamingData;
     // const deglib::Metric metric     = deglib::Metric::L2;
     
     // // if(std::filesystem::exists(graph_file.c_str()) == false) {
@@ -549,7 +549,7 @@ int main() {
     // const auto graph_file           = (data_path / "deg" / "300k" / "768D_L2_K30_AddK60Eps0.1_schemeD_t4_512byte.deg").string();
     // const auto opt_graph_file       = (data_path / "deg" / "300k" / "768D_L2_K30_AddK60Eps0.1_schemeD_t1_512byte_200kAll.deg").string(); 
     // const auto mrng_graph_file      = (data_path / "deg" / "300k" / "768D_L2_K30_AddK60Eps0.1_schemeD_t12_512byte_removedNonMRNG.deg").string(); 
-    // const auto lid                  = deglib::builder::LID::Low; // low=schemeD, high=schemeC
+    // const auto lid                  = deglib::builder::OptimizationTarget::LowLID; // low=schemeD, high=schemeC
     // const deglib::Metric metric     = deglib::Metric::L2_Uint8;
 
     // if(std::filesystem::exists(graph_file.c_str()) == false) 
