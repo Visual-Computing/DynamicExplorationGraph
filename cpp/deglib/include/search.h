@@ -141,7 +141,7 @@ class SearchGraph
     /**
      * A exploration for similar element, limited by max_distance_computation_count
      */
-    virtual deglib::search::ResultSet explore(const uint32_t entry_vertex_index, const uint32_t k, const uint32_t max_distance_computation_count) const = 0;
+    virtual deglib::search::ResultSet explore(const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count) const = 0;
 };
 
 } // end namespace deglib::search

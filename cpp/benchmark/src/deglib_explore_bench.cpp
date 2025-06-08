@@ -21,6 +21,7 @@ int main(int argc, char *argv[]) {
     const auto data_path = std::filesystem::path(DATA_PATH);
     
     const uint32_t k = 16; 
+    boolean include_entry = false;
 
     // ------------------------------------------ SIFT1M ---------------------------------------------
     // const auto graph_file               = (data_path / "deg" / "best_distortion_decisions" / "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string(); 
@@ -28,9 +29,10 @@ int main(int argc, char *argv[]) {
     // const auto query_file        = (data_path / "SIFT1M" / "sift_explore_entry_vertex.ivecs").string();
 
     // ------------------------------------------ ccnews-small ---------------------------------------------
-    const auto graph_file           = (data_path / "deg" / "384D_uint8_L2_K16_AddK16Eps0.1_schemeLow.deg").string();
+    const auto graph_file           = (data_path / "deg" / "384D_uint8_L2_K32_AddK32Eps0.1_schemeLow.deg").string();
     const auto query_file           = (data_path / "ccnews-small" / "ccnews-small_explore_entry_vertex.ivecs").string();
     const auto gt_file              = (data_path / "ccnews-small" / "ccnews-small_explore_groundtruth.ivecs").string();
+    include_entry = true; // include the entry vertex in the ground truth
     
     // ------------------------------------------ Glove ---------------------------------------------
     // const auto graph_file               = (data_path / "deg" / "100D_L2_K30_AddK30Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string(); 
@@ -49,13 +51,14 @@ int main(int argc, char *argv[]) {
     
     // load graph
     fmt::print("Load graph {} \n", graph_file);
-    const auto graph = deglib::graph::load_readonly_graph(graph_file.c_str());
+    // const auto graph = deglib::graph::load_readonly_graph(graph_file.c_str());
+    const auto graph = deglib::graph::load_sizebounded_graph(graph_file.c_str());
 
     // load starting vertex data
     size_t entry_vertex_dims;
     size_t entry_vertex_count;
     const auto entry_vertex_f = deglib::fvecs_read(query_file.c_str(), entry_vertex_dims, entry_vertex_count);
-    const auto entry_vertex = (uint32_t*)entry_vertex_f.get(); // not very clean, works as long as sizeof(int) == sizeof(float)
+    const auto entry_vertex_labels = (uint32_t*)entry_vertex_f.get(); // not very clean, works as long as sizeof(int) == sizeof(float)
     fmt::print("{} entry vertex {} dimensions \n", entry_vertex_count, entry_vertex_dims);
 
     // load ground truth data (nearest neighbors of the starting vertices)
@@ -66,7 +69,7 @@ int main(int argc, char *argv[]) {
     fmt::print("{} ground truth {} dimensions \n", ground_truth_count, ground_truth_dims);
 
     // explore the graph
-    deglib::benchmark::test_graph_explore(graph, (uint32_t) ground_truth_count, ground_truth, (uint32_t) ground_truth_dims, entry_vertex, (uint32_t) entry_vertex_dims, repeat_test, k);
+    deglib::benchmark::test_graph_explore(graph, (uint32_t) ground_truth_count, ground_truth, (uint32_t) ground_truth_dims, entry_vertex_labels, (uint32_t) entry_vertex_dims, include_entry, repeat_test, k);
 
     fmt::print("Test OK\n");
     return 0;

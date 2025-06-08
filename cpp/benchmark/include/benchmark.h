@@ -87,14 +87,14 @@ static float test_approx_anns(const deglib::search::SearchGraph& graph, const st
     return total_correct / (test_size*k);
 }
 
-static float test_approx_explore(const deglib::search::SearchGraph& graph, const std::vector<std::vector<uint32_t>>& entry_vertex_indices, 
+static float test_approx_explore(const deglib::search::SearchGraph& graph, const std::vector<std::vector<uint32_t>>& entry_vertex_indices, const boolean include_entry,
                                   const std::vector<std::unordered_set<uint32_t>>& ground_truth, const uint32_t k, const uint32_t max_distance_count)
 {    
     size_t total = 0;
     size_t correct = 0;
     for (uint32_t i = 0; i < entry_vertex_indices.size(); i++) {
         const auto entry_vertex_index = entry_vertex_indices[i][0];
-        auto result_queue = graph.explore(entry_vertex_index, k, max_distance_count);
+        auto result_queue = graph.explore(entry_vertex_index, k, include_entry, max_distance_count);
 
         total += k;
         const auto& gt = ground_truth[i];
@@ -151,7 +151,7 @@ static void test_graph_anns(const deglib::search::SearchGraph& graph, const degl
     fmt::print("Max memory usage: {} Mb\n", getPeakRSS() / 1000000);
 }
 
-static void test_graph_explore(const deglib::search::SearchGraph& graph, const uint32_t query_count, const uint32_t* ground_truth, const uint32_t ground_truth_dims, const uint32_t* entry_vertices, const uint32_t entry_vertex_dims, const uint32_t repeat, const uint32_t k)
+static void test_graph_explore(const deglib::search::SearchGraph& graph, const uint32_t query_count, const uint32_t* ground_truth, const uint32_t ground_truth_dims, const uint32_t* entry_vertex_labels, const uint32_t entry_vertex_dims, const boolean include_entry, const uint32_t repeat, const uint32_t k)
 {
     if (ground_truth_dims < k)
     {
@@ -159,11 +159,15 @@ static void test_graph_explore(const deglib::search::SearchGraph& graph, const u
         perror("");
         abort();
     }
-    
-    // reproduceable entry point for the graph search
+      // reproduceable entry point for the graph search
     auto entry_vertex_indices = std::vector<std::vector<uint32_t>>();
     for (size_t i = 0; i < query_count; i++) {
-        auto entry_vertex = std::vector<uint32_t>(entry_vertices + i * entry_vertex_dims, entry_vertices + (i+1) * entry_vertex_dims);
+        auto entry_vertex = std::vector<uint32_t>();
+        entry_vertex.reserve(entry_vertex_dims);
+
+        // use the entry vertex labels to get the internal index
+        for (size_t v = 0; v < entry_vertex_dims; v++)             
+            entry_vertex.emplace_back(graph.getInternalIndex(entry_vertex_labels[i * entry_vertex_dims + v]));
         entry_vertex_indices.emplace_back(entry_vertex);
     }
 
@@ -171,7 +175,7 @@ static void test_graph_explore(const deglib::search::SearchGraph& graph, const u
     const auto answer = deglib::benchmark::get_ground_truth(ground_truth, query_count, ground_truth_dims, k);
 
     // try different k values
-    uint32_t k_factor = 100;
+    uint32_t k_factor = 16;
     for (uint32_t f = 0; f <= 3; f++, k_factor *= 10) {
         for (uint32_t i = (f == 0) ? 1 : 2; i < 11; i++) {         
            const auto max_distance_count = ((f == 0) ? (k + k_factor * (i-1)) : (k_factor * i));
@@ -182,7 +186,7 @@ static void test_graph_explore(const deglib::search::SearchGraph& graph, const u
             StopW stopw = StopW();
             float recall = 0;
             for (size_t r = 0; r < repeat; r++) 
-                recall = deglib::benchmark::test_approx_explore(graph, entry_vertex_indices, answer, k, max_distance_count);
+                recall = deglib::benchmark::test_approx_explore(graph, entry_vertex_indices, include_entry, answer, k, max_distance_count);
             uint64_t search_time_us = stopw.getElapsedTimeMicro();
             uint64_t time_us_per_query = search_time_us / (query_count * repeat);
 
