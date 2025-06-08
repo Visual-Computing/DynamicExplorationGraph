@@ -239,8 +239,8 @@ class EvenRegularGraphBuilder {
     std::queue<BuilderRemoveTask> remove_entry_queue_;
 
     // the batch_size should be thread_count * thread_task_count thread_task_size
-    uint32_t extend_batch_size = 32;          // the overall number of elements per batch
-    uint32_t extend_thread_count = 1;         // number of concurrent threads
+    uint32_t extend_batch_size = 32;         // the overall number of elements per batch
+    uint32_t extend_thread_count = 1;        // number of concurrent threads
     uint32_t extend_thread_task_size = 32;   // each thread processed 32 elements per task
     uint32_t extend_thread_task_count = 10;  // there are 10 tasks per thread per batch
 
@@ -319,13 +319,22 @@ class EvenRegularGraphBuilder {
      */
     void setThreadCount(uint32_t thread_count) {
       extend_thread_count = thread_count;
+      extend_batch_size = extend_thread_count * extend_thread_task_count * extend_thread_task_size;
     }
 
     /**
-     * Set the batch size when adding multiple elements
+     * Set the batch size when adding multiple elements to the graph.analysis
+     * The batch size is calculated as:
+     *   batch_size = thread_count * tasks_per_batch * task_size
+     * where
+     *   thread_count = number of threads which are used to extend the graph
+     *   tasks_per_batch = number of tasks in each batch
+     *   task_size = number of elements each thread processes in one task
      */
-    void setBatchSize(uint32_t batch_size) {
-      extend_batch_size = batch_size;
+    void setBatchSize(uint32_t tasks_per_batch, uint32_t task_size) {
+      extend_thread_task_size = task_size;
+      extend_thread_task_count = tasks_per_batch;
+      extend_batch_size = extend_thread_count * extend_thread_task_count * extend_thread_task_size;
     }
 
   private:
