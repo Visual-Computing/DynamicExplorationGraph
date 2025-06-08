@@ -128,7 +128,8 @@ static void test_graph_anns(const deglib::search::SearchGraph& graph, const degl
     // std::vector<float> eps_parameter = { 0.00f, 0.03f, 0.05f, 0.07f, 0.09f, 0.12f, 0.2f, 0.3f, };    // audio
     // std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f  };       // SIFT1M k=100
     // std::vector<float> eps_parameter = { 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f, 0.4f };             // GloVe
-    std::vector<float> eps_parameter = { 0.01f, 0.02f, 0.03f, 0.04f, 0.06f, 0.1f, 0.2f, };           // Deep1M
+    // std::vector<float> eps_parameter = { 0.01f, 0.02f, 0.03f, 0.04f, 0.06f, 0.1f, 0.2f, };           // Deep1M
+    std::vector<float> eps_parameter = { 0.01f, 0.02f, 0.05f };           // ccnews-small
 
     fmt::print("Compute TOP{} for eps {}us\n", k, fmt::join(eps_parameter, ", "));
     const auto test_size = uint32_t(query_repository.size());
@@ -138,9 +139,10 @@ static void test_graph_anns(const deglib::search::SearchGraph& graph, const degl
         float recall = 0;
         for (size_t i = 0; i < repeat; i++) 
             recall = deglib::benchmark::test_approx_anns(graph, entry_vertex_indices, query_repository, answer, eps, k, test_size, threads, filter);
-        uint64_t time_us_per_query = (stopw.getElapsedTimeMicro() / test_size) / repeat;
+        uint64_t search_time_us = stopw.getElapsedTimeMicro();
+        uint64_t time_us_per_query = (search_time_us / test_size) / repeat;
 
-        fmt::print("eps {:.3f} \t recall {:.5f} \t time_us_per_query {:6}us\n", eps, recall, time_us_per_query);
+        fmt::print("eps {:.3f} \t recall {:.5f} \t time_us_per_query {:6}us \t search time: {:6}ms\n", eps, recall, time_us_per_query, search_time_us / 1000);
         if (recall > 1.0)
             break;
     }
@@ -181,9 +183,10 @@ static void test_graph_explore(const deglib::search::SearchGraph& graph, const u
             float recall = 0;
             for (size_t r = 0; r < repeat; r++) 
                 recall = deglib::benchmark::test_approx_explore(graph, entry_vertex_indices, answer, k, max_distance_count);
-            uint64_t time_us_per_query = stopw.getElapsedTimeMicro() / (query_count * repeat);
+            uint64_t search_time_us = stopw.getElapsedTimeMicro();
+            uint64_t time_us_per_query = search_time_us / (query_count * repeat);
 
-            fmt::print("max_distance_count {:5}, k {:4}, recall {:.5f}, time_us_per_query {:4}us\n", max_distance_count, k, recall, time_us_per_query);
+            fmt::print("max_distance_count {:5}, k {:4}, recall {:.5f}, time_us_per_query {:4}us \t search time: {:6}ms\n", max_distance_count, k, recall, time_us_per_query, search_time_us / 1000);
             if (recall > 1.0)
                 break;
         }

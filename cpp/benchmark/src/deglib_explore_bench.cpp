@@ -20,13 +20,18 @@ int main(int argc, char *argv[]) {
     const uint32_t repeat_test = 1;
     const auto data_path = std::filesystem::path(DATA_PATH);
     
-    const uint32_t k = 1000; 
+    const uint32_t k = 16; 
 
     // ------------------------------------------ SIFT1M ---------------------------------------------
-    const auto graph_file               = (data_path / "deg" / "best_distortion_decisions" / "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string(); 
-    const auto gt_file   = (data_path / "SIFT1M" / "sift_explore_ground_truth.ivecs").string();
-    const auto query_file        = (data_path / "SIFT1M" / "sift_explore_entry_vertex.ivecs").string();
+    // const auto graph_file               = (data_path / "deg" / "best_distortion_decisions" / "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string(); 
+    // const auto gt_file   = (data_path / "SIFT1M" / "sift_explore_ground_truth.ivecs").string();
+    // const auto query_file        = (data_path / "SIFT1M" / "sift_explore_entry_vertex.ivecs").string();
 
+    // ------------------------------------------ ccnews-small ---------------------------------------------
+    const auto graph_file           = (data_path / "deg" / "384D_uint8_L2_K16_AddK16Eps0.1_schemeLow.deg").string();
+    const auto query_file           = (data_path / "ccnews-small" / "ccnews-small_explore_entry_vertex.ivecs").string();
+    const auto gt_file              = (data_path / "ccnews-small" / "ccnews-small_explore_groundtruth.ivecs").string();
+    
     // ------------------------------------------ Glove ---------------------------------------------
     // const auto graph_file               = (data_path / "deg" / "100D_L2_K30_AddK30Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string(); 
     // const auto gt_file   = (data_path / "glove-100" / "glove-100_explore_ground_truth.ivecs").string();

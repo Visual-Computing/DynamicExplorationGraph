@@ -90,10 +90,15 @@ int main(int argc, char *argv[]) {
     uint32_t repeat_test = 1;
     uint32_t test_threads = 1;
 
-    // SIFT1M
-    const auto graph_file   = (data_path / "deg" / "schemes" / "128D_L2_K30_AddK60Eps0.1_schemeUnkown.deg").string();
-    const auto query_file   = (data_path / "SIFT1M" / "sift_query.fvecs").string();
-    const auto gt_file      = (data_path / "SIFT1M" / "sift_groundtruth.ivecs").string();
+    // // SIFT1M
+    // const auto graph_file   = (data_path / "deg" / "schemes" / "128D_L2_K30_AddK60Eps0.1_schemeUnkown.deg").string();
+    // const auto query_file   = (data_path / "SIFT1M" / "sift_query.fvecs").string();
+    // const auto gt_file      = (data_path / "SIFT1M" / "sift_groundtruth.ivecs").string();
+
+    // SIFT1000K
+    const auto graph_file   = (data_path / "deg" / "128D_L2_K16_AddK32Eps0.1_schemeLow.deg").string();
+    const auto query_file   = (data_path / "SIFT100K" / "sift_query.fvecs").string();
+    const auto gt_file      = (data_path / "SIFT100K" / "sift_groundtruth.ivecs").string();
 
     fmt::print("Load graph {} \n", graph_file);
     fmt::print("Actual memory usage: {} Mb\n", getCurrentRSS() / 1000000);
@@ -116,9 +121,9 @@ int main(int argc, char *argv[]) {
     const auto ground_truth = (uint32_t*)ground_truth_f.get(); // not very clean, works as long as sizeof(int) == sizeof(float)
     fmt::print("{} ground truth {} dimensions \n", ground_truth_count, ground_truth_dims);
 
-    // create filter
-    auto valid_label_rate = 100.0;
+    // create filter    
     auto graph_size = graph.size();
+    auto valid_label_rate = graph_size; // graph_size=all allowed
     auto fill_rate = static_cast<size_t>(graph_size * (valid_label_rate / 100));
     auto step_size = static_cast<double>(graph_size) / fill_rate;
     std::vector<int> valid_labels;
@@ -130,7 +135,8 @@ int main(int argc, char *argv[]) {
     fmt::print("{} valid label in filter, {} valid labels, {} fill_rate, {} step_size \n", filter.size(), valid_labels.size(), fill_rate, step_size);
 
     fmt::print("Test with k={} and repeat_test={}\n", k, repeat_test);
-    deglib::benchmark::test_graph_anns(graph, query_repository, ground_truth, (uint32_t) ground_truth_dims, repeat_test, test_threads, k, &filter);
+    // deglib::benchmark::test_graph_anns(graph, query_repository, ground_truth, (uint32_t) ground_truth_dims, repeat_test, test_threads, k, &filter);
+    deglib::benchmark::test_graph_anns(graph, query_repository, ground_truth, (uint32_t) ground_truth_dims, repeat_test, test_threads, k);
   
     fmt::print("Test OK\n");
     return 0;
