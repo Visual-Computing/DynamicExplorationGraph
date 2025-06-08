@@ -220,6 +220,7 @@ enum OptimizationTarget {
   StreamingData,  // Streaming or shifting distributions
   HighLID,        // Optimized for datasets with high local intrinsic dimensionality
   LowLID,         // Optimized for datasets with low local intrinsic dimensionality
+  SelfJoins       // Optimized for self-join workloads
 };
 
 class EvenRegularGraphBuilder {
@@ -663,7 +664,54 @@ class EvenRegularGraphBuilder {
               }
             }
           } 
-       
+          else {
+
+            // find the edge which improves the distortion the most: (distance_new_edge1 + distance_new_edge2) - distance_removed_edge    
+            // but also does not remove good neighbors from other existing vertices (each vertex should keep its SelfJoinTarget neighbors)   
+            float best_distortion = std::numeric_limits<float>::max();
+            const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
+            const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
+
+            // sort the neighbor indices by their distance to candidate_index and keep the SelfJoinTarget best onces
+            std::vector<std::pair<uint32_t, float>> neighbor_distances;
+            neighbor_distances.reserve(edges_per_vertex);
+            for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
+              const auto neighbor_index = neighbor_indices[edge_idx];
+              const auto neighbor_weight = neighbor_weights[edge_idx];
+
+              // add the neighbor to the list of neighbors with their distance to the candidate
+              neighbor_distances.emplace_back(neighbor_index, neighbor_weight);
+            }
+
+            // sort the neighbors by their distance to the candidate
+            std::sort(neighbor_distances.begin(), neighbor_distances.end(), [](const auto& a, const auto& b) {
+              return a.second < b.second; // sort by distance
+            });
+
+            // allow the candidate_index to keep its best neighbor, skip therefore the first self_join_target_count neighbors
+            int self_join_target_count = 8;
+            for (size_t edge_idx = self_join_target_count; edge_idx < edges_per_vertex; edge_idx++) {
+              const auto neighbor_index = neighbor_distances[edge_idx].first;
+              const auto neighbor_weight = neighbor_distances[edge_idx].second;
+
+              // if another thread is building the candidate_index at the moment, than its neighbor list contains self references
+              if(candidate_index == neighbor_index)
+                continue;
+
+              // the suggested neighbor might already be in the edge list of the new vertex
+              if(graph.hasEdge(neighbor_index, internal_index))
+                continue;
+
+              // take the neighbor with the best distance to the new vertex, which might already be in its edge list
+              const auto neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(neighbor_index), dist_func_param);
+              float distortion = (candidate_weight + neighbor_distance) - neighbor_weight;   // version D in the paper
+              if(distortion < best_distortion) {
+                best_distortion = distortion;
+                new_neighbor_index = neighbor_index;
+                new_neighbor_distance = neighbor_distance;
+              }
+            }
+          }
 
           // this should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
           if(new_neighbor_distance == std::numeric_limits<float>::lowest()) 
@@ -696,11 +744,14 @@ class EvenRegularGraphBuilder {
         }
 
         check_rng_phase = false;
+        if(this->optimizationTarget_ == SelfJoins && new_neighbors.size() < edges_per_vertex) {
+          std::fprintf(stderr, "SelfJoins: could find only %zu good neighbors for the new vertex %u need %u\n", new_neighbors.size(), internal_index, edges_per_vertex);
+          std::abort();
+        }
       }
       
       if(new_neighbors.size() < edges_per_vertex) {
         std::fprintf(stderr, "could find only %zu good neighbors for the new vertex %u need %u\n", new_neighbors.size(), internal_index, edges_per_vertex);
-        std::perror("");
         std::abort();
       }
     }

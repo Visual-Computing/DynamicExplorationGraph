@@ -504,12 +504,12 @@ int main() {
     const auto repository_file      = (data_path / "ccnews-small" / "ccnews-small_base.u8vecs").string();
     const auto query_file           = (data_path / "ccnews-small" / "ccnews-small_base.u8vecs").string();
     const auto gt_file              = (data_path / "ccnews-small" / "ccnews-small_explore_groundtruth.ivecs").string();
-    const auto graph_file           = (data_path / "deg" / "384D_uint8_L2_K16_AddK16Eps0.1_SelfJoin8.deg").string();
-    const auto lid                  = deglib::builder::OptimizationTarget::LowLID;
+    const auto graph_file           = (data_path / "deg" / "384D_uint8_L2_K16_AddK32Eps0.05_HighLID.deg").string();
+    const auto lid                  = deglib::builder::OptimizationTarget::HighLID;
     const deglib::Metric metric     = deglib::Metric::L2_Uint8;
 
     if(std::filesystem::exists(graph_file.c_str()) == false) 
-        create_graph(repository_file, data_stream_type, graph_file, metric, lid, 16, 32, 0.1f, 0, 0, 0, 8); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt, threads
+        create_graph(repository_file, data_stream_type, graph_file, metric, lid, 16, 32, 0.05f, 0, 0, 0, 8); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt, threads
     test_graph(query_file, gt_file, graph_file, 1, 8, 16);  // repeat_test, test_threads, k
 
 

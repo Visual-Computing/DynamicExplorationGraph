@@ -29,7 +29,7 @@ int main(int argc, char *argv[]) {
     // const auto query_file        = (data_path / "SIFT1M" / "sift_explore_entry_vertex.ivecs").string();
 
     // ------------------------------------------ ccnews-small ---------------------------------------------
-    const auto graph_file           = (data_path / "deg" / "384D_uint8_L2_K32_AddK32Eps0.1_schemeLow.deg").string();
+    const auto graph_file           = (data_path / "deg" / "384D_uint8_L2_K24_AddK32Eps0.05_SelfJoin8.deg").string();
     const auto query_file           = (data_path / "ccnews-small" / "ccnews-small_explore_entry_vertex.ivecs").string();
     const auto gt_file              = (data_path / "ccnews-small" / "ccnews-small_explore_groundtruth.ivecs").string();
     include_entry = true; // include the entry vertex in the ground truth
