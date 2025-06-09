@@ -223,17 +223,6 @@ enum OptimizationTarget {
   SelfJoins       // Optimized for self-join workloads
 };
 
-// Structure to hold neighbor information for distortion calculation
-struct NeighborInfo {
-  uint32_t neighbor_index;
-  float neighbor_distance;
-  float distortion;
-  size_t better_neighbors;
-  
-  NeighborInfo(uint32_t idx, float dist, float distort, size_t better)
-    : neighbor_index(idx), neighbor_distance(dist), distortion(distort), better_neighbors(better) {}
-};
-
 class EvenRegularGraphBuilder {
 
     const OptimizationTarget optimizationTarget_;
@@ -675,16 +664,10 @@ class EvenRegularGraphBuilder {
               }
             }
           } 
-          else {            
-
-            // Vector to store all the neighbor information
-            std::vector<NeighborInfo> neighbor_infos;
-            neighbor_infos.reserve(edges_per_vertex);
-            
-            // find the edge which improves the distortion the most: (distance_new_edge1 + distance_new_edge2) - distance_removed_edge    
-            // but also does not remove good neighbors from other existing vertices (each vertex should keep its SelfJoinTarget neighbors)   
+          else {                
+            // find the edge which does not remove good neighbors from other existing vertices (each vertex should keep its SelfJoinTarget neighbors)   
             const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
-            const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
+            uint32_t min_better_neighbors = std::numeric_limits<uint32_t>::max();            
             for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
               const auto neighbor_index = neighbor_indices[edge_idx];
 
@@ -697,38 +680,18 @@ class EvenRegularGraphBuilder {
                 continue;
 
               // take the neighbor with the best distance to the new vertex, which might already be in its edge list
-              const auto neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(neighbor_index), dist_func_param);
-              float distortion = (candidate_weight + neighbor_distance) - neighbor_weights[edge_idx];   
-
-              // count how many neighbors of neighbor_index have a better neighbor_distance
-              size_t better_neighbors = 0;
+              const auto neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(neighbor_index), dist_func_param);              // count how many neighbors of neighbor_index have a better neighbor_distance
               const auto neighbor_neighbor_weights = graph.getNeighborWeights(neighbor_index);
-              for (size_t neighbor_edge_idx = 0; neighbor_edge_idx < edges_per_vertex; neighbor_edge_idx++) 
-                if(neighbor_neighbor_weights[neighbor_edge_idx] < neighbor_distance) 
-                  better_neighbors++;
+              uint32_t better_neighbors = std::count_if(neighbor_neighbor_weights, 
+                                                       neighbor_neighbor_weights + edges_per_vertex,
+                                                       [&neighbor_distance](float weight) { return weight < neighbor_distance; });
 
-              // store neighbor_index, neighbor_distance, distortion, and better_neighbors in vector
-              neighbor_infos.emplace_back(neighbor_index, neighbor_distance, distortion, better_neighbors);
-            }
-            
-            // Find the best neighbor based on the collected information
-            if (!neighbor_infos.empty()) {              
-              
-              // Sort by better_neighbors (primary criteria) and then by distortion (secondary criteria)
-              std::sort(neighbor_infos.begin(), neighbor_infos.end(), 
-                [](const NeighborInfo& a, const NeighborInfo& b) {
-
-                  // First compare by better_neighbors - prefer the one with less better neighbors
-                  if (a.better_neighbors != b.better_neighbors)
-                    return a.better_neighbors < b.better_neighbors;
-
-                  // If better_neighbors is the same, compare by distortion
-                  return a.distortion < b.distortion;
-                });
-                
-              // The best neighbor is the first one after sorting
-              new_neighbor_index = neighbor_infos[0].neighbor_index;
-              new_neighbor_distance = neighbor_infos[0].neighbor_distance;
+              // Update if this neighbor has fewer "better neighbors" or same count but lower distortion
+              if (better_neighbors < min_better_neighbors) {
+                min_better_neighbors = better_neighbors;
+                new_neighbor_index = neighbor_index;
+                new_neighbor_distance = neighbor_distance;
+              }
             }
           }
 
