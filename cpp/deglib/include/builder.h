@@ -223,6 +223,17 @@ enum OptimizationTarget {
   SelfJoins       // Optimized for self-join workloads
 };
 
+// Structure to hold neighbor information for distortion calculation
+struct NeighborInfo {
+  uint32_t neighbor_index;
+  float neighbor_distance;
+  float distortion;
+  size_t better_neighbors;
+  
+  NeighborInfo(uint32_t idx, float dist, float distort, size_t better)
+    : neighbor_index(idx), neighbor_distance(dist), distortion(distort), better_neighbors(better) {}
+};
+
 class EvenRegularGraphBuilder {
 
     const OptimizationTarget optimizationTarget_;
@@ -585,7 +596,7 @@ class EvenRegularGraphBuilder {
      
 
       // adding neighbors happens in two phases, the first tries to retain RNG, the second adds them without checking
-      bool check_rng_phase = (this->optimizationTarget_ == SelfJoins) ? false : true; // true = activated, false = deactived
+      bool check_rng_phase = true; //(this->optimizationTarget_ == SelfJoins) ? false : true; // true = activated, false = deactived
 
       // remove an edge of the good neighbors and connect them with this new vertex
       auto new_neighbors = std::vector<std::pair<uint32_t, float>>();
@@ -664,35 +675,18 @@ class EvenRegularGraphBuilder {
               }
             }
           } 
-          else {
+          else {            
 
+            // Vector to store all the neighbor information
+            std::vector<NeighborInfo> neighbor_infos;
+            neighbor_infos.reserve(edges_per_vertex);
+            
             // find the edge which improves the distortion the most: (distance_new_edge1 + distance_new_edge2) - distance_removed_edge    
             // but also does not remove good neighbors from other existing vertices (each vertex should keep its SelfJoinTarget neighbors)   
-            float best_distortion = std::numeric_limits<float>::max();
             const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
             const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
-
-            // sort the neighbor indices by their distance to candidate_index and keep the SelfJoinTarget best onces
-            std::vector<std::pair<uint32_t, float>> neighbor_distances;
-            neighbor_distances.reserve(edges_per_vertex);
             for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
               const auto neighbor_index = neighbor_indices[edge_idx];
-              const auto neighbor_weight = neighbor_weights[edge_idx];
-
-              // add the neighbor to the list of neighbors with their distance to the candidate
-              neighbor_distances.emplace_back(neighbor_index, neighbor_weight);
-            }
-
-            // sort the neighbors by their distance to the candidate
-            std::sort(neighbor_distances.begin(), neighbor_distances.end(), [](const auto& a, const auto& b) {
-              return a.second < b.second; // sort by distance
-            });
-
-            // allow the candidate_index to keep its best neighbor, skip therefore the first self_join_target_count neighbors
-            int self_join_target_count = 8;
-            for (size_t edge_idx = self_join_target_count; edge_idx < edges_per_vertex; edge_idx++) {
-              const auto neighbor_index = neighbor_distances[edge_idx].first;
-              const auto neighbor_weight = neighbor_distances[edge_idx].second;
 
               // if another thread is building the candidate_index at the moment, than its neighbor list contains self references
               if(candidate_index == neighbor_index)
@@ -704,12 +698,37 @@ class EvenRegularGraphBuilder {
 
               // take the neighbor with the best distance to the new vertex, which might already be in its edge list
               const auto neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(neighbor_index), dist_func_param);
-              float distortion = (candidate_weight + neighbor_distance) - neighbor_weight;   // version D in the paper
-              if(distortion < best_distortion) {
-                best_distortion = distortion;
-                new_neighbor_index = neighbor_index;
-                new_neighbor_distance = neighbor_distance;
-              }
+              float distortion = (candidate_weight + neighbor_distance) - neighbor_weights[edge_idx];   
+
+              // count how many neighbors of neighbor_index have a better neighbor_distance
+              size_t better_neighbors = 0;
+              const auto neighbor_neighbor_weights = graph.getNeighborWeights(neighbor_index);
+              for (size_t neighbor_edge_idx = 0; neighbor_edge_idx < edges_per_vertex; neighbor_edge_idx++) 
+                if(neighbor_neighbor_weights[neighbor_edge_idx] < neighbor_distance) 
+                  better_neighbors++;
+
+              // store neighbor_index, neighbor_distance, distortion, and better_neighbors in vector
+              neighbor_infos.emplace_back(neighbor_index, neighbor_distance, distortion, better_neighbors);
+            }
+            
+            // Find the best neighbor based on the collected information
+            if (!neighbor_infos.empty()) {              
+              
+              // Sort by better_neighbors (primary criteria) and then by distortion (secondary criteria)
+              std::sort(neighbor_infos.begin(), neighbor_infos.end(), 
+                [](const NeighborInfo& a, const NeighborInfo& b) {
+
+                  // First compare by better_neighbors - prefer the one with less better neighbors
+                  if (a.better_neighbors != b.better_neighbors)
+                    return a.better_neighbors < b.better_neighbors;
+
+                  // If better_neighbors is the same, compare by distortion
+                  return a.distortion < b.distortion;
+                });
+                
+              // The best neighbor is the first one after sorting
+              new_neighbor_index = neighbor_infos[0].neighbor_index;
+              new_neighbor_distance = neighbor_infos[0].neighbor_distance;
             }
           }
 
@@ -744,10 +763,6 @@ class EvenRegularGraphBuilder {
         }
 
         check_rng_phase = false;
-        if(this->optimizationTarget_ == SelfJoins && new_neighbors.size() < edges_per_vertex) {
-          std::fprintf(stderr, "SelfJoins: could find only %zu good neighbors for the new vertex %u need %u\n", new_neighbors.size(), internal_index, edges_per_vertex);
-          std::abort();
-        }
       }
       
       if(new_neighbors.size() < edges_per_vertex) {
