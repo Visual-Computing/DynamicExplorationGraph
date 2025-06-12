@@ -33,29 +33,6 @@ static float test_approx_anns(const deglib::search::SearchGraph& graph, const st
                          const deglib::FeatureRepository& query_repository, const std::vector<std::unordered_set<uint32_t>>& ground_truth, 
                          const float eps, const uint32_t k, const uint32_t test_size, const uint32_t threads, const deglib::graph::Filter* filter = nullptr)
 {
-
-    // uint32_t correct = 0;
-    // for (size_t i = 0; i < test_size; i++)
-    // {
-    //     auto query = reinterpret_cast<const std::byte*>(query_repository.getFeature(uint32_t(i)));
-    //     auto result_queue = graph.search(entry_vertex_indices, query, eps, k);
-
-    //     if (result_queue.size() != k) {
-    //         fmt::print(stderr, "ANNS with k={} got only {} results for query {}\n", k, result_queue.size(), i);
-    //         abort();
-    //     }
-
-    //     const auto& gt = ground_truth[i];
-    //     while (result_queue.empty() == false)
-    //     {
-    //         const auto& result = result_queue.top();
-    //         const auto external_id = graph.getExternalLabel(result.getInternalIndex());
-    //         if (gt.find(external_id) != gt.end()) correct++;
-    //         result_queue.pop();
-    //     }
-    // }   
-    // return 1.0f * correct / (test_size*k);
-
     auto corrects = std::vector<float>(threads);
     deglib::concurrent::parallel_for(0, test_size, threads, [&] (size_t i, size_t thread_id) {
 
@@ -88,26 +65,38 @@ static float test_approx_anns(const deglib::search::SearchGraph& graph, const st
 }
 
 static float test_approx_explore(const deglib::search::SearchGraph& graph, const std::vector<std::vector<uint32_t>>& entry_vertex_indices, const boolean include_entry,
-                                  const std::vector<std::unordered_set<uint32_t>>& ground_truth, const uint32_t k, const uint32_t max_distance_count)
+                                  const std::vector<std::unordered_set<uint32_t>>& ground_truth, const uint32_t k, const uint32_t max_distance_count,
+                                  const uint32_t threads, const deglib::graph::Filter* filter = nullptr)
 {    
-    size_t total = 0;
-    size_t correct = 0;
-    for (uint32_t i = 0; i < entry_vertex_indices.size(); i++) {
-        const auto entry_vertex_index = entry_vertex_indices[i][0];
-        auto result_queue = graph.explore(entry_vertex_index, k, include_entry, max_distance_count);
+    auto corrects = std::vector<float>(threads);
+    deglib::concurrent::parallel_for(0, entry_vertex_indices.size(), threads, [&] (size_t i, size_t thread_id) {
 
-        total += k;
+        const auto entry_vertex_index = entry_vertex_indices[i][0];
+        auto result_queue = graph.explore(entry_vertex_index, k, include_entry, max_distance_count); // TODO missing filter
+
+        if (result_queue.size() != k) {
+            fmt::print(stderr, "Exploration with k={} got only {} results for query {}\n", k, result_queue.size(), i);
+            abort();
+        }
+
+        uint32_t correct = 0;
         const auto& gt = ground_truth[i];
         while (result_queue.empty() == false)
         {
-            const auto internal_index = result_queue.top().getInternalIndex();
-            const auto external_id = graph.getExternalLabel(internal_index);
+            const auto& result = result_queue.top();
+            const auto external_id = graph.getExternalLabel(result.getInternalIndex());
             if (gt.find(external_id) != gt.end()) correct++;
             result_queue.pop();
         }
-    }
 
-    return 1.0f * correct / total;
+        corrects[thread_id] += correct;
+    });
+
+    // calc recall
+    float total_correct = 0;
+    for (size_t i = 0; i < threads; i++) 
+        total_correct += corrects[i];
+    return total_correct / (entry_vertex_indices.size()*k);
 }
 
 static void test_graph_anns(const deglib::search::SearchGraph& graph, const deglib::FeatureRepository& query_repository, const uint32_t* ground_truth, const uint32_t ground_truth_dims, const uint32_t repeat, const uint32_t threads, const uint32_t k, const deglib::graph::Filter* filter = nullptr)
@@ -127,9 +116,9 @@ static void test_graph_anns(const deglib::search::SearchGraph& graph, const degl
     // std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.2f, 0.4f, 0.8f  };                    // UQ-V
     // std::vector<float> eps_parameter = { 0.00f, 0.03f, 0.05f, 0.07f, 0.09f, 0.12f, 0.2f, 0.3f, };    // audio
     // std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f  };       // SIFT1M k=100
-    // std::vector<float> eps_parameter = { 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f, 0.4f };             // GloVe
+    std::vector<float> eps_parameter = { 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f, 0.4f };             // GloVe
     // std::vector<float> eps_parameter = { 0.01f, 0.02f, 0.03f, 0.04f, 0.06f, 0.1f, 0.2f, };           // Deep1M
-    std::vector<float> eps_parameter = { 0.01f, 0.02f, 0.05f };           // ccnews-small
+    // std::vector<float> eps_parameter = { 0.01f, 0.02f, 0.05f };           // ccnews-small
 
     fmt::print("Compute TOP{} for eps {}us\n", k, fmt::join(eps_parameter, ", "));
     const auto test_size = uint32_t(query_repository.size());
@@ -151,7 +140,7 @@ static void test_graph_anns(const deglib::search::SearchGraph& graph, const degl
     fmt::print("Max memory usage: {} Mb\n", getPeakRSS() / 1000000);
 }
 
-static void test_graph_explore(const deglib::search::SearchGraph& graph, const uint32_t query_count, const uint32_t* ground_truth, const uint32_t ground_truth_dims, const uint32_t* entry_vertex_labels, const uint32_t entry_vertex_dims, const boolean include_entry, const uint32_t repeat, const uint32_t k)
+static void test_graph_explore(const deglib::search::SearchGraph& graph, const uint32_t query_count, const uint32_t* ground_truth, const uint32_t ground_truth_dims, const uint32_t* entry_vertex_labels, const uint32_t entry_vertex_dims, const boolean include_entry, const uint32_t repeat, const uint32_t k, const uint32_t threads, const deglib::graph::Filter* filter = nullptr)
 {
     if (ground_truth_dims < k)
     {
@@ -186,7 +175,7 @@ static void test_graph_explore(const deglib::search::SearchGraph& graph, const u
             StopW stopw = StopW();
             float recall = 0;
             for (size_t r = 0; r < repeat; r++) 
-                recall = deglib::benchmark::test_approx_explore(graph, entry_vertex_indices, include_entry, answer, k, max_distance_count);
+                recall = deglib::benchmark::test_approx_explore(graph, entry_vertex_indices, include_entry, answer, k, max_distance_count, threads, filter);
             uint64_t search_time_us = stopw.getElapsedTimeMicro();
             uint64_t time_us_per_query = search_time_us / (query_count * repeat);
 
