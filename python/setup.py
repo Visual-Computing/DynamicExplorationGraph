@@ -132,7 +132,30 @@ class CMakeBuild(build_ext):
         # In this example, we pass in the version to C++. You might not need to.
         # cmake_args += [f"-DEXAMPLE_VERSION_INFO={self.distribution.get_version()}"]
 
-        if self.compiler.compiler_type != "msvc":
+        print('self.compiler.compiler_type=', self.compiler.compiler_type)
+        if self.compiler.compiler_type == "msvc":
+
+            # Single config generators are handled "normally"
+            single_config = any(x in cmake_generator for x in {"NMake", "Ninja"})
+
+            # CMake allows an arch-in-generator style for backward compatibility
+            contains_arch = any(x in cmake_generator for x in {"ARM", "Win64"})
+
+
+            # Specify the arch if using MSVC generator, but only if it doesn't
+            # contain a backward-compatibility arch spec already in the
+            # generator name.
+            if not single_config and not contains_arch:
+                cmake_args += ["-A", PLAT_TO_CMAKE[self.plat_name]]
+
+            # Multi-config generators have a different way to specify configs
+            if not single_config:
+                cmake_args += [
+                    f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_{cfg.upper()}={extdir}"
+                ]
+                build_args += ["--config", cfg]
+            print('cmake_args=', cmake_args)
+        else:
             # Using Ninja-build since it a) is available as a wheel and b)
             # multi-threads automatically. MSVC would require all variables be
             # exported for Ninja to pick it up, which is a little tricky to do.
@@ -150,26 +173,6 @@ class CMakeBuild(build_ext):
                     ]
                 except ImportError:
                     pass
-
-        else:
-            # Single config generators are handled "normally"
-            single_config = any(x in cmake_generator for x in {"NMake", "Ninja"})
-
-            # CMake allows an arch-in-generator style for backward compatibility
-            contains_arch = any(x in cmake_generator for x in {"ARM", "Win64"})
-
-            # Specify the arch if using MSVC generator, but only if it doesn't
-            # contain a backward-compatibility arch spec already in the
-            # generator name.
-            if not single_config and not contains_arch:
-                cmake_args += ["-A", PLAT_TO_CMAKE[self.plat_name]]
-
-            # Multi-config generators have a different way to specify configs
-            if not single_config:
-                cmake_args += [
-                    f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_{cfg.upper()}={extdir}"
-                ]
-                build_args += ["--config", cfg]
 
         if sys.platform.startswith("darwin"):
             # Cross-compile support for macOS - respect ARCHFLAGS if set
