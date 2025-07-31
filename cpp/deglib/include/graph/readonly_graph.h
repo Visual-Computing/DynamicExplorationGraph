@@ -343,6 +343,9 @@ public:
         feature_space_(feature_space),
         visited_list_pool_( std::make_unique<VisitedListPool>(1, max_vertex_count)) { 
 
+    if (edges_per_vertex % 2 != 0) 
+      throw std::invalid_argument("edges_per_vertex must be even.");
+
     label_to_index_.reserve(max_vertex_count);
   }
 

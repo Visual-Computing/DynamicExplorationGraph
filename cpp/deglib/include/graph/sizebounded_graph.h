@@ -344,21 +344,11 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
         feature_space_(feature_space),
         visited_list_pool_( std::make_unique<VisitedListPool>(1, max_vertex_count)) { 
 
+    if (edges_per_vertex % 2 != 0) 
+      throw std::invalid_argument("edges_per_vertex must be even.");
+  
     label_to_index_.reserve(max_vertex_count);  
   }
-  //     : edges_per_vertex_(edges_per_vertex), 
-  //       max_vertex_count_(max_vertex_count), 
-  //       feature_space_(feature_space),
-  //       search_func_(getSearchFunction(feature_space)), explore_func_(getExploreFunction(feature_space)),
-  //       feature_byte_size_(uint16_t(feature_space.get_data_size())), 
-  //       byte_size_per_vertex_(compute_aligned_byte_size_per_vertex(edges_per_vertex, uint16_t(feature_space.get_data_size()), object_alignment)), 
-  //       neighbor_indices_offset_(uint32_t(feature_space.get_data_size())),
-  //       neighbor_weights_offset_(neighbor_indices_offset_ + uint32_t(edges_per_vertex) * sizeof(uint32_t)),
-  //       external_label_offset_(neighbor_weights_offset_ + uint32_t(edges_per_vertex) * sizeof(float)), 
-  //       vertices_(std::make_unique<std::byte[]>(size_t(max_vertex_count) * byte_size_per_vertex_ + object_alignment)), 
-  //       vertices_memory_(compute_aligned_pointer(vertices_, object_alignment)), 
-  //       label_to_index_(max_vertex_count) {
-  // }
 
   /**
    *  Load from file
