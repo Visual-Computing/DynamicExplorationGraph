@@ -452,6 +452,8 @@ PYBIND11_MODULE(deglib_cpp, m) {
     .def("get_num_remove_entries", &deglib::builder::EvenRegularGraphBuilder::getNumRemoveEntries)
     .def("set_thread_count", &deglib::builder::EvenRegularGraphBuilder::setThreadCount)
     .def("set_batch_size", &deglib::builder::EvenRegularGraphBuilder::setBatchSize)
+    .def("get_batch_size", &deglib::builder::EvenRegularGraphBuilder::getBatchSize)
+
     .def("build", [] (deglib::builder::EvenRegularGraphBuilder& builder, std::function<void(deglib::builder::BuilderStatus&)> callback, const bool infinite) -> deglib::graph::MutableGraph& {
       return builder.build(callback, infinite);
     })

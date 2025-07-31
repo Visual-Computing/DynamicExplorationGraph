@@ -279,8 +279,8 @@ class EvenRegularGraphBuilder {
 
     EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, const uint32_t swaps) 
       : EvenRegularGraphBuilder(graph, rnd, OptimizationTarget::StreamingData,
-                                graph.getEdgesPerVertex(), 0.2f, 
-                                graph.getEdgesPerVertex(), 0.001f, 
+                                graph.getEdgesPerVertex(), 0.1f, 
+                                0, 0.0f, 
                                 5, swaps, swaps) {
     }
 
@@ -319,7 +319,14 @@ class EvenRegularGraphBuilder {
     }
 
     /**
-     * Set the thread count
+     * Set the number of threads used to extend the graph during building.
+     * 
+     * When the thread count is greater than 1 and the optimization target is not StreamingData,
+     * the builder will utilize multiple threads to add elements to the graph in parallel.
+     * By default, all available CPU cores/threads are used unless specified.
+     * Note: The order in which elements are added is not guaranteed when using multiple threads.
+     * 
+     * @param thread_count Number of threads which are used to extend the graph.
      */
     void setThreadCount(uint32_t thread_count) {
       extend_thread_count = thread_count;
@@ -327,18 +334,42 @@ class EvenRegularGraphBuilder {
     }
 
     /**
-     * Set the batch size when adding multiple elements to the graph.analysis
+     * When adding multiple elements to the graph the builder processes them in batches.
+     * The elements in a batch are only available after the batch is fully processed.
+     * 
+     * Depending on the thread count, optimization target and the desired latency 
+     * (how fast changed are added to the graph), specify the batch size should be considered.
+     * 
+     * e.g. 
+     * thread count = 1 and batch size = 1: low throuput, medium latency, order of elements is guaranteed
+     * thread count > 1 and batch size = 1: high throuput, low latency, order of elements is not guaranteed
+     * thread count > 1 and batch size > 1: highest throuput, highest latency, order of elements is not guaranteed
+     * * Please note that the optimization target StreamingData only uses a thread count of 1.
+     * 
      * The batch size is calculated as:
      *   batch_size = thread_count * tasks_per_batch * task_size
      * where
      *   thread_count = number of threads which are used to extend the graph
      *   tasks_per_batch = number of tasks in each batch
      *   task_size = number of elements each thread processes in one task
+     * 
+     * A low tasks_per_batch improves the latency but reduces the throughput.
+     * Therefore it is recommended to use a higher task_size value.
+     * 
+     * @param tasks_per_batch Number of tasks for each thread in one batch. (default: 32)
+     * @param task_size Number of elements each thread processes in one task. (default: 10)
      */
     void setBatchSize(uint32_t tasks_per_batch, uint32_t task_size) {
       extend_thread_task_size = task_size;
       extend_thread_task_count = tasks_per_batch;
       extend_batch_size = extend_thread_count * extend_thread_task_count * extend_thread_task_size;
+    }
+
+    /*
+     * Get the current batch size.
+     */
+    uint32_t getBatchSize() const {
+      return extend_batch_size;
     }
 
   private:

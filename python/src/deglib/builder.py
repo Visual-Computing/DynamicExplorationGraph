@@ -28,9 +28,11 @@ class OptimizationTarget(enum.IntEnum):
 
 class EvenRegularGraphBuilder:
     def __init__(
-            self, graph: MutableGraph, rng: Mt19937 | None = None, optimization_target: OptimizationTarget = OptimizationTarget.LowLID,
-            extend_k: Optional[int] = None, extend_eps: float = 0.2, improve_k: Optional[int] = None,
-            improve_eps: float = 0.001, max_path_length: int = 10, swap_tries: int = 3, additional_swap_tries: int = 3
+            self, graph: MutableGraph, rng: Mt19937 | None = None,
+            optimization_target: OptimizationTarget = OptimizationTarget.LowLID,
+            extend_k: int = 0, extend_eps: float = 0.1,
+            improve_k: int = 0, improve_eps: float = 0.0,
+            max_path_length: int = 5, swap_tries: int = 0, additional_swap_tries: int = 0
     ):
         """
         Create an EvenRegularBuilder that can be used to construct a graph.
@@ -48,9 +50,7 @@ class EvenRegularGraphBuilder:
         """
         if rng is None:
             rng = Mt19937()
-        if improve_k is None:
-            improve_k = graph.get_edges_per_vertex()
-        if extend_k is None:
+        if extend_k < graph.get_edges_per_vertex():
             extend_k = graph.get_edges_per_vertex()
         self.builder_cpp = deglib_cpp.EvenRegularGraphBuilder(
             graph.to_cpp(), rng.to_cpp(), optimization_target.to_cpp(), extend_k, extend_eps, improve_k, improve_eps, max_path_length,
@@ -113,20 +113,47 @@ class EvenRegularGraphBuilder:
 
     def set_thread_count(self, thread_count: int):
         """
-        Set the number of thread used to build the graph.
+        Set the number of threads used to extend the graph during building.
 
-        :param thread_count: number of thread used to build the graph
+        When the thread count is greater than 1 and the optimization target is not StreamingData,
+        the builder will utilize multiple threads to add elements to the graph in parallel.
+        By default, all available CPU cores/threads are used unless specified.
+        Note: The order in which elements are added is not guaranteed when using multiple threads.
+
+        :param thread_count: Number of threads to use for graph extension.
+        :type thread_count: int
+        :return: None
         """
         return self.builder_cpp.set_thread_count(thread_count)
 
-    def set_batch_size(self, batch_size: int):
+    def set_batch_size(self, tasks_per_batch: int, task_size: int):
         """
-        During construction several thread can build the graph. To minimize synchronization batches are used.
-        The batch size defines how many vertices should be added at once without calling the callback of the build method.
+        Set the batch size parameters for parallel graph construction.
 
-        :param batch_size: size of the batch used to build the graph
+        The builder processes elements in batches to minimize synchronization between threads.
+        The total batch size is calculated as:
+            batch_size = thread_count * tasks_per_batch * task_size
+
+        Effects of thread count and batch size:
+          - thread_count = 1 and batch_size = 1: low throughput, medium latency, order of elements is guaranteed
+          - thread_count > 1 and batch_size = 1: high throughput, low latency, order of elements is not guaranteed
+          - thread_count > 1 and batch_size > 1: highest throughput, highest latency, order of elements is not guaranteed
+
+        Note: The optimization target `StreamingData` always uses a thread count of 1.
+
+        :param tasks_per_batch: Number of tasks for each thread in one batch (default: 32).
+        :type tasks_per_batch: int
+        :param task_size: Number of elements each thread processes in one task (default: 10).
+        :type task_size: int
+        :return: None
         """
-        return self.builder_cpp.set_batch_size(batch_size)
+        return self.builder_cpp.set_batch_size(tasks_per_batch, task_size)
+
+    def get_batch_size(self) -> int:
+        """
+        :returns: the batch size used for parallel graph construction.
+        """
+        return self.builder_cpp.get_batch_size()
 
     def build(
             self, callback: Callable[[deglib_cpp.BuilderStatus], None] | str | None = None,
