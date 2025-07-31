@@ -179,8 +179,9 @@ def test_has_path(conf: Configuration):
 @pytest.mark.parametrize('conf', configurations)
 def test_explore(conf: Configuration):
     k = 10
+    include_entry = True
     entry_vertex_index = random.randint(0, conf.samples-1)
-    result = conf.graph.explore(entry_vertex_index, k, max_distance_computation_count=k*10)
+    result = conf.graph.explore(entry_vertex_index, k, include_entry, max_distance_computation_count=k*10)
     assert len(result) == k
     assert all(isinstance(od, deglib.search.ObjectDistance) for od in result)
 
