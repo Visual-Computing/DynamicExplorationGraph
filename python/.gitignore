@@ -7,3 +7,5 @@ __pycache__
 /cmake-build*
 *.egg-info
 *.so
+/.pynb_checkpoints
+*.pyd
