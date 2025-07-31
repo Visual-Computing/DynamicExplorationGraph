@@ -22,7 +22,7 @@ authors = [
 ]
 description = "Python bindings for the Dynamic Exploration Graph library by Nico Hezel"
 readme = "README.md"
-license = {file = "LICENSE"}
+license-files = ["LICENSE"]
 keywords = ["anns-search", "graph", "python"]
 
 classifiers = [
