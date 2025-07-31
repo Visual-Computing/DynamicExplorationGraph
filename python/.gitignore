@@ -1,3 +1,4 @@
+/venv*
 /deglib.egg-info
 __pycache__
 /lib
