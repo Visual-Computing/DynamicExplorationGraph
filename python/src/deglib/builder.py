@@ -186,8 +186,8 @@ class EvenRegularGraphBuilder:
 def build_from_data(
         data: np.ndarray, labels: Iterable[int] | None = None, edges_per_vertex: int = 32, capacity: int = -1,
         metric: Metric = Metric.L2, rng: Mt19937 | None = None, optimization_target: OptimizationTarget = OptimizationTarget.LowLID,
-        extend_k: Optional[int] = None, extend_eps: float = 0.2,
-        improve_k: Optional[int] = None, improve_eps: float = 0.001, max_path_length: int = 10,
+        extend_k: int = 0, extend_eps: float = 0.2,
+        improve_k: int = 0, improve_eps: float = 0.001, max_path_length: int = 10,
         swap_tries: int = 3, additional_swap_tries: int = 3,
         callback: Callable[[deglib_cpp.BuilderStatus], None] | str | None = None
 ) -> SizeBoundedGraph:
