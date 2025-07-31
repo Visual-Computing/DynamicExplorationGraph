@@ -385,7 +385,7 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
     return this->edges_per_vertex_;
   }
 
-  const deglib::SpaceInterface<float>& getFeatureSpace() const override {
+  const deglib::FloatSpace& getFeatureSpace() const override {
     return this->feature_space_;
   }
 
@@ -447,7 +447,7 @@ public:
   }
 
   inline const bool hasVertex(const uint32_t external_label) const override {
-    return label_to_index_.contains(external_label);
+    return label_to_index_.find(external_label) != label_to_index_.end();
   }
 
   inline const bool hasEdge(const uint32_t internal_index, const uint32_t neighbor_index) const override {

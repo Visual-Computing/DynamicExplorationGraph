@@ -270,10 +270,6 @@ PYBIND11_MODULE(deglib_cpp, m) {
     .def("__getitem__", [](const deglib::search::ResultSet& rs, std::size_t index) { return rs[index]; })
   ;
 
-  // TODO: SpaceInterface in c++ is general over datatype, here we use float always
-  py::class_<deglib::SpaceInterface<float>>(m, "SpaceInterface")
-      .def("dim", &deglib::SpaceInterface<float>::dim);
-
   py::class_<deglib::graph::Filter>(m, "Filter")
       .def(py::init<const int*, size_t, size_t, size_t>());
 
@@ -295,7 +291,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
       .def(py::init<const uint32_t, const uint8_t, const deglib::FloatSpace>())
       .def("size", &deglib::graph::ReadOnlyGraph::size)
       .def("get_feature_space",
-           [](const deglib::graph::ReadOnlyGraph &g) -> const deglib::SpaceInterface<float> & { return g.getFeatureSpace(); },
+           [](const deglib::graph::ReadOnlyGraph &g) -> const deglib::FloatSpace & { return g.getFeatureSpace(); },
            py::return_value_policy::reference)
       .def("get_feature_vector",
            [](const deglib::graph::ReadOnlyGraph &g, const uint32_t internal_idx) {
@@ -336,7 +332,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
     .def(py::init<const uint32_t, const uint8_t, const deglib::FloatSpace>())
     .def("size", &deglib::graph::SizeBoundedGraph::size)
     .def("get_feature_space",
-         [](const deglib::graph::SizeBoundedGraph &g) -> const deglib::SpaceInterface<float> & { return g.getFeatureSpace(); },
+         [](const deglib::graph::SizeBoundedGraph &g) -> const deglib::FloatSpace & { return g.getFeatureSpace(); },
          py::return_value_policy::reference)
     .def("get_feature_vector",
          [](const deglib::graph::SizeBoundedGraph &g, const uint32_t internal_idx) {

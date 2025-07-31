@@ -94,7 +94,7 @@ class SearchGraph
     virtual ~SearchGraph() = default;
     virtual const uint32_t size() const = 0;
     virtual const uint8_t getEdgesPerVertex() const = 0;
-    virtual const deglib::SpaceInterface<float>& getFeatureSpace() const = 0;
+    virtual const deglib::FloatSpace& getFeatureSpace() const = 0;
 
     virtual const uint32_t getExternalLabel(const uint32_t internal_index) const = 0;
     virtual const uint32_t getInternalIndex(const uint32_t external_label) const = 0;

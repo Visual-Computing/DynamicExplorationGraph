@@ -631,20 +631,7 @@ namespace deglib {
     template <typename MTYPE>
     using DISTFUNC = MTYPE (*)(const void*, const void*, const void*);
 
-    template <typename MTYPE>
-    class SpaceInterface
-    {
-    public:
-        virtual const size_t dim() const = 0;
-        virtual const deglib::Metric metric() const = 0;
-        virtual const size_t get_data_size() const = 0;
-        virtual const DISTFUNC<MTYPE> get_dist_func() const = 0;
-        virtual const void* get_dist_func_param() const = 0;
-		virtual ~SpaceInterface() = default;
-    };
-
-
-    class FloatSpace : public SpaceInterface<float> {
+    class FloatSpace  {
 
         static DISTFUNC<float> select_dist_func(const size_t dim, const deglib::Metric metric) {
             DISTFUNC<float> distfunc = deglib::distances::L2Float::compare;

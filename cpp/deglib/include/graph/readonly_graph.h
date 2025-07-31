@@ -410,7 +410,7 @@ public:
     return edges_per_vertex_;
   }
 
-  const deglib::SpaceInterface<float>& getFeatureSpace() const override {
+  const deglib::FloatSpace& getFeatureSpace() const override {
     return this->feature_space_;
   }
 
