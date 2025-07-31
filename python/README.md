@@ -48,6 +48,7 @@ This will compile the C++ code and install deglib into your virtual environment,
 
 To execute all tests.
 ```shell
+pip install pytest
 pytest
 ```
 
@@ -87,7 +88,7 @@ graph.save_graph("/path/to/graph.deg")
 rd_graph = deglib.graph.load_readonly_graph("/path/to/graph.deg")
 ```
 
-*Note: Threaded building is not supported for lid == LID.Unknown (the default). Use `lid=deglib.builder.LID.High` or `lid=deglib.builder.LID.Low` in `build_from_data()` for multithreaded building*
+*Note: Threaded building is not supported for lid == OptimizationTarget.LowLID (the default). Use `lid=deglib.builder.LID.High` or `lid=deglib.builder.LID.Low` in `build_from_data()` for multithreaded building*
 
 ### Searching the Graph
 ```python

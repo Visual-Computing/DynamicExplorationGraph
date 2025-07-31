@@ -74,7 +74,7 @@ class Configuration:
             raise ValueError(f'Unsupported metric: {metric}')
 
         size_bounded_graph = deglib.builder.build_from_data(
-            data, edges_per_vertex=edges_per_vertex, metric=metric, lid=deglib.builder.LID.Low,
+            data, edges_per_vertex=edges_per_vertex, metric=metric, optimization_target=deglib.builder.OptimizationTarget.LowLID,
         )
 
         graph_path = get_tmp_graph_file(samples, dims)

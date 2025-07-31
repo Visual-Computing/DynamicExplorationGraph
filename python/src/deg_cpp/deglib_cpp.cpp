@@ -416,13 +416,13 @@ PYBIND11_MODULE(deglib_cpp, m) {
       .def(py::init<std::uint_fast32_t>());
 
   // even regular builder
-  py::enum_<deglib::builder::LID>(m, "LID")
-    .value("Unknown", deglib::builder::LID::Unknown)
-    .value("High", deglib::builder::LID::High)
-    .value("Low", deglib::builder::LID::Low);
+  py::enum_<deglib::builder::OptimizationTarget>(m, "OptimizationTarget")
+    .value("StreamingData", deglib::builder::OptimizationTarget::StreamingData)
+    .value("HighLID", deglib::builder::OptimizationTarget::HighLID)
+    .value("LowLID", deglib::builder::OptimizationTarget::LowLID);
 
   py::class_<deglib::builder::EvenRegularGraphBuilder>(m, "EvenRegularGraphBuilder")
-    .def(py::init<deglib::graph::MutableGraph&, std::mt19937&, const deglib::builder::LID, const uint8_t, const float, const uint8_t, const float, const uint8_t, const uint32_t, const uint32_t>())
+    .def(py::init<deglib::graph::MutableGraph&, std::mt19937&, const deglib::builder::OptimizationTarget, const uint8_t, const float, const uint8_t, const float, const uint8_t, const uint32_t, const uint32_t>())
     .def("add_entry", [] (deglib::builder::EvenRegularGraphBuilder& builder, const py::array_t<uint32_t, py::array::c_style>& label, const py::array& feature) {
       // label buffer
       const auto label_access = label.unchecked<1>();

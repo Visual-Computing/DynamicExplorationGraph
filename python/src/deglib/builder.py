@@ -12,23 +12,23 @@ from .graph import MutableGraph, SizeBoundedGraph
 from .utils import assure_array, InvalidShapeException
 
 
-class LID(enum.IntEnum):
-    Unknown = deglib_cpp.LID.Unknown
-    High = deglib_cpp.LID.High
-    Low = deglib_cpp.LID.Low
+class OptimizationTarget(enum.IntEnum):
+    StreamingData = deglib_cpp.OptimizationTarget.StreamingData
+    HighLID = deglib_cpp.OptimizationTarget.HighLID
+    LowLID = deglib_cpp.OptimizationTarget.LowLID
 
-    def to_cpp(self) -> deglib_cpp.LID:
-        if self == LID.Unknown:
-            return deglib_cpp.LID.Unknown
-        elif self == LID.High:
-            return deglib_cpp.LID.High
-        elif self == LID.Low:
-            return deglib_cpp.LID.Low
+    def to_cpp(self) -> deglib_cpp.OptimizationTarget:
+        if self == OptimizationTarget.StreamingData:
+            return deglib_cpp.OptimizationTarget.StreamingData
+        elif self == OptimizationTarget.HighLID:
+            return deglib_cpp.OptimizationTarget.HighLID
+        elif self == OptimizationTarget.LowLID:
+            return deglib_cpp.OptimizationTarget.LowLID
 
 
 class EvenRegularGraphBuilder:
     def __init__(
-            self, graph: MutableGraph, rng: Mt19937 | None = None, lid: LID = LID.Unknown,
+            self, graph: MutableGraph, rng: Mt19937 | None = None, optimization_target: OptimizationTarget = OptimizationTarget.LowLID,
             extend_k: Optional[int] = None, extend_eps: float = 0.2, improve_k: Optional[int] = None,
             improve_eps: float = 0.001, max_path_length: int = 10, swap_tries: int = 3, additional_swap_tries: int = 3
     ):
@@ -37,7 +37,7 @@ class EvenRegularGraphBuilder:
 
         :param graph: The preallocated graph to build
         :param rng: An rng generator. Will be constructed, if set to None (default)
-        :param lid: TODO
+        :param optimization_target: TODO
         :param extend_k: TODO
         :param extend_eps: TODO
         :param improve_k: TODO
@@ -53,12 +53,12 @@ class EvenRegularGraphBuilder:
         if extend_k is None:
             extend_k = graph.get_edges_per_vertex()
         self.builder_cpp = deglib_cpp.EvenRegularGraphBuilder(
-            graph.to_cpp(), rng.to_cpp(), lid.to_cpp(), extend_k, extend_eps, improve_k, improve_eps, max_path_length,
+            graph.to_cpp(), rng.to_cpp(), optimization_target.to_cpp(), extend_k, extend_eps, improve_k, improve_eps, max_path_length,
             swap_tries, additional_swap_tries
         )
         self.graph = graph
         self.rng = rng
-        self.lid = lid
+        self.optimization_target = optimization_target
 
     def add_entry(self, external_label: int | Iterable[int] | np.ndarray, feature: np.ndarray):
         """
@@ -158,8 +158,9 @@ class EvenRegularGraphBuilder:
 
 def build_from_data(
         data: np.ndarray, labels: Iterable[int] | None = None, edges_per_vertex: int = 32, capacity: int = -1,
-        metric: Metric = Metric.L2, rng: Mt19937 | None = None, lid: LID = LID.Unknown, extend_k: Optional[int] = None,
-        extend_eps: float = 0.2, improve_k: Optional[int] = None, improve_eps: float = 0.001, max_path_length: int = 10,
+        metric: Metric = Metric.L2, rng: Mt19937 | None = None, optimization_target: OptimizationTarget = OptimizationTarget.LowLID,
+        extend_k: Optional[int] = None, extend_eps: float = 0.2,
+        improve_k: Optional[int] = None, improve_eps: float = 0.001, max_path_length: int = 10,
         swap_tries: int = 3, additional_swap_tries: int = 3,
         callback: Callable[[deglib_cpp.BuilderStatus], None] | str | None = None
 ) -> SizeBoundedGraph:
@@ -176,7 +177,7 @@ def build_from_data(
     :param edges_per_vertex: The number of edges per vertex for the graph. Defaults to 32.
     :param metric: The metric to measure distances between features. Defaults to L2-Metric.
     :param rng: An rng generator. Will be constructed, if set to None (default)
-    :param lid: TODO
+    :param optimization_target: TODO
     :param extend_k: TODO
     :param extend_eps: TODO
     :param improve_k: TODO
@@ -193,7 +194,7 @@ def build_from_data(
         capacity = data.shape[0]
     graph = SizeBoundedGraph.create_empty(capacity, data.shape[1], edges_per_vertex, metric)
     builder = EvenRegularGraphBuilder(
-        graph, rng, lid=lid, extend_k=extend_k, extend_eps=extend_eps, improve_k=improve_k,
+        graph, rng, optimization_target=optimization_target, extend_k=extend_k, extend_eps=extend_eps, improve_k=improve_k,
         improve_eps=improve_eps, max_path_length=max_path_length, swap_tries=swap_tries,
         additional_swap_tries=additional_swap_tries
     )
