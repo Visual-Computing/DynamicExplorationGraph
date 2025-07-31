@@ -1,6 +1,5 @@
 import enum
 from abc import ABC, abstractmethod
-from typing import Self
 
 import numpy as np
 
@@ -19,6 +18,8 @@ class Metric(enum.IntEnum):
             return deglib_cpp.Metric.InnerProduct
         elif self == Metric.L2_Uint8:
             return deglib_cpp.Metric.L2_Uint8
+        else:
+            raise ValueError('unknown metric: {}'.format(self))
 
     def get_dtype(self):
         if self in (Metric.L2, Metric.InnerProduct):
@@ -54,7 +55,7 @@ class FloatSpace(SpaceInterface):
         self.float_space_cpp = float_space_cpp
 
     @classmethod
-    def create(cls, dim: int, metric: Metric) -> Self:
+    def create(cls, dim: int, metric: Metric) -> 'FloatSpace':
         """
         Create a FloatSpace.
 

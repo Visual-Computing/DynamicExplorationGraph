@@ -1,7 +1,7 @@
 import os
 import multiprocessing
 import warnings
-from typing import List, Optional, Tuple, Self, Union
+from typing import List, Optional, Tuple, Union
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -11,7 +11,7 @@ import pathlib
 
 from .distances import FloatSpace, Metric, SpaceInterface
 from .search import ResultSet, ObjectDistance, Filter
-from .utils import assure_array, InvalidShapeException, assure_contiguous
+from .utils import assure_array, InvalidShapeException
 
 
 class SearchGraph(ABC):
@@ -213,7 +213,7 @@ class ReadOnlyGraph(SearchGraph):
     def from_graph(
             cls, input_graph: SearchGraph, max_vertex_count: int = -1, feature_space: FloatSpace | None = None,
             edges_per_vertex: int = -1
-    ) -> Self:
+    ) -> 'ReadOnlyGraph':
         """
         Create a read only graph from the given graph by only keeping information that is useful for searching.
 

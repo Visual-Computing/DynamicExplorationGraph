@@ -1,4 +1,4 @@
-from typing import Self, Iterator, Union, Optional
+from typing import Iterator, Union, Optional
 import numpy as np
 
 import deglib_cpp
@@ -29,19 +29,19 @@ class ObjectDistance:
         """
         return self.distance
 
-    def __eq__(self, other: Self):
+    def __eq__(self, other: 'ObjectDistance'):
         """
         Checks equality with other. Two ObjectDistances are equal, if the found vertex and the distance is equal.
         """
         return self.object_distance_cpp == other.object_distance_cpp
 
-    def __lt__(self, other: Self):
+    def __lt__(self, other: 'ObjectDistance'):
         """
         Checks whether this vertex is closer to the query than other.
         """
         return self.object_distance_cpp < other.object_distance_cpp
 
-    def __gt__(self, other: Self):
+    def __gt__(self, other: 'ObjectDistance'):
         """
         Checks whether this vertex is further to the query than other.
         """

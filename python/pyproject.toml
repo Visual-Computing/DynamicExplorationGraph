@@ -1,6 +1,6 @@
 [build-system]
 requires = [
-    "setuptools",
+    "setuptools>=77.0",
     "pybind11==2.12.0",
     "wheel",
     "ninja",
@@ -15,7 +15,7 @@ dependencies = [
     "numpy>=2.2",
     "psutil",
 ]
-requires-python = ">= 3.11"
+requires-python = ">= 3.10"
 authors = [
     {name = "Bruno Schilling", email = "bruno.schilling@htw-berlin.de"},
     {name = "Nico Hezel"},
