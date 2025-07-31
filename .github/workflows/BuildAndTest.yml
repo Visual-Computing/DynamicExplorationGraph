@@ -38,7 +38,7 @@ jobs:
         CIBW_BUILD_FRONTEND: "pip; args: --verbose"
         CIBW_ENVIRONMENT: "FORCE_AVX2=1"
         CIBW_ENVIRONMENT_MACOS: "FORCE_AVX2=1 MACOSX_DEPLOYMENT_TARGET=11.00"
-        # CIBW_SKIP: "cp313-*"
+        CIBW_SKIP: "cp314-*"
         CIBW_SKIP: "pp*win*"
 
   build_sdist:
