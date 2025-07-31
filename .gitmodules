@@ -1,4 +1,4 @@
-[submodule "external/fmt"]
+[submodule "cpp/external/fmt"]
 	path = cpp/external/fmt
 	url = https://github.com/fmtlib/fmt
 	branch = 7.1.3
