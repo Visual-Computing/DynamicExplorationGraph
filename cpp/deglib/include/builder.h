@@ -224,6 +224,7 @@ enum OptimizationTarget {
 
 class EvenRegularGraphBuilder {
 
+    // Optimization target for the graph (StreamingData, HighLID, LowLID)
     const OptimizationTarget optimizationTarget_;
     const uint8_t extend_k_;            // k value for extending the graph
     const float extend_eps_;            // eps value for extending the graph
@@ -231,16 +232,16 @@ class EvenRegularGraphBuilder {
     const uint8_t improve_k_;           // k value for improving the graph
     const float improve_eps_;           // eps value for improving the graph
     const uint8_t max_path_length_;     // max amount of changes before canceling an improvement try
-    const uint32_t swap_tries_;
-    const uint32_t additional_swap_tries_;
+    const uint32_t swap_tries_;         // number of improvement attempts per build step 
+    const uint32_t additional_swap_tries_;  // additional improvement attempts after a successful improvement
 
-    std::mt19937& rnd_;
-    deglib::graph::MutableGraph& graph_;
+    std::mt19937& rnd_;                       // Reference to a random number generator used for randomized operations
+    deglib::graph::MutableGraph& graph_;      // Reference to the mutable graph being built and optimized
 
-    BuilderStatus build_status_;
-    std::atomic<uint64_t> manipulation_counter_;
-    std::deque<BuilderAddTask> new_entry_queue_;
-    std::queue<BuilderRemoveTask> remove_entry_queue_;
+    BuilderStatus build_status_;                        // Status of the build process (steps, added, deleted, improved, tries)
+    std::atomic<uint64_t> manipulation_counter_;        // Counter for graph manipulations (add/remove operations)
+    std::deque<BuilderAddTask> new_entry_queue_;        // Queue of new entries to be added to the graph
+    std::queue<BuilderRemoveTask> remove_entry_queue_;  // Queue of entries to be removed from the graph
 
     // the batch_size should be thread_count * thread_task_count thread_task_size
     uint32_t extend_batch_size = 32;         // the overall number of elements per batch
@@ -248,19 +249,36 @@ class EvenRegularGraphBuilder {
     uint32_t extend_thread_task_size = 32;   // each thread processed 32 elements per task
     uint32_t extend_thread_task_count = 10;  // there are 10 tasks per thread per batch
 
-
+    // Mutex for synchronizing graph extension in multi-threaded scenarios
     mutable std::mutex extend_mutex;
 
-    // should the build loop run until the stop method is called
+    // Flag to indicate if the build loop should stop
     bool stop_building_ = false;
 
   public:
 
-    EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, const OptimizationTarget lid,
+    /**
+     * @brief Constructs an EvenRegularGraphBuilder for building and optimizing a regular graph.
+     *
+     * @param graph Reference to a MutableGraph object to be built and optimized.
+     * @param rnd Reference to a random number generator (std::mt19937) used for randomized operations.
+     * @param optimization_target Optimization target, determines the graph extension strategy (StreamingData, HighLID, LowLID).
+     * @param extend_k Number of neighbors to consider when extending the graph.
+     * @param extend_eps Epsilon value for neighbor search during graph extension.
+     * @param improve_k Number of neighbors to consider when improving the graph.
+     * @param improve_eps Epsilon value for neighbor search during graph improvement.
+     * @param max_path_length Maximum number of edge swaps in a single improvement attempt (default: 5).
+     * @param swap_tries Number of improvement attempts per build step (default: 0).
+     * @param additional_swap_tries Additional improvement attempts after a successful improvement (default: 0).
+     *
+     * This constructor initializes the builder with the provided parameters and sets up internal
+     * batching and threading parameters for efficient graph construction and optimization.
+     */
+    EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, const OptimizationTarget optimization_target,
                             const uint8_t extend_k, const float extend_eps, 
                             const uint8_t improve_k, const float improve_eps, 
                             const uint8_t max_path_length = 5, const uint32_t swap_tries = 0, const uint32_t additional_swap_tries = 0) 
-      : optimizationTarget_(lid),
+      : optimizationTarget_(optimization_target),
         extend_k_(extend_k),
         extend_eps_(extend_eps),
         improve_k_(improve_k), 
@@ -277,6 +295,16 @@ class EvenRegularGraphBuilder {
           extend_batch_size = extend_thread_count * extend_thread_task_count * extend_thread_task_size;
     }
 
+    /**
+     * @brief Constructs an EvenRegularGraphBuilder with default parameters for streaming data.
+     *
+     * @param graph Reference to a MutableGraph object to be built and optimized.
+     * @param rnd Reference to a random number generator (std::mt19937) used for randomized operations.
+     * @param swaps Number of improvement attempts per build step (used for both swap_tries and additional_swap_tries).
+     *
+     * This constructor is a convenience overload for quickly creating a builder for streaming data
+     * with default extension and improvement parameters.
+     */
     EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, const uint32_t swaps) 
       : EvenRegularGraphBuilder(graph, rnd, OptimizationTarget::StreamingData,
                                 graph.getEdgesPerVertex(), 0.1f, 
@@ -284,6 +312,14 @@ class EvenRegularGraphBuilder {
                                 5, swaps, swaps) {
     }
 
+    /**
+     * @brief Constructs an EvenRegularGraphBuilder with default parameters and a single swap attempt.
+     *
+     * @param graph Reference to a MutableGraph object to be built and optimized.
+     * @param rnd Reference to a random number generator (std::mt19937) used for randomized operations.
+     *
+     * This constructor is a convenience overload for quickly creating a builder with minimal configuration.
+     */
     EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd) 
       : EvenRegularGraphBuilder(graph, rnd, 1) {
     }
@@ -375,8 +411,11 @@ class EvenRegularGraphBuilder {
   private:
 
     /**
-     * Convert the queue into a vector with ascending distance order
-     **/
+     * Convert the queue into a vector with ascending distance order.
+     *
+     * @param queue The result set queue to convert.
+     * @return A vector of ObjectDistance sorted in ascending order.
+     */
     static auto topListAscending(deglib::search::ResultSet& queue) {
       const auto size = (int32_t) queue.size();
       auto topList = std::vector<deglib::search::ObjectDistance>(size);
@@ -388,8 +427,11 @@ class EvenRegularGraphBuilder {
     }
 
     /**
-     * Convert the queue into a vector with decending distance order
-     **/
+     * Convert the queue into a vector with descending distance order.
+     *
+     * @param queue The result set queue to convert.
+     * @return A vector of ObjectDistance sorted in descending order.
+     */
     static auto topListDescending(deglib::search::ResultSet& queue) {
       const auto size = queue.size();
       auto topList = std::vector<deglib::search::ObjectDistance>(size);
@@ -401,7 +443,9 @@ class EvenRegularGraphBuilder {
     }
 
     /**
-     * Extend the graph with a new vertex. Find good existing vertex to which this new vertex gets connected.
+     * Extend the graph with a new vertex. Finds good existing vertices to which this new vertex gets connected.
+     *
+     * @param add_tasks The list of tasks describing vertices to add.
      */
     void extendGraph(const std::vector<BuilderAddTask>& add_tasks) {
       auto& graph = this->graph_;
@@ -438,6 +482,7 @@ class EvenRegularGraphBuilder {
         }
       }
 
+      // LID is unknown for streaming data, so we add the new vertices one-by-one single threaded.
       if(this->optimizationTarget_ == OptimizationTarget::StreamingData) {
         while(index < add_tasks.size()) 
           extendGraphUnknownLID(add_tasks[index++]);
@@ -458,10 +503,11 @@ class EvenRegularGraphBuilder {
       }
     }
 
-    
-
     /**
-     * The OptimizationTarget of the dataset is unknown, add the new data one-by-one single threaded.
+     * The OptimizationTarget is StreamingData and we do not know the LID, 
+     * add the new data one-by-one single threaded.
+     *
+     * @param add_task The task describing the vertex to add.
      */
     void extendGraphUnknownLID(const BuilderAddTask& add_task) {
       auto& graph = this->graph_;
@@ -570,7 +616,9 @@ class EvenRegularGraphBuilder {
     }
 
     /**
-     * The OptimizationTarget of the dataset is known and defined, use multi threading to build the graph.
+     * The OptimizationTarget is a known LID, use multi-threading to build the graph.
+     *
+     * @param add_task The task describing the vertex to add.
      */
     void extendGraphKnownLID(const BuilderAddTask& add_task) {
       auto& graph = this->graph_;
@@ -738,6 +786,8 @@ class EvenRegularGraphBuilder {
 
     /**
      * Removing a vertex from the graph.
+     *
+     * @param del_task The task describing the vertex to remove.
      */
     void reduceGraph(const BuilderRemoveTask& del_task) {
       auto& graph = this->graph_;
@@ -757,6 +807,9 @@ class EvenRegularGraphBuilder {
     /**
      * Reconnect the vertices indicated in the list of involved_indices.
      * All these vertices are missing an edge.
+     *
+     * @param involved_indices The indices of vertices missing an edge.
+     * @param improve_edges Whether to attempt to improve the new edges after reconnecting.
      */
     void restoreGraph(const std::vector<uint32_t>& involved_indices, bool improve_edges) {
       auto& graph = this->graph_;
@@ -1062,15 +1115,21 @@ class EvenRegularGraphBuilder {
     }
 
     /**
-     * Do not call this method directly instead call improve() to improve the graph.
-     *  
+     * Do not call this method directly; instead call improve() to improve the graph.
      * This is the extended part of the optimization process.
      * The method takes an array where all graph changes will be documented.
-	   * Vertex1 and vertex2 might be in a separate subgraph than vertex3 and vertex4.
-     * Thru a series of edges swaps both subgraphs should be reconnected..
-     * If those changes improve the graph this method returns true otherwise false. 
-     * 
-     * @return true if a good sequences of changes has been found
+     * Vertex1 and vertex2 might be in a separate subgraph than vertex3 and vertex4.
+     * Through a series of edge swaps both subgraphs should be reconnected.
+     * If those changes improve the graph this method returns true otherwise false.
+     *
+     * @param changes Vector to record all changes made during improvement.
+     * @param vertex1 First vertex involved in the improvement.
+     * @param vertex2 Second vertex involved in the improvement.
+     * @param vertex3 Third vertex involved in the improvement.
+     * @param vertex4 Fourth vertex involved in the improvement.
+     * @param total_gain The total gain in graph quality so far.
+     * @param steps The current recursion depth.
+     * @return true if a good sequence of changes has been found, false otherwise.
      */
     bool improveEdges(std::vector<deglib::builder::BuilderChange>& changes, uint32_t vertex1, uint32_t vertex2, uint32_t vertex3, uint32_t vertex4, float total_gain, const uint8_t steps) {
       auto& graph = this->graph_;
@@ -1298,9 +1357,12 @@ class EvenRegularGraphBuilder {
     }
 
     /**
-     * Try to improve the existing edge between the two vertices
-     * 
-     * @return true if a change could be made otherwise false
+     * Try to improve the existing edge between the two vertices.
+     *
+     * @param vertex1 The first vertex.
+     * @param vertex2 The second vertex.
+     * @param dist12 The distance between vertex1 and vertex2.
+     * @return true if a change could be made, otherwise false.
      */
     bool improveEdges(uint32_t vertex1, uint32_t vertex2, float dist12) {
 
@@ -1335,6 +1397,10 @@ class EvenRegularGraphBuilder {
 
     /**
      * Build the graph. This could be run on a separate thread in an infinite loop.
+     *
+     * @param callback A callback function to report build status.
+     * @param infinite If true, the build loop runs indefinitely.
+     * @return Reference to the built MutableGraph.
      */
     auto& build(std::function<void(deglib::builder::BuilderStatus&)> callback, const bool infinite = false) {      
       const auto edge_per_vertex = this->graph_.getEdgesPerVertex();
@@ -1402,7 +1468,12 @@ class EvenRegularGraphBuilder {
 };
 
 /**
- * Remove all edges which are not MRNG conform
+ * @brief Removes all edges from the graph that will never be in a MRNG (Monotonic Relative Neighborhood Graph).
+ *
+ * This function iterates over all vertices and their neighbors, removing any edge that does not satisfy the MRNG condition.
+ * The process is parallelized across available hardware threads for efficiency.
+ *
+ * @param graph Reference to the MutableGraph to be processed.
  */
 void remove_non_mrng_edges(deglib::graph::MutableGraph& graph) {
 
@@ -1448,7 +1519,16 @@ void remove_non_mrng_edges(deglib::graph::MutableGraph& graph) {
 
 
 /**
- * Optimize the edges of the graph.
+ * @brief Optimizes the edges of the graph using the builder's improvement routines.
+ *
+ * This function creates a builder and repeatedly attempts to improve the graph's edges for a given number of iterations.
+ * It reports progress and statistics during the optimization process.
+ *
+ * @param graph Reference to the MutableGraph to be optimized.
+ * @param k_opt Number of neighbors to consider during optimization.
+ * @param eps_opt Epsilon value for neighbor search during optimization.
+ * @param i_opt Number of improvement attempts per build step.
+ * @param iterations Number of optimization iterations to perform.
  */
 void optimze_edges(deglib::graph::MutableGraph& graph, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt, const uint32_t iterations) {
     
