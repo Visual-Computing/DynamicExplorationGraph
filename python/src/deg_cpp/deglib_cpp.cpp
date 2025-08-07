@@ -25,6 +25,14 @@ bool avx_usable() {
 #endif
 }
 
+bool avx512_usable() {
+#if defined(USE_AVX512)
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool sse_usable() {
 #if defined(USE_SSE)
   return true;
@@ -240,6 +248,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
   m.doc() = "Python bindings for Dynamic Exploration Graph";
 
   m.def("avx_usable", &avx_usable, "Returns whether AVX instructions are available");
+  m.def("avx512_usable", &avx512_usable, "Returns whether AVX512 instructions are available");
   m.def("sse_usable", &sse_usable, "Returns whether SSE instructions are available");
 
   // distances

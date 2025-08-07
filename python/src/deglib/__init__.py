@@ -1,4 +1,4 @@
-from deglib_cpp import avx_usable, sse_usable
+from deglib_cpp import avx_usable, avx512_usable, sse_usable
 
 from . import analysis
 from . import benchmark
