@@ -1353,6 +1353,14 @@ class EvenRegularGraphBuilder {
           success |= improveEdges(vertex1, vertex2, neighbor_weights[edge_idx]);
       }
 
+      // 1.3 if no noneRNG edge was improved, try to improve the RNG edges
+      for (size_t edge_idx = 0; success == false && edge_idx < edges_per_vertex; edge_idx++) {
+        const auto vertex2 = neighbor_indices[edge_idx];
+        if(graph.hasEdge(vertex1, vertex2) && deglib::analysis::checkRNG(graph, edges_per_vertex, vertex2, vertex1, neighbor_weights[edge_idx])) 
+          if(improveEdges(vertex1, vertex2, neighbor_weights[edge_idx]))
+            success = true;
+      }
+
       return success;
     }
 
