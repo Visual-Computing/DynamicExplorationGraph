@@ -94,9 +94,7 @@ class EvenRegularGraphBuilder:
 
         :param external_label: The label(s) that name the added vertex/vertices. For batch processing,
                               should be a list or array with length N matching the number of features
-        :type external_label: int | Iterable[int] | np.ndarray
         :param feature: The feature vector(s) to be added. Shape [D] for single entry or [N, D] for batch
-        :type feature: np.ndarray
         :raises InvalidShapeException: If feature array has invalid shape (not 1D or 2D)
         :raises AssertionError: If number of features doesn't match number of labels in batch processing
         """
@@ -174,7 +172,7 @@ class EvenRegularGraphBuilder:
           - thread_count = 1 and batch_size = 1: low throughput, medium latency, order of elements is guaranteed
           - thread_count > 1 and batch_size = 1: high throughput, low latency, order of elements is not guaranteed
           - thread_count > 1 and batch_size > 1: highest throughput, highest latency, order of elements is not
-          guaranteed
+            guaranteed
 
         Note: The optimization target `StreamingData` always uses a thread count of 1.
 
