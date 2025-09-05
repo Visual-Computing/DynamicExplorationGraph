@@ -20,13 +20,13 @@ The output is a NumPy array with shape  `(1, k)` containing `k` indices from the
     data = np.random.random((N_SAMPLES, DIMS)).astype(np.float32)
 
     # build index
-    index = deglib.builder.build_from_data(data)
+    graph = deglib.builder.build_from_data(data)
 
     # generate query
     query = np.random.random(DIMS).astype(np.float32)
 
     # search query
-    result_indices, dists = index.search(query, eps=0.1, k=16)
+    result_indices, dists = graph.search(query, eps=0.1, k=16)
 
     print(result_indices)  # data[result_indices] will show the 16 closest datapoints to "query"
     print(dists)           # numpy array with 16 distances to the results
@@ -41,10 +41,11 @@ It is also possible to search for multiple queries at once:
     N_QUERIES = 10
     query = np.random.random(N_QUERIES, DIMS).astype(np.float32)
 
-    result_indices, dists = index.search(query, eps=0.1, k=16)
+    result_indices, dists = graph.search(query, eps=0.1, k=16)
 
 In this case `result_indices` will have shape `(10, 16)` (16 indices for 10 queries).
 
 More Options
 ************
 There are far more options to build a graph and to search for results.
+Look at the documentation for building graphs and the search documentation.

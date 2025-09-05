@@ -3,7 +3,7 @@ Python Installation
 
 Via pip
 -------
-Install from `pypi <https://pypi.org/project/deglib/>`_.
+Install from `PyPI <https://pypi.org/project/deglib/>`_.
 
 .. code-block:: sh
 

@@ -28,6 +28,8 @@ class OptimizationTarget(enum.IntEnum):
         """
         Convert the Python OptimizationTarget enum to its C++ equivalent.
 
+        :no-index:
+
         :return: The corresponding C++ OptimizationTarget enum value
         :rtype: deglib_cpp.OptimizationTarget
         """
@@ -172,7 +174,7 @@ class EvenRegularGraphBuilder:
 
         The builder processes elements in batches to minimize synchronization between threads.
         The total batch size is calculated as:
-            batch_size = thread_count * tasks_per_batch * task_size
+        batch_size = thread_count * tasks_per_batch * task_size
 
         Effects of thread count and batch size:
           - thread_count = 1 and batch_size = 1: low throughput, medium latency, order of elements is guaranteed
