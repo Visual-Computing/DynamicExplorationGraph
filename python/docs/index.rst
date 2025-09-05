@@ -19,3 +19,4 @@ It offers performance comparable to HNSW while providing the added benefits of d
 
    usage/installation
    usage/quickstart
+   api/index
