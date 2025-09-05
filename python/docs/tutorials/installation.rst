@@ -1,9 +1,9 @@
-Python Installation
-===================
+Installation
+============
 
 Via pip
 -------
-Install from `PyPI <https://pypi.org/project/deglib/>`_.
+Install from `PyPI <https://pypi.org/project/deglib/>`_. This is best for most users.
 
 .. code-block:: sh
 
@@ -11,13 +11,21 @@ Install from `PyPI <https://pypi.org/project/deglib/>`_.
 
 From Source
 -----------
+You can also compile `deglib` yourself.
+
+This can be useful if you want to:
+
+* make use of AVX512 instructions
+* have the newest version
+* develop new features
+
 .. code-block:: sh
 
     # get the source
     git clone https://github.com/Visual-Computing/DynamicExplorationGraph.git
     cd DynamicExplorationGraph/python/
 
-    # create venv
+    # create virtualenv
     python -m venv venv && . venv/bin/activate
 
     # install build dependencies

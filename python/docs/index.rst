@@ -17,6 +17,5 @@ It offers performance comparable to HNSW while providing the added benefits of d
    :maxdepth: 2
    :caption: Contents:
 
-   usage/installation
-   usage/quickstart
+   tutorials/index
    api/index

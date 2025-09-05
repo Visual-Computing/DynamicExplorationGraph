@@ -8,8 +8,4 @@ This is the API Documentation for the deglib project.
    :caption: Contents:
 
    graphs/index
-   graphs/search_graph
-   graphs/mutable_graph
-   graphs/read_only_graph
-   graphs/size_bounded_graph
    builder
