@@ -18,6 +18,74 @@ class SearchGraph(ABC):
     def __init__(self, graph_cpp: deglib_cpp.SearchGraph):
         self.graph_cpp = graph_cpp
 
+    def search(
+            self, query: np.ndarray, eps: float, k: int, filter_labels: Union[None, np.ndarray, Filter] = None,
+            max_distance_computation_count: int = 0, entry_vertex_indices: Optional[List[int]] = None, threads: int = 1,
+            thread_batch_size: int = 0
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
+
+        Eps greater 0 extends the search range and takes additional graph vertices into account.
+
+        It is possible to limit the amount of work by specifying a maximal number of distances to be calculated.
+        For lower numbers it is recommended to set eps to 0 since its very unlikely the method can make use of the
+        extended the search range.
+
+        :param query: A feature vector for which similar feature vectors should searched.
+        :param eps: Controls how many nodes are checked during search. Lower eps values like 0.001 are faster but less
+                    accurate. Higher eps values like 0.1 are slower but more accurate. Should always be greater 0.
+        :param k: The number of results that will be returned. If k is smaller than the number of vertices in the graph,
+                  k is set to the number of vertices in the graph.
+        :param filter_labels: A numpy array with dtype int32, that contains all labels that can be returned or an object
+                              of type Filter, that limits the possible results to a given set.
+                              All other labels will not be included in the result set.
+        :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
+        :param entry_vertex_indices: Start point for exploratory search. If None, a reasonable default is used.
+        :param threads: The number of threads to use for parallel processing. It should not excel the number of queries.
+                        If set to 0, the minimum of the number of cores of this machine and the number of queries is
+                        used.
+        :param thread_batch_size: If threads != 1, the number of queries to search in the same thread.
+        :returns: A tuple containing (indices, distances) where indices is a numpy-array of shape [n_queries, k]
+                  containing the indices to the closest found neighbors to the queries.
+                  Distances is a numpy-array of shape [n_queries, k] containing the distances to the closest found
+                  neighbors.
+        """
+        # handle query shapes
+        if len(query.shape) == 1:
+            query = query.reshape(1, -1)
+        if len(query.shape) != 2:
+            raise InvalidShapeException('invalid query shape: {}'.format(query.shape))
+
+        if k > self.size():
+            warnings.warn(
+                'k={} is smaller than number of vertices in graph={}. Setting k={}'.format(k, self.size(), self.size()))
+            k = self.size()
+
+        valid_dtype = self.get_feature_space().metric().get_dtype()
+
+        query = assure_array(query, 'query', valid_dtype)
+        if entry_vertex_indices is None:
+            entry_vertex_indices = self.get_entry_vertex_indices()
+
+        filter_obj = Filter.create_filter(filter_labels, self.size())
+
+        threads = get_num_useful_threads(threads, query.shape[0])
+
+        if thread_batch_size <= 0:
+            thread_batch_size = max(query.shape[0] // (threads * 4), 1)
+
+        indices, distances, num_results = self.graph_cpp.search(
+            entry_vertex_indices, query, eps, k, filter_obj, max_distance_computation_count, threads,
+            thread_batch_size
+        )
+        if num_results != k:
+            warnings.warn('Number of results ({}) is smaller than k ({})'.format(num_results, k))
+            indices = indices[:, :num_results]
+            distances = distances[:, :num_results]
+        return indices, distances
+
+
     @abstractmethod
     def size(self) -> int:
         """
@@ -118,73 +186,6 @@ class SearchGraph(ABC):
         :param k: TODO
         """
         raise NotImplementedError()
-
-    def search(
-            self, query: np.ndarray, eps: float, k: int, filter_labels: Union[None, np.ndarray, Filter] = None,
-            max_distance_computation_count: int = 0, entry_vertex_indices: Optional[List[int]] = None, threads: int = 1,
-            thread_batch_size: int = 0
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
-
-        Eps greater 0 extends the search range and takes additional graph vertices into account.
-
-        It is possible to limit the amount of work by specifying a maximal number of distances to be calculated.
-        For lower numbers it is recommended to set eps to 0 since its very unlikely the method can make use of the
-        extended the search range.
-
-        :param query: A feature vector for which similar feature vectors should searched.
-        :param eps: Controls how many nodes are checked during search. Lower eps values like 0.001 are faster but less
-                    accurate. Higher eps values like 0.1 are slower but more accurate. Should always be greater 0.
-        :param k: The number of results that will be returned. If k is smaller than the number of vertices in the graph,
-                  k is set to the number of vertices in the graph.
-        :param filter_labels: A numpy array with dtype int32, that contains all labels that can be returned or an object
-                              of type Filter, that limits the possible results to a given set.
-                              All other labels will not be included in the result set.
-        :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
-        :param entry_vertex_indices: Start point for exploratory search. If None, a reasonable default is used.
-        :param threads: The number of threads to use for parallel processing. It should not excel the number of queries.
-                        If set to 0, the minimum of the number of cores of this machine and the number of queries is
-                        used.
-        :param thread_batch_size: If threads != 1, the number of queries to search in the same thread.
-        :returns: A tuple containing (indices, distances) where indices is a numpy-array of shape [n_queries, k]
-                  containing the indices to the closest found neighbors to the queries.
-                  Distances is a numpy-array of shape [n_queries, k] containing the distances to the closest found
-                  neighbors.
-        """
-        # handle query shapes
-        if len(query.shape) == 1:
-            query = query.reshape(1, -1)
-        if len(query.shape) != 2:
-            raise InvalidShapeException('invalid query shape: {}'.format(query.shape))
-
-        if k > self.size():
-            warnings.warn(
-                'k={} is smaller than number of vertices in graph={}. Setting k={}'.format(k, self.size(), self.size()))
-            k = self.size()
-
-        valid_dtype = self.get_feature_space().metric().get_dtype()
-
-        query = assure_array(query, 'query', valid_dtype)
-        if entry_vertex_indices is None:
-            entry_vertex_indices = self.get_entry_vertex_indices()
-
-        filter_obj = Filter.create_filter(filter_labels, self.size())
-
-        threads = get_num_useful_threads(threads, query.shape[0])
-
-        if thread_batch_size <= 0:
-            thread_batch_size = max(query.shape[0] // (threads * 4), 1)
-
-        indices, distances, num_results = self.graph_cpp.search(
-            entry_vertex_indices, query, eps, k, filter_obj, max_distance_computation_count, threads,
-            thread_batch_size
-        )
-        if num_results != k:
-            warnings.warn('Number of results ({}) is smaller than k ({})'.format(num_results, k))
-            indices = indices[:, :num_results]
-            distances = distances[:, :num_results]
-        return indices, distances
 
     @abstractmethod
     def explore(self, entry_vertex_index: int, k: int, include_entry: bool, max_distance_computation_count: int) -> ResultSet:

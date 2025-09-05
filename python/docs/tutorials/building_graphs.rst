@@ -20,6 +20,10 @@ This will instantiate a `SizeBoundedGraph` containing 10_000 random feature vect
 
 There are many different parameters to control the building process. See :ref:`build_from_data` for more information.
 
+LID.Unknown vs LID.High or LID.Low
+**********************************
+The crEG paper introduces an additional parameter, *LIDType*, to determine whether a dataset exhibits high complexity and Local Intrinsic Dimensionality (LID) or if it is relatively low. In contrast, the DEG paper presents a new algorithm that does not rely on this information. Consequently, DEG defaults to *LID.Unknown*. However, if the LID is known, utilizing it can be beneficial, as multi-threaded graph construction is only possible with these parameters.
+
 Metrics
 *******
 
@@ -29,6 +33,30 @@ Deglib implements two different metrics:
 - The `InnerProduct` distance.
 
 The L2 metric is also available for uint8 features as `L2_Uint8`.
+
+Internal Index vs External Label
+********************************
+
+There are two kinds of indices used in a graph: `internal_index` and `external_label`. Both are integers and specify
+a vertex in a graph.
+
+Internal Indices are dense, which means that every `internal_index < len(graph)` can be used.
+For example: If you add 100 vertices and remove the vertex with internal_index 42, the last vertex in the graph will
+be moved to index 42.
+
+In contrast, external label is a user defined identifier for each added vertex
+(see `builder.add_entry(external_label, feature_vector)`). Adding or Removing vertices to the graph will keep the
+connection between external labels and associated feature vector.
+
+When you create the external labels by starting with `0` and increasing it for each entry by `1` and don't remove
+elements from the graph, external labels and internal indices are equal.
+
+.. code-block:: python
+
+    # as long as no elements are removed
+    # external labels and internal indices are equal
+    for i, vec in enumerate(data):
+        builder.add_entry(i, vec)
 
 Using builder object
 ********************
