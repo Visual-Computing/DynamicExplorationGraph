@@ -1,7 +1,7 @@
 import enum
 import sys
 import time
-from typing import Optional, Callable, List, Iterable
+from typing import Callable, Iterable
 
 import numpy as np
 import deglib_cpp
@@ -28,8 +28,6 @@ class OptimizationTarget(enum.IntEnum):
         """
         Convert the Python OptimizationTarget enum to its C++ equivalent.
 
-        :no-index:
-
         :return: The corresponding C++ OptimizationTarget enum value
         :rtype: deglib_cpp.OptimizationTarget
         """
@@ -39,6 +37,8 @@ class OptimizationTarget(enum.IntEnum):
             return deglib_cpp.OptimizationTarget.HighLID
         elif self == OptimizationTarget.LowLID:
             return deglib_cpp.OptimizationTarget.LowLID
+        else:
+            raise ValueError('Unknown OptimizationTarget: {}'.format(self))
 
 
 class EvenRegularGraphBuilder:
@@ -64,28 +64,22 @@ class EvenRegularGraphBuilder:
         :type rng: Mt19937 | None
         :param optimization_target: Optimization strategy based on data distribution characteristics
         :type optimization_target: OptimizationTarget
-        :param extend_k: Number of neighbors to consider when extending the graph. Defaults to graph's edges_per_vertex if smaller
-        :type extend_k: int
+        :param extend_k: Number of neighbors to consider when extending the graph. Defaults to graph's edges_per_vertex
+        if smaller
         :param extend_eps: Epsilon value for neighbor search during graph extension
-        :type extend_eps: float
         :param improve_k: Number of neighbors to consider when improving the graph
-        :type improve_k: int
         :param improve_eps: Epsilon value for neighbor search during graph improvement
-        :type improve_eps: float
         :param max_path_length: Maximum number of edge swaps in a single improvement attempt
-        :type max_path_length: int
         :param swap_tries: Number of improvement attempts per build step
-        :type swap_tries: int
         :param additional_swap_tries: Additional improvement attempts after a successful improvement
-        :type additional_swap_tries: int
         """
         if rng is None:
             rng = Mt19937()
         if extend_k < graph.get_edges_per_vertex():
             extend_k = graph.get_edges_per_vertex()
         self.builder_cpp = deglib_cpp.EvenRegularGraphBuilder(
-            graph.to_cpp(), rng.to_cpp(), optimization_target.to_cpp(), extend_k, extend_eps, improve_k, improve_eps, max_path_length,
-            swap_tries, additional_swap_tries
+            graph.to_cpp(), rng.to_cpp(), optimization_target.to_cpp(), extend_k, extend_eps, improve_k, improve_eps,
+            max_path_length, swap_tries, additional_swap_tries
         )
         self.graph = graph
         self.rng = rng
@@ -179,7 +173,8 @@ class EvenRegularGraphBuilder:
         Effects of thread count and batch size:
           - thread_count = 1 and batch_size = 1: low throughput, medium latency, order of elements is guaranteed
           - thread_count > 1 and batch_size = 1: high throughput, low latency, order of elements is not guaranteed
-          - thread_count > 1 and batch_size > 1: highest throughput, highest latency, order of elements is not guaranteed
+          - thread_count > 1 and batch_size > 1: highest throughput, highest latency, order of elements is not
+          guaranteed
 
         Note: The optimization target `StreamingData` always uses a thread count of 1.
 
@@ -240,8 +235,8 @@ class EvenRegularGraphBuilder:
 
 def build_from_data(
         data: np.ndarray, labels: Iterable[int] | None = None, edges_per_vertex: int = 32, capacity: int = -1,
-        metric: Metric = Metric.L2, rng: Mt19937 | None = None, optimization_target: OptimizationTarget = OptimizationTarget.LowLID,
-        extend_k: int = 0, extend_eps: float = 0.2,
+        metric: Metric = Metric.L2, rng: Mt19937 | None = None,
+        optimization_target: OptimizationTarget = OptimizationTarget.LowLID, extend_k: int = 0, extend_eps: float = 0.2,
         improve_k: int = 0, improve_eps: float = 0.001, max_path_length: int = 5,
         swap_tries: int = 0, additional_swap_tries: int = 0,
         callback: Callable[[deglib_cpp.BuilderStatus], None] | str | None = None
@@ -290,8 +285,8 @@ def build_from_data(
         capacity = data.shape[0]
     graph = SizeBoundedGraph.create_empty(capacity, data.shape[1], edges_per_vertex, metric)
     builder = EvenRegularGraphBuilder(
-        graph, rng, optimization_target=optimization_target, extend_k=extend_k, extend_eps=extend_eps, improve_k=improve_k,
-        improve_eps=improve_eps, max_path_length=max_path_length, swap_tries=swap_tries,
+        graph, rng, optimization_target=optimization_target, extend_k=extend_k, extend_eps=extend_eps,
+        improve_k=improve_k, improve_eps=improve_eps, max_path_length=max_path_length, swap_tries=swap_tries,
         additional_swap_tries=additional_swap_tries
     )
 
