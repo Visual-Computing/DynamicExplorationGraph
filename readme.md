@@ -3,7 +3,33 @@
 The Dynamic Exploration Graph (DEG) is a graph-based algorithm for approximate nearest neighbor search (ANNS). It indexes both static and dynamic datasets using three algorithms: incremental extension, continuous edge optimization, and vertex deletion. The resulting graph demonstrates high efficiency in terms of queries per second relative to the achieved recall rate. DEG provides state-of-the-art performance for both indexed and unindexed queries (where the query is not part of the index).
 
 ## Usage
-For a short introduction on how to use deglib for vector search, see our [Python Examples](python/README.md#examples).
+
+Install with
+```sh
+pip install deglib
+```
+Use with
+
+```py
+import numpy as np
+import deglib
+
+N_SAMPLES, DIMS = 10_000, 128
+
+# random generate example dataset
+data = np.random.random((N_SAMPLES, DIMS)).astype(np.float32)
+
+# random generate example query
+query = np.random.random(DIMS).astype(np.float32)
+
+# build index
+graph = deglib.builder.build_from_data(data)
+
+# search query
+indices, distances = graph.search(query, eps=0.1, k=16)
+```
+
+For more information [read the docs](https://dynamic-exploration-graph.readthedocs.io/en/latest/tutorials/quickstart.html).
 
 ## Release
 
