@@ -50,12 +50,11 @@ if (FORCE_AVX2)
                 -ftree-vectorizer-verbose=0
                 )
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-    target_compile_options(
-      compile-options
-      INTERFACE -O2
-                -mavx2
-                -mfma
-                -fpic)
+	target_compile_options(compile-options INTERFACE -O2 -fpic)
+
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+        target_compile_options(compile-options INTERFACE -mavx2 -mfma)
+    endif()
   elseif(MSVC)
     target_compile_options(
 	  compile-options
