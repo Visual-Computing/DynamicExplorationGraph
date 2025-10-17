@@ -1314,8 +1314,8 @@ class EvenRegularGraphBuilder {
         return false;
       }
       
-      // 4. swap vertex1 and vertex4 every second round, to give each a fair chance
-      if(steps % 2 == 1) {
+      // 4. swap vertex1 and vertex4 every round, to give each a fair chance
+      {
         uint32_t b = vertex1;
         vertex1 = vertex4;
         vertex4 = b;
