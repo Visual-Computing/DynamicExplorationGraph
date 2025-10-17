@@ -121,6 +121,7 @@ inline size_t parallel_for(size_t start, size_t end, size_t numThreads, Function
   return all_num_results;
 }
 
+// TODO the result_indices_ptr and result_distances_ptr should already be pointing to the right location. query_info could then be replaced with a feature vector and we do not need query_index at all.
 template<typename G>
 size_t search_one_query(const G& graph, size_t query_index, const py::buffer_info& query_info, const std::vector<uint32_t> &entry_vertex_indices, uint32_t k, const deglib::graph::Filter* filter, const uint32_t max_distance_computation_count, const float eps, uint32_t* const result_indices_ptr, float* const result_distances_ptr) {
   std::byte* query_ptr = static_cast<std::byte *>(query_info.ptr) + query_info.strides[0] * query_index;
@@ -128,11 +129,11 @@ size_t search_one_query(const G& graph, size_t query_index, const py::buffer_inf
 
   assert((void(std::format("Expected result should have k={} entries, but got {} entries.\n", k, result.size())), (k == result.size())));
 
-  uint32_t k_index = result.size()-1;  // start by last index to reverse result order
+  uint32_t last_index = result.size() - 1;  // start by last index to reverse result order
   size_t num_results = result.size();
   while (!result.empty()) {
     // location in result buffer
-    const uint32_t offset = k_index + query_index * k;
+    const uint32_t offset = last_index + query_index * k;
     uint32_t* indices_target_ptr = static_cast<uint32_t*>(result_indices_ptr) + offset;
     float* distances_target_ptr = static_cast<float*>(result_distances_ptr) + offset;
 
@@ -142,7 +143,7 @@ size_t search_one_query(const G& graph, size_t query_index, const py::buffer_inf
     *distances_target_ptr = next_result.getDistance();
 
     result.pop();
-    k_index--;
+    last_index--;
   }
   return num_results;
 }
