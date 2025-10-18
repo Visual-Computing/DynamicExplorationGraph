@@ -3,6 +3,10 @@
 #include <filesystem>
 #include <unordered_set>
 
+#include <fmt/base.h>
+#include <fmt/format.h>
+#include <fmt/ranges.h>  
+
 #include "deglib.h"
 #include "stopwatch.h"
 
