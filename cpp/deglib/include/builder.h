@@ -1319,7 +1319,7 @@ class EvenRegularGraphBuilder {
         return false;
       }
 
-      return improveEdges(changes, vertex4, vertex1, vertex2, vertex3, total_gain, steps + 1);
+      return improveEdges(changes, vertex1, vertex4, vertex2, vertex3, total_gain, steps + 1);
     }
 
     /**
