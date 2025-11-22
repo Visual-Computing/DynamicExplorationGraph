@@ -535,24 +535,28 @@ int main() {
 
 
     // // ------------------------------- SIFT1M -----------------------------------------
-    // const auto data_stream_type     = DataStreamType::AddAll;
-    // const auto repository_file      = (data_path / "SIFT1M" / "sift_base.fvecs").string();
-    // const auto query_file           = (data_path / "SIFT1M" / "sift_query.fvecs").string();
-    // const auto gt_file              = (data_path / "SIFT1M" / (data_stream_type == AddAll ? "sift_groundtruth.ivecs" : "sift_groundtruth_base500000.ivecs" )).string();
-    // const auto graph_file           = (data_path / "deg" / "crEG" / "128D_L2_K30_AddK60Eps0.1_schemeD.deg").string();
-    // // const auto reduce_graph_file    = (data_path / "deg" / "online" / "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string();
-    // // const auto reduce_graph_file    = (data_path / "deg" / "schemes" / "128D_L2_K30_AddK60Eps0.1_schemeUnkown.deg").string();
-    // // const auto graph_file           = (data_path / "deg" / "dynamic" / "128D_L2_K30_AddK60Eps0.1_add500k_schemeD.deg").string();
-    // // const auto opt_graph_file       = (data_path / "deg" / "dynamic" / "128D_L2_K30_AddK60Eps0.1_add500k_schemeD_OptAfterwardsWith_SwapK30-0StepEps0.001LowPath5_it100000.deg").string();
-    // const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::OptimizationTarget::LowLID : deglib::builder::OptimizationTarget::StreamingData;
-    // const deglib::Metric metric     = deglib::Metric::L2;
-// 
-    // // if(std::filesystem::exists(graph_file.c_str()) == false) {
-    //     create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
-    //     // optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 100000); // k_opt, eps_opt, i_opt, iteration
-    // // }
-    // // reduce_graph(reduce_graph_file, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
+    const auto data_stream_type     = DataStreamType::AddAll;
+    const auto repository_file      = (data_path / "SIFT1M" / "sift_base.fvecs").string();
+    const auto query_file           = (data_path / "SIFT1M" / "sift_query.fvecs").string();
+    const auto gt_file              = (data_path / "SIFT1M" / (data_stream_type == AddAll ? "sift_groundtruth_top1024_nb1000000.ivecs" : "sift_groundtruth_base500000.ivecs" )).string();
+    const auto graph_file           = (data_path / "deg" / "crEG" / "128D_L2_K30_AddK60Eps0.1_schemeD.deg").string();
+    // const auto reduce_graph_file    = (data_path / "deg" / "online" / "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string();
+    // const auto reduce_graph_file    = (data_path / "deg" / "schemes" / "128D_L2_K30_AddK60Eps0.1_schemeUnkown.deg").string();
+    // const auto graph_file           = (data_path / "deg" / "dynamic" / "128D_L2_K30_AddK60Eps0.1_add500k_schemeD.deg").string();
+    // const auto opt_graph_file       = (data_path / "deg" / "dynamic" / "128D_L2_K30_AddK60Eps0.1_add500k_schemeD_OptAfterwardsWith_SwapK30-0StepEps0.001LowPath5_it100000.deg").string();
+    const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::OptimizationTarget::LowLID : deglib::builder::OptimizationTarget::StreamingData;
+    const deglib::Metric metric     = deglib::Metric::L2;
+
+    if(std::filesystem::exists(graph_file.c_str()) == false) {
+        create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
+        // optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 100000); // k_opt, eps_opt, i_opt, iteration
+    }
+    // reduce_graph(reduce_graph_file, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
     // test_graph(query_file, gt_file, graph_file, 1, 1, 100);  // repeat_test, test_threads, k
+     for (uint32_t k = 1; k <= 1024; k *= 2) {
+        fmt::print("Testing for k = {} \n", k);
+        test_graph(query_file, gt_file, graph_file, 1, 1, k);
+    }
 
 
     
@@ -590,25 +594,29 @@ int main() {
     */
 
     // ------------------------------- GLOVE -----------------------------------------
-    const auto data_stream_type     = DataStreamType::AddAll;
-    const auto repository_file      = (data_path / "glove-100" / "glove-100_base.fvecs").string();    
-    const auto query_file           = (data_path / "glove-100" / "glove-100_query.fvecs").string();
-    const auto gt_file              = (data_path / "glove-100" / (data_stream_type == AddAll ? "glove-100_groundtruth.ivecs" : "glove-100_groundtruth_base591757.ivecs" )).string();
-    const auto graph_file           = (data_path / "deg" / "crEG" / "100D_L2_K30_AddK60Eps0.1_schemeC.deg").string();
-    const auto lid                  = deglib::builder::OptimizationTarget::HighLID;
-    // const auto reduce_graph_file    = (data_path / "deg" / "schemes" / "100D_L2_K30_AddK60Eps0.1_schemeC.deg").string();
-    // const auto graph_file           = (data_path / "deg" / "dynamic" / "100D_L2_K30_AddK60Eps0.1_add500k_schemeC.deg").string();
-    // const auto opt_graph_file       = (data_path / "deg" / "dynamic" / "100D_L2_K30_AddK60Eps0.1_add500k_schemeC_OptAfterwardsWith_SwapK30-0StepEps0.001LowPath5_it1000000.deg").string();
-    // const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::OptimizationTarget::HighLID : deglib::builder::OptimizationTarget::StreamingData;
-    const deglib::Metric metric     = deglib::Metric::L2;
-    
-    if(std::filesystem::exists(graph_file.c_str()) == false) {
-        create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 0, 0, 0, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt, thread_count
-        // create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt, thread_count
-        // optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 1000000); // k_opt, eps_opt, i_opt, iteration
-    }
-    // reduce_graph(reduce_graph_file, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
-    test_graph(query_file, gt_file, graph_file, 1, 1, 100);  // repeat_test, test_threads, k
+    //const auto data_stream_type     = DataStreamType::AddAll;
+    //const auto repository_file      = (data_path / "glove-100" / "glove-100_base.fvecs").string();    
+    //const auto query_file           = (data_path / "glove-100" / "glove-100_query.fvecs").string();
+    //const auto gt_file              = (data_path / "glove-100" / (data_stream_type == AddAll ? "glove-100_groundtruth_top1024_nb1183514.ivecs" : "glove-100_groundtruth_base591757.ivecs" )).string();
+    //const auto graph_file           = (data_path / "deg" / "crEG" / "100D_L2_K30_AddK60Eps0.1_schemeC.deg").string();
+    //const auto lid                  = deglib::builder::OptimizationTarget::HighLID;
+    //// const auto reduce_graph_file    = (data_path / "deg" / "schemes" / "100D_L2_K30_AddK60Eps0.1_schemeC.deg").string();
+    //// const auto graph_file           = (data_path / "deg" / "dynamic" / "100D_L2_K30_AddK60Eps0.1_add500k_schemeC.deg").string();
+    //// const auto opt_graph_file       = (data_path / "deg" / "dynamic" / "100D_L2_K30_AddK60Eps0.1_add500k_schemeC_OptAfterwardsWith_SwapK30-0StepEps0.001LowPath5_it1000000.deg").string();
+    //// const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::OptimizationTarget::HighLID : deglib::builder::OptimizationTarget::StreamingData;
+    //const deglib::Metric metric     = deglib::Metric::L2;
+    //
+    //if(std::filesystem::exists(graph_file.c_str()) == false) {
+    //    create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 0, 0, 0, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt, thread_count
+    //    // create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt, thread_count
+    //    // optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 1000000); // k_opt, eps_opt, i_opt, iteration
+    //}
+    //// reduce_graph(reduce_graph_file, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
+    //// test_graph(query_file, gt_file, graph_file, 1, 1, 100);  // repeat_test, test_threads, k
+    //for (uint32_t k = 128; k <= 1024; k *= 2) {
+    //    fmt::print("Testing for k = {} \n", k);
+    //    test_graph(query_file, gt_file, graph_file, 1, 1, k);
+    //}
 
  
 
