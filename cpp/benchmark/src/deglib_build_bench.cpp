@@ -624,7 +624,7 @@ static float estimate_recall(const deglib::search::SearchGraph& graph, const deg
     float best_precision = 0;
     float best_eps = 0;
 
-    std::vector<float> eps_parameter = { 0.01f, 0.02f, 0.03f, 0.04f, 0.05f, 0.1f, 0.2f };
+    std::vector<float> eps_parameter = { 0.2f };
 
     for (float eps : eps_parameter)
     {
@@ -677,7 +677,7 @@ static float estimate_recall(const deglib::search::SearchGraph& graph, const deg
  * @param max_distance_count_test The maximum distance count for testing.
  * @param k_test The k parameter for testing.
  */
-static void improve_and_test(const std::string initial_graph_file, const std::string query_path, const std::string gt_path, const uint8_t k_opt, const float eps_opt, const uint32_t log_after, const uint32_t max_distance_count_test, const uint32_t k_test) {
+static void improve_and_test(const std::string initial_graph_file, const std::string query_path, const std::string gt_path, const uint8_t k_opt, const float eps_opt, const uint64_t log_after, const uint32_t max_distance_count_test, const uint32_t k_test) {
 
     // Load query repository
     auto query_repository = deglib::load_static_repository(query_path.c_str());
@@ -907,8 +907,8 @@ int main() {
     const auto data_stream_type     = DataStreamType::AddAll;
     const auto repository_file      = (data_path / "SIFT1M" / "sift_base.fvecs").string();
     const auto query_file           = (data_path / "SIFT1M" / "sift_query.fvecs").string();
-    const auto gt_file              = (data_path / "SIFT1M" / (data_stream_type == AddAll ? "sift_groundtruth_top1024_nb100000.ivecs" : "sift_groundtruth_base500000.ivecs" )).string();
-    const auto graph_file           = (data_path / "deg" / "crEG" / "improve_rnd_graph" / "128D_L2_K30_RndAdd_base100k.deg").string();
+    const auto gt_file              = (data_path / "SIFT1M" / (data_stream_type == AddAll ? "sift_groundtruth_top1024.ivecs" : "sift_groundtruth_base500000.ivecs" )).string();
+    const auto graph_file           = (data_path / "deg" / "crEG" / "optOnly" / "128D_L2_K30_RndAdd.deg").string();
     // const auto reduce_graph_file    = (data_path / "deg" / "online" / "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string();
     // const auto opt_graph_file       = (data_path / "deg" / "dynamic" / "128D_L2_K30_AddK60Eps0.1_add500k_schemeD_OptAfterwardsWith_SwapK30-0StepEps0.001LowPath5_it100000.deg").string();
     const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::OptimizationTarget::LowLID : deglib::builder::OptimizationTarget::StreamingData;
@@ -919,7 +919,7 @@ int main() {
     //    create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
     //    // optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 100000); // k_opt, eps_opt, i_opt, iteration
     }
-    improve_and_test(graph_file, query_file, gt_file, 30, 0.001f, 100000, 2000, 100);
+    improve_and_test(graph_file, query_file, gt_file, 30, 0.001f, 10000, 2000, 100);
 
     // reduce_graph(reduce_graph_file, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
     // test_graph(query_file, gt_file, graph_file, 1, 1, 100);  // repeat_test, test_threads, k

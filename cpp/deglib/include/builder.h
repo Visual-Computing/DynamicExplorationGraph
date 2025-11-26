@@ -1589,6 +1589,84 @@ class EvenRegularGraphBuilder {
     }
 
     /**
+     * Tries to improve the graph by swapping edges between two pairs of vertices.
+     * Given an edge (v1, v2), it selects a random edge (v3, v4) and checks if swapping
+     * connections to (v1, v3) & (v2, v4) or (v1, v4) & (v2, v3) reduces the total edge weight.
+     */
+    bool simpleEdgeSwaps(uint32_t vertex1, uint32_t vertex2, float dist12) {
+      auto& graph = this->graph_;
+      
+      // Select a random vertex3
+      auto distrib = std::uniform_int_distribution<uint32_t>(0, uint32_t(graph.size() - 1));
+      uint32_t vertex3 = distrib(this->rnd_);
+      
+      if (vertex3 == vertex1 || vertex3 == vertex2) return false;
+
+      // Select a random neighbor of vertex3 as vertex4
+      const auto neighbor_indices = graph.getNeighborIndices(vertex3);
+      const auto neighbor_weights = graph.getNeighborWeights(vertex3);
+      const auto edges_per_vertex = graph.getEdgesPerVertex();
+      
+      auto distrib_neighbor = std::uniform_int_distribution<uint32_t>(0, edges_per_vertex - 1);
+      uint32_t neighbor_idx = distrib_neighbor(this->rnd_);
+      
+      uint32_t vertex4 = neighbor_indices[neighbor_idx];
+      float dist34 = neighbor_weights[neighbor_idx];
+
+      if (vertex4 == vertex1 || vertex4 == vertex2) return false;
+
+      // Check connectivity constraints: v3 and v4 should not be connected to v1 or v2
+      if (graph.hasEdge(vertex3, vertex1) || graph.hasEdge(vertex3, vertex2) ||
+          graph.hasEdge(vertex4, vertex1) || graph.hasEdge(vertex4, vertex2)) {
+        return false;
+      }
+
+      // Calculate distances for potential new edges
+      const auto& feature_space = graph.getFeatureSpace();
+      const auto dist_func = feature_space.get_dist_func();
+      const auto dist_func_param = feature_space.get_dist_func_param();
+      
+      const auto f1 = graph.getFeatureVector(vertex1);
+      const auto f2 = graph.getFeatureVector(vertex2);
+      const auto f3 = graph.getFeatureVector(vertex3);
+      const auto f4 = graph.getFeatureVector(vertex4);
+
+      float dist13 = dist_func(f1, f3, dist_func_param);
+      float dist24 = dist_func(f2, f4, dist_func_param);
+      
+      float dist14 = dist_func(f1, f4, dist_func_param);
+      float dist23 = dist_func(f2, f3, dist_func_param);
+
+      // Calculate costs
+      // a) Current: (v1, v2) and (v3, v4)
+      float cost_a = dist12 + dist34;
+      
+      // b) Swap 1: (v1, v3) and (v2, v4)
+      float cost_b = dist13 + dist24;
+      
+      // c) Swap 2: (v1, v4) and (v2, v3)
+      float cost_c = dist14 + dist23;
+
+      if (cost_b < cost_a && cost_b < cost_c) {
+        // Apply swap b
+        graph.changeEdge(vertex1, vertex2, vertex3, dist13);
+        graph.changeEdge(vertex2, vertex1, vertex4, dist24);
+        graph.changeEdge(vertex3, vertex4, vertex1, dist13);
+        graph.changeEdge(vertex4, vertex3, vertex2, dist24);
+        return true;
+      } else if (cost_c < cost_a && cost_c < cost_b) {
+        // Apply swap c
+        graph.changeEdge(vertex1, vertex2, vertex4, dist14);
+        graph.changeEdge(vertex2, vertex1, vertex3, dist23);
+        graph.changeEdge(vertex3, vertex4, vertex2, dist23);
+        graph.changeEdge(vertex4, vertex3, vertex1, dist14);
+        return true;
+      }
+
+      return false;
+    }
+
+    /**
      * Try to improve the edge of a random vertex to its worst neighbor
      * 
      * @return true if a change could be made otherwise false
@@ -1606,11 +1684,18 @@ class EvenRegularGraphBuilder {
       const auto neighbor_weights = graph.getNeighborWeights(vertex1);
       const auto neighbor_indices = graph.getNeighborIndices(vertex1);
       auto success = false;
+
+      // real random edges swaps
+      //auto distrib_neighbor = std::uniform_int_distribution<uint32_t>(0, edges_per_vertex - 1);
+      //uint32_t neighbor_idx = distrib_neighbor(this->rnd_);
+      //success |= simpleEdgeSwaps(vertex1, neighbor_indices[neighbor_idx], neighbor_weights[neighbor_idx]);
+
       for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
         const auto vertex2 = neighbor_indices[edge_idx];
         if(graph.hasEdge(vertex1, vertex2) && deglib::analysis::checkRNG(graph, edges_per_vertex, vertex2, vertex1, neighbor_weights[edge_idx]) == false) 
           success |= improveEdges(vertex1, vertex2, neighbor_weights[edge_idx]);
           // success |= optEdge(vertex1, vertex2, neighbor_weights[edge_idx]);
+          //success |= simpleEdgeSwaps(vertex1, vertex2, neighbor_weights[edge_idx]);
       }
 
       // 1.3 if no noneRNG edge was improved, try to improve a RNG edges
@@ -1621,6 +1706,8 @@ class EvenRegularGraphBuilder {
             success = true;
           // if(optEdge(vertex1, vertex2, neighbor_weights[edge_idx]))
           //   success = true;
+          //if(simpleEdgeSwaps(vertex1, vertex2, neighbor_weights[edge_idx]))
+          //  success = true;
       }
 
       return success;
@@ -1763,7 +1850,7 @@ void remove_non_mrng_edges(deglib::graph::MutableGraph& graph) {
  * @param i_opt Number of improvement attempts per build step.
  * @param iterations Number of optimization iterations to perform.
  */
-void optimze_edges(deglib::graph::MutableGraph& graph, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt, const uint32_t iterations) {
+void optimize_edges(deglib::graph::MutableGraph& graph, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt, const uint32_t iterations) {
     
   auto rnd = std::mt19937(7);                         // default 7
 
