@@ -1,5 +1,8 @@
 #include <random>
 #include <chrono>
+#include <unordered_set>
+#include <filesystem>
+#include <atomic>
 
 #include <fmt/core.h>
 #include <omp.h>
@@ -266,7 +269,7 @@ void reduce_graph(const std::string graph_file, deglib::builder::OptimizationTar
  * Load the data repository and create a random regular graph.
  * Store the graph in the graph file.
  */
-void create_random_exploration_graph(const std::string repository_file, const std::string graph_file, deglib::Metric metric, const uint8_t d) {
+void create_random_exploration_graph(const std::string repository_file, const std::string graph_file, deglib::Metric metric, const uint8_t d, const uint32_t max_size = 0) {
     fmt::print("Build and store a random EG{}\n", d);
 
     // load data
@@ -282,7 +285,7 @@ void create_random_exploration_graph(const std::string repository_file, const st
     // create the graph and add all vertices, without any edges
     const auto start = std::chrono::system_clock::now();
     const uint8_t edges_per_vertex = d;
-    const uint32_t vertex_count = uint32_t(repository.size());
+    const uint32_t vertex_count = (max_size > 0 && max_size < repository.size()) ? max_size : uint32_t(repository.size());
     auto graph = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, feature_space);
 
     // add the initial vertices (edges_per_vertex + 1)
@@ -614,6 +617,136 @@ void test_graph(const std::string query_file, const std::string gt_file, const s
     deglib::benchmark::test_graph_anns(graph, query_repository, ground_truth, (uint32_t)dims_out, repeat, threads, k);
 }
 
+static float estimate_recall(const deglib::search::SearchGraph& graph, const deglib::FeatureRepository& query_repository, const std::vector<std::unordered_set<uint32_t>>& answer, const uint32_t max_distance_count, const uint32_t k) {
+
+    const auto entry_vertex_indices = std::vector<uint32_t> { graph.getInternalIndex(0) };
+
+    float best_precision = 0;
+    float best_eps = 0;
+
+    std::vector<float> eps_parameter = { 0.01f, 0.02f, 0.03f, 0.04f, 0.05f, 0.1f, 0.2f };
+
+    for (float eps : eps_parameter)
+    {
+        size_t total = 0;
+        size_t correct = 0;
+        
+        #pragma omp parallel for reduction(+:total) reduction(+:correct)
+        for (int i = 0; i < (int)query_repository.size(); i++)
+        {
+            auto query = reinterpret_cast<const std::byte*>(query_repository.getFeature(uint32_t(i)));
+            auto result_queue = graph.search(entry_vertex_indices, query, eps, k, nullptr, max_distance_count);
+
+            const auto& gt = answer[i];
+            total += result_queue.size();
+            
+            size_t local_correct = 0;
+            while (result_queue.empty() == false)
+            {
+                const auto internal_index = result_queue.top().getInternalIndex();
+                const auto external_id = graph.getExternalLabel(internal_index);
+                if (gt.find(external_id) != gt.end()) local_correct++;
+                result_queue.pop();
+            }
+            correct += local_correct;
+        }
+
+        const auto precision = ((float)correct) / total;
+
+        if(best_precision < precision) {
+            best_precision = precision;
+            best_eps = eps;
+        } else {
+            break;
+        }
+    }
+
+    return best_precision;
+}
+
+/**
+ * Load the graph from the drive, improve it and test it against the query data.
+ * The tests are only used to give an estimate of the current quality, 
+ * which is why the max_distance_count_test ideally is kept low (e.g. 2000).
+ * 
+ * @param initial_graph_file The initial graph to be improved.
+ * @param query_path The path to the query repository.
+ * @param gt_path The path to the ground truth file.
+ * @param k_opt The optimization parameter k.
+ * @param eps_opt The optimization parameter eps.
+ * @param max_distance_count_test The maximum distance count for testing.
+ * @param k_test The k parameter for testing.
+ */
+static void improve_and_test(const std::string initial_graph_file, const std::string query_path, const std::string gt_path, const uint8_t k_opt, const float eps_opt, const uint32_t log_after, const uint32_t max_distance_count_test, const uint32_t k_test) {
+
+    // Load query repository
+    auto query_repository = deglib::load_static_repository(query_path.c_str());
+    
+    // Load ground truth
+    size_t dims_out;
+    size_t count_out;
+    const auto ground_truth_f = deglib::fvecs_read(gt_path.c_str(), dims_out, count_out);
+    const auto ground_truth = (uint32_t*)ground_truth_f.get();
+    auto answer = deglib::benchmark::get_ground_truth(ground_truth, query_repository.size(), (uint32_t)dims_out, k_test);
+
+    auto rnd = std::mt19937(7);
+    auto graph = deglib::graph::load_sizebounded_graph(initial_graph_file.c_str());
+    
+    // Adapted constructor call
+    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::OptimizationTarget::LowLID, 0, 0, k_opt, eps_opt, 5, 1, 0);
+
+    auto initial_recall = estimate_recall(graph, query_repository, answer, max_distance_count_test, k_test);
+    auto initial_graph_quality = 0.0f;//deglib::analysis::calc_graph_quality(graph);
+    auto initial_avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 1);
+    auto initial_avg_neighbor_rank = 0.0f;//deglib::analysis::calc_avg_neighbor_rank(graph);
+    fmt::print("Improve and test graph {} with initial GQ {:.4f}, AEW {:.2f}, ANR {:.2f}, Recall {:.4f}, \n", initial_graph_file, initial_graph_quality, initial_avg_edge_weight, initial_avg_neighbor_rank, initial_recall);
+
+    auto start = std::chrono::steady_clock::now();
+    auto last_status = deglib::builder::BuilderStatus{};
+    uint64_t duration_ms = 0;
+    const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
+        const auto tries = status.tries;
+        const auto improved = status.improved;
+        if(tries > 0 && tries % log_after == 0) {
+            duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+            auto duration = duration_ms / 1000;
+            auto graph_quality = 0.0f;//deglib::analysis::calc_graph_quality(graph);
+            auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 1);
+            auto avg_neighbor_rank = 0.0f;//deglib::analysis::calc_avg_neighbor_rank(graph);
+            auto connected = deglib::analysis::check_graph_connectivity(graph);
+            auto diff = tries - last_status.tries;
+            auto avg_improv = uint32_t((improved - last_status.improved) / diff);
+            auto avg_tries = uint32_t((tries - last_status.tries) / diff);
+
+            // check the graph from time to time
+            auto valid = deglib::analysis::check_graph_regularity(graph, (uint32_t)graph.size(), true);
+            if(valid == false) {
+                builder.stop();
+                fmt::print("Invalid graph, build process is stopped \n");
+            } 
+
+            // test the graph quality
+            std::filesystem::path p(initial_graph_file);
+            std::string extension = p.extension().string();
+            std::string stem = p.stem().string();
+            auto graph_file = (p.parent_path() / fmt::format("{}_OptK{}Eps{:.3f}Path5_it{}{}", stem, k_opt, eps_opt, tries, extension)).string();
+
+            graph.saveGraph(graph_file.c_str());
+            auto recall = estimate_recall(graph, query_repository, answer, max_distance_count_test, k_test);
+
+            fmt::print("{:5}s, with {:8} / {:8} improvements (avg {:2}/{:3}), GQ {:.4f}, AEW {:.2f}, ANR {:.2f}, Recall {:.4f}, connected {} \n", duration, improved, tries, avg_improv, avg_tries, graph_quality, avg_edge_weight, avg_neighbor_rank, recall, connected);
+            last_status = status;
+            start = std::chrono::steady_clock::now();
+        }
+        
+        // stop after 10 * log_after
+        if(tries >= 10 * log_after) 
+            builder.stop();
+
+    };
+    builder.build(improvement_callback, true);
+}
+
 int main() {
 
     #if defined(USE_AVX)
@@ -774,18 +907,20 @@ int main() {
     const auto data_stream_type     = DataStreamType::AddAll;
     const auto repository_file      = (data_path / "SIFT1M" / "sift_base.fvecs").string();
     const auto query_file           = (data_path / "SIFT1M" / "sift_query.fvecs").string();
-    const auto gt_file              = (data_path / "SIFT1M" / (data_stream_type == AddAll ? "sift_groundtruth_top1024_nb1000000.ivecs" : "sift_groundtruth_base500000.ivecs" )).string();
-    const auto graph_file           = (data_path / "deg" / "crEG" / "improve_rnd_graph" / "128D_L2_K30_RndAdd.deg").string();
+    const auto gt_file              = (data_path / "SIFT1M" / (data_stream_type == AddAll ? "sift_groundtruth_top1024_nb100000.ivecs" : "sift_groundtruth_base500000.ivecs" )).string();
+    const auto graph_file           = (data_path / "deg" / "crEG" / "improve_rnd_graph" / "128D_L2_K30_RndAdd_base100k.deg").string();
     // const auto reduce_graph_file    = (data_path / "deg" / "online" / "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string();
     // const auto opt_graph_file       = (data_path / "deg" / "dynamic" / "128D_L2_K30_AddK60Eps0.1_add500k_schemeD_OptAfterwardsWith_SwapK30-0StepEps0.001LowPath5_it100000.deg").string();
     const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::OptimizationTarget::LowLID : deglib::builder::OptimizationTarget::StreamingData;
     const deglib::Metric metric     = deglib::Metric::L2;
 
     if(std::filesystem::exists(graph_file.c_str()) == false) {
-        create_random_exploration_graph(repository_file, graph_file, metric, 30); // d, k_ext, eps_ext, threads
+        create_random_exploration_graph(repository_file, graph_file, metric, 30, 100000);
     //    create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
     //    // optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 100000); // k_opt, eps_opt, i_opt, iteration
     }
+    improve_and_test(graph_file, query_file, gt_file, 30, 0.001f, 100000, 2000, 100);
+
     // reduce_graph(reduce_graph_file, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
     // test_graph(query_file, gt_file, graph_file, 1, 1, 100);  // repeat_test, test_threads, k
     //for (uint32_t k = 1; k <= 1024; k *= 2) {
