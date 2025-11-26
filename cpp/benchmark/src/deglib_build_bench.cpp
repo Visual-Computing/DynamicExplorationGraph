@@ -373,6 +373,100 @@ void create_graph(const std::string repository_file, const DataStreamType data_s
 }
 
 /**
+ * Create multiple graphs incrementally using more data from the repository file.
+ * Returns a list of the created graph files and their sizes.
+ */
+std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(const std::string repository_file, const std::string graph_file_base, const uint32_t step_size, deglib::Metric metric, deglib::builder::OptimizationTarget lid, const uint8_t d, const uint8_t k_ext, const float eps_ext, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt, const uint32_t thread_count) {
+    
+    std::vector<std::pair<std::string, uint32_t>> created_files;
+    auto rnd = std::mt19937(7);                         // default 7
+    const uint32_t swap_tries = 0;                      // additional swap tries between the next graph extension
+    const uint32_t additional_swap_tries = 0;           // increse swap try count for each successful swap
+    const uint32_t scale = 1000;
+
+    // load data
+    fmt::print("Load Data \n");
+    auto repository = deglib::load_static_repository(repository_file.c_str());   
+    fmt::print("Actual memory usage: {} Mb, Max memory usage: {} Mb after loading data\n", getCurrentRSS() / 1000000, getPeakRSS() / 1000000);
+
+    // create a new graph
+    fmt::print("Setup empty graph with {} vertices in {}D feature space\n", repository.size(), repository.dims());
+    const auto dims = repository.dims();
+    const uint32_t max_vertex_count = uint32_t(repository.size());
+    const auto feature_space = deglib::FloatSpace(dims, metric);
+    const auto feature_byte_size = feature_space.get_data_size();
+    auto graph = deglib::graph::SizeBoundedGraph(max_vertex_count, d, feature_space);
+    fmt::print("Actual memory usage: {} Mb, Max memory usage: {} Mb after setup empty graph\n", getCurrentRSS() / 1000000, getPeakRSS() / 1000000);
+
+    // create a graph builder to add vertices to the new graph and improve its edges
+    fmt::print("Start graph builder \n");   
+    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, lid, k_ext, eps_ext, k_opt, eps_opt, i_opt, swap_tries, additional_swap_tries);
+    builder.setThreadCount(thread_count);
+    if(thread_count == 1)
+        builder.setBatchSize(1,1);
+    
+    // check the integrity of the graph during the graph build process
+    const auto log_after = 100000;
+
+    fmt::print("Start building \n");    
+    auto start = std::chrono::steady_clock::now();
+    uint64_t duration_ms = 0;
+    const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
+        const auto size = graph.size();
+
+        if(status.step % log_after == 0) {    
+            duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+            auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
+            auto weight_histogram_sorted = deglib::analysis::calc_edge_weight_histogram(graph, true, scale);
+            auto weight_histogram = deglib::analysis::calc_edge_weight_histogram(graph, false, scale);
+            auto valid_weights = deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_regularity(graph, uint32_t(size), true);
+            auto connected = deglib::analysis::check_graph_connectivity(graph);
+            auto duration = duration_ms;// / 1000;
+            auto currRSS = getCurrentRSS() / 1000000;
+            auto peakRSS = getPeakRSS() / 1000000;
+            fmt::print("{:7} vertices, {:8}ms, {:8} / {:8} improv, Q: {:4.2f} -> Sorted:{:.1f}, InOrder:{:.1f}, {} connected & {}, RSS {} & peakRSS {}\n", 
+                        size, duration, status.improved, status.tries, avg_edge_weight, fmt::join(weight_histogram_sorted, " "), fmt::join(weight_histogram, " "), connected ? "" : "not", valid_weights ? "valid" : "invalid", currRSS, peakRSS);
+            start = std::chrono::steady_clock::now();
+        }
+    };
+
+    uint32_t current_count = 0;
+    uint32_t total_size = uint32_t(repository.size());
+
+    while(current_count < total_size) {
+        uint32_t target_size = std::min(current_count + step_size, total_size);
+        
+        fmt::print("Adding data from {} to {}\n", current_count, target_size);
+
+        for (uint32_t i = current_count; i < target_size; i++) {
+            auto feature = repository.getFeature(i);
+            auto feature_vector = std::vector<std::byte>{feature, feature + feature_byte_size};
+            builder.addEntry(i, std::move(feature_vector)); 
+        }
+        current_count = target_size;
+
+        // start the build process
+        builder.build(improvement_callback, false);
+        fmt::print("Actual memory usage: {} Mb, Max memory usage: {} Mb after building the graph in {} secs\n", getCurrentRSS() / 1000000, getPeakRSS() / 1000000, duration_ms / 1000);
+
+        // construct filename
+        std::filesystem::path p(graph_file_base);
+        std::string extension = p.extension().string();
+        std::string stem = p.stem().string();
+        std::string size_str = std::to_string(target_size / 1000) + "k";
+        std::string new_filename = (p.parent_path() / (stem + "_" + size_str + extension)).string();
+
+        // store the graph
+        graph.saveGraph(new_filename.c_str());
+        created_files.push_back({new_filename, target_size});
+
+        fmt::print("The graph contains {} non-RNG edges\n", deglib::analysis::calc_non_rng_edges(graph));
+    }
+
+    return created_files;
+}
+
+/**
  * Load the graph from the drive and test it against the SIFT query data.
  */
 void test_graph(const std::string query_file, const std::string gt_file, const std::string graph_file, const uint32_t repeat, const uint32_t threads, const uint32_t k) {
@@ -479,23 +573,40 @@ int main() {
 
 
     // // ------------------------------- Deep1M -----------------------------------------
-    // const auto data_stream_type     = DataStreamType::AddAllRemoveHalf;
+    // const auto data_stream_type     = DataStreamType::AddAll;
     // const auto repository_file      = (data_path / "deep1m" / "deep1m_base.fvecs").string();
     // const auto query_file           = (data_path / "deep1m" / "deep1m_query.fvecs").string();
-    // const auto gt_file              = (data_path / "deep1m" / (data_stream_type == AddAll ? "deep1m_groundtruth.ivecs" : "deep1m_groundtruth_base500000.ivecs" )).string();
-    // const auto reduce_graph_file    = (data_path / "deg" / "96D_L2_K30_AddK60Eps0.1High_schemaD.deg").string();
-    // const auto graph_file           = (data_path / "deg" / "dynamic" / "96D_L2_K30_AddK60Eps0.1_add500k_schemeD.deg").string();
+    // const auto gt_file              = (data_path / "deep1m" / (data_stream_type == AddAll ? "deep1m_groundtruth_top1024_nb1000000.ivecs" : "deep1m_groundtruth_base500000.ivecs" )).string();
+    // const auto reduce_graph_file    = (data_path / "deg" / "crEG" / "96D_L2_K30_AddK60Eps0.1_schemeD.deg").string();
+    // const auto graph_file           = (data_path / "deg" / "crEG" / "scaling" / "96D_L2_K30_AddK60Eps0.1_schemeD_1000k.deg").string();
     // const auto opt_graph_file       = (data_path / "deg" / "dynamic" / "96D_L2_K30_AddK60Eps0.1_add500k_schemeD_OptAfterwardsWith_SwapK30-0StepEps0.001LowPath5_it100000.deg").string();
     // const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::OptimizationTarget::LowLID : deglib::builder::OptimizationTarget::StreamingData;
     // const deglib::Metric metric     = deglib::Metric::L2;
     
-    // // if(std::filesystem::exists(graph_file.c_str()) == false) {
-    // //     create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt, threads
-    //     optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 100000); // k_opt, eps_opt, i_opt, iteration
-    // // }
-    // // reduce_graph(reduce_graph_file, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt, threads
-    // test_graph(query_file, gt_file, opt_graph_file, 1, 1, 100);  // repeat_test, test_threads, k
+    // if(std::filesystem::exists(graph_file.c_str()) == false) {
+    //     create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt, threads
+    //     //optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 100000); // k_opt, eps_opt, i_opt, iteration
+    // }
+    // reduce_graph(reduce_graph_file, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt, threads
+    //test_graph(query_file, gt_file, graph_file, 1, 1, 100);  // repeat_test, test_threads, k
+    //for (uint32_t k = 128; k <= 1024; k *= 2) {
+    //    fmt::print("Testing for k = {} \n", k);
+    //    test_graph(query_file, gt_file, graph_file, 1, 1, k);
+    //}
 
+    // scaling test
+    //const int step_size = 100000;
+    //const auto graph_files = create_incremental_graphs(repository_file, graph_file, step_size, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); 
+    //for (const auto& [g_file, size] : graph_files) {
+    //    fmt::print("Testing incremental graph {} \n", g_file);
+//
+    //    // construct gt_file based on size
+    //    std::filesystem::path gt_path(gt_file);
+    //    std::string gt_filename = "deep1m_groundtruth_top1024_nb" + std::to_string(size) + ".ivecs";
+    //    std::string current_gt_file = (gt_path.parent_path() / gt_filename).string();
+//
+    //    test_graph(query_file, current_gt_file, g_file, 1, 1, 100);
+    //}
 
     // ------------------------------- Gist1m -----------------------------------------
     // const auto data_stream_type     = DataStreamType::AddAll;
@@ -534,7 +645,7 @@ int main() {
     // test_graph(query_file, gt_file, graph_file, 1, 1, 100);  // repeat_test, test_threads, k
 
 
-    // // ------------------------------- SIFT1M -----------------------------------------
+    // ------------------------------- SIFT1M -----------------------------------------
     const auto data_stream_type     = DataStreamType::AddAll;
     const auto repository_file      = (data_path / "SIFT1M" / "sift_base.fvecs").string();
     const auto query_file           = (data_path / "SIFT1M" / "sift_query.fvecs").string();
@@ -547,18 +658,30 @@ int main() {
     const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::OptimizationTarget::LowLID : deglib::builder::OptimizationTarget::StreamingData;
     const deglib::Metric metric     = deglib::Metric::L2;
 
-    if(std::filesystem::exists(graph_file.c_str()) == false) {
-        create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
-        // optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 100000); // k_opt, eps_opt, i_opt, iteration
-    }
+    //if(std::filesystem::exists(graph_file.c_str()) == false) {
+    //    create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
+    //    // optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 100000); // k_opt, eps_opt, i_opt, iteration
+    //}
     // reduce_graph(reduce_graph_file, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
     // test_graph(query_file, gt_file, graph_file, 1, 1, 100);  // repeat_test, test_threads, k
-     for (uint32_t k = 1; k <= 1024; k *= 2) {
+    for (uint32_t k = 1; k <= 1024; k *= 2) {
         fmt::print("Testing for k = {} \n", k);
         test_graph(query_file, gt_file, graph_file, 1, 1, k);
     }
 
-
+    //// scaling test
+    //const int step_size = 100000;
+    //const auto graph_files = create_incremental_graphs(repository_file, graph_file, step_size, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); 
+    //for (const auto& [g_file, size] : graph_files) {
+    //    fmt::print("Testing incremental graph {} \n", g_file);
+//
+    //    // construct gt_file based on size
+    //    std::filesystem::path gt_path(gt_file);
+    //    std::string gt_filename = "sift_groundtruth_top1024_nb" + std::to_string(size) + ".ivecs";
+    //    std::string current_gt_file = (gt_path.parent_path() / gt_filename).string();
+//
+    //    test_graph(query_file, current_gt_file, g_file, 1, 1, 100);
+    //}
     
     // // ------------------------------- SIFT100K -----------------------------------------
     // const auto data_stream_type     = DataStreamType::AddAll;
@@ -593,19 +716,19 @@ int main() {
     test_graph(query_file, gt_file, opt_graph_file, 1, 8, 16);  // repeat_test, test_threads, k
     */
 
-    // ------------------------------- GLOVE -----------------------------------------
-    //const auto data_stream_type     = DataStreamType::AddAll;
-    //const auto repository_file      = (data_path / "glove-100" / "glove-100_base.fvecs").string();    
-    //const auto query_file           = (data_path / "glove-100" / "glove-100_query.fvecs").string();
-    //const auto gt_file              = (data_path / "glove-100" / (data_stream_type == AddAll ? "glove-100_groundtruth_top1024_nb1183514.ivecs" : "glove-100_groundtruth_base591757.ivecs" )).string();
-    //const auto graph_file           = (data_path / "deg" / "crEG" / "100D_L2_K30_AddK60Eps0.1_schemeC.deg").string();
-    //const auto lid                  = deglib::builder::OptimizationTarget::HighLID;
-    //// const auto reduce_graph_file    = (data_path / "deg" / "schemes" / "100D_L2_K30_AddK60Eps0.1_schemeC.deg").string();
-    //// const auto graph_file           = (data_path / "deg" / "dynamic" / "100D_L2_K30_AddK60Eps0.1_add500k_schemeC.deg").string();
-    //// const auto opt_graph_file       = (data_path / "deg" / "dynamic" / "100D_L2_K30_AddK60Eps0.1_add500k_schemeC_OptAfterwardsWith_SwapK30-0StepEps0.001LowPath5_it1000000.deg").string();
-    //// const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::OptimizationTarget::HighLID : deglib::builder::OptimizationTarget::StreamingData;
-    //const deglib::Metric metric     = deglib::Metric::L2;
-    //
+    // // ------------------------------- GLOVE -----------------------------------------
+    // const auto data_stream_type     = DataStreamType::AddAll;
+    // const auto repository_file      = (data_path / "glove-100" / "glove-100_base.fvecs").string();    
+    // const auto query_file           = (data_path / "glove-100" / "glove-100_query.fvecs").string();
+    // const auto gt_file              = (data_path / "glove-100" / (data_stream_type == AddAll ? "glove-100_groundtruth_top1024_nb1183514.ivecs" : "glove-100_groundtruth_base591757.ivecs" )).string();
+    // const auto graph_file           = (data_path / "deg" / "crEG" / "scaling" / "100D_L2_K30_AddK60Eps0.1_schemeC.deg").string();
+    // const auto lid                  = deglib::builder::OptimizationTarget::HighLID;
+    // // const auto reduce_graph_file    = (data_path / "deg" / "schemes" / "100D_L2_K30_AddK60Eps0.1_schemeC.deg").string();
+    // // const auto graph_file           = (data_path / "deg" / "dynamic" / "100D_L2_K30_AddK60Eps0.1_add500k_schemeC.deg").string();
+    // // const auto opt_graph_file       = (data_path / "deg" / "dynamic" / "100D_L2_K30_AddK60Eps0.1_add500k_schemeC_OptAfterwardsWith_SwapK30-0StepEps0.001LowPath5_it1000000.deg").string();
+    // // const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::OptimizationTarget::HighLID : deglib::builder::OptimizationTarget::StreamingData;
+    // const deglib::Metric metric     = deglib::Metric::L2;
+    
     //if(std::filesystem::exists(graph_file.c_str()) == false) {
     //    create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 0, 0, 0, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt, thread_count
     //    // create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt, thread_count
@@ -618,7 +741,19 @@ int main() {
     //    test_graph(query_file, gt_file, graph_file, 1, 1, k);
     //}
 
- 
+    // scaling test
+    //const int step_size = 100000;
+    //const auto graph_files = create_incremental_graphs(repository_file, graph_file, step_size, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); 
+    //for (const auto& [g_file, size] : graph_files) {
+    //    fmt::print("Testing incremental graph {} \n", g_file);
+//
+    //    // construct gt_file based on size
+    //    std::filesystem::path gt_path(gt_file);
+    //    std::string gt_filename = "glove-100_groundtruth_top1024_nb" + std::to_string(size) + ".ivecs";
+    //    std::string current_gt_file = (gt_path.parent_path() / gt_filename).string();
+//
+    //    test_graph(query_file, current_gt_file, g_file, 1, 1, 100);
+    //}
 
     // // ------------------------------- laion2B -----------------------------------------
     // const auto data_stream_type     = DataStreamType::AddAll;
