@@ -175,7 +175,7 @@ void remove_non_mrng_edges(const std::string initial_graph_file, const std::stri
  * Load the data repository and create a dynamic exploratino graph with it.
  * Store the graph in the graph file.
  */
-void optimze_graph(const std::string initial_graph_file, const std::string graph_file, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt, const uint32_t iterations) {
+void optimize_graph(const std::string initial_graph_file, const std::string graph_file, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt, const uint32_t iterations) {
     
     auto rnd = std::mt19937(7);                         // default 7
 
@@ -183,7 +183,7 @@ void optimze_graph(const std::string initial_graph_file, const std::string graph
     auto graph = deglib::graph::load_sizebounded_graph(initial_graph_file.c_str());
     fmt::print("Graph with {} vertices and an avg edge weight of {} \n", graph.size(), deglib::analysis::calc_avg_edge_weight(graph, 100));
 
-    deglib::builder::optimze_edges(graph, k_opt, eps_opt, i_opt, iterations);
+    deglib::builder::optimize_edges(graph, k_opt, eps_opt, i_opt, iterations);
 
     // store the graph
     graph.saveGraph(graph_file.c_str());
@@ -259,6 +259,131 @@ void reduce_graph(const std::string graph_file, deglib::builder::OptimizationTar
     fmt::print("Actual memory usage: {} Mb, Max memory usage: {} Mb after building the graph in {} secs\n", getCurrentRSS() / 1000000, getPeakRSS() / 1000000, duration_ms / 1000);
 
     fmt::print("The graph contains {} non-RNG edges\n", deglib::analysis::calc_non_rng_edges(graph));
+}
+
+
+/**
+ * Load the data repository and create a random regular graph.
+ * Store the graph in the graph file.
+ */
+void create_random_exploration_graph(const std::string repository_file, const std::string graph_file, deglib::Metric metric, const uint8_t d) {
+    fmt::print("Build and store a random EG{}\n", d);
+
+    // load data
+    fmt::print("Load Data \n");
+    auto repository = deglib::load_static_repository(repository_file.c_str());   
+    fmt::print("Actual memory usage: {} Mb, Max memory usage: {} Mb after loading data\n", getCurrentRSS() / 1000000, getPeakRSS() / 1000000);
+
+    const auto dims = repository.dims();
+    const auto feature_space = deglib::FloatSpace(dims, metric);
+    const auto dist_func = feature_space.get_dist_func();
+    const auto dist_func_param = feature_space.get_dist_func_param();
+
+    // create the graph and add all vertices, without any edges
+    const auto start = std::chrono::system_clock::now();
+    const uint8_t edges_per_vertex = d;
+    const uint32_t vertex_count = uint32_t(repository.size());
+    auto graph = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, feature_space);
+
+    // add the initial vertices (edges_per_vertex + 1)
+    {
+        const auto size = (uint32_t)(edges_per_vertex + 1);
+        for (uint32_t y = 0; y < size; y++) {
+            const auto query = repository.getFeature(y);
+            const auto internal_index = graph.addVertex(y, query);
+
+            auto neighbor_indices = std::vector<uint32_t>();
+            auto neighbor_weights = std::vector<float>();
+            for (uint32_t x = 0; x < size; x++) {
+                if(x == internal_index) continue;
+                neighbor_indices.emplace_back(x);
+                neighbor_weights.emplace_back(dist_func(query, repository.getFeature(x), dist_func_param));
+            }
+            graph.changeEdges(internal_index, neighbor_indices.data(), neighbor_weights.data());
+        }
+    }
+
+    // random order of vertices
+    auto rnd = std::mt19937(7);
+    auto rnd_neighbor = std::uniform_int_distribution<uint32_t>(0, edges_per_vertex - 1);
+
+    // add the remaining vertices
+    for (uint32_t label = edges_per_vertex + 1; label < vertex_count; label++) {
+        const auto new_vertex_feature = repository.getFeature(label);
+        const auto internal_index = graph.addVertex(label, new_vertex_feature);
+        auto top_list = std::uniform_int_distribution<uint32_t>(0, label - 1);
+        
+        // remove the worst edge of the good neighbors and connect them with this new vertex
+        auto new_neighbors = std::vector<std::pair<uint32_t, float>>();
+        while (new_neighbors.size() < edges_per_vertex) {
+            const auto candidate_index = (uint32_t) top_list(rnd);
+
+            // check if the vertex is already in the edge list of the new vertex (added during a previous loop-run)
+            // since all edges are undirected and the edge information of the new vertex does not yet exist, we search the other way around.
+            if(graph.hasEdge(candidate_index, internal_index))
+                continue;
+
+            // find a new random neighbor
+            uint32_t new_neighbor_index = 0;
+            float new_neighbor_weight = -1;
+            const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
+            const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
+            while(new_neighbor_weight < 0) {
+                const auto edge_idx = (uint32_t) rnd_neighbor(rnd);
+                const auto neighbor_index = neighbor_indices[edge_idx];
+                const auto neighbor_weight = neighbor_weights[edge_idx];
+
+                // the suggest neighbors might already be in the edge list of the new vertex
+                if(graph.hasEdge(neighbor_index, internal_index) == false) {
+                    new_neighbor_index = neighbor_index;
+                    new_neighbor_weight = neighbor_weight;
+                }          
+            }
+
+            // this should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
+            if(new_neighbor_weight < 0) {
+                fmt::print("it was not possible to find an edge (best weight {}) in the neighbor list of vertex {} which would connect to vertex {} \n", new_neighbor_weight, candidate_index, internal_index);
+                perror("");
+                abort();
+            }
+
+            // place the new vertex in the edge list of the result-vertex
+            const auto candidate_dist = dist_func(new_vertex_feature, graph.getFeatureVector(candidate_index), dist_func_param); 
+            graph.changeEdge(candidate_index, new_neighbor_index, internal_index, candidate_dist);
+            new_neighbors.emplace_back(candidate_index, candidate_dist);
+
+            // place the new vertex in the edge list of the worst edge neighbor
+            const auto new_neighbor_dist = dist_func(new_vertex_feature, graph.getFeatureVector(new_neighbor_index), dist_func_param);
+            graph.changeEdge(new_neighbor_index, candidate_index, internal_index, new_neighbor_dist);
+            new_neighbors.emplace_back(new_neighbor_index, new_neighbor_dist);
+        }
+
+        // sort the neighbors by their neighbor indices and store them in the new vertex
+        std::sort(new_neighbors.begin(), new_neighbors.end(), [](const auto& x, const auto& y){return x.first < y.first;});
+        auto neighbor_indices = std::vector<uint32_t>();
+        auto neighbor_weights = std::vector<float>();
+        for (auto &&neighbor : new_neighbors) {
+            neighbor_indices.emplace_back(neighbor.first);
+            neighbor_weights.emplace_back(neighbor.second);
+        }
+        graph.changeEdges(internal_index, neighbor_indices.data(), neighbor_weights.data());
+
+        if((label+1) % 10000 == 0 || (label+1) == vertex_count) {
+            auto quality = deglib::analysis::calc_avg_edge_weight(graph);
+            auto connected = deglib::analysis::check_graph_connectivity(graph);
+            auto duration = uint32_t(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - start).count());
+            fmt::print("{:7} elements, in {:5}s, AEW {:4.2f}, connected {} \n", (label+1), duration, quality, connected);
+        }
+    }
+
+    // check the graph from time to time
+    const auto valid = deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_regularity(graph, vertex_count, true);
+    if(valid == false) 
+        fmt::print("Invalid graph, build process is stopped \n");
+
+    // store the graph
+    graph.saveGraph(graph_file.c_str());
+    fmt::print("Write graph {} \n\n", graph_file.c_str());
 }
 
 /**
@@ -650,24 +775,23 @@ int main() {
     const auto repository_file      = (data_path / "SIFT1M" / "sift_base.fvecs").string();
     const auto query_file           = (data_path / "SIFT1M" / "sift_query.fvecs").string();
     const auto gt_file              = (data_path / "SIFT1M" / (data_stream_type == AddAll ? "sift_groundtruth_top1024_nb1000000.ivecs" : "sift_groundtruth_base500000.ivecs" )).string();
-    const auto graph_file           = (data_path / "deg" / "crEG" / "128D_L2_K30_AddK60Eps0.1_schemeD.deg").string();
+    const auto graph_file           = (data_path / "deg" / "crEG" / "improve_rnd_graph" / "128D_L2_K30_RndAdd.deg").string();
     // const auto reduce_graph_file    = (data_path / "deg" / "online" / "128D_L2_K30_AddK60Eps0.2High_SwapK30-0StepEps0.001LowPath5Rnd0+0_improveEvery2ndNonPerfectEdge.deg").string();
-    // const auto reduce_graph_file    = (data_path / "deg" / "schemes" / "128D_L2_K30_AddK60Eps0.1_schemeUnkown.deg").string();
-    // const auto graph_file           = (data_path / "deg" / "dynamic" / "128D_L2_K30_AddK60Eps0.1_add500k_schemeD.deg").string();
     // const auto opt_graph_file       = (data_path / "deg" / "dynamic" / "128D_L2_K30_AddK60Eps0.1_add500k_schemeD_OptAfterwardsWith_SwapK30-0StepEps0.001LowPath5_it100000.deg").string();
     const auto lid                  = (data_stream_type == AddAll || data_stream_type == AddHalf) ? deglib::builder::OptimizationTarget::LowLID : deglib::builder::OptimizationTarget::StreamingData;
     const deglib::Metric metric     = deglib::Metric::L2;
 
-    //if(std::filesystem::exists(graph_file.c_str()) == false) {
+    if(std::filesystem::exists(graph_file.c_str()) == false) {
+        create_random_exploration_graph(repository_file, graph_file, metric, 30); // d, k_ext, eps_ext, threads
     //    create_graph(repository_file, data_stream_type, graph_file, metric, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
     //    // optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 100000); // k_opt, eps_opt, i_opt, iteration
-    //}
+    }
     // reduce_graph(reduce_graph_file, lid, 30, 60, 0.1f, 30, 0.001f, 5, 1); // d, k_ext, eps_ext, k_opt, eps_opt, i_opt
     // test_graph(query_file, gt_file, graph_file, 1, 1, 100);  // repeat_test, test_threads, k
-    for (uint32_t k = 1; k <= 1024; k *= 2) {
-        fmt::print("Testing for k = {} \n", k);
-        test_graph(query_file, gt_file, graph_file, 1, 1, k);
-    }
+    //for (uint32_t k = 1; k <= 1024; k *= 2) {
+    //    fmt::print("Testing for k = {} \n", k);
+    //    test_graph(query_file, gt_file, graph_file, 1, 1, k);
+    //}
 
     //// scaling test
     //const int step_size = 100000;
