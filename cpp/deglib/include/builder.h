@@ -1310,14 +1310,16 @@ class EvenRegularGraphBuilder {
       }
       
       // 3. Maximum path length
-      if(steps >= this->max_path_length_) {
+      if(steps >= this->max_path_length_) 
         return false;
-      }
+
+      // swap vertices to give vertex1 another chance to find a better connection
+      //if(steps % 2 == 0) 
+      //std::swap(vertex1, vertex4);
       
       // 4. early stop
-      if(total_gain < 0) {
+      if(total_gain < 0) 
         return false;
-      }
 
       return improveEdges(changes, vertex1, vertex4, vertex2, vertex3, total_gain, steps + 1);
     }
@@ -1698,17 +1700,49 @@ class EvenRegularGraphBuilder {
           //success |= simpleEdgeSwaps(vertex1, vertex2, neighbor_weights[edge_idx]);
       }
 
+      // improve bad edge
+      uint32_t bad_neighbor_index = 0;
+      float bad_neighbor_weight = std::numeric_limits<float>::lowest();
+      for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
+        const auto vertex2 = neighbor_indices[edge_idx];
+        if (bad_neighbor_weight < neighbor_weights[edge_idx] && graph.hasEdge(vertex1, vertex2)) {
+          bad_neighbor_weight = neighbor_weights[edge_idx];
+          bad_neighbor_index = vertex2;
+        }
+      }
+      if(bad_neighbor_weight != std::numeric_limits<float>::lowest())
+        success |= improveEdges(vertex1, bad_neighbor_index, bad_neighbor_weight);
+
+      // repeat until you improve at least one bad edge
+      /*if (success == false) {
+        auto neighbors = std::vector<std::pair<uint32_t, float>>();
+        neighbors.reserve(edges_per_vertex);
+        for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
+          const auto vertex2 = neighbor_indices[edge_idx];
+          if (graph.hasEdge(vertex1, vertex2)) {
+            neighbors.emplace_back(vertex2, neighbor_weights[edge_idx]);
+          }
+        }
+
+        std::sort(neighbors.begin(), neighbors.end(), [](const auto& a, const auto& b) {
+          return a.second > b.second;
+        });
+
+        for (const auto& neighbor : neighbors) {
+          success |= improveEdges(vertex1, neighbor.first, neighbor.second);
+          if (success) break;
+        }
+      }*/
+
+
       // 1.3 if no noneRNG edge was improved, try to improve a RNG edges
-      for (size_t edge_idx = 0; success == false && edge_idx < edges_per_vertex; edge_idx++) {
+      /*for (size_t edge_idx = 0; success == false && edge_idx < edges_per_vertex; edge_idx++) {
         const auto vertex2 = neighbor_indices[edge_idx];
         if(graph.hasEdge(vertex1, vertex2) && deglib::analysis::checkRNG(graph, edges_per_vertex, vertex2, vertex1, neighbor_weights[edge_idx])) 
-          if(improveEdges(vertex1, vertex2, neighbor_weights[edge_idx]))
-            success = true;
-          // if(optEdge(vertex1, vertex2, neighbor_weights[edge_idx]))
-          //   success = true;
-          //if(simpleEdgeSwaps(vertex1, vertex2, neighbor_weights[edge_idx]))
-          //  success = true;
-      }
+          success |= improveEdges(vertex1, vertex2, neighbor_weights[edge_idx]);
+          //success |= optEdge(vertex1, vertex2, neighbor_weights[edge_idx]);
+          //success |= simpleEdgeSwaps(vertex1, vertex2, neighbor_weights[edge_idx]);
+      }*/
 
       return success;
     }
