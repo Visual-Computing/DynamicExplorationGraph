@@ -617,14 +617,12 @@ void test_graph(const std::string query_file, const std::string gt_file, const s
     deglib::benchmark::test_graph_anns(graph, query_repository, ground_truth, (uint32_t)dims_out, repeat, threads, k);
 }
 
-static float estimate_recall(const deglib::search::SearchGraph& graph, const deglib::FeatureRepository& query_repository, const std::vector<std::unordered_set<uint32_t>>& answer, const uint32_t max_distance_count, const uint32_t k) {
+static std::vector<float> estimate_recall(const deglib::search::SearchGraph& graph, const deglib::FeatureRepository& query_repository, const std::vector<std::unordered_set<uint32_t>>& answer, const uint32_t max_distance_count, const uint32_t k) {
 
     const auto entry_vertex_indices = std::vector<uint32_t> { graph.getInternalIndex(0) };
 
-    float best_precision = 0;
-    float best_eps = 0;
-
-    std::vector<float> eps_parameter = { 0.2f };
+    std::vector<float> recalls;
+    std::vector<float> eps_parameter = { 0.1f, 0.2f };
 
     for (float eps : eps_parameter)
     {
@@ -652,16 +650,10 @@ static float estimate_recall(const deglib::search::SearchGraph& graph, const deg
         }
 
         const auto precision = ((float)correct) / total;
-
-        if(best_precision < precision) {
-            best_precision = precision;
-            best_eps = eps;
-        } else {
-            break;
-        }
+        recalls.push_back(precision);
     }
 
-    return best_precision;
+    return recalls;
 }
 
 /**
@@ -699,7 +691,7 @@ static void improve_and_test(const std::string initial_graph_file, const std::st
     auto initial_graph_quality = 0.0f;//deglib::analysis::calc_graph_quality(graph);
     auto initial_avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 1);
     auto initial_avg_neighbor_rank = 0.0f;//deglib::analysis::calc_avg_neighbor_rank(graph);
-    fmt::print("Improve and test graph {} with initial GQ {:.4f}, AEW {:.2f}, ANR {:.2f}, Recall {:.4f}, \n", initial_graph_file, initial_graph_quality, initial_avg_edge_weight, initial_avg_neighbor_rank, initial_recall);
+    fmt::print("Improve and test graph {} with initial GQ {:.4f}, AEW {:.2f}, ANR {:.2f}, Recall {}, \n", initial_graph_file, initial_graph_quality, initial_avg_edge_weight, initial_avg_neighbor_rank, fmt::join(initial_recall, ", "));
 
     auto start = std::chrono::steady_clock::now();
     auto last_status = deglib::builder::BuilderStatus{};
@@ -734,7 +726,7 @@ static void improve_and_test(const std::string initial_graph_file, const std::st
             graph.saveGraph(graph_file.c_str());
             auto recall = estimate_recall(graph, query_repository, answer, max_distance_count_test, k_test);
 
-            fmt::print("{:5}s, with {:8} / {:8} improvements (avg {:2}/{:3}), GQ {:.4f}, AEW {:.2f}, ANR {:.2f}, Recall {:.4f}, connected {} \n", duration, improved, tries, avg_improv, avg_tries, graph_quality, avg_edge_weight, avg_neighbor_rank, recall, connected);
+            fmt::print("{:5}s, with {:8} / {:8} improvements (avg {:2}/{:3}), GQ {:.4f}, AEW {:.2f}, ANR {:.2f}, Recall {}, connected {} \n", duration, improved, tries, avg_improv, avg_tries, graph_quality, avg_edge_weight, avg_neighbor_rank, fmt::join(recall, ", "), connected);
             last_status = status;
             start = std::chrono::steady_clock::now();
         }
