@@ -218,8 +218,10 @@ struct BuilderStatus {
  */
 enum OptimizationTarget { 
   StreamingData,  // Streaming or shifting distributions
-  HighLID,        // Optimized for datasets with high local intrinsic dimensionality
-  LowLID,         // Optimized for datasets with low local intrinsic dimensionality
+  HighLID,        // Optimized for datasets with high local intrinsic dimensionality (schemeC in the paper)
+  LowLID,         // Optimized for datasets with low local intrinsic dimensionality (schemeD in the paper)
+  SchemeA,        // Only for research purposes
+  SchemeB         // Only for research purposes
 };
 
 class EvenRegularGraphBuilder {
@@ -742,6 +744,66 @@ class EvenRegularGraphBuilder {
               }
             }
           } 
+          else if(this->optimizationTarget_ == SchemeA) 
+          {
+            // Scheme A: Connect the new vertex v to the most similar neighbor of b.
+            // Select neighbor n with minimum distance to v.
+            float best_neighbor_distance = std::numeric_limits<float>::max();
+            
+            const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
+            
+            for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
+              const auto neighbor_index = neighbor_indices[edge_idx];
+
+              // if another thread is building the candidate_index at the moment, than its neighbor list contains self references
+              if(candidate_index == neighbor_index)
+                continue;
+
+              // the suggested neighbor might already be in the edge list of the new vertex
+              if(graph.hasEdge(neighbor_index, internal_index))
+                continue;
+
+              const auto neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(neighbor_index), dist_func_param);
+              
+              if(neighbor_distance < best_neighbor_distance) {
+                best_neighbor_distance = neighbor_distance;
+                new_neighbor_index = neighbor_index;
+                new_neighbor_distance = neighbor_distance;
+              }
+            }
+          }
+          else if(this->optimizationTarget_ == SchemeB) 
+          {
+            // Scheme B: Remove the shortest edge of b.
+            // Select neighbor n with minimum distance to b.
+            float min_edge_weight = std::numeric_limits<float>::max();
+            
+            const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
+            const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
+
+            for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
+              const auto neighbor_index = neighbor_indices[edge_idx];
+
+              // if another thread is building the candidate_index at the moment, than its neighbor list contains self references
+              if(candidate_index == neighbor_index)
+                continue;
+
+              // the suggested neighbor might already be in the edge list of the new vertex
+              if(graph.hasEdge(neighbor_index, internal_index))
+                continue;
+
+              const auto neighbor_weight = neighbor_weights[edge_idx];
+              
+              if(neighbor_weight < min_edge_weight) {
+                min_edge_weight = neighbor_weight;
+                new_neighbor_index = neighbor_index;
+              }
+            }
+            
+            if(min_edge_weight != std::numeric_limits<float>::max()) {
+                 new_neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(new_neighbor_index), dist_func_param);
+            }
+          }
        
 
           // this should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
