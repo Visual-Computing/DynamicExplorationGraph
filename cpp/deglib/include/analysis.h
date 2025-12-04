@@ -1,5 +1,18 @@
 #pragma once
 
+/**
+ * @file analysis.h
+ * @brief Graph analysis and validation utilities for deglib.
+ * 
+ * Provides functions for:
+ * - Graph regularity checks (edge validity, uniqueness, ordering)
+ * - Edge weight validation and statistics
+ * - RNG (Relative Neighborhood Graph) conformance checking
+ * - Connectivity analysis (components, bidirectionality)
+ * - In-degree computation
+ * - Reachability testing
+ */
+
 #include <math.h>
 #include <thread>
 #include <algorithm>
@@ -11,10 +24,18 @@
 namespace deglib::analysis
 {
     /**
-     * Check if the number of vertices and edges is consistent. 
-     * The edges of a vertex should only contain unique neighbor indices in ascending order and no self-loops.
+     * @brief Check if the graph structure is valid and well-formed.
      * 
-     * @param check_back_link checks if all edges are undirected (quite expensive)
+     * Validates that:
+     * - Vertex count matches expected
+     * - Edges contain unique neighbor indices in ascending order
+     * - No self-loops exist
+     * - Optionally checks for bidirectional edges
+     * 
+     * @param graph The search graph to check
+     * @param expected_vertices Expected number of vertices
+     * @param check_back_link If true, verify all edges are bidirectional (expensive)
+     * @return true if graph passes all checks
      */
     static bool check_graph_regularity(const deglib::search::SearchGraph& graph, const uint32_t expected_vertices, const bool check_back_link = false) {
 
@@ -28,36 +49,36 @@ namespace deglib::analysis
         // skip if the graph is too small to check
         auto edges_per_vertex = graph.getEdgesPerVertex();
         if(vertex_count <= edges_per_vertex) {
-            std::fprintf(stderr, "the graph was to small for checking validity \n");
+            std::fprintf(stderr, "the graph was too small for checking validity \n");
             return true;
         }
 
         // check edges
-        for (uint32_t n = 0; n < vertex_count; n++) {
-            auto neighbor_indices = graph.getNeighborIndices(n);
+        for (uint32_t v = 0; v < vertex_count; v++) {
+            auto neighbor_indices = graph.getNeighborIndices(v);
 
-            // check if the neighbor indizizes of the vertices are in ascending order and unique
+            // check if the neighbor indices of the vertices are in ascending order and unique
             int64_t last_index = -1;
             for (int64_t e = 0; e < edges_per_vertex; e++) {
                 auto neighbor_index = neighbor_indices[e];
 
-                if(n == neighbor_index) {
-                    std::fprintf(stderr, "vertex %u has a self-loop at position %lld \n", n, e);
+                if(v == neighbor_index) {
+                    std::fprintf(stderr, "vertex %u has a self-loop at position %lld \n", v, e);
                     return false;
                 }
 
                 if(last_index == neighbor_index) {
-                    std::fprintf(stderr, "vertex %u has a duplicate neighbor at position %lld with the neighbor index %u \n", n, e, neighbor_index);
+                    std::fprintf(stderr, "vertex %u has a duplicate neighbor at position %lld with the neighbor index %u \n", v, e, neighbor_index);
                     return false;
                 }
 
                 if(last_index > neighbor_index) {
-                    std::fprintf(stderr, "the neighbor order for vertex %u is invalid: pos %lld has index %lld while pos %lld has index %u \n", n, e-1, last_index, e, neighbor_index);
+                    std::fprintf(stderr, "the neighbor order for vertex %u is invalid: pos %lld has index %lld while pos %lld has index %u \n", v, e-1, last_index, e, neighbor_index);
                     return false;
                 }
 
-                if(check_back_link && graph.hasEdge(neighbor_index, n) == false) {
-                    std::fprintf(stderr, "the neighbor %u of vertex %u does not have a back link to the vertex \n", neighbor_index, n);
+                if(check_back_link && graph.hasEdge(neighbor_index, v) == false) {
+                    std::fprintf(stderr, "the neighbor %u of vertex %u does not have a back link to the vertex \n", neighbor_index, v);
                     return false;
                 }
 
@@ -69,7 +90,11 @@ namespace deglib::analysis
     }
 
     /**
-     * Compute the graph quality be
+     * @brief Calculate the average edge weight across all edges in the graph.
+     * 
+     * @param graph The mutable graph to analyze
+     * @param scale Scaling factor for the result
+     * @return Average edge weight (scaled)
      */
     static float calc_avg_edge_weight(const deglib::graph::MutableGraph& graph, const int scale = 1) {
         double total_distance = 0;
@@ -88,6 +113,14 @@ namespace deglib::analysis
         return (float) total_distance ;
     }
 
+    /**
+     * @brief Calculate edge weight histogram (distribution of edge weights).
+     * 
+     * @param graph The mutable graph to analyze
+     * @param sorted If true, sort weights before computing histogram
+     * @param scale Scaling factor for the result
+     * @return Vector of 10 average edge weights (one per bin)
+     */
     static auto calc_edge_weight_histogram(const deglib::graph::MutableGraph& graph, const bool sorted, const int scale = 1) {
  
         const auto edges_per_vertex = graph.getEdgesPerVertex();
@@ -118,7 +151,12 @@ namespace deglib::analysis
     }
 
     /**
-     * Check if the weights of the graph are still the same to the distance of the vertices
+     * @brief Verify that stored edge weights match actual distances.
+     * 
+     * Iterates through all edges and compares stored weights to computed distances.
+     * 
+     * @param graph The mutable graph to check
+     * @return true if all weights match distances
      */
     static auto check_graph_weights(const deglib::graph::MutableGraph& graph) {
         const auto& feature_space = graph.getFeatureSpace();
@@ -149,9 +187,17 @@ namespace deglib::analysis
     }
 
     /**
-     * Is the vertex_index a RNG conform neighbor if it gets connected to target_index?
+     * @brief Check if a vertex is RNG-conforming when connected to a target.
      * 
-     * Does vertex_index has a neighbor which is connected to the target_index and has a lower weight?
+     * A vertex is RNG-conforming if none of its neighbors provide a shorter
+     * path to the target vertex.
+     * 
+     * @param graph The mutable graph
+     * @param edges_per_vertex Number of edges per vertex
+     * @param vertex_index The vertex to check
+     * @param target_index The target vertex
+     * @param vertex_target_weight The weight between vertex and target
+     * @return true if vertex is RNG-conforming
      */
     static auto checkRNG(const deglib::graph::MutableGraph& graph, const uint32_t edges_per_vertex, const uint32_t vertex_index, const uint32_t target_index, const float vertex_target_weight) {
       const auto neighbor_indices = graph.getNeighborIndices(vertex_index);
@@ -165,6 +211,14 @@ namespace deglib::analysis
       return true;
     }
 
+    /**
+     * @brief Count the number of non-RNG-conforming edges in the graph.
+     * 
+     * Uses parallel computation to check each edge for RNG conformance.
+     * 
+     * @param graph The mutable graph to analyze
+     * @return Number of edges that violate RNG property
+     */
     static uint32_t calc_non_rng_edges(const deglib::graph::MutableGraph& graph) {
         const auto vertex_count = graph.size();
         const auto edge_per_vertex = graph.getEdgesPerVertex();
@@ -196,7 +250,12 @@ namespace deglib::analysis
     }
 
     /**
-     * check if the graph is connected and contains only one graph component
+     * @brief Check if the graph is fully connected (single component).
+     * 
+     * Uses flood fill from vertex 0 to check if all vertices are reachable.
+     * 
+     * @param graph The search graph to check
+     * @return true if all vertices are connected
      */
     static bool check_graph_connectivity(const deglib::search::SearchGraph& graph) {
         const auto vertex_count = graph.size();
@@ -241,6 +300,141 @@ namespace deglib::analysis
                 checked_vertex_count++;
 
         return checked_vertex_count == vertex_count;
+    }
+
+    /**
+     * @brief Count the number of connected components in the graph.
+     * 
+     * Uses flood fill to identify separate connected subgraphs.
+     * 
+     * @param graph The search graph to analyze
+     * @return Number of connected components
+     */
+    static uint32_t count_graph_components(const deglib::search::SearchGraph& graph) {
+        const auto vertex_count = graph.size();
+        const auto edges_per_vertex = graph.getEdgesPerVertex();
+
+        auto visited = std::vector<bool>(vertex_count, false);
+        uint32_t component_count = 0;
+
+        for (uint32_t start = 0; start < vertex_count; start++) {
+            if (visited[start]) continue;
+
+            // Found a new component, flood fill from this vertex
+            component_count++;
+            auto check = std::vector<uint32_t>();
+            visited[start] = true;
+            check.emplace_back(start);
+
+            while (check.size() > 0) {
+                auto check_next = std::vector<uint32_t>();
+
+                for (auto&& internal_index : check) {
+                    auto neighbor_indices = graph.getNeighborIndices(internal_index);
+                    for (size_t e = 0; e < edges_per_vertex; e++) {
+                        auto neighbor_index = neighbor_indices[e];
+                        if (neighbor_index < vertex_count && !visited[neighbor_index]) {
+                            visited[neighbor_index] = true;
+                            check_next.emplace_back(neighbor_index);
+                        }
+                    }
+                }
+
+                check = std::move(check_next);
+            }
+        }
+
+        return component_count;
+    }
+
+    /**
+     * @brief Compute in-degree for each vertex in the graph.
+     * 
+     * In-degree is the number of edges pointing TO a vertex.
+     * 
+     * @param graph The search graph to analyze
+     * @return Vector of in-degrees indexed by vertex
+     */
+    static std::vector<uint32_t> compute_in_degrees(const deglib::search::SearchGraph& graph) {
+        const auto vertex_count = graph.size();
+        const auto edges_per_vertex = graph.getEdgesPerVertex();
+
+        auto in_degrees = std::vector<uint32_t>(vertex_count, 0);
+
+        for (uint32_t n = 0; n < vertex_count; n++) {
+            auto neighbor_indices = graph.getNeighborIndices(n);
+            for (size_t e = 0; e < edges_per_vertex; e++) {
+                auto neighbor_index = neighbor_indices[e];
+                if (neighbor_index < vertex_count) {
+                    in_degrees[neighbor_index]++;
+                }
+            }
+        }
+
+        return in_degrees;
+    }
+
+    /**
+     * @brief Check if all edges in the graph are bidirectional.
+     * 
+     * A graph is bidirectional if for every edge (u, v), edge (v, u) also exists.
+     * 
+     * @param graph The search graph to check
+     * @return true if all edges have a back-link
+     */
+    static bool check_graph_bidirectional(const deglib::search::SearchGraph& graph) {
+        const auto vertex_count = graph.size();
+        const auto edges_per_vertex = graph.getEdgesPerVertex();
+
+        for (uint32_t n = 0; n < vertex_count; n++) {
+            auto neighbor_indices = graph.getNeighborIndices(n);
+            for (size_t e = 0; e < edges_per_vertex; e++) {
+                auto neighbor_index = neighbor_indices[e];
+                if (neighbor_index >= vertex_count) continue;
+
+                if (!graph.hasEdge(neighbor_index, n)) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * @brief Count vertices reachable from entry points via search.
+     * 
+     * Tests search reachability by attempting to find each vertex using
+     * the graph's search function from entry points.
+     * 
+     * @param graph The search graph to analyze
+     * @param eps Search epsilon parameter
+     * @param k Number of results to retrieve per search
+     * @return Number of vertices that can be found via search
+     */
+    static uint32_t count_search_reachable(const deglib::search::SearchGraph& graph, float eps = 0.5f, uint32_t k = 100) {
+        const auto vertex_count = graph.size();
+        const auto entry_vertices = graph.getEntryVertexIndices();
+
+        uint32_t reachable_count = 0;
+
+        for (uint32_t target = 0; target < vertex_count; target++) {
+            auto target_feature = graph.getFeatureVector(target);
+            auto result_queue = graph.search(entry_vertices, target_feature, eps, k);
+
+            bool found = false;
+            while (!result_queue.empty()) {
+                if (result_queue.top().getInternalIndex() == target) {
+                    found = true;
+                    break;
+                }
+                result_queue.pop();
+            }
+
+            if (found) reachable_count++;
+        }
+
+        return reachable_count;
     }
     
 } // end namespace deglib::analysis

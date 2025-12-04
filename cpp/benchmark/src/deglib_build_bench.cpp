@@ -13,7 +13,8 @@
 /**
  * The last three types are used to reproduce the deletion tests in our paper
  */
-enum DataStreamType { AddAll, AddHalf, AddAllRemoveHalf, AddHalfRemoveAndAddOneAtATime };
+// Reuse the canonical DataStreamType enum provided by benchmark.h
+using deglib::benchmark::DataStreamType;
 
 
 
@@ -429,7 +430,7 @@ void create_graph(const std::string repository_file, const DataStreamType data_s
         auto feature_vector = std::vector<std::byte>{feature, feature + feature_byte_size};
         builder.addEntry(idx, std::move(feature_vector)); // TODO label offset +1 for the laion dataset
     };
-    if(data_stream_type == AddHalfRemoveAndAddOneAtATime) {
+    if(data_stream_type == deglib::benchmark::AddHalfRemoveAndAddOneAtATime) {
         auto base_size_half = base_size / 2;
         auto base_size_fourth = base_size / 4;
         for (uint32_t i = 0; i < base_size_fourth; i++) { 
@@ -443,11 +444,11 @@ void create_graph(const std::string repository_file, const DataStreamType data_s
             builder.removeEntry(base_size_half + (i * 2) + 1);
         }
     } else {
-        base_size /= (data_stream_type == AddHalf) ? 2 : 1;
+        base_size /= (data_stream_type == deglib::benchmark::AddHalf) ? 2 : 1;
         for (uint32_t i = 0; i < base_size; i++) 
             addEntry(i);
 
-        if(data_stream_type == AddAllRemoveHalf) 
+        if(data_stream_type == deglib::benchmark::AddAllRemoveHalf) 
             for (uint32_t i = base_size/2; i < base_size; i++) 
                 builder.removeEntry(i);
     }
@@ -974,7 +975,7 @@ int main() {
     const auto data_stream_type     = DataStreamType::AddAll;
     const auto repository_file      = (data_path / "glove-100" / "glove-100_base.fvecs").string();    
     const auto query_file           = (data_path / "glove-100" / "glove-100_query.fvecs").string();
-    const auto gt_file              = (data_path / "glove-100" / (data_stream_type == AddAll ? "glove-100_groundtruth_top1024_nb1183514.ivecs" : "glove-100_groundtruth_base591757.ivecs" )).string();
+    const auto gt_file              = (data_path / "glove-100" / (data_stream_type == deglib::benchmark::AddAll ? "glove-100_groundtruth_top1024_nb1183514.ivecs" : "glove-100_groundtruth_base591757.ivecs" )).string();
     const auto graph_file           = (data_path / "deg" / "crEG" / "schemes" / "100D_L2_K30_AddK60Eps0.1_schemeD.deg").string();
     const auto lid                  = deglib::builder::OptimizationTarget::LowLID;
     // const auto reduce_graph_file    = (data_path / "deg" / "schemes" / "100D_L2_K30_AddK60Eps0.1_schemeC.deg").string();

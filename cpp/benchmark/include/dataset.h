@@ -23,6 +23,7 @@
 #include <atomic>
 #include <chrono>
 #include <limits>
+#include <unordered_set>
 
 #include <fmt/core.h>
 #include <fmt/format.h>
@@ -38,33 +39,33 @@ namespace deglib::benchmark
 // ============================================================================
 
 struct DatasetInfo;
-struct DatasetPaths;
+class Dataset;
 
 // ============================================================================
-// Dataset Class
+// DatasetName - Enum-like class for dataset identification
 // ============================================================================
 
 /**
- * Dataset wrapper class providing name, info, and path utilities.
+ * Lightweight enum-like class identifying a dataset by name.
  * Uses static instances for type-safe dataset identification.
  */
-class Dataset {
+class DatasetName {
 public:
     // Static dataset instances
-    static const Dataset SIFT1M;
-    static const Dataset DEEP1M;
-    static const Dataset GLOVE;
-    static const Dataset AUDIO;
-    static const Dataset Invalid;
+    static const DatasetName SIFT1M;
+    static const DatasetName DEEP1M;
+    static const DatasetName GLOVE;
+    static const DatasetName AUDIO;
+    static const DatasetName Invalid;
     
     // All valid datasets for iteration
-    static const std::array<Dataset, 4>& all() {
-        static const std::array<Dataset, 4> datasets = {SIFT1M, DEEP1M, GLOVE, AUDIO};
+    static const std::array<DatasetName, 4>& all() {
+        static const std::array<DatasetName, 4> datasets = {SIFT1M, DEEP1M, GLOVE, AUDIO};
         return datasets;
     }
     
     // Parse from string (case-insensitive)
-    static Dataset from_string(const std::string& str) {
+    static DatasetName from_string(const std::string& str) {
         std::string lower = str;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
         
@@ -79,39 +80,33 @@ public:
     // Accessors
     const char* name() const { return name_; }
     bool is_valid() const { return name_ != Invalid.name_; }
-    
-    // Convert to string (same as name())
     const char* to_string() const { return name_; }
     
-    // Get dataset info (defined after DatasetInfo)
+    // Get dataset info
     DatasetInfo info() const;
     
-    // Get dataset paths for a given data root (defined after DatasetPaths)
-    DatasetPaths paths(const std::filesystem::path& data_root) const;
-    
-    // Comparison operators (compare by name pointer - works because of static instances)
-    bool operator==(const Dataset& other) const { return name_ == other.name_; }
-    bool operator!=(const Dataset& other) const { return name_ != other.name_; }
+    // Comparison operators
+    bool operator==(const DatasetName& other) const { return name_ == other.name_; }
+    bool operator!=(const DatasetName& other) const { return name_ != other.name_; }
     
 private:
-    constexpr Dataset(const char* name) : name_(name) {}
-    
+    constexpr DatasetName(const char* name) : name_(name) {}
     const char* name_;
 };
 
-// Static dataset definitions
-inline constexpr Dataset Dataset::SIFT1M{"sift1m"};
-inline constexpr Dataset Dataset::DEEP1M{"deep1m"};
-inline constexpr Dataset Dataset::GLOVE{"glove"};
-inline constexpr Dataset Dataset::AUDIO{"audio"};
-inline constexpr Dataset Dataset::Invalid{"invalid"};
+// Static DatasetName definitions
+inline constexpr DatasetName DatasetName::SIFT1M{"sift1m"};
+inline constexpr DatasetName DatasetName::DEEP1M{"deep1m"};
+inline constexpr DatasetName DatasetName::GLOVE{"glove"};
+inline constexpr DatasetName DatasetName::AUDIO{"audio"};
+inline constexpr DatasetName DatasetName::Invalid{"invalid"};
 
 // ============================================================================
 // Dataset Info Structure
 // ============================================================================
 
 struct DatasetInfo {
-    Dataset dataset;                // The dataset this info belongs to
+    DatasetName dataset_name;       // The dataset name this info belongs to
     std::string download_url;       // URL to download the dataset
     deglib::Metric metric;          // Distance metric (L2, etc.)
     size_t base_count;              // Number of base vectors
@@ -136,14 +131,14 @@ struct DatasetInfo {
     static constexpr size_t GROUNDTRUTH_STEP = 100000;  // Steps for partial ground truth
     
     // Convenience accessor for name
-    const char* name() const { return dataset.name(); }
+    const char* name() const { return dataset_name.name(); }
 };
 
 // ============================================================================
 // Dataset Configuration Factory
 // ============================================================================
 
-inline DatasetInfo make_dataset_info(const Dataset& ds) {
+inline DatasetInfo make_dataset_info(const DatasetName& ds) {
     DatasetInfo info{ds, {}, deglib::Metric::L2, 0, 0, 0, {}, {}, {}, {}, {}};
     
     std::string name = ds.name();
@@ -155,22 +150,22 @@ inline DatasetInfo make_dataset_info(const Dataset& ds) {
     info.explore_entry_vertex_file = name + "_explore_entry_vertex.ivecs";
     info.explore_groundtruth_file = name + "_explore_groundtruth_top1000.ivecs";
     
-    if (ds == Dataset::SIFT1M) {
+    if (ds == DatasetName::SIFT1M) {
         info.download_url = "https://static.visual-computing.com/paper/DEG/sift.tar.gz";
         info.base_count = 1000000;
         info.query_count = 10000;
         info.dims = 128;
-    } else if (ds == Dataset::DEEP1M) {
+    } else if (ds == DatasetName::DEEP1M) {
         info.download_url = "https://static.visual-computing.com/paper/DEG/deep1m.tar.gz";
         info.base_count = 1000000;
         info.query_count = 10000;
         info.dims = 96;
-    } else if (ds == Dataset::GLOVE) {
+    } else if (ds == DatasetName::GLOVE) {
         info.download_url = "https://static.visual-computing.com/paper/DEG/glove.tar.gz";
         info.base_count = 1183514;
         info.query_count = 10000;
         info.dims = 100;
-    } else if (ds == Dataset::AUDIO) {
+    } else if (ds == DatasetName::AUDIO) {
         info.download_url = "https://static.visual-computing.com/paper/DEG/audio.tar.gz";
         info.base_count = 53387;
         info.query_count = 200;
@@ -180,69 +175,141 @@ inline DatasetInfo make_dataset_info(const Dataset& ds) {
     return info;
 }
 
-// Dataset::info() implementation
-inline DatasetInfo Dataset::info() const {
+// DatasetName::info() implementation
+inline DatasetInfo DatasetName::info() const {
     return make_dataset_info(*this);
 }
 
 // ============================================================================
-// Path Utilities
+// Dataset Class - Main class holding data_root and providing all utilities
 // ============================================================================
 
-struct DatasetPaths {
-    std::filesystem::path data_root;     // DATA_PATH
-    std::filesystem::path dataset_dir;   // DATA_PATH/sift1m
-    std::filesystem::path files_dir;     // DATA_PATH/sift1m/sift1m
-    DatasetInfo info;                    // Cached dataset info
-    
-    DatasetPaths(const std::filesystem::path& root, const Dataset& dataset)
-        : data_root(root)
-        , dataset_dir(root / dataset.name())
-        , files_dir(root / dataset.name() / dataset.name())
-        , info(dataset.info())
+/**
+ * Dataset class combining dataset identification with data root path.
+ * Provides all path utilities and data loading methods.
+ */
+class Dataset {
+public:
+    Dataset(const DatasetName& name, const std::filesystem::path& data_root)
+        : name_(name)
+        , data_root_(data_root)
+        , dataset_dir_(data_root / name.name())
+        , files_dir_(data_root / name.name() / name.name())
+        , info_(name.info())
     {}
     
+    // ========== Accessors ==========
+    
+    const DatasetName& dataset_name() const { return name_; }
+    const char* name() const { return name_.name(); }
+    bool is_valid() const { return name_.is_valid(); }
+    const DatasetInfo& info() const { return info_; }
+    
+    const std::filesystem::path& data_root() const { return data_root_; }
+    const std::filesystem::path& dataset_dir() const { return dataset_dir_; }
+    const std::filesystem::path& files_dir() const { return files_dir_; }
+    
+    // ========== Path Methods ==========
+    
     std::string base_file() const {
-        return (files_dir / info.base_file).string();
+        return (files_dir_ / info_.base_file).string();
     }
     
     std::string query_file() const {
-        return (files_dir / info.query_file).string();
+        return (files_dir_ / info_.query_file).string();
     }
     
     std::string explore_query_file() const {
-        return (files_dir / info.explore_query_file).string();
+        return (files_dir_ / info_.explore_query_file).string();
     }
     
     std::string explore_entry_vertex_file() const {
-        return (files_dir / info.explore_entry_vertex_file).string();
+        return (files_dir_ / info_.explore_entry_vertex_file).string();
     }
     
     std::string explore_groundtruth_file() const {
-        return (files_dir / info.explore_groundtruth_file).string();
+        return (files_dir_ / info_.explore_groundtruth_file).string();
     }
     
     // Ground truth file for specific base count
     std::string groundtruth_file(size_t nb) const {
-        return (files_dir / fmt::format("{}_groundtruth_top{}_nb{}.ivecs", 
-                info.name(), DatasetInfo::GROUNDTRUTH_TOPK, nb)).string();
+        return (files_dir_ / fmt::format("{}_groundtruth_top{}_nb{}.ivecs", 
+                info_.name(), DatasetInfo::GROUNDTRUTH_TOPK, nb)).string();
     }
     
     // Ground truth file for full dataset
     std::string groundtruth_file_full() const {
-        return groundtruth_file(info.base_count);
+        return groundtruth_file(info_.base_count);
     }
     
     // Ground truth file for half dataset
     std::string groundtruth_file_half() const {
-        return groundtruth_file(info.base_count / 2);
-    } 
-};
+        return groundtruth_file(info_.base_count / 2);
+    }
+    
+    // ========== Data Loading Methods ==========
+    
+    /**
+     * @brief Load the base feature repository.
+     */
+    deglib::StaticFeatureRepository load_base() const {
+        return deglib::load_static_repository(base_file().c_str());
+    }
+    
+    /**
+     * @brief Load the query feature repository.
+     */
+    deglib::StaticFeatureRepository load_query() const {
+        return deglib::load_static_repository(query_file().c_str());
+    }
+    
+    /**
+     * @brief Load ground truth and convert to vector of unordered_sets.
+     * 
+     * @param k Number of nearest neighbors to include in each set
+     * @param use_half_dataset Whether to use half dataset ground truth
+     * @return Vector of unordered_sets, one per query
+     */
+    std::vector<std::unordered_set<uint32_t>> load_groundtruth(size_t k, bool use_half_dataset = false) const {
+        std::string gt_file = use_half_dataset ? groundtruth_file_half() : groundtruth_file_full();
+        
+        size_t ground_truth_dims = 0;
+        size_t ground_truth_size = 0;
+        auto gt_data = deglib::fvecs_read(gt_file.c_str(), ground_truth_dims, ground_truth_size);
+        const uint32_t* ground_truth = reinterpret_cast<const uint32_t*>(gt_data.get());
+        
+        // Does the ground truth data provide enough top elements to check for k elements?
+        if (ground_truth_dims < k) {
+            fmt::print(stderr, "Ground truth data has only {} elements but need {}\n", ground_truth_dims, k);
+            abort();
+        }
 
-// Dataset::paths() implementation
-inline DatasetPaths Dataset::paths(const std::filesystem::path& data_root) const {
-    return DatasetPaths(data_root, *this);
-}
+        auto answers = std::vector<std::unordered_set<uint32_t>>(ground_truth_size);
+        for (size_t i = 0; i < ground_truth_size; i++) {
+            auto& gt = answers[i];
+            gt.reserve(k);
+            for (size_t j = 0; j < k; j++) {
+                gt.insert(ground_truth[ground_truth_dims * i + j]);
+            }
+        }
+
+        return answers;
+    }
+    
+    // ========== Comparison ==========
+    
+    bool operator==(const Dataset& other) const { 
+        return name_ == other.name_ && data_root_ == other.data_root_; 
+    }
+    bool operator!=(const Dataset& other) const { return !(*this == other); }
+    
+private:
+    DatasetName name_;
+    std::filesystem::path data_root_;
+    std::filesystem::path dataset_dir_;
+    std::filesystem::path files_dir_;
+    DatasetInfo info_;
+};
 
 
 // ============================================================================
@@ -321,20 +388,20 @@ namespace detail {
 /**
  * Setup SIFT1M dataset - download, extract, rename files
  */
-inline bool setup_sift1m_files(const DatasetPaths& paths) {
+inline bool setup_sift1m_files(const Dataset& ds) {
     fmt::print("\n=== Setting up SIFT1M dataset ===\n");
     
-    const auto& info = paths.info;
-    const auto archive_file = paths.dataset_dir / "sift.tar.gz";
-    const auto tmp_dir = paths.dataset_dir / "_tmp_extract";
+    const auto& info = ds.info();
+    const auto archive_file = ds.dataset_dir() / "sift.tar.gz";
+    const auto tmp_dir = ds.dataset_dir() / "_tmp_extract";
     
     // Ensure directories exist
-    ensure_directory(paths.dataset_dir);
-    ensure_directory(paths.files_dir);
+    ensure_directory(ds.dataset_dir());
+    ensure_directory(ds.files_dir());
     
     // Check if already setup (base file exists with correct name)
-    if (file_exists(paths.base_file())) {
-        fmt::print("SIFT1M already set up at {}\n", paths.files_dir.string());
+    if (file_exists(ds.base_file())) {
+        fmt::print("SIFT1M already set up at {}\n", ds.files_dir().string());
         return true;
     }
     
@@ -368,35 +435,35 @@ inline bool setup_sift1m_files(const DatasetPaths& paths) {
     fmt::print("Found extracted files in: {}\n", extracted_dir.string());
     
     // Move files to canonical names
-    move_file(extracted_dir / "sift_base.fvecs", paths.files_dir / info.base_file);
-    move_file(extracted_dir / "sift_query.fvecs", paths.files_dir / info.query_file);
-    move_file(extracted_dir / "sift_explore_query.fvecs", paths.files_dir / info.explore_query_file);
-    move_file(extracted_dir / "sift_explore_entry_vertex.ivecs", paths.files_dir / info.explore_entry_vertex_file);
+    move_file(extracted_dir / "sift_base.fvecs", ds.files_dir() / info.base_file);
+    move_file(extracted_dir / "sift_query.fvecs", ds.files_dir() / info.query_file);
+    move_file(extracted_dir / "sift_explore_query.fvecs", ds.files_dir() / info.explore_query_file);
+    move_file(extracted_dir / "sift_explore_entry_vertex.ivecs", ds.files_dir() / info.explore_entry_vertex_file);
     // Rename explore ground truth (different naming convention)
-    move_file(extracted_dir / "sift_explore_ground_truth.ivecs", paths.files_dir / info.explore_groundtruth_file);
+    move_file(extracted_dir / "sift_explore_ground_truth.ivecs", ds.files_dir() / info.explore_groundtruth_file);
     
     // Clean up tmp directory completely
     remove_directory(tmp_dir);
     
-    fmt::print("SIFT1M files set up in: {}\n", paths.files_dir.string());
+    fmt::print("SIFT1M files set up in: {}\n", ds.files_dir().string());
     return true;
 }
 
 /**
  * Setup DEEP1M dataset
  */
-inline bool setup_deep1m_files(const DatasetPaths& paths) {
+inline bool setup_deep1m_files(const Dataset& ds) {
     fmt::print("\n=== Setting up DEEP1M dataset ===\n");
     
-    const auto& info = paths.info;
-    const auto archive_file = paths.dataset_dir / "deep1m.tar.gz";
-    const auto tmp_dir = paths.dataset_dir / "_tmp_extract";
+    const auto& info = ds.info();
+    const auto archive_file = ds.dataset_dir() / "deep1m.tar.gz";
+    const auto tmp_dir = ds.dataset_dir() / "_tmp_extract";
     
-    ensure_directory(paths.dataset_dir);
-    ensure_directory(paths.files_dir);
+    ensure_directory(ds.dataset_dir());
+    ensure_directory(ds.files_dir());
     
-    if (file_exists(paths.base_file())) {
-        fmt::print("DEEP1M already set up at {}\n", paths.files_dir.string());
+    if (file_exists(ds.base_file())) {
+        fmt::print("DEEP1M already set up at {}\n", ds.files_dir().string());
         return true;
     }
     
@@ -430,36 +497,36 @@ inline bool setup_deep1m_files(const DatasetPaths& paths) {
     fmt::print("Found extracted files in: {}\n", extracted_dir.string());
     
     // Move files to canonical names
-    move_file(extracted_dir / "deep1m_base.fvecs", paths.files_dir / info.base_file);
-    move_file(extracted_dir / "deep1m_query.fvecs", paths.files_dir / info.query_file);
+    move_file(extracted_dir / "deep1m_base.fvecs", ds.files_dir() / info.base_file);
+    move_file(extracted_dir / "deep1m_query.fvecs", ds.files_dir() / info.query_file);
     
     // Handle exploration files if they exist (with possible different naming)
-    move_file(extracted_dir / "deep1m_explore_query.fvecs", paths.files_dir / info.explore_query_file);
-    move_file(extracted_dir / "deep1m_explore_entry_vertex.ivecs", paths.files_dir / info.explore_entry_vertex_file);
-    move_file(extracted_dir / "deep1m_explore_ground_truth.ivecs", paths.files_dir / info.explore_groundtruth_file);
+    move_file(extracted_dir / "deep1m_explore_query.fvecs", ds.files_dir() / info.explore_query_file);
+    move_file(extracted_dir / "deep1m_explore_entry_vertex.ivecs", ds.files_dir() / info.explore_entry_vertex_file);
+    move_file(extracted_dir / "deep1m_explore_ground_truth.ivecs", ds.files_dir() / info.explore_groundtruth_file);
     
     // Clean up tmp directory completely
     remove_directory(tmp_dir);
     
-    fmt::print("DEEP1M files set up in: {}\n", paths.files_dir.string());
+    fmt::print("DEEP1M files set up in: {}\n", ds.files_dir().string());
     return true;
 }
 
 /**
  * Setup GLOVE dataset
  */
-inline bool setup_glove_files(const DatasetPaths& paths) {
+inline bool setup_glove_files(const Dataset& ds) {
     fmt::print("\n=== Setting up GLOVE dataset ===\n");
     
-    const auto& info = paths.info;
-    const auto archive_file = paths.dataset_dir / "glove.tar.gz";
-    const auto tmp_dir = paths.dataset_dir / "_tmp_extract";
+    const auto& info = ds.info();
+    const auto archive_file = ds.dataset_dir() / "glove.tar.gz";
+    const auto tmp_dir = ds.dataset_dir() / "_tmp_extract";
     
-    ensure_directory(paths.dataset_dir);
-    ensure_directory(paths.files_dir);
+    ensure_directory(ds.dataset_dir());
+    ensure_directory(ds.files_dir());
     
-    if (file_exists(paths.base_file())) {
-        fmt::print("GLOVE already set up at {}\n", paths.files_dir.string());
+    if (file_exists(ds.base_file())) {
+        fmt::print("GLOVE already set up at {}\n", ds.files_dir().string());
         return true;
     }
     
@@ -493,39 +560,39 @@ inline bool setup_glove_files(const DatasetPaths& paths) {
     fmt::print("Found extracted files in: {}\n", extracted_dir.string());
     
     // Move files to canonical names (GLOVE uses "glove-100_" prefix in archive)
-    move_file(extracted_dir / "glove-100_base.fvecs", paths.files_dir / info.base_file);
-    move_file(extracted_dir / "glove-100_query.fvecs", paths.files_dir / info.query_file);
+    move_file(extracted_dir / "glove-100_base.fvecs", ds.files_dir() / info.base_file);
+    move_file(extracted_dir / "glove-100_query.fvecs", ds.files_dir() / info.query_file);
     
     // Handle exploration files if they exist
-    move_file(extracted_dir / "glove-100_explore_query.fvecs", paths.files_dir / info.explore_query_file);
-    move_file(extracted_dir / "glove_explore_query.fvecs", paths.files_dir / info.explore_query_file);
-    move_file(extracted_dir / "glove-100_explore_entry_vertex.ivecs", paths.files_dir / info.explore_entry_vertex_file);
-    move_file(extracted_dir / "glove_explore_entry_vertex.ivecs", paths.files_dir / info.explore_entry_vertex_file);
-    move_file(extracted_dir / "glove-100_explore_ground_truth.ivecs", paths.files_dir / info.explore_groundtruth_file);
-    move_file(extracted_dir / "glove_explore_ground_truth.ivecs", paths.files_dir / info.explore_groundtruth_file);
+    move_file(extracted_dir / "glove-100_explore_query.fvecs", ds.files_dir() / info.explore_query_file);
+    move_file(extracted_dir / "glove_explore_query.fvecs", ds.files_dir() / info.explore_query_file);
+    move_file(extracted_dir / "glove-100_explore_entry_vertex.ivecs", ds.files_dir() / info.explore_entry_vertex_file);
+    move_file(extracted_dir / "glove_explore_entry_vertex.ivecs", ds.files_dir() / info.explore_entry_vertex_file);
+    move_file(extracted_dir / "glove-100_explore_ground_truth.ivecs", ds.files_dir() / info.explore_groundtruth_file);
+    move_file(extracted_dir / "glove_explore_ground_truth.ivecs", ds.files_dir() / info.explore_groundtruth_file);
     
     // Clean up tmp directory completely
     remove_directory(tmp_dir);
     
-    fmt::print("GLOVE files set up in: {}\n", paths.files_dir.string());
+    fmt::print("GLOVE files set up in: {}\n", ds.files_dir().string());
     return true;
 }
 
 /**
  * Setup AUDIO dataset
  */
-inline bool setup_audio_files(const DatasetPaths& paths) {
+inline bool setup_audio_files(const Dataset& ds) {
     fmt::print("\n=== Setting up AUDIO dataset ===\n");
     
-    const auto& info = paths.info;
-    const auto archive_file = paths.dataset_dir / "audio.tar.gz";
-    const auto tmp_dir = paths.dataset_dir / "_tmp_extract";
+    const auto& info = ds.info();
+    const auto archive_file = ds.dataset_dir() / "audio.tar.gz";
+    const auto tmp_dir = ds.dataset_dir() / "_tmp_extract";
     
-    ensure_directory(paths.dataset_dir);
-    ensure_directory(paths.files_dir);
+    ensure_directory(ds.dataset_dir());
+    ensure_directory(ds.files_dir());
     
-    if (file_exists(paths.base_file())) {
-        fmt::print("AUDIO already set up at {}\n", paths.files_dir.string());
+    if (file_exists(ds.base_file())) {
+        fmt::print("AUDIO already set up at {}\n", ds.files_dir().string());
         return true;
     }
     
@@ -559,18 +626,18 @@ inline bool setup_audio_files(const DatasetPaths& paths) {
     fmt::print("Found extracted files in: {}\n", extracted_dir.string());
     
     // Move files to canonical names
-    move_file(extracted_dir / "audio_base.fvecs", paths.files_dir / info.base_file);
-    move_file(extracted_dir / "audio_query.fvecs", paths.files_dir / info.query_file);
+    move_file(extracted_dir / "audio_base.fvecs", ds.files_dir() / info.base_file);
+    move_file(extracted_dir / "audio_query.fvecs", ds.files_dir() / info.query_file);
     
     // Handle exploration files if they exist
-    move_file(extracted_dir / "audio_explore_query.fvecs", paths.files_dir / info.explore_query_file);
-    move_file(extracted_dir / "audio_explore_entry_vertex.ivecs", paths.files_dir / info.explore_entry_vertex_file);
-    move_file(extracted_dir / "audio_explore_ground_truth.ivecs", paths.files_dir / info.explore_groundtruth_file);
+    move_file(extracted_dir / "audio_explore_query.fvecs", ds.files_dir() / info.explore_query_file);
+    move_file(extracted_dir / "audio_explore_entry_vertex.ivecs", ds.files_dir() / info.explore_entry_vertex_file);
+    move_file(extracted_dir / "audio_explore_ground_truth.ivecs", ds.files_dir() / info.explore_groundtruth_file);
     
     // Clean up tmp directory completely
     remove_directory(tmp_dir);
     
-    fmt::print("AUDIO files set up in: {}\n", paths.files_dir.string());
+    fmt::print("AUDIO files set up in: {}\n", ds.files_dir().string());
     return true;
 }
 
@@ -588,20 +655,20 @@ inline bool setup_audio_files(const DatasetPaths& paths) {
  * - explore_groundtruth_top1000.ivecs: Top-1000 nearest neighbors for each entry
  */
 inline bool generate_exploration_files(
-    const DatasetPaths& paths,
+    const Dataset& ds,
     const deglib::FeatureRepository& base_repo,
     const uint32_t thread_count = 4)
 {
-    const auto& info = paths.info;
+    const auto& info = ds.info();
     const size_t base_size = base_repo.size();
     const size_t sample_count = DatasetInfo::EXPLORE_SAMPLE_COUNT;
     const uint32_t topk = DatasetInfo::EXPLORE_TOPK;
     const uint32_t dims = (uint32_t)base_repo.dims();
     
     // Check if files already exist
-    if (file_exists(paths.explore_query_file()) &&
-        file_exists(paths.explore_entry_vertex_file()) &&
-        file_exists(paths.explore_groundtruth_file())) {
+    if (file_exists(ds.explore_query_file()) &&
+        file_exists(ds.explore_entry_vertex_file()) &&
+        file_exists(ds.explore_groundtruth_file())) {
         fmt::print("Exploration files already exist\n");
         return true;
     }
@@ -626,12 +693,12 @@ inline bool generate_exploration_files(
     fmt::print("Selected {} entry vertices with step {:.2f}\n", sample_count, step);
     
     // Write entry vertex IDs
-    ivecs_write(paths.explore_entry_vertex_file().c_str(), 1, sample_count, entry_ids.data());
-    fmt::print("Wrote: {}\n", paths.explore_entry_vertex_file());
+    ivecs_write(ds.explore_entry_vertex_file().c_str(), 1, sample_count, entry_ids.data());
+    fmt::print("Wrote: {}\n", ds.explore_entry_vertex_file());
     
     // Write entry features
-    fvecs_write(paths.explore_query_file().c_str(), dims, sample_count, entry_features.data());
-    fmt::print("Wrote: {}\n", paths.explore_query_file());
+    fvecs_write(ds.explore_query_file().c_str(), dims, sample_count, entry_features.data());
+    fmt::print("Wrote: {}\n", ds.explore_query_file());
     
     // Create a temporary repository for queries
     auto query_features = std::make_unique<std::byte[]>(sample_count * dims * sizeof(float));
@@ -643,8 +710,8 @@ inline bool generate_exploration_files(
     auto groundtruth = compute_knn_groundtruth(base_repo, query_repo, info.metric, topk, 0, thread_count);
     
     // Write ground truth
-    ivecs_write(paths.explore_groundtruth_file().c_str(), topk, sample_count, groundtruth.data());
-    fmt::print("Wrote: {}\n", paths.explore_groundtruth_file());
+    ivecs_write(ds.explore_groundtruth_file().c_str(), topk, sample_count, groundtruth.data());
+    fmt::print("Wrote: {}\n", ds.explore_groundtruth_file());
     
     return true;
 }
@@ -661,12 +728,12 @@ inline bool generate_exploration_files(
  * - All base vectors
  */
 inline bool generate_groundtruth_files(
-    const DatasetPaths& paths,
+    const Dataset& ds,
     const deglib::FeatureRepository& base_repo,
     const deglib::FeatureRepository& query_repo,
     const uint32_t thread_count = 4)
 {
-    const auto& info = paths.info;
+    const auto& info = ds.info();
     const size_t base_size = base_repo.size();
     const uint32_t topk = DatasetInfo::GROUNDTRUTH_TOPK;
     const size_t step = DatasetInfo::GROUNDTRUTH_STEP;
@@ -677,7 +744,7 @@ inline bool generate_groundtruth_files(
     
     // Generate for each step
     for (size_t nb = step; nb <= base_size; nb += step) {
-        std::string gt_file = paths.groundtruth_file(nb);
+        std::string gt_file = ds.groundtruth_file(nb);
         
         if (file_exists(gt_file)) {
             fmt::print("Ground truth exists: {}\n", gt_file);
@@ -694,7 +761,7 @@ inline bool generate_groundtruth_files(
     // Generate for half of base (if not already covered by step)
     size_t half_count = base_size / 2;
     if (half_count % step != 0) {
-        std::string gt_half_file = paths.groundtruth_file_half();
+        std::string gt_half_file = ds.groundtruth_file_half();
         
         if (!file_exists(gt_half_file)) {
             fmt::print("\nComputing ground truth for half (nb={}) ...\n", half_count);
@@ -707,7 +774,7 @@ inline bool generate_groundtruth_files(
     
     // Generate for full base (if not already covered by step)
     if (base_size % step != 0) {
-        std::string gt_full_file = paths.groundtruth_file_full();
+        std::string gt_full_file = ds.groundtruth_file_full();
         
         if (!file_exists(gt_full_file)) {
             fmt::print("\nComputing ground truth for full (nb={}) ...\n", base_size);
@@ -728,41 +795,36 @@ inline bool generate_groundtruth_files(
 /**
  * Set up a dataset: download, extract, rename files, generate missing data.
  * 
- * @param data_path The root data path (DATA_PATH)
- * @param dataset The dataset to set up
+ * @param ds The dataset to set up (already contains data_root)
  * @param thread_count Number of threads for ground truth computation
  * @return true if successful
  */
 inline bool setup_dataset(
-    const std::filesystem::path& data_path,
-    const Dataset& dataset,
+    const Dataset& ds,
     const uint32_t thread_count = 4)
 {
-    if (!dataset.is_valid()) {
+    if (!ds.is_valid()) {
         fmt::print(stderr, "Invalid dataset\n");
         return false;
     }
     
-    auto paths = dataset.paths(data_path);
-    const auto& info = paths.info;
-    
     fmt::print("\n============================================================\n");
-    fmt::print("Setting up dataset: {}\n", dataset.name());
-    fmt::print("Data path: {}\n", data_path.string());
-    fmt::print("Dataset directory: {}\n", paths.dataset_dir.string());
-    fmt::print("Files directory: {}\n", paths.files_dir.string());
+    fmt::print("Setting up dataset: {}\n", ds.name());
+    fmt::print("Data path: {}\n", ds.data_root().string());
+    fmt::print("Dataset directory: {}\n", ds.dataset_dir().string());
+    fmt::print("Files directory: {}\n", ds.files_dir().string());
     fmt::print("============================================================\n");
     
     // Step 1: Download and extract dataset files
     bool setup_ok = false;
-    if (dataset == Dataset::SIFT1M) {
-        setup_ok = detail::setup_sift1m_files(paths);
-    } else if (dataset == Dataset::DEEP1M) {
-        setup_ok = detail::setup_deep1m_files(paths);
-    } else if (dataset == Dataset::GLOVE) {
-        setup_ok = detail::setup_glove_files(paths);
-    } else if (dataset == Dataset::AUDIO) {
-        setup_ok = detail::setup_audio_files(paths);
+    if (ds.dataset_name() == DatasetName::SIFT1M) {
+        setup_ok = detail::setup_sift1m_files(ds);
+    } else if (ds.dataset_name() == DatasetName::DEEP1M) {
+        setup_ok = detail::setup_deep1m_files(ds);
+    } else if (ds.dataset_name() == DatasetName::GLOVE) {
+        setup_ok = detail::setup_glove_files(ds);
+    } else if (ds.dataset_name() == DatasetName::AUDIO) {
+        setup_ok = detail::setup_audio_files(ds);
     } else {
         fmt::print(stderr, "Unknown dataset\n");
         return false;
@@ -774,55 +836,68 @@ inline bool setup_dataset(
     }
     
     // Step 2: Verify required files exist
-    if (!file_exists(paths.base_file())) {
-        fmt::print(stderr, "Base file not found: {}\n", paths.base_file());
+    if (!file_exists(ds.base_file())) {
+        fmt::print(stderr, "Base file not found: {}\n", ds.base_file());
         return false;
     }
-    if (!file_exists(paths.query_file())) {
-        fmt::print(stderr, "Query file not found: {}\n", paths.query_file());
+    if (!file_exists(ds.query_file())) {
+        fmt::print(stderr, "Query file not found: {}\n", ds.query_file());
         return false;
     }
     
     fmt::print("\nLoading base repository...\n");
-    auto base_repo = deglib::load_static_repository(paths.base_file().c_str());
+    auto base_repo = ds.load_base();
     fmt::print("Loaded {} vectors of dimension {}\n", base_repo.size(), base_repo.dims());
     
     fmt::print("\nLoading query repository...\n");
-    auto query_repo = deglib::load_static_repository(paths.query_file().c_str());
+    auto query_repo = ds.load_query();
     fmt::print("Loaded {} vectors of dimension {}\n", query_repo.size(), query_repo.dims());
     
     // Step 3: Generate exploration files if missing
-    generate_exploration_files(paths, base_repo, thread_count);
+    generate_exploration_files(ds, base_repo, thread_count);
     
     // Step 4: Generate ground truth files if missing
-    generate_groundtruth_files(paths, base_repo, query_repo, thread_count);
+    generate_groundtruth_files(ds, base_repo, query_repo, thread_count);
     
     fmt::print("\n============================================================\n");
-    fmt::print("Dataset {} setup complete!\n", dataset.name());
+    fmt::print("Dataset {} setup complete!\n", ds.name());
     fmt::print("\nFiles:\n");
-    fmt::print("  Base:     {}\n", paths.base_file());
-    fmt::print("  Query:    {}\n", paths.query_file());
-    fmt::print("  Explore Query:  {}\n", paths.explore_query_file());
-    fmt::print("  Explore Entry:  {}\n", paths.explore_entry_vertex_file());
-    fmt::print("  Explore GT:     {}\n", paths.explore_groundtruth_file());
-    fmt::print("  GT Full:  {}\n", paths.groundtruth_file_full());
-    fmt::print("  GT Half:  {}\n", paths.groundtruth_file_half());
+    fmt::print("  Base:     {}\n", ds.base_file());
+    fmt::print("  Query:    {}\n", ds.query_file());
+    fmt::print("  Explore Query:  {}\n", ds.explore_query_file());
+    fmt::print("  Explore Entry:  {}\n", ds.explore_entry_vertex_file());
+    fmt::print("  Explore GT:     {}\n", ds.explore_groundtruth_file());
+    fmt::print("  GT Full:  {}\n", ds.groundtruth_file_full());
+    fmt::print("  GT Half:  {}\n", ds.groundtruth_file_half());
     fmt::print("============================================================\n\n");
     
     return true;
 }
 
 /**
+ * Convenience overload taking DatasetName and data_root separately.
+ */
+inline bool setup_dataset(
+    const DatasetName& name,
+    const std::filesystem::path& data_root,
+    const uint32_t thread_count = 4)
+{
+    Dataset ds(name, data_root);
+    return setup_dataset(ds, thread_count);
+}
+
+/**
  * Convenience function to set up all datasets.
  */
 inline bool setup_all_datasets(
-    const std::filesystem::path& data_path,
+    const std::filesystem::path& data_root,
     const uint32_t thread_count = 4)
 {
     bool all_ok = true;
     
-    for (const auto& ds : Dataset::all()) {
-        if (!setup_dataset(data_path, ds, thread_count)) {
+    for (const auto& name : DatasetName::all()) {
+        Dataset ds(name, data_root);
+        if (!setup_dataset(ds, thread_count)) {
             fmt::print(stderr, "Failed to set up {}\n", ds.name());
             all_ok = false;
         }
