@@ -1050,10 +1050,10 @@ int main() {
     // const auto opt_graph_file = (data_path / "2dgraph_opt.deg").string();
     // optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 20); // k_opt, eps_opt, i_opt, iteration
 
-    fmt::print("Data path: {}\n", data_path.string());
-    const auto graph_file = (data_path / "fashion.deg").string();
-    const auto opt_graph_file = (data_path / "fashion_opt.deg").string();
-    optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 1000); // k_opt, eps_opt, i_opt, iteration
+    //fmt::print("Data path: {}\n", data_path.string());
+    //const auto graph_file = (data_path / "fashion.deg").string();
+    //const auto opt_graph_file = (data_path / "fashion_opt.deg").string();
+    //optimze_graph(graph_file, opt_graph_file, 30, 0.001f, 5, 1000); // k_opt, eps_opt, i_opt, iteration
 
 
     fmt::print("Test OK\n");
