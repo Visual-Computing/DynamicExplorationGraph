@@ -1314,8 +1314,7 @@ class EvenRegularGraphBuilder {
         return false;
 
       // swap vertices to give vertex1 another chance to find a better connection
-      //if(steps % 2 == 0) 
-      //std::swap(vertex1, vertex4);
+      std::swap(vertex1, vertex4);
       
       // 4. early stop
       if(total_gain < 0) 
