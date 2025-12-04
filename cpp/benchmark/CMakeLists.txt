@@ -30,3 +30,13 @@ add_executable(deglib_groundtruth ${PROJECT_SOURCE_DIR}/src/deglib_groundtruth.c
 target_link_libraries(deglib_groundtruth PUBLIC DEG_LIB compile-options
                                                 fmt::fmt-header-only OpenMP::OpenMP_CXX)
 target_compile_definitions(deglib_groundtruth PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
+
+add_executable(deglib_phd ${PROJECT_SOURCE_DIR}/src/deglib_phd.cpp)
+target_link_libraries(deglib_phd PUBLIC DEG_LIB compile-options
+                                                fmt::fmt-header-only OpenMP::OpenMP_CXX)
+target_compile_definitions(deglib_phd PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
+
+add_executable(deglib_setup_dataset ${PROJECT_SOURCE_DIR}/src/deglib_setup_dataset.cpp)
+target_link_libraries(deglib_setup_dataset PUBLIC DEG_LIB compile-options
+                                                fmt::fmt-header-only)
+target_compile_definitions(deglib_setup_dataset PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
