@@ -576,8 +576,9 @@ int main(int argc, char *argv[]) {
     
     if(do_run) {
         // Setup dataset (downloads, extracts, generates ground truth if needed)
-        log("\nSetting up dataset...\n");
-        if (!deglib::benchmark::setup_dataset(ds)) {
+        auto setup_threads = std::thread::hardware_concurrency();
+        log("\nSetting up dataset with {} threads...\n", setup_threads);
+        if (!deglib::benchmark::setup_dataset(ds, setup_threads)) {
             log("ERROR: Failed to setup dataset {}\n", ds.name());
             return 1;
         }

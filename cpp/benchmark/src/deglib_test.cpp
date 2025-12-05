@@ -172,7 +172,8 @@ int main(int argc, char* argv[]) {
     
     // Ensure dataset is set up (downloads, generates ground truth files if needed)
     fmt::print("\n=== Ensuring dataset is set up ===\n");
-    if (!setup_dataset(ds, analysis_threads)) {
+    auto setup_threads = std::thread::hardware_concurrency();
+    if (!setup_dataset(ds, setup_threads)) {
         fmt::print(stderr, "Error: Failed to set up dataset: {}\n", dataset_str);
         return 1;
     }
