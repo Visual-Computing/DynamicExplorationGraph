@@ -284,11 +284,12 @@ inline void create_graph(
 /**
  * Create multiple graphs incrementally using more data from the repository.
  * Builds graphs at specified size intervals, all in the same directory.
+ * Skips building if a graph file already exists for a given size.
  * 
  * @param repository The feature repository containing the data.
  * @param output_dir Directory to save graphs.
  * @param graph_name_base Base name for graph files.
- * @param interval Add this many vertices between each saved graph.
+ * @param step_size Add this many vertices between each saved graph.
  * @param metric Distance metric to use.
  * @param lid Optimization target.
  * @param k Edges per vertex (graph degree).
@@ -299,7 +300,7 @@ inline void create_graph(
  * @param i_opt Optimization path length.
  * @param thread_count Number of threads to use.
  * @param use_rng Enable RNG (Relative Neighborhood Graph) pruning during graph extension (default: true).
- * @return Vector of pairs (graph_path, vertex_count) for each saved graph.
+ * @return Vector of pairs (graph_path, vertex_count) for each graph (existing or newly created).
  */
 inline std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(
     const deglib::StaticFeatureRepository& repository, 
@@ -317,7 +318,30 @@ inline std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(
     const uint32_t thread_count,
     const bool use_rng = true) 
 {
-    std::vector<std::pair<std::string, uint32_t>> created_files;
+    std::vector<std::pair<std::string, uint32_t>> result_files;
+    const uint32_t total_size = uint32_t(repository.size());
+    
+    // First, collect all target sizes and check which graphs already exist
+    std::vector<uint32_t> target_sizes;
+    uint32_t first_missing_size = 0;
+    for(uint32_t size = step_size; size <= total_size; size += step_size) {
+        target_sizes.push_back(size);
+        std::string size_str = std::to_string(size / 1000) + "k";
+        std::string graph_file = fmt::format("{}/{}_{}.deg", output_dir, graph_name_base, size_str);
+        result_files.push_back({graph_file, size});
+        
+        if(first_missing_size == 0 && !std::filesystem::exists(graph_file)) {
+            first_missing_size = size;
+        }
+    }
+    
+    // If all graphs exist, return early
+    if(first_missing_size == 0) {
+        log("All {} incremental graphs already exist, skipping build\n", result_files.size());
+        return result_files;
+    }
+    
+    // Need to build - set up the graph and builder
     auto rnd = std::mt19937(7);
     const uint32_t swap_tries = 0;
     const uint32_t additional_swap_tries = 0;
@@ -325,7 +349,7 @@ inline std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(
 
     log("Setup empty graph with {} vertices in {}D feature space\n", repository.size(), repository.dims());
     const auto dims = repository.dims();
-    const uint32_t max_vertex_count = uint32_t(repository.size());
+    const uint32_t max_vertex_count = total_size;
     const auto feature_space = deglib::FloatSpace(dims, metric);
     const auto feature_byte_size = feature_space.get_data_size();
     auto graph = deglib::graph::SizeBoundedGraph(max_vertex_count, k, feature_space);
@@ -338,7 +362,7 @@ inline std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(
     
     const auto log_after = 100000;
 
-    log("Start building\n");    
+    log("Start building (first missing size: {})\n", first_missing_size);    
     auto start = std::chrono::steady_clock::now();
     uint64_t duration_ms = 0;
     const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
@@ -359,13 +383,13 @@ inline std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(
     };
 
     uint32_t current_count = 0;
-    uint32_t total_size = uint32_t(repository.size());
 
-    while(current_count < total_size) {
-        uint32_t target_size = std::min(current_count + step_size, total_size);
+    for(uint32_t target_size : target_sizes) {
+        std::string size_str = std::to_string(target_size / 1000) + "k";
+        std::string graph_file = fmt::format("{}/{}_{}.deg", output_dir, graph_name_base, size_str);
         
+        // Add data up to target size
         log("Adding data from {} to {}\n", current_count, target_size);
-
         for (uint32_t i = current_count; i < target_size; i++) {
             auto feature = repository.getFeature(i);
             auto feature_vector = std::vector<std::byte>{feature, feature + feature_byte_size};
@@ -373,21 +397,20 @@ inline std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(
         }
         current_count = target_size;
 
-        // Start the build process
+        // Build the graph
         builder.build(improvement_callback, false);
-        log("Built graph in {} secs\n", duration_ms / 1000);
+        log("Built graph with {} vertices in {} secs\n", target_size, duration_ms / 1000);
 
-        // Construct filename with size suffix (e.g., _100k)
-        std::string size_str = std::to_string(target_size / 1000) + "k";
-        std::string graph_file = fmt::format("{}/{}_{}.deg", output_dir, graph_name_base, size_str);
-        
-        graph.saveGraph(graph_file.c_str());
-        created_files.push_back({graph_file, target_size});
-
-        log("Saved graph: {}, non-RNG edges: {}\n", graph_file, deglib::analysis::calc_non_rng_edges(graph));
+        // Save only if file doesn't exist
+        if(!std::filesystem::exists(graph_file)) {
+            graph.saveGraph(graph_file.c_str());
+            log("Saved graph: {}, non-RNG edges: {}\n", graph_file, deglib::analysis::calc_non_rng_edges(graph));
+        } else {
+            log("Graph already exists, skipping save: {}\n", graph_file);
+        }
     }
 
-    return created_files;
+    return result_files;
 }
 
 

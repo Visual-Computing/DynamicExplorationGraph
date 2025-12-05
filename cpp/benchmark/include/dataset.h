@@ -281,7 +281,23 @@ public:
      */
     std::vector<std::unordered_set<uint32_t>> load_groundtruth(size_t k, bool use_half_dataset = false) const {
         std::string gt_file = use_half_dataset ? groundtruth_file_half() : groundtruth_file_full();
-        
+        return load_groundtruth_from_file(gt_file, k);
+    }
+    
+    /**
+     * @brief Load ground truth for a specific base count.
+     * 
+     * @param k Number of nearest neighbors to include in each set
+     * @param nb Number of base vectors (e.g., 100000 for 100k subset)
+     * @return Vector of unordered_sets, one per query
+     */
+    std::vector<std::unordered_set<uint32_t>> load_groundtruth_for_size(size_t k, size_t nb) const {
+        std::string gt_file = groundtruth_file(nb);
+        return load_groundtruth_from_file(gt_file, k);
+    }
+
+private:
+    std::vector<std::unordered_set<uint32_t>> load_groundtruth_from_file(const std::string& gt_file, size_t k) const {
         size_t ground_truth_dims = 0;
         size_t ground_truth_size = 0;
         auto gt_data = deglib::fvecs_read(gt_file.c_str(), ground_truth_dims, ground_truth_size);
@@ -304,6 +320,8 @@ public:
 
         return answers;
     }
+
+public:
     
     /**
      * @brief Load exploration entry vertex IDs.
