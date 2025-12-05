@@ -296,6 +296,48 @@ public:
         return answers;
     }
     
+    /**
+     * @brief Load exploration entry vertex IDs.
+     * @return Vector of entry vertex IDs (external labels)
+     */
+    std::vector<uint32_t> load_explore_entry_vertices() const {
+        size_t dims = 0, count = 0;
+        auto data = deglib::fvecs_read(explore_entry_vertex_file().c_str(), dims, count);
+        const uint32_t* ptr = reinterpret_cast<const uint32_t*>(data.get());
+        
+        // Entry vertices are stored as ivecs with dims=1, so total count is count
+        std::vector<uint32_t> entry_vertices(count);
+        for (size_t i = 0; i < count; i++) {
+            entry_vertices[i] = ptr[i * dims];  // Each entry has 'dims' elements, take first
+        }
+        return entry_vertices;
+    }
+    
+    /**
+     * @brief Load exploration ground truth and convert to vector of unordered_sets.
+     * 
+     * @param k Number of nearest neighbors to include in each set (default: EXPLORE_TOPK = 1000)
+     * @return Vector of unordered_sets, one per entry vertex
+     */
+    std::vector<std::unordered_set<uint32_t>> load_explore_groundtruth(size_t k = DatasetInfo::EXPLORE_TOPK) const {
+        size_t dims = 0, count = 0;
+        auto data = deglib::fvecs_read(explore_groundtruth_file().c_str(), dims, count);
+        const uint32_t* gt_ptr = reinterpret_cast<const uint32_t*>(data.get());
+        
+        // Clamp k to available dimensions
+        size_t actual_k = std::min(k, dims);
+        
+        std::vector<std::unordered_set<uint32_t>> answers(count);
+        for (size_t i = 0; i < count; i++) {
+            auto& gt = answers[i];
+            gt.reserve(actual_k);
+            for (size_t j = 0; j < actual_k; j++) {
+                gt.insert(gt_ptr[dims * i + j]);
+            }
+        }
+        return answers;
+    }
+    
     // ========== Comparison ==========
     
     bool operator==(const Dataset& other) const { 

@@ -615,47 +615,11 @@ void test_graph(const std::string query_file, const std::string gt_file, const s
     const auto ground_truth = (uint32_t*)ground_truth_f.get(); // not very clean, works as long as sizeof(int) == sizeof(float)
     fmt::print("{} ground truth {} dimensions \n", count_out, dims_out);
 
-    deglib::benchmark::test_graph_anns(graph, query_repository, ground_truth, (uint32_t)dims_out, repeat, threads, k);
+    // Default eps_parameter for testing
+    std::vector<float> eps_parameter = { 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f };
+    deglib::benchmark::test_graph_anns(graph, query_repository, ground_truth, (uint32_t)dims_out, repeat, threads, k, eps_parameter);
 }
 
-static std::vector<float> estimate_recall(const deglib::search::SearchGraph& graph, const deglib::FeatureRepository& query_repository, const std::vector<std::unordered_set<uint32_t>>& answer, const uint32_t max_distance_count, const uint32_t k) {
-
-    const auto entry_vertex_indices = std::vector<uint32_t> { graph.getInternalIndex(0) };
-
-    std::vector<float> recalls;
-    std::vector<float> eps_parameter = { 0.1f, 0.2f };
-
-    for (float eps : eps_parameter)
-    {
-        size_t total = 0;
-        size_t correct = 0;
-        
-        #pragma omp parallel for reduction(+:total) reduction(+:correct)
-        for (int i = 0; i < (int)query_repository.size(); i++)
-        {
-            auto query = reinterpret_cast<const std::byte*>(query_repository.getFeature(uint32_t(i)));
-            auto result_queue = graph.search(entry_vertex_indices, query, eps, k, nullptr, max_distance_count);
-
-            const auto& gt = answer[i];
-            total += result_queue.size();
-            
-            size_t local_correct = 0;
-            while (result_queue.empty() == false)
-            {
-                const auto internal_index = result_queue.top().getInternalIndex();
-                const auto external_id = graph.getExternalLabel(internal_index);
-                if (gt.find(external_id) != gt.end()) local_correct++;
-                result_queue.pop();
-            }
-            correct += local_correct;
-        }
-
-        const auto precision = ((float)correct) / total;
-        recalls.push_back(precision);
-    }
-
-    return recalls;
-}
 
 /**
  * Load the graph from the drive, improve it and test it against the query data.
@@ -688,7 +652,7 @@ static void improve_and_test(const std::string initial_graph_file, const std::st
     // Adapted constructor call
     auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::OptimizationTarget::LowLID, 0, 0, k_opt, eps_opt, 5, 1, 0);
 
-    auto initial_recall = estimate_recall(graph, query_repository, answer, max_distance_count_test, k_test);
+    auto initial_recall = deglib::benchmark::estimate_recall(graph, query_repository, answer, max_distance_count_test, k_test);
     auto initial_graph_quality = 0.0f;//deglib::analysis::calc_graph_quality(graph);
     auto initial_avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 1);
     auto initial_avg_neighbor_rank = 0.0f;//deglib::analysis::calc_avg_neighbor_rank(graph);
@@ -725,7 +689,7 @@ static void improve_and_test(const std::string initial_graph_file, const std::st
             auto graph_file = (p.parent_path() / fmt::format("{}_OptK{}Eps{:.3f}Path5_it{}{}", stem, k_opt, eps_opt, tries, extension)).string();
 
             graph.saveGraph(graph_file.c_str());
-            auto recall = estimate_recall(graph, query_repository, answer, max_distance_count_test, k_test);
+            auto recall = deglib::benchmark::estimate_recall(graph, query_repository, answer, max_distance_count_test, k_test);
 
             fmt::print("{:5}s, with {:8} / {:8} improvements (avg {:2}/{:3}), GQ {:.4f}, AEW {:.2f}, ANR {:.2f}, Recall {}, connected {} \n", duration, improved, tries, avg_improv, avg_tries, graph_quality, avg_edge_weight, avg_neighbor_rank, fmt::join(recall, ", "), connected);
             last_status = status;
