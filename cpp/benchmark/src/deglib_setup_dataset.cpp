@@ -29,7 +29,7 @@ int main(int argc, char* argv[]) {
     
     // Parse arguments
     std::string dataset_arg = "sift1m";
-    uint32_t thread_count = 8;
+    uint32_t thread_count = std::thread::hardware_concurrency();
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -63,14 +63,14 @@ int main(int argc, char* argv[]) {
         fmt::print("Setting up all datasets...\n\n");
         deglib::benchmark::setup_all_datasets(data_path, thread_count);
     } else {
-        auto ds = deglib::benchmark::Dataset::from_string(dataset_arg);
+        auto ds = deglib::benchmark::DatasetName::from_string(dataset_arg);
         if (!ds.is_valid()) {
             fmt::print(stderr, "Unknown dataset: {}\n", dataset_arg);
             fmt::print(stderr, "Valid datasets: sift1m, deep1m, glove, audio, all\n");
             return 1;
         }
         
-        if (!deglib::benchmark::setup_dataset(data_path, ds, thread_count)) {
+        if (!deglib::benchmark::setup_dataset(ds, data_path, thread_count)) {
             fmt::print(stderr, "Failed to set up dataset: {}\n", dataset_arg);
             return 1;
         }
