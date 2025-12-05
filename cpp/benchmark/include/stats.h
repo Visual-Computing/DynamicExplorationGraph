@@ -30,143 +30,6 @@ namespace deglib::benchmark
 {
 
 // ============================================================================
-// Graph Statistics 
-// ============================================================================
-
-/**
- * @brief Complete graph statistics structure with in-degree and out-degree stats.
- */
-struct GraphStats {
-    // Basic stats
-    size_t vertex_count = 0;       ///< Total number of vertices
-    size_t edge_count = 0;         ///< Total number of edges
-    uint32_t feature_dims = 0;     ///< Feature vector dimensions
-    uint8_t edges_per_vertex = 0;  ///< Maximum edges per vertex (k)
-    
-    // Out-degree stats
-    float avg_out_degree = 0.0f;
-    uint32_t min_out_degree = 0;
-    uint32_t max_out_degree = 0;
-    
-    // In-degree stats
-    float avg_in_degree = 0.0f;
-    uint32_t min_in_degree = 0;
-    uint32_t max_in_degree = 0;
-    uint32_t source_vertices = 0;           // Vertices with 0 in-degree
-    
-    // Quality metrics (optional, expensive to compute)
-    float graph_quality = -1.0f;            // Graph quality (-1 means not computed)
-    float search_reachability = -1.0f;      // search reach (-1 means not computed)
-    float exploration_reachability = -1.0f; // exploration reach (-1 means not computed)
-    
-    // Memory
-    size_t memory_bytes = 0;       ///< Estimated memory usage
-};
-
-/**
- * @brief Collect statistics from a search graph.
- * 
- * This collects statistics that are cheap to compute.
- * For expensive metrics (reachability, avg reach, graph quality), use compute_full_graph_stats().
- * 
- * @param graph The search graph to analyze
- * @return GraphStats with basic statistics filled in
- */
-inline GraphStats collect_graph_stats(const deglib::search::SearchGraph& graph) {
-    GraphStats stats;
-    stats.vertex_count = graph.size();
-    stats.feature_dims = graph.getFeatureSpace().dim();
-    stats.edges_per_vertex = graph.getEdgesPerVertex();
-
-    const auto graph_size = graph.size();
-    const auto edges_per_vertex = graph.getEdgesPerVertex();
-
-    // Count out-degrees
-    size_t total_edges = 0;
-    uint32_t min_out = (std::numeric_limits<uint32_t>::max)();
-    uint32_t max_out = 0;
-
-    for (uint32_t i = 0; i < graph_size; i++) {
-        const auto neighbors = graph.getNeighborIndices(i);
-        uint32_t valid_edges = 0;
-        for (uint8_t j = 0; j < edges_per_vertex; j++) {
-            if (neighbors[j] != (std::numeric_limits<uint32_t>::max)()) {
-                valid_edges++;
-            }
-        }
-        total_edges += valid_edges;
-        if (valid_edges < min_out) min_out = valid_edges;
-        if (valid_edges > max_out) max_out = valid_edges;
-    }
-
-    stats.edge_count = total_edges;
-    stats.avg_out_degree = graph_size > 0 ? (float)total_edges / graph_size : 0.0f;
-    stats.min_out_degree = graph_size > 0 ? min_out : 0;
-    stats.max_out_degree = max_out;
-
-    // Compute in-degree stats (inlined)
-    auto in_degree_count = std::vector<uint32_t>(graph_size, 0);
-    for (uint32_t v = 0; v < graph_size; v++) {
-        const auto neighbor_indices = graph.getNeighborIndices(v);
-        for (uint8_t e = 0; e < edges_per_vertex; e++) {
-            const auto neighbor_index = neighbor_indices[e];
-            if (neighbor_index != (std::numeric_limits<uint32_t>::max)() && neighbor_index < graph_size) {
-                in_degree_count[neighbor_index]++;
-            }
-        }
-    }
-
-    stats.min_in_degree = (std::numeric_limits<uint32_t>::max)();
-    stats.max_in_degree = 0;
-    uint64_t total_in_degree = 0;
-
-    for (uint32_t v = 0; v < graph_size; v++) {
-        const auto in_degree = in_degree_count[v];
-        if (in_degree < stats.min_in_degree) stats.min_in_degree = in_degree;
-        if (in_degree > stats.max_in_degree) stats.max_in_degree = in_degree;
-        if (in_degree == 0) stats.source_vertices++;
-        total_in_degree += in_degree;
-    }
-
-    stats.avg_in_degree = graph_size > 0 ? ((float)total_in_degree) / graph_size : 0.0f;
-    if (graph_size == 0) stats.min_in_degree = 0;
-
-    // Memory estimation
-    // Per vertex: neighbors (k * 4 bytes) + weights (k * 4 bytes) + feature (dims * 4 bytes)
-    stats.memory_bytes = stats.vertex_count * (stats.edges_per_vertex * 4 + stats.edges_per_vertex * 4 + stats.feature_dims * 4);
-
-    return stats;
-}
-
-/**
- * @brief Log graph statistics.
- * 
- * @param stats The statistics to log
- */
-inline void log_graph_stats(const GraphStats& stats) {
-    log("Graph Statistics:\n");
-    log("  Vertices: {}\n", stats.vertex_count);
-    log("  Total edges: {}\n", stats.edge_count);
-    log("  Feature dimensions: {}\n", stats.feature_dims);
-    log("  Edges per vertex (k): {}\n", stats.edges_per_vertex);
-    log("  Out-degree: avg={:.2f}, min={}, max={}\n", stats.avg_out_degree, stats.min_out_degree, stats.max_out_degree);
-    log("  In-degree:  avg={:.2f}, min={}, max={}, source_vertices={}\n", 
-        stats.avg_in_degree, stats.min_in_degree, stats.max_in_degree, stats.source_vertices);
-    
-    if (stats.graph_quality >= 0) {
-        log("  Graph Quality (GQ): {:.4f}\n", stats.graph_quality);
-    }
-    if (stats.search_reachability > 0) {
-        log("  Search Reachability: {:.2f}%\n", stats.search_reachability * 100);
-    }
-    if (stats.exploration_reachability >= 0) {
-        log("  Exploration Reachability: {:.2f}%\n", stats.exploration_reachability * 100);
-    }
-    
-    log("  Estimated memory: {:.2f} MB\n", stats.memory_bytes / (1024.0 * 1024.0));
-}
-
-// ============================================================================
 // Search Reachability
 // ============================================================================
 
@@ -449,41 +312,164 @@ inline float compute_graph_quality(
 }
 
 
+// ============================================================================
+// Graph Statistics 
+// ============================================================================
+
 /**
- * @brief Compute all statistics including expensive ones, using pre-computed ground truth sets.
+ * @brief Complete graph statistics structure with in-degree and out-degree stats.
+ */
+struct GraphStats {
+    // Basic stats
+    size_t vertex_count = 0;       ///< Total number of vertices
+    size_t edge_count = 0;         ///< Total number of edges
+    uint32_t feature_dims = 0;     ///< Feature vector dimensions
+    uint8_t edges_per_vertex = 0;  ///< Maximum edges per vertex (k)
+    
+    // Out-degree stats
+    float avg_out_degree = 0.0f;
+    uint32_t min_out_degree = 0;
+    uint32_t max_out_degree = 0;
+    
+    // In-degree stats
+    float avg_in_degree = 0.0f;
+    uint32_t min_in_degree = 0;
+    uint32_t max_in_degree = 0;
+    uint32_t source_vertices = 0;           // Vertices with 0 in-degree
+    
+    // Quality metrics (optional, expensive to compute)
+    float graph_quality = -1.0f;            // Graph quality (-1 means not computed)
+    float search_reachability = -1.0f;      // search reach (-1 means not computed)
+    float exploration_reachability = -1.0f; // exploration reach (-1 means not computed)
+    
+    // Memory
+    size_t memory_bytes = 0;       ///< Estimated memory usage
+};
+
+/**
+ * @brief Analyze a search graph, compute all statistics, and log them.
+ * 
+ * This is the main function for graph analysis. It computes basic stats,
+ * optionally computes expensive metrics (reachability, graph quality), and logs everything.
  * 
  * @param graph The search graph to analyze
- * @param exploration_gt Pre-computed ground truth as vector of unordered_sets
- * @param compute_reachability Whether to compute seed reachability (expensive)
- * @param compute_reach Whether to compute average reach (expensive)
+ * @param exploration_gt Pre-computed ground truth as vector of unordered_sets (optional, for graph quality)
+ * @param compute_reachability Whether to compute search reachability (expensive)
+ * @param compute_reach Whether to compute exploration reachability (expensive)
  * @param thread_count Number of threads for parallel computation
- * @return GraphStats with all requested statistics
+ * @return GraphStats with all computed statistics
  */
-inline GraphStats compute_full_graph_stats(
+inline GraphStats analyze_graph(
     const deglib::search::SearchGraph& graph,
-    const std::vector<std::unordered_set<uint32_t>>& exploration_gt,
-    bool compute_reachability = true,
-    bool compute_reach = true,
+    const std::vector<std::unordered_set<uint32_t>>& exploration_gt = {},
+    bool compute_reachability = false,
+    bool compute_reach = false,
     uint32_t thread_count = std::thread::hardware_concurrency())
 {
-    auto stats = collect_graph_stats(graph);
+    GraphStats stats;
+    stats.vertex_count = graph.size();
+    stats.feature_dims = graph.getFeatureSpace().dim();
+    stats.edges_per_vertex = graph.getEdgesPerVertex();
 
+    const auto graph_size = graph.size();
+    const auto edges_per_vertex = graph.getEdgesPerVertex();
+
+    // Count out-degrees
+    size_t total_edges = 0;
+    uint32_t min_out = (std::numeric_limits<uint32_t>::max)();
+    uint32_t max_out = 0;
+
+    for (uint32_t i = 0; i < graph_size; i++) {
+        const auto neighbors = graph.getNeighborIndices(i);
+        uint32_t valid_edges = 0;
+        for (uint8_t j = 0; j < edges_per_vertex; j++) {
+            if (neighbors[j] != (std::numeric_limits<uint32_t>::max)()) {
+                valid_edges++;
+            }
+        }
+        total_edges += valid_edges;
+        if (valid_edges < min_out) min_out = valid_edges;
+        if (valid_edges > max_out) max_out = valid_edges;
+    }
+
+    stats.edge_count = total_edges;
+    stats.avg_out_degree = graph_size > 0 ? (float)total_edges / graph_size : 0.0f;
+    stats.min_out_degree = graph_size > 0 ? min_out : 0;
+    stats.max_out_degree = max_out;
+
+    // Compute in-degree stats
+    auto in_degree_count = std::vector<uint32_t>(graph_size, 0);
+    for (uint32_t v = 0; v < graph_size; v++) {
+        const auto neighbor_indices = graph.getNeighborIndices(v);
+        for (uint8_t e = 0; e < edges_per_vertex; e++) {
+            const auto neighbor_index = neighbor_indices[e];
+            if (neighbor_index != (std::numeric_limits<uint32_t>::max)() && neighbor_index < graph_size) {
+                in_degree_count[neighbor_index]++;
+            }
+        }
+    }
+
+    stats.min_in_degree = (std::numeric_limits<uint32_t>::max)();
+    stats.max_in_degree = 0;
+    uint64_t total_in_degree = 0;
+
+    for (uint32_t v = 0; v < graph_size; v++) {
+        const auto in_degree = in_degree_count[v];
+        if (in_degree < stats.min_in_degree) stats.min_in_degree = in_degree;
+        if (in_degree > stats.max_in_degree) stats.max_in_degree = in_degree;
+        if (in_degree == 0) stats.source_vertices++;
+        total_in_degree += in_degree;
+    }
+
+    stats.avg_in_degree = graph_size > 0 ? ((float)total_in_degree) / graph_size : 0.0f;
+    if (graph_size == 0) stats.min_in_degree = 0;
+
+    // Memory estimation
+    stats.memory_bytes = stats.vertex_count * (stats.edges_per_vertex * 4 + stats.edges_per_vertex * 4 + stats.feature_dims * 4);
+
+    // Compute expensive metrics if requested
     if (!exploration_gt.empty()) {
         log("Computing graph quality...\n");
         stats.graph_quality = compute_graph_quality(graph, exploration_gt);
     }
 
     if (compute_reachability) {
-        log("Computing seed reachability...\n");
-        stats.search_reachability = compute_search_reachability(graph, thread_count);
+        log("Computing search reachability...\n");
+        uint32_t reachable = compute_search_reachability(graph, thread_count);
+        stats.search_reachability = graph_size > 0 ? (float)reachable / graph_size : 0.0f;
     }
 
     if (compute_reach) {
-        log("Computing average reach...\n");
-        stats.exploration_reachability = compute_exploration_reach(graph);
+        log("Computing exploration reachability...\n");
+        float avg_reach = compute_exploration_reach(graph);
+        stats.exploration_reachability = graph_size > 0 ? avg_reach / graph_size : 0.0f;
     }
+
+    // Log all stats
+    log("Graph Statistics:\n");
+    log("  Vertices: {}\n", stats.vertex_count);
+    log("  Total edges: {}\n", stats.edge_count);
+    log("  Feature dimensions: {}\n", stats.feature_dims);
+    log("  Edges per vertex (k): {}\n", stats.edges_per_vertex);
+    log("  Out-degree: avg={:.2f}, min={}, max={}\n", stats.avg_out_degree, stats.min_out_degree, stats.max_out_degree);
+    log("  In-degree:  avg={:.2f}, min={}, max={}, source_vertices={}\n", 
+        stats.avg_in_degree, stats.min_in_degree, stats.max_in_degree, stats.source_vertices);
+    
+    if (stats.graph_quality >= 0) {
+        log("  Graph Quality (GQ): {:.4f}\n", stats.graph_quality);
+    }
+    if (stats.search_reachability >= 0) {
+        log("  Search Reachability: {:.2f}%\n", stats.search_reachability * 100);
+    }
+    if (stats.exploration_reachability >= 0) {
+        log("  Exploration Reachability: {:.2f}%\n", stats.exploration_reachability * 100);
+    }
+    
+    log("  Estimated memory: {:.2f} MB\n", stats.memory_bytes / (1024.0 * 1024.0));
 
     return stats;
 }
+
+
 
 }  // namespace deglib::benchmark

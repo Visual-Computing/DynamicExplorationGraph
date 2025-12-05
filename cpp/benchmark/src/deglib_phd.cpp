@@ -620,10 +620,9 @@ int main(int argc, char *argv[]) {
                 const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
                 log("Graph loaded: {} vertices\n", graph.size());
                 
-                // 1. Compute and log graph stats
-                log("\n--- Graph Statistics ---\n");
-                auto stats = deglib::benchmark::collect_graph_stats(graph);
-                deglib::benchmark::log_graph_stats(stats);
+                // 1. Analyze graph and log stats
+                log("\n--- Graph Analysis ---\n");
+                deglib::benchmark::analyze_graph(graph);
                 
                 // 2. ANNS Test with Top-k
                 log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
@@ -731,10 +730,6 @@ int main(int argc, char *argv[]) {
                     
                     if(std::filesystem::exists(cp_path)) {
                         const auto cp_graph = deglib::graph::load_readonly_graph(cp_path.c_str());
-                        
-                        // Graph statistics
-                        auto stats = deglib::benchmark::collect_graph_stats(cp_graph);
-                        deglib::benchmark::log_graph_stats(stats);
                         
                         // ANNS Test
                         log("\n-- ANNS Test (k={}) --\n", cg.anns_k);
@@ -1201,10 +1196,6 @@ int main(int argc, char *argv[]) {
                 const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
                 log("Graph loaded: {} vertices\n", graph.size());
                 
-                log("\n--- Graph Statistics ---\n");
-                auto stats = deglib::benchmark::collect_graph_stats(graph);
-                deglib::benchmark::log_graph_stats(stats);
-                
                 // ANNS Test
                 log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
                 auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
@@ -1269,15 +1260,21 @@ int main(int argc, char *argv[]) {
                     bool use_half = (ds_type != DataStreamType::AddAll);
                     auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half);
                     
-                    // Graph statistics
-                    log("\n--- Graph Statistics ---\n");
-                    auto stats = deglib::benchmark::collect_graph_stats(graph);
-                    deglib::benchmark::log_graph_stats(stats);
+                    // Graph analysis
+                    log("\n--- Graph Analysis ---\n");
+                    deglib::benchmark::analyze_graph(graph);
                     
                     // ANNS Test
                     log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
                     deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
                         cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
+                    
+                    // Exploration Test
+                    log("\n--- Exploration Test (k={}) ---\n", cg.explore_k);
+                    auto entry_vertices = ds.load_explore_entry_vertices();
+                    auto explore_gt = ds.load_explore_groundtruth(cg.explore_k);
+                    deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
+                        false, cg.explore_repeat, cg.explore_k, cg.explore_threads);
                 } else {
                     log("Graph file not found: {}\n", graph_path);
                 }
