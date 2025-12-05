@@ -68,75 +68,6 @@ static std::vector<std::unordered_set<uint32_t>> get_ground_truth(
     return answers;
 }
 
-static float test_approx_anns(const deglib::search::SearchGraph& graph, const std::vector<uint32_t>& entry_vertex_indices,
-                         const deglib::FeatureRepository& query_repository, const std::vector<std::unordered_set<uint32_t>>& ground_truth, 
-                         const float eps, const uint32_t k, const uint32_t test_size, const uint32_t threads, const deglib::graph::Filter* filter = nullptr)
-{
-    auto corrects = std::vector<float>(threads);
-    deglib::concurrent::parallel_for(0, test_size, threads, [&] (size_t i, size_t thread_id) {
-
-        auto query = reinterpret_cast<const std::byte*>(query_repository.getFeature(uint32_t(i)));
-        auto result_queue = graph.search(entry_vertex_indices, query, eps, k, filter);
-
-        if (result_queue.size() != k) {
-            fmt::print(stderr, "ANNS with k={} got only {} results for query {}\n", k, result_queue.size(), i);
-            abort();
-        }
-
-        uint32_t correct = 0;
-        const auto& gt = ground_truth[i];
-        while (result_queue.empty() == false)
-        {
-            const auto& result = result_queue.top();
-            const auto external_id = graph.getExternalLabel(result.getInternalIndex());
-            if (gt.find(external_id) != gt.end()) correct++;
-            result_queue.pop();
-        }
-
-        corrects[thread_id] += correct;
-    });
-
-    // calc recall
-    float total_correct = 0;
-    for (size_t i = 0; i < threads; i++) 
-        total_correct += corrects[i];
-    return total_correct / (test_size*k);
-}
-
-static float test_approx_explore(const deglib::search::SearchGraph& graph, const std::vector<std::vector<uint32_t>>& entry_vertex_indices, const boolean include_entry,
-                                  const std::vector<std::unordered_set<uint32_t>>& ground_truth, const uint32_t k, const uint32_t max_distance_count,
-                                  const uint32_t threads, const deglib::graph::Filter* filter = nullptr)
-{    
-    auto corrects = std::vector<float>(threads);
-    deglib::concurrent::parallel_for(0, entry_vertex_indices.size(), threads, [&] (size_t i, size_t thread_id) {
-
-        const auto entry_vertex_index = entry_vertex_indices[i][0];
-        auto result_queue = graph.explore(entry_vertex_index, k, include_entry, max_distance_count); // TODO missing filter
-
-        if (result_queue.size() != k) {
-            fmt::print(stderr, "Exploration with k={} got only {} results for query {}\n", k, result_queue.size(), i);
-            abort();
-        }
-
-        uint32_t correct = 0;
-        const auto& gt = ground_truth[i];
-        while (result_queue.empty() == false)
-        {
-            const auto& result = result_queue.top();
-            const auto external_id = graph.getExternalLabel(result.getInternalIndex());
-            if (gt.find(external_id) != gt.end()) correct++;
-            result_queue.pop();
-        }
-
-        corrects[thread_id] += correct;
-    });
-
-    // calc recall
-    float total_correct = 0;
-    for (size_t i = 0; i < threads; i++) 
-        total_correct += corrects[i];
-    return total_correct / (entry_vertex_indices.size()*k);
-}
 
 static void test_graph_anns(const deglib::search::SearchGraph& graph, const deglib::FeatureRepository& query_repository, 
                             const uint32_t* ground_truth, const uint32_t ground_truth_dims, 
@@ -226,6 +157,76 @@ static void test_graph_explore(const deglib::search::SearchGraph& graph, const u
 
 //-----------------------------------
 
+
+static float test_approx_anns(const deglib::search::SearchGraph& graph, const std::vector<uint32_t>& entry_vertex_indices,
+                         const deglib::FeatureRepository& query_repository, const std::vector<std::unordered_set<uint32_t>>& ground_truth, 
+                         const float eps, const uint32_t k, const uint32_t test_size, const uint32_t threads, const deglib::graph::Filter* filter = nullptr)
+{
+    auto corrects = std::vector<float>(threads);
+    deglib::concurrent::parallel_for(0, test_size, threads, [&] (size_t i, size_t thread_id) {
+
+        auto query = reinterpret_cast<const std::byte*>(query_repository.getFeature(uint32_t(i)));
+        auto result_queue = graph.search(entry_vertex_indices, query, eps, k, filter);
+
+        if (result_queue.size() != k) {
+            fmt::print(stderr, "ANNS with k={} got only {} results for query {}\n", k, result_queue.size(), i);
+            abort();
+        }
+
+        uint32_t correct = 0;
+        const auto& gt = ground_truth[i];
+        while (result_queue.empty() == false)
+        {
+            const auto& result = result_queue.top();
+            const auto external_id = graph.getExternalLabel(result.getInternalIndex());
+            if (gt.find(external_id) != gt.end()) correct++;
+            result_queue.pop();
+        }
+
+        corrects[thread_id] += correct;
+    });
+
+    // calc recall
+    float total_correct = 0;
+    for (size_t i = 0; i < threads; i++) 
+        total_correct += corrects[i];
+    return total_correct / (test_size*k);
+}
+
+static float test_approx_explore(const deglib::search::SearchGraph& graph, const std::vector<std::vector<uint32_t>>& entry_vertex_indices, const boolean include_entry,
+                                  const std::vector<std::unordered_set<uint32_t>>& ground_truth, const uint32_t k, const uint32_t max_distance_count,
+                                  const uint32_t threads, const deglib::graph::Filter* filter = nullptr)
+{    
+    auto corrects = std::vector<float>(threads);
+    deglib::concurrent::parallel_for(0, entry_vertex_indices.size(), threads, [&] (size_t i, size_t thread_id) {
+
+        const auto entry_vertex_index = entry_vertex_indices[i][0];
+        auto result_queue = graph.explore(entry_vertex_index, k, include_entry, max_distance_count); // TODO missing filter
+
+        if (result_queue.size() != k) {
+            fmt::print(stderr, "Exploration with k={} got only {} results for query {} and max_distance_count {}\n", k, result_queue.size(), i, max_distance_count);
+            abort();
+        }
+
+        uint32_t correct = 0;
+        const auto& gt = ground_truth[i];
+        while (result_queue.empty() == false)
+        {
+            const auto& result = result_queue.top();
+            const auto external_id = graph.getExternalLabel(result.getInternalIndex());
+            if (gt.find(external_id) != gt.end()) correct++;
+            result_queue.pop();
+        }
+
+        corrects[thread_id] += correct;
+    });
+
+    // calc recall
+    float total_correct = 0;
+    for (size_t i = 0; i < threads; i++) 
+        total_correct += corrects[i];
+    return total_correct / (entry_vertex_indices.size()*k);
+}
 
 static std::vector<float> estimate_recall(const deglib::search::SearchGraph& graph, const deglib::FeatureRepository& query_repository, const std::vector<std::unordered_set<uint32_t>>& answer, const uint32_t max_distance_count, const uint32_t k) {
 
@@ -345,7 +346,7 @@ static void test_graph_explore(const deglib::search::SearchGraph& graph,
     }
 
     // try different max_distance_count values
-    uint32_t k_factor = 16;
+    uint32_t k_factor = 1000;
     for (uint32_t f = 0; f <= 3; f++, k_factor *= 10) {
         for (uint32_t i = (f == 0) ? 1 : 2; i < 11; i++) {         
             const auto max_distance_count = ((f == 0) ? (k + k_factor * (i-1)) : (k_factor * i));

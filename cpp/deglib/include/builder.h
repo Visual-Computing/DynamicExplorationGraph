@@ -237,6 +237,8 @@ class EvenRegularGraphBuilder {
     const uint32_t swap_tries_;         // number of improvement attempts per build step 
     const uint32_t additional_swap_tries_;  // additional improvement attempts after a successful improvement
 
+    const bool use_rng_;                // Enable RNG (Relative Neighborhood Graph) pruning during graph extension
+
     std::mt19937& rnd_;                       // Reference to a random number generator used for randomized operations
     deglib::graph::MutableGraph& graph_;      // Reference to the mutable graph being built and optimized
 
@@ -272,6 +274,7 @@ class EvenRegularGraphBuilder {
      * @param max_path_length Maximum number of edge swaps in a single improvement attempt (default: 5).
      * @param swap_tries Number of improvement attempts per build step (default: 0).
      * @param additional_swap_tries Additional improvement attempts after a successful improvement (default: 0).
+     * @param use_rng Enable RNG (Relative Neighborhood Graph) pruning during graph extension (default: true).
      *
      * This constructor initializes the builder with the provided parameters and sets up internal
      * batching and threading parameters for efficient graph construction and optimization.
@@ -279,7 +282,8 @@ class EvenRegularGraphBuilder {
     EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, const OptimizationTarget optimization_target,
                             const uint8_t extend_k, const float extend_eps, 
                             const uint8_t improve_k, const float improve_eps, 
-                            const uint8_t max_path_length = 5, const uint32_t swap_tries = 0, const uint32_t additional_swap_tries = 0) 
+                            const uint8_t max_path_length = 5, const uint32_t swap_tries = 0, const uint32_t additional_swap_tries = 0,
+                            const bool use_rng = true) 
       : optimizationTarget_(optimization_target),
         extend_k_(extend_k),
         extend_eps_(extend_eps),
@@ -288,6 +292,7 @@ class EvenRegularGraphBuilder {
         max_path_length_(max_path_length), 
         swap_tries_(swap_tries), 
         additional_swap_tries_(additional_swap_tries),
+        use_rng_(use_rng),
         rnd_(rnd),  
         graph_(graph),
         build_status_() { 
@@ -534,7 +539,7 @@ class EvenRegularGraphBuilder {
       const auto internal_index = graph.addVertex(external_label, new_vertex_feature);
      
       // adding neighbors happens in two phases, the first tries to retain RNG, the second adds them without checking
-      bool check_rng_phase = true; // true = activated, false = deactived
+      bool check_rng_phase = this->use_rng_; // true = activated, false = deactived
 
       // list of potential isolates vertices
       auto isolated_vertices = std::vector<uint32_t>();
@@ -665,7 +670,7 @@ class EvenRegularGraphBuilder {
      
 
       // adding neighbors happens in two phases, the first tries to retain RNG, the second adds them without checking
-      bool check_rng_phase = true; // true = activated, false = deactived
+      bool check_rng_phase = this->use_rng_; // true = activated, false = deactived
 
       // remove an edge of the good neighbors and connect them with this new vertex
       auto new_neighbors = std::vector<std::pair<uint32_t, float>>();

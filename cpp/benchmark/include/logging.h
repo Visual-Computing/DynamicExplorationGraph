@@ -16,6 +16,8 @@
 #include <fmt/ranges.h>
 #include <fmt/ostream.h>
 
+#include "file_io.h"
+
 namespace deglib::benchmark
 {
 
@@ -79,26 +81,6 @@ void log(fmt::format_string<Args...> fmt_str, Args&&... args) {
         fmt::print(*log_file_ptr, "{}", msg);
         log_file_ptr->flush();
     }
-}
-
-// ============================================================================
-// Directory utilities
-// ============================================================================
-
-/**
- * Ensure a directory exists, creating it if necessary.
- * @param path Path to the directory
- * @return true if directory exists or was created successfully
- */
-inline bool ensure_directory(const std::filesystem::path& path) {
-    if (std::filesystem::exists(path)) return true;
-    std::error_code ec;
-    std::filesystem::create_directories(path, ec);
-    if (ec) {
-        fmt::print(stderr, "Error creating directory '{}': {}\n", path.string(), ec.message());
-        return false;
-    }
-    return true;
 }
 
 }  // namespace deglib::benchmark

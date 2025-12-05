@@ -398,63 +398,6 @@ inline float compute_exploration_reach(const deglib::search::SearchGraph& graph)
     return ((float)exploration_reachability) / graph_size;
 }
 
-/**
- * @brief Compute the graph quality using exploration ground truth.
- * 
- * Graph quality (GQ) is the ratio of neighbors that are "perfect" - meaning they
- * appear in the ground truth top-k list for that vertex. Uses exploration ground
- * truth which is computed by finding true nearest neighbors for each vertex
- * within the graph itself.
- * 
- * @param graph The search graph to analyze
- * @param exploration_gt Exploration ground truth data (external labels)
- * @param exploration_gt_dims Number of neighbors per vertex in ground truth
- * @return Graph quality ratio in [0, 1]
- */
-inline float compute_graph_quality(
-    const deglib::search::SearchGraph& graph, 
-    const uint32_t* exploration_gt, 
-    const size_t exploration_gt_dims) 
-{
-    const auto graph_size = graph.size();
-    const auto edges_per_vertex = graph.getEdgesPerVertex();
-
-    if (exploration_gt_dims < edges_per_vertex) {
-        log("Warning: Exploration GT size {} is smaller than edges per vertex {}\n", 
-            exploration_gt_dims, edges_per_vertex);
-    }
-
-    uint64_t perfect_neighbor_count = 0;
-    uint64_t total_neighbor_count = 0;
-
-    for (uint32_t v = 0; v < graph_size; v++) {
-        const auto neighbor_indices = graph.getNeighborIndices(v);
-        
-        // The exploration GT is indexed by vertex order in the graph
-        const auto vertex_gt = exploration_gt + v * exploration_gt_dims;
-        const auto compare_size = (std::min)((size_t)edges_per_vertex, exploration_gt_dims);
-
-        for (uint8_t e = 0; e < edges_per_vertex; e++) {
-            const auto neighbor_index = neighbor_indices[e];
-            if (neighbor_index == (std::numeric_limits<uint32_t>::max)()) continue;
-            
-            total_neighbor_count++;
-
-            // Get the neighbor's external label
-            const auto neighbor_label = graph.getExternalLabel(neighbor_index);
-
-            // Check if neighbor is in the top-k list (ground truth contains external labels)
-            for (size_t i = 0; i < compare_size; i++) {
-                if (neighbor_label == vertex_gt[i]) {
-                    perfect_neighbor_count++;
-                    break;
-                }
-            }
-        }
-    }
-
-    return total_neighbor_count > 0 ? ((float)perfect_neighbor_count) / total_neighbor_count : 0.0f;
-}
 
 /**
  * @brief Compute the graph quality using pre-computed ground truth sets.
@@ -505,44 +448,6 @@ inline float compute_graph_quality(
     return total_neighbor_count > 0 ? ((float)perfect_neighbor_count) / total_neighbor_count : 0.0f;
 }
 
-/**
- * @brief Compute all statistics including expensive ones.
- * 
- * @param graph The search graph to analyze
- * @param exploration_gt Exploration ground truth data (external labels), nullptr to skip GQ
- * @param exploration_gt_dims Number of neighbors per vertex in ground truth
- * @param compute_reachability Whether to compute seed reachability (expensive)
- * @param compute_reach Whether to compute average reach (expensive)
- * @param thread_count Number of threads for parallel computation
- * @return GraphStats with all requested statistics
- */
-inline GraphStats compute_full_graph_stats(
-    const deglib::search::SearchGraph& graph,
-    const uint32_t* exploration_gt = nullptr,
-    size_t exploration_gt_dims = 0,
-    bool compute_reachability = true,
-    bool compute_reach = true,
-    uint32_t thread_count = std::thread::hardware_concurrency())
-{
-    auto stats = collect_graph_stats(graph);
-
-    if (exploration_gt != nullptr && exploration_gt_dims > 0) {
-        log("Computing graph quality...\n");
-        stats.graph_quality = compute_graph_quality(graph, exploration_gt, exploration_gt_dims);
-    }
-
-    if (compute_reachability) {
-        log("Computing seed reachability...\n");
-        stats.search_reachability = compute_search_reachability(graph, thread_count);
-    }
-
-    if (compute_reach) {
-        log("Computing average reach...\n");
-        stats.exploration_reachability = compute_exploration_reach(graph);
-    }
-
-    return stats;
-}
 
 /**
  * @brief Compute all statistics including expensive ones, using pre-computed ground truth sets.
