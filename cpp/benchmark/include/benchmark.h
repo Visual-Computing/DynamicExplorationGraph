@@ -32,19 +32,6 @@
 namespace deglib::benchmark
 {
 
-
-/*
- * Stream types for the benchmarks. These are shared across the benchmark programs and
- * were previously declared inside multiple files. Move the canonical definition here
- * so we can reuse it across the tools.
- */
-enum DataStreamType { AddAll, AddHalf, AddAllRemoveHalf, AddHalfRemoveAndAddOneAtATime };
-
-
-
-//-----------------------------------
-
-
 static float test_approx_anns(const deglib::search::SearchGraph& graph, const std::vector<uint32_t>& entry_vertex_indices,
                          const deglib::FeatureRepository& query_repository, const std::vector<std::unordered_set<uint32_t>>& ground_truth, 
                          const float eps, const uint32_t k, const uint32_t test_size, const uint32_t threads, const deglib::graph::Filter* filter = nullptr)

@@ -6,7 +6,7 @@
  * 
  * This header provides functions for building and optimizing graphs:
  * - create_random_exploration_graph: Build a random regular graph (returns graph)
- * - optimize_graph: Optimize an existing graph
+ * - optimize_graph: Optimize an existing graph for a specified number of iterations
  * - improve_and_save_checkpoints: Optimize graph and save at intervals
  * - create_graph: Build a DEG graph with the builder
  * - create_incremental_graphs: Build graphs incrementally with increasing data sizes
@@ -28,6 +28,16 @@
 
 namespace deglib::benchmark
 {
+
+    
+/*
+ * Stream types for the benchmarks. These are shared across the benchmark programs and
+ * were previously declared inside multiple files. Move the canonical definition here
+ * so we can reuse it across the tools.
+ */
+enum DataStreamType { AddAll, AddHalf, AddAllRemoveHalf, AddHalfRemoveAndAddOneAtATime };
+
+
 
 /**
  * Create a random regular graph from the repository.
@@ -378,6 +388,67 @@ inline std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(
     }
 
     return created_files;
+}
+
+
+/**
+ * Optimize an existing graph by running the builder's improve step.
+ * This is a simple optimization function that runs for a specified number of iterations.
+ * 
+ * @param graph The graph to optimize (modified in place).
+ * @param k_opt Optimization neighborhood size.
+ * @param eps_opt Optimization epsilon for search.
+ * @param i_opt Optimization path length.
+ * @param total_iterations Total optimization iterations to run.
+ * @param log_interval Log progress every N iterations (0 = disable, default: 10000).
+ */
+inline void optimize_graph(
+    deglib::graph::SizeBoundedGraph& graph,
+    const uint8_t k_opt, 
+    const float eps_opt, 
+    const uint8_t i_opt,
+    const uint64_t total_iterations,
+    const uint64_t log_interval = 10000)
+{
+    auto rnd = std::mt19937(7);
+    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::OptimizationTarget::LowLID, 0, 0, k_opt, eps_opt, i_opt, 1, 0);
+
+    auto initial_avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 1);
+    log("Optimizing graph with initial AEW {:.2f}\n", initial_avg_edge_weight);
+
+    auto start = std::chrono::steady_clock::now();
+    auto last_status = deglib::builder::BuilderStatus{};
+    uint64_t duration_ms = 0;
+    
+    const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
+        const auto tries = status.tries;
+        const auto improved = status.improved;
+        
+        // Log progress at intervals
+        if(log_interval > 0 && tries > 0 && tries % log_interval == 0) {
+            duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+            auto duration = duration_ms / 1000;
+            auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 1);
+            auto connected = deglib::analysis::check_graph_connectivity(graph);
+            auto diff = tries - last_status.tries;
+            auto avg_improv = (diff > 0) ? uint32_t((improved - last_status.improved) / diff) : 0;
+
+            log("{:5}s, {:8} / {:8} iterations (avg {:2} improvements), AEW {:.2f}, connected {}\n", 
+                duration, improved, tries, avg_improv, avg_edge_weight, connected);
+            
+            last_status = status;
+            start = std::chrono::steady_clock::now();
+        }
+        
+        // stop after total_iterations
+        if(tries >= total_iterations) 
+            builder.stop();
+    };
+    
+    builder.build(improvement_callback, true);
+    
+    log("Optimization complete. Final AEW: {:.2f}, non-RNG edges: {}\n", 
+        deglib::analysis::calc_avg_edge_weight(graph, 1), deglib::analysis::calc_non_rng_edges(graph));
 }
 
 
