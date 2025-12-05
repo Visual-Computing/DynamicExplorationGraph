@@ -479,7 +479,7 @@ int main(int argc, char *argv[]) {
     // Parse command-line arguments
     // Usage: deglib_phd <dataset> [test_type] [--run]
     DatasetName ds_name = DatasetName::SIFT1M;
-    std::string test_type_arg = "create_graph";
+    std::string test_type_arg = "all";
     bool do_run = true;
     
     for(int i = 1; i < argc; ++i) {

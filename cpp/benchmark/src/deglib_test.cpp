@@ -95,8 +95,8 @@ int main(int argc, char* argv[]) {
     // Default parameters - change these in the IDE to run different benchmarks
     // ==========================================================================
     std::string dataset_str = "sift1m";                                 // Dataset: sift1m, deep1m, glove, audio
-    std::string graph_file = "c:/Data/phd/sift1m/deg/128D_L2_K30_AddK60Eps0.1_LowLID.deg";                        // Graph file path (empty = auto-generate)
-    std::string benchmark_type = "stats";                               // Benchmark: anns, explore, stats, all
+    std::string graph_file = "";                                        // Graph file path (empty = auto-generate)
+    std::string benchmark_type = "all";                                 // Benchmark: anns, explore, stats, all
     uint32_t k = 100;                                                   // ANNS k
     uint32_t explore_k = 1000;                                          // Exploration k
     uint32_t repeat = 1;                                                // Test repetitions
