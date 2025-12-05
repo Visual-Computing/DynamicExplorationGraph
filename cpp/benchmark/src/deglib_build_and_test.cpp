@@ -610,63 +610,68 @@ int main(int argc, char *argv[]) {
             std::string graph_path = graph_paths.graph_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, cg.lid);
             std::string log_path = graph_paths.graph_log_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, cg.lid);
             
-            // Set up log file for this graph (all tests logged here)
-            deglib::benchmark::set_log_file(log_path, true);
-            
-            // Build graph if it doesn't exist
-            if(std::filesystem::exists(graph_path)) {
-                log("Graph already exists: {}\n", graph_path);
+            // Skip entire scenario if log file already exists
+            if(std::filesystem::exists(log_path)) {
+                log("CREATE_GRAPH: Skipping - log file already exists: {}\n", log_path);
             } else {
-                log("\n=== Building Graph ===\n");
-                log("Settings: k={}, k_ext={}, eps_ext={:.2f}, lid={}, threads={}\n",
-                    cg.k, cg.k_ext, cg.eps_ext, DatasetConfig::optimization_target_str(cg.lid), cg.build_threads);
-                log("Output graph: {}\n", graph_path);
+                // Set up log file for this graph (all tests logged here)
+                deglib::benchmark::set_log_file(log_path, true);
                 
-                deglib::benchmark::create_graph(*base_repository, config.data_stream_type, graph_path, 
-                    config.metric, cg.lid, cg.k, cg.k_ext, cg.eps_ext, 0, 0, 0, cg.build_threads);
-            }
-            
-            // Run comprehensive tests on the graph (existing or newly created)
-            if(std::filesystem::exists(graph_path)) {
-                const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
-                log("Graph loaded: {} vertices\n", graph.size());
-                
-                // 1. Analyze graph and log stats (with graph quality using full exploration GT)
-                log("\n--- Graph Analysis ---\n");
-                {
-                    auto full_explore_gt = ds.load_full_explore_groundtruth();
-                    deglib::benchmark::analyze_graph(graph, full_explore_gt, true, true, cg.analysis_threads);
+                // Build graph if it doesn't exist
+                if(std::filesystem::exists(graph_path)) {
+                    log("Graph already exists: {}\n", graph_path);
+                } else {
+                    log("\n=== Building Graph ===\n");
+                    log("Settings: k={}, k_ext={}, eps_ext={:.2f}, lid={}, threads={}\n",
+                        cg.k, cg.k_ext, cg.eps_ext, DatasetConfig::optimization_target_str(cg.lid), cg.build_threads);
+                    log("Output graph: {}\n", graph_path);
+                    
+                    deglib::benchmark::create_graph(*base_repository, config.data_stream_type, graph_path, 
+                        config.metric, cg.lid, cg.k, cg.k_ext, cg.eps_ext, 0, 0, 0, cg.build_threads);
                 }
                 
-                // 2. ANNS Test with Top-k
-                log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
-                {
-                    auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
-                    deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                        cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
-                }
-                
-                // 3. Exploration Test
-                log("\n--- Exploration Test (k={}) ---\n", cg.explore_k);
-                {
-                    auto entry_vertices = ds.load_explore_entry_vertices();
-                    auto explore_gt = ds.load_explore_groundtruth(cg.explore_k);
-                    deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
-                        false, cg.explore_repeat, cg.explore_k, cg.explore_threads);
-                }
+                // Run comprehensive tests on the graph (existing or newly created)
+                if(std::filesystem::exists(graph_path)) {
+                    const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
+                    log("Graph loaded: {} vertices\n", graph.size());
+                    
+                    // 1. Analyze graph and log stats (with graph quality using full exploration GT)
+                    log("\n--- Graph Analysis ---\n");
+                    {
+                        auto full_explore_gt = ds.load_full_explore_groundtruth();
+                        deglib::benchmark::analyze_graph(graph, full_explore_gt, true, true, cg.analysis_threads);
+                    }
+                    
+                    // 2. ANNS Test with Top-k
+                    log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
+                    {
+                        auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
+                        deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
+                            cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
+                    }
+                    
+                    // 3. Exploration Test
+                    log("\n--- Exploration Test (k={}) ---\n", cg.explore_k);
+                    {
+                        auto entry_vertices = ds.load_explore_entry_vertices();
+                        auto explore_gt = ds.load_explore_groundtruth(cg.explore_k);
+                        deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
+                            false, cg.explore_repeat, cg.explore_k, cg.explore_threads);
+                    }
 
-                // 4. k-Sweep Test
-                log("\n--- k-Sweep Test ---\n");
-                for(uint32_t k_val : cg.k_sweep_values) {
-                    log("\n-- k={} --\n", k_val);
-                    auto gt_k = ds.load_groundtruth(k_val, use_half_gt);
-                    deglib::benchmark::test_graph_anns(graph, *query_repository, gt_k, 
-                        cg.anns_repeat, cg.anns_threads, k_val, cg.eps_parameter);
+                    // 4. k-Sweep Test
+                    log("\n--- k-Sweep Test ---\n");
+                    for(uint32_t k_val : cg.k_sweep_values) {
+                        log("\n-- k={} --\n", k_val);
+                        auto gt_k = ds.load_groundtruth(k_val, use_half_gt);
+                        deglib::benchmark::test_graph_anns(graph, *query_repository, gt_k, 
+                            cg.anns_repeat, cg.anns_threads, k_val, cg.eps_parameter);
+                    }
                 }
+                
+                deglib::benchmark::reset_log_to_console();
+                log("Log written to: {}\n", log_path);
             }
-            
-            deglib::benchmark::reset_log_to_console();
-            log("Log written to: {}\n", log_path);
         }
     }
     
@@ -686,67 +691,74 @@ int main(int argc, char *argv[]) {
             std::string log_path = graph_paths.optimized_log_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, 
                                                                    cg.lid, og.k_opt, og.eps_opt, og.i_opt, og.total_iterations);
             
-            // Set up log file for this optimized graph
-            deglib::benchmark::set_log_file(log_path, true);
-            log("\n=== OPTIMIZE_GRAPH Test ===\n");
-            log("Input graph: {}\n", input_graph);
-            log("Output graph: {}\n", output_graph);
-            log("Settings: k_opt={}, eps_opt={:.4f}, i_opt={}, total_iterations={}\n",
-                og.k_opt, og.eps_opt, og.i_opt, og.total_iterations);
-            
-                // Check if source graph exists
-            if(!std::filesystem::exists(input_graph)) {
-                log("ERROR: Source graph does not exist: {}\n", input_graph);
+            // Skip entire scenario if log file already exists
+            if(std::filesystem::exists(log_path)) {
+                log("OPTIMIZE_GRAPH: Skipping - log file already exists: {}\n", log_path);
             } else {
-                // Build optimized graph if it doesn't exist
-                if(std::filesystem::exists(output_graph)) {
-                    log("Optimized graph already exists: {}\n", output_graph);
+                // Set up log file for this optimized graph
+                deglib::benchmark::set_log_file(log_path, true);
+                log("\n=== OPTIMIZE_GRAPH Test ===\n");
+                log("Input graph: {}\n", input_graph);
+                log("Output graph: {}\n", output_graph);
+                log("Settings: k_opt={}, eps_opt={:.4f}, i_opt={}, total_iterations={}\n",
+                    og.k_opt, og.eps_opt, og.i_opt, og.total_iterations);
+                
+                // Check if source graph exists
+                if(!std::filesystem::exists(input_graph)) {
+                    log("ERROR: Source graph does not exist: {}\n", input_graph);
                 } else {
-                    // Load the source graph and optimize it
-                    log("\n--- Loading source graph ---\n");
-                    auto graph = deglib::graph::load_sizebounded_graph(input_graph.c_str());
-                    log("Loaded graph: {} vertices\n", graph.size());
-                    
-                    // Run optimization
-                    log("\n--- Optimizing graph for {} iterations ---\n", og.total_iterations);
-                    deglib::benchmark::optimize_graph(graph, og.k_opt, og.eps_opt, og.i_opt, og.total_iterations);
-                    
-                    // Save optimized graph
-                    graph.saveGraph(output_graph.c_str());
-                    log("Saved optimized graph: {}\n", output_graph);
-                }                // Run comprehensive tests on the optimized graph
-                if(std::filesystem::exists(output_graph)) {
-                    const auto graph = deglib::graph::load_readonly_graph(output_graph.c_str());
-                    log("Graph loaded: {} vertices\n", graph.size());
-                    
-                    // 1. Analyze graph and log stats (with graph quality using full exploration GT)
-                    log("\n--- Graph Analysis ---\n");
-                    {
-                        auto full_explore_gt = ds.load_full_explore_groundtruth();
-                        deglib::benchmark::analyze_graph(graph, full_explore_gt, true, true, cg.analysis_threads);
+                    // Build optimized graph if it doesn't exist
+                    if(std::filesystem::exists(output_graph)) {
+                        log("Optimized graph already exists: {}\n", output_graph);
+                    } else {
+                        // Load the source graph and optimize it
+                        log("\n--- Loading source graph ---\n");
+                        auto graph = deglib::graph::load_sizebounded_graph(input_graph.c_str());
+                        log("Loaded graph: {} vertices\n", graph.size());
+                        
+                        // Run optimization
+                        log("\n--- Optimizing graph for {} iterations ---\n", og.total_iterations);
+                        deglib::benchmark::optimize_graph(graph, og.k_opt, og.eps_opt, og.i_opt, og.total_iterations);
+                        
+                        // Save optimized graph
+                        graph.saveGraph(output_graph.c_str());
+                        log("Saved optimized graph: {}\n", output_graph);
                     }
+                    
+                    // Run comprehensive tests on the optimized graph
+                    if(std::filesystem::exists(output_graph)) {
+                        const auto graph = deglib::graph::load_readonly_graph(output_graph.c_str());
+                        log("Graph loaded: {} vertices\n", graph.size());
+                        
+                        // 1. Analyze graph and log stats (with graph quality using full exploration GT)
+                        log("\n--- Graph Analysis ---\n");
+                        {
+                            auto full_explore_gt = ds.load_full_explore_groundtruth();
+                            deglib::benchmark::analyze_graph(graph, full_explore_gt, true, true, cg.analysis_threads);
+                        }
 
-                    // 2. ANNS Test with Top-100
-                    log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
-                    {
-                        auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
-                        deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                        cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
-                    }
-                    
-                    // 3. Exploration Test with Top-1000
-                    log("\n--- Exploration Test (k={}) ---\n", cg.explore_k);
-                    {
-                        auto entry_vertices = ds.load_explore_entry_vertices();
-                        auto explore_gt = ds.load_explore_groundtruth(cg.explore_k);
-                        deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
-                        false, cg.explore_repeat, cg.explore_k, cg.explore_threads);
+                        // 2. ANNS Test with Top-100
+                        log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
+                        {
+                            auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
+                            deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
+                                cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
+                        }
+                        
+                        // 3. Exploration Test with Top-1000
+                        log("\n--- Exploration Test (k={}) ---\n", cg.explore_k);
+                        {
+                            auto entry_vertices = ds.load_explore_entry_vertices();
+                            auto explore_gt = ds.load_explore_groundtruth(cg.explore_k);
+                            deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
+                                false, cg.explore_repeat, cg.explore_k, cg.explore_threads);
+                        }
                     }
                 }
+                
+                deglib::benchmark::reset_log_to_console();
+                log("OPTIMIZE_GRAPH: Log written to: {}\n", log_path);
             }
-            
-            deglib::benchmark::reset_log_to_console();
-            log("OPTIMIZE_GRAPH: Log written to: {}\n", log_path);
         }
     }
     
@@ -772,6 +784,13 @@ int main(int argc, char *argv[]) {
             for(auto lid : all_targets) {
                 std::string graph_path = graph_paths.graph_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, lid);
                 std::string log_path = graph_paths.graph_log_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, lid);
+                
+                // Skip if log file already exists
+                if(std::filesystem::exists(log_path)) {
+                    log("{}: Skipping - log file already exists: {}\n", DatasetConfig::optimization_target_str(lid), log_path);
+                    continue;
+                }
+                
                 deglib::benchmark::set_log_file(log_path, true);
                 
                 log("\n=== ALL_SCHEMES Test: {} ===\n", DatasetConfig::optimization_target_str(lid));
@@ -816,6 +835,12 @@ int main(int argc, char *argv[]) {
                 uint8_t k_ext = k * 2;  // k_ext scales with k
                 std::string graph_path = graph_paths.scaling_graph_file(scaling_dir, dims, config.metric, k, k_ext, cg.eps_ext, cg.lid);
                 std::string log_path = graph_paths.scaling_log_file(scaling_dir, dims, config.metric, k, k_ext, cg.eps_ext, cg.lid);
+                
+                // Skip if log file already exists
+                if(std::filesystem::exists(log_path)) {
+                    log("k={}: Skipping - log file already exists: {}\n", k, log_path);
+                    continue;
+                }
                     
                 deglib::benchmark::set_log_file(log_path, true);
                 log("\n=== K_SWEEP Test: k={} ===\n", k);
@@ -855,6 +880,12 @@ int main(int argc, char *argv[]) {
             for(uint8_t k_ext : kes.k_ext_values) {
                 std::string graph_path = graph_paths.scaling_graph_file(scaling_dir, dims, config.metric, cg.k, k_ext, cg.eps_ext, cg.lid);
                 std::string log_path = graph_paths.scaling_log_file(scaling_dir, dims, config.metric, cg.k, k_ext, cg.eps_ext, cg.lid);
+                
+                // Skip if log file already exists
+                if(std::filesystem::exists(log_path)) {
+                    log("k_ext={}: Skipping - log file already exists: {}\n", k_ext, log_path);
+                    continue;
+                }
                     
                 deglib::benchmark::set_log_file(log_path, true);
                 log("\n=== K_EXT_SWEEP Test: k_ext={} ===\n", k_ext);
@@ -894,6 +925,12 @@ int main(int argc, char *argv[]) {
             for(float eps_ext : ees.eps_ext_values) {
                 std::string graph_path = graph_paths.scaling_graph_file(scaling_dir, dims, config.metric, cg.k, cg.k_ext, eps_ext, cg.lid);
                 std::string log_path = graph_paths.scaling_log_file(scaling_dir, dims, config.metric, cg.k, cg.k_ext, eps_ext, cg.lid);
+                
+                // Skip if log file already exists
+                if(std::filesystem::exists(log_path)) {
+                    log("eps_ext={:.2f}: Skipping - log file already exists: {}\n", eps_ext, log_path);
+                    continue;
+                }
                     
                 deglib::benchmark::set_log_file(log_path, true);
                 log("\n=== EPS_EXT_SWEEP Test: eps_ext={:.2f} ===\n", eps_ext);
@@ -926,70 +963,75 @@ int main(int argc, char *argv[]) {
         log("Log file: {}\n", log_path);
         
         if(do_run && base_repository && query_repository) {
-            // Ensure scaling directory exists
-            std::filesystem::create_directories(scaling_dir);
-            
-            // Set log file for all size scaling operations
-            deglib::benchmark::set_log_file(log_path, false);
-            log("\n=== SIZE_SCALING Test ===\n");
-            log("Size interval: {}\n", ss.size_interval);
-            
-            // Generate base name for graph files
-            std::string metric_str = (config.metric == deglib::Metric::L2) ? "L2" : "L2_Uint8";
-            std::string scheme = DatasetConfig::optimization_target_str(cg.lid);
-            std::string graph_name_base = fmt::format("{}D_{}_K{}_AddK{}Eps{:.1f}_{}", 
-                                                       dims, metric_str, cg.k, cg.k_ext, cg.eps_ext, scheme);
-            
-            // Phase 1: Build all graphs incrementally using create_incremental_graphs
-            log("\n--- Phase 1: Building graphs incrementally ---\n");
-            
-            // Check if we need to build (no graphs exist yet)
-            bool needs_build = true;
-            uint32_t total_size = uint32_t(base_repository->size());
-            for(uint32_t size = ss.size_interval; size <= total_size; size += ss.size_interval) {
-                std::string size_str = std::to_string(size / 1000) + "k";
-                std::string graph_path = fmt::format("{}/{}_{}.deg", scaling_dir, graph_name_base, size_str);
-                if(std::filesystem::exists(graph_path)) {
-                    log("Graph for size={} already exists: {}\n", size, graph_path);
-                    needs_build = false;  // At least one exists, skip full rebuild
-                }
-            }
-            
-            if(needs_build) {
-                auto created_files = deglib::benchmark::create_incremental_graphs(
-                    *base_repository, scaling_dir, graph_name_base, ss.size_interval,
-                    config.metric, cg.lid, cg.k, cg.k_ext, cg.eps_ext, 
-                    30, 0.001f, 5,  // k_opt, eps_opt, i_opt (defaults)
-                    cg.build_threads);
-                log("Created {} incremental graphs\n", created_files.size());
+            // Skip entire scenario if log file already exists
+            if(std::filesystem::exists(log_path)) {
+                log("SIZE_SCALING: Skipping - log file already exists: {}\n", log_path);
             } else {
-                log("Some graphs exist, skipping incremental build. Delete existing graphs to rebuild.\n");
-            }
-            
-            // Phase 2: Test all graphs
-            log("\n--- Phase 2: Testing graphs ---\n");
-            for(uint32_t size = ss.size_interval; size <= total_size; size += ss.size_interval) {
-                std::string size_str = std::to_string(size / 1000) + "k";
-                std::string graph_path = fmt::format("{}/{}_{}.deg", scaling_dir, graph_name_base, size_str);
-                log("\n=== SIZE_SCALING Test: size={} ===\n", size);
-                log("Graph: {}\n", graph_path);
+                // Ensure scaling directory exists
+                std::filesystem::create_directories(scaling_dir);
                 
-                if(std::filesystem::exists(graph_path)) {
-                    const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
-                    
-                    // Load ground truth (full dataset, queries search against subset)
-                    // Note: For size scaling, we use full query set against partial graph
-                    auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
-                    
-                    deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                        cg.anns_repeat, cg.anns_threads, cg.anns_k, ss.eps_parameter);
-                } else {
-                    log("Graph file not found: {}\n", graph_path);
+                // Set log file for all size scaling operations
+                deglib::benchmark::set_log_file(log_path, false);
+                log("\n=== SIZE_SCALING Test ===\n");
+                log("Size interval: {}\n", ss.size_interval);
+                
+                // Generate base name for graph files
+                std::string metric_str = (config.metric == deglib::Metric::L2) ? "L2" : "L2_Uint8";
+                std::string scheme = DatasetConfig::optimization_target_str(cg.lid);
+                std::string graph_name_base = fmt::format("{}D_{}_K{}_AddK{}Eps{:.1f}_{}", 
+                                                           dims, metric_str, cg.k, cg.k_ext, cg.eps_ext, scheme);
+                
+                // Phase 1: Build all graphs incrementally using create_incremental_graphs
+                log("\n--- Phase 1: Building graphs incrementally ---\n");
+                
+                // Check if we need to build (no graphs exist yet)
+                bool needs_build = true;
+                uint32_t total_size = uint32_t(base_repository->size());
+                for(uint32_t size = ss.size_interval; size <= total_size; size += ss.size_interval) {
+                    std::string size_str = std::to_string(size / 1000) + "k";
+                    std::string graph_path = fmt::format("{}/{}_{}.deg", scaling_dir, graph_name_base, size_str);
+                    if(std::filesystem::exists(graph_path)) {
+                        log("Graph for size={} already exists: {}\n", size, graph_path);
+                        needs_build = false;  // At least one exists, skip full rebuild
+                    }
                 }
+                
+                if(needs_build) {
+                    auto created_files = deglib::benchmark::create_incremental_graphs(
+                        *base_repository, scaling_dir, graph_name_base, ss.size_interval,
+                        config.metric, cg.lid, cg.k, cg.k_ext, cg.eps_ext, 
+                        30, 0.001f, 5,  // k_opt, eps_opt, i_opt (defaults)
+                        cg.build_threads);
+                    log("Created {} incremental graphs\n", created_files.size());
+                } else {
+                    log("Some graphs exist, skipping incremental build. Delete existing graphs to rebuild.\n");
+                }
+                
+                // Phase 2: Test all graphs
+                log("\n--- Phase 2: Testing graphs ---\n");
+                for(uint32_t size = ss.size_interval; size <= total_size; size += ss.size_interval) {
+                    std::string size_str = std::to_string(size / 1000) + "k";
+                    std::string graph_path = fmt::format("{}/{}_{}.deg", scaling_dir, graph_name_base, size_str);
+                    log("\n=== SIZE_SCALING Test: size={} ===\n", size);
+                    log("Graph: {}\n", graph_path);
+                    
+                    if(std::filesystem::exists(graph_path)) {
+                        const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
+                        
+                        // Load ground truth (full dataset, queries search against subset)
+                        // Note: For size scaling, we use full query set against partial graph
+                        auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
+                        
+                        deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
+                            cg.anns_repeat, cg.anns_threads, cg.anns_k, ss.eps_parameter);
+                    } else {
+                        log("Graph file not found: {}\n", graph_path);
+                    }
+                }
+                
+                deglib::benchmark::reset_log_to_console();
+                log("SIZE_SCALING: Log written to: {}\n", log_path);
             }
-            
-            deglib::benchmark::reset_log_to_console();
-            log("SIZE_SCALING: Log written to: {}\n", log_path);
         }
     }
     
@@ -1008,28 +1050,32 @@ int main(int argc, char *argv[]) {
         log("Log file: {}\n", log_path);
         
         if(do_run && base_repository && query_repository) {
-            // Ensure scaling directory exists
-            std::filesystem::create_directories(scaling_dir);
-            
-            // Set log file for all opt scaling operations
-            deglib::benchmark::set_log_file(log_path, false);
-            log("\n=== OPT_SCALING Test ===\n");
-            log("Iteration interval: {}, total: {}\n", os.iteration_interval, os.total_iterations);
-            log("Optimization: k_opt={}, eps_opt={:.4f}, i_opt={}\n", og.k_opt, og.eps_opt, og.i_opt);
-            
-            // Random graph path
-            std::string random_graph_path = graph_paths.opt_scaling_random_graph_file(dims, config.metric, cg.k);
-            
-            // Generate base name for optimized graph files
-            std::string metric_str = (config.metric == deglib::Metric::L2) ? "L2" : "L2_Uint8";
-            std::string graph_name_base = fmt::format("{}D_{}_K{}_OptK{}Eps{:.4f}Path{}", 
-                                                       dims, metric_str, cg.k, og.k_opt, og.eps_opt, og.i_opt);
-            
-            // Phase 1: Build random graph
-            log("\n--- Phase 1: Building random graph ---\n");
-            log("Random graph: {}\n", random_graph_path);
-            
-            bool random_graph_built = std::filesystem::exists(random_graph_path);
+            // Skip entire scenario if log file already exists
+            if(std::filesystem::exists(log_path)) {
+                log("OPT_SCALING: Skipping - log file already exists: {}\n", log_path);
+            } else {
+                // Ensure scaling directory exists
+                std::filesystem::create_directories(scaling_dir);
+                
+                // Set log file for all opt scaling operations
+                deglib::benchmark::set_log_file(log_path, false);
+                log("\n=== OPT_SCALING Test ===\n");
+                log("Iteration interval: {}, total: {}\n", os.iteration_interval, os.total_iterations);
+                log("Optimization: k_opt={}, eps_opt={:.4f}, i_opt={}\n", og.k_opt, og.eps_opt, og.i_opt);
+                
+                // Random graph path
+                std::string random_graph_path = graph_paths.opt_scaling_random_graph_file(dims, config.metric, cg.k);
+                
+                // Generate base name for optimized graph files
+                std::string metric_str = (config.metric == deglib::Metric::L2) ? "L2" : "L2_Uint8";
+                std::string graph_name_base = fmt::format("{}D_{}_K{}_OptK{}Eps{:.4f}Path{}", 
+                                                           dims, metric_str, cg.k, og.k_opt, og.eps_opt, og.i_opt);
+                
+                // Phase 1: Build random graph
+                log("\n--- Phase 1: Building random graph ---\n");
+                log("Random graph: {}\n", random_graph_path);
+                
+                bool random_graph_built = std::filesystem::exists(random_graph_path);
             if(random_graph_built) {
                 log("Random graph already exists, skipping build\n");
             } else {
@@ -1052,59 +1098,59 @@ int main(int argc, char *argv[]) {
                     all_checkpoints_exist = false;
                     break;
                 }
-            }
-            
-            if(all_checkpoints_exist) {
-                log("All checkpoint graphs exist, skipping optimization\n");
-            } else if(random_graph_built) {
-                // Load random graph and optimize it
-                auto graph = deglib::graph::load_sizebounded_graph(random_graph_path.c_str());
-                log("Loaded random graph: {} vertices\n", graph.size());
                 
-                // Load ground truth for recall testing during optimization
-                auto gt_for_opt = ds.load_groundtruth(cg.anns_k, use_half_gt);
+                if(all_checkpoints_exist) {
+                    log("All checkpoint graphs exist, skipping optimization\n");
+                } else if(random_graph_built) {
+                    // Load random graph and optimize it
+                    auto graph = deglib::graph::load_sizebounded_graph(random_graph_path.c_str());
+                    log("Loaded random graph: {} vertices\n", graph.size());
+                    
+                    // Load ground truth for recall testing during optimization
+                    auto gt_for_opt = ds.load_groundtruth(cg.anns_k, use_half_gt);
+                    
+                    // Optimize and save checkpoints with recall testing
+                    auto created_files = deglib::benchmark::improve_and_test(
+                        graph, scaling_dir, graph_name_base,
+                        os.k_opt, os.eps_opt, os.i_opt,
+                        os.iteration_interval, os.total_iterations,
+                        *query_repository, gt_for_opt, cg.anns_k);
+                    log("Created {} optimized checkpoint graphs\n", created_files.size());
+                }
                 
-                // Optimize and save checkpoints with recall testing
-                auto created_files = deglib::benchmark::improve_and_test(
-                    graph, scaling_dir, graph_name_base,
-                    os.k_opt, os.eps_opt, os.i_opt,
-                    os.iteration_interval, os.total_iterations,
-                    *query_repository, gt_for_opt, cg.anns_k);
-                log("Created {} optimized checkpoint graphs\n", created_files.size());
-            }
-            
-            // Phase 3: Test all optimized graphs
-            log("\n--- Phase 3: Testing graphs ---\n");
-            auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
-            
-            // Test random graph (iteration 0)
-            log("\n=== OPT_SCALING Test: iterations=0 (random) ===\n");
-            log("Graph: {}\n", random_graph_path);
-            if(std::filesystem::exists(random_graph_path)) {
-                const auto graph = deglib::graph::load_readonly_graph(random_graph_path.c_str());
-                deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                    cg.anns_repeat, cg.anns_threads, cg.anns_k, os.eps_parameter);
-            } else {
-                log("Graph file not found: {}\n", random_graph_path);
-            }
-            
-            // Test optimized graphs at each checkpoint
-            for(uint64_t iterations = os.iteration_interval; iterations <= os.total_iterations; iterations += os.iteration_interval) {
-                std::string opt_graph_path = graph_paths.opt_scaling_graph_file(dims, config.metric, cg.k, og.k_opt, og.eps_opt, og.i_opt, iterations);
-                log("\n=== OPT_SCALING Test: iterations={} ===\n", iterations);
-                log("Graph: {}\n", opt_graph_path);
+                // Phase 3: Test all optimized graphs
+                log("\n--- Phase 3: Testing graphs ---\n");
+                auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
                 
-                if(std::filesystem::exists(opt_graph_path)) {
-                    const auto graph = deglib::graph::load_readonly_graph(opt_graph_path.c_str());
+                // Test random graph (iteration 0)
+                log("\n=== OPT_SCALING Test: iterations=0 (random) ===\n");
+                log("Graph: {}\n", random_graph_path);
+                if(std::filesystem::exists(random_graph_path)) {
+                    const auto graph = deglib::graph::load_readonly_graph(random_graph_path.c_str());
                     deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
                         cg.anns_repeat, cg.anns_threads, cg.anns_k, os.eps_parameter);
                 } else {
-                    log("Graph file not found: {}\n", opt_graph_path);
+                    log("Graph file not found: {}\n", random_graph_path);
                 }
+                
+                // Test optimized graphs at each checkpoint
+                for(uint64_t iterations = os.iteration_interval; iterations <= os.total_iterations; iterations += os.iteration_interval) {
+                    std::string opt_graph_path = graph_paths.opt_scaling_graph_file(dims, config.metric, cg.k, og.k_opt, og.eps_opt, og.i_opt, iterations);
+                    log("\n=== OPT_SCALING Test: iterations={} ===\n", iterations);
+                    log("Graph: {}\n", opt_graph_path);
+                    
+                    if(std::filesystem::exists(opt_graph_path)) {
+                        const auto graph = deglib::graph::load_readonly_graph(opt_graph_path.c_str());
+                        deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
+                            cg.anns_repeat, cg.anns_threads, cg.anns_k, os.eps_parameter);
+                    } else {
+                        log("Graph file not found: {}\n", opt_graph_path);
+                    }
+                }
+                
+                deglib::benchmark::reset_log_to_console();
+                log("OPT_SCALING: Log written to: {}\n", log_path);
             }
-            
-            deglib::benchmark::reset_log_to_console();
-            log("OPT_SCALING: Log written to: {}\n", log_path);
         }
     }
     
@@ -1128,6 +1174,12 @@ int main(int argc, char *argv[]) {
             for(uint32_t threads : ts.thread_counts) {
                 std::string graph_path = graph_paths.thread_scaling_graph_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, cg.lid, threads);
                 std::string log_path = graph_paths.thread_scaling_log_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, cg.lid, threads);
+                
+                // Skip if log file already exists
+                if(std::filesystem::exists(log_path)) {
+                    log("threads={}: Skipping - log file already exists: {}\n", threads, log_path);
+                    continue;
+                }
                 
                 // Set up log file for this thread count (each gets its own log for timing analysis)
                 deglib::benchmark::set_log_file(log_path, false);
@@ -1178,37 +1230,42 @@ int main(int argc, char *argv[]) {
         log("Log: {}\n", log_path);
         
         if(do_run && base_repository && query_repository) {
-            deglib::benchmark::set_log_file(log_path, true);
-            log("\n=== RNG_DISABLED Test ===\n");
-            
-            if(std::filesystem::exists(graph_path)) {
-                log("Graph already exists: {}\n", graph_path);
+            // Skip entire scenario if log file already exists
+            if(std::filesystem::exists(log_path)) {
+                log("RNG_DISABLED: Skipping - log file already exists: {}\n", log_path);
             } else {
-                log("\n=== Building Graph with RNG Disabled ===\n");
-                log("Settings: k={}, k_ext={}, eps_ext={:.2f}, lid={}, threads={}\n",
-                    cg.k, cg.k_ext, cg.eps_ext, DatasetConfig::optimization_target_str(cg.lid), cg.build_threads);
-                log("Output graph: {}\n", graph_path);
+                deglib::benchmark::set_log_file(log_path, true);
+                log("\n=== RNG_DISABLED Test ===\n");
                 
-                // Build graph with RNG pruning disabled (use_rng=false)
-                deglib::benchmark::create_graph(*base_repository, config.data_stream_type, graph_path, 
-                    config.metric, cg.lid, cg.k, cg.k_ext, cg.eps_ext, 0, 0, 0, 
-                    cg.build_threads, /*use_rng=*/false);
-            }
-            
-            // Test the graph
-            if(std::filesystem::exists(graph_path)) {
-                const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
-                log("Graph loaded: {} vertices\n", graph.size());
+                if(std::filesystem::exists(graph_path)) {
+                    log("Graph already exists: {}\n", graph_path);
+                } else {
+                    log("\n=== Building Graph with RNG Disabled ===\n");
+                    log("Settings: k={}, k_ext={}, eps_ext={:.2f}, lid={}, threads={}\n",
+                        cg.k, cg.k_ext, cg.eps_ext, DatasetConfig::optimization_target_str(cg.lid), cg.build_threads);
+                    log("Output graph: {}\n", graph_path);
+                    
+                    // Build graph with RNG pruning disabled (use_rng=false)
+                    deglib::benchmark::create_graph(*base_repository, config.data_stream_type, graph_path, 
+                        config.metric, cg.lid, cg.k, cg.k_ext, cg.eps_ext, 0, 0, 0, 
+                        cg.build_threads, /*use_rng=*/false);
+                }
                 
-                // ANNS Test
-                log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
-                auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
-                deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                    cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
+                // Test the graph
+                if(std::filesystem::exists(graph_path)) {
+                    const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
+                    log("Graph loaded: {} vertices\n", graph.size());
+                    
+                    // ANNS Test
+                    log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
+                    auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
+                    deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
+                        cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
+                }
+                
+                deglib::benchmark::reset_log_to_console();
+                log("Log written to: {}\n", log_path);
             }
-            
-            deglib::benchmark::reset_log_to_console();
-            log("Log written to: {}\n", log_path);
         }
     }
 
@@ -1234,6 +1291,12 @@ int main(int argc, char *argv[]) {
                                                                          og.k_opt, og.eps_opt, og.i_opt, ds_type);
                 std::string log_path = graph_paths.dynamic_log_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, 
                                                                      og.k_opt, og.eps_opt, og.i_opt, ds_type);
+                
+                // Skip if log file already exists
+                if(std::filesystem::exists(log_path)) {
+                    log("{}: Skipping - log file already exists: {}\n", DatasetConfig::data_stream_type_str(ds_type), log_path);
+                    continue;
+                }
                 
                 // Set up log file for this DataStreamType
                 deglib::benchmark::set_log_file(log_path, false);
