@@ -1,3 +1,16 @@
+/**
+ * @file deglib_build_and_test.cpp
+ * @brief Comprehensive graph building and testing tool for DEG.
+ * 
+ * This tool builds DEG graphs with various configurations and runs comprehensive
+ * tests including ANNS, exploration, and graph quality analysis.
+ * 
+ * Usage:
+ *   deglib_build_and_test [dataset] [tests...]
+ * 
+ * See DatasetConfig and test structs for available configurations.
+ */
+
 #include <random>
 #include <chrono>
 #include <unordered_set>
@@ -6,6 +19,7 @@
 #include <filesystem>
 #include <atomic>
 #include <map>
+#include <thread>
 
 #include <fmt/core.h>
 #include <omp.h>
@@ -44,6 +58,7 @@ struct CreateGraphTest {
     uint8_t k_ext = 60;
     float eps_ext = 0.1f;
     uint32_t build_threads = 1;
+    uint32_t analysis_threads = std::thread::hardware_concurrency(); // Threads for graph analysis (default: all CPU threads)
     
     // ANNS test parameters
     uint32_t anns_k = 100;                    // k for ANNS recall test
@@ -620,9 +635,10 @@ int main(int argc, char *argv[]) {
                 const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
                 log("Graph loaded: {} vertices\n", graph.size());
                 
-                // 1. Analyze graph and log stats
+                // 1. Analyze graph and log stats (with graph quality using full exploration GT)
                 log("\n--- Graph Analysis ---\n");
-                deglib::benchmark::analyze_graph(graph);
+                auto full_explore_gt = ds.load_full_explore_groundtruth();
+                deglib::benchmark::analyze_graph(graph, full_explore_gt, true, true, cg.analysis_threads);
                 
                 // 2. ANNS Test with Top-k
                 log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
@@ -1260,9 +1276,10 @@ int main(int argc, char *argv[]) {
                     bool use_half = (ds_type != DataStreamType::AddAll);
                     auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half);
                     
-                    // Graph analysis
+                    // Graph analysis (with graph quality using full exploration GT)
                     log("\n--- Graph Analysis ---\n");
-                    deglib::benchmark::analyze_graph(graph);
+                    auto full_explore_gt = ds.load_full_explore_groundtruth();
+                    deglib::benchmark::analyze_graph(graph, full_explore_gt, false, false, cg.analysis_threads);
                     
                     // ANNS Test
                     log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);

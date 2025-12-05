@@ -1,5 +1,5 @@
 /**
- * @file deglib_phd_bench.cpp
+ * @file deglib_test.cpp
  * @brief Standalone benchmark tool for running benchmarks on existing DEG graphs.
  * 
  * This tool allows running any benchmark (search, explore, graph analysis) on any
@@ -10,22 +10,23 @@
  *   Command-line options can override numeric parameters.
  * 
  * Usage:
- *   deglib_phd_bench [options]
+ *   deglib_test [dataset] [graph_file] [benchmark_type] [options]
  * 
  * Options:
- *   --k <value>           - Number of nearest neighbors (default: 100)
- *   --repeat <value>      - Number of test repetitions (default: 1)
- *   --threads <value>     - Number of threads (default: 1)
- *   --eps <values>        - Comma-separated eps values for ANNS
+ *   --k <value>               - Number of nearest neighbors (default: 100)
+ *   --repeat <value>          - Number of test repetitions (default: 1)
+ *   --analysis-threads <val>  - Threads for graph analysis (default: all CPU threads)
+ *   --test-threads <value>    - Threads for ANNS/exploration tests (default: 1)
+ *   --eps <values>            - Comma-separated eps values for ANNS
  *   --explore-k <value>   - k for exploration test (default: 1000)
  *   --half-gt             - Use half dataset ground truth
  *   --reachability        - Compute search reachability (expensive)
  *   --reach               - Compute exploration reachability (expensive)
  * 
  * Examples:
- *   deglib_phd_bench                          # Run with defaults from source code
- *   deglib_phd_bench --k 50 --threads 4       # Override k and threads
- *   deglib_phd_bench --reachability           # Also compute reachability
+ *   deglib_test                               # Run with defaults from source code
+ *   deglib_test sift1m path/to/graph.deg      # Test specific graph
+ *   deglib_test --k 50 --threads 4            # Override k and threads
  */
 
 #include <filesystem>
@@ -33,6 +34,7 @@
 #include <vector>
 #include <algorithm>
 #include <sstream>
+#include <thread>
 
 #include <fmt/core.h>
 #include <fmt/format.h>
@@ -61,10 +63,11 @@ static void print_usage(const char* program_name) {
     fmt::print("  graph_file    - Path to the graph file (.deg) - default: auto from dataset\n");
     fmt::print("  benchmark     - Benchmark type: anns, explore, stats, all (default: all)\n\n");
     fmt::print("Options:\n");
-    fmt::print("  --k <value>           - Number of nearest neighbors (default: 100)\n");
-    fmt::print("  --repeat <value>      - Number of test repetitions (default: 1)\n");
-    fmt::print("  --threads <value>     - Number of threads (default: 1)\n");
-    fmt::print("  --eps <values>        - Comma-separated eps values for ANNS (default: 0.1,0.12,0.14,0.16,0.18,0.2,0.3)\n");
+    fmt::print("  --k <value>               - Number of nearest neighbors (default: 100)\n");
+    fmt::print("  --repeat <value>          - Number of test repetitions (default: 1)\n");
+    fmt::print("  --analysis-threads <val>  - Threads for graph analysis (default: all CPU threads)\n");
+    fmt::print("  --test-threads <value>    - Threads for ANNS/exploration tests (default: 1)\n");
+    fmt::print("  --eps <values>            - Comma-separated eps values for ANNS (default: 0.1,0.12,0.14,0.16,0.18,0.2,0.3)\n");
     fmt::print("  --explore-k <value>   - k for exploration test (default: 1000)\n");
     fmt::print("  --half-gt             - Use half dataset ground truth\n");
     fmt::print("  --reachability        - Compute search reachability (expensive)\n");
@@ -91,17 +94,18 @@ int main(int argc, char* argv[]) {
     // ==========================================================================
     // Default parameters - change these in the IDE to run different benchmarks
     // ==========================================================================
-    std::string dataset_str = "sift1m";                 // Dataset: sift1m, deep1m, glove, audio
+    std::string dataset_str = "sift1m";                                 // Dataset: sift1m, deep1m, glove, audio
     std::string graph_file = "c:/Data/phd/sift1m/deg/128D_L2_K30_AddK60Eps0.1_LowLID.deg";                        // Graph file path (empty = auto-generate)
-    std::string benchmark_type = "stats";                 // Benchmark: anns, explore, stats, all
-    uint32_t k = 100;                                   // ANNS k
-    uint32_t explore_k = 1000;                          // Exploration k
-    uint32_t repeat = 1;                                // Test repetitions
-    uint32_t threads = 1;                               // Thread count
+    std::string benchmark_type = "stats";                               // Benchmark: anns, explore, stats, all
+    uint32_t k = 100;                                                   // ANNS k
+    uint32_t explore_k = 1000;                                          // Exploration k
+    uint32_t repeat = 1;                                                // Test repetitions
+    uint32_t analysis_threads = std::thread::hardware_concurrency();    // Threads for graph analysis (default: all CPU threads)
+    uint32_t test_threads = 1;                                          // Threads for ANNS/exploration tests (default: 1)
     std::vector<float> eps_parameter = { 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f };
-    bool use_half_gt = false;                           // Use half dataset ground truth
-    bool compute_reachability = false;                  // Compute search reachability (expensive)
-    bool compute_reach = false;                         // Compute exploration reachability (expensive)
+    bool use_half_gt = false;                                           // Use half dataset ground truth
+    bool compute_reachability = false;                                  // Compute search reachability (expensive)
+    bool compute_reach = false;                                         // Compute exploration reachability (expensive)
     // ==========================================================================
     
     // Parse command-line arguments
@@ -118,8 +122,10 @@ int main(int argc, char* argv[]) {
             explore_k = std::stoul(argv[++i]);
         } else if (arg == "--repeat" && i + 1 < argc) {
             repeat = std::stoul(argv[++i]);
-        } else if (arg == "--threads" && i + 1 < argc) {
-            threads = std::stoul(argv[++i]);
+        } else if (arg == "--analysis-threads" && i + 1 < argc) {
+            analysis_threads = std::stoul(argv[++i]);
+        } else if (arg == "--test-threads" && i + 1 < argc) {
+            test_threads = std::stoul(argv[++i]);
         } else if (arg == "--eps" && i + 1 < argc) {
             eps_parameter = parse_eps_values(argv[++i]);
         } else if (arg == "--half-gt") {
@@ -164,20 +170,25 @@ int main(int argc, char* argv[]) {
     // Create dataset object
     Dataset ds(dataset_name, data_path);
     
+    // Ensure dataset is set up (downloads, generates ground truth files if needed)
+    fmt::print("\n=== Ensuring dataset is set up ===\n");
+    if (!setup_dataset(ds, analysis_threads)) {
+        fmt::print(stderr, "Error: Failed to set up dataset: {}\n", dataset_str);
+        return 1;
+    }
+    
     // Validate graph file exists
     if (!std::filesystem::exists(graph_file)) {
         fmt::print(stderr, "Error: Graph file not found: {}\n", graph_file);
         return 1;
     }
     
-    // Set up OpenMP threads
-    omp_set_num_threads(threads);
-    
-    fmt::print("\n=== DEG Benchmark Tool ===\n");
+    fmt::print("\n=== DEG Test Tool ===\n");
     fmt::print("Dataset: {}\n", dataset_str);
     fmt::print("Graph: {}\n", graph_file);
     fmt::print("Benchmark: {}\n", benchmark_type);
-    fmt::print("k={}, explore_k={}, repeat={}, threads={}\n", k, explore_k, repeat, threads);
+    fmt::print("k={}, explore_k={}, repeat={}, analysis_threads={}, test_threads={}\n", 
+               k, explore_k, repeat, analysis_threads, test_threads);
     fmt::print("eps_parameter: {}\n", fmt::join(eps_parameter, ", "));
     fmt::print("use_half_gt: {}, compute_reachability: {}, compute_reach: {}\n\n", 
                use_half_gt, compute_reachability, compute_reach);
@@ -195,7 +206,12 @@ int main(int argc, char* argv[]) {
     // Stats / Graph Analysis
     if (run_stats) {
         fmt::print("=== Graph Analysis ===\n");
-        deglib::benchmark::analyze_graph(graph, {}, compute_reachability, compute_reach, threads);
+        
+        // Load full exploration ground truth for graph quality computation
+        fmt::print("Loading full exploration ground truth for graph quality...\n");
+        auto full_explore_gt = ds.load_full_explore_groundtruth();
+        fmt::print("Loaded full exploration ground truth for {} elements\n", full_explore_gt.size());
+        deglib::benchmark::analyze_graph(graph, full_explore_gt, compute_reachability, compute_reach, analysis_threads);
         fmt::print("\n");
     }
     
@@ -218,7 +234,7 @@ int main(int argc, char* argv[]) {
         fmt::print("Loaded ground truth for {} queries\n", ground_truth.size());
         
         deglib::benchmark::test_graph_anns(graph, query_repository, ground_truth, 
-            repeat, threads, k, eps_parameter);
+            repeat, test_threads, k, eps_parameter);
         fmt::print("\n");
     }
     
@@ -245,7 +261,7 @@ int main(int argc, char* argv[]) {
         fmt::print("Loaded exploration ground truth for {} entries\n", explore_gt.size());
         
         deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
-            false, repeat, explore_k, threads);
+            false, repeat, explore_k, test_threads);
         fmt::print("\n");
     }
     

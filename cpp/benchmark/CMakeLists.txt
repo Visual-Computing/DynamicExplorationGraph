@@ -11,15 +11,15 @@ endif()
 # build DEG benchmark files
 find_package(OpenMP REQUIRED)
 
-add_executable(deglib_phd ${PROJECT_SOURCE_DIR}/src/deglib_phd.cpp)
-target_link_libraries(deglib_phd PUBLIC DEG_LIB compile-options
+add_executable(deglib_build_and_test ${PROJECT_SOURCE_DIR}/src/deglib_build_and_test.cpp)
+target_link_libraries(deglib_build_and_test PUBLIC DEG_LIB compile-options
                                                 fmt::fmt-header-only OpenMP::OpenMP_CXX)
-target_compile_definitions(deglib_phd PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
+target_compile_definitions(deglib_build_and_test PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
 
-add_executable(deglib_phd_bench ${PROJECT_SOURCE_DIR}/src/deglib_phd_bench.cpp)
-target_link_libraries(deglib_phd_bench PUBLIC DEG_LIB compile-options
+add_executable(deglib_test ${PROJECT_SOURCE_DIR}/src/deglib_test.cpp)
+target_link_libraries(deglib_test PUBLIC DEG_LIB compile-options
                                                 fmt::fmt-header-only OpenMP::OpenMP_CXX)
-target_compile_definitions(deglib_phd_bench PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
+target_compile_definitions(deglib_test PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
 
 add_executable(deglib_setup_dataset ${PROJECT_SOURCE_DIR}/src/deglib_setup_dataset.cpp)
 target_link_libraries(deglib_setup_dataset PUBLIC DEG_LIB compile-options

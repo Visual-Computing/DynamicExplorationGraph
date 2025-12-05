@@ -117,10 +117,13 @@ struct DatasetInfo {
     std::string base_file;          // e.g., "sift1m_base.fvecs"
     std::string query_file;         // e.g., "sift1m_query.fvecs"
     
-    // Exploration files
+    // Exploration files (sampled subset)
     std::string explore_query_file;           // e.g., "sift1m_explore_query.fvecs"
     std::string explore_entry_vertex_file;    // e.g., "sift1m_explore_entry_vertex.ivecs"
     std::string explore_groundtruth_file;     // e.g., "sift1m_explore_groundtruth_top1000.ivecs"
+    
+    // Full exploration ground truth (all base elements)
+    std::string full_explore_groundtruth_file;  // e.g., "sift1m_full_explore_groundtruth_top1000.ivecs"
     
     // Exploration parameters
     static constexpr size_t EXPLORE_SAMPLE_COUNT = 10000;
@@ -139,7 +142,7 @@ struct DatasetInfo {
 // ============================================================================
 
 inline DatasetInfo make_dataset_info(const DatasetName& ds) {
-    DatasetInfo info{ds, {}, deglib::Metric::L2, 0, 0, 0, {}, {}, {}, {}, {}};
+    DatasetInfo info{ds, {}, deglib::Metric::L2, 0, 0, 0, {}, {}, {}, {}, {}, {}};
     
     std::string name = ds.name();
     
@@ -149,6 +152,7 @@ inline DatasetInfo make_dataset_info(const DatasetName& ds) {
     info.explore_query_file = name + "_explore_query.fvecs";
     info.explore_entry_vertex_file = name + "_explore_entry_vertex.ivecs";
     info.explore_groundtruth_file = name + "_explore_groundtruth_top1000.ivecs";
+    info.full_explore_groundtruth_file = name + "_full_explore_groundtruth_top1000.ivecs";
     
     if (ds == DatasetName::SIFT1M) {
         info.download_url = "https://static.visual-computing.com/paper/DEG/sift.tar.gz";
@@ -229,6 +233,11 @@ public:
     
     std::string explore_groundtruth_file() const {
         return (files_dir_ / info_.explore_groundtruth_file).string();
+    }
+    
+    // Full exploration ground truth file (top-k for ALL base elements)
+    std::string full_explore_groundtruth_file() const {
+        return (files_dir_ / info_.full_explore_groundtruth_file).string();
     }
     
     // Ground truth file for specific base count
@@ -322,6 +331,34 @@ public:
     std::vector<std::unordered_set<uint32_t>> load_explore_groundtruth(size_t k = DatasetInfo::EXPLORE_TOPK) const {
         size_t dims = 0, count = 0;
         auto data = deglib::fvecs_read(explore_groundtruth_file().c_str(), dims, count);
+        const uint32_t* gt_ptr = reinterpret_cast<const uint32_t*>(data.get());
+        
+        // Clamp k to available dimensions
+        size_t actual_k = std::min(k, dims);
+        
+        std::vector<std::unordered_set<uint32_t>> answers(count);
+        for (size_t i = 0; i < count; i++) {
+            auto& gt = answers[i];
+            gt.reserve(actual_k);
+            for (size_t j = 0; j < actual_k; j++) {
+                gt.insert(gt_ptr[dims * i + j]);
+            }
+        }
+        return answers;
+    }
+    
+    /**
+     * @brief Load full exploration ground truth (for all base elements) as vector of unordered_sets.
+     * 
+     * This ground truth contains the top-k nearest neighbors for EVERY element in the base dataset.
+     * Used for computing graph quality metrics.
+     * 
+     * @param k Number of nearest neighbors to include in each set (default: EXPLORE_TOPK = 1000)
+     * @return Vector of unordered_sets, one per base element
+     */
+    std::vector<std::unordered_set<uint32_t>> load_full_explore_groundtruth(size_t k = DatasetInfo::EXPLORE_TOPK) const {
+        size_t dims = 0, count = 0;
+        auto data = deglib::fvecs_read(full_explore_groundtruth_file().c_str(), dims, count);
         const uint32_t* gt_ptr = reinterpret_cast<const uint32_t*>(data.get());
         
         // Clamp k to available dimensions
@@ -759,6 +796,50 @@ inline bool generate_exploration_files(
 }
 
 // ============================================================================
+// Full Exploration Ground Truth Generation
+// ============================================================================
+
+/**
+ * Generate full exploration ground truth for ALL base elements.
+ * Creates:
+ * - full_explore_groundtruth_top1000.ivecs: Top-1000 nearest neighbors for EVERY base element
+ * 
+ * This is used for computing graph quality metrics where we need the ideal neighbors
+ * for every vertex in the graph, not just a sampled subset.
+ * 
+ * WARNING: This is very expensive for large datasets (O(n^2) distance computations).
+ */
+inline bool generate_full_exploration_groundtruth(
+    const Dataset& ds,
+    const deglib::FeatureRepository& base_repo,
+    const uint32_t thread_count = 4)
+{
+    const auto& info = ds.info();
+    const size_t base_size = base_repo.size();
+    const uint32_t topk = DatasetInfo::EXPLORE_TOPK;
+    
+    // Check if file already exists
+    if (file_exists(ds.full_explore_groundtruth_file())) {
+        fmt::print("Full exploration ground truth already exists: {}\n", ds.full_explore_groundtruth_file());
+        return true;
+    }
+    
+    fmt::print("\n=== Generating full exploration ground truth ===\n");
+    fmt::print("Base size: {}, TopK: {}, Threads: {}\n", base_size, topk, thread_count);
+    fmt::print("WARNING: This computes top-{} for ALL {} elements (expensive)...\n", topk, base_size);
+    
+    // Compute ground truth: for each base element, find its top-k nearest neighbors in the base set
+    // This is essentially computing KNN with base_repo as both query and base
+    auto groundtruth = compute_knn_groundtruth(base_repo, base_repo, info.metric, topk, 0, thread_count);
+    
+    // Write ground truth
+    ivecs_write(ds.full_explore_groundtruth_file().c_str(), topk, base_size, groundtruth.data());
+    fmt::print("Wrote: {}\n", ds.full_explore_groundtruth_file());
+    
+    return true;
+}
+
+// ============================================================================
 // Ground Truth File Generation
 // ============================================================================
 
@@ -895,11 +976,14 @@ inline bool setup_dataset(
     auto query_repo = ds.load_query();
     fmt::print("Loaded {} vectors of dimension {}\n", query_repo.size(), query_repo.dims());
     
-    // Step 3: Generate exploration files if missing
+    // Step 3: Generate exploration files if missing (sampled subset)
     generate_exploration_files(ds, base_repo, thread_count);
     
     // Step 4: Generate ground truth files if missing
     generate_groundtruth_files(ds, base_repo, query_repo, thread_count);
+    
+    // Step 5: Generate full exploration ground truth if missing (all base elements)
+    generate_full_exploration_groundtruth(ds, base_repo, thread_count);
     
     fmt::print("\n============================================================\n");
     fmt::print("Dataset {} setup complete!\n", ds.name());
@@ -909,6 +993,7 @@ inline bool setup_dataset(
     fmt::print("  Explore Query:  {}\n", ds.explore_query_file());
     fmt::print("  Explore Entry:  {}\n", ds.explore_entry_vertex_file());
     fmt::print("  Explore GT:     {}\n", ds.explore_groundtruth_file());
+    fmt::print("  Full Explore GT: {}\n", ds.full_explore_groundtruth_file());
     fmt::print("  GT Full:  {}\n", ds.groundtruth_file_full());
     fmt::print("  GT Half:  {}\n", ds.groundtruth_file_half());
     fmt::print("============================================================\n\n");
