@@ -204,7 +204,6 @@ struct DatasetConfig {
     DatasetName dataset_name = DatasetName::Invalid;
     
     // Common settings
-    DataStreamType data_stream_type = DataStreamType::AddAll;
     deglib::Metric metric = deglib::Metric::L2;
     
     // ============================================================================
@@ -627,9 +626,6 @@ int main(int argc, char *argv[]) {
         log("Loaded {} queries\n", query_repository->size());
     }
 
-    // Helper: determine if we need half dataset ground truth
-    const bool use_half_gt = (config.data_stream_type != DataStreamType::AddAll);
-
     // Execute tests based on test_type_arg
     bool run_all = (test_type_arg == "all");
     
@@ -661,7 +657,7 @@ int main(int argc, char *argv[]) {
                         cg.k, cg.k_ext, cg.eps_ext, DatasetConfig::optimization_target_str(cg.lid), cg.build_threads);
                     log("Output graph: {}\n", graph_path);
                     
-                    deglib::benchmark::create_graph(*base_repository, config.data_stream_type, graph_path, 
+                    deglib::benchmark::create_graph(*base_repository, DataStreamType::AddAll, graph_path, 
                         config.metric, cg.lid, cg.k, cg.k_ext, cg.eps_ext, 0, 0, 0, cg.build_threads, true, ds.info().scale);
                 }
                 
@@ -680,7 +676,7 @@ int main(int argc, char *argv[]) {
                     // 2. ANNS Test with Top-k
                     log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
                     {
-                        auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
+                        auto ground_truth = ds.load_groundtruth(cg.anns_k, false);
                         wait_before_test();
                         deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
                             cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
@@ -700,7 +696,7 @@ int main(int argc, char *argv[]) {
                     log("\n--- k-Sweep Test ---\n");
                     for(uint32_t k_val : cg.k_sweep_values) {
                         log("\n-- k={} --\n", k_val);
-                        auto gt_k = ds.load_groundtruth(k_val, use_half_gt);
+                        auto gt_k = ds.load_groundtruth(k_val, false);
                         wait_before_test();
                         deglib::benchmark::test_graph_anns(graph, *query_repository, gt_k, 
                             cg.anns_repeat, cg.anns_threads, k_val, cg.eps_parameter);
@@ -778,7 +774,7 @@ int main(int argc, char *argv[]) {
                         // 2. ANNS Test with Top-100
                         log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
                         {
-                            auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
+                            auto ground_truth = ds.load_groundtruth(cg.anns_k, false);
                             wait_before_test();
                             deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
                                 cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
@@ -842,7 +838,7 @@ int main(int argc, char *argv[]) {
                     log("Settings: k={}, k_ext={}, eps_ext={:.2f}, threads={}\n",
                         cg.k, cg.k_ext, cg.eps_ext, cg.build_threads);
                     
-                    deglib::benchmark::create_graph(*base_repository, config.data_stream_type, graph_path, 
+                    deglib::benchmark::create_graph(*base_repository, DataStreamType::AddAll, graph_path, 
                         config.metric, lid, cg.k, cg.k_ext, cg.eps_ext, 0, 0, 0, cg.build_threads, true, ds.info().scale);
                 }
                 
@@ -908,7 +904,7 @@ int main(int argc, char *argv[]) {
                     log("Settings: k={}, k_ext={}, eps_ext={:.2f}, lid={}, threads={}\n",
                         k, k_ext, cg.eps_ext, DatasetConfig::optimization_target_str(cg.lid), cg.build_threads);
                     
-                    deglib::benchmark::create_graph(*base_repository, config.data_stream_type, graph_path, 
+                    deglib::benchmark::create_graph(*base_repository, DataStreamType::AddAll, graph_path, 
                         config.metric, cg.lid, k, k_ext, cg.eps_ext, 0, 0, 0, cg.build_threads, true, ds.info().scale);
                 }
                 
@@ -944,7 +940,7 @@ int main(int argc, char *argv[]) {
             std::filesystem::create_directories(scaling_dir);
             
             // Load ground truth once for all k_ext tests
-            auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
+            auto ground_truth = ds.load_groundtruth(cg.anns_k, false);
             
             for(uint8_t k_ext : kes.k_ext_values) {
                 std::string graph_path = graph_paths.scaling_graph_file(scaling_dir, dims, config.metric, cg.k, k_ext, cg.eps_ext, cg.lid);
@@ -966,7 +962,7 @@ int main(int argc, char *argv[]) {
                     log("Settings: k={}, k_ext={}, eps_ext={:.2f}, lid={}, threads={}\n",
                         cg.k, k_ext, cg.eps_ext, DatasetConfig::optimization_target_str(cg.lid), cg.build_threads);
                     
-                    deglib::benchmark::create_graph(*base_repository, config.data_stream_type, graph_path, 
+                    deglib::benchmark::create_graph(*base_repository, DataStreamType::AddAll, graph_path, 
                         config.metric, cg.lid, cg.k, k_ext, cg.eps_ext, 0, 0, 0, cg.build_threads, true, ds.info().scale);
                 }
                 
@@ -1002,7 +998,7 @@ int main(int argc, char *argv[]) {
             std::filesystem::create_directories(scaling_dir);
             
             // Load ground truth once for all eps_ext tests
-            auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
+            auto ground_truth = ds.load_groundtruth(cg.anns_k, false);
             
             for(float eps_ext : ees.eps_ext_values) {
                 std::string graph_path = graph_paths.scaling_graph_file(scaling_dir, dims, config.metric, cg.k, cg.k_ext, eps_ext, cg.lid);
@@ -1024,7 +1020,7 @@ int main(int argc, char *argv[]) {
                     log("Settings: k={}, k_ext={}, eps_ext={:.2f}, lid={}, threads={}\n",
                         cg.k, cg.k_ext, eps_ext, DatasetConfig::optimization_target_str(cg.lid), cg.build_threads);
                     
-                    deglib::benchmark::create_graph(*base_repository, config.data_stream_type, graph_path, 
+                    deglib::benchmark::create_graph(*base_repository, DataStreamType::AddAll, graph_path, 
                         config.metric, cg.lid, cg.k, cg.k_ext, eps_ext, 0, 0, 0, cg.build_threads, true, ds.info().scale);
                 }
                 
@@ -1229,7 +1225,7 @@ int main(int argc, char *argv[]) {
             std::filesystem::create_directories(scaling_dir);
             
             // Load ground truth once for all thread tests
-            auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
+            auto ground_truth = ds.load_groundtruth(cg.anns_k, false);
             
             for(uint32_t threads : ts.thread_counts) {
                 std::string graph_path = graph_paths.thread_scaling_graph_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, cg.lid, threads);
@@ -1252,7 +1248,7 @@ int main(int argc, char *argv[]) {
                 } else {
                     log("\n--- Building graph with {} threads ---\n", threads);
                     deglib::benchmark::create_graph(
-                        *base_repository, config.data_stream_type, graph_path,
+                        *base_repository, DataStreamType::AddAll, graph_path,
                         config.metric, cg.lid, cg.k, cg.k_ext, cg.eps_ext,
                         0, 0, 0,  // k_opt, eps_opt, i_opt (defaults)
                         threads, true, ds.info().scale);
@@ -1307,7 +1303,7 @@ int main(int argc, char *argv[]) {
                     log("Output graph: {}\n", graph_path);
                     
                     // Build graph with RNG pruning disabled (use_rng=false)
-                    deglib::benchmark::create_graph(*base_repository, config.data_stream_type, graph_path, 
+                    deglib::benchmark::create_graph(*base_repository, DataStreamType::AddAll, graph_path, 
                         config.metric, cg.lid, cg.k, cg.k_ext, cg.eps_ext, 0, 0, 0, 
                         cg.build_threads, /*use_rng=*/false, ds.info().scale);
                 }
@@ -1319,7 +1315,7 @@ int main(int argc, char *argv[]) {
                     
                     // ANNS Test
                     log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
-                    auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
+                    auto ground_truth = ds.load_groundtruth(cg.anns_k, false);
                     wait_before_test();
                     deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
                         cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
