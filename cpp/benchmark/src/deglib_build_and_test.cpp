@@ -693,7 +693,7 @@ int main(int argc, char *argv[]) {
                         auto explore_gt = ds.load_explore_groundtruth(cg.explore_k);
                         wait_before_test();
                         deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
-                            false, cg.explore_repeat, cg.explore_k, cg.explore_threads);
+                            false, cg.explore_repeat, cg.explore_k, cg.explore_threads, nullptr, ds.info().explore_depth);
                     }
 
                     // 4. k-Sweep Test
@@ -791,7 +791,7 @@ int main(int argc, char *argv[]) {
                             auto explore_gt = ds.load_explore_groundtruth(cg.explore_k);
                             wait_before_test();
                             deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
-                                false, cg.explore_repeat, cg.explore_k, cg.explore_threads);
+                                false, cg.explore_repeat, cg.explore_k, cg.explore_threads, nullptr, ds.info().explore_depth);
                         }
                     }
                 }
@@ -1410,7 +1410,7 @@ int main(int argc, char *argv[]) {
                         auto explore_gt = ds.load_explore_groundtruth(cg.explore_k, use_half);
                         wait_before_test();
                         deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
-                            false, cg.explore_repeat, cg.explore_k, cg.explore_threads);
+                            false, cg.explore_repeat, cg.explore_k, cg.explore_threads, nullptr, ds.info().explore_depth);
                     }
                 } else {
                     log("Graph file not found: {}\n", graph_path);

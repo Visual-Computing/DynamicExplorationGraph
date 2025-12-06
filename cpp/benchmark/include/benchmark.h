@@ -203,7 +203,8 @@ static void test_graph_explore(const deglib::search::SearchGraph& graph,
                                const std::vector<std::unordered_set<uint32_t>>& ground_truth,
                                const boolean include_entry,
                                const uint32_t repeat, const uint32_t k, const uint32_t threads,
-                               const deglib::graph::Filter* filter = nullptr)
+                               const deglib::graph::Filter* filter = nullptr,
+                               const uint32_t explore_depth = 3)
 {
     if (entry_vertex_labels.size() != ground_truth.size()) {
         fmt::print(stderr, "Entry vertex count {} does not match ground truth count {}\n", 
@@ -221,7 +222,7 @@ static void test_graph_explore(const deglib::search::SearchGraph& graph,
 
     // try different max_distance_count values
     uint32_t k_factor = 100;
-    for (uint32_t f = 0; f <= 3; f++, k_factor *= 10) {
+    for (uint32_t f = 0; f <= explore_depth; f++, k_factor *= 10) {
         for (uint32_t i = (f == 0) ? 1 : 2; i < 11; i++) {         
             const auto max_distance_count = ((f == 0) ? (k + k_factor * (i-1)) : (k_factor * i));
 

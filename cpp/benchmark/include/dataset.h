@@ -113,6 +113,7 @@ struct DatasetInfo {
     size_t query_count;             // Number of query vectors
     uint32_t dims;                  // Feature dimensions
     uint32_t scale;                 // Scale factor for distance/weight metrics (1 for SIFT1M/Audio, 100 for DEEP1M/GLOVE)
+    uint32_t explore_depth;         // Exploration test depth (1 for Audio, 2 for SIFT1M/DEEP1M, 3 for GLOVE)
     
     // File names (canonical)
     std::string base_file;          // e.g., "sift1m_base.fvecs"
@@ -145,7 +146,7 @@ struct DatasetInfo {
 // ============================================================================
 
 inline DatasetInfo make_dataset_info(const DatasetName& ds) {
-    DatasetInfo info{ds, {}, deglib::Metric::L2, 0, 0, 0, 1, {}, {}, {}, {}, {}, {}, {}, {}};
+    DatasetInfo info{ds, {}, deglib::Metric::L2, 0, 0, 0, 1, 2, {}, {}, {}, {}, {}, {}, {}, {}};
     
     std::string name = ds.name();
     
@@ -165,24 +166,28 @@ inline DatasetInfo make_dataset_info(const DatasetName& ds) {
         info.query_count = 10000;
         info.dims = 128;
         info.scale = 1;
+        info.explore_depth = 2;
     } else if (ds == DatasetName::DEEP1M) {
         info.download_url = "https://static.visual-computing.com/paper/DEG/deep1m.tar.gz";
         info.base_count = 1000000;
         info.query_count = 10000;
         info.dims = 96;
         info.scale = 100;
+        info.explore_depth = 2;
     } else if (ds == DatasetName::GLOVE) {
         info.download_url = "https://static.visual-computing.com/paper/DEG/glove.tar.gz";
         info.base_count = 1183514;
         info.query_count = 10000;
         info.dims = 100;
         info.scale = 100;
+        info.explore_depth = 3;
     } else if (ds == DatasetName::AUDIO) {
         info.download_url = "https://static.visual-computing.com/paper/DEG/audio.tar.gz";
         info.base_count = 53387;
         info.query_count = 200;
         info.dims = 192;
         info.scale = 1;
+        info.explore_depth = 1;
     }
     
     return info;
