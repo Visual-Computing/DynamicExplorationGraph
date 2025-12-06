@@ -17,7 +17,6 @@
 #include <algorithm>
 #include <filesystem>
 #include <thread>
-#include <unordered_set>
 
 #include <fmt/core.h>
 
@@ -263,18 +262,20 @@ inline float compute_exploration_reach(const deglib::search::SearchGraph& graph)
 
 
 /**
- * @brief Compute the graph quality using pre-computed ground truth sets.
+ * @brief Compute the graph quality using pre-computed ground truth sorted vectors.
  * 
  * Graph quality (GQ) is the ratio of neighbors that are "perfect" - meaning they
  * appear in the ground truth top-k list for that vertex.
  * 
+ * Uses std::binary_search for efficient membership testing on sorted vectors.
+ * 
  * @param graph The search graph to analyze
- * @param exploration_gt Pre-computed ground truth as vector of unordered_sets (one per vertex)
+ * @param exploration_gt Pre-computed ground truth as vector of sorted vectors (one per vertex)
  * @return Graph quality ratio in [0, 1]
  */
 inline float compute_graph_quality(
     const deglib::search::SearchGraph& graph, 
-    const std::vector<std::unordered_set<uint32_t>>& exploration_gt) 
+    const std::vector<std::vector<uint32_t>>& exploration_gt) 
 {
     const auto graph_size = graph.size();
     const auto edges_per_vertex = graph.getEdgesPerVertex();
@@ -301,8 +302,8 @@ inline float compute_graph_quality(
             // Get the neighbor's external label
             const auto neighbor_label = graph.getExternalLabel(neighbor_index);
 
-            // Check if neighbor is in the ground truth set
-            if (gt.find(neighbor_label) != gt.end()) {
+            // Check if neighbor is in the ground truth sorted vector using binary search
+            if (std::binary_search(gt.begin(), gt.end(), neighbor_label)) {
                 perfect_neighbor_count++;
             }
         }
@@ -353,7 +354,7 @@ struct GraphStats {
  * optionally computes expensive metrics (reachability, graph quality), and logs everything.
  * 
  * @param graph The search graph to analyze
- * @param exploration_gt Pre-computed ground truth as vector of unordered_sets (optional, for graph quality)
+ * @param exploration_gt Pre-computed ground truth as vector of sorted vectors (optional, for graph quality)
  * @param compute_reachability Whether to compute search reachability (expensive)
  * @param compute_reach Whether to compute exploration reachability (expensive)
  * @param thread_count Number of threads for parallel computation
@@ -361,7 +362,7 @@ struct GraphStats {
  */
 inline GraphStats analyze_graph(
     const deglib::search::SearchGraph& graph,
-    const std::vector<std::unordered_set<uint32_t>>& exploration_gt = {},
+    const std::vector<std::vector<uint32_t>>& exploration_gt = {},
     bool compute_reachability = false,
     bool compute_reach = false,
     uint32_t thread_count = std::thread::hardware_concurrency())

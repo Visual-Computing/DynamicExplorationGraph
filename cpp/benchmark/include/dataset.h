@@ -23,7 +23,6 @@
 #include <atomic>
 #include <chrono>
 #include <limits>
-#include <unordered_set>
 
 #include <fmt/core.h>
 #include <fmt/format.h>
@@ -297,13 +296,16 @@ public:
     }
     
     /**
-     * @brief Load ground truth and convert to vector of unordered_sets.
+     * @brief Load ground truth and convert to vector of sorted vectors.
      * 
-     * @param k Number of nearest neighbors to include in each set
+     * Uses sorted vectors instead of unordered_sets for memory efficiency.
+     * Use std::binary_search() for membership testing.
+     * 
+     * @param k Number of nearest neighbors to include in each vector
      * @param use_half_dataset Whether to use half dataset ground truth
-     * @return Vector of unordered_sets, one per query
+     * @return Vector of sorted vectors, one per query
      */
-    std::vector<std::unordered_set<uint32_t>> load_groundtruth(size_t k, bool use_half_dataset = false) const {
+    std::vector<std::vector<uint32_t>> load_groundtruth(size_t k, bool use_half_dataset = false) const {
         std::string gt_file = use_half_dataset ? groundtruth_file_half() : groundtruth_file_full();
         return load_groundtruth_from_file(gt_file, k);
     }
@@ -311,17 +313,17 @@ public:
     /**
      * @brief Load ground truth for a specific base count.
      * 
-     * @param k Number of nearest neighbors to include in each set
+     * @param k Number of nearest neighbors to include in each vector
      * @param nb Number of base vectors (e.g., 100000 for 100k subset)
-     * @return Vector of unordered_sets, one per query
+     * @return Vector of sorted vectors, one per query
      */
-    std::vector<std::unordered_set<uint32_t>> load_groundtruth_for_size(size_t k, size_t nb) const {
+    std::vector<std::vector<uint32_t>> load_groundtruth_for_size(size_t k, size_t nb) const {
         std::string gt_file = groundtruth_file(nb);
         return load_groundtruth_from_file(gt_file, k);
     }
 
 private:
-    std::vector<std::unordered_set<uint32_t>> load_groundtruth_from_file(const std::string& gt_file, size_t k) const {
+    std::vector<std::vector<uint32_t>> load_groundtruth_from_file(const std::string& gt_file, size_t k) const {
         size_t ground_truth_dims = 0;
         size_t ground_truth_size = 0;
         auto gt_data = deglib::fvecs_read(gt_file.c_str(), ground_truth_dims, ground_truth_size);
@@ -333,13 +335,14 @@ private:
             abort();
         }
 
-        auto answers = std::vector<std::unordered_set<uint32_t>>(ground_truth_size);
+        auto answers = std::vector<std::vector<uint32_t>>(ground_truth_size);
         for (size_t i = 0; i < ground_truth_size; i++) {
             auto& gt = answers[i];
-            gt.reserve(k);
+            gt.resize(k);
             for (size_t j = 0; j < k; j++) {
-                gt.insert(ground_truth[ground_truth_dims * i + j]);
+                gt[j] = ground_truth[ground_truth_dims * i + j];
             }
+            std::sort(gt.begin(), gt.end());
         }
 
         return answers;
@@ -365,13 +368,16 @@ public:
     }
     
     /**
-     * @brief Load exploration ground truth and convert to vector of unordered_sets.
+     * @brief Load exploration ground truth and convert to vector of sorted vectors.
      * 
-     * @param k Number of nearest neighbors to include in each set (default: EXPLORE_TOPK = 1000)
+     * Uses sorted vectors instead of unordered_sets for memory efficiency.
+     * Use std::binary_search() for membership testing.
+     * 
+     * @param k Number of nearest neighbors to include in each vector (default: EXPLORE_TOPK = 1000)
      * @param use_half_dataset Whether to use half dataset ground truth (for dynamic data tests)
-     * @return Vector of unordered_sets, one per entry vertex
+     * @return Vector of sorted vectors, one per entry vertex
      */
-    std::vector<std::unordered_set<uint32_t>> load_explore_groundtruth(size_t k = DatasetInfo::EXPLORE_TOPK, bool use_half_dataset = false) const {
+    std::vector<std::vector<uint32_t>> load_explore_groundtruth(size_t k = DatasetInfo::EXPLORE_TOPK, bool use_half_dataset = false) const {
         std::string gt_file = use_half_dataset ? explore_groundtruth_half_file() : explore_groundtruth_file();
         
         size_t dims = 0, count = 0;
@@ -381,28 +387,32 @@ public:
         // Clamp k to available dimensions
         size_t actual_k = std::min(k, dims);
         
-        std::vector<std::unordered_set<uint32_t>> answers(count);
+        std::vector<std::vector<uint32_t>> answers(count);
         for (size_t i = 0; i < count; i++) {
             auto& gt = answers[i];
-            gt.reserve(actual_k);
+            gt.resize(actual_k);
             for (size_t j = 0; j < actual_k; j++) {
-                gt.insert(gt_ptr[dims * i + j]);
+                gt[j] = gt_ptr[dims * i + j];
             }
+            std::sort(gt.begin(), gt.end());
         }
         return answers;
     }
     
     /**
-     * @brief Load base ground truth (for all base elements) as vector of unordered_sets.
+     * @brief Load base ground truth (for all base elements) as vector of sorted vectors.
      * 
      * This ground truth contains the top-k nearest neighbors for EVERY element in the base dataset.
      * Used for computing graph quality metrics.
      * 
-     * @param k Number of nearest neighbors to include in each set (default: EXPLORE_TOPK = 1000)
+     * Uses sorted vectors instead of unordered_sets for memory efficiency (~4GB vs ~45GB for 1M×1000).
+     * Use std::binary_search() for membership testing.
+     * 
+     * @param k Number of nearest neighbors to include in each vector (default: EXPLORE_TOPK = 1000)
      * @param use_half_dataset Whether to use half dataset ground truth (for dynamic data tests)
-     * @return Vector of unordered_sets, one per base element
+     * @return Vector of sorted vectors, one per base element
      */
-    std::vector<std::unordered_set<uint32_t>> load_base_groundtruth(size_t k = DatasetInfo::EXPLORE_TOPK, bool use_half_dataset = false) const {
+    std::vector<std::vector<uint32_t>> load_base_groundtruth(size_t k = DatasetInfo::EXPLORE_TOPK, bool use_half_dataset = false) const {
         size_t dims = 0, count = 0;
         std::string gt_file = use_half_dataset ? base_groundtruth_half_file() : base_groundtruth_file();
         auto data = deglib::fvecs_read(gt_file.c_str(), dims, count);
@@ -411,13 +421,14 @@ public:
         // Clamp k to available dimensions
         size_t actual_k = std::min(k, dims);
         
-        std::vector<std::unordered_set<uint32_t>> answers(count);
+        std::vector<std::vector<uint32_t>> answers(count);
         for (size_t i = 0; i < count; i++) {
             auto& gt = answers[i];
-            gt.reserve(actual_k);
+            gt.resize(actual_k);
             for (size_t j = 0; j < actual_k; j++) {
-                gt.insert(gt_ptr[dims * i + j]);
+                gt[j] = gt_ptr[dims * i + j];
             }
+            std::sort(gt.begin(), gt.end());
         }
         return answers;
     }

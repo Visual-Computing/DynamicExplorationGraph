@@ -498,7 +498,7 @@ inline void optimize_graph(
  * @param save_interval Save checkpoint every N iterations.
  * @param max_iterations Total optimization iterations (0 = 10 * save_interval).
  * @param query_repository Query features for recall testing.
- * @param ground_truth Ground truth as vector of unordered_sets for recall estimation.
+ * @param ground_truth Ground truth as vector of sorted vectors for recall estimation.
  * @param k_test k parameter for testing.
  * @param max_distance_count_test Max distance count for recall estimation.
  * @return Vector of pairs (graph_path, iteration_count) for each saved checkpoint.
@@ -513,7 +513,7 @@ inline std::vector<std::pair<std::string, uint64_t>> improve_and_test(
     const uint64_t save_interval,
     const uint64_t max_iterations,
     const deglib::StaticFeatureRepository& query_repository,
-    const std::vector<std::unordered_set<uint32_t>>& ground_truth,
+    const std::vector<std::vector<uint32_t>>& ground_truth,
     const uint32_t k_test,
     const uint32_t max_distance_count_test = 2000,
     const uint32_t scale = 1) 

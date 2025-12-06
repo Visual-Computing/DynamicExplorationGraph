@@ -13,7 +13,6 @@
 
 #include <filesystem>
 #include <fstream>
-#include <unordered_set>
 #include <random>
 #include <limits>
 
@@ -33,7 +32,7 @@ namespace deglib::benchmark
 {
 
 static float test_approx_anns(const deglib::search::SearchGraph& graph, const std::vector<uint32_t>& entry_vertex_indices,
-                         const deglib::FeatureRepository& query_repository, const std::vector<std::unordered_set<uint32_t>>& ground_truth, 
+                         const deglib::FeatureRepository& query_repository, const std::vector<std::vector<uint32_t>>& ground_truth, 
                          const float eps, const uint32_t k, const uint32_t test_size, const uint32_t threads, const deglib::graph::Filter* filter = nullptr)
 {
     auto corrects = std::vector<float>(threads);
@@ -53,7 +52,7 @@ static float test_approx_anns(const deglib::search::SearchGraph& graph, const st
         {
             const auto& result = result_queue.top();
             const auto external_id = graph.getExternalLabel(result.getInternalIndex());
-            if (gt.find(external_id) != gt.end()) correct++;
+            if (std::binary_search(gt.begin(), gt.end(), external_id)) correct++;
             result_queue.pop();
         }
 
@@ -68,7 +67,7 @@ static float test_approx_anns(const deglib::search::SearchGraph& graph, const st
 }
 
 static float test_approx_explore(const deglib::search::SearchGraph& graph, const std::vector<std::vector<uint32_t>>& entry_vertex_indices, const boolean include_entry,
-                                  const std::vector<std::unordered_set<uint32_t>>& ground_truth, const uint32_t k, const uint32_t max_distance_count,
+                                  const std::vector<std::vector<uint32_t>>& ground_truth, const uint32_t k, const uint32_t max_distance_count,
                                   const uint32_t threads, const deglib::graph::Filter* filter = nullptr)
 {    
     auto corrects = std::vector<float>(threads);
@@ -88,7 +87,7 @@ static float test_approx_explore(const deglib::search::SearchGraph& graph, const
         {
             const auto& result = result_queue.top();
             const auto external_id = graph.getExternalLabel(result.getInternalIndex());
-            if (gt.find(external_id) != gt.end()) correct++;
+            if (std::binary_search(gt.begin(), gt.end(), external_id)) correct++;
             result_queue.pop();
         }
 
@@ -102,7 +101,7 @@ static float test_approx_explore(const deglib::search::SearchGraph& graph, const
     return total_correct / (entry_vertex_indices.size()*k);
 }
 
-static std::vector<float> estimate_recall(const deglib::search::SearchGraph& graph, const deglib::FeatureRepository& query_repository, const std::vector<std::unordered_set<uint32_t>>& answer, const uint32_t max_distance_count, const uint32_t k) {
+static std::vector<float> estimate_recall(const deglib::search::SearchGraph& graph, const deglib::FeatureRepository& query_repository, const std::vector<std::vector<uint32_t>>& answer, const uint32_t max_distance_count, const uint32_t k) {
 
     const auto entry_vertex_indices = std::vector<uint32_t> { graph.getInternalIndex(0) };
 
@@ -128,7 +127,7 @@ static std::vector<float> estimate_recall(const deglib::search::SearchGraph& gra
             {
                 const auto internal_index = result_queue.top().getInternalIndex();
                 const auto external_id = graph.getExternalLabel(internal_index);
-                if (gt.find(external_id) != gt.end()) local_correct++;
+                if (std::binary_search(gt.begin(), gt.end(), external_id)) local_correct++;
                 result_queue.pop();
             }
             correct += local_correct;
@@ -142,11 +141,11 @@ static std::vector<float> estimate_recall(const deglib::search::SearchGraph& gra
 }
 
 /**
- * @brief Test ANNS performance using pre-computed ground truth sets.
+ * @brief Test ANNS performance using pre-computed ground truth sorted vectors.
  * 
  * @param graph The search graph
  * @param query_repository Query feature repository
- * @param ground_truth Pre-computed ground truth as vector of unordered_sets
+ * @param ground_truth Pre-computed ground truth as vector of sorted vectors
  * @param repeat Number of repetitions for timing
  * @param threads Number of threads
  * @param k Number of nearest neighbors to find
@@ -154,7 +153,7 @@ static std::vector<float> estimate_recall(const deglib::search::SearchGraph& gra
  * @param filter Optional filter
  */
 static void test_graph_anns(const deglib::search::SearchGraph& graph, const deglib::FeatureRepository& query_repository, 
-                            const std::vector<std::unordered_set<uint32_t>>& ground_truth,
+                            const std::vector<std::vector<uint32_t>>& ground_truth,
                             const uint32_t repeat, const uint32_t threads, const uint32_t k, 
                             const std::vector<float>& eps_parameter,
                             const deglib::graph::Filter* filter = nullptr)
@@ -185,22 +184,21 @@ static void test_graph_anns(const deglib::search::SearchGraph& graph, const degl
 
 
 /**
- * @brief Test exploration performance using pre-computed ground truth sets.
- * 
- * This overload takes ground truth as vector<unordered_set> similar to the new test_graph_anns.
+ * @brief Test exploration performance using pre-computed ground truth sorted vectors.
  * 
  * @param graph The search graph
  * @param entry_vertex_labels External labels of entry vertices
- * @param ground_truth Pre-computed exploration ground truth as vector of unordered_sets
+ * @param ground_truth Pre-computed exploration ground truth as vector of sorted vectors
  * @param include_entry Whether to include entry vertex in results
  * @param repeat Number of repetitions for timing
  * @param k Number of nearest neighbors to find
  * @param threads Number of threads
  * @param filter Optional filter
+ * @param explore_depth Exploration depth for max_distance_count scaling
  */
 static void test_graph_explore(const deglib::search::SearchGraph& graph,
                                const std::vector<uint32_t>& entry_vertex_labels,
-                               const std::vector<std::unordered_set<uint32_t>>& ground_truth,
+                               const std::vector<std::vector<uint32_t>>& ground_truth,
                                const boolean include_entry,
                                const uint32_t repeat, const uint32_t k, const uint32_t threads,
                                const deglib::graph::Filter* filter = nullptr,
