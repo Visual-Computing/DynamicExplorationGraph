@@ -94,18 +94,18 @@ int main(int argc, char* argv[]) {
     // ==========================================================================
     // Default parameters - change these in the IDE to run different benchmarks
     // ==========================================================================
-    std::string dataset_str = "sift1m";                                 // Dataset: sift1m, deep1m, glove, audio
-    std::string graph_file = "c:/Data/phd/sift1m/deg/128D_L2_K30_AddK60Eps0.1_LowLID.deg";                        // Graph file path (empty = auto-generate)
-    std::string benchmark_type = "stats";                               // Benchmark: anns, explore, stats, all
+    std::string dataset_str = "audio";                                  // Dataset: sift1m, deep1m, glove, audio
+    std::string graph_file = "192D_L2_K20_AddK40Eps0.1_StreamingData_OptK20Eps0.0010Path5_AddHalf_.deg";                        // Graph file path (empty = auto-generate)
+    std::string benchmark_type = "explore";                             // Benchmark: anns, explore, stats, all
     uint32_t k = 100;                                                   // ANNS k
     uint32_t explore_k = 1000;                                          // Exploration k
     uint32_t repeat = 1;                                                // Test repetitions
     uint32_t analysis_threads = std::thread::hardware_concurrency();    // Threads for graph analysis (default: all CPU threads)
     uint32_t test_threads = 1;                                          // Threads for ANNS/exploration tests (default: 1)
     std::vector<float> eps_parameter = { 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f };
-    bool use_half_gt = false;                                           // Use half dataset ground truth
-    bool compute_reachability = false;                                  // Compute search reachability (expensive)
-    bool compute_reach = false;                                         // Compute exploration reachability (expensive)
+    bool use_half_gt = true;                                            // Use half dataset ground truth
+    bool compute_search_reach = false;                                  // Compute search reachability (expensive)
+    bool compute_exploration_reach = false;                             // Compute exploration reachability (expensive)
     // ==========================================================================
     
     // Parse command-line arguments
@@ -131,9 +131,9 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--half-gt") {
             use_half_gt = true;
         } else if (arg == "--reachability") {
-            compute_reachability = true;
+            compute_search_reach = true;
         } else if (arg == "--reach") {
-            compute_reach = true;
+            compute_exploration_reach = true;
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             return 0;
@@ -192,7 +192,7 @@ int main(int argc, char* argv[]) {
                k, explore_k, repeat, analysis_threads, test_threads);
     fmt::print("eps_parameter: {}\n", fmt::join(eps_parameter, ", "));
     fmt::print("use_half_gt: {}, compute_reachability: {}, compute_reach: {}\n\n", 
-               use_half_gt, compute_reachability, compute_reach);
+               use_half_gt, compute_search_reach, compute_exploration_reach);
     
     // Load graph
     fmt::print("Loading graph: {}\n", graph_file);
@@ -208,11 +208,11 @@ int main(int argc, char* argv[]) {
     if (run_stats) {
         fmt::print("=== Graph Analysis ===\n");
         
-        // Load full exploration ground truth for graph quality computation
-        fmt::print("Loading full exploration ground truth for graph quality...\n");
-        auto full_explore_gt = ds.load_full_explore_groundtruth();
-        fmt::print("Loaded full exploration ground truth for {} elements\n", full_explore_gt.size());
-        deglib::benchmark::analyze_graph(graph, full_explore_gt, compute_reachability, compute_reach, analysis_threads);
+        // Load base ground truth for graph quality computation
+        fmt::print("Loading Top{} of the base data set for graph quality...\n", DatasetInfo::EXPLORE_TOPK);
+        auto base_gt = ds.load_base_groundtruth(DatasetInfo::EXPLORE_TOPK, use_half_gt);
+        fmt::print("Loaded Top{} of the base data with {} elements\n", DatasetInfo::EXPLORE_TOPK, base_gt.size());
+        deglib::benchmark::analyze_graph(graph, base_gt, compute_search_reach, compute_exploration_reach, analysis_threads);
         fmt::print("\n");
     }
     
@@ -234,8 +234,7 @@ int main(int argc, char* argv[]) {
         }
         fmt::print("Loaded ground truth for {} queries\n", ground_truth.size());
         
-        deglib::benchmark::test_graph_anns(graph, query_repository, ground_truth, 
-            repeat, test_threads, k, eps_parameter);
+        deglib::benchmark::test_graph_anns(graph, query_repository, ground_truth, repeat, test_threads, k, eps_parameter);
         fmt::print("\n");
     }
     
@@ -254,15 +253,14 @@ int main(int argc, char* argv[]) {
         
         // Load exploration ground truth
         fmt::print("Loading exploration ground truth...\n");
-        auto explore_gt = ds.load_explore_groundtruth(explore_k);
+        auto explore_gt = ds.load_explore_groundtruth(explore_k, use_half_gt);
         if (explore_gt.empty()) {
             fmt::print(stderr, "Error: Failed to load exploration ground truth\n");
             return 1;
         }
         fmt::print("Loaded exploration ground truth for {} entries\n", explore_gt.size());
         
-        deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
-            false, repeat, explore_k, test_threads);
+        deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, true, repeat, explore_k, test_threads, nullptr, ds.info().explore_depth);
         fmt::print("\n");
     }
     

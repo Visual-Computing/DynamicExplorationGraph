@@ -125,9 +125,9 @@ struct DatasetInfo {
     std::string explore_groundtruth_file;     // e.g., "sift1m_explore_groundtruth_top1000.ivecs"
     std::string explore_groundtruth_half_file; // e.g., "sift1m_explore_groundtruth_half_top1000.ivecs"
     
-    // Full exploration ground truth (all base elements)
-    std::string full_explore_groundtruth_file;       // e.g., "sift1m_full_explore_groundtruth_top1000.ivecs"
-    std::string full_explore_groundtruth_half_file;  // e.g., "sift1m_full_explore_groundtruth_half_top1000.ivecs"
+    // Base ground truth (all base elements)
+    std::string base_groundtruth_file;       // e.g., "sift1m_base_top1000.ivecs"
+    std::string base_groundtruth_half_file;  // e.g., "sift1m_base_half_top1000.ivecs"
     
     // Exploration parameters
     static constexpr size_t EXPLORE_SAMPLE_COUNT = 10000;
@@ -157,8 +157,8 @@ inline DatasetInfo make_dataset_info(const DatasetName& ds) {
     info.explore_entry_vertex_file = name + "_explore_entry_vertex.ivecs";
     info.explore_groundtruth_file = name + "_explore_groundtruth_top1000.ivecs";
     info.explore_groundtruth_half_file = name + "_explore_groundtruth_half_top1000.ivecs";
-    info.full_explore_groundtruth_file = name + "_full_explore_groundtruth_top1000.ivecs";
-    info.full_explore_groundtruth_half_file = name + "_full_explore_groundtruth_half_top1000.ivecs";
+    info.base_groundtruth_file = name + "_base_top1000.ivecs";
+    info.base_groundtruth_half_file = name + "_base_half_top1000.ivecs";
     
     if (ds == DatasetName::SIFT1M) {
         info.download_url = "https://static.visual-computing.com/paper/DEG/sift.tar.gz";
@@ -254,14 +254,14 @@ public:
         return (files_dir_ / info_.explore_groundtruth_half_file).string();
     }
     
-    // Full exploration ground truth file (top-k for ALL base elements)
-    std::string full_explore_groundtruth_file() const {
-        return (files_dir_ / info_.full_explore_groundtruth_file).string();
+    // Base ground truth file (top-k for ALL base elements)
+    std::string base_groundtruth_file() const {
+        return (files_dir_ / info_.base_groundtruth_file).string();
     }
     
-    // Full exploration ground truth file for half dataset (for dynamic data tests)
-    std::string full_explore_groundtruth_half_file() const {
-        return (files_dir_ / info_.full_explore_groundtruth_half_file).string();
+    // Base ground truth file for half dataset (for dynamic data tests)
+    std::string base_groundtruth_half_file() const {
+        return (files_dir_ / info_.base_groundtruth_half_file).string();
     }
     
     // Ground truth file for specific base count
@@ -393,7 +393,7 @@ public:
     }
     
     /**
-     * @brief Load full exploration ground truth (for all base elements) as vector of unordered_sets.
+     * @brief Load base ground truth (for all base elements) as vector of unordered_sets.
      * 
      * This ground truth contains the top-k nearest neighbors for EVERY element in the base dataset.
      * Used for computing graph quality metrics.
@@ -402,9 +402,9 @@ public:
      * @param use_half_dataset Whether to use half dataset ground truth (for dynamic data tests)
      * @return Vector of unordered_sets, one per base element
      */
-    std::vector<std::unordered_set<uint32_t>> load_full_explore_groundtruth(size_t k = DatasetInfo::EXPLORE_TOPK, bool use_half_dataset = false) const {
+    std::vector<std::unordered_set<uint32_t>> load_base_groundtruth(size_t k = DatasetInfo::EXPLORE_TOPK, bool use_half_dataset = false) const {
         size_t dims = 0, count = 0;
-        std::string gt_file = use_half_dataset ? full_explore_groundtruth_half_file() : full_explore_groundtruth_file();
+        std::string gt_file = use_half_dataset ? base_groundtruth_half_file() : base_groundtruth_file();
         auto data = deglib::fvecs_read(gt_file.c_str(), dims, count);
         const uint32_t* gt_ptr = reinterpret_cast<const uint32_t*>(data.get());
         
@@ -807,45 +807,77 @@ inline bool generate_exploration_files(
     fmt::print("\n=== Generating exploration files ===\n");
     fmt::print("Base size: {}, Half size: {}, Sample count: {}, TopK: {}\n", base_size, half_base_size, sample_count, topk);
     
-    // Subsample: step through base data to get exactly sample_count elements
-    // Use half_base_size for sampling so entry vertices are valid for both full and half datasets
-    std::vector<uint32_t> entry_ids(sample_count);
-    std::vector<float> entry_features(sample_count * dims);
+    // Check if entry files already exist
+    std::vector<uint32_t> entry_ids;
+    std::vector<float> entry_features;
+    size_t actual_sample_count = sample_count;
     
-    const double step = static_cast<double>(half_base_size) / sample_count;
-    for (size_t i = 0; i < sample_count; i++) {
-        uint32_t idx = static_cast<uint32_t>(i * step);
-        if (idx >= half_base_size) idx = (uint32_t)half_base_size - 1;
+    bool entry_ids_exist = file_exists(ds.explore_entry_vertex_file());
+    bool entry_features_exist = file_exists(ds.explore_query_file());
+    
+    // Step 1: Get or generate entry IDs
+    if (entry_ids_exist) {
+        // Load existing entry vertex IDs
+        fmt::print("Loading existing entry vertex IDs from: {}\n", ds.explore_entry_vertex_file());
+        size_t id_dims = 0, id_count = 0;
+        auto id_data = deglib::fvecs_read(ds.explore_entry_vertex_file().c_str(), id_dims, id_count);
+        const uint32_t* id_ptr = reinterpret_cast<const uint32_t*>(id_data.get());
+        entry_ids.resize(id_count);
+        for (size_t i = 0; i < id_count; i++) {
+            entry_ids[i] = id_ptr[i * id_dims];
+        }
+        actual_sample_count = id_count;
+        fmt::print("Loaded {} entry vertex IDs\n", actual_sample_count);
+    } else {
+        // Generate new entry IDs by subsampling
+        entry_ids.resize(sample_count);
+        const double step = static_cast<double>(half_base_size) / sample_count;
+        for (size_t i = 0; i < sample_count; i++) {
+            uint32_t idx = static_cast<uint32_t>(i * step);
+            if (idx >= half_base_size) idx = (uint32_t)half_base_size - 1;
+            entry_ids[i] = idx;
+        }
+        fmt::print("Generated {} entry vertex IDs with step {:.2f} (from first half of data)\n", sample_count, step);
         
-        entry_ids[i] = idx;
-        const float* src = reinterpret_cast<const float*>(base_repo.getFeature(idx));
-        std::copy(src, src + dims, entry_features.data() + i * dims);
-    }
-    
-    fmt::print("Selected {} entry vertices with step {:.2f} (from first half of data)\n", sample_count, step);
-    
-    // Write entry vertex IDs (if not exists)
-    if (!file_exists(ds.explore_entry_vertex_file())) {
+        // Write entry vertex IDs
         ivecs_write(ds.explore_entry_vertex_file().c_str(), 1, sample_count, entry_ids.data());
         fmt::print("Wrote: {}\n", ds.explore_entry_vertex_file());
     }
     
-    // Write entry features (if not exists)
-    if (!file_exists(ds.explore_query_file())) {
-        fvecs_write(ds.explore_query_file().c_str(), dims, sample_count, entry_features.data());
+    // Step 2: Get or generate entry features (always consistent with entry_ids)
+    if (entry_features_exist) {
+        // Load existing entry features
+        fmt::print("Loading existing entry features from: {}\n", ds.explore_query_file());
+        size_t feat_dims = 0, feat_count = 0;
+        auto feat_data = deglib::fvecs_read(ds.explore_query_file().c_str(), feat_dims, feat_count);
+        const float* feat_ptr = reinterpret_cast<const float*>(feat_data.get());
+        entry_features.resize(feat_count * feat_dims);
+        std::copy(feat_ptr, feat_ptr + feat_count * feat_dims, entry_features.data());
+        fmt::print("Loaded {} entry features\n", feat_count);
+    } else {
+        // Generate features from entry_ids (ensures consistency)
+        entry_features.resize(actual_sample_count * dims);
+        for (size_t i = 0; i < actual_sample_count; i++) {
+            const float* src = reinterpret_cast<const float*>(base_repo.getFeature(entry_ids[i]));
+            std::copy(src, src + dims, entry_features.data() + i * dims);
+        }
+        fmt::print("Generated {} entry features from entry IDs\n", actual_sample_count);
+        
+        // Write entry features
+        fvecs_write(ds.explore_query_file().c_str(), dims, actual_sample_count, entry_features.data());
         fmt::print("Wrote: {}\n", ds.explore_query_file());
     }
     
     // Create a temporary repository for queries
-    auto query_features = std::make_unique<std::byte[]>(sample_count * dims * sizeof(float));
-    std::memcpy(query_features.get(), entry_features.data(), sample_count * dims * sizeof(float));
-    deglib::StaticFeatureRepository query_repo(std::move(query_features), dims, sample_count, sizeof(float));
+    auto query_features = std::make_unique<std::byte[]>(actual_sample_count * dims * sizeof(float));
+    std::memcpy(query_features.get(), entry_features.data(), actual_sample_count * dims * sizeof(float));
+    deglib::StaticFeatureRepository query_repo(std::move(query_features), dims, actual_sample_count, sizeof(float));
     
     // Compute and write ground truth for full dataset (if not exists)
     if (!file_exists(ds.explore_groundtruth_file())) {
         fmt::print("Computing exploration ground truth for FULL dataset (this may take a while)...\n");
         auto groundtruth = compute_knn_groundtruth(base_repo, query_repo, info.metric, topk, 0, thread_count);
-        ivecs_write(ds.explore_groundtruth_file().c_str(), topk, sample_count, groundtruth.data());
+        ivecs_write(ds.explore_groundtruth_file().c_str(), topk, actual_sample_count, groundtruth.data());
         fmt::print("Wrote: {}\n", ds.explore_groundtruth_file());
     }
     
@@ -853,7 +885,7 @@ inline bool generate_exploration_files(
     if (!file_exists(ds.explore_groundtruth_half_file())) {
         fmt::print("Computing exploration ground truth for HALF dataset ({} base vectors)...\n", half_base_size);
         auto groundtruth_half = compute_knn_groundtruth(base_repo, query_repo, info.metric, topk, half_base_size, thread_count);
-        ivecs_write(ds.explore_groundtruth_half_file().c_str(), topk, sample_count, groundtruth_half.data());
+        ivecs_write(ds.explore_groundtruth_half_file().c_str(), topk, actual_sample_count, groundtruth_half.data());
         fmt::print("Wrote: {}\n", ds.explore_groundtruth_half_file());
     }
     
@@ -865,9 +897,9 @@ inline bool generate_exploration_files(
 // ============================================================================
 
 /**
- * Generate full exploration ground truth for ALL base elements.
+ * Generate base ground truth for ALL base elements.
  * Creates:
- * - full_explore_groundtruth_top1000.ivecs: Top-1000 nearest neighbors for EVERY base element
+ * - base_top1000.ivecs: Top-1000 nearest neighbors for EVERY base element
  * 
  * This is used for computing graph quality metrics where we need the ideal neighbors
  * for every vertex in the graph, not just a sampled subset.
@@ -884,15 +916,15 @@ inline bool generate_full_exploration_groundtruth(
     const uint32_t topk = DatasetInfo::EXPLORE_TOPK;
     
     // Check if full file already exists
-    bool full_exists = file_exists(ds.full_explore_groundtruth_file());
+    bool full_exists = file_exists(ds.base_groundtruth_file());
     if (full_exists) {
-        fmt::print("Full exploration ground truth already exists: {}\n", ds.full_explore_groundtruth_file());
+        fmt::print("Base ground truth already exists: {}\n", ds.base_groundtruth_file());
     }
     
     // Check if half file already exists
-    bool half_exists = file_exists(ds.full_explore_groundtruth_half_file());
+    bool half_exists = file_exists(ds.base_groundtruth_half_file());
     if (half_exists) {
-        fmt::print("Half exploration ground truth already exists: {}\n", ds.full_explore_groundtruth_half_file());
+        fmt::print("Base half ground truth already exists: {}\n", ds.base_groundtruth_half_file());
     }
     
     // Generate full exploration ground truth if needed
@@ -906,8 +938,8 @@ inline bool generate_full_exploration_groundtruth(
         auto groundtruth = compute_knn_groundtruth(base_repo, base_repo, info.metric, topk, 0, thread_count);
         
         // Write ground truth
-        ivecs_write(ds.full_explore_groundtruth_file().c_str(), topk, base_size, groundtruth.data());
-        fmt::print("Wrote: {}\n", ds.full_explore_groundtruth_file());
+        ivecs_write(ds.base_groundtruth_file().c_str(), topk, base_size, groundtruth.data());
+        fmt::print("Wrote: {}\n", ds.base_groundtruth_file());
     }
     
     // Generate half exploration ground truth if needed (for dynamic data tests)
@@ -922,8 +954,8 @@ inline bool generate_full_exploration_groundtruth(
         auto groundtruth = compute_knn_groundtruth(base_repo, base_repo, info.metric, topk, half_size, thread_count);
         
         // Write ground truth
-        ivecs_write(ds.full_explore_groundtruth_half_file().c_str(), topk, half_size, groundtruth.data());
-        fmt::print("Wrote: {}\n", ds.full_explore_groundtruth_half_file());
+        ivecs_write(ds.base_groundtruth_half_file().c_str(), topk, half_size, groundtruth.data());
+        fmt::print("Wrote: {}\n", ds.base_groundtruth_half_file());
     }
     
     return true;
@@ -1084,8 +1116,8 @@ inline bool setup_dataset(
     fmt::print("  Explore Entry:  {}\n", ds.explore_entry_vertex_file());
     fmt::print("  Explore GT:     {}\n", ds.explore_groundtruth_file());
     fmt::print("  Explore GT Half: {}\n", ds.explore_groundtruth_half_file());
-    fmt::print("  Full Explore GT: {}\n", ds.full_explore_groundtruth_file());
-    fmt::print("  Full Explore GT Half: {}\n", ds.full_explore_groundtruth_half_file());
+    fmt::print("  Base GT:        {}\n", ds.base_groundtruth_file());
+    fmt::print("  Base GT Half:   {}\n", ds.base_groundtruth_half_file());
     fmt::print("  GT Full:  {}\n", ds.groundtruth_file_full());
     fmt::print("  GT Half:  {}\n", ds.groundtruth_file_half());
     fmt::print("============================================================\n\n");

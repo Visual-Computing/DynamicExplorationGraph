@@ -670,11 +670,11 @@ int main(int argc, char *argv[]) {
                     const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
                     log("Graph loaded: {} vertices\n", graph.size());
                     
-                    // 1. Analyze graph and log stats (with graph quality using full exploration GT)
+                    // 1. Analyze graph and log stats (with graph quality using base GT)
                     log("\n--- Graph Analysis ---\n");
                     {
-                        auto full_explore_gt = ds.load_full_explore_groundtruth();
-                        deglib::benchmark::analyze_graph(graph, full_explore_gt, true, true, cg.analysis_threads);
+                        auto base_gt = ds.load_base_groundtruth();
+                        deglib::benchmark::analyze_graph(graph, base_gt, true, true, cg.analysis_threads);
                     }
                     
                     // 2. ANNS Test with Top-k
@@ -693,7 +693,7 @@ int main(int argc, char *argv[]) {
                         auto explore_gt = ds.load_explore_groundtruth(cg.explore_k);
                         wait_before_test();
                         deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
-                            false, cg.explore_repeat, cg.explore_k, cg.explore_threads, nullptr, ds.info().explore_depth);
+                            true, cg.explore_repeat, cg.explore_k, cg.explore_threads, nullptr, ds.info().explore_depth);
                     }
 
                     // 4. k-Sweep Test
@@ -768,11 +768,11 @@ int main(int argc, char *argv[]) {
                         const auto graph = deglib::graph::load_readonly_graph(output_graph.c_str());
                         log("Graph loaded: {} vertices\n", graph.size());
                         
-                        // 1. Analyze graph and log stats (with graph quality using full exploration GT)
+                        // 1. Analyze graph and log stats (with graph quality using base GT)
                         log("\n--- Graph Analysis ---\n");
                         {
-                            auto full_explore_gt = ds.load_full_explore_groundtruth();
-                            deglib::benchmark::analyze_graph(graph, full_explore_gt, true, true, cg.analysis_threads);
+                            auto base_gt = ds.load_base_groundtruth();
+                            deglib::benchmark::analyze_graph(graph, base_gt, true, true, cg.analysis_threads);
                         }
 
                         // 2. ANNS Test with Top-100
@@ -791,7 +791,7 @@ int main(int argc, char *argv[]) {
                             auto explore_gt = ds.load_explore_groundtruth(cg.explore_k);
                             wait_before_test();
                             deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
-                                false, cg.explore_repeat, cg.explore_k, cg.explore_threads, nullptr, ds.info().explore_depth);
+                                true, cg.explore_repeat, cg.explore_k, cg.explore_threads, nullptr, ds.info().explore_depth);
                         }
                     }
                 }
@@ -1387,11 +1387,11 @@ int main(int argc, char *argv[]) {
                     // Determine if we need half dataset ground truth based on DataStreamType
                     bool use_half = (ds_type != DataStreamType::AddAll);
 
-                    // Graph analysis with full exploration GT (use half for dynamic data)
+                    // Graph analysis with base GT (use half for dynamic data)
                     log("\n--- Graph Analysis ---\n");
                     {
-                        auto full_explore_gt = ds.load_full_explore_groundtruth(DatasetInfo::EXPLORE_TOPK, use_half);
-                        deglib::benchmark::analyze_graph(graph, full_explore_gt, true, true, cg.analysis_threads);
+                        auto base_gt = ds.load_base_groundtruth(DatasetInfo::EXPLORE_TOPK, use_half);
+                        deglib::benchmark::analyze_graph(graph, base_gt, true, true, cg.analysis_threads);
                     }
                     
                     // ANNS Test
@@ -1410,7 +1410,7 @@ int main(int argc, char *argv[]) {
                         auto explore_gt = ds.load_explore_groundtruth(cg.explore_k, use_half);
                         wait_before_test();
                         deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
-                            false, cg.explore_repeat, cg.explore_k, cg.explore_threads, nullptr, ds.info().explore_depth);
+                            true, cg.explore_repeat, cg.explore_k, cg.explore_threads, nullptr, ds.info().explore_depth);
                     }
                 } else {
                     log("Graph file not found: {}\n", graph_path);
