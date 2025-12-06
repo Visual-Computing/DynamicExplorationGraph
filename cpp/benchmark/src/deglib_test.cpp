@@ -240,9 +240,9 @@ int main(int argc, char* argv[]) {
         fmt::print("=== Graph Analysis ===\n");
         
         // Load base ground truth for graph quality computation
-        fmt::print("Loading Top{} of the base data set for graph quality...\n", DatasetInfo::EXPLORE_TOPK);
-        auto base_gt = ds.load_base_groundtruth(DatasetInfo::EXPLORE_TOPK, use_half_gt);
-        fmt::print("Loaded Top{} of the base data with {} elements\n", DatasetInfo::EXPLORE_TOPK, base_gt.size());
+        fmt::print("Loading Top{} of the base data set for graph quality...\n", graph.getEdgesPerVertex());
+        auto base_gt = ds.load_base_groundtruth(graph.getEdgesPerVertex(), use_half_gt);
+        fmt::print("Loaded Top{} of the base data with {} elements\n", graph.getEdgesPerVertex(), base_gt.size());
         deglib::benchmark::analyze_graph(graph, base_gt, compute_search_reach, compute_exploration_reach, analysis_threads);
         fmt::print("\n");
     }

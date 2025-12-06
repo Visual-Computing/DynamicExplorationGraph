@@ -668,7 +668,7 @@ int main(int argc, char *argv[]) {
                     // 1. Analyze graph and log stats (with graph quality using base GT)
                     log("\n--- Graph Analysis ---\n");
                     {
-                        auto base_gt = ds.load_base_groundtruth();
+                        auto base_gt = ds.load_base_groundtruth(graph.getEdgesPerVertex());
                         deglib::benchmark::analyze_graph(graph, base_gt, true, true, cg.analysis_threads);
                     }
                     
@@ -766,7 +766,7 @@ int main(int argc, char *argv[]) {
                         // 1. Analyze graph and log stats (with graph quality using base GT)
                         log("\n--- Graph Analysis ---\n");
                         {
-                            auto base_gt = ds.load_base_groundtruth();
+                            auto base_gt = ds.load_base_groundtruth(graph.getEdgesPerVertex());
                             deglib::benchmark::analyze_graph(graph, base_gt, true, true, cg.analysis_threads);
                         }
 
@@ -1385,7 +1385,7 @@ int main(int argc, char *argv[]) {
                     // Graph analysis with base GT (use half for dynamic data)
                     log("\n--- Graph Analysis ---\n");
                     {
-                        auto base_gt = ds.load_base_groundtruth(DatasetInfo::EXPLORE_TOPK, use_half);
+                        auto base_gt = ds.load_base_groundtruth(graph.getEdgesPerVertex(), use_half);
                         deglib::benchmark::analyze_graph(graph, base_gt, true, true, cg.analysis_threads);
                     }
                     
