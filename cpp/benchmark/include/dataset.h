@@ -174,7 +174,7 @@ inline DatasetInfo make_dataset_info(const DatasetName& ds) {
         info.scale = 100;
         info.explore_depth = 2;
     } else if (ds == DatasetName::GLOVE) {
-        info.download_url = "https://static.visual-computing.com/paper/DEG/glove.tar.gz";
+        info.download_url = "https://static.visual-computing.com/paper/DEG/glove-100.tar.gz";
         info.base_count = 1183514;
         info.query_count = 10000;
         info.dims = 100;
@@ -576,8 +576,6 @@ inline bool setup_sift1m_files(const Dataset& ds) {
     move_file(extracted_dir / "sift_query.fvecs", ds.files_dir() / info.query_file);
     move_file(extracted_dir / "sift_explore_query.fvecs", ds.files_dir() / info.explore_query_file);
     move_file(extracted_dir / "sift_explore_entry_vertex.ivecs", ds.files_dir() / info.explore_entry_vertex_file);
-    // Rename explore ground truth (different naming convention)
-    move_file(extracted_dir / "sift_explore_ground_truth.ivecs", ds.files_dir() / info.explore_groundtruth_file);
     
     // Clean up tmp directory completely
     remove_directory(tmp_dir);
@@ -636,11 +634,8 @@ inline bool setup_deep1m_files(const Dataset& ds) {
     // Move files to canonical names
     move_file(extracted_dir / "deep1m_base.fvecs", ds.files_dir() / info.base_file);
     move_file(extracted_dir / "deep1m_query.fvecs", ds.files_dir() / info.query_file);
-    
-    // Handle exploration files if they exist (with possible different naming)
     move_file(extracted_dir / "deep1m_explore_query.fvecs", ds.files_dir() / info.explore_query_file);
     move_file(extracted_dir / "deep1m_explore_entry_vertex.ivecs", ds.files_dir() / info.explore_entry_vertex_file);
-    move_file(extracted_dir / "deep1m_explore_ground_truth.ivecs", ds.files_dir() / info.explore_groundtruth_file);
     
     // Clean up tmp directory completely
     remove_directory(tmp_dir);
@@ -699,14 +694,8 @@ inline bool setup_glove_files(const Dataset& ds) {
     // Move files to canonical names (GLOVE uses "glove-100_" prefix in archive)
     move_file(extracted_dir / "glove-100_base.fvecs", ds.files_dir() / info.base_file);
     move_file(extracted_dir / "glove-100_query.fvecs", ds.files_dir() / info.query_file);
-    
-    // Handle exploration files if they exist
     move_file(extracted_dir / "glove-100_explore_query.fvecs", ds.files_dir() / info.explore_query_file);
-    move_file(extracted_dir / "glove_explore_query.fvecs", ds.files_dir() / info.explore_query_file);
     move_file(extracted_dir / "glove-100_explore_entry_vertex.ivecs", ds.files_dir() / info.explore_entry_vertex_file);
-    move_file(extracted_dir / "glove_explore_entry_vertex.ivecs", ds.files_dir() / info.explore_entry_vertex_file);
-    move_file(extracted_dir / "glove-100_explore_ground_truth.ivecs", ds.files_dir() / info.explore_groundtruth_file);
-    move_file(extracted_dir / "glove_explore_ground_truth.ivecs", ds.files_dir() / info.explore_groundtruth_file);
     
     // Clean up tmp directory completely
     remove_directory(tmp_dir);
@@ -765,11 +754,8 @@ inline bool setup_audio_files(const Dataset& ds) {
     // Move files to canonical names
     move_file(extracted_dir / "audio_base.fvecs", ds.files_dir() / info.base_file);
     move_file(extracted_dir / "audio_query.fvecs", ds.files_dir() / info.query_file);
-    
-    // Handle exploration files if they exist
     move_file(extracted_dir / "audio_explore_query.fvecs", ds.files_dir() / info.explore_query_file);
     move_file(extracted_dir / "audio_explore_entry_vertex.ivecs", ds.files_dir() / info.explore_entry_vertex_file);
-    move_file(extracted_dir / "audio_explore_ground_truth.ivecs", ds.files_dir() / info.explore_groundtruth_file);
     
     // Clean up tmp directory completely
     remove_directory(tmp_dir);
@@ -932,12 +918,6 @@ inline bool generate_full_exploration_groundtruth(
         fmt::print("Base ground truth already exists: {}\n", ds.base_groundtruth_file());
     }
     
-    // Check if half file already exists
-    bool half_exists = file_exists(ds.base_groundtruth_half_file());
-    if (half_exists) {
-        fmt::print("Base half ground truth already exists: {}\n", ds.base_groundtruth_half_file());
-    }
-    
     // Generate full exploration ground truth if needed
     if (!full_exists) {
         fmt::print("\n=== Generating full exploration ground truth ===\n");
@@ -951,6 +931,14 @@ inline bool generate_full_exploration_groundtruth(
         // Write ground truth
         ivecs_write(ds.base_groundtruth_file().c_str(), topk, base_size, groundtruth.data());
         fmt::print("Wrote: {}\n", ds.base_groundtruth_file());
+    }
+
+    
+    
+    // Check if half file already exists
+    bool half_exists = file_exists(ds.base_groundtruth_half_file());
+    if (half_exists) {
+        fmt::print("Base half ground truth already exists: {}\n", ds.base_groundtruth_half_file());
     }
     
     // Generate half exploration ground truth if needed (for dynamic data tests)
