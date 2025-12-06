@@ -54,7 +54,8 @@ inline deglib::graph::SizeBoundedGraph create_random_graph(
     const deglib::StaticFeatureRepository& repository, 
     deglib::Metric metric, 
     const uint8_t k, 
-    const uint32_t max_size = 0) 
+    const uint32_t max_size = 0,
+    const uint32_t scale = 1) 
 {
     log("Build a random EG{}\n", k);
 
@@ -144,7 +145,7 @@ inline deglib::graph::SizeBoundedGraph create_random_graph(
         graph.changeEdges(internal_index, neighbor_indices.data(), neighbor_weights.data());
 
         if((label+1) % 100000 == 0 || (label+1) == vertex_count) {
-            auto quality = deglib::analysis::calc_avg_edge_weight(graph);
+            auto quality = deglib::analysis::calc_avg_edge_weight(graph, scale);
             auto connected = deglib::analysis::check_graph_connectivity(graph);
             auto duration = uint32_t(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - start).count());
             log("{:7} elements, in {:5}s, AEW {:4.2f}, connected {} \n", (label+1), duration, quality, connected);
@@ -189,12 +190,12 @@ inline void create_graph(
     const float eps_opt, 
     const uint8_t i_opt, 
     const uint32_t thread_count,
-    const bool use_rng = true) 
+    const bool use_rng = true,
+    const uint32_t scale = 1) 
 {
     auto rnd = std::mt19937(7);
     const uint32_t swap_tries = 0;
     const uint32_t additional_swap_tries = 0;
-    const uint32_t scale = 1000;
 
     log("Setup empty graph with {} vertices in {}D feature space\n", repository.size(), repository.dims());
     const auto dims = repository.dims();
@@ -316,7 +317,8 @@ inline std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(
     const float eps_opt, 
     const uint8_t i_opt, 
     const uint32_t thread_count,
-    const bool use_rng = true) 
+    const bool use_rng = true,
+    const uint32_t scale = 1) 
 {
     std::vector<std::pair<std::string, uint32_t>> result_files;
     const uint32_t total_size = uint32_t(repository.size());
@@ -353,7 +355,6 @@ inline std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(
     auto rnd = std::mt19937(7);
     const uint32_t swap_tries = 0;
     const uint32_t additional_swap_tries = 0;
-    const uint32_t scale = 1000;
 
     log("Setup empty graph with {} vertices in {}D feature space\n", repository.size(), repository.dims());
     const auto dims = repository.dims();
@@ -439,12 +440,13 @@ inline void optimize_graph(
     const float eps_opt, 
     const uint8_t i_opt,
     const uint64_t total_iterations,
-    const uint64_t log_interval = 10000)
+    const uint64_t log_interval = 10000,
+    const uint32_t scale = 1)
 {
     auto rnd = std::mt19937(7);
     auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::OptimizationTarget::LowLID, 0, 0, k_opt, eps_opt, i_opt, 1, 0);
 
-    auto initial_avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 1);
+    auto initial_avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
     log("Optimizing graph with initial AEW {:.2f}\n", initial_avg_edge_weight);
 
     auto start = std::chrono::steady_clock::now();
@@ -459,7 +461,7 @@ inline void optimize_graph(
         if(log_interval > 0 && tries > 0 && tries % log_interval == 0) {
             duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
             auto duration = duration_ms / 1000;
-            auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 1);
+            auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
             auto connected = deglib::analysis::check_graph_connectivity(graph);
             auto diff = tries - last_status.tries;
             auto avg_improv = (diff > 0) ? uint32_t((improved - last_status.improved) / diff) : 0;
@@ -479,7 +481,7 @@ inline void optimize_graph(
     builder.build(improvement_callback, true);
     
     log("Optimization complete. Final AEW: {:.2f}, non-RNG edges: {}\n", 
-        deglib::analysis::calc_avg_edge_weight(graph, 1), deglib::analysis::calc_non_rng_edges(graph));
+        deglib::analysis::calc_avg_edge_weight(graph, scale), deglib::analysis::calc_non_rng_edges(graph));
 }
 
 
@@ -513,7 +515,8 @@ inline std::vector<std::pair<std::string, uint64_t>> improve_and_test(
     const deglib::StaticFeatureRepository& query_repository,
     const std::vector<std::unordered_set<uint32_t>>& ground_truth,
     const uint32_t k_test,
-    const uint32_t max_distance_count_test = 2000) 
+    const uint32_t max_distance_count_test = 2000,
+    const uint32_t scale = 1) 
 {
     std::vector<std::pair<std::string, uint64_t>> created_files;
     
@@ -521,7 +524,7 @@ inline std::vector<std::pair<std::string, uint64_t>> improve_and_test(
     auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::OptimizationTarget::LowLID, 0, 0, k_opt, eps_opt, i_opt, 1, 0);
 
     auto initial_recall = deglib::benchmark::estimate_recall(graph, query_repository, ground_truth, max_distance_count_test, k_test);
-    auto initial_avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 1);
+    auto initial_avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
     log("Improve and test graph with initial AEW {:.2f}, Recall {}\n", 
         initial_avg_edge_weight, fmt::join(initial_recall, ", "));
 
@@ -537,7 +540,7 @@ inline std::vector<std::pair<std::string, uint64_t>> improve_and_test(
         if(tries > 0 && tries % save_interval == 0) {
             duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
             auto duration = duration_ms / 1000;
-            auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 1);
+            auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
             auto connected = deglib::analysis::check_graph_connectivity(graph);
             auto diff = tries - last_status.tries;
             auto avg_improv = (diff > 0) ? uint32_t((improved - last_status.improved) / diff) : 0;
@@ -574,7 +577,7 @@ inline std::vector<std::pair<std::string, uint64_t>> improve_and_test(
     builder.build(improvement_callback, true);
     
     log("Optimization complete. Final AEW: {:.2f}, non-RNG edges: {}\n", 
-        deglib::analysis::calc_avg_edge_weight(graph, 1), deglib::analysis::calc_non_rng_edges(graph));
+        deglib::analysis::calc_avg_edge_weight(graph, scale), deglib::analysis::calc_non_rng_edges(graph));
     
     return created_files;
 }

@@ -37,6 +37,7 @@
 using deglib::benchmark::DataStreamType;
 using deglib::benchmark::Dataset;
 using deglib::benchmark::DatasetName;
+using deglib::benchmark::DatasetInfo;
 using deglib::benchmark::log;
 
 // Helper function to wait before benchmark tests to let the machine settle down
@@ -443,21 +444,49 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
         };
         
     } else if (dataset_name == DatasetName::GLOVE) {
-        std::vector<float> eps = { 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f, 1.2f };
         conf.create_graph.lid = deglib::builder::OptimizationTarget::HighLID;
-        conf.create_graph.eps_parameter = eps;
+        conf.create_graph.eps_parameter = { 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f, 1.2f };
+
+        conf.optimize_graph.total_iterations = 2000000;
+
+        conf.all_schemes_test.eps_parameter = {
+            { deglib::builder::OptimizationTarget::LowLID,    { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::HighLID,   { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::SchemeA,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::SchemeB,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } }
+        }; 
         
     } else if (dataset_name == DatasetName::DEEP1M) {
-        std::vector<float> eps = { 0.01f, 0.02f, 0.03f, 0.04f, 0.06f, 0.1f, 0.2f };
-        conf.create_graph.eps_parameter = eps;
+        conf.create_graph.eps_parameter = { 0.01f, 0.02f, 0.03f, 0.04f, 0.06f, 0.1f, 0.2f };
+
+        conf.optimize_graph.total_iterations = 400000;
+
+        conf.all_schemes_test.eps_parameter = {
+            { deglib::builder::OptimizationTarget::LowLID,    { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::HighLID,   { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::SchemeA,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::SchemeB,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } }
+        }; 
         
     } else if (dataset_name == DatasetName::AUDIO) {
-        std::vector<float> eps = { 0.00f, 0.03f, 0.05f, 0.07f, 0.09f, 0.12f, 0.2f, 0.3f };
+
         conf.create_graph.k = 20;
         conf.create_graph.k_ext = 40;
         conf.create_graph.anns_repeat = 50;
-        conf.create_graph.eps_parameter = eps;
+        conf.create_graph.eps_parameter =  { 0.00f, 0.03f, 0.05f, 0.07f, 0.09f, 0.12f, 0.2f, 0.3f };
+
         conf.optimize_graph.k_opt = 20;
+        conf.optimize_graph.total_iterations = 20000;
+
+        conf.all_schemes_test.eps_parameter = {
+            { deglib::builder::OptimizationTarget::LowLID,    { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::HighLID,   { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::SchemeA,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::SchemeB,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } }
+        };       
+
+        conf.opt_scaling_test.iteration_interval = 10000;
+        conf.opt_scaling_test.iteration_interval = 100000;
     }
 
     return conf;
@@ -633,7 +662,7 @@ int main(int argc, char *argv[]) {
                     log("Output graph: {}\n", graph_path);
                     
                     deglib::benchmark::create_graph(*base_repository, config.data_stream_type, graph_path, 
-                        config.metric, cg.lid, cg.k, cg.k_ext, cg.eps_ext, 0, 0, 0, cg.build_threads);
+                        config.metric, cg.lid, cg.k, cg.k_ext, cg.eps_ext, 0, 0, 0, cg.build_threads, true, ds.info().scale);
                 }
                 
                 // Run comprehensive tests on the graph (existing or newly created)
@@ -727,7 +756,7 @@ int main(int argc, char *argv[]) {
                         
                         // Run optimization
                         log("\n--- Optimizing graph for {} iterations ---\n", og.total_iterations);
-                        deglib::benchmark::optimize_graph(graph, og.k_opt, og.eps_opt, og.i_opt, og.total_iterations);
+                        deglib::benchmark::optimize_graph(graph, og.k_opt, og.eps_opt, og.i_opt, og.total_iterations, 10000, ds.info().scale);
                         
                         // Save optimized graph
                         graph.saveGraph(output_graph.c_str());
@@ -814,7 +843,7 @@ int main(int argc, char *argv[]) {
                         cg.k, cg.k_ext, cg.eps_ext, cg.build_threads);
                     
                     deglib::benchmark::create_graph(*base_repository, config.data_stream_type, graph_path, 
-                        config.metric, lid, cg.k, cg.k_ext, cg.eps_ext, 0, 0, 0, cg.build_threads);
+                        config.metric, lid, cg.k, cg.k_ext, cg.eps_ext, 0, 0, 0, cg.build_threads, true, ds.info().scale);
                 }
                 
                 // Test the graph
@@ -880,7 +909,7 @@ int main(int argc, char *argv[]) {
                         k, k_ext, cg.eps_ext, DatasetConfig::optimization_target_str(cg.lid), cg.build_threads);
                     
                     deglib::benchmark::create_graph(*base_repository, config.data_stream_type, graph_path, 
-                        config.metric, cg.lid, k, k_ext, cg.eps_ext, 0, 0, 0, cg.build_threads);
+                        config.metric, cg.lid, k, k_ext, cg.eps_ext, 0, 0, 0, cg.build_threads, true, ds.info().scale);
                 }
                 
                 // Test the graph
@@ -938,7 +967,7 @@ int main(int argc, char *argv[]) {
                         cg.k, k_ext, cg.eps_ext, DatasetConfig::optimization_target_str(cg.lid), cg.build_threads);
                     
                     deglib::benchmark::create_graph(*base_repository, config.data_stream_type, graph_path, 
-                        config.metric, cg.lid, cg.k, k_ext, cg.eps_ext, 0, 0, 0, cg.build_threads);
+                        config.metric, cg.lid, cg.k, k_ext, cg.eps_ext, 0, 0, 0, cg.build_threads, true, ds.info().scale);
                 }
                 
                 // Test the graph
@@ -996,7 +1025,7 @@ int main(int argc, char *argv[]) {
                         cg.k, cg.k_ext, eps_ext, DatasetConfig::optimization_target_str(cg.lid), cg.build_threads);
                     
                     deglib::benchmark::create_graph(*base_repository, config.data_stream_type, graph_path, 
-                        config.metric, cg.lid, cg.k, cg.k_ext, eps_ext, 0, 0, 0, cg.build_threads);
+                        config.metric, cg.lid, cg.k, cg.k_ext, eps_ext, 0, 0, 0, cg.build_threads, true, ds.info().scale);
                 }
                 
                 // Test the graph
@@ -1053,7 +1082,7 @@ int main(int argc, char *argv[]) {
                     *base_repository, scaling_dir, graph_name_base, ss.size_interval,
                     config.metric, cg.lid, cg.k, cg.k_ext, cg.eps_ext, 
                     0, 0, 0,  // k_opt, eps_opt, i_opt (defaults)
-                    cg.build_threads);
+                    cg.build_threads, true, ds.info().scale);
                 log("Created {} incremental graphs\n", created_files.size());
                 
                 // Test all graphs
@@ -1126,7 +1155,7 @@ int main(int argc, char *argv[]) {
                     log("Random graph already exists, skipping build\n");
                 } else {
                     auto random_graph = deglib::benchmark::create_random_graph(
-                        *base_repository, config.metric, cg.k);
+                        *base_repository, config.metric, cg.k, 0, ds.info().scale);
                     random_graph.saveGraph(random_graph_path.c_str());
                     log("Saved random graph: {}\n", random_graph_path);
                 }
@@ -1146,7 +1175,7 @@ int main(int argc, char *argv[]) {
                     graph, scaling_dir, graph_name_base,
                     og.k_opt, og.eps_opt, og.i_opt,
                     os.iteration_interval, os.total_iterations,
-                    *query_repository, ground_truth, cg.anns_k);
+                    *query_repository, ground_truth, cg.anns_k, 2000, ds.info().scale);
                 log("Created {} optimized checkpoint graphs\n", created_files.size());
                 
                 // Phase 3: Test all optimized graphs
@@ -1226,7 +1255,7 @@ int main(int argc, char *argv[]) {
                         *base_repository, config.data_stream_type, graph_path,
                         config.metric, cg.lid, cg.k, cg.k_ext, cg.eps_ext,
                         0, 0, 0,  // k_opt, eps_opt, i_opt (defaults)
-                        threads);
+                        threads, true, ds.info().scale);
                     log("Graph built and saved: {}\n", graph_path);
                 }
                 
@@ -1280,7 +1309,7 @@ int main(int argc, char *argv[]) {
                     // Build graph with RNG pruning disabled (use_rng=false)
                     deglib::benchmark::create_graph(*base_repository, config.data_stream_type, graph_path, 
                         config.metric, cg.lid, cg.k, cg.k_ext, cg.eps_ext, 0, 0, 0, 
-                        cg.build_threads, /*use_rng=*/false);
+                        cg.build_threads, /*use_rng=*/false, ds.info().scale);
                 }
                 
                 // Test the graph
@@ -1346,7 +1375,7 @@ int main(int argc, char *argv[]) {
                         config.metric, deglib::builder::OptimizationTarget::StreamingData,
                         cg.k, cg.k_ext, cg.eps_ext,
                         og.k_opt, og.eps_opt, og.i_opt,
-                        cg.build_threads);
+                        cg.build_threads, true, ds.info().scale);
                     log("Graph built and saved: {}\n", graph_path);
                 }
                 
@@ -1355,16 +1384,15 @@ int main(int argc, char *argv[]) {
                     const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
                     log("Graph loaded: {} vertices\n", graph.size());
                     
-
-                    // Graph analysis (skip graph quality but check reachability)
-                    log("\n--- Graph Analysis ---\n");
-                    {
-                        auto full_explore_gt = std::vector<std::unordered_set<uint32_t>>{};
-                        deglib::benchmark::analyze_graph(graph, full_explore_gt, true, true, cg.analysis_threads);
-                    }
-                    
                     // Determine if we need half dataset ground truth based on DataStreamType
                     bool use_half = (ds_type != DataStreamType::AddAll);
+
+                    // Graph analysis with full exploration GT (use half for dynamic data)
+                    log("\n--- Graph Analysis ---\n");
+                    {
+                        auto full_explore_gt = ds.load_full_explore_groundtruth(DatasetInfo::EXPLORE_TOPK, use_half);
+                        deglib::benchmark::analyze_graph(graph, full_explore_gt, true, true, cg.analysis_threads);
+                    }
                     
                     // ANNS Test
                     log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
