@@ -257,7 +257,7 @@ inline void create_graph(
             auto duration = duration_ms;
             auto currRSS = getCurrentRSS() / 1000000;
             auto peakRSS = getPeakRSS() / 1000000;
-            log("{:7} vertices, {:8}ms, {:8} / {:8} improv, Q: {:4.2f} -> Sorted:{:.1f}, InOrder:{:.1f}, {} connected & {}, RSS {} & peakRSS {}\n", 
+            log("{:7} vertices, {:8}ms, {:8} / {:8} improv, AEW: {:4.2f} -> Sorted:{:.1f}, InOrder:{:.1f}, {} connected & {}, RSS {} & peakRSS {}\n", 
                         size, duration, status.improved, status.tries, avg_edge_weight, fmt::join(weight_histogram_sorted, " "), fmt::join(weight_histogram, " "), connected ? "" : "not", valid_weights ? "valid" : "invalid", currRSS, peakRSS);
             start = std::chrono::steady_clock::now();
         }
@@ -324,8 +324,16 @@ inline std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(
     // First, collect all target sizes and check which graphs already exist
     std::vector<uint32_t> target_sizes;
     uint32_t first_missing_size = 0;
-    for(uint32_t size = step_size; size <= total_size; size += step_size) {
+    for(uint32_t size = step_size; size < total_size; size += step_size) {
         target_sizes.push_back(size);
+    }
+    // Always include total_size as the last entry
+    if(target_sizes.empty() || target_sizes.back() != total_size) {
+        target_sizes.push_back(total_size);
+    }
+    
+    // Build result_files list and find first missing graph
+    for(uint32_t size : target_sizes) {
         std::string size_str = std::to_string(size / 1000) + "k";
         std::string graph_file = fmt::format("{}/{}_{}.deg", output_dir, graph_name_base, size_str);
         result_files.push_back({graph_file, size});
@@ -376,7 +384,7 @@ inline std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(
             auto valid_weights = deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_regularity(graph, uint32_t(size), true);
             auto connected = deglib::analysis::check_graph_connectivity(graph);
             auto duration = duration_ms;
-            log("{:7} vertices, {:8}ms, {:8} / {:8} improv, Q: {:4.2f} -> Sorted:{:.1f}, InOrder:{:.1f}, {} connected & {}\n", 
+            log("{:7} vertices, {:8}ms, {:8} / {:8} improv, AEW: {:4.2f} -> Sorted:{:.1f}, InOrder:{:.1f}, {} connected & {}\n", 
                         size, duration, status.improved, status.tries, avg_edge_weight, fmt::join(weight_histogram_sorted, " "), fmt::join(weight_histogram, " "), connected ? "" : "not", valid_weights ? "valid" : "invalid");
             start = std::chrono::steady_clock::now();
         }

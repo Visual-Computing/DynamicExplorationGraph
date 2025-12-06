@@ -39,6 +39,12 @@ using deglib::benchmark::Dataset;
 using deglib::benchmark::DatasetName;
 using deglib::benchmark::log;
 
+// Helper function to wait before benchmark tests to let the machine settle down
+static void wait_before_test(int seconds = 10) {
+    log("Waiting {} seconds for machine to settle...\n", seconds);
+    std::this_thread::sleep_for(std::chrono::seconds(seconds));
+}
+
 // Test type configurations - each test type only runs if present in config
 
 /**
@@ -110,7 +116,7 @@ struct AllSchemesTest {
  */
 struct KSweepTest {
     std::vector<uint8_t> k_values = {20, 30, 40, 50, 60, 70, 80, 90};  // k values to test
-    std::vector<float> eps_parameter = { 0.01f, 0.1f, 0.12f, 0.16f, 0.2f, 0.3f, 0.4f };
+    std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.16f, 0.2f };
 };
 
 /**
@@ -119,7 +125,7 @@ struct KSweepTest {
  */
 struct KExtSweepTest {
     std::vector<uint8_t> k_ext_values = {30, 40, 50, 60, 90};  // k_ext values to test
-    std::vector<float> eps_parameter = { 0.01f, 0.1f, 0.12f, 0.16f, 0.2f, 0.3f, 0.4f };
+    std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.16f, 0.2f};
 };
 
 /**
@@ -128,7 +134,7 @@ struct KExtSweepTest {
  */
 struct EpsExtSweepTest {
     std::vector<float> eps_ext_values = {0.0f, 0.05f, 0.1f, 0.2f, 0.3f};  // eps_ext values to test
-    std::vector<float> eps_parameter = { 0.01f, 0.1f, 0.12f, 0.16f, 0.2f, 0.3f, 0.4f };
+    std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.16f, 0.2f};
 };
 
 /**
@@ -139,7 +145,7 @@ struct EpsExtSweepTest {
  */
 struct SizeScalingTest {
     uint32_t size_interval = 100000;  // Build graphs at this interval (e.g., 200k, 400k, ...)
-    std::vector<float> eps_parameter = { 0.01f, 0.1f, 0.12f, 0.16f, 0.2f, 0.3f, 0.4f };
+    std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.16f, 0.2f };
 };
 
 /**
@@ -152,9 +158,9 @@ struct OptScalingTest {
     uint8_t k_opt = 30;                       // Optimization neighborhood size
     float eps_opt = 0.001f;                   // Optimization epsilon for search
     uint8_t i_opt = 5;                        // Optimization path length
-    uint64_t iteration_interval = 100000;     // Save checkpoint every N iterations
-    uint64_t total_iterations = 1000000;      // Total optimization iterations
-    std::vector<float> eps_parameter = { 0.01f, 0.1f, 0.12f, 0.16f, 0.2f, 0.3f, 0.4f };
+    uint64_t iteration_interval = 1000000;    // Save checkpoint every N iterations
+    uint64_t total_iterations = 10000000;     // Total optimization iterations
+    std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.16f, 0.2f, 0.3f, 0.4f };
 };
 
 /**
@@ -474,7 +480,7 @@ int main(int argc, char *argv[]) {
     // Parse command-line arguments
     // Usage: deglib_phd <dataset> [test_type] [--run]
     DatasetName ds_name = DatasetName::SIFT1M;
-    std::string test_type_arg = "create_graph";
+    std::string test_type_arg = "all";
     bool do_run = true;
     
     for(int i = 1; i < argc; ++i) {
@@ -646,6 +652,7 @@ int main(int argc, char *argv[]) {
                     log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
                     {
                         auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
+                        wait_before_test();
                         deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
                             cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
                     }
@@ -655,6 +662,7 @@ int main(int argc, char *argv[]) {
                     {
                         auto entry_vertices = ds.load_explore_entry_vertices();
                         auto explore_gt = ds.load_explore_groundtruth(cg.explore_k);
+                        wait_before_test();
                         deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
                             false, cg.explore_repeat, cg.explore_k, cg.explore_threads);
                     }
@@ -664,6 +672,7 @@ int main(int argc, char *argv[]) {
                     for(uint32_t k_val : cg.k_sweep_values) {
                         log("\n-- k={} --\n", k_val);
                         auto gt_k = ds.load_groundtruth(k_val, use_half_gt);
+                        wait_before_test();
                         deglib::benchmark::test_graph_anns(graph, *query_repository, gt_k, 
                             cg.anns_repeat, cg.anns_threads, k_val, cg.eps_parameter);
                     }
@@ -741,6 +750,7 @@ int main(int argc, char *argv[]) {
                         log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
                         {
                             auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
+                            wait_before_test();
                             deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
                                 cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
                         }
@@ -750,6 +760,7 @@ int main(int argc, char *argv[]) {
                         {
                             auto entry_vertices = ds.load_explore_entry_vertices();
                             auto explore_gt = ds.load_explore_groundtruth(cg.explore_k);
+                            wait_before_test();
                             deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
                                 false, cg.explore_repeat, cg.explore_k, cg.explore_threads);
                         }
@@ -815,6 +826,7 @@ int main(int argc, char *argv[]) {
                     auto eps_it = as.eps_parameter.find(lid);
                     const auto& scheme_eps = (eps_it != as.eps_parameter.end()) ? eps_it->second : cg.eps_parameter;
                     
+                    wait_before_test();
                     deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
                         cg.anns_repeat, cg.anns_threads, cg.anns_k, scheme_eps);
                 } else {
@@ -842,10 +854,12 @@ int main(int argc, char *argv[]) {
             std::filesystem::create_directories(scaling_dir);
             
             // Load ground truth once for all k tests
-            auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
+            auto ground_truth = ds.load_groundtruth(cg.anns_k, false);
+            
+            // Use the highest k value as k_ext for all graphs
+            uint8_t k_ext = *std::max_element(ks.k_values.begin(), ks.k_values.end());
             
             for(uint8_t k : ks.k_values) {
-                uint8_t k_ext = k * 2;  // k_ext scales with k
                 std::string graph_path = graph_paths.scaling_graph_file(scaling_dir, dims, config.metric, k, k_ext, cg.eps_ext, cg.lid);
                 std::string log_path = graph_paths.scaling_log_file(scaling_dir, dims, config.metric, k, k_ext, cg.eps_ext, cg.lid);
                 
@@ -873,6 +887,7 @@ int main(int argc, char *argv[]) {
                 if(std::filesystem::exists(graph_path)) {
                     const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
                     log("Graph loaded: {} vertices\n", graph.size());
+                    wait_before_test();
                     deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
                         cg.anns_repeat, cg.anns_threads, cg.anns_k, ks.eps_parameter);
                 } else {
@@ -930,6 +945,7 @@ int main(int argc, char *argv[]) {
                 if(std::filesystem::exists(graph_path)) {
                     const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
                     log("Graph loaded: {} vertices\n", graph.size());
+                    wait_before_test();
                     deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
                         cg.anns_repeat, cg.anns_threads, cg.anns_k, kes.eps_parameter);
                 } else {
@@ -987,6 +1003,7 @@ int main(int argc, char *argv[]) {
                 if(std::filesystem::exists(graph_path)) {
                     const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
                     log("Graph loaded: {} vertices\n", graph.size());
+                    wait_before_test();
                     deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
                         cg.anns_repeat, cg.anns_threads, cg.anns_k, ees.eps_parameter);
                 } else {
@@ -1051,6 +1068,7 @@ int main(int argc, char *argv[]) {
                         // Load ground truth for this specific size
                         auto ground_truth = ds.load_groundtruth_for_size(cg.anns_k, vertex_count);
                         
+                        wait_before_test();
                         deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
                             cg.anns_repeat, cg.anns_threads, cg.anns_k, ss.eps_parameter);
                     } else {
@@ -1139,6 +1157,7 @@ int main(int argc, char *argv[]) {
                 log("Graph: {}\n", random_graph_path);
                 if(std::filesystem::exists(random_graph_path)) {
                     const auto random_graph = deglib::graph::load_readonly_graph(random_graph_path.c_str());
+                    wait_before_test();
                     deglib::benchmark::test_graph_anns(random_graph, *query_repository, ground_truth, 
                         cg.anns_repeat, cg.anns_threads, cg.anns_k, os.eps_parameter);
                 } else {
@@ -1152,6 +1171,7 @@ int main(int argc, char *argv[]) {
                     
                     if(std::filesystem::exists(opt_graph_path)) {
                         const auto opt_graph = deglib::graph::load_readonly_graph(opt_graph_path.c_str());
+                        wait_before_test();
                         deglib::benchmark::test_graph_anns(opt_graph, *query_repository, ground_truth, 
                             cg.anns_repeat, cg.anns_threads, cg.anns_k, os.eps_parameter);
                     } else {
@@ -1214,6 +1234,7 @@ int main(int argc, char *argv[]) {
                 if(std::filesystem::exists(graph_path)) {
                     const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
                     log("\n--- Testing graph ---\n");
+                    wait_before_test();
                     deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
                         cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
                 } else {
@@ -1270,6 +1291,7 @@ int main(int argc, char *argv[]) {
                     // ANNS Test
                     log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
                     auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half_gt);
+                    wait_before_test();
                     deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
                         cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
                 }
@@ -1341,11 +1363,14 @@ int main(int argc, char *argv[]) {
                         deglib::benchmark::analyze_graph(graph, full_explore_gt, true, true, cg.analysis_threads);
                     }
                     
+                    // Determine if we need half dataset ground truth based on DataStreamType
+                    bool use_half = (ds_type != DataStreamType::AddAll);
+                    
                     // ANNS Test
                     log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
                     {
-                        bool use_half = (ds_type != DataStreamType::AddAll);
                         auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half);
+                        wait_before_test();
                         deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
                             cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
                     }
@@ -1354,7 +1379,8 @@ int main(int argc, char *argv[]) {
                     log("\n--- Exploration Test (k={}) ---\n", cg.explore_k);
                     {
                         auto entry_vertices = ds.load_explore_entry_vertices();
-                        auto explore_gt = ds.load_explore_groundtruth(cg.explore_k);
+                        auto explore_gt = ds.load_explore_groundtruth(cg.explore_k, use_half);
+                        wait_before_test();
                         deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
                             false, cg.explore_repeat, cg.explore_k, cg.explore_threads);
                     }
