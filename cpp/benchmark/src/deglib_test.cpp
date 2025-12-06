@@ -56,6 +56,35 @@ static std::vector<float> parse_eps_values(const std::string& str) {
     return values;
 }
 
+// Benchmark type enum for type-safe benchmark selection
+enum class BenchmarkType {
+    Stats,
+    ANNS,
+    Explore,
+    All,
+    Invalid
+};
+
+static BenchmarkType parse_benchmark_type(const std::string& str) {
+    std::string lower = str;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    if (lower == "stats") return BenchmarkType::Stats;
+    if (lower == "anns") return BenchmarkType::ANNS;
+    if (lower == "explore") return BenchmarkType::Explore;
+    if (lower == "all") return BenchmarkType::All;
+    return BenchmarkType::Invalid;
+}
+
+static const char* benchmark_type_str(BenchmarkType type) {
+    switch (type) {
+        case BenchmarkType::Stats: return "stats";
+        case BenchmarkType::ANNS: return "anns";
+        case BenchmarkType::Explore: return "explore";
+        case BenchmarkType::All: return "all";
+        default: return "invalid";
+    }
+}
+
 static void print_usage(const char* program_name) {
     fmt::print("\nUsage: {} [dataset] [graph_file] [benchmark_type] [options]\n\n", program_name);
     fmt::print("Arguments:\n");
@@ -94,16 +123,16 @@ int main(int argc, char* argv[]) {
     // ==========================================================================
     // Default parameters - change these in the IDE to run different benchmarks
     // ==========================================================================
-    std::string dataset_str = "audio";                                  // Dataset: sift1m, deep1m, glove, audio
+    DatasetName dataset_name = DatasetName::AUDIO;                      // Dataset: SIFT1M, DEEP1M, GLOVE, AUDIO
     std::string graph_file = "192D_L2_K20_AddK40Eps0.1_StreamingData_OptK20Eps0.0010Path5_AddHalf_.deg";                        // Graph file path (empty = auto-generate)
-    std::string benchmark_type = "explore";                             // Benchmark: anns, explore, stats, all
+    BenchmarkType benchmark_type = BenchmarkType::Explore;              // Benchmark: Stats, ANNS, Explore, All
     uint32_t k = 100;                                                   // ANNS k
     uint32_t explore_k = 1000;                                          // Exploration k
     uint32_t repeat = 1;                                                // Test repetitions
     uint32_t analysis_threads = std::thread::hardware_concurrency();    // Threads for graph analysis (default: all CPU threads)
     uint32_t test_threads = 1;                                          // Threads for ANNS/exploration tests (default: 1)
     std::vector<float> eps_parameter = { 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f };
-    bool use_half_gt = true;                                            // Use half dataset ground truth
+    bool use_half_gt = false;                                           // Use half dataset ground truth
     bool compute_search_reach = false;                                  // Compute search reachability (expensive)
     bool compute_exploration_reach = false;                             // Compute exploration reachability (expensive)
     // ==========================================================================
@@ -145,11 +174,21 @@ int main(int argc, char* argv[]) {
         } else {
             // Positional argument
             if (positional_index == 0) {
-                dataset_str = arg;
+                dataset_name = DatasetName::from_string(arg);
+                if (!dataset_name.is_valid()) {
+                    fmt::print(stderr, "Error: Unknown dataset: {}\n", arg);
+                    fmt::print(stderr, "Valid datasets: sift1m, deep1m, glove, audio\n");
+                    return 1;
+                }
             } else if (positional_index == 1) {
                 graph_file = arg;
             } else if (positional_index == 2) {
-                benchmark_type = arg;
+                benchmark_type = parse_benchmark_type(arg);
+                if (benchmark_type == BenchmarkType::Invalid) {
+                    fmt::print(stderr, "Error: Unknown benchmark type: {}\n", arg);
+                    fmt::print(stderr, "Valid types: stats, anns, explore, all\n");
+                    return 1;
+                }
             } else {
                 fmt::print(stderr, "Too many positional arguments: {}\n", arg);
                 print_usage(argv[0]);
@@ -159,14 +198,6 @@ int main(int argc, char* argv[]) {
         }
     }
     
-    // Parse dataset name
-    DatasetName dataset_name = DatasetName::from_string(dataset_str);
-    if (!dataset_name.is_valid()) {
-        fmt::print(stderr, "Error: Unknown dataset: {}\n", dataset_str);
-        fmt::print(stderr, "Valid datasets: sift1m, deep1m, glove, audio\n");
-        return 1;
-    }
-    
     // Create dataset object
     Dataset ds(dataset_name, data_path);
     
@@ -174,7 +205,7 @@ int main(int argc, char* argv[]) {
     fmt::print("\n=== Ensuring dataset is set up ===\n");
     auto setup_threads = std::thread::hardware_concurrency();
     if (!setup_dataset(ds, setup_threads)) {
-        fmt::print(stderr, "Error: Failed to set up dataset: {}\n", dataset_str);
+        fmt::print(stderr, "Error: Failed to set up dataset: {}\n", ds.name());
         return 1;
     }
     
@@ -185,9 +216,9 @@ int main(int argc, char* argv[]) {
     }
     
     fmt::print("\n=== DEG Test Tool ===\n");
-    fmt::print("Dataset: {}\n", dataset_str);
+    fmt::print("Dataset: {}\n", ds.name());
     fmt::print("Graph: {}\n", graph_file);
-    fmt::print("Benchmark: {}\n", benchmark_type);
+    fmt::print("Benchmark: {}\n", benchmark_type_str(benchmark_type));
     fmt::print("k={}, explore_k={}, repeat={}, analysis_threads={}, test_threads={}\n", 
                k, explore_k, repeat, analysis_threads, test_threads);
     fmt::print("eps_parameter: {}\n", fmt::join(eps_parameter, ", "));
@@ -200,9 +231,9 @@ int main(int argc, char* argv[]) {
     fmt::print("Graph loaded: {} vertices, {} edges per vertex\n\n", graph.size(), graph.getEdgesPerVertex());
     
     // Run requested benchmarks
-    bool run_stats = (benchmark_type == "stats" || benchmark_type == "all");
-    bool run_anns = (benchmark_type == "anns" || benchmark_type == "all");
-    bool run_explore = (benchmark_type == "explore" || benchmark_type == "all");
+    bool run_stats = (benchmark_type == BenchmarkType::Stats || benchmark_type == BenchmarkType::All);
+    bool run_anns = (benchmark_type == BenchmarkType::ANNS || benchmark_type == BenchmarkType::All);
+    bool run_explore = (benchmark_type == BenchmarkType::Explore || benchmark_type == BenchmarkType::All);
     
     // Stats / Graph Analysis
     if (run_stats) {
