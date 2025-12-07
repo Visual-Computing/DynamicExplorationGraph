@@ -58,7 +58,7 @@ static uint64_t compute_linear_search_baseline(
     
     // Generate random indices for sampling
     std::vector<uint32_t> query_indices(query_count);
-    std::mt19937 rng(42);  // Fixed seed for reproducibility
+    std::mt19937 rng(7);  // Fixed seed for reproducibility
     std::uniform_int_distribution<uint32_t> dist(0, (uint32_t)base_size - 1);
     for (uint32_t i = 0; i < query_count; i++) {
         query_indices[i] = dist(rng);
@@ -70,25 +70,22 @@ static uint64_t compute_linear_search_baseline(
     StopW stopw = StopW();
     
     // For each query, compute distance to all base vectors and find minimum
-    volatile float min_dist_sink = 0;  // Prevent optimizer from removing computation
+    float min_dist = std::numeric_limits<float>::max();
     for (uint32_t q = 0; q < query_count; q++) {
-        const auto query = base_repository.getFeature(query_indices[q]);
-        float min_dist = std::numeric_limits<float>::max();
+        const auto query = base_repository.getFeature(query_indices[q]);        
         
         for (uint32_t i = 0; i < base_size; i++) {
             const auto base_feature = base_repository.getFeature(i);
             const auto d = dist_func(query, base_feature, dist_func_param);
             if (d < min_dist) min_dist = d;
         }
-        
-        min_dist_sink = min_dist;  // Prevent optimization
     }
     
     const uint64_t total_time_us = stopw.getElapsedTimeMicro();
     const uint64_t time_per_query_us = total_time_us / query_count;
     
-    log("Linear search baseline: {}us per query (total: {}ms for {} queries)\n", 
-        time_per_query_us, total_time_us / 1000, query_count);
+    log("Linear search baseline: {}us per query (total: {}ms for {} queries) with min distance {}\n", 
+        time_per_query_us, total_time_us / 1000, query_count, min_dist);
     
     return time_per_query_us;
 }
@@ -240,7 +237,7 @@ static void test_graph_anns(const deglib::search::SearchGraph& graph, const degl
         if (linear_baseline_us > 0 && test_size > abort_sample_size) {
             const auto sample_size = std::min(abort_sample_size, test_size);
             StopW sample_stopw = StopW();
-            test_approx_anns(graph, entry_vertex_indices, query_repository, ground_truth, eps, k, sample_size, threads, filter);
+            deglib::benchmark::test_approx_anns(graph, entry_vertex_indices, query_repository, ground_truth, eps, k, sample_size, threads, filter);
             const uint64_t sample_time_us = sample_stopw.getElapsedTimeMicro();
             const uint64_t sample_time_per_query = sample_time_us / sample_size;
             
@@ -324,7 +321,7 @@ static void test_graph_explore(const deglib::search::SearchGraph& graph,
                 auto sample_entry_indices = std::vector<std::vector<uint32_t>>(entry_vertex_indices.begin(), entry_vertex_indices.begin() + sample_size);
                 auto sample_ground_truth = std::vector<std::vector<uint32_t>>(ground_truth.begin(), ground_truth.begin() + sample_size);                
                 StopW sample_stopw = StopW();
-                test_approx_explore(graph, sample_entry_indices, include_entry, sample_ground_truth, k, max_distance_count, threads, filter);
+                deglib::benchmark::test_approx_explore(graph, sample_entry_indices, include_entry, sample_ground_truth, k, max_distance_count, threads, filter);
                 const uint64_t sample_time_us = sample_stopw.getElapsedTimeMicro();
                 const uint64_t sample_time_per_query = sample_time_us / sample_size;
                 
