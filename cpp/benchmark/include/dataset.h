@@ -55,11 +55,12 @@ public:
     static const DatasetName DEEP1M;
     static const DatasetName GLOVE;
     static const DatasetName AUDIO;
+    static const DatasetName ENRON;
     static const DatasetName Invalid;
     
     // All valid datasets for iteration
-    static const std::array<DatasetName, 4>& all() {
-        static const std::array<DatasetName, 4> datasets = {SIFT1M, DEEP1M, GLOVE, AUDIO};
+    static const std::array<DatasetName, 5>& all() {
+        static const std::array<DatasetName, 5> datasets = {SIFT1M, DEEP1M, GLOVE, AUDIO, ENRON};
         return datasets;
     }
     
@@ -98,6 +99,7 @@ inline constexpr DatasetName DatasetName::SIFT1M{"sift1m"};
 inline constexpr DatasetName DatasetName::DEEP1M{"deep1m"};
 inline constexpr DatasetName DatasetName::GLOVE{"glove"};
 inline constexpr DatasetName DatasetName::AUDIO{"audio"};
+inline constexpr DatasetName DatasetName::ENRON{"enron"};
 inline constexpr DatasetName DatasetName::Invalid{"invalid"};
 
 // ============================================================================
@@ -185,6 +187,13 @@ inline DatasetInfo make_dataset_info(const DatasetName& ds) {
         info.base_count = 53387;
         info.query_count = 200;
         info.dims = 192;
+        info.scale = 1;
+        info.explore_depth = 1;
+    } else if (ds == DatasetName::ENRON) {
+        info.download_url = "https://static.visual-computing.com/paper/DEG/enron.tar.gz";
+        info.base_count = 94987;
+        info.query_count = 200;
+        info.dims = 1369;
         info.scale = 1;
         info.explore_depth = 1;
     }
@@ -764,6 +773,66 @@ inline bool setup_audio_files(const Dataset& ds) {
     return true;
 }
 
+/**
+ * Setup ENRON dataset
+ */
+inline bool setup_enron_files(const Dataset& ds) {
+    fmt::print("\n=== Setting up ENRON dataset ===\n");
+    
+    const auto& info = ds.info();
+    const auto archive_file = ds.dataset_dir() / "enron.tar.gz";
+    const auto tmp_dir = ds.dataset_dir() / "_tmp_extract";
+    
+    ensure_directory(ds.dataset_dir());
+    ensure_directory(ds.files_dir());
+    
+    if (file_exists(ds.base_file())) {
+        fmt::print("ENRON already set up at {}\n", ds.files_dir().string());
+        return true;
+    }
+    
+    // Download if archive doesn't exist
+    if (!file_exists(archive_file)) {
+        if (!download_file(info.download_url, archive_file)) {
+            fmt::print(stderr, "Failed to download ENRON\n");
+            return false;
+        }
+    }
+    
+    // Clean up any previous tmp directory and create fresh one
+    remove_directory(tmp_dir);
+    ensure_directory(tmp_dir);
+    
+    // Extract archive to tmp directory
+    if (!extract_tar_gz(archive_file, tmp_dir)) {
+        fmt::print(stderr, "Failed to extract ENRON archive\n");
+        remove_directory(tmp_dir);
+        return false;
+    }
+    
+    // Find extracted directory containing base file
+    auto extracted_dir = find_directory_with_file(tmp_dir, "enron_base.fvecs");
+    if (extracted_dir.empty()) {
+        fmt::print(stderr, "Could not find extracted ENRON files\n");
+        remove_directory(tmp_dir);
+        return false;
+    }
+    
+    fmt::print("Found extracted files in: {}\n", extracted_dir.string());
+    
+    // Move files to canonical names
+    move_file(extracted_dir / "enron_base.fvecs", ds.files_dir() / info.base_file);
+    move_file(extracted_dir / "enron_query.fvecs", ds.files_dir() / info.query_file);
+    move_file(extracted_dir / "enron_explore_query.fvecs", ds.files_dir() / info.explore_query_file);
+    move_file(extracted_dir / "enron_explore_entry_vertex.ivecs", ds.files_dir() / info.explore_entry_vertex_file);
+    
+    // Clean up tmp directory completely
+    remove_directory(tmp_dir);
+    
+    fmt::print("ENRON files set up in: {}\n", ds.files_dir().string());
+    return true;
+}
+
 } // namespace detail
 
 // ============================================================================
@@ -1069,6 +1138,8 @@ inline bool setup_dataset(
         setup_ok = detail::setup_glove_files(ds);
     } else if (ds.dataset_name() == DatasetName::AUDIO) {
         setup_ok = detail::setup_audio_files(ds);
+    } else if (ds.dataset_name() == DatasetName::ENRON) {
+        setup_ok = detail::setup_enron_files(ds);
     } else {
         fmt::print(stderr, "Unknown dataset\n");
         return false;

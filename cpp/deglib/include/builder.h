@@ -298,7 +298,7 @@ class EvenRegularGraphBuilder {
         build_status_() { 
 
           // each core processes extend_thread_batch_size element per tasks, there are 10 tasks per threads
-          extend_thread_count = std::thread::hardware_concurrency();
+          extend_thread_count = std::thread::hardware_concurrency() / 2;
           extend_batch_size = extend_thread_count * extend_thread_task_count * extend_thread_task_size;
     }
 
@@ -1901,7 +1901,7 @@ void remove_non_mrng_edges(deglib::graph::MutableGraph& graph) {
   const auto edge_per_vertex = graph.getEdgesPerVertex();
 
   const auto start = std::chrono::steady_clock::now();
-  const auto thread_count = std::thread::hardware_concurrency();
+  const auto thread_count = std::thread::hardware_concurrency() / 2;
   auto removed_rng_edges_per_thread = std::vector<uint32_t>(thread_count);
   deglib::concurrent::parallel_for(0, vertex_count, thread_count, [&] (size_t vertex_index, size_t thread_id) {
     uint32_t removed_rng_edges = 0;

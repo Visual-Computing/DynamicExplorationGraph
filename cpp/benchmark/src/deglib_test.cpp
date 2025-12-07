@@ -123,13 +123,13 @@ int main(int argc, char* argv[]) {
     // ==========================================================================
     // Default parameters - change these in the IDE to run different benchmarks
     // ==========================================================================
-    DatasetName dataset_name = DatasetName::AUDIO;                      // Dataset: SIFT1M, DEEP1M, GLOVE, AUDIO
+    DatasetName dataset_name = DatasetName::AUDIO;                      // Dataset: SIFT1M, DEEP1M, GLOVE, AUDIO, ENRON
     std::string graph_file = "192D_L2_K20_AddK40Eps0.1_StreamingData_OptK20Eps0.0010Path5_AddHalf_.deg";                        // Graph file path (empty = auto-generate)
     BenchmarkType benchmark_type = BenchmarkType::Explore;              // Benchmark: Stats, ANNS, Explore, All
     uint32_t k = 100;                                                   // ANNS k
     uint32_t explore_k = 1000;                                          // Exploration k
     uint32_t repeat = 1;                                                // Test repetitions
-    uint32_t analysis_threads = std::thread::hardware_concurrency();    // Threads for graph analysis (default: all CPU threads)
+    uint32_t analysis_threads = std::thread::hardware_concurrency() / 2;    // Threads for graph analysis (default: all CPU threads)
     uint32_t test_threads = 1;                                          // Threads for ANNS/exploration tests (default: 1)
     std::vector<float> eps_parameter = { 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f };
     bool use_half_gt = false;                                           // Use half dataset ground truth
@@ -203,7 +203,7 @@ int main(int argc, char* argv[]) {
     
     // Ensure dataset is set up (downloads, generates ground truth files if needed)
     fmt::print("\n=== Ensuring dataset is set up ===\n");
-    auto setup_threads = std::thread::hardware_concurrency();
+    auto setup_threads = std::thread::hardware_concurrency() / 2;
     if (!setup_dataset(ds, setup_threads)) {
         fmt::print(stderr, "Error: Failed to set up dataset: {}\n", ds.name());
         return 1;

@@ -44,7 +44,7 @@ namespace deglib::benchmark
  */
 inline uint32_t compute_search_reachability(
     const deglib::search::SearchGraph& graph, 
-    const uint32_t thread_count = std::thread::hardware_concurrency()) 
+    const uint32_t thread_count = std::thread::hardware_concurrency() / 2) 
 {
     auto stopw = StopW();
     const auto graph_size = (uint32_t)graph.size();
@@ -365,7 +365,7 @@ inline GraphStats analyze_graph(
     const std::vector<std::vector<uint32_t>>& exploration_gt = {},
     bool compute_reachability = false,
     bool compute_reach = false,
-    uint32_t thread_count = std::thread::hardware_concurrency())
+    uint32_t thread_count = std::thread::hardware_concurrency() / 2)
 {
     GraphStats stats;
     stats.vertex_count = graph.size();

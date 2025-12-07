@@ -14,7 +14,7 @@ namespace deglib::concurrent {
   template<class Function>
   inline void parallel_for(size_t start, size_t end, size_t numThreads, Function fn) {
     if (numThreads <= 0) {
-      numThreads = std::thread::hardware_concurrency();
+      numThreads = std::thread::hardware_concurrency() / 2;
     }
 
     if (numThreads == 1) {

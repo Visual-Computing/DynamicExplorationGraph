@@ -28,8 +28,8 @@ int main(int argc, char* argv[]) {
     fmt::print("DATA_PATH: {}\n\n", data_path.string());
     
     // Parse arguments
-    std::string dataset_arg = "sift1m";
-    uint32_t thread_count = std::thread::hardware_concurrency();
+    std::string dataset_arg = "enron";
+    uint32_t thread_count = std::thread::hardware_concurrency() / 2;
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -41,9 +41,10 @@ int main(int argc, char* argv[]) {
             fmt::print("  deep1m  - Deep1M (1M vectors, 96D)\n");
             fmt::print("  glove   - GloVe (1.18M vectors, 100D)\n");
             fmt::print("  audio   - Audio (53K vectors, 192D)\n");
+            fmt::print("  enron   - Enron (94K vectors, 1369D)\n");
             fmt::print("  all     - Set up all datasets\n");
             fmt::print("\nOptions:\n");
-            fmt::print("  --threads N  Number of threads for ground truth computation (default: 4)\n");
+            fmt::print("  --threads N  Number of threads for ground truth computation (default: all available cores)\n");
             return 0;
         }
         

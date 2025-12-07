@@ -64,7 +64,7 @@ struct CreateGraphTest {
     uint8_t k_ext = 60;
     float eps_ext = 0.1f;
     uint32_t build_threads = 1;
-    uint32_t analysis_threads = std::thread::hardware_concurrency(); // Threads for graph analysis (default: all CPU threads)
+    uint32_t analysis_threads = std::thread::hardware_concurrency() / 2; // Threads for graph analysis (default: all CPU threads)
     
     // ANNS test parameters
     uint32_t anns_k = 100;                    // k for ANNS recall test
@@ -485,6 +485,25 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
 
         conf.opt_scaling_test.iteration_interval = 10000;
         conf.opt_scaling_test.iteration_interval = 100000;
+    } else if (dataset_name == DatasetName::ENRON) {
+
+        conf.create_graph.k = 30;
+        conf.create_graph.k_ext = 60;
+        conf.create_graph.anns_repeat = 50;
+        conf.create_graph.eps_parameter =  { 0.00f, 0.03f, 0.05f, 0.07f, 0.09f, 0.12f, 0.2f };
+
+        conf.optimize_graph.k_opt = 30;
+        conf.optimize_graph.total_iterations = 40000;
+
+        conf.all_schemes_test.eps_parameter = {
+            { deglib::builder::OptimizationTarget::LowLID,    { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::HighLID,   { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::SchemeA,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::SchemeB,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } }
+        };       
+
+        conf.opt_scaling_test.iteration_interval = 10000;
+        conf.opt_scaling_test.iteration_interval = 100000;
     }
 
     return conf;
@@ -514,7 +533,7 @@ int main(int argc, char *argv[]) {
         std::string arg = argv[i];
         if(arg == "help" || arg == "--help") {
             log("Usage: deglib_phd <dataset> [test_type] [--run]\n");
-            log("Datasets: sift1m, deep1m, audio, glove\n");
+            log("Datasets: sift1m, deep1m, audio, glove, enron\n");
             log("Test types:\n");
             log("  create_graph    - Build graph, run stats, ANNS, explore, k-sweep\n");
             log("  optimize_graph  - Optimize existing graph\n");
@@ -605,7 +624,7 @@ int main(int argc, char *argv[]) {
     
     if(do_run) {
         // Setup dataset (downloads, extracts, generates ground truth if needed)
-        auto setup_threads = std::thread::hardware_concurrency();
+        auto setup_threads = std::thread::hardware_concurrency() / 2;
         log("\nSetting up dataset with {} threads...\n", setup_threads);
         if (!deglib::benchmark::setup_dataset(ds, setup_threads)) {
             log("ERROR: Failed to setup dataset {}\n", ds.name());
