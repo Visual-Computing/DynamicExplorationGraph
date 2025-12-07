@@ -32,87 +32,63 @@ namespace deglib::benchmark
 {
 
 /**
- * @brief Perform linear search to find k nearest neighbors.
+ * @brief Compute baseline time per query using linear distance computation.
  * 
- * This is a brute-force search that compares the query against all vectors
- * in the base repository. Used to establish a baseline time for early abort.
- * 
- * @param base_repository The base feature repository to search
- * @param query Query feature vector
- * @param k Number of nearest neighbors to find
- * @param dist_func Distance function
- * @param dist_func_param Parameter for distance function (typically dimension)
- * @return Priority queue with k nearest neighbors
- */
-static deglib::search::ResultSet linear_search(
-    const deglib::FeatureRepository& base_repository,
-    const std::byte* query,
-    const uint32_t k,
-    const deglib::DISTFUNC<float> dist_func,
-    const void* dist_func_param)
-{
-    auto result_queue = deglib::search::ResultSet();
-    const auto base_size = base_repository.size();
-    
-    for (uint32_t i = 0; i < base_size; i++) {
-        const auto base_feature = base_repository.getFeature(i);
-        const auto dist = dist_func(query, base_feature, dist_func_param);
-        
-        if (result_queue.size() < k) {
-            result_queue.emplace(i, dist);
-        } else if (dist < result_queue.top().getDistance()) {
-            result_queue.pop();
-            result_queue.emplace(i, dist);
-        }
-    }
-    
-    return result_queue;
-}
-
-/**
- * @brief Compute baseline time per query using linear search.
- * 
- * Performs linear search on a sample of queries to establish the worst-case
- * baseline time. This baseline is used for early abort in graph search tests.
+ * Uses random samples from the base repository as queries and computes distances
+ * to all other elements in the repository. This establishes the worst-case
+ * baseline time for early abort in graph search tests.
  * 
  * @param base_repository The base feature repository
- * @param query_repository The query feature repository
  * @param metric The distance metric (L2, etc.)
- * @param k Number of nearest neighbors
- * @param sample_size Number of queries to sample (default: 100)
- * @return Average time per query in microseconds for linear search
+ * @param sample_size Number of random queries to sample (default: 100)
+ * @return Average time per query in microseconds for full linear scan
  */
 static uint64_t compute_linear_search_baseline(
     const deglib::FeatureRepository& base_repository,
-    const deglib::FeatureRepository& query_repository,
     const deglib::Metric metric,
-    const uint32_t k,
     const uint32_t sample_size = 100)
 {
     const auto dims = base_repository.dims();
+    const auto base_size = base_repository.size();
     const auto feature_space = deglib::FloatSpace(dims, metric);
     const auto dist_func = feature_space.get_dist_func();
     const auto dist_func_param = feature_space.get_dist_func_param();
     
-    const auto query_count = std::min(sample_size, (uint32_t)query_repository.size());
+    const auto query_count = std::min(sample_size, (uint32_t)base_size);
     
-    log("Computing linear search baseline with {} queries on {} base vectors...\n", query_count, base_repository.size());
+    // Generate random indices for sampling
+    std::vector<uint32_t> query_indices(query_count);
+    std::mt19937 rng(42);  // Fixed seed for reproducibility
+    std::uniform_int_distribution<uint32_t> dist(0, (uint32_t)base_size - 1);
+    for (uint32_t i = 0; i < query_count; i++) {
+        query_indices[i] = dist(rng);
+    }
+    
+    log("Computing linear search baseline with {} random queries on {} base vectors...\n", 
+        query_count, base_size);
     
     StopW stopw = StopW();
     
-    for (uint32_t i = 0; i < query_count; i++) {
-        auto query = reinterpret_cast<const std::byte*>(query_repository.getFeature(i));
-        auto result = linear_search(base_repository, query, k, dist_func, dist_func_param);
-        // Prevent optimizer from removing the computation
-        if (result.size() != k) {
-            fmt::print(stderr, "Linear search returned {} results instead of {}\n", result.size(), k);
+    // For each query, compute distance to all base vectors and find minimum
+    volatile float min_dist_sink = 0;  // Prevent optimizer from removing computation
+    for (uint32_t q = 0; q < query_count; q++) {
+        const auto query = base_repository.getFeature(query_indices[q]);
+        float min_dist = std::numeric_limits<float>::max();
+        
+        for (uint32_t i = 0; i < base_size; i++) {
+            const auto base_feature = base_repository.getFeature(i);
+            const auto d = dist_func(query, base_feature, dist_func_param);
+            if (d < min_dist) min_dist = d;
         }
+        
+        min_dist_sink = min_dist;  // Prevent optimization
     }
     
     const uint64_t total_time_us = stopw.getElapsedTimeMicro();
     const uint64_t time_per_query_us = total_time_us / query_count;
     
-    log("Linear search baseline: {}us per query (total: {}ms for {} queries)\n", time_per_query_us, total_time_us / 1000, query_count);
+    log("Linear search baseline: {}us per query (total: {}ms for {} queries)\n", 
+        time_per_query_us, total_time_us / 1000, query_count);
     
     return time_per_query_us;
 }

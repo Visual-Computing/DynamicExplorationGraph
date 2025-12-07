@@ -230,6 +230,15 @@ int main(int argc, char* argv[]) {
     const auto graph = deglib::graph::load_readonly_graph(graph_file.c_str());
     fmt::print("Graph loaded: {} vertices, {} edges per vertex\n\n", graph.size(), graph.getEdgesPerVertex());
     
+    // Load base repository and compute linear search baseline for early abort
+    fmt::print("Loading base repository for linear search baseline...\n");
+    auto base_repository = ds.load_base();
+    fmt::print("Loaded {} base vectors\n", base_repository.size());
+    
+    fmt::print("\n--- Computing Linear Search Baseline ---\n");
+    uint64_t linear_baseline_us = deglib::benchmark::compute_linear_search_baseline(base_repository, deglib::Metric::L2, 100);
+    fmt::print("\n");
+    
     // Run requested benchmarks
     bool run_stats = (benchmark_type == BenchmarkType::Stats || benchmark_type == BenchmarkType::All);
     bool run_anns = (benchmark_type == BenchmarkType::ANNS || benchmark_type == BenchmarkType::All);
@@ -265,7 +274,7 @@ int main(int argc, char* argv[]) {
         }
         fmt::print("Loaded ground truth for {} queries\n", ground_truth.size());
         
-        deglib::benchmark::test_graph_anns(graph, query_repository, ground_truth, repeat, test_threads, k, eps_parameter);
+        deglib::benchmark::test_graph_anns(graph, query_repository, ground_truth, repeat, test_threads, k, eps_parameter, nullptr, linear_baseline_us);
         fmt::print("\n");
     }
     
@@ -291,7 +300,7 @@ int main(int argc, char* argv[]) {
         }
         fmt::print("Loaded exploration ground truth for {} entries\n", explore_gt.size());
         
-        deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, true, repeat, explore_k, test_threads, nullptr, ds.info().explore_depth);
+        deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, true, repeat, explore_k, test_threads, nullptr, ds.info().explore_depth, linear_baseline_us);
         fmt::print("\n");
     }
     

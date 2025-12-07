@@ -627,8 +627,7 @@ int main(int argc, char *argv[]) {
         
         // Compute linear search baseline for early abort
         log("\n--- Computing Linear Search Baseline ---\n");
-        const uint32_t baseline_k = std::max(config.create_graph.anns_k, config.create_graph.explore_k);
-        linear_baseline_us = deglib::benchmark::compute_linear_search_baseline(*base_repository, *query_repository, config.metric, baseline_k, 100) / 2;
+        linear_baseline_us = deglib::benchmark::compute_linear_search_baseline(*base_repository, config.metric, 100);
     }
 
     // Execute tests based on test_type_arg
