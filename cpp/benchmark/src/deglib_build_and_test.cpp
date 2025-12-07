@@ -443,15 +443,15 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
         
     } else if (dataset_name == DatasetName::GLOVE) {
         conf.create_graph.lid = deglib::builder::OptimizationTarget::HighLID;
-        conf.create_graph.eps_parameter = { 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f, 1.2f };
+        conf.create_graph.eps_parameter = { 0.01f, 0.05f, 0.10f, 0.15f, 0.2f, 0.3f };
 
         conf.optimize_graph.total_iterations = 2000000;
 
         conf.all_schemes_test.eps_parameter = {
-            { deglib::builder::OptimizationTarget::LowLID,    { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
-            { deglib::builder::OptimizationTarget::HighLID,   { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
-            { deglib::builder::OptimizationTarget::SchemeA,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
-            { deglib::builder::OptimizationTarget::SchemeB,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } }
+            { deglib::builder::OptimizationTarget::LowLID,    { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f } },
+            { deglib::builder::OptimizationTarget::HighLID,   { 0.01f, 0.05f, 0.10f, 0.15f, 0.2f, 0.3f } },
+            { deglib::builder::OptimizationTarget::SchemeA,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f } },
+            { deglib::builder::OptimizationTarget::SchemeB,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f } }
         }; 
         
     } else if (dataset_name == DatasetName::DEEP1M) {

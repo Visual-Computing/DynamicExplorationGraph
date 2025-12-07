@@ -179,7 +179,7 @@ inline DatasetInfo make_dataset_info(const DatasetName& ds) {
         info.query_count = 10000;
         info.dims = 100;
         info.scale = 100;
-        info.explore_depth = 3;
+        info.explore_depth = 2;
     } else if (ds == DatasetName::AUDIO) {
         info.download_url = "https://static.visual-computing.com/paper/DEG/audio.tar.gz";
         info.base_count = 53387;
