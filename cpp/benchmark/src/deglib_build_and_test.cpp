@@ -471,7 +471,7 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
         conf.create_graph.k = 20;
         conf.create_graph.k_ext = 40;
         conf.create_graph.anns_repeat = 50;
-        conf.create_graph.eps_parameter =  { 0.00f, 0.03f, 0.05f, 0.07f, 0.09f, 0.12f, 0.2f, 0.3f };
+        conf.create_graph.eps_parameter =  { 0.00f, 0.03f, 0.05f, 0.07f, 0.09f, 0.12f, 0.2f };
 
         conf.optimize_graph.k_opt = 20;
         conf.optimize_graph.total_iterations = 20000;
@@ -601,6 +601,7 @@ int main(int argc, char *argv[]) {
     std::unique_ptr<deglib::StaticFeatureRepository> base_repository;
     std::unique_ptr<deglib::StaticFeatureRepository> query_repository;
     uint32_t dims = 0;
+    uint64_t linear_baseline_us = 0;  // Baseline time per query for early abort
     
     if(do_run) {
         // Setup dataset (downloads, extracts, generates ground truth if needed)
@@ -623,6 +624,11 @@ int main(int argc, char *argv[]) {
         
         log("Loaded {} features with {} dimensions\n", base_repository->size(), dims);
         log("Loaded {} queries\n", query_repository->size());
+        
+        // Compute linear search baseline for early abort
+        log("\n--- Computing Linear Search Baseline ---\n");
+        const uint32_t baseline_k = std::max(config.create_graph.anns_k, config.create_graph.explore_k);
+        linear_baseline_us = deglib::benchmark::compute_linear_search_baseline(*base_repository, *query_repository, config.metric, baseline_k, 100) / 2;
     }
 
     // Execute tests based on test_type_arg
@@ -678,7 +684,7 @@ int main(int argc, char *argv[]) {
                         auto ground_truth = ds.load_groundtruth(cg.anns_k, false);
                         wait_before_test();
                         deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                            cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
+                            cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter, nullptr, linear_baseline_us);
                     }
                     
                     // 3. Exploration Test
@@ -688,7 +694,7 @@ int main(int argc, char *argv[]) {
                         auto explore_gt = ds.load_explore_groundtruth(cg.explore_k);
                         wait_before_test();
                         deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
-                            true, cg.explore_repeat, cg.explore_k, cg.explore_threads, nullptr, ds.info().explore_depth);
+                            true, cg.explore_repeat, cg.explore_k, cg.explore_threads, nullptr, ds.info().explore_depth, linear_baseline_us);
                     }
 
                     // 4. k-Sweep Test
@@ -698,7 +704,7 @@ int main(int argc, char *argv[]) {
                         auto gt_k = ds.load_groundtruth(k_val, false);
                         wait_before_test();
                         deglib::benchmark::test_graph_anns(graph, *query_repository, gt_k, 
-                            cg.anns_repeat, cg.anns_threads, k_val, cg.eps_parameter);
+                            cg.anns_repeat, cg.anns_threads, k_val, cg.eps_parameter, nullptr, linear_baseline_us);
                     }
                 }
                 
@@ -776,7 +782,7 @@ int main(int argc, char *argv[]) {
                             auto ground_truth = ds.load_groundtruth(cg.anns_k, false);
                             wait_before_test();
                             deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                                cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
+                                cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter, nullptr, linear_baseline_us);
                         }
                         
                         // 3. Exploration Test with Top-1000
@@ -786,7 +792,7 @@ int main(int argc, char *argv[]) {
                             auto explore_gt = ds.load_explore_groundtruth(cg.explore_k);
                             wait_before_test();
                             deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
-                                true, cg.explore_repeat, cg.explore_k, cg.explore_threads, nullptr, ds.info().explore_depth);
+                                true, cg.explore_repeat, cg.explore_k, cg.explore_threads, nullptr, ds.info().explore_depth, linear_baseline_us);
                         }
                     }
                 }
@@ -852,7 +858,7 @@ int main(int argc, char *argv[]) {
                     
                     wait_before_test();
                     deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                        cg.anns_repeat, cg.anns_threads, cg.anns_k, scheme_eps);
+                        cg.anns_repeat, cg.anns_threads, cg.anns_k, scheme_eps, nullptr, linear_baseline_us);
                 } else {
                     log("ERROR: Graph file not found after build attempt: {}\n", graph_path);
                 }
@@ -913,7 +919,7 @@ int main(int argc, char *argv[]) {
                     log("Graph loaded: {} vertices\n", graph.size());
                     wait_before_test();
                     deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                        cg.anns_repeat, cg.anns_threads, cg.anns_k, ks.eps_parameter);
+                        cg.anns_repeat, cg.anns_threads, cg.anns_k, ks.eps_parameter, nullptr, linear_baseline_us);
                 } else {
                     log("ERROR: Graph file not found after build attempt: {}\n", graph_path);
                 }
@@ -971,7 +977,7 @@ int main(int argc, char *argv[]) {
                     log("Graph loaded: {} vertices\n", graph.size());
                     wait_before_test();
                     deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                        cg.anns_repeat, cg.anns_threads, cg.anns_k, kes.eps_parameter);
+                        cg.anns_repeat, cg.anns_threads, cg.anns_k, kes.eps_parameter, nullptr, linear_baseline_us);
                 } else {
                     log("ERROR: Graph file not found after build attempt: {}\n", graph_path);
                 }
@@ -1029,7 +1035,7 @@ int main(int argc, char *argv[]) {
                     log("Graph loaded: {} vertices\n", graph.size());
                     wait_before_test();
                     deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                        cg.anns_repeat, cg.anns_threads, cg.anns_k, ees.eps_parameter);
+                        cg.anns_repeat, cg.anns_threads, cg.anns_k, ees.eps_parameter, nullptr, linear_baseline_us);
                 } else {
                     log("ERROR: Graph file not found after build attempt: {}\n", graph_path);
                 }
@@ -1094,7 +1100,7 @@ int main(int argc, char *argv[]) {
                         
                         wait_before_test();
                         deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                            cg.anns_repeat, cg.anns_threads, cg.anns_k, ss.eps_parameter);
+                            cg.anns_repeat, cg.anns_threads, cg.anns_k, ss.eps_parameter, nullptr, linear_baseline_us);
                     } else {
                         log("Graph file not found: {}\n", graph_path);
                     }
@@ -1183,7 +1189,7 @@ int main(int argc, char *argv[]) {
                     const auto random_graph = deglib::graph::load_readonly_graph(random_graph_path.c_str());
                     wait_before_test();
                     deglib::benchmark::test_graph_anns(random_graph, *query_repository, ground_truth, 
-                        cg.anns_repeat, cg.anns_threads, cg.anns_k, os.eps_parameter);
+                        cg.anns_repeat, cg.anns_threads, cg.anns_k, os.eps_parameter, nullptr, linear_baseline_us);
                 } else {
                     log("Graph file not found: {}\n", random_graph_path);
                 }
@@ -1197,7 +1203,7 @@ int main(int argc, char *argv[]) {
                         const auto opt_graph = deglib::graph::load_readonly_graph(opt_graph_path.c_str());
                         wait_before_test();
                         deglib::benchmark::test_graph_anns(opt_graph, *query_repository, ground_truth, 
-                            cg.anns_repeat, cg.anns_threads, cg.anns_k, os.eps_parameter);
+                            cg.anns_repeat, cg.anns_threads, cg.anns_k, os.eps_parameter, nullptr, linear_baseline_us);
                     } else {
                         log("Graph file not found: {}\n", opt_graph_path);
                     }
@@ -1260,7 +1266,7 @@ int main(int argc, char *argv[]) {
                     log("\n--- Testing graph ---\n");
                     wait_before_test();
                     deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                        cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
+                        cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter, nullptr, linear_baseline_us);
                 } else {
                     log("Graph file not found: {}\n", graph_path);
                 }
@@ -1317,7 +1323,7 @@ int main(int argc, char *argv[]) {
                     auto ground_truth = ds.load_groundtruth(cg.anns_k, false);
                     wait_before_test();
                     deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                        cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
+                        cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter, nullptr, linear_baseline_us);
                 }
                 
                 deglib::benchmark::reset_log_to_console();
@@ -1395,7 +1401,7 @@ int main(int argc, char *argv[]) {
                         auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half);
                         wait_before_test();
                         deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                            cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter);
+                            cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter, nullptr, linear_baseline_us);
                     }
                     
                     // Exploration Test
@@ -1405,7 +1411,7 @@ int main(int argc, char *argv[]) {
                         auto explore_gt = ds.load_explore_groundtruth(cg.explore_k, use_half);
                         wait_before_test();
                         deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
-                            true, cg.explore_repeat, cg.explore_k, cg.explore_threads, nullptr, ds.info().explore_depth);
+                            true, cg.explore_repeat, cg.explore_k, cg.explore_threads, nullptr, ds.info().explore_depth, linear_baseline_us);
                     }
                 } else {
                     log("Graph file not found: {}\n", graph_path);

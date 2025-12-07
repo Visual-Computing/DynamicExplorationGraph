@@ -31,6 +31,92 @@
 namespace deglib::benchmark
 {
 
+/**
+ * @brief Perform linear search to find k nearest neighbors.
+ * 
+ * This is a brute-force search that compares the query against all vectors
+ * in the base repository. Used to establish a baseline time for early abort.
+ * 
+ * @param base_repository The base feature repository to search
+ * @param query Query feature vector
+ * @param k Number of nearest neighbors to find
+ * @param dist_func Distance function
+ * @param dist_func_param Parameter for distance function (typically dimension)
+ * @return Priority queue with k nearest neighbors
+ */
+static deglib::search::ResultSet linear_search(
+    const deglib::FeatureRepository& base_repository,
+    const std::byte* query,
+    const uint32_t k,
+    const deglib::DISTFUNC<float> dist_func,
+    const void* dist_func_param)
+{
+    auto result_queue = deglib::search::ResultSet();
+    const auto base_size = base_repository.size();
+    
+    for (uint32_t i = 0; i < base_size; i++) {
+        const auto base_feature = base_repository.getFeature(i);
+        const auto dist = dist_func(query, base_feature, dist_func_param);
+        
+        if (result_queue.size() < k) {
+            result_queue.emplace(i, dist);
+        } else if (dist < result_queue.top().getDistance()) {
+            result_queue.pop();
+            result_queue.emplace(i, dist);
+        }
+    }
+    
+    return result_queue;
+}
+
+/**
+ * @brief Compute baseline time per query using linear search.
+ * 
+ * Performs linear search on a sample of queries to establish the worst-case
+ * baseline time. This baseline is used for early abort in graph search tests.
+ * 
+ * @param base_repository The base feature repository
+ * @param query_repository The query feature repository
+ * @param metric The distance metric (L2, etc.)
+ * @param k Number of nearest neighbors
+ * @param sample_size Number of queries to sample (default: 100)
+ * @return Average time per query in microseconds for linear search
+ */
+static uint64_t compute_linear_search_baseline(
+    const deglib::FeatureRepository& base_repository,
+    const deglib::FeatureRepository& query_repository,
+    const deglib::Metric metric,
+    const uint32_t k,
+    const uint32_t sample_size = 100)
+{
+    const auto dims = base_repository.dims();
+    const auto feature_space = deglib::FloatSpace(dims, metric);
+    const auto dist_func = feature_space.get_dist_func();
+    const auto dist_func_param = feature_space.get_dist_func_param();
+    
+    const auto query_count = std::min(sample_size, (uint32_t)query_repository.size());
+    
+    log("Computing linear search baseline with {} queries on {} base vectors...\n", query_count, base_repository.size());
+    
+    StopW stopw = StopW();
+    
+    for (uint32_t i = 0; i < query_count; i++) {
+        auto query = reinterpret_cast<const std::byte*>(query_repository.getFeature(i));
+        auto result = linear_search(base_repository, query, k, dist_func, dist_func_param);
+        // Prevent optimizer from removing the computation
+        if (result.size() != k) {
+            fmt::print(stderr, "Linear search returned {} results instead of {}\n", result.size(), k);
+        }
+    }
+    
+    const uint64_t total_time_us = stopw.getElapsedTimeMicro();
+    const uint64_t time_per_query_us = total_time_us / query_count;
+    
+    log("Linear search baseline: {}us per query (total: {}ms for {} queries)\n", time_per_query_us, total_time_us / 1000, query_count);
+    
+    return time_per_query_us;
+}
+
 static float test_approx_anns(const deglib::search::SearchGraph& graph, const std::vector<uint32_t>& entry_vertex_indices,
                          const deglib::FeatureRepository& query_repository, const std::vector<std::vector<uint32_t>>& ground_truth, 
                          const float eps, const uint32_t k, const uint32_t test_size, const uint32_t threads, const deglib::graph::Filter* filter = nullptr)
@@ -151,21 +237,43 @@ static std::vector<float> estimate_recall(const deglib::search::SearchGraph& gra
  * @param k Number of nearest neighbors to find
  * @param eps_parameter Vector of epsilon values to test
  * @param filter Optional filter
+ * @param linear_baseline_us Optional baseline time per query (linear search). If > 0, enables early abort.
+ * @param abort_sample_size Number of queries to check before deciding to abort (default: 100)
  */
 static void test_graph_anns(const deglib::search::SearchGraph& graph, const deglib::FeatureRepository& query_repository, 
                             const std::vector<std::vector<uint32_t>>& ground_truth,
                             const uint32_t repeat, const uint32_t threads, const uint32_t k, 
                             const std::vector<float>& eps_parameter,
-                            const deglib::graph::Filter* filter = nullptr)
+                            const deglib::graph::Filter* filter = nullptr,
+                            const uint64_t linear_baseline_us = 0,
+                            const uint32_t abort_sample_size = 100)
 {
     // reproduceable entry point for the graph search
     const auto entry_vertex_indices = graph.getEntryVertexIndices();
     log("internal id {} \n", entry_vertex_indices[0]);
 
     log("Compute TOP{} for eps {}\n", k, fmt::join(eps_parameter, ", "));
+    if (linear_baseline_us > 0) {
+        log("Early abort enabled: baseline {}us/query, checking after {} queries\n", linear_baseline_us, abort_sample_size);
+    }
+    
     const auto test_size = uint32_t(query_repository.size());
     for (float eps : eps_parameter)
     {
+        // Early abort check: run a small sample first
+        if (linear_baseline_us > 0 && test_size > abort_sample_size) {
+            const auto sample_size = std::min(abort_sample_size, test_size);
+            StopW sample_stopw = StopW();
+            test_approx_anns(graph, entry_vertex_indices, query_repository, ground_truth, eps, k, sample_size, threads, filter);
+            const uint64_t sample_time_us = sample_stopw.getElapsedTimeMicro();
+            const uint64_t sample_time_per_query = sample_time_us / sample_size;
+            
+            if (sample_time_per_query > linear_baseline_us) {
+                log("eps {:.3f} \t ABORTED ({}us/query > {}us baseline after {} queries)\n", eps, sample_time_per_query, linear_baseline_us, sample_size);
+                continue;  // Skip to next eps value
+            }
+        }
+        
         StopW stopw = StopW();
         float recall = 0;
         for (size_t i = 0; i < repeat; i++) 
@@ -195,6 +303,8 @@ static void test_graph_anns(const deglib::search::SearchGraph& graph, const degl
  * @param threads Number of threads
  * @param filter Optional filter
  * @param explore_depth Exploration depth for max_distance_count scaling
+ * @param linear_baseline_us Optional baseline time per query (linear search). If > 0, enables early abort.
+ * @param abort_sample_size Number of queries to check before deciding to abort (default: 100)
  */
 static void test_graph_explore(const deglib::search::SearchGraph& graph,
                                const std::vector<uint32_t>& entry_vertex_labels,
@@ -202,7 +312,9 @@ static void test_graph_explore(const deglib::search::SearchGraph& graph,
                                const boolean include_entry,
                                const uint32_t repeat, const uint32_t k, const uint32_t threads,
                                const deglib::graph::Filter* filter = nullptr,
-                               const uint32_t explore_depth = 3)
+                               const uint32_t explore_depth = 3,
+                               const uint64_t linear_baseline_us = 0,
+                               const uint32_t abort_sample_size = 100)
 {
     if (entry_vertex_labels.size() != ground_truth.size()) {
         fmt::print(stderr, "Entry vertex count {} does not match ground truth count {}\n", 
@@ -218,17 +330,38 @@ static void test_graph_explore(const deglib::search::SearchGraph& graph,
         entry_vertex_indices[i].push_back(graph.getInternalIndex(entry_vertex_labels[i]));
     }
 
+    if (linear_baseline_us > 0) {
+        log("Early abort enabled: baseline {}us/query, checking after {} queries\n", linear_baseline_us, abort_sample_size);
+    }
+
     // try different max_distance_count values
     uint32_t k_factor = 100;
     for (uint32_t f = 0; f <= explore_depth; f++, k_factor *= 10) {
         for (uint32_t i = (f == 0) ? 1 : 2; i < 11; i++) {         
             const auto max_distance_count = ((f == 0) ? (k + k_factor * (i-1)) : (k_factor * i));
 
+            // Early abort check: run a small sample first
+            if (linear_baseline_us > 0 && query_count > abort_sample_size) {
+                const auto sample_size = std::min(abort_sample_size, query_count);
+                
+                // Create a subset of entry indices for sampling
+                auto sample_entry_indices = std::vector<std::vector<uint32_t>>(entry_vertex_indices.begin(), entry_vertex_indices.begin() + sample_size);
+                auto sample_ground_truth = std::vector<std::vector<uint32_t>>(ground_truth.begin(), ground_truth.begin() + sample_size);                
+                StopW sample_stopw = StopW();
+                test_approx_explore(graph, sample_entry_indices, include_entry, sample_ground_truth, k, max_distance_count, threads, filter);
+                const uint64_t sample_time_us = sample_stopw.getElapsedTimeMicro();
+                const uint64_t sample_time_per_query = sample_time_us / sample_size;
+                
+                if (sample_time_per_query > linear_baseline_us) {
+                    log("max_distance_count {:5}, k {:4}, ABORTED ({}us/query > {}us baseline after {} queries)\n", max_distance_count, k, sample_time_per_query, linear_baseline_us, sample_size);
+                    continue;  // Skip to next max_distance_count value
+                }
+            }
+
             StopW stopw = StopW();
             float recall = 0;
             for (size_t r = 0; r < repeat; r++) 
-                recall = deglib::benchmark::test_approx_explore(graph, entry_vertex_indices, include_entry, 
-                                                                 ground_truth, k, max_distance_count, threads, filter);
+                recall = deglib::benchmark::test_approx_explore(graph, entry_vertex_indices, include_entry, ground_truth, k, max_distance_count, threads, filter);
             uint64_t search_time_us = stopw.getElapsedTimeMicro();
             uint64_t time_us_per_query = search_time_us / (query_count * repeat);
 
