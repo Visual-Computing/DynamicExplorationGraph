@@ -646,7 +646,7 @@ int main(int argc, char *argv[]) {
         
         // Compute linear search baseline for early abort
         log("\n--- Computing Linear Search Baseline ---\n");
-        linear_baseline_us = deglib::benchmark::compute_linear_search_baseline(*base_repository, config.metric, 100);
+        linear_baseline_us = deglib::benchmark::compute_linear_search_baseline(*base_repository, config.metric, 100) * 2;
     }
 
     // Execute tests based on test_type_arg

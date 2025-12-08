@@ -236,7 +236,7 @@ int main(int argc, char* argv[]) {
     fmt::print("Loaded {} base vectors\n", base_repository.size());
     
     fmt::print("\n--- Computing Linear Search Baseline ---\n");
-    uint64_t linear_baseline_us = deglib::benchmark::compute_linear_search_baseline(base_repository, deglib::Metric::L2, 100);
+    uint64_t linear_baseline_us = deglib::benchmark::compute_linear_search_baseline(base_repository, deglib::Metric::L2, 100) * 2;
     fmt::print("\n");
     
     // Run requested benchmarks
