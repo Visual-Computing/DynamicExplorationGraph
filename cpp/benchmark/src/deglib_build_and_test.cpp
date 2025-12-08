@@ -116,7 +116,6 @@ struct AllSchemesTest {
  */
 struct KSweepTest {
     std::vector<uint8_t> k_values = {20, 30, 40, 50, 60, 70, 80, 90};  // k values to test
-    std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.16f, 0.2f };
 };
 
 /**
@@ -125,7 +124,6 @@ struct KSweepTest {
  */
 struct KExtSweepTest {
     std::vector<uint8_t> k_ext_values = {30, 40, 50, 60, 90};  // k_ext values to test
-    std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.16f, 0.2f};
 };
 
 /**
@@ -134,7 +132,6 @@ struct KExtSweepTest {
  */
 struct EpsExtSweepTest {
     std::vector<float> eps_ext_values = {0.0f, 0.05f, 0.1f, 0.2f, 0.3f};  // eps_ext values to test
-    std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.16f, 0.2f};
 };
 
 /**
@@ -145,7 +142,6 @@ struct EpsExtSweepTest {
  */
 struct SizeScalingTest {
     uint32_t size_interval = 100000;  // Build graphs at this interval (e.g., 200k, 400k, ...)
-    std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.16f, 0.2f };
 };
 
 /**
@@ -937,7 +933,7 @@ int main(int argc, char *argv[]) {
                     log("Graph loaded: {} vertices\n", graph.size());
                     wait_before_test();
                     deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                        cg.anns_repeat, cg.anns_threads, cg.anns_k, ks.eps_parameter, nullptr, linear_baseline_us);
+                        cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter, nullptr, linear_baseline_us);
                 } else {
                     log("ERROR: Graph file not found after build attempt: {}\n", graph_path);
                 }
@@ -995,7 +991,7 @@ int main(int argc, char *argv[]) {
                     log("Graph loaded: {} vertices\n", graph.size());
                     wait_before_test();
                     deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                        cg.anns_repeat, cg.anns_threads, cg.anns_k, kes.eps_parameter, nullptr, linear_baseline_us);
+                        cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter, nullptr, linear_baseline_us);
                 } else {
                     log("ERROR: Graph file not found after build attempt: {}\n", graph_path);
                 }
@@ -1053,7 +1049,7 @@ int main(int argc, char *argv[]) {
                     log("Graph loaded: {} vertices\n", graph.size());
                     wait_before_test();
                     deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                        cg.anns_repeat, cg.anns_threads, cg.anns_k, ees.eps_parameter, nullptr, linear_baseline_us);
+                        cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter, nullptr, linear_baseline_us);
                 } else {
                     log("ERROR: Graph file not found after build attempt: {}\n", graph_path);
                 }
@@ -1118,7 +1114,7 @@ int main(int argc, char *argv[]) {
                         
                         wait_before_test();
                         deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                            cg.anns_repeat, cg.anns_threads, cg.anns_k, ss.eps_parameter, nullptr, linear_baseline_us);
+                            cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter, nullptr, linear_baseline_us);
                     } else {
                         log("Graph file not found: {}\n", graph_path);
                     }
