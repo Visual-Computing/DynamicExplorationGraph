@@ -131,7 +131,7 @@ int main(int argc, char* argv[]) {
     uint32_t repeat = 1;                                                // Test repetitions
     uint32_t analysis_threads = std::thread::hardware_concurrency() / 2;    // Threads for graph analysis (default: all CPU threads)
     uint32_t test_threads = 1;                                          // Threads for ANNS/exploration tests (default: 1)
-    std::vector<float> eps_parameter = { 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f };
+    std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f };
     bool use_half_gt = false;                                           // Use half dataset ground truth
     bool compute_search_reach = false;                                  // Compute search reachability (expensive)
     bool compute_exploration_reach = false;                             // Compute exploration reachability (expensive)

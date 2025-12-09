@@ -426,7 +426,7 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
     conf.dataset_name = dataset_name;
 
     if (dataset_name == DatasetName::SIFT1M) {
-        conf.create_graph.eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f };
+        conf.create_graph.eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f };
 
         conf.optimize_graph.total_iterations = 200000;
 
