@@ -225,13 +225,16 @@ static void test_graph_anns(const deglib::search::SearchGraph& graph, const degl
     const auto entry_vertex_indices = graph.getEntryVertexIndices();
     log("internal id {} \n", entry_vertex_indices[0]);
 
-    log("Compute TOP{} for eps {}\n", k, fmt::join(eps_parameter, ", "));
+    //sort eps_parameter
+    std::vector<float> eps_parameter_sorted = eps_parameter;
+    std::sort(eps_parameter_sorted.begin(), eps_parameter_sorted.end());
+    log("Compute TOP{} for eps {}\n", k, fmt::join(eps_parameter_sorted, ", "));
     if (linear_baseline_us > 0) {
         log("Early abort enabled: baseline {}us/query, checking after {} queries\n", linear_baseline_us, abort_sample_size);
     }
     
     const auto test_size = uint32_t(query_repository.size());
-    for (float eps : eps_parameter)
+    for (float eps : eps_parameter_sorted)
     {
         // Early abort check: run a small sample first
         if (linear_baseline_us > 0 && test_size > abort_sample_size) {
@@ -255,8 +258,10 @@ static void test_graph_anns(const deglib::search::SearchGraph& graph, const degl
         uint64_t time_us_per_query = (search_time_us / test_size) / repeat;
 
         log("eps {:.3f} \t recall {:.5f} \t time_us_per_query {:6}us \t search time: {:6}ms\n", eps, recall, time_us_per_query, search_time_us / 1000);
-        if (recall > 1.0)
+        if (recall > 0.995) {
+            log("Reached recall > 0.995, stopping further tests.\n");
             break;
+        }
     }
 
     log("Actual memory usage: {} Mb\n", getCurrentRSS() / 1000000);
@@ -340,8 +345,10 @@ static void test_graph_explore(const deglib::search::SearchGraph& graph,
 
             log("max_distance_count {:5}, k {:4}, recall {:.5f}, time_us_per_query {:4}us \t search time: {:6}ms\n", 
                 max_distance_count, k, recall, time_us_per_query, search_time_us / 1000);
-            if (recall > 1.0)
+            if (recall > 0.995) {
+                log("Reached recall > 0.995, stopping further tests.\n");
                 break;
+            }
         }
     }
 
