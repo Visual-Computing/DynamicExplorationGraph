@@ -131,7 +131,7 @@ struct KExtSweepTest {
  * Builds graphs in "epsExtScaling" subdirectory.
  */
 struct EpsExtSweepTest {
-    std::vector<float> eps_ext_values = {0.0f, 0.05f, 0.1f, 0.2f, 0.3f};  // eps_ext values to test
+    std::vector<float> eps_ext_values = {0.0f, 0.1f, 0.2f, 0.3f};  // eps_ext values to test
 };
 
 /**
@@ -166,7 +166,7 @@ struct OptScalingTest {
  * Uses CreateGraphTest parameters for graph construction.
  */
 struct ThreadScalingTest {
-    std::vector<uint32_t> thread_counts = {1, 2, 4, 8, 16};  // Number of threads to test
+    std::vector<uint32_t> thread_counts = {1, 2, 4, 8, 16, 32};  // Number of threads to test
 };
 
 /**
