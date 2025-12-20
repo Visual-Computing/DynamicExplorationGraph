@@ -974,16 +974,21 @@ class EvenRegularGraphBuilder {
       }
 
       // 2.2 get all isolated vertices
-      auto isolated_groups = std::unordered_set<std::shared_ptr<ReachableGroup>>();	
-      for(const auto group : unique_groups) {
+      auto isolated_groups = std::vector<std::shared_ptr<ReachableGroup>>();	
+      isolated_groups.reserve(unique_groups.size());
+      for(const auto& group : unique_groups) {
         if(group->size() == 1)
-          isolated_groups.emplace(group);
+          isolated_groups.emplace_back(group);
       }
       
-
+      // Sort isolated groups deterministically by vertex index
+      std::sort(isolated_groups.begin(), isolated_groups.end(), [](const auto& a, const auto& b) {
+          return a->getVertexIndex() < b->getVertexIndex();
+      });
+      
       // 2.3 find for every isolated vertex the best other involved vertex which is part of a bigger unique group      
       auto new_edges = std::vector<GraphEdge>();
-      for(const auto isolated_group : isolated_groups) {
+      for(const auto& isolated_group : isolated_groups) {
 
         // are you no longer isolated?
         if(isolated_group->size() > 1)
@@ -1011,6 +1016,13 @@ class EvenRegularGraphBuilder {
               best_candidate_distance = distance;
               best_candidate_index = candidate;
               best_candidate_group = candidate_group.get();
+            }
+            // Deterministic tie-breaking: prefer smaller vertex index
+            else if (distance == best_candidate_distance) {
+              if (candidate < best_candidate_index) {
+                best_candidate_index = candidate;
+                best_candidate_group = candidate_group.get();
+              }
             }
           }
         }
@@ -1040,7 +1052,9 @@ class EvenRegularGraphBuilder {
 
       // Define a custom comparison function based on the size of the sets
       auto compareBySize = [](const std::shared_ptr<deglib::builder::ReachableGroup>& a, const std::shared_ptr<deglib::builder::ReachableGroup>& b) {
-          return a->getMissingEdgeSize() < b->getMissingEdgeSize(); // < is ascending, > is descending
+          if (a->getMissingEdgeSize() != b->getMissingEdgeSize())
+              return a->getMissingEdgeSize() < b->getMissingEdgeSize(); // < is ascending
+          return a->getVertexIndex() < b->getVertexIndex(); // Deterministic tie-breaker
       };
 
       // Sort the groups by size in ascending order
@@ -1053,14 +1067,14 @@ class EvenRegularGraphBuilder {
         auto& reachable_vertices = reachable_group.getMissingEdges();
         auto& other_vertices = other_group.getMissingEdges();
 
-        auto best_other_it = reachable_vertices.begin();
-        auto best_reachable_it = reachable_vertices.begin();
+        uint32_t best_reachable_index = 0;
+        uint32_t best_other_index = 0;
         auto best_other_distance = std::numeric_limits<float>::max();
 
         // iterate over all its entries to find a vertex which is still missing an edge
-        for(auto reachable_it = reachable_vertices.begin(); reachable_it != reachable_vertices.end(); ++reachable_it) {
-          const auto reachable_index = *reachable_it;
+        for(const auto reachable_index : reachable_vertices) {
           const auto reachable_feature = graph.getFeatureVector(reachable_index);
+
 
           // find another vertex in a smaller group, also missing an edge			
           // the other vertex and reachable_index can not share an edge yet, otherwise they would be in the same group due to step 2.1           
@@ -1070,16 +1084,23 @@ class EvenRegularGraphBuilder {
             const auto candidate_dist = dist_func(reachable_feature, other_feature, dist_func_param);
 
             if(candidate_dist < best_other_distance) {
-              best_other_it = other_it;
-              best_reachable_it = reachable_it;
+              best_reachable_index = reachable_index;
+              best_other_index = other_index;
               best_other_distance = candidate_dist;
+            }
+            // Deterministic tie-breaking
+            else if (candidate_dist == best_other_distance) {
+              if (reachable_index < best_reachable_index || (reachable_index == best_reachable_index && other_index < best_other_index)) {
+                best_reachable_index = reachable_index;
+                best_other_index = other_index;
+              }
             }
           }
         }
 
         // connect reachable_index and other_index
-        const auto reachable_index = *best_reachable_it;
-        const auto other_index = *best_other_it;
+        const auto reachable_index = best_reachable_index;
+        const auto other_index = best_other_index;
         graph.changeEdge(reachable_index, reachable_index, other_index, best_other_distance);
         graph.changeEdge(other_index, other_index, reachable_index, best_other_distance);
 
