@@ -562,7 +562,7 @@ class EvenRegularGraphBuilder {
             continue;
 
           // the vertex is already missing an edge (one of its longer edges was removed during a previous iteration), 
-          // just add an new edge between the candidate and the new vertex
+          // just add a new edge between the candidate and the new vertex
           if(graph.hasEdge(candidate_index, candidate_index)) {
             graph.changeEdge(candidate_index, candidate_index, internal_index, candidate_weight);
             graph.changeEdge(internal_index, internal_index, candidate_index, candidate_weight);
@@ -570,7 +570,7 @@ class EvenRegularGraphBuilder {
             continue;
           }
 
-          // This version is good for high OptimizationTarget datasets or small graphs with low distance count limit during ANNS
+          // This version is good for high LID datasets or small graphs with a lot of equidistant vertices during ANNS
           uint32_t new_neighbor_index = 0;
           {
             // find the worst edge of the new neighbor
@@ -589,7 +589,7 @@ class EvenRegularGraphBuilder {
               if(graph.hasEdge(neighbor_index, neighbor_index)) 
                 continue;
 
-              // find heightest weighted neighbor
+              // find highest weighted neighbor
               const auto neighbor_weight = neighbor_weights[edge_idx];
               if(neighbor_weight > new_neighbor_weight) {
                 new_neighbor_weight = neighbor_weight;
@@ -881,6 +881,19 @@ class EvenRegularGraphBuilder {
     void restoreGraph(const std::vector<uint32_t>& involved_indices, bool improve_edges) {
       auto& graph = this->graph_;
       const auto edges_per_vertex = std::min(graph.size(), uint32_t(graph.getEdgesPerVertex()));
+      const auto& feature_space = graph.getFeatureSpace();
+      const auto dist_func = feature_space.get_dist_func();
+      const auto dist_func_param = feature_space.get_dist_func_param();
+
+      // Shortcut if its only two involved vertices: just connect them
+      if(involved_indices.size() == 2) {
+        const auto vertex_a = involved_indices[0];
+        const auto vertex_b = involved_indices[1];
+        const auto distance = dist_func(graph.getFeatureVector(vertex_a), graph.getFeatureVector(vertex_b), dist_func_param);
+        graph.changeEdge(vertex_a, vertex_a, vertex_b, distance);
+        graph.changeEdge(vertex_b, vertex_b, vertex_a, distance);        
+        return;
+      }
       
       // 2 find pairs or groups of vertices which can reach each other		
 		  auto unique_groups = std::unordered_set<std::shared_ptr<ReachableGroup>>();	
@@ -962,18 +975,17 @@ class EvenRegularGraphBuilder {
 
       // 2.2 get all isolated vertices
       auto isolated_groups = std::unordered_set<std::shared_ptr<ReachableGroup>>();	
-      for(const auto group : unique_groups)
+      for(const auto group : unique_groups) {
         if(group->size() == 1)
           isolated_groups.emplace(group);
+      }
+      
 
-      // 2.3 find for every isolated vertex the best other involved vertex which is part of a unique group      
+      // 2.3 find for every isolated vertex the best other involved vertex which is part of a bigger unique group      
       auto new_edges = std::vector<GraphEdge>();
-      const auto& feature_space = graph.getFeatureSpace();
-      const auto dist_func = feature_space.get_dist_func();
-      const auto dist_func_param = feature_space.get_dist_func_param();
       for(const auto isolated_group : isolated_groups) {
 
-        // are you still isolated?
+        // are you no longer isolated?
         if(isolated_group->size() > 1)
           continue;
 
@@ -1003,6 +1015,13 @@ class EvenRegularGraphBuilder {
           }
         }
 
+        // important: should never happen, otherwise the graph is broken
+        if(best_candidate_group == nullptr) {
+          std::fprintf(stderr, "could not find a candidate to reconnect isolated vertex %u \n", isolated_vertex);
+          std::perror("");
+          std::abort();
+        }
+
         // found a good candidate, add the isolated vertex to its reachable group and an edge between them
         graph.changeEdge(isolated_vertex, isolated_vertex, best_candidate_index, best_candidate_distance);
         graph.changeEdge(best_candidate_index, best_candidate_index, isolated_vertex, best_candidate_distance);
@@ -1027,7 +1046,7 @@ class EvenRegularGraphBuilder {
       // Sort the groups by size in ascending order
       std::sort(reachable_groups.begin(), reachable_groups.end(), compareBySize);
 
-      // 3.1 Find the biggest group and one of its vertices to one vertex of a smaller group. Repeat until only one group is left.
+      // 3.1 Find the biggest group and connect one of its vertices to one vertex of a smaller group. Repeat until only one group is left.
       while(reachable_groups.size() >= 2) {
         auto& reachable_group = *reachable_groups[reachable_groups.size()-1];
         auto& other_group = *reachable_groups[reachable_groups.size()-2];
