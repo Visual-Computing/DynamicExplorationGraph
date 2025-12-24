@@ -392,13 +392,9 @@ inline std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(
     };
 
     uint32_t current_count = 0;
-
-    for(uint32_t target_size : target_sizes) {
-        std::string size_str = std::to_string(target_size / 1000) + "k";
-        std::string graph_file = fmt::format("{}/{}_{}.deg", output_dir, graph_name_base, size_str);
+    for(const auto& [graph_file, target_size] : result_files) {
         
         // Add data up to target size
-        log("Adding data from {} to {}\n", current_count, target_size);
         for (uint32_t i = current_count; i < target_size; i++) {
             auto feature = repository.getFeature(i);
             auto feature_vector = std::vector<std::byte>{feature, feature + feature_byte_size};
@@ -407,16 +403,12 @@ inline std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(
         current_count = target_size;
 
         // Build the graph
+        start = std::chrono::steady_clock::now();
         builder.build(improvement_callback, false);
-        log("Built graph with {} vertices in {} secs\n", target_size, duration_ms / 1000);
 
         // Save only if file doesn't exist
-        if(!std::filesystem::exists(graph_file)) {
+        if(!std::filesystem::exists(graph_file))
             graph.saveGraph(graph_file.c_str());
-            log("Saved graph: {}, non-RNG edges: {}\n", graph_file, deglib::analysis::calc_non_rng_edges(graph));
-        } else {
-            log("Graph already exists, skipping save: {}\n", graph_file);
-        }
     }
 
     return result_files;
@@ -455,73 +447,75 @@ inline std::vector<std::pair<std::string, uint32_t>> reduce_graph_incremental(
     
     // Collect target sizes exactly as in create_incremental_graphs
     std::vector<uint32_t> target_sizes;
-    for(uint32_t size = step_size; size < total_size; size += step_size) {
+    for(uint32_t size = 0; size < total_size; size += step_size) {
         target_sizes.push_back(size);
     }
-    // Always include total_size as the last entry
-    if(target_sizes.empty() || target_sizes.back() != total_size) {
-        target_sizes.push_back(total_size);
-    }
-    
+
     // We process in reverse order (largest to smallest)
     std::reverse(target_sizes.begin(), target_sizes.end());
+    
+    // Build result_files list and check if all exist
+    bool all_exist = true;
+    for(uint32_t size : target_sizes) {
+        std::string size_str = std::to_string(size / 1000) + "k";
+        std::string graph_file = fmt::format("{}/{}_{}.deg", output_dir, graph_name_base, size_str);
+        result_files.push_back({graph_file, size});
+        
+        if(!std::filesystem::exists(graph_file)) {
+            all_exist = false;
+        }
+    }
 
-    // Setup builder for removal
+    // If all graphs exist, return early
+    if(all_exist) {
+        log("All {} reduced graphs already exist, skipping reduction\n", result_files.size());
+        return result_files;
+    }
+    
+
+    // Setup builder for removal (Use default parameters for builder, we only need it for removal and repair)
     auto rnd = std::mt19937(7);
-    // Use default parameters for builder, we only need it for removal and repair
     auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::OptimizationTarget::LowLID, 0, 0, k_opt, eps_opt, i_opt, 0, 0, use_rng);
     builder.setThreadCount(thread_count);
     
-    const auto log_after = 10000; // Log every 10k operations as requested
+    const auto log_after = 50000;
     auto start = std::chrono::steady_clock::now();
     uint64_t duration_ms = 0;
 
-    for(uint32_t target_size : target_sizes) {
-        std::string size_str = std::to_string(target_size / 1000) + "k";
-        std::string graph_file = fmt::format("{}/{}_{}.deg", output_dir, graph_name_base, size_str);
-        
-        // If we are at the current size (e.g. start), just save if needed
-        if (graph.size() == target_size) {
-             if(!std::filesystem::exists(graph_file)) {
-                graph.saveGraph(graph_file.c_str());
-                log("Saved graph: {}\n", graph_file);
-            } else {
-                log("Graph already exists, skipping save: {}\n", graph_file);
-            }
-            result_files.push_back({graph_file, target_size});
-            continue;
-        }
+    const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
+        const auto size = graph.size();
 
-        // Remove vertices down to target_size
-        log("Reducing graph from {} to {}\n", graph.size(), target_size);
-        
+        if(status.step % log_after == 0) {    
+            duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+            auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
+            auto weight_histogram_sorted = deglib::analysis::calc_edge_weight_histogram(graph, true, scale);
+            auto weight_histogram = deglib::analysis::calc_edge_weight_histogram(graph, false, scale);
+            auto valid_weights = deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_regularity(graph, uint32_t(size), true);
+            auto connected = deglib::analysis::check_graph_connectivity(graph);
+            auto duration = duration_ms;
+            log("{:7} vertices, {:8}ms, {:8} / {:8} improv, AEW: {:4.2f} -> Sorted:{:.1f}, InOrder:{:.1f}, {} connected & {}\n", 
+                        size, duration, status.improved, status.tries, avg_edge_weight, fmt::join(weight_histogram_sorted, " "), fmt::join(weight_histogram, " "), connected ? "" : "not", valid_weights ? "valid" : "invalid");
+            start = std::chrono::steady_clock::now();
+        }
+    };
+
+    for(const auto& [graph_file, target_size] : result_files) {
+
         uint32_t current_size = (uint32_t)graph.size();
-        uint32_t removed_count = 0;
         for (uint32_t i = current_size; i > target_size; i--) {
             builder.removeEntry(i - 1);
-            removed_count++;
-            
-            if (removed_count % log_after == 0) {
-                 duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
-                 auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
-                 log("{:7} vertices, {:8}ms, removed {}, AEW: {:4.2f}\n", 
-                        graph.size(), duration_ms, removed_count, avg_edge_weight);
-                 start = std::chrono::steady_clock::now();
-            }
         }
+
+        // Build the graph
+        start = std::chrono::steady_clock::now();
+        builder.build(improvement_callback, false);
         
+        // Save only if file doesn't exist
         if(!std::filesystem::exists(graph_file)) {
             graph.saveGraph(graph_file.c_str());
-            log("Saved graph: {}\n", graph_file);
-        } else {
-            log("Graph already exists, skipping save: {}\n", graph_file);
-        }
-        result_files.push_back({graph_file, target_size});
+        } 
     }
     
-    // Reverse result_files to match the order of create_incremental_graphs (smallest to largest) for testing
-    std::reverse(result_files.begin(), result_files.end());
-
     return result_files;
 }
 
