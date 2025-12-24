@@ -1219,6 +1219,10 @@ int main(int argc, char *argv[]) {
                         if(std::filesystem::exists(graph_path)) {
                             const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
                             
+                            // dont test an empty graph
+                            if(graph.size() == 0)
+                                continue;
+
                             // Load ground truth for this specific size
                             auto ground_truth = ds.load_groundtruth_for_size(cg.anns_k, vertex_count);
                             
