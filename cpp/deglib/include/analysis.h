@@ -46,6 +46,10 @@ namespace deglib::analysis
             return false;
         }
 
+        // an empty graph can not be tested
+        if(vertex_count == 0)
+            return true;
+
         // skip if the graph is too small to check
         auto edges_per_vertex = graph.getEdgesPerVertex();
         if(vertex_count <= edges_per_vertex) {
@@ -260,6 +264,10 @@ namespace deglib::analysis
     static bool check_graph_connectivity(const deglib::search::SearchGraph& graph) {
         const auto vertex_count = graph.size();
         const auto edges_per_vertex = graph.getEdgesPerVertex();
+
+        // an empty graph can not be tested
+        if (vertex_count == 0)
+            return true;
 
         // already checked vertices
         auto checked_ids = std::vector<bool>(vertex_count);
