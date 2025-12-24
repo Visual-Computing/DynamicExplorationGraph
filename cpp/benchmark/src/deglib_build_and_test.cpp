@@ -1481,77 +1481,83 @@ int main(int argc, char *argv[]) {
         if(do_run && base_repository && query_repository) {
             // Ensure dynamic directory exists
             std::filesystem::create_directories(dynamic_dir);
-            
-            for(DataStreamType ds_type : dd.data_stream_types) {
-                std::string graph_path = graph_paths.dynamic_graph_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, 
-                                                                         og.k_opt, og.eps_opt, og.i_opt, ds_type);
-                std::string log_path = graph_paths.dynamic_log_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, 
-                                                                     og.k_opt, og.eps_opt, og.i_opt, ds_type);
-                
-                // Skip if log file already exists
-                if(std::filesystem::exists(log_path)) {
-                    log("{}: Skipping - log file already exists: {}\n", DatasetConfig::data_stream_type_str(ds_type), log_path);
-                    continue;
-                }
-                
-                // Set up log file for this DataStreamType
-                deglib::benchmark::set_log_file(log_path, false);
-                log("\n=== DYNAMIC_DATA Test: {} ===\n", DatasetConfig::data_stream_type_str(ds_type));
-                log("Graph: {}\n", graph_path);
-                
-                // Phase 1: Build graph if it doesn't exist
-                if(std::filesystem::exists(graph_path)) {
-                    log("Graph already exists, skipping build\n");
-                } else {
-                    log("\n--- Building graph with DataStreamType={} ---\n", DatasetConfig::data_stream_type_str(ds_type));
-                    deglib::benchmark::create_graph(
-                        *base_repository, ds_type, graph_path,
-                        config.metric, deglib::builder::OptimizationTarget::StreamingData,
-                        cg.k, cg.k_ext, cg.eps_ext,
-                        og.k_opt, og.eps_opt, og.i_opt,
-                        cg.build_threads, true, ds.info().scale);
-                    log("Graph built and saved: {}\n", graph_path);
-                }
-                
-                // Phase 2: Test the graph
-                if(std::filesystem::exists(graph_path)) {
-                    const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
-                    log("Graph loaded: {} vertices\n", graph.size());
+ 
+            const std::vector<std::tuple<uint8_t, float, uint8_t>> settings = {
+                std::make_tuple(og.k_opt, og.eps_opt, og.i_opt), 
+                std::make_tuple(0, 0, 0), 
+            };
+            for(const auto& [k_opt, eps_opt, i_opt] : settings) {
+                for(DataStreamType ds_type : dd.data_stream_types) {
+                    std::string graph_path = graph_paths.dynamic_graph_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, 
+                                                                            k_opt, eps_opt, i_opt, ds_type);
+                    std::string log_path = graph_paths.dynamic_log_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, 
+                                                                        k_opt, eps_opt, i_opt, ds_type);
                     
-                    // Determine if we need half dataset ground truth based on DataStreamType
-                    bool use_half = (ds_type != DataStreamType::AddAll);
+                    // Skip if log file already exists
+                    if(std::filesystem::exists(log_path)) {
+                        log("{}: Skipping - log file already exists: {}\n", DatasetConfig::data_stream_type_str(ds_type), log_path);
+                        continue;
+                    }
+                    
+                    // Set up log file for this DataStreamType
+                    deglib::benchmark::set_log_file(log_path, false);
+                    log("\n=== DYNAMIC_DATA Test: {} ===\n", DatasetConfig::data_stream_type_str(ds_type));
+                    log("Graph: {}\n", graph_path);
+                    
+                    // Phase 1: Build graph if it doesn't exist
+                    if(std::filesystem::exists(graph_path)) {
+                        log("Graph already exists, skipping build\n");
+                    } else {
+                        log("\n--- Building graph with DataStreamType={} ---\n", DatasetConfig::data_stream_type_str(ds_type));
+                        deglib::benchmark::create_graph(
+                            *base_repository, ds_type, graph_path,
+                            config.metric, deglib::builder::OptimizationTarget::StreamingData,
+                            cg.k, cg.k_ext, cg.eps_ext,
+                            k_opt, eps_opt, i_opt,
+                            cg.build_threads, true, ds.info().scale);
+                        log("Graph built and saved: {}\n", graph_path);
+                    }
+                    
+                    // Phase 2: Test the graph
+                    if(std::filesystem::exists(graph_path)) {
+                        const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
+                        log("Graph loaded: {} vertices\n", graph.size());
+                        
+                        // Determine if we need half dataset ground truth based on DataStreamType
+                        bool use_half = (ds_type != DataStreamType::AddAll);
 
-                    // Graph analysis with base GT (use half for dynamic data)
-                    log("\n--- Graph Analysis ---\n");
-                    {
-                        auto base_gt = ds.load_base_groundtruth(graph.getEdgesPerVertex(), use_half);
-                        deglib::benchmark::analyze_graph(graph, base_gt, true, true, cg.analysis_threads);
+                        // Graph analysis with base GT (use half for dynamic data)
+                        log("\n--- Graph Analysis ---\n");
+                        {
+                            auto base_gt = ds.load_base_groundtruth(graph.getEdgesPerVertex(), use_half);
+                            deglib::benchmark::analyze_graph(graph, base_gt, true, true, cg.analysis_threads);
+                        }
+                        
+                        // ANNS Test
+                        log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
+                        {
+                            auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half);
+                            wait_before_test();
+                            deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
+                                cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter, nullptr, linear_baseline_us);
+                        }
+                        
+                        // Exploration Test
+                        log("\n--- Exploration Test (k={}) ---\n", cg.explore_k);
+                        {
+                            auto entry_vertices = ds.load_explore_entry_vertices();
+                            auto explore_gt = ds.load_explore_groundtruth(cg.explore_k, use_half);
+                            wait_before_test();
+                            deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
+                                true, cg.explore_repeat, cg.explore_k, cg.explore_threads, nullptr, ds.info().explore_depth, linear_baseline_us);
+                        }
+                    } else {
+                        log("Graph file not found: {}\n", graph_path);
                     }
                     
-                    // ANNS Test
-                    log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
-                    {
-                        auto ground_truth = ds.load_groundtruth(cg.anns_k, use_half);
-                        wait_before_test();
-                        deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                            cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter, nullptr, linear_baseline_us);
-                    }
-                    
-                    // Exploration Test
-                    log("\n--- Exploration Test (k={}) ---\n", cg.explore_k);
-                    {
-                        auto entry_vertices = ds.load_explore_entry_vertices();
-                        auto explore_gt = ds.load_explore_groundtruth(cg.explore_k, use_half);
-                        wait_before_test();
-                        deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, 
-                            true, cg.explore_repeat, cg.explore_k, cg.explore_threads, nullptr, ds.info().explore_depth, linear_baseline_us);
-                    }
-                } else {
-                    log("Graph file not found: {}\n", graph_path);
+                    deglib::benchmark::reset_log_to_console();
+                    log("{}: Log written to: {}\n", DatasetConfig::data_stream_type_str(ds_type), log_path);
                 }
-                
-                deglib::benchmark::reset_log_to_console();
-                log("{}: Log written to: {}\n", DatasetConfig::data_stream_type_str(ds_type), log_path);
             }
         }
     }
