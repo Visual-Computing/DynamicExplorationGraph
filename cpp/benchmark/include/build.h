@@ -424,6 +424,109 @@ inline std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(
 
 
 /**
+ * Reduce a graph incrementally by removing vertices and saving checkpoints.
+ * Works in reverse of create_incremental_graphs.
+ * 
+ * @param graph The initial full graph (will be modified).
+ * @param output_dir Directory to save graphs.
+ * @param graph_name_base Base name for graph files.
+ * @param step_size Remove vertices to reach these size intervals.
+ * @param k_opt Optimization neighborhood size.
+ * @param eps_opt Optimization epsilon.
+ * @param i_opt Optimization path length.
+ * @param thread_count Number of threads to use.
+ * @param use_rng Enable RNG (Relative Neighborhood Graph) pruning during graph extension (default: true).
+ * @return Vector of pairs (graph_path, vertex_count) for each graph (existing or newly created).
+ */
+inline std::vector<std::pair<std::string, uint32_t>> reduce_graph_incremental(
+    deglib::graph::SizeBoundedGraph& graph,
+    const std::string& output_dir,
+    const std::string& graph_name_base,
+    const uint32_t step_size,
+    const uint8_t k_opt, 
+    const float eps_opt, 
+    const uint8_t i_opt, 
+    const uint32_t thread_count,
+    const bool use_rng = true,
+    const uint32_t scale = 1) 
+{
+    std::vector<std::pair<std::string, uint32_t>> result_files;
+    const uint32_t total_size = uint32_t(graph.size());
+    
+    // Collect target sizes exactly as in create_incremental_graphs
+    std::vector<uint32_t> target_sizes;
+    for(uint32_t size = step_size; size < total_size; size += step_size) {
+        target_sizes.push_back(size);
+    }
+    // Always include total_size as the last entry
+    if(target_sizes.empty() || target_sizes.back() != total_size) {
+        target_sizes.push_back(total_size);
+    }
+    
+    // We process in reverse order (largest to smallest)
+    std::reverse(target_sizes.begin(), target_sizes.end());
+
+    // Setup builder for removal
+    auto rnd = std::mt19937(7);
+    // Use default parameters for builder, we only need it for removal and repair
+    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::OptimizationTarget::LowLID, 0, 0, k_opt, eps_opt, i_opt, 0, 0, use_rng);
+    builder.setThreadCount(thread_count);
+    
+    const auto log_after = 10000; // Log every 10k operations as requested
+    auto start = std::chrono::steady_clock::now();
+    uint64_t duration_ms = 0;
+
+    for(uint32_t target_size : target_sizes) {
+        std::string size_str = std::to_string(target_size / 1000) + "k";
+        std::string graph_file = fmt::format("{}/{}_{}.deg", output_dir, graph_name_base, size_str);
+        
+        // If we are at the current size (e.g. start), just save if needed
+        if (graph.size() == target_size) {
+             if(!std::filesystem::exists(graph_file)) {
+                graph.saveGraph(graph_file.c_str());
+                log("Saved graph: {}\n", graph_file);
+            } else {
+                log("Graph already exists, skipping save: {}\n", graph_file);
+            }
+            result_files.push_back({graph_file, target_size});
+            continue;
+        }
+
+        // Remove vertices down to target_size
+        log("Reducing graph from {} to {}\n", graph.size(), target_size);
+        
+        uint32_t current_size = (uint32_t)graph.size();
+        uint32_t removed_count = 0;
+        for (uint32_t i = current_size; i > target_size; i--) {
+            builder.removeEntry(i - 1);
+            removed_count++;
+            
+            if (removed_count % log_after == 0) {
+                 duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+                 auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
+                 log("{:7} vertices, {:8}ms, removed {}, AEW: {:4.2f}\n", 
+                        graph.size(), duration_ms, removed_count, avg_edge_weight);
+                 start = std::chrono::steady_clock::now();
+            }
+        }
+        
+        if(!std::filesystem::exists(graph_file)) {
+            graph.saveGraph(graph_file.c_str());
+            log("Saved graph: {}\n", graph_file);
+        } else {
+            log("Graph already exists, skipping save: {}\n", graph_file);
+        }
+        result_files.push_back({graph_file, target_size});
+    }
+    
+    // Reverse result_files to match the order of create_incremental_graphs (smallest to largest) for testing
+    std::reverse(result_files.begin(), result_files.end());
+
+    return result_files;
+}
+
+
+/**
  * Optimize an existing graph by running the builder's improve step.
  * This is a simple optimization function that runs for a specified number of iterations.
  * 
