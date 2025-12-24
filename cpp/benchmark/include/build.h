@@ -377,7 +377,7 @@ inline std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(
     const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
         const auto size = graph.size();
 
-        if(status.step % log_after == 0) {    
+        if(status.added % log_after == 0) {    
             duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
             auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
             auto weight_histogram_sorted = deglib::analysis::calc_edge_weight_histogram(graph, true, scale);
@@ -450,7 +450,11 @@ inline std::vector<std::pair<std::string, uint32_t>> reduce_graph_incremental(
     for(uint32_t size = 0; size < total_size; size += step_size) {
         target_sizes.push_back(size);
     }
-
+     // Always include total_size as the last entry
+    if(target_sizes.empty() || target_sizes.back() != total_size) {
+        target_sizes.push_back(total_size);
+    }
+    
     // We process in reverse order (largest to smallest)
     std::reverse(target_sizes.begin(), target_sizes.end());
     
@@ -485,7 +489,7 @@ inline std::vector<std::pair<std::string, uint32_t>> reduce_graph_incremental(
     const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
         const auto size = graph.size();
 
-        if(status.step % log_after == 0) {    
+        if(status.deleted % log_after == 0) {    
             duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
             auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
             auto weight_histogram_sorted = deglib::analysis::calc_edge_weight_histogram(graph, true, scale);
@@ -501,7 +505,7 @@ inline std::vector<std::pair<std::string, uint32_t>> reduce_graph_incremental(
 
     for(const auto& [graph_file, target_size] : result_files) {
 
-        uint32_t current_size = (uint32_t)graph.size();
+        const auto current_size = (uint32_t)graph.size();
         for (uint32_t i = current_size; i > target_size; i--) {
             builder.removeEntry(i - 1);
         }
