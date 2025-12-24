@@ -1176,7 +1176,7 @@ int main(int argc, char *argv[]) {
 
                 const std::vector<std::tuple<uint8_t, float, uint8_t>> settings = {
                     std::make_tuple(og.k_opt, og.eps_opt, og.i_opt), 
-                    std::make_tuple(og.k_opt, 0, og.i_opt), 
+                    std::make_tuple(og.k_opt, 0.01, og.i_opt), 
                     std::make_tuple(0, 0, 0), 
                 };
                 for(const auto& [k_opt, eps_opt, i_opt] : settings) {
