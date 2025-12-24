@@ -541,7 +541,7 @@ int main(int argc, char *argv[]) {
     // Parse command-line arguments
     // Usage: deglib_phd <dataset> [test_type] [--run]
     DatasetName ds_name = DatasetName::SIFT1M;
-    std::string test_type_arg = "all";
+    std::string test_type_arg = "reduce_scaling";
     bool do_run = true;
     
     for(int i = 1; i < argc; ++i) {
@@ -1198,17 +1198,21 @@ int main(int argc, char *argv[]) {
                             config.metric, cg.lid, cg.k, cg.k_ext, cg.eps_ext, 0, 0, 0, cg.build_threads, true, ds.info().scale);
                     }
                     
-                    log("\n--- Loading full graph ---\n");
-                    auto graph = deglib::graph::load_sizebounded_graph(full_graph_path.c_str());
-                    log("Loaded graph with {} vertices\n", graph.size());
-
                     // Reduce graph incrementally
-                    log("\n--- Reducing graph incrementally ---\n");
-                    auto created_files = deglib::benchmark::reduce_graph_incremental(
-                        graph, scaling_dir, graph_name_base, rs.size_interval,
-                        k_opt, eps_opt, i_opt,
-                        cg.build_threads, true, ds.info().scale);
-                    log("Created {} reduced graphs\n", created_files.size());
+                    // Wrapped in a lambda to ensure 'graph' goes out of scope and frees memory immediately after use
+                    auto created_files = [&]() {
+                        log("\n--- Loading full graph ---\n");
+                        auto graph = deglib::graph::load_sizebounded_graph(full_graph_path.c_str());
+                        log("Loaded graph with {} vertices\n", graph.size());
+
+                        log("\n--- Reducing graph incrementally ---\n");
+                        auto files = deglib::benchmark::reduce_graph_incremental(
+                            graph, scaling_dir, graph_name_base, rs.size_interval,
+                            k_opt, eps_opt, i_opt,
+                            cg.build_threads, true, ds.info().scale);
+                        log("Created {} reduced graphs\n", files.size());
+                        return files;
+                    }();
                     
                     // Test all graphs
                     log("\n--- Testing graphs ---\n");
@@ -1217,17 +1221,17 @@ int main(int argc, char *argv[]) {
                         log("Graph: {}\n", graph_path);
                         
                         if(std::filesystem::exists(graph_path)) {
-                            const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
+                            const auto test_graph = deglib::graph::load_readonly_graph(graph_path.c_str());
                             
                             // dont test an empty graph
-                            if(graph.size() == 0)
+                            if(test_graph.size() == 0)
                                 continue;
 
                             // Load ground truth for this specific size
                             auto ground_truth = ds.load_groundtruth_for_size(cg.anns_k, vertex_count);
                             
                             wait_before_test();
-                            deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
+                            deglib::benchmark::test_graph_anns(test_graph, *query_repository, ground_truth, 
                                 cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter, nullptr, linear_baseline_us);
                         } else {
                             log("Graph file not found: {}\n", graph_path);
