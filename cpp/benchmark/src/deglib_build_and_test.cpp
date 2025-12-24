@@ -1183,22 +1183,22 @@ int main(int argc, char *argv[]) {
                     log("---- REDUCE_SCALING with k_opt={}, eps_opt={:.4f}, i_opt={} ----\n", k_opt, eps_opt, i_opt);
                 
                     // Generate base name for graph files
+                    auto lid = deglib::builder::OptimizationTarget::StreamingData;
                     std::string metric_str = (config.metric == deglib::Metric::L2) ? "L2" : "L2_Uint8";
-                    std::string scheme = DatasetConfig::optimization_target_str(cg.lid);
+                    std::string scheme = DatasetConfig::optimization_target_str(lid);
                     std::string graph_name_base = fmt::format("{}D_{}_K{}_AddK{}Eps{:.1f}_{}_ReduceWith_OptK{}Eps{:.4f}Path{}",
                                                             dims, metric_str, cg.k, cg.k_ext, cg.eps_ext, scheme, k_opt, eps_opt, i_opt);
                     
-                    // Load or build the full graph first
-                    std::string full_graph_path = graph_paths.graph_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, cg.lid);
-                    
+                    // Load or build the full graph first                    
+                    std::string full_graph_path = graph_paths.dynamic_graph_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, 
+                                                                            og.k_opt, og.eps_opt, og.i_opt, DataStreamType::AddAll);                    
                     if(!std::filesystem::exists(full_graph_path)) {
                         log("\n--- Building full graph first ---\n");
-                        deglib::benchmark::create_graph(*base_repository, DataStreamType::AddAll, full_graph_path, 
-                            config.metric, cg.lid, cg.k, cg.k_ext, cg.eps_ext, 0, 0, 0, cg.build_threads, true, ds.info().scale);
+                        deglib::benchmark::create_graph(*base_repository, DataStreamType::AddAll, full_graph_path, config.metric, lid, 
+                            cg.k, cg.k_ext, cg.eps_ext, og.k_opt, og.eps_opt, og.i_opt, cg.build_threads, true, ds.info().scale);
                     }
                     
                     // Reduce graph incrementally
-                    // Wrapped in a lambda to ensure 'graph' goes out of scope and frees memory immediately after use
                     auto created_files = [&]() {
                         log("\n--- Loading full graph ---\n");
                         auto graph = deglib::graph::load_sizebounded_graph(full_graph_path.c_str());
