@@ -369,7 +369,7 @@ inline std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(
     if(thread_count == 1)
         builder.setBatchSize(1,1);
     
-    const auto log_after = 100000;
+    const auto log_after = 20000;
 
     log("Start building (first missing size: {})\n", first_missing_size);    
     auto start = std::chrono::steady_clock::now();
@@ -389,12 +389,11 @@ inline std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(
     for(const auto& [graph_file, target_size] : result_files) {
         
         // Add data up to target size
-        for (uint32_t i = current_count; i < target_size; i++) {
-            auto feature = repository.getFeature(i);
+        for (; current_count < target_size; current_count++) {
+            auto feature = repository.getFeature(current_count);
             auto feature_vector = std::vector<std::byte>{feature, feature + feature_byte_size};
-            builder.addEntry(i, std::move(feature_vector)); 
+            builder.addEntry(current_count, std::move(feature_vector)); 
         }
-        current_count = target_size;
 
         // Build the graph
         start = std::chrono::steady_clock::now();
@@ -475,8 +474,10 @@ inline std::vector<std::pair<std::string, uint32_t>> reduce_graph_incremental(
     auto rnd = std::mt19937(7);
     auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::OptimizationTarget::LowLID, 0, 0, k_opt, eps_opt, i_opt, 0, 0, use_rng);
     builder.setThreadCount(thread_count);
+    if(thread_count == 1)
+        builder.setBatchSize(1,1);
     
-    const auto log_after = 10000;
+    const auto log_after = 20000;
     auto start = std::chrono::steady_clock::now();
     uint64_t duration_ms = 0;
 
