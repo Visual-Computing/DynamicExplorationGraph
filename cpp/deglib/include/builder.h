@@ -217,7 +217,10 @@ struct BuilderStatus {
  * For data with distribution Shifts Unknown is better. 
  */
 enum OptimizationTarget { 
-  StreamingData,  // Streaming or shifting distributions
+  StreamingData_SchemeA,  // Streaming or shifting distributions (just for the ablation study)
+  StreamingData_SchemeB,  // Streaming or shifting distributions (just for the ablation study)
+  StreamingData_SchemeC,  // Streaming or shifting distributions (default in the paper)
+  StreamingData_SchemeD,  // Streaming or shifting distributions (just for the ablation study)
   HighLID,        // Optimized for datasets with high local intrinsic dimensionality (schemeC in the paper)
   LowLID,         // Optimized for datasets with low local intrinsic dimensionality (schemeD in the paper)
   SchemeA,        // Only for research purposes
@@ -313,7 +316,7 @@ class EvenRegularGraphBuilder {
      * with default extension and improvement parameters.
      */
     EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, const uint32_t swaps) 
-      : EvenRegularGraphBuilder(graph, rnd, OptimizationTarget::StreamingData,
+      : EvenRegularGraphBuilder(graph, rnd, OptimizationTarget::StreamingData_SchemeC,
                                 graph.getEdgesPerVertex(), 0.1f, 
                                 0, 0.0f, 
                                 5, swaps, swaps) {
@@ -490,7 +493,10 @@ class EvenRegularGraphBuilder {
       }
 
       // LID is unknown for streaming data, so we add the new vertices one-by-one single threaded.
-      if(this->optimizationTarget_ == OptimizationTarget::StreamingData) {
+      if(this->optimizationTarget_ == OptimizationTarget::StreamingData_SchemeA ||
+         this->optimizationTarget_ == OptimizationTarget::StreamingData_SchemeB ||
+         this->optimizationTarget_ == OptimizationTarget::StreamingData_SchemeC ||
+         this->optimizationTarget_ == OptimizationTarget::StreamingData_SchemeD) {
         while(index < add_tasks.size()) 
           extendGraphUnknownLID(add_tasks[index++]);
       } else {
@@ -572,7 +578,70 @@ class EvenRegularGraphBuilder {
 
           // This version is good for high LID datasets or small graphs with a lot of equidistant vertices during ANNS
           uint32_t new_neighbor_index = 0;
-          {
+          if(this->optimizationTarget_ == OptimizationTarget::StreamingData_SchemeA) {
+            // SchemeA: Connect the new vertex v to the most similar neighbor of the candidate.
+            // Select neighbor n with minimum distance to v.
+            const auto dist_func = graph.getFeatureSpace().get_dist_func();
+            const auto dist_func_param = graph.getFeatureSpace().get_dist_func_param();
+            float best_neighbor_distance = std::numeric_limits<float>::max();
+            const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
+
+            for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
+              const auto neighbor_index = neighbor_indices[edge_idx];
+
+              // the suggested neighbor might already be in the edge list of the new vertex
+              if(graph.hasEdge(neighbor_index, internal_index))
+                continue;
+
+              // is the neighbor already missing an edge?
+              if(graph.hasEdge(neighbor_index, neighbor_index)) 
+                continue;
+
+              const auto neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(neighbor_index), dist_func_param);
+              if(neighbor_distance < best_neighbor_distance) {
+                best_neighbor_distance = neighbor_distance;
+                new_neighbor_index = neighbor_index;
+              }
+            }
+
+            // This can happens as each selected neighbor will be added to the neighor list of internal_index and removes an edges from another vertex.
+            // Which mean in each round this algorthm can eliminte two potential neighbor_index candidates of the next candidate. 
+            // After 15 candiates 30 potential neighbor_index are already blocked and if all of them are neighbor of the current candidate_index than we will find nothing here.
+            if(best_neighbor_distance == std::numeric_limits<float>::max()) 
+              continue;
+          }
+          else if(this->optimizationTarget_ == OptimizationTarget::StreamingData_SchemeB) {
+            // SchemeB: Remove the shortest edge of the candidate.
+            // Select neighbor n with minimum edge weight to the candidate.
+            float min_edge_weight = std::numeric_limits<float>::max();
+            const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
+            const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
+
+            for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
+              const auto neighbor_index = neighbor_indices[edge_idx];
+
+              // the suggested neighbor might already be in the edge list of the new vertex
+              if(graph.hasEdge(neighbor_index, internal_index))
+                continue;
+
+              // is the neighbor already missing an edge?
+              if(graph.hasEdge(neighbor_index, neighbor_index)) 
+                continue;
+
+              const auto neighbor_weight = neighbor_weights[edge_idx];
+              if(neighbor_weight < min_edge_weight) {
+                min_edge_weight = neighbor_weight;
+                new_neighbor_index = neighbor_index;
+              }
+            }
+
+            // This can happens as each selected neighbor will be added to the neighor list of internal_index and removes an edges from another vertex.
+            // Which mean in each round this algorthm can eliminte two potential neighbor_index candidates of the next candidate. 
+            // After 15 candiates 30 potential neighbor_index are already blocked and if all of them are neighbor of the current candidate_index than we will find nothing here.
+            if(min_edge_weight == std::numeric_limits<float>::max()) 
+              continue;
+          }
+          else if(this->optimizationTarget_ == OptimizationTarget::StreamingData_SchemeC) {
             // find the worst edge of the new neighbor
             float new_neighbor_weight = std::numeric_limits<float>::lowest();
             const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
@@ -597,8 +666,44 @@ class EvenRegularGraphBuilder {
               }
             }
 
-            // this should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the candidate-vertex and still has space for more
+            // This can happens as each selected neighbor will be added to the neighor list of internal_index and removes an edges from another vertex.
+            // Which mean in each round this algorthm can eliminte two potential neighbor_index candidates of the next candidate. 
+            // After 15 candiates 30 potential neighbor_index are already blocked and if all of them are neighbor of the current candidate_index than we will find nothing here.
             if(new_neighbor_weight == std::numeric_limits<float>::lowest()) 
+              continue;
+          }
+          else if(this->optimizationTarget_ == OptimizationTarget::StreamingData_SchemeD) {
+            // SchemeD: find the edge which improves the distortion the most: (distance_new_edge1 + distance_new_edge2) - distance_removed_edge
+            const auto dist_func = graph.getFeatureSpace().get_dist_func();
+            const auto dist_func_param = graph.getFeatureSpace().get_dist_func_param();
+            float best_distortion = std::numeric_limits<float>::max();
+            const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
+            const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
+
+            for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
+              const auto neighbor_index = neighbor_indices[edge_idx];
+
+              // the suggested neighbor might already be in the edge list of the new vertex
+              if(graph.hasEdge(neighbor_index, internal_index))
+                continue;
+
+              // is the neighbor already missing an edge?
+              if(graph.hasEdge(neighbor_index, neighbor_index)) 
+                continue;
+
+              // take the neighbor with the best distortion improvement
+              const auto neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(neighbor_index), dist_func_param);
+              float distortion = (candidate_weight + neighbor_distance) - neighbor_weights[edge_idx];
+              if(distortion < best_distortion) {
+                best_distortion = distortion;
+                new_neighbor_index = neighbor_index;
+              }
+            }
+
+            // This can happens as each selected neighbor will be added to the neighor list of internal_index and removes an edges from another vertex.
+            // Which mean in each round this algorthm can eliminte two potential neighbor_index candidates of the next candidate. 
+            // After 15 candiates 30 potential neighbor_index are already blocked and if all of them are neighbor of the current candidate_index than we will find nothing here.
+            if(best_distortion == std::numeric_limits<float>::max()) 
               continue;
           }
 
@@ -717,8 +822,11 @@ class EvenRegularGraphBuilder {
             }
 
             // should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
-            if(new_neighbor_weight == std::numeric_limits<float>::lowest()) 
-              continue;
+            if(new_neighbor_weight == std::numeric_limits<float>::lowest()) {
+              std::cerr << "could not find a new neighbor for candidate " << candidate_index << " when adding vertex " << external_label << std::endl;
+              std::perror("");
+              std::abort();
+            }
 
             new_neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(new_neighbor_index), dist_func_param); 
           } 
@@ -748,6 +856,12 @@ class EvenRegularGraphBuilder {
                 new_neighbor_distance = neighbor_distance;
               }
             }
+
+             if(best_distortion == std::numeric_limits<float>::max()) {
+              std::cerr << "could not find a new neighbor for candidate " << candidate_index << " when adding vertex " << external_label << std::endl;
+              std::perror("");
+              std::abort();
+            }
           } 
           else if(this->optimizationTarget_ == SchemeA) 
           {
@@ -755,8 +869,7 @@ class EvenRegularGraphBuilder {
             // Select neighbor n with minimum distance to v.
             float best_neighbor_distance = std::numeric_limits<float>::max();
             
-            const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
-            
+            const auto neighbor_indices = graph.getNeighborIndices(candidate_index);            
             for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
               const auto neighbor_index = neighbor_indices[edge_idx];
 
@@ -775,6 +888,13 @@ class EvenRegularGraphBuilder {
                 new_neighbor_index = neighbor_index;
                 new_neighbor_distance = neighbor_distance;
               }
+            }
+
+            
+            if(best_neighbor_distance == std::numeric_limits<float>::max()) {
+              std::cerr << "could not find a new neighbor for candidate " << candidate_index << " when adding vertex " << external_label << std::endl;
+              std::perror("");
+              std::abort();
             }
           }
           else if(this->optimizationTarget_ == SchemeB) 
@@ -804,9 +924,15 @@ class EvenRegularGraphBuilder {
                 new_neighbor_index = neighbor_index;
               }
             }
+
+            if(min_edge_weight == std::numeric_limits<float>::max()) {
+              std::cerr << "could not find a new neighbor for candidate " << candidate_index << " when adding vertex " << external_label << std::endl;
+              std::perror("");
+              std::abort();
+            }
             
             if(min_edge_weight != std::numeric_limits<float>::max()) {
-                 new_neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(new_neighbor_index), dist_func_param);
+              new_neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(new_neighbor_index), dist_func_param);
             }
           }
        
@@ -1996,7 +2122,7 @@ void optimize_edges(deglib::graph::MutableGraph& graph, const uint8_t k_opt, con
 
   // create a graph builder to add vertices to the new graph and improve its edges
 	std::cout << "Start graph builder\n";
-  auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::StreamingData, 0, 0.0f, k_opt, eps_opt, i_opt, 1, 0);
+  auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::StreamingData_SchemeC, 0, 0.0f, k_opt, eps_opt, i_opt, 1, 0);
   
   // check the integrity of the graph during the graph build process
   auto start = std::chrono::steady_clock::now();

@@ -234,11 +234,14 @@ struct DatasetConfig {
     
     static std::string optimization_target_str(deglib::builder::OptimizationTarget t) {
         switch(t) {
-            case deglib::builder::OptimizationTarget::LowLID: return "LowLID";
-            case deglib::builder::OptimizationTarget::HighLID: return "HighLID";
-            case deglib::builder::OptimizationTarget::StreamingData: return "StreamingData";
             case deglib::builder::OptimizationTarget::SchemeA: return "SchemeA";
             case deglib::builder::OptimizationTarget::SchemeB: return "SchemeB";
+            case deglib::builder::OptimizationTarget::HighLID: return "HighLID";
+            case deglib::builder::OptimizationTarget::LowLID: return "LowLID";
+            case deglib::builder::OptimizationTarget::StreamingData_SchemeA: return "StreamingData_SchemeA";
+            case deglib::builder::OptimizationTarget::StreamingData_SchemeB: return "StreamingData_SchemeB";
+            case deglib::builder::OptimizationTarget::StreamingData_SchemeC: return "StreamingData_SchemeC";
+            case deglib::builder::OptimizationTarget::StreamingData_SchemeD: return "StreamingData_SchemeD";
             default: return "UnknownLID";
         }
     }
@@ -308,6 +311,17 @@ public:
     std::string graph_log_file(uint32_t dims, deglib::Metric metric, uint8_t k, uint8_t k_ext, float eps_ext, 
                                deglib::builder::OptimizationTarget lid) const {
         return (graph_dir / (base_name(dims, metric, k, k_ext, eps_ext, lid) + ".log")).string();
+    }
+    
+    // Versions with optimization parameters (for all_schemes test with StreamingData)
+    std::string graph_file(uint32_t dims, deglib::Metric metric, uint8_t k, uint8_t k_ext, float eps_ext, 
+                           deglib::builder::OptimizationTarget lid, uint8_t k_opt, float eps_opt, uint8_t i_opt) const {
+        return (graph_dir / (base_name(dims, metric, k, k_ext, eps_ext, lid) + opt_suffix(k_opt, eps_opt, i_opt) + ".deg")).string();
+    }
+    
+    std::string graph_log_file(uint32_t dims, deglib::Metric metric, uint8_t k, uint8_t k_ext, float eps_ext, 
+                               deglib::builder::OptimizationTarget lid, uint8_t k_opt, float eps_opt, uint8_t i_opt) const {
+        return (graph_dir / (base_name(dims, metric, k, k_ext, eps_ext, lid) + opt_suffix(k_opt, eps_opt, i_opt) + ".log")).string();
     }
     
     // ============================================================================
@@ -456,10 +470,14 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
         conf.optimize_graph.total_iterations = 200000;
 
         conf.all_schemes_test.eps_parameter = {
-            { deglib::builder::OptimizationTarget::LowLID,    { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
-            { deglib::builder::OptimizationTarget::HighLID,   { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
-            { deglib::builder::OptimizationTarget::SchemeA,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
-            { deglib::builder::OptimizationTarget::SchemeB,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } }
+            { deglib::builder::OptimizationTarget::SchemeA, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::SchemeB, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::HighLID, { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::LowLID, { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeA, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeB, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeC, { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeD, { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } }
         };
         
     } else if (dataset_name == DatasetName::GLOVE) {
@@ -469,10 +487,14 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
         conf.optimize_graph.total_iterations = 2000000;
 
         conf.all_schemes_test.eps_parameter = {
-            { deglib::builder::OptimizationTarget::LowLID,    { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f } },
-            { deglib::builder::OptimizationTarget::HighLID,   { 0.01f, 0.05f, 0.10f, 0.15f, 0.2f, 0.3f } },
-            { deglib::builder::OptimizationTarget::SchemeA,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f } },
-            { deglib::builder::OptimizationTarget::SchemeB,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f } }
+            { deglib::builder::OptimizationTarget::SchemeA, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f } },
+            { deglib::builder::OptimizationTarget::SchemeB, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f } },
+            { deglib::builder::OptimizationTarget::HighLID, { 0.01f, 0.05f, 0.10f, 0.15f, 0.2f, 0.3f } },
+            { deglib::builder::OptimizationTarget::LowLID, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeA, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeB, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeC, { 0.01f, 0.05f, 0.10f, 0.15f, 0.2f, 0.3f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeD, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f } }
         }; 
         
     } else if (dataset_name == DatasetName::DEEP1M) {
@@ -481,10 +503,14 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
         conf.optimize_graph.total_iterations = 400000;
 
         conf.all_schemes_test.eps_parameter = {
-            { deglib::builder::OptimizationTarget::LowLID,    { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
-            { deglib::builder::OptimizationTarget::HighLID,   { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
-            { deglib::builder::OptimizationTarget::SchemeA,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
-            { deglib::builder::OptimizationTarget::SchemeB,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } }
+            { deglib::builder::OptimizationTarget::SchemeA, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::SchemeB, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::HighLID, { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::LowLID, { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeA, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeB, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeC, { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeD, { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } }
         }; 
         
     } else if (dataset_name == DatasetName::AUDIO) {
@@ -498,10 +524,14 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
         conf.optimize_graph.total_iterations = 20000;
 
         conf.all_schemes_test.eps_parameter = {
-            { deglib::builder::OptimizationTarget::LowLID,    { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
-            { deglib::builder::OptimizationTarget::HighLID,   { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
-            { deglib::builder::OptimizationTarget::SchemeA,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
-            { deglib::builder::OptimizationTarget::SchemeB,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } }
+            { deglib::builder::OptimizationTarget::SchemeA, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::SchemeB, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::HighLID, { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::LowLID, { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeA, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeB, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeC, { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeD, { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } }
         };       
 
         conf.opt_scaling_test.iteration_interval = 10000;
@@ -517,10 +547,14 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
         conf.optimize_graph.total_iterations = 40000;
 
         conf.all_schemes_test.eps_parameter = {
-            { deglib::builder::OptimizationTarget::LowLID,    { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
-            { deglib::builder::OptimizationTarget::HighLID,   { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
-            { deglib::builder::OptimizationTarget::SchemeA,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
-            { deglib::builder::OptimizationTarget::SchemeB,   { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } }
+            { deglib::builder::OptimizationTarget::SchemeA, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::SchemeB, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::HighLID, { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::LowLID, { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeA, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeB, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeC, { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } },
+            { deglib::builder::OptimizationTarget::StreamingData_SchemeD, { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } }
         };       
 
         conf.opt_scaling_test.iteration_interval = 10000;
@@ -546,8 +580,8 @@ int main(int argc, char *argv[]) {
 
     // Parse command-line arguments
     // Usage: deglib_phd <dataset> [test_type] [--run]
-    DatasetName ds_name = DatasetName::SIFT1M;
-    std::string test_type_arg = "reduce_scaling";
+    DatasetName ds_name = DatasetName::SIFT1M
+    std::string test_type_arg = "all";
     bool do_run = true;
     
     for(int i = 1; i < argc; ++i) {
@@ -845,28 +879,23 @@ int main(int argc, char *argv[]) {
         }
     }
     
-    // ALL_SCHEMES test (tests all 5 OptimizationTargets with CreateGraphTest parameters)
+    // ALL_SCHEMES test (tests all 4 StreamingData OptimizationTargets with CreateGraphTest parameters)
     if(run_all || test_type_arg == "all_schemes") {
         const auto& as = config.all_schemes_test;
         const auto& cg = config.create_graph;
+        const auto& og = config.optimize_graph;
         
         log("\n=== ALL_SCHEMES Test ===\n");
-        log("Testing all 5 OptimizationTargets with k={}, k_ext={}, eps_ext={:.2f}\n", cg.k, cg.k_ext, cg.eps_ext);
+        log("Testing all schemes with k={}, k_ext={}, eps_ext={:.2f}, k_opt={}, eps_opt={:.4f}, i_opt={}\n", cg.k, cg.k_ext, cg.eps_ext, og.k_opt, og.eps_opt, og.i_opt);
         
         if(do_run && base_repository && query_repository) {
             // Load ground truth for this test
             auto ground_truth = ds.load_groundtruth(cg.anns_k, false);
             
-            std::vector<deglib::builder::OptimizationTarget> all_targets = {
-                deglib::builder::OptimizationTarget::LowLID,
-                deglib::builder::OptimizationTarget::HighLID,
-                deglib::builder::OptimizationTarget::SchemeA,
-                deglib::builder::OptimizationTarget::SchemeB
-            };
-            
-            for(auto lid : all_targets) {
-                std::string graph_path = graph_paths.graph_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, lid);
-                std::string log_path = graph_paths.graph_log_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, lid);
+            // Iterate over all schemes configured in eps_parameter
+            for(const auto& [lid, scheme_eps] : as.eps_parameter) {
+                std::string graph_path = graph_paths.graph_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, lid, og.k_opt, og.eps_opt, og.i_opt);
+                std::string log_path = graph_paths.graph_log_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, lid, og.k_opt, og.eps_opt, og.i_opt);
                 
                 // Skip if log file already exists
                 if(std::filesystem::exists(log_path)) {
@@ -876,27 +905,18 @@ int main(int argc, char *argv[]) {
                 
                 deglib::benchmark::set_log_file(log_path, true);
                 
-                log("\n=== ALL_SCHEMES Test: {} ===\n", DatasetConfig::optimization_target_str(lid));
-                log("Graph: {}\n", graph_path);
+                log("Testing scheme {} \n", DatasetConfig::optimization_target_str(lid));
                 
                 // Build graph if it doesn't exist
                 if(!std::filesystem::exists(graph_path)) {
-                    log("\n--- Building Graph with {} ---\n", DatasetConfig::optimization_target_str(lid));
-                    log("Settings: k={}, k_ext={}, eps_ext={:.2f}, threads={}\n",
-                        cg.k, cg.k_ext, cg.eps_ext, cg.build_threads);
-                    
-                    deglib::benchmark::create_graph(*base_repository, DataStreamType::AddAll, graph_path, 
-                        config.metric, lid, cg.k, cg.k_ext, cg.eps_ext, 0, 0, 0, cg.build_threads, true, ds.info().scale);
+                    log("Building Graph ...\n");                    
+                    deglib::benchmark::create_graph(*base_repository, DataStreamType::AddAll, graph_path, config.metric, lid, cg.k, cg.k_ext, cg.eps_ext, og.k_opt, og.eps_opt, og.i_opt, cg.build_threads, true, ds.info().scale);
                 }
                 
                 // Test the graph
                 if(std::filesystem::exists(graph_path)) {
                     const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
-                    log("Graph loaded: {} vertices\n", graph.size());
-                    
-                    // Get per-scheme eps_parameter, fall back to CreateGraphTest default
-                    auto eps_it = as.eps_parameter.find(lid);
-                    const auto& scheme_eps = (eps_it != as.eps_parameter.end()) ? eps_it->second : cg.eps_parameter;
+                    log("Testing Graph ({} vertices) ...\n", graph.size());
                     
                     wait_before_test();
                     deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
@@ -1095,7 +1115,7 @@ int main(int argc, char *argv[]) {
         const auto& og =  config.optimize_graph;
         
         // Test both schemes: original cg.lid and StreamingData
-        for(deglib::builder::OptimizationTarget lid_scheme : {cg.lid, deglib::builder::OptimizationTarget::StreamingData}) {
+        for(deglib::builder::OptimizationTarget lid_scheme : {cg.lid, deglib::builder::OptimizationTarget::StreamingData_SchemeC}) {
             std::string scaling_dir = graph_paths.size_scaling_directory(lid_scheme);
             std::string log_path = graph_paths.size_scaling_log_file(lid_scheme);
             std::string scheme_name = DatasetConfig::optimization_target_str(lid_scheme);
@@ -1400,8 +1420,8 @@ int main(int argc, char *argv[]) {
             std::filesystem::create_directories(dynamic_dir);
  
             const std::vector<std::tuple<uint8_t, float, uint8_t, deglib::builder::OptimizationTarget>> settings = {
-                std::make_tuple(og.k_opt, og.eps_opt, og.i_opt, deglib::builder::OptimizationTarget::StreamingData), 
-                std::make_tuple(0, 0, 0, deglib::builder::OptimizationTarget::StreamingData), 
+                std::make_tuple(og.k_opt, og.eps_opt, og.i_opt, deglib::builder::OptimizationTarget::StreamingData_SchemeC), 
+                std::make_tuple(0, 0, 0, deglib::builder::OptimizationTarget::StreamingData_SchemeC), 
                 std::make_tuple(og.k_opt, og.eps_opt, og.i_opt, cg.lid), 
             };
             for(const auto& [k_opt, eps_opt, i_opt, lid] : settings) {
@@ -1489,7 +1509,7 @@ int main(int argc, char *argv[]) {
         const auto& og = config.optimize_graph;
         
         // Test both schemes: original cg.lid and StreamingData
-        for(deglib::builder::OptimizationTarget lid_scheme : {cg.lid, deglib::builder::OptimizationTarget::StreamingData}) {
+        for(deglib::builder::OptimizationTarget lid_scheme : {cg.lid, deglib::builder::OptimizationTarget::StreamingData_SchemeC}) {
             std::string scaling_dir = graph_paths.reduce_scaling_directory(lid_scheme);
             std::string log_path = graph_paths.reduce_scaling_log_file(lid_scheme);
             std::string scheme = DatasetConfig::optimization_target_str(lid_scheme);
