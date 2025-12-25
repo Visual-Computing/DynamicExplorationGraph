@@ -377,16 +377,10 @@ inline std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(
     const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
         const auto size = graph.size();
 
-        if(status.added % log_after == 0) {    
+        if(size == total_size || size % log_after == 0) {    
             duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
             auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
-            auto weight_histogram_sorted = deglib::analysis::calc_edge_weight_histogram(graph, true, scale);
-            auto weight_histogram = deglib::analysis::calc_edge_weight_histogram(graph, false, scale);
-            auto valid_weights = deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_regularity(graph, uint32_t(size), true);
-            auto connected = deglib::analysis::check_graph_connectivity(graph);
-            auto duration = duration_ms;
-            log("{:7} vertices, {:8}ms, {:8} / {:8} improv, AEW: {:4.2f} -> Sorted:{:.1f}, InOrder:{:.1f}, {} connected & {}\n", 
-                        size, duration, status.improved, status.tries, avg_edge_weight, fmt::join(weight_histogram_sorted, " "), fmt::join(weight_histogram, " "), connected ? "" : "not", valid_weights ? "valid" : "invalid");
+            log("{:7} vertices, {:8}ms, {:8} / {:8} improv, AEW: {:4.2f}\n", size, duration_ms, status.improved, status.tries, avg_edge_weight);
             start = std::chrono::steady_clock::now();
         }
     };
@@ -482,23 +476,17 @@ inline std::vector<std::pair<std::string, uint32_t>> reduce_graph_incremental(
     auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::OptimizationTarget::LowLID, 0, 0, k_opt, eps_opt, i_opt, 0, 0, use_rng);
     builder.setThreadCount(thread_count);
     
-    const auto log_after = 50000;
+    const auto log_after = 10000;
     auto start = std::chrono::steady_clock::now();
     uint64_t duration_ms = 0;
 
     const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
         const auto size = graph.size();
 
-        if(status.deleted % log_after == 0) {    
+        if(size == 0 || size % log_after == 0) {    
             duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
             auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
-            auto weight_histogram_sorted = deglib::analysis::calc_edge_weight_histogram(graph, true, scale);
-            auto weight_histogram = deglib::analysis::calc_edge_weight_histogram(graph, false, scale);
-            auto valid_weights = deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_regularity(graph, uint32_t(size), true);
-            auto connected = deglib::analysis::check_graph_connectivity(graph);
-            auto duration = duration_ms;
-            log("{:7} vertices, {:8}ms, {:8} / {:8} improv, AEW: {:4.2f} -> Sorted:{:.1f}, InOrder:{:.1f}, {} connected & {}\n", 
-                        size, duration, status.improved, status.tries, avg_edge_weight, fmt::join(weight_histogram_sorted, " "), fmt::join(weight_histogram, " "), connected ? "" : "not", valid_weights ? "valid" : "invalid");
+            log("{:7} vertices, {:8}ms, {:8} / {:8} improv, AEW: {:4.2f}\n", size, duration_ms, status.improved, status.tries, avg_edge_weight);
             start = std::chrono::steady_clock::now();
         }
     };

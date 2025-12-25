@@ -333,8 +333,12 @@ public:
     std::string k_scaling_directory() const       { return (graph_dir / "kScaling").string(); }
     std::string k_ext_scaling_directory() const   { return (graph_dir / "kExtScaling").string(); }
     std::string eps_ext_scaling_directory() const { return (graph_dir / "epsExtScaling").string(); }
-    std::string size_scaling_directory() const    { return (graph_dir / "sizeScaling").string(); }
-    std::string reduce_scaling_directory() const  { return (graph_dir / "reduceScaling").string(); }
+    std::string size_scaling_directory(deglib::builder::OptimizationTarget lid) const {
+        return (graph_dir / ("sizeScaling_" + DatasetConfig::optimization_target_str(lid))).string();
+    }
+    std::string reduce_scaling_directory(deglib::builder::OptimizationTarget lid) const {
+        return (graph_dir / ("reduceScaling_" + DatasetConfig::optimization_target_str(lid))).string();
+    }
     std::string opt_scaling_directory() const     { return (graph_dir / "optScaling").string(); }
     std::string thread_scaling_directory() const  { return (graph_dir / "threadScaling").string(); }
     std::string dynamic_directory() const         { return (graph_dir / "dynamic").string(); }
@@ -383,20 +387,22 @@ public:
     // ============================================================================
     // DynamicDataTest: per-DataStreamType graph and log files with opt params
     // ============================================================================
-    std::string dynamic_graph_file(uint32_t dims, deglib::Metric metric, uint8_t k, uint8_t k_ext, float eps_ext,
+    std::string dynamic_graph_file(uint32_t dims, deglib::Metric metric, deglib::builder::OptimizationTarget lid, uint8_t k, uint8_t k_ext, float eps_ext,
                                    uint8_t k_opt, float eps_opt, uint8_t i_opt, DataStreamType ds_type) const {
         std::string ds_str = DatasetConfig::data_stream_type_str(ds_type);
+        std::string lid_str = DatasetConfig::optimization_target_str(lid);
         return (std::filesystem::path(dynamic_directory()) 
-                / fmt::format("{}D_{}_K{}_AddK{}Eps{:.1f}_StreamingData{}_{}_.deg", 
-                              dims, metric_str(metric), k, k_ext, eps_ext, opt_suffix(k_opt, eps_opt, i_opt), ds_str)).string();
+                / fmt::format("{}D_{}_K{}_AddK{}Eps{:.1f}_{}_{}_{}_.deg", 
+                              dims, metric_str(metric), k, k_ext, eps_ext, lid_str, opt_suffix(k_opt, eps_opt, i_opt), ds_str)).string();
     }
     
-    std::string dynamic_log_file(uint32_t dims, deglib::Metric metric, uint8_t k, uint8_t k_ext, float eps_ext,
+    std::string dynamic_log_file(uint32_t dims, deglib::Metric metric, deglib::builder::OptimizationTarget lid, uint8_t k, uint8_t k_ext, float eps_ext,
                                  uint8_t k_opt, float eps_opt, uint8_t i_opt, DataStreamType ds_type) const {
         std::string ds_str = DatasetConfig::data_stream_type_str(ds_type);
+        std::string lid_str = DatasetConfig::optimization_target_str(lid);
         return (std::filesystem::path(dynamic_directory()) 
-                / fmt::format("{}D_{}_K{}_AddK{}Eps{:.1f}_StreamingData{}_{}_.log", 
-                              dims, metric_str(metric), k, k_ext, eps_ext, opt_suffix(k_opt, eps_opt, i_opt), ds_str)).string();
+                / fmt::format("{}D_{}_K{}_AddK{}Eps{:.1f}_{}_{}_{}_.log", 
+                              dims, metric_str(metric), k, k_ext, eps_ext, lid_str, opt_suffix(k_opt, eps_opt, i_opt), ds_str)).string();
     }
     
     // ============================================================================
@@ -404,19 +410,19 @@ public:
     // ============================================================================
     std::string size_scaling_graph_file(uint32_t dims, deglib::Metric metric, uint8_t k, uint8_t k_ext, float eps_ext, 
                                         deglib::builder::OptimizationTarget lid, uint32_t size) const {
-        return (std::filesystem::path(size_scaling_directory()) 
+        return (std::filesystem::path(size_scaling_directory(lid)) 
                 / fmt::format("{}_N{}.deg", base_name(dims, metric, k, k_ext, eps_ext, lid), size)).string();
     }
     
-    std::string size_scaling_log_file() const {
-        return (std::filesystem::path(size_scaling_directory()) / "log.txt").string();
+    std::string size_scaling_log_file(deglib::builder::OptimizationTarget lid) const {
+        return (std::filesystem::path(size_scaling_directory(lid)) / "log.txt").string();
     }
 
     // ============================================================================
     // ReduceScalingTest: incremental reduce graph files
     // ============================================================================
-    std::string reduce_scaling_log_file() const {
-        return (std::filesystem::path(reduce_scaling_directory()) / "log.txt").string();
+    std::string reduce_scaling_log_file(deglib::builder::OptimizationTarget lid) const {
+        return (std::filesystem::path(reduce_scaling_directory(lid)) / "log.txt").string();
     }
     
     // ============================================================================
@@ -1086,164 +1092,76 @@ int main(int argc, char *argv[]) {
     if(run_all || test_type_arg == "size_scaling") {
         const auto& ss = config.size_scaling_test;
         const auto& cg = config.create_graph;
-        std::string scaling_dir = graph_paths.size_scaling_directory();
-        std::string log_path = graph_paths.size_scaling_log_file();
+        const auto& og =  config.optimize_graph;
         
-        log("\n=== SIZE_SCALING Test ===\n");
-        log("Size interval: {}\n", ss.size_interval);
-        log("Directory: {}\n", scaling_dir);
-        log("Log file: {}\n", log_path);
-        
-        if(do_run && base_repository && query_repository) {
-            // Skip entire scenario if log file already exists
-            if(std::filesystem::exists(log_path)) {
-                log("SIZE_SCALING: Skipping - log file already exists: {}\n", log_path);
-            } else {
-                // Ensure scaling directory exists
-                std::filesystem::create_directories(scaling_dir);
-                
-                // Set log file for all size scaling operations
-                deglib::benchmark::set_log_file(log_path, false);
-                log("\n=== SIZE_SCALING Test ===\n");
-                log("Size interval: {}\n", ss.size_interval);
-                
-                // Generate base name for graph files
-                std::string metric_str = (config.metric == deglib::Metric::L2) ? "L2" : "L2_Uint8";
-                std::string scheme = DatasetConfig::optimization_target_str(cg.lid);
-                std::string graph_name_base = fmt::format("{}D_{}_K{}_AddK{}Eps{:.1f}_{}", 
-                                                           dims, metric_str, cg.k, cg.k_ext, cg.eps_ext, scheme);
-                
-                // Build all graphs incrementally (skips existing graphs internally)
-                log("\n--- Building graphs incrementally ---\n");
-                auto created_files = deglib::benchmark::create_incremental_graphs(
-                    *base_repository, scaling_dir, graph_name_base, ss.size_interval,
-                    config.metric, cg.lid, cg.k, cg.k_ext, cg.eps_ext, 
-                    0, 0, 0,  // k_opt, eps_opt, i_opt (defaults)
-                    cg.build_threads, true, ds.info().scale);
-                log("Created {} incremental graphs\n", created_files.size());
-                
-                // Test all graphs
-                log("\n--- Testing graphs ---\n");
-                for(const auto& [graph_path, vertex_count] : created_files) {
-                    log("\n=== SIZE_SCALING Test: size={} ===\n", vertex_count);
-                    log("Graph: {}\n", graph_path);
+        // Test both schemes: original cg.lid and StreamingData
+        for(deglib::builder::OptimizationTarget lid_scheme : {cg.lid, deglib::builder::OptimizationTarget::StreamingData}) {
+            std::string scaling_dir = graph_paths.size_scaling_directory(lid_scheme);
+            std::string log_path = graph_paths.size_scaling_log_file(lid_scheme);
+            std::string scheme_name = DatasetConfig::optimization_target_str(lid_scheme);
+            
+            log("\n=== SIZE_SCALING Test: {} ===\n", scheme_name);
+            log("Size interval: {}\n", ss.size_interval);
+            log("Directory: {}\n", scaling_dir);
+            log("Log file: {}\n", log_path);
+            
+            if(do_run && base_repository && query_repository) {
+
+                // Skip entire scenario if log file already exists
+                if(std::filesystem::exists(log_path)) {
+                    log("SIZE_SCALING {}: Skipping - log file already exists: {}\n", scheme_name, log_path);
+                    continue;
+                } else {
+                    // Ensure scaling directory exists
+                    std::filesystem::create_directories(scaling_dir);
                     
-                    if(std::filesystem::exists(graph_path)) {
-                        const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
-                        
-                        // Load ground truth for this specific size
-                        auto ground_truth = ds.load_groundtruth_for_size(cg.anns_k, vertex_count);
-                        
-                        wait_before_test();
-                        deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                            cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter, nullptr, linear_baseline_us);
-                    } else {
-                        log("Graph file not found: {}\n", graph_path);
-                    }
-                }
-                
-                deglib::benchmark::reset_log_to_console();
-                log("SIZE_SCALING: Log written to: {}\n", log_path);
-            }
-        }
-    }
-
-    // REDUCE_SCALING test (build full graph and reduce it incrementally)
-    if(run_all || test_type_arg == "reduce_scaling") {
-        const auto& rs = config.reduce_scaling_test;
-        const auto& cg = config.create_graph;
-        const auto& og = config.optimize_graph;
-        std::string scaling_dir = graph_paths.reduce_scaling_directory();
-        std::string log_path = graph_paths.reduce_scaling_log_file();
-        
-        log("\n=== REDUCE_SCALING Test ===\n");
-        log("Size interval: {}\n", rs.size_interval);
-        log("Directory: {}\n", scaling_dir);
-        log("Log file: {}\n", log_path);
-        
-        if(do_run && base_repository && query_repository) {
-            // Skip entire scenario if log file already exists
-            if(std::filesystem::exists(log_path)) {
-                log("REDUCE_SCALING: Skipping - log file already exists: {}\n", log_path);
-            } else {
-                // Ensure scaling directory exists
-                std::filesystem::create_directories(scaling_dir);
-                
-                // Set log file for all reduce scaling operations
-                deglib::benchmark::set_log_file(log_path, false);
-                log("\n=== REDUCE_SCALING Test ===\n");
-                log("Size interval: {}\n", rs.size_interval);
-
-                const std::vector<std::tuple<uint8_t, float, uint8_t>> settings = {
-                    std::make_tuple(og.k_opt, og.eps_opt, og.i_opt), 
-                    std::make_tuple(0, 0, 0), 
-                };
-                for(const auto& [k_opt, eps_opt, i_opt] : settings) {
-                    log("----------------------------------------------------------------\n");
-                    log("---- REDUCE_SCALING with k_opt={}, eps_opt={:.4f}, i_opt={} ----\n", k_opt, eps_opt, i_opt);
-                
+                    // Set log file for all size scaling operations
+                    deglib::benchmark::set_log_file(log_path, false);
+                    log("\n=== SIZE_SCALING Test: {} ===\n", scheme_name);
+                    log("Size interval: {}\n", ss.size_interval);
+                    
                     // Generate base name for graph files
-                    auto lid = deglib::builder::OptimizationTarget::StreamingData;
                     std::string metric_str = (config.metric == deglib::Metric::L2) ? "L2" : "L2_Uint8";
-                    std::string scheme = DatasetConfig::optimization_target_str(lid);
-                    std::string graph_name_base = fmt::format("{}D_{}_K{}_AddK{}Eps{:.1f}_{}_ReduceWith_OptK{}Eps{:.4f}Path{}",
-                                                            dims, metric_str, cg.k, cg.k_ext, cg.eps_ext, scheme, k_opt, eps_opt, i_opt);
+                    std::string scheme = DatasetConfig::optimization_target_str(lid_scheme);
+                    std::string graph_name_base = fmt::format("{}D_{}_K{}_AddK{}Eps{:.1f}_{}_OptK{}Eps{:.3f}Path{}", 
+                        dims, metric_str, cg.k, cg.k_ext, cg.eps_ext, scheme, og.k_opt, og.eps_opt, og.i_opt);
                     
-                    // Load or build the full graph first                    
-                    std::string full_graph_path = graph_paths.dynamic_graph_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, 
-                                                                            og.k_opt, og.eps_opt, og.i_opt, DataStreamType::AddAll);                    
-                    if(!std::filesystem::exists(full_graph_path)) {
-                        log("\n--- Building full graph first ---\n");
-                        deglib::benchmark::create_graph(*base_repository, DataStreamType::AddAll, full_graph_path, config.metric, lid, 
-                            cg.k, cg.k_ext, cg.eps_ext, og.k_opt, og.eps_opt, og.i_opt, cg.build_threads, true, ds.info().scale);
-                    }
-                    
-                    // Reduce graph incrementally
-                    auto created_files = [&]() {
-                        log("\n--- Loading full graph ---\n");
-                        auto graph = deglib::graph::load_sizebounded_graph(full_graph_path.c_str());
-                        log("Loaded graph with {} vertices\n", graph.size());
-
-                        log("\n--- Reducing graph incrementally ---\n");
-                        auto files = deglib::benchmark::reduce_graph_incremental(
-                            graph, scaling_dir, graph_name_base, rs.size_interval,
-                            k_opt, eps_opt, i_opt,
-                            cg.build_threads, true, ds.info().scale);
-                        log("Created {} reduced graphs\n", files.size());
-                        return files;
-                    }();
+                    // Build all graphs incrementally (skips existing graphs internally)
+                    log("\n--- Building graphs incrementally ---\n");
+                    auto created_files = deglib::benchmark::create_incremental_graphs(
+                        *base_repository, scaling_dir, graph_name_base, ss.size_interval,
+                        config.metric, lid_scheme, cg.k, cg.k_ext, cg.eps_ext, 
+                        og.k_opt, og.eps_opt, og.i_opt, 
+                        cg.build_threads, true, ds.info().scale);
+                    log("Created {} incremental graphs\n", created_files.size());
                     
                     // Test all graphs
                     log("\n--- Testing graphs ---\n");
                     for(const auto& [graph_path, vertex_count] : created_files) {
-                        log("\n=== REDUCE_SCALING Test: size={} ===\n", vertex_count);
+                        log("\n=== SIZE_SCALING Test: {} size={} ===\n", scheme_name, vertex_count);
                         log("Graph: {}\n", graph_path);
                         
                         if(std::filesystem::exists(graph_path)) {
-                            const auto test_graph = deglib::graph::load_readonly_graph(graph_path.c_str());
+                            const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
                             
-                            // dont test an empty graph
-                            if(test_graph.size() == 0)
-                                continue;
-
                             // Load ground truth for this specific size
                             auto ground_truth = ds.load_groundtruth_for_size(cg.anns_k, vertex_count);
                             
                             wait_before_test();
-                            deglib::benchmark::test_graph_anns(test_graph, *query_repository, ground_truth, 
+                            deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
                                 cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter, nullptr, linear_baseline_us);
                         } else {
                             log("Graph file not found: {}\n", graph_path);
                         }
                     }
+                    
+                    deglib::benchmark::reset_log_to_console();
+                    log("SIZE_SCALING {}: Log written to: {}\n", scheme_name, log_path);
                 }
-
-                deglib::benchmark::reset_log_to_console();
-                log("REDUCE_SCALING: Log written to: {}\n", log_path);
             }
         }
     }
-    
+
     // OPT_SCALING test (build random graph, optimize at intervals, test all)
     if(run_all || test_type_arg == "opt_scaling") {
         const auto& os = config.opt_scaling_test;
@@ -1481,15 +1399,16 @@ int main(int argc, char *argv[]) {
             // Ensure dynamic directory exists
             std::filesystem::create_directories(dynamic_dir);
  
-            const std::vector<std::tuple<uint8_t, float, uint8_t>> settings = {
-                std::make_tuple(og.k_opt, og.eps_opt, og.i_opt), 
-                std::make_tuple(0, 0, 0), 
+            const std::vector<std::tuple<uint8_t, float, uint8_t, deglib::builder::OptimizationTarget>> settings = {
+                std::make_tuple(og.k_opt, og.eps_opt, og.i_opt, deglib::builder::OptimizationTarget::StreamingData), 
+                std::make_tuple(0, 0, 0, deglib::builder::OptimizationTarget::StreamingData), 
+                std::make_tuple(og.k_opt, og.eps_opt, og.i_opt, cg.lid), 
             };
-            for(const auto& [k_opt, eps_opt, i_opt] : settings) {
+            for(const auto& [k_opt, eps_opt, i_opt, lid] : settings) {
                 for(DataStreamType ds_type : dd.data_stream_types) {
-                    std::string graph_path = graph_paths.dynamic_graph_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, 
+                    std::string graph_path = graph_paths.dynamic_graph_file(dims, config.metric, lid, cg.k, cg.k_ext, cg.eps_ext, 
                                                                             k_opt, eps_opt, i_opt, ds_type);
-                    std::string log_path = graph_paths.dynamic_log_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, 
+                    std::string log_path = graph_paths.dynamic_log_file(dims, config.metric, lid, cg.k, cg.k_ext, cg.eps_ext, 
                                                                         k_opt, eps_opt, i_opt, ds_type);
                     
                     // Skip if log file already exists
@@ -1510,7 +1429,7 @@ int main(int argc, char *argv[]) {
                         log("\n--- Building graph with DataStreamType={} ---\n", DatasetConfig::data_stream_type_str(ds_type));
                         deglib::benchmark::create_graph(
                             *base_repository, ds_type, graph_path,
-                            config.metric, deglib::builder::OptimizationTarget::StreamingData,
+                            config.metric, lid,
                             cg.k, cg.k_ext, cg.eps_ext,
                             k_opt, eps_opt, i_opt,
                             cg.build_threads, true, ds.info().scale);
@@ -1560,6 +1479,108 @@ int main(int argc, char *argv[]) {
             }
         }
     }
+
+    
+
+    // REDUCE_SCALING test (build full graph and reduce it incrementally)
+    if(run_all || test_type_arg == "reduce_scaling") {
+        const auto& rs = config.reduce_scaling_test;
+        const auto& cg = config.create_graph;
+        const auto& og = config.optimize_graph;
+        
+        // Test both schemes: original cg.lid and StreamingData
+        for(deglib::builder::OptimizationTarget lid_scheme : {cg.lid, deglib::builder::OptimizationTarget::StreamingData}) {
+            std::string scaling_dir = graph_paths.reduce_scaling_directory(lid_scheme);
+            std::string log_path = graph_paths.reduce_scaling_log_file(lid_scheme);
+            std::string scheme = DatasetConfig::optimization_target_str(lid_scheme);
+            
+            log("\n=== REDUCE_SCALING Test: {} ===\n", scheme);
+            log("Size interval: {}\n", rs.size_interval);
+            log("Directory: {}\n", scaling_dir);
+            log("Log file: {}\n", log_path);
+            
+            if(do_run && base_repository && query_repository) {
+                // Skip entire scenario if log file already exists
+                if(std::filesystem::exists(log_path)) {
+                    log("REDUCE_SCALING {}: Skipping - log file already exists: {}\n", scheme, log_path);
+                    continue;
+                } else {
+                    // Ensure scaling directory exists
+                    std::filesystem::create_directories(scaling_dir);
+                    
+                    // Set log file for all reduce scaling operations
+                    deglib::benchmark::set_log_file(log_path, false);
+                    log("\n=== REDUCE_SCALING Test: {} ===\n", scheme);
+                    log("Size interval: {}\n", rs.size_interval);
+
+                    for(const auto& [k_opt, eps_opt, i_opt] : std::array<std::tuple<uint8_t, float, uint8_t>, 2>{
+                        std::make_tuple(og.k_opt, og.eps_opt, og.i_opt),
+                        std::make_tuple(static_cast<uint8_t>(0), 0.0f, static_cast<uint8_t>(0))
+                    }) {
+                        log("----------------------------------------------------------------\n");
+                        log("---- REDUCE_SCALING with k_opt={}, eps_opt={:.4f}, i_opt={} ----\n", k_opt, eps_opt, i_opt);
+                    
+                        // Generate base name for graph files
+                        std::string metric_str = (config.metric == deglib::Metric::L2) ? "L2" : "L2_Uint8";
+                        std::string graph_name_base = fmt::format("{}D_{}_K{}_AddK{}Eps{:.1f}_{}_ReduceWith_OptK{}Eps{:.3f}Path{}",
+                                                                dims, metric_str, cg.k, cg.k_ext, cg.eps_ext, scheme, k_opt, eps_opt, i_opt);
+                        
+                        // Load or build the full graph first                    
+                        std::string full_graph_path = graph_paths.dynamic_graph_file(dims, config.metric, lid_scheme, cg.k, cg.k_ext, cg.eps_ext, 
+                                                                                og.k_opt, og.eps_opt, og.i_opt, DataStreamType::AddAll);                    
+                        if(!std::filesystem::exists(full_graph_path)) {
+                            log("\n--- Building full graph first ---\n");
+                            deglib::benchmark::create_graph(*base_repository, DataStreamType::AddAll, full_graph_path, config.metric, lid_scheme, 
+                                cg.k, cg.k_ext, cg.eps_ext, og.k_opt, og.eps_opt, og.i_opt, cg.build_threads, true, ds.info().scale);
+                        }
+                        
+                        // Reduce graph incrementally
+                        auto created_files = [&]() {
+                            log("\n--- Loading full graph ---\n");
+                            auto graph = deglib::graph::load_sizebounded_graph(full_graph_path.c_str());
+                            log("Loaded graph with {} vertices\n", graph.size());
+
+                            log("\n--- Reducing graph incrementally ---\n");
+                            auto files = deglib::benchmark::reduce_graph_incremental(
+                                graph, scaling_dir, graph_name_base, rs.size_interval,
+                                k_opt, eps_opt, i_opt,
+                                cg.build_threads, true, ds.info().scale);
+                            log("Created {} reduced graphs\n", files.size());
+                            return files;
+                        }();
+                        
+                        // Test all graphs
+                        log("\n--- Testing graphs ---\n");
+                        for(const auto& [graph_path, vertex_count] : created_files) {
+                            log("\n=== REDUCE_SCALING Test: {} size={} ===\n", scheme, vertex_count);
+                            log("Graph: {}\n", graph_path);
+                            
+                            if(std::filesystem::exists(graph_path)) {
+                                const auto test_graph = deglib::graph::load_readonly_graph(graph_path.c_str());
+                                
+                                // dont test an empty graph
+                                if(test_graph.size() == 0)
+                                    continue;
+
+                                // Load ground truth for this specific size
+                                auto ground_truth = ds.load_groundtruth_for_size(cg.anns_k, vertex_count);
+                                
+                                wait_before_test();
+                                deglib::benchmark::test_graph_anns(test_graph, *query_repository, ground_truth, 
+                                    cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter, nullptr, linear_baseline_us);
+                            } else {
+                                log("Graph file not found: {}\n", graph_path);
+                            }
+                        }
+                    }
+
+                    deglib::benchmark::reset_log_to_console();
+                    log("REDUCE_SCALING {}: Log written to: {}\n", scheme, log_path);
+                }
+            }
+        }
+    }
+    
     
     
     log("\nTest OK\n");
