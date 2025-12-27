@@ -369,7 +369,7 @@ inline std::vector<std::pair<std::string, uint32_t>> create_incremental_graphs(
     if(thread_count == 1)
         builder.setBatchSize(1,1);
     
-    const auto log_after = 20000;
+    const auto log_after = 10000;
 
     log("Start building (first missing size: {})\n", first_missing_size);    
     auto start = std::chrono::steady_clock::now();
@@ -477,7 +477,7 @@ inline std::vector<std::pair<std::string, uint32_t>> reduce_graph_incremental(
     if(thread_count == 1)
         builder.setBatchSize(1,1);
     
-    const auto log_after = 20000;
+    const auto log_after = 10000;
     auto start = std::chrono::steady_clock::now();
     uint64_t duration_ms = 0;
 

@@ -482,7 +482,7 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
         
     } else if (dataset_name == DatasetName::GLOVE) {
         conf.create_graph.lid = deglib::builder::OptimizationTarget::HighLID;
-        conf.create_graph.eps_parameter = { 0.01f, 0.05f, 0.10f, 0.15f, 0.2f, 0.3f };
+        conf.create_graph.eps_parameter = { 0.001f, 0.05f, 0.10f, 0.125f, 0.15f, 0.175f, 0.2f, 0.25f, 0.3f };
 
         conf.optimize_graph.total_iterations = 2000000;
 
