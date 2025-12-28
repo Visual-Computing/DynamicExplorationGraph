@@ -534,8 +534,8 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
             { deglib::builder::OptimizationTarget::StreamingData_SchemeD, { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } }
         };       
 
-        conf.opt_scaling_test.iteration_interval = 10000;
         conf.opt_scaling_test.iteration_interval = 100000;
+        conf.opt_scaling_test.total_iterations = 1000000;
     } else if (dataset_name == DatasetName::ENRON) {
 
         conf.create_graph.k = 30;
@@ -557,8 +557,8 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
             { deglib::builder::OptimizationTarget::StreamingData_SchemeD, { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f } }
         };       
 
-        conf.opt_scaling_test.iteration_interval = 10000;
         conf.opt_scaling_test.iteration_interval = 100000;
+        conf.opt_scaling_test.total_iterations = 1000000;
     }
 
     return conf;
@@ -580,7 +580,7 @@ int main(int argc, char *argv[]) {
 
     // Parse command-line arguments
     // Usage: deglib_phd <dataset> [test_type] [--run]
-    DatasetName ds_name = DatasetName::SIFT1M
+    DatasetName ds_name = DatasetName::AUDIO;
     std::string test_type_arg = "all";
     bool do_run = true;
     
