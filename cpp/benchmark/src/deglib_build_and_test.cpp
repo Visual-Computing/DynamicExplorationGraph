@@ -301,27 +301,18 @@ public:
     }
     
     // ============================================================================
-    // CreateGraphTest: main graph files
+    // CreateGraphTest: main graph files (with optional optimization parameters)
     // ============================================================================
     std::string graph_file(uint32_t dims, deglib::Metric metric, uint8_t k, uint8_t k_ext, float eps_ext, 
-                           deglib::builder::OptimizationTarget lid) const {
-        return (graph_dir / (base_name(dims, metric, k, k_ext, eps_ext, lid) + ".deg")).string();
+                           deglib::builder::OptimizationTarget lid, uint8_t k_opt = 0, float eps_opt = 0, uint8_t i_opt = 0) const {
+        std::string suffix = (k_opt == 0 && eps_opt == 0 && i_opt == 0) ? "" : opt_suffix(k_opt, eps_opt, i_opt);
+        return (graph_dir / (base_name(dims, metric, k, k_ext, eps_ext, lid) + suffix + ".deg")).string();
     }
     
     std::string graph_log_file(uint32_t dims, deglib::Metric metric, uint8_t k, uint8_t k_ext, float eps_ext, 
-                               deglib::builder::OptimizationTarget lid) const {
-        return (graph_dir / (base_name(dims, metric, k, k_ext, eps_ext, lid) + ".log")).string();
-    }
-    
-    // Versions with optimization parameters (for all_schemes test with StreamingData)
-    std::string graph_file(uint32_t dims, deglib::Metric metric, uint8_t k, uint8_t k_ext, float eps_ext, 
-                           deglib::builder::OptimizationTarget lid, uint8_t k_opt, float eps_opt, uint8_t i_opt) const {
-        return (graph_dir / (base_name(dims, metric, k, k_ext, eps_ext, lid) + opt_suffix(k_opt, eps_opt, i_opt) + ".deg")).string();
-    }
-    
-    std::string graph_log_file(uint32_t dims, deglib::Metric metric, uint8_t k, uint8_t k_ext, float eps_ext, 
-                               deglib::builder::OptimizationTarget lid, uint8_t k_opt, float eps_opt, uint8_t i_opt) const {
-        return (graph_dir / (base_name(dims, metric, k, k_ext, eps_ext, lid) + opt_suffix(k_opt, eps_opt, i_opt) + ".log")).string();
+                               deglib::builder::OptimizationTarget lid, uint8_t k_opt = 0, float eps_opt = 0, uint8_t i_opt = 0) const {
+        std::string suffix = (k_opt == 0 && eps_opt == 0 && i_opt == 0) ? "" : opt_suffix(k_opt, eps_opt, i_opt);
+        return (graph_dir / (base_name(dims, metric, k, k_ext, eps_ext, lid) + suffix + ".log")).string();
     }
     
     // ============================================================================
@@ -879,14 +870,14 @@ int main(int argc, char *argv[]) {
         }
     }
     
-    // ALL_SCHEMES test (tests all 4 StreamingData OptimizationTargets with CreateGraphTest parameters)
+    // ALL_SCHEMES test (tests all OptimizationTargets)
     if(run_all || test_type_arg == "all_schemes") {
         const auto& as = config.all_schemes_test;
         const auto& cg = config.create_graph;
         const auto& og = config.optimize_graph;
         
         log("\n=== ALL_SCHEMES Test ===\n");
-        log("Testing all schemes with k={}, k_ext={}, eps_ext={:.2f}, k_opt={}, eps_opt={:.4f}, i_opt={}\n", cg.k, cg.k_ext, cg.eps_ext, og.k_opt, og.eps_opt, og.i_opt);
+        log("Testing all schemes with k={}, k_ext={}, eps_ext={:.2f}\n", cg.k, cg.k_ext, cg.eps_ext);
         
         if(do_run && base_repository && query_repository) {
             // Load ground truth for this test
@@ -894,8 +885,9 @@ int main(int argc, char *argv[]) {
             
             // Iterate over all schemes configured in eps_parameter
             for(const auto& [lid, scheme_eps] : as.eps_parameter) {
-                std::string graph_path = graph_paths.graph_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, lid, og.k_opt, og.eps_opt, og.i_opt);
-                std::string log_path = graph_paths.graph_log_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, lid, og.k_opt, og.eps_opt, og.i_opt);
+
+                std::string graph_path = graph_paths.graph_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, lid);
+                std::string log_path = graph_paths.graph_log_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, lid);
                 
                 // Skip if log file already exists
                 if(std::filesystem::exists(log_path)) {
@@ -910,7 +902,7 @@ int main(int argc, char *argv[]) {
                 // Build graph if it doesn't exist
                 if(!std::filesystem::exists(graph_path)) {
                     log("Building Graph ...\n");                    
-                    deglib::benchmark::create_graph(*base_repository, DataStreamType::AddAll, graph_path, config.metric, lid, cg.k, cg.k_ext, cg.eps_ext, og.k_opt, og.eps_opt, og.i_opt, cg.build_threads, true, ds.info().scale);
+                    deglib::benchmark::create_graph(*base_repository, DataStreamType::AddAll, graph_path, config.metric, lid, cg.k, cg.k_ext, cg.eps_ext, 0, 0, 0, cg.build_threads, true, ds.info().scale);
                 }
                 
                 // Test the graph
