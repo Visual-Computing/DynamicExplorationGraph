@@ -823,11 +823,11 @@ class EvenRegularGraphBuilder {
               }
             }
 
-            // should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
+            // Single Threaded: should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
+            // Multi Threaded: can happen if the mutation threads replaced an edge in the neighbor list at the same time
             if(new_neighbor_weight == std::numeric_limits<float>::lowest()) {
               std::cerr << "could not find a new neighbor for candidate " << candidate_index << " when adding vertex " << external_label << std::endl;
-              std::perror("");
-              std::abort();
+              continue;
             }
 
             new_neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(new_neighbor_index), dist_func_param); 
@@ -859,10 +859,11 @@ class EvenRegularGraphBuilder {
               }
             }
 
-             if(best_distortion == std::numeric_limits<float>::max()) {
+            // Single Threaded: should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
+            // Multi Threaded: can happen if the mutation threads replaced an edge in the neighbor list at the same time
+            if(best_distortion == std::numeric_limits<float>::max()) {
               std::cerr << "could not find a new neighbor for candidate " << candidate_index << " when adding vertex " << external_label << std::endl;
-              std::perror("");
-              std::abort();
+              continue;
             }
           } 
           else if(this->optimizationTarget_ == SchemeA) 
@@ -892,11 +893,11 @@ class EvenRegularGraphBuilder {
               }
             }
 
-            
+            // Single Threaded: should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
+            // Multi Threaded: can happen if the mutation threads replaced an edge in the neighbor list at the same time
             if(best_neighbor_distance == std::numeric_limits<float>::max()) {
               std::cerr << "could not find a new neighbor for candidate " << candidate_index << " when adding vertex " << external_label << std::endl;
-              std::perror("");
-              std::abort();
+              continue;
             }
           }
           else if(this->optimizationTarget_ == SchemeB) 
@@ -927,10 +928,11 @@ class EvenRegularGraphBuilder {
               }
             }
 
+            // Single Threaded: should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
+            // Multi Threaded: can happen if the mutation threads replaced an edge in the neighbor list at the same time
             if(min_edge_weight == std::numeric_limits<float>::max()) {
               std::cerr << "could not find a new neighbor for candidate " << candidate_index << " when adding vertex " << external_label << std::endl;
-              std::perror("");
-              std::abort();
+              continue;
             }
             
             if(min_edge_weight != std::numeric_limits<float>::max()) {
