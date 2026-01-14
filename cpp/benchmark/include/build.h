@@ -191,7 +191,8 @@ inline void create_graph(
     const uint8_t i_opt, 
     const uint32_t thread_count,
     const bool use_rng = true,
-    const uint32_t scale = 1) 
+    const uint32_t scale = 1,
+    const bool use_path_verification = false) 
 {
     auto rnd = std::mt19937(7);
     const uint32_t swap_tries = 0;
@@ -205,7 +206,7 @@ inline void create_graph(
     auto graph = deglib::graph::SizeBoundedGraph(max_vertex_count, k, feature_space);
 
     log("Start graph builder (RNG pruning: {})\n", use_rng ? "enabled" : "disabled");   
-    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, lid, k_ext, eps_ext, k_opt, eps_opt, i_opt, swap_tries, additional_swap_tries, use_rng);
+    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, lid, k_ext, eps_ext, k_opt, eps_opt, i_opt, swap_tries, additional_swap_tries, use_rng, use_path_verification);
     builder.setThreadCount(thread_count);
     if(thread_count == 1)
         builder.setBatchSize(1,1);

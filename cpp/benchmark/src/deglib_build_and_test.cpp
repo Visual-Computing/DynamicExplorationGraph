@@ -394,25 +394,26 @@ public:
     // ============================================================================
 private:
     std::string dynamic_file_name(uint32_t dims, deglib::Metric metric, deglib::builder::OptimizationTarget lid, uint8_t k, uint8_t k_ext, float eps_ext,
-                                  uint8_t k_opt, float eps_opt, uint8_t i_opt, uint64_t opt_iterations, DataStreamType ds_type, const std::string& ext) const {
+                                  uint8_t k_opt, float eps_opt, uint8_t i_opt, uint64_t opt_iterations, DataStreamType ds_type, const std::string& ext, bool use_path_verification) const {
         std::string ds_str = DatasetConfig::data_stream_type_str(ds_type);
         std::string lid_str = DatasetConfig::optimization_target_str(lid);
         std::string opt_part = (k_opt == 0 && eps_opt == 0 && i_opt == 0) ? "" : opt_suffix(k_opt, eps_opt, i_opt);
         std::string it_part = (opt_iterations == 0) ? "" : fmt::format("_it{}", opt_iterations);
+        std::string path_part = use_path_verification ? "_UsingPathSearch" : "";
         return (std::filesystem::path(dynamic_directory()) 
-                / fmt::format("{}D_{}_K{}_AddK{}Eps{:.1f}_{}{}{}_{}{}",
-                              dims, metric_str(metric), k, k_ext, eps_ext, lid_str, opt_part, it_part, ds_str, ext)).string();
+                / fmt::format("{}D_{}_K{}_AddK{}Eps{:.1f}_{}{}{}_{}{}{}",
+                              dims, metric_str(metric), k, k_ext, eps_ext, lid_str, opt_part, it_part, ds_str, path_part, ext)).string();
     }
     
 public:
     std::string dynamic_graph_file(uint32_t dims, deglib::Metric metric, deglib::builder::OptimizationTarget lid, uint8_t k, uint8_t k_ext, float eps_ext,
-                                   uint8_t k_opt, float eps_opt, uint8_t i_opt, DataStreamType ds_type, uint64_t opt_iterations = 0) const {
-        return dynamic_file_name(dims, metric, lid, k, k_ext, eps_ext, k_opt, eps_opt, i_opt, opt_iterations, ds_type, ".deg");
+                                   uint8_t k_opt, float eps_opt, uint8_t i_opt, DataStreamType ds_type, uint64_t opt_iterations = 0, bool use_path_verification = false) const {
+        return dynamic_file_name(dims, metric, lid, k, k_ext, eps_ext, k_opt, eps_opt, i_opt, opt_iterations, ds_type, ".deg", use_path_verification);
     }
     
     std::string dynamic_log_file(uint32_t dims, deglib::Metric metric, deglib::builder::OptimizationTarget lid, uint8_t k, uint8_t k_ext, float eps_ext,
-                                 uint8_t k_opt, float eps_opt, uint8_t i_opt, DataStreamType ds_type, uint64_t opt_iterations = 0) const {
-        return dynamic_file_name(dims, metric, lid, k, k_ext, eps_ext, k_opt, eps_opt, i_opt, opt_iterations, ds_type, ".log");
+                                 uint8_t k_opt, float eps_opt, uint8_t i_opt, DataStreamType ds_type, uint64_t opt_iterations = 0, bool use_path_verification = false) const {
+        return dynamic_file_name(dims, metric, lid, k, k_ext, eps_ext, k_opt, eps_opt, i_opt, opt_iterations, ds_type, ".log", use_path_verification);
     }
     
     // ============================================================================
@@ -1402,7 +1403,6 @@ int main(int argc, char *argv[]) {
     
     // DYNAMIC_DATA test (builds graphs with different DataStreamTypes in dynamic directory)
     if(run_all || test_type_arg == "dynamic_data") {
-        const auto& dd = config.dynamic_data_test;
         const auto& cg = config.create_graph;
         const auto& og = config.optimize_graph;
         std::string dynamic_dir = graph_paths.dynamic_directory();
@@ -1416,19 +1416,20 @@ int main(int argc, char *argv[]) {
             // Ensure dynamic directory exists
             std::filesystem::create_directories(dynamic_dir);
  
-            const std::vector<std::tuple<uint8_t, float, uint8_t, uint32_t, deglib::builder::OptimizationTarget>> settings = {
+            const std::vector<std::tuple<uint8_t, float, uint8_t, uint32_t, deglib::builder::OptimizationTarget, bool>> settings = {
                 // TODO: add version which uses RangeSearch in the RestoreGraph phase
-                std::make_tuple(og.k_opt, og.eps_opt, og.i_opt, 0, deglib::builder::OptimizationTarget::StreamingData_SchemeC), 
-                std::make_tuple(0, 0, 0, 0, deglib::builder::OptimizationTarget::StreamingData_SchemeC), 
-                std::make_tuple(og.k_opt, og.eps_opt, og.i_opt, 0, cg.lid), 
-                std::make_tuple(og.k_opt, og.eps_opt, og.i_opt, og.total_iterations/2, cg.lid), 
+                std::make_tuple(og.k_opt, og.eps_opt, og.i_opt, 0, deglib::builder::OptimizationTarget::StreamingData_SchemeC, false), 
+                std::make_tuple(og.k_opt, og.eps_opt, og.i_opt, 0, deglib::builder::OptimizationTarget::StreamingData_SchemeC, true), 
+                std::make_tuple(0, 0, 0, 0, deglib::builder::OptimizationTarget::StreamingData_SchemeC, false), 
+                std::make_tuple(og.k_opt, og.eps_opt, og.i_opt, 0, cg.lid, false), 
+                std::make_tuple(og.k_opt, og.eps_opt, og.i_opt, og.total_iterations/2, cg.lid, false), 
             };
-            for(const auto& [k_opt, eps_opt, i_opt, opt_iterations, lid] : settings) {
+            for(const auto& [k_opt, eps_opt, i_opt, opt_iterations, lid, use_path_verification] : settings) {
                 for(DataStreamType ds_type : {DataStreamType::AddHalf, DataStreamType::AddAllRemoveHalf, DataStreamType::AddHalfRemoveAndAddOneAtATime}) {
                     std::string graph_path = graph_paths.dynamic_graph_file(dims, config.metric, lid, cg.k, cg.k_ext, cg.eps_ext, 
-                                                                            k_opt, eps_opt, i_opt, ds_type, opt_iterations);
+                                                                            k_opt, eps_opt, i_opt, ds_type, opt_iterations, use_path_verification);
                     std::string log_path = graph_paths.dynamic_log_file(dims, config.metric, lid, cg.k, cg.k_ext, cg.eps_ext, 
-                                                                        k_opt, eps_opt, i_opt, ds_type, opt_iterations);
+                                                                        k_opt, eps_opt, i_opt, ds_type, opt_iterations, use_path_verification);
                     
                     // Skip if log file already exists
                     if(std::filesystem::exists(log_path)) {
@@ -1451,7 +1452,7 @@ int main(int argc, char *argv[]) {
                             config.metric, lid,
                             cg.k, cg.k_ext, cg.eps_ext,
                             k_opt, eps_opt, i_opt,
-                            cg.build_threads, true, ds.info().scale);
+                            cg.build_threads, true, ds.info().scale, use_path_verification);
                         log("Graph built and saved: {}\n", graph_path);
 
                         // optimize graph
