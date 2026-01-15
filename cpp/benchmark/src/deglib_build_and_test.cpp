@@ -141,7 +141,7 @@ struct EpsExtSweepTest {
  * Uses a single log file for all size variants.
  */
 struct SizeScalingTest {
-    uint32_t size_interval = 100000;  // Build graphs at this interval (e.g., 200k, 400k, ...)
+    uint32_t size_interval = 10000;  // Build graphs at this interval (e.g., 200k, 400k, ...)
 };
 
 /**
@@ -537,7 +537,6 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
 
         conf.opt_scaling_test.iteration_interval = 100000;
         conf.opt_scaling_test.total_iterations = 1000000;
-        conf.reduce_scaling_test.size_interval = 10000;
     } else if (dataset_name == DatasetName::ENRON) {
 
         conf.create_graph.k = 30;
@@ -561,7 +560,6 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
 
         conf.opt_scaling_test.iteration_interval = 100000;
         conf.opt_scaling_test.total_iterations = 1000000;
-        conf.reduce_scaling_test.size_interval = 10000;
     }
 
     return conf;
@@ -1162,18 +1160,20 @@ int main(int argc, char *argv[]) {
                     // Test all graphs
                     log("\n--- Testing graphs ---\n");
                     for(const auto& [graph_path, vertex_count] : created_files) {
-                        log("\n=== SIZE_SCALING Test: {} size={} ===\n", scheme_name, vertex_count);
-                        log("Graph: {}\n", graph_path);
-                        
                         if(std::filesystem::exists(graph_path)) {
-                            const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
-                            
-                            // Load ground truth for this specific size
-                            auto ground_truth = ds.load_groundtruth_for_size(cg.anns_k, vertex_count);
-                            
-                            wait_before_test();
-                            deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
-                                cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter, nullptr, linear_baseline_us);
+                            // Check for ground truth for this specific size
+                            std::string gt_file = ds.groundtruth_file(vertex_count);
+                            if(std::filesystem::exists(gt_file)) {
+                                log("\n=== SIZE_SCALING Test: {} size={} ===\n", scheme_name, vertex_count);
+                                log("Graph: {}\n", graph_path);
+
+                                const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
+                                auto ground_truth = ds.load_groundtruth_for_size(cg.anns_k, vertex_count);
+                                
+                                wait_before_test();
+                                deglib::benchmark::test_graph_anns(graph, *query_repository, ground_truth, 
+                                    cg.anns_repeat, cg.anns_threads, cg.anns_k, cg.eps_parameter, nullptr, linear_baseline_us);
+                            }
                         } else {
                             log("Graph file not found: {}\n", graph_path);
                         }
@@ -1619,19 +1619,23 @@ int main(int argc, char *argv[]) {
     // REDUCE_SCALING_MEASURE test
     // This reuses the reduce_scaling configuration but runs the incremental measurement in a separate log file.
     if(run_all || test_type_arg == "reduce_scaling") {
-        const auto& rs = config.reduce_scaling_test;
         const auto& cg = config.create_graph;
         const auto& og = config.optimize_graph;
+        const auto& ss = config.size_scaling_test;
         
         for(deglib::builder::OptimizationTarget lid_scheme : {cg.lid, deglib::builder::OptimizationTarget::StreamingData_SchemeC}) {
-            std::string scaling_dir = graph_paths.reduce_scaling_directory(lid_scheme);
-            std::string log_path = scaling_dir + "/log_measured.txt";
+            std::string reduce_dir = graph_paths.reduce_scaling_directory(lid_scheme);
+            std::string log_path = reduce_dir + "/log_measured.txt";
             std::string scheme = DatasetConfig::optimization_target_str(lid_scheme);
             
+            // Get size scaling directory where the pre-built graphs are
+            std::string size_scaling_dir = graph_paths.size_scaling_directory(lid_scheme);
+
             log("\n=== REDUCE_SCALING_MEASURE Test: {} ===\n", scheme);
-            log("Size interval: {}\n", rs.size_interval);
-            log("Directory: {}\n", scaling_dir);
+            log("Size interval: {}\n", ss.size_interval);
+            log("Directory: {}\n", reduce_dir);
             log("Log file: {}\n", log_path);
+            log("Loading graphs from: {}\n", size_scaling_dir);
             
             if(do_run && base_repository) {
                 // Skip if log file already exists
@@ -1640,27 +1644,31 @@ int main(int argc, char *argv[]) {
                     continue;
                 } else {
                     // Ensure scaling directory exists
-                    std::filesystem::create_directories(scaling_dir);
+                    std::filesystem::create_directories(reduce_dir);
                     
                     // Set log file for measurement
                     deglib::benchmark::set_log_file(log_path, false);
                     log("\n=== REDUCE_SCALING_MEASURE Test: {} ===\n", scheme);
                     
+                     // Generate base name for expected size scaling graph files
+                    std::string metric_str = (config.metric == deglib::Metric::L2) ? "L2" : "L2_Uint8";
+                    std::string graph_name_base = fmt::format("{}D_{}_K{}_AddK{}Eps{:.1f}_{}_OptK{}Eps{:.3f}Path{}", 
+                        dims, metric_str, cg.k, cg.k_ext, cg.eps_ext, scheme, og.k_opt, og.eps_opt, og.i_opt);
+
                     for(const auto& [k_opt, eps_opt, i_opt] : std::array<std::tuple<uint8_t, float, uint8_t>, 2>{
                         std::make_tuple(og.k_opt, og.eps_opt, og.i_opt),
                         std::make_tuple(static_cast<uint8_t>(0), 0.0f, static_cast<uint8_t>(0))
                     }) {
                         log("----------------------------------------------------------------\n");
                         log("---- REDUCE_SCALING_MEASURE with k_opt={}, eps_opt={:.4f}, i_opt={} ----\n", k_opt, eps_opt, i_opt);
-                    
-                        log("\n--- Incremental Removal Measurement (Target Size: {}, Step: {}) ---\n", base_repository->size(), rs.size_interval);
-                        deglib::benchmark::reduce_graph_incremental_measure(
-                            *base_repository,
-                            rs.size_interval,
-                            cg.k, cg.k_ext, cg.eps_ext,
+                        
+                        deglib::benchmark::measure_reduction_on_prebuilt_graphs(
+                            size_scaling_dir,
+                            graph_name_base,
+                            ss.size_interval,
+                            (uint32_t)base_repository->size(),
                             k_opt, eps_opt, i_opt,
                             cg.build_threads,
-                            config.metric,
                             lid_scheme,
                             true,
                             ds.info().scale
