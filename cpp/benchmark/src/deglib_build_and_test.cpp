@@ -482,6 +482,8 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
         conf.create_graph.eps_parameter = { 0.001f, 0.05f, 0.10f, 0.125f, 0.15f, 0.175f, 0.2f, 0.25f, 0.3f };
 
         conf.optimize_graph.total_iterations = 2000000;
+        conf.opt_scaling_test.total_iterations = 30000000;
+        conf.opt_scaling_test.iteration_interval = 3000000;
 
         conf.all_schemes_test.eps_parameter = {
             { deglib::builder::OptimizationTarget::SchemeA, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f } },
@@ -498,6 +500,8 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
         conf.create_graph.eps_parameter = { 0.01f, 0.02f, 0.03f, 0.04f, 0.06f, 0.1f, 0.2f };
 
         conf.optimize_graph.total_iterations = 400000;
+        conf.opt_scaling_test.total_iterations = 20000000;
+        conf.opt_scaling_test.iteration_interval = 2000000;
 
         conf.all_schemes_test.eps_parameter = {
             { deglib::builder::OptimizationTarget::SchemeA, { 0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f } },
