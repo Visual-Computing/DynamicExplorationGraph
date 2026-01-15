@@ -515,6 +515,96 @@ inline std::vector<std::pair<std::string, uint32_t>> reduce_graph_incremental(
 
 
 /**
+ * Incremental graph construction and reduction measurement test.
+ * Builds the graph in steps, and after each step, measures the time to remove the newly added elements.
+ * 
+ * @param repository The feature repository.
+ * @param step_size Number of elements to add/remove in each step.
+ * @param k Graph degree.
+ * @param k_ext Builder extended K.
+ * @param eps_ext Builder extended Epsilon.
+ * @param k_opt Builder optimization K.
+ * @param eps_opt Builder optimization Epsilon.
+ * @param i_opt Builder optimization path length.
+ * @param thread_count Threads.
+ * @param metric Distance metric.
+ * @param lid_scheme LID optimization target.
+ * @param use_rng Use RNG pruning.
+ * @param scale Distance scaling factor.
+ */
+inline void reduce_graph_incremental_measure(
+    const deglib::StaticFeatureRepository& repository, 
+    const uint32_t step_size,
+    const uint8_t k,
+    const uint8_t k_ext,
+    const float eps_ext,
+    const uint8_t k_opt, 
+    const float eps_opt, 
+    const uint8_t i_opt, 
+    const uint32_t thread_count,
+    const deglib::Metric metric,
+    const deglib::builder::OptimizationTarget lid_scheme,
+    const bool use_rng = true,
+    const uint32_t scale = 1) 
+{
+    const auto dims = repository.dims();
+    const uint32_t max_vertex_count = uint32_t(repository.size());
+    const auto feature_space = deglib::FloatSpace(dims, metric);
+    const auto feature_byte_size = feature_space.get_data_size();
+    
+    // Initialize empty graph with capacity
+    auto graph = deglib::graph::SizeBoundedGraph(max_vertex_count, k, feature_space);
+    
+    // Builder setup
+    auto rnd = std::mt19937(7);
+    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, lid_scheme, k_ext, eps_ext, k_opt, eps_opt, i_opt, 0, 0, use_rng);
+    builder.setThreadCount(thread_count);
+    if(thread_count == 1) builder.setBatchSize(1,1);
+
+    auto addEntry = [&](uint32_t idx) {
+        auto feature = repository.getFeature(idx);
+        auto feature_vector = std::vector<std::byte>{feature, feature + feature_byte_size};
+        builder.addEntry(idx, std::move(feature_vector));
+    };
+
+    auto dummy_callback = [](deglib::builder::BuilderStatus&){};
+
+    log("\n=== REDUCE_SCALING_MEASURE: Incrementally building and removing (step_size={}) ===\n", step_size);
+    
+    // Iterate through the dataset using target sizes
+    for(uint32_t target_size = step_size; target_size <= max_vertex_count; target_size += step_size) {
+        const uint32_t current_size = (uint32_t)graph.size();
+        const uint32_t count = target_size - current_size;
+
+        // 1. Add the batch
+        for(uint32_t i = current_size; i < target_size; ++i) {
+            addEntry(i);
+        }
+        builder.build(dummy_callback, false); 
+        
+        // 2. Measure removal of this batch
+        for(uint32_t i = current_size; i < target_size; ++i) {
+            builder.removeEntry(i);
+        }
+        
+        auto start = std::chrono::steady_clock::now();
+        builder.build(dummy_callback, false);
+        auto duration_ms = uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+        auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
+        
+        log("REDUCE_MEASURE: Size {} -> {}, Removed {} elements in {} ms, AEW: {:.2f}\n", 
+            target_size, current_size, count, duration_ms, avg_edge_weight);
+
+        // 3. Re-add the batch to restore state for next iteration
+        for(uint32_t i = current_size; i < target_size; ++i) {
+            addEntry(i);
+        }
+        builder.build(dummy_callback, false);
+    }
+}
+
+
+/**
  * Optimize an existing graph by running the builder's improve step.
  * This is a simple optimization function that runs for a specified number of iterations.
  * 

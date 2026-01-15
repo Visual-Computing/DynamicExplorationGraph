@@ -537,6 +537,7 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
 
         conf.opt_scaling_test.iteration_interval = 100000;
         conf.opt_scaling_test.total_iterations = 1000000;
+        conf.reduce_scaling_test.size_interval = 10000;
     } else if (dataset_name == DatasetName::ENRON) {
 
         conf.create_graph.k = 30;
@@ -560,6 +561,7 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
 
         conf.opt_scaling_test.iteration_interval = 100000;
         conf.opt_scaling_test.total_iterations = 1000000;
+        conf.reduce_scaling_test.size_interval = 10000;
     }
 
     return conf;
@@ -1608,6 +1610,65 @@ int main(int argc, char *argv[]) {
 
                     deglib::benchmark::reset_log_to_console();
                     log("REDUCE_SCALING {}: Log written to: {}\n", scheme, log_path);
+                }
+            }
+        }
+    }
+
+    
+    // REDUCE_SCALING_MEASURE test
+    // This reuses the reduce_scaling configuration but runs the incremental measurement in a separate log file.
+    if(run_all || test_type_arg == "reduce_scaling") {
+        const auto& rs = config.reduce_scaling_test;
+        const auto& cg = config.create_graph;
+        const auto& og = config.optimize_graph;
+        
+        for(deglib::builder::OptimizationTarget lid_scheme : {cg.lid, deglib::builder::OptimizationTarget::StreamingData_SchemeC}) {
+            std::string scaling_dir = graph_paths.reduce_scaling_directory(lid_scheme);
+            std::string log_path = scaling_dir + "/log_measured.txt";
+            std::string scheme = DatasetConfig::optimization_target_str(lid_scheme);
+            
+            log("\n=== REDUCE_SCALING_MEASURE Test: {} ===\n", scheme);
+            log("Size interval: {}\n", rs.size_interval);
+            log("Directory: {}\n", scaling_dir);
+            log("Log file: {}\n", log_path);
+            
+            if(do_run && base_repository) {
+                // Skip if log file already exists
+                if(std::filesystem::exists(log_path)) {
+                    log("REDUCE_SCALING_MEASURE {}: Skipping - log file already exists: {}\n", scheme, log_path);
+                    continue;
+                } else {
+                    // Ensure scaling directory exists
+                    std::filesystem::create_directories(scaling_dir);
+                    
+                    // Set log file for measurement
+                    deglib::benchmark::set_log_file(log_path, false);
+                    log("\n=== REDUCE_SCALING_MEASURE Test: {} ===\n", scheme);
+                    
+                    for(const auto& [k_opt, eps_opt, i_opt] : std::array<std::tuple<uint8_t, float, uint8_t>, 2>{
+                        std::make_tuple(og.k_opt, og.eps_opt, og.i_opt),
+                        std::make_tuple(static_cast<uint8_t>(0), 0.0f, static_cast<uint8_t>(0))
+                    }) {
+                        log("----------------------------------------------------------------\n");
+                        log("---- REDUCE_SCALING_MEASURE with k_opt={}, eps_opt={:.4f}, i_opt={} ----\n", k_opt, eps_opt, i_opt);
+                    
+                        log("\n--- Incremental Removal Measurement (Target Size: {}, Step: {}) ---\n", base_repository->size(), rs.size_interval);
+                        deglib::benchmark::reduce_graph_incremental_measure(
+                            *base_repository,
+                            rs.size_interval,
+                            cg.k, cg.k_ext, cg.eps_ext,
+                            k_opt, eps_opt, i_opt,
+                            cg.build_threads,
+                            config.metric,
+                            lid_scheme,
+                            true,
+                            ds.info().scale
+                        );
+                    }
+                    
+                    deglib::benchmark::reset_log_to_console();
+                    log("REDUCE_SCALING_MEASURE {}: Log written to: {}\n", scheme, log_path);
                 }
             }
         }
