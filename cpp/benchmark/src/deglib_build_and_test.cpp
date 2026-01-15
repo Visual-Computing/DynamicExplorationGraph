@@ -1425,7 +1425,7 @@ int main(int argc, char *argv[]) {
                 std::make_tuple(og.k_opt, og.eps_opt, og.i_opt, og.total_iterations/2, cg.lid, false), 
             };
             for(const auto& [k_opt, eps_opt, i_opt, opt_iterations, lid, use_path_verification] : settings) {
-                for(DataStreamType ds_type : {DataStreamType::AddHalf, DataStreamType::AddAllRemoveHalf, DataStreamType::AddHalfRemoveAndAddOneAtATime}) {
+                for(DataStreamType ds_type : {DataStreamType::AddHalf, DataStreamType::AddHalfRemoveAndAddOneAtATime, DataStreamType::AddAllRemoveHalf}) {
                     std::string graph_path = graph_paths.dynamic_graph_file(dims, config.metric, lid, cg.k, cg.k_ext, cg.eps_ext, 
                                                                             k_opt, eps_opt, i_opt, ds_type, opt_iterations, use_path_verification);
                     std::string log_path = graph_paths.dynamic_log_file(dims, config.metric, lid, cg.k, cg.k_ext, cg.eps_ext, 
