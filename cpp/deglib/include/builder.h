@@ -1080,52 +1080,51 @@ class EvenRegularGraphBuilder {
           }
 
           // 2.1b use graph.hasPath(...) to find a path for every not paired but involved vertex
-          for (auto it = reachable_groups.begin(); it != reachable_groups.end(); ++it) {
-            const auto involved_index = it->first;
-            
-            // skip already reachable groups
-            auto root = path_map.Find(involved_index);
-            if(root != involved_index) continue;
-            
-            // check only groups with a single vertex
-            auto& group = it->second;
-            if(group->size() <= 1) {
-
-              // find all involved indices which are not part of the same reachable group
-              auto from_indices = std::vector<uint32_t>();
-              for(auto other : involved_indices) {
-                if(path_map.Find(other) != root) {
-                  from_indices.push_back(other);
-                }
-              }
-              if(from_indices.empty()) {
-                std::fprintf(stderr, "restoreGraph: no from_indices found for involved_index %u\n", involved_index);
-                std::perror("");
-                abort();
-              }
-
-              // check if there is a path from any of the from_indices to the current group vertex
-              std::vector<deglib::search::ObjectDistance> traceback = graph.hasPath(from_indices, group->getVertexIndex(), this->extend_eps_, this->extend_k_);
+          auto ext_k = uint32_t(this->extend_k_);
+          auto ext_eps = this->extend_eps_;
+          while(not_enough_free_connections(involved_indices, path_map, reachable_groups)) {
+            for (auto it = reachable_groups.begin(); it != reachable_groups.end(); ++it) {
+              const auto involved_index = it->first;
               
-              // fallback: use a more relaxed search if no path was found
-              if(traceback.empty()) {
-                traceback = graph.hasPath(from_indices, group->getVertexIndex(), 100.0f, uint32_t(graph.size()));
-              }
+              // skip already reachable groups
+              auto root = path_map.Find(involved_index);
+              if(root != involved_index) continue;
               
-              // connect the two groups if a path was found
-              if(!traceback.empty()) {
-                const auto reachable_index = traceback.back().getInternalIndex();
-                auto reachable_root = path_map.Find(reachable_index);
-                
-                if(root != reachable_root) {
-                  path_map.Update(root, reachable_root);
-                  reachable_groups.at(reachable_root)->copyFrom(*group);
+              // check only groups with a single vertex
+              auto& group = it->second;
+              if(group->size() <= 1) {
+
+                // find all involved indices which are not part of the same reachable group
+                auto from_indices = std::vector<uint32_t>();
+                for(auto other : involved_indices) {
+                  if(path_map.Find(other) != root) {
+                    from_indices.push_back(other);
+                  }
                 }
-              } else {
-                // no path found, will need to reconnect this isolated vertex later
-                std::fprintf(stderr, "restoreGraph: no path found for involved_index %u\n", involved_index);
+                if(from_indices.empty()) {
+                  std::fprintf(stderr, "restoreGraph: no from_indices found for involved_index %u\n", involved_index);
+                  std::perror("");
+                  abort();
+                }
+
+                // check if there is a path from any of the from_indices to the current group vertex
+                std::vector<deglib::search::ObjectDistance> traceback = graph.hasPath(from_indices, group->getVertexIndex(), ext_eps, ext_k);
+                                
+                // connect the two groups if a path was found
+                if(!traceback.empty()) {
+                  const auto reachable_index = traceback.back().getInternalIndex();
+                  auto reachable_root = path_map.Find(reachable_index);
+                  
+                  if(root != reachable_root) {
+                    path_map.Update(root, reachable_root);
+                    reachable_groups.at(reachable_root)->copyFrom(*group);
+                  }
+                }
               }
             }
+
+            // increase search parameters for the next iteration
+            ext_eps = ext_eps * 2.0f;
           }
 
           // check if there are still enough free connections to reconnect isolated vertices
