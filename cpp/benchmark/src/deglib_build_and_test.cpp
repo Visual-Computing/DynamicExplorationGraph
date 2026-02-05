@@ -22,7 +22,6 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
-#include <map>
 #include <optional>
 #include <random>
 #include <thread>
@@ -33,6 +32,7 @@
 #include "dataset.h"
 #include "deglib.h"
 #include "stats.h"
+
 
 // Use types from benchmark.h and dataset.h
 using deglib::benchmark::Dataset;
@@ -82,7 +82,7 @@ struct CreateGraphTest {
     std::vector<uint32_t> k_sweep_values = {1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024};
 
     // Test eps parameters for ANNS benchmark (search)
-    std::vector<float> eps_parameter = {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f};
+    std::vector<float> eps_parameter = {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f, 1.0f, 1.5f, 2.0f};
 };
 
 /**
@@ -108,8 +108,15 @@ struct OptimizeGraphTest {
  * Replaces LIDComparisonTest.
  */
 struct AllSchemesTest {
-    // Per-scheme eps parameters for testing (indexed by OptimizationTarget enum)
-    std::map<deglib::builder::OptimizationTarget, std::vector<float>> eps_parameter;
+    // List of schemes to test (defaults to all)
+    std::vector<deglib::builder::OptimizationTarget> optimization_targets = {deglib::builder::OptimizationTarget::SchemeA,
+                                                                             deglib::builder::OptimizationTarget::SchemeB,
+                                                                             deglib::builder::OptimizationTarget::HighLID,
+                                                                             deglib::builder::OptimizationTarget::LowLID,
+                                                                             deglib::builder::OptimizationTarget::StreamingData_SchemeA,
+                                                                             deglib::builder::OptimizationTarget::StreamingData_SchemeB,
+                                                                             deglib::builder::OptimizationTarget::StreamingData_SchemeC,
+                                                                             deglib::builder::OptimizationTarget::StreamingData_SchemeD};
 };
 
 /**
@@ -168,7 +175,6 @@ struct OptScalingTest {
     uint8_t i_opt = 5;                      // Optimization path length
     uint64_t iteration_interval = 1000000;  // Save checkpoint every N iterations
     uint64_t total_iterations = 10000000;   // Total optimization iterations
-    std::vector<float> eps_parameter = {0.01f, 0.05f, 0.1f, 0.12f, 0.16f, 0.2f, 0.3f, 0.4f};
 };
 
 /**
@@ -570,73 +576,34 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
     conf.dataset_name = dataset_name;
 
     if (dataset_name == DatasetName::SIFT1M) {
-        conf.create_graph.eps_parameter = {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f};
+        conf.create_graph.eps_parameter = {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f, 1.0f, 1.5f, 2.0f};
 
         conf.optimize_graph.total_iterations = 200000;
 
-        conf.all_schemes_test.eps_parameter = {
-            {deglib::builder::OptimizationTarget::SchemeA, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f}},
-            {deglib::builder::OptimizationTarget::SchemeB, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f}},
-            {deglib::builder::OptimizationTarget::HighLID, {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f}},
-            {deglib::builder::OptimizationTarget::LowLID, {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeA, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeB, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeC, {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeD, {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f}}};
-
     } else if (dataset_name == DatasetName::GLOVE) {
         conf.create_graph.lid = deglib::builder::OptimizationTarget::HighLID;
-        conf.create_graph.eps_parameter = {0.001f, 0.05f, 0.10f, 0.125f, 0.15f, 0.175f, 0.2f, 0.25f, 0.3f};
+        conf.create_graph.eps_parameter = {
+            0.001f, 0.05f, 0.10f, 0.125f, 0.15f, 0.175f, 0.2f, 0.25f, 0.3f, 0.4f, 0.5f, 0.6f, 0.8f, 1.0f, 1.5f, 2.0f};
 
         conf.optimize_graph.total_iterations = 2000000;
         conf.opt_scaling_test.total_iterations = 30000000;
         conf.opt_scaling_test.iteration_interval = 3000000;
 
-        conf.all_schemes_test.eps_parameter = {
-            {deglib::builder::OptimizationTarget::SchemeA, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f}},
-            {deglib::builder::OptimizationTarget::SchemeB, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f}},
-            {deglib::builder::OptimizationTarget::HighLID, {0.01f, 0.05f, 0.10f, 0.15f, 0.2f, 0.3f}},
-            {deglib::builder::OptimizationTarget::LowLID, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeA, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeB, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeC, {0.01f, 0.05f, 0.10f, 0.15f, 0.2f, 0.3f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeD, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f}}};
-
     } else if (dataset_name == DatasetName::DEEP1M) {
-        conf.create_graph.eps_parameter = {0.01f, 0.02f, 0.03f, 0.04f, 0.06f, 0.1f, 0.2f};
+        conf.create_graph.eps_parameter = {0.01f, 0.02f, 0.03f, 0.04f, 0.06f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.8f, 1.0f, 1.5f, 2.0f};
 
         conf.optimize_graph.total_iterations = 400000;
         conf.opt_scaling_test.total_iterations = 20000000;
         conf.opt_scaling_test.iteration_interval = 2000000;
 
-        conf.all_schemes_test.eps_parameter = {
-            {deglib::builder::OptimizationTarget::SchemeA, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f}},
-            {deglib::builder::OptimizationTarget::SchemeB, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f}},
-            {deglib::builder::OptimizationTarget::HighLID, {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f}},
-            {deglib::builder::OptimizationTarget::LowLID, {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeA, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeB, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeC, {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeD, {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f}}};
-
     } else if (dataset_name == DatasetName::AUDIO) {
         conf.create_graph.k = 20;
         conf.create_graph.k_ext = 40;
         conf.create_graph.anns_repeat = 50;
-        conf.create_graph.eps_parameter = {0.00f, 0.03f, 0.05f, 0.07f, 0.09f, 0.12f, 0.2f};
+        conf.create_graph.eps_parameter = {0.00f, 0.03f, 0.05f, 0.07f, 0.09f, 0.12f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.8f, 1.0f, 1.5f, 2.0f};
 
         conf.optimize_graph.k_opt = 20;
         conf.optimize_graph.total_iterations = 20000;
-
-        conf.all_schemes_test.eps_parameter = {
-            {deglib::builder::OptimizationTarget::SchemeA, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f}},
-            {deglib::builder::OptimizationTarget::SchemeB, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f}},
-            {deglib::builder::OptimizationTarget::HighLID, {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f}},
-            {deglib::builder::OptimizationTarget::LowLID, {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeA, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeB, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeC, {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeD, {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f}}};
 
         conf.opt_scaling_test.iteration_interval = 100000;
         conf.opt_scaling_test.total_iterations = 1000000;
@@ -644,20 +611,10 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
         conf.create_graph.k = 30;
         conf.create_graph.k_ext = 60;
         conf.create_graph.anns_repeat = 50;
-        conf.create_graph.eps_parameter = {0.00f, 0.03f, 0.05f, 0.07f, 0.09f, 0.12f, 0.2f};
+        conf.create_graph.eps_parameter = {0.00f, 0.03f, 0.05f, 0.07f, 0.09f, 0.12f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.8f, 1.0f, 1.5f, 2.0f};
 
         conf.optimize_graph.k_opt = 30;
         conf.optimize_graph.total_iterations = 40000;
-
-        conf.all_schemes_test.eps_parameter = {
-            {deglib::builder::OptimizationTarget::SchemeA, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f}},
-            {deglib::builder::OptimizationTarget::SchemeB, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f}},
-            {deglib::builder::OptimizationTarget::HighLID, {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f}},
-            {deglib::builder::OptimizationTarget::LowLID, {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeA, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeB, {0.01f, 0.1f, 0.15f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeC, {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f}},
-            {deglib::builder::OptimizationTarget::StreamingData_SchemeD, {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f}}};
 
         conf.opt_scaling_test.iteration_interval = 100000;
         conf.opt_scaling_test.total_iterations = 1000000;
@@ -1045,7 +1002,6 @@ int main(int argc, char* argv[]) {
     if (run_all || test_type_arg == "all_schemes") {
         const auto& as = config.all_schemes_test;
         const auto& cg = config.create_graph;
-        const auto& og = config.optimize_graph;
 
         log("\n=== ALL_SCHEMES Test ===\n");
         log("Testing all schemes with k={}, k_ext={}, eps_ext={:.2f}\n", cg.k, cg.k_ext, cg.eps_ext);
@@ -1054,8 +1010,8 @@ int main(int argc, char* argv[]) {
             // Load ground truth for this test
             auto ground_truth = ds.load_groundtruth(cg.anns_k, false);
 
-            // Iterate over all schemes configured in eps_parameter
-            for (const auto& [lid, scheme_eps] : as.eps_parameter) {
+            // Iterate over all schemes configured in optimization_targets
+            for (const auto& lid : as.optimization_targets) {
                 std::string graph_path = graph_paths.graph_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, lid);
                 std::string log_path = graph_paths.graph_log_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, lid);
 
@@ -1578,7 +1534,7 @@ int main(int argc, char* argv[]) {
                                                        cg.anns_repeat,
                                                        cg.anns_threads,
                                                        cg.anns_k,
-                                                       os.eps_parameter,
+                                                       cg.eps_parameter,
                                                        nullptr,
                                                        linear_baseline_us);
                 } else {
@@ -1599,7 +1555,7 @@ int main(int argc, char* argv[]) {
                                                            cg.anns_repeat,
                                                            cg.anns_threads,
                                                            cg.anns_k,
-                                                           os.eps_parameter,
+                                                           cg.eps_parameter,
                                                            nullptr,
                                                            linear_baseline_us);
                     } else {
