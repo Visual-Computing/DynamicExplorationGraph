@@ -22,7 +22,6 @@
 #include "graph.h"
 #include "search.h"
 
-
 namespace deglib::analysis {
 /**
  * @brief Check if the graph structure is valid and well-formed.
