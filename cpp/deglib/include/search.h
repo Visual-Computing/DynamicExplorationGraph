@@ -4,6 +4,7 @@
 
 #include <queue>
 
+#include "filter.h"
 
 namespace deglib::search {
 

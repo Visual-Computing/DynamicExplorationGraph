@@ -20,7 +20,9 @@
 
 #include "concurrent.h"
 #include "graph.h"
+#include "memory.h"
 #include "search.h"
+
 
 namespace deglib::analysis {
 /**
