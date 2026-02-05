@@ -129,16 +129,14 @@ int main(int argc, char* argv[]) {
     DatasetName dataset_name = DatasetName::GLOVE;  // Dataset: SIFT1M, DEEP1M, GLOVE, AUDIO
     std::string graph_file =
         "e:/Data/ANN/glove/deg/kExtScaling/100D_L2_K30_AddK90Eps0.1_HighLID.deg";  // Graph file path (empty = auto-generate)
-    BenchmarkType benchmark_type = BenchmarkType::ANNS;                            // Benchmark: Stats, ANNS, Explore, All
+    BenchmarkType benchmark_type = BenchmarkType::Stats;                           // Benchmark: Stats, ANNS, Explore, All
     uint32_t k = 100;                                                              // ANNS k
     uint32_t explore_k = 1000;                                                     // Exploration k
     uint32_t repeat = 1;                                                           // Test repetitions
     uint32_t analysis_threads = std::thread::hardware_concurrency() / 2;           // Threads for graph analysis (default: all CPU threads)
     uint32_t test_threads = 1;                                                     // Threads for ANNS/exploration tests (default: 1)
     std::vector<float> eps_parameter = {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f};
-    bool use_half_gt = false;                // Use half dataset ground truth
-    bool compute_search_reach = false;       // Compute search reachability (expensive)
-    bool compute_exploration_reach = false;  // Compute exploration reachability (expensive)
+    bool use_half_gt = false;  // Use half dataset ground truth
     // ==========================================================================
 
     // Parse command-line arguments
@@ -163,10 +161,6 @@ int main(int argc, char* argv[]) {
             eps_parameter = parse_eps_values(argv[++i]);
         } else if (arg == "--half-gt") {
             use_half_gt = true;
-        } else if (arg == "--reachability") {
-            compute_search_reach = true;
-        } else if (arg == "--reach") {
-            compute_exploration_reach = true;
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             return 0;
@@ -226,8 +220,7 @@ int main(int argc, char* argv[]) {
     fmt::print(
         "k={}, explore_k={}, repeat={}, analysis_threads={}, test_threads={}\n", k, explore_k, repeat, analysis_threads, test_threads);
     fmt::print("eps_parameter: {}\n", fmt::join(eps_parameter, ", "));
-    fmt::print(
-        "use_half_gt: {}, compute_reachability: {}, compute_reach: {}\n\n", use_half_gt, compute_search_reach, compute_exploration_reach);
+    fmt::print("use_half_gt: {}\n\n", use_half_gt);
 
     // Load graph
     fmt::print("Loading graph: {}\n", graph_file);
@@ -257,7 +250,7 @@ int main(int argc, char* argv[]) {
         fmt::print("Loading Top{} of the base data set for graph quality...\n", graph.getEdgesPerVertex());
         auto base_gt = ds.load_base_groundtruth(graph.getEdgesPerVertex(), use_half_gt);
         fmt::print("Loaded Top{} of the base data with {} elements\n", graph.getEdgesPerVertex(), base_gt.size());
-        deglib::benchmark::analyze_graph(graph, base_gt, compute_search_reach, compute_exploration_reach, analysis_threads);
+        deglib::benchmark::analyze_graph(graph, base_gt, analysis_threads);
         fmt::print("\n");
     }
 

@@ -873,7 +873,7 @@ int main(int argc, char* argv[]) {
                     log("\n--- Graph Analysis ---\n");
                     {
                         auto base_gt = ds.load_base_groundtruth(graph.getEdgesPerVertex());
-                        deglib::benchmark::analyze_graph(graph, base_gt, true, true, cg.analysis_threads);
+                        deglib::benchmark::analyze_graph(graph, base_gt, cg.analysis_threads);
                     }
 
                     // 2. ANNS Test with Top-k
@@ -996,7 +996,7 @@ int main(int argc, char* argv[]) {
                         log("\n--- Graph Analysis ---\n");
                         {
                             auto base_gt = ds.load_base_groundtruth(graph.getEdgesPerVertex());
-                            deglib::benchmark::analyze_graph(graph, base_gt, true, true, cg.analysis_threads);
+                            deglib::benchmark::analyze_graph(graph, base_gt, cg.analysis_threads);
                         }
 
                         // 2. ANNS Test with Top-100
@@ -1848,7 +1848,7 @@ int main(int argc, char* argv[]) {
                         log("\n--- Graph Analysis ---\n");
                         {
                             auto base_gt = ds.load_base_groundtruth(graph.getEdgesPerVertex(), use_half);
-                            deglib::benchmark::analyze_graph(graph, base_gt, true, true, cg.analysis_threads);
+                            deglib::benchmark::analyze_graph(graph, base_gt, cg.analysis_threads);
                         }
 
                         // ANNS Test

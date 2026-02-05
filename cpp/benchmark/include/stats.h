@@ -14,7 +14,6 @@
 #include <fmt/core.h>
 
 #include <algorithm>
-#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <thread>
@@ -24,7 +23,6 @@
 #include "file_io.h"
 #include "logging.h"
 #include "stopwatch.h"
-
 
 namespace deglib::benchmark {
 
@@ -43,92 +41,46 @@ namespace deglib::benchmark {
  * @return Number of vertices reachable from entry points
  */
 inline uint32_t compute_search_reachability(const deglib::search::SearchGraph& graph,
-                                            const uint32_t thread_count = std::thread::hardware_concurrency() / 2) {
-    auto stopw = StopW();
+                                            const uint32_t /*thread_count*/ = std::thread::hardware_concurrency() / 2) {
     const auto graph_size = (uint32_t)graph.size();
     const auto edges_per_vertex = graph.getEdgesPerVertex();
     const auto entry_vertices = graph.getEntryVertexIndices();
 
-    std::atomic<uint32_t> reachable_count{0};
-    std::atomic<uint32_t> tested_count{0};
+    std::vector<bool> visited(graph_size, false);
+    std::vector<uint32_t> frontier;
+    frontier.reserve(graph_size);
 
-    deglib::concurrent::parallel_for(0, graph_size, thread_count, [&](size_t id, size_t) {
-        auto target_index = (uint32_t)id;
-        auto target_feature = graph.getFeatureVector(target_index);
-        bool found = false;
+    for (const auto& s : entry_vertices) {
+        if (s < graph_size && !visited[s]) {
+            visited[s] = true;
+            frontier.push_back(s);
+        }
+    }
 
-        // Try a simple search first to find the target vertex
-        {
-            auto result_queue = graph.search(entry_vertices, target_feature, 0.2f, 100);
-            while (!result_queue.empty()) {
-                if (result_queue.top().getInternalIndex() == target_index) {
-                    found = true;
-                    break;
+    while (!frontier.empty()) {
+        std::vector<uint32_t> next_frontier;
+        for (const auto& v : frontier) {
+            const auto neighbor_indices = graph.getNeighborIndices(v);
+            for (uint8_t e = 0; e < edges_per_vertex; e++) {
+                const auto neighbor_index = neighbor_indices[e];
+                if (neighbor_index == (std::numeric_limits<uint32_t>::max)()) continue;
+
+                if (!visited[neighbor_index]) {
+                    visited[neighbor_index] = true;
+                    next_frontier.push_back(neighbor_index);
                 }
-                result_queue.pop();
             }
         }
+        frontier = std::move(next_frontier);
+    }
 
-        // If the simple search was not successful, use flood fill to find the target vertex
-        if (!found) {
-            // Use the first entry vertex as starting point
-            uint32_t start_vertex = entry_vertices.empty() ? 0 : entry_vertices[0];
+    uint32_t count = 0;
+    for (size_t i = 0; i < graph_size; i++) {
+        if (visited[i]) count++;
+    }
 
-            // Flood fill from the entry vertex
-            auto checked_ids = std::vector<bool>(graph_size);
-            auto check = std::vector<uint32_t>();
-            auto check_next = std::vector<uint32_t>();
-
-            checked_ids[start_vertex] = true;
-            check.emplace_back(start_vertex);
-
-            auto check_ptr = &check;
-            auto check_next_ptr = &check_next;
-            found = (start_vertex == target_index);
-
-            while (check_ptr->size() > 0 && !found) {
-                check_next_ptr->clear();
-
-                for (size_t c = 0; c < check_ptr->size() && !found; c++) {
-                    auto check_index = check_ptr->at(c);
-                    auto neighbor_indices = graph.getNeighborIndices(check_index);
-
-                    for (uint8_t e = 0; e < edges_per_vertex; e++) {
-                        auto neighbor_index = neighbor_indices[e];
-                        if (neighbor_index == (std::numeric_limits<uint32_t>::max)()) continue;
-
-                        if (neighbor_index == target_index) {
-                            found = true;
-                            break;
-                        }
-
-                        if (!checked_ids[neighbor_index]) {
-                            checked_ids[neighbor_index] = true;
-                            check_next_ptr->emplace_back(neighbor_index);
-                        }
-                    }
-                }
-
-                std::swap(check_ptr, check_next_ptr);
-            }
-        }
-
-        if (found) {
-            reachable_count++;
-        }
-
-        uint32_t count = ++tested_count;
-        if (count % 10000 == 0) {
-            log("Seed reachability is {:7d} after checking {:7d} of {:7d} vertices after {:4d}s\n",
-                reachable_count.load(),
-                count,
-                graph_size,
-                stopw.getElapsedTimeMicro() / 1000000);
-        }
-    });
-
-    log("Seed Reachability is {} out of {}\n", reachable_count.load(), graph_size);
-    return reachable_count.load();
+    log("Seed Reachability is {} out of {}\n", count, graph_size);
+    return count;
 }
 
 /**
@@ -162,7 +114,6 @@ inline float compute_exploration_reach(const deglib::search::SearchGraph& graph)
     auto index_of_vertex_reach = std::vector<uint32_t>(graph_size);
     std::fill(index_of_vertex_reach.begin(), index_of_vertex_reach.end(), graph_size);
 
-    uint64_t counter = 0;
     uint64_t exploration_reachability = 0;
 
     for (uint32_t entry_id = 0; entry_id < graph_size; entry_id++) {
@@ -247,22 +198,7 @@ inline float compute_exploration_reach(const deglib::search::SearchGraph& graph)
                 vertices_reach.emplace_back(entry_id, reach_count, std::move(checked_ids));
             }
         }
-
-        counter++;
-        if (counter % 10000 == 0) {
-            log("Avg reach is {:.2f} after checking {:7d} of {:7d} vertices after {:4d}s\n",
-                ((float)exploration_reachability) / counter,
-                counter,
-                graph_size,
-                stopw.getElapsedTimeMicro() / 1000000);
-        }
     }
-
-    log("Avg reach is {:.2f} after checking {:7d} of {:7d} vertices after {:4d}s\n",
-        ((float)exploration_reachability) / counter,
-        counter,
-        graph_size,
-        stopw.getElapsedTimeMicro() / 1000000);
     return ((float)exploration_reachability) / graph_size;
 }
 
@@ -355,15 +291,11 @@ struct GraphStats {
  *
  * @param graph The search graph to analyze
  * @param exploration_gt Pre-computed ground truth as vector of sorted vectors (optional, for graph quality)
- * @param compute_reachability Whether to compute search reachability (expensive)
- * @param compute_reach Whether to compute exploration reachability (expensive)
  * @param thread_count Number of threads for parallel computation
  * @return GraphStats with all computed statistics
  */
 inline GraphStats analyze_graph(const deglib::search::SearchGraph& graph,
                                 const std::vector<std::vector<uint32_t>>& exploration_gt = {},
-                                bool compute_reachability = false,
-                                bool compute_reach = false,
                                 uint32_t thread_count = std::thread::hardware_concurrency() / 2) {
     GraphStats stats;
     stats.vertex_count = graph.size();
@@ -432,17 +364,13 @@ inline GraphStats analyze_graph(const deglib::search::SearchGraph& graph,
         stats.graph_quality = compute_graph_quality(graph, exploration_gt);
     }
 
-    if (compute_reachability) {
-        log("Computing search reachability...\n");
-        uint32_t reachable = compute_search_reachability(graph, thread_count);
-        stats.search_reachability = graph_size > 0 ? (float)reachable / graph_size : 0.0f;
-    }
+    log("Computing search reachability...\n");
+    uint32_t reachable = compute_search_reachability(graph, thread_count);
+    stats.search_reachability = graph_size > 0 ? (float)reachable / graph_size : 0.0f;
 
-    if (compute_reach) {
-        log("Computing exploration reachability...\n");
-        float avg_reach = compute_exploration_reach(graph);
-        stats.exploration_reachability = graph_size > 0 ? avg_reach / graph_size : 0.0f;
-    }
+    log("Computing exploration reachability...\n");
+    float avg_reach = compute_exploration_reach(graph);
+    stats.exploration_reachability = graph_size > 0 ? avg_reach / graph_size : 0.0f;
 
     // Log all stats
     log("Graph Statistics:\n");
