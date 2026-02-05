@@ -3,7 +3,7 @@
 /**
  * @file stats.h
  * @brief Graph statistics computation utilities for deglib benchmark.
- * 
+ *
  * Provides functions to compute various graph quality metrics including:
  * - Seed reachability: How many vertices can be reached from entry points
  * - Average reach: Average number of vertices reachable from each vertex
@@ -11,22 +11,22 @@
  * - In-degree statistics: Distribution of incoming edges
  */
 
-#include <vector>
-#include <cstdint>
-#include <atomic>
-#include <algorithm>
-#include <filesystem>
-#include <thread>
-
 #include <fmt/core.h>
 
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <filesystem>
+#include <thread>
+#include <vector>
+
 #include "deglib.h"
-#include "logging.h"
 #include "file_io.h"
+#include "logging.h"
 #include "stopwatch.h"
 
-namespace deglib::benchmark
-{
+
+namespace deglib::benchmark {
 
 // ============================================================================
 // Search Reachability
@@ -34,23 +34,21 @@ namespace deglib::benchmark
 
 /**
  * @brief Compute the seed reachability count.
- * 
+ *
  * Measures how many vertices can be reached from the graph's entry point via search.
  * This tests if the graph is well-connected for nearest neighbor search.
- * 
+ *
  * @param graph The search graph to analyze
  * @param thread_count Number of threads to use for parallel computation
  * @return Number of vertices reachable from entry points
  */
-inline uint32_t compute_search_reachability(
-    const deglib::search::SearchGraph& graph, 
-    const uint32_t thread_count = std::thread::hardware_concurrency() / 2) 
-{
+inline uint32_t compute_search_reachability(const deglib::search::SearchGraph& graph,
+                                            const uint32_t thread_count = std::thread::hardware_concurrency() / 2) {
     auto stopw = StopW();
     const auto graph_size = (uint32_t)graph.size();
     const auto edges_per_vertex = graph.getEdgesPerVertex();
     const auto entry_vertices = graph.getEntryVertexIndices();
-    
+
     std::atomic<uint32_t> reachable_count{0};
     std::atomic<uint32_t> tested_count{0};
 
@@ -121,8 +119,11 @@ inline uint32_t compute_search_reachability(
 
         uint32_t count = ++tested_count;
         if (count % 10000 == 0) {
-            log("Seed reachability is {:7d} after checking {:7d} of {:7d} vertices after {:4d}s\n", 
-                reachable_count.load(), count, graph_size, stopw.getElapsedTimeMicro() / 1000000);
+            log("Seed reachability is {:7d} after checking {:7d} of {:7d} vertices after {:4d}s\n",
+                reachable_count.load(),
+                count,
+                graph_size,
+                stopw.getElapsedTimeMicro() / 1000000);
         }
     });
 
@@ -134,20 +135,19 @@ inline uint32_t compute_search_reachability(
  * @brief Structure to store vertex reach information for caching during avg reach computation.
  */
 struct VertexReach {
-    uint32_t vertex_id;      ///< The vertex ID
-    uint32_t reach_count;    ///< Number of vertices reachable from this vertex
+    uint32_t vertex_id;               ///< The vertex ID
+    uint32_t reach_count;             ///< Number of vertices reachable from this vertex
     std::vector<bool> reachable_ids;  ///< Bitmap of reachable vertex IDs
-    
-    VertexReach(uint32_t id, uint32_t count, std::vector<bool>&& ids)
-        : vertex_id(id), reach_count(count), reachable_ids(std::move(ids)) {}
+
+    VertexReach(uint32_t id, uint32_t count, std::vector<bool>&& ids) : vertex_id(id), reach_count(count), reachable_ids(std::move(ids)) {}
 };
 
 /**
  * @brief Compute the average reach of the graph.
- * 
+ *
  * Measures the average number of vertices reachable from each vertex via graph exploration.
  * This indicates how well connected the graph is for exploration tasks.
- * 
+ *
  * @param graph The search graph to analyze
  * @return Average number of vertices reachable from each vertex
  */
@@ -200,7 +200,7 @@ inline float compute_exploration_reach(const deglib::search::SearchGraph& graph)
                         const auto vertex_reach_index = index_of_vertex_reach[neighbor_index];
                         if (vertex_reach_index < graph_size) {
                             const auto& neighbor_reach = vertices_reach[vertex_reach_index];
-                            
+
                             if (neighbor_reach.reach_count == graph_size) {
                                 best_reach_vertex_index = vertex_reach_index;
                                 best_reach_vertex_reach = graph_size;
@@ -251,38 +251,39 @@ inline float compute_exploration_reach(const deglib::search::SearchGraph& graph)
         counter++;
         if (counter % 10000 == 0) {
             log("Avg reach is {:.2f} after checking {:7d} of {:7d} vertices after {:4d}s\n",
-                ((float)exploration_reachability) / counter, counter, graph_size, stopw.getElapsedTimeMicro() / 1000000);
+                ((float)exploration_reachability) / counter,
+                counter,
+                graph_size,
+                stopw.getElapsedTimeMicro() / 1000000);
         }
     }
 
     log("Avg reach is {:.2f} after checking {:7d} of {:7d} vertices after {:4d}s\n",
-        ((float)exploration_reachability) / counter, counter, graph_size, stopw.getElapsedTimeMicro() / 1000000);
+        ((float)exploration_reachability) / counter,
+        counter,
+        graph_size,
+        stopw.getElapsedTimeMicro() / 1000000);
     return ((float)exploration_reachability) / graph_size;
 }
 
-
 /**
  * @brief Compute the graph quality using pre-computed ground truth sorted vectors.
- * 
+ *
  * Graph quality (GQ) is the ratio of neighbors that are "perfect" - meaning they
  * appear in the ground truth top-k list for that vertex.
- * 
+ *
  * Uses std::binary_search for efficient membership testing on sorted vectors.
- * 
+ *
  * @param graph The search graph to analyze
  * @param exploration_gt Pre-computed ground truth as vector of sorted vectors (one per vertex)
  * @return Graph quality ratio in [0, 1]
  */
-inline float compute_graph_quality(
-    const deglib::search::SearchGraph& graph, 
-    const std::vector<std::vector<uint32_t>>& exploration_gt) 
-{
+inline float compute_graph_quality(const deglib::search::SearchGraph& graph, const std::vector<std::vector<uint32_t>>& exploration_gt) {
     const auto graph_size = graph.size();
     const auto edges_per_vertex = graph.getEdgesPerVertex();
 
     if (exploration_gt.size() < graph_size) {
-        log("Warning: Exploration GT size {} is smaller than graph size {}\n", 
-            exploration_gt.size(), graph_size);
+        log("Warning: Exploration GT size {} is smaller than graph size {}\n", exploration_gt.size(), graph_size);
         return 0.0f;
     }
 
@@ -296,7 +297,7 @@ inline float compute_graph_quality(
         for (uint8_t e = 0; e < edges_per_vertex; e++) {
             const auto neighbor_index = neighbor_indices[e];
             if (neighbor_index == (std::numeric_limits<uint32_t>::max)()) continue;
-            
+
             total_neighbor_count++;
 
             // Get the neighbor's external label
@@ -312,9 +313,8 @@ inline float compute_graph_quality(
     return total_neighbor_count > 0 ? ((float)perfect_neighbor_count) / total_neighbor_count : 0.0f;
 }
 
-
 // ============================================================================
-// Graph Statistics 
+// Graph Statistics
 // ============================================================================
 
 /**
@@ -326,33 +326,33 @@ struct GraphStats {
     size_t edge_count = 0;         ///< Total number of edges
     uint32_t feature_dims = 0;     ///< Feature vector dimensions
     uint8_t edges_per_vertex = 0;  ///< Maximum edges per vertex (k)
-    
+
     // Out-degree stats
     float avg_out_degree = 0.0f;
     uint32_t min_out_degree = 0;
     uint32_t max_out_degree = 0;
-    
+
     // In-degree stats
     float avg_in_degree = 0.0f;
     uint32_t min_in_degree = 0;
     uint32_t max_in_degree = 0;
-    uint32_t source_vertices = 0;           // Vertices with 0 in-degree
-    
+    uint32_t source_vertices = 0;  // Vertices with 0 in-degree
+
     // Quality metrics (optional, expensive to compute)
-    float graph_quality = -1.0f;            // Graph quality (-1 means not computed)
-    float search_reachability = -1.0f;      // search reach (-1 means not computed)
-    float exploration_reachability = -1.0f; // exploration reach (-1 means not computed)
-    
+    float graph_quality = -1.0f;             // Graph quality (-1 means not computed)
+    float search_reachability = -1.0f;       // search reach (-1 means not computed)
+    float exploration_reachability = -1.0f;  // exploration reach (-1 means not computed)
+
     // Memory
-    size_t memory_bytes = 0;       ///< Estimated memory usage
+    size_t memory_bytes = 0;  ///< Estimated memory usage
 };
 
 /**
  * @brief Analyze a search graph, compute all statistics, and log them.
- * 
+ *
  * This is the main function for graph analysis. It computes basic stats,
  * optionally computes expensive metrics (reachability, graph quality), and logs everything.
- * 
+ *
  * @param graph The search graph to analyze
  * @param exploration_gt Pre-computed ground truth as vector of sorted vectors (optional, for graph quality)
  * @param compute_reachability Whether to compute search reachability (expensive)
@@ -360,13 +360,11 @@ struct GraphStats {
  * @param thread_count Number of threads for parallel computation
  * @return GraphStats with all computed statistics
  */
-inline GraphStats analyze_graph(
-    const deglib::search::SearchGraph& graph,
-    const std::vector<std::vector<uint32_t>>& exploration_gt = {},
-    bool compute_reachability = false,
-    bool compute_reach = false,
-    uint32_t thread_count = std::thread::hardware_concurrency() / 2)
-{
+inline GraphStats analyze_graph(const deglib::search::SearchGraph& graph,
+                                const std::vector<std::vector<uint32_t>>& exploration_gt = {},
+                                bool compute_reachability = false,
+                                bool compute_reach = false,
+                                uint32_t thread_count = std::thread::hardware_concurrency() / 2) {
     GraphStats stats;
     stats.vertex_count = graph.size();
     stats.feature_dims = graph.getFeatureSpace().dim();
@@ -453,9 +451,12 @@ inline GraphStats analyze_graph(
     log("  Feature dimensions: {}\n", stats.feature_dims);
     log("  Edges per vertex (k): {}\n", stats.edges_per_vertex);
     log("  Out-degree: avg={:.2f}, min={}, max={}\n", stats.avg_out_degree, stats.min_out_degree, stats.max_out_degree);
-    log("  In-degree:  avg={:.2f}, min={}, max={}, source_vertices={}\n", 
-        stats.avg_in_degree, stats.min_in_degree, stats.max_in_degree, stats.source_vertices);
-    
+    log("  In-degree:  avg={:.2f}, min={}, max={}, source_vertices={}\n",
+        stats.avg_in_degree,
+        stats.min_in_degree,
+        stats.max_in_degree,
+        stats.source_vertices);
+
     if (stats.graph_quality >= 0) {
         log("  Graph Quality (GQ): {:.4f}\n", stats.graph_quality);
     }
@@ -465,12 +466,10 @@ inline GraphStats analyze_graph(
     if (stats.exploration_reachability >= 0) {
         log("  Exploration Reachability: {:.2f}%\n", stats.exploration_reachability * 100);
     }
-    
+
     log("  Estimated memory: {:.2f} MB\n", stats.memory_bytes / (1024.0 * 1024.0));
 
     return stats;
 }
-
-
 
 }  // namespace deglib::benchmark

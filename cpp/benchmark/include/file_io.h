@@ -5,16 +5,16 @@
  * @brief File I/O utilities for vector files (fvecs, ivecs format) and filesystem operations.
  */
 
+#include <fmt/core.h>
+
+#include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <vector>
-#include <cstdint>
-#include <cstdlib>
 
-#include <fmt/core.h>
 
-namespace deglib::benchmark
-{
+namespace deglib::benchmark {
 
 // ============================================================================
 // Vector File I/O (fvecs, ivecs)
@@ -23,7 +23,7 @@ namespace deglib::benchmark
 /**
  * Write an ivecs file (vectors of uint32_t).
  * Format: Each vector is stored as [dimension (4 bytes)][data (dim * 4 bytes)]
- * 
+ *
  * @param fname Output file path
  * @param d Dimension of each vector
  * @param n Number of vectors
@@ -46,7 +46,7 @@ inline void ivecs_write(const char* fname, uint32_t d, size_t n, const uint32_t*
 /**
  * Write an fvecs file (vectors of float).
  * Format: Each vector is stored as [dimension (4 bytes)][data (dim * 4 bytes)]
- * 
+ *
  * @param fname Output file path
  * @param d Dimension of each vector
  * @param n Number of vectors
@@ -149,10 +149,10 @@ inline bool move_file(const std::filesystem::path& src, const std::filesystem::p
     if (!std::filesystem::exists(src)) {
         return false;  // Source doesn't exist
     }
-    
+
     // Ensure destination directory exists
     ensure_directory(dest.parent_path());
-    
+
     std::error_code ec;
     std::filesystem::rename(src, dest, ec);
     if (ec) {
@@ -192,21 +192,21 @@ inline bool remove_directory(const std::filesystem::path& path) {
 inline bool download_file(const std::string& url, const std::filesystem::path& dest_path) {
     // Ensure destination directory exists
     ensure_directory(dest_path.parent_path());
-    
+
     fmt::print("Downloading: {} -> {}\n", url, dest_path.string());
-    
-    #ifdef _WIN32
+
+#ifdef _WIN32
     std::string cmd = fmt::format("curl -L -o \"{}\" \"{}\"", dest_path.string(), url);
-    #else
+#else
     std::string cmd = fmt::format("wget -O \"{}\" \"{}\"", dest_path.string(), url);
-    #endif
-    
+#endif
+
     int result = std::system(cmd.c_str());
     if (result != 0) {
         fmt::print(stderr, "Download failed with code {}\n", result);
         return false;
     }
-    
+
     fmt::print("Download complete: {}\n", dest_path.string());
     return true;
 }
@@ -222,20 +222,20 @@ inline bool extract_tar_gz(const std::filesystem::path& archive_path, const std:
         fmt::print(stderr, "Archive not found: {}\n", archive_path.string());
         return false;
     }
-    
+
     // Ensure destination directory exists
     ensure_directory(dest_dir);
-    
+
     fmt::print("Extracting: {} -> {}\n", archive_path.string(), dest_dir.string());
-    
+
     std::string cmd = fmt::format("tar -xzf \"{}\" -C \"{}\"", archive_path.string(), dest_dir.string());
-    
+
     int result = std::system(cmd.c_str());
     if (result != 0) {
         fmt::print(stderr, "Extraction failed with code {}\n", result);
         return false;
     }
-    
+
     fmt::print("Extraction complete\n");
     return true;
 }
@@ -247,15 +247,12 @@ inline bool extract_tar_gz(const std::filesystem::path& archive_path, const std:
  * @param filename File to look for
  * @return Path to the directory containing the file, or empty path if not found
  */
-inline std::filesystem::path find_directory_with_file(
-    const std::filesystem::path& search_dir,
-    const std::string& filename)
-{
+inline std::filesystem::path find_directory_with_file(const std::filesystem::path& search_dir, const std::string& filename) {
     // First check if file is directly in search_dir
     if (std::filesystem::exists(search_dir / filename)) {
         return search_dir;
     }
-    
+
     // Search subdirectories
     for (const auto& entry : std::filesystem::directory_iterator(search_dir)) {
         if (entry.is_directory()) {
@@ -264,7 +261,7 @@ inline std::filesystem::path find_directory_with_file(
             }
         }
     }
-    
+
     return {};  // Not found
 }
 

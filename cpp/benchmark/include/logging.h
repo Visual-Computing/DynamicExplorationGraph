@@ -3,23 +3,23 @@
 /**
  * @file logging.h
  * @brief Dual-output logging utilities for benchmark tools.
- * 
+ *
  * Provides logging that outputs to both console and file simultaneously.
  */
+
+#include <fmt/base.h>
+#include <fmt/format.h>
+#include <fmt/ostream.h>
+#include <fmt/ranges.h>
 
 #include <filesystem>
 #include <fstream>
 #include <string>
 
-#include <fmt/base.h>
-#include <fmt/format.h>
-#include <fmt/ranges.h>
-#include <fmt/ostream.h>
-
 #include "file_io.h"
 
-namespace deglib::benchmark
-{
+
+namespace deglib::benchmark {
 
 // ============================================================================
 // Logging utilities - log to file AND console simultaneously
@@ -71,7 +71,7 @@ inline void set_console_logging(bool enabled) {
  * Log a formatted message to both console (if enabled) and file (if set).
  * Uses fmt library formatting syntax.
  */
-template<typename... Args>
+template <typename... Args>
 void log(fmt::format_string<Args...> fmt_str, Args&&... args) {
     std::string msg = fmt::format(fmt_str, std::forward<Args>(args)...);
     if (log_to_console) {

@@ -1,17 +1,17 @@
 /**
  * @file deglib_test.cpp
  * @brief Standalone benchmark tool for running benchmarks on existing DEG graphs.
- * 
+ *
  * This tool allows running any benchmark (search, explore, graph analysis) on any
  * existing graph file. Output goes to console only (no log files).
- * 
+ *
  * Configuration:
  *   Edit the default parameters in main() to change dataset, graph file, and benchmark type.
  *   Command-line options can override numeric parameters.
- * 
+ *
  * Usage:
  *   deglib_test [dataset] [graph_file] [benchmark_type] [options]
- * 
+ *
  * Options:
  *   --k <value>               - Number of nearest neighbors (default: 100)
  *   --repeat <value>          - Number of test repetitions (default: 1)
@@ -22,26 +22,27 @@
  *   --half-gt             - Use half dataset ground truth
  *   --reachability        - Compute search reachability (expensive)
  *   --reach               - Compute exploration reachability (expensive)
- * 
+ *
  * Examples:
  *   deglib_test                               # Run with defaults from source code
  *   deglib_test sift1m path/to/graph.deg      # Test specific graph
  *   deglib_test --k 50 --threads 4            # Override k and threads
  */
 
-#include <filesystem>
-#include <string>
-#include <vector>
-#include <algorithm>
-#include <sstream>
-#include <thread>
+#include "deglib.h"
 
 #include <fmt/core.h>
 #include <fmt/format.h>
 #include <omp.h>
 
+#include <algorithm>
+#include <filesystem>
+#include <sstream>
+#include <string>
+#include <thread>
+#include <vector>
+
 #include "benchmark.h"
-#include "deglib.h"
 
 using namespace deglib::benchmark;
 
@@ -57,13 +58,7 @@ static std::vector<float> parse_eps_values(const std::string& str) {
 }
 
 // Benchmark type enum for type-safe benchmark selection
-enum class BenchmarkType {
-    Stats,
-    ANNS,
-    Explore,
-    All,
-    Invalid
-};
+enum class BenchmarkType { Stats, ANNS, Explore, All, Invalid };
 
 static BenchmarkType parse_benchmark_type(const std::string& str) {
     std::string lower = str;
@@ -77,11 +72,16 @@ static BenchmarkType parse_benchmark_type(const std::string& str) {
 
 static const char* benchmark_type_str(BenchmarkType type) {
     switch (type) {
-        case BenchmarkType::Stats: return "stats";
-        case BenchmarkType::ANNS: return "anns";
-        case BenchmarkType::Explore: return "explore";
-        case BenchmarkType::All: return "all";
-        default: return "invalid";
+        case BenchmarkType::Stats:
+            return "stats";
+        case BenchmarkType::ANNS:
+            return "anns";
+        case BenchmarkType::Explore:
+            return "explore";
+        case BenchmarkType::All:
+            return "all";
+        default:
+            return "invalid";
     }
 }
 
@@ -110,40 +110,41 @@ static void print_usage(const char* program_name) {
 }
 
 int main(int argc, char* argv[]) {
-    #if defined(USE_AVX)
-        fmt::print("Using AVX2...\n");
-    #elif defined(USE_SSE)
-        fmt::print("Using SSE...\n");
-    #else
-        fmt::print("Using arch...\n");
-    #endif
+#if defined(USE_AVX)
+    fmt::print("Using AVX2...\n");
+#elif defined(USE_SSE)
+    fmt::print("Using SSE...\n");
+#else
+    fmt::print("Using arch...\n");
+#endif
 
     const auto data_path = std::filesystem::path(DATA_PATH);
-    
+
     // ==========================================================================
     // Default parameters - change these in the IDE to run different benchmarks
     // ==========================================================================
-    DatasetName dataset_name = DatasetName::AUDIO;                      // Dataset: SIFT1M, DEEP1M, GLOVE, AUDIO, ENRON
-    std::string graph_file = "192D_L2_K20_AddK40Eps0.1_StreamingData_OptK20Eps0.0010Path5_AddHalf_.deg";                        // Graph file path (empty = auto-generate)
-    BenchmarkType benchmark_type = BenchmarkType::Explore;              // Benchmark: Stats, ANNS, Explore, All
-    uint32_t k = 100;                                                   // ANNS k
-    uint32_t explore_k = 1000;                                          // Exploration k
-    uint32_t repeat = 1;                                                // Test repetitions
-    uint32_t analysis_threads = std::thread::hardware_concurrency() / 2;    // Threads for graph analysis (default: all CPU threads)
-    uint32_t test_threads = 1;                                          // Threads for ANNS/exploration tests (default: 1)
-    std::vector<float> eps_parameter = { 0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f };
-    bool use_half_gt = false;                                           // Use half dataset ground truth
-    bool compute_search_reach = false;                                  // Compute search reachability (expensive)
-    bool compute_exploration_reach = false;                             // Compute exploration reachability (expensive)
+    DatasetName dataset_name = DatasetName::GLOVE;  // Dataset: SIFT1M, DEEP1M, GLOVE, AUDIO
+    std::string graph_file =
+        "e:/Data/ANN/glove/deg/kExtScaling/100D_L2_K30_AddK90Eps0.1_HighLID.deg";  // Graph file path (empty = auto-generate)
+    BenchmarkType benchmark_type = BenchmarkType::ANNS;                            // Benchmark: Stats, ANNS, Explore, All
+    uint32_t k = 100;                                                              // ANNS k
+    uint32_t explore_k = 1000;                                                     // Exploration k
+    uint32_t repeat = 1;                                                           // Test repetitions
+    uint32_t analysis_threads = std::thread::hardware_concurrency() / 2;           // Threads for graph analysis (default: all CPU threads)
+    uint32_t test_threads = 1;                                                     // Threads for ANNS/exploration tests (default: 1)
+    std::vector<float> eps_parameter = {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f};
+    bool use_half_gt = false;                // Use half dataset ground truth
+    bool compute_search_reach = false;       // Compute search reachability (expensive)
+    bool compute_exploration_reach = false;  // Compute exploration reachability (expensive)
     // ==========================================================================
-    
+
     // Parse command-line arguments
     // Positional args: [dataset] [graph_file] [benchmark_type]
     // Then optional --key value pairs
     int positional_index = 0;
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
-        
+
         // Check for optional flags first
         if (arg == "--k" && i + 1 < argc) {
             k = std::stoul(argv[++i]);
@@ -197,10 +198,10 @@ int main(int argc, char* argv[]) {
             positional_index++;
         }
     }
-    
+
     // Create dataset object
     Dataset ds(dataset_name, data_path);
-    
+
     // Ensure dataset is set up (downloads, generates ground truth files if needed)
     fmt::print("\n=== Ensuring dataset is set up ===\n");
     auto setup_threads = std::thread::hardware_concurrency() / 2;
@@ -208,46 +209,47 @@ int main(int argc, char* argv[]) {
         fmt::print(stderr, "Error: Failed to set up dataset: {}\n", ds.name());
         return 1;
     }
-    
+
     // Validate graph file exists
     if (!std::filesystem::exists(graph_file)) {
         fmt::print(stderr, "Error: Graph file not found: {}\n", graph_file);
         return 1;
     }
-    
+
     fmt::print("\n=== DEG Test Tool ===\n");
     fmt::print("Dataset: {}\n", ds.name());
     fmt::print("Graph: {}\n", graph_file);
     fmt::print("Benchmark: {}\n", benchmark_type_str(benchmark_type));
-    fmt::print("k={}, explore_k={}, repeat={}, analysis_threads={}, test_threads={}\n", 
-               k, explore_k, repeat, analysis_threads, test_threads);
+    fmt::print(
+        "k={}, explore_k={}, repeat={}, analysis_threads={}, test_threads={}\n", k, explore_k, repeat, analysis_threads, test_threads);
     fmt::print("eps_parameter: {}\n", fmt::join(eps_parameter, ", "));
-    fmt::print("use_half_gt: {}, compute_reachability: {}, compute_reach: {}\n\n", 
-               use_half_gt, compute_search_reach, compute_exploration_reach);
-    
+    fmt::print(
+        "use_half_gt: {}, compute_reachability: {}, compute_reach: {}\n\n", use_half_gt, compute_search_reach, compute_exploration_reach);
+
     // Load graph
     fmt::print("Loading graph: {}\n", graph_file);
     const auto graph = deglib::graph::load_readonly_graph(graph_file.c_str());
     fmt::print("Graph loaded: {} vertices, {} edges per vertex\n\n", graph.size(), graph.getEdgesPerVertex());
-    
+
     // Load base repository and compute linear search baseline for early abort
     fmt::print("Loading base repository for linear search baseline...\n");
     auto base_repository = ds.load_base();
     fmt::print("Loaded {} base vectors\n", base_repository.size());
-    
+
     fmt::print("\n--- Computing Linear Search Baseline ---\n");
-    uint64_t linear_baseline_us = deglib::benchmark::compute_linear_search_baseline(base_repository, deglib::Metric::L2, 100) * 2; // x2 for safety margin
+    uint64_t linear_baseline_us =
+        deglib::benchmark::compute_linear_search_baseline(base_repository, deglib::Metric::L2, 100) * 2;  // x2 for safety margin
     fmt::print("\n");
-    
+
     // Run requested benchmarks
     bool run_stats = (benchmark_type == BenchmarkType::Stats || benchmark_type == BenchmarkType::All);
     bool run_anns = (benchmark_type == BenchmarkType::ANNS || benchmark_type == BenchmarkType::All);
     bool run_explore = (benchmark_type == BenchmarkType::Explore || benchmark_type == BenchmarkType::All);
-    
+
     // Stats / Graph Analysis
     if (run_stats) {
         fmt::print("=== Graph Analysis ===\n");
-        
+
         // Load base ground truth for graph quality computation
         fmt::print("Loading Top{} of the base data set for graph quality...\n", graph.getEdgesPerVertex());
         auto base_gt = ds.load_base_groundtruth(graph.getEdgesPerVertex(), use_half_gt);
@@ -255,16 +257,16 @@ int main(int argc, char* argv[]) {
         deglib::benchmark::analyze_graph(graph, base_gt, compute_search_reach, compute_exploration_reach, analysis_threads);
         fmt::print("\n");
     }
-    
+
     // ANNS Benchmark
     if (run_anns) {
         fmt::print("=== ANNS Benchmark (k={}) ===\n", k);
-        
+
         // Load query repository
         fmt::print("Loading query repository...\n");
         auto query_repository = ds.load_query();
         fmt::print("Loaded {} query vectors\n", query_repository.size());
-        
+
         // Load ground truth
         fmt::print("Loading ground truth (use_half={})...\n", use_half_gt);
         auto ground_truth = ds.load_groundtruth(k, use_half_gt);
@@ -273,15 +275,16 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         fmt::print("Loaded ground truth for {} queries\n", ground_truth.size());
-        
-        deglib::benchmark::test_graph_anns(graph, query_repository, ground_truth, repeat, test_threads, k, eps_parameter, nullptr, linear_baseline_us);
+
+        deglib::benchmark::test_graph_anns(
+            graph, query_repository, ground_truth, repeat, test_threads, k, eps_parameter, nullptr, linear_baseline_us);
         fmt::print("\n");
     }
-    
+
     // Exploration Benchmark
     if (run_explore) {
         fmt::print("=== Exploration Benchmark (k={}) ===\n", explore_k);
-        
+
         // Load entry vertices
         fmt::print("Loading exploration entry vertices...\n");
         auto entry_vertices = ds.load_explore_entry_vertices();
@@ -290,7 +293,7 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         fmt::print("Loaded {} entry vertices\n", entry_vertices.size());
-        
+
         // Load exploration ground truth
         fmt::print("Loading exploration ground truth...\n");
         auto explore_gt = ds.load_explore_groundtruth(explore_k, use_half_gt);
@@ -299,14 +302,15 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         fmt::print("Loaded exploration ground truth for {} entries\n", explore_gt.size());
-        
-        deglib::benchmark::test_graph_explore(graph, entry_vertices, explore_gt, true, repeat, explore_k, test_threads, nullptr, ds.info().explore_depth, linear_baseline_us);
+
+        deglib::benchmark::test_graph_explore(
+            graph, entry_vertices, explore_gt, true, repeat, explore_k, test_threads, nullptr, ds.info().explore_depth, linear_baseline_us);
         fmt::print("\n");
     }
-    
+
     fmt::print("=== Benchmark Complete ===\n");
     fmt::print("Actual memory usage: {} Mb\n", getCurrentRSS() / 1000000);
     fmt::print("Max memory usage: {} Mb\n", getPeakRSS() / 1000000);
-    
+
     return 0;
 }
