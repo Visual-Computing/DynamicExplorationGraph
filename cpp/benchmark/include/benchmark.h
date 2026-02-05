@@ -232,7 +232,6 @@ static void test_graph_anns(const deglib::search::SearchGraph& graph,
                             const uint32_t abort_sample_size = 100) {
     // reproduceable entry point for the graph search
     const auto entry_vertex_indices = graph.getEntryVertexIndices();
-    log("internal id {} \n", entry_vertex_indices[0]);
 
     // sort eps_parameter
     std::vector<float> eps_parameter_sorted = eps_parameter;
@@ -241,6 +240,10 @@ static void test_graph_anns(const deglib::search::SearchGraph& graph,
     if (linear_baseline_us > 0) {
         log("Early abort enabled: baseline {}us/query, checking after {} queries\n", linear_baseline_us, abort_sample_size);
     }
+
+    log("Internal seed id {} \n", entry_vertex_indices[0]);
+    log("Actual memory usage: {} Mb\n", getCurrentRSS() / 1000000);
+    log("Max memory usage: {} Mb\n", getPeakRSS() / 1000000);
 
     const auto test_size = uint32_t(query_repository.size());
     for (float eps : eps_parameter_sorted) {
@@ -259,7 +262,7 @@ static void test_graph_anns(const deglib::search::SearchGraph& graph,
                     sample_time_per_query,
                     linear_baseline_us,
                     sample_size);
-                continue;  // Skip to next eps value
+                return;
             }
         }
 
@@ -278,12 +281,9 @@ static void test_graph_anns(const deglib::search::SearchGraph& graph,
             search_time_us / 1000);
         if (recall > 0.997) {
             log("Reached recall > 0.997, stopping further tests.\n");
-            break;
+            return;
         }
     }
-
-    log("Actual memory usage: {} Mb\n", getCurrentRSS() / 1000000);
-    log("Max memory usage: {} Mb\n", getPeakRSS() / 1000000);
 }
 
 /**
@@ -330,6 +330,9 @@ static void test_graph_explore(const deglib::search::SearchGraph& graph,
         log("Early abort enabled: baseline {}us/query, checking after {} queries\n", linear_baseline_us, abort_sample_size);
     }
 
+    log("Actual memory usage: {} Mb\n", getCurrentRSS() / 1000000);
+    log("Max memory usage: {} Mb\n", getPeakRSS() / 1000000);
+
     // try different max_distance_count values
     uint32_t k_factor = 100;
     float last_recall = -1.0f;
@@ -358,7 +361,7 @@ static void test_graph_explore(const deglib::search::SearchGraph& graph,
                         sample_time_per_query,
                         linear_baseline_us,
                         sample_size);
-                    continue;  // Skip to next max_distance_count value
+                    return;
                 }
             }
 
@@ -389,9 +392,6 @@ static void test_graph_explore(const deglib::search::SearchGraph& graph,
             }
         }
     }
-
-    log("Actual memory usage: {} Mb\n", getCurrentRSS() / 1000000);
-    log("Max memory usage: {} Mb\n", getPeakRSS() / 1000000);
 }
 
 }  // namespace deglib::benchmark
