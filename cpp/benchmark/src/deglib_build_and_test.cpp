@@ -1088,21 +1088,51 @@ int main(int argc, char* argv[]) {
                                                     ds.info().scale);
                 }
 
-                // Test the graph
+                // Run comprehensive tests on the graph
                 if (std::filesystem::exists(graph_path)) {
                     const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
                     log("Testing Graph ({} vertices) ...\n", graph.size());
 
-                    wait_before_test();
-                    deglib::benchmark::test_graph_anns(graph,
-                                                       *query_repository,
-                                                       ground_truth,
-                                                       cg.anns_repeat,
-                                                       cg.anns_threads,
-                                                       cg.anns_k,
-                                                       scheme_eps,
-                                                       nullptr,
-                                                       linear_baseline_us);
+                    // 1. Analyze graph and log stats (with graph quality using base GT)
+                    log("\n--- Graph Analysis ---\n");
+                    {
+                        auto base_gt = ds.load_base_groundtruth(graph.getEdgesPerVertex());
+                        deglib::benchmark::analyze_graph(graph, base_gt, cg.analysis_threads);
+                    }
+
+                    // 2. ANNS Test with Top-100
+                    log("\n--- ANNS Test (k={}) ---\n", cg.anns_k);
+                    {
+                        auto ground_truth = ds.load_groundtruth(cg.anns_k, false);
+                        wait_before_test();
+                        deglib::benchmark::test_graph_anns(graph,
+                                                           *query_repository,
+                                                           ground_truth,
+                                                           cg.anns_repeat,
+                                                           cg.anns_threads,
+                                                           cg.anns_k,
+                                                           cg.eps_parameter,
+                                                           nullptr,
+                                                           linear_baseline_us);
+                    }
+
+                    // 3. Exploration Test with Top-1000
+                    log("\n--- Exploration Test (k={}) ---\n", cg.explore_k);
+                    {
+                        auto entry_vertices = ds.load_explore_entry_vertices();
+                        auto explore_gt = ds.load_explore_groundtruth(cg.explore_k);
+                        wait_before_test();
+                        deglib::benchmark::test_graph_explore(graph,
+                                                              entry_vertices,
+                                                              explore_gt,
+                                                              true,
+                                                              cg.explore_repeat,
+                                                              cg.explore_k,
+                                                              cg.explore_threads,
+                                                              nullptr,
+                                                              ds.info().explore_depth,
+                                                              linear_baseline_us);
+                    }
                 } else {
                     log("ERROR: Graph file not found after build attempt: {}\n", graph_path);
                 }
