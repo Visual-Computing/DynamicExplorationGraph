@@ -5,6 +5,7 @@ var/
 .vscode/
 CMakePresets.json
 cmake-variants.yaml
-build-*
+build
 cmake-build*
 data/
+.cache/

@@ -29,7 +29,9 @@
  *   deglib_test --k 50 --threads 4            # Override k and threads
  */
 
-#include "deglib.h"
+#if defined(_WIN32)
+    #include <windows.h>
+#endif
 
 #include <fmt/core.h>
 #include <fmt/format.h>
@@ -43,6 +45,7 @@
 #include <vector>
 
 #include "benchmark.h"
+#include "deglib.h"
 
 using namespace deglib::benchmark;
 

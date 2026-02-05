@@ -11,6 +11,10 @@
  * See DatasetConfig and test structs for available configurations.
  */
 
+#if defined(_WIN32)
+    #include <windows.h>
+#endif
+
 #include <fmt/core.h>
 #include <omp.h>
 

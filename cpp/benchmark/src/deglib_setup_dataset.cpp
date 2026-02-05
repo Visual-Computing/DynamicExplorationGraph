@@ -6,13 +6,16 @@
  * Datasets: sift1m, deep1m, glove, audio, all
  */
 
+#if defined(_WIN32)
+    #include <windows.h>
+#endif
+
 #include <fmt/core.h>
 
 #include <filesystem>
 #include <string>
 
 #include "dataset.h"
-
 
 int main(int argc, char* argv[]) {
     fmt::print("=== DEG Dataset Setup Tool ===\n\n");
