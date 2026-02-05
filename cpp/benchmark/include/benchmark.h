@@ -28,7 +28,6 @@
 #include "stats.h"
 #include "stopwatch.h"
 
-
 namespace deglib::benchmark {
 
 /**
@@ -277,8 +276,8 @@ static void test_graph_anns(const deglib::search::SearchGraph& graph,
             recall,
             time_us_per_query,
             search_time_us / 1000);
-        if (recall > 0.995) {
-            log("Reached recall > 0.995, stopping further tests.\n");
+        if (recall > 0.997) {
+            log("Reached recall > 0.997, stopping further tests.\n");
             break;
         }
     }
@@ -312,7 +311,8 @@ static void test_graph_explore(const deglib::search::SearchGraph& graph,
                                const deglib::graph::Filter* filter = nullptr,
                                const uint32_t explore_depth = 3,
                                const uint64_t linear_baseline_us = 0,
-                               const uint32_t abort_sample_size = 100) {
+                               const uint32_t abort_sample_size = 100,
+                               const float recall_target = 0.997f) {
     if (entry_vertex_labels.size() != ground_truth.size()) {
         fmt::print(stderr, "Entry vertex count {} does not match ground truth count {}\n", entry_vertex_labels.size(), ground_truth.size());
         abort();
@@ -332,6 +332,7 @@ static void test_graph_explore(const deglib::search::SearchGraph& graph,
 
     // try different max_distance_count values
     uint32_t k_factor = 100;
+    float last_recall = -1.0f;
     for (uint32_t f = 0; f <= explore_depth; f++, k_factor *= 10) {
         for (uint32_t i = (f == 0) ? 1 : 2; i < 11; i++) {
             const auto max_distance_count = ((f == 0) ? (k + k_factor * (i - 1)) : (k_factor * i));
@@ -369,15 +370,22 @@ static void test_graph_explore(const deglib::search::SearchGraph& graph,
             uint64_t search_time_us = stopw.getElapsedTimeMicro();
             uint64_t time_us_per_query = search_time_us / (query_count * repeat);
 
-            log("max_distance_count {:5}, k {:4}, recall {:.5f}, time_us_per_query {:4}us \t search time: {:6}ms\n",
-                max_distance_count,
+            log("k {:5}, max_distance_count {:6}, recall {:.4f}, time_us_per_query {:6}\n",
                 k,
+                max_distance_count,
                 recall,
-                time_us_per_query,
-                search_time_us / 1000);
-            if (recall > 0.995) {
-                log("Reached recall > 0.995, stopping further tests.\n");
-                break;
+                time_us_per_query);
+
+            if (recall == last_recall) {
+                log("Recall stabilized at {:.4f}, stopping exploration sweep\n", recall);
+                return;
+            }
+            last_recall = recall;
+
+            // Early exit if recall target reached
+            if (recall >= recall_target) {
+                log("Recall target {:.3f} reached, stopping exploration sweep\n", recall_target);
+                return;
             }
         }
     }
