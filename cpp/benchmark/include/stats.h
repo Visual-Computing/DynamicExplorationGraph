@@ -46,6 +46,7 @@ inline uint32_t compute_search_reachability(const deglib::search::SearchGraph& g
     const auto edges_per_vertex = graph.getEdgesPerVertex();
     const auto entry_vertices = graph.getEntryVertexIndices();
 
+    auto stopw = StopW();
     std::vector<bool> visited(graph_size, false);
     std::vector<uint32_t> frontier;
     frontier.reserve(graph_size);
@@ -79,7 +80,7 @@ inline uint32_t compute_search_reachability(const deglib::search::SearchGraph& g
         if (visited[i]) count++;
     }
 
-    log("Seed Reachability is {} out of {}\n", count, graph_size);
+    log("Seed Reachability is {} out of {} after {}s\n", count, graph_size, stopw.getElapsedTimeMicro() / 1000000);
     return count;
 }
 
@@ -199,7 +200,11 @@ inline float compute_exploration_reach(const deglib::search::SearchGraph& graph)
             }
         }
     }
-    return ((float)exploration_reachability) / graph_size;
+
+    log("Average Exploration reachability is {:.2f} after {:4d}s\n",
+        (static_cast<float>(exploration_reachability)) / static_cast<float>(graph_size),
+        stopw.getElapsedTimeMicro() / 1000000);
+    return (graph_size > 0) ? (static_cast<float>(exploration_reachability) / static_cast<float>(graph_size)) : 0.0f;
 }
 
 /**

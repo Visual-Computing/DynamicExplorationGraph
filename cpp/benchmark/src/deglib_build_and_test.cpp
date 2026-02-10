@@ -33,7 +33,6 @@
 #include "deglib.h"
 #include "stats.h"
 
-
 // Use types from benchmark.h and dataset.h
 using deglib::benchmark::Dataset;
 using deglib::benchmark::DatasetInfo;
@@ -600,7 +599,7 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
         conf.create_graph.k = 20;
         conf.create_graph.k_ext = 40;
         conf.create_graph.anns_repeat = 50;
-        conf.create_graph.eps_parameter = {0.00f, 0.03f, 0.05f, 0.07f, 0.09f, 0.12f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.8f, 1.0f, 1.5f, 2.0f};
+        conf.create_graph.eps_parameter = {0.00f, 0.03f, 0.05f, 0.07f, 0.09f, 0.12f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.8f, 1.2f, 1.6f, 2.0f};
 
         conf.optimize_graph.k_opt = 20;
         conf.optimize_graph.total_iterations = 20000;
@@ -611,7 +610,7 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
         conf.create_graph.k = 30;
         conf.create_graph.k_ext = 60;
         conf.create_graph.anns_repeat = 50;
-        conf.create_graph.eps_parameter = {0.00f, 0.03f, 0.05f, 0.07f, 0.09f, 0.12f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.8f, 1.0f, 1.5f, 2.0f};
+        conf.create_graph.eps_parameter = {0.00f, 0.03f, 0.05f, 0.07f, 0.09f, 0.12f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.8f, 1.2f, 1.6f, 2.0f};
 
         conf.optimize_graph.k_opt = 30;
         conf.optimize_graph.total_iterations = 40000;
@@ -639,7 +638,7 @@ int main(int argc, char* argv[]) {
 
     // Parse command-line arguments
     // Usage: deglib_phd <dataset> [test_type] [--run]
-    DatasetName ds_name = DatasetName::AUDIO;
+    DatasetName ds_name = DatasetName::DEEP1M;
     std::string test_type_arg = "all";
     bool do_run = true;
 
