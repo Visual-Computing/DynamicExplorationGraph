@@ -641,11 +641,12 @@ int main(int argc, char* argv[]) {
     DatasetName ds_name = DatasetName::DEEP1M;
     std::string test_type_arg = "all";
     bool do_run = true;
+    bool force_test = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "help" || arg == "--help") {
-            log("Usage: deglib_phd <dataset> [test_type] [--run]\n");
+            log("Usage: deglib_phd <dataset> [test_type] [--run] [--force-test]\n");
             log("Datasets: sift1m, deep1m, audio, glove, enron\n");
             log("Test types:\n");
             log("  create_graph    - Build graph, run stats, ANNS, explore, k-sweep\n");
@@ -677,6 +678,8 @@ int main(int argc, char* argv[]) {
                    arg == "k_ext_sweep" || arg == "eps_ext_sweep" || arg == "size_scaling" || arg == "reduce_scaling" ||
                    arg == "opt_scaling" || arg == "thread_scaling" || arg == "rng_disabled" || arg == "all") {
             test_type_arg = arg;
+        } else if (arg == "--force-test") {
+            force_test = true;
         }
     }
 
@@ -785,11 +788,11 @@ int main(int argc, char* argv[]) {
             std::string log_path = graph_paths.graph_log_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, cg.lid);
 
             // Skip entire scenario if log file already exists
-            if (std::filesystem::exists(log_path)) {
+            if (!force_test && std::filesystem::exists(log_path)) {
                 log("CREATE_GRAPH: Skipping - log file already exists: {}\n", log_path);
             } else {
                 // Set up log file for this graph (all tests logged here)
-                deglib::benchmark::set_log_file(log_path, true);
+                deglib::benchmark::set_log_file(log_path, force_test);
 
                 // Build graph if it doesn't exist
                 if (std::filesystem::exists(graph_path)) {
@@ -906,11 +909,11 @@ int main(int argc, char* argv[]) {
                 dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, cg.lid, og.k_opt, og.eps_opt, og.i_opt, og.total_iterations);
 
             // Skip entire scenario if log file already exists
-            if (std::filesystem::exists(log_path)) {
+            if (!force_test && std::filesystem::exists(log_path)) {
                 log("OPTIMIZE_GRAPH: Skipping - log file already exists: {}\n", log_path);
             } else {
                 // Set up log file for this optimized graph
-                deglib::benchmark::set_log_file(log_path, true);
+                deglib::benchmark::set_log_file(log_path, force_test);
                 log("\n=== OPTIMIZE_GRAPH Test ===\n");
                 log("Input graph: {}\n", input_graph);
                 log("Output graph: {}\n", output_graph);
@@ -1015,12 +1018,12 @@ int main(int argc, char* argv[]) {
                 std::string log_path = graph_paths.graph_log_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, lid);
 
                 // Skip if log file already exists
-                if (std::filesystem::exists(log_path)) {
+                if (!force_test && std::filesystem::exists(log_path)) {
                     log("{}: Skipping - log file already exists: {}\n", DatasetConfig::optimization_target_str(lid), log_path);
                     continue;
                 }
 
-                deglib::benchmark::set_log_file(log_path, true);
+                deglib::benchmark::set_log_file(log_path, force_test);
 
                 log("Testing scheme {} \n", DatasetConfig::optimization_target_str(lid));
 
@@ -1123,12 +1126,12 @@ int main(int argc, char* argv[]) {
                 std::string log_path = graph_paths.scaling_log_file(scaling_dir, dims, config.metric, k, k_ext, cg.eps_ext, cg.lid);
 
                 // Skip if log file already exists
-                if (std::filesystem::exists(log_path)) {
+                if (!force_test && std::filesystem::exists(log_path)) {
                     log("k={}: Skipping - log file already exists: {}\n", k, log_path);
                     continue;
                 }
 
-                deglib::benchmark::set_log_file(log_path, true);
+                deglib::benchmark::set_log_file(log_path, force_test);
                 log("\n=== K_SWEEP Test: k={} ===\n", k);
                 log("Graph: {}\n", graph_path);
 
@@ -1204,12 +1207,12 @@ int main(int argc, char* argv[]) {
                 std::string log_path = graph_paths.scaling_log_file(scaling_dir, dims, config.metric, cg.k, k_ext, cg.eps_ext, cg.lid);
 
                 // Skip if log file already exists
-                if (std::filesystem::exists(log_path)) {
+                if (!force_test && std::filesystem::exists(log_path)) {
                     log("k_ext={}: Skipping - log file already exists: {}\n", k_ext, log_path);
                     continue;
                 }
 
-                deglib::benchmark::set_log_file(log_path, true);
+                deglib::benchmark::set_log_file(log_path, force_test);
                 log("\n=== K_EXT_SWEEP Test: k_ext={} ===\n", k_ext);
                 log("Graph: {}\n", graph_path);
 
@@ -1285,12 +1288,12 @@ int main(int argc, char* argv[]) {
                 std::string log_path = graph_paths.scaling_log_file(scaling_dir, dims, config.metric, cg.k, cg.k_ext, eps_ext, cg.lid);
 
                 // Skip if log file already exists
-                if (std::filesystem::exists(log_path)) {
+                if (!force_test && std::filesystem::exists(log_path)) {
                     log("eps_ext={:.2f}: Skipping - log file already exists: {}\n", eps_ext, log_path);
                     continue;
                 }
 
-                deglib::benchmark::set_log_file(log_path, true);
+                deglib::benchmark::set_log_file(log_path, force_test);
                 log("\n=== EPS_EXT_SWEEP Test: eps_ext={:.2f} ===\n", eps_ext);
                 log("Graph: {}\n", graph_path);
 
@@ -1363,7 +1366,7 @@ int main(int argc, char* argv[]) {
 
             if (do_run && base_repository && query_repository) {
                 // Skip entire scenario if log file already exists
-                if (std::filesystem::exists(log_path)) {
+                if (!force_test && std::filesystem::exists(log_path)) {
                     log("SIZE_SCALING {}: Skipping - log file already exists: {}\n", scheme_name, log_path);
                     continue;
                 } else {
@@ -1371,7 +1374,7 @@ int main(int argc, char* argv[]) {
                     std::filesystem::create_directories(scaling_dir);
 
                     // Set log file for all size scaling operations
-                    deglib::benchmark::set_log_file(log_path, false);
+                    deglib::benchmark::set_log_file(log_path, force_test);
                     log("\n=== SIZE_SCALING Test: {} ===\n", scheme_name);
                     log("Size interval: {}\n", ss.size_interval);
 
@@ -1460,14 +1463,14 @@ int main(int argc, char* argv[]) {
 
         if (do_run && base_repository && query_repository) {
             // Skip entire scenario if log file already exists
-            if (std::filesystem::exists(log_path)) {
+            if (!force_test && std::filesystem::exists(log_path)) {
                 log("OPT_SCALING: Skipping - log file already exists: {}\n", log_path);
             } else {
                 // Ensure scaling directory exists
                 std::filesystem::create_directories(scaling_dir);
 
                 // Set log file for all opt scaling operations
-                deglib::benchmark::set_log_file(log_path, false);
+                deglib::benchmark::set_log_file(log_path, force_test);
                 log("\n=== OPT_SCALING Test ===\n");
                 log("Iteration interval: {}, total: {}\n", os.iteration_interval, os.total_iterations);
                 log("Optimization: k_opt={}, eps_opt={:.4f}, i_opt={}\n", og.k_opt, og.eps_opt, og.i_opt);
@@ -1592,13 +1595,13 @@ int main(int argc, char* argv[]) {
                     graph_paths.thread_scaling_log_file(dims, config.metric, cg.k, cg.k_ext, cg.eps_ext, cg.lid, threads);
 
                 // Skip if log file already exists
-                if (std::filesystem::exists(log_path)) {
+                if (!force_test && std::filesystem::exists(log_path)) {
                     log("threads={}: Skipping - log file already exists: {}\n", threads, log_path);
                     continue;
                 }
 
                 // Set up log file for this thread count (each gets its own log for timing analysis)
-                deglib::benchmark::set_log_file(log_path, false);
+                deglib::benchmark::set_log_file(log_path, force_test);
                 log("\n=== THREAD_SCALING Test: threads={} ===\n", threads);
                 log("Graph: {}\n", graph_path);
 
@@ -1667,10 +1670,10 @@ int main(int argc, char* argv[]) {
 
         if (do_run && base_repository && query_repository) {
             // Skip entire scenario if log file already exists
-            if (std::filesystem::exists(log_path)) {
+            if (!force_test && std::filesystem::exists(log_path)) {
                 log("RNG_DISABLED: Skipping - log file already exists: {}\n", log_path);
             } else {
-                deglib::benchmark::set_log_file(log_path, true);
+                deglib::benchmark::set_log_file(log_path, force_test);
                 log("\n=== RNG_DISABLED Test ===\n");
 
                 if (std::filesystem::exists(graph_path)) {
@@ -1780,13 +1783,13 @@ int main(int argc, char* argv[]) {
                                                                         use_path_verification);
 
                     // Skip if log file already exists
-                    if (std::filesystem::exists(log_path)) {
+                    if (!force_test && std::filesystem::exists(log_path)) {
                         log("{}: Skipping - log file already exists: {}\n", DatasetConfig::data_stream_type_str(ds_type), log_path);
                         continue;
                     }
 
                     // Set up log file for this DataStreamType
-                    deglib::benchmark::set_log_file(log_path, false);
+                    deglib::benchmark::set_log_file(log_path, force_test);
                     log("\n=== DYNAMIC_DATA Test: {} ===\n", DatasetConfig::data_stream_type_str(ds_type));
                     log("Graph: {}\n", graph_path);
 
@@ -1899,7 +1902,7 @@ int main(int argc, char* argv[]) {
 
             if (do_run && base_repository && query_repository) {
                 // Skip entire scenario if log file already exists
-                if (std::filesystem::exists(log_path)) {
+                if (!force_test && std::filesystem::exists(log_path)) {
                     log("REDUCE_SCALING {}: Skipping - log file already exists: {}\n", scheme, log_path);
                     continue;
                 } else {
@@ -1907,7 +1910,7 @@ int main(int argc, char* argv[]) {
                     std::filesystem::create_directories(scaling_dir);
 
                     // Set log file for all reduce scaling operations
-                    deglib::benchmark::set_log_file(log_path, false);
+                    deglib::benchmark::set_log_file(log_path, force_test);
                     log("\n=== REDUCE_SCALING Test: {} ===\n", scheme);
                     log("Size interval: {}\n", rs.size_interval);
 
@@ -2041,7 +2044,7 @@ int main(int argc, char* argv[]) {
 
             if (do_run && base_repository) {
                 // Skip if log file already exists
-                if (std::filesystem::exists(log_path)) {
+                if (!force_test && std::filesystem::exists(log_path)) {
                     log("REDUCE_SCALING_MEASURE {}: Skipping - log file already exists: {}\n", scheme, log_path);
                     continue;
                 } else {
@@ -2049,7 +2052,7 @@ int main(int argc, char* argv[]) {
                     std::filesystem::create_directories(reduce_dir);
 
                     // Set log file for measurement
-                    deglib::benchmark::set_log_file(log_path, false);
+                    deglib::benchmark::set_log_file(log_path, force_test);
                     log("\n=== REDUCE_SCALING_MEASURE Test: {} ===\n", scheme);
 
                     // Generate base name for expected size scaling graph files
