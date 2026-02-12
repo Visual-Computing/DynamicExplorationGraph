@@ -55,11 +55,12 @@ public:
     static const DatasetName GLOVE;
     static const DatasetName AUDIO;
     static const DatasetName ENRON;
+    static const DatasetName ALL;
     static const DatasetName Invalid;
 
     // All valid datasets for iteration
     static const std::array<DatasetName, 5>& all() {
-        static const std::array<DatasetName, 5> datasets = {SIFT1M, DEEP1M, GLOVE, AUDIO, ENRON};
+        static const std::array<DatasetName, 5> datasets = {AUDIO, ENRON, SIFT1M, DEEP1M, GLOVE};
         return datasets;
     }
 
@@ -67,6 +68,10 @@ public:
     static DatasetName from_string(const std::string& str) {
         std::string lower = str;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+
+        if (lower == "all") {
+            return ALL;
+        }
 
         for (const auto& ds : all()) {
             if (lower == ds.name()) {
@@ -99,6 +104,7 @@ inline constexpr DatasetName DatasetName::DEEP1M{"deep1m"};
 inline constexpr DatasetName DatasetName::GLOVE{"glove"};
 inline constexpr DatasetName DatasetName::AUDIO{"audio"};
 inline constexpr DatasetName DatasetName::ENRON{"enron"};
+inline constexpr DatasetName DatasetName::ALL{"all"};
 inline constexpr DatasetName DatasetName::Invalid{"invalid"};
 
 // ============================================================================

@@ -637,69 +637,8 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
     return conf;
 }
 
-int main(int argc, char* argv[]) {
-    log("Testing ...\n");
-
-#if defined(USE_AVX)
-    log("use AVX2  ...\n");
-#elif defined(USE_SSE)
-    log("use SSE  ...\n");
-#else
-    log("use arch  ...\n");
-#endif
-
-    const auto data_path = std::filesystem::path(DATA_PATH);
-    log("data_path {} \n", data_path.string());
-
-    // Parse command-line arguments
-    // Usage: deglib_phd <dataset> [test_type] [--run]
-    DatasetName ds_name = DatasetName::AUDIO;
-    std::string test_type_arg = "simple_swap";
-    bool do_run = true;
-    bool force_test = false;
-
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "help" || arg == "--help") {
-            log("Usage: deglib_phd <dataset> [test_type] [--run] [--force-test]\n");
-            log("Datasets: sift1m, deep1m, audio, glove, enron\n");
-            log("Test types:\n");
-            log("  create_graph    - Build graph, run stats, ANNS, explore, k-sweep\n");
-            log("  optimize_graph  - Optimize existing graph\n");
-            log("  dynamic_data    - Build graphs with different DataStreamTypes\n");
-            log("  all_schemes     - Test all 5 OptimizationTargets\n");
-            log("  k_sweep         - Sweep k values for graph construction\n");
-            log("  k_ext_sweep     - Sweep k_ext values for graph construction\n");
-            log("  eps_ext_sweep   - Sweep eps_ext values for graph construction\n");
-            log("  size_scaling    - Build/test graphs with different data sizes (incremental)\n");
-            log("  reduce_scaling  - Build full graph and reduce it incrementally\n");
-            log("  opt_scaling     - Build random graph, optimize at intervals, test\n");
-            log("  thread_scaling  - Build graphs with different thread counts\n");
-            log("  rng_disabled    - Build graph with RNG pruning disabled\n");
-            log("  simple_swap     - Optimize random graph with simple edge swaps (logarithmic intervals)\n");
-            log("  all             - Run all available tests\n");
-            log("Options: --run  Actually execute tests (otherwise just show config)\n");
-            return 0;
-        }
-        if (arg == "--run") {
-            do_run = true;
-            continue;
-        }
-
-        // Try to parse as dataset name
-        auto parsed_ds = DatasetName::from_string(arg);
-        if (parsed_ds.is_valid()) {
-            ds_name = parsed_ds;
-        } else if (arg == "create_graph" || arg == "optimize_graph" || arg == "dynamic_data" || arg == "all_schemes" || arg == "k_sweep" ||
-                   arg == "k_ext_sweep" || arg == "eps_ext_sweep" || arg == "size_scaling" || arg == "reduce_scaling" ||
-                   arg == "opt_scaling" || arg == "thread_scaling" || arg == "rng_disabled" || arg == "simple_swap" || arg == "all") {
-            test_type_arg = arg;
-        } else if (arg == "--force-test") {
-            force_test = true;
-        }
-    }
-
-    // Create Dataset object (combines name with data_path)
+void process_dataset(
+    const DatasetName& ds_name, const std::filesystem::path& data_path, const std::string& test_type_arg, bool do_run, bool force_test) {
     Dataset ds(ds_name, data_path);
 
     // Get dataset config and create path utilities
@@ -763,7 +702,7 @@ int main(int argc, char* argv[]) {
         log("\nSetting up dataset with {} threads...\n", setup_threads);
         if (!deglib::benchmark::setup_dataset(ds, setup_threads)) {
             log("ERROR: Failed to setup dataset {}\n", ds.name());
-            return 1;
+            return;
         }
 
         log("\nLoading data...\n");
@@ -2228,6 +2167,80 @@ int main(int argc, char* argv[]) {
             deglib::benchmark::reset_log_to_console();
             log("SIMPLE_SWAP: Log written to: {}\n", log_file);
         }
+    }
+}
+
+int main(int argc, char* argv[]) {
+    log("Testing ...\n");
+
+#if defined(USE_AVX)
+    log("use AVX2  ...\n");
+#elif defined(USE_SSE)
+    log("use SSE  ...\n");
+#else
+    log("use arch  ...\n");
+#endif
+
+    const auto data_path = std::filesystem::path(DATA_PATH);
+    log("data_path {} \n", data_path.string());
+
+    // Parse command-line arguments
+    // Usage: deglib_phd <dataset> [test_type] [--run]
+    DatasetName ds_name = DatasetName::ALL;
+    std::string test_type_arg = "simple_swap";
+    bool do_run = true;
+    bool force_test = false;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "help" || arg == "--help") {
+            log("Usage: deglib_phd <dataset> [test_type] [--run] [--force-test]\n");
+            log("Datasets: sift1m, deep1m, audio, glove, enron\n");
+            log("Test types:\n");
+            log("  create_graph    - Build graph, run stats, ANNS, explore, k-sweep\n");
+            log("  optimize_graph  - Optimize existing graph\n");
+            log("  dynamic_data    - Build graphs with different DataStreamTypes\n");
+            log("  all_schemes     - Test all 5 OptimizationTargets\n");
+            log("  k_sweep         - Sweep k values for graph construction\n");
+            log("  k_ext_sweep     - Sweep k_ext values for graph construction\n");
+            log("  eps_ext_sweep   - Sweep eps_ext values for graph construction\n");
+            log("  size_scaling    - Build/test graphs with different data sizes (incremental)\n");
+            log("  reduce_scaling  - Build full graph and reduce it incrementally\n");
+            log("  opt_scaling     - Build random graph, optimize at intervals, test\n");
+            log("  thread_scaling  - Build graphs with different thread counts\n");
+            log("  rng_disabled    - Build graph with RNG pruning disabled\n");
+            log("  simple_swap     - Optimize random graph with simple edge swaps (logarithmic intervals)\n");
+            log("  all             - Run all available tests\n");
+            log("Options: --run  Actually execute tests (otherwise just show config)\n");
+            return 0;
+        }
+        if (arg == "--run") {
+            do_run = true;
+            continue;
+        }
+
+        // Try to parse as dataset name
+        auto parsed_ds = DatasetName::from_string(arg);
+        if (parsed_ds.is_valid()) {
+            ds_name = parsed_ds;
+        } else if (arg == "create_graph" || arg == "optimize_graph" || arg == "dynamic_data" || arg == "all_schemes" || arg == "k_sweep" ||
+                   arg == "k_ext_sweep" || arg == "eps_ext_sweep" || arg == "size_scaling" || arg == "reduce_scaling" ||
+                   arg == "opt_scaling" || arg == "thread_scaling" || arg == "rng_disabled" || arg == "simple_swap" || arg == "all") {
+            test_type_arg = arg;
+        } else if (arg == "--force-test") {
+            force_test = true;
+        }
+    }
+
+    std::vector<DatasetName> datasets_to_run;
+    if (ds_name == DatasetName::ALL) {
+        for (const auto& d : DatasetName::all()) datasets_to_run.push_back(d);
+    } else {
+        datasets_to_run.push_back(ds_name);
+    }
+
+    for (const auto& current_ds_name : datasets_to_run) {
+        process_dataset(current_ds_name, data_path, test_type_arg, do_run, force_test);
     }
 
     log("\nTest OK\n");
