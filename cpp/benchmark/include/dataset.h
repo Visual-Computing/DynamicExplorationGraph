@@ -30,7 +30,6 @@
 #include "deglib.h"
 #include "file_io.h"
 
-
 namespace deglib::benchmark {
 
 // ============================================================================

@@ -177,6 +177,15 @@ struct OptScalingTest {
 };
 
 /**
+ * SimpleSwapTest: Optimize a random graph using simple edge swaps.
+ * Logs AEW and time at logarithmic intervals (1M, 2M...1B).
+ */
+struct SimpleSwapTest {
+    uint64_t max_iterations = 100000000000;  // 100 Billion
+    uint32_t max_minutes = 300;              // 0 means no time limit
+};
+
+/**
  * ThreadScalingTest: Build graphs with different thread counts.
  * Builds graphs in "threadScaling" subdirectory.
  * Each graph has its own log file for detailed build timing analysis.
@@ -281,6 +290,7 @@ struct DatasetConfig {
     ThreadScalingTest thread_scaling_test;
     RNGDisabledTest rng_disabled_test;
     DynamicDataTest dynamic_data_test;
+    SimpleSwapTest simple_swap_test;
 };
 
 // Path building utilities for graph files
@@ -606,6 +616,9 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
 
         conf.opt_scaling_test.iteration_interval = 100000;
         conf.opt_scaling_test.total_iterations = 1000000;
+        conf.simple_swap_test.max_iterations = 4000000000;
+        conf.simple_swap_test.max_minutes = 60;
+
     } else if (dataset_name == DatasetName::ENRON) {
         conf.create_graph.k = 30;
         conf.create_graph.k_ext = 60;
@@ -617,6 +630,8 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
 
         conf.opt_scaling_test.iteration_interval = 100000;
         conf.opt_scaling_test.total_iterations = 1000000;
+        conf.simple_swap_test.max_iterations = 4000000000;
+        conf.simple_swap_test.max_minutes = 60;
     }
 
     return conf;
@@ -638,8 +653,8 @@ int main(int argc, char* argv[]) {
 
     // Parse command-line arguments
     // Usage: deglib_phd <dataset> [test_type] [--run]
-    DatasetName ds_name = DatasetName::DEEP1M;
-    std::string test_type_arg = "all";
+    DatasetName ds_name = DatasetName::AUDIO;
+    std::string test_type_arg = "simple_swap";
     bool do_run = true;
     bool force_test = false;
 
@@ -661,6 +676,7 @@ int main(int argc, char* argv[]) {
             log("  opt_scaling     - Build random graph, optimize at intervals, test\n");
             log("  thread_scaling  - Build graphs with different thread counts\n");
             log("  rng_disabled    - Build graph with RNG pruning disabled\n");
+            log("  simple_swap     - Optimize random graph with simple edge swaps (logarithmic intervals)\n");
             log("  all             - Run all available tests\n");
             log("Options: --run  Actually execute tests (otherwise just show config)\n");
             return 0;
@@ -676,7 +692,7 @@ int main(int argc, char* argv[]) {
             ds_name = parsed_ds;
         } else if (arg == "create_graph" || arg == "optimize_graph" || arg == "dynamic_data" || arg == "all_schemes" || arg == "k_sweep" ||
                    arg == "k_ext_sweep" || arg == "eps_ext_sweep" || arg == "size_scaling" || arg == "reduce_scaling" ||
-                   arg == "opt_scaling" || arg == "thread_scaling" || arg == "rng_disabled" || arg == "all") {
+                   arg == "opt_scaling" || arg == "thread_scaling" || arg == "rng_disabled" || arg == "simple_swap" || arg == "all") {
             test_type_arg = arg;
         } else if (arg == "--force-test") {
             force_test = true;
@@ -2091,6 +2107,126 @@ int main(int argc, char* argv[]) {
                     log("REDUCE_SCALING_MEASURE {}: Log written to: {}\n", scheme, log_path);
                 }
             }
+        }
+    }
+
+    // SIMPLE_SWAP test
+    if (run_all || test_type_arg == "simple_swap") {
+        const auto& ss = config.simple_swap_test;
+
+        // Use opt_scaling directory for logs as requested
+        std::string log_dir = graph_paths.opt_scaling_directory();
+        std::string log_file = (std::filesystem::path(log_dir) / "log_simple_swap.log").string();
+
+        log("\n=== SIMPLE_SWAP Test ===\n");
+        log("Max iterations: {}\n", ss.max_iterations);
+        log("Log file: {}\n", log_file);
+
+        if (do_run && base_repository && std::filesystem::exists(log_file) == false) {
+            deglib::benchmark::ensure_directory(log_dir);
+            deglib::benchmark::set_log_file(log_file, force_test);
+
+            // 1. Create Random Graph (in memory)
+            // Use consistent K from CreateGraph config or default
+            uint8_t k = config.create_graph.k;
+            log("Creating random graph with k={}\n", k);
+            auto graph = deglib::benchmark::create_random_graph(*base_repository, config.metric, k);
+
+            // 2. Setup Builder
+            log("Initializing EvenRegularGraphBuilder with simple_swap=true\n");
+            std::mt19937 rnd(7);
+
+            // Enable loop with improve_k=1, but logic uses simple swaps
+            auto builder = deglib::builder::EvenRegularGraphBuilder(graph,
+                                                                    rnd,
+                                                                    deglib::builder::OptimizationTarget::LowLID,
+                                                                    0,
+                                                                    0.0f,
+                                                                    1,
+                                                                    0.0f,  // improve_k=1 to enable loop
+                                                                    0,
+                                                                    1,
+                                                                    0,  // swap_tries=1
+                                                                    false,
+                                                                    false,
+                                                                    true  // use_simple_edge_swaps
+            );
+
+            // 3. Optimization Loop
+            auto start = std::chrono::steady_clock::now();
+            auto last_status = deglib::builder::BuilderStatus{};
+            float last_avg_edge_weight = 0.0f;
+            uint64_t duration_ms = 0;
+
+            uint64_t next_milestone = 1000000;
+            uint64_t current_step = 1000000;
+            uint64_t milestone_level = 1000000;  // 1M, then 10M, then 100M
+
+            log("Starting optimization loop up to {} iterations\n", ss.max_iterations);
+            log("Iterations, Time(s), AEW\n");
+
+            const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
+                if (status.tries >= next_milestone) {
+                    duration_ms +=
+                        uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+                    auto duration = duration_ms / 1000;
+                    auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, ds.info().scale);
+                    auto diff = status.tries - last_status.tries;
+                    auto avg_improv = (diff > 0) ? uint32_t((status.improved - last_status.improved) / diff) : 0;
+                    auto avg_tries = (diff > 0) ? uint32_t((status.tries - last_status.tries) / diff) : 0;
+
+                    // Direct logging to file using fmt
+                    log("{:5}s, with {:8} / {:8} improvements (avg {:2}/{:3}), AEW {:.2f}\n",
+                        duration,
+                        status.improved,
+                        status.tries,
+                        avg_improv,
+                        avg_tries,
+                        avg_edge_weight);
+
+                    // Stop if AEW hasn't changed
+                    // We use a small epsilon for float comparison, though usually it decreases monotonically or stays same
+                    if (std::abs(avg_edge_weight - last_avg_edge_weight) < 0.0001f && last_status.tries > 0) {
+                        log("Stopping optimization: Average Edge Weight converged ({:.4f} -> {:.4f})\n",
+                            last_avg_edge_weight,
+                            avg_edge_weight);
+                        builder.stop();
+                    }
+
+                    // Stop if max_minutes exceeded
+                    if (ss.max_minutes > 0 && duration >= (ss.max_minutes * 60)) {
+                        log("Stopping optimization: Time limit reached ({}s >= {}m)\n", duration, ss.max_minutes);
+                        builder.stop();
+                    }
+
+                    // Update next milestone
+                    // 1M..9M -> step 1M
+                    // 10M..90M -> step 10M
+                    // 100M.. -> step 100M
+                    next_milestone += current_step;
+                    if (next_milestone >= (milestone_level * 10)) {
+                        milestone_level *= 10;
+                        current_step = milestone_level;
+
+                        // Reset to exact decade start
+                        next_milestone = milestone_level;
+                    }
+
+                    // Store current state for next comparison
+                    last_status = status;
+                    last_avg_edge_weight = avg_edge_weight;
+                    start = std::chrono::steady_clock::now();
+                }
+
+                if (status.tries >= ss.max_iterations) {
+                    builder.stop();
+                }
+            };
+
+            builder.build(improvement_callback, true);  // infinite=true
+
+            deglib::benchmark::reset_log_to_console();
+            log("SIMPLE_SWAP: Log written to: {}\n", log_file);
         }
     }
 
