@@ -630,7 +630,7 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
 
         conf.opt_scaling_test.iteration_interval = 100000;
         conf.opt_scaling_test.total_iterations = 1000000;
-        conf.simple_swap_test.max_iterations = 4000000000;
+        conf.simple_swap_test.max_iterations = 1000000000;
         conf.simple_swap_test.max_minutes = 60;
     }
 
@@ -2052,6 +2052,7 @@ void process_dataset(
     // SIMPLE_SWAP test
     if (run_all || test_type_arg == "simple_swap") {
         const auto& ss = config.simple_swap_test;
+        const auto& cg = config.create_graph;
 
         // Use opt_scaling directory for logs as requested
         std::string log_dir = graph_paths.opt_scaling_directory();
@@ -2070,6 +2071,9 @@ void process_dataset(
             uint8_t k = config.create_graph.k;
             log("Creating random graph with k={}\n", k);
             auto graph = deglib::benchmark::create_random_graph(*base_repository, config.metric, k);
+
+            // Load ground truth for recall estimation
+            auto ground_truth = ds.load_groundtruth(cg.anns_k, false);
 
             // 2. Setup Builder
             log("Initializing EvenRegularGraphBuilder with simple_swap=true\n");
@@ -2102,7 +2106,7 @@ void process_dataset(
             uint64_t milestone_level = 1000000;  // 1M, then 10M, then 100M
 
             log("Starting optimization loop up to {} iterations\n", ss.max_iterations);
-            log("Iterations, Time(s), AEW\n");
+            log("Iterations, Time(s), AEW, Recall\n");
 
             const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
                 if (status.tries >= next_milestone) {
@@ -2114,14 +2118,18 @@ void process_dataset(
                     auto avg_improv = (diff > 0) ? uint32_t((status.improved - last_status.improved) / diff) : 0;
                     auto avg_tries = (diff > 0) ? uint32_t((status.tries - last_status.tries) / diff) : 0;
 
+                    // Estimate recall
+                    auto recall = deglib::benchmark::estimate_recall(graph, *query_repository, ground_truth, 2000, cg.anns_k);
+
                     // Direct logging to file using fmt
-                    log("{:5}s, with {:8} / {:8} improvements (avg {:2}/{:3}), AEW {:.2f}\n",
+                    log("{:5}s, with {:8} / {:8} improvements (avg {:2}/{:3}), AEW {:.2f}, Recall {}\n",
                         duration,
                         status.improved,
                         status.tries,
                         avg_improv,
                         avg_tries,
-                        avg_edge_weight);
+                        avg_edge_weight,
+                        fmt::join(recall, ", "));
 
                     // Stop if AEW hasn't changed
                     // We use a small epsilon for float comparison, though usually it decreases monotonically or stays same
