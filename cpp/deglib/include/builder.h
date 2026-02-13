@@ -1838,6 +1838,11 @@ public:
      * Stop the build process
      */
     void stop() { this->stop_building_ = true; }
+
+    /**
+     * Check if the build process is stopped
+     */
+    bool is_stopped() const { return this->stop_building_; }
 };
 
 /**

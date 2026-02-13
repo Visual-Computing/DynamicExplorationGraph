@@ -182,7 +182,7 @@ struct OptScalingTest {
  */
 struct SimpleSwapTest {
     uint64_t max_iterations = 100000000000;  // 100 Billion
-    uint32_t max_minutes = 300;              // 0 means no time limit
+    uint32_t max_minutes = 360;              // 0 means no time limit
 };
 
 /**
@@ -588,6 +588,7 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
         conf.create_graph.eps_parameter = {0.01f, 0.05f, 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f, 1.0f, 1.5f, 2.0f};
 
         conf.optimize_graph.total_iterations = 200000;
+        conf.simple_swap_test.max_iterations = 30000000000;
 
     } else if (dataset_name == DatasetName::GLOVE) {
         conf.create_graph.lid = deglib::builder::OptimizationTarget::HighLID;
@@ -597,6 +598,7 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
         conf.optimize_graph.total_iterations = 2000000;
         conf.opt_scaling_test.total_iterations = 30000000;
         conf.opt_scaling_test.iteration_interval = 3000000;
+        conf.simple_swap_test.max_iterations = 20000000000;
 
     } else if (dataset_name == DatasetName::DEEP1M) {
         conf.create_graph.eps_parameter = {0.01f, 0.02f, 0.03f, 0.04f, 0.06f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.8f, 1.0f, 1.5f, 2.0f};
@@ -604,6 +606,8 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
         conf.optimize_graph.total_iterations = 400000;
         conf.opt_scaling_test.total_iterations = 20000000;
         conf.opt_scaling_test.iteration_interval = 2000000;
+        conf.simple_swap_test.max_iterations = 60000000000;
+        conf.simple_swap_test.max_minutes = 660;
 
     } else if (dataset_name == DatasetName::AUDIO) {
         conf.create_graph.k = 20;
@@ -616,8 +620,7 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
 
         conf.opt_scaling_test.iteration_interval = 100000;
         conf.opt_scaling_test.total_iterations = 1000000;
-        conf.simple_swap_test.max_iterations = 4000000000;
-        conf.simple_swap_test.max_minutes = 60;
+        conf.simple_swap_test.max_iterations = 5000000000;
 
     } else if (dataset_name == DatasetName::ENRON) {
         conf.create_graph.k = 30;
@@ -630,8 +633,7 @@ static DatasetConfig get_dataset_config(const DatasetName& dataset_name) {
 
         conf.opt_scaling_test.iteration_interval = 100000;
         conf.opt_scaling_test.total_iterations = 1000000;
-        conf.simple_swap_test.max_iterations = 1000000000;
-        conf.simple_swap_test.max_minutes = 60;
+        conf.simple_swap_test.max_iterations = 5000000000;
     }
 
     return conf;
@@ -2101,6 +2103,9 @@ void process_dataset(
             float last_avg_edge_weight = 0.0f;
             uint64_t duration_ms = 0;
 
+            // Store created files for later testing
+            std::vector<std::pair<std::string, uint64_t>> created_files;
+
             uint64_t next_milestone = 1000000;
             uint64_t current_step = 1000000;
             uint64_t milestone_level = 1000000;  // 1M, then 10M, then 100M
@@ -2132,7 +2137,6 @@ void process_dataset(
                         fmt::join(recall, ", "));
 
                     // Stop if AEW hasn't changed
-                    // We use a small epsilon for float comparison, though usually it decreases monotonically or stays same
                     if (std::abs(avg_edge_weight - last_avg_edge_weight) < 0.0001f && last_status.tries > 0) {
                         log("Stopping optimization: Average Edge Weight converged ({:.4f} -> {:.4f})\n",
                             last_avg_edge_weight,
@@ -2144,6 +2148,21 @@ void process_dataset(
                     if (ss.max_minutes > 0 && duration >= (ss.max_minutes * 60)) {
                         log("Stopping optimization: Time limit reached ({}s >= {}m)\n", duration, ss.max_minutes);
                         builder.stop();
+                    }
+
+                    // Stop if max_iterations exceeded
+                    if (status.tries >= ss.max_iterations) {
+                        log("Stopping optimization: Max iterations reached ({} >= {})", status.tries, ss.max_iterations);
+                        builder.stop();
+                    }
+
+                    // Save graph at 1x and 5x of the current milestone level (e.g. 1M, 5M, 10M, 50M...)
+                    if (next_milestone == milestone_level || next_milestone == (milestone_level * 5) || builder.is_stopped()) {
+                        std::string saved_graph_path = fmt::format(
+                            "{}/{}D_{}_K{}_SimpleSwap_it{}.deg", log_dir, dims, DatasetConfig::metric_str(config.metric), k, status.tries);
+                        graph.saveGraph(saved_graph_path.c_str());
+                        log("Saved graph checkpoint: {}\n", saved_graph_path);
+                        created_files.push_back({saved_graph_path, status.tries});
                     }
 
                     // Update next milestone
@@ -2164,13 +2183,31 @@ void process_dataset(
                     last_avg_edge_weight = avg_edge_weight;
                     start = std::chrono::steady_clock::now();
                 }
-
-                if (status.tries >= ss.max_iterations) {
-                    builder.stop();
-                }
             };
 
             builder.build(improvement_callback, true);  // infinite=true
+
+            // Test optimized graphs at each checkpoint (similar to opt_scaling)
+            for (const auto& [opt_graph_path, iterations] : created_files) {
+                log("\n=== SIMPLE_SWAP Test: iterations={} ===\n", iterations);
+                log("Graph: {}\n", opt_graph_path);
+
+                if (std::filesystem::exists(opt_graph_path)) {
+                    const auto opt_graph = deglib::graph::load_readonly_graph(opt_graph_path.c_str());
+                    wait_before_test();
+                    deglib::benchmark::test_graph_anns(opt_graph,
+                                                       *query_repository,
+                                                       ground_truth,
+                                                       cg.anns_repeat,
+                                                       cg.anns_threads,
+                                                       cg.anns_k,
+                                                       cg.eps_parameter,
+                                                       nullptr,
+                                                       linear_baseline_us);
+                } else {
+                    log("Graph file not found: {}\n", opt_graph_path);
+                }
+            }
 
             deglib::benchmark::reset_log_to_console();
             log("SIMPLE_SWAP: Log written to: {}\n", log_file);
@@ -2194,8 +2231,8 @@ int main(int argc, char* argv[]) {
 
     // Parse command-line arguments
     // Usage: deglib_phd <dataset> [test_type] [--run]
-    DatasetName ds_name = DatasetName::ALL;
-    std::string test_type_arg = "simple_swap";
+    DatasetName ds_name = DatasetName::DEEP1M;
+    std::string test_type_arg = "opt_scaling";
     bool do_run = true;
     bool force_test = false;
 
