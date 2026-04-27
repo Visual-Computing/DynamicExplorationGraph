@@ -12,8 +12,8 @@ namespace deglib::concurrent {
 // Multithreaded executor
 // The helper function copied from https://github.com/nmslib/hnswlib/blob/master/examples/cpp/example_mt_search.cpp (and that itself is
 // copied from nmslib) An alternative is using #pragme omp parallel for or any other C++ threading
-template <class Function>
-inline void parallel_for(size_t start, size_t end, size_t numThreads, Function fn) {
+template <class FuncType>
+inline void parallel_for(size_t start, size_t end, size_t numThreads, FuncType fn) {
     if (numThreads <= 0) {
         numThreads = std::thread::hardware_concurrency() / 2;
     }

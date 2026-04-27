@@ -2,7 +2,8 @@
 
 #include "config.h"
 
-namespace deglib::memory {
+namespace deglib {
+namespace memory {
 
 static const size_t L1_CACHE_LINE_SIZE = 64;
 
@@ -16,4 +17,5 @@ inline static void prefetch(const char* ptr, const size_t size = 128) {
 #endif
 }
 
-}  // namespace deglib::memory
+}  // namespace memory
+}  // namespace deglib

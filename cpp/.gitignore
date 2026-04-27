@@ -9,3 +9,5 @@ build
 cmake-build*
 data/
 .cache/
+AGENTS.md
+*.bat

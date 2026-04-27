@@ -8,6 +8,8 @@
 #include <array>
 #include <unordered_set>
 #include <random>
+#include <fstream>
+#include <filesystem>
 
 #include "deglib.h"
 #include "distances.h"

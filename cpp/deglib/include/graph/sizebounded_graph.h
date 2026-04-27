@@ -6,11 +6,14 @@
 #include <queue>
 #include <math.h>
 #include <filesystem>
+#include <fstream>
 #include <unordered_map>
 
 #include "graph.h"
 #include "repository.h"
 #include "search.h"
+#include "visited_list_pool.h"
+#include "memory.h"
 
 namespace deglib::graph
 {
@@ -553,13 +556,19 @@ public:
   }
 
   /**
-   * Swap a neighbor with another neighbor and its weight.
+   * Replace an existing edge of a vertex with a new edge.
+   * The vertex edges are stored as a sorted list of neighbor indices.
    * 
-   * @param internal_index vertex index which neighbors should be changed
-   * @param replace_index neighbor index to remove
-   * @param new_index neighbor index to add
-   * @param new_weight weight of the neighbor to add
-   * @return true if the from_neighbor_index was found and changed
+   * Example: A new vertex starts with N self-loops: {0, 0, 0, 0} (when edges_per_vertex=4).
+   *          changeEdge(0, 0, 1, 1.0f) replaces ONE self-loop (0→0) with edge 0→1: {0, 0, 0, 1}
+   *          changeEdge(0, 0, 2, 4.0f) replaces ANOTHER self-loop (0→0) with edge 0→2: {0, 0, 1, 2}
+   *          changeEdge(0, 1, 2, 4.0f) would replace the edge 0→1 with 0→2: {0, 0, 0, 2} — edge to 1 is lost!
+   * 
+ * @param internal_index   vertex index whose edge to replace (in its neighbor list)
+ * @param replace_index    the neighbor index to replace in internal_index's sorted edge list (must exist among its current neighbors)
+ * @param new_index        the new neighbor index to insert in its place
+   * @param new_weight       weight of the new edge
+   * @return true if the edge was found and replaced successfully
    */
   bool changeEdge(const uint32_t internal_index, const uint32_t replace_index, const uint32_t new_index, const float new_weight) override {
     auto vertex_memory = vertex_by_index(internal_index);
