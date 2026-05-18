@@ -1,6 +1,21 @@
 #pragma once
 
+#include <bit>
 #include <config.h>
+
+#if defined(USE_AVX2) || defined(USE_AVX512) || defined(USE_SSE)
+#include <immintrin.h>
+#endif
+
+// MSVC popcnt intrinsic
+#ifdef _MSC_VER
+#include <intrin.h>
+#define POPCNT32 __popcnt
+#define POPCNT64 __popcnt64
+#else
+#define POPCNT32 std::popcount
+#define POPCNT64 std::popcount
+#endif
 
 namespace deglib {
 
@@ -605,6 +620,299 @@ public:
     }
 };
 
+// ---------------------------------------------------------------------------------------------------------------------
+// --------------------------------------------- EVP Bits Dists --------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * Computes EvpBits similarity between two byte arrays.
+ *
+ * Each vector layout: [ones (dim/8 bytes)][negative_ones (dim/8 bytes)]
+ * qty_ptr points to the original float dimension (divisible by 8).
+ *
+ * Formula: (aa + bb + dim*2) - (cc + dd)
+ *   aa = popcount(ones(a) AND ones(b))
+ *   bb = popcount(neg(a) AND neg(b))
+ *   cc = popcount(ones(a) AND neg(b))
+ *   dd = popcount(ones(b) AND neg(a))
+ */
+class EvpBitsSimilarity {
+public:
+    /**
+     * Computes EvpBits similarity. Dispatches to the best available SIMD path.
+     *
+     * @param pVect1v  Pointer to vector A [ones (dim/8)][negs (dim/8)]
+     * @param pVect2v  Pointer to vector B [ones (dim/8)][negs (dim/8)]
+     * @param qty_ptr  Pointer to uint32_t dim (original float dimension)
+     * @return similarity as float
+     */
+    inline static float compare(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+#if defined(USE_AVX512) && defined(__AVX512VPOPCNTDQ__)
+        return compare_avx512(pVect1v, pVect2v, qty_ptr);
+#elif defined(USE_AVX2)
+        return compare_avx2(pVect1v, pVect2v, qty_ptr);
+#else
+        return compare_naive(pVect1v, pVect2v, qty_ptr);
+#endif
+    }
+
+    /**
+     * Naive implementation: uint64_t loop + std::popcount.
+     * This is the canonical reference — always correct, never optimized away.
+     */
+    inline static float compare_naive(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+        const std::byte* a = (const std::byte*)pVect1v;
+        const std::byte* b = (const std::byte*)pVect2v;
+        uint32_t dim = *((uint32_t*)qty_ptr);
+        const size_t mask_bytes = dim / 8;
+
+        const std::byte* ones_a = a;
+        const std::byte* negs_a = a + mask_bytes;
+        const std::byte* ones_b = b;
+        const std::byte* negs_b = b + mask_bytes;
+
+        uint32_t aa = 0, bb = 0, cc = 0, dd = 0;
+
+        size_t i = 0;
+        for (; i + sizeof(uint64_t) <= mask_bytes; i += sizeof(uint64_t)) {
+            const uint64_t o1 = *reinterpret_cast<const uint64_t*>(&ones_a[i]);
+            const uint64_t o2 = *reinterpret_cast<const uint64_t*>(&ones_b[i]);
+            const uint64_t n1 = *reinterpret_cast<const uint64_t*>(&negs_a[i]);
+            const uint64_t n2 = *reinterpret_cast<const uint64_t*>(&negs_b[i]);
+            aa += std::popcount(o1 & o2);
+            bb += std::popcount(n1 & n2);
+            cc += std::popcount(o1 & n2);
+            dd += std::popcount(o2 & n1);
+        }
+
+        for (; i < mask_bytes; ++i) {
+            unsigned int b1 = static_cast<unsigned int>(static_cast<uint8_t>(ones_a[i]));
+            unsigned int b2 = static_cast<unsigned int>(static_cast<uint8_t>(ones_b[i]));
+            unsigned int n1 = static_cast<unsigned int>(static_cast<uint8_t>(negs_a[i]));
+            unsigned int n2 = static_cast<unsigned int>(static_cast<uint8_t>(negs_b[i]));
+            aa += std::popcount(b1 & b2);
+            bb += std::popcount(n1 & n2);
+            cc += std::popcount(b1 & n2);
+            dd += std::popcount(b2 & n1);
+        }
+
+        return static_cast<float>(aa + bb + dim * 2) - static_cast<float>(cc + dd);
+    }
+
+    /**
+     * SSE2 path: processes 16 bytes (2× uint64_t) per iteration.
+     * Uses _mm_and_si128 for bitwise AND, then stores to memory
+     * and uses scalar POPCNT32 for popcount.
+     */
+    inline static float compare_sse2(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+        const uint8_t* a = (const uint8_t*)pVect1v;
+        const uint8_t* b = (const uint8_t*)pVect2v;
+        uint32_t dim = *((uint32_t*)qty_ptr);
+        const size_t mask_bytes = dim / 8;
+
+        const uint8_t* ones_a = a;
+        const uint8_t* negs_a = a + mask_bytes;
+        const uint8_t* ones_b = b;
+        const uint8_t* negs_b = b + mask_bytes;
+
+        // Accumulate popcounts as scalar uint64_t (simpler than vector accumulators)
+        uint64_t aa = 0, bb = 0, cc = 0, dd = 0;
+
+        const size_t block = 16;  // 2 × uint64_t = 16 bytes
+        for (size_t i = 0; i + block <= mask_bytes; i += block) {
+            __m128i o1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&ones_a[i]));
+            __m128i o2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&ones_b[i]));
+            __m128i n1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&negs_a[i]));
+            __m128i n2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&negs_b[i]));
+
+            __m128i and_aa = _mm_and_si128(o1, o2);
+            __m128i and_bb = _mm_and_si128(n1, n2);
+            __m128i and_cc = _mm_and_si128(o1, n2);
+            __m128i and_dd = _mm_and_si128(o2, n1);
+
+            // Store each 128-bit result and popcount all 4× uint32_t
+            alignas(16) uint32_t tmp[4];
+
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(tmp), and_aa);
+            aa += POPCNT32(tmp[0]) + POPCNT32(tmp[1]) + POPCNT32(tmp[2]) + POPCNT32(tmp[3]);
+
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(tmp), and_bb);
+            bb += POPCNT32(tmp[0]) + POPCNT32(tmp[1]) + POPCNT32(tmp[2]) + POPCNT32(tmp[3]);
+
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(tmp), and_cc);
+            cc += POPCNT32(tmp[0]) + POPCNT32(tmp[1]) + POPCNT32(tmp[2]) + POPCNT32(tmp[3]);
+
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(tmp), and_dd);
+            dd += POPCNT32(tmp[0]) + POPCNT32(tmp[1]) + POPCNT32(tmp[2]) + POPCNT32(tmp[3]);
+        }
+
+        // Tail
+        for (size_t i = 0; i < mask_bytes; ++i) {
+            unsigned int b1 = static_cast<unsigned int>(ones_a[i]);
+            unsigned int b2 = static_cast<unsigned int>(ones_b[i]);
+            unsigned int n1 = static_cast<unsigned int>(negs_a[i]);
+            unsigned int n2 = static_cast<unsigned int>(negs_b[i]);
+            aa += POPCNT32(b1 & b2);
+            bb += POPCNT32(n1 & n2);
+            cc += POPCNT32(b1 & n2);
+            dd += POPCNT32(b2 & n1);
+        }
+
+        return static_cast<float>(aa + bb + dim * 2) - static_cast<float>(cc + dd);
+    }
+
+    /**
+     * AVX2 path: processes 32 bytes (4× uint64_t) per iteration.
+     * Uses _mm256_and_si256 for bitwise AND, then stores to memory
+     * and uses scalar POPCNT32 for popcount (no AVX512VPOPCNTDQ needed).
+     */
+    inline static float compare_avx2(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+        const std::byte* a = (const std::byte*)pVect1v;
+        const std::byte* b = (const std::byte*)pVect2v;
+        uint32_t dim = *((uint32_t*)qty_ptr);
+        const size_t mask_bytes = dim / 8;
+
+        const std::byte* ones_a = a;
+        const std::byte* negs_a = a + mask_bytes;
+        const std::byte* ones_b = b;
+        const std::byte* negs_b = b + mask_bytes;
+
+        // Accumulate popcounts in 4× int64 vectors (one per metric)
+        __m256i acc_aa = _mm256_setzero_si256();
+        __m256i acc_bb = _mm256_setzero_si256();
+        __m256i acc_cc = _mm256_setzero_si256();
+        __m256i acc_dd = _mm256_setzero_si256();
+
+        const size_t block = 32;  // 4 × uint64_t
+        for (size_t i = 0; i + block <= mask_bytes; i += block) {
+            __m256i o1 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&ones_a[i]));
+            __m256i o2 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&ones_b[i]));
+            __m256i n1 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&negs_a[i]));
+            __m256i n2 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&negs_b[i]));
+
+            __m256i and_aa = _mm256_and_si256(o1, o2);
+            __m256i and_bb = _mm256_and_si256(n1, n2);
+            __m256i and_cc = _mm256_and_si256(o1, n2);
+            __m256i and_dd = _mm256_and_si256(o2, n1);
+
+            // Store each 256-bit result and scalar-popcount the 8× uint32_t lanes
+            alignas(32) uint32_t tmp[8];
+
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp), and_aa);
+            acc_aa = _mm256_add_epi64(acc_aa, _mm256_set_epi64x(
+                POPCNT32(tmp[7]) + POPCNT32(tmp[6]),
+                POPCNT32(tmp[5]) + POPCNT32(tmp[4]),
+                POPCNT32(tmp[3]) + POPCNT32(tmp[2]),
+                POPCNT32(tmp[1]) + POPCNT32(tmp[0])));
+
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp), and_bb);
+            acc_bb = _mm256_add_epi64(acc_bb, _mm256_set_epi64x(
+                POPCNT32(tmp[7]) + POPCNT32(tmp[6]),
+                POPCNT32(tmp[5]) + POPCNT32(tmp[4]),
+                POPCNT32(tmp[3]) + POPCNT32(tmp[2]),
+                POPCNT32(tmp[1]) + POPCNT32(tmp[0])));
+
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp), and_cc);
+            acc_cc = _mm256_add_epi64(acc_cc, _mm256_set_epi64x(
+                POPCNT32(tmp[7]) + POPCNT32(tmp[6]),
+                POPCNT32(tmp[5]) + POPCNT32(tmp[4]),
+                POPCNT32(tmp[3]) + POPCNT32(tmp[2]),
+                POPCNT32(tmp[1]) + POPCNT32(tmp[0])));
+
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp), and_dd);
+            acc_dd = _mm256_add_epi64(acc_dd, _mm256_set_epi64x(
+                POPCNT32(tmp[7]) + POPCNT32(tmp[6]),
+                POPCNT32(tmp[5]) + POPCNT32(tmp[4]),
+                POPCNT32(tmp[3]) + POPCNT32(tmp[2]),
+                POPCNT32(tmp[1]) + POPCNT32(tmp[0])));
+        }
+
+        // Horizontal sum
+        alignas(32) int64_t arr[4];
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(arr), acc_aa);
+        uint64_t aa = arr[0] + arr[1] + arr[2] + arr[3];
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(arr), acc_bb);
+        uint64_t bb = arr[0] + arr[1] + arr[2] + arr[3];
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(arr), acc_cc);
+        uint64_t cc = arr[0] + arr[1] + arr[2] + arr[3];
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(arr), acc_dd);
+        uint64_t dd = arr[0] + arr[1] + arr[2] + arr[3];
+
+        // Tail
+        for (size_t i = 0; i < mask_bytes; ++i) {
+            unsigned int b1 = static_cast<unsigned int>(static_cast<uint8_t>(ones_a[i]));
+            unsigned int b2 = static_cast<unsigned int>(static_cast<uint8_t>(ones_b[i]));
+            unsigned int n1 = static_cast<unsigned int>(static_cast<uint8_t>(negs_a[i]));
+            unsigned int n2 = static_cast<unsigned int>(static_cast<uint8_t>(negs_b[i]));
+            aa += std::popcount(b1 & b2);
+            bb += std::popcount(n1 & n2);
+            cc += std::popcount(b1 & n2);
+            dd += std::popcount(b2 & n1);
+        }
+
+        return static_cast<float>(aa + bb + dim * 2) - static_cast<float>(cc + dd);
+    }
+
+    /**
+     * AVX-512 path with VPOPCNTDQ: processes 64 bytes (8× uint64_t) per iteration.
+     * Uses _mm512_popcnt_epi64 for hardware popcount — the fastest path.
+     */
+    inline static float compare_avx512(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+        const std::byte* a = (const std::byte*)pVect1v;
+        const std::byte* b = (const std::byte*)pVect2v;
+        uint32_t dim = *((uint32_t*)qty_ptr);
+        const size_t mask_bytes = dim / 8;
+
+        const std::byte* ones_a = a;
+        const std::byte* negs_a = a + mask_bytes;
+        const std::byte* ones_b = b;
+        const std::byte* negs_b = b + mask_bytes;
+
+        __m512i acc_aa = _mm512_setzero_si512();
+        __m512i acc_bb = _mm512_setzero_si512();
+        __m512i acc_cc = _mm512_setzero_si512();
+        __m512i acc_dd = _mm512_setzero_si512();
+
+        const size_t block = 64;  // 8 × uint64_t
+        for (size_t i = 0; i + block <= mask_bytes; i += block) {
+            __m512i o1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&ones_a[i]));
+            __m512i o2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&ones_b[i]));
+            __m512i n1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&negs_a[i]));
+            __m512i n2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&negs_b[i]));
+
+            acc_aa = _mm512_add_epi64(acc_aa, _mm512_popcnt_epi64(_mm512_and_si512(o1, o2)));
+            acc_bb = _mm512_add_epi64(acc_bb, _mm512_popcnt_epi64(_mm512_and_si512(n1, n2)));
+            acc_cc = _mm512_add_epi64(acc_cc, _mm512_popcnt_epi64(_mm512_and_si512(o1, n2)));
+            acc_dd = _mm512_add_epi64(acc_dd, _mm512_popcnt_epi64(_mm512_and_si512(o2, n1)));
+        }
+
+        // Horizontal sum of 8× int64
+        alignas(64) int64_t arr[8];
+        _mm512_storeu_si512(reinterpret_cast<__m512i*>(arr), acc_aa);
+        uint64_t aa = arr[0] + arr[1] + arr[2] + arr[3] + arr[4] + arr[5] + arr[6] + arr[7];
+        _mm512_storeu_si512(reinterpret_cast<__m512i*>(arr), acc_bb);
+        uint64_t bb = arr[0] + arr[1] + arr[2] + arr[3] + arr[4] + arr[5] + arr[6] + arr[7];
+        _mm512_storeu_si512(reinterpret_cast<__m512i*>(arr), acc_cc);
+        uint64_t cc = arr[0] + arr[1] + arr[2] + arr[3] + arr[4] + arr[5] + arr[6] + arr[7];
+        _mm512_storeu_si512(reinterpret_cast<__m512i*>(arr), acc_dd);
+        uint64_t dd = arr[0] + arr[1] + arr[2] + arr[3] + arr[4] + arr[5] + arr[6] + arr[7];
+
+        // Tail
+        for (size_t i = 0; i < mask_bytes; ++i) {
+            unsigned int b1 = static_cast<unsigned int>(static_cast<uint8_t>(ones_a[i]));
+            unsigned int b2 = static_cast<unsigned int>(static_cast<uint8_t>(ones_b[i]));
+            unsigned int n1 = static_cast<unsigned int>(static_cast<uint8_t>(negs_a[i]));
+            unsigned int n2 = static_cast<unsigned int>(static_cast<uint8_t>(negs_b[i]));
+            aa += std::popcount(b1 & b2);
+            bb += std::popcount(n1 & n2);
+            cc += std::popcount(b1 & n2);
+            dd += std::popcount(b2 & n1);
+        }
+
+        return static_cast<float>(aa + bb + dim * 2) - static_cast<float>(cc + dd);
+    }
+};
+
 }  // namespace distances
 
 enum class Metric {
@@ -614,7 +922,10 @@ enum class Metric {
     InnerProduct = 0x00 | 2,
 
     // 0x10 = uint8
-    L2_Uint8 = 0x10 | 1
+    L2_Uint8 = 0x10 | 1,
+
+    // 0x20 = evp bits (ones + negative_ones, dim/8 bytes each)
+    EvpBits = 0x20 | 3
 };
 
 template <typename MTYPE>
@@ -665,6 +976,8 @@ class FloatSpace {
 #else
             distfunc = deglib::distances::L2Uint8::compare;
 #endif
+        } else if (metric == deglib::Metric::EvpBits) {
+            distfunc = deglib::distances::EvpBitsSimilarity::compare;
         }
 
         // TODO add cosine but convert to a distance = 2 - (cosine + 1)
@@ -675,6 +988,9 @@ class FloatSpace {
     }
 
     static size_t calculate_data_size(const size_t dim, const deglib::Metric metric) {
+        if (metric == deglib::Metric::EvpBits) {
+            return 2 * dim / 8;  // ones (dim/8) + negative_ones (dim/8)
+        }
         return (static_cast<int>(metric) & 0x10) ? dim * sizeof(uint8_t) : dim * sizeof(float);
     }
 

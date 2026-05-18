@@ -119,6 +119,11 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
   }
 
   template <bool use_max_distance_count = false, bool use_filter = false>
+  inline static deglib::search::ResultSet searchEvpBits(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
+    return graph.searchImpl<deglib::distances::EvpBitsSimilarity, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
+  }
+
+  template <bool use_max_distance_count = false, bool use_filter = false>
   inline static SEARCHFUNC getSearchFunction(const deglib::FloatSpace& feature_space) {
     const auto dim = feature_space.dim();
     const auto metric = feature_space.metric();
@@ -160,6 +165,10 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
         return deglib::graph::ReadOnlyGraph::searchL2Uint8Ext16<use_max_distance_count, use_filter>;
       else
         return deglib::graph::ReadOnlyGraph::searchL2Uint8<use_max_distance_count, use_filter>;
+    }
+    else if(metric == deglib::Metric::EvpBits)
+    {
+      return deglib::graph::ReadOnlyGraph::searchEvpBits<use_max_distance_count, use_filter>;
     }
 
     std::fprintf(stderr, "Could not find metric %u for the readonly_graph search method \n", static_cast<int>(metric));
@@ -230,6 +239,10 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
     return graph.exploreImpl<deglib::distances::L2Uint8Ext16>(entry_vertex_index, k, include_entry, max_distance_computation_count);
   }
 
+  inline static deglib::search::ResultSet exploreEvpBits(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
+    return graph.exploreImpl<deglib::distances::EvpBitsSimilarity>(entry_vertex_index, k, include_entry, max_distance_computation_count);
+  }
+
   inline static EXPLOREFUNC getExploreFunction(const deglib::FloatSpace& feature_space) {
     const auto dim = feature_space.dim();
     const auto metric = feature_space.metric();
@@ -272,6 +285,10 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
         return deglib::graph::ReadOnlyGraph::exploreL2Uint8Ext16;
       else
         return deglib::graph::ReadOnlyGraph::exploreL2Uint8;
+    }
+    else if(metric == deglib::Metric::EvpBits)
+    {
+      return deglib::graph::ReadOnlyGraph::exploreEvpBits;
     }
 
     std::fprintf(stderr, "Could not find metric %u for the readonly_graph explore method \n", static_cast<int>(metric));

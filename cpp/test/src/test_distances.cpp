@@ -9,9 +9,11 @@
 #include <cstring>
 #include <iostream>
 #include <limits>
+#include <random>
 #include <vector>
 
 #include "distances.h"
+#include "quantization/evp_quantize.h"
 
 // ---------------------------------------------------------------------------
 //  Google Test (bundled with fmt)
@@ -492,6 +494,190 @@ static void test_l2_uint8_matches_naive() {
 
 TEST(L2Uint8Ext16, MatchesNaive) { test_l2_uint8_matches_naive<deglib::distances::L2Uint8Ext16>(); }
 TEST(L2Uint8Ext32, MatchesNaive) { test_l2_uint8_matches_naive<deglib::distances::L2Uint8Ext32>(); }
+
+// ---------------------------------------------------------------------------
+//  EvpBitsSimilarity — each path validated against compare_naive
+// ---------------------------------------------------------------------------
+
+static std::pair<std::vector<std::byte>, std::vector<std::byte>>
+make_evp_pair(uint32_t dim, uint32_t non_zeros, int seed_a = 42, int seed_b = 99) {
+    std::mt19937 rng_a(seed_a), rng_b(seed_b);
+    std::vector<float> a(dim), b(dim);
+    std::normal_distribution<float> dist(0.0f, 1.0f);
+    for (auto& x : a) x = dist(rng_a);
+    for (auto& x : b) x = dist(rng_b);
+    return {
+        deglib::quantization::quantize_single(a.data(), dim, non_zeros),
+        deglib::quantization::quantize_single(b.data(), dim, non_zeros)
+    };
+}
+
+TEST(EvpBitsSimilarity, NaiveSelfSimilarity) {
+    auto [a, b] = make_evp_pair(64, 16);
+    uint32_t dim = 64;
+    float sim = deglib::distances::EvpBitsSimilarity::compare_naive(
+        static_cast<const void*>(a.data()), static_cast<const void*>(a.data()),
+        static_cast<const void*>(&dim));
+    EXPECT_GT(sim, 0.0f);
+}
+
+
+
+TEST(EvpBitsSimilarity, Avx2MatchesNaive_64Dim) {
+    auto [a, b] = make_evp_pair(64, 16);
+    uint32_t dim = 64;
+    float naive = deglib::distances::EvpBitsSimilarity::compare_naive(
+        static_cast<const void*>(a.data()), static_cast<const void*>(b.data()),
+        static_cast<const void*>(&dim));
+    float avx2  = deglib::distances::EvpBitsSimilarity::compare_avx2(
+        static_cast<const void*>(a.data()), static_cast<const void*>(b.data()),
+        static_cast<const void*>(&dim));
+    EXPECT_NEAR(avx2, naive, 0.001f);
+}
+
+TEST(EvpBitsSimilarity, Avx2MatchesNaive_128Dim) {
+    auto [a, b] = make_evp_pair(128, 32);
+    uint32_t dim = 128;
+    float naive = deglib::distances::EvpBitsSimilarity::compare_naive(
+        static_cast<const void*>(a.data()), static_cast<const void*>(b.data()),
+        static_cast<const void*>(&dim));
+    float avx2  = deglib::distances::EvpBitsSimilarity::compare_avx2(
+        static_cast<const void*>(a.data()), static_cast<const void*>(b.data()),
+        static_cast<const void*>(&dim));
+    EXPECT_NEAR(avx2, naive, 0.001f);
+}
+
+TEST(EvpBitsSimilarity, Avx2MatchesNaive_256Dim) {
+    auto [a, b] = make_evp_pair(256, 64);
+    uint32_t dim = 256;
+    float naive = deglib::distances::EvpBitsSimilarity::compare_naive(
+        static_cast<const void*>(a.data()), static_cast<const void*>(b.data()),
+        static_cast<const void*>(&dim));
+    float avx2  = deglib::distances::EvpBitsSimilarity::compare_avx2(
+        static_cast<const void*>(a.data()), static_cast<const void*>(b.data()),
+        static_cast<const void*>(&dim));
+    EXPECT_NEAR(avx2, naive, 0.001f);
+}
+
+TEST(EvpBitsSimilarity, Avx512MatchesNaive_64Dim) {
+    auto [a, b] = make_evp_pair(64, 16);
+    uint32_t dim = 64;
+    float naive = deglib::distances::EvpBitsSimilarity::compare_naive(
+        static_cast<const void*>(a.data()), static_cast<const void*>(b.data()),
+        static_cast<const void*>(&dim));
+    float avx512 = deglib::distances::EvpBitsSimilarity::compare_avx512(
+        static_cast<const void*>(a.data()), static_cast<const void*>(b.data()),
+        static_cast<const void*>(&dim));
+    EXPECT_NEAR(avx512, naive, 0.001f);
+}
+
+TEST(EvpBitsSimilarity, Avx512MatchesNaive_128Dim) {
+    auto [a, b] = make_evp_pair(128, 32);
+    uint32_t dim = 128;
+    float naive = deglib::distances::EvpBitsSimilarity::compare_naive(
+        static_cast<const void*>(a.data()), static_cast<const void*>(b.data()),
+        static_cast<const void*>(&dim));
+    float avx512 = deglib::distances::EvpBitsSimilarity::compare_avx512(
+        static_cast<const void*>(a.data()), static_cast<const void*>(b.data()),
+        static_cast<const void*>(&dim));
+    EXPECT_NEAR(avx512, naive, 0.001f);
+}
+
+TEST(EvpBitsSimilarity, Avx512MatchesNaive_256Dim) {
+    auto [a, b] = make_evp_pair(256, 64);
+    uint32_t dim = 256;
+    float naive = deglib::distances::EvpBitsSimilarity::compare_naive(
+        static_cast<const void*>(a.data()), static_cast<const void*>(b.data()),
+        static_cast<const void*>(&dim));
+    float avx512 = deglib::distances::EvpBitsSimilarity::compare_avx512(
+        static_cast<const void*>(a.data()), static_cast<const void*>(b.data()),
+        static_cast<const void*>(&dim));
+    EXPECT_NEAR(avx512, naive, 0.001f);
+}
+
+TEST(EvpBitsSimilarity, Avx2AndAvx512MatchNaive_128Dim) {
+    auto [a, b] = make_evp_pair(128, 32);
+    uint32_t dim = 128;
+    const void* qa = static_cast<const void*>(a.data());
+    const void* qb = static_cast<const void*>(b.data());
+    const void* qd = static_cast<const void*>(&dim);
+
+    float naive  = deglib::distances::EvpBitsSimilarity::compare_naive(qa, qb, qd);
+    float avx2   = deglib::distances::EvpBitsSimilarity::compare_avx2(qa, qb, qd);
+    float avx512 = deglib::distances::EvpBitsSimilarity::compare_avx512(qa, qb, qd);
+
+    EXPECT_NEAR(avx2,   naive,  0.001f);
+    EXPECT_NEAR(avx512, naive,  0.001f);
+}
+
+TEST(EvpBitsSimilarity, Avx2AndAvx512MatchNaive_256Dim) {
+    auto [a, b] = make_evp_pair(256, 64);
+    uint32_t dim = 256;
+    const void* qa = static_cast<const void*>(a.data());
+    const void* qb = static_cast<const void*>(b.data());
+    const void* qd = static_cast<const void*>(&dim);
+
+    float naive  = deglib::distances::EvpBitsSimilarity::compare_naive(qa, qb, qd);
+    float avx2   = deglib::distances::EvpBitsSimilarity::compare_avx2(qa, qb, qd);
+    float avx512 = deglib::distances::EvpBitsSimilarity::compare_avx512(qa, qb, qd);
+
+    EXPECT_NEAR(avx2,   naive,  0.001f);
+    EXPECT_NEAR(avx512, naive,  0.001f);
+}
+
+TEST(EvpBitsSimilarity, Symmetry) {
+    auto [a, b] = make_evp_pair(128, 32);
+    uint32_t dim = 128;
+    const void* qa = static_cast<const void*>(a.data());
+    const void* qb = static_cast<const void*>(b.data());
+    const void* qd = static_cast<const void*>(&dim);
+
+    float ab = deglib::distances::EvpBitsSimilarity::compare_naive(qa, qb, qd);
+    float ba = deglib::distances::EvpBitsSimilarity::compare_naive(qb, qa, qd);
+    EXPECT_NEAR(ab, ba, 0.001f);
+}
+
+TEST(EvpBitsSimilarity, MatchesQuantizationLibrary) {
+    auto [a, b] = make_evp_pair(256, 64);
+    uint32_t dim = 256;
+    const size_t mask_bytes = dim / 8;
+
+    float sim_dist = deglib::distances::EvpBitsSimilarity::compare_naive(
+        static_cast<const void*>(a.data()), static_cast<const void*>(b.data()),
+        static_cast<const void*>(&dim));
+    float sim_lib = deglib::quantization::similarity_bytes(
+        a.data(), a.data() + mask_bytes,
+        b.data(), b.data() + mask_bytes,
+        dim);
+
+    EXPECT_NEAR(sim_dist, sim_lib, 0.001f);
+}
+
+TEST(EvpBitsSimilarity, SmallDims) {
+    // Smallest valid EVP: dim=8 → 1 byte ones + 1 byte negs
+    std::mt19937 rng(42);
+    const uint32_t dim = 8;
+    const uint32_t non_zeros = 4;
+    std::vector<float> v(dim);
+    std::normal_distribution<float> dist(0.0f, 1.0f);
+    for (auto& x : v) x = dist(rng);
+
+    auto result = deglib::quantization::quantize_single(v.data(), dim, non_zeros);
+
+    float naive  = deglib::distances::EvpBitsSimilarity::compare_naive(
+        static_cast<const void*>(result.data()), static_cast<const void*>(result.data()),
+        static_cast<const void*>(&dim));
+    float avx2   = deglib::distances::EvpBitsSimilarity::compare_avx2(
+        static_cast<const void*>(result.data()), static_cast<const void*>(result.data()),
+        static_cast<const void*>(&dim));
+    float avx512 = deglib::distances::EvpBitsSimilarity::compare_avx512(
+        static_cast<const void*>(result.data()), static_cast<const void*>(result.data()),
+        static_cast<const void*>(&dim));
+
+    EXPECT_GT(naive, 0.0f);
+    EXPECT_NEAR(avx2,   naive,  0.001f);
+    EXPECT_NEAR(avx512, naive,  0.001f);
+}
 
 // ---------------------------------------------------------------------------
 //  FloatSpace — integration test
