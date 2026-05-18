@@ -118,6 +118,7 @@ message("C++ compiler flags: ${CMAKE_CXX_FLAGS}")
 message("C++ compiler flags release: ${CMAKE_CXX_FLAGS_RELEASE}")
 
 add_subdirectory(deglib)
+add_subdirectory(evp)
 
 add_executable(test_distances test/test_distances.cpp)
 add_executable(test_sizebounded_graph test/test_sizebounded_graph.cpp)

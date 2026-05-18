@@ -18,7 +18,7 @@ inline void parallel_for(size_t start, size_t end, size_t numThreads, FuncType f
         numThreads = std::thread::hardware_concurrency() / 2;
     }
 
-    if (numThreads == 1) {
+    if (numThreads <= 1) {
         for (size_t id = start; id < end; id++) {
             fn(id, 0);
         }
