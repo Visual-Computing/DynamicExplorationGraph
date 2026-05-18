@@ -40,3 +40,14 @@ set_property(TARGET deglib_setup_dataset PROPERTY RUNTIME_OUTPUT_DIRECTORY_DEBUG
 set_property(TARGET deglib_setup_dataset PROPERTY RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/benchmark")
 set_property(TARGET deglib_setup_dataset PROPERTY RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/benchmark")
 set_property(TARGET deglib_setup_dataset PROPERTY RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_BINARY_DIR}/benchmark")
+
+add_executable(deglib_evp_test ${PROJECT_SOURCE_DIR}/src/deglib_evp_test.cpp)
+target_include_directories(deglib_evp_test PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(deglib_evp_test PUBLIC DEG_LIB compile-options
+                                                fmt::fmt-header-only OpenMP::OpenMP_CXX)
+target_compile_definitions(deglib_evp_test PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
+set_property(TARGET deglib_evp_test PROPERTY RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmark")
+set_property(TARGET deglib_evp_test PROPERTY RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/benchmark")
+set_property(TARGET deglib_evp_test PROPERTY RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/benchmark")
+set_property(TARGET deglib_evp_test PROPERTY RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/benchmark")
+set_property(TARGET deglib_evp_test PROPERTY RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_BINARY_DIR}/benchmark")
