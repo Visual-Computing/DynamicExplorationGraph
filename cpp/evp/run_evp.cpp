@@ -22,8 +22,8 @@ int main() {
     // DATA_PATH defined at compile-time via CMake (or empty string if not set)
     const std::filesystem::path data_path(DATA_PATH);
 
-    const auto train_fvecs = data_path / "train.fvecs";
-    const auto allknn_ivecs = data_path / "allknn.ivecs";
+    const auto train_fvecs = data_path / "SISAP" / "train.fvecs";
+    const auto allknn_ivecs = data_path / "SISAP" / "allknn.ivecs";
 
     // Parameter
     constexpr uint32_t NON_ZEROS = 512;

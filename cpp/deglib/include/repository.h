@@ -138,6 +138,47 @@ auto u8vecs_read(const char* fname, size_t& d_out, size_t& n_out) {
     return x;
 }
 
+inline auto ivecs_read(const char* fname, size_t& d_out, size_t& n_out) {
+    // get total file size
+    std::error_code ec{};
+    auto file_size = std::filesystem::file_size(fname, ec);
+    if (ec != std::error_code{}) {
+        std::fprintf(stderr, "error when accessing file %s, size is: %ju message: %s \n", fname, file_size, ec.message().c_str());
+        std::abort();
+    }
+
+    // open as binary
+    auto ifstream = std::ifstream(fname, std::ios::binary);
+    if (!ifstream.is_open()) {
+        std::fprintf(stderr, "could not open %s\n", fname);
+        std::abort();
+    }
+
+    // read dimension header
+    uint32_t dims = 0;
+    ifstream.read(reinterpret_cast<char*>(&dims), sizeof(dims));
+    assert((dims > 0 && dims < 1'000'000) && "unreasonable dimension");
+
+    // compute number of rows
+    assert(file_size % (dims * sizeof(int32_t) + sizeof(dims)) == 0 || !"weird file size");
+    size_t n = (size_t)file_size / (dims * sizeof(int32_t) + sizeof(dims));
+    d_out = dims;
+    n_out = n;
+
+    // read data rows (each row starts with its dimension, which is 4 bytes)
+    auto x = std::make_unique<std::byte[]>(file_size);
+    ifstream.seekg(0);
+    ifstream.read(reinterpret_cast<char*>(x.get()), file_size);
+    if (!ifstream) assert(ifstream.gcount() == static_cast<int>(file_size) || !"could not read whole file");
+
+    // shift array to remove row headers
+    for (size_t i = 0; i < n; i++)
+        std::memmove(&x[i * dims * sizeof(int32_t)], &x[sizeof(dims) + i * (dims * sizeof(int32_t) + sizeof(dims))], dims * sizeof(int32_t));
+
+    ifstream.close();
+    return x;
+}
+
 bool string_ends_with(const char* str, const char* suffix) {
     size_t str_len = std::strlen(str);
     size_t suffix_len = std::strlen(suffix);

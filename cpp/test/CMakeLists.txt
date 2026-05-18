@@ -14,7 +14,6 @@ macro(add_deglib_test name source)
     target_include_directories(${name} PRIVATE ${DEGLIB_INCLUDE})
     target_include_directories(${name} PRIVATE ${GTEST_INCLUDE})
     target_sources(${name} PRIVATE ${GTEST_SOURCE})
-    set_target_properties(${name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
     set_target_properties(${name} PROPERTIES INTERMEDIATE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/obj/${name}")
 endmacro()
 

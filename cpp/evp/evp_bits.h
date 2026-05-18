@@ -16,58 +16,6 @@
 namespace deglib {
 
 /**
- * Liest eine ivecs-Datei (int32-Vektoren).
- * Format: [dim(4B)][data(dim x 4B)] pro Vektor.
- * Analog zu fvecs_read, aber mit int32 statt float.
- *
- * @param fname Dateipfad
- * @param d_out Ausgabe: Dimension
- * @param n_out Ausgabe: Anzahl der Vektoren
- * @return std::unique_ptr<std::byte[]> mit rohen int32-Daten
- */
-inline auto ivecs_read(const char* fname, size_t& d_out, size_t& n_out) {
-    std::error_code ec{};
-    auto file_size = std::filesystem::file_size(fname, ec);
-    if (ec != std::error_code{}) {
-        std::fprintf(stderr, "error when accessing file %s, size is: %ju message: %s\n",
-                     fname, file_size, ec.message().c_str());
-        std::abort();
-    }
-
-    auto ifstream = std::ifstream(fname, std::ios::binary);
-    if (!ifstream.is_open()) {
-        std::fprintf(stderr, "could not open %s\n", fname);
-        std::abort();
-    }
-
-    // read dimension header
-    uint32_t dims = 0;
-    ifstream.read(reinterpret_cast<char*>(&dims), sizeof(dims));
-    assert((dims > 0 && dims < 1'000'000) && "unreasonable dimension");
-
-    // compute number of rows
-    assert(file_size % ((dims + 1) * sizeof(int32_t)) == 0 || !"weird file size");
-    size_t n = static_cast<size_t>(file_size) / ((dims + 1) * sizeof(int32_t));
-    d_out = dims;
-    n_out = n;
-
-    // read data
-    auto x = std::make_unique<std::byte[]>(file_size);
-    ifstream.seekg(0);
-    ifstream.read(reinterpret_cast<char*>(x.get()), static_cast<std::streamsize>(file_size));
-    if (!ifstream) assert(ifstream.gcount() == static_cast<std::streamsize>(file_size) || !"could not read whole file");
-
-    // shift array to remove row headers
-    for (size_t i = 0; i < n; ++i)
-        std::memmove(&x[i * dims * sizeof(int32_t)],
-                     &x[sizeof(dims) + i * (dims + 1) * sizeof(int32_t)],
-                     dims * sizeof(int32_t));
-
-    ifstream.close();
-    return x;
-}
-
-/**
  * Speichert alle EvpBits-Vektoren in einem einzigen zusammenhängenden
  * std::vector<std::byte>, analog zum StaticFeatureRepository-Speicherlayout.
  *

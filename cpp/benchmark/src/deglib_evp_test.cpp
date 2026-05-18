@@ -26,6 +26,8 @@
 #include <thread>
 #include <vector>
 
+#include <fmt/core.h>
+
 #include "builder.h"
 #include "concurrent.h"
 #include "distances.h"
@@ -52,14 +54,22 @@ static size_t hardware_threads() {
 // ============================================================================
 
 int main(int argc, char* argv[]) {
+#if defined(USE_AVX)
+    fmt::print("Using AVX2...\n");
+#elif defined(USE_SSE)
+    fmt::print("Using SSE...\n");
+#else
+    fmt::print("Using arch...\n");
+#endif
+
     // --------------------------------------------------------------------------
     // Parameters
     // --------------------------------------------------------------------------
     constexpr uint32_t NON_ZEROS = 512;
     constexpr uint32_t K_TOP     = 15;
-    constexpr uint8_t  K_GRAPH   = 30;
-    constexpr uint8_t  K_EXT     = 60;
-    constexpr float    EPS_EXT   = 0.1f;
+    constexpr uint8_t  K_GRAPH   = 32;
+    constexpr uint8_t  K_EXT     = 32;
+    constexpr float    EPS_EXT   = 0.001f;
 
     // --------------------------------------------------------------------------
     // Parse data path
@@ -77,8 +87,8 @@ int main(int argc, char* argv[]) {
 #endif
     }
 
-    const auto train_fvecs = data_path / "train.fvecs";
-    const auto allknn_ivecs = data_path / "allknn.ivecs";
+    const auto train_fvecs = data_path / "SISAP" / "train.fvecs";
+    const auto allknn_ivecs = data_path / "SISAP" / "allknn.ivecs";
 
     if (!std::filesystem::exists(train_fvecs)) {
         std::fprintf(stderr, "Error: %ls not found\n", train_fvecs.wstring().c_str());
@@ -89,7 +99,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    const size_t threads = hardware_threads();
+    const size_t threads = 1; //hardware_threads();
 
     std::printf("=== EVP Bits Graph Benchmark ===\n");
     std::printf("Data path: %ls\n", data_path.wstring().c_str());
@@ -118,8 +128,13 @@ int main(int argc, char* argv[]) {
     std::printf("Ground truth: %zu queries, top-%zu\n", gt_count, gt_dims);
     std::printf("Load time: %.2f ms\n\n", load_ms);
 
-    // Use min of count and gt_count (they should match)
-    size_t eval_count = std::min(count, gt_count);
+    // Check that dataset and ground truth sizes match
+    if (count != gt_count) {
+        std::fprintf(stderr,
+            "Error: train.fvecs and allknn.ivecs must contain the same number of entries (%zu vs %zu)\n",
+            count, gt_count);
+        return 1;
+    }
 
     // --------------------------------------------------------------------------
     // Step 3: Quantize with deglib::quantization
@@ -127,7 +142,7 @@ int main(int argc, char* argv[]) {
     double t1 = now_ms();
 
     auto quantized = deglib::quantization::quantize_batch(
-        train_data, eval_count, static_cast<uint32_t>(dims), NON_ZEROS, threads);
+        train_data, count, static_cast<uint32_t>(dims), NON_ZEROS, threads);
 
     double quantize_ms = now_ms() - t1;
     std::printf("Quantize time: %.2f ms\n", quantize_ms);
@@ -139,14 +154,11 @@ int main(int argc, char* argv[]) {
     // --------------------------------------------------------------------------
     double t2 = now_ms();
 
-    const uint32_t uint_dims = static_cast<uint32_t>(dims);
-    const deglib::Metric metric = deglib::Metric::EvpBits;
-
     // Create feature space for EvpBits
-    deglib::FloatSpace feature_space(uint_dims, metric);
+    deglib::FloatSpace feature_space(static_cast<uint32_t>(dims), deglib::Metric::EvpBits);
 
     // Create graph
-    deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(eval_count), K_GRAPH, feature_space);
+    deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(count), K_GRAPH, feature_space);
 
     // Create builder
     std::mt19937 rnd(42);
@@ -154,7 +166,7 @@ int main(int argc, char* argv[]) {
         graph, rnd,
         deglib::builder::OptimizationTarget::LowLID,
         K_EXT, EPS_EXT,
-        0, 0.0f,   // improve_k, improve_eps (0 = no improvement during build)
+        0, 0.0f,    // improve_k, improve_eps (0 = no improvement during build)
         5,          // max_path_length
         0, 0,       // swap_tries, additional_swap_tries
         true,       // use_rng
@@ -164,8 +176,8 @@ int main(int argc, char* argv[]) {
     builder.setThreadCount(static_cast<uint32_t>(threads));
 
     // Add all entries from quantized data
-    const size_t bytes_per_evp = uint_dims / 4; // 2 * dim/8 = dim/4
-    for (size_t i = 0; i < eval_count; ++i) {
+    const size_t bytes_per_evp = dims / 4; // 2 * dim/8 = dim/4
+    for (size_t i = 0; i < count; ++i) {
         std::vector<std::byte> feature(quantized.data() + i * bytes_per_evp,
                                        quantized.data() + (i + 1) * bytes_per_evp);
         builder.addEntry(static_cast<uint32_t>(i), std::move(feature));
@@ -173,12 +185,10 @@ int main(int argc, char* argv[]) {
 
     // Build
     auto build_callback = [](deglib::builder::BuilderStatus& status) {
-        if (status.step % 10000 == 0 || status.added == 0) {
-            std::printf("  Build step %llu: added=%llu, improved=%llu\n",
-                        (unsigned long long)status.step,
-                        (unsigned long long)status.added,
-                        (unsigned long long)status.improved);
-        }
+        std::printf("  Build step %llu: added=%llu, improved=%llu\n",
+                    (unsigned long long)status.step,
+                    (unsigned long long)status.added,
+                    (unsigned long long)status.improved);
     };
 
     builder.build(build_callback, false);
@@ -190,8 +200,6 @@ int main(int argc, char* argv[]) {
     // --------------------------------------------------------------------------
     // Step 5: Exploration for Recall@K_TOP
     // --------------------------------------------------------------------------
-    double t3 = now_ms();
-
     const uint32_t k_explore = K_TOP;
 
     // Sweep max_distance_count like in deglib_test.cpp
@@ -202,21 +210,21 @@ int main(int argc, char* argv[]) {
     std::vector<std::vector<uint32_t>> best_results;
 
     for (uint32_t f = 0; f <= 3; f++, k_factor *= 10) {
-        for (uint32_t i = (f == 0) ? 1 : 2; i <= 10; i++) {
-            const uint32_t max_distance_count = (f == 0) ? (k_explore + k_factor * (i - 1)) : (k_factor * i);
+        for (uint32_t c = (f == 0) ? 1 : 2; c <= 10; c++) {
+            const uint32_t max_distance_count = (f == 0) ? (k_explore + k_factor * (c - 1)) : (k_factor * c);
 
             // Measure per-configuration timing
             double t_explore_start = now_ms();
 
             // Explore all vertices
-            std::vector<std::vector<uint32_t>> results(eval_count);
+            std::vector<std::vector<uint32_t>> results(count);
 
-            deglib::concurrent::parallel_for(static_cast<size_t>(0), eval_count, threads,
+            deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads,
                 [&](size_t entry_idx, size_t) {
                     auto result_queue = graph.explore(
                         static_cast<uint32_t>(entry_idx),
                         k_explore,
-                        false,   // include_entry
+                        true,   // include_entry
                         max_distance_count);
 
                     auto& result = results[entry_idx];
@@ -231,7 +239,7 @@ int main(int argc, char* argv[]) {
 
             // Calculate recall
             int total_hits = 0;
-            for (size_t i = 0; i < eval_count; ++i) {
+            for (size_t i = 0; i < count; ++i) {                
                 const int32_t* gt_row = &gt_data[i * gt_dims];
                 for (uint32_t k = 0; k < K_TOP && k < gt_dims; ++k) {
                     uint32_t gt_idx = static_cast<uint32_t>(gt_row[k] - 1); // 1→0 indexed
@@ -244,7 +252,7 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            float recall = static_cast<float>(total_hits) / (eval_count * K_TOP);
+            float recall = static_cast<float>(total_hits) / (count * K_TOP);
 
             if (recall > best_recall) {
                 best_recall = recall;
@@ -281,7 +289,7 @@ recall_done:;
     std::printf("Exploration (best):      %.2f ms\n", best_explore_ms);
     std::printf("---------------------------------------------\n");
     std::printf("TOTAL:                   %.2f ms\n", total_ms);
-    std::printf("Vectors:                 %zu\n", eval_count);
+    std::printf("Vectors:                 %zu\n", count);
     std::printf("Dimensions:              %zu\n", dims);
     std::printf("NON_ZEROS:               %u\n", NON_ZEROS);
     std::printf("Recall@%d:               %.4f\n", K_TOP, best_recall);

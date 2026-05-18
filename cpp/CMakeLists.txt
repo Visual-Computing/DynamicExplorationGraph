@@ -13,6 +13,11 @@ project(
   LANGUAGES CXX
   )
 
+# Consolidate all build outputs into the build directory
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+
 # build options
 option(ENABLE_BENCHMARKS "compile benchmarks" ON)
 option(FORCE_AVX2 "compile for avx2 support. Otherwise compile for this machine." OFF)
