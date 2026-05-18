@@ -120,15 +120,14 @@ message("C++ compiler flags release: ${CMAKE_CXX_FLAGS_RELEASE}")
 add_subdirectory(deglib)
 add_subdirectory(evp)
 
-add_executable(test_distances test/test_distances.cpp)
-add_executable(test_sizebounded_graph test/test_sizebounded_graph.cpp)
-foreach(_target test_distances test_sizebounded_graph)
-    target_include_directories(${_target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/deglib/include)
-    set_target_properties(${_target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
-    set_target_properties(${_target} PROPERTIES INTERMEDIATE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/obj/${_target}")
-endforeach()
-
+# fmt is only needed by benchmarks — not by deglib/evp.
 if (ENABLE_BENCHMARKS)
+	set(FMT_MASTER_PROJECT OFF)
+	set(FMT_TEST OFF)
+	set(FMT_INSTALL OFF)
 	add_subdirectory(external/fmt)
 	add_subdirectory(benchmark)
 endif()
+
+# Unit tests
+add_subdirectory(test)
