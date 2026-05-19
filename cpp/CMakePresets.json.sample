@@ -10,12 +10,25 @@
       "name": "default",
       "hidden": false,
       "description": "Preset that sets the DATA_PATH variable.",
+      "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "DATA_PATH": {
           "value": "",
           "type": "PATH"
         }
       }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "Debug",
+      "configurePreset": "default",
+      "configuration": "Debug"
+    },
+    {
+      "name": "Release",
+      "configurePreset": "default",
+      "configuration": "Release"
     }
   ]
 }

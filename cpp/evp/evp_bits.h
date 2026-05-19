@@ -243,6 +243,11 @@ namespace deglib {
  * @param b Index des zweiten Vektors
  * @return Similarity als float
  */
+// Forward declaration — defined below
+inline float evp_similarity_bytes(const std::byte* ones_a, const std::byte* negs_a,
+                                   const std::byte* ones_b, const std::byte* negs_b,
+                                   uint32_t dim);
+
 inline float evp_similarity(const EvpBitsArray& array, uint32_t a, uint32_t b) {
     const uint32_t dim = array.dim();
 
@@ -307,12 +312,12 @@ inline float get_max_similarity(uint32_t dim, uint32_t non_zeros) {
     // aa = non_zeros (all ones bits match)
     // bb = count of negative values (all negs bits match)
     // cc = dd = 0 (no overlaps between ones and negs)
-    // max = non_zeros + neg_count + dim*2 - 0
+    // max = non_zeros + neg_count + dim - 0
     // But we don't know how many are negative - approximate with non_zeros
-    // In practice: similarity(a, a) = non_zeros + neg_count + dim*2
-    // Since we don't know neg_count, we use: 2 * non_zeros + dim * 2
+    // In practice: similarity(a, a) = non_zeros + neg_count + dim
+    // Since we don't know neg_count, we use: 2 * non_zeros + dim
     // This is an upper bound
-    return static_cast<float>(2 * non_zeros + dim * 2);
+    return static_cast<float>(2 * non_zeros + dim);
 }
 
 }  // namespace deglib

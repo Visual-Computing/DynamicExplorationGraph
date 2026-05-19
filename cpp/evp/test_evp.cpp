@@ -79,21 +79,21 @@ static void test_evp_similarity_simple() {
     // bb = popcount(0x00 & 0x00) = 0
     // cc = popcount(0xF0 & 0x00) = 0
     // dd = popcount(0x0F & 0x00) = 0
-    // sim = (0+0+16) - (0+0) = 16
+    // sim = (0+0+8) - (0+0) = 8
 
     float sim = deglib::evp_similarity(array, 0, 1);
-    check_float(sim, 16.0f, 0.01f, "similarity(a, b) == 16.0 (no overlap)");
+    check_float(sim, 8.0f, 0.01f, "similarity(a, b) == 8.0 (no overlap)");
 
     // sim(a,a): ones=0xF0, negs=0x00
     // aa = popcount(0xF0) = 4, bb = 0, cc = 0, dd = 0
-    // sim = (4+0+16) - 0 = 20
+    // sim = (4+0+8) - 0 = 12
     float sim_aa = deglib::evp_similarity(array, 0, 0);
-    check_float(sim_aa, 20.0f, 0.01f, "similarity(a, a) == 20.0");
+    check_float(sim_aa, 12.0f, 0.01f, "similarity(a, a) == 12.0");
 
     // sim(b,b): ones=0x0F, negs=0x00
-    // aa = popcount(0x0F) = 4, sim = (4+0+16) - 0 = 20
+    // aa = popcount(0x0F) = 4, sim = (4+0+8) - 0 = 12
     float sim_bb = deglib::evp_similarity(array, 1, 1);
-    check_float(sim_bb, 20.0f, 0.01f, "similarity(b, b) == 20.0");
+    check_float(sim_bb, 12.0f, 0.01f, "similarity(b, b) == 12.0");
 }
 
 // ============================================================================
@@ -358,13 +358,13 @@ static void test_similarity_exhaustive_by_dimension() {
             }
         }
 
-        // Erwartete Werte: min = dim*2 - non_zeros, max = dim*2 + non_zeros
-        float expected_min = static_cast<float>(dim * 2 - non_zeros);
-        float expected_max = static_cast<float>(dim * 2 + non_zeros);
+        // Erwartete Werte: min = dim - non_zeros, max = dim + non_zeros
+        float expected_min = static_cast<float>(dim - non_zeros);
+        float expected_max = static_cast<float>(dim + non_zeros);
         check(std::fabs(sim_min - expected_min) < 0.01f,
-              sprintf_str("min=%.1f == %.1f (dim*2 - non_zeros)", sim_min, expected_min).c_str());
+              sprintf_str("min=%.1f == %.1f (dim - non_zeros)", sim_min, expected_min).c_str());
         check(std::fabs(sim_max - expected_max) < 0.01f,
-              sprintf_str("max=%.1f == %.1f (dim*2 + non_zeros)", sim_max, expected_max).c_str());
+              sprintf_str("max=%.1f == %.1f (dim + non_zeros)", sim_max, expected_max).c_str());
 
         // Einzelne Paare verifizieren
         float sim_ones_ones = deglib::evp_similarity(array, 1, 1);
@@ -374,12 +374,12 @@ static void test_similarity_exhaustive_by_dimension() {
         float sim_none_ones = deglib::evp_similarity(array, 0, 1);
         float sim_none_negs = deglib::evp_similarity(array, 0, 2);
 
-        check_float(sim_ones_ones, expected_max, 0.01f, "sim(ones, ones) == dim*2 + non_zeros");
-        check_float(sim_negs_negs, expected_max, 0.01f, "sim(negs, negs) == dim*2 + non_zeros");
-        check_float(sim_ones_negs, expected_min, 0.01f, "sim(ones, negs) == dim*2 - non_zeros");
-        check_float(sim_none_none, static_cast<float>(dim * 2), 0.01f, "sim(none, none) == dim*2");
-        check_float(sim_none_ones, static_cast<float>(dim * 2), 0.01f, "sim(none, ones) == dim*2");
-        check_float(sim_none_negs, static_cast<float>(dim * 2), 0.01f, "sim(none, negs) == dim*2");
+        check_float(sim_ones_ones, expected_max, 0.01f, "sim(ones, ones) == dim + non_zeros");
+        check_float(sim_negs_negs, expected_max, 0.01f, "sim(negs, negs) == dim + non_zeros");
+        check_float(sim_ones_negs, expected_min, 0.01f, "sim(ones, negs) == dim - non_zeros");
+        check_float(sim_none_none, static_cast<float>(dim), 0.01f, "sim(none, none) == dim");
+        check_float(sim_none_ones, static_cast<float>(dim), 0.01f, "sim(none, ones) == dim");
+        check_float(sim_none_negs, static_cast<float>(dim), 0.01f, "sim(none, negs) == dim");
 
         printf("  dim=%5u, non_zeros=%4u: EXACT min=%.1f, EXACT max=%.1f\n",
                dim, non_zeros, sim_min, sim_max);
