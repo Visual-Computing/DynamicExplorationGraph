@@ -245,41 +245,13 @@ namespace deglib {
  */
 inline float evp_similarity(const EvpBitsArray& array, uint32_t a, uint32_t b) {
     const uint32_t dim = array.dim();
-    const size_t mask_bytes = dim / 8;
 
     const std::byte* ones_a = array.ones_ptr(a);
     const std::byte* negs_a = array.negs_ptr(a);
     const std::byte* ones_b = array.ones_ptr(b);
     const std::byte* negs_b = array.negs_ptr(b);
 
-    uint32_t aa = 0, bb = 0, cc = 0, dd = 0;
-
-    // Process 8 bytes (64 bits) at a time using uint64_t
-    size_t i = 0;
-    for (; i + sizeof(uint64_t) <= mask_bytes; i += sizeof(uint64_t)) {
-        const uint64_t o1 = *reinterpret_cast<const uint64_t*>(&ones_a[i]);
-        const uint64_t o2 = *reinterpret_cast<const uint64_t*>(&ones_b[i]);
-        const uint64_t n1 = *reinterpret_cast<const uint64_t*>(&negs_a[i]);
-        const uint64_t n2 = *reinterpret_cast<const uint64_t*>(&negs_b[i]);
-        aa += std::popcount(o1 & o2);
-        bb += std::popcount(n1 & n2);
-        cc += std::popcount(o1 & n2);
-        dd += std::popcount(o2 & n1);
-    }
-
-    // Process remaining bytes
-    for (; i < mask_bytes; ++i) {
-        unsigned int b1 = static_cast<unsigned int>(static_cast<uint8_t>(ones_a[i]));
-        unsigned int b2 = static_cast<unsigned int>(static_cast<uint8_t>(ones_b[i]));
-        unsigned int n1 = static_cast<unsigned int>(static_cast<uint8_t>(negs_a[i]));
-        unsigned int n2 = static_cast<unsigned int>(static_cast<uint8_t>(negs_b[i]));
-        aa += std::popcount(b1 & b2);
-        bb += std::popcount(n1 & n2);
-        cc += std::popcount(b1 & n2);
-        dd += std::popcount(b2 & n1);
-    }
-
-    return static_cast<float>(aa + bb + dim * 2) - static_cast<float>(cc + dd);
+    return evp_similarity_bytes(ones_a, negs_a, ones_b, negs_b, dim); 
 }
 
 /**
@@ -323,7 +295,7 @@ inline float evp_similarity_bytes(const std::byte* ones_a, const std::byte* negs
         dd += std::popcount(b2 & n1);
     }
 
-    return static_cast<float>(aa + bb + dim * 2) - static_cast<float>(cc + dd);
+    return static_cast<float>(aa + bb + dim) - static_cast<float>(cc + dd);
 }
 
 /**

@@ -5,6 +5,8 @@
 // guaranteed regardless of which SIMD path the compiler selects.
 
 #include <cmath>
+#include <algorithm>
+#include <bit>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -512,6 +514,16 @@ make_evp_pair(uint32_t dim, uint32_t non_zeros, int seed_a = 42, int seed_b = 99
     };
 }
 
+static uint32_t count_evp_active_bits(const std::vector<std::byte>& bits, uint32_t dim) {
+    const size_t mask_bytes = dim / 8;
+    uint32_t active = 0;
+    for (size_t i = 0; i < mask_bytes; ++i) {
+        active += std::popcount(static_cast<unsigned int>(static_cast<uint8_t>(bits[i]))) +
+                  std::popcount(static_cast<unsigned int>(static_cast<uint8_t>(bits[i + mask_bytes])));
+    }
+    return active;
+}
+
 TEST(EvpBitsSimilarity, NaiveSelfSimilarity) {
     auto [a, b] = make_evp_pair(64, 16);
     uint32_t dim = 64;
@@ -519,6 +531,42 @@ TEST(EvpBitsSimilarity, NaiveSelfSimilarity) {
         static_cast<const void*>(a.data()), static_cast<const void*>(a.data()),
         static_cast<const void*>(&dim));
     EXPECT_GT(sim, 0.0f);
+}
+
+TEST(EvpBitsSimilarity, CompareNormalizesToZeroForIdenticalVectors) {
+    auto [a, b] = make_evp_pair(64, 16);
+    uint32_t dim = 64;
+    
+    float sim = deglib::distances::EvpBitsSimilarity::compare_naive(
+        static_cast<const void*>(a.data()), static_cast<const void*>(a.data()),
+        static_cast<const void*>(&dim));
+        
+    const float max_similarity = static_cast<float>(dim) * 2.0f;
+    float expected = 1.f - (sim / max_similarity);
+
+    float dist = deglib::distances::EvpBitsSimilarity::compare(
+        static_cast<const void*>(a.data()), static_cast<const void*>(a.data()),
+        static_cast<const void*>(&dim));
+
+    EXPECT_FLOAT_EQ(dist, expected);
+}
+
+TEST(EvpBitsSimilarity, CompareMatchesPairwiseNormalization) {
+    auto [a, b] = make_evp_pair(128, 32);
+    uint32_t dim = 128;
+
+    float sim = deglib::distances::EvpBitsSimilarity::compare_naive(
+        static_cast<const void*>(a.data()), static_cast<const void*>(b.data()),
+        static_cast<const void*>(&dim));
+        
+    const float max_similarity = static_cast<float>(dim) * 2.0f;
+    float expected = 1.f - (sim / max_similarity);
+
+    float dist = deglib::distances::EvpBitsSimilarity::compare(
+        static_cast<const void*>(a.data()), static_cast<const void*>(b.data()),
+        static_cast<const void*>(&dim));
+
+    EXPECT_FLOAT_EQ(dist, expected);
 }
 
 
@@ -637,21 +685,7 @@ TEST(EvpBitsSimilarity, Symmetry) {
     EXPECT_NEAR(ab, ba, 0.001f);
 }
 
-TEST(EvpBitsSimilarity, MatchesQuantizationLibrary) {
-    auto [a, b] = make_evp_pair(256, 64);
-    uint32_t dim = 256;
-    const size_t mask_bytes = dim / 8;
-
-    float sim_dist = deglib::distances::EvpBitsSimilarity::compare_naive(
-        static_cast<const void*>(a.data()), static_cast<const void*>(b.data()),
-        static_cast<const void*>(&dim));
-    float sim_lib = deglib::quantization::similarity_bytes(
-        a.data(), a.data() + mask_bytes,
-        b.data(), b.data() + mask_bytes,
-        dim);
-
-    EXPECT_NEAR(sim_dist, sim_lib, 0.001f);
-}
+// Removed MatchesQuantizationLibrary test because similarity_bytes is not available.
 
 TEST(EvpBitsSimilarity, SmallDims) {
     // Smallest valid EVP: dim=8 → 1 byte ones + 1 byte negs

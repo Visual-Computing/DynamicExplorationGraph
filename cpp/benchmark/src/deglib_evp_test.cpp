@@ -1,13 +1,17 @@
 /**
  * @file deglib_evp_test.cpp
- * @brief EVP Bits Graph Benchmark: build a DEG graph from quantized EvpBits and evaluate exploration recall@15.
+ * @brief Graph Benchmark: build a DEG graph and evaluate exploration recall@15.
  *
  * Uses only deglib headers (no benchmark.h / dataset.h / build.h).
- * Loads raw .fvecs and .ivecs, quantizes with deglib::quantization, builds a SizeBoundedGraph
- * with Metric::EvpBits, explores the graph for Top-15, and compares against allknn ground truth.
+ * Loads raw .fvecs and .ivecs, builds a SizeBoundedGraph, explores for Top-15,
+ * and compares against allknn ground truth.
+ *
+ * Two modes:
+ *   evp   - quantize with deglib::quantization, build graph with Metric::EvpBits
+ *   raw   - use original float feature vectors directly with Metric::L2
  *
  * Usage:
- *   deglib_evp_test <data_path>
+ *   deglib_evp_test <data_path> [mode]
  *
  * Expected files in data_path:
  *   train.fvecs      - float feature vectors
@@ -21,6 +25,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <functional>
 #include <random>
 #include <thread>
@@ -45,8 +50,276 @@ static double now_ms() {
            .count();
 }
 
-static size_t hardware_threads() {
-    return std::max(std::thread::hardware_concurrency(), static_cast<unsigned int>(1));
+// ============================================================================
+// Shared helpers
+// ============================================================================
+
+static void run_exploration_sweep(
+    const deglib::graph::SizeBoundedGraph& graph,
+    const int32_t* gt_data,
+    size_t count,
+    size_t gt_dims,
+    uint32_t k_top,
+    uint8_t threads,
+    std::string_view label)
+{
+    std::printf("\n--- Exploration sweep (%s) ---\n", label);
+
+    const uint32_t k_explore = k_top;
+
+    // Sweep max_distance_count like in deglib_test.cpp
+    uint32_t k_factor = 100;
+    float best_recall = -1.0f;
+    uint32_t best_max_dist = 0;
+    double best_explore_ms = 0.0;
+
+    for (uint32_t f = 0; f <= 3; f++, k_factor *= 10) {
+        for (uint32_t c = (f == 0) ? 1 : 2; c <= 10; c++) {
+            const uint32_t max_distance_count = (f == 0) ? (k_explore + k_factor * (c - 1)) : (k_factor * c);
+
+            // Measure per-configuration timing
+            double t_explore_start = now_ms();
+
+            // Explore all vertices
+            std::vector<std::vector<uint32_t>> results(count);
+
+            deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads,
+                [&](size_t label, size_t) {
+                    size_t entry_idx = graph.getInternalIndex(static_cast<uint32_t>(label));
+                    auto result_queue = graph.explore(
+                        static_cast<uint32_t>(entry_idx),
+                        k_explore,
+                        true,   // include_entry
+                        max_distance_count);
+
+                    auto& result = results[label];
+                    result.resize(k_explore);
+                    for (uint32_t j = 0; j < k_explore && !result_queue.empty(); ++j) {
+                        result[j] = graph.getExternalLabel(result_queue.top().getInternalIndex());
+                        result_queue.pop();
+                    }
+                });
+
+            double explore_ms_single = now_ms() - t_explore_start;
+
+            // Calculate recall
+            int total_hits = 0;
+            for (size_t i = 0; i < count; ++i) {
+                const int32_t* gt_row = &gt_data[i * gt_dims];
+                for (uint32_t k = 0; k < k_top && k < gt_dims; ++k) {
+                    uint32_t gt_idx = static_cast<uint32_t>(gt_row[k] - 1); // 1→0 indexed
+                    for (uint32_t j = 0; j < k_top; ++j) {
+                        if (results[i][j] == gt_idx) {
+                            total_hits++;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            float recall = static_cast<float>(total_hits) / (count * k_top);
+
+            if (recall > best_recall) {
+                best_recall = recall;
+                best_max_dist = max_distance_count;
+                best_explore_ms = explore_ms_single;
+            }
+
+            std::printf("  max_dist=%6u  recall=%.4f  time=%.2f ms\n", max_distance_count, recall, explore_ms_single);
+
+            if (recall >= 0.997f) {
+                std::printf("  Reached recall target 0.997, stopping sweep\n");
+                goto recall_done;
+            }
+        }
+    }
+
+recall_done:;
+
+    std::printf("\nBest recall@%d: %.4f (max_distance_count=%u, explore_time=%.2f ms)\n",
+                k_top, best_recall, best_max_dist, best_explore_ms);
+}
+
+// ============================================================================
+// Mode 1: EVP Bits path (quantize → EvpBits graph)
+// ============================================================================
+
+static int run_evp_mode(
+    const std::filesystem::path& data_path,
+    size_t count, size_t dims,
+    const float* train_data,
+    const int32_t* gt_data, size_t gt_dims,
+    uint32_t threads,
+    uint32_t non_zeros,
+    uint8_t k_graph, uint8_t k_ext,
+    float eps_ext,
+    uint32_t k_top)
+{
+    std::printf("=== EVP Bits Graph Benchmark ===\n");
+    std::printf("Data path: %ls\n", data_path.wstring().c_str());
+    std::printf("NON_ZEROS=%u, K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.2f\n",
+                non_zeros, k_top, k_graph, k_ext, eps_ext);
+    std::printf("Threads: %zu\n\n", threads);
+
+    // --------------------------------------------------------------------------
+    // Quantize
+    // --------------------------------------------------------------------------
+    double t1 = now_ms();
+
+    auto quantized = deglib::quantization::quantize_batch(
+        train_data, count, static_cast<uint32_t>(dims), non_zeros, threads);
+
+    double quantize_ms = now_ms() - t1;
+    std::printf("Quantize time: %.2f ms\n", quantize_ms);
+    std::printf("Quantized size: %.2f MB\n\n",
+                static_cast<double>(quantized.size()) / (1024.0 * 1024.0));
+
+    // --------------------------------------------------------------------------
+    // Build graph with Metric::EvpBits
+    // --------------------------------------------------------------------------
+    double t2 = now_ms();
+
+    deglib::FloatSpace feature_space(static_cast<uint32_t>(dims), deglib::Metric::EvpBits);
+    deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(count), k_graph, feature_space);
+
+    std::mt19937 rnd(42);
+    deglib::builder::EvenRegularGraphBuilder builder(
+        graph, rnd,
+        deglib::builder::OptimizationTarget::LowLID,
+        k_ext, eps_ext,
+        0, 0.0f,
+        5,
+        0, 0,
+        true,
+        false,
+        false
+    );
+    builder.setThreadCount(static_cast<uint32_t>(threads));
+
+    const size_t bytes_per_evp = dims / 4;
+    for (size_t i = 0; i < count; ++i) {
+        std::vector<std::byte> feature(quantized.data() + i * bytes_per_evp,
+                                       quantized.data() + (i + 1) * bytes_per_evp);
+        builder.addEntry(static_cast<uint32_t>(i), std::move(feature));
+    }
+
+    auto build_callback = [](deglib::builder::BuilderStatus& status) {
+        std::printf("  Build step %llu: added=%llu, improved=%llu\n",
+                    (unsigned long long)status.step,
+                    (unsigned long long)status.added,
+                    (unsigned long long)status.improved);
+    };
+
+    builder.build(build_callback, false);
+
+    double build_ms = now_ms() - t2;
+    std::printf("Graph built: %zu vertices, %u edges/vertex\n", graph.size(), graph.getEdgesPerVertex());
+    std::printf("Build time: %.2f ms\n\n", build_ms);
+
+    // --------------------------------------------------------------------------
+    // Exploration sweep
+    // --------------------------------------------------------------------------
+    run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, threads, "EVP Bits");
+
+    // --------------------------------------------------------------------------
+    // Summary
+    // --------------------------------------------------------------------------
+    double total_ms = (now_ms() - 0.0); // caller handles t0
+
+    std::printf("=============================================\n");
+    std::printf("          FINAL SUMMARY (EVP Bits)\n");
+    std::printf("=============================================\n");
+    std::printf("Quantize:                %.2f ms\n", quantize_ms);
+    std::printf("Graph Build:             %.2f ms\n", build_ms);
+    std::printf("---------------------------------------------\n");
+    std::printf("Vectors:                 %zu\n", count);
+    std::printf("Dimensions:              %zu\n", dims);
+    std::printf("NON_ZEROS:               %u\n", non_zeros);
+    std::printf("=============================================\n\n");
+
+    return 0;
+}
+
+// ============================================================================
+// Mode 2: Raw float path (no quantization, Metric::L2)
+// ============================================================================
+
+static int run_raw_mode(
+    const std::filesystem::path& data_path,
+    size_t count, size_t dims,
+    const float* train_data,
+    const int32_t* gt_data, size_t gt_dims,
+    uint32_t threads,
+    uint8_t k_graph, uint8_t k_ext,
+    float eps_ext,
+    uint32_t k_top)
+{
+    std::printf("=== FP32 InnerProduct Graph Benchmark ===\n");
+    std::printf("Data path: %ls\n", data_path.wstring().c_str());
+    std::printf("K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.2f\n",
+                k_top, k_graph, k_ext, eps_ext);
+    std::printf("Threads: %zu\n\n", threads);
+
+    // --------------------------------------------------------------------------
+    // Build graph with Metric::InnerProduct (no quantization)
+    // --------------------------------------------------------------------------
+    double t2 = now_ms();
+
+    deglib::FloatSpace feature_space(static_cast<uint32_t>(dims), deglib::Metric::InnerProduct);
+    deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(count), k_graph, feature_space);
+
+    std::mt19937 rnd(42);
+    deglib::builder::EvenRegularGraphBuilder builder(
+        graph, rnd,
+        deglib::builder::OptimizationTarget::LowLID,
+        k_ext, eps_ext,
+        0, 0.0f,
+        5,
+        0, 0,
+        true,
+        false,
+        false
+    );
+    builder.setThreadCount(static_cast<uint32_t>(threads));
+
+    // Add all entries from raw float data
+    for (size_t i = 0; i < count; ++i) {
+        std::vector<std::byte> feature(dims * sizeof(float));
+        std::memcpy(feature.data(), train_data + i * dims, dims * sizeof(float));
+        builder.addEntry(static_cast<uint32_t>(i), std::move(feature));
+    }
+
+    auto build_callback = [](deglib::builder::BuilderStatus& status) {
+        std::printf("  Build step %llu: added=%llu, improved=%llu\n",
+                    (unsigned long long)status.step,
+                    (unsigned long long)status.added,
+                    (unsigned long long)status.improved);
+    };
+
+    builder.build(build_callback, false);
+
+    double build_ms = now_ms() - t2;
+    std::printf("Graph built: %zu vertices, %u edges/vertex\n", graph.size(), graph.getEdgesPerVertex());
+    std::printf("Build time: %.2f ms\n\n", build_ms);
+
+    // --------------------------------------------------------------------------
+    // Exploration sweep
+    // --------------------------------------------------------------------------
+    run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, threads, "FP32 InnerProduct");
+
+    // --------------------------------------------------------------------------
+    // Summary
+    // --------------------------------------------------------------------------
+    std::printf("=============================================\n");
+    std::printf("          FINAL SUMMARY (FP32 InnerProduct)\n");
+    std::printf("=============================================\n");
+    std::printf("Graph Build:             %.2f ms\n", build_ms);
+    std::printf("---------------------------------------------\n");
+    std::printf("Vectors:                 %zu\n", count);
+    std::printf("Dimensions:              %zu\n", dims);
+    std::printf("=============================================\n\n");
+
+    return 0;
 }
 
 // ============================================================================
@@ -72,19 +345,29 @@ int main(int argc, char* argv[]) {
     constexpr float    EPS_EXT   = 0.001f;
 
     // --------------------------------------------------------------------------
-    // Parse data path
+    // Parse data path and mode
     // --------------------------------------------------------------------------
     std::filesystem::path data_path;
+    std::string mode = "evp";  // default: EVP Bits mode
+
     if (argc >= 2) {
         data_path = argv[1];
     } else {
-        // Try DATA_PATH compile-time define
 #ifdef DATA_PATH
         data_path = DATA_PATH;
 #else
-        std::fprintf(stderr, "Usage: %s <data_path>\n", argv[0]);
+        std::fprintf(stderr, "Usage: %s <data_path> [evp|raw]\n", argv[0]);
         return 1;
 #endif
+    }
+
+    if (argc >= 3) {
+        mode = argv[2];
+    }
+
+    if (mode != "evp" && mode != "raw") {
+        std::fprintf(stderr, "Unknown mode '%s'. Use 'evp' or 'raw'.\n", mode.c_str());
+        return 1;
     }
 
     const auto train_fvecs = data_path / "SISAP" / "train.fvecs";
@@ -99,16 +382,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    const size_t threads = 1; //hardware_threads();
-
-    std::printf("=== EVP Bits Graph Benchmark ===\n");
-    std::printf("Data path: %ls\n", data_path.wstring().c_str());
-    std::printf("NON_ZEROS=%u, K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.2f\n",
-                NON_ZEROS, K_TOP, K_GRAPH, K_EXT, EPS_EXT);
-    std::printf("Threads: %zu\n\n", threads);
+    const size_t threads = 6; // hardware_threads();
 
     // --------------------------------------------------------------------------
-    // Step 1: Load train.fvecs
+    // Load data
     // --------------------------------------------------------------------------
     double t0 = now_ms();
 
@@ -116,9 +393,6 @@ int main(int argc, char* argv[]) {
     auto train_bytes = deglib::fvecs_read(train_fvecs.string().c_str(), dims, count);
     const float* train_data = reinterpret_cast<const float*>(train_bytes.get());
 
-    // --------------------------------------------------------------------------
-    // Step 2: Load allknn.ivecs (ground truth, 1-indexed)
-    // --------------------------------------------------------------------------
     size_t gt_dims = 0, gt_count = 0;
     auto gt_bytes = deglib::ivecs_read(allknn_ivecs.string().c_str(), gt_dims, gt_count);
     const int32_t* gt_data = reinterpret_cast<const int32_t*>(gt_bytes.get());
@@ -128,7 +402,6 @@ int main(int argc, char* argv[]) {
     std::printf("Ground truth: %zu queries, top-%zu\n", gt_count, gt_dims);
     std::printf("Load time: %.2f ms\n\n", load_ms);
 
-    // Check that dataset and ground truth sizes match
     if (count != gt_count) {
         std::fprintf(stderr,
             "Error: train.fvecs and allknn.ivecs must contain the same number of entries (%zu vs %zu)\n",
@@ -137,164 +410,13 @@ int main(int argc, char* argv[]) {
     }
 
     // --------------------------------------------------------------------------
-    // Step 3: Quantize with deglib::quantization
+    // Dispatch to selected mode
     // --------------------------------------------------------------------------
-    double t1 = now_ms();
-
-    auto quantized = deglib::quantization::quantize_batch(
-        train_data, count, static_cast<uint32_t>(dims), NON_ZEROS, threads);
-
-    double quantize_ms = now_ms() - t1;
-    std::printf("Quantize time: %.2f ms\n", quantize_ms);
-    std::printf("Quantized size: %.2f MB\n\n",
-                static_cast<double>(quantized.size()) / (1024.0 * 1024.0));
-
-    // --------------------------------------------------------------------------
-    // Step 4: Build DEG graph with Metric::EvpBits
-    // --------------------------------------------------------------------------
-    double t2 = now_ms();
-
-    // Create feature space for EvpBits
-    deglib::FloatSpace feature_space(static_cast<uint32_t>(dims), deglib::Metric::EvpBits);
-
-    // Create graph
-    deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(count), K_GRAPH, feature_space);
-
-    // Create builder
-    std::mt19937 rnd(42);
-    deglib::builder::EvenRegularGraphBuilder builder(
-        graph, rnd,
-        deglib::builder::OptimizationTarget::LowLID,
-        K_EXT, EPS_EXT,
-        0, 0.0f,    // improve_k, improve_eps (0 = no improvement during build)
-        5,          // max_path_length
-        0, 0,       // swap_tries, additional_swap_tries
-        true,       // use_rng
-        false,      // use_path_verification
-        false       // use_simple_edge_swaps
-    );
-    builder.setThreadCount(static_cast<uint32_t>(threads));
-
-    // Add all entries from quantized data
-    const size_t bytes_per_evp = dims / 4; // 2 * dim/8 = dim/4
-    for (size_t i = 0; i < count; ++i) {
-        std::vector<std::byte> feature(quantized.data() + i * bytes_per_evp,
-                                       quantized.data() + (i + 1) * bytes_per_evp);
-        builder.addEntry(static_cast<uint32_t>(i), std::move(feature));
+    if (mode == "evp") {
+        return run_evp_mode(data_path, count, dims, train_data, gt_data, gt_dims,
+                            threads, NON_ZEROS, K_GRAPH, K_EXT, EPS_EXT, K_TOP);
+    } else {
+        return run_raw_mode(data_path, count, dims, train_data, gt_data, gt_dims,
+                            threads, K_GRAPH, K_EXT, EPS_EXT, K_TOP);
     }
-
-    // Build
-    auto build_callback = [](deglib::builder::BuilderStatus& status) {
-        std::printf("  Build step %llu: added=%llu, improved=%llu\n",
-                    (unsigned long long)status.step,
-                    (unsigned long long)status.added,
-                    (unsigned long long)status.improved);
-    };
-
-    builder.build(build_callback, false);
-
-    double build_ms = now_ms() - t2;
-    std::printf("Graph built: %zu vertices, %u edges/vertex\n", graph.size(), graph.getEdgesPerVertex());
-    std::printf("Build time: %.2f ms\n\n", build_ms);
-
-    // --------------------------------------------------------------------------
-    // Step 5: Exploration for Recall@K_TOP
-    // --------------------------------------------------------------------------
-    const uint32_t k_explore = K_TOP;
-
-    // Sweep max_distance_count like in deglib_test.cpp
-    uint32_t k_factor = 100;
-    float best_recall = -1.0f;
-    uint32_t best_max_dist = 0;
-    double best_explore_ms = 0.0;
-    std::vector<std::vector<uint32_t>> best_results;
-
-    for (uint32_t f = 0; f <= 3; f++, k_factor *= 10) {
-        for (uint32_t c = (f == 0) ? 1 : 2; c <= 10; c++) {
-            const uint32_t max_distance_count = (f == 0) ? (k_explore + k_factor * (c - 1)) : (k_factor * c);
-
-            // Measure per-configuration timing
-            double t_explore_start = now_ms();
-
-            // Explore all vertices
-            std::vector<std::vector<uint32_t>> results(count);
-
-            deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads,
-                [&](size_t entry_idx, size_t) {
-                    auto result_queue = graph.explore(
-                        static_cast<uint32_t>(entry_idx),
-                        k_explore,
-                        true,   // include_entry
-                        max_distance_count);
-
-                    auto& result = results[entry_idx];
-                    result.resize(k_explore);
-                    for (uint32_t j = 0; j < k_explore && !result_queue.empty(); ++j) {
-                        result[j] = graph.getExternalLabel(result_queue.top().getInternalIndex());
-                        result_queue.pop();
-                    }
-                });
-
-            double explore_ms_single = now_ms() - t_explore_start;
-
-            // Calculate recall
-            int total_hits = 0;
-            for (size_t i = 0; i < count; ++i) {                
-                const int32_t* gt_row = &gt_data[i * gt_dims];
-                for (uint32_t k = 0; k < K_TOP && k < gt_dims; ++k) {
-                    uint32_t gt_idx = static_cast<uint32_t>(gt_row[k] - 1); // 1→0 indexed
-                    for (uint32_t j = 0; j < K_TOP; ++j) {
-                        if (results[i][j] == gt_idx) {
-                            total_hits++;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            float recall = static_cast<float>(total_hits) / (count * K_TOP);
-
-            if (recall > best_recall) {
-                best_recall = recall;
-                best_max_dist = max_distance_count;
-                best_explore_ms = explore_ms_single;
-                best_results = std::move(results);
-            }
-
-            std::printf("  max_dist=%6u  recall=%.4f  time=%.2f ms\n", max_distance_count, recall, explore_ms_single);
-
-            if (recall >= 0.997f) {
-                std::printf("  Reached recall target 0.997, stopping sweep\n");
-                goto recall_done;
-            }
-        }
-    }
-
-recall_done:;
-
-    std::printf("\nBest recall@%d: %.4f (max_distance_count=%u, explore_time=%.2f ms)\n",
-                K_TOP, best_recall, best_max_dist, best_explore_ms);
-
-    // --------------------------------------------------------------------------
-    // Summary
-    // --------------------------------------------------------------------------
-    double total_ms = (now_ms() - t0);
-
-    std::printf("=============================================\n");
-    std::printf("          FINAL SUMMARY\n");
-    std::printf("=============================================\n");
-    std::printf("Load:                    %.2f ms\n", load_ms);
-    std::printf("Quantize:                %.2f ms\n", quantize_ms);
-    std::printf("Graph Build:             %.2f ms\n", build_ms);
-    std::printf("Exploration (best):      %.2f ms\n", best_explore_ms);
-    std::printf("---------------------------------------------\n");
-    std::printf("TOTAL:                   %.2f ms\n", total_ms);
-    std::printf("Vectors:                 %zu\n", count);
-    std::printf("Dimensions:              %zu\n", dims);
-    std::printf("NON_ZEROS:               %u\n", NON_ZEROS);
-    std::printf("Recall@%d:               %.4f\n", K_TOP, best_recall);
-    std::printf("Max distance count:      %u\n", best_max_dist);
-    std::printf("=============================================\n");
-
-    return 0;
 }

@@ -2,11 +2,31 @@
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <random>
+#include <string>
 #include <vector>
 
 static int tests_passed = 0;
 static int tests_failed = 0;
+
+static std::string sprintf_str(const char* fmt, float a, float b) {
+    char buf[256];
+    snprintf(buf, sizeof(buf), fmt, a, b);
+    return std::string(buf);
+}
+
+static std::string sprintf_str(const char* fmt, const char* a, int b, int c) {
+    char buf[256];
+    snprintf(buf, sizeof(buf), fmt, a, b, c);
+    return std::string(buf);
+}
+
+static std::string sprintf_str(const char* fmt, const char* a) {
+    char buf[256];
+    snprintf(buf, sizeof(buf), fmt, a);
+    return std::string(buf);
+}
 
 static void check(bool condition, const char* message) {
     if (condition) {
@@ -216,6 +236,157 @@ static void test_dim_not_divisible_by_8() {
 }
 
 // ============================================================================
+// Test 7: test_similarity_range_by_dimension
+// ============================================================================
+// Untersucht, wie sich die minimale und maximale Similarität rein aus der
+// Dimensionalität ergibt. Für jede Dimension werden viele zufällige
+// Vektorenpaare generiert und die Extremwerte der Similarity gemessen.
+//
+// Hintergrund: Die EVP-Similarity-Formel ist
+//   sim(a,b) = (aa + bb + dim*2) - (cc + dd)
+// wobei aa, bb, cc, dd popcount-Werte über die Bitmasken sind.
+//
+// Bei zufälligen, unkorrelierten Vektoren mit gleichverteilter Vorzeichen-
+// Wahl und non_zeros ≈ dim/2 erwarten wir:
+//   - aa ≈ dim/4, bb ≈ dim/4, cc ≈ dim/4, dd ≈ dim/4
+//   - sim ≈ dim*2 (das „Baseline"-Signal)
+//
+// Die Selbstsimilarität sim(a,a) ist deterministisch:
+//   aa = non_zeros, bb = neg_count, cc = dd = 0
+//   sim(a,a) = non_zeros + neg_count + dim*2
+//
+// ============================================================================
+// Test 7: test_similarity_exhaustive_by_dimension
+// ============================================================================
+// Findet die exakte minimale und maximale Similarität für jede Dimension,
+// indem drei Basis-Vektoren mit garantiert korrekten Bitmasken erzeugt
+// und alle 3x3 Paare exhaustiv verglichen werden.
+//
+// Drei Vektoren in einem EvpBitsArray:
+//   Vektor 0 (none):   alle Werte = 0.0f
+//                      → nth_element wählt top non_zeros, aber alle sind 0
+//                      → ones = 0, negs = 0 (0.0f ist weder >0 noch <0)
+//   Vektor 1 (ones):   pos 0..nz-1 = +nz (positiv, hoher Absolutwert)
+//                      pos nz..dim-1 = 0.0f
+//                      → ones = bits 0..nz-1, negs = 0
+//   Vektor 2 (negs):   pos 0..nz-1 = -nz (negativ, hoher Absolutwert)
+//                      pos nz..dim-1 = 0.0f
+//                      → ones = 0, negs = bits 0..nz-1
+//
+// EVP-Similarity-Formel:
+//   sim(a,b) = (aa + bb + dim*2) - (cc + dd)
+//
+// Erwartete Ergebnisse:
+//   sim(none, none)   = 0 + 0 + dim*2 - 0 = dim*2
+//   sim(none, ones)   = 0 + 0 + dim*2 - 0 = dim*2
+//   sim(none, negs)   = 0 + 0 + dim*2 - 0 = dim*2
+//   sim(ones, ones)   = nz + 0 + dim*2 - 0 = nz + dim*2
+//   sim(ones, negs)   = 0 + 0 + dim*2 - nz = dim*2 - nz
+//   sim(negs, negs)   = 0 + nz + dim*2 - 0 = nz + dim*2
+//
+// Also: min = dim*2 - non_zeros, max = non_zeros + dim*2
+// ============================================================================
+static void test_similarity_exhaustive_by_dimension() {
+    printf("\n--- test_similarity_exhaustive_by_dimension ---\n");
+
+    const std::vector<uint32_t> dims = {8, 16, 32, 64, 128, 256, 512, 1024};
+
+    for (uint32_t dim : dims) {
+        const uint32_t non_zeros = 1;
+        const size_t count = 3;
+
+        // Drei Vektoren: none, ones, negs
+        std::vector<float> data(count * dim, 0.0f);
+        for (uint32_t d = 0; d < non_zeros; ++d) {
+            float val = static_cast<float>(non_zeros);
+            data[0 * dim + d] = 0.0f;       // none: alle 0
+            data[1 * dim + d] = val;         // ones: positiv
+            data[2 * dim + d] = -val;        // negs: negativ
+            // Rest bleibt 0.0f
+        }
+
+        deglib::EvpBitsArray array(data.data(), count, dim, non_zeros);
+
+        // Verifiziere die Bitmasken
+        for (uint32_t v = 0; v < 3; ++v) {
+            const std::byte* ones = array.ones_ptr(v);
+            const std::byte* negs = array.negs_ptr(v);
+            const size_t mask_bytes = dim / 8;
+
+            // ones und negs dürfen keine gemeinsamen Bits haben
+            bool overlap = false;
+            for (size_t i = 0; i < mask_bytes; ++i) {
+                unsigned ob = static_cast<unsigned>(static_cast<uint8_t>(ones[i]));
+                unsigned nb = static_cast<unsigned>(static_cast<uint8_t>(negs[i]));
+                if ((ob & nb) != 0) {
+                    overlap = true;
+                    break;
+                }
+            }
+
+            int ones_pc = 0;
+            int negs_pc = 0;
+            for (size_t i = 0; i < mask_bytes; ++i) {
+                ones_pc += std::popcount(static_cast<uint8_t>(ones[i]));
+                negs_pc += std::popcount(static_cast<uint8_t>(negs[i]));
+            }
+
+            const char* name[] = {"none", "ones", "negs"};
+            int expected_ones = (v == 1) ? non_zeros : 0;
+            int expected_negs = (v == 2) ? non_zeros : 0;
+            check(!overlap, sprintf_str("vec=%s: keine overlap zwischen ones und negs", name[v]).c_str());
+            check(ones_pc == expected_ones,
+                  sprintf_str("vec=%s: ones=%d (erwartet %d)", name[v], ones_pc, expected_ones).c_str());
+            check(negs_pc == expected_negs,
+                  sprintf_str("vec=%s: negs=%d (erwartet %d)", name[v], negs_pc, expected_negs).c_str());
+            printf("  dim=%5u, vec=%s: ones=%d, negs=%d\n",
+                   dim, name[v], ones_pc, negs_pc);
+        }
+
+        // Alle 3x3 = 9 Paare durchgehen
+        float sim_min = std::numeric_limits<float>::infinity();
+        float sim_max = -std::numeric_limits<float>::infinity();
+
+        const char* name[] = {"none", "ones", "negs"};
+        for (uint32_t a = 0; a < 3; ++a) {
+            for (uint32_t b = 0; b < 3; ++b) {
+                float s = deglib::evp_similarity(array, a, b);
+                if (s < sim_min) sim_min = s;
+                if (s > sim_max) sim_max = s;
+                printf("  dim=%5u, non_zeros=%4u: sim(%s,%s) = %.1f\n",
+                       dim, non_zeros, name[a], name[b], s);
+            }
+        }
+
+        // Erwartete Werte: min = dim*2 - non_zeros, max = dim*2 + non_zeros
+        float expected_min = static_cast<float>(dim * 2 - non_zeros);
+        float expected_max = static_cast<float>(dim * 2 + non_zeros);
+        check(std::fabs(sim_min - expected_min) < 0.01f,
+              sprintf_str("min=%.1f == %.1f (dim*2 - non_zeros)", sim_min, expected_min).c_str());
+        check(std::fabs(sim_max - expected_max) < 0.01f,
+              sprintf_str("max=%.1f == %.1f (dim*2 + non_zeros)", sim_max, expected_max).c_str());
+
+        // Einzelne Paare verifizieren
+        float sim_ones_ones = deglib::evp_similarity(array, 1, 1);
+        float sim_negs_negs = deglib::evp_similarity(array, 2, 2);
+        float sim_ones_negs = deglib::evp_similarity(array, 1, 2);
+        float sim_none_none = deglib::evp_similarity(array, 0, 0);
+        float sim_none_ones = deglib::evp_similarity(array, 0, 1);
+        float sim_none_negs = deglib::evp_similarity(array, 0, 2);
+
+        check_float(sim_ones_ones, expected_max, 0.01f, "sim(ones, ones) == dim*2 + non_zeros");
+        check_float(sim_negs_negs, expected_max, 0.01f, "sim(negs, negs) == dim*2 + non_zeros");
+        check_float(sim_ones_negs, expected_min, 0.01f, "sim(ones, negs) == dim*2 - non_zeros");
+        check_float(sim_none_none, static_cast<float>(dim * 2), 0.01f, "sim(none, none) == dim*2");
+        check_float(sim_none_ones, static_cast<float>(dim * 2), 0.01f, "sim(none, ones) == dim*2");
+        check_float(sim_none_negs, static_cast<float>(dim * 2), 0.01f, "sim(none, negs) == dim*2");
+
+        printf("  dim=%5u, non_zeros=%4u: EXACT min=%.1f, EXACT max=%.1f\n",
+               dim, non_zeros, sim_min, sim_max);
+    }
+}
+
+// ============================================================================
 // Hauptprogramm
 // ============================================================================
 int main() {
@@ -227,6 +398,7 @@ int main() {
     test_from_embeddings_with_ties();
     test_invalid_non_zeros();
     test_dim_not_divisible_by_8();
+    test_similarity_exhaustive_by_dimension();
 
     printf("\n=== Results ===\n");
     printf("Passed: %d\n", tests_passed);

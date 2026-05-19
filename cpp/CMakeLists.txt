@@ -42,6 +42,7 @@ if (FORCE_AVX2)
 
   # setup compiler flags
   if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    message(STATUS "[FORCE_AVX2 Clang/GNU] Compiler: ${CMAKE_CXX_COMPILER_ID}")
     target_compile_options(
       compile-options
       INTERFACE -O3
@@ -54,13 +55,18 @@ if (FORCE_AVX2)
                 -ftree-vectorize
                 -ftree-vectorizer-verbose=0
                 )
+    message(STATUS "  -> Using: -O3 -mavx2 -mfma -fopenmp ...")
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
 	target_compile_options(compile-options INTERFACE -O2 -fpic)
 
     if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
         target_compile_options(compile-options INTERFACE -mavx2 -mfma)
+        message(STATUS "[FORCE_AVX2 AppleClang x86_64] -> Using: -O2 -fpic -mavx2 -mfma")
+    else()
+        message(STATUS "[FORCE_AVX2 AppleClang non-x86_64] -> Using: -O2 -fpic (no AVX2)")
     endif()
   elseif(MSVC)
+    message(STATUS "[FORCE_AVX2 MSVC] -> Using: /O2 /arch:AVX2 /W1 /openmp /EHsc")
     target_compile_options(
 	  compile-options
 	  INTERFACE /O2
@@ -78,6 +84,7 @@ else()  # Native build
 
   # setup compiler flags
   if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    message(STATUS "[Native Clang/GNU] Compiler: ${CMAKE_CXX_COMPILER_ID}")
     target_compile_options(
       compile-options
       INTERFACE -O3
@@ -90,24 +97,40 @@ else()  # Native build
                 -pthread
                 -ftree-vectorize
                 -ftree-vectorizer-verbose=0)
+    message(STATUS "  -> Using: -O3 -march=native -mavx2 -mfma -fopenmp ...")
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    message(STATUS "[Native AppleClang] Compiler: ${CMAKE_CXX_COMPILER_ID}")
     target_compile_options(
       compile-options
       INTERFACE -O2
                 -DNDEBUG
                 -march=native
                 -fpic)
+    message(STATUS "  -> Using: -O2 -DNDEBUG -march=native -fpic")
   elseif(MSVC)
     # warning level 4 (show all)
     target_compile_options(compile-options INTERFACE /W4)
 
-    # detecting SUPPORT_AVX2 or SSE2 support
-    cmake_host_system_information(RESULT SUPPORT_SSE2 QUERY HAS_SSE2)
-    if(SUPPORT_AVX2)
+    # SUPPORT_AVX2 and SUPPORT_SSE2 are already set by DetectCPUFeatures.cmake
+    # (via actual compiler tests, not cmake_host_system_information)
+    message(STATUS "[MSVC native] CPU feature detection (from DetectCPUFeatures.cmake):")
+    message(STATUS "  SUPPORT_AVX512F = ${SUPPORT_AVX512F}")
+    message(STATUS "  SUPPORT_AVX2 = ${SUPPORT_AVX2}")
+    message(STATUS "  SUPPORT_SSE2 = ${SUPPORT_SSE2}")
+    message(STATUS "  Compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER}")
+    message(STATUS "  System processor: ${CMAKE_SYSTEM_PROCESSOR}")
+
+    if(SUPPORT_AVX512F)
+      message(STATUS "  -> Using /arch:AVX512")
+      target_compile_options(compile-options INTERFACE /arch:AVX512)
+    elseif(SUPPORT_AVX2)
+      message(STATUS "  -> Using /arch:AVX2")
       target_compile_options(compile-options INTERFACE /arch:AVX2)
     elseif(SUPPORT_SSE2)
+      message(STATUS "  -> Using /arch:SSE2")
       target_compile_options(compile-options INTERFACE /arch:SSE2)
     else()
+      message(STATUS "  -> Using /arch:native")
       target_compile_options(compile-options INTERFACE /arch:native)
     endif()
 
