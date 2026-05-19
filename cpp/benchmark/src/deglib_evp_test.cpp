@@ -67,74 +67,71 @@ static void run_exploration_sweep(
 
     const uint32_t k_explore = k_top;
 
-    // Sweep max_distance_count like in deglib_test.cpp
-    uint32_t k_factor = 100;
+    // Fixed max_distance_count values
+    const uint32_t max_distances[] = { k_explore, 50, 100, 200, 300, 400, 500, 750, 1000 };
     float best_recall = -1.0f;
     uint32_t best_max_dist = 0;
     double best_explore_ms = 0.0;
+    bool stop_sweep = false;
 
-    for (uint32_t f = 0; f <= 3; f++, k_factor *= 10) {
-        for (uint32_t c = (f == 0) ? 1 : 2; c <= 10; c++) {
-            const uint32_t max_distance_count = (f == 0) ? (k_explore + k_factor * (c - 1)) : (k_factor * c);
+    for (uint32_t md_idx = 0; md_idx < sizeof(max_distances) / sizeof(max_distances[0]) && !stop_sweep; md_idx++) {
+        const uint32_t max_distance_count = max_distances[md_idx];
 
-            // Measure per-configuration timing
-            double t_explore_start = now_ms();
+        // Measure per-configuration timing
+        double t_explore_start = now_ms();
 
-            // Explore all vertices
-            std::vector<std::vector<uint32_t>> results(count);
+        // Explore all vertices
+        std::vector<std::vector<uint32_t>> results(count);
 
-            deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads,
-                [&](size_t label, size_t) {
-                    size_t entry_idx = graph.getInternalIndex(static_cast<uint32_t>(label));
-                    auto result_queue = graph.explore(
-                        static_cast<uint32_t>(entry_idx),
-                        k_explore,
-                        true,   // include_entry
-                        max_distance_count);
+        deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads,
+            [&](size_t label, size_t) {
+                size_t entry_idx = graph.getInternalIndex(static_cast<uint32_t>(label));
+                auto result_queue = graph.explore(
+                    static_cast<uint32_t>(entry_idx),
+                    k_explore,
+                    false,  // include_entry (false: exclude self)
+                    max_distance_count);
 
-                    auto& result = results[label];
-                    result.resize(k_explore);
-                    for (uint32_t j = 0; j < k_explore && !result_queue.empty(); ++j) {
-                        result[j] = graph.getExternalLabel(result_queue.top().getInternalIndex());
-                        result_queue.pop();
-                    }
-                });
+                auto& result = results[label];
+                result.resize(k_explore);
+                for (uint32_t j = 0; j < k_explore && !result_queue.empty(); ++j) {
+                    result[j] = graph.getExternalLabel(result_queue.top().getInternalIndex());
+                    result_queue.pop();
+                }
+            });
 
-            double explore_ms_single = now_ms() - t_explore_start;
+        double explore_ms_single = now_ms() - t_explore_start;
 
-            // Calculate recall
-            int total_hits = 0;
-            for (size_t i = 0; i < count; ++i) {
-                const int32_t* gt_row = &gt_data[i * gt_dims];
-                for (uint32_t k = 0; k < k_top && k < gt_dims; ++k) {
-                    uint32_t gt_idx = static_cast<uint32_t>(gt_row[k] - 1); // 1→0 indexed
-                    for (uint32_t j = 0; j < k_top; ++j) {
-                        if (results[i][j] == gt_idx) {
-                            total_hits++;
-                            break;
-                        }
+        // Calculate recall
+        int total_hits = 0;
+        for (size_t i = 0; i < count; ++i) {
+            const int32_t* gt_row = &gt_data[i * gt_dims];
+            for (uint32_t k = 1; k <= k_top && k < gt_dims; ++k) {
+                uint32_t gt_idx = static_cast<uint32_t>(gt_row[k] - 1); // 1→0 indexed
+                for (uint32_t j = 0; j < k_top; ++j) {
+                    if (results[i][j] == gt_idx) {
+                        total_hits++;
+                        break;
                     }
                 }
             }
+        }
 
-            float recall = static_cast<float>(total_hits) / (count * k_top);
+        float recall = static_cast<float>(total_hits) / (count * k_top);
 
-            if (recall > best_recall) {
-                best_recall = recall;
-                best_max_dist = max_distance_count;
-                best_explore_ms = explore_ms_single;
-            }
+        if (recall > best_recall) {
+            best_recall = recall;
+            best_max_dist = max_distance_count;
+            best_explore_ms = explore_ms_single;
+        }
 
-            std::printf("  max_dist=%6u  recall=%.4f  time=%.2f ms\n", max_distance_count, recall, explore_ms_single);
+        std::printf("  max_dist=%6u  recall=%.4f  time=%.2f ms\n", max_distance_count, recall, explore_ms_single);
 
-            if (recall >= 0.997f) {
-                std::printf("  Reached recall target 0.997, stopping sweep\n");
-                goto recall_done;
-            }
+        if (recall >= 0.8f) {
+            std::printf("  Reached recall target 0.8, stopping sweep\n");
+            stop_sweep = true;
         }
     }
-
-recall_done:;
 
     std::printf("\nBest recall@%d: %.4f (max_distance_count=%u, explore_time=%.2f ms)\n",
                 k_top, best_recall, best_max_dist, best_explore_ms);
