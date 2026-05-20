@@ -767,5 +767,293 @@ TEST(FloatSpace, VariousDimensions) {
 }
 
 // ---------------------------------------------------------------------------
+//  FP16 Inner Product
+// ---------------------------------------------------------------------------
+
+// Helper: convert a float array to FP16 (uint16_t) using the software path
+// from FP16InnerProduct::fp16_to_float in reverse (via SIMD round-trip when
+// available, otherwise via the standard _mm_cvtps_ph intrinsic path).
+static std::vector<uint16_t> floats_to_fp16(const std::vector<float>& v) {
+    std::vector<uint16_t> out(v.size());
+#if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
+    // Use _mm_cvtps_ph for a correct hardware round-trip (8 at a time)
+    size_t i = 0;
+    for (; i + 4 <= v.size(); i += 4) {
+        __m128 f4 = _mm_loadu_ps(&v[i]);
+        __m128i h4 = _mm_cvtps_ph(f4, _MM_FROUND_TO_NEAREST_INT);
+        // _mm_cvtps_ph stores 4 uint16 into the lower 8 bytes
+        alignas(16) uint16_t tmp[8];
+        _mm_storeu_si128((__m128i*)tmp, h4);
+        out[i]   = tmp[0];
+        out[i+1] = tmp[1];
+        out[i+2] = tmp[2];
+        out[i+3] = tmp[3];
+    }
+    // tail
+    for (; i < v.size(); ++i) {
+        __m128 f1 = _mm_set_ss(v[i]);
+        __m128i h1 = _mm_cvtps_ph(f1, _MM_FROUND_TO_NEAREST_INT);
+        alignas(16) uint16_t tmp[8];
+        _mm_storeu_si128((__m128i*)tmp, h1);
+        out[i] = tmp[0];
+    }
+#else
+    // No SIMD: use a well-known portable float32→float16 bit-manipulation
+    for (size_t i = 0; i < v.size(); ++i) {
+        uint32_t bits;
+        std::memcpy(&bits, &v[i], 4);
+        uint16_t sign     = static_cast<uint16_t>((bits >> 16) & 0x8000u);
+        int32_t  exponent = static_cast<int32_t>((bits >> 23) & 0xFF) - 127 + 15;
+        uint32_t mantissa = bits & 0x7FFFFFu;
+        if (exponent <= 0)      { out[i] = sign; }
+        else if (exponent >= 31){ out[i] = static_cast<uint16_t>(sign | 0x7C00u); }
+        else                    { out[i] = static_cast<uint16_t>(sign | (exponent << 10) | (mantissa >> 13)); }
+    }
+#endif
+    return out;
+}
+
+// Naive FP16 inner-product reference (operates on uint16_t arrays).
+// Converts via the software path so the reference is independent of SIMD.
+static float fp16_ip_naive_ref(const uint16_t* a, const uint16_t* b, size_t dim) {
+    float dot = 0.0f;
+    for (size_t i = 0; i < dim; ++i) {
+        dot += deglib::distances::FP16InnerProduct::fp16_to_float(a[i]) *
+               deglib::distances::FP16InnerProduct::fp16_to_float(b[i]);
+    }
+    return 1.0f - dot;
+}
+
+// ---------------------------------------------------------------------------
+//  fp16_to_float — unit tests for the software converter
+// ---------------------------------------------------------------------------
+
+TEST(FP16InnerProduct, Fp16ToFloat_Zero) {
+    EXPECT_FLOAT_EQ(deglib::distances::FP16InnerProduct::fp16_to_float(0x0000u), 0.0f);
+}
+
+TEST(FP16InnerProduct, Fp16ToFloat_One) {
+    // FP16 representation of 1.0f: sign=0, exp=15 (stored as 01111), mant=0 → 0x3C00
+    EXPECT_FLOAT_EQ(deglib::distances::FP16InnerProduct::fp16_to_float(0x3C00u), 1.0f);
+}
+
+TEST(FP16InnerProduct, Fp16ToFloat_NegOne) {
+    // -1.0f: 0xBC00
+    EXPECT_FLOAT_EQ(deglib::distances::FP16InnerProduct::fp16_to_float(0xBC00u), -1.0f);
+}
+
+TEST(FP16InnerProduct, Fp16ToFloat_Two) {
+    // 2.0f: 0x4000
+    EXPECT_FLOAT_EQ(deglib::distances::FP16InnerProduct::fp16_to_float(0x4000u), 2.0f);
+}
+
+TEST(FP16InnerProduct, Fp16ToFloat_RoundTrip) {
+    // Round-trip through float -> FP16 -> float should be close (FP16 has ~3 decimal digits)
+    const std::vector<float> vals = {0.5f, -0.5f, 1.5f, -1.5f, 0.125f, 100.0f, -0.001f};
+    for (float orig : vals) {
+        auto fp16 = floats_to_fp16({orig});
+        float recovered = deglib::distances::FP16InnerProduct::fp16_to_float(fp16[0]);
+        EXPECT_NEAR(recovered, orig, std::abs(orig) * 1e-2f + 1e-4f)
+            << "original=" << orig;
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  FP16InnerProduct naive baseline
+// ---------------------------------------------------------------------------
+
+TEST(FP16InnerProduct, IdentityZero) {
+    // All-zeros: dot = 0, distance = 1
+    std::vector<uint16_t> v(16, 0);
+    size_t dim = v.size();
+    float d = deglib::distances::FP16InnerProduct::compare(v.data(), v.data(), &dim);
+    EXPECT_NEAR(d, 1.0f, 1e-4f);
+}
+
+TEST(FP16InnerProduct, KnownValue) {
+    // a = [1,0,0,0], b = [1,0,0,0] -> dot=1 -> distance=0
+    auto a = floats_to_fp16({1.0f, 0.0f, 0.0f, 0.0f});
+    auto b = floats_to_fp16({1.0f, 0.0f, 0.0f, 0.0f});
+    size_t dim = 4;
+    float d = deglib::distances::FP16InnerProduct::compare(a.data(), b.data(), &dim);
+    EXPECT_NEAR(d, 0.0f, 5e-3f);  // FP16 round-trip tolerance
+}
+
+TEST(FP16InnerProduct, Orthogonal) {
+    auto a = floats_to_fp16({1.0f, 0.0f, 0.0f, 0.0f});
+    auto b = floats_to_fp16({0.0f, 1.0f, 0.0f, 0.0f});
+    size_t dim = 4;
+    float d = deglib::distances::FP16InnerProduct::compare(a.data(), b.data(), &dim);
+    EXPECT_NEAR(d, 1.0f, 1e-3f);
+}
+
+TEST(FP16InnerProduct, Symmetry) {
+    auto af = make_float_vec(64);
+    auto bf = make_float_vec(64, 99);
+    auto a  = floats_to_fp16(af);
+    auto b  = floats_to_fp16(bf);
+    size_t dim = a.size();
+    float ab = deglib::distances::FP16InnerProduct::compare(a.data(), b.data(), &dim);
+    float ba = deglib::distances::FP16InnerProduct::compare(b.data(), a.data(), &dim);
+    EXPECT_NEAR(ab, ba, 1e-3f);
+}
+
+TEST(FP16InnerProduct, MatchesNaiveRef_32) {
+    auto af = make_float_vec(32);
+    auto bf = make_float_vec(32, 7);
+    auto a  = floats_to_fp16(af);
+    auto b  = floats_to_fp16(bf);
+    size_t dim = a.size();
+    float d = deglib::distances::FP16InnerProduct::compare(a.data(), b.data(), &dim);
+    EXPECT_NEAR(d, fp16_ip_naive_ref(a.data(), b.data(), dim), 1e-3f);
+}
+
+TEST(FP16InnerProduct, MatchesNaiveRef_128) {
+    auto af = make_float_vec(128);
+    auto bf = make_float_vec(128, 13);
+    auto a  = floats_to_fp16(af);
+    auto b  = floats_to_fp16(bf);
+    size_t dim = a.size();
+    float d = deglib::distances::FP16InnerProduct::compare(a.data(), b.data(), &dim);
+    EXPECT_NEAR(d, fp16_ip_naive_ref(a.data(), b.data(), dim), 1e-2f);
+}
+
+// ---------------------------------------------------------------------------
+//  FP16 SIMD extensions — validated against the naive implementation
+// ---------------------------------------------------------------------------
+
+template <typename DistClass>
+static void test_fp16_ip_matches_naive(const std::vector<size_t>& dims) {
+    for (size_t dim : dims) {
+        auto af = make_float_vec(dim);
+        auto bf = make_float_vec(dim, static_cast<unsigned>(dim));
+        auto a  = floats_to_fp16(af);
+        auto b  = floats_to_fp16(bf);
+        float d    = DistClass::compare(a.data(), b.data(), &dim);
+        float ref  = fp16_ip_naive_ref(a.data(), b.data(), dim);
+        EXPECT_NEAR(d, ref, 1e-2f) << "dim=" << dim;
+    }
+}
+
+TEST(FP16InnerProductExt8, MatchesNaive) {
+    // dim must be a multiple of 8
+    test_fp16_ip_matches_naive<deglib::distances::FP16InnerProductExt8>(
+        {8, 16, 32, 64, 128, 256});
+}
+
+TEST(FP16InnerProductExt16, MatchesNaive) {
+    // dim must be a multiple of 16
+    test_fp16_ip_matches_naive<deglib::distances::FP16InnerProductExt16>(
+        {16, 32, 64, 128, 256});
+}
+
+TEST(FP16InnerProductExt32, MatchesNaive) {
+    // dim must be a multiple of 32
+    test_fp16_ip_matches_naive<deglib::distances::FP16InnerProductExt32>(
+        {32, 64, 128, 256});
+}
+
+// ---------------------------------------------------------------------------
+//  FP16 residual variants (non-aligned dimensions)
+// ---------------------------------------------------------------------------
+
+TEST(FP16InnerProductExt16Residuals, NonAlignedDims) {
+    std::vector<size_t> dims = {17, 20, 24, 33, 50, 100, 129, 200};
+    for (size_t dim : dims) {
+        auto af = make_float_vec(dim);
+        auto bf = make_float_vec(dim, static_cast<unsigned>(dim + 1));
+        auto a  = floats_to_fp16(af);
+        auto b  = floats_to_fp16(bf);
+        float d   = deglib::distances::FP16InnerProductExt16Residuals::compare(a.data(), b.data(), &dim);
+        float ref = fp16_ip_naive_ref(a.data(), b.data(), dim);
+        EXPECT_NEAR(d, ref, 1e-2f) << "dim=" << dim;
+    }
+}
+
+TEST(FP16InnerProductExt8Residuals, NonAlignedDims) {
+    std::vector<size_t> dims = {1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 17, 25};
+    for (size_t dim : dims) {
+        auto af = make_float_vec(dim);
+        auto bf = make_float_vec(dim, static_cast<unsigned>(dim + 2));
+        auto a  = floats_to_fp16(af);
+        auto b  = floats_to_fp16(bf);
+        float d   = deglib::distances::FP16InnerProductExt8Residuals::compare(a.data(), b.data(), &dim);
+        float ref = fp16_ip_naive_ref(a.data(), b.data(), dim);
+        EXPECT_NEAR(d, ref, 1e-2f) << "dim=" << dim;
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  FP16 cross-SIMD-path consistency
+// ---------------------------------------------------------------------------
+
+TEST(FP16InnerProduct, AllPathsAgree_128) {
+    auto af = make_float_vec(128);
+    auto bf = make_float_vec(128, 77);
+    auto a  = floats_to_fp16(af);
+    auto b  = floats_to_fp16(bf);
+    size_t dim = 128;
+
+    float naive  = deglib::distances::FP16InnerProduct::compare(a.data(), b.data(), &dim);
+    float ext8   = deglib::distances::FP16InnerProductExt8::compare(a.data(), b.data(), &dim);
+    float ext16  = deglib::distances::FP16InnerProductExt16::compare(a.data(), b.data(), &dim);
+    float ext32  = deglib::distances::FP16InnerProductExt32::compare(a.data(), b.data(), &dim);
+
+    EXPECT_NEAR(ext8,  naive, 1e-2f);
+    EXPECT_NEAR(ext16, naive, 1e-2f);
+    EXPECT_NEAR(ext32, naive, 1e-2f);
+}
+
+TEST(FP16InnerProduct, AllPathsAgree_256) {
+    auto af = make_float_vec(256);
+    auto bf = make_float_vec(256, 55);
+    auto a  = floats_to_fp16(af);
+    auto b  = floats_to_fp16(bf);
+    size_t dim = 256;
+
+    float naive  = deglib::distances::FP16InnerProduct::compare(a.data(), b.data(), &dim);
+    float ext8   = deglib::distances::FP16InnerProductExt8::compare(a.data(), b.data(), &dim);
+    float ext16  = deglib::distances::FP16InnerProductExt16::compare(a.data(), b.data(), &dim);
+    float ext32  = deglib::distances::FP16InnerProductExt32::compare(a.data(), b.data(), &dim);
+
+    EXPECT_NEAR(ext8,  naive, 1e-2f);
+    EXPECT_NEAR(ext16, naive, 1e-2f);
+    EXPECT_NEAR(ext32, naive, 1e-2f);
+}
+
+// ---------------------------------------------------------------------------
+//  FloatSpace integration — FP16InnerProduct metric
+// ---------------------------------------------------------------------------
+
+TEST(FloatSpace, FP16InnerProduct_128Dim) {
+    deglib::FloatSpace space(128, deglib::Metric::FP16InnerProduct);
+    EXPECT_EQ(space.dim(), 128u);
+    EXPECT_EQ(space.metric(), deglib::Metric::FP16InnerProduct);
+    EXPECT_EQ(space.get_data_size(), 128 * sizeof(uint16_t));
+
+    auto af = make_float_vec(128);
+    auto bf = make_float_vec(128, 99);
+    auto a  = floats_to_fp16(af);
+    auto b  = floats_to_fp16(bf);
+    float d   = space.get_dist_func()(a.data(), b.data(), space.get_dist_func_param());
+    float ref = fp16_ip_naive_ref(a.data(), b.data(), 128);
+    EXPECT_NEAR(d, ref, 1e-2f);
+}
+
+TEST(FloatSpace, FP16InnerProduct_VariousDimensions) {
+    std::vector<size_t> dims = {1, 3, 7, 8, 15, 16, 17, 31, 32, 33, 63, 64, 128, 256};
+    for (size_t dim : dims) {
+        deglib::FloatSpace space(dim, deglib::Metric::FP16InnerProduct);
+        auto af = make_float_vec(dim);
+        auto bf = make_float_vec(dim, static_cast<unsigned>(dim));
+        auto a  = floats_to_fp16(af);
+        auto b  = floats_to_fp16(bf);
+        float d   = space.get_dist_func()(a.data(), b.data(), space.get_dist_func_param());
+        float ref = fp16_ip_naive_ref(a.data(), b.data(), dim);
+        EXPECT_NEAR(d, ref, 1e-2f) << "dim=" << dim;
+    }
+}
+
+// ---------------------------------------------------------------------------
 //  Main — handled by test_main.cpp (shared entry point)
 // ---------------------------------------------------------------------------

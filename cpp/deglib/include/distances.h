@@ -1,6 +1,8 @@
 #pragma once
 
 #include <bit>
+#include <cstdint>
+#include <cstring>
 #include <config.h>
 
 #if defined(USE_AVX2) || defined(USE_AVX512) || defined(USE_SSE)
@@ -848,6 +850,283 @@ public:
     }
 };
 
+// ---------------------------------------------------------------------------------------------------------------------
+// ------------------------------------- FP16 (Half-Precision) Inner Product -------------------------------------------
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * Inner-product distance for vectors stored as IEEE 754 half-precision floats (uint16_t).
+ *
+ * The input pointers are treated as arrays of uint16_t (FP16).
+ * qty_ptr points to a size_t holding the number of FP16 elements.
+ *
+ * Returns: 1 - dot(a, b)  (same convention as the Float InnerProduct family).
+ *
+ * SIMD paths convert FP16 → FP32 on-the-fly using F16C intrinsics
+ * (_mm_cvtph_ps / _mm256_cvtph_ps / _mm512_cvtph_ps) and then accumulate
+ * with FMA.  F16C is implied by AVX on all x86 CPUs that support AVX.
+ */
+class FP16InnerProduct {
+public:
+    inline static float compare(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+        return 1.f - ip_naive(pVect1v, pVect2v, qty_ptr);
+    }
+
+    /**
+     * Portable reference implementation.
+     * Converts each FP16 element to FP32 via bit manipulation and accumulates.
+     */
+    inline static float ip_naive(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+        const uint16_t* a = (const uint16_t*)pVect1v;
+        const uint16_t* b = (const uint16_t*)pVect2v;
+        size_t size = *((size_t*)qty_ptr);
+
+        float result = 0.f;
+        for (size_t i = 0; i < size; ++i) {
+            // Convert FP16 → FP32 via the CPU's fp16 conversion round-trip
+            // using a union trick that is well-defined for this purpose.
+            // MSVC and GCC/Clang both support _mm_cvtss_f32(_mm_cvtph_ps(...))
+            // as a scalar conversion — but for portability we use std::bit_cast
+            // into a __m128i and extract one lane.
+#if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
+            const __m128i h = _mm_cvtsi32_si128(static_cast<int>(a[i]));
+            const float fa = _mm_cvtss_f32(_mm_cvtph_ps(h));
+            const __m128i hb = _mm_cvtsi32_si128(static_cast<int>(b[i]));
+            const float fb = _mm_cvtss_f32(_mm_cvtph_ps(hb));
+#else
+            // Pure-software FP16→FP32 (no SIMD available)
+            const float fa = fp16_to_float(a[i]);
+            const float fb = fp16_to_float(b[i]);
+#endif
+            result += fa * fb;
+        }
+        return result;
+    }
+
+    /**
+     * Pure-software FP16→FP32 conversion (no intrinsics required).
+     * Used as fallback when no SIMD headers are available.
+     */
+    static inline float fp16_to_float(uint16_t h) {
+        // IEEE 754 half-precision bit layout:
+        //   [15]    sign
+        //   [14:10] exponent (biased by 15)
+        //   [9:0]   mantissa
+        const uint32_t sign     = (h & 0x8000u) << 16;
+        const uint32_t exponent = (h & 0x7C00u) >> 10;
+        const uint32_t mantissa = (h & 0x03FFu);
+        uint32_t bits;
+        if (exponent == 0) {
+            if (mantissa == 0) {
+                bits = sign;  // ±0
+            } else {
+                // Subnormal: convert to normalised FP32
+                uint32_t e = 0;
+                uint32_t m = mantissa << 1;
+                while (!(m & 0x0400u)) { m <<= 1; ++e; }
+                bits = sign | ((127 - 15 - e + 1) << 23) | ((m & 0x03FFu) << 13);
+            }
+        } else if (exponent == 31) {
+            // Inf or NaN
+            bits = sign | 0x7F800000u | (mantissa << 13);
+        } else {
+            // Normal
+            bits = sign | ((exponent + (127 - 15)) << 23) | (mantissa << 13);
+        }
+        float f;
+        std::memcpy(&f, &bits, sizeof(f));
+        return f;
+    }
+};
+
+/**
+ * FP16 inner product — 8-wide SSE path.
+ * Requires SSE + F16C (implied by USE_SSE on MSVC with /arch:AVX2).
+ * Processes 8 FP16 elements per iteration.
+ * Falls back to FP16InnerProduct::ip_naive when SIMD is unavailable.
+ */
+class FP16InnerProductExt8 {
+public:
+    inline static float compare(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+        return 1.f - ip_8ext(pVect1v, pVect2v, qty_ptr);
+    }
+
+    inline static float ip_8ext(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+#if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
+        const uint16_t* a    = (const uint16_t*)pVect1v;
+        const uint16_t* b    = (const uint16_t*)pVect2v;
+        size_t           size = *((size_t*)qty_ptr);
+
+        const uint16_t* last = a + size;
+        __m128 sum128 = _mm_setzero_ps();
+        while (a < last) {
+            // Load 8 FP16 values (16 bytes) and convert to two FP32 quads
+            __m128i raw = _mm_loadu_si128((const __m128i*)a);
+            __m128  a_lo = _mm_cvtph_ps(raw);                              // elements 0..3
+            __m128  a_hi = _mm_cvtph_ps(_mm_srli_si128(raw, 8));           // elements 4..7
+
+            __m128i rawb = _mm_loadu_si128((const __m128i*)b);
+            __m128  b_lo = _mm_cvtph_ps(rawb);
+            __m128  b_hi = _mm_cvtph_ps(_mm_srli_si128(rawb, 8));
+
+            sum128 = _mm_fmadd_ps(a_lo, b_lo, sum128);
+            sum128 = _mm_fmadd_ps(a_hi, b_hi, sum128);
+            a += 8;
+            b += 8;
+        }
+
+        alignas(16) float f[4];
+        _mm_store_ps(f, sum128);
+        return f[0] + f[1] + f[2] + f[3];
+#else
+        return FP16InnerProduct::ip_naive(pVect1v, pVect2v, qty_ptr);
+#endif
+    }
+};
+
+/**
+ * FP16 inner product — 16-wide AVX path (AVX + F16C).
+ * Processes 16 FP16 elements per iteration.
+ */
+class FP16InnerProductExt16 {
+public:
+    inline static float compare(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+        return 1.f - ip_16ext(pVect1v, pVect2v, qty_ptr);
+    }
+
+    inline static float ip_16ext(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+#if defined(USE_AVX512) || defined(USE_AVX)
+        const uint16_t* a    = (const uint16_t*)pVect1v;
+        const uint16_t* b    = (const uint16_t*)pVect2v;
+        size_t           size = *((size_t*)qty_ptr);
+
+        const uint16_t* last = a + size;
+        __m256 sum256 = _mm256_setzero_ps();
+        while (a < last) {
+            // Load 16 FP16 values (32 bytes) and convert to two FP32 octuples
+            __m128i raw_a_lo = _mm_loadu_si128((const __m128i*)a);         // FP16[0..7]
+            __m128i raw_a_hi = _mm_loadu_si128((const __m128i*)(a + 8));   // FP16[8..15]
+            __m256  a_lo     = _mm256_cvtph_ps(raw_a_lo);
+            __m256  a_hi     = _mm256_cvtph_ps(raw_a_hi);
+
+            __m128i raw_b_lo = _mm_loadu_si128((const __m128i*)b);
+            __m128i raw_b_hi = _mm_loadu_si128((const __m128i*)(b + 8));
+            __m256  b_lo     = _mm256_cvtph_ps(raw_b_lo);
+            __m256  b_hi     = _mm256_cvtph_ps(raw_b_hi);
+
+            sum256 = _mm256_fmadd_ps(a_lo, b_lo, sum256);
+            sum256 = _mm256_fmadd_ps(a_hi, b_hi, sum256);
+            a += 16;
+            b += 16;
+        }
+
+        __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
+        alignas(16) float f[4];
+        _mm_store_ps(f, sum128);
+        return f[0] + f[1] + f[2] + f[3];
+#elif defined(USE_SSE)
+        return FP16InnerProductExt8::ip_8ext(pVect1v, pVect2v, qty_ptr);
+#else
+        return FP16InnerProduct::ip_naive(pVect1v, pVect2v, qty_ptr);
+#endif
+    }
+};
+
+/**
+ * FP16 inner product — 32-wide AVX-512 path.
+ * Requires AVX-512F + AVX-512FP16 (or the _mm512_cvtph_ps intrinsic available
+ * with AVX-512F on MSVC / GCC with -mavx512f).
+ * Processes 32 FP16 elements per iteration.
+ */
+class FP16InnerProductExt32 {
+public:
+    inline static float compare(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+        return 1.f - ip_32ext(pVect1v, pVect2v, qty_ptr);
+    }
+
+    inline static float ip_32ext(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+#if defined(USE_AVX512)
+        const uint16_t* a    = (const uint16_t*)pVect1v;
+        const uint16_t* b    = (const uint16_t*)pVect2v;
+        size_t           size = *((size_t*)qty_ptr);
+
+        const uint16_t* last = a + size;
+        __m512 sum512 = _mm512_setzero_ps();
+        while (a < last) {
+            // Load 32 FP16 values (64 bytes) → two 512-bit FP32 vectors
+            __m256i raw_a_lo = _mm256_loadu_si256((const __m256i*)a);        // FP16[0..15]
+            __m256i raw_a_hi = _mm256_loadu_si256((const __m256i*)(a + 16)); // FP16[16..31]
+            __m512  a_lo     = _mm512_cvtph_ps(raw_a_lo);
+            __m512  a_hi     = _mm512_cvtph_ps(raw_a_hi);
+
+            __m256i raw_b_lo = _mm256_loadu_si256((const __m256i*)b);
+            __m256i raw_b_hi = _mm256_loadu_si256((const __m256i*)(b + 16));
+            __m512  b_lo     = _mm512_cvtph_ps(raw_b_lo);
+            __m512  b_hi     = _mm512_cvtph_ps(raw_b_hi);
+
+            sum512 = _mm512_fmadd_ps(a_lo, b_lo, sum512);
+            sum512 = _mm512_fmadd_ps(a_hi, b_hi, sum512);
+            a += 32;
+            b += 32;
+        }
+
+        __m256 sum256 = _mm256_add_ps(_mm512_extractf32x8_ps(sum512, 0), _mm512_extractf32x8_ps(sum512, 1));
+        __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
+        alignas(16) float f[4];
+        _mm_store_ps(f, sum128);
+        return f[0] + f[1] + f[2] + f[3];
+#elif defined(USE_AVX)
+        return FP16InnerProductExt16::ip_16ext(pVect1v, pVect2v, qty_ptr);
+#elif defined(USE_SSE)
+        return FP16InnerProductExt8::ip_8ext(pVect1v, pVect2v, qty_ptr);
+#else
+        return FP16InnerProduct::ip_naive(pVect1v, pVect2v, qty_ptr);
+#endif
+    }
+};
+
+/**
+ * FP16 inner product with residual handling for dimensions not divisible by 16.
+ * Aligns to the next multiple of 16, processes that chunk with FP16InnerProductExt16,
+ * and handles the tail elements with the scalar path.
+ */
+class FP16InnerProductExt16Residuals {
+public:
+    inline static float compare(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+        size_t qty = *((size_t*)qty_ptr);
+
+        size_t qty16 = qty >> 4 << 4;  // round down to multiple of 16
+        float res = deglib::distances::FP16InnerProductExt16::ip_16ext(pVect1v, pVect2v, &qty16);
+
+        const uint16_t* pVect1 = (const uint16_t*)pVect1v + qty16;
+        const uint16_t* pVect2 = (const uint16_t*)pVect2v + qty16;
+        size_t qty_left = qty - qty16;
+        float res_tail = deglib::distances::FP16InnerProduct::ip_naive(pVect1, pVect2, &qty_left);
+
+        return 1.f - (res + res_tail);
+    }
+};
+
+/**
+ * FP16 inner product with residual handling for dimensions not divisible by 8.
+ */
+class FP16InnerProductExt8Residuals {
+public:
+    inline static float compare(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+        size_t qty = *((size_t*)qty_ptr);
+
+        size_t qty8 = qty >> 3 << 3;  // round down to multiple of 8
+        float res = deglib::distances::FP16InnerProductExt8::ip_8ext(pVect1v, pVect2v, &qty8);
+
+        const uint16_t* pVect1 = (const uint16_t*)pVect1v + qty8;
+        const uint16_t* pVect2 = (const uint16_t*)pVect2v + qty8;
+        size_t qty_left = qty - qty8;
+        float res_tail = deglib::distances::FP16InnerProduct::ip_naive(pVect1, pVect2, &qty_left);
+
+        return 1.f - (res + res_tail);
+    }
+};
+
 }  // namespace distances
 
 enum class Metric {
@@ -860,7 +1139,10 @@ enum class Metric {
     L2_Uint8 = 0x10 | 1,
 
     // 0x20 = evp bits (ones + negative_ones, dim/8 bytes each)
-    EvpBits = 0x20 | 3
+    EvpBits = 0x20 | 3,
+
+    // 0x30 = fp16 (uint16_t half-precision floats)
+    FP16InnerProduct = 0x30 | 2
 };
 
 template <typename MTYPE>
@@ -913,6 +1195,21 @@ class FloatSpace {
 #endif
         } else if (metric == deglib::Metric::EvpBits) {
             distfunc = deglib::distances::EvpBitsSimilarity::compare;
+        } else if (metric == deglib::Metric::FP16InnerProduct) {
+#if defined(USE_SSE) || defined(USE_AVX) || defined(USE_AVX512)
+            if (dim % 32 == 0)
+                distfunc = deglib::distances::FP16InnerProductExt32::compare;
+            else if (dim % 16 == 0)
+                distfunc = deglib::distances::FP16InnerProductExt16::compare;
+            else if (dim % 8 == 0)
+                distfunc = deglib::distances::FP16InnerProductExt8::compare;
+            else if (dim > 16)
+                distfunc = deglib::distances::FP16InnerProductExt16Residuals::compare;
+            else
+                distfunc = deglib::distances::FP16InnerProductExt8Residuals::compare;
+#else
+            distfunc = deglib::distances::FP16InnerProduct::compare;
+#endif
         }
 
         // TODO add cosine but convert to a distance = 2 - (cosine + 1)
@@ -925,6 +1222,9 @@ class FloatSpace {
     static size_t calculate_data_size(const size_t dim, const deglib::Metric metric) {
         if (metric == deglib::Metric::EvpBits) {
             return 2 * dim / 8;  // ones (dim/8) + negative_ones (dim/8)
+        }
+        if (metric == deglib::Metric::FP16InnerProduct) {
+            return dim * sizeof(uint16_t);
         }
         return (static_cast<int>(metric) & 0x10) ? dim * sizeof(uint8_t) : dim * sizeof(float);
     }
