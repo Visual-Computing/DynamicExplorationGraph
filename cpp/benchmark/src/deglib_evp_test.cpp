@@ -38,6 +38,7 @@
 #include "concurrent.h"
 #include "distances.h"
 #include "graph/sizebounded_graph.h"
+#include "graph/readonly_graph.h"
 #include "quantization/evp_quantize.h"
 #include "repository.h"
 
@@ -52,17 +53,28 @@ static double now_ms() {
 }
 
 // ============================================================================
+// Consolidated Modes
+// ============================================================================
+
+enum class BenchmarkMode {
+    EvpWithRerank,
+    EvpNoRerank,
+    EvpAsymmetric,
+    Raw
+};
+
+// ============================================================================
 // Shared helpers
 // ============================================================================
 
 static void run_exploration_sweep(
-    const deglib::graph::SizeBoundedGraph& graph,
+    const deglib::search::SearchGraph& graph,
     const int32_t* gt_data,
     size_t count,
     size_t gt_dims,
     uint32_t k_top,
     uint8_t threads,
-    std::string_view label,
+    const char* label,
     const float* train_data = nullptr,
     size_t dims = 0)
 {
@@ -191,10 +203,11 @@ static void run_exploration_sweep(
 }
 
 // ============================================================================
-// Mode 1: EVP Bits path (quantize → EvpBits graph)
+// Unified Benchmark Entry Point
 // ============================================================================
 
-static int run_evp_mode(
+static int run_benchmark(
+    BenchmarkMode mode,
     const std::filesystem::path& data_path,
     size_t count, size_t dims,
     const float* train_data,
@@ -203,176 +216,179 @@ static int run_evp_mode(
     uint32_t non_zeros,
     uint8_t k_graph, uint8_t k_ext,
     float eps_ext,
-    uint32_t k_top,
-    bool rerank)
-{
-    std::printf("=== EVP Bits Graph Benchmark ===\n");
-    std::printf("Data path: %ls\n", data_path.wstring().c_str());
-    std::printf("NON_ZEROS=%u, K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.2f, RERANK=%s\n",
-                non_zeros, k_top, k_graph, k_ext, eps_ext, rerank ? "true" : "false");
-    std::printf("Threads: %zu\n\n", threads);
-
-    // --------------------------------------------------------------------------
-    // Quantize
-    // --------------------------------------------------------------------------
-    double t1 = now_ms();
-
-    auto quantized = deglib::quantization::quantize_batch(
-        train_data, count, static_cast<uint32_t>(dims), non_zeros, threads);
-
-    double quantize_ms = now_ms() - t1;
-    std::printf("Quantize time: %.2f ms\n", quantize_ms);
-    std::printf("Quantized size: %.2f MB\n\n",
-                static_cast<double>(quantized.size()) / (1024.0 * 1024.0));
-
-    // --------------------------------------------------------------------------
-    // Build graph with Metric::EvpBits
-    // --------------------------------------------------------------------------
-    double t2 = now_ms();
-
-    deglib::FloatSpace feature_space(static_cast<uint32_t>(dims), deglib::Metric::EvpBits);
-    deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(count), k_graph, feature_space);
-
-    std::mt19937 rnd(42);
-    deglib::builder::EvenRegularGraphBuilder builder(
-        graph, rnd,
-        deglib::builder::OptimizationTarget::LowLID,
-        k_ext, eps_ext,
-        0, 0.0f,
-        5,
-        0, 0,
-        true,
-        false,
-        false
-    );
-    builder.setThreadCount(static_cast<uint32_t>(threads));
-
-    const size_t bytes_per_evp = dims / 4;
-    for (size_t i = 0; i < count; ++i) {
-        std::vector<std::byte> feature(quantized.data() + i * bytes_per_evp,
-                                       quantized.data() + (i + 1) * bytes_per_evp);
-        builder.addEntry(static_cast<uint32_t>(i), std::move(feature));
-    }
-
-    auto build_callback = [](deglib::builder::BuilderStatus& status) {
-        std::printf("  Build step %llu: added=%llu, improved=%llu\n",
-                    (unsigned long long)status.step,
-                    (unsigned long long)status.added,
-                    (unsigned long long)status.improved);
-    };
-
-    builder.build(build_callback, false);
-
-    double build_ms = now_ms() - t2;
-    std::printf("Graph built: %zu vertices, %u edges/vertex\n", graph.size(), graph.getEdgesPerVertex());
-    std::printf("Build time: %.2f ms\n\n", build_ms);
-
-    // --------------------------------------------------------------------------
-    // Exploration sweep
-    // --------------------------------------------------------------------------
-    run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, threads, 
-                          rerank ? "EVP Bits (with FP32 Reranking)" : "EVP Bits (no Reranking)", 
-                          rerank ? train_data : nullptr, dims);
-
-    // --------------------------------------------------------------------------
-    // Summary
-    // --------------------------------------------------------------------------
-    double total_ms = (now_ms() - 0.0); // caller handles t0
-
-    std::printf("=============================================\n");
-    std::printf("          FINAL SUMMARY (EVP Bits)\n");
-    std::printf("=============================================\n");
-    std::printf("Quantize:                %.2f ms\n", quantize_ms);
-    std::printf("Graph Build:             %.2f ms\n", build_ms);
-    std::printf("---------------------------------------------\n");
-    std::printf("Vectors:                 %zu\n", count);
-    std::printf("Dimensions:              %zu\n", dims);
-    std::printf("NON_ZEROS:               %u\n", non_zeros);
-    std::printf("=============================================\n\n");
-
-    return 0;
-}
-
-// ============================================================================
-// Mode 2: Raw float path (no quantization, Metric::L2)
-// ============================================================================
-
-static int run_raw_mode(
-    const std::filesystem::path& data_path,
-    size_t count, size_t dims,
-    const float* train_data,
-    const int32_t* gt_data, size_t gt_dims,
-    uint32_t threads,
-    uint8_t k_graph, uint8_t k_ext,
-    float eps_ext,
     uint32_t k_top)
 {
-    std::printf("=== FP32 InnerProduct Graph Benchmark ===\n");
-    std::printf("Data path: %ls\n", data_path.wstring().c_str());
-    std::printf("K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.2f\n",
-                k_top, k_graph, k_ext, eps_ext);
-    std::printf("Threads: %zu\n\n", threads);
+    if (mode == BenchmarkMode::Raw) {
+        std::printf("=== FP32 InnerProduct Graph Benchmark ===\n");
+        std::printf("Data path: %ls\n", data_path.wstring().c_str());
+        std::printf("K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.2f\n",
+                    k_top, k_graph, k_ext, eps_ext);
+        std::printf("Threads: %zu\n\n", threads);
 
-    // --------------------------------------------------------------------------
-    // Build graph with Metric::InnerProduct (no quantization)
-    // --------------------------------------------------------------------------
-    double t2 = now_ms();
+        // --------------------------------------------------------------------------
+        // Build graph with Metric::InnerProduct (no quantization)
+        // --------------------------------------------------------------------------
+        double t2 = now_ms();
 
-    deglib::FloatSpace feature_space(static_cast<uint32_t>(dims), deglib::Metric::InnerProduct);
-    deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(count), k_graph, feature_space);
+        deglib::FloatSpace feature_space(static_cast<uint32_t>(dims), deglib::Metric::InnerProduct);
+        deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(count), k_graph, feature_space);
 
-    std::mt19937 rnd(42);
-    deglib::builder::EvenRegularGraphBuilder builder(
-        graph, rnd,
-        deglib::builder::OptimizationTarget::LowLID,
-        k_ext, eps_ext,
-        0, 0.0f,
-        5,
-        0, 0,
-        true,
-        false,
-        false
-    );
-    builder.setThreadCount(static_cast<uint32_t>(threads));
+        std::mt19937 rnd(42);
+        deglib::builder::EvenRegularGraphBuilder builder(
+            graph, rnd,
+            deglib::builder::OptimizationTarget::LowLID,
+            k_ext, eps_ext,
+            0, 0.0f,
+            5,
+            0, 0,
+            true,
+            false,
+            false
+        );
+        builder.setThreadCount(static_cast<uint32_t>(threads));
 
-    // Add all entries from raw float data
-    for (size_t i = 0; i < count; ++i) {
-        std::vector<std::byte> feature(dims * sizeof(float));
-        std::memcpy(feature.data(), train_data + i * dims, dims * sizeof(float));
-        builder.addEntry(static_cast<uint32_t>(i), std::move(feature));
+        // Add all entries from raw float data
+        for (size_t i = 0; i < count; ++i) {
+            std::vector<std::byte> feature(dims * sizeof(float));
+            std::memcpy(feature.data(), train_data + i * dims, dims * sizeof(float));
+            builder.addEntry(static_cast<uint32_t>(i), std::move(feature));
+        }
+
+        auto build_callback = [](deglib::builder::BuilderStatus& status) {
+            std::printf("  Build step %llu: added=%llu, improved=%llu\n",
+                        (unsigned long long)status.step,
+                        (unsigned long long)status.added,
+                        (unsigned long long)status.improved);
+        };
+
+        builder.build(build_callback, false);
+
+        double build_ms = now_ms() - t2;
+        std::printf("Graph built: %zu vertices, %u edges/vertex\n", graph.size(), graph.getEdgesPerVertex());
+        std::printf("Build time: %.2f ms\n\n", build_ms);
+
+        // --------------------------------------------------------------------------
+        // Exploration sweep
+        // --------------------------------------------------------------------------
+        run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, threads, "FP32 InnerProduct");
+
+        // --------------------------------------------------------------------------
+        // Summary
+        // --------------------------------------------------------------------------
+        std::printf("=============================================\n");
+        std::printf("          FINAL SUMMARY (FP32 InnerProduct)\n");
+        std::printf("=============================================\n");
+        std::printf("Graph Build:             %.2f ms\n", build_ms);
+        std::printf("---------------------------------------------\n");
+        std::printf("Vectors:                 %zu\n", count);
+        std::printf("Dimensions:              %zu\n", dims);
+        std::printf("=============================================\n\n");
+
+        return 0;
+    } else {
+        std::printf("=== EVP Bits Graph Benchmark ===\n");
+        std::printf("Data path: %ls\n", data_path.wstring().c_str());
+        std::printf("NON_ZEROS=%u, K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.2f, MODE=%s\n",
+                    non_zeros, k_top, k_graph, k_ext, eps_ext,
+                    mode == BenchmarkMode::EvpAsymmetric ? "asymmetric" :
+                    (mode == BenchmarkMode::EvpWithRerank ? "rerank" : "no-rerank"));
+        std::printf("Threads: %zu\n\n", threads);
+
+        // --------------------------------------------------------------------------
+        // Quantize
+        // --------------------------------------------------------------------------
+        double t1 = now_ms();
+
+        auto quantized = deglib::quantization::quantize_batch(
+            train_data, count, static_cast<uint32_t>(dims), non_zeros, threads);
+
+        double quantize_ms = now_ms() - t1;
+        std::printf("Quantize time: %.2f ms\n", quantize_ms);
+        std::printf("Quantized size: %.2f MB\n\n",
+                    static_cast<double>(quantized.size()) / (1024.0 * 1024.0));
+
+        // --------------------------------------------------------------------------
+        // Build graph with Metric::EvpBits
+        // --------------------------------------------------------------------------
+        double t2 = now_ms();
+
+        deglib::FloatSpace feature_space(static_cast<uint32_t>(dims), deglib::Metric::EvpBits);
+        deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(count), k_graph, feature_space);
+
+        std::mt19937 rnd(42);
+        deglib::builder::EvenRegularGraphBuilder builder(
+            graph, rnd,
+            deglib::builder::OptimizationTarget::LowLID,
+            k_ext, eps_ext,
+            0, 0.0f,
+            5,
+            0, 0,
+            true,
+            false,
+            false
+        );
+        builder.setThreadCount(static_cast<uint32_t>(threads));
+
+        const size_t bytes_per_evp = dims / 4;
+        for (size_t i = 0; i < count; ++i) {
+            std::vector<std::byte> feature(quantized.data() + i * bytes_per_evp,
+                                           quantized.data() + (i + 1) * bytes_per_evp);
+            builder.addEntry(static_cast<uint32_t>(i), std::move(feature));
+        }
+
+        auto build_callback = [](deglib::builder::BuilderStatus& status) {
+            std::printf("  Build step %llu: added=%llu, improved=%llu\n",
+                        (unsigned long long)status.step,
+                        (unsigned long long)status.added,
+                        (unsigned long long)status.improved);
+        };
+
+        builder.build(build_callback, false);
+
+        double build_ms = now_ms() - t2;
+        std::printf("Graph built: %zu vertices, %u edges/vertex\n", graph.size(), graph.getEdgesPerVertex());
+        std::printf("Build time: %.2f ms\n\n", build_ms);
+
+        // --------------------------------------------------------------------------
+        // Exploration sweep
+        // --------------------------------------------------------------------------
+        double conversion_ms = 0.0;
+        if (mode == BenchmarkMode::EvpAsymmetric) {
+            double t_conv_start = now_ms();
+            deglib::FloatSpace fp32_feature_space(static_cast<uint32_t>(dims), deglib::Metric::InnerProduct);
+            deglib::graph::ReadOnlyGraph fp32_graph(fp32_feature_space, graph, train_data);
+            conversion_ms = now_ms() - t_conv_start;
+            std::printf("Asymmetric graph conversion time: %.2f ms\n", conversion_ms);
+
+            run_exploration_sweep(fp32_graph, gt_data, count, gt_dims, k_top, threads, 
+                                  "EVP Asymmetric (ReadOnly FP32)", 
+                                  nullptr, dims);
+        } else {
+            bool rerank = (mode == BenchmarkMode::EvpWithRerank);
+            run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, threads, 
+                                  rerank ? "EVP Bits (with FP32 Reranking)" : "EVP Bits (no Reranking)", 
+                                  rerank ? train_data : nullptr, dims);
+        }
+
+        // --------------------------------------------------------------------------
+        // Summary
+        // --------------------------------------------------------------------------
+        std::printf("=============================================\n");
+        std::printf("          FINAL SUMMARY (EVP Bits)\n");
+        std::printf("=============================================\n");
+        std::printf("Quantize:                %.2f ms\n", quantize_ms);
+        std::printf("Graph Build:             %.2f ms\n", build_ms);
+        if (mode == BenchmarkMode::EvpAsymmetric) {
+            std::printf("Graph Conversion:        %.2f ms\n", conversion_ms);
+        }
+        std::printf("---------------------------------------------\n");
+        std::printf("Vectors:                 %zu\n", count);
+        std::printf("Dimensions:              %zu\n", dims);
+        std::printf("NON_ZEROS:               %u\n", non_zeros);
+        std::printf("=============================================\n\n");
+
+        return 0;
     }
-
-    auto build_callback = [](deglib::builder::BuilderStatus& status) {
-        std::printf("  Build step %llu: added=%llu, improved=%llu\n",
-                    (unsigned long long)status.step,
-                    (unsigned long long)status.added,
-                    (unsigned long long)status.improved);
-    };
-
-    builder.build(build_callback, false);
-
-    double build_ms = now_ms() - t2;
-    std::printf("Graph built: %zu vertices, %u edges/vertex\n", graph.size(), graph.getEdgesPerVertex());
-    std::printf("Build time: %.2f ms\n\n", build_ms);
-
-    // --------------------------------------------------------------------------
-    // Exploration sweep
-    // --------------------------------------------------------------------------
-    run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, threads, "FP32 InnerProduct");
-
-    // --------------------------------------------------------------------------
-    // Summary
-    // --------------------------------------------------------------------------
-    std::printf("=============================================\n");
-    std::printf("          FINAL SUMMARY (FP32 InnerProduct)\n");
-    std::printf("=============================================\n");
-    std::printf("Graph Build:             %.2f ms\n", build_ms);
-    std::printf("---------------------------------------------\n");
-    std::printf("Vectors:                 %zu\n", count);
-    std::printf("Dimensions:              %zu\n", dims);
-    std::printf("=============================================\n\n");
-
-    return 0;
 }
 
 // ============================================================================
@@ -409,7 +425,7 @@ int main(int argc, char* argv[]) {
 #ifdef DATA_PATH
         data_path = DATA_PATH;
 #else
-        std::fprintf(stderr, "Usage: %s <data_path> [evp|raw]\n", argv[0]);
+        std::fprintf(stderr, "Usage: %s <data_path> [evp|evp-no-rerank|evp-asymmetric|raw]\n", argv[0]);
         return 1;
 #endif
     }
@@ -418,8 +434,8 @@ int main(int argc, char* argv[]) {
         mode = argv[2];
     }
 
-    if (mode != "evp" && mode != "evp-no-rerank" && mode != "raw") {
-        std::fprintf(stderr, "Unknown mode '%s'. Use 'evp', 'evp-no-rerank', or 'raw'.\n", mode.c_str());
+    if (mode != "evp" && mode != "evp-no-rerank" && mode != "evp-asymmetric" && mode != "raw") {
+        std::fprintf(stderr, "Unknown mode '%s'. Use 'evp', 'evp-no-rerank', 'evp-asymmetric', or 'raw'.\n", mode.c_str());
         return 1;
     }
 
@@ -465,12 +481,16 @@ int main(int argc, char* argv[]) {
     // --------------------------------------------------------------------------
     // Dispatch to selected mode
     // --------------------------------------------------------------------------
-    if (mode == "evp" || mode == "evp-no-rerank") {
-        bool rerank = (mode == "evp");
-        return run_evp_mode(data_path, count, dims, train_data, gt_data, gt_dims,
-                            threads, NON_ZEROS, K_GRAPH, K_EXT, EPS_EXT, K_TOP, rerank);
-    } else {
-        return run_raw_mode(data_path, count, dims, train_data, gt_data, gt_dims,
-                            threads, K_GRAPH, K_EXT, EPS_EXT, K_TOP);
+    BenchmarkMode benchmark_mode = BenchmarkMode::EvpWithRerank;
+    if (mode == "evp-no-rerank") {
+        benchmark_mode = BenchmarkMode::EvpNoRerank;
+    } else if (mode == "evp-asymmetric") {
+        benchmark_mode = BenchmarkMode::EvpAsymmetric;
+    } else if (mode == "raw") {
+        benchmark_mode = BenchmarkMode::Raw;
     }
+
+    return run_benchmark(benchmark_mode, data_path, count, dims, train_data, gt_data, gt_dims,
+                         threads, NON_ZEROS, K_GRAPH, K_EXT, EPS_EXT, K_TOP);
 }
+

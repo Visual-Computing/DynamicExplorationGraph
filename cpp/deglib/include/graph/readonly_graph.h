@@ -409,6 +409,34 @@ public:
   }
 
   /**
+   *  Copy from input graph but with custom feature vectors and feature space
+   */
+  ReadOnlyGraph(const deglib::FloatSpace feature_space, deglib::search::SearchGraph& input_graph, const void* new_features)
+      : ReadOnlyGraph(input_graph.size(), input_graph.getEdgesPerVertex(), feature_space) {
+
+    const size_t feature_data_size = feature_space.get_data_size();
+    const uint32_t max_vertex_count = input_graph.size();
+    const uint8_t edges_per_vertex = input_graph.getEdgesPerVertex();
+
+    for (uint32_t i = 0; i < max_vertex_count; i++) {
+        auto vertex = reinterpret_cast<char*>(this->vertex_by_index(i));
+
+        const auto label = input_graph.getExternalLabel(i);
+        const auto feature = static_cast<const std::byte*>(new_features) + size_t(label) * feature_data_size;
+        std::memcpy(vertex, feature, feature_data_size);
+        vertex += feature_data_size;
+
+        const auto neighbor_indices = input_graph.getNeighborIndices(i);
+        std::memcpy(vertex, neighbor_indices, sizeof(uint32_t) * uint32_t(edges_per_vertex));
+        vertex += sizeof(uint32_t) * uint32_t(edges_per_vertex);
+
+        std::memcpy(vertex, &label, sizeof(uint32_t));
+        label_to_index_.emplace(label, i);
+    }
+  }
+
+
+  /**
    * Current maximal capacity of vertices
    */ 
   const auto capacity() const {
