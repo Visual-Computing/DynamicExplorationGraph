@@ -28,6 +28,7 @@
 #include <cstring>
 #include <functional>
 #include <random>
+#include <algorithm>
 #include <thread>
 #include <vector>
 
@@ -61,14 +62,16 @@ static void run_exploration_sweep(
     size_t gt_dims,
     uint32_t k_top,
     uint8_t threads,
-    std::string_view label)
+    std::string_view label,
+    const float* train_data = nullptr,
+    size_t dims = 0)
 {
     std::printf("\n--- Exploration sweep (%s) ---\n", label);
 
     const uint32_t k_explore = k_top;
 
     // Fixed max_distance_count values
-    const uint32_t max_distances[] = { k_explore, 50, 100, 200, 300, 400, 500, 750, 1000 };
+    const uint32_t max_distances[] = { k_explore, 50, 100, 200, 300, 400 };
     float best_recall = -1.0f;
     uint32_t best_max_dist = 0;
     double best_explore_ms = 0.0;
@@ -77,30 +80,74 @@ static void run_exploration_sweep(
     for (uint32_t md_idx = 0; md_idx < sizeof(max_distances) / sizeof(max_distances[0]) && !stop_sweep; md_idx++) {
         const uint32_t max_distance_count = max_distances[md_idx];
 
-        // Measure per-configuration timing
+        // --- Phase 1: Graph Exploration ---
         double t_explore_start = now_ms();
-
-        // Explore all vertices
-        std::vector<std::vector<uint32_t>> results(count);
+        std::vector<std::vector<uint32_t>> explore_candidates(count);
 
         deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads,
-            [&](size_t label, size_t) {
+            [&](size_t label, size_t thread_id) {
                 size_t entry_idx = graph.getInternalIndex(static_cast<uint32_t>(label));
+                uint32_t k_search = (train_data != nullptr) ? std::max(k_top, max_distance_count) : k_explore;
+
                 auto result_queue = graph.explore(
                     static_cast<uint32_t>(entry_idx),
-                    k_explore,
+                    k_search,
                     false,  // include_entry (false: exclude self)
                     max_distance_count);
 
-                auto& result = results[label];
-                result.resize(k_explore);
-                for (uint32_t j = 0; j < k_explore && !result_queue.empty(); ++j) {
-                    result[j] = graph.getExternalLabel(result_queue.top().getInternalIndex());
+                auto& cands = explore_candidates[label];
+                cands.reserve(result_queue.size());
+                while (!result_queue.empty()) {
+                    cands.push_back(graph.getExternalLabel(result_queue.top().getInternalIndex()));
                     result_queue.pop();
                 }
             });
+        double explore_ms = now_ms() - t_explore_start;
 
-        double explore_ms_single = now_ms() - t_explore_start;
+        // --- Phase 2: Reranking (if train_data is provided) ---
+        double rerank_ms = 0.0;
+        std::vector<std::vector<uint32_t>> results(count);
+
+        if (train_data != nullptr) {
+            double t_rerank_start = now_ms();
+            deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads,
+                [&](size_t label, size_t thread_id) {
+                    struct Candidate {
+                        uint32_t label;
+                        float distance;
+                    };
+                    const auto& cands = explore_candidates[label];
+                    std::vector<Candidate> candidates;
+                    candidates.reserve(cands.size());
+
+                    size_t dims_size = dims;
+                    const float* query_ptr = train_data + label * dims;
+
+                    for (uint32_t cand_label : cands) {
+                        const float* cand_ptr = train_data + cand_label * dims;
+                        float exact_dist = deglib::distances::InnerProductFloat16Ext::compare(query_ptr, cand_ptr, &dims_size);
+                        candidates.push_back({cand_label, exact_dist});
+                    }
+
+                    std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+                        return a.distance < b.distance;
+                    });
+
+                    auto& result = results[label];
+                    result.resize(k_top);
+                    for (uint32_t j = 0; j < k_top && j < candidates.size(); ++j) {
+                        result[j] = candidates[j].label;
+                    }
+                });
+            rerank_ms = now_ms() - t_rerank_start;
+        } else {
+            results = std::move(explore_candidates);
+        }
+
+        double explore_ms_single = explore_ms + rerank_ms;
+
+        double wall_explore = explore_ms;
+        double wall_rerank = rerank_ms;
 
         // Calculate recall
         int total_hits = 0;
@@ -125,7 +172,13 @@ static void run_exploration_sweep(
             best_explore_ms = explore_ms_single;
         }
 
-        std::printf("  max_dist=%6u  recall=%.4f  time=%.2f ms\n", max_distance_count, recall, explore_ms_single);
+        if (train_data != nullptr) {
+            std::printf("  max_dist=%6u  recall=%.4f  time=%.2f ms (explore=%.2f ms, rerank=%.2f ms)\n",
+                        max_distance_count, recall, explore_ms_single, wall_explore, wall_rerank);
+        } else {
+            std::printf("  max_dist=%6u  recall=%.4f  time=%.2f ms\n",
+                        max_distance_count, recall, explore_ms_single);
+        }
 
         if (recall >= 0.8f) {
             std::printf("  Reached recall target 0.8, stopping sweep\n");
@@ -150,12 +203,13 @@ static int run_evp_mode(
     uint32_t non_zeros,
     uint8_t k_graph, uint8_t k_ext,
     float eps_ext,
-    uint32_t k_top)
+    uint32_t k_top,
+    bool rerank)
 {
     std::printf("=== EVP Bits Graph Benchmark ===\n");
     std::printf("Data path: %ls\n", data_path.wstring().c_str());
-    std::printf("NON_ZEROS=%u, K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.2f\n",
-                non_zeros, k_top, k_graph, k_ext, eps_ext);
+    std::printf("NON_ZEROS=%u, K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.2f, RERANK=%s\n",
+                non_zeros, k_top, k_graph, k_ext, eps_ext, rerank ? "true" : "false");
     std::printf("Threads: %zu\n\n", threads);
 
     // --------------------------------------------------------------------------
@@ -216,7 +270,9 @@ static int run_evp_mode(
     // --------------------------------------------------------------------------
     // Exploration sweep
     // --------------------------------------------------------------------------
-    run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, threads, "EVP Bits");
+    run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, threads, 
+                          rerank ? "EVP Bits (with FP32 Reranking)" : "EVP Bits (no Reranking)", 
+                          rerank ? train_data : nullptr, dims);
 
     // --------------------------------------------------------------------------
     // Summary
@@ -362,8 +418,8 @@ int main(int argc, char* argv[]) {
         mode = argv[2];
     }
 
-    if (mode != "evp" && mode != "raw") {
-        std::fprintf(stderr, "Unknown mode '%s'. Use 'evp' or 'raw'.\n", mode.c_str());
+    if (mode != "evp" && mode != "evp-no-rerank" && mode != "raw") {
+        std::fprintf(stderr, "Unknown mode '%s'. Use 'evp', 'evp-no-rerank', or 'raw'.\n", mode.c_str());
         return 1;
     }
 
@@ -409,9 +465,10 @@ int main(int argc, char* argv[]) {
     // --------------------------------------------------------------------------
     // Dispatch to selected mode
     // --------------------------------------------------------------------------
-    if (mode == "evp") {
+    if (mode == "evp" || mode == "evp-no-rerank") {
+        bool rerank = (mode == "evp");
         return run_evp_mode(data_path, count, dims, train_data, gt_data, gt_dims,
-                            threads, NON_ZEROS, K_GRAPH, K_EXT, EPS_EXT, K_TOP);
+                            threads, NON_ZEROS, K_GRAPH, K_EXT, EPS_EXT, K_TOP, rerank);
     } else {
         return run_raw_mode(data_path, count, dims, train_data, gt_data, gt_dims,
                             threads, K_GRAPH, K_EXT, EPS_EXT, K_TOP);

@@ -989,11 +989,11 @@ public:
     }
 
     // search radius
-    auto radius = results.top().getDistance();
+    auto radius = (results.size() >= k) ? results.top().getDistance() : std::numeric_limits<float>::max();
 
     // experimental: eps replacement parameter
-    const auto eps = std::log10(float(max_distance_computation_count)/k);
-    auto exploration_radius = radius * ((radius < 0) ? (1 - eps) : (1 + eps));
+    const auto eps = std::max(0.1f, std::log10(float(max_distance_computation_count)/k));
+    auto exploration_radius = (radius == std::numeric_limits<float>::max()) ? std::numeric_limits<float>::max() : radius * ((radius < 0) ? (1 - eps) : (1 + eps));
 
     // iterate as long as good elements are in the next_vertices queue and max_calcs is not yet reached
     auto good_neighbors = std::array<uint32_t, 256>();    // this limits the neighbor count to 256 using Variable Length Array wrapped in a macro
