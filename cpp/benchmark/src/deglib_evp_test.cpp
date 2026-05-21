@@ -12,7 +12,7 @@
  *   fp16  - convert FP32 to FP16, build graph with Metric::FP16InnerProduct
  *
  * Usage:
- *   deglib_evp_test <data_path> [evp|evp-no-rerank|evp-asymmetric|raw|fp16]
+ *   deglib_evp_test <data_path> [evp|evp-no-rerank|evp-build-fp16-search|evp-build-fp16-proxy|raw|fp16|evp-linear]
  *
  * Expected files in data_path:
  *   train.fvecs      - float feature vectors
@@ -62,12 +62,13 @@ static double now_ms() {
 // ============================================================================
 
 enum class BenchmarkMode {
-    EvpWithRerank,
-    EvpNoRerank,
-    EvpAsymmetric,
-    Raw,
-    FP16,
-    EvpLinear
+    EvpBuildEvpExploreFP16Rerank,
+    EvpBuildEvpExplore,
+    EvpBuildFP16Explore,
+    EvpBuildFP16ProxySearch,
+    FP32BuildFP32Explore,
+    FP16BuildFP16Explore,
+    EvpLinearSearch
 };
 
 // ============================================================================
@@ -82,6 +83,7 @@ static void run_exploration_sweep(
     uint32_t k_top,
     uint8_t threads,
     const char* label,
+    bool use_search = false,
     const void* rerank_data = nullptr,
     size_t rerank_feature_bytes = 0,
     deglib::DISTFUNC<float> rerank_dist_func = nullptr,
@@ -110,17 +112,36 @@ static void run_exploration_sweep(
                 size_t entry_idx = graph.getInternalIndex(static_cast<uint32_t>(label));
                 uint32_t k_search = (rerank_data != nullptr) ? std::max(k_top, max_distance_count) : k_explore;
 
-                auto result_queue = graph.explore(
-                    static_cast<uint32_t>(entry_idx),
-                    k_search,
-                    false,  // include_entry (false: exclude self)
-                    max_distance_count);
+                deglib::search::ResultSet result_queue;
+                if (use_search) {
+                    std::vector<uint32_t> entry_indices = { static_cast<uint32_t>(entry_idx) };
+                    const std::byte* query = graph.getFeatureVector(static_cast<uint32_t>(entry_idx));
+                    result_queue = graph.search(
+                        entry_indices,
+                        query,
+                        0.0f,
+                        k_search + 1,
+                        nullptr,
+                        max_distance_count);
+                } else {
+                    result_queue = graph.explore(
+                        static_cast<uint32_t>(entry_idx),
+                        k_search,
+                        false,  // include_entry (false: exclude self)
+                        max_distance_count);
+                }
 
                 auto& cands = explore_candidates[label];
                 cands.reserve(result_queue.size());
                 while (!result_queue.empty()) {
-                    cands.push_back(graph.getExternalLabel(result_queue.top().getInternalIndex()));
+                    const auto cand_idx = result_queue.top().getInternalIndex();
+                    if (!use_search || cand_idx != entry_idx) {
+                        cands.push_back(graph.getExternalLabel(cand_idx));
+                    }
                     result_queue.pop();
+                }
+                if (use_search && cands.size() > k_search) {
+                    cands.resize(k_search);
                 }
             });
         double explore_ms = now_ms() - t_explore_start;
@@ -308,8 +329,8 @@ static int run_benchmark(
         return 1;
     }
 
-    if (mode == BenchmarkMode::Raw) {
-        std::printf("=== FP32 InnerProduct Graph Benchmark ===\n");
+    if (mode == BenchmarkMode::FP32BuildFP32Explore) {
+        std::printf("=== FP32 Build FP32 Explore Graph Benchmark ===\n");
         std::printf("Data path: %ls\n", data_path.wstring().c_str());
         std::printf("K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.2f\n",
                     k_top, k_graph, k_ext, eps_ext);
@@ -360,13 +381,13 @@ static int run_benchmark(
         // --------------------------------------------------------------------------
         // Exploration sweep
         // --------------------------------------------------------------------------
-        run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, threads, "FP32 InnerProduct");
+        run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, threads, "FP32 Build FP32 Explore");
 
         // --------------------------------------------------------------------------
         // Summary
         // --------------------------------------------------------------------------
         std::printf("=============================================\n");
-        std::printf("          FINAL SUMMARY (FP32 InnerProduct)\n");
+        std::printf("          FINAL SUMMARY (FP32 Build FP32 Explore)\n");
         std::printf("=============================================\n");
         std::printf("Graph Build:             %.2f ms\n", build_ms);
         std::printf("---------------------------------------------\n");
@@ -375,8 +396,8 @@ static int run_benchmark(
         std::printf("=============================================\n\n");
 
         return 0;
-    } else if (mode == BenchmarkMode::FP16) {
-        std::printf("=== FP16 InnerProduct Graph Benchmark ===\n");
+    } else if (mode == BenchmarkMode::FP16BuildFP16Explore) {
+        std::printf("=== FP16 Build FP16 Explore Graph Benchmark ===\n");
         std::printf("Data path: %ls\n", data_path.wstring().c_str());
         std::printf("K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.2f\n",
                     k_top, k_graph, k_ext, eps_ext);
@@ -439,13 +460,13 @@ static int run_benchmark(
         // --------------------------------------------------------------------------
         // Exploration sweep
         // --------------------------------------------------------------------------
-        run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, threads, "FP16 InnerProduct");
+        run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, threads, "FP16 Build FP16 Explore");
 
         // --------------------------------------------------------------------------
         // Summary
         // --------------------------------------------------------------------------
         std::printf("=============================================\n");
-        std::printf("          FINAL SUMMARY (FP16 InnerProduct)\n");
+        std::printf("          FINAL SUMMARY (FP16 Build FP16 Explore)\n");
         std::printf("=============================================\n");
         std::printf("FP32→FP16 Conversion:    %.2f ms\n", convert_ms);
         std::printf("Graph Build:             %.2f ms\n", build_ms);
@@ -456,13 +477,14 @@ static int run_benchmark(
         std::printf("=============================================\n\n");
 
         return 0;
-    } else if (mode == BenchmarkMode::EvpWithRerank || mode == BenchmarkMode::EvpNoRerank || mode == BenchmarkMode::EvpAsymmetric) {
+    } else if (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank || mode == BenchmarkMode::EvpBuildEvpExplore || mode == BenchmarkMode::EvpBuildFP16Explore || mode == BenchmarkMode::EvpBuildFP16ProxySearch) {
         std::printf("=== EVP Bits Graph Benchmark ===\n");
         std::printf("Data path: %ls\n", data_path.wstring().c_str());
         std::printf("NON_ZEROS=%u, K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.2f, MODE=%s\n",
                     non_zeros, k_top, k_graph, k_ext, eps_ext,
-                    mode == BenchmarkMode::EvpAsymmetric ? "asymmetric" :
-                    (mode == BenchmarkMode::EvpWithRerank ? "rerank" : "no-rerank"));
+                    mode == BenchmarkMode::EvpBuildFP16ProxySearch ? "build-fp16-proxy-search" :
+                    (mode == BenchmarkMode::EvpBuildFP16Explore ? "build-fp16-explore" :
+                    (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank ? "build-evp-explore-fp16-rerank" : "build-evp-explore")));
         std::printf("Threads: %zu\n\n", threads);
 
         // --------------------------------------------------------------------------
@@ -524,8 +546,8 @@ static int run_benchmark(
         // Exploration sweep
         // --------------------------------------------------------------------------
         double conversion_ms = 0.0;
-        if (mode == BenchmarkMode::EvpAsymmetric) {
-            // Convert FP32 → FP16 for asymmetric graph
+        if (mode == BenchmarkMode::EvpBuildFP16Explore || mode == BenchmarkMode::EvpBuildFP16ProxySearch) {
+            // Convert FP32 → FP16 for FP16 search graph
             double t_conv_start = now_ms();
             auto fp16_data = fp32_to_fp16_batch(train_data, count, dims, threads);
             conversion_ms = now_ms() - t_conv_start;
@@ -534,11 +556,17 @@ static int run_benchmark(
             deglib::FloatSpace fp16_feature_space(static_cast<uint32_t>(dims), deglib::Metric::FP16InnerProduct);
             deglib::graph::ReadOnlyGraph fp16_graph(fp16_feature_space, graph, fp16_data.data());
             conversion_ms += now_ms() - t_conv_start;
-            std::printf("Asymmetric graph conversion time: %.2f ms\n", conversion_ms);
+            std::printf("FP16 search graph conversion time: %.2f ms\n", conversion_ms);
 
-            run_exploration_sweep(fp16_graph, gt_data, count, gt_dims, k_top, threads,
-                                  "EVP Asymmetric (ReadOnly FP16)");
-        } else if (mode == BenchmarkMode::EvpWithRerank) {
+            if (mode == BenchmarkMode::EvpBuildFP16ProxySearch) {
+                run_exploration_sweep(fp16_graph, gt_data, count, gt_dims, k_top, threads,
+                                      "EVP Build FP16 Proxy Search (ReadOnly FP16 Search)",
+                                      true);
+            } else {
+                run_exploration_sweep(fp16_graph, gt_data, count, gt_dims, k_top, threads,
+                                      "EVP Build FP16 Explore (ReadOnly FP16)");
+            }
+        } else if (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank) {
             // Convert FP32 → FP16 for reranking
             double t_conv_start = now_ms();
             auto fp16_data = fp32_to_fp16_batch(train_data, count, dims, threads);
@@ -547,14 +575,15 @@ static int run_benchmark(
 
             deglib::FloatSpace fp16_rerank_space(static_cast<uint32_t>(dims), deglib::Metric::FP16InnerProduct);
             run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, threads,
-                                  "EVP Bits (with FP16 Reranking)",
+                                  "EVP Build EVP Explore FP16 Rerank",
+                                  false,
                                   fp16_data.data(),
                                   dims * sizeof(uint16_t),
                                   fp16_rerank_space.get_dist_func(),
                                   dims);
         } else {
             run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, threads,
-                                  "EVP Bits (no Reranking)");
+                                  "EVP Build EVP Explore");
         }
 
         // --------------------------------------------------------------------------
@@ -565,7 +594,7 @@ static int run_benchmark(
         std::printf("=============================================\n");
         std::printf("Quantize:                %.2f ms\n", quantize_ms);
         std::printf("Graph Build:             %.2f ms\n", build_ms);
-        if (mode == BenchmarkMode::EvpAsymmetric) {
+        if (mode == BenchmarkMode::EvpBuildFP16Explore || mode == BenchmarkMode::EvpBuildFP16ProxySearch) {
             std::printf("Graph Conversion:        %.2f ms\n", conversion_ms);
         }
         std::printf("---------------------------------------------\n");
@@ -575,7 +604,7 @@ static int run_benchmark(
         std::printf("=============================================\n\n");
 
         return 0;
-    } else if (mode == BenchmarkMode::EvpLinear) {
+    } else if (mode == BenchmarkMode::EvpLinearSearch) {
         std::printf("=== EVP Bits Linear Search Benchmark ===\n");
         std::printf("Data path: %ls\n", data_path.wstring().c_str());
         std::printf("NON_ZEROS=%u, K_TOP=%u\n", non_zeros, k_top);
@@ -703,7 +732,7 @@ int main(int argc, char* argv[]) {
     // Parse data path and mode
     // --------------------------------------------------------------------------
     std::filesystem::path data_path;
-    std::string mode = "evp";  // default: EVP Bits mode
+    std::string mode = "evp-build-evp-explore-fp16-rerank";  // default
 
     if (argc >= 2) {
         data_path = argv[1];
@@ -711,7 +740,7 @@ int main(int argc, char* argv[]) {
 #ifdef DATA_PATH
         data_path = DATA_PATH;
 #else
-        std::fprintf(stderr, "Usage: %s <data_path> [evp|evp-no-rerank|evp-asymmetric|raw|fp16|evp-linear]\n", argv[0]);
+        std::fprintf(stderr, "Usage: %s <data_path> [evp-build-evp-explore-fp16-rerank|evp-build-evp-explore|evp-build-fp16-explore|evp-build-fp16-proxy-search|fp32-build-fp32-explore|fp16-build-fp16-explore|evp-linear-search]\n", argv[0]);
         return 1;
 #endif
     }
@@ -720,8 +749,15 @@ int main(int argc, char* argv[]) {
         mode = argv[2];
     }
 
-    if (mode != "evp" && mode != "evp-no-rerank" && mode != "evp-asymmetric" && mode != "raw" && mode != "fp16" && mode != "evp-linear") {
-        std::fprintf(stderr, "Unknown mode '%s'. Use 'evp', 'evp-no-rerank', 'evp-asymmetric', 'raw', 'fp16', or 'evp-linear'.\n", mode.c_str());
+    // Support old short names as aliases for ease of use
+    if (mode == "evp") mode = "evp-build-evp-explore-fp16-rerank";
+    if (mode == "evp-no-rerank") mode = "evp-build-evp-explore";
+    if (mode == "raw") mode = "fp32-build-fp32-explore";
+    if (mode == "fp16") mode = "fp16-build-fp16-explore";
+    if (mode == "evp-linear") mode = "evp-linear-search";
+
+    if (mode != "evp-build-evp-explore-fp16-rerank" && mode != "evp-build-evp-explore" && mode != "evp-build-fp16-explore" && mode != "evp-build-fp16-proxy-search" && mode != "fp32-build-fp32-explore" && mode != "fp16-build-fp16-explore" && mode != "evp-linear-search") {
+        std::fprintf(stderr, "Unknown mode '%s'. Use 'evp-build-evp-explore-fp16-rerank', 'evp-build-evp-explore', 'evp-build-fp16-explore', 'evp-build-fp16-proxy-search', 'fp32-build-fp32-explore', 'fp16-build-fp16-explore', or 'evp-linear-search'.\n", mode.c_str());
         return 1;
     }
 
@@ -730,19 +766,20 @@ int main(int argc, char* argv[]) {
     // --------------------------------------------------------------------------
     // Dispatch to selected mode
     // --------------------------------------------------------------------------
-    BenchmarkMode benchmark_mode = BenchmarkMode::EvpWithRerank;
-    if (mode == "evp-no-rerank") {
-        benchmark_mode = BenchmarkMode::EvpNoRerank;
-    } else if (mode == "evp-asymmetric") {
-        benchmark_mode = BenchmarkMode::EvpAsymmetric;
-    } else if (mode == "raw") {
-        benchmark_mode = BenchmarkMode::Raw;
-    } else if (mode == "fp16") {
-        benchmark_mode = BenchmarkMode::FP16;
-    } else if (mode == "evp-linear") {
-        benchmark_mode = BenchmarkMode::EvpLinear;
+    BenchmarkMode benchmark_mode = BenchmarkMode::EvpBuildEvpExploreFP16Rerank;
+    if (mode == "evp-build-evp-explore") {
+        benchmark_mode = BenchmarkMode::EvpBuildEvpExplore;
+    } else if (mode == "evp-build-fp16-explore") {
+        benchmark_mode = BenchmarkMode::EvpBuildFP16Explore;
+    } else if (mode == "evp-build-fp16-proxy-search") {
+        benchmark_mode = BenchmarkMode::EvpBuildFP16ProxySearch;
+    } else if (mode == "fp32-build-fp32-explore") {
+        benchmark_mode = BenchmarkMode::FP32BuildFP32Explore;
+    } else if (mode == "fp16-build-fp16-explore") {
+        benchmark_mode = BenchmarkMode::FP16BuildFP16Explore;
+    } else if (mode == "evp-linear-search") {
+        benchmark_mode = BenchmarkMode::EvpLinearSearch;
     }
 
     return run_benchmark(benchmark_mode, data_path, threads, NON_ZEROS, K_GRAPH, K_EXT, EPS_EXT, K_TOP);
 }
-
