@@ -546,10 +546,10 @@ static int run_benchmark(
         // Exploration sweep
         // --------------------------------------------------------------------------
         double conversion_ms = 0.0;
-        if (mode == BenchmarkMode::EvpBuildFP16Explore || mode == BenchmarkMode::EvpBuildFP16ProxySearch) {
+        if (mode == BenchmarkMode::EvpBuildFP16Explore) {
             // Convert FP32 → FP16 for FP16 search graph
-            double t_conv_start = now_ms();
             auto fp16_data = fp32_to_fp16_batch(train_data, count, dims, threads);
+            double t_conv_start = now_ms();
             conversion_ms = now_ms() - t_conv_start;
             std::printf("FP32→FP16 conversion time: %.2f ms\n", conversion_ms);
 
@@ -558,14 +558,29 @@ static int run_benchmark(
             conversion_ms += now_ms() - t_conv_start;
             std::printf("FP16 search graph conversion time: %.2f ms\n", conversion_ms);
 
-            if (mode == BenchmarkMode::EvpBuildFP16ProxySearch) {
-                run_exploration_sweep(fp16_graph, gt_data, count, gt_dims, k_top, threads,
-                                      "EVP Build FP16 Proxy Search (ReadOnly FP16 Search)",
-                                      true);
-            } else {
-                run_exploration_sweep(fp16_graph, gt_data, count, gt_dims, k_top, threads,
-                                      "EVP Build FP16 Explore (ReadOnly FP16)");
+            run_exploration_sweep(fp16_graph, gt_data, count, gt_dims, k_top, threads,
+                                  "EVP Build FP16 Explore (ReadOnly FP16)");
+        } else if (mode == BenchmarkMode::EvpBuildFP16ProxySearch) {
+            // Convert FP32 → FP16 (keep alive in this scope for proxy pointers)
+            auto fp16_data = fp32_to_fp16_batch(train_data, count, dims, threads);
+            double t_conv_start = now_ms();
+            conversion_ms = now_ms() - t_conv_start;
+            std::printf("FP32→FP16 conversion time: %.2f ms\n", conversion_ms);
+
+            // Create lightweight proxy structs pointing into the master fp16_data
+            std::vector<deglib::distances::FP16Proxy> proxy_data(count);
+            for (size_t i = 0; i < count; ++i) {
+                proxy_data[i] = { fp16_data.data() + i * dims, dims };
             }
+
+            deglib::FloatSpace fp16_proxy_space(static_cast<uint32_t>(dims), deglib::Metric::FP16InnerProductProxy);
+            deglib::graph::ReadOnlyGraph fp16_proxy_graph(fp16_proxy_space, graph, proxy_data.data());
+            conversion_ms += now_ms() - t_conv_start;
+            std::printf("FP16 proxy search graph conversion time: %.2f ms\n", conversion_ms);
+
+            run_exploration_sweep(fp16_proxy_graph, gt_data, count, gt_dims, k_top, threads,
+                                  "EVP Build FP16 Proxy Search (ReadOnly FP16 Proxy Search)",
+                                  true);
         } else if (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank) {
             // Convert FP32 → FP16 for reranking
             double t_conv_start = now_ms();
