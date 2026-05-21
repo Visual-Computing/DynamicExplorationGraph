@@ -44,6 +44,7 @@
 #include "distances.h"
 #include "graph/sizebounded_graph.h"
 #include "graph/readonly_graph.h"
+#include "graph/readonly_graph_external.h"
 #include "quantization/evp_quantize.h"
 #include "repository.h"
 
@@ -66,6 +67,7 @@ enum class BenchmarkMode {
     EvpBuildEvpExplore,
     EvpBuildFP16Explore,
     EvpBuildFP16ProxySearch,
+    EvpBuildFP16ExternalSearch,
     FP32BuildFP32Explore,
     FP16BuildFP16Explore,
     EvpLinearSearch
@@ -477,12 +479,13 @@ static int run_benchmark(
         std::printf("=============================================\n\n");
 
         return 0;
-    } else if (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank || mode == BenchmarkMode::EvpBuildEvpExplore || mode == BenchmarkMode::EvpBuildFP16Explore || mode == BenchmarkMode::EvpBuildFP16ProxySearch) {
+    } else if (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank || mode == BenchmarkMode::EvpBuildEvpExplore || mode == BenchmarkMode::EvpBuildFP16Explore || mode == BenchmarkMode::EvpBuildFP16ProxySearch || mode == BenchmarkMode::EvpBuildFP16ExternalSearch) {
         std::printf("=== EVP Bits Graph Benchmark ===\n");
         std::printf("Data path: %ls\n", data_path.wstring().c_str());
         std::printf("NON_ZEROS=%u, K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.2f, MODE=%s\n",
                     non_zeros, k_top, k_graph, k_ext, eps_ext,
                     mode == BenchmarkMode::EvpBuildFP16ProxySearch ? "build-fp16-proxy-search" :
+                    mode == BenchmarkMode::EvpBuildFP16ExternalSearch ? "build-fp16-external-search" :
                     (mode == BenchmarkMode::EvpBuildFP16Explore ? "build-fp16-explore" :
                     (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank ? "build-evp-explore-fp16-rerank" : "build-evp-explore")));
         std::printf("Threads: %zu\n\n", threads);
@@ -581,6 +584,32 @@ static int run_benchmark(
             run_exploration_sweep(fp16_proxy_graph, gt_data, count, gt_dims, k_top, threads,
                                   "EVP Build FP16 Proxy Search (ReadOnly FP16 Proxy Search)",
                                   true);
+        } else if (mode == BenchmarkMode::EvpBuildFP16ExternalSearch) {
+            // Convert FP32 → FP16
+            double t_conv_start = now_ms();
+            auto fp16_data = fp32_to_fp16_batch(train_data, count, dims, threads);
+            conversion_ms = now_ms() - t_conv_start;
+            std::printf("FP32→FP16 conversion time: %.2f ms\n", conversion_ms);
+
+            // Permute FP16 array in-place so that fp16_data[internal_index] holds the
+            // features for that internal index (no proxy needed, no extra allocation).
+            double t_reorder_start = now_ms();
+            deglib::graph::ReadOnlyGraphExternal::reorder_features_inplace(
+                graph, fp16_data.data(), dims);
+            double reorder_ms = now_ms() - t_reorder_start;
+            std::printf("In-place feature reorder time: %.2f ms\n", reorder_ms);
+            conversion_ms += reorder_ms;
+
+            // Build the external graph — references fp16_data directly, no copies.
+            double t_ext_start = now_ms();
+            deglib::FloatSpace fp16_ext_space(static_cast<uint32_t>(dims), deglib::Metric::FP16InnerProduct);
+            deglib::graph::ReadOnlyGraphExternal fp16_ext_graph(fp16_ext_space, graph, fp16_data.data());
+            conversion_ms += now_ms() - t_ext_start;
+            std::printf("ReadOnlyGraphExternal construction time: %.2f ms\n", now_ms() - t_ext_start);
+
+            run_exploration_sweep(fp16_ext_graph, gt_data, count, gt_dims, k_top, threads,
+                                  "EVP Build FP16 External Search (ReadOnlyGraphExternal)",
+                                  true);
         } else if (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank) {
             // Convert FP32 → FP16 for reranking
             double t_conv_start = now_ms();
@@ -609,7 +638,7 @@ static int run_benchmark(
         std::printf("=============================================\n");
         std::printf("Quantize:                %.2f ms\n", quantize_ms);
         std::printf("Graph Build:             %.2f ms\n", build_ms);
-        if (mode == BenchmarkMode::EvpBuildFP16Explore || mode == BenchmarkMode::EvpBuildFP16ProxySearch) {
+        if (mode == BenchmarkMode::EvpBuildFP16Explore || mode == BenchmarkMode::EvpBuildFP16ProxySearch || mode == BenchmarkMode::EvpBuildFP16ExternalSearch) {
             std::printf("Graph Conversion:        %.2f ms\n", conversion_ms);
         }
         std::printf("---------------------------------------------\n");
@@ -755,7 +784,7 @@ int main(int argc, char* argv[]) {
 #ifdef DATA_PATH
         data_path = DATA_PATH;
 #else
-        std::fprintf(stderr, "Usage: %s <data_path> [evp-build-evp-explore-fp16-rerank|evp-build-evp-explore|evp-build-fp16-explore|evp-build-fp16-proxy-search|fp32-build-fp32-explore|fp16-build-fp16-explore|evp-linear-search]\n", argv[0]);
+        std::fprintf(stderr, "Usage: %s <data_path> [evp-build-evp-explore-fp16-rerank|evp-build-evp-explore|evp-build-fp16-explore|evp-build-fp16-proxy-search|evp-build-fp16-external-search|fp32-build-fp32-explore|fp16-build-fp16-explore|evp-linear-search]\n", argv[0]);
         return 1;
 #endif
     }
@@ -771,8 +800,8 @@ int main(int argc, char* argv[]) {
     if (mode == "fp16") mode = "fp16-build-fp16-explore";
     if (mode == "evp-linear") mode = "evp-linear-search";
 
-    if (mode != "evp-build-evp-explore-fp16-rerank" && mode != "evp-build-evp-explore" && mode != "evp-build-fp16-explore" && mode != "evp-build-fp16-proxy-search" && mode != "fp32-build-fp32-explore" && mode != "fp16-build-fp16-explore" && mode != "evp-linear-search") {
-        std::fprintf(stderr, "Unknown mode '%s'. Use 'evp-build-evp-explore-fp16-rerank', 'evp-build-evp-explore', 'evp-build-fp16-explore', 'evp-build-fp16-proxy-search', 'fp32-build-fp32-explore', 'fp16-build-fp16-explore', or 'evp-linear-search'.\n", mode.c_str());
+    if (mode != "evp-build-evp-explore-fp16-rerank" && mode != "evp-build-evp-explore" && mode != "evp-build-fp16-explore" && mode != "evp-build-fp16-proxy-search" && mode != "evp-build-fp16-external-search" && mode != "fp32-build-fp32-explore" && mode != "fp16-build-fp16-explore" && mode != "evp-linear-search") {
+        std::fprintf(stderr, "Unknown mode '%s'. Use 'evp-build-evp-explore-fp16-rerank', 'evp-build-evp-explore', 'evp-build-fp16-explore', 'evp-build-fp16-proxy-search', 'evp-build-fp16-external-search', 'fp32-build-fp32-explore', 'fp16-build-fp16-explore', or 'evp-linear-search'.\n", mode.c_str());
         return 1;
     }
 
@@ -788,6 +817,8 @@ int main(int argc, char* argv[]) {
         benchmark_mode = BenchmarkMode::EvpBuildFP16Explore;
     } else if (mode == "evp-build-fp16-proxy-search") {
         benchmark_mode = BenchmarkMode::EvpBuildFP16ProxySearch;
+    } else if (mode == "evp-build-fp16-external-search") {
+        benchmark_mode = BenchmarkMode::EvpBuildFP16ExternalSearch;
     } else if (mode == "fp32-build-fp32-explore") {
         benchmark_mode = BenchmarkMode::FP32BuildFP32Explore;
     } else if (mode == "fp16-build-fp16-explore") {
