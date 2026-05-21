@@ -66,7 +66,8 @@ enum class BenchmarkMode {
     EvpNoRerank,
     EvpAsymmetric,
     Raw,
-    FP16
+    FP16,
+    EvpLinear
 };
 
 // ============================================================================
@@ -455,7 +456,7 @@ static int run_benchmark(
         std::printf("=============================================\n\n");
 
         return 0;
-    } else {
+    } else if (mode == BenchmarkMode::EvpWithRerank || mode == BenchmarkMode::EvpNoRerank || mode == BenchmarkMode::EvpAsymmetric) {
         std::printf("=== EVP Bits Graph Benchmark ===\n");
         std::printf("Data path: %ls\n", data_path.wstring().c_str());
         std::printf("NON_ZEROS=%u, K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.2f, MODE=%s\n",
@@ -574,7 +575,106 @@ static int run_benchmark(
         std::printf("=============================================\n\n");
 
         return 0;
+    } else if (mode == BenchmarkMode::EvpLinear) {
+        std::printf("=== EVP Bits Linear Search Benchmark ===\n");
+        std::printf("Data path: %ls\n", data_path.wstring().c_str());
+        std::printf("NON_ZEROS=%u, K_TOP=%u\n", non_zeros, k_top);
+        std::printf("Threads: %zu\n\n", threads);
+
+        // --------------------------------------------------------------------------
+        // Quantize
+        // --------------------------------------------------------------------------
+        double t1 = now_ms();
+
+        auto quantized = deglib::quantization::quantize_batch(
+            train_data, count, static_cast<uint32_t>(dims), non_zeros, threads);
+
+        double quantize_ms = now_ms() - t1;
+        std::printf("Quantize time: %.2f ms\n", quantize_ms);
+        std::printf("Quantized size: %.2f MB\n\n",
+                    static_cast<double>(quantized.size()) / (1024.0 * 1024.0));
+
+        // --------------------------------------------------------------------------
+        // Linear Search using distances.h
+        // --------------------------------------------------------------------------
+        double t_search_start = now_ms();
+
+        std::vector<std::vector<uint32_t>> results(count, std::vector<uint32_t>(k_top));
+        const size_t bytes_per_evp = dims / 4;
+        const uint32_t dims_u32 = static_cast<uint32_t>(dims);
+
+        deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads,
+            [&](size_t i, size_t thread_id) {
+                const std::byte* query_ptr = quantized.data() + i * bytes_per_evp;
+
+                std::vector<std::pair<float, uint32_t>> top;
+                top.reserve(k_top + 1);
+
+                for (size_t j = 0; j < count; ++j) {
+                    if (i == j) {
+                        continue;
+                    }
+
+                    const std::byte* cand_ptr = quantized.data() + j * bytes_per_evp;
+                    float dist = deglib::distances::EvpBitsSimilarity::compare(query_ptr, cand_ptr, &dims_u32);
+
+                    if (top.size() < k_top) {
+                        top.push_back({dist, static_cast<uint32_t>(j)});
+                        std::push_heap(top.begin(), top.end());
+                    } else if (dist < top.front().first) {
+                        std::pop_heap(top.begin(), top.end());
+                        top.back() = {dist, static_cast<uint32_t>(j)};
+                        std::push_heap(top.begin(), top.end());
+                    }
+                }
+
+                std::sort_heap(top.begin(), top.end());
+
+                for (uint32_t k = 0; k < k_top && k < top.size(); ++k) {
+                    results[i][k] = top[k].second;
+                }
+            });
+
+        double search_ms = now_ms() - t_search_start;
+        std::printf("Linear Search time: %.2f ms\n", search_ms);
+
+        // --------------------------------------------------------------------------
+        // Calculate Recall
+        // --------------------------------------------------------------------------
+        int total_hits = 0;
+        for (size_t i = 0; i < count; ++i) {
+            const int32_t* gt_row = &gt_data[i * gt_dims];
+            for (uint32_t k = 1; k <= k_top && k < gt_dims; ++k) {
+                uint32_t gt_idx = static_cast<uint32_t>(gt_row[k] - 1); // 1→0 indexed
+                for (uint32_t j = 0; j < k_top; ++j) {
+                    if (results[i][j] == gt_idx) {
+                        total_hits++;
+                        break;
+                    }
+                }
+            }
+        }
+
+        float recall = static_cast<float>(total_hits) / (count * k_top);
+        std::printf("Recall@%u: %.4f\n", k_top, recall);
+
+        // --------------------------------------------------------------------------
+        // Summary
+        // --------------------------------------------------------------------------
+        std::printf("=============================================\n");
+        std::printf("          FINAL SUMMARY (EVP Bits Linear Search)\n");
+        std::printf("=============================================\n");
+        std::printf("Quantize:                %.2f ms\n", quantize_ms);
+        std::printf("Linear Search:           %.2f ms\n", search_ms);
+        std::printf("---------------------------------------------\n");
+        std::printf("Vectors:                 %zu\n", count);
+        std::printf("Dimensions:              %zu\n", dims);
+        std::printf("Recall@%u:                %.4f\n", k_top, recall);
+        std::printf("=============================================\n\n");
+
+        return 0;
     }
+    return 0;
 }
 
 // ============================================================================
@@ -611,7 +711,7 @@ int main(int argc, char* argv[]) {
 #ifdef DATA_PATH
         data_path = DATA_PATH;
 #else
-        std::fprintf(stderr, "Usage: %s <data_path> [evp|evp-no-rerank|evp-asymmetric|raw|fp16]\n", argv[0]);
+        std::fprintf(stderr, "Usage: %s <data_path> [evp|evp-no-rerank|evp-asymmetric|raw|fp16|evp-linear]\n", argv[0]);
         return 1;
 #endif
     }
@@ -620,8 +720,8 @@ int main(int argc, char* argv[]) {
         mode = argv[2];
     }
 
-    if (mode != "evp" && mode != "evp-no-rerank" && mode != "evp-asymmetric" && mode != "raw" && mode != "fp16") {
-        std::fprintf(stderr, "Unknown mode '%s'. Use 'evp', 'evp-no-rerank', 'evp-asymmetric', 'raw', or 'fp16'.\n", mode.c_str());
+    if (mode != "evp" && mode != "evp-no-rerank" && mode != "evp-asymmetric" && mode != "raw" && mode != "fp16" && mode != "evp-linear") {
+        std::fprintf(stderr, "Unknown mode '%s'. Use 'evp', 'evp-no-rerank', 'evp-asymmetric', 'raw', 'fp16', or 'evp-linear'.\n", mode.c_str());
         return 1;
     }
 
@@ -639,6 +739,8 @@ int main(int argc, char* argv[]) {
         benchmark_mode = BenchmarkMode::Raw;
     } else if (mode == "fp16") {
         benchmark_mode = BenchmarkMode::FP16;
+    } else if (mode == "evp-linear") {
+        benchmark_mode = BenchmarkMode::EvpLinear;
     }
 
     return run_benchmark(benchmark_mode, data_path, threads, NON_ZEROS, K_GRAPH, K_EXT, EPS_EXT, K_TOP);

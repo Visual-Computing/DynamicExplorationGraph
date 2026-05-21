@@ -489,7 +489,12 @@ public:
   }
 
   /**
-   *  Copy from input graph but with custom feature vectors and feature space
+   * Copy from input graph but with custom feature vectors and feature space.
+   * @param feature_space feature space for the new graph (e.g., FP16InnerProduct)
+   * @param input_graph graph to copy structure from
+   * @param new_features pointer to new feature vectors (aligned for feature_space)
+   *                     Assumes row-major: [label1_feat_v1, label1_feat_v2, ..., labelN_feat_vN]
+   *                     Must contain features for all labels present in input_graph
    */
   ReadOnlyGraph(const deglib::FloatSpace feature_space, deglib::search::SearchGraph& input_graph, const void* new_features)
       : ReadOnlyGraph(input_graph.size(), input_graph.getEdgesPerVertex(), feature_space) {
