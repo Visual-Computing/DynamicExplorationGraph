@@ -244,7 +244,7 @@ static uint32_t calc_non_rng_edges(const deglib::graph::MutableGraph& graph) {
 
     const auto thread_count = std::thread::hardware_concurrency() / 2;
     auto removed_rng_edges_per_thread = std::vector<uint32_t>(thread_count);
-    deglib::concurrent::parallel_for(0, vertex_count, thread_count, [&](size_t vertex_index, size_t thread_id) {
+    deglib::concurrent::parallel_for(0, vertex_count, thread_count, 1, [&](size_t vertex_index, size_t thread_id) {
         uint32_t removed_rng_edges = 0;
         const auto neighbor_indices = graph.getNeighborIndices((uint32_t)vertex_index);
         const auto neighbor_weights = graph.getNeighborWeights((uint32_t)vertex_index);

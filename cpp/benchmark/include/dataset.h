@@ -459,7 +459,7 @@ inline std::vector<uint32_t> compute_knn_groundtruth(const deglib::FeatureReposi
     std::atomic<uint32_t> progress{0};
     const auto start = std::chrono::steady_clock::now();
 
-    deglib::concurrent::parallel_for(0, query_size, thread_count, [&](size_t q, size_t) {
+    deglib::concurrent::parallel_for(0, query_size, thread_count, 1, [&](size_t q, size_t) {
         const auto query = query_repo.getFeature((uint32_t)q);
 
         auto worst_distance = (std::numeric_limits<float>::max)();

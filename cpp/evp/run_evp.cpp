@@ -125,7 +125,7 @@ int main() {
     const size_t batch_size = 256;
     const size_t num_batches = (eval_count + batch_size - 1) / batch_size;
     deglib::concurrent::parallel_for(
-        static_cast<size_t>(0), num_batches, threads,
+        static_cast<size_t>(0), num_batches, threads, 1,
         [&topk_results, &ones_ptrs, &negs_ptrs, eval_count, dims, batch_size](size_t batch_id, size_t /*threadId*/) {
             size_t start = batch_id * batch_size;
             size_t end = std::min(start + batch_size, eval_count);

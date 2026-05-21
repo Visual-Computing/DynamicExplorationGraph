@@ -110,7 +110,7 @@ inline std::vector<std::byte> quantize_batch(const float* data, size_t count, ui
     const size_t num_chunks = (count + chunk_size - 1) / chunk_size;
 
     deglib::concurrent::parallel_for(
-        static_cast<size_t>(0), num_chunks, numThreads,
+        static_cast<size_t>(0), num_chunks, numThreads, 1,
         [data, count, dim, non_zeros, mask_bytes, bytes_per_evp, chunk_size, &result](size_t chunk_id, size_t) {
             size_t start = chunk_id * chunk_size;
             size_t end = std::min(start + chunk_size, count);

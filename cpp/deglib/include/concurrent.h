@@ -1,8 +1,10 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #include "config.h"
 
@@ -10,12 +12,13 @@
 namespace deglib::concurrent {
 
 // Multithreaded executor
-// The helper function copied from https://github.com/nmslib/hnswlib/blob/master/examples/cpp/example_mt_search.cpp (and that itself is
-// copied from nmslib) An alternative is using #pragme omp parallel for or any other C++ threading
 template <class FuncType>
-inline void parallel_for(size_t start, size_t end, size_t numThreads, FuncType fn) {
+inline void parallel_for(size_t start, size_t end, size_t numThreads, size_t batchSize, FuncType fn) {
     if (numThreads <= 0) {
         numThreads = std::thread::hardware_concurrency() / 2;
+    }
+    if (batchSize <= 0) {
+        batchSize = 1;
     }
 
     if (numThreads <= 1) {
@@ -27,30 +30,27 @@ inline void parallel_for(size_t start, size_t end, size_t numThreads, FuncType f
         std::atomic<size_t> current(start);
 
         // keep track of exceptions in threads
-        // https://stackoverflow.com/a/32428427/1713196
         std::exception_ptr lastException = nullptr;
         std::mutex lastExceptMutex;
 
         for (size_t threadId = 0; threadId < numThreads; ++threadId) {
             threads.push_back(std::thread([&, threadId] {
                 while (true) {
-                    size_t id = current.fetch_add(1);
+                    size_t batchStart = current.fetch_add(batchSize);
 
-                    if (id >= end) {
+                    if (batchStart >= end) {
                         break;
                     }
 
+                    size_t batchEnd = std::min(batchStart + batchSize, end);
+
                     try {
-                        fn(id, threadId);
+                        for (size_t id = batchStart; id < batchEnd; id++) {
+                            fn(id, threadId);
+                        }
                     } catch (...) {
                         std::unique_lock<std::mutex> lastExcepLock(lastExceptMutex);
                         lastException = std::current_exception();
-                        /*
-                         * This will work even when current is the largest value that
-                         * size_t can fit, because fetch_add returns the previous value
-                         * before the increment (what will result in overflow
-                         * and produce 0 instead of current + 1).
-                         */
                         current = end;
                         break;
                     }

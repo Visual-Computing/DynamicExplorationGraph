@@ -85,7 +85,7 @@ public:
         const size_t chunk_size = 8192;
         const size_t num_chunks = (count_ + chunk_size - 1) / chunk_size;
         deglib::concurrent::parallel_for(
-            static_cast<size_t>(0), num_chunks, numThreads,
+            static_cast<size_t>(0), num_chunks, numThreads, 1,
             [this, data, dim, non_zeros, chunk_size](size_t chunk_id, size_t /*threadId*/) {
                 size_t start = chunk_id * chunk_size;
                 size_t end = std::min(start + chunk_size, count_);

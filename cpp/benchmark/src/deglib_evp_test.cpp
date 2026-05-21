@@ -105,7 +105,7 @@ static void run_exploration_sweep(
         double t_explore_start = now_ms();
         std::vector<std::vector<uint32_t>> explore_candidates(count);
 
-        deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads,
+        deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads, 1,
             [&](size_t label, size_t thread_id) {
                 size_t entry_idx = graph.getInternalIndex(static_cast<uint32_t>(label));
                 uint32_t k_search = (rerank_data != nullptr) ? std::max(k_top, max_distance_count) : k_explore;
@@ -132,7 +132,7 @@ static void run_exploration_sweep(
         if (rerank_data != nullptr) {
             double t_rerank_start = now_ms();
             const auto* base = static_cast<const std::byte*>(rerank_data);
-            deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads,
+            deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads, 1,
                 [&](size_t label, size_t thread_id) {
                     struct Candidate {
                         uint32_t label;
@@ -225,7 +225,7 @@ static std::vector<uint16_t> fp32_to_fp16_batch(
     const float* src, size_t count, size_t dims, uint32_t threads)
 {
     std::vector<uint16_t> dst(count * dims);
-    deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads,
+    deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads, 1,
         [&](size_t i, size_t /*thread_id*/) {
             const float* s = src + i * dims;
             uint16_t*    d = dst.data() + i * dims;
@@ -603,7 +603,7 @@ static int run_benchmark(
         const size_t bytes_per_evp = dims / 4;
         const uint32_t dims_u32 = static_cast<uint32_t>(dims);
 
-        deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads,
+        deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads, 1,
             [&](size_t i, size_t thread_id) {
                 const std::byte* query_ptr = quantized.data() + i * bytes_per_evp;
 
