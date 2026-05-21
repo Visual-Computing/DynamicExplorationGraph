@@ -1127,6 +1127,21 @@ public:
     }
 };
 
+struct FP16Proxy {
+    const uint16_t* ptr;
+    size_t dim;
+};
+
+template <typename FP16Dist>
+class FP16InnerProductProxy {
+public:
+    inline static float compare(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+        const auto* proxy1 = static_cast<const FP16Proxy*>(pVect1v);
+        const auto* proxy2 = static_cast<const FP16Proxy*>(pVect2v);
+        return FP16Dist::compare(proxy1->ptr, proxy2->ptr, &(proxy1->dim));
+    }
+};
+
 }  // namespace distances
 
 enum class Metric {
@@ -1142,7 +1157,8 @@ enum class Metric {
     EvpBits = 0x20 | 3,
 
     // 0x30 = fp16 (uint16_t half-precision floats)
-    FP16InnerProduct = 0x30 | 2
+    FP16InnerProduct = 0x30 | 2,
+    FP16InnerProductProxy = 0x30 | 3
 };
 
 template <typename MTYPE>
@@ -1210,6 +1226,21 @@ class FloatSpace {
 #else
             distfunc = deglib::distances::FP16InnerProduct::compare;
 #endif
+        } else if (metric == deglib::Metric::FP16InnerProductProxy) {
+#if defined(USE_SSE) || defined(USE_AVX) || defined(USE_AVX512)
+            if (dim % 32 == 0)
+                distfunc = deglib::distances::FP16InnerProductProxy<deglib::distances::FP16InnerProductExt32>::compare;
+            else if (dim % 16 == 0)
+                distfunc = deglib::distances::FP16InnerProductProxy<deglib::distances::FP16InnerProductExt16>::compare;
+            else if (dim % 8 == 0)
+                distfunc = deglib::distances::FP16InnerProductProxy<deglib::distances::FP16InnerProductExt8>::compare;
+            else if (dim > 16)
+                distfunc = deglib::distances::FP16InnerProductProxy<deglib::distances::FP16InnerProductExt16Residuals>::compare;
+            else
+                distfunc = deglib::distances::FP16InnerProductProxy<deglib::distances::FP16InnerProductExt8Residuals>::compare;
+#else
+            distfunc = deglib::distances::FP16InnerProductProxy<deglib::distances::FP16InnerProduct>::compare;
+#endif
         }
 
         // TODO add cosine but convert to a distance = 2 - (cosine + 1)
@@ -1225,6 +1256,9 @@ class FloatSpace {
         }
         if (metric == deglib::Metric::FP16InnerProduct) {
             return dim * sizeof(uint16_t);
+        }
+        if (metric == deglib::Metric::FP16InnerProductProxy) {
+            return sizeof(deglib::distances::FP16Proxy);
         }
         return (static_cast<int>(metric) & 0x10) ? dim * sizeof(uint8_t) : dim * sizeof(float);
     }

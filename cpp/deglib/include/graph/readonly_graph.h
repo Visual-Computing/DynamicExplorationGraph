@@ -154,6 +154,36 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
   }
 
   template <bool use_max_distance_count = false, bool use_filter = false>
+  inline static deglib::search::ResultSet searchFP16InnerProductProxy(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
+    return graph.searchImpl<deglib::distances::FP16InnerProductProxy<deglib::distances::FP16InnerProduct>, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
+  }
+
+  template <bool use_max_distance_count = false, bool use_filter = false>
+  inline static deglib::search::ResultSet searchFP16InnerProductProxyExt8(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
+    return graph.searchImpl<deglib::distances::FP16InnerProductProxy<deglib::distances::FP16InnerProductExt8>, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
+  }
+
+  template <bool use_max_distance_count = false, bool use_filter = false>
+  inline static deglib::search::ResultSet searchFP16InnerProductProxyExt16(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
+    return graph.searchImpl<deglib::distances::FP16InnerProductProxy<deglib::distances::FP16InnerProductExt16>, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
+  }
+
+  template <bool use_max_distance_count = false, bool use_filter = false>
+  inline static deglib::search::ResultSet searchFP16InnerProductProxyExt32(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
+    return graph.searchImpl<deglib::distances::FP16InnerProductProxy<deglib::distances::FP16InnerProductExt32>, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
+  }
+
+  template <bool use_max_distance_count = false, bool use_filter = false>
+  inline static deglib::search::ResultSet searchFP16InnerProductProxyExt16Residual(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
+    return graph.searchImpl<deglib::distances::FP16InnerProductProxy<deglib::distances::FP16InnerProductExt16Residuals>, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
+  }
+
+  template <bool use_max_distance_count = false, bool use_filter = false>
+  inline static deglib::search::ResultSet searchFP16InnerProductProxyExt8Residual(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
+    return graph.searchImpl<deglib::distances::FP16InnerProductProxy<deglib::distances::FP16InnerProductExt8Residuals>, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
+  }
+
+  template <bool use_max_distance_count = false, bool use_filter = false>
   inline static SEARCHFUNC getSearchFunction(const deglib::FloatSpace& feature_space) {
     const auto dim = feature_space.dim();
     const auto metric = feature_space.metric();
@@ -212,6 +242,19 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
         return deglib::graph::ReadOnlyGraph::searchFP16InnerProductExt16Residual<use_max_distance_count, use_filter>;
       else
         return deglib::graph::ReadOnlyGraph::searchFP16InnerProductExt8Residual<use_max_distance_count, use_filter>;
+    }
+    else if(metric == deglib::Metric::FP16InnerProductProxy)
+    {
+      if (dim % 32 == 0)
+        return deglib::graph::ReadOnlyGraph::searchFP16InnerProductProxyExt32<use_max_distance_count, use_filter>;
+      else if (dim % 16 == 0)
+        return deglib::graph::ReadOnlyGraph::searchFP16InnerProductProxyExt16<use_max_distance_count, use_filter>;
+      else if (dim % 8 == 0)
+        return deglib::graph::ReadOnlyGraph::searchFP16InnerProductProxyExt8<use_max_distance_count, use_filter>;
+      else if (dim > 16)
+        return deglib::graph::ReadOnlyGraph::searchFP16InnerProductProxyExt16Residual<use_max_distance_count, use_filter>;
+      else
+        return deglib::graph::ReadOnlyGraph::searchFP16InnerProductProxyExt8Residual<use_max_distance_count, use_filter>;
     }
 
     std::fprintf(stderr, "Could not find metric %u for the readonly_graph search method \n", static_cast<int>(metric));
@@ -310,6 +353,30 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
     return graph.exploreImpl<deglib::distances::FP16InnerProductExt8Residuals>(entry_vertex_index, k, include_entry, max_distance_computation_count);
   }
 
+  inline static deglib::search::ResultSet exploreFP16InnerProductProxy(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
+    return graph.exploreImpl<deglib::distances::FP16InnerProductProxy<deglib::distances::FP16InnerProduct>>(entry_vertex_index, k, include_entry, max_distance_computation_count);
+  }
+
+  inline static deglib::search::ResultSet exploreFP16InnerProductProxyExt8(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
+    return graph.exploreImpl<deglib::distances::FP16InnerProductProxy<deglib::distances::FP16InnerProductExt8>>(entry_vertex_index, k, include_entry, max_distance_computation_count);
+  }
+
+  inline static deglib::search::ResultSet exploreFP16InnerProductProxyExt16(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
+    return graph.exploreImpl<deglib::distances::FP16InnerProductProxy<deglib::distances::FP16InnerProductExt16>>(entry_vertex_index, k, include_entry, max_distance_computation_count);
+  }
+
+  inline static deglib::search::ResultSet exploreFP16InnerProductProxyExt32(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
+    return graph.exploreImpl<deglib::distances::FP16InnerProductProxy<deglib::distances::FP16InnerProductExt32>>(entry_vertex_index, k, include_entry, max_distance_computation_count);
+  }
+
+  inline static deglib::search::ResultSet exploreFP16InnerProductProxyExt16Residual(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
+    return graph.exploreImpl<deglib::distances::FP16InnerProductProxy<deglib::distances::FP16InnerProductExt16Residuals>>(entry_vertex_index, k, include_entry, max_distance_computation_count);
+  }
+
+  inline static deglib::search::ResultSet exploreFP16InnerProductProxyExt8Residual(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
+    return graph.exploreImpl<deglib::distances::FP16InnerProductProxy<deglib::distances::FP16InnerProductExt8Residuals>>(entry_vertex_index, k, include_entry, max_distance_computation_count);
+  }
+
   inline static EXPLOREFUNC getExploreFunction(const deglib::FloatSpace& feature_space) {
     const auto dim = feature_space.dim();
     const auto metric = feature_space.metric();
@@ -369,6 +436,19 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
         return deglib::graph::ReadOnlyGraph::exploreFP16InnerProductExt16Residual;
       else
         return deglib::graph::ReadOnlyGraph::exploreFP16InnerProductExt8Residual;
+    }
+    else if(metric == deglib::Metric::FP16InnerProductProxy)
+    {
+      if (dim % 32 == 0)
+        return deglib::graph::ReadOnlyGraph::exploreFP16InnerProductProxyExt32;
+      else if (dim % 16 == 0)
+        return deglib::graph::ReadOnlyGraph::exploreFP16InnerProductProxyExt16;
+      else if (dim % 8 == 0)
+        return deglib::graph::ReadOnlyGraph::exploreFP16InnerProductProxyExt8;
+      else if (dim > 16)
+        return deglib::graph::ReadOnlyGraph::exploreFP16InnerProductProxyExt16Residual;
+      else
+        return deglib::graph::ReadOnlyGraph::exploreFP16InnerProductProxyExt8Residual;
     }
 
     std::fprintf(stderr, "Could not find metric %u for the readonly_graph explore method \n", static_cast<int>(metric));
