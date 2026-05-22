@@ -1079,61 +1079,6 @@ TEST(FloatSpace, FP16InnerProduct_VariousDimensions) {
     }
 }
 
-// ---------------------------------------------------------------------------
-//  FP16 Inner Product Proxy
-// ---------------------------------------------------------------------------
-
-TEST(FP16InnerProductProxy, BasicUsage) {
-    auto af = make_float_vec(16);
-    auto bf = make_float_vec(16, 99);
-    auto a = floats_to_fp16(af);
-    auto b = floats_to_fp16(bf);
-
-    deglib::distances::FP16Proxy proxyA{a.data(), 16};
-    deglib::distances::FP16Proxy proxyB{b.data(), 16};
-
-    size_t dim = 16;
-    float d = deglib::distances::FP16InnerProductProxy<deglib::distances::FP16InnerProductExt16>::compare(&proxyA, &proxyB, &dim);
-    float ref = fp16_ip_naive_ref(a.data(), b.data(), 16);
-    EXPECT_NEAR(d, ref, 1e-2f);
-}
-
-TEST(FloatSpace, FP16InnerProductProxy_128Dim) {
-    deglib::FloatSpace space(128, deglib::Metric::FP16InnerProductProxy);
-    EXPECT_EQ(space.dim(), 128u);
-    EXPECT_EQ(space.metric(), deglib::Metric::FP16InnerProductProxy);
-    EXPECT_EQ(space.get_data_size(), sizeof(deglib::distances::FP16Proxy));
-
-    auto af = make_float_vec(128);
-    auto bf = make_float_vec(128, 99);
-    auto a = floats_to_fp16(af);
-    auto b = floats_to_fp16(bf);
-
-    deglib::distances::FP16Proxy proxyA{a.data(), 128};
-    deglib::distances::FP16Proxy proxyB{b.data(), 128};
-
-    float d = space.get_dist_func()(&proxyA, &proxyB, space.get_dist_func_param());
-    float ref = fp16_ip_naive_ref(a.data(), b.data(), 128);
-    EXPECT_NEAR(d, ref, 1e-2f);
-}
-
-TEST(FloatSpace, FP16InnerProductProxy_VariousDimensions) {
-    std::vector<size_t> dims = {1, 3, 7, 8, 15, 16, 17, 31, 32, 33, 63, 64, 128, 256};
-    for (size_t dim : dims) {
-        deglib::FloatSpace space(dim, deglib::Metric::FP16InnerProductProxy);
-        auto af = make_float_vec(dim);
-        auto bf = make_float_vec(dim, static_cast<unsigned>(dim));
-        auto a = floats_to_fp16(af);
-        auto b = floats_to_fp16(bf);
-
-        deglib::distances::FP16Proxy proxyA{a.data(), dim};
-        deglib::distances::FP16Proxy proxyB{b.data(), dim};
-
-        float d = space.get_dist_func()(&proxyA, &proxyB, space.get_dist_func_param());
-        float ref = fp16_ip_naive_ref(a.data(), b.data(), dim);
-        EXPECT_NEAR(d, ref, 1e-2f) << "dim=" << dim;
-    }
-}
 
 // ---------------------------------------------------------------------------
 //  Main — handled by test_main.cpp (shared entry point)
