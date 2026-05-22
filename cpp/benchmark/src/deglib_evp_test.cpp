@@ -297,8 +297,8 @@ static int run_benchmark(
     // --------------------------------------------------------------------------
     // Load data
     // --------------------------------------------------------------------------
-    const auto train_fvecs  = data_path / "SISAP" / "train.fvecs";
-    const auto allknn_ivecs = data_path / "SISAP" / "allknn.ivecs";
+    const auto train_fvecs = data_path / "train.fvecs";
+    const auto allknn_ivecs = data_path / "allknn.ivecs";
 
     if (!std::filesystem::exists(train_fvecs)) {
         std::fprintf(stderr, "Error: %ls not found\n", train_fvecs.wstring().c_str());

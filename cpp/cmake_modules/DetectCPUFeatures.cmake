@@ -1,82 +1,77 @@
 include(CheckCXXSourceCompiles)
+include(CheckCXXSourceRuns)
 
 set(OLD_CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS})
 
+# We modify these test programs to ensure they return 0 on successful execution.
+# Using 'volatile' tells the compiler not to optimize the vector instructions away.
 set(SSE4PROG "
-
-#include<smmintrin.h>
-int main(){
-__m128 x=_mm_set1_ps(0.5);
-x=_mm_dp_ps(x,x,0x77);
-return _mm_movemask_ps(x);
+#include <smmintrin.h>
+int main() {
+    __m128 x = _mm_set1_ps(0.5f);
+    x = _mm_dp_ps(x, x, 0x77);
+    volatile float d = _mm_cvtss_f32(x);
+    (void)d;
+    return 0;
 }")
 
 set(AVXPROG "
-
-#include<immintrin.h>
-int main(){
-__m128 x=_mm_set1_ps(0.5);
-x=_mm_permute_ps(x,1);
-return _mm_movemask_ps(x);
+#include <immintrin.h>
+int main() {
+    __m128 x = _mm_set1_ps(0.5f);
+    x = _mm_permute_ps(x, 1);
+    volatile float d = _mm_cvtss_f32(x);
+    (void)d;
+    return 0;
 }")
 
 set(AVX2PROG "
-
-#include<immintrin.h>
-int main(){
-__m256i x=_mm256_set1_epi32(5);
-x=_mm256_add_epi32(x,x);
-return _mm256_movemask_epi8(x);
+#include <immintrin.h>
+int main() {
+    __m256i x = _mm256_set1_epi32(5);
+    x = _mm256_add_epi32(x, x);
+    volatile int d = _mm256_movemask_epi8(x);
+    (void)d;
+    return 0;
 }")
-
-# ============================================================================
-# AVX-512 detection — based on actual intrinsics used in deglib/include/distances.h
-#
-# distances.h uses these AVX-512 intrinsics:
-#   Float distance (AVX512F + FMA):
-#     _mm512_setzero_ps, _mm512_sub_ps, _mm512_loadu_ps,
-#     _mm512_fmadd_ps, _mm512_extractf32x8_ps (requires AVX512DQ)
-#   Binary distance (AVX512VPOPCNTDQ):
-#     _mm512_setzero_si512, _mm512_loadu_si512, _mm512_and_si512,
-#     _mm512_add_epi64, _mm512_popcnt_epi64, _mm512_storeu_si512
-#
-# USE_AVX512 is set when AVX512F + FMA are available (float distance path).
-# The binary distance path is guarded by #if defined(USE_AVX512) && defined(__AVX512VPOPCNTDQ__)
-# in distances.h and only activates when the compiler defines __AVX512VPOPCNTDQ__.
-# ===========================================================================
 
 # Test AVX512F — minimal: just setzero + reduce_add (no DQ needed)
 set(AVX512F_MIN_PROG "
-
-#include<immintrin.h>
-int main(){
+#include <immintrin.h>
+int main() {
     __m512 v = _mm512_set1_ps(1.0f);
-    return _mm512_reduce_add_ps(v) > 0 ? 1 : 0;
+    volatile float res = _mm512_reduce_add_ps(v);
+    (void)res;
+    return 0;
 }")
 
+# Helper macro to check compiler capability AND runtime execution
+macro(check_cpu_feature CODE FLAGS VAR)
+    set(CMAKE_REQUIRED_FLAGS "${FLAGS}")
+    if(CMAKE_CROSSCOMPILING)
+        # If cross-compiling, we can only verify if the compiler compiles the code
+        check_cxx_source_compiles("${CODE}" ${VAR})
+    else()
+        # If native compiling, we also verify that the compiled code runs successfully
+        check_cxx_source_runs("${CODE}" ${VAR})
+    endif()
+endmacro()
+
 if(MSVC)
-	set(CMAKE_REQUIRED_FLAGS "/EHsc /arch:SSE2")
-	check_cxx_source_compiles("${SSE4PROG}" SUPPORT_SSE42)
-	message(STATUS "SUPPORT_SSE42 ${SUPPORT_SSE42}")
-	set(CMAKE_REQUIRED_FLAGS "/EHsc /arch:AVX")
-	check_cxx_source_compiles("${AVXPROG}" SUPPORT_AVX)
-	message(STATUS "SUPPORT_AVX ${SUPPORT_AVX}")
-	set(CMAKE_REQUIRED_FLAGS "/EHsc /arch:AVX2")
-	check_cxx_source_compiles("${AVX2PROG}" SUPPORT_AVX2)
-	message(STATUS "SUPPORT_AVX2 ${SUPPORT_AVX2}")
-	set(CMAKE_REQUIRED_FLAGS "/EHsc /arch:AVX512")
-	check_cxx_source_compiles("${AVX512F_MIN_PROG}" SUPPORT_AVX512F)
-	message(STATUS "SUPPORT_AVX512F ${SUPPORT_AVX512F}")
+    check_cpu_feature("${SSE4PROG}" "/EHsc /arch:SSE2" SUPPORT_SSE42)
+    message(STATUS "SUPPORT_SSE42 ${SUPPORT_SSE42}")
+    check_cpu_feature("${AVXPROG}" "/EHsc /arch:AVX" SUPPORT_AVX)
+    message(STATUS "SUPPORT_AVX ${SUPPORT_AVX}")
+    check_cpu_feature("${AVX2PROG}" "/EHsc /arch:AVX2" SUPPORT_AVX2)
+    message(STATUS "SUPPORT_AVX2 ${SUPPORT_AVX2}")
+    check_cpu_feature("${AVX512F_MIN_PROG}" "/EHsc /arch:AVX512" SUPPORT_AVX512F)
+    message(STATUS "SUPPORT_AVX512F ${SUPPORT_AVX512F}")
 else()
-	set(CMAKE_REQUIRED_FLAGS "-march=native -msse4.2")
-	check_cxx_source_compiles("${SSE4PROG}" SUPPORT_SSE42)
-	set(CMAKE_REQUIRED_FLAGS "-march=native -mavx")
-	check_cxx_source_compiles("${AVXPROG}" SUPPORT_AVX)
-	set(CMAKE_REQUIRED_FLAGS "-march=native -mavx2")
-	check_cxx_source_compiles("${AVX2PROG}" SUPPORT_AVX2)
-	set(CMAKE_REQUIRED_FLAGS "-march=native -mavx512f -mfma")
-	check_cxx_source_compiles("${AVX512F_MIN_PROG}" SUPPORT_AVX512F)
-	message(STATUS "SUPPORT_AVX512F ${SUPPORT_AVX512F}")
+    check_cpu_feature("${SSE4PROG}" "-march=native -msse4.2" SUPPORT_SSE42)
+    check_cpu_feature("${AVXPROG}" "-march=native -mavx" SUPPORT_AVX)
+    check_cpu_feature("${AVX2PROG}" "-march=native -mavx2" SUPPORT_AVX2)
+    check_cpu_feature("${AVX512F_MIN_PROG}" "-march=native -mavx512f -mfma" SUPPORT_AVX512F)
+    message(STATUS "SUPPORT_AVX512F ${SUPPORT_AVX512F}")
 endif()	
 
 set(CMAKE_REQUIRED_FLAGS ${OLD_CMAKE_REQUIRED_FLAGS})

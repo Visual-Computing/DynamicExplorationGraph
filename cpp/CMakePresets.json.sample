@@ -10,7 +10,7 @@
       "name": "default",
       "hidden": false,
       "description": "Preset that sets the DATA_PATH variable.",
-      "binaryDir": "${sourceDir}/build",
+      "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "DATA_PATH": {
           "value": "",

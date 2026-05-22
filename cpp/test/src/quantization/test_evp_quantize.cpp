@@ -1,10 +1,11 @@
-// test_evp_quantize.cpp — Unit tests for deglib::quantization (quantize_single, quantize_batch, similarity_bytes)
+// test_evp_quantize.cpp — Unit tests for deglib::quantization (quantize_single, quantize_batch)
 
 #include <cstdint>
 #include <random>
 #include <vector>
 
 #include "quantization/evp_quantize.h"
+#include "distances.h"
 #include "gtest/gtest.h"
 
 // ============================================================================
@@ -140,10 +141,10 @@ TEST(EvpQuantize, SingleVsBatchConsistency) {
 }
 
 // ============================================================================
-// similarity_bytes
+// Integration with distances.h EvpBitsSimilarity
 // ============================================================================
 
-TEST(EvpQuantize, SimilarityBytesNoOverlap) {
+TEST(EvpQuantize, EvpSimilarityNoOverlap) {
     float data[] = {
         1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f,
         8.0f, 7.0f, 6.0f, 5.0f, 4.0f, 3.0f, 2.0f, 1.0f,
@@ -154,36 +155,23 @@ TEST(EvpQuantize, SimilarityBytesNoOverlap) {
     auto r0 = deglib::quantization::quantize_single(data, dim, non_zeros);
     auto r1 = deglib::quantization::quantize_single(data + dim, dim, non_zeros);
 
-    float sim = deglib::quantization::similarity_bytes(
-        r0.data(), r0.data() + dim / 8,
-        r1.data(), r1.data() + dim / 8,
-        dim);
+    float sim = deglib::distances::EvpBitsSimilarity::compare_naive(
+        r0.data(), r1.data(), &dim);
 
-    EXPECT_NEAR(sim, 16.0f, 0.01f);  // dim*2, no overlap
+    EXPECT_NEAR(sim, 8.0f, 0.01f);  // dim, no overlap
 }
 
-TEST(EvpQuantize, SimilarityBytesSelf) {
+TEST(EvpQuantize, EvpSimilaritySelf) {
     float vec[] = {1.0f, -1.0f, 2.0f, -2.0f, 3.0f, -3.0f, 4.0f, -4.0f};
     const uint32_t dim = 8;
     const uint32_t non_zeros = 4;
 
     auto result = deglib::quantization::quantize_single(vec, dim, non_zeros);
 
-    float sim = deglib::quantization::similarity_bytes(
-        result.data(), result.data() + dim / 8,
-        result.data(), result.data() + dim / 8,
-        dim);
+    float sim = deglib::distances::EvpBitsSimilarity::compare_naive(
+        result.data(), result.data(), &dim);
 
-    EXPECT_NEAR(sim, 20.0f, 0.01f);
-}
-
-// ============================================================================
-// max_similarity
-// ============================================================================
-
-TEST(EvpQuantize, MaxSimilarity) {
-    EXPECT_NEAR(deglib::quantization::max_similarity(8, 4), 24.0f, 0.01f);   // 2*4 + 8*2
-    EXPECT_NEAR(deglib::quantization::max_similarity(128, 32), 320.0f, 0.01f); // 2*32 + 128*2
+    EXPECT_NEAR(sim, 12.0f, 0.01f); // 2 * non_zeros_active + dim = 4 + 8 = 12
 }
 
 // ============================================================================

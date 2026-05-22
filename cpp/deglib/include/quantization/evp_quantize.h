@@ -163,5 +163,4 @@ inline std::vector<std::byte> quantize_batch(const float* data, size_t count, ui
 
     return result;
 }
-
 }  // namespace deglib::quantization

@@ -24,6 +24,8 @@
 #include "gmock/gmock.h"
 
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 //  Naive reference implementations
 // ---------------------------------------------------------------------------
 
@@ -608,6 +610,9 @@ TEST(EvpBitsSimilarity, Avx2MatchesNaive_256Dim) {
 }
 
 TEST(EvpBitsSimilarity, Avx512MatchesNaive_64Dim) {
+#if !defined(USE_AVX512)
+    GTEST_SKIP() << "AVX-512 support was not compiled in";
+#else
     auto [a, b] = make_evp_pair(64, 16);
     uint32_t dim = 64;
     float naive = deglib::distances::EvpBitsSimilarity::compare_naive(
@@ -617,9 +622,13 @@ TEST(EvpBitsSimilarity, Avx512MatchesNaive_64Dim) {
         static_cast<const void*>(a.data()), static_cast<const void*>(b.data()),
         static_cast<const void*>(&dim));
     EXPECT_NEAR(avx512, naive, 0.001f);
+#endif
 }
 
 TEST(EvpBitsSimilarity, Avx512MatchesNaive_128Dim) {
+#if !defined(USE_AVX512)
+    GTEST_SKIP() << "AVX-512 support was not compiled in";
+#else
     auto [a, b] = make_evp_pair(128, 32);
     uint32_t dim = 128;
     float naive = deglib::distances::EvpBitsSimilarity::compare_naive(
@@ -629,9 +638,13 @@ TEST(EvpBitsSimilarity, Avx512MatchesNaive_128Dim) {
         static_cast<const void*>(a.data()), static_cast<const void*>(b.data()),
         static_cast<const void*>(&dim));
     EXPECT_NEAR(avx512, naive, 0.001f);
+#endif
 }
 
 TEST(EvpBitsSimilarity, Avx512MatchesNaive_256Dim) {
+#if !defined(USE_AVX512)
+    GTEST_SKIP() << "AVX-512 support was not compiled in";
+#else
     auto [a, b] = make_evp_pair(256, 64);
     uint32_t dim = 256;
     float naive = deglib::distances::EvpBitsSimilarity::compare_naive(
@@ -641,9 +654,13 @@ TEST(EvpBitsSimilarity, Avx512MatchesNaive_256Dim) {
         static_cast<const void*>(a.data()), static_cast<const void*>(b.data()),
         static_cast<const void*>(&dim));
     EXPECT_NEAR(avx512, naive, 0.001f);
+#endif
 }
 
 TEST(EvpBitsSimilarity, Avx2AndAvx512MatchNaive_128Dim) {
+#if !defined(USE_AVX512)
+    GTEST_SKIP() << "AVX-512 support was not compiled in";
+#else
     auto [a, b] = make_evp_pair(128, 32);
     uint32_t dim = 128;
     const void* qa = static_cast<const void*>(a.data());
@@ -656,9 +673,13 @@ TEST(EvpBitsSimilarity, Avx2AndAvx512MatchNaive_128Dim) {
 
     EXPECT_NEAR(avx2,   naive,  0.001f);
     EXPECT_NEAR(avx512, naive,  0.001f);
+#endif
 }
 
 TEST(EvpBitsSimilarity, Avx2AndAvx512MatchNaive_256Dim) {
+#if !defined(USE_AVX512)
+    GTEST_SKIP() << "AVX-512 support was not compiled in";
+#else
     auto [a, b] = make_evp_pair(256, 64);
     uint32_t dim = 256;
     const void* qa = static_cast<const void*>(a.data());
@@ -671,6 +692,7 @@ TEST(EvpBitsSimilarity, Avx2AndAvx512MatchNaive_256Dim) {
 
     EXPECT_NEAR(avx2,   naive,  0.001f);
     EXPECT_NEAR(avx512, naive,  0.001f);
+#endif
 }
 
 TEST(EvpBitsSimilarity, Symmetry) {
@@ -704,13 +726,16 @@ TEST(EvpBitsSimilarity, SmallDims) {
     float avx2   = deglib::distances::EvpBitsSimilarity::compare_avx2(
         static_cast<const void*>(result.data()), static_cast<const void*>(result.data()),
         static_cast<const void*>(&dim));
-    float avx512 = deglib::distances::EvpBitsSimilarity::compare_avx512(
-        static_cast<const void*>(result.data()), static_cast<const void*>(result.data()),
-        static_cast<const void*>(&dim));
 
     EXPECT_GT(naive, 0.0f);
     EXPECT_NEAR(avx2,   naive,  0.001f);
+
+#if defined(USE_AVX512)
+    float avx512 = deglib::distances::EvpBitsSimilarity::compare_avx512(
+        static_cast<const void*>(result.data()), static_cast<const void*>(result.data()),
+        static_cast<const void*>(&dim));
     EXPECT_NEAR(avx512, naive,  0.001f);
+#endif
 }
 
 // ---------------------------------------------------------------------------
