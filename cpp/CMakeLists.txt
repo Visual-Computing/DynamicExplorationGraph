@@ -146,7 +146,7 @@ message("C++ compiler flags: ${CMAKE_CXX_FLAGS}")
 message("C++ compiler flags release: ${CMAKE_CXX_FLAGS_RELEASE}")
 
 add_subdirectory(deglib)
-add_subdirectory(evp)
+
 
 # fmt is only needed by benchmarks — not by deglib/evp.
 if (ENABLE_BENCHMARKS)
