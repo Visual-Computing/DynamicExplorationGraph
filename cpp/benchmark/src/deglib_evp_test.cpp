@@ -66,7 +66,6 @@ enum class BenchmarkMode {
     EvpBuildEvpExploreFP16Rerank,
     EvpBuildEvpExplore,
     EvpBuildFP16ExternalSearch,
-    FP32BuildFP32Explore,
     FP16BuildFP16Explore,
     EvpLinearSearch
 };
@@ -233,50 +232,54 @@ static void run_exploration_sweep(
                 k_top, best_recall, best_max_dist, best_explore_ms);
 }
 
-// ============================================================================
-// FP32 -> FP16 batch conversion helper
-// ============================================================================
+
 
 /**
- * Converts a packed FP32 array (count × dims floats) to FP16 (uint16_t) in
- * parallel. Uses F16C intrinsics when available, falls back to a portable
- * software implementation otherwise.
+ * Reads an hvecs file containing FP16 feature vectors.
+ * Follows the standard vecs format (4-byte uint32_t dimension header followed by vector data).
  */
-static std::vector<uint16_t> fp32_to_fp16_batch(
-    const float* src, size_t count, size_t dims, uint32_t threads)
-{
-    std::vector<uint16_t> dst(count * dims);
-    deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads, 1,
-        [&](size_t i, size_t /*thread_id*/) {
-            const float* s = src + i * dims;
-            uint16_t*    d = dst.data() + i * dims;
-#if defined(USE_SSE) || defined(USE_AVX) || defined(USE_AVX512)
-            for (size_t k = 0; k < dims; ++k) {
-                __m128  f32 = _mm_set_ss(s[k]);
-                __m128i h   = _mm_cvtps_ph(f32, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
-                d[k] = static_cast<uint16_t>(_mm_cvtsi128_si32(h));
-            }
-#else
-            for (size_t k = 0; k < dims; ++k) {
-                uint32_t bits;
-                std::memcpy(&bits, &s[k], sizeof(bits));
-                const uint32_t sign     = (bits & 0x80000000u) >> 16;
-                const uint32_t exponent = (bits & 0x7F800000u) >> 23;
-                const uint32_t mantissa = (bits & 0x007FFFFFu);
-                uint16_t h;
-                if (exponent == 255) {
-                    h = static_cast<uint16_t>(sign | 0x7C00u | (mantissa ? 0x0200u : 0u));
-                } else {
-                    const int32_t e = static_cast<int32_t>(exponent) - 127 + 15;
-                    if      (e >= 31) h = static_cast<uint16_t>(sign | 0x7C00u); // overflow → inf
-                    else if (e <= 0)  h = static_cast<uint16_t>(sign);            // underflow → 0
-                    else              h = static_cast<uint16_t>(sign | (static_cast<uint32_t>(e) << 10) | (mantissa >> 13));
-                }
-                d[k] = h;
-            }
-#endif
-        });
-    return dst;
+static auto hvecs_read(const char* fname, size_t& d_out, size_t& n_out) {
+    std::error_code ec{};
+    auto file_size = std::filesystem::file_size(fname, ec);
+    if (ec != std::error_code{}) {
+        std::fprintf(stderr, "error when accessing file %s, size is: %ju message: %s \n", fname, file_size, ec.message().c_str());
+        perror("");
+        abort();
+    }
+
+    // open as binary
+    auto ifstream = std::ifstream(fname, std::ios::binary);
+    if (!ifstream.is_open()) {
+        std::fprintf(stderr, "could not open %s\n", fname);
+        perror("");
+        abort();
+    }
+
+    // read dimension header
+    uint32_t dims = 0;
+    ifstream.read(reinterpret_cast<char*>(&dims), sizeof(dims));
+    assert((dims > 0 && dims < 1'000'000) && "unreasonable dimension");
+
+    // compute number of rows
+    size_t row_bytes = sizeof(uint32_t) + dims * sizeof(uint16_t);
+    assert(file_size % row_bytes == 0 || !"weird file size");
+    size_t n = (size_t)file_size / row_bytes;
+    d_out = dims;
+    n_out = n;
+
+    // read data rows
+    auto x = std::make_unique<std::byte[]>(file_size);
+    ifstream.seekg(0);
+    ifstream.read(reinterpret_cast<char*>(x.get()), file_size);
+    if (!ifstream) assert(ifstream.gcount() == static_cast<int>(file_size) || !"could not read whole file");
+
+    // shift array to remove row headers (the headers are 4 bytes at the start of each row)
+    for (size_t i = 0; i < n; i++) {
+        std::memmove(&x[i * dims * sizeof(uint16_t)], &x[sizeof(uint32_t) + i * row_bytes], dims * sizeof(uint16_t));
+    }
+
+    ifstream.close();
+    return x;
 }
 
 // ============================================================================
@@ -295,11 +298,11 @@ static int run_benchmark(
     // --------------------------------------------------------------------------
     // Load data
     // --------------------------------------------------------------------------
-    const auto train_fvecs = data_path / "train.fvecs";
+    const auto train_hvecs = data_path / "train.hvecs";
     const auto allknn_ivecs = data_path / "allknn.ivecs";
 
-    if (!std::filesystem::exists(train_fvecs)) {
-        std::fprintf(stderr, "Error: %ls not found\n", train_fvecs.wstring().c_str());
+    if (!std::filesystem::exists(train_hvecs)) {
+        std::fprintf(stderr, "Error: %ls not found\n", train_hvecs.wstring().c_str());
         return 1;
     }
     if (!std::filesystem::exists(allknn_ivecs)) {
@@ -310,109 +313,36 @@ static int run_benchmark(
     double t_load = now_ms();
 
     size_t dims = 0, count = 0;
-    auto train_bytes = deglib::fvecs_read(train_fvecs.string().c_str(), dims, count);
-    const float* train_data = reinterpret_cast<const float*>(train_bytes.get());
+    auto train_bytes = hvecs_read(train_hvecs.string().c_str(), dims, count);
+    const uint16_t* train_data_fp16 = reinterpret_cast<const uint16_t*>(train_bytes.get());
 
     size_t gt_dims = 0, gt_count = 0;
     auto gt_bytes = deglib::ivecs_read(allknn_ivecs.string().c_str(), gt_dims, gt_count);
     const int32_t* gt_data = reinterpret_cast<const int32_t*>(gt_bytes.get());
 
     double load_ms = now_ms() - t_load;
-    std::printf("Loaded: %zu vectors, dim=%zu\n", count, dims);
+    std::printf("Loaded %ls: %zu vectors, dim=%zu\n", train_hvecs.filename().wstring().c_str(), count, dims);
     std::printf("Ground truth: %zu queries, top-%zu\n", gt_count, gt_dims);
     std::printf("Load time: %.2f ms\n\n", load_ms);
 
     if (count != gt_count) {
         std::fprintf(stderr,
-            "Error: train.fvecs and allknn.ivecs must contain the same number of entries (%zu vs %zu)\n",
+            "Error: train.hvecs and allknn.ivecs must contain the same number of entries (%zu vs %zu)\n",
             count, gt_count);
         return 1;
     }
 
-    if (mode == BenchmarkMode::FP32BuildFP32Explore) {
-        std::printf("=== FP32 Build FP32 Explore Graph Benchmark ===\n");
-        std::printf("Data path: %ls\n", data_path.wstring().c_str());
-        std::printf("K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.2f\n",
-                    k_top, k_graph, k_ext, eps_ext);
-        std::printf("Threads: %zu\n\n", threads);
 
-        // --------------------------------------------------------------------------
-        // Build graph with Metric::InnerProduct (no quantization)
-        // --------------------------------------------------------------------------
-        double t2 = now_ms();
 
-        deglib::FloatSpace feature_space(static_cast<uint32_t>(dims), deglib::Metric::InnerProduct);
-        deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(count), k_graph, feature_space);
-
-        std::mt19937 rnd(42);
-        deglib::builder::EvenRegularGraphBuilder builder(
-            graph, rnd,
-            deglib::builder::OptimizationTarget::LowLID,
-            k_ext, eps_ext,
-            0, 0.0f,
-            5,
-            0, 0,
-            true,
-            false,
-            false
-        );
-        builder.setThreadCount(static_cast<uint32_t>(threads));
-
-        // Add all entries from raw float data
-        for (size_t i = 0; i < count; ++i) {
-            std::vector<std::byte> feature(dims * sizeof(float));
-            std::memcpy(feature.data(), train_data + i * dims, dims * sizeof(float));
-            builder.addEntry(static_cast<uint32_t>(i), std::move(feature));
-        }
-
-        auto build_callback = [](deglib::builder::BuilderStatus& status) {
-            std::printf("  Build step %llu: added=%llu, improved=%llu\n",
-                        (unsigned long long)status.step,
-                        (unsigned long long)status.added,
-                        (unsigned long long)status.improved);
-        };
-
-        builder.build(build_callback, false);
-
-        double build_ms = now_ms() - t2;
-        std::printf("Graph built: %zu vertices, %u edges/vertex\n", graph.size(), graph.getEdgesPerVertex());
-        std::printf("Build time: %.2f ms\n\n", build_ms);
-
-        // --------------------------------------------------------------------------
-        // Exploration sweep
-        // --------------------------------------------------------------------------
-        run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, threads, "FP32 Build FP32 Explore");
-
-        // --------------------------------------------------------------------------
-        // Summary
-        // --------------------------------------------------------------------------
-        std::printf("=============================================\n");
-        std::printf("          FINAL SUMMARY (FP32 Build FP32 Explore)\n");
-        std::printf("=============================================\n");
-        std::printf("Graph Build:             %.2f ms\n", build_ms);
-        std::printf("---------------------------------------------\n");
-        std::printf("Vectors:                 %zu\n", count);
-        std::printf("Dimensions:              %zu\n", dims);
-        std::printf("=============================================\n\n");
-
-        return 0;
-    } else if (mode == BenchmarkMode::FP16BuildFP16Explore) {
+    if (mode == BenchmarkMode::FP16BuildFP16Explore) {
         std::printf("=== FP16 Build FP16 Explore Graph Benchmark ===\n");
         std::printf("Data path: %ls\n", data_path.wstring().c_str());
         std::printf("K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.2f\n",
                     k_top, k_graph, k_ext, eps_ext);
         std::printf("Threads: %zu\n\n", threads);
 
-        // --------------------------------------------------------------------------
-        // Convert FP32 → FP16
-        // --------------------------------------------------------------------------
-        double t_conv_start = now_ms();
-        auto fp16_data = fp32_to_fp16_batch(train_data, count, dims, threads);
-        double convert_ms = now_ms() - t_conv_start;
-
-        std::printf("FP32→FP16 conversion time: %.2f ms\n", convert_ms);
         std::printf("FP16 data size: %.2f MB\n\n",
-                    static_cast<double>(fp16_data.size() * sizeof(uint16_t)) / (1024.0 * 1024.0));
+                    static_cast<double>(count * dims * sizeof(uint16_t)) / (1024.0 * 1024.0));
 
         // --------------------------------------------------------------------------
         // Build graph with Metric::FP16InnerProduct
@@ -436,11 +366,11 @@ static int run_benchmark(
         );
         builder.setThreadCount(static_cast<uint32_t>(threads));
 
-        // Add all entries from FP16 data
+        // Add all entries from FP16 data directly
         const size_t bytes_per_fp16 = dims * sizeof(uint16_t);
+        const std::byte* train_data_bytes = train_bytes.get();
         for (size_t i = 0; i < count; ++i) {
-            std::vector<std::byte> feature(bytes_per_fp16);
-            std::memcpy(feature.data(), fp16_data.data() + i * dims, bytes_per_fp16);
+            std::vector<std::byte> feature(train_data_bytes + i * bytes_per_fp16, train_data_bytes + (i + 1) * bytes_per_fp16);
             builder.addEntry(static_cast<uint32_t>(i), std::move(feature));
         }
 
@@ -468,7 +398,6 @@ static int run_benchmark(
         std::printf("=============================================\n");
         std::printf("          FINAL SUMMARY (FP16 Build FP16 Explore)\n");
         std::printf("=============================================\n");
-        std::printf("FP32→FP16 Conversion:    %.2f ms\n", convert_ms);
         std::printf("Graph Build:             %.2f ms\n", build_ms);
         std::printf("---------------------------------------------\n");
         std::printf("Vectors:                 %zu\n", count);
@@ -492,7 +421,7 @@ static int run_benchmark(
         double t1 = now_ms();
 
         auto quantized = deglib::quantization::quantize_batch(
-            train_data, count, static_cast<uint32_t>(dims), non_zeros, threads);
+            train_data_fp16, count, static_cast<uint32_t>(dims), non_zeros, threads);
 
         double quantize_ms = now_ms() - t1;
         std::printf("Quantize time: %.2f ms\n", quantize_ms);
@@ -523,8 +452,7 @@ static int run_benchmark(
 
         const size_t bytes_per_evp = dims / 4;
         for (size_t i = 0; i < count; ++i) {
-            std::vector<std::byte> feature(quantized.data() + i * bytes_per_evp,
-                                           quantized.data() + (i + 1) * bytes_per_evp);
+            std::vector<std::byte> feature(quantized.data() + i * bytes_per_evp, quantized.data() + (i + 1) * bytes_per_evp);
             builder.addEntry(static_cast<uint32_t>(i), std::move(feature));
         }
 
@@ -546,11 +474,10 @@ static int run_benchmark(
         // --------------------------------------------------------------------------
         double conversion_ms = 0.0;
         if (mode == BenchmarkMode::EvpBuildFP16ExternalSearch) {
-            // Convert FP32 → FP16
-            double t_conv_start = now_ms();
-            auto fp16_data = fp32_to_fp16_batch(train_data, count, dims, threads);
-            conversion_ms = now_ms() - t_conv_start;
-            std::printf("FP32→FP16 conversion time: %.2f ms\n", conversion_ms);
+            // Copy loaded FP16 data to a mutable vector for in-place reordering
+            double t_copy_start = now_ms();
+            std::vector<uint16_t> fp16_data(train_data_fp16, train_data_fp16 + count * dims);
+            conversion_ms = now_ms() - t_copy_start;
 
             // Permute FP16 array in-place so that fp16_data[internal_index] holds the
             // features for that internal index (no proxy needed, no extra allocation).
@@ -572,17 +499,11 @@ static int run_benchmark(
                                   "EVP Build FP16 External Search (ReadOnlyGraphExternal)",
                                   true);
         } else if (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank) {
-            // Convert FP32 → FP16 for reranking
-            double t_conv_start = now_ms();
-            auto fp16_data = fp32_to_fp16_batch(train_data, count, dims, threads);
-            conversion_ms = now_ms() - t_conv_start;
-            std::printf("FP32→FP16 conversion time: %.2f ms\n", conversion_ms);
-
             deglib::FloatSpace fp16_rerank_space(static_cast<uint32_t>(dims), deglib::Metric::FP16InnerProduct);
             run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, threads,
                                   "EVP Build EVP Explore FP16 Rerank",
                                   false,
-                                  fp16_data.data(),
+                                  train_data_fp16,
                                   dims * sizeof(uint16_t),
                                   fp16_rerank_space.get_dist_func(),
                                   dims);
@@ -621,7 +542,7 @@ static int run_benchmark(
         double t1 = now_ms();
 
         auto quantized = deglib::quantization::quantize_batch(
-            train_data, count, static_cast<uint32_t>(dims), non_zeros, threads);
+            train_data_fp16, count, static_cast<uint32_t>(dims), non_zeros, threads);
 
         double quantize_ms = now_ms() - t1;
         std::printf("Quantize time: %.2f ms\n", quantize_ms);
@@ -737,7 +658,7 @@ int main(int argc, char* argv[]) {
     // Parse data path and mode
     // --------------------------------------------------------------------------
     std::filesystem::path data_path;
-    std::string mode = "evp-build-evp-explore-fp16-rerank";  // default
+    std::string mode = "fp16-build-fp16-explore";  // default
 
     if (argc >= 2) {
         data_path = argv[1];
@@ -745,7 +666,7 @@ int main(int argc, char* argv[]) {
 #ifdef DATA_PATH
         data_path = DATA_PATH;
 #else
-        std::fprintf(stderr, "Usage: %s <data_path> [evp-build-evp-explore-fp16-rerank|evp-build-evp-explore|evp-build-fp16-external-search|fp32-build-fp32-explore|fp16-build-fp16-explore|evp-linear-search]\n", argv[0]);
+        std::fprintf(stderr, "Usage: %s <data_path> [evp-build-evp-explore-fp16-rerank|evp-build-evp-explore|evp-build-fp16-external-search|fp16-build-fp16-explore|evp-linear-search]\n", argv[0]);
         return 1;
 #endif
     }
@@ -755,14 +676,13 @@ int main(int argc, char* argv[]) {
     }
 
     // Support old short names as aliases for ease of use
+    if (mode == "fp16") mode = "fp16-build-fp16-explore";
     if (mode == "evp") mode = "evp-build-evp-explore-fp16-rerank";
     if (mode == "evp-no-rerank") mode = "evp-build-evp-explore";
-    if (mode == "raw") mode = "fp32-build-fp32-explore";
-    if (mode == "fp16") mode = "fp16-build-fp16-explore";
     if (mode == "evp-linear") mode = "evp-linear-search";
 
-    if (mode != "evp-build-evp-explore-fp16-rerank" && mode != "evp-build-evp-explore" && mode != "evp-build-fp16-external-search" && mode != "fp32-build-fp32-explore" && mode != "fp16-build-fp16-explore" && mode != "evp-linear-search") {
-        std::fprintf(stderr, "Unknown mode '%s'. Use 'evp-build-evp-explore-fp16-rerank', 'evp-build-evp-explore', 'evp-build-fp16-external-search', 'fp32-build-fp32-explore', 'fp16-build-fp16-explore', or 'evp-linear-search'.\n", mode.c_str());
+    if (mode != "evp-build-evp-explore-fp16-rerank" && mode != "evp-build-evp-explore" && mode != "evp-build-fp16-external-search" && mode != "fp16-build-fp16-explore" && mode != "evp-linear-search") {
+        std::fprintf(stderr, "Unknown mode '%s'. Use 'evp-build-evp-explore-fp16-rerank', 'evp-build-evp-explore', 'evp-build-fp16-external-search', 'fp16-build-fp16-explore', or 'evp-linear-search'.\n", mode.c_str());
         return 1;
     }
 
@@ -771,15 +691,13 @@ int main(int argc, char* argv[]) {
     // --------------------------------------------------------------------------
     // Dispatch to selected mode
     // --------------------------------------------------------------------------
-    BenchmarkMode benchmark_mode = BenchmarkMode::EvpBuildEvpExploreFP16Rerank;
-    if (mode == "evp-build-evp-explore") {
+    BenchmarkMode benchmark_mode = BenchmarkMode::FP16BuildFP16Explore;
+    if (mode == "evp-build-evp-explore-fp16-rerank") {
+        benchmark_mode = BenchmarkMode::EvpBuildEvpExploreFP16Rerank;
+    } else if (mode == "evp-build-evp-explore") {
         benchmark_mode = BenchmarkMode::EvpBuildEvpExplore;
     } else if (mode == "evp-build-fp16-external-search") {
         benchmark_mode = BenchmarkMode::EvpBuildFP16ExternalSearch;
-    } else if (mode == "fp32-build-fp32-explore") {
-        benchmark_mode = BenchmarkMode::FP32BuildFP32Explore;
-    } else if (mode == "fp16-build-fp16-explore") {
-        benchmark_mode = BenchmarkMode::FP16BuildFP16Explore;
     } else if (mode == "evp-linear-search") {
         benchmark_mode = BenchmarkMode::EvpLinearSearch;
     }
