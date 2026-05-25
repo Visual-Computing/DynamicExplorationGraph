@@ -124,6 +124,11 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
   }
 
   template <bool use_max_distance_count = false, bool use_filter = false>
+  inline static deglib::search::ResultSet searchFP16EvpAsymmetric(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
+    return graph.searchImpl<deglib::distances::FP16EvpAsymmetricSimilarity, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
+  }
+
+  template <bool use_max_distance_count = false, bool use_filter = false>
   inline static deglib::search::ResultSet searchFP16InnerProduct(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
     return graph.searchImpl<deglib::distances::FP16InnerProduct, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
   }
@@ -200,6 +205,10 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
     else if(metric == deglib::Metric::EvpBits)
     {
       return deglib::graph::ReadOnlyGraph::searchEvpBits<use_max_distance_count, use_filter>;
+    }
+    else if(metric == deglib::Metric::FP16EvpAsymmetric)
+    {
+      return deglib::graph::ReadOnlyGraph::searchFP16EvpAsymmetric<use_max_distance_count, use_filter>;
     }
     else if(metric == deglib::Metric::FP16InnerProduct)
     {
@@ -357,6 +366,10 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
         return deglib::graph::ReadOnlyGraph::exploreL2Uint8;
     }
     else if(metric == deglib::Metric::EvpBits)
+    {
+      return deglib::graph::ReadOnlyGraph::exploreEvpBits;
+    }
+    else if(metric == deglib::Metric::FP16EvpAsymmetric)
     {
       return deglib::graph::ReadOnlyGraph::exploreEvpBits;
     }
