@@ -929,7 +929,7 @@ public:
 
         // early stop after to many computations
         if constexpr (use_max_distance_count) {
-          if(distance_computation_count++ >= max_distance_computation_count)
+          if(++distance_computation_count >= max_distance_computation_count)
             return results;
         }
       }
@@ -996,12 +996,12 @@ public:
             }
           }
         }
-      }
-
-      // early stop after to many computations
-      if constexpr (use_max_distance_count) {
-        if(distance_computation_count++ >= max_distance_computation_count)
-          return results;
+        
+        // early stop after to many computations
+        if constexpr (use_max_distance_count) {
+          if(++distance_computation_count >= max_distance_computation_count)
+            return results;
+        }
       }
     }
 

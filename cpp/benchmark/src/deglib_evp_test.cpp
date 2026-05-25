@@ -28,6 +28,7 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <random>
 #include <algorithm>
 #include <thread>
@@ -67,7 +68,8 @@ enum class BenchmarkMode {
     EvpBuildEvpExplore,
     EvpBuildFP16ExternalSearch,
     FP16BuildFP16Explore,
-    EvpLinearSearch
+    EvpLinearSearch,
+    EvpBuildFP16AsymmetricSearch
 };
 
 // ============================================================================
@@ -86,7 +88,9 @@ static void run_exploration_sweep(
     const void* rerank_data = nullptr,
     size_t rerank_feature_bytes = 0,
     deglib::DISTFUNC<float> rerank_dist_func = nullptr,
-    size_t dims = 0)
+    size_t dims = 0,
+    bool use_asymmetric_search = false,
+    const void* query_data = nullptr)
 {
     std::printf("\n--- Exploration sweep (%s) ---\n", label);
 
@@ -112,16 +116,27 @@ static void run_exploration_sweep(
                 uint32_t k_search = (rerank_data != nullptr) ? std::max(k_top, max_distance_count) : k_explore;
 
                 deglib::search::ResultSet result_queue;
-                if (use_search) {
+                if (use_asymmetric_search) {
+                    const auto& sb_graph = static_cast<const deglib::graph::SizeBoundedGraph&>(graph);
+                    std::vector<uint32_t> entry_indices = { static_cast<uint32_t>(entry_idx) };
+                    const std::byte* query = static_cast<const std::byte*>(query_data) + label * dims * sizeof(uint16_t);
+                    result_queue = sb_graph.searchImpl<deglib::distances::FP16EvpAsymmetricSimilarity, true, false>(
+                        entry_indices,
+                        query,
+                        1000.0f,
+                        k_search + 1,
+                        nullptr,
+                        max_distance_count + 1);
+                } else if (use_search) {
                     std::vector<uint32_t> entry_indices = { static_cast<uint32_t>(entry_idx) };
                     const std::byte* query = graph.getFeatureVector(static_cast<uint32_t>(entry_idx));
                     result_queue = graph.search(
                         entry_indices,
                         query,
-                        0.0f,
+                        1000.0f,
                         k_search + 1,
                         nullptr,
-                        max_distance_count);
+                        max_distance_count + 1);
                 } else {
                     result_queue = graph.explore(
                         static_cast<uint32_t>(entry_idx),
@@ -134,12 +149,12 @@ static void run_exploration_sweep(
                 cands.reserve(result_queue.size());
                 while (!result_queue.empty()) {
                     const auto cand_idx = result_queue.top().getInternalIndex();
-                    if (!use_search || cand_idx != entry_idx) {
+                    if (cand_idx != entry_idx) {
                         cands.push_back(graph.getExternalLabel(cand_idx));
                     }
                     result_queue.pop();
                 }
-                if (use_search && cands.size() > k_search) {
+                if ((use_search || use_asymmetric_search) && cands.size() > k_search) {
                     cands.resize(k_search);
                 }
             });
@@ -177,6 +192,7 @@ static void run_exploration_sweep(
 
                     auto& result = results[label];
                     result.resize(k_top);
+                    std::fill(result.begin(), result.end(), std::numeric_limits<uint32_t>::max());
                     for (uint32_t j = 0; j < k_top && j < candidates.size(); ++j) {
                         result[j] = candidates[j].label;
                     }
@@ -197,8 +213,10 @@ static void run_exploration_sweep(
             const int32_t* gt_row = &gt_data[i * gt_dims];
             for (uint32_t k = 1; k <= k_top && k < gt_dims; ++k) {
                 uint32_t gt_idx = static_cast<uint32_t>(gt_row[k] - 1); // 1→0 indexed
-                for (uint32_t j = 0; j < k_top; ++j) {
-                    if (results[i][j] == gt_idx) {
+                const auto& row = results[i];
+                const uint32_t row_len = static_cast<uint32_t>(std::min(row.size(), static_cast<size_t>(k_top)));
+                for (uint32_t j = 0; j < row_len; ++j) {
+                    if (row[j] == gt_idx) {
                         total_hits++;
                         break;
                     }
@@ -406,13 +424,14 @@ static int run_benchmark(
         std::printf("=============================================\n\n");
 
         return 0;
-    } else if (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank || mode == BenchmarkMode::EvpBuildEvpExplore || mode == BenchmarkMode::EvpBuildFP16ExternalSearch) {
+    } else if (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank || mode == BenchmarkMode::EvpBuildEvpExplore || mode == BenchmarkMode::EvpBuildFP16ExternalSearch || mode == BenchmarkMode::EvpBuildFP16AsymmetricSearch) {
         std::printf("=== EVP Bits Graph Benchmark ===\n");
         std::printf("Data path: %ls\n", data_path.wstring().c_str());
         std::printf("NON_ZEROS=%u, K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.2f, MODE=%s\n",
                     non_zeros, k_top, k_graph, k_ext, eps_ext,
                     mode == BenchmarkMode::EvpBuildFP16ExternalSearch ? "build-fp16-external-search" :
-                    (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank ? "build-evp-explore-fp16-rerank" : "build-evp-explore"));
+                    (mode == BenchmarkMode::EvpBuildFP16AsymmetricSearch ? "build-fp16-asymmetric-search" :
+                    (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank ? "build-evp-explore-fp16-rerank" : "build-evp-explore")));
         std::printf("Threads: %zu\n\n", threads);
 
         // --------------------------------------------------------------------------
@@ -498,6 +517,16 @@ static int run_benchmark(
             run_exploration_sweep(fp16_ext_graph, gt_data, count, gt_dims, k_top, threads,
                                   "EVP Build FP16 External Search (ReadOnlyGraphExternal)",
                                   true);
+        } else if (mode == BenchmarkMode::EvpBuildFP16AsymmetricSearch) {
+            run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, threads,
+                                  "EVP Build FP16 Asymmetric Search",
+                                  false,
+                                  nullptr,
+                                  0,
+                                  nullptr,
+                                  dims,
+                                  true,
+                                  train_data_fp16);
         } else if (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank) {
             deglib::FloatSpace fp16_rerank_space(static_cast<uint32_t>(dims), deglib::Metric::FP16InnerProduct);
             run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, threads,
@@ -658,7 +687,12 @@ int main(int argc, char* argv[]) {
     // Parse data path and mode
     // --------------------------------------------------------------------------
     std::filesystem::path data_path;
-    std::string mode = "fp16-build-fp16-explore";  // default
+    // std::string mode = "fp16-build-fp16-explore"; 
+    // std::string mode = "evp-build-fp16-asymmetric-search";  // default 
+    // std::string mode = "evp-build-fp16-external-search"; 
+    std::string mode = "evp-build-evp-explore"; 
+    
+    
 
     if (argc >= 2) {
         data_path = argv[1];
@@ -680,9 +714,10 @@ int main(int argc, char* argv[]) {
     if (mode == "evp") mode = "evp-build-evp-explore-fp16-rerank";
     if (mode == "evp-no-rerank") mode = "evp-build-evp-explore";
     if (mode == "evp-linear") mode = "evp-linear-search";
+    if (mode == "evp-asymmetric") mode = "evp-build-fp16-asymmetric-search";
 
-    if (mode != "evp-build-evp-explore-fp16-rerank" && mode != "evp-build-evp-explore" && mode != "evp-build-fp16-external-search" && mode != "fp16-build-fp16-explore" && mode != "evp-linear-search") {
-        std::fprintf(stderr, "Unknown mode '%s'. Use 'evp-build-evp-explore-fp16-rerank', 'evp-build-evp-explore', 'evp-build-fp16-external-search', 'fp16-build-fp16-explore', or 'evp-linear-search'.\n", mode.c_str());
+    if (mode != "evp-build-evp-explore-fp16-rerank" && mode != "evp-build-evp-explore" && mode != "evp-build-fp16-external-search" && mode != "fp16-build-fp16-explore" && mode != "evp-linear-search" && mode != "evp-build-fp16-asymmetric-search") {
+        std::fprintf(stderr, "Unknown mode '%s'. Use 'evp-build-evp-explore-fp16-rerank', 'evp-build-evp-explore', 'evp-build-fp16-external-search', 'fp16-build-fp16-explore', 'evp-linear-search', or 'evp-build-fp16-asymmetric-search'.\n", mode.c_str());
         return 1;
     }
 
@@ -700,6 +735,8 @@ int main(int argc, char* argv[]) {
         benchmark_mode = BenchmarkMode::EvpBuildFP16ExternalSearch;
     } else if (mode == "evp-linear-search") {
         benchmark_mode = BenchmarkMode::EvpLinearSearch;
+    } else if (mode == "evp-build-fp16-asymmetric-search") {
+        benchmark_mode = BenchmarkMode::EvpBuildFP16AsymmetricSearch;
     }
 
     return run_benchmark(benchmark_mode, data_path, threads, NON_ZEROS, K_GRAPH, K_EXT, EPS_EXT, K_TOP);
