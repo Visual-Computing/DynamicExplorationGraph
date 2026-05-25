@@ -1081,5 +1081,169 @@ TEST(FloatSpace, FP16InnerProduct_VariousDimensions) {
 
 
 // ---------------------------------------------------------------------------
+//  FP16-EVP Asymmetric Similarity
+// ---------------------------------------------------------------------------
+
+static std::pair<std::vector<uint16_t>, std::vector<std::byte>>
+make_asymmetric_pair(uint32_t dim, uint32_t non_zeros, int seed_a = 42, int seed_b = 99) {
+    std::mt19937 rng_a(seed_a), rng_b(seed_b);
+    std::vector<float> a(dim), b(dim);
+    std::normal_distribution<float> dist(0.0f, 1.0f);
+    for (auto& x : a) x = dist(rng_a);
+    for (auto& x : b) x = dist(rng_b);
+    return {
+        floats_to_fp16(a),
+        deglib::quantization::quantize_single(b.data(), dim, non_zeros)
+    };
+}
+
+static float fp16_evp_asymmetric_naive_ref(const uint16_t* a, const std::byte* b, uint32_t dim) {
+    // 1. Decompress EVP bits into standard float values (-1.0f, 0.0f, 1.0f)
+    std::vector<float> reconstructed_b(dim, 0.0f);
+    const size_t mask_bytes = dim / 8;
+    const std::byte* ones_b = b;
+    const std::byte* negs_b = b + mask_bytes;
+
+    for (size_t byte_idx = 0; byte_idx < mask_bytes; ++byte_idx) {
+        uint8_t ones_byte = static_cast<uint8_t>(ones_b[byte_idx]);
+        uint8_t negs_byte = static_cast<uint8_t>(negs_b[byte_idx]);
+
+        for (int bit = 0; bit < 8; ++bit) {
+            const uint32_t i = byte_idx * 8 + bit;
+            if (i >= dim) break;
+
+            float val = 0.0f;
+            if ((ones_byte & (1 << bit)) != 0) {
+                val = 1.0f;
+            } else if ((negs_byte & (1 << bit)) != 0) {
+                val = -1.0f;
+            }
+            reconstructed_b[i] = val;
+        }
+    }
+
+    // 2. Perform a standard inner product dot(a, reconstructed_b)
+    float dot = 0.0f;
+    for (uint32_t i = 0; i < dim; ++i) {
+        float fa = deglib::distances::FP16InnerProduct::fp16_to_float(a[i]);
+        dot += fa * reconstructed_b[i];
+    }
+
+    return 1.0f - dot;
+}
+
+TEST(FP16EvpAsymmetricSimilarity, HandCraftedCalculation) {
+    // 8 dimensions
+    uint32_t dim = 8;
+    // a = [1.0, -2.0, 3.0, 4.0, -5.0, 6.0, -7.0, 8.0]
+    auto a = floats_to_fp16({1.0f, -2.0f, 3.0f, 4.0f, -5.0f, 6.0f, -7.0f, 8.0f});
+
+    // We hand-craft the EVP bits:
+    // ones_b byte: bit 0, 2, 3 (values: a[0]=1.0, a[2]=3.0, a[3]=4.0)
+    // negs_b byte: bit 1, 4, 6 (values: a[1]=-2.0, a[4]=-5.0, a[6]=-7.0)
+    // rest (bit 5, 7) are zero.
+    // ones = 1 << 0 | 1 << 2 | 1 << 3 = 1 + 4 + 8 = 13 (0x0D)
+    // negs = 1 << 1 | 1 << 4 | 1 << 6 = 2 + 16 + 64 = 82 (0x52)
+    std::vector<std::byte> b(2);
+    b[0] = static_cast<std::byte>(13);
+    b[1] = static_cast<std::byte>(82);
+
+    float d = deglib::distances::FP16EvpAsymmetricSimilarity::compare(a.data(), b.data(), &dim);
+
+    // Expected IP:
+    // Ones: a[0] (1.f) + a[2] (3.f) + a[3] (4.f) = 8.f
+    // Negs: -(a[1] (-2.f) + a[4] (-5.f) + a[6] (-7.f)) = -(-14.f) = 14.f
+    // Total IP: 8.f + 14.f = 22.f
+    // Expected distance: 1.f - 22.f = -21.f
+    EXPECT_NEAR(d, -21.f, 1e-2f);
+}
+
+TEST(FP16EvpAsymmetricSimilarity, MatchesNaive_64Dim) {
+    uint32_t dim = 64;
+    auto [a, b] = make_asymmetric_pair(dim, 16, 12, 34);
+    float d = deglib::distances::FP16EvpAsymmetricSimilarity::compare(a.data(), b.data(), &dim);
+    float ref = fp16_evp_asymmetric_naive_ref(a.data(), b.data(), dim);
+    EXPECT_NEAR(d, ref, 1e-2f);
+}
+
+TEST(FP16EvpAsymmetricSimilarity, MatchesNaive_128Dim) {
+    uint32_t dim = 128;
+    auto [a, b] = make_asymmetric_pair(dim, 32, 56, 78);
+    float d = deglib::distances::FP16EvpAsymmetricSimilarity::compare(a.data(), b.data(), &dim);
+    float ref = fp16_evp_asymmetric_naive_ref(a.data(), b.data(), dim);
+    EXPECT_NEAR(d, ref, 1e-2f);
+}
+
+TEST(FP16EvpAsymmetricSimilarity, MatchesNaive_256Dim) {
+    uint32_t dim = 256;
+    auto [a, b] = make_asymmetric_pair(dim, 64, 90, 12);
+    float d = deglib::distances::FP16EvpAsymmetricSimilarity::compare(a.data(), b.data(), &dim);
+    float ref = fp16_evp_asymmetric_naive_ref(a.data(), b.data(), dim);
+    EXPECT_NEAR(d, ref, 1e-2f);
+}
+
+#if defined(USE_SSE)
+TEST(FP16EvpAsymmetricSimilarity, SSEMatchesRef) {
+    std::vector<uint32_t> dims = {8, 16, 32, 64, 128, 256};
+    for (uint32_t dim : dims) {
+        auto [a, b] = make_asymmetric_pair(dim, dim / 4, 12, 34);
+        float d = 1.f - deglib::distances::FP16EvpAsymmetricSimilarity::ip_sse(a.data(), b.data(), &dim);
+        float ref = fp16_evp_asymmetric_naive_ref(a.data(), b.data(), dim);
+        EXPECT_NEAR(d, ref, 1e-2f) << "dim=" << dim;
+    }
+}
+#endif
+
+#if defined(USE_AVX)
+TEST(FP16EvpAsymmetricSimilarity, AVX2MatchesRef) {
+    std::vector<uint32_t> dims = {8, 16, 32, 64, 128, 256};
+    for (uint32_t dim : dims) {
+        auto [a, b] = make_asymmetric_pair(dim, dim / 4, 56, 78);
+        float d = 1.f - deglib::distances::FP16EvpAsymmetricSimilarity::ip_avx2(a.data(), b.data(), &dim);
+        float ref = fp16_evp_asymmetric_naive_ref(a.data(), b.data(), dim);
+        EXPECT_NEAR(d, ref, 1e-2f) << "dim=" << dim;
+    }
+}
+#endif
+
+#if defined(USE_AVX512)
+TEST(FP16EvpAsymmetricSimilarity, AVX512MatchesRef) {
+    std::vector<uint32_t> dims = {8, 16, 24, 32, 48, 64, 128, 256};
+    for (uint32_t dim : dims) {
+        auto [a, b] = make_asymmetric_pair(dim, dim / 4, 90, 12);
+        float d = 1.f - deglib::distances::FP16EvpAsymmetricSimilarity::ip_avx512(a.data(), b.data(), &dim);
+        float ref = fp16_evp_asymmetric_naive_ref(a.data(), b.data(), dim);
+        EXPECT_NEAR(d, ref, 1e-2f) << "dim=" << dim;
+    }
+}
+#endif
+
+TEST(FP16EvpAsymmetricSimilarity, PathsAgree) {
+    std::vector<uint32_t> dims = {8, 16, 32, 64, 128, 256};
+    for (uint32_t dim : dims) {
+        auto [a, b] = make_asymmetric_pair(dim, dim / 4, 77, 88);
+        float naive = 1.f - deglib::distances::FP16EvpAsymmetricSimilarity::ip_naive(a.data(), b.data(), &dim);
+        float dispatch = deglib::distances::FP16EvpAsymmetricSimilarity::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(dispatch, naive, 1e-2f) << "dispatch vs naive dim=" << dim;
+
+#if defined(USE_SSE)
+        float sse = 1.f - deglib::distances::FP16EvpAsymmetricSimilarity::ip_sse(a.data(), b.data(), &dim);
+        EXPECT_NEAR(sse, naive, 1e-2f) << "sse vs naive dim=" << dim;
+#endif
+
+#if defined(USE_AVX)
+        float avx2 = 1.f - deglib::distances::FP16EvpAsymmetricSimilarity::ip_avx2(a.data(), b.data(), &dim);
+        EXPECT_NEAR(avx2, naive, 1e-2f) << "avx2 vs naive dim=" << dim;
+#endif
+
+#if defined(USE_AVX512)
+        float avx512 = 1.f - deglib::distances::FP16EvpAsymmetricSimilarity::ip_avx512(a.data(), b.data(), &dim);
+        EXPECT_NEAR(avx512, naive, 1e-2f) << "avx512 vs naive dim=" << dim;
+#endif
+    }
+}
+
+
+// ---------------------------------------------------------------------------
 //  Main — handled by test_main.cpp (shared entry point)
 // ---------------------------------------------------------------------------

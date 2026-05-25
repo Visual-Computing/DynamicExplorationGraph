@@ -1127,6 +1127,236 @@ public:
     }
 };
 
+// ---------------------------------------------------------------------------------------------------------------------
+// ------------------------------------- FP16-EVP Asymmetric Similarity ------------------------------------------------
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * Computes asymmetric inner product distance between an FP16 float array and quantized EVP bits.
+ *
+ * pVect1v points to an array of uint16_t (FP16) of size dim.
+ * pVect2v points to a quantized EVP byte array layout: [ones (dim/8 bytes)][negative_ones (dim/8 bytes)].
+ * qty_ptr points to a uint32_t holding the original float dimension (must be divisible by 8).
+ *
+ * Returns: 1 - dot(a, b)
+ */
+class FP16EvpAsymmetricSimilarity {
+public:
+    inline static float compare(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+#if defined(USE_AVX512)
+        return 1.f - ip_avx512(pVect1v, pVect2v, qty_ptr);
+#elif defined(USE_AVX)
+        return 1.f - ip_avx2(pVect1v, pVect2v, qty_ptr);
+#elif defined(USE_SSE)
+        return 1.f - ip_sse(pVect1v, pVect2v, qty_ptr);
+#else
+        return 1.f - ip_naive(pVect1v, pVect2v, qty_ptr);
+#endif
+    }
+
+    inline static float ip_naive(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+        const uint16_t* a = (const uint16_t*)pVect1v;
+        const std::byte* b = (const std::byte*)pVect2v;
+        const uint32_t dim = *static_cast<const uint32_t*>(qty_ptr);
+        const size_t mask_bytes = dim / 8;
+
+        const std::byte* ones_b = b;
+        const std::byte* negs_b = b + mask_bytes;
+
+        float ip = 0.f;
+        for (size_t byte_idx = 0; byte_idx < mask_bytes; ++byte_idx) {
+            uint8_t ones_byte = static_cast<uint8_t>(ones_b[byte_idx]);
+            uint8_t negs_byte = static_cast<uint8_t>(negs_b[byte_idx]);
+
+            if (ones_byte == 0 && negs_byte == 0) {
+                continue;
+            }
+
+            for (int bit = 0; bit < 8; ++bit) {
+                const uint32_t i = byte_idx * 8 + bit;
+                if ((ones_byte & (1 << bit)) != 0) {
+                    ip += deglib::distances::FP16InnerProduct::fp16_to_float(a[i]);
+                }
+                if ((negs_byte & (1 << bit)) != 0) {
+                    ip -= deglib::distances::FP16InnerProduct::fp16_to_float(a[i]);
+                }
+            }
+        }
+
+        return ip;
+    }
+
+#if defined(USE_SSE)
+    inline static float ip_sse(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+        const uint16_t* a = (const uint16_t*)pVect1v;
+        const std::byte* b = (const std::byte*)pVect2v;
+        const uint32_t dim = *static_cast<const uint32_t*>(qty_ptr);
+        const size_t mask_bytes = dim / 8;
+
+        const std::byte* ones_b = b;
+        const std::byte* negs_b = b + mask_bytes;
+
+        __m128 sum128 = _mm_setzero_ps();
+
+        for (size_t byte_idx = 0; byte_idx < mask_bytes; ++byte_idx) {
+            uint8_t ones_byte = static_cast<uint8_t>(ones_b[byte_idx]);
+            uint8_t negs_byte = static_cast<uint8_t>(negs_b[byte_idx]);
+
+            if (ones_byte == 0 && negs_byte == 0) {
+                continue;
+            }
+
+            // Load 8 FP16 elements (16 bytes)
+            __m128i raw_a = _mm_loadu_si128((const __m128i*)&a[byte_idx * 8]);
+            __m128 a_lo = _mm_cvtph_ps(raw_a);
+            __m128 a_hi = _mm_cvtph_ps(_mm_srli_si128(raw_a, 8));
+
+            // Process lower 4 elements (nibble 0)
+            {
+                uint8_t o_nibble = ones_byte & 0x0F;
+                uint8_t n_nibble = negs_byte & 0x0F;
+                if (o_nibble != 0 || n_nibble != 0) {
+                    alignas(16) float m_arr[4];
+                    for (int bit = 0; bit < 4; ++bit) {
+                        float val = 0.0f;
+                        if ((o_nibble & (1 << bit)) != 0) val = 1.0f;
+                        else if ((n_nibble & (1 << bit)) != 0) val = -1.0f;
+                        m_arr[bit] = val;
+                    }
+                    __m128 mask_lo = _mm_load_ps(m_arr);
+                    sum128 = _mm_fmadd_ps(a_lo, mask_lo, sum128);
+                }
+            }
+
+            // Process upper 4 elements (nibble 1)
+            {
+                uint8_t o_nibble = (ones_byte >> 4) & 0x0F;
+                uint8_t n_nibble = (negs_byte >> 4) & 0x0F;
+                if (o_nibble != 0 || n_nibble != 0) {
+                    alignas(16) float m_arr[4];
+                    for (int bit = 0; bit < 4; ++bit) {
+                        float val = 0.0f;
+                        if ((o_nibble & (1 << bit)) != 0) val = 1.0f;
+                        else if ((n_nibble & (1 << bit)) != 0) val = -1.0f;
+                        m_arr[bit] = val;
+                    }
+                    __m128 mask_hi = _mm_load_ps(m_arr);
+                    sum128 = _mm_fmadd_ps(a_hi, mask_hi, sum128);
+                }
+            }
+        }
+
+        alignas(16) float f[4];
+        _mm_store_ps(f, sum128);
+        return f[0] + f[1] + f[2] + f[3];
+    }
+#endif
+
+#if defined(USE_AVX)
+    inline static float ip_avx2(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+        const uint16_t* a = (const uint16_t*)pVect1v;
+        const std::byte* b = (const std::byte*)pVect2v;
+        const uint32_t dim = *static_cast<const uint32_t*>(qty_ptr);
+        const size_t mask_bytes = dim / 8;
+
+        const std::byte* ones_b = b;
+        const std::byte* negs_b = b + mask_bytes;
+
+        __m256 sum256 = _mm256_setzero_ps();
+        __m256i shift = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+        __m256i one = _mm256_set1_epi32(1);
+
+        for (size_t byte_idx = 0; byte_idx < mask_bytes; ++byte_idx) {
+            uint8_t ones_byte = static_cast<uint8_t>(ones_b[byte_idx]);
+            uint8_t negs_byte = static_cast<uint8_t>(negs_b[byte_idx]);
+
+            if (ones_byte == 0 && negs_byte == 0) {
+                continue;
+            }
+
+            // Load 8 FP16 elements
+            __m128i raw_a = _mm_loadu_si128((const __m128i*)&a[byte_idx * 8]);
+            __m256 a_ps = _mm256_cvtph_ps(raw_a);
+
+            // Expand ones and negs to vector of floats
+            __m256i v_ones = _mm256_and_si256(_mm256_srlv_epi32(_mm256_set1_epi32(ones_byte), shift), one);
+            __m256i v_negs = _mm256_and_si256(_mm256_srlv_epi32(_mm256_set1_epi32(negs_byte), shift), one);
+            __m256i v_diff = _mm256_sub_epi32(v_ones, v_negs);
+            __m256 mask_ps = _mm256_cvtepi32_ps(v_diff);
+
+            // Accumulate
+            sum256 = _mm256_fmadd_ps(a_ps, mask_ps, sum256);
+        }
+
+        // Horizontal sum of sum256
+        __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
+        alignas(16) float f[4];
+        _mm_store_ps(f, sum128);
+        return f[0] + f[1] + f[2] + f[3];
+    }
+#endif
+
+#if defined(USE_AVX512)
+    inline static float ip_avx512(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+        const uint16_t* a = (const uint16_t*)pVect1v;
+        const std::byte* b = (const std::byte*)pVect2v;
+        const uint32_t dim = *static_cast<const uint32_t*>(qty_ptr);
+        const size_t mask_bytes = dim / 8;
+
+        const std::byte* ones_b = b;
+        const std::byte* negs_b = b + mask_bytes;
+
+        __m512 sum512 = _mm512_setzero_ps();
+
+        size_t i = 0;
+        // Process 16 elements (2 bytes of ones, 2 bytes of negs) per iteration
+        for (; i + 2 <= mask_bytes; i += 2) {
+            // Load 16 FP16 elements
+            __m256i raw_a = _mm256_loadu_si256((const __m256i*)&a[i * 8]);
+            __m512 a_ps = _mm512_cvtph_ps(raw_a);
+
+            // Load 16-bit masks
+            uint16_t m_ones = *reinterpret_cast<const uint16_t*>(&ones_b[i]);
+            uint16_t m_negs = *reinterpret_cast<const uint16_t*>(&negs_b[i]);
+
+            // Masked addition and subtraction
+            sum512 = _mm512_mask_add_ps(sum512, m_ones, sum512, a_ps);
+            sum512 = _mm512_mask_sub_ps(sum512, m_negs, sum512, a_ps);
+        }
+
+        // Horizontal sum of sum512
+        __m256 sum256 = _mm256_add_ps(_mm512_extractf32x8_ps(sum512, 0), _mm512_extractf32x8_ps(sum512, 1));
+        __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
+        alignas(16) float f[4];
+        _mm_store_ps(f, sum128);
+        float ip = f[0] + f[1] + f[2] + f[3];
+
+        // Process tail if any (since dim is divisible by 8, if mask_bytes is odd, there is 1 byte left = 8 elements)
+        if (i < mask_bytes) {
+            __m128i raw_a = _mm_loadu_si128((const __m128i*)&a[i * 8]);
+            __m256 a_ps = _mm256_cvtph_ps(raw_a);
+
+            uint8_t ones_byte = static_cast<uint8_t>(ones_b[i]);
+            uint8_t negs_byte = static_cast<uint8_t>(negs_b[i]);
+
+            __m256i shift = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+            __m256i v_ones = _mm256_and_si256(_mm256_srlv_epi32(_mm256_set1_epi32(ones_byte), shift), _mm256_set1_epi32(1));
+            __m256i v_negs = _mm256_and_si256(_mm256_srlv_epi32(_mm256_set1_epi32(negs_byte), shift), _mm256_set1_epi32(1));
+            __m256i v_diff = _mm256_sub_epi32(v_ones, v_negs);
+            __m256 mask_ps = _mm256_cvtepi32_ps(v_diff);
+
+            __m256 sum256_tail = _mm256_mul_ps(a_ps, mask_ps);
+            __m128 sum128_tail = _mm_add_ps(_mm256_extractf128_ps(sum256_tail, 0), _mm256_extractf128_ps(sum256_tail, 1));
+            alignas(16) float f_tail[4];
+            _mm_store_ps(f_tail, sum128_tail);
+            ip += f_tail[0] + f_tail[1] + f_tail[2] + f_tail[3];
+        }
+
+        return ip;
+    }
+#endif
+};
+
 }  // namespace distances
 
 enum class Metric {
