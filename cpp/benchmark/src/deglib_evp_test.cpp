@@ -70,6 +70,7 @@ enum class BenchmarkMode {
     FP16BuildFP16Explore,
     EvpLinearSearch,
     EvpBuildFP16AsymmetricSearch,
+    EvpBuildFP16AsymmetricSearchRerank,
     FP16EvpAsymmetricMicrobench
 };
 
@@ -828,7 +829,7 @@ static void run_exploration_sweep(
             [&](size_t label, size_t thread_id) {
                 (void)thread_id;
                 size_t entry_idx = graph.getInternalIndex(static_cast<uint32_t>(label));
-                uint32_t k_search = (rerank_data != nullptr) ? std::max(k_top, max_distance_count) : k_explore;
+                uint32_t k_search = (rerank_data != nullptr) ? (use_asymmetric_search ? 25 : std::max(k_top, max_distance_count)) : k_explore;
 
                 deglib::search::ResultSet result_queue;
                 if (use_asymmetric_search) {
@@ -1172,14 +1173,15 @@ static int run_benchmark(
         std::printf("=============================================\n\n");
 
         return 0;
-    } else if (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank || mode == BenchmarkMode::EvpBuildEvpExplore || mode == BenchmarkMode::EvpBuildFP16ExternalSearch || mode == BenchmarkMode::EvpBuildFP16AsymmetricSearch) {
+    } else if (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank || mode == BenchmarkMode::EvpBuildEvpExplore || mode == BenchmarkMode::EvpBuildFP16ExternalSearch || mode == BenchmarkMode::EvpBuildFP16AsymmetricSearch || mode == BenchmarkMode::EvpBuildFP16AsymmetricSearchRerank) {
         std::printf("=== EVP Bits Graph Benchmark ===\n");
         std::printf("Data path: %ls\n", data_path.wstring().c_str());
         std::printf("NON_ZEROS=%u, K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.2f, MODE=%s\n",
                     non_zeros, k_top, k_graph, k_ext, eps_ext,
                     mode == BenchmarkMode::EvpBuildFP16ExternalSearch ? "build-fp16-external-search" :
                     (mode == BenchmarkMode::EvpBuildFP16AsymmetricSearch ? "build-fp16-asymmetric-search" :
-                    (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank ? "build-evp-explore-fp16-rerank" : "build-evp-explore")));
+                    (mode == BenchmarkMode::EvpBuildFP16AsymmetricSearchRerank ? "build-fp16-asymmetric-search-rerank" :
+                    (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank ? "build-evp-explore-fp16-rerank" : "build-evp-explore"))));
         std::printf("Threads: %u\n\n", threads);
 
         // --------------------------------------------------------------------------
@@ -1281,6 +1283,23 @@ static int run_benchmark(
                                   dims,
                                   true,
                                   train_data_fp16);
+        } else if (mode == BenchmarkMode::EvpBuildFP16AsymmetricSearchRerank) {
+            double t_copy_start = now_ms();
+            deglib::FloatSpace asymmetric_space(static_cast<uint32_t>(dims), deglib::Metric::FP16EvpAsymmetric);
+            deglib::graph::ReadOnlyGraph readonly_asym_graph(static_cast<uint32_t>(count), k_graph, asymmetric_space, graph);
+            conversion_ms = now_ms() - t_copy_start;
+            std::printf("ReadOnlyGraph construction (copy) time: %.2f ms\n", conversion_ms);
+
+            deglib::FloatSpace fp16_rerank_space(static_cast<uint32_t>(dims), deglib::Metric::FP16InnerProduct);
+            run_exploration_sweep(readonly_asym_graph, gt_data, count, gt_dims, k_top, static_cast<uint8_t>(threads),
+                                  "EVP Build FP16 Asymmetric Search FP16 Rerank (ReadOnlyGraph)",
+                                  false,
+                                  train_data_fp16,
+                                  dims * sizeof(uint16_t),
+                                  fp16_rerank_space.get_dist_func(),
+                                  dims,
+                                  true,
+                                  train_data_fp16);
         } else if (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank) {
             deglib::FloatSpace fp16_rerank_space(static_cast<uint32_t>(dims), deglib::Metric::FP16InnerProduct);
             run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, static_cast<uint8_t>(threads),
@@ -1303,7 +1322,7 @@ static int run_benchmark(
         std::printf("=============================================\n");
         std::printf("Quantize:                %.2f ms\n", quantize_ms);
         std::printf("Graph Build:             %.2f ms\n", build_ms);
-        if (mode == BenchmarkMode::EvpBuildFP16ExternalSearch || mode == BenchmarkMode::EvpBuildFP16AsymmetricSearch) {
+        if (mode == BenchmarkMode::EvpBuildFP16ExternalSearch || mode == BenchmarkMode::EvpBuildFP16AsymmetricSearch || mode == BenchmarkMode::EvpBuildFP16AsymmetricSearchRerank) {
             std::printf("Graph Conversion:        %.2f ms\n", conversion_ms);
         }
         std::printf("---------------------------------------------\n");
@@ -1455,7 +1474,7 @@ int main(int argc, char* argv[]) {
 #ifdef DATA_PATH
         data_path = DATA_PATH;
 #else
-    std::fprintf(stderr, "Usage: %s <data_path> [evp-build-evp-explore-fp16-rerank|evp-build-evp-explore|evp-build-fp16-external-search|fp16-build-fp16-explore|evp-linear-search|evp-build-fp16-asymmetric-search|bench-asymmetric]\n", argv[0]);
+    std::fprintf(stderr, "Usage: %s <data_path> [evp-build-evp-explore-fp16-rerank|evp-build-evp-explore|evp-build-fp16-external-search|fp16-build-fp16-explore|evp-linear-search|evp-build-fp16-asymmetric-search|evp-build-fp16-asymmetric-search-rerank|bench-asymmetric]\n", argv[0]);
         return 1;
 #endif
     }
@@ -1470,10 +1489,11 @@ int main(int argc, char* argv[]) {
     if (mode == "evp-no-rerank") mode = "evp-build-evp-explore";
     if (mode == "evp-linear") mode = "evp-linear-search";
     if (mode == "evp-asymmetric") mode = "evp-build-fp16-asymmetric-search";
+    if (mode == "evp-asymmetric-rerank") mode = "evp-build-fp16-asymmetric-search-rerank";
     if (mode == "bench-asymmetric") mode = "fp16-evp-asymmetric-bench";
 
-    if (mode != "evp-build-evp-explore-fp16-rerank" && mode != "evp-build-evp-explore" && mode != "evp-build-fp16-external-search" && mode != "fp16-build-fp16-explore" && mode != "evp-linear-search" && mode != "evp-build-fp16-asymmetric-search" && mode != "fp16-evp-asymmetric-bench") {
-        std::fprintf(stderr, "Unknown mode '%s'. Use 'evp-build-evp-explore-fp16-rerank', 'evp-build-evp-explore', 'evp-build-fp16-external-search', 'fp16-build-fp16-explore', 'evp-linear-search', 'evp-build-fp16-asymmetric-search', or 'bench-asymmetric'.\n", mode.c_str());
+    if (mode != "evp-build-evp-explore-fp16-rerank" && mode != "evp-build-evp-explore" && mode != "evp-build-fp16-external-search" && mode != "fp16-build-fp16-explore" && mode != "evp-linear-search" && mode != "evp-build-fp16-asymmetric-search" && mode != "evp-build-fp16-asymmetric-search-rerank" && mode != "fp16-evp-asymmetric-bench") {
+        std::fprintf(stderr, "Unknown mode '%s'. Use 'evp-build-evp-explore-fp16-rerank', 'evp-build-evp-explore', 'evp-build-fp16-external-search', 'fp16-build-fp16-explore', 'evp-linear-search', 'evp-build-fp16-asymmetric-search', 'evp-build-fp16-asymmetric-search-rerank', or 'bench-asymmetric'.\n", mode.c_str());
         return 1;
     }
 
@@ -1493,6 +1513,8 @@ int main(int argc, char* argv[]) {
         benchmark_mode = BenchmarkMode::EvpLinearSearch;
     } else if (mode == "evp-build-fp16-asymmetric-search") {
         benchmark_mode = BenchmarkMode::EvpBuildFP16AsymmetricSearch;
+    } else if (mode == "evp-build-fp16-asymmetric-search-rerank") {
+        benchmark_mode = BenchmarkMode::EvpBuildFP16AsymmetricSearchRerank;
     } else if (mode == "fp16-evp-asymmetric-bench") {
         benchmark_mode = BenchmarkMode::FP16EvpAsymmetricMicrobench;
     }
