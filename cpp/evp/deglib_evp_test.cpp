@@ -14,9 +14,8 @@
  * Usage:
  *   deglib_evp_test <data_path> [evp|evp-no-rerank|evp-build-fp16-search|evp-build-fp16-proxy|raw|fp16|evp-linear]
  *
- * Expected files in data_path:
- *   train.fvecs      - float feature vectors
- *   allknn.ivecs     - ground truth (1-indexed, dims=32)
+ * When data_path is a .h5 file: loads train and allknn/knns directly from HDF5.
+ * When data_path is a directory: loads train.hvecs and allknn.ivecs (legacy).
  */
 
 #if defined(_WIN32)
@@ -51,6 +50,7 @@
 #include "repository.h"
 
 #include "evp_common.h"
+#include "hdf5_reader.h"
 
 // ============================================================================
 // Consolidated Modes
@@ -72,7 +72,7 @@ enum class BenchmarkMode {
 
 static void run_exploration_sweep(
     const deglib::search::SearchGraph& graph,
-    const int32_t* gt_data,
+    const std::vector<std::vector<int32_t>>& gt_data,
     size_t count,
     size_t gt_dims,
     uint32_t k_top,
@@ -213,9 +213,9 @@ static void run_exploration_sweep(
         // Calculate recall
         int total_hits = 0;
         for (size_t i = 0; i < count; ++i) {
-            const int32_t* gt_row = &gt_data[i * gt_dims];
-            for (uint32_t k = 1; k <= k_top && k < gt_dims; ++k) {
-                uint32_t gt_idx = static_cast<uint32_t>(gt_row[k] - 1); // 1→0 indexed
+            const auto& gt_row = gt_data[i];
+            for (uint32_t k = 1; k <= k_top && k < (uint32_t)gt_row.size(); ++k) {
+                uint32_t gt_idx = static_cast<uint32_t>(gt_row[k] - 1); // 1->0 indexed
                 const auto& row = results[i];
                 const uint32_t row_len = static_cast<uint32_t>(std::min(row.size(), static_cast<size_t>(k_top)));
                 for (uint32_t j = 0; j < row_len; ++j) {
@@ -257,6 +257,7 @@ static void run_exploration_sweep(
 // Unified Benchmark Entry Point
 // ============================================================================
 
+// Pre-loaded data variant: ALL data loading happens in main().
 static int run_benchmark(
     BenchmarkMode mode,
     const std::filesystem::path& data_path,
@@ -264,42 +265,24 @@ static int run_benchmark(
     uint32_t non_zeros,
     uint8_t k_graph, uint8_t k_ext,
     float eps_ext,
-    uint32_t k_top)
+    uint32_t k_top,
+    std::vector<std::vector<std::byte>> train_vectors_in,
+    std::vector<std::vector<int32_t>> gt_data_in,
+    size_t dims_in,
+    size_t count_in,
+    size_t gt_dims_in,
+    size_t gt_count_in)
 {
-    // --------------------------------------------------------------------------
-    // Load data
-    // --------------------------------------------------------------------------
-    const auto train_hvecs = data_path / "train.hvecs";
-    const auto allknn_ivecs = data_path / "allknn.ivecs";
-
-    if (!std::filesystem::exists(train_hvecs)) {
-        std::fprintf(stderr, "Error: %ls not found\n", train_hvecs.wstring().c_str());
-        return 1;
-    }
-    if (!std::filesystem::exists(allknn_ivecs)) {
-        std::fprintf(stderr, "Error: %ls not found\n", allknn_ivecs.wstring().c_str());
-        return 1;
-    }
-
-    double t_load = now_ms();
-
-    size_t dims = 0, count = 0;
-    auto train_vectors = hvecs_read(train_hvecs.string().c_str(), dims, count);
-
-    size_t gt_dims = 0, gt_count = 0;
-    std::unique_ptr<std::byte[]> gt_bytes;
-    const int32_t* gt_data = nullptr;
-    gt_bytes = deglib::ivecs_read(allknn_ivecs.string().c_str(), gt_dims, gt_count);
-    gt_data = reinterpret_cast<const int32_t*>(gt_bytes.get());
-
-    double load_ms = now_ms() - t_load;
-    std::printf("Loaded %ls: %zu vectors, dim=%zu\n", train_hvecs.filename().wstring().c_str(), count, dims);
-    std::printf("Ground truth: %zu queries, top-%zu\n", gt_count, gt_dims);
-    std::printf("Load time: %.2f ms\n\n", load_ms);
+    std::vector<std::vector<std::byte>>& train_vectors = train_vectors_in;
+    std::vector<std::vector<int32_t>>& gt_data = gt_data_in;
+    size_t dims = dims_in;
+    size_t count = count_in;
+    size_t gt_dims = gt_dims_in;
+    size_t gt_count = gt_count_in;
 
     if (count != gt_count) {
         std::fprintf(stderr,
-            "Error: train.hvecs and allknn.ivecs must contain the same number of entries (%zu vs %zu)\n",
+            "Error: train and allknn must contain the same number of entries (%zu vs %zu)\n",
             count, gt_count);
         return 1;
     }
@@ -612,9 +595,9 @@ static int run_benchmark(
         // --------------------------------------------------------------------------
         int total_hits = 0;
         for (size_t i = 0; i < count; ++i) {
-            const int32_t* gt_row = &gt_data[i * gt_dims];
-            for (uint32_t k = 1; k <= k_top && k < gt_dims; ++k) {
-                uint32_t gt_idx = static_cast<uint32_t>(gt_row[k] - 1); // 1→0 indexed
+            const auto& gt_row = gt_data[i];
+            for (uint32_t k = 1; k <= k_top && k < (uint32_t)gt_row.size(); ++k) {
+                uint32_t gt_idx = static_cast<uint32_t>(gt_row[k] - 1); // 1->0 indexed
                 for (uint32_t j = 0; j < k_top; ++j) {
                     if (results[i][j] == gt_idx) {
                         total_hits++;
@@ -651,6 +634,7 @@ static int run_benchmark(
 // ============================================================================
 
 int main(int argc, char* argv[]) {
+  try {
 #if defined(USE_AVX)
     fmt::print("Using AVX2...\n");
 #elif defined(USE_SSE)
@@ -680,7 +664,7 @@ int main(int argc, char* argv[]) {
 #ifdef DATA_PATH
         data_path = DATA_PATH;
 #else
-        std::fprintf(stderr, "Usage: %s <data_path> [evp-build-evp-explore-fp16-rerank|evp-build-evp-explore|evp-build-fp16-external-search|fp16-build-fp16-explore|evp-linear-search|evp-build-fp16-asymmetric-search|evp-build-fp16-asymmetric-search-rerank]\n", argv[0]);
+        std::fprintf(stderr, "Usage: %s <data_path_or_h5_file> [evp-build-evp-explore-fp16-rerank|evp-build-evp-explore|evp-build-fp16-external-search|fp16-build-fp16-explore|evp-linear-search|evp-build-fp16-asymmetric-search|evp-build-fp16-asymmetric-search-rerank]\n", argv[0]);
         return 1;
 #endif
     }
@@ -722,5 +706,80 @@ int main(int argc, char* argv[]) {
         benchmark_mode = BenchmarkMode::EvpBuildFP16AsymmetricSearchRerank;
     }
 
-    return run_benchmark(benchmark_mode, data_path, threads, NON_ZEROS, K_GRAPH, K_EXT, EPS_EXT, K_TOP);
+    // --------------------------------------------------------------------------
+    // Load data (always in main, never in run_benchmark)
+    // --------------------------------------------------------------------------
+    const std::string ext = data_path.extension().string();
+    const bool is_hdf5 = (ext == ".h5" || ext == ".hdf5");
+
+    std::vector<std::vector<std::byte>> train_vectors;
+    std::vector<std::vector<int32_t>> gt_data;
+    size_t dims = 0, count = 0, gt_dims = 0, gt_count = 0;
+
+    if (is_hdf5) {
+        const std::string h5path = data_path.string();
+        std::printf("HDF5 mode: scanning '%s'\n", h5path.c_str());
+
+        auto datasets = hdf5_reader::scan_datasets(h5path);
+        auto& train_info = hdf5_reader::find_dataset(datasets, "train");
+        auto& allknn_info = hdf5_reader::find_dataset(datasets, "allknn/knns");
+
+        std::printf("  train:       %llu x %llu (elem=%uB)\n",
+            (unsigned long long)train_info.num_rows,
+            (unsigned long long)train_info.num_cols,
+            train_info.element_size);
+        std::printf("  allknn/knns: %llu x %llu (elem=%uB)\n",
+            (unsigned long long)allknn_info.num_rows,
+            (unsigned long long)allknn_info.num_cols,
+            allknn_info.element_size);
+
+        double t_load = now_ms();
+        train_vectors = hdf5_reader::read_dataset_as_vecs(h5path, train_info);
+        gt_data = hdf5_reader::read_dataset_as_ints(h5path, allknn_info, gt_dims, gt_count);
+        dims = static_cast<size_t>(train_info.num_cols);
+        count = static_cast<size_t>(train_info.num_rows);
+        double load_ms = now_ms() - t_load;
+
+        std::printf("Loaded train:  %zu vectors, dim=%zu\n", count, dims);
+        std::printf("Ground truth:  %zu queries, top-%zu\n", gt_count, gt_dims);
+        std::printf("Load time:     %.2f ms\n\n", load_ms);
+    }
+    else {
+        // Legacy .hvecs / .ivecs directory path
+        const auto train_hvecs  = data_path / "train.hvecs";
+        const auto allknn_ivecs = data_path / "allknn.ivecs";
+
+        if (!std::filesystem::exists(train_hvecs)) {
+            std::fprintf(stderr, "Error: %ls not found\n", train_hvecs.wstring().c_str());
+            return 1;
+        }
+        if (!std::filesystem::exists(allknn_ivecs)) {
+            std::fprintf(stderr, "Error: %ls not found\n", allknn_ivecs.wstring().c_str());
+            return 1;
+        }
+
+        double t_load = now_ms();
+        train_vectors = hvecs_read(train_hvecs.string().c_str(), dims, count);
+        auto gt_raw = deglib::ivecs_read(allknn_ivecs.string().c_str(), gt_dims, gt_count);
+        const int32_t* raw = reinterpret_cast<const int32_t*>(gt_raw.get());
+        gt_data.resize(gt_count);
+        for (size_t i = 0; i < gt_count; ++i) {
+            gt_data[i] = std::vector<int32_t>(raw + i * gt_dims, raw + (i + 1) * gt_dims);
+        }
+        double load_ms = now_ms() - t_load;
+
+        std::printf("Loaded %ls: %zu vectors, dim=%zu\n", train_hvecs.filename().wstring().c_str(), count, dims);
+        std::printf("Ground truth: %zu queries, top-%zu\n", gt_count, gt_dims);
+        std::printf("Load time: %.2f ms\n\n", load_ms);
+    }
+
+    return run_benchmark(
+        benchmark_mode, data_path, static_cast<uint32_t>(threads),
+        NON_ZEROS, K_GRAPH, K_EXT, EPS_EXT, K_TOP,
+        std::move(train_vectors), std::move(gt_data),
+        dims, count, gt_dims, gt_count);
+  } catch (const std::exception& ex) {
+      std::fprintf(stderr, "Fatal error: %s\n", ex.what());
+      return 1;
+  }
 }
