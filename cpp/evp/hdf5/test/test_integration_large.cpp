@@ -221,17 +221,16 @@ TEST(Hdf5IntegrationLarge, ReadAllknnKnns_MatchesIvecs) {
     auto it = datasets.find("allknn/knns");
     ASSERT_NE(it, datasets.end());
 
-    size_t dims, count;
-    auto data = read_dataset_as_ints(SISAP_H5, it->second, dims, count);
+    auto data = read_matrix_int32(SISAP_H5, it->second);
     ASSERT_FALSE(data.empty());
-    EXPECT_EQ(dims, 32u);
-    EXPECT_EQ(count, 6350000u);
+    EXPECT_EQ(static_cast<size_t>(it->second.num_cols), 32u);
+    EXPECT_EQ(static_cast<size_t>(it->second.num_rows), 6350000u);
 
     std::ifstream f(SISAP_ALLKNN_IVECS, std::ios::binary);
     ASSERT_TRUE(f.is_open());
 
     int match = 0, total = 0;
-    for (int i = 0; i < 100 && i < static_cast<int>(count); i++) {
+    for (int i = 0; i < 100 && i < static_cast<int>(it->second.num_rows); i++) {
         uint32_t row_dim;
         f.read(reinterpret_cast<char*>(&row_dim), 4);
         EXPECT_EQ(row_dim, 32u);
@@ -268,7 +267,7 @@ TEST(Hdf5IntegrationLarge, ReadTrain_MatchesHvecs) {
     std::ifstream f(SISAP_TRAIN_HVECS, std::ios::binary);
     ASSERT_TRUE(f.is_open());
 
-    auto vecs = read_dataset_as_vecs(SISAP_H5, it->second);
+    auto vecs = read_matrix_bytes(SISAP_H5, it->second);
     const size_t bytes_per_row = it->second.num_cols * 2u;
 
     int match = 0, total = 0;
@@ -302,11 +301,10 @@ TEST(Hdf5IntegrationLarge, ReadItestDists_Positive) {
     auto it = datasets.find("itest/dists");
     ASSERT_NE(it, datasets.end());
 
-    size_t dims, count;
-    auto data = read_dataset_as_ints(SISAP_H5, it->second, dims, count);
+    auto data = read_matrix_int32(SISAP_H5, it->second);
     ASSERT_FALSE(data.empty());
-    EXPECT_EQ(dims, 1000u);
-    EXPECT_EQ(count, 10000u);
+    EXPECT_EQ(static_cast<size_t>(it->second.num_cols), 1000u);
+    EXPECT_EQ(static_cast<size_t>(it->second.num_rows), 10000u);
 
     const float* data_f = reinterpret_cast<const float*>(data[0].data());
     for (int i = 0; i < 20; i++) {
@@ -335,7 +333,7 @@ TEST(Hdf5IntegrationLarge, ReadFP16Vectors) {
         GTEST_SKIP() << "No FP16 dataset found";
     }
 
-    auto vecs = read_dataset_as_vecs(SISAP_H5, *fp16);
+    auto vecs = read_matrix_bytes(SISAP_H5, *fp16);
     EXPECT_GT(vecs.size(), 0u);
     EXPECT_GT(vecs[0].size(), 0u);
     EXPECT_EQ(vecs[0].size(), fp16->num_cols * 2u);
@@ -358,5 +356,5 @@ TEST(Hdf5IntegrationLarge, ReadVecs_1DDataset) {
     info.num_rows = 10;
     info.file_offset = 0;
 
-    EXPECT_THROW(read_dataset_as_vecs(SISAP_H5, info), std::runtime_error);
+    EXPECT_THROW(read_matrix_bytes(SISAP_H5, info), std::runtime_error);
 }

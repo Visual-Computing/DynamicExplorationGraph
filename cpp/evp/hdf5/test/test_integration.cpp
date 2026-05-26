@@ -229,11 +229,10 @@ TEST(Hdf5Integration, ReadItestKnns_MatchesIvecs) {
     auto it = datasets.find("itest/knns");
     ASSERT_NE(it, datasets.end());
 
-    size_t dims, count;
-    auto data = read_dataset_as_ints(SISAP_H5, it->second, dims, count);
+    auto data = read_matrix_int32(SISAP_H5, it->second);
     ASSERT_FALSE(data.empty());
-    EXPECT_EQ(dims, 1000u);
-    EXPECT_EQ(count, 10000u);
+    EXPECT_EQ(static_cast<size_t>(it->second.num_cols), 1000u);
+    EXPECT_EQ(static_cast<size_t>(it->second.num_rows), 10000u);
 
     // knns data: access per-row
     for (int i = 0; i < 10; i++) {
@@ -267,7 +266,7 @@ TEST(Hdf5Integration, ReadFP16Vectors) {
         GTEST_SKIP() << "No FP16 dataset found";
     }
 
-    auto vecs = read_dataset_as_vecs(SISAP_H5, *fp16);
+    auto vecs = read_matrix_bytes(SISAP_H5, *fp16);
     EXPECT_GT(vecs.size(), 0u);
     EXPECT_GT(vecs[0].size(), 0u);
     EXPECT_EQ(vecs[0].size(), fp16->num_cols * 2u);
@@ -290,5 +289,5 @@ TEST(Hdf5Integration, ReadVecs_1DDataset) {
     info.num_rows = 10;
     info.file_offset = 0;
 
-    EXPECT_THROW(read_dataset_as_vecs(SISAP_H5, info), std::runtime_error);
+    EXPECT_THROW(read_matrix_bytes(SISAP_H5, info), std::runtime_error);
 }

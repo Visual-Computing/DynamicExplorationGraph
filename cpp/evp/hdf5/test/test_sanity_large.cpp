@@ -57,15 +57,14 @@ TEST(Hdf5SanityLarge, AllknnDists_NonNegative) {
     auto it = datasets.find("allknn/dists");
     ASSERT_NE(it, datasets.end()) << "Dataset 'allknn/dists' not found";
 
-    size_t dims, count;
-    auto data = read_dataset_as_floats(SISAP_H5, it->second, dims, count);
+    auto data = read_matrix_fp32(SISAP_H5, it->second);
     ASSERT_FALSE(data.empty());
-    EXPECT_EQ(dims, 32u);
-    EXPECT_EQ(count, 6350000u);
+    EXPECT_EQ(static_cast<size_t>(it->second.num_cols), 32u);
+    EXPECT_EQ(static_cast<size_t>(it->second.num_rows), 6350000u);
 
     int idx = 0;
-    for (size_t i = 0; i < 1000 && i < count; i++) {
-        for (size_t j = 0; j < dims && idx < 1000; j++, idx++) {
+    for (size_t i = 0; i < 1000 && i < it->second.num_rows; i++) {
+        for (size_t j = 0; j < it->second.num_cols && idx < 1000; j++, idx++) {
             EXPECT_GE(data[i][j], -0.01f) << "Negative distance at row " << i << " col " << j;
             EXPECT_LT(data[i][j], 10000.0f) << "Distance too large (" << data[i][j] << ") at row " << i << " col " << j;
         }
@@ -79,14 +78,13 @@ TEST(Hdf5SanityLarge, ItestKnns_IndicesValid) {
     auto it = datasets.find("itest/knns");
     ASSERT_NE(it, datasets.end()) << "Dataset 'itest/knns' not found";
 
-    size_t dims, count;
-    auto data = read_dataset_as_ints(SISAP_H5, it->second, dims, count);
+    auto data = read_matrix_int32(SISAP_H5, it->second);
     ASSERT_FALSE(data.empty());
-    EXPECT_EQ(dims, 1000u);
-    EXPECT_EQ(count, 10000u);
+    EXPECT_EQ(static_cast<size_t>(it->second.num_cols), 1000u);
+    EXPECT_EQ(static_cast<size_t>(it->second.num_rows), 10000u);
 
     for (size_t i = 0; i < 100; i++) {
-        for (size_t j = 0; j < dims; j++) {
+        for (size_t j = 0; j < it->second.num_cols; j++) {
             int32_t idx = data[i][j];
             EXPECT_GE(idx, 1) << "Negative index at row " << i << " col " << j;
             EXPECT_LE(idx, 6350000) << "Index > train size at row " << i << " col " << j << " (value=" << idx << ")";
@@ -101,11 +99,10 @@ TEST(Hdf5SanityLarge, ItestDists_NonNegative) {
     auto it = datasets.find("itest/dists");
     ASSERT_NE(it, datasets.end()) << "Dataset 'itest/dists' not found";
 
-    size_t dims, count;
-    auto data = read_dataset_as_floats(SISAP_H5, it->second, dims, count);
+    auto data = read_matrix_fp32(SISAP_H5, it->second);
     ASSERT_FALSE(data.empty());
-    EXPECT_EQ(dims, 1000u);
-    EXPECT_EQ(count, 10000u);
+    EXPECT_EQ(static_cast<size_t>(it->second.num_cols), 1000u);
+    EXPECT_EQ(static_cast<size_t>(it->second.num_rows), 10000u);
 
     for (int i = 0; i < 1000; i++) {
         EXPECT_GE(data[0][i], 0.0f) << "Negative distance at index " << i;
@@ -120,15 +117,14 @@ TEST(Hdf5SanityLarge, ItestQueries_Normalized) {
     auto it = datasets.find("itest/queries");
     ASSERT_NE(it, datasets.end()) << "Dataset 'itest/queries' not found";
 
-    size_t dims, count;
-    auto data = read_dataset_as_floats(SISAP_H5, it->second, dims, count);
+    auto data = read_matrix_fp32(SISAP_H5, it->second);
     ASSERT_FALSE(data.empty());
-    EXPECT_EQ(dims, 1024u);
-    EXPECT_EQ(count, 10000u);
+    EXPECT_EQ(static_cast<size_t>(it->second.num_cols), 1024u);
+    EXPECT_EQ(static_cast<size_t>(it->second.num_rows), 10000u);
 
     for (size_t i = 0; i < 100; i++) {
         float norm = 0.0f;
-        for (size_t j = 0; j < dims; j++) {
+        for (size_t j = 0; j < it->second.num_cols; j++) {
             float v = data[i][j];
             norm += v * v;
         }
@@ -144,14 +140,13 @@ TEST(Hdf5SanityLarge, OtestKnns_IndicesValid) {
     auto it = datasets.find("otest/knns");
     ASSERT_NE(it, datasets.end()) << "Dataset 'otest/knns' not found";
 
-    size_t dims, count;
-    auto data = read_dataset_as_ints(SISAP_H5, it->second, dims, count);
+    auto data = read_matrix_int32(SISAP_H5, it->second);
     ASSERT_FALSE(data.empty());
-    EXPECT_EQ(dims, 1000u);
-    EXPECT_EQ(count, 10000u);
+    EXPECT_EQ(static_cast<size_t>(it->second.num_cols), 1000u);
+    EXPECT_EQ(static_cast<size_t>(it->second.num_rows), 10000u);
 
     for (size_t i = 0; i < 100; i++) {
-        for (size_t j = 0; j < dims; j++) {
+        for (size_t j = 0; j < it->second.num_cols; j++) {
             int32_t idx = data[i][j];
             EXPECT_GE(idx, 1) << "Negative index at row " << i << " col " << j;
             EXPECT_LE(idx, 6350000) << "Index > train size at row " << i << " col " << j << " (value=" << idx << ")";
@@ -166,11 +161,10 @@ TEST(Hdf5SanityLarge, OtestDists_NonNegative) {
     auto it = datasets.find("otest/dists");
     ASSERT_NE(it, datasets.end()) << "Dataset 'otest/dists' not found";
 
-    size_t dims, count;
-    auto data = read_dataset_as_floats(SISAP_H5, it->second, dims, count);
+    auto data = read_matrix_fp32(SISAP_H5, it->second);
     ASSERT_FALSE(data.empty());
-    EXPECT_EQ(dims, 1000u);
-    EXPECT_EQ(count, 10000u);
+    EXPECT_EQ(static_cast<size_t>(it->second.num_cols), 1000u);
+    EXPECT_EQ(static_cast<size_t>(it->second.num_rows), 10000u);
 
     for (int i = 0; i < 1000; i++) {
         EXPECT_GE(data[0][i], 0.0f) << "Negative distance at index " << i;
@@ -186,7 +180,7 @@ TEST(Hdf5SanityLarge, OtestQueries_Normalized) {
     ASSERT_NE(it, datasets.end()) << "Dataset 'otest/queries' not found";
     EXPECT_EQ(it->second.element_size, 2u);
 
-    auto byte_vecs = read_dataset_as_vecs(SISAP_H5, it->second);
+    auto byte_vecs = read_matrix_bytes(SISAP_H5, it->second);
     size_t dims = it->second.num_cols;
 
     for (size_t i = 0; i < 100 && i < byte_vecs.size(); i++) {

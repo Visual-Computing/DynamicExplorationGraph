@@ -1282,18 +1282,18 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    double t_load = now_ms();
+    double t_load = evp_common::now_ms();
     size_t dims = 0, count = 0;
-    auto train_vectors = hvecs_read(train_hvecs.string().c_str(), dims, count);
-    double load_ms = now_ms() - t_load;
+    auto train_vectors = evp_common::hvecs_read(train_hvecs.string().c_str(), dims, count);
+    double load_ms = evp_common::now_ms() - t_load;
 
     std::printf("Loaded %ls: %zu vectors, dim=%zu\n", train_hvecs.filename().wstring().c_str(), count, dims);
     std::printf("Load time: %.2f ms\n\n", load_ms);
 
-    double t_q = now_ms();
+    double t_q = evp_common::now_ms();
     auto quantized = deglib::quantization::quantize_batch(
         train_vectors, static_cast<uint32_t>(dims), NON_ZEROS, threads);
-    double quantize_ms = now_ms() - t_q;
+    double quantize_ms = evp_common::now_ms() - t_q;
 
     std::printf("Quantize time: %.2f ms (produced %.2f MB)\n\n",
                 quantize_ms,
