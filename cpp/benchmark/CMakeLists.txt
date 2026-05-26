@@ -23,9 +23,3 @@ add_executable(deglib_setup_dataset ${PROJECT_SOURCE_DIR}/src/deglib_setup_datas
 target_link_libraries(deglib_setup_dataset PUBLIC DEG_LIB compile-options
                                                 fmt::fmt-header-only OpenMP::OpenMP_CXX)
 target_compile_definitions(deglib_setup_dataset PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
-add_executable(deglib_evp_test ${PROJECT_SOURCE_DIR}/src/deglib_evp_test.cpp)
-target_include_directories(deglib_evp_test PRIVATE ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(deglib_evp_test PUBLIC DEG_LIB compile-options
-                                                fmt::fmt-header-only OpenMP::OpenMP_CXX)
-target_compile_definitions(deglib_evp_test PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
-

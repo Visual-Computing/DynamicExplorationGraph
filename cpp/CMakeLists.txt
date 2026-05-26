@@ -155,6 +155,7 @@ if (ENABLE_BENCHMARKS)
 	set(FMT_INSTALL OFF)
 	add_subdirectory(external/fmt)
 	add_subdirectory(benchmark)
+	add_subdirectory(evp)
 endif()
 
 # Unit tests
