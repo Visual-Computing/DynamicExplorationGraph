@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <thread>
 #include <vector>
+#include <numeric>
 
 #include <fmt/core.h>
 
@@ -79,7 +80,7 @@ enum class BenchmarkMode {
 // ============================================================================
 
 static void bench_fp16_evp_asymmetric(
-    const uint16_t* fp16_data,
+    const std::vector<std::vector<std::byte>>& fp16_data_vecs,
     size_t count,
     uint32_t dim,
     const std::byte* evp_data,
@@ -96,6 +97,13 @@ static void bench_fp16_evp_asymmetric(
         std::printf("Asymmetric bench: no data (count=%zu, dim=%u)\n", count, dim);
         return;
     }
+
+    // Generate once a vector with numbers 0 to count-1, shuffle it to simulate random memory access
+    std::vector<uint32_t> shuffled_indices(count);
+    std::iota(shuffled_indices.begin(), shuffled_indices.end(), 0u);
+    std::mt19937 g(1337); // Deterministic seed for fair reproducible benchmark
+    std::shuffle(shuffled_indices.begin(), shuffled_indices.end(), g);
+
     // Scale down for tiny datasets.
     comparisons = std::min(comparisons, std::max<size_t>(count * 256, 10'000));
 
@@ -122,8 +130,9 @@ static void bench_fp16_evp_asymmetric(
         for (size_t i = 0; i < warm; ++i) {
             const uint32_t q = static_cast<uint32_t>((i * 2654435761ULL) % count);
             const uint32_t c = static_cast<uint32_t>(((i * 40503ULL) + 17ULL) % count);
-            const uint16_t* a = fp16_data + static_cast<size_t>(q) * dim;
-            const std::byte* b = evp_data + static_cast<size_t>(c) * bytes_per_evp;
+            const uint32_t db_idx = shuffled_indices[c];
+            const uint16_t* a = reinterpret_cast<const uint16_t*>(fp16_data_vecs[q].data());
+            const std::byte* b = evp_data + static_cast<size_t>(db_idx) * bytes_per_evp;
             sink += fn(a, b, &dim_u32);
         }
 
@@ -135,8 +144,9 @@ static void bench_fp16_evp_asymmetric(
             for (size_t i = 0; i < comparisons; ++i) {
                 const uint32_t q = static_cast<uint32_t>((i * 2654435761ULL) % count);
                 const uint32_t c = static_cast<uint32_t>(((i * 40503ULL) + 17ULL) % count);
-                const uint16_t* a = fp16_data + static_cast<size_t>(q) * dim;
-                const std::byte* b = evp_data + static_cast<size_t>(c) * bytes_per_evp;
+                const uint32_t db_idx = shuffled_indices[c];
+                const uint16_t* a = reinterpret_cast<const uint16_t*>(fp16_data_vecs[q].data());
+                const std::byte* b = evp_data + static_cast<size_t>(db_idx) * bytes_per_evp;
                 sink += fn(a, b, &dim_u32);
             }
             const auto t1 = std::chrono::steady_clock::now();
@@ -739,6 +749,496 @@ static void bench_fp16_evp_asymmetric(
         _mm_store_ps(f, sum128);
         return f[0] + f[1] + f[2] + f[3];
     };
+
+    auto ip_avx2_batch4_ptr = [](const uint16_t* a, const std::byte* const* b_arr, const uint32_t* qty_ptr, float* dists) {
+        const uint32_t dim = *qty_ptr;
+        const size_t mask_bytes = dim / 8;
+
+        const std::byte* ones_b[4];
+        const std::byte* negs_b[4];
+        for (int j = 0; j < 4; ++j) {
+            ones_b[j] = b_arr[j];
+            negs_b[j] = b_arr[j] + mask_bytes;
+        }
+
+        __m256 sum0 = _mm256_setzero_ps();
+        __m256 sum1 = _mm256_setzero_ps();
+        __m256 sum2 = _mm256_setzero_ps();
+        __m256 sum3 = _mm256_setzero_ps();
+
+        for (size_t byte_idx = 0; byte_idx < mask_bytes; ++byte_idx) {
+            const __m128i raw_a = _mm_loadu_si128((const __m128i*)&a[byte_idx * 8]);
+            const __m256 a_ps = _mm256_cvtph_ps(raw_a);
+
+            #define ACCUMULATE_NEIGHBOR(j, sum_reg) { \
+                const uint8_t o = static_cast<uint8_t>(ones_b[j][byte_idx]); \
+                const uint8_t n = static_cast<uint8_t>(negs_b[j][byte_idx]); \
+                const __m256 m = _mm256_sub_ps(_mm256_load_ps(avx2_tbl.ones[o]), _mm256_load_ps(avx2_tbl.negs[n])); \
+                sum_reg = _mm256_add_ps(sum_reg, _mm256_mul_ps(a_ps, m)); \
+            }
+
+            ACCUMULATE_NEIGHBOR(0, sum0);
+            ACCUMULATE_NEIGHBOR(1, sum1);
+            ACCUMULATE_NEIGHBOR(2, sum2);
+            ACCUMULATE_NEIGHBOR(3, sum3);
+
+            #undef ACCUMULATE_NEIGHBOR
+        }
+
+        auto hsum256 = [](const __m256 sum256) -> float {
+            __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
+            alignas(16) float f[4];
+            _mm_store_ps(f, sum128);
+            return f[0] + f[1] + f[2] + f[3];
+        };
+
+        dists[0] = 1.0f - hsum256(sum0);
+        dists[1] = 1.0f - hsum256(sum1);
+        dists[2] = 1.0f - hsum256(sum2);
+        dists[3] = 1.0f - hsum256(sum3);
+    };
+
+    auto ip_avx2_batch8_ptr = [](const uint16_t* a, const std::byte* const* b_arr, const uint32_t* qty_ptr, float* dists) {
+        const uint32_t dim = *qty_ptr;
+        const size_t mask_bytes = dim / 8;
+
+        const std::byte* ones_b[8];
+        const std::byte* negs_b[8];
+        for (int j = 0; j < 8; ++j) {
+            ones_b[j] = b_arr[j];
+            negs_b[j] = b_arr[j] + mask_bytes;
+        }
+
+        __m256 sum0 = _mm256_setzero_ps();
+        __m256 sum1 = _mm256_setzero_ps();
+        __m256 sum2 = _mm256_setzero_ps();
+        __m256 sum3 = _mm256_setzero_ps();
+        __m256 sum4 = _mm256_setzero_ps();
+        __m256 sum5 = _mm256_setzero_ps();
+        __m256 sum6 = _mm256_setzero_ps();
+        __m256 sum7 = _mm256_setzero_ps();
+
+        for (size_t byte_idx = 0; byte_idx < mask_bytes; ++byte_idx) {
+            const __m128i raw_a = _mm_loadu_si128((const __m128i*)&a[byte_idx * 8]);
+            const __m256 a_ps = _mm256_cvtph_ps(raw_a);
+
+            #define ACCUMULATE_NEIGHBOR(j, sum_reg) { \
+                const uint8_t o = static_cast<uint8_t>(ones_b[j][byte_idx]); \
+                const uint8_t n = static_cast<uint8_t>(negs_b[j][byte_idx]); \
+                const __m256 m = _mm256_sub_ps(_mm256_load_ps(avx2_tbl.ones[o]), _mm256_load_ps(avx2_tbl.negs[n])); \
+                sum_reg = _mm256_add_ps(sum_reg, _mm256_mul_ps(a_ps, m)); \
+            }
+
+            ACCUMULATE_NEIGHBOR(0, sum0);
+            ACCUMULATE_NEIGHBOR(1, sum1);
+            ACCUMULATE_NEIGHBOR(2, sum2);
+            ACCUMULATE_NEIGHBOR(3, sum3);
+            ACCUMULATE_NEIGHBOR(4, sum4);
+            ACCUMULATE_NEIGHBOR(5, sum5);
+            ACCUMULATE_NEIGHBOR(6, sum6);
+            ACCUMULATE_NEIGHBOR(7, sum7);
+
+            #undef ACCUMULATE_NEIGHBOR
+        }
+
+        auto hsum256 = [](const __m256 sum256) -> float {
+            __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
+            alignas(16) float f[4];
+            _mm_store_ps(f, sum128);
+            return f[0] + f[1] + f[2] + f[3];
+        };
+
+        dists[0] = 1.0f - hsum256(sum0);
+        dists[1] = 1.0f - hsum256(sum1);
+        dists[2] = 1.0f - hsum256(sum2);
+        dists[3] = 1.0f - hsum256(sum3);
+        dists[4] = 1.0f - hsum256(sum4);
+        dists[5] = 1.0f - hsum256(sum5);
+        dists[6] = 1.0f - hsum256(sum6);
+        dists[7] = 1.0f - hsum256(sum7);
+    };
+
+    auto ip_avx2_batch4_unroll2 = [](const uint16_t* a, const std::byte* const* b_arr, const uint32_t* qty_ptr, float* dists) {
+        const uint32_t dim = *qty_ptr;
+        const size_t mask_bytes = dim / 8;
+
+        const std::byte* ones_b[4];
+        const std::byte* negs_b[4];
+        for (int j = 0; j < 4; ++j) {
+            ones_b[j] = b_arr[j];
+            negs_b[j] = b_arr[j] + mask_bytes;
+        }
+
+        __m256 sum0 = _mm256_setzero_ps();
+        __m256 sum1 = _mm256_setzero_ps();
+        __m256 sum2 = _mm256_setzero_ps();
+        __m256 sum3 = _mm256_setzero_ps();
+
+        size_t byte_idx = 0;
+        for (; byte_idx + 1 < mask_bytes; byte_idx += 2) {
+            const __m256i raw16 = _mm256_loadu_si256((const __m256i*)&a[byte_idx * 8]);
+            const __m128i raw_a0 = _mm256_extractf128_si256(raw16, 0);
+            const __m128i raw_a1 = _mm256_extractf128_si256(raw16, 1);
+            const __m256 a_ps_0 = _mm256_cvtph_ps(raw_a0);
+            const __m256 a_ps_1 = _mm256_cvtph_ps(raw_a1);
+
+            #define ACCUMULATE_NEIGHBOR(j, sum_reg) { \
+                const uint8_t o0 = static_cast<uint8_t>(ones_b[j][byte_idx]); \
+                const uint8_t n0 = static_cast<uint8_t>(negs_b[j][byte_idx]); \
+                const uint8_t o1 = static_cast<uint8_t>(ones_b[j][byte_idx + 1]); \
+                const uint8_t n1 = static_cast<uint8_t>(negs_b[j][byte_idx + 1]); \
+                const __m256 m0 = _mm256_sub_ps(_mm256_load_ps(avx2_tbl.ones[o0]), _mm256_load_ps(avx2_tbl.negs[n0])); \
+                const __m256 m1 = _mm256_sub_ps(_mm256_load_ps(avx2_tbl.ones[o1]), _mm256_load_ps(avx2_tbl.negs[n1])); \
+                sum_reg = _mm256_add_ps(sum_reg, _mm256_mul_ps(a_ps_0, m0)); \
+                sum_reg = _mm256_add_ps(sum_reg, _mm256_mul_ps(a_ps_1, m1)); \
+            }
+
+            ACCUMULATE_NEIGHBOR(0, sum0);
+            ACCUMULATE_NEIGHBOR(1, sum1);
+            ACCUMULATE_NEIGHBOR(2, sum2);
+            ACCUMULATE_NEIGHBOR(3, sum3);
+
+            #undef ACCUMULATE_NEIGHBOR
+        }
+
+        if (byte_idx < mask_bytes) {
+            const __m128i raw_a = _mm_loadu_si128((const __m128i*)&a[byte_idx * 8]);
+            const __m256 a_ps = _mm256_cvtph_ps(raw_a);
+
+            #define ACCUMULATE_NEIGHBOR_REMAINDER(j, sum_reg) { \
+                const uint8_t o = static_cast<uint8_t>(ones_b[j][byte_idx]); \
+                const uint8_t n = static_cast<uint8_t>(negs_b[j][byte_idx]); \
+                const __m256 m = _mm256_sub_ps(_mm256_load_ps(avx2_tbl.ones[o]), _mm256_load_ps(avx2_tbl.negs[n])); \
+                sum_reg = _mm256_add_ps(sum_reg, _mm256_mul_ps(a_ps, m)); \
+            }
+
+            ACCUMULATE_NEIGHBOR_REMAINDER(0, sum0);
+            ACCUMULATE_NEIGHBOR_REMAINDER(1, sum1);
+            ACCUMULATE_NEIGHBOR_REMAINDER(2, sum2);
+            ACCUMULATE_NEIGHBOR_REMAINDER(3, sum3);
+
+            #undef ACCUMULATE_NEIGHBOR_REMAINDER
+        }
+
+        auto hsum256 = [](const __m256 sum256) -> float {
+            __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
+            alignas(16) float f[4];
+            _mm_store_ps(f, sum128);
+            return f[0] + f[1] + f[2] + f[3];
+        };
+
+        dists[0] = 1.0f - hsum256(sum0);
+        dists[1] = 1.0f - hsum256(sum1);
+        dists[2] = 1.0f - hsum256(sum2);
+        dists[3] = 1.0f - hsum256(sum3);
+    };
+
+    auto ip_avx2_batch8_unroll2 = [](const uint16_t* a, const std::byte* const* b_arr, const uint32_t* qty_ptr, float* dists) {
+        const uint32_t dim = *qty_ptr;
+        const size_t mask_bytes = dim / 8;
+
+        const std::byte* ones_b[8];
+        const std::byte* negs_b[8];
+        for (int j = 0; j < 8; ++j) {
+            ones_b[j] = b_arr[j];
+            negs_b[j] = b_arr[j] + mask_bytes;
+        }
+
+        __m256 sum0 = _mm256_setzero_ps();
+        __m256 sum1 = _mm256_setzero_ps();
+        __m256 sum2 = _mm256_setzero_ps();
+        __m256 sum3 = _mm256_setzero_ps();
+        __m256 sum4 = _mm256_setzero_ps();
+        __m256 sum5 = _mm256_setzero_ps();
+        __m256 sum6 = _mm256_setzero_ps();
+        __m256 sum7 = _mm256_setzero_ps();
+
+        size_t byte_idx = 0;
+        for (; byte_idx + 1 < mask_bytes; byte_idx += 2) {
+            const __m256i raw16 = _mm256_loadu_si256((const __m256i*)&a[byte_idx * 8]);
+            const __m128i raw_a0 = _mm256_extractf128_si256(raw16, 0);
+            const __m128i raw_a1 = _mm256_extractf128_si256(raw16, 1);
+            const __m256 a_ps_0 = _mm256_cvtph_ps(raw_a0);
+            const __m256 a_ps_1 = _mm256_cvtph_ps(raw_a1);
+
+            #define ACCUMULATE_NEIGHBOR(j, sum_reg) { \
+                const uint8_t o0 = static_cast<uint8_t>(ones_b[j][byte_idx]); \
+                const uint8_t n0 = static_cast<uint8_t>(negs_b[j][byte_idx]); \
+                const uint8_t o1 = static_cast<uint8_t>(ones_b[j][byte_idx + 1]); \
+                const uint8_t n1 = static_cast<uint8_t>(negs_b[j][byte_idx + 1]); \
+                const __m256 m0 = _mm256_sub_ps(_mm256_load_ps(avx2_tbl.ones[o0]), _mm256_load_ps(avx2_tbl.negs[n0])); \
+                const __m256 m1 = _mm256_sub_ps(_mm256_load_ps(avx2_tbl.ones[o1]), _mm256_load_ps(avx2_tbl.negs[n1])); \
+                sum_reg = _mm256_add_ps(sum_reg, _mm256_mul_ps(a_ps_0, m0)); \
+                sum_reg = _mm256_add_ps(sum_reg, _mm256_mul_ps(a_ps_1, m1)); \
+            }
+
+            ACCUMULATE_NEIGHBOR(0, sum0);
+            ACCUMULATE_NEIGHBOR(1, sum1);
+            ACCUMULATE_NEIGHBOR(2, sum2);
+            ACCUMULATE_NEIGHBOR(3, sum3);
+            ACCUMULATE_NEIGHBOR(4, sum4);
+            ACCUMULATE_NEIGHBOR(5, sum5);
+            ACCUMULATE_NEIGHBOR(6, sum6);
+            ACCUMULATE_NEIGHBOR(7, sum7);
+
+            #undef ACCUMULATE_NEIGHBOR
+        }
+
+        if (byte_idx < mask_bytes) {
+            const __m128i raw_a = _mm_loadu_si128((const __m128i*)&a[byte_idx * 8]);
+            const __m256 a_ps = _mm256_cvtph_ps(raw_a);
+
+            #define ACCUMULATE_NEIGHBOR_REMAINDER(j, sum_reg) { \
+                const uint8_t o = static_cast<uint8_t>(ones_b[j][byte_idx]); \
+                const uint8_t n = static_cast<uint8_t>(negs_b[j][byte_idx]); \
+                const __m256 m = _mm256_sub_ps(_mm256_load_ps(avx2_tbl.ones[o]), _mm256_load_ps(avx2_tbl.negs[n])); \
+                sum_reg = _mm256_add_ps(sum_reg, _mm256_mul_ps(a_ps, m)); \
+            }
+
+            ACCUMULATE_NEIGHBOR_REMAINDER(0, sum0);
+            ACCUMULATE_NEIGHBOR_REMAINDER(1, sum1);
+            ACCUMULATE_NEIGHBOR_REMAINDER(2, sum2);
+            ACCUMULATE_NEIGHBOR_REMAINDER(3, sum3);
+            ACCUMULATE_NEIGHBOR_REMAINDER(4, sum4);
+            ACCUMULATE_NEIGHBOR_REMAINDER(5, sum5);
+            ACCUMULATE_NEIGHBOR_REMAINDER(6, sum6);
+            ACCUMULATE_NEIGHBOR_REMAINDER(7, sum7);
+
+            #undef ACCUMULATE_NEIGHBOR_REMAINDER
+        }
+
+        auto hsum256 = [](const __m256 sum256) -> float {
+            __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
+            alignas(16) float f[4];
+            _mm_store_ps(f, sum128);
+            return f[0] + f[1] + f[2] + f[3];
+        };
+
+        dists[0] = 1.0f - hsum256(sum0);
+        dists[1] = 1.0f - hsum256(sum1);
+        dists[2] = 1.0f - hsum256(sum2);
+        dists[3] = 1.0f - hsum256(sum3);
+        dists[4] = 1.0f - hsum256(sum4);
+        dists[5] = 1.0f - hsum256(sum5);
+        dists[6] = 1.0f - hsum256(sum6);
+        dists[7] = 1.0f - hsum256(sum7);
+    };
+
+    auto ip_avx2_batch4_unroll4 = [](const uint16_t* a, const std::byte* const* b_arr, const uint32_t* qty_ptr, float* dists) {
+        const uint32_t dim = *qty_ptr;
+        const size_t mask_bytes = dim / 8;
+
+        const std::byte* ones_b[4];
+        const std::byte* negs_b[4];
+        for (int j = 0; j < 4; ++j) {
+            ones_b[j] = b_arr[j];
+            negs_b[j] = b_arr[j] + mask_bytes;
+        }
+
+        __m256 sum0 = _mm256_setzero_ps();
+        __m256 sum1 = _mm256_setzero_ps();
+        __m256 sum2 = _mm256_setzero_ps();
+        __m256 sum3 = _mm256_setzero_ps();
+
+        size_t byte_idx = 0;
+        for (; byte_idx + 3 < mask_bytes; byte_idx += 4) {
+            const __m256i raw16_0 = _mm256_loadu_si256((const __m256i*)&a[byte_idx * 8]);
+            const __m256i raw16_1 = _mm256_loadu_si256((const __m256i*)&a[(byte_idx + 2) * 8]);
+
+            const __m128i r0 = _mm256_extractf128_si256(raw16_0, 0);
+            const __m128i r1 = _mm256_extractf128_si256(raw16_0, 1);
+            const __m128i r2 = _mm256_extractf128_si256(raw16_1, 0);
+            const __m128i r3 = _mm256_extractf128_si256(raw16_1, 1);
+
+            const __m256 a_ps_0 = _mm256_cvtph_ps(r0);
+            const __m256 a_ps_1 = _mm256_cvtph_ps(r1);
+            const __m256 a_ps_2 = _mm256_cvtph_ps(r2);
+            const __m256 a_ps_3 = _mm256_cvtph_ps(r3);
+
+            #define ACCUMULATE_NEIGHBOR(j, sum_reg) { \
+                const uint8_t o0 = static_cast<uint8_t>(ones_b[j][byte_idx]); \
+                const uint8_t n0 = static_cast<uint8_t>(negs_b[j][byte_idx]); \
+                const uint8_t o1 = static_cast<uint8_t>(ones_b[j][byte_idx + 1]); \
+                const uint8_t n1 = static_cast<uint8_t>(negs_b[j][byte_idx + 1]); \
+                const uint8_t o2 = static_cast<uint8_t>(ones_b[j][byte_idx + 2]); \
+                const uint8_t n2 = static_cast<uint8_t>(negs_b[j][byte_idx + 2]); \
+                const uint8_t o3 = static_cast<uint8_t>(ones_b[j][byte_idx + 3]); \
+                const uint8_t n3 = static_cast<uint8_t>(negs_b[j][byte_idx + 3]); \
+                sum_reg = _mm256_add_ps(sum_reg, _mm256_mul_ps(a_ps_0, _mm256_sub_ps(_mm256_load_ps(avx2_tbl.ones[o0]), _mm256_load_ps(avx2_tbl.negs[n0])))); \
+                sum_reg = _mm256_add_ps(sum_reg, _mm256_mul_ps(a_ps_1, _mm256_sub_ps(_mm256_load_ps(avx2_tbl.ones[o1]), _mm256_load_ps(avx2_tbl.negs[n1])))); \
+                sum_reg = _mm256_add_ps(sum_reg, _mm256_mul_ps(a_ps_2, _mm256_sub_ps(_mm256_load_ps(avx2_tbl.ones[o2]), _mm256_load_ps(avx2_tbl.negs[n2])))); \
+                sum_reg = _mm256_add_ps(sum_reg, _mm256_mul_ps(a_ps_3, _mm256_sub_ps(_mm256_load_ps(avx2_tbl.ones[o3]), _mm256_load_ps(avx2_tbl.negs[n3])))); \
+            }
+
+            ACCUMULATE_NEIGHBOR(0, sum0);
+            ACCUMULATE_NEIGHBOR(1, sum1);
+            ACCUMULATE_NEIGHBOR(2, sum2);
+            ACCUMULATE_NEIGHBOR(3, sum3);
+
+            #undef ACCUMULATE_NEIGHBOR
+        }
+
+        // Remainder
+        for (; byte_idx < mask_bytes; ++byte_idx) {
+            const __m128i raw_a = _mm_loadu_si128((const __m128i*)&a[byte_idx * 8]);
+            const __m256 a_ps = _mm256_cvtph_ps(raw_a);
+
+            #define ACCUMULATE_NEIGHBOR_REMAINDER(j, sum_reg) { \
+                const uint8_t o = static_cast<uint8_t>(ones_b[j][byte_idx]); \
+                const uint8_t n = static_cast<uint8_t>(negs_b[j][byte_idx]); \
+                const __m256 m = _mm256_sub_ps(_mm256_load_ps(avx2_tbl.ones[o]), _mm256_load_ps(avx2_tbl.negs[n])); \
+                sum_reg = _mm256_add_ps(sum_reg, _mm256_mul_ps(a_ps, m)); \
+            }
+
+            ACCUMULATE_NEIGHBOR_REMAINDER(0, sum0);
+            ACCUMULATE_NEIGHBOR_REMAINDER(1, sum1);
+            ACCUMULATE_NEIGHBOR_REMAINDER(2, sum2);
+            ACCUMULATE_NEIGHBOR_REMAINDER(3, sum3);
+
+            #undef ACCUMULATE_NEIGHBOR_REMAINDER
+        }
+
+        auto hsum256 = [](const __m256 sum256) -> float {
+            __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
+            alignas(16) float f[4];
+            _mm_store_ps(f, sum128);
+            return f[0] + f[1] + f[2] + f[3];
+        };
+
+        dists[0] = 1.0f - hsum256(sum0);
+        dists[1] = 1.0f - hsum256(sum1);
+        dists[2] = 1.0f - hsum256(sum2);
+        dists[3] = 1.0f - hsum256(sum3);
+    };
+
+
+    auto run_case_batch4 = [&](const char* name, auto&& fn_batch4) {
+        constexpr int trials = 5;
+
+        // Warmup
+        volatile float sink = 0.0f;
+        const size_t warm = std::min<size_t>((comparisons / 4) / 10, 12500);
+        for (size_t i = 0; i < warm; ++i) {
+            const uint32_t q = static_cast<uint32_t>((i * 2654435761ULL) % count);
+            const uint16_t* a = reinterpret_cast<const uint16_t*>(fp16_data_vecs[q].data());
+            
+            const std::byte* b[4];
+            for (int j = 0; j < 4; ++j) {
+                const uint32_t c = static_cast<uint32_t>((( (i * 4 + j) * 40503ULL) + 17ULL) % count);
+                const uint32_t db_idx = shuffled_indices[c];
+                b[j] = evp_data + static_cast<size_t>(db_idx) * bytes_per_evp;
+            }
+            
+            alignas(32) float dists[4];
+            fn_batch4(a, b, &dim_u32, dists);
+            for (int j = 0; j < 4; ++j) {
+                sink += dists[j];
+            }
+        }
+
+        double best_ms = std::numeric_limits<double>::infinity();
+        double best_ns_per_op = std::numeric_limits<double>::infinity();
+
+        for (int t = 0; t < trials; ++t) {
+            const auto t0 = std::chrono::steady_clock::now();
+            for (size_t i = 0; i < comparisons / 4; ++i) {
+                const uint32_t q = static_cast<uint32_t>((i * 2654435761ULL) % count);
+                const uint16_t* a = reinterpret_cast<const uint16_t*>(fp16_data_vecs[q].data());
+                
+                const std::byte* b[4];
+                for (int j = 0; j < 4; ++j) {
+                    const uint32_t c = static_cast<uint32_t>((( (i * 4 + j) * 40503ULL) + 17ULL) % count);
+                    const uint32_t db_idx = shuffled_indices[c];
+                    b[j] = evp_data + static_cast<size_t>(db_idx) * bytes_per_evp;
+                }
+                
+                alignas(32) float dists[4];
+                fn_batch4(a, b, &dim_u32, dists);
+                for (int j = 0; j < 4; ++j) {
+                    sink += dists[j];
+                }
+            }
+            const auto t1 = std::chrono::steady_clock::now();
+            const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+            const double ns_per_op = (ms * 1e6) / static_cast<double>(comparisons);
+
+            if (ns_per_op < best_ns_per_op) {
+                best_ns_per_op = ns_per_op;
+                best_ms = ms;
+            }
+        }
+
+        std::printf("  %-14s  %10.2f ms  %8.2f ns/op  (best-of-%d, sink=%.3f)\n",
+                    name, best_ms, best_ns_per_op, trials, (float)sink);
+
+        if (best_ns_per_op < best.ns_per_op) {
+            best = BenchResult{ name, best_ms, best_ns_per_op };
+        }
+    };
+
+    auto run_case_batch8 = [&](const char* name, auto&& fn_batch8) {
+        constexpr int trials = 5;
+
+        // Warmup
+        volatile float sink = 0.0f;
+        const size_t warm = std::min<size_t>((comparisons / 8) / 10, 6250);
+        for (size_t i = 0; i < warm; ++i) {
+            const uint32_t q = static_cast<uint32_t>((i * 2654435761ULL) % count);
+            const uint16_t* a = reinterpret_cast<const uint16_t*>(fp16_data_vecs[q].data());
+            
+            const std::byte* b[8];
+            for (int j = 0; j < 8; ++j) {
+                const uint32_t c = static_cast<uint32_t>((( (i * 8 + j) * 40503ULL) + 17ULL) % count);
+                const uint32_t db_idx = shuffled_indices[c];
+                b[j] = evp_data + static_cast<size_t>(db_idx) * bytes_per_evp;
+            }
+            
+            alignas(32) float dists[8];
+            fn_batch8(a, b, &dim_u32, dists);
+            for (int j = 0; j < 8; ++j) {
+                sink += dists[j];
+            }
+        }
+
+        double best_ms = std::numeric_limits<double>::infinity();
+        double best_ns_per_op = std::numeric_limits<double>::infinity();
+
+        for (int t = 0; t < trials; ++t) {
+            const auto t0 = std::chrono::steady_clock::now();
+            for (size_t i = 0; i < comparisons / 8; ++i) {
+                const uint32_t q = static_cast<uint32_t>((i * 2654435761ULL) % count);
+                const uint16_t* a = reinterpret_cast<const uint16_t*>(fp16_data_vecs[q].data());
+                
+                const std::byte* b[8];
+                for (int j = 0; j < 8; ++j) {
+                    const uint32_t c = static_cast<uint32_t>((( (i * 8 + j) * 40503ULL) + 17ULL) % count);
+                    const uint32_t db_idx = shuffled_indices[c];
+                    b[j] = evp_data + static_cast<size_t>(db_idx) * bytes_per_evp;
+                }
+                
+                alignas(32) float dists[8];
+                fn_batch8(a, b, &dim_u32, dists);
+                for (int j = 0; j < 8; ++j) {
+                    sink += dists[j];
+                }
+            }
+            const auto t1 = std::chrono::steady_clock::now();
+            const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+            const double ns_per_op = (ms * 1e6) / static_cast<double>(comparisons);
+
+            if (ns_per_op < best_ns_per_op) {
+                best_ns_per_op = ns_per_op;
+                best_ms = ms;
+            }
+        }
+
+        std::printf("  %-14s  %10.2f ms  %8.2f ns/op  (best-of-%d, sink=%.3f)\n",
+                    name, best_ms, best_ns_per_op, trials, (float)sink);
+
+        if (best_ns_per_op < best.ns_per_op) {
+            best = BenchResult{ name, best_ms, best_ns_per_op };
+        }
+    };
 #endif
 
     std::printf("\nAvailable implementations in this build:\n");
@@ -756,6 +1256,11 @@ static void bench_fp16_evp_asymmetric(
     std::printf("  - ip_avx2_lut4_nb (candidate)\n");
     std::printf("  - ip_avx2_lut8_nb (candidate)\n");
     std::printf("  - ip_avx2_diff2 (candidate)\n");
+    std::printf("  - ip_avx2_batch4_ptr (batch candidate)\n");
+    std::printf("  - ip_avx2_batch8_ptr (batch candidate)\n");
+    std::printf("  - ip_avx2_batch4_unroll2 (batch candidate)\n");
+    std::printf("  - ip_avx2_batch8_unroll2 (batch candidate)\n");
+    std::printf("  - ip_avx2_batch4_unroll4 (batch candidate)\n");
 #endif
 #if defined(USE_AVX512)
     std::printf("  - ip_avx512\n");
@@ -776,6 +1281,11 @@ static void bench_fp16_evp_asymmetric(
     run_case("ip_avx2_lut4_nb", ip_avx2_lut4_nb);
     run_case("ip_avx2_lut8_nb", ip_avx2_lut8_nb);
     run_case("ip_avx2_diff2", ip_avx2_diff2);
+    run_case_batch4("ip_avx2_b4_ptr", ip_avx2_batch4_ptr);
+    run_case_batch8("ip_avx2_b8_ptr", ip_avx2_batch8_ptr);
+    run_case_batch4("ip_avx2_b4_u2", ip_avx2_batch4_unroll2);
+    run_case_batch8("ip_avx2_b8_u2", ip_avx2_batch8_unroll2);
+    run_case_batch4("ip_avx2_b4_u4", ip_avx2_batch4_unroll4);
 #endif
 #if defined(USE_AVX512)
     run_case("ip_avx512", deglib::distances::FP16EvpAsymmetricSimilarity::ip_avx512);
@@ -805,7 +1315,9 @@ static void run_exploration_sweep(
     deglib::DISTFUNC<float> rerank_dist_func = nullptr,
     size_t dims = 0,
     bool use_asymmetric_search = false,
-    const void* query_data = nullptr)
+    const void* query_data = nullptr,
+    const std::vector<std::vector<std::byte>>* query_data_vecs = nullptr,
+    const std::vector<std::vector<std::byte>>* rerank_data_vecs = nullptr)
 {
     std::printf("\n--- Exploration sweep (%s) ---\n", label);
 
@@ -829,12 +1341,14 @@ static void run_exploration_sweep(
             [&](size_t label, size_t thread_id) {
                 (void)thread_id;
                 size_t entry_idx = graph.getInternalIndex(static_cast<uint32_t>(label));
-                uint32_t k_search = (rerank_data != nullptr) ? (use_asymmetric_search ? 25 : std::max(k_top, max_distance_count)) : k_explore;
+                uint32_t k_search = (rerank_data != nullptr || rerank_data_vecs != nullptr) ? (use_asymmetric_search ? 25 : std::max(k_top, max_distance_count)) : k_explore;
 
                 deglib::search::ResultSet result_queue;
                 if (use_asymmetric_search) {
                     std::vector<uint32_t> entry_indices = { static_cast<uint32_t>(entry_idx) };
-                    const std::byte* query = static_cast<const std::byte*>(query_data) + label * dims * sizeof(uint16_t);
+                    const std::byte* query = query_data_vecs
+                        ? (*query_data_vecs)[label].data()
+                        : (static_cast<const std::byte*>(query_data) + label * dims * sizeof(uint16_t));
                     result_queue = graph.search(
                         entry_indices,
                         query,
@@ -875,11 +1389,11 @@ static void run_exploration_sweep(
             });
         double explore_ms = now_ms() - t_explore_start;
 
-        // --- Phase 2: Reranking (if rerank_data is provided) ---
+        // --- Phase 2: Reranking (if rerank_data or rerank_data_vecs is provided) ---
         double rerank_ms = 0.0;
         std::vector<std::vector<uint32_t>> results(count);
 
-        if (rerank_data != nullptr) {
+        if (rerank_data != nullptr || rerank_data_vecs != nullptr) {
             double t_rerank_start = now_ms();
             const auto* base = static_cast<const std::byte*>(rerank_data);
             deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads, 1,
@@ -894,10 +1408,14 @@ static void run_exploration_sweep(
                     candidates.reserve(cands.size());
 
                     size_t dims_size = dims;
-                    const std::byte* query_ptr = base + label * rerank_feature_bytes;
+                    const std::byte* query_ptr = rerank_data_vecs
+                        ? (*rerank_data_vecs)[label].data()
+                        : (base + label * rerank_feature_bytes);
 
                     for (uint32_t cand_label : cands) {
-                        const std::byte* cand_ptr = base + cand_label * rerank_feature_bytes;
+                        const std::byte* cand_ptr = rerank_data_vecs
+                            ? (*rerank_data_vecs)[cand_label].data()
+                            : (base + cand_label * rerank_feature_bytes);
                         float exact_dist = rerank_dist_func(query_ptr, cand_ptr, &dims_size);
                         candidates.push_back({cand_label, exact_dist});
                     }
@@ -972,7 +1490,7 @@ static void run_exploration_sweep(
  * Reads an hvecs file containing FP16 feature vectors.
  * Follows the standard vecs format (4-byte uint32_t dimension header followed by vector data).
  */
-static auto hvecs_read(const char* fname, size_t& d_out, size_t& n_out) {
+static std::vector<std::vector<std::byte>> hvecs_read(const char* fname, size_t& d_out, size_t& n_out) {
     std::error_code ec{};
     auto file_size = std::filesystem::file_size(fname, ec);
     if (ec != std::error_code{}) {
@@ -1001,19 +1519,16 @@ static auto hvecs_read(const char* fname, size_t& d_out, size_t& n_out) {
     d_out = dims;
     n_out = n;
 
-    // read data rows
-    auto x = std::make_unique<std::byte[]>(file_size);
-    ifstream.seekg(0);
-    ifstream.read(reinterpret_cast<char*>(x.get()), file_size);
-    if (!ifstream) assert(ifstream.gcount() == static_cast<int>(file_size) || !"could not read whole file");
-
-    // shift array to remove row headers (the headers are 4 bytes at the start of each row)
-    for (size_t i = 0; i < n; i++) {
-        std::memmove(&x[i * dims * sizeof(uint16_t)], &x[sizeof(uint32_t) + i * row_bytes], dims * sizeof(uint16_t));
+    std::vector<std::vector<std::byte>> vectors(n);
+    for (size_t i = 0; i < n; ++i) {
+        vectors[i].resize(dims * sizeof(uint16_t));
+        // Seek to the start of this row's features (skip the 4-byte dimension header)
+        ifstream.seekg(i * row_bytes + sizeof(uint32_t));
+        ifstream.read(reinterpret_cast<char*>(vectors[i].data()), dims * sizeof(uint16_t));
     }
 
     ifstream.close();
-    return x;
+    return vectors;
 }
 
 // ============================================================================
@@ -1051,8 +1566,7 @@ static int run_benchmark(
     double t_load = now_ms();
 
     size_t dims = 0, count = 0;
-    auto train_bytes = hvecs_read(train_hvecs.string().c_str(), dims, count);
-    const uint16_t* train_data_fp16 = reinterpret_cast<const uint16_t*>(train_bytes.get());
+    auto train_vectors = hvecs_read(train_hvecs.string().c_str(), dims, count);
 
     size_t gt_dims = 0, gt_count = 0;
     std::unique_ptr<std::byte[]> gt_bytes;
@@ -1082,7 +1596,7 @@ static int run_benchmark(
         // Quantize once to EVP and then time the asymmetric dot-product paths.
         double t_q = now_ms();
         auto quantized = deglib::quantization::quantize_batch(
-            train_data_fp16, count, static_cast<uint32_t>(dims), non_zeros, threads);
+            train_vectors, static_cast<uint32_t>(dims), non_zeros, threads);
         double quantize_ms = now_ms() - t_q;
 
         std::printf("Quantize time: %.2f ms (produced %.2f MB)\n\n",
@@ -1090,7 +1604,7 @@ static int run_benchmark(
                     static_cast<double>(quantized.size()) / (1024.0 * 1024.0));
 
         bench_fp16_evp_asymmetric(
-            train_data_fp16,
+            train_vectors,
             count,
             static_cast<uint32_t>(dims),
             quantized.data(),
@@ -1133,12 +1647,10 @@ static int run_benchmark(
         );
         builder.setThreadCount(static_cast<uint32_t>(threads));
 
-        // Add all entries from FP16 data directly
+        // Add all entries from FP16 data directly using zero-copy std::move
         const size_t bytes_per_fp16 = dims * sizeof(uint16_t);
-        const std::byte* train_data_bytes = train_bytes.get();
         for (size_t i = 0; i < count; ++i) {
-            std::vector<std::byte> feature(train_data_bytes + i * bytes_per_fp16, train_data_bytes + (i + 1) * bytes_per_fp16);
-            builder.addEntry(static_cast<uint32_t>(i), std::move(feature));
+            builder.addEntry(static_cast<uint32_t>(i), std::move(train_vectors[i]));
         }
 
         auto build_callback = [](deglib::builder::BuilderStatus& status) {
@@ -1190,7 +1702,7 @@ static int run_benchmark(
         double t1 = now_ms();
 
         auto quantized = deglib::quantization::quantize_batch(
-            train_data_fp16, count, static_cast<uint32_t>(dims), non_zeros, threads);
+            train_vectors, static_cast<uint32_t>(dims), non_zeros, threads);
 
         double quantize_ms = now_ms() - t1;
         std::printf("Quantize time: %.2f ms\n", quantize_ms);
@@ -1243,9 +1755,12 @@ static int run_benchmark(
         // --------------------------------------------------------------------------
         double conversion_ms = 0.0;
         if (mode == BenchmarkMode::EvpBuildFP16ExternalSearch) {
-            // Copy loaded FP16 data to a mutable vector for in-place reordering
+            // Copy loaded FP16 data to a mutable vector for in-place reordering (specifically required by ReadOnlyGraphExternal)
             double t_copy_start = now_ms();
-            std::vector<uint16_t> fp16_data(train_data_fp16, train_data_fp16 + count * dims);
+            std::vector<uint16_t> fp16_data(count * dims);
+            for (size_t i = 0; i < count; ++i) {
+                std::memcpy(fp16_data.data() + i * dims, train_vectors[i].data(), dims * sizeof(uint16_t));
+            }
             conversion_ms = now_ms() - t_copy_start;
 
             // Permute FP16 array in-place so that fp16_data[internal_index] holds the
@@ -1282,7 +1797,8 @@ static int run_benchmark(
                                   nullptr,
                                   dims,
                                   true,
-                                  train_data_fp16);
+                                  nullptr,
+                                  &train_vectors);
         } else if (mode == BenchmarkMode::EvpBuildFP16AsymmetricSearchRerank) {
             double t_copy_start = now_ms();
             deglib::FloatSpace asymmetric_space(static_cast<uint32_t>(dims), deglib::Metric::FP16EvpAsymmetric);
@@ -1294,21 +1810,27 @@ static int run_benchmark(
             run_exploration_sweep(readonly_asym_graph, gt_data, count, gt_dims, k_top, static_cast<uint8_t>(threads),
                                   "EVP Build FP16 Asymmetric Search FP16 Rerank (ReadOnlyGraph)",
                                   false,
-                                  train_data_fp16,
+                                  nullptr,
                                   dims * sizeof(uint16_t),
                                   fp16_rerank_space.get_dist_func(),
                                   dims,
                                   true,
-                                  train_data_fp16);
+                                  nullptr,
+                                  &train_vectors,
+                                  &train_vectors);
         } else if (mode == BenchmarkMode::EvpBuildEvpExploreFP16Rerank) {
             deglib::FloatSpace fp16_rerank_space(static_cast<uint32_t>(dims), deglib::Metric::FP16InnerProduct);
             run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, static_cast<uint8_t>(threads),
                                   "EVP Build EVP Explore FP16 Rerank",
                                   false,
-                                  train_data_fp16,
+                                  nullptr,
                                   dims * sizeof(uint16_t),
                                   fp16_rerank_space.get_dist_func(),
-                                  dims);
+                                  dims,
+                                  false,
+                                  nullptr,
+                                  nullptr,
+                                  &train_vectors);
         } else {
             run_exploration_sweep(graph, gt_data, count, gt_dims, k_top, static_cast<uint8_t>(threads),
                                   "EVP Build EVP Explore");
@@ -1344,7 +1866,7 @@ static int run_benchmark(
         double t1 = now_ms();
 
         auto quantized = deglib::quantization::quantize_batch(
-            train_data_fp16, count, static_cast<uint32_t>(dims), non_zeros, threads);
+            train_vectors, static_cast<uint32_t>(dims), non_zeros, threads);
 
         double quantize_ms = now_ms() - t1;
         std::printf("Quantize time: %.2f ms\n", quantize_ms);
