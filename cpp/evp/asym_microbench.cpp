@@ -1277,13 +1277,13 @@ static void bench_fp16_evp_asymmetric(
 #endif
     std::printf("  - compare() dispatch\n\n");
 
-    run_case("ip_naive", deglib::distances::FP16EvpAsymmetricSimilarity::ip_naive);
+    run_case("ip_naive", deglib::distances::FP16EvpAsymInnerProduct::ip_naive);
 #if defined(USE_SSE)
-    run_case("ip_sse", deglib::distances::FP16EvpAsymmetricSimilarity::ip_sse);
+    run_case("ip_sse", deglib::distances::FP16EvpAsymInnerProduct::ip_sse);
     run_case("ip_sse_lut", ip_sse_lut);
 #endif
 #if defined(USE_AVX)
-    run_case("ip_avx2", deglib::distances::FP16EvpAsymmetricSimilarity::ip_avx2);
+    run_case("ip_avx2", deglib::distances::FP16EvpAsymInnerProduct::ip_avx2);
     run_case("ip_avx2_lut", ip_avx2_lut);
     run_case("ip_avx2_lut2", ip_avx2_lut2);
     run_case("ip_avx2_lut2_nb", ip_avx2_lut2_nb);
@@ -1298,9 +1298,27 @@ static void bench_fp16_evp_asymmetric(
     run_case_batch4("ip_avx2_b4_u4", ip_avx2_batch4_unroll4);
 #endif
 #if defined(USE_AVX512)
-    run_case("ip_avx512", deglib::distances::FP16EvpAsymmetricSimilarity::ip_avx512);
+    run_case("ip_avx512", deglib::distances::FP16EvpAsymInnerProduct::ip_avx512);
 #endif
-    run_case("compare", deglib::distances::FP16EvpAsymmetricSimilarity::compare);
+    run_case("compare", deglib::distances::FP16EvpAsymInnerProduct::compare);
+
+    // ------------------------------------------------------------------
+    // Deglib compare_batch
+    // ------------------------------------------------------------------
+    std::printf("  - deglib_batch4 (via compare_batch)\n");
+    std::printf("  - deglib_batch8 (via compare_batch)\n\n");
+    run_case_batch4("deglib_batch4",
+        [](const uint16_t* q, const std::byte* const* db, const uint32_t* d, float* dists) {
+            const void* vdb[4];
+            for (int j = 0; j < 4; ++j) vdb[j] = db[j];
+            deglib::distances::FP16EvpAsymInnerProduct::compare_batch(q, vdb, 4, d, dists);
+        });
+    run_case_batch8("deglib_batch8",
+        [](const uint16_t* q, const std::byte* const* db, const uint32_t* d, float* dists) {
+            const void* vdb[8];
+            for (int j = 0; j < 8; ++j) vdb[j] = db[j];
+            deglib::distances::FP16EvpAsymInnerProduct::compare_batch(q, vdb, 8, d, dists);
+        });
 
     std::printf("\nBEST: %s (%.2f ns/op)\n", best.name, best.ns_per_op);
 

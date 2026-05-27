@@ -164,7 +164,7 @@ static float evp_custom_unroll2(const void* pVect1v, const void* pVect2v, const 
     const float similarity = static_cast<float>(aa_u + bb_u + dim) - static_cast<float>(cc_u + dd_u);
     return 1.0f - similarity / (2.0f * static_cast<float>(dim));
 #else
-    return deglib::distances::EvpBitsSimilarity::compare_naive(pVect1v, pVect2v, qty_ptr);
+    return deglib::distances::EvpInnerProduct::compare_naive(pVect1v, pVect2v, qty_ptr);
 #endif
 }
 
@@ -242,7 +242,7 @@ static float evp_custom_unroll4(const void* pVect1v, const void* pVect2v, const 
     const float similarity = static_cast<float>(aa_u + bb_u + dim) - static_cast<float>(cc_u + dd_u);
     return 1.0f - similarity / (2.0f * static_cast<float>(dim));
 #else
-    return deglib::distances::EvpBitsSimilarity::compare_naive(pVect1v, pVect2v, qty_ptr);
+    return deglib::distances::EvpInnerProduct::compare_naive(pVect1v, pVect2v, qty_ptr);
 #endif
 }
 
@@ -480,14 +480,14 @@ static void bench_evp(
     // Deglib baselines (single-query)
     // ------------------------------------------------------------------
     std::printf("\n--- Deglib baselines (single-query) ---\n");
-    run_case("naive", deglib::distances::EvpBitsSimilarity::compare_naive);
+    run_case("naive", deglib::distances::EvpInnerProduct::compare_naive);
 #if defined(USE_AVX) || defined(USE_AVX512)
-    run_case("avx2", deglib::distances::EvpBitsSimilarity::compare_avx2);
+    run_case("avx2", deglib::distances::EvpInnerProduct::compare_avx2);
 #endif
 #if defined(USE_AVX512) && defined(__AVX512VPOPCNTDQ__)
-    run_case("avx512", deglib::distances::EvpBitsSimilarity::compare_avx512);
+    run_case("avx512", deglib::distances::EvpInnerProduct::compare_avx512);
 #endif
-    run_case("compare", deglib::distances::EvpBitsSimilarity::compare);
+    run_case("compare", deglib::distances::EvpInnerProduct::compare);
 
     // ------------------------------------------------------------------
     // Custom unrolled (single-query)
@@ -504,6 +504,31 @@ static void bench_evp(
     std::printf("\n--- Custom batch variants ---\n");
     run_case_batch("evp_custom_b4", evp_custom_batch4, 4);
     run_case_batch("evp_custom_b8", evp_custom_batch8, 8);
+
+    // ------------------------------------------------------------------
+    // Deglib compare_batch
+    // ------------------------------------------------------------------
+    {
+        auto deglib_batch4 = [](const std::byte* query, const std::byte* const* db_arr, const uint32_t* dim, float* dists) {
+            deglib::distances::EvpInnerProduct::compare_batch(
+                static_cast<const void*>(query),
+                reinterpret_cast<const void* const*>(db_arr),
+                4,
+                static_cast<const void*>(dim),
+                dists);
+        };
+        auto deglib_batch8 = [](const std::byte* query, const std::byte* const* db_arr, const uint32_t* dim, float* dists) {
+            deglib::distances::EvpInnerProduct::compare_batch(
+                static_cast<const void*>(query),
+                reinterpret_cast<const void* const*>(db_arr),
+                8,
+                static_cast<const void*>(dim),
+                dists);
+        };
+        std::printf("\n--- Deglib compare_batch ---\n");
+        run_case_batch("deglib_batch4", deglib_batch4, 4);
+        run_case_batch("deglib_batch8", deglib_batch8, 8);
+    }
 
     std::printf("\nBEST: %s (%.2f ns/op)\n", best.name, best.ns_per_op);
 }

@@ -36,7 +36,7 @@
 // ============================================================================
 //
 // Benchmarks uint8 L2 (Euclidean) distance implementations:
-//   1. Deglib built-in functions (L2Uint8, L2Uint8Ext32, L2Uint8Ext16)
+//   1. Deglib built-in functions (Uint8L2Default, L2Uint8Ext32, L2Uint8Ext16)
 //   2. Custom unrolled single-query variants (avx2 unroll by 2 and 4)
 //   3. Custom batch variants (batch=4, batch=8, with and without unroll)
 //
@@ -47,7 +47,7 @@
 //
 // Output format: "name    ms    ns/op  (best-of-5, sink=...)"
 //
-// Hardware: 13th Gen Intel Core i7-13850HX (Raptor Cove / Gracemont), AVX2
+// Hardware: AMD 5600G with AVX2 support
 // Dataset: 200000 vectors, dim=1024, uint8 (quantized from train.hvecs)
 //
 // Results (100K comparisons, best-of-5):
@@ -96,7 +96,7 @@ static std::vector<std::vector<uint8_t>> quantize_to_uint8(
     for (size_t i = 0; i < fp16_data.size(); ++i) {
         const uint16_t* src = reinterpret_cast<const uint16_t*>(fp16_data[i].data());
         for (size_t j = 0; j < dim; ++j) {
-            float v = deglib::distances::FP16InnerProduct::fp16_to_float(src[j]);
+            float v = deglib::distances::fp16_to_float(src[j]);
             if (v < g_min) g_min = v;
             if (v > g_max) g_max = v;
         }
@@ -112,7 +112,7 @@ static std::vector<std::vector<uint8_t>> quantize_to_uint8(
         const uint16_t* src = reinterpret_cast<const uint16_t*>(fp16_data[i].data());
         uint8_t* dst = result[i].data();
         for (size_t j = 0; j < dim; ++j) {
-            float v = deglib::distances::FP16InnerProduct::fp16_to_float(src[j]);
+            float v = deglib::distances::fp16_to_float(src[j]);
             float q = (v - g_min) * scale;
             dst[j] = static_cast<uint8_t>(std::min(255.0f, std::max(0.0f, q + 0.5f)));
         }
@@ -161,7 +161,7 @@ static float u8_custom_unroll2(const void* pVect1v, const void* pVect2v, const v
     }
     return static_cast<float>(result);
 #else
-    return deglib::distances::L2Uint8::compare(pVect1v, pVect2v, qty_ptr);
+    return deglib::distances::Uint8L2Default::compare(pVect1v, pVect2v, qty_ptr);
 #endif
 }
 
@@ -204,7 +204,7 @@ static float u8_custom_unroll4(const void* pVect1v, const void* pVect2v, const v
     }
     return static_cast<float>(result);
 #else
-    return deglib::distances::L2Uint8::compare(pVect1v, pVect2v, qty_ptr);
+    return deglib::distances::Uint8L2Default::compare(pVect1v, pVect2v, qty_ptr);
 #endif
 }
 
@@ -439,7 +439,7 @@ static void bench_u8_l2(
     // Deglib baselines (single-query)
     // ------------------------------------------------------------------
     std::printf("\n--- Deglib baselines (single-query) ---\n");
-    run_case_single("u8_naive", deglib::distances::L2Uint8::compare);
+    run_case_single("u8_naive", deglib::distances::Uint8L2Default::compare);
 
 #if defined(USE_AVX) || defined(USE_AVX512) || defined(USE_SSE)
     run_case_single("u8_ext32", deglib::distances::L2Uint8Ext32::compare);
@@ -466,6 +466,57 @@ static void bench_u8_l2(
     run_case_batch("u8_custom_b8", u8_custom_batch8, 8);
     run_case_batch("u8_custom_b4_u2", u8_custom_batch4_u2, 4);
     run_case_batch("u8_custom_b8_u2", u8_custom_batch8_u2, 8);
+
+    // ------------------------------------------------------------------
+    // Deglib compare_batch via L2Uint8Ext16 (dim%16==0)
+    // ------------------------------------------------------------------
+    std::printf("\n--- Deglib compare_batch (via L2Uint8Ext16) ---\n");
+    run_case_batch("deglib_batch4",
+        [](const uint8_t* q, const uint8_t* const* db, const size_t* d, float* dists) {
+            const void* vdb[4];
+            for (int j = 0; j < 4; ++j) vdb[j] = db[j];
+            deglib::distances::L2Uint8Ext16::compare_batch(q, vdb, 4, d, dists);
+        }, 4);
+    run_case_batch("deglib_batch8",
+        [](const uint8_t* q, const uint8_t* const* db, const size_t* d, float* dists) {
+            const void* vdb[8];
+            for (int j = 0; j < 8; ++j) vdb[j] = db[j];
+            deglib::distances::L2Uint8Ext16::compare_batch(q, vdb, 8, d, dists);
+        }, 8);
+
+    // ------------------------------------------------------------------
+    // Deglib compare_batch via L2Uint8Ext32 (dim%32==0, wider SIMD)
+    // ------------------------------------------------------------------
+    std::printf("\n--- Deglib compare_batch (via L2Uint8Ext32) ---\n");
+    run_case_batch("deglib_batch4_ext32",
+        [](const uint8_t* q, const uint8_t* const* db, const size_t* d, float* dists) {
+            const void* vdb[4];
+            for (int j = 0; j < 4; ++j) vdb[j] = db[j];
+            deglib::distances::L2Uint8Ext32::compare_batch(q, vdb, 4, d, dists);
+        }, 4);
+    run_case_batch("deglib_batch8_ext32",
+        [](const uint8_t* q, const uint8_t* const* db, const size_t* d, float* dists) {
+            const void* vdb[8];
+            for (int j = 0; j < 8; ++j) vdb[j] = db[j];
+            deglib::distances::L2Uint8Ext32::compare_batch(q, vdb, 8, d, dists);
+        }, 8);
+
+    // ------------------------------------------------------------------
+    // Deglib compare_batch via Uint8L2Default (cascading template)
+    // ------------------------------------------------------------------
+    std::printf("\n--- Deglib compare_batch (via Uint8L2Default cascading) ---\n");
+    run_case_batch("deglib_batch4_cascade",
+        [](const uint8_t* q, const uint8_t* const* db, const size_t* d, float* dists) {
+            const void* vdb[4];
+            for (int j = 0; j < 4; ++j) vdb[j] = db[j];
+            deglib::distances::Uint8L2Default::compare_batch(q, vdb, 4, d, dists);
+        }, 4);
+    run_case_batch("deglib_batch8_cascade",
+        [](const uint8_t* q, const uint8_t* const* db, const size_t* d, float* dists) {
+            const void* vdb[8];
+            for (int j = 0; j < 8; ++j) vdb[j] = db[j];
+            deglib::distances::Uint8L2Default::compare_batch(q, vdb, 8, d, dists);
+        }, 8);
 
     std::printf("\nBEST: %s (%.2f ns/op)\n", best.name, best.ns_per_op);
 }

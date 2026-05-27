@@ -45,7 +45,7 @@
 //
 // Output format: "name    ms    ns/op  (best-of-5, sink=...)"
 //
-// Hardware: 13th Gen Intel Core i7-13850HX (Raptor Cove / Gracemont), AVX2
+// Hardware: AMD 5600G with AVX2 support
 // Dataset: 200000 vectors, dim=1024, FP32 (converted from train.hvecs)
 //
 // Results (100K comparisons, best-of-5):
@@ -364,10 +364,10 @@ static std::vector<std::vector<float>> convert_to_float(
             _mm256_storeu_ps(&dst[j + 8], _mm256_cvtph_ps(hi));
         }
         for (; j < dim; ++j)
-            dst[j] = deglib::distances::FP16InnerProduct::fp16_to_float(src[j]);
+            dst[j] = fp16_to_float(src[j]);
 #else
         for (size_t j = 0; j < dim; ++j)
-            dst[j] = deglib::distances::FP16InnerProduct::fp16_to_float(src[j]);
+            dst[j] = fp16_to_float(src[j]);
 #endif
     }
     return result;
@@ -519,7 +519,7 @@ static void bench_fp32_l2(
     run_case_single("L2_8ext", deglib::distances::L2Float8Ext::compare);
 #endif
 
-#if defined(USE_SSE)
+#if defined(USE_SSE) || defined(USE_AVX) || defined(USE_AVX512)
     run_case_single("L2_4ext", deglib::distances::L2Float4Ext::compare);
 #endif
 
@@ -540,6 +540,40 @@ static void bench_fp32_l2(
     run_case_batch("l2_custom_b8", l2_custom_batch8, 8);
     run_case_batch("l2_custom_b4_u2", l2_custom_batch4_unroll2, 4);
     run_case_batch("l2_custom_b8_u2", l2_custom_batch8_unroll2, 8);
+
+    // ------------------------------------------------------------------
+    // Deglib compare_batch variants (via L2Float16Ext = dim%16==0)
+    // ------------------------------------------------------------------
+    std::printf("\n--- Deglib compare_batch (via L2Float16Ext) ---\n");
+    run_case_batch("deglib_batch4",
+        [](const float* q, const float* const* db, const size_t* d, float* dists) {
+            const void* vdb[4];
+            for (int j = 0; j < 4; ++j) vdb[j] = db[j];
+            deglib::distances::L2Float16Ext::compare_batch(q, vdb, 4, d, dists);
+        }, 4);
+    run_case_batch("deglib_batch8",
+        [](const float* q, const float* const* db, const size_t* d, float* dists) {
+            const void* vdb[8];
+            for (int j = 0; j < 8; ++j) vdb[j] = db[j];
+            deglib::distances::L2Float16Ext::compare_batch(q, vdb, 8, d, dists);
+        }, 8);
+
+    // ------------------------------------------------------------------
+    // Deglib compare_batch variants (via L2Float4Ext = dim%4==0, cascading)
+    // ------------------------------------------------------------------
+    std::printf("\n--- Deglib compare_batch (via L2Float4Ext cascading) ---\n");
+    run_case_batch("deglib_batch4_cascade",
+        [](const float* q, const float* const* db, const size_t* d, float* dists) {
+            const void* vdb[4];
+            for (int j = 0; j < 4; ++j) vdb[j] = db[j];
+            deglib::distances::L2Float4Ext::compare_batch(q, vdb, 4, d, dists);
+        }, 4);
+    run_case_batch("deglib_batch8_cascade",
+        [](const float* q, const float* const* db, const size_t* d, float* dists) {
+            const void* vdb[8];
+            for (int j = 0; j < 8; ++j) vdb[j] = db[j];
+            deglib::distances::L2Float4Ext::compare_batch(q, vdb, 8, d, dists);
+        }, 8);
 
     std::printf("\nBEST: %s (%.2f ns/op)\n", best.name, best.ns_per_op);
 }

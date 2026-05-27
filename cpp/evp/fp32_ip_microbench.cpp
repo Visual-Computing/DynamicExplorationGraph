@@ -350,10 +350,10 @@ static std::vector<std::vector<float>> convert_to_float(
             _mm256_storeu_ps(&dst[j + 8], _mm256_cvtph_ps(hi));
         }
         for (; j < dim; ++j)
-            dst[j] = deglib::distances::FP16InnerProduct::fp16_to_float(src[j]);
+            dst[j] = fp16_to_float(src[j]);
 #else
         for (size_t j = 0; j < dim; ++j)
-            dst[j] = deglib::distances::FP16InnerProduct::fp16_to_float(src[j]);
+            dst[j] = fp16_to_float(src[j]);
 #endif
     }
     return result;
@@ -492,21 +492,21 @@ static void bench_fp32_ip(
     };
 
     // ------------------------------------------------------------------
-    // Deglib baselines (single-query)
+    // Deglib baselines (single-query) — using dot() for raw dot product
     // ------------------------------------------------------------------
     std::printf("\n--- Deglib baselines (single-query) ---\n");
-    run_case_single("ip_naive", deglib::distances::InnerProductFloat::ip_naive);
+    run_case_single("ip_naive", deglib::distances::InnerProductFloat::dot);
 
 #if defined(USE_AVX) || defined(USE_AVX512)
-    run_case_single("ip_16ext", deglib::distances::InnerProductFloat16Ext::ip_16ext);
+    run_case_single("ip_16ext", deglib::distances::InnerProductFloat16Ext::dot);
 #endif
 
 #if defined(USE_AVX) || defined(USE_SSE)
-    run_case_single("ip_8ext", deglib::distances::InnerProductFloat8Ext::ip_8ext);
+    run_case_single("ip_8ext", deglib::distances::InnerProductFloat8Ext::dot);
 #endif
 
 #if defined(USE_SSE)
-    run_case_single("ip_4ext", deglib::distances::InnerProductFloat4Ext::ip_4ext);
+    run_case_single("ip_4ext", deglib::distances::InnerProductFloat4Ext::dot);
 #endif
 
     run_case_single("compare", deglib::distances::InnerProductFloat::compare);
@@ -528,6 +528,40 @@ static void bench_fp32_ip(
     run_case_batch("ip_custom_batch8", ip_custom_batch8, 8);
     run_case_batch("ip_custom_batch4_u2", ip_custom_batch4_unroll2, 4);
     run_case_batch("ip_custom_batch8_u2", ip_custom_batch8_unroll2, 8);
+
+    // ------------------------------------------------------------------
+    // Deglib compare_batch variants (via InnerProductFloat16Ext = dim%16==0)
+    // ------------------------------------------------------------------
+    std::printf("\n--- Deglib compare_batch (via InnerProductFloat16Ext) ---\n");
+    run_case_batch("deglib_batch4",
+        [](const float* q, const float* const* db, const size_t* d, float* dists) {
+            const void* vdb[4];
+            for (int j = 0; j < 4; ++j) vdb[j] = db[j];
+            deglib::distances::InnerProductFloat16Ext::compare_batch(q, vdb, 4, d, dists);
+        }, 4);
+    run_case_batch("deglib_batch8",
+        [](const float* q, const float* const* db, const size_t* d, float* dists) {
+            const void* vdb[8];
+            for (int j = 0; j < 8; ++j) vdb[j] = db[j];
+            deglib::distances::InnerProductFloat16Ext::compare_batch(q, vdb, 8, d, dists);
+        }, 8);
+
+    // ------------------------------------------------------------------
+    // Deglib compare_batch variants (via InnerProductFloat4Ext = dim%4==0, cascading)
+    // ------------------------------------------------------------------
+    std::printf("\n--- Deglib compare_batch (via InnerProductFloat4Ext cascading) ---\n");
+    run_case_batch("deglib_batch4_cascade",
+        [](const float* q, const float* const* db, const size_t* d, float* dists) {
+            const void* vdb[4];
+            for (int j = 0; j < 4; ++j) vdb[j] = db[j];
+            deglib::distances::InnerProductFloat4Ext::compare_batch(q, vdb, 4, d, dists);
+        }, 4);
+    run_case_batch("deglib_batch8_cascade",
+        [](const float* q, const float* const* db, const size_t* d, float* dists) {
+            const void* vdb[8];
+            for (int j = 0; j < 8; ++j) vdb[j] = db[j];
+            deglib::distances::InnerProductFloat4Ext::compare_batch(q, vdb, 8, d, dists);
+        }, 8);
 
     std::printf("\nBEST: %s (%.2f ns/op)\n", best.name, best.ns_per_op);
 }

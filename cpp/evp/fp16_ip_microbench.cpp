@@ -146,11 +146,11 @@ static float ip_custom_unroll2(const void* pVect1v, const void* pVect2v, const v
     // Tail: remaining chunks handled by ip_16ext
     float result = hsum256(sum0) + hsum256(sum1) + hsum256(sum2) + hsum256(sum3);
     if (full_chunks < num_chunks) {
-        result += deglib::distances::FP16InnerProductExt16::ip_16ext(&a[full_chunks * 16], &b[full_chunks * 16], qty_ptr);
+        result += deglib::distances::FP16InnerProductExt16::dot(&a[full_chunks * 16], &b[full_chunks * 16], qty_ptr);
     }
     return result;
 #else
-    return deglib::distances::FP16InnerProduct::ip_naive(pVect1v, pVect2v, qty_ptr);
+    return deglib::distances::FP16InnerProductDefault::dot(pVect1v, pVect2v, qty_ptr);
 #endif
 }
 
@@ -196,11 +196,11 @@ static float ip_custom_unroll4(const void* pVect1v, const void* pVect2v, const v
     float result = hsum256(s0) + hsum256(s1) + hsum256(s2) + hsum256(s3)
                  + hsum256(s4) + hsum256(s5) + hsum256(s6) + hsum256(s7);
     if (full_chunks < num_chunks) {
-        result += deglib::distances::FP16InnerProductExt16::ip_16ext(&a[full_chunks * 16], &b[full_chunks * 16], qty_ptr);
+        result += deglib::distances::FP16InnerProductExt16::dot(&a[full_chunks * 16], &b[full_chunks * 16], qty_ptr);
     }
     return result;
 #else
-    return deglib::distances::FP16InnerProduct::ip_naive(pVect1v, pVect2v, qty_ptr);
+    return deglib::distances::FP16InnerProductDefault::dot(pVect1v, pVect2v, qty_ptr);
 #endif
 }
 
@@ -247,7 +247,7 @@ static void ip_custom_batch4(const uint16_t* query, const uint16_t* const* db_ar
     dists[3] = 1.0f - hsum256(sum3);
 #else
     for (int j = 0; j < 4; ++j) {
-        dists[j] = 1.0f - deglib::distances::FP16InnerProduct::ip_naive(query, db_arr[j], dim);
+        dists[j] = 1.0f - deglib::distances::FP16InnerProductDefault::dot(query, db_arr[j], dim);
     }
 #endif
 }
@@ -302,7 +302,7 @@ static void ip_custom_batch8(const uint16_t* query, const uint16_t* const* db_ar
     dists[7] = 1.0f - hsum256(sum7);
 #else
     for (int j = 0; j < 8; ++j) {
-        dists[j] = 1.0f - deglib::distances::FP16InnerProduct::ip_naive(query, db_arr[j], dim);
+        dists[j] = 1.0f - deglib::distances::FP16InnerProductDefault::dot(query, db_arr[j], dim);
     }
 #endif
 }
@@ -378,7 +378,7 @@ static void ip_custom_batch4_unroll2(const uint16_t* query, const uint16_t* cons
     dists[3] = 1.0f - hsum256(sum3);
 #else
     for (int j = 0; j < 4; ++j) {
-        dists[j] = 1.0f - deglib::distances::FP16InnerProduct::ip_naive(query, db_arr[j], dim);
+        dists[j] = 1.0f - deglib::distances::FP16InnerProductDefault::dot(query, db_arr[j], dim);
     }
 #endif
 }
@@ -458,7 +458,7 @@ static void ip_custom_batch8_unroll2(const uint16_t* query, const uint16_t* cons
     dists[7] = 1.0f - hsum256(sum7);
 #else
     for (int j = 0; j < 8; ++j) {
-        dists[j] = 1.0f - deglib::distances::FP16InnerProduct::ip_naive(query, db_arr[j], dim);
+        dists[j] = 1.0f - deglib::distances::FP16InnerProductDefault::dot(query, db_arr[j], dim);
     }
 #endif
 }
@@ -610,25 +610,25 @@ static void bench_fp16_ip(
     };
 
     // ------------------------------------------------------------------
-    // Deglib baseline implementations (single-query)
+    // Deglib baseline implementations (single-query) — using dot()
     // ------------------------------------------------------------------
     std::printf("\n--- Deglib baselines (single-query) ---\n");
 
-    run_case_single("ip_naive", deglib::distances::FP16InnerProduct::ip_naive);
+    run_case_single("ip_naive", deglib::distances::FP16InnerProductDefault::dot);
 
 #if defined(USE_SSE)
-    run_case_single("ip_8ext", deglib::distances::FP16InnerProductExt8::ip_8ext);
+    run_case_single("ip_8ext", deglib::distances::FP16InnerProductExt8::dot);
 #endif
 
 #if defined(USE_AVX) || defined(USE_AVX512)
-    run_case_single("ip_16ext", deglib::distances::FP16InnerProductExt16::ip_16ext);
+    run_case_single("ip_16ext", deglib::distances::FP16InnerProductExt16::dot);
 #endif
 
 #if defined(USE_AVX512)
-    run_case_single("ip_32ext", deglib::distances::FP16InnerProductExt32::ip_32ext);
+    run_case_single("ip_32ext", deglib::distances::FP16InnerProductExt32::dot);
 #endif
 
-    run_case_single("compare", deglib::distances::FP16InnerProduct::compare);
+    run_case_single("compare", deglib::distances::FP16InnerProductDefault::compare);
 
     // ------------------------------------------------------------------
     // Custom unrolled variants (single-query)
@@ -649,6 +649,57 @@ static void bench_fp16_ip(
     run_case_batch("ip_custom_batch8", ip_custom_batch8, 8);
     run_case_batch("ip_custom_batch4_u2", ip_custom_batch4_unroll2, 4);
     run_case_batch("ip_custom_batch8_u2", ip_custom_batch8_unroll2, 8);
+
+    // ------------------------------------------------------------------
+    // Deglib compare_batch via FP16InnerProductExt16 (dim%16==0)
+    // ------------------------------------------------------------------
+    std::printf("\n--- Deglib compare_batch (via FP16InnerProductExt16) ---\n");
+    run_case_batch("deglib_batch4",
+        [](const uint16_t* q, const uint16_t* const* db, const size_t* d, float* dists) {
+            const void* vdb[4];
+            for (int j = 0; j < 4; ++j) vdb[j] = db[j];
+            deglib::distances::FP16InnerProductExt16::compare_batch(q, vdb, 4, d, dists);
+        }, 4);
+    run_case_batch("deglib_batch8",
+        [](const uint16_t* q, const uint16_t* const* db, const size_t* d, float* dists) {
+            const void* vdb[8];
+            for (int j = 0; j < 8; ++j) vdb[j] = db[j];
+            deglib::distances::FP16InnerProductExt16::compare_batch(q, vdb, 8, d, dists);
+        }, 8);
+
+    // ------------------------------------------------------------------
+    // Deglib compare_batch via FP16InnerProductExt8 (dim%8==0)
+    // ------------------------------------------------------------------
+    std::printf("\n--- Deglib compare_batch (via FP16InnerProductExt8) ---\n");
+    run_case_batch("deglib_batch4_ext8",
+        [](const uint16_t* q, const uint16_t* const* db, const size_t* d, float* dists) {
+            const void* vdb[4];
+            for (int j = 0; j < 4; ++j) vdb[j] = db[j];
+            deglib::distances::FP16InnerProductExt8::compare_batch(q, vdb, 4, d, dists);
+        }, 4);
+    run_case_batch("deglib_batch8_ext8",
+        [](const uint16_t* q, const uint16_t* const* db, const size_t* d, float* dists) {
+            const void* vdb[8];
+            for (int j = 0; j < 8; ++j) vdb[j] = db[j];
+            deglib::distances::FP16InnerProductExt8::compare_batch(q, vdb, 8, d, dists);
+        }, 8);
+
+    // ------------------------------------------------------------------
+    // Deglib compare_batch via FP16InnerProduct<1> (cascading template)
+    // ------------------------------------------------------------------
+    std::printf("\n--- Deglib compare_batch (via FP16InnerProduct<1> cascading) ---\n");
+    run_case_batch("deglib_batch4_cascade",
+        [](const uint16_t* q, const uint16_t* const* db, const size_t* d, float* dists) {
+            const void* vdb[4];
+            for (int j = 0; j < 4; ++j) vdb[j] = db[j];
+            deglib::distances::FP16InnerProduct<1>::compare_batch(q, vdb, 4, d, dists);
+        }, 4);
+    run_case_batch("deglib_batch8_cascade",
+        [](const uint16_t* q, const uint16_t* const* db, const size_t* d, float* dists) {
+            const void* vdb[8];
+            for (int j = 0; j < 8; ++j) vdb[j] = db[j];
+            deglib::distances::FP16InnerProduct<1>::compare_batch(q, vdb, 8, d, dists);
+        }, 8);
 
     std::printf("\nBEST: %s (%.2f ns/op)\n", best.name, best.ns_per_op);
 }
