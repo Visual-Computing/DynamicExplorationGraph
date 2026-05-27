@@ -33,6 +33,61 @@
 // ============================================================================
 // Microbench: FP16-EVP Asymmetric Similarity
 // ============================================================================
+//
+// Benchmark: FP16 query (half-precision float) vs EVP database (ones/negs bit
+// masks, dim/8 bytes each).  Computes masked inner product:
+//
+//   sum over i:  a[i] * mask[i]    where mask[i] = +1 if ones_bit[i], -1
+//   if negs_bit[i], 0 otherwise
+//
+// --- Benchmark results (dim=1024, NON_ZEROS=512, 200K vectors, best-of-5)
+//
+//   Rank  Name                          ns/op     Category
+//   ----  ----------------------------  --------  -------------------------
+//    1   ip_avx2_b8_ptr                139.11    batch=8, per-byte
+//    2   ip_avx2_b8_u2                 142.13    batch=8, 2-byte unroll
+//    3   ip_avx2_b4_ptr                173.11    batch=4, per-byte
+//    4   ip_avx2_b4_u2                 183.81    batch=4, 2-byte unroll
+//    5   ip_avx2_b4_u4                 197.78    batch=4, 4-byte unroll
+//    6   ip_avx2                       471.17    AVX2 library (default)
+//    7   compare                       466.57    dispatch wrapper
+//    8   ip_avx2_lut8_nb               469.88    AVX2, 8-byte unroll, branchless
+//    9   ip_avx2_lut2_nb               455.85    AVX2, 2-byte unroll, branchless
+//   10   ip_avx2_lut4_nb               471.22    AVX2, 4-byte unroll, branchless
+//   11   ip_avx2_lut2                  490.02    AVX2, 2-byte unroll, branchy
+//   12   ip_avx2_lut4                  487.49    AVX2, 4-byte unroll, branchy
+//   13   ip_avx2_lut                   511.77    AVX2, 1-byte loop
+//   14   ip_avx2_diff2                 528.57    AVX2, combined 2MB diff LUT
+//   15   ip_sse                        538.16    SSE library
+//   16   ip_sse_lut                    728.70    SSE, nibble LUT
+//   17   ip_naive                      4229.11   scalar reference
+//
+// --- What these mean
+//   * Batch variants (rank 1-5): ONE FP16 query vs 4-8 database vectors at
+//     once.  ns/op = per-comparison within the batch.  ~3x faster than
+//     single-query because FP16->float conversion is amortized.
+//   * Single-query variants (rank 6-17): ONE query vs ONE database vector.
+//     These are what deglib uses during graph search.
+//   * Best single-query: ip_avx2 (library default) at 471 ns/op — already
+//     near-optimal.  lut2_nb is close at 456 ns/op.
+//   * Best overall: ip_avx2_b8_ptr at 139 ns/op per comparison (batch=8).
+//   * ip_avx2_lut8_nb is fastest pure single-query (470 ns/op).
+//
+// --- Key findings
+//     * Batch=8 beats batch=4: more amortization of FP16->float conversion.
+//     * Per-byte accumulation (b_ptr) beats unrolled variants for batches:
+//       cleaner code, similar or better performance.
+//     * Branchless LUTs (lut2_nb, lut4_nb) ~match branchy variants because
+//       mask values are ~50% non-zero (no skip benefit).
+//     * Combined diff LUT (diff2, 2MB) is slower: L1 cache misses.
+//     * Scalar naive is ~9x slower than best AVX2 single-query.
+//
+// --- How to use this benchmark
+//     Run with a data path containing train.hvecs:
+//       ./asym_microbench <data_path>
+//     The benchmark loads train.hvecs, quantizes to EVP (NON_ZEROS=512),
+//     then runs 5 trials per implementation and prints the best-of-5 speed.
+// ============================================================================
 
 static void bench_fp16_evp_asymmetric(
     const std::vector<std::vector<std::byte>>& fp16_data_vecs,
