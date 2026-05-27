@@ -3,6 +3,7 @@
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <concepts>
 #include <config.h>
 
 #if defined(USE_AVX2) || defined(USE_AVX512) || defined(USE_SSE)
@@ -1409,77 +1410,61 @@ enum class Metric {
 template <typename MTYPE>
 using DISTFUNC = MTYPE (*)(const void*, const void*, const void*);
 
+namespace distances {
+
+template <typename T>
+concept DistanceComparator = requires(const void* a, const void* b, const void* c) {
+    { T::compare(a, b, c) } -> std::same_as<float>;
+};
+
+template <typename Functor>
+auto dispatch_distance(const deglib::Metric metric, const size_t dim, Functor&& f) {
+    if (metric == deglib::Metric::L2) {
+        if (dim % 16 == 0)      return f.template operator()<deglib::distances::L2Float16Ext>();
+        if (dim % 8 == 0)       return f.template operator()<deglib::distances::L2Float8Ext>();
+        if (dim % 4 == 0)       return f.template operator()<deglib::distances::L2Float4Ext>();
+        if (dim > 16)           return f.template operator()<deglib::distances::L2Float16ExtResiduals>();
+        if (dim > 4)            return f.template operator()<deglib::distances::L2Float4ExtResiduals>();
+        return f.template operator()<deglib::distances::L2Float>();
+    } 
+    else if (metric == deglib::Metric::InnerProduct) {
+        if (dim % 16 == 0)      return f.template operator()<deglib::distances::InnerProductFloat16Ext>();
+        if (dim % 8 == 0)       return f.template operator()<deglib::distances::InnerProductFloat8Ext>();
+        if (dim % 4 == 0)       return f.template operator()<deglib::distances::InnerProductFloat4Ext>();
+        if (dim > 16)           return f.template operator()<deglib::distances::InnerProductFloat16ExtResiduals>();
+        if (dim > 4)            return f.template operator()<deglib::distances::InnerProductFloat4ExtResiduals>();
+        return f.template operator()<deglib::distances::InnerProductFloat>();
+    } 
+    else if (metric == deglib::Metric::L2_Uint8) {
+        if (dim % 32 == 0)      return f.template operator()<deglib::distances::L2Uint8Ext32>();
+        if (dim % 16 == 0)      return f.template operator()<deglib::distances::L2Uint8Ext16>();
+        return f.template operator()<deglib::distances::L2Uint8>();
+    } 
+    else if (metric == deglib::Metric::EvpBits) {
+        return f.template operator()<deglib::distances::EvpBitsSimilarity>();
+    } 
+    else if (metric == deglib::Metric::FP16EvpAsymmetric) {
+        return f.template operator()<deglib::distances::FP16EvpAsymmetricSimilarity>();
+    } 
+    else if (metric == deglib::Metric::FP16InnerProduct) {
+        if (dim % 32 == 0)      return f.template operator()<deglib::distances::FP16InnerProductExt32>();
+        if (dim % 16 == 0)      return f.template operator()<deglib::distances::FP16InnerProductExt16>();
+        if (dim % 8 == 0)       return f.template operator()<deglib::distances::FP16InnerProductExt8>();
+        if (dim > 16)           return f.template operator()<deglib::distances::FP16InnerProductExt16Residuals>();
+        return f.template operator()<deglib::distances::FP16InnerProductExt8Residuals>();
+    }
+
+    std::fprintf(stderr, "Unsupported metric %u for dispatch_distance\n", static_cast<int>(metric));
+    std::abort();
+}
+
+} // namespace distances
+
 class FloatSpace {
     static DISTFUNC<float> select_dist_func(const size_t dim, const deglib::Metric metric) {
-        DISTFUNC<float> distfunc = deglib::distances::L2Float::compare;
-
-        if (metric == deglib::Metric::L2) {
-#if defined(USE_SSE) || defined(USE_AVX) || defined(USE_AVX512)
-            if (dim % 16 == 0)
-                distfunc = deglib::distances::L2Float16Ext::compare;
-            else if (dim % 8 == 0)
-                distfunc = deglib::distances::L2Float8Ext::compare;
-            else if (dim % 4 == 0)
-                distfunc = deglib::distances::L2Float4Ext::compare;
-            else if (dim > 16)
-                distfunc = deglib::distances::L2Float16ExtResiduals::compare;
-            else if (dim > 4)
-                distfunc = deglib::distances::L2Float4ExtResiduals::compare;
-#else
-            distfunc = deglib::distances::L2Float::compare;
-#endif
-        } else if (metric == deglib::Metric::InnerProduct) {
-#if defined(USE_SSE) || defined(USE_AVX) || defined(USE_AVX512)
-            if (dim % 16 == 0)
-                distfunc = deglib::distances::InnerProductFloat16Ext::compare;
-            else if (dim % 8 == 0)
-                distfunc = deglib::distances::InnerProductFloat8Ext::compare;
-            else if (dim % 4 == 0)
-                distfunc = deglib::distances::InnerProductFloat4Ext::compare;
-            else if (dim > 16)
-                distfunc = deglib::distances::InnerProductFloat16ExtResiduals::compare;
-            else if (dim > 4)
-                distfunc = deglib::distances::InnerProductFloat4ExtResiduals::compare;
-#else
-            distfunc = deglib::distances::InnerProductFloat::compare;
-#endif
-        } else if (metric == deglib::Metric::L2_Uint8) {
-#if defined(USE_SSE) || defined(USE_AVX) || defined(USE_AVX512)
-            if (dim % 32 == 0)
-                distfunc = deglib::distances::L2Uint8Ext32::compare;
-            else if (dim % 16 == 0)
-                distfunc = deglib::distances::L2Uint8Ext16::compare;
-            else
-                distfunc = deglib::distances::L2Uint8::compare;
-#else
-            distfunc = deglib::distances::L2Uint8::compare;
-#endif
-        } else if (metric == deglib::Metric::EvpBits) {
-            distfunc = deglib::distances::EvpBitsSimilarity::compare;
-        } else if (metric == deglib::Metric::FP16EvpAsymmetric) {
-            distfunc = deglib::distances::FP16EvpAsymmetricSimilarity::compare;
-        } else if (metric == deglib::Metric::FP16InnerProduct) {
-#if defined(USE_SSE) || defined(USE_AVX) || defined(USE_AVX512)
-            if (dim % 32 == 0)
-                distfunc = deglib::distances::FP16InnerProductExt32::compare;
-            else if (dim % 16 == 0)
-                distfunc = deglib::distances::FP16InnerProductExt16::compare;
-            else if (dim % 8 == 0)
-                distfunc = deglib::distances::FP16InnerProductExt8::compare;
-            else if (dim > 16)
-                distfunc = deglib::distances::FP16InnerProductExt16Residuals::compare;
-            else
-                distfunc = deglib::distances::FP16InnerProductExt8Residuals::compare;
-#else
-            distfunc = deglib::distances::FP16InnerProduct::compare;
-#endif
-        }
-
-        // TODO add cosine but convert to a distance = 2 - (cosine + 1)
-        // https://www.kaggle.com/cdabakoglu/word-vectors-cosine-similarity
-        // https://github.com/yahoojapan/NGT/blob/master/lib/NGT/PrimitiveComparator.h#L431
-
-        return distfunc;
+        return distances::dispatch_distance(metric, dim, []<typename COMPARATOR>() -> DISTFUNC<float> {
+            return COMPARATOR::compare;
+        });
     }
 
     static size_t calculate_data_size(const size_t dim, const deglib::Metric metric) {
@@ -1514,5 +1499,14 @@ public:
 
     ~FloatSpace() {}
 };
+
+namespace distances {
+
+template <typename Functor>
+auto dispatch_distance(const deglib::FloatSpace& space, Functor&& f) {
+    return dispatch_distance(space.metric(), space.dim(), std::forward<Functor>(f));
+}
+
+} // namespace distances
 
 }  // end namespace deglib
