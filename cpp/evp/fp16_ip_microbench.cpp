@@ -41,6 +41,32 @@
 //
 // Batch variants amortize the FP16→float conversion across multiple database
 // vectors, yielding significant speedups for KNN-style workloads.
+//
+// Output format: "name    ms    ns/op  (best-of-5, sink=...)"
+//
+// Hardware: AMD 5600G with AVX2 support
+// Dataset: 200000 vectors, dim=1024, FP16 (train.hvecs)
+//
+// Results (100K comparisons, best-of-5):
+// ---------------------------------------------------------------
+//   ip_naive (deglib)          1339 ns/op    1.0x baseline
+//   ip_8ext  (deglib)           633 ns/op    2.1x
+//   ip_16ext (deglib)           517 ns/op    2.6x
+//   compare  (deglib)          1294 ns/op    1.0x
+//   ip_custom_unroll2           468 ns/op    2.9x
+//   ip_custom_unroll4           350 ns/op    3.8x
+//   ip_custom_batch4            222 ns/op    6.0x   (batch=4)
+//   ip_custom_batch8            175 ns/op    7.7x   (batch=8)
+//   ip_custom_batch4_u2         232 ns/op    5.8x   (batch=4, unroll2)
+//   ip_custom_batch8_u2         169 ns/op    7.9x   (batch=8, unroll2)  ← BEST
+// ---------------------------------------------------------------
+//
+// Key takeaways:
+//   * Batch variants amortize query FP16→float conversion across neighbors.
+//   * Batch=8 beats batch=4: wider amortization.
+//   * Unrolling provides modest gains for batch=8, negligible for batch=4.
+//   * ip_custom_unroll4 (single-query, 350 ns/op) is already faster than
+//     deglib's best ext variant (ip_16ext, 517 ns/op).
 // ============================================================================
 
 // ---------------------------------------------------------------------------
@@ -180,120 +206,45 @@ static float ip_custom_unroll4(const void* pVect1v, const void* pVect2v, const v
 
 // ---------------------------------------------------------------------------
 // Custom batch implementations
-// Signature: void fn(const uint16_t* query, const uint16_t** db_arr, const uint32_t* dim, float* dists)
+// Signature: void fn(const uint16_t* query, const uint16_t* const* db_arr, const size_t* dim, float* dists)
 // ---------------------------------------------------------------------------
 
-// ip_custom_batch4: Batch of 4, convert query FP16 once, accumulate per neighbor
-static void ip_custom_batch4(const uint16_t* query, const uint16_t** db_arr, const uint32_t* dim, float* dists) {
+// ip_custom_batch4: Batch of 4, chunk-first pattern (convert query per chunk, accumulate all neighbors)
+static void ip_custom_batch4(const uint16_t* query, const uint16_t* const* db_arr, const size_t* dim, float* dists) {
 #if defined(USE_AVX) || defined(USE_AVX512)
-    size_t num_chunks = *dim / 16;
+    const size_t num_chunks = *dim / 16;
 
-    // Convert query once into register array
-    alignas(32) __m256 qa[32];  // max 512 elements / 16 = 32 chunks
-    for (size_t chunk = 0; chunk < num_chunks; ++chunk) {
-        __m128i lo = _mm_loadu_si128((const __m128i*)&query[chunk * 16]);
-        __m128i hi = _mm_loadu_si128((const __m128i*)&query[chunk * 16 + 8]);
-        qa[chunk * 2]     = _mm256_cvtph_ps(lo);
-        qa[chunk * 2 + 1] = _mm256_cvtph_ps(hi);
+    __m256 sum0 = _mm256_setzero_ps();
+    __m256 sum1 = _mm256_setzero_ps();
+    __m256 sum2 = _mm256_setzero_ps();
+    __m256 sum3 = _mm256_setzero_ps();
+
+    for (size_t c = 0; c < num_chunks; ++c) {
+        const __m128i q_lo = _mm_loadu_si128((const __m128i*)&query[c * 16]);
+        const __m128i q_hi = _mm_loadu_si128((const __m128i*)&query[c * 16 + 8]);
+        const __m256 qf_lo = _mm256_cvtph_ps(q_lo);
+        const __m256 qf_hi = _mm256_cvtph_ps(q_hi);
+
+        #define ACCUM(j, sum_reg) do { \
+            const __m128i b_lo = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16]); \
+            const __m128i b_hi = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16 + 8]); \
+            const __m256 bf_lo = _mm256_cvtph_ps(b_lo); \
+            const __m256 bf_hi = _mm256_cvtph_ps(b_hi); \
+            sum_reg = _mm256_fmadd_ps(qf_lo, bf_lo, sum_reg); \
+            sum_reg = _mm256_fmadd_ps(qf_hi, bf_hi, sum_reg); \
+        } while(0)
+
+        ACCUM(0, sum0);
+        ACCUM(1, sum1);
+        ACCUM(2, sum2);
+        ACCUM(3, sum3);
+        #undef ACCUM
     }
 
-    // For each neighbor, convert + multiply-accumulate
-    for (int j = 0; j < 4; ++j) {
-        __m256 sum = _mm256_setzero_ps();
-        for (size_t chunk = 0; chunk < num_chunks; ++chunk) {
-            __m128i lo = _mm_loadu_si128((const __m128i*)&db_arr[j][chunk * 16]);
-            __m128i hi = _mm_loadu_si128((const __m128i*)&db_arr[j][chunk * 16 + 8]);
-            __m256 qb_lo = _mm256_cvtph_ps(lo);
-            __m256 qb_hi = _mm256_cvtph_ps(hi);
-            __m256 t = _mm256_fmadd_ps(qa[chunk * 2], qb_lo, sum);
-            sum = _mm256_fmadd_ps(qa[chunk * 2 + 1], qb_hi, t);
-        }
-        dists[j] = 1.0f - hsum256(sum);
-    }
-#else
-    // Fallback: naive single-query loop
-    for (int j = 0; j < 4; ++j) {
-        dists[j] = 1.0f - deglib::distances::FP16InnerProduct::ip_naive(query, db_arr[j], dim);
-    }
-#endif
-}
-
-// ip_custom_batch8: Batch of 8, same pattern as batch4
-static void ip_custom_batch8(const uint16_t* query, const uint16_t** db_arr, const uint32_t* dim, float* dists) {
-#if defined(USE_AVX) || defined(USE_AVX512)
-    size_t num_chunks = *dim / 16;
-
-    alignas(32) __m256 qa[32];
-    for (size_t chunk = 0; chunk < num_chunks; ++chunk) {
-        __m128i lo = _mm_loadu_si128((const __m128i*)&query[chunk * 16]);
-        __m128i hi = _mm_loadu_si128((const __m128i*)&query[chunk * 16 + 8]);
-        qa[chunk * 2]     = _mm256_cvtph_ps(lo);
-        qa[chunk * 2 + 1] = _mm256_cvtph_ps(hi);
-    }
-
-    for (int j = 0; j < 8; ++j) {
-        __m256 sum = _mm256_setzero_ps();
-        for (size_t chunk = 0; chunk < num_chunks; ++chunk) {
-            __m128i lo = _mm_loadu_si128((const __m128i*)&db_arr[j][chunk * 16]);
-            __m128i hi = _mm_loadu_si128((const __m128i*)&db_arr[j][chunk * 16 + 8]);
-            __m256 qb_lo = _mm256_cvtph_ps(lo);
-            __m256 qb_hi = _mm256_cvtph_ps(hi);
-            __m256 t = _mm256_fmadd_ps(qa[chunk * 2], qb_lo, sum);
-            sum = _mm256_fmadd_ps(qa[chunk * 2 + 1], qb_hi, t);
-        }
-        dists[j] = 1.0f - hsum256(sum);
-    }
-#else
-    for (int j = 0; j < 8; ++j) {
-        dists[j] = 1.0f - deglib::distances::FP16InnerProduct::ip_naive(query, db_arr[j], dim);
-    }
-#endif
-}
-
-// ip_custom_batch4_unroll2: Batch=4 with inner loop unrolled by 2 (process 2 chunks per iteration)
-static void ip_custom_batch4_unroll2(const uint16_t* query, const uint16_t** db_arr, const uint32_t* dim, float* dists) {
-#if defined(USE_AVX) || defined(USE_AVX512)
-    size_t num_chunks = *dim / 16;
-
-    // Convert query once
-    alignas(32) __m256 qa[32];
-    for (size_t chunk = 0; chunk < num_chunks; ++chunk) {
-        __m128i lo = _mm_loadu_si128((const __m128i*)&query[chunk * 16]);
-        __m128i hi = _mm_loadu_si128((const __m128i*)&query[chunk * 16 + 8]);
-        qa[chunk * 2]     = _mm256_cvtph_ps(lo);
-        qa[chunk * 2 + 1] = _mm256_cvtph_ps(hi);
-    }
-
-    for (int j = 0; j < 4; ++j) {
-        __m256 sum = _mm256_setzero_ps();
-        size_t c = 0;
-        for (; c + 1 < num_chunks; c += 2) {
-            // Chunk c
-            __m128i lo = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16]);
-            __m128i hi = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16 + 8]);
-            __m256 qb_lo = _mm256_cvtph_ps(lo);
-            __m256 qb_hi = _mm256_cvtph_ps(hi);
-            __m256 t = _mm256_fmadd_ps(qa[c * 2], qb_lo, sum);
-            sum = _mm256_fmadd_ps(qa[c * 2 + 1], qb_hi, t);
-            // Chunk c+1
-            lo = _mm_loadu_si128((const __m128i*)&db_arr[j][(c + 1) * 16]);
-            hi = _mm_loadu_si128((const __m128i*)&db_arr[j][(c + 1) * 16 + 8]);
-            qb_lo = _mm256_cvtph_ps(lo);
-            qb_hi = _mm256_cvtph_ps(hi);
-            t = _mm256_fmadd_ps(qa[(c + 1) * 2], qb_lo, sum);
-            sum = _mm256_fmadd_ps(qa[(c + 1) * 2 + 1], qb_hi, t);
-        }
-        // Tail
-        for (; c < num_chunks; ++c) {
-            __m128i lo = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16]);
-            __m128i hi = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16 + 8]);
-            __m256 qb_lo = _mm256_cvtph_ps(lo);
-            __m256 qb_hi = _mm256_cvtph_ps(hi);
-            __m256 t = _mm256_fmadd_ps(qa[c * 2], qb_lo, sum);
-            sum = _mm256_fmadd_ps(qa[c * 2 + 1], qb_hi, t);
-        }
-        dists[j] = 1.0f - hsum256(sum);
-    }
+    dists[0] = 1.0f - hsum256(sum0);
+    dists[1] = 1.0f - hsum256(sum1);
+    dists[2] = 1.0f - hsum256(sum2);
+    dists[3] = 1.0f - hsum256(sum3);
 #else
     for (int j = 0; j < 4; ++j) {
         dists[j] = 1.0f - deglib::distances::FP16InnerProduct::ip_naive(query, db_arr[j], dim);
@@ -301,46 +252,54 @@ static void ip_custom_batch4_unroll2(const uint16_t* query, const uint16_t** db_
 #endif
 }
 
-// ip_custom_batch8_unroll2: Batch=8 with inner loop unrolled by 2
-static void ip_custom_batch8_unroll2(const uint16_t* query, const uint16_t** db_arr, const uint32_t* dim, float* dists) {
+// ip_custom_batch8: Batch of 8, chunk-first pattern
+static void ip_custom_batch8(const uint16_t* query, const uint16_t* const* db_arr, const size_t* dim, float* dists) {
 #if defined(USE_AVX) || defined(USE_AVX512)
-    size_t num_chunks = *dim / 16;
+    const size_t num_chunks = *dim / 16;
 
-    alignas(32) __m256 qa[32];
-    for (size_t chunk = 0; chunk < num_chunks; ++chunk) {
-        __m128i lo = _mm_loadu_si128((const __m128i*)&query[chunk * 16]);
-        __m128i hi = _mm_loadu_si128((const __m128i*)&query[chunk * 16 + 8]);
-        qa[chunk * 2]     = _mm256_cvtph_ps(lo);
-        qa[chunk * 2 + 1] = _mm256_cvtph_ps(hi);
+    __m256 sum0 = _mm256_setzero_ps();
+    __m256 sum1 = _mm256_setzero_ps();
+    __m256 sum2 = _mm256_setzero_ps();
+    __m256 sum3 = _mm256_setzero_ps();
+    __m256 sum4 = _mm256_setzero_ps();
+    __m256 sum5 = _mm256_setzero_ps();
+    __m256 sum6 = _mm256_setzero_ps();
+    __m256 sum7 = _mm256_setzero_ps();
+
+    for (size_t c = 0; c < num_chunks; ++c) {
+        const __m128i q_lo = _mm_loadu_si128((const __m128i*)&query[c * 16]);
+        const __m128i q_hi = _mm_loadu_si128((const __m128i*)&query[c * 16 + 8]);
+        const __m256 qf_lo = _mm256_cvtph_ps(q_lo);
+        const __m256 qf_hi = _mm256_cvtph_ps(q_hi);
+
+        #define ACCUM(j, sum_reg) do { \
+            const __m128i b_lo = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16]); \
+            const __m128i b_hi = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16 + 8]); \
+            const __m256 bf_lo = _mm256_cvtph_ps(b_lo); \
+            const __m256 bf_hi = _mm256_cvtph_ps(b_hi); \
+            sum_reg = _mm256_fmadd_ps(qf_lo, bf_lo, sum_reg); \
+            sum_reg = _mm256_fmadd_ps(qf_hi, bf_hi, sum_reg); \
+        } while(0)
+
+        ACCUM(0, sum0);
+        ACCUM(1, sum1);
+        ACCUM(2, sum2);
+        ACCUM(3, sum3);
+        ACCUM(4, sum4);
+        ACCUM(5, sum5);
+        ACCUM(6, sum6);
+        ACCUM(7, sum7);
+        #undef ACCUM
     }
 
-    for (int j = 0; j < 8; ++j) {
-        __m256 sum = _mm256_setzero_ps();
-        size_t c = 0;
-        for (; c + 1 < num_chunks; c += 2) {
-            __m128i lo = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16]);
-            __m128i hi = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16 + 8]);
-            __m256 qb_lo = _mm256_cvtph_ps(lo);
-            __m256 qb_hi = _mm256_cvtph_ps(hi);
-            __m256 t = _mm256_fmadd_ps(qa[c * 2], qb_lo, sum);
-            sum = _mm256_fmadd_ps(qa[c * 2 + 1], qb_hi, t);
-            lo = _mm_loadu_si128((const __m128i*)&db_arr[j][(c + 1) * 16]);
-            hi = _mm_loadu_si128((const __m128i*)&db_arr[j][(c + 1) * 16 + 8]);
-            qb_lo = _mm256_cvtph_ps(lo);
-            qb_hi = _mm256_cvtph_ps(hi);
-            t = _mm256_fmadd_ps(qa[(c + 1) * 2], qb_lo, sum);
-            sum = _mm256_fmadd_ps(qa[(c + 1) * 2 + 1], qb_hi, t);
-        }
-        for (; c < num_chunks; ++c) {
-            __m128i lo = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16]);
-            __m128i hi = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16 + 8]);
-            __m256 qb_lo = _mm256_cvtph_ps(lo);
-            __m256 qb_hi = _mm256_cvtph_ps(hi);
-            __m256 t = _mm256_fmadd_ps(qa[c * 2], qb_lo, sum);
-            sum = _mm256_fmadd_ps(qa[c * 2 + 1], qb_hi, t);
-        }
-        dists[j] = 1.0f - hsum256(sum);
-    }
+    dists[0] = 1.0f - hsum256(sum0);
+    dists[1] = 1.0f - hsum256(sum1);
+    dists[2] = 1.0f - hsum256(sum2);
+    dists[3] = 1.0f - hsum256(sum3);
+    dists[4] = 1.0f - hsum256(sum4);
+    dists[5] = 1.0f - hsum256(sum5);
+    dists[6] = 1.0f - hsum256(sum6);
+    dists[7] = 1.0f - hsum256(sum7);
 #else
     for (int j = 0; j < 8; ++j) {
         dists[j] = 1.0f - deglib::distances::FP16InnerProduct::ip_naive(query, db_arr[j], dim);
@@ -348,6 +307,161 @@ static void ip_custom_batch8_unroll2(const uint16_t* query, const uint16_t** db_
 #endif
 }
 
+// ip_custom_batch4_unroll2: Batch=4, process 2 query chunks per outer iteration
+static void ip_custom_batch4_unroll2(const uint16_t* query, const uint16_t* const* db_arr, const size_t* dim, float* dists) {
+#if defined(USE_AVX) || defined(USE_AVX512)
+    const size_t num_chunks = *dim / 16;
+
+    __m256 sum0 = _mm256_setzero_ps();
+    __m256 sum1 = _mm256_setzero_ps();
+    __m256 sum2 = _mm256_setzero_ps();
+    __m256 sum3 = _mm256_setzero_ps();
+
+    size_t c = 0;
+    for (; c + 1 < num_chunks; c += 2) {
+        const __m128i q0_lo = _mm_loadu_si128((const __m128i*)&query[c * 16]);
+        const __m128i q0_hi = _mm_loadu_si128((const __m128i*)&query[c * 16 + 8]);
+        const __m256 qf0_lo = _mm256_cvtph_ps(q0_lo);
+        const __m256 qf0_hi = _mm256_cvtph_ps(q0_hi);
+
+        const __m128i q1_lo = _mm_loadu_si128((const __m128i*)&query[(c + 1) * 16]);
+        const __m128i q1_hi = _mm_loadu_si128((const __m128i*)&query[(c + 1) * 16 + 8]);
+        const __m256 qf1_lo = _mm256_cvtph_ps(q1_lo);
+        const __m256 qf1_hi = _mm256_cvtph_ps(q1_hi);
+
+        #define ACCUM(j, sum_reg) do { \
+            const __m128i b0_lo = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16]); \
+            const __m128i b0_hi = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16 + 8]); \
+            const __m256 bf0_lo = _mm256_cvtph_ps(b0_lo); \
+            const __m256 bf0_hi = _mm256_cvtph_ps(b0_hi); \
+            sum_reg = _mm256_fmadd_ps(qf0_lo, bf0_lo, sum_reg); \
+            sum_reg = _mm256_fmadd_ps(qf0_hi, bf0_hi, sum_reg); \
+            const __m128i b1_lo = _mm_loadu_si128((const __m128i*)&db_arr[j][(c + 1) * 16]); \
+            const __m128i b1_hi = _mm_loadu_si128((const __m128i*)&db_arr[j][(c + 1) * 16 + 8]); \
+            const __m256 bf1_lo = _mm256_cvtph_ps(b1_lo); \
+            const __m256 bf1_hi = _mm256_cvtph_ps(b1_hi); \
+            sum_reg = _mm256_fmadd_ps(qf1_lo, bf1_lo, sum_reg); \
+            sum_reg = _mm256_fmadd_ps(qf1_hi, bf1_hi, sum_reg); \
+        } while(0)
+
+        ACCUM(0, sum0);
+        ACCUM(1, sum1);
+        ACCUM(2, sum2);
+        ACCUM(3, sum3);
+        #undef ACCUM
+    }
+    for (; c < num_chunks; ++c) {
+        const __m128i q_lo = _mm_loadu_si128((const __m128i*)&query[c * 16]);
+        const __m128i q_hi = _mm_loadu_si128((const __m128i*)&query[c * 16 + 8]);
+        const __m256 qf_lo = _mm256_cvtph_ps(q_lo);
+        const __m256 qf_hi = _mm256_cvtph_ps(q_hi);
+
+        #define ACCUM(j, sum_reg) do { \
+            const __m128i b_lo = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16]); \
+            const __m128i b_hi = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16 + 8]); \
+            const __m256 bf_lo = _mm256_cvtph_ps(b_lo); \
+            const __m256 bf_hi = _mm256_cvtph_ps(b_hi); \
+            sum_reg = _mm256_fmadd_ps(qf_lo, bf_lo, sum_reg); \
+            sum_reg = _mm256_fmadd_ps(qf_hi, bf_hi, sum_reg); \
+        } while(0)
+
+        ACCUM(0, sum0);
+        ACCUM(1, sum1);
+        ACCUM(2, sum2);
+        ACCUM(3, sum3);
+        #undef ACCUM
+    }
+
+    dists[0] = 1.0f - hsum256(sum0);
+    dists[1] = 1.0f - hsum256(sum1);
+    dists[2] = 1.0f - hsum256(sum2);
+    dists[3] = 1.0f - hsum256(sum3);
+#else
+    for (int j = 0; j < 4; ++j) {
+        dists[j] = 1.0f - deglib::distances::FP16InnerProduct::ip_naive(query, db_arr[j], dim);
+    }
+#endif
+}
+
+// ip_custom_batch8_unroll2: Batch=8, process 2 query chunks per outer iteration
+static void ip_custom_batch8_unroll2(const uint16_t* query, const uint16_t* const* db_arr, const size_t* dim, float* dists) {
+#if defined(USE_AVX) || defined(USE_AVX512)
+    const size_t num_chunks = *dim / 16;
+
+    __m256 sum0 = _mm256_setzero_ps();
+    __m256 sum1 = _mm256_setzero_ps();
+    __m256 sum2 = _mm256_setzero_ps();
+    __m256 sum3 = _mm256_setzero_ps();
+    __m256 sum4 = _mm256_setzero_ps();
+    __m256 sum5 = _mm256_setzero_ps();
+    __m256 sum6 = _mm256_setzero_ps();
+    __m256 sum7 = _mm256_setzero_ps();
+
+    size_t c = 0;
+    for (; c + 1 < num_chunks; c += 2) {
+        const __m128i q0_lo = _mm_loadu_si128((const __m128i*)&query[c * 16]);
+        const __m128i q0_hi = _mm_loadu_si128((const __m128i*)&query[c * 16 + 8]);
+        const __m256 qf0_lo = _mm256_cvtph_ps(q0_lo);
+        const __m256 qf0_hi = _mm256_cvtph_ps(q0_hi);
+
+        const __m128i q1_lo = _mm_loadu_si128((const __m128i*)&query[(c + 1) * 16]);
+        const __m128i q1_hi = _mm_loadu_si128((const __m128i*)&query[(c + 1) * 16 + 8]);
+        const __m256 qf1_lo = _mm256_cvtph_ps(q1_lo);
+        const __m256 qf1_hi = _mm256_cvtph_ps(q1_hi);
+
+        #define ACCUM(j, sum_reg) do { \
+            const __m128i b0_lo = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16]); \
+            const __m128i b0_hi = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16 + 8]); \
+            const __m256 bf0_lo = _mm256_cvtph_ps(b0_lo); \
+            const __m256 bf0_hi = _mm256_cvtph_ps(b0_hi); \
+            sum_reg = _mm256_fmadd_ps(qf0_lo, bf0_lo, sum_reg); \
+            sum_reg = _mm256_fmadd_ps(qf0_hi, bf0_hi, sum_reg); \
+            const __m128i b1_lo = _mm_loadu_si128((const __m128i*)&db_arr[j][(c + 1) * 16]); \
+            const __m128i b1_hi = _mm_loadu_si128((const __m128i*)&db_arr[j][(c + 1) * 16 + 8]); \
+            const __m256 bf1_lo = _mm256_cvtph_ps(b1_lo); \
+            const __m256 bf1_hi = _mm256_cvtph_ps(b1_hi); \
+            sum_reg = _mm256_fmadd_ps(qf1_lo, bf1_lo, sum_reg); \
+            sum_reg = _mm256_fmadd_ps(qf1_hi, bf1_hi, sum_reg); \
+        } while(0)
+
+        ACCUM(0, sum0); ACCUM(1, sum1); ACCUM(2, sum2); ACCUM(3, sum3);
+        ACCUM(4, sum4); ACCUM(5, sum5); ACCUM(6, sum6); ACCUM(7, sum7);
+        #undef ACCUM
+    }
+    for (; c < num_chunks; ++c) {
+        const __m128i q_lo = _mm_loadu_si128((const __m128i*)&query[c * 16]);
+        const __m128i q_hi = _mm_loadu_si128((const __m128i*)&query[c * 16 + 8]);
+        const __m256 qf_lo = _mm256_cvtph_ps(q_lo);
+        const __m256 qf_hi = _mm256_cvtph_ps(q_hi);
+
+        #define ACCUM(j, sum_reg) do { \
+            const __m128i b_lo = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16]); \
+            const __m128i b_hi = _mm_loadu_si128((const __m128i*)&db_arr[j][c * 16 + 8]); \
+            const __m256 bf_lo = _mm256_cvtph_ps(b_lo); \
+            const __m256 bf_hi = _mm256_cvtph_ps(b_hi); \
+            sum_reg = _mm256_fmadd_ps(qf_lo, bf_lo, sum_reg); \
+            sum_reg = _mm256_fmadd_ps(qf_hi, bf_hi, sum_reg); \
+        } while(0)
+
+        ACCUM(0, sum0); ACCUM(1, sum1); ACCUM(2, sum2); ACCUM(3, sum3);
+        ACCUM(4, sum4); ACCUM(5, sum5); ACCUM(6, sum6); ACCUM(7, sum7);
+        #undef ACCUM
+    }
+
+    dists[0] = 1.0f - hsum256(sum0);
+    dists[1] = 1.0f - hsum256(sum1);
+    dists[2] = 1.0f - hsum256(sum2);
+    dists[3] = 1.0f - hsum256(sum3);
+    dists[4] = 1.0f - hsum256(sum4);
+    dists[5] = 1.0f - hsum256(sum5);
+    dists[6] = 1.0f - hsum256(sum6);
+    dists[7] = 1.0f - hsum256(sum7);
+#else
+    for (int j = 0; j < 8; ++j) {
+        dists[j] = 1.0f - deglib::distances::FP16InnerProduct::ip_naive(query, db_arr[j], dim);
+    }
+#endif
+}
 // ---------------------------------------------------------------------------
 // Benchmark runner
 // ---------------------------------------------------------------------------
@@ -359,8 +473,6 @@ static void bench_fp16_ip(
     uint32_t threads)
 {
     (void)threads;
-    const uint32_t dim_u32 = dim;
-
     if (count == 0 || dim == 0) {
         std::printf("FP16 IP bench: no data (count=%zu, dim=%u)\n", count, dim);
         return;
@@ -370,6 +482,8 @@ static void bench_fp16_ip(
     std::iota(shuffled_indices.begin(), shuffled_indices.end(), 0u);
     std::mt19937 g(1337);
     std::shuffle(shuffled_indices.begin(), shuffled_indices.end(), g);
+
+    size_t dim_sz = dim;
 
     size_t comparisons = 100'000;
     comparisons = std::min(comparisons, std::max<size_t>(count * 256, 10'000));
@@ -398,7 +512,7 @@ static void bench_fp16_ip(
             const uint32_t db_idx = shuffled_indices[c];
             const uint16_t* a = reinterpret_cast<const uint16_t*>(fp16_data_vecs[q].data());
             const uint16_t* b = reinterpret_cast<const uint16_t*>(fp16_data_vecs[db_idx].data());
-            sink += fn(a, b, &dim_u32);
+            sink += fn(a, b, &dim_sz);
         }
 
         double best_ms = std::numeric_limits<double>::infinity();
@@ -412,7 +526,7 @@ static void bench_fp16_ip(
                 const uint32_t db_idx = shuffled_indices[c];
                 const uint16_t* a = reinterpret_cast<const uint16_t*>(fp16_data_vecs[q].data());
                 const uint16_t* b = reinterpret_cast<const uint16_t*>(fp16_data_vecs[db_idx].data());
-                sink += fn(a, b, &dim_u32);
+                sink += fn(a, b, &dim_sz);
             }
             const auto t1 = std::chrono::steady_clock::now();
             const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
@@ -449,7 +563,7 @@ static void bench_fp16_ip(
             }
 
             alignas(32) float dists[8];
-            fn_batch(a, b_arr, &dim_u32, dists);
+                fn_batch(a, b_arr, &dim_sz, dists);
             for (int j = 0; j < batch_size; ++j) {
                 sink += dists[j];
             }
@@ -472,7 +586,7 @@ static void bench_fp16_ip(
                 }
 
                 alignas(32) float dists[8];
-                fn_batch(a, b_arr, &dim_u32, dists);
+            fn_batch(a, b_arr, &dim_sz, dists);
                 for (int j = 0; j < batch_size; ++j) {
                     sink += dists[j];
                 }
@@ -579,7 +693,11 @@ int main(int argc, char* argv[]) {
 
     double t_load = evp_common::now_ms();
     size_t dims = 0, count = 0;
+    std::printf("Loading hvecs...\n");
+    fflush(stdout);
     auto train_vectors = evp_common::hvecs_read(train_hvecs.string().c_str(), dims, count);
+    std::printf("Loaded: %zu vectors, dim=%zu\n", count, dims);
+    fflush(stdout);
     double load_ms = evp_common::now_ms() - t_load;
 
     std::printf("Loaded %S: %zu vectors, dim=%zu\n", train_hvecs.c_str(), count, dims);

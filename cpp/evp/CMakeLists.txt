@@ -16,6 +16,34 @@ target_link_libraries(fp16_ip_microbench PUBLIC DEG_LIB compile-options
                                                 fmt::fmt-header-only OpenMP::OpenMP_CXX)
 target_compile_definitions(fp16_ip_microbench PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
 
+# Build fp32_ip_microbench target
+add_executable(fp32_ip_microbench fp32_ip_microbench.cpp)
+target_include_directories(fp32_ip_microbench PRIVATE "${CMAKE_SOURCE_DIR}")
+target_link_libraries(fp32_ip_microbench PUBLIC DEG_LIB compile-options
+                                                fmt::fmt-header-only OpenMP::OpenMP_CXX)
+target_compile_definitions(fp32_ip_microbench PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
+
+# Build evp_microbench target
+add_executable(evp_microbench evp_microbench.cpp)
+target_include_directories(evp_microbench PRIVATE "${CMAKE_SOURCE_DIR}")
+target_link_libraries(evp_microbench PUBLIC DEG_LIB compile-options
+                                                fmt::fmt-header-only OpenMP::OpenMP_CXX)
+target_compile_definitions(evp_microbench PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
+
+# Build fp32_L2_microbench target
+add_executable(fp32_L2_microbench fp32_L2_microbench.cpp)
+target_include_directories(fp32_L2_microbench PRIVATE "${CMAKE_SOURCE_DIR}")
+target_link_libraries(fp32_L2_microbench PUBLIC DEG_LIB compile-options
+                                                fmt::fmt-header-only OpenMP::OpenMP_CXX)
+target_compile_definitions(fp32_L2_microbench PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
+
+# Build uint8_L2_microbench target
+add_executable(uint8_L2_microbench uint8_L2_microbench.cpp)
+target_include_directories(uint8_L2_microbench PRIVATE "${CMAKE_SOURCE_DIR}")
+target_link_libraries(uint8_L2_microbench PUBLIC DEG_LIB compile-options
+                                                fmt::fmt-header-only OpenMP::OpenMP_CXX)
+target_compile_definitions(uint8_L2_microbench PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
+
 # Build deglib_evp_task1 target
 add_executable(deglib_evp_task1 task1.cpp)
 target_include_directories(deglib_evp_task1 PRIVATE ${CMAKE_SOURCE_DIR}/benchmark/include)
