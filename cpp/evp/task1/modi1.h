@@ -137,8 +137,7 @@ static int run(
     auto datasets = hdf5_reader::scan_datasets(h5path);
     auto& train_info = hdf5_reader::find_dataset(datasets, "train");
 
-    double t_load = evp_common::now_ms();
-    std::vector<std::vector<std::byte>> train_vectors = hdf5_reader::read_matrix_bytes(h5path, train_info);
+    double t_load_start = evp_common::now_ms();
     size_t dims = static_cast<size_t>(train_info.num_cols);
     size_t count = static_cast<size_t>(train_info.num_rows);
 
@@ -152,15 +151,9 @@ static int run(
             return 1;
         }
     }
-    double load_ms = evp_common::now_ms() - t_load;
+    double total_load_ms = evp_common::now_ms() - t_load_start;
 
-    std::printf("Loaded train:  %zu vectors, dim=%zu\n", count, dims);
-    if (compute_recall) {
-        std::printf("Ground truth:  %zu queries, top-%u\n", gt_data.size(), k_top);
-    }
-    std::printf("Load time:     %.2f ms\n\n", load_ms);
-
-    std::printf("=== FP16 Build FP16 Explore Graph Benchmark (Mode 1) ===\n");
+    std::printf("=== FP16 Build FP16 Explore Graph Benchmark (Mode 1 - Chunked Build) ===\n");
     std::printf("Data path: %ls\n", data_path.wstring().c_str());
     std::printf("K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.3f\n",
                 k_top, k_graph, k_ext, eps_ext);
@@ -172,8 +165,6 @@ static int run(
     // --------------------------------------------------------------------------
     // Build graph with Metric::FP16InnerProduct
     // --------------------------------------------------------------------------
-    double t2 = evp_common::now_ms();
-
     deglib::FloatSpace feature_space(static_cast<uint32_t>(dims), deglib::Metric::FP16InnerProduct);
     deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(count), k_graph, feature_space);
 
@@ -192,26 +183,46 @@ static int run(
     builder.setThreadCount(static_cast<uint32_t>(threads));
     builder.setBatchSize(64, 128);
 
-    // Add all entries from FP16 data directly using zero-copy std::move
-    const size_t bytes_per_fp16 = dims * sizeof(uint16_t);
-    for (size_t i = 0; i < count; ++i) {
-        builder.addEntry(static_cast<uint32_t>(i), std::move(train_vectors[i]));
+    double total_build_ms = 0.0;
+    const size_t load_chunk_size = 100000;
+    double t_build_start = evp_common::now_ms();
+
+    for (size_t start_row = 0; start_row < count; start_row += load_chunk_size) {
+        size_t current_chunk_size = std::min(load_chunk_size, count - start_row);
+
+        // Load chunk
+        double t_chunk_load = evp_common::now_ms();
+        std::vector<std::vector<std::byte>> chunk_vectors = hdf5_reader::read_matrix_bytes(h5path, train_info, start_row, current_chunk_size);
+        double chunk_load_ms = evp_common::now_ms() - t_chunk_load;
+        total_load_ms += chunk_load_ms;
+
+        // Add chunk entries
+        for (size_t i = 0; i < current_chunk_size; ++i) {
+            builder.addEntry(static_cast<uint32_t>(start_row + i), std::move(chunk_vectors[i]));
+        }
+        chunk_vectors.clear();
+        chunk_vectors.shrink_to_fit();
+
+        // Build chunk
+        double t_chunk_build = evp_common::now_ms();
+        auto dummy_callback = [](deglib::builder::BuilderStatus&) {};
+        builder.build(dummy_callback, false);
+        double chunk_build_ms = evp_common::now_ms() - t_chunk_build;
+        total_build_ms += chunk_build_ms;
+
+        double elapsed_s = (evp_common::now_ms() - t_build_start) / 1000.0;
+        std::printf("  Chunk [%6zuk - %6zuk): Load = %.2fs, Build = %.2fs | Elapsed = %.2fs\n", 
+                    start_row / 1000, (start_row + current_chunk_size) / 1000, 
+                    chunk_load_ms / 1000.0, chunk_build_ms / 1000.0, elapsed_s);
     }
 
-    auto build_callback = [&](deglib::builder::BuilderStatus& status) {
-        double elapsed = evp_common::now_ms() - t2;
-        std::printf("  Build step %llu: added=%llu, improved=%llu, elapsed=%.2f ms\n",
-                    (unsigned long long)status.step,
-                    (unsigned long long)status.added,
-                    (unsigned long long)status.improved,
-                    elapsed);
-    };
-
-    builder.build(build_callback, false);
-
-    double build_ms = evp_common::now_ms() - t2;
+    std::printf("\nLoaded train:  %zu vectors, dim=%zu\n", count, dims);
+    if (compute_recall) {
+        std::printf("Ground truth:  %zu queries, top-%u\n", gt_data.size(), k_top);
+    }
+    std::printf("Total Load time:     %.2fs\n", total_load_ms / 1000.0);
     std::printf("Graph built: %zu vertices, %u edges/vertex\n", static_cast<size_t>(graph.size()), graph.getEdgesPerVertex());
-    std::printf("Build time: %.2f ms\n\n", build_ms);
+    std::printf("Total Build time:    %.2fs\n\n", total_build_ms / 1000.0);
 
     // --------------------------------------------------------------------------
     // Exploration sweep
@@ -219,7 +230,8 @@ static int run(
     auto timings = run_exploration_sweep(graph, k_top, max_distance_count, static_cast<uint8_t>(threads),
                                          compute_recall, gt_data, output_path);
 
-    double total_time_ms = load_ms + build_ms + timings.explore_ms;
+    const size_t bytes_per_fp16 = dims * sizeof(uint16_t);
+    double total_time_ms = total_load_ms + total_build_ms + timings.explore_ms;
 
     // --------------------------------------------------------------------------
     // Summary
@@ -227,8 +239,8 @@ static int run(
     std::printf("========================================================================\n");
     std::printf("  FINAL SUMMARY (FP16 Build, FP16 Explore - Mode 1)                     \n");
     std::printf("========================================================================\n");
-    std::printf("Load Time:               %.2f ms\n", load_ms);
-    std::printf("Graph Build Time:        %.2f ms\n", build_ms);
+    std::printf("Load Time:               %.2f ms\n", total_load_ms);
+    std::printf("Graph Build Time:        %.2f ms\n", total_build_ms);
     std::printf("Explore Time:            %.2f ms\n", timings.explore_ms);
     std::printf("Exploration Wall Time:   %.2f ms\n", timings.explore_ms);
     std::printf("Total Elapsed Time:      %.2f ms\n", total_time_ms);

@@ -158,6 +158,13 @@ public:
   }
 
   /**
+   * Copy from input graph (feature space of new graph is same as input graph)
+   */
+  ReadOnlyGraph(deglib::search::SearchGraph& input_graph)
+    : ReadOnlyGraph(input_graph.size(), input_graph.getEdgesPerVertex(), input_graph.getFeatureSpace(), input_graph) {
+  }
+
+  /**
    *  Copy from input graph
    */
   ReadOnlyGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::FloatSpace feature_space, deglib::search::SearchGraph& input_graph)
