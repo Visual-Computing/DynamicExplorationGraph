@@ -405,7 +405,7 @@ public:
 
       memory::prefetch(reinterpret_cast<const char*>(feature_by_index(good_neighbors[0])), feature_size);
       for (size_t i = 0; i < good_neighbor_count; ++i) {
-        memory::prefetch(reinterpret_cast<const char*>(feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])), feature_size);
+        memory::prefetch(reinterpret_cast<const char*>(feature_by_index(good_neighbors[size_t(i) + 1 < good_neighbor_count - 1 ? size_t(i) + 1 : good_neighbor_count - 1])), feature_size);
 
         const auto neighbor_index = good_neighbors[i];
         const auto neighbor_distance = dist_func(query, feature_by_index(neighbor_index), dist_func_param);
@@ -527,8 +527,6 @@ public:
     auto exploration_radius = radius;
 
     auto good_neighbors = std::array<uint32_t, 256>();
-    alignas(32) auto db_arr = std::array<const void*, 256>();
-    alignas(32) auto dists = std::array<float, 256>();
     while (!next_vertices.empty()) {
       const auto next_vertex = next_vertices.top();
       next_vertices.pop();
@@ -549,26 +547,13 @@ public:
       if (good_neighbor_count == 0)
         continue;
 
-      // Cap the neighbor count based on the remaining distance budget
-      if constexpr (use_max_distance_count) {
-        if (distance_computation_count + good_neighbor_count > max_distance_computation_count) {
-          good_neighbor_count = max_distance_computation_count - distance_computation_count;
-        }
-      }
+      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])), feature_size);
+      for (uint8_t i = 0; i < good_neighbor_count; i++) {
+        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[size_t(i) + 1 < good_neighbor_count - 1 ? size_t(i) + 1 : good_neighbor_count - 1])), feature_size);
 
-      // Construct features pointer array
-      for (size_t i = 0; i < good_neighbor_count; ++i) {
-        db_arr[i] = feature_by_index(good_neighbors[i]);
-        memory::prefetch_feature(db_arr[i]);
-      }
-
-      // Compute distances in batch
-      deglib::distances::compare_batch<COMPARATOR>(query, db_arr.data(), good_neighbor_count, dist_func_param, dists.data());
-
-      // Process results sequentially
-      for (size_t i = 0; i < good_neighbor_count; ++i) {
         const auto neighbor_index = good_neighbors[i];
-        const auto neighbor_distance = dists[i];
+        const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
+        const auto neighbor_distance = COMPARATOR::compare(query, neighbor_feature_vector, dist_func_param);
 
         if (neighbor_distance <= exploration_radius) {
           next_vertices.emplace(neighbor_index, neighbor_distance);
@@ -588,12 +573,10 @@ public:
             }
           }
         }
-      }
-
-      if constexpr (use_max_distance_count) {
-        distance_computation_count += good_neighbor_count;
-        if (distance_computation_count >= max_distance_computation_count)
-          return results;
+        if constexpr (use_max_distance_count) {
+          if(++distance_computation_count >= max_distance_computation_count)
+            return results;
+        }
       }
     }
 
@@ -647,8 +630,6 @@ public:
     auto radius = std::numeric_limits<float>::max();
 
     auto good_neighbors = std::array<uint32_t, 256>();
-    alignas(32) auto db_arr = std::array<const void*, 256>();
-    alignas(32) auto dists = std::array<float, 256>();
     while (!next_vertices.empty()) {
       const auto next_vertex = next_vertices.top();
       next_vertices.pop();
@@ -666,24 +647,13 @@ public:
       if (good_neighbor_count == 0)
         continue;
 
-      // Cap the neighbor count based on the remaining distance budget
-      if (distance_computation_count + good_neighbor_count > max_distance_computation_count) {
-        good_neighbor_count = max_distance_computation_count - distance_computation_count;
-      }
+      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])), feature_size);
+      for (uint8_t i = 0; i < good_neighbor_count; i++) {
+        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[size_t(i) + 1 < good_neighbor_count - 1 ? size_t(i) + 1 : good_neighbor_count - 1])), feature_size);
 
-      // Construct features pointer array
-      for (size_t i = 0; i < good_neighbor_count; ++i) {
-        db_arr[i] = feature_by_index(good_neighbors[i]);
-        memory::prefetch_feature(db_arr[i]);
-      }
-
-      // Compute distances in batch
-      deglib::distances::compare_batch<COMPARATOR>(query, db_arr.data(), good_neighbor_count, dist_func_param, dists.data());
-
-      // Process results sequentially
-      for (size_t i = 0; i < good_neighbor_count; ++i) {
         const auto neighbor_index = good_neighbors[i];
-        const auto neighbor_distance = dists[i];
+        const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
+        const auto neighbor_distance = COMPARATOR::compare(query, neighbor_feature_vector, dist_func_param);
 
         if (neighbor_distance < radius) {
           next_vertices.emplace(neighbor_index, neighbor_distance);
@@ -694,11 +664,11 @@ public:
             radius = results.top().getDistance();
           }
         }
+        
+        // early stop after to many computations
+        if(++distance_computation_count >= max_distance_computation_count)
+          return results;
       }
-
-      distance_computation_count += good_neighbor_count;
-      if (distance_computation_count >= max_distance_computation_count)
-        return results;
     }
 
     return results;
