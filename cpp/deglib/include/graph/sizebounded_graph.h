@@ -718,7 +718,7 @@ public:
 
     // items to traverse next
     auto next_vertices = deglib::search::UncheckedSet();
-    next_vertices.reserve(k*this->edges_per_vertex_);
+    next_vertices.reserve(k * this->edges_per_vertex_);
 
     // result set
     auto results = deglib::search::ResultSet();   
@@ -759,75 +759,66 @@ public:
     }
 
     // search radius
-    auto radius = (results.size() >= k) ? results.top().getDistance() : std::numeric_limits<float>::max();
-
-    // experimental: eps replacement parameter
-    const auto eps = std::max(0.1f, std::log10(float(max_distance_computation_count)/k));
-    auto exploration_radius = (radius == std::numeric_limits<float>::max()) ? std::numeric_limits<float>::max() : radius * ((radius < 0) ? (1 - eps) : (1 + eps));
+    auto radius = std::numeric_limits<float>::max();
 
     // iterate as long as good elements are in the next_vertices queue and max_calcs is not yet reached
-    auto good_neighbors = std::array<uint32_t, 256>();    // this limits the neighbor count to 256 using Variable Length Array wrapped in a macro
-    while (next_vertices.empty() == false)
+    auto good_neighbors = std::array<uint32_t, 256>();  // this limits the neighbor count to 256 using Variable Length Array wrapped in a macro
+    alignas(32) auto db_arr = std::array<const void*, 256>();
+    alignas(32) auto dists = std::array<float, 256>();
+    while (!next_vertices.empty()) 
     {
       // next vertex to check
       const auto next_vertex = next_vertices.top();
       next_vertices.pop();
 
-      // if no weight of this neighbor would survive the distance estimation check, stop here
-      if (next_vertex.getDistance() > exploration_radius)
-        break;
-
       uint8_t good_neighbor_count = 0;
-      {
-        const auto neighbor_indices = this->neighbors_by_index(next_vertex.getInternalIndex());
-        const auto neighbor_weights = this->weights_by_index(next_vertex.getInternalIndex());
-        memory::prefetch(reinterpret_cast<const char*>(neighbor_indices));
-        memory::prefetch(reinterpret_cast<const char*>(neighbor_weights));
-        for (uint8_t i = 0; i < this->edges_per_vertex_; i++) {
-          const auto neighbor_index = neighbor_indices[i];
-
-          if (checked_ids[neighbor_index] != checked_ids_tag)  {
-            checked_ids[neighbor_index] = checked_ids_tag;
-
-            // distance estimation check: allow only edges with a worst case distance < r
-            // this produces slighly better results and brings the sizebound graph on par with the readonly graph when comparing speed vs quality
-            if(next_vertex.getDistance() + neighbor_weights[i] < exploration_radius)
-              good_neighbors[good_neighbor_count++] = neighbor_index;
-          }
+      const auto* neighbor_indices = neighbors_by_index(next_vertex.getInternalIndex());
+      for (uint8_t i = 0; i < edges_per_vertex_; ++i) {
+        const auto neighbor_index = neighbor_indices[i];
+        if (checked_ids[neighbor_index] != checked_ids_tag) {
+          checked_ids[neighbor_index] = checked_ids_tag;
+          good_neighbors[good_neighbor_count++] = neighbor_index;
         }
       }
 
       if (good_neighbor_count == 0)
         continue;
 
-      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])), feature_size);
-      for (uint8_t i = 0; i < good_neighbor_count; i++) {
-        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[size_t(i) + 1 < good_neighbor_count - 1 ? size_t(i) + 1 : good_neighbor_count - 1])), feature_size);
+      // Cap the neighbor count based on the remaining distance budget
+      if (distance_computation_count + good_neighbor_count > max_distance_computation_count) {
+        good_neighbor_count = max_distance_computation_count - distance_computation_count;
+      }
 
+      // Construct features pointer array
+      for (size_t i = 0; i < good_neighbor_count; ++i) {
+        db_arr[i] = feature_by_index(good_neighbors[i]);
+        if(i < 8)
+          memory::prefetch(db_arr[i]);
+      }
+
+      // Compute distances in batch
+      deglib::distances::compare_batch<COMPARATOR>(query, db_arr.data(), good_neighbor_count, dist_func_param, dists.data());
+
+      // Process results sequentially
+      for (size_t i = 0; i < good_neighbor_count; ++i) {
         const auto neighbor_index = good_neighbors[i];
-        const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
-        const auto neighbor_distance = COMPARATOR::compare(query, neighbor_feature_vector, dist_func_param);
+        const auto neighbor_distance = dists[i];
 
         if (neighbor_distance < radius) {
-
-          // check the neighborhood of this vertex later
           next_vertices.emplace(neighbor_index, neighbor_distance);
-
-          // remember the vertex, if its better than the worst in the result list
           results.emplace(neighbor_index, neighbor_distance);
 
-          // update the search radius
           if (results.size() > k) {
             results.pop();
             radius = results.top().getDistance();
-            exploration_radius = radius * ((radius < 0) ? (1 - eps) : (1 + eps));
           }
         }
-        
-        // early stop after to many computations
-        if(++distance_computation_count >= max_distance_computation_count)
-          return results;
       }
+
+      // early stop after to many computations
+      distance_computation_count += good_neighbor_count;
+      if (distance_computation_count >= max_distance_computation_count)
+        return results;
     }
 
     return results;
