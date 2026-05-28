@@ -58,11 +58,12 @@ static void run_exploration_sweep(
     std::printf("\n--- Exploration (EVP Build FP16 External Search, max_dist=%u) ---\n", max_distance_count);
     const uint32_t k_search = max_distance_count;
     size_t count = graph.size();
+    const size_t batch_size = evp_common::calc_batch_size(count, threads);
 
     double t_explore_start = evp_common::now_ms();
     std::vector<std::vector<uint32_t>> results(count);
 
-    deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads, 1,
+    deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads, batch_size,
         [&](size_t label, size_t thread_id) {
             (void)thread_id;
             size_t entry_idx = graph.getInternalIndex(static_cast<uint32_t>(label));
@@ -95,7 +96,7 @@ static void run_exploration_sweep(
     std::printf("Exploration complete in %.2f ms\n", explore_ms);
 
     if (compute_recall) {
-        float recall = evp_common::compute_recall(results, gt_data, count, k_top);
+        float recall = evp_common::compute_recall(gt_data, results, k_top);
         std::printf("Recall@%u: %.4f  (max_dist=%u, time=%.2f ms)\n",
                     k_top, recall, max_distance_count, explore_ms);
     } else {
@@ -126,35 +127,26 @@ static int run(
     std::vector<uint16_t> fp16_data = hdf5_reader::read_flat_uint16(h5path, train_info);
 
     std::vector<std::vector<int32_t>> gt_data;
-    size_t gt_dims = 0, gt_count = 0;
     if (run_recall) {
-        auto& allknn_info = hdf5_reader::find_dataset(datasets, "allknn/knns");
-        std::printf("  allknn/knns: %llu x %llu (elem=%uB)\n",
-            (unsigned long long)allknn_info.num_rows,
-            (unsigned long long)allknn_info.num_cols,
-            allknn_info.element_size);
-        gt_data = hdf5_reader::read_matrix_int32(h5path, allknn_info);
-        gt_dims = static_cast<size_t>(allknn_info.num_cols);
-        gt_count = static_cast<size_t>(allknn_info.num_rows);
+        gt_data = evp_common::load_ground_truth(h5path, datasets, k_top);
+        if (count != gt_data.size()) {
+            std::fprintf(stderr,
+                "Error: train and allknn must contain the same number of entries (%zu vs %zu)\n",
+                count, gt_data.size());
+            return 1;
+        }
     }
     double load_ms = evp_common::now_ms() - t_load;
 
     std::printf("Loaded train:  %zu vectors, dim=%zu\n", count, dims);
     if (run_recall) {
-        std::printf("Ground truth:  %zu queries, top-%zu\n", gt_count, gt_dims);
+        std::printf("Ground truth:  %zu queries, top-%u\n", gt_data.size(), k_top);
     }
     std::printf("Load time:     %.2f ms\n\n", load_ms);
 
-    if (run_recall && count != gt_count) {
-        std::fprintf(stderr,
-            "Error: train and allknn must contain the same number of entries (%zu vs %zu)\n",
-            count, gt_count);
-        return 1;
-    }
-
     std::printf("=== EVP Bits Graph Benchmark (Mode 5: EvpBuildFP16ExternalSearch) ===\n");
     std::printf("Data path: %ls\n", data_path.wstring().c_str());
-    std::printf("NON_ZEROS=%u, K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.2f, MODE=build-fp16-external-search\n",
+    std::printf("NON_ZEROS=%u, K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.3f, MODE=build-fp16-external-search\n",
                 non_zeros, k_top, k_graph, k_ext, eps_ext);
     std::printf("Threads: %u\n\n", threads);
 
@@ -192,6 +184,7 @@ static int run(
         false
     );
     builder.setThreadCount(static_cast<uint32_t>(threads));
+    builder.setBatchSize(64, 128);
 
     const size_t bytes_per_evp = dims / 4;
     for (size_t i = 0; i < count; ++i) {
@@ -199,11 +192,13 @@ static int run(
         builder.addEntry(static_cast<uint32_t>(i), std::move(feature));
     }
 
-    auto build_callback = [](deglib::builder::BuilderStatus& status) {
-        std::printf("  Build step %llu: added=%llu, improved=%llu\n",
+    auto build_callback = [&](deglib::builder::BuilderStatus& status) {
+        double elapsed = evp_common::now_ms() - t2;
+        std::printf("  Build step %llu: added=%llu, improved=%llu, elapsed=%.2f ms\n",
                     (unsigned long long)status.step,
                     (unsigned long long)status.added,
-                    (unsigned long long)status.improved);
+                    (unsigned long long)status.improved,
+                    elapsed);
     };
 
     builder.build(build_callback, false);

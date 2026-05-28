@@ -14,11 +14,15 @@ namespace deglib::concurrent {
 // Multithreaded executor
 template <class FuncType>
 inline void parallel_for(size_t start, size_t end, size_t numThreads, size_t batchSize, FuncType fn) {
+
+    // default number of threads is half of the hardware concurrency
     if (numThreads <= 0) {
         numThreads = std::thread::hardware_concurrency() / 2;
     }
+
+    // default batch size is 1% of the total number of elements per thread
     if (batchSize <= 0) {
-        batchSize = 1;
+        batchSize =  std::max(static_cast<size_t>(1), (end-start) / (static_cast<size_t>(numThreads) * 100));
     }
 
     if (numThreads <= 1) {

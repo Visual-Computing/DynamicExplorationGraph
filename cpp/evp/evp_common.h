@@ -6,9 +6,18 @@
 #include <filesystem>
 #include <fstream>
 #include <cassert>
+#include <cstdlib>
 #include <iostream>
+#include <map>
+#include <string>
+
+#include "hdf5_reader.h"
 
 namespace evp_common {
+
+inline size_t calc_batch_size(size_t count, uint8_t threads) {
+    return std::max(static_cast<size_t>(1), count / (static_cast<size_t>(threads) * 100));
+}
 
 inline double now_ms() {
     return std::chrono::duration<double, std::milli>(
@@ -97,21 +106,53 @@ inline void ivecs_write(
                 results.size(), output_path.c_str());
 }
 
+inline std::vector<std::vector<int32_t>> load_ground_truth(
+    const std::string& h5path,
+    const std::map<std::string, hdf5_reader::DatasetInfo>& datasets,
+    uint32_t k_top)
+{
+    auto& allknn_info = hdf5_reader::find_dataset(datasets, "allknn/knns");
+    std::printf("  allknn/knns: %llu x %llu (elem=%uB)\n",
+        (unsigned long long)allknn_info.num_rows,
+        (unsigned long long)allknn_info.num_cols,
+        allknn_info.element_size);
+
+    auto gt_data = hdf5_reader::read_matrix_int32(h5path, allknn_info);
+    for (auto& row : gt_data) {
+        size_t n = row.size() > 1 ? std::min(static_cast<size_t>(k_top), row.size() - 1) : 0;
+        for (size_t i = 0; i < n; ++i) {
+            row[i] = row[i + 1] - 1;
+        }
+        row.resize(n);
+    }
+    return gt_data;
+}
+
 inline float compute_recall(
-    const std::vector<std::vector<uint32_t>>& results,
     const std::vector<std::vector<int32_t>>& gt_data,
-    size_t count,
+    const std::vector<std::vector<uint32_t>>& results,
     uint32_t k_top)
 {
     int total_hits = 0;
+    size_t count = gt_data.size();
+    if (count != results.size()) {
+        std::fprintf(stderr, "Error: gt_data size (%zu) != results size (%zu)\n",
+                    count, results.size());
+        std::exit(1);
+    }
     for (size_t i = 0; i < count; ++i) {
         const auto& gt_row = gt_data[i];
-        for (uint32_t k = 1; k <= k_top && k < (uint32_t)gt_row.size(); ++k) {
-            uint32_t gt_idx = static_cast<uint32_t>(gt_row[k] - 1);
-            const auto& row = results[i];
-            const uint32_t row_len = static_cast<uint32_t>(std::min(row.size(), static_cast<size_t>(k_top)));
+        const auto& row = results[i];
+        if (gt_row.size() < k_top) {
+            std::fprintf(stderr, "Error: ground truth row %zu has only %zu entries, expected %u\n",
+                        i, gt_row.size(), k_top);
+            std::exit(1);
+        }
+        const uint32_t row_len = static_cast<uint32_t>(std::min(row.size(), static_cast<size_t>(k_top)));
+        for (uint32_t k = 0; k < k_top; ++k) {
+            int32_t gt_idx = gt_row[k];
             for (uint32_t j = 0; j < row_len; ++j) {
-                if (row[j] == gt_idx) {
+                if (static_cast<int32_t>(row[j]) == gt_idx) {
                     total_hits++;
                     break;
                 }

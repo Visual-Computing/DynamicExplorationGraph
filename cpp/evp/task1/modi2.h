@@ -73,31 +73,22 @@ static int run(
     size_t count = static_cast<size_t>(train_info.num_rows);
 
     std::vector<std::vector<int32_t>> gt_data;
-    size_t gt_dims = 0, gt_count = 0;
     if (compute_recall) {
-        auto& allknn_info = hdf5_reader::find_dataset(datasets, "allknn/knns");
-        std::printf("  allknn/knns: %llu x %llu (elem=%uB)\n",
-            (unsigned long long)allknn_info.num_rows,
-            (unsigned long long)allknn_info.num_cols,
-            allknn_info.element_size);
-        gt_data = hdf5_reader::read_matrix_int32(h5path, allknn_info);
-        gt_dims = static_cast<size_t>(allknn_info.num_cols);
-        gt_count = static_cast<size_t>(allknn_info.num_rows);
+        gt_data = evp_common::load_ground_truth(h5path, datasets, k_top);
+        if (count != gt_data.size()) {
+            std::fprintf(stderr,
+                "Error: train and allknn must contain the same number of entries (%zu vs %zu)\n",
+                count, gt_data.size());
+            return 1;
+        }
     }
     double load_ms = evp_common::now_ms() - t_load;
 
     std::printf("Loaded train:  %zu vectors, dim=%zu\n", count, dims);
     if (compute_recall) {
-        std::printf("Ground truth:  %zu queries, top-%zu\n", gt_count, gt_dims);
+        std::printf("Ground truth:  %zu queries, top-%u\n", gt_data.size(), k_top);
     }
     std::printf("Load time:     %.2f ms\n\n", load_ms);
-
-    if (compute_recall && count != gt_count) {
-        std::fprintf(stderr,
-            "Error: train and allknn must contain the same number of entries (%zu vs %zu)\n",
-            count, gt_count);
-        return 1;
-    }
 
     std::printf("=== EVP Bits Linear Search Benchmark (Mode 2) ===\n");
     std::printf("Data path: %ls\n", data_path.wstring().c_str());
@@ -125,8 +116,9 @@ static int run(
     std::vector<std::vector<uint32_t>> results(count, std::vector<uint32_t>(k_top));
     const size_t bytes_per_evp = dims / 4;
     const uint32_t dims_u32 = static_cast<uint32_t>(dims);
+    const size_t batch_size = evp_common::calc_batch_size(count, static_cast<uint8_t>(threads));
 
-    deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads, 1,
+    deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads, batch_size,
         [&](size_t i, size_t thread_id) {
             (void)thread_id;
             const std::byte* query_ptr = quantized.data() + i * bytes_per_evp;
@@ -170,7 +162,7 @@ static int run(
     // --------------------------------------------------------------------------
     float recall = 0.0f;
     if (compute_recall) {
-        recall = evp_common::compute_recall(results, gt_data, count, k_top);
+        recall = evp_common::compute_recall(gt_data, results, k_top);
         std::printf("Recall@%u: %.4f\n", k_top, recall);
     }
 
