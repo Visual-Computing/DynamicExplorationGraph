@@ -112,16 +112,23 @@ static void run_exploration_sweep(
                 float distance;
             };
             const auto& cands = explore_candidates[label];
-            std::vector<Candidate> candidates;
-            candidates.reserve(cands.size());
+            const size_t num_cands = cands.size();
+            std::vector<Candidate> candidates(num_cands);
 
             const std::byte* query_ptr = train_vectors[label].data();
-            size_t dims_size = dims;
+            std::vector<const void*> cand_ptrs(num_cands);
+            for (size_t i = 0; i < num_cands; ++i) {
+                cand_ptrs[i] = train_vectors[cands[i]].data();
+            }
 
-            for (uint32_t cand_label : cands) {
-                const std::byte* cand_ptr = train_vectors[cand_label].data();
-                float exact_dist = rerank_dist_func(query_ptr, cand_ptr, &dims_size);
-                candidates.push_back({cand_label, exact_dist});
+            std::vector<float> exact_dists(num_cands);
+            const void* dist_func_param = fp16_rerank_space.get_dist_func_param();
+            deglib::distances::dispatch_distance(fp16_rerank_space, [&]<typename COMPARATOR>() {
+                deglib::distances::compare_batch<COMPARATOR>(query_ptr, cand_ptrs.data(), num_cands, dist_func_param, exact_dists.data());
+            });
+
+            for (size_t i = 0; i < num_cands; ++i) {
+                candidates[i] = {cands[i], exact_dists[i]};
             }
 
             std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
