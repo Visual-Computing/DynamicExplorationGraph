@@ -111,48 +111,62 @@ static int run(
     // --------------------------------------------------------------------------
     // Linear Search using distances.h
     // --------------------------------------------------------------------------
-    double t_search_start = evp_common::now_ms();
+    std::printf("  Chunk-based dataset mode: unified linear search via chunks with timing measurements\n");
+    double t_start = evp_common::now_ms();
 
     std::vector<std::vector<uint32_t>> results(count, std::vector<uint32_t>(k_top));
     const size_t bytes_per_evp = dims / 4;
     const uint32_t dims_u32 = static_cast<uint32_t>(dims);
-    const size_t batch_size = evp_common::calc_batch_size(count, static_cast<uint8_t>(threads));
 
-    deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads, batch_size,
-        [&](size_t i, size_t thread_id) {
-            (void)thread_id;
-            const std::byte* query_ptr = quantized.data() + i * bytes_per_evp;
+    const size_t chunk_size = 8192;
+    const size_t num_chunks = (count + chunk_size - 1) / chunk_size;
 
-            std::vector<std::pair<float, uint32_t>> top;
-            top.reserve(k_top + 1);
+    std::vector<double> chunk_search_times(num_chunks, 0.0);
 
-            for (size_t j = 0; j < count; ++j) {
-                if (i == j) {
-                    continue;
+    deglib::concurrent::parallel_for(static_cast<size_t>(0), num_chunks, threads, 1,
+        [&](size_t chunk_id, size_t) {
+            size_t start = chunk_id * chunk_size;
+            size_t end = std::min(start + chunk_size, count);
+            size_t num_items = end - start;
+
+            double t_search_start = evp_common::now_ms();
+            for (size_t i = 0; i < num_items; ++i) {
+                size_t label = start + i;
+                const std::byte* query_ptr = quantized.data() + label * bytes_per_evp;
+
+                std::vector<std::pair<float, uint32_t>> top;
+                top.reserve(k_top + 1);
+
+                for (size_t j = 0; j < count; ++j) {
+                    if (label == j) {
+                        continue;
+                    }
+
+                    const std::byte* cand_ptr = quantized.data() + j * bytes_per_evp;
+                    float dist = deglib::distances::EvpBitsSimilarity::compare(query_ptr, cand_ptr, &dims_u32);
+
+                    if (top.size() < k_top) {
+                        top.push_back({dist, static_cast<uint32_t>(j)});
+                        std::push_heap(top.begin(), top.end());
+                    } else if (dist < top.front().first) {
+                        std::pop_heap(top.begin(), top.end());
+                        top.back() = {dist, static_cast<uint32_t>(j)};
+                        std::push_heap(top.begin(), top.end());
+                    }
                 }
 
-                const std::byte* cand_ptr = quantized.data() + j * bytes_per_evp;
-                float dist = deglib::distances::EvpBitsSimilarity::compare(query_ptr, cand_ptr, &dims_u32);
+                std::sort_heap(top.begin(), top.end());
 
-                if (top.size() < k_top) {
-                    top.push_back({dist, static_cast<uint32_t>(j)});
-                    std::push_heap(top.begin(), top.end());
-                } else if (dist < top.front().first) {
-                    std::pop_heap(top.begin(), top.end());
-                    top.back() = {dist, static_cast<uint32_t>(j)};
-                    std::push_heap(top.begin(), top.end());
+                for (uint32_t k = 0; k < k_top && k < top.size(); ++k) {
+                    results[label][k] = top[k].second;
                 }
             }
-
-            std::sort_heap(top.begin(), top.end());
-
-            for (uint32_t k = 0; k < k_top && k < top.size(); ++k) {
-                results[i][k] = top[k].second;
-            }
+            chunk_search_times[chunk_id] = evp_common::now_ms() - t_search_start;
         });
 
-    double search_ms = evp_common::now_ms() - t_search_start;
-    std::printf("Linear Search time: %.2f ms\n", search_ms);
+    double total_ms = evp_common::now_ms() - t_start;
+    double search_ms = std::accumulate(chunk_search_times.begin(), chunk_search_times.end(), 0.0) / threads;
+    std::printf("Linear Search time: %.2f ms (chunked/normalized)\n", search_ms);
 
     // Write results to output file if needed
     evp_common::ivecs_write(output_path, results);
@@ -166,21 +180,31 @@ static int run(
         std::printf("Recall@%u: %.4f\n", k_top, recall);
     }
 
+    double total_time_ms = load_ms + quantize_ms + search_ms;
+
     // --------------------------------------------------------------------------
     // Summary
     // --------------------------------------------------------------------------
-    std::printf("=============================================\n");
-    std::printf("          FINAL SUMMARY (EVP Bits Linear Search - Mode 2)\n");
-    std::printf("=============================================\n");
-    std::printf("Quantize:                %.2f ms\n", quantize_ms);
-    std::printf("Linear Search:           %.2f ms\n", search_ms);
-    std::printf("---------------------------------------------\n");
-    std::printf("Vectors:                 %zu\n", count);
-    std::printf("Dimensions:              %zu\n", dims);
+    std::printf("========================================================================\n");
+    std::printf("  FINAL SUMMARY (EVP Quantization, EVP Linear Search - Mode 2)          \n");
+    std::printf("========================================================================\n");
+    std::printf("Load Time:               %.2f ms\n", load_ms);
+    std::printf("Quantize Time:           %.2f ms\n", quantize_ms);
+    std::printf("Linear Search Time:      %.2f ms\n", search_ms);
+    std::printf("Total Elapsed Time:      %.2f ms\n", total_time_ms);
     if (compute_recall) {
         std::printf("Recall@%u:                %.4f\n", k_top, recall);
     }
-    std::printf("=============================================\n\n");
+    std::printf("------------------------------------------------------------------------\n");
+    std::printf("Hyperparameters:\n");
+    std::printf("  NON_ZEROS:             %u\n", non_zeros);
+    std::printf("  K_TOP:                 %u\n", k_top);
+    std::printf("  threads:               %u\n", threads);
+    std::printf("------------------------------------------------------------------------\n");
+    std::printf("Dataset Info:\n");
+    std::printf("  Vectors:               %zu\n", count);
+    std::printf("  Dimensions:            %zu\n", dims);
+    std::printf("========================================================================\n\n");
 
     return 0;
 }

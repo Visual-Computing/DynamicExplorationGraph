@@ -49,7 +49,14 @@ namespace task1::mode7 {
 /**
  * @brief Performs search/exploration sweep over different graph search limits, calculates recall or exports Top-K results.
  */
-static void run_exploration_sweep(
+struct ExplorationTimings {
+    double search_ms = 0.0;
+    double rerank_ms = 0.0;
+    double total_ms = 0.0;
+    float recall = -1.0f;
+};
+
+static ExplorationTimings run_exploration_sweep(
     const deglib::search::SearchGraph& graph,
     uint32_t k_top,
     uint32_t max_distance_count,
@@ -70,15 +77,27 @@ static void run_exploration_sweep(
 
     std::vector<std::vector<uint32_t>> results(count);
 
-    constexpr size_t LARGE_THRESHOLD = 1'000'000;
+    std::printf("  Chunk-based dataset mode: unified search+rerank via chunks with separate timing measurements\n");
+    double t_start = evp_common::now_ms();
 
-    if (count >= LARGE_THRESHOLD) {
-        std::printf("  Large dataset mode: combined search+rerank (single pass, no explore_candidates buffer)\n");
-        double t_start = evp_common::now_ms();
+    const size_t chunk_size = 8192;
+    const size_t num_chunks = (count + chunk_size - 1) / chunk_size;
 
-        deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads, batch_size,
-            [&](size_t label, size_t thread_id) {
-                (void)thread_id;
+    std::vector<double> chunk_search_times(num_chunks, 0.0);
+    std::vector<double> chunk_rerank_times(num_chunks, 0.0);
+
+    deglib::concurrent::parallel_for(static_cast<size_t>(0), num_chunks, threads, 1,
+        [&](size_t chunk_id, size_t) {
+            size_t start = chunk_id * chunk_size;
+            size_t end = std::min(start + chunk_size, count);
+            size_t num_items = end - start;
+
+            std::vector<std::vector<uint32_t>> chunk_cands(num_items);
+
+            // --- Search Phase for Chunk ---
+            double t_search_start = evp_common::now_ms();
+            for (size_t i = 0; i < num_items; ++i) {
+                size_t label = start + i;
                 size_t entry_idx = graph.getInternalIndex(static_cast<uint32_t>(label));
 
                 std::vector<uint32_t> entry_indices = { static_cast<uint32_t>(entry_idx) };
@@ -91,7 +110,7 @@ static void run_exploration_sweep(
                     nullptr,
                     max_distance_count + 1);
 
-                std::vector<uint32_t> cands;
+                auto& cands = chunk_cands[i];
                 cands.reserve(result_queue.size());
                 while (!result_queue.empty()) {
                     const auto cand_idx = result_queue.top().getInternalIndex();
@@ -103,13 +122,20 @@ static void run_exploration_sweep(
                 if (cands.size() > k_search) {
                     cands.resize(k_search);
                 }
+            }
+            chunk_search_times[chunk_id] = evp_common::now_ms() - t_search_start;
 
+            // --- Rerank Phase for Chunk ---
+            double t_rerank_start = evp_common::now_ms();
+            for (size_t i = 0; i < num_items; ++i) {
+                size_t label = start + i;
+                const auto& cands = chunk_cands[i];
                 const size_t num_cands = cands.size();
 
                 const std::byte* query_ptr = train_vectors[label].data();
                 std::vector<const void*> cand_ptrs(num_cands);
-                for (size_t i = 0; i < num_cands; ++i) {
-                    cand_ptrs[i] = train_vectors[cands[i]].data();
+                for (size_t c = 0; c < num_cands; ++c) {
+                    cand_ptrs[c] = train_vectors[cands[c]].data();
                 }
 
                 std::vector<float> exact_dists(num_cands);
@@ -123,8 +149,8 @@ static void run_exploration_sweep(
                     float distance;
                 };
                 std::vector<Candidate> candidates(num_cands);
-                for (size_t i = 0; i < num_cands; ++i) {
-                    candidates[i] = {cands[i], exact_dists[i]};
+                for (size_t c = 0; c < num_cands; ++c) {
+                    candidates[c] = {cands[c], exact_dists[c]};
                 }
 
                 std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
@@ -137,107 +163,27 @@ static void run_exploration_sweep(
                 for (uint32_t j = 0; j < k_top && j < candidates.size(); ++j) {
                     result[j] = candidates[j].label;
                 }
-            });
+            }
+            chunk_rerank_times[chunk_id] = evp_common::now_ms() - t_rerank_start;
+        });
 
-        double total_ms = evp_common::now_ms() - t_start;
-        std::printf("Exploration complete in %.2f ms\n", total_ms);
+    double total_ms = evp_common::now_ms() - t_start;
+    double sum_search_ms = std::accumulate(chunk_search_times.begin(), chunk_search_times.end(), 0.0) / threads;
+    double sum_rerank_ms = std::accumulate(chunk_rerank_times.begin(), chunk_rerank_times.end(), 0.0) / threads;
 
-        if (compute_recall) {
-            float recall = evp_common::compute_recall(gt_data, results, k_top);
-            std::printf("Recall@%u: %.4f  (max_dist=%u)\n",
-                        k_top, recall, max_distance_count);
-        } else {
-            evp_common::ivecs_write(output_path, results);
-        }
+    std::printf("Exploration complete in %.2f ms (search=%.2f ms, rerank=%.2f ms)\n",
+                total_ms, sum_search_ms, sum_rerank_ms);
+
+    float recall = -1.0f;
+    if (compute_recall) {
+        recall = evp_common::compute_recall(gt_data, results, k_top);
+        std::printf("Recall@%u: %.4f  (max_dist=%u, search=%.2f ms, rerank=%.2f ms)\n",
+                    k_top, recall, max_distance_count, sum_search_ms, sum_rerank_ms);
     } else {
-        std::printf("  Small dataset mode: separate search+rerank passes\n");
-        // --- Search ---
-        double t_explore_start = evp_common::now_ms();
-        std::vector<std::vector<uint32_t>> explore_candidates(count);
-
-        deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads, batch_size,
-            [&](size_t label, size_t thread_id) {
-                (void)thread_id;
-                size_t entry_idx = graph.getInternalIndex(static_cast<uint32_t>(label));
-
-                std::vector<uint32_t> entry_indices = { static_cast<uint32_t>(entry_idx) };
-                const std::byte* query = train_vectors[label].data();
-                deglib::search::ResultSet result_queue = graph.search(
-                    entry_indices,
-                    query,
-                    1000.0f,
-                    k_search + 1,
-                    nullptr,
-                    max_distance_count + 1);
-
-                auto& cands = explore_candidates[label];
-                cands.reserve(result_queue.size());
-                while (!result_queue.empty()) {
-                    const auto cand_idx = result_queue.top().getInternalIndex();
-                    if (cand_idx != entry_idx) {
-                        cands.push_back(graph.getExternalLabel(cand_idx));
-                    }
-                    result_queue.pop();
-                }
-                if (cands.size() > k_search) {
-                    cands.resize(k_search);
-                }
-            });
-        double explore_ms = evp_common::now_ms() - t_explore_start;
-
-        // --- Rerank ---
-        double t_rerank_start = evp_common::now_ms();
-        deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads, batch_size,
-            [&](size_t label, size_t thread_id) {
-                (void)thread_id;
-                const auto& cands = explore_candidates[label];
-                const size_t num_cands = cands.size();
-
-                const std::byte* query_ptr = train_vectors[label].data();
-                std::vector<const void*> cand_ptrs(num_cands);
-                for (size_t i = 0; i < num_cands; ++i) {
-                    cand_ptrs[i] = train_vectors[cands[i]].data();
-                }
-
-                std::vector<float> exact_dists(num_cands);
-                const void* dist_func_param = fp16_rerank_space.get_dist_func_param();
-                deglib::distances::dispatch_distance(fp16_rerank_space, [&]<typename COMPARATOR>() {
-                    deglib::distances::compare_batch<COMPARATOR>(query_ptr, cand_ptrs.data(), num_cands, dist_func_param, exact_dists.data());
-                });
-
-                struct Candidate {
-                    uint32_t label;
-                    float distance;
-                };
-                std::vector<Candidate> candidates(num_cands);
-                for (size_t i = 0; i < num_cands; ++i) {
-                    candidates[i] = {cands[i], exact_dists[i]};
-                }
-
-                std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
-                    return a.distance < b.distance;
-                });
-
-                auto& result = results[label];
-                result.resize(k_top);
-                std::fill(result.begin(), result.end(), std::numeric_limits<uint32_t>::max());
-                for (uint32_t j = 0; j < k_top && j < candidates.size(); ++j) {
-                    result[j] = candidates[j].label;
-                }
-            });
-        double rerank_ms = evp_common::now_ms() - t_rerank_start;
-        double total_ms = explore_ms + rerank_ms;
-        std::printf("Exploration complete in %.2f ms (search=%.2f ms, rerank=%.2f ms)\n",
-                    total_ms, explore_ms, rerank_ms);
-
-        if (compute_recall) {
-            float recall = evp_common::compute_recall(gt_data, results, k_top);
-            std::printf("Recall@%u: %.4f  (max_dist=%u, search=%.2f ms, rerank=%.2f ms)\n",
-                        k_top, recall, max_distance_count, explore_ms, rerank_ms);
-        } else {
-            evp_common::ivecs_write(output_path, results);
-        }
+        evp_common::ivecs_write(output_path, results);
     }
+
+    return { sum_search_ms, sum_rerank_ms, total_ms, recall };
 }
 
 /**
@@ -357,23 +303,43 @@ static int run(
     conversion_ms = evp_common::now_ms() - t_copy_start;
     std::printf("ReadOnlyGraph construction (copy) time: %.2f ms\n", conversion_ms);
 
-    run_exploration_sweep(readonly_asym_graph, k_top, max_distance_count, static_cast<uint8_t>(threads),
-                          evpK, dims, train_vectors,
-                          compute_recall, gt_data, output_path);
+    auto timings = run_exploration_sweep(readonly_asym_graph, k_top, max_distance_count, static_cast<uint8_t>(threads),
+                                         evpK, dims, train_vectors,
+                                         compute_recall, gt_data, output_path);
+
+    double total_time_ms = load_ms + quantize_ms + build_ms + conversion_ms + timings.total_ms;
 
     // --------------------------------------------------------------------------
     // Summary
     // --------------------------------------------------------------------------
-    std::printf("=============================================\n");
-    std::printf("          FINAL SUMMARY (EVP Bits - Mode 7)\n");
-    std::printf("=============================================\n");
-    std::printf("Quantize:                %.2f ms\n", quantize_ms);
-    std::printf("Graph Build:             %.2f ms\n", build_ms);
-    std::printf("Graph Conversion:        %.2f ms\n", conversion_ms);
+    std::printf("========================================================================\n");
+    std::printf("  FINAL SUMMARY (EVP Build, Asymmetric Search, FP16 Rerank - Mode 7)    \n");
+    std::printf("========================================================================\n");
+    std::printf("Load Time:               %.2f ms\n", load_ms);
+    std::printf("Quantize Time:           %.2f ms\n", quantize_ms);
+    std::printf("Graph Build Time:        %.2f ms\n", build_ms);
+    std::printf("Graph Conversion Time:   %.2f ms\n", conversion_ms);
+    std::printf("Search Time:             %.2f ms\n", timings.search_ms);
+    std::printf("Rerank Time:             %.2f ms\n", timings.rerank_ms);
+    std::printf("Exploration Wall Time:   %.2f ms\n", timings.total_ms);
+    std::printf("Total Elapsed Time:      %.2f ms\n", total_time_ms);
+    if (compute_recall) {
+        std::printf("Recall@%u:                %.4f\n", k_top, timings.recall);
+    }
+    std::printf("------------------------------------------------------------------------\n");
+    std::printf("Hyperparameters:\n");
+    std::printf("  NON_ZEROS:             %u\n", non_zeros);
+    std::printf("  K_TOP:                 %u\n", k_top);
+    std::printf("  K_GRAPH:               %u\n", (uint32_t)k_graph);
+    std::printf("  K_EXT:                 %u\n", (uint32_t)k_ext);
+    std::printf("  EPS_EXT:               %.3f\n", eps_ext);
+    std::printf("  evpK:                  %u\n", evpK);
+    std::printf("  max_dist:              %u\n", max_distance_count);
+    std::printf("  threads:               %u\n", threads);
     std::printf("---------------------------------------------\n");
-    std::printf("Vectors:                 %zu\n", count);
-    std::printf("Dimensions:              %zu\n", dims);
-    std::printf("NON_ZEROS:               %u\n", non_zeros);
+    std::printf("Dataset Info:\n");
+    std::printf("  Vectors:               %zu\n", count);
+    std::printf("  Dimensions:            %zu\n", dims);
     std::printf("=============================================\n\n");
 
     return 0;

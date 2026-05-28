@@ -193,6 +193,17 @@ int main(int argc, char* argv[]) {
             std::fprintf(stderr, "Warning: --no-recall is set but no --output file path is specified. Top-K results will not be saved.\n");
         }
 
+        // Print compiled-in SIMD instruction set info
+#ifdef USE_AVX512
+        std::fprintf(stderr, "SIMD: AVX-512, AVX, SSE\n");
+#elif defined(USE_AVX)
+        std::fprintf(stderr, "SIMD: AVX, SSE\n");
+#elif defined(USE_SSE)
+        std::fprintf(stderr, "SIMD: SSE\n");
+#else
+        std::fprintf(stderr, "SIMD: none (scalar)\n");
+#endif
+
         // Support both old mode names/aliases and modiX names
         if (mode == "fp16-build-fp16-explore" || mode == "fp16" || mode == "modi1") {
             return task1::mode1::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_distance_count, run_recall, output_path);

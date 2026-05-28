@@ -45,7 +45,12 @@
 
 namespace task1::mode3 {
 
-static void run_exploration_sweep(
+struct ExplorationTimings {
+    double explore_ms = 0.0;
+    float recall = -1.0f;
+};
+
+static ExplorationTimings run_exploration_sweep(
     const deglib::search::SearchGraph& graph,
     uint32_t k_top,
     uint32_t max_distance_count,
@@ -56,42 +61,62 @@ static void run_exploration_sweep(
 {
     size_t count = graph.size();
     std::printf("\n--- Exploration (EVP Build EVP Explore, max_dist=%u) ---\n", max_distance_count);
-    const size_t batch_size = evp_common::calc_batch_size(count, threads);
-
-    double t_explore_start = evp_common::now_ms();
     std::vector<std::vector<uint32_t>> results(count);
 
-    deglib::concurrent::parallel_for(static_cast<size_t>(0), count, threads, batch_size,
-        [&](size_t label, size_t thread_id) {
-            (void)thread_id;
-            size_t entry_idx = graph.getInternalIndex(static_cast<uint32_t>(label));
+    std::printf("  Chunk-based dataset mode: unified explore via chunks with timing measurements\n");
+    double t_start = evp_common::now_ms();
 
-            deglib::search::ResultSet result_queue = graph.explore(
-                static_cast<uint32_t>(entry_idx),
-                k_top,
-                false,
-                max_distance_count);
+    const size_t chunk_size = 8192;
+    const size_t num_chunks = (count + chunk_size - 1) / chunk_size;
 
-            auto& res = results[label];
-            res.reserve(result_queue.size());
-            while (!result_queue.empty()) {
-                const auto cand_idx = result_queue.top().getInternalIndex();
-                if (cand_idx != entry_idx) {
-                    res.push_back(graph.getExternalLabel(cand_idx));
+    std::vector<double> chunk_search_times(num_chunks, 0.0);
+
+    deglib::concurrent::parallel_for(static_cast<size_t>(0), num_chunks, threads, 1,
+        [&](size_t chunk_id, size_t) {
+            size_t start = chunk_id * chunk_size;
+            size_t end = std::min(start + chunk_size, count);
+            size_t num_items = end - start;
+
+            double t_search_start = evp_common::now_ms();
+            for (size_t i = 0; i < num_items; ++i) {
+                size_t label = start + i;
+                size_t entry_idx = graph.getInternalIndex(static_cast<uint32_t>(label));
+
+                deglib::search::ResultSet result_queue = graph.explore(
+                    static_cast<uint32_t>(entry_idx),
+                    k_top,
+                    false,
+                    max_distance_count);
+
+                auto& res = results[label];
+                res.reserve(result_queue.size());
+                while (!result_queue.empty()) {
+                    const auto cand_idx = result_queue.top().getInternalIndex();
+                    if (cand_idx != entry_idx) {
+                        res.push_back(graph.getExternalLabel(cand_idx));
+                    }
+                    result_queue.pop();
                 }
-                result_queue.pop();
             }
+            chunk_search_times[chunk_id] = evp_common::now_ms() - t_search_start;
         });
-    double explore_ms = evp_common::now_ms() - t_explore_start;
-    std::printf("Exploration complete in %.2f ms\n", explore_ms);
 
+    double total_ms = evp_common::now_ms() - t_start;
+    double sum_search_ms = std::accumulate(chunk_search_times.begin(), chunk_search_times.end(), 0.0) / threads;
+
+    std::printf("Exploration complete in %.2f ms (explore=%.2f ms)\n",
+                total_ms, sum_search_ms);
+
+    float recall = -1.0f;
     if (compute_recall) {
-        float recall = evp_common::compute_recall(gt_data, results, k_top);
-        std::printf("Recall@%u: %.4f  (max_dist=%u, time=%.2f ms)\n",
-                    k_top, recall, max_distance_count, explore_ms);
+        recall = evp_common::compute_recall(gt_data, results, k_top);
+        std::printf("Recall@%u: %.4f  (max_dist=%u, explore=%.2f ms)\n",
+                    k_top, recall, max_distance_count, sum_search_ms);
     } else {
         evp_common::ivecs_write(output_path, results);
     }
+
+    return { sum_search_ms, recall };
 }
 
 static int run(
@@ -200,22 +225,40 @@ static int run(
     // --------------------------------------------------------------------------
     // Exploration sweep
     // --------------------------------------------------------------------------
-    run_exploration_sweep(graph, k_top, max_distance_count, static_cast<uint8_t>(threads),
-                          compute_recall, gt_data, output_path);
+    auto timings = run_exploration_sweep(graph, k_top, max_distance_count, static_cast<uint8_t>(threads),
+                                         compute_recall, gt_data, output_path);
+
+    double total_time_ms = load_ms + quantize_ms + build_ms + timings.explore_ms;
 
     // --------------------------------------------------------------------------
     // Summary
     // --------------------------------------------------------------------------
-    std::printf("=============================================\n");
-    std::printf("          FINAL SUMMARY (EVP Bits - Mode 3)\n");
-    std::printf("=============================================\n");
-    std::printf("Quantize:                %.2f ms\n", quantize_ms);
-    std::printf("Graph Build:             %.2f ms\n", build_ms);
-    std::printf("---------------------------------------------\n");
-    std::printf("Vectors:                 %zu\n", count);
-    std::printf("Dimensions:              %zu\n", dims);
-    std::printf("NON_ZEROS:               %u\n", non_zeros);
-    std::printf("=============================================\n\n");
+    std::printf("========================================================================\n");
+    std::printf("  FINAL SUMMARY (EVP Build, EVP Explore - Mode 3)                       \n");
+    std::printf("========================================================================\n");
+    std::printf("Load Time:               %.2f ms\n", load_ms);
+    std::printf("Quantize Time:           %.2f ms\n", quantize_ms);
+    std::printf("Graph Build Time:        %.2f ms\n", build_ms);
+    std::printf("Explore Time:            %.2f ms\n", timings.explore_ms);
+    std::printf("Exploration Wall Time:   %.2f ms\n", timings.explore_ms);
+    std::printf("Total Elapsed Time:      %.2f ms\n", total_time_ms);
+    if (compute_recall) {
+        std::printf("Recall@%u:                %.4f\n", k_top, timings.recall);
+    }
+    std::printf("------------------------------------------------------------------------\n");
+    std::printf("Hyperparameters:\n");
+    std::printf("  NON_ZEROS:             %u\n", non_zeros);
+    std::printf("  K_TOP:                 %u\n", k_top);
+    std::printf("  K_GRAPH:               %u\n", (uint32_t)k_graph);
+    std::printf("  K_EXT:                 %u\n", (uint32_t)k_ext);
+    std::printf("  EPS_EXT:               %.3f\n", eps_ext);
+    std::printf("  max_dist:              %u\n", max_distance_count);
+    std::printf("  threads:               %u\n", threads);
+    std::printf("------------------------------------------------------------------------\n");
+    std::printf("Dataset Info:\n");
+    std::printf("  Vectors:               %zu\n", count);
+    std::printf("  Dimensions:            %zu\n", dims);
+    std::printf("========================================================================\n\n");
 
     return 0;
 }
