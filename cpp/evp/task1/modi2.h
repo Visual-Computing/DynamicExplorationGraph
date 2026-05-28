@@ -35,8 +35,6 @@
 #include "concurrent.h"
 #include "distances.h"
 #include "graph/sizebounded_graph.h"
-#include "graph/readonly_graph.h"
-#include "graph/readonly_graph_external.h"
 #include "quantization/evp_quantize.h"
 #include "repository.h"
 

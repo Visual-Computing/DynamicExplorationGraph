@@ -24,7 +24,6 @@
 #include <vector>
 #include <numeric>
 #include <filesystem>
-#include <fstream>
 
 #include <fmt/core.h>
 
@@ -37,7 +36,6 @@
 #include "distances.h"
 #include "graph/sizebounded_graph.h"
 #include "graph/readonly_graph.h"
-#include "graph/readonly_graph_external.h"
 #include "quantization/evp_quantize.h"
 #include "repository.h"
 
@@ -47,7 +45,7 @@
 namespace task1::mode7 {
 
 /**
- * @brief Performs search/exploration sweep over different graph search limits, calculates recall or exports Top-K results.
+ * @brief Performs search/exploration over different graph search limits, calculates recall or exports Top-K results.
  */
 struct ExplorationTimings {
     double search_ms = 0.0;
@@ -56,12 +54,12 @@ struct ExplorationTimings {
     float recall = -1.0f;
 };
 
-static ExplorationTimings run_exploration_sweep(
+static ExplorationTimings run_exploration(
     const deglib::search::SearchGraph& graph,
     uint32_t k_top,
     uint32_t max_distance_count,
     uint8_t threads,
-    uint32_t evpK,
+    uint32_t k_search,
     size_t dims,
     const std::vector<std::vector<std::byte>>& train_vectors,
     bool compute_recall,
@@ -70,8 +68,7 @@ static ExplorationTimings run_exploration_sweep(
 {
     deglib::FloatSpace fp16_rerank_space(static_cast<uint32_t>(dims), deglib::Metric::FP16InnerProduct);
     size_t count = graph.size();
-    const uint32_t k_search = evpK > 0 ? evpK : 50; 
-    std::printf("\n--- Exploration (EVP Build FP16 Asymmetric Search FP16 Rerank, max_dist=%u) ---\n", max_distance_count);
+    std::printf("\n--- Exploration (EVP Build FP16 Asymmetric Search FP16 Rerank, max_dist=%u, k_search=%u) ---\n", max_distance_count, k_search);
     std::printf("  Dataset size: %zu vectors\n", count);
     const size_t batch_size = evp_common::calc_batch_size(count, threads);
 
@@ -199,7 +196,8 @@ static int run(
     uint32_t max_distance_count,
     uint32_t evpK,
     bool compute_recall,
-    const std::string& output_path)
+    const std::string& output_path,
+    const std::string& graph_path)
 {
     const std::string h5path = data_path.string();
     std::printf("HDF5 mode (modi7): scanning '%s'\n", h5path.c_str());
@@ -237,74 +235,105 @@ static int run(
     std::printf("Threads: %u\n\n", threads);
 
     // --------------------------------------------------------------------------
-    // Quantize
+    // Build/Load graph with Metric::EvpBits
     // --------------------------------------------------------------------------
-    double t1 = evp_common::now_ms();
-
-    auto quantized = deglib::quantization::quantize_batch(
-        train_vectors, static_cast<uint32_t>(dims), non_zeros, threads);
-
-    double quantize_ms = evp_common::now_ms() - t1;
-    std::printf("Quantize time: %.2f ms\n", quantize_ms);
-    std::printf("Quantized size: %.2f MB\n\n",
-                static_cast<double>(quantized.size()) / (1024.0 * 1024.0));
-
-    // --------------------------------------------------------------------------
-    // Build graph with Metric::EvpBits
-    // --------------------------------------------------------------------------
-    double t2 = evp_common::now_ms();
-
     deglib::FloatSpace feature_space(static_cast<uint32_t>(dims), deglib::Metric::EvpBits);
-    deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(count), k_graph, feature_space);
+    std::unique_ptr<deglib::graph::SizeBoundedGraph> graph_ptr;
+    bool loaded = false;
+    double quantize_ms = 0.0;
+    double build_ms = 0.0;
 
-    std::mt19937 rnd(42);
-    deglib::builder::EvenRegularGraphBuilder builder(
-        graph, rnd,
-        deglib::builder::OptimizationTarget::LowLID,
-        k_ext, eps_ext,
-        0, 0.0f,
-        5,
-        0, 0,
-        true,
-        false,
-        false
-    );
-    builder.setThreadCount(static_cast<uint32_t>(threads));
-    builder.setBatchSize(64, 128);
-
-    const size_t bytes_per_evp = dims / 4;
-    for (size_t i = 0; i < count; ++i) {
-        std::vector<std::byte> feature(quantized.data() + i * bytes_per_evp, quantized.data() + (i + 1) * bytes_per_evp);
-        builder.addEntry(static_cast<uint32_t>(i), std::move(feature));
+    if (!graph_path.empty() && std::filesystem::exists(graph_path)) {
+        double t_load_graph_start = evp_common::now_ms();
+        std::printf("Loading existing graph from %s...\n", graph_path.c_str());
+        auto g = deglib::graph::load_sizebounded_graph(graph_path.c_str());
+        const auto& fs = g.getFeatureSpace();
+        if (fs.metric() == deglib::Metric::EvpBits && fs.dim() == dims && g.size() == count) {
+            graph_ptr = std::make_unique<deglib::graph::SizeBoundedGraph>(std::move(g));
+            loaded = true;
+            double load_graph_ms = evp_common::now_ms() - t_load_graph_start;
+            std::printf("Graph loaded successfully in %.2f ms\n", load_graph_ms);
+        } else {
+            std::fprintf(stderr, "Warning: Saved graph properties do not match dataset: metric=%d vs %d, dim=%u vs %zu, size=%u vs %zu. Rebuilding.\n",
+                         (int)fs.metric(), (int)deglib::Metric::EvpBits, (unsigned)fs.dim(), dims, g.size(), count);
+        }
     }
 
-    auto build_callback = [&](deglib::builder::BuilderStatus& status) {
-        double elapsed = evp_common::now_ms() - t2;
-        std::printf("  Build step %llu: added=%llu, improved=%llu, elapsed=%.2f ms\n",
-                    (unsigned long long)status.step,
-                    (unsigned long long)status.added,
-                    (unsigned long long)status.improved,
-                    elapsed);
-    };
+    if (!loaded) {
+        // --------------------------------------------------------------------------
+        // Quantize
+        // --------------------------------------------------------------------------
+        double t1 = evp_common::now_ms();
 
-    builder.build(build_callback, false);
+        auto quantized = deglib::quantization::quantize_batch(
+            train_vectors, static_cast<uint32_t>(dims), non_zeros, threads);
 
-    double build_ms = evp_common::now_ms() - t2;
-    std::printf("Graph built: %zu vertices, %u edges/vertex\n", static_cast<size_t>(graph.size()), graph.getEdgesPerVertex());
-    std::printf("Build time: %.2f ms\n\n", build_ms);
+        quantize_ms = evp_common::now_ms() - t1;
+        std::printf("Quantize time: %.2f ms\n", quantize_ms);
+        std::printf("Quantized size: %.2f MB\n\n",
+                    static_cast<double>(quantized.size()) / (1024.0 * 1024.0));
+
+        double t2 = evp_common::now_ms();
+        graph_ptr = std::make_unique<deglib::graph::SizeBoundedGraph>(static_cast<uint32_t>(count), k_graph, feature_space);
+        deglib::graph::SizeBoundedGraph& graph = *graph_ptr;
+
+        std::mt19937 rnd(42);
+        deglib::builder::EvenRegularGraphBuilder builder(
+            graph, rnd,
+            deglib::builder::OptimizationTarget::LowLID,
+            k_ext, eps_ext,
+            0, 0.0f,
+            5,
+            0, 0,
+            true,
+            false,
+            false
+        );
+        builder.setThreadCount(static_cast<uint32_t>(threads));
+        builder.setBatchSize(64, 128);
+
+        const size_t bytes_per_evp = dims / 4;
+        for (size_t i = 0; i < count; ++i) {
+            std::vector<std::byte> feature(quantized.data() + i * bytes_per_evp, quantized.data() + (i + 1) * bytes_per_evp);
+            builder.addEntry(static_cast<uint32_t>(i), std::move(feature));
+        }
+
+        auto build_callback = [&](deglib::builder::BuilderStatus& status) {
+            double elapsed = evp_common::now_ms() - t2;
+            std::printf("  Build step %llu: added=%llu, improved=%llu, elapsed=%.2f ms\n",
+                        (unsigned long long)status.step,
+                        (unsigned long long)status.added,
+                        (unsigned long long)status.improved,
+                        elapsed);
+        };
+
+        builder.build(build_callback, false);
+
+        build_ms = evp_common::now_ms() - t2;
+        std::printf("Graph built: %zu vertices, %u edges/vertex\n", static_cast<size_t>(graph.size()), graph.getEdgesPerVertex());
+        std::printf("Build time: %.2f ms\n\n", build_ms);
+
+        if (!graph_path.empty()) {
+            std::printf("Saving built graph to %s...\n", graph_path.c_str());
+            graph.saveGraph(graph_path.c_str());
+        }
+    }
+
+    deglib::graph::SizeBoundedGraph& graph = *graph_ptr;
 
     // --------------------------------------------------------------------------
-    // Exploration sweep
+    // Exploration
     // --------------------------------------------------------------------------
     double conversion_ms = 0.0;
     double t_copy_start = evp_common::now_ms();
     deglib::FloatSpace asymmetric_space(static_cast<uint32_t>(dims), deglib::Metric::FP16EvpAsymmetric);
-    deglib::graph::ReadOnlyGraph readonly_asym_graph(static_cast<uint32_t>(count), k_graph, asymmetric_space, graph);
+    deglib::graph::ReadOnlyGraph readonly_asym_graph(static_cast<uint32_t>(count), graph.getEdgesPerVertex(), asymmetric_space, graph);
     conversion_ms = evp_common::now_ms() - t_copy_start;
     std::printf("ReadOnlyGraph construction (copy) time: %.2f ms\n", conversion_ms);
 
-    auto timings = run_exploration_sweep(readonly_asym_graph, k_top, max_distance_count, static_cast<uint8_t>(threads),
-                                         evpK, dims, train_vectors,
+    const uint32_t k_search = evpK > 0 ? evpK : 50;
+    auto timings = run_exploration(readonly_asym_graph, k_top, max_distance_count, static_cast<uint8_t>(threads),
+                                         k_search, dims, train_vectors,
                                          compute_recall, gt_data, output_path);
 
     double total_time_ms = load_ms + quantize_ms + build_ms + conversion_ms + timings.total_ms;
@@ -333,7 +362,8 @@ static int run(
     std::printf("  K_GRAPH:               %u\n", (uint32_t)k_graph);
     std::printf("  K_EXT:                 %u\n", (uint32_t)k_ext);
     std::printf("  EPS_EXT:               %.3f\n", eps_ext);
-    std::printf("  evpK:                  %u\n", evpK);
+    std::printf("  evpK (input):          %u\n", evpK);
+    std::printf("  k_search (effective):  %u%s\n", k_search, evpK == 0 ? "  [auto: 50]" : "");
     std::printf("  max_dist:              %u\n", max_distance_count);
     std::printf("  threads:               %u\n", threads);
     std::printf("---------------------------------------------\n");

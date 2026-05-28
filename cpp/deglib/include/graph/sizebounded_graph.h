@@ -248,8 +248,11 @@ public:
 
   const bool saveGraph(const char* path_to_graph) const override {
     
-    // create parent dir
-    std::filesystem::create_directories(std::filesystem::path(path_to_graph).parent_path());
+    // create parent dir if not empty
+    auto parent_path = std::filesystem::path(path_to_graph).parent_path();
+    if (!parent_path.empty()) {
+      std::filesystem::create_directories(parent_path);
+    }
 
     // check open file for write
     auto out = std::ofstream(path_to_graph, std::ios::out | std::ios::binary);

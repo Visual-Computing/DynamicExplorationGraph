@@ -23,7 +23,6 @@
 #include <vector>
 #include <numeric>
 #include <filesystem>
-#include <fstream>
 
 #include <fmt/core.h>
 
@@ -35,8 +34,6 @@
 #include "concurrent.h"
 #include "distances.h"
 #include "graph/sizebounded_graph.h"
-#include "graph/readonly_graph.h"
-#include "graph/readonly_graph_external.h"
 #include "quantization/evp_quantize.h"
 #include "repository.h"
 
@@ -50,7 +47,7 @@ struct ExplorationTimings {
     float recall = -1.0f;
 };
 
-static ExplorationTimings run_exploration_sweep(
+static ExplorationTimings run_exploration(
     const deglib::search::SearchGraph& graph,
     uint32_t k_top,
     uint32_t max_distance_count,
@@ -128,7 +125,8 @@ static int run(
     uint32_t k_top,
     uint32_t max_distance_count,
     bool compute_recall,
-    const std::string& output_path)
+    const std::string& output_path,
+    const std::string& graph_path)
 {
     (void)non_zeros;
     const std::string h5path = data_path.string();
@@ -163,71 +161,100 @@ static int run(
                 static_cast<double>(count * dims * sizeof(uint16_t)) / (1024.0 * 1024.0));
 
     // --------------------------------------------------------------------------
-    // Build graph with Metric::FP16InnerProduct
+    // Build/Load graph with Metric::FP16InnerProduct
     // --------------------------------------------------------------------------
     deglib::FloatSpace feature_space(static_cast<uint32_t>(dims), deglib::Metric::FP16InnerProduct);
-    deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(count), k_graph, feature_space);
-
-    std::mt19937 rnd(42);
-    deglib::builder::EvenRegularGraphBuilder builder(
-        graph, rnd,
-        deglib::builder::OptimizationTarget::LowLID,
-        k_ext, eps_ext,
-        0, 0.0f,
-        5,
-        0, 0,
-        true,
-        false,
-        false
-    );
-    builder.setThreadCount(static_cast<uint32_t>(threads));
-    builder.setBatchSize(64, 128);
-
+    std::unique_ptr<deglib::graph::SizeBoundedGraph> graph_ptr;
+    bool loaded = false;
     double total_build_ms = 0.0;
-    const size_t load_chunk_size = 100000;
-    double t_build_start = evp_common::now_ms();
 
-    for (size_t start_row = 0; start_row < count; start_row += load_chunk_size) {
-        size_t current_chunk_size = std::min(load_chunk_size, count - start_row);
-
-        // Load chunk
-        double t_chunk_load = evp_common::now_ms();
-        std::vector<std::vector<std::byte>> chunk_vectors = hdf5_reader::read_matrix_bytes(h5path, train_info, start_row, current_chunk_size);
-        double chunk_load_ms = evp_common::now_ms() - t_chunk_load;
-        total_load_ms += chunk_load_ms;
-
-        // Add chunk entries
-        for (size_t i = 0; i < current_chunk_size; ++i) {
-            builder.addEntry(static_cast<uint32_t>(start_row + i), std::move(chunk_vectors[i]));
+    if (!graph_path.empty() && std::filesystem::exists(graph_path)) {
+        double t_load_graph_start = evp_common::now_ms();
+        std::printf("Loading existing graph from %s...\n", graph_path.c_str());
+        auto g = deglib::graph::load_sizebounded_graph(graph_path.c_str());
+        const auto& fs = g.getFeatureSpace();
+        if (fs.metric() == deglib::Metric::FP16InnerProduct && fs.dim() == dims && g.size() == count) {
+            graph_ptr = std::make_unique<deglib::graph::SizeBoundedGraph>(std::move(g));
+            loaded = true;
+            double load_graph_ms = evp_common::now_ms() - t_load_graph_start;
+            std::printf("Graph loaded successfully in %.2f ms\n", load_graph_ms);
+        } else {
+            std::fprintf(stderr, "Warning: Saved graph properties do not match dataset: metric=%d vs %d, dim=%u vs %zu, size=%u vs %zu. Rebuilding.\n",
+                         (int)fs.metric(), (int)deglib::Metric::FP16InnerProduct, (unsigned)fs.dim(), dims, g.size(), count);
         }
-        chunk_vectors.clear();
-        chunk_vectors.shrink_to_fit();
-
-        // Build chunk
-        double t_chunk_build = evp_common::now_ms();
-        auto dummy_callback = [](deglib::builder::BuilderStatus&) {};
-        builder.build(dummy_callback, false);
-        double chunk_build_ms = evp_common::now_ms() - t_chunk_build;
-        total_build_ms += chunk_build_ms;
-
-        double elapsed_s = (evp_common::now_ms() - t_build_start) / 1000.0;
-        std::printf("  Chunk [%6zuk - %6zuk): Load = %.2fs, Build = %.2fs | Elapsed = %.2fs\n", 
-                    start_row / 1000, (start_row + current_chunk_size) / 1000, 
-                    chunk_load_ms / 1000.0, chunk_build_ms / 1000.0, elapsed_s);
     }
+
+    if (!loaded) {
+        graph_ptr = std::make_unique<deglib::graph::SizeBoundedGraph>(static_cast<uint32_t>(count), k_graph, feature_space);
+        deglib::graph::SizeBoundedGraph& graph = *graph_ptr;
+
+        std::mt19937 rnd(42);
+        deglib::builder::EvenRegularGraphBuilder builder(
+            graph, rnd,
+            deglib::builder::OptimizationTarget::LowLID,
+            k_ext, eps_ext,
+            0, 0.0f,
+            5,
+            0, 0,
+            true,
+            false,
+            false
+        );
+        builder.setThreadCount(static_cast<uint32_t>(threads));
+        builder.setBatchSize(64, 128);
+
+        const size_t load_chunk_size = 100000;
+        double t_build_start = evp_common::now_ms();
+
+        for (size_t start_row = 0; start_row < count; start_row += load_chunk_size) {
+            size_t current_chunk_size = std::min(load_chunk_size, count - start_row);
+
+            // Load chunk
+            double t_chunk_load = evp_common::now_ms();
+            std::vector<std::vector<std::byte>> chunk_vectors = hdf5_reader::read_matrix_bytes(h5path, train_info, start_row, current_chunk_size);
+            double chunk_load_ms = evp_common::now_ms() - t_chunk_load;
+            total_load_ms += chunk_load_ms;
+
+            // Add chunk entries
+            for (size_t i = 0; i < current_chunk_size; ++i) {
+                builder.addEntry(static_cast<uint32_t>(start_row + i), std::move(chunk_vectors[i]));
+            }
+            chunk_vectors.clear();
+            chunk_vectors.shrink_to_fit();
+
+            // Build chunk
+            double t_chunk_build = evp_common::now_ms();
+            auto dummy_callback = [](deglib::builder::BuilderStatus&) {};
+            builder.build(dummy_callback, false);
+            double chunk_build_ms = evp_common::now_ms() - t_chunk_build;
+            total_build_ms += chunk_build_ms;
+
+            double elapsed_s = (evp_common::now_ms() - t_build_start) / 1000.0;
+            std::printf("  Chunk [%6zuk - %6zuk): Load = %.2fs, Build = %.2fs | Elapsed = %.2fs\n", 
+                        start_row / 1000, (start_row + current_chunk_size) / 1000, 
+                        chunk_load_ms / 1000.0, chunk_build_ms / 1000.0, elapsed_s);
+        }
+
+        if (!graph_path.empty()) {
+            std::printf("Saving built graph to %s...\n", graph_path.c_str());
+            graph.saveGraph(graph_path.c_str());
+        }
+    }
+
+    deglib::graph::SizeBoundedGraph& graph = *graph_ptr;
 
     std::printf("\nLoaded train:  %zu vectors, dim=%zu\n", count, dims);
     if (compute_recall) {
         std::printf("Ground truth:  %zu queries, top-%u\n", gt_data.size(), k_top);
     }
     std::printf("Total Load time:     %.2fs\n", total_load_ms / 1000.0);
-    std::printf("Graph built: %zu vertices, %u edges/vertex\n", static_cast<size_t>(graph.size()), graph.getEdgesPerVertex());
-    std::printf("Total Build time:    %.2fs\n\n", total_build_ms / 1000.0);
+    std::printf("Graph vertices: %zu, %u edges/vertex\n", static_cast<size_t>(graph.size()), graph.getEdgesPerVertex());
+    std::printf("Total Build/Load time:    %.2fs\n\n", total_build_ms / 1000.0);
 
     // --------------------------------------------------------------------------
-    // Exploration sweep
+    // Exploration
     // --------------------------------------------------------------------------
-    auto timings = run_exploration_sweep(graph, k_top, max_distance_count, static_cast<uint8_t>(threads),
+    auto timings = run_exploration(graph, k_top, max_distance_count, static_cast<uint8_t>(threads),
                                          compute_recall, gt_data, output_path);
 
     const size_t bytes_per_fp16 = dims * sizeof(uint16_t);
