@@ -12,15 +12,18 @@
         #endif
     #endif
 
+    // Cascade: wider SIMD implies narrower SIMD capabilities.
+    //   AVX-512 -> USE_AVX512, USE_AVX, USE_SSE
+    //   AVX2/AVX -> USE_AVX, USE_SSE
+    //   SSE/SSE2 -> USE_SSE
     #if defined(__AVX512F__)
         #define USE_AVX512
-    #endif
-
-    #if defined(__AVX__) || defined(__AVX2__)
         #define USE_AVX
-    #endif
-
-    #if defined(__SSE__) || defined(__SSE2__)
+        #define USE_SSE
+    #elif defined(__AVX__) || defined(__AVX2__)
+        #define USE_AVX
+        #define USE_SSE
+    #elif defined(__SSE__) || defined(__SSE2__)
         #define USE_SSE
     #endif
 

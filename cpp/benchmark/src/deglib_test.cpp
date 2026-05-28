@@ -126,9 +126,8 @@ int main(int argc, char* argv[]) {
     // ==========================================================================
     // Default parameters - change these in the IDE to run different benchmarks
     // ==========================================================================
-    DatasetName dataset_name = DatasetName::GLOVE;  // Dataset: SIFT1M, DEEP1M, GLOVE, AUDIO
-    std::string graph_file =
-        "e:/Data/ANN/glove/deg/kExtScaling/100D_L2_K30_AddK90Eps0.1_HighLID.deg";  // Graph file path (empty = auto-generate)
+    DatasetName dataset_name = DatasetName::SIFT1M;  // Dataset: SIFT1M, DEEP1M, GLOVE, AUDIO
+    std::string graph_file = "128D_L2_K30_AddK60Eps0.1_HighLID.deg";  // Graph file path (empty = auto-generate)
     BenchmarkType benchmark_type = BenchmarkType::Stats;                           // Benchmark: Stats, ANNS, Explore, All
     uint32_t k = 100;                                                              // ANNS k
     uint32_t explore_k = 1000;                                                     // Exploration k
