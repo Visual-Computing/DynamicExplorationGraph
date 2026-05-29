@@ -137,7 +137,8 @@ static int run(
     uint32_t max_distance_count,
     bool compute_recall,
     const std::string& output_path,
-    const std::string& graph_path)
+    const std::string& graph_path,
+    uint32_t prune_worst = 0)
 {
     const std::string h5path = data_path.string();
     std::printf("HDF5 mode (modi6): scanning '%s'\n", h5path.c_str());
@@ -261,6 +262,8 @@ static int run(
 
     deglib::graph::SizeBoundedGraph& graph = *graph_ptr;
 
+    evp_common::prune_worst_neighbors(graph, prune_worst, threads);
+
     // --------------------------------------------------------------------------
     // Exploration
     // --------------------------------------------------------------------------
@@ -301,6 +304,7 @@ static int run(
     std::printf("  EPS_EXT:               %.3f\n", eps_ext);
     std::printf("  max_dist:              %u\n", max_distance_count);
     std::printf("  threads:               %u\n", threads);
+    std::printf("  prune_worst:           %u\n", prune_worst);
     std::printf("------------------------------------------------------------------------\n");
     std::printf("Dataset Info:\n");
     std::printf("  Vectors:               %zu\n", count);

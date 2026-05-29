@@ -12,6 +12,9 @@
 #include <string>
 
 #include "hdf5_reader.h"
+#include "graph/sizebounded_graph.h"
+#include "concurrent.h"
+#include <algorithm>
 
 namespace evp_common {
 
@@ -23,6 +26,73 @@ inline double now_ms() {
     return std::chrono::duration<double, std::milli>(
                std::chrono::steady_clock::now().time_since_epoch())
            .count();
+}
+
+inline void prune_worst_neighbors(deglib::graph::SizeBoundedGraph& graph, uint32_t prune_worst, uint32_t threads) {
+    if (prune_worst == 0) {
+        return;
+    }
+
+    std::printf("Pruning %u worst neighbors per vertex and replacing them with self-loops using %u threads...\n", prune_worst, threads);
+    double t_prune_start = now_ms();
+    const size_t num_vertices = graph.size();
+    const uint32_t k = graph.getEdgesPerVertex();
+
+    const size_t chunk_size = 8192;
+    const size_t num_chunks = (num_vertices + chunk_size - 1) / chunk_size;
+
+    deglib::concurrent::parallel_for(static_cast<size_t>(0), num_chunks, threads, 1,
+        [&](size_t chunk_id, size_t) {
+            size_t start = chunk_id * chunk_size;
+            size_t end = std::min(start + chunk_size, num_vertices);
+
+            struct NeighborInfo {
+                uint32_t index;
+                float weight;
+            };
+            std::vector<NeighborInfo> neighbors;
+            neighbors.reserve(k);
+
+            std::vector<uint32_t> new_indices(k);
+            std::vector<float> new_weights(k);
+
+            for (size_t u = start; u < end; ++u) {
+                const uint32_t* neighbor_indices = graph.getNeighborIndices(static_cast<uint32_t>(u));
+                const float* neighbor_weights = graph.getNeighborWeights(static_cast<uint32_t>(u));
+
+                neighbors.clear();
+                for (uint32_t i = 0; i < k; ++i) {
+                    neighbors.push_back({neighbor_indices[i], neighbor_weights[i]});
+                }
+
+                // Sort neighbors in descending order of weights (worst neighbor first)
+                std::sort(neighbors.begin(), neighbors.end(), [](const NeighborInfo& a, const NeighborInfo& b) {
+                    return a.weight > b.weight;
+                });
+
+                // Overwrite index to the vertex itself and weight to 0.f for the prune_worst worst neighbors
+                for (uint32_t i = 0; i < prune_worst; ++i) {
+                    neighbors[i].index = static_cast<uint32_t>(u);
+                    neighbors[i].weight = 0.0f;
+                }
+
+                // Re-sort the entire neighborhood by neighbor index (internal index ID)
+                std::sort(neighbors.begin(), neighbors.end(), [](const NeighborInfo& a, const NeighborInfo& b) {
+                    return a.index < b.index;
+                });
+
+                // Write back to graph
+                for (uint32_t i = 0; i < k; ++i) {
+                    new_indices[i] = neighbors[i].index;
+                    new_weights[i] = neighbors[i].weight;
+                }
+
+                graph.changeEdges(static_cast<uint32_t>(u), new_indices.data(), new_weights.data());
+            }
+        });
+
+    double prune_ms = now_ms() - t_prune_start;
+    std::printf("Pruning complete in %.2f ms\n", prune_ms);
 }
 
 inline std::vector<std::vector<std::byte>> hvecs_read(const char* fname, size_t& d_out, size_t& n_out) {
