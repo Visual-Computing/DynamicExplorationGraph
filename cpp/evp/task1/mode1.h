@@ -191,7 +191,7 @@ static int run(
         builder.setThreadCount(static_cast<uint32_t>(threads));
         builder.setBatchSize(64, 128);
 
-        const size_t load_chunk_size = 100000;
+        const size_t load_chunk_size = 200000;
         double t_build_start = evp_common::now_ms();
 
         for (size_t start_row = 0; start_row < count; start_row += load_chunk_size) {

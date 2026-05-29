@@ -180,17 +180,13 @@ static int run(
 
     if (!loaded) {
         std::printf("Building graph: k_graph=%u, k_ext=%u, eps_ext=%.3f, non_zeros=%u, threads=%u\n", k_graph, k_ext, eps_ext, non_zeros, threads);
-        // --------------------------------------------------------------------------
-        // Quantize
-        // --------------------------------------------------------------------------
-        double t1 = evp_common::now_ms();
 
+        // Quantize all upfront once (highly optimized, parallel, zero raw copy)
+        double t1 = evp_common::now_ms();
         auto quantized = deglib::quantization::quantize_batch(
             fp16_data.data(), count, static_cast<uint32_t>(dims), non_zeros, threads);
-
         quantize_ms = evp_common::now_ms() - t1;
 
-        double t2 = evp_common::now_ms();
         graph_ptr = std::make_unique<deglib::graph::SizeBoundedGraph>(static_cast<uint32_t>(count), k_graph, feature_space);
         deglib::graph::SizeBoundedGraph& graph = *graph_ptr;
 
@@ -209,24 +205,32 @@ static int run(
         builder.setThreadCount(static_cast<uint32_t>(threads));
         builder.setBatchSize(64, 128);
 
+        const size_t load_chunk_size = 200000;
         const size_t bytes_per_evp = dims / 4;
-        for (size_t i = 0; i < count; ++i) {
-            std::vector<std::byte> feature(quantized.data() + i * bytes_per_evp, quantized.data() + (i + 1) * bytes_per_evp);
-            builder.addEntry(static_cast<uint32_t>(i), std::move(feature));
+        double t_build_start = evp_common::now_ms();
+
+        for (size_t start_row = 0; start_row < count; start_row += load_chunk_size) {
+            size_t current_chunk_size = std::min(load_chunk_size, count - start_row);
+
+            // Add chunk entries directly from quantized buffer
+            for (size_t i = 0; i < current_chunk_size; ++i) {
+                size_t idx = start_row + i;
+                std::vector<std::byte> feature(quantized.data() + idx * bytes_per_evp, quantized.data() + (idx + 1) * bytes_per_evp);
+                builder.addEntry(static_cast<uint32_t>(idx), std::move(feature));
+            }
+
+            // Build chunk
+            double t_chunk_build = evp_common::now_ms();
+            auto dummy_callback = [](deglib::builder::BuilderStatus&) {};
+            builder.build(dummy_callback, false);
+            double chunk_build_ms = evp_common::now_ms() - t_chunk_build;
+            build_ms += chunk_build_ms;
+
+            double elapsed_s = (evp_common::now_ms() - t_build_start) / 1000.0;
+            std::printf("  Chunk [%6zuk - %6zuk): Build = %.2fs | Elapsed = %.2fs\n", 
+                        start_row / 1000, (start_row + current_chunk_size) / 1000, 
+                        chunk_build_ms / 1000.0, elapsed_s);
         }
-
-        auto build_callback = [&](deglib::builder::BuilderStatus& status) {
-            double elapsed = evp_common::now_ms() - t2;
-            std::printf("  Build step %llu: added=%llu, improved=%llu, elapsed=%.2f ms\n",
-                        (unsigned long long)status.step,
-                        (unsigned long long)status.added,
-                        (unsigned long long)status.improved,
-                        elapsed);
-        };
-
-        builder.build(build_callback, false);
-
-        build_ms = evp_common::now_ms() - t2;
 
         if (!graph_path.empty()) {
             std::printf("Saving built graph to %s...\n", graph_path.c_str());
