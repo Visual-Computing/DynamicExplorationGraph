@@ -28,12 +28,82 @@ inline double now_ms() {
            .count();
 }
 
-inline void prune_worst_neighbors(deglib::graph::SizeBoundedGraph& graph, uint32_t prune_worst, uint32_t threads) {
+inline std::vector<uint32_t> parse_list(const std::string& s) {
+    std::vector<uint32_t> res;
+    std::stringstream ss(s);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        if (!item.empty()) {
+            res.push_back(static_cast<uint32_t>(std::stoul(item)));
+        }
+    }
+    return res;
+}
+
+inline void print_summary(
+    const char* mode_name,
+    uint32_t mode_number,
+    double load_ms,
+    double quantize_ms,
+    double build_ms,
+    double convert_ms,
+    double prune_ms,
+    double explore_ms,
+    double rerank_ms,
+    double total_elapsed_ms,
+    bool compute_recall,
+    uint32_t k_top,
+    float recall,
+    uint32_t threads,
+    uint32_t max_dist,
+    uint32_t prune_worst,
+    uint8_t k_graph,
+    uint8_t k_ext,
+    float eps_ext,
+    uint32_t non_zeros,
+    size_t count,
+    size_t dims,
+    uint32_t evpK)
+{
+    std::printf("========================================================================\n");
+    std::printf("  FINAL SUMMARY (%s - Mode %u)\n", mode_name, mode_number);
+    std::printf("========================================================================\n");
+    std::printf("Load Time:              %6.1f s\n", load_ms            / 1000.0);
+    std::printf("Quantize Time:          %6.1f s\n", quantize_ms        / 1000.0);
+    std::printf("Graph Build Time:       %6.1f s\n", build_ms           / 1000.0);
+    std::printf("Graph Conversion Time:  %6.1f s\n", convert_ms         / 1000.0);
+    std::printf("Pruning Time:           %6.1f s\n", prune_ms           / 1000.0);
+    std::printf("Explore Time:           %6.1f s\n", explore_ms         / 1000.0);
+    std::printf("Rerank Time:            %6.1f s\n", rerank_ms          / 1000.0);
+    std::printf("Total Elapsed Time:     %6.1f s\n", total_elapsed_ms   / 1000.0);
+    if (compute_recall) {
+        std::printf("Recall@%u:              %6.2f %%\n", k_top, recall * 100.0f);
+    }
+    std::printf("------------------------------------------------------------------------\n");
+    std::printf("Hyperparameters:\n");
+    std::printf("  NON_ZEROS:             %u\n", non_zeros);
+    std::printf("  K_TOP:                 %u\n", k_top);
+    std::printf("  K_GRAPH:               %u\n", (uint32_t)k_graph);
+    std::printf("  K_EXT:                 %u\n", (uint32_t)k_ext);
+    std::printf("  EPS_EXT:               %.3f\n", eps_ext);
+    if (evpK > 0) {
+        std::printf("  evpK:                  %u\n", evpK);
+    }
+    std::printf("  max_dist:              %u\n", max_dist);
+    std::printf("  threads:               %u\n", threads);
+    std::printf("  prune_worst:           %u\n", prune_worst);
+    std::printf("------------------------------------------------------------------------\n");
+    std::printf("Dataset Info:\n");
+    std::printf("  Vectors:               %zu\n", count);
+    std::printf("  Dimensions:            %zu\n", dims);
+    std::printf("========================================================================\n\n");
+}
+
+inline double prune_worst_neighbors(deglib::graph::SizeBoundedGraph& graph, uint32_t prune_worst, uint32_t threads) {
     if (prune_worst == 0) {
-        return;
+        return 0.0;
     }
 
-    std::printf("Pruning %u worst neighbors per vertex and replacing them with self-loops using %u threads...\n", prune_worst, threads);
     double t_prune_start = now_ms();
     const size_t num_vertices = graph.size();
     const uint32_t k = graph.getEdgesPerVertex();
@@ -91,8 +161,7 @@ inline void prune_worst_neighbors(deglib::graph::SizeBoundedGraph& graph, uint32
             }
         });
 
-    double prune_ms = now_ms() - t_prune_start;
-    std::printf("Pruning complete in %.2f ms\n", prune_ms);
+    return now_ms() - t_prune_start;
 }
 
 inline std::vector<std::vector<std::byte>> hvecs_read(const char* fname, size_t& d_out, size_t& n_out) {
@@ -182,11 +251,6 @@ inline std::vector<std::vector<int32_t>> load_ground_truth(
     uint32_t k_top)
 {
     auto& allknn_info = hdf5_reader::find_dataset(datasets, "allknn/knns");
-    std::printf("  allknn/knns: %llu x %llu (elem=%uB)\n",
-        (unsigned long long)allknn_info.num_rows,
-        (unsigned long long)allknn_info.num_cols,
-        allknn_info.element_size);
-
     auto gt_data = hdf5_reader::read_matrix_int32(h5path, allknn_info);
     for (auto& row : gt_data) {
         size_t n = row.size() > 1 ? std::min(static_cast<size_t>(k_top), row.size() - 1) : 0;

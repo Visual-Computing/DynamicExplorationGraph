@@ -4,7 +4,7 @@
  *
  * Overview
  * --------
- * This executable implements 7 distinct benchmark modes (modi1–modi7), each exercising a different
+ * This executable implements 7 distinct benchmark modes (mode1–mode7), each exercising a different
  * combination of graph construction strategy (FP16 vs. EVP-quantized), search metric (EVP bits,
  * FP16 inner product, asymmetric FP16-vs-EVP), and optional post-processing (FP16 reranking).
  * All modes accept a single HDF5 input file containing at least the "train" dataset and
@@ -31,33 +31,33 @@
  *
  * Benchmark Modes
  * ---------------
- *   modi1  (fp16, fp16-build-fp16-explore)
+ *   mode1  (fp16, fp16-build-fp16-explore)
  *     Builds a SizeBoundedGraph using FP16 features (Metric::FP16InnerProduct) and
  *     explores via FP16 inner-product similarity. Serves as a high-quality baseline.
  *
- *   modi2  (evp-linear, evp-linear-search)
+ *   mode2  (evp-linear, evp-linear-search)
  *     Quantizes all vectors to EVP bits and performs exact brute-force (linear) search.
  *     No graph is built. Serves as an exact similarity baseline.
  *
- *   modi3  (evp-no-rerank, evp-build-evp-explore)
+ *   mode3  (evp, evp-build-evp-explore)
  *     Builds the graph using EVP-quantized features (Metric::EvpBits) and explores
  *     directly using EVP bit similarity. No reranking.
  *
- *   modi4  (evp, evp-build-evp-explore-fp16-rerank)
+ *   mode4  (evp-rerank, evp-build-evp-explore-fp16-rerank)
  *     Builds the EVP graph, explores using EVP bits to retrieve candidates, then
  *     reranks the candidates using exact FP16 inner-product distances.
  *
- *   modi5  (evp-build-fp16-external-search)
+ *   mode5  (evp-build-fp16-external-search)
  *     Builds the EVP graph, then constructs a ReadOnlyGraphExternal that references
  *     the permuted FP16 data in-place. Search uses FP16 inner product over the
  *     EVP-derived graph topology.
  *
- *   modi6  (evp-asymmetric, evp-build-fp16-asymmetric-search)
+ *   mode6  (evp-asymmetric, evp-build-fp16-asymmetric-search)
  *     Builds the EVP graph, converts to a ReadOnlyGraph with Metric::FP16EvpAsymmetric.
  *     Queries are FP16, database items remain EVP-quantized. No reranking.
  *
- *   modi7  (evp-asymmetric-rerank, evp-build-fp16-asymmetric-search-rerank)
- *     Same asymmetric search as modi6, but adds a candidate reranking phase using
+ *   mode7  (evp-asymmetric-rerank, evp-build-fp16-asymmetric-search-rerank)
+ *     Same asymmetric search as mode6, but adds a candidate reranking phase using
  *     exact FP16 inner-product distances.
  *
  * CLI Usage
@@ -65,9 +65,9 @@
  *   deglib_evp_task1.exe <hdf5_file> <mode> [options...]
  *
  *   <mode> accepts:
- *     - The symbolic mode name (e.g. "fp16", "evp", "evp-linear", "evp-asymmetric", etc.)
+ *     - The symbolic mode name (e.g. "fp16", "evp-rerank", "evp-linear", "evp-asymmetric", etc.)
  *     - The descriptive alias (e.g. "fp16-build-fp16-explore", "evp-build-evp-explore-fp16-rerank")
- *     - The positional identifier "modi1" through "modi7"
+ *     - The positional identifier "mode1" through "mode7"
  *
  * Key Options
  * -----------
@@ -84,14 +84,14 @@
  *
  * Examples
  * --------
- *   # FP16 baseline (modi1)
- *   .\deglib_evp_task1.exe dataset.h5 modi1 --max-dist 100
+ *   # FP16 baseline (mode1)
+ *   .\deglib_evp_task1.exe dataset.h5 mode1 --max-dist 100
  *
- *   # EVP build + explore + FP16 rerank (modi4)
- *   .\deglib_evp_task1.exe dataset.h5 evp --max-dist 200
+ *   # EVP build + explore + FP16 rerank (mode4)
+ *   .\deglib_evp_task1.exe dataset.h5 evp-rerank --max-dist 200
  *
- *   # Asymmetric search + rerank, save results (modi7)
- *   .\deglib_evp_task1.exe dataset.h5 modi7 --max-dist 200 --evpK 50 --no-recall --output results.ivecs
+ *   # Asymmetric search + rerank, save results (mode7)
+ *   .\deglib_evp_task1.exe dataset.h5 mode7 --max-dist 200 --evpK 50 --no-recall --output results.ivecs
  */
 
 #if defined(_WIN32)
@@ -103,13 +103,13 @@
 #include <filesystem>
 #include <iostream>
 
-#include "task1/modi1.h"
-#include "task1/modi2.h"
-#include "task1/modi3.h"
-#include "task1/modi4.h"
-#include "task1/modi5.h"
-#include "task1/modi6.h"
-#include "task1/modi7.h"
+#include "task1/mode1.h"
+#include "task1/mode2.h"
+#include "task1/mode3.h"
+#include "task1/mode4.h"
+#include "task1/mode5.h"
+#include "task1/mode6.h"
+#include "task1/mode7.h"
 
 int main(int argc, char* argv[]) {
     try {
@@ -124,34 +124,48 @@ int main(int argc, char* argv[]) {
         bool run_recall = true;
         std::string output_path;
         std::string graph_path;
-        uint32_t evpK = 50; 
-        uint32_t max_distance_count = 200;
+        std::string evpK_str = "50"; 
+        std::string max_dist_str = "200";
         uint32_t prune_worst = 16;
 
         if (argc < 3) {
             std::fprintf(stderr, "Usage: %s <hdf5_file_path> <mode_name> [options...]\n", argv[0]);
             std::fprintf(stderr, "Modes:\n");
-            std::fprintf(stderr, "  fp16 | fp16-build-fp16-explore | modi1                        : FP16 build + FP16 explore\n");
-            std::fprintf(stderr, "  evp-linear | evp-linear-search | modi2                        : EVP quantization + brute-force linear search\n");
-            std::fprintf(stderr, "  evp-no-rerank | evp-build-evp-explore | modi3                  : EVP build + EVP explore (no rerank)\n");
-            std::fprintf(stderr, "  evp | evp-build-evp-explore-fp16-rerank | modi4               : EVP build + EVP explore + FP16 rerank\n");
-            std::fprintf(stderr, "  evp-build-fp16-external-search | modi5                        : EVP build + FP16 external graph search\n");
-            std::fprintf(stderr, "  evp-asymmetric | evp-build-fp16-asymmetric-search | modi6     : EVP build + asymmetric FP16-vs-EVP search\n");
-            std::fprintf(stderr, "  evp-asymmetric-rerank | evp-build-fp16-asymmetric-search-rerank | modi7\n");
+            std::fprintf(stderr, "  fp16 | fp16-build-fp16-explore | mode1                        : FP16 build + FP16 explore\n");
+            std::fprintf(stderr, "  evp-linear | evp-linear-search | mode2                        : EVP quantization + brute-force linear search\n");
+            std::fprintf(stderr, "  evp | evp-build-evp-explore | mode3                  : EVP build + EVP explore (no rerank)\n");
+            std::fprintf(stderr, "  evp-rerank | evp-build-evp-explore-fp16-rerank | mode4               : EVP build + EVP explore + FP16 rerank\n");
+            std::fprintf(stderr, "  evp-build-fp16-external-search | mode5                        : EVP build + FP16 external graph search\n");
+            std::fprintf(stderr, "  evp-asymmetric | evp-build-fp16-asymmetric-search | mode6     : EVP build + asymmetric FP16-vs-EVP search\n");
+            std::fprintf(stderr, "  evp-asymmetric-rerank | evp-build-fp16-asymmetric-search-rerank | mode7\n");
             std::fprintf(stderr, "                                                     : EVP build + asymmetric search + FP16 rerank\n\n");
             std::fprintf(stderr, "Options:\n");
-            std::fprintf(stderr, "  --threads <n>      Number of threads (default: 6)\n");
-            std::fprintf(stderr, "  --non-zeros <n>    Number of non-zeros for EVP (default: 512)\n");
-            std::fprintf(stderr, "  --k-top <n>        Top-K nearest neighbors to retrieve (default: 15)\n");
-            std::fprintf(stderr, "  --k-graph <n>      k_graph for graph structure (default: 32)\n");
-            std::fprintf(stderr, "  --k-ext <n>        k_ext for graph extension (default: 32)\n");
-            std::fprintf(stderr, "  --eps-ext <f>      eps_ext for search expansion (default: 0.001)\n");
-            std::fprintf(stderr, "  --no-recall        Skip recall computation\n");
-            std::fprintf(stderr, "  --output <path>    Output file path to save retrieved neighbor labels\n");
-            std::fprintf(stderr, "  --evpK <n>         Search parameter to override graph search size (defaults: 50)\n");
-            std::fprintf(stderr, "  --max-dist <n>     Max distance count for graph exploration (default: 200)\n");
-            std::fprintf(stderr, "  --graph <path>     Path to load/save the pre-built graph\n");
-            std::fprintf(stderr, "  --prune-worst <n>  Number of worst neighbors per vertex to replace with self-loop (default: 16)\n");
+            std::fprintf(stderr, "  --threads <n>      Number of CPU worker threads used for parallel EVP quantization,\n");
+            std::fprintf(stderr, "                     even-regular graph construction, and query exploration (default: 6).\n");
+            std::fprintf(stderr, "  --non-zeros <n>    EVP Quantization sparsity parameter. Specifies the exact number of non-zero\n");
+            std::fprintf(stderr, "                     elements in each quantized sparse vector (default: 600).\n");
+            std::fprintf(stderr, "  --k-top <n>        The final number of nearest neighbors (top-K) retrieved per query\n");
+            std::fprintf(stderr, "                     and evaluated for recall or written to the output file (default: 15).\n");
+            std::fprintf(stderr, "  --k-graph <n>      The degree of the regular graph. Specifies the exact number of edges\n");
+            std::fprintf(stderr, "                     (neighbors) per vertex. Must be an even integer >= 4 (default: 32).\n");
+            std::fprintf(stderr, "  --k-ext <n>        The search size (k-top parameter) used during graph construction. Decides\n");
+            std::fprintf(stderr, "                     how many good neighbors are shown to each newly added node, from which it\n");
+            std::fprintf(stderr, "                     selects nodes to connect with up to k-graph (default: 32).\n");
+            std::fprintf(stderr, "  --eps-ext <f>      Search expansion parameter used together with k-ext during graph construction.\n");
+            std::fprintf(stderr, "                     Decides if nodes whose distance is slightly worse (e.g. 0.01 = 1%%) than the\n");
+            std::fprintf(stderr, "                     current worst in the search list should be explored (default: 0.001).\n");
+            std::fprintf(stderr, "  --no-recall        Disables loading ground-truth datasets and calculating Recall@K metrics.\n");
+            std::fprintf(stderr, "                     Required when exporting search results to an output file.\n");
+            std::fprintf(stderr, "  --output <path>    Path to a binary `.ivecs` file where the retrieved nearest-neighbor indices\n");
+            std::fprintf(stderr, "                     will be saved (one row per query; uint32_t count followed by indices).\n");
+            std::fprintf(stderr, "  --evpK <list>      Candidate pool size or comma-separated list of sizes. Graph search retrieves `evpK` candidates\n");
+            std::fprintf(stderr, "                     which are then reranked using exact FP16 inner product. Used in Mode 4 and Mode 7 (default: 50).\n");
+            std::fprintf(stderr, "  --max-dist <list>  Exploration search budget or comma-separated list of budgets. Specifies the maximum number of\n");
+            std::fprintf(stderr, "                     distance computations allowed per query. Main parameter to trade search speed for recall (default: 200).\n");
+            std::fprintf(stderr, "  --graph <path>     File path to save the pre-built graph to, or load a pre-built graph from\n");
+            std::fprintf(stderr, "                     to bypass the construction phase.\n");
+            std::fprintf(stderr, "  --prune-worst <n>  Number of worst (least similar) neighbors per vertex to replace with self-loops.\n");
+            std::fprintf(stderr, "                     Applies to all modes (default: 16).\n");
             return 1;
         }
 
@@ -177,9 +191,9 @@ int main(int argc, char* argv[]) {
             } else if (arg == "--output" && i + 1 < argc) {
                 output_path = argv[++i];
             } else if (arg == "--evpK" && i + 1 < argc) {
-                evpK = std::stoul(argv[++i]);
+                evpK_str = argv[++i];
             } else if (arg == "--max-dist" && i + 1 < argc) {
-                max_distance_count = std::stoul(argv[++i]);
+                max_dist_str = argv[++i];
             } else if (arg == "--graph" && i + 1 < argc) {
                 graph_path = argv[++i];
             } else if (arg == "--prune-worst" && i + 1 < argc) {
@@ -189,10 +203,42 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        std::vector<uint32_t> evpK_list = evp_common::parse_list(evpK_str);
+        std::vector<uint32_t> max_dist_list = evp_common::parse_list(max_dist_str);
+
         // Validate --prune-worst
         if (prune_worst >= k_graph) {
             std::fprintf(stderr, "Error: --prune-worst (%u) must be less than --k-graph (%u)\n", prune_worst, (uint32_t)k_graph);
             return 1;
+        }
+
+        // Validate --no-recall restrictions
+        if (!run_recall) {
+            if (output_path.empty()) {
+                std::fprintf(stderr, "Error: --output path must be specified when --no-recall is set.\n");
+                return 1;
+            }
+            if (max_dist_list.size() > 1 || evpK_list.size() > 1) {
+                std::fprintf(stderr, "Error: Multiple parameters for --max-dist or --evpK are not allowed when --no-recall is set.\n");
+                return 1;
+            }
+        }
+
+        // Validate --evpK for reranking modes (Mode 4, Mode 7)
+        if (mode == "evp-rerank" || mode == "evp-build-evp-explore-fp16-rerank" || mode == "mode4" ||
+            mode == "evp-asymmetric-rerank" || mode == "evp-build-fp16-asymmetric-search-rerank" || mode == "mode7") {
+            for (uint32_t evpK_val : evpK_list) {
+                if (evpK_val < k_top) {
+                    std::fprintf(stderr, "Error: --evpK (%u) must be greater than or equal to --k-top (%u) for reranking modes.\n", evpK_val, k_top);
+                    return 1;
+                }
+                for (uint32_t max_dist_val : max_dist_list) {
+                    if (evpK_val > max_dist_val) {
+                        std::fprintf(stderr, "Error: --evpK (%u) must be less than or equal to --max-dist (%u) for reranking modes.\n", evpK_val, max_dist_val);
+                        return 1;
+                    }
+                }
+            }
         }
 
         // Validate that data_path has an HDF5 extension
@@ -203,42 +249,37 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        if (!run_recall && output_path.empty()) {
-            std::fprintf(stderr, "Warning: --no-recall is set but no --output file path is specified. Top-K results will not be saved.\n");
-        }
-
         // Print compiled-in SIMD instruction set info
 #ifdef USE_AVX512
-        std::fprintf(stderr, "SIMD: AVX-512, AVX, SSE\n");
+        std::fprintf(stderr, "SIMD: AVX-512, AVX2, SSE\n");
 #elif defined(USE_AVX)
-        std::fprintf(stderr, "SIMD: AVX, SSE\n");
+        std::fprintf(stderr, "SIMD: AVX2, SSE\n");
 #elif defined(USE_SSE)
         std::fprintf(stderr, "SIMD: SSE\n");
 #else
         std::fprintf(stderr, "SIMD: none (scalar)\n");
 #endif
 
-        // Support both old mode names/aliases and modiX names
-        if (mode == "fp16-build-fp16-explore" || mode == "fp16" || mode == "modi1") {
-            return task1::mode1::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_distance_count, run_recall, output_path, graph_path, prune_worst);
-        } else if (mode == "evp-linear-search" || mode == "evp-linear" || mode == "modi2") {
-
+        // Support both old mode names/aliases and modeX names
+        if (mode == "fp16-build-fp16-explore" || mode == "fp16" || mode == "mode1") {
+            return task1::mode1::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, output_path, graph_path, prune_worst);
+        } else if (mode == "evp-linear-search" || mode == "evp-linear" || mode == "mode2") {
             if (!graph_path.empty()) {
-                std::fprintf(stderr, "Warning: --graph-path is not supported by modi2 (EVP linear search) and will be ignored.\n");
+                std::fprintf(stderr, "Warning: --graph-path is not supported by mode2 (EVP linear search) and will be ignored.\n");
             }
-            return task1::mode2::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_distance_count, run_recall, output_path);
-        } else if (mode == "evp-build-evp-explore" || mode == "evp-no-rerank" || mode == "modi3") {
-            return task1::mode3::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_distance_count, run_recall, output_path, graph_path, prune_worst);
-        } else if (mode == "evp-build-evp-explore-fp16-rerank" || mode == "evp" || mode == "modi4") {
-            return task1::mode4::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_distance_count, evpK, run_recall, output_path, graph_path, prune_worst);
-        } else if (mode == "evp-build-fp16-external-search" || mode == "modi5") {
-            return task1::mode5::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_distance_count, run_recall, output_path, graph_path, prune_worst);
-        } else if (mode == "evp-build-fp16-asymmetric-search" || mode == "evp-asymmetric" || mode == "modi6") {
-            return task1::mode6::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_distance_count, run_recall, output_path, graph_path, prune_worst);
-        } else if (mode == "evp-build-fp16-asymmetric-search-rerank" || mode == "evp-asymmetric-rerank" || mode == "modi7") {
-            return task1::mode7::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_distance_count, evpK, run_recall, output_path, graph_path, prune_worst);
+            return task1::mode2::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, output_path);
+        } else if (mode == "evp-build-evp-explore" || mode == "evp" || mode == "mode3") {
+            return task1::mode3::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, output_path, graph_path, prune_worst);
+        } else if (mode == "evp-build-evp-explore-fp16-rerank" || mode == "evp-rerank" || mode == "mode4") {
+            return task1::mode4::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, evpK_list, run_recall, output_path, graph_path, prune_worst);
+        } else if (mode == "evp-build-fp16-external-search" || mode == "mode5") {
+            return task1::mode5::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, output_path, graph_path, prune_worst);
+        } else if (mode == "evp-build-fp16-asymmetric-search" || mode == "evp-asymmetric" || mode == "mode6") {
+            return task1::mode6::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, output_path, graph_path, prune_worst);
+        } else if (mode == "evp-build-fp16-asymmetric-search-rerank" || mode == "evp-asymmetric-rerank" || mode == "mode7") {
+            return task1::mode7::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, evpK_list, run_recall, output_path, graph_path, prune_worst);
         } else {
-            std::fprintf(stderr, "Error: Unknown mode '%s'. Choose a valid benchmark mode (e.g. 'evp', 'evp-no-rerank', etc.) or 'modi1'-'modi7'.\n", mode.c_str());
+            std::fprintf(stderr, "Error: Unknown mode '%s'. Choose a valid benchmark mode (e.g. 'evp-rerank', 'evp', etc.) or 'mode1'-'mode7'.\n", mode.c_str());
             return 1;
         }
 

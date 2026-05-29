@@ -1,7 +1,7 @@
 #pragma once
 
 /**
- * @file modi1.h
+ * @file mode1.h
  * @brief Benchmark Mode 1: FP16 Build, FP16 Explore (fp16-build-fp16-explore)
  * 
  * Behavior:
@@ -57,10 +57,8 @@ static ExplorationTimings run_exploration(
     const std::string& output_path)
 {
     size_t count = graph.size();
-    std::printf("\n--- Exploration (FP16 Build FP16 Explore, max_dist=%u) ---\n", max_distance_count);
     std::vector<std::vector<uint32_t>> results(count);
 
-    std::printf("  Chunk-based dataset mode: unified explore via chunks with timing measurements\n");
     double t_start = evp_common::now_ms();
 
     const size_t chunk_size = 8192;
@@ -98,17 +96,12 @@ static ExplorationTimings run_exploration(
             chunk_search_times[chunk_id] = evp_common::now_ms() - t_search_start;
         });
 
-    double total_ms = evp_common::now_ms() - t_start;
-    double sum_search_ms = std::accumulate(chunk_search_times.begin(), chunk_search_times.end(), 0.0) / threads;
 
-    std::printf("Exploration complete in %.2f ms (explore=%.2f ms)\n",
-                total_ms, sum_search_ms);
+    double sum_search_ms = std::accumulate(chunk_search_times.begin(), chunk_search_times.end(), 0.0) / threads;
 
     float recall = -1.0f;
     if (compute_recall) {
         recall = evp_common::compute_recall(gt_data, results, k_top);
-        std::printf("Recall@%u: %.4f  (max_dist=%u, explore=%.2f ms)\n",
-                    k_top, recall, max_distance_count, sum_search_ms);
     } else {
         evp_common::ivecs_write(output_path, results);
     }
@@ -123,7 +116,7 @@ static int run(
     uint8_t k_graph, uint8_t k_ext,
     float eps_ext,
     uint32_t k_top,
-    uint32_t max_distance_count,
+    const std::vector<uint32_t>& max_dist_list,
     bool compute_recall,
     const std::string& output_path,
     const std::string& graph_path,
@@ -131,7 +124,7 @@ static int run(
 {
     (void)non_zeros;
     const std::string h5path = data_path.string();
-    std::printf("HDF5 mode (modi1): scanning '%s'\n", h5path.c_str());
+    std::printf("\n");
 
     auto datasets = hdf5_reader::scan_datasets(h5path);
     auto& train_info = hdf5_reader::find_dataset(datasets, "train");
@@ -152,14 +145,7 @@ static int run(
     }
     double total_load_ms = evp_common::now_ms() - t_load_start;
 
-    std::printf("=== FP16 Build FP16 Explore Graph Benchmark (Mode 1 - Chunked Build) ===\n");
-    std::printf("Data path: %ls\n", data_path.wstring().c_str());
-    std::printf("K_TOP=%u, K_GRAPH=%u, K_EXT=%u, EPS_EXT=%.3f\n",
-                k_top, k_graph, k_ext, eps_ext);
-    std::printf("Threads: %u\n\n", threads);
-
-    std::printf("FP16 data size: %.2f MB\n\n",
-                static_cast<double>(count * dims * sizeof(uint16_t)) / (1024.0 * 1024.0));
+    std::printf("=== FP16 Build, FP16 Explore - Mode 1 ===\n");
 
     // --------------------------------------------------------------------------
     // Build/Load graph with Metric::FP16InnerProduct
@@ -186,6 +172,7 @@ static int run(
     }
 
     if (!loaded) {
+        std::printf("Building graph: k_graph=%u, k_ext=%u, eps_ext=%.3f, threads=%u\n", k_graph, k_ext, eps_ext, threads);
         graph_ptr = std::make_unique<deglib::graph::SizeBoundedGraph>(static_cast<uint32_t>(count), k_graph, feature_space);
         deglib::graph::SizeBoundedGraph& graph = *graph_ptr;
 
@@ -244,54 +231,39 @@ static int run(
 
     deglib::graph::SizeBoundedGraph& graph = *graph_ptr;
 
-    std::printf("\nLoaded train:  %zu vectors, dim=%zu\n", count, dims);
-    if (compute_recall) {
-        std::printf("Ground truth:  %zu queries, top-%u\n", gt_data.size(), k_top);
-    }
-    std::printf("Total Load time:     %.2fs\n", total_load_ms / 1000.0);
-    std::printf("Graph vertices: %zu, %u edges/vertex\n", static_cast<size_t>(graph.size()), graph.getEdgesPerVertex());
-    std::printf("Total Build/Load time:    %.2fs\n\n", total_build_ms / 1000.0);
-
-    evp_common::prune_worst_neighbors(graph, prune_worst, threads);
+    double prune_ms = evp_common::prune_worst_neighbors(graph, prune_worst, threads);
 
     // --------------------------------------------------------------------------
     // Exploration
     // --------------------------------------------------------------------------
-    auto timings = run_exploration(graph, k_top, max_distance_count, static_cast<uint8_t>(threads),
-                                         compute_recall, gt_data, output_path);
+    std::printf("Starting exploration: k_top=%u, prune_worst=%u, threads=%u\n", k_top, prune_worst, threads);
+    uint32_t best_max_dist = 0;
+    ExplorationTimings best_timings;
 
-    const size_t bytes_per_fp16 = dims * sizeof(uint16_t);
-    double total_time_ms = total_load_ms + total_build_ms + timings.explore_ms;
+    for (uint32_t max_dist_val : max_dist_list) {
+        auto timings = run_exploration(graph, k_top, max_dist_val, static_cast<uint8_t>(threads),
+                                             compute_recall, gt_data, output_path);
 
-    // --------------------------------------------------------------------------
-    // Summary
-    // --------------------------------------------------------------------------
-    std::printf("========================================================================\n");
-    std::printf("  FINAL SUMMARY (FP16 Build, FP16 Explore - Mode 1)                     \n");
-    std::printf("========================================================================\n");
-    std::printf("Load Time:               %.2f ms\n", total_load_ms);
-    std::printf("Graph Build Time:        %.2f ms\n", total_build_ms);
-    std::printf("Explore Time:            %.2f ms\n", timings.explore_ms);
-    std::printf("Exploration Wall Time:   %.2f ms\n", timings.explore_ms);
-    std::printf("Total Elapsed Time:      %.2f ms\n", total_time_ms);
-    if (compute_recall) {
-        std::printf("Recall@%u:                %.4f\n", k_top, timings.recall);
+        std::printf("  max_dist=%u has recall %.2f %% and time %.1f s\n",
+                    max_dist_val, timings.recall * 100.0f, timings.explore_ms / 1000.0);
+
+        if (timings.recall > best_timings.recall) {
+            best_max_dist = max_dist_val;
+            best_timings = timings;
+        }
     }
-    std::printf("------------------------------------------------------------------------\n");
-    std::printf("Hyperparameters:\n");
-    std::printf("  K_TOP:                 %u\n", k_top);
-    std::printf("  K_GRAPH:               %u\n", (uint32_t)k_graph);
-    std::printf("  K_EXT:                 %u\n", (uint32_t)k_ext);
-    std::printf("  EPS_EXT:               %.3f\n", eps_ext);
-    std::printf("  max_dist:              %u\n", max_distance_count);
-    std::printf("  threads:               %u\n", threads);
-    std::printf("  prune_worst:           %u\n", prune_worst);
-    std::printf("------------------------------------------------------------------------\n");
-    std::printf("Dataset Info:\n");
-    std::printf("  Vectors:               %zu\n", count);
-    std::printf("  Dimensions:            %zu\n", dims);
-    std::printf("  FP16 bytes/vector:     %zu\n", bytes_per_fp16);
-    std::printf("========================================================================\n\n");
+
+    std::printf("\n");
+    double total_time_ms = total_load_ms + total_build_ms + best_timings.explore_ms;
+
+    evp_common::print_summary(
+        "FP16 Build, FP16 Explore", 1,
+        total_load_ms, 0.0, total_build_ms, 0.0, prune_ms,
+        best_timings.explore_ms, 0.0, total_time_ms,
+        compute_recall, k_top, best_timings.recall,
+        threads, best_max_dist, prune_worst,
+        k_graph, k_ext, eps_ext, 0, count, dims, 0
+    );
 
     return 0;
 }

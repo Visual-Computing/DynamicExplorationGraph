@@ -11,33 +11,33 @@ Every mode supports two mutually exclusive output behaviours, controlled via CLI
 
 ## Benchmark Modes Overview
 
-### 1. `modi1.h` (FP16 Build, FP16 Explore)
+### 1. `mode1.h` (FP16 Build, FP16 Explore)
 * **Metric**: Graph uses `Metric::FP16InnerProduct`, exploration uses `Metric::FP16InnerProduct`.
 * **Behavior**: Builds the Size-Bounded Graph using FP16 features directly and explores it via FP16 Inner Product similarity. Acts as a high-quality FP16 baseline.
 
-### 2. `modi2.h` (EVP Linear Search)
+### 2. `mode2.h` (EVP Linear Search)
 * **Metric**: Exact comparison using `EvpBitsSimilarity::compare`.
 * **Behavior**: Exact all-pairs linear search baseline. Quantizes all vectors to EVP bits and performs exact brute-force search. No graph structure is built.
 
-### 3. `modi3.h` (EVP Build, EVP Explore)
+### 3. `mode3.h` (EVP Build, EVP Explore)
 * **Metric**: Graph uses `Metric::EvpBits`, exploration uses `Metric::EvpBits`.
 * **Behavior**: Builds the graph with EVP-quantized features and explores it directly using EVP bits similarity. No reranking is performed.
 
-### 4. `modi4.h` (EVP Build, EVP Explore, FP16 Rerank)
+### 4. `mode4.h` (EVP Build, EVP Explore, FP16 Rerank)
 * **Metric**: Graph uses `Metric::EvpBits`, exploration uses `Metric::EvpBits`.
 * **Behavior**: Quantizes FP16 features to EVP-bits to construct a Size-Bounded Graph. During search, it explores the EVP graph to retrieve candidates and then reranks the candidates using exact FP16 Inner Product distances.
 
-### 5. `modi5.h` (EVP Build, FP16 External Search)
+### 5. `mode5.h` (EVP Build, FP16 External Search)
 * **Metric**: Graph uses `Metric::EvpBits`, search uses `Metric::FP16InnerProduct`.
 * **Behavior**: Builds the graph with EVP features. Then, copies the FP16 data and permutes it in-place using the graph's internal indexing order. A `ReadOnlyGraphExternal` is constructed that directly references the FP16 array without copies, allowing direct FP16 search over the graph topology.
 
-### 6. `modi6.h` (EVP Build, FP16 Asymmetric Search)
+### 6. `mode6.h` (EVP Build, FP16 Asymmetric Search)
 * **Metric**: Graph uses `Metric::EvpBits`, search uses `Metric::FP16EvpAsymmetric`.
 * **Behavior**: Builds the graph using EVP. Converts it to a `ReadOnlyGraph` with asymmetric float space. Performs search where the query is in FP16 representation and the database is represented using EVP bits in the graph.
 
-### 7. `modi7.h` (EVP Build, FP16 Asymmetric Search, FP16 Rerank)
+### 7. `mode7.h` (EVP Build, FP16 Asymmetric Search, FP16 Rerank)
 * **Metric**: Graph uses `Metric::EvpBits`, search uses `Metric::FP16EvpAsymmetric`, rerank uses `Metric::FP16InnerProduct`.
-* **Behavior**: Same asymmetric search configuration as `modi6`, but with an added candidate reranking phase using exact FP16 Inner Product distances.
+* **Behavior**: Same asymmetric search configuration as `mode6`, but with an added candidate reranking phase using exact FP16 Inner Product distances.
 
 ---
 
@@ -55,7 +55,7 @@ cmake --build --preset "Visual Studio Community 2022 release" --target deglib_ev
 
 ## Execution and CLI Options
 
-Run the binary by providing the input H5 file path, the target mode (`modi1` - `modi7`), and optional arguments:
+Run the binary by providing the input H5 file path, the target mode (`mode1` - `mode7`), and optional arguments:
 ```powershell
 ./build/Visual Studio Community 2022/evp/Release/deglib_evp_task1.exe <hdf5_file_path> <mode> [options...]
 ```
@@ -70,7 +70,7 @@ Run the binary by providing the input H5 file path, the target mode (`modi1` - `
 | `--k-ext <n>` | `32` | Graph builder degree during regular extension. |
 | `--eps-ext <f>` | `0.001` | Graph builder entry search expansion coefficient. |
 | `--max-dist <n>` | `200` | Maximum number of distance computations per query during graph exploration/search. Higher values improve recall at the cost of speed. |
-| `--evpK <n>` | `0` (auto) | Overrides the internal candidate list size for graph search. Defaults: `50` for asymmetric-rerank (modi7), `max(k_top, max_dist)` for EVP-rerank (modi4). |
+| `--evpK <n>` | `0` (auto) | Overrides the internal candidate list size for graph search. Defaults: `50` for asymmetric-rerank (mode7), `max(k_top, max_dist)` for EVP-rerank (mode4). |
 | `--no-recall` | — | Skip ground-truth loading and recall computation. Must be combined with `--output`. |
 | `--output <path>` | — | Write retrieved Top-K labels to a binary **ivecs** file (one row per query). |
 
