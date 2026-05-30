@@ -50,12 +50,11 @@ if (FORCE_AVX2)
                 -mfma
                 -fpic
                 -w
-                -fopenmp
                 -pthread
                 -ftree-vectorize
                 -ftree-vectorizer-verbose=0
                 )
-    message(STATUS "  -> Using: -O3 -mavx2 -mfma -fopenmp ...")
+    message(STATUS "  -> Using: -O3 -mavx2 -mfma ...")
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
 	target_compile_options(compile-options INTERFACE -O2 -fpic)
 
@@ -66,13 +65,12 @@ if (FORCE_AVX2)
         message(STATUS "[FORCE_AVX2 AppleClang non-x86_64] -> Using: -O2 -fpic (no AVX2)")
     endif()
   elseif(MSVC)
-    message(STATUS "[FORCE_AVX2 MSVC] -> Using: /O2 /arch:AVX2 /W1 /openmp /EHsc")
+    message(STATUS "[FORCE_AVX2 MSVC] -> Using: /O2 /arch:AVX2 /W1 /EHsc")
     target_compile_options(
 	  compile-options
 	  INTERFACE /O2
 				/arch:AVX2
 				/W1
-				/openmp
 				/EHsc)
   else()
     message(WARNING "Unknown compiler for AVX2 Build: ${CMAKE_CXX_COMPILER_ID}")
@@ -93,11 +91,10 @@ else()  # Native build
                 -mfma
                 -fpic
                 -w
-                -fopenmp
                 -pthread
                 -ftree-vectorize
                 -ftree-vectorizer-verbose=0)
-    message(STATUS "  -> Using: -O3 -march=native -mavx2 -mfma -fopenmp ...")
+    message(STATUS "  -> Using: -O3 -march=native -mavx2 -mfma ...")
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
     message(STATUS "[Native AppleClang] Compiler: ${CMAKE_CXX_COMPILER_ID}")
     target_compile_options(

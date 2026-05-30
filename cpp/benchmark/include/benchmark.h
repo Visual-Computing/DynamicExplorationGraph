@@ -20,6 +20,7 @@
 #include <fstream>
 #include <limits>
 #include <random>
+#include <thread>
 
 #include "dataset.h"
 #include "deglib.h"
@@ -181,13 +182,16 @@ static std::vector<float> estimate_recall(const deglib::search::SearchGraph& gra
         size_t total = 0;
         size_t correct = 0;
 
-#pragma omp parallel for reduction(+ : total) reduction(+ : correct)
-        for (int i = 0; i < (int)query_repository.size(); i++) {
+        const auto threads = std::max(1u, std::thread::hardware_concurrency() / 2);
+        std::vector<size_t> local_corrects(threads, 0);
+        std::vector<size_t> local_totals(threads, 0);
+
+        deglib::concurrent::parallel_for(0, query_repository.size(), threads, 0, [&](size_t i, size_t thread_id) {
             auto query = reinterpret_cast<const std::byte*>(query_repository.getFeature(uint32_t(i)));
             auto result_queue = graph.search(entry_vertex_indices, query, eps, k, nullptr, max_distance_count);
 
             const auto& gt = answer[i];
-            total += result_queue.size();
+            local_totals[thread_id] += result_queue.size();
 
             size_t local_correct = 0;
             while (result_queue.empty() == false) {
@@ -196,7 +200,12 @@ static std::vector<float> estimate_recall(const deglib::search::SearchGraph& gra
                 if (std::binary_search(gt.begin(), gt.end(), external_id)) local_correct++;
                 result_queue.pop();
             }
-            correct += local_correct;
+            local_corrects[thread_id] += local_correct;
+        });
+
+        for (size_t t = 0; t < threads; t++) {
+            correct += local_corrects[t];
+            total += local_totals[t];
         }
 
         const auto precision = ((float)correct) / total;

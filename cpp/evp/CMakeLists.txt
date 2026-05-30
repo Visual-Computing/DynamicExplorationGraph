@@ -1,12 +1,10 @@
 cmake_minimum_required(VERSION 3.19)
 
-find_package(OpenMP REQUIRED)
-
 # Build deglib_evp_task1 target
 add_executable(deglib_evp_task1 task1.cpp)
 target_include_directories(deglib_evp_task1 PRIVATE ${CMAKE_SOURCE_DIR}/benchmark/include)
 target_link_libraries(deglib_evp_task1 PUBLIC DEG_LIB compile-options
-                                                fmt::fmt-header-only OpenMP::OpenMP_CXX)
+                                                fmt::fmt-header-only)
 target_compile_definitions(deglib_evp_task1 PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
 
 # ---------------------------------------------------------------------------
