@@ -48,19 +48,20 @@ if (FORCE_AVX2)
       INTERFACE -O3
                 -mavx2
                 -mfma
+                -mf16c
                 -fpic
                 -w
                 -pthread
                 -ftree-vectorize
                 -ftree-vectorizer-verbose=0
                 )
-    message(STATUS "  -> Using: -O3 -mavx2 -mfma ...")
+    message(STATUS "  -> Using: -O3 -mavx2 -mfma -mf16c ...")
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
 	target_compile_options(compile-options INTERFACE -O2 -fpic)
 
     if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
-        target_compile_options(compile-options INTERFACE -mavx2 -mfma)
-        message(STATUS "[FORCE_AVX2 AppleClang x86_64] -> Using: -O2 -fpic -mavx2 -mfma")
+        target_compile_options(compile-options INTERFACE -mavx2 -mfma -mf16c)
+        message(STATUS "[FORCE_AVX2 AppleClang x86_64] -> Using: -O2 -fpic -mavx2 -mfma -mf16c")
     else()
         message(STATUS "[FORCE_AVX2 AppleClang non-x86_64] -> Using: -O2 -fpic (no AVX2)")
     endif()
@@ -89,12 +90,13 @@ else()  # Native build
                 -march=native
                 -mavx2
                 -mfma
+                -mf16c
                 -fpic
                 -w
                 -pthread
                 -ftree-vectorize
                 -ftree-vectorizer-verbose=0)
-    message(STATUS "  -> Using: -O3 -march=native -mavx2 -mfma ...")
+    message(STATUS "  -> Using: -O3 -march=native -mavx2 -mfma -mf16c ...")
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
     message(STATUS "[Native AppleClang] Compiler: ${CMAKE_CXX_COMPILER_ID}")
     target_compile_options(
