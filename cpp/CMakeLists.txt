@@ -37,117 +37,113 @@ if (APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
   message(WARNING "You are compiling on an Apple M chip. At the moment deglib does not support ARM optimizations, so using deglib will be slow!")
 endif()
 
-if (FORCE_AVX2)
-  message(NOTICE "Compiling for avx2, ignoring native optimizations.")
-
-  # setup compiler flags
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    message(STATUS "[FORCE_AVX2 Clang/GNU] Compiler: ${CMAKE_CXX_COMPILER_ID}")
-    target_compile_options(
-      compile-options
-      INTERFACE -O3
-                -mavx2
-                -mfma
-                -mf16c
-                -fpic
-                -w
-                -pthread
-                -ftree-vectorize
-                -ftree-vectorizer-verbose=0
-                )
-    message(STATUS "  -> Using: -O3 -mavx2 -mfma -mf16c ...")
-  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-	target_compile_options(compile-options INTERFACE -O2 -fpic)
-
-    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
-        target_compile_options(compile-options INTERFACE -mavx2 -mfma -mf16c)
-        message(STATUS "[FORCE_AVX2 AppleClang x86_64] -> Using: -O2 -fpic -mavx2 -mfma -mf16c")
-    else()
-        message(STATUS "[FORCE_AVX2 AppleClang non-x86_64] -> Using: -O2 -fpic (no AVX2)")
-    endif()
-  elseif(MSVC)
-    message(STATUS "[FORCE_AVX2 MSVC] -> Using: /O2 /arch:AVX2 /W1 /EHsc")
-    target_compile_options(
-	  compile-options
-	  INTERFACE /O2
-				/arch:AVX2
-				/W1
-				/EHsc)
-  else()
-    message(WARNING "Unknown compiler for AVX2 Build: ${CMAKE_CXX_COMPILER_ID}")
-  endif()
-
-else()  # Native build
+# ==============================================================================
+# 1. Platform & CPU Feature Detection
+# ==============================================================================
+if (NOT FORCE_AVX2)
+  # This module runs test programs on the host machine to check for SSE42, AVX, AVX2, and AVX512 support.
+  # It sets the variables: SUPPORT_SSE42, SUPPORT_AVX, SUPPORT_AVX2, SUPPORT_AVX512F.
   list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
   include(DetectCPUFeatures)
+endif()
 
-  # setup compiler flags
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    message(STATUS "[Native Clang/GNU] Compiler: ${CMAKE_CXX_COMPILER_ID}")
-    target_compile_options(
-      compile-options
-      INTERFACE -O3
-                -march=native
-                -mavx2
-                -mfma
-                -mf16c
-                -fpic
-                -w
-                -pthread
-                -ftree-vectorize
-                -ftree-vectorizer-verbose=0)
-    message(STATUS "  -> Using: -O3 -march=native -mavx2 -mfma -mf16c ...")
-  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-    message(STATUS "[Native AppleClang] Compiler: ${CMAKE_CXX_COMPILER_ID}")
-    target_compile_options(
-      compile-options
-      INTERFACE -O2
-                -DNDEBUG
-                -march=native
-                -fpic)
-    message(STATUS "  -> Using: -O2 -DNDEBUG -march=native -fpic")
-  elseif(MSVC)
-    # warning level 4 (show all)
-    target_compile_options(compile-options INTERFACE /W4)
+# ==============================================================================
+# 2. Compile Flag Settings (Declaration Phase)
+# ==============================================================================
+set(COMPILER_ARCH_FLAGS "")
+set(COMPILER_COMMON_FLAGS "")
 
-    # SUPPORT_AVX2 and SUPPORT_SSE2 are already set by DetectCPUFeatures.cmake
-    # (via actual compiler tests, not cmake_host_system_information)
-    message(STATUS "[MSVC native] CPU feature detection (from DetectCPUFeatures.cmake):")
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU|AppleClang")
+  # Common flags for Unix/Apple toolchains
+  list(APPEND COMPILER_COMMON_FLAGS 
+    -fpic                           # Position Independent Code
+    -w                              # Suppress warnings
+    -pthread                        # Thread support
+    -ftree-vectorize                # Enable tree vectorization
+    -ftree-vectorizer-verbose=0     # Quiet vectorizer output
+  )
+
+  # Optimization levels
+  if (CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    list(APPEND COMPILER_COMMON_FLAGS -O2)
+  else()
+    list(APPEND COMPILER_COMMON_FLAGS -O3)
+  endif()
+
+  # Architecture / ISA extension flags selection
+  if (FORCE_AVX2)
+    message(STATUS "[FORCE_AVX2] Configuring compiler options for forced AVX2")
+    if (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" OR NOT APPLE)
+      list(APPEND COMPILER_ARCH_FLAGS -mavx2 -mfma -mf16c)
+    endif()
+  else()
+    message(STATUS "[Native Build] Configuring native CPU architectures")
+    list(APPEND COMPILER_ARCH_FLAGS -march=native)
+    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+      # Reinforce standard instruction set extensions
+      list(APPEND COMPILER_ARCH_FLAGS -mavx2 -mfma -mf16c)
+    endif()
+  endif()
+
+elseif(MSVC)
+  # Common flags for MSVC
+  list(APPEND COMPILER_COMMON_FLAGS 
+    /EHsc                           # C++ exception handling model
+    /W1                             # Warning level 1
+  )
+
+  # Optimization options
+  list(APPEND COMPILER_COMMON_FLAGS /O2)
+  target_compile_options(compile-options INTERFACE $<$<CONFIG:Release>:/Ox>)
+
+  # Architecture / ISA extension flags selection
+  if (FORCE_AVX2)
+    message(STATUS "[FORCE_AVX2 MSVC] Configuring compiler options for forced AVX2")
+    list(APPEND COMPILER_ARCH_FLAGS /arch:AVX2)
+  else()
+    message(STATUS "[Native MSVC] CPU feature detection (from DetectCPUFeatures.cmake):")
     message(STATUS "  SUPPORT_AVX512F = ${SUPPORT_AVX512F}")
-    message(STATUS "  SUPPORT_AVX2 = ${SUPPORT_AVX2}")
-    message(STATUS "  SUPPORT_SSE2 = ${SUPPORT_SSE2}")
-    message(STATUS "  Compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER}")
-    message(STATUS "  System processor: ${CMAKE_SYSTEM_PROCESSOR}")
+    message(STATUS "  SUPPORT_AVX2    = ${SUPPORT_AVX2}")
+    message(STATUS "  SUPPORT_SSE42   = ${SUPPORT_SSE42}")
 
     if(SUPPORT_AVX512F)
-      message(STATUS "  -> Using /arch:AVX512")
-      target_compile_options(compile-options INTERFACE /arch:AVX512)
+      list(APPEND COMPILER_ARCH_FLAGS /arch:AVX512)
     elseif(SUPPORT_AVX2)
-      message(STATUS "  -> Using /arch:AVX2")
-      target_compile_options(compile-options INTERFACE /arch:AVX2)
-    elseif(SUPPORT_SSE2)
-      message(STATUS "  -> Using /arch:SSE2")
-      target_compile_options(compile-options INTERFACE /arch:SSE2)
+      list(APPEND COMPILER_ARCH_FLAGS /arch:AVX2)
+    elseif(SUPPORT_SSE42)
+      # MSVC x64 always natively supports SSE2, so we use /arch:SSE2 or fallback
+      list(APPEND COMPILER_ARCH_FLAGS /arch:SSE2)
     else()
-      message(STATUS "  -> Using /arch:native")
-      target_compile_options(compile-options INTERFACE /arch:native)
+      list(APPEND COMPILER_ARCH_FLAGS /arch:native)
     endif()
-
-    # disable string optimizations and function level linking
-    # https://stackoverflow.com/questions/5063334/what-is-the-difference-between-the-ox-and-o2-compiler-options
-    target_compile_options(compile-options INTERFACE $<$<CONFIG:Release>:/Ox>)
-  else()
-    message(WARNING "Unknown compiler: ${CMAKE_CXX_COMPILER_ID}")
   endif()
+
+else()
+  message(WARNING "Unknown compiler: ${CMAKE_CXX_COMPILER_ID}")
 endif()
+
+# ==============================================================================
+# 3. Application Phase
+# ==============================================================================
+message(STATUS "Applying compiler flags:")
+message(STATUS "  Common Flags: ${COMPILER_COMMON_FLAGS}")
+message(STATUS "  Arch Flags:   ${COMPILER_ARCH_FLAGS}")
+
+target_compile_options(compile-options INTERFACE 
+  ${COMPILER_COMMON_FLAGS}
+  ${COMPILER_ARCH_FLAGS}
+)
 
 message("C++ compiler flags: ${CMAKE_CXX_FLAGS}")
 message("C++ compiler flags release: ${CMAKE_CXX_FLAGS_RELEASE}")
 
+# Core Library
 add_subdirectory(deglib)
 
+# Unit tests
+add_subdirectory(test)
 
-# fmt is only needed by benchmarks — not by deglib/evp.
+# fmt is only needed by benchmarks and evp — not by the core deglib library.
 if (ENABLE_BENCHMARKS)
 	set(FMT_MASTER_PROJECT OFF)
 	set(FMT_TEST OFF)
@@ -156,6 +152,3 @@ if (ENABLE_BENCHMARKS)
 	add_subdirectory(benchmark)
 	add_subdirectory(evp)
 endif()
-
-# Unit tests
-add_subdirectory(test)

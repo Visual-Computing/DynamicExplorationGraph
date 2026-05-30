@@ -7,27 +7,91 @@
   },
   "configurePresets": [
     {
-      "name": "default",
-      "hidden": false,
-      "description": "Preset that sets the DATA_PATH variable.",
-      "binaryDir": "${sourceDir}/build/${presetName}",
+      "name": "base-data-path",
+      "hidden": true,
+      "description": "Base preset defining the shared DATA_PATH variable",
       "cacheVariables": {
         "DATA_PATH": {
           "value": "",
           "type": "PATH"
         }
       }
+    },
+    {
+      "name": "windows-msvc",
+      "displayName": "Windows (MSVC & VS 2022)",
+      "description": "Configure build for Windows using Visual Studio 2022 (x64 architecture)",
+      "inherits": "base-data-path",
+      "generator": "Visual Studio 17 2022",
+      "toolset": "host=x64",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/install/${presetName}",
+        "CMAKE_C_COMPILER": "cl.exe",
+        "CMAKE_CXX_COMPILER": "cl.exe"
+      }
+    },
+    {
+      "name": "linux-gcc",
+      "displayName": "Linux (GCC & Makefiles)",
+      "description": "Configure build for Linux using GCC compiler and Unix Makefiles",
+      "inherits": "base-data-path",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++"
+      }
+    },
+    {
+      "name": "macos-clang",
+      "displayName": "macOS (Clang & Makefiles)",
+      "description": "Configure build for macOS using AppleClang compiler and Unix Makefiles",
+      "inherits": "base-data-path",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
     }
   ],
   "buildPresets": [
     {
-      "name": "Debug",
-      "configurePreset": "default",
+      "name": "windows-msvc-debug",
+      "displayName": "Windows Debug",
+      "configurePreset": "windows-msvc",
       "configuration": "Debug"
     },
     {
-      "name": "Release",
-      "configurePreset": "default",
+      "name": "windows-msvc-release",
+      "displayName": "Windows Release",
+      "configurePreset": "windows-msvc",
+      "configuration": "Release"
+    },
+    {
+      "name": "linux-gcc-debug",
+      "displayName": "Linux Debug",
+      "configurePreset": "linux-gcc",
+      "configuration": "Debug"
+    },
+    {
+      "name": "linux-gcc-release",
+      "displayName": "Linux Release",
+      "configurePreset": "linux-gcc",
+      "configuration": "Release"
+    },
+    {
+      "name": "macos-clang-debug",
+      "displayName": "macOS Debug",
+      "configurePreset": "macos-clang",
+      "configuration": "Debug"
+    },
+    {
+      "name": "macos-clang-release",
+      "displayName": "macOS Release",
+      "configurePreset": "macos-clang",
       "configuration": "Release"
     }
   ]
