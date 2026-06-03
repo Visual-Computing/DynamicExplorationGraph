@@ -51,10 +51,10 @@ The following files contain the datasets used in our paper. Including exploratio
 | DEEP1M    | [deep1m.tar.gz](https://static.visual-computing.com/paper/DEG/deep1m.tar.gz)     | 96        | 1,000,000       | 10,000           | [original website](https://github.com/facebookresearch/ppuda)             |
 | GloVe-100 | [glove-100.tar.gz](https://static.visual-computing.com/paper/DEG/glove-100.tar.gz) | 100       | 1,183,514       | 10,000           | [original website](https://nlp.stanford.edu/projects/glove/)   |
 
-In order to reproduce the results in our older papers, please visit the corresponding github branch.
-- [main branch](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/main) for "Dynamic Exploration Graph: A Novel Approach for Efficient Nearest Neighbor Search in Evolving Multimedia Datasets"
-- [crEG branch](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/crEG) for "An Exploration Graph with Continuous Refinement for Efficient Multimedia Retrieval"
-- [arxiv branch](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/arxiv) for "Fast Approximate nearest neighbor search with the Dynamic Exploration Graph using continuous refinement"
+In order to see the hyperparameters and reproduce the results in our older papers, please visit the "cpp" directory in the corresponding github branches:
+- [main branch](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/main/cpp) for "Dynamic Exploration Graph: A Novel Approach for Efficient Nearest Neighbor Search in Evolving Multimedia Datasets"
+- [crEG branch](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/crEG/cpp) for "An Exploration Graph with Continuous Refinement for Efficient Multimedia Retrieval"
+- [arxiv branch](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/arxiv/cpp) for "Fast Approximate nearest neighbor search with the Dynamic Exploration Graph using continuous refinement"
 
 
 
