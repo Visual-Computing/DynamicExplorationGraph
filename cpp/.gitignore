@@ -1,12 +1,7 @@
 build/
-dist/
-tmp/
-var/
 .vscode/
 CMakePresets.json
-cmake-variants.yaml
 cmake-build*
 data/
 .cache/
 AGENTS.md
-*.bat

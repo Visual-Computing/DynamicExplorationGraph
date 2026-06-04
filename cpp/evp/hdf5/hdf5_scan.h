@@ -13,6 +13,44 @@
 namespace hdf5_reader {
 namespace detail {
 
+// Forward declarations
+inline void collect_datasets(
+    std::ifstream& f,
+    uint64_t btree_abs,
+    uint64_t heap_abs,
+    uint64_t base,
+    const std::string& prefix,
+    std::map<std::string, DatasetInfo>& out);
+
+inline void collect_datasets_from_ohdr(
+    std::ifstream& f,
+    uint64_t ohdr_abs,
+    uint64_t base,
+    const std::string& prefix,
+    std::map<std::string, DatasetInfo>& out)
+{
+    OhdrInfo ohdr = parse_ohdr(f, ohdr_abs, base);
+    if (ohdr.is_group) {
+        if (!ohdr.links.empty()) {
+            for (const auto& l : ohdr.links) {
+                std::string full_name = prefix.empty() ? l.name : (prefix + "/" + l.name);
+                collect_datasets_from_ohdr(f, l.obj_abs, base, full_name, out);
+            }
+        } else if (ohdr.group_btree_abs != UNDEF64 && ohdr.group_heap_abs != UNDEF64) {
+            collect_datasets(f, ohdr.group_btree_abs, ohdr.group_heap_abs, base, prefix, out);
+        }
+    } else if (ohdr.elem_size > 0 && ohdr.dim0 > 0 && ohdr.data_abs > 0) {
+        DatasetInfo info;
+        info.name = prefix;
+        info.file_offset = ohdr.data_abs;
+        info.total_bytes = ohdr.data_len;
+        info.element_size = ohdr.elem_size;
+        info.num_rows = ohdr.dim0;
+        info.num_cols = ohdr.dim1;
+        out[prefix] = info;
+    }
+}
+
 // ============================================================================
 // Collect all leaf datasets under a group recursively.
 // prefix = path prefix, e.g. "" for root, "allknn" for /allknn
@@ -40,31 +78,14 @@ inline void collect_datasets(
             if (name.empty()) continue;
             std::string full_name = prefix.empty() ? name : (prefix + "/" + name);
 
-            // Parse the object header — auto-detects v1 or v2
-            OhdrInfo ohdr;
+            // Fetch metadata and fallback to scratch if ohdr parser didn't mark as group
             try {
-                ohdr = parse_ohdr(f, ste.ohdr_abs, base);
+                collect_datasets_from_ohdr(f, ste.ohdr_abs, base, full_name, out);
             } catch (const std::exception& ex) {
-                std::cerr << "hdf5_reader: skip OHdr at " << ste.ohdr_abs
-                          << ": " << ex.what() << "\n";
-                continue;
-            }
-
-            if (ohdr.is_group) {
-                // Recurse into sub-group
-                if (ohdr.group_btree_abs != UNDEF64 && ohdr.group_heap_abs != UNDEF64) {
-                    collect_datasets(f, ohdr.group_btree_abs, ohdr.group_heap_abs,
-                                     base, full_name, out);
+                // Fallback: use scratch fields from STE entry for groups
+                if (ste.cache_type == 1 && ste.scratch_btree != UNDEF64 && ste.scratch_heap != UNDEF64) {
+                    collect_datasets(f, ste.scratch_btree, ste.scratch_heap, base, full_name, out);
                 }
-            } else if (ohdr.elem_size > 0 && ohdr.dim0 > 0 && ohdr.data_abs > 0) {
-                DatasetInfo info;
-                info.name = full_name;
-                info.file_offset = ohdr.data_abs;
-                info.total_bytes = ohdr.data_len;
-                info.element_size = ohdr.elem_size;
-                info.num_rows = ohdr.dim0;
-                info.num_cols = ohdr.dim1;
-                out[full_name] = info;
             }
         }
     }

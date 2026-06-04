@@ -58,6 +58,11 @@ struct SteEntry {
 // ============================================================================
 // Dataset Object Header info
 // ============================================================================
+struct LinkInfo {
+    std::string name;
+    uint64_t    obj_abs;
+};
+
 struct OhdrInfo {
     uint64_t data_abs  = 0;  // absolute file offset of contiguous data
     uint64_t data_len  = 0;  // byte length
@@ -67,6 +72,7 @@ struct OhdrInfo {
     bool     is_group  = false;  // has Symbol Table message (is a group)
     uint64_t group_btree_abs = UNDEF64; // for groups: absolute btree addr
     uint64_t group_heap_abs  = UNDEF64; // for groups: absolute heap addr
+    std::vector<LinkInfo> links;       // for groups: list of child links
 };
 
 } // namespace detail

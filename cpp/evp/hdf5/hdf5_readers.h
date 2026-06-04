@@ -176,6 +176,28 @@ inline std::vector<float> read_flat_fp32(const std::string& filepath, const Data
     return out;
 }
 
+inline std::vector<int64_t> read_flat_int64(const std::string& filepath, const DatasetInfo& info, size_t start_row = 0, size_t num_rows = 0) {
+    detail::validate_dims<int64_t>(info, "read_flat_int64");
+    std::ifstream f;
+    detail::open_file(f, filepath);
+    size_t count = (size_t)info.num_rows;
+    size_t dims = (size_t)info.num_cols;
+    std::vector<int64_t> out;
+    detail::read_flat<int64_t>(f, info, out, count, dims, start_row, num_rows);
+    return out;
+}
+
+inline std::vector<double> read_flat_fp64(const std::string& filepath, const DatasetInfo& info, size_t start_row = 0, size_t num_rows = 0) {
+    detail::validate_dims<double>(info, "read_flat_fp64");
+    std::ifstream f;
+    detail::open_file(f, filepath);
+    size_t count = (size_t)info.num_rows;
+    size_t dims = (size_t)info.num_cols;
+    std::vector<double> out;
+    detail::read_flat<double>(f, info, out, count, dims, start_row, num_rows);
+    return out;
+}
+
 // ============================================================================
 // Matrix readers — return std::vector<std::vector<T>> (one row per inner vector)
 // ============================================================================
@@ -287,6 +309,29 @@ inline std::vector<std::vector<float>> read_matrix_fp32(const std::string& filep
     detail::read_matrix<float>(f, info, out, count, dims, start_row, num_rows);
     return out;
 }
+
+inline std::vector<std::vector<int64_t>> read_matrix_int64(const std::string& filepath, const DatasetInfo& info, size_t start_row = 0, size_t num_rows = 0) {
+    detail::validate_dims<int64_t>(info, "read_matrix_int64");
+    std::ifstream f;
+    detail::open_file(f, filepath);
+    size_t count = (size_t)info.num_rows;
+    size_t dims = (size_t)info.num_cols;
+    std::vector<std::vector<int64_t>> out;
+    detail::read_matrix<int64_t>(f, info, out, count, dims, start_row, num_rows);
+    return out;
+}
+
+inline std::vector<std::vector<double>> read_matrix_fp64(const std::string& filepath, const DatasetInfo& info, size_t start_row = 0, size_t num_rows = 0) {
+    detail::validate_dims<double>(info, "read_matrix_fp64");
+    std::ifstream f;
+    detail::open_file(f, filepath);
+    size_t count = (size_t)info.num_rows;
+    size_t dims = (size_t)info.num_cols;
+    std::vector<std::vector<double>> out;
+    detail::read_matrix<double>(f, info, out, count, dims, start_row, num_rows);
+    return out;
+}
+
 
 // ============================================================================
 // Find dataset by name

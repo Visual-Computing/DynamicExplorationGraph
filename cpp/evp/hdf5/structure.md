@@ -127,12 +127,37 @@ OHDr v2 parsing has been fixed. The issues were:
 All datasets (train, allknn/*, otest/*) are now correctly discovered with proper dimensions.
 
 ### Indexing Note
-- Both HDF5 `knns` datasets (`itest/knns`, `allknn/knns`, `otest/knns`) store **1-indexed**
-  integer arrays (indices 1..N, where N = number of training vectors = 200000).
-- `allknn.ivecs` is also 1-indexed (written by the Python conversion script directly from HDF5).
-  Comparison is direct: `hdf5_data[i] == ivecs_data[i]` (no -1 offset needed).
+- SISAP `knns` datasets use **mixed indexing** — do not assume uniform behavior:
+  - **1-indexed**: `itest/knns` (int32, indices 1..200000), `allknn/knns` (int32, indices 1..200000),
+    `test/knns` in llama-dev.h5 (INT64, indices 1..256921)
+  - **0-indexed**: `otest/knns` (int32, indices 0..199999) — the only exception
+- `allknn.ivecs` is also 1-indexed. Comparison is direct: `hdf5_data[i] == ivecs_data[i]`
+  (no -1 offset needed).
 - `itest.ivecs` (if it existed) may also be 1-indexed — the existing test subtracts 1 as a
   precaution, but this depends on how the file was generated.
+
+### SISAP File Examples
+
+#### Small File (benchmark-dev-wikipedia-bge-m3-small.h5)
+- SISAP 2026 benchmark dataset.
+- Groups: `itest`, `otest`, `allknn`, `train`.
+- `allknn/knns` verified 100% match against `allknn.ivecs` ground truth.
+
+#### Large File (benchmark-dev-wikipedia-bge-m3.h5, 14.2 GB)
+- Same structure as small, but with larger train/allknn datasets.
+- `allknn/knns` verified vs allknn.ivecs ✅
+
+#### llama-dev (llama-dev.h5)
+- **Disk File**: `C:\Data\ANN\sisap2026\llama-dev\llama-dev.h5`
+- **SISAP-generated file** — same Python conversion pipeline as other SISAP datasets.
+- **Root Level**:
+  - `train` dataset (FP32, 256921 x 128)
+  - `test` group
+- **Group `test`**:
+  - Contains `queries` (FP32, 1000 x 128), `dists` (FP64 / double, 1000 x 100), and `knns` (INT64, 1000 x 100).
+  - Uses HDF5 Object Header Continuation Messages (Type 16) and Link Messages (Type 6).
+  - Stale B-Tree/SNOD structures only contained 2 entries (missing `knns`). The Link Messages (Type 6) represent the up-to-date group structure.
+  - Reader updated to follow recursive continuation blocks and parse Link Messages directly, bypassing stale B-Tree/SNOD nodes when `links` are found.
 
 ---
 
@@ -152,8 +177,8 @@ All datasets (train, allknn/*, otest/*) are now correctly discovered with proper
         hdf5_btree.h              # traverse_btree() — btree v1 only
         hdf5_snod.h               # parse_snod()
         hdf5_ohdr.h               # apply_msg(), parse_ohdr_v1(), parse_ohdr_v2(), parse_ohdr()
-        hdf5_scan.h               # collect_datasets(), scan_datasets(), print_datasets()
-        hdf5_readers.h            # read_fp16_vectors(), read_int32_flat(), verify_hardcoded_offsets()
+        hdf5_scan.h               # collect_datasets(), scan_datasets(), print_datasets() (supports recursive continuation & links)
+        hdf5_readers.h            # read_fp16_vectors(), read_int32_flat(), read_matrix_int64(), read_matrix_fp64()
         test/
           test_main.cpp           # gtest entry point
           test_types.cpp          # type struct defaults, constants
@@ -166,6 +191,7 @@ All datasets (train, allknn/*, otest/*) are now correctly discovered with proper
           test_integration_large.cpp  # end-to-end scan + readers + ground truth (large)
           test_dataset_dims_large.cpp # per-dataset dimension verification (large)
           test_sanity_large.cpp   # data integrity: indices, distances, norms (large)
+          test_llama_dev.cpp      # end-to-end structure and values verification for llama-dev (uses Link & Continuation msgs)
 
 ## Dependency Order
     1. hdf5_types.h       (no deps)
@@ -204,7 +230,7 @@ All datasets (train, allknn/*, otest/*) are now correctly discovered with proper
 - **`itest.ivecs` is not on disk** — ground truth comparison test skips.
 - **FP16 datasets**: `train` and `otest/queries` have element_size=2, both small and large files.
 - **Large file (14.2 GB)**: all 9 datasets verified. train/allknn scaled to 6.35M rows.
-- **63 small tests + 33 large tests = 96 total (2 skipped, 94 passed, 0 failures).**
+- **63 small tests + 33 large tests + 5 llama-dev tests = 101 total (2 skipped, 99 passed, 0 failures).**
 - Test include paths: `#include "hdf5_types.h"` (not `hdf5/hdf5_types.h`) when
   `evp/hdf5/` is set as the include directory in CMake (`add_hdf5_test` macro).
 - **`heap_str` test vectors must null-terminate** — a `std::vector<uint8_t>`
@@ -221,7 +247,7 @@ All datasets (train, allknn/*, otest/*) are now correctly discovered with proper
 6. Fix test assumptions to match actual file structure ✅
 7. Fix OHDr v2 + dataspace v2 parsing (type byte, max dims, timestamps) ✅
 8. Add large file tests (14.2 GB, 6.35M vectors) ✅
-9. 96 tests total: 94 passed, 2 skipped (itest.ivecs missing x2), 0 failed ✅
+9. 101 tests total: 99 passed, 2 skipped (itest.ivecs missing x2), 0 failed ✅
 
 ## Remaining Work
 - **Add `itest.ivecs` ground truth file** to enable `ReadItestKnns_MatchesIvecs` test (both small and large).

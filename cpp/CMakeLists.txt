@@ -63,11 +63,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU|AppleClang")
     -ftree-vectorizer-verbose=0     # Quiet vectorizer output
   )
 
-  # Optimization levels
+  # Optimization levels (only for non-Debug builds)
   if (CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-    list(APPEND COMPILER_COMMON_FLAGS -O2)
+    target_compile_options(compile-options INTERFACE $<$<NOT:$<CONFIG:Debug>>:-O2>)
   else()
-    list(APPEND COMPILER_COMMON_FLAGS -O3)
+    target_compile_options(compile-options INTERFACE $<$<NOT:$<CONFIG:Debug>>:-O3>)
   endif()
 
   # Architecture / ISA extension flags selection
@@ -92,8 +92,8 @@ elseif(MSVC)
     /W1                             # Warning level 1
   )
 
-  # Optimization options
-  list(APPEND COMPILER_COMMON_FLAGS /O2)
+  # Optimization options (only for non-Debug builds)
+  target_compile_options(compile-options INTERFACE $<$<NOT:$<CONFIG:Debug>>:/O2>)
   target_compile_options(compile-options INTERFACE $<$<CONFIG:Release>:/Ox>)
 
   # Architecture / ISA extension flags selection

@@ -7,8 +7,8 @@
  * This executable implements 7 distinct benchmark modes (mode1–mode7), each exercising a different
  * combination of graph construction strategy (FP16 vs. EVP-quantized), search metric (EVP bits,
  * FP16 inner product, asymmetric FP16-vs-EVP), and optional post-processing (FP16 reranking).
- * All modes accept a single HDF5 input file containing at least the "train" dataset and
- * optionally the "allknn/knns" ground-truth for recall evaluation.
+ * All modes accept a single HDF5 input file (SISAP benchmark files only, e.g. benchmark-dev-wikipedia-bge-m3-small.h5 or benchmark-dev-wikipedia-bge-m3.h5) containing at least the "train" dataset and
+ * the "allknn/knns" ground-truth for recall evaluation.
  *
  * Input Format
  * ------------
@@ -115,7 +115,7 @@ int main(int argc, char* argv[]) {
     try {
         std::string data_path;
         std::string mode;
-        uint32_t threads = 6;
+        uint32_t threads = 8;
         uint32_t non_zeros = 600;
         uint32_t k_top = 15;
         uint8_t k_graph = 32;

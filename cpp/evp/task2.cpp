@@ -1,0 +1,264 @@
+/**
+ * @file task2.cpp
+ * @brief EVP Benchmark Task 2 — Entrypoint to dispatch HDF5-based MIPS ANN benchmarks for LLM attention workloads.
+ *
+ * Overview
+ * --------
+ * This executable implements the baseline benchmark mode (mode1) exercising FP32 graph construction
+ * and FP32 search.
+ * It accepts a single HDF5 input file (llama-dev.h5 ONLY — no other HDF5 files are supported for task2) containing at least the "train" dataset and
+ * the "test/knns" ground-truth for recall evaluation.
+ *
+ * Input Format
+ * ------------
+ * The input HDF5 file must contain:
+ *   - "train"         : N × D dataset of FP32 (float) feature vectors (database).
+ *   - "test/queries"  : Q × D query vectors (separate from database).
+ *   - "test/knns"     : Q × K ground-truth nearest-neighbor indices (0-based, int32),
+ *                       required when running in recall mode (the default).
+ *
+ * Output Modes
+ * ------------
+ * Two mutually exclusive output behaviours are supported:
+ *
+ *   1. Recall mode (default):
+ *      Loads the "test/knns" ground truth, runs the benchmark, and prints Recall@K.
+ *
+ *   2. Save mode (--no-recall --output <path>):
+ *      Skips ground-truth loading, runs the search once, and writes the retrieved
+ *      neighbor indices to a binary ivecs file (one row per query; each row:
+ *      uint32_t count followed by count × uint32_t label values).
+ *
+ * Benchmark Modes
+ * ---------------
+ *   mode1  (baseline: fp32-build-fp32-explore)
+ *     Builds a SizeBoundedGraph using FP32 features (Metric::InnerProduct) and
+ *     explores via FP32 inner-product similarity. Serves as the high-quality baseline.
+ *
+ *   mode4  (evp-search: fp32-build-asymmetric-fp16-evp-search)
+ *     Builds the graph with FP32 InnerProduct, quantizes database to EVP bits,
+ *     then uses asymmetric search (FP16 query × EVP bits database) via
+ *     Metric::FP16EvpAsymmetric. Requires --non-zeros.
+ *
+ * CLI Usage
+ * ---------
+ *   deglib_evp_task2.exe <hdf5_file> <mode> [options...]
+ *
+ *   <mode> accepts:
+ *     - "baseline"
+ *     - "fp32-build-fp32-explore"
+ *     - "mode1"
+ *
+ * Key Options
+ * -----------
+ *   --threads <n>      Parallel thread count (default: 6).
+ *   --k-top <n>        Number of nearest neighbors to retrieve (default: 30).
+ *   --k-graph <n>      Graph degree / edges per vertex (default: 32).
+ *   --k-ext <n>        Builder extension degree (default: 32).
+ *   --eps-ext <f>      Builder entry-search expansion coefficient (default: 0.001).
+ *   --max-dist <n>     Maximum distance computations per query during exploration (default: 200).
+ *   --no-recall        Skip recall computation; requires --output.
+ *   --output <path>    Write results to a binary ivecs file.
+ *   --graph <path>     File path to save the pre-built graph to, or load a pre-built graph from.
+ *   --prune-worst <n>  Number of worst (least similar) neighbors per vertex to replace with self-loops.
+ *
+ * Examples
+ * --------
+ *   # FP32 baseline (mode1)
+ *   .\deglib_evp_task2.exe llama-dev.h5 mode1 --max-dist 100
+ */
+
+#if defined(_WIN32)
+    #define _CRT_SECURE_NO_WARNINGS
+#endif
+
+#include <cstdio>
+#include <string>
+#include <filesystem>
+#include <iostream>
+
+#include "task2/mode1.h"
+#include "task2/mode2.h"
+#include "task2/mode3.h"
+#include "task2/mode4.h"
+
+int main(int argc, char* argv[]) {
+    try {
+        std::string data_path;
+        std::string mode;
+        uint32_t threads = 8;
+        uint32_t build_threads = 1;
+        uint32_t k_top = 30;
+        uint8_t k_graph = 30;
+        uint8_t k_ext = 30;
+        float eps_ext = 0.001f;
+        uint32_t non_zeros = 64;
+        bool run_recall = true;
+        std::string output_path;
+        std::string graph_path;
+        std::string max_dist_str = "20000";
+        uint32_t prune_worst = 0;
+        std::string eps_search_str = "0.3";
+        uint32_t num_runs = 1;
+        deglib::builder::OptimizationTarget opt_target = deglib::builder::OptimizationTarget::LowLID;
+
+        if (argc < 3) {
+            std::fprintf(stderr, "Usage: %s <hdf5_file_path> <mode_name> [options...]\n", argv[0]);
+            std::fprintf(stderr, "Modes:\n");
+            std::fprintf(stderr, "  baseline | fp32-build-fp32-explore | mode1            : FP32 build + FP32 explore\n");
+            std::fprintf(stderr, "  fp16-build-fp16-explore | mode2                      : FP16 build + FP16 explore\n");
+            std::fprintf(stderr, "  baseline-fp16 | fp32-build-fp16-explore | mode3       : FP32 build + FP16 explore\n");
+            std::fprintf(stderr, "  evp-search | fp32-build-evp-search | mode4                : FP32 build + asymmetric FP16xEVP search\n\n");
+            std::fprintf(stderr, "  --threads <n>      Number of CPU worker threads used for query exploration (default: 6).\n");
+            std::fprintf(stderr, "  --build-threads <n> Number of CPU worker threads used for graph construction (default: same as --threads).\n");
+            std::fprintf(stderr, "  --k-top <n>        The final number of nearest neighbors (top-K) retrieved per query\n");
+            std::fprintf(stderr, "                     and evaluated for recall or written to the output file (default: 30).\n");
+            std::fprintf(stderr, "  --k-graph <n>      The degree of the regular graph. Specifies the exact number of edges\n");
+            std::fprintf(stderr, "                     (neighbors) per vertex. Must be an even integer >= 4 (default: 32).\n");
+            std::fprintf(stderr, "  --k-ext <n>        The search size (k-top parameter) used during graph construction. Decides\n");
+            std::fprintf(stderr, "                     how many good neighbors are shown to each newly added node, from which it\n");
+            std::fprintf(stderr, "                     selects nodes to connect with up to k-graph (default: 32).\n");
+            std::fprintf(stderr, "  --non-zeros <n>    EVP quantization sparsity: number of top absolute-value elements\n");
+            std::fprintf(stderr, "                     per vector retained after quantization (default: 64, for mode4 only).\n");
+            std::fprintf(stderr, "  --eps-ext <f>      Search expansion parameter used together with k-ext during graph construction.\n");
+            std::fprintf(stderr, "                     Decides if nodes whose distance is slightly worse (e.g. 0.01 = 1%%) than the\n");
+            std::fprintf(stderr, "                     current worst in the search list should be explored (default: 0.001).\n");
+            std::fprintf(stderr, "  --no-recall        Disables loading ground-truth datasets and calculating Recall@K metrics.\n");
+            std::fprintf(stderr, "                     Required when exporting search results to an output file.\n");
+            std::fprintf(stderr, "  --output <path>    Path to a binary `.ivecs` file where the retrieved nearest-neighbor indices\n");
+            std::fprintf(stderr, "                     will be saved (one row per query; uint32_t count followed by indices).\n");
+            std::fprintf(stderr, "  --max-dist <list>  Exploration search budget or comma-separated list of budgets. Specifies the maximum number of\n");
+            std::fprintf(stderr, "                     distance computations allowed per query. Main parameter to trade search speed for recall (default: 200).\n");
+            std::fprintf(stderr, "  --graph <path>     File path to save the pre-built graph to, or load a pre-built graph from\n");
+            std::fprintf(stderr, "                     to bypass the construction phase.\n");
+            std::fprintf(stderr, "  --prune-worst <n>  Number of worst (least similar) neighbors per vertex to replace with self-loops (default: 0).\n");
+            std::fprintf(stderr, "  --num-runs <n>     Number of query explorations to perform and average (default: 1).\n");
+            std::fprintf(stderr, "  --opt-target <str> Optimization target for graph builder (LowLID, HighLID, StreamingData_SchemeA, ..., default: LowLID).\n");
+            return 1;
+        }
+
+        data_path = argv[1];
+        mode = argv[2];
+
+        for (int i = 3; i < argc; ++i) {
+            std::string arg = argv[i];
+            if (arg == "--threads" && i + 1 < argc) {
+                threads = std::stoul(argv[++i]);
+            } else if (arg == "--build-threads" && i + 1 < argc) {
+                build_threads = std::stoul(argv[++i]);
+            } else if (arg == "--k-top" && i + 1 < argc) {
+                k_top = std::stoul(argv[++i]);
+            } else if (arg == "--k-graph" && i + 1 < argc) {
+                k_graph = static_cast<uint8_t>(std::stoul(argv[++i]));
+            } else if (arg == "--k-ext" && i + 1 < argc) {
+                k_ext = static_cast<uint8_t>(std::stoul(argv[++i]));
+            } else if (arg == "--eps-ext" && i + 1 < argc) {
+                eps_ext = std::stof(argv[++i]);
+            } else if (arg == "--non-zeros" && i + 1 < argc) {
+                non_zeros = std::stoul(argv[++i]);
+            } else if (arg == "--no-recall") {
+                run_recall = false;
+            } else if (arg == "--output" && i + 1 < argc) {
+                output_path = argv[++i];
+            } else if (arg == "--max-dist" && i + 1 < argc) {
+                max_dist_str = argv[++i];
+            } else if (arg == "--graph" && i + 1 < argc) {
+                graph_path = argv[++i];
+            } else if (arg == "--prune-worst" && i + 1 < argc) {
+                prune_worst = std::stoul(argv[++i]);
+            } else if (arg == "--eps-search" && i + 1 < argc) {
+                eps_search_str = argv[++i];
+            } else if (arg == "--num-runs" && i + 1 < argc) {
+                num_runs = std::stoul(argv[++i]);
+            } else if (arg == "--opt-target" && i + 1 < argc) {
+                std::string target_str = argv[++i];
+                if (target_str == "LowLID") {
+                    opt_target = deglib::builder::OptimizationTarget::LowLID;
+                } else if (target_str == "HighLID") {
+                    opt_target = deglib::builder::OptimizationTarget::HighLID;
+                } else if (target_str == "StreamingData_SchemeA") {
+                    opt_target = deglib::builder::OptimizationTarget::StreamingData_SchemeA;
+                } else if (target_str == "StreamingData_SchemeB") {
+                    opt_target = deglib::builder::OptimizationTarget::StreamingData_SchemeB;
+                } else if (target_str == "StreamingData_SchemeC") {
+                    opt_target = deglib::builder::OptimizationTarget::StreamingData_SchemeC;
+                } else if (target_str == "StreamingData_SchemeD") {
+                    opt_target = deglib::builder::OptimizationTarget::StreamingData_SchemeD;
+                } else if (target_str == "SchemeA") {
+                    opt_target = deglib::builder::OptimizationTarget::SchemeA;
+                } else if (target_str == "SchemeB") {
+                    opt_target = deglib::builder::OptimizationTarget::SchemeB;
+                } else {
+                    std::fprintf(stderr, "Error: Unknown optimization target '%s'\n", target_str.c_str());
+                    return 1;
+                }
+            } else {
+                std::fprintf(stderr, "Warning: Unknown or malformed option '%s'\n", arg.c_str());
+            }
+        }
+
+        if (build_threads == 0) {
+            build_threads = threads;
+        }
+
+        std::vector<uint32_t> max_dist_list = evp_common::parse_list(max_dist_str);
+        std::vector<float> eps_search_list = evp_common::parse_list_f(eps_search_str);
+
+        // Validate --prune-worst
+        if (prune_worst >= k_graph) {
+            std::fprintf(stderr, "Error: --prune-worst (%u) must be less than --k-graph (%u)\n", prune_worst, (uint32_t)k_graph);
+            return 1;
+        }
+
+        // Validate --no-recall restrictions
+        if (!run_recall) {
+            if (output_path.empty()) {
+                std::fprintf(stderr, "Error: --output path must be specified when --no-recall is set.\n");
+                return 1;
+            }
+            if (max_dist_list.size() > 1) {
+                std::fprintf(stderr, "Error: Multiple parameters for --max-dist are not allowed when --no-recall is set.\n");
+                return 1;
+            }
+        }
+
+        std::setvbuf(stdout, NULL, _IONBF, 0);
+        std::setvbuf(stderr, NULL, _IONBF, 0);
+
+        // Validate that data_path has an HDF5 extension
+        std::filesystem::path path(data_path);
+        std::string ext = path.extension().string();
+        if (ext != ".h5" && ext != ".hdf5") {
+            std::fprintf(stderr, "Error: Only HDF5 (.h5 or .hdf5) input files are accepted by task2.\n");
+            return 1;
+        }
+
+        // Print compiled-in SIMD instruction set info
+#ifdef USE_AVX512
+        std::fprintf(stderr, "SIMD: AVX-512, AVX2, SSE\n");
+#elif defined(USE_AVX)
+        std::fprintf(stderr, "SIMD: AVX2, SSE\n");
+#elif defined(USE_SSE)
+        std::fprintf(stderr, "SIMD: SSE\n");
+#else
+        std::fprintf(stderr, "SIMD: none (scalar)\n");
+#endif
+
+         if (mode == "fp32-build-fp32-explore" || mode == "baseline" || mode == "mode1") {
+             return task2::mode_baseline::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target);
+         } else if (mode == "fp16-build-fp16-explore" || mode == "mode2") {
+             return task2::mode_fp16_build::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target);
+         } else if (mode == "fp32-build-fp16-explore" || mode == "baseline-fp16" || mode == "mode3") {
+             return task2::mode_fp16::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target);
+         } else if (mode == "evp-search" || mode == "fp32-build-evp-search" || mode == "mode4") {
+             return task2::mode_evp_asym_search::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, non_zeros);
+         } else {
+             std::fprintf(stderr, "Error: Unknown mode '%s'. Supported modes: mode1, mode2, mode3, mode4\n", mode.c_str());
+             return 1;
+         }
+
+    } catch (const std::exception& ex) {
+        std::fprintf(stderr, "Fatal error: %s\n", ex.what());
+        return 1;
+    }
+}

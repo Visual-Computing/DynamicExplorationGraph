@@ -64,6 +64,44 @@ inline void apply_msg(std::ifstream& f, uint16_t mtype, uint64_t mdata_abs,
         info.is_group = true;
         info.group_btree_abs = (br != UNDEF64) ? base + br : UNDEF64;
         info.group_heap_abs = (hr != UNDEF64) ? base + hr : UNDEF64;
+    } else if (mtype == 6) {
+        // ---- Link Message ----
+        fseek(f, mdata_abs);
+        uint8_t lver = frd8(f);
+        if (lver == 1) {
+            uint8_t lflags = frd8(f);
+            uint8_t link_type = 0;
+            if (lflags & 0x08) {
+                link_type = frd8(f);
+            }
+            if (lflags & 0x04) {
+                fskip(f, 8); // creation order
+            }
+            if (lflags & 0x10) {
+                fskip(f, 1); // character set
+            }
+            // link name length: 1u << (lflags & 0x03) bytes
+            uint64_t name_len = 0;
+            uint8_t name_len_sz = 1u << (lflags & 0x03);
+            if (name_len_sz == 1) name_len = frd8(f);
+            else if (name_len_sz == 2) name_len = frd16(f);
+            else if (name_len_sz == 4) name_len = frd32(f);
+            else name_len = frd64(f);
+
+            // Read name
+            std::string name(name_len, '\0');
+            f.read(&name[0], (std::streamsize)name_len);
+
+            // If hard link (type 0), read address
+            if (link_type == 0) {
+                uint64_t obj_rel = frd64(f);
+                if (obj_rel != UNDEF64) {
+                    info.links.push_back({name, base + obj_rel});
+                    // Having links makes this object a group
+                    info.is_group = true;
+                }
+            }
+        }
     }
 }
 
@@ -71,6 +109,33 @@ inline void apply_msg(std::ifstream& f, uint16_t mtype, uint64_t mdata_abs,
 // Object Header v1
 // First byte == 1, followed by fixed header then 8-byte aligned messages.
 // ============================================================================
+inline void parse_ohdr_messages_v1(std::ifstream& f, uint64_t block_abs, uint32_t block_size, uint64_t base, OhdrInfo& info, uint16_t& msgs_left) {
+    uint32_t consumed = 0;
+    while (consumed < block_size && msgs_left > 0) {
+        fseek(f, block_abs + consumed);
+        uint16_t mtype = frd16(f);
+        uint16_t msize = frd16(f);
+        fskip(f, 1 + 3);              // flags + reserved
+        uint64_t mdata_abs = block_abs + consumed + 8;
+
+        if (mtype == 16) {
+            // Continuation message: read offset and length (using 8-byte offsets/lengths)
+            fseek(f, mdata_abs);
+            uint64_t cont_off = frd64(f);
+            uint64_t cont_len = frd64(f);
+            msgs_left--;
+            // Recursively parse the continuation block
+            parse_ohdr_messages_v1(f, base + cont_off, (uint32_t)cont_len, base, info, msgs_left);
+        } else {
+            apply_msg(f, mtype, mdata_abs, base, info);
+            msgs_left--;
+        }
+
+        uint32_t padded = (8u + msize + 7u) & ~7u;
+        consumed += padded;
+    }
+}
+
 inline OhdrInfo parse_ohdr_v1(std::ifstream& f, uint64_t ohdr_abs, uint64_t base) {
     fseek(f, ohdr_abs);
     uint8_t ver = frd8(f);
@@ -84,21 +149,8 @@ inline OhdrInfo parse_ohdr_v1(std::ifstream& f, uint64_t ohdr_abs, uint64_t base
     // messages start at offset 16 from ohdr_abs
 
     OhdrInfo info;
-    uint32_t consumed = 0;
-    const uint64_t msg_base = ohdr_abs + 16;
-
-    for (uint16_t m = 0; m < n_msgs && consumed < hdr_sz; ++m) {
-        fseek(f, msg_base + consumed);
-        uint16_t mtype = frd16(f);
-        uint16_t msize = frd16(f);
-        fskip(f, 1 + 3);              // flags + reserved
-        uint64_t mdata_abs = msg_base + consumed + 8;
-
-        apply_msg(f, mtype, mdata_abs, base, info);
-
-        uint32_t padded = (8u + msize + 7u) & ~7u;
-        consumed += padded;
-    }
+    uint16_t msgs_left = n_msgs;
+    parse_ohdr_messages_v1(f, ohdr_abs + 16, hdr_sz, base, info, msgs_left);
 
     // Compute data_len if not set by layout message
     if (info.data_len == 0 && info.elem_size > 0) {

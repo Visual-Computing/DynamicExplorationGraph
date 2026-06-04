@@ -804,7 +804,7 @@ private:
                     // in the neighbor list at the same time
                     if (new_neighbor_weight == std::numeric_limits<float>::lowest()) {
                         std::cerr << "could not find a new neighbor for candidate " << candidate_index << " when adding vertex "
-                                  << external_label << std::endl;
+                                  << external_label << (this->extend_thread_count > 1 ? " (this can happen in multi-threaded mode)" : "") << std::endl;
                         continue;
                     }
 
@@ -840,7 +840,7 @@ private:
                     // in the neighbor list at the same time
                     if (best_distortion == std::numeric_limits<float>::max()) {
                         std::cerr << "could not find a new neighbor for candidate " << candidate_index << " when adding vertex "
-                                  << external_label << std::endl;
+                                  << external_label << (this->extend_thread_count > 1 ? " (this can happen in multi-threaded mode)" : "") << std::endl;
                         continue;
                     }
                 } else if (this->optimizationTarget_ == SchemeA) {
@@ -873,7 +873,7 @@ private:
                     // in the neighbor list at the same time
                     if (best_neighbor_distance == std::numeric_limits<float>::max()) {
                         std::cerr << "could not find a new neighbor for candidate " << candidate_index << " when adding vertex "
-                                  << external_label << std::endl;
+                                  << external_label << (this->extend_thread_count > 1 ? " (this can happen in multi-threaded mode)" : "") << std::endl;
                         continue;
                     }
                 } else if (this->optimizationTarget_ == SchemeB) {
@@ -906,7 +906,7 @@ private:
                     // in the neighbor list at the same time
                     if (min_edge_weight == std::numeric_limits<float>::max()) {
                         std::cerr << "could not find a new neighbor for candidate " << candidate_index << " when adding vertex "
-                                  << external_label << std::endl;
+                                  << external_label << (this->extend_thread_count > 1 ? " (this can happen in multi-threaded mode)" : "") << std::endl;
                         continue;
                     }
 

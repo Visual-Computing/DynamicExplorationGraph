@@ -13,6 +13,7 @@
 
 #include "hdf5_reader.h"
 #include "graph/sizebounded_graph.h"
+#include "builder.h"
 #include "concurrent.h"
 #include <algorithm>
 
@@ -40,6 +41,32 @@ inline std::vector<uint32_t> parse_list(const std::string& s) {
     return res;
 }
 
+inline std::vector<float> parse_list_f(const std::string& s) {
+    std::vector<float> res;
+    std::stringstream ss(s);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        if (!item.empty()) {
+            res.push_back(std::stof(item));
+        }
+    }
+    return res;
+}
+
+inline const char* opt_target_str(deglib::builder::OptimizationTarget t) {
+    switch (t) {
+        case deglib::builder::OptimizationTarget::LowLID:                  return "LowLID";
+        case deglib::builder::OptimizationTarget::HighLID:                 return "HighLID";
+        case deglib::builder::OptimizationTarget::StreamingData_SchemeA:   return "StreamingData_SchemeA";
+        case deglib::builder::OptimizationTarget::StreamingData_SchemeB:   return "StreamingData_SchemeB";
+        case deglib::builder::OptimizationTarget::StreamingData_SchemeC:   return "StreamingData_SchemeC";
+        case deglib::builder::OptimizationTarget::StreamingData_SchemeD:   return "StreamingData_SchemeD";
+        case deglib::builder::OptimizationTarget::SchemeA:                 return "SchemeA";
+        case deglib::builder::OptimizationTarget::SchemeB:                 return "SchemeB";
+        default:                                                            return "Unknown";
+    }
+}
+
 inline void print_summary(
     const char* mode_name,
     uint32_t mode_number,
@@ -63,7 +90,8 @@ inline void print_summary(
     uint32_t non_zeros,
     size_t count,
     size_t dims,
-    uint32_t evpK)
+    uint32_t evpK,
+    deglib::builder::OptimizationTarget opt_target = deglib::builder::OptimizationTarget::LowLID)
 {
     std::printf("========================================================================\n");
     std::printf("  FINAL SUMMARY (%s - Mode %u)\n", mode_name, mode_number);
@@ -86,6 +114,7 @@ inline void print_summary(
     std::printf("  K_GRAPH:               %u\n", (uint32_t)k_graph);
     std::printf("  K_EXT:                 %u\n", (uint32_t)k_ext);
     std::printf("  EPS_EXT:               %.3f\n", eps_ext);
+    std::printf("  OPT_TARGET:            %s\n", opt_target_str(opt_target));
     if (evpK > 0) {
         std::printf("  evpK:                  %u\n", evpK);
     }

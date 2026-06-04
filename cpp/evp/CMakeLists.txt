@@ -7,6 +7,13 @@ target_link_libraries(deglib_evp_task1 PUBLIC DEG_LIB compile-options
                                                 fmt::fmt-header-only)
 target_compile_definitions(deglib_evp_task1 PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
 
+# Build deglib_evp_task2 target
+add_executable(deglib_evp_task2 task2.cpp)
+target_include_directories(deglib_evp_task2 PRIVATE ${CMAKE_SOURCE_DIR}/benchmark/include)
+target_link_libraries(deglib_evp_task2 PUBLIC DEG_LIB compile-options
+                                                fmt::fmt-header-only)
+target_compile_definitions(deglib_evp_task2 PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
+
 # ---------------------------------------------------------------------------
 # HDF5 module unit tests (header-only, uses gtest bundled with fmt)
 # ---------------------------------------------------------------------------
@@ -30,10 +37,11 @@ add_hdf5_test(test_hdf5_io hdf5/test/test_io.cpp)
 add_hdf5_test(test_hdf5_structural hdf5/test/test_structural.cpp)
 add_hdf5_test(test_hdf5_ohdr hdf5/test/test_ohdr.cpp)
 add_hdf5_test(test_hdf5_integration hdf5/test/test_integration.cpp)
-add_hdf5_test(test_dataset_dims hdf5/test/test_dataset_dims.cpp)
-add_hdf5_test(test_sanity hdf5/test/test_sanity.cpp)
-add_hdf5_test(test_dataset_dims_large hdf5/test/test_dataset_dims_large.cpp)
-add_hdf5_test(test_sanity_large hdf5/test/test_sanity_large.cpp)
-add_hdf5_test(test_integration_large hdf5/test/test_integration_large.cpp)
+add_hdf5_test(test_hdf5_dataset_dims hdf5/test/test_dataset_dims.cpp)
+add_hdf5_test(test_hdf5_sanity hdf5/test/test_sanity.cpp)
+add_hdf5_test(test_hdf5_llama_dev hdf5/test/test_llama_dev.cpp)
+add_hdf5_test(test_hdf5_dataset_dims_large hdf5/test/test_dataset_dims_large.cpp)
+add_hdf5_test(test_hdf5_sanity_large hdf5/test/test_sanity_large.cpp)
+add_hdf5_test(test_hdf5_integration_large hdf5/test/test_integration_large.cpp)
 
 
