@@ -47,8 +47,8 @@ The modes are built into a single executable `deglib_evp_task1`.
 
 Configure and build:
 ```powershell
-cmake --preset "Visual Studio Community 2022"
-cmake --build --preset "Visual Studio Community 2022 release" --target deglib_evp_task1
+cmake --preset "<Build-Preset-Name>"
+cmake --build --preset "<Build-Preset-Name>" --target deglib_evp_task1
 ```
 
 ---

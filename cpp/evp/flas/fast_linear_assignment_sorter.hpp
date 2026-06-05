@@ -15,11 +15,16 @@
 #include <cmath>
 #include <functional>
 
+#include <distance/fp32_l2.h>
+#include <distance/fp32_inner_product.h>
+
 #include "map_field.hpp"
 #include "junker_volgenant_solver.hpp"
 
 typedef std::mt19937 RandomEngine;
 constexpr int QUANT = 256;
+
+enum class FlasMetric { L2, InnerProduct };
 
 // ------------------- UTILS -------------------
 inline int min(const int a, const int b) {
@@ -60,6 +65,7 @@ public:
   float sample_factor;
   int max_swap_positions;
   int optimize_narrow_grids;
+  FlasMetric metric = FlasMetric::L2;
 };
 
 inline FlasSettings default_flas_settings() {
@@ -83,6 +89,7 @@ struct InternalData {
   int *dist_lut;
   float *dist_lut_f;
   RandomEngine* rng;
+  FlasMetric metric = FlasMetric::L2;
 };
 
 inline InternalData create_internal_data(MapField *map_fields, int columns, int rows, int dim, int max_swap_positions, RandomEngine* rng) {
@@ -650,16 +657,23 @@ T get_l2_distance(const T *fv1, const T *fv2, int dim) {
   return sqrt(get_squared_l2_distance<T>(fv1, fv2, dim));
 }
 
-inline void calc_dist_lut_l2_int(const InternalData *data, int num_swaps) {
+inline void calc_dist_lut_int(const InternalData *data, int num_swaps) {
   float max = 0;
+  const size_t dim_sz = static_cast<size_t>(data->dim);
   for (int i = 0; i < num_swaps; i++)
     for (int j = 0; j < num_swaps; j++) {
-      const float val = get_squared_l2_distance(data->fvs[i], data->som_fvs[j], data->dim);
+      const float val =
+        (data->metric == FlasMetric::InnerProduct)
+          ? deglib::distances::InnerProductFloat::compare(
+              data->fvs[i], data->som_fvs[j], &dim_sz)
+          : deglib::distances::L2Float::compare(
+              data->fvs[i], data->som_fvs[j], &dim_sz);
       data->dist_lut_f[i * num_swaps + j] = val;
       if (val > max)
         max = val;
     }
 
+  if (max < 1e-10f) max = 1.0f; // avoid division by zero
   for (int i = 0; i < num_swaps; i++)
     for (int j = 0; j < num_swaps; j++) {
       data->dist_lut[i * num_swaps + j] = static_cast<int>(roundf(static_cast<float>(QUANT) * data->dist_lut_f[i * num_swaps + j] / max));
@@ -684,7 +698,7 @@ inline void do_swaps(const InternalData *data, int num_swaps) {
   }
 
   if (num_valid > 0) {
-    calc_dist_lut_l2_int(data, num_swaps);
+    calc_dist_lut_int(data, num_swaps);
     int *permutation = compute_assignment(data->dist_lut, num_swaps);
 
     for (int i = 0; i < num_swaps; i++) {
@@ -800,7 +814,8 @@ inline void do_sorting_full(
     }
   }
 
-  const InternalData data = create_internal_data(map_fields, columns, rows, dim, settings->max_swap_positions, rng);
+  InternalData data = create_internal_data(map_fields, columns, rows, dim, settings->max_swap_positions, rng);
+  data.metric = settings->metric;
 
   do {
     copy_feature_vectors_to_som(&data, settings);

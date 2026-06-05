@@ -44,6 +44,7 @@
 
 #include "../evp_common.h"
 #include "../hdf5_reader.h"
+#include "../flas_common.h"
 
 namespace task2::mode_evp_asym_search {
 
@@ -176,7 +177,8 @@ static int run(
     uint32_t prune_worst = 0,
     const std::vector<float>& eps_search_list = {0.1f},
     deglib::builder::OptimizationTarget opt_target = deglib::builder::OptimizationTarget::LowLID,
-    uint32_t non_zeros = 64)
+    uint32_t non_zeros = 64,
+    bool use_flas = false)
 {
     const std::string h5path = data_path.string();
     std::printf("\n");
@@ -253,8 +255,17 @@ static int run(
     double t_load_fp32 = evp_common::now_ms();
     std::vector<float> database_fp32 = hdf5_reader::read_flat_fp32(h5path, train_info);
     double load_fp32_ms = evp_common::now_ms() - t_load_fp32;
-    std::printf("Loaded %.1fM FP32 values in %.2f ms\n", (count * dims) / 1e6, load_fp32_ms);
     load_ms += load_fp32_ms;
+
+    // --------------------------------------------------------------------------
+    // Optional FLAS pre-sort
+    // --------------------------------------------------------------------------
+    std::vector<uint32_t> sorted_indices;
+    double flas_ms = 0.0;
+    if (use_flas) {
+        sorted_indices = flas_common::run_flas_presort(database_fp32.data(), count, dims, FlasMetric::L2, flas_ms);
+        if (sorted_indices.empty()) return 1;
+    }
 
     // --------------------------------------------------------------------------
     // Build/Load graph with Metric::InnerProduct (FP32)
@@ -283,8 +294,12 @@ static int run(
     }
 
     if (!loaded) {
-        std::printf("Building graph: k_graph=%u, k_ext=%u, eps_ext=%.3f, threads=%u, opt_target=%s\n",
-                    k_graph, k_ext, eps_ext, build_threads, evp_common::opt_target_str(opt_target));
+        if (use_flas)
+            std::printf("Building graph (FLAS order): k_graph=%u, k_ext=%u, eps_ext=%.3f, threads=%u, opt_target=%s\n",
+                        k_graph, k_ext, eps_ext, build_threads, evp_common::opt_target_str(opt_target));
+        else
+            std::printf("Building graph: k_graph=%u, k_ext=%u, eps_ext=%.3f, threads=%u, opt_target=%s\n",
+                        k_graph, k_ext, eps_ext, build_threads, evp_common::opt_target_str(opt_target));
 
         graph_ptr = std::make_unique<deglib::graph::SizeBoundedGraph>(static_cast<uint32_t>(count), k_graph, feature_space);
         deglib::graph::SizeBoundedGraph& graph = *graph_ptr;
@@ -311,8 +326,8 @@ static int run(
             size_t current_chunk_size = std::min(load_chunk_size, count - start_row);
 
             size_t bytes_per_vector = dims * sizeof(float);
-            for (size_t i = 0; i < current_chunk_size; ++i) {
-                size_t idx = start_row + i;
+            for (size_t j = 0; j < current_chunk_size; ++j) {
+                size_t idx = use_flas ? sorted_indices[start_row + j] : (start_row + j);
                 std::vector<std::byte> feature(bytes_per_vector);
                 std::memcpy(feature.data(), &database_fp32[idx * dims], bytes_per_vector);
                 builder.addEntry(static_cast<uint32_t>(idx), std::move(feature));
@@ -450,9 +465,9 @@ static int run(
     double total_time_ms = load_ms + build_ms + quantize_ms + best_timings.search_ms;
 
     evp_common::print_summary(
-        "FP32 Build, Asymmetric FP16×EVP Search", 1,
+        (use_flas ? "FP32 Build, Asymmetric FP16×EVP Search (FLAS)" : "FP32 Build, Asymmetric FP16×EVP Search"), 1,
         load_ms, 0.0, build_ms, quantize_ms, prune_ms,
-        best_timings.search_ms, 0.0, total_time_ms,
+        best_timings.search_ms, flas_ms, total_time_ms,
         compute_recall, k_top, best_timings.recall,
         threads, best_max_dist, 0,
         k_graph, k_ext, eps_ext, non_zeros, count, dims, 0, opt_target

@@ -39,6 +39,7 @@
 
 #include "../evp_common.h"
 #include "../hdf5_reader.h"
+#include "../flas_common.h"
 
 namespace task2::mode_fp16_build {
 
@@ -166,7 +167,8 @@ static int run(
     const std::string& graph_path = "",
     uint32_t prune_worst = 0,
     const std::vector<float>& eps_search_list = {0.1f},
-    deglib::builder::OptimizationTarget opt_target = deglib::builder::OptimizationTarget::LowLID)
+    deglib::builder::OptimizationTarget opt_target = deglib::builder::OptimizationTarget::LowLID,
+    bool use_flas = false)
 {
     const std::string h5path = data_path.string();
     std::printf("\n");
@@ -227,6 +229,24 @@ static int run(
     std::printf("=== FP16 Build, FP16 Search - Task 2 Mode 2 (opt_target=%s) ===\n", evp_common::opt_target_str(opt_target));
 
     // --------------------------------------------------------------------------
+    // Load ALL FP32 training vectors once
+    // --------------------------------------------------------------------------
+    double t_load_fp32 = evp_common::now_ms();
+    std::vector<float> database_fp32 = hdf5_reader::read_flat_fp32(h5path, train_info);
+    double load_fp32_ms = evp_common::now_ms() - t_load_fp32;
+    load_ms += load_fp32_ms;
+
+    // --------------------------------------------------------------------------
+    // Optional FLAS pre-sort
+    // --------------------------------------------------------------------------
+    std::vector<uint32_t> sorted_indices;
+    double flas_ms = 0.0;
+    if (use_flas) {
+        sorted_indices = flas_common::run_flas_presort(database_fp32.data(), count, dims, FlasMetric::L2, flas_ms);
+        if (sorted_indices.empty()) return 1;
+    }
+
+    // --------------------------------------------------------------------------
     // Build/Load graph with Metric::FP16InnerProduct
     // --------------------------------------------------------------------------
     deglib::FloatSpace feature_space(static_cast<uint32_t>(dims), deglib::Metric::FP16InnerProduct);
@@ -253,7 +273,10 @@ static int run(
     }
 
     if (!loaded) {
-        std::printf("Building graph: k_graph=%u, k_ext=%u, eps_ext=%.3f, threads=%u, opt_target=%s\n", k_graph, k_ext, eps_ext, build_threads, evp_common::opt_target_str(opt_target));
+        if (use_flas)
+            std::printf("Building graph (FLAS order): k_graph=%u, k_ext=%u, eps_ext=%.3f, threads=%u, opt_target=%s\n", k_graph, k_ext, eps_ext, build_threads, evp_common::opt_target_str(opt_target));
+        else
+            std::printf("Building graph: k_graph=%u, k_ext=%u, eps_ext=%.3f, threads=%u, opt_target=%s\n", k_graph, k_ext, eps_ext, build_threads, evp_common::opt_target_str(opt_target));
 
         graph_ptr = std::make_unique<deglib::graph::SizeBoundedGraph>(static_cast<uint32_t>(count), k_graph, feature_space);
         deglib::graph::SizeBoundedGraph& graph = *graph_ptr;
@@ -279,23 +302,18 @@ static int run(
         for (size_t start_row = 0; start_row < count; start_row += load_chunk_size) {
             size_t current_chunk_size = std::min(load_chunk_size, count - start_row);
 
-            // Load chunk of FP32 vectors
-            double t_chunk_load = evp_common::now_ms();
-            std::vector<std::vector<float>> chunk_vectors = hdf5_reader::read_matrix_fp32(h5path, train_info, start_row, current_chunk_size);
-            double chunk_load_ms = evp_common::now_ms() - t_chunk_load;
-
-            // Add chunk entries
             size_t bytes_per_vector = dims * sizeof(uint16_t);
-            for (size_t i = 0; i < current_chunk_size; ++i) {
-                std::vector<uint16_t> fp16_vec = floats_to_fp16(chunk_vectors[i]);
+            for (size_t j = 0; j < current_chunk_size; ++j) {
+                size_t idx = use_flas ? sorted_indices[start_row + j] : (start_row + j);
+                // Convert FP32 → FP16 from the flat array
+                std::vector<float> fp32_vec(dims);
+                std::memcpy(fp32_vec.data(), &database_fp32[idx * dims], dims * sizeof(float));
+                std::vector<uint16_t> fp16_vec = floats_to_fp16(fp32_vec);
                 std::vector<std::byte> feature(bytes_per_vector);
                 std::memcpy(feature.data(), fp16_vec.data(), bytes_per_vector);
-                builder.addEntry(static_cast<uint32_t>(start_row + i), std::move(feature));
+                builder.addEntry(static_cast<uint32_t>(idx), std::move(feature));
             }
-            chunk_vectors.clear();
-            chunk_vectors.shrink_to_fit();
 
-            // Build chunk
             double t_chunk_build = evp_common::now_ms();
             auto dummy_callback = [](deglib::builder::BuilderStatus&) {};
             builder.build(dummy_callback, false);
@@ -303,9 +321,9 @@ static int run(
             build_ms += chunk_build_ms;
 
             double elapsed_s = (evp_common::now_ms() - t_build_start) / 1000.0;
-            std::printf("  Chunk [%6zuk - %6zuk): Load = %.2fs, Build = %.2fs | Elapsed = %.2fs\n",
+            std::printf("  Chunk [%6zuk - %6zuk): Build = %.2fs | Elapsed = %.2fs\n",
                         start_row / 1000, (start_row + current_chunk_size) / 1000,
-                        chunk_load_ms / 1000.0, chunk_build_ms / 1000.0, elapsed_s);
+                        chunk_build_ms / 1000.0, elapsed_s);
         }
 
         if (!graph_path.empty()) {
@@ -315,6 +333,10 @@ static int run(
     }
 
     deglib::graph::SizeBoundedGraph& graph = *graph_ptr;
+
+    // Free FP32 data — no longer needed
+    database_fp32.clear();
+    database_fp32.shrink_to_fit();
 
     // Prune worst neighbors (prune_worst=0 = no pruning, default)
     double prune_ms = evp_common::prune_worst_neighbors(graph, prune_worst, static_cast<uint32_t>(build_threads));
@@ -370,9 +392,9 @@ static int run(
     double total_time_ms = load_ms + build_ms + best_timings.search_ms;
 
     evp_common::print_summary(
-        "FP16 Build, FP16 Search", 1,
+        (use_flas ? "FP16 Build, FP16 Search (FLAS)" : "FP16 Build, FP16 Search"), 1,
         load_ms, 0.0, build_ms, 0.0, prune_ms,
-        best_timings.search_ms, 0.0, total_time_ms,
+        best_timings.search_ms, flas_ms, total_time_ms,
         compute_recall, k_top, best_timings.recall,
         threads, best_max_dist, 0,
         k_graph, k_ext, eps_ext, 0, count, dims, 0, opt_target

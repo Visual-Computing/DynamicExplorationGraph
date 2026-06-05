@@ -106,6 +106,7 @@ int main(int argc, char* argv[]) {
         uint32_t prune_worst = 0;
         std::string eps_search_str = "0.3";
         uint32_t num_runs = 1;
+        bool use_flas = false;
         deglib::builder::OptimizationTarget opt_target = deglib::builder::OptimizationTarget::LowLID;
 
         if (argc < 3) {
@@ -139,6 +140,7 @@ int main(int argc, char* argv[]) {
             std::fprintf(stderr, "  --graph <path>     File path to save the pre-built graph to, or load a pre-built graph from\n");
             std::fprintf(stderr, "                     to bypass the construction phase.\n");
             std::fprintf(stderr, "  --prune-worst <n>  Number of worst (least similar) neighbors per vertex to replace with self-loops (default: 0).\n");
+            std::fprintf(stderr, "  --flas             Enable FLAS pre-sort of training vectors before graph construction (default: off).\n");
             std::fprintf(stderr, "  --num-runs <n>     Number of query explorations to perform and average (default: 1).\n");
             std::fprintf(stderr, "  --opt-target <str> Optimization target for graph builder (LowLID, HighLID, StreamingData_SchemeA, ..., default: LowLID).\n");
             return 1;
@@ -175,6 +177,8 @@ int main(int argc, char* argv[]) {
                 prune_worst = std::stoul(argv[++i]);
             } else if (arg == "--eps-search" && i + 1 < argc) {
                 eps_search_str = argv[++i];
+            } else if (arg == "--flas") {
+                use_flas = true;
             } else if (arg == "--num-runs" && i + 1 < argc) {
                 num_runs = std::stoul(argv[++i]);
             } else if (arg == "--opt-target" && i + 1 < argc) {
@@ -252,15 +256,15 @@ int main(int argc, char* argv[]) {
 #endif
 
          if (mode == "fp32-build-fp32-explore" || mode == "baseline" || mode == "mode1") {
-             return task2::mode_baseline::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target);
+             return task2::mode_baseline::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas);
          } else if (mode == "fp16-build-fp16-explore" || mode == "mode2") {
-             return task2::mode_fp16_build::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target);
+             return task2::mode_fp16_build::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas);
          } else if (mode == "fp32-build-fp16-explore" || mode == "baseline-fp16" || mode == "mode3") {
-             return task2::mode_fp16::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target);
+             return task2::mode_fp16::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas);
          } else if (mode == "evp-search" || mode == "fp32-build-evp-search" || mode == "mode4") {
-             return task2::mode_evp_asym_search::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, non_zeros);
+             return task2::mode_evp_asym_search::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, non_zeros, use_flas);
          } else if (mode == "flas-sort" || mode == "fp32-build-flas-sort" || mode == "mode5") {
-             return task2::mode_flas_sort::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target);
+             return task2::mode_flas_sort::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas);
          } else {
              std::fprintf(stderr, "Error: Unknown mode '%s'. Supported modes: mode1, mode2, mode3, mode4\n", mode.c_str());
              return 1;

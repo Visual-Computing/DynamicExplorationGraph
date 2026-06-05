@@ -44,7 +44,7 @@
 
 #include "../evp_common.h"
 #include "../hdf5_reader.h"
-#include "../flas/fast_linear_assignment_sorter.hpp"
+#include "../flas_common.h"
 
 namespace task2::mode_flas_sort {
 
@@ -136,7 +136,8 @@ static int run(
     const std::string& graph_path = "",
     uint32_t prune_worst = 0,
     const std::vector<float>& eps_search_list = {0.1f},
-    deglib::builder::OptimizationTarget opt_target = deglib::builder::OptimizationTarget::LowLID)
+    deglib::builder::OptimizationTarget opt_target = deglib::builder::OptimizationTarget::LowLID,
+    bool use_flas = false)
 {
     const std::string h5path = data_path.string();
     std::printf("\n");
@@ -194,89 +195,32 @@ static int run(
     }
     double load_ms = evp_common::now_ms() - t_load_start;
 
-    std::printf("=== FP32 Build, FP32 Search - Task 2 Mode 5 (FLAS pre-sort, opt_target=%s) ===\n",
+    std::printf("=== FP32 Build, FP32 Search - Task 2 Mode 5%s (opt_target=%s) ===\n",
+                use_flas ? " (FLAS pre-sort)" : "",
                 evp_common::opt_target_str(opt_target));
 
     // --------------------------------------------------------------------------
-    // Load ALL FP32 training vectors once — used for FLAS sorting AND graph building
+    // Load ALL FP32 training vectors once — used for sorting AND graph building
     // --------------------------------------------------------------------------
     double t_load_fp32 = evp_common::now_ms();
     std::vector<float> database_fp32 = hdf5_reader::read_flat_fp32(h5path, train_info);
     double load_fp32_ms = evp_common::now_ms() - t_load_fp32;
-    std::printf("Loaded %.1fM FP32 values in %.2f ms\n", (count * dims) / 1e6, load_fp32_ms);
     load_ms += load_fp32_ms;
 
     // --------------------------------------------------------------------------
-    // FLAS pre-sort: arrange N vectors along a 1D line (columns=1, rows=N)
+    // Optional FLAS pre-sort (or natural order)
     // --------------------------------------------------------------------------
-    double t_flas_start = evp_common::now_ms();
-    std::printf("Running FLAS pre-sort on %zu vectors (columns=1, rows=%zu, dims=%zu)...\n",
-                count, count, dims);
-
-    // MapField array: one per vector, id = original index, feature = pointer into flat array
-    std::vector<MapField> map_fields(count);
-    for (size_t i = 0; i < count; ++i) {
-        init_map_field(&map_fields[i], static_cast<int>(i),
-                       &database_fp32[i * dims], true);
-    }
-
-    FlasSettings settings = default_flas_settings();
-    // columns=1, rows=N → FLAS acts as 1D swap-optimizer
-    // no wrap (mirror boundary), default radius_decay
-
-    std::mt19937 rng(42);  // deterministic seed for reproducibility
-
-    auto noop_callback = [](float) { return false; };
-
-    do_sorting_full(
-        map_fields.data(),
-        static_cast<int>(dims),
-        1,                              // columns = 1 (1D)
-        static_cast<int>(count),        // rows = N
-        &settings,
-        &rng,
-        noop_callback
-    );
-
-    // Read back the sorted permutation: sorted_indices[i] = map_fields[i].id
-    std::vector<uint32_t> sorted_indices(count);
-    for (size_t i = 0; i < count; ++i) {
-        sorted_indices[i] = static_cast<uint32_t>(map_fields[i].id);
-    }
-
-    double flas_ms = evp_common::now_ms() - t_flas_start;
-    double flas_s = flas_ms / 1000.0;
-    std::printf("FLAS sorting completed in %.2f s\n", flas_s);
-
-    // Diagnostic: check permutation validity
-    {
-        std::vector<bool> seen(count, false);
-        bool valid = true;
-        for (size_t i = 0; i < count; ++i) {
-            if (sorted_indices[i] >= count) {
-                std::fprintf(stderr, "Error: FLAS returned invalid index %u at position %zu\n",
-                            sorted_indices[i], i);
-                valid = false;
-                break;
-            }
-            if (seen[sorted_indices[i]]) {
-                std::fprintf(stderr, "Error: FLAS returned duplicate index %u at position %zu\n",
-                            sorted_indices[i], i);
-                valid = false;
-                break;
-            }
-            seen[sorted_indices[i]] = true;
-        }
-        if (!valid) {
-            return 1;
-        }
-        std::printf("FLAS permutation valid: %zu unique indices\n", count);
+    std::vector<uint32_t> sorted_indices;
+    double flas_ms = 0.0;
+    if (use_flas) {
+        sorted_indices = flas_common::run_flas_presort(database_fp32.data(), count, dims, FlasMetric::L2, flas_ms);
+        if (sorted_indices.empty()) return 1;
     }
 
     // --------------------------------------------------------------------------
     // Build/Load graph with Metric::InnerProduct (FP32)
-    // Vectors are inserted in FLAS-sorted order, but each retains its
-    // original external label = sorted_indices[i].
+    // Vectors are inserted in sorted order (FLAS or natural), but each retains
+    // its original external label = sorted_indices[i] (or i for natural).
     // --------------------------------------------------------------------------
     deglib::FloatSpace feature_space(static_cast<uint32_t>(dims), deglib::Metric::InnerProduct);
     std::unique_ptr<deglib::graph::SizeBoundedGraph> graph_ptr;
@@ -302,7 +246,8 @@ static int run(
     }
 
     if (!loaded) {
-        std::printf("Building graph (FLAS order): k_graph=%u, k_ext=%u, eps_ext=%.3f, threads=%u, opt_target=%s\n",
+        std::printf("Building graph%s: k_graph=%u, k_ext=%u, eps_ext=%.3f, threads=%u, opt_target=%s\n",
+                    use_flas ? " (FLAS order)" : "",
                     k_graph, k_ext, eps_ext, build_threads, evp_common::opt_target_str(opt_target));
 
         graph_ptr = std::make_unique<deglib::graph::SizeBoundedGraph>(static_cast<uint32_t>(count), k_graph, feature_space);
@@ -332,7 +277,7 @@ static int run(
             size_t bytes_per_vector = dims * sizeof(float);
             for (size_t j = 0; j < current_chunk_size; ++j) {
                 size_t i = chunk_start + j;
-                uint32_t original_idx = sorted_indices[i];
+                uint32_t original_idx = use_flas ? sorted_indices[i] : static_cast<uint32_t>(i);
 
                 std::vector<std::byte> feature(bytes_per_vector);
                 std::memcpy(feature.data(), &database_fp32[original_idx * dims], bytes_per_vector);
@@ -415,7 +360,7 @@ static int run(
     double total_time_ms = load_ms + flas_ms + build_ms + best_timings.search_ms;
 
     evp_common::print_summary(
-        "FP32 Build, FP32 Search (FLAS pre-sort)", 5,
+        (use_flas ? "FP32 Build, FP32 Search (FLAS)" : "FP32 Build, FP32 Search"), 5,
         load_ms, 0.0, build_ms, 0.0, prune_ms,
         best_timings.search_ms, flas_ms, total_time_ms,
         compute_recall, k_top, best_timings.recall,

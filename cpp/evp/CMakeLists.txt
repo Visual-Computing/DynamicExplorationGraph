@@ -57,6 +57,7 @@ macro(add_flas_test name source)
     target_include_directories(${name} PRIVATE ${GTEST_INCLUDE})
     target_sources(${name} PRIVATE ${GTEST_SOURCE})
     target_link_libraries(${name} PRIVATE compile-options)
+    target_link_libraries(${name} PUBLIC DEG_LIB)
     set_target_properties(${name} PROPERTIES INTERMEDIATE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/obj/${name}")
 endmacro()
 
