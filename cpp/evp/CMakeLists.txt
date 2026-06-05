@@ -44,4 +44,22 @@ add_hdf5_test(test_hdf5_dataset_dims_large hdf5/test/test_dataset_dims_large.cpp
 add_hdf5_test(test_hdf5_sanity_large hdf5/test/test_sanity_large.cpp)
 add_hdf5_test(test_hdf5_integration_large hdf5/test/test_integration_large.cpp)
 
+# ---------------------------------------------------------------------------
+# FLAS unit tests
+# ---------------------------------------------------------------------------
+
+set(FLAS_TEST_MAIN ${CMAKE_CURRENT_SOURCE_DIR}/flas/test/test_main.cpp)
+set(FLAS_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/flas)
+
+macro(add_flas_test name source)
+    add_executable(${name} ${FLAS_TEST_MAIN} ${source})
+    target_include_directories(${name} PRIVATE ${FLAS_INCLUDE})
+    target_include_directories(${name} PRIVATE ${GTEST_INCLUDE})
+    target_sources(${name} PRIVATE ${GTEST_SOURCE})
+    target_link_libraries(${name} PRIVATE compile-options)
+    set_target_properties(${name} PROPERTIES INTERMEDIATE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/obj/${name}")
+endmacro()
+
+add_flas_test(test_flas flas/test/test_flas.cpp)
+
 

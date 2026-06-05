@@ -40,6 +40,11 @@
  *     then uses asymmetric search (FP16 query × EVP bits database) via
  *     Metric::FP16EvpAsymmetric. Requires --non-zeros.
  *
+ *   mode5  (flas-sort: fp32-build-flas-sort)
+ *     Builds the graph with FP32 InnerProduct, but inserts training vectors
+ *     in FLAS-sorted 1D order (similar vectors inserted adjacently).
+ *     Search is standard FP32 search. No extra parameters needed.
+ *
  * CLI Usage
  * ---------
  *   deglib_evp_task2.exe <hdf5_file> <mode> [options...]
@@ -81,6 +86,7 @@
 #include "task2/mode2.h"
 #include "task2/mode3.h"
 #include "task2/mode4.h"
+#include "task2/mode5.h"
 
 int main(int argc, char* argv[]) {
     try {
@@ -108,7 +114,8 @@ int main(int argc, char* argv[]) {
             std::fprintf(stderr, "  baseline | fp32-build-fp32-explore | mode1            : FP32 build + FP32 explore\n");
             std::fprintf(stderr, "  fp16-build-fp16-explore | mode2                      : FP16 build + FP16 explore\n");
             std::fprintf(stderr, "  baseline-fp16 | fp32-build-fp16-explore | mode3       : FP32 build + FP16 explore\n");
-            std::fprintf(stderr, "  evp-search | fp32-build-evp-search | mode4                : FP32 build + asymmetric FP16xEVP search\n\n");
+            std::fprintf(stderr, "  evp-search | fp32-build-evp-search | mode4                : FP32 build + asymmetric FP16xEVP search\n");
+            std::fprintf(stderr, "  flas-sort | fp32-build-flas-sort | mode5                  : FP32 build + FLAS pre-sort + FP32 search\n\n");
             std::fprintf(stderr, "  --threads <n>      Number of CPU worker threads used for query exploration (default: 6).\n");
             std::fprintf(stderr, "  --build-threads <n> Number of CPU worker threads used for graph construction (default: same as --threads).\n");
             std::fprintf(stderr, "  --k-top <n>        The final number of nearest neighbors (top-K) retrieved per query\n");
@@ -252,6 +259,8 @@ int main(int argc, char* argv[]) {
              return task2::mode_fp16::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target);
          } else if (mode == "evp-search" || mode == "fp32-build-evp-search" || mode == "mode4") {
              return task2::mode_evp_asym_search::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, non_zeros);
+         } else if (mode == "flas-sort" || mode == "fp32-build-flas-sort" || mode == "mode5") {
+             return task2::mode_flas_sort::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target);
          } else {
              std::fprintf(stderr, "Error: Unknown mode '%s'. Supported modes: mode1, mode2, mode3, mode4\n", mode.c_str());
              return 1;
