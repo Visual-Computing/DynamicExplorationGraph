@@ -40,10 +40,16 @@
  *     then uses asymmetric search (FP16 query × EVP bits database) via
  *     Metric::FP16EvpAsymmetric. Requires --non-zeros.
  *
- *   mode5  (flas-sort: fp32-build-flas-sort)
- *     Builds the graph with FP32 InnerProduct, but inserts training vectors
- *     in FLAS-sorted 1D order (similar vectors inserted adjacently).
- *     Search is standard FP32 search. No extra parameters needed.
+ *   mode1 --flas
+ *     Same as mode1 (FP32 build + FP32 search) but enables FLAS
+ *     (Fast Linear Assignment Sorting) pre-sort of training vectors.
+ *     Replaces the now-removed mode5.
+ *
+ * FLAS Settings
+ * -------------
+ *   --flas                    Enable FLAS pre-sort (default: off).
+ *   --flas-metric <l2|ip>    FLAS distance metric (default: l2).
+ *   --flas-radius-decay <f>  FLAS swap radius decay factor (default: 0.93).
  *
  * CLI Usage
  * ---------
@@ -86,7 +92,7 @@
 #include "task2/mode2.h"
 #include "task2/mode3.h"
 #include "task2/mode4.h"
-#include "task2/mode5.h"
+#include "../evp/flas/fast_linear_assignment_sorter.hpp"
 
 int main(int argc, char* argv[]) {
     try {
@@ -107,6 +113,8 @@ int main(int argc, char* argv[]) {
         std::string eps_search_str = "0.3";
         uint32_t num_runs = 1;
         bool use_flas = false;
+        std::string flas_metric_str = "l2";
+        float flas_radius_decay = 0.93f;
         deglib::builder::OptimizationTarget opt_target = deglib::builder::OptimizationTarget::LowLID;
 
         if (argc < 3) {
@@ -116,7 +124,7 @@ int main(int argc, char* argv[]) {
             std::fprintf(stderr, "  fp16-build-fp16-explore | mode2                      : FP16 build + FP16 explore\n");
             std::fprintf(stderr, "  baseline-fp16 | fp32-build-fp16-explore | mode3       : FP32 build + FP16 explore\n");
             std::fprintf(stderr, "  evp-search | fp32-build-evp-search | mode4                : FP32 build + asymmetric FP16xEVP search\n");
-            std::fprintf(stderr, "  flas-sort | fp32-build-flas-sort | mode5                  : FP32 build + FLAS pre-sort + FP32 search\n\n");
+            std::fprintf(stderr, "  Use --flas with any FP32 mode to enable FLAS pre-sort.\n\n");
             std::fprintf(stderr, "  --threads <n>      Number of CPU worker threads used for query exploration (default: 6).\n");
             std::fprintf(stderr, "  --build-threads <n> Number of CPU worker threads used for graph construction (default: same as --threads).\n");
             std::fprintf(stderr, "  --k-top <n>        The final number of nearest neighbors (top-K) retrieved per query\n");
@@ -140,8 +148,10 @@ int main(int argc, char* argv[]) {
             std::fprintf(stderr, "  --graph <path>     File path to save the pre-built graph to, or load a pre-built graph from\n");
             std::fprintf(stderr, "                     to bypass the construction phase.\n");
             std::fprintf(stderr, "  --prune-worst <n>  Number of worst (least similar) neighbors per vertex to replace with self-loops (default: 0).\n");
-            std::fprintf(stderr, "  --flas             Enable FLAS pre-sort of training vectors before graph construction (default: off).\n");
-            std::fprintf(stderr, "  --num-runs <n>     Number of query explorations to perform and average (default: 1).\n");
+            std::fprintf(stderr, "  --flas                    Enable FLAS pre-sort of training vectors before graph construction (default: off).\n");
+            std::fprintf(stderr, "  --flas-metric <l2|ip>   FLAS distance metric: l2 (Euclidean) or ip (Inner Product) (default: l2).\n");
+            std::fprintf(stderr, "  --flas-radius-decay <f>  FLAS swap radius decay factor per iteration (default: 0.93).\n");
+            std::fprintf(stderr, "  --num-runs <n>           Number of query explorations to perform and average (default: 1).\n");
             std::fprintf(stderr, "  --opt-target <str> Optimization target for graph builder (LowLID, HighLID, StreamingData_SchemeA, ..., default: LowLID).\n");
             return 1;
         }
@@ -179,6 +189,10 @@ int main(int argc, char* argv[]) {
                 eps_search_str = argv[++i];
             } else if (arg == "--flas") {
                 use_flas = true;
+            } else if (arg == "--flas-metric" && i + 1 < argc) {
+                flas_metric_str = argv[++i];
+            } else if (arg == "--flas-radius-decay" && i + 1 < argc) {
+                flas_radius_decay = std::stof(argv[++i]);
             } else if (arg == "--num-runs" && i + 1 < argc) {
                 num_runs = std::stoul(argv[++i]);
             } else if (arg == "--opt-target" && i + 1 < argc) {
@@ -244,6 +258,16 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
+        // Resolve FLAS metric string to enum
+        FlasMetric flas_metric = FlasMetric::L2;
+        if (use_flas) {
+            if (flas_metric_str == "ip" || flas_metric_str == "innerproduct") {
+                flas_metric = FlasMetric::InnerProduct;
+            } else if (flas_metric_str != "l2") {
+                std::fprintf(stderr, "Warning: Unknown --flas-metric '%s', using l2\n", flas_metric_str.c_str());
+            }
+        }
+
         // Print compiled-in SIMD instruction set info
 #ifdef USE_AVX512
         std::fprintf(stderr, "SIMD: AVX-512, AVX2, SSE\n");
@@ -255,16 +279,14 @@ int main(int argc, char* argv[]) {
         std::fprintf(stderr, "SIMD: none (scalar)\n");
 #endif
 
-         if (mode == "fp32-build-fp32-explore" || mode == "baseline" || mode == "mode1") {
-             return task2::mode_baseline::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas);
-         } else if (mode == "fp16-build-fp16-explore" || mode == "mode2") {
-             return task2::mode_fp16_build::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas);
-         } else if (mode == "fp32-build-fp16-explore" || mode == "baseline-fp16" || mode == "mode3") {
-             return task2::mode_fp16::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas);
-         } else if (mode == "evp-search" || mode == "fp32-build-evp-search" || mode == "mode4") {
-             return task2::mode_evp_asym_search::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, non_zeros, use_flas);
-         } else if (mode == "flas-sort" || mode == "fp32-build-flas-sort" || mode == "mode5") {
-             return task2::mode_flas_sort::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas);
+          if (mode == "fp32-build-fp32-explore" || mode == "baseline" || mode == "mode1") {
+             return task2::mode_baseline::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
+          } else if (mode == "fp16-build-fp16-explore" || mode == "mode2") {
+             return task2::mode_fp16_build::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
+          } else if (mode == "fp32-build-fp16-explore" || mode == "baseline-fp16" || mode == "mode3") {
+             return task2::mode_fp16::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
+          } else if (mode == "evp-search" || mode == "fp32-build-evp-search" || mode == "mode4") {
+             return task2::mode_evp_asym_search::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, non_zeros, use_flas, flas_metric, flas_radius_decay);
          } else {
              std::fprintf(stderr, "Error: Unknown mode '%s'. Supported modes: mode1, mode2, mode3, mode4\n", mode.c_str());
              return 1;

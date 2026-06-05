@@ -178,7 +178,9 @@ static int run(
     const std::vector<float>& eps_search_list = {0.1f},
     deglib::builder::OptimizationTarget opt_target = deglib::builder::OptimizationTarget::LowLID,
     uint32_t non_zeros = 64,
-    bool use_flas = false)
+    bool use_flas = false,
+    FlasMetric flas_metric = FlasMetric::L2,
+    float flas_radius_decay = 0.93f)
 {
     const std::string h5path = data_path.string();
     std::printf("\n");
@@ -263,7 +265,7 @@ static int run(
     std::vector<uint32_t> sorted_indices;
     double flas_ms = 0.0;
     if (use_flas) {
-        sorted_indices = flas_common::run_flas_presort(database_fp32.data(), count, dims, FlasMetric::L2, flas_ms);
+        sorted_indices = flas_common::run_flas_presort(database_fp32.data(), count, dims, flas_metric, flas_ms, flas_radius_decay);
         if (sorted_indices.empty()) return 1;
     }
 
@@ -465,7 +467,7 @@ static int run(
     double total_time_ms = load_ms + build_ms + quantize_ms + best_timings.search_ms;
 
     evp_common::print_summary(
-        (use_flas ? "FP32 Build, Asymmetric FP16×EVP Search (FLAS)" : "FP32 Build, Asymmetric FP16×EVP Search"), 1,
+        (use_flas ? "FP32 Build, Asymmetric FP16×EVP Search (FLAS)" : "FP32 Build, Asymmetric FP16×EVP Search"), 4,
         load_ms, 0.0, build_ms, quantize_ms, prune_ms,
         best_timings.search_ms, flas_ms, total_time_ms,
         compute_recall, k_top, best_timings.recall,

@@ -171,7 +171,9 @@ static int run(
     uint32_t prune_worst = 0,
     const std::vector<float>& eps_search_list = {0.1f},
     deglib::builder::OptimizationTarget opt_target = deglib::builder::OptimizationTarget::LowLID,
-    bool use_flas = false)
+    bool use_flas = false,
+    FlasMetric flas_metric = FlasMetric::L2,
+    float flas_radius_decay = 0.93f)
 {
     const std::string h5path = data_path.string();
     std::printf("\n");
@@ -245,7 +247,7 @@ static int run(
     std::vector<uint32_t> sorted_indices;
     double flas_ms = 0.0;
     if (use_flas) {
-        sorted_indices = flas_common::run_flas_presort(database_fp32.data(), count, dims, FlasMetric::L2, flas_ms);
+        sorted_indices = flas_common::run_flas_presort(database_fp32.data(), count, dims, flas_metric, flas_ms, flas_radius_decay);
         if (sorted_indices.empty()) return 1;
     }
 
@@ -344,9 +346,8 @@ static int run(
 
     std::vector<uint16_t> database_fp16(count * dims);
     for (size_t i = 0; i < count; ++i) {
-        size_t idx = use_flas ? sorted_indices[i] : i;
         std::vector<float> fp32_vec(dims);
-        std::memcpy(fp32_vec.data(), &database_fp32[idx * dims], dims * sizeof(float));
+        std::memcpy(fp32_vec.data(), &database_fp32[i * dims], dims * sizeof(float));
         std::vector<uint16_t> fp16_vec = floats_to_fp16(fp32_vec);
         std::memcpy(&database_fp16[i * dims], fp16_vec.data(), dims * sizeof(uint16_t));
     }
@@ -416,7 +417,7 @@ static int run(
     double total_time_ms = load_ms + build_ms + convert_ms + best_timings.search_ms;
 
     evp_common::print_summary(
-        (use_flas ? "FP32 Build, FP16 Search (FLAS)" : "FP32 Build, FP16 Search"), 1,
+        (use_flas ? "FP32 Build, FP16 Search (FLAS)" : "FP32 Build, FP16 Search"), 3,
         load_ms, 0.0, build_ms, convert_ms, prune_ms,
         best_timings.search_ms, flas_ms, total_time_ms,
         compute_recall, k_top, best_timings.recall,

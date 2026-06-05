@@ -30,7 +30,8 @@ namespace flas_common {
  */
 inline std::vector<uint32_t> run_flas_presort(
     const float* database_fp32, size_t count, size_t dims,
-    FlasMetric metric, double& flas_ms)
+    FlasMetric metric, double& flas_ms,
+    float radius_decay = 0.93f)
 {
     double t_start = evp_common::now_ms();
 
@@ -42,6 +43,7 @@ inline std::vector<uint32_t> run_flas_presort(
 
     FlasSettings settings = default_flas_settings();
     settings.metric = metric;
+    settings.radius_decay = radius_decay;
 
     std::mt19937 rng(42);  // deterministic seed
 

@@ -1,79 +1,3 @@
-# mode1 (FP32 build + FP32 search) — Results for 80% recall
-
-## Konfiguration
-
-| Parameter | Wert |
-|---|---|
-| Mode | mode1 (FP32 build + FP32 search) |
-| Metric | ip |
-| Dataset | llama-dev (256921 vectors, 128 dims, k_top=30) |
-| threads | 6 |
-| search | 10x Wiederholung, Durchschnitt in ms |
-
-## Getestete Kombinationen
-
-### k_graph=30, k_ext=60, eps_ext=0.001
-
-**Graph-Datei:** `C:\Data\ANN\sisap2026\llama-dev\llama-dev_k30_kext60_eps0.001_ip.deg`
-
-| eps_search | max_dist | recall | search time (ms) |
-|---|---|---|---|
-| 0.1 | 10000 | 15.17% | 13.4 |
-| 0.1 | 30000 | 15.17% | 11.8 |
-| 0.2 | 10000 | 35.32% | 37.3 |
-| 0.2 | 30000 | 35.43% | 38.6 |
-| 0.3 | 10000 | 54.52% | 91.8 |
-| 0.3 | 30000 | 59.37% | 152.6 |
-| 0.5 | 10000 | 64.32% | 142.7 |
-| 0.5 | 30000 | 79.62% | 431.5 |
-
-**Schnellste Kombination über 80%:** Nicht erreicht (max 79.62%)
-
-### k_graph=30, k_ext=60, eps_ext=0.01
-
-**Graph-Datei:** `C:\Data\ANN\sisap2026\llama-dev\llama-dev_k30_kext60_eps0.01_ip.deg`
-
-| eps_search | max_dist | recall | search time (ms) |
-|---|---|---|---|
-| 0.3 | 20000 | 59.11% | 150.6 |
-| 0.3 | 25000 | 59.64% | 157.8 |
-| 0.3 | 30000 | 59.90% | 164.3 |
-| 0.5 | 20000 | 74.22% | 299.2 |
-| 0.5 | 25000 | 76.74% | 369.8 |
-| 0.5 | 30000 | 78.44% | 446.3 |
-
-**Schnellste Kombination über 80%:** Nicht erreicht (max 78.44%)
-
-### k_graph=30, k_ext=60, eps_ext=0.05
-
-**Graph-Datei:** `C:\Data\ANN\sisap2026\llama-dev\llama-dev_k30_kext60_eps0.05_ip.deg`
-
-| eps_search | max_dist | recall | search time (ms) |
-|---|---|---|---|
-| 0.3 | 20000 | 60.26% | 135.9 |
-| 0.3 | 30000 | 60.99% | 157.8 |
-| 0.5 | 20000 | 74.99% | 299.7 |
-| 0.5 | 30000 | 79.06% | 436.7 |
-
-**Schnellste Kombination über 80%:** Nicht erreicht (max 79.06%)
-
-### k_graph=48, k_ext=96, eps_ext=0.001
-
-**Graph-Datei:** `C:\Data\ANN\sisap2026\llama-dev\llama-dev_k48_kext96_eps0.001_ip.deg`
-
-| eps_search | max_dist | recall | search time (ms) |
-|---|---|---|---|
-| 0.3 | 20000 | 80.96% | 220.8 |
-| 0.3 | 25000 | 83.29% | 256.5 |
-| 0.5 | 20000 | 84.85% | 272.0 |
-| 0.5 | 25000 | 88.09% | 339.6 |
-
-**Schnellste Kombination über 80%:** eps_search=0.3, max_dist=20000 → 80.96% in 220.8ms
-
-**Bester bisheriger Gesamt-Sieger:** eps_search=0.3, max_dist=20000, eps_ext=0.001, k_graph=48 → 80.96% in 220.8ms
-
----
-
 # FP16 Exploration (Modes 2 & 3) vs FP32 Baseline (Mode 1)
 
 ## Konfiguration
@@ -183,3 +107,54 @@
 | **StreamingData_SchemeD** | 165.1 | **84.40%** | 130.5 |
 | **SchemeA** | 47.1 | 79.46% | 129.6 |
 | **SchemeB** | 41.6 | 60.96% | 129.5 |
+
+---
+
+# OptimizationTarget Vergleich — Mode 3 + FLAS (FP32 Build + FP16 Search, FLAS Pre-Sort)
+
+## Konfiguration
+
+- **Dataset:** llama-dev (256921 vectors, 128 dims, k_top=30)
+- **Parameter:** k_graph=30, k_ext=60, eps_ext=0.001, build-threads=1, max_dist=20000, eps_search=0.30
+- **FLAS:** L2, R=0.93, alle weiteren Parameter default
+- **Suchen:** 10 Wiederholungen, Durchschnitt
+
+## Ergebnisse
+
+| OptimizationTarget | Build Time (s) | Recall@30 | Search Time (ms) | Δ Recall vs ohne FLAS |
+|---|---|---|---|---|
+| **LowLID** | 68.7 | 77.87% | 118.8 | −1.59pp |
+| **HighLID** | 56.3 | 55.33% | 79.5 | −20.96pp |
+| **StreamingData_SchemeA** | 68.7 | 59.70% | 118.8 | −15.33pp |
+| **StreamingData_SchemeB** | 77.1 | 50.79% | 106.9 | −19.62pp |
+| **StreamingData_SchemeC** | 79.9 | 79.33% | 128.7 | −0.58pp |
+| **StreamingData_SchemeD** | 89.8 | 82.10% | 148.0 | −2.30pp |
+| **SchemeA** | 68.5 | 50.11% | 120.0 | −29.35pp |
+| **SchemeB** | 32.4 | 33.60% | 79.5 | −27.36pp |
+
+
+# FLAS Pre-Sort Vergleich — Mode 1 (FP32 Build + FP32 Search)
+
+## Konfiguration
+
+- **Dataset:** llama-dev (256921 vectors, 128 dims, k_top=30)
+
+- **Graphbau:** mode1, k_graph=30, k_ext=30, eps_ext=0.001, eps_search=0.30, max_dist=20000, build-threads=1, search-threads=8, num-runs=1, opt_target=LowLID, prune_worst=0
+- **FLAS:** metric/radius_decay pro Zeile (siehe Tabelle), sonst alles default (`do_wrap=false, initial_radius_factor=0.5, num_filters=1, radius_end=1.0, weight_swappable=1.0, weight_non_swappable=100.0, weight_hole=0.01, sample_factor=1.0, max_swap_positions=9, optimize_narrow_grids=1, columns=1, rows=count, seed=42`)
+
+## Ergebnisse
+
+| FLAS Config | FLAS Time (s) | Build Time (s) | Search Time (ms) | Recall@30 | Δ Recall |
+|---|---|---|---|---|---|
+| **Ohne FLAS** (Baseline) | — | 24.5 | 217.7 | 76.76% | — |
+| **FLAS L2, R=0.93 (Default)** | 57.7 | **19.9** | **145.7** | **79.57%** | **+2.81pp** |
+| **FLAS L2, R=0.80** | 18.3 | 21.1 | 102.0 | 56.77% | −19.99pp |
+| **FLAS L2, R=0.99** | 322.9 | 23.8 | 101.9 | 59.01% | −17.75pp |
+| **FLAS IP, R=0.93** | 59.4 | 21.0 | 133.1 | 74.89% | −1.87pp |
+| **FLAS IP, R=0.99** | 362.1 | 21.4 | 70.5 | 38.48% | −38.28pp |
+| **FLAS L2, R=0.93, num_filters=3** | 73.1 | 16.8 | 145.7 | 59.00% | −17.76pp |
+| **FLAS L2, R=0.93, max_swap_positions=18** | 66.7 | 19.7 | 137.0 | 77.89% | −1.68pp |
+| **FLAS L2, R=0.93, sample_factor=2** | 81.6 | 20.9 | 99.9 | 53.12% | −23.45pp |
+| **FLAS L2, R=0.93, optimize_narrow_grids=0** | 53.6 | 21.2 | 137.7 | 71.37% | −8.20pp |
+
+**Fazit:** Die Default-Einstellungen aus `default_flas_settings()` sind für diesen Workload optimal. Alle getesteten Abweichungen (`num_filters>1`, `max_swap_positions>9`, `sample_factor>1`, `optimize_narrow_grids=0`) verschlechtern das Ergebnis.
