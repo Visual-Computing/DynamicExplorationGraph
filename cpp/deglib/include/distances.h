@@ -26,6 +26,7 @@
 #include "distance/evp_inner_product.h"
 #include "distance/fp16_inner_product.h"
 #include "distance/fp16_evp_asym_inner_product.h"
+#include "distance/fp16_l2.h"
 
 namespace deglib {
 
@@ -44,7 +45,10 @@ enum class Metric {
     FP16InnerProduct = 0x30 | 2,
 
     // 0x40 = fp16 query + evp bits database (asymmetric)
-    FP16EvpAsymmetric = 0x40 | 3
+    FP16EvpAsymmetric = 0x40 | 3,
+
+    // 0x50 = fp16 L2 (squared Euclidean in FP16 space)
+    FP16L2 = 0x50 | 1
 };
 
 template <typename MTYPE>
@@ -111,6 +115,12 @@ auto dispatch_distance(const deglib::Metric metric, const size_t dim, Functor&& 
         if (dim % 8 == 0)       return f.template operator()<deglib::distances::FP16InnerProductExt8>();
         return f.template operator()<deglib::distances::FP16InnerProduct<1>>();
     }
+    else if (metric == deglib::Metric::FP16L2) {
+        if (dim % 32 == 0)      return f.template operator()<deglib::distances::FP16L2Ext32>();
+        if (dim % 16 == 0)      return f.template operator()<deglib::distances::FP16L2Ext16>();
+        if (dim % 8 == 0)       return f.template operator()<deglib::distances::FP16L2Ext8>();
+        return f.template operator()<deglib::distances::FP16L2Default>();
+    }
 
     std::fprintf(stderr, "Unsupported metric %u for dispatch_distance\n", static_cast<int>(metric));
     std::abort();
@@ -129,7 +139,7 @@ class FloatSpace {
         if (metric == deglib::Metric::EvpBits || metric == deglib::Metric::FP16EvpAsymmetric) {
             return 2 * dim / 8;
         }
-        if (metric == deglib::Metric::FP16InnerProduct) {
+        if (metric == deglib::Metric::FP16InnerProduct || metric == deglib::Metric::FP16L2) {
             return dim * sizeof(uint16_t);
         }
 

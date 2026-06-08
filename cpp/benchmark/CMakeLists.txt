@@ -22,3 +22,8 @@ add_executable(deglib_setup_dataset ${PROJECT_SOURCE_DIR}/src/deglib_setup_datas
 target_link_libraries(deglib_setup_dataset PUBLIC DEG_LIB compile-options
                                                 fmt::fmt-header-only)
 target_compile_definitions(deglib_setup_dataset PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
+
+# Microbenchmark: FP32 L2 vs FP16 L2 distance throughput
+add_executable(microbench_fp16_l2 ${PROJECT_SOURCE_DIR}/src/microbench_fp16_l2.cpp)
+target_link_libraries(microbench_fp16_l2 PUBLIC DEG_LIB compile-options)
+target_compile_definitions(microbench_fp16_l2 PUBLIC "DATA_PATH=\"${DATA_PATH}\"")
