@@ -38,44 +38,12 @@
 
 #include "distances.h"
 
+#include "distance/fp16.h"
+
 // ---------------------------------------------------------------------------
-// floats_to_fp16: identical to task2/mode5.h implementation
+// floats_to_fp16
 // ---------------------------------------------------------------------------
-static std::vector<uint16_t> floats_to_fp16(const std::vector<float>& v) {
-    std::vector<uint16_t> out(v.size());
-#if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
-    size_t i = 0;
-    for (; i + 4 <= v.size(); i += 4) {
-        __m128 f4 = _mm_loadu_ps(&v[i]);
-        __m128i h4 = _mm_cvtps_ph(f4, _MM_FROUND_TO_NEAREST_INT);
-        alignas(16) uint16_t tmp[8];
-        _mm_storeu_si128((__m128i*)tmp, h4);
-        out[i]   = tmp[0];
-        out[i+1] = tmp[1];
-        out[i+2] = tmp[2];
-        out[i+3] = tmp[3];
-    }
-    for (; i < v.size(); ++i) {
-        __m128 f1 = _mm_set_ss(v[i]);
-        __m128i h1 = _mm_cvtps_ph(f1, _MM_FROUND_TO_NEAREST_INT);
-        alignas(16) uint16_t tmp[8];
-        _mm_storeu_si128((__m128i*)tmp, h1);
-        out[i] = tmp[0];
-    }
-#else
-    for (size_t i = 0; i < v.size(); ++i) {
-        uint32_t bits;
-        std::memcpy(&bits, &v[i], 4);
-        uint16_t sign     = static_cast<uint16_t>((bits >> 16) & 0x8000u);
-        int32_t  exponent = static_cast<int32_t>((bits >> 23) & 0xFF) - 127 + 15;
-        uint32_t mantissa = bits & 0x7FFFFFu;
-        if (exponent <= 0)       { out[i] = sign; }
-        else if (exponent >= 31) { out[i] = static_cast<uint16_t>(sign | 0x7C00u); }
-        else                     { out[i] = static_cast<uint16_t>(sign | (exponent << 10) | (mantissa >> 13)); }
-    }
-#endif
-    return out;
-}
+using deglib::distances::floats_to_fp16;
 
 // ---------------------------------------------------------------------------
 // Timer helpers
@@ -103,8 +71,8 @@ static float l2_fp32_naive(const float* a, const float* b, size_t dim) {
 static float l2_fp16_naive(const uint16_t* a, const uint16_t* b, size_t dim) {
     float s = 0.0f;
     for (size_t i = 0; i < dim; ++i) {
-        float fa = deglib::distances::fp16l2_to_float(a[i]);
-        float fb = deglib::distances::fp16l2_to_float(b[i]);
+        float fa = deglib::distances::fp16_to_float(a[i]);
+        float fb = deglib::distances::fp16_to_float(b[i]);
         float d = fa - fb;
         s += d * d;
     }

@@ -14,6 +14,8 @@
 #include <intrin.h>
 #endif
 
+#include <distance/fp16.h>
+
 namespace deglib {
 namespace distances {
 
@@ -41,35 +43,6 @@ namespace distances {
 //   FP16InnerProductExt32, FP16InnerProductExt16, FP16InnerProductExt8,
 //   FP16InnerProduct
 // =============================================================================
-
-
-// -----------------------------------------------------------------------------
-// FP16 -> float conversion helper (scalar fallback)
-// -----------------------------------------------------------------------------
-
-static inline float fp16_to_float(uint16_t h) {
-    const uint32_t sign     = (h & 0x8000u) << 16;
-    const uint32_t exponent = (h & 0x7C00u) >> 10;
-    const uint32_t mantissa = (h & 0x03FFu);
-    uint32_t bits;
-    if (exponent == 0) {
-        if (mantissa == 0) {
-            bits = sign;
-        } else {
-            uint32_t e = 0;
-            uint32_t m = mantissa << 1;
-            while (!(m & 0x0400u)) { m <<= 1; ++e; }
-            bits = sign | ((127 - 15 - e + 1) << 23) | ((m & 0x03FFu) << 13);
-        }
-    } else if (exponent == 31) {
-        bits = sign | 0x7F800000u | (mantissa << 13);
-    } else {
-        bits = sign | ((exponent + (127 - 15)) << 23) | (mantissa << 13);
-    }
-    float f;
-    std::memcpy(&f, &bits, sizeof(f));
-    return f;
-}
 
 
 // -----------------------------------------------------------------------------
@@ -162,29 +135,6 @@ static inline float fp16_hsum512(__m512 v) {
 template <size_t MIN_ALIGN>
 class FP16InnerProduct {
 public:
-    static inline float fp16_to_float(uint16_t h) {
-        const uint32_t sign     = (h & 0x8000u) << 16;
-        const uint32_t exponent = (h & 0x7C00u) >> 10;
-        const uint32_t mantissa = (h & 0x03FFu);
-        uint32_t bits;
-        if (exponent == 0) {
-            if (mantissa == 0) {
-                bits = sign;
-            } else {
-                uint32_t e = 0;
-                uint32_t m = mantissa << 1;
-                while (!(m & 0x0400u)) { m <<= 1; ++e; }
-                bits = sign | ((127 - 15 - e + 1) << 23) | ((m & 0x03FFu) << 13);
-            }
-        } else if (exponent == 31) {
-            bits = sign | 0x7F800000u | (mantissa << 13);
-        } else {
-            bits = sign | ((exponent + (127 - 15)) << 23) | (mantissa << 13);
-        }
-        float f;
-        std::memcpy(&f, &bits, sizeof(f));
-        return f;
-    }
 
     inline static float compare(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
         return 1.f - dot(pVect1v, pVect2v, qty_ptr);

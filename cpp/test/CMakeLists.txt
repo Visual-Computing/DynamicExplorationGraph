@@ -26,6 +26,7 @@ add_deglib_test(test_uint8_l2 src/distance/test_uint8_l2.cpp)
 add_deglib_test(test_evp_inner_product src/distance/test_evp_inner_product.cpp)
 add_deglib_test(test_fp16_inner_product src/distance/test_fp16_inner_product.cpp)
 add_deglib_test(test_fp16_evp_asym_inner_product src/distance/test_fp16_evp_asym_inner_product.cpp)
+add_deglib_test(test_fp16 src/distance/test_fp16.cpp)
 add_deglib_test(test_distances src/test_distances.cpp)
 
 # --- Other unit tests ---

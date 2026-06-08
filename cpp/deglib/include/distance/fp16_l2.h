@@ -14,6 +14,8 @@
 #include <intrin.h>
 #endif
 
+#include <distance/fp16.h>
+
 namespace deglib {
 namespace distances {
 
@@ -37,35 +39,6 @@ namespace distances {
 // Backward-compatible aliases:
 //   FP16L2Ext32, FP16L2Ext16, FP16L2Ext8, FP16L2Default
 // =============================================================================
-
-
-// -----------------------------------------------------------------------------
-// Scalar FP16 -> float helper (reused from fp16_inner_product.h context)
-// -----------------------------------------------------------------------------
-
-static inline float fp16l2_to_float(uint16_t h) {
-    const uint32_t sign     = (h & 0x8000u) << 16;
-    const uint32_t exponent = (h & 0x7C00u) >> 10;
-    const uint32_t mantissa = (h & 0x03FFu);
-    uint32_t bits;
-    if (exponent == 0) {
-        if (mantissa == 0) {
-            bits = sign;
-        } else {
-            uint32_t e = 0;
-            uint32_t m = mantissa << 1;
-            while (!(m & 0x0400u)) { m <<= 1; ++e; }
-            bits = sign | ((127 - 15 - e + 1) << 23) | ((m & 0x03FFu) << 13);
-        }
-    } else if (exponent == 31) {
-        bits = sign | 0x7F800000u | (mantissa << 13);
-    } else {
-        bits = sign | ((exponent + (127 - 15)) << 23) | (mantissa << 13);
-    }
-    float f;
-    std::memcpy(&f, &bits, sizeof(f));
-    return f;
-}
 
 
 // -----------------------------------------------------------------------------
@@ -186,8 +159,8 @@ public:
         // ---- Scalar tail ----
         if constexpr (MIN_ALIGN < 8) {
             while (a < last) {
-                float fa = fp16l2_to_float(*a++);
-                float fb = fp16l2_to_float(*b++);
+                float fa = fp16_to_float(*a++);
+                float fb = fp16_to_float(*b++);
                 float d = fa - fb;
                 result += d * d;
             }
@@ -236,8 +209,8 @@ public:
         // ---- Scalar tail ----
         if constexpr (MIN_ALIGN < 8) {
             while (a < last) {
-                float fa = fp16l2_to_float(*a++);
-                float fb = fp16l2_to_float(*b++);
+                float fa = fp16_to_float(*a++);
+                float fb = fp16_to_float(*b++);
                 float d = fa - fb;
                 result += d * d;
             }
@@ -265,8 +238,8 @@ public:
         // ---- Scalar tail ----
         if constexpr (MIN_ALIGN < 8) {
             while (a < last) {
-                float fa = fp16l2_to_float(*a++);
-                float fb = fp16l2_to_float(*b++);
+                float fa = fp16_to_float(*a++);
+                float fb = fp16_to_float(*b++);
                 float d = fa - fb;
                 result += d * d;
             }
@@ -277,8 +250,8 @@ public:
         // ---- Pure scalar fallback ----
         float result = 0.0f;
         for (size_t i = 0; i < size; ++i) {
-            float fa = fp16l2_to_float(a[i]);
-            float fb = fp16l2_to_float(b[i]);
+            float fa = fp16_to_float(a[i]);
+            float fb = fp16_to_float(b[i]);
             float d = fa - fb;
             result += d * d;
         }
@@ -309,8 +282,8 @@ private:
         }
 #endif
         for (size_t i = 0; i < tail_elems; ++i) {
-            float fa = fp16l2_to_float(a[i]);
-            float fb = fp16l2_to_float(b[i]);
+            float fa = fp16_to_float(a[i]);
+            float fb = fp16_to_float(b[i]);
             float d = fa - fb;
             result += d * d;
         }
