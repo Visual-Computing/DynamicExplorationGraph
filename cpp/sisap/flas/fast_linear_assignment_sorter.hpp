@@ -15,6 +15,7 @@
 #include <cmath>
 #include <functional>
 
+#include <distances.h>
 #include <distance/fp32_l2.h>
 #include <distance/fp32_inner_product.h>
 
@@ -660,18 +661,20 @@ T get_l2_distance(const T *fv1, const T *fv2, int dim) {
 inline void calc_dist_lut_int(const InternalData *data, int num_swaps) {
   float max = 0;
   const size_t dim_sz = static_cast<size_t>(data->dim);
-  for (int i = 0; i < num_swaps; i++)
+  for (int i = 0; i < num_swaps; i++) {
+    if (data->metric == FlasMetric::InnerProduct) {
+      deglib::distances::compare_batch<deglib::distances::InnerProductFloat>(
+        data->fvs[i], reinterpret_cast<const void* const*>(data->som_fvs), num_swaps, &dim_sz, &data->dist_lut_f[i * num_swaps]);
+    } else {
+      deglib::distances::compare_batch<deglib::distances::L2Float>(
+        data->fvs[i], reinterpret_cast<const void* const*>(data->som_fvs), num_swaps, &dim_sz, &data->dist_lut_f[i * num_swaps]);
+    }
     for (int j = 0; j < num_swaps; j++) {
-      const float val =
-        (data->metric == FlasMetric::InnerProduct)
-          ? deglib::distances::InnerProductFloat::compare(
-              data->fvs[i], data->som_fvs[j], &dim_sz)
-          : deglib::distances::L2Float::compare(
-              data->fvs[i], data->som_fvs[j], &dim_sz);
-      data->dist_lut_f[i * num_swaps + j] = val;
+      float val = data->dist_lut_f[i * num_swaps + j];
       if (val > max)
         max = val;
     }
+  }
 
   if (max < 1e-10f) max = 1.0f; // avoid division by zero
   for (int i = 0; i < num_swaps; i++)
