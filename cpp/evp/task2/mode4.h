@@ -129,18 +129,17 @@ static int run(
     uint32_t k_top,
     const std::vector<uint32_t>& max_dist_list,
     bool compute_recall,
+    float goal_recall,
     int num_runs = 1,
     const std::string& output_path = "",
     const std::string& graph_path = "",
     uint32_t prune_worst = 0,
     const std::vector<float>& eps_search_list = {0.1f},
     deglib::builder::OptimizationTarget opt_target = deglib::builder::OptimizationTarget::LowLID,
-    uint32_t non_zeros = 0, // unused but kept for compatibility with CLI dispatch signature
     bool use_flas = false,
     FlasMetric flas_metric = FlasMetric::L2,
     float flas_radius_decay = 0.93f)
 {
-    (void)non_zeros; // suppress unused warning
     const std::string h5path = data_path.string();
     std::printf("\n");
 
@@ -388,7 +387,14 @@ static int run(
             std::printf("    max_dist=%u has recall %.2f %% and search time %.1f ms\n",
                         max_dist_val, timings.recall * 100.0f, timings.search_ms);
 
-            if (timings.recall > best_recall) {
+            bool is_better = false;
+            if (timings.recall >= goal_recall) {
+                is_better = (best_recall < goal_recall) || (timings.search_ms < best_timings.search_ms);
+            } else {
+                is_better = (best_recall < goal_recall) && (timings.recall > best_recall);
+            }
+
+            if (is_better) {
                 best_recall = timings.recall;
                 best_eps_search = eps_search;
                 best_max_dist = max_dist_val;

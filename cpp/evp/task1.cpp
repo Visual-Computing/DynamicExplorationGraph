@@ -127,6 +127,7 @@ int main(int argc, char* argv[]) {
         std::string evpK_str = "50"; 
         std::string max_dist_str = "200";
         uint32_t prune_worst = 16;
+        float goal_recall = 0.8f;
 
         if (argc < 3) {
             std::fprintf(stderr, "Usage: %s <hdf5_file_path> <mode_name> [options...]\n", argv[0]);
@@ -166,6 +167,8 @@ int main(int argc, char* argv[]) {
             std::fprintf(stderr, "                     to bypass the construction phase.\n");
             std::fprintf(stderr, "  --prune-worst <n>  Number of worst (least similar) neighbors per vertex to replace with self-loops.\n");
             std::fprintf(stderr, "                     Applies to all modes (default: 16).\n");
+            std::fprintf(stderr, "  --goal-recall <f>  Recall threshold. Sweeps will select configuration minimizing search time\n");
+            std::fprintf(stderr, "                     among those with recall >= threshold (default: 0.8).\n");
             return 1;
         }
 
@@ -198,6 +201,8 @@ int main(int argc, char* argv[]) {
                 graph_path = argv[++i];
             } else if (arg == "--prune-worst" && i + 1 < argc) {
                 prune_worst = std::stoul(argv[++i]);
+            } else if (arg == "--goal-recall" && i + 1 < argc) {
+                goal_recall = std::stof(argv[++i]);
             } else {
                 std::fprintf(stderr, "Warning: Unknown or malformed option '%s'\n", arg.c_str());
             }
@@ -262,22 +267,22 @@ int main(int argc, char* argv[]) {
 
         // Support both old mode names/aliases and modeX names
         if (mode == "fp16-build-fp16-explore" || mode == "fp16" || mode == "mode1") {
-            return task1::mode1::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, output_path, graph_path, prune_worst);
+            return task1::mode1::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, output_path, graph_path, prune_worst);
         } else if (mode == "evp-linear-search" || mode == "evp-linear" || mode == "mode2") {
             if (!graph_path.empty()) {
                 std::fprintf(stderr, "Warning: --graph-path is not supported by mode2 (EVP linear search) and will be ignored.\n");
             }
-            return task1::mode2::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, output_path);
+            return task1::mode2::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, output_path);
         } else if (mode == "evp-build-evp-explore" || mode == "evp" || mode == "mode3") {
-            return task1::mode3::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, output_path, graph_path, prune_worst);
+            return task1::mode3::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, output_path, graph_path, prune_worst);
         } else if (mode == "evp-build-evp-explore-fp16-rerank" || mode == "evp-rerank" || mode == "mode4") {
-            return task1::mode4::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, evpK_list, run_recall, output_path, graph_path, prune_worst);
+            return task1::mode4::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, evpK_list, run_recall, goal_recall, output_path, graph_path, prune_worst);
         } else if (mode == "evp-build-fp16-external-search" || mode == "mode5") {
-            return task1::mode5::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, output_path, graph_path, prune_worst);
+            return task1::mode5::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, output_path, graph_path, prune_worst);
         } else if (mode == "evp-build-fp16-asymmetric-search" || mode == "evp-asymmetric" || mode == "mode6") {
-            return task1::mode6::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, output_path, graph_path, prune_worst);
+            return task1::mode6::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, output_path, graph_path, prune_worst);
         } else if (mode == "evp-build-fp16-asymmetric-search-rerank" || mode == "evp-asymmetric-rerank" || mode == "mode7") {
-            return task1::mode7::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, evpK_list, run_recall, output_path, graph_path, prune_worst);
+            return task1::mode7::run(path, threads, non_zeros, k_graph, k_ext, eps_ext, k_top, max_dist_list, evpK_list, run_recall, goal_recall, output_path, graph_path, prune_worst);
         } else {
             std::fprintf(stderr, "Error: Unknown mode '%s'. Choose a valid benchmark mode (e.g. 'evp-rerank', 'evp', etc.) or 'mode1'-'mode7'.\n", mode.c_str());
             return 1;

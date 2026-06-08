@@ -52,6 +52,7 @@ static int run(
     uint32_t k_top,
     const std::vector<uint32_t>& max_dist_list,
     bool compute_recall,
+    float goal_recall,
     const std::string& output_path)
 {
     (void)k_graph;
@@ -94,7 +95,7 @@ static int run(
 
     std::printf("Starting exploration: k_top=%u, prune_worst=0, threads=%u\n", k_top, threads);
     uint32_t best_max_dist = 0;
-    float best_recall = -2.0f;
+    float best_recall = -1.0f;
     double best_search_ms = 0.0;
 
     for (uint32_t max_dist_val : max_dist_list) {
@@ -166,7 +167,14 @@ static int run(
         std::printf("  max_dist=%u has recall %.2f %% and time %.1f s\n",
                     max_dist_val, recall * 100.0f, search_ms / 1000.0);
 
-        if (recall > best_recall) {
+        bool is_better = false;
+        if (recall >= goal_recall) {
+            is_better = (best_recall < goal_recall) || (search_ms < best_search_ms);
+        } else {
+            is_better = (best_recall < goal_recall) && (recall > best_recall);
+        }
+
+        if (is_better) {
             best_recall = recall;
             best_max_dist = max_dist_val;
             best_search_ms = search_ms;

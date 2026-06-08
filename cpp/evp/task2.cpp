@@ -105,7 +105,6 @@ int main(int argc, char* argv[]) {
         uint8_t k_graph = 30;
         uint8_t k_ext = 30;
         float eps_ext = 0.001f;
-        uint32_t non_zeros = 64;
         bool run_recall = true;
         std::string output_path;
         std::string graph_path;
@@ -114,6 +113,7 @@ int main(int argc, char* argv[]) {
         std::string eps_search_str = "0.3";
         uint32_t num_runs = 1;
         bool use_flas = false;
+        float goal_recall = 0.8f;
         std::string flas_metric_str = "l2";
         float flas_radius_decay = 0.93f;
         deglib::builder::OptimizationTarget opt_target = deglib::builder::OptimizationTarget::LowLID;
@@ -136,8 +136,6 @@ int main(int argc, char* argv[]) {
             std::fprintf(stderr, "  --k-ext <n>        The search size (k-top parameter) used during graph construction. Decides\n");
             std::fprintf(stderr, "                     how many good neighbors are shown to each newly added node, from which it\n");
             std::fprintf(stderr, "                     selects nodes to connect with up to k-graph (default: 32).\n");
-            std::fprintf(stderr, "  --non-zeros <n>    EVP quantization sparsity: number of top absolute-value elements\n");
-            std::fprintf(stderr, "                     per vector retained after quantization (default: 64, for mode4 only).\n");
             std::fprintf(stderr, "  --eps-ext <f>      Search expansion parameter used together with k-ext during graph construction.\n");
             std::fprintf(stderr, "                     Decides if nodes whose distance is slightly worse (e.g. 0.01 = 1%%) than the\n");
             std::fprintf(stderr, "                     current worst in the search list should be explored (default: 0.001).\n");
@@ -155,6 +153,8 @@ int main(int argc, char* argv[]) {
             std::fprintf(stderr, "  --flas-radius-decay <f>  FLAS swap radius decay factor per iteration (default: 0.93).\n");
             std::fprintf(stderr, "  --num-runs <n>           Number of query explorations to perform and average (default: 1).\n");
             std::fprintf(stderr, "  --opt-target <str> Optimization target for graph builder (LowLID, HighLID, StreamingData_SchemeA, ..., default: LowLID).\n");
+            std::fprintf(stderr, "  --goal-recall <f>  Recall threshold. Sweeps will select configuration minimizing search time\n");
+            std::fprintf(stderr, "                     among those with recall >= threshold (default: 0.8).\n");
             return 1;
         }
 
@@ -175,8 +175,6 @@ int main(int argc, char* argv[]) {
                 k_ext = static_cast<uint8_t>(std::stoul(argv[++i]));
             } else if (arg == "--eps-ext" && i + 1 < argc) {
                 eps_ext = std::stof(argv[++i]);
-            } else if (arg == "--non-zeros" && i + 1 < argc) {
-                non_zeros = std::stoul(argv[++i]);
             } else if (arg == "--no-recall") {
                 run_recall = false;
             } else if (arg == "--output" && i + 1 < argc) {
@@ -197,6 +195,8 @@ int main(int argc, char* argv[]) {
                 flas_radius_decay = std::stof(argv[++i]);
             } else if (arg == "--num-runs" && i + 1 < argc) {
                 num_runs = std::stoul(argv[++i]);
+            } else if (arg == "--goal-recall" && i + 1 < argc) {
+                goal_recall = std::stof(argv[++i]);
             } else if (arg == "--opt-target" && i + 1 < argc) {
                 std::string target_str = argv[++i];
                 if (target_str == "LowLID") {
@@ -282,15 +282,15 @@ int main(int argc, char* argv[]) {
 #endif
 
           if (mode == "fp32-build-fp32-explore" || mode == "baseline" || mode == "mode1") {
-             return task2::mode_baseline::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
+             return task2::mode_baseline::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
           } else if (mode == "fp16-build-fp16-explore" || mode == "mode2") {
-             return task2::mode_fp16_build::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
+             return task2::mode_fp16_build::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
           } else if (mode == "fp32-build-fp16-explore" || mode == "baseline-fp16" || mode == "mode3") {
-             return task2::mode_fp16::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
+             return task2::mode_fp16::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
            } else if (mode == "l2-converted" || mode == "fp32-build-l2-explore" || mode == "mode4") {
-              return task2::mode_evp_asym_search::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, non_zeros, use_flas, flas_metric, flas_radius_decay);
+              return task2::mode_evp_asym_search::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
            } else if (mode == "l2-fp16-ip" || mode == "l2-build-fp16-ip-explore" || mode == "mode5") {
-              return task2::mode_l2_fp16_ip::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
+              return task2::mode_l2_fp16_ip::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
            } else {
               std::fprintf(stderr, "Error: Unknown mode '%s'. Supported modes: mode1, mode2, mode3, mode4, mode5\n", mode.c_str());
               return 1;

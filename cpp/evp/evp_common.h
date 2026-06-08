@@ -67,6 +67,15 @@ inline const char* opt_target_str(deglib::builder::OptimizationTarget t) {
     }
 }
 
+// Format a duration (given in ms) as "XX.X ms" when < 10000 ms, else "XX.X s".
+inline void print_time(const char* label, double ms) {
+    if (ms < 10000.0) {
+        std::printf("%-24s%6.1f ms\n", label, ms);
+    } else {
+        std::printf("%-24s%6.1f s\n",  label, ms / 1000.0);
+    }
+}
+
 inline void print_summary(
     const char* mode_name,
     uint32_t mode_number,
@@ -96,20 +105,22 @@ inline void print_summary(
     std::printf("========================================================================\n");
     std::printf("  FINAL SUMMARY (%s - Mode %u)\n", mode_name, mode_number);
     std::printf("========================================================================\n");
-    std::printf("Load Time:              %6.1f s\n", load_ms            / 1000.0);
-    std::printf("Quantize Time:          %6.1f s\n", quantize_ms        / 1000.0);
-    std::printf("Graph Build Time:       %6.1f s\n", build_ms           / 1000.0);
-    std::printf("Graph Conversion Time:  %6.1f s\n", convert_ms         / 1000.0);
-    std::printf("Pruning Time:           %6.1f s\n", prune_ms           / 1000.0);
-    std::printf("Explore Time:           %6.1f s\n", explore_ms         / 1000.0);
-    std::printf("Rerank Time:            %6.1f s\n", rerank_ms          / 1000.0);
-    std::printf("Total Elapsed Time:     %6.1f s\n", total_elapsed_ms   / 1000.0);
+    print_time("Load Time:",             load_ms);
+    print_time("Quantize Time:",         quantize_ms);
+    print_time("Graph Build Time:",      build_ms);
+    print_time("Graph Conversion Time:", convert_ms);
+    print_time("Pruning Time:",          prune_ms);
+    print_time("Explore Time:",          explore_ms);
+    print_time("Rerank Time:",           rerank_ms);
+    print_time("Total Elapsed Time:",    total_elapsed_ms);
     if (compute_recall) {
         std::printf("Recall@%u:              %6.2f %%\n", k_top, recall * 100.0f);
     }
     std::printf("------------------------------------------------------------------------\n");
     std::printf("Hyperparameters:\n");
-    std::printf("  NON_ZEROS:             %u\n", non_zeros);
+    if (non_zeros > 0) {
+        std::printf("  NON_ZEROS:             %u\n", non_zeros);
+    }
     std::printf("  K_TOP:                 %u\n", k_top);
     std::printf("  K_GRAPH:               %u\n", (uint32_t)k_graph);
     std::printf("  K_EXT:                 %u\n", (uint32_t)k_ext);

@@ -4,11 +4,25 @@
  * @file mode5.h
  * @brief Task 2 Mode 5: FP32 Build (L2-converted) + FP16 Inner Product Search
  *
- * Building graph: k_graph=30, k_ext=60, eps_ext=0.001, threads=1, opt_target=LowLID
- *  --- eps_search=0.150 ---
- *   max_dist=50000 has recall 77.25 % and search time 39.5 ms
- * --- eps_search=0.180 ---
- *   max_dist=50000 has recall 83.93 % and search time 56.6 ms
+ * Building graph (FLAS order): k_graph=30, k_ext=60, eps_ext=0.001, threads=1, opt_target=LowLID
+
+  --- eps_search=0.150 ---
+    max_dist=5000 has recall 73.78 % and search time 22.6 ms
+    max_dist=6000 has recall 75.77 % and search time 26.0 ms
+    max_dist=7000 has recall 76.98 % and search time 26.3 ms
+    max_dist=8000 has recall 77.73 % and search time 28.0 ms
+
+  --- eps_search=0.180 ---
+    max_dist=5000 has recall 75.53 % and search time 25.5 ms
+    max_dist=6000 has recall 78.34 % and search time 29.3 ms
+    max_dist=7000 has recall 80.31 % and search time 31.8 ms
+    max_dist=8000 has recall 81.74 % and search time 36.2 ms
+
+  --- eps_search=0.190 ---
+    max_dist=5000 has recall 75.88 % and search time 26.2 ms
+    max_dist=6000 has recall 78.84 % and search time 30.8 ms
+    max_dist=7000 has recall 80.97 % and search time 33.2 ms
+    max_dist=8000 has recall 82.59 % and search time 37.8 ms
  *
  * Behavior:
  * 1. Loads FP32 training vectors from "train" as the database.
@@ -174,6 +188,7 @@ static int run(
     uint32_t k_top,
     const std::vector<uint32_t>& max_dist_list,
     bool compute_recall,
+    float goal_recall,
     int num_runs = 1,
     const std::string& output_path = "",
     const std::string& graph_path = "",
@@ -450,7 +465,14 @@ static int run(
             std::printf("    max_dist=%u has recall %.2f %% and search time %.1f ms\n",
                         max_dist_val, timings.recall * 100.0f, timings.search_ms);
 
-            if (timings.recall > best_recall) {
+            bool is_better = false;
+            if (timings.recall >= goal_recall) {
+                is_better = (best_recall < goal_recall) || (timings.search_ms < best_timings.search_ms);
+            } else {
+                is_better = (best_recall < goal_recall) && (timings.recall > best_recall);
+            }
+
+            if (is_better) {
                 best_recall = timings.recall;
                 best_eps_search = eps_search;
                 best_max_dist = max_dist_val;

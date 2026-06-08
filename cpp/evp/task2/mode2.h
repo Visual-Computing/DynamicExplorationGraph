@@ -162,6 +162,7 @@ static int run(
     uint32_t k_top,
     const std::vector<uint32_t>& max_dist_list,
     bool compute_recall,
+    float goal_recall,
     int num_runs = 1,
     const std::string& output_path = "",
     const std::string& graph_path = "",
@@ -381,7 +382,14 @@ static int run(
             std::printf("    max_dist=%u has recall %.2f %% and search time %.1f ms\n",
                         max_dist_val, timings.recall * 100.0f, timings.search_ms);
 
-            if (timings.recall > best_recall) {
+            bool is_better = false;
+            if (timings.recall >= goal_recall) {
+                is_better = (best_recall < goal_recall) || (timings.search_ms < best_timings.search_ms);
+            } else {
+                is_better = (best_recall < goal_recall) && (timings.recall > best_recall);
+            }
+
+            if (is_better) {
                 best_recall = timings.recall;
                 best_eps_search = eps_search;
                 best_max_dist = max_dist_val;
