@@ -92,6 +92,7 @@
 #include "task2/mode2.h"
 #include "task2/mode3.h"
 #include "task2/mode4.h"
+#include "task2/mode5.h"
 #include "../evp/flas/fast_linear_assignment_sorter.hpp"
 
 int main(int argc, char* argv[]) {
@@ -123,7 +124,8 @@ int main(int argc, char* argv[]) {
             std::fprintf(stderr, "  baseline | fp32-build-fp32-explore | mode1            : FP32 build + FP32 explore\n");
             std::fprintf(stderr, "  fp16-build-fp16-explore | mode2                      : FP16 build + FP16 explore\n");
             std::fprintf(stderr, "  baseline-fp16 | fp32-build-fp16-explore | mode3       : FP32 build + FP16 explore\n");
-            std::fprintf(stderr, "  evp-search | fp32-build-evp-search | mode4                : FP32 build + asymmetric FP16xEVP search\n");
+            std::fprintf(stderr, "  l2-converted | fp32-build-l2-explore | mode4              : FP32 build (L2 converted) + FP32 L2 search\n");
+            std::fprintf(stderr, "  l2-fp16-ip | l2-build-fp16-ip-explore | mode5             : FP32 build (L2 converted) + FP16 InnerProduct search\n");
             std::fprintf(stderr, "  Use --flas with any FP32 mode to enable FLAS pre-sort.\n\n");
             std::fprintf(stderr, "  --threads <n>      Number of CPU worker threads used for query exploration (default: 6).\n");
             std::fprintf(stderr, "  --build-threads <n> Number of CPU worker threads used for graph construction (default: same as --threads).\n");
@@ -144,7 +146,7 @@ int main(int argc, char* argv[]) {
             std::fprintf(stderr, "  --output <path>    Path to a binary `.ivecs` file where the retrieved nearest-neighbor indices\n");
             std::fprintf(stderr, "                     will be saved (one row per query; uint32_t count followed by indices).\n");
             std::fprintf(stderr, "  --max-dist <list>  Exploration search budget or comma-separated list of budgets. Specifies the maximum number of\n");
-            std::fprintf(stderr, "                     distance computations allowed per query. Main parameter to trade search speed for recall (default: 200).\n");
+            std::fprintf(stderr, "                     distance computations allowed per query. Main parameter to trade search speed for recall (default: 20000).\n");
             std::fprintf(stderr, "  --graph <path>     File path to save the pre-built graph to, or load a pre-built graph from\n");
             std::fprintf(stderr, "                     to bypass the construction phase.\n");
             std::fprintf(stderr, "  --prune-worst <n>  Number of worst (least similar) neighbors per vertex to replace with self-loops (default: 0).\n");
@@ -285,12 +287,14 @@ int main(int argc, char* argv[]) {
              return task2::mode_fp16_build::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
           } else if (mode == "fp32-build-fp16-explore" || mode == "baseline-fp16" || mode == "mode3") {
              return task2::mode_fp16::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
-          } else if (mode == "evp-search" || mode == "fp32-build-evp-search" || mode == "mode4") {
-             return task2::mode_evp_asym_search::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, non_zeros, use_flas, flas_metric, flas_radius_decay);
-         } else {
-             std::fprintf(stderr, "Error: Unknown mode '%s'. Supported modes: mode1, mode2, mode3, mode4\n", mode.c_str());
-             return 1;
-         }
+           } else if (mode == "l2-converted" || mode == "fp32-build-l2-explore" || mode == "mode4") {
+              return task2::mode_evp_asym_search::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, non_zeros, use_flas, flas_metric, flas_radius_decay);
+           } else if (mode == "l2-fp16-ip" || mode == "l2-build-fp16-ip-explore" || mode == "mode5") {
+              return task2::mode_l2_fp16_ip::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
+           } else {
+              std::fprintf(stderr, "Error: Unknown mode '%s'. Supported modes: mode1, mode2, mode3, mode4, mode5\n", mode.c_str());
+              return 1;
+          }
 
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "Fatal error: %s\n", ex.what());

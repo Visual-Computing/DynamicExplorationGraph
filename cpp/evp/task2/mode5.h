@@ -1,18 +1,26 @@
 #pragma once
 
 /**
- * @file mode4.h
- * @brief Task 2 Mode 4: FP32 Build (L2-converted) + FP32 L2 Search
+ * @file mode5.h
+ * @brief Task 2 Mode 5: FP32 Build (L2-converted) + FP16 Inner Product Search
+ *
+ * Building graph: k_graph=30, k_ext=60, eps_ext=0.001, threads=1, opt_target=LowLID
+ *  --- eps_search=0.150 ---
+ *   max_dist=50000 has recall 77.25 % and search time 39.5 ms
+ * --- eps_search=0.180 ---
+ *   max_dist=50000 has recall 83.93 % and search time 56.6 ms
  *
  * Behavior:
  * 1. Loads FP32 training vectors from "train" as the database.
  * 2. Computes the maximum squared norm M^2 of database vectors.
  * 3. Appends sqrt(M^2 - ||x||^2) to each database vector (d+1 dimensions).
  * 4. Builds a SizeBoundedGraph using Metric::L2 with FloatSpace(dims + 1, Metric::L2).
- * 5. Loads FP32 query vectors from "queries".
- * 6. Appends 0.0f to each query vector (d+1 dimensions).
- * 7. For each query, uses graph.search() with Metric::L2.
- * 8. Tracks build time and search time separately.
+ * 5. Converts original d-dimensional database vectors to FP16.
+ * 6. Creates a ReadOnlyGraph using Metric::FP16InnerProduct with the FP16 database,
+ *    mapping the graph structure built in L2-space.
+ * 7. Loads FP32 query vectors, converts them to FP16 (d dimensions).
+ * 8. For each query, uses fp16_graph.search() with Metric::FP16InnerProduct.
+ * 9. Tracks build time, conversion time, and search time separately.
  */
 
 #include <chrono>
@@ -38,22 +46,59 @@
 #include "concurrent.h"
 #include "distances.h"
 #include "graph/sizebounded_graph.h"
+#include "graph/readonly_graph.h"
 #include "repository.h"
 
 #include "../evp_common.h"
 #include "../hdf5_reader.h"
 #include "../flas_common.h"
 
-namespace task2::mode_evp_asym_search {
+namespace task2::mode_l2_fp16_ip {
 
 struct ExplorationTimings {
     double search_ms = 0.0;
     float recall = -1.0f;
 };
 
+static std::vector<uint16_t> floats_to_fp16(const std::vector<float>& v) {
+    std::vector<uint16_t> out(v.size());
+#if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
+    size_t i = 0;
+    for (; i + 4 <= v.size(); i += 4) {
+        __m128 f4 = _mm_loadu_ps(&v[i]);
+        __m128i h4 = _mm_cvtps_ph(f4, _MM_FROUND_TO_NEAREST_INT);
+        alignas(16) uint16_t tmp[8];
+        _mm_storeu_si128((__m128i*)tmp, h4);
+        out[i]   = tmp[0];
+        out[i+1] = tmp[1];
+        out[i+2] = tmp[2];
+        out[i+3] = tmp[3];
+    }
+    for (; i < v.size(); ++i) {
+        __m128 f1 = _mm_set_ss(v[i]);
+        __m128i h1 = _mm_cvtps_ph(f1, _MM_FROUND_TO_NEAREST_INT);
+        alignas(16) uint16_t tmp[8];
+        _mm_storeu_si128((__m128i*)tmp, h1);
+        out[i] = tmp[0];
+    }
+#else
+    for (size_t i = 0; i < v.size(); ++i) {
+        uint32_t bits;
+        std::memcpy(&bits, &v[i], 4);
+        uint16_t sign     = static_cast<uint16_t>((bits >> 16) & 0x8000u);
+        int32_t  exponent = static_cast<int32_t>((bits >> 23) & 0xFF) - 127 + 15;
+        uint32_t mantissa = bits & 0x7FFFFFu;
+        if (exponent <= 0)      { out[i] = sign; }
+        else if (exponent >= 31){ out[i] = static_cast<uint16_t>(sign | 0x7C00u); }
+        else                    { out[i] = static_cast<uint16_t>(sign | (exponent << 10) | (mantissa >> 13)); }
+    }
+#endif
+    return out;
+}
+
 static ExplorationTimings run_search(
-    const deglib::graph::SizeBoundedGraph& graph,
-    const std::vector<std::vector<float>>& queries,
+    const deglib::graph::ReadOnlyGraph& graph,
+    const std::vector<std::vector<uint16_t>>& queries,
     uint32_t k_top,
     float eps_search,
     uint32_t max_dist,
@@ -135,12 +180,10 @@ static int run(
     uint32_t prune_worst = 0,
     const std::vector<float>& eps_search_list = {0.1f},
     deglib::builder::OptimizationTarget opt_target = deglib::builder::OptimizationTarget::LowLID,
-    uint32_t non_zeros = 0, // unused but kept for compatibility with CLI dispatch signature
     bool use_flas = false,
     FlasMetric flas_metric = FlasMetric::L2,
     float flas_radius_decay = 0.93f)
 {
-    (void)non_zeros; // suppress unused warning
     const std::string h5path = data_path.string();
     std::printf("\n");
 
@@ -197,7 +240,7 @@ static int run(
     }
     double load_ms = evp_common::now_ms() - t_load_start;
 
-    std::printf("=== FP32 L2-converted Build, FP32 L2 Search - Task 2 Mode 4 (opt_target=%s) ===\n", evp_common::opt_target_str(opt_target));
+    std::printf("=== L2-structured FP32 Build, FP16 IP Search - Task 2 Mode 5 (opt_target=%s) ===\n", evp_common::opt_target_str(opt_target));
 
     // --------------------------------------------------------------------------
     // Load ALL FP32 training vectors once
@@ -208,7 +251,7 @@ static int run(
     load_ms += load_fp32_ms;
 
     // --------------------------------------------------------------------------
-    // Perform (d+1)-dimensional L2 transformation on database
+    // Perform (d+1)-dimensional L2 transformation on database for building
     // --------------------------------------------------------------------------
     double t_transform_start = evp_common::now_ms();
     
@@ -240,11 +283,7 @@ static int run(
     }
 
     double transform_ms = evp_common::now_ms() - t_transform_start;
-    std::printf("Transformed database to %zu dimensions in %.2f ms\n", new_dims, transform_ms);
-
-    // Free raw database_fp32 since we have the transformed version
-    database_fp32.clear();
-    database_fp32.shrink_to_fit();
+    std::printf("Transformed database to %zu dimensions for graph building in %.2f ms\n", new_dims, transform_ms);
 
     // --------------------------------------------------------------------------
     // Optional FLAS pre-sort (performed on transformed vectors)
@@ -344,35 +383,58 @@ static int run(
     double prune_ms = evp_common::prune_worst_neighbors(graph, prune_worst, static_cast<uint32_t>(build_threads));
 
     // --------------------------------------------------------------------------
-    // Load query vectors and append 0.0f
+    // Convert original database features (d dims) to FP16 and build ReadOnlyGraph
     // --------------------------------------------------------------------------
-    std::vector<std::vector<float>> queries;
+    double t_convert_start = evp_common::now_ms();
+    std::printf("Converting original features (dims=%zu) to FP16...\n", dims);
+
+    std::vector<uint16_t> database_fp16(count * dims);
+    for (size_t i = 0; i < count; ++i) {
+        std::vector<float> fp32_vec(dims);
+        std::memcpy(fp32_vec.data(), &database_fp32[i * dims], dims * sizeof(float));
+        std::vector<uint16_t> fp16_vec = floats_to_fp16(fp32_vec);
+        std::memcpy(&database_fp16[i * dims], fp16_vec.data(), dims * sizeof(uint16_t));
+    }
+
+    std::printf("Building ReadOnlyGraph with FP16InnerProduct features...\n");
+    deglib::FloatSpace fp16_space(static_cast<uint32_t>(dims), deglib::Metric::FP16InnerProduct);
+    deglib::graph::ReadOnlyGraph fp16_graph(fp16_space, graph, database_fp16.data());
+    
+    // Free the original graph, temporary buffers and transformed vectors
+    graph_ptr.reset();
+    database_fp32.clear();
+    database_fp32.shrink_to_fit();
+    database_fp16.clear();
+    database_fp16.shrink_to_fit();
+    database_transformed.clear();
+    database_transformed.shrink_to_fit();
+
+    double convert_ms = evp_common::now_ms() - t_convert_start;
+    std::printf("Converted database and swapped features in %.2f ms\n", convert_ms);
+
+    // --------------------------------------------------------------------------
+    // Load query vectors and convert to FP16 (d dims)
+    // --------------------------------------------------------------------------
+    std::vector<std::vector<uint16_t>> queries;
     if (!query_info_ptr) {
-        std::fprintf(stderr, "Error: No query dataset found in HDF5 file. Task 2 requires actual test queries.\n");
+        std::fprintf(stderr, "Error: No query dataset found in HDF5 file.\n");
         return 1;
     }
     double t_query_load = evp_common::now_ms();
     auto queries_fp32 = hdf5_reader::read_matrix_fp32(h5path, *query_info_ptr);
-    
-    // Transform queries: append 0.0f
-    queries.resize(queries_fp32.size());
-    for (size_t i = 0; i < queries_fp32.size(); ++i) {
-        queries[i].resize(new_dims);
-        std::memcpy(queries[i].data(), queries_fp32[i].data(), dims * sizeof(float));
-        queries[i][dims] = 0.0f;
+    queries.reserve(queries_fp32.size());
+    for (const auto& q : queries_fp32) {
+        queries.push_back(floats_to_fp16(q));
     }
-
     double query_load_ms = evp_common::now_ms() - t_query_load;
     load_ms += query_load_ms;
-    std::printf("Loaded %zu queries and transformed to %zu dimensions\n", queries.size(), new_dims);
+    std::printf("Loaded %zu queries and converted to FP16 (dims=%zu)\n", queries.size(), dims);
 
     // --------------------------------------------------------------------------
     // Exploration with parameter sweep: eps_search × max_dist
-    // Graph built once, then searched across all combinations
     // --------------------------------------------------------------------------
     std::printf("Starting exploration: k_top=%u, threads=%u\n", k_top, threads);
 
-    // Track best eps_search × max_dist combination
     float best_recall = -1.0f;
     float best_eps_search = 0.1f;
     uint32_t best_max_dist = 200;
@@ -382,7 +444,7 @@ static int run(
         std::printf("\n  --- eps_search=%.3f ---\n", eps_search);
         
         for (uint32_t max_dist_val : max_dist_list) {
-            auto timings = run_search(graph, queries, k_top, eps_search, max_dist_val, static_cast<uint8_t>(threads),
+            auto timings = run_search(fp16_graph, queries, k_top, eps_search, max_dist_val, static_cast<uint8_t>(threads),
                                            compute_recall, num_runs, gt_data, output_path);
 
             std::printf("    max_dist=%u has recall %.2f %% and search time %.1f ms\n",
@@ -398,18 +460,18 @@ static int run(
     }
 
     std::printf("\n");
-    double total_time_ms = load_ms + build_ms + transform_ms + best_timings.search_ms;
+    double total_time_ms = load_ms + build_ms + transform_ms + convert_ms + best_timings.search_ms;
 
     evp_common::print_summary(
-        (use_flas ? "FP32 Build (L2-converted), FP32 L2 Search (FLAS)" : "FP32 Build (L2-converted), FP32 L2 Search"), 4,
-        load_ms, transform_ms, build_ms, 0.0, prune_ms,
+        (use_flas ? "L2-structured Build, FP16 IP Search (FLAS)" : "L2-structured Build, FP16 IP Search"), 5,
+        load_ms, transform_ms, build_ms, convert_ms, prune_ms,
         best_timings.search_ms, flas_ms, total_time_ms,
         compute_recall, k_top, best_timings.recall,
         threads, best_max_dist, 0,
-        k_graph, k_ext, eps_ext, 0, count, new_dims, 0, opt_target
+        k_graph, k_ext, eps_ext, 0, count, dims, 0, opt_target
     );
 
     return 0;
 }
 
-} // namespace task2::mode_evp_asym_search
+} // namespace task2::mode_l2_fp16_ip
