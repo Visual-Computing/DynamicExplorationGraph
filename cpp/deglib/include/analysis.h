@@ -223,7 +223,7 @@ static auto checkRNG(const deglib::graph::MutableGraph& graph,
     const auto neighbor_weight = graph.getNeighborWeights(vertex_index);
     for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
         const auto neighbor_target_weight = graph.getEdgeWeight(neighbor_indices[edge_idx], target_index);
-        if (neighbor_target_weight >= 0 && vertex_target_weight > std::max(neighbor_weight[edge_idx], neighbor_target_weight)) {
+        if (neighbor_target_weight != std::numeric_limits<float>::lowest() && vertex_target_weight > std::max(neighbor_weight[edge_idx], neighbor_target_weight)) {
             return false;
         }
     }

@@ -101,10 +101,10 @@ inline deglib::graph::SizeBoundedGraph create_random_graph(const deglib::StaticF
             if (graph.hasEdge(candidate_index, internal_index)) continue;
 
             uint32_t new_neighbor_index = 0;
-            float new_neighbor_weight = -1;
+            float new_neighbor_weight = std::numeric_limits<float>::lowest();
             const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
             const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
-            while (new_neighbor_weight < 0) {
+            while (new_neighbor_weight == std::numeric_limits<float>::lowest()) {
                 const auto edge_idx = (uint32_t)rnd_neighbor(rnd);
                 const auto neighbor_index = neighbor_indices[edge_idx];
                 const auto neighbor_weight = neighbor_weights[edge_idx];
@@ -115,7 +115,7 @@ inline deglib::graph::SizeBoundedGraph create_random_graph(const deglib::StaticF
                 }
             }
 
-            if (new_neighbor_weight < 0) {
+            if (new_neighbor_weight == std::numeric_limits<float>::lowest()) {
                 log("ERROR: could not find edge in neighbor list of vertex {} to connect to vertex {}\n", candidate_index, internal_index);
                 abort();
             }

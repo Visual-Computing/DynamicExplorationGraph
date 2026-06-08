@@ -233,7 +233,7 @@ public:
       auto weight_index = neighbor_ptr - neighbor_indices;
       return weights_by_index(internal_index)[weight_index];
     }
-    return -1;
+    return std::numeric_limits<float>::lowest();
   }
 
   inline const bool hasVertex(const uint32_t external_label) const override {
