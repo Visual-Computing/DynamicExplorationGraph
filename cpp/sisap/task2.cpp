@@ -53,7 +53,7 @@
  *
  * CLI Usage
  * ---------
- *   deglib_evp_task2.exe <hdf5_file> <mode> [options...]
+ *   deglib_sisap_task2.exe <hdf5_file> <mode> [options...]
  *
  *   <mode> accepts:
  *     - "baseline"
@@ -76,7 +76,9 @@
  * Examples
  * --------
  *   # FP32 baseline (mode1)
- *   .\deglib_evp_task2.exe llama-dev.h5 mode1 --max-dist 100
+ *   .\deglib_sisap_task2.exe llama-dev.h5 mode1 --max-dist 100
+ *   # Or via combined entry point
+ *   .\deglib_sisap.exe task2 llama-dev.h5 mode1 --max-dist 100
  */
 
 #if defined(_WIN32)
@@ -88,14 +90,19 @@
 #include <filesystem>
 #include <iostream>
 
+#include "sisap_common.h"
 #include "task2/mode1.h"
 #include "task2/mode2.h"
 #include "task2/mode3.h"
 #include "task2/mode4.h"
 #include "task2/mode5.h"
-#include "../evp/flas/fast_linear_assignment_sorter.hpp"
+#include "flas/fast_linear_assignment_sorter.hpp"
 
+#ifdef BUILD_COMBINED_SISAP
+int run_task2(int argc, char* argv[]) {
+#else
 int main(int argc, char* argv[]) {
+#endif
     try {
         std::string data_path;
         std::string mode;
@@ -228,8 +235,8 @@ int main(int argc, char* argv[]) {
             build_threads = threads;
         }
 
-        std::vector<uint32_t> max_dist_list = evp_common::parse_list(max_dist_str);
-        std::vector<float> eps_search_list = evp_common::parse_list_f(eps_search_str);
+        std::vector<uint32_t> max_dist_list = sisap_common::parse_list(max_dist_str);
+        std::vector<float> eps_search_list = sisap_common::parse_list_f(eps_search_str);
 
         // Validate --prune-worst
         if (prune_worst >= k_graph) {

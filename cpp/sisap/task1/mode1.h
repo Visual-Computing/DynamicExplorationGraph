@@ -37,7 +37,7 @@
 #include "quantization/evp_quantize.h"
 #include "repository.h"
 
-#include "../evp_common.h"
+#include "../sisap_common.h"
 #include "../hdf5_reader.h"
 
 namespace task1::mode1 {
@@ -59,7 +59,7 @@ static ExplorationTimings run_exploration(
     size_t count = graph.size();
     std::vector<std::vector<uint32_t>> results(count);
 
-    double t_start = evp_common::now_ms();
+    double t_start = sisap_common::now_ms();
 
     const size_t chunk_size = 8192;
     const size_t num_chunks = (count + chunk_size - 1) / chunk_size;
@@ -72,7 +72,7 @@ static ExplorationTimings run_exploration(
             size_t end = std::min(start + chunk_size, count);
             size_t num_items = end - start;
 
-            double t_search_start = evp_common::now_ms();
+            double t_search_start = sisap_common::now_ms();
             for (size_t i = 0; i < num_items; ++i) {
                 size_t label = start + i;
                 size_t entry_idx = graph.getInternalIndex(static_cast<uint32_t>(label));
@@ -93,7 +93,7 @@ static ExplorationTimings run_exploration(
                     result_queue.pop();
                 }
             }
-            chunk_search_times[chunk_id] = evp_common::now_ms() - t_search_start;
+            chunk_search_times[chunk_id] = sisap_common::now_ms() - t_search_start;
         });
 
 
@@ -101,9 +101,9 @@ static ExplorationTimings run_exploration(
 
     float recall = -1.0f;
     if (compute_recall) {
-        recall = evp_common::compute_recall(gt_data, results, k_top);
+        recall = sisap_common::compute_recall(gt_data, results, k_top);
     } else {
-        evp_common::ivecs_write(output_path, results);
+        sisap_common::ivecs_write(output_path, results);
     }
 
     return { sum_search_ms, recall };
@@ -130,13 +130,13 @@ static int run(
     auto datasets = hdf5_reader::scan_datasets(h5path);
     auto& train_info = hdf5_reader::find_dataset(datasets, "train");
 
-    double t_load_start = evp_common::now_ms();
+    double t_load_start = sisap_common::now_ms();
     size_t dims = static_cast<size_t>(train_info.num_cols);
     size_t count = static_cast<size_t>(train_info.num_rows);
 
     std::vector<std::vector<int32_t>> gt_data;
     if (compute_recall) {
-        gt_data = evp_common::load_ground_truth(h5path, datasets, k_top);
+        gt_data = sisap_common::load_ground_truth(h5path, datasets, k_top);
         if (count != gt_data.size()) {
             std::fprintf(stderr,
                 "Error: train and allknn must contain the same number of entries (%zu vs %zu)\n",
@@ -144,7 +144,7 @@ static int run(
             return 1;
         }
     }
-    double total_load_ms = evp_common::now_ms() - t_load_start;
+    double total_load_ms = sisap_common::now_ms() - t_load_start;
 
     std::printf("=== FP16 Build, FP16 Explore - Mode 1 ===\n");
 
@@ -157,14 +157,14 @@ static int run(
     double total_build_ms = 0.0;
 
     if (!graph_path.empty() && std::filesystem::exists(graph_path)) {
-        double t_load_graph_start = evp_common::now_ms();
+        double t_load_graph_start = sisap_common::now_ms();
         std::printf("Loading existing graph from %s...\n", graph_path.c_str());
         auto g = deglib::graph::load_sizebounded_graph(graph_path.c_str());
         const auto& fs = g.getFeatureSpace();
         if (fs.metric() == deglib::Metric::FP16InnerProduct && fs.dim() == dims && g.size() == count) {
             graph_ptr = std::make_unique<deglib::graph::SizeBoundedGraph>(std::move(g));
             loaded = true;
-            double load_graph_ms = evp_common::now_ms() - t_load_graph_start;
+            double load_graph_ms = sisap_common::now_ms() - t_load_graph_start;
             std::printf("Graph loaded successfully in %.2f ms\n", load_graph_ms);
         } else {
             std::fprintf(stderr, "Warning: Saved graph properties do not match dataset: metric=%d vs %d, dim=%u vs %zu, size=%u vs %zu. Rebuilding.\n",
@@ -193,15 +193,15 @@ static int run(
         builder.setBatchSize(64, 128);
 
         const size_t load_chunk_size = 200000;
-        double t_build_start = evp_common::now_ms();
+        double t_build_start = sisap_common::now_ms();
 
         for (size_t start_row = 0; start_row < count; start_row += load_chunk_size) {
             size_t current_chunk_size = std::min(load_chunk_size, count - start_row);
 
             // Load chunk
-            double t_chunk_load = evp_common::now_ms();
+            double t_chunk_load = sisap_common::now_ms();
             std::vector<std::vector<std::byte>> chunk_vectors = hdf5_reader::read_matrix_bytes(h5path, train_info, start_row, current_chunk_size);
-            double chunk_load_ms = evp_common::now_ms() - t_chunk_load;
+            double chunk_load_ms = sisap_common::now_ms() - t_chunk_load;
             total_load_ms += chunk_load_ms;
 
             // Add chunk entries
@@ -212,13 +212,13 @@ static int run(
             chunk_vectors.shrink_to_fit();
 
             // Build chunk
-            double t_chunk_build = evp_common::now_ms();
+            double t_chunk_build = sisap_common::now_ms();
             auto dummy_callback = [](deglib::builder::BuilderStatus&) {};
             builder.build(dummy_callback, false);
-            double chunk_build_ms = evp_common::now_ms() - t_chunk_build;
+            double chunk_build_ms = sisap_common::now_ms() - t_chunk_build;
             total_build_ms += chunk_build_ms;
 
-            double elapsed_s = (evp_common::now_ms() - t_build_start) / 1000.0;
+            double elapsed_s = (sisap_common::now_ms() - t_build_start) / 1000.0;
             std::printf("  Chunk [%6zuk - %6zuk): Load = %.2fs, Build = %.2fs | Elapsed = %.2fs\n", 
                         start_row / 1000, (start_row + current_chunk_size) / 1000, 
                         chunk_load_ms / 1000.0, chunk_build_ms / 1000.0, elapsed_s);
@@ -232,7 +232,7 @@ static int run(
 
     deglib::graph::SizeBoundedGraph& graph = *graph_ptr;
 
-    double prune_ms = evp_common::prune_worst_neighbors(graph, prune_worst, threads);
+    double prune_ms = sisap_common::prune_worst_neighbors(graph, prune_worst, threads);
 
     // --------------------------------------------------------------------------
     // Exploration
@@ -266,7 +266,7 @@ static int run(
     std::printf("\n");
     double total_time_ms = total_load_ms + total_build_ms + best_timings.explore_ms;
 
-    evp_common::print_summary(
+    sisap_common::print_summary(
         "FP16 Build, FP16 Explore", 1,
         total_load_ms, 0.0, total_build_ms, 0.0, prune_ms,
         best_timings.explore_ms, 0.0, total_time_ms,

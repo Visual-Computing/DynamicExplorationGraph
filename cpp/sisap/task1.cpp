@@ -62,7 +62,7 @@
  *
  * CLI Usage
  * ---------
- *   deglib_evp_task1.exe <hdf5_file> <mode> [options...]
+ *   deglib_sisap_task1.exe <hdf5_file> <mode> [options...]
  *
  *   <mode> accepts:
  *     - The symbolic mode name (e.g. "fp16", "evp-rerank", "evp-linear", "evp-asymmetric", etc.)
@@ -85,13 +85,16 @@
  * Examples
  * --------
  *   # FP16 baseline (mode1)
- *   .\deglib_evp_task1.exe dataset.h5 mode1 --max-dist 100
+ *   .\deglib_sisap_task1.exe dataset.h5 mode1 --max-dist 100
  *
  *   # EVP build + explore + FP16 rerank (mode4)
- *   .\deglib_evp_task1.exe dataset.h5 evp-rerank --max-dist 200
+ *   .\deglib_sisap_task1.exe dataset.h5 evp-rerank --max-dist 200
  *
  *   # Asymmetric search + rerank, save results (mode7)
- *   .\deglib_evp_task1.exe dataset.h5 mode7 --max-dist 200 --evpK 50 --no-recall --output results.ivecs
+ *   .\deglib_sisap_task1.exe dataset.h5 mode7 --max-dist 200 --evpK 50 --no-recall --output results.ivecs
+ *
+ *   # Or run via combined entry point
+ *   .\deglib_sisap.exe task1 dataset.h5 mode4 --max-dist 200
  */
 
 #if defined(_WIN32)
@@ -103,6 +106,7 @@
 #include <filesystem>
 #include <iostream>
 
+#include "sisap_common.h"
 #include "task1/mode1.h"
 #include "task1/mode2.h"
 #include "task1/mode3.h"
@@ -111,7 +115,11 @@
 #include "task1/mode6.h"
 #include "task1/mode7.h"
 
+#ifdef BUILD_COMBINED_SISAP
+int run_task1(int argc, char* argv[]) {
+#else
 int main(int argc, char* argv[]) {
+#endif
     try {
         std::string data_path;
         std::string mode;
@@ -208,8 +216,8 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        std::vector<uint32_t> evpK_list = evp_common::parse_list(evpK_str);
-        std::vector<uint32_t> max_dist_list = evp_common::parse_list(max_dist_str);
+        std::vector<uint32_t> evpK_list = sisap_common::parse_list(evpK_str);
+        std::vector<uint32_t> max_dist_list = sisap_common::parse_list(max_dist_str);
 
         // Validate --prune-worst
         if (prune_worst >= k_graph) {

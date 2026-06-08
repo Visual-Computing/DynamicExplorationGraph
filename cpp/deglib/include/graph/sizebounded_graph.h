@@ -847,7 +847,7 @@ public:
 /**
  * Load the graph
  */
-auto load_sizebounded_graph(const char* path_graph, uint32_t new_max_size = 0)
+inline auto load_sizebounded_graph(const char* path_graph, uint32_t new_max_size = 0)
 {
   std::error_code ec{};
   auto file_size = std::filesystem::file_size(path_graph, ec);

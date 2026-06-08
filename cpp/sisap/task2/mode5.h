@@ -1,17 +1,40 @@
 #pragma once
 
 /**
- * @file mode1.h
- * @brief Task 2 Baseline: FP32 Build + FP32 Search (MIPS on LLM attention workloads)
+ * @file mode5.h
+ * @brief Task 2 Mode 5: FP32 Build (L2-converted) + FP16 Inner Product Search
+ *
+ * Building graph (FLAS order): k_graph=30, k_ext=60, eps_ext=0.001, threads=1, opt_target=LowLID
+
+  --- eps_search=0.150 ---
+    max_dist=5000 has recall 73.78 % and search time 22.6 ms
+    max_dist=6000 has recall 75.77 % and search time 26.0 ms
+    max_dist=7000 has recall 76.98 % and search time 26.3 ms
+    max_dist=8000 has recall 77.73 % and search time 28.0 ms
+
+  --- eps_search=0.180 ---
+    max_dist=5000 has recall 75.53 % and search time 25.5 ms
+    max_dist=6000 has recall 78.34 % and search time 29.3 ms
+    max_dist=7000 has recall 80.31 % and search time 31.8 ms
+    max_dist=8000 has recall 81.74 % and search time 36.2 ms
+
+  --- eps_search=0.190 ---
+    max_dist=5000 has recall 75.88 % and search time 26.2 ms
+    max_dist=6000 has recall 78.84 % and search time 30.8 ms
+    max_dist=7000 has recall 80.97 % and search time 33.2 ms
+    max_dist=8000 has recall 82.59 % and search time 37.8 ms
  *
  * Behavior:
  * 1. Loads FP32 training vectors from "train" as the database.
- * 5. Loads ground truth from "knns" which are 1-based.
- * 2. Builds a SizeBoundedGraph using Metric::InnerProduct with FloatSpace(128, Metric::InnerProduct).
- * 3. Loads FP32 query vectors from "queries" (separate dataset from database).
- * 4. For each query, uses graph.search() with entry point at vertex 0.
- * 6. Tracks build time and search time SEPARATELY (only search time is measured for evaluation).
- * 7. Result indices are 1-based (for sisap submission).
+ * 2. Computes the maximum squared norm M^2 of database vectors.
+ * 3. Appends sqrt(M^2 - ||x||^2) to each database vector (d+1 dimensions).
+ * 4. Builds a SizeBoundedGraph using Metric::L2 with FloatSpace(dims + 1, Metric::L2).
+ * 5. Converts original d-dimensional database vectors to FP16.
+ * 6. Creates a ReadOnlyGraph using Metric::FP16InnerProduct with the FP16 database,
+ *    mapping the graph structure built in L2-space.
+ * 7. Loads FP32 query vectors, converts them to FP16 (d dimensions).
+ * 8. For each query, uses fp16_graph.search() with Metric::FP16InnerProduct.
+ * 9. Tracks build time, conversion time, and search time separately.
  */
 
 #include <chrono>
@@ -37,22 +60,59 @@
 #include "concurrent.h"
 #include "distances.h"
 #include "graph/sizebounded_graph.h"
+#include "graph/readonly_graph.h"
 #include "repository.h"
 
-#include "../evp_common.h"
+#include "../sisap_common.h"
 #include "../hdf5_reader.h"
-#include "../flas_common.h"
+#include "../sisap_common.h"
 
-namespace task2::mode_baseline {
+namespace task2::mode_l2_fp16_ip {
 
 struct ExplorationTimings {
     double search_ms = 0.0;
     float recall = -1.0f;
 };
 
+static std::vector<uint16_t> floats_to_fp16(const std::vector<float>& v) {
+    std::vector<uint16_t> out(v.size());
+#if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
+    size_t i = 0;
+    for (; i + 4 <= v.size(); i += 4) {
+        __m128 f4 = _mm_loadu_ps(&v[i]);
+        __m128i h4 = _mm_cvtps_ph(f4, _MM_FROUND_TO_NEAREST_INT);
+        alignas(16) uint16_t tmp[8];
+        _mm_storeu_si128((__m128i*)tmp, h4);
+        out[i]   = tmp[0];
+        out[i+1] = tmp[1];
+        out[i+2] = tmp[2];
+        out[i+3] = tmp[3];
+    }
+    for (; i < v.size(); ++i) {
+        __m128 f1 = _mm_set_ss(v[i]);
+        __m128i h1 = _mm_cvtps_ph(f1, _MM_FROUND_TO_NEAREST_INT);
+        alignas(16) uint16_t tmp[8];
+        _mm_storeu_si128((__m128i*)tmp, h1);
+        out[i] = tmp[0];
+    }
+#else
+    for (size_t i = 0; i < v.size(); ++i) {
+        uint32_t bits;
+        std::memcpy(&bits, &v[i], 4);
+        uint16_t sign     = static_cast<uint16_t>((bits >> 16) & 0x8000u);
+        int32_t  exponent = static_cast<int32_t>((bits >> 23) & 0xFF) - 127 + 15;
+        uint32_t mantissa = bits & 0x7FFFFFu;
+        if (exponent <= 0)      { out[i] = sign; }
+        else if (exponent >= 31){ out[i] = static_cast<uint16_t>(sign | 0x7C00u); }
+        else                    { out[i] = static_cast<uint16_t>(sign | (exponent << 10) | (mantissa >> 13)); }
+    }
+#endif
+    return out;
+}
+
 static ExplorationTimings run_search(
-    const deglib::graph::SizeBoundedGraph& graph,
-    const std::vector<std::vector<float>>& queries,
+    const deglib::graph::ReadOnlyGraph& graph,
+    const std::vector<std::vector<uint16_t>>& queries,
     uint32_t k_top,
     float eps_search,
     uint32_t max_dist,
@@ -78,7 +138,7 @@ static ExplorationTimings run_search(
                 size_t end = std::min(start + chunk_size, count);
                 size_t num_items = end - start;
 
-                double t_search_start = evp_common::now_ms();
+                double t_search_start = sisap_common::now_ms();
                 for (size_t i = 0; i < num_items; ++i) {
                     size_t q_idx = start + i;
 
@@ -100,7 +160,7 @@ static ExplorationTimings run_search(
                         result_queue.pop();
                     }
                 }
-                chunk_search_times[chunk_id] = evp_common::now_ms() - t_search_start;
+                chunk_search_times[chunk_id] = sisap_common::now_ms() - t_search_start;
             });
 
         double sum_search_ms = std::accumulate(chunk_search_times.begin(), chunk_search_times.end(), 0.0) / static_cast<double>(threads);
@@ -111,9 +171,9 @@ static ExplorationTimings run_search(
 
     float recall = -1.0f;
     if (compute_recall) {
-        recall = evp_common::compute_recall(gt_data, results, k_top);
+        recall = sisap_common::compute_recall(gt_data, results, k_top);
     } else {
-        evp_common::ivecs_write(output_path, results);
+        sisap_common::ivecs_write(output_path, results);
     }
 
     return { avg_ms, recall };
@@ -157,7 +217,7 @@ static int run(
         query_count = static_cast<size_t>(query_info_ptr->num_rows);
     }
 
-    double t_load_start = evp_common::now_ms();
+    double t_load_start = sisap_common::now_ms();
     size_t dims = static_cast<size_t>(train_info.num_cols);
     size_t count = static_cast<size_t>(train_info.num_rows);
 
@@ -193,59 +253,94 @@ static int run(
             return 1;
         }
     }
-    double load_ms = evp_common::now_ms() - t_load_start;
+    double load_ms = sisap_common::now_ms() - t_load_start;
 
-    std::printf("=== FP32 Build, FP32 Search - Task 2 Baseline (opt_target=%s) ===\n", evp_common::opt_target_str(opt_target));
+    std::printf("=== L2-structured FP32 Build, FP16 IP Search - Task 2 Mode 5 (opt_target=%s) ===\n", sisap_common::opt_target_str(opt_target));
 
     // --------------------------------------------------------------------------
     // Load ALL FP32 training vectors once
     // --------------------------------------------------------------------------
-    double t_load_fp32 = evp_common::now_ms();
+    double t_load_fp32 = sisap_common::now_ms();
     std::vector<float> database_fp32 = hdf5_reader::read_flat_fp32(h5path, train_info);
-    double load_fp32_ms = evp_common::now_ms() - t_load_fp32;
+    double load_fp32_ms = sisap_common::now_ms() - t_load_fp32;
     load_ms += load_fp32_ms;
 
     // --------------------------------------------------------------------------
-    // Optional FLAS pre-sort
+    // Perform (d+1)-dimensional L2 transformation on database for building
+    // --------------------------------------------------------------------------
+    double t_transform_start = sisap_common::now_ms();
+    
+    // 1. Compute squared norms and find max
+    double max_norm_sq = 0.0;
+    std::vector<double> norms_sq(count, 0.0);
+    for (size_t i = 0; i < count; ++i) {
+        double sum = 0.0;
+        for (size_t j = 0; j < dims; ++j) {
+            float val = database_fp32[i * dims + j];
+            sum += double(val) * double(val);
+        }
+        norms_sq[i] = sum;
+        if (sum > max_norm_sq) {
+            max_norm_sq = sum;
+        }
+    }
+
+    std::printf("Max norm squared M^2 = %.6f (M = %.6f)\n", max_norm_sq, std::sqrt(max_norm_sq));
+
+    // 2. Append extra dimension
+    size_t new_dims = dims + 1;
+    std::vector<float> database_transformed(count * new_dims);
+    for (size_t i = 0; i < count; ++i) {
+        std::memcpy(&database_transformed[i * new_dims], &database_fp32[i * dims], dims * sizeof(float));
+        double diff = max_norm_sq - norms_sq[i];
+        float extra = (diff > 0.0) ? static_cast<float>(std::sqrt(diff)) : 0.0f;
+        database_transformed[i * new_dims + dims] = extra;
+    }
+
+    double transform_ms = sisap_common::now_ms() - t_transform_start;
+    std::printf("Transformed database to %zu dimensions for graph building in %.2f ms\n", new_dims, transform_ms);
+
+    // --------------------------------------------------------------------------
+    // Optional FLAS pre-sort (performed on transformed vectors)
     // --------------------------------------------------------------------------
     std::vector<uint32_t> sorted_indices;
     double flas_ms = 0.0;
     if (use_flas) {
-        sorted_indices = flas_common::run_flas_presort(database_fp32.data(), count, dims, flas_metric, flas_ms, flas_radius_decay);
+        sorted_indices = sisap_common::run_flas_presort(database_transformed.data(), count, new_dims, flas_metric, flas_ms, flas_radius_decay);
         if (sorted_indices.empty()) return 1;
     }
 
     // --------------------------------------------------------------------------
-    // Build/Load graph with Metric::InnerProduct
+    // Build/Load graph with Metric::L2 (dimension d+1)
     // --------------------------------------------------------------------------
-    deglib::FloatSpace feature_space(static_cast<uint32_t>(dims), deglib::Metric::InnerProduct);
+    deglib::FloatSpace feature_space(static_cast<uint32_t>(new_dims), deglib::Metric::L2);
     std::unique_ptr<deglib::graph::SizeBoundedGraph> graph_ptr;
     bool loaded = false;
     double build_ms = 0.0;
 
     if (!graph_path.empty() && std::filesystem::exists(graph_path)) {
-        double t_load_graph_start = evp_common::now_ms();
+        double t_load_graph_start = sisap_common::now_ms();
         std::printf("Loading existing graph from %s...\n", graph_path.c_str());
         auto g = deglib::graph::load_sizebounded_graph(graph_path.c_str());
         const auto& fs = g.getFeatureSpace();
         const uint32_t graph_size = g.size();
 
-        if (fs.metric() == feature_space.metric() && fs.dim() == dims && graph_size == count) {
+        if (fs.metric() == feature_space.metric() && fs.dim() == new_dims && graph_size == count) {
             graph_ptr = std::make_unique<deglib::graph::SizeBoundedGraph>(std::move(g));
             loaded = true;
-            double load_graph_ms = evp_common::now_ms() - t_load_graph_start;
+            double load_graph_ms = sisap_common::now_ms() - t_load_graph_start;
             std::printf("Graph loaded successfully in %.2f ms (%u vertices)\n", load_graph_ms, graph_size);
         } else {
             std::fprintf(stderr, "Warning: Saved graph properties do not match dataset: metric=%d vs %d, dim=%u vs %zu, size=%u vs %zu. Rebuilding.\n",
-                         (int)fs.metric(), (int)feature_space.metric(), (unsigned)fs.dim(), dims, graph_size, count);
+                         (int)fs.metric(), (int)feature_space.metric(), (unsigned)fs.dim(), (unsigned)new_dims, graph_size, count);
         }
     }
 
     if (!loaded) {
         if (use_flas)
-            std::printf("Building graph (FLAS order): k_graph=%u, k_ext=%u, eps_ext=%.3f, threads=%u, opt_target=%s\n", k_graph, k_ext, eps_ext, build_threads, evp_common::opt_target_str(opt_target));
+            std::printf("Building graph (FLAS order): k_graph=%u, k_ext=%u, eps_ext=%.3f, threads=%u, opt_target=%s\n", k_graph, k_ext, eps_ext, build_threads, sisap_common::opt_target_str(opt_target));
         else
-            std::printf("Building graph: k_graph=%u, k_ext=%u, eps_ext=%.3f, threads=%u, opt_target=%s\n", k_graph, k_ext, eps_ext, build_threads, evp_common::opt_target_str(opt_target));
+            std::printf("Building graph: k_graph=%u, k_ext=%u, eps_ext=%.3f, threads=%u, opt_target=%s\n", k_graph, k_ext, eps_ext, build_threads, sisap_common::opt_target_str(opt_target));
 
         graph_ptr = std::make_unique<deglib::graph::SizeBoundedGraph>(static_cast<uint32_t>(count), k_graph, feature_space);
         deglib::graph::SizeBoundedGraph& graph = *graph_ptr;
@@ -266,26 +361,26 @@ static int run(
         builder.setBatchSize(64, 128);
 
         const size_t load_chunk_size = 20000;
-        double t_build_start = evp_common::now_ms();
+        double t_build_start = sisap_common::now_ms();
 
         for (size_t start_row = 0; start_row < count; start_row += load_chunk_size) {
             size_t current_chunk_size = std::min(load_chunk_size, count - start_row);
 
-            size_t bytes_per_vector = dims * sizeof(float);
+            size_t bytes_per_vector = new_dims * sizeof(float);
             for (size_t j = 0; j < current_chunk_size; ++j) {
                 size_t idx = use_flas ? sorted_indices[start_row + j] : (start_row + j);
                 std::vector<std::byte> feature(bytes_per_vector);
-                std::memcpy(feature.data(), &database_fp32[idx * dims], bytes_per_vector);
+                std::memcpy(feature.data(), &database_transformed[idx * new_dims], bytes_per_vector);
                 builder.addEntry(static_cast<uint32_t>(idx), std::move(feature));
             }
 
-            double t_chunk_build = evp_common::now_ms();
+            double t_chunk_build = sisap_common::now_ms();
             auto dummy_callback = [](deglib::builder::BuilderStatus&) {};
             builder.build(dummy_callback, false);
-            double chunk_build_ms = evp_common::now_ms() - t_chunk_build;
+            double chunk_build_ms = sisap_common::now_ms() - t_chunk_build;
             build_ms += chunk_build_ms;
 
-            double elapsed_s = (evp_common::now_ms() - t_build_start) / 1000.0;
+            double elapsed_s = (sisap_common::now_ms() - t_build_start) / 1000.0;
             std::printf("  Chunk [%6zuk - %6zuk): Build = %.2fs | Elapsed = %.2fs\n",
                         start_row / 1000, (start_row + current_chunk_size) / 1000,
                         chunk_build_ms / 1000.0, elapsed_s);
@@ -299,44 +394,72 @@ static int run(
 
     deglib::graph::SizeBoundedGraph& graph = *graph_ptr;
 
-    // Free FP32 data — no longer needed
+    // Prune worst neighbors (prune_worst=0 = no pruning, default)
+    double prune_ms = sisap_common::prune_worst_neighbors(graph, prune_worst, static_cast<uint32_t>(build_threads));
+
+    // --------------------------------------------------------------------------
+    // Convert original database features (d dims) to FP16 and build ReadOnlyGraph
+    // --------------------------------------------------------------------------
+    double t_convert_start = sisap_common::now_ms();
+    std::printf("Converting original features (dims=%zu) to FP16...\n", dims);
+
+    std::vector<uint16_t> database_fp16(count * dims);
+    for (size_t i = 0; i < count; ++i) {
+        std::vector<float> fp32_vec(dims);
+        std::memcpy(fp32_vec.data(), &database_fp32[i * dims], dims * sizeof(float));
+        std::vector<uint16_t> fp16_vec = floats_to_fp16(fp32_vec);
+        std::memcpy(&database_fp16[i * dims], fp16_vec.data(), dims * sizeof(uint16_t));
+    }
+
+    std::printf("Building ReadOnlyGraph with FP16InnerProduct features...\n");
+    deglib::FloatSpace fp16_space(static_cast<uint32_t>(dims), deglib::Metric::FP16InnerProduct);
+    deglib::graph::ReadOnlyGraph fp16_graph(fp16_space, graph, database_fp16.data());
+    
+    // Free the original graph, temporary buffers and transformed vectors
+    graph_ptr.reset();
     database_fp32.clear();
     database_fp32.shrink_to_fit();
+    database_fp16.clear();
+    database_fp16.shrink_to_fit();
+    database_transformed.clear();
+    database_transformed.shrink_to_fit();
 
-    // Prune worst neighbors (prune_worst=0 = no pruning, default)
-    double prune_ms = evp_common::prune_worst_neighbors(graph, prune_worst, static_cast<uint32_t>(build_threads));
+    double convert_ms = sisap_common::now_ms() - t_convert_start;
+    std::printf("Converted database and swapped features in %.2f ms\n", convert_ms);
 
     // --------------------------------------------------------------------------
-    // Load query vectors
+    // Load query vectors and convert to FP16 (d dims)
     // --------------------------------------------------------------------------
-    std::vector<std::vector<float>> queries;
+    std::vector<std::vector<uint16_t>> queries;
     if (!query_info_ptr) {
-        std::fprintf(stderr, "Error: No query dataset found in HDF5 file. Task 2 requires actual test queries (e.g. itest/queries, otest/queries, test/queries, or queries).\n");
+        std::fprintf(stderr, "Error: No query dataset found in HDF5 file.\n");
         return 1;
     }
-    double t_query_load = evp_common::now_ms();
-    queries = hdf5_reader::read_matrix_fp32(h5path, *query_info_ptr);
-    double query_load_ms = evp_common::now_ms() - t_query_load;
+    double t_query_load = sisap_common::now_ms();
+    auto queries_fp32 = hdf5_reader::read_matrix_fp32(h5path, *query_info_ptr);
+    queries.reserve(queries_fp32.size());
+    for (const auto& q : queries_fp32) {
+        queries.push_back(floats_to_fp16(q));
+    }
+    double query_load_ms = sisap_common::now_ms() - t_query_load;
     load_ms += query_load_ms;
-    std::printf("Loaded %zu queries (dims=%zu)\n", queries.size(), dims);
+    std::printf("Loaded %zu queries and converted to FP16 (dims=%zu)\n", queries.size(), dims);
 
     // --------------------------------------------------------------------------
     // Exploration with parameter sweep: eps_search × max_dist
-    // Graph built once, then searched across all combinations
     // --------------------------------------------------------------------------
     std::printf("Starting exploration: k_top=%u, threads=%u\n", k_top, threads);
 
-    // Track best eps_search × max_dist combination
     float best_recall = -1.0f;
     float best_eps_search = 0.1f;
     uint32_t best_max_dist = 200;
     ExplorationTimings best_timings;
 
     for (float eps_search : eps_search_list) {
-        std::printf("\n  --- eps_search=%.2f ---\n", eps_search);
+        std::printf("\n  --- eps_search=%.3f ---\n", eps_search);
         
         for (uint32_t max_dist_val : max_dist_list) {
-            auto timings = run_search(graph, queries, k_top, eps_search, max_dist_val, static_cast<uint8_t>(threads),
+            auto timings = run_search(fp16_graph, queries, k_top, eps_search, max_dist_val, static_cast<uint8_t>(threads),
                                            compute_recall, num_runs, gt_data, output_path);
 
             std::printf("    max_dist=%u has recall %.2f %% and search time %.1f ms\n",
@@ -359,11 +482,11 @@ static int run(
     }
 
     std::printf("\n");
-    double total_time_ms = load_ms + build_ms + best_timings.search_ms;
+    double total_time_ms = load_ms + build_ms + transform_ms + convert_ms + best_timings.search_ms;
 
-    evp_common::print_summary(
-        (use_flas ? "FP32 Build, FP32 Search (FLAS)" : "FP32 Build, FP32 Search"), 1,
-        load_ms, 0.0, build_ms, 0.0, 0.0,
+    sisap_common::print_summary(
+        (use_flas ? "L2-structured Build, FP16 IP Search (FLAS)" : "L2-structured Build, FP16 IP Search"), 5,
+        load_ms, transform_ms, build_ms, convert_ms, prune_ms,
         best_timings.search_ms, 0.0, total_time_ms,
         compute_recall, k_top, best_timings.recall,
         threads, best_max_dist, 0,
@@ -374,4 +497,4 @@ static int run(
     return 0;
 }
 
-} // namespace task2::mode_baseline
+} // namespace task2::mode_l2_fp16_ip

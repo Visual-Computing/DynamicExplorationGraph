@@ -1853,7 +1853,7 @@ public:
  *
  * @param graph Reference to the MutableGraph to be processed.
  */
-void remove_non_mrng_edges(deglib::graph::MutableGraph& graph) {
+inline void remove_non_mrng_edges(deglib::graph::MutableGraph& graph) {
     const auto vertex_count = graph.size();
     const auto edge_per_vertex = graph.getEdgesPerVertex();
 
@@ -1907,7 +1907,7 @@ void remove_non_mrng_edges(deglib::graph::MutableGraph& graph) {
  * @param i_opt Number of improvement attempts per build step.
  * @param iterations Number of optimization iterations to perform.
  */
-void optimize_edges(
+inline void optimize_edges(
     deglib::graph::MutableGraph& graph, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt, const uint32_t iterations) {
     auto rnd = std::mt19937(7);  // default 7
 

@@ -38,7 +38,7 @@
 #include "quantization/evp_quantize.h"
 #include "repository.h"
 
-#include "../evp_common.h"
+#include "../sisap_common.h"
 #include "../hdf5_reader.h"
 
 namespace task1::mode2 {
@@ -64,14 +64,14 @@ static int run(
     auto datasets = hdf5_reader::scan_datasets(h5path);
     auto& train_info = hdf5_reader::find_dataset(datasets, "train");
 
-    double t_load = evp_common::now_ms();
+    double t_load = sisap_common::now_ms();
     std::vector<std::vector<std::byte>> train_vectors = hdf5_reader::read_matrix_bytes(h5path, train_info);
     size_t dims = static_cast<size_t>(train_info.num_cols);
     size_t count = static_cast<size_t>(train_info.num_rows);
 
     std::vector<std::vector<int32_t>> gt_data;
     if (compute_recall) {
-        gt_data = evp_common::load_ground_truth(h5path, datasets, k_top);
+        gt_data = sisap_common::load_ground_truth(h5path, datasets, k_top);
         if (count != gt_data.size()) {
             std::fprintf(stderr,
                 "Error: train and allknn must contain the same number of entries (%zu vs %zu)\n",
@@ -79,19 +79,19 @@ static int run(
             return 1;
         }
     }
-    double load_ms = evp_common::now_ms() - t_load;
+    double load_ms = sisap_common::now_ms() - t_load;
 
     std::printf("=== EVP Linear Search - Mode 2 ===\n");
 
     // --------------------------------------------------------------------------
     // Quantize
     // --------------------------------------------------------------------------
-    double t1 = evp_common::now_ms();
+    double t1 = sisap_common::now_ms();
 
     auto quantized = deglib::quantization::quantize_batch(
         train_vectors, static_cast<uint32_t>(dims), non_zeros, threads);
 
-    double quantize_ms = evp_common::now_ms() - t1;
+    double quantize_ms = sisap_common::now_ms() - t1;
 
     std::printf("Starting exploration: k_top=%u, prune_worst=0, threads=%u\n", k_top, threads);
     uint32_t best_max_dist = 0;
@@ -99,7 +99,7 @@ static int run(
     double best_search_ms = 0.0;
 
     for (uint32_t max_dist_val : max_dist_list) {
-        double t_start = evp_common::now_ms();
+        double t_start = sisap_common::now_ms();
 
         std::vector<std::vector<uint32_t>> results(count, std::vector<uint32_t>(k_top));
         const size_t bytes_per_evp = dims / 4;
@@ -116,7 +116,7 @@ static int run(
                 size_t end = std::min(start + chunk_size, count);
                 size_t num_items = end - start;
 
-                double t_search_start = evp_common::now_ms();
+                double t_search_start = sisap_common::now_ms();
                 for (size_t i = 0; i < num_items; ++i) {
                     size_t label = start + i;
                     const std::byte* query_ptr = quantized.data() + label * bytes_per_evp;
@@ -148,20 +148,20 @@ static int run(
                         results[label][k] = top[k].second;
                     }
                 }
-                chunk_search_times[chunk_id] = evp_common::now_ms() - t_search_start;
+                chunk_search_times[chunk_id] = sisap_common::now_ms() - t_search_start;
             });
 
-        double total_ms = evp_common::now_ms() - t_start;
+        double total_ms = sisap_common::now_ms() - t_start;
         double search_ms = std::accumulate(chunk_search_times.begin(), chunk_search_times.end(), 0.0) / threads;
         // Write results to output file if needed
-        evp_common::ivecs_write(output_path, results);
+        sisap_common::ivecs_write(output_path, results);
 
         // --------------------------------------------------------------------------
         // Calculate Recall
         // --------------------------------------------------------------------------
         float recall = 0.0f;
         if (compute_recall) {
-            recall = evp_common::compute_recall(gt_data, results, k_top);
+            recall = sisap_common::compute_recall(gt_data, results, k_top);
         }
 
         std::printf("  max_dist=%u has recall %.2f %% and time %.1f s\n",
@@ -184,7 +184,7 @@ static int run(
     std::printf("\n");
     double total_time_ms = load_ms + quantize_ms + best_search_ms;
 
-    evp_common::print_summary(
+    sisap_common::print_summary(
         "EVP Linear Search", 2,
         load_ms, quantize_ms, 0.0, 0.0, 0.0,
         best_search_ms, 0.0, total_time_ms,

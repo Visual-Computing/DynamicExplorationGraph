@@ -56,7 +56,7 @@ private:
  * https://github.com/facebookresearch/faiss/blob/e86bf8cae1a0ecdaee1503121421ed262ecee98c/demos/demo_sift1M.cpp
  *****************************************************/
 
-auto fvecs_read(const char* fname, size_t& d_out, size_t& n_out) {
+inline auto fvecs_read(const char* fname, size_t& d_out, size_t& n_out) {
     std::error_code ec{};
     auto file_size = std::filesystem::file_size(fname, ec);
     if (ec != std::error_code{}) {
@@ -98,7 +98,7 @@ auto fvecs_read(const char* fname, size_t& d_out, size_t& n_out) {
     return x;
 }
 
-auto u8vecs_read(const char* fname, size_t& d_out, size_t& n_out) {
+inline auto u8vecs_read(const char* fname, size_t& d_out, size_t& n_out) {
     // get total file size
     std::error_code ec{};
     auto file_size = std::filesystem::file_size(fname, ec);
@@ -179,7 +179,7 @@ inline auto ivecs_read(const char* fname, size_t& d_out, size_t& n_out) {
     return x;
 }
 
-bool string_ends_with(const char* str, const char* suffix) {
+inline bool string_ends_with(const char* str, const char* suffix) {
     size_t str_len = std::strlen(str);
     size_t suffix_len = std::strlen(suffix);
 
@@ -189,7 +189,7 @@ bool string_ends_with(const char* str, const char* suffix) {
     return std::strcmp(str + str_len - suffix_len, suffix) == 0;
 }
 
-StaticFeatureRepository load_static_repository(const char* path_repository) {
+inline StaticFeatureRepository load_static_repository(const char* path_repository) {
     if (string_ends_with(path_repository, "fvecs")) {
         size_t dims;
         size_t count;

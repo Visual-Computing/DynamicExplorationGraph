@@ -43,21 +43,26 @@ Every mode supports two mutually exclusive output behaviours, controlled via CLI
 
 ## Compilation
 
-The modes are built into a single executable `deglib_evp_task1`.
+The modes are built into the standalone executable `deglib_sisap_task1` or the combined executable `deglib_sisap`.
 
 Configure and build:
 ```powershell
 cmake --preset "<Build-Preset-Name>"
-cmake --build --preset "<Build-Preset-Name>" --target deglib_evp_task1
+cmake --build --preset "<Build-Preset-Name>" --target deglib_sisap_task1
+cmake --build --preset "<Build-Preset-Name>" --target deglib_sisap
 ```
 
 ---
 
 ## Execution and CLI Options
 
-Run the binary by providing the input H5 file path, the target mode (`mode1` - `mode7`), and optional arguments:
+Run either the standalone binary or the combined entry point:
 ```powershell
-./build/Visual Studio Community 2022/evp/Release/deglib_evp_task1.exe <hdf5_file_path> <mode> [options...]
+# Standalone
+./build/<Preset-Name>/bin/Release/deglib_sisap_task1.exe <hdf5_file_path> <mode> [options...]
+
+# Combined
+./build/<Preset-Name>/bin/Release/deglib_sisap.exe task1 <hdf5_file_path> <mode> [options...]
 ```
 
 ### Options
@@ -77,12 +82,15 @@ Run the binary by providing the input H5 file path, the target mode (`mode1` - `
 ### Examples
 
 ```powershell
-# Recall mode with default max_dist=200
-.\deglib_evp_task1.exe dataset.h5 evp
+# Recall mode with default max_dist=200 (using standalone)
+.\deglib_sisap_task1.exe dataset.h5 evp
+
+# Recall mode with default max_dist=200 (using combined)
+.\deglib_sisap.exe task1 dataset.h5 evp
 
 # Recall mode with a specific max_dist to trade speed for accuracy
-.\deglib_evp_task1.exe dataset.h5 evp --max-dist 400
+.\deglib_sisap_task1.exe dataset.h5 evp --max-dist 400
 
 # Save mode: run once, write results to disk (no recall computed)
-.\deglib_evp_task1.exe dataset.h5 evp --no-recall --output results.ivecs --max-dist 200
+.\deglib_sisap_task1.exe dataset.h5 evp --no-recall --output results.ivecs --max-dist 200
 ```
