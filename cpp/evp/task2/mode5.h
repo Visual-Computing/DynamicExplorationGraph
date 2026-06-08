@@ -487,10 +487,11 @@ static int run(
     evp_common::print_summary(
         (use_flas ? "L2-structured Build, FP16 IP Search (FLAS)" : "L2-structured Build, FP16 IP Search"), 5,
         load_ms, transform_ms, build_ms, convert_ms, prune_ms,
-        best_timings.search_ms, flas_ms, total_time_ms,
+        best_timings.search_ms, 0.0, total_time_ms,
         compute_recall, k_top, best_timings.recall,
         threads, best_max_dist, 0,
-        k_graph, k_ext, eps_ext, 0, count, dims, 0, opt_target
+        k_graph, k_ext, eps_ext, 0, count, dims, 0, opt_target,
+        flas_ms
     );
 
     return 0;

@@ -100,7 +100,8 @@ inline void print_summary(
     size_t count,
     size_t dims,
     uint32_t evpK,
-    deglib::builder::OptimizationTarget opt_target = deglib::builder::OptimizationTarget::LowLID)
+    deglib::builder::OptimizationTarget opt_target = deglib::builder::OptimizationTarget::LowLID,
+    double flas_ms = 0.0)
 {
     std::printf("========================================================================\n");
     std::printf("  FINAL SUMMARY (%s - Mode %u)\n", mode_name, mode_number);
@@ -112,6 +113,9 @@ inline void print_summary(
     print_time("Pruning Time:",          prune_ms);
     print_time("Explore Time:",          explore_ms);
     print_time("Rerank Time:",           rerank_ms);
+    if (flas_ms > 0.0) {
+        print_time("FLAS Time:",         flas_ms);
+    }
     print_time("Total Elapsed Time:",    total_elapsed_ms);
     if (compute_recall) {
         std::printf("Recall@%u:              %6.2f %%\n", k_top, recall * 100.0f);

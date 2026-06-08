@@ -34,9 +34,11 @@
             #warning "neither SSE, AVX nor AVX512 are defined"
         #endif
     #elif !defined(__FMA__)
-        #ifdef _MSC_VER
-            #pragma message("warning: no FMA support or compile flag is missing")
-        #else
+        #if defined(_MSC_VER)
+            #ifndef USE_AVX
+                #pragma message("warning: no FMA support or compile flag is missing")
+            #endif
+        #elif defined(__GNUC__) || defined(__clang__)
             #warning "no FMA support or compile flag is missing"
         #endif
     #endif

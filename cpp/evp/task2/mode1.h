@@ -364,10 +364,11 @@ static int run(
     evp_common::print_summary(
         (use_flas ? "FP32 Build, FP32 Search (FLAS)" : "FP32 Build, FP32 Search"), 1,
         load_ms, 0.0, build_ms, 0.0, 0.0,
-        best_timings.search_ms, flas_ms, total_time_ms,
+        best_timings.search_ms, 0.0, total_time_ms,
         compute_recall, k_top, best_timings.recall,
         threads, best_max_dist, 0,
-        k_graph, k_ext, eps_ext, 0, count, dims, 0, opt_target
+        k_graph, k_ext, eps_ext, 0, count, dims, 0, opt_target,
+        flas_ms
     );
 
     return 0;
