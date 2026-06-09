@@ -104,7 +104,8 @@ inline void print_summary(
     size_t dims,
     uint32_t evpK,
     deglib::builder::OptimizationTarget opt_target = deglib::builder::OptimizationTarget::LowLID,
-    double flas_ms = 0.0)
+    double flas_ms = 0.0,
+    double opt_ms = 0.0)
 {
     std::printf("========================================================================\n");
     std::printf("  FINAL SUMMARY (%s - Mode %u)\n", mode_name, mode_number);
@@ -118,6 +119,9 @@ inline void print_summary(
     print_time("Rerank Time:",           rerank_ms);
     if (flas_ms > 0.0) {
         print_time("FLAS Time:",         flas_ms);
+    }
+    if (opt_ms > 0.0) {
+        print_time("Graph Opt Time:",     opt_ms);
     }
     print_time("Total Elapsed Time:",    total_elapsed_ms);
     if (compute_recall) {
@@ -435,6 +439,47 @@ inline std::vector<uint32_t> run_flas_presort(
     std::printf("FLAS permutation valid: %zu unique indices | Time: %.2f s\n",
                 count, flas_ms / 1000.0);
     return sorted_indices;
+}
+
+inline void optimize_graph(deglib::graph::SizeBoundedGraph& graph,
+                           const uint8_t k_opt,
+                           const float eps_opt,
+                           const uint8_t i_opt,
+                           const uint64_t total_iterations,
+                           const uint64_t log_interval = 10000) {
+    auto rnd = std::mt19937(7);
+    auto builder = deglib::builder::EvenRegularGraphBuilder(
+        graph, rnd, deglib::builder::OptimizationTarget::LowLID, 0, 0, k_opt, eps_opt, i_opt, 1, 0);
+
+    auto start = std::chrono::steady_clock::now();
+    auto last_status = deglib::builder::BuilderStatus{};
+    uint64_t duration_ms = 0;
+
+    const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
+        const auto tries = status.tries;
+        const auto improved = status.improved;
+
+        // Log progress at intervals
+        if (log_interval > 0 && tries > 0 && tries % log_interval == 0) {
+            duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+            auto duration = duration_ms / 1000;
+            auto avg_improv = uint32_t((improved - last_status.improved));
+
+            std::printf("%5jds, %8ju / %8ju iterations (%2u improvements)\n",
+                        (uint64_t)duration,
+                        (uint64_t)improved,
+                        (uint64_t)tries,
+                        (uint32_t)avg_improv);
+
+            last_status = status;
+            start = std::chrono::steady_clock::now();
+        }
+
+        // stop after total_iterations
+        if (tries >= total_iterations) builder.stop();
+    };
+
+    builder.build(improvement_callback, true);
 }
 
 } // namespace sisap_common

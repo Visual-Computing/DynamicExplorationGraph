@@ -126,6 +126,7 @@ int main(int argc, char* argv[]) {
         std::string flas_metric_str = "l2";
         float flas_radius_decay = 0.93f;
         deglib::builder::OptimizationTarget opt_target = deglib::builder::OptimizationTarget::LowLID;
+        uint64_t opt_iterations = 0;
 
         if (argc < 3) {
             std::fprintf(stderr, "Usage: %s <hdf5_file_path> <mode_name> [options...]\n", argv[0]);
@@ -166,6 +167,7 @@ int main(int argc, char* argv[]) {
             std::fprintf(stderr, "  --opt-target <str> Optimization target for graph builder (LowLID, HighLID, StreamingData_SchemeA, ..., default: LowLID).\n");
             std::fprintf(stderr, "  --goal-recall <f>  Recall threshold. Sweeps will select configuration minimizing search time\n");
             std::fprintf(stderr, "                     among those with recall >= threshold (default: 0.8).\n");
+            std::fprintf(stderr, "  --opt-iterations <n> Number of graph optimization iterations to perform after building (default: 0).\n");
             return 1;
         }
 
@@ -208,6 +210,8 @@ int main(int argc, char* argv[]) {
                 num_runs = std::stoul(argv[++i]);
             } else if (arg == "--goal-recall" && i + 1 < argc) {
                 goal_recall = std::stof(argv[++i]);
+            } else if (arg == "--opt-iterations" && i + 1 < argc) {
+                opt_iterations = std::stoull(argv[++i]);
             } else if (arg == "--opt-target" && i + 1 < argc) {
                 std::string target_str = argv[++i];
                 if (target_str == "LowLID") {
@@ -293,19 +297,19 @@ int main(int argc, char* argv[]) {
 #endif
 
           if (mode == "fp32-build-fp32-explore" || mode == "baseline" || mode == "mode1") {
-             return task2::mode_baseline::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
+             return task2::mode_baseline::run(path, threads, build_threads, use_flas, flas_metric, flas_radius_decay, k_graph, k_ext, eps_ext, opt_target, opt_iterations, prune_worst, k_top, num_runs, max_dist_list, eps_search_list, run_recall, goal_recall, output_path, graph_path);
           } else if (mode == "fp16-build-fp16-explore" || mode == "mode2") {
-             return task2::mode_fp16_build::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
+             return task2::mode_fp16_build::run(path, threads, build_threads, use_flas, flas_metric, flas_radius_decay, k_graph, k_ext, eps_ext, opt_target, opt_iterations, prune_worst, k_top, num_runs, max_dist_list, eps_search_list, run_recall, goal_recall, output_path, graph_path);
           } else if (mode == "fp32-build-fp16-explore" || mode == "baseline-fp16" || mode == "mode3") {
-             return task2::mode_fp16::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
+             return task2::mode_fp16::run(path, threads, build_threads, use_flas, flas_metric, flas_radius_decay, k_graph, k_ext, eps_ext, opt_target, opt_iterations, prune_worst, k_top, num_runs, max_dist_list, eps_search_list, run_recall, goal_recall, output_path, graph_path);
            } else if (mode == "l2-converted" || mode == "fp32-build-l2-explore" || mode == "mode4") {
-              return task2::mode_l2_converted::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
+              return task2::mode_l2_converted::run(path, threads, build_threads, use_flas, flas_metric, flas_radius_decay, k_graph, k_ext, eps_ext, opt_target, opt_iterations, prune_worst, k_top, num_runs, max_dist_list, eps_search_list, run_recall, goal_recall, output_path, graph_path);
            } else if (mode == "l2-fp16-ip" || mode == "l2-build-fp16-ip-explore" || mode == "mode5") {
-              return task2::mode_l2_fp16_ip::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
+              return task2::mode_l2_fp16_ip::run(path, threads, build_threads, use_flas, flas_metric, flas_radius_decay, k_graph, k_ext, eps_ext, opt_target, opt_iterations, prune_worst, k_top, num_runs, max_dist_list, eps_search_list, run_recall, goal_recall, output_path, graph_path);
            } else if (mode == "l2-fp16-l2" || mode == "l2-build-fp16-l2-explore" || mode == "mode6") {
-              return task2::mode_l2_fp16::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
+              return task2::mode_l2_fp16::run(path, threads, build_threads, use_flas, flas_metric, flas_radius_decay, k_graph, k_ext, eps_ext, opt_target, opt_iterations, prune_worst, k_top, num_runs, max_dist_list, eps_search_list, run_recall, goal_recall, output_path, graph_path);
             } else if (mode == "l2-fp16-d2" || mode == "l2-build-fp16-d2-explore" || mode == "mode7") {
-               return task2::mode_l2_fp16_d2::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
+               return task2::mode_l2_fp16_d2::run(path, threads, build_threads, use_flas, flas_metric, flas_radius_decay, k_graph, k_ext, eps_ext, opt_target, opt_iterations, prune_worst, k_top, num_runs, max_dist_list, eps_search_list, run_recall, goal_recall, output_path, graph_path);
             } else {
                std::fprintf(stderr, "Error: Unknown mode '%s'. Supported modes: mode1, mode2, mode3, mode4, mode5, mode6, mode7\n", mode.c_str());
                return 1;

@@ -39,7 +39,6 @@
 
 #include "../sisap_common.h"
 #include "../hdf5_reader.h"
-#include "../sisap_common.h"
 
 #include "distance/fp16.h"
 
@@ -125,22 +124,24 @@ static int run(
     const std::filesystem::path& data_path,
     uint32_t threads,
     uint32_t build_threads,
+    bool use_flas,
+    FlasMetric flas_metric,
+    float flas_radius_decay,
     uint8_t k_graph, uint8_t k_ext,
     float eps_ext,
+    deglib::builder::OptimizationTarget opt_target,
+    uint64_t opt_iterations,
+    uint32_t prune_worst,
     uint32_t k_top,
+    int num_runs,
     const std::vector<uint32_t>& max_dist_list,
+    const std::vector<float>& eps_search_list,
     bool compute_recall,
     float goal_recall,
-    int num_runs = 1,
     const std::string& output_path = "",
-    const std::string& graph_path = "",
-    uint32_t prune_worst = 0,
-    const std::vector<float>& eps_search_list = {0.1f},
-    deglib::builder::OptimizationTarget opt_target = deglib::builder::OptimizationTarget::LowLID,
-    bool use_flas = false,
-    FlasMetric flas_metric = FlasMetric::L2,
-    float flas_radius_decay = 0.93f)
+    const std::string& graph_path = "")
 {
+    double opt_ms = 0.0;
     const std::string h5path = data_path.string();
     std::printf("\n");
 
@@ -297,6 +298,13 @@ static int run(
                         chunk_build_ms / 1000.0, elapsed_s);
         }
 
+        if (opt_iterations > 0) {
+            double t_opt_start = sisap_common::now_ms();
+            std::printf("Optimizing graph: k_opt=%u, eps_opt=%.4f, i_opt=%u, iterations=%zu\n", k_ext, 0.01f, 5, (size_t)opt_iterations);
+            sisap_common::optimize_graph(graph, k_ext, 0.01f, 5, opt_iterations, 10000);
+            opt_ms = sisap_common::now_ms() - t_opt_start;
+        }
+
         if (!graph_path.empty()) {
             std::printf("Saving built graph to %s...\n", graph_path.c_str());
             graph.saveGraph(graph_path.c_str());
@@ -367,7 +375,7 @@ static int run(
     }
 
     std::printf("\n");
-    double total_time_ms = load_ms + build_ms + best_timings.search_ms;
+    double total_time_ms = load_ms + build_ms + opt_ms + best_timings.search_ms;
 
     sisap_common::print_summary(
         (use_flas ? "FP16 Build, FP16 Search (FLAS)" : "FP16 Build, FP16 Search"), 2,
@@ -376,7 +384,7 @@ static int run(
         compute_recall, k_top, best_timings.recall,
         threads, best_max_dist, 0,
         k_graph, k_ext, eps_ext, 0, count, dims, 0, opt_target,
-        flas_ms
+        flas_ms, opt_ms
     );
 
     return 0;
