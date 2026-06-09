@@ -1,45 +1,45 @@
 #pragma once
 
 /**
- * @file mode4.h
- * @brief Task 2 Mode 4: FP32 Build (L2-converted) + FP32 L2 Search
+ * @file mode7.h
+ * @brief Task 2 Mode 7: FP32 Build (L2-converted d+2) + FP16 L2 Search
  *
- * .\deglib_sisap.exe task2  "C:\Data\ANN\sisap2026\llama-dev\llama-dev.h5" mode4 --eps-ext 0.001 --k-ext 64 --k-graph 32 --build-threads 1 --max-dist 5000,5500,6000,6500,7000 --eps-search 0.006,0.007,0.008,0.009,0.01 --num-runs 10 --flas 
+ * .\deglib_sisap.exe task2  "C:\Data\ANN\sisap2026\llama-dev\llama-dev.h5" mode7 --eps-ext 0.001 --k-ext 64 --k-graph 32 --build-threads 1 --max-dist 5000,5500,6000,6500,7000 --eps-search 0.006,0.007,0.008,0.009,0.01 --num-runs 10 --flas
 
    --- eps_search=0.006 ---
-    max_dist=5000 has recall 74.08 % and search time 29.9 ms
-    max_dist=5500 has recall 75.04 % and search time 31.7 ms
-    max_dist=6000 has recall 75.66 % and search time 30.2 ms
-    max_dist=6500 has recall 75.95 % and search time 29.2 ms
-    max_dist=7000 has recall 76.07 % and search time 29.9 ms
+    max_dist=5000 has recall 75.25 % and search time 24.1 ms
+    max_dist=5500 has recall 76.69 % and search time 25.1 ms
+    max_dist=6000 has recall 77.57 % and search time 26.2 ms
+    max_dist=6500 has recall 78.36 % and search time 28.0 ms
+    max_dist=7000 has recall 78.87 % and search time 27.7 ms
 
   --- eps_search=0.007 ---
-    max_dist=5000 has recall 76.03 % and search time 30.1 ms
-    max_dist=5500 has recall 77.68 % and search time 32.4 ms
-    max_dist=6000 has recall 78.82 % and search time 34.6 ms
-    max_dist=6500 has recall 79.80 % and search time 36.0 ms
-    max_dist=7000 has recall 80.44 % and search time 37.0 ms
+    max_dist=5000 has recall 76.21 % and search time 25.9 ms
+    max_dist=5500 has recall 78.15 % and search time 28.3 ms
+    max_dist=6000 has recall 79.66 % and search time 29.9 ms
+    max_dist=6500 has recall 80.95 % and search time 31.8 ms
+    max_dist=7000 has recall 81.91 % and search time 33.1 ms
 
   --- eps_search=0.008 ---
-    max_dist=5000 has recall 76.56 % and search time 32.1 ms
-    max_dist=5500 has recall 78.56 % and search time 35.0 ms
-    max_dist=6000 has recall 80.13 % and search time 38.0 ms
-    max_dist=6500 has recall 81.56 % and search time 40.2 ms
-    max_dist=7000 has recall 82.55 % and search time 41.7 ms
-
+    max_dist=5000 has recall 76.39 % and search time 26.8 ms
+    max_dist=5500 has recall 78.43 % and search time 29.5 ms
+    max_dist=6000 has recall 80.10 % and search time 32.5 ms
+    max_dist=6500 has recall 81.59 % and search time 34.4 ms
+    max_dist=7000 has recall 82.80 % and search time 36.9 ms
+    
 ========================================================================
-  FINAL SUMMARY (FP32 Build (L2-converted), FP32 L2 Search (FLAS) - Mode 4)
+  FINAL SUMMARY (L2-structured Build, FP16 L2 Search (FLAS) (d+2) - Mode 7)
 ========================================================================
-Load Time:               101.2 ms
-Quantize Time:            50.7 ms
+Load Time:                97.1 ms
+Quantize Time:            47.8 ms
 Graph Build Time:         23.6 s
-Graph Conversion Time:    94.1 ms
+Graph Conversion Time:   125.9 ms
 Pruning Time:              0.0 ms
-Explore Time:             37.0 ms
+Explore Time:             31.8 ms
 Rerank Time:               0.0 ms
-FLAS Time:                38.7 s
-Total Elapsed Time:       23.8 s
-Recall@30:               80.44 %
+FLAS Time:                38.1 s
+Total Elapsed Time:       23.9 s
+Recall@30:               80.95 %
 ------------------------------------------------------------------------
 Hyperparameters:
   K_TOP:                 30
@@ -47,26 +47,28 @@ Hyperparameters:
   K_EXT:                 64
   EPS_EXT:               0.001
   OPT_TARGET:            LowLID
-  max_dist:              7000
+  max_dist:              6500
   threads:               8
   prune_worst:           0
 ------------------------------------------------------------------------
 Dataset Info:
   Vectors:               256921
-  Dimensions:            129
+  Dimensions:            130
 ========================================================================
-
 
  *
  * Behavior:
  * 1. Loads FP32 training vectors from "train" as the database.
  * 2. Computes the maximum squared norm M^2 of database vectors.
- * 3. Appends sqrt(M^2 - ||x||^2) to each database vector (d+1 dimensions).
- * 4. Builds a SizeBoundedGraph using Metric::L2 with FloatSpace(dims + 1, Metric::L2).
- * 5. Loads FP32 query vectors from "queries".
- * 6. Appends 0.0f to each query vector (d+1 dimensions).
- * 7. For each query, uses graph.search() with Metric::L2.
- * 8. Tracks build time and search time separately.
+ * 3. Appends sqrt(M^2 - ||x||^2) and 0.0f to each database vector (d+2 dimensions).
+ * 4. Builds a SizeBoundedGraph using Metric::L2 with FloatSpace(dims + 2, Metric::L2).
+ * 5. Converts transformed database vectors (d+2 dims) to FP16.
+ * 6. Creates a ReadOnlyGraph using Metric::FP16L2 with the FP16 database,
+ *    mapping the graph structure built in L2-space.
+ * 7. Loads FP32 query vectors, computes max query squared norm U^2.
+ * 8. Appends 0.0f and sqrt(U^2 - ||q||^2) to each query (d+2 dims), and converts to FP16.
+ * 9. For each query, uses fp16_graph.search() with Metric::FP16L2.
+ * 10. Tracks build time, conversion time, and search time separately.
  */
 
 #include <chrono>
@@ -97,18 +99,21 @@ Dataset Info:
 
 #include "../sisap_common.h"
 #include "../hdf5_reader.h"
-#include "../sisap_common.h"
 
-namespace task2::mode_l2_converted {
+#include "distance/fp16.h"
+
+namespace task2::mode_l2_fp16_d2 {
 
 struct ExplorationTimings {
     double search_ms = 0.0;
     float recall = -1.0f;
 };
 
+using deglib::distances::floats_to_fp16;
+
 static ExplorationTimings run_search(
     const deglib::graph::ReadOnlyGraph& graph,
-    const std::vector<std::vector<float>>& queries,
+    const std::vector<std::vector<uint16_t>>& queries,
     uint32_t k_top,
     float eps_search,
     uint32_t max_dist,
@@ -251,7 +256,7 @@ static int run(
     }
     double load_ms = sisap_common::now_ms() - t_load_start;
 
-    std::printf("=== FP32 L2-converted Build, FP32 L2 Search - Task 2 Mode 4 (opt_target=%s) ===\n", sisap_common::opt_target_str(opt_target));
+    std::printf("=== L2-structured FP32 Build, FP16 L2 Search (d+2) - Task 2 Mode 7 (opt_target=%s) ===\n", sisap_common::opt_target_str(opt_target));
 
     // --------------------------------------------------------------------------
     // Load ALL FP32 training vectors once
@@ -262,7 +267,7 @@ static int run(
     load_ms += load_fp32_ms;
 
     // --------------------------------------------------------------------------
-    // Perform (d+1)-dimensional L2 transformation on database
+    // Perform (d+2)-dimensional L2 transformation on database for building
     // --------------------------------------------------------------------------
     double t_transform_start = sisap_common::now_ms();
     
@@ -283,20 +288,21 @@ static int run(
 
     std::printf("Max norm squared M^2 = %.6f (M = %.6f)\n", max_norm_sq, std::sqrt(max_norm_sq));
 
-    // 2. Append extra dimension
-    size_t new_dims = dims + 1;
+    // 2. Append extra dimensions
+    size_t new_dims = dims + 2;
     std::vector<float> database_transformed(count * new_dims);
     for (size_t i = 0; i < count; ++i) {
         std::memcpy(&database_transformed[i * new_dims], &database_fp32[i * dims], dims * sizeof(float));
         double diff = max_norm_sq - norms_sq[i];
         float extra = (diff > 0.0) ? static_cast<float>(std::sqrt(diff)) : 0.0f;
         database_transformed[i * new_dims + dims] = extra;
+        database_transformed[i * new_dims + dims + 1] = 0.0f;
     }
 
     double transform_ms = sisap_common::now_ms() - t_transform_start;
-    std::printf("Transformed database to %zu dimensions in %.2f ms\n", new_dims, transform_ms);
+    std::printf("Transformed database to %zu dimensions for graph building in %.2f ms\n", new_dims, transform_ms);
 
-    // Free raw database_fp32 since we have the transformed version
+    // Free raw database_fp32
     database_fp32.clear();
     database_fp32.shrink_to_fit();
 
@@ -311,7 +317,7 @@ static int run(
     }
 
     // --------------------------------------------------------------------------
-    // Build/Load graph with Metric::L2 (dimension d+1)
+    // Build/Load graph with Metric::L2 (dimension d+2)
     // --------------------------------------------------------------------------
     deglib::FloatSpace feature_space(static_cast<uint32_t>(new_dims), deglib::Metric::L2);
     std::unique_ptr<deglib::graph::SizeBoundedGraph> graph_ptr;
@@ -398,45 +404,82 @@ static int run(
     double prune_ms = sisap_common::prune_worst_neighbors(graph, prune_worst, static_cast<uint32_t>(build_threads));
 
     // --------------------------------------------------------------------------
-    // Convert graph to ReadOnlyGraph
+    // Convert transformed features (d+2 dims) to FP16 and build ReadOnlyGraph (FP16L2)
     // --------------------------------------------------------------------------
     double t_convert_start = sisap_common::now_ms();
-    std::printf("Converting graph to ReadOnlyGraph...\n");
-    deglib::graph::ReadOnlyGraph readonly_graph = deglib::graph::convert_to_readonly_graph(graph);
+    std::printf("Converting transformed database features (dims=%zu) to FP16...\n", new_dims);
+
+    std::vector<uint16_t> database_fp16(count * new_dims);
+    for (size_t i = 0; i < count; ++i) {
+        std::vector<float> fp32_vec(new_dims);
+        std::memcpy(fp32_vec.data(), &database_transformed[i * new_dims], new_dims * sizeof(float));
+        std::vector<uint16_t> fp16_vec = floats_to_fp16(fp32_vec);
+        std::memcpy(&database_fp16[i * new_dims], fp16_vec.data(), new_dims * sizeof(uint16_t));
+    }
+
+    std::printf("Building ReadOnlyGraph with FP16L2 features...\n");
+    deglib::FloatSpace fp16_space(static_cast<uint32_t>(new_dims), deglib::Metric::FP16L2);
+    deglib::graph::ReadOnlyGraph fp16_graph(fp16_space, graph, database_fp16.data());
+    
+    // Free the original graph, temporary buffers and transformed vectors
     graph_ptr.reset();
+    database_fp16.clear();
+    database_fp16.shrink_to_fit();
+    database_transformed.clear();
+    database_transformed.shrink_to_fit();
+
     double convert_ms = sisap_common::now_ms() - t_convert_start;
-    std::printf("Converted graph to ReadOnlyGraph in %.2f ms\n", convert_ms);
+    std::printf("Converted database and swapped features in %.2f ms\n", convert_ms);
 
     // --------------------------------------------------------------------------
-    // Load query vectors and append 0.0f
+    // Load query vectors, transform with U^2, and convert to FP16 (d+2 dims)
     // --------------------------------------------------------------------------
-    std::vector<std::vector<float>> queries;
+    std::vector<std::vector<uint16_t>> queries;
     if (!query_info_ptr) {
         std::fprintf(stderr, "Error: No query dataset found in HDF5 file. Task 2 requires actual test queries.\n");
         return 1;
     }
     double t_query_load = sisap_common::now_ms();
     auto queries_fp32 = hdf5_reader::read_matrix_fp32(h5path, *query_info_ptr);
-    
-    // Transform queries: append 0.0f
-    queries.resize(queries_fp32.size());
-    for (size_t i = 0; i < queries_fp32.size(); ++i) {
-        queries[i].resize(new_dims);
-        std::memcpy(queries[i].data(), queries_fp32[i].data(), dims * sizeof(float));
-        queries[i][dims] = 0.0f;
-    }
-
     double query_load_ms = sisap_common::now_ms() - t_query_load;
     load_ms += query_load_ms;
-    std::printf("Loaded %zu queries and transformed to %zu dimensions\n", queries.size(), new_dims);
+
+    double t_query_convert = sisap_common::now_ms();
+
+    // Compute max query norm
+    double max_query_norm_sq = 0.0;
+    std::vector<double> query_norms_sq(queries_fp32.size(), 0.0);
+    for (size_t i = 0; i < queries_fp32.size(); ++i) {
+        double sum = 0.0;
+        for (size_t j = 0; j < dims; ++j) {
+            float val = queries_fp32[i][j];
+            sum += double(val) * double(val);
+        }
+        query_norms_sq[i] = sum;
+        if (sum > max_query_norm_sq) {
+            max_query_norm_sq = sum;
+        }
+    }
+    std::printf("Max query norm squared U^2 = %.6f (U = %.6f)\n", max_query_norm_sq, std::sqrt(max_query_norm_sq));
+
+    queries.reserve(queries_fp32.size());
+    for (size_t i = 0; i < queries_fp32.size(); ++i) {
+        std::vector<float> q_transformed(new_dims);
+        std::memcpy(q_transformed.data(), queries_fp32[i].data(), dims * sizeof(float));
+        q_transformed[dims] = 0.0f;
+        double diff = max_query_norm_sq - query_norms_sq[i];
+        float extra = (diff > 0.0) ? static_cast<float>(std::sqrt(diff)) : 0.0f;
+        q_transformed[dims + 1] = extra;
+        queries.push_back(floats_to_fp16(q_transformed));
+    }
+    double query_convert_ms = sisap_common::now_ms() - t_query_convert;
+    std::printf("Loaded %zu queries (%.2f ms) and converted to FP16 (%.2f ms, dims=%zu)\n", queries.size(), query_load_ms, query_convert_ms, new_dims);
 
     // --------------------------------------------------------------------------
     // Exploration with parameter sweep: eps_search × max_dist
-    // Graph built once, then searched across all combinations
     // --------------------------------------------------------------------------
     std::printf("Starting exploration: k_top=%u, threads=%u\n", k_top, threads);
 
-    // Track best eps_search × max_dist combination
     float best_recall = -1.0f;
     float best_eps_search = 0.1f;
     uint32_t best_max_dist = 200;
@@ -446,8 +489,9 @@ static int run(
         std::printf("\n  --- eps_search=%.3f ---\n", eps_search);
         
         for (uint32_t max_dist_val : max_dist_list) {
-            auto timings = run_search(readonly_graph, queries, k_top, eps_search, max_dist_val, static_cast<uint8_t>(threads),
+            auto timings = run_search(fp16_graph, queries, k_top, eps_search, max_dist_val, static_cast<uint8_t>(threads),
                                            compute_recall, num_runs, gt_data, output_path);
+            timings.search_ms += query_convert_ms;
 
             std::printf("    max_dist=%u has recall %.2f %% and search time %.1f ms\n",
                         max_dist_val, timings.recall * 100.0f, timings.search_ms);
@@ -472,7 +516,7 @@ static int run(
     double total_time_ms = load_ms + build_ms + transform_ms + convert_ms + best_timings.search_ms;
 
     sisap_common::print_summary(
-        (use_flas ? "FP32 Build (L2-converted), FP32 L2 Search (FLAS)" : "FP32 Build (L2-converted), FP32 L2 Search"), 4,
+        (use_flas ? "L2-structured Build, FP16 L2 Search (FLAS) (d+2)" : "L2-structured Build, FP16 L2 Search (d+2)"), 7,
         load_ms, transform_ms, build_ms, convert_ms, prune_ms,
         best_timings.search_ms, 0.0, total_time_ms,
         compute_recall, k_top, best_timings.recall,
@@ -484,4 +528,4 @@ static int run(
     return 0;
 }
 
-} // namespace task2::mode_l2_converted
+} // namespace task2::mode_l2_fp16_d2

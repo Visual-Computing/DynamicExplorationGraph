@@ -97,6 +97,7 @@
 #include "task2/mode4.h"
 #include "task2/mode5.h"
 #include "task2/mode6.h"
+#include "task2/mode7.h"
 #include "flas/fast_linear_assignment_sorter.hpp"
 
 #ifdef BUILD_COMBINED_SISAP
@@ -135,6 +136,7 @@ int main(int argc, char* argv[]) {
             std::fprintf(stderr, "  l2-converted | fp32-build-l2-explore | mode4              : FP32 build (L2 converted) + FP32 L2 search\n");
             std::fprintf(stderr, "  l2-fp16-ip | l2-build-fp16-ip-explore | mode5             : FP32 build (L2 converted) + FP16 InnerProduct search\n");
             std::fprintf(stderr, "  l2-fp16-l2 | l2-build-fp16-l2-explore | mode6             : FP32 build (L2 converted) + FP16 L2 search\n");
+            std::fprintf(stderr, "  l2-fp16-d2 | l2-build-fp16-d2-explore | mode7             : FP32 build (L2-converted d+2) + FP16 L2 search\n");
             std::fprintf(stderr, "  Use --flas with any FP32 mode to enable FLAS pre-sort.\n\n");
             std::fprintf(stderr, "  --threads <n>      Number of CPU worker threads used for query exploration (default: 6).\n");
             std::fprintf(stderr, "  --build-threads <n> Number of CPU worker threads used for graph construction (default: same as --threads).\n");
@@ -302,10 +304,12 @@ int main(int argc, char* argv[]) {
               return task2::mode_l2_fp16_ip::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
            } else if (mode == "l2-fp16-l2" || mode == "l2-build-fp16-l2-explore" || mode == "mode6") {
               return task2::mode_l2_fp16::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
-           } else {
-              std::fprintf(stderr, "Error: Unknown mode '%s'. Supported modes: mode1, mode2, mode3, mode4, mode5, mode6\n", mode.c_str());
-              return 1;
-          }
+            } else if (mode == "l2-fp16-d2" || mode == "l2-build-fp16-d2-explore" || mode == "mode7") {
+               return task2::mode_l2_fp16_d2::run(path, threads, build_threads, k_graph, k_ext, eps_ext, k_top, max_dist_list, run_recall, goal_recall, num_runs, output_path, graph_path, prune_worst, eps_search_list, opt_target, use_flas, flas_metric, flas_radius_decay);
+            } else {
+               std::fprintf(stderr, "Error: Unknown mode '%s'. Supported modes: mode1, mode2, mode3, mode4, mode5, mode6, mode7\n", mode.c_str());
+               return 1;
+           }
 
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "Fatal error: %s\n", ex.what());

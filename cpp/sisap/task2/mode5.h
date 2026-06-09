@@ -4,25 +4,56 @@
  * @file mode5.h
  * @brief Task 2 Mode 5: FP32 Build (L2-converted) + FP16 Inner Product Search
  *
- * Building graph (FLAS order): k_graph=30, k_ext=60, eps_ext=0.001, threads=1, opt_target=LowLID
+ *  .\deglib_sisap.exe task2  "C:\Data\ANN\sisap2026\llama-dev\llama-dev.h5" mode5 --eps-ext 0.001 --k-ext 64 --k-graph 32 --build-threads 1 --max-dist 5000,6000,7000,8000 --eps-search 0.15,0.18,0.19,0.2,0.3 --num-runs 10 --flas
+
 
   --- eps_search=0.150 ---
-    max_dist=5000 has recall 73.78 % and search time 22.6 ms
-    max_dist=6000 has recall 75.77 % and search time 26.0 ms
-    max_dist=7000 has recall 76.98 % and search time 26.3 ms
-    max_dist=8000 has recall 77.73 % and search time 28.0 ms
+    max_dist=5000 has recall 73.75 % and search time 19.8 ms
+    max_dist=6000 has recall 76.01 % and search time 22.4 ms
+    max_dist=7000 has recall 77.30 % and search time 24.6 ms
+    max_dist=8000 has recall 78.17 % and search time 25.5 ms
 
   --- eps_search=0.180 ---
-    max_dist=5000 has recall 75.53 % and search time 25.5 ms
-    max_dist=6000 has recall 78.34 % and search time 29.3 ms
-    max_dist=7000 has recall 80.31 % and search time 31.8 ms
-    max_dist=8000 has recall 81.74 % and search time 36.2 ms
+    max_dist=5000 has recall 75.39 % and search time 22.2 ms
+    max_dist=6000 has recall 78.46 % and search time 25.5 ms
+    max_dist=7000 has recall 80.54 % and search time 28.8 ms
+    max_dist=8000 has recall 82.14 % and search time 31.8 ms
 
   --- eps_search=0.190 ---
-    max_dist=5000 has recall 75.88 % and search time 26.2 ms
-    max_dist=6000 has recall 78.84 % and search time 30.8 ms
-    max_dist=7000 has recall 80.97 % and search time 33.2 ms
-    max_dist=8000 has recall 82.59 % and search time 37.8 ms
+    max_dist=5000 has recall 75.75 % and search time 22.1 ms
+    max_dist=6000 has recall 78.90 % and search time 26.0 ms
+    max_dist=7000 has recall 81.13 % and search time 29.8 ms
+    max_dist=8000 has recall 82.96 % and search time 32.8 ms
+    
+========================================================================
+  FINAL SUMMARY (L2-structured Build, FP16 IP Search (FLAS) - Mode 5)
+========================================================================
+Load Time:               105.7 ms
+Quantize Time:            49.7 ms
+Graph Build Time:         23.8 s
+Graph Conversion Time:   148.6 ms
+Pruning Time:              0.0 ms
+Explore Time:             28.8 ms
+Rerank Time:               0.0 ms
+FLAS Time:                39.2 s
+Total Elapsed Time:       24.1 s
+Recall@30:               80.54 %
+------------------------------------------------------------------------
+Hyperparameters:
+  K_TOP:                 30
+  K_GRAPH:               32
+  K_EXT:                 64
+  EPS_EXT:               0.001
+  OPT_TARGET:            LowLID
+  max_dist:              7000
+  threads:               8
+  prune_worst:           0
+------------------------------------------------------------------------
+Dataset Info:
+  Vectors:               256921
+  Dimensions:            128
+========================================================================
+
  *
  * Behavior:
  * 1. Loads FP32 training vectors from "train" as the database.
