@@ -31,23 +31,35 @@
  *
  * Benchmark Modes
  * ---------------
- *   mode1  (baseline: fp32-build-fp32-explore)
+ *   mode1  (baseline | fp32-build-fp32-explore)
  *     Builds a SizeBoundedGraph using FP32 features (Metric::InnerProduct) and
  *     explores via FP32 inner-product similarity. Serves as the high-quality baseline.
  *
- *   mode4  (evp-search: fp32-build-asymmetric-fp16-evp-search)
- *     Builds the graph with FP32 InnerProduct, quantizes database to EVP bits,
- *     then uses asymmetric search (FP16 query × EVP bits database) via
- *     Metric::FP16EvpAsymmetric. Requires --non-zeros.
+ *   mode2  (fp16-build-fp16-explore)
+ *     Builds the graph with FP16 features and explores via FP16 inner-product similarity.
  *
- *   mode1 --flas
- *     Same as mode1 (FP32 build + FP32 search) but enables FLAS
- *     (Fast Linear Assignment Sorting) pre-sort of training vectors.
- *     Replaces the now-removed mode5.
+ *   mode3  (baseline-fp16 | fp32-build-fp16-explore)
+ *     Builds the graph with FP32 features and explores via FP16 inner-product similarity.
+ *
+ *   mode4  (l2-converted | fp32-build-l2-explore)
+ *     Builds the graph with FP32 features converted to L2 space (dimension d+1)
+ *     and explores via FP32 L2 similarity.
+ *
+ *   mode5  (l2-fp16-ip | l2-build-fp16-ip-explore)
+ *     Builds the graph with FP32 features converted to L2 space (dimension d+1)
+ *     and explores via FP16 Inner Product similarity.
+ *
+ *   mode6  (l2-fp16-l2 | l2-build-fp16-l2-explore)
+ *     Builds the graph with FP32 features converted to L2 space (dimension d+1)
+ *     and explores via FP16 L2 similarity.
+ *
+ *   mode7  (l2-fp16-d2 | l2-build-fp16-d2-explore)
+ *     Builds the graph with FP32 features converted to L2-converted space (dimension d+2)
+ *     and explores via FP16 L2 similarity.
  *
  * FLAS Settings
  * -------------
- *   --flas                    Enable FLAS pre-sort (default: off).
+ *   --flas                    Enable FLAS pre-sort (default: off). Works with any mode.
  *   --flas-metric <l2|ip>    FLAS distance metric (default: l2).
  *   --flas-radius-decay <f>  FLAS swap radius decay factor (default: 0.93).
  *
