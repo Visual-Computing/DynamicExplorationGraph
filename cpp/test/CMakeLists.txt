@@ -20,3 +20,12 @@ endmacro()
 
 # Phase 1 Test Target: CPU Features & Build Verification
 add_deglib_test(test_cpu_features src/test_cpu_features.cpp)
+
+# Phase 2 Test Targets: FP16 & Distance Functions
+add_deglib_test(test_fp16 src/distance/test_fp16.cpp)
+add_deglib_test(test_fp32_l2 src/distance/test_fp32_l2.cpp)
+add_deglib_test(test_fp32_inner_product src/distance/test_fp32_inner_product.cpp)
+add_deglib_test(test_fp16_inner_product src/distance/test_fp16_inner_product.cpp)
+add_deglib_test(test_uint8_l2 src/distance/test_uint8_l2.cpp)
+add_deglib_test(test_config_cascade src/distance/test_config_cascade.cpp)
+add_deglib_test(test_distances src/test_distances.cpp)

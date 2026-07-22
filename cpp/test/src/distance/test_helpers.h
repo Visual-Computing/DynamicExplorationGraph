@@ -11,6 +11,9 @@
 #endif
 
 #include "distances.h"
+#include "distance/fp16.h"
+
+using deglib::distances::floats_to_fp16;
 
 static float l2_naive(const float* a, const float* b, size_t dim) {
     float sum = 0.0f;
@@ -65,4 +68,13 @@ static std::vector<uint8_t> make_uint8_vec(size_t dim, unsigned seed = 42) {
 
 static bool approx_eq(float a, float b, float eps = 1e-3f) {
     return std::fabs(a - b) < eps;
+}
+
+static float fp16_ip_naive_ref(const uint16_t* a, const uint16_t* b, size_t dim) {
+    float dot = 0.0f;
+    for (size_t i = 0; i < dim; ++i) {
+        dot += deglib::distances::fp16_to_float(a[i]) *
+               deglib::distances::fp16_to_float(b[i]);
+    }
+    return 1.0f - dot;
 }

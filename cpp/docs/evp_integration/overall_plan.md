@@ -24,7 +24,8 @@ graph TD
 - Einrichtung von `test/CMakeLists.txt`, `DetectCPUFeatures.cmake`, `compile-options` Interface Target.
 - Einbinden der Google Test (gtest) Infrastruktur über `external/fmt/test/gtest`.
 
-### [Phase 2: FP16 & Basis-Distanzen TDD](file:///c:/Lang/cpp/DynamicExplorationGraph/cpp/docs/evp_integration/phase2_fp16_and_distances.md)
+### [Phase 2: FP16 & Basis-Distanzen TDD](file:///c:/Lang/cpp/DynamicExplorationGraph/cpp/docs/evp_integration/phase2_fp16_and_distances.md) (✅ ABGESCHLOSSEN - Siehe [Ergebnisse Phase 2](file:///c:/Lang/cpp/DynamicExplorationGraph/cpp/docs/evp_integration/phase2_results.md))
+
 - Tests: `test_fp16`, `test_fp32_l2`, `test_fp32_inner_product`, `test_fp16_inner_product`, `test_uint8_l2`, `test_config_cascade`.
 - Headers: `fp16.h`, `fp32_l2.h`, `fp32_inner_product.h`, `fp16_l2.h`, `fp16_inner_product.h`, `uint8_l2.h`, refaktorierte `distances.h`.
 
