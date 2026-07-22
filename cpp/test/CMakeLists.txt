@@ -29,3 +29,8 @@ add_deglib_test(test_fp16_inner_product src/distance/test_fp16_inner_product.cpp
 add_deglib_test(test_uint8_l2 src/distance/test_uint8_l2.cpp)
 add_deglib_test(test_config_cascade src/distance/test_config_cascade.cpp)
 add_deglib_test(test_distances src/test_distances.cpp)
+
+# Phase 3 Test Targets: EVP Quantization & Asymmetric EVP Distances
+add_deglib_test(test_evp_quantize src/quantization/test_evp_quantize.cpp)
+add_deglib_test(test_evp_inner_product src/distance/test_evp_inner_product.cpp)
+add_deglib_test(test_fp16_evp_asym_inner_product src/distance/test_fp16_evp_asym_inner_product.cpp)
