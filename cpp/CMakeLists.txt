@@ -27,42 +27,30 @@ target_compile_features(compile-options INTERFACE cxx_std_20)
 target_compile_definitions(compile-options INTERFACE $<$<PLATFORM_ID:Windows>:NOMINMAX>)
 
 # detecting CPU instruction support
-# https://github.com/lemire/FastPFor/blob/master/CMakeLists.txt
 if (APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
   message(WARNING "You are compiling on an Apple M chip. At the moment deglib does not support ARM optimizations, so using deglib will be slow!")
 endif()
 
+# ==============================================================================
+# 1. Compiler Flags Setup
+# ==============================================================================
+set(COMPILER_COMMON_FLAGS "")
+set(COMPILER_ARCH_FLAGS "")
+
 if (FORCE_AVX2)
   message(NOTICE "Compiling for avx2, ignoring native optimizations.")
 
-  # setup compiler flags
   if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(
-      compile-options
-      INTERFACE -O3
-                -mavx2
-                -mfma
-                -fpic
-                -w
-                -fopenmp
-                -pthread
-                -ftree-vectorize
-                -ftree-vectorizer-verbose=0
-                )
+    list(APPEND COMPILER_COMMON_FLAGS -O3 -fpic -w -pthread -ftree-vectorize)
+    list(APPEND COMPILER_ARCH_FLAGS -mavx2 -mfma)
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-	target_compile_options(compile-options INTERFACE -O2 -fpic)
-
+    list(APPEND COMPILER_COMMON_FLAGS -O2 -fpic)
     if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
-        target_compile_options(compile-options INTERFACE -mavx2 -mfma)
+      list(APPEND COMPILER_ARCH_FLAGS -mavx2 -mfma)
     endif()
   elseif(MSVC)
-    target_compile_options(
-	  compile-options
-	  INTERFACE /O2
-				/arch:AVX2
-				/W1
-				/openmp
-				/EHsc)
+    list(APPEND COMPILER_COMMON_FLAGS /O2 /EHsc /W4)
+    list(APPEND COMPILER_ARCH_FLAGS /arch:AVX2)
   else()
     message(WARNING "Unknown compiler for AVX2 Build: ${CMAKE_CXX_COMPILER_ID}")
   endif()
@@ -71,55 +59,53 @@ else()  # Native build
   list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
   include(DetectCPUFeatures)
 
-  # setup compiler flags
   if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(
-      compile-options
-      INTERFACE -O3
-                -march=native
-                -mavx2
-                -mfma
-                -fpic
-                -w
-                -fopenmp
-                -pthread
-                -ftree-vectorize
-                -ftree-vectorizer-verbose=0)
+    list(APPEND COMPILER_COMMON_FLAGS -O3 -march=native -fpic -w -pthread -ftree-vectorize)
+    list(APPEND COMPILER_ARCH_FLAGS -mavx2 -mfma)
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-    target_compile_options(
-      compile-options
-      INTERFACE -O2
-                -DNDEBUG
-                -march=native
-                -fpic)
+    list(APPEND COMPILER_COMMON_FLAGS -O2 -DNDEBUG -march=native -fpic)
   elseif(MSVC)
-    # warning level 4 (show all)
-    target_compile_options(compile-options INTERFACE /W4)
+    list(APPEND COMPILER_COMMON_FLAGS /W4 /EHsc $<$<CONFIG:Release>:/Ox>)
 
-    # detecting SUPPORT_AVX2 or SSE2 support
-    cmake_host_system_information(RESULT SUPPORT_SSE2 QUERY HAS_SSE2)
-    if(SUPPORT_AVX2)
-      target_compile_options(compile-options INTERFACE /arch:AVX2)
-    elseif(SUPPORT_SSE2)
-      target_compile_options(compile-options INTERFACE /arch:SSE2)
+    message(STATUS "[Native MSVC] CPU feature detection:")
+    message(STATUS "  SUPPORT_AVX512F = ${SUPPORT_AVX512F}")
+    message(STATUS "  SUPPORT_AVX2    = ${SUPPORT_AVX2}")
+    message(STATUS "  SUPPORT_SSE42   = ${SUPPORT_SSE42}")
+
+    if(SUPPORT_AVX512F)
+      list(APPEND COMPILER_ARCH_FLAGS /arch:AVX512)
+    elseif(SUPPORT_AVX2)
+      list(APPEND COMPILER_ARCH_FLAGS /arch:AVX2)
+    elseif(SUPPORT_SSE42)
+      list(APPEND COMPILER_ARCH_FLAGS /arch:SSE2)
     else()
-      target_compile_options(compile-options INTERFACE /arch:native)
+      list(APPEND COMPILER_ARCH_FLAGS /arch:native)
     endif()
-
-    # disable string optimizations and function level linking
-    # https://stackoverflow.com/questions/5063334/what-is-the-difference-between-the-ox-and-o2-compiler-options
-    target_compile_options(compile-options INTERFACE $<$<CONFIG:Release>:/Ox>)
   else()
     message(WARNING "Unknown compiler: ${CMAKE_CXX_COMPILER_ID}")
   endif()
 endif()
 
+# Apply compiler flags to compile-options interface target
+target_compile_options(compile-options INTERFACE 
+  ${COMPILER_COMMON_FLAGS}
+  ${COMPILER_ARCH_FLAGS}
+)
+
 message("C++ compiler flags: ${CMAKE_CXX_FLAGS}")
 message("C++ compiler flags release: ${CMAKE_CXX_FLAGS_RELEASE}")
 
+# Core Library
 add_subdirectory(deglib)
 
+# Unit tests
+add_subdirectory(test)
+
+# Benchmarks (optional)
 if (ENABLE_BENCHMARKS)
+	set(FMT_MASTER_PROJECT OFF CACHE BOOL "" FORCE)
+	set(FMT_TEST OFF CACHE BOOL "" FORCE)
+	set(FMT_INSTALL OFF CACHE BOOL "" FORCE)
 	add_subdirectory(external/fmt)
 	add_subdirectory(benchmark)
 endif()
