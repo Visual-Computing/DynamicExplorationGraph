@@ -8,6 +8,8 @@
 #include <array>
 #include <unordered_set>
 #include <random>
+#include <fstream>
+#include <filesystem>
 
 #include "deglib.h"
 #include "distances.h"
@@ -40,242 +42,31 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
 
 
   using SEARCHFUNC = deglib::search::ResultSet (*)(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter, const uint32_t max_distance_computation_count);
+  using EXPLOREFUNC = deglib::search::ResultSet (*)(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count);
 
-  template <bool use_max_distance_count = false, bool use_filter = false>
-  inline static deglib::search::ResultSet searchL2(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
-    return graph.searchImpl<deglib::distances::L2Float, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
+  template <deglib::distances::DistanceComparator COMPARATOR, bool use_max_distance_count, bool use_filter>
+  static deglib::search::ResultSet search_wrapper(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter, const uint32_t max_distance_computation_count) {
+    return graph.searchImpl<COMPARATOR, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
   }
 
-  template <bool use_max_distance_count = false, bool use_filter = false>
-  inline static deglib::search::ResultSet searchL2Ext16(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
-    return graph.searchImpl<deglib::distances::L2Float16Ext, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
-  }
-
-  template <bool use_max_distance_count = false, bool use_filter = false>
-  inline static deglib::search::ResultSet searchL2Ext8(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
-    return graph.searchImpl<deglib::distances::L2Float8Ext, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
-  }
-
-  template <bool use_max_distance_count = false, bool use_filter = false>
-  inline static deglib::search::ResultSet searchL2Ext4(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
-    return graph.searchImpl<deglib::distances::L2Float4Ext, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
-  }
-
-  template <bool use_max_distance_count = false, bool use_filter = false>
-  inline static deglib::search::ResultSet searchL2Ext16Residual(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
-    return graph.searchImpl<deglib::distances::L2Float16ExtResiduals, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
-  }
-
-  template <bool use_max_distance_count = false, bool use_filter = false>
-  inline static deglib::search::ResultSet searchL2Ext4Residual(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
-    return graph.searchImpl<deglib::distances::L2Float4ExtResiduals, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
-  }
-
-  template <bool use_max_distance_count = false, bool use_filter = false>
-  inline static deglib::search::ResultSet searchInnerProduct(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
-    return graph.searchImpl<deglib::distances::InnerProductFloat, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
-  }
-
-  template <bool use_max_distance_count = false, bool use_filter = false>
-  inline static deglib::search::ResultSet searchInnerProductExt16(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
-    return graph.searchImpl<deglib::distances::InnerProductFloat16Ext, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
-  }
-
-  template <bool use_max_distance_count = false, bool use_filter = false>
-  inline static deglib::search::ResultSet searchInnerProductExt8(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
-    return graph.searchImpl<deglib::distances::InnerProductFloat8Ext, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
-  }
-
-  template <bool use_max_distance_count = false, bool use_filter = false>
-  inline static deglib::search::ResultSet searchInnerProductExt4(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
-    return graph.searchImpl<deglib::distances::InnerProductFloat4Ext, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
-  }
-
-  template <bool use_max_distance_count = false, bool use_filter = false>
-  inline static deglib::search::ResultSet searchInnerProductExt16Residual(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
-    return graph.searchImpl<deglib::distances::InnerProductFloat16ExtResiduals, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
-  }
-
-  template <bool use_max_distance_count = false, bool use_filter = false>
-  inline static deglib::search::ResultSet searchInnerProductExt4Residual(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
-    return graph.searchImpl<deglib::distances::InnerProductFloat4ExtResiduals, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
-  }
-
-  template <bool use_max_distance_count = false, bool use_filter = false>
-  inline static deglib::search::ResultSet searchL2Uint8(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
-    return graph.searchImpl<deglib::distances::L2Uint8, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
-  }
-
-  template <bool use_max_distance_count = false, bool use_filter = false>
-  inline static deglib::search::ResultSet searchL2Uint8Ext32(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
-    return graph.searchImpl<deglib::distances::L2Uint8Ext32, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
-  }
-
-  template <bool use_max_distance_count = false, bool use_filter = false>
-  inline static deglib::search::ResultSet searchL2Uint8Ext16(const ReadOnlyGraph& graph, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) {
-    return graph.searchImpl<deglib::distances::L2Uint8Ext16, use_max_distance_count, use_filter>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
+  template <deglib::distances::DistanceComparator COMPARATOR>
+  static deglib::search::ResultSet explore_wrapper(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count) {
+    return graph.exploreImpl<COMPARATOR>(entry_vertex_index, k, include_entry, max_distance_computation_count);
   }
 
   template <bool use_max_distance_count = false, bool use_filter = false>
   inline static SEARCHFUNC getSearchFunction(const deglib::FloatSpace& feature_space) {
-    const auto dim = feature_space.dim();
-    const auto metric = feature_space.metric();
-
-    if(metric == deglib::Metric::L2) {
-      if (dim % 16 == 0)
-        return deglib::graph::ReadOnlyGraph::searchL2Ext16<use_max_distance_count, use_filter>;
-      else if (dim % 8 == 0)
-        return deglib::graph::ReadOnlyGraph::searchL2Ext8<use_max_distance_count, use_filter>;
-      else if (dim % 4 == 0)
-        return deglib::graph::ReadOnlyGraph::searchL2Ext4<use_max_distance_count, use_filter>;
-      else if (dim > 16)
-        return deglib::graph::ReadOnlyGraph::searchL2Ext16Residual<use_max_distance_count, use_filter>;
-      else if (dim > 4)
-        return deglib::graph::ReadOnlyGraph::searchL2Ext4Residual<use_max_distance_count, use_filter>;
-      else
-        return deglib::graph::ReadOnlyGraph::searchL2<use_max_distance_count, use_filter>;
-    }
-    else if(metric == deglib::Metric::InnerProduct)
-    {
-      if (dim % 16 == 0)
-        return deglib::graph::ReadOnlyGraph::searchInnerProductExt16<use_max_distance_count, use_filter>;
-      else if (dim % 8 == 0)
-        return deglib::graph::ReadOnlyGraph::searchInnerProductExt8<use_max_distance_count, use_filter>;
-      else if (dim % 4 == 0)
-        return deglib::graph::ReadOnlyGraph::searchInnerProductExt4<use_max_distance_count, use_filter>;
-      else if (dim > 16)
-        return deglib::graph::ReadOnlyGraph::searchInnerProductExt16Residual<use_max_distance_count, use_filter>;
-      else if (dim > 4)
-        return deglib::graph::ReadOnlyGraph::searchInnerProductExt4Residual<use_max_distance_count, use_filter>;
-      else
-        return deglib::graph::ReadOnlyGraph::searchInnerProduct<use_max_distance_count, use_filter>;
-    }
-    else if(metric == deglib::Metric::L2_Uint8)
-    {
-      if (dim % 32 == 0)
-        return deglib::graph::ReadOnlyGraph::searchL2Uint8Ext32<use_max_distance_count, use_filter>;
-      else if (dim % 16 == 0)
-        return deglib::graph::ReadOnlyGraph::searchL2Uint8Ext16<use_max_distance_count, use_filter>;
-      else
-        return deglib::graph::ReadOnlyGraph::searchL2Uint8<use_max_distance_count, use_filter>;
-    }
-
-    std::fprintf(stderr, "Could not find metric %u for the readonly_graph search method \n", static_cast<int>(metric));
-    std::perror("");
-    std::abort();
-  }
-
-
-  using EXPLOREFUNC = deglib::search::ResultSet (*)(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count);
-
-  inline static deglib::search::ResultSet exploreL2(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
-    return graph.exploreImpl<deglib::distances::L2Float>(entry_vertex_index, k, include_entry, max_distance_computation_count);
-  }
-
-  inline static deglib::search::ResultSet exploreL2Ext16(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
-    return graph.exploreImpl<deglib::distances::L2Float16Ext>(entry_vertex_index, k, include_entry, max_distance_computation_count);
-  }
-
-  inline static deglib::search::ResultSet exploreL2Ext8(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
-    return graph.exploreImpl<deglib::distances::L2Float8Ext>(entry_vertex_index, k, include_entry, max_distance_computation_count);
-  }
-
-  inline static deglib::search::ResultSet exploreL2Ext4(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
-    return graph.exploreImpl<deglib::distances::L2Float4Ext>(entry_vertex_index, k, include_entry, max_distance_computation_count);
-  }
-
-  inline static deglib::search::ResultSet exploreL2Ext16Residual(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
-    return graph.exploreImpl<deglib::distances::L2Float16ExtResiduals>(entry_vertex_index, k, include_entry, max_distance_computation_count);
-  }
-
-  inline static deglib::search::ResultSet exploreL2Ext4Residual(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
-    return graph.exploreImpl<deglib::distances::L2Float4ExtResiduals>(entry_vertex_index, k, include_entry, max_distance_computation_count);
-  }
-
-  inline static deglib::search::ResultSet exploreInnerProduct(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
-    return graph.exploreImpl<deglib::distances::InnerProductFloat>(entry_vertex_index, k, include_entry, max_distance_computation_count);
-  }
-
-  inline static deglib::search::ResultSet exploreInnerProductExt16(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
-    return graph.exploreImpl<deglib::distances::InnerProductFloat16Ext>(entry_vertex_index, k, include_entry, max_distance_computation_count);
-  }
-
-  inline static deglib::search::ResultSet exploreInnerProductExt8(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
-    return graph.exploreImpl<deglib::distances::InnerProductFloat8Ext>(entry_vertex_index, k, include_entry, max_distance_computation_count);
-  }
-
-  inline static deglib::search::ResultSet exploreInnerProductExt4(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
-    return graph.exploreImpl<deglib::distances::InnerProductFloat4Ext>(entry_vertex_index, k, include_entry, max_distance_computation_count);
-  }
-
-  inline static deglib::search::ResultSet exploreInnerProductExt16Residual(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
-    return graph.exploreImpl<deglib::distances::InnerProductFloat16ExtResiduals>(entry_vertex_index, k, include_entry, max_distance_computation_count);
-  }
-
-  inline static deglib::search::ResultSet exploreInnerProductExt4Residual(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
-    return graph.exploreImpl<deglib::distances::InnerProductFloat4ExtResiduals>(entry_vertex_index, k, include_entry, max_distance_computation_count);
-  }
-
-  inline static deglib::search::ResultSet exploreL2Uint8(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
-    return graph.exploreImpl<deglib::distances::L2Uint8>(entry_vertex_index, k, include_entry, max_distance_computation_count);
-  }
-
-  inline static deglib::search::ResultSet exploreL2Uint8Ext32(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
-    return graph.exploreImpl<deglib::distances::L2Uint8Ext32>(entry_vertex_index, k, include_entry, max_distance_computation_count);
-  }
-
-  inline static deglib::search::ResultSet exploreL2Uint8Ext16(const ReadOnlyGraph& graph, const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) {
-    return graph.exploreImpl<deglib::distances::L2Uint8Ext16>(entry_vertex_index, k, include_entry, max_distance_computation_count);
+    return deglib::distances::dispatch_distance(feature_space, []<typename COMPARATOR>() -> SEARCHFUNC {
+      return &search_wrapper<COMPARATOR, use_max_distance_count, use_filter>;
+    });
   }
 
   inline static EXPLOREFUNC getExploreFunction(const deglib::FloatSpace& feature_space) {
-    const auto dim = feature_space.dim();
-    const auto metric = feature_space.metric();
-
-    if(metric == deglib::Metric::L2) {
-      if (dim % 16 == 0)
-        return deglib::graph::ReadOnlyGraph::exploreL2Ext16;
-      else if (dim % 8 == 0)
-        return deglib::graph::ReadOnlyGraph::exploreL2Ext8;
-      else if (dim % 4 == 0)
-        return deglib::graph::ReadOnlyGraph::exploreL2Ext4;
-      else if (dim > 16)
-        return deglib::graph::ReadOnlyGraph::exploreL2Ext16Residual;
-      else if (dim > 4)
-        return deglib::graph::ReadOnlyGraph::exploreL2Ext4Residual;
-      else
-        return deglib::graph::ReadOnlyGraph::exploreL2;      
-    }
-    else if(metric == deglib::Metric::InnerProduct)
-    {
-      if (dim % 16 == 0)
-        return deglib::graph::ReadOnlyGraph::exploreInnerProductExt16;
-      else if (dim % 8 == 0)
-        return deglib::graph::ReadOnlyGraph::exploreInnerProductExt8;
-      else if (dim % 4 == 0)
-        return deglib::graph::ReadOnlyGraph::exploreInnerProductExt4;
-      else if (dim > 16)
-        return deglib::graph::ReadOnlyGraph::exploreInnerProductExt16Residual;
-      else if (dim > 4)
-        return deglib::graph::ReadOnlyGraph::exploreInnerProductExt4Residual;
-      else
-        return deglib::graph::ReadOnlyGraph::exploreInnerProduct;
-    }
-    else if(metric == deglib::Metric::L2_Uint8)
-    {
-
-      if (dim % 32 == 0)
-        return deglib::graph::ReadOnlyGraph::exploreL2Uint8Ext32;
-      else if (dim % 16 == 0)
-        return deglib::graph::ReadOnlyGraph::exploreL2Uint8Ext16;
-      else
-        return deglib::graph::ReadOnlyGraph::exploreL2Uint8;
-    }
-
-    std::fprintf(stderr, "Could not find metric %u for the readonly_graph explore method \n", static_cast<int>(metric));
-    std::perror("");
-    std::abort();
+    return deglib::distances::dispatch_distance(feature_space, []<typename COMPARATOR>() -> EXPLOREFUNC {
+      return &explore_wrapper<COMPARATOR>;
+    });
   }
+
 
 
   static uint32_t compute_aligned_byte_size_per_vertex(const uint8_t edges_per_vertex, const uint16_t feature_byte_size, const uint8_t alignment) {
@@ -367,6 +158,13 @@ public:
   }
 
   /**
+   * Copy from input graph (feature space of new graph is same as input graph)
+   */
+  ReadOnlyGraph(deglib::search::SearchGraph& input_graph)
+    : ReadOnlyGraph(input_graph.size(), input_graph.getEdgesPerVertex(), input_graph.getFeatureSpace(), input_graph) {
+  }
+
+  /**
    *  Copy from input graph
    */
   ReadOnlyGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::FloatSpace feature_space, deglib::search::SearchGraph& input_graph)
@@ -388,6 +186,39 @@ public:
         label_to_index_.emplace(label, i);
     }
   }
+
+  /**
+   * Copy from input graph but with custom feature vectors and feature space.
+   * @param feature_space feature space for the new graph (e.g., FP16InnerProduct)
+   * @param input_graph graph to copy structure from
+   * @param new_features pointer to new feature vectors (aligned for feature_space)
+   *                     Assumes row-major: [label1_feat_v1, label1_feat_v2, ..., labelN_feat_vN]
+   *                     Must contain features for all labels present in input_graph
+   */
+  ReadOnlyGraph(const deglib::FloatSpace feature_space, deglib::search::SearchGraph& input_graph, const void* new_features)
+      : ReadOnlyGraph(input_graph.size(), input_graph.getEdgesPerVertex(), feature_space) {
+
+    const size_t feature_data_size = feature_space.get_data_size();
+    const uint32_t max_vertex_count = input_graph.size();
+    const uint8_t edges_per_vertex = input_graph.getEdgesPerVertex();
+
+    for (uint32_t i = 0; i < max_vertex_count; i++) {
+        auto vertex = reinterpret_cast<char*>(this->vertex_by_index(i));
+
+        const auto label = input_graph.getExternalLabel(i);
+        const auto feature = static_cast<const std::byte*>(new_features) + size_t(label) * feature_data_size;
+        std::memcpy(vertex, feature, feature_data_size);
+        vertex += feature_data_size;
+
+        const auto neighbor_indices = input_graph.getNeighborIndices(i);
+        std::memcpy(vertex, neighbor_indices, sizeof(uint32_t) * uint32_t(edges_per_vertex));
+        vertex += sizeof(uint32_t) * uint32_t(edges_per_vertex);
+
+        std::memcpy(vertex, &label, sizeof(uint32_t));
+        label_to_index_.emplace(label, i);
+    }
+  }
+
 
   /**
    * Current maximal capacity of vertices
@@ -547,7 +378,7 @@ public:
 
       memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])), feature_size);
       for (size_t i = 0; i < good_neighbor_count; i++) {
-        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])), feature_size);
+        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[size_t(i) + 1 < good_neighbor_count - 1 ? size_t(i) + 1 : good_neighbor_count - 1])), feature_size);
 
         const auto neighbor_index = good_neighbors[i];
         const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
@@ -683,6 +514,8 @@ public:
 
     // iterate as long as good elements are in the next_vertices queue
     auto good_neighbors = std::array<uint32_t, 256>();    // this limits the neighbor count to 256 using Variable Length Array wrapped in a macro
+    alignas(32) auto db_arr = std::array<const void*, 256>();
+    alignas(32) auto dists = std::array<float, 256>();
     while (next_vertices.empty() == false)
     {      
       // next vertex to check
@@ -706,14 +539,28 @@ public:
       if (good_neighbor_count == 0)
         continue;
 
-      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])), feature_size);
-      for (size_t i = 0; i < good_neighbor_count; i++) {
-        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])), feature_size);
+      // Cap the neighbor count based on the remaining distance budget
+      if constexpr (use_max_distance_count) {
+        if (distance_computation_count + good_neighbor_count > max_distance_computation_count) {
+          good_neighbor_count = max_distance_computation_count - distance_computation_count;
+        }
+      }
 
+      // Construct features pointer array
+      for (size_t i = 0; i < good_neighbor_count; ++i) {
+        db_arr[i] = this->feature_by_index(good_neighbors[i]);
+        if(i < 8)
+          memory::prefetch(db_arr[i]);
+      }
+
+      // Compute distances in batch
+      deglib::distances::compare_batch<COMPARATOR>(query, db_arr.data(), good_neighbor_count, dist_func_param, dists.data());
+
+      // Process results sequentially
+      for (size_t i = 0; i < good_neighbor_count; ++i) {
         const auto neighbor_index = good_neighbors[i];
-        const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
-        const auto neighbor_distance = COMPARATOR::compare(query, neighbor_feature_vector, dist_func_param);
-             
+        const auto neighbor_distance = dists[i];
+
         // check the neighborhood of this vertex later, if its good enough
         if (neighbor_distance <= exploration_radius) {
           next_vertices.emplace(neighbor_index, neighbor_distance);
@@ -738,12 +585,12 @@ public:
             }
           }
         }
+      }
 
-        // early stop after to many computations
-        if constexpr (use_max_distance_count) {
-          if(++distance_computation_count >= max_distance_computation_count) {
-            return results;
-          }
+      if constexpr (use_max_distance_count) {
+        distance_computation_count += good_neighbor_count;
+        if (distance_computation_count >= max_distance_computation_count) {
+          return results;
         }
       }
     }
@@ -794,18 +641,20 @@ public:
     auto radius = std::numeric_limits<float>::max();
 
     // iterate as long as good elements are in the next_vertices queue and max_calcs is not yet reached
-    auto good_neighbors = std::array<uint32_t, 256>();    // this limits the neighbor count to 256 using Variable Length Array wrapped in a macro
-    while (next_vertices.empty() == false)
+    auto good_neighbors = std::array<uint32_t, 256>();  // this limits the neighbor count to 256 using Variable Length Array wrapped in a macro
+    alignas(32) auto db_arr = std::array<const void*, 256>();
+    alignas(32) auto dists = std::array<float, 256>();
+    while (!next_vertices.empty()) 
     {
       // next vertex to check
       const auto next_vertex = next_vertices.top();
       next_vertices.pop();
 
       uint8_t good_neighbor_count = 0;
-      const auto neighbor_indices = this->neighbors_by_index(next_vertex.getInternalIndex());
-      for (uint8_t i = 0; i < this->edges_per_vertex_; i++) {
+      const auto* neighbor_indices = neighbors_by_index(next_vertex.getInternalIndex());
+      for (uint8_t i = 0; i < edges_per_vertex_; ++i) {
         const auto neighbor_index = neighbor_indices[i];
-        if (checked_ids[neighbor_index] != checked_ids_tag)  {
+        if (checked_ids[neighbor_index] != checked_ids_tag) {
           checked_ids[neighbor_index] = checked_ids_tag;
           good_neighbors[good_neighbor_count++] = neighbor_index;
         }
@@ -814,33 +663,41 @@ public:
       if (good_neighbor_count == 0)
         continue;
 
-      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])), feature_size);
-      for (uint8_t i = 0; i < good_neighbor_count; i++) {
-        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])), feature_size);
+      // Cap the neighbor count based on the remaining distance budget
+      if (distance_computation_count + good_neighbor_count > max_distance_computation_count) {
+        good_neighbor_count = max_distance_computation_count - distance_computation_count;
+      }
 
+      // Construct features pointer array
+      for (size_t i = 0; i < good_neighbor_count; ++i) {
+        db_arr[i] = feature_by_index(good_neighbors[i]);
+        if(i < 8)
+          memory::prefetch(db_arr[i]);
+      }
+
+      // Compute distances in batch
+      deglib::distances::compare_batch<COMPARATOR>(query, db_arr.data(), good_neighbor_count, dist_func_param, dists.data());
+
+      // Process results sequentially
+      for (size_t i = 0; i < good_neighbor_count; ++i) {
         const auto neighbor_index = good_neighbors[i];
-        const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
-        const auto neighbor_distance = COMPARATOR::compare(query, neighbor_feature_vector, dist_func_param);
+        const auto neighbor_distance = dists[i];
 
         if (neighbor_distance < radius) {
-
-          // check the neighborhood of this vertex later
           next_vertices.emplace(neighbor_index, neighbor_distance);
-
-          // remember the vertex, if its better than the worst in the result list
           results.emplace(neighbor_index, neighbor_distance);
 
-          // update the search radius
           if (results.size() > k) {
             results.pop();
             radius = results.top().getDistance();
           }
         }
-
-        // early stop after to many computations
-        if(++distance_computation_count >= max_distance_computation_count)
-          return results;
       }
+
+      // early stop after to many computations
+      distance_computation_count += good_neighbor_count;
+      if (distance_computation_count >= max_distance_computation_count)
+        return results;
     }
 
     return results;

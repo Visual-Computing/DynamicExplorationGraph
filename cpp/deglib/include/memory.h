@@ -2,18 +2,24 @@
 
 #include "config.h"
 
-namespace deglib::memory {
+#include <cstddef>
 
-  static const size_t L1_CACHE_LINE_SIZE = 64;
+#if defined(USE_AVX) || defined(USE_AVX512) || defined(USE_SSE)
+#include <immintrin.h>
+#endif
 
-  inline static void prefetch(const char *ptr, const size_t size = 128) {
-    #if defined(USE_AVX) || defined(USE_SSE)
-    size_t pos = 0;
-    while(pos < size) {
-      _mm_prefetch(ptr+pos, _MM_HINT_T0);
-      pos += L1_CACHE_LINE_SIZE;
-    }
-    #endif
-  }
+namespace deglib {
+namespace memory {
 
-}  // namespace deglib::memory
+inline static void prefetch(const void* ptr, ...) {
+#if defined(USE_AVX) || defined(USE_AVX512) || defined(USE_SSE)
+    const char* p = reinterpret_cast<const char*>(ptr);
+    _mm_prefetch(p + 0, _MM_HINT_T0);
+    _mm_prefetch(p + 64, _MM_HINT_T0);
+#else
+    (void)ptr;
+#endif
+}
+
+}  // namespace memory
+}  // namespace deglib

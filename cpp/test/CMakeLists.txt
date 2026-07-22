@@ -34,3 +34,7 @@ add_deglib_test(test_distances src/test_distances.cpp)
 add_deglib_test(test_evp_quantize src/quantization/test_evp_quantize.cpp)
 add_deglib_test(test_evp_inner_product src/distance/test_evp_inner_product.cpp)
 add_deglib_test(test_fp16_evp_asym_inner_product src/distance/test_fp16_evp_asym_inner_product.cpp)
+
+# Phase 4 Test Targets: Readonly Graph External & Graph Structures
+add_deglib_test(test_readonly_graph_external src/graph/test_readonly_graph_external.cpp)
+add_deglib_test(test_sizebounded_graph src/graph/test_sizebounded_graph.cpp)

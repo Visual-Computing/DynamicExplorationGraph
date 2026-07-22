@@ -70,4 +70,10 @@ inline void parallel_for(size_t start, size_t end, size_t numThreads, size_t bat
     }
 }
 
+// 4-argument overload for backward compatibility with 4-arg callers
+template <class FuncType>
+inline void parallel_for(size_t start, size_t end, size_t numThreads, FuncType fn) {
+    parallel_for(start, end, numThreads, 0, fn);
+}
+
 }  // namespace deglib::concurrent
