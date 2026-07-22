@@ -1,25 +1,20 @@
-# Umsetzungsplan Phase 6: Standalone FLAS Utility (Optional, TDD)
+# Umsetzungsplan Phase 6: Standalone FLAS Utility (TDD)
 
-Dieser Detailplan beschreibt Phase 6 (Optional): Die Extraktion des **Fast Linear Assignment Sorters (FLAS)** als sauberes, unabhängiges Utility-Modul in `deglib` (ohne jeglichen SISAP- oder HDF5-Code).
-
----
-
-## Betroffene Komponenten & Dateien in Phase 6
-
-### TDD Step 1: FLAS Unit-Tests etablieren
-
-#### [NEW] `test_flas.cpp`
-- Testet den Jonker-Volgenant Solver und den Fast Linear Assignment Sorter auf Feature-Vektoren.
+In Phase 6 wird der **Fast Linear Assignment Sorter (FLAS)** als sauberes, unabhängiges Modul in `deglib` integriert – ohne jegliche Abhängigkeiten zu SISAP oder HDF5.
 
 ---
 
-### TDD Step 2: Modul-Implementierung
+## Speicherort & Struktur für FLAS
 
-#### [NEW] `deglib/include/flas/fast_linear_assignment_sorter.hpp`
-- Standalone Algorithmus zur Vorsortierung von Vektor-Features für verbesserte Speicherlokalität.
+Die Dateien werden sauber unter `deglib/include/flas/` abgelegt:
 
-#### [NEW] `deglib/include/flas/junker_volgenant_solver.hpp`
-- Jonker-Volgenant Zuweisungs-Solver.
+### 1. Header-Dateien (Modul)
+- **[NEW] [fast_linear_assignment_sorter.hpp](file:///c:/Lang/cpp/DynamicExplorationGraph/cpp/deglib/include/flas/fast_linear_assignment_sorter.hpp)**: Algorithmus zur Umordnung/Reorganisation von Vektor-Features für optimale Cache-Lokalität.
+- **[NEW] [junker_volgenant_solver.hpp](file:///c:/Lang/cpp/DynamicExplorationGraph/cpp/deglib/include/flas/junker_volgenant_solver.hpp)**: Jonker-Volgenant Zuweisungs-Solver.
+- **[NEW] [map_field.hpp](file:///c:/Lang/cpp/DynamicExplorationGraph/cpp/deglib/include/flas/map_field.hpp)**: Hilfsstruktur für Map-Felder.
+
+### 2. Unit-Test (TDD)
+- **[NEW] `cpp/test/src/flas/test_flas.cpp`**: Testet die Korrektheit des Jonker-Volgenant Solvers und des FLAS-Sorters.
 
 ---
 
@@ -31,4 +26,4 @@ cmake --build . --config Release --target test_flas
 cd bin/Release
 test_flas.exe
 ```
-Erfolgs-Kriterium: **FLAS Unit-Test läuft erfolgreich.**
+Erfolgs-Kriterium: **`test_flas.exe` schlägt nicht fehl und verifiziert die Zuweisungs-Logik.**
