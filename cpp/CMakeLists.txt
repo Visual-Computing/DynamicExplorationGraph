@@ -37,18 +37,7 @@ if (FORCE_AVX2)
 
   # setup compiler flags
   if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(
-      compile-options
-      INTERFACE -O3
-                -mavx2
-                -mfma
-                -fpic
-                -w
-                -fopenmp
-                -pthread
-                -ftree-vectorize
-                -ftree-vectorizer-verbose=0
-                )
+    target_compile_options(compile-options INTERFACE -O3 -mavx2 -mfma -fpic -w -fopenmp -pthread -ftree-vectorize)
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
 	target_compile_options(compile-options INTERFACE -O2 -fpic)
 
@@ -57,12 +46,11 @@ if (FORCE_AVX2)
     endif()
   elseif(MSVC)
     target_compile_options(
-	  compile-options
-	  INTERFACE /O2
-				/arch:AVX2
-				/W1
-				/openmp
-				/EHsc)
+		  compile-options
+			  INTERFACE /O2
+						/arch:AVX2
+						/W1
+						/EHsc)
   else()
     message(WARNING "Unknown compiler for AVX2 Build: ${CMAKE_CXX_COMPILER_ID}")
   endif()
@@ -73,42 +61,23 @@ else()  # Native build
 
   # setup compiler flags
   if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(
-      compile-options
-      INTERFACE -O3
-                -march=native
-                -mavx2
-                -mfma
-                -fpic
-                -w
-                -fopenmp
-                -pthread
-                -ftree-vectorize
-                -ftree-vectorizer-verbose=0)
-  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-    target_compile_options(
-      compile-options
-      INTERFACE -O2
-                -DNDEBUG
-                -march=native
-                -fpic)
-  elseif(MSVC)
-    # warning level 4 (show all)
-    target_compile_options(compile-options INTERFACE /W4)
-
-    # detecting SUPPORT_AVX2 or SSE2 support
-    cmake_host_system_information(RESULT SUPPORT_SSE2 QUERY HAS_SSE2)
-    if(SUPPORT_AVX2)
-      target_compile_options(compile-options INTERFACE /arch:AVX2)
-    elseif(SUPPORT_SSE2)
-      target_compile_options(compile-options INTERFACE /arch:SSE2)
-    else()
-      target_compile_options(compile-options INTERFACE /arch:native)
+    target_compile_options(compile-options INTERFACE -O3 -march=native -fpic -w -pthread -ftree-vectorize)
+    if(SUPPORT_AVX512F)
+      target_compile_options(compile-options INTERFACE -mavx512f -mfma)
+    elseif(SUPPORT_AVX2)
+      target_compile_options(compile-options INTERFACE -mavx2 -mfma)
     endif()
-
-    # disable string optimizations and function level linking
-    # https://stackoverflow.com/questions/5063334/what-is-the-difference-between-the-ox-and-o2-compiler-options
-    target_compile_options(compile-options INTERFACE $<$<CONFIG:Release>:/Ox>)
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    target_compile_options(compile-options INTERFACE -O2 -DNDEBUG -march=native -fpic)
+  elseif(MSVC)
+    target_compile_options(compile-options INTERFACE /W4 /EHSC /fp:precise $<$<CONFIG:Release>:/O2>)
+    if(SUPPORT_AVX512F)
+      target_compile_options(compile-options INTERFACE /arch:AVX512)
+    elseif(SUPPORT_AVX2)
+      target_compile_options(compile-options INTERFACE /arch:AVX2)
+    elseif(SUPPORT_SSE42)
+      target_compile_options(compile-options INTERFACE /arch:SSE2)
+    endif()
   else()
     message(WARNING "Unknown compiler: ${CMAKE_CXX_COMPILER_ID}")
   endif()
