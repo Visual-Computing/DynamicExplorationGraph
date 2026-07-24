@@ -70,7 +70,7 @@ else()  # Native build
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
     target_compile_options(compile-options INTERFACE -O2 -DNDEBUG -march=native -fpic)
   elseif(MSVC)
-    target_compile_options(compile-options INTERFACE /W4 /EHSC /fp:precise $<$<CONFIG:Release>:/O2>)
+    target_compile_options(compile-options INTERFACE /W4 /EHsc /fp:precise $<$<CONFIG:Release>:/O2>)
     if(SUPPORT_AVX512F)
       target_compile_options(compile-options INTERFACE /arch:AVX512)
     elseif(SUPPORT_AVX2)
@@ -87,6 +87,7 @@ message("C++ compiler flags: ${CMAKE_CXX_FLAGS}")
 message("C++ compiler flags release: ${CMAKE_CXX_FLAGS_RELEASE}")
 
 add_subdirectory(deglib)
+add_subdirectory(test)
 
 if (ENABLE_BENCHMARKS)
 	add_subdirectory(external/fmt)
