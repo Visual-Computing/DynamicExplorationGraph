@@ -1,8 +1,10 @@
 #pragma once
 
-#include <thread>
-#include <mutex>
+#include <algorithm>
 #include <atomic>
+#include <mutex>
+#include <thread>
+#include <vector>
 
 #include "config.h"
 

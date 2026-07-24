@@ -2,6 +2,12 @@
 
 #include "config.h"
 
+#include <cstddef>
+
+#if defined(USE_AVX) || defined(USE_AVX512) || defined(USE_SSE)
+#include <immintrin.h>
+#endif
+
 namespace deglib::memory {
 
   static const size_t L1_CACHE_LINE_SIZE = 64;

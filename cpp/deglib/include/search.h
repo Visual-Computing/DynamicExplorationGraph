@@ -3,6 +3,8 @@
 #include <queue>
 #include <distances.h>
 
+#include "filter.h"
+
 namespace deglib::search
 {
 

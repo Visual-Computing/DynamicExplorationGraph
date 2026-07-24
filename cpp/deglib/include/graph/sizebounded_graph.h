@@ -7,10 +7,13 @@
 #include <math.h>
 #include <filesystem>
 #include <unordered_map>
+#include <fstream>
 
 #include "graph.h"
 #include "repository.h"
 #include "search.h"
+#include "visited_list_pool.h"
+#include "memory.h"
 
 namespace deglib::graph
 {

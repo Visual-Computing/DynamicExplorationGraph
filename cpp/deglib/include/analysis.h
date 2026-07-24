@@ -1,10 +1,12 @@
 #pragma once
 
 #include <math.h>
-#include <thread>
+
 #include <algorithm>
+#include <thread>
 
 #include "concurrent.h"
+#include "memory.h"
 #include "search.h"
 #include "graph.h"
 
