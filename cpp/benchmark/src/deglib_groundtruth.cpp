@@ -124,10 +124,12 @@ static std::vector<uint32_t> compute_gt(const deglib::StaticFeatureRepository& b
 
 int main() {
 
-    #if defined(USE_AVX)
+    #if defined(USE_AVX512)
+        fmt::print("use AVX512  ...\n");
+    #elif defined(USE_AVX2)
         fmt::print("use AVX2  ...\n");
-    #elif defined(USE_SSE)
-        fmt::print("use SSE  ...\n");
+    #elif defined(USE_SSE42)
+        fmt::print("use SSE42  ...\n");
     #else
         fmt::print("use arch  ...\n");
     #endif

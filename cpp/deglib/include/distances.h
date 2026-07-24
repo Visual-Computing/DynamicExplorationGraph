@@ -48,7 +48,7 @@ namespace deglib {
             // https://stackoverflow.com/questions/52147378/choice-between-aligned-vs-unaligned-x86-simd-instructions
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) 
             {
-            #if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
+            #if defined(USE_AVX512) || defined(USE_AVX2) || defined(USE_SSE42)
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
@@ -65,7 +65,7 @@ namespace deglib {
 
                 __m256 sum256 = _mm256_add_ps(_mm512_extractf32x8_ps(sum512, 0), _mm512_extractf32x8_ps(sum512, 1));
                 __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
-            #elif defined(USE_AVX)
+            #elif defined(USE_AVX2)
                 
                 // TODO two sum and v's to increase throughput
                 // newer CPUs have reciprocal throughput less than its latency -> performance can be improved if multiple instructions are executed in parallel
@@ -96,7 +96,7 @@ namespace deglib {
                 // https://www.py4u.net/discuss/73145
 
                 __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
-            #elif defined(USE_SSE)
+            #elif defined(USE_SSE42)
                 __m128 sum128 = _mm_setzero_ps();
                 __m128 v;
                 while (a < last) {
@@ -132,13 +132,13 @@ namespace deglib {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
 
-            #if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
+            #if defined(USE_AVX512) || defined(USE_AVX2) || defined(USE_SSE42)
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
                 
                 const float *last = a + size;
-            #if defined(USE_AVX)
+            #if defined(USE_AVX2)
                 __m256 sum256 = _mm256_setzero_ps();
                 __m256 v;
                 while (a < last) {
@@ -148,7 +148,7 @@ namespace deglib {
                     b += 8;
                 }
                 __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
-            #elif defined(USE_SSE)
+            #elif defined(USE_SSE42)
                 __m128 sum128 = _mm_setzero_ps();
                 __m128 v;
                 while (a < last) {
@@ -175,7 +175,7 @@ namespace deglib {
         class L2Float4Ext {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-            #if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
+            #if defined(USE_AVX512) || defined(USE_AVX2) || defined(USE_SSE42)
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
@@ -294,7 +294,7 @@ namespace deglib {
             // AVX instructions don't require their memory operands to be aligned, but SSE does
             // https://stackoverflow.com/questions/52147378/choice-between-aligned-vs-unaligned-x86-simd-instructions
             inline static float ip_16ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-            #if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
+            #if defined(USE_AVX512) || defined(USE_AVX2) || defined(USE_SSE42)
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
@@ -310,7 +310,7 @@ namespace deglib {
 
                 __m256 sum256 = _mm256_add_ps(_mm512_extractf32x8_ps(sum512, 0), _mm512_extractf32x8_ps(sum512, 1));
                 __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
-            #elif defined(USE_AVX)
+            #elif defined(USE_AVX2)
                 __m256 sum256 = _mm256_setzero_ps();
                 while (a < last) {
                     sum256 = _mm256_fmadd_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b), sum256);
@@ -321,7 +321,7 @@ namespace deglib {
                     b += 8;
                 }
                 __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
-            #elif defined(USE_SSE)
+            #elif defined(USE_SSE42)
                 __m128 sum128 = _mm_setzero_ps();
                 while (a < last) {
                     sum128 = _mm_fmadd_ps(_mm_loadu_ps(a), _mm_loadu_ps(b), sum128);
@@ -355,13 +355,13 @@ namespace deglib {
             }
 
             inline static float ip_8ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-            #if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
+            #if defined(USE_AVX512) || defined(USE_AVX2) || defined(USE_SSE42)
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
                 
                 const float *last = a + size;
-            #if defined(USE_AVX)
+            #if defined(USE_AVX2)
                 __m256 sum256 = _mm256_setzero_ps();
                 while (a < last) {
                     sum256 = _mm256_fmadd_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b), sum256);
@@ -369,7 +369,7 @@ namespace deglib {
                     b += 8;
                 }
                 __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
-            #elif defined(USE_SSE)
+            #elif defined(USE_SSE42)
                 __m128 sum128 = _mm_setzero_ps();
                 while (a < last) {
                     sum128 = _mm_fmadd_ps(_mm_loadu_ps(a), _mm_loadu_ps(b), sum128);
@@ -397,7 +397,7 @@ namespace deglib {
             }
 
             inline static float ip_4ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-            #if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
+            #if defined(USE_AVX512) || defined(USE_AVX2) || defined(USE_SSE42)
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
@@ -479,12 +479,12 @@ namespace deglib {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
 
-            #if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
+            #if defined(USE_AVX512) || defined(USE_AVX2) || defined(USE_SSE42)
                 size_t size = *((size_t *) qty_ptr);
                 const unsigned char *a = (const unsigned char *) pVect1v;
                 const unsigned char *b = (const unsigned char *) pVect2v;
 
-             #if defined(USE_AVX)
+             #if defined(USE_AVX2)
             
                 __m256i sum256 = _mm256_setzero_si256();
                 for (size_t i = 0; i + 16 <= size; i += 16) {
@@ -527,7 +527,7 @@ namespace deglib {
                 // __m256i d2_vec = _mm256_add_epi32(d2_low_vec, d2_high_vec);
                 // __m128i sum128 = _mm_add_epi32(_mm256_extracti128_si256(d2_vec, 0), _mm256_extracti128_si256(d2_vec, 1));
    
-            #elif defined(USE_SSE)
+            #elif defined(USE_SSE42)
 
                 // __m128i sum128 = _mm_setzero_si128();
                 // for (size_t i = 0; i + 8 <= size; i += 8) {
@@ -580,7 +580,7 @@ namespace deglib {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
 
-            #if defined(USE_AVX512) || defined(USE_AVX) || defined(USE_SSE)
+            #if defined(USE_AVX512) || defined(USE_AVX2) || defined(USE_SSE42)
                 size_t size = *((size_t *) qty_ptr);
                 const unsigned char *a = (const unsigned char *) pVect1v;
                 const unsigned char *b = (const unsigned char *) pVect2v;
@@ -637,7 +637,7 @@ namespace deglib {
             DISTFUNC<float> distfunc = deglib::distances::L2Float::compare;
 
             if(metric == deglib::Metric::L2) {
-                #if defined(USE_SSE) || defined(USE_AVX) || defined(USE_AVX512)
+                #if defined(USE_SSE42) || defined(USE_AVX2) || defined(USE_AVX512)
                     if (dim % 16 == 0)
                         distfunc = deglib::distances::L2Float16Ext::compare;
                     else if (dim % 8 == 0)
@@ -654,7 +654,7 @@ namespace deglib {
             }
             else if(metric == deglib::Metric::InnerProduct) 
             {
-                #if defined(USE_SSE) || defined(USE_AVX) || defined(USE_AVX512)
+                #if defined(USE_SSE42) || defined(USE_AVX2) || defined(USE_AVX512)
                     if (dim % 16 == 0)
                         distfunc = deglib::distances::InnerProductFloat16Ext::compare;
                     else if (dim % 8 == 0)
@@ -671,7 +671,7 @@ namespace deglib {
             } 
             else if(metric == deglib::Metric::L2_Uint8) 
             {
-                #if defined(USE_SSE) || defined(USE_AVX) || defined(USE_AVX512)
+                #if defined(USE_SSE42) || defined(USE_AVX2) || defined(USE_AVX512)
                     if (dim % 32 == 0)
                         distfunc = deglib::distances::L2Uint8Ext32::compare;
                     else if (dim % 16 == 0)
