@@ -7,15 +7,159 @@
   },
   "configurePresets": [
     {
-      "name": "default",
-      "hidden": false,
-      "description": "Preset that sets the DATA_PATH variable.",
+      "name": "base",
+      "hidden": true,
+      "description": "Base preset defining shared DATA_PATH and FORCE_AVX2 variables",
       "cacheVariables": {
         "DATA_PATH": {
           "value": "",
           "type": "PATH"
+        },
+        "FORCE_AVX2": {
+          "value": "OFF",
+          "type": "BOOL"
         }
       }
+    },
+    {
+      "name": "windows-msvc",
+      "displayName": "Windows (MSVC & VS 2022)",
+      "description": "Configure build for Windows using Visual Studio 2022 (x64 architecture)",
+      "inherits": "base",
+      "generator": "Visual Studio 17 2022",
+      "toolset": "host=x64",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/install/${presetName}",
+        "CMAKE_C_COMPILER": "cl.exe",
+        "CMAKE_CXX_COMPILER": "cl.exe"
+      }
+    },
+    {
+      "name": "windows-msvc-avx2",
+      "displayName": "Windows AVX2 (MSVC & VS 2022)",
+      "description": "Configure build for Windows using Visual Studio 2022 with FORCE_AVX2 enabled",
+      "inherits": "windows-msvc",
+      "cacheVariables": {
+        "FORCE_AVX2": "ON"
+      }
+    },
+    {
+      "name": "linux-gcc",
+      "displayName": "Linux (GCC & Makefiles)",
+      "description": "Configure build for Linux using GCC compiler and Unix Makefiles",
+      "inherits": "base",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++"
+      }
+    },
+    {
+      "name": "linux-gcc-avx2",
+      "displayName": "Linux AVX2 (GCC & Makefiles)",
+      "description": "Configure build for Linux using GCC compiler with FORCE_AVX2 enabled",
+      "inherits": "linux-gcc",
+      "cacheVariables": {
+        "FORCE_AVX2": "ON"
+      }
+    },
+    {
+      "name": "macos-clang",
+      "displayName": "macOS (Clang & Makefiles)",
+      "description": "Configure build for macOS using AppleClang compiler and Unix Makefiles",
+      "inherits": "base",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    },
+    {
+      "name": "macos-clang-avx2",
+      "displayName": "macOS AVX2 (Clang & Makefiles)",
+      "description": "Configure build for macOS using AppleClang compiler with FORCE_AVX2 enabled",
+      "inherits": "macos-clang",
+      "cacheVariables": {
+        "FORCE_AVX2": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-msvc-debug",
+      "displayName": "Windows Debug",
+      "configurePreset": "windows-msvc",
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-msvc-release",
+      "displayName": "Windows Release",
+      "configurePreset": "windows-msvc",
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-msvc-avx2-debug",
+      "displayName": "Windows AVX2 Debug",
+      "configurePreset": "windows-msvc-avx2",
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-msvc-avx2-release",
+      "displayName": "Windows AVX2 Release",
+      "configurePreset": "windows-msvc-avx2",
+      "configuration": "Release"
+    },
+    {
+      "name": "linux-gcc-debug",
+      "displayName": "Linux Debug",
+      "configurePreset": "linux-gcc",
+      "configuration": "Debug"
+    },
+    {
+      "name": "linux-gcc-release",
+      "displayName": "Linux Release",
+      "configurePreset": "linux-gcc",
+      "configuration": "Release"
+    },
+    {
+      "name": "linux-gcc-avx2-debug",
+      "displayName": "Linux AVX2 Debug",
+      "configurePreset": "linux-gcc-avx2",
+      "configuration": "Debug"
+    },
+    {
+      "name": "linux-gcc-avx2-release",
+      "displayName": "Linux AVX2 Release",
+      "configurePreset": "linux-gcc-avx2",
+      "configuration": "Release"
+    },
+    {
+      "name": "macos-clang-debug",
+      "displayName": "macOS Debug",
+      "configurePreset": "macos-clang",
+      "configuration": "Debug"
+    },
+    {
+      "name": "macos-clang-release",
+      "displayName": "macOS Release",
+      "configurePreset": "macos-clang",
+      "configuration": "Release"
+    },
+    {
+      "name": "macos-clang-avx2-debug",
+      "displayName": "macOS AVX2 Debug",
+      "configurePreset": "macos-clang-avx2",
+      "configuration": "Debug"
+    },
+    {
+      "name": "macos-clang-avx2-release",
+      "displayName": "macOS AVX2 Release",
+      "configurePreset": "macos-clang-avx2",
+      "configuration": "Release"
     }
   ]
 }
