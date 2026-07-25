@@ -13,6 +13,7 @@ macro(add_deglib_test name source)
     add_executable(${name} ${TEST_MAIN} ${source})
     target_include_directories(${name} PRIVATE ${DEGLIB_INCLUDE})
     target_include_directories(${name} PRIVATE ${GTEST_INCLUDE})
+    target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/regression)
     target_sources(${name} PRIVATE ${GTEST_SOURCE})
     target_link_libraries(${name} PRIVATE compile-options)
     set_target_properties(${name} PROPERTIES INTERMEDIATE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/obj/${name}")
@@ -21,5 +22,13 @@ endmacro()
 # Phase 1 Test Target: CPU Features & Build Verification
 add_deglib_test(test_cpu_features src/test_cpu_features.cpp)
 
-# Regression test
-add_deglib_test(test_regression src/test_regression.cpp)
+# Metric Regression tests
+add_deglib_test(test_l2_regression src/regression/metric/test_l2_regression.cpp)
+add_deglib_test(test_innerproduct_regression src/regression/metric/test_innerproduct_regression.cpp)
+add_deglib_test(test_l2_uint8_regression src/regression/metric/test_l2_uint8_regression.cpp)
+
+# Meta target to build all metric regression tests
+add_custom_target(test_regression DEPENDS test_l2_regression test_innerproduct_regression test_l2_uint8_regression)
+
+
+

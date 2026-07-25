@@ -499,8 +499,21 @@ namespace deglib {
                 const unsigned char *a = (const unsigned char *) pVect1v;
                 const unsigned char *b = (const unsigned char *) pVect2v;
 
-             #if defined(USE_AVX2)
-            
+             #if defined(USE_AVX512)
+                __m512i sum512 = _mm512_setzero_si512();
+
+                size_t i = 0;
+                for (; i + 32 <= size; i += 32) {
+                    __m256i v1 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a + i));
+                    __m256i v2 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + i));
+                    __m512i diff = _mm512_sub_epi16(_mm512_cvtepu8_epi16(v1), _mm512_cvtepu8_epi16(v2));
+                    sum512 = _mm512_add_epi32(sum512, _mm512_madd_epi16(diff, diff));
+                }
+                __m256i sum256 = _mm256_add_epi32(_mm512_castsi512_si256(sum512), _mm512_extracti64x4_epi64(sum512, 1));
+                __m128i sum128 = _mm_add_epi32(_mm256_castsi256_si128(sum256), _mm256_extracti128_si256(sum256, 1));
+
+             #elif defined(USE_AVX2)
+
                 __m256i sum256 = _mm256_setzero_si256();
                 for (size_t i = 0; i + 16 <= size; i += 16) {
                     __m128i v1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a + i));
@@ -515,47 +528,7 @@ namespace deglib {
                 }
                 __m128i sum128 = _mm_add_epi32(_mm256_extracti128_si256(sum256, 0), _mm256_extracti128_si256(sum256, 1));
 
-                // __m256i d2_high_vec = _mm256_setzero_si256();
-                // __m256i d2_low_vec = _mm256_setzero_si256();
-                // for (size_t i = 0; i + 32 <= size; i += 32) {
-                //     __m256i a_vec = _mm256_loadu_si256((__m256i const*)(a + i));
-                //     __m256i b_vec = _mm256_loadu_si256((__m256i const*)(b + i));
-
-                //     // Sign extend int8 to int16
-                //     __m256i a_low = _mm256_cvtepu8_epi16(_mm256_castsi256_si128(a_vec));
-                //     __m256i a_high = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(a_vec, 1));
-                //     __m256i b_low = _mm256_cvtepu8_epi16(_mm256_castsi256_si128(b_vec));
-                //     __m256i b_high = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(b_vec, 1));
-
-                //     // Subtract and multiply
-                //     __m256i d_low = _mm256_sub_epi16(a_low, b_low);
-                //     __m256i d_high = _mm256_sub_epi16(a_high, b_high);
-                //     __m256i d2_low_part = _mm256_madd_epi16(d_low, d_low);
-                //     __m256i d2_high_part = _mm256_madd_epi16(d_high, d_high);
-
-                //     // Accumulate into int32 vectors
-                //     d2_low_vec = _mm256_add_epi32(d2_low_vec, d2_low_part);
-                //     d2_high_vec = _mm256_add_epi32(d2_high_vec, d2_high_part);
-                // }
-
-                // // Accumulate the 32-bit integers from `d2_high_vec` and `d2_low_vec`
-                // __m256i d2_vec = _mm256_add_epi32(d2_low_vec, d2_high_vec);
-                // __m128i sum128 = _mm_add_epi32(_mm256_extracti128_si256(d2_vec, 0), _mm256_extracti128_si256(d2_vec, 1));
-   
             #elif defined(USE_SSE42)
-
-                // __m128i sum128 = _mm_setzero_si128();
-                // for (size_t i = 0; i + 8 <= size; i += 8) {
-                //     __m128i v1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a + i));
-                //     __m128i v2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b + i));
-
-                //     __m128i v1_lo = _mm_cvtepu8_epi16(v1);
-                //     __m128i v2_lo = _mm_cvtepu8_epi16(v2);
-
-                //     __m128i diff_lo = _mm_sub_epi16(v1_lo, v2_lo);
-                //     __m128i sqr_lo = _mm_madd_epi16(diff_lo, diff_lo);
-                //     sum128 = _mm_add_epi32(sum128, sqr_lo);
-                // }
 
                 __m128i d2_low_vec = _mm_setzero_si128();
                 __m128i d2_high_vec = _mm_setzero_si128();
@@ -595,7 +568,28 @@ namespace deglib {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
 
-            #if defined(USE_AVX512) || defined(USE_AVX2) || defined(USE_SSE42)
+            #if defined(USE_AVX2)
+                size_t size = *((size_t *) qty_ptr);
+                const unsigned char *a = (const unsigned char *) pVect1v;
+                const unsigned char *b = (const unsigned char *) pVect2v;
+
+                __m256i sum256 = _mm256_setzero_si256();
+                for (size_t i = 0; i + 16 <= size; i += 16) {
+                    __m128i v1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a + i));
+                    __m128i v2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b + i));
+
+                    __m256i v1_ext = _mm256_cvtepu8_epi16(v1);
+                    __m256i v2_ext = _mm256_cvtepu8_epi16(v2);
+
+                    __m256i diff = _mm256_sub_epi16(v1_ext, v2_ext);
+                    __m256i sqr = _mm256_madd_epi16(diff, diff);
+                    sum256 = _mm256_add_epi32(sum256, sqr);
+                }
+                __m128i sum128 = _mm_add_epi32(_mm256_castsi256_si128(sum256), _mm256_extracti128_si256(sum256, 1));
+                alignas(16) int sum_array[4];
+                _mm_store_si128(reinterpret_cast<__m128i*>(sum_array), sum128);
+                return static_cast<float>(sum_array[0] + sum_array[1] + sum_array[2] + sum_array[3]);
+            #elif defined(USE_SSE42)
                 size_t size = *((size_t *) qty_ptr);
                 const unsigned char *a = (const unsigned char *) pVect1v;
                 const unsigned char *b = (const unsigned char *) pVect2v;
