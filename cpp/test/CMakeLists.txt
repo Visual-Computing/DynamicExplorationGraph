@@ -20,3 +20,6 @@ endmacro()
 
 # Phase 1 Test Target: CPU Features & Build Verification
 add_deglib_test(test_cpu_features src/test_cpu_features.cpp)
+
+# Regression test
+add_deglib_test(test_regression src/test_regression.cpp)

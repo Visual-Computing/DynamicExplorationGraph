@@ -55,19 +55,34 @@ namespace deglib {
 
                 const float *last = a + size;
             #if defined(USE_AVX512)
-                __m512 sum512 = _mm512_setzero_ps();
-                while (a < last) {
-                    __m512 v = _mm512_sub_ps(_mm512_loadu_ps(a), _mm512_loadu_ps(b));
-                    sum512 = _mm512_fmadd_ps(v, v, sum512);
+                // Dual accumulator unrolling: two independent FMADD chains
+                // hide the latency of _mm512_fmadd_ps on modern CPUs.
+                __m512 sum512_1 = _mm512_setzero_ps();
+                __m512 sum512_2 = _mm512_setzero_ps();
+                while (a + 31 < last)
+                {
+                    __m512 v1 = _mm512_sub_ps(_mm512_loadu_ps(a), _mm512_loadu_ps(b));
+                    sum512_1 = _mm512_fmadd_ps(v1, v1, sum512_1);
+                    a += 16;
+                    b += 16;
+                    __m512 v2 = _mm512_sub_ps(_mm512_loadu_ps(a), _mm512_loadu_ps(b));
+                    sum512_2 = _mm512_fmadd_ps(v2, v2, sum512_2);
                     a += 16;
                     b += 16;
                 }
-
+                while (a < last)
+                {
+                    __m512 v = _mm512_sub_ps(_mm512_loadu_ps(a), _mm512_loadu_ps(b));
+                    sum512_1 = _mm512_fmadd_ps(v, v, sum512_1);
+                    a += 16;
+                    b += 16;
+                }
+                __m512 sum512 = _mm512_add_ps(sum512_1, sum512_2);
                 __m256 sum256 = _mm256_add_ps(_mm512_extractf32x8_ps(sum512, 0), _mm512_extractf32x8_ps(sum512, 1));
                 __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
             #elif defined(USE_AVX2)
                 
-                // TODO two sum and v's to increase throughput
+                // Two sum acculumator is slower
                 // newer CPUs have reciprocal throughput less than its latency -> performance can be improved if multiple instructions are executed in parallel
                 // https://stackoverflow.com/questions/65818232/improving-performance-of-floating-point-dot-product-of-an-array-with-simd/65827668#65827668
                 __m256 sum256 = _mm256_setzero_ps();
@@ -138,7 +153,7 @@ namespace deglib {
                 size_t size = *((size_t *) qty_ptr);
                 
                 const float *last = a + size;
-            #if defined(USE_AVX2)
+            #if defined(USE_AVX512) || defined(USE_AVX2)
                 __m256 sum256 = _mm256_setzero_ps();
                 __m256 v;
                 while (a < last) {
