@@ -120,49 +120,42 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
 
   template <bool use_max_distance_count = false, bool use_filter = false>
   inline static SEARCHFUNC getSearchFunction(const deglib::FloatSpace& feature_space) {
-    const auto dim = feature_space.dim();
-    const auto metric = feature_space.metric();
+    // Compare the exact function pointer chosen by FloatSpace::select_dist_func
+    // to guarantee this function matches the distance function used by the graph.
+    const auto dist_func = feature_space.get_dist_func();
 
-    if(metric == deglib::Metric::L2) {
-      if (dim % 16 == 0)
-        return deglib::graph::ReadOnlyGraph::searchL2Ext16<use_max_distance_count, use_filter>;
-      else if (dim % 8 == 0)
-        return deglib::graph::ReadOnlyGraph::searchL2Ext8<use_max_distance_count, use_filter>;
-      else if (dim % 4 == 0)
-        return deglib::graph::ReadOnlyGraph::searchL2Ext4<use_max_distance_count, use_filter>;
-      else if (dim > 16)
-        return deglib::graph::ReadOnlyGraph::searchL2Ext16Residual<use_max_distance_count, use_filter>;
-      else if (dim > 4)
-        return deglib::graph::ReadOnlyGraph::searchL2Ext4Residual<use_max_distance_count, use_filter>;
-      else
-        return deglib::graph::ReadOnlyGraph::searchL2<use_max_distance_count, use_filter>;
-    }
-    else if(metric == deglib::Metric::InnerProduct)
-    {
-      if (dim % 16 == 0)
-        return deglib::graph::ReadOnlyGraph::searchInnerProductExt16<use_max_distance_count, use_filter>;
-      else if (dim % 8 == 0)
-        return deglib::graph::ReadOnlyGraph::searchInnerProductExt8<use_max_distance_count, use_filter>;
-      else if (dim % 4 == 0)
-        return deglib::graph::ReadOnlyGraph::searchInnerProductExt4<use_max_distance_count, use_filter>;
-      else if (dim > 16)
-        return deglib::graph::ReadOnlyGraph::searchInnerProductExt16Residual<use_max_distance_count, use_filter>;
-      else if (dim > 4)
-        return deglib::graph::ReadOnlyGraph::searchInnerProductExt4Residual<use_max_distance_count, use_filter>;
-      else
-        return deglib::graph::ReadOnlyGraph::searchInnerProduct<use_max_distance_count, use_filter>;
-    }
-    else if(metric == deglib::Metric::L2_Uint8)
-    {
-      if (dim % 32 == 0)
-        return deglib::graph::ReadOnlyGraph::searchL2Uint8Ext32<use_max_distance_count, use_filter>;
-      else if (dim % 16 == 0)
-        return deglib::graph::ReadOnlyGraph::searchL2Uint8Ext16<use_max_distance_count, use_filter>;
-      else
-        return deglib::graph::ReadOnlyGraph::searchL2Uint8<use_max_distance_count, use_filter>;
-    }
+    if(dist_func == deglib::distances::L2Float16Ext::compare)
+      return deglib::graph::ReadOnlyGraph::searchL2Ext16<use_max_distance_count, use_filter>;
+    else if(dist_func == deglib::distances::L2Float8Ext::compare)
+      return deglib::graph::ReadOnlyGraph::searchL2Ext8<use_max_distance_count, use_filter>;
+    else if(dist_func == deglib::distances::L2Float4Ext::compare)
+      return deglib::graph::ReadOnlyGraph::searchL2Ext4<use_max_distance_count, use_filter>;
+    else if(dist_func == deglib::distances::L2Float16ExtResiduals::compare)
+      return deglib::graph::ReadOnlyGraph::searchL2Ext16Residual<use_max_distance_count, use_filter>;
+    else if(dist_func == deglib::distances::L2Float4ExtResiduals::compare)
+      return deglib::graph::ReadOnlyGraph::searchL2Ext4Residual<use_max_distance_count, use_filter>;
+    else if(dist_func == deglib::distances::L2Float::compare)
+      return deglib::graph::ReadOnlyGraph::searchL2<use_max_distance_count, use_filter>;
+    else if(dist_func == deglib::distances::InnerProductFloat16Ext::compare)
+      return deglib::graph::ReadOnlyGraph::searchInnerProductExt16<use_max_distance_count, use_filter>;
+    else if(dist_func == deglib::distances::InnerProductFloat8Ext::compare)
+      return deglib::graph::ReadOnlyGraph::searchInnerProductExt8<use_max_distance_count, use_filter>;
+    else if(dist_func == deglib::distances::InnerProductFloat4Ext::compare)
+      return deglib::graph::ReadOnlyGraph::searchInnerProductExt4<use_max_distance_count, use_filter>;
+    else if(dist_func == deglib::distances::InnerProductFloat16ExtResiduals::compare)
+      return deglib::graph::ReadOnlyGraph::searchInnerProductExt16Residual<use_max_distance_count, use_filter>;
+    else if(dist_func == deglib::distances::InnerProductFloat4ExtResiduals::compare)
+      return deglib::graph::ReadOnlyGraph::searchInnerProductExt4Residual<use_max_distance_count, use_filter>;
+    else if(dist_func == deglib::distances::InnerProductFloat::compare)
+      return deglib::graph::ReadOnlyGraph::searchInnerProduct<use_max_distance_count, use_filter>;
+    else if(dist_func == deglib::distances::L2Uint8Ext32::compare)
+      return deglib::graph::ReadOnlyGraph::searchL2Uint8Ext32<use_max_distance_count, use_filter>;
+    else if(dist_func == deglib::distances::L2Uint8Ext16::compare)
+      return deglib::graph::ReadOnlyGraph::searchL2Uint8Ext16<use_max_distance_count, use_filter>;
+    else if(dist_func == deglib::distances::L2Uint8::compare)
+      return deglib::graph::ReadOnlyGraph::searchL2Uint8<use_max_distance_count, use_filter>;
 
-    std::fprintf(stderr, "Could not find metric %u for the readonly_graph search method \n", static_cast<int>(metric));
+    std::fprintf(stderr, "Could not find distance function for the readonly_graph search method \n");
     std::perror("");
     std::abort();
   }
@@ -231,50 +224,42 @@ class ReadOnlyGraph : public deglib::search::SearchGraph {
   }
 
   inline static EXPLOREFUNC getExploreFunction(const deglib::FloatSpace& feature_space) {
-    const auto dim = feature_space.dim();
-    const auto metric = feature_space.metric();
+    // Compare the exact function pointer chosen by FloatSpace::select_dist_func
+    // to guarantee this function matches the distance function used by the graph.
+    const auto dist_func = feature_space.get_dist_func();
 
-    if(metric == deglib::Metric::L2) {
-      if (dim % 16 == 0)
-        return deglib::graph::ReadOnlyGraph::exploreL2Ext16;
-      else if (dim % 8 == 0)
-        return deglib::graph::ReadOnlyGraph::exploreL2Ext8;
-      else if (dim % 4 == 0)
-        return deglib::graph::ReadOnlyGraph::exploreL2Ext4;
-      else if (dim > 16)
-        return deglib::graph::ReadOnlyGraph::exploreL2Ext16Residual;
-      else if (dim > 4)
-        return deglib::graph::ReadOnlyGraph::exploreL2Ext4Residual;
-      else
-        return deglib::graph::ReadOnlyGraph::exploreL2;      
-    }
-    else if(metric == deglib::Metric::InnerProduct)
-    {
-      if (dim % 16 == 0)
-        return deglib::graph::ReadOnlyGraph::exploreInnerProductExt16;
-      else if (dim % 8 == 0)
-        return deglib::graph::ReadOnlyGraph::exploreInnerProductExt8;
-      else if (dim % 4 == 0)
-        return deglib::graph::ReadOnlyGraph::exploreInnerProductExt4;
-      else if (dim > 16)
-        return deglib::graph::ReadOnlyGraph::exploreInnerProductExt16Residual;
-      else if (dim > 4)
-        return deglib::graph::ReadOnlyGraph::exploreInnerProductExt4Residual;
-      else
-        return deglib::graph::ReadOnlyGraph::exploreInnerProduct;
-    }
-    else if(metric == deglib::Metric::L2_Uint8)
-    {
+    if(dist_func == deglib::distances::L2Float16Ext::compare)
+      return deglib::graph::ReadOnlyGraph::exploreL2Ext16;
+    else if(dist_func == deglib::distances::L2Float8Ext::compare)
+      return deglib::graph::ReadOnlyGraph::exploreL2Ext8;
+    else if(dist_func == deglib::distances::L2Float4Ext::compare)
+      return deglib::graph::ReadOnlyGraph::exploreL2Ext4;
+    else if(dist_func == deglib::distances::L2Float16ExtResiduals::compare)
+      return deglib::graph::ReadOnlyGraph::exploreL2Ext16Residual;
+    else if(dist_func == deglib::distances::L2Float4ExtResiduals::compare)
+      return deglib::graph::ReadOnlyGraph::exploreL2Ext4Residual;
+    else if(dist_func == deglib::distances::L2Float::compare)
+      return deglib::graph::ReadOnlyGraph::exploreL2;
+    else if(dist_func == deglib::distances::InnerProductFloat16Ext::compare)
+      return deglib::graph::ReadOnlyGraph::exploreInnerProductExt16;
+    else if(dist_func == deglib::distances::InnerProductFloat8Ext::compare)
+      return deglib::graph::ReadOnlyGraph::exploreInnerProductExt8;
+    else if(dist_func == deglib::distances::InnerProductFloat4Ext::compare)
+      return deglib::graph::ReadOnlyGraph::exploreInnerProductExt4;
+    else if(dist_func == deglib::distances::InnerProductFloat16ExtResiduals::compare)
+      return deglib::graph::ReadOnlyGraph::exploreInnerProductExt16Residual;
+    else if(dist_func == deglib::distances::InnerProductFloat4ExtResiduals::compare)
+      return deglib::graph::ReadOnlyGraph::exploreInnerProductExt4Residual;
+    else if(dist_func == deglib::distances::InnerProductFloat::compare)
+      return deglib::graph::ReadOnlyGraph::exploreInnerProduct;
+    else if(dist_func == deglib::distances::L2Uint8Ext32::compare)
+      return deglib::graph::ReadOnlyGraph::exploreL2Uint8Ext32;
+    else if(dist_func == deglib::distances::L2Uint8Ext16::compare)
+      return deglib::graph::ReadOnlyGraph::exploreL2Uint8Ext16;
+    else if(dist_func == deglib::distances::L2Uint8::compare)
+      return deglib::graph::ReadOnlyGraph::exploreL2Uint8;
 
-      if (dim % 32 == 0)
-        return deglib::graph::ReadOnlyGraph::exploreL2Uint8Ext32;
-      else if (dim % 16 == 0)
-        return deglib::graph::ReadOnlyGraph::exploreL2Uint8Ext16;
-      else
-        return deglib::graph::ReadOnlyGraph::exploreL2Uint8;
-    }
-
-    std::fprintf(stderr, "Could not find metric %u for the readonly_graph explore method \n", static_cast<int>(metric));
+    std::fprintf(stderr, "Could not find distance function for the readonly_graph explore method \n");
     std::perror("");
     std::abort();
   }
