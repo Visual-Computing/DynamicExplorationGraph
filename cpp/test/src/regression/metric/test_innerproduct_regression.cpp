@@ -26,7 +26,7 @@ TEST(DeglibRegressionIP, MultiInstructionSetBenchmark)
 #if defined(USE_AVX512)
     run_regression_test("AVX512", deglib::Metric::InnerProduct, 18000.0, 9.0, 0.797, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data);
 #elif defined(USE_AVX2)
-    run_regression_test("AVX2", deglib::Metric::InnerProduct, 18000.0, 9.5, 0.744, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data);
+    run_regression_test("AVX2", deglib::Metric::InnerProduct, 18000.0, 9.2, 0.744, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data);
 #elif defined(USE_SSE42)
     run_regression_test("SSE", deglib::Metric::InnerProduct, 1.0, 60.0, 0.5, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data);
 #else

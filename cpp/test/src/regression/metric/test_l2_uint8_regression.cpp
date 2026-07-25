@@ -24,9 +24,9 @@ TEST(DeglibRegressionL2Uint8, MultiInstructionSetBenchmark)
     auto gt_data = compute_groundtruth_l2_uint8(base_data, base_count, query_data, query_count, dim, 10);
 
 #if defined(USE_AVX512)
-    run_regression_test("AVX512", deglib::Metric::L2_Uint8, 72000.0, 4.9, 0.99, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data);
+    run_regression_test("AVX512", deglib::Metric::L2_Uint8, 72000.0, 4.7, 0.99, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data);
 #elif defined(USE_AVX2)
-    run_regression_test("AVX2", deglib::Metric::L2_Uint8, 69000.0, 4.8, 0.99, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data);
+    run_regression_test("AVX2", deglib::Metric::L2_Uint8, 72000.0, 4.8, 0.99, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data);
 #elif defined(USE_SSE42)
     run_regression_test("SSE", deglib::Metric::L2_Uint8, 1000.0, 60.0, 0.5, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data);
 #else

@@ -1,5 +1,8 @@
 #pragma once
 
+#include <variant>
+#include <concepts>
+
 #include "config.h"
 
 namespace deglib {
@@ -637,101 +640,173 @@ namespace deglib {
         L2_Uint8 = 0x10 | 1
     };
 
+    /**
+     * Function pointer signature for distance comparison functions.
+     */
     template <typename MTYPE>
     using DISTFUNC = MTYPE (*)(const void*, const void*, const void*);
 
+    /**
+     * Concept for distance function implementations that provide a static compare method
+     * compatible with DISTFUNC<float>.
+     */
+    template <typename T>
+    concept DistanceFunction = requires(const void* a, const void* b, const void* param) {
+        { T::compare(a, b, param) } -> std::same_as<float>;
+    } && std::is_convertible_v<decltype(&T::compare), DISTFUNC<float>>;
+
+    /**
+     * Variant containing all supported concrete distance function implementations.
+     */
+    using DistanceVariant = std::variant<
+        deglib::distances::L2Float,
+        deglib::distances::L2Float16Ext,
+        deglib::distances::L2Float8Ext,
+        deglib::distances::L2Float4Ext,
+        deglib::distances::L2Float16ExtResiduals,
+        deglib::distances::L2Float4ExtResiduals,
+        deglib::distances::InnerProductFloat,
+        deglib::distances::InnerProductFloat16Ext,
+        deglib::distances::InnerProductFloat8Ext,
+        deglib::distances::InnerProductFloat4Ext,
+        deglib::distances::InnerProductFloat16ExtResiduals,
+        deglib::distances::InnerProductFloat4ExtResiduals,
+        deglib::distances::L2Uint8,
+        deglib::distances::L2Uint8Ext32,
+        deglib::distances::L2Uint8Ext16
+    >;
+
+    // Compile-time verification that every type in DistanceVariant fulfills the DistanceFunction concept
+    static_assert([]<typename... Ts>(std::variant<Ts...>*) {
+        return (deglib::DistanceFunction<Ts> && ...);
+    }(static_cast<DistanceVariant*>(nullptr)), "All types in DistanceVariant must satisfy DistanceFunction concept");
+
+    /**
+     * Extracts the DISTFUNC<float> function pointer from a DistanceVariant object.
+     */
+    inline DISTFUNC<float> to_dist_func(const DistanceVariant& variant) {
+        return std::visit([](auto&& dist) -> DISTFUNC<float> {
+            using DistType = std::decay_t<decltype(dist)>;
+            static_assert(deglib::DistanceFunction<DistType>, "Selected distance variant must satisfy DistanceFunction concept");
+            return &DistType::compare;
+        }, variant);
+    }
+
+    /**
+     * Represents a metric feature space for vector distance computations.
+     * Manages dimension, metric type, byte size, and distance evaluation logic.
+     */
     class FloatSpace  {
 
-        static DISTFUNC<float> select_dist_func(const size_t dim, const deglib::Metric metric) {
-            DISTFUNC<float> distfunc = deglib::distances::L2Float::compare;
-
+        static DistanceVariant select_dist_variant(const size_t dim, const deglib::Metric metric) {
             if(metric == deglib::Metric::L2) {
                 #if defined(USE_SSE42) || defined(USE_AVX2) || defined(USE_AVX512)
                     if (dim % 16 == 0)
-                        distfunc = deglib::distances::L2Float16Ext::compare;
+                        return deglib::distances::L2Float16Ext{};
                     else if (dim % 8 == 0)
-                        distfunc = deglib::distances::L2Float8Ext::compare;
+                        return deglib::distances::L2Float8Ext{};
                     else if (dim % 4 == 0)
-                        distfunc = deglib::distances::L2Float4Ext::compare;
+                        return deglib::distances::L2Float4Ext{};
                     else if (dim > 16)
-                        distfunc = deglib::distances::L2Float16ExtResiduals::compare;
+                        return deglib::distances::L2Float16ExtResiduals{};
                     else if (dim > 4)
-                        distfunc = deglib::distances::L2Float4ExtResiduals::compare;
+                        return deglib::distances::L2Float4ExtResiduals{};
                 #else
-                    distfunc = deglib::distances::L2Float::compare;
+                    return deglib::distances::L2Float{};
                 #endif
             }
             else if(metric == deglib::Metric::InnerProduct) 
             {
                 #if defined(USE_SSE42) || defined(USE_AVX2) || defined(USE_AVX512)
                     if (dim % 16 == 0)
-                        distfunc = deglib::distances::InnerProductFloat16Ext::compare;
+                        return deglib::distances::InnerProductFloat16Ext{};
                     else if (dim % 8 == 0)
-                        distfunc = deglib::distances::InnerProductFloat8Ext::compare;
+                        return deglib::distances::InnerProductFloat8Ext{};
                     else if (dim % 4 == 0)
-                        distfunc = deglib::distances::InnerProductFloat4Ext::compare;
+                        return deglib::distances::InnerProductFloat4Ext{};
                     else if (dim > 16)
-                        distfunc = deglib::distances::InnerProductFloat16ExtResiduals::compare;
+                        return deglib::distances::InnerProductFloat16ExtResiduals{};
                     else if (dim > 4)
-                        distfunc = deglib::distances::InnerProductFloat4ExtResiduals::compare;
+                        return deglib::distances::InnerProductFloat4ExtResiduals{};
                 #else
-                    distfunc = deglib::distances::InnerProductFloat::compare;
+                    return deglib::distances::InnerProductFloat{};
                 #endif
             } 
             else if(metric == deglib::Metric::L2_Uint8) 
             {
                 #if defined(USE_SSE42) || defined(USE_AVX2) || defined(USE_AVX512)
                     if (dim % 32 == 0)
-                        distfunc = deglib::distances::L2Uint8Ext32::compare;
+                        return deglib::distances::L2Uint8Ext32{};
                     else if (dim % 16 == 0)
-                        distfunc = deglib::distances::L2Uint8Ext16::compare;
+                        return deglib::distances::L2Uint8Ext16{};
                     else
-                        distfunc = deglib::distances::L2Uint8::compare;
+                        return deglib::distances::L2Uint8{};
                 #else
-                    distfunc = deglib::distances::L2Uint8::compare;
+                    return deglib::distances::L2Uint8{};
                 #endif
             }
-
-            // TODO add cosine but convert to a distance = 2 - (cosine + 1)
-            // https://www.kaggle.com/cdabakoglu/word-vectors-cosine-similarity
-            // https://github.com/yahoojapan/NGT/blob/master/lib/NGT/PrimitiveComparator.h#L431
-
-            return distfunc;
+            return deglib::distances::L2Float{};
         }
 
         static size_t calculate_data_size(const size_t dim, const deglib::Metric metric) {
             return (static_cast<int>(metric) & 0x10) ? dim * sizeof(uint8_t) : dim * sizeof(float);
         }
 
-        const DISTFUNC<float> fstdistfunc_;
+        const DistanceVariant dist_variant_;
         const size_t data_size_;
         const size_t dim_;
         const deglib::Metric metric_;
 
     public:
         FloatSpace(const size_t dim, const deglib::Metric metric) 
-            : fstdistfunc_(select_dist_func(dim, metric)), data_size_(calculate_data_size(dim, metric)), dim_(dim), metric_(metric) {
+            : dist_variant_(select_dist_variant(dim, metric)),
+              data_size_(calculate_data_size(dim, metric)),
+              dim_(dim),
+              metric_(metric) {
         }
 
+        /**
+         * Returns the dimension of feature vectors in this space.
+         */
         const size_t dim() const {
             return dim_;
         }
 
+        /**
+         * Returns the metric type used for distance computations.
+         */
         const deglib::Metric metric() const {
             return metric_;
         }
 
-
+        /**
+         * Returns the size in bytes of a single feature vector in this space.
+         */
         const size_t get_data_size() const {
             return data_size_;
         }
 
+        /**
+         * Returns a function pointer to the selected distance comparison function.
+         */
         const DISTFUNC<float> get_dist_func() const {
-            return fstdistfunc_;
+            return to_dist_func(dist_variant_);
         }
 
+        /**
+         * Returns the parameter required by the distance function (pointer to vector dimension).
+         */
         const void *get_dist_func_param() const {
             return &dim_;
+        }
+
+        /**
+         * Executes a visitor function with the concrete compile-time DistanceFunction type
+         * selected for this feature space (static dispatch).
+         */
+        template <typename Visitor>
+        decltype(auto) compute(Visitor&& visitor) const {
+            return std::visit(std::forward<Visitor>(visitor), dist_variant_);
         }
 
         ~FloatSpace() {}
