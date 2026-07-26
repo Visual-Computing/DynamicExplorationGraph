@@ -86,27 +86,34 @@ TEST(DeglibRegressionL2, DistanceRecallAllVariantsSameDataset)
         EXPECT_EQ(recall, 1.0) << "Distance recall between scalar and " << name << " L2 must be exactly 1.0";
     };
 
-    // All variants compile now — test them all regardless of compile-time flags
-    check_variant("L2Float16Ext_AVX512", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_l2::L2Float16Ext_AVX512::compare(a, b, qty); });
-    check_variant("L2Float16Ext_AVX2", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_l2::L2Float16Ext_AVX2::compare(a, b, qty); });
-    check_variant("L2Float16Ext_SSE", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_l2::L2Float16Ext_SSE::compare(a, b, qty); });
-    check_variant("L2Float8Ext_AVX2", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_l2::L2Float8Ext_AVX2::compare(a, b, qty); });
-    check_variant("L2Float8Ext_SSE", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_l2::L2Float8Ext_SSE::compare(a, b, qty); });
-    check_variant("L2Float4Ext_SSE", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_l2::L2Float4Ext_SSE::compare(a, b, qty); });
-    check_variant("L2Float16ExtResiduals_AVX512", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_l2::L2Float16ExtResiduals_AVX512::compare(a, b, qty); });
-    check_variant("L2Float16ExtResiduals_AVX2", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_l2::L2Float16ExtResiduals_AVX2::compare(a, b, qty); });
-    check_variant("L2Float16ExtResiduals_SSE", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_l2::L2Float16ExtResiduals_SSE::compare(a, b, qty); });
-    check_variant("L2Float4ExtResiduals_SSE", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_l2::L2Float4ExtResiduals_SSE::compare(a, b, qty); });
+#if defined(DEGLIB_X86)
+    if (deglib::cpu::has_avx512()) {
+        check_variant("L2Float16Ext_AVX512", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_l2::L2Float16Ext_AVX512::compare(a, b, qty); });
+        check_variant("L2Float16ExtResiduals_AVX512", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_l2::L2Float16ExtResiduals_AVX512::compare(a, b, qty); });
+    }
+    if (deglib::cpu::has_avx2()) {
+        check_variant("L2Float16Ext_AVX2", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_l2::L2Float16Ext_AVX2::compare(a, b, qty); });
+        check_variant("L2Float8Ext_AVX2", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_l2::L2Float8Ext_AVX2::compare(a, b, qty); });
+        check_variant("L2Float16ExtResiduals_AVX2", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_l2::L2Float16ExtResiduals_AVX2::compare(a, b, qty); });
+    }
+    if (deglib::cpu::has_sse42()) {
+        check_variant("L2Float16Ext_SSE", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_l2::L2Float16Ext_SSE::compare(a, b, qty); });
+        check_variant("L2Float8Ext_SSE", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_l2::L2Float8Ext_SSE::compare(a, b, qty); });
+        check_variant("L2Float4Ext_SSE", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_l2::L2Float4Ext_SSE::compare(a, b, qty); });
+        check_variant("L2Float16ExtResiduals_SSE", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_l2::L2Float16ExtResiduals_SSE::compare(a, b, qty); });
+        check_variant("L2Float4ExtResiduals_SSE", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_l2::L2Float4ExtResiduals_SSE::compare(a, b, qty); });
+    }
+#endif
     check_variant("L2Float", [](const void* a, const void* b, const void* qty)
                   { return deglib::distances::fp32_l2::L2Float::compare(a, b, qty); });
 }

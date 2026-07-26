@@ -86,27 +86,34 @@ TEST(DeglibRegressionIP, DistanceRecallAllVariantsSameDataset)
         EXPECT_EQ(recall, 1.0) << "Distance recall between scalar and " << name << " InnerProduct must be exactly 1.0";
     };
 
-    // All variants compile now — test them all regardless of compile-time flags
-    check_variant("InnerProductFloat16Ext_AVX512", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_ip::InnerProductFloat16Ext_AVX512::compare(a, b, qty); });
-    check_variant("InnerProductFloat16Ext_AVX2", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_ip::InnerProductFloat16Ext_AVX2::compare(a, b, qty); });
-    check_variant("InnerProductFloat16Ext_SSE", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_ip::InnerProductFloat16Ext_SSE::compare(a, b, qty); });
-    check_variant("InnerProductFloat8Ext_AVX2", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_ip::InnerProductFloat8Ext_AVX2::compare(a, b, qty); });
-    check_variant("InnerProductFloat8Ext_SSE", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_ip::InnerProductFloat8Ext_SSE::compare(a, b, qty); });
-    check_variant("InnerProductFloat4Ext_SSE", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_ip::InnerProductFloat4Ext_SSE::compare(a, b, qty); });
-    check_variant("InnerProductFloat16ExtResiduals_AVX512", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_ip::InnerProductFloat16ExtResiduals_AVX512::compare(a, b, qty); });
-    check_variant("InnerProductFloat16ExtResiduals_AVX2", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_ip::InnerProductFloat16ExtResiduals_AVX2::compare(a, b, qty); });
-    check_variant("InnerProductFloat16ExtResiduals_SSE", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_ip::InnerProductFloat16ExtResiduals_SSE::compare(a, b, qty); });
-    check_variant("InnerProductFloat4ExtResiduals_SSE", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_ip::InnerProductFloat4ExtResiduals_SSE::compare(a, b, qty); });
+#if defined(DEGLIB_X86)
+    if (deglib::cpu::has_avx512()) {
+        check_variant("InnerProductFloat16Ext_AVX512", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_ip::InnerProductFloat16Ext_AVX512::compare(a, b, qty); });
+        check_variant("InnerProductFloat16ExtResiduals_AVX512", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_ip::InnerProductFloat16ExtResiduals_AVX512::compare(a, b, qty); });
+    }
+    if (deglib::cpu::has_avx2()) {
+        check_variant("InnerProductFloat16Ext_AVX2", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_ip::InnerProductFloat16Ext_AVX2::compare(a, b, qty); });
+        check_variant("InnerProductFloat8Ext_AVX2", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_ip::InnerProductFloat8Ext_AVX2::compare(a, b, qty); });
+        check_variant("InnerProductFloat16ExtResiduals_AVX2", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_ip::InnerProductFloat16ExtResiduals_AVX2::compare(a, b, qty); });
+    }
+    if (deglib::cpu::has_sse42()) {
+        check_variant("InnerProductFloat16Ext_SSE", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_ip::InnerProductFloat16Ext_SSE::compare(a, b, qty); });
+        check_variant("InnerProductFloat8Ext_SSE", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_ip::InnerProductFloat8Ext_SSE::compare(a, b, qty); });
+        check_variant("InnerProductFloat4Ext_SSE", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_ip::InnerProductFloat4Ext_SSE::compare(a, b, qty); });
+        check_variant("InnerProductFloat16ExtResiduals_SSE", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_ip::InnerProductFloat16ExtResiduals_SSE::compare(a, b, qty); });
+        check_variant("InnerProductFloat4ExtResiduals_SSE", [](const void* a, const void* b, const void* qty)
+                      { return deglib::distances::fp32_ip::InnerProductFloat4ExtResiduals_SSE::compare(a, b, qty); });
+    }
+#endif
     check_variant("InnerProductFloat", [](const void* a, const void* b, const void* qty)
                   { return deglib::distances::fp32_ip::InnerProductFloat::compare(a, b, qty); });
 }
