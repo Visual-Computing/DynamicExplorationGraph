@@ -85,10 +85,10 @@ TEST(DeglibRegressionL2Uint8, DistanceRecallAllVariantsSameDataset)
 
 #if defined(USE_AVX512) || defined(USE_AVX2) || defined(USE_SSE42)
     check_variant("L2Uint8Ext32", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::L2Uint8Ext32::compare(a, b, qty); });
+                  { return deglib::distances::uint8_l2::L2Uint8Ext32::compare(a, b, qty); });
     check_variant("L2Uint8Ext16", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::L2Uint8Ext16::compare(a, b, qty); });
+                  { return deglib::distances::uint8_l2::L2Uint8Ext16::compare(a, b, qty); });
 #endif
     check_variant("L2Uint8", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::L2Uint8::compare(a, b, qty); });
+                  { return deglib::distances::uint8_l2::L2Uint8::compare(a, b, qty); });
 }

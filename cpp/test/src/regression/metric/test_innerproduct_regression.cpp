@@ -85,8 +85,8 @@ TEST(DeglibRegressionIP, DistanceRecallAllVariantsSameDataset)
 
 #if defined(USE_AVX512) || defined(USE_AVX2) || defined(USE_SSE42)
     check_variant("InnerProductFloat16Ext", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::InnerProductFloat16Ext::compare(a, b, qty); });
+                  { return deglib::distances::fp32_ip::InnerProductFloat16Ext::compare(a, b, qty); });
 #endif
     check_variant("InnerProductFloat", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::InnerProductFloat::compare(a, b, qty); });
+                  { return deglib::distances::fp32_ip::InnerProductFloat::compare(a, b, qty); });
 }

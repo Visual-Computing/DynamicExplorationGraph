@@ -85,8 +85,8 @@ TEST(DeglibRegressionL2, DistanceRecallAllVariantsSameDataset)
 
 #if defined(USE_AVX512) || defined(USE_AVX2) || defined(USE_SSE42)
     check_variant("L2Float16Ext", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::L2Float16Ext::compare(a, b, qty); });
+                  { return deglib::distances::fp32_l2::L2Float16Ext::compare(a, b, qty); });
 #endif
     check_variant("L2Float", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::L2Float::compare(a, b, qty); });
+                  { return deglib::distances::fp32_l2::L2Float::compare(a, b, qty); });
 }
