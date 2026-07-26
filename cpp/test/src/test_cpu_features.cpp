@@ -3,6 +3,7 @@
 
 #include <deglib.h>
 
+#if defined(DEGLIB_X86)
 #if defined(_MSC_VER)
 #include <intrin.h>
 #else
@@ -17,8 +18,10 @@ static void get_cpuid(int leaf, int subleaf, int cpu_info[4]) {
     __cpuid_count(leaf, subleaf, cpu_info[0], cpu_info[1], cpu_info[2], cpu_info[3]);
 #endif
 }
+#endif
 
 TEST(CPUFeaturesTest, CpuHelperFunctionsMatchRawCPUID) {
+#if defined(DEGLIB_X86)
     int cpu_info[4] = {0};
     get_cpuid(1, 0, cpu_info);
 
@@ -38,4 +41,14 @@ TEST(CPUFeaturesTest, CpuHelperFunctionsMatchRawCPUID) {
     EXPECT_EQ(deglib::cpu::has_avx512(), hw_avx512f) << "deglib::cpu::has_avx512() does not match raw CPUID";
 
     std::cout << "[CPU Test] deglib::cpu helper functions verified against raw CPUID" << std::endl;
+#else
+    // On non-x86 architectures (e.g. ARM), x86 feature flags must all be false
+    EXPECT_FALSE(deglib::cpu::has_sse42());
+    EXPECT_FALSE(deglib::cpu::has_f16c());
+    EXPECT_FALSE(deglib::cpu::has_avx());
+    EXPECT_FALSE(deglib::cpu::has_avx2());
+    EXPECT_FALSE(deglib::cpu::has_avx512());
+
+    std::cout << "[CPU Test] Non-x86 architecture detected: all x86 SIMD features set to false as expected" << std::endl;
+#endif
 }
