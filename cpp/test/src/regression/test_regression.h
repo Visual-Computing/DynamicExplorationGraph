@@ -3,6 +3,8 @@
 #include <deglib.h>
 #include <gtest/gtest.h>
 
+#include "deterministic_normal_distribution.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -13,23 +15,24 @@
 #include <unordered_set>
 #include <vector>
 
-// Compute exact brute-force groundtruth for top-K neighbors using a custom distance evaluator
-template <typename DistFunc>
-inline static std::vector<std::vector<uint32_t>> compute_groundtruth_custom(const std::vector<float>& base, size_t base_count,
-                                                                      const std::vector<float>& query, size_t query_count,
-                                                                      size_t dim, uint32_t k, DistFunc dist_func)
+// Compute exact brute-force groundtruth for top-K neighbors using a custom distance evaluator.
+// Works for both float and uint8_t element types via the ElemType template parameter.
+template <typename ElemType, typename DistFunc>
+inline static std::vector<std::vector<uint32_t>> compute_groundtruth_custom(const std::vector<ElemType>& base, size_t base_count,
+                                                                       const std::vector<ElemType>& query, size_t query_count,
+                                                                       size_t dim, uint32_t k, DistFunc dist_func)
 {
     std::vector<std::vector<uint32_t>> gt(query_count);
 
     for (int q = 0; q < static_cast<int>(query_count); ++q)
     {
         std::vector<std::pair<float, uint32_t>> dists(base_count);
-        const float* q_vec = &query[q * dim];
+        const ElemType* q_vec = &query[q * dim];
 
         for (size_t i = 0; i < base_count; ++i)
         {
-            const float* b_vec = &base[i * dim];
-            float d = dist_func(q_vec, b_vec, dim);
+            const ElemType* b_vec = &base[i * dim];
+            float d = dist_func(q_vec, b_vec, &dim);
             dists[i] = {d, static_cast<uint32_t>(i)};
         }
 
@@ -44,42 +47,36 @@ inline static std::vector<std::vector<uint32_t>> compute_groundtruth_custom(cons
     return gt;
 }
 
-// Compute exact brute-force L2 groundtruth for top-K neighbors
+// Compute exact brute-force L2 groundtruth for top-K neighbors.
+// Uses the scalar L2Float::compare() implementation from deglib to ensure
+// the ground-truth distances match the actual distance computation exactly.
 inline static std::vector<std::vector<uint32_t>> compute_groundtruth_l2(const std::vector<float>& base, size_t base_count,
                                                                  const std::vector<float>& query, size_t query_count,
                                                                  size_t dim, uint32_t k)
 {
-    return compute_groundtruth_custom(base, base_count, query, query_count, dim, k,
-                                      [](const float* q_vec, const float* b_vec, size_t d_dim)
+    return compute_groundtruth_custom<float>(base, base_count, query, query_count, dim, k,
+                                      [](const float* q_vec, const float* b_vec, const void* qty_ptr)
                                       {
-                                          float sum = 0.0f;
-                                          for (size_t d = 0; d < d_dim; ++d)
-                                          {
-                                              float diff = q_vec[d] - b_vec[d];
-                                              sum += diff * diff;
-                                          }
-                                          return sum;
+                                          return deglib::distances::fp32_l2::L2Float::compare(q_vec, b_vec, qty_ptr);
                                       });
 }
 
-// Compute exact brute-force InnerProduct groundtruth for top-K neighbors (distance = 1 - dot_product)
+// Compute exact brute-force InnerProduct groundtruth for top-K neighbors (distance = 1 - dot_product).
+// Uses the scalar InnerProductFloat::compare() implementation from deglib to ensure
+// the ground-truth distances match the actual distance computation exactly.
 inline static std::vector<std::vector<uint32_t>> compute_groundtruth_innerproduct(const std::vector<float>& base, size_t base_count,
-                                                                         const std::vector<float>& query, size_t query_count,
-                                                                         size_t dim, uint32_t k)
+                                                                             const std::vector<float>& query, size_t query_count,
+                                                                             size_t dim, uint32_t k)
 {
-    return compute_groundtruth_custom(base, base_count, query, query_count, dim, k,
-                                      [](const float* q_vec, const float* b_vec, size_t d_dim)
+    return compute_groundtruth_custom<float>(base, base_count, query, query_count, dim, k,
+                                      [](const float* q_vec, const float* b_vec, const void* qty_ptr)
                                       {
-                                          float dot = 0.0f;
-                                          for (size_t d = 0; d < d_dim; ++d)
-                                          {
-                                              dot += q_vec[d] * b_vec[d];
-                                          }
-                                          return 1.0f - dot;
+                                          return deglib::distances::fp32_ip::InnerProductFloat::compare(q_vec, b_vec, qty_ptr);
                                       });
 }
 
 // Generate cross-platform deterministic clustered dataset (Gaussian Mixture with fixed seed)
+// Uses DeterministicNormalDistribution instead of std::normal_distribution for portability.
 inline static void generate_synthetic_clustered_dataset(size_t count, size_t dim, std::vector<float>& base,
                                                  std::vector<float>& query, size_t query_count,
                                                  size_t num_clusters = 20)
@@ -89,8 +86,8 @@ inline static void generate_synthetic_clustered_dataset(size_t count, size_t dim
 
     std::mt19937 rng(42);
     std::vector<std::vector<float>> centroids(num_clusters, std::vector<float>(dim));
-    std::normal_distribution<float> cent_dist(-1000.0f, 1000.0f);
-    std::normal_distribution<float> noise_dist(-100.0f, 100.0f);
+    DeterministicNormalDistribution cent_dist(-1000.0f, 1000.0f);
+    DeterministicNormalDistribution noise_dist(-100.0f, 100.0f);
 
     for (size_t c = 0; c < num_clusters; ++c)
     {
@@ -119,42 +116,22 @@ inline static void generate_synthetic_clustered_dataset(size_t count, size_t dim
     }
 }
 
-// Compute exact brute-force L2 groundtruth for uint8 vectors
+// Compute exact brute-force L2 groundtruth for uint8 vectors.
+// Uses the scalar L2Uint8::compare() from deglib to ensure the ground-truth
+// distances match the actual distance computation exactly.
 inline static std::vector<std::vector<uint32_t>> compute_groundtruth_l2_uint8(const std::vector<uint8_t>& base, size_t base_count,
-                                                                              const std::vector<uint8_t>& query, size_t query_count,
-                                                                              size_t dim, uint32_t k)
+                                                                          const std::vector<uint8_t>& query, size_t query_count,
+                                                                          size_t dim, uint32_t k)
 {
-    std::vector<std::vector<uint32_t>> gt(query_count);
-
-    for (int q = 0; q < static_cast<int>(query_count); ++q)
-    {
-        std::vector<std::pair<float, uint32_t>> dists(base_count);
-        const uint8_t* q_vec = &query[q * dim];
-
-        for (size_t i = 0; i < base_count; ++i)
-        {
-            const uint8_t* b_vec = &base[i * dim];
-            int64_t sum = 0;
-            for (size_t d = 0; d < dim; ++d)
-            {
-                int32_t diff = int32_t(q_vec[d]) - int32_t(b_vec[d]);
-                sum += diff * diff;
-            }
-            dists[i] = {static_cast<float>(sum), static_cast<uint32_t>(i)};
-        }
-
-        std::partial_sort(dists.begin(), dists.begin() + k, dists.end());
-        gt[q].reserve(k);
-        for (uint32_t i = 0; i < k; ++i)
-        {
-            gt[q].push_back(dists[i].second);
-        }
-    }
-
-    return gt;
+    return compute_groundtruth_custom<uint8_t>(base, base_count, query, query_count, dim, k,
+                                      [](const uint8_t* q_vec, const uint8_t* b_vec, const void* qty_ptr)
+                                      {
+                                          return deglib::distances::uint8_l2::L2Uint8::compare(q_vec, b_vec, qty_ptr);
+                                      });
 }
 
 // Generate uint8 clustered synthetic dataset (values clamped to 0..255)
+// Uses DeterministicNormalDistribution instead of std::normal_distribution for portability.
 inline static void generate_synthetic_clustered_dataset_uint8(size_t count, size_t dim, std::vector<uint8_t>& base,
                                                               std::vector<uint8_t>& query, size_t query_count,
                                                               size_t num_clusters = 20)
@@ -164,7 +141,7 @@ inline static void generate_synthetic_clustered_dataset_uint8(size_t count, size
 
     std::mt19937 rng(42);
     std::uniform_int_distribution<int> cent_dist(20, 235);
-    std::normal_distribution<float> noise_dist(-15.0f, 15.0f);
+    DeterministicNormalDistribution noise_dist(-15.0f, 15.0f);
 
     std::vector<std::vector<int>> centroids(num_clusters, std::vector<int>(dim));
     for (size_t c = 0; c < num_clusters; ++c)
@@ -200,11 +177,14 @@ inline static void generate_synthetic_clustered_dataset_uint8(size_t count, size
 
 
 // Universal regression benchmark runner function for any metric
+// num_runs: number of measured search runs (averaged for QPS/recall).
+//           Higher values extend the total search measurement window, reducing QPS noise.
 inline static void run_regression_test(const char* name, deglib::Metric metric, double min_qps, double max_build_secs,
                                 double min_recall, const void* base_data,
                                 const void* query_data, size_t base_count, size_t query_count,
                                 size_t dim, const std::vector<std::vector<uint32_t>>& gt_data,
-                                std::optional<deglib::DistanceVariant> dist_variant = std::nullopt)
+                                std::optional<deglib::DistanceVariant> dist_variant = std::nullopt,
+                                size_t num_runs = 5)
 {
     std::cout << "--- Testing Instruction Variant: " << name << " ---" << std::endl;
 
@@ -266,7 +246,6 @@ inline static void run_regression_test(const char* name, deglib::Metric metric, 
             const std::byte* q_ptr = query_bytes + q * feature_bytes;
             auto result = graph.search(entry_vertex_indices, q_ptr, search_eps, search_k, nullptr, 0);
 
-
             std::unordered_set<uint32_t> gt_set;
             if (!gt_data.empty() && q < gt_data.size())
             {
@@ -299,11 +278,11 @@ inline static void run_regression_test(const char* name, deglib::Metric metric, 
     // Warm-up run
     run_search();
 
-    // Measured average runs
+    // Measured average runs — higher num_runs extends the measurement window,
+    // reducing QPS noise from OS jitter and CPU power-state transitions.
     double total_qps = 0.0;
     double total_recall = 0.0;
-    constexpr int num_runs = 5;
-    for (int r = 0; r < num_runs; ++r)
+    for (size_t r = 0; r < num_runs; ++r)
     {
         auto [qps, recall] = run_search();
         total_qps += qps;

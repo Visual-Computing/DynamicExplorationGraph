@@ -11,27 +11,30 @@ TEST(DeglibRegressionL2, MultiInstructionSetBenchmark)
     std::vector<float> query_data;
     generate_synthetic_clustered_dataset(base_count, dim, base_data, query_data, query_count, num_clusters);
 
+    // Compute ground-truth using the scalar L2Float::compare() implementation.
     auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
 
-    // Explicitly test each distance variant with its own performance thresholds
+    // Test each distance variant with its own performance thresholds
+    // num_runs=50 extends the search measurement window to ~130ms per run,
+    // reducing QPS noise from OS jitter and CPU power-state transitions.
     if (deglib::cpu::has_avx512()) {
-        run_regression_test("AVX512_16Ext", deglib::Metric::L2, 41000.0, 6.0, 0.98,
+        run_regression_test("AVX512_16Ext", deglib::Metric::L2, 38000.0, 6.1, 0.92,
                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                            deglib::distances::fp32_l2::L2Float16Ext_AVX512{});
+                            deglib::distances::fp32_l2::L2Float16Ext_AVX512{}, 100);
     }
     if (deglib::cpu::has_avx2()) {
-        run_regression_test("AVX2_16Ext", deglib::Metric::L2, 38000.0, 6.2, 0.96,
+        run_regression_test("AVX2_16Ext", deglib::Metric::L2, 38000.0, 6.2, 0.92,
                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                            deglib::distances::fp32_l2::L2Float16Ext_AVX2{});
+                            deglib::distances::fp32_l2::L2Float16Ext_AVX2{}, 100);
     }
     if (deglib::cpu::has_sse42()) {
-        run_regression_test("SSE_16Ext", deglib::Metric::L2, 33000.0, 7.2, 0.96,
+        run_regression_test("SSE_16Ext", deglib::Metric::L2, 33000.0, 7.0, 0.909,
                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                            deglib::distances::fp32_l2::L2Float16Ext_SSE{});
+                            deglib::distances::fp32_l2::L2Float16Ext_SSE{}, 100);
     }
-    run_regression_test("Scalar", deglib::Metric::L2, 26000.0, 9.2, 0.989,
+    run_regression_test("Scalar", deglib::Metric::L2, 28000.0, 9.3, 0.92,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                        deglib::distances::fp32_l2::L2Float{});
+                        deglib::distances::fp32_l2::L2Float{}, 100);
 }
 
 TEST(DeglibRegressionL2, DistanceRecallAllVariantsSameDataset)

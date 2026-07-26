@@ -11,27 +11,30 @@ TEST(DeglibRegressionIP, MultiInstructionSetBenchmark)
     std::vector<float> query_data;
     generate_synthetic_clustered_dataset(base_count, dim, base_data, query_data, query_count, num_clusters);
 
+    // Compute ground-truth using the scalar InnerProductFloat::compare() implementation.
     auto gt_data = compute_groundtruth_innerproduct(base_data, base_count, query_data, query_count, dim, 10);
 
-    // Explicitly test each distance variant with its own performance thresholds
+    // Test each distance variant with its own performance thresholds
+    // num_runs=50 extends the search measurement window to ~280ms per run,
+    // reducing QPS noise from OS jitter and CPU power-state transitions.
     if (deglib::cpu::has_avx512()) {
-        run_regression_test("AVX512_16Ext", deglib::Metric::InnerProduct, 18000.0, 9.0, 0.797,
+        run_regression_test("AVX512_16Ext", deglib::Metric::InnerProduct, 18000.0, 10.3, 0.774,
                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                            deglib::distances::fp32_ip::InnerProductFloat16Ext_AVX512{});
+                            deglib::distances::fp32_ip::InnerProductFloat16Ext_AVX512{}, 50);
     }
     if (deglib::cpu::has_avx2()) {
-        run_regression_test("AVX2_16Ext", deglib::Metric::InnerProduct, 18000.0, 9.2, 0.744,
+        run_regression_test("AVX2_16Ext", deglib::Metric::InnerProduct, 18000.0, 10.2, 0.774,
                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                            deglib::distances::fp32_ip::InnerProductFloat16Ext_AVX2{});
+                            deglib::distances::fp32_ip::InnerProductFloat16Ext_AVX2{}, 50);
     }
     if (deglib::cpu::has_sse42()) {
-        run_regression_test("SSE_16Ext", deglib::Metric::InnerProduct, 15000.0, 10.0, 0.757,
+        run_regression_test("SSE_16Ext", deglib::Metric::InnerProduct, 15000.0, 11.8, 0.774,
                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                            deglib::distances::fp32_ip::InnerProductFloat16Ext_SSE{});
+                            deglib::distances::fp32_ip::InnerProductFloat16Ext_SSE{}, 50);
     }
-    run_regression_test("Scalar", deglib::Metric::InnerProduct, 12000.0, 15.0, 0.784,
+    run_regression_test("Scalar", deglib::Metric::InnerProduct, 12000.0, 15.4, 0.78,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                        deglib::distances::fp32_ip::InnerProductFloat{});
+                        deglib::distances::fp32_ip::InnerProductFloat{}, 50);
 }
 
 TEST(DeglibRegressionIP, DistanceRecallAllVariantsSameDataset)

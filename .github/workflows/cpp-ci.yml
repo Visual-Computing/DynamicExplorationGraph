@@ -22,6 +22,12 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Install Build Tools (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        apt-get update
+        apt-get install -y cmake g++
+
     - name: Configure CMake
       run: cmake -B build -S cpp -DFORCE_AVX2=OFF -DENABLE_BENCHMARKS=OFF
 

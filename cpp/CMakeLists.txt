@@ -37,7 +37,7 @@ if (FORCE_AVX2)
 
   # setup compiler flags
   if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(compile-options INTERFACE -O3 -mavx2 -mfma -fpic -w -fopenmp -pthread -ftree-vectorize)
+    target_compile_options(compile-options INTERFACE -O3 -mavx2 -mfma -fpic -w -pthread -ftree-vectorize)
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
 	target_compile_options(compile-options INTERFACE -O2 -fpic)
 
@@ -70,7 +70,7 @@ else()  # Native build
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
     target_compile_options(compile-options INTERFACE -O2 -DNDEBUG -march=native -fpic)
   elseif(MSVC)
-    target_compile_options(compile-options INTERFACE /W4 /EHsc /fp:precise $<$<CONFIG:Release>:/O2>)
+    target_compile_options(compile-options INTERFACE /W4 /EHsc $<$<CONFIG:Release>:/O2>)
     if(SUPPORT_AVX512F)
       target_compile_options(compile-options INTERFACE /arch:AVX512)
     elseif(SUPPORT_AVX2)

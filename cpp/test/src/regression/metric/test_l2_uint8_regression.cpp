@@ -14,24 +14,26 @@ TEST(DeglibRegressionL2Uint8, MultiInstructionSetBenchmark)
     auto gt_data = compute_groundtruth_l2_uint8(base_data, base_count, query_data, query_count, dim, 10);
 
     // Explicitly test each distance variant with its own performance thresholds
+    // num_runs=50 extends the search measurement window to ~70ms per run,
+    // reducing QPS noise from OS jitter and CPU power-state transitions.
     if (deglib::cpu::has_avx512()) {
-        run_regression_test("AVX512_Ext32", deglib::Metric::L2_Uint8, 72000.0, 4.7, 0.99,
+        run_regression_test("AVX512_Ext32", deglib::Metric::L2_Uint8, 73000.0, 4.7, 1,
                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                            deglib::distances::uint8_l2::L2Uint8Ext32_AVX512{});
+                            deglib::distances::uint8_l2::L2Uint8Ext32_AVX512{}, 100);
     }
     if (deglib::cpu::has_avx2()) {
-        run_regression_test("AVX2_Ext32", deglib::Metric::L2_Uint8, 72000.0, 4.8, 0.99,
+        run_regression_test("AVX2_Ext32", deglib::Metric::L2_Uint8, 74000.0, 4.8, 1,
                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                            deglib::distances::uint8_l2::L2Uint8Ext32_AVX2{});
+                            deglib::distances::uint8_l2::L2Uint8Ext32_AVX2{}, 100);
     }
     if (deglib::cpu::has_sse42()) {
-        run_regression_test("SSE_Ext32", deglib::Metric::L2_Uint8, 67000.0, 5.2, 0.5,
+        run_regression_test("SSE_Ext32", deglib::Metric::L2_Uint8, 70000.0, 5.2, 1,
                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                            deglib::distances::uint8_l2::L2Uint8Ext32_SSE{});
+                            deglib::distances::uint8_l2::L2Uint8Ext32_SSE{}, 100);
     }
-    run_regression_test("Scalar", deglib::Metric::L2_Uint8, 56000.0, 5.5, 0.5,
+    run_regression_test("Scalar", deglib::Metric::L2_Uint8, 63000.0, 5.5, 1,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                        deglib::distances::uint8_l2::L2Uint8{});
+                        deglib::distances::uint8_l2::L2Uint8{}, 100);
 }
 
 TEST(DeglibRegressionL2Uint8, DistanceRecallAllVariantsSameDataset)

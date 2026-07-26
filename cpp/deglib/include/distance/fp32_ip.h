@@ -92,15 +92,17 @@ namespace deglib::distances::fp32_ip {
 
                 const float *last = a + size;
 
-                __m256 sum256 = _mm256_setzero_ps();
+                __m256 sum256_1 = _mm256_setzero_ps();
+                __m256 sum256_2 = _mm256_setzero_ps();
                 while (a < last) {
-                    sum256 = _mm256_fmadd_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b), sum256);
+                    sum256_1 = _mm256_fmadd_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b), sum256_1);
                     a += 8;
                     b += 8;        
-                    sum256 = _mm256_fmadd_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b), sum256);
+                    sum256_2 = _mm256_fmadd_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b), sum256_2);
                     a += 8;
                     b += 8;
                 }
+                __m256 sum256 = _mm256_add_ps(sum256_1, sum256_2);
                 __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
                 alignas(32) float f[4];
                 _mm_store_ps(f, sum128);
