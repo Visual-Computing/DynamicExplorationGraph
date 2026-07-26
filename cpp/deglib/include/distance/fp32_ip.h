@@ -45,6 +45,7 @@ namespace deglib::distances::fp32_ip {
             }
         };
 
+#if defined(DEGLIB_X86)
         // -------------------------------------------------------------------
         // InnerProductFloat16Ext — processes 16 floats (64 bytes) per iteration.
         // Separate classes per SIMD width so that compare() has zero
@@ -300,10 +301,12 @@ namespace deglib::distances::fp32_ip {
                 return 1.f - (res + res_tail);
             }
         };
+#endif
 
     using DistanceVariant = std::variant<
-        InnerProductFloat,
-        InnerProductFloat16Ext_AVX512,
+        InnerProductFloat
+#if defined(DEGLIB_X86)
+        , InnerProductFloat16Ext_AVX512,
         InnerProductFloat16Ext_AVX2,
         InnerProductFloat16Ext_SSE,
         InnerProductFloat8Ext_AVX2,
@@ -313,9 +316,11 @@ namespace deglib::distances::fp32_ip {
         InnerProductFloat16ExtResiduals_AVX2,
         InnerProductFloat16ExtResiduals_SSE,
         InnerProductFloat4ExtResiduals_SSE
+#endif
     >;
 
     inline DistanceVariant select_dist(const size_t dim) {
+#if defined(DEGLIB_X86)
             if (deglib::cpu::has_avx512()) {
                 if (dim % 16 == 0)
                     return InnerProductFloat16Ext_AVX512{};
@@ -352,6 +357,7 @@ namespace deglib::distances::fp32_ip {
                 else if (dim > 4)
                     return InnerProductFloat4ExtResiduals_SSE{};
             }
+#endif
             return InnerProductFloat{};
         }
 

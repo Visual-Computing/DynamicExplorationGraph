@@ -41,6 +41,7 @@ namespace deglib::distances::fp32_l2 {
             }
         };
 
+#if defined(DEGLIB_X86)
         // -------------------------------------------------------------------
         // L2Float16Ext — processes 16 floats (64 bytes) per iteration.
         // Separate classes per SIMD width so that compare() has zero
@@ -308,10 +309,12 @@ namespace deglib::distances::fp32_l2 {
                 return (res + res_tail);
             }
         };
+#endif
 
     using DistanceVariant = std::variant<
-        L2Float,
-        L2Float16Ext_AVX512,
+        L2Float
+#if defined(DEGLIB_X86)
+        , L2Float16Ext_AVX512,
         L2Float16Ext_AVX2,
         L2Float16Ext_SSE,
         L2Float8Ext_AVX2,
@@ -321,9 +324,11 @@ namespace deglib::distances::fp32_l2 {
         L2Float16ExtResiduals_AVX2,
         L2Float16ExtResiduals_SSE,
         L2Float4ExtResiduals_SSE
+#endif
     >;
 
     inline DistanceVariant select_dist(const size_t dim) {
+#if defined(DEGLIB_X86)
             if (deglib::cpu::has_avx512()) {
                 if (dim % 16 == 0)
                     return L2Float16Ext_AVX512{};
@@ -360,6 +365,7 @@ namespace deglib::distances::fp32_l2 {
                 else if (dim > 4)
                     return L2Float4ExtResiduals_SSE{};
             }
+#endif
             return L2Float{};
         }
 

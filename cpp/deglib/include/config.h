@@ -2,14 +2,23 @@
 
 #include <cstdint>
 
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#define DEGLIB_X86 1
+#endif
+
 // Always include the x86 intrinsic headers so that SIMD code in the distance
 // headers compiles regardless of the target architecture flags.
+#if defined(DEGLIB_X86)
 #ifdef _MSC_VER
 #include <intrin.h>
 #include <stdexcept>
 #else
 #include <x86intrin.h>
 #include <xmmintrin.h>  // for _mm_prefetch
+#endif
+#if defined(__GNUC__) || defined(__clang__)
+#include <cpuid.h>
+#endif
 #endif
 
 
@@ -27,14 +36,11 @@
 // not inside distance calculation loops.
 // ---------------------------------------------------------------------------
 
-#if defined(__GNUC__) || defined(__clang__)
-#include <cpuid.h>
-#endif
-
 namespace deglib::cpu {
 
     namespace detail {
 
+#if defined(DEGLIB_X86)
         // Query CPUID leaf/subleaf into a 4-element int array.
         // Uses __cpuidex on MSVC and __cpuid_count on GCC/Clang.
         inline void cpuid(int leaf, int subleaf, int cpu_info[4]) {
@@ -44,16 +50,18 @@ namespace deglib::cpu {
             __cpuid_count(leaf, subleaf, cpu_info[0], cpu_info[1], cpu_info[2], cpu_info[3]);
 #endif
         }
+#endif
 
         // Cached hardware feature flags, populated on first call via a function-local static.
         struct CpuFeatures {
-            bool sse42;
-            bool f16c;
-            bool avx;
-            bool avx2;
-            bool avx512f;
+            bool sse42{false};
+            bool f16c{false};
+            bool avx{false};
+            bool avx2{false};
+            bool avx512f{false};
 
             CpuFeatures() {
+#if defined(DEGLIB_X86)
                 int cpu_info[4] = {0};
 
                 // Leaf 1: feature flags in ECX and EDX
@@ -66,6 +74,7 @@ namespace deglib::cpu {
                 cpuid(7, 0, cpu_info);
                 avx2    = (cpu_info[1] & (1 << 5)) != 0;
                 avx512f = (cpu_info[1] & (1 << 16)) != 0;
+#endif
             }
         };
 

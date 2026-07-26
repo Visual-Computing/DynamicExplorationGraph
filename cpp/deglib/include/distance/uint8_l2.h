@@ -27,6 +27,8 @@ namespace deglib::distances::uint8_l2 {
         };
 
         // -------------------------------------------------------------------
+#if defined(DEGLIB_X86)
+        // -------------------------------------------------------------------
         // L2Uint8Ext32 — processes 32 uint8 values (32 bytes) per iteration.
         // Separate classes per SIMD width so that compare() has zero
         // runtime dispatch overhead — select_dist() chooses the class.
@@ -184,17 +186,21 @@ namespace deglib::distances::uint8_l2 {
                 return static_cast<float>(sum_array[0] + sum_array[1] + sum_array[2] + sum_array[3]);
             }
         };
+#endif
 
     using DistanceVariant = std::variant<
-        L2Uint8,
-        L2Uint8Ext32_AVX512,
+        L2Uint8
+#if defined(DEGLIB_X86)
+        , L2Uint8Ext32_AVX512,
         L2Uint8Ext32_AVX2,
         L2Uint8Ext32_SSE,
         L2Uint8Ext16_AVX2,
         L2Uint8Ext16_SSE
+#endif
     >;
 
     inline DistanceVariant select_dist(const size_t dim) {
+#if defined(DEGLIB_X86)
             if (deglib::cpu::has_avx512()) {
                 if (dim % 32 == 0)
                     return L2Uint8Ext32_AVX512{};
@@ -213,6 +219,7 @@ namespace deglib::distances::uint8_l2 {
                 else if (dim % 16 == 0)
                     return L2Uint8Ext16_SSE{};
             }
+#endif
             return L2Uint8{};
         }
 
