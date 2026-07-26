@@ -50,7 +50,7 @@ namespace deglib::distances::fp32_l2 {
 
         class L2Float16Ext_AVX512 {
         public:
-            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) 
+            DEGLIB_TARGET_AVX512 inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) 
             {
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
@@ -248,7 +248,7 @@ namespace deglib::distances::fp32_l2 {
 
         class L2Float16ExtResiduals_AVX512 {
         public:
-            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+            DEGLIB_TARGET_AVX512 inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 size_t qty = *((size_t *) qty_ptr);
 
                 size_t qty16 = qty >> 4 << 4;

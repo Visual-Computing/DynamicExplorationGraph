@@ -54,11 +54,11 @@ namespace deglib::distances::fp32_ip {
 
         class InnerProductFloat16Ext_AVX512 {
         public:
-            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+            DEGLIB_TARGET_AVX512 inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 return 1.f - ip_16ext(pVect1v, pVect2v, qty_ptr);
             }
 
-            inline static float ip_16ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+            DEGLIB_TARGET_AVX512 inline static float ip_16ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
@@ -240,7 +240,7 @@ namespace deglib::distances::fp32_ip {
 
         class InnerProductFloat16ExtResiduals_AVX512 {
         public:
-            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+            DEGLIB_TARGET_AVX512 inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 size_t qty = *((size_t *) qty_ptr);
 
                 size_t qty16 = qty >> 4 << 4;

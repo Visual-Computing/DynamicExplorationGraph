@@ -34,23 +34,31 @@ endif()
 
 if (FORCE_AVX2)
   message(NOTICE "Compiling for avx2, ignoring native optimizations.")
+  include(CheckCXXCompilerFlag)
 
   # setup compiler flags
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(compile-options INTERFACE -O3 -mavx2 -mfma -fpic -w -pthread -ftree-vectorize)
-  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-	target_compile_options(compile-options INTERFACE -O2 -fpic)
-
-    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
-        target_compile_options(compile-options INTERFACE -mavx2 -mfma)
+  if(MSVC)
+    check_cxx_compiler_flag("/arch:AVX2" COMPILER_SUPPORTS_AVX2)
+    if(COMPILER_SUPPORTS_AVX2)
+      target_compile_options(compile-options INTERFACE /O2 /arch:AVX2 /W1 /EHsc)
+    else()
+      target_compile_options(compile-options INTERFACE /O2 /W1 /EHsc)
     endif()
-  elseif(MSVC)
-    target_compile_options(
-		  compile-options
-			  INTERFACE /O2
-						/arch:AVX2
-						/W1
-						/EHsc)
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    check_cxx_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2)
+    if(COMPILER_SUPPORTS_AVX2)
+      target_compile_options(compile-options INTERFACE -O3 -mavx2 -mfma -fpic -w -pthread -ftree-vectorize)
+    else()
+      target_compile_options(compile-options INTERFACE -O3 -fpic -w -pthread -ftree-vectorize)
+    endif()
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    target_compile_options(compile-options INTERFACE -O2 -fpic)
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+      check_cxx_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2)
+      if(COMPILER_SUPPORTS_AVX2)
+        target_compile_options(compile-options INTERFACE -mavx2 -mfma)
+      endif()
+    endif()
   else()
     message(WARNING "Unknown compiler for AVX2 Build: ${CMAKE_CXX_COMPILER_ID}")
   endif()

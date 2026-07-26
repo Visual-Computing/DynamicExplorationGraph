@@ -31,7 +31,7 @@ jobs:
         sudo apt-get install -y cmake g++
 
     - name: Configure CMake
-      run: cmake -B build -S cpp -DFORCE_AVX2=OFF -DENABLE_BENCHMARKS=OFF
+      run: cmake -B build -S cpp -DFORCE_AVX2=ON -DENABLE_BENCHMARKS=OFF
 
     - name: Build
       run: cmake --build build --config Release

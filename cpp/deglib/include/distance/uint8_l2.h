@@ -36,7 +36,7 @@ namespace deglib::distances::uint8_l2 {
 
         class L2Uint8Ext32_AVX512 {
         public:
-            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+            DEGLIB_TARGET_AVX512 inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 size_t size = *((size_t *) qty_ptr);
                 const unsigned char *a = (const unsigned char *) pVect1v;
                 const unsigned char *b = (const unsigned char *) pVect2v;

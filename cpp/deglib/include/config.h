@@ -6,8 +6,14 @@
 #define DEGLIB_X86 1
 #endif
 
-// Always include the x86 intrinsic headers so that SIMD code in the distance
-// headers compiles regardless of the target architecture flags.
+// Target attribute for AVX-512 functions on GCC/Clang
+#if defined(DEGLIB_X86) && (defined(__GNUC__) || defined(__clang__))
+#define DEGLIB_TARGET_AVX512 __attribute__((target("avx512f,avx512dq,fma")))
+#else
+#define DEGLIB_TARGET_AVX512
+#endif
+
+// Architecture intrinsic headers
 #if defined(DEGLIB_X86)
 #ifdef _MSC_VER
 #include <intrin.h>
@@ -15,8 +21,6 @@
 #else
 #include <x86intrin.h>
 #include <xmmintrin.h>  // for _mm_prefetch
-#endif
-#if defined(__GNUC__) || defined(__clang__)
 #include <cpuid.h>
 #endif
 #endif

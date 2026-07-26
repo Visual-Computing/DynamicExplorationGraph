@@ -17,6 +17,7 @@ TEST(DeglibRegressionL2, MultiInstructionSetBenchmark)
     // Test each distance variant with its own performance thresholds
     // num_runs=50 extends the search measurement window to ~130ms per run,
     // reducing QPS noise from OS jitter and CPU power-state transitions.
+#if defined(DEGLIB_X86)
     if (deglib::cpu::has_avx512()) {
         run_regression_test("AVX512_16Ext", deglib::Metric::L2, 38000.0, 6.1, 0.92,
                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
@@ -32,6 +33,7 @@ TEST(DeglibRegressionL2, MultiInstructionSetBenchmark)
                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                             deglib::distances::fp32_l2::L2Float16Ext_SSE{}, 100);
     }
+#endif
     run_regression_test("Scalar", deglib::Metric::L2, 28000.0, 9.3, 0.92,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_l2::L2Float{}, 100);
