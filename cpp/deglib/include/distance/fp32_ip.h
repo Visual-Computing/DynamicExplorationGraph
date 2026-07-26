@@ -45,23 +45,25 @@ namespace deglib::distances::fp32_ip {
             }
         };
 
-        class InnerProductFloat16Ext {
-        public:
+        // -------------------------------------------------------------------
+        // InnerProductFloat16Ext — processes 16 floats (64 bytes) per iteration.
+        // Separate classes per SIMD width so that compare() has zero
+        // runtime dispatch overhead — select_dist() chooses the class.
+        // -------------------------------------------------------------------
 
+        class InnerProductFloat16Ext_AVX512 {
+        public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 return 1.f - ip_16ext(pVect1v, pVect2v, qty_ptr);
             }
 
-            // AVX instructions don't require their memory operands to be aligned, but SSE does
-            // https://stackoverflow.com/questions/52147378/choice-between-aligned-vs-unaligned-x86-simd-instructions
             inline static float ip_16ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-            #if defined(USE_AVX512) || defined(USE_AVX2) || defined(USE_SSE42)
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
 
                 const float *last = a + size;
-            #if defined(USE_AVX512)
+
                 __m512 sum512 = _mm512_setzero_ps();
                 while (a < last) {
                     sum512 = _mm512_fmadd_ps(_mm512_loadu_ps(a), _mm512_loadu_ps(b), sum512);
@@ -71,7 +73,25 @@ namespace deglib::distances::fp32_ip {
 
                 __m256 sum256 = _mm256_add_ps(_mm512_extractf32x8_ps(sum512, 0), _mm512_extractf32x8_ps(sum512, 1));
                 __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
-            #elif defined(USE_AVX2)
+                alignas(32) float f[4];
+                _mm_store_ps(f, sum128);
+                return f[0] + f[1] + f[2] + f[3];
+            }
+        };
+
+        class InnerProductFloat16Ext_AVX2 {
+        public:
+            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                return 1.f - ip_16ext(pVect1v, pVect2v, qty_ptr);
+            }
+
+            inline static float ip_16ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                float *a = (float *) pVect1v;
+                float *b = (float *) pVect2v;
+                size_t size = *((size_t *) qty_ptr);
+
+                const float *last = a + size;
+
                 __m256 sum256 = _mm256_setzero_ps();
                 while (a < last) {
                     sum256 = _mm256_fmadd_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b), sum256);
@@ -82,7 +102,25 @@ namespace deglib::distances::fp32_ip {
                     b += 8;
                 }
                 __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
-            #elif defined(USE_SSE42)
+                alignas(32) float f[4];
+                _mm_store_ps(f, sum128);
+                return f[0] + f[1] + f[2] + f[3];
+            }
+        };
+
+        class InnerProductFloat16Ext_SSE {
+        public:
+            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                return 1.f - ip_16ext(pVect1v, pVect2v, qty_ptr);
+            }
+
+            inline static float ip_16ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                float *a = (float *) pVect1v;
+                float *b = (float *) pVect2v;
+                size_t size = *((size_t *) qty_ptr);
+
+                const float *last = a + size;
+
                 __m128 sum128 = _mm_setzero_ps();
                 while (a < last) {
                     sum128 = _mm_fmadd_ps(_mm_loadu_ps(a), _mm_loadu_ps(b), sum128);
@@ -98,31 +136,29 @@ namespace deglib::distances::fp32_ip {
                     a += 4;
                     b += 4;
                 }
-            #endif 
-
                 alignas(32) float f[4];
                 _mm_store_ps(f, sum128);
                 return f[0] + f[1] + f[2] + f[3];
-            #else
-                return InnerProductFloat::compare(pVect1v, pVect2v, qty_ptr);
-            #endif 
             }
         };
-        
-        class InnerProductFloat8Ext {
+
+        // -------------------------------------------------------------------
+        // InnerProductFloat8Ext — processes 8 floats (32 bytes) per iteration.
+        // -------------------------------------------------------------------
+
+        class InnerProductFloat8Ext_AVX2 {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 return 1.f - ip_8ext(pVect1v, pVect2v, qty_ptr);
             }
 
             inline static float ip_8ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-            #if defined(USE_AVX512) || defined(USE_AVX2) || defined(USE_SSE42)
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
                 
                 const float *last = a + size;
-            #if defined(USE_AVX2)
+
                 __m256 sum256 = _mm256_setzero_ps();
                 while (a < last) {
                     sum256 = _mm256_fmadd_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b), sum256);
@@ -130,7 +166,25 @@ namespace deglib::distances::fp32_ip {
                     b += 8;
                 }
                 __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
-            #elif defined(USE_SSE42)
+                alignas(32) float f[4];
+                _mm_store_ps(f, sum128);
+                return f[0] + f[1] + f[2] + f[3];
+            }
+        };
+
+        class InnerProductFloat8Ext_SSE {
+        public:
+            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                return 1.f - ip_8ext(pVect1v, pVect2v, qty_ptr);
+            }
+
+            inline static float ip_8ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                float *a = (float *) pVect1v;
+                float *b = (float *) pVect2v;
+                size_t size = *((size_t *) qty_ptr);
+
+                const float *last = a + size;
+
                 __m128 sum128 = _mm_setzero_ps();
                 while (a < last) {
                     sum128 = _mm_fmadd_ps(_mm_loadu_ps(a), _mm_loadu_ps(b), sum128);
@@ -140,30 +194,29 @@ namespace deglib::distances::fp32_ip {
                     a += 4;
                     b += 4;
                 }
-            #endif 
-
                 alignas(32) float f[4];
                 _mm_store_ps(f, sum128);
                 return f[0] + f[1] + f[2] + f[3];
-            #else
-                return InnerProductFloat::compare(pVect1v, pVect2v, qty_ptr);
-            #endif 
             }
         };
 
-        class InnerProductFloat4Ext {
+        // -------------------------------------------------------------------
+        // InnerProductFloat4Ext — processes 4 floats (16 bytes) per iteration.
+        // -------------------------------------------------------------------
+
+        class InnerProductFloat4Ext_SSE {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 return 1.f - ip_4ext(pVect1v, pVect2v, qty_ptr);
             }
 
             inline static float ip_4ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-            #if defined(USE_AVX512) || defined(USE_AVX2) || defined(USE_SSE42)
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
                 
                 const float *last = a + size;
+
                 __m128 sum128 = _mm_setzero_ps();
                 while (a < last) {
                     sum128 = _mm_fmadd_ps(_mm_loadu_ps(a), _mm_loadu_ps(b), sum128);
@@ -174,19 +227,21 @@ namespace deglib::distances::fp32_ip {
                 alignas(32) float f[4];
                 _mm_store_ps(f, sum128);
                 return abs(f[0] + f[1] + f[2] + f[3]);
-            #else
-                return InnerProductFloat::compare(pVect1v, pVect2v, qty_ptr);
-            #endif 
             }
         };
 
-        class InnerProductFloat16ExtResiduals {
+        // -------------------------------------------------------------------
+        // Residual classes — process the aligned portion with the SIMD
+        // variant and the remainder with the scalar fallback.
+        // -------------------------------------------------------------------
+
+        class InnerProductFloat16ExtResiduals_AVX512 {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 size_t qty = *((size_t *) qty_ptr);
 
                 size_t qty16 = qty >> 4 << 4;
-                float res = InnerProductFloat16Ext::ip_16ext(pVect1v, pVect2v, &qty16);
+                float res = InnerProductFloat16Ext_AVX512::ip_16ext(pVect1v, pVect2v, &qty16);
                 float *pVect1 = (float *) pVect1v + qty16;
                 float *pVect2 = (float *) pVect2v + qty16;
 
@@ -196,13 +251,45 @@ namespace deglib::distances::fp32_ip {
             }
         };
 
-        class InnerProductFloat4ExtResiduals {
+        class InnerProductFloat16ExtResiduals_AVX2 {
+        public:
+            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                size_t qty = *((size_t *) qty_ptr);
+
+                size_t qty16 = qty >> 4 << 4;
+                float res = InnerProductFloat16Ext_AVX2::ip_16ext(pVect1v, pVect2v, &qty16);
+                float *pVect1 = (float *) pVect1v + qty16;
+                float *pVect2 = (float *) pVect2v + qty16;
+
+                size_t qty_left = qty - qty16;
+                float res_tail = InnerProductFloat::ip_naive(pVect1, pVect2, &qty_left);
+                return 1.f - (res + res_tail);
+            }
+        };
+
+        class InnerProductFloat16ExtResiduals_SSE {
+        public:
+            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                size_t qty = *((size_t *) qty_ptr);
+
+                size_t qty16 = qty >> 4 << 4;
+                float res = InnerProductFloat16Ext_SSE::ip_16ext(pVect1v, pVect2v, &qty16);
+                float *pVect1 = (float *) pVect1v + qty16;
+                float *pVect2 = (float *) pVect2v + qty16;
+
+                size_t qty_left = qty - qty16;
+                float res_tail = InnerProductFloat::ip_naive(pVect1, pVect2, &qty_left);
+                return 1.f - (res + res_tail);
+            }
+        };
+
+        class InnerProductFloat4ExtResiduals_SSE {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 size_t qty = *((size_t *) qty_ptr);
 
                 size_t qty4 = qty >> 2 << 2;
-                float res = InnerProductFloat4Ext::ip_4ext(pVect1v, pVect2v, &qty4);
+                float res = InnerProductFloat4Ext_SSE::ip_4ext(pVect1v, pVect2v, &qty4);
                 float *pVect1 = (float *) pVect1v + qty4;
                 float *pVect2 = (float *) pVect2v + qty4;
 
@@ -214,26 +301,55 @@ namespace deglib::distances::fp32_ip {
 
     using DistanceVariant = std::variant<
         InnerProductFloat,
-        InnerProductFloat16Ext,
-        InnerProductFloat8Ext,
-        InnerProductFloat4Ext,
-        InnerProductFloat16ExtResiduals,
-        InnerProductFloat4ExtResiduals
+        InnerProductFloat16Ext_AVX512,
+        InnerProductFloat16Ext_AVX2,
+        InnerProductFloat16Ext_SSE,
+        InnerProductFloat8Ext_AVX2,
+        InnerProductFloat8Ext_SSE,
+        InnerProductFloat4Ext_SSE,
+        InnerProductFloat16ExtResiduals_AVX512,
+        InnerProductFloat16ExtResiduals_AVX2,
+        InnerProductFloat16ExtResiduals_SSE,
+        InnerProductFloat4ExtResiduals_SSE
     >;
 
     inline DistanceVariant select_dist(const size_t dim) {
-            #if defined(USE_SSE42) || defined(USE_AVX2) || defined(USE_AVX512)
+            if (deglib::cpu::has_avx512()) {
                 if (dim % 16 == 0)
-                    return InnerProductFloat16Ext{};
+                    return InnerProductFloat16Ext_AVX512{};
                 else if (dim % 8 == 0)
-                    return InnerProductFloat8Ext{};
+                    return InnerProductFloat8Ext_AVX2{};
                 else if (dim % 4 == 0)
-                    return InnerProductFloat4Ext{};
+                    return InnerProductFloat4Ext_SSE{};
                 else if (dim > 16)
-                    return InnerProductFloat16ExtResiduals{};
+                    return InnerProductFloat16ExtResiduals_AVX512{};
                 else if (dim > 4)
-                    return InnerProductFloat4ExtResiduals{};
-            #endif
+                    return InnerProductFloat4ExtResiduals_SSE{};
+            }
+            else if (deglib::cpu::has_avx2()) {
+                if (dim % 16 == 0)
+                    return InnerProductFloat16Ext_AVX2{};
+                else if (dim % 8 == 0)
+                    return InnerProductFloat8Ext_AVX2{};
+                else if (dim % 4 == 0)
+                    return InnerProductFloat4Ext_SSE{};
+                else if (dim > 16)
+                    return InnerProductFloat16ExtResiduals_AVX2{};
+                else if (dim > 4)
+                    return InnerProductFloat4ExtResiduals_SSE{};
+            }
+            else if (deglib::cpu::has_sse42()) {
+                if (dim % 16 == 0)
+                    return InnerProductFloat16Ext_SSE{};
+                else if (dim % 8 == 0)
+                    return InnerProductFloat8Ext_SSE{};
+                else if (dim % 4 == 0)
+                    return InnerProductFloat4Ext_SSE{};
+                else if (dim > 16)
+                    return InnerProductFloat16ExtResiduals_SSE{};
+                else if (dim > 4)
+                    return InnerProductFloat4ExtResiduals_SSE{};
+            }
             return InnerProductFloat{};
         }
 

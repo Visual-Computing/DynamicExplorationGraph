@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <random>
 #include <unordered_set>
 #include <vector>
@@ -202,7 +203,8 @@ inline static void generate_synthetic_clustered_dataset_uint8(size_t count, size
 inline static void run_regression_test(const char* name, deglib::Metric metric, double min_qps, double max_build_secs,
                                 double min_recall, const void* base_data,
                                 const void* query_data, size_t base_count, size_t query_count,
-                                size_t dim, const std::vector<std::vector<uint32_t>>& gt_data)
+                                size_t dim, const std::vector<std::vector<uint32_t>>& gt_data,
+                                std::optional<deglib::DistanceVariant> dist_variant = std::nullopt)
 {
     std::cout << "--- Testing Instruction Variant: " << name << " ---" << std::endl;
 
@@ -224,7 +226,9 @@ inline static void run_regression_test(const char* name, deglib::Metric metric, 
     const size_t feature_bytes = (static_cast<int>(metric) & 0x10) ? dim * sizeof(uint8_t) : dim * sizeof(float);
 
     // Build DEG Graph using the specified metric feature space
-    const deglib::FloatSpace feature_space(dim, metric);
+    const deglib::FloatSpace feature_space = dist_variant.has_value()
+        ? deglib::FloatSpace(dim, metric, dist_variant.value())
+        : deglib::FloatSpace(dim, metric);
 
     deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(base_count), edges_per_vertex,
                                           std::move(feature_space));

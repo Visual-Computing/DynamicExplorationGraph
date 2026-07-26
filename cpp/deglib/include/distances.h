@@ -128,6 +128,13 @@ namespace deglib {
               metric_(metric) {
         }
 
+        FloatSpace(const size_t dim, const deglib::Metric metric, DistanceVariant dist_variant)
+            : dist_variant_(std::move(dist_variant)),
+              data_size_(calculate_data_size(dim, metric)),
+              dim_(dim),
+              metric_(metric) {
+        }
+
         /**
          * Returns the dimension of feature vectors in this space.
          */

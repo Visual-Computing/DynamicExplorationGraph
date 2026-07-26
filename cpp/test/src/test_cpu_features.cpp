@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 #include <iostream>
 
+#include <deglib.h>
+
 #if defined(_MSC_VER)
 #include <intrin.h>
 #else
@@ -16,7 +18,7 @@ static void get_cpuid(int leaf, int subleaf, int cpu_info[4]) {
 #endif
 }
 
-TEST(CPUFeaturesTest, QueryHardwareSupport) {
+TEST(CPUFeaturesTest, CpuHelperFunctionsMatchRawCPUID) {
     int cpu_info[4] = {0};
     get_cpuid(1, 0, cpu_info);
 
@@ -28,22 +30,12 @@ TEST(CPUFeaturesTest, QueryHardwareSupport) {
     bool hw_avx2    = (cpu_info[1] & (1 << 5)) != 0;
     bool hw_avx512f = (cpu_info[1] & (1 << 16)) != 0;
 
-    std::cout << "[CPU Test] Hardware Feature Support:" << std::endl;
-    std::cout << "  SSE4.2  : " << (hw_sse42 ? "YES" : "NO") << std::endl;
-    std::cout << "  F16C    : " << (hw_f16c  ? "YES" : "NO") << std::endl;
-    std::cout << "  AVX     : " << (hw_avx   ? "YES" : "NO") << std::endl;
-    std::cout << "  AVX2    : " << (hw_avx2  ? "YES" : "NO") << std::endl;
-    std::cout << "  AVX512F : " << (hw_avx512f ? "YES" : "NO") << std::endl;
+    // Verify deglib::cpu helper functions match raw CPUID queries
+    EXPECT_EQ(deglib::cpu::has_sse42(), hw_sse42) << "deglib::cpu::has_sse42() does not match raw CPUID";
+    EXPECT_EQ(deglib::cpu::has_f16c(),  hw_f16c)  << "deglib::cpu::has_f16c() does not match raw CPUID";
+    EXPECT_EQ(deglib::cpu::has_avx(),    hw_avx)   << "deglib::cpu::has_avx() does not match raw CPUID";
+    EXPECT_EQ(deglib::cpu::has_avx2(),   hw_avx2)  << "deglib::cpu::has_avx2() does not match raw CPUID";
+    EXPECT_EQ(deglib::cpu::has_avx512(), hw_avx512f) << "deglib::cpu::has_avx512() does not match raw CPUID";
 
-#if defined(__AVX512F__)
-    EXPECT_TRUE(hw_avx512f) << "Binary compiled with AVX512F, but CPU hardware does not support it!";
-#endif
-
-#if defined(__AVX2__)
-    EXPECT_TRUE(hw_avx2) << "Binary compiled with AVX2, but CPU hardware does not support it!";
-#endif
-
-#if defined(__AVX__)
-    EXPECT_TRUE(hw_avx) << "Binary compiled with AVX, but CPU hardware does not support it!";
-#endif
+    std::cout << "[CPU Test] deglib::cpu helper functions verified against raw CPUID" << std::endl;
 }

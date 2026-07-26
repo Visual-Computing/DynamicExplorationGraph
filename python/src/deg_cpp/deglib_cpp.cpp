@@ -18,27 +18,15 @@ constexpr int MAX_TRIES_SAME_RESULT_SIZE = 10;
 
 
 bool avx_usable() {
-#if defined(USE_AVX)
-  return true;
-#else
-  return false;
-#endif
+  return deglib::cpu::has_avx();
 }
 
 bool avx512_usable() {
-#if defined(USE_AVX512)
-  return true;
-#else
-  return false;
-#endif
+  return deglib::cpu::has_avx512();
 }
 
 bool sse_usable() {
-#if defined(USE_SSE)
-  return true;
-#else
-  return false;
-#endif
+  return deglib::cpu::has_sse42();
 }
 
 

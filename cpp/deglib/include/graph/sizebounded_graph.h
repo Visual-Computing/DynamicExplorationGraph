@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint> // for types like uint32_t
+#include <cstring>
 #include <limits>
 #include <queue>
 #include <math.h>

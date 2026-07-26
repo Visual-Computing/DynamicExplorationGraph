@@ -2,16 +2,6 @@
 
 TEST(DeglibRegressionL2Uint8, MultiInstructionSetBenchmark)
 {
-#if defined(USE_AVX512)
-    std::cout << "use AVX512  ...\n";
-#elif defined(USE_AVX2)
-    std::cout << "use AVX2  ...\n";
-#elif defined(USE_SSE42)
-    std::cout << "use SSE  ...\n";
-#else
-    std::cout << "use arch  ...\n";
-#endif
-
     size_t dim = 128;
     size_t base_count = 100000;
     size_t query_count = 100;
@@ -23,15 +13,25 @@ TEST(DeglibRegressionL2Uint8, MultiInstructionSetBenchmark)
 
     auto gt_data = compute_groundtruth_l2_uint8(base_data, base_count, query_data, query_count, dim, 10);
 
-#if defined(USE_AVX512)
-    run_regression_test("AVX512", deglib::Metric::L2_Uint8, 72000.0, 4.7, 0.99, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data);
-#elif defined(USE_AVX2)
-    run_regression_test("AVX2", deglib::Metric::L2_Uint8, 72000.0, 4.8, 0.99, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data);
-#elif defined(USE_SSE42)
-    run_regression_test("SSE", deglib::Metric::L2_Uint8, 1000.0, 60.0, 0.5, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data);
-#else
-    run_regression_test("Scalar", deglib::Metric::L2_Uint8, 1000.0, 60.0, 0.5, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data);
-#endif
+    // Explicitly test each distance variant with its own performance thresholds
+    if (deglib::cpu::has_avx512()) {
+        run_regression_test("AVX512_Ext32", deglib::Metric::L2_Uint8, 72000.0, 4.7, 0.99,
+                            base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                            deglib::distances::uint8_l2::L2Uint8Ext32_AVX512{});
+    }
+    if (deglib::cpu::has_avx2()) {
+        run_regression_test("AVX2_Ext32", deglib::Metric::L2_Uint8, 72000.0, 4.8, 0.99,
+                            base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                            deglib::distances::uint8_l2::L2Uint8Ext32_AVX2{});
+    }
+    if (deglib::cpu::has_sse42()) {
+        run_regression_test("SSE_Ext32", deglib::Metric::L2_Uint8, 67000.0, 5.2, 0.5,
+                            base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                            deglib::distances::uint8_l2::L2Uint8Ext32_SSE{});
+    }
+    run_regression_test("Scalar", deglib::Metric::L2_Uint8, 56000.0, 5.5, 0.5,
+                        base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                        deglib::distances::uint8_l2::L2Uint8{});
 }
 
 TEST(DeglibRegressionL2Uint8, DistanceRecallAllVariantsSameDataset)
@@ -83,12 +83,17 @@ TEST(DeglibRegressionL2Uint8, DistanceRecallAllVariantsSameDataset)
         EXPECT_EQ(recall, 1.0) << "Distance recall between scalar and " << name << " L2Uint8 must be exactly 1.0";
     };
 
-#if defined(USE_AVX512) || defined(USE_AVX2) || defined(USE_SSE42)
-    check_variant("L2Uint8Ext32", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::uint8_l2::L2Uint8Ext32::compare(a, b, qty); });
-    check_variant("L2Uint8Ext16", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::uint8_l2::L2Uint8Ext16::compare(a, b, qty); });
-#endif
+    // All variants compile now — test them all regardless of compile-time flags
+    check_variant("L2Uint8Ext32_AVX512", [](const void* a, const void* b, const void* qty)
+                  { return deglib::distances::uint8_l2::L2Uint8Ext32_AVX512::compare(a, b, qty); });
+    check_variant("L2Uint8Ext32_AVX2", [](const void* a, const void* b, const void* qty)
+                  { return deglib::distances::uint8_l2::L2Uint8Ext32_AVX2::compare(a, b, qty); });
+    check_variant("L2Uint8Ext32_SSE", [](const void* a, const void* b, const void* qty)
+                  { return deglib::distances::uint8_l2::L2Uint8Ext32_SSE::compare(a, b, qty); });
+    check_variant("L2Uint8Ext16_AVX2", [](const void* a, const void* b, const void* qty)
+                  { return deglib::distances::uint8_l2::L2Uint8Ext16_AVX2::compare(a, b, qty); });
+    check_variant("L2Uint8Ext16_SSE", [](const void* a, const void* b, const void* qty)
+                  { return deglib::distances::uint8_l2::L2Uint8Ext16_SSE::compare(a, b, qty); });
     check_variant("L2Uint8", [](const void* a, const void* b, const void* qty)
                   { return deglib::distances::uint8_l2::L2Uint8::compare(a, b, qty); });
 }

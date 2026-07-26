@@ -1,61 +1,89 @@
 #pragma once
 
-#ifndef NO_MANUAL_VECTORIZATION
-// Microsoft Visual C++ does not define __SSE__ or __SSE2__ but _M_IX86_FP instead
-// https://docs.microsoft.com/en-us/cpp/preprocessor/predefined-macros?view=msvc-170
-#ifdef _MSC_VER
-#if defined(_M_AMD64) || defined(_M_X64)
-#define __SSE4_1__
-#define __SSE4_2__
-#endif
-#if defined(__AVX2__) || defined(__AVX512F__)
-#ifndef __FMA__
-#define __FMA__
-#endif
-#endif
-#endif
+#include <cstdint>
 
-// Ensure only one SIMD variant is defined at a time
-// AVX-512 implies AVX2 and AVX, but we want exclusive selection
-// MSVC defines __AVX2__ and __AVX512F__ from /arch: flags
-#if defined(__AVX512F__)
-#define USE_AVX512
-#define USE_AVX2
-#define USE_SSE42
-#elif defined(__AVX2__)
-#define USE_AVX2
-#define USE_SSE42
-#elif defined(__SSE4_2__) || defined(__SSE4_1__)
-#define USE_SSE42
-#endif
-
-#if !defined(USE_AVX2) && !defined(USE_SSE42) && !defined(USE_AVX512)
-#ifdef _MSC_VER
-#pragma message("warning: neither SSE4.2, AVX2 nor AVX512 are defined")
-#else
-#warning "neither SSE4.2, AVX2 nor AVX512 are defined"
-#endif
-#elif !defined(__FMA__)
-#ifdef _MSC_VER
-#pragma message("warning: no FMA support or compile flag is missing")
-#else
-#warning "no FMA support or compile flag is missing"
-#endif
-#endif
-
-// #undef USE_AVX512  // for testing arm processors
-// #undef USE_AVX2
-// #undef USE_SSE42
-#endif
-
-// TODO switch to only #include <immintrin.h>
-// https://stackoverflow.com/questions/11228855/header-files-for-x86-intrin
-#if defined(USE_AVX2) || defined(USE_SSE42) || defined(USE_AVX512)
+// Always include the x86 intrinsic headers so that SIMD code in the distance
+// headers compiles regardless of the target architecture flags.
 #ifdef _MSC_VER
 #include <intrin.h>
-
 #include <stdexcept>
 #else
 #include <x86intrin.h>
+#include <xmmintrin.h>  // for _mm_prefetch
 #endif
+
+
+// ---------------------------------------------------------------------------
+// Runtime CPU feature detection
+// ---------------------------------------------------------------------------
+// Uses CPUID (via __cpuidex on MSVC, __cpuid_count on GCC/Clang) to detect
+// SSE4.2, F16C, AVX, AVX2, and AVX-512F at runtime. Results are cached in a
+// function-local static so the CPUID query runs only once.
+//
+// The distance headers compile all SIMD code paths unconditionally (the
+// intrinsic headers are always included below). At runtime, select_dist()
+// uses deglib::cpu::has_*() to dispatch to the best variant. This means there
+// is zero loop overhead — capability checks happen during variant selection,
+// not inside distance calculation loops.
+// ---------------------------------------------------------------------------
+
+#if defined(__GNUC__) || defined(__clang__)
+#include <cpuid.h>
 #endif
+
+namespace deglib::cpu {
+
+    namespace detail {
+
+        // Query CPUID leaf/subleaf into a 4-element int array.
+        // Uses __cpuidex on MSVC and __cpuid_count on GCC/Clang.
+        inline void cpuid(int leaf, int subleaf, int cpu_info[4]) {
+#if defined(_MSC_VER)
+            __cpuidex(cpu_info, leaf, subleaf);
+#else
+            __cpuid_count(leaf, subleaf, cpu_info[0], cpu_info[1], cpu_info[2], cpu_info[3]);
+#endif
+        }
+
+        // Cached hardware feature flags, populated on first call via a function-local static.
+        struct CpuFeatures {
+            bool sse42;
+            bool f16c;
+            bool avx;
+            bool avx2;
+            bool avx512f;
+
+            CpuFeatures() {
+                int cpu_info[4] = {0};
+
+                // Leaf 1: feature flags in ECX and EDX
+                cpuid(1, 0, cpu_info);
+                sse42 = (cpu_info[2] & (1 << 20)) != 0;
+                f16c  = (cpu_info[2] & (1 << 29)) != 0;
+                avx   = (cpu_info[2] & (1 << 28)) != 0;
+
+                // Leaf 7, subleaf 0: extended feature flags in EBX and ECX
+                cpuid(7, 0, cpu_info);
+                avx2    = (cpu_info[1] & (1 << 5)) != 0;
+                avx512f = (cpu_info[1] & (1 << 16)) != 0;
+            }
+        };
+
+        inline const CpuFeatures& features() {
+            static CpuFeatures cached;
+            return cached;
+        }
+
+    } // namespace detail
+
+    // Runtime CPU feature detection — safe to call from any translation unit.
+    // These checks are performed once (cached) and have zero cost per call thereafter.
+
+    inline bool has_sse42()  { return detail::features().sse42; }
+    inline bool has_f16c()   { return detail::features().f16c; }
+    inline bool has_avx()    { return detail::features().avx; }
+    inline bool has_avx2()   { return detail::features().avx2; }
+    inline bool has_avx512() { return detail::features().avx512f; }
+
+} // namespace deglib::cpu
+

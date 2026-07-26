@@ -26,16 +26,19 @@ namespace deglib::distances::uint8_l2 {
             }
         };
 
-        class L2Uint8Ext32 {
+        // -------------------------------------------------------------------
+        // L2Uint8Ext32 — processes 32 uint8 values (32 bytes) per iteration.
+        // Separate classes per SIMD width so that compare() has zero
+        // runtime dispatch overhead — select_dist() chooses the class.
+        // -------------------------------------------------------------------
+
+        class L2Uint8Ext32_AVX512 {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-
-            #if defined(USE_AVX512) || defined(USE_AVX2) || defined(USE_SSE42)
                 size_t size = *((size_t *) qty_ptr);
                 const unsigned char *a = (const unsigned char *) pVect1v;
                 const unsigned char *b = (const unsigned char *) pVect2v;
 
-             #if defined(USE_AVX512)
                 __m512i sum512 = _mm512_setzero_si512();
 
                 size_t i = 0;
@@ -48,7 +51,18 @@ namespace deglib::distances::uint8_l2 {
                 __m256i sum256 = _mm256_add_epi32(_mm512_castsi512_si256(sum512), _mm512_extracti64x4_epi64(sum512, 1));
                 __m128i sum128 = _mm_add_epi32(_mm256_castsi256_si128(sum256), _mm256_extracti128_si256(sum256, 1));
 
-             #elif defined(USE_AVX2)
+                alignas(16) int sum_array[4];
+                _mm_store_si128(reinterpret_cast<__m128i*>(sum_array), sum128);
+                return static_cast<float>(sum_array[0] + sum_array[1] + sum_array[2] + sum_array[3]);
+            }
+        };
+
+        class L2Uint8Ext32_AVX2 {
+        public:
+            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                size_t size = *((size_t *) qty_ptr);
+                const unsigned char *a = (const unsigned char *) pVect1v;
+                const unsigned char *b = (const unsigned char *) pVect2v;
 
                 __m256i sum256 = _mm256_setzero_si256();
                 for (size_t i = 0; i + 16 <= size; i += 16) {
@@ -64,7 +78,18 @@ namespace deglib::distances::uint8_l2 {
                 }
                 __m128i sum128 = _mm_add_epi32(_mm256_extracti128_si256(sum256, 0), _mm256_extracti128_si256(sum256, 1));
 
-            #elif defined(USE_SSE42)
+                alignas(16) int sum_array[4];
+                _mm_store_si128(reinterpret_cast<__m128i*>(sum_array), sum128);
+                return static_cast<float>(sum_array[0] + sum_array[1] + sum_array[2] + sum_array[3]);
+            }
+        };
+
+        class L2Uint8Ext32_SSE {
+        public:
+            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                size_t size = *((size_t *) qty_ptr);
+                const unsigned char *a = (const unsigned char *) pVect1v;
+                const unsigned char *b = (const unsigned char *) pVect2v;
 
                 __m128i d2_low_vec = _mm_setzero_si128();
                 __m128i d2_high_vec = _mm_setzero_si128();
@@ -72,7 +97,7 @@ namespace deglib::distances::uint8_l2 {
                     __m128i v1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a + i));
                     __m128i v2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b + i));
                     
-                     // Sign extend int8 to int16
+                    // Sign extend int8 to int16
                     __m128i v1_lo = _mm_cvtepu8_epi16(v1);
                     __m128i v1_hi = _mm_cvtepu8_epi16(_mm_srli_si128(v1, 8));
                     __m128i v2_lo = _mm_cvtepu8_epi16(v2);
@@ -88,23 +113,20 @@ namespace deglib::distances::uint8_l2 {
                     d2_high_vec = _mm_add_epi32(d2_high_vec, sqr_hi);
                 }
                 __m128i sum128 = _mm_add_epi32(d2_low_vec, d2_high_vec);
-            #endif 
 
                 alignas(16) int sum_array[4];
                 _mm_store_si128(reinterpret_cast<__m128i*>(sum_array), sum128);
                 return static_cast<float>(sum_array[0] + sum_array[1] + sum_array[2] + sum_array[3]);
-
-            #else
-                return L2Uint8::compare(pVect1v, pVect2v, qty_ptr);
-            #endif 
             }
         };
 
-        class L2Uint8Ext16 {
+        // -------------------------------------------------------------------
+        // L2Uint8Ext16 — processes 16 uint8 values (16 bytes) per iteration.
+        // -------------------------------------------------------------------
+
+        class L2Uint8Ext16_AVX2 {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-
-            #if defined(USE_AVX2)
                 size_t size = *((size_t *) qty_ptr);
                 const unsigned char *a = (const unsigned char *) pVect1v;
                 const unsigned char *b = (const unsigned char *) pVect2v;
@@ -125,11 +147,16 @@ namespace deglib::distances::uint8_l2 {
                 alignas(16) int sum_array[4];
                 _mm_store_si128(reinterpret_cast<__m128i*>(sum_array), sum128);
                 return static_cast<float>(sum_array[0] + sum_array[1] + sum_array[2] + sum_array[3]);
-            #elif defined(USE_SSE42)
+            }
+        };
+
+        class L2Uint8Ext16_SSE {
+        public:
+            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 size_t size = *((size_t *) qty_ptr);
                 const unsigned char *a = (const unsigned char *) pVect1v;
                 const unsigned char *b = (const unsigned char *) pVect2v;
-                
+
                 __m128i d2_low_vec = _mm_setzero_si128();
                 __m128i d2_high_vec = _mm_setzero_si128();
                 for (size_t i = 0; i + 16 <= size; i += 16) {
@@ -155,25 +182,37 @@ namespace deglib::distances::uint8_l2 {
                 alignas(16) int sum_array[4];
                 _mm_store_si128(reinterpret_cast<__m128i*>(sum_array), sum128);
                 return static_cast<float>(sum_array[0] + sum_array[1] + sum_array[2] + sum_array[3]);
-            #else
-                return L2Uint8::compare(pVect1v, pVect2v, qty_ptr);
-            #endif 
             }
         };
 
     using DistanceVariant = std::variant<
         L2Uint8,
-        L2Uint8Ext32,
-        L2Uint8Ext16
+        L2Uint8Ext32_AVX512,
+        L2Uint8Ext32_AVX2,
+        L2Uint8Ext32_SSE,
+        L2Uint8Ext16_AVX2,
+        L2Uint8Ext16_SSE
     >;
 
     inline DistanceVariant select_dist(const size_t dim) {
-            #if defined(USE_SSE42) || defined(USE_AVX2) || defined(USE_AVX512)
+            if (deglib::cpu::has_avx512()) {
                 if (dim % 32 == 0)
-                    return L2Uint8Ext32{};
+                    return L2Uint8Ext32_AVX512{};
                 else if (dim % 16 == 0)
-                    return L2Uint8Ext16{};
-            #endif
+                    return L2Uint8Ext16_AVX2{};
+            }
+            else if (deglib::cpu::has_avx2()) {
+                if (dim % 32 == 0)
+                    return L2Uint8Ext32_AVX2{};
+                else if (dim % 16 == 0)
+                    return L2Uint8Ext16_AVX2{};
+            }
+            else if (deglib::cpu::has_sse42()) {
+                if (dim % 32 == 0)
+                    return L2Uint8Ext32_SSE{};
+                else if (dim % 16 == 0)
+                    return L2Uint8Ext16_SSE{};
+            }
             return L2Uint8{};
         }
 

@@ -2,16 +2,6 @@
 
 TEST(DeglibRegressionL2, MultiInstructionSetBenchmark)
 {
-#if defined(USE_AVX512)
-    std::cout << "use AVX512  ...\n";
-#elif defined(USE_AVX2)
-    std::cout << "use AVX2  ...\n";
-#elif defined(USE_SSE42)
-    std::cout << "use SSE  ...\n";
-#else
-    std::cout << "use arch  ...\n";
-#endif
-
     size_t dim = 128;
     size_t base_count = 100000;
     size_t query_count = 100;
@@ -23,15 +13,25 @@ TEST(DeglibRegressionL2, MultiInstructionSetBenchmark)
 
     auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
 
-#if defined(USE_AVX512)
-    run_regression_test("AVX512", deglib::Metric::L2, 41000.0, 6.0, 0.98, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data);
-#elif defined(USE_AVX2)
-    run_regression_test("AVX2", deglib::Metric::L2, 38000.0, 6.2, 0.96, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data);
-#elif defined(USE_SSE42)
-    run_regression_test("SSE", deglib::Metric::L2, 33000.0, 7.2, 0.96, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data);
-#else
-    run_regression_test("Scalar", deglib::Metric::L2, 26000.0, 9.2, 0.989, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data);
-#endif
+    // Explicitly test each distance variant with its own performance thresholds
+    if (deglib::cpu::has_avx512()) {
+        run_regression_test("AVX512_16Ext", deglib::Metric::L2, 41000.0, 6.0, 0.98,
+                            base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                            deglib::distances::fp32_l2::L2Float16Ext_AVX512{});
+    }
+    if (deglib::cpu::has_avx2()) {
+        run_regression_test("AVX2_16Ext", deglib::Metric::L2, 38000.0, 6.2, 0.96,
+                            base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                            deglib::distances::fp32_l2::L2Float16Ext_AVX2{});
+    }
+    if (deglib::cpu::has_sse42()) {
+        run_regression_test("SSE_16Ext", deglib::Metric::L2, 33000.0, 7.2, 0.96,
+                            base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                            deglib::distances::fp32_l2::L2Float16Ext_SSE{});
+    }
+    run_regression_test("Scalar", deglib::Metric::L2, 26000.0, 9.2, 0.989,
+                        base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                        deglib::distances::fp32_l2::L2Float{});
 }
 
 TEST(DeglibRegressionL2, DistanceRecallAllVariantsSameDataset)
@@ -83,10 +83,27 @@ TEST(DeglibRegressionL2, DistanceRecallAllVariantsSameDataset)
         EXPECT_EQ(recall, 1.0) << "Distance recall between scalar and " << name << " L2 must be exactly 1.0";
     };
 
-#if defined(USE_AVX512) || defined(USE_AVX2) || defined(USE_SSE42)
-    check_variant("L2Float16Ext", [](const void* a, const void* b, const void* qty)
-                  { return deglib::distances::fp32_l2::L2Float16Ext::compare(a, b, qty); });
-#endif
+    // All variants compile now — test them all regardless of compile-time flags
+    check_variant("L2Float16Ext_AVX512", [](const void* a, const void* b, const void* qty)
+                  { return deglib::distances::fp32_l2::L2Float16Ext_AVX512::compare(a, b, qty); });
+    check_variant("L2Float16Ext_AVX2", [](const void* a, const void* b, const void* qty)
+                  { return deglib::distances::fp32_l2::L2Float16Ext_AVX2::compare(a, b, qty); });
+    check_variant("L2Float16Ext_SSE", [](const void* a, const void* b, const void* qty)
+                  { return deglib::distances::fp32_l2::L2Float16Ext_SSE::compare(a, b, qty); });
+    check_variant("L2Float8Ext_AVX2", [](const void* a, const void* b, const void* qty)
+                  { return deglib::distances::fp32_l2::L2Float8Ext_AVX2::compare(a, b, qty); });
+    check_variant("L2Float8Ext_SSE", [](const void* a, const void* b, const void* qty)
+                  { return deglib::distances::fp32_l2::L2Float8Ext_SSE::compare(a, b, qty); });
+    check_variant("L2Float4Ext_SSE", [](const void* a, const void* b, const void* qty)
+                  { return deglib::distances::fp32_l2::L2Float4Ext_SSE::compare(a, b, qty); });
+    check_variant("L2Float16ExtResiduals_AVX512", [](const void* a, const void* b, const void* qty)
+                  { return deglib::distances::fp32_l2::L2Float16ExtResiduals_AVX512::compare(a, b, qty); });
+    check_variant("L2Float16ExtResiduals_AVX2", [](const void* a, const void* b, const void* qty)
+                  { return deglib::distances::fp32_l2::L2Float16ExtResiduals_AVX2::compare(a, b, qty); });
+    check_variant("L2Float16ExtResiduals_SSE", [](const void* a, const void* b, const void* qty)
+                  { return deglib::distances::fp32_l2::L2Float16ExtResiduals_SSE::compare(a, b, qty); });
+    check_variant("L2Float4ExtResiduals_SSE", [](const void* a, const void* b, const void* qty)
+                  { return deglib::distances::fp32_l2::L2Float4ExtResiduals_SSE::compare(a, b, qty); });
     check_variant("L2Float", [](const void* a, const void* b, const void* qty)
                   { return deglib::distances::fp32_l2::L2Float::compare(a, b, qty); });
 }
