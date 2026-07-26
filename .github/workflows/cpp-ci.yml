@@ -1,0 +1,32 @@
+name: C++ CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    env:
+      SKIP_PERFORMANCE_TESTS: "1"
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure CMake
+      run: cmake -B build -S cpp -DFORCE_AVX2=OFF -DENABLE_BENCHMARKS=OFF
+
+    - name: Build
+      run: cmake --build build --config Release
+
+    - name: Run Tests
+      run: ctest --test-dir build --output-on-failure -C Release

@@ -86,6 +86,7 @@ endif()
 message("C++ compiler flags: ${CMAKE_CXX_FLAGS}")
 message("C++ compiler flags release: ${CMAKE_CXX_FLAGS_RELEASE}")
 
+enable_testing()
 add_subdirectory(deglib)
 add_subdirectory(test)
 

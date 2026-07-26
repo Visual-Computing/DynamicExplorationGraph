@@ -17,6 +17,7 @@ macro(add_deglib_test name source)
     target_sources(${name} PRIVATE ${GTEST_SOURCE})
     target_link_libraries(${name} PRIVATE compile-options)
     set_target_properties(${name} PROPERTIES INTERMEDIATE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/obj/${name}")
+    add_test(NAME ${name} COMMAND ${name})
 endmacro()
 
 # Phase 1 Test Target: CPU Features & Build Verification

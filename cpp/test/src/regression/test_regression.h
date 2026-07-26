@@ -311,6 +311,8 @@ inline static void run_regression_test(const char* name, deglib::Metric metric, 
     std::cout << "[" << name << "] build_secs=" << build_secs << "  qps=" << qps << "  recall=" << recall << std::endl;
 
     EXPECT_GE(recall + 1e-5, min_recall) << name << ": Recall@10 dropped below threshold";
-    EXPECT_GT(qps, min_qps) << name << ": Search QPS dropped below threshold";
-    EXPECT_LE(build_secs, max_build_secs) << name << ": Build time exceeded threshold";
+    if (std::getenv("SKIP_PERFORMANCE_TESTS") == nullptr) {
+        EXPECT_GT(qps, min_qps) << name << ": Search QPS dropped below threshold";
+        EXPECT_LE(build_secs, max_build_secs) << name << ": Build time exceeded threshold";
+    }
 }
