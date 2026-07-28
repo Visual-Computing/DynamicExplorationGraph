@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include "deterministic_normal_distribution.h"
+#include "deterministic_uniform_int_distribution.h"
 
 #include <algorithm>
 #include <chrono>
@@ -140,7 +141,7 @@ inline static void generate_synthetic_clustered_dataset_uint8(size_t count, size
     query.resize(query_count * dim);
 
     std::mt19937 rng(42);
-    std::uniform_int_distribution<int> cent_dist(20, 235);
+    DeterministicUniformIntDistribution<int> cent_dist(20, 235);
     DeterministicNormalDistribution noise_dist(-15.0f, 15.0f);
 
     std::vector<std::vector<int>> centroids(num_clusters, std::vector<int>(dim));

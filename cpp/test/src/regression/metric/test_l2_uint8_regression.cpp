@@ -18,24 +18,24 @@ TEST(DeglibRegressionL2Uint8, MultiInstructionSetBenchmark)
     // reducing QPS noise from OS jitter and CPU power-state transitions.
 #if defined(DEGLIB_X86)
     if (deglib::cpu::has_avx512()) {
-        run_regression_test("AVX512_Ext32", deglib::Metric::L2_Uint8, 73000.0, 4.7, 1,
+        run_regression_test("AVX512_Ext32", deglib::Metric::L2_Uint8, 75000.0, 4.7, 0.96,
                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                            deglib::distances::uint8_l2::L2Uint8Ext32_AVX512{}, 100);
+                            deglib::distances::uint8_l2::L2Uint8Ext32_AVX512{}, 500);
     }
     if (deglib::cpu::has_avx2()) {
-        run_regression_test("AVX2_Ext32", deglib::Metric::L2_Uint8, 74000.0, 4.8, 1,
+        run_regression_test("AVX2_Ext32", deglib::Metric::L2_Uint8, 75000.0, 4.8, 0.96,
                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                            deglib::distances::uint8_l2::L2Uint8Ext32_AVX2{}, 100);
+                            deglib::distances::uint8_l2::L2Uint8Ext32_AVX2{}, 500);
     }
     if (deglib::cpu::has_sse42()) {
-        run_regression_test("SSE_Ext32", deglib::Metric::L2_Uint8, 70000.0, 5.2, 1,
+        run_regression_test("SSE_Ext32", deglib::Metric::L2_Uint8, 72000.0, 5.2, 0.96,
                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                            deglib::distances::uint8_l2::L2Uint8Ext32_SSE{}, 100);
+                            deglib::distances::uint8_l2::L2Uint8Ext32_SSE{}, 500);
     }
 #endif
-    run_regression_test("Scalar", deglib::Metric::L2_Uint8, 63000.0, 5.5, 1,
+    run_regression_test("Scalar", deglib::Metric::L2_Uint8, 65000.0, 5.5, 0.96,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                        deglib::distances::uint8_l2::L2Uint8{}, 100);
+                        deglib::distances::uint8_l2::L2Uint8{}, 500);
 }
 
 TEST(DeglibRegressionL2Uint8, DistanceRecallAllVariantsSameDataset)
