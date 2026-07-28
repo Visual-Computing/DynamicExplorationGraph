@@ -14,6 +14,9 @@ namespace deglib::distances::fp32_ip {
                 return 1.f - ip_naive(pVect1v, pVect2v, qty_ptr);
             }
 
+#if defined(__GNUC__) || defined(__clang__)
+            __attribute__((optimize("no-tree-vectorize")))
+#endif
             inline static float ip_naive(const void *pVect1v, const void *pVect2v, const void *qty_ptr) 
             {
                 float *a = (float *) pVect1v;
@@ -31,7 +34,7 @@ namespace deglib::distances::fp32_ip {
                     dot1 = a[1] * b[1];
                     dot2 = a[2] * b[2];
                     dot3 = a[3] * b[3];
-                    result += dot0 + dot1 + dot2 + dot3;
+                    result = (((result + dot0) + dot1) + dot2) + dot3;
                     a += 4;
                     b += 4;
                 }
@@ -126,16 +129,16 @@ namespace deglib::distances::fp32_ip {
 
                 __m128 sum128 = _mm_setzero_ps();
                 while (a < last) {
-                    sum128 = _mm_fmadd_ps(_mm_loadu_ps(a), _mm_loadu_ps(b), sum128);
+                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(_mm_loadu_ps(a), _mm_loadu_ps(b)));
                     a += 4;
                     b += 4;
-                    sum128 = _mm_fmadd_ps(_mm_loadu_ps(a), _mm_loadu_ps(b), sum128);
+                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(_mm_loadu_ps(a), _mm_loadu_ps(b)));
                     a += 4;
                     b += 4;
-                    sum128 = _mm_fmadd_ps(_mm_loadu_ps(a), _mm_loadu_ps(b), sum128);
+                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(_mm_loadu_ps(a), _mm_loadu_ps(b)));
                     a += 4;
                     b += 4;
-                    sum128 = _mm_fmadd_ps(_mm_loadu_ps(a), _mm_loadu_ps(b), sum128);
+                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(_mm_loadu_ps(a), _mm_loadu_ps(b)));
                     a += 4;
                     b += 4;
                 }
@@ -190,10 +193,10 @@ namespace deglib::distances::fp32_ip {
 
                 __m128 sum128 = _mm_setzero_ps();
                 while (a < last) {
-                    sum128 = _mm_fmadd_ps(_mm_loadu_ps(a), _mm_loadu_ps(b), sum128);
+                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(_mm_loadu_ps(a), _mm_loadu_ps(b)));
                     a += 4;
                     b += 4;
-                    sum128 = _mm_fmadd_ps(_mm_loadu_ps(a), _mm_loadu_ps(b), sum128);
+                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(_mm_loadu_ps(a), _mm_loadu_ps(b)));
                     a += 4;
                     b += 4;
                 }
@@ -222,7 +225,7 @@ namespace deglib::distances::fp32_ip {
 
                 __m128 sum128 = _mm_setzero_ps();
                 while (a < last) {
-                    sum128 = _mm_fmadd_ps(_mm_loadu_ps(a), _mm_loadu_ps(b), sum128);
+                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(_mm_loadu_ps(a), _mm_loadu_ps(b)));
                     a += 4;
                     b += 4;
                 }

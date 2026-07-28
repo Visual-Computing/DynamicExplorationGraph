@@ -67,7 +67,7 @@ TEST(DeglibRegressionIP, Benchmark_SSE_16Ext)
 
     auto gt_data = compute_groundtruth_innerproduct(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("SSE_16Ext", deglib::Metric::InnerProduct, 16000.0, 11.8, 0.82,
+    run_regression_test("SSE_16Ext", deglib::Metric::InnerProduct, 16000.0, 11.8, 0.81,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_ip::InnerProductFloat16Ext_SSE{}, 50);
 #else
@@ -88,7 +88,7 @@ TEST(DeglibRegressionIP, Benchmark_Scalar)
 
     auto gt_data = compute_groundtruth_innerproduct(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("Scalar", deglib::Metric::InnerProduct, 13500.0, 15.8, 0.8,
+    run_regression_test("Scalar", deglib::Metric::InnerProduct, 13500.0, 15.8, 0.83,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_ip::InnerProductFloat{}, 50);
 }

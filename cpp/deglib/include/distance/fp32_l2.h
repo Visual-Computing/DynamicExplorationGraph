@@ -10,6 +10,9 @@ namespace deglib::distances::fp32_l2 {
         // Scalar fallback — no SIMD required.
         class L2Float {
         public:
+#if defined(__GNUC__) || defined(__clang__)
+            __attribute__((optimize("no-tree-vectorize")))
+#endif
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) 
             {
                 float *a = (float *) pVect1v;
@@ -27,11 +30,11 @@ namespace deglib::distances::fp32_l2 {
                     diff1 = a[1] - b[1];
                     diff2 = a[2] - b[2];
                     diff3 = a[3] - b[3];
-                    result += diff0 * diff0 + diff1 * diff1 + diff2 * diff2 + diff3 * diff3;
+                    result = (((result + diff0 * diff0) + diff1 * diff1) + diff2 * diff2) + diff3 * diff3;
                     a += 4;
                     b += 4;
                 }
-                // Process last 0-3 elements.  Not needed for standard vector lengths. 
+                // Process last 0-3 elements. Not needed for standard vector lengths. 
                 while (a < last) {
                     diff0 = *a++ - *b++;
                     result += diff0 * diff0;
@@ -136,19 +139,19 @@ namespace deglib::distances::fp32_l2 {
                 __m128 v;
                 while (a < last) {
                     v = _mm_sub_ps(_mm_loadu_ps(a), _mm_loadu_ps(b));
-                    sum128 = _mm_fmadd_ps(v, v, sum128);
+                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(v, v));
                     a += 4;
                     b += 4;
                     v = _mm_sub_ps(_mm_loadu_ps(a), _mm_loadu_ps(b));
-                    sum128 = _mm_fmadd_ps(v, v, sum128);
+                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(v, v));
                     a += 4;
                     b += 4;
                     v = _mm_sub_ps(_mm_loadu_ps(a), _mm_loadu_ps(b));
-                    sum128 = _mm_fmadd_ps(v, v, sum128);
+                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(v, v));
                     a += 4;
                     b += 4;
                     v = _mm_sub_ps(_mm_loadu_ps(a), _mm_loadu_ps(b));
-                    sum128 = _mm_fmadd_ps(v, v, sum128);
+                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(v, v));
                     a += 4;
                     b += 4;
                 }
@@ -199,11 +202,11 @@ namespace deglib::distances::fp32_l2 {
                 __m128 v;
                 while (a < last) {
                     v = _mm_sub_ps(_mm_loadu_ps(a), _mm_loadu_ps(b));
-                    sum128 = _mm_fmadd_ps(v, v, sum128);
+                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(v, v));
                     a += 4;
                     b += 4;
                     v = _mm_sub_ps(_mm_loadu_ps(a), _mm_loadu_ps(b));
-                    sum128 = _mm_fmadd_ps(v, v, sum128);
+                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(v, v));
                     a += 4;
                     b += 4;
                 }
@@ -230,7 +233,7 @@ namespace deglib::distances::fp32_l2 {
                 __m128 v;
                 while (a < last) {
                     v = _mm_sub_ps(_mm_loadu_ps(a), _mm_loadu_ps(b));
-                    sum128 = _mm_fmadd_ps(v, v, sum128);
+                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(v, v));
                     a += 4;
                     b += 4;
                 }

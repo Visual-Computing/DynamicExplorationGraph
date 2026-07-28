@@ -67,7 +67,7 @@ TEST(DeglibRegressionL2, Benchmark_SSE_16Ext)
 
     auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("SSE_16Ext", deglib::Metric::L2, 33000.0, 7.0, 0.93,
+    run_regression_test("SSE_16Ext", deglib::Metric::L2, 33000.0, 7.0, 0.94,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_l2::L2Float16Ext_SSE{}, 100);
 #else
@@ -88,7 +88,7 @@ TEST(DeglibRegressionL2, Benchmark_Scalar)
 
     auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("Scalar", deglib::Metric::L2, 29000.0, 9.3, 0.99,
+    run_regression_test("Scalar", deglib::Metric::L2, 29000.0, 9.3, 0.988,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_l2::L2Float{}, 100);
 }
