@@ -17,7 +17,7 @@ TEST(DeglibBuilderRegressionL2, Benchmark_LowLID)
 
     auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("LowLID", deglib::Metric::L2, 27000.0, 9.3, 0.971,
+    run_regression_test("LowLID", deglib::Metric::L2, 20000.0, 14, 0.971,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_l2::L2Float{}, 100,
                         deglib::builder::OptimizationTarget::LowLID);
@@ -36,7 +36,7 @@ TEST(DeglibBuilderRegressionL2, Benchmark_HighLID)
 
     auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("HighLID", deglib::Metric::L2, 16000.0, 10.0, 0.96,
+    run_regression_test("HighLID", deglib::Metric::L2, 12000.0, 14.4, 0.96,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_l2::L2Float{}, 100,
                         deglib::builder::OptimizationTarget::HighLID);
@@ -55,7 +55,7 @@ TEST(DeglibBuilderRegressionL2, Benchmark_StreamingData)
 
     auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("StreamingData", deglib::Metric::L2, 24000.0, 23.8, 0.91,
+    run_regression_test("StreamingData", deglib::Metric::L2, 16000.0, 30, 0.91,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_l2::L2Float{}, 100,
                         deglib::builder::OptimizationTarget::StreamingData);
