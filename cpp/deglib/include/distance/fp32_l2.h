@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include "distance/fp32.h"
 
 namespace deglib::distances::fp32_l2 {
@@ -10,9 +11,6 @@ namespace deglib::distances::fp32_l2 {
         // Scalar fallback — no SIMD required.
         class L2Float {
         public:
-#if defined(__GNUC__) || defined(__clang__)
-            __attribute__((optimize("no-tree-vectorize")))
-#endif
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) 
             {
                 float *a = (float *) pVect1v;
@@ -30,14 +28,14 @@ namespace deglib::distances::fp32_l2 {
                     diff1 = a[1] - b[1];
                     diff2 = a[2] - b[2];
                     diff3 = a[3] - b[3];
-                    result = (((result + diff0 * diff0) + diff1 * diff1) + diff2 * diff2) + diff3 * diff3;
+                    result = std::fma(diff3, diff3, std::fma(diff2, diff2, std::fma(diff1, diff1, std::fma(diff0, diff0, result))));
                     a += 4;
                     b += 4;
                 }
                 // Process last 0-3 elements. Not needed for standard vector lengths. 
                 while (a < last) {
                     diff0 = *a++ - *b++;
-                    result += diff0 * diff0;
+                    result = std::fma(diff0, diff0, result);
                 }
 
                 return result;

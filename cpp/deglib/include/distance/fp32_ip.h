@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include "distance/fp32.h"
 
 namespace deglib::distances::fp32_ip {
@@ -14,34 +15,28 @@ namespace deglib::distances::fp32_ip {
                 return 1.f - ip_naive(pVect1v, pVect2v, qty_ptr);
             }
 
-#if defined(__GNUC__) || defined(__clang__)
-            __attribute__((optimize("no-tree-vectorize")))
-#endif
             inline static float ip_naive(const void *pVect1v, const void *pVect2v, const void *qty_ptr) 
             {
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
 
-                float dot0, dot1, dot2, dot3;
                 const float* last = a + size;
                 const float* unroll_group = last - 3;
 
                 // Process 4 entries at each loop for efficiency. 
                 float result = 0;
                 while (a < unroll_group) {
-                    dot0 = a[0] * b[0];
-                    dot1 = a[1] * b[1];
-                    dot2 = a[2] * b[2];
-                    dot3 = a[3] * b[3];
-                    result = (((result + dot0) + dot1) + dot2) + dot3;
+                    result = std::fma(a[3], b[3], std::fma(a[2], b[2], std::fma(a[1], b[1], std::fma(a[0], b[0], result))));
                     a += 4;
                     b += 4;
                 }
 
                 // Process last 0-3 entries
                 while (a < last) {
-                    result += *a++ * *b++;
+                    result = std::fma(*a, *b, result);
+                    a++;
+                    b++;
                 }
 
                 return result;
