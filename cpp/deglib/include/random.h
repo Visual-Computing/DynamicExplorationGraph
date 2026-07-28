@@ -27,7 +27,7 @@ namespace deglib::random {
 namespace detail {
 
 // Portable float natural logarithm (log(x)) without platform libm dependencies.
-// Accurate to 1e-7 (full float precision) across [1e-38, 1e38].
+// Operates strictly on 32-bit floats with 24-bit mantissa precision.
 inline float portable_log(float x) {
     uint32_t ix;
     std::memcpy(&ix, &x, sizeof(float));
@@ -48,16 +48,11 @@ inline float portable_log(float x) {
 }
 
 // Portable float cosine (cos(x)) without platform libm dependencies.
-// Uses symmetry reduction to [0, PI/2] and a 10th-degree polynomial for full float precision (1e-7).
+// Input x is in [0, 2*PI). Uses symmetry reduction to [0, PI/2] and a 10th-degree polynomial.
 inline float portable_cos(float x) {
-    constexpr float TWO_PI = 6.28318530717958647692f;
     constexpr float PI = 3.14159265358979323846f;
     constexpr float HALF_PI = 1.57079632679489661923f;
-    constexpr float INV_TWO_PI = 0.15915494309189533576f;
-
-    // Reduce x to [0, 2*PI)
-    x -= std::floor(x * INV_TWO_PI) * TWO_PI;
-    if (x < 0.0f) x += TWO_PI;
+    constexpr float TWO_PI = 6.28318530717958647692f;
 
     // Symmetry reduction to [0, PI]
     if (x > PI) {
@@ -71,7 +66,7 @@ inline float portable_cos(float x) {
         sign = true;
     }
 
-    // Polynomial for cos(x) on [0, PI/2] accurate to 1e-7
+    // Polynomial for cos(x) on [0, PI/2] accurate to 1e-7 (full float precision)
     float x2 = x * x;
     float res = 1.0f - x2 * (0.5f - x2 * (0.041666666666666664f - x2 * (0.0013888888888888889f - x2 * (0.0000248015873015873f - x2 * 0.000000275573192239859f))));
 
@@ -127,22 +122,20 @@ public:
         : mean_(mean), stddev_(stddev) {}
 
     // Generate a single normally-distributed float using the provided RNG.
-    // Always consumes exactly 2 RNG values per call (no caching/spare state)
-    // to ensure deterministic behavior regardless of how multiple
-    // DeterministicNormalDistribution instances share the same RNG.
+    // Operates strictly on 24-bit mantissa float division and portable math
+    // to guarantee 100% bit-identical sequences across Windows, Linux, and macOS.
     float operator()(std::mt19937& rng) {
-        // Box-Muller transform: generate one standard normal from two uniforms.
-        // We discard the second value (z1) to avoid cross-instance state issues.
         float u1, u2;
         do {
-            u1 = static_cast<float>(static_cast<double>(rng()) / (static_cast<double>(rng.max()) + 1.0));
+            uint32_t v1 = rng() >> 8;
+            u1 = static_cast<float>(v1) / 16777216.0f;
         } while (u1 <= 0.0f);
-        u2 = static_cast<float>(static_cast<double>(rng()) / (static_cast<double>(rng.max()) + 1.0));
 
-        // Box-Muller formula: z0 = sqrt(-2 * ln(u1)) * cos(2 * pi * u2)
-        // Uses portable_log and portable_cos to avoid platform-dependent libm differences.
+        uint32_t v2 = rng() >> 8;
+        u2 = static_cast<float>(v2) / 16777216.0f;
+
         float mag = stddev_ * std::sqrt(-2.0f * detail::portable_log(u1));
-        return mean_ + mag * detail::portable_cos(2.0f * 3.14159265358979323846f * u2);
+        return mean_ + mag * detail::portable_cos(6.28318530717958647692f * u2);
     }
 
 private:

@@ -17,7 +17,7 @@ TEST(DeglibRegressionL2, Benchmark_AVX512_16Ext)
 
     auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("AVX512_16Ext", deglib::Metric::L2, 42000.0, 6.0, 0.949,
+    run_regression_test("AVX512_16Ext", deglib::Metric::L2, 42000.0, 6.0, 0.94,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_l2::L2Float16Ext_AVX512{}, 100);
 #else
@@ -67,7 +67,7 @@ TEST(DeglibRegressionL2, Benchmark_SSE_16Ext)
 
     auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("SSE_16Ext", deglib::Metric::L2, 33000.0, 7.0, 0.979,
+    run_regression_test("SSE_16Ext", deglib::Metric::L2, 33000.0, 7.0, 0.93,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_l2::L2Float16Ext_SSE{}, 100);
 #else
@@ -88,7 +88,7 @@ TEST(DeglibRegressionL2, Benchmark_Scalar)
 
     auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("Scalar", deglib::Metric::L2, 29000.0, 9.3, 0.94,
+    run_regression_test("Scalar", deglib::Metric::L2, 29000.0, 9.3, 0.99,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_l2::L2Float{}, 100);
 }
