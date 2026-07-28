@@ -16,6 +16,7 @@
 #include "concurrent.h"
 #include "analysis.h"
 #include "graph.h"
+#include "random.h"
 
 namespace deglib::builder
 {
@@ -516,7 +517,7 @@ class EvenRegularGraphBuilder {
       const auto edges_per_vertex = uint32_t(graph.getEdgesPerVertex());
       
       // find good neighbor candidates for the new vertex
-      auto distrib = std::uniform_int_distribution<uint32_t>(0, uint32_t(graph.size() - 1));
+      auto distrib = deglib::random::DeterministicUniformIntDistribution<uint32_t>(0, uint32_t(graph.size() - 1));
       const std::vector<uint32_t> entry_vertex_indices = { distrib(this->rnd_) };
       auto top_list = graph.search(entry_vertex_indices, new_vertex_feature, this->extend_eps_, std::max(uint32_t(this->extend_k_), edges_per_vertex*2)); // need 2x otherwise it might lock during neighbor selection
       const auto candidates = topListAscending(top_list);
@@ -631,8 +632,7 @@ class EvenRegularGraphBuilder {
       const auto dist_func_param = graph.getFeatureSpace().get_dist_func_param();
 
       // find good neighbors for the new vertex
-      auto distrib = std::uniform_int_distribution<uint32_t>(0, uint32_t(graph.size() - 1));
-      const std::vector<uint32_t> entry_vertex_indices = { distrib(this->rnd_) };
+      const std::vector<uint32_t> entry_vertex_indices = { 0 };
       auto top_list = graph.search(entry_vertex_indices, new_vertex_feature, this->extend_eps_, std::max(uint32_t(this->extend_k_), edges_per_vertex));
       const auto results = topListAscending(top_list);
 
@@ -1607,7 +1607,7 @@ class EvenRegularGraphBuilder {
       auto& graph = this->graph_;
       
       // Select a random vertex3
-      auto distrib = std::uniform_int_distribution<uint32_t>(0, uint32_t(graph.size() - 1));
+      auto distrib = deglib::random::DeterministicUniformIntDistribution<uint32_t>(0, uint32_t(graph.size() - 1));
       uint32_t vertex3 = distrib(this->rnd_);
       
       if (vertex3 == vertex1 || vertex3 == vertex2) return false;
@@ -1617,7 +1617,7 @@ class EvenRegularGraphBuilder {
       const auto neighbor_weights = graph.getNeighborWeights(vertex3);
       const auto edges_per_vertex = graph.getEdgesPerVertex();
       
-      auto distrib_neighbor = std::uniform_int_distribution<uint32_t>(0, edges_per_vertex - 1);
+      auto distrib_neighbor = deglib::random::DeterministicUniformIntDistribution<uint32_t>(0, edges_per_vertex - 1);
       uint32_t neighbor_idx = distrib_neighbor(this->rnd_);
       
       uint32_t vertex4 = neighbor_indices[neighbor_idx];
@@ -1687,7 +1687,7 @@ class EvenRegularGraphBuilder {
       const auto edges_per_vertex = graph.getEdgesPerVertex();
 
       // 1.1 select a random vertex
-      auto distrib = std::uniform_int_distribution<uint32_t>(0, uint32_t(graph.size() - 1));
+      auto distrib = deglib::random::DeterministicUniformIntDistribution<uint32_t>(0, uint32_t(graph.size() - 1));
       uint32_t vertex1 = distrib(this->rnd_);
 
       // 1.2 find the worst edge of this vertex
@@ -1696,7 +1696,7 @@ class EvenRegularGraphBuilder {
       auto success = false;
 
       // real random edges swaps
-      //auto distrib_neighbor = std::uniform_int_distribution<uint32_t>(0, edges_per_vertex - 1);
+      //auto distrib_neighbor = deglib::random::DeterministicUniformIntDistribution<uint32_t>(0, edges_per_vertex - 1);
       //uint32_t neighbor_idx = distrib_neighbor(this->rnd_);
       //success |= simpleEdgeSwaps(vertex1, neighbor_indices[neighbor_idx], neighbor_weights[neighbor_idx]);
 

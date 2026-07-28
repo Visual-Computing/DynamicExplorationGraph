@@ -17,7 +17,7 @@ void filter_test() {
 
     // Pre-generate random query IDs for is_valid tests
     std::mt19937 rng(std::random_device{}());
-    std::uniform_int_distribution<int> dist(0, static_cast<int>(max_value));
+    deglib::random::DeterministicUniformIntDistribution<int> dist(0, static_cast<int>(max_value));
     size_t num_queries = 100'000;
     std::vector<int> query_ids(num_queries);
     for (size_t i = 0; i < num_queries; ++i) {

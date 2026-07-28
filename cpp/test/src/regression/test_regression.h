@@ -3,9 +3,6 @@
 #include <deglib.h>
 #include <gtest/gtest.h>
 
-#include "deterministic_normal_distribution.h"
-#include "deterministic_uniform_int_distribution.h"
-
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -87,8 +84,8 @@ inline static void generate_synthetic_clustered_dataset(size_t count, size_t dim
 
     std::mt19937 rng(42);
     std::vector<std::vector<float>> centroids(num_clusters, std::vector<float>(dim));
-    DeterministicNormalDistribution cent_dist(-1000.0f, 1000.0f);
-    DeterministicNormalDistribution noise_dist(-100.0f, 100.0f);
+    deglib::random::DeterministicNormalDistribution cent_dist(-1000.0f, 1000.0f);
+    deglib::random::DeterministicNormalDistribution noise_dist(-100.0f, 100.0f);
 
     for (size_t c = 0; c < num_clusters; ++c)
     {
@@ -141,8 +138,8 @@ inline static void generate_synthetic_clustered_dataset_uint8(size_t count, size
     query.resize(query_count * dim);
 
     std::mt19937 rng(42);
-    DeterministicUniformIntDistribution<int> cent_dist(20, 235);
-    DeterministicNormalDistribution noise_dist(-15.0f, 15.0f);
+    deglib::random::DeterministicUniformIntDistribution<int> cent_dist(20, 235);
+    deglib::random::DeterministicNormalDistribution noise_dist(-15.0f, 15.0f);
 
     std::vector<std::vector<int>> centroids(num_clusters, std::vector<int>(dim));
     for (size_t c = 0; c < num_clusters; ++c)
@@ -177,6 +174,48 @@ inline static void generate_synthetic_clustered_dataset_uint8(size_t count, size
 }
 
 
+// Verify that a SIMD distance variant produces the same top-K results as the scalar ground truth.
+// Each variant should match the scalar implementation exactly (recall == 1.0).
+// ElemType is either float or uint8_t depending on the metric.
+template <typename ElemType, typename DistFunc>
+inline static void check_distance_recall(const char* name, const std::vector<ElemType>& base_data, size_t base_count,
+                                         const std::vector<ElemType>& query_data, size_t query_count,
+                                         size_t dim, uint32_t k,
+                                         const std::vector<std::vector<uint32_t>>& gt_scalar,
+                                         DistFunc dist_func)
+{
+    std::vector<std::vector<uint32_t>> gt(query_count);
+    for (int q = 0; q < static_cast<int>(query_count); ++q)
+    {
+        std::vector<std::pair<float, uint32_t>> dists(base_count);
+        const void* q_vec = static_cast<const void*>(&query_data[q * dim]);
+        for (size_t i = 0; i < base_count; ++i)
+        {
+            const void* b_vec = static_cast<const void*>(&base_data[i * dim]);
+            size_t qty = dim;
+            float d = dist_func(q_vec, b_vec, &qty);
+            dists[i] = {d, static_cast<uint32_t>(i)};
+        }
+        std::partial_sort(dists.begin(), dists.begin() + k, dists.end());
+        gt[q].reserve(k);
+        for (uint32_t i = 0; i < k; ++i) gt[q].push_back(dists[i].second);
+    }
+
+    size_t correct = 0;
+    for (size_t q = 0; q < query_count; ++q)
+    {
+        std::unordered_set<uint32_t> gt_set(gt_scalar[q].begin(), gt_scalar[q].end());
+        for (uint32_t idx : gt[q])
+        {
+            if (gt_set.count(idx)) ++correct;
+        }
+    }
+    double recall = static_cast<double>(correct) / static_cast<double>(query_count * k);
+    std::cout << "[DistanceRecall " << name << "] recall=" << recall << "  correct=" << correct << "/"
+              << (query_count * k) << std::endl;
+    EXPECT_EQ(recall, 1.0) << "Distance recall between scalar and " << name << " must be exactly 1.0";
+}
+
 // Universal regression benchmark runner function for any metric
 // num_runs: number of measured search runs (averaged for QPS/recall).
 //           Higher values extend the total search measurement window, reducing QPS noise.
@@ -189,8 +228,6 @@ inline static void run_regression_test(const char* name, deglib::Metric metric, 
                                 size_t num_runs = 5,
                                 deglib::builder::OptimizationTarget optimization_target = deglib::builder::OptimizationTarget::LowLID)
 {
-    std::cout << "--- Testing Instruction Variant: " << name << " ---" << std::endl;
-
     const uint32_t search_k = 10;
     const float search_eps = 0.05f;
 
@@ -295,9 +332,9 @@ inline static void run_regression_test(const char* name, deglib::Metric metric, 
 
     std::cout << "[" << name << "] build_secs=" << build_secs << "  qps=" << qps << "  recall=" << recall << std::endl;
 
-    EXPECT_GE(recall + 1e-5, min_recall) << name << ": Recall@10 dropped below threshold";
+    EXPECT_GE(recall + 1e-5, min_recall);
     if (std::getenv("SKIP_PERFORMANCE_TESTS") == nullptr) {
-        EXPECT_GT(qps, min_qps) << name << ": Search QPS dropped below threshold";
-        EXPECT_LE(build_secs, max_build_secs) << name << ": Build time exceeded threshold";
+        EXPECT_GT(qps, min_qps);
+        EXPECT_LE(build_secs, max_build_secs);
     }
 }

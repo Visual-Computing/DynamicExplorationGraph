@@ -308,13 +308,13 @@ void create_random_exploration_graph(const std::string repository_file, const st
 
     // random order of vertices
     auto rnd = std::mt19937(7);
-    auto rnd_neighbor = std::uniform_int_distribution<uint32_t>(0, edges_per_vertex - 1);
+    auto rnd_neighbor = deglib::random::DeterministicUniformIntDistribution<uint32_t>(0, edges_per_vertex - 1);
 
     // add the remaining vertices
     for (uint32_t label = edges_per_vertex + 1; label < vertex_count; label++) {
         const auto new_vertex_feature = repository.getFeature(label);
         const auto internal_index = graph.addVertex(label, new_vertex_feature);
-        auto top_list = std::uniform_int_distribution<uint32_t>(0, label - 1);
+        auto top_list = deglib::random::DeterministicUniformIntDistribution<uint32_t>(0, label - 1);
         
         // remove the worst edge of the good neighbors and connect them with this new vertex
         auto new_neighbors = std::vector<std::pair<uint32_t, float>>();
