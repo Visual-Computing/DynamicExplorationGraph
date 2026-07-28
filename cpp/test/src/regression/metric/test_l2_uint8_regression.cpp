@@ -1,8 +1,5 @@
 #include "test_regression.h"
 
-// Regression tests for L2_Uint8 metric: each SIMD variant gets its own benchmark test.
-// num_runs=500 extends the search measurement window to reduce QPS noise.
-
 TEST(DeglibRegressionL2Uint8, Benchmark_AVX512_Ext32)
 {
 #if defined(DEGLIB_X86)
@@ -20,7 +17,7 @@ TEST(DeglibRegressionL2Uint8, Benchmark_AVX512_Ext32)
 
     auto gt_data = compute_groundtruth_l2_uint8(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("AVX512_Ext32", deglib::Metric::L2_Uint8, 76000.0, 4.7, 0.96,
+    run_regression_test("AVX512_Ext32", deglib::Metric::L2_Uint8, 77000.0, 4.6, 0.97,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::uint8_l2::L2Uint8Ext32_AVX512{}, 500);
 #else
@@ -45,7 +42,7 @@ TEST(DeglibRegressionL2Uint8, Benchmark_AVX2_Ext32)
 
     auto gt_data = compute_groundtruth_l2_uint8(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("AVX2_Ext32", deglib::Metric::L2_Uint8, 78000.0, 4.8, 0.96,
+    run_regression_test("AVX2_Ext32", deglib::Metric::L2_Uint8, 78000.0, 4.6, 0.97,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::uint8_l2::L2Uint8Ext32_AVX2{}, 500);
 #else
@@ -70,7 +67,7 @@ TEST(DeglibRegressionL2Uint8, Benchmark_SSE_Ext32)
 
     auto gt_data = compute_groundtruth_l2_uint8(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("SSE_Ext32", deglib::Metric::L2_Uint8, 72000.0, 5.1, 0.96,
+    run_regression_test("SSE_Ext32", deglib::Metric::L2_Uint8, 73000.0, 5.1, 0.97,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::uint8_l2::L2Uint8Ext32_SSE{}, 500);
 #else
@@ -91,7 +88,7 @@ TEST(DeglibRegressionL2Uint8, Benchmark_Scalar)
 
     auto gt_data = compute_groundtruth_l2_uint8(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("Scalar", deglib::Metric::L2_Uint8, 64000.0, 5.5, 0.96,
+    run_regression_test("Scalar", deglib::Metric::L2_Uint8, 66000.0, 5.5, 0.97,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::uint8_l2::L2Uint8{}, 500);
 }
