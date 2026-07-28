@@ -28,8 +28,11 @@ add_deglib_test(test_l2_regression src/regression/metric/test_l2_regression.cpp)
 add_deglib_test(test_innerproduct_regression src/regression/metric/test_innerproduct_regression.cpp)
 add_deglib_test(test_l2_uint8_regression src/regression/metric/test_l2_uint8_regression.cpp)
 
-# Meta target to build all metric regression tests
-add_custom_target(test_regression DEPENDS test_l2_regression test_innerproduct_regression test_l2_uint8_regression)
+# Builder Regression tests
+add_deglib_test(test_l2_builder_regression src/regression/builder/test_l2_builder_regression.cpp)
+
+# Meta target to build all regression tests
+add_custom_target(test_regression DEPENDS test_l2_regression test_innerproduct_regression test_l2_uint8_regression test_l2_builder_regression)
 
 
 

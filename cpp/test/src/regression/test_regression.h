@@ -180,12 +180,14 @@ inline static void generate_synthetic_clustered_dataset_uint8(size_t count, size
 // Universal regression benchmark runner function for any metric
 // num_runs: number of measured search runs (averaged for QPS/recall).
 //           Higher values extend the total search measurement window, reducing QPS noise.
+// optimization_target: controls the graph build strategy (LowLID, HighLID, StreamingData).
 inline static void run_regression_test(const char* name, deglib::Metric metric, double min_qps, double max_build_secs,
                                 double min_recall, const void* base_data,
                                 const void* query_data, size_t base_count, size_t query_count,
                                 size_t dim, const std::vector<std::vector<uint32_t>>& gt_data,
                                 std::optional<deglib::DistanceVariant> dist_variant = std::nullopt,
-                                size_t num_runs = 5)
+                                size_t num_runs = 5,
+                                deglib::builder::OptimizationTarget optimization_target = deglib::builder::OptimizationTarget::LowLID)
 {
     std::cout << "--- Testing Instruction Variant: " << name << " ---" << std::endl;
 
@@ -193,7 +195,6 @@ inline static void run_regression_test(const char* name, deglib::Metric metric, 
     const float search_eps = 0.05f;
 
     const uint32_t edges_per_vertex = 32;
-    const deglib::builder::OptimizationTarget optimization_target = deglib::builder::OptimizationTarget::LowLID;
     const uint8_t extend_k = static_cast<uint8_t>(edges_per_vertex);
     const float extend_eps = 0.1f;
     const uint8_t improve_k = 0;

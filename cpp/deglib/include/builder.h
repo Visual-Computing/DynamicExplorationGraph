@@ -631,9 +631,8 @@ class EvenRegularGraphBuilder {
       const auto dist_func_param = graph.getFeatureSpace().get_dist_func_param();
 
       // find good neighbors for the new vertex
-      //auto distrib = std::uniform_int_distribution<uint32_t>(0, uint32_t(graph.size() - 1));
-      //const std::vector<uint32_t> entry_vertex_indices = { distrib(this->rnd_) };
-      const std::vector<uint32_t> entry_vertex_indices = { 0 };
+      auto distrib = std::uniform_int_distribution<uint32_t>(0, uint32_t(graph.size() - 1));
+      const std::vector<uint32_t> entry_vertex_indices = { distrib(this->rnd_) };
       auto top_list = graph.search(entry_vertex_indices, new_vertex_feature, this->extend_eps_, std::max(uint32_t(this->extend_k_), edges_per_vertex));
       const auto results = topListAscending(top_list);
 
@@ -816,7 +815,7 @@ class EvenRegularGraphBuilder {
       const auto edges_per_vertex = std::min(graph.size(), uint32_t(graph.getEdgesPerVertex()));
       
       // 2 find pairs or groups of vertices which can reach each other		
-		  auto unique_groups = std::unordered_set<std::shared_ptr<ReachableGroup>>();	
+      auto unique_groups = std::vector<std::shared_ptr<ReachableGroup>>();	
       {
         auto path_map = UnionFind(edges_per_vertex);
         auto reachable_groups = std::unordered_map<uint32_t, std::shared_ptr<ReachableGroup>>();	
@@ -888,23 +887,28 @@ class EvenRegularGraphBuilder {
           neighbor_check_depth++;
         }
 
-        // copy the unique groups
-        for (const auto involved_index : involved_indices) 
-          unique_groups.emplace(reachable_groups.at(path_map.Find(involved_index)));
+        // copy the unique groups deterministically by root vertex ID
+        auto added_roots = std::unordered_set<uint32_t>();
+        for (const auto involved_index : involved_indices) {
+          uint32_t root = path_map.Find(involved_index);
+          if (added_roots.insert(root).second) {
+            unique_groups.push_back(reachable_groups.at(root));
+          }
+        }
       }
 
       // 2.2 get all isolated vertices
-      auto isolated_groups = std::unordered_set<std::shared_ptr<ReachableGroup>>();	
-      for(const auto group : unique_groups)
+      auto isolated_groups = std::vector<std::shared_ptr<ReachableGroup>>();	
+      for(const auto& group : unique_groups)
         if(group->size() == 1)
-          isolated_groups.emplace(group);
+          isolated_groups.push_back(group);
 
       // 2.3 find for every isolated vertex the best other involved vertex which is part of a unique group      
       auto new_edges = std::vector<GraphEdge>();
       const auto& feature_space = graph.getFeatureSpace();
       const auto dist_func = feature_space.get_dist_func();
       const auto dist_func_param = feature_space.get_dist_func_param();
-      for(const auto isolated_group : isolated_groups) {
+      for(const auto& isolated_group : isolated_groups) {
 
         // are you still isolated?
         if(isolated_group->size() > 1)
@@ -917,14 +921,14 @@ class EvenRegularGraphBuilder {
         uint32_t best_candidate_index = 0;
         float best_candidate_distance = std::numeric_limits<float>::max();
         deglib::builder::ReachableGroup* best_candidate_group = nullptr;
-        for (const auto candidate_group : unique_groups) {
+        for (const auto& candidate_group : unique_groups) {
 
           // skip all groups which do not have enough vertices missing an edge
           const auto& missing_edges = candidate_group->getMissingEdges();
           if(missing_edges.size() <= 2)
             continue;
 
-          // find the candidate with the best distance to the isolated vertex
+          // missing_edges is already a sorted const std::vector<uint32_t>& from ReachableGroup!
           for (const auto candidate : missing_edges) {
             const auto candidate_feature = graph.getFeatureVector(candidate);
             const auto distance = dist_func(isolated_vertex_feature, candidate_feature, dist_func_param);
@@ -946,15 +950,17 @@ class EvenRegularGraphBuilder {
         isolated_group->hasEdge(isolated_vertex);
         best_candidate_group->copyFrom(*isolated_group);
 
-        unique_groups.erase(isolated_group);
+        unique_groups.erase(std::remove(unique_groups.begin(), unique_groups.end(), isolated_group), unique_groups.end());
       }
 
       // 3 reconnect the groups
-      auto reachable_groups = std::vector(unique_groups.begin(), unique_groups.end());
+      auto reachable_groups = unique_groups;
 
-      // Define a custom comparison function based on the size of the sets
+      // Define a custom comparison function based on the size of the sets, with a deterministic tie-breaker
       auto compareBySize = [](const std::shared_ptr<deglib::builder::ReachableGroup>& a, const std::shared_ptr<deglib::builder::ReachableGroup>& b) {
-          return a->getMissingEdgeSize() < b->getMissingEdgeSize(); // < is ascending, > is descending
+          if (a->getMissingEdgeSize() != b->getMissingEdgeSize())
+            return a->getMissingEdgeSize() < b->getMissingEdgeSize(); // < is ascending, > is descending
+          return a->getVertexIndex() < b->getVertexIndex();
       };
 
       // Sort the groups by size in ascending order
@@ -964,36 +970,35 @@ class EvenRegularGraphBuilder {
       while(reachable_groups.size() >= 2) {
         auto& reachable_group = *reachable_groups[reachable_groups.size()-1];
         auto& other_group = *reachable_groups[reachable_groups.size()-2];
-        auto& reachable_vertices = reachable_group.getMissingEdges();
-        auto& other_vertices = other_group.getMissingEdges();
+        
+        const auto& reachable_missing = reachable_group.getMissingEdges();
+        const auto& other_missing = other_group.getMissingEdges();
 
-        auto best_other_it = reachable_vertices.begin();
-        auto best_reachable_it = reachable_vertices.begin();
+        uint32_t best_reachable_index = 0;
+        uint32_t best_other_index = 0;
         auto best_other_distance = std::numeric_limits<float>::max();
 
         // iterate over all its entries to find a vertex which is still missing an edge
-        for(auto reachable_it = reachable_vertices.begin(); reachable_it != reachable_vertices.end(); ++reachable_it) {
-          const auto reachable_index = *reachable_it;
+        for(const auto reachable_index : reachable_missing) {
           const auto reachable_feature = graph.getFeatureVector(reachable_index);
 
           // find another vertex in a smaller group, also missing an edge			
           // the other vertex and reachable_index can not share an edge yet, otherwise they would be in the same group due to step 2.1           
-          for(auto other_it = other_vertices.begin(); other_it != other_vertices.end(); ++other_it) {
-            const auto other_index = *other_it;
+          for(const auto other_index : other_missing) {
             const auto other_feature = graph.getFeatureVector(other_index);
             const auto candidate_dist = dist_func(reachable_feature, other_feature, dist_func_param);
 
             if(candidate_dist < best_other_distance) {
-              best_other_it = other_it;
-              best_reachable_it = reachable_it;
+              best_reachable_index = reachable_index;
+              best_other_index = other_index;
               best_other_distance = candidate_dist;
             }
           }
         }
 
         // connect reachable_index and other_index
-        const auto reachable_index = *best_reachable_it;
-        const auto other_index = *best_other_it;
+        const auto reachable_index = best_reachable_index;
+        const auto other_index = best_other_index;
         graph.changeEdge(reachable_index, reachable_index, other_index, best_other_distance);
         graph.changeEdge(other_index, other_index, reachable_index, best_other_distance);
 
@@ -1099,7 +1104,11 @@ class EvenRegularGraphBuilder {
 
         // Define a custom comparison function based on the size of the sets
         auto compareByWeight = [](const GraphEdge& a, const GraphEdge& b) {
-          return a.weight > b.weight; // < is ascending, > is descending
+          if (a.weight != b.weight)
+            return a.weight > b.weight; // < is ascending, > is descending
+          if (a.from_vertex != b.from_vertex)
+            return a.from_vertex < b.from_vertex;
+          return a.to_vertex < b.to_vertex;
         };
 
         // Sort the groups by size in ascending order
