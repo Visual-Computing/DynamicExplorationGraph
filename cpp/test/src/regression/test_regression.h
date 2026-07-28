@@ -73,8 +73,22 @@ inline static std::vector<std::vector<uint32_t>> compute_groundtruth_innerproduc
                                       });
 }
 
+// Pure bit-exact 32-bit PRNG and float generator across MSVC, GCC, Clang, x86_64, and ARM64.
+inline static uint32_t deglib_prng_next(uint32_t& state) {
+    uint32_t x = state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    return state = x;
+}
+
+inline static float deglib_prng_float(uint32_t& state, float min_val, float max_val) {
+    uint32_t val = deglib_prng_next(state) >> 8; // 24-bit integer
+    float u = static_cast<float>(val) * (1.0f / 16777215.0f);
+    return min_val + u * (max_val - min_val);
+}
+
 // Generate cross-platform deterministic clustered dataset (Gaussian Mixture with fixed seed)
-// Uses DeterministicNormalDistribution instead of std::normal_distribution for portability.
 inline static void generate_synthetic_clustered_dataset(size_t count, size_t dim, std::vector<float>& base,
                                                  std::vector<float>& query, size_t query_count,
                                                  size_t num_clusters = 20)
@@ -82,16 +96,14 @@ inline static void generate_synthetic_clustered_dataset(size_t count, size_t dim
     base.resize(count * dim);
     query.resize(query_count * dim);
 
-    std::mt19937 rng(42);
+    uint32_t rng_state = 42;
     std::vector<std::vector<float>> centroids(num_clusters, std::vector<float>(dim));
-    deglib::random::DeterministicNormalDistribution cent_dist(-1000.0f, 1000.0f);
-    deglib::random::DeterministicNormalDistribution noise_dist(-100.0f, 100.0f);
 
     for (size_t c = 0; c < num_clusters; ++c)
     {
         for (size_t d = 0; d < dim; ++d)
         {
-            centroids[c][d] = cent_dist(rng);
+            centroids[c][d] = deglib_prng_float(rng_state, -1000.0f, 1000.0f);
         }
     }
 
@@ -100,7 +112,8 @@ inline static void generate_synthetic_clustered_dataset(size_t count, size_t dim
         size_t c = i % num_clusters;
         for (size_t d = 0; d < dim; ++d)
         {
-            base[i * dim + d] = centroids[c][d] + noise_dist(rng);
+            float noise = deglib_prng_float(rng_state, -100.0f, 100.0f);
+            base[i * dim + d] = centroids[c][d] + noise;
         }
     }
 
@@ -109,10 +122,57 @@ inline static void generate_synthetic_clustered_dataset(size_t count, size_t dim
         size_t c = q % num_clusters;
         for (size_t d = 0; d < dim; ++d)
         {
-            query[q * dim + d] = centroids[c][d] + noise_dist(rng);
+            float noise = deglib_prng_float(rng_state, -100.0f, 100.0f);
+            query[q * dim + d] = centroids[c][d] + noise;
         }
     }
 }
+
+// Generate cross-platform deterministic uint8 clustered dataset
+inline static void generate_synthetic_clustered_dataset_uint8(size_t count, size_t dim, std::vector<uint8_t>& base,
+                                                       std::vector<uint8_t>& query, size_t query_count,
+                                                       size_t num_clusters = 20)
+{
+    base.resize(count * dim);
+    query.resize(query_count * dim);
+
+    uint32_t rng_state = 42;
+    std::vector<std::vector<int>> centroids(num_clusters, std::vector<int>(dim));
+
+    for (size_t c = 0; c < num_clusters; ++c)
+    {
+        for (size_t d = 0; d < dim; ++d)
+        {
+            uint32_t val = deglib_prng_next(rng_state);
+            centroids[c][d] = 20 + static_cast<int>(val % 216); // [20, 235]
+        }
+    }
+
+    for (size_t i = 0; i < count; ++i)
+    {
+        size_t c = i % num_clusters;
+        for (size_t d = 0; d < dim; ++d)
+        {
+            uint32_t val = deglib_prng_next(rng_state);
+            int noise = static_cast<int>(val % 31) - 15; // [-15, 15]
+            int res = centroids[c][d] + noise;
+            base[i * dim + d] = static_cast<uint8_t>(std::clamp(res, 0, 255));
+        }
+    }
+
+    for (size_t q = 0; q < query_count; ++q)
+    {
+        size_t c = q % num_clusters;
+        for (size_t d = 0; d < dim; ++d)
+        {
+            uint32_t val = deglib_prng_next(rng_state);
+            int noise = static_cast<int>(val % 31) - 15; // [-15, 15]
+            int res = centroids[c][d] + noise;
+            query[q * dim + d] = static_cast<uint8_t>(std::clamp(res, 0, 255));
+        }
+    }
+}
+
 
 // Compute exact brute-force L2 groundtruth for uint8 vectors.
 // Uses the scalar L2Uint8::compare() from deglib to ensure the ground-truth
@@ -126,51 +186,6 @@ inline static std::vector<std::vector<uint32_t>> compute_groundtruth_l2_uint8(co
                                       {
                                           return deglib::distances::uint8_l2::L2Uint8::compare(q_vec, b_vec, qty_ptr);
                                       });
-}
-
-// Generate uint8 clustered synthetic dataset (values clamped to 0..255)
-// Uses DeterministicNormalDistribution instead of std::normal_distribution for portability.
-inline static void generate_synthetic_clustered_dataset_uint8(size_t count, size_t dim, std::vector<uint8_t>& base,
-                                                              std::vector<uint8_t>& query, size_t query_count,
-                                                              size_t num_clusters = 20)
-{
-    base.resize(count * dim);
-    query.resize(query_count * dim);
-
-    std::mt19937 rng(42);
-    deglib::random::DeterministicUniformIntDistribution<int> cent_dist(20, 235);
-    deglib::random::DeterministicNormalDistribution noise_dist(-15.0f, 15.0f);
-
-    std::vector<std::vector<int>> centroids(num_clusters, std::vector<int>(dim));
-    for (size_t c = 0; c < num_clusters; ++c)
-    {
-        for (size_t d = 0; d < dim; ++d)
-        {
-            centroids[c][d] = cent_dist(rng);
-        }
-    }
-
-    auto clamp_u8 = [](float val) -> uint8_t {
-        return static_cast<uint8_t>(std::clamp(val, 0.0f, 255.0f));
-    };
-
-    for (size_t i = 0; i < count; ++i)
-    {
-        size_t c = i % num_clusters;
-        for (size_t d = 0; d < dim; ++d)
-        {
-            base[i * dim + d] = clamp_u8(centroids[c][d] + noise_dist(rng));
-        }
-    }
-
-    for (size_t q = 0; q < query_count; ++q)
-    {
-        size_t c = q % num_clusters;
-        for (size_t d = 0; d < dim; ++d)
-        {
-            query[q * dim + d] = clamp_u8(centroids[c][d] + noise_dist(rng));
-        }
-    }
 }
 
 
@@ -393,10 +408,10 @@ TEST(DeglibDatasetDeterminism, ClusteredDatasetBitExactness)
 
     // Hardcoded expected hashes computed on Windows
     // Checksum verification ensures 100% bit-exact dataset generation and groundtruth across OS/compilers.
-    EXPECT_EQ(base_hash, 0xf80fde3a7f5f38a1ULL) << "base_data checksum mismatch across platforms!";
-    EXPECT_EQ(query_hash, 0xab4d21f8fd591534ULL) << "query_data checksum mismatch across platforms!";
-    EXPECT_EQ(gt_l2_hash, 0x3e39050feaeabd31ULL) << "gt_l2 checksum mismatch across platforms!";
-    EXPECT_EQ(gt_ip_hash, 0xb3f4c8e142814cedULL) << "gt_ip checksum mismatch across platforms!";
+    EXPECT_EQ(base_hash, 0x9843814b67933ae7ULL) << "base_data checksum mismatch across platforms!";
+    EXPECT_EQ(query_hash, 0xf632af44f678450dULL) << "query_data checksum mismatch across platforms!";
+    EXPECT_EQ(gt_l2_hash, 0xecfc8c14d4c8a2dcULL) << "gt_l2 checksum mismatch across platforms!";
+    EXPECT_EQ(gt_ip_hash, 0xe37a489e10fb4a5fULL) << "gt_ip checksum mismatch across platforms!";
 }
 
 TEST(DeglibDatasetDeterminism, Uint8ClusteredDatasetBitExactness)
@@ -420,9 +435,9 @@ TEST(DeglibDatasetDeterminism, Uint8ClusteredDatasetBitExactness)
     std::cout << "[DatasetDeterminism] uint8_query_hash = 0x" << std::hex << query_hash << std::dec << std::endl;
     std::cout << "[DatasetDeterminism] gt_u8_hash = 0x" << std::hex << gt_u8_hash << std::dec << std::endl;
 
-    EXPECT_EQ(base_hash, 0xd653f3ae520dd7fcULL) << "uint8_base_data checksum mismatch across platforms!";
-    EXPECT_EQ(query_hash, 0x45a27f03527caf5dULL) << "uint8_query_data checksum mismatch across platforms!";
-    EXPECT_EQ(gt_u8_hash, 0x562e85c02549bdf2ULL) << "gt_u8 checksum mismatch across platforms!";
+    EXPECT_EQ(base_hash, 0x4d94d32f77a245daULL) << "uint8_base_data checksum mismatch across platforms!";
+    EXPECT_EQ(query_hash, 0x5493b1b61d1b8a94ULL) << "uint8_query_data checksum mismatch across platforms!";
+    EXPECT_EQ(gt_u8_hash, 0xde241e831af209fcULL) << "gt_u8 checksum mismatch across platforms!";
 }
 
 
