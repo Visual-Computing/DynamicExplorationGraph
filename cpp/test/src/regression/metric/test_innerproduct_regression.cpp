@@ -17,7 +17,7 @@ TEST(DeglibRegressionIP, Benchmark_AVX512_16Ext)
 
     auto gt_data = compute_groundtruth_innerproduct(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("AVX512_16Ext", deglib::Metric::InnerProduct, 18000.0, 10.3, 0.829,
+    run_regression_test("AVX512_16Ext", deglib::Metric::InnerProduct, 18000.0, 10.3, 0.79,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_ip::InnerProductFloat16Ext_AVX512{}, 50);
 #else
@@ -42,7 +42,7 @@ TEST(DeglibRegressionIP, Benchmark_AVX2_16Ext)
 
     auto gt_data = compute_groundtruth_innerproduct(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("AVX2_16Ext", deglib::Metric::InnerProduct, 18000.0, 10.3, 0.829,
+    run_regression_test("AVX2_16Ext", deglib::Metric::InnerProduct, 18000.0, 10.3, 0.79,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_ip::InnerProductFloat16Ext_AVX2{}, 50);
 #else
@@ -67,7 +67,7 @@ TEST(DeglibRegressionIP, Benchmark_SSE_16Ext)
 
     auto gt_data = compute_groundtruth_innerproduct(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("SSE_16Ext", deglib::Metric::InnerProduct, 16000.0, 11.8, 0.82,
+    run_regression_test("SSE_16Ext", deglib::Metric::InnerProduct, 16000.0, 11.8, 0.78,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_ip::InnerProductFloat16Ext_SSE{}, 50);
 #else
@@ -88,7 +88,7 @@ TEST(DeglibRegressionIP, Benchmark_Scalar)
 
     auto gt_data = compute_groundtruth_innerproduct(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("Scalar", deglib::Metric::InnerProduct, 13500.0, 15.8, 0.789,
+    run_regression_test("Scalar", deglib::Metric::InnerProduct, 13500.0, 15.8, 0.82,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_ip::InnerProductFloat{}, 50);
 }

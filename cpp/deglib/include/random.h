@@ -27,6 +27,7 @@ namespace deglib::random {
 namespace detail {
 
 // Portable float natural logarithm (log(x)) without platform libm dependencies.
+// Accurate to 1e-7 (full float precision) across [1e-38, 1e38].
 inline float portable_log(float x) {
     uint32_t ix;
     std::memcpy(&ix, &x, sizeof(float));
@@ -42,18 +43,39 @@ inline float portable_log(float x) {
     float s = f / (2.0f + f);
     float z = s * s;
     float w = z * z;
-    float R = z * (0.6666666666666666f + w * (0.4f + w * (0.2857142857142857f + w * 0.2222222222222222f)));
+    float R = z * (0.6666666666666666f + w * (0.4f + w * (0.2857142857142857f + w * (0.2222222222222222f + w * 0.1818181818181818f))));
     return static_cast<float>(exp) * 0.6931471805599453f + s * (2.0f + R);
 }
 
 // Portable float cosine (cos(x)) without platform libm dependencies.
+// Uses symmetry reduction to [0, PI/2] and a 10th-degree polynomial for full float precision (1e-7).
 inline float portable_cos(float x) {
     constexpr float TWO_PI = 6.28318530717958647692f;
+    constexpr float PI = 3.14159265358979323846f;
+    constexpr float HALF_PI = 1.57079632679489661923f;
     constexpr float INV_TWO_PI = 0.15915494309189533576f;
-    float k = std::floor(x * INV_TWO_PI + 0.5f);
-    x -= k * TWO_PI;
+
+    // Reduce x to [0, 2*PI)
+    x -= std::floor(x * INV_TWO_PI) * TWO_PI;
+    if (x < 0.0f) x += TWO_PI;
+
+    // Symmetry reduction to [0, PI]
+    if (x > PI) {
+        x = TWO_PI - x;
+    }
+
+    // Symmetry reduction to [0, PI/2]
+    bool sign = false;
+    if (x > HALF_PI) {
+        x = PI - x;
+        sign = true;
+    }
+
+    // Polynomial for cos(x) on [0, PI/2] accurate to 1e-7
     float x2 = x * x;
-    return 1.0f - x2 * (0.5f - x2 * (0.041666666666666664f - x2 * (0.0013888888888888889f - x2 * 0.0000248015873015873f)));
+    float res = 1.0f - x2 * (0.5f - x2 * (0.041666666666666664f - x2 * (0.0013888888888888889f - x2 * (0.0000248015873015873f - x2 * 0.000000275573192239859f))));
+
+    return sign ? -res : res;
 }
 
 } // namespace detail
