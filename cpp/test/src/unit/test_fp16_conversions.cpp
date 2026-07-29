@@ -456,7 +456,7 @@ TEST(FP16ConversionTest, CurrentVsHardwarePrecision) {
 // Prints time per 1M conversions in milliseconds.
 TEST(FP16ConversionTest, BenchmarkConversionSpeed) {
     const size_t count = 1000000;
-    const int iterations = 10;
+    const int iterations = 500;
 
     std::vector<float> floats(count);
     std::vector<uint16_t> result(count);
@@ -497,7 +497,12 @@ TEST(FP16ConversionTest, BenchmarkConversionSpeed) {
                   << (current_ms / simd_ms) << "x" << std::endl;
     }
 
-    // Basic sanity: SIMD should not be slower than scalar
-    EXPECT_LT(simd_ms, current_ms * 2.0)
-        << "SIMD path should not be significantly slower than scalar";
+    // SIMD should be faster than scalar when F16C is available.
+    // If F16C is not available, floats_to_fp16 falls back to scalar and
+    // the timings would be equal — but in that case this benchmark is not
+    // meaningful, so we only assert when F16C is present.
+    if (deglib::cpu::has_f16c()) {
+        EXPECT_LT(simd_ms, current_ms)
+            << "SIMD path should be faster than scalar when F16C is available";
+    }
 }

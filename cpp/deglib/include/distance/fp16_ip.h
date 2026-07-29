@@ -83,11 +83,11 @@ namespace deglib::distances::fp16_ip {
 
     class InnerProductFP16_16Ext_AVX2 {
     public:
-        inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+        DEGLIB_TARGET_AVX2 inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
             return 1.f - dot(pVect1v, pVect2v, qty_ptr);
         }
 
-        inline static float dot(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+        DEGLIB_TARGET_AVX2 inline static float dot(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
             const uint16_t *a = static_cast<const uint16_t *>(pVect1v);
             const uint16_t *b = static_cast<const uint16_t *>(pVect2v);
             size_t size = *((size_t *) qty_ptr);
@@ -128,11 +128,11 @@ namespace deglib::distances::fp16_ip {
 
     class InnerProductFP16_8Ext_SSE {
     public:
-        inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+        DEGLIB_TARGET_F16C inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
             return 1.f - dot(pVect1v, pVect2v, qty_ptr);
         }
 
-        inline static float dot(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+        DEGLIB_TARGET_F16C inline static float dot(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
             const uint16_t *a = static_cast<const uint16_t *>(pVect1v);
             const uint16_t *b = static_cast<const uint16_t *>(pVect2v);
             size_t size = *((size_t *) qty_ptr);
@@ -177,7 +177,7 @@ namespace deglib::distances::fp16_ip {
 
     class InnerProductFP16_16ExtResiduals_AVX2 {
     public:
-        inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+        DEGLIB_TARGET_AVX2 inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
             size_t qty = *((size_t *) qty_ptr);
 
             size_t qty16 = qty >> 4 << 4;
@@ -193,7 +193,7 @@ namespace deglib::distances::fp16_ip {
 
     class InnerProductFP16_8ExtResiduals_SSE {
     public:
-        inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+        DEGLIB_TARGET_F16C inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
             size_t qty = *((size_t *) qty_ptr);
 
             size_t qty8 = qty >> 3 << 3;

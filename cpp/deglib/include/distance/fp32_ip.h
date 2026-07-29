@@ -88,15 +88,15 @@ namespace deglib::distances::fp32_ip {
 
         class InnerProductFloat16Ext_AVX2 {
         public:
-            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+            DEGLIB_TARGET_AVX2 inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 return 1.f - dot(pVect1v, pVect2v, qty_ptr);
             }
 
-            inline static float dot(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+            DEGLIB_TARGET_AVX2 inline static float dot(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 return ip_16ext(pVect1v, pVect2v, qty_ptr);
             }
 
-            inline static float ip_16ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+            DEGLIB_TARGET_AVX2 inline static float ip_16ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
@@ -165,15 +165,15 @@ namespace deglib::distances::fp32_ip {
 
         class InnerProductFloat8Ext_AVX2 {
         public:
-            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+            DEGLIB_TARGET_AVX2 inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 return 1.f - dot(pVect1v, pVect2v, qty_ptr);
             }
 
-            inline static float dot(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+            DEGLIB_TARGET_AVX2 inline static float dot(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 return ip_8ext(pVect1v, pVect2v, qty_ptr);
             }
 
-            inline static float ip_8ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+            DEGLIB_TARGET_AVX2 inline static float ip_8ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
@@ -282,7 +282,7 @@ namespace deglib::distances::fp32_ip {
 
         class InnerProductFloat16ExtResiduals_AVX2 {
         public:
-            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+            DEGLIB_TARGET_AVX2 inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 size_t qty = *((size_t *) qty_ptr);
 
                 size_t qty16 = qty >> 4 << 4;

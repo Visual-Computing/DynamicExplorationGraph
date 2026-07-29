@@ -14,9 +14,18 @@
 #define DEGLIB_TARGET_AVX512
 #endif
 
-// Compile methods with this attribute for F16C functions on GCC/Clang
+// Compile methods with this attribute for AVX2 F16C functions on GCC/Clang.
+// Covers AVX2, F16C, and FMA intrinsics used in fp16_ip.h and fp32_ip.h.
 #if defined(DEGLIB_X86) && (defined(__GNUC__) || defined(__clang__))
-#define DEGLIB_TARGET_F16C __attribute__((target("f16c,avx")))
+#define DEGLIB_TARGET_AVX2 __attribute__((target("avx2,f16c,fma")))
+#else
+#define DEGLIB_TARGET_AVX2
+#endif
+
+// Compile methods with this attribute for F16C functions on GCC/Clang.
+// Includes FMA for _mm_fmadd_ps / _mm256_fmadd_ps used in SSE/AVX2 paths.
+#if defined(DEGLIB_X86) && (defined(__GNUC__) || defined(__clang__))
+#define DEGLIB_TARGET_F16C __attribute__((target("f16c,avx,fma")))
 #else
 #define DEGLIB_TARGET_F16C
 #endif
