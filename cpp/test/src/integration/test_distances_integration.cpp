@@ -1,4 +1,4 @@
-#include "test_builder_integration.h"
+#include "common/test_helpers.h"
 
 // ============================================================================
 // Distance Calculation Recall Integration Tests
