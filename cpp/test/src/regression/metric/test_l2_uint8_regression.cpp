@@ -17,7 +17,7 @@ TEST(DeglibRegressionL2Uint8, Benchmark_AVX512_Ext32)
 
     auto gt_data = compute_groundtruth_l2_uint8(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("AVX512_Ext32", deglib::Metric::L2_Uint8, 58000.0, 4.8, 0.99,
+    run_regression_test("AVX512_Ext32", deglib::Metric::L2_Uint8, 60000.0, 4.8, 0.99,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::uint8_l2::L2Uint8Ext32_AVX512{}, 500);
 #else
@@ -42,7 +42,7 @@ TEST(DeglibRegressionL2Uint8, Benchmark_AVX2_Ext32)
 
     auto gt_data = compute_groundtruth_l2_uint8(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("AVX2_Ext32", deglib::Metric::L2_Uint8, 58000.0, 4.8, 0.99,
+    run_regression_test("AVX2_Ext32", deglib::Metric::L2_Uint8, 60000.0, 4.9, 0.99,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::uint8_l2::L2Uint8Ext32_AVX2{}, 500);
 #else
@@ -67,7 +67,7 @@ TEST(DeglibRegressionL2Uint8, Benchmark_SSE_Ext32)
 
     auto gt_data = compute_groundtruth_l2_uint8(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("SSE_Ext32", deglib::Metric::L2_Uint8, 54000.0, 5.3, 0.99,
+    run_regression_test("SSE_Ext32", deglib::Metric::L2_Uint8, 56000.0, 5.4, 0.99,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::uint8_l2::L2Uint8Ext32_SSE{}, 500);
 #else

@@ -16,9 +16,6 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
-    env:
-      SKIP_PERFORMANCE_TESTS: "1"
-
     steps:
     - uses: actions/checkout@v4
       with:

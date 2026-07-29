@@ -20,22 +20,43 @@ macro(add_deglib_test name source)
     add_test(NAME ${name} COMMAND ${name})
 endmacro()
 
+# Helper macro: creates a test executable with integration test include path
+macro(add_deglib_integration_test name source)
+    add_executable(${name} ${TEST_MAIN} ${source})
+    target_include_directories(${name} PRIVATE ${DEGLIB_INCLUDE})
+    target_include_directories(${name} PRIVATE ${GTEST_INCLUDE})
+    target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/integration)
+    target_sources(${name} PRIVATE ${GTEST_SOURCE})
+    target_link_libraries(${name} PRIVATE compile-options)
+    set_target_properties(${name} PROPERTIES INTERMEDIATE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/obj/${name}")
+    add_test(NAME ${name} COMMAND ${name})
+endmacro()
+
+# Helper macro: creates a test executable without registering it with CTest
+# (used for regression tests that are built manually but excluded from CI)
+macro(add_deglib_test_no_ctest name source)
+    add_executable(${name} ${TEST_MAIN} ${source})
+    target_include_directories(${name} PRIVATE ${DEGLIB_INCLUDE})
+    target_include_directories(${name} PRIVATE ${GTEST_INCLUDE})
+    target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/regression)
+    target_sources(${name} PRIVATE ${GTEST_SOURCE})
+    target_link_libraries(${name} PRIVATE compile-options)
+    set_target_properties(${name} PROPERTIES INTERMEDIATE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/obj/${name}")
+endmacro()
+
 # Phase 1 Test Target: CPU Features & Build Verification
 add_deglib_test(test_cpu_features src/test_cpu_features.cpp)
 
-# Dataset Determinism Regression test
-add_deglib_test(test_dataset_determinism src/regression/test_dataset_determinism.cpp)
+# Integration tests (fast, recall-only, registered with CTest for CI)
+add_deglib_integration_test(test_builder_integration src/integration/test_builder_integration.cpp)
+add_deglib_integration_test(test_distance_integration src/integration/test_distance_integration.cpp)
 
-# Metric Regression tests
-add_deglib_test(test_l2_regression src/regression/metric/test_l2_regression.cpp)
-add_deglib_test(test_innerproduct_regression src/regression/metric/test_innerproduct_regression.cpp)
-add_deglib_test(test_l2_uint8_regression src/regression/metric/test_l2_uint8_regression.cpp)
-
-# Builder Regression tests
-add_deglib_test(test_l2_builder_regression src/regression/builder/test_l2_builder_regression.cpp)
+# Regression tests (100k vectors, performance benchmarking — built but NOT registered with CTest)
+add_deglib_test_no_ctest(test_dataset_determinism src/regression/test_dataset_determinism.cpp)
+add_deglib_test_no_ctest(test_l2_regression src/regression/metric/test_l2_regression.cpp)
+add_deglib_test_no_ctest(test_innerproduct_regression src/regression/metric/test_innerproduct_regression.cpp)
+add_deglib_test_no_ctest(test_l2_uint8_regression src/regression/metric/test_l2_uint8_regression.cpp)
+add_deglib_test_no_ctest(test_l2_builder_regression src/regression/builder/test_l2_builder_regression.cpp)
 
 # Meta target to build all regression tests
 add_custom_target(test_regression DEPENDS test_dataset_determinism test_l2_regression test_innerproduct_regression test_l2_uint8_regression test_l2_builder_regression)
-
-
-
