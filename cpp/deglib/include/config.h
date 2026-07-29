@@ -2,15 +2,23 @@
 
 #include <cstdint>
 
+// Architecture flags. Define DEGLIB_X86 if the code is for x86 machines. ARM often has separate coding pathes.
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 #define DEGLIB_X86 1
 #endif
 
-// Target attribute for AVX-512 functions on GCC/Clang
+// Compile methods with this attribute for AVX-512 functions on GCC/Clang
 #if defined(DEGLIB_X86) && (defined(__GNUC__) || defined(__clang__))
 #define DEGLIB_TARGET_AVX512 __attribute__((target("avx512f,avx512dq,avx512bw,fma")))
 #else
 #define DEGLIB_TARGET_AVX512
+#endif
+
+// Compile methods with this attribute for F16C functions on GCC/Clang
+#if defined(DEGLIB_X86) && (defined(__GNUC__) || defined(__clang__))
+#define DEGLIB_TARGET_F16C __attribute__((target("f16c,avx")))
+#else
+#define DEGLIB_TARGET_F16C
 #endif
 
 // Architecture intrinsic headers

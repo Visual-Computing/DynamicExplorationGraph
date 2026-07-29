@@ -12,7 +12,11 @@ namespace deglib::distances::fp32_ip {
         class InnerProductFloat {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return 1.f - ip_naive(pVect1v, pVect2v, qty_ptr);
+                return 1.f - dot(pVect1v, pVect2v, qty_ptr);
+            }
+
+            inline static float dot(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                return ip_naive(pVect1v, pVect2v, qty_ptr);
             }
 
             inline static float ip_naive(const void *pVect1v, const void *pVect2v, const void *qty_ptr) 
@@ -53,7 +57,11 @@ namespace deglib::distances::fp32_ip {
         class InnerProductFloat16Ext_AVX512 {
         public:
             DEGLIB_TARGET_AVX512 inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return 1.f - ip_16ext(pVect1v, pVect2v, qty_ptr);
+                return 1.f - dot(pVect1v, pVect2v, qty_ptr);
+            }
+
+            DEGLIB_TARGET_AVX512 inline static float dot(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                return ip_16ext(pVect1v, pVect2v, qty_ptr);
             }
 
             DEGLIB_TARGET_AVX512 inline static float ip_16ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
@@ -81,7 +89,11 @@ namespace deglib::distances::fp32_ip {
         class InnerProductFloat16Ext_AVX2 {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return 1.f - ip_16ext(pVect1v, pVect2v, qty_ptr);
+                return 1.f - dot(pVect1v, pVect2v, qty_ptr);
+            }
+
+            inline static float dot(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                return ip_16ext(pVect1v, pVect2v, qty_ptr);
             }
 
             inline static float ip_16ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
@@ -112,7 +124,11 @@ namespace deglib::distances::fp32_ip {
         class InnerProductFloat16Ext_SSE {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return 1.f - ip_16ext(pVect1v, pVect2v, qty_ptr);
+                return 1.f - dot(pVect1v, pVect2v, qty_ptr);
+            }
+
+            inline static float dot(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                return ip_16ext(pVect1v, pVect2v, qty_ptr);
             }
 
             inline static float ip_16ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
@@ -150,7 +166,11 @@ namespace deglib::distances::fp32_ip {
         class InnerProductFloat8Ext_AVX2 {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return 1.f - ip_8ext(pVect1v, pVect2v, qty_ptr);
+                return 1.f - dot(pVect1v, pVect2v, qty_ptr);
+            }
+
+            inline static float dot(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                return ip_8ext(pVect1v, pVect2v, qty_ptr);
             }
 
             inline static float ip_8ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
@@ -176,7 +196,11 @@ namespace deglib::distances::fp32_ip {
         class InnerProductFloat8Ext_SSE {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return 1.f - ip_8ext(pVect1v, pVect2v, qty_ptr);
+                return 1.f - dot(pVect1v, pVect2v, qty_ptr);
+            }
+
+            inline static float dot(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                return ip_8ext(pVect1v, pVect2v, qty_ptr);
             }
 
             inline static float ip_8ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
@@ -208,7 +232,11 @@ namespace deglib::distances::fp32_ip {
         class InnerProductFloat4Ext_SSE {
         public:
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return 1.f - ip_4ext(pVect1v, pVect2v, qty_ptr);
+                return 1.f - dot(pVect1v, pVect2v, qty_ptr);
+            }
+
+            inline static float dot(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+                return ip_4ext(pVect1v, pVect2v, qty_ptr);
             }
 
             inline static float ip_4ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
@@ -242,12 +270,12 @@ namespace deglib::distances::fp32_ip {
                 size_t qty = *((size_t *) qty_ptr);
 
                 size_t qty16 = qty >> 4 << 4;
-                float res = InnerProductFloat16Ext_AVX512::ip_16ext(pVect1v, pVect2v, &qty16);
+                float res = InnerProductFloat16Ext_AVX512::dot(pVect1v, pVect2v, &qty16);
                 float *pVect1 = (float *) pVect1v + qty16;
                 float *pVect2 = (float *) pVect2v + qty16;
 
                 size_t qty_left = qty - qty16;
-                float res_tail = InnerProductFloat::ip_naive(pVect1, pVect2, &qty_left);
+                float res_tail = InnerProductFloat::dot(pVect1, pVect2, &qty_left);
                 return 1.f - (res + res_tail);
             }
         };
@@ -258,12 +286,12 @@ namespace deglib::distances::fp32_ip {
                 size_t qty = *((size_t *) qty_ptr);
 
                 size_t qty16 = qty >> 4 << 4;
-                float res = InnerProductFloat16Ext_AVX2::ip_16ext(pVect1v, pVect2v, &qty16);
+                float res = InnerProductFloat16Ext_AVX2::dot(pVect1v, pVect2v, &qty16);
                 float *pVect1 = (float *) pVect1v + qty16;
                 float *pVect2 = (float *) pVect2v + qty16;
 
                 size_t qty_left = qty - qty16;
-                float res_tail = InnerProductFloat::ip_naive(pVect1, pVect2, &qty_left);
+                float res_tail = InnerProductFloat::dot(pVect1, pVect2, &qty_left);
                 return 1.f - (res + res_tail);
             }
         };
@@ -274,12 +302,12 @@ namespace deglib::distances::fp32_ip {
                 size_t qty = *((size_t *) qty_ptr);
 
                 size_t qty16 = qty >> 4 << 4;
-                float res = InnerProductFloat16Ext_SSE::ip_16ext(pVect1v, pVect2v, &qty16);
+                float res = InnerProductFloat16Ext_SSE::dot(pVect1v, pVect2v, &qty16);
                 float *pVect1 = (float *) pVect1v + qty16;
                 float *pVect2 = (float *) pVect2v + qty16;
 
                 size_t qty_left = qty - qty16;
-                float res_tail = InnerProductFloat::ip_naive(pVect1, pVect2, &qty_left);
+                float res_tail = InnerProductFloat::dot(pVect1, pVect2, &qty_left);
                 return 1.f - (res + res_tail);
             }
         };
@@ -290,12 +318,12 @@ namespace deglib::distances::fp32_ip {
                 size_t qty = *((size_t *) qty_ptr);
 
                 size_t qty4 = qty >> 2 << 2;
-                float res = InnerProductFloat4Ext_SSE::ip_4ext(pVect1v, pVect2v, &qty4);
+                float res = InnerProductFloat4Ext_SSE::dot(pVect1v, pVect2v, &qty4);
                 float *pVect1 = (float *) pVect1v + qty4;
                 float *pVect2 = (float *) pVect2v + qty4;
 
                 size_t qty_left = qty - qty4;
-                float res_tail = InnerProductFloat::ip_naive(pVect1, pVect2, &qty_left);
+                float res_tail = InnerProductFloat::dot(pVect1, pVect2, &qty_left);
                 return 1.f - (res + res_tail);
             }
         };

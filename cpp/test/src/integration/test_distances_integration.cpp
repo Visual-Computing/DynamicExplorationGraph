@@ -552,6 +552,191 @@ TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFloat)
 }
 
 // ---------------------------------------------------------------------------
+// FP16 InnerProduct distance recall tests
+// ---------------------------------------------------------------------------
+
+TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFP16_32Ext_AVX512)
+{
+#if defined(DEGLIB_X86)
+    if (!deglib::cpu::has_avx512()) {
+        GTEST_SKIP() << "AVX-512 not available on this CPU";
+    }
+    const size_t dim = 128;
+    const size_t base_count = 10000;
+    const size_t query_count = 100;
+    const uint32_t k = 10;
+
+    std::vector<uint16_t> base_data;
+    std::vector<uint16_t> query_data;
+    generate_synthetic_clustered_dataset_fp16(base_count, dim, base_data, query_data, query_count, 1000);
+
+    auto gt_scalar = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, k);
+
+    check_distance_recall("InnerProductFP16_32Ext_AVX512", base_data, base_count, query_data, query_count, dim, k, gt_scalar,
+                          [](const void* a, const void* b, const void* qty)
+                          {
+                              return deglib::distances::fp16_ip::InnerProductFP16_32Ext_AVX512::compare(a, b, qty);
+                          });
+#else
+    GTEST_SKIP() << "AVX-512 not available on this platform";
+#endif
+}
+
+TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFP16_32ExtResiduals_AVX512)
+{
+#if defined(DEGLIB_X86)
+    if (!deglib::cpu::has_avx512()) {
+        GTEST_SKIP() << "AVX-512 not available on this CPU";
+    }
+    const size_t dim = 129;
+    const size_t base_count = 10000;
+    const size_t query_count = 100;
+    const uint32_t k = 10;
+
+    std::vector<uint16_t> base_data;
+    std::vector<uint16_t> query_data;
+    generate_synthetic_clustered_dataset_fp16(base_count, dim, base_data, query_data, query_count, 1000);
+
+    auto gt_scalar = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, k);
+
+    check_distance_recall("InnerProductFP16_32ExtResiduals_AVX512", base_data, base_count, query_data, query_count, dim, k, gt_scalar,
+                          [](const void* a, const void* b, const void* qty)
+                          {
+                              return deglib::distances::fp16_ip::InnerProductFP16_32ExtResiduals_AVX512::compare(a, b, qty);
+                          });
+#else
+    GTEST_SKIP() << "AVX-512 not available on this platform";
+#endif
+}
+
+TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFP16_16Ext_AVX2)
+{
+#if defined(DEGLIB_X86)
+    if (!deglib::cpu::has_avx2()) {
+        GTEST_SKIP() << "AVX2 not available on this CPU";
+    }
+    const size_t dim = 128;
+    const size_t base_count = 10000;
+    const size_t query_count = 100;
+    const uint32_t k = 10;
+
+    std::vector<uint16_t> base_data;
+    std::vector<uint16_t> query_data;
+    generate_synthetic_clustered_dataset_fp16(base_count, dim, base_data, query_data, query_count, 1000);
+
+    auto gt_scalar = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, k);
+
+    check_distance_recall("InnerProductFP16_16Ext_AVX2", base_data, base_count, query_data, query_count, dim, k, gt_scalar,
+                          [](const void* a, const void* b, const void* qty)
+                          {
+                              return deglib::distances::fp16_ip::InnerProductFP16_16Ext_AVX2::compare(a, b, qty);
+                          });
+#else
+    GTEST_SKIP() << "AVX2 not available on this platform";
+#endif
+}
+
+TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFP16_16ExtResiduals_AVX2)
+{
+#if defined(DEGLIB_X86)
+    if (!deglib::cpu::has_avx2()) {
+        GTEST_SKIP() << "AVX2 not available on this CPU";
+    }
+    const size_t dim = 129;
+    const size_t base_count = 10000;
+    const size_t query_count = 100;
+    const uint32_t k = 10;
+
+    std::vector<uint16_t> base_data;
+    std::vector<uint16_t> query_data;
+    generate_synthetic_clustered_dataset_fp16(base_count, dim, base_data, query_data, query_count, 1000);
+
+    auto gt_scalar = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, k);
+
+    check_distance_recall("InnerProductFP16_16ExtResiduals_AVX2", base_data, base_count, query_data, query_count, dim, k, gt_scalar,
+                          [](const void* a, const void* b, const void* qty)
+                          {
+                              return deglib::distances::fp16_ip::InnerProductFP16_16ExtResiduals_AVX2::compare(a, b, qty);
+                          });
+#else
+    GTEST_SKIP() << "AVX2 not available on this platform";
+#endif
+}
+
+TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFP16_8Ext_SSE)
+{
+#if defined(DEGLIB_X86)
+    if (!deglib::cpu::has_sse42()) {
+        GTEST_SKIP() << "SSE4.2 not available on this CPU";
+    }
+    const size_t dim = 128;
+    const size_t base_count = 10000;
+    const size_t query_count = 100;
+    const uint32_t k = 10;
+
+    std::vector<uint16_t> base_data;
+    std::vector<uint16_t> query_data;
+    generate_synthetic_clustered_dataset_fp16(base_count, dim, base_data, query_data, query_count, 1000);
+
+    auto gt_scalar = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, k);
+
+    check_distance_recall("InnerProductFP16_8Ext_SSE", base_data, base_count, query_data, query_count, dim, k, gt_scalar,
+                          [](const void* a, const void* b, const void* qty)
+                          {
+                              return deglib::distances::fp16_ip::InnerProductFP16_8Ext_SSE::compare(a, b, qty);
+                          });
+#else
+    GTEST_SKIP() << "SSE not available on this platform";
+#endif
+}
+
+TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFP16_8ExtResiduals_SSE)
+{
+#if defined(DEGLIB_X86)
+    if (!deglib::cpu::has_sse42()) {
+        GTEST_SKIP() << "SSE4.2 not available on this CPU";
+    }
+    const size_t dim = 129;
+    const size_t base_count = 10000;
+    const size_t query_count = 100;
+    const uint32_t k = 10;
+
+    std::vector<uint16_t> base_data;
+    std::vector<uint16_t> query_data;
+    generate_synthetic_clustered_dataset_fp16(base_count, dim, base_data, query_data, query_count, 1000);
+
+    auto gt_scalar = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, k);
+
+    check_distance_recall("InnerProductFP16_8ExtResiduals_SSE", base_data, base_count, query_data, query_count, dim, k, gt_scalar,
+                          [](const void* a, const void* b, const void* qty)
+                          {
+                              return deglib::distances::fp16_ip::InnerProductFP16_8ExtResiduals_SSE::compare(a, b, qty);
+                          });
+#else
+    GTEST_SKIP() << "SSE not available on this platform";
+#endif
+}
+
+TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFP16)
+{
+    const size_t dim = 128;
+    const size_t base_count = 10000;
+    const size_t query_count = 100;
+    const uint32_t k = 10;
+
+    std::vector<uint16_t> base_data;
+    std::vector<uint16_t> query_data;
+    generate_synthetic_clustered_dataset_fp16(base_count, dim, base_data, query_data, query_count, 1000);
+
+    auto gt_scalar = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, k);
+
+    check_distance_recall("InnerProductFP16", base_data, base_count, query_data, query_count, dim, k, gt_scalar,
+                          [](const void* a, const void* b, const void* qty)
+                          {
+                              return deglib::distances::fp16_ip::InnerProductFP16::compare(a, b, qty);
+                          });
+}
+
 // L2 Uint8 distance recall tests
 // ---------------------------------------------------------------------------
 

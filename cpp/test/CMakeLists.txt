@@ -47,6 +47,9 @@ endmacro()
 # Phase 1 Test Target: CPU Features & Build Verification
 add_deglib_test(test_cpu_features src/test_cpu_features.cpp)
 
+# Unit tests (FP16 conversion, etc.)
+add_deglib_test(test_fp16_conversions src/unit/test_fp16_conversions.cpp)
+
 # Integration tests (fast, recall-only, registered with CTest for CI)
 add_deglib_integration_test(test_builder_integration src/integration/test_builder_integration.cpp)
 add_deglib_integration_test(test_distances_integration src/integration/test_distances_integration.cpp)

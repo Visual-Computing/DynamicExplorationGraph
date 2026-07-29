@@ -9,6 +9,7 @@
 // Modular distance headers - contain all distance function class definitions
 #include "distance/fp32_l2.h"
 #include "distance/fp32_ip.h"
+#include "distance/fp16_ip.h"
 #include "distance/uint8_l2.h"
 
 namespace deglib {
@@ -18,6 +19,7 @@ namespace deglib {
         //L1 = 0x00 | 0,
         L2 = 0x00 | 1,
         InnerProduct = 0x00 | 2,
+        FP16InnerProduct = 0x00 | 3,
 
         // 0x10 = uint8
         L2_Uint8 = 0x10 | 1
@@ -61,6 +63,7 @@ namespace deglib {
     using DistanceVariant = variant_concat_t<
         deglib::distances::fp32_l2::DistanceVariant,
         deglib::distances::fp32_ip::DistanceVariant,
+        deglib::distances::fp16_ip::DistanceVariant,
         deglib::distances::uint8_l2::DistanceVariant
     >;
 
@@ -104,6 +107,8 @@ namespace deglib {
                     return to_flat_variant(deglib::distances::fp32_l2::select_dist(dim));
                 case deglib::Metric::InnerProduct:
                     return to_flat_variant(deglib::distances::fp32_ip::select_dist(dim));
+                case deglib::Metric::FP16InnerProduct:
+                    return to_flat_variant(deglib::distances::fp16_ip::select_dist(dim));
                 case deglib::Metric::L2_Uint8:
                     return to_flat_variant(deglib::distances::uint8_l2::select_dist(dim));
                 default:
@@ -112,6 +117,8 @@ namespace deglib {
         }
 
         static size_t calculate_data_size(const size_t dim, const deglib::Metric metric) {
+            if (metric == deglib::Metric::FP16InnerProduct)
+                return dim * sizeof(uint16_t);
             return (static_cast<int>(metric) & 0x10) ? dim * sizeof(uint8_t) : dim * sizeof(float);
         }
 

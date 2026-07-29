@@ -139,6 +139,64 @@ inline static void generate_synthetic_clustered_dataset_uint8(size_t count, size
 }
 
 // ---------------------------------------------------------------------------
+// Dataset generation (FP16, for FP16InnerProduct)
+// ---------------------------------------------------------------------------
+
+// Generate cross-platform deterministic clustered FP16 dataset.
+// Generates float vectors using the same PRNG as the float generator,
+// then converts them to FP16 (uint16_t) using bit-exact conversion.
+// The float centroids are computed using the same logic as generate_synthetic_clustered_dataset,
+// ensuring the FP16 dataset is derived from the same deterministic float data.
+inline static void generate_synthetic_clustered_dataset_fp16(size_t count, size_t dim, std::vector<uint16_t>& base,
+                                                       std::vector<uint16_t>& query, size_t query_count,
+                                                       size_t num_clusters = 20)
+{
+    // Generate float data using the same logic as the float generator
+    std::vector<float> base_float(count * dim);
+    std::vector<float> query_float(query_count * dim);
+
+    uint32_t rng_state = 42;
+    std::vector<std::vector<int32_t>> centroids(num_clusters, std::vector<int32_t>(dim));
+
+    for (size_t c = 0; c < num_clusters; ++c)
+    {
+        for (size_t d = 0; d < dim; ++d)
+        {
+            uint32_t val = deglib_prng_next(rng_state);
+            centroids[c][d] = static_cast<int32_t>(val % 2001) - 1000; // [-1000, 1000]
+        }
+    }
+
+    for (size_t i = 0; i < count; ++i)
+    {
+        size_t c = i % num_clusters;
+        for (size_t d = 0; d < dim; ++d)
+        {
+            uint32_t val = deglib_prng_next(rng_state);
+            int32_t noise = static_cast<int32_t>(val % 201) - 100; // [-100, 100]
+            base_float[i * dim + d] = static_cast<float>(centroids[c][d] + noise);
+        }
+    }
+
+    for (size_t q = 0; q < query_count; ++q)
+    {
+        size_t c = q % num_clusters;
+        for (size_t d = 0; d < dim; ++d)
+        {
+            uint32_t val = deglib_prng_next(rng_state);
+            int32_t noise = static_cast<int32_t>(val % 201) - 100; // [-100, 100]
+            query_float[q * dim + d] = static_cast<float>(centroids[c][d] + noise);
+        }
+    }
+
+    // Convert float vectors to FP16 (uint16_t) using bit-exact conversion
+    base.resize(count * dim);
+    query.resize(query_count * dim);
+    deglib::distances::fp16::floats_to_fp16(base_float.data(), base.data(), count * dim);
+    deglib::distances::fp16::floats_to_fp16(query_float.data(), query.data(), query_count * dim);
+}
+
+// ---------------------------------------------------------------------------
 // Groundtruth computation
 // ---------------------------------------------------------------------------
 
@@ -199,6 +257,33 @@ inline static std::vector<std::vector<uint32_t>> compute_groundtruth_innerproduc
                                       [](const float* q_vec, const float* b_vec, const void* qty_ptr)
                                       {
                                           return deglib::distances::fp32_ip::InnerProductFloat::compare(q_vec, b_vec, qty_ptr);
+                                      });
+}
+
+// Compute exact brute-force InnerProduct groundtruth for top-K neighbors (distance = dot_product).
+// Returns the raw dot product (not 1.f - dot) for use with FP16 inner product tests.
+// Uses the scalar InnerProductFloat::dot() implementation from deglib.
+inline static std::vector<std::vector<uint32_t>> compute_groundtruth_ip(const std::vector<float>& base, size_t base_count,
+                                                                   const std::vector<float>& query, size_t query_count,
+                                                                   size_t dim, uint32_t k)
+{
+    return compute_groundtruth_custom<float>(base, base_count, query, query_count, dim, k,
+                                      [](const float* q_vec, const float* b_vec, const void* qty_ptr)
+                                      {
+                                          return deglib::distances::fp32_ip::InnerProductFloat::dot(q_vec, b_vec, qty_ptr);
+                                      });
+}
+
+// Compute exact brute-force FP16 InnerProduct groundtruth for top-K neighbors (distance = 1.f - dot_product).
+// Uses the scalar InnerProductFP16::compare() implementation from deglib.
+inline static std::vector<std::vector<uint32_t>> compute_groundtruth_fp16_ip(const std::vector<uint16_t>& base, size_t base_count,
+                                                                         const std::vector<uint16_t>& query, size_t query_count,
+                                                                         size_t dim, uint32_t k)
+{
+    return compute_groundtruth_custom<uint16_t>(base, base_count, query, query_count, dim, k,
+                                      [](const uint16_t* q_vec, const uint16_t* b_vec, const void* qty_ptr)
+                                      {
+                                          return deglib::distances::fp16_ip::InnerProductFP16::compare(q_vec, b_vec, qty_ptr);
                                       });
 }
 
@@ -283,8 +368,12 @@ inline static void run_integration_test(const char* name, deglib::Metric metric,
     const uint32_t additional_swap_tries = 0;
     const uint32_t thread_count = 1;
 
-    // Compute byte size per vector based on metric type (0x10 flag indicates 8-bit integer)
-    const size_t feature_bytes = (static_cast<int>(metric) & 0x10) ? dim * sizeof(uint8_t) : dim * sizeof(float);
+    // Compute byte size per vector based on metric type
+    size_t feature_bytes;
+    if (metric == deglib::Metric::FP16InnerProduct)
+        feature_bytes = dim * sizeof(uint16_t);
+    else
+        feature_bytes = (static_cast<int>(metric) & 0x10) ? dim * sizeof(uint8_t) : dim * sizeof(float);
 
     // Build DEG Graph using the specified metric feature space
     const deglib::FloatSpace feature_space = dist_variant.has_value()
@@ -423,6 +512,19 @@ inline static void run_builder_integration_test(const char* name, deglib::Metric
                              base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                              dist_variant, optimization_target);
     }
+    else if (metric == deglib::Metric::FP16InnerProduct)
+    {
+        // FP16 metric
+        std::vector<uint16_t> base_data;
+        std::vector<uint16_t> query_data;
+        generate_synthetic_clustered_dataset_fp16(base_count, dim, base_data, query_data, query_count, num_clusters);
+
+        auto gt_data = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, 10);
+
+        run_integration_test(name, metric, min_recall,
+                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                             dist_variant, optimization_target);
+    }
     else
     {
         // float metric (L2 or InnerProduct)
@@ -474,8 +576,12 @@ inline static void run_regression_test(const char* name, deglib::Metric metric, 
     const uint32_t additional_swap_tries = 0;
     const uint32_t thread_count = 1;
 
-    // Compute byte size per vector based on metric type (0x10 flag indicates 8-bit integer)
-    const size_t feature_bytes = (static_cast<int>(metric) & 0x10) ? dim * sizeof(uint8_t) : dim * sizeof(float);
+    // Compute byte size per vector based on metric type
+    size_t feature_bytes;
+    if (metric == deglib::Metric::FP16InnerProduct)
+        feature_bytes = dim * sizeof(uint16_t);
+    else
+        feature_bytes = (static_cast<int>(metric) & 0x10) ? dim * sizeof(uint8_t) : dim * sizeof(float);
 
     // Build DEG Graph using the specified metric feature space
     const deglib::FloatSpace feature_space = dist_variant.has_value()
