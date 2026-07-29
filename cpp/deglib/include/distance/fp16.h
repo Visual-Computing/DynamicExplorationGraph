@@ -33,15 +33,15 @@ namespace deglib::distances {
 
 #if defined(DEGLIB_X86) && (defined(__GNUC__) || defined(__clang__))
 
-        DEGLIB_TARGET_F16C inline uint16_t float_to_fp16_gcc(float f) {
+        DEGLIB_TARGET_AVX2 inline uint16_t float_to_fp16_gcc(float f) {
             return _cvtss_sh(f, 0);
         }
 
-        DEGLIB_TARGET_F16C inline float fp16_to_float_gcc(uint16_t h) {
+        DEGLIB_TARGET_AVX2 inline float fp16_to_float_gcc(uint16_t h) {
             return _cvtsh_ss(h);
         }
 
-        DEGLIB_TARGET_F16C inline void floats_to_fp16_gcc(const float* floats, uint16_t* fp16_vals, size_t count) {
+        DEGLIB_TARGET_AVX2 inline void floats_to_fp16_gcc(const float* floats, uint16_t* fp16_vals, size_t count) {
             size_t i = 0;
             // Process 8 floats per step with _mm256_cvtps_ph
             for (; i + 8 <= count; i += 8) {
@@ -61,7 +61,7 @@ namespace deglib::distances {
             }
         }
 
-        DEGLIB_TARGET_F16C inline void fp16_to_floats_gcc(const uint16_t* fp16_vals, float* floats, size_t count) {
+        DEGLIB_TARGET_AVX2 inline void fp16_to_floats_gcc(const uint16_t* fp16_vals, float* floats, size_t count) {
             size_t i = 0;
             // Process 8 uint16_t per step with _mm256_cvtph_ps
             for (; i + 8 <= count; i += 8) {
@@ -243,15 +243,15 @@ namespace deglib::distances {
         // ---------------------------------------------------------------------------
         // Public API: float_to_fp16, fp16_to_float, floats_to_fp16, fp16_to_floats
         // ---------------------------------------------------------------------------
-        // Runtime dispatch via deglib::cpu::has_f16c().
-        // On GCC/Clang: uses DEGLIB_TARGET_F16C-attributed intrinsics.
+        // Runtime dispatch via deglib::cpu::has_avx2().
+        // On GCC/Clang: uses DEGLIB_TARGET_AVX2-attributed intrinsics.
         // On MSVC: uses _mm_cvtps_ph / _mm_cvtph_ps (SSE intrinsics).
         // Fallback: scalar IEEE 754 Round-to-Nearest-Even.
         // ---------------------------------------------------------------------------
 
         inline uint16_t float_to_fp16(float f) {
 #if defined(DEGLIB_X86)
-            if (deglib::cpu::has_f16c()) {
+            if (deglib::cpu::has_avx2()) {
 #if defined(__GNUC__) || defined(__clang__)
                 return float_to_fp16_gcc(f);
 #elif defined(_MSC_VER)
@@ -264,7 +264,7 @@ namespace deglib::distances {
 
         inline float fp16_to_float(uint16_t h) {
 #if defined(DEGLIB_X86)
-            if (deglib::cpu::has_f16c()) {
+            if (deglib::cpu::has_avx2()) {
 #if defined(__GNUC__) || defined(__clang__)
                 return fp16_to_float_gcc(h);
 #elif defined(_MSC_VER)
@@ -277,7 +277,7 @@ namespace deglib::distances {
 
         inline void floats_to_fp16(const float* floats, uint16_t* fp16_vals, size_t count) {
 #if defined(DEGLIB_X86)
-            if (deglib::cpu::has_f16c()) {
+            if (deglib::cpu::has_avx2()) {
 #if defined(__GNUC__) || defined(__clang__)
                 floats_to_fp16_gcc(floats, fp16_vals, count);
                 return;
@@ -295,7 +295,7 @@ namespace deglib::distances {
 
         inline void fp16_to_floats(const uint16_t* fp16_vals, float* floats, size_t count) {
 #if defined(DEGLIB_X86)
-            if (deglib::cpu::has_f16c()) {
+            if (deglib::cpu::has_avx2()) {
 #if defined(__GNUC__) || defined(__clang__)
                 fp16_to_floats_gcc(fp16_vals, floats, count);
                 return;
@@ -309,22 +309,6 @@ namespace deglib::distances {
             for (size_t i = 0; i < count; ++i) {
                 floats[i] = fp16_to_float_scalar(fp16_vals[i]);
             }
-        }
-
-        // Naive scalar inner product for FP16 vectors (used for testing and fallback).
-        // Computes the raw dot product (without 1.f -) using std::fma for precision.
-        inline float fp16_ip_naive(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-            const uint16_t* a = static_cast<const uint16_t*>(pVect1v);
-            const uint16_t* b = static_cast<const uint16_t*>(pVect2v);
-            size_t size = *((size_t*)qty_ptr);
-
-            float result = 0.0f;
-            for (size_t i = 0; i < size; ++i) {
-                float fa = fp16_to_float(a[i]);
-                float fb = fp16_to_float(b[i]);
-                result = std::fma(fa, fb, result);
-            }
-            return result;
         }
 
     } // namespace fp16

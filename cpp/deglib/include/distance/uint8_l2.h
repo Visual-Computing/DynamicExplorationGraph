@@ -86,41 +86,6 @@ namespace deglib::distances::uint8_l2 {
             }
         };
 
-        class L2Uint8Ext32_SSE {
-        public:
-            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                size_t size = *((size_t *) qty_ptr);
-                const unsigned char *a = (const unsigned char *) pVect1v;
-                const unsigned char *b = (const unsigned char *) pVect2v;
-
-                __m128i d2_low_vec = _mm_setzero_si128();
-                __m128i d2_high_vec = _mm_setzero_si128();
-                for (size_t i = 0; i + 16 <= size; i += 16) {
-                    __m128i v1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a + i));
-                    __m128i v2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b + i));
-                    
-                    // Sign extend int8 to int16
-                    __m128i v1_lo = _mm_cvtepu8_epi16(v1);
-                    __m128i v1_hi = _mm_cvtepu8_epi16(_mm_srli_si128(v1, 8));
-                    __m128i v2_lo = _mm_cvtepu8_epi16(v2);
-                    __m128i v2_hi = _mm_cvtepu8_epi16(_mm_srli_si128(v2, 8));
-
-                    // Subtract and multiply
-                    __m128i diff_lo = _mm_sub_epi16(v1_lo, v2_lo);
-                    __m128i diff_hi = _mm_sub_epi16(v1_hi, v2_hi);
-                    __m128i sqr_lo = _mm_madd_epi16(diff_lo, diff_lo);
-                    __m128i sqr_hi = _mm_madd_epi16(diff_hi, diff_hi);
-
-                    d2_low_vec = _mm_add_epi32(d2_low_vec, sqr_lo);
-                    d2_high_vec = _mm_add_epi32(d2_high_vec, sqr_hi);
-                }
-                __m128i sum128 = _mm_add_epi32(d2_low_vec, d2_high_vec);
-
-                alignas(16) int sum_array[4];
-                _mm_store_si128(reinterpret_cast<__m128i*>(sum_array), sum128);
-                return static_cast<float>(sum_array[0] + sum_array[1] + sum_array[2] + sum_array[3]);
-            }
-        };
 
         // -------------------------------------------------------------------
         // L2Uint8Ext16 — processes 16 uint8 values (16 bytes) per iteration.
@@ -152,40 +117,6 @@ namespace deglib::distances::uint8_l2 {
             }
         };
 
-        class L2Uint8Ext16_SSE {
-        public:
-            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                size_t size = *((size_t *) qty_ptr);
-                const unsigned char *a = (const unsigned char *) pVect1v;
-                const unsigned char *b = (const unsigned char *) pVect2v;
-
-                __m128i d2_low_vec = _mm_setzero_si128();
-                __m128i d2_high_vec = _mm_setzero_si128();
-                for (size_t i = 0; i + 16 <= size; i += 16) {
-                    __m128i v1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a + i));
-                    __m128i v2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b + i));
-                    
-                    __m128i v1_lo = _mm_cvtepu8_epi16(v1);
-                    __m128i v1_hi = _mm_cvtepu8_epi16(_mm_srli_si128(v1, 8));
-                    __m128i v2_lo = _mm_cvtepu8_epi16(v2);
-                    __m128i v2_hi = _mm_cvtepu8_epi16(_mm_srli_si128(v2, 8));
-
-                    __m128i diff_lo = _mm_sub_epi16(v1_lo, v2_lo);
-                    __m128i diff_hi = _mm_sub_epi16(v1_hi, v2_hi);
-
-                    __m128i sqr_lo = _mm_madd_epi16(diff_lo, diff_lo);
-                    __m128i sqr_hi = _mm_madd_epi16(diff_hi, diff_hi);
-
-                    d2_low_vec = _mm_add_epi32(d2_low_vec, sqr_lo);
-                    d2_high_vec = _mm_add_epi32(d2_high_vec, sqr_hi);
-                }
-                __m128i sum128 = _mm_add_epi32(d2_low_vec, d2_high_vec);
-
-                alignas(16) int sum_array[4];
-                _mm_store_si128(reinterpret_cast<__m128i*>(sum_array), sum128);
-                return static_cast<float>(sum_array[0] + sum_array[1] + sum_array[2] + sum_array[3]);
-            }
-        };
 #endif
 
     using DistanceVariant = std::variant<
@@ -193,9 +124,7 @@ namespace deglib::distances::uint8_l2 {
 #if defined(DEGLIB_X86)
         , L2Uint8Ext32_AVX512,
         L2Uint8Ext32_AVX2,
-        L2Uint8Ext32_SSE,
-        L2Uint8Ext16_AVX2,
-        L2Uint8Ext16_SSE
+        L2Uint8Ext16_AVX2
 #endif
     >;
 
@@ -212,12 +141,6 @@ namespace deglib::distances::uint8_l2 {
                     return L2Uint8Ext32_AVX2{};
                 else if (dim % 16 == 0)
                     return L2Uint8Ext16_AVX2{};
-            }
-            else if (deglib::cpu::has_sse42()) {
-                if (dim % 32 == 0)
-                    return L2Uint8Ext32_SSE{};
-                else if (dim % 16 == 0)
-                    return L2Uint8Ext16_SSE{};
             }
 #endif
             return L2Uint8{};

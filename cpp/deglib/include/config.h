@@ -16,18 +16,11 @@
 
 // Compile methods with this attribute for AVX2 F16C functions on GCC/Clang.
 // Covers AVX2, F16C, and FMA intrinsics used in fp16_ip.h and fp32_ip.h.
+// F16C is assumed available on all CPUs supporting AVX2.
 #if defined(DEGLIB_X86) && (defined(__GNUC__) || defined(__clang__))
 #define DEGLIB_TARGET_AVX2 __attribute__((target("avx2,f16c,fma")))
 #else
 #define DEGLIB_TARGET_AVX2
-#endif
-
-// Compile methods with this attribute for F16C functions on GCC/Clang.
-// Includes FMA for _mm_fmadd_ps / _mm256_fmadd_ps used in SSE/AVX2 paths.
-#if defined(DEGLIB_X86) && (defined(__GNUC__) || defined(__clang__))
-#define DEGLIB_TARGET_F16C __attribute__((target("f16c,avx,fma")))
-#else
-#define DEGLIB_TARGET_F16C
 #endif
 
 // Architecture intrinsic headers
@@ -47,8 +40,11 @@
 // Runtime CPU feature detection
 // ---------------------------------------------------------------------------
 // Uses CPUID (via __cpuidex on MSVC, __cpuid_count on GCC/Clang) to detect
-// SSE4.2, F16C, AVX, AVX2, and AVX-512F at runtime. Results are cached in a
-// function-local static so the CPUID query runs only once.
+// AVX2 and AVX-512F at runtime. Results are cached in a function-local static
+// so the CPUID query runs only once.
+//
+// AVX2 is the minimum x86 baseline requirement. F16C is always available on
+// CPUs that support AVX2, so it is not tracked separately.
 //
 // The distance headers compile all SIMD code paths unconditionally (the
 // intrinsic headers are always included below). At runtime, select_dist()
@@ -75,21 +71,12 @@ namespace deglib::cpu {
 
         // Cached hardware feature flags, populated on first call via a function-local static.
         struct CpuFeatures {
-            bool sse42{false};
-            bool f16c{false};
-            bool avx{false};
             bool avx2{false};
             bool avx512f{false};
 
             CpuFeatures() {
 #if defined(DEGLIB_X86)
                 int cpu_info[4] = {0};
-
-                // Leaf 1: feature flags in ECX and EDX
-                cpuid(1, 0, cpu_info);
-                sse42 = (cpu_info[2] & (1 << 20)) != 0;
-                f16c  = (cpu_info[2] & (1 << 29)) != 0;
-                avx   = (cpu_info[2] & (1 << 28)) != 0;
 
                 // Leaf 7, subleaf 0: extended feature flags in EBX and ECX
                 cpuid(7, 0, cpu_info);
@@ -109,9 +96,6 @@ namespace deglib::cpu {
     // Runtime CPU feature detection — safe to call from any translation unit.
     // These checks are performed once (cached) and have zero cost per call thereafter.
 
-    inline bool has_sse42()  { return detail::features().sse42; }
-    inline bool has_f16c()   { return detail::features().f16c; }
-    inline bool has_avx()    { return detail::features().avx; }
     inline bool has_avx2()   { return detail::features().avx2; }
     inline bool has_avx512() { return detail::features().avx512f; }
 

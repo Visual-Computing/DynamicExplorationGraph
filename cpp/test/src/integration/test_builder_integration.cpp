@@ -203,20 +203,6 @@ TEST(DeglibBuilderIntegration, L2_AVX2_16Ext)
 #endif
 }
 
-TEST(DeglibBuilderIntegration, L2_SSE_16Ext)
-{
-#if defined(DEGLIB_X86)
-    if (!deglib::cpu::has_sse42()) {
-        GTEST_SKIP() << "SSE4.2 not available on this CPU";
-    }
-    run_builder_integration_test("L2_SSE_16Ext", deglib::Metric::L2, 0.96,
-                                 128, 10000, 100, 1000,
-                                 deglib::distances::fp32_l2::L2Float16Ext_SSE{},
-                                 deglib::builder::OptimizationTarget::LowLID);
-#else
-    GTEST_SKIP() << "SSE not available on this platform";
-#endif
-}
 
 TEST(DeglibBuilderIntegration, L2_Scalar)
 {
@@ -260,20 +246,6 @@ TEST(DeglibBuilderIntegration, IP_AVX2_16Ext)
 #endif
 }
 
-TEST(DeglibBuilderIntegration, IP_SSE_16Ext)
-{
-#if defined(DEGLIB_X86)
-    if (!deglib::cpu::has_sse42()) {
-        GTEST_SKIP() << "SSE4.2 not available on this CPU";
-    }
-    run_builder_integration_test("IP_SSE_16Ext", deglib::Metric::InnerProduct, 0.86,
-                                 128, 10000, 100, 1000,
-                                 deglib::distances::fp32_ip::InnerProductFloat16Ext_SSE{},
-                                 deglib::builder::OptimizationTarget::LowLID);
-#else
-    GTEST_SKIP() << "SSE not available on this platform";
-#endif
-}
 
 TEST(DeglibBuilderIntegration, IP_Scalar)
 {
@@ -317,20 +289,6 @@ TEST(DeglibBuilderIntegration, L2_Uint8_AVX2_32Ext)
 #endif
 }
 
-TEST(DeglibBuilderIntegration, L2_Uint8_SSE_32Ext)
-{
-#if defined(DEGLIB_X86)
-    if (!deglib::cpu::has_sse42()) {
-        GTEST_SKIP() << "SSE4.2 not available on this CPU";
-    }
-    run_builder_integration_test("L2_Uint8_SSE_32Ext", deglib::Metric::L2_Uint8, 0.99,
-                                 128, 10000, 100, 1000,
-                                 deglib::distances::uint8_l2::L2Uint8Ext32_SSE{},
-                                 deglib::builder::OptimizationTarget::LowLID);
-#else
-    GTEST_SKIP() << "SSE not available on this platform";
-#endif
-}
 
 TEST(DeglibBuilderIntegration, L2_Uint8_Scalar)
 {

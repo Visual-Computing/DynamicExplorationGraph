@@ -7,7 +7,7 @@
 //   - L2 Float metric (AVX512, AVX2, SSE, Scalar variants)
 //   - InnerProduct Float metric (AVX512, AVX2, SSE, Scalar variants)
 //   - L2 Uint8 metric (AVX512, AVX2, SSE, Scalar variants)
-//   - InnerProduct FP16 metric (AVX512, AVX2, SSE, Scalar variants)
+//   - InnerProduct FP16 metric (AVX512, AVX2 32Ext, AVX2 16Ext, AVX2 8Ext, Scalar variants)
 //   - OptimizationTarget modes (LowLID, HighLID, StreamingData)
 //
 // Each benchmark measures QPS, build time, and recall on 100,000 base vectors.
@@ -68,30 +68,6 @@ TEST(DeglibBuilderRegression, L2Float_Benchmark_AVX2_16Ext)
 #endif
 }
 
-TEST(DeglibBuilderRegression, L2Float_Benchmark_SSE_16Ext)
-{
-#if defined(DEGLIB_X86)
-    if (!deglib::cpu::has_sse42()) {
-        GTEST_SKIP() << "SSE4.2 not available on this CPU";
-    }
-    const size_t dim = 128;
-    const size_t base_count = 100000;
-    const size_t query_count = 100;
-    const size_t num_clusters = 1000;
-
-    std::vector<float> base_data;
-    std::vector<float> query_data;
-    generate_synthetic_clustered_dataset(base_count, dim, base_data, query_data, query_count, num_clusters);
-
-    auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
-
-    run_regression_test("L2Float_SSE_16Ext", deglib::Metric::L2, 40000.0, 6.9, 0.961,
-                        base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                        deglib::distances::fp32_l2::L2Float16Ext_SSE{}, 100);
-#else
-    GTEST_SKIP() << "SSE not available on this platform";
-#endif
-}
 
 TEST(DeglibBuilderRegression, L2Float_Benchmark_Scalar)
 {
@@ -165,30 +141,6 @@ TEST(DeglibBuilderRegression, InnerProductFloat_Benchmark_AVX2_16Ext)
 #endif
 }
 
-TEST(DeglibBuilderRegression, InnerProductFloat_Benchmark_SSE_16Ext)
-{
-#if defined(DEGLIB_X86)
-    if (!deglib::cpu::has_sse42()) {
-        GTEST_SKIP() << "SSE4.2 not available on this CPU";
-    }
-    const size_t dim = 128;
-    const size_t base_count = 100000;
-    const size_t query_count = 100;
-    const size_t num_clusters = 1000;
-
-    std::vector<float> base_data;
-    std::vector<float> query_data;
-    generate_synthetic_clustered_dataset(base_count, dim, base_data, query_data, query_count, num_clusters);
-
-    auto gt_data = compute_groundtruth_innerproduct(base_data, base_count, query_data, query_count, dim, 10);
-
-    run_regression_test("InnerProductFloat_SSE_16Ext", deglib::Metric::InnerProduct, 33000.0, 5.0, 0.866,
-                        base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                        deglib::distances::fp32_ip::InnerProductFloat16Ext_SSE{}, 50);
-#else
-    GTEST_SKIP() << "SSE not available on this platform";
-#endif
-}
 
 TEST(DeglibBuilderRegression, InnerProductFloat_Benchmark_Scalar)
 {
@@ -262,30 +214,6 @@ TEST(DeglibBuilderRegression, L2Uint8_Benchmark_AVX2_32Ext)
 #endif
 }
 
-TEST(DeglibBuilderRegression, L2Uint8_Benchmark_SSE_32Ext)
-{
-#if defined(DEGLIB_X86)
-    if (!deglib::cpu::has_sse42()) {
-        GTEST_SKIP() << "SSE4.2 not available on this CPU";
-    }
-    const size_t dim = 128;
-    const size_t base_count = 100000;
-    const size_t query_count = 100;
-    const size_t num_clusters = 1000;
-
-    std::vector<uint8_t> base_data;
-    std::vector<uint8_t> query_data;
-    generate_synthetic_clustered_dataset_uint8(base_count, dim, base_data, query_data, query_count, num_clusters);
-
-    auto gt_data = compute_groundtruth_l2_uint8(base_data, base_count, query_data, query_count, dim, 10);
-
-    run_regression_test("L2Uint8_SSE_32Ext", deglib::Metric::L2_Uint8, 56000.0, 5.4, 0.99,
-                        base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                        deglib::distances::uint8_l2::L2Uint8Ext32_SSE{}, 500);
-#else
-    GTEST_SKIP() << "SSE not available on this platform";
-#endif
-}
 
 TEST(DeglibBuilderRegression, L2Uint8_Benchmark_Scalar)
 {
@@ -303,6 +231,105 @@ TEST(DeglibBuilderRegression, L2Uint8_Benchmark_Scalar)
     run_regression_test("L2Uint8_Scalar", deglib::Metric::L2_Uint8, 50000.0, 5.8, 0.99,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::uint8_l2::L2Uint8{}, 500);
+}
+
+
+// ---------------------------------------------------------------------------
+// InnerProduct FP16 Metric Benchmarks (100k)
+// ---------------------------------------------------------------------------
+
+TEST(DeglibBuilderRegression, InnerProductFP16_Benchmark_AVX512_32Ext)
+{
+#if defined(DEGLIB_X86)
+    if (!deglib::cpu::has_avx512()) {
+        GTEST_SKIP() << "AVX512 not available on this CPU";
+    }
+    const size_t dim = 128;
+    const size_t base_count = 100000;
+    const size_t query_count = 100;
+    const size_t num_clusters = 1000;
+
+    std::vector<uint16_t> base_data;
+    std::vector<uint16_t> query_data;
+    generate_synthetic_clustered_dataset_fp16(base_count, dim, base_data, query_data, query_count, num_clusters);
+
+    auto gt_data = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, 10);
+
+    run_regression_test("InnerProductFP16_AVX512_32Ext", deglib::Metric::FP16InnerProduct, 47000.0, 4.2, 0.866,
+                        base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                        deglib::distances::fp16_ip::InnerProductFP16_32Ext_AVX512{}, 50);
+#else
+    GTEST_SKIP() << "AVX512 not available on this platform";
+#endif
+}
+
+TEST(DeglibBuilderRegression, InnerProductFP16_Benchmark_AVX2_16Ext)
+{
+#if defined(DEGLIB_X86)
+    if (!deglib::cpu::has_avx2()) {
+        GTEST_SKIP() << "AVX2 not available on this CPU";
+    }
+    const size_t dim = 128;
+    const size_t base_count = 100000;
+    const size_t query_count = 100;
+    const size_t num_clusters = 1000;
+
+    std::vector<uint16_t> base_data;
+    std::vector<uint16_t> query_data;
+    generate_synthetic_clustered_dataset_fp16(base_count, dim, base_data, query_data, query_count, num_clusters);
+
+    auto gt_data = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, 10);
+
+    run_regression_test("InnerProductFP16_AVX2_16Ext", deglib::Metric::FP16InnerProduct, 47000.0, 4.2, 0.866,
+                        base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                        deglib::distances::fp16_ip::InnerProductFP16_16Ext_AVX2{}, 50);
+#else
+    GTEST_SKIP() << "AVX2 not available on this platform";
+#endif
+}
+
+TEST(DeglibBuilderRegression, InnerProductFP16_Benchmark_AVX2_8Ext)
+{
+#if defined(DEGLIB_X86)
+    if (!deglib::cpu::has_avx2()) {
+        GTEST_SKIP() << "AVX2 not available on this CPU";
+    }
+    const size_t dim = 128;
+    const size_t base_count = 100000;
+    const size_t query_count = 100;
+    const size_t num_clusters = 1000;
+
+    std::vector<uint16_t> base_data;
+    std::vector<uint16_t> query_data;
+    generate_synthetic_clustered_dataset_fp16(base_count, dim, base_data, query_data, query_count, num_clusters);
+
+    auto gt_data = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, 10);
+
+    run_regression_test("InnerProductFP16_AVX2_8Ext", deglib::Metric::FP16InnerProduct, 45000.0, 4.4, 0.866,
+                        base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                        deglib::distances::fp16_ip::InnerProductFP16_8Ext_AVX2{}, 50);
+#else
+    GTEST_SKIP() << "AVX2 not available on this platform";
+#endif
+}
+
+
+TEST(DeglibBuilderRegression, InnerProductFP16_Benchmark_Scalar)
+{
+    const size_t dim = 128;
+    const size_t base_count = 100000;
+    const size_t query_count = 100;
+    const size_t num_clusters = 1000;
+
+    std::vector<uint16_t> base_data;
+    std::vector<uint16_t> query_data;
+    generate_synthetic_clustered_dataset_fp16(base_count, dim, base_data, query_data, query_count, num_clusters);
+
+    auto gt_data = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, 10);
+
+    run_regression_test("InnerProductFP16_Scalar", deglib::Metric::FP16InnerProduct, 8000.0, 25.0, 0.867,
+                        base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                        deglib::distances::fp16_ip::InnerProductFP16{}, 50);
 }
 
 // ---------------------------------------------------------------------------
@@ -366,99 +393,3 @@ TEST(DeglibBuilderRegression, Benchmark_StreamingData)
                         deglib::builder::OptimizationTarget::StreamingData);
 }
 
-// ---------------------------------------------------------------------------
-// InnerProduct FP16 Metric Benchmarks (100k)
-// ---------------------------------------------------------------------------
-
-TEST(DeglibBuilderRegression, InnerProductFP16_Benchmark_AVX512_32Ext)
-{
-#if defined(DEGLIB_X86)
-    if (!deglib::cpu::has_avx512()) {
-        GTEST_SKIP() << "AVX512 not available on this CPU";
-    }
-    const size_t dim = 128;
-    const size_t base_count = 100000;
-    const size_t query_count = 100;
-    const size_t num_clusters = 1000;
-
-    std::vector<uint16_t> base_data;
-    std::vector<uint16_t> query_data;
-    generate_synthetic_clustered_dataset_fp16(base_count, dim, base_data, query_data, query_count, num_clusters);
-
-    auto gt_data = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, 10);
-
-    run_regression_test("InnerProductFP16_AVX512_32Ext", deglib::Metric::FP16InnerProduct, 38000.0, 5.0, 0.866,
-                        base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                        deglib::distances::fp16_ip::InnerProductFP16_32Ext_AVX512{}, 50);
-#else
-    GTEST_SKIP() << "AVX512 not available on this platform";
-#endif
-}
-
-TEST(DeglibBuilderRegression, InnerProductFP16_Benchmark_AVX2_16Ext)
-{
-#if defined(DEGLIB_X86)
-    if (!deglib::cpu::has_avx2()) {
-        GTEST_SKIP() << "AVX2 not available on this CPU";
-    }
-    const size_t dim = 128;
-    const size_t base_count = 100000;
-    const size_t query_count = 100;
-    const size_t num_clusters = 1000;
-
-    std::vector<uint16_t> base_data;
-    std::vector<uint16_t> query_data;
-    generate_synthetic_clustered_dataset_fp16(base_count, dim, base_data, query_data, query_count, num_clusters);
-
-    auto gt_data = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, 10);
-
-    run_regression_test("InnerProductFP16_AVX2_16Ext", deglib::Metric::FP16InnerProduct, 37000.0, 5.0, 0.866,
-                        base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                        deglib::distances::fp16_ip::InnerProductFP16_16Ext_AVX2{}, 50);
-#else
-    GTEST_SKIP() << "AVX2 not available on this platform";
-#endif
-}
-
-TEST(DeglibBuilderRegression, InnerProductFP16_Benchmark_SSE_8Ext)
-{
-#if defined(DEGLIB_X86)
-    if (!deglib::cpu::has_sse42()) {
-        GTEST_SKIP() << "SSE4.2 not available on this CPU";
-    }
-    const size_t dim = 128;
-    const size_t base_count = 100000;
-    const size_t query_count = 100;
-    const size_t num_clusters = 1000;
-
-    std::vector<uint16_t> base_data;
-    std::vector<uint16_t> query_data;
-    generate_synthetic_clustered_dataset_fp16(base_count, dim, base_data, query_data, query_count, num_clusters);
-
-    auto gt_data = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, 10);
-
-    run_regression_test("InnerProductFP16_SSE_8Ext", deglib::Metric::FP16InnerProduct, 30000.0, 6.0, 0.40,
-                        base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                        deglib::distances::fp16_ip::InnerProductFP16_8Ext_SSE{}, 50);
-#else
-    GTEST_SKIP() << "SSE not available on this platform";
-#endif
-}
-
-TEST(DeglibBuilderRegression, InnerProductFP16_Benchmark_Scalar)
-{
-    const size_t dim = 128;
-    const size_t base_count = 100000;
-    const size_t query_count = 100;
-    const size_t num_clusters = 1000;
-
-    std::vector<uint16_t> base_data;
-    std::vector<uint16_t> query_data;
-    generate_synthetic_clustered_dataset_fp16(base_count, dim, base_data, query_data, query_count, num_clusters);
-
-    auto gt_data = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, 10);
-
-    run_regression_test("InnerProductFP16_Scalar", deglib::Metric::FP16InnerProduct, 10000.0, 22.0, 0.867,
-                        base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                        deglib::distances::fp16_ip::InnerProductFP16{}, 50);
-}

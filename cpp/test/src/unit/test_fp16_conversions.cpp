@@ -360,8 +360,8 @@ TEST(FP16ConversionTest, ArrayConversionConsistency) {
 // Logs CPU support status and verifies that calling floats_to_fp16 executes
 // without crashes or fallback discrepancies.
 TEST(FP16ConversionTest, VerifyRuntimeF16CDispatch) {
-    bool has_f16c = deglib::cpu::has_f16c();
-    std::cout << "[F16C] Runtime has_f16c() = " << (has_f16c ? "true" : "false") << std::endl;
+    bool has_avx2 = deglib::cpu::has_avx2();
+    std::cout << "[F16C] Runtime has_avx2() = " << (has_avx2 ? "true" : "false") << std::endl;
 
     // Generate test data
     const size_t count = 1000;
@@ -436,8 +436,8 @@ TEST(FP16ConversionTest, CurrentVsHardwarePrecision) {
         }
     }
 
-    bool has_f16c = deglib::cpu::has_f16c();
-    std::cout << "[Precision] has_f16c() = " << (has_f16c ? "true" : "false") << std::endl;
+    bool has_avx2 = deglib::cpu::has_avx2();
+    std::cout << "[Precision] has_avx2() = " << (has_avx2 ? "true" : "false") << std::endl;
     std::cout << "[Precision] Vectorized vs scalar mismatches: " << mismatches
               << " / " << count << " (" << (100.0 * mismatches / count) << "%)" << std::endl;
 
@@ -501,8 +501,8 @@ TEST(FP16ConversionTest, BenchmarkConversionSpeed) {
     // If F16C is not available, floats_to_fp16 falls back to scalar and
     // the timings would be equal — but in that case this benchmark is not
     // meaningful, so we only assert when F16C is present.
-    if (deglib::cpu::has_f16c()) {
+    if (deglib::cpu::has_avx2()) {
         EXPECT_LT(simd_ms, current_ms)
-            << "SIMD path should be faster than scalar when F16C is available";
+            << "SIMD path should be faster than scalar when AVX2 is available";
     }
 }

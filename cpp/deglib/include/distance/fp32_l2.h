@@ -123,41 +123,6 @@ namespace deglib::distances::fp32_l2 {
             }
         };
 
-        class L2Float16Ext_SSE {
-        public:
-            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) 
-            {
-                float *a = (float *) pVect1v;
-                float *b = (float *) pVect2v;
-                size_t size = *((size_t *) qty_ptr);
-
-                const float *last = a + size;
-
-                __m128 sum128 = _mm_setzero_ps();
-                __m128 v;
-                while (a < last) {
-                    v = _mm_sub_ps(_mm_loadu_ps(a), _mm_loadu_ps(b));
-                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(v, v));
-                    a += 4;
-                    b += 4;
-                    v = _mm_sub_ps(_mm_loadu_ps(a), _mm_loadu_ps(b));
-                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(v, v));
-                    a += 4;
-                    b += 4;
-                    v = _mm_sub_ps(_mm_loadu_ps(a), _mm_loadu_ps(b));
-                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(v, v));
-                    a += 4;
-                    b += 4;
-                    v = _mm_sub_ps(_mm_loadu_ps(a), _mm_loadu_ps(b));
-                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(v, v));
-                    a += 4;
-                    b += 4;
-                }
-                alignas(32) float f[4];
-                _mm_store_ps(f, sum128);
-                return f[0] + f[1] + f[2] + f[3];
-            }
-        };
 
         // -------------------------------------------------------------------
         // L2Float8Ext — processes 8 floats (32 bytes) per iteration.
@@ -187,60 +152,11 @@ namespace deglib::distances::fp32_l2 {
             }
         };
 
-        class L2Float8Ext_SSE {
-        public:
-            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                float *a = (float *) pVect1v;
-                float *b = (float *) pVect2v;
-                size_t size = *((size_t *) qty_ptr);
-
-                const float *last = a + size;
-
-                __m128 sum128 = _mm_setzero_ps();
-                __m128 v;
-                while (a < last) {
-                    v = _mm_sub_ps(_mm_loadu_ps(a), _mm_loadu_ps(b));
-                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(v, v));
-                    a += 4;
-                    b += 4;
-                    v = _mm_sub_ps(_mm_loadu_ps(a), _mm_loadu_ps(b));
-                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(v, v));
-                    a += 4;
-                    b += 4;
-                }
-                alignas(32) float f[4];
-                _mm_store_ps(f, sum128);
-                return f[0] + f[1] + f[2] + f[3];
-            }
-        };
 
         // -------------------------------------------------------------------
         // L2Float4Ext — processes 4 floats (16 bytes) per iteration.
         // -------------------------------------------------------------------
 
-        class L2Float4Ext_SSE {
-        public:
-            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                float *a = (float *) pVect1v;
-                float *b = (float *) pVect2v;
-                size_t size = *((size_t *) qty_ptr);
-
-                const float *last = a + size;
-
-                __m128 sum128 = _mm_setzero_ps();
-                __m128 v;
-                while (a < last) {
-                    v = _mm_sub_ps(_mm_loadu_ps(a), _mm_loadu_ps(b));
-                    sum128 = _mm_add_ps(sum128, _mm_mul_ps(v, v));
-                    a += 4;
-                    b += 4;
-                }
-
-                alignas(32) float f[4];
-                _mm_store_ps(f, sum128);
-                return f[0] + f[1] + f[2] + f[3];
-            }
-        };
 
         // -------------------------------------------------------------------
         // Residual classes — process the aligned portion with the SIMD
@@ -279,37 +195,7 @@ namespace deglib::distances::fp32_l2 {
             }
         };
 
-        class L2Float16ExtResiduals_SSE {
-        public:
-            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                size_t qty = *((size_t *) qty_ptr);
 
-                size_t qty16 = qty >> 4 << 4;
-                float res = L2Float16Ext_SSE::compare(pVect1v, pVect2v, &qty16);
-                float *pVect1 = (float *) pVect1v + qty16;
-                float *pVect2 = (float *) pVect2v + qty16;
-
-                size_t qty_left = qty - qty16 ;
-                float res_tail = L2Float::compare(pVect1, pVect2, &qty_left);
-                return (res + res_tail);
-            }
-        };
-
-        class L2Float4ExtResiduals_SSE {
-        public:
-            inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                size_t qty = *((size_t *) qty_ptr);
-
-                size_t qty4 = qty >> 2 << 2;
-                float res = L2Float4Ext_SSE::compare(pVect1v, pVect2v, &qty4);
-                float *pVect1 = (float *) pVect1v + qty4;
-                float *pVect2 = (float *) pVect2v + qty4;
-
-                size_t qty_left = qty - qty4;
-                float res_tail = L2Float::compare(pVect1, pVect2, &qty_left);
-                return (res + res_tail);
-            }
-        };
 #endif
 
     using DistanceVariant = std::variant<
@@ -317,14 +203,9 @@ namespace deglib::distances::fp32_l2 {
 #if defined(DEGLIB_X86)
         , L2Float16Ext_AVX512,
         L2Float16Ext_AVX2,
-        L2Float16Ext_SSE,
         L2Float8Ext_AVX2,
-        L2Float8Ext_SSE,
-        L2Float4Ext_SSE,
         L2Float16ExtResiduals_AVX512,
-        L2Float16ExtResiduals_AVX2,
-        L2Float16ExtResiduals_SSE,
-        L2Float4ExtResiduals_SSE
+        L2Float16ExtResiduals_AVX2
 #endif
     >;
 
@@ -335,36 +216,16 @@ namespace deglib::distances::fp32_l2 {
                     return L2Float16Ext_AVX512{};
                 else if (dim % 8 == 0)
                     return L2Float8Ext_AVX2{};
-                else if (dim % 4 == 0)
-                    return L2Float4Ext_SSE{};
                 else if (dim > 16)
                     return L2Float16ExtResiduals_AVX512{};
-                else if (dim > 4)
-                    return L2Float4ExtResiduals_SSE{};
             }
             else if (deglib::cpu::has_avx2()) {
                 if (dim % 16 == 0)
                     return L2Float16Ext_AVX2{};
                 else if (dim % 8 == 0)
                     return L2Float8Ext_AVX2{};
-                else if (dim % 4 == 0)
-                    return L2Float4Ext_SSE{};
                 else if (dim > 16)
                     return L2Float16ExtResiduals_AVX2{};
-                else if (dim > 4)
-                    return L2Float4ExtResiduals_SSE{};
-            }
-            else if (deglib::cpu::has_sse42()) {
-                if (dim % 16 == 0)
-                    return L2Float16Ext_SSE{};
-                else if (dim % 8 == 0)
-                    return L2Float8Ext_SSE{};
-                else if (dim % 4 == 0)
-                    return L2Float4Ext_SSE{};
-                else if (dim > 16)
-                    return L2Float16ExtResiduals_SSE{};
-                else if (dim > 4)
-                    return L2Float4ExtResiduals_SSE{};
             }
 #endif
             return L2Float{};
