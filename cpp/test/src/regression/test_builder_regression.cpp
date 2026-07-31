@@ -15,6 +15,81 @@
 // ============================================================================
 
 // ---------------------------------------------------------------------------
+// EVP Inner Product Metric Benchmark (100k)
+// ---------------------------------------------------------------------------
+
+
+#if defined(DEGLIB_X86)
+TEST(DeglibBuilderRegression, EVPInnerProduct_Benchmark_AVX512)
+{
+    if (!deglib::cpu::has_avx512()) {
+        GTEST_SKIP() << "AVX-512 not available on this CPU";
+    }
+    const size_t dim = 512;
+    const size_t base_count = 100000;
+    const size_t query_count = 100;
+    const size_t num_clusters = 1000;
+
+    std::vector<std::byte> base_data;
+    std::vector<std::byte> query_data;
+    generate_synthetic_clustered_dataset_evp(base_count, dim, base_data, query_data, query_count, num_clusters);
+
+    auto gt_data = compute_groundtruth_evp(base_data, base_count, query_data, query_count, dim, 10);
+
+    run_regression_test("EVPInnerProduct_AVX512", deglib::Metric::EVPInnerProduct, 35000.0, 6.0, 0.898,
+                        base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                        deglib::distances::evp_ip::EvpInnerProduct_AVX512<deglib::distances::ResidualMode::SimdOnly>{}, 50,
+                        deglib::builder::OptimizationTarget::LowLID,
+                        /*edges_per_vertex=*/32, /*extend_k=*/32, /*extend_eps=*/0.01f);
+}
+
+TEST(DeglibBuilderRegression, EVPInnerProduct_Benchmark_AVX2)
+{
+    if (!deglib::cpu::has_avx2()) {
+        GTEST_SKIP() << "AVX2 not available on this CPU";
+    }
+    const size_t dim = 256;
+    const size_t base_count = 100000;
+    const size_t query_count = 100;
+    const size_t num_clusters = 1000;
+
+    std::vector<std::byte> base_data;
+    std::vector<std::byte> query_data;
+    generate_synthetic_clustered_dataset_evp(base_count, dim, base_data, query_data, query_count, num_clusters);
+
+    auto gt_data = compute_groundtruth_evp(base_data, base_count, query_data, query_count, dim, 10);
+
+    run_regression_test("EVPInnerProduct_AVX2", deglib::Metric::EVPInnerProduct, 40000.0, 4.7, 0.866,
+                        base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                        deglib::distances::evp_ip::EvpInnerProduct_AVX2<deglib::distances::ResidualMode::SimdOnly>{}, 50,
+                        deglib::builder::OptimizationTarget::LowLID,
+                         /*edges_per_vertex=*/32, /*extend_k=*/32, /*extend_eps=*/0.01f);
+}
+#endif
+
+TEST(DeglibBuilderRegression, EVPInnerProduct_Benchmark_Scalar)
+{
+    const size_t dim = 128;
+    const size_t base_count = 100000;
+    const size_t query_count = 100;
+    const size_t num_clusters = 1000;
+
+    std::vector<std::byte> base_data;
+    std::vector<std::byte> query_data;
+    generate_synthetic_clustered_dataset_evp(base_count, dim, base_data, query_data, query_count, num_clusters);
+
+    auto gt_data = compute_groundtruth_evp(base_data, base_count, query_data, query_count, dim, 10);
+
+    run_regression_test("EVPInnerProduct_Scalar", deglib::Metric::EVPInnerProduct, 47000.0, 4.0, 0.741,
+                        base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                        deglib::distances::evp_ip::EvpInnerProduct{}, 50,
+                        deglib::builder::OptimizationTarget::LowLID,
+                        /*edges_per_vertex=*/32, /*extend_k=*/32, /*extend_eps=*/0.01f);
+}
+
+
+
+// ---------------------------------------------------------------------------
 // L2 Float Metric Benchmarks (100k)
 // ---------------------------------------------------------------------------
 

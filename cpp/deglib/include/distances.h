@@ -11,6 +11,7 @@
 #include "distance/fp32_ip.h"
 #include "distance/fp16_ip.h"
 #include "distance/uint8_l2.h"
+#include "distance/evp_inner_product.h"
 
 namespace deglib {
 
@@ -20,6 +21,8 @@ namespace deglib {
         L2 = 0x00 | 1,
         InnerProduct = 0x00 | 2,
         FP16InnerProduct = 0x00 | 3,
+        // 0x20 = EVP (bit-packed)
+        EVPInnerProduct = 0x20 | 1,
 
         // 0x10 = uint8
         L2_Uint8 = 0x10 | 1
@@ -64,7 +67,8 @@ namespace deglib {
         deglib::distances::fp32_l2::DistanceVariant,
         deglib::distances::fp32_ip::DistanceVariant,
         deglib::distances::fp16_ip::DistanceVariant,
-        deglib::distances::uint8_l2::DistanceVariant
+        deglib::distances::uint8_l2::DistanceVariant,
+        deglib::distances::evp_ip::DistanceVariant
     >;
 
     // Compile-time verification that every type in DistanceVariant fulfills the DistanceFunction concept
@@ -111,6 +115,8 @@ namespace deglib {
                     return to_flat_variant(deglib::distances::fp16_ip::select_dist(dim));
                 case deglib::Metric::L2_Uint8:
                     return to_flat_variant(deglib::distances::uint8_l2::select_dist(dim));
+                case deglib::Metric::EVPInnerProduct:
+                    return to_flat_variant(deglib::distances::evp_ip::select_dist(dim));
                 default:
                     throw std::invalid_argument("Unsupported metric type in select_dist_variant");
             }
@@ -119,6 +125,8 @@ namespace deglib {
         static size_t calculate_data_size(const size_t dim, const deglib::Metric metric) {
             if (metric == deglib::Metric::FP16InnerProduct)
                 return dim * sizeof(uint16_t);
+            if (metric == deglib::Metric::EVPInnerProduct)
+                return 2 * (dim / 8);  // EVP: [ones (dim/8 bytes)][negs (dim/8 bytes)]
             return (static_cast<int>(metric) & 0x10) ? dim * sizeof(uint8_t) : dim * sizeof(float);
         }
 

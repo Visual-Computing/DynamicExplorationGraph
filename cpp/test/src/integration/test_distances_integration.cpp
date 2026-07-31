@@ -404,3 +404,93 @@ TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFP16)
                           [](const void* a, const void* b, const void* qty)
                           { return deglib::distances::fp16_ip::InnerProductFP16::compare(a, b, qty); });
 }
+
+// ---------------------------------------------------------------------------
+// EVP Inner Product distance recall tests
+// ---------------------------------------------------------------------------
+
+TEST(DeglibDistanceIntegration, DistanceRecall_EVP_AVX2_Modes)
+{
+#if defined(DEGLIB_X86)
+    if (!deglib::cpu::has_avx2()) {
+        GTEST_SKIP() << "AVX2 not available on this CPU";
+    }
+    const size_t base_count = 10000;
+    const size_t query_count = 100;
+    const uint32_t k = 10;
+
+    auto test_mode = [&](const char* name, size_t dim, auto dist_fn) {
+        std::vector<std::byte> base_data, query_data;
+        generate_synthetic_clustered_dataset_evp(base_count, dim, base_data, query_data, query_count, 1000);
+        auto gt_scalar = compute_groundtruth_evp(base_data, base_count, query_data, query_count, dim, k);
+        check_distance_recall_evp(name, base_data, base_count, query_data, query_count, dim, k, gt_scalar, dist_fn);
+    };
+
+    test_mode("EVP_AVX2_Full", 128, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::evp_ip::EvpInnerProduct_AVX2<ResidualMode::Full>::compare(a, b, qty);
+    });
+    test_mode("EVP_AVX2_DualOnly", 512, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::evp_ip::EvpInnerProduct_AVX2<ResidualMode::DualOnly>::compare(a, b, qty);
+    });
+    test_mode("EVP_AVX2_SimdOnly", 256, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::evp_ip::EvpInnerProduct_AVX2<ResidualMode::SimdOnly>::compare(a, b, qty);
+    });
+    test_mode("EVP_AVX2_TailOnly", 8, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::evp_ip::EvpInnerProduct_AVX2<ResidualMode::TailOnly>::compare(a, b, qty);
+    });
+#else
+    GTEST_SKIP() << "AVX2 not available on this platform";
+#endif
+}
+
+TEST(DeglibDistanceIntegration, DistanceRecall_EVP_AVX512_Modes)
+{
+#if defined(DEGLIB_X86)
+    if (!deglib::cpu::has_avx512()) {
+        GTEST_SKIP() << "AVX-512 not available on this CPU";
+    }
+    const size_t base_count = 10000;
+    const size_t query_count = 100;
+    const uint32_t k = 10;
+
+    auto test_mode = [&](const char* name, size_t dim, auto dist_fn) {
+        std::vector<std::byte> base_data, query_data;
+        generate_synthetic_clustered_dataset_evp(base_count, dim, base_data, query_data, query_count, 1000);
+        auto gt_scalar = compute_groundtruth_evp(base_data, base_count, query_data, query_count, dim, k);
+        check_distance_recall_evp(name, base_data, base_count, query_data, query_count, dim, k, gt_scalar, dist_fn);
+    };
+
+    test_mode("EVP_AVX512_Full", 128, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::evp_ip::EvpInnerProduct_AVX512<ResidualMode::Full>::compare(a, b, qty);
+    });
+    test_mode("EVP_AVX512_DualOnly", 1024, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::evp_ip::EvpInnerProduct_AVX512<ResidualMode::DualOnly>::compare(a, b, qty);
+    });
+    test_mode("EVP_AVX512_SimdOnly", 512, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::evp_ip::EvpInnerProduct_AVX512<ResidualMode::SimdOnly>::compare(a, b, qty);
+    });
+    test_mode("EVP_AVX512_TailOnly", 8, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::evp_ip::EvpInnerProduct_AVX512<ResidualMode::TailOnly>::compare(a, b, qty);
+    });
+#else
+    GTEST_SKIP() << "AVX-512 not available on this platform";
+#endif
+}
+
+TEST(DeglibDistanceIntegration, DistanceRecall_EVP)
+{
+    const size_t dim = 128;
+    const size_t base_count = 10000;
+    const size_t query_count = 100;
+    const uint32_t k = 10;
+
+    std::vector<std::byte> base_data;
+    std::vector<std::byte> query_data;
+    generate_synthetic_clustered_dataset_evp(base_count, dim, base_data, query_data, query_count, 1000);
+
+    auto gt_scalar = compute_groundtruth_evp(base_data, base_count, query_data, query_count, dim, k);
+
+    check_distance_recall_evp("EVP", base_data, base_count, query_data, query_count, dim, k, gt_scalar,
+                              [](const void* a, const void* b, const void* qty)
+                              { return deglib::distances::evp_ip::EvpInnerProduct::compare(a, b, qty); });
+}

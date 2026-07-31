@@ -13,6 +13,9 @@
 #include <unordered_set>
 #include <vector>
 
+#include "quantization/evp_quantize.h"
+#include "distance/evp_inner_product.h"
+
 // ============================================================================
 // Shared Test Utilities
 // ============================================================================
@@ -301,6 +304,42 @@ inline static std::vector<std::vector<uint32_t>> compute_groundtruth_l2_uint8(co
                                       });
 }
 
+// Compute exact brute-force EVP InnerProduct groundtruth for top-K neighbors.
+// Uses the scalar EvpInnerProduct::compare() from deglib to ensure
+// the ground-truth distances match the actual distance computation exactly.
+// For EVP, a single vector is 2 * (dim / 8) bytes (ones mask + negative_ones mask).
+inline static std::vector<std::vector<uint32_t>> compute_groundtruth_evp(const std::vector<std::byte>& base, size_t base_count,
+                                                                     const std::vector<std::byte>& query, size_t query_count,
+                                                                     size_t dim, uint32_t k)
+{
+    const size_t bytes_per_vec = 2 * (dim / 8);
+    return compute_groundtruth_custom<std::byte>(base, base_count, query, query_count, bytes_per_vec, k,
+        [dim](const std::byte* q_vec, const std::byte* b_vec, const void*)
+        {
+            uint32_t d = static_cast<uint32_t>(dim);
+            return deglib::distances::evp_ip::EvpInnerProduct::compare(q_vec, b_vec, &d);
+        });
+}
+
+// ---------------------------------------------------------------------------
+// Dataset generation (EVP, for EVPInnerProduct)
+// ---------------------------------------------------------------------------
+
+// Generate cross-platform deterministic clustered EVP dataset.
+// Generates float vectors using generate_synthetic_clustered_dataset(),
+// then quantizes them to EVP bytes via deglib::quantization::quantize_batch().
+inline static void generate_synthetic_clustered_dataset_evp(size_t count, size_t dim, std::vector<std::byte>& base_evp,
+                                                        std::vector<std::byte>& query_evp, size_t query_count,
+                                                        size_t num_clusters = 20, uint32_t non_zeros = 0)
+{
+    if (non_zeros == 0) non_zeros = static_cast<uint32_t>(dim / 4);
+    std::vector<float> base_float, query_float;
+    generate_synthetic_clustered_dataset(count, dim, base_float, query_float, query_count, num_clusters);
+
+    base_evp  = deglib::quantization::quantize_batch(base_float.data(), count, dim, non_zeros);
+    query_evp = deglib::quantization::quantize_batch(query_float.data(), query_count, dim, non_zeros);
+}
+
 // ---------------------------------------------------------------------------
 // Distance recall verification (SIMD variant vs scalar ground truth)
 // ---------------------------------------------------------------------------
@@ -321,6 +360,53 @@ inline static void check_distance_recall(const char* name, const std::vector<Ele
         {
             const void* b_vec = static_cast<const void*>(&base_data[i * dim]);
             size_t qty = dim;
+            float d = dist_func(q_vec, b_vec, &qty);
+            dists[i] = {d, static_cast<uint32_t>(i)};
+        }
+        std::partial_sort(dists.begin(), dists.begin() + k, dists.end());
+        gt[q].reserve(k);
+        for (uint32_t i = 0; i < k; ++i) gt[q].push_back(dists[i].second);
+    }
+
+    size_t correct = 0;
+    for (size_t q = 0; q < query_count; ++q)
+    {
+        std::unordered_set<uint32_t> gt_set(gt_scalar[q].begin(), gt_scalar[q].end());
+        for (uint32_t idx : gt[q])
+        {
+            if (gt_set.count(idx)) ++correct;
+        }
+    }
+    double recall = static_cast<double>(correct) / static_cast<double>(query_count * k);
+    std::cout << "[DistanceRecall " << name << "] recall=" << recall << "  correct=" << correct << "/"
+              << (query_count * k) << std::endl;
+    EXPECT_EQ(recall, 1.0) << "Distance recall between scalar and " << name << " must be exactly 1.0";
+}
+
+// ---------------------------------------------------------------------------
+// Distance recall verification for EVP (SIMD variant vs scalar ground truth)
+// ---------------------------------------------------------------------------
+// EVP vectors are bit-packed: 2 * (dim / 8) bytes per vector. The dim parameter
+// passed to check_distance_recall controls vector indexing, but EVP distance
+// functions need the original float dimension as qty_ptr. This wrapper handles
+// the type mismatch by using bytes_per_vec for indexing and the float dim for qty.
+template <typename DistFunc>
+inline static void check_distance_recall_evp(const char* name, const std::vector<std::byte>& base_data, size_t base_count,
+                                             const std::vector<std::byte>& query_data, size_t query_count,
+                                             size_t dim, uint32_t k,
+                                             const std::vector<std::vector<uint32_t>>& gt_scalar,
+                                             DistFunc dist_func)
+{
+    const size_t bytes_per_vec = 2 * (dim / 8);
+    std::vector<std::vector<uint32_t>> gt(query_count);
+    for (int q = 0; q < static_cast<int>(query_count); ++q)
+    {
+        std::vector<std::pair<float, uint32_t>> dists(base_count);
+        const std::byte* q_vec = &query_data[q * bytes_per_vec];
+        for (size_t i = 0; i < base_count; ++i)
+        {
+            const std::byte* b_vec = &base_data[i * bytes_per_vec];
+            uint32_t qty = static_cast<uint32_t>(dim);
             float d = dist_func(q_vec, b_vec, &qty);
             dists[i] = {d, static_cast<uint32_t>(i)};
         }
@@ -372,6 +458,8 @@ inline static void run_integration_test(const char* name, deglib::Metric metric,
     size_t feature_bytes;
     if (metric == deglib::Metric::FP16InnerProduct)
         feature_bytes = dim * sizeof(uint16_t);
+    else if (metric == deglib::Metric::EVPInnerProduct)
+        feature_bytes = 2 * (dim / 8);
     else
         feature_bytes = (static_cast<int>(metric) & 0x10) ? dim * sizeof(uint8_t) : dim * sizeof(float);
 
@@ -525,6 +613,19 @@ inline static void run_builder_integration_test(const char* name, deglib::Metric
                              base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                              dist_variant, optimization_target);
     }
+    else if (metric == deglib::Metric::EVPInnerProduct)
+    {
+        // EVP metric
+        std::vector<std::byte> base_data;
+        std::vector<std::byte> query_data;
+        generate_synthetic_clustered_dataset_evp(base_count, dim, base_data, query_data, query_count, num_clusters);
+
+        auto gt_data = compute_groundtruth_evp(base_data, base_count, query_data, query_count, dim, 10);
+
+        run_integration_test(name, metric, min_recall,
+                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                             dist_variant, optimization_target);
+    }
     else
     {
         // float metric (L2 or InnerProduct)
@@ -561,14 +662,15 @@ inline static void run_regression_test(const char* name, deglib::Metric metric, 
                                 size_t dim, const std::vector<std::vector<uint32_t>>& gt_data,
                                 std::optional<deglib::DistanceVariant> dist_variant = std::nullopt,
                                 size_t num_runs = 5,
-                                deglib::builder::OptimizationTarget optimization_target = deglib::builder::OptimizationTarget::LowLID)
+                                deglib::builder::OptimizationTarget optimization_target = deglib::builder::OptimizationTarget::LowLID,
+                                uint32_t edges_per_vertex = 32,
+                                uint8_t extend_k = 0,
+                                float extend_eps = 0.1f)
 {
     const uint32_t search_k = 10;
     const float search_eps = 0.05f;
 
-    const uint32_t edges_per_vertex = 32;
-    const uint8_t extend_k = static_cast<uint8_t>(edges_per_vertex);
-    const float extend_eps = 0.1f;
+    if (extend_k == 0) extend_k = static_cast<uint8_t>(edges_per_vertex);
     const uint8_t improve_k = 0;
     const float improve_eps = 0.0f;
     const uint8_t max_path_length = 5;
@@ -580,6 +682,8 @@ inline static void run_regression_test(const char* name, deglib::Metric metric, 
     size_t feature_bytes;
     if (metric == deglib::Metric::FP16InnerProduct)
         feature_bytes = dim * sizeof(uint16_t);
+    else if (metric == deglib::Metric::EVPInnerProduct)
+        feature_bytes = 2 * (dim / 8);
     else
         feature_bytes = (static_cast<int>(metric) & 0x10) ? dim * sizeof(uint8_t) : dim * sizeof(float);
 
@@ -696,6 +800,11 @@ inline static uint64_t fnv1a_64(const void* data, size_t bytes) {
 // Compute checksum of a float vector
 inline static uint64_t float_vector_checksum(const std::vector<float>& vec) {
     return fnv1a_64(vec.data(), vec.size() * sizeof(float));
+}
+
+// Compute checksum of a byte vector
+inline static uint64_t byte_vector_checksum(const std::vector<std::byte>& vec) {
+    return fnv1a_64(vec.data(), vec.size());
 }
 
 // Compute checksum of groundtruth 2D vector

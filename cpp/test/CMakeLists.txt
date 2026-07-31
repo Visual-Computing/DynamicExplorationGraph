@@ -48,6 +48,8 @@ endmacro()
 add_deglib_test(test_config src/unit/test_config.cpp)
 add_deglib_test(test_distance_fp16 src/unit/distance/test_fp16.cpp)
 add_deglib_test(test_distances src/unit/test_distances.cpp)
+add_deglib_test(test_evp_quantize src/unit/quantization/test_evp_quantize.cpp)
+add_deglib_test(test_evp_inner_product src/unit/distance/test_evp_inner_product.cpp)
 
 # Integration tests (fast, recall-only, registered with CTest for CI)
 add_deglib_integration_test(test_builder_integration src/integration/test_builder_integration.cpp)

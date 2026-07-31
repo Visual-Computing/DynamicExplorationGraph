@@ -325,3 +325,54 @@ TEST(DeglibBuilderIntegration, Builder_L2_StreamingData)
                                  std::nullopt,
                                  deglib::builder::OptimizationTarget::StreamingData);
 }
+
+// ---------------------------------------------------------------------------
+// EVP Inner Product Metric Builder Tests
+// ---------------------------------------------------------------------------
+
+TEST(DeglibBuilderIntegration, EvpDatasetBitExactness)
+{
+    const size_t dim = 128;
+    const size_t base_count = 10000;
+    const size_t query_count = 100;
+    const size_t num_clusters = 1000;
+    const uint32_t non_zeros = 32;
+
+    std::vector<std::byte> base_evp;
+    std::vector<std::byte> query_evp;
+    generate_synthetic_clustered_dataset_evp(base_count, dim, base_evp, query_evp, query_count, num_clusters, non_zeros);
+
+    const uint64_t base_hash = byte_vector_checksum(base_evp);
+    const uint64_t query_hash = byte_vector_checksum(query_evp);
+
+    auto gt_evp = compute_groundtruth_evp(base_evp, base_count, query_evp, query_count, dim, 10);
+    const uint64_t gt_evp_hash = groundtruth_checksum(gt_evp);
+
+    std::cout << "[EvpDatasetBitExactness] base_hash = 0x" << std::hex << base_hash << std::dec << std::endl;
+    std::cout << "[EvpDatasetBitExactness] query_hash = 0x" << std::hex << query_hash << std::dec << std::endl;
+    std::cout << "[EvpDatasetBitExactness] gt_evp_hash = 0x" << std::hex << gt_evp_hash << std::dec << std::endl;
+
+    // Hardcoded expected hashes computed on Windows (10k dataset)
+    // Checksum verification ensures 100% bit-exact dataset generation and groundtruth across OS/compilers.
+    EXPECT_EQ(base_hash, 0xe8de72f535d6e07dULL) << "base_evp checksum mismatch across platforms!";
+    EXPECT_EQ(query_hash, 0xccb8e62c3224256fULL) << "query_evp checksum mismatch across platforms!";
+    EXPECT_EQ(gt_evp_hash, 0xc01f476e432ca611ULL) << "gt_evp checksum mismatch across platforms!";
+}
+
+TEST(DeglibBuilderIntegration, EVPInnerProduct_Recall)
+{
+    const size_t dim = 128;
+    const size_t base_count = 10000;
+    const size_t query_count = 100;
+    const size_t num_clusters = 1000;
+    const uint32_t non_zeros = 32;
+
+    std::vector<std::byte> base_evp;
+    std::vector<std::byte> query_evp;
+    generate_synthetic_clustered_dataset_evp(base_count, dim, base_evp, query_evp, query_count, num_clusters, non_zeros);
+
+    auto gt_evp = compute_groundtruth_evp(base_evp, base_count, query_evp, query_count, dim, 10);
+
+    run_integration_test("EVPInnerProduct", deglib::Metric::EVPInnerProduct, 0.95,
+                         base_evp.data(), query_evp.data(), base_count, query_count, dim, gt_evp);
+}
