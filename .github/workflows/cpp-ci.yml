@@ -21,12 +21,6 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Install Build Tools (Linux)
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y cmake g++
-
     - name: Configure CMake
       run: cmake -B build -S cpp -DFORCE_AVX2=ON -DENABLE_BENCHMARKS=OFF
 
