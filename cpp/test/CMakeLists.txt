@@ -44,11 +44,10 @@ macro(add_deglib_test_no_ctest name source)
     set_target_properties(${name} PROPERTIES INTERMEDIATE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/obj/${name}")
 endmacro()
 
-# Phase 1 Test Target: CPU Features & Build Verification
-add_deglib_test(test_cpu_features src/test_cpu_features.cpp)
-
-# Unit tests (FP16 conversion, etc.)
-add_deglib_test(test_fp16_conversions src/unit/test_fp16_conversions.cpp)
+# Unit tests
+add_deglib_test(test_config src/unit/test_config.cpp)
+add_deglib_test(test_distance_fp16 src/unit/distance/test_fp16.cpp)
+add_deglib_test(test_distances src/unit/test_distances.cpp)
 
 # Integration tests (fast, recall-only, registered with CTest for CI)
 add_deglib_integration_test(test_builder_integration src/integration/test_builder_integration.cpp)
@@ -57,5 +56,3 @@ add_deglib_integration_test(test_distances_integration src/integration/test_dist
 # Regression tests (100k vectors, performance benchmarking — built but NOT registered with CTest)
 add_deglib_test_no_ctest(test_builder_regression src/regression/test_builder_regression.cpp)
 
-# Meta target to build all regression tests
-add_custom_target(test_regression DEPENDS test_builder_regression)

@@ -173,30 +173,30 @@ TEST(DeglibBuilderIntegration, StreamingDataDeterminism)
 // L2 Float Metric Builder Tests (10k)
 // ---------------------------------------------------------------------------
 
-TEST(DeglibBuilderIntegration, L2_AVX512_16Ext)
+TEST(DeglibBuilderIntegration, L2_AVX512)
 {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
     }
-    run_builder_integration_test("L2_AVX512_16Ext", deglib::Metric::L2, 0.96,
+    run_builder_integration_test("L2_AVX512", deglib::Metric::L2, 0.96,
                                  128, 10000, 100, 1000,
-                                 deglib::distances::fp32_l2::L2Float16Ext_AVX512{},
+                                 deglib::distances::fp32_l2::L2Float_AVX512<>{},
                                  deglib::builder::OptimizationTarget::LowLID);
 #else
     GTEST_SKIP() << "AVX512 not available on this platform";
 #endif
 }
 
-TEST(DeglibBuilderIntegration, L2_AVX2_16Ext)
+TEST(DeglibBuilderIntegration, L2_AVX2)
 {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
     }
-    run_builder_integration_test("L2_AVX2_16Ext", deglib::Metric::L2, 0.96,
+    run_builder_integration_test("L2_AVX2", deglib::Metric::L2, 0.96,
                                  128, 10000, 100, 1000,
-                                 deglib::distances::fp32_l2::L2Float16Ext_AVX2{},
+                                 deglib::distances::fp32_l2::L2Float_AVX2<>{},
                                  deglib::builder::OptimizationTarget::LowLID);
 #else
     GTEST_SKIP() << "AVX2 not available on this platform";
@@ -216,30 +216,30 @@ TEST(DeglibBuilderIntegration, L2_Scalar)
 // InnerProduct Float Metric Builder Tests (10k)
 // ---------------------------------------------------------------------------
 
-TEST(DeglibBuilderIntegration, IP_AVX512_16Ext)
+TEST(DeglibBuilderIntegration, IP_AVX512)
 {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
     }
-    run_builder_integration_test("IP_AVX512_16Ext", deglib::Metric::InnerProduct, 0.86,
+    run_builder_integration_test("IP_AVX512", deglib::Metric::InnerProduct, 0.86,
                                  128, 10000, 100, 1000,
-                                 deglib::distances::fp32_ip::InnerProductFloat16Ext_AVX512{},
+                                 deglib::distances::fp32_ip::InnerProductFloat_AVX512<>{},
                                  deglib::builder::OptimizationTarget::LowLID);
 #else
     GTEST_SKIP() << "AVX512 not available on this platform";
 #endif
 }
 
-TEST(DeglibBuilderIntegration, IP_AVX2_16Ext)
+TEST(DeglibBuilderIntegration, IP_AVX2)
 {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
     }
-    run_builder_integration_test("IP_AVX2_16Ext", deglib::Metric::InnerProduct, 0.86,
+    run_builder_integration_test("IP_AVX2", deglib::Metric::InnerProduct, 0.86,
                                  128, 10000, 100, 1000,
-                                 deglib::distances::fp32_ip::InnerProductFloat16Ext_AVX2{},
+                                 deglib::distances::fp32_ip::InnerProductFloat_AVX2<>{},
                                  deglib::builder::OptimizationTarget::LowLID);
 #else
     GTEST_SKIP() << "AVX2 not available on this platform";
@@ -259,30 +259,30 @@ TEST(DeglibBuilderIntegration, IP_Scalar)
 // L2 Uint8 Metric Builder Tests (10k)
 // ---------------------------------------------------------------------------
 
-TEST(DeglibBuilderIntegration, L2_Uint8_AVX512_32Ext)
+TEST(DeglibBuilderIntegration, L2_Uint8_AVX512)
 {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
     }
-    run_builder_integration_test("L2_Uint8_AVX512_32Ext", deglib::Metric::L2_Uint8, 0.99,
+    run_builder_integration_test("L2_Uint8_AVX512", deglib::Metric::L2_Uint8, 0.99,
                                  128, 10000, 100, 1000,
-                                 deglib::distances::uint8_l2::L2Uint8Ext32_AVX512{},
+                                 deglib::distances::uint8_l2::L2Uint8_AVX512<>{},
                                  deglib::builder::OptimizationTarget::LowLID);
 #else
     GTEST_SKIP() << "AVX512 not available on this platform";
 #endif
 }
 
-TEST(DeglibBuilderIntegration, L2_Uint8_AVX2_32Ext)
+TEST(DeglibBuilderIntegration, L2_Uint8_AVX2)
 {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
     }
-    run_builder_integration_test("L2_Uint8_AVX2_32Ext", deglib::Metric::L2_Uint8, 0.99,
+    run_builder_integration_test("L2_Uint8_AVX2", deglib::Metric::L2_Uint8, 0.99,
                                  128, 10000, 100, 1000,
-                                 deglib::distances::uint8_l2::L2Uint8Ext32_AVX2{},
+                                 deglib::distances::uint8_l2::L2Uint8_AVX2<>{},
                                  deglib::builder::OptimizationTarget::LowLID);
 #else
     GTEST_SKIP() << "AVX2 not available on this platform";

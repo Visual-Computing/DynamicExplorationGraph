@@ -49,54 +49,77 @@ namespace deglib::distances::fp32_ip {
 
 #if defined(DEGLIB_X86)
         // -------------------------------------------------------------------
-        // InnerProductFloat16Ext — processes 16 floats (64 bytes) per iteration.
+        // InnerProductFloat SIMD implementations — process vectors with
+        // aligned SIMD portions plus scalar residuals for any unaligned tail.
         // Separate classes per SIMD width so that compare() has zero
         // runtime dispatch overhead — select_dist() chooses the class.
+        // The HasResidual template parameter controls whether the scalar
+        // residual tail loop is compiled in. When HasResidual == false,
+        // the residual loop is eliminated at compile time, producing a
+        // faster path for dimensions that are known to be SIMD-aligned.
         // -------------------------------------------------------------------
 
-        class InnerProductFloat16Ext_AVX512 {
+        template <ResidualMode Mode = ResidualMode::Full>
+        class InnerProductFloat_AVX512 {
+            static constexpr bool HasDualSimd = has_flag(Mode, ResidualMode::DualSimd);
+            static constexpr bool HasSimd     = has_flag(Mode, ResidualMode::Simd);
+            static constexpr bool HasTail     = has_flag(Mode, ResidualMode::Tail);
+
         public:
             DEGLIB_TARGET_AVX512 inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return 1.f - dot(pVect1v, pVect2v, qty_ptr);
-            }
-
-            DEGLIB_TARGET_AVX512 inline static float dot(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return ip_16ext(pVect1v, pVect2v, qty_ptr);
-            }
-
-            DEGLIB_TARGET_AVX512 inline static float ip_16ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
 
                 const float *last = a + size;
 
-                __m512 sum512 = _mm512_setzero_ps();
-                while (a < last) {
-                    sum512 = _mm512_fmadd_ps(_mm512_loadu_ps(a), _mm512_loadu_ps(b), sum512);
-                    a += 16;
-                    b += 16;
+                __m512 sum512_1 = _mm512_setzero_ps();
+                __m512 sum512_2 = _mm512_setzero_ps();
+                if constexpr (HasDualSimd) {
+                    while (a + 31 < last) {
+                        sum512_1 = _mm512_fmadd_ps(_mm512_loadu_ps(a), _mm512_loadu_ps(b), sum512_1);
+                        a += 16;
+                        b += 16;
+                        sum512_2 = _mm512_fmadd_ps(_mm512_loadu_ps(a), _mm512_loadu_ps(b), sum512_2);
+                        a += 16;
+                        b += 16;
+                    }
+                }
+                if constexpr (HasSimd) {
+                    while (a + 15 < last) {
+                        sum512_1 = _mm512_fmadd_ps(_mm512_loadu_ps(a), _mm512_loadu_ps(b), sum512_1);
+                        a += 16;
+                        b += 16;
+                    }
                 }
 
+                // Horizontal reduce of SIMD accumulators
+                __m512 sum512 = _mm512_add_ps(sum512_1, sum512_2);
                 __m256 sum256 = _mm256_add_ps(_mm512_extractf32x8_ps(sum512, 0), _mm512_extractf32x8_ps(sum512, 1));
                 __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
                 alignas(32) float f[4];
                 _mm_store_ps(f, sum128);
-                return f[0] + f[1] + f[2] + f[3];
+                float result = f[0] + f[1] + f[2] + f[3];
+
+                // Scalar residual for the unaligned tail — eliminated at compile-time if HasTail == false
+                if constexpr (HasTail) {
+                    while (a < last) {
+                        result = std::fma(*a++, *b++, result);
+                    }
+                }
+
+                return 1.f - result;
             }
         };
 
-        class InnerProductFloat16Ext_AVX2 {
+        template <ResidualMode Mode = ResidualMode::Full>
+        class InnerProductFloat_AVX2 {
+            static constexpr bool HasDualSimd = has_flag(Mode, ResidualMode::DualSimd);
+            static constexpr bool HasSimd     = has_flag(Mode, ResidualMode::Simd);
+            static constexpr bool HasTail     = has_flag(Mode, ResidualMode::Tail);
+
         public:
             DEGLIB_TARGET_AVX2 inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return 1.f - dot(pVect1v, pVect2v, qty_ptr);
-            }
-
-            DEGLIB_TARGET_AVX2 inline static float dot(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return ip_16ext(pVect1v, pVect2v, qty_ptr);
-            }
-
-            DEGLIB_TARGET_AVX2 inline static float ip_16ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 float *a = (float *) pVect1v;
                 float *b = (float *) pVect2v;
                 size_t size = *((size_t *) qty_ptr);
@@ -105,131 +128,88 @@ namespace deglib::distances::fp32_ip {
 
                 __m256 sum256_1 = _mm256_setzero_ps();
                 __m256 sum256_2 = _mm256_setzero_ps();
-                while (a < last) {
-                    sum256_1 = _mm256_fmadd_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b), sum256_1);
-                    a += 8;
-                    b += 8;        
-                    sum256_2 = _mm256_fmadd_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b), sum256_2);
-                    a += 8;
-                    b += 8;
+                if constexpr (HasDualSimd) {
+                    while (a + 15 < last) {
+                        sum256_1 = _mm256_fmadd_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b), sum256_1);
+                        a += 8;
+                        b += 8;
+                        sum256_2 = _mm256_fmadd_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b), sum256_2);
+                        a += 8;
+                        b += 8;
+                    }
                 }
+                if constexpr (HasSimd) {
+                    while (a + 7 < last) {
+                        sum256_1 = _mm256_fmadd_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b), sum256_1);
+                        a += 8;
+                        b += 8;
+                    }
+                }
+
+                // Horizontal reduce of SIMD accumulators
                 __m256 sum256 = _mm256_add_ps(sum256_1, sum256_2);
                 __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
                 alignas(32) float f[4];
                 _mm_store_ps(f, sum128);
-                return f[0] + f[1] + f[2] + f[3];
-            }
-        };
+                float result = f[0] + f[1] + f[2] + f[3];
 
-
-        // -------------------------------------------------------------------
-        // InnerProductFloat8Ext — processes 8 floats (32 bytes) per iteration.
-        // -------------------------------------------------------------------
-
-        class InnerProductFloat8Ext_AVX2 {
-        public:
-            DEGLIB_TARGET_AVX2 inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return 1.f - dot(pVect1v, pVect2v, qty_ptr);
-            }
-
-            DEGLIB_TARGET_AVX2 inline static float dot(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                return ip_8ext(pVect1v, pVect2v, qty_ptr);
-            }
-
-            DEGLIB_TARGET_AVX2 inline static float ip_8ext(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                float *a = (float *) pVect1v;
-                float *b = (float *) pVect2v;
-                size_t size = *((size_t *) qty_ptr);
-                
-                const float *last = a + size;
-
-                __m256 sum256 = _mm256_setzero_ps();
-                while (a < last) {
-                    sum256 = _mm256_fmadd_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b), sum256);
-                    a += 8;
-                    b += 8;
+                // Scalar residual for the unaligned tail — eliminated at compile-time if HasTail == false
+                if constexpr (HasTail) {
+                    while (a < last) {
+                        result = std::fma(*a++, *b++, result);
+                    }
                 }
-                __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
-                alignas(32) float f[4];
-                _mm_store_ps(f, sum128);
-                return f[0] + f[1] + f[2] + f[3];
+
+                return 1.f - result;
             }
         };
-
-
-        // -------------------------------------------------------------------
-        // InnerProductFloat4Ext — processes 4 floats (16 bytes) per iteration.
-        // -------------------------------------------------------------------
-
-
-        // -------------------------------------------------------------------
-        // Residual classes — process the aligned portion with the SIMD
-        // variant and the remainder with the scalar fallback.
-        // -------------------------------------------------------------------
-
-        class InnerProductFloat16ExtResiduals_AVX512 {
-        public:
-            DEGLIB_TARGET_AVX512 inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                size_t qty = *((size_t *) qty_ptr);
-
-                size_t qty16 = qty >> 4 << 4;
-                float res = InnerProductFloat16Ext_AVX512::dot(pVect1v, pVect2v, &qty16);
-                float *pVect1 = (float *) pVect1v + qty16;
-                float *pVect2 = (float *) pVect2v + qty16;
-
-                size_t qty_left = qty - qty16;
-                float res_tail = InnerProductFloat::dot(pVect1, pVect2, &qty_left);
-                return 1.f - (res + res_tail);
-            }
-        };
-
-        class InnerProductFloat16ExtResiduals_AVX2 {
-        public:
-            DEGLIB_TARGET_AVX2 inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
-                size_t qty = *((size_t *) qty_ptr);
-
-                size_t qty16 = qty >> 4 << 4;
-                float res = InnerProductFloat16Ext_AVX2::dot(pVect1v, pVect2v, &qty16);
-                float *pVect1 = (float *) pVect1v + qty16;
-                float *pVect2 = (float *) pVect2v + qty16;
-
-                size_t qty_left = qty - qty16;
-                float res_tail = InnerProductFloat::dot(pVect1, pVect2, &qty_left);
-                return 1.f - (res + res_tail);
-            }
-        };
-
-
 #endif
 
     using DistanceVariant = std::variant<
         InnerProductFloat
 #if defined(DEGLIB_X86)
-        , InnerProductFloat16Ext_AVX512,
-        InnerProductFloat16Ext_AVX2,
-        InnerProductFloat8Ext_AVX2,
-        InnerProductFloat16ExtResiduals_AVX512,
-        InnerProductFloat16ExtResiduals_AVX2
+        , InnerProductFloat_AVX512<ResidualMode::Full>
+        , InnerProductFloat_AVX512<ResidualMode::DualPlusSimd>
+        , InnerProductFloat_AVX512<ResidualMode::DualTail>
+        , InnerProductFloat_AVX512<ResidualMode::DualOnly>
+        , InnerProductFloat_AVX512<ResidualMode::SimdTail>
+        , InnerProductFloat_AVX512<ResidualMode::SimdOnly>
+        , InnerProductFloat_AVX512<ResidualMode::TailOnly>
+        , InnerProductFloat_AVX2<ResidualMode::Full>
+        , InnerProductFloat_AVX2<ResidualMode::DualPlusSimd>
+        , InnerProductFloat_AVX2<ResidualMode::DualTail>
+        , InnerProductFloat_AVX2<ResidualMode::DualOnly>
+        , InnerProductFloat_AVX2<ResidualMode::SimdTail>
+        , InnerProductFloat_AVX2<ResidualMode::SimdOnly>
+        , InnerProductFloat_AVX2<ResidualMode::TailOnly>
 #endif
     >;
 
     inline DistanceVariant select_dist(const size_t dim) {
 #if defined(DEGLIB_X86)
             if (deglib::cpu::has_avx512()) {
-                if (dim % 16 == 0)
-                    return InnerProductFloat16Ext_AVX512{};
-                else if (dim % 8 == 0)
-                    return InnerProductFloat8Ext_AVX2{};
-                else if (dim > 16)
-                    return InnerProductFloat16ExtResiduals_AVX512{};
+                if (dim < 16) {
+                    return InnerProductFloat_AVX512<ResidualMode::TailOnly>{};
+                } else if (dim < 32) {
+                    if (dim == 16) return InnerProductFloat_AVX512<ResidualMode::SimdOnly>{};
+                    else return InnerProductFloat_AVX512<ResidualMode::SimdTail>{};
+                } else {
+                    if (dim % 32 == 0) return InnerProductFloat_AVX512<ResidualMode::DualOnly>{};
+                    else if (dim % 16 == 0) return InnerProductFloat_AVX512<ResidualMode::DualPlusSimd>{};
+                    else return InnerProductFloat_AVX512<ResidualMode::Full>{};
+                }
             }
             else if (deglib::cpu::has_avx2()) {
-                if (dim % 16 == 0)
-                    return InnerProductFloat16Ext_AVX2{};
-                else if (dim % 8 == 0)
-                    return InnerProductFloat8Ext_AVX2{};
-                else if (dim > 16)
-                    return InnerProductFloat16ExtResiduals_AVX2{};
+                if (dim < 8) {
+                    return InnerProductFloat_AVX2<ResidualMode::TailOnly>{};
+                } else if (dim < 16) {
+                    if (dim == 8) return InnerProductFloat_AVX2<ResidualMode::SimdOnly>{};
+                    else return InnerProductFloat_AVX2<ResidualMode::SimdTail>{};
+                } else {
+                    if (dim % 16 == 0) return InnerProductFloat_AVX2<ResidualMode::DualOnly>{};
+                    else if (dim % 8 == 0) return InnerProductFloat_AVX2<ResidualMode::DualPlusSimd>{};
+                    else return InnerProductFloat_AVX2<ResidualMode::Full>{};
+                }
             }
 #endif
             return InnerProductFloat{};
