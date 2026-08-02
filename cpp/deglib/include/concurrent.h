@@ -67,4 +67,89 @@ namespace deglib::concurrent {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // parallel_batch_for: parallel loop over contiguous batches.
+  //
+  // Splits [start, end) into min(numThreads, end-start) contiguous chunks and
+  // invokes
+  //     fn(begin, end, threadId)
+  // exactly once per non-empty chunk, with the half-open range [begin, end).
+  //
+  // Unlike parallel_for (which calls fn once per element and increments a
+  // shared atomic counter per element), the counter is only touched once per
+  // CHUNK. On fine-grained work (short fn bodies) that removes the cache-line
+  // ping-pong between workers, which is what makes element-wise loops with a
+  // shared counter scale poorly. Chunks are still claimed dynamically by the
+  // workers, so load stays balanced even when the work per element varies.
+  // Contiguous chunks also give better cache locality than interleaved
+  // element-wise claiming.
+  //
+  // The caller thread participates as worker 0 (like parallel_for). The range
+  // [begin, end) is passed so callers can write `for (size_t i = begin; i < end;
+  // ++i) { ... }` or use std::copy_n / std::memcpy on the whole slice.
+  // Exceptions thrown by fn are captured and re-thrown on the caller thread.
+  // ---------------------------------------------------------------------------
+  template<class Function>
+  inline void parallel_batch_for(size_t start, size_t end, size_t numThreads, Function fn) {
+    if (numThreads <= 0) {
+      numThreads = std::thread::hardware_concurrency();
+    }
+
+    const size_t count = end - start;
+    if (count == 0) {
+      return;
+    }
+
+    const size_t numChunks = std::min(numThreads, count);
+    if (numChunks == 1) {
+      fn(start, end, 0);
+      return;
+    }
+
+    // Static partition of [0, count) into numChunks contiguous chunks:
+    //   base = count / numChunks, rem = count % numChunks
+    //   chunk c = [c*base + min(c, rem),  c*base + min(c, rem) + base + (c < rem))
+    // The first `rem` chunks have base+1 elements, the rest have base.
+    const size_t base = count / numChunks;
+    const size_t rem = count % numChunks;
+
+    std::atomic<size_t> current(0);
+    std::vector<std::thread> threads;
+
+    // keep track of exceptions in threads (same scheme as parallel_for)
+    std::exception_ptr lastException = nullptr;
+    std::mutex lastExceptMutex;
+
+    auto worker = [&](size_t threadId) {
+      while (true) {
+        size_t c = current.fetch_add(1);
+        if (c >= numChunks) {
+          break;
+        }
+        const size_t cbegin = start + c * base + std::min(c, rem);
+        const size_t clen = base + (c < rem ? 1 : 0);
+        try {
+          fn(cbegin, cbegin + clen, threadId);
+        } catch (...) {
+          std::unique_lock<std::mutex> lastExcepLock(lastExceptMutex);
+          lastException = std::current_exception();
+          current = numChunks; // stop the remaining workers
+          break;
+        }
+      }
+    };
+
+    threads.reserve(numChunks - 1);
+    for (size_t threadId = 1; threadId < numChunks; ++threadId) {
+      threads.emplace_back(worker, threadId);
+    }
+    worker(0); // caller participates
+    for (auto &thread : threads) {
+      thread.join();
+    }
+    if (lastException) {
+      std::rethrow_exception(lastException);
+    }
+  }
+
 }  // namespace deglib::memory
