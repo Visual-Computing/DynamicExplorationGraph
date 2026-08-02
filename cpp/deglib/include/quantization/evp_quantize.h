@@ -43,7 +43,9 @@ inline std::vector<std::byte> quantize_single(const float* embedding, uint32_t d
         abs_vals[i] = {std::abs(embedding[i]), i};
     }
     std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(),
-                 [](const auto& a, const auto& b) { return a.first < b.first; });
+                 [](const auto& a, const auto& b) {
+                     return a.first != b.first ? a.first < b.first : a.second < b.second;
+                 });
 
     std::vector<uint8_t> is_top(dim, 0);
     for (uint32_t j = dim - non_zeros; j < dim; ++j) {
@@ -128,7 +130,9 @@ inline std::vector<std::byte> quantize_batch(const float* data, size_t count, ui
                     abs_vals[k] = {std::abs(emb[k]), k};
                 }
                 std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(),
-                             [](const auto& a, const auto& b) { return a.first < b.first; });
+                             [](const auto& a, const auto& b) {
+                                 return a.first != b.first ? a.first < b.first : a.second < b.second;
+                             });
 
                 is_top.assign(dim, 0);
                 for (uint32_t j = dim - non_zeros; j < dim; ++j) {
@@ -243,7 +247,9 @@ inline std::vector<std::byte> quantize_batch(const uint16_t* data, size_t count,
                     abs_vals[k] = {static_cast<uint16_t>(emb[k] & 0x7FFFu), k};
                 }
                 std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(),
-                             [](const auto& a, const auto& b) { return a.first < b.first; });
+                             [](const auto& a, const auto& b) {
+                                 return a.first != b.first ? a.first < b.first : a.second < b.second;
+                             });
 
                 is_top.assign(dim, 0);
                 for (uint32_t j = dim - non_zeros; j < dim; ++j) {
@@ -334,7 +340,9 @@ inline std::vector<std::byte> quantize_batch(const std::vector<std::vector<std::
                     abs_vals[k] = {static_cast<uint16_t>(emb[k] & 0x7FFFu), k};
                 }
                 std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(),
-                             [](const auto& a, const auto& b) { return a.first < b.first; });
+                             [](const auto& a, const auto& b) {
+                                 return a.first != b.first ? a.first < b.first : a.second < b.second;
+                             });
 
                 is_top.assign(dim, 0);
                 for (uint32_t j = dim - non_zeros; j < dim; ++j) {

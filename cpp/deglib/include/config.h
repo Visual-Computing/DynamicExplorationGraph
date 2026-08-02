@@ -9,7 +9,7 @@
 
 // Compile methods with this attribute for AVX-512 functions on GCC/Clang
 #if defined(DEGLIB_X86) && (defined(__GNUC__) || defined(__clang__))
-#define DEGLIB_TARGET_AVX512 __attribute__((target("avx512f,avx512dq,avx512bw,fma")))
+#define DEGLIB_TARGET_AVX512 __attribute__((target("avx512f,avx512dq,avx512bw,avx512vpopcntdq,fma")))
 #else
 #define DEGLIB_TARGET_AVX512
 #endif
