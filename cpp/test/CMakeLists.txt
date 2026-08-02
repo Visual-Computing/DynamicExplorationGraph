@@ -46,10 +46,13 @@ endmacro()
 
 # Unit tests
 add_deglib_test(test_config src/unit/test_config.cpp)
+add_deglib_test(test_junker_volgenant_solver src/unit/flas/test_junker_volgenant_solver.cpp)
+add_deglib_test(test_flas src/unit/flas/test_flas.cpp)
 add_deglib_test(test_distance_fp16 src/unit/distance/test_fp16.cpp)
 add_deglib_test(test_distances src/unit/test_distances.cpp)
 add_deglib_test(test_evp_quantize src/unit/quantization/test_evp_quantize.cpp)
 add_deglib_test(test_evp_inner_product src/unit/distance/test_evp_inner_product.cpp)
+add_deglib_test(test_concurrent src/unit/test_concurrent.cpp)
 
 # Integration tests (fast, recall-only, registered with CTest for CI)
 add_deglib_integration_test(test_builder_integration src/integration/test_builder_integration.cpp)
@@ -57,4 +60,5 @@ add_deglib_integration_test(test_distances_integration src/integration/test_dist
 
 # Regression tests (100k vectors, performance benchmarking — built but NOT registered with CTest)
 add_deglib_test_no_ctest(test_builder_regression src/regression/test_builder_regression.cpp)
+add_deglib_test_no_ctest(test_flas_regression src/regression/test_flas_regression.cpp)
 
