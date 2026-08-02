@@ -1,6 +1,8 @@
 #pragma once
 
+#include <variant>
 #include "distance/uint8.h"
+#include "distance/residual_mode.h"
 
 namespace deglib::distances::uint8_l2 {
 

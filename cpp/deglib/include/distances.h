@@ -1,10 +1,14 @@
 #pragma once
 
+#include <cstddef>
 #include <variant>
 #include <concepts>
 #include <stdexcept>
 
 #include "config.h"
+
+// Shared residual mode for SIMD distance implementations
+#include "distance/residual_mode.h"
 
 // Modular distance headers - contain all distance function class definitions
 #include "distance/fp32_l2.h"
@@ -16,16 +20,22 @@
 namespace deglib {
 
     enum class Metric {
-        // 0x00 = float
+        // High nibble: Data Type (0x00 = FP32, 0x10 = Uint8, 0x20 = FP16, 0x30 = EVP bit-packed)
+        // Low nibble:  Metric (1 = L2, 2 = InnerProduct)
+
+        // 0x00 = float (FP32)
         //L1 = 0x00 | 0,
         L2 = 0x00 | 1,
         InnerProduct = 0x00 | 2,
-        FP16InnerProduct = 0x00 | 3,
-        // 0x20 = EVP (bit-packed)
-        EVPInnerProduct = 0x20 | 1,
 
         // 0x10 = uint8
-        L2_Uint8 = 0x10 | 1
+        L2_Uint8 = 0x10 | 1,
+
+        // 0x20 = FP16
+        FP16InnerProduct = 0x20 | 2,
+
+        // 0x30 = EVP (bit-packed)
+        EVPInnerProduct = 0x30 | 2
     };
 
     /**
@@ -94,9 +104,9 @@ namespace deglib {
      */
     template <typename SubVariant>
     inline DistanceVariant to_flat_variant(SubVariant&& sub_variant) {
-        return std::visit([](auto&& concrete_dist) -> DistanceVariant {
-            return concrete_dist;
-        }, std::forward<SubVariant>(sub_variant));
+        return std::visit([](const auto& concrete_dist) -> DistanceVariant {
+            return DistanceVariant{concrete_dist};
+        }, sub_variant);
     }
 
     /**
@@ -123,11 +133,14 @@ namespace deglib {
         }
 
         static size_t calculate_data_size(const size_t dim, const deglib::Metric metric) {
-            if (metric == deglib::Metric::FP16InnerProduct)
-                return dim * sizeof(uint16_t);
-            if (metric == deglib::Metric::EVPInnerProduct)
-                return 2 * (dim / 8);  // EVP: [ones (dim/8 bytes)][negs (dim/8 bytes)]
-            return (static_cast<int>(metric) & 0x10) ? dim * sizeof(uint8_t) : dim * sizeof(float);
+            const auto data_type = static_cast<uint8_t>(metric) & 0xF0;
+            switch (data_type) {
+                case 0x00: return dim * sizeof(float);
+                case 0x10: return dim * sizeof(uint8_t);
+                case 0x20: return dim * sizeof(uint16_t);
+                case 0x30: return 2 * (dim / 8);  // EVP: [ones (dim/8 bytes)][negs (dim/8 bytes)]
+                default: throw std::invalid_argument("Unsupported metric data type in calculate_data_size");
+            }
         }
 
         const DistanceVariant dist_variant_;

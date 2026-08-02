@@ -1,6 +1,7 @@
 #pragma once
 
 #include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <concepts>
@@ -8,7 +9,7 @@
 #include <vector>
 #include <deque>
 #include "config.h"
-#include "distance/fp32.h"
+#include "distance/residual_mode.h"
 
 #if defined(DEGLIB_X86)
 #include <immintrin.h>

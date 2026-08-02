@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cmath>
+#include <variant>
 #include "distance/fp16.h"
+#include "distance/residual_mode.h"
 
 namespace deglib::distances::fp16_ip {
 

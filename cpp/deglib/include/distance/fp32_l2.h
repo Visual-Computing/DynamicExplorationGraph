@@ -1,7 +1,8 @@
 #pragma once
 
 #include <cmath>
-#include "distance/fp32.h"
+#include <variant>
+#include "distance/residual_mode.h"
 
 namespace deglib::distances::fp32_l2 {
 

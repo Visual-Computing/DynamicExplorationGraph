@@ -707,7 +707,7 @@ public:
             results.pop();
 
           // early stop after to many computations
-          if(++distance_computation_count >= max_distance_computation_count)
+          if(max_distance_computation_count > 0 && ++distance_computation_count >= max_distance_computation_count)
             return results;
         }
       }
@@ -717,7 +717,7 @@ public:
     auto radius = results.top().getDistance();
 
     // experimental: eps replacement parameter
-    const auto eps = std::log10(float(max_distance_computation_count)/k);
+    const auto eps = (max_distance_computation_count > 0) ? std::log10(float(max_distance_computation_count)/k) : 0.0f;
     auto exploration_radius = radius * ((radius < 0) ? (1 - eps) : (1 + eps));
 
     // iterate as long as good elements are in the next_vertices queue and max_calcs is not yet reached
@@ -780,7 +780,7 @@ public:
         }
 
         // early stop after to many computations
-        if(++distance_computation_count >= max_distance_computation_count)
+        if(max_distance_computation_count > 0 && ++distance_computation_count >= max_distance_computation_count)
           return results;
       }
     }

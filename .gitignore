@@ -54,3 +54,6 @@ Thumbs.db
 *.iml
 *.iws
 *.ipr
+
+# Agent rules
+.agents/

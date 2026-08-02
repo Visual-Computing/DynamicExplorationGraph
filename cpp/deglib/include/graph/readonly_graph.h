@@ -591,7 +591,7 @@ public:
         }
 
         // early stop after to many computations
-        if(++distance_computation_count >= max_distance_computation_count)
+        if(max_distance_computation_count > 0 && ++distance_computation_count >= max_distance_computation_count)
           return results;
       }
     }
