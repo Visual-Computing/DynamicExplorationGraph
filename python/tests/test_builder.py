@@ -108,20 +108,50 @@ class TestGraphs:
 
         _check_entries(self.data.shape[0] // 2, 'remove')
 
-#     def test_callback(self):
-#         graph = deglib.graph.SizeBoundedGraph.create_empty(
-#             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.L2
-#         )
-#         builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
-#         for i, vec in enumerate(self.data):
-#             vec: np.ndarray
-#             builder.add_entry(i, vec)
-#
-#         tester = CallbackTester()
-#         builder.build(callback=tester)
-#         assert tester.num_callbacks == self.data.shape[0], 'Got {} callbacks, but expected {}'.format(
-#             tester.num_callbacks, self.data.shape[0]
-#         )
-#         assert tester.last_status.step == self.data.shape[0], 'Got {} steps, but expected {}'.format(
-#             tester.last_status.step, self.data.shape[0]
-#         )
+    def test_callback(self):
+        graph = deglib.graph.SizeBoundedGraph.create_empty(
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.L2
+        )
+        builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder.add_entry(range(self.data.shape[0]), self.data)
+
+        tester = CallbackTester()
+        builder.build(callback=tester)
+        assert tester.num_callbacks > 0, 'Expected at least 1 callback execution'
+        assert tester.last_status is not None
+        assert tester.last_status.step > 0
+
+    def test_concurrency_settings(self):
+        graph = deglib.graph.SizeBoundedGraph.create_empty(
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.L2
+        )
+        builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+
+        # Test thread count
+        builder.set_thread_count(2)
+
+        # Test batch size setting and getting
+        builder.set_batch_size(tasks_per_batch=16, task_size=5)
+        expected_batch_size = 2 * 16 * 5
+        assert builder.get_batch_size() == expected_batch_size
+
+        builder.add_entry(range(self.data.shape[0]), self.data)
+        builder.build()
+
+    def test_stop(self):
+        graph = deglib.graph.SizeBoundedGraph.create_empty(
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.L2
+        )
+        builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder.add_entry(range(self.data.shape[0]), self.data)
+
+        stopped_in_callback = False
+
+        def _stopping_callback(status: deglib_cpp.BuilderStatus):
+            nonlocal stopped_in_callback
+            stopped_in_callback = True
+            builder.stop()
+
+        builder.build(callback=_stopping_callback)
+        assert stopped_in_callback
+

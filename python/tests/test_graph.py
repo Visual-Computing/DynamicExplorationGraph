@@ -294,3 +294,39 @@ def test_small_filters(conf: Configuration):
 
         if not np.all(np.isin(results, valid_labels)):
             raise ValueError('Found results that should have been filtered out.')
+
+
+@pytest.mark.parametrize('conf', mutable_configurations)
+def test_change_edges_and_weights(conf: Configuration):
+    graph = conf.create_new_size_bounded_graph()
+    if graph.size() > 2:
+        internal_idx = 0
+        edges_count = graph.get_edges_per_vertex()
+        new_neighbors = np.arange(edges_count, dtype=np.uint32)
+        new_weights = np.linspace(0.1, 1.0, edges_count, dtype=np.float32)
+
+        graph.change_edges(internal_idx, new_neighbors, new_weights)
+
+        neighbor_indices = graph.get_neighbor_indices(internal_idx)
+        neighbor_weights = graph.get_neighbor_weights(internal_idx)
+
+        assert np.array_equal(neighbor_indices, new_neighbors)
+        assert np.allclose(neighbor_weights, new_weights)
+        assert np.isclose(graph.get_edge_weight(internal_idx, 1), new_weights[1])
+
+
+@pytest.mark.parametrize('conf', configurations[:1])
+def test_filter_edge_cases(conf: Configuration):
+    k = 5
+    # All valid labels filter
+    all_labels = np.arange(conf.graph.size(), dtype=np.int32)
+    results_all, _ = conf.graph.search(conf.query, filter_labels=Filter(all_labels), eps=0.1, k=k)
+    assert results_all.shape[-1] == k
+
+    # No valid labels filter with max_value specified
+    no_labels = np.array([], dtype=np.int32)
+    with pytest.warns(UserWarning):
+        results_none, _ = conf.graph.search(conf.query, filter_labels=Filter(no_labels, max_value=0), eps=0.1, k=k)
+    assert results_none.shape[-1] == 0
+
+
