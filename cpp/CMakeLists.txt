@@ -15,6 +15,7 @@ project(
 
 # build options
 option(ENABLE_BENCHMARKS "compile benchmarks" ON)
+option(ENABLE_TESTING "compile tests" ON)
 option(FORCE_AVX2 "compile for avx2 support. Otherwise compile for this machine." OFF)
 
 # https://cmake.org/cmake/help/latest/prop_tgt/CXX_STANDARD.html
@@ -96,7 +97,9 @@ message("C++ compiler flags release: ${CMAKE_CXX_FLAGS_RELEASE}")
 
 enable_testing()
 add_subdirectory(deglib)
-add_subdirectory(test)
+if (ENABLE_TESTING)
+	add_subdirectory(test)
+endif()
 
 if (ENABLE_BENCHMARKS)
 	add_subdirectory(external/fmt)
