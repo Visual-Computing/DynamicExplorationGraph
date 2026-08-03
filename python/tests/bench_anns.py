@@ -11,13 +11,13 @@ from deglib.utils import StopWatch, get_current_rss_mb
 # TODO: check slow performance
 
 
-def test_deglib_anns_bench():
+def run_bench():
     print("Testing ...")
 
-    if deglib.avx_usable():
+    if deglib.avx512_usable():
+        print("use AVX512  ...")
+    elif deglib.avx_usable():
         print("use AVX2  ...")
-    elif deglib.sse_usable():
-        print("use SSE  ...")
     else:
         print("use arch  ...")
 
@@ -56,4 +56,4 @@ def test_deglib_anns_bench():
 
 
 if __name__ == '__main__':
-    test_deglib_anns_bench()  # TODO: replace with test framework
+    run_bench()

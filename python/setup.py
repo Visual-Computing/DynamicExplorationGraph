@@ -189,6 +189,9 @@ class CMakeBuild(build_ext):
                 # CMake 3.12+ only.
                 build_args += [f"-j{self.parallel}"]
 
+        # Copy cpp/ to python/lib/ first
+        self.run_command('copy_build_files')
+
         build_temp = Path(self.build_temp) / ext.name
         if not build_temp.exists():
             build_temp.mkdir(parents=True)

@@ -741,15 +741,12 @@ static void improve_and_test(const std::string initial_graph_file, const std::st
 
 int main() {
 
-    #if defined(USE_AVX512)
+    if (deglib::cpu::has_avx512())
         fmt::print("use AVX512  ...\n");
-    #elif defined(USE_AVX2)
+    else if (deglib::cpu::has_avx2())
         fmt::print("use AVX2  ...\n");
-    #elif defined(USE_SSE42)
-        fmt::print("use SSE42  ...\n");
-    #else
+    else
         fmt::print("use arch  ...\n");
-    #endif
     fmt::print("Actual memory usage: {} Mb, Max memory usage: {} Mb \n", getCurrentRSS() / 1000000, getPeakRSS() / 1000000);
 
     omp_set_num_threads(8);

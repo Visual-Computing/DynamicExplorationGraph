@@ -11,8 +11,9 @@ find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 # Add pybind11
 find_package(pybind11 CONFIG REQUIRED)
 
-# disable benchmark building
+# disable benchmark and test building
 set(ENABLE_BENCHMARKS OFF CACHE BOOL "Disable benchmarks" FORCE)
+set(ENABLE_TESTING OFF CACHE BOOL "Disable tests" FORCE)
 
 # Add cpp-deglib
 add_subdirectory(${CMAKE_SOURCE_DIR}/lib/)

@@ -1,4 +1,4 @@
-from deglib_cpp import avx_usable, avx512_usable, sse_usable
+from deglib_cpp import avx_usable, avx512_usable
 
 from . import analysis
 from . import builder
@@ -13,6 +13,6 @@ __version__ = "0.1.6"
 
 
 __all__ = [
-    'avx_usable', 'avx512_usable', 'sse_usable', 'graph', 'Metric', 'FloatSpace',
+    'avx_usable', 'avx512_usable', 'graph', 'Metric', 'FloatSpace',
     'builder', 'Mt19937', 'analysis', 'repository', 'search'
 ]

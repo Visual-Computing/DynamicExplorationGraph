@@ -22,10 +22,10 @@ class DatasetName(enum.Enum):
 
 
 def main():
-    if deglib.avx_usable():
+    if deglib.avx512_usable():
+        print("use AVX512  ...")
+    elif deglib.avx_usable():
         print("use AVX2  ...")
-    elif deglib.sse_usable():
-        print("use SSE  ...")
     else:
         print("use arch  ...")
 

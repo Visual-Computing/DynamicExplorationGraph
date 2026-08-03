@@ -75,15 +75,12 @@ void filter_test() {
 int main(int argc, char *argv[]) {
     fmt::print("Testing ...\n");
 
-    #if defined(USE_AVX512)
+    if (deglib::cpu::has_avx512())
         fmt::print("use AVX512  ...\n");
-    #elif defined(USE_AVX2)
+    else if (deglib::cpu::has_avx2())
         fmt::print("use AVX2  ...\n");
-    #elif defined(USE_SSE42)
-        fmt::print("use SSE42  ...\n");
-    #else
+    else
         fmt::print("use arch  ...\n");
-    #endif
 
     // filter_test();
 

@@ -17,19 +17,6 @@ namespace py = pybind11;
 constexpr int MAX_TRIES_SAME_RESULT_SIZE = 10;
 
 
-bool avx_usable() {
-  return deglib::cpu::has_avx();
-}
-
-bool avx512_usable() {
-  return deglib::cpu::has_avx512();
-}
-
-bool sse_usable() {
-  return deglib::cpu::has_sse42();
-}
-
-
 // Multithreaded executor
 // The helper function copied from https://github.com/nmslib/hnswlib/blob/master/examples/cpp/example_mt_search.cpp (and that itself is copied from nmslib)
 // An alternative is using #pragme omp parallel for or any other C++ threading
@@ -236,9 +223,8 @@ deglib::graph::ReadOnlyGraph read_only_graph_from_search_graph(deglib::search::S
 PYBIND11_MODULE(deglib_cpp, m) {
   m.doc() = "Python bindings for Dynamic Exploration Graph";
 
-  m.def("avx_usable", &avx_usable, "Returns whether AVX instructions are available");
-  m.def("avx512_usable", &avx512_usable, "Returns whether AVX512 instructions are available");
-  m.def("sse_usable", &sse_usable, "Returns whether SSE instructions are available");
+  m.def("avx_usable", &deglib::cpu::has_avx2, "Returns whether AVX2 instructions are available");
+  m.def("avx512_usable", &deglib::cpu::has_avx512, "Returns whether AVX512 instructions are available");
 
   // distances
   py::enum_<deglib::Metric>(m, "Metric")
