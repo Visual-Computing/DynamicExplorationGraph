@@ -31,7 +31,7 @@ jobs:
         cache: 'pip'
 
     - name: Add requirements
-      run: python -m pip install --upgrade setuptools pybind11>=2.12.0 cibuildwheel
+      run: python -m pip install setuptools==83.0.0 pybind11==3.0.4 cibuildwheel
 
     - name: Copy Build Files
       run: python setup.py copy_build_files
@@ -43,7 +43,7 @@ jobs:
         CIBW_BUILD_FRONTEND: "pip; args: --verbose"
         CIBW_ENVIRONMENT: "FORCE_AVX2=1 CMAKE_BUILD_PARALLEL_LEVEL=4"
         CIBW_ENVIRONMENT_MACOS: "FORCE_AVX2=1 MACOSX_DEPLOYMENT_TARGET=11.00 CMAKE_BUILD_PARALLEL_LEVEL=4"
-        CIBW_SKIP: "cp314-* cp314t-* pp*win*"
+        CIBW_SKIP: "cp314t-* pp*win*"
 
     # upload artifacts
     - name: Upload Build Artifacts
@@ -65,7 +65,7 @@ jobs:
         python-version: "3.12"
 
     - name: Add requirements
-      run: python -m pip install --upgrade setuptools pybind11>=2.12.0
+      run: python -m pip install setuptools==83.0.0 pybind11==3.0.4
 
     - name: Copy Build Files
       run: python setup.py copy_build_files

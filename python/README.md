@@ -38,7 +38,7 @@ cd DynamicExplorationGraph/python
 Make sure a C++ compiler is configured on your system (e.g. g++ under Linux, [Build Tools for Visual Studio](https://visualstudio.microsoft.com/downloads/) under Windows, [XCode](https://developer.apple.com/xcode/) under macOS).
 
 ```shell
-pip install setuptools>=77.0 pybind11 build
+pip install setuptools==83.0.0 pybind11==3.0.4 build
 python setup.py copy_build_files  # copy c++ library to ./lib/
 pip install .
 ```
@@ -166,7 +166,7 @@ The crEG paper introduces an additional parameter, *LIDType*, to determine wheth
 
 ### BuildError: `pybind11/typing.h:104:58: error: ‘copy_n’ is not a member of ‘std’`
 
-This is a pybind11 bug, that occurs when compiling it with gcc-14. Change the pybind version to 2.12.
+This is a pybind11 bug, that occurs when compiling older pybind11 versions with gcc-14. Change the pybind version to 3.0.4.
 
 ## How to publish a new version
 - Run `git checkout main` and `git pull` to be sure, all updates are fetched

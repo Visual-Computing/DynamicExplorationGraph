@@ -29,7 +29,7 @@ This can be useful if you want to:
     python -m venv venv && . venv/bin/activate
 
     # install build dependencies
-    pip install setuptools>=77.0 pybind11 build
+    pip install setuptools==83.0.0 pybind11==3.0.4 build
     python setup.py copy_build_files  # copy c++ library to ./lib/
 
     # install
