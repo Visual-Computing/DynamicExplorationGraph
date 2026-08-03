@@ -229,15 +229,27 @@ TEST(ReadOnlyGraph, Search) {
         mutable_graph.addVertex(i, make_float_bytes(v).get());
     }
 
-    // fully connected graph (neighbors must be sorted ascending)
+    // connect each vertex to its neighbors so the graph is connected
+    // (neighbors must be sorted ascending)
     for (int i = 0; i < 8; ++i) {
         std::vector<uint32_t> neighbors;
         std::vector<float> weights;
-        for (int j = 0; j < 8; j++) {
-            if (j < 4) {  // only first 4 neighbors fit
-                neighbors.push_back(static_cast<uint32_t>(j));
-                weights.push_back(static_cast<float>(std::abs(i - j)));
-            }
+        // connect to previous and next vertices to ensure connectivity
+        if (i > 0) {
+            neighbors.push_back(static_cast<uint32_t>(i - 1));
+            weights.push_back(1.0f);
+        }
+        if (i > 1) {
+            neighbors.push_back(static_cast<uint32_t>(i - 2));
+            weights.push_back(1.0f);
+        }
+        if (i < 7) {
+            neighbors.push_back(static_cast<uint32_t>(i + 1));
+            weights.push_back(1.0f);
+        }
+        if (i < 6) {
+            neighbors.push_back(static_cast<uint32_t>(i + 2));
+            weights.push_back(1.0f);
         }
         // fill remaining with self
         while (neighbors.size() < 4) {
@@ -263,8 +275,11 @@ TEST(ReadOnlyGraph, Search) {
     auto results = graph.search({0}, make_float_bytes(query).get(), 0.1f, 3);
 
     EXPECT_GT(results.size(), 0u);
-    auto best = results.top();
-    EXPECT_EQ(best.getInternalIndex(), graph.getInternalIndex(4));
+    // ResultSet is a max-heap (std::less), so top() returns the worst of the top-k results.
+    // Find the best (minimum distance) result by iterating through all results.
+    auto best = std::min_element(results.begin(), results.end(),
+        [](const auto& a, const auto& b) { return a.getDistance() < b.getDistance(); });
+    EXPECT_EQ(best->getInternalIndex(), graph.getInternalIndex(4));
 }
 
 TEST(ReadOnlyGraph, HasPath) {
