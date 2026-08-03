@@ -24,14 +24,14 @@ jobs:
     - name: Setup ccache
       uses: hendrikmuhs/ccache-action@v1.2
       with:
-        key: ${{ matrix.os }}-ccache-${{ github.sha }}
-        restore-keys: ${{ matrix.os }}-ccache-
+        key: ${{ matrix.os }}-ccache-${{ github.ref_name }}-${{ github.sha }}
+        restore-keys: ${{ matrix.os }}-ccache-${{ github.ref_name }}-
 
     - name: Configure CMake
       run: cmake -B build -S cpp -DFORCE_AVX2=ON -DENABLE_BENCHMARKS=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
     - name: Build
-      run: cmake --build build --config Release --parallel
+      run: cmake --build build --config Release --parallel 4
 
     - name: Run Tests
       run: ctest --test-dir build --output-on-failure -C Release

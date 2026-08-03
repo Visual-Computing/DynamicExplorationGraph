@@ -9,3 +9,5 @@ __pycache__
 *.so
 /.pynb_checkpoints
 *.pyd
+# uv lock file
+uv.lock
