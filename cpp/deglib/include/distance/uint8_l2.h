@@ -13,6 +13,8 @@ namespace deglib::distances::uint8_l2 {
         // Scalar fallback — no SIMD required.
         class L2Uint8 {
         public:
+            static constexpr const char* get_instruction() { return "Scalar"; }
+
             inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) 
             {
                 int64_t result = 0;
@@ -48,6 +50,8 @@ namespace deglib::distances::uint8_l2 {
             static constexpr bool HasTail     = has_flag(Mode, ResidualMode::Tail);
 
         public:
+            static constexpr const char* get_instruction() { return "AVX512"; }
+
             DEGLIB_TARGET_AVX512 inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 size_t size = *((size_t *) qty_ptr);
                 const unsigned char *a = (const unsigned char *) pVect1v;
@@ -112,6 +116,7 @@ namespace deglib::distances::uint8_l2 {
             static constexpr bool HasTail     = has_flag(Mode, ResidualMode::Tail);
 
         public:
+            static constexpr const char* get_instruction() { return "AVX2"; }
             DEGLIB_TARGET_AVX2 inline static float compare(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
                 size_t size = *((size_t *) qty_ptr);
                 const unsigned char *a = (const unsigned char *) pVect1v;
@@ -189,34 +194,49 @@ namespace deglib::distances::uint8_l2 {
 #endif
     >;
 
-    inline DistanceVariant select_dist(const size_t dim) {
-#if defined(DEGLIB_X86)
-            if (deglib::cpu::has_avx512()) {
-                if (dim < 32) {
-                    return L2Uint8_AVX512<ResidualMode::TailOnly>{};
-                } else if (dim < 64) {
-                    if (dim == 32) return L2Uint8_AVX512<ResidualMode::SimdOnly>{};
-                    else return L2Uint8_AVX512<ResidualMode::SimdTail>{};
-                } else {
-                    if (dim % 64 == 0) return L2Uint8_AVX512<ResidualMode::DualOnly>{};
-                    else if (dim % 32 == 0) return L2Uint8_AVX512<ResidualMode::DualPlusSimd>{};
-                    else return L2Uint8_AVX512<ResidualMode::Full>{};
-                }
-            }
-            else if (deglib::cpu::has_avx2()) {
-                if (dim < 16) {
-                    return L2Uint8_AVX2<ResidualMode::TailOnly>{};
-                } else if (dim < 32) {
-                    if (dim == 16) return L2Uint8_AVX2<ResidualMode::SimdOnly>{};
-                    else return L2Uint8_AVX2<ResidualMode::SimdTail>{};
-                } else {
-                    if (dim % 32 == 0) return L2Uint8_AVX2<ResidualMode::DualOnly>{};
-                    else if (dim % 16 == 0) return L2Uint8_AVX2<ResidualMode::DualPlusSimd>{};
-                    else return L2Uint8_AVX2<ResidualMode::Full>{};
-                }
-            }
-#endif
+    inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) {
+        if (instruction == deglib::cpu::InstructionSet::Scalar) {
             return L2Uint8{};
         }
+
+#if defined(DEGLIB_X86)
+        if (instruction == deglib::cpu::InstructionSet::AVX512 || (instruction == deglib::cpu::InstructionSet::Auto && deglib::cpu::has_avx512())) {
+            if (instruction == deglib::cpu::InstructionSet::AVX512 && !deglib::cpu::has_avx512()) {
+                throw std::runtime_error("AVX512 instruction set requested, but not supported by CPU");
+            }
+            if (dim < 32) {
+                return L2Uint8_AVX512<ResidualMode::TailOnly>{};
+            } else if (dim < 64) {
+                if (dim == 32) return L2Uint8_AVX512<ResidualMode::SimdOnly>{};
+                else return L2Uint8_AVX512<ResidualMode::SimdTail>{};
+            } else {
+                if (dim % 64 == 0) return L2Uint8_AVX512<ResidualMode::DualOnly>{};
+                else if (dim % 32 == 0) return L2Uint8_AVX512<ResidualMode::DualPlusSimd>{};
+                else return L2Uint8_AVX512<ResidualMode::Full>{};
+            }
+        }
+        else if (instruction == deglib::cpu::InstructionSet::AVX2 || (instruction == deglib::cpu::InstructionSet::Auto && deglib::cpu::has_avx2())) {
+            if (instruction == deglib::cpu::InstructionSet::AVX2 && !deglib::cpu::has_avx2()) {
+                throw std::runtime_error("AVX2 instruction set requested, but not supported by CPU");
+            }
+            if (dim < 16) {
+                return L2Uint8_AVX2<ResidualMode::TailOnly>{};
+            } else if (dim < 32) {
+                if (dim == 16) return L2Uint8_AVX2<ResidualMode::SimdOnly>{};
+                else return L2Uint8_AVX2<ResidualMode::SimdTail>{};
+            } else {
+                if (dim % 32 == 0) return L2Uint8_AVX2<ResidualMode::DualOnly>{};
+                else if (dim % 16 == 0) return L2Uint8_AVX2<ResidualMode::DualPlusSimd>{};
+                else return L2Uint8_AVX2<ResidualMode::Full>{};
+            }
+        }
+#else
+        if (instruction != deglib::cpu::InstructionSet::Auto && instruction != deglib::cpu::InstructionSet::Scalar) {
+            throw std::runtime_error("Requested SIMD instruction set is not supported on this platform");
+        }
+#endif
+
+        return L2Uint8{};
+    }
 
 } // namespace deglib::distances::uint8_l2

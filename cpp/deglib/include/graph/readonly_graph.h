@@ -538,9 +538,9 @@ public:
 
     // add the entry vertex index to the vertices which gets checked next and ignore it for further checks
     checked_ids[entry_vertex_index] = checked_ids_tag;
-    next_vertices.emplace(entry_vertex_index, 0);
+    next_vertices.emplace(entry_vertex_index, 0.0f);
     if(include_entry)
-      results.emplace(entry_vertex_index, 0);
+      results.emplace(entry_vertex_index, 0.0f);
     const auto query = this->feature_by_index(entry_vertex_index);
 
     // search radius

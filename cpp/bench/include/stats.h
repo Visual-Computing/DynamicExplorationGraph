@@ -1,0 +1,346 @@
+#pragma once
+
+/**
+ * @file stats.h
+ * @brief Graph statistics computation utilities for deglib benchmark.
+ *
+ * Provides functions to compute various graph quality metrics including:
+ * - Seed reachability: How many vertices can be reached from entry points
+ * - Average reach: Average number of vertices reachable from each vertex
+ * - Graph quality: Ratio of neighbors that are "perfect" (in ground truth top-k)
+ * - In-degree statistics: Distribution of incoming edges
+ */
+
+#include <fmt/core.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <filesystem>
+#include <limits>
+#include <thread>
+#include <vector>
+
+#include "deglib.h"
+#include "file_io.h"
+#include "logging.h"
+#include "stopwatch.h"
+
+namespace deglib::benchmark {
+
+// ============================================================================
+// Search Reachability
+// ============================================================================
+
+/**
+ * @brief Compute the seed reachability count.
+ *
+ * Measures how many vertices can be reached from the graph's entry point via search.
+ * This tests if the graph is well-connected for nearest neighbor search.
+ *
+ * @param graph The search graph to analyze
+ * @return Number of vertices reachable from entry points
+ */
+inline uint32_t compute_search_reachability(const deglib::search::SearchGraph& graph) {
+    const auto graph_size = (uint32_t)graph.size();
+    const auto edges_per_vertex = graph.getEdgesPerVertex();
+    const auto entry_vertices = graph.getEntryVertexIndices();
+
+    auto stopw = StopW();
+    std::vector<bool> visited(graph_size, false);
+    std::vector<uint32_t> frontier;
+    frontier.reserve(graph_size);
+
+    for (const auto& s : entry_vertices) {
+        if (s < graph_size && !visited[s]) {
+            visited[s] = true;
+            frontier.push_back(s);
+        }
+    }
+
+    while (!frontier.empty()) {
+        std::vector<uint32_t> next_frontier;
+        for (const auto& v : frontier) {
+            const auto neighbor_indices = graph.getNeighborIndices(v);
+            for (uint8_t e = 0; e < edges_per_vertex; e++) {
+                const auto neighbor_index = neighbor_indices[e];
+                if (neighbor_index == (std::numeric_limits<uint32_t>::max)()) continue;
+
+                if (!visited[neighbor_index]) {
+                    visited[neighbor_index] = true;
+                    next_frontier.push_back(neighbor_index);
+                }
+            }
+        }
+        frontier = std::move(next_frontier);
+    }
+
+    uint32_t count = 0;
+    for (size_t i = 0; i < graph_size; i++) {
+        if (visited[i]) count++;
+    }
+
+    log("Seed Reachability is {} out of {} after {}s\n", count, graph_size, stopw.getElapsedTimeMicro() / 1000000);
+    return count;
+}
+
+/**
+ * @brief Structure to store vertex reach information for caching during avg reach computation.
+ */
+struct VertexReach {
+    uint32_t vertex_id;               ///< The vertex ID
+    uint32_t reach_count;             ///< Number of vertices reachable from this vertex
+    std::vector<bool> reachable_ids;  ///< Bitmap of reachable vertex IDs
+
+    VertexReach(uint32_t id, uint32_t count, std::vector<bool>&& ids) : vertex_id(id), reach_count(count), reachable_ids(std::move(ids)) {}
+};
+
+/**
+ * @brief Compute the average reach of the graph.
+ *
+ * Measures the average number of vertices reachable from any given vertex.
+ * Uses a caching optimization where vertices processed earlier share their reachability set.
+ *
+ * @param graph The search graph to analyze
+ * @return Average number of vertices reachable per vertex
+ */
+inline float compute_exploration_reach(const deglib::search::SearchGraph& graph) {
+    const auto graph_size = (uint32_t)graph.size();
+    const auto edges_per_vertex = graph.getEdgesPerVertex();
+    auto stopw = StopW();
+
+    // Remember vertices with high reach for optimization
+    uint32_t best_vertex_reach = 0;
+    auto vertices_reach = std::vector<VertexReach>();
+    auto index_of_vertex_reach = std::vector<uint32_t>(graph_size);
+    std::fill(index_of_vertex_reach.begin(), index_of_vertex_reach.end(), graph_size);
+
+    uint64_t exploration_reachability = 0;
+
+    for (uint32_t entry_id = 0; entry_id < graph_size; entry_id++) {
+        // Flood fill from this entry vertex
+        auto checked_ids = std::vector<bool>(graph_size);
+        auto check = std::vector<uint32_t>();
+        auto check_next = std::vector<uint32_t>();
+
+        checked_ids[entry_id] = true;
+        check.emplace_back(entry_id);
+
+        // Try to speed up by reaching a vertex that can reach many others
+        uint32_t best_reach_vertex_index = 0;
+        uint32_t best_reach_vertex_reach = 0;
+
+        auto check_ptr = &check;
+        auto check_next_ptr = &check_next;
+
+        while (check_ptr->size() > 0 && best_reach_vertex_reach < graph_size) {
+            check_next_ptr->clear();
+
+            for (size_t c = 0; c < check_ptr->size() && best_reach_vertex_reach < graph_size; c++) {
+                const auto check_index = check_ptr->at(c);
+                const auto neighbor_indices = graph.getNeighborIndices(check_index);
+
+                for (uint8_t e = 0; e < edges_per_vertex; e++) {
+                    const auto neighbor_index = neighbor_indices[e];
+                    if (neighbor_index == (std::numeric_limits<uint32_t>::max)()) continue;
+
+                    if (!checked_ids[neighbor_index]) {
+                        checked_ids[neighbor_index] = true;
+                        check_next_ptr->emplace_back(neighbor_index);
+
+                        // Check if neighbor is connected to a high-reach vertex
+                        const auto vertex_reach_index = index_of_vertex_reach[neighbor_index];
+                        if (vertex_reach_index < graph_size) {
+                            const auto& neighbor_reach = vertices_reach[vertex_reach_index];
+
+                            if (neighbor_reach.reach_count == graph_size) {
+                                best_reach_vertex_index = vertex_reach_index;
+                                best_reach_vertex_reach = graph_size;
+                                break;
+                            }
+
+                            if (neighbor_reach.reach_count > best_reach_vertex_reach) {
+                                best_reach_vertex_reach = neighbor_reach.reach_count;
+                                best_reach_vertex_index = vertex_reach_index;
+
+                                // Copy the reach of the best
+                                const auto& best_vertex_checked_ids = neighbor_reach.reachable_ids;
+                                for (size_t b = 0; b < graph_size; b++) {
+                                    checked_ids[b] = checked_ids[b] | best_vertex_checked_ids[b];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            std::swap(check_ptr, check_next_ptr);
+        }
+
+        if (best_reach_vertex_reach == graph_size) {
+            index_of_vertex_reach[entry_id] = best_reach_vertex_index;
+            exploration_reachability += graph_size;
+        } else {
+            // Count how many nodes have been checked
+            uint32_t reach_count = 0;
+            for (size_t i = 0; i < graph_size; i++) {
+                reach_count += checked_ids[i];
+            }
+            exploration_reachability += reach_count;
+
+            if (best_vertex_reach < reach_count) {
+                best_vertex_reach = reach_count;
+                index_of_vertex_reach[entry_id] = (uint32_t)vertices_reach.size();
+                vertices_reach.emplace_back(entry_id, reach_count, std::move(checked_ids));
+            } else if (best_reach_vertex_reach > 0) {
+                index_of_vertex_reach[entry_id] = best_reach_vertex_index;
+            } else {
+                index_of_vertex_reach[entry_id] = (uint32_t)vertices_reach.size();
+                vertices_reach.emplace_back(entry_id, reach_count, std::move(checked_ids));
+            }
+        }
+    }
+
+    log("Average Exploration reachability is {:.2f} after {:4d}s\n",
+        (static_cast<float>(exploration_reachability)) / static_cast<float>(graph_size),
+        stopw.getElapsedTimeMicro() / 1000000);
+    return (graph_size > 0) ? (static_cast<float>(exploration_reachability) / static_cast<float>(graph_size)) : 0.0f;
+}
+
+// ============================================================================
+// Graph Statistics
+// ============================================================================
+
+/**
+ * @brief Complete graph statistics structure with in-degree and out-degree stats.
+ */
+struct GraphStats {
+    // Basic stats
+    size_t vertex_count = 0;       ///< Total number of vertices
+    size_t edge_count = 0;         ///< Total number of edges
+    uint32_t feature_dims = 0;     ///< Feature vector dimensions
+    uint8_t edges_per_vertex = 0;  ///< Maximum edges per vertex (k)
+
+    // Out-degree stats
+    float avg_out_degree = 0.0f;
+    uint32_t min_out_degree = 0;
+    uint32_t max_out_degree = 0;
+
+    // In-degree stats
+    float avg_in_degree = 0.0f;
+    uint32_t min_in_degree = 0;
+    uint32_t max_in_degree = 0;
+    uint32_t source_vertices = 0;  // Vertices with 0 in-degree
+
+    // Reachability metrics
+    float search_reachability = -1.0f;       // search reach (-1 means not computed)
+    float exploration_reachability = -1.0f;  // exploration reach (-1 means not computed)
+
+    // Memory
+    size_t memory_bytes = 0;  ///< Estimated memory usage
+};
+
+/**
+ * @brief Analyze a search graph, compute all statistics, and log them.
+ *
+ * This is the main function for graph analysis. It computes basic stats,
+ * reachability metrics, and logs everything.
+ *
+ * @param graph The search graph to analyze
+ * @return GraphStats with all computed statistics
+ */
+inline GraphStats analyze_graph(const deglib::search::SearchGraph& graph) {
+    GraphStats stats;
+    stats.vertex_count = graph.size();
+    stats.feature_dims = graph.getFeatureSpace().dim();
+    stats.edges_per_vertex = graph.getEdgesPerVertex();
+
+    const auto graph_size = graph.size();
+    const auto edges_per_vertex = graph.getEdgesPerVertex();
+
+    // Count out-degrees
+    size_t total_edges = 0;
+    uint32_t min_out = (std::numeric_limits<uint32_t>::max)();
+    uint32_t max_out = 0;
+
+    for (uint32_t i = 0; i < graph_size; i++) {
+        const auto neighbors = graph.getNeighborIndices(i);
+        uint32_t valid_edges = 0;
+        for (uint8_t j = 0; j < edges_per_vertex; j++) {
+            if (neighbors[j] != (std::numeric_limits<uint32_t>::max)()) {
+                valid_edges++;
+            }
+        }
+        total_edges += valid_edges;
+        if (valid_edges < min_out) min_out = valid_edges;
+        if (valid_edges > max_out) max_out = valid_edges;
+    }
+
+    stats.edge_count = total_edges;
+    stats.avg_out_degree = graph_size > 0 ? (float)total_edges / graph_size : 0.0f;
+    stats.min_out_degree = graph_size > 0 ? min_out : 0;
+    stats.max_out_degree = max_out;
+
+    // Compute in-degree stats
+    auto in_degree_count = std::vector<uint32_t>(graph_size, 0);
+    for (uint32_t v = 0; v < graph_size; v++) {
+        const auto neighbor_indices = graph.getNeighborIndices(v);
+        for (uint8_t e = 0; e < edges_per_vertex; e++) {
+            const auto neighbor_index = neighbor_indices[e];
+            if (neighbor_index != (std::numeric_limits<uint32_t>::max)() && neighbor_index < graph_size) {
+                in_degree_count[neighbor_index]++;
+            }
+        }
+    }
+
+    stats.min_in_degree = (std::numeric_limits<uint32_t>::max)();
+    stats.max_in_degree = 0;
+    uint64_t total_in_degree = 0;
+
+    for (uint32_t v = 0; v < graph_size; v++) {
+        const auto in_degree = in_degree_count[v];
+        if (in_degree < stats.min_in_degree) stats.min_in_degree = in_degree;
+        if (in_degree > stats.max_in_degree) stats.max_in_degree = in_degree;
+        if (in_degree == 0) stats.source_vertices++;
+        total_in_degree += in_degree;
+    }
+
+    stats.avg_in_degree = graph_size > 0 ? ((float)total_in_degree) / graph_size : 0.0f;
+    if (graph_size == 0) stats.min_in_degree = 0;
+
+    // Memory estimation
+    stats.memory_bytes = stats.vertex_count * (stats.edges_per_vertex * 4 + stats.edges_per_vertex * 4 + stats.feature_dims * 4);
+
+    log("Computing search reachability...\n");
+    uint32_t reachable = compute_search_reachability(graph);
+    stats.search_reachability = graph_size > 0 ? (float)reachable / graph_size : 0.0f;
+
+    log("Computing exploration reachability...\n");
+    float avg_reach = compute_exploration_reach(graph);
+    stats.exploration_reachability = graph_size > 0 ? avg_reach / graph_size : 0.0f;
+
+    // Log all stats
+    log("Graph Statistics:\n");
+    log("  Vertices: {}\n", stats.vertex_count);
+    log("  Total edges: {}\n", stats.edge_count);
+    log("  Feature dimensions: {}\n", stats.feature_dims);
+    log("  Edges per vertex (k): {}\n", stats.edges_per_vertex);
+    log("  Out-degree: avg={:.2f}, min={}, max={}\n", stats.avg_out_degree, stats.min_out_degree, stats.max_out_degree);
+    log("  In-degree:  avg={:.2f}, min={}, max={}, source_vertices={}\n",
+        stats.avg_in_degree,
+        stats.min_in_degree,
+        stats.max_in_degree,
+        stats.source_vertices);
+
+    if (stats.search_reachability >= 0) {
+        log("  Search Reachability: {:.2f}%\n", stats.search_reachability * 100);
+    }
+    if (stats.exploration_reachability >= 0) {
+        log("  Exploration Reachability: {:.2f}%\n", stats.exploration_reachability * 100);
+    }
+
+    log("  Estimated memory: {:.2f} MB\n", stats.memory_bytes / (1024.0 * 1024.0));
+
+    return stats;
+}
+
+}  // namespace deglib::benchmark

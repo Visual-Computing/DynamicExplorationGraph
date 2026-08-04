@@ -5,7 +5,6 @@
 #include <atomic>
 
 #include <fmt/core.h>
-#include <omp.h>
 
 #include "benchmark.h"
 #include "deglib.h"
@@ -626,17 +625,18 @@ static std::vector<float> estimate_recall(const deglib::search::SearchGraph& gra
 
     for (float eps : eps_parameter)
     {
-        size_t total = 0;
-        size_t correct = 0;
-        
-        #pragma omp parallel for reduction(+:total) reduction(+:correct)
-        for (int i = 0; i < (int)query_repository.size(); i++)
+        std::atomic<size_t> total{0};
+        std::atomic<size_t> correct{0};
+
+        const uint32_t threads = std::thread::hardware_concurrency();
+        deglib::concurrent::parallel_for(0, query_repository.size(), threads, [&](size_t i_idx, size_t)
         {
+            const int i = (int)i_idx;
             auto query = reinterpret_cast<const std::byte*>(query_repository.getFeature(uint32_t(i)));
             auto result_queue = graph.search(entry_vertex_indices, query, eps, k, nullptr, max_distance_count);
 
             const auto& gt = answer[i];
-            total += result_queue.size();
+            total.fetch_add(result_queue.size(), std::memory_order_relaxed);
             
             size_t local_correct = 0;
             while (result_queue.empty() == false)
@@ -646,10 +646,10 @@ static std::vector<float> estimate_recall(const deglib::search::SearchGraph& gra
                 if (gt.find(external_id) != gt.end()) local_correct++;
                 result_queue.pop();
             }
-            correct += local_correct;
-        }
+            correct.fetch_add(local_correct, std::memory_order_relaxed);
+        });
 
-        const auto precision = ((float)correct) / total;
+        const auto precision = ((float)correct.load()) / total.load();
         recalls.push_back(precision);
     }
 
@@ -748,9 +748,6 @@ int main() {
     else
         fmt::print("use arch  ...\n");
     fmt::print("Actual memory usage: {} Mb, Max memory usage: {} Mb \n", getCurrentRSS() / 1000000, getPeakRSS() / 1000000);
-
-    omp_set_num_threads(8);
-    std::cout << "_OPENMP " << omp_get_num_threads() << " threads" << std::endl;
 
     const auto data_path = std::filesystem::path(DATA_PATH);
   

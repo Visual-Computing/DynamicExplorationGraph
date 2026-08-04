@@ -41,6 +41,8 @@ namespace deglib::distances::evp_ip {
 
     class EvpInnerProduct {
     public:
+        static constexpr const char* get_instruction() { return "Scalar"; }
+
         inline static float compare(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
             return 1.f - (compare_naive(pVect1v, pVect2v, qty_ptr) / (2.f * static_cast<float>(*static_cast<const uint32_t*>(qty_ptr))));
         }
@@ -104,6 +106,8 @@ namespace deglib::distances::evp_ip {
             static constexpr bool HasTail     = has_flag(Mode, ResidualMode::Tail);
 
         public:
+            static constexpr const char* get_instruction() { return "AVX512"; }
+
             DEGLIB_TARGET_AVX512 inline static float compare(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
                 const std::byte* a = (const std::byte*)pVect1v;
                 const std::byte* b = (const std::byte*)pVect2v;
@@ -196,6 +200,7 @@ namespace deglib::distances::evp_ip {
             static constexpr bool HasTail     = has_flag(Mode, ResidualMode::Tail);
 
         public:
+            static constexpr const char* get_instruction() { return "AVX2"; }
             DEGLIB_TARGET_AVX2 inline static float compare(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
                 const std::byte* a = (const std::byte*)pVect1v;
                 const std::byte* b = (const std::byte*)pVect2v;
@@ -340,10 +345,16 @@ namespace deglib::distances::evp_ip {
 #endif
     >;
 
-    inline DistanceVariant select_dist(const size_t dim) {
+    inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) {
+        if (instruction == deglib::cpu::InstructionSet::Scalar) {
+            return EvpInnerProduct{};
+        }
+
 #if defined(DEGLIB_X86)
-        if (deglib::cpu::has_avx512()) {
-            // AVX-512 processes 64 bytes per iteration
+        if (instruction == deglib::cpu::InstructionSet::AVX512 || (instruction == deglib::cpu::InstructionSet::Auto && deglib::cpu::has_avx512())) {
+            if (instruction == deglib::cpu::InstructionSet::AVX512 && !deglib::cpu::has_avx512()) {
+                throw std::runtime_error("AVX512 instruction set requested, but not supported by CPU");
+            }
             if (dim < 512) {
                 return EvpInnerProduct_AVX512<ResidualMode::TailOnly>{};
             } else if (dim < 1024) {
@@ -355,8 +366,10 @@ namespace deglib::distances::evp_ip {
                 else return EvpInnerProduct_AVX512<ResidualMode::Full>{};
             }
         }
-        else if (deglib::cpu::has_avx2()) {
-            // AVX2 processes 32 bytes per iteration
+        else if (instruction == deglib::cpu::InstructionSet::AVX2 || (instruction == deglib::cpu::InstructionSet::Auto && deglib::cpu::has_avx2())) {
+            if (instruction == deglib::cpu::InstructionSet::AVX2 && !deglib::cpu::has_avx2()) {
+                throw std::runtime_error("AVX2 instruction set requested, but not supported by CPU");
+            }
             if (dim < 256) {
                 return EvpInnerProduct_AVX2<ResidualMode::TailOnly>{};
             } else if (dim < 512) {
@@ -367,6 +380,10 @@ namespace deglib::distances::evp_ip {
                 else if (dim % 256 == 0) return EvpInnerProduct_AVX2<ResidualMode::DualPlusSimd>{};
                 else return EvpInnerProduct_AVX2<ResidualMode::Full>{};
             }
+        }
+#else
+        if (instruction != deglib::cpu::InstructionSet::Auto && instruction != deglib::cpu::InstructionSet::Scalar) {
+            throw std::runtime_error("Requested SIMD instruction set is not supported on this platform");
         }
 #endif
         return EvpInnerProduct{};

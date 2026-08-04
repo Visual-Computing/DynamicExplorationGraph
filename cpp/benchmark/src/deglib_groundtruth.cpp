@@ -67,21 +67,22 @@ void fvecs_write(const char *fname, uint32_t d, size_t n, const float* v) {
 /**
  * Compute the gt data
  */
-static std::vector<uint32_t> compute_gt(const deglib::StaticFeatureRepository& base_repo, const deglib::StaticFeatureRepository& query_repo, const deglib::Metric metric, const uint32_t k_target) {
-    const auto start = std::chrono::steady_clock::now();
-
-    const auto base_size = (uint32_t)base_repo.size();
-    const auto query_size = (uint32_t)query_repo.size();
+std::vector<uint32_t> compute_knn_groundtruth(const deglib::FeatureRepository& base_repo, const deglib::FeatureRepository& query_repo, const deglib::Metric metric, const uint32_t k_target, const size_t base_limit = 0) {
+    const auto base_size = base_limit > 0 ? std::min(base_limit, base_repo.size()) : base_repo.size();
+    const auto query_size = query_repo.size();
     const auto dims = base_repo.dims();
 
     const auto feature_space = deglib::FloatSpace(dims, metric);
     const auto dist_func = feature_space.get_dist_func();
     const auto dist_func_param = feature_space.get_dist_func_param();
 
-    auto count = 0;
+    std::atomic<int> count{0};
     auto topLists = std::vector<uint32_t>(k_target*query_size);
-    #pragma omp parallel for
-    for (int q = 0; q < (int)query_size; q++) {
+    const auto start = std::chrono::steady_clock::now();
+
+    const uint32_t threads = std::thread::hardware_concurrency();
+    deglib::concurrent::parallel_for(0, query_size, threads, [&](size_t q_idx, size_t) {
+        const int q = (int)q_idx;
         const auto query = query_repo.getFeature(q);
 
         auto worst_distance = std::numeric_limits<float>::max();
@@ -109,15 +110,12 @@ static std::vector<uint32_t> compute_gt(const deglib::StaticFeatureRepository& b
             results.pop();
         }
 
-        #pragma omp critical
-        {
-            count++;
-            if(count % 100 == 0) {
-                const auto duration_ms = uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
-                fmt::print("Computed {} ground truth lists after {}ms\n", count, duration_ms);
-            }
+        int current_count = ++count;
+        if(current_count % 100 == 0) {
+            const auto duration_ms = uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+            fmt::print("Computed {} ground truth lists after {}ms\n", current_count, duration_ms);
         }
-    }
+    });
 
     return topLists;
 }
@@ -131,9 +129,6 @@ int main() {
     else
         fmt::print("use arch  ...\n");
     fmt::print("Actual memory usage: {} Mb, Max memory usage: {} Mb \n", getCurrentRSS() / 1000000, getPeakRSS() / 1000000);
-
-    omp_set_num_threads(1);
-    std::cout << "_OPENMP " << omp_get_num_threads() << " threads" << std::endl;
 
     const auto data_path = std::filesystem::path(DATA_PATH);
 

@@ -93,6 +93,23 @@ namespace deglib::cpu {
 
     } // namespace detail
 
+    enum class InstructionSet : uint8_t {
+        Auto   = 0,
+        Scalar = 1,
+        AVX2   = 2,
+        AVX512 = 3
+    };
+
+    inline const char* instruction_set_to_string(InstructionSet inst) {
+        switch (inst) {
+            case InstructionSet::Auto:   return "Auto";
+            case InstructionSet::Scalar: return "Scalar";
+            case InstructionSet::AVX2:   return "AVX2";
+            case InstructionSet::AVX512: return "AVX512";
+        }
+        return "Unknown";
+    }
+
     // Runtime CPU feature detection — safe to call from any translation unit.
     // These checks are performed once (cached) and have zero cost per call thereafter.
 

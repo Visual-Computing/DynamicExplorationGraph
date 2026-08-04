@@ -229,7 +229,7 @@ public:
     }
 
     // store feature space information
-    uint8_t metric_type = static_cast<uint8_t>(feature_space_.metric());
+    uint8_t metric_type = static_cast<uint8_t>(feature_space_.metric().value);
     out.write(reinterpret_cast<const char*>(&metric_type), sizeof(metric_type));
     uint16_t dim = uint16_t(this->feature_space_.dim());
     out.write(reinterpret_cast<const char*>(&dim), sizeof(dim));

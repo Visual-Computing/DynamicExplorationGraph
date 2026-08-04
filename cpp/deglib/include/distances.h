@@ -19,23 +19,80 @@
 
 namespace deglib {
 
-    enum class Metric {
-        // High nibble: Data Type (0x00 = FP32, 0x10 = Uint8, 0x20 = FP16, 0x30 = EVP bit-packed)
-        // Low nibble:  Metric (1 = L2, 2 = InnerProduct)
+    enum class MetricDataType : uint8_t {
+        FP32  = 0x00,
+        Uint8 = 0x10,
+        FP16  = 0x20,
+        EVP   = 0x30
+    };
 
-        // 0x00 = float (FP32)
-        //L1 = 0x00 | 0,
-        L2 = 0x00 | 1,
-        InnerProduct = 0x00 | 2,
+    enum class MetricDistanceKind : uint8_t {
+        L2           = 0x01,
+        InnerProduct = 0x02
+    };
 
-        // 0x10 = uint8
-        L2_Uint8 = 0x10 | 1,
+    enum class MetricType : uint8_t {
+        FP32_L2            = static_cast<uint8_t>(MetricDataType::FP32)  | static_cast<uint8_t>(MetricDistanceKind::L2),           // 0x01
+        FP32_InnerProduct  = static_cast<uint8_t>(MetricDataType::FP32)  | static_cast<uint8_t>(MetricDistanceKind::InnerProduct), // 0x02
+        Uint8_L2          = static_cast<uint8_t>(MetricDataType::Uint8) | static_cast<uint8_t>(MetricDistanceKind::L2),           // 0x11
+        FP16_InnerProduct = static_cast<uint8_t>(MetricDataType::FP16)  | static_cast<uint8_t>(MetricDistanceKind::InnerProduct), // 0x22
+        EVP_InnerProduct  = static_cast<uint8_t>(MetricDataType::EVP)   | static_cast<uint8_t>(MetricDistanceKind::InnerProduct)  // 0x32
+    };
 
-        // 0x20 = FP16
-        FP16InnerProduct = 0x20 | 2,
+    /**
+     * Metric wrapper providing type, distance kind, and string conversion methods.
+     */
+    struct Metric {
+        MetricType value;
 
-        // 0x30 = EVP (bit-packed)
-        EVPInnerProduct = 0x30 | 2
+        constexpr Metric() : value(MetricType::FP32_L2) {}
+        constexpr Metric(MetricType v) : value(v) {}
+        constexpr explicit Metric(uint8_t raw) : value(static_cast<MetricType>(raw)) {}
+        constexpr operator MetricType() const { return value; }
+
+        // Primary enum names in <type>_<metric> format
+        static constexpr MetricType FP32_L2 = MetricType::FP32_L2;
+        static constexpr MetricType FP32_InnerProduct = MetricType::FP32_InnerProduct;
+        static constexpr MetricType Uint8_L2 = MetricType::Uint8_L2;
+        static constexpr MetricType FP16_InnerProduct = MetricType::FP16_InnerProduct;
+        static constexpr MetricType EVP_InnerProduct = MetricType::EVP_InnerProduct;
+
+        // Legacy metric name aliases for 100% backward compatibility
+        static constexpr MetricType L2 = MetricType::FP32_L2;
+        static constexpr MetricType InnerProduct = MetricType::FP32_InnerProduct;
+        static constexpr MetricType L2_Uint8 = MetricType::Uint8_L2;
+        static constexpr MetricType FP16InnerProduct = MetricType::FP16_InnerProduct;
+        static constexpr MetricType EVPInnerProduct = MetricType::EVP_InnerProduct;
+
+        constexpr MetricDataType get_data_type() const {
+            return static_cast<MetricDataType>(static_cast<uint8_t>(value) & 0xF0);
+        }
+
+        constexpr MetricDistanceKind get_distance_kind() const {
+            return static_cast<MetricDistanceKind>(static_cast<uint8_t>(value) & 0x0F);
+        }
+
+        constexpr const char* get_data_type_name() const {
+            switch (get_data_type()) {
+                case MetricDataType::FP32:  return "FP32";
+                case MetricDataType::Uint8: return "Uint8";
+                case MetricDataType::FP16:  return "FP16";
+                case MetricDataType::EVP:   return "EVP";
+            }
+            return "Unknown";
+        }
+
+        constexpr const char* get_distance_name() const {
+            switch (get_distance_kind()) {
+                case MetricDistanceKind::L2:           return "L2";
+                case MetricDistanceKind::InnerProduct: return "InnerProduct";
+            }
+            return "Unknown";
+        }
+
+        std::string to_string() const {
+            return std::string(get_data_type_name()) + "_" + get_distance_name();
+        }
     };
 
     /**
@@ -98,6 +155,16 @@ namespace deglib {
     }
 
     /**
+     * Extracts the instruction set string name from a DistanceVariant object.
+     */
+    inline const char* to_instruction(const DistanceVariant& variant) {
+        return std::visit([](auto&& dist) -> const char* {
+            using DistType = std::decay_t<decltype(dist)>;
+            return DistType::get_instruction();
+        }, variant);
+    }
+
+    /**
      * Converts a sub-namespace DistanceVariant into the flat DistanceVariant.
      * Uses std::visit to extract the concrete distance type and return it
      * as the flattened variant — zero runtime overhead, single-level visit.
@@ -115,30 +182,29 @@ namespace deglib {
      */
     class FloatSpace  {
 
-        static DistanceVariant select_dist_variant(const size_t dim, const deglib::Metric metric) {
+        static DistanceVariant select_dist_variant(const size_t dim, const deglib::Metric metric, const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) {
             switch (metric) {
-                case deglib::Metric::L2:
-                    return to_flat_variant(deglib::distances::fp32_l2::select_dist(dim));
-                case deglib::Metric::InnerProduct:
-                    return to_flat_variant(deglib::distances::fp32_ip::select_dist(dim));
-                case deglib::Metric::FP16InnerProduct:
-                    return to_flat_variant(deglib::distances::fp16_ip::select_dist(dim));
-                case deglib::Metric::L2_Uint8:
-                    return to_flat_variant(deglib::distances::uint8_l2::select_dist(dim));
-                case deglib::Metric::EVPInnerProduct:
-                    return to_flat_variant(deglib::distances::evp_ip::select_dist(dim));
+                case deglib::Metric::FP32_L2:
+                    return to_flat_variant(deglib::distances::fp32_l2::select_dist(dim, instruction));
+                case deglib::Metric::FP32_InnerProduct:
+                    return to_flat_variant(deglib::distances::fp32_ip::select_dist(dim, instruction));
+                case deglib::Metric::FP16_InnerProduct:
+                    return to_flat_variant(deglib::distances::fp16_ip::select_dist(dim, instruction));
+                case deglib::Metric::Uint8_L2:
+                    return to_flat_variant(deglib::distances::uint8_l2::select_dist(dim, instruction));
+                case deglib::Metric::EVP_InnerProduct:
+                    return to_flat_variant(deglib::distances::evp_ip::select_dist(dim, instruction));
                 default:
                     throw std::invalid_argument("Unsupported metric type in select_dist_variant");
             }
         }
 
         static size_t calculate_data_size(const size_t dim, const deglib::Metric metric) {
-            const auto data_type = static_cast<uint8_t>(metric) & 0xF0;
-            switch (data_type) {
-                case 0x00: return dim * sizeof(float);
-                case 0x10: return dim * sizeof(uint8_t);
-                case 0x20: return dim * sizeof(uint16_t);
-                case 0x30: return 2 * (dim / 8);  // EVP: [ones (dim/8 bytes)][negs (dim/8 bytes)]
+            switch (metric.get_data_type()) {
+                case deglib::MetricDataType::FP32:  return dim * sizeof(float);
+                case deglib::MetricDataType::Uint8: return dim * sizeof(uint8_t);
+                case deglib::MetricDataType::FP16:  return dim * sizeof(uint16_t);
+                case deglib::MetricDataType::EVP:   return 2 * (dim / 8);  // EVP: [ones (dim/8 bytes)][negs (dim/8 bytes)]
                 default: throw std::invalid_argument("Unsupported metric data type in calculate_data_size");
             }
         }
@@ -149,8 +215,8 @@ namespace deglib {
         const deglib::Metric metric_;
 
     public:
-        FloatSpace(const size_t dim, const deglib::Metric metric) 
-            : dist_variant_(select_dist_variant(dim, metric)),
+        FloatSpace(const size_t dim, const deglib::Metric metric, const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) 
+            : dist_variant_(select_dist_variant(dim, metric, instruction)),
               data_size_(calculate_data_size(dim, metric)),
               dim_(dim),
               metric_(metric) {
@@ -189,6 +255,13 @@ namespace deglib {
          */
         const DISTFUNC<float> get_dist_func() const {
             return to_dist_func(dist_variant_);
+        }
+
+        /**
+         * Returns the instruction set name (e.g. "AVX512", "AVX2", "Scalar") used by the distance function.
+         */
+        const char* get_instruction() const {
+            return to_instruction(dist_variant_);
         }
 
         /**
