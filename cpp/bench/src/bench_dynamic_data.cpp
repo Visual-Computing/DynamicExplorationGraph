@@ -25,7 +25,6 @@ struct DynamicConfig {
     uint8_t k_ext = 60;
     float eps_ext = 0.1f;
     deglib::builder::OptimizationTarget lid = deglib::builder::OptimizationTarget::StreamingData;
-    uint32_t build_threads = std::thread::hardware_concurrency() / 2;
     uint32_t anns_k = 100;
     uint32_t anns_repeat = 1;
     uint32_t anns_threads = 1;
@@ -91,7 +90,6 @@ void print_help(const char* program_name) {
     log("Options:\n");
     log("  --force-rebuild       Force rebuilding the graphs even if graph files already exist\n");
     log("  --instruction <inst>  Select distance instruction set (auto, avx512, avx2, scalar)\n");
-    log("  --threads <count>     Number of threads used for building the graph (default: hardware_concurrency / 2)\n");
     log("  --help, -h            Display this detailed help message\n\n");
     log("Data Path:\n");
     log("  Data is loaded from / saved to DATA_PATH defined at build time (e.g. \"{}\")\n", DATA_PATH);
@@ -106,10 +104,9 @@ static deglib::cpu::InstructionSet parse_instruction_set(const std::string& str)
     return deglib::cpu::InstructionSet::Auto;
 }
 
-void run_dynamic_benchmark(const DatasetName& ds_name, const std::filesystem::path& data_path, bool force_rebuild, deglib::cpu::InstructionSet instruction, uint32_t build_threads) {
+void run_dynamic_benchmark(const DatasetName& ds_name, const std::filesystem::path& data_path, bool force_rebuild, deglib::cpu::InstructionSet instruction) {
     Dataset ds(ds_name, data_path);
     auto config = get_dataset_config(ds_name);
-    config.build_threads = build_threads;
 
     log("\n=== Benchmarking Dynamic Data Streams for Dataset: {} ===\n", ds.name());
 
@@ -149,7 +146,7 @@ void run_dynamic_benchmark(const DatasetName& ds_name, const std::filesystem::pa
                          config.k_ext,
                          config.eps_ext,
                          0, 0, 0,
-                         config.build_threads,
+                         1,
                          true,
                          ds.info().scale,
                          false,
@@ -190,10 +187,9 @@ void run_dynamic_benchmark(const DatasetName& ds_name, const std::filesystem::pa
 
 int main(int argc, char* argv[]) {
     const auto data_path = std::filesystem::path(DATA_PATH);
-    DatasetName ds_name = DatasetName::SIFT1M;
+    DatasetName ds_name = DatasetName::AUDIO;
     bool force_rebuild = false;
-    deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto;
-    uint32_t build_threads = std::thread::hardware_concurrency() / 2;
+    deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::AVX2;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -204,8 +200,6 @@ int main(int argc, char* argv[]) {
             force_rebuild = true;
         } else if (arg == "--instruction" && i + 1 < argc) {
             instruction = parse_instruction_set(argv[++i]);
-        } else if (arg == "--threads" && i + 1 < argc) {
-            build_threads = (uint32_t)std::stoul(argv[++i]);
         } else {
             auto parsed = DatasetName::from_string(arg);
             if (parsed.is_valid()) {
@@ -228,7 +222,7 @@ int main(int argc, char* argv[]) {
     }
 
     for (const auto& current_ds : datasets_to_run) {
-        run_dynamic_benchmark(current_ds, data_path, force_rebuild, instruction, build_threads);
+        run_dynamic_benchmark(current_ds, data_path, force_rebuild, instruction);
     }
 
     log("\nDynamic Benchmark Finished Successfully.\n");

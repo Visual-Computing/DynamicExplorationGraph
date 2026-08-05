@@ -1,0 +1,15 @@
+﻿[project]
+name = "dynamic-data-benchmark"
+version = "0.1.0"
+description = "DEG dynamic data benchmark (Python mirror of bench_dynamic_data)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "deglib",
+    "numpy>=1.24.0",
+    "matplotlib>=3.7.0",
+    "tqdm>=4.65.0",
+]
+
+[tool.uv.sources]
+deglib = { path = "../../python", editable = true }

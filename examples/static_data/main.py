@@ -21,9 +21,8 @@ from graph_analysis import analyze_graph
 def _render_anns_plot(dataset_name: str, instruction_set: str, search_k: int, anns_recalls: list, anns_qps: list):
     plt.figure(figsize=(8, 6))
     plt.plot(anns_recalls, anns_qps, marker='o', linewidth=2, color='tab:blue', label=f"DEG ({dataset_name})")
-    plt.yscale('log')
     plt.xlabel(f"Recall@{search_k}")
-    plt.ylabel("Queries Per Second (QPS) [log scale]")
+    plt.ylabel("Queries Per Second (QPS)")
     plt.title(f"DEG ANNS Search Benchmark on {dataset_name} ({instruction_set})")
     plt.grid(True, which="both", ls="--", alpha=0.5)
     plt.legend()
@@ -44,15 +43,13 @@ def plot_anns_results(
             target=_render_anns_plot,
             args=(dataset_name, instruction_set, search_k, list(anns_recalls), list(anns_qps))
         )
-        p.daemon = True
         p.start()
 
 def _render_explore_plot(dataset_name: str, instruction_set: str, explore_k: int, explore_recalls: list, explore_qps: list):
     plt.figure(figsize=(8, 6))
     plt.plot(explore_recalls, explore_qps, marker='s', linewidth=2, color='tab:orange', label=f"DEG Explore ({dataset_name})")
-    plt.yscale('log')
     plt.xlabel(f"Explore Recall@{explore_k}")
-    plt.ylabel("Queries Per Second (QPS) [log scale]")
+    plt.ylabel("Queries Per Second (QPS)")
     plt.title(f"DEG Graph Exploration Benchmark on {dataset_name} ({instruction_set})")
     plt.grid(True, which="both", ls="--", alpha=0.5)
     plt.legend()
@@ -73,7 +70,6 @@ def plot_explore_results(
             target=_render_explore_plot,
             args=(dataset_name, instruction_set, explore_k, list(explore_recalls), list(explore_qps))
         )
-        p.daemon = True
         p.start()
 
 def compute_linear_search_baseline(base_vecs: np.ndarray, float_space: deglib.distances.FloatSpace, sample_size: int = 100) -> float:

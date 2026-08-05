@@ -160,16 +160,24 @@ inline void create_graph(const deglib::StaticFeatureRepository& repository,
 
     if (data_stream_type == DataStreamType::AddHalfRemoveAndAddOneAtATime) {
         auto base_size_half = base_size / 2;
-        auto base_size_fourth = base_size / 4;
-        for (uint32_t i = 0; i < base_size_fourth; i++) {
+        auto base_size_quarter = base_size / 4;
+        // First loop: add base_size_quarter pairs from [0, base_size_quarter) and [base_size_half, base_size_half + base_size_quarter)
+        for (uint32_t i = 0; i < base_size_quarter; i++) {
             addEntry(0 + i);
             addEntry(base_size_half + i);
         }
-        for (uint32_t i = 0; i < base_size_fourth; i++) {
-            addEntry(base_size_fourth + i);
-            addEntry(base_size_half + base_size_fourth + i);
+        // Second loop: add base_size_quarter pairs from [base_size_quarter, base_size_half) and remove the same number
+        // to keep exactly base_size_half vertices in the graph
+        for (uint32_t i = 0; i < base_size_quarter; i++) {
+            addEntry(base_size_quarter + i);
+            addEntry(base_size_half + base_size_quarter + i);
             builder.removeEntry(base_size_half + (i * 2) + 0);
             builder.removeEntry(base_size_half + (i * 2) + 1);
+        }
+        // If base_size is not divisible by 4, add the remaining entries to reach exactly base_size_half vertices
+        auto remainder = base_size_half - (base_size_quarter * 2);
+        for (uint32_t i = 0; i < remainder; i++) {
+            addEntry(base_size_quarter * 2 + i);
         }
     } else {
         base_size /= (data_stream_type == DataStreamType::AddHalf) ? 2 : 1;
