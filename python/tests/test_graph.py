@@ -32,9 +32,9 @@ def get_ranking(features: np.ndarray, graph: deglib.graph.SearchGraph, query: np
     if query.dtype == np.uint8:
         query = query.astype(np.float32)
 
-    if graph.get_feature_space().metric() in (deglib.Metric.L2, deglib.Metric.L2_Uint8):
+    if graph.get_feature_space().metric() in (deglib.Metric.FP32_L2, deglib.Metric.Uint8_L2):
         distances = np.sum(np.square(features - query), axis=1)
-    elif graph.get_feature_space().metric() == deglib.Metric.InnerProduct:
+    elif graph.get_feature_space().metric() == deglib.Metric.FP32_InnerProduct:
         distances = 1.0 - np.dot(features, query.T).flatten()
     else:
         raise ValueError(f'unknown metric: {graph.get_feature_space().metric()}')

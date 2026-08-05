@@ -10,7 +10,10 @@ set(TEST_MAIN ${CMAKE_CURRENT_SOURCE_DIR}/test_main.cpp)
 
 # Static library for GoogleTest to avoid compiling gmock-gtest-all.cc multiple times
 add_library(gtest STATIC ${GTEST_SOURCE})
-target_include_directories(gtest PUBLIC ${GTEST_INCLUDE})
+target_include_directories(gtest SYSTEM PUBLIC ${GTEST_INCLUDE})
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(gtest PRIVATE -Wno-character-conversion)
+endif()
 
 # Helper macro: creates a test executable with shared gtest + deglib setup
 macro(add_deglib_test name source)

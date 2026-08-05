@@ -9,7 +9,7 @@ import numpy as np
 import deglib_cpp
 import pathlib
 
-from .distances import FloatSpace, Metric, SpaceInterface
+from .distances import FloatSpace, Metric, InstructionSet, SpaceInterface
 from .search import ResultSet, ObjectDistance, Filter
 from .utils import assure_array, InvalidShapeException
 
@@ -284,16 +284,19 @@ class ReadOnlyGraph(SearchGraph):
         """
         return self.graph_cpp.get_external_label(internal_index)
 
-    def explore(self, entry_vertex_index: int, k: int, include_entry: bool, max_distance_computation_count: int) -> ResultSet:
+    def explore(self, entry_vertex_indices, k: int, include_entry: bool = True, max_distance_computation_count: int = 0, threads: int = 1):
         """
-        An exploration for similar element, limited by max_distance_computation_count
-
-        :param entry_vertex_index: The start point for which similar feature vectors should be searched
-        :param k: The number of similar feature vectors to return
-        :param include_entry: If True, the entry vertex is included in the result set.
-        :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
+        An exploration for similar elements, limited by max_distance_computation_count.
+        Supports single entry_vertex_index or batch entry_vertex_indices array.
         """
-        return ResultSet(self.graph_cpp.explore(entry_vertex_index, k, include_entry, max_distance_computation_count))
+        if isinstance(entry_vertex_indices, (np.ndarray, list, tuple)):
+            arr = np.ascontiguousarray(entry_vertex_indices, dtype=np.uint32)
+            if arr.ndim == 2:
+                arr = arr[:, 0]
+            indices, distances = self.graph_cpp.explore_batch(arr, k, include_entry, max_distance_computation_count, threads)
+            return indices, distances
+        else:
+            return ResultSet(self.graph_cpp.explore(int(entry_vertex_indices), k, include_entry, max_distance_computation_count))
 
     def get_edges_per_vertex(self) -> int:
         """
@@ -459,7 +462,7 @@ class SizeBoundedGraph(MutableGraph):
         self.feature_space = feature_space
 
     @staticmethod
-    def create_empty(capacity: int, dims: int, edges_per_vertex: int = 32, metric: Metric = Metric.L2):
+    def create_empty(capacity: int, dims: int, edges_per_vertex: int = 32, metric: Metric = Metric.FP32_L2, instruction: InstructionSet = InstructionSet.Auto):
         """
         Create an empty SizeBoundedGraph.
 
@@ -467,8 +470,9 @@ class SizeBoundedGraph(MutableGraph):
         :param dims: The number of dimensions of each feature vector
         :param edges_per_vertex: Number of neighbors for each vertex. Defaults to 32.
         :param metric: The metric to measure distances between features. Defaults to L2-Metric.
+        :param instruction: CPU Instruction Set to use for SIMD vector distance computation.
         """
-        return SizeBoundedGraph(capacity, edges_per_vertex, FloatSpace.create(dims, metric))
+        return SizeBoundedGraph(capacity, edges_per_vertex, FloatSpace.create(dims, metric, instruction))
 
     def size(self) -> int:
         """
@@ -636,16 +640,19 @@ class SizeBoundedGraph(MutableGraph):
         """
         return self.graph_cpp.has_edge(internal_index, neighbor_index)
 
-    def explore(self, entry_vertex_index: int, k: int, include_entry: bool, max_distance_computation_count: int) -> ResultSet:
+    def explore(self, entry_vertex_indices, k: int, include_entry: bool = True, max_distance_computation_count: int = 0, threads: int = 1):
         """
-        An exploration for similar element, limited by max_distance_computation_count
-
-        :param entry_vertex_index: The start point for which similar feature vectors should be searched
-        :param k: The number of similar feature vectors to return
-        :param include_entry: If True, the entry vertex is included in the result set.
-        :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
+        An exploration for similar elements, limited by max_distance_computation_count.
+        Supports single entry_vertex_index or batch entry_vertex_indices array.
         """
-        return ResultSet(self.graph_cpp.explore(entry_vertex_index, k, include_entry, max_distance_computation_count))
+        if isinstance(entry_vertex_indices, (np.ndarray, list, tuple)):
+            arr = np.ascontiguousarray(entry_vertex_indices, dtype=np.uint32)
+            if arr.ndim == 2:
+                arr = arr[:, 0]
+            indices, distances = self.graph_cpp.explore_batch(arr, k, include_entry, max_distance_computation_count, threads)
+            return indices, distances
+        else:
+            return ResultSet(self.graph_cpp.explore(int(entry_vertex_indices), k, include_entry, max_distance_computation_count))
 
     def to_cpp(self) -> deglib_cpp.SizeBoundedGraph:
         return self.graph_cpp

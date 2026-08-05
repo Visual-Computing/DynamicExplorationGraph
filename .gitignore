@@ -57,3 +57,11 @@ Thumbs.db
 
 # Agent rules
 .agents/
+
+# Python generated files & virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+*.png
+

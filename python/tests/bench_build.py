@@ -92,7 +92,7 @@ def create_graph(
         eps_ext: float, k_opt: int, eps_opt: float, i_opt: int
 ):
     rnd = deglib.Mt19937()  # default 7
-    metric = deglib.Metric.L2  # default metric
+    metric = deglib.Metric.FP32_L2  # default metric
     swap_tries = 0  # additional swap tries between the next graph extension
     additional_swap_tries = 0  # increase swap try count for each successful swap
     # load data

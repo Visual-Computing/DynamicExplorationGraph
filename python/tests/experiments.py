@@ -12,7 +12,7 @@ def main():
     data = np.random.random((samples, dims)).astype(np.float32)
     # data = data / np.linalg.norm(data, axis=1)[:, None]  # L2 normalize
 
-    graph = deglib.graph.SizeBoundedGraph.create_empty(data.shape[0], data.shape[1], 16, deglib.Metric.L2)
+    graph = deglib.graph.SizeBoundedGraph.create_empty(data.shape[0], data.shape[1], 16, deglib.Metric.FP32_L2)
     builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=32, extend_eps=0.01, improve_k=0)
 
     for i, vec in enumerate(data):

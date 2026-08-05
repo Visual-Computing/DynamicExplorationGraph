@@ -38,7 +38,7 @@ cd DynamicExplorationGraph/python
 Make sure a C++ compiler is configured on your system (e.g. g++ under Linux, [Build Tools for Visual Studio](https://visualstudio.microsoft.com/downloads/) under Windows, [XCode](https://developer.apple.com/xcode/) under macOS).
 
 ```shell
-pip install setuptools==83.0.0 pybind11==3.0.4 build
+pip install setuptools==83.0.0 pybind11==3.0.4 build==1.5.0
 python setup.py copy_build_files  # copy c++ library to ./lib/
 pip install .
 ```

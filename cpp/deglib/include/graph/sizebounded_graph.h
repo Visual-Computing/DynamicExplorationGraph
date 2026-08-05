@@ -681,44 +681,13 @@ public:
 
     // add the entry vertex index to the vertices which gets checked next and ignore it for further checks
     checked_ids[entry_vertex_index] = checked_ids_tag;
-    next_vertices.emplace(entry_vertex_index, 0);
+    next_vertices.emplace(entry_vertex_index, 0.0f);
     if(include_entry)
-      results.emplace(entry_vertex_index, 0);
+      results.emplace(entry_vertex_index, 0.0f);
     const auto query = this->feature_by_index(entry_vertex_index);
 
-    // add the neighbors of the entry vertex to the next vertices queue
-    {
-      const auto neighbor_indices = this->neighbors_by_index(entry_vertex_index);
-      const auto neighbor_weights = this->weights_by_index(entry_vertex_index);
-      memory::prefetch(reinterpret_cast<const char*>(neighbor_indices));
-      memory::prefetch(reinterpret_cast<const char*>(neighbor_weights));
-      for (uint8_t i = 0; i < this->edges_per_vertex_; i++) {
-        const auto neighbor_index = neighbor_indices[i];
-
-        if (checked_ids[neighbor_index] != checked_ids_tag) {
-          checked_ids[neighbor_index] = checked_ids_tag;
-
-          const auto neighbor_distance = neighbor_weights[i];
-          next_vertices.emplace(neighbor_index, neighbor_distance);
-          results.emplace(neighbor_index, neighbor_distance);
-
-          // update the search radius
-          if (results.size() > k) 
-            results.pop();
-
-          // early stop after to many computations
-          if(max_distance_computation_count > 0 && ++distance_computation_count >= max_distance_computation_count)
-            return results;
-        }
-      }
-    }
-
     // search radius
-    auto radius = results.top().getDistance();
-
-    // experimental: eps replacement parameter
-    const auto eps = (max_distance_computation_count > 0) ? std::log10(float(max_distance_computation_count)/k) : 0.0f;
-    auto exploration_radius = radius * ((radius < 0) ? (1 - eps) : (1 + eps));
+    auto radius = std::numeric_limits<float>::max();
 
     // iterate as long as good elements are in the next_vertices queue and max_calcs is not yet reached
     auto good_neighbors = std::array<uint32_t, 256>();    // this limits the neighbor count to 256 using Variable Length Array wrapped in a macro
@@ -728,27 +697,13 @@ public:
       const auto next_vertex = next_vertices.top();
       next_vertices.pop();
 
-      // if no weight of this neighbor would survive the distance estimation check, stop here
-      if (next_vertex.getDistance() > exploration_radius)
-        break;
-
       uint8_t good_neighbor_count = 0;
-      {
-        const auto neighbor_indices = this->neighbors_by_index(next_vertex.getInternalIndex());
-        const auto neighbor_weights = this->weights_by_index(next_vertex.getInternalIndex());
-        memory::prefetch(reinterpret_cast<const char*>(neighbor_indices));
-        memory::prefetch(reinterpret_cast<const char*>(neighbor_weights));
-        for (uint8_t i = 0; i < this->edges_per_vertex_; i++) {
-          const auto neighbor_index = neighbor_indices[i];
-
-          if (checked_ids[neighbor_index] != checked_ids_tag)  {
-            checked_ids[neighbor_index] = checked_ids_tag;
-
-            // distance estimation check: allow only edges with a worst case distance < r
-            // this produces slighly better results and brings the sizebound graph on par with the readonly graph when comparing speed vs quality
-            if(next_vertex.getDistance() + neighbor_weights[i] < exploration_radius)
-              good_neighbors[good_neighbor_count++] = neighbor_index;
-          }
+      const auto neighbor_indices = this->neighbors_by_index(next_vertex.getInternalIndex());
+      for (uint8_t i = 0; i < this->edges_per_vertex_; i++) {
+        const auto neighbor_index = neighbor_indices[i];
+        if (checked_ids[neighbor_index] != checked_ids_tag)  {
+          checked_ids[neighbor_index] = checked_ids_tag;
+          good_neighbors[good_neighbor_count++] = neighbor_index;
         }
       }
 
@@ -775,7 +730,6 @@ public:
           if (results.size() > k) {
             results.pop();
             radius = results.top().getDistance();
-            exploration_radius = radius * ((radius < 0) ? (1 - eps) : (1 + eps));
           }
         }
 

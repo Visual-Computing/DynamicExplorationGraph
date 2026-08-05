@@ -6,7 +6,7 @@ from typing import Callable, Iterable
 import numpy as np
 import deglib_cpp
 
-from .distances import Metric
+from .distances import Metric, InstructionSet
 from .std import Mt19937
 from .graph import MutableGraph, SizeBoundedGraph
 from .utils import assure_array, InvalidShapeException
@@ -233,7 +233,7 @@ class EvenRegularGraphBuilder:
 
 def build_from_data(
         data: np.ndarray, labels: Iterable[int] | None = None, edges_per_vertex: int = 32, capacity: int = -1,
-        metric: Metric = Metric.L2, rng: Mt19937 | None = None,
+        metric: Metric = Metric.FP32_L2, instruction: InstructionSet = InstructionSet.Auto, rng: Mt19937 | None = None,
         optimization_target: OptimizationTarget = OptimizationTarget.LowLID, extend_k: int = 0, extend_eps: float = 0.2,
         improve_k: int = 0, improve_eps: float = 0.001, max_path_length: int = 5,
         swap_tries: int = 0, additional_swap_tries: int = 0,
@@ -256,6 +256,8 @@ def build_from_data(
     :type capacity: int
     :param metric: Distance metric for measuring feature similarity
     :type metric: Metric
+    :param instruction: CPU Instruction Set to use for SIMD vector distance computation
+    :type instruction: InstructionSet
     :param rng: Random number generator. If None, a new Mt19937 will be created
     :type rng: Mt19937 | None
     :param optimization_target: Optimization strategy based on data distribution characteristics
@@ -281,7 +283,7 @@ def build_from_data(
     """
     if capacity <= 0:
         capacity = data.shape[0]
-    graph = SizeBoundedGraph.create_empty(capacity, data.shape[1], edges_per_vertex, metric)
+    graph = SizeBoundedGraph.create_empty(capacity, data.shape[1], edges_per_vertex, metric, instruction)
     builder = EvenRegularGraphBuilder(
         graph, rng, optimization_target=optimization_target, extend_k=extend_k, extend_eps=extend_eps,
         improve_k=improve_k, improve_eps=improve_eps, max_path_length=max_path_length, swap_tries=swap_tries,
