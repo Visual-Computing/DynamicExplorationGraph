@@ -454,19 +454,12 @@ inline static void run_integration_test(const char* name, deglib::Metric metric,
     const uint32_t additional_swap_tries = 0;
     const uint32_t thread_count = 1;
 
-    // Compute byte size per vector based on metric type
-    size_t feature_bytes;
-    if (metric == deglib::Metric::FP16InnerProduct)
-        feature_bytes = dim * sizeof(uint16_t);
-    else if (metric == deglib::Metric::EVPInnerProduct)
-        feature_bytes = 2 * (dim / 8);
-    else
-        feature_bytes = (static_cast<int>(metric) & 0x10) ? dim * sizeof(uint8_t) : dim * sizeof(float);
-
     // Build DEG Graph using the specified metric feature space
     const deglib::FloatSpace feature_space = dist_variant.has_value()
         ? deglib::FloatSpace(dim, metric, dist_variant.value())
         : deglib::FloatSpace(dim, metric);
+
+    const size_t feature_bytes = feature_space.get_data_size();
 
     deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(base_count), edges_per_vertex,
                                           std::move(feature_space));
@@ -587,7 +580,7 @@ inline static void run_builder_integration_test(const char* name, deglib::Metric
                                                 std::optional<deglib::DistanceVariant> dist_variant,
                                                 deglib::builder::OptimizationTarget optimization_target)
 {
-    if (static_cast<int>(metric) & 0x10)
+    if (metric.get_data_type() == deglib::MetricDataType::Uint8)
     {
         // uint8 metric
         std::vector<uint8_t> base_data;
@@ -678,19 +671,12 @@ inline static void run_regression_test(const char* name, deglib::Metric metric, 
     const uint32_t additional_swap_tries = 0;
     const uint32_t thread_count = 1;
 
-    // Compute byte size per vector based on metric type
-    size_t feature_bytes;
-    if (metric == deglib::Metric::FP16InnerProduct)
-        feature_bytes = dim * sizeof(uint16_t);
-    else if (metric == deglib::Metric::EVPInnerProduct)
-        feature_bytes = 2 * (dim / 8);
-    else
-        feature_bytes = (static_cast<int>(metric) & 0x10) ? dim * sizeof(uint8_t) : dim * sizeof(float);
-
     // Build DEG Graph using the specified metric feature space
     const deglib::FloatSpace feature_space = dist_variant.has_value()
         ? deglib::FloatSpace(dim, metric, dist_variant.value())
         : deglib::FloatSpace(dim, metric);
+
+    const size_t feature_bytes = feature_space.get_data_size();
 
     deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(base_count), edges_per_vertex,
                                           std::move(feature_space));

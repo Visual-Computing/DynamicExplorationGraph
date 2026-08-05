@@ -148,7 +148,7 @@ int main() {
         const auto query_repository = deglib::load_static_repository(query_file_uint8.c_str());
 
         const auto start = std::chrono::system_clock::now();
-        const auto topLists = compute_gt(base_repository, query_repository, deglib::Metric::L2_Uint8, k_target);
+        const auto topLists = compute_knn_groundtruth(base_repository, query_repository, deglib::Metric::L2_Uint8, k_target);
         auto duration = uint32_t(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - start).count());
         fmt::print("Computing {:5} top lists of a {:8} base took {:5}s \n", query_repository.size(), base_repository.size(), duration);
         topListsUint8 = topLists;
@@ -165,7 +165,7 @@ int main() {
         const auto query_repository = deglib::load_static_repository(query_file.c_str());
 
         const auto start = std::chrono::system_clock::now();
-        const auto topLists = compute_gt(base_repository, query_repository, deglib::Metric::L2, k_target);
+        const auto topLists = compute_knn_groundtruth(base_repository, query_repository, deglib::Metric::L2, k_target);
         auto duration = uint32_t(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - start).count());
         fmt::print("Computing {:5} top lists of a {:8} base took {:5}s \n", query_repository.size(), base_repository.size(), duration);
         topListsFloat = topLists;
