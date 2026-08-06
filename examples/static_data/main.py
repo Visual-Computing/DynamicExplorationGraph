@@ -340,21 +340,25 @@ def main():
         "dataset",
         nargs="?",
         default=None,
-        choices=["sift1m", "deep1m", "glove", "glove-100", "audio", "enron", "all"],
-        help="Dataset name (e.g. sift1m, deep1m, glove-100, audio, enron, all) (default: sift1m)"
+        choices=["sift1m", "deep1m", "glove", "audio", "enron", "all"],
+        help="Dataset name (e.g. sift1m, deep1m, glove, audio, enron, all) (default: sift1m)",
     )
     parser.add_argument(
-        "--graph-path",
-        type=str,
+        "--graph-dir",
+        type=Path,
         default=None,
-        help="Optional file path to save the built graph to, or load from if it already exists"
+        help="Directory to save generated .deg graph files (default: <cache_dir>/<dataset>/deg)",
     )
     parser.add_argument(
         "--instruction",
-        type=str,
+        choices=["auto", "scalar", "avx2", "avx512"],
         default="auto",
-        choices=["auto", "avx512", "avx2", "scalar"],
-        help="Select distance instruction set (default: auto)"
+        help="SIMD instruction set to use (default: auto)",
+    )
+    parser.add_argument(
+        "--force-rebuild",
+        action="store_true",
+        help="Force rebuilding graph files even if they exist",
     )
     parser.add_argument(
         "--threads",

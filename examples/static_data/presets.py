@@ -62,7 +62,7 @@ DATASET_PRESETS: Dict[str, Dict[str, Any]] = {
         "explore_depth": 2,
         "search_eps_list": [0.01, 0.02, 0.03, 0.04, 0.06, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5, 2.0],
     },
-    "glove-100": {
+    "glove": {
         "metric": Metric.FP32_InnerProduct,
         "k": 30,
         "extend_k": 60,
@@ -79,15 +79,9 @@ DATASET_PRESETS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-# Alias mapping
-DATASET_ALIASES = {
-    "glove": "glove-100",
-}
-
 def get_preset(dataset_key: str) -> Dict[str, Any]:
     """Returns preset graph build and benchmark parameters for dataset_key."""
     key = dataset_key.lower()
-    key = DATASET_ALIASES.get(key, key)
     if key not in DATASET_PRESETS:
         raise ValueError(f"No preset for dataset '{dataset_key}'. Standard presets: {list(DATASET_PRESETS.keys())}")
     return DATASET_PRESETS[key]

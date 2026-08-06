@@ -242,63 +242,27 @@ def build_dynamic_graph(
             builder.remove_entry(int(all_labels[i]))
 
     elif stream_type == DataStreamType.AddHalfRemoveAndAddOneAtATime:
-        # Interleaved add/remove.
-        # Mirrors C++ build.h:
-        #   quarter = n/4
-        #   add [0..quarter) + [half..half+quarter)  (first wave)
-        #   then for i in [0..quarter):
-        #       add [quarter+i] + [half+quarter+i]
-        #       remove [half + 2*i]
-        #       remove [half + 2*i + 1]
+        # Interleaved add/remove matching C++ build.h.
         quarter = n // 4
 
-        # First wave: indices [0..n/4) and [n/2..3n/4)
-        first_labels = np.concatenate([all_labels[:quarter], all_labels[half:half + quarter]])
-        first_vecs = np.concatenate([base_vecs[:quarter], base_vecs[half:half + quarter]])
-        builder.add_entry(first_labels, first_vecs)
-        builder.build(callback="progress")  # build first wave before interleaving
-
-        # Recreate builder on the same graph for interleaved phase
-        builder2 = deglib.builder.EvenRegularGraphBuilder(
-            graph_mut,
-            rng=deglib.Mt19937(7),
-            optimization_target=deglib.builder.OptimizationTarget.StreamingData,
-            extend_k=preset.get("extend_k", k),
-            extend_eps=preset["build_eps"],
-            improve_k=preset.get("improve_k", 0),
-            improve_eps=preset.get("improve_eps", 0.0),
-        )
-        builder2.set_batch_size(10, 10)
-        if build_threads > 1:
-            builder2.set_thread_count(build_threads)
-
-        # Second wave: interleaved add [n/4+i, 3n/4+i] + remove [n/2+2i, n/2+2i+1]
+        # 1st loop: add base_size_quarter pairs from [0, quarter) and [half, half + quarter)
         for i in range(quarter):
-            builder2.add_entry(
-                np.array([all_labels[quarter + i]], dtype=np.uint32),
-                base_vecs[quarter + i : quarter + i + 1],
-            )
-            builder2.add_entry(
-                np.array([all_labels[half + quarter + i]], dtype=np.uint32),
-                base_vecs[half + quarter + i : half + quarter + i + 1],
-            )
-            builder2.remove_entry(int(all_labels[half + 2 * i]))
-            builder2.remove_entry(int(all_labels[half + 2 * i + 1]))
+            builder.add_entry(int(all_labels[i]), base_vecs[i : i + 1])
+            builder.add_entry(int(all_labels[half + i]), base_vecs[half + i : half + i + 1])
 
-        build_start = time.perf_counter()
-        builder2.build(callback="progress")
-        build_time = time.perf_counter() - build_start
-        print(f"Graph built in {build_time:.2f} seconds ({graph_mut.size()} vertices).")
+        # 2nd loop: add base_size_quarter pairs from [quarter, half) and remove same number
+        for i in range(quarter):
+            builder.add_entry(int(all_labels[quarter + i]), base_vecs[quarter + i : quarter + i + 1])
+            builder.add_entry(int(all_labels[half + quarter + i]), base_vecs[half + quarter + i : half + quarter + i + 1])
+            builder.remove_entry(int(all_labels[half + (i * 2) + 0]))
+            builder.remove_entry(int(all_labels[half + (i * 2) + 1]))
 
-        if graph_path:
-            graph_path.parent.mkdir(parents=True, exist_ok=True)
-            graph_mut.save_graph(str(graph_path))
-            print(f"Graph saved to: {graph_path}")
-            return deglib.graph.load_readonly_graph(str(graph_path))
-        else:
-            return deglib.graph.ReadOnlyGraph.from_graph(graph_mut)
+        # Remainder wave: If base_size is not divisible by 4, add remaining entries to reach exactly half vertices
+        remainder = half - (quarter * 2)
+        for i in range(remainder):
+            rem_idx = quarter * 2 + i
+            builder.add_entry(int(all_labels[rem_idx]), base_vecs[rem_idx : rem_idx + 1])
 
-    # For AddHalf and AddAllRemoveHalf: run build now
     build_start = time.perf_counter()
     builder.build(callback="progress")
     build_time = time.perf_counter() - build_start
@@ -485,9 +449,9 @@ def main():
     parser.add_argument(
         "dataset",
         nargs="?",
-        default=None,
-        choices=["sift1m", "deep1m", "glove", "glove-100", "audio", "enron", "all"],
-        help="Dataset name (e.g. sift1m, deep1m, glove-100, audio, enron, all) (default: sift1m)",
+        default="sift1m",
+        choices=["sift1m", "deep1m", "glove", "audio", "enron", "all"],
+        help="Dataset name (e.g. sift1m, deep1m, glove, audio, enron, all) (default: sift1m)",
     )
     parser.add_argument(
         "--graph-dir",

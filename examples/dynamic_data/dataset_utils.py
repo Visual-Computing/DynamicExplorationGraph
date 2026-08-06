@@ -13,12 +13,12 @@ DATASET_METADATA: Dict[str, Dict[str, Any]] = {
         "name": "SIFT1M",
         "url": "https://static.visual-computing.com/paper/DEG/sift.tar.gz",
         "archive": "sift.tar.gz",
-        "folder": "sift",
+        "folder": "sift1m",
         "metric": Metric.FP32_L2,
         "dim": 128,
         "base_count": 1000000,
-        "base_file": "sift_base.fvecs",
-        "query_file": "sift_query.fvecs",
+        "base_file": "sift1m_base.fvecs",
+        "query_file": "sift1m_query.fvecs",
         "gt_file": "sift1m_groundtruth_top100_nb1000000.ivecs",
         "gt_half_file": "sift1m_groundtruth_top100_nb500000.ivecs",
     },
@@ -61,7 +61,7 @@ DATASET_METADATA: Dict[str, Dict[str, Any]] = {
         "gt_file": "deep1m_groundtruth_top100_nb1000000.ivecs",
         "gt_half_file": "deep1m_groundtruth_top100_nb500000.ivecs",
     },
-    "glove-100": {
+    "glove": {
         "name": "GloVe-100",
         "url": "https://static.visual-computing.com/paper/DEG/glove-100.tar.gz",
         "archive": "glove-100.tar.gz",
@@ -76,14 +76,8 @@ DATASET_METADATA: Dict[str, Dict[str, Any]] = {
     },
 }
 
-# Aliases
-DATASET_ALIASES = {
-    "glove": "glove-100",
-}
-
 def resolve_dataset_key(key: str) -> str:
-    key = key.lower()
-    return DATASET_ALIASES.get(key, key)
+    return key.lower()
 
 def get_default_cache_dir() -> Path:
     """Returns the default dataset cache directory (~/.cache/deg_datasets or DEG_CACHE_DIR)."""
@@ -178,41 +172,41 @@ def ensure_dataset(dataset_key: str, cache_dir: Path) -> Path:
     
     meta = DATASET_METADATA[key]
     archive_path = cache_dir / meta["archive"]
+    
+    # 1. Check if direct folder (e.g., D:\Data\DEG\sift1m or D:\Data\DEG\sift) exists
     extracted_folder = cache_dir / meta["folder"]
+    if not extracted_folder.is_dir():
+        # Check case-insensitive / fallback matches before triggering a download
+        subdirs = [p for p in cache_dir.iterdir() if p.is_dir() and meta["folder"].lower() in p.name.lower()]
+        if subdirs:
+            extracted_folder = subdirs[0]
 
+    # 2. If folder is still not found, check/download archive and extract
     if not extracted_folder.is_dir():
         if not archive_path.is_file():
-            download_file(meta["url"], archive_path)
+            # Also check if archive exists inside a subfolder or cache_dir
+            archive_matches = list(cache_dir.rglob(meta["archive"]))
+            if archive_matches:
+                archive_path = archive_matches[0]
+            else:
+                download_file(meta["url"], archive_path)
         
         print(f"Extracting {archive_path} into {cache_dir}...")
         with tarfile.open(archive_path, "r:gz") as tar:
             tar.extractall(path=cache_dir)
         print("Extraction complete.")
-    
-    if not extracted_folder.is_dir():
-        subdirs = [p for p in cache_dir.iterdir() if p.is_dir() and meta["folder"].lower() in p.name.lower()]
-        if subdirs:
-            extracted_folder = subdirs[0]
-        else:
-            extracted_folder = cache_dir
+
+        extracted_folder = cache_dir / meta["folder"]
+        if not extracted_folder.is_dir():
+            subdirs = [p for p in cache_dir.iterdir() if p.is_dir() and meta["folder"].lower() in p.name.lower()]
+            if subdirs:
+                extracted_folder = subdirs[0]
+            else:
+                extracted_folder = cache_dir
 
     return extracted_folder
 
-def find_file(directory: Path, expected_name: str, pattern: str) -> Path:
-    """Finds a file by exact name or matching pattern in directory tree."""
-    target = directory / expected_name
-    if target.is_file():
-        return target
-    
-    matches = list(directory.rglob(expected_name))
-    if matches:
-        return matches[0]
 
-    matches = list(directory.rglob(f"*{pattern}*"))
-    if matches:
-        return matches[0]
-    
-    raise FileNotFoundError(f"Could not find file '{expected_name}' or pattern '{pattern}' in {directory}")
 
 def compute_and_save_anns_gt(base_vecs: np.ndarray, query_vecs: np.ndarray, float_space: FloatSpace, k: int, out_path: Path):
     """Computes ANNS ground truth against the full base dataset."""
@@ -275,8 +269,10 @@ def load_dataset_for_dynamic(
 
     cleanup_legacy_gt(folder)
 
-    base_path = find_file(folder, meta["base_file"], "base")
-    query_path = find_file(folder, meta["query_file"], "query")
+    files_dir = folder / meta["folder"] if (folder / meta["folder"]).is_dir() else folder
+
+    base_path = files_dir / meta["base_file"]
+    query_path = files_dir / meta["query_file"]
 
     print(f"Loading base features from {base_path}...")
     base_vecs = repo.fvecs_read(base_path)
@@ -289,29 +285,19 @@ def load_dataset_for_dynamic(
     float_space = FloatSpace.create(dims, metric)
 
     # Full ANNS Ground Truth
-    gt_file_name = meta["gt_file"]
-    gt_path = folder / gt_file_name
+    gt_path = files_dir / meta["gt_file"]
     if not gt_path.is_file():
-        sub_matches = list(folder.rglob(gt_file_name))
-        if sub_matches:
-            gt_path = sub_matches[0]
-        else:
-            print(f"ANNS Full Ground Truth not found at {gt_path}.")
-            compute_and_save_anns_gt(base_vecs, query_vecs, float_space, 100, gt_path)
+        print(f"ANNS Full Ground Truth not found at {gt_path}.")
+        compute_and_save_anns_gt(base_vecs, query_vecs, float_space, 100, gt_path)
 
     print(f"Loading full groundtruth indices from {gt_path}...")
     gt_vecs_full = repo.ivecs_read(gt_path)
 
     # Half ANNS Ground Truth (against first base_count/2 vectors)
-    gt_half_file_name = meta["gt_half_file"]
-    gt_half_path = folder / gt_half_file_name
+    gt_half_path = files_dir / meta["gt_half_file"]
     if not gt_half_path.is_file():
-        sub_matches = list(folder.rglob(gt_half_file_name))
-        if sub_matches:
-            gt_half_path = sub_matches[0]
-        else:
-            print(f"ANNS Half Ground Truth not found at {gt_half_path}.")
-            compute_and_save_anns_gt_half(base_vecs, query_vecs, float_space, 100, gt_half_path)
+        print(f"ANNS Half Ground Truth not found at {gt_half_path}.")
+        compute_and_save_anns_gt_half(base_vecs, query_vecs, float_space, 100, gt_half_path)
 
     print(f"Loading half groundtruth indices from {gt_half_path}...")
     gt_vecs_half = repo.ivecs_read(gt_half_path)

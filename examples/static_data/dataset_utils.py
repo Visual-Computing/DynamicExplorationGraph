@@ -17,8 +17,8 @@ DATASET_METADATA: Dict[str, Dict[str, Any]] = {
         "metric": Metric.FP32_L2,
         "dim": 128,
         "base_count": 1000000,
-        "base_file": "sift_base.fvecs",
-        "query_file": "sift_query.fvecs",
+        "base_file": "sift1m_base.fvecs",
+        "query_file": "sift1m_query.fvecs",
         "gt_file": "sift1m_groundtruth_top100_nb1000000.ivecs",
         "explore_entry_file": "sift1m_explore_entry_vertex.ivecs",
         "explore_query_file": "sift1m_explore_query.fvecs",
@@ -69,7 +69,7 @@ DATASET_METADATA: Dict[str, Dict[str, Any]] = {
         "explore_query_file": "deep1m_explore_query.fvecs",
         "explore_gt_file": "deep1m_explore_groundtruth_top1000.ivecs",
     },
-    "glove-100": {
+    "glove": {
         "name": "GloVe-100",
         "url": "https://static.visual-computing.com/paper/DEG/glove-100.tar.gz",
         "archive": "glove-100.tar.gz",
@@ -86,14 +86,8 @@ DATASET_METADATA: Dict[str, Dict[str, Any]] = {
     },
 }
 
-# Aliases
-DATASET_ALIASES = {
-    "glove": "glove-100",
-}
-
 def resolve_dataset_key(key: str) -> str:
-    key = key.lower()
-    return DATASET_ALIASES.get(key, key)
+    return key.lower()
 
 def get_default_cache_dir() -> Path:
     """Returns the default dataset cache directory (~/.cache/deg_datasets or DEG_CACHE_DIR)."""
@@ -188,41 +182,41 @@ def ensure_dataset(dataset_key: str, cache_dir: Path) -> Path:
     
     meta = DATASET_METADATA[key]
     archive_path = cache_dir / meta["archive"]
+    
+    # 1. Check if direct folder (e.g., D:\Data\DEG\sift1m or D:\Data\DEG\sift) exists
     extracted_folder = cache_dir / meta["folder"]
+    if not extracted_folder.is_dir():
+        # Check case-insensitive / fallback matches before triggering a download
+        subdirs = [p for p in cache_dir.iterdir() if p.is_dir() and meta["folder"].lower() in p.name.lower()]
+        if subdirs:
+            extracted_folder = subdirs[0]
 
+    # 2. If folder is still not found, check/download archive and extract
     if not extracted_folder.is_dir():
         if not archive_path.is_file():
-            download_file(meta["url"], archive_path)
+            # Also check if archive exists inside a subfolder or cache_dir
+            archive_matches = list(cache_dir.rglob(meta["archive"]))
+            if archive_matches:
+                archive_path = archive_matches[0]
+            else:
+                download_file(meta["url"], archive_path)
         
         print(f"Extracting {archive_path} into {cache_dir}...")
         with tarfile.open(archive_path, "r:gz") as tar:
             tar.extractall(path=cache_dir)
         print("Extraction complete.")
-    
-    if not extracted_folder.is_dir():
-        subdirs = [p for p in cache_dir.iterdir() if p.is_dir() and meta["folder"].lower() in p.name.lower()]
-        if subdirs:
-            extracted_folder = subdirs[0]
-        else:
-            extracted_folder = cache_dir
+
+        extracted_folder = cache_dir / meta["folder"]
+        if not extracted_folder.is_dir():
+            subdirs = [p for p in cache_dir.iterdir() if p.is_dir() and meta["folder"].lower() in p.name.lower()]
+            if subdirs:
+                extracted_folder = subdirs[0]
+            else:
+                extracted_folder = cache_dir
 
     return extracted_folder
 
-def find_file(directory: Path, expected_name: str, pattern: str) -> Path:
-    """Finds a file by exact name or matching pattern in directory tree."""
-    target = directory / expected_name
-    if target.is_file():
-        return target
-    
-    matches = list(directory.rglob(expected_name))
-    if matches:
-        return matches[0]
 
-    matches = list(directory.rglob(f"*{pattern}*"))
-    if matches:
-        return matches[0]
-    
-    raise FileNotFoundError(f"Could not find file '{expected_name}' or pattern '{pattern}' in {directory}")
 
 def build_graph_filename(dataset_key: str, cache_dir: Path, dims: int, k: int, extend_k: int, extend_eps: float, optimization_target_str: str, metric_str: str) -> Path:
     """
@@ -298,8 +292,10 @@ def load_dataset(dataset_key: str, cache_dir: Path) -> Tuple[np.ndarray, np.ndar
 
     cleanup_legacy_gt(folder)
 
-    base_path = find_file(folder, meta["base_file"], "base")
-    query_path = find_file(folder, meta["query_file"], "query")
+    files_dir = folder / meta["folder"] if (folder / meta["folder"]).is_dir() else folder
+
+    base_path = files_dir / meta["base_file"]
+    query_path = files_dir / meta["query_file"]
 
     print(f"Loading base features from {base_path}...")
     base_vecs = repo.fvecs_read(base_path)
@@ -312,44 +308,29 @@ def load_dataset(dataset_key: str, cache_dir: Path) -> Tuple[np.ndarray, np.ndar
     float_space = FloatSpace.create(dims, metric)
 
     # 1. ANNS Ground Truth
-    gt_file_name = meta["gt_file"]
-    gt_path = folder / gt_file_name
+    gt_path = files_dir / meta["gt_file"]
     if not gt_path.is_file():
-        sub_matches = list(folder.rglob(gt_file_name))
-        if sub_matches:
-            gt_path = sub_matches[0]
-        else:
-            print(f"ANNS Ground Truth not found at {gt_path}.")
-            compute_and_save_anns_gt(base_vecs, query_vecs, float_space, 100, gt_path)
+        print(f"ANNS Ground Truth not found at {gt_path}.")
+        compute_and_save_anns_gt(base_vecs, query_vecs, float_space, 100, gt_path)
 
     print(f"Loading groundtruth indices from {gt_path}...")
     gt_vecs = repo.ivecs_read(gt_path)
 
     # 2. Exploration Entry Vertices, Exploration Query, and Exploration Ground Truth
-    explore_entry_path = folder / meta["explore_entry_file"]
-    explore_query_path = folder / meta["explore_query_file"]
-    explore_gt_path = folder / meta["explore_gt_file"]
+    explore_entry_path = files_dir / meta["explore_entry_file"]
+    explore_query_path = files_dir / meta["explore_query_file"]
+    explore_gt_path = files_dir / meta["explore_gt_file"]
 
     if not explore_entry_path.is_file() or not explore_query_path.is_file():
-        sub_entry = list(folder.rglob(meta["explore_entry_file"]))
-        sub_query = list(folder.rglob(meta["explore_query_file"]))
-        if sub_entry and sub_query:
-            explore_entry_path = sub_entry[0]
-            explore_query_path = sub_query[0]
-        else:
-            generate_explore_entry_and_query(base_vecs, explore_entry_path, explore_query_path)
+        generate_explore_entry_and_query(base_vecs, explore_entry_path, explore_query_path)
 
     print(f"Loading explore entry vertices from {explore_entry_path}...")
     explore_entry = repo.ivecs_read(explore_entry_path)
 
     if not explore_gt_path.is_file():
-        sub_explore_gt = list(folder.rglob(meta["explore_gt_file"]))
-        if sub_explore_gt:
-            explore_gt_path = sub_explore_gt[0]
-        else:
-            print(f"Exploration Ground Truth not found at {explore_gt_path}.")
-            explore_query_vecs = repo.fvecs_read(explore_query_path)
-            compute_and_save_explore_gt(base_vecs, explore_query_vecs, float_space, 1000, explore_gt_path)
+        print(f"Exploration Ground Truth not found at {explore_gt_path}.")
+        explore_query_vecs = repo.fvecs_read(explore_query_path)
+        compute_and_save_explore_gt(base_vecs, explore_query_vecs, float_space, 1000, explore_gt_path)
 
     print(f"Loading explore groundtruth from {explore_gt_path}...")
     explore_gt = repo.ivecs_read(explore_gt_path)
