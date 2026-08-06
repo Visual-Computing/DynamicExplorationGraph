@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "flas/fast_linear_assignment_sorter.h"
+#include "deglib/flas/fast_linear_assignment_sorter.h"
 #include "common/test_helpers.h"
 
 #include <vector>

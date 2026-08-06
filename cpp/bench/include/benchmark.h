@@ -17,7 +17,7 @@
 #include <random>
 
 #include "dataset.h"
-#include "deglib.h"
+#include <deglib/deglib.h>
 #include "file_io.h"
 #include "logging.h"
 #include "stats.h"

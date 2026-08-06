@@ -6,8 +6,8 @@
 #include <vector>
 
 #include "gtest/gtest.h"
-#include "distance/uint8_l2.h"
-#include "distances.h"
+#include "deglib/distance/uint8_l2.h"
+#include "deglib/distances.h"
 
 namespace {
 

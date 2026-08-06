@@ -6,7 +6,7 @@
 #include <thread>
 #include <vector>
 
-#include "config.h"
+#include "deglib/config.h"
 
 namespace deglib::concurrent {
 

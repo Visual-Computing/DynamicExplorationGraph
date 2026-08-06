@@ -3,7 +3,7 @@
 #include <fmt/core.h>
 
 #include "benchmark.h"
-#include "deglib.h"
+#include <deglib/deglib.h>
 
 int main(int argc, char *argv[]) {
     fmt::print("Testing ...\n");

@@ -6,7 +6,7 @@
 #include <chrono>
 
 #include "benchmark.h"
-#include "deglib.h"
+#include <deglib/deglib.h>
 
 
 

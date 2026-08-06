@@ -11,7 +11,7 @@
 #include <vector>
 #include <array>
 
-#include "fast_linear_assignment_sorter.h"
+#include "deglib/flas/fast_linear_assignment_sorter.h"
 
 // ---------------------------------------------------------------------------
 // Multi-Threaded 1D-FLAS Sorter

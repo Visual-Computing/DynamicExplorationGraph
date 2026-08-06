@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-#include "deglib.h"
+#include <deglib/deglib.h>
 #include "file_io.h"
 
 namespace deglib::benchmark {

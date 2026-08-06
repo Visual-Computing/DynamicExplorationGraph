@@ -1,11 +1,25 @@
+# Build directories
 build/
+build-*/
+cmake-build*/
 dist/
+
+# Temporary directories
 tmp/
 var/
+
+# IDE/Editor directories
 .vscode/
+.agents/
+.pi/
+
+# IDE/Editor files
 .clangd
+.clang-format
+
+# CMake files
 CMakePresets.json
 cmake-variants.yaml
-build-*
-cmake-build*
+
+# Data directories
 data/

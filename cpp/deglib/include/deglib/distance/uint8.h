@@ -1,6 +1,6 @@
 #pragma once
 
-#include "config.h"
+#include "deglib/config.h"
 
 namespace deglib::distances {
 

@@ -4,7 +4,7 @@
 #include <thread>
 #include <vector>
 
-#include "visited_list_pool.h"
+#include "deglib/visited_list_pool.h"
 #include "gtest/gtest.h"
 
 // ---------------------------------------------------------------------------

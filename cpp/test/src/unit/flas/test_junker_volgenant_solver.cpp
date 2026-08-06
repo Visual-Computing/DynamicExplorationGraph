@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "flas/junker_volgenant_solver.h"
+#include "deglib/flas/junker_volgenant_solver.h"
 #include "common/test_helpers.h"
 
 #include <vector>

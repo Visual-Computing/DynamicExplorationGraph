@@ -10,11 +10,11 @@
 #include <unordered_map>
 #include <fstream>
 
-#include "graph.h"
-#include "repository.h"
-#include "search.h"
-#include "visited_list_pool.h"
-#include "memory.h"
+#include "deglib/graph.h"
+#include "deglib/repository.h"
+#include "deglib/search.h"
+#include "deglib/visited_list_pool.h"
+#include "deglib/memory.h"
 
 namespace deglib::graph
 {

@@ -11,8 +11,8 @@
 #include <string>
 #include <vector>
 
-#include "graph/sizebounded_graph.h"
-#include "filter.h"
+#include "deglib/graph/sizebounded_graph.h"
+#include "deglib/filter.h"
 #include "gtest/gtest.h"
 
 // ---------------------------------------------------------------------------

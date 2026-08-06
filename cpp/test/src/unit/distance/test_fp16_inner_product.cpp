@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "gtest/gtest.h"
-#include "distance/fp16_ip.h"
-#include "distances.h"
+#include "deglib/distance/fp16_ip.h"
+#include "deglib/distances.h"
 
 namespace {
 

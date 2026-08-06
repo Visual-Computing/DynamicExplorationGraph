@@ -1,6 +1,6 @@
 #pragma once
 
-#include <deglib.h>
+#include <deglib/deglib.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -13,8 +13,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include "quantization/evp_quantize.h"
-#include "distance/evp_inner_product.h"
+#include "deglib/quantization/evp_quantize.h"
+#include "deglib/distance/evp_inner_product.h"
 
 // ============================================================================
 // Shared Test Utilities

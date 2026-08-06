@@ -14,9 +14,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include "builder.h"
-#include "distances.h"
-#include "graph/sizebounded_graph.h"
+#include "deglib/builder.h"
+#include "deglib/distances.h"
+#include "deglib/graph/sizebounded_graph.h"
 #include "gtest/gtest.h"
 
 // ---------------------------------------------------------------------------

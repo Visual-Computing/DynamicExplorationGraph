@@ -6,7 +6,7 @@
 #include <memory>
 #include <vector>
 
-#include "repository.h"
+#include "deglib/repository.h"
 #include "gtest/gtest.h"
 
 // Helper: create feature data as properly managed std::byte[]

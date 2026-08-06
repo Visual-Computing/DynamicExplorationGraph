@@ -8,8 +8,8 @@
 #include <cstdint>
 #include <vector>
 
-#include "search.h"
-#include "distances.h"
+#include "deglib/search.h"
+#include "deglib/distances.h"
 #include "gtest/gtest.h"
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "distances.h"
+#include "deglib/distances.h"
 
 using deglib::distances::ResidualMode;
 

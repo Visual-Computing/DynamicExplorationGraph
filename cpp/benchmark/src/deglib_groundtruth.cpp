@@ -6,7 +6,7 @@
 #include <omp.h>
 
 #include "benchmark.h"
-#include "deglib.h"
+#include <deglib/deglib.h>
 
 /**
  * Convert the queue into a vector with ascending distance order

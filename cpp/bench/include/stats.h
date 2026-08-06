@@ -20,7 +20,7 @@
 #include <thread>
 #include <vector>
 
-#include "deglib.h"
+#include <deglib/deglib.h>
 #include "file_io.h"
 #include "logging.h"
 #include "stopwatch.h"

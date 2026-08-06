@@ -4,8 +4,8 @@
 #include <random>
 #include <vector>
 
-#include "quantization/evp_quantize.h"
-#include "distance/fp16.h"
+#include "deglib/quantization/evp_quantize.h"
+#include "deglib/distance/fp16.h"
 #include "gtest/gtest.h"
 
 // ============================================================================

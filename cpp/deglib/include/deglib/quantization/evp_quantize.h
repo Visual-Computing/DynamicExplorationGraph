@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "concurrent.h"
+#include "deglib/concurrent.h"
 
 namespace deglib::quantization {
 

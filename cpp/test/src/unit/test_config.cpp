@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <iostream>
 
-#include <deglib.h>
+#include <deglib/deglib.h>
 
 #if defined(DEGLIB_X86)
 #if defined(_MSC_VER)

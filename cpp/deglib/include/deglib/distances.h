@@ -5,17 +5,17 @@
 #include <concepts>
 #include <stdexcept>
 
-#include "config.h"
+#include "deglib/config.h"
 
 // Shared residual mode for SIMD distance implementations
-#include "distance/residual_mode.h"
+#include "deglib/distance/residual_mode.h"
 
 // Modular distance headers - contain all distance function class definitions
-#include "distance/fp32_l2.h"
-#include "distance/fp32_ip.h"
-#include "distance/fp16_ip.h"
-#include "distance/uint8_l2.h"
-#include "distance/evp_inner_product.h"
+#include "deglib/distance/fp32_l2.h"
+#include "deglib/distance/fp32_ip.h"
+#include "deglib/distance/fp16_ip.h"
+#include "deglib/distance/uint8_l2.h"
+#include "deglib/distance/evp_inner_product.h"
 
 namespace deglib {
 

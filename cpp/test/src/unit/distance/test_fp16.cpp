@@ -6,7 +6,7 @@
 #include <vector>
 #include <chrono>
 
-#include <deglib.h>
+#include <deglib/deglib.h>
 
 // ---------------------------------------------------------------------------
 // FP16 Conversion Tests

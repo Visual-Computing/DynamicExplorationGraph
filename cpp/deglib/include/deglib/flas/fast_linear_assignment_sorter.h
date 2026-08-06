@@ -8,11 +8,11 @@
 #include <random>
 #include <span>
 
-#include <distances.h>
-#include <distance/fp32_l2.h>
-#include <distance/evp_inner_product.h>
+#include "deglib/distances.h"
+#include "deglib/distance/fp32_l2.h"
+#include "deglib/distance/evp_inner_product.h"
 
-#include "junker_volgenant_solver.h"
+#include "deglib/flas/junker_volgenant_solver.h"
 
 namespace flas {
 

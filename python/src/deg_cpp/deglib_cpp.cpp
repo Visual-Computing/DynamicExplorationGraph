@@ -10,7 +10,7 @@
 #include <pybind11/stl.h>
 #include <pybind11/functional.h>
 
-#include <deglib.h>
+#include <deglib/deglib.h>
 
 
 namespace py = pybind11;

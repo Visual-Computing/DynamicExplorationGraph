@@ -2,8 +2,8 @@
 
 #include <cmath>
 #include <variant>
-#include "distance/fp16.h"
-#include "distance/residual_mode.h"
+#include "deglib/distance/fp16.h"
+#include "deglib/distance/residual_mode.h"
 
 namespace deglib::distances::fp16_ip {
 

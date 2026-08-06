@@ -15,9 +15,9 @@
 #include <random>
 #include <vector>
 
-#include "analysis.h"
+#include "deglib/analysis.h"
 #include "benchmark.h"
-#include "deglib.h"
+#include <deglib/deglib.h>
 
 namespace deglib::benchmark {
 

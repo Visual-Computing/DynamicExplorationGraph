@@ -12,7 +12,7 @@
 #include "benchmark.h"
 #include "build.h"
 #include "dataset.h"
-#include "deglib.h"
+#include <deglib/deglib.h>
 #include "file_io.h"
 #include "logging.h"
 #include "stats.h"

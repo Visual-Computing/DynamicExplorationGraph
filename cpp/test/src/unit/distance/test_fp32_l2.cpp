@@ -7,8 +7,8 @@
 #include <vector>
 
 #include "gtest/gtest.h"
-#include "distance/fp32_l2.h"
-#include "distances.h"
+#include "deglib/distance/fp32_l2.h"
+#include "deglib/distances.h"
 
 namespace {
 

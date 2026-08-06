@@ -12,12 +12,12 @@
 #include <fstream>
 #include <filesystem>
 
-#include "graph.h"
-#include "repository.h"
-#include "memory.h"
-#include "distances.h"
-#include "search.h"
-#include "visited_list_pool.h"
+#include "deglib/graph.h"
+#include "deglib/repository.h"
+#include "deglib/memory.h"
+#include "deglib/distances.h"
+#include "deglib/search.h"
+#include "deglib/visited_list_pool.h"
 
 namespace deglib::graph
 {

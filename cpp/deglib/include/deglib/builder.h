@@ -14,10 +14,10 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "concurrent.h"
-#include "analysis.h"
-#include "graph.h"
-#include "random.h"
+#include "deglib/concurrent.h"
+#include "deglib/analysis.h"
+#include "deglib/graph.h"
+#include "deglib/random.h"
 
 namespace deglib::builder
 {

@@ -5,10 +5,10 @@
 #include <algorithm>
 #include <thread>
 
-#include "concurrent.h"
-#include "memory.h"
-#include "search.h"
-#include "graph.h"
+#include "deglib/concurrent.h"
+#include "deglib/memory.h"
+#include "deglib/search.h"
+#include "deglib/graph.h"
 
 namespace deglib::analysis
 {

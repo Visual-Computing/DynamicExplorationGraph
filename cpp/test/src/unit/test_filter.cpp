@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <cstdlib>
 
-#include "filter.h"
+#include "deglib/filter.h"
 #include "gtest/gtest.h"
 
 // ---------------------------------------------------------------------------

@@ -7,8 +7,8 @@
 #include <algorithm>
 
 #include "gtest/gtest.h"
-#include "graph/readonly_graph.h"
-#include "graph/sizebounded_graph.h"
+#include "deglib/graph/readonly_graph.h"
+#include "deglib/graph/sizebounded_graph.h"
 
 namespace {
 

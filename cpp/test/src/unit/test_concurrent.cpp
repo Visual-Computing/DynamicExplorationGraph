@@ -8,7 +8,7 @@
 #include <thread>
 #include <vector>
 
-#include "concurrent.h"
+#include "deglib/concurrent.h"
 
 // ============================================================================
 // Unit tests for deglib::concurrent::parallel_batch_for

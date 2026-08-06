@@ -1,6 +1,6 @@
 #pragma once
 
-#include "search.h"
+#include "deglib/search.h"
 
 namespace deglib::graph
 {

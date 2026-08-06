@@ -7,7 +7,7 @@
 #include <fmt/core.h>
 
 #include "benchmark.h"
-#include "deglib.h"
+#include <deglib/deglib.h>
 
 /**
  * The last three types are used to reproduce the deletion tests in our paper

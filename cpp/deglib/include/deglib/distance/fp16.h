@@ -3,7 +3,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-#include "config.h"
+#include "deglib/config.h"
 
 namespace deglib::distances {
 

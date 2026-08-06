@@ -55,8 +55,10 @@ Thumbs.db
 *.iws
 *.ipr
 
-# Agent rules
+# IDE/Editor directories
+.vscode/
 .agents/
+.pi/
 
 # Python generated files & virtual environments
 __pycache__/

@@ -8,8 +8,8 @@
 #include <variant>
 #include <vector>
 #include <deque>
-#include "config.h"
-#include "distance/residual_mode.h"
+#include "deglib/config.h"
+#include "deglib/distance/residual_mode.h"
 
 #if defined(DEGLIB_X86)
 #include <immintrin.h>

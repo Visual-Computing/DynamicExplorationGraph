@@ -2,9 +2,9 @@
 
 #include <cstddef>
 #include <queue>
-#include <distances.h>
+#include "deglib/distances.h"
 
-#include "filter.h"
+#include "deglib/filter.h"
 
 namespace deglib::search
 {

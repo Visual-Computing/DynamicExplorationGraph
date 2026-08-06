@@ -7,7 +7,7 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>  
 
-#include "deglib.h"
+#include <deglib/deglib.h>
 #include "stopwatch.h"
 
 namespace deglib::benchmark
