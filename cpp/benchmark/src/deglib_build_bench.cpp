@@ -3,6 +3,7 @@
 #include <unordered_set>
 #include <filesystem>
 #include <atomic>
+#include <span>
 
 #include <fmt/core.h>
 
@@ -632,8 +633,8 @@ static std::vector<float> estimate_recall(const deglib::search::SearchGraph& gra
         deglib::concurrent::parallel_for(0, query_repository.size(), threads, [&](size_t i_idx, size_t)
         {
             const int i = (int)i_idx;
-            auto query = reinterpret_cast<const std::byte*>(query_repository.getFeature(uint32_t(i)));
-            auto result_queue = graph.search(entry_vertex_indices, query, eps, k, nullptr, max_distance_count);
+            auto query = reinterpret_cast<const float*>(query_repository.getFeature(uint32_t(i)));
+            auto result_queue = graph.search(std::span<const float>(query, graph.getFeatureSpace().dim()), k, eps, nullptr, max_distance_count);
 
             const auto& gt = answer[i];
             total.fetch_add(result_queue.size(), std::memory_order_relaxed);

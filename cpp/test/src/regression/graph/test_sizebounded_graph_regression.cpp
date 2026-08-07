@@ -1,4 +1,5 @@
 #include "common/test_helpers.h"
+#include <span>
 
 // ============================================================================
 // SizeBoundedGraph Search & Explore Regression Benchmarks (100x averaged)
@@ -50,7 +51,7 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_L2)
 
     for (int run = 0; run < benchmark_runs; ++run) {
         for (size_t q = 0; q < query_count; ++q) {
-            auto results = graph.search(graph.getEntryVertexIndices(), reinterpret_cast<const std::byte*>(&query_data[q * dim]), search_eps, search_k);
+            auto results = graph.search(std::span<const float>(&query_data[q * dim], dim), search_k, search_eps);
 
             if (run == 0) {
                 std::unordered_set<uint32_t> gt_set(gt_data[q].begin(), gt_data[q].end());
@@ -86,7 +87,7 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_L2)
     for (int run = 0; run < benchmark_runs; ++run) {
         for (size_t i = 0; i < explore_count_per_run; ++i) {
             uint32_t entry_node = static_cast<uint32_t>((run * 13 + i) % base_count);
-            auto results = graph.explore(entry_node, search_k, true, explore_max_calcs);
+            auto results = graph.explore(entry_node, search_k, explore_max_calcs);
 
             if (run == 0) {
                 // Compute ground truth for this entry_node vector
@@ -165,7 +166,7 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_InnerProduct)
     auto t_start_search = std::chrono::high_resolution_clock::now();
     for (int run = 0; run < benchmark_runs; ++run) {
         for (size_t q = 0; q < query_count; ++q) {
-            auto results = graph.search(graph.getEntryVertexIndices(), reinterpret_cast<const std::byte*>(&query_data[q * dim]), search_eps, search_k);
+            auto results = graph.search(std::span<const float>(&query_data[q * dim], dim), search_k, search_eps);
 
             if (run == 0) {
                 std::unordered_set<uint32_t> gt_set(gt_data[q].begin(), gt_data[q].end());
@@ -198,7 +199,7 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_InnerProduct)
     for (int run = 0; run < benchmark_runs; ++run) {
         for (size_t i = 0; i < explore_count_per_run; ++i) {
             uint32_t entry_node = static_cast<uint32_t>((run * 13 + i) % base_count);
-            auto results = graph.explore(entry_node, search_k, true, explore_max_calcs);
+            auto results = graph.explore(entry_node, search_k, explore_max_calcs);
 
             if (run == 0) {
                 // Compute ground truth for this entry_node vector

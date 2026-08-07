@@ -11,6 +11,7 @@
 #include <fmt/ranges.h>
 
 #include <atomic>
+#include <span>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -85,8 +86,8 @@ static float test_approx_anns(const deglib::search::SearchGraph& graph,
                               const deglib::graph::Filter* filter = nullptr) {
     auto corrects = std::vector<float>(threads);
     deglib::concurrent::parallel_for(0, test_size, threads, [&](size_t i, size_t thread_id) {
-        auto query = reinterpret_cast<const std::byte*>(query_repository.getFeature(uint32_t(i)));
-        auto result_queue = graph.search(entry_vertex_indices, query, eps, k, filter);
+        auto query = reinterpret_cast<const float*>(query_repository.getFeature(uint32_t(i)));
+        auto result_queue = graph.search(std::span<const float>(query, graph.getFeatureSpace().dim()), k, eps, filter);
 
         if (result_queue.size() != k) {
             fmt::print(stderr, "ANNS with k={} got only {} results for query {}\n", k, result_queue.size(), i);
@@ -121,7 +122,7 @@ static float test_approx_explore(const deglib::search::SearchGraph& graph,
     auto corrects = std::vector<float>(threads);
     deglib::concurrent::parallel_for(0, entry_vertex_indices.size(), threads, [&](size_t i, size_t thread_id) {
         const auto entry_vertex_index = entry_vertex_indices[i][0];
-        auto result_queue = graph.explore(entry_vertex_index, k, include_entry, max_distance_count);
+        auto result_queue = graph.explore(entry_vertex_index, k, max_distance_count, 0.0f, include_entry);
 
         if (result_queue.size() != k) {
             fmt::print(stderr,
@@ -166,8 +167,8 @@ static std::vector<float> estimate_recall(const deglib::search::SearchGraph& gra
         std::atomic<size_t> correct{0};
 
         deglib::concurrent::parallel_for(0, query_repository.size(), threads, [&](size_t i, size_t thread_id) {
-            auto query = reinterpret_cast<const std::byte*>(query_repository.getFeature(uint32_t(i)));
-            auto result_queue = graph.search(entry_vertex_indices, query, eps, k, nullptr, max_distance_count);
+            auto query = reinterpret_cast<const float*>(query_repository.getFeature(uint32_t(i)));
+            auto result_queue = graph.search(std::span<const float>(query, graph.getFeatureSpace().dim()), k, eps, nullptr, max_distance_count);
 
             const auto& gt = answer[i];
             total += result_queue.size();

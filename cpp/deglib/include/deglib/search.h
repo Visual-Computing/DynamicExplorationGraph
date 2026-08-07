@@ -2,13 +2,20 @@
 
 #include <cstddef>
 #include <queue>
+#include <span>
+#include <stdexcept>
+#include <string>
 #include "deglib/distances.h"
 
 #include "deglib/filter.h"
 
+// Forward declaration for friend access
+namespace deglib::builder {
+class EvenRegularGraphBuilder;
+}
+
 namespace deglib::search
 {
-
 
 class ObjectDistance
 {
@@ -47,15 +54,6 @@ class ObjectDistance
     }
 };
 
-
-
-/**
- * priority queue with access to the internal data.
- * therefore access to the unsorted data is possible.
- * 
- * https://stackoverflow.com/questions/4484767/how-to-iterate-over-a-priority-queue
- * https://www.linuxtopia.org/online_books/programming_books/c++_practical_programming/c++_practical_programming_189.html
- */
 template<class Compare, class ObjectType>
 class PQV : public std::vector<ObjectType> {
   Compare comp;
@@ -85,11 +83,7 @@ class PQV : public std::vector<ObjectType> {
 typedef PQV<std::less<ObjectDistance>, ObjectDistance> ResultSet;
 
 // set of unchecked vertex ids
-// typedef std::priority_queue<ObjectDistance, std::vector<ObjectDistance>, std::greater<ObjectDistance>> UncheckedSet;
 typedef PQV<std::greater<ObjectDistance>, ObjectDistance> UncheckedSet;
-
-
-
 
 class SearchGraph
 {
@@ -116,35 +110,53 @@ class SearchGraph
      */
     virtual std::vector<deglib::search::ObjectDistance> hasPath(const std::vector<uint32_t>& entry_vertex_indices, const uint32_t to_vertex, const float eps, const uint32_t k) const = 0;
 
+    /**
+     * Bounds-checked public search for query vectors (float span).
+     */
+    deglib::search::ResultSet search(
+        std::span<const float> query,
+        const uint32_t k,
+        const float eps = 0.0f,
+        const deglib::graph::Filter* filter = nullptr,
+        const uint32_t max_distance_computation_count = 0) const 
+    {
+        if (query.size_bytes() < getFeatureSpace().get_data_size()) {
+            throw std::invalid_argument(
+                "Search query buffer mismatch: expected at least " + std::to_string(getFeatureSpace().get_data_size()) +
+                " bytes (dim=" + std::to_string(getFeatureSpace().dim()) + "), got " + std::to_string(query.size_bytes()) + " bytes");
+        }
+        return search_intern(getEntryVertexIndices(), reinterpret_cast<const std::byte*>(query.data()), k, eps, true, filter, max_distance_computation_count);
+    }
 
     /**
-     * Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
-     * 
-     * Eps greater 0 extends the search range and takes additional graph vertices into account. 
-     * 
-     * It is possible to limit the amount of work by specifing a maximal number of distances to be calculated.
-     * For lower numbers it is recommended to set eps to 0 since its very unlikly the method can make use of the extended the search range.
-     * 
-     * The starting point of the search is determined be the graph
+     * Public graph exploration starting at entry_vertex_index.
      */
-    deglib::search::ResultSet search(const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) const {
-      return search(getEntryVertexIndices(), query, eps,  k, filter, max_distance_computation_count);
-    };
+    deglib::search::ResultSet explore(
+        const uint32_t entry_vertex_index,
+        const uint32_t k,
+        const uint32_t max_distance_computation_count = 0,
+        const float eps = 0.0f,
+        const bool include_entry = true,
+        const deglib::graph::Filter* filter = nullptr) const
+    {
+        const auto query_ptr = getFeatureVector(entry_vertex_index);
+        return search_intern({ entry_vertex_index }, query_ptr, k, eps, include_entry, filter, max_distance_computation_count);
+    }
 
+  protected:
     /**
-     * Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
-     * 
-     * Eps greater 0 extends the search range and takes additional graph vertices into account. 
-     * 
-     * It is possible to limit the amount of work by specifing a maximal number of distances to be calculated.
-     * For lower numbers it is recommended to set eps to 0 since its very unlikly the method can make use of the extended the search range.
+     * Internal raw-pointer search implementation.
      */
-    virtual deglib::search::ResultSet search(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) const = 0;
+    virtual deglib::search::ResultSet search_intern(
+        const std::vector<uint32_t>& entry_vertex_indices,
+        const std::byte* query,
+        const uint32_t k,
+        const float eps = 0.0f,
+        const bool include_entry = true,
+        const deglib::graph::Filter* filter = nullptr,
+        const uint32_t max_distance_computation_count = 0) const = 0;
 
-    /**
-     * A exploration for similar element, limited by max_distance_computation_count
-     */
-    virtual deglib::search::ResultSet explore(const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count) const = 0;
+    friend class deglib::builder::EvenRegularGraphBuilder;
 };
 
 } // end namespace deglib::search

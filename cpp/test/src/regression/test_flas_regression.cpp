@@ -4,6 +4,7 @@
 #include <iostream>
 #include <random>
 #include <vector>
+#include <span>
 #include <algorithm>
 #include <unordered_set>
 #include <cmath>
@@ -111,14 +112,13 @@ static std::pair<double, double> search_deg_graph(
     uint32_t search_k,
     float search_eps) {
 
-    auto entry_vertex_indices = graph.getEntryVertexIndices();
 
     size_t total_correct = 0;
     auto t_search_start = std::chrono::high_resolution_clock::now();
 
     for (size_t q = 0; q < query_count; ++q) {
-        const std::byte* q_ptr = &query_bytes[q * feature_bytes_per_vec];
-        auto result = graph.search(entry_vertex_indices, q_ptr, search_eps, search_k, nullptr, 0);
+        const float* q_ptr = reinterpret_cast<const float*>(&query_bytes[q * feature_bytes_per_vec]);
+        auto result = graph.search(std::span<const float>(q_ptr, graph.getFeatureSpace().dim()), search_k, search_eps);
 
         std::unordered_set<uint32_t> gt_set;
         if (!gt_data.empty() && q < gt_data.size()) {

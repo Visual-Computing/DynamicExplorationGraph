@@ -491,11 +491,11 @@ public:
    * The result set contains internal indices. 
    */
   template <deglib::DistanceFunction COMPARATOR, bool use_max_distance_count, bool use_filter>
-  deglib::search::ResultSet searchImpl(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t initial_k, const deglib::graph::Filter* filter, const uint32_t max_distance_computation_count) const
+  deglib::search::ResultSet searchImpl(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const uint32_t initial_k, const float eps, const bool include_entry, const deglib::graph::Filter* filter, const uint32_t max_distance_computation_count) const
   {
+    uint32_t distance_computation_count = 0;
     const auto dist_func_param = this->feature_space_.get_dist_func_param();
     const auto feature_size = this->feature_space_.get_data_size();
-    uint32_t distance_computation_count = 0;
     const size_t vertex_count = this->size();
     size_t k = std::min(vertex_count, static_cast<size_t>(initial_k));
 
@@ -545,18 +545,21 @@ public:
         const auto feature = this->feature_by_index(index);
         const auto distance = COMPARATOR::compare(query, feature, dist_func_param);
         next_vertices.emplace(index, distance);
-        if constexpr (use_filter) {
-          if(filter->is_valid(this->label_by_index(index)))  {
+        if (include_entry) {
+          if constexpr (use_filter) {
+            if(filter->is_valid(this->label_by_index(index)))  {
+              results.emplace(index, distance);
+            }
+          } else {
             results.emplace(index, distance);
           }
-        } else {
-          results.emplace(index, distance);
         }
 
         // early stop after to many computations
         if constexpr (use_max_distance_count) {
-          if(distance_computation_count++ >= max_distance_computation_count)
+          if(++distance_computation_count >= max_distance_computation_count) {
             return results;
+          }
         }
       }
     }
@@ -622,135 +625,37 @@ public:
             }
           }
         }
-      }
-
-      // early stop after to many computations
-      if constexpr (use_max_distance_count) {
-        if(distance_computation_count++ >= max_distance_computation_count)
-          return results;
-      }
-    }
-
-    return results;
-  }
-
-  /**
-   * The result set contains internal indices. 
-   */
-  deglib::search::ResultSet search(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const float eps, const uint32_t k, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) const override
-  {
-    return feature_space_.compute([&]<deglib::DistanceFunction Dist>(Dist) {
-      if(filter) {
-        if(max_distance_computation_count == 0) {
-          return searchImpl<Dist, false, true>(entry_vertex_indices, query, eps, k, filter, 0);
-        } else {
-          return searchImpl<Dist, true, true>(entry_vertex_indices, query, eps, k, filter, max_distance_computation_count);
-        }
-      } else {
-        if(max_distance_computation_count == 0) {
-          return searchImpl<Dist, false, false>(entry_vertex_indices, query, eps, k, nullptr, 0);
-        } else {
-          return searchImpl<Dist, true, false>(entry_vertex_indices, query, eps, k, nullptr, max_distance_computation_count);
-        }
-      }
-    });
-  }
-
-  /**
-   * The result set contains internal indices. 
-   */
-  template <deglib::DistanceFunction COMPARATOR>
-  deglib::search::ResultSet exploreImpl(const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count) const
-  {
-    uint32_t distance_computation_count = 0;
-    const auto dist_func_param = this->feature_space_.get_dist_func_param();
-    const auto feature_size = this->feature_space_.get_data_size();
-
-    // set of checked vertex ids
-    const auto vl = visited_list_pool_->getFreeVisitedList();
-    auto* checked_ids = vl->get_visited();
-    const auto checked_ids_tag = vl->get_tag();
-
-    // items to traverse next
-    auto next_vertices = deglib::search::UncheckedSet();
-    next_vertices.reserve(k*this->edges_per_vertex_);
-
-    // result set
-    auto results = deglib::search::ResultSet();   
-    results.reserve(k);
-
-    // add the entry vertex index to the vertices which gets checked next and ignore it for further checks
-    checked_ids[entry_vertex_index] = checked_ids_tag;
-    next_vertices.emplace(entry_vertex_index, 0.0f);
-    if(include_entry)
-      results.emplace(entry_vertex_index, 0.0f);
-    const auto query = this->feature_by_index(entry_vertex_index);
-
-    // search radius
-    auto radius = std::numeric_limits<float>::max();
-
-    // iterate as long as good elements are in the next_vertices queue and max_calcs is not yet reached
-    auto good_neighbors = std::array<uint32_t, 256>();    // this limits the neighbor count to 256 using Variable Length Array wrapped in a macro
-    while (next_vertices.empty() == false)
-    {
-      // next vertex to check
-      const auto next_vertex = next_vertices.top();
-      next_vertices.pop();
-
-      uint8_t good_neighbor_count = 0;
-      const auto neighbor_indices = this->neighbors_by_index(next_vertex.getInternalIndex());
-      for (uint8_t i = 0; i < this->edges_per_vertex_; i++) {
-        const auto neighbor_index = neighbor_indices[i];
-        if (checked_ids[neighbor_index] != checked_ids_tag)  {
-          checked_ids[neighbor_index] = checked_ids_tag;
-          good_neighbors[good_neighbor_count++] = neighbor_index;
-        }
-      }
-
-      if (good_neighbor_count == 0)
-        continue;
-
-      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])), feature_size);
-      for (uint8_t i = 0; i < good_neighbor_count; i++) {
-        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])), feature_size);
-
-        const auto neighbor_index = good_neighbors[i];
-        const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
-        const auto neighbor_distance = COMPARATOR::compare(query, neighbor_feature_vector, dist_func_param);
-
-        if (neighbor_distance < radius) {
-
-          // check the neighborhood of this vertex later
-          next_vertices.emplace(neighbor_index, neighbor_distance);
-
-          // remember the vertex, if its better than the worst in the result list
-          results.emplace(neighbor_index, neighbor_distance);
-
-          // update the search radius
-          if (results.size() > k) {
-            results.pop();
-            radius = results.top().getDistance();
+        // early stop after to many computations
+        if constexpr (use_max_distance_count) {
+          if(++distance_computation_count >= max_distance_computation_count) {
+            return results;
           }
         }
-
-        // early stop after to many computations
-        if(max_distance_computation_count > 0 && ++distance_computation_count >= max_distance_computation_count)
-          return results;
       }
     }
 
     return results;
-  }  
-
-  /**
-   * The result set contains internal indices. 
-   */
-  deglib::search::ResultSet explore(const uint32_t entry_vertex_index, const uint32_t k, const bool include_entry, const uint32_t max_distance_computation_count = 0) const override
-  {
-    return feature_space_.compute([&]<deglib::DistanceFunction Dist>(Dist) {
-      return exploreImpl<Dist>(entry_vertex_index, k, include_entry, max_distance_computation_count);
-    });
   }
+
+  protected:
+    deglib::search::ResultSet search_intern(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const uint32_t k, const float eps = 0.0f, const bool include_entry = true, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) const override
+    {
+      return feature_space_.compute([&]<deglib::DistanceFunction Dist>(Dist) {
+        if(filter) {
+          if(max_distance_computation_count == 0) {
+            return searchImpl<Dist, false, true>(entry_vertex_indices, query, k, eps, include_entry, filter, 0);
+          } else {
+            return searchImpl<Dist, true, true>(entry_vertex_indices, query, k, eps, include_entry, filter, max_distance_computation_count);
+          }
+        } else {
+          if(max_distance_computation_count == 0) {
+            return searchImpl<Dist, false, false>(entry_vertex_indices, query, k, eps, include_entry, nullptr, 0);
+          } else {
+            return searchImpl<Dist, true, false>(entry_vertex_indices, query, k, eps, include_entry, nullptr, max_distance_computation_count);
+          }
+        }
+      });
+    }
 
 };
 

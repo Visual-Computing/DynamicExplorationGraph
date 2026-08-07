@@ -536,7 +536,7 @@ TEST(SizeBoundedGraph, ExploreBasicIncludeEntry) {
     float weights[] = {0.0f, 1.0f, 4.0f, 9.0f};
     graph.changeEdges(0, sorted_neighbors, weights);
 
-    auto results = graph.explore(0, 3, 0.0f, /*include_entry=*/true, nullptr, 0);
+    auto results = graph.explore(0, 3, 0, 0.0f, /*include_entry=*/true, nullptr);
 
     EXPECT_GT(results.size(), 0u);
     bool found_entry = false;
@@ -562,7 +562,7 @@ TEST(SizeBoundedGraph, ExploreExcludeEntry) {
     float weights[] = {0.0f, 1.0f, 4.0f, 9.0f};
     graph.changeEdges(0, sorted_neighbors, weights);
 
-    auto results = graph.explore(0, 2, 0.0f, /*include_entry=*/false, nullptr, 0);
+    auto results = graph.explore(0, 2, 0, 0.0f, /*include_entry=*/false, nullptr);
 
     EXPECT_GT(results.size(), 0u);
 }
@@ -576,7 +576,7 @@ TEST(SizeBoundedGraph, ExploreWithMaxDistanceCount) {
         graph.addVertex(i, make_float_bytes(v).get());
     }
 
-    auto results = graph.explore(0, 5, 0.0f, /*include_entry=*/true, nullptr, 2);
+    auto results = graph.explore(0, 5, 2, 0.0f, /*include_entry=*/true, nullptr);
 
     EXPECT_GT(results.size(), 0u);
     EXPECT_LE(results.size(), 5u);

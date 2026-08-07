@@ -487,7 +487,8 @@ inline static void run_integration_test(const char* name, deglib::Metric metric,
     for (size_t q = 0; q < query_count; ++q)
     {
         const std::byte* q_ptr = query_bytes + q * feature_bytes;
-        auto result = graph.search(entry_vertex_indices, q_ptr, search_eps, search_k, nullptr, 0);
+        std::span<const float> q_span(reinterpret_cast<const float*>(q_ptr), dim);
+        auto result = graph.search(q_span, search_k, search_eps, nullptr, 0);
 
         std::unordered_set<uint32_t> gt_set;
         if (!gt_data.empty() && q < gt_data.size())
@@ -708,11 +709,11 @@ inline static void run_regression_test(const char* name, deglib::Metric metric, 
     {
         size_t total_correct = 0;
         auto t_search_start = std::chrono::high_resolution_clock::now();
-
         for (size_t q = 0; q < query_count; ++q)
         {
             const std::byte* q_ptr = query_bytes + q * feature_bytes;
-            auto result = graph.search(entry_vertex_indices, q_ptr, search_eps, search_k, nullptr, 0);
+            std::span<const float> q_span(reinterpret_cast<const float*>(q_ptr), dim);
+            auto result = graph.search(q_span, search_k, search_eps, nullptr, 0);
 
             std::unordered_set<uint32_t> gt_set;
             if (!gt_data.empty() && q < gt_data.size())

@@ -201,7 +201,7 @@ TEST(ReadOnlyGraph, Explore) {
     EXPECT_TRUE(graph.hasEdge(0, 2));
     EXPECT_TRUE(graph.hasEdge(0, 3));
     // explore from vertex 0, find 3 nearest neighbors (excluding entry)
-    auto results = graph.explore(0, 3, 0.0f, /*include_entry=*/false);
+    auto results = graph.explore(0, 3, 3, 0.0f, /*include_entry=*/false);
     
     // all 3 other vertices should be found (distance 1.0 each)
     EXPECT_EQ(results.size(), 3u);
@@ -327,7 +327,7 @@ TEST(ReadOnlyGraph, ExploreBasicIncludeEntry) {
     set_edges(mutable_graph, 0, {0, 1, 2, 3}, {0.0f, 1.0f, 4.0f, 9.0f});
     deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
 
-    auto results = graph.explore(0, 3, 0.0f, /*include_entry=*/true, nullptr, 0);
+    auto results = graph.explore(0, 3, 0, 0.0f, /*include_entry=*/true, nullptr);
     EXPECT_GT(results.size(), 0u);
 
     bool found_entry = false;
@@ -353,7 +353,7 @@ TEST(ReadOnlyGraph, ExploreExcludeEntry) {
     set_edges(mutable_graph, 0, {0, 1, 2, 3}, {0.0f, 1.0f, 4.0f, 9.0f});
     deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
 
-    auto results = graph.explore(0, 2, 0.0f, /*include_entry=*/false, nullptr, 0);
+    auto results = graph.explore(0, 2, 0, 0.0f, /*include_entry=*/false, nullptr);
     EXPECT_GT(results.size(), 0u);
 }
 
@@ -369,7 +369,7 @@ TEST(ReadOnlyGraph, ExploreWithMaxDistanceCount) {
 
     deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
 
-    auto results = graph.explore(0, 5, 0.0f, /*include_entry=*/true, nullptr, 2);
+    auto results = graph.explore(0, 5, 2, 0.0f, /*include_entry=*/true, nullptr);
     EXPECT_GT(results.size(), 0u);
     EXPECT_LE(results.size(), 5u);
 }

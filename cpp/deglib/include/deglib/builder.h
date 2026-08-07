@@ -520,7 +520,7 @@ class EvenRegularGraphBuilder {
       // find good neighbor candidates for the new vertex
       auto distrib = deglib::random::DeterministicUniformIntDistribution<uint32_t>(0, uint32_t(graph.size() - 1));
       const std::vector<uint32_t> entry_vertex_indices = { distrib(this->rnd_) };
-      auto top_list = graph.search(entry_vertex_indices, new_vertex_feature, this->extend_eps_, std::max(uint32_t(this->extend_k_), edges_per_vertex*2)); // need 2x otherwise it might lock during neighbor selection
+      auto top_list = graph.search_intern(entry_vertex_indices, new_vertex_feature, std::max(uint32_t(this->extend_k_), edges_per_vertex*2), this->extend_eps_); // need 2x otherwise it might lock during neighbor selection
       const auto candidates = topListAscending(top_list);
 
       // their should always be enough neighbors (search candidates), otherwise the graph would be broken
@@ -634,7 +634,7 @@ class EvenRegularGraphBuilder {
 
       // find good neighbors for the new vertex
       const std::vector<uint32_t> entry_vertex_indices = { 0 };
-      auto top_list = graph.search(entry_vertex_indices, new_vertex_feature, this->extend_eps_, std::max(uint32_t(this->extend_k_), edges_per_vertex));
+      auto top_list = graph.search_intern(entry_vertex_indices, new_vertex_feature, std::max(uint32_t(this->extend_k_), edges_per_vertex), this->extend_eps_);
       const auto results = topListAscending(top_list);
 
       // their should always be enough neighbors (search results), otherwise the graph would be broken
@@ -1153,7 +1153,7 @@ class EvenRegularGraphBuilder {
         {
           const auto vertex2_feature = graph.getFeatureVector(vertex2);
           const std::vector<uint32_t> entry_vertex_indices = { vertex3, vertex4 };
-          auto top_list = graph.search(entry_vertex_indices, vertex2_feature, this->improve_eps_, improve_k_);
+          auto top_list = graph.search_intern(entry_vertex_indices, vertex2_feature, improve_k_, this->improve_eps_);
 
           // find a good new vertex3
           float best_gain = total_gain;
@@ -1228,7 +1228,7 @@ class EvenRegularGraphBuilder {
           // find a good (not yet connected) vertex for vertex1/vertex4
           const std::vector<uint32_t> entry_vertex_indices = { vertex2, vertex3 };
           const auto vertex4_feature = graph.getFeatureVector(vertex4);
-          auto top_list = graph.search(entry_vertex_indices, vertex4_feature, this->improve_eps_, improve_k_);
+          auto top_list = graph.search_intern(entry_vertex_indices, vertex4_feature, improve_k_, this->improve_eps_);
 
           float best_gain = 0;
           uint32_t best_selected_neighbor = 0;
@@ -1420,7 +1420,7 @@ class EvenRegularGraphBuilder {
         // RangeSearch from (a) to target (b): find good (e) and its neighbor (f) with
         // e != b, f != b, and not adjacent to b: (N(b) ∩ {e,f} = ∅)
         const auto b_feat = graph.getFeatureVector(b);
-        auto rs = graph.search({ s,t }, b_feat, eps, k); 
+        auto rs = graph.search_intern({ s,t }, b_feat, k, eps); 
         float best_delta = std::numeric_limits<float>::lowest();
         uint32_t best_e = 0, best_f = 0;
         float best_w_ef = 0.f, best_w_eb = 0.f, best_w_fb = 0.f;
@@ -1498,7 +1498,7 @@ class EvenRegularGraphBuilder {
       float best_score = std::numeric_limits<float>::lowest();
       {
         const auto b_feat = graph.getFeatureVector(b);
-        auto rs_bc = graph.search({ s,t }, b_feat, eps, k); 
+        auto rs_bc = graph.search_intern({ s,t }, b_feat, k, eps); 
 
         // Choose the best (c,d) pair by maximizing (gain - d(b,c) + d(c,d))
         float best_w_bc = 0.f, best_w_cd = 0.f;
