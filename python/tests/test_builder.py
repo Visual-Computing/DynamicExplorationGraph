@@ -42,7 +42,7 @@ class TestGraphs:
     @pytest.mark.parametrize('optimization_target', list(deglib.builder.OptimizationTarget))
     def test_build_simple(self, optimization_target):
         graph = deglib.graph.SizeBoundedGraph.create_empty(
-            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.L2
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.FP32_L2
         )
         builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30, optimization_target=optimization_target)
         for i, vec in enumerate(self.data):
@@ -54,7 +54,7 @@ class TestGraphs:
     @pytest.mark.parametrize('optimization_target', list(deglib.builder.OptimizationTarget))
     def test_build_batch(self, optimization_target):
         graph = deglib.graph.SizeBoundedGraph.create_empty(
-            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.L2
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.FP32_L2
         )
         builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30, optimization_target=optimization_target)
         builder.add_entry(range(self.data.shape[0]), self.data)
@@ -63,7 +63,7 @@ class TestGraphs:
 
     def test_build_with_remove(self):
         graph = deglib.graph.SizeBoundedGraph.create_empty(
-            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.L2
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.FP32_L2
         )
         builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
@@ -79,7 +79,7 @@ class TestGraphs:
 
     def test_get_num_entries(self):
         graph = deglib.graph.SizeBoundedGraph.create_empty(
-            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.L2
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.FP32_L2
         )
         builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
@@ -110,7 +110,7 @@ class TestGraphs:
 
     def test_callback(self):
         graph = deglib.graph.SizeBoundedGraph.create_empty(
-            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.L2
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.FP32_L2
         )
         builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
         builder.add_entry(range(self.data.shape[0]), self.data)

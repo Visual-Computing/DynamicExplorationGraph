@@ -1,0 +1,243 @@
+"""
+main.py — k-Nearest Neighbor Graph (k-NNG) Construction Example (SISAP Challenge 2026 Task 1).
+
+Demonstrates fast construction and exploration of a k-NN graph on high-dimensional vectors 
+using Dynamic Exploration Graph (DEG), EVP feature quantization, and FP16 candidate reranking.
+
+Uses deglib_cpp C++ bindings for:
+  - quantize_batch: Fast EVP quantization of float32 vectors to byte-packed EVP format
+  - floats_to_fp16 / fp16_to_floats: IEEE 754 half-precision conversion for reranking
+  - EVP_InnerProduct metric: Bit-level inner product distance for quantized graph search
+
+Usage
+-----
+    uv run main.py                                      # Uses small dataset (10000 vectors by default)
+    uv run main.py --max-vecs 5000                     # Test first 5000 vectors of small dataset
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+from pathlib import Path
+import numpy as np
+import matplotlib.pyplot as plt
+
+import deglib
+from dataset_utils import load_hdf5_dataset, ensure_small_dataset, DEFAULT_CACHE_DIR
+
+
+DEFAULT_K_TOP = 15
+DEFAULT_K_GRAPH = 18
+DEFAULT_K_EXT = 41
+DEFAULT_NON_ZEROS = 768
+DEFAULT_MAX_DIST = 586
+DEFAULT_EVP_K = 78
+DEFAULT_PRUNE_WORST = 9
+DEFAULT_THREADS = 8
+
+
+def prune_worst_edges(graph: deglib.graph.SizeBoundedGraph, prune_worst: int) -> None:
+    """
+    Prunes the worst (least similar) `prune_worst` neighbors of each vertex and replaces them
+    with self-loops, matching SISAP Task 1 prune_worst_neighbors logic to prevent exploration drift.
+    """
+    if prune_worst <= 0:
+        return
+    k = graph.get_edges_per_vertex()
+    for u in range(graph.size()):
+        indices = np.array(graph.get_neighbor_indices(u), copy=True)
+        weights = np.array(graph.get_neighbor_weights(u), copy=True)
+        order = np.argsort(-weights)
+        sorted_indices = indices[order]
+        sorted_weights = weights[order]
+        sorted_indices[:prune_worst] = u
+        sorted_weights[:prune_worst] = 0.0
+        idx_order = np.argsort(sorted_indices)
+        graph.change_edges(u, sorted_indices[idx_order].astype(np.uint32), sorted_weights[idx_order].astype(np.float32))
+
+
+def quantize_vectors(vectors: np.ndarray, non_zeros: int = DEFAULT_NON_ZEROS, num_threads: int = DEFAULT_THREADS) -> np.ndarray:
+    """
+    Quantizes floating point vectors to sparse EVP-bit representation using deglib.
+    Applies top `non_zeros` active component feature projection via C++ implementation.
+    """
+    dims = vectors.shape[1]
+    effective_non_zeros = min(non_zeros, dims - 1)
+    return deglib.quantize_batch(vectors, effective_non_zeros, num_threads)
+
+
+def construct_knng_mode4(
+    train_vectors: np.ndarray,
+    ground_truth: np.ndarray | None = None,
+    k_top: int = DEFAULT_K_TOP,
+    k_graph: int = DEFAULT_K_GRAPH,
+    k_ext: int = DEFAULT_K_EXT,
+    non_zeros: int = DEFAULT_NON_ZEROS,
+    max_dist: int = DEFAULT_MAX_DIST,
+    evp_k: int = DEFAULT_EVP_K,
+    prune_worst: int = DEFAULT_PRUNE_WORST,
+    threads: int = DEFAULT_THREADS,
+) -> dict[str, float]:
+    """
+    Constructs and evaluates a k-Nearest Neighbor Graph (k-NNG) using DEG (Task 1 Mode 4).
+    """
+    n_vecs, dims = train_vectors.shape
+    if train_vectors.dtype == np.float16:
+        train_vectors = train_vectors.view(np.uint16)
+
+    print(f"Dataset shape: {n_vecs} vectors, {dims} dimensions (dtype: {train_vectors.dtype})")
+    print(f"k-NNG Construction Config: k_top={k_top}, k_graph={k_graph}, non_zeros={non_zeros}, max_dist={max_dist}, evp_k={evp_k}, prune_worst={prune_worst}")
+
+    # 1. Quantization Phase (using C++ deglib.quantize_batch)
+    t0 = time.perf_counter()
+    quant_vectors = quantize_vectors(train_vectors, non_zeros=non_zeros, num_threads=threads)
+    t_quant = time.perf_counter() - t0
+    print(f"Quantization completed in {t_quant:.3f}s")
+
+    # 2. Graph Construction Phase (using EVP_InnerProduct metric for fast quantized search)
+    t0 = time.perf_counter()
+    space = deglib.FloatSpace.create(dims, deglib.Metric.EVP_InnerProduct)
+    graph = deglib.graph.SizeBoundedGraph(n_vecs, k_graph, space)
+    builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=k_ext, extend_eps=0.001)
+
+    labels = np.arange(n_vecs, dtype=np.uint32)
+    builder.add_entry(labels, quant_vectors)
+    builder.build()
+    t_build = time.perf_counter() - t0
+    print(f"Graph construction completed in {t_build:.3f}s")
+
+    t0 = time.perf_counter()
+    if prune_worst > 0:
+        prune_worst_edges(graph, prune_worst)
+    t_prune = time.perf_counter() - t0
+    print(f"Edge pruning completed in {t_prune:.3f}s")
+
+    # Convert SizeBoundedGraph to ReadOnlyGraph for flat memory alignment & fast search
+    t0 = time.perf_counter()
+    readonly_graph = deglib.graph.ReadOnlyGraph.from_graph(graph)
+    t_readonly = time.perf_counter() - t0
+    print(f"ReadOnlyGraph conversion completed in {t_readonly:.3f}s")
+
+    # 3. Graph Exploration Phase (Self-Join for k-NNG neighbor retrieval using readonly_graph.explore)
+    t0 = time.perf_counter()
+    indices, distances = readonly_graph.explore(
+        entry_vertex_indices=labels,
+        k=evp_k,
+        include_entry=False,
+        max_distance_computation_count=max_dist,
+        threads=threads
+    )
+    t_explore = time.perf_counter() - t0
+    print(f"Graph candidate search completed in {t_explore:.3f}s")
+
+    # 4. FP16 Candidate Rerank Phase (O(1) memory footprint per query thread via C++ SIMD FloatSpace)
+    t0 = time.perf_counter()
+    rerank_space = deglib.FloatSpace.create(dims, deglib.Metric.FP16_InnerProduct)
+    final_knng_edges = rerank_space.rerank(
+        queries=train_vectors,
+        candidate_indices=indices,
+        base_vectors=train_vectors,
+        k_top=k_top,
+        num_threads=threads
+    )
+    t_rerank = time.perf_counter() - t0
+    print(f"FP16 Reranking completed in {t_rerank:.3f}s")
+
+    t_total = t_quant + t_build + t_prune + t_explore + t_rerank
+
+    # 5. Recall@15 Evaluation against Ground Truth
+    recall = 0.0
+    if ground_truth is not None:
+        correct = 0
+        total_gt = 0
+        for i in range(n_vecs):
+            gt_set = set(ground_truth[i, :k_top])
+            pred_set = set(final_knng_edges[i])
+            correct += len(gt_set.intersection(pred_set))
+            total_gt += len(gt_set)
+        recall = correct / max(total_gt, 1)
+        print(f"\n---> k-NNG Quality (Recall@{k_top}): {recall * 100.0:.2f}%")
+
+    print(f"\n--- Timing Summary ---")
+    print(f"Quantization Time: {t_quant:.3f}s")
+    print(f"Graph Build Time:  {t_build:.3f}s")
+    print(f"Prune Time:        {t_prune:.3f}s")
+    print(f"Search Time:       {t_explore:.3f}s")
+    print(f"Rerank Time:       {t_rerank:.3f}s")
+    print(f"Total Time:        {t_total:.3f}s")
+
+    return {
+        "quant_time": t_quant,
+        "build_time": t_build,
+        "prune_time": t_prune,
+        "explore_time": t_explore,
+        "rerank_time": t_rerank,
+        "total_time": t_total,
+        "recall": recall,
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description="k-Nearest Neighbor Graph (k-NNG) Construction Example (SISAP Task 1)")
+    parser.add_argument("--dataset", type=str, default="small", help="Path to HDF5 dataset file or 'small' (default: small dataset)")
+    parser.add_argument("--max-vecs", type=int, default=None, help="Limit number of vectors for fast testing (default: None, uses full dataset)")
+    parser.add_argument("--non-zeros", type=int, default=DEFAULT_NON_ZEROS, help="EVP quantization non-zero components")
+    parser.add_argument("--k-graph", type=int, default=DEFAULT_K_GRAPH, help="Graph degree per vertex")
+    parser.add_argument("--k-ext", type=int, default=DEFAULT_K_EXT, help="Builder search size parameter")
+    parser.add_argument("--max-dist", type=int, default=DEFAULT_MAX_DIST, help="Search step budget per query")
+    parser.add_argument("--evpK", type=int, default=DEFAULT_EVP_K, help="Candidate list size before FP16 reranking")
+    parser.add_argument("--prune-worst", type=int, default=DEFAULT_PRUNE_WORST, help="Number of worst neighbors to replace with self-loops")
+    parser.add_argument("--threads", type=int, default=DEFAULT_THREADS, help="Number of parallel threads")
+    parser.add_argument("--output-plot", type=str, default=None, help="Path to save timing chart PNG")
+    parser.add_argument("--no-show", action="store_true", help="Disable GUI plot display")
+
+    args = parser.parse_args()
+
+    if args.dataset in (None, "small", "small_dataset"):
+        dataset_path = ensure_small_dataset()
+    else:
+        dataset_path = Path(args.dataset)
+    
+    print(f"Loading dataset from {dataset_path}...")
+    train_data, gt_data = load_hdf5_dataset(dataset_path, max_vecs=args.max_vecs)
+
+    stats = construct_knng_mode4(
+        train_data,
+        gt_data,
+        k_top=15,
+        k_graph=args.k_graph,
+        k_ext=args.k_ext,
+        non_zeros=args.non_zeros,
+        max_dist=args.max_dist,
+        evp_k=args.evpK,
+        prune_worst=args.prune_worst,
+        threads=args.threads,
+    )
+
+    if args.output_plot or not args.no_show:
+        stages = ["Quantization", "Graph Build", "Prune", "Exploration", "Rerank"]
+        times = [stats["quant_time"], stats["build_time"], stats["prune_time"], stats["explore_time"], stats["rerank_time"]]
+
+        fig, ax = plt.subplots(figsize=(9, 5))
+        bars = ax.bar(stages, times, color=["#4C72B0", "#55A868", "#DD8452", "#C44E52", "#8172B1"])
+        ax.set_ylabel("Time (seconds)")
+        ax.set_title("k-NNG Construction Execution Time Breakdown (SISAP Task 1 Mode 4)")
+
+        for bar in bars:
+            height = bar.get_height()
+            ax.annotate(f"{height:.3f}s", xy=(bar.get_x() + bar.get_width() / 2, height),
+                        xytext=(0, 3), textcoords="offset points", ha="center", va="bottom")
+
+        plt.tight_layout()
+
+        if args.output_plot:
+            plt.savefig(args.output_plot)
+            print(f"Plot saved to {args.output_plot}")
+
+        if not args.no_show:
+            plt.show()
+
+
+if __name__ == "__main__":
+    main()

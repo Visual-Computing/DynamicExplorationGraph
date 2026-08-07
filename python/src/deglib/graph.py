@@ -65,8 +65,6 @@ class SearchGraph(ABC):
         valid_dtype = self.get_feature_space().metric().get_dtype()
 
         query = assure_array(query, 'query', valid_dtype)
-        if entry_vertex_indices is None:
-            entry_vertex_indices = self.get_entry_vertex_indices()
 
         filter_obj = Filter.create_filter(filter_labels, self.size())
 
@@ -75,8 +73,8 @@ class SearchGraph(ABC):
         if thread_batch_size <= 0:
             thread_batch_size = max(query.shape[0] // (threads * 4), 1)
 
-        indices, distances, num_results = self.graph_cpp.search(
-            entry_vertex_indices, query, eps, k, filter_obj, max_distance_computation_count, threads,
+        indices, distances, num_results = self.graph_cpp.search_batch(
+            query, eps, k, filter_obj, max_distance_computation_count, threads,
             thread_batch_size
         )
         if num_results != k:

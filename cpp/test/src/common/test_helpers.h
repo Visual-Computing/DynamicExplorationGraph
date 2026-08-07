@@ -204,11 +204,11 @@ inline static void generate_synthetic_clustered_dataset_fp16(size_t count, size_
 // ---------------------------------------------------------------------------
 
 // Compute exact brute-force groundtruth for top-K neighbors using a custom distance evaluator.
-// Works for both float and uint8_t element types via the ElemType template parameter.
+// Works for all vector element types (float, uint8_t, uint16_t, std::byte).
 template <typename ElemType, typename DistFunc>
-inline static std::vector<std::vector<uint32_t>> compute_groundtruth_custom(const std::vector<ElemType>& base, size_t base_count,
-                                                                       const std::vector<ElemType>& query, size_t query_count,
-                                                                       size_t dim, uint32_t k, DistFunc dist_func)
+inline static std::vector<std::vector<uint32_t>> compute_groundtruth(const std::vector<ElemType>& base, size_t base_count,
+                                                               const std::vector<ElemType>& query, size_t query_count,
+                                                               size_t dim, uint32_t k, DistFunc dist_func)
 {
     std::vector<std::vector<uint32_t>> gt(query_count);
 
@@ -242,38 +242,23 @@ inline static std::vector<std::vector<uint32_t>> compute_groundtruth_l2(const st
                                                                  const std::vector<float>& query, size_t query_count,
                                                                  size_t dim, uint32_t k)
 {
-    return compute_groundtruth_custom<float>(base, base_count, query, query_count, dim, k,
+    return compute_groundtruth<float>(base, base_count, query, query_count, dim, k,
                                       [](const float* q_vec, const float* b_vec, const void* qty_ptr)
                                       {
                                           return deglib::distances::fp32_l2::L2Float::compare(q_vec, b_vec, qty_ptr);
                                       });
 }
-
 // Compute exact brute-force InnerProduct groundtruth for top-K neighbors (distance = 1 - dot_product).
 // Uses the scalar InnerProductFloat::compare() implementation from deglib to ensure
 // the ground-truth distances match the actual distance computation exactly.
 inline static std::vector<std::vector<uint32_t>> compute_groundtruth_innerproduct(const std::vector<float>& base, size_t base_count,
-                                                                             const std::vector<float>& query, size_t query_count,
-                                                                             size_t dim, uint32_t k)
+                                                                              const std::vector<float>& query, size_t query_count,
+                                                                              size_t dim, uint32_t k)
 {
-    return compute_groundtruth_custom<float>(base, base_count, query, query_count, dim, k,
+    return compute_groundtruth<float>(base, base_count, query, query_count, dim, k,
                                       [](const float* q_vec, const float* b_vec, const void* qty_ptr)
                                       {
                                           return deglib::distances::fp32_ip::InnerProductFloat::compare(q_vec, b_vec, qty_ptr);
-                                      });
-}
-
-// Compute exact brute-force InnerProduct groundtruth for top-K neighbors (distance = dot_product).
-// Returns the raw dot product (not 1.f - dot) for use with FP16 inner product tests.
-// Uses the scalar InnerProductFloat::dot() implementation from deglib.
-inline static std::vector<std::vector<uint32_t>> compute_groundtruth_ip(const std::vector<float>& base, size_t base_count,
-                                                                   const std::vector<float>& query, size_t query_count,
-                                                                   size_t dim, uint32_t k)
-{
-    return compute_groundtruth_custom<float>(base, base_count, query, query_count, dim, k,
-                                      [](const float* q_vec, const float* b_vec, const void* qty_ptr)
-                                      {
-                                          return deglib::distances::fp32_ip::InnerProductFloat::dot(q_vec, b_vec, qty_ptr);
                                       });
 }
 
@@ -283,7 +268,7 @@ inline static std::vector<std::vector<uint32_t>> compute_groundtruth_fp16_ip(con
                                                                          const std::vector<uint16_t>& query, size_t query_count,
                                                                          size_t dim, uint32_t k)
 {
-    return compute_groundtruth_custom<uint16_t>(base, base_count, query, query_count, dim, k,
+    return compute_groundtruth<uint16_t>(base, base_count, query, query_count, dim, k,
                                       [](const uint16_t* q_vec, const uint16_t* b_vec, const void* qty_ptr)
                                       {
                                           return deglib::distances::fp16_ip::InnerProductFP16::compare(q_vec, b_vec, qty_ptr);
@@ -297,7 +282,7 @@ inline static std::vector<std::vector<uint32_t>> compute_groundtruth_l2_uint8(co
                                                                           const std::vector<uint8_t>& query, size_t query_count,
                                                                           size_t dim, uint32_t k)
 {
-    return compute_groundtruth_custom<uint8_t>(base, base_count, query, query_count, dim, k,
+    return compute_groundtruth<uint8_t>(base, base_count, query, query_count, dim, k,
                                       [](const uint8_t* q_vec, const uint8_t* b_vec, const void* qty_ptr)
                                       {
                                           return deglib::distances::uint8_l2::L2Uint8::compare(q_vec, b_vec, qty_ptr);
@@ -313,7 +298,7 @@ inline static std::vector<std::vector<uint32_t>> compute_groundtruth_evp(const s
                                                                      size_t dim, uint32_t k)
 {
     const size_t bytes_per_vec = 2 * (dim / 8);
-    return compute_groundtruth_custom<std::byte>(base, base_count, query, query_count, bytes_per_vec, k,
+    return compute_groundtruth<std::byte>(base, base_count, query, query_count, bytes_per_vec, k,
         [dim](const std::byte* q_vec, const std::byte* b_vec, const void*)
         {
             uint32_t d = static_cast<uint32_t>(dim);

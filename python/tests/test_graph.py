@@ -57,17 +57,17 @@ class Configuration:
 
     @staticmethod
     def generate(samples, dims, metric, edges_per_vertex):
-        if metric == deglib.Metric.InnerProduct:
+        if metric == deglib.Metric.FP32_InnerProduct:
             # normalize data
             data = np.random.random((samples, dims)).astype(np.float32)
             data /= np.linalg.norm(data, axis=1).reshape(-1, 1)
 
             query = np.random.random((dims,)).astype(np.float32)
             query /= np.linalg.norm(query)
-        elif metric == deglib.Metric.L2:
+        elif metric == deglib.Metric.FP32_L2:
             data = np.random.normal(size=(samples, dims)).astype(np.float32)
             query = np.random.normal(size=(dims,)).astype(np.float32)
-        elif metric == deglib.Metric.L2_Uint8:
+        elif metric == deglib.Metric.Uint8_L2:
             data = np.random.randint(0, 256, size=(samples, dims)).astype(np.uint8)
             query = np.random.randint(0, 256, size=(dims,)).astype(np.uint8)
         else:
@@ -98,13 +98,13 @@ class Configuration:
 
 
 configurations = [
-    *Configuration.generate(100, 128, deglib.Metric.L2, 10),
-    *Configuration.generate(100, 128, deglib.Metric.L2_Uint8, 10),
-    *Configuration.generate(100, 128, deglib.Metric.InnerProduct, 10),
+    *Configuration.generate(100, 128, deglib.Metric.FP32_L2, 10),
+    *Configuration.generate(100, 128, deglib.Metric.Uint8_L2, 10),
+    *Configuration.generate(100, 128, deglib.Metric.FP32_InnerProduct, 10),
 ]
 
 large_configurations = [
-    *Configuration.generate(20_000, 2, deglib.Metric.L2_Uint8, 10),
+    *Configuration.generate(20_000, 2, deglib.Metric.Uint8_L2, 10),
 ]
 
 mutable_configurations = [c for c in configurations if isinstance(c.graph, deglib.graph.MutableGraph)]

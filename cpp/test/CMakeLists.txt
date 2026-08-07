@@ -75,5 +75,6 @@ add_deglib_test_no_ctest(test_builder_regression src/regression/test_builder_reg
 add_deglib_test_no_ctest(test_flas_regression src/regression/test_flas_regression.cpp)
 add_deglib_test_no_ctest(test_sizebounded_graph_regression src/regression/graph/test_sizebounded_graph_regression.cpp)
 add_deglib_test_no_ctest(test_readonly_graph_regression src/regression/graph/test_readonly_graph_regression.cpp)
+add_deglib_test_no_ctest(test_evp_quantize_regression src/regression/quantization/test_evp_quantize_regression.cpp)
 
 

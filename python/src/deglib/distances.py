@@ -22,7 +22,9 @@ class Metric(enum.IntEnum):
         elif self == Metric.Uint8_L2:
             return np.uint8
         elif self == Metric.FP16_InnerProduct:
-            return np.float16
+            return np.uint16
+        elif self == Metric.EVP_InnerProduct:
+            return np.uint8
         else:
             return np.float32
 
@@ -110,8 +112,58 @@ class FloatSpace(SpaceInterface):
         """
         return self.float_space_cpp.compute_distances(query, targets)
 
+    def rerank(
+        self,
+        queries: np.ndarray,
+        candidate_indices: np.ndarray,
+        base_vectors: np.ndarray | None = None,
+        k_top: int = 0,
+        num_threads: int = 0
+    ) -> np.ndarray:
+        """
+        Reranks candidate vectors for queries using SIMD distance computations in C++.
+
+        :param queries: 2D array of query vectors (shape: N_queries x D)
+        :param candidate_indices: 2D uint32 array of candidate feature IDs for each query (shape: N_queries x K_cand)
+        :param base_vectors: 2D array of dataset feature vectors (shape: N_base x D). If None, defaults to `queries`.
+        :param k_top: Number of top nearest candidates to return per query (default 0 returns all K_cand sorted).
+        :param num_threads: Number of threads (0 for hardware concurrency).
+        :return: 2D uint32 NumPy array of shape (N_queries, k_top) containing top candidate IDs sorted by similarity.
+        """
+        return self.float_space_cpp.rerank(
+            queries,
+            candidate_indices.astype(np.uint32, copy=False),
+            base_vectors,
+            k_top,
+            num_threads
+        )
+
     def to_cpp(self) -> deglib_cpp.FloatSpace:
         return self.float_space_cpp
 
     def __repr__(self):
         return f'FloatSpace(size={self.get_data_size()} dim={self.dim()}, metric={self.metric()})'
+
+
+def quantize_batch(vectors: np.ndarray, non_zeros: int, num_threads: int = 0) -> np.ndarray:
+    """
+    Quantize float32 or float16/uint16 vectors to byte-packed EVP format using C++ multi-threading.
+    """
+    if vectors.dtype == np.float16:
+        vectors = vectors.view(np.uint16)
+    return deglib_cpp.quantize_batch(vectors, non_zeros, num_threads)
+
+
+def floats_to_fp16(floats: np.ndarray) -> np.ndarray:
+    """
+    Convert float32 array to FP16 (uint16_t) representation in C++.
+    """
+    return deglib_cpp.floats_to_fp16(floats)
+
+
+def fp16_to_floats(fp16_vals: np.ndarray) -> np.ndarray:
+    """
+    Convert FP16 (uint16_t) array to float32 representation in C++.
+    """
+    return deglib_cpp.fp16_to_floats(fp16_vals)
+

@@ -111,10 +111,11 @@ class SearchGraph
     virtual std::vector<deglib::search::ObjectDistance> hasPath(const std::vector<uint32_t>& entry_vertex_indices, const uint32_t to_vertex, const float eps, const uint32_t k) const = 0;
 
     /**
-     * Bounds-checked public search for query vectors (float span).
+     * Bounds-checked public search for query vectors (any type span/buffer).
      */
+    template <typename T>
     deglib::search::ResultSet search(
-        std::span<const float> query,
+        std::span<const T> query,
         const uint32_t k,
         const float eps = 0.0f,
         const deglib::graph::Filter* filter = nullptr,

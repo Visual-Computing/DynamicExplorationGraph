@@ -205,6 +205,15 @@ class CMakeBuild(build_ext):
         print('calling cmake --build')
         call_cmake_checked(["cmake", "--build", ".", *build_args], cwd=build_temp)
 
+        # Copy compiled binary extension to target destination (e.g. src/ in inplace mode)
+        out_file = Path(self.get_ext_fullpath(ext.name))
+        out_dir = out_file.parent
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for item in build_temp.glob("**/*deglib_cpp*"):
+            if item.suffix in (".pyd", ".so", ".dylib"):
+                print(f"Copying built extension {item} -> {out_dir / item.name}")
+                shutil.copy(item, out_dir / item.name)
+
 
 setup(
     version=get_version(os.path.join('src', 'deglib', '__init__.py')),

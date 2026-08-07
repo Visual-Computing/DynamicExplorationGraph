@@ -1,0 +1,22 @@
+[project]
+name = "knng-example"
+version = "0.1.0"
+description = "k-Nearest Neighbor Graph (k-NNG) Construction Example based on SISAP Challenge 2026 Task 1"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24.0",
+    "h5py>=3.8.0",
+    "matplotlib>=3.7.0",
+    "huggingface_hub>=0.20.0",
+    "deglib",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["main", "dataset_utils"]
+
+[tool.uv.sources]
+deglib = { path = "../../python", editable = true }

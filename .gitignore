@@ -66,4 +66,5 @@ __pycache__/
 *$py.class
 .venv/
 *.png
-
+*.egg-info/
+*.egg-info
