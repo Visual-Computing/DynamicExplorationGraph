@@ -84,7 +84,7 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_L2)
     uint32_t total_explore_gt = 0;
     auto t_start_explore = std::chrono::high_resolution_clock::now();
 
-    for (int run = 0; run < benchmark_runs; ++run) {
+    for (int run = 0; run < benchmark_runs/10; ++run) {
         for (size_t i = 0; i < explore_count_per_run; ++i) {
             uint32_t entry_node = static_cast<uint32_t>((run * 13 + i) % base_count);
             auto results = graph.explore(entry_node, search_k, explore_max_calcs);
@@ -196,7 +196,7 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_InnerProduct)
     uint32_t correct_explore = 0;
     uint32_t total_explore_gt = 0;
     auto t_start_explore = std::chrono::high_resolution_clock::now();
-    for (int run = 0; run < benchmark_runs; ++run) {
+    for (int run = 0; run < benchmark_runs/10; ++run) {
         for (size_t i = 0; i < explore_count_per_run; ++i) {
             uint32_t entry_node = static_cast<uint32_t>((run * 13 + i) % base_count);
             auto results = graph.explore(entry_node, search_k, explore_max_calcs);

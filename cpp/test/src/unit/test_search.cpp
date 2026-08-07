@@ -180,11 +180,9 @@ public:
     std::vector<deglib::search::ObjectDistance> hasPath(const std::vector<uint32_t>&, uint32_t, float, uint32_t) const override {
         return {};
     }
-    deglib::search::ResultSet search(const std::vector<uint32_t>&, const std::byte*, float, uint32_t,
-                                      const deglib::graph::Filter*, uint32_t) const override {
-        return deglib::search::ResultSet();
-    }
-    deglib::search::ResultSet explore(uint32_t, uint32_t, bool, uint32_t) const override {
+    deglib::search::ResultSet search_intern(const std::vector<uint32_t>&, const std::byte*,
+                                            const uint32_t, const float = 0.0f, const bool = true,
+                                            const deglib::graph::Filter* = nullptr, const uint32_t = 0) const override {
         return deglib::search::ResultSet();
     }
 

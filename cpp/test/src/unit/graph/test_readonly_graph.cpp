@@ -201,7 +201,7 @@ TEST(ReadOnlyGraph, Explore) {
     EXPECT_TRUE(graph.hasEdge(0, 2));
     EXPECT_TRUE(graph.hasEdge(0, 3));
     // explore from vertex 0, find 3 nearest neighbors (excluding entry)
-    auto results = graph.explore(0, 3, 3, 0.0f, /*include_entry=*/false);
+    auto results = graph.explore(0, 3, 0, 0.0f, /*include_entry=*/false);
     
     // all 3 other vertices should be found (distance 1.0 each)
     EXPECT_EQ(results.size(), 3u);
