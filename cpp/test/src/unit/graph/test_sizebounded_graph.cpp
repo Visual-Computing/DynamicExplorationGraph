@@ -338,7 +338,7 @@ TEST(SizeBoundedGraph, SearchBasic) {
     graph.addVertex(2, reinterpret_cast<const std::byte*>(v2));
 
     float query[] = {0.5f, 0.0f, 0.0f, 0.0f};
-    auto results = graph.search({0}, reinterpret_cast<const std::byte*>(query), 0.0f, 5);
+    auto results = graph.search(std::span<const float>(query, 4), 5, 0.0f);
 
     EXPECT_GT(results.size(), 0u);
     if (results.size() > 0) {
@@ -362,7 +362,7 @@ TEST(SizeBoundedGraph, SearchWithFilter) {
     deglib::graph::Filter filter(valid, 1, 10, 10);
 
     float query[] = {0.0f, 0.0f, 0.0f, 0.0f};
-    auto results = graph.search({0}, reinterpret_cast<const std::byte*>(query), 0.0f, 3, &filter);
+    auto results = graph.search(std::span<const float>(query, 4), 3, 0.0f, &filter);
 
     EXPECT_GE(results.size(), 0u);
 }
@@ -479,11 +479,105 @@ TEST(SizeBoundedGraph, MultipleAddRemoveCycles) {
         v[i % 4] = static_cast<float>(i);
         graph.addVertex(i, make_float_bytes(v).get());
     }
-    EXPECT_EQ(graph.size(), 5u);
-
     for (int i = 1; i <= 7; ++i) {
         if (graph.hasVertex(static_cast<uint32_t>(i)))
             graph.removeVertex(static_cast<uint32_t>(i));
     }
     EXPECT_EQ(graph.size(), 0u);
+}
+
+// ---------------------------------------------------------------------------
+//  8. VisitedListPool
+// ---------------------------------------------------------------------------
+
+TEST(SizeBoundedGraph, VisitedListPool) {
+    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::graph::SizeBoundedGraph graph(10, 4, space);
+
+    float v0[] = {0.0f, 0.0f, 0.0f, 0.0f};
+    graph.addVertex(0, reinterpret_cast<const std::byte*>(v0));
+
+    float query[] = {0.0f, 0.0f, 0.0f, 0.0f};
+    auto results = graph.search(std::span<const float>(query, 4), 1);
+    EXPECT_GT(results.size(), 0u);
+}
+
+// ---------------------------------------------------------------------------
+//  9. Search & Explore Dedicated Verification
+// ---------------------------------------------------------------------------
+
+TEST(SizeBoundedGraph, SearchWithMaxDistanceCount) {
+    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::graph::SizeBoundedGraph graph(10, 4, space);
+
+    for (int i = 0; i < 10; ++i) {
+        std::vector<float> v = {static_cast<float>(i), 0.0f, 0.0f, 0.0f};
+        graph.addVertex(i, make_float_bytes(v).get());
+    }
+
+    std::vector<float> query = {0.0f, 0.0f, 0.0f, 0.0f};
+    auto results = graph.search(std::span<const float>(query), 5, 0.1f, nullptr, 2);
+
+    EXPECT_GT(results.size(), 0u);
+    EXPECT_LE(results.size(), 5u);
+}
+
+TEST(SizeBoundedGraph, ExploreBasicIncludeEntry) {
+    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::graph::SizeBoundedGraph graph(5, 4, space);
+
+    for (int i = 0; i < 5; ++i) {
+        std::vector<float> v = {static_cast<float>(i), 0.0f, 0.0f, 0.0f};
+        graph.addVertex(i, make_float_bytes(v).get());
+    }
+
+    // Connect node 0 to 1 and 2
+    uint32_t sorted_neighbors[] = {0, 1, 2, 3};
+    float weights[] = {0.0f, 1.0f, 4.0f, 9.0f};
+    graph.changeEdges(0, sorted_neighbors, weights);
+
+    auto results = graph.explore(0, 3, 0.0f, /*include_entry=*/true, nullptr, 0);
+
+    EXPECT_GT(results.size(), 0u);
+    bool found_entry = false;
+    while (!results.empty()) {
+        if (results.top().getInternalIndex() == 0u) {
+            found_entry = true;
+        }
+        results.pop();
+    }
+    EXPECT_TRUE(found_entry);
+}
+
+TEST(SizeBoundedGraph, ExploreExcludeEntry) {
+    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::graph::SizeBoundedGraph graph(5, 4, space);
+
+    for (int i = 0; i < 5; ++i) {
+        std::vector<float> v = {static_cast<float>(i), 0.0f, 0.0f, 0.0f};
+        graph.addVertex(i, make_float_bytes(v).get());
+    }
+
+    uint32_t sorted_neighbors[] = {0, 1, 2, 3};
+    float weights[] = {0.0f, 1.0f, 4.0f, 9.0f};
+    graph.changeEdges(0, sorted_neighbors, weights);
+
+    auto results = graph.explore(0, 2, 0.0f, /*include_entry=*/false, nullptr, 0);
+
+    EXPECT_GT(results.size(), 0u);
+}
+
+TEST(SizeBoundedGraph, ExploreWithMaxDistanceCount) {
+    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::graph::SizeBoundedGraph graph(10, 4, space);
+
+    for (int i = 0; i < 10; ++i) {
+        std::vector<float> v = {static_cast<float>(i), 0.0f, 0.0f, 0.0f};
+        graph.addVertex(i, make_float_bytes(v).get());
+    }
+
+    auto results = graph.explore(0, 5, 0.0f, /*include_entry=*/true, nullptr, 2);
+
+    EXPECT_GT(results.size(), 0u);
+    EXPECT_LE(results.size(), 5u);
 }

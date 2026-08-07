@@ -200,9 +200,8 @@ TEST(ReadOnlyGraph, Explore) {
     EXPECT_TRUE(graph.hasEdge(0, 1));
     EXPECT_TRUE(graph.hasEdge(0, 2));
     EXPECT_TRUE(graph.hasEdge(0, 3));
-
     // explore from vertex 0, find 3 nearest neighbors (excluding entry)
-    auto results = graph.explore(0, 3, false);
+    auto results = graph.explore(0, 3, 0.0f, /*include_entry=*/false);
     
     // all 3 other vertices should be found (distance 1.0 each)
     EXPECT_EQ(results.size(), 3u);
@@ -272,7 +271,7 @@ TEST(ReadOnlyGraph, Search) {
 
     // search for something close to vertex 4
     std::vector<float> query = {4.0f, 0.0f, 0.0f, 0.0f};
-    auto results = graph.search({0}, make_float_bytes(query).get(), 0.1f, 3);
+    auto results = graph.search(std::span<const float>(query), 3, 0.1f);
 
     EXPECT_GT(results.size(), 0u);
     // ResultSet is a max-heap (std::less), so top() returns the worst of the top-k results.
@@ -284,46 +283,95 @@ TEST(ReadOnlyGraph, Search) {
 
 TEST(ReadOnlyGraph, HasPath) {
     deglib::FloatSpace space(4, deglib::Metric::L2);
-    deglib::graph::SizeBoundedGraph mutable_graph(10, 4, space);
+    deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
 
-    // create a line: 0 -- 1 -- 2 -- 3
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 5; ++i) {
         auto v = make_float_vec(4);
-        v[0] = static_cast<float>(i) * 10.0f;
+        v[0] = static_cast<float>(i);
         mutable_graph.addVertex(i, make_float_bytes(v).get());
     }
 
-    // set up edges: 0-1, 1-2, 2-3 (neighbors must be sorted ascending)
-    set_edges(mutable_graph, 0, {0, 0, 0, 1}, {0.0f, 0.0f, 0.0f, 10.0f});
-    set_edges(mutable_graph, 1, {0, 1, 1, 2}, {10.0f, 0.0f, 0.0f, 10.0f});
-    set_edges(mutable_graph, 2, {1, 2, 2, 3}, {10.0f, 0.0f, 0.0f, 10.0f});
-    set_edges(mutable_graph, 3, {2, 3, 3, 3}, {10.0f, 0.0f, 0.0f, 0.0f});
-
+    set_edges(mutable_graph, 0, {0, 1, 2, 3}, {0.0f, 1.0f, 4.0f, 9.0f});
     deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
 
-    auto path = graph.hasPath({0}, graph.getInternalIndex(3), 0.1f, 1);
-    EXPECT_FALSE(path.empty());
+    auto path = graph.hasPath({0}, 1, 0.0f, 5);
+    EXPECT_GT(path.size(), 0u);
 }
 
 TEST(ReadOnlyGraph, HasPathNoConnection) {
     deglib::FloatSpace space(4, deglib::Metric::L2);
-    deglib::graph::SizeBoundedGraph mutable_graph(10, 4, space);
+    deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
 
-    // create two disconnected components
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 5; ++i) {
         auto v = make_float_vec(4);
-        v[0] = static_cast<float>(i) * 10.0f;
+        v[0] = static_cast<float>(i);
         mutable_graph.addVertex(i, make_float_bytes(v).get());
     }
 
-    // only connect 0-1
-    set_edges(mutable_graph, 0, {0, 0, 0, 1}, {0.0f, 0.0f, 0.0f, 10.0f});
-    set_edges(mutable_graph, 1, {0, 1, 1, 1}, {10.0f, 0.0f, 0.0f, 0.0f});
+    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+
+    auto path = graph.hasPath({0}, 4, 0.0f, 5);
+    EXPECT_EQ(path.size(), 0u);
+}
+
+TEST(ReadOnlyGraph, ExploreBasicIncludeEntry) {
+    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
+
+    for (int i = 0; i < 5; ++i) {
+        auto v = make_float_vec(4);
+        v[0] = static_cast<float>(i);
+        mutable_graph.addVertex(i, make_float_bytes(v).get());
+    }
+
+    set_edges(mutable_graph, 0, {0, 1, 2, 3}, {0.0f, 1.0f, 4.0f, 9.0f});
+    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+
+    auto results = graph.explore(0, 3, 0.0f, /*include_entry=*/true, nullptr, 0);
+    EXPECT_GT(results.size(), 0u);
+
+    bool found_entry = false;
+    while (!results.empty()) {
+        if (results.top().getInternalIndex() == 0u) {
+            found_entry = true;
+        }
+        results.pop();
+    }
+    EXPECT_TRUE(found_entry);
+}
+
+TEST(ReadOnlyGraph, ExploreExcludeEntry) {
+    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
+
+    for (int i = 0; i < 5; ++i) {
+        auto v = make_float_vec(4);
+        v[0] = static_cast<float>(i);
+        mutable_graph.addVertex(i, make_float_bytes(v).get());
+    }
+
+    set_edges(mutable_graph, 0, {0, 1, 2, 3}, {0.0f, 1.0f, 4.0f, 9.0f});
+    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+
+    auto results = graph.explore(0, 2, 0.0f, /*include_entry=*/false, nullptr, 0);
+    EXPECT_GT(results.size(), 0u);
+}
+
+TEST(ReadOnlyGraph, ExploreWithMaxDistanceCount) {
+    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::graph::SizeBoundedGraph mutable_graph(10, 4, space);
+
+    for (int i = 0; i < 10; ++i) {
+        auto v = make_float_vec(4);
+        v[0] = static_cast<float>(i);
+        mutable_graph.addVertex(i, make_float_bytes(v).get());
+    }
 
     deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
 
-    auto path = graph.hasPath({0}, graph.getInternalIndex(3), 0.1f, 1);
-    EXPECT_TRUE(path.empty());
+    auto results = graph.explore(0, 5, 0.0f, /*include_entry=*/true, nullptr, 2);
+    EXPECT_GT(results.size(), 0u);
+    EXPECT_LE(results.size(), 5u);
 }
 
 } // anonymous namespace

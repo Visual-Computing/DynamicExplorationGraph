@@ -73,4 +73,7 @@ add_deglib_integration_test(test_distances_integration src/integration/test_dist
 # Regression tests (100k vectors, performance benchmarking — built but NOT registered with CTest)
 add_deglib_test_no_ctest(test_builder_regression src/regression/test_builder_regression.cpp)
 add_deglib_test_no_ctest(test_flas_regression src/regression/test_flas_regression.cpp)
+add_deglib_test_no_ctest(test_sizebounded_graph_regression src/regression/graph/test_sizebounded_graph_regression.cpp)
+add_deglib_test_no_ctest(test_readonly_graph_regression src/regression/graph/test_readonly_graph_regression.cpp)
+
 
