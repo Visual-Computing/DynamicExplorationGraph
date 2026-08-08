@@ -311,7 +311,7 @@ TEST(ReadOnlyGraph, HasPathNoConnection) {
     deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
 
     auto path = graph.hasPath({0}, 4, 0.0f, 5);
-    EXPECT_EQ(path.size(), 0u);
+    EXPECT_EQ(path.size(), static_cast<size_t>(0));
 }
 
 TEST(ReadOnlyGraph, ExploreBasicIncludeEntry) {

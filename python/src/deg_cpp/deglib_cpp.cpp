@@ -5,6 +5,7 @@
 // #define PYBIND11_DETAILED_ERROR_MESSAGES
 #include <algorithm>
 #include <limits>
+#include <stdexcept>
 #include <pybind11/functional.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -393,10 +394,10 @@ fp16_to_floats_wrapper(py::array_t<uint16_t, py::array::c_style> fp16_vals) {
   return output;
 }
 
-deglib::graph::ReadOnlyGraph read_only_graph_from_search_graph(
-    deglib::search::SearchGraph &search_graph, const uint32_t max_vertex_count,
+deglib::graph::ReadOnlyGraph read_only_graph_from_dynamic_exploration_graph(
+    const deglib::DynamicExplorationGraph &dynamic_exploration_graph, const uint32_t max_vertex_count,
     const deglib::FloatSpace &feature_space, const uint8_t edges_per_vertex) {
-  return {max_vertex_count, edges_per_vertex, feature_space, search_graph};
+  return {max_vertex_count, edges_per_vertex, feature_space, dynamic_exploration_graph.internal()};
 }
 
 PYBIND11_MODULE(deglib_cpp, m) {
@@ -487,10 +488,25 @@ PYBIND11_MODULE(deglib_cpp, m) {
   });
 
   // graphs
-  py::class_<deglib::search::SearchGraph>(m, "SearchGraph");
+  py::class_<deglib::graph::InternalGraph>(m, "InternalGraph");
+
+  py::class_<deglib::DynamicExplorationGraph>(m, "DynamicExplorationGraph")
+      .def(py::init<deglib::graph::InternalGraph &>())
+      .def("size", &deglib::DynamicExplorationGraph::size)
+      .def("get_edges_per_vertex", &deglib::DynamicExplorationGraph::getEdgesPerVertex)
+      .def("has_vertex", &deglib::DynamicExplorationGraph::hasVertex)
+      .def("get_neighbors", &deglib::DynamicExplorationGraph::getNeighbors)
+      .def("internal", [](deglib::DynamicExplorationGraph &g) -> deglib::graph::InternalGraph & { return g.internal(); },
+           py::return_value_policy::reference)
+      .def("is_mutable", &deglib::DynamicExplorationGraph::isMutable)
+      .def("explore", &deglib::DynamicExplorationGraph::explore,
+           py::arg("entry_external_label"), py::arg("k"),
+           py::arg("max_distance_computation_count") = 0,
+           py::arg("eps") = 0.0f, py::arg("include_entry") = true,
+           py::arg("filter") = nullptr);
 
   // read only graph
-  py::class_<deglib::graph::ReadOnlyGraph, deglib::search::SearchGraph>(
+  py::class_<deglib::graph::ReadOnlyGraph, deglib::graph::InternalGraph>(
       m, "ReadOnlyGraph")
       .def(py::init<const uint32_t, const uint8_t, const deglib::FloatSpace>())
       .def("size", &deglib::graph::ReadOnlyGraph::size)
@@ -567,12 +583,12 @@ PYBIND11_MODULE(deglib_cpp, m) {
       .def("get_external_label",
            &deglib::graph::ReadOnlyGraph::getExternalLabel);
 
-  m.def("read_only_graph_from_graph", &read_only_graph_from_search_graph);
+  m.def("read_only_graph_from_graph", &read_only_graph_from_dynamic_exploration_graph);
 
   m.def("load_readonly_graph", &deglib::graph::load_readonly_graph);
 
   // mutable graph
-  py::class_<deglib::graph::MutableGraph, deglib::search::SearchGraph>(
+  py::class_<deglib::graph::MutableGraph, deglib::graph::InternalGraph>(
       m, "MutableGraph");
 
   // size bounded graph
@@ -733,10 +749,18 @@ PYBIND11_MODULE(deglib_cpp, m) {
 
   py::class_<deglib::builder::EvenRegularGraphBuilder>(
       m, "EvenRegularGraphBuilder")
-      .def(py::init<deglib::graph::MutableGraph &, std::mt19937 &,
-                    const deglib::builder::OptimizationTarget, const uint8_t,
-                    const float, const uint8_t, const float, const uint8_t,
-                    const uint32_t, const uint32_t>())
+      .def(py::init([](deglib::DynamicExplorationGraph &graph, std::mt19937 &rnd,
+                       const deglib::builder::OptimizationTarget optimization_target,
+                       const uint8_t extend_k, const float extend_eps,
+                       const uint8_t improve_k, const float improve_eps,
+                       const uint8_t max_path_length, const uint32_t swap_tries, const uint32_t additional_swap_tries) {
+          if (!graph.isMutable()) {
+              throw std::runtime_error("Graph must be mutable to use EvenRegularGraphBuilder");
+          }
+          return new deglib::builder::EvenRegularGraphBuilder(
+              static_cast<deglib::graph::MutableGraph &>(graph.internal()), rnd, optimization_target,
+              extend_k, extend_eps, improve_k, improve_eps, max_path_length, swap_tries, additional_swap_tries);
+      }))
       .def("add_entry",
            [](deglib::builder::EvenRegularGraphBuilder &builder,
               const py::array_t<uint32_t, py::array::c_style> &label,
@@ -784,30 +808,59 @@ PYBIND11_MODULE(deglib_cpp, m) {
       .def("build",
            [](deglib::builder::EvenRegularGraphBuilder &builder,
               std::function<void(deglib::builder::BuilderStatus &)> callback,
-              const bool infinite) -> deglib::graph::MutableGraph & {
-             return builder.build(callback, infinite);
+              const bool infinite) {
+             builder.build(callback, infinite);
            })
       .def("build_silent",
            [](deglib::builder::EvenRegularGraphBuilder &builder,
-              const bool infinite) -> deglib::graph::MutableGraph & {
+              const bool infinite) {
              py::gil_scoped_release release;
-             return builder.build([](deglib::builder::BuilderStatus &) {},
+             builder.build([](deglib::builder::BuilderStatus &) {},
                                   infinite);
            })
       .def("stop", &deglib::builder::EvenRegularGraphBuilder::stop);
-
-  m.def("calc_avg_edge_weight", &deglib::analysis::calc_avg_edge_weight);
-  m.def("calc_edge_weight_histogram",
-        &deglib::analysis::calc_edge_weight_histogram);
-  m.def("check_graph_weights", &deglib::analysis::check_graph_weights);
-  m.def("check_graph_regularity", &deglib::analysis::check_graph_regularity);
-  m.def("check_graph_connectivity",
-        &deglib::analysis::check_graph_connectivity);
-  m.def("calc_non_rng_edges", &deglib::analysis::calc_non_rng_edges);
-  m.def("remove_non_mrng_edges", &deglib::optimization::remove_non_mrng_edges,
-        py::arg("graph"), py::arg("num_threads") = 0);
-  m.def("prune_worst_edges", &deglib::optimization::pruning::prune_worst_edges,
-        py::arg("graph"), py::arg("prune_worst"), py::arg("num_threads") = 0);
+  m.def("calc_avg_edge_weight", [](const deglib::DynamicExplorationGraph &graph, const int scale) {
+      if (!graph.isMutable()) {
+          throw std::runtime_error("Graph must be mutable for calc_avg_edge_weight");
+      }
+      return deglib::analysis::calc_avg_edge_weight(static_cast<const deglib::graph::MutableGraph &>(graph.internal()), scale);
+  }, py::arg("graph"), py::arg("scale") = 1);
+  m.def("calc_edge_weight_histogram", [](const deglib::DynamicExplorationGraph &graph, const bool sorted, const int scale) {
+      if (!graph.isMutable()) {
+          throw std::runtime_error("Graph must be mutable for calc_edge_weight_histogram");
+      }
+      return deglib::analysis::calc_edge_weight_histogram(static_cast<const deglib::graph::MutableGraph &>(graph.internal()), sorted, scale);
+  }, py::arg("graph"), py::arg("sort"), py::arg("scale") = 1);
+  m.def("check_graph_weights", [](const deglib::DynamicExplorationGraph &graph) {
+      if (!graph.isMutable()) {
+          throw std::runtime_error("Graph must be mutable for check_graph_weights");
+      }
+      return deglib::analysis::check_graph_weights(static_cast<const deglib::graph::MutableGraph &>(graph.internal()));
+  }, py::arg("graph"));
+  m.def("check_graph_regularity", [](const deglib::DynamicExplorationGraph &graph, const uint32_t expected_vertices, const bool check_back_link) {
+      return deglib::analysis::check_graph_regularity(graph.internal(), expected_vertices, check_back_link);
+  }, py::arg("graph"), py::arg("expected_vertices"), py::arg("check_back_link") = false);
+  m.def("check_graph_connectivity", [](const deglib::DynamicExplorationGraph &graph) {
+      return deglib::analysis::check_graph_connectivity(graph.internal());
+  }, py::arg("graph"));
+  m.def("calc_non_rng_edges", [](const deglib::DynamicExplorationGraph &graph) {
+      if (!graph.isMutable()) {
+          throw std::runtime_error("Graph must be mutable for calc_non_rng_edges");
+      }
+      return deglib::analysis::calc_non_rng_edges(static_cast<const deglib::graph::MutableGraph &>(graph.internal()));
+  }, py::arg("graph"));
+  m.def("remove_non_mrng_edges", [](deglib::DynamicExplorationGraph &graph, const size_t num_threads) {
+      if (!graph.isMutable()) {
+          throw std::runtime_error("Graph must be mutable to remove non-mrng edges");
+      }
+      deglib::optimization::remove_non_mrng_edges(static_cast<deglib::graph::MutableGraph &>(graph.internal()), num_threads);
+  }, py::arg("graph"), py::arg("num_threads") = 0);
+  m.def("prune_worst_edges", [](deglib::DynamicExplorationGraph &graph, const uint8_t prune_worst, const size_t num_threads) {
+      if (!graph.isMutable()) {
+          throw std::runtime_error("Graph must be mutable to prune worst edges");
+      }
+      deglib::optimization::pruning::prune_worst_edges(static_cast<deglib::graph::MutableGraph &>(graph.internal()), prune_worst, num_threads);
+  }, py::arg("graph"), py::arg("prune_worst"), py::arg("num_threads") = 0);
 
   py::class_<deglib::builder::BuilderStatus>(m, "BuilderStatus")
       .def_readwrite("step", &deglib::builder::BuilderStatus::step)

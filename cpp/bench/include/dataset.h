@@ -287,7 +287,7 @@ inline std::vector<uint32_t> compute_knn_groundtruth(const deglib::FeatureReposi
         const auto query = query_repo.getFeature((uint32_t)q);
 
         auto worst_distance = (std::numeric_limits<float>::max)();
-        auto results = deglib::search::ResultSet();
+        auto results = deglib::graph::ResultSet();
 
         for (uint32_t b = 0; b < base_size; b++) {
             const auto distance = dist_func(query, base_repo.getFeature(b), dist_func_param);

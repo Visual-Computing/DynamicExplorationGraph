@@ -68,3 +68,9 @@ __pycache__/
 *.png
 *.egg-info/
 *.egg-info
+
+# BanyanCode internal files
+.banyancode/
+
+# Python build artifacts
+python/build_cmake/

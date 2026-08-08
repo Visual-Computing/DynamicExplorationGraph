@@ -18,7 +18,7 @@ namespace deglib::analysis
      * 
      * @param check_back_link checks if all edges are undirected (quite expensive)
      */
-    static bool check_graph_regularity(const deglib::search::SearchGraph& graph, const uint32_t expected_vertices, const bool check_back_link = false) {
+    static bool check_graph_regularity(const deglib::graph::InternalGraph& graph, const uint32_t expected_vertices, const bool check_back_link = false) {
 
         // check vertex count
         auto vertex_count = graph.size();
@@ -200,7 +200,7 @@ namespace deglib::analysis
     /**
      * check if the graph is connected and contains only one graph component
      */
-    static bool check_graph_connectivity(const deglib::search::SearchGraph& graph) {
+    static bool check_graph_connectivity(const deglib::graph::InternalGraph& graph) {
         const auto vertex_count = graph.size();
         const auto edges_per_vertex = graph.getEdgesPerVertex();
 

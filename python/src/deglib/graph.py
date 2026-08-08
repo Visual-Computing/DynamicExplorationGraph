@@ -14,9 +14,13 @@ from .search import ResultSet, ObjectDistance, Filter
 from .utils import assure_array, InvalidShapeException
 
 
-class SearchGraph(ABC):
-    def __init__(self, graph_cpp: deglib_cpp.SearchGraph):
-        self.graph_cpp = graph_cpp
+class DynamicExplorationGraph(ABC):
+    def __init__(self, graph_cpp: deglib_cpp.DynamicExplorationGraph):
+        self.dynamic_exploration_graph_cpp = graph_cpp
+
+    def is_mutable(self) -> bool:
+        return self.dynamic_exploration_graph_cpp.is_mutable()
+
 
     def search(
             self, query: np.ndarray, eps: float, k: int, filter_labels: Union[None, np.ndarray, Filter] = None,
@@ -43,8 +47,8 @@ class SearchGraph(ABC):
         :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
         :param entry_vertex_indices: Start point for exploratory search. If None, a reasonable default is used.
         :param threads: The number of threads to use for parallel processing. It should not excel the number of queries.
-                        If set to 0, the minimum of the number of cores of this machine and the number of queries is
-                        used.
+                      If set to 0, the minimum of the number of cores of this machine and the number of queries is
+                      used.
         :param thread_batch_size: If threads != 1, the number of queries to search in the same thread.
         :returns: A tuple containing (indices, distances) where indices is a numpy-array of shape [n_queries, k]
                   containing the indices to the closest found neighbors to the queries.
@@ -73,7 +77,7 @@ class SearchGraph(ABC):
         if thread_batch_size <= 0:
             thread_batch_size = max(query.shape[0] // (threads * 4), 1)
 
-        indices, distances = self.graph_cpp.search_batch(
+        indices, distances = self.dynamic_exploration_graph_cpp.internal().search_batch(
             query, eps, k, filter_obj, max_distance_computation_count, threads
         )
         # Check if any query returned fewer than k valid results (unfilled elements have NaN distance)
@@ -148,7 +152,7 @@ class SearchGraph(ABC):
         """
         if index < 0 or index >= self.size():
             raise IndexError("Index {} out of range for size {}".format(index, self.size()))
-        memory_view = self.graph_cpp.get_feature_vector(index)
+        memory_view = self.dynamic_exploration_graph_cpp.internal().get_feature_vector(index)
         feature_vector = np.asarray(memory_view)
         if copy:
             feature_vector = np.copy(feature_vector)
@@ -190,7 +194,7 @@ class SearchGraph(ABC):
     @abstractmethod
     def explore(self, entry_vertex_index: int, k: int, include_entry: bool, max_distance_computation_count: int) -> ResultSet:
         """
-        An exploration for similar element, limited by max_distance_computation_count
+        An exploration for similar element, limited by max_distance_computation_count.
 
         :param entry_vertex_index: The start point for which similar feature vectors should be searched
         :param k: The number of similar feature vectors to return
@@ -199,20 +203,14 @@ class SearchGraph(ABC):
         """
         raise NotImplementedError()
 
-    @abstractmethod
-    def to_cpp(self):
-        raise NotImplementedError()
-
-
-class ReadOnlyGraph(SearchGraph):
+class ReadOnlyGraph(DynamicExplorationGraph):
     def __init__(self, graph_cpp: deglib_cpp.ReadOnlyGraph):
-        super().__init__(graph_cpp)
-        if not isinstance(graph_cpp, deglib_cpp.ReadOnlyGraph):
-            raise TypeError("expected ReadOnlyGraph but got {}".format(type(graph_cpp)))
+        super().__init__(deglib_cpp.DynamicExplorationGraph(graph_cpp))
+        self.graph_cpp = graph_cpp
 
     @classmethod
     def from_graph(
-            cls, input_graph: SearchGraph, max_vertex_count: int = -1, feature_space: FloatSpace | None = None,
+            cls, input_graph: DynamicExplorationGraph, max_vertex_count: int = -1, feature_space: FloatSpace | None = None,
             edges_per_vertex: int = -1
     ) -> 'ReadOnlyGraph':
         """
@@ -232,21 +230,21 @@ class ReadOnlyGraph(SearchGraph):
         if edges_per_vertex == -1:
             edges_per_vertex = input_graph.get_edges_per_vertex()
         return ReadOnlyGraph(deglib_cpp.read_only_graph_from_graph(
-            input_graph.to_cpp(), max_vertex_count, feature_space.to_cpp(), edges_per_vertex
+            input_graph.dynamic_exploration_graph_cpp, max_vertex_count, feature_space.to_cpp(), edges_per_vertex
         ))
 
     def size(self) -> int:
         """
         :return: the number of vertices in the graph
         """
-        return self.graph_cpp.size()
+        return self.dynamic_exploration_graph_cpp.internal().size()
 
     def get_feature_space(self) -> FloatSpace:
         """
         :return: the feature space
         """
         # first two parameters get ignored
-        return FloatSpace(float_space_cpp=self.graph_cpp.get_feature_space())
+        return FloatSpace(float_space_cpp=self.dynamic_exploration_graph_cpp.internal().get_feature_space())
 
     def get_internal_index(self, external_label: int) -> int:
         """
@@ -255,7 +253,7 @@ class ReadOnlyGraph(SearchGraph):
         :param external_label: The external label to translate
         :returns: The internal index
         """
-        return self.graph_cpp.get_internal_index(external_label)
+        return self.dynamic_exploration_graph_cpp.internal().get_internal_index(external_label)
 
     def has_path(self, entry_vertex_indices: List[int], to_vertex: int, eps: float, k: int) -> List[ObjectDistance]:
         """
@@ -267,13 +265,13 @@ class ReadOnlyGraph(SearchGraph):
                     accurate. Higher eps values like 0.1 are slower but more accurate. Should always be greater 0.
         :param k: TODO
         """
-        return [ObjectDistance(od) for od in self.graph_cpp.has_path(entry_vertex_indices, to_vertex, eps, k)]
+        return [ObjectDistance(od) for od in self.dynamic_exploration_graph_cpp.internal().has_path(entry_vertex_indices, to_vertex, eps, k)]
 
     def get_entry_vertex_indices(self) -> List[int]:
         """
         Creates a list of internal indices that can be used as starting point for an anns search.
         """
-        return self.graph_cpp.get_entry_vertex_indices()
+        return self.dynamic_exploration_graph_cpp.internal().get_entry_vertex_indices()
 
     def get_external_label(self, internal_index: int) -> int:
         """
@@ -282,27 +280,39 @@ class ReadOnlyGraph(SearchGraph):
         :param internal_index: The internal index to translate
         :returns: The external label
         """
-        return self.graph_cpp.get_external_label(internal_index)
+        return self.dynamic_exploration_graph_cpp.internal().get_external_label(internal_index)
 
     def explore(self, entry_vertex_indices, k: int, include_entry: bool = True, max_distance_computation_count: int = 0, threads: int = 1):
         """
         An exploration for similar elements, limited by max_distance_computation_count.
-        Supports single entry_vertex_index or batch entry_vertex_indices array.
+        Supports single entry_vertex_label or batch entry_vertex_labels array.
+        Uses C++ DynamicExplorationGraph wrapper to handle external_label translation natively.
         """
         if isinstance(entry_vertex_indices, (np.ndarray, list, tuple)):
             arr = np.ascontiguousarray(entry_vertex_indices, dtype=np.uint32)
             if arr.ndim == 2:
                 arr = arr[:, 0]
-            indices, distances = self.graph_cpp.explore_batch(arr, k, include_entry, max_distance_computation_count, threads)
-            return indices, distances
+            res_indices = []
+            res_distances = []
+            for entry_label in arr:
+                res_set = self.dynamic_exploration_graph_cpp.explore(int(entry_label), k, max_distance_computation_count, 0.0, include_entry)
+                items = []
+                while not res_set.empty():
+                    item = res_set.top()
+                    res_set.pop()
+                    items.append((item.get_internal_index(), item.get_distance()))
+                items.sort(key=lambda x: x[1])
+                res_indices.append([x[0] for x in items])
+                res_distances.append([x[1] for x in items])
+            return np.array(res_indices, dtype=np.uint32), np.array(res_distances, dtype=np.float32)
         else:
-            return ResultSet(self.graph_cpp.explore(int(entry_vertex_indices), k, include_entry, max_distance_computation_count))
+            return ResultSet(self.dynamic_exploration_graph_cpp.explore(int(entry_vertex_indices), k, max_distance_computation_count, 0.0, include_entry))
 
     def get_edges_per_vertex(self) -> int:
         """
         :return: the number of edges of each vertex
         """
-        return self.graph_cpp.get_edges_per_vertex()
+        return self.dynamic_exploration_graph_cpp.internal().get_edges_per_vertex()
 
     def get_neighbor_indices(self, internal_index: int, copy: bool = False) -> np.ndarray:
         """
@@ -313,7 +323,7 @@ class ReadOnlyGraph(SearchGraph):
         """
         if internal_index < 0 or internal_index >= self.size():
             raise IndexError("Index {} out of range for size {}".format(internal_index, self.size()))
-        memory_view = self.graph_cpp.get_neighbor_indices(internal_index)
+        memory_view = self.dynamic_exploration_graph_cpp.internal().get_neighbor_indices(internal_index)
         neighbors = np.asarray(memory_view)
         if copy:
             neighbors = np.copy(neighbors)
@@ -323,16 +333,13 @@ class ReadOnlyGraph(SearchGraph):
         """
         :returns: whether the given external label is present in the graph.
         """
-        return self.graph_cpp.has_vertex(external_label)
+        return self.dynamic_exploration_graph_cpp.internal().has_vertex(external_label)
 
     def has_edge(self, internal_index: int, neighbor_index: int) -> bool:
         """
         :returns: whether the vertex at internal_index has an edge to the vertex at neighbor_index.
         """
-        return self.graph_cpp.has_edge(internal_index, neighbor_index)
-
-    def to_cpp(self) -> deglib_cpp.ReadOnlyGraph:
-        return self.graph_cpp
+        return self.dynamic_exploration_graph_cpp.internal().has_edge(internal_index, neighbor_index)
 
     def __repr__(self) -> str:
         return (f'ReadOnlyGraph(size={self.size()} edges_per_vertex={self.get_edges_per_vertex()} '
@@ -351,7 +358,7 @@ def load_readonly_graph(path: pathlib.Path | str) -> ReadOnlyGraph:
     return ReadOnlyGraph(deglib_cpp.load_readonly_graph(str(path)))
 
 
-class MutableGraph(SearchGraph, ABC):
+class MutableGraph(DynamicExplorationGraph, ABC):
     @abstractmethod
     def add_vertex(self, external_label: int, feature_vector: np.ndarray) -> int:
         """
@@ -432,15 +439,11 @@ class MutableGraph(SearchGraph, ABC):
         """
         raise NotImplementedError()
 
-    @abstractmethod
-    def to_cpp(self):
-        raise NotImplementedError()
-
     def remove_non_mrng_edges(self):
         """
         Remove all edges which are not MRNG conform.
         """
-        deglib_cpp.remove_non_mrng_edges(self.to_cpp())
+        deglib_cpp.remove_non_mrng_edges(self.dynamic_exploration_graph_cpp)
 
     def prune_worst_edges(self, prune_worst: int, num_threads: int = 0):
         """
@@ -450,7 +453,7 @@ class MutableGraph(SearchGraph, ABC):
         :param prune_worst: Number of worst neighbors to replace with self-loops per vertex.
         :param num_threads: Number of threads to use for parallel processing. If 0, uses hardware concurrency.
         """
-        deglib_cpp.prune_worst_edges(self.to_cpp(), prune_worst, num_threads)
+        deglib_cpp.prune_worst_edges(self.dynamic_exploration_graph_cpp, prune_worst, num_threads)
 
 
 class SizeBoundedGraph(MutableGraph):
@@ -468,7 +471,8 @@ class SizeBoundedGraph(MutableGraph):
         """
         if graph_cpp is None:
             graph_cpp = deglib_cpp.SizeBoundedGraph(max_vertex_count, edges_per_vertex, feature_space.to_cpp())
-        super().__init__(graph_cpp)
+        super().__init__(deglib_cpp.DynamicExplorationGraph(graph_cpp))
+        self.graph_cpp = graph_cpp
         self.feature_space = feature_space
 
     @staticmethod
@@ -488,13 +492,13 @@ class SizeBoundedGraph(MutableGraph):
         """
         :return: the number of vertices in the graph
         """
-        return self.graph_cpp.size()
+        return self.dynamic_exploration_graph_cpp.internal().size()
 
     def get_feature_space(self) -> FloatSpace:
         """
         :return: the feature space
         """
-        return FloatSpace(self.graph_cpp.get_feature_space())
+        return FloatSpace(self.dynamic_exploration_graph_cpp.internal().get_feature_space())
 
     def get_internal_index(self, external_label: int) -> int:
         """
@@ -503,7 +507,7 @@ class SizeBoundedGraph(MutableGraph):
         :param external_label: The external label to translate
         :returns: The internal index
         """
-        return self.graph_cpp.get_internal_index(external_label)
+        return self.dynamic_exploration_graph_cpp.internal().get_internal_index(external_label)
 
     def has_path(self, entry_vertex_indices: List[int], to_vertex: int, eps: float, k: int) -> List[ObjectDistance]:
         """
@@ -515,13 +519,13 @@ class SizeBoundedGraph(MutableGraph):
                     accurate. Higher eps values like 0.1 are slower but more accurate. Should always be greater 0.
         :param k: TODO
         """
-        return [ObjectDistance(od) for od in self.graph_cpp.has_path(entry_vertex_indices, to_vertex, eps, k)]
+        return [ObjectDistance(od) for od in self.dynamic_exploration_graph_cpp.internal().has_path(entry_vertex_indices, to_vertex, eps, k)]
 
     def get_entry_vertex_indices(self) -> List[int]:
         """
         Creates a list of internal indices that can be used as starting point for an anns search.
         """
-        return self.graph_cpp.get_entry_vertex_indices()
+        return self.dynamic_exploration_graph_cpp.internal().get_entry_vertex_indices()
 
     def get_external_label(self, internal_index: int) -> int:
         """
@@ -530,7 +534,7 @@ class SizeBoundedGraph(MutableGraph):
         :param internal_index: The internal index to translate
         :returns: The external label
         """
-        return self.graph_cpp.get_external_label(internal_index)
+        return self.dynamic_exploration_graph_cpp.internal().get_external_label(internal_index)
 
     def save_graph(self, path: pathlib.Path | str):
         """
@@ -538,13 +542,13 @@ class SizeBoundedGraph(MutableGraph):
 
         :param path: The path where to save the file.
         """
-        self.graph_cpp.save_graph(str(path))
+        self.dynamic_exploration_graph_cpp.internal().save_graph(str(path))
 
     def get_edges_per_vertex(self) -> int:
         """
         :return: the number of edges of each vertex
         """
-        return self.graph_cpp.get_edges_per_vertex()
+        return self.dynamic_exploration_graph_cpp.internal().get_edges_per_vertex()
 
     def add_vertex(self, external_label: int, feature_vector: np.ndarray) -> int:
         """
@@ -557,7 +561,7 @@ class SizeBoundedGraph(MutableGraph):
         """
         valid_dtype = self.get_feature_space().metric().get_dtype()
         feature_vector = assure_array(feature_vector, 'feature_vector', valid_dtype)
-        return self.graph_cpp.add_vertex(external_label, feature_vector)
+        return self.dynamic_exploration_graph_cpp.internal().add_vertex(external_label, feature_vector)
 
     def remove_vertex(self, external_label: int):
         """
@@ -565,7 +569,7 @@ class SizeBoundedGraph(MutableGraph):
 
         :param external_label: The external label of the vertex that should be removed.
         """
-        self.graph_cpp.remove_vertex(external_label)
+        self.dynamic_exploration_graph_cpp.internal().remove_vertex(external_label)
 
     def change_edge(
             self, internal_index: int, from_neighbor_index: int, to_neighbor_index: int, to_neighbor_weight: float
@@ -579,7 +583,7 @@ class SizeBoundedGraph(MutableGraph):
         :param to_neighbor_weight: weight of the neighbor to add
         :return: True if the from_neighbor_index was found and changed
         """
-        return self.graph_cpp.change_edge(internal_index, from_neighbor_index, to_neighbor_index, to_neighbor_weight)
+        return self.dynamic_exploration_graph_cpp.internal().change_edge(internal_index, from_neighbor_index, to_neighbor_index, to_neighbor_weight)
 
     def change_edges(self, internal_index: int, neighbor_indices: np.ndarray, neighbor_weights: np.ndarray):
         """
@@ -594,7 +598,7 @@ class SizeBoundedGraph(MutableGraph):
         """
         neighbor_indices = assure_array(neighbor_indices, 'neighbor_indices', np.uint32)
         neighbor_weights = assure_array(neighbor_weights, 'neighbor_weights', np.float32)
-        return self.graph_cpp.change_edges(internal_index, neighbor_indices, neighbor_weights)
+        return self.dynamic_exploration_graph_cpp.internal().change_edges(internal_index, neighbor_indices, neighbor_weights)
 
     def get_neighbor_weights(self, internal_index: int, copy: bool = False) -> np.ndarray:
         """
@@ -606,7 +610,7 @@ class SizeBoundedGraph(MutableGraph):
         """
         if internal_index < 0 or internal_index >= self.size():
             raise IndexError("Index {} out of range for size {}".format(internal_index, self.size()))
-        memory_view = self.graph_cpp.get_neighbor_weights(internal_index)
+        memory_view = self.dynamic_exploration_graph_cpp.internal().get_neighbor_weights(internal_index)
         weights = np.asarray(memory_view)
         if copy:
             weights = np.copy(weights)
@@ -620,7 +624,7 @@ class SizeBoundedGraph(MutableGraph):
         :param to_neighbor_index: Internal index of the target vertex
         :returns: If present the weight between start and target vertex, -1.0 otherwise
         """
-        return self.graph_cpp.get_edge_weight(from_neighbor_index, to_neighbor_index)
+        return self.dynamic_exploration_graph_cpp.internal().get_edge_weight(from_neighbor_index, to_neighbor_index)
 
     def get_neighbor_indices(self, internal_index: int, copy: bool = False) -> np.ndarray:
         """
@@ -632,7 +636,7 @@ class SizeBoundedGraph(MutableGraph):
         """
         if internal_index < 0 or internal_index >= self.size():
             raise IndexError("Index {} out of range for size {}".format(internal_index, self.size()))
-        memory_view = self.graph_cpp.get_neighbor_indices(internal_index)
+        memory_view = self.dynamic_exploration_graph_cpp.internal().get_neighbor_indices(internal_index)
         indices = np.asarray(memory_view)
         if copy:
             indices = np.copy(indices)
@@ -642,13 +646,13 @@ class SizeBoundedGraph(MutableGraph):
         """
         :returns: whether the given external label is present in the graph.
         """
-        return self.graph_cpp.has_vertex(external_label)
+        return self.dynamic_exploration_graph_cpp.internal().has_vertex(external_label)
 
     def has_edge(self, internal_index: int, neighbor_index: int) -> bool:
         """
         :returns: whether the vertex at internal_index has an edge to the vertex at neighbor_index.
         """
-        return self.graph_cpp.has_edge(internal_index, neighbor_index)
+        return self.dynamic_exploration_graph_cpp.internal().has_edge(internal_index, neighbor_index)
 
     def explore(self, entry_vertex_indices, k: int, include_entry: bool = True, max_distance_computation_count: int = 0, threads: int = 1):
         """
@@ -659,13 +663,10 @@ class SizeBoundedGraph(MutableGraph):
             arr = np.ascontiguousarray(entry_vertex_indices, dtype=np.uint32)
             if arr.ndim == 2:
                 arr = arr[:, 0]
-            indices, distances = self.graph_cpp.explore_batch(arr, k, include_entry, max_distance_computation_count, threads)
+            indices, distances = self.dynamic_exploration_graph_cpp.internal().explore_batch(arr, k, include_entry, max_distance_computation_count, threads)
             return indices, distances
         else:
-            return ResultSet(self.graph_cpp.explore(int(entry_vertex_indices), k, include_entry, max_distance_computation_count))
-
-    def to_cpp(self) -> deglib_cpp.SizeBoundedGraph:
-        return self.graph_cpp
+            return ResultSet(self.dynamic_exploration_graph_cpp.internal().explore(int(entry_vertex_indices), k, include_entry, max_distance_computation_count))
 
     def __repr__(self) -> str:
         return (f'SizeBoundedGraph(size={self.size()} edges_per_vertex={self.get_edges_per_vertex()} '
@@ -678,4 +679,4 @@ def get_num_useful_threads(requested: int, max_limit: int):
     return min(requested, max_limit)  # dont use more threads than queries
 
 
-__all__ = ['load_readonly_graph', 'ReadOnlyGraph', 'SizeBoundedGraph', 'MutableGraph', 'SearchGraph']
+__all__ = ['load_readonly_graph', 'ReadOnlyGraph', 'SizeBoundedGraph', 'MutableGraph', 'DynamicExplorationGraph']

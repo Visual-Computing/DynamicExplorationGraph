@@ -375,7 +375,7 @@ public:
   /**
    * Performan a search but stops when the to_vertex was found.
    */
-  std::vector<deglib::search::ObjectDistance> hasPath(const std::vector<uint32_t>& entry_vertex_indices, const uint32_t to_vertex, const float eps, const uint32_t k) const override
+  std::vector<deglib::graph::ObjectDistance> hasPath(const std::vector<uint32_t>& entry_vertex_indices, const uint32_t to_vertex, const float eps, const uint32_t k) const override
   {
     const auto query = this->feature_by_index(to_vertex);
     const auto dist_func = this->feature_space_.get_dist_func();
@@ -388,13 +388,13 @@ public:
     const auto checked_ids_tag = vl->get_tag();
 
     // items to traverse next
-    auto next_vertices = deglib::search::UncheckedSet();
+    auto next_vertices = deglib::graph::UncheckedSet();
 
     // trackable information 
-    auto trackback = std::unordered_map<uint32_t, deglib::search::ObjectDistance>();
+    auto trackback = std::unordered_map<uint32_t, deglib::graph::ObjectDistance>();
 
     // result set
-    auto results = deglib::search::ResultSet();   
+    auto results = deglib::graph::ResultSet();   
 
     // copy the initial entry vertices and their distances to the query into the three containers
     for (auto&& index : entry_vertex_indices) {
@@ -405,7 +405,7 @@ public:
         const auto distance = dist_func(query, feature, dist_func_param);
         results.emplace(index, distance);
         next_vertices.emplace(index, distance);
-        trackback.emplace(index, deglib::search::ObjectDistance(index, distance));
+        trackback.emplace(index, deglib::graph::ObjectDistance(index, distance));
       }
     }
 
@@ -432,7 +432,7 @@ public:
 
         // found our target vertex, create a path back to the entry vertex
         if(neighbor_index == to_vertex) {
-          auto path = std::vector<deglib::search::ObjectDistance>();
+          auto path = std::vector<deglib::graph::ObjectDistance>();
           path.emplace_back(to_vertex, 0.f);
           path.emplace_back(next_vertex.getInternalIndex(), next_vertex.getDistance());
 
@@ -466,7 +466,7 @@ public:
         // check the neighborhood of this vertex later, if its good enough
         if (neighbor_distance <= exploration_radius) {
           next_vertices.emplace(neighbor_index, neighbor_distance);
-          trackback.insert({neighbor_index, deglib::search::ObjectDistance(next_vertex.getInternalIndex(), next_vertex.getDistance())});
+          trackback.insert({neighbor_index, deglib::graph::ObjectDistance(next_vertex.getInternalIndex(), next_vertex.getDistance())});
 
           // remember the vertex, if its better than the worst in the result list
           if (neighbor_distance < radius) {
@@ -484,14 +484,14 @@ public:
     }
 
     // there is no path
-    return std::vector<deglib::search::ObjectDistance>();
+    return std::vector<deglib::graph::ObjectDistance>();
   }
 
   /**
    * The result set contains internal indices. 
    */
   template <deglib::DistanceFunction COMPARATOR, bool use_max_distance_count, bool use_filter>
-  deglib::search::ResultSet searchImpl(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const uint32_t initial_k, const float eps, const bool include_entry, const deglib::graph::Filter* filter, const uint32_t max_distance_computation_count) const
+  deglib::graph::ResultSet searchImpl(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const uint32_t initial_k, const float eps, const bool include_entry, const deglib::graph::Filter* filter, const uint32_t max_distance_computation_count) const
   {
     uint32_t distance_computation_count = 0;
     const auto dist_func_param = this->feature_space_.get_dist_func_param();
@@ -505,12 +505,12 @@ public:
     const auto checked_ids_tag = vl->get_tag();
 
     // items to traverse next
-    auto next_vertices = deglib::search::UncheckedSet();
+    auto next_vertices = deglib::graph::UncheckedSet();
     next_vertices.reserve(k*this->edges_per_vertex_);
 
     // result set
     // TODO: custom priority queue with an internal Variable Length Array wrapped in a macro with linear-scan search and memcopy 
-    auto results = deglib::search::ResultSet();   
+    auto results = deglib::graph::ResultSet();   
     results.reserve(k+1);
 
     // if the filter only contains few valid ids brute force them all
@@ -638,9 +638,9 @@ public:
   }
 
   protected:
-    deglib::search::ResultSet search_intern(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const uint32_t k, const float eps = 0.0f, const bool include_entry = true, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) const override
+    deglib::graph::ResultSet search_intern(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const uint32_t k, const float eps = 0.0f, const bool include_entry = true, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) const override
     {
-      return feature_space_.compute([&]<deglib::DistanceFunction Dist>(Dist) {
+      return feature_space_.compute([&]<deglib::DistanceFunction Dist>(Dist) -> deglib::graph::ResultSet {
         if(filter) {
           if(max_distance_computation_count == 0) {
             return searchImpl<Dist, false, true>(entry_vertex_indices, query, k, eps, include_entry, filter, 0);

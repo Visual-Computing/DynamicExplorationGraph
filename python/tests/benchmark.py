@@ -106,7 +106,7 @@ def test_approx_anns(
 
 
 def test_graph_explore(
-        graph: deglib.graph.SearchGraph, ground_truth: np.ndarray, entry_vertices: np.ndarray, repeat: int, k: int
+        graph: deglib.graph.DynamicExplorationGraph, ground_truth: np.ndarray, entry_vertices: np.ndarray, repeat: int, k: int
 ):
     # ground truth data
     answer = get_ground_truth(ground_truth, k)
@@ -134,7 +134,7 @@ def test_graph_explore(
 
 
 def test_approx_explore(
-        graph: deglib.graph.SearchGraph, entry_vertex_indices: np.ndarray, ground_truth: List[Set[int]], k: int,
+        graph: deglib.graph.DynamicExplorationGraph, entry_vertex_indices: np.ndarray, ground_truth: List[Set[int]], k: int,
         max_distance_count: int
 ) -> float:
     total = 0

@@ -6,6 +6,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <algorithm>
 
 #include "deglib/distances.h"
 #include "deglib/filter.h"
@@ -15,7 +16,7 @@ namespace deglib::builder {
 class EvenRegularGraphBuilder;
 }
 
-namespace deglib::search {
+namespace deglib::graph {
 
 class ObjectDistance
 {
@@ -79,16 +80,20 @@ class PQV : public std::vector<ObjectType> {
     }
 };
 
-// search result set containing vertex ids and distances
+// search result set containing internal vertex ids and distances
 typedef PQV<std::less<ObjectDistance>, ObjectDistance> ResultSet;
 
 // set of unchecked vertex ids
 typedef PQV<std::greater<ObjectDistance>, ObjectDistance> UncheckedSet;
 
-class SearchGraph
+/**
+ * Abstract base interface for all low-level internal graph representations.
+ * All methods operate on internal_index (0..N-1) for maximum memory performance.
+ */
+class InternalGraph
 {
   public:    
-    virtual ~SearchGraph() = default;
+    virtual ~InternalGraph() = default;
     virtual const uint32_t size() const = 0;
     virtual const uint8_t getEdgesPerVertex() const = 0;
     virtual const deglib::FloatSpace& getFeatureSpace() const = 0;
@@ -108,13 +113,13 @@ class SearchGraph
     /**
      * Perform a search but stops when the to_vertex was found.
      */
-    virtual std::vector<deglib::search::ObjectDistance> hasPath(const std::vector<uint32_t>& entry_vertex_indices, const uint32_t to_vertex, const float eps, const uint32_t k) const = 0;
+    virtual std::vector<deglib::graph::ObjectDistance> hasPath(const std::vector<uint32_t>& entry_vertex_indices, const uint32_t to_vertex, const float eps, const uint32_t k) const = 0;
 
     /**
-     * Bounds-checked public search for query vectors (any type span/buffer).
+     * Bounds-checked internal search for query vectors.
      */
     template <typename T>
-    deglib::search::ResultSet search(
+    deglib::graph::ResultSet search(
         std::span<const T> query,
         const uint32_t k,
         const float eps = 0.0f,
@@ -130,9 +135,9 @@ class SearchGraph
     }
 
     /**
-     * Public graph exploration starting at entry_vertex_index.
+     * Internal graph exploration starting at entry_vertex_index.
      */
-    deglib::search::ResultSet explore(
+    deglib::graph::ResultSet explore(
         const uint32_t entry_vertex_index,
         const uint32_t k,
         const uint32_t max_distance_computation_count = 0,
@@ -144,11 +149,7 @@ class SearchGraph
         return search_intern({ entry_vertex_index }, query_ptr, k, eps, include_entry, filter, max_distance_computation_count);
     }
 
-  protected:
-    /**
-     * Internal raw-pointer search implementation.
-     */
-    virtual deglib::search::ResultSet search_intern(
+    virtual deglib::graph::ResultSet search_intern(
         const std::vector<uint32_t>& entry_vertex_indices,
         const std::byte* query,
         const uint32_t k,
@@ -160,4 +161,4 @@ class SearchGraph
     friend class deglib::builder::EvenRegularGraphBuilder;
 };
 
-} // namespace deglib::search
+} // namespace deglib::graph

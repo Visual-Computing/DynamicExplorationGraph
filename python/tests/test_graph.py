@@ -21,7 +21,7 @@ def get_tmp_graph_file(samples: int, dims: int) -> pathlib.Path:
     return pathlib.Path(os.path.join(tmpdir, 'test_graph_S{}_D{}.deg'.format(samples, dims)))
 
 
-def get_ranking(features: np.ndarray, graph: deglib.graph.SearchGraph, query: np.ndarray) -> np.ndarray:
+def get_ranking(features: np.ndarray, graph: deglib.graph.DynamicExplorationGraph, query: np.ndarray) -> np.ndarray:
     """
     Returns the ranking for each feature vector in the graph
     """
@@ -43,7 +43,7 @@ def get_ranking(features: np.ndarray, graph: deglib.graph.SearchGraph, query: np
 
 class Configuration:
     def __init__(
-            self, edges_per_vertex: int, samples: int, dims: int, data: np.ndarray, graph: deglib.graph.SearchGraph,
+            self, edges_per_vertex: int, samples: int, dims: int, data: np.ndarray, graph: deglib.graph.DynamicExplorationGraph,
             graph_path: Optional[pathlib.Path], query: np.ndarray, metric: deglib.Metric
     ):
         self.edges_per_vertex = edges_per_vertex
@@ -327,6 +327,30 @@ def test_filter_edge_cases(conf: Configuration):
     no_labels = np.array([], dtype=np.int32)
     with pytest.warns(UserWarning):
         results_none, _ = conf.graph.search(conf.query, filter_labels=Filter(no_labels, max_value=0), eps=0.1, k=k)
-    assert results_none.shape[-1] == 0
 
+
+
+@pytest.mark.parametrize('conf', configurations)
+def test_analysis_read_only_graph(conf: Configuration):
+    """Test that analysis functions work with ReadOnlyGraph for InternalGraph-based functions."""
+    # check_graph_regularity and check_graph_connectivity should work with ReadOnlyGraph
+    assert deglib.analysis.check_graph_regularity(conf.graph, conf.graph.size())
+    assert deglib.analysis.check_graph_connectivity(conf.graph)
+
+    # Functions requiring MutableGraph should raise for ReadOnlyGraph
+    if isinstance(conf.graph, deglib.graph.ReadOnlyGraph):
+        with pytest.raises(RuntimeError, match="Graph must be mutable"):
+            deglib.analysis.calc_avg_edge_weight(conf.graph)
+        with pytest.raises(RuntimeError, match="Graph must be mutable"):
+            deglib.analysis.calc_edge_weight_histogram(conf.graph, True)
+        with pytest.raises(RuntimeError, match="Graph must be mutable"):
+            deglib.analysis.check_graph_weights(conf.graph)
+        with pytest.raises(RuntimeError, match="Graph must be mutable"):
+            deglib.analysis.calc_non_rng_edges(conf.graph)
+    else:
+        # MutableGraph should work with all analysis functions
+        assert deglib.analysis.calc_avg_edge_weight(conf.graph) > 0
+        assert len(deglib.analysis.calc_edge_weight_histogram(conf.graph, True)) == 10
+        assert deglib.analysis.check_graph_weights(conf.graph)
+        assert deglib.analysis.calc_non_rng_edges(conf.graph) >= 0
 

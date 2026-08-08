@@ -78,7 +78,7 @@ class EvenRegularGraphBuilder:
         if extend_k < graph.get_edges_per_vertex():
             extend_k = graph.get_edges_per_vertex()
         self.builder_cpp = deglib_cpp.EvenRegularGraphBuilder(
-            graph.to_cpp(), rng.to_cpp(), optimization_target.to_cpp(), extend_k, extend_eps, improve_k, improve_eps,
+            graph.dynamic_exploration_graph_cpp, rng.to_cpp(), optimization_target.to_cpp(), extend_k, extend_eps, improve_k, improve_eps,
             max_path_length, swap_tries, additional_swap_tries
         )
         self.graph = graph

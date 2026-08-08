@@ -38,7 +38,7 @@ In this case `indices` and `distances` will have shape `(10, 16)` (16 indices fo
 Parameters
 **********
 
-There are a lot of parameters to control the search speed and recall. See :ref:`search_graph` for more details.
+There are a lot of parameters to control the search speed and recall. See :ref:`dynamic_exploration_graph` for more details.
 
 Filters
 *******

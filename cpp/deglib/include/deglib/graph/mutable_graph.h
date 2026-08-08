@@ -1,6 +1,6 @@
 #pragma once
 
-#include "deglib/graph/search_graph.h"
+#include "deglib/graph/internal_graph.h"
 
 #include <cstdint>
 #include <cstddef>
@@ -9,7 +9,7 @@
 namespace deglib::graph
 {
 
-class MutableGraph : public deglib::search::SearchGraph
+class MutableGraph : public deglib::graph::InternalGraph
 {
   public:    
 

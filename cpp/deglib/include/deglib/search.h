@@ -8,9 +8,13 @@
 #include "deglib/distances.h"
 #include "deglib/filter.h"
 #include "deglib/concurrent.h"
-#include "deglib/graph/search_graph.h"
+#include "deglib/graph/internal_graph.h"
 
 namespace deglib::search {
+
+using ObjectDistance = deglib::graph::ObjectDistance;
+using ResultSet = deglib::graph::ResultSet;
+using UncheckedSet = deglib::graph::UncheckedSet;
 
 /**
  * Rerank candidate neighbor indices for queries using exact FloatSpace distances.

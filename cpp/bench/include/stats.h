@@ -40,7 +40,7 @@ namespace deglib::benchmark {
  * @param graph The search graph to analyze
  * @return Number of vertices reachable from entry points
  */
-inline uint32_t compute_search_reachability(const deglib::search::SearchGraph& graph) {
+inline uint32_t compute_search_reachability(const deglib::graph::InternalGraph& graph) {
     const auto graph_size = (uint32_t)graph.size();
     const auto edges_per_vertex = graph.getEdgesPerVertex();
     const auto entry_vertices = graph.getEntryVertexIndices();
@@ -103,7 +103,7 @@ struct VertexReach {
  * @param graph The search graph to analyze
  * @return Average number of vertices reachable per vertex
  */
-inline float compute_exploration_reach(const deglib::search::SearchGraph& graph) {
+inline float compute_exploration_reach(const deglib::graph::InternalGraph& graph) {
     const auto graph_size = (uint32_t)graph.size();
     const auto edges_per_vertex = graph.getEdgesPerVertex();
     auto stopw = StopW();
@@ -248,7 +248,7 @@ struct GraphStats {
  * @param graph The search graph to analyze
  * @return GraphStats with all computed statistics
  */
-inline GraphStats analyze_graph(const deglib::search::SearchGraph& graph) {
+inline GraphStats analyze_graph(const deglib::graph::InternalGraph& graph) {
     GraphStats stats;
     stats.vertex_count = graph.size();
     stats.feature_dims = graph.getFeatureSpace().dim();

@@ -11,11 +11,11 @@
 /**
  * Convert the queue into a vector with ascending distance order
  **/
-static auto topListAscending(deglib::search::ResultSet& queue) {
+static auto topListAscending(deglib::graph::ResultSet& queue) {
     const auto size = (int32_t) queue.size();
-    auto topList = std::vector<deglib::search::ObjectDistance>(size);
+    auto topList = std::vector<deglib::graph::ObjectDistance>(size);
     for(int32_t i = size - 1; i >= 0; i--) {
-        topList[i] = std::move(const_cast<deglib::search::ObjectDistance&>(queue.top()));
+        topList[i] = std::move(const_cast<deglib::graph::ObjectDistance&>(queue.top()));
         queue.pop();
     }
     return topList;
@@ -86,7 +86,7 @@ std::vector<uint32_t> compute_knn_groundtruth(const deglib::FeatureRepository& b
         const auto query = query_repo.getFeature(q);
 
         auto worst_distance = std::numeric_limits<float>::max();
-        auto results = deglib::search::ResultSet(); 
+        auto results = deglib::graph::ResultSet(); 
         for (uint32_t b = 0; b < base_size; b++) {
             const auto distance = dist_func(query, base_repo.getFeature(b), dist_func_param);
             if(distance < worst_distance) {

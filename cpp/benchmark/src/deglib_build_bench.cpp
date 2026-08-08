@@ -538,7 +538,7 @@ void test_graph(const std::string query_file, const std::string gt_file, const s
     deglib::benchmark::test_graph_anns(graph, query_repository, ground_truth, (uint32_t)dims_out, repeat, threads, k);
 }
 
-static std::vector<float> estimate_recall(const deglib::search::SearchGraph& graph, const deglib::FeatureRepository& query_repository, const std::vector<std::unordered_set<uint32_t>>& answer, const uint32_t max_distance_count, const uint32_t k) {
+static std::vector<float> estimate_recall(const deglib::graph::InternalGraph& graph, const deglib::FeatureRepository& query_repository, const std::vector<std::unordered_set<uint32_t>>& answer, const uint32_t max_distance_count, const uint32_t k) {
 
     const auto entry_vertex_indices = std::vector<uint32_t> { graph.getInternalIndex(0) };
 

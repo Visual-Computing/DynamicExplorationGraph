@@ -418,9 +418,9 @@ class EvenRegularGraphBuilder {
      * @param queue The result set queue to convert.
      * @return A vector of ObjectDistance sorted in ascending order.
      */
-    static auto topListAscending(deglib::search::ResultSet& queue) {
+    static auto topListAscending(deglib::graph::ResultSet& queue) {
       const auto size = (int32_t) queue.size();
-      auto topList = std::vector<deglib::search::ObjectDistance>(size);
+      auto topList = std::vector<deglib::graph::ObjectDistance>(size);
       for (int32_t i = size - 1; i >= 0; i--) {
         topList[i] = queue.top();
         queue.pop();
@@ -434,11 +434,11 @@ class EvenRegularGraphBuilder {
      * @param queue The result set queue to convert.
      * @return A vector of ObjectDistance sorted in descending order.
      */
-    static auto topListDescending(deglib::search::ResultSet& queue) {
+    static auto topListDescending(deglib::graph::ResultSet& queue) {
       const auto size = queue.size();
-      auto topList = std::vector<deglib::search::ObjectDistance>(size);
+      auto topList = std::vector<deglib::graph::ObjectDistance>(size);
       for (size_t i = 0; i < size; i++) {
-        topList[i] = std::move(const_cast<deglib::search::ObjectDistance&>(queue.top()));
+        topList[i] = std::move(const_cast<deglib::graph::ObjectDistance&>(queue.top()));
         queue.pop();
       }
       return topList;

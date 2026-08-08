@@ -75,7 +75,7 @@ static uint64_t compute_linear_search_baseline(const deglib::FeatureRepository& 
     return time_per_query_us;
 }
 
-static float test_approx_anns(const deglib::search::SearchGraph& graph,
+static float test_approx_anns(const deglib::graph::InternalGraph& graph,
                               const std::vector<uint32_t>& entry_vertex_indices,
                               const deglib::FeatureRepository& query_repository,
                               const std::vector<std::vector<uint32_t>>& ground_truth,
@@ -111,7 +111,7 @@ static float test_approx_anns(const deglib::search::SearchGraph& graph,
     return total_correct / (test_size * k);
 }
 
-static float test_approx_explore(const deglib::search::SearchGraph& graph,
+static float test_approx_explore(const deglib::graph::InternalGraph& graph,
                                  const std::vector<std::vector<uint32_t>>& entry_vertex_indices,
                                  const bool include_entry,
                                  const std::vector<std::vector<uint32_t>>& ground_truth,
@@ -151,7 +151,7 @@ static float test_approx_explore(const deglib::search::SearchGraph& graph,
     return total_correct / (entry_vertex_indices.size() * k);
 }
 
-static std::vector<float> estimate_recall(const deglib::search::SearchGraph& graph,
+static std::vector<float> estimate_recall(const deglib::graph::InternalGraph& graph,
                                           const deglib::FeatureRepository& query_repository,
                                           const std::vector<std::vector<uint32_t>>& answer,
                                           const uint32_t max_distance_count,
@@ -190,7 +190,7 @@ static std::vector<float> estimate_recall(const deglib::search::SearchGraph& gra
     return recalls;
 }
 
-static void test_graph_anns(const deglib::search::SearchGraph& graph,
+static void test_graph_anns(const deglib::graph::InternalGraph& graph,
                             const deglib::FeatureRepository& query_repository,
                             const std::vector<std::vector<uint32_t>>& ground_truth,
                             const uint32_t repeat,
@@ -253,7 +253,7 @@ static void test_graph_anns(const deglib::search::SearchGraph& graph,
     }
 }
 
-static void test_graph_explore(const deglib::search::SearchGraph& graph,
+static void test_graph_explore(const deglib::graph::InternalGraph& graph,
                                const std::vector<uint32_t>& entry_vertex_labels,
                                const std::vector<std::vector<uint32_t>>& ground_truth,
                                const bool include_entry,
