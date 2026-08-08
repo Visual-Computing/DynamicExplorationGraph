@@ -8,6 +8,12 @@
 // Vector Quantization techniques
 #include "deglib/optimization/quantization/evp_quantize.h"
 
+// Graph pruning techniques
+#include "deglib/optimization/pruning.h"
+
+// Builder (needed for optimize_edges)
+#include "deglib/builder.h"
+
 namespace deglib::optimization {
 
     /**
@@ -38,5 +44,109 @@ namespace deglib::optimization {
         return deglib::quantization::evp::quantize_batch(data, count, dim, non_zeros, numThreads);
     }
 
-} // namespace deglib::optimization
+    // ========================================================================
+    // Graph Pruning API
+    // ========================================================================
 
+    /**
+     * @brief Prune the worst (highest-weight) neighbors of each vertex.
+     *
+     * Replaces the `prune_worst` highest-weight neighbors of each vertex with
+     * self-loops. Multi-threaded.
+     *
+     * @param graph Reference to the MutableGraph to be processed.
+     * @param prune_worst Number of worst neighbors to replace with self-loops per vertex.
+     * @param numThreads Number of threads to use (0 = use hardware concurrency).
+     */
+    inline void prune_worst_edges(deglib::graph::MutableGraph& graph, const uint8_t prune_worst, const size_t numThreads = 0) {
+        deglib::optimization::pruning::prune_worst_edges(graph, prune_worst, numThreads);
+    }
+
+    /**
+     * @brief Remove all edges that do not satisfy the MRNG condition.
+     *
+     * Parallelized across hardware threads. For each vertex, checks each neighbor
+     * using the RNG condition and removes non-conforming edges.
+     *
+     * @param graph Reference to the MutableGraph to be processed.
+     * @param numThreads Number of threads to use (0 = use hardware concurrency).
+     * @return Number of edges removed.
+     */
+    inline uint32_t remove_non_mrng_edges(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
+        return deglib::optimization::pruning::remove_non_mrng_edges(graph, numThreads);
+    }
+
+    /**
+     * @brief Remove non-MRNG edges using a weight-sorted global strategy.
+     *
+     * Collects all non-RNG edges, sorts them by weight (ascending), then removes
+     * them in that order. Collection is multi-threaded; removal is single-threaded.
+     *
+     * @param graph Reference to the MutableGraph to be processed.
+     * @param numThreads Number of threads to use for collection (0 = use hardware concurrency).
+     * @return Number of edges removed.
+     */
+    inline uint32_t remove_non_mrng_edges_weight_sorted(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
+        return deglib::optimization::pruning::remove_non_mrng_edges_weight_sorted(graph, numThreads);
+    }
+
+    /**
+     * @brief Remove non-MRNG edges using an iterative per-vertex strategy.
+     *
+     * For each vertex, iteratively removes non-RNG edges in a do-while loop until
+     * no more edges can be removed. This accounts for cascading effects where
+     * removing one edge may make another edge RNG-conform. Multi-threaded per vertex.
+     *
+     * @param graph Reference to the MutableGraph to be processed.
+     * @param numThreads Number of threads to use (0 = use hardware concurrency).
+     * @return Number of edges removed.
+     */
+    inline uint32_t remove_non_mrng_edges_iterative(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
+        return deglib::optimization::pruning::remove_non_mrng_edges_iterative(graph, numThreads);
+    }
+
+    // ========================================================================
+    // Edge Optimization API
+    // ========================================================================
+
+    /**
+     * @brief Optimizes the edges of the graph using the builder's improvement routines.
+     *
+     * This function creates a builder and repeatedly attempts to improve the graph's edges for a given number of iterations.
+     * It reports progress and statistics during the optimization process.
+     *
+     * @param graph Reference to the MutableGraph to be optimized.
+     * @param k_opt Number of neighbors to consider during optimization.
+     * @param eps_opt Epsilon value for neighbor search during optimization.
+     * @param i_opt Number of improvement attempts per build step.
+     * @param iterations Number of optimization iterations to perform.
+     */
+    inline void optimize_edges(deglib::graph::MutableGraph& graph, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt, const uint32_t iterations) {
+        auto rnd = std::mt19937(7);
+
+        auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::StreamingData, 0, 0.0f, k_opt, eps_opt, i_opt, 1, 0);
+
+        auto start = std::chrono::steady_clock::now();
+        uint64_t duration_ms = 0;
+        const auto improvement_callback = [&](deglib::builder::BuilderStatus& status) {
+            const auto size = graph.size();
+
+            if(status.step % (iterations/10) == 0) {
+                duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+                auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, 100);
+                auto valid_weights = deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_regularity(graph, uint32_t(size), true);
+                auto connected = deglib::analysis::check_graph_connectivity(graph);
+
+                auto duration = duration_ms / 1000;
+                std::cout << std::setw(7) << status.step << " step, " << std::setw(5) << duration << "s, AEW: " << std::fixed << std::setprecision(2) << std::setw(4) << avg_edge_weight << ", " << (connected ? "" : "not") << " connected, " << (valid_weights ? "valid" : "invalid") << "\n";
+                start = std::chrono::steady_clock::now();
+            }
+
+            if(status.step > iterations)
+                builder.stop();
+        };
+
+        builder.build(improvement_callback, true);
+    }
+
+} // namespace deglib::optimization

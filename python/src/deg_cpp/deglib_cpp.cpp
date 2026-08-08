@@ -13,6 +13,7 @@
 
 #include <deglib/deglib.h>
 #include <deglib/distance/fp16.h>
+#include <deglib/optimization/pruning.h>
 #include <deglib/optimization/quantization/evp_quantize.h>
 
 namespace py = pybind11;
@@ -803,7 +804,10 @@ PYBIND11_MODULE(deglib_cpp, m) {
   m.def("check_graph_connectivity",
         &deglib::analysis::check_graph_connectivity);
   m.def("calc_non_rng_edges", &deglib::analysis::calc_non_rng_edges);
-  m.def("remove_non_mrng_edges", &deglib::builder::remove_non_mrng_edges);
+  m.def("remove_non_mrng_edges", &deglib::optimization::remove_non_mrng_edges,
+        py::arg("graph"), py::arg("num_threads") = 0);
+  m.def("prune_worst_edges", &deglib::optimization::pruning::prune_worst_edges,
+        py::arg("graph"), py::arg("prune_worst"), py::arg("num_threads") = 0);
 
   py::class_<deglib::builder::BuilderStatus>(m, "BuilderStatus")
       .def_readwrite("step", &deglib::builder::BuilderStatus::step)

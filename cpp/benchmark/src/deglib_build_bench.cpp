@@ -61,102 +61,23 @@ void change_features(const std::string initial_graph_file, const std::string rep
 void remove_non_mrng_edges_2(const std::string initial_graph_file, const std::string graph_file) {
     fmt::print("Load graph {} \n", initial_graph_file);
     auto graph = deglib::graph::load_sizebounded_graph(initial_graph_file.c_str());
-    fmt::print("Graph with {} vertices and containing {} non-RNG edges\n", graph.size(), deglib::analysis::calc_non_rng_edges(graph));
+    fmt::print("Graph with {} vertices and containing {} non-RNG edges \n", graph.size(), deglib::analysis::calc_non_rng_edges(graph));
 
-    const auto vertex_count = graph.size();
-    const auto edge_per_vertex = graph.getEdgesPerVertex();
-
-    const auto start = std::chrono::steady_clock::now();
-    std::vector<deglib::builder::GraphEdge> nonMRNG_edges;
-    for (uint32_t i = 0; i < vertex_count; i++) {
-        const auto vertex_index = i;
-        const auto neighbor_indices = graph.getNeighborIndices(vertex_index);
-        const auto neighbor_weights = graph.getNeighborWeights(vertex_index);
-
-        // find all none rng conform neighbors
-        for (uint32_t n = 0; n < edge_per_vertex; n++) {
-            const auto neighbor_index = neighbor_indices[n];
-            const auto neighbor_weight = neighbor_weights[n];
-            if(deglib::analysis::checkRNG(graph, edge_per_vertex, vertex_index, neighbor_index, neighbor_weight) == false) 
-                nonMRNG_edges.emplace_back(vertex_index, neighbor_index, neighbor_weight);
-        }
-    }
-    std::sort(nonMRNG_edges.begin(), nonMRNG_edges.end(), [](const auto& x, const auto& y){return x.weight < y.weight;});
-
-    size_t removed_rng_edges = 0;
-    for (size_t i = 0; i < nonMRNG_edges.size(); i++) {
-        const deglib::builder::GraphEdge& edge = nonMRNG_edges[i];
-        if(deglib::analysis::checkRNG(graph, edge_per_vertex, edge.from_vertex, edge.to_vertex, edge.weight) == false) {
-            graph.changeEdge(edge.from_vertex, edge.to_vertex, edge.from_vertex, 0);
-            removed_rng_edges++;
-        }
-    }
-    const auto duration_ms = uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+    deglib::optimization::remove_non_mrng_edges_weight_sorted(graph);
 
     // store the graph
     graph.saveGraph(graph_file.c_str());
-
-    fmt::print("Removed {} edges in {} ms. Final graph contains {} non-RNG edges\n", removed_rng_edges, duration_ms, deglib::analysis::calc_non_rng_edges(graph));
 }
 
 void remove_non_mrng_edges_1(const std::string initial_graph_file, const std::string graph_file) {
     fmt::print("Load graph {} \n", initial_graph_file);
     auto graph = deglib::graph::load_sizebounded_graph(initial_graph_file.c_str());
-    fmt::print("Graph with {} vertices and containing {} non-RNG edges\n", graph.size(), deglib::analysis::calc_non_rng_edges(graph));
+    fmt::print("Graph with {} vertices and containing {} non-RNG edges \n", graph.size(), deglib::analysis::calc_non_rng_edges(graph));
 
-    const auto vertex_count = graph.size();
-    const auto edge_per_vertex = graph.getEdgesPerVertex();
-
-    const auto start = std::chrono::steady_clock::now();
-    size_t removed_rng_edges = 0;
-    for (uint32_t i = 0; i < vertex_count; i++) {
-        const auto vertex_index = i;
-
-        // sort neighbors by their weight (highest to lowest)
-        std::vector<std::pair<uint32_t, float>> neighbors;
-        {
-            const auto neighbor_indices = graph.getNeighborIndices(vertex_index);
-            const auto neighbor_weights = graph.getNeighborWeights(vertex_index);
-            for (uint32_t n = 0; n < edge_per_vertex; n++) {
-                const auto neighbor_index = neighbor_indices[n];
-                const auto neighbor_weight = neighbor_weights[n];
-                neighbors.emplace_back(neighbor_index, neighbor_weight);
-            }
-            std::sort(neighbors.begin(), neighbors.end(), [](const auto& x, const auto& y){return x.second < y.second;});
-        }
-
-        // find all none rng conform neighbors
-        std::vector<uint32_t> nonMRNG_edges;
-        for (uint32_t n = 0; n < neighbors.size(); n++) {
-            const auto neighbor_index = neighbors[n].first;
-            const auto neighbor_weight = neighbors[n].second;
-            if(deglib::analysis::checkRNG(graph, edge_per_vertex, vertex_index, neighbor_index, neighbor_weight) == false) 
-                nonMRNG_edges.emplace_back(n);
-        }
-
-        bool removed_edge = false;
-        do {
-            removed_edge = false;
-            for (uint32_t n = 0; n < nonMRNG_edges.size(); n++) {
-                const auto neighbor_index = neighbors[nonMRNG_edges[n]].first;
-                const auto neighbor_weight = neighbors[nonMRNG_edges[n]].second;
-
-                if(deglib::analysis::checkRNG(graph, edge_per_vertex, vertex_index, neighbor_index, neighbor_weight) == false) {
-                    nonMRNG_edges.erase(nonMRNG_edges.begin() + n);
-                    graph.changeEdge(vertex_index, neighbor_index, vertex_index, 0);
-                    removed_rng_edges++;
-                    removed_edge = true;
-                    break;
-                }
-            }
-        } while(removed_edge);
-    }
-    const auto duration_ms = uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+    deglib::optimization::remove_non_mrng_edges_iterative(graph);
 
     // store the graph
     graph.saveGraph(graph_file.c_str());
-
-    fmt::print("Removed {} edges in {} ms. Final graph contains {} non-RNG edges\n", removed_rng_edges, duration_ms, deglib::analysis::calc_non_rng_edges(graph));
 }
 
 
@@ -168,7 +89,7 @@ void remove_non_mrng_edges(const std::string initial_graph_file, const std::stri
     auto graph = deglib::graph::load_sizebounded_graph(initial_graph_file.c_str());
     fmt::print("Graph with {} vertices and containing {} non-RNG edges\n", graph.size(), deglib::analysis::calc_non_rng_edges(graph));
 
-    deglib::builder::remove_non_mrng_edges(graph);
+    deglib::optimization::remove_non_mrng_edges(graph);
 
     // store the graph
     graph.saveGraph(graph_file.c_str());
@@ -186,7 +107,7 @@ void optimize_graph(const std::string initial_graph_file, const std::string grap
     auto graph = deglib::graph::load_sizebounded_graph(initial_graph_file.c_str());
     fmt::print("Graph with {} vertices and an avg edge weight of {} \n", graph.size(), deglib::analysis::calc_avg_edge_weight(graph, 100));
 
-    deglib::builder::optimize_edges(graph, k_opt, eps_opt, i_opt, iterations);
+    deglib::optimization::optimize_edges(graph, k_opt, eps_opt, i_opt, iterations);
 
     // store the graph
     graph.saveGraph(graph_file.c_str());

@@ -65,6 +65,7 @@ add_deglib_test(test_fp32_inner_product src/unit/distance/test_fp32_inner_produc
 add_deglib_test(test_uint8_l2 src/unit/distance/test_uint8_l2.cpp)
 add_deglib_test(test_sizebounded_graph src/unit/graph/test_sizebounded_graph.cpp)
 add_deglib_test(test_readonly_graph src/unit/graph/test_readonly_graph.cpp)
+add_deglib_test(test_pruning src/unit/optimization/test_pruning.cpp)
 
 # Integration tests (fast, recall-only, registered with CTest for CI)
 add_deglib_integration_test(test_builder_integration src/integration/test_builder_integration.cpp)

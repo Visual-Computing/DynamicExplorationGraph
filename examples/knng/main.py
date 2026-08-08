@@ -12,7 +12,6 @@ Uses deglib_cpp C++ bindings for:
 Usage
 -----
     uv run main.py                                      # Uses small dataset (10000 vectors by default)
-    uv run main.py --max-vecs 5000                     # Test first 5000 vectors of small dataset
 """
 from __future__ import annotations
 
@@ -39,22 +38,12 @@ DEFAULT_THREADS = 8
 
 def prune_worst_edges(graph: deglib.graph.SizeBoundedGraph, prune_worst: int) -> None:
     """
-    Prunes the worst (least similar) `prune_worst` neighbors of each vertex and replaces them
-    with self-loops, matching SISAP Task 1 prune_worst_neighbors logic to prevent exploration drift.
+    Prunes the worst (highest-weight) `prune_worst` neighbors of each vertex
+    by replacing them with self-loops, using the C++ implementation in deglib::optimization::pruning.
     """
     if prune_worst <= 0:
         return
-    k = graph.get_edges_per_vertex()
-    for u in range(graph.size()):
-        indices = np.array(graph.get_neighbor_indices(u), copy=True)
-        weights = np.array(graph.get_neighbor_weights(u), copy=True)
-        order = np.argsort(-weights)
-        sorted_indices = indices[order]
-        sorted_weights = weights[order]
-        sorted_indices[:prune_worst] = u
-        sorted_weights[:prune_worst] = 0.0
-        idx_order = np.argsort(sorted_indices)
-        graph.change_edges(u, sorted_indices[idx_order].astype(np.uint32), sorted_weights[idx_order].astype(np.float32))
+    graph.prune_worst_edges(prune_worst)
 
 
 def quantize_vectors(vectors: np.ndarray, non_zeros: int = DEFAULT_NON_ZEROS, num_threads: int = DEFAULT_THREADS) -> np.ndarray:
@@ -67,7 +56,7 @@ def quantize_vectors(vectors: np.ndarray, non_zeros: int = DEFAULT_NON_ZEROS, nu
     return deglib.quantize_batch(vectors, effective_non_zeros, num_threads)
 
 
-def construct_knng_mode4(
+def construct_knng(
     train_vectors: np.ndarray,
     ground_truth: np.ndarray | None = None,
     k_top: int = DEFAULT_K_TOP,
@@ -80,7 +69,7 @@ def construct_knng_mode4(
     threads: int = DEFAULT_THREADS,
 ) -> dict[str, float]:
     """
-    Constructs and evaluates a k-Nearest Neighbor Graph (k-NNG) using DEG (Task 1 Mode 4).
+    Constructs and evaluates a k-Nearest Neighbor Graph (k-NNG) using DEG.
     """
     n_vecs, dims = train_vectors.shape
     if train_vectors.dtype == np.float16:
@@ -113,16 +102,15 @@ def construct_knng_mode4(
     t_prune = time.perf_counter() - t0
     print(f"Edge pruning completed in {t_prune:.3f}s")
 
-    # Convert SizeBoundedGraph to ReadOnlyGraph for flat memory alignment & fast search
+    # 3. Graph Exploration Phase (Self-Join for k-NNG neighbor retrieval)
+    # Reference mode4.h explores SizeBoundedGraph directly and converts external labels
+    # to internal indices via graph.getInternalIndex()
     t0 = time.perf_counter()
-    readonly_graph = deglib.graph.ReadOnlyGraph.from_graph(graph)
-    t_readonly = time.perf_counter() - t0
-    print(f"ReadOnlyGraph conversion completed in {t_readonly:.3f}s")
-
-    # 3. Graph Exploration Phase (Self-Join for k-NNG neighbor retrieval using readonly_graph.explore)
-    t0 = time.perf_counter()
-    indices, distances = readonly_graph.explore(
-        entry_vertex_indices=labels,
+    # Convert external labels (0, 1, 2, ...) to internal indices
+    # This is critical: explore() expects internal indices, not external labels
+    internal_indices = np.array([graph.get_internal_index(int(label)) for label in labels], dtype=np.uint32)
+    indices, distances = graph.explore(
+        entry_vertex_indices=internal_indices,
         k=evp_k,
         include_entry=False,
         max_distance_computation_count=max_dist,
@@ -181,7 +169,6 @@ def construct_knng_mode4(
 def main():
     parser = argparse.ArgumentParser(description="k-Nearest Neighbor Graph (k-NNG) Construction Example (SISAP Task 1)")
     parser.add_argument("--dataset", type=str, default="small", help="Path to HDF5 dataset file or 'small' (default: small dataset)")
-    parser.add_argument("--max-vecs", type=int, default=None, help="Limit number of vectors for fast testing (default: None, uses full dataset)")
     parser.add_argument("--non-zeros", type=int, default=DEFAULT_NON_ZEROS, help="EVP quantization non-zero components")
     parser.add_argument("--k-graph", type=int, default=DEFAULT_K_GRAPH, help="Graph degree per vertex")
     parser.add_argument("--k-ext", type=int, default=DEFAULT_K_EXT, help="Builder search size parameter")
@@ -200,9 +187,9 @@ def main():
         dataset_path = Path(args.dataset)
     
     print(f"Loading dataset from {dataset_path}...")
-    train_data, gt_data = load_hdf5_dataset(dataset_path, max_vecs=args.max_vecs)
+    train_data, gt_data = load_hdf5_dataset(dataset_path)
 
-    stats = construct_knng_mode4(
+    stats = construct_knng(
         train_data,
         gt_data,
         k_top=15,
@@ -216,11 +203,11 @@ def main():
     )
 
     if args.output_plot or not args.no_show:
-        stages = ["Quantization", "Graph Build", "Prune", "Exploration", "Rerank"]
-        times = [stats["quant_time"], stats["build_time"], stats["prune_time"], stats["explore_time"], stats["rerank_time"]]
+        stages = ["Quantization", "Graph Build", "Exploration", "Rerank"]
+        times = [stats["quant_time"], stats["build_time"], stats["explore_time"], stats["rerank_time"]]
 
         fig, ax = plt.subplots(figsize=(9, 5))
-        bars = ax.bar(stages, times, color=["#4C72B0", "#55A868", "#DD8452", "#C44E52", "#8172B1"])
+        bars = ax.bar(stages, times, color=["#4C72B0", "#55A868", "#C44E52", "#8172B1"])
         ax.set_ylabel("Time (seconds)")
         ax.set_title("k-NNG Construction Execution Time Breakdown (SISAP Task 1 Mode 4)")
 

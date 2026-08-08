@@ -442,6 +442,16 @@ class MutableGraph(SearchGraph, ABC):
         """
         deglib_cpp.remove_non_mrng_edges(self.to_cpp())
 
+    def prune_worst_edges(self, prune_worst: int, num_threads: int = 0):
+        """
+        Prune the worst (highest-weight) `prune_worst` neighbors of each vertex
+        by replacing them with self-loops.
+
+        :param prune_worst: Number of worst neighbors to replace with self-loops per vertex.
+        :param num_threads: Number of threads to use for parallel processing. If 0, uses hardware concurrency.
+        """
+        deglib_cpp.prune_worst_edges(self.to_cpp(), prune_worst, num_threads)
+
 
 class SizeBoundedGraph(MutableGraph):
     def __init__(
