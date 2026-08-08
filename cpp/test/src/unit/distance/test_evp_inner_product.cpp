@@ -29,8 +29,8 @@ make_evp_pair(uint32_t dim, uint32_t non_zeros, int seed_a = 42, int seed_b = 99
     for (auto& x : a) x = dist(rng_a);
     for (auto& x : b) x = dist(rng_b);
     return {
-        deglib::quantization::quantize_single(a.data(), dim, non_zeros),
-        deglib::quantization::quantize_single(b.data(), dim, non_zeros)
+        deglib::quantization::evp::quantize_single(a.data(), dim, non_zeros),
+        deglib::quantization::evp::quantize_single(b.data(), dim, non_zeros)
     };
 }
 

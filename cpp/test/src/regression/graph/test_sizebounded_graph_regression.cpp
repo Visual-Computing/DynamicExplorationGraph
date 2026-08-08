@@ -294,8 +294,8 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_EVP_InnerProduct)
     auto explore_gt_data = compute_groundtruth(base_data, base_count, explore_data, query_count, dim, search_k, float_dist_func);
 
     // Quantize data to EVP
-    auto base_quant = deglib::quantization::quantize_batch(base_data.data(), base_count, dim, non_zeros, 8);
-    auto query_quant = deglib::quantization::quantize_batch(query_data.data(), query_count, dim, non_zeros, 8);
+    auto base_quant = deglib::quantization::evp::quantize_batch(base_data.data(), base_count, dim, non_zeros, 8);
+    auto query_quant = deglib::quantization::evp::quantize_batch(query_data.data(), query_count, dim, non_zeros, 8);
     size_t vec_bytes = 2 * (dim / 8);
 
     deglib::FloatSpace feature_space(dim, deglib::Metric::EVP_InnerProduct);

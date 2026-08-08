@@ -29,13 +29,13 @@ TEST(EvpQuantizeRegression, QuantizeBatchThroughput) {
 
     // Single-thread quantization benchmark
     auto t0 = std::chrono::high_resolution_clock::now();
-    auto single_res = deglib::quantization::quantize_batch(data.data(), count, dim, non_zeros, 1);
+    auto single_res = deglib::quantization::evp::quantize_batch(data.data(), count, dim, non_zeros, 1);
     auto t1 = std::chrono::high_resolution_clock::now();
     double single_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
     // Multi-thread quantization benchmark (8 threads)
     t0 = std::chrono::high_resolution_clock::now();
-    auto multi_res = deglib::quantization::quantize_batch(data.data(), count, dim, non_zeros, 8);
+    auto multi_res = deglib::quantization::evp::quantize_batch(data.data(), count, dim, non_zeros, 8);
     t1 = std::chrono::high_resolution_clock::now();
     double multi_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
@@ -58,7 +58,7 @@ TEST(EvpQuantizeRegression, EvpDistanceCalculationSpeed) {
         data[i] = dist(rng);
     }
 
-    auto quantized = deglib::quantization::quantize_batch(data.data(), count, dim, non_zeros, 8);
+    auto quantized = deglib::quantization::evp::quantize_batch(data.data(), count, dim, non_zeros, 8);
     size_t vec_bytes = 2 * dim / 8; // byte size per quantized vector
 
     const size_t num_dists = 5000000; // 5 million distance comparisons

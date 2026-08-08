@@ -312,7 +312,7 @@ inline static std::vector<std::vector<uint32_t>> compute_groundtruth_evp(const s
 
 // Generate cross-platform deterministic clustered EVP dataset.
 // Generates float vectors using generate_synthetic_clustered_dataset(),
-// then quantizes them to EVP bytes via deglib::quantization::quantize_batch().
+// then quantizes them to EVP bytes via deglib::quantization::evp::quantize_batch().
 inline static void generate_synthetic_clustered_dataset_evp(size_t count, size_t dim, std::vector<std::byte>& base_evp,
                                                         std::vector<std::byte>& query_evp, size_t query_count,
                                                         size_t num_clusters = 20, uint32_t non_zeros = 0)
@@ -321,8 +321,8 @@ inline static void generate_synthetic_clustered_dataset_evp(size_t count, size_t
     std::vector<float> base_float, query_float;
     generate_synthetic_clustered_dataset(count, dim, base_float, query_float, query_count, num_clusters);
 
-    base_evp  = deglib::quantization::quantize_batch(base_float.data(), count, dim, non_zeros);
-    query_evp = deglib::quantization::quantize_batch(query_float.data(), query_count, dim, non_zeros);
+    base_evp  = deglib::quantization::evp::quantize_batch(base_float.data(), count, dim, non_zeros);
+    query_evp = deglib::quantization::evp::quantize_batch(query_float.data(), query_count, dim, non_zeros);
 }
 
 // ---------------------------------------------------------------------------

@@ -17,7 +17,7 @@ TEST(EvpQuantize, SingleBasic) {
     const uint32_t dim = 8;
     const uint32_t non_zeros = 4;
 
-    auto result = deglib::quantization::quantize_single(vec, dim, non_zeros);
+    auto result = deglib::quantization::evp::quantize_single(vec, dim, non_zeros);
 
     EXPECT_EQ(result.size(), 2u);  // 2 * 8/8
 
@@ -35,7 +35,7 @@ TEST(EvpQuantize, SingleMaskNoOverlap) {
     const uint32_t dim = 16;
     const uint32_t non_zeros = 8;
 
-    auto result = deglib::quantization::quantize_single(vec, dim, non_zeros);
+    auto result = deglib::quantization::evp::quantize_single(vec, dim, non_zeros);
 
     EXPECT_EQ(result.size(), 4u);  // 2 * 16/8
 
@@ -63,7 +63,7 @@ TEST(EvpQuantize, BatchNoOverlap) {
         data[i] = dist(rng);
     }
 
-    auto result = deglib::quantization::quantize_batch(data.data(), count, dim, non_zeros);
+    auto result = deglib::quantization::evp::quantize_batch(data.data(), count, dim, non_zeros);
 
     for (size_t i = 0; i < count; ++i) {
         const std::byte* ones = result.data() + i * 2 * dim / 8;
@@ -90,8 +90,8 @@ TEST(EvpQuantize, BatchMultiThreadConsistent) {
         data[i] = dist(rng);
     }
 
-    auto single = deglib::quantization::quantize_batch(data.data(), count, dim, non_zeros, 1);
-    auto multi  = deglib::quantization::quantize_batch(data.data(), count, dim, non_zeros, 4);
+    auto single = deglib::quantization::evp::quantize_batch(data.data(), count, dim, non_zeros, 1);
+    auto multi  = deglib::quantization::evp::quantize_batch(data.data(), count, dim, non_zeros, 4);
 
     EXPECT_EQ(single.size(), multi.size());
     EXPECT_EQ(single, multi);
@@ -109,10 +109,10 @@ TEST(EvpQuantize, SingleVsBatchConsistency) {
         data[i] = dist(rng);
     }
 
-    auto batch_result = deglib::quantization::quantize_batch(data.data(), count, dim, non_zeros);
+    auto batch_result = deglib::quantization::evp::quantize_batch(data.data(), count, dim, non_zeros);
 
     for (size_t i = 0; i < count; ++i) {
-        auto single_result = deglib::quantization::quantize_single(&data[i * dim], dim, non_zeros);
+        auto single_result = deglib::quantization::evp::quantize_single(&data[i * dim], dim, non_zeros);
 
         size_t offset = i * single_result.size();
         for (size_t b = 0; b < single_result.size(); ++b) {
@@ -137,14 +137,14 @@ TEST(EvpQuantize, FP32VsFP16BitEquivalence) {
     }
 
     // FP32 quantization
-    auto fp32_evp_bits = deglib::quantization::quantize_batch(float_data.data(), count, dim, non_zeros);
+    auto fp32_evp_bits = deglib::quantization::evp::quantize_batch(float_data.data(), count, dim, non_zeros);
 
     // Convert floats to FP16 (uint16_t)
     std::vector<uint16_t> fp16_data(count * dim);
     deglib::distances::fp16::floats_to_fp16(float_data.data(), fp16_data.data(), count * dim);
 
     // FP16 quantization
-    auto fp16_evp_bits = deglib::quantization::quantize_batch(fp16_data.data(), count, dim, non_zeros);
+    auto fp16_evp_bits = deglib::quantization::evp::quantize_batch(fp16_data.data(), count, dim, non_zeros);
 
     // Compare bitmasks for 100% exact equality
     EXPECT_EQ(fp32_evp_bits.size(), fp16_evp_bits.size());
@@ -160,10 +160,10 @@ TEST(EvpQuantize, InvalidArguments) {
     const uint32_t dim = 8;
 
     // Dim not divisible by 8
-    EXPECT_THROW(deglib::quantization::quantize_single(vec, 6, 3), std::invalid_argument);
-    EXPECT_THROW(deglib::quantization::quantize_batch(vec, 1, 6, 3), std::invalid_argument);
+    EXPECT_THROW(deglib::quantization::evp::quantize_single(vec, 6, 3), std::invalid_argument);
+    EXPECT_THROW(deglib::quantization::evp::quantize_batch(vec, 1, 6, 3), std::invalid_argument);
 
     // non_zeros >= dim
-    EXPECT_THROW(deglib::quantization::quantize_single(vec, dim, dim), std::invalid_argument);
-    EXPECT_THROW(deglib::quantization::quantize_batch(vec, 1, dim, dim), std::invalid_argument);
+    EXPECT_THROW(deglib::quantization::evp::quantize_single(vec, dim, dim), std::invalid_argument);
+    EXPECT_THROW(deglib::quantization::evp::quantize_batch(vec, 1, dim, dim), std::invalid_argument);
 }
