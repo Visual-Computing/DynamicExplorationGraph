@@ -6,158 +6,98 @@
 #include <stdexcept>
 #include <string>
 #include "deglib/distances.h"
-
 #include "deglib/filter.h"
+#include "deglib/concurrent.h"
+#include "deglib/graph/search_graph.h"
 
-// Forward declaration for friend access
-namespace deglib::builder {
-class EvenRegularGraphBuilder;
+namespace deglib::search {
+
+/**
+ * Rerank candidate neighbor indices for queries using exact FloatSpace distances.
+ *
+ * @param space                FloatSpace distance calculator instance
+ * @param queries              Pointer to [num_queries x dim] query vectors
+ * @param num_queries          Number of query vectors
+ * @param base_vectors         Pointer to [num_base_vectors x dim] target/base vectors (if null, queries are used as targets)
+ * @param num_base_vectors     Number of base vectors
+ * @param base_candidates      Pointer to [num_queries x candidates_per_query] candidate indices
+ * @param candidates_per_query Number of candidate indices provided per query
+ * @param k_top                Number of top candidates to output per query (0 = all)
+ * @param num_threads          Number of worker threads (0 = auto-detect)
+ * @param out_result_indices   Output pointer to [num_queries x k_top] uint32_t indices
+ */
+inline void rerank(
+    const deglib::FloatSpace& space,
+    const void* queries,
+    size_t num_queries,
+    const void* base_vectors,
+    size_t num_base_vectors,
+    const uint32_t* base_candidates,
+    size_t candidates_per_query,
+    size_t k_top,
+    size_t num_threads,
+    uint32_t* out_result_indices
+) {
+    if (queries == nullptr || base_candidates == nullptr || out_result_indices == nullptr) {
+        throw std::invalid_argument("rerank: queries, base_candidates, and out_result_indices must not be null");
+    }
+
+    if (k_top == 0 || k_top > candidates_per_query) {
+        k_top = candidates_per_query;
+    }
+
+    const void* target_vectors = (base_vectors != nullptr) ? base_vectors : queries;
+    const size_t target_count = (base_vectors != nullptr) ? num_base_vectors : num_queries;
+
+    const size_t byte_stride_query = space.get_data_size();
+    const size_t byte_stride_target = space.get_data_size();
+
+    const uint8_t* q_ptr = static_cast<const uint8_t*>(queries);
+    const uint8_t* t_ptr = static_cast<const uint8_t*>(target_vectors);
+
+    const auto param = space.get_dist_func_param();
+    // Resolve variant type ONCE outside loops via compile-time static dispatch
+    space.compute([&](const auto& dist_func_obj) {
+        using DistType = std::decay_t<decltype(dist_func_obj)>;
+        deglib::concurrent::parallel_for(0, num_queries, num_threads, [&](size_t i, size_t) {
+            const uint8_t* query_ptr = q_ptr + i * byte_stride_query;
+            const uint32_t* cand_row = base_candidates + i * candidates_per_query;
+
+            std::vector<std::pair<float, uint32_t>> heap;
+            heap.reserve(k_top + 1);
+
+            for (size_t j = 0; j < candidates_per_query; ++j) {
+                uint32_t cand_idx = cand_row[j];
+                if (cand_idx >= target_count) {
+                    continue;
+                }
+
+                const uint8_t* cand_ptr = t_ptr + cand_idx * byte_stride_target;
+                float dist = DistType::compare(query_ptr, cand_ptr, param);
+
+                if (heap.size() < k_top) {
+                    heap.push_back({dist, cand_idx});
+                    std::push_heap(heap.begin(), heap.end());
+                } else if (dist < heap.front().first) {
+                    std::pop_heap(heap.begin(), heap.end());
+                    heap.back() = {dist, cand_idx};
+                    std::push_heap(heap.begin(), heap.end());
+                }
+            }
+
+            std::sort_heap(heap.begin(), heap.end());
+
+            uint32_t* out_row = out_result_indices + i * k_top;
+            size_t actual_k = heap.size();
+            for (size_t k = 0; k < actual_k; ++k) {
+                out_row[k] = heap[k].second;
+            }
+            for (size_t k = actual_k; k < k_top; ++k) {
+                out_row[k] = static_cast<uint32_t>(i);
+            }
+        });
+    });
 }
 
-namespace deglib::search
-{
+} // namespace deglib::search
 
-class ObjectDistance
-{
-    uint32_t internal_index_;
-    float distance_;
-
-  public:
-    ObjectDistance() {}
-
-    ObjectDistance(const uint32_t internal_index, const float distance) : internal_index_(internal_index), distance_(distance) {}
-
-    inline const uint32_t getInternalIndex() const { 
-      return internal_index_; 
-    }
-
-    inline const float getDistance() const { 
-      return distance_; 
-    }
-
-    inline bool operator==(const ObjectDistance& o) const { 
-      return (distance_ == o.distance_) && (internal_index_ == o.internal_index_); 
-    }
-
-    inline bool operator<(const ObjectDistance& o) const {
-      if (distance_ == o.distance_)
-        return internal_index_ < o.internal_index_;
-      else
-        return distance_ < o.distance_;
-    }
-
-    inline bool operator>(const ObjectDistance& o) const {
-      if (distance_ == o.distance_)
-        return internal_index_ > o.internal_index_;
-      else
-        return distance_ > o.distance_;
-    }
-};
-
-template<class Compare, class ObjectType>
-class PQV : public std::vector<ObjectType> {
-  Compare comp;
-  public:
-    PQV(Compare cmp = Compare()) : comp(cmp) {}
-
-    const ObjectType& top() { return this->front(); }
-
-    template <class... _Valty>
-    void emplace(_Valty&&... _Val) {
-      this->emplace_back(std::forward<_Valty>(_Val)...);
-      std::push_heap(this->begin(), this->end(), comp);
-    }
-
-    void push(const ObjectType& x) {
-      this->push_back(x);
-      std::push_heap(this->begin(),this->end(), comp);
-    }
-
-    void pop() {
-      std::pop_heap(this->begin(),this->end(), comp);
-      this->pop_back();
-    }
-};
-
-// search result set containing vertex ids and distances
-typedef PQV<std::less<ObjectDistance>, ObjectDistance> ResultSet;
-
-// set of unchecked vertex ids
-typedef PQV<std::greater<ObjectDistance>, ObjectDistance> UncheckedSet;
-
-class SearchGraph
-{
-  public:    
-    virtual ~SearchGraph() = default;
-    virtual const uint32_t size() const = 0;
-    virtual const uint8_t getEdgesPerVertex() const = 0;
-    virtual const deglib::FloatSpace& getFeatureSpace() const = 0;
-
-    virtual const uint32_t getExternalLabel(const uint32_t internal_index) const = 0;
-    virtual const uint32_t getInternalIndex(const uint32_t external_label) const = 0;
-    virtual const uint32_t* getNeighborIndices(const uint32_t internal_index) const = 0;
-    virtual const std::byte* getFeatureVector(const uint32_t internal_index) const = 0;
-
-    virtual const bool hasVertex(const uint32_t external_label) const = 0;
-    virtual const bool hasEdge(const uint32_t internal_index, const uint32_t neighbor_index) const = 0;
-
-    const std::vector<uint32_t> getEntryVertexIndices() const {
-      return std::vector<uint32_t> { 0 };
-    }
-
-    /**
-     * Perform a search but stops when the to_vertex was found.
-     */
-    virtual std::vector<deglib::search::ObjectDistance> hasPath(const std::vector<uint32_t>& entry_vertex_indices, const uint32_t to_vertex, const float eps, const uint32_t k) const = 0;
-
-    /**
-     * Bounds-checked public search for query vectors (any type span/buffer).
-     */
-    template <typename T>
-    deglib::search::ResultSet search(
-        std::span<const T> query,
-        const uint32_t k,
-        const float eps = 0.0f,
-        const deglib::graph::Filter* filter = nullptr,
-        const uint32_t max_distance_computation_count = 0) const 
-    {
-        if (query.size_bytes() < getFeatureSpace().get_data_size()) {
-            throw std::invalid_argument(
-                "Search query buffer mismatch: expected at least " + std::to_string(getFeatureSpace().get_data_size()) +
-                " bytes (dim=" + std::to_string(getFeatureSpace().dim()) + "), got " + std::to_string(query.size_bytes()) + " bytes");
-        }
-        return search_intern(getEntryVertexIndices(), reinterpret_cast<const std::byte*>(query.data()), k, eps, true, filter, max_distance_computation_count);
-    }
-
-    /**
-     * Public graph exploration starting at entry_vertex_index.
-     */
-    deglib::search::ResultSet explore(
-        const uint32_t entry_vertex_index,
-        const uint32_t k,
-        const uint32_t max_distance_computation_count = 0,
-        const float eps = 0.0f,
-        const bool include_entry = true,
-        const deglib::graph::Filter* filter = nullptr) const
-    {
-        const auto query_ptr = getFeatureVector(entry_vertex_index);
-        return search_intern({ entry_vertex_index }, query_ptr, k, eps, include_entry, filter, max_distance_computation_count);
-    }
-
-  protected:
-    /**
-     * Internal raw-pointer search implementation.
-     */
-    virtual deglib::search::ResultSet search_intern(
-        const std::vector<uint32_t>& entry_vertex_indices,
-        const std::byte* query,
-        const uint32_t k,
-        const float eps = 0.0f,
-        const bool include_entry = true,
-        const deglib::graph::Filter* filter = nullptr,
-        const uint32_t max_distance_computation_count = 0) const = 0;
-
-    friend class deglib::builder::EvenRegularGraphBuilder;
-};
-
-} // end namespace deglib::search

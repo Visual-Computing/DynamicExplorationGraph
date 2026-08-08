@@ -14,7 +14,7 @@
 
 #include "gtest/gtest.h"
 #include "common/test_helpers.h"
-#include "deglib/quantization/evp_quantize.h"
+#include "deglib/optimization/quantization/evp_quantize.h"
 #include "deglib/distances.h"
 
 // ============================================================================

@@ -4,7 +4,7 @@
 #include <random>
 #include <vector>
 
-#include "deglib/quantization/evp_quantize.h"
+#include "deglib/optimization/quantization/evp_quantize.h"
 #include "deglib/distance/fp16.h"
 #include "gtest/gtest.h"
 

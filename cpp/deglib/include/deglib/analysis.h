@@ -6,7 +6,7 @@
 #include <thread>
 
 #include "deglib/concurrent.h"
-#include "deglib/memory.h"
+#include "deglib/utils/memory.h"
 #include "deglib/search.h"
 #include "deglib/graph.h"
 

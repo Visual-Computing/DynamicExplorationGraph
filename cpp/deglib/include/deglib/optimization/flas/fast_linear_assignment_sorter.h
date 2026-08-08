@@ -12,7 +12,7 @@
 #include "deglib/distance/fp32_l2.h"
 #include "deglib/distance/evp_inner_product.h"
 
-#include "deglib/flas/junker_volgenant_solver.h"
+#include "deglib/optimization/flas/junker_volgenant_solver.h"
 
 namespace flas {
 

@@ -73,14 +73,16 @@ class SearchGraph(ABC):
         if thread_batch_size <= 0:
             thread_batch_size = max(query.shape[0] // (threads * 4), 1)
 
-        indices, distances, num_results = self.graph_cpp.search_batch(
-            query, eps, k, filter_obj, max_distance_computation_count, threads,
-            thread_batch_size
+        indices, distances = self.graph_cpp.search_batch(
+            query, eps, k, filter_obj, max_distance_computation_count, threads
         )
-        if num_results != k:
-            warnings.warn('Number of results ({}) is smaller than k ({})'.format(num_results, k))
-            indices = indices[:, :num_results]
-            distances = distances[:, :num_results]
+        # Check if any query returned fewer than k valid results (unfilled elements have NaN distance)
+        valid_counts = np.sum(~np.isnan(distances), axis=1)
+        min_valid = int(np.min(valid_counts)) if valid_counts.size > 0 else 0
+        if min_valid < k:
+            warnings.warn('Number of results ({}) is smaller than k ({})'.format(min_valid, k), UserWarning)
+            indices = indices[:, :min_valid]
+            distances = distances[:, :min_valid]
         return indices, distances
 
 

@@ -47,17 +47,17 @@ endmacro()
 
 # Unit tests
 add_deglib_test(test_config src/unit/test_config.cpp)
-add_deglib_test(test_junker_volgenant_solver src/unit/flas/test_junker_volgenant_solver.cpp)
-add_deglib_test(test_flas src/unit/flas/test_flas.cpp)
+add_deglib_test(test_junker_volgenant_solver src/unit/optimization/flas/test_junker_volgenant_solver.cpp)
+add_deglib_test(test_flas src/unit/optimization/flas/test_fast_linear_assignment_sorter.cpp)
 add_deglib_test(test_fp16 src/unit/distance/test_fp16.cpp)
 add_deglib_test(test_fp16_inner_product src/unit/distance/test_fp16_inner_product.cpp)
 add_deglib_test(test_distances src/unit/test_distances.cpp)
-add_deglib_test(test_evp_quantize src/unit/quantization/test_evp_quantize.cpp)
+add_deglib_test(test_evp_quantize src/unit/optimization/quantization/test_evp_quantize.cpp)
 add_deglib_test(test_evp_inner_product src/unit/distance/test_evp_inner_product.cpp)
 add_deglib_test(test_concurrent src/unit/test_concurrent.cpp)
 add_deglib_test(test_repository src/unit/test_repository.cpp)
 add_deglib_test(test_filter src/unit/test_filter.cpp)
-add_deglib_test(test_visited_list_pool src/unit/test_visited_list_pool.cpp)
+add_deglib_test(test_visited_list_pool src/unit/graph/test_visited_list_pool.cpp)
 add_deglib_test(test_search src/unit/test_search.cpp)
 add_deglib_test(test_builder src/unit/test_builder.cpp)
 add_deglib_test(test_fp32_l2 src/unit/distance/test_fp32_l2.cpp)
@@ -72,9 +72,7 @@ add_deglib_integration_test(test_distances_integration src/integration/test_dist
 
 # Regression tests (100k vectors, performance benchmarking — built but NOT registered with CTest)
 add_deglib_test_no_ctest(test_builder_regression src/regression/test_builder_regression.cpp)
-add_deglib_test_no_ctest(test_flas_regression src/regression/test_flas_regression.cpp)
+add_deglib_test_no_ctest(test_flas_regression src/regression/optimization/flas/test_fast_linear_assignment_sorter_regression.cpp)
 add_deglib_test_no_ctest(test_sizebounded_graph_regression src/regression/graph/test_sizebounded_graph_regression.cpp)
 add_deglib_test_no_ctest(test_readonly_graph_regression src/regression/graph/test_readonly_graph_regression.cpp)
-add_deglib_test_no_ctest(test_evp_quantize_regression src/regression/quantization/test_evp_quantize_regression.cpp)
-
-
+add_deglib_test_no_ctest(test_evp_quantize_regression src/regression/optimization/quantization/test_evp_quantize_regression.cpp)

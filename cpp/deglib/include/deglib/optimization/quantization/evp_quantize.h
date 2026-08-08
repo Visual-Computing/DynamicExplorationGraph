@@ -10,7 +10,7 @@
 
 #include "deglib/concurrent.h"
 
-namespace deglib::quantization {
+namespace deglib::quantization::evp {
 
 // ============================================================================
 // Conversion: fp32 → EVP bytes
@@ -384,4 +384,12 @@ inline std::vector<std::byte> quantize_batch(const std::vector<std::vector<std::
     return result;
 }
 
-}  // namespace deglib::quantization
+/**
+ * Quantizes a single FP16 (uint16_t) vector to EVP bytes.
+ */
+inline std::vector<std::byte> quantize_single(const uint16_t* embedding, uint32_t dim, uint32_t non_zeros) {
+    return quantize_batch(embedding, 1, dim, non_zeros, 1);
+}
+
+}  // namespace deglib::quantization::evp
+

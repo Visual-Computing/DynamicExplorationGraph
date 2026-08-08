@@ -14,10 +14,10 @@
 
 #include "deglib/graph.h"
 #include "deglib/repository.h"
-#include "deglib/memory.h"
+#include "deglib/utils/memory.h"
 #include "deglib/distances.h"
 #include "deglib/search.h"
-#include "deglib/visited_list_pool.h"
+#include "deglib/graph/visited_list_pool.h"
 
 namespace deglib::graph
 {

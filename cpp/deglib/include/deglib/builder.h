@@ -17,7 +17,7 @@
 #include "deglib/concurrent.h"
 #include "deglib/analysis.h"
 #include "deglib/graph.h"
-#include "deglib/random.h"
+#include "deglib/utils/random.h"
 
 namespace deglib::builder
 {

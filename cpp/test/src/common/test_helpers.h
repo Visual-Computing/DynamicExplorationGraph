@@ -13,7 +13,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include "deglib/quantization/evp_quantize.h"
+#include "deglib/optimization/quantization/evp_quantize.h"
 #include "deglib/distance/evp_inner_product.h"
 
 // ============================================================================

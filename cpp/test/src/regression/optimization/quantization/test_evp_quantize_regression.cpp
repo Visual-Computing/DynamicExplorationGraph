@@ -4,7 +4,7 @@
 #include <chrono>
 #include <iostream>
 
-#include "deglib/quantization/evp_quantize.h"
+#include "deglib/optimization/quantization/evp_quantize.h"
 #include "deglib/distance/evp_inner_product.h"
 #include "deglib/graph/sizebounded_graph.h"
 #include "deglib/builder.h"

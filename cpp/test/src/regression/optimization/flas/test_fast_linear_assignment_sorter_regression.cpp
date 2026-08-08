@@ -9,8 +9,8 @@
 #include <unordered_set>
 #include <cmath>
 
-#include "deglib/flas/fast_linear_assignment_sorter.h"
-#include "deglib/flas/fast_linear_assignment_sorter_mt.h"
+#include "deglib/optimization/flas/fast_linear_assignment_sorter.h"
+#include "deglib/optimization/flas/fast_linear_assignment_sorter_mt.h"
 #include "common/test_helpers.h"
 
 // ============================================================================

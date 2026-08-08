@@ -283,4 +283,54 @@ namespace deglib {
         ~FloatSpace() {}
     };
 
+namespace distances {
+
+    /**
+     * Compute distance between two feature vectors in the given FloatSpace.
+     */
+    inline float compute_distance(const deglib::FloatSpace& space, const void* vec1, const void* vec2) {
+        if (vec1 == nullptr || vec2 == nullptr) {
+            throw std::invalid_argument("compute_distance: vec1 and vec2 must not be null");
+        }
+        const auto dist_func = space.get_dist_func();
+        const auto param = space.get_dist_func_param();
+        return dist_func(vec1, vec2, param);
+    }
+
+    /**
+     * Compute distances between queries and targets using the given FloatSpace.
+     */
+    inline void compute_distances(
+        const deglib::FloatSpace& space,
+        const void* queries,
+        size_t num_queries,
+        const void* targets,
+        size_t num_targets,
+        float* result_distances
+    ) {
+        if (queries == nullptr || targets == nullptr || result_distances == nullptr) {
+            throw std::invalid_argument("compute_distances: arguments must not be null");
+        }
+
+        const size_t byte_stride = space.get_data_size();
+        const uint8_t* q_ptr = static_cast<const uint8_t*>(queries);
+        const uint8_t* t_ptr = static_cast<const uint8_t*>(targets);
+
+        const auto param = space.get_dist_func_param();
+        space.compute([&](const auto& dist_func_obj) {
+            using DistType = std::decay_t<decltype(dist_func_obj)>;
+            for (size_t q = 0; q < num_queries; ++q) {
+                const uint8_t* current_query = q_ptr + q * byte_stride;
+                float* out_row = result_distances + q * num_targets;
+
+                for (size_t t = 0; t < num_targets; ++t) {
+                    out_row[t] = DistType::compare(current_query, t_ptr + t * byte_stride, param);
+                }
+            }
+        });
+    }
+
+} // namespace distances
+
 }  // end namespace deglib
+
