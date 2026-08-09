@@ -342,7 +342,7 @@ TEST(SizeBoundedGraph, SearchBasic) {
 
     EXPECT_GT(results.size(), 0u);
     if (results.size() > 0) {
-        EXPECT_GE(results.top().getInternalIndex(), 0u);
+        EXPECT_GE(results.top().getIdentifier(), 0u);
     }
 }
 
@@ -541,7 +541,7 @@ TEST(SizeBoundedGraph, ExploreBasicIncludeEntry) {
     EXPECT_GT(results.size(), 0u);
     bool found_entry = false;
     while (!results.empty()) {
-        if (results.top().getInternalIndex() == 0u) {
+        if (results.top().getIdentifier() == 0u) {
             found_entry = true;
         }
         results.pop();
@@ -580,4 +580,203 @@ TEST(SizeBoundedGraph, ExploreWithMaxDistanceCount) {
 
     EXPECT_GT(results.size(), 0u);
     EXPECT_LE(results.size(), 5u);
+}
+// ---------------------------------------------------------------------------
+//  10. Internal vs External ID Verification
+// ---------------------------------------------------------------------------
+//
+// These tests verify that SizeBoundedGraph (as an InternalGraph implementation)
+// strictly operates on internal indices (0..N-1) for search(), explore(),
+// hasPath(), and getNeighborIndices(), while hasVertex() and getExternalLabel()
+// / getInternalIndex() handle the external label ↔ internal index mapping.
+//
+// Non-sequential external labels (1005, 9999, 42, 707, 12345) are used so that
+// any accidental swap of external labels and internal indices will instantly
+// fail test assertions.
+
+namespace {
+
+// Non-sequential, arbitrary external labels — deliberately distinct from 0..N-1
+constexpr std::array<uint32_t, 5> kExtLabels = {1005, 9999, 42, 707, 12345};
+
+} // anonymous namespace
+
+TEST(SizeBoundedGraphInternalIndicesInSearch, SearchReturnsInternalIndices) {
+   deglib::FloatSpace space(4, deglib::Metric::L2);
+   deglib::graph::SizeBoundedGraph graph(5, 4, space);
+
+   // Add vertices with non-sequential external labels at distinct positions
+   graph.addVertex(kExtLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[1], make_float_bytes(make_vec_4d(1.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[2], make_float_bytes(make_vec_4d(2.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[3], make_float_bytes(make_vec_4d(3.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[4], make_float_bytes(make_vec_4d(4.0f, 0.0f, 0.0f, 0.0f)).get());
+
+   // Fully connect vertices 0..3 (neighbors must be sorted ascending)
+   uint32_t sorted_nbrs[] = {0, 1, 2, 3};
+   float weights[] = {0.0f, 1.0f, 2.0f, 3.0f};
+   graph.changeEdges(0, sorted_nbrs, weights);
+   graph.changeEdges(1, sorted_nbrs, weights);
+   graph.changeEdges(2, sorted_nbrs, weights);
+   graph.changeEdges(3, sorted_nbrs, weights);
+   // Vertex 4 has self-loop only
+
+   // search() on InternalGraph returns internal indices in the ResultSet
+   std::vector<float> query = {0.1f, 0.0f, 0.0f, 0.0f};
+   auto results = graph.search(std::span<const float>(query), 3, 0.0f);
+
+   ASSERT_GT(results.size(), 0u);
+
+   // Every identifier must be an internal index (0..4), NOT an external label
+   std::unordered_set<uint32_t> internal_indices = {0, 1, 2, 3, 4};
+   std::unordered_set<uint32_t> ext_labels(kExtLabels.begin(), kExtLabels.end());
+
+   while (!results.empty()) {
+       uint32_t id = results.top().getIdentifier();
+       EXPECT_TRUE(internal_indices.contains(id))
+           << "search() result identifier " << id << " is not a valid internal index (0..N-1)";
+       EXPECT_FALSE(ext_labels.contains(id))
+           << "search() result identifier " << id << " is an external label, not an internal index";
+       results.pop();
+   }
+}
+
+TEST(SizeBoundedGraphInternalIndicesInSearch, ExploreReturnsInternalIndices) {
+   deglib::FloatSpace space(4, deglib::Metric::L2);
+   deglib::graph::SizeBoundedGraph graph(5, 4, space);
+
+   graph.addVertex(kExtLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[1], make_float_bytes(make_vec_4d(1.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[2], make_float_bytes(make_vec_4d(2.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[3], make_float_bytes(make_vec_4d(3.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[4], make_float_bytes(make_vec_4d(4.0f, 0.0f, 0.0f, 0.0f)).get());
+
+   uint32_t sorted_nbrs[] = {0, 1, 2, 3};
+   float weights[] = {0.0f, 1.0f, 2.0f, 3.0f};
+   graph.changeEdges(0, sorted_nbrs, weights);
+   graph.changeEdges(1, sorted_nbrs, weights);
+   graph.changeEdges(2, sorted_nbrs, weights);
+   graph.changeEdges(3, sorted_nbrs, weights);
+
+   // explore() on InternalGraph takes an internal index and returns internal indices
+   auto results = graph.explore(0, 3, 0, 0.0f, /*include_entry=*/true, nullptr);
+
+   ASSERT_GT(results.size(), 0u);
+
+   std::unordered_set<uint32_t> internal_indices = {0, 1, 2, 3, 4};
+   std::unordered_set<uint32_t> ext_labels(kExtLabels.begin(), kExtLabels.end());
+
+   while (!results.empty()) {
+       uint32_t id = results.top().getIdentifier();
+       EXPECT_TRUE(internal_indices.contains(id))
+           << "explore() result identifier " << id << " is not a valid internal index";
+       EXPECT_FALSE(ext_labels.contains(id))
+           << "explore() result identifier " << id << " is an external label, not an internal index";
+       results.pop();
+   }
+}
+
+TEST(SizeBoundedGraphInternalIndicesInSearch, HasPathReturnsInternalIndices) {
+   deglib::FloatSpace space(4, deglib::Metric::L2);
+   deglib::graph::SizeBoundedGraph graph(5, 4, space);
+
+   graph.addVertex(kExtLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[1], make_float_bytes(make_vec_4d(1.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[2], make_float_bytes(make_vec_4d(2.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[3], make_float_bytes(make_vec_4d(3.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[4], make_float_bytes(make_vec_4d(4.0f, 0.0f, 0.0f, 0.0f)).get());
+
+   uint32_t sorted_nbrs[] = {0, 1, 2, 3};
+   float weights[] = {0.0f, 1.0f, 2.0f, 3.0f};
+   graph.changeEdges(0, sorted_nbrs, weights);
+   graph.changeEdges(1, sorted_nbrs, weights);
+   graph.changeEdges(2, sorted_nbrs, weights);
+   graph.changeEdges(3, sorted_nbrs, weights);
+
+   // hasPath() takes internal entry indices and a internal to_vertex index
+   // Returns a vector of ObjectDistance with internal indices
+   auto path = graph.hasPath({0}, 1, 0.0f, 5);
+
+   ASSERT_GT(path.size(), 0u);
+
+   std::unordered_set<uint32_t> internal_indices = {0, 1, 2, 3, 4};
+   std::unordered_set<uint32_t> ext_labels(kExtLabels.begin(), kExtLabels.end());
+
+   for (const auto& od : path) {
+       uint32_t id = od.getIdentifier();
+       EXPECT_TRUE(internal_indices.contains(id))
+           << "hasPath() result identifier " << id << " is not a valid internal index";
+       EXPECT_FALSE(ext_labels.contains(id))
+           << "hasPath() result identifier " << id << " is an external label, not an internal index";
+   }
+}
+
+TEST(SizeBoundedGraphInternalIndicesInSearch, GetNeighborIndicesReturnsInternalIndices) {
+   deglib::FloatSpace space(4, deglib::Metric::L2);
+   deglib::graph::SizeBoundedGraph graph(5, 4, space);
+
+   graph.addVertex(kExtLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[1], make_float_bytes(make_vec_4d(1.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[2], make_float_bytes(make_vec_4d(2.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[3], make_float_bytes(make_vec_4d(3.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[4], make_float_bytes(make_vec_4d(4.0f, 0.0f, 0.0f, 0.0f)).get());
+
+   uint32_t sorted_nbrs[] = {0, 1, 2, 3};
+   float weights[] = {0.0f, 1.0f, 2.0f, 3.0f};
+   graph.changeEdges(0, sorted_nbrs, weights);
+
+   // getNeighborIndices() takes an internal index and returns internal indices
+   const auto* neighbors = graph.getNeighborIndices(0);
+   uint8_t epv = graph.getEdgesPerVertex();
+
+   std::unordered_set<uint32_t> internal_indices = {0, 1, 2, 3, 4};
+   std::unordered_set<uint32_t> ext_labels(kExtLabels.begin(), kExtLabels.end());
+
+   for (uint8_t i = 0; i < epv; ++i) {
+       uint32_t n = neighbors[i];
+       EXPECT_TRUE(internal_indices.contains(n))
+           << "getNeighborIndices()[ " << i << "] = " << n << " is not a valid internal index";
+       EXPECT_FALSE(ext_labels.contains(n))
+           << "getNeighborIndices()[ " << i << "] = " << n << " is an external label, not an internal index";
+   }
+}
+
+TEST(SizeBoundedGraphLabelMapping, BidirectionalTranslationWithNonSequentialLabels) {
+   deglib::FloatSpace space(4, deglib::Metric::L2);
+   deglib::graph::SizeBoundedGraph graph(5, 4, space);
+
+   // Add vertices with non-sequential external labels
+   graph.addVertex(kExtLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[1], make_float_bytes(make_vec_4d(1.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[2], make_float_bytes(make_vec_4d(2.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[3], make_float_bytes(make_vec_4d(3.0f, 0.0f, 0.0f, 0.0f)).get());
+   graph.addVertex(kExtLabels[4], make_float_bytes(make_vec_4d(4.0f, 0.0f, 0.0f, 0.0f)).get());
+
+   // getExternalLabel(internal_index) → external_label
+   EXPECT_EQ(graph.getExternalLabel(0), kExtLabels[0]); // 1005
+   EXPECT_EQ(graph.getExternalLabel(1), kExtLabels[1]); // 9999
+   EXPECT_EQ(graph.getExternalLabel(2), kExtLabels[2]); // 42
+   EXPECT_EQ(graph.getExternalLabel(3), kExtLabels[3]); // 707
+   EXPECT_EQ(graph.getExternalLabel(4), kExtLabels[4]); // 12345
+
+   // getInternalIndex(external_label) → internal_index
+   EXPECT_EQ(graph.getInternalIndex(kExtLabels[0]), 0u);
+   EXPECT_EQ(graph.getInternalIndex(kExtLabels[1]), 1u);
+   EXPECT_EQ(graph.getInternalIndex(kExtLabels[2]), 2u);
+   EXPECT_EQ(graph.getInternalIndex(kExtLabels[3]), 3u);
+   EXPECT_EQ(graph.getInternalIndex(kExtLabels[4]), 4u);
+
+   // Round-trip: internal → external → internal
+   for (uint32_t i = 0; i < 5; ++i) {
+       uint32_t ext = graph.getExternalLabel(i);
+       uint32_t back = graph.getInternalIndex(ext);
+       EXPECT_EQ(back, i) << "Round-trip failed for internal index " << i;
+   }
+
+   // hasVertex() takes external labels
+   EXPECT_TRUE(graph.hasVertex(kExtLabels[0]));
+   EXPECT_TRUE(graph.hasVertex(kExtLabels[2]));
+   EXPECT_FALSE(graph.hasVertex(kExtLabels[0] + 1)); // 1006 — not in graph
+   EXPECT_FALSE(graph.hasVertex(0u)); // 0 is an internal index, not an external label
+   EXPECT_FALSE(graph.hasVertex(4u)); // 4 is an internal index, not an external label
 }

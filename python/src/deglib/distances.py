@@ -47,22 +47,7 @@ class InstructionSet(enum.IntEnum):
         else:
             raise ValueError(f"unknown instruction set: {self}")
 
-
-class SpaceInterface(ABC):
-    @abstractmethod
-    def dim(self) -> int:
-        return NotImplemented()
-
-    @abstractmethod
-    def metric(self) -> Metric:
-        return NotImplemented()
-
-    @abstractmethod
-    def get_data_size(self) -> int:
-        return NotImplemented()
-
-
-class FloatSpace(SpaceInterface):
+class FloatSpace:
     def __init__(self, float_space_cpp: deglib_cpp.FloatSpace):
         """
         Create a FloatSpace.

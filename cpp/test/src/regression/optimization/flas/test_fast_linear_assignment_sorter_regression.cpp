@@ -131,7 +131,7 @@ static std::pair<double, double> search_deg_graph(
         while (!result.empty()) {
             auto top_item = result.top();
             result.pop();
-            uint32_t ext_label = graph.getExternalLabel(top_item.getInternalIndex());
+            uint32_t ext_label = graph.getExternalLabel(top_item.getIdentifier());
             if (gt_set.count(ext_label)) {
                 total_correct++;
             }

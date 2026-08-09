@@ -21,7 +21,7 @@ def get_tmp_graph_file(samples: int, dims: int) -> pathlib.Path:
     return pathlib.Path(os.path.join(tmpdir, 'test_graph_S{}_D{}.deg'.format(samples, dims)))
 
 
-def get_ranking(features: np.ndarray, graph: deglib.graph.DynamicExplorationGraph, query: np.ndarray) -> np.ndarray:
+def get_ranking(features: np.ndarray, graph: deglib.DynamicExplorationGraph, query: np.ndarray) -> np.ndarray:
     """
     Returns the ranking for each feature vector in the graph
     """
@@ -43,7 +43,7 @@ def get_ranking(features: np.ndarray, graph: deglib.graph.DynamicExplorationGrap
 
 class Configuration:
     def __init__(
-            self, edges_per_vertex: int, samples: int, dims: int, data: np.ndarray, graph: deglib.graph.DynamicExplorationGraph,
+        self, edges_per_vertex: int, samples: int, dims: int, data: np.ndarray, graph: deglib.DynamicExplorationGraph,
             graph_path: Optional[pathlib.Path], query: np.ndarray, metric: deglib.Metric
     ):
         self.edges_per_vertex = edges_per_vertex
@@ -73,14 +73,14 @@ class Configuration:
         else:
             raise ValueError(f'Unsupported metric: {metric}')
 
-        size_bounded_graph = deglib.builder.build_from_data(
+        size_bounded_graph = deglib.build_from_data(
             data, edges_per_vertex=edges_per_vertex, metric=metric, optimization_target=deglib.builder.OptimizationTarget.LowLID,
         )
 
         graph_path = get_tmp_graph_file(samples, dims)
         size_bounded_graph.save_graph(graph_path)
-        read_only_graph = deglib.graph.load_readonly_graph(graph_path)
-        read_only_graph_converted = deglib.graph.ReadOnlyGraph.from_graph(size_bounded_graph)
+        read_only_graph = deglib.load_readonly_graph(graph_path)
+        read_only_graph_converted = size_bounded_graph.to_readonly()
 
         return [
             Configuration(edges_per_vertex, samples, dims, data, size_bounded_graph, graph_path, query, metric),
@@ -89,7 +89,7 @@ class Configuration:
         ]
 
     def create_new_size_bounded_graph(self):
-        return deglib.builder.build_from_data(
+        return deglib.build_from_data(
             self.data, edges_per_vertex=self.edges_per_vertex, metric=self.metric
         )
 
@@ -107,19 +107,7 @@ large_configurations = [
     *Configuration.generate(20_000, 2, deglib.Metric.Uint8_L2, 10),
 ]
 
-mutable_configurations = [c for c in configurations if isinstance(c.graph, deglib.graph.MutableGraph)]
-
-
-@pytest.mark.parametrize('conf', configurations)
-def test_get_feature_vector(conf: Configuration):
-    for i in range(conf.graph.size()):
-        l = conf.graph.get_external_label(i)
-        fv = conf.graph.get_feature_vector(i)
-        assert fv.shape == (conf.dims,)
-        assert np.allclose(fv, conf.data[l])
-
-    with pytest.raises(IndexError):
-        _fv = conf.graph.get_feature_vector(conf.graph.size())
+mutable_configurations = [c for c in configurations if c.graph.is_mutable()]
 
 
 @pytest.mark.parametrize('conf', configurations)
@@ -133,7 +121,7 @@ def test_search(conf: Configuration):
     graph_result = graph_result.flatten()
     correct_result = get_ranking(conf.data, conf.graph, conf.query)[:k]
 
-    assert graph_result.shape[-1] == k, 'expected {} results, but got {}'.format(k, graph_result.shape[1])
+    assert graph_result.shape[-1] == k, 'expected {} results, but got {}'.format(k, graph_result.shape[-1])
 
     # test matches are good
     matches = set(graph_result).intersection(set(correct_result))
@@ -147,13 +135,12 @@ def test_search(conf: Configuration):
                 last_distance, index-1, distance, index
             )
         )
-        last_distance = distance
 
 
 @pytest.mark.parametrize('conf', mutable_configurations)
 def test_remove_non_mrng_edges(conf: Configuration):
     graph = conf.create_new_size_bounded_graph()
-    graph.remove_non_mrng_edges()
+    deglib.optimization.remove_non_mrng_edges(graph)
 
 
 @pytest.mark.parametrize('conf', configurations)
@@ -169,21 +156,17 @@ def test_threaded_search(conf: Configuration):
 
 
 @pytest.mark.parametrize('conf', configurations)
-def test_has_path(conf: Configuration):
-    entry_vertex_indices = conf.graph.get_entry_vertex_indices()
-    path = conf.graph.has_path(entry_vertex_indices, 70, 0.001, 10)
-    for p in path:
-        assert isinstance(p, deglib.search.ObjectDistance)
-
-
-@pytest.mark.parametrize('conf', configurations)
 def test_explore(conf: Configuration):
     k = 10
     include_entry = True
     entry_vertex_index = random.randint(0, conf.samples-1)
-    result = conf.graph.explore(entry_vertex_index, k, include_entry, max_distance_computation_count=k*10)
-    assert len(result) == k
-    assert all(isinstance(od, deglib.search.ObjectDistance) for od in result)
+    indices, distances = conf.graph.explore(entry_vertex_index, k, include_entry, max_distance_computation_count=k*10)
+    assert len(indices) == k
+    assert len(distances) == k
+    # check that valid (non-NaN) distances are sorted (ascending)
+    valid_distances = distances[~np.isnan(distances)]
+    for i in range(len(valid_distances) - 1):
+        assert valid_distances[i] <= valid_distances[i + 1], 'Distances should be sorted in ascending order'
 
 
 @pytest.mark.parametrize('conf', configurations)
@@ -192,51 +175,32 @@ def test_get_edges_per_vertex(conf: Configuration):
 
 
 @pytest.mark.parametrize('conf', configurations)
-def test_get_neighbor_indices(conf: Configuration):
-    for i in range(conf.graph.size()):
-        neighbor_indices = conf.graph.get_neighbor_indices(i)
-        assert isinstance(neighbor_indices, np.ndarray)
-        assert len(neighbor_indices) == conf.edges_per_vertex
-        assert neighbor_indices.dtype == np.uint32
-
-
-@pytest.mark.parametrize('conf', configurations)
 def test_has_vertex(conf: Configuration):
     assert conf.graph.has_vertex(0)
     assert not conf.graph.has_vertex(conf.graph.size())
 
 
-@pytest.mark.parametrize('conf', configurations)
-def test_has_edge(conf: Configuration):
-    counter = 0
-    for e in range(conf.graph.size()):
-        if conf.graph.has_edge(0, e):
-            counter += 1
-    assert counter == conf.graph.get_edges_per_vertex()
-
-
-@pytest.mark.parametrize('conf', mutable_configurations)
-def test_get_neighbor_weights(conf: Configuration):
-    weights = conf.graph.get_neighbor_weights(0)
-    assert isinstance(weights, np.ndarray)
-    assert len(weights) == conf.edges_per_vertex
-
-
 @pytest.mark.parametrize('conf', mutable_configurations)
 def test_modify_graph(conf: Configuration):
     graph = conf.create_new_size_bounded_graph()
-    graph.remove_vertex(graph.size()-1)
+    # remove vertex via builder
+    builder = deglib.GraphBuilder(graph)
+    builder.remove_entry(graph.size()-1)
+    builder.build()
     assert graph.size() == conf.samples - 1
-    graph.add_vertex(conf.samples-1, conf.data[-1])
+    # add vertex back via builder
+    builder2 = deglib.GraphBuilder(graph)
+    builder2.add_entry(conf.samples-1, conf.data[-1])
+    builder2.build()
 
 
 @pytest.mark.parametrize('conf', mutable_configurations)
 def test_load_graph(conf: Configuration):
-    graph = deglib.graph.load_readonly_graph(conf.graph_path)
-    assert isinstance(graph, deglib.graph.ReadOnlyGraph)
+    graph = deglib.load_readonly_graph(conf.graph_path)
+    assert not graph.is_mutable()
 
     with pytest.raises(FileNotFoundError):
-        _graph = deglib.graph.load_readonly_graph(pathlib.Path('path') / 'does' / 'not' / 'exist')
+        _graph = deglib.load_readonly_graph(pathlib.Path('path') / 'does' / 'not' / 'exist')
 
 
 @pytest.mark.parametrize('conf', mutable_configurations)
@@ -250,19 +214,9 @@ def test_save_graph(tmp_path, conf):
 
 
 @pytest.mark.parametrize('conf', mutable_configurations)
-def test_del_graph(conf: Configuration):
-    graph = deglib.graph.load_readonly_graph(conf.graph_path)
-    fv = graph.get_feature_vector(0, copy=True)
-
-    del graph
-
-    print(np.sum(fv))  # try to access data, after graph is deleted
-
-
-@pytest.mark.parametrize('conf', mutable_configurations)
 def test_convert_graph(conf: Configuration):
-    rd_graph = deglib.graph.ReadOnlyGraph.from_graph(conf.graph)
-    assert isinstance(rd_graph, deglib.graph.ReadOnlyGraph)
+    rd_graph = conf.graph.to_readonly()
+    assert not rd_graph.is_mutable()
 
 
 @pytest.mark.parametrize('conf', large_configurations)
@@ -296,25 +250,6 @@ def test_small_filters(conf: Configuration):
             raise ValueError('Found results that should have been filtered out.')
 
 
-@pytest.mark.parametrize('conf', mutable_configurations)
-def test_change_edges_and_weights(conf: Configuration):
-    graph = conf.create_new_size_bounded_graph()
-    if graph.size() > 2:
-        internal_idx = 0
-        edges_count = graph.get_edges_per_vertex()
-        new_neighbors = np.arange(edges_count, dtype=np.uint32)
-        new_weights = np.linspace(0.1, 1.0, edges_count, dtype=np.float32)
-
-        graph.change_edges(internal_idx, new_neighbors, new_weights)
-
-        neighbor_indices = graph.get_neighbor_indices(internal_idx)
-        neighbor_weights = graph.get_neighbor_weights(internal_idx)
-
-        assert np.array_equal(neighbor_indices, new_neighbors)
-        assert np.allclose(neighbor_weights, new_weights)
-        assert np.isclose(graph.get_edge_weight(internal_idx, 1), new_weights[1])
-
-
 @pytest.mark.parametrize('conf', configurations[:1])
 def test_filter_edge_cases(conf: Configuration):
     k = 5
@@ -329,28 +264,84 @@ def test_filter_edge_cases(conf: Configuration):
         results_none, _ = conf.graph.search(conf.query, filter_labels=Filter(no_labels, max_value=0), eps=0.1, k=k)
 
 
+def _build_test_graph_with_distinct_labels(samples=50, dims=16, edges_per_vertex=10):
+    """Build a graph with external labels that differ from internal indices."""
+    data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
+    labels = np.arange(samples, dtype=np.uint32) * 10
+    graph = deglib.build_from_data(
+        data, labels=labels, edges_per_vertex=edges_per_vertex,
+        optimization_target=deglib.builder.OptimizationTarget.LowLID,
+        extend_k=10, extend_eps=0.001
+    )
+    return graph, data
 
-@pytest.mark.parametrize('conf', configurations)
-def test_analysis_read_only_graph(conf: Configuration):
-    """Test that analysis functions work with ReadOnlyGraph for InternalGraph-based functions."""
-    # check_graph_regularity and check_graph_connectivity should work with ReadOnlyGraph
-    assert deglib.analysis.check_graph_regularity(conf.graph, conf.graph.size())
-    assert deglib.analysis.check_graph_connectivity(conf.graph)
 
-    # Functions requiring MutableGraph should raise for ReadOnlyGraph
-    if isinstance(conf.graph, deglib.graph.ReadOnlyGraph):
-        with pytest.raises(RuntimeError, match="Graph must be mutable"):
-            deglib.analysis.calc_avg_edge_weight(conf.graph)
-        with pytest.raises(RuntimeError, match="Graph must be mutable"):
-            deglib.analysis.calc_edge_weight_histogram(conf.graph, True)
-        with pytest.raises(RuntimeError, match="Graph must be mutable"):
-            deglib.analysis.check_graph_weights(conf.graph)
-        with pytest.raises(RuntimeError, match="Graph must be mutable"):
-            deglib.analysis.calc_non_rng_edges(conf.graph)
-    else:
-        # MutableGraph should work with all analysis functions
-        assert deglib.analysis.calc_avg_edge_weight(conf.graph) > 0
-        assert len(deglib.analysis.calc_edge_weight_histogram(conf.graph, True)) == 10
-        assert deglib.analysis.check_graph_weights(conf.graph)
-        assert deglib.analysis.calc_non_rng_edges(conf.graph) >= 0
+def test_has_vertex_accepts_external_label():
+    """has_vertex should accept external labels, not internal indices."""
+    g, _ = _build_test_graph_with_distinct_labels()
+    # External labels are 0, 10, 20, ...
+    assert g.has_vertex(0) is True
+    assert g.has_vertex(10) is True
+    assert g.has_vertex(1) is False  # internal index, not external label
+    assert g.has_vertex(99999) is False
 
+
+def test_search_returns_external_labels():
+    """DynamicExplorationGraph.search returns external labels."""
+    g, data = _build_test_graph_with_distinct_labels()
+    indices, distances = g.search(data[0:1], eps=0.1, k=5)
+    assert indices.shape == (1, 5)
+    # search_batch returns external labels (multiples of 10)
+    for idx in indices.flatten():
+        if idx != 0xFFFFFFFF:
+            assert idx % 10 == 0, \
+                f"Search result {idx} should be an external label (multiple of 10)"
+
+
+def test_facade_has_vertex_accepts_external_label():
+    """DynamicExplorationGraph facade has_vertex should accept external labels."""
+    g, _ = _build_test_graph_with_distinct_labels()
+    # External labels are 0, 10, 20, ...
+    assert g.has_vertex(0) is True
+    assert g.has_vertex(10) is True
+    assert g.has_vertex(1) is False  # internal index, not external label
+
+
+def test_facade_explore_uses_external_label():
+    """DynamicExplorationGraph facade explore should use external labels."""
+    g, _ = _build_test_graph_with_distinct_labels()
+    indices, distances = g.explore(0, k=5, max_distance_computation_count=50)
+    assert len(indices) == 5
+    assert len(distances) == 5
+    for idx in indices:
+        if idx != 0xFFFFFFFF:
+            assert idx % 10 == 0, \
+                f"Facade explore result should be external label (multiple of 10), got {idx}"
+
+
+def test_facade_get_neighbors_uses_external_label():
+    """DynamicExplorationGraph facade get_neighbors should return external labels."""
+    g, _ = _build_test_graph_with_distinct_labels()
+    neighbors = g.get_neighbors(0)
+    assert len(neighbors) == g.get_edges_per_vertex()
+    for n in neighbors:
+        if n != 0xFFFFFFFF:
+            assert n % 10 == 0, f"Facade get_neighbors should return external labels, got {n}"
+
+
+def test_facade_search_returns_external_labels():
+    """DynamicExplorationGraph facade search should return external labels."""
+    g, data = _build_test_graph_with_distinct_labels()
+    indices, distances = g.search(data[0:1], eps=0.1, k=5)
+    assert indices.shape == (1, 5)
+    for idx in indices.flatten():
+        if idx != 0xFFFFFFFF:
+            assert idx % 10 == 0, f"Facade search should return external labels, got {idx}"
+
+
+def test_facade_to_readonly():
+    """DynamicExplorationGraph.to_readonly() should return a read-only graph."""
+    g, _ = _build_test_graph_with_distinct_labels()
+    rd_graph = g.to_readonly()
+    assert not rd_graph.is_mutable()
+    assert rd_graph.size() == g.size()

@@ -9,9 +9,9 @@
 #include <filesystem>
 #include <unordered_map>
 #include <fstream>
+#include <iostream>
 
 #include "deglib/graph.h"
-#include "deglib/repository.h"
 #include "deglib/search.h"
 #include "deglib/graph/visited_list_pool.h"
 #include "deglib/utils/memory.h"
@@ -40,8 +40,6 @@ namespace deglib::graph
  * The number of vertices is limited to uint32.max
  */
 class SizeBoundedGraph : public deglib::graph::MutableGraph {
-
-
 
   static uint32_t compute_aligned_byte_size_per_vertex(const uint8_t edges_per_vertex, const uint16_t feature_byte_size, const uint8_t alignment) {
     const uint32_t byte_size = uint32_t(feature_byte_size) + uint32_t(edges_per_vertex) * (sizeof(uint32_t) + sizeof(float)) + sizeof(uint32_t);
@@ -426,7 +424,7 @@ public:
         break;
 
       size_t good_neighbor_count = 0;
-      const auto neighbor_indices = this->neighbors_by_index(next_vertex.getInternalIndex());
+      const auto neighbor_indices = this->neighbors_by_index(next_vertex.getIdentifier());
       for (size_t i = 0; i < this->edges_per_vertex_; i++) {
         const auto neighbor_index = neighbor_indices[i];
 
@@ -434,12 +432,12 @@ public:
         if(neighbor_index == to_vertex) {
           auto path = std::vector<deglib::graph::ObjectDistance>();
           path.emplace_back(to_vertex, 0.f);
-          path.emplace_back(next_vertex.getInternalIndex(), next_vertex.getDistance());
+          path.emplace_back(next_vertex.getIdentifier(), next_vertex.getDistance());
 
-          auto last_vertex = trackback.find(next_vertex.getInternalIndex());
-          while(last_vertex != trackback.cend() && last_vertex->first != last_vertex->second.getInternalIndex()) {
-            path.emplace_back(last_vertex->second.getInternalIndex(), last_vertex->second.getDistance());
-            last_vertex = trackback.find(last_vertex->second.getInternalIndex());
+          auto last_vertex = trackback.find(next_vertex.getIdentifier());
+          while(last_vertex != trackback.cend() && last_vertex->first != last_vertex->second.getIdentifier()) {
+            path.emplace_back(last_vertex->second.getIdentifier(), last_vertex->second.getDistance());
+            last_vertex = trackback.find(last_vertex->second.getIdentifier());
           }
 
           return path;
@@ -466,7 +464,7 @@ public:
         // check the neighborhood of this vertex later, if its good enough
         if (neighbor_distance <= exploration_radius) {
           next_vertices.emplace(neighbor_index, neighbor_distance);
-          trackback.insert({neighbor_index, deglib::graph::ObjectDistance(next_vertex.getInternalIndex(), next_vertex.getDistance())});
+          trackback.insert({neighbor_index, deglib::graph::ObjectDistance(next_vertex.getIdentifier(), next_vertex.getDistance())});
 
           // remember the vertex, if its better than the worst in the result list
           if (neighbor_distance < radius) {
@@ -582,7 +580,7 @@ public:
         break;
 
       size_t good_neighbor_count = 0;
-      const auto neighbor_indices = this->neighbors_by_index(next_vertex.getInternalIndex());
+      const auto neighbor_indices = this->neighbors_by_index(next_vertex.getIdentifier());
       for (size_t i = 0; i < this->edges_per_vertex_; i++) {
         const auto neighbor_index = neighbor_indices[i];
         if(checked_ids[neighbor_index] != checked_ids_tag) {

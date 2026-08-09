@@ -3,6 +3,7 @@
 #include <fmt/core.h>
 
 #include "benchmark.h"
+#include "repository.h"
 #include <deglib/deglib.h>
 
 int main(int argc, char *argv[]) {

@@ -69,19 +69,26 @@ public:
         const deglib::graph::Filter* filter = nullptr,
         const uint32_t max_distance_computation_count = 0) const 
     {
-        auto internal_res = internal_graph_.search(query, k, eps, filter, max_distance_computation_count);
-        deglib::graph::ResultSet external_res;
-        for (const auto& od : internal_res) {
-            uint32_t ext_label = internal_graph_.getExternalLabel(od.getInternalIndex());
-            external_res.push(deglib::graph::ObjectDistance(ext_label, od.getDistance()));
+        auto res = internal_graph_.search(query, k, eps, filter, max_distance_computation_count);
+        for (auto& od : res) {
+            uint32_t ext_label = internal_graph_.getExternalLabel(od.getIdentifier());
+            od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
         }
-        return external_res;
+        std::make_heap(res.begin(), res.end(), std::less<deglib::graph::ObjectDistance>());
+        return res;
     }
-
-    /**
-     * Exploration starting at a specific external_label.
-     * Maps entry external_label to internal_index, performs search, and maps result back to external_labels.
-     */
+   /**
+    * Exploration starting at a specific external_label.
+    * Maps entry external_label to internal_index, performs search, and maps result back to external_labels.
+    *
+    * @param entry_external_label The external label of the vertex to start exploration from.
+    * @param k The number of nearest neighbors to return.
+    * @param max_distance_computation_count Maximum number of distance calculations. 0 means unlimited.
+    * @param eps Epsilon for search range expansion. 0.0 means exact search.
+    * @param include_entry If true, the entry vertex is included in the result set.
+    * @param filter Optional filter to restrict which vertices can be returned.
+    * @return A ResultSet of ObjectDistance objects, with vertex IDs as external labels.
+    */
     deglib::graph::ResultSet explore(
         const uint32_t entry_external_label,
         const uint32_t k,
@@ -91,18 +98,21 @@ public:
         const deglib::graph::Filter* filter = nullptr) const
     {
         uint32_t internal_entry = internal_graph_.getInternalIndex(entry_external_label);
-        auto internal_res = internal_graph_.explore(internal_entry, k, max_distance_computation_count, eps, include_entry, filter);
-        deglib::graph::ResultSet external_res;
-        for (const auto& od : internal_res) {
-            uint32_t ext_label = internal_graph_.getExternalLabel(od.getInternalIndex());
-            external_res.push(deglib::graph::ObjectDistance(ext_label, od.getDistance()));
+        auto res = internal_graph_.explore(internal_entry, k, max_distance_computation_count, eps, include_entry, filter);
+        for (auto& od : res) {
+            uint32_t ext_label = internal_graph_.getExternalLabel(od.getIdentifier());
+            od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
         }
-        return external_res;
+        std::make_heap(res.begin(), res.end(), std::less<deglib::graph::ObjectDistance>());
+        return res;
     }
 
-    /**
-     * Get neighbors as external_labels for a given external_label.
-     */
+   /**
+    * Get neighbors as external_labels for a given external_label.
+    *
+    * @param external_label The external label of the vertex to get neighbors for.
+    * @return A vector of external labels of the neighbors.
+    */
     std::vector<uint32_t> getNeighbors(const uint32_t external_label) const {
         uint32_t internal_idx = internal_graph_.getInternalIndex(external_label);
         const uint32_t* internal_neighbors = internal_graph_.getNeighborIndices(internal_idx);
@@ -112,6 +122,21 @@ public:
             external_neighbors[i] = internal_graph_.getExternalLabel(internal_neighbors[i]);
         }
         return external_neighbors;
+    }
+
+   /**
+    * Convert this graph to a read-only graph.
+    *
+    * @return A new read-only DynamicExplorationGraph.
+    */
+    DynamicExplorationGraph to_readonly() const {
+        auto* graph = new deglib::graph::ReadOnlyGraph(
+            internal_graph_.size(),
+            internal_graph_.getEdgesPerVertex(),
+            internal_graph_.getFeatureSpace(),
+            internal_graph_
+        );
+        return DynamicExplorationGraph(*graph);
     }
 };
 

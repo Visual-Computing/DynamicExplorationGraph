@@ -25,6 +25,7 @@ macro(add_deglib_test name source)
     add_test(NAME ${name} COMMAND ${name})
 endmacro()
 
+
 # Helper macro: creates a test executable with integration test include path
 macro(add_deglib_integration_test name source)
     add_executable(${name} ${TEST_MAIN} ${source})
@@ -54,7 +55,6 @@ add_deglib_test(test_internal_graph src/unit/graph/test_internal_graph.cpp)
 add_deglib_test(test_search src/unit/test_search.cpp)
 add_deglib_test(test_evp_quantize src/unit/optimization/quantization/test_evp_quantize.cpp)
 add_deglib_test(test_concurrent src/unit/test_concurrent.cpp)
-add_deglib_test(test_repository src/unit/test_repository.cpp)
 add_deglib_test(test_filter src/unit/test_filter.cpp)
 add_deglib_test(test_visited_list_pool src/unit/graph/test_visited_list_pool.cpp)
 add_deglib_test(test_builder src/unit/test_builder.cpp)
@@ -63,7 +63,9 @@ add_deglib_test(test_fp32_inner_product src/unit/distance/test_fp32_inner_produc
 add_deglib_test(test_uint8_l2 src/unit/distance/test_uint8_l2.cpp)
 add_deglib_test(test_sizebounded_graph src/unit/graph/test_sizebounded_graph.cpp)
 add_deglib_test(test_readonly_graph src/unit/graph/test_readonly_graph.cpp)
+add_deglib_test(test_graph src/unit/test_graph.cpp)
 add_deglib_test(test_pruning src/unit/optimization/test_pruning.cpp)
+add_deglib_test(test_analysis src/unit/test_analysis.cpp)
 
 # Integration tests (fast, recall-only, registered with CTest for CI)
 add_deglib_integration_test(test_builder_integration src/integration/test_builder_integration.cpp)

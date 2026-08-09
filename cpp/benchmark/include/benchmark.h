@@ -9,6 +9,7 @@
 #include <span>
 
 #include <deglib/deglib.h>
+#include "repository.h"
 #include "stopwatch.h"
 
 namespace deglib::benchmark
@@ -54,7 +55,7 @@ static float test_approx_anns(const deglib::graph::InternalGraph& graph, const s
         while (result_queue.empty() == false)
         {
             const auto& result = result_queue.top();
-            const auto external_id = graph.getExternalLabel(result.getInternalIndex());
+            const auto external_id = graph.getExternalLabel(result.getIdentifier());
             if (gt.find(external_id) != gt.end()) correct++;
             result_queue.pop();
         }
@@ -89,7 +90,7 @@ static float test_approx_explore(const deglib::graph::InternalGraph& graph, cons
         while (result_queue.empty() == false)
         {
             const auto& result = result_queue.top();
-            const auto external_id = graph.getExternalLabel(result.getInternalIndex());
+            const auto external_id = graph.getExternalLabel(result.getIdentifier());
             if (gt.find(external_id) != gt.end()) correct++;
             result_queue.pop();
         }

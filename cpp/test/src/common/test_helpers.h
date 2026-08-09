@@ -489,7 +489,7 @@ inline static void run_integration_test(const char* name, deglib::Metric metric,
         {
             auto top_item = result.top();
             result.pop();
-            uint32_t ext_label = graph.getExternalLabel(top_item.getInternalIndex());
+            uint32_t ext_label = graph.getExternalLabel(top_item.getIdentifier());
             if (gt_set.count(ext_label))
             {
                 total_correct++;
@@ -714,7 +714,7 @@ inline static void run_regression_test(const char* name, deglib::Metric metric, 
             {
                 auto top_item = result.top();
                 result.pop();
-                uint32_t ext_label = graph.getExternalLabel(top_item.getInternalIndex());
+                uint32_t ext_label = graph.getExternalLabel(top_item.getIdentifier());
                 if (gt_set.count(ext_label))
                 {
                     total_correct++;

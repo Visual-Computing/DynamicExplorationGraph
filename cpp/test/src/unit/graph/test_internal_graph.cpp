@@ -22,7 +22,7 @@ TEST(ObjectDistance, DefaultCtor) {
 
 TEST(ObjectDistance, Ctor) {
    deglib::graph::ObjectDistance od(42, 3.14f);
-   EXPECT_EQ(od.getInternalIndex(), 42u);
+   EXPECT_EQ(od.getIdentifier(), 42u);
    EXPECT_NEAR(od.getDistance(), 3.14f, 1e-6f);
 }
 
@@ -80,7 +80,7 @@ TEST(ResultSet, EmplaceAndTop) {
    // Top should be the element with the largest distance
    auto top = rs.top();
    EXPECT_NEAR(top.getDistance(), 2.0f, 1e-6f);
-   EXPECT_EQ(top.getInternalIndex(), 3u);
+   EXPECT_EQ(top.getIdentifier(), 3u);
 }
 
 TEST(ResultSet, PopRemovesMax) {
@@ -120,7 +120,7 @@ TEST(UncheckedSet, MinHeapOrder) {
    // UncheckedSet uses std::greater → min-heap
    auto top = us.top();
    EXPECT_NEAR(top.getDistance(), 1.0f, 1e-6f);
-   EXPECT_EQ(top.getInternalIndex(), 2u);
+   EXPECT_EQ(top.getIdentifier(), 2u);
 }
 
 TEST(UncheckedSet, PopRemovesMin) {

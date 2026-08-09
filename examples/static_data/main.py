@@ -154,7 +154,7 @@ def run_static_benchmark(
     # Load from file if --graph-path was explicitly provided and file exists
     if graph_path and graph_path.exists():
         print(f"\n=== Loading Graph from File: {graph_path} ===")
-        graph = deglib.graph.load_readonly_graph(str(graph_path))
+        graph = deglib.load_readonly_graph(str(graph_path))
         print(f"Graph loaded: {graph.size()} vertices")
     else:
         if graph_path:
@@ -163,16 +163,16 @@ def run_static_benchmark(
             print(f"\n=== Building Graph with {build_threads} threads (in RAM, no file path specified) ===")
 
         build_start = time.perf_counter()
-        graph_mut = deglib.builder.SizeBoundedGraph.create_empty(
+        graph_mut = deglib.DynamicExplorationGraph.create_empty(
             capacity=base_vecs.shape[0],
             dims=dims,
             edges_per_vertex=preset["k"],
             metric=metric,
             instruction=instruction_enum,
         )
-        builder = deglib.builder.EvenRegularGraphBuilder(
+        builder = deglib.GraphBuilder(
             graph_mut,
-            rng=deglib.Mt19937(7),
+            seed=7,
             optimization_target=optimization_target,
             extend_k=preset.get("extend_k", preset["k"]),
             extend_eps=preset["build_eps"],
@@ -194,9 +194,9 @@ def run_static_benchmark(
             graph_path.parent.mkdir(parents=True, exist_ok=True)
             graph_mut.save_graph(str(graph_path))
             print(f"Graph saved to file: {graph_path}")
-            graph = deglib.graph.load_readonly_graph(str(graph_path))
+            graph = deglib.load_readonly_graph(str(graph_path))
         else:
-            graph = deglib.graph.ReadOnlyGraph.from_graph(graph_mut)
+            graph = graph_mut.to_readonly()
 
     # Graph Analysis
     analyze_graph(graph)
@@ -263,15 +263,11 @@ def run_static_benchmark(
 
         print(f"\n--- Exploration Test (k={actual_explore_k}) ---")
 
-        entry_indices = np.array([
-            graph.get_internal_index(int(explore_entry[i][0] if explore_entry.ndim > 1 else explore_entry[i]))
-            for i in range(len(explore_entry))
-        ], dtype=np.uint32)
-
+        entry_labels = np.ascontiguousarray(explore_entry, dtype=np.uint32)
         explore_recalls = []
         explore_qps = []
         last_recall = -1.0
-        query_count = len(entry_indices)
+        query_count = len(entry_labels)
 
         k_factor = 100
         max_dist_steps = []
@@ -286,7 +282,7 @@ def run_static_benchmark(
             start_time = time.perf_counter()
             for _ in range(explore_repeat):
                 indices_batch, _ = graph.explore(
-                    entry_indices,
+                    entry_labels,
                     k=actual_explore_k,
                     include_entry=True,
                     max_distance_computation_count=max_dist,
@@ -339,16 +335,15 @@ def main():
     parser.add_argument(
         "dataset",
         nargs="?",
-        default=None,
+        default="audio",
         choices=["sift1m", "deep1m", "glove", "audio", "enron", "all"],
-        help="Dataset name (e.g. sift1m, deep1m, glove, audio, enron, all) (default: sift1m)",
+        help="Dataset name (e.g. sift1m, deep1m, glove, audio, enron, all) (default: audio)",
     )
     parser.add_argument(
-        "--graph-dir",
+        "--graph-path",
         type=Path,
         default=None,
-        help="Directory to save generated .deg graph files (default: <cache_dir>/<dataset>/deg)",
-    )
+        help="Save generated .deg graph files to this path. (default: none)")
     parser.add_argument(
         "--instruction",
         choices=["auto", "scalar", "avx2", "avx512"],
@@ -386,7 +381,7 @@ def main():
 
     args = parser.parse_args()
 
-    dataset_name = args.dataset or "sift1m"
+    dataset_name = args.dataset 
     cache_dir = Path(args.cache_dir) if args.cache_dir else get_default_cache_dir()
 
     # Detect CPU Instruction Set

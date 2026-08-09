@@ -74,7 +74,7 @@ To load a dataset formatted like the [TexMex-Datasets](http://corpus-texmex.iris
 import deglib
 import numpy as np
 
-dataset: np.ndarray = deglib.repository.fvecs_read("path/to/data.fvecs")
+dataset: np.ndarray = np.load("path/to/data.npy")  # or load from .fvecs, .hdf5, etc.
 num_samples, dims = dataset.shape
 ```
 The dataset is a numpy array with shape (N, D), where N is the number of feature
@@ -83,9 +83,9 @@ vectors and D is the number of dimensions of each feature vector.
 ### Building a Graph
 
 ```python
-graph = deglib.builder.build_from_data(dataset, edges_per_vertex=30, callback="progress")
+graph = deglib.build_from_data(dataset, edges_per_vertex=30, callback="progress")
 graph.save_graph("/path/to/graph.deg")
-rd_graph = deglib.graph.load_readonly_graph("/path/to/graph.deg")
+rd_graph = deglib.load_readonly_graph("/path/to/graph.deg")
 ```
 
 *Note: Threaded building is not supported for lid == OptimizationTarget.LowLID (the default). Use `lid=deglib.builder.LID.High` or `lid=deglib.builder.LID.Low` in `build_from_data()` for multithreaded building*

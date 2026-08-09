@@ -12,7 +12,7 @@ class CallbackTester:
 
     def __call__(self, status: deglib_cpp.BuilderStatus):
         assert isinstance(status, deglib_cpp.BuilderStatus), \
-            'Got instance of type \"{}\" for builder_status in callback'.format(type(status))
+            'Got instance of type "{}" for builder_status in callback'.format(type(status))
         self.last_status = status
         self.num_callbacks += 1
 
@@ -27,10 +27,10 @@ class TestGraphs:
 
     @pytest.mark.parametrize('batch', [True, False])
     def test_add_entry(self, batch):
-        graph = deglib.graph.SizeBoundedGraph.create_empty(
+        graph = deglib.DynamicExplorationGraph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.FP32_L2
         )
-        builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
         if batch:
             builder.add_entry(range(self.data.shape[0]), self.data)
@@ -41,10 +41,10 @@ class TestGraphs:
 
     @pytest.mark.parametrize('optimization_target', list(deglib.builder.OptimizationTarget))
     def test_build_simple(self, optimization_target):
-        graph = deglib.graph.SizeBoundedGraph.create_empty(
+        graph = deglib.DynamicExplorationGraph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.FP32_L2
         )
-        builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30, optimization_target=optimization_target)
+        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30, optimization_target=optimization_target)
         for i, vec in enumerate(self.data):
             vec: np.ndarray
             builder.add_entry(i, vec)
@@ -53,19 +53,19 @@ class TestGraphs:
 
     @pytest.mark.parametrize('optimization_target', list(deglib.builder.OptimizationTarget))
     def test_build_batch(self, optimization_target):
-        graph = deglib.graph.SizeBoundedGraph.create_empty(
+        graph = deglib.DynamicExplorationGraph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.FP32_L2
         )
-        builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30, optimization_target=optimization_target)
+        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30, optimization_target=optimization_target)
         builder.add_entry(range(self.data.shape[0]), self.data)
 
         builder.build()
 
     def test_build_with_remove(self):
-        graph = deglib.graph.SizeBoundedGraph.create_empty(
+        graph = deglib.DynamicExplorationGraph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.FP32_L2
         )
-        builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
         for label, vec in enumerate(self.data):
             vec: np.ndarray
@@ -78,10 +78,10 @@ class TestGraphs:
         builder.build()
 
     def test_get_num_entries(self):
-        graph = deglib.graph.SizeBoundedGraph.create_empty(
+        graph = deglib.DynamicExplorationGraph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.FP32_L2
         )
-        builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
         def _check_entries(expected: int, action: str):
             assert action in ('new', 'remove')
@@ -109,10 +109,10 @@ class TestGraphs:
         _check_entries(self.data.shape[0] // 2, 'remove')
 
     def test_callback(self):
-        graph = deglib.graph.SizeBoundedGraph.create_empty(
+        graph = deglib.DynamicExplorationGraph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.FP32_L2
         )
-        builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
         builder.add_entry(range(self.data.shape[0]), self.data)
 
         tester = CallbackTester()
@@ -122,10 +122,10 @@ class TestGraphs:
         assert tester.last_status.step > 0
 
     def test_concurrency_settings(self):
-        graph = deglib.graph.SizeBoundedGraph.create_empty(
+        graph = deglib.DynamicExplorationGraph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.FP32_L2
         )
-        builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
         # Test thread count
         builder.set_thread_count(2)
@@ -139,10 +139,10 @@ class TestGraphs:
         builder.build()
 
     def test_stop(self):
-        graph = deglib.graph.SizeBoundedGraph.create_empty(
+        graph = deglib.DynamicExplorationGraph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, deglib.Metric.FP32_L2
         )
-        builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
         builder.add_entry(range(self.data.shape[0]), self.data)
 
         stopped_in_callback = False
@@ -154,4 +154,3 @@ class TestGraphs:
 
         builder.build(callback=_stopping_callback)
         assert stopped_in_callback
-

@@ -5,8 +5,16 @@ import urllib.request
 from pathlib import Path
 from typing import Dict, Any, Tuple
 import numpy as np
-import deglib.repository as repo
 from deglib.distances import Metric, FloatSpace
+
+
+def ivecs_read(filename: str | Path) -> np.ndarray:
+    a = np.fromfile(filename, dtype=np.int32)
+    d = a[0]
+    return a.reshape(-1, d + 1)[:, 1:].copy()
+
+def fvecs_read(filename: str | Path) -> np.ndarray:
+    return ivecs_read(filename).view(np.float32)
 
 DATASET_METADATA: Dict[str, Dict[str, Any]] = {
     "sift1m": {
@@ -275,10 +283,10 @@ def load_dataset_for_dynamic(
     query_path = files_dir / meta["query_file"]
 
     print(f"Loading base features from {base_path}...")
-    base_vecs = repo.fvecs_read(base_path)
+    base_vecs = fvecs_read(base_path)
 
     print(f"Loading query features from {query_path}...")
-    query_vecs = repo.fvecs_read(query_path)
+    query_vecs = fvecs_read(query_path)
 
     dims = base_vecs.shape[1]
     metric = meta["metric"]
@@ -291,7 +299,7 @@ def load_dataset_for_dynamic(
         compute_and_save_anns_gt(base_vecs, query_vecs, float_space, 100, gt_path)
 
     print(f"Loading full groundtruth indices from {gt_path}...")
-    gt_vecs_full = repo.ivecs_read(gt_path)
+    gt_vecs_full = ivecs_read(gt_path)
 
     # Half ANNS Ground Truth (against first base_count/2 vectors)
     gt_half_path = files_dir / meta["gt_half_file"]
@@ -300,6 +308,6 @@ def load_dataset_for_dynamic(
         compute_and_save_anns_gt_half(base_vecs, query_vecs, float_space, 100, gt_half_path)
 
     print(f"Loading half groundtruth indices from {gt_half_path}...")
-    gt_vecs_half = repo.ivecs_read(gt_half_path)
+    gt_vecs_half = ivecs_read(gt_half_path)
 
     return base_vecs, query_vecs, gt_vecs_full, gt_vecs_half, meta

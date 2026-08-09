@@ -209,7 +209,7 @@ TEST(ReadOnlyGraph, Explore) {
     // all other vertices should be found
     std::unordered_set<uint32_t> found;
     while (!results.empty()) {
-        found.insert(results.top().getInternalIndex());
+        found.insert(results.top().getIdentifier());
         results.pop();
     }
     EXPECT_TRUE(found.contains(1));
@@ -278,7 +278,7 @@ TEST(ReadOnlyGraph, Search) {
     // Find the best (minimum distance) result by iterating through all results.
     auto best = std::min_element(results.begin(), results.end(),
         [](const auto& a, const auto& b) { return a.getDistance() < b.getDistance(); });
-    EXPECT_EQ(best->getInternalIndex(), graph.getInternalIndex(4));
+    EXPECT_EQ(best->getIdentifier(), graph.getInternalIndex(4));
 }
 
 TEST(ReadOnlyGraph, HasPath) {
@@ -332,7 +332,7 @@ TEST(ReadOnlyGraph, ExploreBasicIncludeEntry) {
 
     bool found_entry = false;
     while (!results.empty()) {
-        if (results.top().getInternalIndex() == 0u) {
+        if (results.top().getIdentifier() == 0u) {
             found_entry = true;
         }
         results.pop();
@@ -372,6 +372,220 @@ TEST(ReadOnlyGraph, ExploreWithMaxDistanceCount) {
     auto results = graph.explore(0, 5, 2, 0.0f, /*include_entry=*/true, nullptr);
     EXPECT_GT(results.size(), 0u);
     EXPECT_LE(results.size(), 5u);
+}
+// ---------------------------------------------------------------------------
+//  Internal vs External ID Verification
+// ---------------------------------------------------------------------------
+//
+// These tests verify that ReadOnlyGraph (as an InternalGraph implementation)
+// strictly operates on internal indices (0..N-1) for search(), explore(),
+// hasPath(), and getNeighborIndices(), while hasVertex() and getExternalLabel()
+// / getInternalIndex() handle the external label ↔ internal index mapping.
+//
+// Non-sequential external labels (1005, 9999, 42, 707, 12345) are used so that
+// any accidental swap of external labels and internal indices will instantly
+// fail test assertions.
+
+namespace {
+
+// Non-sequential, arbitrary external labels — deliberately distinct from 0..N-1
+constexpr std::array<uint32_t, 5> kExtLabels = {1005, 9999, 42, 707, 12345};
+
+} // anonymous namespace
+
+TEST(ReadOnlyGraphInternalIndicesInSearch, SearchReturnsInternalIndices) {
+   deglib::FloatSpace space(4, deglib::Metric::L2);
+   deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
+
+   // Add vertices with non-sequential external labels at distinct positions
+   mutable_graph.addVertex(kExtLabels[0], make_float_bytes(std::vector<float>{0.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[1], make_float_bytes(std::vector<float>{1.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[2], make_float_bytes(std::vector<float>{2.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[3], make_float_bytes(std::vector<float>{3.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[4], make_float_bytes(std::vector<float>{4.0f, 0.0f, 0.0f, 0.0f}).get());
+
+   // Fully connect vertices 0..3 (neighbors must be sorted ascending)
+   set_edges(mutable_graph, 0, {0, 1, 2, 3}, {0.0f, 1.0f, 2.0f, 3.0f});
+   set_edges(mutable_graph, 1, {0, 1, 2, 3}, {1.0f, 0.0f, 1.0f, 2.0f});
+   set_edges(mutable_graph, 2, {0, 1, 2, 3}, {2.0f, 1.0f, 0.0f, 1.0f});
+   set_edges(mutable_graph, 3, {0, 1, 2, 3}, {3.0f, 2.0f, 1.0f, 0.0f});
+   // Vertex 4 has self-loop only
+
+   deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+
+   // search() on InternalGraph returns internal indices in the ResultSet
+   std::vector<float> query = {0.1f, 0.0f, 0.0f, 0.0f};
+   auto results = graph.search(std::span<const float>(query), 3, 0.0f);
+
+   ASSERT_GT(results.size(), 0u);
+
+   std::unordered_set<uint32_t> internal_indices = {0, 1, 2, 3, 4};
+   std::unordered_set<uint32_t> ext_labels(kExtLabels.begin(), kExtLabels.end());
+
+   while (!results.empty()) {
+       uint32_t id = results.top().getIdentifier();
+       EXPECT_TRUE(internal_indices.contains(id))
+           << "search() result identifier " << id << " is not a valid internal index (0..N-1)";
+       EXPECT_FALSE(ext_labels.contains(id))
+           << "search() result identifier " << id << " is an external label, not an internal index";
+       results.pop();
+   }
+}
+
+TEST(ReadOnlyGraphInternalIndicesInSearch, ExploreReturnsInternalIndices) {
+   deglib::FloatSpace space(4, deglib::Metric::L2);
+   deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
+
+   mutable_graph.addVertex(kExtLabels[0], make_float_bytes(std::vector<float>{0.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[1], make_float_bytes(std::vector<float>{1.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[2], make_float_bytes(std::vector<float>{2.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[3], make_float_bytes(std::vector<float>{3.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[4], make_float_bytes(std::vector<float>{4.0f, 0.0f, 0.0f, 0.0f}).get());
+
+   set_edges(mutable_graph, 0, {0, 1, 2, 3}, {0.0f, 1.0f, 2.0f, 3.0f});
+   set_edges(mutable_graph, 1, {0, 1, 2, 3}, {1.0f, 0.0f, 1.0f, 2.0f});
+   set_edges(mutable_graph, 2, {0, 1, 2, 3}, {2.0f, 1.0f, 0.0f, 1.0f});
+   set_edges(mutable_graph, 3, {0, 1, 2, 3}, {3.0f, 2.0f, 1.0f, 0.0f});
+
+   deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+
+   // explore() takes an internal index and returns internal indices
+   auto results = graph.explore(0, 3, 0, 0.0f, /*include_entry=*/true, nullptr);
+
+   ASSERT_GT(results.size(), 0u);
+
+   std::unordered_set<uint32_t> internal_indices = {0, 1, 2, 3, 4};
+   std::unordered_set<uint32_t> ext_labels(kExtLabels.begin(), kExtLabels.end());
+
+   while (!results.empty()) {
+       uint32_t id = results.top().getIdentifier();
+       EXPECT_TRUE(internal_indices.contains(id))
+           << "explore() result identifier " << id << " is not a valid internal index";
+       EXPECT_FALSE(ext_labels.contains(id))
+           << "explore() result identifier " << id << " is an external label, not an internal index";
+       results.pop();
+   }
+}
+
+TEST(ReadOnlyGraphInternalIndicesInSearch, HasPathReturnsInternalIndices) {
+   deglib::FloatSpace space(4, deglib::Metric::L2);
+   deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
+
+   mutable_graph.addVertex(kExtLabels[0], make_float_bytes(std::vector<float>{0.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[1], make_float_bytes(std::vector<float>{1.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[2], make_float_bytes(std::vector<float>{2.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[3], make_float_bytes(std::vector<float>{3.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[4], make_float_bytes(std::vector<float>{4.0f, 0.0f, 0.0f, 0.0f}).get());
+
+   set_edges(mutable_graph, 0, {0, 1, 2, 3}, {0.0f, 1.0f, 2.0f, 3.0f});
+   set_edges(mutable_graph, 1, {0, 1, 2, 3}, {1.0f, 0.0f, 1.0f, 2.0f});
+   set_edges(mutable_graph, 2, {0, 1, 2, 3}, {2.0f, 1.0f, 0.0f, 1.0f});
+   set_edges(mutable_graph, 3, {0, 1, 2, 3}, {3.0f, 2.0f, 1.0f, 0.0f});
+
+   deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+
+   // hasPath() takes internal entry indices and a internal to_vertex index
+   auto path = graph.hasPath({0}, 1, 0.0f, 5);
+
+   ASSERT_GT(path.size(), 0u);
+
+   std::unordered_set<uint32_t> internal_indices = {0, 1, 2, 3, 4};
+   std::unordered_set<uint32_t> ext_labels(kExtLabels.begin(), kExtLabels.end());
+
+   for (const auto& od : path) {
+       uint32_t id = od.getIdentifier();
+       EXPECT_TRUE(internal_indices.contains(id))
+           << "hasPath() result identifier " << id << " is not a valid internal index";
+       EXPECT_FALSE(ext_labels.contains(id))
+           << "hasPath() result identifier " << id << " is an external label, not an internal index";
+   }
+}
+
+TEST(ReadOnlyGraphInternalIndicesInSearch, GetNeighborIndicesReturnsInternalIndices) {
+   deglib::FloatSpace space(4, deglib::Metric::L2);
+   deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
+
+   mutable_graph.addVertex(kExtLabels[0], make_float_bytes(std::vector<float>{0.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[1], make_float_bytes(std::vector<float>{1.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[2], make_float_bytes(std::vector<float>{2.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[3], make_float_bytes(std::vector<float>{3.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[4], make_float_bytes(std::vector<float>{4.0f, 0.0f, 0.0f, 0.0f}).get());
+
+   set_edges(mutable_graph, 0, {0, 1, 2, 3}, {0.0f, 1.0f, 2.0f, 3.0f});
+
+   deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+
+   // getNeighborIndices() takes an internal index and returns internal indices
+   const auto* neighbors = graph.getNeighborIndices(0);
+   uint8_t epv = graph.getEdgesPerVertex();
+
+   std::unordered_set<uint32_t> internal_indices = {0, 1, 2, 3, 4};
+   std::unordered_set<uint32_t> ext_labels(kExtLabels.begin(), kExtLabels.end());
+
+   for (uint8_t i = 0; i < epv; ++i) {
+       uint32_t n = neighbors[i];
+       EXPECT_TRUE(internal_indices.contains(n))
+           << "getNeighborIndices()[ " << i << "] = " << n << " is not a valid internal index";
+       EXPECT_FALSE(ext_labels.contains(n))
+           << "getNeighborIndices()[ " << i << "] = " << n << " is an external label, not an internal index";
+   }
+}
+
+TEST(ReadOnlyGraphSaveLoadLabelPreservation, SaveLoadPreservesExternalLabels) {
+   deglib::FloatSpace space(4, deglib::Metric::L2);
+   deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
+
+   // Add vertices with non-sequential external labels
+   mutable_graph.addVertex(kExtLabels[0], make_float_bytes(std::vector<float>{0.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[1], make_float_bytes(std::vector<float>{1.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[2], make_float_bytes(std::vector<float>{2.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[3], make_float_bytes(std::vector<float>{3.0f, 0.0f, 0.0f, 0.0f}).get());
+   mutable_graph.addVertex(kExtLabels[4], make_float_bytes(std::vector<float>{4.0f, 0.0f, 0.0f, 0.0f}).get());
+
+   set_edges(mutable_graph, 0, {0, 1, 2, 3}, {0.0f, 1.0f, 2.0f, 3.0f});
+   set_edges(mutable_graph, 1, {0, 1, 2, 3}, {1.0f, 0.0f, 1.0f, 2.0f});
+   set_edges(mutable_graph, 2, {0, 1, 2, 3}, {2.0f, 1.0f, 0.0f, 1.0f});
+   set_edges(mutable_graph, 3, {0, 1, 2, 3}, {3.0f, 2.0f, 1.0f, 0.0f});
+
+   // Save the SizeBoundedGraph to disk
+   std::string path = "test/readonly_label_preservation_test.deg";
+   bool saved = mutable_graph.saveGraph(path.c_str());
+   EXPECT_TRUE(saved);
+
+   // Load as ReadOnlyGraph
+   auto loaded = deglib::graph::load_readonly_graph(path.c_str());
+
+   // Verify external labels are preserved after save/load
+   EXPECT_EQ(loaded.size(), 5u);
+   EXPECT_EQ(loaded.getExternalLabel(0), kExtLabels[0]);
+   EXPECT_EQ(loaded.getExternalLabel(1), kExtLabels[1]);
+   EXPECT_EQ(loaded.getExternalLabel(2), kExtLabels[2]);
+   EXPECT_EQ(loaded.getExternalLabel(3), kExtLabels[3]);
+   EXPECT_EQ(loaded.getExternalLabel(4), kExtLabels[4]);
+
+   // Verify bidirectional mapping is preserved
+   EXPECT_EQ(loaded.getInternalIndex(kExtLabels[0]), 0u);
+   EXPECT_EQ(loaded.getInternalIndex(kExtLabels[1]), 1u);
+   EXPECT_EQ(loaded.getInternalIndex(kExtLabels[2]), 2u);
+   EXPECT_EQ(loaded.getInternalIndex(kExtLabels[3]), 3u);
+   EXPECT_EQ(loaded.getInternalIndex(kExtLabels[4]), 4u);
+
+   // Verify hasVertex works with external labels
+   for (uint32_t label : kExtLabels) {
+       EXPECT_TRUE(loaded.hasVertex(label));
+   }
+
+   // Verify getNeighborIndices returns internal indices (not external labels)
+   const auto* neighbors = loaded.getNeighborIndices(0);
+   uint8_t epv = loaded.getEdgesPerVertex();
+   std::unordered_set<uint32_t> internal_indices = {0, 1, 2, 3, 4};
+   for (uint8_t i = 0; i < epv; ++i) {
+       EXPECT_TRUE(internal_indices.contains(neighbors[i]))
+           << "getNeighborIndices()[ " << i << "] = " << neighbors[i]
+           << " is not a valid internal index after save/load";
+   }
+
+   std::filesystem::remove(path);
 }
 
 } // anonymous namespace

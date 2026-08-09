@@ -1,14 +1,13 @@
 import enum
 import sys
 import time
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Union
 
 import numpy as np
 import deglib_cpp
 
 from .distances import Metric, InstructionSet
-from .std import Mt19937
-from .graph import MutableGraph, SizeBoundedGraph
+from .graph import DynamicExplorationGraph
 from .utils import assure_array, InvalidShapeException
 
 
@@ -41,27 +40,27 @@ class OptimizationTarget(enum.IntEnum):
             raise ValueError('Unknown OptimizationTarget: {}'.format(self))
 
 
-class EvenRegularGraphBuilder:
+class GraphBuilder:
     """
-    Constructs an EvenRegularGraphBuilder for building and optimizing a regular graph.
+    Constructs a GraphBuilder for building and optimizing a regular graph.
 
     This class provides functionality to incrementally build and optimize a graph structure
     by adding/removing vertices and improving edge connections through various strategies.
     """
     def __init__(
-            self, graph: MutableGraph, rng: Mt19937 | None = None,
+            self, graph: DynamicExplorationGraph, seed: int | None = None,
             optimization_target: OptimizationTarget = OptimizationTarget.LowLID,
             extend_k: int = 0, extend_eps: float = 0.1,
             improve_k: int = 0, improve_eps: float = 0.001, max_path_length: int = 5,
             swap_tries: int = 0, additional_swap_tries: int = 0
     ):
         """
-        Initialize an EvenRegularGraphBuilder with the specified parameters.
+        Initialize a GraphBuilder with the specified parameters.
 
-        :param graph: The preallocated mutable graph to build and optimize
-        :type graph: MutableGraph
-        :param rng: Random number generator used for randomized operations. If None, a new Mt19937 will be created
-        :type rng: Mt19937 | None
+        :param graph: The preallocated mutable DynamicExplorationGraph to build and optimize
+        :type graph: DynamicExplorationGraph
+        :param seed: Random seed used for randomized operations. If None, a default seed is used.
+        :type seed: int | None
         :param optimization_target: Optimization strategy based on data distribution characteristics
         :type optimization_target: OptimizationTarget
         :param extend_k: Number of neighbors to consider when extending the graph. Defaults to graph's edges_per_vertex
@@ -73,16 +72,13 @@ class EvenRegularGraphBuilder:
         :param swap_tries: Number of improvement attempts per build step
         :param additional_swap_tries: Additional improvement attempts after a successful improvement
         """
-        if rng is None:
-            rng = Mt19937()
         if extend_k < graph.get_edges_per_vertex():
             extend_k = graph.get_edges_per_vertex()
-        self.builder_cpp = deglib_cpp.EvenRegularGraphBuilder(
-            graph.dynamic_exploration_graph_cpp, rng.to_cpp(), optimization_target.to_cpp(), extend_k, extend_eps, improve_k, improve_eps,
+        self.builder_cpp = deglib_cpp.GraphBuilder(
+            graph.dynamic_exploration_graph_cpp, seed, optimization_target.to_cpp(), extend_k, extend_eps, improve_k, improve_eps,
             max_path_length, swap_tries, additional_swap_tries
         )
         self.graph = graph
-        self.rng = rng
         self.optimization_target = optimization_target
 
     def add_entry(self, external_label: int | Iterable[int] | np.ndarray, feature: np.ndarray):
@@ -193,7 +189,7 @@ class EvenRegularGraphBuilder:
         return self.builder_cpp.get_batch_size()
 
     def build(
-            self, callback: Callable[[deglib_cpp.BuilderStatus], None] | str | None = None,
+            self, callback: Union[Callable[[deglib_cpp.BuilderStatus], None], str, None] = None,
             infinite: bool = False
     ):
         """
@@ -223,24 +219,27 @@ class EvenRegularGraphBuilder:
 
     def __repr__(self):
         """
-        Return a string representation of the EvenRegularGraphBuilder.
+        Return a string representation of the GraphBuilder.
 
         :return: String representation showing the number of vertices added
         :rtype: str
         """
-        return 'EvenRegularGraphBuilder(vertices_added={})'.format(self.graph.size())
+        return 'GraphBuilder(vertices_added={})'.format(self.graph.size())
 
 
 def build_from_data(
-        data: np.ndarray, labels: Iterable[int] | None = None, edges_per_vertex: int = 32, capacity: int = -1,
-        metric: Metric = Metric.FP32_L2, instruction: InstructionSet = InstructionSet.Auto, rng: Mt19937 | None = None,
+        data: np.ndarray, labels: Union[Iterable[int], np.ndarray, None] = None, edges_per_vertex: int = 32,
+        capacity: int = -1,
+        metric: Metric | str = Metric.FP32_L2, instruction: InstructionSet | str = InstructionSet.Auto,
+        seed: int | None = None,
         optimization_target: OptimizationTarget = OptimizationTarget.LowLID, extend_k: int = 0, extend_eps: float = 0.2,
         improve_k: int = 0, improve_eps: float = 0.001, max_path_length: int = 5,
         swap_tries: int = 0, additional_swap_tries: int = 0,
-        callback: Callable[[deglib_cpp.BuilderStatus], None] | str | None = None
-) -> SizeBoundedGraph:
+        thread_count: int = 0,
+        callback: Union[Callable[[deglib_cpp.BuilderStatus], None], str, None] = None
+) -> DynamicExplorationGraph:
     """
-    Create a new graph built from the given data using an EvenRegularGraphBuilder.
+    Create a new graph built from the given data using a GraphBuilder.
 
     This is a convenience function that creates a graph, builder, adds all data entries,
     and builds the complete graph in one call. Infinite building is not supported.
@@ -249,17 +248,17 @@ def build_from_data(
     :type data: np.ndarray
     :param labels: Labels for each data entry with shape [N]. If None, labels 0 to N-1 are created.
                   If numpy array, should have dtype uint32
-    :type labels: Iterable[int] | None
+    :type labels: Iterable[int] | np.ndarray | None
     :param edges_per_vertex: Number of edges per vertex in the graph
     :type edges_per_vertex: int
     :param capacity: Maximum number of vertices the graph can hold. If <= 0, defaults to data.shape[0]
     :type capacity: int
     :param metric: Distance metric for measuring feature similarity
-    :type metric: Metric
+    :type metric: Metric | str
     :param instruction: CPU Instruction Set to use for SIMD vector distance computation
-    :type instruction: InstructionSet
-    :param rng: Random number generator. If None, a new Mt19937 will be created
-    :type rng: Mt19937 | None
+    :type instruction: InstructionSet | str
+    :param seed: Random seed. If None, a default seed is used.
+    :type seed: int | None
     :param optimization_target: Optimization strategy based on data distribution characteristics
     :type optimization_target: OptimizationTarget
     :param extend_k: Number of neighbors to consider when extending the graph
@@ -276,16 +275,18 @@ def build_from_data(
     :type swap_tries: int
     :param additional_swap_tries: Additional improvement attempts after a successful improvement
     :type additional_swap_tries: int
+    :param thread_count: Number of threads to use for parallel building. If 0, uses hardware concurrency.
+    :type thread_count: int
     :param callback: Callback function for build progress reporting. If "progress", shows progress bar
     :type callback: Callable[[deglib_cpp.BuilderStatus], None] | str | None
     :return: The constructed and optimized graph
-    :rtype: SizeBoundedGraph
+    :rtype: DynamicExplorationGraph
     """
     if capacity <= 0:
         capacity = data.shape[0]
-    graph = SizeBoundedGraph.create_empty(capacity, data.shape[1], edges_per_vertex, metric, instruction)
-    builder = EvenRegularGraphBuilder(
-        graph, rng, optimization_target=optimization_target, extend_k=extend_k, extend_eps=extend_eps,
+    graph = DynamicExplorationGraph.create_empty(capacity, data.shape[1], edges_per_vertex, metric, instruction)
+    builder = GraphBuilder(
+        graph, seed=seed, optimization_target=optimization_target, extend_k=extend_k, extend_eps=extend_eps,
         improve_k=improve_k, improve_eps=improve_eps, max_path_length=max_path_length, swap_tries=swap_tries,
         additional_swap_tries=additional_swap_tries
     )
@@ -294,6 +295,9 @@ def build_from_data(
         labels = np.arange(data.shape[0], dtype=np.uint32)
 
     builder.add_entry(labels, data)
+
+    if thread_count > 0:
+        builder.set_thread_count(thread_count)
 
     builder.build(callback=callback)
 

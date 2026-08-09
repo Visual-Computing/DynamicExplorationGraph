@@ -78,14 +78,13 @@ def test_readonly_graph_regression_fp32_l2():
     search_gt_data = compute_groundtruth_l2(base_data, query_data, search_k)
     explore_gt_data = compute_groundtruth_l2(base_data, explore_data, search_k)
 
-    # Build SizeBoundedGraph
-    mutable_graph = deglib.graph.SizeBoundedGraph.create_empty(
+    # Build DynamicExplorationGraph
+    mutable_graph = deglib.DynamicExplorationGraph.create_empty(
         base_count, dim, edges_per_vertex, deglib.Metric.FP32_L2
     )
 
-    rng = deglib.std.Mt19937(42)
-    builder = deglib.builder.EvenRegularGraphBuilder(
-        mutable_graph, rng=rng, optimization_target=deglib.builder.OptimizationTarget.LowLID,
+    builder = deglib.GraphBuilder(
+        mutable_graph, seed=42, optimization_target=deglib.builder.OptimizationTarget.LowLID,
         extend_k=edges_per_vertex, extend_eps=extend_eps, improve_k=0, improve_eps=0.0
     )
     builder.set_thread_count(1)
@@ -93,7 +92,7 @@ def test_readonly_graph_regression_fp32_l2():
     builder.build()
 
     # Convert to ReadOnlyGraph
-    graph = deglib.graph.ReadOnlyGraph.from_graph(mutable_graph)
+    graph = mutable_graph.to_readonly()
 
     # 1. Search Benchmark
     last_search_results = None
@@ -192,14 +191,13 @@ def test_readonly_graph_regression_fp32_inner_product():
     search_gt_data = compute_groundtruth_innerproduct(base_data, query_data, search_k)
     explore_gt_data = compute_groundtruth_innerproduct(base_data, explore_data, search_k)
 
-    # Build SizeBoundedGraph
-    mutable_graph = deglib.graph.SizeBoundedGraph.create_empty(
+    # Build DynamicExplorationGraph
+    mutable_graph = deglib.DynamicExplorationGraph.create_empty(
         base_count, dim, edges_per_vertex, deglib.Metric.FP32_InnerProduct
     )
 
-    rng = deglib.std.Mt19937(42)
-    builder = deglib.builder.EvenRegularGraphBuilder(
-        mutable_graph, rng=rng, optimization_target=deglib.builder.OptimizationTarget.LowLID,
+    builder = deglib.GraphBuilder(
+        mutable_graph, seed=42, optimization_target=deglib.builder.OptimizationTarget.LowLID,
         extend_k=edges_per_vertex, extend_eps=extend_eps, improve_k=0, improve_eps=0.0
     )
     builder.set_thread_count(1)
@@ -207,7 +205,7 @@ def test_readonly_graph_regression_fp32_inner_product():
     builder.build()
 
     # Convert to ReadOnlyGraph
-    graph = deglib.graph.ReadOnlyGraph.from_graph(mutable_graph)
+    graph = mutable_graph.to_readonly()
 
     # 1. Search Benchmark
     last_search_results = None
@@ -312,14 +310,13 @@ def test_readonly_graph_regression_evp_inner_product():
     base_quant = deglib.distances.quantize_batch(base_data, non_zeros=non_zeros, num_threads=8)
     query_quant = deglib.distances.quantize_batch(query_data, non_zeros=non_zeros, num_threads=8)
 
-    # Build SizeBoundedGraph with EVP_InnerProduct metric
-    mutable_graph = deglib.graph.SizeBoundedGraph.create_empty(
+    # Build DynamicExplorationGraph with EVP_InnerProduct metric
+    mutable_graph = deglib.DynamicExplorationGraph.create_empty(
         base_count, dim, edges_per_vertex, deglib.Metric.EVP_InnerProduct
     )
 
-    rng = deglib.std.Mt19937(42)
-    builder = deglib.builder.EvenRegularGraphBuilder(
-        mutable_graph, rng=rng, optimization_target=deglib.builder.OptimizationTarget.LowLID,
+    builder = deglib.GraphBuilder(
+        mutable_graph, seed=42, optimization_target=deglib.builder.OptimizationTarget.LowLID,
         extend_k=edges_per_vertex, extend_eps=extend_eps, improve_k=0, improve_eps=0.0
     )
     builder.set_thread_count(1)
@@ -327,7 +324,7 @@ def test_readonly_graph_regression_evp_inner_product():
     builder.build()
 
     # Convert to ReadOnlyGraph
-    graph = deglib.graph.ReadOnlyGraph.from_graph(mutable_graph)
+    graph = mutable_graph.to_readonly()
 
     # 1. Search Benchmark
     last_search_results = None

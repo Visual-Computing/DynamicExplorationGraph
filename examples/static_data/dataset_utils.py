@@ -5,8 +5,16 @@ import urllib.request
 from pathlib import Path
 from typing import Dict, Any, Tuple
 import numpy as np
-import deglib.repository as repo
 from deglib.distances import Metric, FloatSpace
+
+
+def ivecs_read(filename: str | Path) -> np.ndarray:
+    a = np.fromfile(filename, dtype=np.int32)
+    d = a[0]
+    return a.reshape(-1, d + 1)[:, 1:].copy()
+
+def fvecs_read(filename: str | Path) -> np.ndarray:
+    return ivecs_read(filename).view(np.float32)
 
 DATASET_METADATA: Dict[str, Dict[str, Any]] = {
     "sift1m": {
@@ -298,10 +306,10 @@ def load_dataset(dataset_key: str, cache_dir: Path) -> Tuple[np.ndarray, np.ndar
     query_path = files_dir / meta["query_file"]
 
     print(f"Loading base features from {base_path}...")
-    base_vecs = repo.fvecs_read(base_path)
+    base_vecs = fvecs_read(base_path)
 
     print(f"Loading query features from {query_path}...")
-    query_vecs = repo.fvecs_read(query_path)
+    query_vecs = fvecs_read(query_path)
 
     dims = base_vecs.shape[1]
     metric = meta["metric"]
@@ -314,7 +322,7 @@ def load_dataset(dataset_key: str, cache_dir: Path) -> Tuple[np.ndarray, np.ndar
         compute_and_save_anns_gt(base_vecs, query_vecs, float_space, 100, gt_path)
 
     print(f"Loading groundtruth indices from {gt_path}...")
-    gt_vecs = repo.ivecs_read(gt_path)
+    gt_vecs = ivecs_read(gt_path)
 
     # 2. Exploration Entry Vertices, Exploration Query, and Exploration Ground Truth
     explore_entry_path = files_dir / meta["explore_entry_file"]
@@ -325,14 +333,14 @@ def load_dataset(dataset_key: str, cache_dir: Path) -> Tuple[np.ndarray, np.ndar
         generate_explore_entry_and_query(base_vecs, explore_entry_path, explore_query_path)
 
     print(f"Loading explore entry vertices from {explore_entry_path}...")
-    explore_entry = repo.ivecs_read(explore_entry_path)
+    explore_entry = ivecs_read(explore_entry_path)
 
     if not explore_gt_path.is_file():
         print(f"Exploration Ground Truth not found at {explore_gt_path}.")
-        explore_query_vecs = repo.fvecs_read(explore_query_path)
+        explore_query_vecs = fvecs_read(explore_query_path)
         compute_and_save_explore_gt(base_vecs, explore_query_vecs, float_space, 1000, explore_gt_path)
 
     print(f"Loading explore groundtruth from {explore_gt_path}...")
-    explore_gt = repo.ivecs_read(explore_gt_path)
+    explore_gt = ivecs_read(explore_gt_path)
 
     return base_vecs, query_vecs, gt_vecs, explore_entry, explore_gt, meta

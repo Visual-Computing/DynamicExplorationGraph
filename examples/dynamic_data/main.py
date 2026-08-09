@@ -14,7 +14,6 @@ from dataset_utils import (
     DATASET_METADATA,
 )
 from presets import get_preset
-from graph_analysis import analyze_graph
 
 
 class DataStreamType(Enum):
@@ -207,16 +206,16 @@ def build_dynamic_graph(
     else:
         print("Output: (in RAM, no file)")
 
-    graph_mut = deglib.builder.SizeBoundedGraph.create_empty(
+    graph_mut = deglib.DynamicExplorationGraph.create_empty(
         capacity=n,
         dims=dims,
         edges_per_vertex=k,
         metric=metric,
         instruction=instruction_enum,
     )
-    builder = deglib.builder.EvenRegularGraphBuilder(
+    builder = deglib.GraphBuilder(
         graph_mut,
-        rng=deglib.Mt19937(7),
+        seed=7,
         optimization_target=deglib.builder.OptimizationTarget.StreamingData,
         extend_k=preset.get("extend_k", k),
         extend_eps=preset["build_eps"],
@@ -268,13 +267,13 @@ def build_dynamic_graph(
     build_time = time.perf_counter() - build_start
     print(f"Graph built in {build_time:.2f} seconds ({graph_mut.size()} vertices).")
 
-    if graph_path:
-        graph_path.parent.mkdir(parents=True, exist_ok=True)
-        graph_mut.save_graph(str(graph_path))
-        print(f"Graph saved to: {graph_path}")
-        return deglib.graph.load_readonly_graph(str(graph_path))
-    else:
-        return deglib.graph.ReadOnlyGraph.from_graph(graph_mut)
+        if graph_path:
+            graph_path.parent.mkdir(parents=True, exist_ok=True)
+            graph_mut.save_graph(str(graph_path))
+            print(f"Graph saved to: {graph_path}")
+            return deglib.load_readonly_graph(str(graph_path))
+        else:
+            return graph_mut.to_readonly()
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +356,7 @@ def run_dynamic_benchmark(
         # Load from file if it exists and force_rebuild is not set
         if graph_path and graph_path.exists() and not force_rebuild:
             print(f"Loading existing graph: {graph_path}")
-            graph = deglib.graph.load_readonly_graph(str(graph_path))
+            graph = deglib.load_readonly_graph(str(graph_path))
             print(f"Loaded dynamic graph with {graph.size()} vertices")
         else:
             if graph_path and force_rebuild:
@@ -383,7 +382,7 @@ def run_dynamic_benchmark(
         print(f"Graph size: {graph.size()} vertices")
 
         # Graph analysis
-        analyze_graph(graph)
+        deglib.analysis.analyze_graph(graph)
 
         # ANNS Test using half ground truth
         # C++: use_half = (ds_type != DataStreamType::AddAll) -> always True for our 3 types

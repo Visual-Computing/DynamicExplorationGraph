@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <deglib/deglib.h>
+#include "repository.h"
 #include "file_io.h"
 
 namespace deglib::benchmark {
@@ -303,7 +304,7 @@ inline std::vector<uint32_t> compute_knn_groundtruth(const deglib::FeatureReposi
         auto topList = topLists.data() + (k_target * q);
         for (int32_t i = k_target - 1; i >= 0; i--) {
             if (!results.empty()) {
-                topList[i] = results.top().getInternalIndex();
+                topList[i] = results.top().getIdentifier();
                 results.pop();
             } else {
                 topList[i] = (std::numeric_limits<uint32_t>::max)();

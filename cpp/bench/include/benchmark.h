@@ -98,7 +98,7 @@ static float test_approx_anns(const deglib::graph::InternalGraph& graph,
         const auto& gt = ground_truth[i];
         while (result_queue.empty() == false) {
             const auto& result = result_queue.top();
-            const auto external_id = graph.getExternalLabel(result.getInternalIndex());
+            const auto external_id = graph.getExternalLabel(result.getIdentifier());
             if (std::binary_search(gt.begin(), gt.end(), external_id)) correct++;
             result_queue.pop();
         }
@@ -138,7 +138,7 @@ static float test_approx_explore(const deglib::graph::InternalGraph& graph,
         const auto& gt = ground_truth[i];
         while (result_queue.empty() == false) {
             const auto& result = result_queue.top();
-            const auto external_id = graph.getExternalLabel(result.getInternalIndex());
+            const auto external_id = graph.getExternalLabel(result.getIdentifier());
             if (std::binary_search(gt.begin(), gt.end(), external_id)) correct++;
             result_queue.pop();
         }
@@ -175,7 +175,7 @@ static std::vector<float> estimate_recall(const deglib::graph::InternalGraph& gr
 
             size_t local_correct = 0;
             while (result_queue.empty() == false) {
-                const auto internal_index = result_queue.top().getInternalIndex();
+                const auto internal_index = result_queue.top().getIdentifier();
                 const auto external_id = graph.getExternalLabel(internal_index);
                 if (std::binary_search(gt.begin(), gt.end(), external_id)) local_correct++;
                 result_queue.pop();

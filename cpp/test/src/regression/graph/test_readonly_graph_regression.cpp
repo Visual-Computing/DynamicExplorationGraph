@@ -79,7 +79,7 @@ TEST(ReadOnlyGraphRegression, SearchAndExplore_FP32_L2)
         total_gt += static_cast<uint32_t>(gt_set.size());
         auto results = std::move(last_search_results[q]);
         while (!results.empty()) {
-            uint32_t ext_label = graph.getExternalLabel(results.top().getInternalIndex());
+            uint32_t ext_label = graph.getExternalLabel(results.top().getIdentifier());
             if (gt_set.count(ext_label)) {
                 correct_search++;
             }
@@ -121,7 +121,7 @@ TEST(ReadOnlyGraphRegression, SearchAndExplore_FP32_L2)
 
         auto results = std::move(last_explore_results[i]);
         while (!results.empty()) {
-            uint32_t ext_label = graph.getExternalLabel(results.top().getInternalIndex());
+            uint32_t ext_label = graph.getExternalLabel(results.top().getIdentifier());
             if (gt_set.count(ext_label)) {
                 correct_explore++;
             }
@@ -209,7 +209,7 @@ TEST(ReadOnlyGraphRegression, SearchAndExplore_FP32_InnerProduct)
         total_gt += static_cast<uint32_t>(gt_set.size());
         auto results = std::move(last_search_results[q]);
         while (!results.empty()) {
-            uint32_t ext_label = graph.getExternalLabel(results.top().getInternalIndex());
+            uint32_t ext_label = graph.getExternalLabel(results.top().getIdentifier());
             if (gt_set.count(ext_label)) {
                 correct_search++;
             }
@@ -250,7 +250,7 @@ TEST(ReadOnlyGraphRegression, SearchAndExplore_FP32_InnerProduct)
 
         auto results = std::move(last_explore_results[i]);
         while (!results.empty()) {
-            uint32_t ext_label = graph.getExternalLabel(results.top().getInternalIndex());
+            uint32_t ext_label = graph.getExternalLabel(results.top().getIdentifier());
             if (gt_set.count(ext_label)) {
                 correct_explore++;
             }
@@ -347,7 +347,7 @@ TEST(ReadOnlyGraphRegression, SearchAndExplore_EVP_InnerProduct)
         total_gt += static_cast<uint32_t>(gt_set.size());
         auto results = std::move(last_search_results[q]);
         while (!results.empty()) {
-            uint32_t ext_label = graph.getExternalLabel(results.top().getInternalIndex());
+            uint32_t ext_label = graph.getExternalLabel(results.top().getIdentifier());
             if (gt_set.count(ext_label)) {
                 correct_search++;
             }
@@ -388,7 +388,7 @@ TEST(ReadOnlyGraphRegression, SearchAndExplore_EVP_InnerProduct)
 
         auto results = std::move(last_explore_results[i]);
         while (!results.empty()) {
-            uint32_t ext_label = graph.getExternalLabel(results.top().getInternalIndex());
+            uint32_t ext_label = graph.getExternalLabel(results.top().getIdentifier());
             if (gt_set.count(ext_label)) {
                 correct_explore++;
             }

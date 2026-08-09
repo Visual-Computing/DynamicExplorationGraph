@@ -36,14 +36,14 @@ DEFAULT_PRUNE_WORST = 9
 DEFAULT_THREADS = 8
 
 
-def prune_worst_edges(graph: deglib.graph.SizeBoundedGraph, prune_worst: int) -> None:
+def prune_worst_edges(graph: deglib.DynamicExplorationGraph, prune_worst: int) -> None:
     """
     Prunes the worst (highest-weight) `prune_worst` neighbors of each vertex
     by replacing them with self-loops, using the C++ implementation in deglib::optimization::pruning.
     """
     if prune_worst <= 0:
         return
-    graph.prune_worst_edges(prune_worst)
+    deglib.optimization.prune_worst_edges(graph, prune_worst)
 
 
 def quantize_vectors(vectors: np.ndarray, non_zeros: int = DEFAULT_NON_ZEROS, num_threads: int = DEFAULT_THREADS) -> np.ndarray:
@@ -87,8 +87,8 @@ def construct_knng(
     # 2. Graph Construction Phase (using EVP_InnerProduct metric for fast quantized search)
     t0 = time.perf_counter()
     space = deglib.FloatSpace.create(dims, deglib.Metric.EVP_InnerProduct)
-    graph = deglib.graph.SizeBoundedGraph(n_vecs, k_graph, space)
-    builder = deglib.builder.EvenRegularGraphBuilder(graph, extend_k=k_ext, extend_eps=0.001)
+    graph = deglib.DynamicExplorationGraph.create_empty(n_vecs, dims, k_graph, deglib.Metric.EVP_InnerProduct)
+    builder = deglib.GraphBuilder(graph, extend_k=k_ext, extend_eps=0.001)
 
     labels = np.arange(n_vecs, dtype=np.uint32)
     builder.add_entry(labels, quant_vectors)
@@ -103,14 +103,11 @@ def construct_knng(
     print(f"Edge pruning completed in {t_prune:.3f}s")
 
     # 3. Graph Exploration Phase (Self-Join for k-NNG neighbor retrieval)
-    # Reference mode4.h explores SizeBoundedGraph directly and converts external labels
-    # to internal indices via graph.getInternalIndex()
+    # explore() accepts external labels
     t0 = time.perf_counter()
-    # Convert external labels (0, 1, 2, ...) to internal indices
-    # This is critical: explore() expects internal indices, not external labels
-    internal_indices = np.array([graph.get_internal_index(int(label)) for label in labels], dtype=np.uint32)
+    entry_labels = np.ascontiguousarray(labels, dtype=np.uint32)
     indices, distances = graph.explore(
-        entry_vertex_indices=internal_indices,
+        entry_labels,
         k=evp_k,
         include_entry=False,
         max_distance_computation_count=max_dist,

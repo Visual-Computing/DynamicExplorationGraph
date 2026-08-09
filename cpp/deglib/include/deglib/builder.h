@@ -544,7 +544,7 @@ class EvenRegularGraphBuilder {
       auto slots = (uint32_t) edges_per_vertex - 1; // the new vertex will get an additional neighbor during the restore phase
       while(slots > 0) {
         for (size_t i = 0; i < candidates.size() && slots > 0; i++) {
-          const auto candidate_index = candidates[i].getInternalIndex();
+          const auto candidate_index = candidates[i].getIdentifier();
           const auto candidate_weight = candidates[i].getDistance();
 
           // check if the vertex is already in the edge list of the new vertex (added during a previous loop-run)
@@ -669,7 +669,7 @@ class EvenRegularGraphBuilder {
       auto new_neighbors = std::vector<std::pair<uint32_t, float>>();
       while(new_neighbors.size() < edges_per_vertex) {
         for (size_t i = 0; i < results.size() && new_neighbors.size() < edges_per_vertex; i++) {
-          const auto candidate_index = results[i].getInternalIndex();
+          const auto candidate_index = results[i].getIdentifier();
           const auto candidate_weight = results[i].getDistance();
 
           // check if the vertex is already in the edge list of the new vertex (added during a previous loop-run)
@@ -1163,7 +1163,7 @@ class EvenRegularGraphBuilder {
           // We use the descending order to find the worst swap combination with the best gain
           // Sometimes the gain between the two best combinations is the same, its better to use one with the bad edges to make later improvements easier
           for(auto&& result : topListDescending(top_list)) {
-            const uint32_t new_vertex3 = result.getInternalIndex();
+            const uint32_t new_vertex3 = result.getIdentifier();
 
             // vertex1 and vertex2 got tested in the recursive call before and vertex4 got just disconnected from vertex2
             if(vertex1 != new_vertex3 && vertex2 != new_vertex3 && graph.hasEdge(vertex2, new_vertex3) == false) {
@@ -1237,7 +1237,7 @@ class EvenRegularGraphBuilder {
           uint32_t best_good_vertex = 0;
           float best_good_vertex_dist = 0;
           for(auto&& result : topListAscending(top_list)) {
-            const auto good_vertex = result.getInternalIndex();
+            const auto good_vertex = result.getIdentifier();
 
             // the new vertex should not be connected to vertex4 yet
             if(vertex4 != good_vertex && graph.hasEdge(vertex4, good_vertex) == false) {
@@ -1426,7 +1426,7 @@ class EvenRegularGraphBuilder {
         float best_w_ef = 0.f, best_w_eb = 0.f, best_w_fb = 0.f;
 
         for (auto&& cand : topListAscending(rs)) {
-          const uint32_t e = cand.getInternalIndex();
+          const uint32_t e = cand.getIdentifier();
           if (e == b) continue;
           if (graph.hasEdge(b, e)) continue; // N(b) ∩ {e} = ∅
 
@@ -1504,7 +1504,7 @@ class EvenRegularGraphBuilder {
         float best_w_bc = 0.f, best_w_cd = 0.f;
 
         for (auto&& cand : topListAscending(rs_bc)) {
-          const uint32_t c = cand.getInternalIndex();
+          const uint32_t c = cand.getIdentifier();
           if (c == a || c == b) continue;
           if (graph.hasEdge(b, c)) continue; // not yet adjacent to b
 

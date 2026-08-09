@@ -20,16 +20,16 @@ namespace deglib::graph {
 
 class ObjectDistance
 {
-    uint32_t internal_index_;
+    uint32_t identifier_;
     float distance_;
 
   public:
     ObjectDistance() {}
 
-    ObjectDistance(const uint32_t internal_index, const float distance) : internal_index_(internal_index), distance_(distance) {}
+    ObjectDistance(const uint32_t identifier, const float distance) : identifier_(identifier), distance_(distance) {}
 
-    inline const uint32_t getInternalIndex() const { 
-      return internal_index_; 
+    inline const uint32_t getIdentifier() const { 
+      return identifier_; 
     }
 
     inline const float getDistance() const { 
@@ -37,19 +37,19 @@ class ObjectDistance
     }
 
     inline bool operator==(const ObjectDistance& o) const { 
-      return (distance_ == o.distance_) && (internal_index_ == o.internal_index_); 
+      return (distance_ == o.distance_) && (identifier_ == o.identifier_); 
     }
 
     inline bool operator<(const ObjectDistance& o) const {
       if (distance_ == o.distance_)
-        return internal_index_ < o.internal_index_;
+        return identifier_ < o.identifier_;
       else
         return distance_ < o.distance_;
     }
 
     inline bool operator>(const ObjectDistance& o) const {
       if (distance_ == o.distance_)
-        return internal_index_ > o.internal_index_;
+        return identifier_ > o.identifier_;
       else
         return distance_ > o.distance_;
     }

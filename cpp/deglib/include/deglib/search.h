@@ -14,7 +14,6 @@ namespace deglib::search {
 
 using ObjectDistance = deglib::graph::ObjectDistance;
 using ResultSet = deglib::graph::ResultSet;
-using UncheckedSet = deglib::graph::UncheckedSet;
 
 /**
  * Rerank candidate neighbor indices for queries using exact FloatSpace distances.

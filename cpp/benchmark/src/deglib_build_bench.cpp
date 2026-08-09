@@ -8,6 +8,7 @@
 #include <fmt/core.h>
 
 #include "benchmark.h"
+#include "repository.h"
 #include <deglib/deglib.h>
 
 /**
@@ -563,7 +564,7 @@ static std::vector<float> estimate_recall(const deglib::graph::InternalGraph& gr
             size_t local_correct = 0;
             while (result_queue.empty() == false)
             {
-                const auto internal_index = result_queue.top().getInternalIndex();
+                const auto internal_index = result_queue.top().getIdentifier();
                 const auto external_id = graph.getExternalLabel(internal_index);
                 if (gt.find(external_id) != gt.end()) local_correct++;
                 result_queue.pop();

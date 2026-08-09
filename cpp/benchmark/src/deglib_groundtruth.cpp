@@ -6,6 +6,7 @@
 #include <omp.h>
 
 #include "benchmark.h"
+#include "repository.h"
 #include <deglib/deglib.h>
 
 /**
@@ -106,7 +107,7 @@ std::vector<uint32_t> compute_knn_groundtruth(const deglib::FeatureRepository& b
 
         auto topList = topLists.data() + (k_target*q);
         for(int32_t i = k_target - 1; i >= 0; i--) {
-            topList[i] = results.top().getInternalIndex();
+            topList[i] = results.top().getIdentifier();
             results.pop();
         }
 
