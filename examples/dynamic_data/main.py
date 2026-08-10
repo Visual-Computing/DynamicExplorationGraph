@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import deglib
+from deglib_cpp import avx_usable, avx512_usable
 from dataset_utils import (
     load_dataset_for_dynamic,
     get_default_cache_dir,
@@ -186,7 +187,7 @@ def build_dynamic_graph(
     stream_type: DataStreamType,
     graph_path: Path | None,
     preset: dict,
-    instruction_enum: deglib.distances.InstructionSet,
+    instruction_enum: deglib.cpu.InstructionSet,
     build_threads: int,
 ):
     """
@@ -301,16 +302,16 @@ def run_dynamic_benchmark(
     dims = base_vecs.shape[1]
     metric = preset["metric"]
 
-    # Map instruction_set string to deglib.distances.InstructionSet
+    # Map instruction_set string to deglib.cpu.InstructionSet
     inst_lower = instruction_set.lower()
     if inst_lower == "scalar":
-        instruction_enum = deglib.distances.InstructionSet.Scalar
+        instruction_enum = deglib.cpu.InstructionSet.Scalar
     elif inst_lower == "avx2":
-        instruction_enum = deglib.distances.InstructionSet.AVX2
+        instruction_enum = deglib.cpu.InstructionSet.AVX2
     elif inst_lower == "avx512":
-        instruction_enum = deglib.distances.InstructionSet.AVX512
+        instruction_enum = deglib.cpu.InstructionSet.AVX512
     else:
-        instruction_enum = deglib.distances.InstructionSet.Auto
+        instruction_enum = deglib.cpu.InstructionSet.Auto
 
     print(f"\n=== Benchmarking Dynamic Data Streams for Dataset: {meta['name']} ===")
     print(f"Selected Instruction Set: {instruction_set}")
@@ -504,9 +505,9 @@ def main():
     # Detect CPU Instruction Set
     if args.instruction != "auto":
         instruction_set = args.instruction.upper()
-    elif deglib.avx512_usable():
+    elif avx512_usable():
         instruction_set = "AVX512"
-    elif deglib.avx_usable():
+    elif avx_usable():
         instruction_set = "AVX2"
     else:
         instruction_set = "Scalar"

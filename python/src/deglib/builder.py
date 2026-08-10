@@ -6,7 +6,8 @@ from typing import Callable, Iterable, Union
 import numpy as np
 import deglib_cpp
 
-from .distances import FloatSpace, Metric, InstructionSet
+from .distances import FloatSpace, Metric
+from .cpu import InstructionSet
 from .graph import DynamicExplorationGraph
 from .utils import assure_array, InvalidShapeException
 

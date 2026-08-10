@@ -194,7 +194,7 @@ namespace {
 // FloatSpace integration tests
 TEST(L2Float_FloatSpace, L2Metric) {
     size_t dim = 64;
-    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
 
     auto a = make_float_vec(dim, 42);
     auto b = make_float_vec(dim, 123);
@@ -206,7 +206,7 @@ TEST(L2Float_FloatSpace, L2Metric) {
 TEST(L2Float_FloatSpace, VariousDims) {
     std::vector<size_t> dims = {4, 8, 16, 32, 64, 128, 256, 512};
     for (size_t dim : dims) {
-        deglib::distances::FloatSpace space(dim, deglib::distances::Metric::L2);
+        deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
 
         auto a = make_float_vec(dim, dim);
         auto b = make_float_vec(dim, dim + 1);

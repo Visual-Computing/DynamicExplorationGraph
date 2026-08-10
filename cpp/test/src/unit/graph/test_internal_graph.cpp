@@ -195,7 +195,7 @@ public:
 // ---------------------------------------------------------------------------
 
 TEST(InternalGraph, InterfaceContract) {
-   deglib::distances::FloatSpace fs(4, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace fs(4, deglib::distances::Metric::FP32_L2);
    MockInternalGraph graph(3, 2, std::move(fs));
 
    graph.setLabel(0, 10);
@@ -208,7 +208,7 @@ TEST(InternalGraph, InterfaceContract) {
 }
 
 TEST(InternalGraph, HasVertex) {
-   deglib::distances::FloatSpace fs(4, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace fs(4, deglib::distances::Metric::FP32_L2);
    MockInternalGraph graph(3, 2, std::move(fs));
    graph.setLabel(0, 10);
    graph.setLabel(1, 20);
@@ -220,7 +220,7 @@ TEST(InternalGraph, HasVertex) {
 }
 
 TEST(InternalGraph, GetInternalIndex) {
-   deglib::distances::FloatSpace fs(4, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace fs(4, deglib::distances::Metric::FP32_L2);
    MockInternalGraph graph(3, 2, std::move(fs));
    graph.setLabel(0, 10);
    graph.setLabel(1, 20);
@@ -232,7 +232,7 @@ TEST(InternalGraph, GetInternalIndex) {
 }
 
 TEST(InternalGraph, HasEdge) {
-   deglib::distances::FloatSpace fs(4, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace fs(4, deglib::distances::Metric::FP32_L2);
    MockInternalGraph graph(3, 2, std::move(fs));
    graph.setLabel(0, 10);
    graph.setLabel(1, 20);
@@ -247,7 +247,7 @@ TEST(InternalGraph, HasEdge) {
 }
 
 TEST(InternalGraph, GetEntryVertexIndices) {
-   deglib::distances::FloatSpace fs(4, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace fs(4, deglib::distances::Metric::FP32_L2);
    MockInternalGraph graph(3, 2, std::move(fs));
    auto entries = graph.getEntryVertexIndices();
    EXPECT_EQ(entries.size(), 1u);

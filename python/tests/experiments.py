@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor, wait
 import numpy as np
 import deglib
 from deglib.builder import GraphBuilder
+from deglib.distances import FloatSpace, Metric
 
 
 def main():
@@ -12,7 +13,7 @@ def main():
     data = np.random.random((samples, dims)).astype(np.float32)
     # data = data / np.linalg.norm(data, axis=1)[:, None]  # L2 normalize
 
-    graph = deglib.DynamicExplorationGraph.create_empty(data.shape[0], deglib.FloatSpace.create(dims, deglib.Metric.FP32_L2), 16)
+    graph = deglib.DynamicExplorationGraph.create_empty(data.shape[0], FloatSpace.create(dims, Metric.FP32_L2), 16)
     builder = deglib.GraphBuilder(graph, extend_k=32, extend_eps=0.01, improve_k=0)
 
     for i, vec in enumerate(data):
@@ -77,7 +78,7 @@ def do_build_with_remove(seed, edges_per_vertex):
     data = np.random.random((samples, dims)).astype(np.float32)
 
     # data = deglib.repository.fvecs_read('crash_data.fvecs')
-    graph = deglib.DynamicExplorationGraph.create_empty(data.shape[0], deglib.FloatSpace.create(dims, deglib.Metric.FP32_L2), edges_per_vertex)
+    graph = deglib.DynamicExplorationGraph.create_empty(data.shape[0], FloatSpace.create(dims, Metric.FP32_L2), edges_per_vertex)
     builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
     for label, vec in enumerate(data):
@@ -108,7 +109,7 @@ def do_all():
 
 def build_graph(jobname, data, dim):
     print('starting', jobname)
-    graph = deglib.DynamicExplorationGraph.create_empty(1_000_000, deglib.FloatSpace.create(dim, deglib.Metric.FP32_L2), 8)
+    graph = deglib.DynamicExplorationGraph.create_empty(1_000_000, FloatSpace.create(dim, Metric.FP32_L2), 8)
     print(graph)
 
     builder = GraphBuilder(graph, improve_k=0, extend_eps=0, extend_k=8)

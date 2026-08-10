@@ -10,6 +10,7 @@ import numpy as np
 
 import deglib
 from deglib.search import Filter
+from deglib.distances import Metric, FloatSpace
 
 IS_MACOS_M1 = platform.system() == "Darwin" and platform.machine() == "arm64"
 
@@ -32,9 +33,9 @@ def get_ranking(features: np.ndarray, graph: deglib.DynamicExplorationGraph, que
     if query.dtype == np.uint8:
         query = query.astype(np.float32)
 
-    if graph.get_feature_space().metric() in (deglib.Metric.FP32_L2, deglib.Metric.Uint8_L2):
+    if graph.get_feature_space().metric() in (Metric.FP32_L2, Metric.Uint8_L2):
         distances = np.sum(np.square(features - query), axis=1)
-    elif graph.get_feature_space().metric() == deglib.Metric.FP32_InnerProduct:
+    elif graph.get_feature_space().metric() == Metric.FP32_InnerProduct:
         distances = 1.0 - np.dot(features, query.T).flatten()
     else:
         raise ValueError(f'unknown metric: {graph.get_feature_space().metric()}')
@@ -44,7 +45,7 @@ def get_ranking(features: np.ndarray, graph: deglib.DynamicExplorationGraph, que
 class Configuration:
     def __init__(
         self, edges_per_vertex: int, samples: int, dims: int, data: np.ndarray, graph: deglib.DynamicExplorationGraph,
-            graph_path: Optional[pathlib.Path], query: np.ndarray, metric: deglib.Metric
+            graph_path: Optional[pathlib.Path], query: np.ndarray, metric: Metric
     ):
         self.edges_per_vertex = edges_per_vertex
         self.samples = samples
@@ -57,17 +58,17 @@ class Configuration:
 
     @staticmethod
     def generate(samples, dims, metric, edges_per_vertex):
-        if metric == deglib.Metric.FP32_InnerProduct:
+        if metric == Metric.FP32_InnerProduct:
             # normalize data
             data = np.random.random((samples, dims)).astype(np.float32)
             data /= np.linalg.norm(data, axis=1).reshape(-1, 1)
 
             query = np.random.random((dims,)).astype(np.float32)
             query /= np.linalg.norm(query)
-        elif metric == deglib.Metric.FP32_L2:
+        elif metric == Metric.FP32_L2:
             data = np.random.normal(size=(samples, dims)).astype(np.float32)
             query = np.random.normal(size=(dims,)).astype(np.float32)
-        elif metric == deglib.Metric.Uint8_L2:
+        elif metric == Metric.Uint8_L2:
             data = np.random.randint(0, 256, size=(samples, dims)).astype(np.uint8)
             query = np.random.randint(0, 256, size=(dims,)).astype(np.uint8)
         else:
@@ -98,13 +99,13 @@ class Configuration:
 
 
 configurations = [
-    *Configuration.generate(100, 128, deglib.Metric.FP32_L2, 10),
-    *Configuration.generate(100, 128, deglib.Metric.Uint8_L2, 10),
-    *Configuration.generate(100, 128, deglib.Metric.FP32_InnerProduct, 10),
+    *Configuration.generate(100, 128, Metric.FP32_L2, 10),
+    *Configuration.generate(100, 128, Metric.Uint8_L2, 10),
+    *Configuration.generate(100, 128, Metric.FP32_InnerProduct, 10),
 ]
 
 large_configurations = [
-    *Configuration.generate(20_000, 2, deglib.Metric.Uint8_L2, 10),
+    *Configuration.generate(20_000, 2, Metric.Uint8_L2, 10),
 ]
 
 mutable_configurations = [c for c in configurations if c.graph.is_mutable()]
@@ -112,7 +113,7 @@ mutable_configurations = [c for c in configurations if c.graph.is_mutable()]
 
 @pytest.mark.parametrize('conf', configurations)
 def test_search(conf: Configuration):
-    if IS_MACOS_M1 and conf.metric == deglib.Metric.InnerProduct:
+    if IS_MACOS_M1 and conf.metric == Metric.InnerProduct:
         pytest.skip('This test is skipped on macOS with M1 chip, as avx2 is not supported on m1 chip.')
 
     k = 10

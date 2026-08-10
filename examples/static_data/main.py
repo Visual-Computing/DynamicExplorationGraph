@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import deglib
+from deglib_cpp import avx_usable, avx512_usable
 from dataset_utils import (
     load_dataset,
     get_default_cache_dir,
@@ -118,16 +119,16 @@ def run_static_benchmark(
     dims = base_vecs.shape[1]
     metric = preset["metric"]
 
-    # Map instruction_set string to deglib.distances.InstructionSet
+    # Map instruction_set string to deglib.cpu.InstructionSet
     inst_lower = instruction_set.lower()
     if inst_lower == "scalar":
-        instruction_enum = deglib.distances.InstructionSet.Scalar
+        instruction_enum = deglib.cpu.InstructionSet.Scalar
     elif inst_lower == "avx2":
-        instruction_enum = deglib.distances.InstructionSet.AVX2
+        instruction_enum = deglib.cpu.InstructionSet.AVX2
     elif inst_lower == "avx512":
-        instruction_enum = deglib.distances.InstructionSet.AVX512
+        instruction_enum = deglib.cpu.InstructionSet.AVX512
     else:
-        instruction_enum = deglib.distances.InstructionSet.Auto
+        instruction_enum = deglib.cpu.InstructionSet.Auto
 
     target_str = preset.get("optimization_target", "LowLID")
     optimization_target = (
@@ -385,9 +386,9 @@ def main():
     # Detect CPU Instruction Set
     if args.instruction != "auto":
         instruction_set = args.instruction.upper()
-    elif deglib.avx512_usable():
+    elif avx512_usable():
         instruction_set = "AVX512"
-    elif deglib.avx_usable():
+    elif avx_usable():
         instruction_set = "AVX2"
     else:
         instruction_set = "Scalar"

@@ -292,7 +292,7 @@ TEST(FlasRegression, DEGGraphBuildAndSearch_RawVsFlasSorted) {
     std::vector<std::byte> query_bytes_raw(query_count * feature_bytes_per_vec);
     std::memcpy(query_bytes_raw.data(), query_data.data(), query_count * feature_bytes_per_vec);
 
-    deglib::distances::FloatSpace feature_space_raw(dim, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace feature_space_raw(dim, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph_raw(static_cast<uint32_t>(base_count), edges_per_vertex,
                                               std::move(feature_space_raw));
 
@@ -341,7 +341,7 @@ TEST(FlasRegression, DEGGraphBuildAndSearch_RawVsFlasSorted) {
     std::vector<std::byte> base_bytes_clean(base_count * feature_bytes_per_vec);
     std::memcpy(base_bytes_clean.data(), base_data_clean.data(), base_count * feature_bytes_per_vec);
 
-    deglib::distances::FloatSpace feature_space_clean(dim, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace feature_space_clean(dim, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph_clean(static_cast<uint32_t>(base_count), edges_per_vertex,
                                                    std::move(feature_space_clean));
 

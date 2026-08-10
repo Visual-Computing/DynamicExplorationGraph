@@ -94,16 +94,16 @@ void print_help(const char* program_name) {
     log("  Data is loaded from / saved to DATA_PATH defined at build time (e.g. \"{}\")\n", DATA_PATH);
 }
 
-static deglib::distances::InstructionSet parse_instruction_set(const std::string& str) {
-    if (str == "auto" || str == "Auto") return deglib::distances::InstructionSet::Auto;
-    if (str == "scalar" || str == "Scalar") return deglib::distances::InstructionSet::Scalar;
-    if (str == "avx2" || str == "AVX2") return deglib::distances::InstructionSet::AVX2;
-    if (str == "avx512" || str == "AVX512") return deglib::distances::InstructionSet::AVX512;
+static deglib::cpu::InstructionSet parse_instruction_set(const std::string& str) {
+    if (str == "auto" || str == "Auto") return deglib::cpu::InstructionSet::Auto;
+    if (str == "scalar" || str == "Scalar") return deglib::cpu::InstructionSet::Scalar;
+    if (str == "avx2" || str == "AVX2") return deglib::cpu::InstructionSet::AVX2;
+    if (str == "avx512" || str == "AVX512") return deglib::cpu::InstructionSet::AVX512;
     log("Unknown instruction set '{}', falling back to Auto\n", str);
-    return deglib::distances::InstructionSet::Auto;
+    return deglib::cpu::InstructionSet::Auto;
 }
 
-void run_static_benchmark(const DatasetName& ds_name, const std::filesystem::path& data_path, bool force_rebuild, deglib::distances::InstructionSet instruction, uint32_t build_threads) {
+void run_static_benchmark(const DatasetName& ds_name, const std::filesystem::path& data_path, bool force_rebuild, deglib::cpu::InstructionSet instruction, uint32_t build_threads) {
     Dataset ds(ds_name, data_path);
     auto config = get_dataset_config(ds_name);
     config.build_threads = build_threads;
@@ -198,7 +198,7 @@ int main(int argc, char* argv[]) {
     const auto data_path = std::filesystem::path(DATA_PATH);
     DatasetName ds_name = DatasetName::DEEP1M;
     bool force_rebuild = false;
-    deglib::distances::InstructionSet instruction = deglib::distances::InstructionSet::AVX2;
+    deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::AVX2;
     uint32_t build_threads = 1;
 
     for (int i = 1; i < argc; ++i) {

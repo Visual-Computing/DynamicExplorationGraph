@@ -105,7 +105,7 @@ struct DatasetInfo {
 };
 
 inline DatasetInfo make_dataset_info(const DatasetName& ds) {
-    DatasetInfo info{ds, {}, deglib::distances::Metric::L2, 0, 0, 0, 1, 2, {}, {}, {}, {}, {}, {}};
+    DatasetInfo info{ds, {}, deglib::distances::Metric::FP32_L2, 0, 0, 0, 1, 2, {}, {}, {}, {}, {}, {}};
 
     std::string name = ds.name();
 

@@ -36,7 +36,7 @@ TEST(DeglibBuilderRegression, EVPInnerProduct_Benchmark_AVX512)
 
     auto gt_data = compute_groundtruth_evp(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("EVPInnerProduct_AVX512", deglib::distances::Metric::EVPInnerProduct, 35000.0, 6.0, 0.898,
+    run_regression_test("EVPInnerProduct_AVX512", deglib::distances::Metric::EVP_InnerProduct, 35000.0, 6.0, 0.898,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::evp_ip::EvpInnerProduct_AVX512<deglib::distances::ResidualMode::SimdOnly>{}, 50,
                         deglib::builder::OptimizationTarget::LowLID,
@@ -59,7 +59,7 @@ TEST(DeglibBuilderRegression, EVPInnerProduct_Benchmark_AVX2)
 
     auto gt_data = compute_groundtruth_evp(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("EVPInnerProduct_AVX2", deglib::distances::Metric::EVPInnerProduct, 40000.0, 4.7, 0.866,
+    run_regression_test("EVPInnerProduct_AVX2", deglib::distances::Metric::EVP_InnerProduct, 40000.0, 4.7, 0.866,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::evp_ip::EvpInnerProduct_AVX2<deglib::distances::ResidualMode::SimdOnly>{}, 50,
                         deglib::builder::OptimizationTarget::LowLID,
@@ -80,7 +80,7 @@ TEST(DeglibBuilderRegression, EVPInnerProduct_Benchmark_Scalar)
 
     auto gt_data = compute_groundtruth_evp(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("EVPInnerProduct_Scalar", deglib::distances::Metric::EVPInnerProduct, 47000.0, 4.0, 0.741,
+    run_regression_test("EVPInnerProduct_Scalar", deglib::distances::Metric::EVP_InnerProduct, 47000.0, 4.0, 0.741,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::evp_ip::EvpInnerProduct{}, 50,
                         deglib::builder::OptimizationTarget::LowLID,
@@ -110,7 +110,7 @@ TEST(DeglibBuilderRegression, L2Float_Benchmark_AVX512)
 
     auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("L2Float_AVX512", deglib::distances::Metric::L2, 46000.0, 6.0, 0.961,
+    run_regression_test("L2Float_AVX512", deglib::distances::Metric::FP32_L2, 46000.0, 6.0, 0.961,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_l2::L2Float_AVX512<deglib::distances::ResidualMode::DualOnly>{}, 100);
 #else
@@ -135,7 +135,7 @@ TEST(DeglibBuilderRegression, L2Float_Benchmark_AVX2)
 
     auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("L2Float_AVX2", deglib::distances::Metric::L2, 45000.0, 6.0, 0.961,
+    run_regression_test("L2Float_AVX2", deglib::distances::Metric::FP32_L2, 45000.0, 6.0, 0.961,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_l2::L2Float_AVX2<deglib::distances::ResidualMode::DualOnly>{}, 100);
 #else
@@ -156,7 +156,7 @@ TEST(DeglibBuilderRegression, L2Float_Benchmark_Scalar)
 
     auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("L2Float_Scalar", deglib::distances::Metric::L2, 21000.0, 14.0, 0.971,
+    run_regression_test("L2Float_Scalar", deglib::distances::Metric::FP32_L2, 21000.0, 14.0, 0.971,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_l2::L2Float{}, 100);
 }
@@ -182,7 +182,7 @@ TEST(DeglibBuilderRegression, InnerProductFloat_Benchmark_AVX512)
 
     auto gt_data = compute_groundtruth_innerproduct(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("InnerProductFloat_AVX512", deglib::distances::Metric::InnerProduct, 38000.0, 4.5, 0.866,
+    run_regression_test("InnerProductFloat_AVX512", deglib::distances::Metric::FP32_InnerProduct, 38000.0, 4.5, 0.866,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_ip::InnerProductFloat_AVX512<deglib::distances::ResidualMode::DualOnly>{}, 50);
 #else
@@ -207,7 +207,7 @@ TEST(DeglibBuilderRegression, InnerProductFloat_Benchmark_AVX2)
 
     auto gt_data = compute_groundtruth_innerproduct(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("InnerProductFloat_AVX2", deglib::distances::Metric::InnerProduct, 38000.0, 4.5, 0.866,
+    run_regression_test("InnerProductFloat_AVX2", deglib::distances::Metric::FP32_InnerProduct, 38000.0, 4.5, 0.866,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_ip::InnerProductFloat_AVX2<deglib::distances::ResidualMode::DualOnly>{}, 50);
 #else
@@ -228,7 +228,7 @@ TEST(DeglibBuilderRegression, InnerProductFloat_Benchmark_Scalar)
 
     auto gt_data = compute_groundtruth_innerproduct(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("InnerProductFloat_Scalar", deglib::distances::Metric::InnerProduct, 18000.0, 9.8, 0.867,
+    run_regression_test("InnerProductFloat_Scalar", deglib::distances::Metric::FP32_InnerProduct, 18000.0, 9.8, 0.867,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_ip::InnerProductFloat{}, 50);
 }
@@ -254,7 +254,7 @@ TEST(DeglibBuilderRegression, L2Uint8_Benchmark_AVX512)
 
     auto gt_data = compute_groundtruth_l2_uint8(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("L2Uint8_AVX512", deglib::distances::Metric::L2_Uint8, 60000.0, 4.8, 0.99,
+    run_regression_test("L2Uint8_AVX512", deglib::distances::Metric::Uint8_L2, 60000.0, 4.8, 0.99,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::uint8_l2::L2Uint8_AVX512<deglib::distances::ResidualMode::DualOnly>{}, 500);
 #else
@@ -279,7 +279,7 @@ TEST(DeglibBuilderRegression, L2Uint8_Benchmark_AVX2)
 
     auto gt_data = compute_groundtruth_l2_uint8(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("L2Uint8_AVX2", deglib::distances::Metric::L2_Uint8, 60000.0, 4.9, 0.99,
+    run_regression_test("L2Uint8_AVX2", deglib::distances::Metric::Uint8_L2, 60000.0, 4.9, 0.99,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::uint8_l2::L2Uint8_AVX2<deglib::distances::ResidualMode::DualOnly>{}, 500);
 #else
@@ -300,7 +300,7 @@ TEST(DeglibBuilderRegression, L2Uint8_Benchmark_Scalar)
 
     auto gt_data = compute_groundtruth_l2_uint8(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("L2Uint8_Scalar", deglib::distances::Metric::L2_Uint8, 50000.0, 5.8, 0.99,
+    run_regression_test("L2Uint8_Scalar", deglib::distances::Metric::Uint8_L2, 50000.0, 5.8, 0.99,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::uint8_l2::L2Uint8{}, 500);
 }
@@ -327,7 +327,7 @@ TEST(DeglibBuilderRegression, InnerProductFP16_Benchmark_AVX512)
 
     auto gt_data = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("InnerProductFP16_AVX512", deglib::distances::Metric::FP16InnerProduct, 47000.0, 4.2, 0.866,
+    run_regression_test("InnerProductFP16_AVX512", deglib::distances::Metric::FP16_InnerProduct, 47000.0, 4.2, 0.866,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp16_ip::InnerProductFP16_AVX512<deglib::distances::ResidualMode::DualOnly>{}, 50);
 #else
@@ -352,7 +352,7 @@ TEST(DeglibBuilderRegression, InnerProductFP16_Benchmark_AVX2)
 
     auto gt_data = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("InnerProductFP16_AVX2", deglib::distances::Metric::FP16InnerProduct, 47000.0, 4.2, 0.866,
+    run_regression_test("InnerProductFP16_AVX2", deglib::distances::Metric::FP16_InnerProduct, 47000.0, 4.2, 0.866,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp16_ip::InnerProductFP16_AVX2<deglib::distances::ResidualMode::DualOnly>{}, 50);
 #else
@@ -374,7 +374,7 @@ TEST(DeglibBuilderRegression, InnerProductFP16_Benchmark_Scalar)
 
     auto gt_data = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("InnerProductFP16_Scalar", deglib::distances::Metric::FP16InnerProduct, 8000.0, 25.0, 0.867,
+    run_regression_test("InnerProductFP16_Scalar", deglib::distances::Metric::FP16_InnerProduct, 8000.0, 25.0, 0.867,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp16_ip::InnerProductFP16{}, 50);
 }
@@ -396,7 +396,7 @@ TEST(DeglibBuilderRegression, Benchmark_LowLID)
 
     auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("LowLID", deglib::distances::Metric::L2, 20000.0, 14, 0.971,
+    run_regression_test("LowLID", deglib::distances::Metric::FP32_L2, 20000.0, 14, 0.971,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_l2::L2Float{}, 100,
                         deglib::builder::OptimizationTarget::LowLID);
@@ -415,7 +415,7 @@ TEST(DeglibBuilderRegression, Benchmark_HighLID)
 
     auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("HighLID", deglib::distances::Metric::L2, 12000.0, 14.4, 0.96,
+    run_regression_test("HighLID", deglib::distances::Metric::FP32_L2, 12000.0, 14.4, 0.96,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_l2::L2Float{}, 100,
                         deglib::builder::OptimizationTarget::HighLID);
@@ -434,7 +434,7 @@ TEST(DeglibBuilderRegression, Benchmark_StreamingData)
 
     auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("StreamingData", deglib::distances::Metric::L2, 16000.0, 30, 0.91,
+    run_regression_test("StreamingData", deglib::distances::Metric::FP32_L2, 16000.0, 30, 0.91,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::fp32_l2::L2Float{}, 100,
                         deglib::builder::OptimizationTarget::StreamingData);

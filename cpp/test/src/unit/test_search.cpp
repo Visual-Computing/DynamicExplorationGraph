@@ -16,7 +16,7 @@
 // ---------------------------------------------------------------------------
 
 TEST(Rerank, SingleQuerySingleCandidate) {
-   deglib::distances::FloatSpace fs(4, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace fs(4, deglib::distances::Metric::FP32_L2);
    std::vector<float> query = {0.0f, 0.0f, 0.0f, 0.0f};
    std::vector<float> base = {1.0f, 0.0f, 0.0f, 0.0f};
    uint32_t candidates[] = {0};
@@ -29,7 +29,7 @@ TEST(Rerank, SingleQuerySingleCandidate) {
 }
 
 TEST(Rerank, SingleQueryMultipleCandidates) {
-   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::FP32_L2);
    std::vector<float> query = {0.0f, 0.0f};
    std::vector<float> base = {
       1.0f, 0.0f,  // idx 0, dist = 1
@@ -48,7 +48,7 @@ TEST(Rerank, SingleQueryMultipleCandidates) {
 }
 
 TEST(Rerank, MultipleQueries) {
-   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::FP32_L2);
    std::vector<float> queries = {
       0.0f, 0.0f,  // query 0
       5.0f, 5.0f,  // query 1
@@ -76,7 +76,7 @@ TEST(Rerank, MultipleQueries) {
 }
 
 TEST(Rerank, KTopZeroReturnsAllCandidates) {
-   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::FP32_L2);
    std::vector<float> query = {0.0f, 0.0f};
    std::vector<float> base = {
       1.0f, 0.0f,  // idx 0, dist = 1
@@ -96,7 +96,7 @@ TEST(Rerank, KTopZeroReturnsAllCandidates) {
 }
 
 TEST(Rerank, KTopLargerThanCandidates) {
-   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::FP32_L2);
    std::vector<float> query = {0.0f, 0.0f};
    std::vector<float> base = {
       1.0f, 0.0f,  // idx 0
@@ -111,7 +111,7 @@ TEST(Rerank, KTopLargerThanCandidates) {
    EXPECT_EQ(results[0], 0u);
 }
 TEST(Rerank, NullQueriesThrows) {
-   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::FP32_L2);
    uint32_t candidates[] = {0};
    uint32_t results[1];
 
@@ -121,7 +121,7 @@ TEST(Rerank, NullQueriesThrows) {
 }
 
 TEST(Rerank, NullCandidatesThrows) {
-   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::FP32_L2);
    std::vector<float> query = {0.0f, 0.0f};
    uint32_t results[1];
 
@@ -131,7 +131,7 @@ TEST(Rerank, NullCandidatesThrows) {
 }
 
 TEST(Rerank, NullResultsThrows) {
-   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::FP32_L2);
    std::vector<float> query = {0.0f, 0.0f};
    std::vector<float> base = {1.0f, 0.0f};
    uint32_t candidates[] = {0};
@@ -142,7 +142,7 @@ TEST(Rerank, NullResultsThrows) {
 }
 
 TEST(Rerank, InvalidCandidateIndexSkipped) {
-   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::FP32_L2);
    std::vector<float> query = {0.0f, 0.0f};
    std::vector<float> base = {
       1.0f, 0.0f,  // idx 0, valid
@@ -159,7 +159,7 @@ TEST(Rerank, InvalidCandidateIndexSkipped) {
 }
 
 TEST(Rerank, UsesQueriesAsTargetsWhenBaseNull) {
-   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::FP32_L2);
    std::vector<float> query = {
       0.0f, 0.0f,  // query 0
       1.0f, 0.0f,  // query 1
@@ -184,7 +184,7 @@ TEST(Rerank, UsesQueriesAsTargetsWhenBaseNull) {
 }
 
 TEST(Rerank, InnerProductMetric) {
-   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::InnerProduct);
+   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::FP32_InnerProduct);
    std::vector<float> query = {1.0f, 0.0f};
    std::vector<float> base = {
       1.0f, 0.0f,  // idx 0, inner product = 1

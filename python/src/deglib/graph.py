@@ -10,7 +10,8 @@ import deglib_cpp.distances as cpp_distances
 import deglib_cpp.search as cpp_search
 import pathlib
 
-from .distances import FloatSpace, Metric, InstructionSet
+from .distances import FloatSpace, Metric
+from .cpu import InstructionSet
 from .search import Filter
 from .utils import assure_array, InvalidShapeException
 

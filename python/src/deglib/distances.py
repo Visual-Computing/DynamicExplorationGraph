@@ -4,11 +4,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 
 import deglib_cpp.distances as cpp_distances
-
-# Backward-compatible module-level aliases
-Metric = cpp_distances.Metric
-InstructionSet = cpp_distances.InstructionSet
-FloatSpace = cpp_distances.FloatSpace
+from deglib.cpu import InstructionSet
 
 
 class Metric(enum.IntEnum):
@@ -33,24 +29,6 @@ class Metric(enum.IntEnum):
         else:
             return np.float32
 
-
-class InstructionSet(enum.IntEnum):
-    Auto = cpp_distances.InstructionSet.Auto
-    Scalar = cpp_distances.InstructionSet.Scalar
-    AVX2 = cpp_distances.InstructionSet.AVX2
-    AVX512 = cpp_distances.InstructionSet.AVX512
-
-    def to_cpp(self) -> cpp_distances.InstructionSet:
-        if self == InstructionSet.Auto:
-            return cpp_distances.InstructionSet.Auto
-        elif self == InstructionSet.Scalar:
-            return cpp_distances.InstructionSet.Scalar
-        elif self == InstructionSet.AVX2:
-            return cpp_distances.InstructionSet.AVX2
-        elif self == InstructionSet.AVX512:
-            return cpp_distances.InstructionSet.AVX512
-        else:
-            raise ValueError(f"unknown instruction set: {self}")
 
 class FloatSpace:
     def __init__(self, float_space_cpp: cpp_distances.FloatSpace):

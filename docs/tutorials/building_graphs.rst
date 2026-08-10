@@ -68,7 +68,7 @@ If we iterate over batches of data, we can add them to the graph like this:
 
 .. code-block:: python
 
-    graph = deglib.graph.SizeBoundedGraph.create_empty(N_SAMPLES, DIM, 16, deglib.Metric.L2)
+    graph = deglib.graph.SizeBoundedGraph.create_empty(N_SAMPLES, DIM, 16, deglib.distances.Metric.FP32_L2)
     builder = deglib.builder.EvenRegularGraphBuilder(graph)
 
     counter = 0

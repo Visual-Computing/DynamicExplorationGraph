@@ -23,6 +23,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import deglib
+from deglib.distances import FloatSpace, Metric, quantize_batch
 from dataset_utils import load_hdf5_dataset, ensure_small_dataset, DEFAULT_CACHE_DIR
 
 
@@ -53,7 +54,7 @@ def quantize_vectors(vectors: np.ndarray, non_zeros: int = DEFAULT_NON_ZEROS, nu
     """
     dims = vectors.shape[1]
     effective_non_zeros = min(non_zeros, dims - 1)
-    return deglib.quantize_batch(vectors, effective_non_zeros, num_threads)
+    return quantize_batch(vectors, effective_non_zeros, num_threads)
 
 
 def construct_knng(
@@ -78,7 +79,7 @@ def construct_knng(
     print(f"Dataset shape: {n_vecs} vectors, {dims} dimensions (dtype: {train_vectors.dtype})")
     print(f"k-NNG Construction Config: k_top={k_top}, k_graph={k_graph}, non_zeros={non_zeros}, max_dist={max_dist}, evp_k={evp_k}, prune_worst={prune_worst}")
 
-    # 1. Quantization Phase (using C++ deglib.quantize_batch)
+    # 1. Quantization Phase (using C++ quantize_batch)
     t0 = time.perf_counter()
     quant_vectors = quantize_vectors(train_vectors, non_zeros=non_zeros, num_threads=threads)
     t_quant = time.perf_counter() - t0
@@ -86,7 +87,7 @@ def construct_knng(
 
     # 2. Graph Construction Phase (using EVP_InnerProduct metric for fast quantized search)
     t0 = time.perf_counter()
-    space = deglib.FloatSpace.create(dims, deglib.Metric.EVP_InnerProduct)
+    space = FloatSpace.create(dims, Metric.EVP_InnerProduct)
     graph = deglib.DynamicExplorationGraph.create_empty(n_vecs, space, k_graph)
     builder = deglib.GraphBuilder(graph, extend_k=k_ext, extend_eps=0.001)
 
@@ -118,7 +119,7 @@ def construct_knng(
 
     # 4. FP16 Candidate Rerank Phase (O(1) memory footprint per query thread via C++ SIMD FloatSpace)
     t0 = time.perf_counter()
-    rerank_space = deglib.FloatSpace.create(dims, deglib.Metric.FP16_InnerProduct)
+    rerank_space = FloatSpace.create(dims, Metric.FP16_InnerProduct)
     final_knng_edges = rerank_space.rerank(
         queries=train_vectors,
         candidate_indices=indices,

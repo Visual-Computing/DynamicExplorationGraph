@@ -70,11 +70,15 @@ public:
         const uint32_t max_distance_computation_count = 0) const 
     {
         auto res = internal_graph_.search(query, k, eps, filter, max_distance_computation_count);
+
+        // 1. Modify internal vertex IDs to external labels in-place
         for (auto& od : res) {
             uint32_t ext_label = internal_graph_.getExternalLabel(od.getIdentifier());
             od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
         }
-        std::make_heap(res.begin(), res.end(), std::less<deglib::graph::ObjectDistance>());
+        // 2. Re-establish heap invariant using encapsulated comparator
+        res.heapify();
+
         return res;
     }
    /**
@@ -99,11 +103,15 @@ public:
     {
         uint32_t internal_entry = internal_graph_.getInternalIndex(entry_external_label);
         auto res = internal_graph_.explore(internal_entry, k, max_distance_computation_count, eps, include_entry, filter);
+        
+        // 1. Modify internal vertex IDs to external labels in-place
         for (auto& od : res) {
             uint32_t ext_label = internal_graph_.getExternalLabel(od.getIdentifier());
             od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
         }
-        std::make_heap(res.begin(), res.end(), std::less<deglib::graph::ObjectDistance>());
+        // 2. Re-establish heap invariant using encapsulated comparator
+        res.heapify();
+
         return res;
     }
 

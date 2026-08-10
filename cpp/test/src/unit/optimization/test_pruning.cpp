@@ -35,7 +35,7 @@ static std::unique_ptr<std::byte[]> make_vec_bytes(float x, float y, float z, fl
 
 // Create a simple 5-vertex graph with 4 edges per vertex
 static deglib::graph::SizeBoundedGraph create_test_graph() {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(10, 4, space);
 
     // Add 5 vertices at distinct positions

@@ -40,35 +40,35 @@ static std::unique_ptr<std::byte[]> make_float_bytes(const std::vector<uint8_t>&
 // ---------------------------------------------------------------------------
 
 TEST(SizeBoundedGraph, ConstructionEmpty) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(100, 4, space);
 
     EXPECT_EQ(graph.size(), 0u);
     EXPECT_EQ(graph.capacity(), 100u);
     EXPECT_EQ(graph.getEdgesPerVertex(), 4u);
     EXPECT_EQ(space.dim(), 4u);
-    EXPECT_EQ(space.metric(), deglib::distances::Metric::L2);
+    EXPECT_EQ(space.metric(), deglib::distances::Metric::FP32_L2);
 }
 
 TEST(SizeBoundedGraph, RejectsOddEdgesPerVertex) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     EXPECT_THROW(deglib::graph::SizeBoundedGraph graph(50, 3, space), std::invalid_argument);
 }
 
 TEST(SizeBoundedGraph, InnerProductMetric) {
-    deglib::distances::FloatSpace space(8, deglib::distances::Metric::InnerProduct);
+    deglib::distances::FloatSpace space(8, deglib::distances::Metric::FP32_InnerProduct);
     deglib::graph::SizeBoundedGraph graph(200, 8, space);
 
     EXPECT_EQ(graph.getEdgesPerVertex(), 8u);
     EXPECT_EQ(graph.capacity(), 200u);
-    EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::InnerProduct);
+    EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::FP32_InnerProduct);
 }
 
 TEST(SizeBoundedGraph, L2Uint8Metric) {
-    deglib::distances::FloatSpace space(128, deglib::distances::Metric::L2_Uint8);
+    deglib::distances::FloatSpace space(128, deglib::distances::Metric::Uint8_L2);
     deglib::graph::SizeBoundedGraph graph(10, 4, space);
 
-    EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::L2_Uint8);
+    EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::Uint8_L2);
     EXPECT_EQ(graph.getFeatureSpace().dim(), 128u);
 }
 
@@ -77,7 +77,7 @@ TEST(SizeBoundedGraph, L2Uint8Metric) {
 // ---------------------------------------------------------------------------
 
 TEST(SizeBoundedGraph, AddVertex) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(10, 4, space);
 
     auto v0 = make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f);
@@ -99,7 +99,7 @@ TEST(SizeBoundedGraph, AddVertex) {
 }
 
 TEST(SizeBoundedGraph, ExternalLabels) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(10, 4, space);
 
     std::vector<float> v(4, 0.0f);
@@ -113,7 +113,7 @@ TEST(SizeBoundedGraph, ExternalLabels) {
 }
 
 TEST(SizeBoundedGraph, RemoveSingleVertex) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(4, 2, space);
 
     std::vector<float> v(4, 0.0f);
@@ -125,7 +125,7 @@ TEST(SizeBoundedGraph, RemoveSingleVertex) {
 }
 
 TEST(SizeBoundedGraph, RemoveMiddleVertex) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(5, 2, space);
 
     for (int i = 0; i < 4; ++i) {
@@ -145,7 +145,7 @@ TEST(SizeBoundedGraph, RemoveMiddleVertex) {
 }
 
 TEST(SizeBoundedGraph, SelfLoopInitialization) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(10, 4, space);
 
     std::vector<float> v = {1.0f, 0.0f, 0.0f, 0.0f};
@@ -160,7 +160,7 @@ TEST(SizeBoundedGraph, SelfLoopInitialization) {
 // ---------------------------------------------------------------------------
 
 TEST(SizeBoundedGraph, SetAndQueryEdge) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(10, 4, space);
 
     float v0[] = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -180,7 +180,7 @@ TEST(SizeBoundedGraph, SetAndQueryEdge) {
 }
 
 TEST(SizeBoundedGraph, ChangeEdgeSwap) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
     for (int i = 0; i < 4; ++i) {
@@ -208,7 +208,7 @@ TEST(SizeBoundedGraph, ChangeEdgeSwap) {
 }
 
 TEST(SizeBoundedGraph, ChangeEdgesSorted) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
     for (int i = 0; i < 5; ++i) {
@@ -233,7 +233,7 @@ TEST(SizeBoundedGraph, ChangeEdgesSorted) {
 // ---------------------------------------------------------------------------
 
 TEST(SizeBoundedGraph, LabelLookup) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(10, 2, space);
 
     for (auto lbl : {100u, 200u, 300u}) {
@@ -251,7 +251,7 @@ TEST(SizeBoundedGraph, LabelLookup) {
 }
 
 TEST(SizeBoundedGraph, FeatureVectorStorage) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(2, 2, space);
 
     std::vector<float> v1 = {1.0f, 2.0f, 3.0f, 4.0f};
@@ -274,17 +274,17 @@ TEST(SizeBoundedGraph, FeatureVectorStorage) {
 // ---------------------------------------------------------------------------
 
 TEST(SizeBoundedGraph, LargeGraph) {
-    deglib::distances::FloatSpace space(128, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(128, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(1000, 16, space);
 
     EXPECT_EQ(graph.getEdgesPerVertex(), 16u);
     EXPECT_EQ(graph.capacity(), 1000u);
     EXPECT_EQ(graph.getFeatureSpace().dim(), 128u);
-    EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::L2);
+    EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::FP32_L2);
 }
 
 TEST(SizeBoundedGraph, SmallGraph) {
-    deglib::distances::FloatSpace space(2, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(2, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(3, 2, space);
 
     std::vector<float> v(2, 0.0f);
@@ -297,7 +297,7 @@ TEST(SizeBoundedGraph, SmallGraph) {
 TEST(SizeBoundedGraph, VariousDimensions) {
     std::vector<size_t> dims = {1, 4, 8, 64, 128, 192};
     for (size_t dim : dims) {
-        deglib::distances::FloatSpace space(dim, deglib::distances::Metric::L2);
+        deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
         deglib::graph::SizeBoundedGraph graph(3, 2, space);
 
         std::vector<float> v(dim, 0.0f);
@@ -310,7 +310,7 @@ TEST(SizeBoundedGraph, VariousDimensions) {
 
     std::vector<size_t> u8_dims = {64, 128, 192};
     for (size_t dim : u8_dims) {
-        deglib::distances::FloatSpace space(dim, deglib::distances::Metric::L2_Uint8);
+        deglib::distances::FloatSpace space(dim, deglib::distances::Metric::Uint8_L2);
         deglib::graph::SizeBoundedGraph graph(3, 2, space);
 
         std::vector<uint8_t> v(dim, 0);
@@ -326,7 +326,7 @@ TEST(SizeBoundedGraph, VariousDimensions) {
 // ---------------------------------------------------------------------------
 
 TEST(SizeBoundedGraph, SearchBasic) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
     float v0[] = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -347,7 +347,7 @@ TEST(SizeBoundedGraph, SearchBasic) {
 }
 
 TEST(SizeBoundedGraph, SearchWithFilter) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
     float v0[] = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -372,7 +372,7 @@ TEST(SizeBoundedGraph, SearchWithFilter) {
 // ---------------------------------------------------------------------------
 
 TEST(SizeBoundedGraph, SaveGraph) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
     float v0[] = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -393,7 +393,7 @@ TEST(SizeBoundedGraph, SaveGraph) {
 }
 
 TEST(SizeBoundedGraph, SaveLoadHeader) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
     float v0[] = {7.0f, 10.0f, 0.0f, 0.0f};
@@ -431,7 +431,7 @@ TEST(SizeBoundedGraph, SaveLoadHeader) {
 }
 
 TEST(SizeBoundedGraph, SaveUint8Graph) {
-    deglib::distances::FloatSpace space(128, deglib::distances::Metric::L2_Uint8);
+    deglib::distances::FloatSpace space(128, deglib::distances::Metric::Uint8_L2);
     deglib::graph::SizeBoundedGraph graph(3, 2, space);
 
     std::vector<uint8_t> v0(128, 0);
@@ -449,7 +449,7 @@ TEST(SizeBoundedGraph, SaveUint8Graph) {
     auto size = std::filesystem::file_size(path);
     EXPECT_GT(size, 0u);
     std::filesystem::remove(path);
-    EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::L2_Uint8);
+    EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::Uint8_L2);
 }
 
 // ---------------------------------------------------------------------------
@@ -457,7 +457,7 @@ TEST(SizeBoundedGraph, SaveUint8Graph) {
 // ---------------------------------------------------------------------------
 
 TEST(SizeBoundedGraph, MultipleAddRemoveCycles) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(10, 2, space);
 
     for (int i = 0; i < 5; ++i) {
@@ -491,7 +491,7 @@ TEST(SizeBoundedGraph, MultipleAddRemoveCycles) {
 // ---------------------------------------------------------------------------
 
 TEST(SizeBoundedGraph, VisitedListPool) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(10, 4, space);
 
     float v0[] = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -507,7 +507,7 @@ TEST(SizeBoundedGraph, VisitedListPool) {
 // ---------------------------------------------------------------------------
 
 TEST(SizeBoundedGraph, SearchWithMaxDistanceCount) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(10, 4, space);
 
     for (int i = 0; i < 10; ++i) {
@@ -523,7 +523,7 @@ TEST(SizeBoundedGraph, SearchWithMaxDistanceCount) {
 }
 
 TEST(SizeBoundedGraph, ExploreBasicIncludeEntry) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
     for (int i = 0; i < 5; ++i) {
@@ -550,7 +550,7 @@ TEST(SizeBoundedGraph, ExploreBasicIncludeEntry) {
 }
 
 TEST(SizeBoundedGraph, ExploreExcludeEntry) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
     for (int i = 0; i < 5; ++i) {
@@ -568,7 +568,7 @@ TEST(SizeBoundedGraph, ExploreExcludeEntry) {
 }
 
 TEST(SizeBoundedGraph, ExploreWithMaxDistanceCount) {
-    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(10, 4, space);
 
     for (int i = 0; i < 10; ++i) {
@@ -602,7 +602,7 @@ constexpr std::array<uint32_t, 5> kExtLabels = {1005, 9999, 42, 707, 12345};
 } // anonymous namespace
 
 TEST(SizeBoundedGraphInternalIndicesInSearch, SearchReturnsInternalIndices) {
-   deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
    deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
    // Add vertices with non-sequential external labels at distinct positions
@@ -642,7 +642,7 @@ TEST(SizeBoundedGraphInternalIndicesInSearch, SearchReturnsInternalIndices) {
 }
 
 TEST(SizeBoundedGraphInternalIndicesInSearch, ExploreReturnsInternalIndices) {
-   deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
    deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
    graph.addVertex(kExtLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
@@ -677,7 +677,7 @@ TEST(SizeBoundedGraphInternalIndicesInSearch, ExploreReturnsInternalIndices) {
 }
 
 TEST(SizeBoundedGraphInternalIndicesInSearch, HasPathReturnsInternalIndices) {
-   deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
    deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
    graph.addVertex(kExtLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
@@ -712,7 +712,7 @@ TEST(SizeBoundedGraphInternalIndicesInSearch, HasPathReturnsInternalIndices) {
 }
 
 TEST(SizeBoundedGraphInternalIndicesInSearch, GetNeighborIndicesReturnsInternalIndices) {
-   deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
    deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
    graph.addVertex(kExtLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
@@ -742,7 +742,7 @@ TEST(SizeBoundedGraphInternalIndicesInSearch, GetNeighborIndicesReturnsInternalI
 }
 
 TEST(SizeBoundedGraphLabelMapping, BidirectionalTranslationWithNonSequentialLabels) {
-   deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+   deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
    deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
    // Add vertices with non-sequential external labels

@@ -19,9 +19,6 @@
 
 namespace deglib::distances {
 
-    // Bring InstructionSet from deglib::cpu into deglib::distances
-    using deglib::cpu::InstructionSet;
-
     enum class MetricDataType : uint8_t {
         FP32  = 0x00,
         Uint8 = 0x10,
@@ -59,13 +56,6 @@ namespace deglib::distances {
         static constexpr MetricType Uint8_L2 = MetricType::Uint8_L2;
         static constexpr MetricType FP16_InnerProduct = MetricType::FP16_InnerProduct;
         static constexpr MetricType EVP_InnerProduct = MetricType::EVP_InnerProduct;
-
-        // Legacy metric name aliases for 100% backward compatibility
-        static constexpr MetricType L2 = MetricType::FP32_L2;
-        static constexpr MetricType InnerProduct = MetricType::FP32_InnerProduct;
-        static constexpr MetricType L2_Uint8 = MetricType::Uint8_L2;
-        static constexpr MetricType FP16InnerProduct = MetricType::FP16_InnerProduct;
-        static constexpr MetricType EVPInnerProduct = MetricType::EVP_InnerProduct;
 
         constexpr MetricDataType get_data_type() const {
             return static_cast<MetricDataType>(static_cast<uint8_t>(value) & 0xF0);
@@ -185,7 +175,7 @@ namespace deglib::distances {
      */
     class FloatSpace  {
 
-        static DistanceVariant select_dist_variant(const size_t dim, const Metric metric, const InstructionSet instruction = InstructionSet::Auto) {
+        static DistanceVariant select_dist_variant(const size_t dim, const Metric metric, const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) {
             switch (metric) {
                 case Metric::FP32_L2:
                     return to_flat_variant(deglib::distances::fp32_l2::select_dist(dim, instruction));
@@ -218,7 +208,7 @@ namespace deglib::distances {
         const Metric metric_;
 
     public:
-        FloatSpace(const size_t dim, const Metric metric, const InstructionSet instruction = InstructionSet::Auto) 
+        FloatSpace(const size_t dim, const Metric metric, const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) 
             : dist_variant_(select_dist_variant(dim, metric, instruction)),
               data_size_(calculate_data_size(dim, metric)),
               dim_(dim),

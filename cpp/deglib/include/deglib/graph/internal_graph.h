@@ -18,73 +18,93 @@ class EvenRegularGraphBuilder;
 
 namespace deglib::graph {
 
+/**
+ * Represents a pair of a vertex identifier and its corresponding distance.
+ * Designed as a trivially default-constructible type (POD) for zero-overhead allocations.
+ */
 class ObjectDistance
 {
     uint32_t identifier_;
     float distance_;
 
-  public:
-    ObjectDistance() {}
+public:
+    // Default constructor generates zero instructions (uninitialized memory for maximum performance)
+    ObjectDistance() = default;
 
-    ObjectDistance(const uint32_t identifier, const float distance) : identifier_(identifier), distance_(distance) {}
+    constexpr ObjectDistance(const uint32_t identifier, const float distance) noexcept
+        : identifier_(identifier), distance_(distance) {}
 
-    inline const uint32_t getIdentifier() const { 
-      return identifier_; 
+    [[nodiscard]] constexpr uint32_t getIdentifier() const noexcept { 
+        return identifier_; 
     }
 
-    inline const float getDistance() const { 
-      return distance_; 
+    [[nodiscard]] constexpr float getDistance() const noexcept { 
+        return distance_; 
     }
 
-    inline bool operator==(const ObjectDistance& o) const { 
-      return (distance_ == o.distance_) && (identifier_ == o.identifier_); 
+    constexpr bool operator==(const ObjectDistance& o) const noexcept { 
+        return distance_ == o.distance_ && identifier_ == o.identifier_; 
     }
 
-    inline bool operator<(const ObjectDistance& o) const {
-      if (distance_ == o.distance_)
-        return identifier_ < o.identifier_;
-      else
+    constexpr bool operator<(const ObjectDistance& o) const noexcept {
+        if (distance_ == o.distance_)
+            return identifier_ < o.identifier_;
         return distance_ < o.distance_;
     }
 
-    inline bool operator>(const ObjectDistance& o) const {
-      if (distance_ == o.distance_)
-        return identifier_ > o.identifier_;
-      else
+    constexpr bool operator>(const ObjectDistance& o) const noexcept {
+        if (distance_ == o.distance_)
+            return identifier_ > o.identifier_;
         return distance_ > o.distance_;
     }
 };
 
+/**
+ * Priority Queue based on std::vector using binary heap operations.
+ */
 template<class Compare, class ObjectType>
 class PQV : public std::vector<ObjectType> {
-  Compare comp;
-  public:
-    PQV(Compare cmp = Compare()) : comp(cmp) {}
+    Compare comp;
 
-    const ObjectType& top() { return this->front(); }
+public:
+    explicit PQV(Compare cmp = Compare()) : comp(cmp) {}
 
-    template <class... _Valty>
-    void emplace(_Valty&&... _Val) {
-      this->emplace_back(std::forward<_Valty>(_Val)...);
-      std::push_heap(this->begin(), this->end(), comp);
+    /// Const-correct access to the top element of the heap.
+    [[nodiscard]] const ObjectType& top() const { 
+        return this->front(); 
     }
 
-    void push(const ObjectType& x) {
-      this->push_back(x);
-      std::push_heap(this->begin(),this->end(), comp);
+    /// Construct element in-place at the end and restore heap invariants.
+    template <class... Args>
+    void emplace(Args&&... args) {
+        this->emplace_back(std::forward<Args>(args)...);
+        std::push_heap(this->begin(), this->end(), comp);
     }
 
+    /// Removes the top element from the heap.
     void pop() {
-      std::pop_heap(this->begin(),this->end(), comp);
-      this->pop_back();
+        std::pop_heap(this->begin(), this->end(), comp);
+        this->pop_back();
+    }
+
+    /// Replaces the top element in O(log k) time without vector reallocation.
+    void replace_top(ObjectType&& x) {
+        std::pop_heap(this->begin(), this->end(), comp);
+        this->back() = std::move(x);
+        std::push_heap(this->begin(), this->end(), comp);
+    }
+
+    /// Re-establishes the heap order using the internal comparator.
+    void heapify() {
+        std::make_heap(this->begin(), this->end(), comp);
     }
 };
 
-// search result set containing internal vertex ids and distances
-typedef PQV<std::less<ObjectDistance>, ObjectDistance> ResultSet;
+// Search result set (Max-Heap: top() returns the entry with the LARGEST distance)
+using ResultSet = PQV<std::less<ObjectDistance>, ObjectDistance>;
 
-// set of unchecked vertex ids
-typedef PQV<std::greater<ObjectDistance>, ObjectDistance> UncheckedSet;
+// Unchecked search candidates (Min-Heap: top() returns the entry with the SMALLEST distance)
+using UncheckedSet = PQV<std::greater<ObjectDistance>, ObjectDistance>;
 
 /**
  * Abstract base interface for all low-level internal graph representations.

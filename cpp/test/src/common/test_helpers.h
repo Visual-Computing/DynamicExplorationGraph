@@ -513,7 +513,7 @@ inline static std::vector<uint32_t> build_graph_for_determinism(
     size_t dim, size_t base_count, uint32_t edges_per_vertex,
     const std::vector<float>& base_data)
 {
-    const deglib::distances::FloatSpace feature_space(dim, deglib::distances::Metric::L2);
+    const deglib::distances::FloatSpace feature_space(dim, deglib::distances::Metric::FP32_L2);
     deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(base_count), edges_per_vertex,
                                           std::move(feature_space));
 
@@ -579,7 +579,7 @@ inline static void run_builder_integration_test(const char* name, deglib::distan
                              base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                              dist_variant, optimization_target);
     }
-    else if (metric == deglib::distances::Metric::FP16InnerProduct)
+    else if (metric == deglib::distances::Metric::FP16_InnerProduct)
     {
         // FP16 metric
         std::vector<uint16_t> base_data;
@@ -592,7 +592,7 @@ inline static void run_builder_integration_test(const char* name, deglib::distan
                              base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                              dist_variant, optimization_target);
     }
-    else if (metric == deglib::distances::Metric::EVPInnerProduct)
+    else if (metric == deglib::distances::Metric::EVP_InnerProduct)
     {
         // EVP metric
         std::vector<std::byte> base_data;
@@ -613,7 +613,7 @@ inline static void run_builder_integration_test(const char* name, deglib::distan
         generate_synthetic_clustered_dataset(base_count, dim, base_data, query_data, query_count, num_clusters);
 
         std::vector<std::vector<uint32_t>> gt_data;
-        if (metric == deglib::distances::Metric::InnerProduct)
+        if (metric == deglib::distances::Metric::FP32_InnerProduct)
         {
             gt_data = compute_groundtruth_innerproduct(base_data, base_count, query_data, query_count, dim, 10);
         }

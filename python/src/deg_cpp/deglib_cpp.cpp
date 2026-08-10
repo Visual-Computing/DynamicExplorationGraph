@@ -755,14 +755,21 @@ PYBIND11_MODULE(deglib_cpp, m) {
   m.def("avx512_usable", &deglib::cpu::has_avx512,
         "Returns whether AVX512 instructions are available");
 
+  // cpu submodule
+  py::module_ cpu_module = m.def_submodule("cpu", "CPU feature detection and InstructionSet");
+  py::enum_<deglib::cpu::InstructionSet>(cpu_module, "InstructionSet")
+      .value("Auto", deglib::cpu::InstructionSet::Auto)
+      .value("Scalar", deglib::cpu::InstructionSet::Scalar)
+      .value("AVX2", deglib::cpu::InstructionSet::AVX2)
+      .value("AVX512", deglib::cpu::InstructionSet::AVX512);
+
+  cpu_module.def("has_avx2", &deglib::cpu::has_avx2,
+        "Returns whether AVX2 instructions are available");
+  cpu_module.def("has_avx512", &deglib::cpu::has_avx512,
+        "Returns whether AVX512 instructions are available");
+
   // distances submodule
   py::module_ distances_module = m.def_submodule("distances", "Distance metrics and feature spaces");
-  py::enum_<deglib::distances::InstructionSet>(distances_module, "InstructionSet")
-      .value("Auto", deglib::distances::InstructionSet::Auto)
-      .value("Scalar", deglib::distances::InstructionSet::Scalar)
-      .value("AVX2", deglib::distances::InstructionSet::AVX2)
-      .value("AVX512", deglib::distances::InstructionSet::AVX512);
-
   py::enum_<deglib::distances::MetricType>(distances_module, "Metric")
       .value("FP32_L2", deglib::distances::MetricType::FP32_L2)
       .value("FP32_InnerProduct", deglib::distances::MetricType::FP32_InnerProduct)
@@ -772,12 +779,12 @@ PYBIND11_MODULE(deglib_cpp, m) {
 
   py::class_<deglib::distances::FloatSpace>(distances_module, "FloatSpace")
       .def(py::init([](const size_t dim, const deglib::distances::MetricType metric,
-                       const deglib::distances::InstructionSet instruction) {
+                       const deglib::cpu::InstructionSet instruction) {
               return deglib::distances::FloatSpace(dim, deglib::distances::Metric(metric),
                                         instruction);
             }),
             py::arg("dim"), py::arg("metric") = deglib::distances::MetricType::FP32_L2,
-            py::arg("instruction") = deglib::distances::InstructionSet::Auto)
+            py::arg("instruction") = deglib::cpu::InstructionSet::Auto)
       .def("dim", &deglib::distances::FloatSpace::dim)
       .def("metric",
            [](const deglib::distances::FloatSpace &fs) { return fs.metric().value; })
@@ -799,11 +806,6 @@ PYBIND11_MODULE(deglib_cpp, m) {
   distances_module.def("fp16_to_floats", &fp16_to_floats_wrapper,
         "Convert FP16 (uint16_t) array to float32");
 
-  // Backward-compatible aliases at module level
-  m.attr("quantize_batch") = distances_module.attr("quantize_batch");
-  m.attr("floats_to_fp16") = distances_module.attr("floats_to_fp16");
-  m.attr("fp16_to_floats") = distances_module.attr("fp16_to_floats");
-
   // search submodule
   py::module_ search_module = m.def_submodule("search", "Search utilities including Filter");
   py::class_<deglib::search::Filter>(search_module, "Filter")
@@ -822,13 +824,6 @@ PYBIND11_MODULE(deglib_cpp, m) {
     size_t size = labels_info.shape[0];
     return new deglib::search::Filter(ptr, size, max_value, max_label_count);
   });
-
-  // Backward-compatible aliases at module level
-  m.attr("Filter") = search_module.attr("Filter");
-  m.attr("FloatSpace") = distances_module.attr("FloatSpace");
-  m.attr("Metric") = distances_module.attr("Metric");
-  m.attr("InstructionSet") = distances_module.attr("InstructionSet");
-  m.attr("create_filter") = search_module.attr("create_filter");
 
   // graphs
   py::class_<deglib::DynamicExplorationGraph>(m, "DynamicExplorationGraph")

@@ -78,7 +78,7 @@ public:
 //  3 -> 0, 1, 2
 // This is a fully-connected graph where every vertex can reach every other vertex.
 MockInternalGraph build_fully_connected_graph() {
-  deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+  deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
   MockInternalGraph graph(4, 4, std::move(space));
 
   graph.setLabel(0, 0);
@@ -98,7 +98,7 @@ MockInternalGraph build_fully_connected_graph() {
 //  Component A: 0 -> 1, 1 -> 0
 //  Component B: 2 -> 3, 3 -> 2
 MockInternalGraph build_disconnected_graph() {
-  deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+  deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
   MockInternalGraph graph(4, 4, std::move(space));
 
   graph.setLabel(0, 0);
@@ -206,7 +206,7 @@ TEST(DegAnalysisAnalyzeGraph, DisconnectedGraph) {
 }
 
 TEST(DegAnalysisAnalyzeGraph, EmptyGraph) {
-  deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
+  deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
   MockInternalGraph graph(0, 4, std::move(space));
   auto stats = deglib::analysis::analyze_graph(graph);
 

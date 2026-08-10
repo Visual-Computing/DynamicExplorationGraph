@@ -156,7 +156,7 @@ namespace {
 // FloatSpace integration tests
 TEST(L2Uint8_FloatSpace, L2Uint8Metric) {
     size_t dim = 64;
-    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::L2_Uint8);
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::Uint8_L2);
 
     auto a = make_uint8_vec(dim, 42);
     auto b = make_uint8_vec(dim, 123);
@@ -168,7 +168,7 @@ TEST(L2Uint8_FloatSpace, L2Uint8Metric) {
 TEST(L2Uint8_FloatSpace, VariousDims) {
     std::vector<size_t> dims = {4, 8, 16, 32, 64, 128, 256};
     for (size_t dim : dims) {
-        deglib::distances::FloatSpace space(dim, deglib::distances::Metric::L2_Uint8);
+        deglib::distances::FloatSpace space(dim, deglib::distances::Metric::Uint8_L2);
 
         auto a = make_uint8_vec(dim, dim);
         auto b = make_uint8_vec(dim, dim + 1);

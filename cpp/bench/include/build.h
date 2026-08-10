@@ -28,7 +28,7 @@ inline deglib::graph::SizeBoundedGraph create_random_graph(const deglib::StaticF
                                                            const uint8_t k,
                                                            const uint32_t max_size = 0,
                                                            const uint32_t scale = 1,
-                                                           const deglib::distances::InstructionSet instruction = deglib::distances::InstructionSet::Auto) {
+                                                           const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) {
     log("Build a random EG{}\n", k);
 
     const auto dims = repository.dims();
@@ -127,7 +127,7 @@ inline void create_graph(const deglib::StaticFeatureRepository& repository,
                          const bool use_rng = true,
                          const uint32_t scale = 1,
                          const bool use_path_verification = false,
-                         const deglib::distances::InstructionSet instruction = deglib::distances::InstructionSet::Auto) {
+                         const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) {
     auto rnd = std::mt19937(7);
     const uint32_t swap_tries = 0;
     const uint32_t additional_swap_tries = 0;

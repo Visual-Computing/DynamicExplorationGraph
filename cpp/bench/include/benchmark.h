@@ -32,7 +32,7 @@ namespace deglib::benchmark {
 static uint64_t compute_linear_search_baseline(const deglib::FeatureRepository& base_repository,
                                                const deglib::distances::Metric metric,
                                                const uint32_t sample_size = 100,
-                                               const deglib::distances::InstructionSet instruction = deglib::distances::InstructionSet::Auto) {
+                                               const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) {
     const auto dims = base_repository.dims();
     const auto base_size = base_repository.size();
     const auto feature_space = deglib::distances::FloatSpace(dims, metric, instruction);
