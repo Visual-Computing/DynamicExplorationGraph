@@ -109,9 +109,12 @@ TEST(EvpInnerProduct, SelectDistReturnsValidVariant) {
 
 TEST(EvpInnerProduct, FloatSpaceEVPInnerProduct) {
     const size_t dim = 128;
-    deglib::FloatSpace space(dim, deglib::Metric::EVPInnerProduct);
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::EVPInnerProduct);
 
     EXPECT_EQ(space.dim(), dim);
-    EXPECT_EQ(space.metric(), deglib::Metric::EVPInnerProduct);
+    EXPECT_EQ(space.metric(), deglib::distances::Metric::EVPInnerProduct);
     EXPECT_EQ(space.get_data_size(), 2 * (dim / 8));
 }
+
+
+

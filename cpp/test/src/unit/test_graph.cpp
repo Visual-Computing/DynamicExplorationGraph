@@ -48,7 +48,7 @@ void set_edges(deglib::graph::MutableGraph& graph, uint32_t vertex,
 // Vertices are placed at distinct positions so search/explore return deterministic results.
 // Internal indices: 0..4, External labels: 1005, 9999, 42, 707, 12345
 deglib::graph::SizeBoundedGraph build_test_graph() {
-   deglib::FloatSpace space(4, deglib::Metric::L2);
+   deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
    deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
    // Place vertices at distinct 4D positions

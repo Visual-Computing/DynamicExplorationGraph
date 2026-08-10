@@ -160,7 +160,7 @@ def test_explore(conf: Configuration):
     k = 10
     include_entry = True
     entry_vertex_index = random.randint(0, conf.samples-1)
-    indices, distances = conf.graph.explore(entry_vertex_index, k, include_entry, max_distance_computation_count=k*10)
+    indices, distances = conf.graph.explore(entry_vertex_index, k, max_distance_computation_count=k*10, include_entry=include_entry)
     assert len(indices) == k
     assert len(distances) == k
     # check that valid (non-NaN) distances are sorted (ascending)

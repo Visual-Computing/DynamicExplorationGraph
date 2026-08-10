@@ -165,10 +165,8 @@ def run_static_benchmark(
         build_start = time.perf_counter()
         graph_mut = deglib.DynamicExplorationGraph.create_empty(
             capacity=base_vecs.shape[0],
-            dims=dims,
+            feature_space=deglib.distances.FloatSpace.create(dims, metric, instruction_enum),
             edges_per_vertex=preset["k"],
-            metric=metric,
-            instruction=instruction_enum,
         )
         builder = deglib.GraphBuilder(
             graph_mut,
@@ -284,8 +282,8 @@ def run_static_benchmark(
                 indices_batch, _ = graph.explore(
                     entry_labels,
                     k=actual_explore_k,
-                    include_entry=True,
                     max_distance_computation_count=max_dist,
+                    include_entry=True,
                     threads=1,
                 )
             elapsed_sec = time.perf_counter() - start_time

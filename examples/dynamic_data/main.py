@@ -208,10 +208,8 @@ def build_dynamic_graph(
 
     graph_mut = deglib.DynamicExplorationGraph.create_empty(
         capacity=n,
-        dims=dims,
+        feature_space=deglib.distances.FloatSpace.create(dims, metric, instruction_enum),
         edges_per_vertex=k,
-        metric=metric,
-        instruction=instruction_enum,
     )
     builder = deglib.GraphBuilder(
         graph_mut,

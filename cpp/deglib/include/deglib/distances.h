@@ -17,7 +17,10 @@
 #include "deglib/distance/uint8_l2.h"
 #include "deglib/distance/evp_inner_product.h"
 
-namespace deglib {
+namespace deglib::distances {
+
+    // Bring InstructionSet from deglib::cpu into deglib::distances
+    using deglib::cpu::InstructionSet;
 
     enum class MetricDataType : uint8_t {
         FP32  = 0x00,
@@ -140,7 +143,7 @@ namespace deglib {
 
     // Compile-time verification that every type in DistanceVariant fulfills the DistanceFunction concept
     static_assert([]<typename... Ts>(std::variant<Ts...>*) {
-        return (deglib::DistanceFunction<Ts> && ...);
+        return (deglib::distances::DistanceFunction<Ts> && ...);
     }(static_cast<DistanceVariant*>(nullptr)), "All types in DistanceVariant must satisfy DistanceFunction concept");
 
     /**
@@ -149,7 +152,7 @@ namespace deglib {
     inline DISTFUNC<float> to_dist_func(const DistanceVariant& variant) {
         return std::visit([](auto&& dist) -> DISTFUNC<float> {
             using DistType = std::decay_t<decltype(dist)>;
-            static_assert(deglib::DistanceFunction<DistType>, "Selected distance variant must satisfy DistanceFunction concept");
+            static_assert(deglib::distances::DistanceFunction<DistType>, "Selected distance variant must satisfy DistanceFunction concept");
             return &DistType::compare;
         }, variant);
     }
@@ -182,29 +185,29 @@ namespace deglib {
      */
     class FloatSpace  {
 
-        static DistanceVariant select_dist_variant(const size_t dim, const deglib::Metric metric, const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) {
+        static DistanceVariant select_dist_variant(const size_t dim, const Metric metric, const InstructionSet instruction = InstructionSet::Auto) {
             switch (metric) {
-                case deglib::Metric::FP32_L2:
+                case Metric::FP32_L2:
                     return to_flat_variant(deglib::distances::fp32_l2::select_dist(dim, instruction));
-                case deglib::Metric::FP32_InnerProduct:
+                case Metric::FP32_InnerProduct:
                     return to_flat_variant(deglib::distances::fp32_ip::select_dist(dim, instruction));
-                case deglib::Metric::FP16_InnerProduct:
+                case Metric::FP16_InnerProduct:
                     return to_flat_variant(deglib::distances::fp16_ip::select_dist(dim, instruction));
-                case deglib::Metric::Uint8_L2:
+                case Metric::Uint8_L2:
                     return to_flat_variant(deglib::distances::uint8_l2::select_dist(dim, instruction));
-                case deglib::Metric::EVP_InnerProduct:
+                case Metric::EVP_InnerProduct:
                     return to_flat_variant(deglib::distances::evp_ip::select_dist(dim, instruction));
                 default:
                     throw std::invalid_argument("Unsupported metric type in select_dist_variant");
             }
         }
 
-        static size_t calculate_data_size(const size_t dim, const deglib::Metric metric) {
+        static size_t calculate_data_size(const size_t dim, const Metric metric) {
             switch (metric.get_data_type()) {
-                case deglib::MetricDataType::FP32:  return dim * sizeof(float);
-                case deglib::MetricDataType::Uint8: return dim * sizeof(uint8_t);
-                case deglib::MetricDataType::FP16:  return dim * sizeof(uint16_t);
-                case deglib::MetricDataType::EVP:   return 2 * (dim / 8);  // EVP: [ones (dim/8 bytes)][negs (dim/8 bytes)]
+                case MetricDataType::FP32:  return dim * sizeof(float);
+                case MetricDataType::Uint8: return dim * sizeof(uint8_t);
+                case MetricDataType::FP16:  return dim * sizeof(uint16_t);
+                case MetricDataType::EVP:   return 2 * (dim / 8);  // EVP: [ones (dim/8 bytes)][negs (dim/8 bytes)]
                 default: throw std::invalid_argument("Unsupported metric data type in calculate_data_size");
             }
         }
@@ -212,17 +215,17 @@ namespace deglib {
         const DistanceVariant dist_variant_;
         const size_t data_size_;
         const size_t dim_;
-        const deglib::Metric metric_;
+        const Metric metric_;
 
     public:
-        FloatSpace(const size_t dim, const deglib::Metric metric, const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) 
+        FloatSpace(const size_t dim, const Metric metric, const InstructionSet instruction = InstructionSet::Auto) 
             : dist_variant_(select_dist_variant(dim, metric, instruction)),
               data_size_(calculate_data_size(dim, metric)),
               dim_(dim),
               metric_(metric) {
         }
 
-        FloatSpace(const size_t dim, const deglib::Metric metric, DistanceVariant dist_variant)
+        FloatSpace(const size_t dim, const Metric metric, DistanceVariant dist_variant)
             : dist_variant_(std::move(dist_variant)),
               data_size_(calculate_data_size(dim, metric)),
               dim_(dim),
@@ -239,7 +242,7 @@ namespace deglib {
         /**
          * Returns the metric type used for distance computations.
          */
-        const deglib::Metric metric() const {
+        const Metric metric() const {
             return metric_;
         }
 
@@ -283,12 +286,10 @@ namespace deglib {
         ~FloatSpace() {}
     };
 
-namespace distances {
-
     /**
      * Compute distance between two feature vectors in the given FloatSpace.
      */
-    inline float compute_distance(const deglib::FloatSpace& space, const void* vec1, const void* vec2) {
+    inline float compute_distance(const FloatSpace& space, const void* vec1, const void* vec2) {
         if (vec1 == nullptr || vec2 == nullptr) {
             throw std::invalid_argument("compute_distance: vec1 and vec2 must not be null");
         }
@@ -301,7 +302,7 @@ namespace distances {
      * Compute distances between queries and targets using the given FloatSpace.
      */
     inline void compute_distances(
-        const deglib::FloatSpace& space,
+        const FloatSpace& space,
         const void* queries,
         size_t num_queries,
         const void* targets,
@@ -330,7 +331,5 @@ namespace distances {
         });
     }
 
-} // namespace distances
-
-}  // end namespace deglib
+} // namespace deglib::distances
 

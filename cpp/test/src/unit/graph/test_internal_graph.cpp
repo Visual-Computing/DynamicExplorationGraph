@@ -140,14 +140,14 @@ TEST(UncheckedSet, PopRemovesMin) {
 class MockInternalGraph : public deglib::graph::InternalGraph {
    uint32_t size_;
    uint8_t edges_per_vertex_;
-   deglib::FloatSpace feature_space_;
+   deglib::distances::FloatSpace feature_space_;
    std::vector<uint32_t> labels_;
    std::vector<std::vector<uint32_t>> neighbors_;
    std::vector<std::vector<float>> weights_;
    std::vector<std::vector<std::byte>> features_;
 
 public:
-   MockInternalGraph(uint32_t size, uint8_t epv, deglib::FloatSpace fs)
+   MockInternalGraph(uint32_t size, uint8_t epv, deglib::distances::FloatSpace fs)
        : size_(size), edges_per_vertex_(epv), feature_space_(std::move(fs)),
          labels_(size), neighbors_(size, std::vector<uint32_t>(epv)),
          weights_(size, std::vector<float>(epv, 0.0f)),
@@ -155,7 +155,7 @@ public:
 
    const uint32_t size() const override { return size_; }
    const uint8_t getEdgesPerVertex() const override { return edges_per_vertex_; }
-   const deglib::FloatSpace& getFeatureSpace() const override { return feature_space_; }
+   const deglib::distances::FloatSpace& getFeatureSpace() const override { return feature_space_; }
 
    const uint32_t getExternalLabel(uint32_t idx) const override { return labels_[idx]; }
    const uint32_t getInternalIndex(uint32_t label) const override {
@@ -180,7 +180,7 @@ public:
    }
    deglib::graph::ResultSet search_intern(const std::vector<uint32_t>&, const std::byte*,
                                           const uint32_t, const float = 0.0f, const bool = true,
-                                          const deglib::graph::Filter* = nullptr, const uint32_t = 0) const override {
+                                           const deglib::search::Filter* = nullptr, const uint32_t = 0) const override {
        return deglib::graph::ResultSet();
    }
 
@@ -195,7 +195,7 @@ public:
 // ---------------------------------------------------------------------------
 
 TEST(InternalGraph, InterfaceContract) {
-   deglib::FloatSpace fs(4, deglib::Metric::L2);
+   deglib::distances::FloatSpace fs(4, deglib::distances::Metric::L2);
    MockInternalGraph graph(3, 2, std::move(fs));
 
    graph.setLabel(0, 10);
@@ -208,7 +208,7 @@ TEST(InternalGraph, InterfaceContract) {
 }
 
 TEST(InternalGraph, HasVertex) {
-   deglib::FloatSpace fs(4, deglib::Metric::L2);
+   deglib::distances::FloatSpace fs(4, deglib::distances::Metric::L2);
    MockInternalGraph graph(3, 2, std::move(fs));
    graph.setLabel(0, 10);
    graph.setLabel(1, 20);
@@ -220,7 +220,7 @@ TEST(InternalGraph, HasVertex) {
 }
 
 TEST(InternalGraph, GetInternalIndex) {
-   deglib::FloatSpace fs(4, deglib::Metric::L2);
+   deglib::distances::FloatSpace fs(4, deglib::distances::Metric::L2);
    MockInternalGraph graph(3, 2, std::move(fs));
    graph.setLabel(0, 10);
    graph.setLabel(1, 20);
@@ -232,7 +232,7 @@ TEST(InternalGraph, GetInternalIndex) {
 }
 
 TEST(InternalGraph, HasEdge) {
-   deglib::FloatSpace fs(4, deglib::Metric::L2);
+   deglib::distances::FloatSpace fs(4, deglib::distances::Metric::L2);
    MockInternalGraph graph(3, 2, std::move(fs));
    graph.setLabel(0, 10);
    graph.setLabel(1, 20);
@@ -247,9 +247,12 @@ TEST(InternalGraph, HasEdge) {
 }
 
 TEST(InternalGraph, GetEntryVertexIndices) {
-   deglib::FloatSpace fs(4, deglib::Metric::L2);
+   deglib::distances::FloatSpace fs(4, deglib::distances::Metric::L2);
    MockInternalGraph graph(3, 2, std::move(fs));
    auto entries = graph.getEntryVertexIndices();
    EXPECT_EQ(entries.size(), 1u);
    EXPECT_EQ(entries[0], 0u);
 }
+
+
+

@@ -22,14 +22,14 @@ namespace {
 class MockInternalGraph : public deglib::graph::InternalGraph {
   uint32_t size_;
   uint8_t edges_per_vertex_;
-  deglib::FloatSpace feature_space_;
+  deglib::distances::FloatSpace feature_space_;
   std::vector<uint32_t> labels_;
   std::vector<std::vector<uint32_t>> neighbors_;
   std::vector<std::vector<float>> weights_;
   std::vector<std::vector<std::byte>> features_;
 
 public:
-  MockInternalGraph(uint32_t size, uint8_t epv, deglib::FloatSpace fs)
+  MockInternalGraph(uint32_t size, uint8_t epv, deglib::distances::FloatSpace fs)
       : size_(size), edges_per_vertex_(epv), feature_space_(std::move(fs)),
         labels_(size), neighbors_(size, std::vector<uint32_t>(epv, (std::numeric_limits<uint32_t>::max)())),
         weights_(size, std::vector<float>(epv, 0.0f)),
@@ -37,7 +37,7 @@ public:
 
   const uint32_t size() const override { return size_; }
   const uint8_t getEdgesPerVertex() const override { return edges_per_vertex_; }
-  const deglib::FloatSpace& getFeatureSpace() const override { return feature_space_; }
+  const deglib::distances::FloatSpace& getFeatureSpace() const override { return feature_space_; }
 
   const uint32_t getExternalLabel(uint32_t idx) const override { return labels_[idx]; }
   const uint32_t getInternalIndex(uint32_t label) const override {
@@ -62,7 +62,7 @@ public:
   }
   deglib::graph::ResultSet search_intern(const std::vector<uint32_t>&, const std::byte*,
                                          const uint32_t, const float = 0.0f, const bool = true,
-                                         const deglib::graph::Filter* = nullptr, const uint32_t = 0) const override {
+                                          const deglib::search::Filter* = nullptr, const uint32_t = 0) const override {
       return deglib::graph::ResultSet();
   }
 
@@ -78,7 +78,7 @@ public:
 //  3 -> 0, 1, 2
 // This is a fully-connected graph where every vertex can reach every other vertex.
 MockInternalGraph build_fully_connected_graph() {
-  deglib::FloatSpace space(4, deglib::Metric::L2);
+  deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
   MockInternalGraph graph(4, 4, std::move(space));
 
   graph.setLabel(0, 0);
@@ -98,7 +98,7 @@ MockInternalGraph build_fully_connected_graph() {
 //  Component A: 0 -> 1, 1 -> 0
 //  Component B: 2 -> 3, 3 -> 2
 MockInternalGraph build_disconnected_graph() {
-  deglib::FloatSpace space(4, deglib::Metric::L2);
+  deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
   MockInternalGraph graph(4, 4, std::move(space));
 
   graph.setLabel(0, 0);
@@ -206,7 +206,7 @@ TEST(DegAnalysisAnalyzeGraph, DisconnectedGraph) {
 }
 
 TEST(DegAnalysisAnalyzeGraph, EmptyGraph) {
-  deglib::FloatSpace space(4, deglib::Metric::L2);
+  deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
   MockInternalGraph graph(0, 4, std::move(space));
   auto stats = deglib::analysis::analyze_graph(graph);
 

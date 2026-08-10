@@ -106,15 +106,15 @@ struct FlasContext {
 
   RandomEngine &rng;
   FlasMetric metric;
-  deglib::DISTFUNC<float> dist_func;
+  deglib::distances::DISTFUNC<float> dist_func;
 
   FlasContext(std::span<MapField> map_fields_, int count_, int dim_, RandomEngine &rng_, FlasMetric metric_)
     : map_fields(map_fields_), count(count_), dim(dim_), rng(rng_), metric(metric_) {
 
     if (metric == FlasMetric::InnerProduct) {
-      dist_func = deglib::to_dist_func(deglib::to_flat_variant(deglib::distances::fp32_ip::select_dist(dim)));
+      dist_func = deglib::distances::to_dist_func(deglib::distances::to_flat_variant(deglib::distances::fp32_ip::select_dist(dim)));
     } else {
-      dist_func = deglib::to_dist_func(deglib::to_flat_variant(deglib::distances::fp32_l2::select_dist(dim)));
+      dist_func = deglib::distances::to_dist_func(deglib::distances::to_flat_variant(deglib::distances::fp32_l2::select_dist(dim)));
     }
   }
 

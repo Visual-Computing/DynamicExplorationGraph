@@ -68,12 +68,12 @@ void fvecs_write(const char *fname, uint32_t d, size_t n, const float* v) {
 /**
  * Compute the gt data
  */
-std::vector<uint32_t> compute_knn_groundtruth(const deglib::FeatureRepository& base_repo, const deglib::FeatureRepository& query_repo, const deglib::Metric metric, const uint32_t k_target, const size_t base_limit = 0) {
+std::vector<uint32_t> compute_knn_groundtruth(const deglib::FeatureRepository& base_repo, const deglib::FeatureRepository& query_repo, const deglib::distances::Metric metric, const uint32_t k_target, const size_t base_limit = 0) {
     const auto base_size = base_limit > 0 ? std::min(base_limit, base_repo.size()) : base_repo.size();
     const auto query_size = query_repo.size();
     const auto dims = base_repo.dims();
 
-    const auto feature_space = deglib::FloatSpace(dims, metric);
+    const auto feature_space = deglib::distances::FloatSpace(dims, metric);
     const auto dist_func = feature_space.get_dist_func();
     const auto dist_func_param = feature_space.get_dist_func_param();
 
@@ -149,7 +149,7 @@ int main() {
         const auto query_repository = deglib::load_static_repository(query_file_uint8.c_str());
 
         const auto start = std::chrono::system_clock::now();
-        const auto topLists = compute_knn_groundtruth(base_repository, query_repository, deglib::Metric::L2_Uint8, k_target);
+        const auto topLists = compute_knn_groundtruth(base_repository, query_repository, deglib::distances::Metric::L2_Uint8, k_target);
         auto duration = uint32_t(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - start).count());
         fmt::print("Computing {:5} top lists of a {:8} base took {:5}s \n", query_repository.size(), base_repository.size(), duration);
         topListsUint8 = topLists;
@@ -166,7 +166,7 @@ int main() {
         const auto query_repository = deglib::load_static_repository(query_file.c_str());
 
         const auto start = std::chrono::system_clock::now();
-        const auto topLists = compute_knn_groundtruth(base_repository, query_repository, deglib::Metric::L2, k_target);
+        const auto topLists = compute_knn_groundtruth(base_repository, query_repository, deglib::distances::Metric::L2, k_target);
         auto duration = uint32_t(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - start).count());
         fmt::print("Computing {:5} top lists of a {:8} base took {:5}s \n", query_repository.size(), base_repository.size(), duration);
         topListsFloat = topLists;

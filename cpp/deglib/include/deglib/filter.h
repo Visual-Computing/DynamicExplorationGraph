@@ -6,7 +6,7 @@
 #include <utility>
 
 
-namespace deglib::graph {
+namespace deglib::search {
 
 class Filter {
 private:
@@ -74,4 +74,6 @@ public:
     }
 };
 
-}  // namespace deglib::graph
+}  // namespace deglib::search
+
+

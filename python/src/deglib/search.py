@@ -1,7 +1,7 @@
 from typing import Optional, Union
 import numpy as np
 
-import deglib_cpp
+import deglib_cpp.search as cpp_search
 
 from deglib.utils import assure_contiguous
 
@@ -22,7 +22,7 @@ class Filter:
         self.max_value = max_value
         self.max_label_count = max_label_count
 
-    def create_filter_obj(self, graph_size: int) -> deglib_cpp.Filter:
+    def create_filter_obj(self, graph_size: int) -> cpp_search.Filter:
         """
         Only for internal use.
         Creates a filter object that can be used to limit the set of possible results.
@@ -33,12 +33,12 @@ class Filter:
             max_label_count = self.max_label_count
             if max_label_count <= 0:
                 max_label_count = graph_size
-            filter_obj = deglib_cpp.create_filter(valid_labels, self.max_value, max_label_count)
+            filter_obj = cpp_search.create_filter(valid_labels, self.max_value, max_label_count)
 
         return filter_obj
 
     @staticmethod
-    def create_filter(filter_labels: Union[None, np.ndarray, 'Filter'], graph_size: int) -> Optional[deglib_cpp.Filter]:
+    def create_filter(filter_labels: Union[None, np.ndarray, 'Filter'], graph_size: int) -> Optional[cpp_search.Filter]:
         if filter_labels is None:
             return None
         if isinstance(filter_labels, np.ndarray):

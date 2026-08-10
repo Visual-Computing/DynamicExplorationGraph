@@ -37,7 +37,7 @@ void set_edges(deglib::graph::SizeBoundedGraph& graph, uint32_t vertex,
 namespace {
 
 TEST(ReadOnlyGraph, Construction) {
-    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
     deglib::graph::ReadOnlyGraph graph(10, 4, space);
     EXPECT_EQ(graph.capacity(), 10u);
     EXPECT_EQ(graph.size(), 0u);
@@ -45,12 +45,12 @@ TEST(ReadOnlyGraph, Construction) {
 }
 
 TEST(ReadOnlyGraph, ConstructionOddEdges) {
-    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
     EXPECT_THROW((deglib::graph::ReadOnlyGraph(10, 3, space)), std::invalid_argument);
 }
 
 TEST(ReadOnlyGraph, CopyFromSizeBoundedGraph) {
-    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
     deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
 
     for (int i = 0; i < 4; ++i) {
@@ -85,7 +85,7 @@ TEST(ReadOnlyGraph, CopyFromSizeBoundedGraph) {
 }
 
 TEST(ReadOnlyGraph, InternalExternalIndex) {
-    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
     deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
 
     for (int i = 0; i < 4; ++i) {
@@ -104,7 +104,7 @@ TEST(ReadOnlyGraph, InternalExternalIndex) {
 }
 
 TEST(ReadOnlyGraph, FeatureVector) {
-    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
     deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
 
     std::vector<float> expected(4, 42.0f);
@@ -119,7 +119,7 @@ TEST(ReadOnlyGraph, FeatureVector) {
 }
 
 TEST(ReadOnlyGraph, NeighborIndices) {
-    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
     deglib::graph::SizeBoundedGraph mutable_graph(10, 4, space);
 
     for (int i = 0; i < 4; ++i) {
@@ -142,7 +142,7 @@ TEST(ReadOnlyGraph, NeighborIndices) {
 }
 
 TEST(ReadOnlyGraph, HasEdge) {
-    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
     deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
 
     for (int i = 0; i < 3; ++i) {
@@ -163,7 +163,7 @@ TEST(ReadOnlyGraph, HasEdge) {
 }
 
 TEST(ReadOnlyGraph, Explore) {
-    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
     deglib::graph::SizeBoundedGraph mutable_graph(10, 4, space);
 
     // create 4 vertices with distinct features
@@ -218,7 +218,7 @@ TEST(ReadOnlyGraph, Explore) {
 }
 
 TEST(ReadOnlyGraph, Search) {
-    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
     deglib::graph::SizeBoundedGraph mutable_graph(10, 4, space);
 
     // create vertices close together in a cluster
@@ -282,7 +282,7 @@ TEST(ReadOnlyGraph, Search) {
 }
 
 TEST(ReadOnlyGraph, HasPath) {
-    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
     deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
 
     for (int i = 0; i < 5; ++i) {
@@ -299,7 +299,7 @@ TEST(ReadOnlyGraph, HasPath) {
 }
 
 TEST(ReadOnlyGraph, HasPathNoConnection) {
-    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
     deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
 
     for (int i = 0; i < 5; ++i) {
@@ -315,7 +315,7 @@ TEST(ReadOnlyGraph, HasPathNoConnection) {
 }
 
 TEST(ReadOnlyGraph, ExploreBasicIncludeEntry) {
-    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
     deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
 
     for (int i = 0; i < 5; ++i) {
@@ -341,7 +341,7 @@ TEST(ReadOnlyGraph, ExploreBasicIncludeEntry) {
 }
 
 TEST(ReadOnlyGraph, ExploreExcludeEntry) {
-    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
     deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
 
     for (int i = 0; i < 5; ++i) {
@@ -358,7 +358,7 @@ TEST(ReadOnlyGraph, ExploreExcludeEntry) {
 }
 
 TEST(ReadOnlyGraph, ExploreWithMaxDistanceCount) {
-    deglib::FloatSpace space(4, deglib::Metric::L2);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
     deglib::graph::SizeBoundedGraph mutable_graph(10, 4, space);
 
     for (int i = 0; i < 10; ++i) {
@@ -394,7 +394,7 @@ constexpr std::array<uint32_t, 5> kExtLabels = {1005, 9999, 42, 707, 12345};
 } // anonymous namespace
 
 TEST(ReadOnlyGraphInternalIndicesInSearch, SearchReturnsInternalIndices) {
-   deglib::FloatSpace space(4, deglib::Metric::L2);
+   deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
    deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
 
    // Add vertices with non-sequential external labels at distinct positions
@@ -433,7 +433,7 @@ TEST(ReadOnlyGraphInternalIndicesInSearch, SearchReturnsInternalIndices) {
 }
 
 TEST(ReadOnlyGraphInternalIndicesInSearch, ExploreReturnsInternalIndices) {
-   deglib::FloatSpace space(4, deglib::Metric::L2);
+   deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
    deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
 
    mutable_graph.addVertex(kExtLabels[0], make_float_bytes(std::vector<float>{0.0f, 0.0f, 0.0f, 0.0f}).get());
@@ -468,7 +468,7 @@ TEST(ReadOnlyGraphInternalIndicesInSearch, ExploreReturnsInternalIndices) {
 }
 
 TEST(ReadOnlyGraphInternalIndicesInSearch, HasPathReturnsInternalIndices) {
-   deglib::FloatSpace space(4, deglib::Metric::L2);
+   deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
    deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
 
    mutable_graph.addVertex(kExtLabels[0], make_float_bytes(std::vector<float>{0.0f, 0.0f, 0.0f, 0.0f}).get());
@@ -502,7 +502,7 @@ TEST(ReadOnlyGraphInternalIndicesInSearch, HasPathReturnsInternalIndices) {
 }
 
 TEST(ReadOnlyGraphInternalIndicesInSearch, GetNeighborIndicesReturnsInternalIndices) {
-   deglib::FloatSpace space(4, deglib::Metric::L2);
+   deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
    deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
 
    mutable_graph.addVertex(kExtLabels[0], make_float_bytes(std::vector<float>{0.0f, 0.0f, 0.0f, 0.0f}).get());
@@ -532,7 +532,7 @@ TEST(ReadOnlyGraphInternalIndicesInSearch, GetNeighborIndicesReturnsInternalIndi
 }
 
 TEST(ReadOnlyGraphSaveLoadLabelPreservation, SaveLoadPreservesExternalLabels) {
-   deglib::FloatSpace space(4, deglib::Metric::L2);
+   deglib::distances::FloatSpace space(4, deglib::distances::Metric::L2);
    deglib::graph::SizeBoundedGraph mutable_graph(5, 4, space);
 
    // Add vertices with non-sequential external labels

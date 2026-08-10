@@ -30,7 +30,7 @@ using ResultSet = deglib::graph::ResultSet;
  * @param out_result_indices   Output pointer to [num_queries x k_top] uint32_t indices
  */
 inline void rerank(
-    const deglib::FloatSpace& space,
+    const deglib::distances::FloatSpace& space,
     const void* queries,
     size_t num_queries,
     const void* base_vectors,

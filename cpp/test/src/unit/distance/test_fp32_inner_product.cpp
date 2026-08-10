@@ -169,7 +169,7 @@ namespace {
 // FloatSpace integration tests
 TEST(InnerProductFloat_FloatSpace, InnerProductMetric) {
     size_t dim = 64;
-    deglib::FloatSpace space(dim, deglib::Metric::InnerProduct);
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::InnerProduct);
 
     auto a = make_float_vec(dim, 42);
     auto b = make_float_vec(dim, 123);
@@ -181,7 +181,7 @@ TEST(InnerProductFloat_FloatSpace, InnerProductMetric) {
 TEST(InnerProductFloat_FloatSpace, VariousDims) {
     std::vector<size_t> dims = {4, 8, 16, 32, 64, 128, 256, 512};
     for (size_t dim : dims) {
-        deglib::FloatSpace space(dim, deglib::Metric::InnerProduct);
+        deglib::distances::FloatSpace space(dim, deglib::distances::Metric::InnerProduct);
 
         auto a = make_float_vec(dim, dim);
         auto b = make_float_vec(dim, dim + 1);

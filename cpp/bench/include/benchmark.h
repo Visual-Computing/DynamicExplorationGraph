@@ -30,12 +30,12 @@ namespace deglib::benchmark {
  * @brief Compute baseline time per query using linear distance computation.
  */
 static uint64_t compute_linear_search_baseline(const deglib::FeatureRepository& base_repository,
-                                               const deglib::Metric metric,
+                                               const deglib::distances::Metric metric,
                                                const uint32_t sample_size = 100,
-                                               const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) {
+                                               const deglib::distances::InstructionSet instruction = deglib::distances::InstructionSet::Auto) {
     const auto dims = base_repository.dims();
     const auto base_size = base_repository.size();
-    const auto feature_space = deglib::FloatSpace(dims, metric, instruction);
+    const auto feature_space = deglib::distances::FloatSpace(dims, metric, instruction);
     const auto dist_func = feature_space.get_dist_func();
     const auto dist_func_param = feature_space.get_dist_func_param();
 
@@ -83,7 +83,7 @@ static float test_approx_anns(const deglib::graph::InternalGraph& graph,
                               const uint32_t k,
                               const uint32_t test_size,
                               const uint32_t threads,
-                              const deglib::graph::Filter* filter = nullptr) {
+                              const deglib::search::Filter* filter = nullptr) {
     auto corrects = std::vector<float>(threads);
     deglib::concurrent::parallel_for(0, test_size, threads, [&](size_t i, size_t thread_id) {
         auto query = reinterpret_cast<const float*>(query_repository.getFeature(uint32_t(i)));
@@ -118,7 +118,7 @@ static float test_approx_explore(const deglib::graph::InternalGraph& graph,
                                  const uint32_t k,
                                  const uint32_t max_distance_count,
                                  const uint32_t threads,
-                                 const deglib::graph::Filter* filter = nullptr) {
+                              const deglib::search::Filter* filter = nullptr) {
     auto corrects = std::vector<float>(threads);
     deglib::concurrent::parallel_for(0, entry_vertex_indices.size(), threads, [&](size_t i, size_t thread_id) {
         const auto entry_vertex_index = entry_vertex_indices[i][0];
@@ -197,7 +197,7 @@ static void test_graph_anns(const deglib::graph::InternalGraph& graph,
                             const uint32_t threads,
                             const uint32_t k,
                             const std::vector<float>& eps_parameter,
-                            const deglib::graph::Filter* filter = nullptr,
+                            const deglib::search::Filter* filter = nullptr,
                             const uint64_t linear_baseline_us = 0,
                             const uint32_t abort_sample_size = 100) {
     const auto entry_vertex_indices = graph.getEntryVertexIndices();
@@ -260,7 +260,7 @@ static void test_graph_explore(const deglib::graph::InternalGraph& graph,
                                const uint32_t repeat,
                                const uint32_t k,
                                const uint32_t threads,
-                               const deglib::graph::Filter* filter = nullptr,
+                            const deglib::search::Filter* filter = nullptr,
                                const uint32_t explore_depth = 3,
                                const uint64_t linear_baseline_us = 0,
                                const uint32_t abort_sample_size = 100,
@@ -342,3 +342,4 @@ static void test_graph_explore(const deglib::graph::InternalGraph& graph,
 }
 
 }  // namespace deglib::benchmark
+

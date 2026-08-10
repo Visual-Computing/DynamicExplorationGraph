@@ -179,7 +179,7 @@ TEST(DeglibBuilderIntegration, L2_AVX512)
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
     }
-    run_builder_integration_test("L2_AVX512", deglib::Metric::L2, 0.96,
+    run_builder_integration_test("L2_AVX512", deglib::distances::Metric::L2, 0.96,
                                  128, 10000, 100, 1000,
                                  deglib::distances::fp32_l2::L2Float_AVX512<>{},
                                  deglib::builder::OptimizationTarget::LowLID);
@@ -194,7 +194,7 @@ TEST(DeglibBuilderIntegration, L2_AVX2)
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
     }
-    run_builder_integration_test("L2_AVX2", deglib::Metric::L2, 0.96,
+    run_builder_integration_test("L2_AVX2", deglib::distances::Metric::L2, 0.96,
                                  128, 10000, 100, 1000,
                                  deglib::distances::fp32_l2::L2Float_AVX2<>{},
                                  deglib::builder::OptimizationTarget::LowLID);
@@ -206,7 +206,7 @@ TEST(DeglibBuilderIntegration, L2_AVX2)
 
 TEST(DeglibBuilderIntegration, L2_Scalar)
 {
-    run_builder_integration_test("L2_Scalar", deglib::Metric::L2, 0.96,
+    run_builder_integration_test("L2_Scalar", deglib::distances::Metric::L2, 0.96,
                                  128, 10000, 100, 1000,
                                  deglib::distances::fp32_l2::L2Float{},
                                  deglib::builder::OptimizationTarget::LowLID);
@@ -222,7 +222,7 @@ TEST(DeglibBuilderIntegration, IP_AVX512)
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
     }
-    run_builder_integration_test("IP_AVX512", deglib::Metric::InnerProduct, 0.86,
+    run_builder_integration_test("IP_AVX512", deglib::distances::Metric::InnerProduct, 0.86,
                                  128, 10000, 100, 1000,
                                  deglib::distances::fp32_ip::InnerProductFloat_AVX512<>{},
                                  deglib::builder::OptimizationTarget::LowLID);
@@ -237,7 +237,7 @@ TEST(DeglibBuilderIntegration, IP_AVX2)
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
     }
-    run_builder_integration_test("IP_AVX2", deglib::Metric::InnerProduct, 0.86,
+    run_builder_integration_test("IP_AVX2", deglib::distances::Metric::InnerProduct, 0.86,
                                  128, 10000, 100, 1000,
                                  deglib::distances::fp32_ip::InnerProductFloat_AVX2<>{},
                                  deglib::builder::OptimizationTarget::LowLID);
@@ -249,7 +249,7 @@ TEST(DeglibBuilderIntegration, IP_AVX2)
 
 TEST(DeglibBuilderIntegration, IP_Scalar)
 {
-    run_builder_integration_test("IP_Scalar", deglib::Metric::InnerProduct, 0.86,
+    run_builder_integration_test("IP_Scalar", deglib::distances::Metric::InnerProduct, 0.86,
                                  128, 10000, 100, 1000,
                                  deglib::distances::fp32_ip::InnerProductFloat{},
                                  deglib::builder::OptimizationTarget::LowLID);
@@ -265,7 +265,7 @@ TEST(DeglibBuilderIntegration, L2_Uint8_AVX512)
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
     }
-    run_builder_integration_test("L2_Uint8_AVX512", deglib::Metric::L2_Uint8, 0.99,
+    run_builder_integration_test("L2_Uint8_AVX512", deglib::distances::Metric::L2_Uint8, 0.99,
                                  128, 10000, 100, 1000,
                                  deglib::distances::uint8_l2::L2Uint8_AVX512<>{},
                                  deglib::builder::OptimizationTarget::LowLID);
@@ -280,7 +280,7 @@ TEST(DeglibBuilderIntegration, L2_Uint8_AVX2)
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
     }
-    run_builder_integration_test("L2_Uint8_AVX2", deglib::Metric::L2_Uint8, 0.99,
+    run_builder_integration_test("L2_Uint8_AVX2", deglib::distances::Metric::L2_Uint8, 0.99,
                                  128, 10000, 100, 1000,
                                  deglib::distances::uint8_l2::L2Uint8_AVX2<>{},
                                  deglib::builder::OptimizationTarget::LowLID);
@@ -292,7 +292,7 @@ TEST(DeglibBuilderIntegration, L2_Uint8_AVX2)
 
 TEST(DeglibBuilderIntegration, L2_Uint8_Scalar)
 {
-    run_builder_integration_test("L2_Uint8_Scalar", deglib::Metric::L2_Uint8, 0.99,
+    run_builder_integration_test("L2_Uint8_Scalar", deglib::distances::Metric::L2_Uint8, 0.99,
                                  128, 10000, 100, 1000,
                                  deglib::distances::uint8_l2::L2Uint8{},
                                  deglib::builder::OptimizationTarget::LowLID);
@@ -304,7 +304,7 @@ TEST(DeglibBuilderIntegration, L2_Uint8_Scalar)
 
 TEST(DeglibBuilderIntegration, Builder_L2_LowLID)
 {
-    run_builder_integration_test("Builder_L2_LowLID", deglib::Metric::L2, 0.96,
+    run_builder_integration_test("Builder_L2_LowLID", deglib::distances::Metric::L2, 0.96,
                                  128, 10000, 100, 1000,
                                  std::nullopt,
                                  deglib::builder::OptimizationTarget::LowLID);
@@ -312,7 +312,7 @@ TEST(DeglibBuilderIntegration, Builder_L2_LowLID)
 
 TEST(DeglibBuilderIntegration, Builder_L2_HighLID)
 {
-    run_builder_integration_test("Builder_L2_HighLID", deglib::Metric::L2, 0.95,
+    run_builder_integration_test("Builder_L2_HighLID", deglib::distances::Metric::L2, 0.95,
                                  128, 10000, 100, 1000,
                                  std::nullopt,
                                  deglib::builder::OptimizationTarget::HighLID);
@@ -320,7 +320,7 @@ TEST(DeglibBuilderIntegration, Builder_L2_HighLID)
 
 TEST(DeglibBuilderIntegration, Builder_L2_StreamingData)
 {
-    run_builder_integration_test("Builder_L2_StreamingData", deglib::Metric::L2, 0.90,
+    run_builder_integration_test("Builder_L2_StreamingData", deglib::distances::Metric::L2, 0.90,
                                  128, 10000, 100, 1000,
                                  std::nullopt,
                                  deglib::builder::OptimizationTarget::StreamingData);
@@ -373,6 +373,9 @@ TEST(DeglibBuilderIntegration, EVPInnerProduct_Recall)
 
     auto gt_evp = compute_groundtruth_evp(base_evp, base_count, query_evp, query_count, dim, 10);
 
-    run_integration_test("EVPInnerProduct", deglib::Metric::EVPInnerProduct, 0.95,
+    run_integration_test("EVPInnerProduct", deglib::distances::Metric::EVPInnerProduct, 0.95,
                          base_evp.data(), query_evp.data(), base_count, query_count, dim, gt_evp);
 }
+
+
+

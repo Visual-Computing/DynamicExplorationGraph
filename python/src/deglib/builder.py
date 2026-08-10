@@ -6,7 +6,7 @@ from typing import Callable, Iterable, Union
 import numpy as np
 import deglib_cpp
 
-from .distances import Metric, InstructionSet
+from .distances import FloatSpace, Metric, InstructionSet
 from .graph import DynamicExplorationGraph
 from .utils import assure_array, InvalidShapeException
 
@@ -284,7 +284,8 @@ def build_from_data(
     """
     if capacity <= 0:
         capacity = data.shape[0]
-    graph = DynamicExplorationGraph.create_empty(capacity, data.shape[1], edges_per_vertex, metric, instruction)
+    feature_space = FloatSpace.create(data.shape[1], metric, instruction)
+    graph = DynamicExplorationGraph.create_empty(capacity, feature_space, edges_per_vertex)
     builder = GraphBuilder(
         graph, seed=seed, optimization_target=optimization_target, extend_k=extend_k, extend_eps=extend_eps,
         improve_k=improve_k, improve_eps=improve_eps, max_path_length=max_path_length, swap_tries=swap_tries,

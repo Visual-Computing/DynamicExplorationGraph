@@ -24,15 +24,15 @@ namespace deglib::benchmark {
 enum DataStreamType { AddAll, AddHalf, AddAllRemoveHalf, AddHalfRemoveAndAddOneAtATime };
 
 inline deglib::graph::SizeBoundedGraph create_random_graph(const deglib::StaticFeatureRepository& repository,
-                                                           deglib::Metric metric,
+                                                           deglib::distances::Metric metric,
                                                            const uint8_t k,
                                                            const uint32_t max_size = 0,
                                                            const uint32_t scale = 1,
-                                                           const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) {
+                                                           const deglib::distances::InstructionSet instruction = deglib::distances::InstructionSet::Auto) {
     log("Build a random EG{}\n", k);
 
     const auto dims = repository.dims();
-    const auto feature_space = deglib::FloatSpace(dims, metric, instruction);
+    const auto feature_space = deglib::distances::FloatSpace(dims, metric, instruction);
     const auto dist_func = feature_space.get_dist_func();
     const auto dist_func_param = feature_space.get_dist_func_param();
 
@@ -115,7 +115,7 @@ inline deglib::graph::SizeBoundedGraph create_random_graph(const deglib::StaticF
 inline void create_graph(const deglib::StaticFeatureRepository& repository,
                          const DataStreamType data_stream_type,
                          const std::string& graph_file,
-                         deglib::Metric metric,
+                         deglib::distances::Metric metric,
                          deglib::builder::OptimizationTarget lid,
                          const uint8_t k,
                          const uint8_t k_ext,
@@ -127,14 +127,14 @@ inline void create_graph(const deglib::StaticFeatureRepository& repository,
                          const bool use_rng = true,
                          const uint32_t scale = 1,
                          const bool use_path_verification = false,
-                         const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) {
+                         const deglib::distances::InstructionSet instruction = deglib::distances::InstructionSet::Auto) {
     auto rnd = std::mt19937(7);
     const uint32_t swap_tries = 0;
     const uint32_t additional_swap_tries = 0;
 
     const auto dims = repository.dims();
     const uint32_t max_vertex_count = uint32_t(repository.size());
-    const auto feature_space = deglib::FloatSpace(dims, metric, instruction);
+    const auto feature_space = deglib::distances::FloatSpace(dims, metric, instruction);
     const auto feature_byte_size = feature_space.get_data_size();
 
     log("Initializing empty graph (capacity: {} vertices, {}D {} {} feature space using {})\n",

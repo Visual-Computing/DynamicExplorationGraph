@@ -200,17 +200,17 @@ namespace {
 
 TEST(InnerProductFP16_FloatSpace, FP16InnerProductMetric) {
     size_t dim = 64;
-    deglib::FloatSpace space(dim, deglib::Metric::FP16InnerProduct);
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP16InnerProduct);
 
     EXPECT_EQ(space.dim(), dim);
-    EXPECT_EQ(space.metric(), deglib::Metric::FP16InnerProduct);
+    EXPECT_EQ(space.metric(), deglib::distances::Metric::FP16InnerProduct);
     EXPECT_EQ(space.get_data_size(), dim * sizeof(uint16_t));
 }
 
 TEST(InnerProductFP16_FloatSpace, VariousDims) {
     std::vector<size_t> dims = {4, 8, 16, 32, 64, 128, 256, 512};
     for (size_t dim : dims) {
-        deglib::FloatSpace space(dim, deglib::Metric::FP16InnerProduct);
+        deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP16InnerProduct);
 
         auto a = make_float_vec(dim, static_cast<int>(dim));
         auto b = make_float_vec(dim, static_cast<int>(dim + 1));
@@ -226,7 +226,7 @@ TEST(InnerProductFP16_FloatSpace, VariousDims) {
 TEST(InnerProductFP16_FloatSpace, SelectDistMatchesScalar) {
     std::vector<size_t> dims = {1, 2, 3, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256};
     for (size_t dim : dims) {
-        deglib::FloatSpace space(dim, deglib::Metric::FP16InnerProduct);
+        deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP16InnerProduct);
 
         auto a = make_float_vec(dim, 42);
         auto b = make_float_vec(dim, 123);

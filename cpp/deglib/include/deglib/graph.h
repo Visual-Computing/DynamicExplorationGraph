@@ -39,7 +39,7 @@ public:
         return internal_graph_.getEdgesPerVertex();
     }
 
-    const deglib::FloatSpace& getFeatureSpace() const {
+    const deglib::distances::FloatSpace& getFeatureSpace() const {
         return internal_graph_.getFeatureSpace();
     }
 
@@ -66,7 +66,7 @@ public:
         std::span<const T> query,
         const uint32_t k,
         const float eps = 0.0f,
-        const deglib::graph::Filter* filter = nullptr,
+        const deglib::search::Filter* filter = nullptr,
         const uint32_t max_distance_computation_count = 0) const 
     {
         auto res = internal_graph_.search(query, k, eps, filter, max_distance_computation_count);
@@ -95,7 +95,7 @@ public:
         const uint32_t max_distance_computation_count = 0,
         const float eps = 0.0f,
         const bool include_entry = true,
-        const deglib::graph::Filter* filter = nullptr) const
+        const deglib::search::Filter* filter = nullptr) const
     {
         uint32_t internal_entry = internal_graph_.getInternalIndex(entry_external_label);
         auto res = internal_graph_.explore(internal_entry, k, max_distance_computation_count, eps, include_entry, filter);
@@ -138,6 +138,23 @@ public:
         );
         return DynamicExplorationGraph(*graph);
     }
+
+   /**
+    * Save the graph to a file.
+    *
+    * @param path The file path where the graph should be saved.
+    * @return True if the graph was saved successfully.
+    */
+    bool saveGraph(const std::string& path) const {
+        const auto* mutable_graph = dynamic_cast<const deglib::graph::MutableGraph*>(&internal_graph_);
+        if (mutable_graph == nullptr) {
+            throw std::runtime_error("Graph must be mutable to save");
+        }
+        return mutable_graph->saveGraph(path.c_str());
+    }
 };
 
 } // namespace deglib
+
+
+

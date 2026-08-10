@@ -87,7 +87,7 @@ def construct_knng(
     # 2. Graph Construction Phase (using EVP_InnerProduct metric for fast quantized search)
     t0 = time.perf_counter()
     space = deglib.FloatSpace.create(dims, deglib.Metric.EVP_InnerProduct)
-    graph = deglib.DynamicExplorationGraph.create_empty(n_vecs, dims, k_graph, deglib.Metric.EVP_InnerProduct)
+    graph = deglib.DynamicExplorationGraph.create_empty(n_vecs, space, k_graph)
     builder = deglib.GraphBuilder(graph, extend_k=k_ext, extend_eps=0.001)
 
     labels = np.arange(n_vecs, dtype=np.uint32)
@@ -109,8 +109,8 @@ def construct_knng(
     indices, distances = graph.explore(
         entry_labels,
         k=evp_k,
-        include_entry=False,
         max_distance_computation_count=max_dist,
+        include_entry=False,
         threads=threads
     )
     t_explore = time.perf_counter() - t0

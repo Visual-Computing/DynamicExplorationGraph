@@ -24,7 +24,7 @@ template <typename G>
 std::tuple<py::array_t<uint32_t>, py::array_t<float>>
 graph_search_batch_wrapper(const G &graph, const py::array query,
                            const float eps, const uint32_t k,
-                           const deglib::graph::Filter *filter,
+                           const deglib::search::Filter *filter,
                            const uint32_t max_distance_computation_count,
                            const uint32_t threads) {
   py::buffer_info query_info = query.request();
@@ -102,7 +102,7 @@ template <typename G>
 std::tuple<py::array_t<uint32_t>, py::array_t<float>>
 graph_search_single_wrapper(const G &graph, const py::array query,
                             const float eps, const uint32_t k,
-                            const deglib::graph::Filter *filter,
+                            const deglib::search::Filter *filter,
                             const uint32_t max_distance_computation_count) {
   py::buffer_info query_info = query.request();
   const size_t req_bytes = graph.getFeatureSpace().get_data_size();
@@ -222,7 +222,7 @@ std::tuple<py::array_t<uint32_t>, py::array_t<float>>
 dynamic_exploration_graph_search_batch_wrapper(const deglib::DynamicExplorationGraph &graph,
                                                const py::array query,
                                                const float eps, const uint32_t k,
-                                               const deglib::graph::Filter *filter,
+                                               const deglib::search::Filter *filter,
                                                const uint32_t max_distance_computation_count,
                                                const uint32_t threads) {
   py::buffer_info query_info = query.request();
@@ -364,9 +364,9 @@ std::tuple<py::array_t<uint32_t>, py::array_t<float>>
 dynamic_exploration_graph_explore_batch_wrapper(
    const deglib::DynamicExplorationGraph &graph,
    const py::array_t<uint32_t, py::array::c_style> entry_external_labels,
-   const uint32_t k, const bool include_entry,
-   const uint32_t max_distance_computation_count, const float eps,
-   const deglib::graph::Filter *filter, const uint32_t threads) {
+   const uint32_t k, const uint32_t max_distance_computation_count,
+   const float eps, const bool include_entry,
+    const deglib::search::Filter *filter, const uint32_t threads) {
   py::buffer_info entry_info = entry_external_labels.request();
   if (entry_info.ndim != 1) {
     throw std::invalid_argument(
@@ -429,11 +429,12 @@ std::tuple<py::array_t<uint32_t>, py::array_t<float>>
 dynamic_exploration_graph_explore_single_wrapper(
     const deglib::DynamicExplorationGraph &graph,
     const uint32_t entry_external_label,
-    const uint32_t k, const bool include_entry,
-    const uint32_t max_distance_computation_count) {
+    const uint32_t k,
+    const uint32_t max_distance_computation_count, const float eps,
+    const bool include_entry, const deglib::search::Filter *filter) {
   deglib::search::ResultSet result = graph.explore(
-      entry_external_label, k, max_distance_computation_count, 0.0f,
-      include_entry, nullptr);
+      entry_external_label, k, max_distance_computation_count, eps,
+      include_entry, filter);
 
   py::array_t<uint32_t> result_indices({static_cast<py::ssize_t>(k)});
   py::buffer_info result_indices_info = result_indices.request();
@@ -464,7 +465,7 @@ dynamic_exploration_graph_explore_single_wrapper(
 }
 
 
-float float_space_compute_distance(const deglib::FloatSpace &space,
+float float_space_compute_distance(const deglib::distances::FloatSpace &space,
                                    py::array vec1, py::array vec2) {
   auto buf1 = vec1.request();
   auto buf2 = vec2.request();
@@ -485,7 +486,7 @@ float float_space_compute_distance(const deglib::FloatSpace &space,
 }
 
 py::array_t<float>
-float_space_compute_distances(const deglib::FloatSpace &space, py::array query,
+float_space_compute_distances(const deglib::distances::FloatSpace &space, py::array query,
                               py::array targets) {
   auto q_buf = query.request();
   auto t_buf = targets.request();
@@ -528,7 +529,7 @@ float_space_compute_distances(const deglib::FloatSpace &space, py::array query,
 }
 
 py::array_t<uint32_t>
-float_space_rerank(const deglib::FloatSpace &space, py::array queries,
+float_space_rerank(const deglib::distances::FloatSpace &space, py::array queries,
                    py::array_t<uint32_t> candidate_indices,
                    py::object base_vectors = py::none(), size_t k_top = 0,
                    size_t num_threads = 0) {
@@ -681,9 +682,13 @@ deglib::DynamicExplorationGraph load_readonly_graph_wrapper(const char* path) {
   return deglib::DynamicExplorationGraph(*heap_graph);
 }
 
+deglib::DynamicExplorationGraph read_only_graph_from_graph_wrapper(const deglib::DynamicExplorationGraph& graph) {
+  return graph.to_readonly();
+}
+
 deglib::DynamicExplorationGraph create_size_bounded_graph(
     const uint32_t max_vertex_count, const uint8_t edges_per_vertex,
-    const deglib::FloatSpace &feature_space) {
+    const deglib::distances::FloatSpace &feature_space) {
   auto* graph = new deglib::graph::SizeBoundedGraph(max_vertex_count, edges_per_vertex, feature_space);
   return deglib::DynamicExplorationGraph(*graph);
 }
@@ -750,41 +755,34 @@ PYBIND11_MODULE(deglib_cpp, m) {
   m.def("avx512_usable", &deglib::cpu::has_avx512,
         "Returns whether AVX512 instructions are available");
 
-  // quantization
-  m.def("quantize_batch", &quantize_batch_wrapper,
-        "Quantize float32 or float16/uint16 vectors to byte-packed EVP format");
-  m.def("floats_to_fp16", &floats_to_fp16_wrapper,
-        "Convert float32 array to FP16 (uint16_t)");
-  m.def("fp16_to_floats", &fp16_to_floats_wrapper,
-        "Convert FP16 (uint16_t) array to float32");
+  // distances submodule
+  py::module_ distances_module = m.def_submodule("distances", "Distance metrics and feature spaces");
+  py::enum_<deglib::distances::InstructionSet>(distances_module, "InstructionSet")
+      .value("Auto", deglib::distances::InstructionSet::Auto)
+      .value("Scalar", deglib::distances::InstructionSet::Scalar)
+      .value("AVX2", deglib::distances::InstructionSet::AVX2)
+      .value("AVX512", deglib::distances::InstructionSet::AVX512);
 
-  // distances
-  py::enum_<deglib::cpu::InstructionSet>(m, "InstructionSet")
-      .value("Auto", deglib::cpu::InstructionSet::Auto)
-      .value("Scalar", deglib::cpu::InstructionSet::Scalar)
-      .value("AVX2", deglib::cpu::InstructionSet::AVX2)
-      .value("AVX512", deglib::cpu::InstructionSet::AVX512);
+  py::enum_<deglib::distances::MetricType>(distances_module, "Metric")
+      .value("FP32_L2", deglib::distances::MetricType::FP32_L2)
+      .value("FP32_InnerProduct", deglib::distances::MetricType::FP32_InnerProduct)
+      .value("Uint8_L2", deglib::distances::MetricType::Uint8_L2)
+      .value("FP16_InnerProduct", deglib::distances::MetricType::FP16_InnerProduct)
+      .value("EVP_InnerProduct", deglib::distances::MetricType::EVP_InnerProduct);
 
-  py::enum_<deglib::MetricType>(m, "Metric")
-      .value("FP32_L2", deglib::MetricType::FP32_L2)
-      .value("FP32_InnerProduct", deglib::MetricType::FP32_InnerProduct)
-      .value("Uint8_L2", deglib::MetricType::Uint8_L2)
-      .value("FP16_InnerProduct", deglib::MetricType::FP16_InnerProduct)
-      .value("EVP_InnerProduct", deglib::MetricType::EVP_InnerProduct);
-
-  py::class_<deglib::FloatSpace>(m, "FloatSpace")
-      .def(py::init([](const size_t dim, const deglib::MetricType metric,
-                       const deglib::cpu::InstructionSet instruction) {
-             return deglib::FloatSpace(dim, deglib::Metric(metric),
-                                       instruction);
-           }),
-           py::arg("dim"), py::arg("metric") = deglib::MetricType::FP32_L2,
-           py::arg("instruction") = deglib::cpu::InstructionSet::Auto)
-      .def("dim", &deglib::FloatSpace::dim)
+  py::class_<deglib::distances::FloatSpace>(distances_module, "FloatSpace")
+      .def(py::init([](const size_t dim, const deglib::distances::MetricType metric,
+                       const deglib::distances::InstructionSet instruction) {
+              return deglib::distances::FloatSpace(dim, deglib::distances::Metric(metric),
+                                        instruction);
+            }),
+            py::arg("dim"), py::arg("metric") = deglib::distances::MetricType::FP32_L2,
+            py::arg("instruction") = deglib::distances::InstructionSet::Auto)
+      .def("dim", &deglib::distances::FloatSpace::dim)
       .def("metric",
-           [](const deglib::FloatSpace &fs) { return fs.metric().value; })
-      .def("get_data_size", &deglib::FloatSpace::get_data_size)
-      .def("get_instruction", &deglib::FloatSpace::get_instruction)
+           [](const deglib::distances::FloatSpace &fs) { return fs.metric().value; })
+      .def("get_data_size", &deglib::distances::FloatSpace::get_data_size)
+      .def("get_instruction", &deglib::distances::FloatSpace::get_instruction)
       .def("compute_distance", &float_space_compute_distance, py::arg("vec1"),
            py::arg("vec2"))
       .def("compute_distances", &float_space_compute_distances,
@@ -793,10 +791,25 @@ PYBIND11_MODULE(deglib_cpp, m) {
            py::arg("candidate_indices"), py::arg("base_vectors") = py::none(),
            py::arg("k_top") = 0, py::arg("num_threads") = 0);
 
-  py::class_<deglib::graph::Filter>(m, "Filter")
+  // quantization functions in distances submodule
+  distances_module.def("quantize_batch", &quantize_batch_wrapper,
+        "Quantize float32 or float16/uint16 vectors to byte-packed EVP format");
+  distances_module.def("floats_to_fp16", &floats_to_fp16_wrapper,
+        "Convert float32 array to FP16 (uint16_t)");
+  distances_module.def("fp16_to_floats", &fp16_to_floats_wrapper,
+        "Convert FP16 (uint16_t) array to float32");
+
+  // Backward-compatible aliases at module level
+  m.attr("quantize_batch") = distances_module.attr("quantize_batch");
+  m.attr("floats_to_fp16") = distances_module.attr("floats_to_fp16");
+  m.attr("fp16_to_floats") = distances_module.attr("fp16_to_floats");
+
+  // search submodule
+  py::module_ search_module = m.def_submodule("search", "Search utilities including Filter");
+  py::class_<deglib::search::Filter>(search_module, "Filter")
       .def(py::init<const int *, size_t, size_t, size_t>());
 
-  m.def("create_filter", [](py::array_t<int, py::array::c_style> valid_labels,
+  search_module.def("create_filter", [](py::array_t<int, py::array::c_style> valid_labels,
                             size_t max_value, size_t max_label_count) {
     const py::buffer_info labels_info = valid_labels.request();
     const int *ptr = static_cast<int *>(labels_info.ptr);
@@ -807,8 +820,15 @@ PYBIND11_MODULE(deglib_cpp, m) {
     }
 
     size_t size = labels_info.shape[0];
-    return new deglib::graph::Filter(ptr, size, max_value, max_label_count);
+    return new deglib::search::Filter(ptr, size, max_value, max_label_count);
   });
+
+  // Backward-compatible aliases at module level
+  m.attr("Filter") = search_module.attr("Filter");
+  m.attr("FloatSpace") = distances_module.attr("FloatSpace");
+  m.attr("Metric") = distances_module.attr("Metric");
+  m.attr("InstructionSet") = distances_module.attr("InstructionSet");
+  m.attr("create_filter") = search_module.attr("create_filter");
 
   // graphs
   py::class_<deglib::DynamicExplorationGraph>(m, "DynamicExplorationGraph")
@@ -817,7 +837,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
       .def("get_edges_per_vertex", &deglib::DynamicExplorationGraph::getEdgesPerVertex)
       .def("get_feature_space",
            [](const deglib::DynamicExplorationGraph &g)
-               -> const deglib::FloatSpace & { return g.getFeatureSpace(); },
+               -> const deglib::distances::FloatSpace & { return g.getFeatureSpace(); },
            py::return_value_policy::reference)
       .def("has_vertex", &deglib::DynamicExplorationGraph::hasVertex)
       .def("get_neighbors", &deglib::DynamicExplorationGraph::getNeighbors)
@@ -836,23 +856,21 @@ PYBIND11_MODULE(deglib_cpp, m) {
       .def("explore",
            &dynamic_exploration_graph_explore_single_wrapper,
            py::arg("entry_external_label"), py::arg("k"),
-           py::arg("include_entry") = true,
-           py::arg("max_distance_computation_count") = 0)
-       .def("explore_batch",
-            &dynamic_exploration_graph_explore_batch_wrapper,
-            py::arg("entry_external_labels"), py::arg("k"),
-            py::arg("include_entry") = true,
-            py::arg("max_distance_computation_count") = 0,
-            py::arg("eps") = 0.0f, py::arg("filter") = nullptr,
-            py::arg("threads") = 1)
+           py::arg("max_distance_computation_count") = 0,
+           py::arg("eps") = 0.0f, py::arg("include_entry") = true,
+           py::arg("filter") = nullptr)
+        .def("explore_batch",
+             &dynamic_exploration_graph_explore_batch_wrapper,
+             py::arg("entry_external_labels"), py::arg("k"),
+             py::arg("max_distance_computation_count") = 0,
+             py::arg("eps") = 0.0f, py::arg("include_entry") = true,
+             py::arg("filter") = nullptr, py::arg("threads") = 1)
       .def("save_graph", [](deglib::DynamicExplorationGraph &g, const char* path) {
-          if (!g.isMutable()) {
-              throw std::runtime_error("Graph must be mutable to save");
-          }
-          static_cast<deglib::graph::MutableGraph&>(g.internal()).saveGraph(path);
+          g.saveGraph(path);
       }, py::arg("path"));
 
   m.def("load_readonly_graph", &load_readonly_graph_wrapper);
+  m.def("read_only_graph_from_graph", &read_only_graph_from_graph_wrapper, py::arg("graph"));
 
   m.def("create_size_bounded_graph", &create_size_bounded_graph,
         py::arg("max_vertex_count"), py::arg("edges_per_vertex"),
@@ -983,3 +1001,4 @@ PYBIND11_MODULE(deglib_cpp, m) {
       .def_readwrite("improved", &deglib::builder::BuilderStatus::improved)
       .def_readwrite("tries", &deglib::builder::BuilderStatus::tries);
 }
+

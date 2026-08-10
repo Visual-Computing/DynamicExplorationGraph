@@ -82,7 +82,7 @@ inline constexpr DatasetName DatasetName::Invalid{"invalid"};
 struct DatasetInfo {
     DatasetName dataset_name;
     std::string download_url;
-    deglib::Metric metric;
+    deglib::distances::Metric metric;
     size_t base_count;
     size_t query_count;
     uint32_t dims;
@@ -105,7 +105,7 @@ struct DatasetInfo {
 };
 
 inline DatasetInfo make_dataset_info(const DatasetName& ds) {
-    DatasetInfo info{ds, {}, deglib::Metric::L2, 0, 0, 0, 1, 2, {}, {}, {}, {}, {}, {}};
+    DatasetInfo info{ds, {}, deglib::distances::Metric::L2, 0, 0, 0, 1, 2, {}, {}, {}, {}, {}, {}};
 
     std::string name = ds.name();
 
@@ -268,7 +268,7 @@ private:
 
 inline std::vector<uint32_t> compute_knn_groundtruth(const deglib::FeatureRepository& base_repo,
                                                      const deglib::FeatureRepository& query_repo,
-                                                     const deglib::Metric metric,
+                                                     const deglib::distances::Metric metric,
                                                      const uint32_t k_target,
                                                      const size_t base_limit = 0,
                                                      const uint32_t thread_count = 1) {
@@ -276,7 +276,7 @@ inline std::vector<uint32_t> compute_knn_groundtruth(const deglib::FeatureReposi
     const auto query_size = (uint32_t)query_repo.size();
     const auto dims = base_repo.dims();
 
-    const auto feature_space = deglib::FloatSpace((uint32_t)dims, metric);
+    const auto feature_space = deglib::distances::FloatSpace((uint32_t)dims, metric);
     const auto dist_func = feature_space.get_dist_func();
     const auto dist_func_param = feature_space.get_dist_func_param();
 

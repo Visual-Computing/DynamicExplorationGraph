@@ -6,6 +6,8 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 
 import deglib_cpp
+import deglib_cpp.distances as cpp_distances
+import deglib_cpp.search as cpp_search
 import pathlib
 
 from .distances import FloatSpace, Metric, InstructionSet
@@ -28,29 +30,16 @@ class DynamicExplorationGraph:
 
     @classmethod
     def create_empty(
-            cls, capacity: int, feature_space_or_dims: Union[FloatSpace, int],
-            edges_per_vertex: int = 32, metric: Metric = Metric.FP32_L2,
-            instruction: InstructionSet = InstructionSet.Auto
+            cls, capacity: int, feature_space: FloatSpace, edges_per_vertex: int = 32
     ) -> 'DynamicExplorationGraph':
         """
         Create an empty mutable DynamicExplorationGraph.
 
         :param capacity: The maximal number of vertices of this graph.
-        :param feature_space_or_dims: Either a FloatSpace object defining dimensionality,
-                                      metric, and instruction set, or an int specifying the
-                                      number of dimensions (metric and instruction default
-                                      to FP32_L2 and Auto respectively).
+        :param feature_space: A FloatSpace object defining dimensionality, metric, and instruction set.
         :param edges_per_vertex: Number of neighbors for each vertex. Defaults to 32.
-        :param metric: The metric to measure distances between features. Defaults to L2-Metric.
-                      Only used when feature_space_or_dims is an int.
-        :param instruction: CPU Instruction Set to use for SIMD vector distance computation.
-                           Only used when feature_space_or_dims is an int.
         :return: A new mutable DynamicExplorationGraph.
         """
-        if isinstance(feature_space_or_dims, FloatSpace):
-            feature_space = feature_space_or_dims
-        else:
-            feature_space = FloatSpace.create(feature_space_or_dims, metric, instruction)
         graph_cpp = deglib_cpp.create_size_bounded_graph(capacity, edges_per_vertex, feature_space.to_cpp())
         return cls(graph_cpp)
 
@@ -169,9 +158,9 @@ class DynamicExplorationGraph:
 
     def explore(
             self, entry_external_label: Union[int, np.ndarray, list], k: int,
-            include_entry: bool = True, max_distance_computation_count: int = 0,
-            threads: int = 1, filter_labels: Union[None, np.ndarray, Filter] = None,
-            eps: float = 0.0
+            max_distance_computation_count: int = 0, eps: float = 0.0,
+            include_entry: bool = True, threads: int = 1,
+            filter_labels: Union[None, np.ndarray, Filter] = None
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         An exploration for similar elements, limited by max_distance_computation_count.
@@ -181,14 +170,14 @@ class DynamicExplorationGraph:
         :param entry_external_label: The external label of the vertex to start exploration from (int for single,
                                      ndarray/list for batch).
         :param k: The number of similar feature vectors to return
-        :param include_entry: If True, the entry vertex is included in the result set.
         :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
+        :param eps: Controls how many nodes are checked during search. Lower eps values like 0.001 are faster but less
+                    accurate. Higher eps values like 0.1 are slower but more accurate. Should always be greater 0.
+        :param include_entry: If True, the entry vertex is included in the result set.
         :param threads: The number of threads to use for parallel processing.
         :param filter_labels: A numpy array with dtype int32, that contains all labels that can be returned or an object
                               of type Filter, that limits the possible results to a given set.
                               All other labels will not be included in the result set.
-        :param eps: Controls how many nodes are checked during search. Lower eps values like 0.001 are faster but less
-                    accurate. Higher eps values like 0.1 are slower but more accurate. Should always be greater 0.
         :returns: For a single entry, a tuple of (indices, distances) as 1D numpy arrays where indices are external labels.
                   For batch, a tuple of (indices, distances) as 2D numpy arrays where indices are external labels.
         """
@@ -199,7 +188,7 @@ class DynamicExplorationGraph:
             filter_obj = Filter.create_filter(filter_labels, self.size())
             threads = get_num_useful_threads(threads, arr.shape[0])
             indices, distances = self.dynamic_exploration_graph_cpp.explore_batch(
-                arr, k, include_entry, max_distance_computation_count, eps, filter_obj, threads
+                arr, k, max_distance_computation_count, eps, include_entry, filter_obj, threads
             )
             valid_counts = np.sum(~np.isnan(distances), axis=1)
             min_valid = int(np.min(valid_counts)) if valid_counts.size > 0 else 0
@@ -210,7 +199,7 @@ class DynamicExplorationGraph:
             return indices, distances
         else:
             return self.dynamic_exploration_graph_cpp.explore(
-                int(entry_external_label), k, include_entry, max_distance_computation_count
+                int(entry_external_label), k, max_distance_computation_count, eps, include_entry
             )
 
     def save_graph(self, path: pathlib.Path | str):

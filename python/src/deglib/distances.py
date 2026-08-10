@@ -3,18 +3,23 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-import deglib_cpp
+import deglib_cpp.distances as cpp_distances
+
+# Backward-compatible module-level aliases
+Metric = cpp_distances.Metric
+InstructionSet = cpp_distances.InstructionSet
+FloatSpace = cpp_distances.FloatSpace
 
 
 class Metric(enum.IntEnum):
-    FP32_L2 = deglib_cpp.Metric.FP32_L2
-    FP32_InnerProduct = deglib_cpp.Metric.FP32_InnerProduct
-    Uint8_L2 = deglib_cpp.Metric.Uint8_L2
-    FP16_InnerProduct = deglib_cpp.Metric.FP16_InnerProduct
-    EVP_InnerProduct = deglib_cpp.Metric.EVP_InnerProduct
+    FP32_L2 = cpp_distances.Metric.FP32_L2
+    FP32_InnerProduct = cpp_distances.Metric.FP32_InnerProduct
+    Uint8_L2 = cpp_distances.Metric.Uint8_L2
+    FP16_InnerProduct = cpp_distances.Metric.FP16_InnerProduct
+    EVP_InnerProduct = cpp_distances.Metric.EVP_InnerProduct
 
-    def to_cpp(self) -> deglib_cpp.Metric:
-        return deglib_cpp.Metric(int(self))
+    def to_cpp(self) -> cpp_distances.Metric:
+        return cpp_distances.Metric(int(self))
 
     def get_dtype(self):
         if self in (Metric.FP32_L2, Metric.FP32_InnerProduct):
@@ -30,25 +35,25 @@ class Metric(enum.IntEnum):
 
 
 class InstructionSet(enum.IntEnum):
-    Auto = deglib_cpp.InstructionSet.Auto
-    Scalar = deglib_cpp.InstructionSet.Scalar
-    AVX2 = deglib_cpp.InstructionSet.AVX2
-    AVX512 = deglib_cpp.InstructionSet.AVX512
+    Auto = cpp_distances.InstructionSet.Auto
+    Scalar = cpp_distances.InstructionSet.Scalar
+    AVX2 = cpp_distances.InstructionSet.AVX2
+    AVX512 = cpp_distances.InstructionSet.AVX512
 
-    def to_cpp(self) -> deglib_cpp.InstructionSet:
+    def to_cpp(self) -> cpp_distances.InstructionSet:
         if self == InstructionSet.Auto:
-            return deglib_cpp.InstructionSet.Auto
+            return cpp_distances.InstructionSet.Auto
         elif self == InstructionSet.Scalar:
-            return deglib_cpp.InstructionSet.Scalar
+            return cpp_distances.InstructionSet.Scalar
         elif self == InstructionSet.AVX2:
-            return deglib_cpp.InstructionSet.AVX2
+            return cpp_distances.InstructionSet.AVX2
         elif self == InstructionSet.AVX512:
-            return deglib_cpp.InstructionSet.AVX512
+            return cpp_distances.InstructionSet.AVX512
         else:
             raise ValueError(f"unknown instruction set: {self}")
 
 class FloatSpace:
-    def __init__(self, float_space_cpp: deglib_cpp.FloatSpace):
+    def __init__(self, float_space_cpp: cpp_distances.FloatSpace):
         """
         Create a FloatSpace.
 
@@ -65,7 +70,7 @@ class FloatSpace:
         :param metric: Metric to calculate distances between features
         :param instruction: CPU Instruction Set to use for SIMD vector distance computation
         """
-        return FloatSpace(deglib_cpp.FloatSpace(dim, metric.to_cpp(), instruction.to_cpp()))
+        return FloatSpace(cpp_distances.FloatSpace(dim, metric.to_cpp(), instruction.to_cpp()))
 
     def dim(self) -> int:
         """
@@ -73,7 +78,7 @@ class FloatSpace:
         """
         return self.float_space_cpp.dim()
 
-    def metric(self) -> deglib_cpp.Metric:
+    def metric(self) -> cpp_distances.Metric:
         """
         :return: the metric that can be used to calculate distances between features
         """
@@ -123,7 +128,7 @@ class FloatSpace:
             num_threads
         )
 
-    def to_cpp(self) -> deglib_cpp.FloatSpace:
+    def to_cpp(self) -> cpp_distances.FloatSpace:
         return self.float_space_cpp
 
     def __repr__(self):
@@ -136,19 +141,20 @@ def quantize_batch(vectors: np.ndarray, non_zeros: int, num_threads: int = 0) ->
     """
     if vectors.dtype == np.float16:
         vectors = vectors.view(np.uint16)
-    return deglib_cpp.quantize_batch(vectors, non_zeros, num_threads)
+    return cpp_distances.quantize_batch(vectors, non_zeros, num_threads)
 
 
 def floats_to_fp16(floats: np.ndarray) -> np.ndarray:
     """
     Convert float32 array to FP16 (uint16_t) representation in C++.
     """
-    return deglib_cpp.floats_to_fp16(floats)
+    return cpp_distances.floats_to_fp16(floats)
 
 
 def fp16_to_floats(fp16_vals: np.ndarray) -> np.ndarray:
     """
     Convert FP16 (uint16_t) array to float32 representation in C++.
     """
-    return deglib_cpp.fp16_to_floats(fp16_vals)
+    return cpp_distances.fp16_to_floats(fp16_vals)
+
 

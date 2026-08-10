@@ -37,7 +37,7 @@ static std::vector<std::unordered_set<uint32_t>> get_ground_truth(const uint32_t
 
 static float test_approx_anns(const deglib::graph::InternalGraph& graph, const std::vector<uint32_t>& entry_vertex_indices,
                          const deglib::FeatureRepository& query_repository, const std::vector<std::unordered_set<uint32_t>>& ground_truth, 
-                         const float eps, const uint32_t k, const uint32_t test_size, const uint32_t threads, const deglib::graph::Filter* filter = nullptr)
+                          const float eps, const uint32_t k, const uint32_t test_size, const uint32_t threads, const deglib::search::Filter* filter = nullptr)
 {
     auto corrects = std::vector<float>(threads);
     deglib::concurrent::parallel_for(0, test_size, threads, [&] (size_t i, size_t thread_id) {
@@ -72,7 +72,7 @@ static float test_approx_anns(const deglib::graph::InternalGraph& graph, const s
 
 static float test_approx_explore(const deglib::graph::InternalGraph& graph, const std::vector<std::vector<uint32_t>>& entry_vertex_indices, const boolean include_entry,
                                   const std::vector<std::unordered_set<uint32_t>>& ground_truth, const uint32_t k, const uint32_t max_distance_count,
-                                  const uint32_t threads, const deglib::graph::Filter* filter = nullptr)
+                                   const uint32_t threads, const deglib::search::Filter* filter = nullptr)
 {    
     auto corrects = std::vector<float>(threads);
     deglib::concurrent::parallel_for(0, entry_vertex_indices.size(), threads, [&] (size_t i, size_t thread_id) {
@@ -105,7 +105,7 @@ static float test_approx_explore(const deglib::graph::InternalGraph& graph, cons
     return total_correct / (entry_vertex_indices.size()*k);
 }
 
-static void test_graph_anns(const deglib::graph::InternalGraph& graph, const deglib::FeatureRepository& query_repository, const uint32_t* ground_truth, const uint32_t ground_truth_dims, const uint32_t repeat, const uint32_t threads, const uint32_t k, const deglib::graph::Filter* filter = nullptr)
+static void test_graph_anns(const deglib::graph::InternalGraph& graph, const deglib::FeatureRepository& query_repository, const uint32_t* ground_truth, const uint32_t ground_truth_dims, const uint32_t repeat, const uint32_t threads, const uint32_t k, const deglib::search::Filter* filter = nullptr)
 {
     // reproduceable entry point for the graph search
     const auto entry_vertex_indices = graph.getEntryVertexIndices();
@@ -146,7 +146,7 @@ static void test_graph_anns(const deglib::graph::InternalGraph& graph, const deg
     fmt::print("Max memory usage: {} Mb\n", getPeakRSS() / 1000000);
 }
 
-static void test_graph_explore(const deglib::graph::InternalGraph& graph, const uint32_t query_count, const uint32_t* ground_truth, const uint32_t ground_truth_dims, const uint32_t* entry_vertex_labels, const uint32_t entry_vertex_dims, const boolean include_entry, const uint32_t repeat, const uint32_t k, const uint32_t threads, const deglib::graph::Filter* filter = nullptr)
+static void test_graph_explore(const deglib::graph::InternalGraph& graph, const uint32_t query_count, const uint32_t* ground_truth, const uint32_t ground_truth_dims, const uint32_t* entry_vertex_labels, const uint32_t entry_vertex_dims, const boolean include_entry, const uint32_t repeat, const uint32_t k, const uint32_t threads, const deglib::search::Filter* filter = nullptr)
 {
     if (ground_truth_dims < k)
     {

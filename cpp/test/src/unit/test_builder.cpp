@@ -249,7 +249,7 @@ TEST(EvenRegularGraphBuilder, BuildGraphWithL2Float) {
     size_t feature_dim = 4;
 
     // Create graph with L2 metric
-    deglib::FloatSpace feature_space(feature_dim, deglib::Metric::L2);
+    deglib::distances::FloatSpace feature_space(feature_dim, deglib::distances::Metric::L2);
     deglib::graph::SizeBoundedGraph graph(size, edges_per_vertex, std::move(feature_space));
 
     // Create builder
@@ -297,7 +297,7 @@ TEST(EvenRegularGraphBuilder, BuildGraphWithInnerProductFloat) {
     auto edges_per_vertex = 4;  // Must be even
     size_t feature_dim = 4;
 
-    deglib::FloatSpace feature_space(feature_dim, deglib::Metric::InnerProduct);
+    deglib::distances::FloatSpace feature_space(feature_dim, deglib::distances::Metric::InnerProduct);
     deglib::graph::SizeBoundedGraph graph(size, edges_per_vertex, std::move(feature_space));
     std::mt19937 rnd(42);
     deglib::builder::EvenRegularGraphBuilder builder(graph, rnd);
@@ -338,7 +338,7 @@ TEST(EvenRegularGraphBuilder, BuildGraphWithL2Uint8) {
     auto edges_per_vertex = 4;  // Must be even
     size_t feature_dim = 4;
 
-    deglib::FloatSpace feature_space(feature_dim, deglib::Metric::L2_Uint8);
+    deglib::distances::FloatSpace feature_space(feature_dim, deglib::distances::Metric::L2_Uint8);
     deglib::graph::SizeBoundedGraph graph(size, edges_per_vertex, std::move(feature_space));
     std::mt19937 rnd(42);
     deglib::builder::EvenRegularGraphBuilder builder(graph, rnd);
@@ -379,7 +379,7 @@ TEST(EvenRegularGraphBuilder, BuildGraphLargerDataset) {
     auto edges_per_vertex = 6;  // Must be even
     size_t feature_dim = 4;
 
-    deglib::FloatSpace feature_space(feature_dim, deglib::Metric::L2);
+    deglib::distances::FloatSpace feature_space(feature_dim, deglib::distances::Metric::L2);
     deglib::graph::SizeBoundedGraph graph(size, edges_per_vertex, std::move(feature_space));
     std::mt19937 rnd(123);
     deglib::builder::EvenRegularGraphBuilder builder(graph, rnd);
@@ -450,7 +450,7 @@ TEST(EvenRegularGraphBuilder, BuildGraphWithCustomParameters) {
     auto edges_per_vertex = 6;  // Must be even
     size_t feature_dim = 5;
 
-    deglib::FloatSpace feature_space(feature_dim, deglib::Metric::L2);
+    deglib::distances::FloatSpace feature_space(feature_dim, deglib::distances::Metric::L2);
     deglib::graph::SizeBoundedGraph graph(size, edges_per_vertex, std::move(feature_space));
     std::mt19937 rnd(456);
 
@@ -504,7 +504,7 @@ TEST(EvenRegularGraphBuilder, VerifyEdgeWeights) {
     auto edges_per_vertex = 4;  // Must be even
     size_t feature_dim = 4;
 
-    deglib::FloatSpace feature_space(feature_dim, deglib::Metric::L2);
+    deglib::distances::FloatSpace feature_space(feature_dim, deglib::distances::Metric::L2);
     deglib::graph::SizeBoundedGraph graph(size, edges_per_vertex, std::move(feature_space));
     std::mt19937 rnd(789);
     deglib::builder::EvenRegularGraphBuilder builder(graph, rnd);
@@ -553,7 +553,7 @@ TEST(EvenRegularGraphBuilder, BuildGraphWithDifferentOptimizationTargets) {
         auto size = 12;
         auto edges_per_vertex = 4;  // Must be even
 
-        deglib::FloatSpace feature_space(feature_dim, deglib::Metric::L2);
+        deglib::distances::FloatSpace feature_space(feature_dim, deglib::distances::Metric::L2);
         deglib::graph::SizeBoundedGraph graph(size, edges_per_vertex, std::move(feature_space));
         std::mt19937 rnd(999);
 
@@ -598,7 +598,7 @@ TEST(EvenRegularGraphBuilder, BuildGraphWithEvpBits) {
     auto edges_per_vertex = 4;  // Must be even
     size_t feature_dim = 32;    // EvpBits works with bit dimensions
 
-    deglib::FloatSpace feature_space(feature_dim, deglib::Metric::EVPInnerProduct);
+    deglib::distances::FloatSpace feature_space(feature_dim, deglib::distances::Metric::EVPInnerProduct);
     deglib::graph::SizeBoundedGraph graph(size, edges_per_vertex, std::move(feature_space));
     std::mt19937 rnd(555);
     deglib::builder::EvenRegularGraphBuilder builder(graph, rnd);
@@ -642,7 +642,7 @@ TEST(EvenRegularGraphBuilder, BuildGraphWithEvpBitsLarger) {
     auto edges_per_vertex = 6;  // Must be even
     size_t feature_dim = 64;    // Larger bit dimension
 
-    deglib::FloatSpace feature_space(feature_dim, deglib::Metric::EVPInnerProduct);
+    deglib::distances::FloatSpace feature_space(feature_dim, deglib::distances::Metric::EVPInnerProduct);
     deglib::graph::SizeBoundedGraph graph(size, edges_per_vertex, std::move(feature_space));
     std::mt19937 rnd(666);
     std::uniform_int_distribution<int> bit_dist(0, 1);

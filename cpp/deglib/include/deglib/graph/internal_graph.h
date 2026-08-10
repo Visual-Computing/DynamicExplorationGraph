@@ -96,7 +96,7 @@ class InternalGraph
     virtual ~InternalGraph() = default;
     virtual const uint32_t size() const = 0;
     virtual const uint8_t getEdgesPerVertex() const = 0;
-    virtual const deglib::FloatSpace& getFeatureSpace() const = 0;
+    virtual const deglib::distances::FloatSpace& getFeatureSpace() const = 0;
 
     virtual const uint32_t getExternalLabel(const uint32_t internal_index) const = 0;
     virtual const uint32_t getInternalIndex(const uint32_t external_label) const = 0;
@@ -123,7 +123,7 @@ class InternalGraph
         std::span<const T> query,
         const uint32_t k,
         const float eps = 0.0f,
-        const deglib::graph::Filter* filter = nullptr,
+        const deglib::search::Filter* filter = nullptr,
         const uint32_t max_distance_computation_count = 0) const 
     {
         if (query.size_bytes() < getFeatureSpace().get_data_size()) {
@@ -143,7 +143,7 @@ class InternalGraph
         const uint32_t max_distance_computation_count = 0,
         const float eps = 0.0f,
         const bool include_entry = true,
-        const deglib::graph::Filter* filter = nullptr) const
+        const deglib::search::Filter* filter = nullptr) const
     {
         const auto query_ptr = getFeatureVector(entry_vertex_index);
         return search_intern({ entry_vertex_index }, query_ptr, k, eps, include_entry, filter, max_distance_computation_count);
@@ -155,10 +155,13 @@ class InternalGraph
         const uint32_t k,
         const float eps = 0.0f,
         const bool include_entry = true,
-        const deglib::graph::Filter* filter = nullptr,
+        const deglib::search::Filter* filter = nullptr,
         const uint32_t max_distance_computation_count = 0) const = 0;
 
     friend class deglib::builder::EvenRegularGraphBuilder;
 };
 
 } // namespace deglib::graph
+
+
+

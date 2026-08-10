@@ -81,12 +81,12 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
   std::unordered_map<uint32_t, uint32_t> label_to_index_;
 
   // distance calculation function between feature vectors of two graph vertices
-  const deglib::FloatSpace feature_space_;
+  const deglib::distances::FloatSpace feature_space_;
 
   std::unique_ptr<VisitedListPool> visited_list_pool_;
 
  public:
-  SizeBoundedGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::FloatSpace feature_space)
+  SizeBoundedGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::distances::FloatSpace feature_space)
       : max_vertex_count_(max_vertex_count),
         edges_per_vertex_(edges_per_vertex), 
         feature_byte_size_(uint16_t(feature_space.get_data_size())), 
@@ -111,7 +111,7 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
   /**
    *  Load from file
    */
-  SizeBoundedGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::FloatSpace feature_space, std::ifstream& ifstream, const uint32_t size)
+  SizeBoundedGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::distances::FloatSpace feature_space, std::ifstream& ifstream, const uint32_t size)
       : SizeBoundedGraph(max_vertex_count, edges_per_vertex, std::move(feature_space)) {
 
     // copy the old data over
@@ -143,7 +143,7 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
     return this->edges_per_vertex_;
   }
 
-  const deglib::FloatSpace& getFeatureSpace() const override {
+  const deglib::distances::FloatSpace& getFeatureSpace() const override {
     return this->feature_space_;
   }
 
@@ -488,8 +488,8 @@ public:
   /**
    * The result set contains internal indices. 
    */
-  template <deglib::DistanceFunction COMPARATOR, bool use_max_distance_count, bool use_filter>
-  deglib::graph::ResultSet searchImpl(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const uint32_t initial_k, const float eps, const bool include_entry, const deglib::graph::Filter* filter, const uint32_t max_distance_computation_count) const
+  template <deglib::distances::DistanceFunction COMPARATOR, bool use_max_distance_count, bool use_filter>
+  deglib::graph::ResultSet searchImpl(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const uint32_t initial_k, const float eps, const bool include_entry, const deglib::search::Filter* filter, const uint32_t max_distance_computation_count) const
   {
     uint32_t distance_computation_count = 0;
     const auto dist_func_param = this->feature_space_.get_dist_func_param();
@@ -636,9 +636,9 @@ public:
   }
 
   protected:
-    deglib::graph::ResultSet search_intern(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const uint32_t k, const float eps = 0.0f, const bool include_entry = true, const deglib::graph::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) const override
+    deglib::graph::ResultSet search_intern(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const uint32_t k, const float eps = 0.0f, const bool include_entry = true, const deglib::search::Filter* filter = nullptr, const uint32_t max_distance_computation_count = 0) const override
     {
-      return feature_space_.compute([&]<deglib::DistanceFunction Dist>(Dist) -> deglib::graph::ResultSet {
+      return feature_space_.compute([&]<deglib::distances::DistanceFunction Dist>(Dist) -> deglib::graph::ResultSet {
         if(filter) {
           if(max_distance_computation_count == 0) {
             return searchImpl<Dist, false, true>(entry_vertex_indices, query, k, eps, include_entry, filter, 0);
@@ -684,7 +684,7 @@ auto load_sizebounded_graph(const char* path_graph, uint32_t new_max_size = 0)
   ifstream.read(reinterpret_cast<char*>(&metric_type), sizeof(metric_type));
   uint16_t dim;
   ifstream.read(reinterpret_cast<char*>(&dim), sizeof(dim));
-  const auto feature_space = deglib::FloatSpace(dim, static_cast<deglib::Metric>(metric_type));
+  const auto feature_space = deglib::distances::FloatSpace(dim, static_cast<deglib::distances::Metric>(metric_type));
 
   // create the graph
   uint32_t size;

@@ -31,7 +31,7 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_L2)
         std::memcpy(&explore_data[i * dim], &base_data[entry_node * dim], dim * sizeof(float));
     }
 
-    deglib::FloatSpace feature_space(dim, deglib::Metric::FP32_L2);
+    deglib::distances::FloatSpace feature_space(dim, deglib::distances::Metric::FP32_L2);
     auto dist_func = feature_space.get_dist_func();
 
     auto search_gt_data = compute_groundtruth(base_data, base_count, query_data, query_count, dim, search_k, dist_func);
@@ -159,7 +159,7 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_InnerProduct)
         std::memcpy(&explore_data[i * dim], &base_data[entry_node * dim], dim * sizeof(float));
     }
 
-    deglib::FloatSpace feature_space(dim, deglib::Metric::FP32_InnerProduct);
+    deglib::distances::FloatSpace feature_space(dim, deglib::distances::Metric::FP32_InnerProduct);
     auto dist_func = feature_space.get_dist_func();
 
     auto search_gt_data = compute_groundtruth(base_data, base_count, query_data, query_count, dim, search_k, dist_func);
@@ -286,7 +286,7 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_EVP_InnerProduct)
         std::memcpy(&explore_data[i * dim], &base_data[entry_node * dim], dim * sizeof(float));
     }
 
-    deglib::FloatSpace float_feature_space(dim, deglib::Metric::FP32_InnerProduct);
+    deglib::distances::FloatSpace float_feature_space(dim, deglib::distances::Metric::FP32_InnerProduct);
     auto float_dist_func = float_feature_space.get_dist_func();
 
     // Compute groundtruth using original float data (InnerProduct)
@@ -298,7 +298,7 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_EVP_InnerProduct)
     auto query_quant = deglib::quantization::evp::quantize_batch(query_data.data(), query_count, dim, non_zeros, 8);
     size_t vec_bytes = 2 * (dim / 8);
 
-    deglib::FloatSpace feature_space(dim, deglib::Metric::EVP_InnerProduct);
+    deglib::distances::FloatSpace feature_space(dim, deglib::distances::Metric::EVP_InnerProduct);
     deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(base_count), edges_per_vertex, feature_space);
 
     std::mt19937 rnd(42);

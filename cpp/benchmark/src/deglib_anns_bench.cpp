@@ -36,7 +36,7 @@ void filter_test() {
 
         // Measure the time for Filter creation
         auto start_creation = std::chrono::high_resolution_clock::now();
-        deglib::graph::Filter filter(valid_ids.data(), valid_ids.size(), max_value, max_id_count);
+        deglib::search::Filter filter(valid_ids.data(), valid_ids.size(), max_value, max_id_count);
         auto end_creation = std::chrono::high_resolution_clock::now();
 
         double creation_time = std::chrono::duration<double, std::milli>(end_creation - start_creation).count();
@@ -131,7 +131,7 @@ int main(int argc, char *argv[]) {
     for (double i = 0; i < graph_size; i += step_size) {
         valid_labels.push_back(static_cast<int>(i));
     }
-    deglib::graph::Filter filter(valid_labels.data(), valid_labels.size(), graph_size-1, graph_size);
+    deglib::search::Filter filter(valid_labels.data(), valid_labels.size(), graph_size-1, graph_size);
     fmt::print("{} valid label in filter, {} valid labels, {} fill_rate, {} step_size \n", filter.size(), valid_labels.size(), fill_rate, step_size);
 
     fmt::print("Test with k={} and repeat_test={}\n", k, repeat_test);

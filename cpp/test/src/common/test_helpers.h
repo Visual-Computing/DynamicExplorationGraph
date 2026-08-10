@@ -419,11 +419,11 @@ inline static void check_distance_recall_evp(const char* name, const std::vector
 // Graph builder + search recall runner (integration: no QPS / build-time checks)
 // ---------------------------------------------------------------------------
 
-inline static void run_integration_test(const char* name, deglib::Metric metric, double min_recall,
+inline static void run_integration_test(const char* name, deglib::distances::Metric metric, double min_recall,
                                 const void* base_data,
                                 const void* query_data, size_t base_count, size_t query_count,
                                 size_t dim, const std::vector<std::vector<uint32_t>>& gt_data,
-                                std::optional<deglib::DistanceVariant> dist_variant = std::nullopt,
+                                std::optional<deglib::distances::DistanceVariant> dist_variant = std::nullopt,
                                 deglib::builder::OptimizationTarget optimization_target = deglib::builder::OptimizationTarget::LowLID)
 {
     const uint32_t search_k = 10;
@@ -440,9 +440,9 @@ inline static void run_integration_test(const char* name, deglib::Metric metric,
     const uint32_t thread_count = 1;
 
     // Build DEG Graph using the specified metric feature space
-    const deglib::FloatSpace feature_space = dist_variant.has_value()
-        ? deglib::FloatSpace(dim, metric, dist_variant.value())
-        : deglib::FloatSpace(dim, metric);
+    const deglib::distances::FloatSpace feature_space = dist_variant.has_value()
+        ? deglib::distances::FloatSpace(dim, metric, dist_variant.value())
+        : deglib::distances::FloatSpace(dim, metric);
 
     const size_t feature_bytes = feature_space.get_data_size();
 
@@ -513,7 +513,7 @@ inline static std::vector<uint32_t> build_graph_for_determinism(
     size_t dim, size_t base_count, uint32_t edges_per_vertex,
     const std::vector<float>& base_data)
 {
-    const deglib::FloatSpace feature_space(dim, deglib::Metric::L2);
+    const deglib::distances::FloatSpace feature_space(dim, deglib::distances::Metric::L2);
     deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(base_count), edges_per_vertex,
                                           std::move(feature_space));
 
@@ -561,12 +561,12 @@ inline static std::vector<uint32_t> build_graph_for_determinism(
 // generation and groundtruth for a given metric, variant, and optimization target.
 // ---------------------------------------------------------------------------
 
-inline static void run_builder_integration_test(const char* name, deglib::Metric metric, double min_recall,
+inline static void run_builder_integration_test(const char* name, deglib::distances::Metric metric, double min_recall,
                                                 size_t dim, size_t base_count, size_t query_count, size_t num_clusters,
-                                                std::optional<deglib::DistanceVariant> dist_variant,
+                                                std::optional<deglib::distances::DistanceVariant> dist_variant,
                                                 deglib::builder::OptimizationTarget optimization_target)
 {
-    if (metric.get_data_type() == deglib::MetricDataType::Uint8)
+    if (metric.get_data_type() == deglib::distances::MetricDataType::Uint8)
     {
         // uint8 metric
         std::vector<uint8_t> base_data;
@@ -579,7 +579,7 @@ inline static void run_builder_integration_test(const char* name, deglib::Metric
                              base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                              dist_variant, optimization_target);
     }
-    else if (metric == deglib::Metric::FP16InnerProduct)
+    else if (metric == deglib::distances::Metric::FP16InnerProduct)
     {
         // FP16 metric
         std::vector<uint16_t> base_data;
@@ -592,7 +592,7 @@ inline static void run_builder_integration_test(const char* name, deglib::Metric
                              base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                              dist_variant, optimization_target);
     }
-    else if (metric == deglib::Metric::EVPInnerProduct)
+    else if (metric == deglib::distances::Metric::EVPInnerProduct)
     {
         // EVP metric
         std::vector<std::byte> base_data;
@@ -613,7 +613,7 @@ inline static void run_builder_integration_test(const char* name, deglib::Metric
         generate_synthetic_clustered_dataset(base_count, dim, base_data, query_data, query_count, num_clusters);
 
         std::vector<std::vector<uint32_t>> gt_data;
-        if (metric == deglib::Metric::InnerProduct)
+        if (metric == deglib::distances::Metric::InnerProduct)
         {
             gt_data = compute_groundtruth_innerproduct(base_data, base_count, query_data, query_count, dim, 10);
         }
@@ -635,11 +635,11 @@ inline static void run_builder_integration_test(const char* name, deglib::Metric
 // optimization_target: controls the graph build strategy (LowLID, HighLID, StreamingData).
 // ---------------------------------------------------------------------------
 
-inline static void run_regression_test(const char* name, deglib::Metric metric, double min_qps, double max_build_secs,
+inline static void run_regression_test(const char* name, deglib::distances::Metric metric, double min_qps, double max_build_secs,
                                 double min_recall, const void* base_data,
                                 const void* query_data, size_t base_count, size_t query_count,
                                 size_t dim, const std::vector<std::vector<uint32_t>>& gt_data,
-                                std::optional<deglib::DistanceVariant> dist_variant = std::nullopt,
+                                std::optional<deglib::distances::DistanceVariant> dist_variant = std::nullopt,
                                 size_t num_runs = 5,
                                 deglib::builder::OptimizationTarget optimization_target = deglib::builder::OptimizationTarget::LowLID,
                                 uint32_t edges_per_vertex = 32,
@@ -658,9 +658,9 @@ inline static void run_regression_test(const char* name, deglib::Metric metric, 
     const uint32_t thread_count = 1;
 
     // Build DEG Graph using the specified metric feature space
-    const deglib::FloatSpace feature_space = dist_variant.has_value()
-        ? deglib::FloatSpace(dim, metric, dist_variant.value())
-        : deglib::FloatSpace(dim, metric);
+    const deglib::distances::FloatSpace feature_space = dist_variant.has_value()
+        ? deglib::distances::FloatSpace(dim, metric, dist_variant.value())
+        : deglib::distances::FloatSpace(dim, metric);
 
     const size_t feature_bytes = feature_space.get_data_size();
 
