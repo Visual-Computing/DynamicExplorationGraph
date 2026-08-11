@@ -53,11 +53,18 @@ uv run python main.py sift1m --graph-dir /data/deg_graphs/sift1m/dynamic
 uv run python main.py all --graph-dir /data/deg_graphs --threads 4
 ```
 
-## Setup
+## Prerequisites: Building the Python Library (`deglib`)
+
+The `deglib` Python library contains C++ pybind11 bindings (`deglib_cpp`). 
+
+Since `pyproject.toml` references `deglib` locally (`path = "../../python"`), running `uv sync` automatically copies the C++ sources from `cpp/`, invokes CMake, and compiles/installs the latest `deglib` C++ bindings into the local environment:
 
 ```bash
+# Install dependencies & compile latest deglib C++ bindings
 uv sync
 ```
+
+> **Note:** A C++ compiler (MSVC on Windows, GCC/Clang on Linux/macOS) and CMake must be available in your system `PATH`. `setup.py` handles copying C++ files, running CMake, and compiling the extension during the `uv sync` step.
 
 ## Key Differences from `static_data`
 

@@ -10,18 +10,18 @@ This example project demonstrates how to download paper datasets from `readme.md
 - `deep1m` (96D, 1M base vectors, L2 distance)
 - `glove-100` (100D, 1.18M base vectors, Angular / InnerProduct distance)
 
-## Prerequisites & UV Setup
+## Prerequisites: Building the Python Library (`deglib`)
 
-1. **Install `uv`** (if not already installed):
-   - **Linux/macOS**: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-   - **Windows (PowerShell)**: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
-   - **Pip**: `pip install uv`
+The `deglib` Python library contains C++ pybind11 bindings (`deglib_cpp`). 
 
-2. **Sync Dependencies**:
-   Inside this directory, initialize the environment and install dependencies (including building local `deglib` bindings):
-   ```bash
-   uv sync
-   ```
+Since `pyproject.toml` references `deglib` locally (`path = "../../python"`), running `uv sync` automatically copies the C++ sources from `cpp/`, invokes CMake, and compiles/installs the latest `deglib` C++ bindings into the local environment:
+
+```bash
+# Install dependencies & compile latest deglib C++ bindings
+uv sync
+```
+
+> **Note:** A C++ compiler (MSVC on Windows, GCC/Clang on Linux/macOS) and CMake must be available in your system `PATH`. `setup.py` handles copying C++ files, running CMake, and compiling the extension during the `uv sync` step.
 
 ## Running the Benchmark
 

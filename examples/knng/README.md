@@ -13,6 +13,19 @@ The approach demonstrates **Mode 4 (`evp-rerank`)**, which achieves state-of-the
 3. **Graph Exploration**: Exploration for vertex $i$ walks the DEG graph neighborhood using fast EVP bit-level inner product distances to collect candidates (`evpK = 50`).
 4. **FP16 Candidate Reranking**: Exact inner-product distances are computed using `deglib_cpp.floats_to_fp16` and `deglib_cpp.fp16_to_floats` for candidate sets to produce final $k$-nearest neighbor edges.
 
+## Prerequisites: Building the Python Library (`deglib`)
+
+The `deglib` Python library contains C++ pybind11 bindings (`deglib_cpp`). 
+
+Since `pyproject.toml` references `deglib` locally (`path = "../../python"`), running `uv sync` automatically copies the C++ sources from `cpp/`, invokes CMake, and compiles/installs the latest `deglib` C++ bindings into the local environment:
+
+```bash
+# Install dependencies & compile latest deglib C++ bindings
+uv sync
+```
+
+> **Note:** A C++ compiler (MSVC on Windows, GCC/Clang on Linux/macOS) and CMake must be available in your system `PATH`. `setup.py` handles copying C++ files, running CMake, and compiling the extension during the `uv sync` step.
+
 ## Running the Benchmark with `uv`
 
 ### 1. Run Full Benchmark (200K Wikipedia BGE-M3 vectors)

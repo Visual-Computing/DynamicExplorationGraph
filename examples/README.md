@@ -28,10 +28,12 @@ We use [`uv`](https://docs.astral.sh/uv/) for fast Python environment and depend
 Navigating into any example directory and running `uv sync` or `uv run` will automatically set up a isolated Python virtual environment, build the local `deglib` C++ bindings, and install all required dependencies:
 
 ```bash
-cd examples/paper_reproduction
+cd examples/knng
 uv sync
 ```
 
 ## Projects
 
-- [`paper_reproduction`](./paper_reproduction/): Reproduce DEG paper search benchmarks (Recall vs QPS) on datasets mentioned in the root `readme.md` (`Audio`, `Enron`, `SIFT1M`, `DEEP1M`, `GloVe-100`).
+- [`knng`](./knng/): k-Nearest Neighbor Graph (k-NNG) construction benchmark using EVP quantization and FP16 reranking (SISAP 2026 Challenge Task 1).
+- [`static_data`](./static_data/): DEG paper search benchmark reproduction (Recall vs. QPS) on static datasets (`sift1m`, `deep1m`, `glove-100`, `audio`, `enron`).
+- [`dynamic_data`](./dynamic_data/): DEG dynamic data streaming benchmark (AddHalf, AddHalfRemoveAndAddOneAtATime, AddAllRemoveHalf).
