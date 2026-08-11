@@ -1,10 +1,13 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <queue>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <vector>
 #include "deglib/distances.h"
 #include "deglib/filter.h"
 #include "deglib/concurrent.h"
@@ -18,6 +21,10 @@ using ResultSet = deglib::graph::ResultSet;
 /**
  * Rerank candidate neighbor indices for queries using exact FloatSpace distances.
  *
+ * Returns a vector of ResultSet objects (one per query). Each ResultSet contains the top-k nearest
+ * candidates maintained in a max-heap property. Note that ResultSet elements are in heap order (unsorted);
+ * use top() and pop(), or call sort() on the ResultSet if sorted order is required.
+ *
  * @param space                FloatSpace distance calculator instance
  * @param queries              Pointer to [num_queries x dim] query vectors
  * @param num_queries          Number of query vectors
@@ -25,11 +32,11 @@ using ResultSet = deglib::graph::ResultSet;
  * @param num_base_vectors     Number of base vectors
  * @param base_candidates      Pointer to [num_queries x candidates_per_query] candidate indices
  * @param candidates_per_query Number of candidate indices provided per query
- * @param k_top                Number of top candidates to output per query (0 = all)
+ * @param k_top                Number of top candidates to keep per query (0 = all)
  * @param num_threads          Number of worker threads (0 = auto-detect)
- * @param out_result_indices   Output pointer to [num_queries x k_top] uint32_t indices
+ * @return std::vector<ResultSet> containing the top-k result sets per query (unsorted heap order)
  */
-inline void rerank(
+inline std::vector<ResultSet> rerank(
     const deglib::distances::FloatSpace& space,
     const void* queries,
     size_t num_queries,
@@ -37,12 +44,11 @@ inline void rerank(
     size_t num_base_vectors,
     const uint32_t* base_candidates,
     size_t candidates_per_query,
-    size_t k_top,
-    size_t num_threads,
-    uint32_t* out_result_indices
+    size_t k_top = 0,
+    size_t num_threads = 0
 ) {
-    if (queries == nullptr || base_candidates == nullptr || out_result_indices == nullptr) {
-        throw std::invalid_argument("rerank: queries, base_candidates, and out_result_indices must not be null");
+    if (queries == nullptr || base_candidates == nullptr) {
+        throw std::invalid_argument("rerank: queries and base_candidates must not be null");
     }
 
     if (k_top == 0 || k_top > candidates_per_query) {
@@ -59,15 +65,18 @@ inline void rerank(
     const uint8_t* t_ptr = static_cast<const uint8_t*>(target_vectors);
 
     const auto param = space.get_dist_func_param();
-    // Resolve variant type ONCE outside loops via compile-time static dispatch
+
+    std::vector<ResultSet> results(num_queries);
+
     space.compute([&](const auto& dist_func_obj) {
         using DistType = std::decay_t<decltype(dist_func_obj)>;
         deglib::concurrent::parallel_for(0, num_queries, num_threads, [&](size_t i, size_t) {
             const uint8_t* query_ptr = q_ptr + i * byte_stride_query;
             const uint32_t* cand_row = base_candidates + i * candidates_per_query;
 
-            std::vector<std::pair<float, uint32_t>> heap;
-            heap.reserve(k_top + 1);
+            ResultSet heap;
+            heap.reserve(k_top);
+            float max_dist = std::numeric_limits<float>::max();
 
             for (size_t j = 0; j < candidates_per_query; ++j) {
                 uint32_t cand_idx = cand_row[j];
@@ -78,29 +87,26 @@ inline void rerank(
                 const uint8_t* cand_ptr = t_ptr + cand_idx * byte_stride_target;
                 float dist = DistType::compare(query_ptr, cand_ptr, param);
 
+                // Keep candidates in max-heap of capacity k_top.
+                // Until the heap reaches k_top elements, add all valid candidates.
                 if (heap.size() < k_top) {
-                    heap.push_back({dist, cand_idx});
-                    std::push_heap(heap.begin(), heap.end());
-                } else if (dist < heap.front().first) {
-                    std::pop_heap(heap.begin(), heap.end());
-                    heap.back() = {dist, cand_idx};
-                    std::push_heap(heap.begin(), heap.end());
+                    heap.emplace(cand_idx, dist);
+                    if (heap.size() == k_top) {
+                        max_dist = heap.top().getDistance();
+                    }
+                } 
+                // Once full, only consider candidates strictly closer than the worst (max_dist).
+                // replace_top replaces the root in O(log k) and returns a reference to the NEW root element (new max distance).
+                else if (dist < max_dist) {
+                    max_dist = heap.replace_top(cand_idx, dist).getDistance();
                 }
             }
 
-            std::sort_heap(heap.begin(), heap.end());
-
-            uint32_t* out_row = out_result_indices + i * k_top;
-            size_t actual_k = heap.size();
-            for (size_t k = 0; k < actual_k; ++k) {
-                out_row[k] = heap[k].second;
-            }
-            for (size_t k = actual_k; k < k_top; ++k) {
-                out_row[k] = static_cast<uint32_t>(i);
-            }
+            results[i] = std::move(heap);
         });
     });
+
+    return results;
 }
 
 } // namespace deglib::search
-

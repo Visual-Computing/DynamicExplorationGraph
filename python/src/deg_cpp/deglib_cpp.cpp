@@ -528,11 +528,11 @@ float_space_compute_distances(const deglib::distances::FloatSpace &space, py::ar
   return result;
 }
 
-py::array_t<uint32_t>
+py::object
 float_space_rerank(const deglib::distances::FloatSpace &space, py::array queries,
                    py::array_t<uint32_t> candidate_indices,
                    py::object base_vectors = py::none(), size_t k_top = 0,
-                   size_t num_threads = 0) {
+                   size_t num_threads = 0, bool return_distances = false) {
   auto q_buf = queries.request();
   if (q_buf.ndim != 2) {
     throw std::invalid_argument("queries must be a 2D array");
@@ -583,14 +583,45 @@ float_space_rerank(const deglib::distances::FloatSpace &space, py::array queries
   const void *base_ptr = has_base_vectors ? base_buf.ptr : nullptr;
   size_t num_base_vectors = has_base_vectors ? base_buf.shape[0] : 0;
 
-  auto result_indices = py::array_t<uint32_t>({n_queries, k_top});
-  auto res_buf = result_indices.request();
-
-  deglib::search::rerank(
+  auto results = deglib::search::rerank(
       space, q_buf.ptr, n_queries, base_ptr, num_base_vectors,
-      static_cast<const uint32_t *>(cand_buf.ptr), evp_k, k_top, num_threads,
-      static_cast<uint32_t *>(res_buf.ptr));
+      static_cast<const uint32_t *>(cand_buf.ptr), evp_k, k_top, num_threads);
 
+  auto result_indices = py::array_t<uint32_t>({n_queries, k_top});
+  auto res_indices_buf = result_indices.request();
+  uint32_t *ind_ptr = static_cast<uint32_t *>(res_indices_buf.ptr);
+
+  py::array_t<float> result_distances;
+  float *dist_ptr = nullptr;
+  if (return_distances) {
+    result_distances = py::array_t<float>({n_queries, k_top});
+    dist_ptr = static_cast<float *>(result_distances.request().ptr);
+  }
+
+  for (size_t i = 0; i < n_queries; ++i) {
+    auto &res_set = results[i];
+    res_set.sort();
+    size_t actual_k = res_set.size();
+    uint32_t *row_ind = ind_ptr + i * k_top;
+    float *row_dist = dist_ptr ? (dist_ptr + i * k_top) : nullptr;
+
+    for (size_t k = 0; k < actual_k; ++k) {
+      row_ind[k] = res_set[k].getIdentifier();
+      if (row_dist) {
+        row_dist[k] = res_set[k].getDistance();
+      }
+    }
+    for (size_t k = actual_k; k < k_top; ++k) {
+      row_ind[k] = static_cast<uint32_t>(i);
+      if (row_dist) {
+        row_dist[k] = std::numeric_limits<float>::max();
+      }
+    }
+  }
+
+  if (return_distances) {
+    return py::make_tuple(result_indices, result_distances);
+  }
   return result_indices;
 }
 
@@ -796,7 +827,8 @@ PYBIND11_MODULE(deglib_cpp, m) {
            py::arg("query"), py::arg("targets"))
       .def("rerank", &float_space_rerank, py::arg("queries"),
            py::arg("candidate_indices"), py::arg("base_vectors") = py::none(),
-           py::arg("k_top") = 0, py::arg("num_threads") = 0);
+           py::arg("k_top") = 0, py::arg("num_threads") = 0,
+           py::arg("return_distances") = false);
 
   // quantization functions in distances submodule
   distances_module.def("quantize_batch", &quantize_batch_wrapper,

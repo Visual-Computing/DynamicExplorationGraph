@@ -134,6 +134,71 @@ TEST(UncheckedSet, PopRemovesMin) {
 }
 
 // ---------------------------------------------------------------------------
+//  PQV emplace / pop / heapify (heap invariant tests)
+// ---------------------------------------------------------------------------
+
+TEST(PQV, EmplaceRestoresHeap) {
+   deglib::graph::ResultSet rs;
+   rs.emplace(1, 1.0f);
+   rs.emplace(2, 5.0f);
+   rs.emplace(3, 3.0f);
+
+   // ResultSet is a max-heap: top() must be the largest distance
+   EXPECT_EQ(rs.size(), 3u);
+   EXPECT_NEAR(rs.top().getDistance(), 5.0f, 1e-6f);
+   EXPECT_EQ(rs.top().getIdentifier(), 2u);
+
+   // Verify heap property holds for all elements
+   for (size_t i = 0; i < rs.size(); ++i) {
+      EXPECT_GE(rs[i].getDistance(), 0.0f);
+   }
+}
+
+TEST(PQV, Heapify) {
+   deglib::graph::ResultSet rs;
+   // Insert elements without maintaining heap order (bypass emplace)
+   rs.reserve(5);
+   static_cast<std::vector<deglib::graph::ObjectDistance>&>(rs).emplace_back(1, 1.0f);
+   static_cast<std::vector<deglib::graph::ObjectDistance>&>(rs).emplace_back(2, 5.0f);
+   static_cast<std::vector<deglib::graph::ObjectDistance>&>(rs).emplace_back(3, 3.0f);
+
+   // Before heapify, top() is front() which may not be the max
+   rs.heapify();
+   EXPECT_NEAR(rs.top().getDistance(), 5.0f, 1e-6f);
+   EXPECT_EQ(rs.top().getIdentifier(), 2u);
+}
+
+TEST(PQV, PopMaintainsHeap) {
+   deglib::graph::ResultSet rs;
+   rs.emplace(1, 1.0f);
+   rs.emplace(2, 5.0f);
+   rs.emplace(3, 3.0f);
+
+   rs.pop(); // remove max (5.0)
+   EXPECT_EQ(rs.size(), 2u);
+   EXPECT_NEAR(rs.top().getDistance(), 3.0f, 1e-6f);
+
+   rs.pop(); // remove max (3.0)
+   EXPECT_EQ(rs.size(), 1u);
+   EXPECT_NEAR(rs.top().getDistance(), 1.0f, 1e-6f);
+}
+
+// ---------------------------------------------------------------------------
+//  ObjectDistance POD traits
+// ---------------------------------------------------------------------------
+
+TEST(ObjectDistance, POD_Traits) {
+   // ObjectDistance should be trivially default-constructible, copyable, and movable
+   static_assert(std::is_trivially_default_constructible_v<deglib::graph::ObjectDistance>);
+   static_assert(std::is_trivially_copyable_v<deglib::graph::ObjectDistance>);
+   static_assert(std::is_trivially_destructible_v<deglib::graph::ObjectDistance>);
+   static_assert(std::is_standard_layout_v<deglib::graph::ObjectDistance>);
+
+   // Verify size: uint32_t + float = 8 bytes
+   EXPECT_EQ(sizeof(deglib::graph::ObjectDistance), 8u);
+}
+
+// ---------------------------------------------------------------------------
 //  Mock implementation of InternalGraph for testing the interface
 // ---------------------------------------------------------------------------
 

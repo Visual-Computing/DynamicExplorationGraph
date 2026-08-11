@@ -86,8 +86,9 @@ class FloatSpace:
         candidate_indices: np.ndarray,
         base_vectors: np.ndarray | None = None,
         k_top: int = 0,
-        num_threads: int = 0
-    ) -> np.ndarray:
+        num_threads: int = 0,
+        return_distances: bool = False,
+    ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         """
         Reranks candidate vectors for queries using SIMD distance computations in C++.
 
@@ -96,14 +97,16 @@ class FloatSpace:
         :param base_vectors: 2D array of dataset feature vectors (shape: N_base x D). If None, defaults to `queries`.
         :param k_top: Number of top nearest candidates to return per query (default 0 returns all K_cand sorted).
         :param num_threads: Number of threads (0 for hardware concurrency).
-        :return: 2D uint32 NumPy array of shape (N_queries, k_top) containing top candidate IDs sorted by similarity.
+        :param return_distances: If True, returns a tuple `(indices, distances)` containing candidate IDs and distance scores.
+        :return: 2D uint32 NumPy array of candidate IDs, or tuple `(indices, distances)` if return_distances is True.
         """
         return self.float_space_cpp.rerank(
             queries,
             candidate_indices.astype(np.uint32, copy=False),
             base_vectors,
             k_top,
-            num_threads
+            num_threads,
+            return_distances
         )
 
     def to_cpp(self) -> cpp_distances.FloatSpace:

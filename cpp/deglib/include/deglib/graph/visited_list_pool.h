@@ -5,6 +5,7 @@
 #include <vector>
 #include <deque>
 #include <cstdint>
+#include <memory>
 
 /**
  * Ref https://raw.githubusercontent.com/nmslib/hnswlib/master/hnswlib/visited_list_pool.h

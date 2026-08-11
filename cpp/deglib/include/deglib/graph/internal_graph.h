@@ -87,20 +87,53 @@ public:
         this->pop_back();
     }
 
-    /// Replaces the top element in O(log k) time without vector reallocation.
-    void replace_top(ObjectType&& x) {
-        std::pop_heap(this->begin(), this->end(), comp);
-        this->back() = std::move(x);
-        std::push_heap(this->begin(), this->end(), comp);
+    /// Replaces the top element in-place, sifts it down in single-pass O(log k) time,
+    /// and returns a const reference to the new top element.
+    template <class... Args>
+    const ObjectType& replace_top(Args&&... args) {
+        ObjectType val(std::forward<Args>(args)...);
+        size_t len = this->size();
+        size_t parent = 0;
+        size_t child = 1;
+
+        while (child < len) {
+            // Find the larger child (comp(a, b) means a < b for max-heap)
+            if (child + 1 < len && comp((*this)[child], (*this)[child + 1])) {
+                child++;
+            }
+            // If val is not less than the larger child, heap property holds
+            if (!comp(val, (*this)[child])) {
+                break;
+            }
+            (*this)[parent] = std::move((*this)[child]);
+            parent = child;
+            child = 2 * parent + 1;
+        }
+        (*this)[parent] = std::move(val);
+        return this->front();
     }
 
     /// Re-establishes the heap order using the internal comparator.
     void heapify() {
         std::make_heap(this->begin(), this->end(), comp);
     }
+
+    /// Sorts the heap elements in ascending order using the internal comparator,
+    /// consuming the heap property. After calling this, top() is no longer valid
+    /// until heapify() is called again.
+    void sort() {
+        std::sort_heap(this->begin(), this->end(), comp);
+    }
 };
 
-// Search result set (Max-Heap: top() returns the entry with the LARGEST distance)
+/**
+ * Search result set (Max-Heap: top() returns the entry with the LARGEST distance).
+ * 
+ * Note: Elements are maintained in max-heap order within the underlying vector.
+ * Iterating or indexing the container directly will yield elements in arbitrary (unsorted) heap order.
+ * To access elements in ordered sequence (closest distance first), extract them using top() and pop(),
+ * or call sort() explicitly to sort the underlying storage in ascending distance order.
+ */
 using ResultSet = PQV<std::less<ObjectDistance>, ObjectDistance>;
 
 // Unchecked search candidates (Min-Heap: top() returns the entry with the SMALLEST distance)
