@@ -644,7 +644,8 @@ inline static void run_regression_test(const char* name, deglib::distances::Metr
                                 deglib::builder::OptimizationTarget optimization_target = deglib::builder::OptimizationTarget::LowLID,
                                 uint32_t edges_per_vertex = 32,
                                 uint8_t extend_k = 0,
-                                float extend_eps = 0.1f)
+                                float extend_eps = 0.1f,
+                                uint32_t thread_count = 1)
 {
     const uint32_t search_k = 10;
     const float search_eps = 0.05f;
@@ -655,7 +656,6 @@ inline static void run_regression_test(const char* name, deglib::distances::Metr
     const uint8_t max_path_length = 5;
     const uint32_t swap_tries = 0;
     const uint32_t additional_swap_tries = 0;
-    const uint32_t thread_count = 1;
 
     // Build DEG Graph using the specified metric feature space
     const deglib::distances::FloatSpace feature_space = dist_variant.has_value()

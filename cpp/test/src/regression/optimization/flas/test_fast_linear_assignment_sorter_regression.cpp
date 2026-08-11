@@ -72,7 +72,8 @@ static double build_deg_graph(deglib::graph::SizeBoundedGraph& graph,
                               deglib::builder::OptimizationTarget optimization_target,
                               uint32_t /*edges_per_vertex*/,
                               uint8_t extend_k,
-                              float extend_eps) {
+                              float extend_eps,
+                              uint32_t thread_count = 1) {
     std::mt19937 rng(1337);
     const uint8_t improve_k = 0;
     const float improve_eps = 0.0f;
@@ -83,7 +84,7 @@ static double build_deg_graph(deglib::graph::SizeBoundedGraph& graph,
     deglib::builder::EvenRegularGraphBuilder builder(graph, rng, optimization_target,
                                                      extend_k, extend_eps, improve_k, improve_eps,
                                                      max_path_length, swap_tries, additional_swap_tries);
-    builder.setThreadCount(1);
+    builder.setThreadCount(thread_count);
 
     for (size_t i = 0; i < base_count; ++i) {
         const std::byte* ptr = &feature_bytes[i * feature_bytes_per_vec];
@@ -364,8 +365,28 @@ TEST(FlasRegression, DEGGraphBuildAndSearch_RawVsFlasSorted) {
                   locality_clean, flas_secs_clean, build_secs_clean, qps_clean, recall_clean);
     std::cout << buf << std::endl;
 
+    // -----------------------------------------------------------------------
+    // 3. Build DEG graph on FLAS sorted data using 4 Threads (MT)
+    // -----------------------------------------------------------------------
+    deglib::distances::FloatSpace feature_space_mt(dim, deglib::distances::Metric::FP32_L2);
+    deglib::graph::SizeBoundedGraph graph_mt(static_cast<uint32_t>(base_count), edges_per_vertex,
+                                             std::move(feature_space_mt));
+
+    double build_secs_mt = build_deg_graph(graph_mt, base_bytes_clean, feature_bytes_per_vec,
+                                           base_count,
+                                           deglib::builder::OptimizationTarget::LowLID,
+                                           edges_per_vertex, extend_k, extend_eps, /*thread_count=*/4);
+
+    auto [qps_mt, recall_mt] = search_deg_graph(graph_mt, query_bytes_raw, feature_bytes_per_vec,
+                                                 query_count, gt_data_clean, search_k, search_eps);
+
+    std::snprintf(buf, sizeof(buf), "[DEGGraph_3_FlasSorted_MT4]      locality=%-8.2f  flas_secs=%-7.4f  build_secs=%-7.4f  qps=%-8.1f  recall=%.3f",
+                  locality_clean, flas_secs_clean, build_secs_mt, qps_mt, recall_mt);
+    std::cout << buf << std::endl;
+
     EXPECT_GE(recall_raw + 1e-5, 0.5);
     EXPECT_GE(recall_clean + 1e-5, 0.5);
+    EXPECT_GE(recall_mt + 1e-5, 0.5);
 }
 
 TEST(FlasRegression, InnerProductMetric_N200_D16) {

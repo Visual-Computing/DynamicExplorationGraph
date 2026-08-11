@@ -489,19 +489,10 @@ class EvenRegularGraphBuilder {
         while(index < add_tasks.size()) 
           extendGraphUnknownLID(add_tasks[index++]);
       } else {
-        const auto remaining_add_tasks = std::vector<BuilderAddTask>(add_tasks.begin() + index, add_tasks.end());
-
-        auto batchExtendGraphKnownLID = [&](const std::vector<BuilderAddTask>& tasks, size_t task_index) {
-          const auto start_index = task_index * this->extend_thread_task_size;
-          const auto end_index = std::min(tasks.size(), (task_index+1) * this->extend_thread_task_size);
-          for (size_t i = start_index; i < end_index; i++) 
-            extendGraphKnownLID(tasks[i]);
-        };
-
-        size_t task_count = (remaining_add_tasks.size() / extend_thread_task_size) + ((remaining_add_tasks.size() % extend_thread_task_size != 0) ? 1 : 0);  // +1, if n_queries % batch_size != 0
-        deglib::concurrent::parallel_for(0, task_count, extend_thread_count, [&] (size_t task_index, size_t thread_id) {
-          batchExtendGraphKnownLID(remaining_add_tasks, task_index);
-        });
+        if(index < add_tasks.size()) {
+          const auto remaining_add_tasks = std::span<const BuilderAddTask>(add_tasks.data() + index, add_tasks.size() - index);
+          extendGraphKnownLID(remaining_add_tasks);
+        }
       }
     }
 
@@ -620,168 +611,184 @@ class EvenRegularGraphBuilder {
     /**
      * The OptimizationTarget is a known LID, use multi-threading to build the graph.
      *
-     * @param add_task The task describing the vertex to add.
+     * @param add_tasks The tasks describing the vertices to add.
      */
-    void extendGraphKnownLID(const BuilderAddTask& add_task) {
+    void extendGraphKnownLID(const std::span<const BuilderAddTask> add_tasks) {
       auto& graph = this->graph_;
-      const auto external_label = add_task.label;
-      const auto new_vertex_feature = add_task.feature.data();
-      const auto edges_per_vertex = uint32_t(graph.getEdgesPerVertex());
 
-      // for computing distances to neighbors not in the result queue
-      const auto dist_func = graph.getFeatureSpace().get_dist_func();
-      const auto dist_func_param = graph.getFeatureSpace().get_dist_func_param();
+      struct TaskWithIndex {
+        const BuilderAddTask& task;
+        uint32_t internal_index;
+      };
+      std::vector<TaskWithIndex> tasks_with_indices;
+      tasks_with_indices.reserve(add_tasks.size());
 
-      // find good neighbors for the new vertex
-      const std::vector<uint32_t> entry_vertex_indices = { 0 };
-      auto top_list = graph.search_intern(entry_vertex_indices, new_vertex_feature, std::max(uint32_t(this->extend_k_), edges_per_vertex), this->extend_eps_);
-      const auto results = topListAscending(top_list);
+      for (const auto& add_task : add_tasks) {
+        const auto external_label = add_task.label;
+        const auto new_vertex_feature = add_task.feature.data();
 
-      // their should always be enough neighbors (search results), otherwise the graph would be broken
-      if(results.size() < edges_per_vertex) {
-        std::fprintf(stderr, "the graph search for the new vertex %u did only provided %zu results \n", external_label, results.size());
-        std::perror("");
-        std::abort();
-      }
-
-      uint32_t internal_index = 0;
-      {
-        std::lock_guard<std::mutex> lock(this->extend_mutex);
-        std::atomic_thread_fence(std::memory_order_acquire);
-        
-        // graph should not contain a vertex with the same label
-        if(graph.hasVertex(external_label)) {
+        if (graph.hasVertex(external_label)) {
           std::fprintf(stderr, "graph contains vertex %u already. can not add it again\n", external_label);
-          perror("");
-          abort();
+          std::perror("");
+          std::abort();
         }
 
-        // add an empty vertex to the graph (no neighbor information yet)
-        internal_index = graph.addVertex(external_label, new_vertex_feature);
-        std::atomic_thread_fence(std::memory_order_release);
+        const uint32_t internal_index = graph.addVertex(external_label, new_vertex_feature);
+        tasks_with_indices.push_back({add_task, internal_index});
       }
-     
 
-      // adding neighbors happens in two phases, the first tries to retain RNG, the second adds them without checking
-      bool check_rng_phase = true; // true = activated, false = deactived
+      auto process_task = [&](const TaskWithIndex& item) {
+        const auto& add_task = item.task;
+        const uint32_t internal_index = item.internal_index;
+        const auto external_label = add_task.label;
+        const auto new_vertex_feature = add_task.feature.data();
+        const auto edges_per_vertex = uint32_t(graph.getEdgesPerVertex());
 
-      // remove an edge of the good neighbors and connect them with this new vertex
-      auto new_neighbors = std::vector<std::pair<uint32_t, float>>();
-      while(new_neighbors.size() < edges_per_vertex) {
-        for (size_t i = 0; i < results.size() && new_neighbors.size() < edges_per_vertex; i++) {
-          const auto candidate_index = results[i].getIdentifier();
-          const auto candidate_weight = results[i].getDistance();
+        // for computing distances to neighbors not in the result queue
+        const auto dist_func = graph.getFeatureSpace().get_dist_func();
+        const auto dist_func_param = graph.getFeatureSpace().get_dist_func_param();
 
-          // check if the vertex is already in the edge list of the new vertex (added during a previous loop-run)
-          // since all edges are undirected and the edge information of the new vertex does not yet exist, we search the other way around.
-          if(graph.hasEdge(candidate_index, internal_index)) 
-            continue;
+        // find good neighbors for the new vertex
+        const std::vector<uint32_t> entry_vertex_indices = { 0 };
+        auto top_list = graph.search_intern(entry_vertex_indices, new_vertex_feature, std::max(uint32_t(this->extend_k_), edges_per_vertex), this->extend_eps_);
+        const auto results = topListAscending(top_list);
 
-          // does the candidate has a neighbor which is connected to the new vertex and has a lower distance?
-          if(check_rng_phase && deglib::analysis::checkRNG(graph, edges_per_vertex, candidate_index, internal_index, candidate_weight) == false) 
-            continue;
+        // their should always be enough neighbors (search results), otherwise the graph would be broken
+        if(results.size() < edges_per_vertex) {
+          std::fprintf(stderr, "the graph search for the new vertex %u did only provided %zu results \n", external_label, results.size());
+          std::perror("");
+          std::abort();
+        }
 
-          // SchemeC: This version is good for high OptimizationTarget datasets or small graphs with low distance count limit during ANNS
-          uint32_t new_neighbor_index = 0;
-          float new_neighbor_distance = std::numeric_limits<float>::lowest();
-          if(this->optimizationTarget_ == HighLID) 
-          {
-            // find the worst edge of the new neighbor
-            float new_neighbor_weight = std::numeric_limits<float>::lowest();
-            const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
-            const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
-            for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
-              const auto neighbor_index = neighbor_indices[edge_idx];
+        // adding neighbors happens in two phases, the first tries to retain RNG, the second adds them without checking
+        bool check_rng_phase = true; // true = activated, false = deactived
 
-              // if another thread is building the candidate_index at the moment, than its neighbor list contains self references
-              if(candidate_index == neighbor_index)
-                continue;
+        // remove an edge of the good neighbors and connect them with this new vertex
+        auto new_neighbors = std::vector<std::pair<uint32_t, float>>();
+        while(new_neighbors.size() < edges_per_vertex) {
+          for (size_t i = 0; i < results.size() && new_neighbors.size() < edges_per_vertex; i++) {
+            const auto candidate_index = results[i].getIdentifier();
+            const auto candidate_weight = results[i].getDistance();
 
-              // the suggested neighbor might already be in the edge list of the new vertex
-              if(graph.hasEdge(neighbor_index, internal_index))
-                continue;
-
-              // the weight of the neighbor might not be worst than the current worst one     
-              const auto neighbor_weight = neighbor_weights[edge_idx];
-              if(neighbor_weight > new_neighbor_weight) {
-                new_neighbor_weight = neighbor_weight;
-                new_neighbor_index = neighbor_index;
-              }
-            }
-
-            // should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
-            if(new_neighbor_weight == std::numeric_limits<float>::lowest()) 
+            // check if the vertex is already in the edge list of the new vertex (added during a previous loop-run)
+            // since all edges are undirected and the edge information of the new vertex does not yet exist, we search the other way around.
+            if(graph.hasEdge(candidate_index, internal_index)) 
               continue;
 
-            new_neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(new_neighbor_index), dist_func_param); 
-          } 
-          else if(this->optimizationTarget_ == LowLID) 
-          {
-            // find the edge which improves the distortion the most: (distance_new_edge1 + distance_new_edge2) - distance_removed_edge       
-            float best_distortion = std::numeric_limits<float>::max();
-            const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
-            const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
-            for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
-              const auto neighbor_index = neighbor_indices[edge_idx];
+            // does the candidate has a neighbor which is connected to the new vertex and has a lower distance?
+            if(check_rng_phase && deglib::analysis::checkRNG(graph, edges_per_vertex, candidate_index, internal_index, candidate_weight) == false) 
+              continue;
 
-              // if another thread is building the candidate_index at the moment, than its neighbor list contains self references
-              if(candidate_index == neighbor_index)
-                continue;
+            // SchemeC: This version is good for high OptimizationTarget datasets or small graphs with low distance count limit during ANNS
+            uint32_t new_neighbor_index = 0;
+            float new_neighbor_distance = std::numeric_limits<float>::lowest();
+            if(this->optimizationTarget_ == HighLID) 
+            {
+              // find the worst edge of the new neighbor
+              float new_neighbor_weight = std::numeric_limits<float>::lowest();
+              const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
+              const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
+              for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
+                const auto neighbor_index = neighbor_indices[edge_idx];
 
-              // the suggested neighbor might already be in the edge list of the new vertex
-              if(graph.hasEdge(neighbor_index, internal_index))
-                continue;
+                // if another thread is building the candidate_index at the moment, than its neighbor list contains self references
+                if(candidate_index == neighbor_index)
+                  continue;
 
-              // take the neighbor with the best distance to the new vertex, which might already be in its edge list
-              const auto neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(neighbor_index), dist_func_param);
-              float distortion = (candidate_weight + neighbor_distance) - neighbor_weights[edge_idx];   // version D in the paper
-              if(distortion < best_distortion) {
-                best_distortion = distortion;
-                new_neighbor_index = neighbor_index;
-                new_neighbor_distance = neighbor_distance;
+                // the suggested neighbor might already be in the edge list of the new vertex
+                if(graph.hasEdge(neighbor_index, internal_index))
+                  continue;
+
+                // the weight of the neighbor might not be worst than the current worst one     
+                const auto neighbor_weight = neighbor_weights[edge_idx];
+                if(neighbor_weight > new_neighbor_weight) {
+                  new_neighbor_weight = neighbor_weight;
+                  new_neighbor_index = neighbor_index;
+                }
               }
+
+              // should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
+              if(new_neighbor_weight == std::numeric_limits<float>::lowest()) 
+                continue;
+
+              new_neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(new_neighbor_index), dist_func_param); 
+            } 
+            else if(this->optimizationTarget_ == LowLID) 
+            {
+              // find the edge which improves the distortion the most: (distance_new_edge1 + distance_new_edge2) - distance_removed_edge       
+              float best_distortion = std::numeric_limits<float>::max();
+              const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
+              const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
+              for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
+                const auto neighbor_index = neighbor_indices[edge_idx];
+
+                // if another thread is building the candidate_index at the moment, than its neighbor list contains self references
+                if(candidate_index == neighbor_index)
+                  continue;
+
+                // the suggested neighbor might already be in the edge list of the new vertex
+                if(graph.hasEdge(neighbor_index, internal_index))
+                  continue;
+
+                // take the neighbor with the best distance to the new vertex, which might already be in its edge list
+                const auto neighbor_distance = dist_func(new_vertex_feature, graph.getFeatureVector(neighbor_index), dist_func_param);
+                float distortion = (candidate_weight + neighbor_distance) - neighbor_weights[edge_idx];   // version D in the paper
+                if(distortion < best_distortion) {
+                  best_distortion = distortion;
+                  new_neighbor_index = neighbor_index;
+                  new_neighbor_distance = neighbor_distance;
+                }
+              }
+            } 
+        
+
+            // this should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
+            if(new_neighbor_distance == std::numeric_limits<float>::lowest()) 
+              continue;
+            
+            // update all edges
+            {
+              std::lock_guard<std::mutex> lock(this->extend_mutex); 
+              std::atomic_thread_fence(std::memory_order_acquire);
+
+              // other threads might have already changed the edges of the new_neighbor_index
+              if(graph.hasEdge(candidate_index, new_neighbor_index) && graph.hasEdge(new_neighbor_index, candidate_index) && 
+                graph.hasEdge(internal_index, candidate_index) == false && graph.hasEdge(candidate_index, internal_index) == false &&
+                graph.hasEdge(internal_index, new_neighbor_index) == false && graph.hasEdge(new_neighbor_index, internal_index) == false) {
+
+                // update edge list of the new vertex
+                graph.changeEdge(internal_index, internal_index, candidate_index, candidate_weight);
+                graph.changeEdge(internal_index, internal_index, new_neighbor_index, new_neighbor_distance);
+                new_neighbors.emplace_back(candidate_index, candidate_weight);
+                new_neighbors.emplace_back(new_neighbor_index, new_neighbor_distance);
+
+                // place the new vertex in the edge list of the result-vertex
+                graph.changeEdge(candidate_index, new_neighbor_index, internal_index, candidate_weight);
+
+                // place the new vertex in the edge list of the best edge neighbor
+                graph.changeEdge(new_neighbor_index, candidate_index, internal_index, new_neighbor_distance);
+              }
+              std::atomic_thread_fence(std::memory_order_release);
             }
-          } 
-       
-
-          // this should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
-          if(new_neighbor_distance == std::numeric_limits<float>::lowest()) 
-            continue;
-          
-          // update all edges
-          {
-            std::lock_guard<std::mutex> lock(this->extend_mutex); 
-            std::atomic_thread_fence(std::memory_order_acquire);
-
-            // other threads might have already changed the edges of the new_neighbor_index
-            if(graph.hasEdge(candidate_index, new_neighbor_index) && graph.hasEdge(new_neighbor_index, candidate_index) && 
-               graph.hasEdge(internal_index, candidate_index) == false && graph.hasEdge(candidate_index, internal_index) == false &&
-               graph.hasEdge(internal_index, new_neighbor_index) == false && graph.hasEdge(new_neighbor_index, internal_index) == false) {
-
-              // update edge list of the new vertex
-              graph.changeEdge(internal_index, internal_index, candidate_index, candidate_weight);
-              graph.changeEdge(internal_index, internal_index, new_neighbor_index, new_neighbor_distance);
-              new_neighbors.emplace_back(candidate_index, candidate_weight);
-              new_neighbors.emplace_back(new_neighbor_index, new_neighbor_distance);
-
-              // place the new vertex in the edge list of the result-vertex
-              graph.changeEdge(candidate_index, new_neighbor_index, internal_index, candidate_weight);
-
-              // place the new vertex in the edge list of the best edge neighbor
-              graph.changeEdge(new_neighbor_index, candidate_index, internal_index, new_neighbor_distance);
-            }
-            std::atomic_thread_fence(std::memory_order_release);
           }
-        }
 
-        check_rng_phase = false;
-      }
-      
-      if(new_neighbors.size() < edges_per_vertex) {
-        std::fprintf(stderr, "could find only %zu good neighbors for the new vertex %u need %u\n", new_neighbors.size(), internal_index, edges_per_vertex);
-        std::perror("");
-        std::abort();
-      }
+          check_rng_phase = false;
+        }
+        
+        if(new_neighbors.size() < edges_per_vertex) {
+          std::fprintf(stderr, "could find only %zu good neighbors for the new vertex %u need %u\n", new_neighbors.size(), internal_index, edges_per_vertex);
+          std::perror("");
+          std::abort();
+        }
+      };
+
+      const size_t task_count = (tasks_with_indices.size() / extend_thread_task_size) + ((tasks_with_indices.size() % extend_thread_task_size != 0) ? 1 : 0);
+      deglib::concurrent::parallel_for(0, task_count, extend_thread_count, [&](size_t task_index, size_t thread_id) {
+        const auto start_index = task_index * this->extend_thread_task_size;
+        const auto end_index = std::min(tasks_with_indices.size(), (task_index + 1) * this->extend_thread_task_size);
+        for (size_t i = start_index; i < end_index; ++i)
+          process_task(tasks_with_indices[i]);
+      });
     }
 
     /**

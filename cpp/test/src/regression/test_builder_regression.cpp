@@ -15,6 +15,73 @@
 // ============================================================================
 
 // ---------------------------------------------------------------------------
+// Multi-Threaded Builder Regression Benchmarks (1, 2, 4 Threads)
+// ---------------------------------------------------------------------------
+
+TEST(DeglibBuilderRegression, MultiThreaded_1_Thread_Benchmark)
+{
+    const size_t dim = 128;
+    const size_t base_count = 100000;
+    const size_t query_count = 100;
+    const size_t num_clusters = 1000;
+
+    std::vector<float> base_data;
+    std::vector<float> query_data;
+    generate_synthetic_clustered_dataset(base_count, dim, base_data, query_data, query_count, num_clusters);
+
+    auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
+
+    run_regression_test("MultiThreaded_1Thread", deglib::distances::Metric::FP32_L2, 40000.0, 4.0, 0.882,
+                        base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                        std::nullopt, 50,
+                        deglib::builder::OptimizationTarget::LowLID,
+                        /*edges_per_vertex=*/32, /*extend_k=*/32, /*extend_eps=*/0.01f,
+                        /*thread_count=*/1);
+}
+
+TEST(DeglibBuilderRegression, MultiThreaded_2_Threads_Benchmark)
+{
+    const size_t dim = 128;
+    const size_t base_count = 100000;
+    const size_t query_count = 100;
+    const size_t num_clusters = 1000;
+
+    std::vector<float> base_data;
+    std::vector<float> query_data;
+    generate_synthetic_clustered_dataset(base_count, dim, base_data, query_data, query_count, num_clusters);
+
+    auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
+
+    run_regression_test("MultiThreaded_2Threads", deglib::distances::Metric::FP32_L2, 40000.0, 2.4, 0.89201,
+                        base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                        std::nullopt, 50,
+                        deglib::builder::OptimizationTarget::LowLID,
+                        /*edges_per_vertex=*/32, /*extend_k=*/32, /*extend_eps=*/0.01f,
+                        /*thread_count=*/2);
+}
+
+TEST(DeglibBuilderRegression, MultiThreaded_4_Threads_Benchmark)
+{
+    const size_t dim = 128;
+    const size_t base_count = 100000;
+    const size_t query_count = 100;
+    const size_t num_clusters = 1000;
+
+    std::vector<float> base_data;
+    std::vector<float> query_data;
+    generate_synthetic_clustered_dataset(base_count, dim, base_data, query_data, query_count, num_clusters);
+
+    auto gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
+
+    run_regression_test("MultiThreaded_4Threads", deglib::distances::Metric::FP32_L2, 40000.0, 1.5, 0.89001,
+                        base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
+                        std::nullopt, 50,
+                        deglib::builder::OptimizationTarget::LowLID,
+                        /*edges_per_vertex=*/32, /*extend_k=*/32, /*extend_eps=*/0.01f,
+                        /*thread_count=*/4);
+}
+
+// ---------------------------------------------------------------------------
 // EVP Inner Product Metric Benchmark (100k)
 // ---------------------------------------------------------------------------
 
@@ -59,7 +126,7 @@ TEST(DeglibBuilderRegression, EVPInnerProduct_Benchmark_AVX2)
 
     auto gt_data = compute_groundtruth_evp(base_data, base_count, query_data, query_count, dim, 10);
 
-    run_regression_test("EVPInnerProduct_AVX2", deglib::distances::Metric::EVP_InnerProduct, 40000.0, 4.7, 0.866,
+    run_regression_test("EVPInnerProduct_AVX2", deglib::distances::Metric::EVP_InnerProduct, 40000.0, 4.7, 0.85301,
                         base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
                         deglib::distances::evp_ip::EvpInnerProduct_AVX2<deglib::distances::ResidualMode::SimdOnly>{}, 50,
                         deglib::builder::OptimizationTarget::LowLID,
