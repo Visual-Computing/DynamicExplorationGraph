@@ -34,9 +34,26 @@ namespace deglib::distances::fp16_ip {
             }
             return 1.f - result;
         }
+        inline static void compare_batch(const void *query_ptr, const void * const *db_arr, size_t count, const void *qty_ptr, float *dists) {
+            for (size_t i = 0; i < count; ++i) {
+                dists[i] = compare(query_ptr, db_arr[i], qty_ptr);
+            }
+        }
     };
 
 #if defined(DEGLIB_X86)
+    DEGLIB_TARGET_AVX2 inline static float fp16_hsum256(__m256 s) {
+        __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(s, 0), _mm256_extractf128_ps(s, 1));
+        alignas(32) float f[4];
+        _mm_store_ps(f, sum128);
+        return f[0] + f[1] + f[2] + f[3];
+    }
+
+    DEGLIB_TARGET_AVX512 inline static float fp16_hsum512(__m512 s) {
+        __m256 sum256 = _mm256_add_ps(_mm512_extractf32x8_ps(s, 0), _mm512_extractf32x8_ps(s, 1));
+        return fp16_hsum256(sum256);
+    }
+
     // -------------------------------------------------------------------
     // InnerProductFP16 SIMD implementations — process vectors with
     // aligned SIMD portions plus scalar residuals for any unaligned tail.
@@ -92,11 +109,7 @@ namespace deglib::distances::fp16_ip {
 
             // Horizontal reduce of SIMD accumulators
             __m512 sum512 = _mm512_add_ps(sum512_1, sum512_2);
-            __m256 sum256 = _mm256_add_ps(_mm512_extractf32x8_ps(sum512, 0), _mm512_extractf32x8_ps(sum512, 1));
-            __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
-            alignas(32) float f[4];
-            _mm_store_ps(f, sum128);
-            float result = f[0] + f[1] + f[2] + f[3];
+            float result = fp16_hsum512(sum512);
 
             // Scalar residual for the unaligned tail — eliminated at compile-time if HasTail == false
             if constexpr (HasTail) {
@@ -108,6 +121,88 @@ namespace deglib::distances::fp16_ip {
             }
 
             return 1.f - result;
+        }
+
+        DEGLIB_TARGET_AVX512 inline static void compare_batch(const void *query_ptr, const void * const *db_arr, size_t count, const void *qty_ptr, float *dists) {
+            static constexpr size_t BATCH_SIZE = 8;
+            const uint16_t* query = static_cast<const uint16_t*>(query_ptr);
+            const size_t dim = *((const size_t*)qty_ptr);
+
+            auto batch_impl = [query, dim](const void* const* db, float* out_dists) {
+                const size_t nc32 = dim / 32;
+                size_t offset = nc32 * 32;
+
+                alignas(64) __m512 s[BATCH_SIZE];
+                for (size_t j = 0; j < BATCH_SIZE; ++j) {
+                    s[j] = _mm512_setzero_ps();
+                }
+
+                for (size_t c = 0; c < nc32; ++c) {
+                    size_t idx = c * 32;
+                    __m256i q_raw_lo = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&query[idx]));
+                    __m256i q_raw_hi = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&query[idx + 16]));
+                    __m512 q_lo = _mm512_cvtph_ps(q_raw_lo);
+                    __m512 q_hi = _mm512_cvtph_ps(q_raw_hi);
+
+                    for (size_t j = 0; j < BATCH_SIZE; ++j) {
+                        const uint16_t* db_ = static_cast<const uint16_t*>(db[j]);
+                        __m256i r_lo_ = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&db_[idx]));
+                        __m256i r_hi_ = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&db_[idx + 16]));
+                        s[j] = _mm512_fmadd_ps(q_lo, _mm512_cvtph_ps(r_lo_), s[j]);
+                        s[j] = _mm512_fmadd_ps(q_hi, _mm512_cvtph_ps(r_hi_), s[j]);
+                    }
+                }
+
+                for (size_t j = 0; j < BATCH_SIZE; ++j) {
+                    out_dists[j] = fp16_hsum512(s[j]);
+                }
+
+                if constexpr (HasSimd) {
+                    if (offset + 16 <= dim) {
+                        __m128i q16_lo = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&query[offset]));
+                        __m128i q16_hi = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&query[offset + 8]));
+                        __m256 qf_lo = _mm256_cvtph_ps(q16_lo);
+                        __m256 qf_hi = _mm256_cvtph_ps(q16_hi);
+
+                        for (size_t j = 0; j < BATCH_SIZE; ++j) {
+                            const uint16_t* db_ = static_cast<const uint16_t*>(db[j]);
+                            __m128i r_lo_ = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&db_[offset]));
+                            __m128i r_hi_ = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&db_[offset + 8]));
+                            __m256 t_lo = _mm256_fmadd_ps(qf_lo, _mm256_cvtph_ps(r_lo_), _mm256_setzero_ps());
+                            __m256 t_hi = _mm256_fmadd_ps(qf_hi, _mm256_cvtph_ps(r_hi_), _mm256_setzero_ps());
+                            out_dists[j] += fp16_hsum256(_mm256_add_ps(t_lo, t_hi));
+                        }
+                        offset += 16;
+                    }
+                }
+
+                if constexpr (HasTail) {
+                    if (offset < dim) {
+                        for (size_t j = 0; j < BATCH_SIZE; ++j) {
+                            const uint16_t* db_ptr = static_cast<const uint16_t*>(db[j]);
+                            float tail_dot = 0.0f;
+                            for (size_t k = offset; k < dim; ++k) {
+                                float fa = deglib::distances::fp16::fp16_to_float(query[k]);
+                                float fb = deglib::distances::fp16::fp16_to_float(db_ptr[k]);
+                                tail_dot = std::fma(fa, fb, tail_dot);
+                            }
+                            out_dists[j] += tail_dot;
+                        }
+                    }
+                }
+
+                for (size_t j = 0; j < BATCH_SIZE; ++j) {
+                    out_dists[j] = 1.0f - out_dists[j];
+                }
+            };
+
+            size_t i = 0;
+            for (; i + BATCH_SIZE <= count; i += BATCH_SIZE) {
+                batch_impl(&db_arr[i], &dists[i]);
+            }
+            for (; i < count; ++i) {
+                dists[i] = compare(query_ptr, db_arr[i], qty_ptr);
+            }
         }
     };
 
@@ -154,10 +249,7 @@ namespace deglib::distances::fp16_ip {
 
             // Horizontal reduce of SIMD accumulators
             __m256 sum256 = _mm256_add_ps(sum256_1, sum256_2);
-            __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
-            alignas(32) float f[4];
-            _mm_store_ps(f, sum128);
-            float result = f[0] + f[1] + f[2] + f[3];
+            float result = fp16_hsum256(sum256);
 
             // Scalar residual for the unaligned tail — eliminated at compile-time if HasTail == false
             if constexpr (HasTail) {
@@ -169,6 +261,84 @@ namespace deglib::distances::fp16_ip {
             }
 
             return 1.f - result;
+        }
+
+        DEGLIB_TARGET_AVX2 inline static void compare_batch(const void *query_ptr, const void * const *db_arr, size_t count, const void *qty_ptr, float *dists) {
+            static constexpr size_t BATCH_SIZE = 8;
+            const uint16_t* query = static_cast<const uint16_t*>(query_ptr);
+            const size_t dim = *((const size_t*)qty_ptr);
+
+            auto batch_impl = [query, dim](const void* const* db, float* out_dists) {
+                const size_t nc = dim / 16;
+                size_t offset = nc * 16;
+
+                alignas(32) __m256 s[BATCH_SIZE];
+                for (size_t j = 0; j < BATCH_SIZE; ++j) {
+                    s[j] = _mm256_setzero_ps();
+                }
+
+                for (size_t c = 0; c < nc; ++c) {
+                    size_t idx = c * 16;
+                    __m128i q_raw_lo = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&query[idx]));
+                    __m128i q_raw_hi = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&query[idx + 8]));
+                    __m256 q_lo = _mm256_cvtph_ps(q_raw_lo);
+                    __m256 q_hi = _mm256_cvtph_ps(q_raw_hi);
+
+                    for (size_t j = 0; j < BATCH_SIZE; ++j) {
+                        const uint16_t* db_ = static_cast<const uint16_t*>(db[j]);
+                        __m128i r_lo_ = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&db_[idx]));
+                        __m128i r_hi_ = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&db_[idx + 8]));
+                        s[j] = _mm256_fmadd_ps(q_lo, _mm256_cvtph_ps(r_lo_), s[j]);
+                        s[j] = _mm256_fmadd_ps(q_hi, _mm256_cvtph_ps(r_hi_), s[j]);
+                    }
+                }
+
+                for (size_t j = 0; j < BATCH_SIZE; ++j) {
+                    out_dists[j] = fp16_hsum256(s[j]);
+                }
+
+                if constexpr (HasSimd) {
+                    if (offset + 8 <= dim) {
+                        __m128i q_raw = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&query[offset]));
+                        __m256 q_vec = _mm256_cvtph_ps(q_raw);
+                        for (size_t j = 0; j < BATCH_SIZE; ++j) {
+                            const uint16_t* db_ptr = static_cast<const uint16_t*>(db[j]);
+                            __m128i r_raw = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&db_ptr[offset]));
+                            __m256 r_vec = _mm256_cvtph_ps(r_raw);
+                            __m256 prod = _mm256_mul_ps(q_vec, r_vec);
+                            out_dists[j] += fp16_hsum256(prod);
+                        }
+                        offset += 8;
+                    }
+                }
+
+                if constexpr (HasTail) {
+                    if (offset < dim) {
+                        for (size_t j = 0; j < BATCH_SIZE; ++j) {
+                            const uint16_t* db_ptr = static_cast<const uint16_t*>(db[j]);
+                            float tail_dot = 0.0f;
+                            for (size_t k = offset; k < dim; ++k) {
+                                float fa = deglib::distances::fp16::fp16_to_float(query[k]);
+                                float fb = deglib::distances::fp16::fp16_to_float(db_ptr[k]);
+                                tail_dot = std::fma(fa, fb, tail_dot);
+                            }
+                            out_dists[j] += tail_dot;
+                        }
+                    }
+                }
+
+                for (size_t j = 0; j < BATCH_SIZE; ++j) {
+                    out_dists[j] = 1.0f - out_dists[j];
+                }
+            };
+
+            size_t i = 0;
+            for (; i + BATCH_SIZE <= count; i += BATCH_SIZE) {
+                batch_impl(&db_arr[i], &dists[i]);
+            }
+            for (; i < count; ++i) {
+                dists[i] = compare(query_ptr, db_arr[i], qty_ptr);
+            }
         }
     };
 #endif

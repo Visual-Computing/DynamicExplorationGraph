@@ -4,7 +4,7 @@
 // HEAD API uses L2Float, L2Float_AVX512<Mode>, L2Float_AVX2<Mode> instead of
 // L2Float4Ext/L2Float8Ext/L2Float16Ext from older commits.
 
-#include <vector>
+#include <chrono>
 
 #include "gtest/gtest.h"
 #include "deglib/distance/fp32_l2.h"
@@ -217,4 +217,103 @@ TEST(L2Float_FloatSpace, VariousDims) {
     }
 }
 
+TEST(L2Float_Batch, MatchesSingleCompare) {
+   std::vector<size_t> dims = {8, 16, 32, 64, 128, 256, 768};
+   std::vector<size_t> counts = {1, 3, 4, 7, 8, 9, 15, 16, 25};
+
+   for (size_t dim : dims) {
+       for (size_t count : counts) {
+           auto q = make_float_vec(dim, 77);
+
+           std::vector<std::vector<float>> db(count);
+           std::vector<const void*> db_ptrs(count);
+           for (size_t i = 0; i < count; ++i) {
+               db[i] = make_float_vec(dim, static_cast<int>(i * 10 + 1));
+               db_ptrs[i] = db[i].data();
+           }
+
+           std::vector<float> batch_dists(count, 0.0f);
+           auto dist_variant = deglib::distances::fp32_l2::select_dist(dim);
+
+           std::visit([&](auto&& dist) {
+               using DistType = std::decay_t<decltype(dist)>;
+               DistType::compare_batch(q.data(), db_ptrs.data(), count, &dim, batch_dists.data());
+           }, dist_variant);
+
+           for (size_t i = 0; i < count; ++i) {
+               float single_dist = std::visit([&](auto&& dist) {
+                   using DistType = std::decay_t<decltype(dist)>;
+                   return DistType::compare(q.data(), db_ptrs[i], &dim);
+               }, dist_variant);
+
+               EXPECT_NEAR(batch_dists[i], single_dist, 1e-4f)
+                   << "dim=" << dim << ", count=" << count << ", index=" << i;
+           }
+       }
+   }
+}
+
 } // anonymous namespace
+
+// ============================================================================
+// Performance: compare vs compare_batch
+// ============================================================================
+
+TEST(L2Float_Batch, PerformanceCompareVsBatch) {
+  const size_t dim = 128;
+  const size_t count = 1000;
+
+  auto q = make_float_vec(dim, 77);
+
+  std::vector<std::vector<float>> db(count);
+  std::vector<const void*> db_ptrs(count);
+  for (size_t i = 0; i < count; ++i) {
+      db[i] = make_float_vec(dim, static_cast<int>(i * 10 + 1));
+      db_ptrs[i] = db[i].data();
+  }
+
+  std::vector<float> batch_dists(count, 0.0f);
+  auto dist_variant = deglib::distances::fp32_l2::select_dist(dim);
+
+  // Warm up
+  std::visit([&](auto&& dist) {
+      using DistType = std::decay_t<decltype(dist)>;
+      DistType::compare_batch(q.data(), db_ptrs.data(), count, &dim, batch_dists.data());
+  }, dist_variant);
+
+  // Time single compare loop
+  auto start = std::chrono::high_resolution_clock::now();
+  std::vector<float> single_dists(count, 0.0f);
+  std::visit([&](auto&& dist) {
+      using DistType = std::decay_t<decltype(dist)>;
+      for (size_t i = 0; i < count; ++i) {
+          single_dists[i] = DistType::compare(q.data(), db_ptrs[i], &dim);
+      }
+  }, dist_variant);
+  auto mid = std::chrono::high_resolution_clock::now();
+
+  // Time batch compare
+  std::visit([&](auto&& dist) {
+      using DistType = std::decay_t<decltype(dist)>;
+      DistType::compare_batch(q.data(), db_ptrs.data(), count, &dim, batch_dists.data());
+  }, dist_variant);
+  auto end = std::chrono::high_resolution_clock::now();
+
+  auto single_us = std::chrono::duration_cast<std::chrono::microseconds>(mid - start).count();
+  auto batch_us = std::chrono::duration_cast<std::chrono::microseconds>(end - mid).count();
+
+  std::cout << "  dim=" << dim << ", count=" << count << "\n"
+            << "  single compare: " << single_us << " us\n"
+            << "  batch compare:  " << batch_us << " us\n"
+            << "  speedup:        " << (static_cast<double>(single_us) / batch_us) << "x\n";
+
+  // Verify correctness
+  for (size_t i = 0; i < count; ++i) {
+      EXPECT_NEAR(batch_dists[i], single_dists[i], 1e-3f)
+          << "dim=" << dim << ", index=" << i;
+  }
+
+  // Batch should be at least as fast (allowing for noise)
+  EXPECT_LE(batch_us, single_us * 2)
+      << "batch compare should not be significantly slower than single compare";
+}

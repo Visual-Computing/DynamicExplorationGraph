@@ -8,7 +8,7 @@
 
 #include <bit>
 #include <cstdint>
-#include <cstring>
+#include <chrono>
 #include <random>
 #include <vector>
 
@@ -114,6 +114,119 @@ TEST(EvpInnerProduct, FloatSpaceEVPInnerProduct) {
     EXPECT_EQ(space.dim(), dim);
     EXPECT_EQ(space.metric(), deglib::distances::Metric::EVP_InnerProduct);
     EXPECT_EQ(space.get_data_size(), 2 * (dim / 8));
+}
+
+// ============================================================================
+// Batch correctness tests
+// ============================================================================
+
+TEST(EvpInnerProduct_Batch, MatchesSingleCompare) {
+#if defined(DEGLIB_X86)
+   std::vector<uint32_t> dims = {64, 128, 256, 512};
+   std::vector<size_t> counts = {1, 3, 4, 7, 8, 9, 15, 16, 25};
+
+   for (uint32_t dim : dims) {
+       for (size_t count : counts) {
+           auto [q, _] = make_evp_pair(dim, dim / 4, 77, 0);
+
+           std::vector<std::vector<std::byte>> db(count);
+           std::vector<const void*> db_ptrs(count);
+           for (size_t i = 0; i < count; ++i) {
+               auto [_, db_vec] = make_evp_pair(dim, dim / 4, static_cast<int>(i * 10 + 1), 0);
+               db[i] = db_vec;
+               db_ptrs[i] = db[i].data();
+           }
+
+           std::vector<float> batch_dists(count, 0.0f);
+           auto dist_variant = deglib::distances::evp_ip::select_dist(dim);
+
+           std::visit([&](auto&& dist) {
+               using DistType = std::decay_t<decltype(dist)>;
+               DistType::compare_batch(q.data(), db_ptrs.data(), count, &dim, batch_dists.data());
+           }, dist_variant);
+
+           for (size_t i = 0; i < count; ++i) {
+               float single_dist = std::visit([&](auto&& dist) {
+                   using DistType = std::decay_t<decltype(dist)>;
+                   return DistType::compare(q.data(), db_ptrs[i], &dim);
+               }, dist_variant);
+
+               EXPECT_NEAR(batch_dists[i], single_dist, 1e-4f)
+                   << "dim=" << dim << ", count=" << count << ", index=" << i;
+           }
+       }
+   }
+#else
+   GTEST_SKIP() << "EVP SIMD support was not compiled in";
+#endif
+}
+
+// ============================================================================
+// Performance: compare vs compare_batch
+// ============================================================================
+
+TEST(EvpInnerProduct_Batch, PerformanceCompareVsBatch) {
+#if defined(DEGLIB_X86)
+  const uint32_t dim = 128;
+  const size_t count = 1000;
+
+  auto [q, _] = make_evp_pair(dim, dim / 4, 77, 0);
+
+  std::vector<std::vector<std::byte>> db(count);
+  std::vector<const void*> db_ptrs(count);
+  for (size_t i = 0; i < count; ++i) {
+      auto [_, db_vec] = make_evp_pair(dim, dim / 4, static_cast<int>(i * 10 + 1), 0);
+      db[i] = db_vec;
+      db_ptrs[i] = db[i].data();
+  }
+
+  std::vector<float> batch_dists(count, 0.0f);
+  auto dist_variant = deglib::distances::evp_ip::select_dist(dim);
+
+  // Warm up
+  std::visit([&](auto&& dist) {
+      using DistType = std::decay_t<decltype(dist)>;
+      DistType::compare_batch(q.data(), db_ptrs.data(), count, &dim, batch_dists.data());
+  }, dist_variant);
+
+  // Time single compare loop
+  auto start = std::chrono::high_resolution_clock::now();
+  std::vector<float> single_dists(count, 0.0f);
+  std::visit([&](auto&& dist) {
+      using DistType = std::decay_t<decltype(dist)>;
+      for (size_t i = 0; i < count; ++i) {
+          single_dists[i] = DistType::compare(q.data(), db_ptrs[i], &dim);
+      }
+  }, dist_variant);
+  auto mid = std::chrono::high_resolution_clock::now();
+
+  // Time batch compare
+  std::visit([&](auto&& dist) {
+      using DistType = std::decay_t<decltype(dist)>;
+      DistType::compare_batch(q.data(), db_ptrs.data(), count, &dim, batch_dists.data());
+  }, dist_variant);
+  auto end = std::chrono::high_resolution_clock::now();
+
+  auto single_us = std::chrono::duration_cast<std::chrono::microseconds>(mid - start).count();
+  auto batch_us = std::chrono::duration_cast<std::chrono::microseconds>(end - mid).count();
+
+  std::cout << "  dim=" << dim << ", count=" << count << "\n"
+            << "  single compare: " << single_us << " us\n"
+            << "  batch compare:  " << batch_us << " us\n"
+            << "  speedup:        " << (static_cast<double>(single_us) / batch_us) << "x\n";
+
+  // Verify correctness
+  for (size_t i = 0; i < count; ++i) {
+      EXPECT_NEAR(batch_dists[i], single_dists[i], 1e-3f)
+          << "dim=" << dim << ", index=" << i;
+  }
+
+  // Batch should be at least as fast (allowing for noise)
+  EXPECT_LE(batch_us, single_us * 2)
+      << "batch compare should not be significantly slower than single compare";
+#else
+  GTEST_SKIP() << "EVP SIMD support was not compiled in";
+#endif
 }
 
 

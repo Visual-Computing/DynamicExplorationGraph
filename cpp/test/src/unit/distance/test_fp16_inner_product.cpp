@@ -239,4 +239,43 @@ TEST(InnerProductFP16_FloatSpace, SelectDistMatchesScalar) {
     }
 }
 
+TEST(InnerProductFP16_Batch, MatchesSingleCompare) {
+    std::vector<size_t> dims = {8, 16, 32, 64, 128, 256, 768};
+    std::vector<size_t> counts = {1, 3, 4, 7, 8, 9, 15, 16, 25};
+
+    for (size_t dim : dims) {
+        for (size_t count : counts) {
+            auto q_floats = make_float_vec(dim, 77);
+            auto q_fp16 = make_fp16_vec(q_floats);
+
+            std::vector<std::vector<uint16_t>> db_fp16(count);
+            std::vector<const void*> db_ptrs(count);
+            for (size_t i = 0; i < count; ++i) {
+                auto db_floats = make_float_vec(dim, static_cast<int>(i * 10 + 1));
+                db_fp16[i] = make_fp16_vec(db_floats);
+                db_ptrs[i] = db_fp16[i].data();
+            }
+
+            std::vector<float> batch_dists(count, 0.0f);
+            auto dist_variant = deglib::distances::fp16_ip::select_dist(dim);
+
+            std::visit([&](auto&& dist) {
+                using DistType = std::decay_t<decltype(dist)>;
+                DistType::compare_batch(q_fp16.data(), db_ptrs.data(), count, &dim, batch_dists.data());
+            }, dist_variant);
+
+            for (size_t i = 0; i < count; ++i) {
+                float single_dist = std::visit([&](auto&& dist) {
+                    using DistType = std::decay_t<decltype(dist)>;
+                    return DistType::compare(q_fp16.data(), db_ptrs[i], &dim);
+                }, dist_variant);
+
+                EXPECT_NEAR(batch_dists[i], single_dist, 1e-4f)
+                    << "dim=" << dim << ", count=" << count << ", index=" << i;
+            }
+        }
+    }
+}
+
 } // anonymous namespace
+

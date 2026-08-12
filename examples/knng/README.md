@@ -36,19 +36,14 @@ uv run main.py
 
 *The script automatically downloads `benchmark-dev-wikipedia-bge-m3-small.h5` from Hugging Face Hub if not cached locally.*
 
-### 2. Fast Test Run (First 5,000 vectors)
-
-```bash
-uv run main.py --max-vecs 5000
-```
 
 ## Command-Line Options
 
 - `--dataset`: Path to HDF5 dataset file or `"small"` (default: downloads/uses Wikipedia BGE-M3 200K dataset).
 - `--max-vecs`: Limit vector count for fast verification.
-- `--non-zeros`: Number of non-zero active components in EVP quantization (default: 512).
-- `--k-graph`: Graph degree per vertex (default: 32).
-- `--max-dist`: Maximum distance calculation budget per query (default: 220).
-- `--evpK`: Number of candidate vertices retrieved before FP16 reranking (default: 50).
-- `--threads`: Number of parallel execution threads (default: 8).
+- `--non-zeros`: Number of non-zero active components in EVP quantization 
+- `--k-graph`: Graph degree per vertex 
+- `--max-dist`: Maximum distance calculation budget per query 
+- `--evpK`: Number of candidate vertices retrieved before FP16 reranking 
+- `--threads`: Number of parallel execution threads
 - `--output-plot`: Save execution time breakdown chart to a file.

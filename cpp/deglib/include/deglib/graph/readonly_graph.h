@@ -417,6 +417,8 @@ public:
 
     // iterate as long as good elements are in the next_vertices queue
     auto good_neighbors = std::array<uint32_t, 256>();    // this limits the neighbor count to 256 using Variable Length Array wrapped in a macro
+    alignas(32) auto db_arr = std::array<const void*, 256>();
+    alignas(32) auto dists = std::array<float, 256>();
     while (next_vertices.empty() == false)
     {      
       // next vertex to check
@@ -440,14 +442,28 @@ public:
       if (good_neighbor_count == 0)
         continue;
 
-      memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[0])), feature_size);
-      for (size_t i = 0; i < good_neighbor_count; i++) {
-        memory::prefetch(reinterpret_cast<const char*>(this->feature_by_index(good_neighbors[std::min(i + 1, good_neighbor_count - 1)])), feature_size);
+      // Cap the neighbor count based on the remaining distance budget
+      if constexpr (use_max_distance_count) {
+        if (distance_computation_count + good_neighbor_count > max_distance_computation_count) {
+          good_neighbor_count = max_distance_computation_count - distance_computation_count;
+        }
+      }
 
+      // Construct features pointer array
+      for (size_t i = 0; i < good_neighbor_count; ++i) {
+        db_arr[i] = this->feature_by_index(good_neighbors[i]);
+        if (i < 8)
+          memory::prefetch(reinterpret_cast<const char*>(db_arr[i]), feature_size);
+      }
+
+      // Compute distances in batch
+      COMPARATOR::compare_batch(query, db_arr.data(), good_neighbor_count, dist_func_param, dists.data());
+
+      // Process results sequentially
+      for (size_t i = 0; i < good_neighbor_count; ++i) {
         const auto neighbor_index = good_neighbors[i];
-        const auto neighbor_feature_vector = this->feature_by_index(neighbor_index);
-        const auto neighbor_distance = COMPARATOR::compare(query, neighbor_feature_vector, dist_func_param);
-             
+        const auto neighbor_distance = dists[i];
+
         // check the neighborhood of this vertex later, if its good enough
         if (neighbor_distance <= exploration_radius) {
           next_vertices.emplace(neighbor_index, neighbor_distance);
@@ -472,12 +488,12 @@ public:
             }
           }
         }
+      }
 
-        // early stop after to many computations
-        if constexpr (use_max_distance_count) {
-          if(++distance_computation_count >= max_distance_computation_count) {
-            return results;
-          }
+      if constexpr (use_max_distance_count) {
+        distance_computation_count += good_neighbor_count;
+        if (distance_computation_count >= max_distance_computation_count) {
+          return results;
         }
       }
     }

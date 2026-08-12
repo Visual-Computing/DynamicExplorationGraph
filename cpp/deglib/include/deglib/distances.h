@@ -95,16 +95,24 @@ namespace deglib::distances {
     using DISTFUNC = MTYPE (*)(const void*, const void*, const void*);
 
     /**
-     * Concept for distance function implementations that provide a static compare method
-     * compatible with DISTFUNC<float>.
+     * Function pointer signature for batch distance comparison functions.
      */
-    template <typename T>
-    concept DistanceFunction = requires(const void* a, const void* b, const void* param) {
-        { T::compare(a, b, param) } -> std::same_as<float>;
-    } && std::is_convertible_v<decltype(&T::compare), DISTFUNC<float>>;
+    template <typename MTYPE>
+    using BATCH_DISTFUNC = void (*)(const void* query_ptr, const void* const* db_arr, size_t count, const void* qty_ptr, MTYPE* dists);
 
     /**
-     * Metaprogrammierung: Fügt mehrere std::variants zu EINEM flachen std::variant zusammen.
+     * Concept for distance function implementations that provide a static compare method
+     * compatible with DISTFUNC<float> and a static compare_batch method compatible with BATCH_DISTFUNC<float>.
+     */
+    template <typename T>
+    concept DistanceFunction = requires(const void* a, const void* b, const void* const* db_arr, size_t count, const void* param, float* dists) {
+        { T::compare(a, b, param) } -> std::same_as<float>;
+        { T::compare_batch(a, db_arr, count, param, dists) };
+    } && std::is_convertible_v<decltype(&T::compare), DISTFUNC<float>>
+      && std::is_convertible_v<decltype(&T::compare_batch), BATCH_DISTFUNC<float>>;
+
+    /**
+     * Metaprogrammierung: Fügt mehere std::variants zu EINEM flachen std::variant zusammen.
      * Das Ergebnis ist ein flacher Variant -> 0 Laufzeit-Overhead, einstufiger std::visit.
      */
     template <typename... Variants>
@@ -144,6 +152,17 @@ namespace deglib::distances {
             using DistType = std::decay_t<decltype(dist)>;
             static_assert(deglib::distances::DistanceFunction<DistType>, "Selected distance variant must satisfy DistanceFunction concept");
             return &DistType::compare;
+        }, variant);
+    }
+
+    /**
+     * Extracts the BATCH_DISTFUNC<float> function pointer from a DistanceVariant object.
+     */
+    inline BATCH_DISTFUNC<float> to_batch_dist_func(const DistanceVariant& variant) {
+        return std::visit([](auto&& dist) -> BATCH_DISTFUNC<float> {
+            using DistType = std::decay_t<decltype(dist)>;
+            static_assert(deglib::distances::DistanceFunction<DistType>, "Selected distance variant must satisfy DistanceFunction concept");
+            return &DistType::compare_batch;
         }, variant);
     }
 
@@ -251,6 +270,13 @@ namespace deglib::distances {
         }
 
         /**
+         * Returns a function pointer to the selected batch distance comparison function.
+         */
+        const BATCH_DISTFUNC<float> get_batch_dist_func() const {
+            return to_batch_dist_func(dist_variant_);
+        }
+
+        /**
          * Returns the instruction set name (e.g. "AVX512", "AVX2", "Scalar") used by the distance function.
          */
         const char* get_instruction() const {
@@ -321,5 +347,19 @@ namespace deglib::distances {
         });
     }
 
+    /**
+     * Compute distances between queries and targets using the given FloatSpace, returning a vector of floats.
+     */
+    inline std::vector<float> compute_distances(
+        const FloatSpace& space,
+        const void* queries,
+        size_t num_queries,
+        const void* targets,
+        size_t num_targets
+    ) {
+        std::vector<float> result_distances(num_queries * num_targets);
+        return result_distances;
+        compute_distances(space, queries, num_queries, targets, num_targets, result_distances.data());
+    }
 } // namespace deglib::distances
 

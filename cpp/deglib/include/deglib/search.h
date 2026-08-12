@@ -69,7 +69,6 @@ inline std::vector<ResultSet> rerank(
     std::vector<ResultSet> results(num_queries);
 
     space.compute([&](const auto& dist_func_obj) {
-        using DistType = std::decay_t<decltype(dist_func_obj)>;
         deglib::concurrent::parallel_for(0, num_queries, num_threads, [&](size_t i, size_t) {
             const uint8_t* query_ptr = q_ptr + i * byte_stride_query;
             const uint32_t* cand_row = base_candidates + i * candidates_per_query;
@@ -85,7 +84,7 @@ inline std::vector<ResultSet> rerank(
                 }
 
                 const uint8_t* cand_ptr = t_ptr + cand_idx * byte_stride_target;
-                float dist = DistType::compare(query_ptr, cand_ptr, param);
+                float dist = dist_func_obj.compare(query_ptr, cand_ptr, param);
 
                 // Keep candidates in max-heap of capacity k_top.
                 // Until the heap reaches k_top elements, add all valid candidates.
