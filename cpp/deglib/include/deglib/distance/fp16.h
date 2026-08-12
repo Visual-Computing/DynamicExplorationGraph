@@ -111,13 +111,8 @@ namespace deglib::distances {
             for (; i + 4 <= count; i += 4) {
                 __m128 va = _mm_loadu_ps(floats + i);
                 __m128i vhp = _mm_cvtps_ph(va, 0);
-                // Store 4 uint16_t values from the __m128i
-                alignas(16) uint16_t temp[4];
-                _mm_store_si128(reinterpret_cast<__m128i*>(temp), vhp);
-                fp16_vals[i] = temp[0];
-                fp16_vals[i + 1] = temp[1];
-                fp16_vals[i + 2] = temp[2];
-                fp16_vals[i + 3] = temp[3];
+                // Store 4 uint16_t values (8 bytes) into destination directly
+                _mm_storel_epi64(reinterpret_cast<__m128i*>(fp16_vals + i), vhp);
             }
             // Scalar fallback for remaining 0-3 elements
             for (; i < count; ++i) {
@@ -129,9 +124,7 @@ namespace deglib::distances {
             size_t i = 0;
             // Process 4 uint16_t per step with _mm_cvtph_ps
             for (; i + 4 <= count; i += 4) {
-                // Load 4 uint16_t values into __m128i
-                alignas(16) uint16_t temp[4] = {fp16_vals[i], fp16_vals[i + 1], fp16_vals[i + 2], fp16_vals[i + 3]};
-                __m128i vhp = _mm_load_si128(reinterpret_cast<const __m128i*>(temp));
+                __m128i vhp = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(fp16_vals + i));
                 __m128 va = _mm_cvtph_ps(vhp);
                 _mm_storeu_ps(floats + i, va);
             }
