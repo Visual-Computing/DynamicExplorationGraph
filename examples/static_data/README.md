@@ -19,6 +19,9 @@ Since `pyproject.toml` references `deglib` locally (`path = "../../python"`), ru
 ```bash
 # Install dependencies & compile latest deglib C++ bindings
 uv sync
+
+# If C++ code or pybind11 bindings were modified, force rebuilding the extension:
+uv sync --reinstall-package deglib
 ```
 
 > **Note:** A C++ compiler (MSVC on Windows, GCC/Clang on Linux/macOS) and CMake must be available in your system `PATH`. `setup.py` handles copying C++ files, running CMake, and compiling the extension during the `uv sync` step.

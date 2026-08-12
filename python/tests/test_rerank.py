@@ -169,3 +169,21 @@ class TestRerankUnit:
         assert result[0, 1] == 1
         assert result[1, 0] == 1
         assert result[1, 1] == 0
+
+    def test_unsorted(self):
+        queries = np.zeros((1, self.dims), dtype=np.float32)
+        base = np.zeros((3, self.dims), dtype=np.float32)
+        base[0, 0] = 1.0
+        base[1, 0] = 3.0
+        base[2, 0] = 0.5
+        candidates = np.array([[0, 1, 2]], dtype=np.uint32)
+
+        # Sorted returns idx 2 then idx 0
+        sorted_res = self.space.rerank(queries, candidates, base, k_top=2, unsorted=False)
+        assert sorted_res[0, 0] == 2
+        assert sorted_res[0, 1] == 0
+
+        # Unsorted returns top 2 without sorting
+        unsorted_res = self.space.rerank(queries, candidates, base, k_top=2, unsorted=True)
+        assert unsorted_res.shape == (1, 2)
+        assert set(unsorted_res[0]) == {0, 2}

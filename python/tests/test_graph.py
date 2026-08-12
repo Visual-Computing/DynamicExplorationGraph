@@ -346,3 +346,56 @@ def test_facade_to_readonly():
     rd_graph = g.to_readonly()
     assert not rd_graph.is_mutable()
     assert rd_graph.size() == g.size()
+
+
+def test_facade_explore_return_distances_false():
+    """explore with return_distances=False should return only indices array."""
+    g, _ = _build_test_graph_with_distinct_labels()
+    indices = g.explore(0, k=5, max_distance_computation_count=50, return_distances=False)
+    assert isinstance(indices, np.ndarray)
+    assert len(indices) == 5
+
+
+def test_facade_explore_unsorted():
+    """explore with unsorted=True should return indices."""
+    g, _ = _build_test_graph_with_distinct_labels()
+    indices, distances = g.explore(0, k=5, max_distance_computation_count=50, unsorted=True)
+    assert len(indices) == 5
+    assert len(distances) == 5
+
+
+def test_facade_explore_batch():
+    """explore_batch with return_distances and unsorted options."""
+    g, _ = _build_test_graph_with_distinct_labels()
+    labels = np.array([0, 10], dtype=np.uint32)
+
+    # Default return_distances=True
+    indices, distances = g.explore(labels, k=5, max_distance_computation_count=50)
+    assert indices.shape == (2, 5)
+    assert distances.shape == (2, 5)
+
+    # return_distances=False
+    indices_only = g.explore(labels, k=5, max_distance_computation_count=50, return_distances=False)
+    assert indices_only.shape == (2, 5)
+    assert isinstance(indices_only, np.ndarray)
+
+    # unsorted=True
+    indices_unsorted, distances_unsorted = g.explore(labels, k=5, max_distance_computation_count=50, unsorted=True)
+    assert indices_unsorted.shape == (2, 5)
+    assert distances_unsorted.shape == (2, 5)
+
+
+def test_facade_search_return_distances_false():
+    """search with return_distances=False should return only indices."""
+    g, data = _build_test_graph_with_distinct_labels()
+    indices = g.search(data[0:1], eps=0.1, k=5, return_distances=False)
+    assert isinstance(indices, np.ndarray)
+    assert indices.shape == (1, 5)
+
+
+def test_facade_search_unsorted():
+    """search with unsorted=True should return results."""
+    g, data = _build_test_graph_with_distinct_labels()
+    indices, distances = g.search(data[0:2], eps=0.1, k=5, unsorted=True)
+    assert indices.shape == (2, 5)
+    assert distances.shape == (2, 5)

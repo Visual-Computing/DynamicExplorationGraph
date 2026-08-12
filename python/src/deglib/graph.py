@@ -99,32 +99,23 @@ class DynamicExplorationGraph:
         return self.dynamic_exploration_graph_cpp.get_neighbors(external_label)
 
     def search(
-            self, query: np.ndarray, eps: float, k: int, filter_labels: Union[None, np.ndarray, Filter] = None,
-            max_distance_computation_count: int = 0, threads: int = 1
-    ) -> Tuple[np.ndarray, np.ndarray]:
+            self, query: np.ndarray, eps: float = 0.0, k: int = 10,
+            filter_labels: Union[None, np.ndarray, Filter] = None,
+            max_distance_computation_count: int = 0, threads: int = 0,
+            return_distances: bool = True, unsorted: bool = False
+    ) -> Union[Tuple[np.ndarray, np.ndarray], np.ndarray]:
         """
-        Approximate nearest neighbor search based on yahoo's range search algorithm for graphs.
+        Search for nearest neighbors of query vector(s).
 
-        Eps greater 0 extends the search range and takes additional graph vertices into account.
-        For lower numbers it is recommended to set eps to 0 since its very unlikely the method can make use of the
-        extended the search range.
-
-        :param query: A feature vector for which similar feature vectors should searched.
-        :param eps: Controls how many nodes are checked during search. Lower eps values like 0.001 are faster but less
-                    accurate. Higher eps values like 0.1 are slower but more accurate. Should always be greater 0.
-        :param k: The number of results that will be returned. If k is smaller than the number of vertices in the graph,
-                  k is set to the number of vertices in the graph.
-        :param filter_labels: A numpy array with dtype int32, that contains all labels that can be returned or an object
-                              of type Filter, that limits the possible results to a given set.
-                              All other labels will not be included in the result set.
-        :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
-        :param threads: The number of threads to use for parallel processing. It should not excel the number of queries.
-                        If set to 0, the minimum of the number of cores of this machine and the number of queries is
-                        used.
-        :returns: A tuple containing (indices, distances) where indices is a numpy-array of shape [n_queries, k]
-                  containing the external labels of the closest found neighbors to the queries.
-                  Distances is a numpy-array of shape [n_queries, k] containing the distances to the closest found
-                  neighbors. Unfilled positions have NaN distance.
+        :param query: Query feature vector(s) as numpy array.
+        :param eps: Controls how many nodes are checked during search.
+        :param k: The number of results to return per query.
+        :param filter_labels: Filter for labels to include.
+        :param max_distance_computation_count: Distance computation budget limit.
+        :param threads: Number of parallel worker threads.
+        :param return_distances: If True, returns (indices, distances). If False, returns only indices.
+        :param unsorted: If True, returns candidates in unsorted (heap) order instead of ascending distance order.
+        :returns: (indices, distances) tuple if return_distances is True, otherwise indices array.
         """
         # handle query shapes
         single_query = len(query.shape) == 1
@@ -142,66 +133,62 @@ class DynamicExplorationGraph:
         query = assure_array(query, 'query', valid_dtype)
         filter_obj = Filter.create_filter(filter_labels, self.size())
         threads = get_num_useful_threads(threads, query.shape[0])
-        indices, distances = self.dynamic_exploration_graph_cpp.search_batch(
-            query, eps, k, filter_obj, max_distance_computation_count, threads
+        indices_or_tuple = self.dynamic_exploration_graph_cpp.search_batch(
+            query, eps, k, filter_obj, max_distance_computation_count, threads, return_distances, unsorted
         )
-        # Check if any query returned fewer than k valid results (unfilled elements have NaN distance)
-        valid_counts = np.sum(~np.isnan(distances), axis=1)
-        min_valid = int(np.min(valid_counts)) if valid_counts.size > 0 else 0
-        if min_valid < k:
-            warnings.warn('Number of results ({}) is smaller than k ({})'.format(min_valid, k), UserWarning)
-            indices = indices[:, :min_valid]
-            distances = distances[:, :min_valid]
+
         if single_query:
-            indices = indices[0]
-            distances = distances[0]
-        return indices, distances
+            if return_distances:
+                return indices_or_tuple[0][0], indices_or_tuple[1][0]
+            else:
+                return indices_or_tuple[0]
+
+        return indices_or_tuple
 
     def explore(
             self, entry_external_label: Union[int, np.ndarray, list], k: int,
             max_distance_computation_count: int = 0, eps: float = 0.0,
             include_entry: bool = True, threads: int = 1,
-            filter_labels: Union[None, np.ndarray, Filter] = None
-    ) -> Tuple[np.ndarray, np.ndarray]:
+            filter_labels: Union[None, np.ndarray, Filter] = None,
+            return_distances: bool = True, unsorted: bool = False
+    ) -> Union[Tuple[np.ndarray, np.ndarray], np.ndarray]:
         """
         An exploration for similar elements, limited by max_distance_computation_count.
 
         Handles both single entry labels (int) and batch entry arrays (ndarray/list).
 
-        :param entry_external_label: The external label of the vertex to start exploration from (int for single,
-                                     ndarray/list for batch).
-        :param k: The number of similar feature vectors to return
-        :param max_distance_computation_count: Limit the number of distance calculations. If set to 0 this is ignored.
-        :param eps: Controls how many nodes are checked during search. Lower eps values like 0.001 are faster but less
-                    accurate. Higher eps values like 0.1 are slower but more accurate. Should always be greater 0.
+        :param entry_external_label: The external label of the vertex to start exploration from.
+        :param k: The number of similar feature vectors to return.
+        :param max_distance_computation_count: Limit the number of distance calculations.
+        :param eps: Controls how many nodes are checked during search.
         :param include_entry: If True, the entry vertex is included in the result set.
         :param threads: The number of threads to use for parallel processing.
-        :param filter_labels: A numpy array with dtype int32, that contains all labels that can be returned or an object
-                              of type Filter, that limits the possible results to a given set.
-                              All other labels will not be included in the result set.
-        :returns: For a single entry, a tuple of (indices, distances) as 1D numpy arrays where indices are external labels.
-                  For batch, a tuple of (indices, distances) as 2D numpy arrays where indices are external labels.
+        :param filter_labels: Labels filter.
+        :param return_distances: If True, returns (indices, distances). If False, returns only indices.
+        :param unsorted: If True, returns candidates in unsorted (heap) order.
+        :returns: (indices, distances) tuple if return_distances is True, otherwise indices array.
         """
+        if k > self.size():
+            warnings.warn(
+                'k={} is larger than number of vertices in graph={}. Setting k={}'.format(k, self.size(), self.size()))
+            k = self.size()
+
         if isinstance(entry_external_label, (np.ndarray, list, tuple)):
             arr = np.ascontiguousarray(entry_external_label, dtype=np.uint32)
             if arr.ndim == 2:
                 arr = arr[:, 0]
             filter_obj = Filter.create_filter(filter_labels, self.size())
             threads = get_num_useful_threads(threads, arr.shape[0])
-            indices, distances = self.dynamic_exploration_graph_cpp.explore_batch(
-                arr, k, max_distance_computation_count, eps, include_entry, filter_obj, threads
+            return self.dynamic_exploration_graph_cpp.explore_batch(
+                arr, k, max_distance_computation_count, eps, include_entry, filter_obj, threads, return_distances, unsorted
             )
-            valid_counts = np.sum(~np.isnan(distances), axis=1)
-            min_valid = int(np.min(valid_counts)) if valid_counts.size > 0 else 0
-            if min_valid < k:
-                warnings.warn('Number of results ({}) is smaller than k ({})'.format(min_valid, k), UserWarning)
-                indices = indices[:, :min_valid]
-                distances = distances[:, :min_valid]
-            return indices, distances
         else:
-            return self.dynamic_exploration_graph_cpp.explore(
+            indices, distances = self.dynamic_exploration_graph_cpp.explore(
                 int(entry_external_label), k, max_distance_computation_count, eps, include_entry
             )
+            if return_distances:
+                return indices, distances
+            return indices
 
     def save_graph(self, path: pathlib.Path | str):
         """

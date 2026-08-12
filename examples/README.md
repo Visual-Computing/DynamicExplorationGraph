@@ -30,6 +30,9 @@ Navigating into any example directory and running `uv sync` or `uv run` will aut
 ```bash
 cd examples/knng
 uv sync
+
+# If C++ code or pybind11 bindings were modified, force rebuilding the extension:
+uv sync --reinstall-package deglib
 ```
 
 ## Projects

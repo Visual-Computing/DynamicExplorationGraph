@@ -107,12 +107,14 @@ def construct_knng(
     # explore() accepts external labels
     t0 = time.perf_counter()
     entry_labels = np.ascontiguousarray(labels, dtype=np.uint32)
-    indices, distances = graph.explore(
+    indices = graph.explore(
         entry_labels,
         k=evp_k,
         max_distance_computation_count=max_dist,
         include_entry=False,
-        threads=threads
+        threads=threads,
+        return_distances=False,
+        unsorted=True
     )
     t_explore = time.perf_counter() - t0
     print(f"Graph candidate search completed in {t_explore:.3f}s")
@@ -125,7 +127,9 @@ def construct_knng(
         candidate_indices=indices,
         base_vectors=train_vectors,
         k_top=k_top,
-        num_threads=threads
+        num_threads=threads,
+        return_distances=False,
+        unsorted=True
     )
     t_rerank = time.perf_counter() - t0
     print(f"FP16 Reranking completed in {t_rerank:.3f}s")
