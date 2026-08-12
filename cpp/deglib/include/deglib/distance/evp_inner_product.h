@@ -216,7 +216,7 @@ namespace deglib::distances::evp_ip {
                uint32_t dim = *((uint32_t*)qty_ptr);
                const size_t mask_bytes = dim / 8;
 
-               auto batch_impl = [query, mask_bytes, dim](const void* const* db, float* out_dists) {
+               auto batch_impl = [query, mask_bytes, dim](const void* const* db, float* out_dists) DEGLIB_TARGET_AVX512 {
                    const std::byte* q_ones = query;
                    const std::byte* q_negs = query + mask_bytes;
 
@@ -452,7 +452,7 @@ namespace deglib::distances::evp_ip {
                uint32_t dim = *((uint32_t*)qty_ptr);
                const size_t mask_bytes = dim / 8;
 
-               auto batch_impl = [query, mask_bytes, dim](const void* const* db, float* out_dists) {
+               auto batch_impl = [query, mask_bytes, dim](const void* const* db, float* out_dists) DEGLIB_TARGET_AVX2 {
                    const std::byte* q_ones = query;
                    const std::byte* q_negs = query + mask_bytes;
 

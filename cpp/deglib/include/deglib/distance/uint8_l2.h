@@ -130,7 +130,7 @@ namespace deglib::distances::uint8_l2 {
                const unsigned char* query = static_cast<const unsigned char*>(query_ptr);
                const size_t dim = *((const size_t*)qty_ptr);
 
-               auto batch_impl = [query, dim](const void* const* db, float* out_dists) {
+               auto batch_impl = [query, dim](const void* const* db, float* out_dists) DEGLIB_TARGET_AVX512 {
                    const size_t nc32 = dim / 32;
                    size_t offset = nc32 * 32;
 
@@ -262,7 +262,7 @@ namespace deglib::distances::uint8_l2 {
                const unsigned char* query = static_cast<const unsigned char*>(query_ptr);
                const size_t dim = *((const size_t*)qty_ptr);
 
-               auto batch_impl = [query, dim](const void* const* db, float* out_dists) {
+               auto batch_impl = [query, dim](const void* const* db, float* out_dists) DEGLIB_TARGET_AVX2 {
                    const size_t nc16 = dim / 16;
                    size_t offset = nc16 * 16;
 
