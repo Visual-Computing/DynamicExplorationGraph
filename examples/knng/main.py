@@ -77,9 +77,9 @@ def construct_knng(
         train_vectors = train_vectors.view(np.uint16)
 
     print(f"Dataset shape: {n_vecs} vectors, {dims} dimensions (dtype: {train_vectors.dtype})")
-    print(f"k-NNG Construction Config: k_top={k_top}, k_graph={k_graph}, non_zeros={non_zeros}, max_dist={max_dist}, evp_k={evp_k}, prune_worst={prune_worst}")
+    print(f"k-NNG Construction Config: k_top={k_top}, k_graph={k_graph}, non_zeros={non_zeros}, max_dist={max_dist}, evp_k={evp_k}, prune_worst={prune_worst}, threads={threads}")
 
-    # 1. Quantization Phase (using C++ quantize_batch)
+    # 1. Quantization Phase 
     t0 = time.perf_counter()
     quant_vectors = quantize_vectors(train_vectors, non_zeros=non_zeros, num_threads=threads)
     t_quant = time.perf_counter() - t0
@@ -90,6 +90,7 @@ def construct_knng(
     space = FloatSpace.create(dims, Metric.EVP_InnerProduct)
     graph = deglib.DynamicExplorationGraph.create_empty(n_vecs, space, k_graph)
     builder = deglib.GraphBuilder(graph, extend_k=k_ext, extend_eps=0.001)
+    builder.set_thread_count(threads)
 
     labels = np.arange(n_vecs, dtype=np.uint32)
     builder.add_entry(labels, quant_vectors)
@@ -104,7 +105,6 @@ def construct_knng(
     print(f"Edge pruning completed in {t_prune:.3f}s")
 
     # 3. Graph Exploration Phase (Self-Join for k-NNG neighbor retrieval)
-    # explore() accepts external labels
     t0 = time.perf_counter()
     entry_labels = np.ascontiguousarray(labels, dtype=np.uint32)
     indices = graph.explore(
@@ -119,7 +119,7 @@ def construct_knng(
     t_explore = time.perf_counter() - t0
     print(f"Graph candidate search completed in {t_explore:.3f}s")
 
-    # 4. FP16 Candidate Rerank Phase (O(1) memory footprint per query thread via C++ SIMD FloatSpace)
+    # 4. FP16 Candidate Rerank Phase
     t0 = time.perf_counter()
     rerank_space = FloatSpace.create(dims, Metric.FP16_InnerProduct)
     final_knng_edges = rerank_space.rerank(
