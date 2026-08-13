@@ -11,10 +11,60 @@
 // Graph pruning techniques
 #include "deglib/optimization/pruning.h"
 
+// Vector transformation techniques (MIPS L2 transformation)
+#include "deglib/optimization/transform.h"
+
 // Builder (needed for optimize_edges)
 #include "deglib/builder.h"
 
 namespace deglib::optimization {
+
+    /**
+     * @brief Perform 1D pre-sorting of dataset feature vectors using FLAS.
+     * Supports all deglib metric types.
+     *
+     * @param data Pointer to contiguous FP32 feature vectors array (shape: count x dim).
+     * @param count Number of feature vectors.
+     * @param dim Dimension of feature vectors.
+     * @param metric Metric type used for distance computation during sorting.
+     * @param radius_decay Decay factor per iteration for neighborhood radius (default 0.9).
+     * @param numThreads Number of worker threads (0 = use hardware concurrency).
+     * @return std::vector<uint32_t> Permutation array of original vector indices [0..count-1] in sorted order.
+     */
+    inline std::vector<uint32_t> presort(
+        const float* data, size_t count, size_t dim,
+        deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2,
+        float radius_decay = 0.9f,
+        size_t numThreads = 0,
+        std::function<bool(float)> callback = nullptr
+    ) {
+        if (count == 0) return {};
+
+        std::vector<flas::MapField> map_fields = flas::make_map_fields(data, static_cast<int>(count), static_cast<int>(dim));
+        flas::FlasSettings settings;
+        settings.radius_decay = radius_decay;
+
+        if (metric.get_distance_kind() == deglib::distances::MetricDistanceKind::InnerProduct) {
+            settings.metric = flas::FlasMetric::InnerProduct;
+        } else {
+            settings.metric = flas::FlasMetric::L2;
+        }
+
+        std::mt19937 rng(42);
+        auto cb = callback ? callback : [](float) { return false; };
+
+        if (numThreads != 1) {
+            flas::do_sorting_1d(map_fields, static_cast<int>(dim), settings, rng, cb, static_cast<int>(numThreads));
+        } else {
+            flas::do_sorting_1d(map_fields, static_cast<int>(dim), settings, rng, cb);
+        }
+
+        std::vector<uint32_t> result(count);
+        for (size_t i = 0; i < count; ++i) {
+            result[i] = static_cast<uint32_t>(map_fields[i].id);
+        }
+        return result;
+    }
 
     /**
      * Quantize a single FP32 vector using EVP quantization.
