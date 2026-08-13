@@ -26,16 +26,14 @@ import deglib
 from deglib.distances import FloatSpace, Metric, quantize_batch
 from dataset_utils import load_hdf5_dataset, ensure_small_dataset, DEFAULT_CACHE_DIR
 
-
 DEFAULT_K_TOP = 15
-DEFAULT_K_GRAPH = 18
-DEFAULT_K_EXT = 41
-DEFAULT_NON_ZEROS = 768
-DEFAULT_MAX_DIST = 586
-DEFAULT_EVP_K = 78
-DEFAULT_PRUNE_WORST = 9
+DEFAULT_K_GRAPH = 16
+DEFAULT_K_EXT = 32
+DEFAULT_NON_ZEROS = 700
+DEFAULT_MAX_DIST = 400
+DEFAULT_EVP_K = 50
+DEFAULT_PRUNE_WORST = 6
 DEFAULT_THREADS = 8
-
 
 def prune_worst_edges(graph: deglib.DynamicExplorationGraph, prune_worst: int) -> None:
     """
@@ -73,9 +71,6 @@ def construct_knng(
     Constructs and evaluates a k-Nearest Neighbor Graph (k-NNG) using DEG.
     """
     n_vecs, dims = train_vectors.shape
-    if train_vectors.dtype == np.float16:
-        train_vectors = train_vectors.view(np.uint16)
-
     print(f"Dataset shape: {n_vecs} vectors, {dims} dimensions (dtype: {train_vectors.dtype})")
     print(f"k-NNG Construction Config: k_top={k_top}, k_graph={k_graph}, non_zeros={non_zeros}, max_dist={max_dist}, evp_k={evp_k}, prune_worst={prune_worst}, threads={threads}")
 
@@ -142,7 +137,9 @@ def construct_knng(
         correct = 0
         total_gt = 0
         for i in range(n_vecs):
-            gt_set = set(ground_truth[i, :k_top])
+            # Ground truth list clean-up: remove self-references (i) if present
+            gt_row = [idx for idx in ground_truth[i] if idx != i][:k_top]
+            gt_set = set(gt_row)
             pred_set = set(final_knng_edges[i])
             correct += len(gt_set.intersection(pred_set))
             total_gt += len(gt_set)
