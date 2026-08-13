@@ -124,23 +124,30 @@ public:
   }
 
   /**
-   *  Copy from input graph
+   *  Copy from input graph (with optional custom features buffer)
    */
-  ReadOnlyGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::distances::FloatSpace feature_space, const deglib::graph::InternalGraph& input_graph)
+  ReadOnlyGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::distances::FloatSpace feature_space, const deglib::graph::InternalGraph& input_graph, const void* custom_features = nullptr)
       : ReadOnlyGraph(max_vertex_count, edges_per_vertex, feature_space) {
+
+    const auto custom_feature_bytes = reinterpret_cast<const std::byte*>(custom_features);
 
     for (uint32_t i = 0; i < max_vertex_count; i++) {
         auto vertex = reinterpret_cast<char*>(this->vertex_by_index(i));
+        const auto label = input_graph.getExternalLabel(i);
 
-        const auto feature = input_graph.getFeatureVector(i);
-        std::memcpy(vertex, feature, feature_space.get_data_size());
+        if (custom_features != nullptr) {
+            const auto feature = custom_feature_bytes + size_t(label) * feature_space.get_data_size();
+            std::memcpy(vertex, feature, feature_space.get_data_size());
+        } else {
+            const auto feature = input_graph.getFeatureVector(i);
+            std::memcpy(vertex, feature, feature_space.get_data_size());
+        }
         vertex += feature_space.get_data_size();
 
         const auto neighbor_indices = input_graph.getNeighborIndices(i);
         std::memcpy(vertex, neighbor_indices, sizeof(uint32_t) * uint32_t(edges_per_vertex));
         vertex += sizeof(uint32_t) * uint32_t(edges_per_vertex);
 
-        const auto label = input_graph.getExternalLabel(i);
         std::memcpy(vertex, &label, sizeof(uint32_t));
         label_to_index_.emplace(label, i);
     }
@@ -572,11 +579,17 @@ inline auto convert_to_readonly_graph(const deglib::graph::InternalGraph& input_
 {
   auto size = input_graph.size();
   auto edges_per_vertex = input_graph.getEdgesPerVertex();
-  auto dim = input_graph.getFeatureSpace().dim();
-  auto metric_type = input_graph.getFeatureSpace().metric();
-  const auto feature_space = deglib::distances::FloatSpace(dim, static_cast<deglib::distances::Metric>(metric_type));
+  return deglib::graph::ReadOnlyGraph(size, edges_per_vertex, input_graph.getFeatureSpace(), input_graph);
+}
 
-  return deglib::graph::ReadOnlyGraph(size, edges_per_vertex, feature_space, input_graph);
+/**
+ * Convert the given graph to a readonly graph, overriding feature space and feature vectors.
+ */
+inline auto convert_to_readonly_graph(const deglib::graph::InternalGraph& input_graph, const deglib::distances::FloatSpace feature_space, const void* custom_features = nullptr)
+{
+  auto size = input_graph.size();
+  auto edges_per_vertex = input_graph.getEdgesPerVertex();
+  return deglib::graph::ReadOnlyGraph(size, edges_per_vertex, feature_space, input_graph, custom_features);
 }
 }  // namespace deglib::graph
 
