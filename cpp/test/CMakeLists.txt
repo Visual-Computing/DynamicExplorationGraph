@@ -66,6 +66,7 @@ add_deglib_test(test_sizebounded_graph src/unit/graph/test_sizebounded_graph.cpp
 add_deglib_test(test_readonly_graph src/unit/graph/test_readonly_graph.cpp)
 add_deglib_test(test_graph src/unit/test_graph.cpp)
 add_deglib_test(test_pruning src/unit/optimization/test_pruning.cpp)
+add_deglib_test(test_transform src/unit/optimization/test_transform.cpp)
 add_deglib_test(test_analysis src/unit/test_analysis.cpp)
 add_deglib_test(test_evp_inner_product src/unit/distance/test_evp_inner_product.cpp)
 
