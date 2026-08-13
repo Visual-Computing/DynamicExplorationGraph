@@ -399,3 +399,33 @@ def test_facade_search_unsorted():
     indices, distances = g.search(data[0:2], eps=0.1, k=5, unsorted=True)
     assert indices.shape == (2, 5)
     assert distances.shape == (2, 5)
+
+
+def test_to_readonly_custom_features():
+    """to_readonly with custom feature space and FP16 custom feature buffer."""
+    N, d = 20, 16
+    data = np.random.randn(N, d).astype(np.float32)
+
+    # Build FP32 L2 graph
+    fs_fp32 = FloatSpace.create(d, Metric.FP32_L2)
+    g = deglib.DynamicExplorationGraph.create_empty(N, fs_fp32, edges_per_vertex=4)
+    builder = deglib.GraphBuilder(g, extend_k=10, extend_eps=0.2)
+    builder.add_entry(range(N), data)
+    builder.build()
+
+    # Convert features to FP16
+    fp16_data = deglib.floats_to_fp16(data)
+    fs_fp16 = FloatSpace.create(d, Metric.FP16_InnerProduct)
+
+    # Swap to FP16 ReadOnlyGraph
+    ro_g = g.to_readonly(feature_space=fs_fp16, custom_features=fp16_data)
+    assert ro_g.size() == N
+    assert not ro_g.is_mutable()
+    assert ro_g.get_feature_space().metric() == Metric.FP16_InnerProduct
+
+    # Search on FP16 ReadOnlyGraph
+    query_fp16 = deglib.floats_to_fp16(data[0:2])
+    res_indices, res_dists = ro_g.search(query_fp16, eps=0.1, k=3)
+    assert res_indices.shape == (2, 3)
+    assert res_dists.shape == (2, 3)
+

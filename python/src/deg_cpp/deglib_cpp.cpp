@@ -15,8 +15,10 @@
 
 #include <deglib/deglib.h>
 #include <deglib/distance/fp16.h>
+#include <deglib/optimization.h>
 #include <deglib/optimization/pruning.h>
 #include <deglib/optimization/quantization/evp_quantize.h>
+#include <deglib/optimization/transform.h>
 
 namespace py = pybind11;
 
@@ -89,9 +91,17 @@ graph_search_batch_wrapper(const G &graph, const py::array query,
   if (threads <= 1) {
     search_range(0, n_queries);
   } else {
-    deglib::concurrent::parallel_batch_for(
-        0, n_queries, threads, [&](size_t begin, size_t end, size_t thread_id) {
-          search_range(begin, end);
+    const size_t chunk_size = std::clamp(
+        (n_queries + static_cast<size_t>(threads) * 8 - 1) / (static_cast<size_t>(threads) * 8),
+        size_t{1}, size_t{8196});
+    const size_t num_chunks = (n_queries + chunk_size - 1) / chunk_size;
+
+    deglib::concurrent::parallel_for(
+        static_cast<size_t>(0), num_chunks, threads,
+        [&](size_t chunk_id, size_t) {
+          size_t start = chunk_id * chunk_size;
+          size_t end = std::min(start + chunk_size, static_cast<size_t>(n_queries));
+          search_range(start, end);
         });
   }
 
@@ -227,9 +237,17 @@ std::tuple<py::array_t<uint32_t>, py::array_t<float>> graph_explore_wrapper(
   if (threads <= 1) {
     explore_range(0, n_queries);
   } else {
-    deglib::concurrent::parallel_batch_for(
-        0, n_queries, threads, [&](size_t begin, size_t end, size_t thread_id) {
-          explore_range(begin, end);
+    const size_t chunk_size = std::clamp(
+        (n_queries + static_cast<size_t>(threads) * 8 - 1) / (static_cast<size_t>(threads) * 8),
+        size_t{1}, size_t{8196});
+    const size_t num_chunks = (n_queries + chunk_size - 1) / chunk_size;
+
+    deglib::concurrent::parallel_for(
+        static_cast<size_t>(0), num_chunks, threads,
+        [&](size_t chunk_id, size_t) {
+          size_t start = chunk_id * chunk_size;
+          size_t end = std::min(start + chunk_size, static_cast<size_t>(n_queries));
+          explore_range(start, end);
         });
   }
 
@@ -322,9 +340,17 @@ dynamic_exploration_graph_search_batch_wrapper(const deglib::DynamicExplorationG
     if (threads <= 1) {
       search_range(0, n_queries);
     } else {
-      deglib::concurrent::parallel_batch_for(
-          0, n_queries, threads, [&](size_t begin, size_t end, size_t thread_id) {
-            search_range(begin, end);
+      const size_t chunk_size = std::clamp(
+          (n_queries + static_cast<size_t>(threads) * 8 - 1) / (static_cast<size_t>(threads) * 8),
+          size_t{1}, size_t{8196});
+      const size_t num_chunks = (n_queries + chunk_size - 1) / chunk_size;
+
+      deglib::concurrent::parallel_for(
+          static_cast<size_t>(0), num_chunks, threads,
+          [&](size_t chunk_id, size_t) {
+            size_t start = chunk_id * chunk_size;
+            size_t end = std::min(start + chunk_size, static_cast<size_t>(n_queries));
+            search_range(start, end);
           });
     }
   }
@@ -491,9 +517,17 @@ dynamic_exploration_graph_explore_batch_wrapper(
     if (threads <= 1) {
       explore_range(0, n_queries);
     } else {
-      deglib::concurrent::parallel_batch_for(
-          0, n_queries, threads, [&](size_t begin, size_t end, size_t thread_id) {
-            explore_range(begin, end);
+      const size_t chunk_size = std::clamp(
+          (n_queries + static_cast<size_t>(threads) * 8 - 1) / (static_cast<size_t>(threads) * 8),
+          size_t{1}, size_t{8196});
+      const size_t num_chunks = (n_queries + chunk_size - 1) / chunk_size;
+
+      deglib::concurrent::parallel_for(
+          static_cast<size_t>(0), num_chunks, threads,
+          [&](size_t chunk_id, size_t) {
+            size_t start = chunk_id * chunk_size;
+            size_t end = std::min(start + chunk_size, static_cast<size_t>(n_queries));
+            explore_range(start, end);
           });
     }
   }
@@ -797,8 +831,124 @@ deglib::DynamicExplorationGraph load_readonly_graph_wrapper(const char* path) {
   return deglib::DynamicExplorationGraph(*heap_graph);
 }
 
-deglib::DynamicExplorationGraph read_only_graph_from_graph_wrapper(const deglib::DynamicExplorationGraph& graph) {
-  return graph.to_readonly();
+std::tuple<py::array_t<float>, float>
+mips_l2_transform_wrapper(py::array_t<float, py::array::c_style> vectors) {
+  py::buffer_info buf = vectors.request();
+  if (buf.ndim != 2) {
+    throw std::invalid_argument("vectors must be a 2D float32 array");
+  }
+  size_t count = buf.shape[0];
+  size_t dim = buf.shape[1];
+
+  py::array_t<float> output({count, dim + 1});
+  py::buffer_info out_buf = output.request();
+
+  float max_norm = 0.0f;
+  {
+    py::gil_scoped_release release;
+    max_norm = deglib::optimization::mips_l2_transform(
+        static_cast<const float*>(buf.ptr), count, dim,
+        static_cast<float*>(out_buf.ptr)
+    );
+  }
+  return std::make_tuple(output, max_norm);
+}
+
+py::array_t<float>
+mips_l2_transform_query_wrapper(py::array_t<float, py::array::c_style> queries) {
+  py::buffer_info buf = queries.request();
+  if (buf.ndim != 1 && buf.ndim != 2) {
+    throw std::invalid_argument("queries must be a 1D or 2D float32 array");
+  }
+  bool is_1d = (buf.ndim == 1);
+  size_t count = is_1d ? 1 : buf.shape[0];
+  size_t dim = is_1d ? buf.shape[0] : buf.shape[1];
+
+  py::array_t<float> output = is_1d ? py::array_t<float>(dim + 1) : py::array_t<float>({count, dim + 1});
+  py::buffer_info out_buf = output.request();
+
+  {
+    py::gil_scoped_release release;
+    deglib::optimization::mips_l2_transform_query(
+        static_cast<const float*>(buf.ptr), count, dim,
+        static_cast<float*>(out_buf.ptr)
+    );
+  }
+  return output;
+}
+
+py::array_t<uint32_t>
+presort_wrapper(py::array_t<float, py::array::c_style> vectors,
+                deglib::distances::MetricType metric = deglib::distances::MetricType::FP32_L2,
+                float radius_decay = 0.9f,
+                size_t threads = 0,
+                py::object callback = py::none()) {
+  py::buffer_info buf = vectors.request();
+  if (buf.ndim != 2) {
+    throw std::invalid_argument("vectors must be a 2D float32 array");
+  }
+  size_t count = buf.shape[0];
+  size_t dim = buf.shape[1];
+
+  std::function<bool(float)> cb = nullptr;
+  if (!callback.is_none() && !callback.is_none()) {
+    cb = [callback](float progress) -> bool {
+      py::gil_scoped_acquire acquire;
+      try {
+        py::object res = callback(progress);
+        if (!res.is_none() && py::isinstance<py::bool_>(res)) {
+          return res.cast<bool>();
+        }
+      } catch (const std::exception& e) {
+        // Ignore callback exceptions during sorting loop
+      }
+      return false;
+    };
+  }
+
+  std::vector<uint32_t> sorted_indices;
+  {
+    py::gil_scoped_release release;
+    sorted_indices = deglib::optimization::presort(
+        static_cast<const float*>(buf.ptr), count, dim,
+        deglib::distances::Metric(metric), radius_decay, threads, cb
+    );
+  }
+
+  py::array_t<uint32_t> output(count);
+  py::buffer_info out_buf = output.request();
+  std::memcpy(out_buf.ptr, sorted_indices.data(), count * sizeof(uint32_t));
+  return output;
+}
+
+deglib::DynamicExplorationGraph read_only_graph_from_graph_wrapper(
+    const deglib::DynamicExplorationGraph& graph,
+    std::optional<deglib::distances::FloatSpace> custom_feature_space = std::nullopt,
+    std::optional<py::array> custom_features = std::nullopt) {
+
+  const void* feat_ptr = nullptr;
+  py::buffer_info feat_info;
+
+  if (custom_features.has_value() && !custom_features->is_none()) {
+    feat_info = custom_features->request();
+    feat_ptr = feat_info.ptr;
+    if (custom_feature_space.has_value()) {
+      size_t expected_bytes = graph.size() * custom_feature_space->get_data_size();
+      size_t actual_bytes = feat_info.size * feat_info.itemsize;
+      if (actual_bytes != expected_bytes) {
+        throw std::invalid_argument(std::format(
+            "custom_features buffer size ({} bytes) does not match expected size for graph ({} bytes)",
+            actual_bytes, expected_bytes));
+      }
+    }
+  }
+
+  deglib::graph::ReadOnlyGraph read_only = custom_feature_space.has_value()
+      ? deglib::graph::convert_to_readonly_graph(graph.internal(), custom_feature_space.value(), feat_ptr)
+      : deglib::graph::convert_to_readonly_graph(graph.internal());
+
+  auto* heap_graph = new deglib::graph::ReadOnlyGraph(std::move(read_only));
+  return deglib::DynamicExplorationGraph(*heap_graph);
 }
 
 deglib::DynamicExplorationGraph create_size_bounded_graph(
@@ -990,7 +1140,14 @@ PYBIND11_MODULE(deglib_cpp, m) {
       }, py::arg("path"));
 
   m.def("load_readonly_graph", &load_readonly_graph_wrapper);
-  m.def("read_only_graph_from_graph", &read_only_graph_from_graph_wrapper, py::arg("graph"));
+  m.def("read_only_graph_from_graph", &read_only_graph_from_graph_wrapper,
+        py::arg("graph"), py::arg("custom_feature_space") = py::none(), py::arg("custom_features") = py::none());
+  m.def("presort", &presort_wrapper,
+        py::arg("vectors"), py::arg("metric") = deglib::distances::MetricType::FP32_L2,
+        py::arg("radius_decay") = 0.9f, py::arg("threads") = 0,
+        py::arg("callback") = py::none());
+  m.def("mips_l2_transform", &mips_l2_transform_wrapper, py::arg("vectors"));
+  m.def("mips_l2_transform_query", &mips_l2_transform_query_wrapper, py::arg("queries"));
 
   m.def("create_size_bounded_graph", &create_size_bounded_graph,
         py::arg("max_vertex_count"), py::arg("edges_per_vertex"),

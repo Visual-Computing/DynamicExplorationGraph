@@ -132,13 +132,16 @@ def floats_to_fp16(floats: np.ndarray) -> np.ndarray:
     """
     Convert float32 array to FP16 (uint16_t) representation in C++.
     """
-    return cpp_distances.floats_to_fp16(floats)
+    arr = np.ascontiguousarray(floats, dtype=np.float32)
+    res = cpp_distances.floats_to_fp16(arr)
+    return res.reshape(arr.shape)
 
 
 def fp16_to_floats(fp16_vals: np.ndarray) -> np.ndarray:
     """
     Convert FP16 (uint16_t) array to float32 representation in C++.
     """
-    return cpp_distances.fp16_to_floats(fp16_vals)
+    res = cpp_distances.fp16_to_floats(fp16_vals)
+    return res.reshape(fp16_vals.shape)
 
 

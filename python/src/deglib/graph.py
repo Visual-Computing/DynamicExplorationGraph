@@ -198,14 +198,27 @@ class DynamicExplorationGraph:
         """
         self.dynamic_exploration_graph_cpp.save_graph(str(path))
 
-    def to_readonly(self) -> 'DynamicExplorationGraph':
+    def to_readonly(
+        self,
+        feature_space: Optional[FloatSpace] = None,
+        custom_features: Optional[np.ndarray] = None
+    ) -> 'DynamicExplorationGraph':
         """
         Create a read-only graph from the given graph by only keeping information
         that is useful for searching.
 
+        Optionally overrides feature space and replaces feature vectors with a custom features buffer
+        (e.g., swapping FP32 (d+1) features for FP16 d features while preserving graph topology).
+
+        :param feature_space: Optional FloatSpace specifying the target feature space.
+        :param custom_features: Optional NumPy array containing replacement feature vectors.
         :return: A new read-only DynamicExplorationGraph.
         """
-        graph_cpp = self.dynamic_exploration_graph_cpp.to_readonly()
+        fs_cpp = feature_space.to_cpp() if feature_space is not None else None
+        feat_cpp = np.ascontiguousarray(custom_features) if custom_features is not None else None
+        graph_cpp = deglib_cpp.read_only_graph_from_graph(
+            self.dynamic_exploration_graph_cpp, fs_cpp, feat_cpp
+        )
         return DynamicExplorationGraph(graph_cpp)
 
     def __repr__(self) -> str:

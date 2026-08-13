@@ -76,8 +76,6 @@ public:
             uint32_t ext_label = internal_graph_.getExternalLabel(od.getIdentifier());
             od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
         }
-        // 2. Re-establish heap invariant using encapsulated comparator
-        res.heapify();
 
         return res;
     }
@@ -109,8 +107,6 @@ public:
             uint32_t ext_label = internal_graph_.getExternalLabel(od.getIdentifier());
             od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
         }
-        // 2. Re-establish heap invariant using encapsulated comparator
-        res.heapify();
 
         return res;
     }
