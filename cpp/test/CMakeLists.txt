@@ -81,3 +81,5 @@ add_deglib_test_no_ctest(test_sizebounded_graph_regression src/regression/graph/
 add_deglib_test_no_ctest(test_readonly_graph_regression src/regression/graph/test_readonly_graph_regression.cpp)
 add_deglib_test_no_ctest(test_evp_quantize_regression src/regression/optimization/quantization/test_evp_quantize_regression.cpp)
 add_deglib_test_no_ctest(test_search_regression src/regression/test_search_regression.cpp)
+add_deglib_test_no_ctest(test_filter_regression src/regression/test_filter_regression.cpp)
+
