@@ -200,6 +200,85 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
   }
 
   /**
+   * Copy from an existing InternalGraph, optionally replacing the feature space
+   * and feature vectors, and recalculating all edge weights with the new metric.
+   * If the input graph is a MutableGraph with the same feature space and no custom
+   * features are provided, edge weights are copied directly without recalculation.
+   *
+   * @param input_graph The source graph to copy topology, labels, and (optionally) features from.
+   * @param feature_space The feature space for the new graph (may differ from the input).
+   * @param custom_features Optional pointer to replacement feature vectors. If non-null,
+   *                        features are read from this buffer indexed by external label.
+   *                        If null, features are copied from input_graph.
+   * @param new_max_size If > 0, sets the capacity to max(new_max_size, input_graph.size()).
+   *                     If 0, capacity equals input_graph.size().
+   */
+  SizeBoundedGraph(
+      const deglib::graph::InternalGraph& input_graph,
+      const deglib::distances::FloatSpace feature_space,
+      const void* custom_features = nullptr,
+      const uint32_t new_max_size = 0)
+      : SizeBoundedGraph(
+          (new_max_size > 0 ? std::max(new_max_size, input_graph.size()) : input_graph.size()),
+          input_graph.getEdgesPerVertex(),
+          std::move(feature_space)) {
+
+    const auto custom_feature_bytes = reinterpret_cast<const std::byte*>(custom_features);
+    const auto dist_func = this->feature_space_.get_dist_func();
+    const auto dist_func_param = this->feature_space_.get_dist_func_param();
+    const auto feature_data_size = this->feature_space_.get_data_size();
+    const auto edges_per_vertex = this->edges_per_vertex_;
+
+    const uint32_t graph_size = input_graph.size();
+
+    // Check if we can directly copy neighbor weights from a mutable graph
+    const auto* src_mutable = dynamic_cast<const deglib::graph::MutableGraph*>(&input_graph);
+    const bool can_direct_copy_weights = (src_mutable != nullptr) && (custom_features == nullptr) &&
+                                         (this->feature_space_.metric() == input_graph.getFeatureSpace().metric()) &&
+                                         (this->feature_space_.dim() == input_graph.getFeatureSpace().dim());
+
+    for (uint32_t i = 0; i < graph_size; i++) {
+      const auto label = input_graph.getExternalLabel(i);
+      auto vertex_memory = vertex_by_index(i);
+
+      // Copy feature vector
+      if (custom_features != nullptr) {
+        const auto feature = custom_feature_bytes + size_t(label) * feature_data_size;
+        std::memcpy(vertex_memory, feature, feature_data_size);
+      } else {
+        const auto feature = input_graph.getFeatureVector(i);
+        std::memcpy(vertex_memory, feature, feature_data_size);
+      }
+
+      // Copy neighbor indices
+      const auto input_neighbor_indices = input_graph.getNeighborIndices(i);
+      auto neighbor_indices = reinterpret_cast<uint32_t*>(vertex_memory + neighbor_indices_offset_);
+      std::memcpy(neighbor_indices, input_neighbor_indices, sizeof(uint32_t) * edges_per_vertex);
+
+      // Copy or recalculate edge weights
+      auto neighbor_weights = reinterpret_cast<float*>(vertex_memory + neighbor_weights_offset_);
+      if (can_direct_copy_weights) {
+        std::memcpy(neighbor_weights, src_mutable->getNeighborWeights(i), sizeof(float) * edges_per_vertex);
+      } else {
+        for (uint8_t e = 0; e < edges_per_vertex; e++) {
+          const auto neighbor_internal_index = input_neighbor_indices[e];
+          const auto neighbor_feature = custom_features != nullptr
+              ? custom_feature_bytes + size_t(input_graph.getExternalLabel(neighbor_internal_index)) * feature_data_size
+              : input_graph.getFeatureVector(neighbor_internal_index);
+          neighbor_weights[e] = dist_func(vertex_memory, neighbor_feature, dist_func_param);
+        }
+      }
+
+      // Copy external label
+      std::memcpy(vertex_memory + external_label_offset_, &label, sizeof(uint32_t));
+
+      // Register label and consume a free index
+      label_to_index_.emplace(label, i);
+      free_indices_pool_.pop();
+    }
+  }
+
+  /**
    * Create an empty SizeBoundedGraph with the given capacity, edges per vertex, and feature space.
    * The graph starts with zero vertices; vertices can be added via addVertex().
    */
@@ -209,6 +288,46 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
       const deglib::distances::FloatSpace& feature_space)
   {
     return SizeBoundedGraph(max_vertex_count, edges_per_vertex, feature_space);
+  }
+
+  /**
+   * Create a SizeBoundedGraph by copying topology, labels, and (optionally) features
+   * from an existing InternalGraph, recalculating all edge weights with the given
+   * feature space (or copying them directly if the input graph is a MutableGraph with the same metric).
+   *
+   * @param input_graph The source graph to copy from.
+   * @param new_max_size If > 0, sets capacity to max(new_max_size, input_graph.size()).
+   *                     If 0, capacity equals input_graph.size().
+   * @return A new SizeBoundedGraph with copied topology and appropriate edge weights.
+   */
+  static SizeBoundedGraph from_graph(
+      const deglib::graph::InternalGraph& input_graph,
+      const uint32_t new_max_size = 0)
+  {
+    return SizeBoundedGraph(input_graph, input_graph.getFeatureSpace(), nullptr, new_max_size);
+  }
+
+  /**
+   * Create a SizeBoundedGraph by copying topology, labels, and (optionally) features
+   * from an existing InternalGraph, recalculating all edge weights with the given
+   * feature space.
+   *
+   * @param input_graph The source graph to copy from.
+   * @param feature_space The feature space for the new graph (may differ from the input).
+   * @param custom_features Optional pointer to replacement feature vectors. If non-null,
+   *                        features are read from this buffer indexed by external label.
+   *                        If null, features are copied from input_graph.
+   * @param new_max_size If > 0, sets the capacity to max(new_max_size, input_graph.size()).
+   *                     If 0, capacity equals input_graph.size().
+   * @return A new SizeBoundedGraph with copied topology and recalculated edge weights.
+   */
+  static SizeBoundedGraph from_graph(
+      const deglib::graph::InternalGraph& input_graph,
+      const deglib::distances::FloatSpace feature_space,
+      const void* custom_features = nullptr,
+      const uint32_t new_max_size = 0)
+  {
+    return SizeBoundedGraph(input_graph, feature_space, custom_features, new_max_size);
   }
 
   /**
@@ -278,10 +397,11 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
 
         // find a new random neighbor
         uint32_t new_neighbor_index = 0;
-        float new_neighbor_weight = -1;
+        float new_neighbor_weight = 0;
+        bool found = false;
         const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
         const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
-        while (new_neighbor_weight < 0) {
+        while (!found) {
           const auto edge_idx = (uint32_t)rnd_neighbor(rnd);
           const auto neighbor_index = neighbor_indices[edge_idx];
           const auto neighbor_weight = neighbor_weights[edge_idx];
@@ -290,14 +410,8 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
           if (graph.hasEdge(neighbor_index, internal_index) == false) {
             new_neighbor_index = neighbor_index;
             new_neighbor_weight = neighbor_weight;
+            found = true;
           }
-        }
-
-        // this should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
-        if (new_neighbor_weight < 0) {
-          std::fprintf(stderr, "it was not possible to find an edge (best weight %f) in the neighbor list of vertex %u which would connect to vertex %u \n", new_neighbor_weight, candidate_index, internal_index);
-          std::perror("");
-          std::abort();
         }
 
         // place the new vertex in the edge list of the result-vertex
@@ -908,6 +1022,23 @@ inline auto load_sizebounded_graph(const char* path_graph, uint32_t new_max_size
   ifstream.close();
 
   return graph;
+}
+
+/**
+ * Convert the given graph to a SizeBoundedGraph, copying topology, labels,
+ * and recalculating all edge weights with the given feature space.
+ */
+inline auto convert_to_sizebounded_graph(const deglib::graph::InternalGraph& input_graph)
+{
+  return deglib::graph::SizeBoundedGraph::from_graph(input_graph, input_graph.getFeatureSpace());
+}
+
+/**
+ * Convert the given graph to a SizeBoundedGraph, overriding feature space and feature vectors.
+ */
+inline auto convert_to_sizebounded_graph(const deglib::graph::InternalGraph& input_graph, const deglib::distances::FloatSpace feature_space, const void* custom_features = nullptr, const uint32_t new_max_size = 0)
+{
+  return deglib::graph::SizeBoundedGraph::from_graph(input_graph, feature_space, custom_features, new_max_size);
 }
 
 }  // namespace deglib::graph

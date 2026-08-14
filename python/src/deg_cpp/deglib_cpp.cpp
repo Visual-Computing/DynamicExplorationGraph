@@ -950,15 +950,46 @@ deglib::DynamicExplorationGraph read_only_graph_from_graph_wrapper(
       ? deglib::graph::convert_to_readonly_graph(graph.internal(), custom_feature_space.value(), feat_ptr)
       : deglib::graph::convert_to_readonly_graph(graph.internal());
 
-  auto* heap_graph = new deglib::graph::ReadOnlyGraph(std::move(read_only));
-  return deglib::DynamicExplorationGraph(*heap_graph);
+  auto heap_graph = std::make_unique<deglib::graph::ReadOnlyGraph>(std::move(read_only));
+  return deglib::DynamicExplorationGraph(std::move(heap_graph));
+}
+
+deglib::DynamicExplorationGraph size_bounded_graph_from_graph_wrapper(
+    const deglib::DynamicExplorationGraph& graph,
+    std::optional<deglib::distances::FloatSpace> custom_feature_space = std::nullopt,
+    std::optional<py::array> custom_features = std::nullopt,
+    const uint32_t new_max_size = 0) {
+
+  const void* feat_ptr = nullptr;
+  py::buffer_info feat_info;
+
+  if (custom_features.has_value() && !custom_features->is_none()) {
+    feat_info = custom_features->request();
+    feat_ptr = feat_info.ptr;
+    if (custom_feature_space.has_value()) {
+      size_t expected_bytes = graph.size() * custom_feature_space->get_data_size();
+      size_t actual_bytes = feat_info.size * feat_info.itemsize;
+      if (actual_bytes != expected_bytes) {
+        throw std::invalid_argument(std::format(
+            "custom_features buffer size ({} bytes) does not match expected size for graph ({} bytes)",
+            actual_bytes, expected_bytes));
+      }
+    }
+  }
+
+  deglib::graph::SizeBoundedGraph size_bounded = custom_feature_space.has_value()
+      ? deglib::graph::convert_to_sizebounded_graph(graph.internal(), custom_feature_space.value(), feat_ptr, new_max_size)
+      : deglib::graph::convert_to_sizebounded_graph(graph.internal());
+
+  auto heap_graph = std::make_unique<deglib::graph::SizeBoundedGraph>(std::move(size_bounded));
+  return deglib::DynamicExplorationGraph(std::move(heap_graph));
 }
 
 deglib::DynamicExplorationGraph create_size_bounded_graph(
     const uint32_t max_vertex_count, const uint8_t edges_per_vertex,
     const deglib::distances::FloatSpace &feature_space) {
-  auto* graph = new deglib::graph::SizeBoundedGraph(max_vertex_count, edges_per_vertex, feature_space);
-  return deglib::DynamicExplorationGraph(*graph);
+  auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(max_vertex_count, edges_per_vertex, feature_space);
+  return deglib::DynamicExplorationGraph(std::move(graph));
 }
 
 deglib::DynamicExplorationGraph create_random_graph(
@@ -981,10 +1012,10 @@ deglib::DynamicExplorationGraph create_random_graph(
   }
 
   const std::byte *feature_data = static_cast<const std::byte *>(buf.ptr);
-  auto* graph = new deglib::graph::SizeBoundedGraph(
+  auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(
       deglib::graph::SizeBoundedGraph::create_random_graph(
           feature_data, vertex_count, edges_per_vertex, feature_space, seed));
-  return deglib::DynamicExplorationGraph(*graph);
+  return deglib::DynamicExplorationGraph(std::move(graph));
 }
 
 // ============================================================================
@@ -1165,7 +1196,37 @@ PYBIND11_MODULE(deglib_cpp, m) {
       .def("has_vertex", &deglib::DynamicExplorationGraph::hasVertex)
       .def("get_neighbors", &deglib::DynamicExplorationGraph::getNeighbors)
       .def("is_mutable", &deglib::DynamicExplorationGraph::isMutable)
-      .def("to_readonly", &deglib::DynamicExplorationGraph::to_readonly)
+       .def("to_readonly", &deglib::DynamicExplorationGraph::to_readonly)
+       .def("to_mutable",
+            [](const deglib::DynamicExplorationGraph& g,
+               std::optional<deglib::distances::FloatSpace> custom_feature_space,
+               std::optional<py::array> custom_features,
+               uint32_t new_max_size) {
+              const void* feat_ptr = nullptr;
+              py::buffer_info feat_info;
+              if (custom_features.has_value() && !custom_features->is_none()) {
+                feat_info = custom_features->request();
+                feat_ptr = feat_info.ptr;
+                if (custom_feature_space.has_value()) {
+                  size_t expected_bytes = g.size() * custom_feature_space->get_data_size();
+                  size_t actual_bytes = feat_info.size * feat_info.itemsize;
+                  if (actual_bytes != expected_bytes) {
+                    throw std::invalid_argument(std::format(
+                        "custom_features buffer size ({} bytes) does not match expected size for graph ({} bytes)",
+                        actual_bytes, expected_bytes));
+                  }
+                }
+              }
+              if (custom_feature_space.has_value() || feat_ptr != nullptr) {
+                const auto& fs = custom_feature_space.value_or(g.getFeatureSpace());
+                return g.to_mutable(fs, feat_ptr, new_max_size);
+              } else {
+                return g.to_mutable(new_max_size);
+              }
+            },
+            py::arg("custom_feature_space") = py::none(),
+            py::arg("custom_features") = py::none(),
+            py::arg("new_max_size") = 0)
       .def("search", &graph_search_single_wrapper<deglib::DynamicExplorationGraph>,
            py::arg("query"), py::arg("eps"), py::arg("k"),
            py::arg("filter") = nullptr,
@@ -1203,6 +1264,9 @@ PYBIND11_MODULE(deglib_cpp, m) {
   m.def("load_readonly_graph", &load_readonly_graph_wrapper);
   m.def("read_only_graph_from_graph", &read_only_graph_from_graph_wrapper,
         py::arg("graph"), py::arg("custom_feature_space") = py::none(), py::arg("custom_features") = py::none());
+  m.def("size_bounded_graph_from_graph", &size_bounded_graph_from_graph_wrapper,
+        py::arg("graph"), py::arg("custom_feature_space") = py::none(), py::arg("custom_features") = py::none(),
+        py::arg("new_max_size") = 0);
   m.def("presort", &presort_wrapper,
         py::arg("vectors"), py::arg("space"),
         py::arg("radius_decay") = 0.9f, py::arg("threads") = 0,

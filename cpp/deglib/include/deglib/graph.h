@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <random>
 #include <span>
 #include <stdexcept>
@@ -28,10 +29,25 @@ namespace deglib {
  */
 class DynamicExplorationGraph {
 private:
-    deglib::graph::InternalGraph& internal_graph_;
+    std::unique_ptr<deglib::graph::InternalGraph> owned_graph_;
+    deglib::graph::InternalGraph* internal_graph_;
 
 public:
-   explicit DynamicExplorationGraph(deglib::graph::InternalGraph& graph) : internal_graph_(graph) {}
+    explicit DynamicExplorationGraph(std::unique_ptr<deglib::graph::InternalGraph> graph)
+        : owned_graph_(std::move(graph)), internal_graph_(owned_graph_.get()) {
+        if (!internal_graph_) {
+            throw std::invalid_argument("DynamicExplorationGraph cannot be initialized with nullptr");
+        }
+    }
+
+    explicit DynamicExplorationGraph(deglib::graph::InternalGraph& graph)
+        : owned_graph_(nullptr), internal_graph_(&graph) {}
+
+    DynamicExplorationGraph(DynamicExplorationGraph&&) noexcept = default;
+    DynamicExplorationGraph& operator=(DynamicExplorationGraph&&) noexcept = default;
+
+    DynamicExplorationGraph(const DynamicExplorationGraph&) = delete;
+    DynamicExplorationGraph& operator=(const DynamicExplorationGraph&) = delete;
 
    /**
     * Create an empty mutable DynamicExplorationGraph with the given capacity,
@@ -42,8 +58,8 @@ public:
        const uint8_t edges_per_vertex,
        const deglib::distances::FloatSpace& feature_space)
    {
-       auto* graph = new deglib::graph::SizeBoundedGraph(max_vertex_count, edges_per_vertex, feature_space);
-       return DynamicExplorationGraph(*graph);
+       auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(max_vertex_count, edges_per_vertex, feature_space);
+       return DynamicExplorationGraph(std::move(graph));
    }
 
    /**
@@ -64,37 +80,37 @@ public:
        const deglib::distances::FloatSpace& feature_space,
        const uint32_t seed = 7)
    {
-       auto* graph = new deglib::graph::SizeBoundedGraph(
+       auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(
            deglib::graph::SizeBoundedGraph::create_random_graph(feature_data, vertex_count, edges_per_vertex, feature_space, seed)
        );
-       return DynamicExplorationGraph(*graph);
+       return DynamicExplorationGraph(std::move(graph));
    }
 
     const uint32_t size() const {
-        return internal_graph_.size();
+        return internal_graph_->size();
     }
 
     const uint8_t getEdgesPerVertex() const {
-        return internal_graph_.getEdgesPerVertex();
+        return internal_graph_->getEdgesPerVertex();
     }
 
     const deglib::distances::FloatSpace& getFeatureSpace() const {
-        return internal_graph_.getFeatureSpace();
+        return internal_graph_->getFeatureSpace();
     }
 
     bool hasVertex(const uint32_t external_label) const {
-        return internal_graph_.hasVertex(external_label);
+        return internal_graph_->hasVertex(external_label);
     }
 
     deglib::graph::InternalGraph& internal() {
-        return internal_graph_;
+        return *internal_graph_;
     }
     const deglib::graph::InternalGraph& internal() const {
-        return internal_graph_;
+        return *internal_graph_;
     }
 
     bool isMutable() const {
-        return dynamic_cast<const deglib::graph::MutableGraph*>(&internal_graph_) != nullptr;
+        return dynamic_cast<const deglib::graph::MutableGraph*>(internal_graph_) != nullptr;
     }
     /**
      * Search for similar feature vectors using query data.
@@ -108,11 +124,11 @@ public:
         const deglib::search::Filter* filter = nullptr,
         const uint32_t max_distance_computation_count = 0) const 
     {
-        auto res = internal_graph_.search(query, k, eps, filter, max_distance_computation_count);
+        auto res = internal_graph_->search(query, k, eps, filter, max_distance_computation_count);
 
         // 1. Modify internal vertex IDs to external labels in-place
         for (auto& od : res) {
-            uint32_t ext_label = internal_graph_.getExternalLabel(od.getIdentifier());
+            uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
             od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
         }
 
@@ -138,12 +154,12 @@ public:
         const bool include_entry = true,
         const deglib::search::Filter* filter = nullptr) const
     {
-        uint32_t internal_entry = internal_graph_.getInternalIndex(entry_external_label);
-        auto res = internal_graph_.explore(internal_entry, k, max_distance_computation_count, eps, include_entry, filter);
+        uint32_t internal_entry = internal_graph_->getInternalIndex(entry_external_label);
+        auto res = internal_graph_->explore(internal_entry, k, max_distance_computation_count, eps, include_entry, filter);
         
         // 1. Modify internal vertex IDs to external labels in-place
         for (auto& od : res) {
-            uint32_t ext_label = internal_graph_.getExternalLabel(od.getIdentifier());
+            uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
             od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
         }
 
@@ -157,12 +173,12 @@ public:
     * @return A vector of external labels of the neighbors.
     */
     std::vector<uint32_t> getNeighbors(const uint32_t external_label) const {
-        uint32_t internal_idx = internal_graph_.getInternalIndex(external_label);
-        const uint32_t* internal_neighbors = internal_graph_.getNeighborIndices(internal_idx);
-        uint8_t edges_count = internal_graph_.getEdgesPerVertex();
+        uint32_t internal_idx = internal_graph_->getInternalIndex(external_label);
+        const uint32_t* internal_neighbors = internal_graph_->getNeighborIndices(internal_idx);
+        uint8_t edges_count = internal_graph_->getEdgesPerVertex();
         std::vector<uint32_t> external_neighbors(edges_count);
         for (size_t i = 0; i < edges_count; ++i) {
-            external_neighbors[i] = internal_graph_.getExternalLabel(internal_neighbors[i]);
+            external_neighbors[i] = internal_graph_->getExternalLabel(internal_neighbors[i]);
         }
         return external_neighbors;
     }
@@ -173,13 +189,48 @@ public:
     * @return A new read-only DynamicExplorationGraph.
     */
     DynamicExplorationGraph to_readonly() const {
-        auto* graph = new deglib::graph::ReadOnlyGraph(
-            internal_graph_.size(),
-            internal_graph_.getEdgesPerVertex(),
-            internal_graph_.getFeatureSpace(),
-            internal_graph_
+        auto graph = std::make_unique<deglib::graph::ReadOnlyGraph>(
+            internal_graph_->size(),
+            internal_graph_->getEdgesPerVertex(),
+            internal_graph_->getFeatureSpace(),
+            *internal_graph_
         );
-        return DynamicExplorationGraph(*graph);
+        return DynamicExplorationGraph(std::move(graph));
+    }
+
+   /**
+    * Convert this graph to a mutable SizeBoundedGraph by copying topology,
+    * labels, features, and weights directly (fast path, no recalculation).
+    *
+    * @param new_max_size If > 0, sets capacity to max(new_max_size, input_graph.size()).
+    *                     If 0, capacity equals input_graph.size().
+    * @return A new mutable DynamicExplorationGraph wrapping a SizeBoundedGraph.
+    */
+    DynamicExplorationGraph to_mutable(const uint32_t new_max_size = 0) const {
+        auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(
+            deglib::graph::SizeBoundedGraph::from_graph(*internal_graph_, new_max_size)
+        );
+        return DynamicExplorationGraph(std::move(graph));
+    }
+
+   /**
+    * Convert this graph to a mutable SizeBoundedGraph with a new feature space
+    * and/or replacement features. All edge weights are recalculated using the new metric.
+    *
+    * @param custom_feature_space New feature space defining dimensionality and metric.
+    * @param custom_features Optional pointer to replacement feature vectors. If null, features are copied from this graph.
+    * @param new_max_size If > 0, sets capacity to max(new_max_size, input_graph.size()). If 0, capacity equals input_graph.size().
+    * @return A new mutable DynamicExplorationGraph wrapping a SizeBoundedGraph.
+    */
+    DynamicExplorationGraph to_mutable(
+        const deglib::distances::FloatSpace& custom_feature_space,
+        const void* custom_features = nullptr,
+        const uint32_t new_max_size = 0) const
+    {
+        auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(
+            deglib::graph::SizeBoundedGraph::from_graph(*internal_graph_, custom_feature_space, custom_features, new_max_size)
+        );
+        return DynamicExplorationGraph(std::move(graph));
     }
 
    /**
@@ -189,7 +240,7 @@ public:
     * @return True if the graph was saved successfully.
     */
     bool saveGraph(const std::string& path) const {
-        const auto* mutable_graph = dynamic_cast<const deglib::graph::MutableGraph*>(&internal_graph_);
+        const auto* mutable_graph = dynamic_cast<const deglib::graph::MutableGraph*>(internal_graph_);
         if (mutable_graph == nullptr) {
             throw std::runtime_error("Graph must be mutable to save");
         }

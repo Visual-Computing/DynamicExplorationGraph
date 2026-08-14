@@ -551,3 +551,140 @@ def test_create_random_graph_explore():
     for idx in indices:
         assert idx in range(samples), f"Index {idx} out of range [0, {samples})"
 
+
+def test_sizebounded_graph_from_graph():
+    """Test DynamicExplorationGraph.to_mutable() creates a mutable graph from a readonly graph."""
+    samples = 50
+    dims = 16
+    edges_per_vertex = 10
+
+    data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
+    feature_space = FloatSpace.create(dims, Metric.FP32_L2)
+
+    # Build a mutable graph, then convert to readonly
+    graph = deglib.build_from_data(
+        data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2
+    )
+    readonly_graph = graph.to_readonly()
+    assert not readonly_graph.is_mutable()
+
+    # Convert back to mutable
+    mutable_graph = readonly_graph.to_mutable()
+    assert mutable_graph.is_mutable()
+    assert mutable_graph.size() == samples
+    assert mutable_graph.get_edges_per_vertex() == edges_per_vertex
+
+    # Search should work
+    query = data[0:1]
+    indices, distances = mutable_graph.search(query, eps=0.1, k=5)
+    assert indices.shape == (1, 5)
+    assert distances.shape == (1, 5)
+
+
+def test_sizebounded_graph_from_graph_custom_features():
+    """Test to_mutable() with custom features buffer."""
+    samples = 30
+    dims = 8
+    edges_per_vertex = 6
+
+    data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
+    feature_space = FloatSpace.create(dims, Metric.FP32_L2)
+
+    graph = deglib.build_from_data(
+        data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2
+    )
+
+    # Create scaled custom features
+    custom_features = data * 10.0
+
+    # Convert to mutable with custom features
+    mutable_graph = graph.to_mutable(
+        feature_space=feature_space, custom_features=custom_features
+    )
+    assert mutable_graph.is_mutable()
+    assert mutable_graph.size() == samples
+
+    # Topology should match
+    for i in range(samples):
+        orig_neighbors = sorted(graph.get_neighbors(i))
+        new_neighbors = sorted(mutable_graph.get_neighbors(i))
+        assert orig_neighbors == new_neighbors, f"Neighbor mismatch at vertex {i}"
+
+
+def test_sizebounded_graph_from_graph_capacity():
+    """Test to_mutable() with new_max_size (capacity) parameter."""
+    samples = 20
+    dims = 4
+    edges_per_vertex = 4
+
+    data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
+    feature_space = FloatSpace.create(dims, Metric.FP32_L2)
+
+    graph = deglib.build_from_data(
+        data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2
+    )
+
+    # Convert to mutable with larger capacity
+    mutable_graph = graph.to_mutable(
+        feature_space=feature_space, capacity=100
+    )
+    assert mutable_graph.is_mutable()
+    assert mutable_graph.size() == samples
+
+    # Should be able to add a vertex via builder
+    builder = deglib.GraphBuilder(mutable_graph)
+    builder.add_entry(samples, data[0])
+    builder.build()
+    assert mutable_graph.size() == samples + 1
+    assert mutable_graph.has_vertex(samples)
+
+
+def test_sizebounded_graph_from_graph_search_matches():
+    """Test that search on a graph converted via to_mutable returns same results as original."""
+    samples = 50
+    dims = 16
+    edges_per_vertex = 10
+
+    data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
+    feature_space = FloatSpace.create(dims, Metric.FP32_L2)
+
+    graph = deglib.build_from_data(
+        data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2
+    )
+    readonly_graph = graph.to_readonly()
+    mutable_graph = readonly_graph.to_mutable()
+
+    # Search on both should return the same results
+    query = data[0:1]
+    orig_indices, orig_dists = readonly_graph.search(query, eps=0.1, k=5)
+    new_indices, new_dists = mutable_graph.search(query, eps=0.1, k=5)
+
+    assert orig_indices.shape == new_indices.shape
+    assert np.allclose(orig_dists, new_dists, atol=1e-5)
+
+
+def test_sizebounded_graph_from_graph_inner_product():
+    """Test to_mutable() with InnerProduct metric."""
+    samples = 30
+    dims = 8
+    edges_per_vertex = 6
+
+    data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
+    data = data / np.linalg.norm(data, axis=1, keepdims=True)
+    feature_space = FloatSpace.create(dims, Metric.FP32_InnerProduct)
+
+    graph = deglib.build_from_data(
+        data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_InnerProduct
+    )
+    mutable_graph = graph.to_mutable()
+
+    assert mutable_graph.is_mutable()
+    assert mutable_graph.size() == samples
+    assert mutable_graph.get_feature_space().metric() == Metric.FP32_InnerProduct
+
+    # Search should work
+    query = data[0:1]
+    indices, distances = mutable_graph.search(query, eps=0.1, k=5)
+    assert indices.shape == (1, 5)
+
+

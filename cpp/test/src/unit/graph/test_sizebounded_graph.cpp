@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "deglib/graph/sizebounded_graph.h"
+#include "deglib/graph/readonly_graph.h"
 #include "deglib/analysis.h"
 #include "deglib/filter.h"
 #include "gtest/gtest.h"
@@ -865,6 +866,406 @@ TEST(SizeBoundedGraph, CreateRandomGraphUInt8) {
     EXPECT_TRUE(deglib::analysis::check_graph_regularity(graph, vertex_count, true));
     EXPECT_TRUE(deglib::analysis::check_graph_connectivity(graph));
     EXPECT_TRUE(deglib::analysis::check_graph_weights(graph));
+}
+
+// ---------------------------------------------------------------------------
+//  FromGraph: Copy from existing graph with weight recalculation
+// ---------------------------------------------------------------------------
+
+TEST(SizeBoundedGraph, FromGraphSameFeatures) {
+    const uint32_t vertex_count = 50;
+    const uint8_t edges_per_vertex = 8;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    // Build a source graph using create_random_graph
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i + d);
+        }
+    }
+
+    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+
+    // Copy using from_graph with the same feature space
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(
+        source_graph, space);
+
+    EXPECT_EQ(copied_graph.size(), vertex_count);
+    EXPECT_EQ(copied_graph.getEdgesPerVertex(), edges_per_vertex);
+    EXPECT_EQ(copied_graph.capacity(), vertex_count);
+    EXPECT_NE(dynamic_cast<const deglib::graph::MutableGraph*>(&copied_graph), nullptr);
+
+    // Verify topology (neighbor indices) matches
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        const auto* src_neighbors = source_graph.getNeighborIndices(i);
+        const auto* copy_neighbors = copied_graph.getNeighborIndices(i);
+        for (uint8_t e = 0; e < edges_per_vertex; e++) {
+            EXPECT_EQ(src_neighbors[e], copy_neighbors[e])
+                << "Neighbor index mismatch at vertex " << i << " edge " << e;
+        }
+    }
+
+    // Verify edge weights are recalculated correctly
+    const auto dist_func = space.get_dist_func();
+    const auto dist_func_param = space.get_dist_func_param();
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        const auto* src_neighbors = source_graph.getNeighborIndices(i);
+        const auto* copy_weights = copied_graph.getNeighborWeights(i);
+        for (uint8_t e = 0; e < edges_per_vertex; e++) {
+            const auto neighbor_idx = src_neighbors[e];
+            const auto expected_weight = dist_func(
+                source_graph.getFeatureVector(i),
+                source_graph.getFeatureVector(neighbor_idx),
+                dist_func_param);
+            EXPECT_NEAR(copy_weights[e], expected_weight, 1e-5f)
+                << "Weight mismatch at vertex " << i << " edge " << e;
+        }
+    }
+
+    // Verify graph is mutable (addVertex/removeVertex work)
+    EXPECT_TRUE(copied_graph.hasVertex(0));
+    auto removed = copied_graph.removeVertex(0);
+    EXPECT_EQ(removed.size(), edges_per_vertex);
+    EXPECT_FALSE(copied_graph.hasVertex(0));
+    EXPECT_EQ(copied_graph.size(), vertex_count - 1);
+
+    // Add vertex back
+    copied_graph.addVertex(0, feature_bytes.get());
+    EXPECT_TRUE(copied_graph.hasVertex(0));
+    EXPECT_EQ(copied_graph.size(), vertex_count);
+}
+
+TEST(SizeBoundedGraph, FromGraphDefaultFeatureSpace) {
+    const uint32_t vertex_count = 20;
+    const uint8_t edges_per_vertex = 4;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i + d);
+        }
+    }
+
+    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+
+    // Copy using from_graph without specifying feature space (fast-path copy)
+    const uint32_t new_capacity = 50;
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph, new_capacity);
+
+    EXPECT_EQ(copied_graph.size(), vertex_count);
+    EXPECT_EQ(copied_graph.capacity(), new_capacity);
+    EXPECT_EQ(copied_graph.getEdgesPerVertex(), edges_per_vertex);
+
+    // Verify weights are copied directly
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        const auto* src_weights = source_graph.getNeighborWeights(i);
+        const auto* copy_weights = copied_graph.getNeighborWeights(i);
+        for (uint8_t e = 0; e < edges_per_vertex; e++) {
+            EXPECT_EQ(src_weights[e], copy_weights[e])
+                << "Weight mismatch at vertex " << i << " edge " << e;
+        }
+    }
+}
+
+TEST(SizeBoundedGraph, FromGraphFromReadOnly) {
+    const uint32_t vertex_count = 30;
+    const uint8_t edges_per_vertex = 6;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    // Build a source SizeBoundedGraph
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i * 2 + d);
+        }
+    }
+
+    auto source_sbg = deglib::graph::SizeBoundedGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+
+    // Convert to ReadOnlyGraph
+    auto readonly = deglib::graph::convert_to_readonly_graph(source_sbg);
+
+    // Copy from ReadOnlyGraph using from_graph
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(
+        readonly, space);
+
+    EXPECT_EQ(copied_graph.size(), vertex_count);
+    EXPECT_EQ(copied_graph.getEdgesPerVertex(), edges_per_vertex);
+    EXPECT_NE(dynamic_cast<const deglib::graph::MutableGraph*>(&copied_graph), nullptr);
+
+    // Verify topology matches
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        const auto* src_neighbors = readonly.getNeighborIndices(i);
+        const auto* copy_neighbors = copied_graph.getNeighborIndices(i);
+        for (uint8_t e = 0; e < edges_per_vertex; e++) {
+            EXPECT_EQ(src_neighbors[e], copy_neighbors[e])
+                << "Neighbor index mismatch at vertex " << i << " edge " << e;
+        }
+    }
+
+    // Verify weights are correct (ReadOnlyGraph has no weights, so they must be recalculated)
+    const auto dist_func = space.get_dist_func();
+    const auto dist_func_param = space.get_dist_func_param();
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        const auto* src_neighbors = readonly.getNeighborIndices(i);
+        const auto* copy_weights = copied_graph.getNeighborWeights(i);
+        for (uint8_t e = 0; e < edges_per_vertex; e++) {
+            const auto neighbor_idx = src_neighbors[e];
+            const auto expected_weight = dist_func(
+                readonly.getFeatureVector(i),
+                readonly.getFeatureVector(neighbor_idx),
+                dist_func_param);
+            EXPECT_NEAR(copy_weights[e], expected_weight, 1e-5f)
+                << "Weight mismatch at vertex " << i << " edge " << e;
+        }
+    }
+}
+
+TEST(SizeBoundedGraph, FromGraphCustomFeatures) {
+    const uint32_t vertex_count = 20;
+    const uint8_t edges_per_vertex = 4;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    // Build a source graph
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i + d);
+        }
+    }
+
+    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+
+    // Create custom features with a different scale (multiply by 10)
+    auto custom_feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* custom_floats = reinterpret_cast<float*>(custom_feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            custom_floats[i * dim + d] = static_cast<float>(i + d) * 10.0f;
+        }
+    }
+
+    // Copy using from_graph with custom features
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(
+        source_graph, space, custom_feature_bytes.get());
+
+    EXPECT_EQ(copied_graph.size(), vertex_count);
+
+    // Verify topology (neighbor indices) matches
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        const auto* src_neighbors = source_graph.getNeighborIndices(i);
+        const auto* copy_neighbors = copied_graph.getNeighborIndices(i);
+        for (uint8_t e = 0; e < edges_per_vertex; e++) {
+            EXPECT_EQ(src_neighbors[e], copy_neighbors[e])
+                << "Neighbor index mismatch at vertex " << i << " edge " << e;
+        }
+    }
+
+    // Verify edge weights are recalculated with the new (scaled) features
+    const auto dist_func = space.get_dist_func();
+    const auto dist_func_param = space.get_dist_func_param();
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        const auto* src_neighbors = source_graph.getNeighborIndices(i);
+        const auto* copy_weights = copied_graph.getNeighborWeights(i);
+        for (uint8_t e = 0; e < edges_per_vertex; e++) {
+            const auto neighbor_idx = src_neighbors[e];
+            const auto expected_weight = dist_func(
+                custom_feature_bytes.get() + size_t(i) * dim * sizeof(float),
+                custom_feature_bytes.get() + size_t(neighbor_idx) * dim * sizeof(float),
+                dist_func_param);
+            EXPECT_NEAR(copy_weights[e], expected_weight, 1e-3f)
+                << "Weight mismatch at vertex " << i << " edge " << e;
+        }
+    }
+}
+
+TEST(SizeBoundedGraph, FromGraphNewMaxSize) {
+    const uint32_t vertex_count = 20;
+    const uint8_t edges_per_vertex = 4;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i + d);
+        }
+    }
+
+    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+
+    // Copy with a larger capacity
+    const uint32_t new_capacity = 100;
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(
+        source_graph, space, nullptr, new_capacity);
+
+    EXPECT_EQ(copied_graph.size(), vertex_count);
+    EXPECT_EQ(copied_graph.capacity(), new_capacity);
+    EXPECT_NE(dynamic_cast<const deglib::graph::MutableGraph*>(&copied_graph), nullptr);
+
+    // Should be able to add more vertices
+    auto new_feature = make_float_bytes(make_vec_4d(100.0f, 0.0f, 0.0f, 0.0f));
+    copied_graph.addVertex(9999, new_feature.get());
+    EXPECT_EQ(copied_graph.size(), vertex_count + 1);
+    EXPECT_TRUE(copied_graph.hasVertex(9999));
+}
+
+TEST(SizeBoundedGraph, FromGraphInnerProduct) {
+    const uint32_t vertex_count = 20;
+    const uint8_t edges_per_vertex = 4;
+    const uint32_t dim = 8;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_InnerProduct);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i + d + 1);
+        }
+    }
+
+    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+
+    // Copy with same feature space (InnerProduct)
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(
+        source_graph, space);
+
+    EXPECT_EQ(copied_graph.size(), vertex_count);
+    EXPECT_EQ(copied_graph.getFeatureSpace().metric(), deglib::distances::Metric::FP32_InnerProduct);
+
+    // Verify weights are recalculated correctly using InnerProduct metric
+    const auto dist_func = space.get_dist_func();
+    const auto dist_func_param = space.get_dist_func_param();
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        const auto* src_neighbors = source_graph.getNeighborIndices(i);
+        const auto* copy_weights = copied_graph.getNeighborWeights(i);
+        for (uint8_t e = 0; e < edges_per_vertex; e++) {
+            const auto neighbor_idx = src_neighbors[e];
+            const auto expected_weight = dist_func(
+                source_graph.getFeatureVector(i),
+                source_graph.getFeatureVector(neighbor_idx),
+                dist_func_param);
+            EXPECT_NEAR(copy_weights[e], expected_weight, 1e-5f)
+                << "Weight mismatch at vertex " << i << " edge " << e;
+        }
+    }
+}
+
+TEST(SizeBoundedGraph, FromGraphSearchable) {
+    const uint32_t vertex_count = 50;
+    const uint8_t edges_per_vertex = 8;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i + d);
+        }
+    }
+
+    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+
+    // Copy using from_graph
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(
+        source_graph, space);
+
+    // Search should work and return the same results
+    std::vector<float> query = {0.0f, 0.0f, 0.0f, 0.0f};
+    auto source_results = source_graph.search(std::span<const float>(query), 5, 0.0f);
+    auto copied_results = copied_graph.search(std::span<const float>(query), 5, 0.0f);
+
+    ASSERT_EQ(source_results.size(), copied_results.size());
+
+    // Compare results (both should return the same internal indices)
+    auto src_res = source_results;
+    auto copy_res = copied_results;
+    while (!src_res.empty() && !copy_res.empty()) {
+        EXPECT_EQ(src_res.top().getIdentifier(), copy_res.top().getIdentifier());
+        EXPECT_NEAR(src_res.top().getDistance(), copy_res.top().getDistance(), 1e-5f);
+        src_res.pop();
+        copy_res.pop();
+    }
+}
+
+TEST(SizeBoundedGraph, FromGraphDifferentFeatureSpace) {
+    const uint32_t vertex_count = 20;
+    const uint8_t edges_per_vertex = 4;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space_l2(dim, deglib::distances::Metric::FP32_L2);
+    deglib::distances::FloatSpace space_ip(dim, deglib::distances::Metric::FP32_InnerProduct);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i + d);
+        }
+    }
+
+    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space_l2, 7);
+
+    // Copy with a different feature space (InnerProduct)
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(
+        source_graph, space_ip);
+
+    EXPECT_EQ(copied_graph.size(), vertex_count);
+    EXPECT_EQ(copied_graph.getFeatureSpace().metric(), deglib::distances::Metric::FP32_InnerProduct);
+
+    // Verify topology matches
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        const auto* src_neighbors = source_graph.getNeighborIndices(i);
+        const auto* copy_neighbors = copied_graph.getNeighborIndices(i);
+        for (uint8_t e = 0; e < edges_per_vertex; e++) {
+            EXPECT_EQ(src_neighbors[e], copy_neighbors[e])
+                << "Neighbor index mismatch at vertex " << i << " edge " << e;
+        }
+    }
+
+    // Verify weights are recalculated with InnerProduct metric
+    const auto dist_func = space_ip.get_dist_func();
+    const auto dist_func_param = space_ip.get_dist_func_param();
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        const auto* src_neighbors = source_graph.getNeighborIndices(i);
+        const auto* copy_weights = copied_graph.getNeighborWeights(i);
+        for (uint8_t e = 0; e < edges_per_vertex; e++) {
+            const auto neighbor_idx = src_neighbors[e];
+            const auto expected_weight = dist_func(
+                source_graph.getFeatureVector(i),
+                source_graph.getFeatureVector(neighbor_idx),
+                dist_func_param);
+            EXPECT_NEAR(copy_weights[e], expected_weight, 1e-5f)
+                << "Weight mismatch at vertex " << i << " edge " << e;
+        }
+    }
 }
 
 TEST(SizeBoundedGraph, CreateRandomGraphSearchable) {

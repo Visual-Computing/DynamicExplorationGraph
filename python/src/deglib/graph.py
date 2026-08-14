@@ -249,6 +249,31 @@ class DynamicExplorationGraph:
         )
         return DynamicExplorationGraph(graph_cpp)
 
+    def to_mutable(
+        self,
+        feature_space: Optional[FloatSpace] = None,
+        custom_features: Optional[np.ndarray] = None,
+        capacity: int = 0
+    ) -> 'DynamicExplorationGraph':
+        """
+        Create a mutable SizeBoundedGraph from the given graph (ReadOnly or SizeBounded),
+        optionally overriding the feature space and feature vectors.
+        All edge weights are recalculated using the new feature space.
+
+        :param feature_space: Optional FloatSpace specifying the target feature space.
+                              If None, uses the graph's existing feature space.
+        :param custom_features: Optional NumPy array containing replacement feature vectors.
+        :param capacity: If > 0, sets the capacity to max(capacity, graph.size()).
+                         If 0, capacity equals graph.size().
+        :return: A new mutable DynamicExplorationGraph.
+        """
+        fs_cpp = feature_space.to_cpp() if feature_space is not None else None
+        feat_cpp = np.ascontiguousarray(custom_features) if custom_features is not None else None
+        graph_cpp = deglib_cpp.size_bounded_graph_from_graph(
+            self.dynamic_exploration_graph_cpp, fs_cpp, feat_cpp, capacity
+        )
+        return DynamicExplorationGraph(graph_cpp)
+
     def __repr__(self) -> str:
         return (f'DynamicExplorationGraph(size={self.size()} edges_per_vertex={self.get_edges_per_vertex()} '
                 f'dim={self.get_feature_space().dim()})')

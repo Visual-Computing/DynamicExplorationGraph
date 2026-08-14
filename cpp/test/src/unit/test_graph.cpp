@@ -482,3 +482,211 @@ TEST(DynamicExplorationGraphCreateRandomGraph, UInt8Metric) {
     EXPECT_TRUE(deglib::analysis::check_graph_connectivity(graph.internal()));
     EXPECT_TRUE(deglib::analysis::check_graph_weights(static_cast<const deglib::graph::MutableGraph &>(graph.internal())));
 }
+
+// ===========================================================================
+//  DynamicExplorationGraph: from_graph and to_mutable
+// ===========================================================================
+
+TEST(DynamicExplorationGraphFromGraph, FromGraphCreatesMutableGraph) {
+    const uint32_t vertex_count = 30;
+    const uint8_t edges_per_vertex = 8;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i + d);
+        }
+    }
+
+    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+
+    // Convert to ReadOnlyGraph first
+    auto readonly = source_graph.to_readonly();
+    EXPECT_FALSE(readonly.isMutable());
+
+    // Now create a mutable graph from the readonly graph
+    auto mutable_graph = readonly.to_mutable();
+
+    EXPECT_TRUE(mutable_graph.isMutable());
+    EXPECT_EQ(mutable_graph.size(), vertex_count);
+    EXPECT_EQ(mutable_graph.getEdgesPerVertex(), edges_per_vertex);
+
+    // Verify graph regularity and weights
+    EXPECT_TRUE(deglib::analysis::check_graph_regularity(mutable_graph.internal(), vertex_count, true));
+    EXPECT_TRUE(deglib::analysis::check_graph_weights(static_cast<const deglib::graph::MutableGraph &>(mutable_graph.internal())));
+}
+
+TEST(DynamicExplorationGraphFromGraph, FromGraphStaticFactory) {
+    const uint32_t vertex_count = 20;
+    const uint8_t edges_per_vertex = 4;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i + d);
+        }
+    }
+
+    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+
+    // Use to_mutable to create a mutable copy from the source graph
+    auto mutable_graph = source_graph.to_mutable();
+
+    EXPECT_TRUE(mutable_graph.isMutable());
+    EXPECT_EQ(mutable_graph.size(), vertex_count);
+    EXPECT_EQ(mutable_graph.getEdgesPerVertex(), edges_per_vertex);
+
+    // Verify topology matches
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        const auto* src_neighbors = source_graph.internal().getNeighborIndices(i);
+        const auto* copy_neighbors = mutable_graph.internal().getNeighborIndices(i);
+        for (uint8_t e = 0; e < edges_per_vertex; e++) {
+            EXPECT_EQ(src_neighbors[e], copy_neighbors[e])
+                << "Neighbor index mismatch at vertex " << i << " edge " << e;
+        }
+    }
+}
+
+TEST(DynamicExplorationGraphFromGraph, ToMutableSearchWorks) {
+    const uint32_t vertex_count = 50;
+    const uint8_t edges_per_vertex = 8;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i + d);
+        }
+    }
+
+    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+
+    // Convert to readonly, then back to mutable
+    auto readonly = source_graph.to_readonly();
+    auto mutable_graph = readonly.to_mutable();
+
+    // Search on both should return the same results
+    std::vector<float> query = {0.0f, 0.0f, 0.0f, 0.0f};
+    auto readonly_results = readonly.search(std::span<const float>(query), 5, 0.0f);
+    auto mutable_results = mutable_graph.search(std::span<const float>(query), 5, 0.0f);
+
+    ASSERT_EQ(readonly_results.size(), mutable_results.size());
+
+    // Compare results
+    auto rd_res = readonly_results;
+    auto mu_res = mutable_results;
+    while (!rd_res.empty() && !mu_res.empty()) {
+        EXPECT_EQ(rd_res.top().getIdentifier(), mu_res.top().getIdentifier());
+        EXPECT_NEAR(rd_res.top().getDistance(), mu_res.top().getDistance(), 1e-5f);
+        rd_res.pop();
+        mu_res.pop();
+    }
+}
+
+TEST(DynamicExplorationGraphFromGraph, ToMutableWithCustomFeatures) {
+    const uint32_t vertex_count = 20;
+    const uint8_t edges_per_vertex = 4;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i + d);
+        }
+    }
+
+    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+
+    // Create scaled custom features
+    auto custom_feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* custom_floats = reinterpret_cast<float*>(custom_feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            custom_floats[i * dim + d] = static_cast<float>(i + d) * 2.0f;
+        }
+    }
+
+    // Convert to mutable with custom features
+    auto mutable_graph = source_graph.to_mutable(space, custom_feature_bytes.get());
+
+    EXPECT_TRUE(mutable_graph.isMutable());
+    EXPECT_EQ(mutable_graph.size(), vertex_count);
+
+    // Verify topology matches
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        const auto* src_neighbors = source_graph.internal().getNeighborIndices(i);
+        const auto* copy_neighbors = mutable_graph.internal().getNeighborIndices(i);
+        for (uint8_t e = 0; e < edges_per_vertex; e++) {
+            EXPECT_EQ(src_neighbors[e], copy_neighbors[e])
+                << "Neighbor index mismatch at vertex " << i << " edge " << e;
+        }
+    }
+
+    // Verify weights are recalculated with custom features
+    const auto dist_func = space.get_dist_func();
+    const auto dist_func_param = space.get_dist_func_param();
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        const auto* src_neighbors = source_graph.internal().getNeighborIndices(i);
+        const auto* copy_weights = static_cast<const deglib::graph::MutableGraph &>(mutable_graph.internal()).getNeighborWeights(i);
+        for (uint8_t e = 0; e < edges_per_vertex; e++) {
+            const auto neighbor_idx = src_neighbors[e];
+            const auto expected_weight = dist_func(
+                custom_feature_bytes.get() + size_t(i) * dim * sizeof(float),
+                custom_feature_bytes.get() + size_t(neighbor_idx) * dim * sizeof(float),
+                dist_func_param);
+            EXPECT_NEAR(copy_weights[e], expected_weight, 1e-4f)
+                << "Weight mismatch at vertex " << i << " edge " << e;
+        }
+    }
+}
+
+TEST(DynamicExplorationGraphFromGraph, ToMutableWithNewMaxSize) {
+    const uint32_t vertex_count = 10;
+    const uint8_t edges_per_vertex = 4;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i + d);
+        }
+    }
+
+    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+
+    // Convert to mutable with larger capacity using the direct to_mutable(new_max_size) overload
+    const uint32_t new_capacity = 50;
+    auto mutable_graph = source_graph.to_mutable(new_capacity);
+
+    EXPECT_TRUE(mutable_graph.isMutable());
+    EXPECT_EQ(mutable_graph.size(), vertex_count);
+
+    // Should be able to add vertices
+    auto new_feature = make_float_bytes(make_vec_4d(100.0f, 0.0f, 0.0f, 0.0f));
+    static_cast<deglib::graph::MutableGraph &>(mutable_graph.internal()).addVertex(9999, new_feature.get());
+    EXPECT_EQ(mutable_graph.size(), vertex_count + 1);
+    EXPECT_TRUE(mutable_graph.hasVertex(9999));
+}
+
