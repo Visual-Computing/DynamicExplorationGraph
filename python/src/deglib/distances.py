@@ -6,6 +6,8 @@ import numpy as np
 import deglib_cpp.distances as cpp_distances
 from deglib.cpu import InstructionSet
 
+__all__ = ["Metric", "FloatSpace", "InstructionSet", "quantize_batch", "floats_to_fp16", "fp16_to_floats"]
+
 
 class Metric(enum.IntEnum):
     FP32_L2 = cpp_distances.Metric.FP32_L2
@@ -67,6 +69,12 @@ class FloatSpace:
         :returns: number of features.
         """
         return self.float_space_cpp.get_data_size()
+
+    def get_instruction(self) -> InstructionSet:
+        """
+        :return: the CPU instruction set used for SIMD distance computation
+        """
+        return InstructionSet[self.float_space_cpp.get_instruction()]
 
     def compute_distance(self, vec1: np.ndarray, vec2: np.ndarray) -> float:
         """

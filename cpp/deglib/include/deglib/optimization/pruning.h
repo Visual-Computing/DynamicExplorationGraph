@@ -80,7 +80,7 @@ namespace deglib::optimization::pruning {
      * @param numThreads Number of threads to use (0 = use hardware concurrency).
      * @return Number of edges removed.
      */
-    inline uint32_t remove_non_mrng_edges(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
+    inline uint32_t prune_non_mrng_edges(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
         const auto vertex_count = graph.size();
         const auto edge_per_vertex = graph.getEdgesPerVertex();
         const auto thread_count = numThreads == 0 ? std::thread::hardware_concurrency() : numThreads;
@@ -131,7 +131,7 @@ namespace deglib::optimization::pruning {
      * @param numThreads Number of threads to use for collection (0 = use hardware concurrency).
      * @return Number of edges removed.
      */
-    inline uint32_t remove_non_mrng_edges_weight_sorted(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
+    inline uint32_t prune_non_mrng_edges_weight_sorted(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
         struct WeightedEdge {
             uint32_t from_vertex;
             uint32_t to_vertex;
@@ -193,7 +193,7 @@ namespace deglib::optimization::pruning {
      * @param numThreads Number of threads to use (0 = use hardware concurrency).
      * @return Number of edges removed.
      */
-    inline uint32_t remove_non_mrng_edges_iterative(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
+    inline uint32_t prune_non_mrng_edges_iterative(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
         const auto vertex_count = graph.size();
         const auto edge_per_vertex = graph.getEdgesPerVertex();
         const auto thread_count = numThreads == 0 ? std::thread::hardware_concurrency() : numThreads;

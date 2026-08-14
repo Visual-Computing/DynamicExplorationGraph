@@ -8,14 +8,12 @@ from . import search
 
 from .builder import GraphBuilder, build_from_data
 from .graph import DynamicExplorationGraph, load_readonly_graph
-from .distances import floats_to_fp16, fp16_to_floats
-from .optimization import mips_l2_transform, mips_l2_transform_query, presort, prune_worst_edges
+from .distances import FloatSpace, Metric
 
 __version__ = "0.1.6"
 
 __all__ = [
     'DynamicExplorationGraph', 'GraphBuilder', 'load_readonly_graph', 'build_from_data',
-    'floats_to_fp16', 'fp16_to_floats',
-    'mips_l2_transform', 'mips_l2_transform_query', 'presort', 'prune_worst_edges',
+    'FloatSpace', 'Metric',
     'builder', 'optimization', 'analysis', 'distances', 'search', 'cpu'
 ]

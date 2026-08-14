@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from deglib.optimization import presort
-from deglib.distances import Metric
+from deglib.distances import FloatSpace, Metric
 
 
 @pytest.mark.parametrize("threads", [0, 1, 2])
@@ -12,13 +12,27 @@ def test_presort_basic(threads, metric):
     N, d = 50, 16
     data = np.random.randn(N, d).astype(np.float32)
 
-    indices = presort(data, metric=metric, radius_decay=0.9, threads=threads)
+    indices = presort(data, metric, radius_decay=0.9, threads=threads)
 
     assert isinstance(indices, np.ndarray)
     assert indices.shape == (N,)
     assert indices.dtype == np.uint32
 
     # Verify that returned indices form a valid permutation of [0..N-1]
+    assert sorted(indices.tolist()) == list(range(N))
+
+
+def test_presort_with_float_space():
+    np.random.seed(42)
+    N, d = 50, 16
+    data = np.random.randn(N, d).astype(np.float32)
+    space = FloatSpace.create(d, Metric.FP32_L2)
+
+    indices = presort(data, space_or_metric=space, radius_decay=0.9, threads=2)
+
+    assert isinstance(indices, np.ndarray)
+    assert indices.shape == (N,)
+    assert indices.dtype == np.uint32
     assert sorted(indices.tolist()) == list(range(N))
 
 
@@ -42,3 +56,14 @@ def test_presort_callback():
     assert len(indices) == N
     assert len(progress_history) > 0
     assert progress_history[-1] == 1.0
+
+
+@pytest.mark.parametrize("invalid_metric", [Metric.Uint8_L2, Metric.FP16_InnerProduct, Metric.EVP_InnerProduct, "Uint8_L2"])
+def test_presort_non_fp32_metric_raises(invalid_metric):
+    np.random.seed(42)
+    N, d = 20, 16
+    data = np.random.randn(N, d).astype(np.float32)
+
+    with pytest.raises((ValueError, RuntimeError), match="FLAS only supports FP32"):
+        presort(data, metric=invalid_metric)
+

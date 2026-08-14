@@ -83,6 +83,7 @@ def construct_knng(
     # 2. Graph Construction Phase (using EVP_InnerProduct metric for fast quantized search)
     t0 = time.perf_counter()
     space = FloatSpace.create(dims, Metric.EVP_InnerProduct)
+    print(f"Graph Construction: {space.metric().name} ({space.get_instruction().name})")
     graph = deglib.DynamicExplorationGraph.create_empty(n_vecs, space, k_graph)
     builder = deglib.GraphBuilder(graph, extend_k=k_ext, extend_eps=0.001)
     builder.set_thread_count(threads)
@@ -117,6 +118,7 @@ def construct_knng(
     # 4. FP16 Candidate Rerank Phase
     t0 = time.perf_counter()
     rerank_space = FloatSpace.create(dims, Metric.FP16_InnerProduct)
+    print(f"Rerank Space: {rerank_space.metric().name} ({rerank_space.get_instruction().name})")
     final_knng_edges = rerank_space.rerank(
         queries=train_vectors,
         candidate_indices=indices,

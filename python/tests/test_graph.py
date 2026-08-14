@@ -139,9 +139,9 @@ def test_search(conf: Configuration):
 
 
 @pytest.mark.parametrize('conf', mutable_configurations)
-def test_remove_non_mrng_edges(conf: Configuration):
+def test_prune_non_mrng_edges(conf: Configuration):
     graph = conf.create_new_size_bounded_graph()
-    deglib.optimization.remove_non_mrng_edges(graph)
+    deglib.optimization.prune_non_mrng_edges(graph)
 
 
 @pytest.mark.parametrize('conf', configurations)
@@ -414,7 +414,7 @@ def test_to_readonly_custom_features():
     builder.build()
 
     # Convert features to FP16
-    fp16_data = deglib.floats_to_fp16(data)
+    fp16_data = deglib.distances.floats_to_fp16(data)
     fs_fp16 = FloatSpace.create(d, Metric.FP16_InnerProduct)
 
     # Swap to FP16 ReadOnlyGraph
@@ -424,7 +424,7 @@ def test_to_readonly_custom_features():
     assert ro_g.get_feature_space().metric() == Metric.FP16_InnerProduct
 
     # Search on FP16 ReadOnlyGraph
-    query_fp16 = deglib.floats_to_fp16(data[0:2])
+    query_fp16 = deglib.distances.floats_to_fp16(data[0:2])
     res_indices, res_dists = ro_g.search(query_fp16, eps=0.1, k=3)
     assert res_indices.shape == (2, 3)
     assert res_dists.shape == (2, 3)

@@ -879,7 +879,7 @@ mips_l2_transform_query_wrapper(py::array_t<float, py::array::c_style> queries) 
 
 py::array_t<uint32_t>
 presort_wrapper(py::array_t<float, py::array::c_style> vectors,
-                deglib::distances::MetricType metric = deglib::distances::MetricType::FP32_L2,
+                const deglib::distances::FloatSpace &space,
                 float radius_decay = 0.9f,
                 size_t threads = 0,
                 py::object callback = py::none()) {
@@ -889,9 +889,12 @@ presort_wrapper(py::array_t<float, py::array::c_style> vectors,
   }
   size_t count = buf.shape[0];
   size_t dim = buf.shape[1];
+  if (count > 0 && dim != space.dim()) {
+    throw std::invalid_argument(std::format("Vector dimension ({}) does not match FloatSpace dimension ({})", dim, space.dim()));
+  }
 
   std::function<bool(float)> cb = nullptr;
-  if (!callback.is_none() && !callback.is_none()) {
+  if (!callback.is_none()) {
     cb = [callback](float progress) -> bool {
       py::gil_scoped_acquire acquire;
       try {
@@ -910,8 +913,8 @@ presort_wrapper(py::array_t<float, py::array::c_style> vectors,
   {
     py::gil_scoped_release release;
     sorted_indices = deglib::optimization::presort(
-        static_cast<const float*>(buf.ptr), count, dim,
-        deglib::distances::Metric(metric), radius_decay, threads, cb
+        static_cast<const float*>(buf.ptr), count, space,
+        radius_decay, threads, cb
     );
   }
 
@@ -1143,7 +1146,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
   m.def("read_only_graph_from_graph", &read_only_graph_from_graph_wrapper,
         py::arg("graph"), py::arg("custom_feature_space") = py::none(), py::arg("custom_features") = py::none());
   m.def("presort", &presort_wrapper,
-        py::arg("vectors"), py::arg("metric") = deglib::distances::MetricType::FP32_L2,
+        py::arg("vectors"), py::arg("space"),
         py::arg("radius_decay") = 0.9f, py::arg("threads") = 0,
         py::arg("callback") = py::none());
   m.def("mips_l2_transform", &mips_l2_transform_wrapper, py::arg("vectors"));
@@ -1258,11 +1261,11 @@ PYBIND11_MODULE(deglib_cpp, m) {
      .def_readonly("exploration_reachability", &deglib::analysis::GraphStats::exploration_reachability)
      .def_readonly("memory_bytes", &deglib::analysis::GraphStats::memory_bytes);
  m.def("analyze_graph", &analyze_graph_wrapper, py::arg("graph"));
-  m.def("remove_non_mrng_edges", [](deglib::DynamicExplorationGraph &graph, const size_t num_threads) {
+  m.def("prune_non_mrng_edges", [](deglib::DynamicExplorationGraph &graph, const size_t num_threads) {
       if (!graph.isMutable()) {
-          throw std::runtime_error("Graph must be mutable to remove non-mrng edges");
+          throw std::runtime_error("Graph must be mutable to prune non-mrng edges");
       }
-      deglib::optimization::remove_non_mrng_edges(static_cast<deglib::graph::MutableGraph &>(graph.internal()), num_threads);
+      deglib::optimization::prune_non_mrng_edges(static_cast<deglib::graph::MutableGraph &>(graph.internal()), num_threads);
   }, py::arg("graph"), py::arg("num_threads") = 0);
   m.def("prune_worst_edges", [](deglib::DynamicExplorationGraph &graph, const uint8_t prune_worst, const size_t num_threads) {
       if (!graph.isMutable()) {

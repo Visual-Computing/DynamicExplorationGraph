@@ -50,11 +50,13 @@ static float compute_1d_locality(const std::vector<float>& features, int N, int 
 // Helper: run FLAS sorting and return the sorted ID permutation
 // ---------------------------------------------------------------------------
 static std::vector<int> run_flas_sort(const float* features, int N, int dim,
-                                      unsigned int seed, const flas::FlasSettings& settings) {
+                                      unsigned int seed, const flas::FlasSettings& settings,
+                                      deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2) {
     auto map_fields = flas::make_map_fields(features, N, dim);
+    deglib::distances::FloatSpace space(dim, metric);
 
     flas::RandomEngine rng(seed);
-    flas::do_sorting_1d(map_fields, dim, settings, rng, [](float) { return false; });
+    flas::do_sorting_1d(map_fields, space, settings, rng, [](float) { return false; });
 
     std::vector<int> result(N);
     for (int i = 0; i < N; ++i) result[i] = map_fields[i].id;
@@ -211,14 +213,14 @@ TEST(FlasRegression, SortingRuntimeAndQuality_2D_N500_D8) {
     std::mt19937 rng(42);
     std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
     for (auto& v : features) v = dist(rng);
-
     auto map_fields = flas::make_map_fields(features.data(), N, D);
+    deglib::distances::FloatSpace space(D, deglib::distances::Metric::FP32_L2);
 
     flas::FlasSettings settings = flas::FlasSettings{};
     flas::RandomEngine flas_rng(42);
 
     auto t_start = std::chrono::high_resolution_clock::now();
-    flas::do_sorting_1d(map_fields, D, settings, flas_rng, [](float) { return false; });
+    flas::do_sorting_1d(map_fields, space, settings, flas_rng, [](float) { return false; });
     auto t_end = std::chrono::high_resolution_clock::now();
     double sort_secs = std::chrono::duration<double>(t_end - t_start).count();
 
@@ -243,13 +245,15 @@ TEST(FlasRegression, SortingRuntimeAndQuality_2D_N500_D8) {
 // run_flas_sort above; this overload drives the parallel swap path.
 // ---------------------------------------------------------------------------
 static std::vector<int> run_flas_sort_mt(const float* features, int N, int dim,
-                                                  unsigned int seed, const flas::FlasSettings& settings,
-                                                  int num_threads) {
+                                         unsigned int seed, const flas::FlasSettings& settings,
+                                         int num_threads,
+                                         deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2) {
     auto map_fields = flas::make_map_fields(features, N, dim);
+    deglib::distances::FloatSpace space(dim, metric);
 
     flas::RandomEngine rng(seed);
-    flas::do_sorting_1d(map_fields, dim, settings, rng,
-                                 [](float) { return false; }, num_threads);
+    flas::do_sorting_1d(map_fields, space, settings, rng,
+                        [](float) { return false; }, num_threads);
 
     std::vector<int> result(N);
     for (int i = 0; i < N; ++i) result[i] = map_fields[i].id;
@@ -399,10 +403,9 @@ TEST(FlasRegression, InnerProductMetric_N200_D16) {
     for (auto& v : features) v = dist(rng);
 
     flas::FlasSettings settings = flas::FlasSettings{};
-    settings.metric = flas::FlasMetric::InnerProduct;
 
     auto t_start = std::chrono::high_resolution_clock::now();
-    auto sorted_ids = run_flas_sort(features.data(), N, D, 42, settings);
+    auto sorted_ids = run_flas_sort(features.data(), N, D, 42, settings, deglib::distances::Metric::FP32_InnerProduct);
     auto t_end = std::chrono::high_resolution_clock::now();
     double sort_secs = std::chrono::duration<double>(t_end - t_start).count();
 

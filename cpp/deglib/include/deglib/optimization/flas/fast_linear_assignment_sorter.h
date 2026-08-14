@@ -4,13 +4,13 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <format>
 #include <functional>
 #include <random>
 #include <span>
+#include <stdexcept>
 
 #include "deglib/distances.h"
-#include "deglib/distance/fp32_l2.h"
-#include "deglib/distance/evp_inner_product.h"
 #include "deglib/utils/random.h"
 
 #include "deglib/optimization/flas/junker_volgenant_solver.h"
@@ -49,8 +49,6 @@ inline std::vector<MapField> make_map_fields(const float *features, int count, i
 using RandomEngine = std::mt19937;
 constexpr int QUANT = 256;
 
-enum class FlasMetric { L2, InnerProduct };
-
 // Configuration parameters for the FLAS 1D sorting algorithm.
 struct FlasSettings {
   float initial_radius_factor = 0.5f;
@@ -59,7 +57,6 @@ struct FlasSettings {
   int num_filters = 1;
   int max_swap_positions = 9;
   float sample_factor = 1.0f;
-  FlasMetric metric = FlasMetric::L2;
 };
 
 // Scratch buffers for candidate swap positions, quantized distance LUT, and JV solver state.
@@ -99,31 +96,28 @@ public:
   }
 };
 
-// Problem context binding map fields span, dimensions, RNG stream, and distance metric.
+// Problem context binding map fields span, FloatSpace, and RNG stream.
 struct FlasContext {
   std::span<MapField> map_fields;
   int count;
-  int dim;
-
+  const deglib::distances::FloatSpace &space;
   RandomEngine &rng;
-  FlasMetric metric;
-  deglib::distances::DISTFUNC<float> dist_func;
 
-  FlasContext(std::span<MapField> map_fields_, int count_, int dim_, RandomEngine &rng_, FlasMetric metric_)
-    : map_fields(map_fields_), count(count_), dim(dim_), rng(rng_), metric(metric_) {
+  FlasContext(std::span<MapField> map_fields_, int count_, const deglib::distances::FloatSpace &space_, RandomEngine &rng_)
+    : map_fields(map_fields_), count(count_), space(space_), rng(rng_) {
 
-    if (metric == FlasMetric::InnerProduct) {
-      dist_func = deglib::distances::to_dist_func(deglib::distances::to_flat_variant(deglib::distances::fp32_ip::select_dist(dim)));
-    } else {
-      dist_func = deglib::distances::to_dist_func(deglib::distances::to_flat_variant(deglib::distances::fp32_l2::select_dist(dim)));
+    if (space.metric().get_data_type() != deglib::distances::MetricDataType::FP32) {
+      throw std::invalid_argument(std::format("FLAS only supports FP32 metric data types, got: {}", space.metric().get_data_type_name()));
     }
   }
 
-  FlasContext(MapField *map_fields_, int count_, int dim_, RandomEngine &rng_, FlasMetric metric_)
-    : FlasContext(std::span<MapField>(map_fields_, static_cast<size_t>(count_)), count_, dim_, rng_, metric_) {}
+  FlasContext(MapField *map_fields_, int count_, const deglib::distances::FloatSpace &space_, RandomEngine &rng_)
+    : FlasContext(std::span<MapField>(map_fields_, static_cast<size_t>(count_)), count_, space_, rng_) {}
 
   FlasContext(const FlasContext&) = delete;
   FlasContext& operator=(const FlasContext&) = delete;
+
+  int dim() const noexcept { return static_cast<int>(space.dim()); }
 };
 
 // Manages SOM buffer and moving-average filter scratch memory (Move-safe, Rule of Zero).
@@ -166,9 +160,10 @@ inline void shuffle_array(std::span<int> data, RandomEngine &rng) {
 
 // Phase "copy": Copies current MapField feature vectors into the SOM grid buffer.
 inline void copy_feature_vectors_to_som(const FlasContext &ctx, SomGrid &grid) {
+  const int dim = ctx.dim();
   for (int i = 0; i < ctx.count; i++) {
     const MapField &map_field = ctx.map_fields[i];
-    std::copy_n(map_field.feature, ctx.dim, grid.row(i, ctx.dim));
+    std::copy_n(map_field.feature, dim, grid.row(i, dim));
   }
 }
 
@@ -180,7 +175,7 @@ inline void filter_weighted_som_1d(int radius, const FlasContext &ctx, SomGrid &
   int filter_size = 2 * radius + 1;
   int ext = filter_size / 2;
   int size = ctx.count;
-  int dims = ctx.dim;
+  int dims = ctx.dim();
   const float inv_filter_size = 1.0f / static_cast<float>(filter_size);
 
   float *window_sum = grid.window_sum.data();
@@ -213,19 +208,19 @@ inline void filter_weighted_som_1d(int radius, const FlasContext &ctx, SomGrid &
   }
 
   // Copy filtered SOM back into main SOM buffer
-  std::copy_n(grid.filtered_som_buf.data(), ctx.count * ctx.dim, grid.som());
+  std::copy_n(grid.filtered_som_buf.data(), ctx.count * dims, grid.som());
 }
 
 // Calculates pairwise distance matrix between swap candidates and quantizes to [0, QUANT].
 inline void calc_dist_lut_int(const FlasContext &ctx, SwapBuffers &swaps, int num_swaps) {
   float max_val = 0.0f;
-  const size_t dim_sz = static_cast<size_t>(ctx.dim);
-  auto dist_func = ctx.dist_func;
+  const auto dist_func = ctx.space.get_dist_func();
+  const auto param = ctx.space.get_dist_func_param();
 
   // Compute exact floating-point distance matrix between candidates and SOM cells
   for (int i = 0; i < num_swaps; i++) {
     for (int j = 0; j < num_swaps; j++) {
-      float val = dist_func(swaps.fvs[i], swaps.som_fvs[j], &dim_sz);
+      float val = dist_func(swaps.fvs[i], swaps.som_fvs[j], param);
       swaps.dist_lut_f[i * num_swaps + j] = val;
       if (val > max_val)
         max_val = val;
@@ -246,13 +241,14 @@ inline void calc_dist_lut_int(const FlasContext &ctx, SwapBuffers &swaps, int nu
 inline void do_swaps(const FlasContext &ctx, SomGrid &grid, SwapBuffers &swaps, int num_swaps) {
   if (num_swaps == 0) return;
 
+  const int dim = ctx.dim();
   // Snapshot candidate MapFields and feature/SOM pointers
   for (int i = 0; i < num_swaps; i++) {
     int swap_position = swaps.swap_positions[i];
     MapField &swapped_element = ctx.map_fields[swap_position];
     swaps.swapped_elements[i] = swapped_element;
     swaps.fvs[i] = swapped_element.feature;
-    swaps.som_fvs[i] = grid.row(swap_position, ctx.dim);
+    swaps.som_fvs[i] = grid.row(swap_position, dim);
   }
 
   // Calculate distance matrix and solve optimal linear assignment problem via JV algorithm
@@ -326,11 +322,13 @@ inline void check_random_swaps_1d(const FlasContext &ctx, SomGrid &grid, SwapBuf
 
 // Main 1D FLAS sorter: repeatedly copies to SOM, applies moving-average filter, and performs random swaps.
 inline void do_sorting_1d(
-  std::span<MapField> map_fields, int dim, const FlasSettings &settings, RandomEngine &rng,
+  std::span<MapField> map_fields, const deglib::distances::FloatSpace &space,
+  const FlasSettings &settings, RandomEngine &rng,
   const std::function<bool(float)>& progress_callback
 ) {
   int count = static_cast<int>(map_fields.size());
   if (count <= 0) return;
+  const int dim = static_cast<int>(space.dim());
   float rad = static_cast<float>(count) * settings.initial_radius_factor;
 
   const int num_iterations = static_cast<int>(ceil(-log(rad / settings.radius_end) / log(settings.radius_decay)));
@@ -338,7 +336,7 @@ inline void do_sorting_1d(
   if (progress_callback && progress_callback(0.f))
     return;
 
-  FlasContext ctx(map_fields, count, dim, rng, settings.metric);
+  FlasContext ctx(map_fields, count, space, rng);
   SomGrid grid(count, dim);
   SwapBuffers swaps(std::min(count, settings.max_swap_positions), count);
 

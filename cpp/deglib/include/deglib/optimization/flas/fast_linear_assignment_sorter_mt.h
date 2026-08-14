@@ -244,24 +244,26 @@ inline bool try_lock_and_swap(const FlasContext &ctx, SomGrid &grid, ThreadWorke
 //   5. Progress callback and termination evaluation
 // ---------------------------------------------------------------------------
 inline void do_sorting_1d(
-  std::span<MapField> map_fields, int dim, const FlasSettings &settings, RandomEngine &rng,
+  std::span<MapField> map_fields, const deglib::distances::FloatSpace &space,
+  const FlasSettings &settings, RandomEngine &rng,
   const std::function<bool(float)>& callback, int num_threads
 ) {
   int count = static_cast<int>(map_fields.size());
   if (count <= 0) return;
 
   if (num_threads <= 1) {
-    do_sorting_1d(map_fields, dim, settings, rng, callback);
+    do_sorting_1d(map_fields, space, settings, rng, callback);
     return;
   }
 
+  const int dim = static_cast<int>(space.dim());
   float rad = static_cast<float>(count) * settings.initial_radius_factor;
   const int num_iterations = static_cast<int>(ceil(-log(rad / settings.radius_end) / log(settings.radius_decay)));
   int iteration_counter = 0;
   if (callback && callback(0.f))
     return;
 
-  FlasContext ctx(map_fields, count, dim, rng, settings.metric);
+  FlasContext ctx(map_fields, count, space, rng);
   SomGrid grid(count, dim);
 
   SwapThreadPool pool(num_threads);

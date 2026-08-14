@@ -60,7 +60,7 @@ deglib::                                # Root namespace: DynamicExplorationGrap
 ├── search::                            # Search utilities and label filtering (Filter, range search)
 ├── distances::                         # Vector space & SIMD metrics (FloatSpace, Metric, SIMD kernels)
 ├── cpu::                               # CPU capabilities & InstructionSet enum (InstructionSet, has_avx2, has_avx512)
-├── optimization::                      # Topology refinement (prune_worst_edges, remove_non_mrng_edges)
+├── optimization::                      # Topology refinement (prune_worst_edges, prune_non_mrng_edges)
 └── analysis::                          # Graph quality diagnostics & reachability (analyze_graph, GraphStats)
 ```
 
@@ -164,7 +164,7 @@ Graph topology refinement algorithms.
 
 #### Functions
 - `void prune_worst_edges(deglib::graph::MutableGraph& graph, const uint8_t prune_worst, const size_t numThreads = 0)`: Prunes worst edges per vertex.
-- `void remove_non_mrng_edges(deglib::graph::MutableGraph& graph, const size_t numThreads = 0)`: Removes non-MRNG edges.
+- `void prune_non_mrng_edges(deglib::graph::MutableGraph& graph, const size_t numThreads = 0)`: Removes non-MRNG edges.
 
 ---
 

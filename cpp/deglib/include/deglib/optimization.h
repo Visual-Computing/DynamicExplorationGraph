@@ -21,42 +21,36 @@ namespace deglib::optimization {
 
     /**
      * @brief Perform 1D pre-sorting of dataset feature vectors using FLAS.
-     * Supports all deglib metric types.
+     * Supports all deglib FP32 metric types.
      *
-     * @param data Pointer to contiguous FP32 feature vectors array (shape: count x dim).
+     * @param data Pointer to contiguous FP32 feature vectors array (shape: count x space.dim()).
      * @param count Number of feature vectors.
-     * @param dim Dimension of feature vectors.
-     * @param metric Metric type used for distance computation during sorting.
+     * @param space FloatSpace defining dimension and distance metric.
      * @param radius_decay Decay factor per iteration for neighborhood radius (default 0.9).
      * @param numThreads Number of worker threads (0 = use hardware concurrency).
+     * @param callback Optional progress callback returning true to cancel early.
      * @return std::vector<uint32_t> Permutation array of original vector indices [0..count-1] in sorted order.
      */
     inline std::vector<uint32_t> presort(
-        const float* data, size_t count, size_t dim,
-        deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2,
+        const float* data, size_t count, const deglib::distances::FloatSpace& space,
         float radius_decay = 0.9f,
         size_t numThreads = 0,
         std::function<bool(float)> callback = nullptr
     ) {
         if (count == 0) return {};
 
-        std::vector<flas::MapField> map_fields = flas::make_map_fields(data, static_cast<int>(count), static_cast<int>(dim));
+        const int dim = static_cast<int>(space.dim());
+        std::vector<flas::MapField> map_fields = flas::make_map_fields(data, static_cast<int>(count), dim);
         flas::FlasSettings settings;
         settings.radius_decay = radius_decay;
-
-        if (metric.get_distance_kind() == deglib::distances::MetricDistanceKind::InnerProduct) {
-            settings.metric = flas::FlasMetric::InnerProduct;
-        } else {
-            settings.metric = flas::FlasMetric::L2;
-        }
 
         std::mt19937 rng(42);
         auto cb = callback ? callback : [](float) { return false; };
 
         if (numThreads != 1) {
-            flas::do_sorting_1d(map_fields, static_cast<int>(dim), settings, rng, cb, static_cast<int>(numThreads));
+            flas::do_sorting_1d(map_fields, space, settings, rng, cb, static_cast<int>(numThreads));
         } else {
-            flas::do_sorting_1d(map_fields, static_cast<int>(dim), settings, rng, cb);
+            flas::do_sorting_1d(map_fields, space, settings, rng, cb);
         }
 
         std::vector<uint32_t> result(count);
@@ -122,8 +116,8 @@ namespace deglib::optimization {
      * @param numThreads Number of threads to use (0 = use hardware concurrency).
      * @return Number of edges removed.
      */
-    inline uint32_t remove_non_mrng_edges(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
-        return deglib::optimization::pruning::remove_non_mrng_edges(graph, numThreads);
+    inline uint32_t prune_non_mrng_edges(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
+        return deglib::optimization::pruning::prune_non_mrng_edges(graph, numThreads);
     }
 
     /**
@@ -136,8 +130,8 @@ namespace deglib::optimization {
      * @param numThreads Number of threads to use for collection (0 = use hardware concurrency).
      * @return Number of edges removed.
      */
-    inline uint32_t remove_non_mrng_edges_weight_sorted(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
-        return deglib::optimization::pruning::remove_non_mrng_edges_weight_sorted(graph, numThreads);
+    inline uint32_t prune_non_mrng_edges_weight_sorted(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
+        return deglib::optimization::pruning::prune_non_mrng_edges_weight_sorted(graph, numThreads);
     }
 
     /**
@@ -151,8 +145,8 @@ namespace deglib::optimization {
      * @param numThreads Number of threads to use (0 = use hardware concurrency).
      * @return Number of edges removed.
      */
-    inline uint32_t remove_non_mrng_edges_iterative(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
-        return deglib::optimization::pruning::remove_non_mrng_edges_iterative(graph, numThreads);
+    inline uint32_t prune_non_mrng_edges_iterative(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
+        return deglib::optimization::pruning::prune_non_mrng_edges_iterative(graph, numThreads);
     }
 
     // ========================================================================

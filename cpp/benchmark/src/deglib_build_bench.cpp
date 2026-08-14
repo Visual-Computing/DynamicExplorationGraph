@@ -59,23 +59,23 @@ void change_features(const std::string initial_graph_file, const std::string rep
     fmt::print("Changing feature in {} ms. Final graph contains {} non-RNG edges\n", duration_ms, deglib::analysis::calc_non_rng_edges(graph));
 }
 
-void remove_non_mrng_edges_2(const std::string initial_graph_file, const std::string graph_file) {
+void prune_non_mrng_edges_2(const std::string initial_graph_file, const std::string graph_file) {
     fmt::print("Load graph {} \n", initial_graph_file);
     auto graph = deglib::graph::load_sizebounded_graph(initial_graph_file.c_str());
     fmt::print("Graph with {} vertices and containing {} non-RNG edges \n", graph.size(), deglib::analysis::calc_non_rng_edges(graph));
 
-    deglib::optimization::remove_non_mrng_edges_weight_sorted(graph);
+    deglib::optimization::prune_non_mrng_edges_weight_sorted(graph);
 
     // store the graph
     graph.saveGraph(graph_file.c_str());
 }
 
-void remove_non_mrng_edges_1(const std::string initial_graph_file, const std::string graph_file) {
+void prune_non_mrng_edges_1(const std::string initial_graph_file, const std::string graph_file) {
     fmt::print("Load graph {} \n", initial_graph_file);
     auto graph = deglib::graph::load_sizebounded_graph(initial_graph_file.c_str());
     fmt::print("Graph with {} vertices and containing {} non-RNG edges \n", graph.size(), deglib::analysis::calc_non_rng_edges(graph));
 
-    deglib::optimization::remove_non_mrng_edges_iterative(graph);
+    deglib::optimization::prune_non_mrng_edges_iterative(graph);
 
     // store the graph
     graph.saveGraph(graph_file.c_str());
@@ -85,12 +85,12 @@ void remove_non_mrng_edges_1(const std::string initial_graph_file, const std::st
 /**
  * Remove all none MRNG conform edges
  */
-void remove_non_mrng_edges(const std::string initial_graph_file, const std::string graph_file) {
+void prune_non_mrng_edges(const std::string initial_graph_file, const std::string graph_file) {
     fmt::print("Load graph {} \n", initial_graph_file);
     auto graph = deglib::graph::load_sizebounded_graph(initial_graph_file.c_str());
     fmt::print("Graph with {} vertices and containing {} non-RNG edges\n", graph.size(), deglib::analysis::calc_non_rng_edges(graph));
 
-    deglib::optimization::remove_non_mrng_edges(graph);
+    deglib::optimization::prune_non_mrng_edges(graph);
 
     // store the graph
     graph.saveGraph(graph_file.c_str());
@@ -953,8 +953,8 @@ int main() {
     // test_graph(query_file, gt_file, opt_graph_file, 1, 1, 30);  // repeat_test, test_threads, k
 
     // if(std::filesystem::exists(mrng_graph_file.c_str()) == false) {
-    //     remove_non_mrng_edges(graph_file, mrng_graph_file);
-    //     // remove_non_mrng_edges(opt_graph_file, mrng_graph_file);
+    //     prune_non_mrng_edges(graph_file, mrng_graph_file);
+    //     // prune_non_mrng_edges(opt_graph_file, mrng_graph_file);
     //     // change_features(graph_file, repository_file, metric, opt_graph_file);
     // }
     // test_graph(query_file, gt_file, mrng_graph_file, 1, 1, 30);  // repeat_test, test_threads, k

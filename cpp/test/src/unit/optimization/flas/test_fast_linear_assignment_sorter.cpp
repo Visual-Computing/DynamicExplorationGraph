@@ -39,12 +39,13 @@ TEST(MapFieldTest, GetNumSwappable) {
 //  FLAS sorting — 1D sort quality (columns=1, rows=N)
 // ============================================================================
 
-static std::vector<int> run_flas_1d(const float* features, int N, int dim, unsigned int seed) {
+static std::vector<int> run_flas_1d(const float* features, int N, int dim, unsigned int seed, deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2) {
     auto mf = flas::make_map_fields(features, N, dim);
+    deglib::distances::FloatSpace space(dim, metric);
 
     flas::FlasSettings s = local_default_flas_settings();
     flas::RandomEngine r(seed);
-    flas::do_sorting_1d(mf, dim, s, r, [](float) { return false; });
+    flas::do_sorting_1d(mf, space, s, r, [](float) { return false; });
 
     std::vector<int> result(N);
     for (int i = 0; i < N; ++i) result[i] = mf[i].id;
@@ -100,16 +101,11 @@ TEST(FlasSort, InnerProductMetric1D) {
     std::vector<float> features(static_cast<size_t>(N) * static_cast<size_t>(D));
     for (auto& v : features) v = dist(rng);
 
-    auto map_fields = flas::make_map_fields(features.data(), N, D);
-
-    flas::FlasSettings settings = local_default_flas_settings();
-    settings.metric = flas::FlasMetric::InnerProduct;
-    flas::RandomEngine flas_rng(42);
-    flas::do_sorting_1d(map_fields, D, settings, flas_rng, [](float) { return false; });
+    auto perm = run_flas_1d(features.data(), N, D, 42, deglib::distances::Metric::FP32_InnerProduct);
 
     std::vector<bool> seen(N, false);
     for (int i = 0; i < N; ++i) {
-        int id = map_fields[i].id;
+        int id = perm[i];
         ASSERT_GE(id, 0);
         ASSERT_LT(id, N);
         EXPECT_FALSE(seen[id]);
@@ -130,16 +126,12 @@ TEST(FlasSort, Stress_N1000_D8) {
     std::vector<float> features(static_cast<size_t>(N) * static_cast<size_t>(D));
     for (auto& v : features) v = dist(rng);
 
-    auto map_fields = flas::make_map_fields(features.data(), N, D);
-
-    flas::FlasSettings settings = local_default_flas_settings();
-    flas::RandomEngine flas_rng(42);
-    flas::do_sorting_1d(map_fields, D, settings, flas_rng, [](float) { return false; });
+    auto perm = run_flas_1d(features.data(), N, D, 42);
 
     // Verify permutation validity
     std::vector<bool> seen(N, false);
     for (int i = 0; i < N; ++i) {
-        int id = map_fields[i].id;
+        int id = perm[i];
         ASSERT_GE(id, 0);
         ASSERT_LT(id, N);
         EXPECT_FALSE(seen[id]);
@@ -162,15 +154,11 @@ TEST(FlasSort, 2DGrid_Cols20_Rows25_D8) {
     std::vector<float> features(static_cast<size_t>(N) * static_cast<size_t>(D));
     for (auto& v : features) v = dist(rng);
 
-    auto map_fields = flas::make_map_fields(features.data(), N, D);
-
-    flas::FlasSettings settings = local_default_flas_settings();
-    flas::RandomEngine flas_rng(42);
-    flas::do_sorting_1d(map_fields, D, settings, flas_rng, [](float) { return false; });
+    auto perm = run_flas_1d(features.data(), N, D, 42);
 
     std::vector<bool> seen(N, false);
     for (int i = 0; i < N; ++i) {
-        int id = map_fields[i].id;
+        int id = perm[i];
         ASSERT_GE(id, 0);
         ASSERT_LT(id, N);
         EXPECT_FALSE(seen[id]);
@@ -191,7 +179,25 @@ TEST(FlasSettingsTest, DefaultSettings) {
     EXPECT_EQ(settings.num_filters, 1);
     EXPECT_EQ(settings.max_swap_positions, 9);
     EXPECT_FLOAT_EQ(settings.sample_factor, 1.0f);
-    EXPECT_EQ(settings.metric, flas::FlasMetric::L2);
+}
+
+TEST(FlasSettingsTest, NonFP32MetricThrows) {
+    const int N = 10;
+    const int D = 4;
+    std::vector<float> features(static_cast<size_t>(N) * static_cast<size_t>(D), 0.0f);
+    auto map_fields = flas::make_map_fields(features.data(), N, D);
+
+    flas::FlasSettings settings = local_default_flas_settings();
+    flas::RandomEngine flas_rng(42);
+
+    deglib::distances::FloatSpace uint8_space(D, deglib::distances::Metric::Uint8_L2);
+    EXPECT_THROW(flas::do_sorting_1d(map_fields, uint8_space, settings, flas_rng, [](float) { return false; }), std::invalid_argument);
+
+    deglib::distances::FloatSpace fp16_space(D, deglib::distances::Metric::FP16_InnerProduct);
+    EXPECT_THROW(flas::do_sorting_1d(map_fields, fp16_space, settings, flas_rng, [](float) { return false; }), std::invalid_argument);
+
+    deglib::distances::FloatSpace evp_space(D, deglib::distances::Metric::EVP_InnerProduct);
+    EXPECT_THROW(flas::do_sorting_1d(map_fields, evp_space, settings, flas_rng, [](float) { return false; }), std::invalid_argument);
 }
 
 // ============================================================================
@@ -208,12 +214,13 @@ TEST(FlasSort, CallbackEarlyTermination) {
     for (auto& v : features) v = dist(rng);
 
     auto map_fields = flas::make_map_fields(features.data(), N, D);
+    deglib::distances::FloatSpace space(D, deglib::distances::Metric::FP32_L2);
 
     flas::FlasSettings settings = local_default_flas_settings();
     flas::RandomEngine flas_rng(42);
 
     bool callback_called = false;
-    flas::do_sorting_1d(map_fields, D, settings, flas_rng,
+    flas::do_sorting_1d(map_fields, space, settings, flas_rng,
                     [&callback_called](float progress) {
                         callback_called = true;
                         return true; // terminate immediately
@@ -236,12 +243,13 @@ static void run_1d_comparison_benchmark(int N, int D, unsigned int seed, int num
 
     // FLAS sorting (fast_linear_assignment_sorter.h)
     auto mf = flas::make_map_fields(features.data(), N, D);
+    deglib::distances::FloatSpace space(D, deglib::distances::Metric::FP32_L2);
     flas::FlasSettings s;
     s.max_swap_positions = 50;
     s.radius_decay = 0.9f;
     flas::RandomEngine r(seed);
     auto t0 = std::chrono::high_resolution_clock::now();
-    flas::do_sorting_1d(mf, D, s, r, [](float) { return false; });
+    flas::do_sorting_1d(mf, space, s, r, [](float) { return false; });
     auto t1 = std::chrono::high_resolution_clock::now();
     double time_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
     std::vector<int> perm(N);
@@ -315,10 +323,11 @@ TEST(Flas1DTest, SortShuffled0To100) {
 
     // FLAS sorting (fast_linear_assignment_sorter.h)
     auto mf = flas::make_map_fields(features.data(), N, D);
+    deglib::distances::FloatSpace space(D, deglib::distances::Metric::FP32_L2);
     flas::FlasSettings s;
     s.max_swap_positions = 10;
     flas::RandomEngine r(seed);
-    flas::do_sorting_1d(mf, D, s, r, [](float) { return false; });
+    flas::do_sorting_1d(mf, space, s, r, [](float) { return false; });
 
     std::vector<float> res(N);
     for (int i = 0; i < N; ++i) res[i] = *mf[i].feature;

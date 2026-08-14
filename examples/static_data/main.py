@@ -80,7 +80,7 @@ def compute_linear_search_baseline(base_vecs: np.ndarray, float_space: deglib.di
     sample_indices = rng.choice(n_base, size=query_count, replace=False)
 
     print(f"\n--- Computing Linear Search Baseline ---")
-    print(f"Computing linear search baseline with {query_count} random queries on {n_base} base vectors using C++ {float_space.metric().name} ({float_space.float_space_cpp.get_instruction()})...")
+    print(f"Computing linear search baseline with {query_count} random queries on {n_base} base vectors using C++ {float_space.metric().name} ({float_space.get_instruction().name})...")
 
     start_time = time.perf_counter()
     min_dist = float('inf')
@@ -144,7 +144,7 @@ def run_static_benchmark(
     print(f"Query vectors: {query_vecs.shape[0]} | GT shape: {gt_vecs.shape}")
 
     feature_space = deglib.distances.FloatSpace.create(dims, metric, instruction_enum)
-    actual_inst = str(feature_space.float_space_cpp.get_instruction()).split('.')[-1]
+    actual_inst = str(feature_space.get_instruction().name)
     print(f"Distance Metric: {metric.name} ({actual_inst})")
 
     linear_baseline_us = compute_linear_search_baseline(base_vecs, feature_space, sample_size=100)

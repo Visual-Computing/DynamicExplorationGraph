@@ -22,7 +22,7 @@ import deglib
 import deglib_cpp
 from deglib.distances import FloatSpace, Metric
 from deglib.cpu import InstructionSet
-from deglib.optimization import mips_l2_transform, presort, prune_worst_edges
+from deglib.optimization import mips_l2_transform, presort
 
 from dataset_utils import (
     ensure_mips_dataset,
@@ -38,12 +38,11 @@ DEFAULT_EPS_SEARCH = 0.18
 DEFAULT_MAX_DIST_LIST = [6000, 6500, 7000, 7500, 8000, 9000]
 DEFAULT_USE_FLAS = True
 DEFAULT_FLAS_DECAY = 0.9
-DEFAULT_PRUNE_WORST = 0
 DEFAULT_BUILD_THREADS = 1
 DEFAULT_SEARCH_THREADS = 8
 DEFAULT_OPT_TARGET = deglib.builder.OptimizationTarget.LowLID
 DEFAULT_NUM_RUNS = 100
-DEFAULT_INSTRUCTION_SET = InstructionSet.AVX2
+DEFAULT_INSTRUCTION_SET = InstructionSet.Auto
 
 
 def compute_1d_distortion(features: np.ndarray, sorted_indices: np.ndarray | None = None) -> float:
@@ -143,7 +142,6 @@ def construct_and_search_mips(
     eps_ext: float = DEFAULT_EPS_EXT,
     use_flas: bool = DEFAULT_USE_FLAS,
     flas_radius_decay: float = DEFAULT_FLAS_DECAY,
-    prune_worst: int = DEFAULT_PRUNE_WORST,
     build_threads: int = DEFAULT_BUILD_THREADS,
     search_threads: int = DEFAULT_SEARCH_THREADS,
     eps_search: float = DEFAULT_EPS_SEARCH,
@@ -162,7 +160,7 @@ def construct_and_search_mips(
     n_queries = query_vectors.shape[0]
     print(f"Dataset shape: {n_vecs} train vectors, {n_queries} queries, {dims} dimensions (dtype: {train_vectors.dtype})")
     print(f"MIPS Config: k_top={k_top}, k_graph={k_graph}, k_ext={k_ext}, eps_ext={eps_ext}, use_flas={use_flas}, "
-          f"opt_target={optimization_target.name}, prune_worst={prune_worst}, "
+          f"opt_target={optimization_target.name}, "
           f"build_threads={build_threads}, search_threads={search_threads}, num_runs={num_runs}, "
           f"instruction={instruction.name}")
 
@@ -178,8 +176,9 @@ def construct_and_search_mips(
     sorted_indices = None
 
     if use_flas:
+        flas_space = FloatSpace.create(new_dims, Metric.FP32_L2)
         dist_before = compute_1d_distortion(train_transformed)
-        print(f"Running FLAS 1D Pre-sorting: N={n_vecs}, dim={new_dims}, decay={flas_radius_decay}, metric=FP32_L2 ({instruction.name}), threads={build_threads}...")
+        print(f"Running FLAS 1D Pre-sorting: N={n_vecs}, dim={new_dims}, decay={flas_radius_decay}, metric={flas_space.metric().name} ({flas_space.get_instruction().name}), threads={build_threads}...")
 
         def flas_progress_cb(prog: float) -> bool:
             pct = int(prog * 100.0)
@@ -191,7 +190,7 @@ def construct_and_search_mips(
 
         sorted_indices = presort(
             train_transformed,
-            metric=Metric.FP32_L2,
+            space=FloatSpace.create(new_dims, Metric.FP32_L2, instruction),
             radius_decay=flas_radius_decay,
             threads=build_threads,
             callback=flas_progress_cb
@@ -204,11 +203,11 @@ def construct_and_search_mips(
     else:
         t_flas = time.perf_counter() - t0
 
-    # 3. Graph Construction Phase (in FP32_L2 space for d+1 dims)
+    # 3. Graph Construction Phase (in FP32_InnerProduct space for d+1 dims)
     t0 = time.perf_counter()
-    print(f"Building graph: k_graph={k_graph}, k_ext={k_ext}, eps_ext={eps_ext:.4f}, opt_target={optimization_target.name}, metric=FP32_L2 ({instruction.name}), build_threads={build_threads}...")
-    space = FloatSpace.create(new_dims, Metric.FP32_L2, instruction)
-    graph = deglib.DynamicExplorationGraph.create_empty(n_vecs, space, k_graph)
+    build_space = FloatSpace.create(new_dims, Metric.FP32_L2, instruction)
+    print(f"Building graph: k_graph={k_graph}, k_ext={k_ext}, eps_ext={eps_ext:.4f}, opt_target={optimization_target.name}, metric={build_space.metric().name} ({build_space.get_instruction().name}), build_threads={build_threads}...")
+    graph = deglib.DynamicExplorationGraph.create_empty(n_vecs, build_space, k_graph)
     builder = deglib.GraphBuilder(
         graph,
         extend_k=k_ext,
@@ -235,17 +234,9 @@ def construct_and_search_mips(
     t_build = time.perf_counter() - t0
     print(f"Graph construction completed in {t_build:.3f}s")
 
-    # 4. Edge Pruning Phase (optional)
-    t0 = time.perf_counter()
-    if prune_worst > 0:
-        deglib.optimization.prune_worst_edges(graph, prune_worst=prune_worst, num_threads=build_threads)
-    t_prune = time.perf_counter() - t0
-    if prune_worst > 0:
-        print(f"Edge pruning completed in {t_prune * 1000:.2f}ms")
-
     # 5. FP16 Feature Convert & Swap Phase
     t0 = time.perf_counter()
-    database_fp16 = deglib.floats_to_fp16(train_vectors)
+    database_fp16 = deglib.distances.floats_to_fp16(train_vectors)
     fp16_space = FloatSpace.create(dims, Metric.FP16_InnerProduct, instruction)
     fp16_graph = graph.to_readonly(feature_space=fp16_space, custom_features=database_fp16)
     t_swap = time.perf_counter() - t0
@@ -253,7 +244,7 @@ def construct_and_search_mips(
 
     # Convert queries to FP16
     t0 = time.perf_counter()
-    queries_fp16 = deglib.floats_to_fp16(query_vectors)
+    queries_fp16 = deglib.distances.floats_to_fp16(query_vectors)
     t_qconvert = time.perf_counter() - t0
 
     # 6. FP16 Inner Product Search Phase (Sweep over max_dist_list with num_runs averaging)
@@ -305,7 +296,7 @@ def construct_and_search_mips(
             best_search_time = total_search_s
             best_max_dist = max_dist
 
-    t_total_index = t_transform + t_flas + t_build + t_prune + t_swap
+    t_total_index = t_transform + t_flas + t_build + t_swap
 
     print(f"\n--- Timing Summary ---")
     if t_transform > 0:
@@ -313,8 +304,6 @@ def construct_and_search_mips(
     if use_flas and t_flas > 0:
         print(f"FLAS Presort Time:     {t_flas:8.3f} s")
     print(f"Graph Build Time:      {t_build:8.3f} s")
-    if prune_worst > 0:
-        print(f"Edge Pruning Time:     {t_prune * 1000:8.2f} ms")
     print(f"FP16 Swap Time:        {t_swap * 1000:8.2f} ms")
     print(f"Total Index Time:      {t_total_index:8.3f} s")
     if best_recall >= 0:
@@ -330,7 +319,6 @@ def construct_and_search_mips(
     print(f"Quantize Time:         {t_transform * 1000:8.1f} ms")
     print(f"Graph Build Time:      {t_build:8.1f} s")
     print(f"Graph Conversion Time: {t_swap * 1000:8.1f} ms")
-    print(f"Pruning Time:          {t_prune * 1000:8.1f} ms")
     print(f"Explore Time:          {best_search_time * 1000:8.1f} ms")
     print(f"Rerank Time:           {0.0:8.1f} ms")
     print(f"FLAS Time:             {t_flas:8.1f} s")
@@ -346,7 +334,6 @@ def construct_and_search_mips(
     print(f"  OPT_TARGET:            {optimization_target.name}")
     print(f"  max_dist:              {best_max_dist}")
     print(f"  threads:               {search_threads}")
-    print(f"  prune_worst:           {prune_worst}")
     print(f"------------------------------------------------------------------------")
     print(f"Dataset Info:")
     print(f"  Vectors:               {n_vecs}")
@@ -358,7 +345,6 @@ def construct_and_search_mips(
         "flas_time": t_flas,
         "build_time": t_build,
         "swap_time": t_swap,
-        "prune_time": t_prune,
         "qconvert_time": t_qconvert,
         "total_index_time": t_total_index,
         "total_elapsed_time": total_elapsed_s,
@@ -406,7 +392,6 @@ def main():
     parser.add_argument("--eps-search", type=float, default=DEFAULT_EPS_SEARCH, help="Epsilon search factor")
     parser.add_argument("--flas", action=argparse.BooleanOptionalAction, default=DEFAULT_USE_FLAS, help="Enable or disable FLAS 1D pre-sorting")
     parser.add_argument("--flas-decay", type=float, default=DEFAULT_FLAS_DECAY, help="FLAS neighborhood radius decay rate")
-    parser.add_argument("--prune-worst", type=int, default=DEFAULT_PRUNE_WORST, help="Number of worst neighbors to replace with self-loops")
     parser.add_argument("--build-threads", type=int, default=DEFAULT_BUILD_THREADS, help="Number of threads for graph building")
     parser.add_argument("--search-threads", type=int, default=DEFAULT_SEARCH_THREADS, help="Number of parallel threads for query search")
     opt_target_choices = [t.name for t in deglib.builder.OptimizationTarget]
@@ -443,7 +428,6 @@ def main():
         eps_ext=args.eps_ext,
         use_flas=args.flas,
         flas_radius_decay=args.flas_decay,
-        prune_worst=args.prune_worst,
         build_threads=args.build_threads,
         search_threads=args.search_threads,
         eps_search=args.eps_search,
