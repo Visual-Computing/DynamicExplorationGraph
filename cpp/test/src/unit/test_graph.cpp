@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "deglib/graph.h"
+#include "deglib/analysis.h"
 #include "deglib/graph/mutable_graph.h"
 #include "deglib/graph/readonly_graph.h"
 #include "gtest/gtest.h"
@@ -331,4 +332,153 @@ TEST(DEGExploreReturnsExternalLabels, ExploreWithReadOnlyGraphBackend) {
            << "Result identifier " << id << " is an internal index, not an external label";
        results.pop();
    }
+}
+
+// ===========================================================================
+//  DynamicExplorationGraph: create_empty and create_random_graph
+// ===========================================================================
+
+TEST(DynamicExplorationGraphCreateEmpty, CreatesEmptyGraph) {
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
+    auto graph = deglib::DynamicExplorationGraph::create_empty(100, 4, space);
+
+    EXPECT_EQ(graph.size(), 0u);
+    EXPECT_EQ(graph.getEdgesPerVertex(), 4u);
+    EXPECT_EQ(graph.getFeatureSpace().dim(), 4u);
+    EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::FP32_L2);
+    EXPECT_TRUE(graph.isMutable());
+}
+
+TEST(DynamicExplorationGraphCreateEmpty, CreatesEmptyGraphUint8) {
+    deglib::distances::FloatSpace space(128, deglib::distances::Metric::Uint8_L2);
+    auto graph = deglib::DynamicExplorationGraph::create_empty(50, 6, space);
+
+    EXPECT_EQ(graph.size(), 0u);
+    EXPECT_EQ(graph.getEdgesPerVertex(), 6u);
+    EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::Uint8_L2);
+    EXPECT_TRUE(graph.isMutable());
+}
+
+TEST(DynamicExplorationGraphCreateRandomGraph, CreatesValidGraph) {
+    const uint32_t vertex_count = 50;
+    const uint8_t edges_per_vertex = 8;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i + d);
+        }
+    }
+
+    auto graph = deglib::DynamicExplorationGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+
+    EXPECT_EQ(graph.size(), vertex_count);
+    EXPECT_EQ(graph.getEdgesPerVertex(), edges_per_vertex);
+    EXPECT_TRUE(graph.isMutable());
+
+    EXPECT_TRUE(deglib::analysis::check_graph_regularity(graph.internal(), vertex_count, true));
+    EXPECT_TRUE(deglib::analysis::check_graph_connectivity(graph.internal()));
+    EXPECT_TRUE(deglib::analysis::check_graph_weights(static_cast<const deglib::graph::MutableGraph &>(graph.internal())));
+}
+
+TEST(DynamicExplorationGraphCreateRandomGraph, SearchReturnsExternalLabels) {
+    const uint32_t vertex_count = 30;
+    const uint8_t edges_per_vertex = 4;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i * 10 + d);
+        }
+    }
+
+    auto graph = deglib::DynamicExplorationGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+
+    // Search returns external labels
+    std::vector<float> query = {0.0f, 0.0f, 0.0f, 0.0f};
+    auto results = graph.search(std::span<const float>(query), 5, 0.0f);
+
+    ASSERT_GT(results.size(), 0u);
+
+    // External labels are 0..vertex_count-1 (same as internal indices in this test)
+    std::unordered_set<uint32_t> valid_labels;
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        valid_labels.insert(i);
+    }
+
+    while (!results.empty()) {
+        uint32_t id = results.top().getIdentifier();
+        EXPECT_TRUE(valid_labels.contains(id))
+            << "Result identifier " << id << " is not a valid external label";
+        results.pop();
+    }
+}
+
+TEST(DynamicExplorationGraphCreateRandomGraph, DeterministicWithSameSeed) {
+    const uint32_t vertex_count = 20;
+    const uint8_t edges_per_vertex = 4;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i + d);
+        }
+    }
+
+    auto graph1 = deglib::DynamicExplorationGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 123);
+    auto graph2 = deglib::DynamicExplorationGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 123);
+
+    EXPECT_EQ(graph1.size(), graph2.size());
+
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        const auto* n1 = graph1.internal().getNeighborIndices(i);
+        const auto* n2 = graph2.internal().getNeighborIndices(i);
+        const auto* w1 = static_cast<const deglib::graph::MutableGraph &>(graph1.internal()).getNeighborWeights(i);
+        const auto* w2 = static_cast<const deglib::graph::MutableGraph &>(graph2.internal()).getNeighborWeights(i);
+        for (uint8_t e = 0; e < edges_per_vertex; e++) {
+            EXPECT_EQ(n1[e], n2[e]) << "Neighbor mismatch at vertex " << i << " edge " << e;
+            EXPECT_NEAR(w1[e], w2[e], 1e-6f) << "Weight mismatch at vertex " << i << " edge " << e;
+        }
+    }
+}
+
+TEST(DynamicExplorationGraphCreateRandomGraph, UInt8Metric) {
+    const uint32_t vertex_count = 30;
+    const uint8_t edges_per_vertex = 6;
+    const uint32_t dim = 8;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::Uint8_L2);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim);
+    uint8_t* feature_uint8 = reinterpret_cast<uint8_t*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_uint8[i * dim + d] = static_cast<uint8_t>((i + d) % 256);
+        }
+    }
+
+    auto graph = deglib::DynamicExplorationGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+
+    EXPECT_EQ(graph.size(), vertex_count);
+    EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::Uint8_L2);
+    EXPECT_TRUE(deglib::analysis::check_graph_regularity(graph.internal(), vertex_count, true));
+    EXPECT_TRUE(deglib::analysis::check_graph_connectivity(graph.internal()));
+    EXPECT_TRUE(deglib::analysis::check_graph_weights(static_cast<const deglib::graph::MutableGraph &>(graph.internal())));
 }

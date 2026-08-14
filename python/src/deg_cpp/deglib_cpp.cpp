@@ -961,6 +961,32 @@ deglib::DynamicExplorationGraph create_size_bounded_graph(
   return deglib::DynamicExplorationGraph(*graph);
 }
 
+deglib::DynamicExplorationGraph create_random_graph(
+    py::array features,
+    const uint8_t edges_per_vertex,
+    const deglib::distances::FloatSpace &feature_space,
+    const uint32_t seed) {
+  py::buffer_info buf = features.request();
+  if (buf.ndim != 2) {
+    throw std::invalid_argument(std::format(
+        "Expected features to have two dimensions, got {}", buf.ndim));
+  }
+  const uint32_t vertex_count = static_cast<uint32_t>(buf.shape[0]);
+  const size_t req_bytes = feature_space.get_data_size();
+  const size_t row_bytes = size_t(buf.shape[1]) * buf.itemsize;
+  if (row_bytes != req_bytes) {
+    throw std::invalid_argument(std::format(
+        "Feature row size in bytes ({}) does not match required feature space "
+        "data size ({})", row_bytes, req_bytes));
+  }
+
+  const std::byte *feature_data = static_cast<const std::byte *>(buf.ptr);
+  auto* graph = new deglib::graph::SizeBoundedGraph(
+      deglib::graph::SizeBoundedGraph::create_random_graph(
+          feature_data, vertex_count, edges_per_vertex, feature_space, seed));
+  return deglib::DynamicExplorationGraph(*graph);
+}
+
 // ============================================================================
 // Analysis Wrapper Functions
 // ============================================================================
@@ -1098,6 +1124,38 @@ PYBIND11_MODULE(deglib_cpp, m) {
   // graphs
   py::class_<deglib::DynamicExplorationGraph>(m, "DynamicExplorationGraph")
       .def(py::init<deglib::graph::InternalGraph &>())
+      .def_static("create_empty",
+           [](const uint32_t max_vertex_count, const uint8_t edges_per_vertex,
+              const deglib::distances::FloatSpace &feature_space) {
+             return deglib::DynamicExplorationGraph::create_empty(
+                 max_vertex_count, edges_per_vertex, feature_space);
+           },
+           py::arg("max_vertex_count"), py::arg("edges_per_vertex"),
+           py::arg("feature_space"))
+      .def_static("create_random_graph",
+           [](py::array features,
+              const uint8_t edges_per_vertex,
+              const deglib::distances::FloatSpace &feature_space,
+              const uint32_t seed) {
+             py::buffer_info buf = features.request();
+             if (buf.ndim != 2) {
+               throw std::invalid_argument(std::format(
+                   "Expected features to have two dimensions, got {}", buf.ndim));
+             }
+             const size_t req_bytes = feature_space.get_data_size();
+             const size_t row_bytes = size_t(buf.shape[1]) * buf.itemsize;
+             if (row_bytes != req_bytes) {
+               throw std::invalid_argument(std::format(
+                   "Feature row size in bytes ({}) does not match required "
+                   "feature space data size ({})", row_bytes, req_bytes));
+             }
+             return deglib::DynamicExplorationGraph::create_random_graph(
+                 static_cast<const std::byte *>(buf.ptr),
+                 static_cast<uint32_t>(buf.shape[0]),
+                 edges_per_vertex, feature_space, seed);
+           },
+           py::arg("features"), py::arg("edges_per_vertex"),
+           py::arg("feature_space"), py::arg("seed") = 7)
       .def("size", &deglib::DynamicExplorationGraph::size)
       .def("get_edges_per_vertex", &deglib::DynamicExplorationGraph::getEdgesPerVertex)
       .def("get_feature_space",
@@ -1155,6 +1213,9 @@ PYBIND11_MODULE(deglib_cpp, m) {
   m.def("create_size_bounded_graph", &create_size_bounded_graph,
         py::arg("max_vertex_count"), py::arg("edges_per_vertex"),
         py::arg("feature_space"));
+  m.def("create_random_graph", &create_random_graph,
+        py::arg("features"), py::arg("edges_per_vertex"),
+        py::arg("feature_space"), py::arg("seed") = 7);
 
   // GraphBuilder (renamed from EvenRegularGraphBuilder)
   py::enum_<deglib::builder::OptimizationTarget>(m, "OptimizationTarget")

@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "deglib/graph/sizebounded_graph.h"
+#include "deglib/analysis.h"
 #include "deglib/filter.h"
 #include "gtest/gtest.h"
 
@@ -773,10 +774,220 @@ TEST(SizeBoundedGraphLabelMapping, BidirectionalTranslationWithNonSequentialLabe
        EXPECT_EQ(back, i) << "Round-trip failed for internal index " << i;
    }
 
-   // hasVertex() takes external labels
-   EXPECT_TRUE(graph.hasVertex(kExtLabels[0]));
-   EXPECT_TRUE(graph.hasVertex(kExtLabels[2]));
-   EXPECT_FALSE(graph.hasVertex(kExtLabels[0] + 1)); // 1006 — not in graph
-   EXPECT_FALSE(graph.hasVertex(0u)); // 0 is an internal index, not an external label
-   EXPECT_FALSE(graph.hasVertex(4u)); // 4 is an internal index, not an external label
+    // hasVertex() takes external labels
+    EXPECT_TRUE(graph.hasVertex(kExtLabels[0]));
+    EXPECT_TRUE(graph.hasVertex(kExtLabels[2]));
+    EXPECT_FALSE(graph.hasVertex(kExtLabels[0] + 1)); // 1006 — not in graph
+    EXPECT_FALSE(graph.hasVertex(0u)); // 0 is an internal index, not an external label
+    EXPECT_FALSE(graph.hasVertex(4u)); // 4 is an internal index, not an external label
+}
+
+// ---------------------------------------------------------------------------
+//  Factory Methods: create_empty and create_random_graph
+// ---------------------------------------------------------------------------
+
+TEST(SizeBoundedGraph, CreateEmpty) {
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
+    auto graph = deglib::graph::SizeBoundedGraph::create_empty(100, 4, space);
+
+    EXPECT_EQ(graph.size(), 0u);
+    EXPECT_EQ(graph.capacity(), 100u);
+    EXPECT_EQ(graph.getEdgesPerVertex(), 4u);
+    EXPECT_EQ(graph.getFeatureSpace().dim(), 4u);
+    EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::FP32_L2);
+}
+
+TEST(SizeBoundedGraph, CreateEmptyUint8) {
+    deglib::distances::FloatSpace space(128, deglib::distances::Metric::Uint8_L2);
+    auto graph = deglib::graph::SizeBoundedGraph::create_empty(50, 6, space);
+
+    EXPECT_EQ(graph.size(), 0u);
+    EXPECT_EQ(graph.capacity(), 50u);
+    EXPECT_EQ(graph.getEdgesPerVertex(), 6u);
+    EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::Uint8_L2);
+}
+
+TEST(SizeBoundedGraph, CreateRandomGraphFP32) {
+    const uint32_t vertex_count = 100;
+    const uint8_t edges_per_vertex = 8;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    // Create feature data: vertex_count vectors of dim floats
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i + d);
+        }
+    }
+
+    auto graph = deglib::graph::SizeBoundedGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+
+    // Validate graph structure
+    EXPECT_EQ(graph.size(), vertex_count);
+    EXPECT_EQ(graph.getEdgesPerVertex(), edges_per_vertex);
+
+    // Check regularity (no self-loops, sorted, unique neighbors)
+    EXPECT_TRUE(deglib::analysis::check_graph_regularity(graph, vertex_count, true));
+
+    // Check connectivity
+    EXPECT_TRUE(deglib::analysis::check_graph_connectivity(graph));
+
+    // Check edge weights match distances
+    EXPECT_TRUE(deglib::analysis::check_graph_weights(graph));
+}
+
+TEST(SizeBoundedGraph, CreateRandomGraphUInt8) {
+    const uint32_t vertex_count = 50;
+    const uint8_t edges_per_vertex = 6;
+    const uint32_t dim = 8;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::Uint8_L2);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim);
+    uint8_t* feature_uint8 = reinterpret_cast<uint8_t*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_uint8[i * dim + d] = static_cast<uint8_t>((i + d) % 256);
+        }
+    }
+
+    auto graph = deglib::graph::SizeBoundedGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 42);
+
+    EXPECT_EQ(graph.size(), vertex_count);
+    EXPECT_EQ(graph.getEdgesPerVertex(), edges_per_vertex);
+    EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::Uint8_L2);
+
+    EXPECT_TRUE(deglib::analysis::check_graph_regularity(graph, vertex_count, true));
+    EXPECT_TRUE(deglib::analysis::check_graph_connectivity(graph));
+    EXPECT_TRUE(deglib::analysis::check_graph_weights(graph));
+}
+
+TEST(SizeBoundedGraph, CreateRandomGraphSearchable) {
+    const uint32_t vertex_count = 30;
+    const uint8_t edges_per_vertex = 4;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i * 10 + d);
+        }
+    }
+
+    auto graph = deglib::graph::SizeBoundedGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+
+    // Use explore from vertex 0 (internal index 0) — should find vertex 0 as nearest
+    auto results = graph.explore(0, 5, 0, 0.0f, /*include_entry=*/true, nullptr);
+    EXPECT_GT(results.size(), 0u);
+
+    // Vertex 0 should be in the results (it's the entry point)
+    bool found_vertex_0 = false;
+    while (!results.empty()) {
+        if (results.top().getIdentifier() == 0u) {
+            found_vertex_0 = true;
+        }
+        results.pop();
+    }
+    EXPECT_TRUE(found_vertex_0) << "Vertex 0 should be in explore results";
+}
+
+TEST(SizeBoundedGraph, CreateRandomGraphDeterministic) {
+    const uint32_t vertex_count = 20;
+    const uint8_t edges_per_vertex = 4;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i + d);
+        }
+    }
+
+    auto graph1 = deglib::graph::SizeBoundedGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 123);
+    auto graph2 = deglib::graph::SizeBoundedGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 123);
+
+    // Same seed should produce same graph
+    EXPECT_EQ(graph1.size(), graph2.size());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        const auto* n1 = graph1.getNeighborIndices(i);
+        const auto* n2 = graph2.getNeighborIndices(i);
+        const auto* w1 = graph1.getNeighborWeights(i);
+        const auto* w2 = graph2.getNeighborWeights(i);
+        for (uint8_t e = 0; e < edges_per_vertex; e++) {
+            EXPECT_EQ(n1[e], n2[e]) << "Neighbor mismatch at vertex " << i << " edge " << e;
+            EXPECT_NEAR(w1[e], w2[e], 1e-6f) << "Weight mismatch at vertex " << i << " edge " << e;
+        }
+    }
+}
+
+TEST(SizeBoundedGraph, CreateRandomGraphDifferentSeeds) {
+    const uint32_t vertex_count = 20;
+    const uint8_t edges_per_vertex = 4;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i + d);
+        }
+    }
+
+    auto graph1 = deglib::graph::SizeBoundedGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 1);
+    auto graph2 = deglib::graph::SizeBoundedGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 999);
+
+    // Different seeds may produce different graphs (not guaranteed, but likely)
+    // At minimum, both should be valid
+    EXPECT_TRUE(deglib::analysis::check_graph_regularity(graph1, vertex_count, true));
+    EXPECT_TRUE(deglib::analysis::check_graph_regularity(graph2, vertex_count, true));
+}
+
+TEST(SizeBoundedGraph, CreateRandomGraphInnerProduct) {
+    const uint32_t vertex_count = 30;
+    const uint8_t edges_per_vertex = 4;
+    const uint32_t dim = 8;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_InnerProduct);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    // Normalize for inner product
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        float norm = 0.0f;
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i + d + 1);
+            norm += feature_floats[i * dim + d] * feature_floats[i * dim + d];
+        }
+        norm = std::sqrt(norm);
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] /= norm;
+        }
+    }
+
+    auto graph = deglib::graph::SizeBoundedGraph::create_random_graph(
+        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+
+    EXPECT_EQ(graph.size(), vertex_count);
+    EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::FP32_InnerProduct);
+    EXPECT_TRUE(deglib::analysis::check_graph_regularity(graph, vertex_count, true));
+    EXPECT_TRUE(deglib::analysis::check_graph_connectivity(graph));
+    EXPECT_TRUE(deglib::analysis::check_graph_weights(graph));
 }

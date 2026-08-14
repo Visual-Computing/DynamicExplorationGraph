@@ -12,10 +12,12 @@
 #include "deglib/graph/readonly_graph.h"
 #include "deglib/graph/sizebounded_graph.h"
 
-#include <vector>
+#include <algorithm>
+#include <memory>
+#include <random>
 #include <span>
 #include <stdexcept>
-#include <memory>
+#include <vector>
 
 namespace deglib {
 
@@ -30,6 +32,43 @@ private:
 
 public:
    explicit DynamicExplorationGraph(deglib::graph::InternalGraph& graph) : internal_graph_(graph) {}
+
+   /**
+    * Create an empty mutable DynamicExplorationGraph with the given capacity,
+    * edges per vertex, and feature space.
+    */
+   static DynamicExplorationGraph create_empty(
+       const uint32_t max_vertex_count,
+       const uint8_t edges_per_vertex,
+       const deglib::distances::FloatSpace& feature_space)
+   {
+       auto* graph = new deglib::graph::SizeBoundedGraph(max_vertex_count, edges_per_vertex, feature_space);
+       return DynamicExplorationGraph(*graph);
+   }
+
+   /**
+    * Create a random exploration graph from the given feature data.
+    *
+    * @param feature_data Pointer to a contiguous array of feature vectors.
+    *                     Each vector is feature_space.get_data_size() bytes.
+    * @param vertex_count Number of vertices to insert.
+    * @param edges_per_vertex Number of edges per vertex (must be even).
+    * @param feature_space The feature space defining dimensionality and metric.
+    * @param seed Random seed for deterministic graph construction.
+    * @return A new DynamicExplorationGraph wrapping the created random graph.
+    */
+   static DynamicExplorationGraph create_random_graph(
+       const std::byte* feature_data,
+       const uint32_t vertex_count,
+       const uint8_t edges_per_vertex,
+       const deglib::distances::FloatSpace& feature_space,
+       const uint32_t seed = 7)
+   {
+       auto* graph = new deglib::graph::SizeBoundedGraph(
+           deglib::graph::SizeBoundedGraph::create_random_graph(feature_data, vertex_count, edges_per_vertex, feature_space, seed)
+       );
+       return DynamicExplorationGraph(*graph);
+   }
 
     const uint32_t size() const {
         return internal_graph_.size();

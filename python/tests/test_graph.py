@@ -429,3 +429,125 @@ def test_to_readonly_custom_features():
     assert res_indices.shape == (2, 3)
     assert res_dists.shape == (2, 3)
 
+
+def test_create_random_graph_fp32():
+    """Test DynamicExplorationGraph.create_random_graph with FP32 L2 data."""
+    samples = 100
+    dims = 8
+    edges_per_vertex = 10
+
+    data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
+    feature_space = FloatSpace.create(dims, Metric.FP32_L2)
+
+    graph = deglib.DynamicExplorationGraph.create_random_graph(
+        data, feature_space, edges_per_vertex=edges_per_vertex, seed=7
+    )
+
+    assert graph.size() == samples
+    assert graph.get_edges_per_vertex() == edges_per_vertex
+    assert graph.is_mutable()
+
+    # Search should work
+    query = data[0:1]
+    indices, distances = graph.search(query, eps=0.1, k=5)
+    assert indices.shape == (1, 5)
+    assert distances.shape == (1, 5)
+
+
+def test_create_random_graph_uint8():
+    """Test DynamicExplorationGraph.create_random_graph with Uint8 L2 data."""
+    samples = 50
+    dims = 16
+    edges_per_vertex = 8
+
+    data = np.random.randint(0, 256, size=(samples, dims)).astype(np.uint8)
+    feature_space = FloatSpace.create(dims, Metric.Uint8_L2)
+
+    graph = deglib.DynamicExplorationGraph.create_random_graph(
+        data, feature_space, edges_per_vertex=edges_per_vertex, seed=42
+    )
+
+    assert graph.size() == samples
+    assert graph.get_edges_per_vertex() == edges_per_vertex
+    assert graph.is_mutable()
+    assert graph.get_feature_space().metric() == Metric.Uint8_L2
+
+    # Search should work
+    query = data[0:1]
+    indices, distances = graph.search(query, eps=0.1, k=5)
+    assert indices.shape == (1, 5)
+    assert distances.shape == (1, 5)
+
+
+def test_create_random_graph_deterministic():
+    """Test that create_random_graph with the same seed produces the same graph."""
+    samples = 30
+    dims = 4
+    edges_per_vertex = 6
+
+    data = np.random.default_rng(99).standard_normal((samples, dims)).astype(np.float32)
+    feature_space = FloatSpace.create(dims, Metric.FP32_L2)
+
+    graph1 = deglib.DynamicExplorationGraph.create_random_graph(
+        data, feature_space, edges_per_vertex=edges_per_vertex, seed=123
+    )
+    graph2 = deglib.DynamicExplorationGraph.create_random_graph(
+        data, feature_space, edges_per_vertex=edges_per_vertex, seed=123
+    )
+
+    assert graph1.size() == graph2.size()
+    assert graph1.get_edges_per_vertex() == graph2.get_edges_per_vertex()
+
+    # Compare neighbor lists for each vertex (external labels are 0..samples-1)
+    for i in range(samples):
+        n1 = sorted(graph1.get_neighbors(i))
+        n2 = sorted(graph2.get_neighbors(i))
+        assert n1 == n2, f"Neighbor mismatch at vertex {i}"
+
+
+def test_create_random_graph_inner_product():
+    """Test create_random_graph with FP32 InnerProduct metric."""
+    samples = 40
+    dims = 8
+    edges_per_vertex = 6
+
+    data = np.random.default_rng(77).standard_normal((samples, dims)).astype(np.float32)
+    # Normalize for inner product
+    data = data / np.linalg.norm(data, axis=1, keepdims=True)
+
+    feature_space = FloatSpace.create(dims, Metric.FP32_InnerProduct)
+    graph = deglib.DynamicExplorationGraph.create_random_graph(
+        data, feature_space, edges_per_vertex=edges_per_vertex, seed=7
+    )
+
+    assert graph.size() == samples
+    assert graph.get_feature_space().metric() == Metric.FP32_InnerProduct
+
+    # Search should work
+    query = data[0:1]
+    indices, distances = graph.search(query, eps=0.1, k=5)
+    assert indices.shape == (1, 5)
+
+
+def test_create_random_graph_explore():
+    """Test that explore works on a graph created via create_random_graph."""
+    samples = 50
+    dims = 4
+    edges_per_vertex = 10
+
+    data = np.random.default_rng(55).standard_normal((samples, dims)).astype(np.float32)
+    feature_space = FloatSpace.create(dims, Metric.FP32_L2)
+
+    graph = deglib.DynamicExplorationGraph.create_random_graph(
+        data, feature_space, edges_per_vertex=edges_per_vertex, seed=7
+    )
+
+    # Explore from vertex 0
+    indices, distances = graph.explore(0, k=5, max_distance_computation_count=50)
+    assert len(indices) == 5
+    assert len(distances) == 5
+
+    # All indices should be valid external labels (0..samples-1)
+    for idx in indices:
+        assert idx in range(samples), f"Index {idx} out of range [0, {samples})"
+

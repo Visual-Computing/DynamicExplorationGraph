@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <algorithm>
 #include <cstdint> // for types like uint32_t
 #include <cstring>
 #include <limits>
@@ -10,11 +11,13 @@
 #include <unordered_map>
 #include <fstream>
 #include <iostream>
+#include <random>
 
-#include "deglib/graph.h"
+#include "deglib/graph/mutable_graph.h"
 #include "deglib/search.h"
 #include "deglib/graph/visited_list_pool.h"
 #include "deglib/utils/memory.h"
+#include "deglib/utils/random.h"
 
 namespace deglib::graph
 {
@@ -194,6 +197,132 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
     for (uint32_t i = size; i < max_vertex_count; i++) {
       free_indices_pool_.push(i);
     }
+  }
+
+  /**
+   * Create an empty SizeBoundedGraph with the given capacity, edges per vertex, and feature space.
+   * The graph starts with zero vertices; vertices can be added via addVertex().
+   */
+  static SizeBoundedGraph create_empty(
+      const uint32_t max_vertex_count,
+      const uint8_t edges_per_vertex,
+      const deglib::distances::FloatSpace& feature_space)
+  {
+    return SizeBoundedGraph(max_vertex_count, edges_per_vertex, feature_space);
+  }
+
+  /**
+   * Create a random exploration graph from the given feature data.
+   *
+   * The graph is built by first fully connecting the initial (edges_per_vertex + 1)
+   * vertices, then iteratively inserting each remaining vertex by connecting it
+   * to edges_per_vertex neighbors chosen from existing vertices.
+   *
+   * @param feature_data Pointer to a contiguous array of feature vectors.
+   *                     Each vector is feature_space.get_data_size() bytes.
+   * @param vertex_count Number of vertices to insert (must be <= max_vertex_count).
+   * @param edges_per_vertex Number of edges per vertex (must be even).
+   * @param feature_space The feature space defining dimensionality and metric.
+   * @param seed Random seed for deterministic graph construction.
+   * @return A fully constructed random exploration graph.
+   */
+  static SizeBoundedGraph create_random_graph(
+      const std::byte* feature_data,
+      const uint32_t vertex_count,
+      const uint8_t edges_per_vertex,
+      const deglib::distances::FloatSpace& feature_space,
+      const uint32_t seed = 7)
+  {
+    const auto dist_func = feature_space.get_dist_func();
+    const auto dist_func_param = feature_space.get_dist_func_param();
+
+    auto graph = SizeBoundedGraph(vertex_count, edges_per_vertex, feature_space);
+
+    // add the initial vertices (edges_per_vertex + 1)
+    {
+      const auto size = (uint32_t)(edges_per_vertex + 1);
+      for (uint32_t y = 0; y < size; y++) {
+        const auto query = feature_data + size_t(y) * feature_space.get_data_size();
+        const auto internal_index = graph.addVertex(y, query);
+
+        auto neighbor_indices = std::vector<uint32_t>();
+        auto neighbor_weights = std::vector<float>();
+        for (uint32_t x = 0; x < size; x++) {
+          if (x == internal_index) continue;
+          neighbor_indices.emplace_back(x);
+          neighbor_weights.emplace_back(dist_func(query, feature_data + size_t(x) * feature_space.get_data_size(), dist_func_param));
+        }
+        graph.changeEdges(internal_index, neighbor_indices.data(), neighbor_weights.data());
+      }
+    }
+
+    // random order of vertices
+    auto rnd = std::mt19937(seed);
+    auto rnd_neighbor = deglib::random::DeterministicUniformIntDistribution<uint32_t>(0, edges_per_vertex - 1);
+
+    // add the remaining vertices
+    for (uint32_t label = edges_per_vertex + 1; label < vertex_count; label++) {
+      const auto new_vertex_feature = feature_data + size_t(label) * feature_space.get_data_size();
+      const auto internal_index = graph.addVertex(label, new_vertex_feature);
+      auto top_list = deglib::random::DeterministicUniformIntDistribution<uint32_t>(0, label - 1);
+
+      // remove the worst edge of the good neighbors and connect them with this new vertex
+      auto new_neighbors = std::vector<std::pair<uint32_t, float>>();
+      while (new_neighbors.size() < edges_per_vertex) {
+        const auto candidate_index = (uint32_t)top_list(rnd);
+
+        // check if the vertex is already in the edge list of the new vertex (added during a previous loop-run)
+        // since all edges are undirected and the edge information of the new vertex does not yet exist, we search the other way around.
+        if (graph.hasEdge(candidate_index, internal_index))
+          continue;
+
+        // find a new random neighbor
+        uint32_t new_neighbor_index = 0;
+        float new_neighbor_weight = -1;
+        const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
+        const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
+        while (new_neighbor_weight < 0) {
+          const auto edge_idx = (uint32_t)rnd_neighbor(rnd);
+          const auto neighbor_index = neighbor_indices[edge_idx];
+          const auto neighbor_weight = neighbor_weights[edge_idx];
+
+          // the suggest neighbors might already be in the edge list of the new vertex
+          if (graph.hasEdge(neighbor_index, internal_index) == false) {
+            new_neighbor_index = neighbor_index;
+            new_neighbor_weight = neighbor_weight;
+          }
+        }
+
+        // this should not be possible, otherwise the new vertex is connected to every vertex in the neighbor-list of the result-vertex and still has space for more
+        if (new_neighbor_weight < 0) {
+          std::fprintf(stderr, "it was not possible to find an edge (best weight %f) in the neighbor list of vertex %u which would connect to vertex %u \n", new_neighbor_weight, candidate_index, internal_index);
+          std::perror("");
+          std::abort();
+        }
+
+        // place the new vertex in the edge list of the result-vertex
+        const auto candidate_dist = dist_func(new_vertex_feature, graph.getFeatureVector(candidate_index), dist_func_param);
+        graph.changeEdge(candidate_index, new_neighbor_index, internal_index, candidate_dist);
+        new_neighbors.emplace_back(candidate_index, candidate_dist);
+
+        // place the new vertex in the edge list of the worst edge neighbor
+        const auto new_neighbor_dist = dist_func(new_vertex_feature, graph.getFeatureVector(new_neighbor_index), dist_func_param);
+        graph.changeEdge(new_neighbor_index, candidate_index, internal_index, new_neighbor_dist);
+        new_neighbors.emplace_back(new_neighbor_index, new_neighbor_dist);
+      }
+
+      // sort the neighbors by their neighbor indices and store them in the new vertex
+      std::sort(new_neighbors.begin(), new_neighbors.end(), [](const auto& x, const auto& y) { return x.first < y.first; });
+      auto neighbor_indices = std::vector<uint32_t>();
+      auto neighbor_weights = std::vector<float>();
+      for (auto &&neighbor : new_neighbors) {
+        neighbor_indices.emplace_back(neighbor.first);
+        neighbor_weights.emplace_back(neighbor.second);
+      }
+      graph.changeEdges(internal_index, neighbor_indices.data(), neighbor_weights.data());
+    }
+
+    return graph;
   }
 
   /**

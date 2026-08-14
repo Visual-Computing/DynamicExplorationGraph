@@ -45,6 +45,34 @@ class DynamicExplorationGraph:
         return cls(graph_cpp)
 
     @classmethod
+    def create_random_graph(
+            cls,
+            features: np.ndarray,
+            feature_space: FloatSpace,
+            edges_per_vertex: int = 32,
+            seed: int = 7
+    ) -> 'DynamicExplorationGraph':
+        """
+        Create a random exploration graph from the given feature data.
+
+        The graph is built by first fully connecting the initial (edges_per_vertex + 1)
+        vertices, then iteratively inserting each remaining vertex by connecting it
+        to edges_per_vertex neighbors chosen from existing vertices.
+
+        :param features: A 2D NumPy array of feature vectors (shape: vertex_count x dim).
+        :param feature_space: A FloatSpace object defining dimensionality, metric, and instruction set.
+        :param edges_per_vertex: Number of neighbors for each vertex. Must be even. Defaults to 32.
+        :param seed: Random seed for deterministic graph construction. Defaults to 7.
+        :return: A new DynamicExplorationGraph with a random exploration graph.
+        """
+        valid_dtype = feature_space.metric().get_dtype()
+        features = assure_array(features, 'features', valid_dtype)
+        graph_cpp = deglib_cpp.create_random_graph(
+            features, edges_per_vertex, feature_space.to_cpp(), seed
+        )
+        return cls(graph_cpp)
+
+    @classmethod
     def load_readonly_graph(cls, path: pathlib.Path | str) -> 'DynamicExplorationGraph':
         """
         Read a saved ReadOnlyGraph from given file.
