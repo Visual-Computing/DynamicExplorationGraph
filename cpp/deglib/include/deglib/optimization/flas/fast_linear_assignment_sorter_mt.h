@@ -180,7 +180,7 @@ private:
 // Samples candidate swap positions within a localized random window using an explicit RNG.
 // ---------------------------------------------------------------------------
 inline int find_swap_positions_1d(const FlasContext &ctx, SwapBuffers &swaps, std::span<const int> swap_indices, int num_swap_indices, RandomEngine &rng) {
-  std::uniform_int_distribution<int> pos_dist(0, ctx.count - 1);
+  deglib::random::DeterministicUniformIntDistribution<int> pos_dist(0, ctx.count - 1);
   int x0 = pos_dist(rng);
 
   int x_start = std::max(0, std::min(x0 - num_swap_indices / 2, ctx.count - num_swap_indices));
@@ -188,7 +188,7 @@ inline int find_swap_positions_1d(const FlasContext &ctx, SwapBuffers &swaps, st
   int max_sp = swaps.num_swap_positions();
   int start_index = 0;
   if (num_swap_indices > max_sp) {
-    std::uniform_int_distribution<int> index_dist(0, num_swap_indices - max_sp - 1);
+    deglib::random::DeterministicUniformIntDistribution<int> index_dist(0, num_swap_indices - max_sp);
     start_index = index_dist(rng);
   }
 
@@ -269,7 +269,7 @@ inline void do_sorting_1d(
 
   const int max_sp = std::min(count, settings.max_swap_positions);
   std::vector<ThreadWorker> workers(static_cast<size_t>(num_threads));
-  std::uniform_int_distribution<unsigned int> seed_dist;
+  deglib::random::DeterministicUniformIntDistribution<unsigned int> seed_dist(0, std::numeric_limits<unsigned int>::max());
   const unsigned int base_seed = seed_dist(ctx.rng);
 
   const int init_radius = std::max(1, std::min(count / 2, static_cast<int>(std::round(rad))));

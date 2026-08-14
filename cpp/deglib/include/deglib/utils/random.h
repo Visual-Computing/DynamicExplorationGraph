@@ -15,6 +15,7 @@ namespace deglib::random {
 
 /// Portable uniform integer distribution using bounded rejection sampling.
 /// Guarantees identical integer sequences across Windows, Linux, and macOS.
+/// Supports integer types (e.g. int, uint32_t, size_t) with ranges up to 2^32 (using 32-bit generators like std::mt19937).
 template <typename IntType = int>
 class DeterministicUniformIntDistribution {
 public:

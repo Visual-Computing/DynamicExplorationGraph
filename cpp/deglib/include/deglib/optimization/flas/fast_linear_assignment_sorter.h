@@ -11,6 +11,7 @@
 #include "deglib/distances.h"
 #include "deglib/distance/fp32_l2.h"
 #include "deglib/distance/evp_inner_product.h"
+#include "deglib/utils/random.h"
 
 #include "deglib/optimization/flas/junker_volgenant_solver.h"
 
@@ -268,7 +269,7 @@ inline void do_swaps(const FlasContext &ctx, SomGrid &grid, SwapBuffers &swaps, 
 // Selects candidate swap positions within a localized random window.
 inline int find_swap_positions_1d(const FlasContext &ctx, SwapBuffers &swaps, std::span<const int> swap_indices, int num_swap_indices) {
   // Pick random center x0 and clamp window range [x_start, x_start + num_swap_indices]
-  std::uniform_int_distribution<int> pos_dist(0, ctx.count - 1);
+  deglib::random::DeterministicUniformIntDistribution<int> pos_dist(0, ctx.count - 1);
   int x0 = pos_dist(ctx.rng);
 
   int x_start = std::max(0, std::min(x0 - num_swap_indices / 2, ctx.count - num_swap_indices));
@@ -277,7 +278,7 @@ inline int find_swap_positions_1d(const FlasContext &ctx, SwapBuffers &swaps, st
   int max_sp = swaps.num_swap_positions();
   int start_index = 0;
   if (num_swap_indices > max_sp) {
-    std::uniform_int_distribution<int> index_dist(0, num_swap_indices - max_sp - 1);
+    deglib::random::DeterministicUniformIntDistribution<int> index_dist(0, num_swap_indices - max_sp);
     start_index = index_dist(ctx.rng);
   }
 
