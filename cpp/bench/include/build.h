@@ -23,6 +23,9 @@ namespace deglib::benchmark {
 
 enum DataStreamType { AddAll, AddHalf, AddAllRemoveHalf, AddHalfRemoveAndAddOneAtATime };
 
+/**
+ * Create a random exploration graph from the given StaticFeatureRepository.
+ */
 inline deglib::graph::SizeBoundedGraph create_random_graph(const deglib::StaticFeatureRepository& repository,
                                                            deglib::distances::Metric metric,
                                                            const uint8_t k,
@@ -33,83 +36,10 @@ inline deglib::graph::SizeBoundedGraph create_random_graph(const deglib::StaticF
 
     const auto dims = repository.dims();
     const auto feature_space = deglib::distances::FloatSpace(dims, metric, instruction);
-    const auto dist_func = feature_space.get_dist_func();
-    const auto dist_func_param = feature_space.get_dist_func_param();
-
-    const auto start = std::chrono::system_clock::now();
-    const uint8_t edges_per_vertex = k;
     const uint32_t vertex_count = (max_size > 0 && max_size < repository.size()) ? max_size : uint32_t(repository.size());
-    auto graph = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, feature_space);
+    const auto feature_data = repository.getFeature(0);
 
-    {
-        const auto size = (uint32_t)(edges_per_vertex + 1);
-        for (uint32_t y = 0; y < size; y++) {
-            const auto query = repository.getFeature(y);
-            const auto internal_index = graph.addVertex(y, query);
-
-            auto neighbor_indices = std::vector<uint32_t>();
-            auto neighbor_weights = std::vector<float>();
-            for (uint32_t x = 0; x < size; x++) {
-                if (x == internal_index) continue;
-                neighbor_indices.emplace_back(x);
-                neighbor_weights.emplace_back(dist_func(query, repository.getFeature(x), dist_func_param));
-            }
-            graph.changeEdges(internal_index, neighbor_indices.data(), neighbor_weights.data());
-        }
-    }
-
-    auto rnd = std::mt19937(7);
-    auto rnd_neighbor = std::uniform_int_distribution<uint32_t>(0, edges_per_vertex - 1);
-
-    for (uint32_t label = edges_per_vertex + 1; label < vertex_count; label++) {
-        const auto new_vertex_feature = repository.getFeature(label);
-        const auto internal_index = graph.addVertex(label, new_vertex_feature);
-        auto top_list = std::uniform_int_distribution<uint32_t>(0, label - 1);
-
-        auto new_neighbors = std::vector<std::pair<uint32_t, float>>();
-        while (new_neighbors.size() < edges_per_vertex) {
-            const auto candidate_index = (uint32_t)top_list(rnd);
-            const auto new_neighbor_index = graph.getNeighborIndices(candidate_index)[rnd_neighbor(rnd)];
-
-            bool duplicate = false;
-            for (const auto& neighbor : new_neighbors) {
-                if (neighbor.first == candidate_index || neighbor.first == new_neighbor_index) {
-                    duplicate = true;
-                    break;
-                }
-            }
-            if (duplicate) continue;
-
-            const auto candidate_dist = dist_func(new_vertex_feature, graph.getFeatureVector(candidate_index), dist_func_param);
-            graph.changeEdge(candidate_index, new_neighbor_index, internal_index, candidate_dist);
-            new_neighbors.emplace_back(candidate_index, candidate_dist);
-
-            const auto new_neighbor_dist = dist_func(new_vertex_feature, graph.getFeatureVector(new_neighbor_index), dist_func_param);
-            graph.changeEdge(new_neighbor_index, candidate_index, internal_index, new_neighbor_dist);
-            new_neighbors.emplace_back(new_neighbor_index, new_neighbor_dist);
-        }
-
-        std::sort(new_neighbors.begin(), new_neighbors.end(), [](const auto& x, const auto& y) { return x.first < y.first; });
-        auto neighbor_indices = std::vector<uint32_t>();
-        auto neighbor_weights = std::vector<float>();
-        for (auto&& neighbor : new_neighbors) {
-            neighbor_indices.emplace_back(neighbor.first);
-            neighbor_weights.emplace_back(neighbor.second);
-        }
-        graph.changeEdges(internal_index, neighbor_indices.data(), neighbor_weights.data());
-
-        if ((label + 1) % 100000 == 0 || (label + 1) == vertex_count) {
-            auto quality = deglib::analysis::calc_avg_edge_weight(graph, scale);
-            auto connected = deglib::analysis::check_graph_connectivity(graph);
-            auto duration = uint32_t(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - start).count());
-            log("{:7} elements, in {:5}s, AEW {:4.2f}, connected {} \n", (label + 1), duration, quality, connected);
-        }
-    }
-
-    const auto valid = deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_regularity(graph, vertex_count, true);
-    if (valid == false) log("WARNING: Invalid graph detected during build\n");
-
-    return graph;
+    return deglib::graph::SizeBoundedGraph::create_random_graph(feature_data, vertex_count, k, feature_space);
 }
 
 inline void create_graph(const deglib::StaticFeatureRepository& repository,

@@ -161,5 +161,115 @@
       "configurePreset": "macos-clang-avx2",
       "configuration": "Release"
     }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-msvc-debug",
+      "displayName": "Windows Debug Tests",
+      "configurePreset": "windows-msvc",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-release",
+      "displayName": "Windows Release Tests",
+      "configurePreset": "windows-msvc",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-avx2-debug",
+      "displayName": "Windows AVX2 Debug Tests",
+      "configurePreset": "windows-msvc-avx2",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-avx2-release",
+      "displayName": "Windows AVX2 Release Tests",
+      "configurePreset": "windows-msvc-avx2",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-gcc-debug",
+      "displayName": "Linux Debug Tests",
+      "configurePreset": "linux-gcc",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-gcc-release",
+      "displayName": "Linux Release Tests",
+      "configurePreset": "linux-gcc",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-gcc-avx2-debug",
+      "displayName": "Linux AVX2 Debug Tests",
+      "configurePreset": "linux-gcc-avx2",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-gcc-avx2-release",
+      "displayName": "Linux AVX2 Release Tests",
+      "configurePreset": "linux-gcc-avx2",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "macos-clang-debug",
+      "displayName": "macOS Debug Tests",
+      "configurePreset": "macos-clang",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "macos-clang-release",
+      "displayName": "macOS Release Tests",
+      "configurePreset": "macos-clang",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "macos-clang-avx2-debug",
+      "displayName": "macOS AVX2 Debug Tests",
+      "configurePreset": "macos-clang-avx2",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "macos-clang-avx2-release",
+      "displayName": "macOS AVX2 Release Tests",
+      "configurePreset": "macos-clang-avx2",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
   ]
 }
