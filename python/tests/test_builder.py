@@ -140,3 +140,59 @@ class TestGraphs:
         builder.build(callback=_stopping_callback)
         assert stopped_in_callback
 
+    def test_build_returns_status(self):
+        graph = deglib.DynamicExplorationGraph.create_empty(self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex)
+        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder.add_entry(range(self.data.shape[0]), self.data)
+
+        status = builder.build()
+        assert isinstance(status, deglib_cpp.BuilderStatus), \
+            'Expected BuilderStatus, got {}'.format(type(status))
+        assert status.added == self.data.shape[0]
+        assert status.deleted == 0
+        assert len(status.total_added_ids) == self.data.shape[0]
+        assert len(status.total_deleted_ids) == 0
+
+    def test_build_status_callback_step_ids(self):
+        graph = deglib.DynamicExplorationGraph.create_empty(self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex)
+        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder.add_entry(range(self.data.shape[0]), self.data)
+
+        callback_statuses = []
+        def _collect_callback(status: deglib_cpp.BuilderStatus):
+            callback_statuses.append(status)
+
+        result = builder.build(callback=_collect_callback)
+
+        assert len(callback_statuses) > 0
+        # Verify that total_added_ids grows monotonically across callbacks
+        prev_total = 0
+        for cb_status in callback_statuses:
+            assert len(cb_status.total_added_ids) >= prev_total
+            assert len(cb_status.step_added_ids) > 0 or cb_status.added == 0
+            prev_total = len(cb_status.total_added_ids)
+
+        # The last callback's total should match the return value
+        last_cb = callback_statuses[-1]
+        assert last_cb.total_added_ids == result.total_added_ids
+        assert last_cb.total_deleted_ids == result.total_deleted_ids
+
+    def test_build_mixed_add_delete(self):
+        graph = deglib.DynamicExplorationGraph.create_empty(self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex)
+        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+
+        for label, vec in enumerate(self.data):
+            vec: np.ndarray
+            builder.add_entry(label, vec)
+
+        # remove some vertices
+        for label in range(0, self.data.shape[0], 3):
+            builder.remove_entry(label)
+
+        status = builder.build()
+        assert isinstance(status, deglib_cpp.BuilderStatus)
+        assert status.added == self.data.shape[0]
+        assert status.deleted > 0
+        assert len(status.total_added_ids) == self.data.shape[0]
+        assert len(status.total_deleted_ids) > 0
+

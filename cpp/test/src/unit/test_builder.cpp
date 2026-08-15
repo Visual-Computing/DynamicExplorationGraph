@@ -152,6 +152,10 @@ TEST(BuilderStatus, DefaultValues) {
     EXPECT_EQ(status.deleted, 0u);
     EXPECT_EQ(status.improved, 0u);
     EXPECT_EQ(status.tries, 0u);
+    EXPECT_TRUE(status.step_added_ids.empty());
+    EXPECT_TRUE(status.step_deleted_ids.empty());
+    EXPECT_TRUE(status.total_added_ids.empty());
+    EXPECT_TRUE(status.total_deleted_ids.empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +244,108 @@ std::vector<std::byte> createEvpBitsFeature(const std::vector<uint8_t>& bit_valu
         }
     }
     return feature;
+}
+
+// Test: build() returns BuilderStatus and tracks added IDs
+TEST(BuilderStatus, BuildReturnsStatusAndTracksIds) {
+    auto size = 6;
+    auto edges_per_vertex = 4;
+    size_t feature_dim = 4;
+
+    deglib::distances::FloatSpace feature_space(feature_dim, deglib::distances::Metric::FP32_L2);
+    deglib::graph::SizeBoundedGraph graph(size, edges_per_vertex, std::move(feature_space));
+    std::mt19937 rnd(42);
+    deglib::builder::EvenRegularGraphBuilder builder(graph, rnd);
+
+    std::vector<std::vector<float>> features = {
+        {1.0f, 2.0f, 3.0f, 4.0f},
+        {5.0f, 6.0f, 7.0f, 8.0f},
+        {10.0f, 10.0f, 10.0f, 10.0f},
+        {15.0f, 15.0f, 15.0f, 15.0f},
+        {20.0f, 20.0f, 20.0f, 20.0f},
+        {25.0f, 25.0f, 25.0f, 25.0f}
+    };
+
+    for (uint32_t i = 0; i < features.size(); ++i) {
+        builder.addEntry(i, createFloatFeature(features[i]));
+    }
+
+    std::vector<deglib::builder::BuilderStatus> callback_statuses;
+    auto callback = [&callback_statuses](deglib::builder::BuilderStatus& status) {
+        callback_statuses.push_back(status);
+    };
+
+    deglib::builder::BuilderStatus result = builder.build(callback);
+
+    // Verify return value has the expected total counts
+    EXPECT_EQ(result.added, 6u);
+    EXPECT_EQ(result.deleted, 0u);
+    EXPECT_EQ(result.total_added_ids.size(), 6u);
+    EXPECT_TRUE(result.total_deleted_ids.empty());
+
+    // Verify total_added_ids contains labels 0-5
+    std::vector<uint32_t> expected_labels = {0, 1, 2, 3, 4, 5};
+    EXPECT_EQ(result.total_added_ids, expected_labels);
+
+    // Verify step_added_ids were populated during the build
+    for (const auto& cb_status : callback_statuses) {
+        EXPECT_EQ(cb_status.total_added_ids.size(), cb_status.added);
+        EXPECT_EQ(cb_status.step_added_ids.size(), 
+                  cb_status.total_added_ids.size() - 
+                  (cb_status.step > 1 ? callback_statuses[cb_status.step - 2].total_added_ids.size() : 0));
+    }
+
+    // Verify the last callback status matches the return value
+    EXPECT_EQ(callback_statuses.back().step, result.step);
+    EXPECT_EQ(callback_statuses.back().added, result.added);
+    EXPECT_EQ(callback_statuses.back().deleted, result.deleted);
+    EXPECT_EQ(callback_statuses.back().total_added_ids, result.total_added_ids);
+    EXPECT_EQ(callback_statuses.back().total_deleted_ids, result.total_deleted_ids);
+}
+
+TEST(BuilderStatus, BuildWithDeleteTracksIds) {
+    auto size = 8;
+    auto edges_per_vertex = 4;
+    size_t feature_dim = 4;
+
+    deglib::distances::FloatSpace feature_space(feature_dim, deglib::distances::Metric::FP32_L2);
+    deglib::graph::SizeBoundedGraph graph(size, edges_per_vertex, std::move(feature_space));
+    std::mt19937 rnd(42);
+    deglib::builder::EvenRegularGraphBuilder builder(graph, rnd);
+
+    std::vector<std::vector<float>> features = {
+        {1.0f, 2.0f, 3.0f, 4.0f},
+        {5.0f, 6.0f, 7.0f, 8.0f},
+        {10.0f, 10.0f, 10.0f, 10.0f},
+        {15.0f, 15.0f, 15.0f, 15.0f},
+        {20.0f, 20.0f, 20.0f, 20.0f},
+        {25.0f, 25.0f, 25.0f, 25.0f},
+        {30.0f, 30.0f, 30.0f, 30.0f},
+        {35.0f, 35.0f, 35.0f, 35.0f}
+    };
+
+    for (uint32_t i = 0; i < features.size(); ++i) {
+        builder.addEntry(i, createFloatFeature(features[i]));
+    }
+
+    // Remove some vertices
+    builder.removeEntry(2);
+    builder.removeEntry(5);
+
+    deglib::builder::BuilderStatus result = builder.build([](deglib::builder::BuilderStatus&) {});
+
+    EXPECT_EQ(result.added, 8u);
+    EXPECT_EQ(result.deleted, 2u);
+    EXPECT_EQ(result.total_added_ids.size(), 8u);
+    EXPECT_EQ(result.total_deleted_ids.size(), 2u);
+
+    // Verify added IDs
+    std::vector<uint32_t> expected_added = {0, 1, 2, 3, 4, 5, 6, 7};
+    EXPECT_EQ(result.total_added_ids, expected_added);
+
+    // Verify deleted IDs
+    std::vector<uint32_t> expected_deleted = {2, 5};
+    EXPECT_EQ(result.total_deleted_ids, expected_deleted);
 }
 
 // Test: Build graph with L2 distance on float vectors

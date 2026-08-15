@@ -192,7 +192,7 @@ class GraphBuilder:
     def build(
             self, callback: Union[Callable[[deglib_cpp.BuilderStatus], None], str, None] = None,
             infinite: bool = False
-    ):
+    ) -> deglib_cpp.BuilderStatus:
         """
         Build the graph. This could be run on a separate thread in an infinite loop. Call stop() to end this process.
 
@@ -202,13 +202,15 @@ class GraphBuilder:
                                      If callback is the string "progress", a simple progress bar is printed to stdout.
         :param infinite: If set to True, blocks indefinitely, until the stop() function is called. Can be used, if
                          build() is run in a separate thread.
+        :return: BuilderStatus containing build metrics and ID vectors for added/deleted vertices.
+        :rtype: deglib_cpp.BuilderStatus
         """
         if callback is None:
-            self.builder_cpp.build_silent(infinite)
+            return self.builder_cpp.build_silent(infinite)
         else:
             if not infinite and callback == 'progress':
                 callback = ProgressCallback(self.get_num_new_entries(), self.get_num_remove_entries())
-            self.builder_cpp.build(callback, infinite)
+            return self.builder_cpp.build(callback, infinite)
 
     def stop(self):
         """

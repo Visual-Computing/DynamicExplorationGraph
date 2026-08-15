@@ -1352,13 +1352,13 @@ PYBIND11_MODULE(deglib_cpp, m) {
            [](deglib::builder::EvenRegularGraphBuilder &builder,
               std::function<void(deglib::builder::BuilderStatus &)> callback,
               const bool infinite) {
-             builder.build(callback, infinite);
+             return builder.build(callback, infinite);
            })
       .def("build_silent",
            [](deglib::builder::EvenRegularGraphBuilder &builder,
               const bool infinite) {
              py::gil_scoped_release release;
-             builder.build([](deglib::builder::BuilderStatus &) {},
+             return builder.build([](deglib::builder::BuilderStatus &) {},
                                   infinite);
            })
       .def("stop", &deglib::builder::EvenRegularGraphBuilder::stop);
@@ -1404,6 +1404,10 @@ PYBIND11_MODULE(deglib_cpp, m) {
       .def_readwrite("added", &deglib::builder::BuilderStatus::added)
       .def_readwrite("deleted", &deglib::builder::BuilderStatus::deleted)
       .def_readwrite("improved", &deglib::builder::BuilderStatus::improved)
-      .def_readwrite("tries", &deglib::builder::BuilderStatus::tries);
+      .def_readwrite("tries", &deglib::builder::BuilderStatus::tries)
+      .def_readonly("step_added_ids", &deglib::builder::BuilderStatus::step_added_ids)
+      .def_readonly("step_deleted_ids", &deglib::builder::BuilderStatus::step_deleted_ids)
+      .def_readonly("total_added_ids", &deglib::builder::BuilderStatus::total_added_ids)
+      .def_readonly("total_deleted_ids", &deglib::builder::BuilderStatus::total_deleted_ids);
 }
 

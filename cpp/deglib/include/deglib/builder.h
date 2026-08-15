@@ -205,11 +205,19 @@ struct BuilderChange {
  * The build process can only be stopped between two steps.
  */
 struct BuilderStatus {
-  uint64_t step;      // number of graph manipulation steps
-  uint64_t added;     // number of added vertices
-  uint64_t deleted;   // number of deleted vertices
-  uint64_t improved;  // number of successful improvement
-  uint64_t tries;     // number of improvement tries
+  uint64_t step = 0;      // number of graph manipulation steps
+  uint64_t added = 0;     // total number of added vertices
+  uint64_t deleted = 0;   // total number of deleted vertices
+  uint64_t improved = 0;  // total number of successful improvement
+  uint64_t tries = 0;     // total number of improvement tries
+
+  // External labels changed in the current step (since last callback)
+  std::vector<uint32_t> step_added_ids;
+  std::vector<uint32_t> step_deleted_ids;
+
+  // External labels changed across the entire build process
+  std::vector<uint32_t> total_added_ids;
+  std::vector<uint32_t> total_deleted_ids;
 };
 
 /**
@@ -1431,13 +1439,17 @@ class EvenRegularGraphBuilder {
      *
      * @param callback A callback function to report build status.
      * @param infinite If true, the build loop runs indefinitely.
-     * @return Reference to the built MutableGraph.
+     * @return BuilderStatus containing build metrics and ID vectors for added/deleted vertices.
      */
-    auto& build(std::function<void(deglib::builder::BuilderStatus&)> callback, const bool infinite = false) {      
+    BuilderStatus build(std::function<void(deglib::builder::BuilderStatus&)> callback, const bool infinite = false) {      
       const auto edge_per_vertex = this->graph_.getEdgesPerVertex();
 
       // run a loop to add, delete and improve the graph
       do{
+
+        // reset step-level ID vectors
+        this->build_status_.step_added_ids.clear();
+        this->build_status_.step_deleted_ids.clear();
 
         // add or delete a vertex
         if(this->new_entry_queue_.size() > 0 || this->remove_entry_queue_.size() > 0) {
@@ -1460,9 +1472,18 @@ class EvenRegularGraphBuilder {
               this->new_entry_queue_.pop_front();
             }
 
+            // record added labels for this step and total
+            for (const auto& add_task : batch) {
+              this->build_status_.step_added_ids.push_back(add_task.label);
+              this->build_status_.total_added_ids.push_back(add_task.label);
+            }
+
             extendGraph(batch);
-            this->build_status_.added+=batch.size();
+            this->build_status_.added += batch.size();
           } else {
+            const auto del_label = this->remove_entry_queue_.front().label;
+            this->build_status_.step_deleted_ids.push_back(del_label);
+            this->build_status_.total_deleted_ids.push_back(del_label);
             reduceGraph(this->remove_entry_queue_.front());
             this->build_status_.deleted++;
             this->remove_entry_queue_.pop();
@@ -1486,8 +1507,8 @@ class EvenRegularGraphBuilder {
       }
       while(this->stop_building_ == false && (infinite || this->new_entry_queue_.size() > 0 || this->remove_entry_queue_.size() > 0));
 
-      // return the finished graph
-      return this->graph_;
+      // return the build status
+      return this->build_status_;
     }
 
     /**
