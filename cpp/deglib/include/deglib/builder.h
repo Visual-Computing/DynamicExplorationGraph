@@ -1133,11 +1133,17 @@ class EvenRegularGraphBuilder {
 
     /**
      * Do not call this method directly; instead call improve() to improve the graph.
-     * This is the extended part of the optimization process.
-     * The method takes an array where all graph changes will be documented.
+     *
+     * This method assumes the caller (wrapper for it==0, or the previous recursion step for it>0)
+     * has already removed the current edge and installed self-loops for both endpoints, and supplied
+     * the corresponding 'gain' (sum of removed-edge weights minus added-edge weights so far).
+     *
      * Vertex1 and vertex2 might be in a separate subgraph than vertex3 and vertex4.
      * Through a series of edge swaps both subgraphs should be reconnected.
      * If those changes improve the graph this method returns true otherwise false.
+     *
+     * On success it appends all performed changes to 'changes' and returns true.
+     * On failure it returns false and the caller/wrapper should revert the recorded changes.
      *
      * @param changes Vector to record all changes made during improvement.
      * @param vertex1 First vertex involved in the improvement.
@@ -1378,313 +1384,6 @@ class EvenRegularGraphBuilder {
     }
 
     /**
-     * A new edge-optimization routine. Which is similar to the old one but the stop condition phase comes earlier.
-     * In practice this method is slightly slower after the same numbers of iterations and similar end quality.
-     *
-     * optEdge(a,b,s, gain, it)
-     * - 1st It: no one is missing an edge (wrapper already removed (a,b) and created self-loops)
-     * - >1 It : (s) is missing an edge and (c) has one too much
-     *
-     * This method assumes the caller (wrapper for it==0, or the previous recursion step for it>0)
-     * has already removed the current edge and installed self-loops for both endpoints, and supplied
-     * the corresponding 'gain' (sum of removed-edge weights minus added-edge weights so far).
-     *
-     * On success it appends all performed changes to 'changes' and returns true.
-     * On failure it returns false and the caller/wrapper should revert the recorded changes.
-     */
-    bool optEdge(std::vector<deglib::builder::BuilderChange>& changes,
-                 uint32_t a, uint32_t b, uint32_t s, uint32_t t, 
-                 float gain, const uint8_t it)
-    {
-      auto& graph = this->graph_;
-      const auto k = this->improve_k_;
-      const auto eps = this->improve_eps_;
-      if (k == 0) return false;
-
-      const auto& fs = graph.getFeatureSpace();
-      const auto dist_func = fs.get_dist_func();
-      const auto dist_param = fs.get_dist_func_param();
-      const auto edges_per_vertex = graph.getEdgesPerVertex();
-
-      // Helper to get existing weight (if present) else compute
-      auto get_weight = [&](uint32_t u, uint32_t v) -> float {
-        const auto nidx = graph.getNeighborIndices(u);
-        const auto nw = graph.getNeighborWeights(u);
-        for (uint32_t i = 0; i < edges_per_vertex; ++i) 
-          if (nidx[i] == v) return nw[i];
-          
-        // fallback to direct distance computation
-        return dist_func(graph.getFeatureVector(u), graph.getFeatureVector(v), dist_param);
-      };
-
-      // Step 1: remove edge (a,b): 
-      // -- happens in the first iteration outside of the method
-      // -- after the first ieration is happens at the end of this method
-
-      // Step 2: STOP criteria (only interesting after one iteration)
-      // Case 1: (b == s)
-      if (a == b) {
-        // RangeSearch from (a) to target (b): find good (e) and its neighbor (f) with
-        // e != b, f != b, and not adjacent to b: (N(b) ∩ {e,f} = ∅)
-        const auto b_feat = graph.getFeatureVector(b);
-        auto rs = graph.search_intern({ s,t }, b_feat, k, eps); 
-        float best_delta = std::numeric_limits<float>::lowest();
-        uint32_t best_e = 0, best_f = 0;
-        float best_w_ef = 0.f, best_w_eb = 0.f, best_w_fb = 0.f;
-
-        for (auto&& cand : topListAscending(rs)) {
-          const uint32_t e = cand.getIdentifier();
-          if (e == b) continue;
-          if (graph.hasEdge(b, e)) continue; // N(b) ∩ {e} = ∅
-
-          const auto e_neighbors = graph.getNeighborIndices(e);
-          const auto e_weights = graph.getNeighborWeights(e);
-
-          for (uint32_t i = 0; i < edges_per_vertex; ++i) {
-            const uint32_t f = e_neighbors[i];
-            if (f == b) continue;
-            if (graph.hasEdge(b, f)) continue; // N(b) ∩ {f} = ∅
-
-            const float w_ef = e_weights[i];
-            const float w_eb = cand.getDistance();
-            const float w_fb = dist_func(graph.getFeatureVector(f), b_feat, dist_param);
-
-            // maximize (gain + d(e,f)) - (d(e,b) + d(f,b))
-            const float delta = (gain + w_ef) - (w_eb + w_fb);
-            if (delta > best_delta) {
-              best_delta = delta;
-              best_e = e; 
-              best_f = f;
-              best_w_ef = w_ef;
-              best_w_eb = w_eb; 
-              best_w_fb = w_fb;
-            }
-          }
-        }
-
-        if (best_delta > 0.f) {
-          // Replace (e,f) with (e,b) and (f,b)
-          // e: replace f -> b
-          graph.changeEdge(best_e, best_f, b, best_w_eb);
-          changes.emplace_back(best_e, best_f, best_w_ef, b, best_w_eb);
-
-          // f: replace e -> b
-          graph.changeEdge(best_f, best_e, b, best_w_fb);
-          changes.emplace_back(best_f, best_e, best_w_ef, b, best_w_fb);
-
-          // s: two self-loops should be present; replace them with e and f
-          graph.changeEdge(b, b, best_e, best_w_eb);
-          changes.emplace_back(b, b, 0.f, best_e, best_w_eb);
-          graph.changeEdge(b, b, best_f, best_w_fb);
-          changes.emplace_back(b, b, 0.f, best_f, best_w_fb);
-
-          return true;
-        }
-        // If we cannot finalize here, continue with next steps
-      } else {
-        // Case 2: (a != b) and a not connected to b
-        if(graph.hasEdge(a, b) == false) {
-
-          const float w_ab = dist_func(graph.getFeatureVector(a), graph.getFeatureVector(b), dist_param);
-          if((gain - w_ab) > 0 && (graph.hasPath({s,t}, a, eps, k).size() > 0 || graph.hasPath({s,t}, b, eps, k).size() > 0)) {
-            // add (a,b) and stop
-            graph.changeEdge(a, a, b, w_ab);
-            changes.emplace_back(a, a, 0.f, b, w_ab);
-            graph.changeEdge(b, b, a, w_ab);
-            changes.emplace_back(b, b, 0.f, a, w_ab);
-            return true;
-          }
-        }
-      }
-      
-      // Step 3: continue searching for improvement path
-      // RangeSearch from (a) to target (b) to find a good vertex (c) with:
-      // (a != c), (b != c), N(b) ∩ {c} = ∅ --> then add edge (b,c)
-      // ** (s) and (b) are missing an edge **
-      uint32_t best_c = 0, best_d = 0;
-      float best_score = std::numeric_limits<float>::lowest();
-      {
-        const auto b_feat = graph.getFeatureVector(b);
-        auto rs_bc = graph.search_intern({ s,t }, b_feat, k, eps); 
-
-        // Choose the best (c,d) pair by maximizing (gain - d(b,c) + d(c,d))
-        float best_w_bc = 0.f, best_w_cd = 0.f;
-
-        for (auto&& cand : topListAscending(rs_bc)) {
-          const uint32_t c = cand.getIdentifier();
-          if (c == a || c == b) continue;
-          if (graph.hasEdge(b, c)) continue; // not yet adjacent to b
-
-          const float w_bc = cand.getDistance();
-
-          // Select an edge from (c) to (d) to remove with (d != b)
-          const auto c_neighbors = graph.getNeighborIndices(c);
-          const auto c_weights  = graph.getNeighborWeights(c);
-
-          for (uint32_t i = 0; i < edges_per_vertex; ++i) {
-            const uint32_t d = c_neighbors[i];
-            if (d == b) continue; // avoid undoing the just-added edge
-            const float w_cd = c_weights[i];
-            
-            // score = gain - d(b,c) + d(c,d)
-            const float score = (gain - w_bc) + w_cd;
-            if (score > best_score) {
-              best_score = score;
-              best_c = c;
-              best_d = d;
-              best_w_bc = w_bc;
-              best_w_cd = w_cd;
-            }
-          }
-        }
-
-        // No feasible (c,d) found
-        if (best_score == std::numeric_limits<float>::lowest()) {          
-          return false;
-        }
-
-        // Apply the chosen (b,c) addition and remove (c,d)
-        // b: replace self-loop -> c
-        graph.changeEdge(b, b, best_c, best_w_bc);
-        changes.emplace_back(b, b, 0.f, best_c, best_w_bc);
-
-        // c: replace d -> b
-        graph.changeEdge(best_c, best_d, b, best_w_bc);
-        changes.emplace_back(best_c, best_d, best_w_cd, b, best_w_bc);
-
-        // d: replace c -> self-loop
-        graph.changeEdge(best_d, best_c, best_d, 0.f);
-        changes.emplace_back(best_d, best_c, best_w_cd, best_d, 0.f);
-      }
-
-      // Step 4: Recurse if depth allows; otherwise stop (fail) to trigger revert by caller
-      if (it + 1 >= this->max_path_length_) {
-        return false;
-      }
-      
-      // Step 5: Stop early
-      if(best_score < 0) {
-        return false;
-      }
-
-      // Next iteration: call optEdge(c, d, s)
-      // ** (a) and (best_d) are missing an edge ** 
-      // ** a and b might be disconnected **
-      // ** b and c are connected **
-      // ** c and d might be disconnected **
-      return optEdge(changes, best_d, a, b, b, best_score, uint8_t(it + 1));
-    }
-
-    /**
-     * A new edge-optimization routine. Which is similar to the old one but the stop condition phase comes earlier.
-     * In practice this method is slightly slower after the same numbers of iterations and similar end quality.
-     * 
-     * Wrapper that initializes optEdge by removing (a,b) once and seeding the gain with d(a,b).
-     * Returns true if an improvement path was found; otherwise reverts all changes and returns false.
-     */
-    bool optEdge(uint32_t a, uint32_t b, float dist_ab) {
-      if (improve_k_ == 0) return false;
-
-      auto& graph = this->graph_;
-      std::vector<deglib::builder::BuilderChange> changes;
-
-      // Initial removal (1st It): replace (a,b) by self-loops and seed gain with d(a,b)
-      graph.changeEdge(a, b, a, 0.f);
-      changes.emplace_back(a, b, dist_ab, a, 0.f);
-      graph.changeEdge(b, a, b, 0.f);
-      changes.emplace_back(b, a, dist_ab, b, 0.f);
-
-      if (optEdge(changes, a, b, a, a, dist_ab, 0) == false) {
-        // revert in reverse order
-        const auto sz = changes.size();
-        for (size_t i = 0; i < sz; ++i) {
-          const auto& c = changes[sz - 1 - i];
-          graph.changeEdge(c.internal_index, c.to_neighbor_index, c.from_neighbor_index, c.from_neighbor_weight);
-        }
-        return false;
-      }
-      return true;
-    }
-
-    /**
-     * Tries to improve the graph by swapping edges between two pairs of vertices.
-     * Given an edge (v1, v2), it selects a random edge (v3, v4) and checks if swapping
-     * connections to (v1, v3) & (v2, v4) or (v1, v4) & (v2, v3) reduces the total edge weight.
-     */
-    bool simpleEdgeSwaps(uint32_t vertex1, uint32_t vertex2, float dist12) {
-      auto& graph = this->graph_;
-      
-      // Select a random vertex3
-      auto distrib = deglib::random::DeterministicUniformIntDistribution<uint32_t>(0, uint32_t(graph.size() - 1));
-      uint32_t vertex3 = distrib(this->rnd_);
-      
-      if (vertex3 == vertex1 || vertex3 == vertex2) return false;
-
-      // Select a random neighbor of vertex3 as vertex4
-      const auto neighbor_indices = graph.getNeighborIndices(vertex3);
-      const auto neighbor_weights = graph.getNeighborWeights(vertex3);
-      const auto edges_per_vertex = graph.getEdgesPerVertex();
-      
-      auto distrib_neighbor = deglib::random::DeterministicUniformIntDistribution<uint32_t>(0, edges_per_vertex - 1);
-      uint32_t neighbor_idx = distrib_neighbor(this->rnd_);
-      
-      uint32_t vertex4 = neighbor_indices[neighbor_idx];
-      float dist34 = neighbor_weights[neighbor_idx];
-
-      if (vertex4 == vertex1 || vertex4 == vertex2) return false;
-
-      // Check connectivity constraints: v3 and v4 should not be connected to v1 or v2
-      if (graph.hasEdge(vertex3, vertex1) || graph.hasEdge(vertex3, vertex2) ||
-          graph.hasEdge(vertex4, vertex1) || graph.hasEdge(vertex4, vertex2)) {
-        return false;
-      }
-
-      // Calculate distances for potential new edges
-      const auto& feature_space = graph.getFeatureSpace();
-      const auto dist_func = feature_space.get_dist_func();
-      const auto dist_func_param = feature_space.get_dist_func_param();
-      
-      const auto f1 = graph.getFeatureVector(vertex1);
-      const auto f2 = graph.getFeatureVector(vertex2);
-      const auto f3 = graph.getFeatureVector(vertex3);
-      const auto f4 = graph.getFeatureVector(vertex4);
-
-      float dist13 = dist_func(f1, f3, dist_func_param);
-      float dist24 = dist_func(f2, f4, dist_func_param);
-      
-      float dist14 = dist_func(f1, f4, dist_func_param);
-      float dist23 = dist_func(f2, f3, dist_func_param);
-
-      // Calculate costs
-      // a) Current: (v1, v2) and (v3, v4)
-      float cost_a = dist12 + dist34;
-      
-      // b) Swap 1: (v1, v3) and (v2, v4)
-      float cost_b = dist13 + dist24;
-      
-      // c) Swap 2: (v1, v4) and (v2, v3)
-      float cost_c = dist14 + dist23;
-
-      if (cost_b < cost_a && cost_b < cost_c) {
-        // Apply swap b
-        graph.changeEdge(vertex1, vertex2, vertex3, dist13);
-        graph.changeEdge(vertex2, vertex1, vertex4, dist24);
-        graph.changeEdge(vertex3, vertex4, vertex1, dist13);
-        graph.changeEdge(vertex4, vertex3, vertex2, dist24);
-        return true;
-      } else if (cost_c < cost_a && cost_c < cost_b) {
-        // Apply swap c
-        graph.changeEdge(vertex1, vertex2, vertex4, dist14);
-        graph.changeEdge(vertex2, vertex1, vertex3, dist23);
-        graph.changeEdge(vertex3, vertex4, vertex2, dist23);
-        graph.changeEdge(vertex4, vertex3, vertex1, dist14);
-        return true;
-      }
-
-      return false;
-    }
-
-    /**
      * Try to improve the edge of a random vertex to its worst neighbor
      * 
      * @return true if a change could be made otherwise false
@@ -1703,17 +1402,10 @@ class EvenRegularGraphBuilder {
       const auto neighbor_indices = graph.getNeighborIndices(vertex1);
       auto success = false;
 
-      // real random edges swaps
-      //auto distrib_neighbor = deglib::random::DeterministicUniformIntDistribution<uint32_t>(0, edges_per_vertex - 1);
-      //uint32_t neighbor_idx = distrib_neighbor(this->rnd_);
-      //success |= simpleEdgeSwaps(vertex1, neighbor_indices[neighbor_idx], neighbor_weights[neighbor_idx]);
-
       for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
         const auto vertex2 = neighbor_indices[edge_idx];
         if(graph.hasEdge(vertex1, vertex2) && deglib::analysis::checkRNG(graph, edges_per_vertex, vertex2, vertex1, neighbor_weights[edge_idx]) == false) 
           success |= improveEdges(vertex1, vertex2, neighbor_weights[edge_idx]);
-          // success |= optEdge(vertex1, vertex2, neighbor_weights[edge_idx]);
-          //success |= simpleEdgeSwaps(vertex1, vertex2, neighbor_weights[edge_idx]);
       }
 
       // improve bad edge
@@ -1728,37 +1420,6 @@ class EvenRegularGraphBuilder {
       }
       if(bad_neighbor_weight != std::numeric_limits<float>::lowest())
         success |= improveEdges(vertex1, bad_neighbor_index, bad_neighbor_weight);
-
-      // repeat until you improve at least one bad edge
-      /*if (success == false) {
-        auto neighbors = std::vector<std::pair<uint32_t, float>>();
-        neighbors.reserve(edges_per_vertex);
-        for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
-          const auto vertex2 = neighbor_indices[edge_idx];
-          if (graph.hasEdge(vertex1, vertex2)) {
-            neighbors.emplace_back(vertex2, neighbor_weights[edge_idx]);
-          }
-        }
-
-        std::sort(neighbors.begin(), neighbors.end(), [](const auto& a, const auto& b) {
-          return a.second > b.second;
-        });
-
-        for (const auto& neighbor : neighbors) {
-          success |= improveEdges(vertex1, neighbor.first, neighbor.second);
-          if (success) break;
-        }
-      }*/
-
-
-      // 1.3 if no noneRNG edge was improved, try to improve a RNG edges
-      /*for (size_t edge_idx = 0; success == false && edge_idx < edges_per_vertex; edge_idx++) {
-        const auto vertex2 = neighbor_indices[edge_idx];
-        if(graph.hasEdge(vertex1, vertex2) && deglib::analysis::checkRNG(graph, edges_per_vertex, vertex2, vertex1, neighbor_weights[edge_idx])) 
-          success |= improveEdges(vertex1, vertex2, neighbor_weights[edge_idx]);
-          //success |= optEdge(vertex1, vertex2, neighbor_weights[edge_idx]);
-          //success |= simpleEdgeSwaps(vertex1, vertex2, neighbor_weights[edge_idx]);
-      }*/
 
       return success;
     }

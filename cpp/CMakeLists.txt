@@ -103,6 +103,5 @@ endif()
 
 if (ENABLE_BENCHMARKS)
 	add_subdirectory(external/fmt)
-	add_subdirectory(benchmark)
 	add_subdirectory(bench)
 endif()
