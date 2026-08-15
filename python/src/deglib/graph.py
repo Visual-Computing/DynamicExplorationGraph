@@ -142,8 +142,10 @@ class DynamicExplorationGraph:
         :param max_distance_computation_count: Distance computation budget limit.
         :param threads: Number of parallel worker threads.
         :param return_distances: If True, returns (indices, distances). If False, returns only indices.
-        :param unsorted: If True, returns candidates in unsorted (heap) order instead of ascending distance order.
+        :param unsorted: If True, returns candidates in unsorted order instead of ascending distance order.
         :returns: (indices, distances) tuple if return_distances is True, otherwise indices array.
+                  If fewer than k results are found, unfilled elements are padded with
+                  np.iinfo(np.uint32).max (for indices) and np.nan / infinity (for distances).
         """
         # handle query shapes
         single_query = len(query.shape) == 1
@@ -165,13 +167,16 @@ class DynamicExplorationGraph:
             query, eps, k, filter_obj, max_distance_computation_count, threads, return_distances, unsorted
         )
 
-        if single_query:
-            if return_distances:
-                return indices_or_tuple[0][0], indices_or_tuple[1][0]
-            else:
-                return indices_or_tuple[0]
-
-        return indices_or_tuple
+        if return_distances:
+            indices, distances = indices_or_tuple
+            if single_query:
+                return indices[0], distances[0]
+            return indices, distances
+        else:
+            indices = indices_or_tuple
+            if single_query:
+                return indices[0]
+            return indices
 
     def explore(
             self, entry_external_label: Union[int, np.ndarray, list], k: int,
@@ -193,8 +198,10 @@ class DynamicExplorationGraph:
         :param threads: The number of threads to use for parallel processing.
         :param filter_labels: Labels filter.
         :param return_distances: If True, returns (indices, distances). If False, returns only indices.
-        :param unsorted: If True, returns candidates in unsorted (heap) order.
+        :param unsorted: If True, returns candidates in order instead of ascending distance order.
         :returns: (indices, distances) tuple if return_distances is True, otherwise indices array.
+                  If fewer than k results are found, unfilled elements are padded with
+                  np.iinfo(np.uint32).max (for indices) and np.nan / infinity (for distances).
         """
         if k > self.size():
             warnings.warn(

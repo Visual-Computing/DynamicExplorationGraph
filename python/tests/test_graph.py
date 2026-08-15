@@ -237,18 +237,18 @@ def test_small_filters(conf: Configuration):
         k = 400
 
         valid_labels = np.random.choice(conf.graph.size(), size=n_valid, replace=False)
-        # if less valid labels are present, than k, a warning is expected
-        if n_valid < k:
-            with pytest.warns(UserWarning):
-                results, _dists = conf.graph.search(conf.query, filter_labels=Filter(valid_labels), eps=0.01, k=k)
-        else:
-            results, _dists = conf.graph.search(conf.query, filter_labels=Filter(valid_labels), eps=0.01, k=k)
+        results, _dists = conf.graph.search(conf.query, filter_labels=Filter(valid_labels), eps=0.01, k=k)
 
-        if results.shape[-1] != min(k, n_valid):
-            raise ValueError('expected {} results, but got {}'.format(min(k, n_valid), results.shape[-1]))
+        assert results.shape[-1] == k
 
-        if not np.all(np.isin(results, valid_labels)):
+        valid_results = results[results != np.iinfo(np.uint32).max]
+        if not np.all(np.isin(valid_results, valid_labels)):
             raise ValueError('Found results that should have been filtered out.')
+
+        if n_valid < k:
+            num_unfilled = k - n_valid
+            assert np.sum(results == np.iinfo(np.uint32).max) == num_unfilled
+            assert np.sum(np.isnan(_dists)) == num_unfilled
 
 
 @pytest.mark.parametrize('conf', configurations[:1])
@@ -261,8 +261,10 @@ def test_filter_edge_cases(conf: Configuration):
 
     # No valid labels filter with max_value specified
     no_labels = np.array([], dtype=np.int32)
-    with pytest.warns(UserWarning):
-        results_none, _ = conf.graph.search(conf.query, filter_labels=Filter(no_labels, max_value=0), eps=0.1, k=k)
+    results_none, dists_none = conf.graph.search(conf.query, filter_labels=Filter(no_labels, max_value=0), eps=0.1, k=k)
+    assert results_none.shape[-1] == k
+    assert np.all(results_none == np.iinfo(np.uint32).max)
+    assert np.all(np.isnan(dists_none))
 
 
 def _build_test_graph_with_distinct_labels(samples=50, dims=16, edges_per_vertex=10):

@@ -65,6 +65,7 @@ class TestFilterIntegration:
     def test_filter_no_valid_labels(self):
         no_labels = np.array([], dtype=np.int32)
         k = 5
-        with pytest.warns(UserWarning):
-            results, _ = self.graph.search(self.query, filter_labels=Filter(no_labels, max_value=0), eps=0.1, k=k)
-        assert results.shape[-1] == 0
+        results, dists = self.graph.search(self.query, filter_labels=Filter(no_labels, max_value=0), eps=0.1, k=k)
+        assert results.shape[-1] == k
+        assert np.all(results == np.iinfo(np.uint32).max)
+        assert np.all(np.isnan(dists))
