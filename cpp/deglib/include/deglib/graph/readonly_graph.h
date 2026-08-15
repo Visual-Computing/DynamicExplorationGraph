@@ -288,6 +288,7 @@ public:
         // found our target vertex, create a path back to the entry vertex
         if(neighbor_index == to_vertex) {
           auto path = std::vector<deglib::graph::ObjectDistance>();
+          path.emplace_back(to_vertex, 0.f);
           path.emplace_back(next_vertex.getIdentifier(), next_vertex.getDistance());
 
           auto last_vertex = trackback.find(next_vertex.getIdentifier());

@@ -25,6 +25,10 @@ static std::vector<float> make_vec_4d(float x, float y, float z, float w) {
     return {x, y, z, w};
 }
 
+static std::vector<float> make_float_vec(size_t dim, float default_val = 0.0f) {
+    return std::vector<float>(dim, default_val);
+}
+
 static std::unique_ptr<std::byte[]> make_float_bytes(const std::vector<float>& v) {
     auto bytes = std::make_unique<std::byte[]>(v.size() * sizeof(float));
     std::memcpy(bytes.get(), v.data(), v.size() * sizeof(float));
@@ -582,6 +586,41 @@ TEST(SizeBoundedGraph, ExploreWithMaxDistanceCount) {
 
     EXPECT_GT(results.size(), 0u);
     EXPECT_LE(results.size(), 5u);
+}
+
+TEST(SizeBoundedGraph, HasPathBasic) {
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
+    deglib::graph::SizeBoundedGraph graph(5, 4, space);
+
+    for (int i = 0; i < 5; ++i) {
+        auto v = make_float_vec(4);
+        v[0] = static_cast<float>(i);
+        graph.addVertex(i, make_float_bytes(v).get());
+    }
+
+    uint32_t sorted_neighbors[] = {0, 1, 2, 3};
+    float weights[] = {0.0f, 1.0f, 4.0f, 9.0f};
+    graph.changeEdges(0, sorted_neighbors, weights);
+
+    auto path = graph.hasPath({0}, 1, 0.0f, 5);
+    ASSERT_EQ(path.size(), 2u);
+    EXPECT_EQ(path[0].getIdentifier(), 1u);
+    EXPECT_EQ(path[0].getDistance(), 0.0f);
+    EXPECT_EQ(path[1].getIdentifier(), 0u);
+}
+
+TEST(SizeBoundedGraph, HasPathNoConnection) {
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
+    deglib::graph::SizeBoundedGraph graph(5, 4, space);
+
+    for (int i = 0; i < 5; ++i) {
+        auto v = make_float_vec(4);
+        v[0] = static_cast<float>(i);
+        graph.addVertex(i, make_float_bytes(v).get());
+    }
+
+    auto path = graph.hasPath({0}, 4, 0.0f, 5);
+    EXPECT_EQ(path.size(), static_cast<size_t>(0));
 }
 // ---------------------------------------------------------------------------
 //  10. Internal vs External ID Verification
