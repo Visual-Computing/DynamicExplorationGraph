@@ -98,7 +98,7 @@ class TestRerankUnit:
         result = self.space.rerank(queries, candidates, base, k_top=2)
         assert result.shape == (1, 2)
         assert result[0, 0] == 0
-        assert result[0, 1] == 0  # filled with query index since only 1 valid candidate
+        assert result[0, 1] == np.iinfo(np.uint32).max  # unfilled candidate is padded with uint32 max
 
     def test_multiple_queries(self):
         queries = np.array([

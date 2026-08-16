@@ -34,7 +34,7 @@ class DynamicExplorationGraph:
             cls, capacity: int, feature_space: FloatSpace, edges_per_vertex: int = 32
     ) -> 'DynamicExplorationGraph':
         """
-        Create an empty mutable DynamicExplorationGraph.
+        Create an empty mutable DynamicExplorationGraph (SizeBoundedGraph).
 
         :param capacity: The maximal number of vertices of this graph.
         :param feature_space: A FloatSpace object defining dimensionality, metric, and instruction set.
@@ -42,6 +42,22 @@ class DynamicExplorationGraph:
         :return: A new mutable DynamicExplorationGraph.
         """
         graph_cpp = deglib_cpp.create_size_bounded_graph(capacity, edges_per_vertex, feature_space.to_cpp())
+        return cls(graph_cpp)
+
+    @classmethod
+    def create_dynamic_empty(
+            cls, feature_space: FloatSpace, edges_per_vertex: int = 32, chunk_size: int = 1024
+    ) -> 'DynamicExplorationGraph':
+        """
+        Create an empty mutable DynamicExplorationGraph with dynamic chunk-based memory allocation (DynamicGraph).
+
+        :param feature_space: A FloatSpace object defining dimensionality, metric, and instruction set.
+        :param edges_per_vertex: Number of neighbors for each vertex (must be even). Defaults to 32.
+        :param chunk_size: Target number of vertices per memory chunk (default = 1024).
+                           Will be automatically rounded up to the nearest power of 2 (e.g. 600 -> 1024).
+        :return: A new mutable DynamicExplorationGraph.
+        """
+        graph_cpp = deglib_cpp.create_dynamic_graph(edges_per_vertex, feature_space.to_cpp(), chunk_size)
         return cls(graph_cpp)
 
     @classmethod
@@ -84,6 +100,22 @@ class DynamicExplorationGraph:
         if not os.path.isfile(path):
             raise FileNotFoundError('File "{}" could not be found'.format(path))
         graph_cpp = deglib_cpp.load_readonly_graph(str(path))
+        return cls(graph_cpp)
+
+    @classmethod
+    def load_dynamic_graph(cls, path: pathlib.Path | str, chunk_size: int = 1024) -> 'DynamicExplorationGraph':
+        """
+        Read a saved graph as a mutable DynamicGraph with chunk-based allocation.
+
+        :param path: The path where to look for the file
+        :param chunk_size: Target number of vertices per memory chunk (default = 1024).
+                           Will be automatically rounded up to the nearest power of 2 (e.g. 600 -> 1024).
+        :raises FileNotFoundError: If the given file does not exist
+        :return: A mutable DynamicExplorationGraph.
+        """
+        if not os.path.isfile(path):
+            raise FileNotFoundError('File "{}" could not be found'.format(path))
+        graph_cpp = deglib_cpp.load_dynamic_graph(str(path), chunk_size)
         return cls(graph_cpp)
 
     def size(self) -> int:
@@ -281,6 +313,32 @@ class DynamicExplorationGraph:
         )
         return DynamicExplorationGraph(graph_cpp)
 
+    def to_dynamic(
+        self,
+        feature_space: Optional[FloatSpace] = None,
+        custom_features: Optional[np.ndarray] = None,
+        chunk_size: int = 1024
+    ) -> 'DynamicExplorationGraph':
+        """
+        Create a mutable DynamicGraph with chunk-based dynamic memory allocation
+        from the given graph (ReadOnly, SizeBounded, or Dynamic),
+        optionally overriding the feature space and feature vectors.
+        All edge weights are recalculated using the new feature space.
+
+        :param feature_space: Optional FloatSpace specifying the target feature space.
+                              If None, uses the graph's existing feature space.
+        :param custom_features: Optional NumPy array containing replacement feature vectors.
+        :param chunk_size: Target number of vertices per memory chunk (default = 1024).
+                           Will be automatically rounded up to the nearest power of 2 (e.g. 600 -> 1024).
+        :return: A new mutable DynamicExplorationGraph.
+        """
+        fs_cpp = feature_space.to_cpp() if feature_space is not None else None
+        feat_cpp = np.ascontiguousarray(custom_features) if custom_features is not None else None
+        graph_cpp = deglib_cpp.dynamic_graph_from_graph(
+            self.dynamic_exploration_graph_cpp, fs_cpp, feat_cpp, chunk_size
+        )
+        return DynamicExplorationGraph(graph_cpp)
+
     def __repr__(self) -> str:
         return (f'DynamicExplorationGraph(size={self.size()} edges_per_vertex={self.get_edges_per_vertex()} '
                 f'dim={self.get_feature_space().dim()})')
@@ -292,7 +350,7 @@ def get_num_useful_threads(requested: int, max_limit: int):
     return min(requested, max_limit)  # dont use more threads than queries
 
 
-__all__ = ['DynamicExplorationGraph', 'load_readonly_graph']
+__all__ = ['DynamicExplorationGraph', 'load_readonly_graph', 'load_dynamic_graph']
 
 
 def load_readonly_graph(path: pathlib.Path | str) -> DynamicExplorationGraph:
@@ -303,3 +361,15 @@ def load_readonly_graph(path: pathlib.Path | str) -> DynamicExplorationGraph:
     :raises FileNotFoundError: If the given file does not exist
     """
     return DynamicExplorationGraph.load_readonly_graph(path)
+
+
+def load_dynamic_graph(path: pathlib.Path | str, chunk_size: int = 1024) -> DynamicExplorationGraph:
+    """
+    Read a saved graph as a mutable DynamicGraph with chunk-based allocation.
+
+    :param path: The path where to look for the file
+    :param chunk_size: Target number of vertices per memory chunk (default = 1024).
+                       Will be automatically rounded up to the nearest power of 2 (e.g. 600 -> 1024).
+    :raises FileNotFoundError: If the given file does not exist
+    """
+    return DynamicExplorationGraph.load_dynamic_graph(path, chunk_size)

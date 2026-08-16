@@ -690,3 +690,92 @@ def test_sizebounded_graph_from_graph_inner_product():
     assert indices.shape == (1, 5)
 
 
+def test_dynamic_graph_create_empty_and_build():
+    """Test creating an empty DynamicGraph and populating it with GraphBuilder."""
+    samples = 50
+    dims = 16
+    edges_per_vertex = 8
+    chunk_size = 32
+
+    data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
+    feature_space = FloatSpace.create(dims, Metric.FP32_L2)
+
+    graph = deglib.DynamicExplorationGraph.create_dynamic_empty(
+        feature_space=feature_space, edges_per_vertex=edges_per_vertex, chunk_size=chunk_size
+    )
+    assert graph.is_mutable()
+    assert graph.size() == 0
+    assert graph.get_edges_per_vertex() == edges_per_vertex
+
+    builder = deglib.GraphBuilder(graph)
+    labels = np.arange(samples, dtype=np.uint32)
+    builder.add_entry(labels, data)
+    builder.build()
+
+    assert graph.size() == samples
+    for i in range(samples):
+        assert graph.has_vertex(i)
+
+    # Search
+    query = data[0:1]
+    indices, distances = graph.search(query, eps=0.1, k=5)
+    assert indices.shape == (1, 5)
+    assert indices[0, 0] == 0
+    assert np.isclose(distances[0, 0], 0.0, atol=1e-5)
+
+
+def test_to_dynamic_conversion_and_mutation():
+    """Test converting a graph to DynamicGraph via to_dynamic() and modifying it."""
+    samples = 40
+    dims = 16
+    edges_per_vertex = 8
+
+    data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
+    graph = deglib.build_from_data(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
+
+    dyn_graph = graph.to_dynamic(chunk_size=64)
+    assert dyn_graph.is_mutable()
+    assert dyn_graph.size() == samples
+
+    # Search on converted graph
+    query = data[0:1]
+    orig_indices, orig_dists = graph.search(query, eps=0.1, k=5)
+    dyn_indices, dyn_dists = dyn_graph.search(query, eps=0.1, k=5)
+    assert np.array_equal(orig_indices, dyn_indices)
+    assert np.allclose(orig_dists, dyn_dists, atol=1e-5)
+
+    # Further mutation with GraphBuilder
+    new_data = np.random.default_rng(123).standard_normal((5, dims)).astype(np.float32)
+    new_labels = np.arange(samples, samples + 5, dtype=np.uint32)
+    builder = deglib.GraphBuilder(dyn_graph)
+    builder.add_entry(new_labels, new_data)
+    builder.build()
+
+    assert dyn_graph.size() == samples + 5
+    assert dyn_graph.has_vertex(samples + 4)
+
+
+def test_save_and_load_dynamic_graph(tmp_path):
+    """Test saving a graph and reloading it via load_dynamic_graph."""
+    samples = 30
+    dims = 8
+    edges_per_vertex = 6
+
+    data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
+    graph = deglib.build_from_data(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
+
+    file_path = tmp_path / "test_dyn_graph.deg"
+    graph.save_graph(file_path)
+
+    loaded_graph = deglib.load_dynamic_graph(file_path, chunk_size=32)
+    assert loaded_graph.is_mutable()
+    assert loaded_graph.size() == samples
+    assert loaded_graph.get_edges_per_vertex() == edges_per_vertex
+
+    query = data[0:1]
+    orig_indices, orig_dists = graph.search(query, eps=0.1, k=5)
+    loaded_indices, loaded_dists = loaded_graph.search(query, eps=0.1, k=5)
+    assert np.array_equal(orig_indices, loaded_indices)
+    assert np.allclose(orig_dists, loaded_dists, atol=1e-5)
+
+

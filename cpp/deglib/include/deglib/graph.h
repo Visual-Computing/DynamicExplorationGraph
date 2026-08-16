@@ -49,18 +49,35 @@ public:
     DynamicExplorationGraph(const DynamicExplorationGraph&) = delete;
     DynamicExplorationGraph& operator=(const DynamicExplorationGraph&) = delete;
 
-   /**
-    * Create an empty mutable DynamicExplorationGraph with the given capacity,
-    * edges per vertex, and feature space.
-    */
-   static DynamicExplorationGraph create_empty(
-       const uint32_t max_vertex_count,
-       const uint8_t edges_per_vertex,
-       const deglib::distances::FloatSpace& feature_space)
-   {
-       auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(max_vertex_count, edges_per_vertex, feature_space);
-       return DynamicExplorationGraph(std::move(graph));
-   }
+    /**
+     * Create an empty mutable DynamicExplorationGraph with the given capacity,
+     * edges per vertex, and feature space.
+     */
+    static DynamicExplorationGraph create_empty(
+        const uint32_t max_vertex_count,
+        const uint8_t edges_per_vertex,
+        const deglib::distances::FloatSpace& feature_space)
+    {
+        auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(max_vertex_count, edges_per_vertex, feature_space);
+        return DynamicExplorationGraph(std::move(graph));
+    }
+
+    /**
+     * Create an empty mutable DynamicExplorationGraph with chunk-based dynamic memory allocation.
+     *
+     * @param edges_per_vertex Number of edges per vertex (must be even).
+     * @param feature_space The feature space defining dimensionality and metric.
+     * @param chunk_size Target number of vertices per memory chunk (default = 1024).
+     *                   Will be automatically rounded up to the nearest power of 2 (e.g. 600 -> 1024).
+     */
+    static DynamicExplorationGraph create_dynamic_empty(
+        const uint8_t edges_per_vertex,
+        const deglib::distances::FloatSpace& feature_space,
+        const uint32_t chunk_size = 1024)
+    {
+        auto graph = std::make_unique<deglib::graph::DynamicGraph>(edges_per_vertex, feature_space, chunk_size);
+        return DynamicExplorationGraph(std::move(graph));
+    }
 
    /**
     * Create a random exploration graph from the given feature data.
@@ -229,6 +246,38 @@ public:
     {
         auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(
             deglib::graph::SizeBoundedGraph::from_graph(*internal_graph_, custom_feature_space, custom_features, new_max_size)
+        );
+        return DynamicExplorationGraph(std::move(graph));
+    }
+
+    /**
+     * Convert this graph to a mutable DynamicGraph with chunk-based allocation.
+     * 
+     * @param chunk_size Target number of vertices per memory chunk (default = 1024).
+     *                   Will be automatically rounded up to the nearest power of 2 (e.g. 600 -> 1024).
+     */
+    DynamicExplorationGraph to_dynamic(const uint32_t chunk_size = 1024) const {
+        auto graph = std::make_unique<deglib::graph::DynamicGraph>(
+            deglib::graph::DynamicGraph::from_graph(*internal_graph_, chunk_size)
+        );
+        return DynamicExplorationGraph(std::move(graph));
+    }
+
+    /**
+     * Convert this graph to a mutable DynamicGraph with custom feature space.
+     * 
+     * @param custom_feature_space Target feature space (dimension and metric).
+     * @param custom_features Optional raw byte pointer to new feature vectors.
+     * @param chunk_size Target number of vertices per memory chunk (default = 1024).
+     *                   Will be automatically rounded up to the nearest power of 2 (e.g. 600 -> 1024).
+     */
+    DynamicExplorationGraph to_dynamic(
+        const deglib::distances::FloatSpace& custom_feature_space,
+        const void* custom_features = nullptr,
+        const uint32_t chunk_size = 1024) const
+    {
+        auto graph = std::make_unique<deglib::graph::DynamicGraph>(
+            deglib::graph::DynamicGraph::from_graph(*internal_graph_, custom_feature_space, custom_features, chunk_size)
         );
         return DynamicExplorationGraph(std::move(graph));
     }

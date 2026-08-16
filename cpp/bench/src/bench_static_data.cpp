@@ -196,9 +196,9 @@ void run_static_benchmark(const DatasetName& ds_name, const std::filesystem::pat
 
 int main(int argc, char* argv[]) {
     const auto data_path = std::filesystem::path(DATA_PATH);
-    DatasetName ds_name = DatasetName::DEEP1M;
+    DatasetName ds_name = DatasetName::SIFT1M;
     bool force_rebuild = false;
-    deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::AVX2;
+    deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto;
     uint32_t build_threads = 1;
 
     for (int i = 1; i < argc; ++i) {
