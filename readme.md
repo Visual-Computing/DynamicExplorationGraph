@@ -1,102 +1,189 @@
-# DEG: Fast Approximate Nearest Neighbor Search
+# Dynamic Exploration Graph (DEG)
 
-The Dynamic Exploration Graph (DEG) is a graph-based algorithm for approximate nearest neighbor search (ANNS). It indexes both static and dynamic datasets using three algorithms: incremental extension, continuous edge optimization, and vertex deletion. The resulting graph demonstrates high efficiency in terms of queries per second relative to the achieved recall rate. DEG provides state-of-the-art performance for both indexed and unindexed queries (where the query is not part of the index).
+[![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](cpp/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](python/)
+[![Documentation](https://img.shields.io/badge/docs-read%20the%20docs-green.svg)](https://dynamic-exploration-graph.readthedocs.io/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-## Usage
+The **Dynamic Exploration Graph (DEG)** is a high-throughput, graph-based algorithm for Approximate Nearest Neighbor Search (ANNS) and exploratory search in high-dimensional vector spaces.
 
-Install with
-```sh
+DEG efficiently handles both static and dynamic streaming datasets via three continuous algorithms:
+1. **Incremental Extension**: Fast insertion of new vertices into the graph topology.
+2. **Continuous Edge Optimization**: Constant refinement and local edge swaps to maintain optimal search properties.
+3. **Vertex Deletion**: Dynamic removal of elements while preserving graph connectivity and regular degree.
+
+---
+
+## Repository Structure
+
+```
+DynamicExplorationGraph/
+├── cpp/          # High-performance C++20 Header-Only library, CMake Presets, Tests & Benchmarks
+├── python/       # Python Bindings (deglib), Pytest Suite & Wheel Build Configuration
+├── examples/     # Ready-to-run Python examples (knng, dynamic_data, static_data, mips)
+├── java/         # Java implementation & Benchmarks
+└── docs/         # Sphinx / ReadTheDocs Documentation
+```
+
+---
+
+## Quickstart
+
+### Python
+
+Install `deglib` via pip:
+
+```bash
 pip install deglib
 ```
-Use with
 
-```py
+Build an index and query nearest neighbors:
+
+```python
 import numpy as np
 import deglib
 
 N_SAMPLES, DIMS = 10_000, 128
 
-# random generate example dataset
+# Generate example dataset and query
 data = np.random.random((N_SAMPLES, DIMS)).astype(np.float32)
-
-# random generate example query
 query = np.random.random(DIMS).astype(np.float32)
 
-# build index
+# Build index directly from data
 graph = deglib.builder.build_from_data(data)
 
-# search query
-indices, distances = graph.search(query, eps=0.1, k=16)
+# Query top-k nearest neighbors
+indices, distances = graph.search(query, k=16, eps=0.1)
+
+print("Nearest neighbor indices:", indices)
+print("Distances:", distances)
 ```
 
-For more information [read the docs](https://dynamic-exploration-graph.readthedocs.io/en/latest/tutorials/quickstart.html).
+For more Python examples, check the [examples/](examples/) directory or read the [Official Documentation](https://dynamic-exploration-graph.readthedocs.io/en/latest/tutorials/quickstart.html).
 
-## Release
+---
 
-- [2025/01/09] The latest iteration of DEG uses a more efficient way of removing and adding a vertex. More details can be found in our new paper [Dynamic Exploration Graph: A Novel Approach for Efficient Nearest Neighbor Search in Evolving Multimedia Datasets](https://link.springer.com/chapter/10.1007/978-981-96-2054-8_25).
-- [2024/05/01] Our paper [An Exploration Graph with Continuous Refinement for Efficient Multimedia Retrieval](https://doi.org/10.1145/3652583.3658117) is accepted by ICMR2024 as **oral presentation**
-- [2023/12/02] The new continuous refining Exploration Graph (crEG) containing a more efficient and thread-safe way to extend DEG. Currently found in the [crEG branch](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/crEG) of this repository.
-- [2023/07/19] First version of Dynamic Exploration Graph is out! For more details please refere to our paper: 
-[Fast Approximate nearest neighbor search with the Dynamic Exploration Graph using continuous refinement](https://arxiv.org/abs/2307.10479)
+### C++20
 
-## Reproduction
+`deglib` is a header-only C++20 library with zero mandatory runtime dependencies.
 
-The following files contain the datasets used in our paper. Including exploration queries and ground truth data.
+```cpp
+#include <deglib/deglib.h>
+#include <iostream>
+#include <vector>
+#include <random>
 
-| Data set  | Download                                                                           | dimension | nb base vectors | nb query vectors | original website                                               |
-|-----------|------------------------------------------------------------------------------------|-----------|-----------------|------------------|----------------------------------------------------------------|
-| Audio    | [audio.tar.gz](https://static.visual-computing.com/paper/DEG/audio.tar.gz)         | 192       | 53,387       | 200           | [original website](https://www.cs.princeton.edu/cass/)             |
-| Enron    | [enron.tar.gz](https://static.visual-computing.com/paper/DEG/enron.tar.gz)         | 1369      | 94,987       | 200           | [original website](https://www.cs.cmu.edu/~enron/)             |
-| SIFT1M    | [sift.tar.gz](https://static.visual-computing.com/paper/DEG/sift.tar.gz)           | 128       | 1,000,000       | 10,000           | [original website](http://corpus-texmex.irisa.fr/)             |
-| DEEP1M    | [deep1m.tar.gz](https://static.visual-computing.com/paper/DEG/deep1m.tar.gz)     | 96        | 1,000,000       | 10,000           | [original website](https://github.com/facebookresearch/ppuda)             |
-| GloVe-100 | [glove-100.tar.gz](https://static.visual-computing.com/paper/DEG/glove-100.tar.gz) | 100       | 1,183,514       | 10,000           | [original website](https://nlp.stanford.edu/projects/glove/)   |
+int main() {
+    const uint32_t num_vectors = 1000;
+    const uint32_t dims = 128;
 
-In order to see the hyperparameters and reproduce the results in our older papers, please visit the "cpp" directory in the corresponding github branches:
-- [main branch](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/main/cpp) for "Dynamic Exploration Graph: A Novel Approach for Efficient Nearest Neighbor Search in Evolving Multimedia Datasets"
-- [crEG branch](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/crEG/cpp) for "An Exploration Graph with Continuous Refinement for Efficient Multimedia Retrieval"
-- [arxiv branch](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/arxiv/cpp) for "Fast Approximate nearest neighbor search with the Dynamic Exploration Graph using continuous refinement"
+    // 1. Generate example feature dataset
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+    std::vector<float> dataset(num_vectors * dims);
+    for (auto& val : dataset) val = dist(rng);
 
+    // 2. Build graph index directly from data
+    auto graph = deglib::build_from_data(
+        std::span<const float>(dataset), 
+        dims, 
+        /*labels=*/{}, 
+        /*edges_per_vertex=*/32, 
+        deglib::distances::Metric::FP32_L2
+    );
 
+    // 3. Query k-nearest neighbors
+    std::vector<float> query(dims);
+    for (auto& val : query) val = dist(rng);
 
+    auto results = graph.search(std::span<const float>(query), /*k=*/10, /*eps=*/0.1f);
 
-## Performance
-
-***NOTE:** All experiments where conduced single threaded on a Ryzen 2700x CPU, operating at a constant core clock speed of 4GHz, and 64GB of DDR4 memory running at 2133MHz.
-
-**Approximate Nearest Neighbor Search**
-![ANNS](figures/anns_qps_vs_recall.jpg)
-
-**Exploratory Search (indexed queries)**
-![Exploration](figures/exploration_qps_vs_recall.jpg)
-
-## Reference
-
-Please cite our work in your publications if it helps your research:
-
-Dynamic Exploration Graph
-```
-@article{Hezel2025,
-  author = {Hezel, Nico and Barthel, Uwe Kai and Schilling, Bruno and Schall, Konstantin and Jung, Klaus},
-  title = {Dynamic Exploration Graph: A Novel Approach for Efficient Nearest Neighbor Search in Evolving Multimedia Datasets},
-  booktitle={MultiMedia Modeling},
-  publisher={Springer Nature},
-  pages={333--347},
-  isbn={978-981-96-2054-8},
-  year = 2025
+    std::cout << "Top nearest neighbors:\n";
+    for (const auto& match : results) {
+        std::cout << "  Label: " << match.getIdentifier()
+                  << " | Distance: " << match.getDistance() << "\n";
+    }
 }
 ```
 
-continuous refining Exploration Graph
+For full C++ build instructions, CMake presets, and architecture details, refer to the [cpp/ README](cpp/readme.md).
+
+---
+
+## Publications & Releases
+
+- **[2025/01/09]** Our paper [Dynamic Exploration Graph: A Novel Approach for Efficient Nearest Neighbor Search in Evolving Multimedia Datasets](https://link.springer.com/chapter/10.1007/978-981-96-2054-8_25) was presented at MMM 2025.
+- **[2024/05/01]** Our paper [An Exploration Graph with Continuous Refinement for Efficient Multimedia Retrieval](https://doi.org/10.1145/3652583.3658117) was presented at ACM ICMR 2024 (archived in [crEG branch](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/crEG)).
+- **[2023/07/19]** First version of DEG released! See our preprint [Fast Approximate nearest neighbor search with the Dynamic Exploration Graph using continuous refinement](https://arxiv.org/abs/2307.10479).
+
+---
+
+## Datasets
+
+The following standard datasets are used for benchmarking and evaluation:
+
+| Dataset   | Archive Name       | Dimension | Base Vectors | Query Vectors | Reference |
+|-----------|--------------------|-----------|--------------|---------------|-----------|
+| Audio     | `audio.tar.gz`     | 192       | 53,387       | 200           | [Princeton CASS](https://www.cs.princeton.edu/cass/) |
+| Enron     | `enron.tar.gz`     | 1369      | 94,987       | 200           | [CMU Enron](https://www.cs.cmu.edu/~enron/) |
+| SIFT1M    | `sift.tar.gz`      | 128       | 1,000,000    | 10,000        | [Texmex](http://corpus-texmex.irisa.fr/) |
+| DEEP1M    | `deep1m.tar.gz`    | 96        | 1,000,000    | 10,000        | [PPUDA](https://github.com/facebookresearch/ppuda) |
+| GloVe-100 | `glove-100.tar.gz` | 100       | 1,183,514    | 10,000        | [Stanford GloVe](https://nlp.stanford.edu/projects/glove/) |
+
+> [!NOTE]
+> When executing the benchmarks in [cpp/](cpp/), datasets are automatically downloaded and prepared in the configured data directory on first run.
+
+### Pre-built Graphs
+
+| Dataset   | DEG Graph File |
+|-----------|----------------|
+| SIFT1M    | [sift_128D_L2_DEG30.deg](https://static.visual-computing.com/paper/DEG/sift_128D_L2_DEG30.zip) |
+| DEEP1M    | [deep1m_96D_L2_DEG30.deg](https://static.visual-computing.com/paper/DEG/deep1m_96D_L2_DEG30.zip) |
+| GloVe-100 | [glove_100D_L2_DEG30.deg](https://static.visual-computing.com/paper/DEG/glove_100D_L2_DEG30.zip) |
+
+---
+
+## Performance
+
+> [!NOTE]
+> Experiments were conducted single-threaded on an AMD Ryzen 2700X CPU (4 GHz core clock, 64 GB DDR4 RAM @ 2133 MHz).
+
+**Approximate Nearest Neighbor Search (ANNS)**  
+![ANNS](figures/anns_qps_vs_recall.jpg)
+
+**Exploratory Search (Indexed Queries)**  
+![Exploration](figures/exploration_qps_vs_recall.jpg)
+
+---
+
+## Citation
+
+If DEG or crEG helps your research, please cite our publications:
+
+**Dynamic Exploration Graph (MMM 2025)**:
+```bibtex
+@article{Hezel2025,
+  author    = {Hezel, Nico and Barthel, Uwe Kai and Schilling, Bruno and Schall, Konstantin and Jung, Klaus},
+  title     = {Dynamic Exploration Graph: A Novel Approach for Efficient Nearest Neighbor Search in Evolving Multimedia Datasets},
+  booktitle = {MultiMedia Modeling},
+  publisher = {Springer Nature},
+  pages     = {333--347},
+  isbn      = {978-981-96-2054-8},
+  year      = {2025}
+}
 ```
-@article{Hezel2024,
-  author = {Hezel, Nico and Barthel, Uwe Kai and Schall, Konstantin and Jung, Klaus},
-  title = {An Exploration Graph with Continuous Refinement for Efficient Multimedia Retrieval},
+
+**Continuous Refining Exploration Graph (ACM ICMR 2024)**:
+```bibtex
+@inproceedings{Hezel2024,
+  author    = {Hezel, Nico and Barthel, Uwe Kai and Schall, Konstantin and Jung, Klaus},
+  title     = {An Exploration Graph with Continuous Refinement for Efficient Multimedia Retrieval},
   booktitle = {Proceedings of the 2024 International Conference on Multimedia Retrieval},
-  year = {2024},
-  isbn = {9798400706196},
   publisher = {Association for Computing Machinery},
-  doi = {10.1145/3652583.3658117},
-  pages = {657–665},
-  series = {ICMR '24}
+  pages     = {657--665},
+  isbn      = {9798400706196},
+  doi       = {10.1145/3652583.3658117},
+  series    = {ICMR '24},
+  year      = {2024}
 }
 ```

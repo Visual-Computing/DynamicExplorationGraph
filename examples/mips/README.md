@@ -3,7 +3,7 @@
 This example demonstrates how to build and query a **Maximum Inner Product Search (MIPS)** graph using **Dynamic Exploration Graph (DEG)** in Python, based on Task 2 (`mode5_flas`) from the **SISAP 2026 Indexing Challenge**.
 
 ## Problem & Algorithmic Approach
-s
+
 Standard graph-based nearest neighbor search algorithms (e.g. DEG, HNSW) are optimized for metric spaces such as Euclidean distance ($L_2$). For Maximum Inner Product Search (MIPS), the goal is to find database vectors $x_i$ maximizing $\langle q, x_i \rangle$ for a query vector $q$.
 
 We use a 5-step pipeline that reduces MIPS to $L_2$ graph search while retaining high query efficiency:
@@ -47,11 +47,11 @@ The script automatically downloads `llama-dev.h5` into `~/.cache/deg_datasets/ll
 ```bash
 cd examples/mips/
 uv sync
-```s
+```
 
 > **Note:** `uv sync` automatically compiles the latest `deglib` C++ pybind11 extension from `../../python` into the local environment.
 
-# If C++ code or pybind11 bindings were modified, force rebuilding the extension:
+If C++ code or pybind11 bindings were modified, force rebuilding the extension:
 ```bash
 uv sync --reinstall-package deglib
 ```

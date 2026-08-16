@@ -38,5 +38,6 @@ uv sync --reinstall-package deglib
 ## Projects
 
 - [`knng`](./knng/): k-Nearest Neighbor Graph (k-NNG) construction benchmark using EVP quantization and FP16 reranking (SISAP 2026 Challenge Task 1).
+- [`mips`](./mips/): Maximum Inner Product Search (MIPS) benchmark using $(d+1)$-dimensional $L_2$ transformation, FLAS pre-sorting, and SIMD FP16 inner products (SISAP 2026 Challenge Task 2).
 - [`static_data`](./static_data/): DEG paper search benchmark reproduction (Recall vs. QPS) on static datasets (`sift1m`, `deep1m`, `glove-100`, `audio`, `enron`).
-- [`dynamic_data`](./dynamic_data/): DEG dynamic data streaming benchmark (AddHalf, AddHalfRemoveAndAddOneAtATime, AddAllRemoveHalf).
+- [`dynamic_data`](./dynamic_data/): DEG dynamic data streaming benchmark (`AddHalf`, `AddHalfRemoveAndAddOneAtATime`, `AddAllRemoveHalf`).
