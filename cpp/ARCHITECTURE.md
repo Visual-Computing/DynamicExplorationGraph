@@ -146,15 +146,21 @@ Graph construction and optimization algorithms.
 - `enum class OptimizationTarget`: Build optimization strategy (`StreamingData`, `HighLID`, `LowLID`).
 - `struct BuilderStatus`: Status object passed to build callbacks (`step`, `added`, `deleted`, `improved`, `tries`).
 - `class EvenRegularGraphBuilder`:
-  - `EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, OptimizationTarget optimization_target = OptimizationTarget::LowLID, uint8_t extend_k = 0, float extend_eps = 0.1f, uint8_t improve_k = 0, float improve_eps = 0.001f, uint8_t max_path_length = 5, uint32_t swap_tries = 0, uint32_t additional_swap_tries = 0)`
-  - `void addEntry(uint32_t label, std::vector<std::byte> feature)`: Queues entry addition.
+  - `EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, OptimizationTarget optimization_target = OptimizationTarget::StreamingData, uint8_t extend_k = 0, float extend_eps = 0.1f, uint8_t improve_k = 0, float improve_eps = 0.001f, uint8_t max_path_length = 5, uint32_t swap_tries = 0, uint32_t additional_swap_tries = 0)`
+  - `EvenRegularGraphBuilder(deglib::DynamicExplorationGraph& graph, std::mt19937& rnd, ...)`: Direct constructor for DynamicExplorationGraph facade instances.
+  - `void addEntry(uint32_t label, std::vector<std::byte> feature)`: Queues entry addition from raw byte vector.
+  - `template <typename T> void addEntry(uint32_t label, std::span<const T> feature)`: Queues entry addition from typed feature span.
   - `void removeEntry(uint32_t label)`: Queues entry removal.
   - `uint32_t getNumNewEntries() const`: Queued addition count.
   - `uint32_t getNumRemoveEntries() const`: Queued removal count.
   - `void setThreadCount(size_t thread_count)`: Sets parallel build thread count.
   - `void setBatchSize(uint32_t tasks_per_batch, uint32_t task_size)`: Sets multithreading batch parameters.
-  - `void build(std::function<void(BuilderStatus&)> callback, bool infinite = false)`: Runs graph construction.
+  - `BuilderStatus build(std::function<void(BuilderStatus&)> callback = nullptr, bool infinite = false)`: Runs graph construction.
+  - `BuilderStatus build()`: Runs graph construction without callback.
   - `void stop()`: Requests build termination.
+
+#### Functions
+- `template <typename T> DynamicExplorationGraph build_from_data(std::span<const T> data, uint32_t dims, std::span<const uint32_t> labels = {}, ...)`: Convenience factory constructing and optimizing a graph directly from contiguous feature data in one call. Also accessible as `deglib::build_from_data`.
 
 ---
 

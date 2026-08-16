@@ -774,3 +774,120 @@ TEST(EvenRegularGraphBuilder, BuildGraphWithEvpBitsLarger) {
         EXPECT_LT(neighbors[0], graph.size());
     }
 }
+
+// ---------------------------------------------------------------------------
+//  High-Level DynamicExplorationGraph & build_from_data Integration Tests
+// ---------------------------------------------------------------------------
+
+TEST(EvenRegularGraphBuilder, DynamicExplorationGraphWrapperAndSpanAddEntry) {
+    const uint32_t num_vectors = 25;
+    const uint32_t dims = 16;
+    const uint8_t edges_per_vertex = 4;
+
+    auto feature_space = deglib::distances::FloatSpace(dims, deglib::distances::Metric::FP32_L2);
+    auto deg = deglib::DynamicExplorationGraph::create_empty(num_vectors, edges_per_vertex, feature_space);
+
+    std::mt19937 rng(42);
+    deglib::builder::EvenRegularGraphBuilder builder(deg, rng);
+
+    std::vector<float> sample_vector(dims, 1.0f);
+    for (uint32_t i = 0; i < num_vectors; ++i) {
+        sample_vector[0] = static_cast<float>(i);
+        builder.addEntry(100 + i, std::span<const float>(sample_vector));
+    }
+
+    auto status = builder.build();
+    EXPECT_EQ(status.added, num_vectors);
+    EXPECT_EQ(deg.size(), num_vectors);
+
+    // Verify search works on the built graph
+    sample_vector[0] = 5.0f;
+    auto results = deg.search(std::span<const float>(sample_vector), 1);
+    EXPECT_EQ(results.size(), 1u);
+    EXPECT_EQ(results.top().getIdentifier(), 105u); // Closest vector is label 105
+    EXPECT_FLOAT_EQ(results.top().getDistance(), 0.0f);
+}
+
+TEST(BuilderBuildFromData, FloatL2Basic) {
+    const uint32_t num_vectors = 30;
+    const uint32_t dims = 8;
+    const uint8_t edges_per_vertex = 4;
+
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(0.0f, 10.0f);
+    std::vector<float> dataset(num_vectors * dims);
+    for (auto& val : dataset) val = dist(rng);
+
+    auto graph = deglib::builder::build_from_data(
+        std::span<const float>(dataset), dims, {}, edges_per_vertex, deglib::distances::Metric::FP32_L2
+    );
+
+    EXPECT_EQ(graph.size(), num_vectors);
+    EXPECT_EQ(graph.getEdgesPerVertex(), edges_per_vertex);
+
+    // Query for vertex 12 with eps=0.2f
+    std::span<const float> query(dataset.data() + 12 * dims, dims);
+    auto results = graph.search(query, 1, 0.2f);
+    EXPECT_EQ(results.size(), 1u);
+    EXPECT_EQ(results.top().getIdentifier(), 12u);
+    EXPECT_FLOAT_EQ(results.top().getDistance(), 0.0f);
+}
+
+TEST(BuilderBuildFromData, CustomLabelsAndThreads) {
+    const uint32_t num_vectors = 40;
+    const uint32_t dims = 8;
+    const uint8_t edges_per_vertex = 6;
+
+    std::vector<float> dataset(num_vectors * dims, 0.5f);
+    std::vector<uint32_t> custom_labels(num_vectors);
+    for (uint32_t i = 0; i < num_vectors; ++i) {
+        custom_labels[i] = 1000 + i;
+        dataset[i * dims] = static_cast<float>(i);
+    }
+
+    uint32_t callback_count = 0;
+    auto callback = [&](deglib::builder::BuilderStatus& status) {
+        callback_count++;
+    };
+
+    auto graph = deglib::builder::build_from_data(
+        std::span<const float>(dataset), dims, std::span<const uint32_t>(custom_labels),
+        edges_per_vertex, deglib::distances::Metric::FP32_L2,
+        deglib::builder::OptimizationTarget::StreamingData,
+        0, 0.2f, 0, 0.001f, 5, 0, 0,
+        2, 123, callback
+    );
+
+    EXPECT_EQ(graph.size(), num_vectors);
+    EXPECT_GT(callback_count, 0u);
+
+    // Query for vertex label 1015
+    std::span<const float> query(dataset.data() + 15 * dims, dims);
+    auto results = graph.search(query, 1);
+    EXPECT_EQ(results.top().getIdentifier(), 1015u);
+}
+
+TEST(BuilderBuildFromData, InvalidArguments) {
+    std::vector<float> dataset = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
+
+    // Dims = 0
+    EXPECT_THROW(
+        deglib::builder::build_from_data(std::span<const float>(dataset), 0),
+        std::invalid_argument
+    );
+
+    // Data size (5) not divisible by dims (2)
+    EXPECT_THROW(
+        deglib::builder::build_from_data(std::span<const float>(dataset), 2),
+        std::invalid_argument
+    );
+
+    // Label count mismatch
+    std::vector<float> valid_dataset = {1.0f, 2.0f, 3.0f, 4.0f};
+    std::vector<uint32_t> wrong_labels = {1, 2, 3}; // 3 labels for 2 vectors
+    EXPECT_THROW(
+        deglib::builder::build_from_data(std::span<const float>(valid_dataset), 2, std::span<const uint32_t>(wrong_labels)),
+        std::invalid_argument
+    );
+}
+

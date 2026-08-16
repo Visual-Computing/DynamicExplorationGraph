@@ -10,3 +10,7 @@
 #include "deglib/analysis.h"
 #include "deglib/builder.h"
 #include "deglib/optimization.h"
+
+namespace deglib {
+    using builder::build_from_data;
+}

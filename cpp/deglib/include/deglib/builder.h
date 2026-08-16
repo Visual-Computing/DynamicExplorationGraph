@@ -335,11 +335,56 @@ class EvenRegularGraphBuilder {
     }
 
     /**
+     * @brief Constructs an EvenRegularGraphBuilder wrapping a DynamicExplorationGraph facade.
+     *
+     * @throws std::invalid_argument If the DynamicExplorationGraph is not mutable.
+     */
+    EvenRegularGraphBuilder(deglib::DynamicExplorationGraph& graph, std::mt19937& rnd, const OptimizationTarget optimization_target,
+                            const uint8_t extend_k, const float extend_eps, 
+                            const uint8_t improve_k, const float improve_eps, 
+                            const uint8_t max_path_length = 5, const uint32_t swap_tries = 0, const uint32_t additional_swap_tries = 0)
+      : EvenRegularGraphBuilder(check_and_get_mutable_graph(graph), rnd, optimization_target,
+                                extend_k, extend_eps, improve_k, improve_eps, max_path_length, swap_tries, additional_swap_tries) {
+    }
+
+    /**
+     * @brief Constructs an EvenRegularGraphBuilder wrapping a DynamicExplorationGraph with default parameters for streaming data.
+     */
+    EvenRegularGraphBuilder(deglib::DynamicExplorationGraph& graph, std::mt19937& rnd, const uint32_t swaps)
+      : EvenRegularGraphBuilder(check_and_get_mutable_graph(graph), rnd, swaps) {
+    }
+
+    /**
+     * @brief Constructs an EvenRegularGraphBuilder wrapping a DynamicExplorationGraph with default parameters and a single swap attempt.
+     */
+    EvenRegularGraphBuilder(deglib::DynamicExplorationGraph& graph, std::mt19937& rnd)
+      : EvenRegularGraphBuilder(check_and_get_mutable_graph(graph), rnd, 1) {
+    }
+
+  private:
+    static deglib::graph::MutableGraph& check_and_get_mutable_graph(deglib::DynamicExplorationGraph& graph) {
+      if (!graph.isMutable()) {
+        throw std::invalid_argument("DynamicExplorationGraph must be mutable for EvenRegularGraphBuilder");
+      }
+      return dynamic_cast<deglib::graph::MutableGraph&>(graph.internal());
+    }
+
+  public:
+    /**
      * Provide the builder a new entry which it will append to the graph in the build() process.
      */ 
     void addEntry(const uint32_t label, std::vector<std::byte> feature) {
       auto manipulation_index = manipulation_counter_.fetch_add(1);
       new_entry_queue_.emplace_back(label, manipulation_index, std::move(feature));
+    }
+
+    /**
+     * Provide the builder a new entry using a typed span (e.g. std::span<const float>, std::span<const uint8_t>).
+     */
+    template <typename T>
+    void addEntry(const uint32_t label, std::span<const T> feature) {
+      const auto* byte_ptr = reinterpret_cast<const std::byte*>(feature.data());
+      addEntry(label, std::vector<std::byte>(byte_ptr, byte_ptr + feature.size_bytes()));
     }
 
     /**
@@ -1503,12 +1548,21 @@ class EvenRegularGraphBuilder {
         }
         
         this->build_status_.step++;
-        callback(this->build_status_);
+        if (callback) {
+          callback(this->build_status_);
+        }
       }
       while(this->stop_building_ == false && (infinite || this->new_entry_queue_.size() > 0 || this->remove_entry_queue_.size() > 0));
 
       // return the build status
       return this->build_status_;
+    }
+
+    /**
+     * Build the graph without callback.
+     */
+    BuilderStatus build() {
+      return build(nullptr, false);
     }
 
     /**
@@ -1518,6 +1572,82 @@ class EvenRegularGraphBuilder {
       this->stop_building_ = true;
     }
 };
+
+/**
+ * @brief High-level helper function to construct and optimize a DynamicExplorationGraph from feature data in one call.
+ *
+ * @param data Contiguous span of feature data of type T (e.g. float, uint8_t). Total elements must be a multiple of dims.
+ * @param dims Dimensionality of each feature vector.
+ * @param labels Optional labels for each vector. If empty, sequential labels 0..N-1 are used.
+ * @param edges_per_vertex Number of edges per vertex in the graph (default: 32).
+ * @param metric Distance metric (default: Metric::FP32_L2).
+ * @param optimization_target Optimization target strategy (default: OptimizationTarget::LowLID).
+ * @param extend_k Number of neighbors to consider during graph extension (default: 64).
+ * @param extend_eps Epsilon value for neighbor search during extension (default: 0.1f).
+ * @param improve_k Number of neighbors to consider during improvement (default: 0).
+ * @param improve_eps Epsilon value for neighbor search during improvement (default: 0.001f).
+ * @param max_path_length Maximum number of edge swaps in a single improvement (default: 5).
+ * @param swap_tries Number of improvement attempts per build step (default: 0).
+ * @param additional_swap_tries Additional improvement attempts after successful improvement (default: 0).
+ * @param thread_count Number of threads for construction (0 = single-threaded / default).
+ * @param seed Random seed for deterministic construction (default: 42).
+ * @param callback Optional progress callback invoked during build.
+ * @return DynamicExplorationGraph Fully constructed DynamicExplorationGraph wrapping a SizeBoundedGraph.
+ */
+template <typename T>
+DynamicExplorationGraph build_from_data(
+    std::span<const T> data,
+    const uint32_t dims,
+    std::span<const uint32_t> labels = {},
+    const uint8_t edges_per_vertex = 32,
+    const deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2,
+    const OptimizationTarget optimization_target = OptimizationTarget::LowLID,
+    const uint8_t extend_k = 64,
+    const float extend_eps = 0.1f,
+    const uint8_t improve_k = 0,
+    const float improve_eps = 0.001f,
+    const uint8_t max_path_length = 5,
+    const uint32_t swap_tries = 0,
+    const uint32_t additional_swap_tries = 0,
+    const size_t thread_count = 0,
+    const uint32_t seed = 42,
+    std::function<void(deglib::builder::BuilderStatus&)> callback = nullptr)
+{
+    if (dims == 0) {
+        throw std::invalid_argument("Dimensionality must be greater than 0");
+    }
+    if (data.size() % dims != 0) {
+        throw std::invalid_argument("Data size must be an exact multiple of dims");
+    }
+
+    const uint32_t vertex_count = static_cast<uint32_t>(data.size() / dims);
+    if (!labels.empty() && labels.size() != vertex_count) {
+        throw std::invalid_argument("Labels count does not match the number of feature vectors in data");
+    }
+
+    auto feature_space = deglib::distances::FloatSpace(dims, metric);
+    auto graph = deglib::DynamicExplorationGraph::create_empty(vertex_count, edges_per_vertex, feature_space);
+
+    std::mt19937 rng(seed);
+    auto builder = EvenRegularGraphBuilder(
+        graph, rng, optimization_target,
+        extend_k, extend_eps,
+        improve_k, improve_eps,
+        max_path_length, swap_tries, additional_swap_tries
+    );
+
+    if (thread_count > 0) {
+        builder.setThreadCount(thread_count);
+    }
+
+    for (uint32_t i = 0; i < vertex_count; ++i) {
+        uint32_t label = labels.empty() ? i : labels[i];
+        builder.addEntry(label, data.subspan(static_cast<size_t>(i) * dims, dims));
+    }
+
+    builder.build(callback);
+    return graph;
+}
 
 } // end namespace deglib::builder
 
