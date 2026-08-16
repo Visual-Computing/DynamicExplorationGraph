@@ -17,9 +17,8 @@ var/
 .clangd
 .clang-format
 
-# CMake files
-CMakePresets.json
-cmake-variants.yaml
+# CMake user files
+CMakeUserPresets.json
 
 # Data directories
 data/

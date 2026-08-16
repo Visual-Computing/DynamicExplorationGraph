@@ -9,12 +9,8 @@
     {
       "name": "base",
       "hidden": true,
-      "description": "Base preset defining shared DATA_PATH and FORCE_AVX2 variables",
+      "description": "Base preset defining default variables",
       "cacheVariables": {
-        "DATA_PATH": {
-          "value": "",
-          "type": "PATH"
-        },
         "FORCE_AVX2": {
           "value": "OFF",
           "type": "BOOL"

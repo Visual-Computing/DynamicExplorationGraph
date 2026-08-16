@@ -160,6 +160,15 @@ inline DatasetInfo DatasetName::info() const {
     return make_dataset_info(*this);
 }
 
+inline std::filesystem::path get_default_data_path() {
+    if (const char* env_path = std::getenv("DEG_DATA_PATH")) {
+        if (std::strlen(env_path) > 0) {
+            return std::filesystem::path(env_path);
+        }
+    }
+    return std::filesystem::path("./data");
+}
+
 class Dataset {
 public:
     Dataset(const DatasetName& name, const std::filesystem::path& data_root)

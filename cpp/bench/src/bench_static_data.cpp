@@ -86,12 +86,11 @@ void print_help(const char* program_name) {
     log("  enron    - Enron (94.9k vectors, 1369D, K=30)\n");
     log("  all      - Execute benchmarks for all datasets sequentially\n\n");
     log("Options:\n");
-    log("  --force-rebuild       Force rebuilding the graph even if the graph file already exists\n");
-    log("  --instruction <inst>  Select distance instruction set (auto, avx512, avx2, scalar)\n");
-    log("  --threads <count>     Number of threads used for building the graph (default: hardware_concurrency / 2)\n");
-    log("  --help, -h            Display this detailed help message\n\n");
-    log("Data Path:\n");
-    log("  Data is loaded from / saved to DATA_PATH defined at build time (e.g. \"{}\")\n", DATA_PATH);
+    log("  --data-path, -d <path> Path to datasets directory (default: env DEG_DATA_PATH or ./data)\n");
+    log("  --force-rebuild        Force rebuilding the graph even if the graph file already exists\n");
+    log("  --instruction <inst>   Select distance instruction set (auto, avx512, avx2, scalar)\n");
+    log("  --threads <count>      Number of threads used for building the graph (default: hardware_concurrency / 2)\n");
+    log("  --help, -h             Display this detailed help message\n\n");
 }
 
 static deglib::cpu::InstructionSet parse_instruction_set(const std::string& str) {
@@ -195,7 +194,7 @@ void run_static_benchmark(const DatasetName& ds_name, const std::filesystem::pat
 }
 
 int main(int argc, char* argv[]) {
-    const auto data_path = std::filesystem::path(DATA_PATH);
+    auto data_path = deglib::benchmark::get_default_data_path();
     DatasetName ds_name = DatasetName::SIFT1M;
     bool force_rebuild = false;
     deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto;
@@ -206,6 +205,8 @@ int main(int argc, char* argv[]) {
         if (arg == "--help" || arg == "-h") {
             print_help(argv[0]);
             return 0;
+        } else if ((arg == "--data-path" || arg == "-d") && i + 1 < argc) {
+            data_path = std::filesystem::path(argv[++i]);
         } else if (arg == "--force-rebuild") {
             force_rebuild = true;
         } else if (arg == "--instruction" && i + 1 < argc) {
