@@ -1,12 +1,12 @@
 // test_evp_quantize.cpp — Unit tests for deglib::quantization (quantize_single, quantize_batch for float & fp16 uint16_t)
 
+#include "deglib/distance/fp16.h"
+#include "deglib/optimization/quantization/evp_quantize.h"
+#include "gtest/gtest.h"
+
 #include <cstdint>
 #include <random>
 #include <vector>
-
-#include "deglib/optimization/quantization/evp_quantize.h"
-#include "deglib/distance/fp16.h"
-#include "gtest/gtest.h"
 
 // ============================================================================
 // Single vector quantization (float)
@@ -30,8 +30,7 @@ TEST(EvpQuantize, SingleBasic) {
 
 TEST(EvpQuantize, SingleMaskNoOverlap) {
     // 16-dim: positive and negative values in top 8
-    float vec[] = {1.0f, -1.0f, 2.0f, -2.0f, 3.0f, -3.0f, 4.0f, -4.0f,
-                   0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    float vec[] = {1.0f, -1.0f, 2.0f, -2.0f, 3.0f, -3.0f, 4.0f, -4.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     const uint32_t dim = 16;
     const uint32_t non_zeros = 8;
 
@@ -72,8 +71,7 @@ TEST(EvpQuantize, BatchNoOverlap) {
         const uint64_t* n = reinterpret_cast<const uint64_t*>(negs);
         size_t num_uint64 = (dim / 8) / sizeof(uint64_t);
         for (size_t j = 0; j < num_uint64; ++j) {
-            EXPECT_EQ(o[j] & n[j], 0ULL)
-                << "Overlap at vector " << i << ", uint64 " << j;
+            EXPECT_EQ(o[j] & n[j], 0ULL) << "Overlap at vector " << i << ", uint64 " << j;
         }
     }
 }
@@ -91,7 +89,7 @@ TEST(EvpQuantize, BatchMultiThreadConsistent) {
     }
 
     auto single = deglib::quantization::evp::quantize_batch(data.data(), count, dim, non_zeros, 1);
-    auto multi  = deglib::quantization::evp::quantize_batch(data.data(), count, dim, non_zeros, 4);
+    auto multi = deglib::quantization::evp::quantize_batch(data.data(), count, dim, non_zeros, 4);
 
     EXPECT_EQ(single.size(), multi.size());
     EXPECT_EQ(single, multi);
@@ -116,8 +114,7 @@ TEST(EvpQuantize, SingleVsBatchConsistency) {
 
         size_t offset = i * single_result.size();
         for (size_t b = 0; b < single_result.size(); ++b) {
-            EXPECT_EQ(batch_result[offset + b], single_result[b])
-                << "Mismatch at vector " << i << ", byte " << b;
+            EXPECT_EQ(batch_result[offset + b], single_result[b]) << "Mismatch at vector " << i << ", byte " << b;
         }
     }
 }

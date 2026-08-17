@@ -3,14 +3,14 @@
 // Covers: prune_worst_edges, prune_non_mrng_edges, prune_non_mrng_edges_weight_sorted,
 //         prune_non_mrng_edges_iterative
 
+#include "deglib/analysis.h"
+#include "deglib/graph/sizebounded_graph.h"
+#include "deglib/optimization/pruning.h"
+#include "gtest/gtest.h"
+
 #include <cmath>
 #include <cstdint>
 #include <vector>
-
-#include "deglib/optimization/pruning.h"
-#include "deglib/graph/sizebounded_graph.h"
-#include "deglib/analysis.h"
-#include "gtest/gtest.h"
 
 // ---------------------------------------------------------------------------
 //  Helpers

@@ -31,8 +31,8 @@ class DynamicExplorationGraph:
 
     @classmethod
     def create_empty(
-            cls, capacity: int, feature_space: FloatSpace, edges_per_vertex: int = 32
-    ) -> 'DynamicExplorationGraph':
+        cls, capacity: int, feature_space: FloatSpace, edges_per_vertex: int = 32
+    ) -> "DynamicExplorationGraph":
         """
         Create an empty mutable DynamicExplorationGraph (SizeBoundedGraph).
 
@@ -46,8 +46,8 @@ class DynamicExplorationGraph:
 
     @classmethod
     def create_dynamic_empty(
-            cls, feature_space: FloatSpace, edges_per_vertex: int = 32, chunk_size: int = 1024
-    ) -> 'DynamicExplorationGraph':
+        cls, feature_space: FloatSpace, edges_per_vertex: int = 32, chunk_size: int = 1024
+    ) -> "DynamicExplorationGraph":
         """
         Create an empty mutable DynamicExplorationGraph with dynamic chunk-based memory allocation (DynamicGraph).
 
@@ -62,12 +62,8 @@ class DynamicExplorationGraph:
 
     @classmethod
     def create_random_graph(
-            cls,
-            features: np.ndarray,
-            feature_space: FloatSpace,
-            edges_per_vertex: int = 32,
-            seed: int = 7
-    ) -> 'DynamicExplorationGraph':
+        cls, features: np.ndarray, feature_space: FloatSpace, edges_per_vertex: int = 32, seed: int = 7
+    ) -> "DynamicExplorationGraph":
         """
         Create a random exploration graph from the given feature data.
 
@@ -82,14 +78,12 @@ class DynamicExplorationGraph:
         :return: A new DynamicExplorationGraph with a random exploration graph.
         """
         valid_dtype = feature_space.metric().get_dtype()
-        features = assure_array(features, 'features', valid_dtype)
-        graph_cpp = deglib_cpp.create_random_graph(
-            features, edges_per_vertex, feature_space.to_cpp(), seed
-        )
+        features = assure_array(features, "features", valid_dtype)
+        graph_cpp = deglib_cpp.create_random_graph(features, edges_per_vertex, feature_space.to_cpp(), seed)
         return cls(graph_cpp)
 
     @classmethod
-    def load_readonly_graph(cls, path: pathlib.Path | str) -> 'DynamicExplorationGraph':
+    def load_readonly_graph(cls, path: pathlib.Path | str) -> "DynamicExplorationGraph":
         """
         Read a saved ReadOnlyGraph from given file.
 
@@ -103,7 +97,7 @@ class DynamicExplorationGraph:
         return cls(graph_cpp)
 
     @classmethod
-    def load_dynamic_graph(cls, path: pathlib.Path | str, chunk_size: int = 1024) -> 'DynamicExplorationGraph':
+    def load_dynamic_graph(cls, path: pathlib.Path | str, chunk_size: int = 1024) -> "DynamicExplorationGraph":
         """
         Read a saved graph as a mutable DynamicGraph with chunk-based allocation.
 
@@ -159,10 +153,15 @@ class DynamicExplorationGraph:
         return self.dynamic_exploration_graph_cpp.get_neighbors(external_label)
 
     def search(
-            self, query: np.ndarray, eps: float = 0.0, k: int = 10,
-            filter_labels: Union[None, np.ndarray, Filter] = None,
-            max_distance_computation_count: int = 0, threads: int = 0,
-            return_distances: bool = True, unsorted: bool = False
+        self,
+        query: np.ndarray,
+        eps: float = 0.0,
+        k: int = 10,
+        filter_labels: Union[None, np.ndarray, Filter] = None,
+        max_distance_computation_count: int = 0,
+        threads: int = 0,
+        return_distances: bool = True,
+        unsorted: bool = False,
     ) -> Union[Tuple[np.ndarray, np.ndarray], np.ndarray]:
         """
         Search for nearest neighbors of query vector(s).
@@ -184,15 +183,16 @@ class DynamicExplorationGraph:
         if single_query:
             query = query.reshape(1, -1)
         if len(query.shape) != 2:
-            raise InvalidShapeException('invalid query shape: {}'.format(query.shape))
+            raise InvalidShapeException("invalid query shape: {}".format(query.shape))
 
         if k > self.size():
             warnings.warn(
-                'k={} is smaller than number of vertices in graph={}. Setting k={}'.format(k, self.size(), self.size()))
+                "k={} is smaller than number of vertices in graph={}. Setting k={}".format(k, self.size(), self.size())
+            )
             k = self.size()
 
         valid_dtype = self.get_feature_space().metric().get_dtype()
-        query = assure_array(query, 'query', valid_dtype)
+        query = assure_array(query, "query", valid_dtype)
         filter_obj = Filter.create_filter(filter_labels, self.size())
         threads = get_num_useful_threads(threads, query.shape[0])
         indices_or_tuple = self.dynamic_exploration_graph_cpp.search_batch(
@@ -211,11 +211,16 @@ class DynamicExplorationGraph:
             return indices
 
     def explore(
-            self, entry_external_label: Union[int, np.ndarray, list], k: int,
-            max_distance_computation_count: int = 0, eps: float = 0.0,
-            include_entry: bool = True, threads: int = 1,
-            filter_labels: Union[None, np.ndarray, Filter] = None,
-            return_distances: bool = True, unsorted: bool = False
+        self,
+        entry_external_label: Union[int, np.ndarray, list],
+        k: int,
+        max_distance_computation_count: int = 0,
+        eps: float = 0.0,
+        include_entry: bool = True,
+        threads: int = 1,
+        filter_labels: Union[None, np.ndarray, Filter] = None,
+        return_distances: bool = True,
+        unsorted: bool = False,
     ) -> Union[Tuple[np.ndarray, np.ndarray], np.ndarray]:
         """
         An exploration for similar elements, limited by max_distance_computation_count.
@@ -237,7 +242,8 @@ class DynamicExplorationGraph:
         """
         if k > self.size():
             warnings.warn(
-                'k={} is larger than number of vertices in graph={}. Setting k={}'.format(k, self.size(), self.size()))
+                "k={} is larger than number of vertices in graph={}. Setting k={}".format(k, self.size(), self.size())
+            )
             k = self.size()
 
         if isinstance(entry_external_label, (np.ndarray, list, tuple)):
@@ -247,7 +253,15 @@ class DynamicExplorationGraph:
             filter_obj = Filter.create_filter(filter_labels, self.size())
             threads = get_num_useful_threads(threads, arr.shape[0])
             return self.dynamic_exploration_graph_cpp.explore_batch(
-                arr, k, max_distance_computation_count, eps, include_entry, filter_obj, threads, return_distances, unsorted
+                arr,
+                k,
+                max_distance_computation_count,
+                eps,
+                include_entry,
+                filter_obj,
+                threads,
+                return_distances,
+                unsorted,
             )
         else:
             indices, distances = self.dynamic_exploration_graph_cpp.explore(
@@ -266,10 +280,8 @@ class DynamicExplorationGraph:
         self.dynamic_exploration_graph_cpp.save_graph(str(path))
 
     def to_readonly(
-        self,
-        feature_space: Optional[FloatSpace] = None,
-        custom_features: Optional[np.ndarray] = None
-    ) -> 'DynamicExplorationGraph':
+        self, feature_space: Optional[FloatSpace] = None, custom_features: Optional[np.ndarray] = None
+    ) -> "DynamicExplorationGraph":
         """
         Create a read-only graph from the given graph by only keeping information
         that is useful for searching.
@@ -283,17 +295,15 @@ class DynamicExplorationGraph:
         """
         fs_cpp = feature_space.to_cpp() if feature_space is not None else None
         feat_cpp = np.ascontiguousarray(custom_features) if custom_features is not None else None
-        graph_cpp = deglib_cpp.read_only_graph_from_graph(
-            self.dynamic_exploration_graph_cpp, fs_cpp, feat_cpp
-        )
+        graph_cpp = deglib_cpp.read_only_graph_from_graph(self.dynamic_exploration_graph_cpp, fs_cpp, feat_cpp)
         return DynamicExplorationGraph(graph_cpp)
 
     def to_mutable(
         self,
         feature_space: Optional[FloatSpace] = None,
         custom_features: Optional[np.ndarray] = None,
-        capacity: int = 0
-    ) -> 'DynamicExplorationGraph':
+        capacity: int = 0,
+    ) -> "DynamicExplorationGraph":
         """
         Create a mutable SizeBoundedGraph from the given graph (ReadOnly or SizeBounded),
         optionally overriding the feature space and feature vectors.
@@ -317,8 +327,8 @@ class DynamicExplorationGraph:
         self,
         feature_space: Optional[FloatSpace] = None,
         custom_features: Optional[np.ndarray] = None,
-        chunk_size: int = 1024
-    ) -> 'DynamicExplorationGraph':
+        chunk_size: int = 1024,
+    ) -> "DynamicExplorationGraph":
         """
         Create a mutable DynamicGraph with chunk-based dynamic memory allocation
         from the given graph (ReadOnly, SizeBounded, or Dynamic),
@@ -340,8 +350,10 @@ class DynamicExplorationGraph:
         return DynamicExplorationGraph(graph_cpp)
 
     def __repr__(self) -> str:
-        return (f'DynamicExplorationGraph(size={self.size()} edges_per_vertex={self.get_edges_per_vertex()} '
-                f'dim={self.get_feature_space().dim()})')
+        return (
+            f"DynamicExplorationGraph(size={self.size()} edges_per_vertex={self.get_edges_per_vertex()} "
+            f"dim={self.get_feature_space().dim()})"
+        )
 
 
 def get_num_useful_threads(requested: int, max_limit: int):
@@ -350,7 +362,7 @@ def get_num_useful_threads(requested: int, max_limit: int):
     return min(requested, max_limit)  # dont use more threads than queries
 
 
-__all__ = ['DynamicExplorationGraph', 'load_readonly_graph', 'load_dynamic_graph']
+__all__ = ["DynamicExplorationGraph", "load_readonly_graph", "load_dynamic_graph"]
 
 
 def load_readonly_graph(path: pathlib.Path | str) -> DynamicExplorationGraph:

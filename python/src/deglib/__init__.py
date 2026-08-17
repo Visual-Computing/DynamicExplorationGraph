@@ -13,7 +13,17 @@ from .distances import FloatSpace, Metric
 __version__ = "0.1.6"
 
 __all__ = [
-    'DynamicExplorationGraph', 'GraphBuilder', 'load_readonly_graph', 'load_dynamic_graph', 'build_from_data',
-    'FloatSpace', 'Metric',
-    'builder', 'optimization', 'analysis', 'distances', 'search', 'cpu'
+    "DynamicExplorationGraph",
+    "GraphBuilder",
+    "load_readonly_graph",
+    "load_dynamic_graph",
+    "build_from_data",
+    "FloatSpace",
+    "Metric",
+    "builder",
+    "optimization",
+    "analysis",
+    "distances",
+    "search",
+    "cpu",
 ]

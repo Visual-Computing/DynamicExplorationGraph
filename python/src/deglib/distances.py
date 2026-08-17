@@ -42,7 +42,7 @@ class FloatSpace:
         self.float_space_cpp = float_space_cpp
 
     @classmethod
-    def create(cls, dim: int, metric: Metric, instruction: InstructionSet = InstructionSet.Auto) -> 'FloatSpace':
+    def create(cls, dim: int, metric: Metric, instruction: InstructionSet = InstructionSet.Auto) -> "FloatSpace":
         """
         Create a FloatSpace.
 
@@ -124,7 +124,7 @@ class FloatSpace:
         return self.float_space_cpp
 
     def __repr__(self):
-        return f'FloatSpace(size={self.get_data_size()} dim={self.dim()}, metric={self.metric()})'
+        return f"FloatSpace(size={self.get_data_size()} dim={self.dim()}, metric={self.metric()})"
 
 
 def quantize_batch(vectors: np.ndarray, non_zeros: int, num_threads: int = 0) -> np.ndarray:
@@ -151,5 +151,3 @@ def fp16_to_floats(fp16_vals: np.ndarray) -> np.ndarray:
     """
     res = cpp_distances.fp16_to_floats(fp16_vals)
     return res.reshape(fp16_vals.shape)
-
-

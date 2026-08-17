@@ -27,7 +27,7 @@ class Filter:
         Only for internal use.
         Creates a filter object that can be used to limit the set of possible results.
         """
-        valid_labels = assure_contiguous(self.valid_labels.astype(np.int32, copy=False), 'filter_labels')
+        valid_labels = assure_contiguous(self.valid_labels.astype(np.int32, copy=False), "filter_labels")
         filter_obj = None
         if valid_labels is not None:
             max_label_count = self.max_label_count
@@ -38,14 +38,14 @@ class Filter:
         return filter_obj
 
     @staticmethod
-    def create_filter(filter_labels: Union[None, np.ndarray, 'Filter'], graph_size: int) -> Optional[cpp_search.Filter]:
+    def create_filter(filter_labels: Union[None, np.ndarray, "Filter"], graph_size: int) -> Optional[cpp_search.Filter]:
         if filter_labels is None:
             return None
         if isinstance(filter_labels, np.ndarray):
             filter_labels = Filter(filter_labels)
         if not isinstance(filter_labels, Filter):
-            raise TypeError('filter_labels must be a None, numpy array or Filter, got {}'.format(type(filter_labels)))
+            raise TypeError("filter_labels must be a None, numpy array or Filter, got {}".format(type(filter_labels)))
         return filter_labels.create_filter_obj(graph_size)
 
 
-__all__ = ['Filter']
+__all__ = ["Filter"]

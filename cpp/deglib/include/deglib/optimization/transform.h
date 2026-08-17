@@ -116,4 +116,4 @@ inline std::vector<float> mips_l2_transform_query(const std::vector<float>& inpu
     return output;
 }
 
-} // namespace deglib::optimization
+}  // namespace deglib::optimization

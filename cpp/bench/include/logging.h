@@ -7,6 +7,8 @@
  * Provides logging that outputs to both console and file simultaneously.
  */
 
+#include "file_io.h"
+
 #include <fmt/base.h>
 #include <fmt/format.h>
 #include <fmt/ostream.h>
@@ -15,8 +17,6 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
-
-#include "file_io.h"
 
 namespace deglib::benchmark {
 
@@ -62,9 +62,7 @@ inline void reset_log_to_console() {
  * Enable or disable console output.
  * @param enabled If false, log() will only write to file (if set)
  */
-inline void set_console_logging(bool enabled) {
-    log_to_console = enabled;
-}
+inline void set_console_logging(bool enabled) { log_to_console = enabled; }
 
 /**
  * Log a formatted message to both console (if enabled) and file (if set).

@@ -1,5 +1,10 @@
 #pragma once
 
+#include "deglib/concurrent.h"
+#include "deglib/distances.h"
+#include "deglib/filter.h"
+#include "deglib/graph/internal_graph.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -8,10 +13,6 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-#include "deglib/distances.h"
-#include "deglib/filter.h"
-#include "deglib/concurrent.h"
-#include "deglib/graph/internal_graph.h"
 
 namespace deglib::search {
 
@@ -93,7 +94,7 @@ inline std::vector<ResultSet> rerank(
                     if (heap.size() == k_top) {
                         max_dist = heap.top().getDistance();
                     }
-                } 
+                }
                 // Once full, only consider candidates strictly closer than the worst (max_dist).
                 // replace_top replaces the root in O(log k) and returns a reference to the NEW root element (new max distance).
                 else if (dist < max_dist) {
@@ -108,4 +109,4 @@ inline std::vector<ResultSet> rerank(
     return results;
 }
 
-} // namespace deglib::search
+}  // namespace deglib::search

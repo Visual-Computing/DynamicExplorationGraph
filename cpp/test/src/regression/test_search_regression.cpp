@@ -1,13 +1,13 @@
+#include "deglib/distances.h"
+#include "deglib/search.h"
+#include "gtest/gtest.h"
+
 #include <chrono>
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
 #include <random>
 #include <vector>
-
-#include "deglib/distances.h"
-#include "deglib/search.h"
-#include "gtest/gtest.h"
 
 namespace {
 
@@ -26,7 +26,7 @@ inline float benchmark_float(uint32_t& state, float min_val = -1.0f, float max_v
     return min_val + u * (max_val - min_val);
 }
 
-} // namespace
+}  // namespace
 
 TEST(SearchRegression, Rerank_FP32_L2_Benchmark) {
     const size_t dim = 512;
@@ -34,7 +34,7 @@ TEST(SearchRegression, Rerank_FP32_L2_Benchmark) {
     const size_t num_base = 100000;
     const size_t candidates_per_query = 200;
     const size_t k_top = 10;
-    const size_t num_threads = 0; // auto-detect
+    const size_t num_threads = 0;  // auto-detect
 
     deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
 
@@ -56,8 +56,7 @@ TEST(SearchRegression, Rerank_FP32_L2_Benchmark) {
 
     // Warm-up run
     auto warm_results = deglib::search::rerank(
-        space, query_vectors.data(), num_queries, base_vectors.data(), num_base,
-        candidates.data(), candidates_per_query, k_top, num_threads
+        space, query_vectors.data(), num_queries, base_vectors.data(), num_base, candidates.data(), candidates_per_query, k_top, num_threads
     );
     EXPECT_EQ(warm_results.size(), num_queries);
 
@@ -67,8 +66,7 @@ TEST(SearchRegression, Rerank_FP32_L2_Benchmark) {
 
     for (int it = 0; it < iterations; ++it) {
         auto results = deglib::search::rerank(
-            space, query_vectors.data(), num_queries, base_vectors.data(), num_base,
-            candidates.data(), candidates_per_query, k_top, num_threads
+            space, query_vectors.data(), num_queries, base_vectors.data(), num_base, candidates.data(), candidates_per_query, k_top, num_threads
         );
     }
 
@@ -76,15 +74,14 @@ TEST(SearchRegression, Rerank_FP32_L2_Benchmark) {
     double total_ms = std::chrono::duration<double, std::milli>(end - start).count();
     double avg_ms = total_ms / iterations;
     double total_comps = static_cast<double>(num_queries * candidates_per_query * iterations);
-    double comps_per_sec = (total_comps / (total_ms / 1000.0)) / 1e6; // MComps/sec
-    double gelements_per_sec = (comps_per_sec * dim) / 1000.0; // GElements/sec
+    double comps_per_sec = (total_comps / (total_ms / 1000.0)) / 1e6;  // MComps/sec
+    double gelements_per_sec = (comps_per_sec * dim) / 1000.0;         // GElements/sec
     double qps = (num_queries * iterations) / (total_ms / 1000.0);
 
     std::cout << "\n=== Rerank Benchmark (FP32_L2, Instruction: " << space.get_instruction() << ") ===\n"
-              << "Queries: " << num_queries << ", Base Vectors: " << num_base << ", Dim: " << dim
-              << ", Cands/Query: " << candidates_per_query << ", K-Top: " << k_top << ", Iterations: " << iterations << "\n"
-              << std::fixed << std::setprecision(3)
-              << "Average latency: " << avg_ms << " ms / batch\n"
+              << "Queries: " << num_queries << ", Base Vectors: " << num_base << ", Dim: " << dim << ", Cands/Query: " << candidates_per_query
+              << ", K-Top: " << k_top << ", Iterations: " << iterations << "\n"
+              << std::fixed << std::setprecision(3) << "Average latency: " << avg_ms << " ms / batch\n"
               << "Total time: " << total_ms << " ms\n"
               << "Throughput: " << std::setprecision(2) << qps << " QPS\n"
               << "Distance Comparisons: " << comps_per_sec << " MComps/sec\n"
@@ -97,7 +94,7 @@ TEST(SearchRegression, Rerank_FP16_InnerProduct_Benchmark) {
     const size_t num_base = 100000;
     const size_t candidates_per_query = 200;
     const size_t k_top = 10;
-    const size_t num_threads = 0; // auto-detect
+    const size_t num_threads = 0;  // auto-detect
 
     deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP16_InnerProduct);
 
@@ -118,8 +115,7 @@ TEST(SearchRegression, Rerank_FP16_InnerProduct_Benchmark) {
 
     // Warm-up run
     auto warm_results = deglib::search::rerank(
-        space, query_vectors.data(), num_queries, base_vectors.data(), num_base,
-        candidates.data(), candidates_per_query, k_top, num_threads
+        space, query_vectors.data(), num_queries, base_vectors.data(), num_base, candidates.data(), candidates_per_query, k_top, num_threads
     );
     EXPECT_EQ(warm_results.size(), num_queries);
 
@@ -129,8 +125,7 @@ TEST(SearchRegression, Rerank_FP16_InnerProduct_Benchmark) {
 
     for (int it = 0; it < iterations; ++it) {
         auto results = deglib::search::rerank(
-            space, query_vectors.data(), num_queries, base_vectors.data(), num_base,
-            candidates.data(), candidates_per_query, k_top, num_threads
+            space, query_vectors.data(), num_queries, base_vectors.data(), num_base, candidates.data(), candidates_per_query, k_top, num_threads
         );
     }
 
@@ -138,15 +133,14 @@ TEST(SearchRegression, Rerank_FP16_InnerProduct_Benchmark) {
     double total_ms = std::chrono::duration<double, std::milli>(end - start).count();
     double avg_ms = total_ms / iterations;
     double total_comps = static_cast<double>(num_queries * candidates_per_query * iterations);
-    double comps_per_sec = (total_comps / (total_ms / 1000.0)) / 1e6; // MComps/sec
-    double gelements_per_sec = (comps_per_sec * dim) / 1000.0; // GElements/sec
+    double comps_per_sec = (total_comps / (total_ms / 1000.0)) / 1e6;  // MComps/sec
+    double gelements_per_sec = (comps_per_sec * dim) / 1000.0;         // GElements/sec
     double qps = (num_queries * iterations) / (total_ms / 1000.0);
 
     std::cout << "\n=== Rerank Benchmark (FP16_InnerProduct, Instruction: " << space.get_instruction() << ") ===\n"
-              << "Queries: " << num_queries << ", Base Vectors: " << num_base << ", Dim: " << dim
-              << ", Cands/Query: " << candidates_per_query << ", K-Top: " << k_top << ", Iterations: " << iterations << "\n"
-              << std::fixed << std::setprecision(3)
-              << "Average latency: " << avg_ms << " ms / batch\n"
+              << "Queries: " << num_queries << ", Base Vectors: " << num_base << ", Dim: " << dim << ", Cands/Query: " << candidates_per_query
+              << ", K-Top: " << k_top << ", Iterations: " << iterations << "\n"
+              << std::fixed << std::setprecision(3) << "Average latency: " << avg_ms << " ms / batch\n"
               << "Total time: " << total_ms << " ms\n"
               << "Throughput: " << std::setprecision(2) << qps << " QPS\n"
               << "Distance Comparisons: " << comps_per_sec << " MComps/sec\n"

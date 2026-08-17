@@ -1,4 +1,5 @@
 #include "common/test_helpers.h"
+
 #include <span>
 
 // ============================================================================
@@ -8,8 +9,7 @@
 // and explore() across 100 iterations on SizeBoundedGraph instances.
 // ============================================================================
 
-TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_L2)
-{
+TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_L2) {
     const size_t dim = 1024;
     const size_t base_count = 10000;
     const size_t query_count = 100;
@@ -40,9 +40,7 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_L2)
     deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(base_count), edges_per_vertex, feature_space);
 
     std::mt19937 rnd(42);
-    deglib::builder::EvenRegularGraphBuilder builder(
-        graph, rnd, deglib::builder::OptimizationTarget::LowLID, edges_per_vertex, extend_eps, 0, 0.0f
-    );
+    deglib::builder::EvenRegularGraphBuilder builder(graph, rnd, deglib::builder::OptimizationTarget::LowLID, edges_per_vertex, extend_eps, 0, 0.0f);
     builder.setThreadCount(1);
 
     for (size_t i = 0; i < base_count; ++i) {
@@ -53,7 +51,7 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_L2)
     auto dummy_callback = [](deglib::builder::BuilderStatus&) {};
     builder.build(dummy_callback, false);
 
-    // 1. Search Benchmark 
+    // 1. Search Benchmark
     std::vector<decltype(graph.search(std::span<const float>(), 0, 0.0f))> last_search_results(query_count);
     auto t_start_search = std::chrono::high_resolution_clock::now();
 
@@ -88,12 +86,10 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_L2)
     double search_qps = (static_cast<double>(total_queries) / total_search_ms) * 1000.0;
     float search_recall = static_cast<float>(correct_search) / static_cast<float>(total_gt);
 
-    std::cout << "[BENCHMARK 100x] SizeBoundedGraph FP32_L2 search(): "
-              << total_search_ms << " ms total for " << total_queries << " queries (" 
-              << (total_search_ms / total_queries) << " ms/q), "
-              << search_qps << " QPS, recall=" << (search_recall * 100.0f) << "%\n";
+    std::cout << "[BENCHMARK 100x] SizeBoundedGraph FP32_L2 search(): " << total_search_ms << " ms total for " << total_queries << " queries ("
+              << (total_search_ms / total_queries) << " ms/q), " << search_qps << " QPS, recall=" << (search_recall * 100.0f) << "%\n";
 
-    // 2. Explore Benchmark 
+    // 2. Explore Benchmark
     std::vector<decltype(graph.explore(0, 0, 0))> last_explore_results(query_count);
     auto t_start_explore = std::chrono::high_resolution_clock::now();
 
@@ -130,14 +126,11 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_L2)
     double explore_qps = (static_cast<double>(total_explorations) / total_explore_ms) * 1000.0;
     float explore_recall = static_cast<float>(correct_explore) / static_cast<float>(total_explore_gt);
 
-    std::cout << "[BENCHMARK 100x] SizeBoundedGraph FP32_L2 explore(): "
-              << total_explore_ms << " ms total for " << total_explorations << " explorations (" 
-              << (total_explore_ms / total_explorations) << " ms/q), "
-              << explore_qps << " QPS, recall=" << (explore_recall * 100.0f) << "%\n";
+    std::cout << "[BENCHMARK 100x] SizeBoundedGraph FP32_L2 explore(): " << total_explore_ms << " ms total for " << total_explorations << " explorations ("
+              << (total_explore_ms / total_explorations) << " ms/q), " << explore_qps << " QPS, recall=" << (explore_recall * 100.0f) << "%\n";
 }
 
-TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_InnerProduct)
-{
+TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_InnerProduct) {
     const size_t dim = 1024;
     const size_t base_count = 10000;
     const size_t query_count = 100;
@@ -168,9 +161,7 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_InnerProduct)
     deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(base_count), edges_per_vertex, feature_space);
 
     std::mt19937 rnd(42);
-    deglib::builder::EvenRegularGraphBuilder builder(
-        graph, rnd, deglib::builder::OptimizationTarget::LowLID, edges_per_vertex, extend_eps, 0, 0.0f
-    );
+    deglib::builder::EvenRegularGraphBuilder builder(graph, rnd, deglib::builder::OptimizationTarget::LowLID, edges_per_vertex, extend_eps, 0, 0.0f);
     builder.setThreadCount(1);
 
     for (size_t i = 0; i < base_count; ++i) {
@@ -181,7 +172,7 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_InnerProduct)
     auto dummy_callback = [](deglib::builder::BuilderStatus&) {};
     builder.build(dummy_callback, false);
 
-    // Search Benchmark 
+    // Search Benchmark
     std::vector<decltype(graph.search(std::span<const float>(), 0, 0.0f))> last_search_results(query_count);
     auto t_start_search = std::chrono::high_resolution_clock::now();
     for (int run = 0; run < benchmark_runs; ++run) {
@@ -215,10 +206,8 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_InnerProduct)
     double search_qps = (static_cast<double>(total_queries) / total_search_ms) * 1000.0;
     float search_recall = static_cast<float>(correct_search) / static_cast<float>(total_gt);
 
-    std::cout << "[BENCHMARK 100x] SizeBoundedGraph FP32_InnerProduct search(): "
-              << total_search_ms << " ms total for " << total_queries << " queries (" 
-              << (total_search_ms / total_queries) << " ms/q), "
-              << search_qps << " QPS, recall=" << (search_recall * 100.0f) << "%\n";
+    std::cout << "[BENCHMARK 100x] SizeBoundedGraph FP32_InnerProduct search(): " << total_search_ms << " ms total for " << total_queries << " queries ("
+              << (total_search_ms / total_queries) << " ms/q), " << search_qps << " QPS, recall=" << (search_recall * 100.0f) << "%\n";
 
     // Explore Benchmark
     std::vector<decltype(graph.explore(0, 0, 0))> last_explore_results(query_count);
@@ -256,14 +245,12 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_FP32_InnerProduct)
     double explore_qps = (static_cast<double>(total_explorations) / total_explore_ms) * 1000.0;
     float explore_recall = static_cast<float>(correct_explore) / static_cast<float>(total_explore_gt);
 
-    std::cout << "[BENCHMARK 100x] SizeBoundedGraph FP32_InnerProduct explore(): "
-              << total_explore_ms << " ms total for " << total_explorations << " explorations (" 
-              << (total_explore_ms / total_explorations) << " ms/q), "
-              << explore_qps << " QPS, recall=" << (explore_recall * 100.0f) << "%\n";
+    std::cout << "[BENCHMARK 100x] SizeBoundedGraph FP32_InnerProduct explore(): " << total_explore_ms << " ms total for " << total_explorations
+              << " explorations (" << (total_explore_ms / total_explorations) << " ms/q), " << explore_qps << " QPS, recall=" << (explore_recall * 100.0f)
+              << "%\n";
 }
 
-TEST(SizeBoundedGraphRegression, SearchAndExplore_EVP_InnerProduct)
-{
+TEST(SizeBoundedGraphRegression, SearchAndExplore_EVP_InnerProduct) {
     const size_t dim = 1024;
     const size_t base_count = 10000;
     const size_t query_count = 100;
@@ -302,9 +289,7 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_EVP_InnerProduct)
     deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(base_count), edges_per_vertex, feature_space);
 
     std::mt19937 rnd(42);
-    deglib::builder::EvenRegularGraphBuilder builder(
-        graph, rnd, deglib::builder::OptimizationTarget::LowLID, edges_per_vertex, extend_eps, 0, 0.0f
-    );
+    deglib::builder::EvenRegularGraphBuilder builder(graph, rnd, deglib::builder::OptimizationTarget::LowLID, edges_per_vertex, extend_eps, 0, 0.0f);
     builder.setThreadCount(1);
 
     for (size_t i = 0; i < base_count; ++i) {
@@ -315,7 +300,7 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_EVP_InnerProduct)
     auto dummy_callback = [](deglib::builder::BuilderStatus&) {};
     builder.build(dummy_callback, false);
 
-    // Search Benchmark 
+    // Search Benchmark
     std::vector<decltype(graph.search(std::span<const std::byte>(), 0, 0.0f))> last_search_results(query_count);
     auto t_start_search = std::chrono::high_resolution_clock::now();
     for (int run = 0; run < benchmark_runs; ++run) {
@@ -350,10 +335,8 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_EVP_InnerProduct)
     double search_qps = (static_cast<double>(total_queries) / total_search_ms) * 1000.0;
     float search_recall = static_cast<float>(correct_search) / static_cast<float>(total_gt);
 
-    std::cout << "[BENCHMARK 100x] SizeBoundedGraph EVP_InnerProduct search(): "
-              << total_search_ms << " ms total for " << total_queries << " queries (" 
-              << (total_search_ms / total_queries) << " ms/q), "
-              << search_qps << " QPS, recall=" << (search_recall * 100.0f) << "%\n";
+    std::cout << "[BENCHMARK 100x] SizeBoundedGraph EVP_InnerProduct search(): " << total_search_ms << " ms total for " << total_queries << " queries ("
+              << (total_search_ms / total_queries) << " ms/q), " << search_qps << " QPS, recall=" << (search_recall * 100.0f) << "%\n";
 
     // Explore Benchmark
     std::vector<decltype(graph.explore(0, 0, 0))> last_explore_results(query_count);
@@ -391,14 +374,12 @@ TEST(SizeBoundedGraphRegression, SearchAndExplore_EVP_InnerProduct)
     double explore_qps = (static_cast<double>(total_explorations) / total_explore_ms) * 1000.0;
     float explore_recall = static_cast<float>(correct_explore) / static_cast<float>(total_explore_gt);
 
-    std::cout << "[BENCHMARK 100x] SizeBoundedGraph EVP_InnerProduct explore(): "
-              << total_explore_ms << " ms total for " << total_explorations << " explorations (" 
-              << (total_explore_ms / total_explorations) << " ms/q), "
-              << explore_qps << " QPS, recall=" << (explore_recall * 100.0f) << "%\n";
+    std::cout << "[BENCHMARK 100x] SizeBoundedGraph EVP_InnerProduct explore(): " << total_explore_ms << " ms total for " << total_explorations
+              << " explorations (" << (total_explore_ms / total_explorations) << " ms/q), " << explore_qps << " QPS, recall=" << (explore_recall * 100.0f)
+              << "%\n";
 }
 
-TEST(SizeBoundedGraphRegression, MultiThreadedSearch_HighDim_Scaling)
-{
+TEST(SizeBoundedGraphRegression, MultiThreadedSearch_HighDim_Scaling) {
     const size_t dim = 1024;
     const size_t base_count = 10000;
     const size_t query_count = 100;
@@ -420,9 +401,7 @@ TEST(SizeBoundedGraphRegression, MultiThreadedSearch_HighDim_Scaling)
     deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(base_count), edges_per_vertex, feature_space);
 
     std::mt19937 rnd(42);
-    deglib::builder::EvenRegularGraphBuilder builder(
-        graph, rnd, deglib::builder::OptimizationTarget::LowLID, edges_per_vertex, extend_eps, 0, 0.0f
-    );
+    deglib::builder::EvenRegularGraphBuilder builder(graph, rnd, deglib::builder::OptimizationTarget::LowLID, edges_per_vertex, extend_eps, 0, 0.0f);
     builder.setThreadCount(1);
 
     for (size_t i = 0; i < base_count; ++i) {
@@ -433,11 +412,12 @@ TEST(SizeBoundedGraphRegression, MultiThreadedSearch_HighDim_Scaling)
     auto dummy_callback = [](deglib::builder::BuilderStatus&) {};
     builder.build(dummy_callback, false);
 
-    run_multithreaded_search_benchmark("SizeBoundedGraph FP32_L2 (1024D)", graph, query_data, query_count, dim, search_k, search_eps, gt_data, {1, 2, 4, 8}, benchmark_runs);
+    run_multithreaded_search_benchmark(
+        "SizeBoundedGraph FP32_L2 (1024D)", graph, query_data, query_count, dim, search_k, search_eps, gt_data, {1, 2, 4, 8}, benchmark_runs
+    );
 }
 
-TEST(SizeBoundedGraphRegression, MultiThreadedSearch_LowDim_Scaling)
-{
+TEST(SizeBoundedGraphRegression, MultiThreadedSearch_LowDim_Scaling) {
     const size_t dim = 64;
     const size_t base_count = 100000;
     const size_t query_count = 100;
@@ -459,9 +439,7 @@ TEST(SizeBoundedGraphRegression, MultiThreadedSearch_LowDim_Scaling)
     deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(base_count), edges_per_vertex, feature_space);
 
     std::mt19937 rnd(42);
-    deglib::builder::EvenRegularGraphBuilder builder(
-        graph, rnd, deglib::builder::OptimizationTarget::LowLID, edges_per_vertex, extend_eps, 0, 0.0f
-    );
+    deglib::builder::EvenRegularGraphBuilder builder(graph, rnd, deglib::builder::OptimizationTarget::LowLID, edges_per_vertex, extend_eps, 0, 0.0f);
     builder.setThreadCount(1);
 
     for (size_t i = 0; i < base_count; ++i) {
@@ -472,8 +450,7 @@ TEST(SizeBoundedGraphRegression, MultiThreadedSearch_LowDim_Scaling)
     auto dummy_callback = [](deglib::builder::BuilderStatus&) {};
     builder.build(dummy_callback, false);
 
-    run_multithreaded_search_benchmark("SizeBoundedGraph FP32_L2 (64D)", graph, query_data, query_count, dim, search_k, search_eps, gt_data, {1, 2, 4, 8}, benchmark_runs);
+    run_multithreaded_search_benchmark(
+        "SizeBoundedGraph FP32_L2 (64D)", graph, query_data, query_count, dim, search_k, search_eps, gt_data, {1, 2, 4, 8}, benchmark_runs
+    );
 }
-
-
-

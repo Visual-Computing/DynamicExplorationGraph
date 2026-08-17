@@ -1,11 +1,11 @@
 // test_filter.cpp — Unit tests for deglib::search::Filter
 
-#include <vector>
-#include <cstdint>
-#include <cstdlib>
-
 #include "deglib/filter.h"
 #include "gtest/gtest.h"
+
+#include <cstdint>
+#include <cstdlib>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 //  Filter — basic bitset operations
@@ -44,7 +44,7 @@ TEST(Filter, MultipleLabels) {
 TEST(Filter, DuplicatesIgnored) {
     int labels[] = {5, 5, 5, 5};
     deglib::search::Filter f(labels, 4, 10, 11);
-    EXPECT_EQ(f.size(), 1u); // only one unique label
+    EXPECT_EQ(f.size(), 1u);  // only one unique label
     EXPECT_TRUE(f.is_valid(5));
 }
 

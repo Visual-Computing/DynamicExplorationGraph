@@ -1,11 +1,12 @@
-#include <gtest/gtest.h>
-#include "deglib/optimization/flas/junker_volgenant_solver.h"
 #include "common/test_helpers.h"
+#include "deglib/optimization/flas/junker_volgenant_solver.h"
 
-#include <vector>
-#include <random>
-#include <cmath>
+#include <gtest/gtest.h>
+
 #include <algorithm>
+#include <cmath>
+#include <random>
+#include <vector>
 
 // ============================================================================
 //  Junker-Volgenant assignment solver tests
@@ -107,11 +108,7 @@ TEST(JunkerVolgenantSolver, JVScratch_ResetZeroesInPlace) {
 
 TEST(JunkerVolgenantSolver, IdentityMatrix) {
     const int dim = 3;
-    int matrix[9] = {
-        0, 10, 10,
-        10, 0, 10,
-        10, 10, 0
-    };
+    int matrix[9] = {0, 10, 10, 10, 0, 10, 10, 10, 0};
 
     std::vector<int> assignment = compute_assignment(matrix, dim);
     ASSERT_FALSE(assignment.empty());
@@ -123,11 +120,7 @@ TEST(JunkerVolgenantSolver, IdentityMatrix) {
 
 TEST(JunkerVolgenantSolver, PermutedOptimalAssignment) {
     const int dim = 3;
-    int matrix[9] = {
-        10,  0, 10,
-        10, 10,  0,
-         0, 10, 10
-    };
+    int matrix[9] = {10, 0, 10, 10, 10, 0, 0, 10, 10};
 
     std::vector<int> assignment = compute_assignment(matrix, dim);
     ASSERT_FALSE(assignment.empty());
@@ -139,7 +132,7 @@ TEST(JunkerVolgenantSolver, PermutedOptimalAssignment) {
 
 TEST(JunkerVolgenantSolver, Dimension1) {
     const int dim = 1;
-    int matrix[1] = { 42 };
+    int matrix[1] = {42};
 
     std::vector<int> assignment = compute_assignment(matrix, dim);
     ASSERT_FALSE(assignment.empty());
@@ -149,12 +142,7 @@ TEST(JunkerVolgenantSolver, Dimension1) {
 
 TEST(JunkerVolgenantSolver, LargerMatrixOptimalAssignment) {
     const int dim = 4;
-    int matrix[16] = {
-        10, 10, 10,  0,
-        10, 10,  0, 10,
-        10,  0, 10, 10,
-         0, 10, 10, 10
-    };
+    int matrix[16] = {10, 10, 10, 0, 10, 10, 0, 10, 10, 0, 10, 10, 0, 10, 10, 10};
 
     std::vector<int> assignment = compute_assignment(matrix, dim);
     ASSERT_EQ(assignment.size(), static_cast<size_t>(dim));
@@ -167,13 +155,7 @@ TEST(JunkerVolgenantSolver, LargerMatrixOptimalAssignment) {
 
 TEST(JunkerVolgenantSolver, AssignmentIsAValidPermutation) {
     const int dim = 5;
-    int matrix[25] = {
-        5, 3, 8, 1, 9,
-        2, 7, 4, 6, 3,
-        8, 1, 5, 9, 2,
-        3, 8, 2, 7, 4,
-        9, 4, 6, 3, 1
-    };
+    int matrix[25] = {5, 3, 8, 1, 9, 2, 7, 4, 6, 3, 8, 1, 5, 9, 2, 3, 8, 2, 7, 4, 9, 4, 6, 3, 1};
 
     std::vector<int> assignment = compute_assignment(matrix, dim);
     ASSERT_EQ(assignment.size(), static_cast<size_t>(dim));
@@ -191,11 +173,7 @@ TEST(JunkerVolgenantSolver, AssignmentIsAValidPermutation) {
 
 TEST(JunkerVolgenantSolver, ScratchOverloadProducesSameResult) {
     const int dim = 3;
-    int matrix[9] = {
-        10,  0, 10,
-        10, 10,  0,
-         0, 10, 10
-    };
+    int matrix[9] = {10, 0, 10, 10, 10, 0, 0, 10, 10};
 
     std::vector<int> expected = compute_assignment(matrix, dim);
 
@@ -211,18 +189,8 @@ TEST(JunkerVolgenantSolver, ScratchOverloadProducesSameResult) {
 
 TEST(JunkerVolgenantSolver, ScratchReuseAcrossMultipleCalls) {
     const int dim = 4;
-    int matrix_a[16] = {
-        0, 10, 10, 10,
-        10, 0, 10, 10,
-        10, 10, 0, 10,
-        10, 10, 10, 0
-    };
-    int matrix_b[16] = {
-        10, 10, 10, 0,
-        10, 10, 0, 10,
-        10, 0, 10, 10,
-        0, 10, 10, 10
-    };
+    int matrix_a[16] = {0, 10, 10, 10, 10, 0, 10, 10, 10, 10, 0, 10, 10, 10, 10, 0};
+    int matrix_b[16] = {10, 10, 10, 0, 10, 10, 0, 10, 10, 0, 10, 10, 0, 10, 10, 10};
 
     JVScratch scratch(dim);
 
@@ -243,11 +211,7 @@ TEST(JunkerVolgenantSolver, ScratchReuseAcrossMultipleCalls) {
 
 TEST(JunkerVolgenantSolver, ScratchInitOnDimMismatch) {
     const int dim = 3;
-    int matrix[9] = {
-        0, 10, 10,
-        10, 0, 10,
-        10, 10, 0
-    };
+    int matrix[9] = {0, 10, 10, 10, 0, 10, 10, 10, 0};
 
     JVScratch scratch(1);
     compute_assignment(matrix, dim, scratch);

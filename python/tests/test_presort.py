@@ -48,6 +48,7 @@ def test_presort_callback():
     data = np.random.randn(N, d).astype(np.float32)
 
     progress_history = []
+
     def my_callback(progress: float) -> bool:
         progress_history.append(progress)
         return False
@@ -58,7 +59,9 @@ def test_presort_callback():
     assert progress_history[-1] == 1.0
 
 
-@pytest.mark.parametrize("invalid_metric", [Metric.Uint8_L2, Metric.FP16_InnerProduct, Metric.EVP_InnerProduct, "Uint8_L2"])
+@pytest.mark.parametrize(
+    "invalid_metric", [Metric.Uint8_L2, Metric.FP16_InnerProduct, Metric.EVP_InnerProduct, "Uint8_L2"]
+)
 def test_presort_non_fp32_metric_raises(invalid_metric):
     np.random.seed(42)
     N, d = 20, 16
@@ -66,4 +69,3 @@ def test_presort_non_fp32_metric_raises(invalid_metric):
 
     with pytest.raises((ValueError, RuntimeError), match="FLAS only supports FP32"):
         presort(data, metric=invalid_metric)
-

@@ -1,3 +1,10 @@
+#include "deglib/analysis.h"
+#include "deglib/filter.h"
+#include "deglib/graph/dynamic_graph.h"
+#include "deglib/graph/readonly_graph.h"
+#include "deglib/graph/sizebounded_graph.h"
+#include "gtest/gtest.h"
+
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -6,18 +13,9 @@
 #include <string>
 #include <vector>
 
-#include "deglib/graph/dynamic_graph.h"
-#include "deglib/graph/sizebounded_graph.h"
-#include "deglib/graph/readonly_graph.h"
-#include "deglib/analysis.h"
-#include "deglib/filter.h"
-#include "gtest/gtest.h"
-
 namespace {
 
-std::vector<float> make_vec_4d(float x, float y, float z, float w) {
-    return {x, y, z, w};
-}
+std::vector<float> make_vec_4d(float x, float y, float z, float w) { return {x, y, z, w}; }
 
 std::unique_ptr<std::byte[]> make_float_bytes(const std::vector<float>& v) {
     auto bytes = std::make_unique<std::byte[]>(v.size() * sizeof(float));
@@ -25,7 +23,7 @@ std::unique_ptr<std::byte[]> make_float_bytes(const std::vector<float>& v) {
     return bytes;
 }
 
-} // anonymous namespace
+}  // anonymous namespace
 
 // ---------------------------------------------------------------------------
 //  1. Construction & Chunk Sizing
@@ -33,7 +31,7 @@ std::unique_ptr<std::byte[]> make_float_bytes(const std::vector<float>& v) {
 
 TEST(DynamicGraph, ConstructionEmpty) {
     deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
-    deglib::graph::DynamicGraph graph(4, space, /*chunk_size=*/8); // 8 vertices per chunk
+    deglib::graph::DynamicGraph graph(4, space, /*chunk_size=*/8);  // 8 vertices per chunk
 
     EXPECT_EQ(graph.size(), 0);
     EXPECT_EQ(graph.capacity(), 0);
@@ -45,7 +43,7 @@ TEST(DynamicGraph, ConstructionEmpty) {
 
 TEST(DynamicGraph, AutoRoundsChunkSizeToPowerOfTwo) {
     deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
-    deglib::graph::DynamicGraph graph(4, space, /*chunk_size=*/10); // rounds up to 16
+    deglib::graph::DynamicGraph graph(4, space, /*chunk_size=*/10);  // rounds up to 16
 
     EXPECT_EQ(graph.chunk_capacity(), 16);
 }
@@ -203,7 +201,7 @@ TEST(DynamicGraph, RemoveVertexSwapWithLast) {
     EXPECT_EQ(graph.getInternalIndex(104), 1u);
     EXPECT_EQ(graph.getExternalLabel(1), 104u);
     const float* f1 = reinterpret_cast<const float*>(graph.getFeatureVector(1));
-    EXPECT_NEAR(f1[0], 40.0f, 1e-4f); // feature of old vertex 4
+    EXPECT_NEAR(f1[0], 40.0f, 1e-4f);  // feature of old vertex 4
 
     // Remove remaining elements down to 0
     graph.removeVertex(100);
@@ -240,9 +238,7 @@ TEST(DynamicGraph, RandomGraphAndSearch) {
         data[i] = static_cast<float>(i % 17) * 0.1f;
     }
 
-    auto graph = deglib::graph::DynamicGraph::create_random_graph(
-        reinterpret_cast<const std::byte*>(data.data()), count, edges, space, 42, /*chunk_size=*/8
-    );
+    auto graph = deglib::graph::DynamicGraph::create_random_graph(reinterpret_cast<const std::byte*>(data.data()), count, edges, space, 42, /*chunk_size=*/8);
 
     EXPECT_EQ(graph.size(), count);
     EXPECT_EQ(graph.getEdgesPerVertex(), edges);
@@ -279,9 +275,8 @@ TEST(DynamicGraph, SaveAndLoad) {
         data[i] = static_cast<float>(i) * 0.05f;
     }
 
-    auto orig_graph = deglib::graph::DynamicGraph::create_random_graph(
-        reinterpret_cast<const std::byte*>(data.data()), count, edges, space, 123, /*chunk_size=*/8
-    );
+    auto orig_graph =
+        deglib::graph::DynamicGraph::create_random_graph(reinterpret_cast<const std::byte*>(data.data()), count, edges, space, 123, /*chunk_size=*/8);
 
     std::filesystem::path temp_path = std::filesystem::temp_directory_path() / "test_dynamic_graph.deg";
     EXPECT_TRUE(orig_graph.saveGraph(temp_path.string().c_str()));
@@ -313,9 +308,7 @@ TEST(DynamicGraph, FacadeConversion) {
     deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
 
     std::vector<float> data(count * 4, 1.0f);
-    auto deg = deglib::DynamicExplorationGraph::create_random_graph(
-        reinterpret_cast<const std::byte*>(data.data()), count, edges, space, 7
-    );
+    auto deg = deglib::DynamicExplorationGraph::create_random_graph(reinterpret_cast<const std::byte*>(data.data()), count, edges, space, 7);
 
     // Convert from SizeBoundedGraph to DynamicGraph
     auto dynamic_deg = deg.to_dynamic(/*chunk_size=*/8);

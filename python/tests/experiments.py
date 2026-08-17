@@ -20,7 +20,7 @@ def main():
         vec: np.ndarray
         builder.add_entry(i, vec)
 
-    builder.build(callback='progress')
+    builder.build(callback="progress")
 
     valid_labels = np.random.choice(graph.size(), size=5, replace=False)
 
@@ -30,9 +30,9 @@ def main():
 
     print(results)
 
-    print('indices:', results.shape, results.dtype)
-    print('valid:', valid_labels.shape)
-    print('all results in labels:', np.all(np.isin(results, valid_labels)))
+    print("indices:", results.shape, results.dtype)
+    print("valid:", valid_labels.shape)
+    print("all results in labels:", np.all(np.isin(results, valid_labels)))
 
 
 def main2():
@@ -41,7 +41,7 @@ def main2():
 
     # build index
     data = np.random.random((samples, dims)).astype(np.float32)
-    index = deglib.builder.build_from_data(data, extend_eps=0.1, callback='progress')
+    index = deglib.builder.build_from_data(data, extend_eps=0.1, callback="progress")
 
     # search
     query = np.random.random(dims).astype(np.float32)
@@ -65,8 +65,8 @@ def dump_data(seed):
 
     print(data_to_dump.shape, data_to_dump.dtype)
 
-    data_to_dump.tofile('crash_data.fvecs')
-    print('data dumped to crash_data.fvecs')
+    data_to_dump.tofile("crash_data.fvecs")
+    print("data dumped to crash_data.fvecs")
 
 
 def do_build_with_remove(seed, edges_per_vertex):
@@ -78,7 +78,9 @@ def do_build_with_remove(seed, edges_per_vertex):
     data = np.random.random((samples, dims)).astype(np.float32)
 
     # data = deglib.repository.fvecs_read('crash_data.fvecs')
-    graph = deglib.DynamicExplorationGraph.create_empty(data.shape[0], FloatSpace.create(dims, Metric.FP32_L2), edges_per_vertex)
+    graph = deglib.DynamicExplorationGraph.create_empty(
+        data.shape[0], FloatSpace.create(dims, Metric.FP32_L2), edges_per_vertex
+    )
     builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
     for label, vec in enumerate(data):
@@ -89,26 +91,24 @@ def do_build_with_remove(seed, edges_per_vertex):
     for label in range(0, data.shape[0], 2):
         builder.remove_entry(label)
 
-    builder.build(callback='progress')
+    builder.build(callback="progress")
 
 
-KNOWN_CRASHES = {
-    (1, 10)
-}
+KNOWN_CRASHES = {(1, 10)}
 
 
 def do_all():
     for i in range(100):
         for epv in range(2, 34, 2):
             if (i, epv) in KNOWN_CRASHES:
-                print('skipping seed:', i, ' epv:', epv)
+                print("skipping seed:", i, " epv:", epv)
             else:
-                print('seed:', i, ' epv:', epv)
+                print("seed:", i, " epv:", epv)
                 do_build_with_remove(i, epv)
 
 
 def build_graph(jobname, data, dim):
-    print('starting', jobname)
+    print("starting", jobname)
     graph = deglib.DynamicExplorationGraph.create_empty(1_000_000, FloatSpace.create(dim, Metric.FP32_L2), 8)
     print(graph)
 
@@ -125,7 +125,7 @@ class FinishPrinter:
         self.jobname = jobname
 
     def __call__(self, fut):
-        print('finish', self.jobname)
+        print("finish", self.jobname)
 
 
 def test_free_memory():
@@ -137,8 +137,8 @@ def test_free_memory():
     with ThreadPoolExecutor(max_workers=jobs) as executor:
         futures = []
         for i in range(10):
-            jobname = 'job {}'.format(i)
-            print('start: {}'.format(jobname))
+            jobname = "job {}".format(i)
+            print("start: {}".format(jobname))
             future = executor.submit(build_graph, jobname, data, dim)
 
             future.add_done_callback(FinishPrinter(jobname))
@@ -146,7 +146,7 @@ def test_free_memory():
         wait(futures)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
     # main()
     # do_build_with_remove(1, 10)

@@ -1,12 +1,12 @@
+#include <deglib/deglib.h>
 #include <gtest/gtest.h>
+
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <random>
 #include <vector>
-#include <chrono>
-
-#include <deglib/deglib.h>
 
 // ---------------------------------------------------------------------------
 // FP16 Conversion Tests
@@ -49,8 +49,7 @@ TEST(FP16ConversionTest, SIMDvsScalarEquivalence) {
 
     // Bit-exact comparison
     for (size_t i = 0; i < count; ++i) {
-        EXPECT_EQ(simd_result[i], scalar_result[i])
-            << "Mismatch at index " << i << ": float=" << floats[i];
+        EXPECT_EQ(simd_result[i], scalar_result[i]) << "Mismatch at index " << i << ": float=" << floats[i];
     }
 }
 
@@ -60,7 +59,7 @@ TEST(FP16ConversionTest, SIMDvsScalarEquivalence) {
 // Tests that the remainder handling (0-7 elements) in the vectorized path
 // produces correct results. Uses a count that is not a multiple of 8.
 TEST(FP16ConversionTest, SIMDvsScalarEquivalenceNonMultiple) {
-    const size_t count = 10003; // Not a multiple of 8
+    const size_t count = 10003;  // Not a multiple of 8
     std::vector<float> floats(count);
     std::vector<uint16_t> simd_result(count);
     std::vector<uint16_t> scalar_result(count);
@@ -78,8 +77,7 @@ TEST(FP16ConversionTest, SIMDvsScalarEquivalenceNonMultiple) {
     }
 
     for (size_t i = 0; i < count; ++i) {
-        EXPECT_EQ(simd_result[i], scalar_result[i])
-            << "Mismatch at index " << i << ": float=" << floats[i];
+        EXPECT_EQ(simd_result[i], scalar_result[i]) << "Mismatch at index " << i << ": float=" << floats[i];
     }
 }
 
@@ -116,8 +114,7 @@ TEST(FP16ConversionTest, SIMDvsScalarEquivalenceReverse) {
         uint32_t bits_simd, bits_scalar;
         std::memcpy(&bits_simd, &simd_result[i], sizeof(bits_simd));
         std::memcpy(&bits_scalar, &scalar_result[i], sizeof(bits_scalar));
-        EXPECT_EQ(bits_simd, bits_scalar)
-            << "Mismatch at index " << i << ": fp16=" << fp16_vals[i];
+        EXPECT_EQ(bits_simd, bits_scalar) << "Mismatch at index " << i << ": fp16=" << fp16_vals[i];
     }
 }
 
@@ -150,14 +147,9 @@ TEST(FP16ConversionTest, RoundtripPrecision) {
 
         // For values that round to zero in FP16, use absolute error
         if (std::fabs(orig) < 1e-7f) {
-            EXPECT_LE(abs_err, 1e-7f)
-                << "Absolute error too large at index " << i
-                << ": orig=" << orig << ", rt=" << rt;
+            EXPECT_LE(abs_err, 1e-7f) << "Absolute error too large at index " << i << ": orig=" << orig << ", rt=" << rt;
         } else {
-            EXPECT_LE(rel_err, 1e-3f)
-                << "Relative error too large at index " << i
-                << ": orig=" << orig << ", rt=" << rt
-                << ", rel_err=" << rel_err;
+            EXPECT_LE(rel_err, 1e-3f) << "Relative error too large at index " << i << ": orig=" << orig << ", rt=" << rt << ", rel_err=" << rel_err;
         }
     }
 }
@@ -171,8 +163,7 @@ TEST(FP16ConversionTest, RoundtripPrecision) {
 // (i.e., float -> fp16 -> float matches scalar fp16_to_float(float_to_fp16(x))).
 TEST(FP16ConversionTest, RoundtripPrecisionSmallValues) {
     std::vector<float> original = {
-        0.0f, -0.0f, 1e-8f, -1e-8f, 1e-7f, -1e-7f, 6e-5f, -6e-5f,
-        6.1e-5f, -6.1e-5f, 6.05e-5f, -6.05e-5f, 6.1e-8f, -6.1e-8f,
+        0.0f, -0.0f, 1e-8f, -1e-8f, 1e-7f, -1e-7f, 6e-5f, -6e-5f, 6.1e-5f, -6.1e-5f, 6.05e-5f, -6.05e-5f, 6.1e-8f, -6.1e-8f,
     };
 
     std::vector<uint16_t> fp16_vals(original.size());
@@ -190,10 +181,7 @@ TEST(FP16ConversionTest, RoundtripPrecisionSmallValues) {
         uint32_t bits_rt, bits_scalar;
         std::memcpy(&bits_rt, &rt, sizeof(bits_rt));
         std::memcpy(&bits_scalar, &scalar_rt, sizeof(bits_scalar));
-        EXPECT_EQ(bits_rt, bits_scalar)
-            << "Roundtrip mismatch at index " << i
-            << ": orig=" << orig << ", rt=" << rt
-            << ", scalar_rt=" << scalar_rt;
+        EXPECT_EQ(bits_rt, bits_scalar) << "Roundtrip mismatch at index " << i << ": orig=" << orig << ", rt=" << rt << ", scalar_rt=" << scalar_rt;
     }
 }
 
@@ -283,13 +271,9 @@ TEST(FP16ConversionTest, EdgeCases) {
     // Test powers of 2
     {
         std::vector<float> powers = {
-            1.0f, 2.0f, 4.0f, 8.0f, 16.0f, 32.0f, 64.0f, 128.0f,
-            256.0f, 512.0f, 1024.0f, 2048.0f, 4096.0f, 8192.0f,
-            16384.0f, 32768.0f,
-            0.5f, 0.25f, 0.125f, 0.0625f, 0.03125f, 0.015625f,
-            0.0078125f, 0.00390625f, 0.001953125f, 0.0009765625f,
-            0.00048828125f, 0.000244140625f, 0.0001220703125f,
-            6.103515625e-5f,
+            1.0f,     2.0f,      4.0f,       8.0f,        16.0f,        32.0f,         64.0f,          128.0f,          256.0f,           512.0f,
+            1024.0f,  2048.0f,   4096.0f,    8192.0f,     16384.0f,     32768.0f,      0.5f,           0.25f,           0.125f,           0.0625f,
+            0.03125f, 0.015625f, 0.0078125f, 0.00390625f, 0.001953125f, 0.0009765625f, 0.00048828125f, 0.000244140625f, 0.0001220703125f, 6.103515625e-5f,
         };
 
         for (float p : powers) {
@@ -307,8 +291,7 @@ TEST(FP16ConversionTest, EdgeCases) {
 // values, including zero.
 TEST(FP16ConversionTest, SignBitPreservation) {
     std::vector<float> values = {
-        1.0f, -1.0f, 100.0f, -100.0f, 0.5f, -0.5f,
-        1e-5f, -1e-5f, 1e4f, -1e4f,
+        1.0f, -1.0f, 100.0f, -100.0f, 0.5f, -0.5f, 1e-5f, -1e-5f, 1e4f, -1e4f,
     };
 
     for (float v : values) {
@@ -316,9 +299,7 @@ TEST(FP16ConversionTest, SignBitPreservation) {
         uint16_t sign_bit = (fp16_val >> 15) & 0x1;
         uint16_t expected_sign = (v < 0.0f || (v == 0.0f && std::signbit(v))) ? 1 : 0;
 
-        EXPECT_EQ(sign_bit, expected_sign)
-            << "Sign bit mismatch for value: " << v
-            << ", fp16=" << std::hex << fp16_val << std::dec;
+        EXPECT_EQ(sign_bit, expected_sign) << "Sign bit mismatch for value: " << v << ", fp16=" << std::hex << fp16_val << std::dec;
     }
 }
 
@@ -348,9 +329,7 @@ TEST(FP16ConversionTest, ArrayConversionConsistency) {
         uint32_t bits_arr, bits_scalar;
         std::memcpy(&bits_arr, &recovered[i], sizeof(bits_arr));
         std::memcpy(&bits_scalar, &scalar_rt, sizeof(bits_scalar));
-        EXPECT_EQ(bits_arr, bits_scalar)
-            << "Array conversion mismatch at index " << i
-            << ": original=" << original[i];
+        EXPECT_EQ(bits_arr, bits_scalar) << "Array conversion mismatch at index " << i << ": original=" << original[i];
     }
 }
 
@@ -397,8 +376,7 @@ TEST(FP16ConversionTest, VerifyRuntimeF16CDispatch) {
         uint32_t bits_rt, bits_scalar;
         std::memcpy(&bits_rt, &recovered[i], sizeof(bits_rt));
         std::memcpy(&bits_scalar, &scalar_rt, sizeof(bits_scalar));
-        EXPECT_EQ(bits_rt, bits_scalar)
-            << "Roundtrip mismatch at index " << i;
+        EXPECT_EQ(bits_rt, bits_scalar) << "Roundtrip mismatch at index " << i;
     }
 }
 
@@ -438,12 +416,10 @@ TEST(FP16ConversionTest, CurrentVsHardwarePrecision) {
 
     bool has_avx2 = deglib::cpu::has_avx2();
     std::cout << "[Precision] has_avx2() = " << (has_avx2 ? "true" : "false") << std::endl;
-    std::cout << "[Precision] Vectorized vs scalar mismatches: " << mismatches
-              << " / " << count << " (" << (100.0 * mismatches / count) << "%)" << std::endl;
+    std::cout << "[Precision] Vectorized vs scalar mismatches: " << mismatches << " / " << count << " (" << (100.0 * mismatches / count) << "%)" << std::endl;
 
     // Vectorized path should match scalar path exactly
-    EXPECT_EQ(mismatches, 0u)
-        << "Vectorized path should match scalar path exactly";
+    EXPECT_EQ(mismatches, 0u) << "Vectorized path should match scalar path exactly";
 }
 
 // ---------------------------------------------------------------------------
@@ -475,8 +451,7 @@ TEST(FP16ConversionTest, BenchmarkConversionSpeed) {
     auto end = std::chrono::high_resolution_clock::now();
     auto simd_duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     double simd_ms = simd_duration.count() / 1000.0 / iterations;
-    std::cout << "[Benchmark] Vectorized SIMD F16C: " << simd_ms
-              << " ms per 1M conversions" << std::endl;
+    std::cout << "[Benchmark] Vectorized SIMD F16C: " << simd_ms << " ms per 1M conversions" << std::endl;
 
     // Benchmark current scalar path
     start = std::chrono::high_resolution_clock::now();
@@ -488,13 +463,11 @@ TEST(FP16ConversionTest, BenchmarkConversionSpeed) {
     end = std::chrono::high_resolution_clock::now();
     auto current_duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     double current_ms = current_duration.count() / 1000.0 / iterations;
-    std::cout << "[Benchmark] Current Local Scalar: " << current_ms
-              << " ms per 1M conversions" << std::endl;
+    std::cout << "[Benchmark] Current Local Scalar: " << current_ms << " ms per 1M conversions" << std::endl;
 
     // Print speedup
     if (simd_ms > 0) {
-        std::cout << "[Benchmark] SIMD speedup vs current scalar: "
-                  << (current_ms / simd_ms) << "x" << std::endl;
+        std::cout << "[Benchmark] SIMD speedup vs current scalar: " << (current_ms / simd_ms) << "x" << std::endl;
     }
 
     // SIMD should be faster than scalar when F16C is available.
@@ -502,7 +475,6 @@ TEST(FP16ConversionTest, BenchmarkConversionSpeed) {
     // the timings would be equal — but in that case this benchmark is not
     // meaningful, so we only assert when F16C is present.
     if (deglib::cpu::has_avx2()) {
-        EXPECT_LT(simd_ms, current_ms)
-            << "SIMD path should be faster than scalar when AVX2 is available";
+        EXPECT_LT(simd_ms, current_ms) << "SIMD path should be faster than scalar when AVX2 is available";
     }
 }

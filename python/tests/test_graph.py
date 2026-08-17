@@ -16,10 +16,10 @@ IS_MACOS_M1 = platform.system() == "Darwin" and platform.machine() == "arm64"
 
 
 def get_tmp_graph_file(samples: int, dims: int) -> pathlib.Path:
-    tmpdir = os.path.join(tempfile.gettempdir(), 'deglib_test')
+    tmpdir = os.path.join(tempfile.gettempdir(), "deglib_test")
     os.makedirs(tmpdir, exist_ok=True)
 
-    return pathlib.Path(os.path.join(tmpdir, 'test_graph_S{}_D{}.deg'.format(samples, dims)))
+    return pathlib.Path(os.path.join(tmpdir, "test_graph_S{}_D{}.deg".format(samples, dims)))
 
 
 def get_ranking(features: np.ndarray, graph: deglib.DynamicExplorationGraph, query: np.ndarray) -> np.ndarray:
@@ -38,14 +38,21 @@ def get_ranking(features: np.ndarray, graph: deglib.DynamicExplorationGraph, que
     elif graph.get_feature_space().metric() == Metric.FP32_InnerProduct:
         distances = 1.0 - np.dot(features, query.T).flatten()
     else:
-        raise ValueError(f'unknown metric: {graph.get_feature_space().metric()}')
+        raise ValueError(f"unknown metric: {graph.get_feature_space().metric()}")
     return np.argsort(distances)
 
 
 class Configuration:
     def __init__(
-        self, edges_per_vertex: int, samples: int, dims: int, data: np.ndarray, graph: deglib.DynamicExplorationGraph,
-            graph_path: Optional[pathlib.Path], query: np.ndarray, metric: Metric
+        self,
+        edges_per_vertex: int,
+        samples: int,
+        dims: int,
+        data: np.ndarray,
+        graph: deglib.DynamicExplorationGraph,
+        graph_path: Optional[pathlib.Path],
+        query: np.ndarray,
+        metric: Metric,
     ):
         self.edges_per_vertex = edges_per_vertex
         self.samples = samples
@@ -72,10 +79,13 @@ class Configuration:
             data = np.random.randint(0, 256, size=(samples, dims)).astype(np.uint8)
             query = np.random.randint(0, 256, size=(dims,)).astype(np.uint8)
         else:
-            raise ValueError(f'Unsupported metric: {metric}')
+            raise ValueError(f"Unsupported metric: {metric}")
 
         size_bounded_graph = deglib.build_from_data(
-            data, edges_per_vertex=edges_per_vertex, metric=metric, optimization_target=deglib.builder.OptimizationTarget.LowLID,
+            data,
+            edges_per_vertex=edges_per_vertex,
+            metric=metric,
+            optimization_target=deglib.builder.OptimizationTarget.LowLID,
         )
 
         graph_path = get_tmp_graph_file(samples, dims)
@@ -90,12 +100,10 @@ class Configuration:
         ]
 
     def create_new_size_bounded_graph(self):
-        return deglib.build_from_data(
-            self.data, edges_per_vertex=self.edges_per_vertex, metric=self.metric
-        )
+        return deglib.build_from_data(self.data, edges_per_vertex=self.edges_per_vertex, metric=self.metric)
 
     def __repr__(self):
-        return f'Conf({type(self.graph).__name__}, metric={self.metric.name})'
+        return f"Conf({type(self.graph).__name__}, metric={self.metric.name})"
 
 
 configurations = [
@@ -111,10 +119,10 @@ large_configurations = [
 mutable_configurations = [c for c in configurations if c.graph.is_mutable()]
 
 
-@pytest.mark.parametrize('conf', configurations)
+@pytest.mark.parametrize("conf", configurations)
 def test_search(conf: Configuration):
     if IS_MACOS_M1 and conf.metric == Metric.InnerProduct:
-        pytest.skip('This test is skipped on macOS with M1 chip, as avx2 is not supported on m1 chip.')
+        pytest.skip("This test is skipped on macOS with M1 chip, as avx2 is not supported on m1 chip.")
 
     k = 10
     graph_result, dists = conf.graph.search(conf.query, eps=0.1, k=k)
@@ -122,89 +130,93 @@ def test_search(conf: Configuration):
     graph_result = graph_result.flatten()
     correct_result = get_ranking(conf.data, conf.graph, conf.query)[:k]
 
-    assert graph_result.shape[-1] == k, 'expected {} results, but got {}'.format(k, graph_result.shape[-1])
+    assert graph_result.shape[-1] == k, "expected {} results, but got {}".format(k, graph_result.shape[-1])
 
     # test matches are good
     matches = set(graph_result).intersection(set(correct_result))
-    assert len(matches) >= k-2, 'expected at least {} matching results, but got only {}'.format(k-2, len(matches))
+    assert len(matches) >= k - 2, "expected at least {} matching results, but got only {}".format(k - 2, len(matches))
 
     # test result is sorted
     last_distance = -1.0
     for index, distance in enumerate(dists):
         assert last_distance <= distance, (
-            'ResultSet is not sorted.\ndistance {} at index {} larger than\ndistance {} at index {}'.format(
-                last_distance, index-1, distance, index
+            "ResultSet is not sorted.\ndistance {} at index {} larger than\ndistance {} at index {}".format(
+                last_distance, index - 1, distance, index
             )
         )
 
 
-@pytest.mark.parametrize('conf', mutable_configurations)
+@pytest.mark.parametrize("conf", mutable_configurations)
 def test_prune_non_mrng_edges(conf: Configuration):
     graph = conf.create_new_size_bounded_graph()
     deglib.optimization.prune_non_mrng_edges(graph)
 
 
-@pytest.mark.parametrize('conf', configurations)
+@pytest.mark.parametrize("conf", configurations)
 def test_threaded_search(conf: Configuration):
     k = 10
     graph_result, dists = conf.graph.search(conf.query, eps=0.1, k=k)
     for n_threads in range(2, 8):
         threaded_graph_result, threaded_dists = conf.graph.search(conf.query, eps=0.1, k=k, threads=n_threads)
-        assert np.all(np.equal(threaded_graph_result, graph_result)), \
-            'Threaded and non threaded results differ (n_threads={})'.format(n_threads)
-        assert np.allclose(threaded_dists, dists), \
-            'Threaded and non threaded dists differ (n_threads={})'.format(n_threads)
+        assert np.all(np.equal(threaded_graph_result, graph_result)), (
+            "Threaded and non threaded results differ (n_threads={})".format(n_threads)
+        )
+        assert np.allclose(threaded_dists, dists), "Threaded and non threaded dists differ (n_threads={})".format(
+            n_threads
+        )
 
 
-@pytest.mark.parametrize('conf', configurations)
+@pytest.mark.parametrize("conf", configurations)
 def test_explore(conf: Configuration):
     k = 10
     include_entry = True
-    entry_vertex_index = random.randint(0, conf.samples-1)
-    indices, distances = conf.graph.explore(entry_vertex_index, k, max_distance_computation_count=k*10, include_entry=include_entry)
+    entry_vertex_index = random.randint(0, conf.samples - 1)
+    indices, distances = conf.graph.explore(
+        entry_vertex_index, k, max_distance_computation_count=k * 10, include_entry=include_entry
+    )
     assert len(indices) == k
     assert len(distances) == k
     # check that valid (non-NaN) distances are sorted (ascending)
     valid_distances = distances[~np.isnan(distances)]
     for i in range(len(valid_distances) - 1):
-        assert valid_distances[i] <= valid_distances[i + 1], 'Distances should be sorted in ascending order'
+        assert valid_distances[i] <= valid_distances[i + 1], "Distances should be sorted in ascending order"
 
 
-@pytest.mark.parametrize('conf', configurations)
+@pytest.mark.parametrize("conf", configurations)
 def test_get_edges_per_vertex(conf: Configuration):
     assert conf.graph.get_edges_per_vertex() == conf.edges_per_vertex
 
 
-@pytest.mark.parametrize('conf', configurations)
+@pytest.mark.parametrize("conf", configurations)
 def test_has_vertex(conf: Configuration):
     assert conf.graph.has_vertex(0)
     assert not conf.graph.has_vertex(conf.graph.size())
 
 
-@pytest.mark.parametrize('conf', mutable_configurations)
+@pytest.mark.parametrize("conf", mutable_configurations)
 def test_modify_graph(conf: Configuration):
     graph = conf.create_new_size_bounded_graph()
     # remove vertex via builder
     builder = deglib.GraphBuilder(graph)
-    builder.remove_entry(graph.size()-1)
+    builder.remove_entry(graph.size() - 1)
     builder.build()
     assert graph.size() == conf.samples - 1
     # add vertex back via builder
     builder2 = deglib.GraphBuilder(graph)
-    builder2.add_entry(conf.samples-1, conf.data[-1])
+    builder2.add_entry(conf.samples - 1, conf.data[-1])
     builder2.build()
 
 
-@pytest.mark.parametrize('conf', mutable_configurations)
+@pytest.mark.parametrize("conf", mutable_configurations)
 def test_load_graph(conf: Configuration):
     graph = deglib.load_readonly_graph(conf.graph_path)
     assert not graph.is_mutable()
 
     with pytest.raises(FileNotFoundError):
-        _graph = deglib.load_readonly_graph(pathlib.Path('path') / 'does' / 'not' / 'exist')
+        _graph = deglib.load_readonly_graph(pathlib.Path("path") / "does" / "not" / "exist")
 
 
-@pytest.mark.parametrize('conf', mutable_configurations)
+@pytest.mark.parametrize("conf", mutable_configurations)
 def test_save_graph(tmp_path, conf):
     target_path = tmp_path / "save_path.deg"
     if target_path.is_file():
@@ -214,13 +226,13 @@ def test_save_graph(tmp_path, conf):
     os.remove(target_path)
 
 
-@pytest.mark.parametrize('conf', mutable_configurations)
+@pytest.mark.parametrize("conf", mutable_configurations)
 def test_convert_graph(conf: Configuration):
     rd_graph = conf.graph.to_readonly()
     assert not rd_graph.is_mutable()
 
 
-@pytest.mark.parametrize('conf', large_configurations)
+@pytest.mark.parametrize("conf", large_configurations)
 def test_filters(conf: Configuration):
     k = 400
 
@@ -228,10 +240,10 @@ def test_filters(conf: Configuration):
     results, _dists = conf.graph.search(conf.query, filter_labels=Filter(valid_labels), eps=0.01, k=k)
 
     if not np.all(np.isin(results, valid_labels)):
-        raise ValueError('Found results that should have been filtered out.')
+        raise ValueError("Found results that should have been filtered out.")
 
 
-@pytest.mark.parametrize('conf', large_configurations)
+@pytest.mark.parametrize("conf", large_configurations)
 def test_small_filters(conf: Configuration):
     for n_valid in [200, 400, 600]:
         k = 400
@@ -243,7 +255,7 @@ def test_small_filters(conf: Configuration):
 
         valid_results = results[results != np.iinfo(np.uint32).max]
         if not np.all(np.isin(valid_results, valid_labels)):
-            raise ValueError('Found results that should have been filtered out.')
+            raise ValueError("Found results that should have been filtered out.")
 
         if n_valid < k:
             num_unfilled = k - n_valid
@@ -251,7 +263,7 @@ def test_small_filters(conf: Configuration):
             assert np.sum(np.isnan(_dists)) == num_unfilled
 
 
-@pytest.mark.parametrize('conf', configurations[:1])
+@pytest.mark.parametrize("conf", configurations[:1])
 def test_filter_edge_cases(conf: Configuration):
     k = 5
     # All valid labels filter
@@ -272,9 +284,12 @@ def _build_test_graph_with_distinct_labels(samples=50, dims=16, edges_per_vertex
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
     labels = np.arange(samples, dtype=np.uint32) * 10
     graph = deglib.build_from_data(
-        data, labels=labels, edges_per_vertex=edges_per_vertex,
+        data,
+        labels=labels,
+        edges_per_vertex=edges_per_vertex,
         optimization_target=deglib.builder.OptimizationTarget.LowLID,
-        extend_k=10, extend_eps=0.001
+        extend_k=10,
+        extend_eps=0.001,
     )
     return graph, data
 
@@ -297,8 +312,7 @@ def test_search_returns_external_labels():
     # search_batch returns external labels (multiples of 10)
     for idx in indices.flatten():
         if idx != 0xFFFFFFFF:
-            assert idx % 10 == 0, \
-                f"Search result {idx} should be an external label (multiple of 10)"
+            assert idx % 10 == 0, f"Search result {idx} should be an external label (multiple of 10)"
 
 
 def test_facade_has_vertex_accepts_external_label():
@@ -318,8 +332,7 @@ def test_facade_explore_uses_external_label():
     assert len(distances) == 5
     for idx in indices:
         if idx != 0xFFFFFFFF:
-            assert idx % 10 == 0, \
-                f"Facade explore result should be external label (multiple of 10), got {idx}"
+            assert idx % 10 == 0, f"Facade explore result should be external label (multiple of 10), got {idx}"
 
 
 def test_facade_get_neighbors_uses_external_label():
@@ -564,9 +577,7 @@ def test_sizebounded_graph_from_graph():
     feature_space = FloatSpace.create(dims, Metric.FP32_L2)
 
     # Build a mutable graph, then convert to readonly
-    graph = deglib.build_from_data(
-        data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2
-    )
+    graph = deglib.build_from_data(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
     readonly_graph = graph.to_readonly()
     assert not readonly_graph.is_mutable()
 
@@ -592,17 +603,13 @@ def test_sizebounded_graph_from_graph_custom_features():
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
     feature_space = FloatSpace.create(dims, Metric.FP32_L2)
 
-    graph = deglib.build_from_data(
-        data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2
-    )
+    graph = deglib.build_from_data(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
 
     # Create scaled custom features
     custom_features = data * 10.0
 
     # Convert to mutable with custom features
-    mutable_graph = graph.to_mutable(
-        feature_space=feature_space, custom_features=custom_features
-    )
+    mutable_graph = graph.to_mutable(feature_space=feature_space, custom_features=custom_features)
     assert mutable_graph.is_mutable()
     assert mutable_graph.size() == samples
 
@@ -622,14 +629,10 @@ def test_sizebounded_graph_from_graph_capacity():
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
     feature_space = FloatSpace.create(dims, Metric.FP32_L2)
 
-    graph = deglib.build_from_data(
-        data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2
-    )
+    graph = deglib.build_from_data(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
 
     # Convert to mutable with larger capacity
-    mutable_graph = graph.to_mutable(
-        feature_space=feature_space, capacity=100
-    )
+    mutable_graph = graph.to_mutable(feature_space=feature_space, capacity=100)
     assert mutable_graph.is_mutable()
     assert mutable_graph.size() == samples
 
@@ -650,9 +653,7 @@ def test_sizebounded_graph_from_graph_search_matches():
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
     feature_space = FloatSpace.create(dims, Metric.FP32_L2)
 
-    graph = deglib.build_from_data(
-        data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2
-    )
+    graph = deglib.build_from_data(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
     readonly_graph = graph.to_readonly()
     mutable_graph = readonly_graph.to_mutable()
 
@@ -675,9 +676,7 @@ def test_sizebounded_graph_from_graph_inner_product():
     data = data / np.linalg.norm(data, axis=1, keepdims=True)
     feature_space = FloatSpace.create(dims, Metric.FP32_InnerProduct)
 
-    graph = deglib.build_from_data(
-        data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_InnerProduct
-    )
+    graph = deglib.build_from_data(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_InnerProduct)
     mutable_graph = graph.to_mutable()
 
     assert mutable_graph.is_mutable()
@@ -777,5 +776,3 @@ def test_save_and_load_dynamic_graph(tmp_path):
     loaded_indices, loaded_dists = loaded_graph.search(query, eps=0.1, k=5)
     assert np.array_equal(orig_indices, loaded_indices)
     assert np.allclose(orig_dists, loaded_dists, atol=1e-5)
-
-

@@ -1,12 +1,12 @@
+#include "deglib/filter.h"
+#include "gtest/gtest.h"
+
 #include <chrono>
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
 #include <random>
 #include <vector>
-
-#include "deglib/filter.h"
-#include "gtest/gtest.h"
 
 TEST(FilterRegression, VaryingFillRatesStressTest) {
     constexpr size_t max_value = 999'999;
@@ -44,9 +44,7 @@ TEST(FilterRegression, VaryingFillRatesStressTest) {
         // Measure iteration via for_each_valid_label
         auto start_retrieval = std::chrono::high_resolution_clock::now();
         uint64_t retrieved_ids_count = 0;
-        filter.for_each_valid_label([&retrieved_ids_count](uint32_t /*valid_label*/) {
-            retrieved_ids_count++;
-        });
+        filter.for_each_valid_label([&retrieved_ids_count](uint32_t /*valid_label*/) { retrieved_ids_count++; });
         auto end_retrieval = std::chrono::high_resolution_clock::now();
         double retrieval_ms = std::chrono::duration<double, std::milli>(end_retrieval - start_retrieval).count();
 
@@ -63,9 +61,7 @@ TEST(FilterRegression, VaryingFillRatesStressTest) {
         auto end_is_valid = std::chrono::high_resolution_clock::now();
         double is_valid_ms = std::chrono::duration<double, std::milli>(end_is_valid - start_is_valid).count();
 
-        std::cout << std::fixed << std::setprecision(3)
-                  << "Fill rate: " << std::setw(7) << fill_rate
-                  << " | Creation: " << std::setw(6) << creation_ms << " ms"
+        std::cout << std::fixed << std::setprecision(3) << "Fill rate: " << std::setw(7) << fill_rate << " | Creation: " << std::setw(6) << creation_ms << " ms"
                   << " | ForEach: " << std::setw(6) << retrieval_ms << " ms"
                   << " | 100k isValid: " << std::setw(6) << is_valid_ms << " ms"
                   << " | Valid in queries: " << valid_count << "\n";

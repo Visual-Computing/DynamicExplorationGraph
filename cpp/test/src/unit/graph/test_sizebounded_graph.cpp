@@ -3,6 +3,12 @@
 // Covers: construction, vertex management, edge management, label lookup,
 // feature storage, capacity, search, save/load, multi-operation cycles.
 
+#include "deglib/analysis.h"
+#include "deglib/filter.h"
+#include "deglib/graph/readonly_graph.h"
+#include "deglib/graph/sizebounded_graph.h"
+#include "gtest/gtest.h"
+
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -11,23 +17,13 @@
 #include <string>
 #include <vector>
 
-#include "deglib/graph/sizebounded_graph.h"
-#include "deglib/graph/readonly_graph.h"
-#include "deglib/analysis.h"
-#include "deglib/filter.h"
-#include "gtest/gtest.h"
-
 // ---------------------------------------------------------------------------
 //  Helpers
 // ---------------------------------------------------------------------------
 
-static std::vector<float> make_vec_4d(float x, float y, float z, float w) {
-    return {x, y, z, w};
-}
+static std::vector<float> make_vec_4d(float x, float y, float z, float w) { return {x, y, z, w}; }
 
-static std::vector<float> make_float_vec(size_t dim, float default_val = 0.0f) {
-    return std::vector<float>(dim, default_val);
-}
+static std::vector<float> make_float_vec(size_t dim, float default_val = 0.0f) { return std::vector<float>(dim, default_val); }
 
 static std::unique_ptr<std::byte[]> make_float_bytes(const std::vector<float>& v) {
     auto bytes = std::make_unique<std::byte[]>(v.size() * sizeof(float));
@@ -425,7 +421,7 @@ TEST(SizeBoundedGraph, SaveLoadHeader) {
         ifs.read(reinterpret_cast<char*>(&graph_size), sizeof(graph_size));
         ifs.read(reinterpret_cast<char*>(&edges), sizeof(edges));
 
-        EXPECT_EQ(static_cast<int>(metric_type), 1); // L2
+        EXPECT_EQ(static_cast<int>(metric_type), 1);  // L2
         EXPECT_EQ(dim, 4u);
         EXPECT_EQ(graph_size, 2u);
         EXPECT_EQ(edges, 4u);
@@ -486,8 +482,7 @@ TEST(SizeBoundedGraph, MultipleAddRemoveCycles) {
         graph.addVertex(i, make_float_bytes(v).get());
     }
     for (int i = 1; i <= 7; ++i) {
-        if (graph.hasVertex(static_cast<uint32_t>(i)))
-            graph.removeVertex(static_cast<uint32_t>(i));
+        if (graph.hasVertex(static_cast<uint32_t>(i))) graph.removeVertex(static_cast<uint32_t>(i));
     }
     EXPECT_EQ(graph.size(), 0u);
 }
@@ -640,186 +635,178 @@ namespace {
 // Non-sequential, arbitrary external labels — deliberately distinct from 0..N-1
 constexpr std::array<uint32_t, 5> kExtLabels = {1005, 9999, 42, 707, 12345};
 
-} // anonymous namespace
+}  // anonymous namespace
 
 TEST(SizeBoundedGraphInternalIndicesInSearch, SearchReturnsInternalIndices) {
-   deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
-   deglib::graph::SizeBoundedGraph graph(5, 4, space);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
+    deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
-   // Add vertices with non-sequential external labels at distinct positions
-   graph.addVertex(kExtLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[1], make_float_bytes(make_vec_4d(1.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[2], make_float_bytes(make_vec_4d(2.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[3], make_float_bytes(make_vec_4d(3.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[4], make_float_bytes(make_vec_4d(4.0f, 0.0f, 0.0f, 0.0f)).get());
+    // Add vertices with non-sequential external labels at distinct positions
+    graph.addVertex(kExtLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[1], make_float_bytes(make_vec_4d(1.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[2], make_float_bytes(make_vec_4d(2.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[3], make_float_bytes(make_vec_4d(3.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[4], make_float_bytes(make_vec_4d(4.0f, 0.0f, 0.0f, 0.0f)).get());
 
-   // Fully connect vertices 0..3 (neighbors must be sorted ascending)
-   uint32_t sorted_nbrs[] = {0, 1, 2, 3};
-   float weights[] = {0.0f, 1.0f, 2.0f, 3.0f};
-   graph.changeEdges(0, sorted_nbrs, weights);
-   graph.changeEdges(1, sorted_nbrs, weights);
-   graph.changeEdges(2, sorted_nbrs, weights);
-   graph.changeEdges(3, sorted_nbrs, weights);
-   // Vertex 4 has self-loop only
+    // Fully connect vertices 0..3 (neighbors must be sorted ascending)
+    uint32_t sorted_nbrs[] = {0, 1, 2, 3};
+    float weights[] = {0.0f, 1.0f, 2.0f, 3.0f};
+    graph.changeEdges(0, sorted_nbrs, weights);
+    graph.changeEdges(1, sorted_nbrs, weights);
+    graph.changeEdges(2, sorted_nbrs, weights);
+    graph.changeEdges(3, sorted_nbrs, weights);
+    // Vertex 4 has self-loop only
 
-   // search() on InternalGraph returns internal indices in the ResultSet
-   std::vector<float> query = {0.1f, 0.0f, 0.0f, 0.0f};
-   auto results = graph.search(std::span<const float>(query), 3, 0.0f);
+    // search() on InternalGraph returns internal indices in the ResultSet
+    std::vector<float> query = {0.1f, 0.0f, 0.0f, 0.0f};
+    auto results = graph.search(std::span<const float>(query), 3, 0.0f);
 
-   ASSERT_GT(results.size(), 0u);
+    ASSERT_GT(results.size(), 0u);
 
-   // Every identifier must be an internal index (0..4), NOT an external label
-   std::unordered_set<uint32_t> internal_indices = {0, 1, 2, 3, 4};
-   std::unordered_set<uint32_t> ext_labels(kExtLabels.begin(), kExtLabels.end());
+    // Every identifier must be an internal index (0..4), NOT an external label
+    std::unordered_set<uint32_t> internal_indices = {0, 1, 2, 3, 4};
+    std::unordered_set<uint32_t> ext_labels(kExtLabels.begin(), kExtLabels.end());
 
-   while (!results.empty()) {
-       uint32_t id = results.top().getIdentifier();
-       EXPECT_TRUE(internal_indices.contains(id))
-           << "search() result identifier " << id << " is not a valid internal index (0..N-1)";
-       EXPECT_FALSE(ext_labels.contains(id))
-           << "search() result identifier " << id << " is an external label, not an internal index";
-       results.pop();
-   }
+    while (!results.empty()) {
+        uint32_t id = results.top().getIdentifier();
+        EXPECT_TRUE(internal_indices.contains(id)) << "search() result identifier " << id << " is not a valid internal index (0..N-1)";
+        EXPECT_FALSE(ext_labels.contains(id)) << "search() result identifier " << id << " is an external label, not an internal index";
+        results.pop();
+    }
 }
 
 TEST(SizeBoundedGraphInternalIndicesInSearch, ExploreReturnsInternalIndices) {
-   deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
-   deglib::graph::SizeBoundedGraph graph(5, 4, space);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
+    deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
-   graph.addVertex(kExtLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[1], make_float_bytes(make_vec_4d(1.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[2], make_float_bytes(make_vec_4d(2.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[3], make_float_bytes(make_vec_4d(3.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[4], make_float_bytes(make_vec_4d(4.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[1], make_float_bytes(make_vec_4d(1.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[2], make_float_bytes(make_vec_4d(2.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[3], make_float_bytes(make_vec_4d(3.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[4], make_float_bytes(make_vec_4d(4.0f, 0.0f, 0.0f, 0.0f)).get());
 
-   uint32_t sorted_nbrs[] = {0, 1, 2, 3};
-   float weights[] = {0.0f, 1.0f, 2.0f, 3.0f};
-   graph.changeEdges(0, sorted_nbrs, weights);
-   graph.changeEdges(1, sorted_nbrs, weights);
-   graph.changeEdges(2, sorted_nbrs, weights);
-   graph.changeEdges(3, sorted_nbrs, weights);
+    uint32_t sorted_nbrs[] = {0, 1, 2, 3};
+    float weights[] = {0.0f, 1.0f, 2.0f, 3.0f};
+    graph.changeEdges(0, sorted_nbrs, weights);
+    graph.changeEdges(1, sorted_nbrs, weights);
+    graph.changeEdges(2, sorted_nbrs, weights);
+    graph.changeEdges(3, sorted_nbrs, weights);
 
-   // explore() on InternalGraph takes an internal index and returns internal indices
-   auto results = graph.explore(0, 3, 0, 0.0f, /*include_entry=*/true, nullptr);
+    // explore() on InternalGraph takes an internal index and returns internal indices
+    auto results = graph.explore(0, 3, 0, 0.0f, /*include_entry=*/true, nullptr);
 
-   ASSERT_GT(results.size(), 0u);
+    ASSERT_GT(results.size(), 0u);
 
-   std::unordered_set<uint32_t> internal_indices = {0, 1, 2, 3, 4};
-   std::unordered_set<uint32_t> ext_labels(kExtLabels.begin(), kExtLabels.end());
+    std::unordered_set<uint32_t> internal_indices = {0, 1, 2, 3, 4};
+    std::unordered_set<uint32_t> ext_labels(kExtLabels.begin(), kExtLabels.end());
 
-   while (!results.empty()) {
-       uint32_t id = results.top().getIdentifier();
-       EXPECT_TRUE(internal_indices.contains(id))
-           << "explore() result identifier " << id << " is not a valid internal index";
-       EXPECT_FALSE(ext_labels.contains(id))
-           << "explore() result identifier " << id << " is an external label, not an internal index";
-       results.pop();
-   }
+    while (!results.empty()) {
+        uint32_t id = results.top().getIdentifier();
+        EXPECT_TRUE(internal_indices.contains(id)) << "explore() result identifier " << id << " is not a valid internal index";
+        EXPECT_FALSE(ext_labels.contains(id)) << "explore() result identifier " << id << " is an external label, not an internal index";
+        results.pop();
+    }
 }
 
 TEST(SizeBoundedGraphInternalIndicesInSearch, HasPathReturnsInternalIndices) {
-   deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
-   deglib::graph::SizeBoundedGraph graph(5, 4, space);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
+    deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
-   graph.addVertex(kExtLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[1], make_float_bytes(make_vec_4d(1.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[2], make_float_bytes(make_vec_4d(2.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[3], make_float_bytes(make_vec_4d(3.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[4], make_float_bytes(make_vec_4d(4.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[1], make_float_bytes(make_vec_4d(1.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[2], make_float_bytes(make_vec_4d(2.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[3], make_float_bytes(make_vec_4d(3.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[4], make_float_bytes(make_vec_4d(4.0f, 0.0f, 0.0f, 0.0f)).get());
 
-   uint32_t sorted_nbrs[] = {0, 1, 2, 3};
-   float weights[] = {0.0f, 1.0f, 2.0f, 3.0f};
-   graph.changeEdges(0, sorted_nbrs, weights);
-   graph.changeEdges(1, sorted_nbrs, weights);
-   graph.changeEdges(2, sorted_nbrs, weights);
-   graph.changeEdges(3, sorted_nbrs, weights);
+    uint32_t sorted_nbrs[] = {0, 1, 2, 3};
+    float weights[] = {0.0f, 1.0f, 2.0f, 3.0f};
+    graph.changeEdges(0, sorted_nbrs, weights);
+    graph.changeEdges(1, sorted_nbrs, weights);
+    graph.changeEdges(2, sorted_nbrs, weights);
+    graph.changeEdges(3, sorted_nbrs, weights);
 
-   // hasPath() takes internal entry indices and a internal to_vertex index
-   // Returns a vector of ObjectDistance with internal indices
-   auto path = graph.hasPath({0}, 1, 0.0f, 5);
+    // hasPath() takes internal entry indices and a internal to_vertex index
+    // Returns a vector of ObjectDistance with internal indices
+    auto path = graph.hasPath({0}, 1, 0.0f, 5);
 
-   ASSERT_GT(path.size(), 0u);
+    ASSERT_GT(path.size(), 0u);
 
-   std::unordered_set<uint32_t> internal_indices = {0, 1, 2, 3, 4};
-   std::unordered_set<uint32_t> ext_labels(kExtLabels.begin(), kExtLabels.end());
+    std::unordered_set<uint32_t> internal_indices = {0, 1, 2, 3, 4};
+    std::unordered_set<uint32_t> ext_labels(kExtLabels.begin(), kExtLabels.end());
 
-   for (const auto& od : path) {
-       uint32_t id = od.getIdentifier();
-       EXPECT_TRUE(internal_indices.contains(id))
-           << "hasPath() result identifier " << id << " is not a valid internal index";
-       EXPECT_FALSE(ext_labels.contains(id))
-           << "hasPath() result identifier " << id << " is an external label, not an internal index";
-   }
+    for (const auto& od : path) {
+        uint32_t id = od.getIdentifier();
+        EXPECT_TRUE(internal_indices.contains(id)) << "hasPath() result identifier " << id << " is not a valid internal index";
+        EXPECT_FALSE(ext_labels.contains(id)) << "hasPath() result identifier " << id << " is an external label, not an internal index";
+    }
 }
 
 TEST(SizeBoundedGraphInternalIndicesInSearch, GetNeighborIndicesReturnsInternalIndices) {
-   deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
-   deglib::graph::SizeBoundedGraph graph(5, 4, space);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
+    deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
-   graph.addVertex(kExtLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[1], make_float_bytes(make_vec_4d(1.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[2], make_float_bytes(make_vec_4d(2.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[3], make_float_bytes(make_vec_4d(3.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[4], make_float_bytes(make_vec_4d(4.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[1], make_float_bytes(make_vec_4d(1.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[2], make_float_bytes(make_vec_4d(2.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[3], make_float_bytes(make_vec_4d(3.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[4], make_float_bytes(make_vec_4d(4.0f, 0.0f, 0.0f, 0.0f)).get());
 
-   uint32_t sorted_nbrs[] = {0, 1, 2, 3};
-   float weights[] = {0.0f, 1.0f, 2.0f, 3.0f};
-   graph.changeEdges(0, sorted_nbrs, weights);
+    uint32_t sorted_nbrs[] = {0, 1, 2, 3};
+    float weights[] = {0.0f, 1.0f, 2.0f, 3.0f};
+    graph.changeEdges(0, sorted_nbrs, weights);
 
-   // getNeighborIndices() takes an internal index and returns internal indices
-   const auto* neighbors = graph.getNeighborIndices(0);
-   uint8_t epv = graph.getEdgesPerVertex();
+    // getNeighborIndices() takes an internal index and returns internal indices
+    const auto* neighbors = graph.getNeighborIndices(0);
+    uint8_t epv = graph.getEdgesPerVertex();
 
-   std::unordered_set<uint32_t> internal_indices = {0, 1, 2, 3, 4};
-   std::unordered_set<uint32_t> ext_labels(kExtLabels.begin(), kExtLabels.end());
+    std::unordered_set<uint32_t> internal_indices = {0, 1, 2, 3, 4};
+    std::unordered_set<uint32_t> ext_labels(kExtLabels.begin(), kExtLabels.end());
 
-   for (uint8_t i = 0; i < epv; ++i) {
-       uint32_t n = neighbors[i];
-       EXPECT_TRUE(internal_indices.contains(n))
-           << "getNeighborIndices()[ " << i << "] = " << n << " is not a valid internal index";
-       EXPECT_FALSE(ext_labels.contains(n))
-           << "getNeighborIndices()[ " << i << "] = " << n << " is an external label, not an internal index";
-   }
+    for (uint8_t i = 0; i < epv; ++i) {
+        uint32_t n = neighbors[i];
+        EXPECT_TRUE(internal_indices.contains(n)) << "getNeighborIndices()[ " << i << "] = " << n << " is not a valid internal index";
+        EXPECT_FALSE(ext_labels.contains(n)) << "getNeighborIndices()[ " << i << "] = " << n << " is an external label, not an internal index";
+    }
 }
 
 TEST(SizeBoundedGraphLabelMapping, BidirectionalTranslationWithNonSequentialLabels) {
-   deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
-   deglib::graph::SizeBoundedGraph graph(5, 4, space);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
+    deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
-   // Add vertices with non-sequential external labels
-   graph.addVertex(kExtLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[1], make_float_bytes(make_vec_4d(1.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[2], make_float_bytes(make_vec_4d(2.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[3], make_float_bytes(make_vec_4d(3.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExtLabels[4], make_float_bytes(make_vec_4d(4.0f, 0.0f, 0.0f, 0.0f)).get());
+    // Add vertices with non-sequential external labels
+    graph.addVertex(kExtLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[1], make_float_bytes(make_vec_4d(1.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[2], make_float_bytes(make_vec_4d(2.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[3], make_float_bytes(make_vec_4d(3.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExtLabels[4], make_float_bytes(make_vec_4d(4.0f, 0.0f, 0.0f, 0.0f)).get());
 
-   // getExternalLabel(internal_index) → external_label
-   EXPECT_EQ(graph.getExternalLabel(0), kExtLabels[0]); // 1005
-   EXPECT_EQ(graph.getExternalLabel(1), kExtLabels[1]); // 9999
-   EXPECT_EQ(graph.getExternalLabel(2), kExtLabels[2]); // 42
-   EXPECT_EQ(graph.getExternalLabel(3), kExtLabels[3]); // 707
-   EXPECT_EQ(graph.getExternalLabel(4), kExtLabels[4]); // 12345
+    // getExternalLabel(internal_index) → external_label
+    EXPECT_EQ(graph.getExternalLabel(0), kExtLabels[0]);  // 1005
+    EXPECT_EQ(graph.getExternalLabel(1), kExtLabels[1]);  // 9999
+    EXPECT_EQ(graph.getExternalLabel(2), kExtLabels[2]);  // 42
+    EXPECT_EQ(graph.getExternalLabel(3), kExtLabels[3]);  // 707
+    EXPECT_EQ(graph.getExternalLabel(4), kExtLabels[4]);  // 12345
 
-   // getInternalIndex(external_label) → internal_index
-   EXPECT_EQ(graph.getInternalIndex(kExtLabels[0]), 0u);
-   EXPECT_EQ(graph.getInternalIndex(kExtLabels[1]), 1u);
-   EXPECT_EQ(graph.getInternalIndex(kExtLabels[2]), 2u);
-   EXPECT_EQ(graph.getInternalIndex(kExtLabels[3]), 3u);
-   EXPECT_EQ(graph.getInternalIndex(kExtLabels[4]), 4u);
+    // getInternalIndex(external_label) → internal_index
+    EXPECT_EQ(graph.getInternalIndex(kExtLabels[0]), 0u);
+    EXPECT_EQ(graph.getInternalIndex(kExtLabels[1]), 1u);
+    EXPECT_EQ(graph.getInternalIndex(kExtLabels[2]), 2u);
+    EXPECT_EQ(graph.getInternalIndex(kExtLabels[3]), 3u);
+    EXPECT_EQ(graph.getInternalIndex(kExtLabels[4]), 4u);
 
-   // Round-trip: internal → external → internal
-   for (uint32_t i = 0; i < 5; ++i) {
-       uint32_t ext = graph.getExternalLabel(i);
-       uint32_t back = graph.getInternalIndex(ext);
-       EXPECT_EQ(back, i) << "Round-trip failed for internal index " << i;
-   }
+    // Round-trip: internal → external → internal
+    for (uint32_t i = 0; i < 5; ++i) {
+        uint32_t ext = graph.getExternalLabel(i);
+        uint32_t back = graph.getInternalIndex(ext);
+        EXPECT_EQ(back, i) << "Round-trip failed for internal index " << i;
+    }
 
     // hasVertex() takes external labels
     EXPECT_TRUE(graph.hasVertex(kExtLabels[0]));
     EXPECT_TRUE(graph.hasVertex(kExtLabels[2]));
-    EXPECT_FALSE(graph.hasVertex(kExtLabels[0] + 1)); // 1006 — not in graph
-    EXPECT_FALSE(graph.hasVertex(0u)); // 0 is an internal index, not an external label
-    EXPECT_FALSE(graph.hasVertex(4u)); // 4 is an internal index, not an external label
+    EXPECT_FALSE(graph.hasVertex(kExtLabels[0] + 1));  // 1006 — not in graph
+    EXPECT_FALSE(graph.hasVertex(0u));                 // 0 is an internal index, not an external label
+    EXPECT_FALSE(graph.hasVertex(4u));                 // 4 is an internal index, not an external label
 }
 
 // ---------------------------------------------------------------------------
@@ -863,8 +850,7 @@ TEST(SizeBoundedGraph, CreateRandomGraphFP32) {
         }
     }
 
-    auto graph = deglib::graph::SizeBoundedGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Validate graph structure
     EXPECT_EQ(graph.size(), vertex_count);
@@ -895,8 +881,7 @@ TEST(SizeBoundedGraph, CreateRandomGraphUInt8) {
         }
     }
 
-    auto graph = deglib::graph::SizeBoundedGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 42);
+    auto graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 42);
 
     EXPECT_EQ(graph.size(), vertex_count);
     EXPECT_EQ(graph.getEdgesPerVertex(), edges_per_vertex);
@@ -927,12 +912,10 @@ TEST(SizeBoundedGraph, FromGraphSameFeatures) {
         }
     }
 
-    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Copy using from_graph with the same feature space
-    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(
-        source_graph, space);
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph, space);
 
     EXPECT_EQ(copied_graph.size(), vertex_count);
     EXPECT_EQ(copied_graph.getEdgesPerVertex(), edges_per_vertex);
@@ -944,8 +927,7 @@ TEST(SizeBoundedGraph, FromGraphSameFeatures) {
         const auto* src_neighbors = source_graph.getNeighborIndices(i);
         const auto* copy_neighbors = copied_graph.getNeighborIndices(i);
         for (uint8_t e = 0; e < edges_per_vertex; e++) {
-            EXPECT_EQ(src_neighbors[e], copy_neighbors[e])
-                << "Neighbor index mismatch at vertex " << i << " edge " << e;
+            EXPECT_EQ(src_neighbors[e], copy_neighbors[e]) << "Neighbor index mismatch at vertex " << i << " edge " << e;
         }
     }
 
@@ -957,12 +939,8 @@ TEST(SizeBoundedGraph, FromGraphSameFeatures) {
         const auto* copy_weights = copied_graph.getNeighborWeights(i);
         for (uint8_t e = 0; e < edges_per_vertex; e++) {
             const auto neighbor_idx = src_neighbors[e];
-            const auto expected_weight = dist_func(
-                source_graph.getFeatureVector(i),
-                source_graph.getFeatureVector(neighbor_idx),
-                dist_func_param);
-            EXPECT_NEAR(copy_weights[e], expected_weight, 1e-5f)
-                << "Weight mismatch at vertex " << i << " edge " << e;
+            const auto expected_weight = dist_func(source_graph.getFeatureVector(i), source_graph.getFeatureVector(neighbor_idx), dist_func_param);
+            EXPECT_NEAR(copy_weights[e], expected_weight, 1e-5f) << "Weight mismatch at vertex " << i << " edge " << e;
         }
     }
 
@@ -994,8 +972,7 @@ TEST(SizeBoundedGraph, FromGraphDefaultFeatureSpace) {
         }
     }
 
-    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Copy using from_graph without specifying feature space (fast-path copy)
     const uint32_t new_capacity = 50;
@@ -1010,8 +987,7 @@ TEST(SizeBoundedGraph, FromGraphDefaultFeatureSpace) {
         const auto* src_weights = source_graph.getNeighborWeights(i);
         const auto* copy_weights = copied_graph.getNeighborWeights(i);
         for (uint8_t e = 0; e < edges_per_vertex; e++) {
-            EXPECT_EQ(src_weights[e], copy_weights[e])
-                << "Weight mismatch at vertex " << i << " edge " << e;
+            EXPECT_EQ(src_weights[e], copy_weights[e]) << "Weight mismatch at vertex " << i << " edge " << e;
         }
     }
 }
@@ -1032,15 +1008,13 @@ TEST(SizeBoundedGraph, FromGraphFromReadOnly) {
         }
     }
 
-    auto source_sbg = deglib::graph::SizeBoundedGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_sbg = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Convert to ReadOnlyGraph
     auto readonly = deglib::graph::convert_to_readonly_graph(source_sbg);
 
     // Copy from ReadOnlyGraph using from_graph
-    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(
-        readonly, space);
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(readonly, space);
 
     EXPECT_EQ(copied_graph.size(), vertex_count);
     EXPECT_EQ(copied_graph.getEdgesPerVertex(), edges_per_vertex);
@@ -1051,8 +1025,7 @@ TEST(SizeBoundedGraph, FromGraphFromReadOnly) {
         const auto* src_neighbors = readonly.getNeighborIndices(i);
         const auto* copy_neighbors = copied_graph.getNeighborIndices(i);
         for (uint8_t e = 0; e < edges_per_vertex; e++) {
-            EXPECT_EQ(src_neighbors[e], copy_neighbors[e])
-                << "Neighbor index mismatch at vertex " << i << " edge " << e;
+            EXPECT_EQ(src_neighbors[e], copy_neighbors[e]) << "Neighbor index mismatch at vertex " << i << " edge " << e;
         }
     }
 
@@ -1064,12 +1037,8 @@ TEST(SizeBoundedGraph, FromGraphFromReadOnly) {
         const auto* copy_weights = copied_graph.getNeighborWeights(i);
         for (uint8_t e = 0; e < edges_per_vertex; e++) {
             const auto neighbor_idx = src_neighbors[e];
-            const auto expected_weight = dist_func(
-                readonly.getFeatureVector(i),
-                readonly.getFeatureVector(neighbor_idx),
-                dist_func_param);
-            EXPECT_NEAR(copy_weights[e], expected_weight, 1e-5f)
-                << "Weight mismatch at vertex " << i << " edge " << e;
+            const auto expected_weight = dist_func(readonly.getFeatureVector(i), readonly.getFeatureVector(neighbor_idx), dist_func_param);
+            EXPECT_NEAR(copy_weights[e], expected_weight, 1e-5f) << "Weight mismatch at vertex " << i << " edge " << e;
         }
     }
 }
@@ -1090,8 +1059,7 @@ TEST(SizeBoundedGraph, FromGraphCustomFeatures) {
         }
     }
 
-    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Create custom features with a different scale (multiply by 10)
     auto custom_feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
@@ -1103,8 +1071,7 @@ TEST(SizeBoundedGraph, FromGraphCustomFeatures) {
     }
 
     // Copy using from_graph with custom features
-    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(
-        source_graph, space, custom_feature_bytes.get());
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph, space, custom_feature_bytes.get());
 
     EXPECT_EQ(copied_graph.size(), vertex_count);
 
@@ -1113,8 +1080,7 @@ TEST(SizeBoundedGraph, FromGraphCustomFeatures) {
         const auto* src_neighbors = source_graph.getNeighborIndices(i);
         const auto* copy_neighbors = copied_graph.getNeighborIndices(i);
         for (uint8_t e = 0; e < edges_per_vertex; e++) {
-            EXPECT_EQ(src_neighbors[e], copy_neighbors[e])
-                << "Neighbor index mismatch at vertex " << i << " edge " << e;
+            EXPECT_EQ(src_neighbors[e], copy_neighbors[e]) << "Neighbor index mismatch at vertex " << i << " edge " << e;
         }
     }
 
@@ -1127,11 +1093,10 @@ TEST(SizeBoundedGraph, FromGraphCustomFeatures) {
         for (uint8_t e = 0; e < edges_per_vertex; e++) {
             const auto neighbor_idx = src_neighbors[e];
             const auto expected_weight = dist_func(
-                custom_feature_bytes.get() + size_t(i) * dim * sizeof(float),
-                custom_feature_bytes.get() + size_t(neighbor_idx) * dim * sizeof(float),
-                dist_func_param);
-            EXPECT_NEAR(copy_weights[e], expected_weight, 1e-3f)
-                << "Weight mismatch at vertex " << i << " edge " << e;
+                custom_feature_bytes.get() + size_t(i) * dim * sizeof(float), custom_feature_bytes.get() + size_t(neighbor_idx) * dim * sizeof(float),
+                dist_func_param
+            );
+            EXPECT_NEAR(copy_weights[e], expected_weight, 1e-3f) << "Weight mismatch at vertex " << i << " edge " << e;
         }
     }
 }
@@ -1151,13 +1116,11 @@ TEST(SizeBoundedGraph, FromGraphNewMaxSize) {
         }
     }
 
-    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Copy with a larger capacity
     const uint32_t new_capacity = 100;
-    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(
-        source_graph, space, nullptr, new_capacity);
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph, space, nullptr, new_capacity);
 
     EXPECT_EQ(copied_graph.size(), vertex_count);
     EXPECT_EQ(copied_graph.capacity(), new_capacity);
@@ -1185,12 +1148,10 @@ TEST(SizeBoundedGraph, FromGraphInnerProduct) {
         }
     }
 
-    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Copy with same feature space (InnerProduct)
-    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(
-        source_graph, space);
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph, space);
 
     EXPECT_EQ(copied_graph.size(), vertex_count);
     EXPECT_EQ(copied_graph.getFeatureSpace().metric(), deglib::distances::Metric::FP32_InnerProduct);
@@ -1203,12 +1164,8 @@ TEST(SizeBoundedGraph, FromGraphInnerProduct) {
         const auto* copy_weights = copied_graph.getNeighborWeights(i);
         for (uint8_t e = 0; e < edges_per_vertex; e++) {
             const auto neighbor_idx = src_neighbors[e];
-            const auto expected_weight = dist_func(
-                source_graph.getFeatureVector(i),
-                source_graph.getFeatureVector(neighbor_idx),
-                dist_func_param);
-            EXPECT_NEAR(copy_weights[e], expected_weight, 1e-5f)
-                << "Weight mismatch at vertex " << i << " edge " << e;
+            const auto expected_weight = dist_func(source_graph.getFeatureVector(i), source_graph.getFeatureVector(neighbor_idx), dist_func_param);
+            EXPECT_NEAR(copy_weights[e], expected_weight, 1e-5f) << "Weight mismatch at vertex " << i << " edge " << e;
         }
     }
 }
@@ -1228,12 +1185,10 @@ TEST(SizeBoundedGraph, FromGraphSearchable) {
         }
     }
 
-    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Copy using from_graph
-    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(
-        source_graph, space);
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph, space);
 
     // Search should work and return the same results
     std::vector<float> query = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -1269,12 +1224,10 @@ TEST(SizeBoundedGraph, FromGraphDifferentFeatureSpace) {
         }
     }
 
-    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space_l2, 7);
+    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space_l2, 7);
 
     // Copy with a different feature space (InnerProduct)
-    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(
-        source_graph, space_ip);
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph, space_ip);
 
     EXPECT_EQ(copied_graph.size(), vertex_count);
     EXPECT_EQ(copied_graph.getFeatureSpace().metric(), deglib::distances::Metric::FP32_InnerProduct);
@@ -1284,8 +1237,7 @@ TEST(SizeBoundedGraph, FromGraphDifferentFeatureSpace) {
         const auto* src_neighbors = source_graph.getNeighborIndices(i);
         const auto* copy_neighbors = copied_graph.getNeighborIndices(i);
         for (uint8_t e = 0; e < edges_per_vertex; e++) {
-            EXPECT_EQ(src_neighbors[e], copy_neighbors[e])
-                << "Neighbor index mismatch at vertex " << i << " edge " << e;
+            EXPECT_EQ(src_neighbors[e], copy_neighbors[e]) << "Neighbor index mismatch at vertex " << i << " edge " << e;
         }
     }
 
@@ -1297,12 +1249,8 @@ TEST(SizeBoundedGraph, FromGraphDifferentFeatureSpace) {
         const auto* copy_weights = copied_graph.getNeighborWeights(i);
         for (uint8_t e = 0; e < edges_per_vertex; e++) {
             const auto neighbor_idx = src_neighbors[e];
-            const auto expected_weight = dist_func(
-                source_graph.getFeatureVector(i),
-                source_graph.getFeatureVector(neighbor_idx),
-                dist_func_param);
-            EXPECT_NEAR(copy_weights[e], expected_weight, 1e-5f)
-                << "Weight mismatch at vertex " << i << " edge " << e;
+            const auto expected_weight = dist_func(source_graph.getFeatureVector(i), source_graph.getFeatureVector(neighbor_idx), dist_func_param);
+            EXPECT_NEAR(copy_weights[e], expected_weight, 1e-5f) << "Weight mismatch at vertex " << i << " edge " << e;
         }
     }
 }
@@ -1322,8 +1270,7 @@ TEST(SizeBoundedGraph, CreateRandomGraphSearchable) {
         }
     }
 
-    auto graph = deglib::graph::SizeBoundedGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Use explore from vertex 0 (internal index 0) — should find vertex 0 as nearest
     auto results = graph.explore(0, 5, 0, 0.0f, /*include_entry=*/true, nullptr);
@@ -1355,10 +1302,8 @@ TEST(SizeBoundedGraph, CreateRandomGraphDeterministic) {
         }
     }
 
-    auto graph1 = deglib::graph::SizeBoundedGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 123);
-    auto graph2 = deglib::graph::SizeBoundedGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 123);
+    auto graph1 = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 123);
+    auto graph2 = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 123);
 
     // Same seed should produce same graph
     EXPECT_EQ(graph1.size(), graph2.size());
@@ -1389,10 +1334,8 @@ TEST(SizeBoundedGraph, CreateRandomGraphDifferentSeeds) {
         }
     }
 
-    auto graph1 = deglib::graph::SizeBoundedGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 1);
-    auto graph2 = deglib::graph::SizeBoundedGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 999);
+    auto graph1 = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 1);
+    auto graph2 = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 999);
 
     // Different seeds may produce different graphs (not guaranteed, but likely)
     // At minimum, both should be valid
@@ -1422,8 +1365,7 @@ TEST(SizeBoundedGraph, CreateRandomGraphInnerProduct) {
         }
     }
 
-    auto graph = deglib::graph::SizeBoundedGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     EXPECT_EQ(graph.size(), vertex_count);
     EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::FP32_InnerProduct);

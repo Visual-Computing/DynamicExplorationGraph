@@ -54,7 +54,11 @@ def presort(
     :param space: Alias for space_or_metric.
     :return: 1D uint32 NumPy array containing the sorted permutation of original vector indices [0..count-1].
     """
-    target = space if space is not None else (metric if metric is not None else (space_or_metric if space_or_metric is not None else Metric.FP32_L2))
+    target = (
+        space
+        if space is not None
+        else (metric if metric is not None else (space_or_metric if space_or_metric is not None else Metric.FP32_L2))
+    )
 
     vectors_f32 = np.ascontiguousarray(vectors, dtype=np.float32)
     dim = vectors_f32.shape[1] if vectors_f32.ndim == 2 else 0
@@ -76,6 +80,7 @@ def presort(
     cb_fn = None
     if callback == "progress":
         last_pct = [-1]
+
         def progress_cb(prog: float) -> bool:
             pct = int(prog * 100.0)
             if pct != last_pct[0]:
@@ -86,6 +91,7 @@ def presort(
                     sys.stdout.write("\n")
                     sys.stdout.flush()
             return False
+
         cb_fn = progress_cb
     elif callable(callback):
         cb_fn = callback
@@ -125,9 +131,9 @@ def mips_l2_transform_query(queries: np.ndarray) -> np.ndarray:
 
 
 __all__ = [
-    'prune_non_mrng_edges',
-    'prune_worst_edges',
-    'presort',
-    'mips_l2_transform',
-    'mips_l2_transform_query',
+    "prune_non_mrng_edges",
+    "prune_worst_edges",
+    "presort",
+    "mips_l2_transform",
+    "mips_l2_transform_query",
 ]

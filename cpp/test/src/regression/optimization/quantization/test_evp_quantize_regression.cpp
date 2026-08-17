@@ -1,15 +1,15 @@
-#include <cstdint>
-#include <random>
-#include <vector>
-#include <chrono>
-#include <iostream>
-
-#include "deglib/optimization/quantization/evp_quantize.h"
+#include "common/test_helpers.h"
+#include "deglib/builder.h"
 #include "deglib/distance/evp_inner_product.h"
 #include "deglib/graph/sizebounded_graph.h"
-#include "deglib/builder.h"
-#include "common/test_helpers.h"
+#include "deglib/optimization/quantization/evp_quantize.h"
 #include "gtest/gtest.h"
+
+#include <chrono>
+#include <cstdint>
+#include <iostream>
+#include <random>
+#include <vector>
 
 // ============================================================================
 // EVP Quantization & EVP_InnerProduct Search Regression Benchmarks
@@ -59,9 +59,9 @@ TEST(EvpQuantizeRegression, EvpDistanceCalculationSpeed) {
     }
 
     auto quantized = deglib::quantization::evp::quantize_batch(data.data(), count, dim, non_zeros, 8);
-    size_t vec_bytes = 2 * dim / 8; // byte size per quantized vector
+    size_t vec_bytes = 2 * dim / 8;  // byte size per quantized vector
 
-    const size_t num_dists = 5000000; // 5 million distance comparisons
+    const size_t num_dists = 5000000;  // 5 million distance comparisons
     auto t0 = std::chrono::high_resolution_clock::now();
 
     double sum_dists = 0.0;
@@ -78,6 +78,6 @@ TEST(EvpQuantizeRegression, EvpDistanceCalculationSpeed) {
     double total_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
     double mops = (static_cast<double>(num_dists) / total_ms) / 1000.0;
 
-    std::cout << "[REGRESSION BENCHMARK] EVP Distance Calculations (" << num_dists << " dists, dim=" << dim << "): "
-              << total_ms << " ms total (" << mops << " Million ops/sec, sum=" << sum_dists << ")\n";
+    std::cout << "[REGRESSION BENCHMARK] EVP Distance Calculations (" << num_dists << " dists, dim=" << dim << "): " << total_ms << " ms total (" << mops
+              << " Million ops/sec, sum=" << sum_dists << ")\n";
 }

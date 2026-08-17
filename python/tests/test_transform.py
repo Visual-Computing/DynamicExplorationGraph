@@ -19,8 +19,8 @@ def test_mips_l2_transform_basic():
     np.testing.assert_allclose(transformed[:, :d], data, rtol=1e-5)
 
     # 2. All transformed vectors must have identical squared norm M^2
-    norms_sq = np.sum(transformed ** 2, axis=1)
-    expected_max_norm_sq = max_norm ** 2
+    norms_sq = np.sum(transformed**2, axis=1)
+    expected_max_norm_sq = max_norm**2
     np.testing.assert_allclose(norms_sq, expected_max_norm_sq, rtol=1e-4)
 
 
@@ -32,7 +32,7 @@ def test_mips_l2_transform_distance_equivalence():
 
     transformed_data, max_norm = mips_l2_transform(data)
     transformed_queries = mips_l2_transform_query(queries)
-    M_sq = max_norm ** 2
+    M_sq = max_norm**2
 
     # Verify that for query q' = [q, 0] and db vector x'_i = [x_i, sqrt(M^2 - ||x_i||^2)]:
     # ||q' - x'_i||^2 = ||q||^2 + M^2 - 2 * <q, x_i>

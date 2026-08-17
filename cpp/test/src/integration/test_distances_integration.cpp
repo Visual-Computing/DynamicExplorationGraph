@@ -13,8 +13,7 @@ using deglib::distances::ResidualMode;
 // L2 Float distance recall tests
 // ---------------------------------------------------------------------------
 
-TEST(DeglibDistanceIntegration, DistanceRecall_L2Float_AVX512_Modes)
-{
+TEST(DeglibDistanceIntegration, DistanceRecall_L2Float_AVX512_Modes) {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
@@ -56,8 +55,7 @@ TEST(DeglibDistanceIntegration, DistanceRecall_L2Float_AVX512_Modes)
 #endif
 }
 
-TEST(DeglibDistanceIntegration, DistanceRecall_L2Float_AVX2_Modes)
-{
+TEST(DeglibDistanceIntegration, DistanceRecall_L2Float_AVX2_Modes) {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
@@ -99,8 +97,7 @@ TEST(DeglibDistanceIntegration, DistanceRecall_L2Float_AVX2_Modes)
 #endif
 }
 
-TEST(DeglibDistanceIntegration, DistanceRecall_L2Float)
-{
+TEST(DeglibDistanceIntegration, DistanceRecall_L2Float) {
     const size_t dim = 128;
     const size_t base_count = 10000;
     const size_t query_count = 100;
@@ -112,17 +109,16 @@ TEST(DeglibDistanceIntegration, DistanceRecall_L2Float)
 
     auto gt_scalar = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, k);
 
-    check_distance_recall("L2Float", base_data, base_count, query_data, query_count, dim, k, gt_scalar,
-                          [](const void* a, const void* b, const void* qty)
-                          { return deglib::distances::fp32_l2::L2Float::compare(a, b, qty); });
+    check_distance_recall("L2Float", base_data, base_count, query_data, query_count, dim, k, gt_scalar, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::fp32_l2::L2Float::compare(a, b, qty);
+    });
 }
 
 // ---------------------------------------------------------------------------
 // InnerProduct Float distance recall tests
 // ---------------------------------------------------------------------------
 
-TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFloat_AVX512_Modes)
-{
+TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFloat_AVX512_Modes) {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
@@ -158,8 +154,7 @@ TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFloat_AVX512_Modes)
 #endif
 }
 
-TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFloat_AVX2_Modes)
-{
+TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFloat_AVX2_Modes) {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
@@ -195,8 +190,7 @@ TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFloat_AVX2_Modes)
 #endif
 }
 
-TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFloat)
-{
+TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFloat) {
     const size_t dim = 128;
     const size_t base_count = 10000;
     const size_t query_count = 100;
@@ -208,17 +202,17 @@ TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFloat)
 
     auto gt_scalar = compute_groundtruth_innerproduct(base_data, base_count, query_data, query_count, dim, k);
 
-    check_distance_recall("InnerProductFloat", base_data, base_count, query_data, query_count, dim, k, gt_scalar,
-                          [](const void* a, const void* b, const void* qty)
-                          { return deglib::distances::fp32_ip::InnerProductFloat::compare(a, b, qty); });
+    check_distance_recall(
+        "InnerProductFloat", base_data, base_count, query_data, query_count, dim, k, gt_scalar,
+        [](const void* a, const void* b, const void* qty) { return deglib::distances::fp32_ip::InnerProductFloat::compare(a, b, qty); }
+    );
 }
 
 // ---------------------------------------------------------------------------
 // L2 Uint8 distance recall tests
 // ---------------------------------------------------------------------------
 
-TEST(DeglibDistanceIntegration, DistanceRecall_L2Uint8_AVX512_Modes)
-{
+TEST(DeglibDistanceIntegration, DistanceRecall_L2Uint8_AVX512_Modes) {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
@@ -254,8 +248,7 @@ TEST(DeglibDistanceIntegration, DistanceRecall_L2Uint8_AVX512_Modes)
 #endif
 }
 
-TEST(DeglibDistanceIntegration, DistanceRecall_L2Uint8_AVX2_Modes)
-{
+TEST(DeglibDistanceIntegration, DistanceRecall_L2Uint8_AVX2_Modes) {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
@@ -291,8 +284,7 @@ TEST(DeglibDistanceIntegration, DistanceRecall_L2Uint8_AVX2_Modes)
 #endif
 }
 
-TEST(DeglibDistanceIntegration, DistanceRecall_L2Uint8)
-{
+TEST(DeglibDistanceIntegration, DistanceRecall_L2Uint8) {
     const size_t dim = 128;
     const size_t base_count = 10000;
     const size_t query_count = 100;
@@ -304,17 +296,16 @@ TEST(DeglibDistanceIntegration, DistanceRecall_L2Uint8)
 
     auto gt_scalar = compute_groundtruth_l2_uint8(base_data, base_count, query_data, query_count, dim, k);
 
-    check_distance_recall("L2Uint8", base_data, base_count, query_data, query_count, dim, k, gt_scalar,
-                          [](const void* a, const void* b, const void* qty)
-                          { return deglib::distances::uint8_l2::L2Uint8::compare(a, b, qty); });
+    check_distance_recall("L2Uint8", base_data, base_count, query_data, query_count, dim, k, gt_scalar, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::uint8_l2::L2Uint8::compare(a, b, qty);
+    });
 }
 
 // ---------------------------------------------------------------------------
 // FP16 Inner Product distance recall tests
 // ---------------------------------------------------------------------------
 
-TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFP16_AVX512_Modes)
-{
+TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFP16_AVX512_Modes) {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
@@ -350,8 +341,7 @@ TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFP16_AVX512_Modes)
 #endif
 }
 
-TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFP16_AVX2_Modes)
-{
+TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFP16_AVX2_Modes) {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
@@ -387,8 +377,7 @@ TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFP16_AVX2_Modes)
 #endif
 }
 
-TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFP16)
-{
+TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFP16) {
     const size_t dim = 128;
     const size_t base_count = 10000;
     const size_t query_count = 100;
@@ -400,17 +389,17 @@ TEST(DeglibDistanceIntegration, DistanceRecall_InnerProductFP16)
 
     auto gt_scalar = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, k);
 
-    check_distance_recall("InnerProductFP16", base_data, base_count, query_data, query_count, dim, k, gt_scalar,
-                          [](const void* a, const void* b, const void* qty)
-                          { return deglib::distances::fp16_ip::InnerProductFP16::compare(a, b, qty); });
+    check_distance_recall(
+        "InnerProductFP16", base_data, base_count, query_data, query_count, dim, k, gt_scalar,
+        [](const void* a, const void* b, const void* qty) { return deglib::distances::fp16_ip::InnerProductFP16::compare(a, b, qty); }
+    );
 }
 
 // ---------------------------------------------------------------------------
 // EVP Inner Product distance recall tests
 // ---------------------------------------------------------------------------
 
-TEST(DeglibDistanceIntegration, DistanceRecall_EVP_AVX2_Modes)
-{
+TEST(DeglibDistanceIntegration, DistanceRecall_EVP_AVX2_Modes) {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
@@ -443,8 +432,7 @@ TEST(DeglibDistanceIntegration, DistanceRecall_EVP_AVX2_Modes)
 #endif
 }
 
-TEST(DeglibDistanceIntegration, DistanceRecall_EVP_AVX512_Modes)
-{
+TEST(DeglibDistanceIntegration, DistanceRecall_EVP_AVX512_Modes) {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX-512 not available on this CPU";
@@ -477,8 +465,7 @@ TEST(DeglibDistanceIntegration, DistanceRecall_EVP_AVX512_Modes)
 #endif
 }
 
-TEST(DeglibDistanceIntegration, DistanceRecall_EVP)
-{
+TEST(DeglibDistanceIntegration, DistanceRecall_EVP) {
     const size_t dim = 128;
     const size_t base_count = 10000;
     const size_t query_count = 100;
@@ -490,7 +477,7 @@ TEST(DeglibDistanceIntegration, DistanceRecall_EVP)
 
     auto gt_scalar = compute_groundtruth_evp(base_data, base_count, query_data, query_count, dim, k);
 
-    check_distance_recall_evp("EVP", base_data, base_count, query_data, query_count, dim, k, gt_scalar,
-                              [](const void* a, const void* b, const void* qty)
-                              { return deglib::distances::evp_ip::EvpInnerProduct::compare(a, b, qty); });
+    check_distance_recall_evp("EVP", base_data, base_count, query_data, query_count, dim, k, gt_scalar, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::evp_ip::EvpInnerProduct::compare(a, b, qty);
+    });
 }

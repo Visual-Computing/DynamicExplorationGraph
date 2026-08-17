@@ -5,6 +5,10 @@
  * @brief Graph building utilities for deglib benchmarks.
  */
 
+#include "benchmark.h"
+#include "deglib/analysis.h"
+
+#include <deglib/deglib.h>
 #include <fmt/core.h>
 #include <fmt/format.h>
 
@@ -15,10 +19,6 @@
 #include <random>
 #include <vector>
 
-#include "deglib/analysis.h"
-#include "benchmark.h"
-#include <deglib/deglib.h>
-
 namespace deglib::benchmark {
 
 enum DataStreamType { AddAll, AddHalf, AddAllRemoveHalf, AddHalfRemoveAndAddOneAtATime };
@@ -26,12 +26,14 @@ enum DataStreamType { AddAll, AddHalf, AddAllRemoveHalf, AddHalfRemoveAndAddOneA
 /**
  * Create a random exploration graph from the given StaticFeatureRepository.
  */
-inline deglib::graph::SizeBoundedGraph create_random_graph(const deglib::StaticFeatureRepository& repository,
-                                                           deglib::distances::Metric metric,
-                                                           const uint8_t k,
-                                                           const uint32_t max_size = 0,
-                                                           const uint32_t scale = 1,
-                                                           const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) {
+inline deglib::graph::SizeBoundedGraph create_random_graph(
+    const deglib::StaticFeatureRepository& repository,
+    deglib::distances::Metric metric,
+    const uint8_t k,
+    const uint32_t max_size = 0,
+    const uint32_t scale = 1,
+    const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto
+) {
     log("Build a random EG{}\n", k);
 
     const auto dims = repository.dims();
@@ -42,22 +44,24 @@ inline deglib::graph::SizeBoundedGraph create_random_graph(const deglib::StaticF
     return deglib::graph::SizeBoundedGraph::create_random_graph(feature_data, vertex_count, k, feature_space);
 }
 
-inline void create_graph(const deglib::StaticFeatureRepository& repository,
-                         const DataStreamType data_stream_type,
-                         const std::string& graph_file,
-                         deglib::distances::Metric metric,
-                         deglib::builder::OptimizationTarget lid,
-                         const uint8_t k,
-                         const uint8_t k_ext,
-                         const float eps_ext,
-                         const uint8_t k_opt,
-                         const float eps_opt,
-                         const uint8_t i_opt,
-                         const uint32_t thread_count,
-                         const bool use_rng = true,
-                         const uint32_t scale = 1,
-                         const bool use_path_verification = false,
-                         const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) {
+inline void create_graph(
+    const deglib::StaticFeatureRepository& repository,
+    const DataStreamType data_stream_type,
+    const std::string& graph_file,
+    deglib::distances::Metric metric,
+    deglib::builder::OptimizationTarget lid,
+    const uint8_t k,
+    const uint8_t k_ext,
+    const float eps_ext,
+    const uint8_t k_opt,
+    const float eps_opt,
+    const uint8_t i_opt,
+    const uint32_t thread_count,
+    const bool use_rng = true,
+    const uint32_t scale = 1,
+    const bool use_path_verification = false,
+    const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto
+) {
     auto rnd = std::mt19937(7);
     const uint32_t swap_tries = 0;
     const uint32_t additional_swap_tries = 0;
@@ -67,17 +71,12 @@ inline void create_graph(const deglib::StaticFeatureRepository& repository,
     const auto feature_space = deglib::distances::FloatSpace(dims, metric, instruction);
     const auto feature_byte_size = feature_space.get_data_size();
 
-    log("Initializing empty graph (capacity: {} vertices, {}D {} {} feature space using {})\n",
-        repository.size(),
-        repository.dims(),
-        metric.get_distance_name(),
-        metric.get_data_type_name(),
-        feature_space.get_instruction());
+    log("Initializing empty graph (capacity: {} vertices, {}D {} {} feature space using {})\n", repository.size(), repository.dims(),
+        metric.get_distance_name(), metric.get_data_type_name(), feature_space.get_instruction());
 
     auto graph = deglib::graph::SizeBoundedGraph(max_vertex_count, k, feature_space);
 
-    auto builder = deglib::builder::EvenRegularGraphBuilder(
-        graph, rnd, lid, k_ext, eps_ext, k_opt, eps_opt, i_opt, swap_tries, additional_swap_tries);
+    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, lid, k_ext, eps_ext, k_opt, eps_opt, i_opt, swap_tries, additional_swap_tries);
     builder.setThreadCount(thread_count);
     builder.setBatchSize(10, 10);
 
@@ -126,67 +125,48 @@ inline void create_graph(const deglib::StaticFeatureRepository& repository,
         const auto size = graph.size();
 
         if (status.added % log_after == 0 || size == base_size) {
-            duration_ms +=
-                uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+            duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
             auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
-            auto valid_weights =
-                deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_regularity(graph, uint32_t(size), true);
+            auto valid_weights = deglib::analysis::check_graph_weights(graph) && deglib::analysis::check_graph_regularity(graph, uint32_t(size), true);
             auto connected = deglib::analysis::check_graph_connectivity(graph);
             auto duration = duration_ms;
             auto currRSS = getCurrentRSS() / 1000000;
             auto peakRSS = getPeakRSS() / 1000000;
-            log("{:7} vertices, {:8}ms, {:8} / {:8} improv, AEW: {:4.2f}, {} connected & {}, RSS {} & peakRSS {}\n",
-                size,
-                duration,
-                status.improved,
-                status.tries,
-                avg_edge_weight,
-                connected ? "" : "not",
-                valid_weights ? "valid" : "invalid",
-                currRSS,
-                peakRSS);
+            log("{:7} vertices, {:8}ms, {:8} / {:8} improv, AEW: {:4.2f}, {} connected & {}, RSS {} & peakRSS {}\n", size, duration, status.improved,
+                status.tries, avg_edge_weight, connected ? "" : "not", valid_weights ? "valid" : "invalid", currRSS, peakRSS);
             start = std::chrono::steady_clock::now();
         } else if (status.added % (log_after / 10) == 0) {
-            duration_ms +=
-                uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+            duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
             auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
             auto connected = deglib::analysis::check_graph_connectivity(graph);
             auto duration = duration_ms;
             auto currRSS = getCurrentRSS() / 1000000;
             auto peakRSS = getPeakRSS() / 1000000;
-            log("{:7} vertices, {:8}ms, {:8} / {:8} improv, AEW: {:4.2f}, {} connected, RSS {} & peakRSS {}\n",
-                size,
-                duration,
-                status.improved,
-                status.tries,
-                avg_edge_weight,
-                connected ? "" : "not",
-                currRSS,
-                peakRSS);
+            log("{:7} vertices, {:8}ms, {:8} / {:8} improv, AEW: {:4.2f}, {} connected, RSS {} & peakRSS {}\n", size, duration, status.improved, status.tries,
+                avg_edge_weight, connected ? "" : "not", currRSS, peakRSS);
             start = std::chrono::steady_clock::now();
         }
     };
 
     builder.build(improvement_callback, false);
-    log("Actual memory usage: {} Mb, Max memory usage: {} Mb after building the graph in {} secs\n",
-        getCurrentRSS() / 1000000,
-        getPeakRSS() / 1000000,
+    log("Actual memory usage: {} Mb, Max memory usage: {} Mb after building the graph in {} secs\n", getCurrentRSS() / 1000000, getPeakRSS() / 1000000,
         duration_ms / 1000);
 
     graph.saveGraph(graph_file.c_str());
     log("The graph contains {} non-RNG edges\n", deglib::analysis::calc_non_rng_edges(graph));
 }
 
-inline void optimize_graph(deglib::graph::SizeBoundedGraph& graph,
-                           const uint8_t k_opt,
-                           const float eps_opt,
-                           const uint8_t i_opt,
-                           const uint64_t total_iterations,
-                           const uint64_t log_interval = 10000,
-                           const uint32_t scale = 1) {
+inline void optimize_graph(
+    deglib::graph::SizeBoundedGraph& graph,
+    const uint8_t k_opt,
+    const float eps_opt,
+    const uint8_t i_opt,
+    const uint64_t total_iterations,
+    const uint64_t log_interval = 10000,
+    const uint32_t scale = 1
+) {
     auto rnd = std::mt19937(7);
-    auto builder = deglib::builder::EvenRegularGraphBuilder(
-        graph, rnd, deglib::builder::OptimizationTarget::LowLID, 0, 0, k_opt, eps_opt, i_opt, 1, 0);
+    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::OptimizationTarget::LowLID, 0, 0, k_opt, eps_opt, i_opt, 1, 0);
 
     auto initial_avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
     log("Optimizing graph with initial AEW {:.2f}\n", initial_avg_edge_weight);
@@ -200,20 +180,14 @@ inline void optimize_graph(deglib::graph::SizeBoundedGraph& graph,
         const auto improved = status.improved;
 
         if (log_interval > 0 && tries > 0 && tries % log_interval == 0) {
-            duration_ms +=
-                uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+            duration_ms += uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
             auto duration = duration_ms / 1000;
             auto avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
             auto connected = deglib::analysis::check_graph_connectivity(graph);
             auto diff = tries - last_status.tries;
             auto avg_improv = (diff > 0) ? uint32_t((improved - last_status.improved) / diff) : 0;
 
-            log("{:5}s, {:8} / {:8} iterations (avg {:2} improvements), AEW {:.2f}, connected {}\n",
-                duration,
-                improved,
-                tries,
-                avg_improv,
-                avg_edge_weight,
+            log("{:5}s, {:8} / {:8} iterations (avg {:2} improvements), AEW {:.2f}, connected {}\n", duration, improved, tries, avg_improv, avg_edge_weight,
                 connected);
 
             last_status = status;
@@ -225,8 +199,7 @@ inline void optimize_graph(deglib::graph::SizeBoundedGraph& graph,
 
     builder.build(improvement_callback, true);
 
-    log("Optimization complete. Final AEW: {:.2f}, non-RNG edges: {}\n",
-        deglib::analysis::calc_avg_edge_weight(graph, scale),
+    log("Optimization complete. Final AEW: {:.2f}, non-RNG edges: {}\n", deglib::analysis::calc_avg_edge_weight(graph, scale),
         deglib::analysis::calc_non_rng_edges(graph));
 }
 

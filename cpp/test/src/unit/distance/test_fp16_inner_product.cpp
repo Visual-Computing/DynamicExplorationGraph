@@ -7,11 +7,11 @@
 // The distance is computed as 1.f - dot_product, where dot_product is the raw
 // inner product of the float-converted vectors.
 
-#include <vector>
-
-#include "gtest/gtest.h"
 #include "deglib/distance/fp16_ip.h"
 #include "deglib/distances.h"
+#include "gtest/gtest.h"
+
+#include <vector>
 
 namespace {
 
@@ -47,7 +47,7 @@ inline float ip_naive(const uint16_t* a, const uint16_t* b, size_t n) {
     return 1.0f - sum;
 }
 
-} // anonymous namespace
+}  // anonymous namespace
 
 // ============================================================================
 // Scalar correctness tests
@@ -100,8 +100,7 @@ TEST(InnerProductFP16, MatchesNaive) {
         auto fa = make_fp16_vec(a);
         auto fb = make_fp16_vec(b);
         float d = InnerProductFP16::compare(fa.data(), fb.data(), &dim);
-        EXPECT_NEAR(d, ip_naive(fa.data(), fb.data(), dim), 1e-2f)
-            << "dim=" << dim;
+        EXPECT_NEAR(d, ip_naive(fa.data(), fb.data(), dim), 1e-2f) << "dim=" << dim;
     }
 }
 
@@ -113,8 +112,7 @@ TEST(InnerProductFP16, NonAlignedDims) {
         auto fa = make_fp16_vec(a);
         auto fb = make_fp16_vec(b);
         float d = InnerProductFP16::compare(fa.data(), fb.data(), &dim);
-        EXPECT_NEAR(d, ip_naive(fa.data(), fb.data(), dim), 1e-2f)
-            << "dim=" << dim;
+        EXPECT_NEAR(d, ip_naive(fa.data(), fb.data(), dim), 1e-2f) << "dim=" << dim;
     }
 }
 
@@ -136,9 +134,9 @@ TEST(InnerProductFP16, LargeDimension) {
 
 namespace {
 
-using deglib::distances::fp16_ip::InnerProductFP16_AVX512;
-using deglib::distances::fp16_ip::InnerProductFP16_AVX2;
 using deglib::distances::ResidualMode;
+using deglib::distances::fp16_ip::InnerProductFP16_AVX2;
+using deglib::distances::fp16_ip::InnerProductFP16_AVX512;
 
 TEST(InnerProductFP16_AVX512, MatchesNaive_IfSupported) {
     if (!deglib::cpu::has_avx512()) {
@@ -151,8 +149,7 @@ TEST(InnerProductFP16_AVX512, MatchesNaive_IfSupported) {
         auto fa = make_fp16_vec(a);
         auto fb = make_fp16_vec(b);
         float d = InnerProductFP16_AVX512<ResidualMode::Full>::compare(fa.data(), fb.data(), &dim);
-        EXPECT_NEAR(d, ip_naive(fa.data(), fb.data(), dim), 1e-2f)
-            << "dim=" << dim;
+        EXPECT_NEAR(d, ip_naive(fa.data(), fb.data(), dim), 1e-2f) << "dim=" << dim;
     }
 }
 
@@ -167,8 +164,7 @@ TEST(InnerProductFP16_AVX2, MatchesNaive_IfSupported) {
         auto fa = make_fp16_vec(a);
         auto fb = make_fp16_vec(b);
         float d = InnerProductFP16_AVX2<ResidualMode::Full>::compare(fa.data(), fb.data(), &dim);
-        EXPECT_NEAR(d, ip_naive(fa.data(), fb.data(), dim), 1e-2f)
-            << "dim=" << dim;
+        EXPECT_NEAR(d, ip_naive(fa.data(), fb.data(), dim), 1e-2f) << "dim=" << dim;
     }
 }
 
@@ -180,17 +176,14 @@ TEST(InnerProductFP16_SelectDist, ReturnsValidDistance) {
         auto b = make_float_vec(dim, static_cast<int>(dim));
         auto fa = make_fp16_vec(a);
         auto fb = make_fp16_vec(b);
-        float d = std::visit([&](auto&& dist) {
-            return dist.compare(fa.data(), fb.data(), &dim);
-        }, dist_variant);
-        EXPECT_NEAR(d, ip_naive(fa.data(), fb.data(), dim), 1e-2f)
-            << "dim=" << dim;
+        float d = std::visit([&](auto&& dist) { return dist.compare(fa.data(), fb.data(), &dim); }, dist_variant);
+        EXPECT_NEAR(d, ip_naive(fa.data(), fb.data(), dim), 1e-2f) << "dim=" << dim;
     }
 }
 
-} // anonymous namespace
+}  // anonymous namespace
 
-#endif // DEGLIB_X86
+#endif  // DEGLIB_X86
 
 // ============================================================================
 // FloatSpace integration tests
@@ -218,8 +211,7 @@ TEST(InnerProductFP16_FloatSpace, VariousDims) {
         auto fb = make_fp16_vec(b);
 
         float d = space.get_dist_func()(fa.data(), fb.data(), space.get_dist_func_param());
-        EXPECT_NEAR(d, ip_naive(fa.data(), fb.data(), dim), 1e-2f)
-            << "dim=" << dim;
+        EXPECT_NEAR(d, ip_naive(fa.data(), fb.data(), dim), 1e-2f) << "dim=" << dim;
     }
 }
 
@@ -259,23 +251,27 @@ TEST(InnerProductFP16_Batch, MatchesSingleCompare) {
             std::vector<float> batch_dists(count, 0.0f);
             auto dist_variant = deglib::distances::fp16_ip::select_dist(dim);
 
-            std::visit([&](auto&& dist) {
-                using DistType = std::decay_t<decltype(dist)>;
-                DistType::compare_batch(q_fp16.data(), db_ptrs.data(), count, &dim, batch_dists.data());
-            }, dist_variant);
+            std::visit(
+                [&](auto&& dist) {
+                    using DistType = std::decay_t<decltype(dist)>;
+                    DistType::compare_batch(q_fp16.data(), db_ptrs.data(), count, &dim, batch_dists.data());
+                },
+                dist_variant
+            );
 
             for (size_t i = 0; i < count; ++i) {
-                float single_dist = std::visit([&](auto&& dist) {
-                    using DistType = std::decay_t<decltype(dist)>;
-                    return DistType::compare(q_fp16.data(), db_ptrs[i], &dim);
-                }, dist_variant);
+                float single_dist = std::visit(
+                    [&](auto&& dist) {
+                        using DistType = std::decay_t<decltype(dist)>;
+                        return DistType::compare(q_fp16.data(), db_ptrs[i], &dim);
+                    },
+                    dist_variant
+                );
 
-                EXPECT_NEAR(batch_dists[i], single_dist, 1e-4f)
-                    << "dim=" << dim << ", count=" << count << ", index=" << i;
+                EXPECT_NEAR(batch_dists[i], single_dist, 1e-4f) << "dim=" << dim << ", count=" << count << ", index=" << i;
             }
         }
     }
 }
 
-} // anonymous namespace
-
+}  // anonymous namespace

@@ -5,7 +5,7 @@
 class StopW {
     std::chrono::steady_clock::time_point time_begin;
 
-public:
+  public:
     StopW() { time_begin = std::chrono::steady_clock::now(); }
 
     long long getElapsedTimeMicro() {
@@ -25,10 +25,10 @@ public:
 
 #if defined(_WIN32)
     #ifndef WIN32_LEAN_AND_MEAN
-    #define WIN32_LEAN_AND_MEAN
+        #define WIN32_LEAN_AND_MEAN
     #endif
     #ifndef NOMINMAX
-    #define NOMINMAX
+        #define NOMINMAX
     #endif
     #include <windows.h>
     #include <psapi.h>
@@ -41,8 +41,7 @@ public:
     #if defined(__APPLE__) && defined(__MACH__)
         #include <mach/mach.h>
 
-    #elif (defined(_AIX) || defined(__TOS__AIX__)) || \
-        (defined(__sun__) || defined(__sun) || defined(sun) && (defined(__SVR4) || defined(__svr4__)))
+    #elif (defined(_AIX) || defined(__TOS__AIX__)) || (defined(__sun__) || defined(__sun) || defined(sun) && (defined(__SVR4) || defined(__svr4__)))
         #include <fcntl.h>
         #include <procfs.h>
 
@@ -66,8 +65,7 @@ static size_t getPeakRSS() {
     GetProcessMemoryInfo(GetCurrentProcess(), &info, sizeof(info));
     return (size_t)info.PeakWorkingSetSize;
 
-#elif (defined(_AIX) || defined(__TOS__AIX__)) || \
-    (defined(__sun__) || defined(__sun) || defined(sun) && (defined(__SVR4) || defined(__svr4__)))
+#elif (defined(_AIX) || defined(__TOS__AIX__)) || (defined(__sun__) || defined(__sun) || defined(sun) && (defined(__SVR4) || defined(__svr4__)))
     /* AIX and Solaris ------------------------------------------ */
     struct psinfo psinfo;
     int fd = -1;
@@ -110,8 +108,7 @@ static size_t getCurrentRSS() {
     /* OSX ------------------------------------------------------ */
     struct mach_task_basic_info info;
     mach_msg_type_number_t infoCount = MACH_TASK_BASIC_INFO_COUNT;
-    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &infoCount) != KERN_SUCCESS)
-        return (size_t)0L; /* Can't access? */
+    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &infoCount) != KERN_SUCCESS) return (size_t)0L; /* Can't access? */
     return (size_t)info.resident_size;
 
 #elif defined(__linux__) || defined(__linux) || defined(linux) || defined(__gnu_linux__)

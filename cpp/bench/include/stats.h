@@ -11,6 +11,11 @@
  * - In-degree statistics: Distribution of incoming edges
  */
 
+#include "file_io.h"
+#include "logging.h"
+#include "stopwatch.h"
+
+#include <deglib/deglib.h>
 #include <fmt/core.h>
 
 #include <algorithm>
@@ -19,11 +24,6 @@
 #include <limits>
 #include <thread>
 #include <vector>
-
-#include <deglib/deglib.h>
-#include "file_io.h"
-#include "logging.h"
-#include "stopwatch.h"
 
 namespace deglib::benchmark {
 
@@ -200,8 +200,7 @@ inline float compute_exploration_reach(const deglib::graph::InternalGraph& graph
         }
     }
 
-    log("Average Exploration reachability is {:.2f} after {:4d}s\n",
-        (static_cast<float>(exploration_reachability)) / static_cast<float>(graph_size),
+    log("Average Exploration reachability is {:.2f} after {:4d}s\n", (static_cast<float>(exploration_reachability)) / static_cast<float>(graph_size),
         stopw.getElapsedTimeMicro() / 1000000);
     return (graph_size > 0) ? (static_cast<float>(exploration_reachability) / static_cast<float>(graph_size)) : 0.0f;
 }
@@ -325,11 +324,7 @@ inline GraphStats analyze_graph(const deglib::graph::InternalGraph& graph) {
     log("  Feature dimensions: {}\n", stats.feature_dims);
     log("  Edges per vertex (k): {}\n", stats.edges_per_vertex);
     log("  Out-degree: avg={:.2f}, min={}, max={}\n", stats.avg_out_degree, stats.min_out_degree, stats.max_out_degree);
-    log("  In-degree:  avg={:.2f}, min={}, max={}, source_vertices={}\n",
-        stats.avg_in_degree,
-        stats.min_in_degree,
-        stats.max_in_degree,
-        stats.source_vertices);
+    log("  In-degree:  avg={:.2f}, min={}, max={}, source_vertices={}\n", stats.avg_in_degree, stats.min_in_degree, stats.max_in_degree, stats.source_vertices);
 
     if (stats.search_reachability >= 0) {
         log("  Search Reachability: {:.2f}%\n", stats.search_reachability * 100);

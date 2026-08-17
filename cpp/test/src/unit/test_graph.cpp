@@ -8,18 +8,18 @@
 // any accidental swap of external labels and internal indices will instantly
 // fail test assertions.
 
+#include "deglib/analysis.h"
+#include "deglib/graph.h"
+#include "deglib/graph/mutable_graph.h"
+#include "deglib/graph/readonly_graph.h"
+#include "gtest/gtest.h"
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
 #include <unordered_set>
 #include <vector>
-
-#include "deglib/graph.h"
-#include "deglib/analysis.h"
-#include "deglib/graph/mutable_graph.h"
-#include "deglib/graph/readonly_graph.h"
-#include "gtest/gtest.h"
 
 namespace {
 
@@ -29,95 +29,90 @@ constexpr std::array<uint32_t, 5> kExternalLabels = {1005, 9999, 42, 707, 12345}
 // Internal indices are always 0..N-1
 constexpr std::array<uint32_t, 5> kInternalIndices = {0, 1, 2, 3, 4};
 
-inline std::vector<float> make_vec_4d(float x, float y, float z, float w) {
-   return {x, y, z, w};
-}
+inline std::vector<float> make_vec_4d(float x, float y, float z, float w) { return {x, y, z, w}; }
 
 inline std::unique_ptr<std::byte[]> make_float_bytes(const std::vector<float>& v) {
-   auto bytes = std::make_unique<std::byte[]>(v.size() * sizeof(float));
-   std::memcpy(bytes.get(), v.data(), v.size() * sizeof(float));
-   return bytes;
+    auto bytes = std::make_unique<std::byte[]>(v.size() * sizeof(float));
+    std::memcpy(bytes.get(), v.data(), v.size() * sizeof(float));
+    return bytes;
 }
 
 // Helper: set up edges for a MutableGraph using changeEdges (bypasses self-loop requirement)
-void set_edges(deglib::graph::MutableGraph& graph, uint32_t vertex,
-              const std::vector<uint32_t>& neighbors, const std::vector<float>& weights) {
-   graph.changeEdges(vertex, neighbors.data(), weights.data());
+void set_edges(deglib::graph::MutableGraph& graph, uint32_t vertex, const std::vector<uint32_t>& neighbors, const std::vector<float>& weights) {
+    graph.changeEdges(vertex, neighbors.data(), weights.data());
 }
 
 // Build a fully-connected mutable graph with non-sequential external labels.
 // Vertices are placed at distinct positions so search/explore return deterministic results.
 // Internal indices: 0..4, External labels: 1005, 9999, 42, 707, 12345
 deglib::graph::SizeBoundedGraph build_test_graph() {
-   deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
-   deglib::graph::SizeBoundedGraph graph(5, 4, space);
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
+    deglib::graph::SizeBoundedGraph graph(5, 4, space);
 
-   // Place vertices at distinct 4D positions
-   graph.addVertex(kExternalLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExternalLabels[1], make_float_bytes(make_vec_4d(1.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExternalLabels[2], make_float_bytes(make_vec_4d(2.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExternalLabels[3], make_float_bytes(make_vec_4d(3.0f, 0.0f, 0.0f, 0.0f)).get());
-   graph.addVertex(kExternalLabels[4], make_float_bytes(make_vec_4d(4.0f, 0.0f, 0.0f, 0.0f)).get());
+    // Place vertices at distinct 4D positions
+    graph.addVertex(kExternalLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExternalLabels[1], make_float_bytes(make_vec_4d(1.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExternalLabels[2], make_float_bytes(make_vec_4d(2.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExternalLabels[3], make_float_bytes(make_vec_4d(3.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExternalLabels[4], make_float_bytes(make_vec_4d(4.0f, 0.0f, 0.0f, 0.0f)).get());
 
-   // Fully connect: each vertex connects to all others (neighbors must be sorted ascending)
-   // Internal index 0 connects to 0(self), 1, 2, 3
-   set_edges(graph, 0, {0, 1, 2, 3}, {0.0f, 1.0f, 2.0f, 3.0f});
-   // Internal index 1 connects to 0, 1(self), 2, 3
-   set_edges(graph, 1, {0, 1, 2, 3}, {1.0f, 0.0f, 1.0f, 2.0f});
-   // Internal index 2 connects to 0, 1, 2(self), 3
-   set_edges(graph, 2, {0, 1, 2, 3}, {2.0f, 1.0f, 0.0f, 1.0f});
-   // Internal index 3 connects to 0, 1, 2, 3(self)
-   set_edges(graph, 3, {0, 1, 2, 3}, {3.0f, 2.0f, 1.0f, 0.0f});
-   // Internal index 4 has self-loop only (not connected to others)
-   set_edges(graph, 4, {4, 4, 4, 4}, {0.0f, 0.0f, 0.0f, 0.0f});
+    // Fully connect: each vertex connects to all others (neighbors must be sorted ascending)
+    // Internal index 0 connects to 0(self), 1, 2, 3
+    set_edges(graph, 0, {0, 1, 2, 3}, {0.0f, 1.0f, 2.0f, 3.0f});
+    // Internal index 1 connects to 0, 1(self), 2, 3
+    set_edges(graph, 1, {0, 1, 2, 3}, {1.0f, 0.0f, 1.0f, 2.0f});
+    // Internal index 2 connects to 0, 1, 2(self), 3
+    set_edges(graph, 2, {0, 1, 2, 3}, {2.0f, 1.0f, 0.0f, 1.0f});
+    // Internal index 3 connects to 0, 1, 2, 3(self)
+    set_edges(graph, 3, {0, 1, 2, 3}, {3.0f, 2.0f, 1.0f, 0.0f});
+    // Internal index 4 has self-loop only (not connected to others)
+    set_edges(graph, 4, {4, 4, 4, 4}, {0.0f, 0.0f, 0.0f, 0.0f});
 
-   return graph;
+    return graph;
 }
 
-} // anonymous namespace
+}  // anonymous namespace
 
 // ===========================================================================
 //  DynamicExplorationGraph: search() returns external labels
 // ===========================================================================
 
 TEST(DEGSearchReturnsExternalLabels, SearchReturnsExternalLabels) {
-   auto graph = build_test_graph();
-   deglib::DynamicExplorationGraph deg(graph);
+    auto graph = build_test_graph();
+    deglib::DynamicExplorationGraph deg(graph);
 
-   // Query near vertex 0 (external label 1005, position 0.0)
-   std::vector<float> query = {0.1f, 0.0f, 0.0f, 0.0f};
-   auto results = deg.search(std::span<const float>(query), 3, 0.0f);
+    // Query near vertex 0 (external label 1005, position 0.0)
+    std::vector<float> query = {0.1f, 0.0f, 0.0f, 0.0f};
+    auto results = deg.search(std::span<const float>(query), 3, 0.0f);
 
-   ASSERT_GT(results.size(), 0u);
+    ASSERT_GT(results.size(), 0u);
 
-   // Every identifier in the result must be an external label, not an internal index
-   std::unordered_set<uint32_t> valid_labels(kExternalLabels.begin(), kExternalLabels.end());
-   std::unordered_set<uint32_t> internal_indices(kInternalIndices.begin(), kInternalIndices.end());
+    // Every identifier in the result must be an external label, not an internal index
+    std::unordered_set<uint32_t> valid_labels(kExternalLabels.begin(), kExternalLabels.end());
+    std::unordered_set<uint32_t> internal_indices(kInternalIndices.begin(), kInternalIndices.end());
 
-   while (!results.empty()) {
-       uint32_t id = results.top().getIdentifier();
-       // Must be a valid external label
-       EXPECT_TRUE(valid_labels.contains(id))
-           << "Result identifier " << id << " is not a valid external label";
-       // Must NOT be an internal index (0..4)
-       EXPECT_FALSE(internal_indices.contains(id))
-           << "Result identifier " << id << " is an internal index, not an external label";
-       results.pop();
-   }
+    while (!results.empty()) {
+        uint32_t id = results.top().getIdentifier();
+        // Must be a valid external label
+        EXPECT_TRUE(valid_labels.contains(id)) << "Result identifier " << id << " is not a valid external label";
+        // Must NOT be an internal index (0..4)
+        EXPECT_FALSE(internal_indices.contains(id)) << "Result identifier " << id << " is an internal index, not an external label";
+        results.pop();
+    }
 }
 
 TEST(DEGSearchReturnsExternalLabels, SearchFindsCorrectExternalLabel) {
-   auto graph = build_test_graph();
-   deglib::DynamicExplorationGraph deg(graph);
+    auto graph = build_test_graph();
+    deglib::DynamicExplorationGraph deg(graph);
 
-   // Query exactly at vertex 0's position (external label 1005)
-   std::vector<float> query = {0.0f, 0.0f, 0.0f, 0.0f};
-   auto results = deg.search(std::span<const float>(query), 1, 0.0f);
+    // Query exactly at vertex 0's position (external label 1005)
+    std::vector<float> query = {0.0f, 0.0f, 0.0f, 0.0f};
+    auto results = deg.search(std::span<const float>(query), 1, 0.0f);
 
-   ASSERT_GE(results.size(), 1u);
-   // The nearest neighbor should be vertex 0 with external label 1005
-   EXPECT_EQ(results.top().getIdentifier(), kExternalLabels[0]);
-   EXPECT_EQ(results.top().getIdentifier(), 1005u);
+    ASSERT_GE(results.size(), 1u);
+    // The nearest neighbor should be vertex 0 with external label 1005
+    EXPECT_EQ(results.top().getIdentifier(), kExternalLabels[0]);
+    EXPECT_EQ(results.top().getIdentifier(), 1005u);
 }
 
 // ===========================================================================
@@ -125,67 +120,62 @@ TEST(DEGSearchReturnsExternalLabels, SearchFindsCorrectExternalLabel) {
 // ===========================================================================
 
 TEST(DEGExploreReturnsExternalLabels, ExploreAcceptsExternalLabelAndReturnsExternalLabels) {
-   auto graph = build_test_graph();
-   deglib::DynamicExplorationGraph deg(graph);
+    auto graph = build_test_graph();
+    deglib::DynamicExplorationGraph deg(graph);
 
-   // Explore starting from external label 1005 (internal index 0)
-   auto results = deg.explore(kExternalLabels[0], 3, 0, 0.0f, /*include_entry=*/true, nullptr);
+    // Explore starting from external label 1005 (internal index 0)
+    auto results = deg.explore(kExternalLabels[0], 3, 0, 0.0f, /*include_entry=*/true, nullptr);
 
-   ASSERT_GT(results.size(), 0u);
+    ASSERT_GT(results.size(), 0u);
 
-   std::unordered_set<uint32_t> valid_labels(kExternalLabels.begin(), kExternalLabels.end());
-   std::unordered_set<uint32_t> internal_indices(kInternalIndices.begin(), kInternalIndices.end());
+    std::unordered_set<uint32_t> valid_labels(kExternalLabels.begin(), kExternalLabels.end());
+    std::unordered_set<uint32_t> internal_indices(kInternalIndices.begin(), kInternalIndices.end());
 
-   while (!results.empty()) {
-       uint32_t id = results.top().getIdentifier();
-       EXPECT_TRUE(valid_labels.contains(id))
-           << "Result identifier " << id << " is not a valid external label";
-       EXPECT_FALSE(internal_indices.contains(id))
-           << "Result identifier " << id << " is an internal index, not an external label";
-       results.pop();
-   }
+    while (!results.empty()) {
+        uint32_t id = results.top().getIdentifier();
+        EXPECT_TRUE(valid_labels.contains(id)) << "Result identifier " << id << " is not a valid external label";
+        EXPECT_FALSE(internal_indices.contains(id)) << "Result identifier " << id << " is an internal index, not an external label";
+        results.pop();
+    }
 }
 
 TEST(DEGExploreReturnsExternalLabels, ExploreFromDifferentExternalLabel) {
-   auto graph = build_test_graph();
-   deglib::DynamicExplorationGraph deg(graph);
+    auto graph = build_test_graph();
+    deglib::DynamicExplorationGraph deg(graph);
 
-   // Explore from external label 9999 (internal index 1, position 1.0)
-   auto results = deg.explore(kExternalLabels[1], 2, 0, 0.0f, /*include_entry=*/false, nullptr);
+    // Explore from external label 9999 (internal index 1, position 1.0)
+    auto results = deg.explore(kExternalLabels[1], 2, 0, 0.0f, /*include_entry=*/false, nullptr);
 
-   ASSERT_GT(results.size(), 0u);
+    ASSERT_GT(results.size(), 0u);
 
-   std::unordered_set<uint32_t> valid_labels(kExternalLabels.begin(), kExternalLabels.end());
-   std::unordered_set<uint32_t> internal_indices(kInternalIndices.begin(), kInternalIndices.end());
+    std::unordered_set<uint32_t> valid_labels(kExternalLabels.begin(), kExternalLabels.end());
+    std::unordered_set<uint32_t> internal_indices(kInternalIndices.begin(), kInternalIndices.end());
 
-   while (!results.empty()) {
-       uint32_t id = results.top().getIdentifier();
-       EXPECT_TRUE(valid_labels.contains(id))
-           << "Result identifier " << id << " is not a valid external label";
-       EXPECT_FALSE(internal_indices.contains(id))
-           << "Result identifier " << id << " is an internal index, not an external label";
-       results.pop();
-   }
+    while (!results.empty()) {
+        uint32_t id = results.top().getIdentifier();
+        EXPECT_TRUE(valid_labels.contains(id)) << "Result identifier " << id << " is not a valid external label";
+        EXPECT_FALSE(internal_indices.contains(id)) << "Result identifier " << id << " is an internal index, not an external label";
+        results.pop();
+    }
 }
 
 TEST(DEGExploreReturnsExternalLabels, ExploreIncludeEntryReturnsExternalLabel) {
-   auto graph = build_test_graph();
-   deglib::DynamicExplorationGraph deg(graph);
+    auto graph = build_test_graph();
+    deglib::DynamicExplorationGraph deg(graph);
 
-   // When include_entry=true, the entry vertex's external label must appear in results
-   auto results = deg.explore(kExternalLabels[2], 4, 0, 0.0f, /*include_entry=*/true, nullptr);
+    // When include_entry=true, the entry vertex's external label must appear in results
+    auto results = deg.explore(kExternalLabels[2], 4, 0, 0.0f, /*include_entry=*/true, nullptr);
 
-   ASSERT_GT(results.size(), 0u);
+    ASSERT_GT(results.size(), 0u);
 
-   bool found_entry = false;
-   while (!results.empty()) {
-       if (results.top().getIdentifier() == kExternalLabels[2]) {
-           found_entry = true;
-       }
-       results.pop();
-   }
-   EXPECT_TRUE(found_entry) << "Entry vertex external label " << kExternalLabels[2]
-                            << " should be in results when include_entry=true";
+    bool found_entry = false;
+    while (!results.empty()) {
+        if (results.top().getIdentifier() == kExternalLabels[2]) {
+            found_entry = true;
+        }
+        results.pop();
+    }
+    EXPECT_TRUE(found_entry) << "Entry vertex external label " << kExternalLabels[2] << " should be in results when include_entry=true";
 }
 
 // ===========================================================================
@@ -193,57 +183,54 @@ TEST(DEGExploreReturnsExternalLabels, ExploreIncludeEntryReturnsExternalLabel) {
 // ===========================================================================
 
 TEST(DEGGetNeighborsReturnsExternalLabels, GetNeighborsAcceptsExternalLabel) {
-   auto graph = build_test_graph();
-   deglib::DynamicExplorationGraph deg(graph);
+    auto graph = build_test_graph();
+    deglib::DynamicExplorationGraph deg(graph);
 
-   // Get neighbors of vertex with external label 1005 (internal index 0)
-   // Internal index 0 has neighbors {0, 1, 2, 3} → external labels {1005, 9999, 42, 707}
-   auto neighbors = deg.getNeighbors(kExternalLabels[0]);
+    // Get neighbors of vertex with external label 1005 (internal index 0)
+    // Internal index 0 has neighbors {0, 1, 2, 3} → external labels {1005, 9999, 42, 707}
+    auto neighbors = deg.getNeighbors(kExternalLabels[0]);
 
-   ASSERT_EQ(neighbors.size(), 4u);
+    ASSERT_EQ(neighbors.size(), 4u);
 
-   std::unordered_set<uint32_t> valid_labels(kExternalLabels.begin(), kExternalLabels.end());
-   std::unordered_set<uint32_t> internal_indices(kInternalIndices.begin(), kInternalIndices.end());
+    std::unordered_set<uint32_t> valid_labels(kExternalLabels.begin(), kExternalLabels.end());
+    std::unordered_set<uint32_t> internal_indices(kInternalIndices.begin(), kInternalIndices.end());
 
-   for (uint32_t n : neighbors) {
-       EXPECT_TRUE(valid_labels.contains(n))
-           << "Neighbor " << n << " is not a valid external label";
-       EXPECT_FALSE(internal_indices.contains(n))
-           << "Neighbor " << n << " is an internal index, not an external label";
-   }
+    for (uint32_t n : neighbors) {
+        EXPECT_TRUE(valid_labels.contains(n)) << "Neighbor " << n << " is not a valid external label";
+        EXPECT_FALSE(internal_indices.contains(n)) << "Neighbor " << n << " is an internal index, not an external label";
+    }
 }
 
 TEST(DEGGetNeighborsReturnsExternalLabels, GetNeighborsReturnsCorrectExternalLabels) {
-   auto graph = build_test_graph();
-   deglib::DynamicExplorationGraph deg(graph);
+    auto graph = build_test_graph();
+    deglib::DynamicExplorationGraph deg(graph);
 
-   // Vertex 0 (external label 1005) has internal neighbors {0, 1, 2, 3}
-   // which map to external labels {1005, 9999, 42, 707}
-   auto neighbors = deg.getNeighbors(kExternalLabels[0]);
+    // Vertex 0 (external label 1005) has internal neighbors {0, 1, 2, 3}
+    // which map to external labels {1005, 9999, 42, 707}
+    auto neighbors = deg.getNeighbors(kExternalLabels[0]);
 
-   ASSERT_EQ(neighbors.size(), 4u);
+    ASSERT_EQ(neighbors.size(), 4u);
 
-   std::unordered_set<uint32_t> expected = {1005, 9999, 42, 707};
-   std::unordered_set<uint32_t> actual(neighbors.begin(), neighbors.end());
+    std::unordered_set<uint32_t> expected = {1005, 9999, 42, 707};
+    std::unordered_set<uint32_t> actual(neighbors.begin(), neighbors.end());
 
-   EXPECT_EQ(actual, expected);
+    EXPECT_EQ(actual, expected);
 }
 
 TEST(DEGGetNeighborsReturnsExternalLabels, GetNeighborsFromDifferentVertex) {
-   auto graph = build_test_graph();
-   deglib::DynamicExplorationGraph deg(graph);
+    auto graph = build_test_graph();
+    deglib::DynamicExplorationGraph deg(graph);
 
-   // Vertex 1 (external label 9999) has internal neighbors {0, 1, 2, 3}
-   // which map to external labels {1005, 9999, 42, 707}
-   auto neighbors = deg.getNeighbors(kExternalLabels[1]);
+    // Vertex 1 (external label 9999) has internal neighbors {0, 1, 2, 3}
+    // which map to external labels {1005, 9999, 42, 707}
+    auto neighbors = deg.getNeighbors(kExternalLabels[1]);
 
-   ASSERT_EQ(neighbors.size(), 4u);
+    ASSERT_EQ(neighbors.size(), 4u);
 
-   std::unordered_set<uint32_t> valid_labels(kExternalLabels.begin(), kExternalLabels.end());
-   for (uint32_t n : neighbors) {
-       EXPECT_TRUE(valid_labels.contains(n))
-           << "Neighbor " << n << " is not a valid external label";
-   }
+    std::unordered_set<uint32_t> valid_labels(kExternalLabels.begin(), kExternalLabels.end());
+    for (uint32_t n : neighbors) {
+        EXPECT_TRUE(valid_labels.contains(n)) << "Neighbor " << n << " is not a valid external label";
+    }
 }
 
 // ===========================================================================
@@ -251,36 +238,33 @@ TEST(DEGGetNeighborsReturnsExternalLabels, GetNeighborsFromDifferentVertex) {
 // ===========================================================================
 
 TEST(DEGHasVertexUsesExternalLabels, HasVertexTrueForValidExternalLabels) {
-   auto graph = build_test_graph();
-   deglib::DynamicExplorationGraph deg(graph);
+    auto graph = build_test_graph();
+    deglib::DynamicExplorationGraph deg(graph);
 
-   for (uint32_t label : kExternalLabels) {
-       EXPECT_TRUE(deg.hasVertex(label))
-           << "hasVertex(" << label << ") should return true for valid external label";
-   }
+    for (uint32_t label : kExternalLabels) {
+        EXPECT_TRUE(deg.hasVertex(label)) << "hasVertex(" << label << ") should return true for valid external label";
+    }
 }
 
 TEST(DEGHasVertexUsesExternalLabels, HasVertexFalseForInvalidExternalLabels) {
-   auto graph = build_test_graph();
-   deglib::DynamicExplorationGraph deg(graph);
+    auto graph = build_test_graph();
+    deglib::DynamicExplorationGraph deg(graph);
 
-   // Labels that are not in the graph
-   EXPECT_FALSE(deg.hasVertex(0u));
-   EXPECT_FALSE(deg.hasVertex(1u));
-   EXPECT_FALSE(deg.hasVertex(999u));
-   EXPECT_FALSE(deg.hasVertex(12346u));
+    // Labels that are not in the graph
+    EXPECT_FALSE(deg.hasVertex(0u));
+    EXPECT_FALSE(deg.hasVertex(1u));
+    EXPECT_FALSE(deg.hasVertex(999u));
+    EXPECT_FALSE(deg.hasVertex(12346u));
 }
 
 TEST(DEGHasVertexUsesExternalLabels, HasVertexFalseForInternalIndices) {
-   auto graph = build_test_graph();
-   deglib::DynamicExplorationGraph deg(graph);
+    auto graph = build_test_graph();
+    deglib::DynamicExplorationGraph deg(graph);
 
-   // Internal indices 0..4 should NOT be valid external labels
-   for (uint32_t idx : kInternalIndices) {
-       EXPECT_FALSE(deg.hasVertex(idx))
-           << "hasVertex(" << idx << ") should return false — " << idx
-           << " is an internal index, not an external label";
-   }
+    // Internal indices 0..4 should NOT be valid external labels
+    for (uint32_t idx : kInternalIndices) {
+        EXPECT_FALSE(deg.hasVertex(idx)) << "hasVertex(" << idx << ") should return false — " << idx << " is an internal index, not an external label";
+    }
 }
 
 // ===========================================================================
@@ -288,50 +272,46 @@ TEST(DEGHasVertexUsesExternalLabels, HasVertexFalseForInternalIndices) {
 // ===========================================================================
 
 TEST(DEGSearchReturnsExternalLabels, SearchWithReadOnlyGraphBackend) {
-   auto size_bounded = build_test_graph();
-   auto readonly = deglib::graph::convert_to_readonly_graph(size_bounded);
-   deglib::DynamicExplorationGraph deg(readonly);
+    auto size_bounded = build_test_graph();
+    auto readonly = deglib::graph::convert_to_readonly_graph(size_bounded);
+    deglib::DynamicExplorationGraph deg(readonly);
 
-   // Query near vertex 0 (external label 1005)
-   std::vector<float> query = {0.1f, 0.0f, 0.0f, 0.0f};
-   auto results = deg.search(std::span<const float>(query), 3, 0.0f);
+    // Query near vertex 0 (external label 1005)
+    std::vector<float> query = {0.1f, 0.0f, 0.0f, 0.0f};
+    auto results = deg.search(std::span<const float>(query), 3, 0.0f);
 
-   ASSERT_GT(results.size(), 0u);
+    ASSERT_GT(results.size(), 0u);
 
-   std::unordered_set<uint32_t> valid_labels(kExternalLabels.begin(), kExternalLabels.end());
-   std::unordered_set<uint32_t> internal_indices(kInternalIndices.begin(), kInternalIndices.end());
+    std::unordered_set<uint32_t> valid_labels(kExternalLabels.begin(), kExternalLabels.end());
+    std::unordered_set<uint32_t> internal_indices(kInternalIndices.begin(), kInternalIndices.end());
 
-   while (!results.empty()) {
-       uint32_t id = results.top().getIdentifier();
-       EXPECT_TRUE(valid_labels.contains(id))
-           << "Result identifier " << id << " is not a valid external label";
-       EXPECT_FALSE(internal_indices.contains(id))
-           << "Result identifier " << id << " is an internal index, not an external label";
-       results.pop();
-   }
+    while (!results.empty()) {
+        uint32_t id = results.top().getIdentifier();
+        EXPECT_TRUE(valid_labels.contains(id)) << "Result identifier " << id << " is not a valid external label";
+        EXPECT_FALSE(internal_indices.contains(id)) << "Result identifier " << id << " is an internal index, not an external label";
+        results.pop();
+    }
 }
 
 TEST(DEGExploreReturnsExternalLabels, ExploreWithReadOnlyGraphBackend) {
-   auto size_bounded = build_test_graph();
-   auto readonly = deglib::graph::convert_to_readonly_graph(size_bounded);
-   deglib::DynamicExplorationGraph deg(readonly);
+    auto size_bounded = build_test_graph();
+    auto readonly = deglib::graph::convert_to_readonly_graph(size_bounded);
+    deglib::DynamicExplorationGraph deg(readonly);
 
-   // Explore from external label 42 (internal index 2)
-   auto results = deg.explore(kExternalLabels[2], 3, 0, 0.0f, /*include_entry=*/true, nullptr);
+    // Explore from external label 42 (internal index 2)
+    auto results = deg.explore(kExternalLabels[2], 3, 0, 0.0f, /*include_entry=*/true, nullptr);
 
-   ASSERT_GT(results.size(), 0u);
+    ASSERT_GT(results.size(), 0u);
 
-   std::unordered_set<uint32_t> valid_labels(kExternalLabels.begin(), kExternalLabels.end());
-   std::unordered_set<uint32_t> internal_indices(kInternalIndices.begin(), kInternalIndices.end());
+    std::unordered_set<uint32_t> valid_labels(kExternalLabels.begin(), kExternalLabels.end());
+    std::unordered_set<uint32_t> internal_indices(kInternalIndices.begin(), kInternalIndices.end());
 
-   while (!results.empty()) {
-       uint32_t id = results.top().getIdentifier();
-       EXPECT_TRUE(valid_labels.contains(id))
-           << "Result identifier " << id << " is not a valid external label";
-       EXPECT_FALSE(internal_indices.contains(id))
-           << "Result identifier " << id << " is an internal index, not an external label";
-       results.pop();
-   }
+    while (!results.empty()) {
+        uint32_t id = results.top().getIdentifier();
+        EXPECT_TRUE(valid_labels.contains(id)) << "Result identifier " << id << " is not a valid external label";
+        EXPECT_FALSE(internal_indices.contains(id)) << "Result identifier " << id << " is an internal index, not an external label";
+        results.pop();
+    }
 }
 
 // ===========================================================================
@@ -374,8 +354,7 @@ TEST(DynamicExplorationGraphCreateRandomGraph, CreatesValidGraph) {
         }
     }
 
-    auto graph = deglib::DynamicExplorationGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto graph = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     EXPECT_EQ(graph.size(), vertex_count);
     EXPECT_EQ(graph.getEdgesPerVertex(), edges_per_vertex);
@@ -383,7 +362,7 @@ TEST(DynamicExplorationGraphCreateRandomGraph, CreatesValidGraph) {
 
     EXPECT_TRUE(deglib::analysis::check_graph_regularity(graph.internal(), vertex_count, true));
     EXPECT_TRUE(deglib::analysis::check_graph_connectivity(graph.internal()));
-    EXPECT_TRUE(deglib::analysis::check_graph_weights(static_cast<const deglib::graph::MutableGraph &>(graph.internal())));
+    EXPECT_TRUE(deglib::analysis::check_graph_weights(static_cast<const deglib::graph::MutableGraph&>(graph.internal())));
 }
 
 TEST(DynamicExplorationGraphCreateRandomGraph, SearchReturnsExternalLabels) {
@@ -401,8 +380,7 @@ TEST(DynamicExplorationGraphCreateRandomGraph, SearchReturnsExternalLabels) {
         }
     }
 
-    auto graph = deglib::DynamicExplorationGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto graph = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Search returns external labels
     std::vector<float> query = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -418,8 +396,7 @@ TEST(DynamicExplorationGraphCreateRandomGraph, SearchReturnsExternalLabels) {
 
     while (!results.empty()) {
         uint32_t id = results.top().getIdentifier();
-        EXPECT_TRUE(valid_labels.contains(id))
-            << "Result identifier " << id << " is not a valid external label";
+        EXPECT_TRUE(valid_labels.contains(id)) << "Result identifier " << id << " is not a valid external label";
         results.pop();
     }
 }
@@ -439,18 +416,16 @@ TEST(DynamicExplorationGraphCreateRandomGraph, DeterministicWithSameSeed) {
         }
     }
 
-    auto graph1 = deglib::DynamicExplorationGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 123);
-    auto graph2 = deglib::DynamicExplorationGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 123);
+    auto graph1 = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 123);
+    auto graph2 = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 123);
 
     EXPECT_EQ(graph1.size(), graph2.size());
 
     for (uint32_t i = 0; i < vertex_count; i++) {
         const auto* n1 = graph1.internal().getNeighborIndices(i);
         const auto* n2 = graph2.internal().getNeighborIndices(i);
-        const auto* w1 = static_cast<const deglib::graph::MutableGraph &>(graph1.internal()).getNeighborWeights(i);
-        const auto* w2 = static_cast<const deglib::graph::MutableGraph &>(graph2.internal()).getNeighborWeights(i);
+        const auto* w1 = static_cast<const deglib::graph::MutableGraph&>(graph1.internal()).getNeighborWeights(i);
+        const auto* w2 = static_cast<const deglib::graph::MutableGraph&>(graph2.internal()).getNeighborWeights(i);
         for (uint8_t e = 0; e < edges_per_vertex; e++) {
             EXPECT_EQ(n1[e], n2[e]) << "Neighbor mismatch at vertex " << i << " edge " << e;
             EXPECT_NEAR(w1[e], w2[e], 1e-6f) << "Weight mismatch at vertex " << i << " edge " << e;
@@ -473,14 +448,13 @@ TEST(DynamicExplorationGraphCreateRandomGraph, UInt8Metric) {
         }
     }
 
-    auto graph = deglib::DynamicExplorationGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto graph = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     EXPECT_EQ(graph.size(), vertex_count);
     EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::Uint8_L2);
     EXPECT_TRUE(deglib::analysis::check_graph_regularity(graph.internal(), vertex_count, true));
     EXPECT_TRUE(deglib::analysis::check_graph_connectivity(graph.internal()));
-    EXPECT_TRUE(deglib::analysis::check_graph_weights(static_cast<const deglib::graph::MutableGraph &>(graph.internal())));
+    EXPECT_TRUE(deglib::analysis::check_graph_weights(static_cast<const deglib::graph::MutableGraph&>(graph.internal())));
 }
 
 // ===========================================================================
@@ -502,8 +476,7 @@ TEST(DynamicExplorationGraphFromGraph, FromGraphCreatesMutableGraph) {
         }
     }
 
-    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Convert to ReadOnlyGraph first
     auto readonly = source_graph.to_readonly();
@@ -518,7 +491,7 @@ TEST(DynamicExplorationGraphFromGraph, FromGraphCreatesMutableGraph) {
 
     // Verify graph regularity and weights
     EXPECT_TRUE(deglib::analysis::check_graph_regularity(mutable_graph.internal(), vertex_count, true));
-    EXPECT_TRUE(deglib::analysis::check_graph_weights(static_cast<const deglib::graph::MutableGraph &>(mutable_graph.internal())));
+    EXPECT_TRUE(deglib::analysis::check_graph_weights(static_cast<const deglib::graph::MutableGraph&>(mutable_graph.internal())));
 }
 
 TEST(DynamicExplorationGraphFromGraph, FromGraphStaticFactory) {
@@ -536,8 +509,7 @@ TEST(DynamicExplorationGraphFromGraph, FromGraphStaticFactory) {
         }
     }
 
-    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Use to_mutable to create a mutable copy from the source graph
     auto mutable_graph = source_graph.to_mutable();
@@ -551,8 +523,7 @@ TEST(DynamicExplorationGraphFromGraph, FromGraphStaticFactory) {
         const auto* src_neighbors = source_graph.internal().getNeighborIndices(i);
         const auto* copy_neighbors = mutable_graph.internal().getNeighborIndices(i);
         for (uint8_t e = 0; e < edges_per_vertex; e++) {
-            EXPECT_EQ(src_neighbors[e], copy_neighbors[e])
-                << "Neighbor index mismatch at vertex " << i << " edge " << e;
+            EXPECT_EQ(src_neighbors[e], copy_neighbors[e]) << "Neighbor index mismatch at vertex " << i << " edge " << e;
         }
     }
 }
@@ -572,8 +543,7 @@ TEST(DynamicExplorationGraphFromGraph, ToMutableSearchWorks) {
         }
     }
 
-    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Convert to readonly, then back to mutable
     auto readonly = source_graph.to_readonly();
@@ -612,8 +582,7 @@ TEST(DynamicExplorationGraphFromGraph, ToMutableWithCustomFeatures) {
         }
     }
 
-    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Create scaled custom features
     auto custom_feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
@@ -635,8 +604,7 @@ TEST(DynamicExplorationGraphFromGraph, ToMutableWithCustomFeatures) {
         const auto* src_neighbors = source_graph.internal().getNeighborIndices(i);
         const auto* copy_neighbors = mutable_graph.internal().getNeighborIndices(i);
         for (uint8_t e = 0; e < edges_per_vertex; e++) {
-            EXPECT_EQ(src_neighbors[e], copy_neighbors[e])
-                << "Neighbor index mismatch at vertex " << i << " edge " << e;
+            EXPECT_EQ(src_neighbors[e], copy_neighbors[e]) << "Neighbor index mismatch at vertex " << i << " edge " << e;
         }
     }
 
@@ -645,15 +613,14 @@ TEST(DynamicExplorationGraphFromGraph, ToMutableWithCustomFeatures) {
     const auto dist_func_param = space.get_dist_func_param();
     for (uint32_t i = 0; i < vertex_count; i++) {
         const auto* src_neighbors = source_graph.internal().getNeighborIndices(i);
-        const auto* copy_weights = static_cast<const deglib::graph::MutableGraph &>(mutable_graph.internal()).getNeighborWeights(i);
+        const auto* copy_weights = static_cast<const deglib::graph::MutableGraph&>(mutable_graph.internal()).getNeighborWeights(i);
         for (uint8_t e = 0; e < edges_per_vertex; e++) {
             const auto neighbor_idx = src_neighbors[e];
             const auto expected_weight = dist_func(
-                custom_feature_bytes.get() + size_t(i) * dim * sizeof(float),
-                custom_feature_bytes.get() + size_t(neighbor_idx) * dim * sizeof(float),
-                dist_func_param);
-            EXPECT_NEAR(copy_weights[e], expected_weight, 1e-4f)
-                << "Weight mismatch at vertex " << i << " edge " << e;
+                custom_feature_bytes.get() + size_t(i) * dim * sizeof(float), custom_feature_bytes.get() + size_t(neighbor_idx) * dim * sizeof(float),
+                dist_func_param
+            );
+            EXPECT_NEAR(copy_weights[e], expected_weight, 1e-4f) << "Weight mismatch at vertex " << i << " edge " << e;
         }
     }
 }
@@ -673,8 +640,7 @@ TEST(DynamicExplorationGraphFromGraph, ToMutableWithNewMaxSize) {
         }
     }
 
-    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(
-        feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Convert to mutable with larger capacity using the direct to_mutable(new_max_size) overload
     const uint32_t new_capacity = 50;
@@ -685,8 +651,7 @@ TEST(DynamicExplorationGraphFromGraph, ToMutableWithNewMaxSize) {
 
     // Should be able to add vertices
     auto new_feature = make_float_bytes(make_vec_4d(100.0f, 0.0f, 0.0f, 0.0f));
-    static_cast<deglib::graph::MutableGraph &>(mutable_graph.internal()).addVertex(9999, new_feature.get());
+    static_cast<deglib::graph::MutableGraph&>(mutable_graph.internal()).addVertex(9999, new_feature.get());
     EXPECT_EQ(mutable_graph.size(), vertex_count + 1);
     EXPECT_TRUE(mutable_graph.hasVertex(9999));
 }
-

@@ -18,9 +18,8 @@ namespace deglib::random {
 /// Supports integer types (e.g. int, uint32_t, size_t) with ranges up to 2^32 (using 32-bit generators like std::mt19937).
 template <typename IntType = int>
 class DeterministicUniformIntDistribution {
-public:
-    DeterministicUniformIntDistribution(IntType min_val, IntType max_val)
-        : min_val_(min_val), max_val_(max_val) {
+  public:
+    DeterministicUniformIntDistribution(IntType min_val, IntType max_val) : min_val_(min_val), max_val_(max_val) {
         if (min_val_ < max_val_) {
             range_ = static_cast<uint64_t>(max_val_) - static_cast<uint64_t>(min_val_) + 1;
             max_valid_ = (4294967296ULL / range_) * range_ - 1;
@@ -44,11 +43,11 @@ public:
         return static_cast<IntType>(min_val_ + (val % range_));
     }
 
-private:
+  private:
     IntType min_val_;
     IntType max_val_;
     uint64_t range_{1};
     uint64_t max_valid_{4294967295ULL};
 };
 
-} // namespace deglib::random
+}  // namespace deglib::random

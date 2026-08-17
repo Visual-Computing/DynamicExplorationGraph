@@ -1,5 +1,8 @@
 #pragma once
 
+#include "deglib/distance/evp_inner_product.h"
+#include "deglib/optimization/quantization/evp_quantize.h"
+
 #include <deglib/deglib.h>
 #include <gtest/gtest.h>
 
@@ -12,9 +15,6 @@
 #include <random>
 #include <unordered_set>
 #include <vector>
-
-#include "deglib/optimization/quantization/evp_quantize.h"
-#include "deglib/distance/evp_inner_product.h"
 
 // ============================================================================
 // Shared Test Utilities
@@ -37,7 +37,7 @@ inline static uint32_t deglib_prng_next(uint32_t& state) {
 }
 
 inline static float deglib_prng_float(uint32_t& state, float min_val, float max_val) {
-    uint32_t val = deglib_prng_next(state) >> 8; // 24-bit integer
+    uint32_t val = deglib_prng_next(state) >> 8;  // 24-bit integer
     float u = static_cast<float>(val) / 16777215.0f;
     float range = max_val - min_val;
     return min_val + u * range;
@@ -50,43 +50,41 @@ inline static float deglib_prng_float(uint32_t& state, float min_val, float max_
 // Generate cross-platform deterministic clustered dataset (Gaussian Mixture with fixed seed)
 // Uses pure 32-bit integer arithmetic and exact integer-to-float conversion to guarantee
 // 100% bit-exact float vectors across MSVC, GCC, and Clang on all CPU architectures.
-inline static void generate_synthetic_clustered_dataset(size_t count, size_t dim, std::vector<float>& base,
-                                                 std::vector<float>& query, size_t query_count,
-                                                 size_t num_clusters = 20)
-{
+inline static void generate_synthetic_clustered_dataset(
+    size_t count,
+    size_t dim,
+    std::vector<float>& base,
+    std::vector<float>& query,
+    size_t query_count,
+    size_t num_clusters = 20
+) {
     base.resize(count * dim);
     query.resize(query_count * dim);
 
     uint32_t rng_state = 42;
     std::vector<std::vector<int32_t>> centroids(num_clusters, std::vector<int32_t>(dim));
 
-    for (size_t c = 0; c < num_clusters; ++c)
-    {
-        for (size_t d = 0; d < dim; ++d)
-        {
+    for (size_t c = 0; c < num_clusters; ++c) {
+        for (size_t d = 0; d < dim; ++d) {
             uint32_t val = deglib_prng_next(rng_state);
-            centroids[c][d] = static_cast<int32_t>(val % 2001) - 1000; // [-1000, 1000]
+            centroids[c][d] = static_cast<int32_t>(val % 2001) - 1000;  // [-1000, 1000]
         }
     }
 
-    for (size_t i = 0; i < count; ++i)
-    {
+    for (size_t i = 0; i < count; ++i) {
         size_t c = i % num_clusters;
-        for (size_t d = 0; d < dim; ++d)
-        {
+        for (size_t d = 0; d < dim; ++d) {
             uint32_t val = deglib_prng_next(rng_state);
-            int32_t noise = static_cast<int32_t>(val % 201) - 100; // [-100, 100]
+            int32_t noise = static_cast<int32_t>(val % 201) - 100;  // [-100, 100]
             base[i * dim + d] = static_cast<float>(centroids[c][d] + noise);
         }
     }
 
-    for (size_t q = 0; q < query_count; ++q)
-    {
+    for (size_t q = 0; q < query_count; ++q) {
         size_t c = q % num_clusters;
-        for (size_t d = 0; d < dim; ++d)
-        {
+        for (size_t d = 0; d < dim; ++d) {
             uint32_t val = deglib_prng_next(rng_state);
-            int32_t noise = static_cast<int32_t>(val % 201) - 100; // [-100, 100]
+            int32_t noise = static_cast<int32_t>(val % 201) - 100;  // [-100, 100]
             query[q * dim + d] = static_cast<float>(centroids[c][d] + noise);
         }
     }
@@ -97,44 +95,42 @@ inline static void generate_synthetic_clustered_dataset(size_t count, size_t dim
 // ---------------------------------------------------------------------------
 
 // Generate cross-platform deterministic uint8 clustered dataset
-inline static void generate_synthetic_clustered_dataset_uint8(size_t count, size_t dim, std::vector<uint8_t>& base,
-                                                       std::vector<uint8_t>& query, size_t query_count,
-                                                       size_t num_clusters = 20)
-{
+inline static void generate_synthetic_clustered_dataset_uint8(
+    size_t count,
+    size_t dim,
+    std::vector<uint8_t>& base,
+    std::vector<uint8_t>& query,
+    size_t query_count,
+    size_t num_clusters = 20
+) {
     base.resize(count * dim);
     query.resize(query_count * dim);
 
     uint32_t rng_state = 42;
     std::vector<std::vector<int>> centroids(num_clusters, std::vector<int>(dim));
 
-    for (size_t c = 0; c < num_clusters; ++c)
-    {
-        for (size_t d = 0; d < dim; ++d)
-        {
+    for (size_t c = 0; c < num_clusters; ++c) {
+        for (size_t d = 0; d < dim; ++d) {
             uint32_t val = deglib_prng_next(rng_state);
-            centroids[c][d] = 20 + static_cast<int>(val % 216); // [20, 235]
+            centroids[c][d] = 20 + static_cast<int>(val % 216);  // [20, 235]
         }
     }
 
-    for (size_t i = 0; i < count; ++i)
-    {
+    for (size_t i = 0; i < count; ++i) {
         size_t c = i % num_clusters;
-        for (size_t d = 0; d < dim; ++d)
-        {
+        for (size_t d = 0; d < dim; ++d) {
             uint32_t val = deglib_prng_next(rng_state);
-            int noise = static_cast<int>(val % 31) - 15; // [-15, 15]
+            int noise = static_cast<int>(val % 31) - 15;  // [-15, 15]
             int res = centroids[c][d] + noise;
             base[i * dim + d] = static_cast<uint8_t>(std::clamp(res, 0, 255));
         }
     }
 
-    for (size_t q = 0; q < query_count; ++q)
-    {
+    for (size_t q = 0; q < query_count; ++q) {
         size_t c = q % num_clusters;
-        for (size_t d = 0; d < dim; ++d)
-        {
+        for (size_t d = 0; d < dim; ++d) {
             uint32_t val = deglib_prng_next(rng_state);
-            int noise = static_cast<int>(val % 31) - 15; // [-15, 15]
+            int noise = static_cast<int>(val % 31) - 15;  // [-15, 15]
             int res = centroids[c][d] + noise;
             query[q * dim + d] = static_cast<uint8_t>(std::clamp(res, 0, 255));
         }
@@ -150,10 +146,14 @@ inline static void generate_synthetic_clustered_dataset_uint8(size_t count, size
 // then converts them to FP16 (uint16_t) using bit-exact conversion.
 // The float centroids are computed using the same logic as generate_synthetic_clustered_dataset,
 // ensuring the FP16 dataset is derived from the same deterministic float data.
-inline static void generate_synthetic_clustered_dataset_fp16(size_t count, size_t dim, std::vector<uint16_t>& base,
-                                                       std::vector<uint16_t>& query, size_t query_count,
-                                                       size_t num_clusters = 20)
-{
+inline static void generate_synthetic_clustered_dataset_fp16(
+    size_t count,
+    size_t dim,
+    std::vector<uint16_t>& base,
+    std::vector<uint16_t>& query,
+    size_t query_count,
+    size_t num_clusters = 20
+) {
     // Generate float data using the same logic as the float generator
     std::vector<float> base_float(count * dim);
     std::vector<float> query_float(query_count * dim);
@@ -161,33 +161,27 @@ inline static void generate_synthetic_clustered_dataset_fp16(size_t count, size_
     uint32_t rng_state = 42;
     std::vector<std::vector<int32_t>> centroids(num_clusters, std::vector<int32_t>(dim));
 
-    for (size_t c = 0; c < num_clusters; ++c)
-    {
-        for (size_t d = 0; d < dim; ++d)
-        {
+    for (size_t c = 0; c < num_clusters; ++c) {
+        for (size_t d = 0; d < dim; ++d) {
             uint32_t val = deglib_prng_next(rng_state);
-            centroids[c][d] = static_cast<int32_t>(val % 2001) - 1000; // [-1000, 1000]
+            centroids[c][d] = static_cast<int32_t>(val % 2001) - 1000;  // [-1000, 1000]
         }
     }
 
-    for (size_t i = 0; i < count; ++i)
-    {
+    for (size_t i = 0; i < count; ++i) {
         size_t c = i % num_clusters;
-        for (size_t d = 0; d < dim; ++d)
-        {
+        for (size_t d = 0; d < dim; ++d) {
             uint32_t val = deglib_prng_next(rng_state);
-            int32_t noise = static_cast<int32_t>(val % 201) - 100; // [-100, 100]
+            int32_t noise = static_cast<int32_t>(val % 201) - 100;  // [-100, 100]
             base_float[i * dim + d] = static_cast<float>(centroids[c][d] + noise);
         }
     }
 
-    for (size_t q = 0; q < query_count; ++q)
-    {
+    for (size_t q = 0; q < query_count; ++q) {
         size_t c = q % num_clusters;
-        for (size_t d = 0; d < dim; ++d)
-        {
+        for (size_t d = 0; d < dim; ++d) {
             uint32_t val = deglib_prng_next(rng_state);
-            int32_t noise = static_cast<int32_t>(val % 201) - 100; // [-100, 100]
+            int32_t noise = static_cast<int32_t>(val % 201) - 100;  // [-100, 100]
             query_float[q * dim + d] = static_cast<float>(centroids[c][d] + noise);
         }
     }
@@ -206,19 +200,22 @@ inline static void generate_synthetic_clustered_dataset_fp16(size_t count, size_
 // Compute exact brute-force groundtruth for top-K neighbors using a custom distance evaluator.
 // Works for all vector element types (float, uint8_t, uint16_t, std::byte).
 template <typename ElemType, typename DistFunc>
-inline static std::vector<std::vector<uint32_t>> compute_groundtruth(const std::vector<ElemType>& base, size_t base_count,
-                                                               const std::vector<ElemType>& query, size_t query_count,
-                                                               size_t dim, uint32_t k, DistFunc dist_func)
-{
+inline static std::vector<std::vector<uint32_t>> compute_groundtruth(
+    const std::vector<ElemType>& base,
+    size_t base_count,
+    const std::vector<ElemType>& query,
+    size_t query_count,
+    size_t dim,
+    uint32_t k,
+    DistFunc dist_func
+) {
     std::vector<std::vector<uint32_t>> gt(query_count);
 
-    for (int q = 0; q < static_cast<int>(query_count); ++q)
-    {
+    for (int q = 0; q < static_cast<int>(query_count); ++q) {
         std::vector<std::pair<float, uint32_t>> dists(base_count);
         const ElemType* q_vec = &query[q * dim];
 
-        for (size_t i = 0; i < base_count; ++i)
-        {
+        for (size_t i = 0; i < base_count; ++i) {
             const ElemType* b_vec = &base[i * dim];
             float d = dist_func(q_vec, b_vec, &dim);
             dists[i] = {d, static_cast<uint32_t>(i)};
@@ -226,8 +223,7 @@ inline static std::vector<std::vector<uint32_t>> compute_groundtruth(const std::
 
         std::partial_sort(dists.begin(), dists.begin() + k, dists.end());
         gt[q].reserve(k);
-        for (uint32_t i = 0; i < k; ++i)
-        {
+        for (uint32_t i = 0; i < k; ++i) {
             gt[q].push_back(dists[i].second);
         }
     }
@@ -238,72 +234,78 @@ inline static std::vector<std::vector<uint32_t>> compute_groundtruth(const std::
 // Compute exact brute-force L2 groundtruth for top-K neighbors.
 // Uses the scalar L2Float::compare() implementation from deglib to ensure
 // the ground-truth distances match the actual distance computation exactly.
-inline static std::vector<std::vector<uint32_t>> compute_groundtruth_l2(const std::vector<float>& base, size_t base_count,
-                                                                 const std::vector<float>& query, size_t query_count,
-                                                                 size_t dim, uint32_t k)
-{
-    return compute_groundtruth<float>(base, base_count, query, query_count, dim, k,
-                                      [](const float* q_vec, const float* b_vec, const void* qty_ptr)
-                                      {
-                                          return deglib::distances::fp32_l2::L2Float::compare(q_vec, b_vec, qty_ptr);
-                                      });
+inline static std::vector<std::vector<uint32_t>>
+compute_groundtruth_l2(const std::vector<float>& base, size_t base_count, const std::vector<float>& query, size_t query_count, size_t dim, uint32_t k) {
+    return compute_groundtruth<float>(base, base_count, query, query_count, dim, k, [](const float* q_vec, const float* b_vec, const void* qty_ptr) {
+        return deglib::distances::fp32_l2::L2Float::compare(q_vec, b_vec, qty_ptr);
+    });
 }
 // Compute exact brute-force InnerProduct groundtruth for top-K neighbors (distance = 1 - dot_product).
 // Uses the scalar InnerProductFloat::compare() implementation from deglib to ensure
 // the ground-truth distances match the actual distance computation exactly.
-inline static std::vector<std::vector<uint32_t>> compute_groundtruth_innerproduct(const std::vector<float>& base, size_t base_count,
-                                                                              const std::vector<float>& query, size_t query_count,
-                                                                              size_t dim, uint32_t k)
-{
-    return compute_groundtruth<float>(base, base_count, query, query_count, dim, k,
-                                      [](const float* q_vec, const float* b_vec, const void* qty_ptr)
-                                      {
-                                          return deglib::distances::fp32_ip::InnerProductFloat::compare(q_vec, b_vec, qty_ptr);
-                                      });
+inline static std::vector<std::vector<uint32_t>> compute_groundtruth_innerproduct(
+    const std::vector<float>& base,
+    size_t base_count,
+    const std::vector<float>& query,
+    size_t query_count,
+    size_t dim,
+    uint32_t k
+) {
+    return compute_groundtruth<float>(base, base_count, query, query_count, dim, k, [](const float* q_vec, const float* b_vec, const void* qty_ptr) {
+        return deglib::distances::fp32_ip::InnerProductFloat::compare(q_vec, b_vec, qty_ptr);
+    });
 }
 
 // Compute exact brute-force FP16 InnerProduct groundtruth for top-K neighbors (distance = 1.f - dot_product).
 // Uses the scalar InnerProductFP16::compare() implementation from deglib.
-inline static std::vector<std::vector<uint32_t>> compute_groundtruth_fp16_ip(const std::vector<uint16_t>& base, size_t base_count,
-                                                                         const std::vector<uint16_t>& query, size_t query_count,
-                                                                         size_t dim, uint32_t k)
-{
-    return compute_groundtruth<uint16_t>(base, base_count, query, query_count, dim, k,
-                                      [](const uint16_t* q_vec, const uint16_t* b_vec, const void* qty_ptr)
-                                      {
-                                          return deglib::distances::fp16_ip::InnerProductFP16::compare(q_vec, b_vec, qty_ptr);
-                                      });
+inline static std::vector<std::vector<uint32_t>> compute_groundtruth_fp16_ip(
+    const std::vector<uint16_t>& base,
+    size_t base_count,
+    const std::vector<uint16_t>& query,
+    size_t query_count,
+    size_t dim,
+    uint32_t k
+) {
+    return compute_groundtruth<uint16_t>(base, base_count, query, query_count, dim, k, [](const uint16_t* q_vec, const uint16_t* b_vec, const void* qty_ptr) {
+        return deglib::distances::fp16_ip::InnerProductFP16::compare(q_vec, b_vec, qty_ptr);
+    });
 }
 
 // Compute exact brute-force L2 groundtruth for uint8 vectors.
 // Uses the scalar L2Uint8::compare() from deglib to ensure the ground-truth
 // distances match the actual distance computation exactly.
-inline static std::vector<std::vector<uint32_t>> compute_groundtruth_l2_uint8(const std::vector<uint8_t>& base, size_t base_count,
-                                                                          const std::vector<uint8_t>& query, size_t query_count,
-                                                                          size_t dim, uint32_t k)
-{
-    return compute_groundtruth<uint8_t>(base, base_count, query, query_count, dim, k,
-                                      [](const uint8_t* q_vec, const uint8_t* b_vec, const void* qty_ptr)
-                                      {
-                                          return deglib::distances::uint8_l2::L2Uint8::compare(q_vec, b_vec, qty_ptr);
-                                      });
+inline static std::vector<std::vector<uint32_t>> compute_groundtruth_l2_uint8(
+    const std::vector<uint8_t>& base,
+    size_t base_count,
+    const std::vector<uint8_t>& query,
+    size_t query_count,
+    size_t dim,
+    uint32_t k
+) {
+    return compute_groundtruth<uint8_t>(base, base_count, query, query_count, dim, k, [](const uint8_t* q_vec, const uint8_t* b_vec, const void* qty_ptr) {
+        return deglib::distances::uint8_l2::L2Uint8::compare(q_vec, b_vec, qty_ptr);
+    });
 }
 
 // Compute exact brute-force EVP InnerProduct groundtruth for top-K neighbors.
 // Uses the scalar EvpInnerProduct::compare() from deglib to ensure
 // the ground-truth distances match the actual distance computation exactly.
 // For EVP, a single vector is 2 * (dim / 8) bytes (ones mask + negative_ones mask).
-inline static std::vector<std::vector<uint32_t>> compute_groundtruth_evp(const std::vector<std::byte>& base, size_t base_count,
-                                                                     const std::vector<std::byte>& query, size_t query_count,
-                                                                     size_t dim, uint32_t k)
-{
+inline static std::vector<std::vector<uint32_t>> compute_groundtruth_evp(
+    const std::vector<std::byte>& base,
+    size_t base_count,
+    const std::vector<std::byte>& query,
+    size_t query_count,
+    size_t dim,
+    uint32_t k
+) {
     const size_t bytes_per_vec = 2 * (dim / 8);
-    return compute_groundtruth<std::byte>(base, base_count, query, query_count, bytes_per_vec, k,
-        [dim](const std::byte* q_vec, const std::byte* b_vec, const void*)
-        {
+    return compute_groundtruth<std::byte>(
+        base, base_count, query, query_count, bytes_per_vec, k, [dim](const std::byte* q_vec, const std::byte* b_vec, const void*) {
             uint32_t d = static_cast<uint32_t>(dim);
             return deglib::distances::evp_ip::EvpInnerProduct::compare(q_vec, b_vec, &d);
-        });
+        }
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -313,15 +315,20 @@ inline static std::vector<std::vector<uint32_t>> compute_groundtruth_evp(const s
 // Generate cross-platform deterministic clustered EVP dataset.
 // Generates float vectors using generate_synthetic_clustered_dataset(),
 // then quantizes them to EVP bytes via deglib::quantization::evp::quantize_batch().
-inline static void generate_synthetic_clustered_dataset_evp(size_t count, size_t dim, std::vector<std::byte>& base_evp,
-                                                        std::vector<std::byte>& query_evp, size_t query_count,
-                                                        size_t num_clusters = 20, uint32_t non_zeros = 0)
-{
+inline static void generate_synthetic_clustered_dataset_evp(
+    size_t count,
+    size_t dim,
+    std::vector<std::byte>& base_evp,
+    std::vector<std::byte>& query_evp,
+    size_t query_count,
+    size_t num_clusters = 20,
+    uint32_t non_zeros = 0
+) {
     if (non_zeros == 0) non_zeros = static_cast<uint32_t>(dim / 4);
     std::vector<float> base_float, query_float;
     generate_synthetic_clustered_dataset(count, dim, base_float, query_float, query_count, num_clusters);
 
-    base_evp  = deglib::quantization::evp::quantize_batch(base_float.data(), count, dim, non_zeros);
+    base_evp = deglib::quantization::evp::quantize_batch(base_float.data(), count, dim, non_zeros);
     query_evp = deglib::quantization::evp::quantize_batch(query_float.data(), query_count, dim, non_zeros);
 }
 
@@ -330,19 +337,22 @@ inline static void generate_synthetic_clustered_dataset_evp(size_t count, size_t
 // ---------------------------------------------------------------------------
 
 template <typename ElemType, typename DistFunc>
-inline static void check_distance_recall(const char* name, const std::vector<ElemType>& base_data, size_t base_count,
-                                         const std::vector<ElemType>& query_data, size_t query_count,
-                                         size_t dim, uint32_t k,
-                                         const std::vector<std::vector<uint32_t>>& gt_scalar,
-                                         DistFunc dist_func)
-{
+inline static void check_distance_recall(
+    const char* name,
+    const std::vector<ElemType>& base_data,
+    size_t base_count,
+    const std::vector<ElemType>& query_data,
+    size_t query_count,
+    size_t dim,
+    uint32_t k,
+    const std::vector<std::vector<uint32_t>>& gt_scalar,
+    DistFunc dist_func
+) {
     std::vector<std::vector<uint32_t>> gt(query_count);
-    for (int q = 0; q < static_cast<int>(query_count); ++q)
-    {
+    for (int q = 0; q < static_cast<int>(query_count); ++q) {
         std::vector<std::pair<float, uint32_t>> dists(base_count);
         const void* q_vec = static_cast<const void*>(&query_data[q * dim]);
-        for (size_t i = 0; i < base_count; ++i)
-        {
+        for (size_t i = 0; i < base_count; ++i) {
             const void* b_vec = static_cast<const void*>(&base_data[i * dim]);
             size_t qty = dim;
             float d = dist_func(q_vec, b_vec, &qty);
@@ -354,17 +364,14 @@ inline static void check_distance_recall(const char* name, const std::vector<Ele
     }
 
     size_t correct = 0;
-    for (size_t q = 0; q < query_count; ++q)
-    {
+    for (size_t q = 0; q < query_count; ++q) {
         std::unordered_set<uint32_t> gt_set(gt_scalar[q].begin(), gt_scalar[q].end());
-        for (uint32_t idx : gt[q])
-        {
+        for (uint32_t idx : gt[q]) {
             if (gt_set.count(idx)) ++correct;
         }
     }
     double recall = static_cast<double>(correct) / static_cast<double>(query_count * k);
-    std::cout << "[DistanceRecall " << name << "] recall=" << recall << "  correct=" << correct << "/"
-              << (query_count * k) << std::endl;
+    std::cout << "[DistanceRecall " << name << "] recall=" << recall << "  correct=" << correct << "/" << (query_count * k) << std::endl;
     EXPECT_EQ(recall, 1.0) << "Distance recall between scalar and " << name << " must be exactly 1.0";
 }
 
@@ -376,20 +383,23 @@ inline static void check_distance_recall(const char* name, const std::vector<Ele
 // functions need the original float dimension as qty_ptr. This wrapper handles
 // the type mismatch by using bytes_per_vec for indexing and the float dim for qty.
 template <typename DistFunc>
-inline static void check_distance_recall_evp(const char* name, const std::vector<std::byte>& base_data, size_t base_count,
-                                             const std::vector<std::byte>& query_data, size_t query_count,
-                                             size_t dim, uint32_t k,
-                                             const std::vector<std::vector<uint32_t>>& gt_scalar,
-                                             DistFunc dist_func)
-{
+inline static void check_distance_recall_evp(
+    const char* name,
+    const std::vector<std::byte>& base_data,
+    size_t base_count,
+    const std::vector<std::byte>& query_data,
+    size_t query_count,
+    size_t dim,
+    uint32_t k,
+    const std::vector<std::vector<uint32_t>>& gt_scalar,
+    DistFunc dist_func
+) {
     const size_t bytes_per_vec = 2 * (dim / 8);
     std::vector<std::vector<uint32_t>> gt(query_count);
-    for (int q = 0; q < static_cast<int>(query_count); ++q)
-    {
+    for (int q = 0; q < static_cast<int>(query_count); ++q) {
         std::vector<std::pair<float, uint32_t>> dists(base_count);
         const std::byte* q_vec = &query_data[q * bytes_per_vec];
-        for (size_t i = 0; i < base_count; ++i)
-        {
+        for (size_t i = 0; i < base_count; ++i) {
             const std::byte* b_vec = &base_data[i * bytes_per_vec];
             uint32_t qty = static_cast<uint32_t>(dim);
             float d = dist_func(q_vec, b_vec, &qty);
@@ -401,17 +411,14 @@ inline static void check_distance_recall_evp(const char* name, const std::vector
     }
 
     size_t correct = 0;
-    for (size_t q = 0; q < query_count; ++q)
-    {
+    for (size_t q = 0; q < query_count; ++q) {
         std::unordered_set<uint32_t> gt_set(gt_scalar[q].begin(), gt_scalar[q].end());
-        for (uint32_t idx : gt[q])
-        {
+        for (uint32_t idx : gt[q]) {
             if (gt_set.count(idx)) ++correct;
         }
     }
     double recall = static_cast<double>(correct) / static_cast<double>(query_count * k);
-    std::cout << "[DistanceRecall " << name << "] recall=" << recall << "  correct=" << correct << "/"
-              << (query_count * k) << std::endl;
+    std::cout << "[DistanceRecall " << name << "] recall=" << recall << "  correct=" << correct << "/" << (query_count * k) << std::endl;
     EXPECT_EQ(recall, 1.0) << "Distance recall between scalar and " << name << " must be exactly 1.0";
 }
 
@@ -419,13 +426,19 @@ inline static void check_distance_recall_evp(const char* name, const std::vector
 // Graph builder + search recall runner (integration: no QPS / build-time checks)
 // ---------------------------------------------------------------------------
 
-inline static void run_integration_test(const char* name, deglib::distances::Metric metric, double min_recall,
-                                const void* base_data,
-                                const void* query_data, size_t base_count, size_t query_count,
-                                size_t dim, const std::vector<std::vector<uint32_t>>& gt_data,
-                                std::optional<deglib::distances::DistanceVariant> dist_variant = std::nullopt,
-                                deglib::builder::OptimizationTarget optimization_target = deglib::builder::OptimizationTarget::LowLID)
-{
+inline static void run_integration_test(
+    const char* name,
+    deglib::distances::Metric metric,
+    double min_recall,
+    const void* base_data,
+    const void* query_data,
+    size_t base_count,
+    size_t query_count,
+    size_t dim,
+    const std::vector<std::vector<uint32_t>>& gt_data,
+    std::optional<deglib::distances::DistanceVariant> dist_variant = std::nullopt,
+    deglib::builder::OptimizationTarget optimization_target = deglib::builder::OptimizationTarget::LowLID
+) {
     const uint32_t search_k = 10;
     const float search_eps = 0.05f;
 
@@ -440,23 +453,21 @@ inline static void run_integration_test(const char* name, deglib::distances::Met
     const uint32_t thread_count = 1;
 
     // Build DEG Graph using the specified metric feature space
-    const deglib::distances::FloatSpace feature_space = dist_variant.has_value()
-        ? deglib::distances::FloatSpace(dim, metric, dist_variant.value())
-        : deglib::distances::FloatSpace(dim, metric);
+    const deglib::distances::FloatSpace feature_space =
+        dist_variant.has_value() ? deglib::distances::FloatSpace(dim, metric, dist_variant.value()) : deglib::distances::FloatSpace(dim, metric);
 
     const size_t feature_bytes = feature_space.get_data_size();
 
-    deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(base_count), edges_per_vertex,
-                                          std::move(feature_space));
+    deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(base_count), edges_per_vertex, std::move(feature_space));
 
     std::mt19937 rng(1337);
-    deglib::builder::EvenRegularGraphBuilder builder(graph, rng, optimization_target, extend_k, extend_eps, improve_k,
-                                                     improve_eps, max_path_length, swap_tries, additional_swap_tries);
+    deglib::builder::EvenRegularGraphBuilder builder(
+        graph, rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, swap_tries, additional_swap_tries
+    );
     builder.setThreadCount(thread_count);
 
     const std::byte* base_bytes = reinterpret_cast<const std::byte*>(base_data);
-    for (size_t i = 0; i < base_count; ++i)
-    {
+    for (size_t i = 0; i < base_count; ++i) {
         const std::byte* ptr = base_bytes + i * feature_bytes;
         std::vector<std::byte> feat_vec(ptr, ptr + feature_bytes);
         builder.addEntry(static_cast<uint32_t>(i), std::move(feat_vec));
@@ -469,29 +480,24 @@ inline static void run_integration_test(const char* name, deglib::distances::Met
     const std::byte* query_bytes = reinterpret_cast<const std::byte*>(query_data);
 
     size_t total_correct = 0;
-    for (size_t q = 0; q < query_count; ++q)
-    {
+    for (size_t q = 0; q < query_count; ++q) {
         const std::byte* q_ptr = query_bytes + q * feature_bytes;
         std::span<const float> q_span(reinterpret_cast<const float*>(q_ptr), dim);
         auto result = graph.search(q_span, search_k, search_eps, nullptr, 0);
 
         std::unordered_set<uint32_t> gt_set;
-        if (!gt_data.empty() && q < gt_data.size())
-        {
+        if (!gt_data.empty() && q < gt_data.size()) {
             size_t eval_k = std::min(static_cast<size_t>(search_k), gt_data[q].size());
-            for (size_t i = 0; i < eval_k; ++i)
-            {
+            for (size_t i = 0; i < eval_k; ++i) {
                 gt_set.insert(gt_data[q][i]);
             }
         }
 
-        while (!result.empty())
-        {
+        while (!result.empty()) {
             auto top_item = result.top();
             result.pop();
             uint32_t ext_label = graph.getExternalLabel(top_item.getIdentifier());
-            if (gt_set.count(ext_label))
-            {
+            if (gt_set.count(ext_label)) {
                 total_correct++;
             }
         }
@@ -510,12 +516,13 @@ inline static void run_integration_test(const char* name, deglib::distances::Met
 
 inline static std::vector<uint32_t> build_graph_for_determinism(
     deglib::builder::OptimizationTarget optimization_target,
-    size_t dim, size_t base_count, uint32_t edges_per_vertex,
-    const std::vector<float>& base_data)
-{
+    size_t dim,
+    size_t base_count,
+    uint32_t edges_per_vertex,
+    const std::vector<float>& base_data
+) {
     const deglib::distances::FloatSpace feature_space(dim, deglib::distances::Metric::FP32_L2);
-    deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(base_count), edges_per_vertex,
-                                          std::move(feature_space));
+    deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(base_count), edges_per_vertex, std::move(feature_space));
 
     std::mt19937 rng(1337);
     const uint8_t extend_k = static_cast<uint8_t>(edges_per_vertex);
@@ -526,15 +533,14 @@ inline static std::vector<uint32_t> build_graph_for_determinism(
     const uint32_t swap_tries = 0;
     const uint32_t additional_swap_tries = 0;
 
-    deglib::builder::EvenRegularGraphBuilder builder(graph, rng, optimization_target,
-                                                     extend_k, extend_eps, improve_k, improve_eps,
-                                                     max_path_length, swap_tries, additional_swap_tries);
+    deglib::builder::EvenRegularGraphBuilder builder(
+        graph, rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, swap_tries, additional_swap_tries
+    );
     builder.setThreadCount(1);
 
     const size_t feature_bytes = dim * sizeof(float);
     const std::byte* base_bytes = reinterpret_cast<const std::byte*>(base_data.data());
-    for (size_t i = 0; i < base_count; ++i)
-    {
+    for (size_t i = 0; i < base_count; ++i) {
         const std::byte* ptr = base_bytes + i * feature_bytes;
         std::vector<std::byte> feat_vec(ptr, ptr + feature_bytes);
         builder.addEntry(static_cast<uint32_t>(i), std::move(feat_vec));
@@ -545,11 +551,9 @@ inline static std::vector<uint32_t> build_graph_for_determinism(
 
     std::vector<uint32_t> neighbors;
     neighbors.reserve(base_count * edges_per_vertex);
-    for (uint32_t v = 0; v < base_count; ++v)
-    {
+    for (uint32_t v = 0; v < base_count; ++v) {
         const uint32_t* nb = graph.getNeighborIndices(v);
-        for (uint32_t e = 0; e < edges_per_vertex; ++e)
-        {
+        for (uint32_t e = 0; e < edges_per_vertex; ++e) {
             neighbors.push_back(nb[e]);
         }
     }
@@ -561,13 +565,18 @@ inline static std::vector<uint32_t> build_graph_for_determinism(
 // generation and groundtruth for a given metric, variant, and optimization target.
 // ---------------------------------------------------------------------------
 
-inline static void run_builder_integration_test(const char* name, deglib::distances::Metric metric, double min_recall,
-                                                size_t dim, size_t base_count, size_t query_count, size_t num_clusters,
-                                                std::optional<deglib::distances::DistanceVariant> dist_variant,
-                                                deglib::builder::OptimizationTarget optimization_target)
-{
-    if (metric.get_data_type() == deglib::distances::MetricDataType::Uint8)
-    {
+inline static void run_builder_integration_test(
+    const char* name,
+    deglib::distances::Metric metric,
+    double min_recall,
+    size_t dim,
+    size_t base_count,
+    size_t query_count,
+    size_t num_clusters,
+    std::optional<deglib::distances::DistanceVariant> dist_variant,
+    deglib::builder::OptimizationTarget optimization_target
+) {
+    if (metric.get_data_type() == deglib::distances::MetricDataType::Uint8) {
         // uint8 metric
         std::vector<uint8_t> base_data;
         std::vector<uint8_t> query_data;
@@ -575,12 +584,10 @@ inline static void run_builder_integration_test(const char* name, deglib::distan
 
         auto gt_data = compute_groundtruth_l2_uint8(base_data, base_count, query_data, query_count, dim, 10);
 
-        run_integration_test(name, metric, min_recall,
-                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                             dist_variant, optimization_target);
-    }
-    else if (metric == deglib::distances::Metric::FP16_InnerProduct)
-    {
+        run_integration_test(
+            name, metric, min_recall, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data, dist_variant, optimization_target
+        );
+    } else if (metric == deglib::distances::Metric::FP16_InnerProduct) {
         // FP16 metric
         std::vector<uint16_t> base_data;
         std::vector<uint16_t> query_data;
@@ -588,12 +595,10 @@ inline static void run_builder_integration_test(const char* name, deglib::distan
 
         auto gt_data = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, 10);
 
-        run_integration_test(name, metric, min_recall,
-                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                             dist_variant, optimization_target);
-    }
-    else if (metric == deglib::distances::Metric::EVP_InnerProduct)
-    {
+        run_integration_test(
+            name, metric, min_recall, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data, dist_variant, optimization_target
+        );
+    } else if (metric == deglib::distances::Metric::EVP_InnerProduct) {
         // EVP metric
         std::vector<std::byte> base_data;
         std::vector<std::byte> query_data;
@@ -601,30 +606,25 @@ inline static void run_builder_integration_test(const char* name, deglib::distan
 
         auto gt_data = compute_groundtruth_evp(base_data, base_count, query_data, query_count, dim, 10);
 
-        run_integration_test(name, metric, min_recall,
-                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                             dist_variant, optimization_target);
-    }
-    else
-    {
+        run_integration_test(
+            name, metric, min_recall, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data, dist_variant, optimization_target
+        );
+    } else {
         // float metric (L2 or InnerProduct)
         std::vector<float> base_data;
         std::vector<float> query_data;
         generate_synthetic_clustered_dataset(base_count, dim, base_data, query_data, query_count, num_clusters);
 
         std::vector<std::vector<uint32_t>> gt_data;
-        if (metric == deglib::distances::Metric::FP32_InnerProduct)
-        {
+        if (metric == deglib::distances::Metric::FP32_InnerProduct) {
             gt_data = compute_groundtruth_innerproduct(base_data, base_count, query_data, query_count, dim, 10);
-        }
-        else
-        {
+        } else {
             gt_data = compute_groundtruth_l2(base_data, base_count, query_data, query_count, dim, 10);
         }
 
-        run_integration_test(name, metric, min_recall,
-                             base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-                             dist_variant, optimization_target);
+        run_integration_test(
+            name, metric, min_recall, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data, dist_variant, optimization_target
+        );
     }
 }
 
@@ -635,18 +635,26 @@ inline static void run_builder_integration_test(const char* name, deglib::distan
 // optimization_target: controls the graph build strategy (LowLID, HighLID, StreamingData).
 // ---------------------------------------------------------------------------
 
-inline static void run_regression_test(const char* name, deglib::distances::Metric metric, double min_qps, double max_build_secs,
-                                double min_recall, const void* base_data,
-                                const void* query_data, size_t base_count, size_t query_count,
-                                size_t dim, const std::vector<std::vector<uint32_t>>& gt_data,
-                                std::optional<deglib::distances::DistanceVariant> dist_variant = std::nullopt,
-                                size_t num_runs = 5,
-                                deglib::builder::OptimizationTarget optimization_target = deglib::builder::OptimizationTarget::LowLID,
-                                uint32_t edges_per_vertex = 32,
-                                uint8_t extend_k = 0,
-                                float extend_eps = 0.1f,
-                                uint32_t thread_count = 1)
-{
+inline static void run_regression_test(
+    const char* name,
+    deglib::distances::Metric metric,
+    double min_qps,
+    double max_build_secs,
+    double min_recall,
+    const void* base_data,
+    const void* query_data,
+    size_t base_count,
+    size_t query_count,
+    size_t dim,
+    const std::vector<std::vector<uint32_t>>& gt_data,
+    std::optional<deglib::distances::DistanceVariant> dist_variant = std::nullopt,
+    size_t num_runs = 5,
+    deglib::builder::OptimizationTarget optimization_target = deglib::builder::OptimizationTarget::LowLID,
+    uint32_t edges_per_vertex = 32,
+    uint8_t extend_k = 0,
+    float extend_eps = 0.1f,
+    uint32_t thread_count = 1
+) {
     const uint32_t search_k = 10;
     const float search_eps = 0.05f;
 
@@ -658,24 +666,22 @@ inline static void run_regression_test(const char* name, deglib::distances::Metr
     const uint32_t additional_swap_tries = 0;
 
     // Build DEG Graph using the specified metric feature space
-    const deglib::distances::FloatSpace feature_space = dist_variant.has_value()
-        ? deglib::distances::FloatSpace(dim, metric, dist_variant.value())
-        : deglib::distances::FloatSpace(dim, metric);
+    const deglib::distances::FloatSpace feature_space =
+        dist_variant.has_value() ? deglib::distances::FloatSpace(dim, metric, dist_variant.value()) : deglib::distances::FloatSpace(dim, metric);
 
     const size_t feature_bytes = feature_space.get_data_size();
 
-    deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(base_count), edges_per_vertex,
-                                          std::move(feature_space));
+    deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(base_count), edges_per_vertex, std::move(feature_space));
 
     std::mt19937 rng(1337);
-    deglib::builder::EvenRegularGraphBuilder builder(graph, rng, optimization_target, extend_k, extend_eps, improve_k,
-                                                     improve_eps, max_path_length, swap_tries, additional_swap_tries);
+    deglib::builder::EvenRegularGraphBuilder builder(
+        graph, rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, swap_tries, additional_swap_tries
+    );
     builder.setThreadCount(thread_count);
     auto t_build_start = std::chrono::high_resolution_clock::now();
 
     const std::byte* base_bytes = reinterpret_cast<const std::byte*>(base_data);
-    for (size_t i = 0; i < base_count; ++i)
-    {
+    for (size_t i = 0; i < base_count; ++i) {
         const std::byte* ptr = base_bytes + i * feature_bytes;
         std::vector<std::byte> feat_vec(ptr, ptr + feature_bytes);
         builder.addEntry(static_cast<uint32_t>(i), std::move(feat_vec));
@@ -690,33 +696,27 @@ inline static void run_regression_test(const char* name, deglib::distances::Metr
     auto entry_vertex_indices = graph.getEntryVertexIndices();
     const std::byte* query_bytes = reinterpret_cast<const std::byte*>(query_data);
 
-    auto run_search = [&]() -> std::pair<double, double>
-    {
+    auto run_search = [&]() -> std::pair<double, double> {
         size_t total_correct = 0;
         auto t_search_start = std::chrono::high_resolution_clock::now();
-        for (size_t q = 0; q < query_count; ++q)
-        {
+        for (size_t q = 0; q < query_count; ++q) {
             const std::byte* q_ptr = query_bytes + q * feature_bytes;
             std::span<const float> q_span(reinterpret_cast<const float*>(q_ptr), dim);
             auto result = graph.search(q_span, search_k, search_eps, nullptr, 0);
 
             std::unordered_set<uint32_t> gt_set;
-            if (!gt_data.empty() && q < gt_data.size())
-            {
+            if (!gt_data.empty() && q < gt_data.size()) {
                 size_t eval_k = std::min(static_cast<size_t>(search_k), gt_data[q].size());
-                for (size_t i = 0; i < eval_k; ++i)
-                {
+                for (size_t i = 0; i < eval_k; ++i) {
                     gt_set.insert(gt_data[q][i]);
                 }
             }
 
-            while (!result.empty())
-            {
+            while (!result.empty()) {
                 auto top_item = result.top();
                 result.pop();
                 uint32_t ext_label = graph.getExternalLabel(top_item.getIdentifier());
-                if (gt_set.count(ext_label))
-                {
+                if (gt_set.count(ext_label)) {
                     total_correct++;
                 }
             }
@@ -736,8 +736,7 @@ inline static void run_regression_test(const char* name, deglib::distances::Metr
     // reducing QPS noise from OS jitter and CPU power-state transitions.
     double total_qps = 0.0;
     double total_recall = 0.0;
-    for (size_t r = 0; r < num_runs; ++r)
-    {
+    for (size_t r = 0; r < num_runs; ++r) {
         auto [qps, recall] = run_search();
         total_qps += qps;
         total_recall += recall;
@@ -768,8 +767,8 @@ inline void run_multithreaded_search_benchmark(
     float search_eps,
     const std::vector<std::vector<uint32_t>>& gt_data,
     const std::vector<uint32_t>& thread_counts = {1, 2, 4, 8},
-    size_t num_runs = 50)
-{
+    size_t num_runs = 50
+) {
     const size_t feature_bytes = dim * sizeof(float);
     const std::byte* query_bytes = reinterpret_cast<const std::byte*>(query_data.data());
 
@@ -777,19 +776,16 @@ inline void run_multithreaded_search_benchmark(
 
     double baseline_qps = 0.0;
 
-    for (uint32_t num_threads : thread_counts)
-    {
+    for (uint32_t num_threads : thread_counts) {
         // Warmup
         {
             std::vector<std::thread> warmup_threads;
             warmup_threads.reserve(num_threads);
-            for (uint32_t t = 0; t < num_threads; ++t)
-            {
+            for (uint32_t t = 0; t < num_threads; ++t) {
                 warmup_threads.emplace_back([&, t]() {
                     size_t q_start = (t * query_count) / num_threads;
                     size_t q_end = ((t + 1) * query_count) / num_threads;
-                    for (size_t q = q_start; q < q_end; ++q)
-                    {
+                    for (size_t q = q_start; q < q_end; ++q) {
                         const std::byte* q_ptr = query_bytes + q * feature_bytes;
                         std::span<const float> q_span(reinterpret_cast<const float*>(q_ptr), dim);
                         auto result = graph.search(q_span, search_k, search_eps, nullptr, 0);
@@ -806,40 +802,32 @@ inline void run_multithreaded_search_benchmark(
 
         auto t_start = std::chrono::high_resolution_clock::now();
 
-        for (uint32_t t = 0; t < num_threads; ++t)
-        {
+        for (uint32_t t = 0; t < num_threads; ++t) {
             workers.emplace_back([&, t]() {
                 size_t local_correct = 0;
                 size_t q_start = (t * query_count) / num_threads;
                 size_t q_end = ((t + 1) * query_count) / num_threads;
 
-                for (size_t r = 0; r < num_runs; ++r)
-                {
-                    for (size_t q = q_start; q < q_end; ++q)
-                    {
+                for (size_t r = 0; r < num_runs; ++r) {
+                    for (size_t q = q_start; q < q_end; ++q) {
                         const std::byte* q_ptr = query_bytes + q * feature_bytes;
                         std::span<const float> q_span(reinterpret_cast<const float*>(q_ptr), dim);
                         auto result = graph.search(q_span, search_k, search_eps, nullptr, 0);
 
-                        if (r == 0)
-                        {
+                        if (r == 0) {
                             std::unordered_set<uint32_t> gt_set;
-                            if (!gt_data.empty() && q < gt_data.size())
-                            {
+                            if (!gt_data.empty() && q < gt_data.size()) {
                                 size_t eval_k = std::min(static_cast<size_t>(search_k), gt_data[q].size());
-                                for (size_t i = 0; i < eval_k; ++i)
-                                {
+                                for (size_t i = 0; i < eval_k; ++i) {
                                     gt_set.insert(gt_data[q][i]);
                                 }
                             }
 
-                            while (!result.empty())
-                            {
+                            while (!result.empty()) {
                                 auto top_item = result.top();
                                 result.pop();
                                 uint32_t ext_label = graph.getExternalLabel(top_item.getIdentifier());
-                                if (gt_set.count(ext_label))
-                                {
+                                if (gt_set.count(ext_label)) {
                                     local_correct++;
                                 }
                             }
@@ -851,8 +839,7 @@ inline void run_multithreaded_search_benchmark(
             });
         }
 
-        for (auto& worker : workers)
-        {
+        for (auto& worker : workers) {
             worker.join();
         }
 
@@ -862,21 +849,14 @@ inline void run_multithreaded_search_benchmark(
         double avg_qps = static_cast<double>(total_queries) / duration_secs;
         double avg_recall = static_cast<double>(total_correct.load()) / static_cast<double>(query_count * search_k);
 
-        if (num_threads == 1 || baseline_qps == 0.0)
-        {
+        if (num_threads == 1 || baseline_qps == 0.0) {
             baseline_qps = avg_qps;
-            std::cout << "  Threads: " << num_threads
-                      << " | QPS: " << std::fixed << std::setprecision(1) << avg_qps
-                      << " | Recall: " << std::setprecision(3) << avg_recall
-                      << " | Speedup: 1.00x (baseline)" << std::endl;
-        }
-        else
-        {
+            std::cout << "  Threads: " << num_threads << " | QPS: " << std::fixed << std::setprecision(1) << avg_qps << " | Recall: " << std::setprecision(3)
+                      << avg_recall << " | Speedup: 1.00x (baseline)" << std::endl;
+        } else {
             double speedup = avg_qps / baseline_qps;
-            std::cout << "  Threads: " << num_threads
-                      << " | QPS: " << std::fixed << std::setprecision(1) << avg_qps
-                      << " | Recall: " << std::setprecision(3) << avg_recall
-                      << " | Speedup: " << std::setprecision(2) << speedup << "x" << std::endl;
+            std::cout << "  Threads: " << num_threads << " | QPS: " << std::fixed << std::setprecision(1) << avg_qps << " | Recall: " << std::setprecision(3)
+                      << avg_recall << " | Speedup: " << std::setprecision(2) << speedup << "x" << std::endl;
         }
 
         EXPECT_GE(avg_recall + 1e-5, 0.85);
@@ -899,14 +879,10 @@ inline static uint64_t fnv1a_64(const void* data, size_t bytes) {
 }
 
 // Compute checksum of a float vector
-inline static uint64_t float_vector_checksum(const std::vector<float>& vec) {
-    return fnv1a_64(vec.data(), vec.size() * sizeof(float));
-}
+inline static uint64_t float_vector_checksum(const std::vector<float>& vec) { return fnv1a_64(vec.data(), vec.size() * sizeof(float)); }
 
 // Compute checksum of a byte vector
-inline static uint64_t byte_vector_checksum(const std::vector<std::byte>& vec) {
-    return fnv1a_64(vec.data(), vec.size());
-}
+inline static uint64_t byte_vector_checksum(const std::vector<std::byte>& vec) { return fnv1a_64(vec.data(), vec.size()); }
 
 // Compute checksum of groundtruth 2D vector
 inline static uint64_t groundtruth_checksum(const std::vector<std::vector<uint32_t>>& gt) {

@@ -2,12 +2,12 @@
 //
 // Covers: mips_l2_transform, mips_l2_transform_query
 
+#include "deglib/optimization/transform.h"
+#include "gtest/gtest.h"
+
 #include <cmath>
 #include <cstdint>
 #include <vector>
-
-#include "deglib/optimization/transform.h"
-#include "gtest/gtest.h"
 
 TEST(TransformTest, MipsL2TransformBasic) {
     const size_t count = 3;
@@ -54,10 +54,7 @@ TEST(TransformTest, MipsL2TransformBasic) {
 TEST(TransformTest, MipsL2TransformQueryPadsZero) {
     const size_t count = 2;
     const size_t dim = 3;
-    std::vector<float> input = {
-        1.0f, 2.0f, 3.0f,
-        4.0f, 5.0f, 6.0f
-    };
+    std::vector<float> input = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
     std::vector<float> output(count * (dim + 1));
 
     deglib::optimization::mips_l2_transform_query(input.data(), count, dim, output.data());
@@ -78,15 +75,8 @@ TEST(TransformTest, MipsL2TransformDistanceEquivalence) {
     const size_t db_count = 3;
     const size_t query_count = 2;
     const size_t dim = 4;
-    std::vector<float> db_input = {
-        1.0f, 0.5f, -0.2f, 0.8f,
-        0.0f, 1.2f,  0.5f, 0.1f,
-        -0.5f, 0.2f, 1.0f, 0.0f
-    };
-    std::vector<float> query_input = {
-        0.5f, -0.3f, 0.8f, 0.1f,
-        1.2f,  0.0f, 0.0f, 0.4f
-    };
+    std::vector<float> db_input = {1.0f, 0.5f, -0.2f, 0.8f, 0.0f, 1.2f, 0.5f, 0.1f, -0.5f, 0.2f, 1.0f, 0.0f};
+    std::vector<float> query_input = {0.5f, -0.3f, 0.8f, 0.1f, 1.2f, 0.0f, 0.0f, 0.4f};
 
     std::vector<float> db_output(db_count * (dim + 1));
     std::vector<float> query_output(query_count * (dim + 1));
@@ -126,10 +116,7 @@ TEST(TransformTest, MipsL2TransformDistanceEquivalence) {
 TEST(TransformTest, MipsL2TransformVectorOverloads) {
     const size_t count = 2;
     const size_t dim = 2;
-    std::vector<float> input = {
-        3.0f, 4.0f,
-        0.0f, 0.0f
-    };
+    std::vector<float> input = {3.0f, 4.0f, 0.0f, 0.0f};
 
     auto [output, max_norm] = deglib::optimization::mips_l2_transform(input, count, dim);
     EXPECT_NEAR(max_norm, 5.0f, 1e-5f);

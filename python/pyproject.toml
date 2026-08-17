@@ -55,3 +55,12 @@ testpaths = ["tests"]
 [tool.cibuildwheel]
 test-command = "pytest {project}"
 test-extras = ["test"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+

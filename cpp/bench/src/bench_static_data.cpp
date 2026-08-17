@@ -1,3 +1,12 @@
+#include "benchmark.h"
+#include "build.h"
+#include "dataset.h"
+#include "file_io.h"
+#include "logging.h"
+#include "stats.h"
+#include "stopwatch.h"
+
+#include <deglib/deglib.h>
 #include <fmt/core.h>
 #include <fmt/format.h>
 
@@ -8,15 +17,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-
-#include "benchmark.h"
-#include "build.h"
-#include "dataset.h"
-#include <deglib/deglib.h>
-#include "file_io.h"
-#include "logging.h"
-#include "stats.h"
-#include "stopwatch.h"
 
 using namespace deglib::benchmark;
 
@@ -62,10 +62,18 @@ static std::string build_graph_filename(const Dataset& ds, const Config& cg, uin
     std::string metric_str = ds.info().metric.to_string();
     std::string lid_str;
     switch (cg.lid) {
-        case deglib::builder::OptimizationTarget::HighLID: lid_str = "HighLID"; break;
-        case deglib::builder::OptimizationTarget::LowLID: lid_str = "LowLID"; break;
-        case deglib::builder::OptimizationTarget::StreamingData: lid_str = "StreamingData"; break;
-        default: lid_str = "UnknownLID"; break;
+        case deglib::builder::OptimizationTarget::HighLID:
+            lid_str = "HighLID";
+            break;
+        case deglib::builder::OptimizationTarget::LowLID:
+            lid_str = "LowLID";
+            break;
+        case deglib::builder::OptimizationTarget::StreamingData:
+            lid_str = "StreamingData";
+            break;
+        default:
+            lid_str = "UnknownLID";
+            break;
     }
     return (ds.dataset_dir() / "deg" / fmt::format("{}D_{}_K{}_AddK{}Eps{:.1f}_{}.deg", dims, metric_str, cg.k, cg.k_ext, cg.eps_ext, lid_str)).string();
 }
@@ -102,7 +110,13 @@ static deglib::cpu::InstructionSet parse_instruction_set(const std::string& str)
     return deglib::cpu::InstructionSet::Auto;
 }
 
-void run_static_benchmark(const DatasetName& ds_name, const std::filesystem::path& data_path, bool force_rebuild, deglib::cpu::InstructionSet instruction, uint32_t build_threads) {
+void run_static_benchmark(
+    const DatasetName& ds_name,
+    const std::filesystem::path& data_path,
+    bool force_rebuild,
+    deglib::cpu::InstructionSet instruction,
+    uint32_t build_threads
+) {
     Dataset ds(ds_name, data_path);
     auto config = get_dataset_config(ds_name);
     config.build_threads = build_threads;
@@ -132,20 +146,10 @@ void run_static_benchmark(const DatasetName& ds_name, const std::filesystem::pat
     if (!std::filesystem::exists(graph_path) || force_rebuild) {
         log("\n=== Building Graph ===\n");
         log("Output graph: {}\n", graph_path);
-        create_graph(base_repository,
-                     DataStreamType::AddAll,
-                     graph_path,
-                     ds.info().metric,
-                     config.lid,
-                     config.k,
-                     config.k_ext,
-                     config.eps_ext,
-                     0, 0, 0,
-                     config.build_threads,
-                     true,
-                     ds.info().scale,
-                     false,
-                     instruction);
+        create_graph(
+            base_repository, DataStreamType::AddAll, graph_path, ds.info().metric, config.lid, config.k, config.k_ext, config.eps_ext, 0, 0, 0,
+            config.build_threads, true, ds.info().scale, false, instruction
+        );
     } else {
         log("Graph already exists: {}\n", graph_path);
     }
@@ -162,31 +166,19 @@ void run_static_benchmark(const DatasetName& ds_name, const std::filesystem::pat
         log("\n--- ANNS Test (k={}) ---\n", config.anns_k);
         {
             auto ground_truth = ds.load_groundtruth(config.anns_k, false);
-            test_graph_anns(graph,
-                            query_repository,
-                            ground_truth,
-                            config.anns_repeat,
-                            config.anns_threads,
-                            config.anns_k,
-                            config.eps_parameter,
-                            nullptr,
-                            linear_baseline_us);
+            test_graph_anns(
+                graph, query_repository, ground_truth, config.anns_repeat, config.anns_threads, config.anns_k, config.eps_parameter, nullptr, linear_baseline_us
+            );
         }
 
         log("\n--- Exploration Test (k={}) ---\n", config.explore_k);
         {
             auto entry_vertices = ds.load_explore_entry_vertices();
             auto explore_gt = ds.load_explore_groundtruth(config.explore_k);
-            test_graph_explore(graph,
-                               entry_vertices,
-                               explore_gt,
-                               true,
-                               config.explore_repeat,
-                               config.explore_k,
-                               config.explore_threads,
-                               nullptr,
-                               ds.info().explore_depth,
-                               linear_baseline_us);
+            test_graph_explore(
+                graph, entry_vertices, explore_gt, true, config.explore_repeat, config.explore_k, config.explore_threads, nullptr, ds.info().explore_depth,
+                linear_baseline_us
+            );
         }
     } else {
         log("ERROR: Graph file not found: {}\n", graph_path);

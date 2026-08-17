@@ -72,13 +72,9 @@ inline void fvecs_write(const char* fname, uint32_t d, size_t n, const float* v)
 /**
  * Check if a file or directory exists.
  */
-inline bool file_exists(const std::string& path) {
-    return std::filesystem::exists(path);
-}
+inline bool file_exists(const std::string& path) { return std::filesystem::exists(path); }
 
-inline bool file_exists(const std::filesystem::path& path) {
-    return std::filesystem::exists(path);
-}
+inline bool file_exists(const std::filesystem::path& path) { return std::filesystem::exists(path); }
 
 /**
  * Ensure a directory exists, creating it if necessary.
@@ -111,9 +107,7 @@ inline bool delete_file(const std::string& path) {
     return true;
 }
 
-inline bool delete_file(const std::filesystem::path& path) {
-    return delete_file(path.string());
-}
+inline bool delete_file(const std::filesystem::path& path) { return delete_file(path.string()); }
 
 /**
  * Rename/move a file.
@@ -133,9 +127,7 @@ inline bool rename_file(const std::string& from, const std::string& to) {
     return true;
 }
 
-inline bool rename_file(const std::filesystem::path& from, const std::filesystem::path& to) {
-    return rename_file(from.string(), to.string());
-}
+inline bool rename_file(const std::filesystem::path& from, const std::filesystem::path& to) { return rename_file(from.string(), to.string()); }
 
 /**
  * Move a file from source to destination, with optional renaming.

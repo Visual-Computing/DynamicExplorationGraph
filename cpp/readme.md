@@ -157,7 +157,16 @@ ctest --preset linux-gcc-avx2-release --output-on-failure
 ctest --preset macos-clang-avx2-release --output-on-failure
 ```
 
-### 4. Run Benchmarks
+### 4. Code Formatting
+
+Format all C++ source files using `clang-format` according to the repository's root `.clang-format` rules:
+
+```bash
+# Format all C++ files
+clang-format -i $(git ls-files '*.cpp' '*.h')
+```
+
+### 5. Run Benchmarks
 
 Benchmark executables are generated in the build directory (`build/<preset>/bench/`):
 

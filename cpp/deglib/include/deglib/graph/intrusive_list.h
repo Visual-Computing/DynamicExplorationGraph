@@ -7,7 +7,7 @@ namespace deglib::graph {
 /*
 Usage:
 
-``` 
+```
 struct Entry {
     Entry* next_; // list hooks
     Entry* prev_; // list hooks
@@ -23,9 +23,8 @@ Make sure entries added to the list have a stable address.
 Implementation adapted from
 https://github.com/facebookexperimental/libunifex/blob/main/include/unifex/detail/intrusive_list.hpp
  */
-template <class T, T* T::*Next, T* T::*Prev>
-class IntrusiveList
-{
+template <class T, T* T::* Next, T* T::* Prev>
+class IntrusiveList {
   private:
     T* head_{};
     T* tail_{};
@@ -35,10 +34,7 @@ class IntrusiveList
 
     IntrusiveList(const IntrusiveList&) = delete;
 
-    IntrusiveList(IntrusiveList&& other) noexcept
-        : head_(std::exchange(other.head_, nullptr)), tail_(std::exchange(other.tail_, nullptr))
-    {
-    }
+    IntrusiveList(IntrusiveList&& other) noexcept : head_(std::exchange(other.head_, nullptr)), tail_(std::exchange(other.tail_, nullptr)) {}
 
     ~IntrusiveList() = default;
 
@@ -47,8 +43,7 @@ class IntrusiveList
 
     [[nodiscard]] bool empty() const noexcept { return head_ == nullptr; }
 
-    void push_back(T* item) noexcept
-    {
+    void push_back(T* item) noexcept {
         item->*Prev = tail_;
         item->*Next = nullptr;
         if (tail_ == nullptr)
@@ -58,8 +53,7 @@ class IntrusiveList
         tail_ = item;
     }
 
-    [[nodiscard]] T* pop_front() noexcept
-    {
+    [[nodiscard]] T* pop_front() noexcept {
         T* item = head_;
         head_ = item->*Next;
         if (head_ != nullptr)

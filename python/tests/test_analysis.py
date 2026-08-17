@@ -10,9 +10,12 @@ def _build_test_graph(samples=50, dims=16, edges_per_vertex=10):
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
     labels = np.arange(samples, dtype=np.uint32) * 10
     graph = deglib.builder.build_from_data(
-        data, labels=labels, edges_per_vertex=edges_per_vertex,
+        data,
+        labels=labels,
+        edges_per_vertex=edges_per_vertex,
         optimization_target=deglib.builder.OptimizationTarget.LowLID,
-        extend_k=10, extend_eps=0.001
+        extend_k=10,
+        extend_eps=0.001,
     )
     return graph, data
 
@@ -37,11 +40,20 @@ def test_analyze_graph_returns_dict():
     stats = deglib.analysis.analyze_graph(graph)
 
     expected_keys = {
-        "vertex_count", "edge_count", "feature_dims", "edges_per_vertex",
-        "avg_out_degree", "min_out_degree", "max_out_degree",
-        "avg_in_degree", "min_in_degree", "max_in_degree",
-        "source_vertices", "search_reachability", "exploration_reachability",
-        "memory_bytes"
+        "vertex_count",
+        "edge_count",
+        "feature_dims",
+        "edges_per_vertex",
+        "avg_out_degree",
+        "min_out_degree",
+        "max_out_degree",
+        "avg_in_degree",
+        "min_in_degree",
+        "max_in_degree",
+        "source_vertices",
+        "search_reachability",
+        "exploration_reachability",
+        "memory_bytes",
     }
     assert set(stats.keys()) == expected_keys
 

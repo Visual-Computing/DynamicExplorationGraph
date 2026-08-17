@@ -73,10 +73,13 @@ class TestRerankUnit:
         assert result[0, 0] == 0
 
     def test_uses_queries_as_targets_when_base_none(self):
-        queries = np.array([
-            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        ], dtype=np.float32)
+        queries = np.array(
+            [
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
         candidates = np.array([[0, 1], [0, 1]], dtype=np.uint32)
 
         result = self.space.rerank(queries, candidates, k_top=2)
@@ -101,14 +104,20 @@ class TestRerankUnit:
         assert result[0, 1] == np.iinfo(np.uint32).max  # unfilled candidate is padded with uint32 max
 
     def test_multiple_queries(self):
-        queries = np.array([
-            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        ], dtype=np.float32)
-        base = np.array([
-            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        ], dtype=np.float32)
+        queries = np.array(
+            [
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
+        base = np.array(
+            [
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
         candidates = np.array([[0, 1], [0, 1]], dtype=np.uint32)
 
         result = self.space.rerank(queries, candidates, base, k_top=2)
@@ -149,18 +158,24 @@ class TestRerankUnit:
         assert distances.shape == (1, 3)
         # Verify distances are correct and sorted ascending
         np.testing.assert_allclose(distances[0, 0], 0.25, rtol=1e-5)  # idx 2
-        np.testing.assert_allclose(distances[0, 1], 1.0, rtol=1e-5)   # idx 0
-        np.testing.assert_allclose(distances[0, 2], 9.0, rtol=1e-5)   # idx 1
+        np.testing.assert_allclose(distances[0, 1], 1.0, rtol=1e-5)  # idx 0
+        np.testing.assert_allclose(distances[0, 2], 9.0, rtol=1e-5)  # idx 1
 
     def test_multi_threaded(self):
-        queries = np.array([
-            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        ], dtype=np.float32)
-        base = np.array([
-            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        ], dtype=np.float32)
+        queries = np.array(
+            [
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
+        base = np.array(
+            [
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
         candidates = np.array([[0, 1], [0, 1]], dtype=np.uint32)
 
         result = self.space.rerank(queries, candidates, base, k_top=2, num_threads=4)

@@ -4,11 +4,11 @@
 // dimensions. HEAD API uses InnerProductFloat, InnerProductFloat_AVX512<Mode>,
 // InnerProductFloat_AVX2<Mode> instead of InnerProductFloat4Ext/etc.
 
-#include <chrono>
-
-#include "gtest/gtest.h"
 #include "deglib/distance/fp32_ip.h"
 #include "deglib/distances.h"
+#include "gtest/gtest.h"
+
+#include <chrono>
 
 namespace {
 
@@ -67,8 +67,7 @@ TEST(InnerProductFloat, MatchesNaive) {
         auto a = make_float_vec(dim);
         auto b = make_float_vec(dim, dim);
         float d = InnerProductFloat::compare(a.data(), b.data(), &dim);
-        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f)
-            << "dim=" << dim;
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "dim=" << dim;
     }
 }
 
@@ -78,8 +77,7 @@ TEST(InnerProductFloat, NonAlignedDims) {
         auto a = make_float_vec(dim);
         auto b = make_float_vec(dim, dim + 1);
         float d = InnerProductFloat::compare(a.data(), b.data(), &dim);
-        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f)
-            << "dim=" << dim;
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "dim=" << dim;
     }
 }
 
@@ -108,15 +106,15 @@ TEST(InnerProductFloat, LargeDimension) {
     EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f);
 }
 
-} // anonymous namespace
+}  // anonymous namespace
 
 #if defined(DEGLIB_X86)
 
 namespace {
 
-using deglib::distances::fp32_ip::InnerProductFloat_AVX512;
-using deglib::distances::fp32_ip::InnerProductFloat_AVX2;
 using deglib::distances::ResidualMode;
+using deglib::distances::fp32_ip::InnerProductFloat_AVX2;
+using deglib::distances::fp32_ip::InnerProductFloat_AVX512;
 
 TEST(InnerProductFloat_AVX512, MatchesNaive_IfSupported) {
     if (!deglib::cpu::has_avx512()) {
@@ -127,8 +125,7 @@ TEST(InnerProductFloat_AVX512, MatchesNaive_IfSupported) {
         auto a = make_float_vec(dim);
         auto b = make_float_vec(dim, dim);
         float d = InnerProductFloat_AVX512<ResidualMode::Full>::compare(a.data(), b.data(), &dim);
-        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f)
-            << "dim=" << dim;
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "dim=" << dim;
     }
 }
 
@@ -141,8 +138,7 @@ TEST(InnerProductFloat_AVX2, MatchesNaive_IfSupported) {
         auto a = make_float_vec(dim);
         auto b = make_float_vec(dim, dim);
         float d = InnerProductFloat_AVX2<ResidualMode::Full>::compare(a.data(), b.data(), &dim);
-        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f)
-            << "dim=" << dim;
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "dim=" << dim;
     }
 }
 
@@ -152,17 +148,14 @@ TEST(InnerProductFloat_SelectDist, ReturnsValidDistance) {
         auto dist_variant = deglib::distances::fp32_ip::select_dist(dim);
         auto a = make_float_vec(dim);
         auto b = make_float_vec(dim, dim);
-        float d = std::visit([&](auto&& dist) {
-            return dist.compare(a.data(), b.data(), &dim);
-        }, dist_variant);
-        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f)
-            << "dim=" << dim;
+        float d = std::visit([&](auto&& dist) { return dist.compare(a.data(), b.data(), &dim); }, dist_variant);
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "dim=" << dim;
     }
 }
 
-} // anonymous namespace
+}  // anonymous namespace
 
-#endif // DEGLIB_X86
+#endif  // DEGLIB_X86
 
 namespace {
 
@@ -187,108 +180,119 @@ TEST(InnerProductFloat_FloatSpace, VariousDims) {
         auto b = make_float_vec(dim, dim + 1);
 
         float d = space.get_dist_func()(a.data(), b.data(), space.get_dist_func_param());
-        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f)
-            << "dim=" << dim;
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "dim=" << dim;
     }
 }
 
 TEST(InnerProductFloat_Batch, MatchesSingleCompare) {
-   std::vector<size_t> dims = {8, 16, 32, 64, 128, 256, 768};
-   std::vector<size_t> counts = {1, 3, 4, 7, 8, 9, 15, 16, 25};
+    std::vector<size_t> dims = {8, 16, 32, 64, 128, 256, 768};
+    std::vector<size_t> counts = {1, 3, 4, 7, 8, 9, 15, 16, 25};
 
-   for (size_t dim : dims) {
-       for (size_t count : counts) {
-           auto q = make_float_vec(dim, 77);
+    for (size_t dim : dims) {
+        for (size_t count : counts) {
+            auto q = make_float_vec(dim, 77);
 
-           std::vector<std::vector<float>> db(count);
-           std::vector<const void*> db_ptrs(count);
-           for (size_t i = 0; i < count; ++i) {
-               db[i] = make_float_vec(dim, static_cast<int>(i * 10 + 1));
-               db_ptrs[i] = db[i].data();
-           }
+            std::vector<std::vector<float>> db(count);
+            std::vector<const void*> db_ptrs(count);
+            for (size_t i = 0; i < count; ++i) {
+                db[i] = make_float_vec(dim, static_cast<int>(i * 10 + 1));
+                db_ptrs[i] = db[i].data();
+            }
 
-           std::vector<float> batch_dists(count, 0.0f);
-           auto dist_variant = deglib::distances::fp32_ip::select_dist(dim);
+            std::vector<float> batch_dists(count, 0.0f);
+            auto dist_variant = deglib::distances::fp32_ip::select_dist(dim);
 
-           std::visit([&](auto&& dist) {
-               using DistType = std::decay_t<decltype(dist)>;
-               DistType::compare_batch(q.data(), db_ptrs.data(), count, &dim, batch_dists.data());
-           }, dist_variant);
+            std::visit(
+                [&](auto&& dist) {
+                    using DistType = std::decay_t<decltype(dist)>;
+                    DistType::compare_batch(q.data(), db_ptrs.data(), count, &dim, batch_dists.data());
+                },
+                dist_variant
+            );
 
-           for (size_t i = 0; i < count; ++i) {
-               float single_dist = std::visit([&](auto&& dist) {
-                   using DistType = std::decay_t<decltype(dist)>;
-                   return DistType::compare(q.data(), db_ptrs[i], &dim);
-               }, dist_variant);
+            for (size_t i = 0; i < count; ++i) {
+                float single_dist = std::visit(
+                    [&](auto&& dist) {
+                        using DistType = std::decay_t<decltype(dist)>;
+                        return DistType::compare(q.data(), db_ptrs[i], &dim);
+                    },
+                    dist_variant
+                );
 
-               EXPECT_NEAR(batch_dists[i], single_dist, 1e-4f)
-                   << "dim=" << dim << ", count=" << count << ", index=" << i;
-           }
-       }
-   }
+                EXPECT_NEAR(batch_dists[i], single_dist, 1e-4f) << "dim=" << dim << ", count=" << count << ", index=" << i;
+            }
+        }
+    }
 }
 
-} // anonymous namespace
+}  // anonymous namespace
 
 // ============================================================================
 // Performance: compare vs compare_batch
 // ============================================================================
 
 TEST(InnerProductFloat_Batch, PerformanceCompareVsBatch) {
-  const size_t dim = 128;
-  const size_t count = 1000;
+    const size_t dim = 128;
+    const size_t count = 1000;
 
-  auto q = make_float_vec(dim, 77);
+    auto q = make_float_vec(dim, 77);
 
-  std::vector<std::vector<float>> db(count);
-  std::vector<const void*> db_ptrs(count);
-  for (size_t i = 0; i < count; ++i) {
-      db[i] = make_float_vec(dim, static_cast<int>(i * 10 + 1));
-      db_ptrs[i] = db[i].data();
-  }
+    std::vector<std::vector<float>> db(count);
+    std::vector<const void*> db_ptrs(count);
+    for (size_t i = 0; i < count; ++i) {
+        db[i] = make_float_vec(dim, static_cast<int>(i * 10 + 1));
+        db_ptrs[i] = db[i].data();
+    }
 
-  std::vector<float> batch_dists(count, 0.0f);
-  auto dist_variant = deglib::distances::fp32_ip::select_dist(dim);
+    std::vector<float> batch_dists(count, 0.0f);
+    auto dist_variant = deglib::distances::fp32_ip::select_dist(dim);
 
-  // Warm up
-  std::visit([&](auto&& dist) {
-      using DistType = std::decay_t<decltype(dist)>;
-      DistType::compare_batch(q.data(), db_ptrs.data(), count, &dim, batch_dists.data());
-  }, dist_variant);
+    // Warm up
+    std::visit(
+        [&](auto&& dist) {
+            using DistType = std::decay_t<decltype(dist)>;
+            DistType::compare_batch(q.data(), db_ptrs.data(), count, &dim, batch_dists.data());
+        },
+        dist_variant
+    );
 
-  // Time single compare loop
-  auto start = std::chrono::high_resolution_clock::now();
-  std::vector<float> single_dists(count, 0.0f);
-  std::visit([&](auto&& dist) {
-      using DistType = std::decay_t<decltype(dist)>;
-      for (size_t i = 0; i < count; ++i) {
-          single_dists[i] = DistType::compare(q.data(), db_ptrs[i], &dim);
-      }
-  }, dist_variant);
-  auto mid = std::chrono::high_resolution_clock::now();
+    // Time single compare loop
+    auto start = std::chrono::high_resolution_clock::now();
+    std::vector<float> single_dists(count, 0.0f);
+    std::visit(
+        [&](auto&& dist) {
+            using DistType = std::decay_t<decltype(dist)>;
+            for (size_t i = 0; i < count; ++i) {
+                single_dists[i] = DistType::compare(q.data(), db_ptrs[i], &dim);
+            }
+        },
+        dist_variant
+    );
+    auto mid = std::chrono::high_resolution_clock::now();
 
-  // Time batch compare
-  std::visit([&](auto&& dist) {
-      using DistType = std::decay_t<decltype(dist)>;
-      DistType::compare_batch(q.data(), db_ptrs.data(), count, &dim, batch_dists.data());
-  }, dist_variant);
-  auto end = std::chrono::high_resolution_clock::now();
+    // Time batch compare
+    std::visit(
+        [&](auto&& dist) {
+            using DistType = std::decay_t<decltype(dist)>;
+            DistType::compare_batch(q.data(), db_ptrs.data(), count, &dim, batch_dists.data());
+        },
+        dist_variant
+    );
+    auto end = std::chrono::high_resolution_clock::now();
 
-  auto single_us = std::chrono::duration_cast<std::chrono::microseconds>(mid - start).count();
-  auto batch_us = std::chrono::duration_cast<std::chrono::microseconds>(end - mid).count();
+    auto single_us = std::chrono::duration_cast<std::chrono::microseconds>(mid - start).count();
+    auto batch_us = std::chrono::duration_cast<std::chrono::microseconds>(end - mid).count();
 
-  std::cout << "  dim=" << dim << ", count=" << count << "\n"
-            << "  single compare: " << single_us << " us\n"
-            << "  batch compare:  " << batch_us << " us\n"
-            << "  speedup:        " << (static_cast<double>(single_us) / batch_us) << "x\n";
+    std::cout << "  dim=" << dim << ", count=" << count << "\n"
+              << "  single compare: " << single_us << " us\n"
+              << "  batch compare:  " << batch_us << " us\n"
+              << "  speedup:        " << (static_cast<double>(single_us) / batch_us) << "x\n";
 
-  // Verify correctness
-  for (size_t i = 0; i < count; ++i) {
-      EXPECT_NEAR(batch_dists[i], single_dists[i], 1e-3f)
-          << "dim=" << dim << ", index=" << i;
-  }
+    // Verify correctness
+    for (size_t i = 0; i < count; ++i) {
+        EXPECT_NEAR(batch_dists[i], single_dists[i], 1e-3f) << "dim=" << dim << ", index=" << i;
+    }
 
-  // Batch should be at least as fast (allowing for noise)
-  EXPECT_LE(batch_us, single_us * 2)
-      << "batch compare should not be significantly slower than single compare";
+    // Batch should be at least as fast (allowing for noise)
+    EXPECT_LE(batch_us, single_us * 2) << "batch compare should not be significantly slower than single compare";
 }

@@ -1,6 +1,7 @@
 """
 We copy the pybind11 include dir and the deglib include dir to ./include to make it available for this package.
 """
+
 import codecs
 import os
 import re
@@ -26,13 +27,13 @@ PLAT_TO_CMAKE = {
 
 def read(rel_path: str):
     here = os.path.abspath(os.path.dirname(os.path.abspath(__file__)))
-    with codecs.open(os.path.join(here, rel_path), 'r') as fp:
+    with codecs.open(os.path.join(here, rel_path), "r") as fp:
         return fp.read()
 
 
 def get_version(rel_path):
     for line in read(rel_path).splitlines():
-        if line.startswith('__version__'):
+        if line.startswith("__version__"):
             delim = '"' if '"' in line else "'"
             return line.split(delim)[1]
     else:
@@ -40,7 +41,7 @@ def get_version(rel_path):
 
 
 class CopyBuildCommand(Command):
-    description = 'Copy necessary build files'
+    description = "Copy necessary build files"
     user_options = []
 
     def initialize_options(self):
@@ -50,10 +51,8 @@ class CopyBuildCommand(Command):
         pass
 
     def run(self):
-        ignore_dirs = shutil.ignore_patterns('external', 'cmake-build*', 'build', 'benchmark', '.venv', '.git*')
-        copy_dirs = [
-            (os.path.join('..', 'cpp'), 'lib')
-        ]
+        ignore_dirs = shutil.ignore_patterns("external", "cmake-build*", "build", "benchmark", ".venv", ".git*")
+        copy_dirs = [(os.path.join("..", "cpp"), "lib")]
 
         for src, dst in copy_dirs:
             print(f"Copying {src} to {dst}")
@@ -63,7 +62,7 @@ class CopyBuildCommand(Command):
 
 class CopySDist(sdist_class):
     def run(self):
-        self.run_command('copy_build_files')
+        self.run_command("copy_build_files")
         super().run()
 
 
@@ -79,8 +78,8 @@ class CMakeExtension(Extension):
 def call_cmake_checked(command, cwd):
     result = subprocess.run(command, cwd=cwd, capture_output=True)
 
-    print('STDOUT: ' + '-'*33 + '\n', result.stdout.decode('utf-8'), '-'*42)
-    print('STDERR: ' + '-'*33 + '\n', result.stderr.decode('utf-8'), '-'*42)
+    print("STDOUT: " + "-" * 33 + "\n", result.stdout.decode("utf-8"), "-" * 42)
+    print("STDERR: " + "-" * 33 + "\n", result.stderr.decode("utf-8"), "-" * 42)
     if result.returncode != 0:
         result.check_returncode()
 
@@ -117,20 +116,18 @@ class CMakeBuild(build_ext):
 
         if os.environ.get("FORCE_AVX2") is not None and os.environ["FORCE_AVX2"] == "1":
             cmake_args.append("-DFORCE_AVX2=ON")
-            print('Enabling FORCE_AVX2')
+            print("Enabling FORCE_AVX2")
 
         # In this example, we pass in the version to C++. You might not need to.
         # cmake_args += [f"-DEXAMPLE_VERSION_INFO={self.distribution.get_version()}"]
 
-        print('self.compiler.compiler_type=', self.compiler.compiler_type)
+        print("self.compiler.compiler_type=", self.compiler.compiler_type)
         if self.compiler.compiler_type == "msvc":
-
             # Single config generators are handled "normally"
             single_config = any(x in cmake_generator for x in {"NMake", "Ninja"})
 
             # CMake allows an arch-in-generator style for backward compatibility
             contains_arch = any(x in cmake_generator for x in {"ARM", "Win64"})
-
 
             # Specify the arch if using MSVC generator, but only if it doesn't
             # contain a backward-compatibility arch spec already in the
@@ -140,11 +137,9 @@ class CMakeBuild(build_ext):
 
             # Multi-config generators have a different way to specify configs
             if not single_config:
-                cmake_args += [
-                    f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_{cfg.upper()}={extdir}"
-                ]
+                cmake_args += [f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_{cfg.upper()}={extdir}"]
                 build_args += ["--config", cfg]
-            print('cmake_args=', cmake_args)
+            print("cmake_args=", cmake_args)
         else:
             # Using Ninja-build since it a) is available as a wheel and b)
             # multi-threads automatically. MSVC would require all variables be
@@ -180,19 +175,18 @@ class CMakeBuild(build_ext):
                 build_args += [f"-j{self.parallel}"]
 
         # Copy cpp/ to python/lib/ first
-        self.run_command('copy_build_files')
+        self.run_command("copy_build_files")
 
         build_temp = Path(self.build_temp) / ext.name
         if not build_temp.exists():
             build_temp.mkdir(parents=True)
 
-        print('python interpreter in setup.py:', sys.executable, sys.version)
-        print('calling cmake')
+        print("python interpreter in setup.py:", sys.executable, sys.version)
+        print("calling cmake")
         call_cmake_checked(
-            ["cmake", ext.sourcedir, '-Dpybind11_DIR={}'.format(pybind11.get_cmake_dir()), *cmake_args],
-            cwd=build_temp
+            ["cmake", ext.sourcedir, "-Dpybind11_DIR={}".format(pybind11.get_cmake_dir()), *cmake_args], cwd=build_temp
         )
-        print('calling cmake --build')
+        print("calling cmake --build")
         call_cmake_checked(["cmake", "--build", ".", *build_args], cwd=build_temp)
 
         # Copy compiled binary extension to target destination (e.g. src/ in inplace mode)
@@ -206,14 +200,13 @@ class CMakeBuild(build_ext):
 
 
 setup(
-    version=get_version(os.path.join('src', 'deglib', '__init__.py')),
+    version=get_version(os.path.join("src", "deglib", "__init__.py")),
     ext_modules=[CMakeExtension("deglib_cpp")],
     cmdclass={
-        'copy_build_files': CopyBuildCommand,
-        'sdist': CopySDist,
-        'build_ext': CMakeBuild,
+        "copy_build_files": CopyBuildCommand,
+        "sdist": CopySDist,
+        "build_ext": CMakeBuild,
     },
-    package_dir={'': 'src'},
-    packages=find_packages(where='src'),
+    package_dir={"": "src"},
+    packages=find_packages(where="src"),
 )
-

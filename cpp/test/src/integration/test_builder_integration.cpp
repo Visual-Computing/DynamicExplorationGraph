@@ -11,8 +11,7 @@
 // Dataset & Graph Determinism
 // ---------------------------------------------------------------------------
 
-TEST(DeglibBuilderIntegration, DatasetBitExactness)
-{
+TEST(DeglibBuilderIntegration, DatasetBitExactness) {
     const size_t dim = 128;
     const size_t base_count = 10000;
     const size_t query_count = 100;
@@ -44,8 +43,7 @@ TEST(DeglibBuilderIntegration, DatasetBitExactness)
     EXPECT_EQ(gt_ip_hash, 0x69f09ac67e0afed5ULL) << "gt_ip checksum mismatch across platforms!";
 }
 
-TEST(DeglibBuilderIntegration, Uint8DatasetBitExactness)
-{
+TEST(DeglibBuilderIntegration, Uint8DatasetBitExactness) {
     const size_t dim = 128;
     const size_t base_count = 10000;
     const size_t query_count = 100;
@@ -70,8 +68,7 @@ TEST(DeglibBuilderIntegration, Uint8DatasetBitExactness)
     EXPECT_EQ(gt_u8_hash, 0x36b390a7cae8797dULL) << "gt_u8 checksum mismatch across platforms!";
 }
 
-TEST(DeglibBuilderIntegration, LowLIDDeterminism)
-{
+TEST(DeglibBuilderIntegration, LowLIDDeterminism) {
     const size_t dim = 64;
     const size_t base_count = 10000;
     const uint32_t edges_per_vertex = 32;
@@ -80,31 +77,23 @@ TEST(DeglibBuilderIntegration, LowLIDDeterminism)
     std::vector<float> query_data;
     generate_synthetic_clustered_dataset(base_count, dim, base_data, query_data, 10, 50);
 
-    auto graph1_neighbors = build_graph_for_determinism(
-        deglib::builder::OptimizationTarget::LowLID, dim, base_count, edges_per_vertex, base_data);
-    auto graph2_neighbors = build_graph_for_determinism(
-        deglib::builder::OptimizationTarget::LowLID, dim, base_count, edges_per_vertex, base_data);
+    auto graph1_neighbors = build_graph_for_determinism(deglib::builder::OptimizationTarget::LowLID, dim, base_count, edges_per_vertex, base_data);
+    auto graph2_neighbors = build_graph_for_determinism(deglib::builder::OptimizationTarget::LowLID, dim, base_count, edges_per_vertex, base_data);
 
-    ASSERT_EQ(graph1_neighbors.size(), graph2_neighbors.size())
-        << "Graph neighbor count mismatch between two builds";
+    ASSERT_EQ(graph1_neighbors.size(), graph2_neighbors.size()) << "Graph neighbor count mismatch between two builds";
 
     size_t mismatch_count = 0;
-    for (size_t i = 0; i < graph1_neighbors.size(); ++i)
-    {
-        if (graph1_neighbors[i] != graph2_neighbors[i])
-            mismatch_count++;
+    for (size_t i = 0; i < graph1_neighbors.size(); ++i) {
+        if (graph1_neighbors[i] != graph2_neighbors[i]) mismatch_count++;
     }
 
     double mismatch_pct = 100.0 * mismatch_count / graph1_neighbors.size();
-    std::cout << "[LowLIDDeterminism] mismatches: " << mismatch_count
-              << " / " << graph1_neighbors.size()
-              << " (" << mismatch_pct << "%)" << std::endl;
+    std::cout << "[LowLIDDeterminism] mismatches: " << mismatch_count << " / " << graph1_neighbors.size() << " (" << mismatch_pct << "%)" << std::endl;
 
     EXPECT_EQ(0u, mismatch_count) << "Graph was not deterministic within the same process";
 }
 
-TEST(DeglibBuilderIntegration, HighLIDDeterminism)
-{
+TEST(DeglibBuilderIntegration, HighLIDDeterminism) {
     const size_t dim = 64;
     const size_t base_count = 10000;
     const uint32_t edges_per_vertex = 32;
@@ -113,31 +102,23 @@ TEST(DeglibBuilderIntegration, HighLIDDeterminism)
     std::vector<float> query_data;
     generate_synthetic_clustered_dataset(base_count, dim, base_data, query_data, 10, 50);
 
-    auto graph1_neighbors = build_graph_for_determinism(
-        deglib::builder::OptimizationTarget::HighLID, dim, base_count, edges_per_vertex, base_data);
-    auto graph2_neighbors = build_graph_for_determinism(
-        deglib::builder::OptimizationTarget::HighLID, dim, base_count, edges_per_vertex, base_data);
+    auto graph1_neighbors = build_graph_for_determinism(deglib::builder::OptimizationTarget::HighLID, dim, base_count, edges_per_vertex, base_data);
+    auto graph2_neighbors = build_graph_for_determinism(deglib::builder::OptimizationTarget::HighLID, dim, base_count, edges_per_vertex, base_data);
 
-    ASSERT_EQ(graph1_neighbors.size(), graph2_neighbors.size())
-        << "Graph neighbor count mismatch between two builds";
+    ASSERT_EQ(graph1_neighbors.size(), graph2_neighbors.size()) << "Graph neighbor count mismatch between two builds";
 
     size_t mismatch_count = 0;
-    for (size_t i = 0; i < graph1_neighbors.size(); ++i)
-    {
-        if (graph1_neighbors[i] != graph2_neighbors[i])
-            mismatch_count++;
+    for (size_t i = 0; i < graph1_neighbors.size(); ++i) {
+        if (graph1_neighbors[i] != graph2_neighbors[i]) mismatch_count++;
     }
 
     double mismatch_pct = 100.0 * mismatch_count / graph1_neighbors.size();
-    std::cout << "[HighLIDDeterminism] mismatches: " << mismatch_count
-              << " / " << graph1_neighbors.size()
-              << " (" << mismatch_pct << "%)" << std::endl;
+    std::cout << "[HighLIDDeterminism] mismatches: " << mismatch_count << " / " << graph1_neighbors.size() << " (" << mismatch_pct << "%)" << std::endl;
 
     EXPECT_EQ(0u, mismatch_count) << "Graph was not deterministic within the same process";
 }
 
-TEST(DeglibBuilderIntegration, StreamingDataDeterminism)
-{
+TEST(DeglibBuilderIntegration, StreamingDataDeterminism) {
     const size_t dim = 64;
     const size_t base_count = 10000;
     const uint32_t edges_per_vertex = 32;
@@ -146,25 +127,18 @@ TEST(DeglibBuilderIntegration, StreamingDataDeterminism)
     std::vector<float> query_data;
     generate_synthetic_clustered_dataset(base_count, dim, base_data, query_data, 10, 50);
 
-    auto graph1_neighbors = build_graph_for_determinism(
-        deglib::builder::OptimizationTarget::StreamingData, dim, base_count, edges_per_vertex, base_data);
-    auto graph2_neighbors = build_graph_for_determinism(
-        deglib::builder::OptimizationTarget::StreamingData, dim, base_count, edges_per_vertex, base_data);
+    auto graph1_neighbors = build_graph_for_determinism(deglib::builder::OptimizationTarget::StreamingData, dim, base_count, edges_per_vertex, base_data);
+    auto graph2_neighbors = build_graph_for_determinism(deglib::builder::OptimizationTarget::StreamingData, dim, base_count, edges_per_vertex, base_data);
 
-    ASSERT_EQ(graph1_neighbors.size(), graph2_neighbors.size())
-        << "Graph neighbor count mismatch between two builds";
+    ASSERT_EQ(graph1_neighbors.size(), graph2_neighbors.size()) << "Graph neighbor count mismatch between two builds";
 
     size_t mismatch_count = 0;
-    for (size_t i = 0; i < graph1_neighbors.size(); ++i)
-    {
-        if (graph1_neighbors[i] != graph2_neighbors[i])
-            mismatch_count++;
+    for (size_t i = 0; i < graph1_neighbors.size(); ++i) {
+        if (graph1_neighbors[i] != graph2_neighbors[i]) mismatch_count++;
     }
 
     double mismatch_pct = 100.0 * mismatch_count / graph1_neighbors.size();
-    std::cout << "[StreamingDataDeterminism] mismatches: " << mismatch_count
-              << " / " << graph1_neighbors.size()
-              << " (" << mismatch_pct << "%)" << std::endl;
+    std::cout << "[StreamingDataDeterminism] mismatches: " << mismatch_count << " / " << graph1_neighbors.size() << " (" << mismatch_pct << "%)" << std::endl;
 
     EXPECT_EQ(0u, mismatch_count) << "Graph was not deterministic within the same process";
 }
@@ -173,165 +147,147 @@ TEST(DeglibBuilderIntegration, StreamingDataDeterminism)
 // L2 Float Metric Builder Tests (10k)
 // ---------------------------------------------------------------------------
 
-TEST(DeglibBuilderIntegration, L2_AVX512)
-{
+TEST(DeglibBuilderIntegration, L2_AVX512) {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
     }
-    run_builder_integration_test("L2_AVX512", deglib::distances::Metric::FP32_L2, 0.96,
-                                 128, 10000, 100, 1000,
-                                 deglib::distances::fp32_l2::L2Float_AVX512<>{},
-                                 deglib::builder::OptimizationTarget::LowLID);
+    run_builder_integration_test(
+        "L2_AVX512", deglib::distances::Metric::FP32_L2, 0.96, 128, 10000, 100, 1000, deglib::distances::fp32_l2::L2Float_AVX512<>{},
+        deglib::builder::OptimizationTarget::LowLID
+    );
 #else
     GTEST_SKIP() << "AVX512 not available on this platform";
 #endif
 }
 
-TEST(DeglibBuilderIntegration, L2_AVX2)
-{
+TEST(DeglibBuilderIntegration, L2_AVX2) {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
     }
-    run_builder_integration_test("L2_AVX2", deglib::distances::Metric::FP32_L2, 0.96,
-                                 128, 10000, 100, 1000,
-                                 deglib::distances::fp32_l2::L2Float_AVX2<>{},
-                                 deglib::builder::OptimizationTarget::LowLID);
+    run_builder_integration_test(
+        "L2_AVX2", deglib::distances::Metric::FP32_L2, 0.96, 128, 10000, 100, 1000, deglib::distances::fp32_l2::L2Float_AVX2<>{},
+        deglib::builder::OptimizationTarget::LowLID
+    );
 #else
     GTEST_SKIP() << "AVX2 not available on this platform";
 #endif
 }
 
-
-TEST(DeglibBuilderIntegration, L2_Scalar)
-{
-    run_builder_integration_test("L2_Scalar", deglib::distances::Metric::FP32_L2, 0.96,
-                                 128, 10000, 100, 1000,
-                                 deglib::distances::fp32_l2::L2Float{},
-                                 deglib::builder::OptimizationTarget::LowLID);
+TEST(DeglibBuilderIntegration, L2_Scalar) {
+    run_builder_integration_test(
+        "L2_Scalar", deglib::distances::Metric::FP32_L2, 0.96, 128, 10000, 100, 1000, deglib::distances::fp32_l2::L2Float{},
+        deglib::builder::OptimizationTarget::LowLID
+    );
 }
 
 // ---------------------------------------------------------------------------
 // InnerProduct Float Metric Builder Tests (10k)
 // ---------------------------------------------------------------------------
 
-TEST(DeglibBuilderIntegration, IP_AVX512)
-{
+TEST(DeglibBuilderIntegration, IP_AVX512) {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
     }
-    run_builder_integration_test("IP_AVX512", deglib::distances::Metric::FP32_InnerProduct, 0.86,
-                                 128, 10000, 100, 1000,
-                                 deglib::distances::fp32_ip::InnerProductFloat_AVX512<>{},
-                                 deglib::builder::OptimizationTarget::LowLID);
+    run_builder_integration_test(
+        "IP_AVX512", deglib::distances::Metric::FP32_InnerProduct, 0.86, 128, 10000, 100, 1000, deglib::distances::fp32_ip::InnerProductFloat_AVX512<>{},
+        deglib::builder::OptimizationTarget::LowLID
+    );
 #else
     GTEST_SKIP() << "AVX512 not available on this platform";
 #endif
 }
 
-TEST(DeglibBuilderIntegration, IP_AVX2)
-{
+TEST(DeglibBuilderIntegration, IP_AVX2) {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
     }
-    run_builder_integration_test("IP_AVX2", deglib::distances::Metric::FP32_InnerProduct, 0.86,
-                                 128, 10000, 100, 1000,
-                                 deglib::distances::fp32_ip::InnerProductFloat_AVX2<>{},
-                                 deglib::builder::OptimizationTarget::LowLID);
+    run_builder_integration_test(
+        "IP_AVX2", deglib::distances::Metric::FP32_InnerProduct, 0.86, 128, 10000, 100, 1000, deglib::distances::fp32_ip::InnerProductFloat_AVX2<>{},
+        deglib::builder::OptimizationTarget::LowLID
+    );
 #else
     GTEST_SKIP() << "AVX2 not available on this platform";
 #endif
 }
 
-
-TEST(DeglibBuilderIntegration, IP_Scalar)
-{
-    run_builder_integration_test("IP_Scalar", deglib::distances::Metric::FP32_InnerProduct, 0.86,
-                                 128, 10000, 100, 1000,
-                                 deglib::distances::fp32_ip::InnerProductFloat{},
-                                 deglib::builder::OptimizationTarget::LowLID);
+TEST(DeglibBuilderIntegration, IP_Scalar) {
+    run_builder_integration_test(
+        "IP_Scalar", deglib::distances::Metric::FP32_InnerProduct, 0.86, 128, 10000, 100, 1000, deglib::distances::fp32_ip::InnerProductFloat{},
+        deglib::builder::OptimizationTarget::LowLID
+    );
 }
 
 // ---------------------------------------------------------------------------
 // L2 Uint8 Metric Builder Tests (10k)
 // ---------------------------------------------------------------------------
 
-TEST(DeglibBuilderIntegration, L2_Uint8_AVX512)
-{
+TEST(DeglibBuilderIntegration, L2_Uint8_AVX512) {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
     }
-    run_builder_integration_test("L2_Uint8_AVX512", deglib::distances::Metric::Uint8_L2, 0.99,
-                                 128, 10000, 100, 1000,
-                                 deglib::distances::uint8_l2::L2Uint8_AVX512<>{},
-                                 deglib::builder::OptimizationTarget::LowLID);
+    run_builder_integration_test(
+        "L2_Uint8_AVX512", deglib::distances::Metric::Uint8_L2, 0.99, 128, 10000, 100, 1000, deglib::distances::uint8_l2::L2Uint8_AVX512<>{},
+        deglib::builder::OptimizationTarget::LowLID
+    );
 #else
     GTEST_SKIP() << "AVX512 not available on this platform";
 #endif
 }
 
-TEST(DeglibBuilderIntegration, L2_Uint8_AVX2)
-{
+TEST(DeglibBuilderIntegration, L2_Uint8_AVX2) {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
     }
-    run_builder_integration_test("L2_Uint8_AVX2", deglib::distances::Metric::Uint8_L2, 0.99,
-                                 128, 10000, 100, 1000,
-                                 deglib::distances::uint8_l2::L2Uint8_AVX2<>{},
-                                 deglib::builder::OptimizationTarget::LowLID);
+    run_builder_integration_test(
+        "L2_Uint8_AVX2", deglib::distances::Metric::Uint8_L2, 0.99, 128, 10000, 100, 1000, deglib::distances::uint8_l2::L2Uint8_AVX2<>{},
+        deglib::builder::OptimizationTarget::LowLID
+    );
 #else
     GTEST_SKIP() << "AVX2 not available on this platform";
 #endif
 }
 
-
-TEST(DeglibBuilderIntegration, L2_Uint8_Scalar)
-{
-    run_builder_integration_test("L2_Uint8_Scalar", deglib::distances::Metric::Uint8_L2, 0.99,
-                                 128, 10000, 100, 1000,
-                                 deglib::distances::uint8_l2::L2Uint8{},
-                                 deglib::builder::OptimizationTarget::LowLID);
+TEST(DeglibBuilderIntegration, L2_Uint8_Scalar) {
+    run_builder_integration_test(
+        "L2_Uint8_Scalar", deglib::distances::Metric::Uint8_L2, 0.99, 128, 10000, 100, 1000, deglib::distances::uint8_l2::L2Uint8{},
+        deglib::builder::OptimizationTarget::LowLID
+    );
 }
 
 // ---------------------------------------------------------------------------
 // OptimizationTarget Variants (10k)
 // ---------------------------------------------------------------------------
 
-TEST(DeglibBuilderIntegration, Builder_L2_LowLID)
-{
-    run_builder_integration_test("Builder_L2_LowLID", deglib::distances::Metric::FP32_L2, 0.96,
-                                 128, 10000, 100, 1000,
-                                 std::nullopt,
-                                 deglib::builder::OptimizationTarget::LowLID);
+TEST(DeglibBuilderIntegration, Builder_L2_LowLID) {
+    run_builder_integration_test(
+        "Builder_L2_LowLID", deglib::distances::Metric::FP32_L2, 0.96, 128, 10000, 100, 1000, std::nullopt, deglib::builder::OptimizationTarget::LowLID
+    );
 }
 
-TEST(DeglibBuilderIntegration, Builder_L2_HighLID)
-{
-    run_builder_integration_test("Builder_L2_HighLID", deglib::distances::Metric::FP32_L2, 0.95,
-                                 128, 10000, 100, 1000,
-                                 std::nullopt,
-                                 deglib::builder::OptimizationTarget::HighLID);
+TEST(DeglibBuilderIntegration, Builder_L2_HighLID) {
+    run_builder_integration_test(
+        "Builder_L2_HighLID", deglib::distances::Metric::FP32_L2, 0.95, 128, 10000, 100, 1000, std::nullopt, deglib::builder::OptimizationTarget::HighLID
+    );
 }
 
-TEST(DeglibBuilderIntegration, Builder_L2_StreamingData)
-{
-    run_builder_integration_test("Builder_L2_StreamingData", deglib::distances::Metric::FP32_L2, 0.90,
-                                 128, 10000, 100, 1000,
-                                 std::nullopt,
-                                 deglib::builder::OptimizationTarget::StreamingData);
+TEST(DeglibBuilderIntegration, Builder_L2_StreamingData) {
+    run_builder_integration_test(
+        "Builder_L2_StreamingData", deglib::distances::Metric::FP32_L2, 0.90, 128, 10000, 100, 1000, std::nullopt,
+        deglib::builder::OptimizationTarget::StreamingData
+    );
 }
 
 // ---------------------------------------------------------------------------
 // EVP Inner Product Metric Builder Tests
 // ---------------------------------------------------------------------------
 
-TEST(DeglibBuilderIntegration, EvpDatasetBitExactness)
-{
+TEST(DeglibBuilderIntegration, EvpDatasetBitExactness) {
     const size_t dim = 128;
     const size_t base_count = 10000;
     const size_t query_count = 100;
@@ -359,8 +315,7 @@ TEST(DeglibBuilderIntegration, EvpDatasetBitExactness)
     EXPECT_EQ(gt_evp_hash, 0x6c0ad164a1cbbd8dULL) << "gt_evp checksum mismatch across platforms!";
 }
 
-TEST(DeglibBuilderIntegration, EVPInnerProduct_Recall)
-{
+TEST(DeglibBuilderIntegration, EVPInnerProduct_Recall) {
     const size_t dim = 128;
     const size_t base_count = 10000;
     const size_t query_count = 100;
@@ -373,9 +328,7 @@ TEST(DeglibBuilderIntegration, EVPInnerProduct_Recall)
 
     auto gt_evp = compute_groundtruth_evp(base_evp, base_count, query_evp, query_count, dim, 10);
 
-    run_integration_test("EVPInnerProduct", deglib::distances::Metric::EVP_InnerProduct, 0.95,
-                         base_evp.data(), query_evp.data(), base_count, query_count, dim, gt_evp);
+    run_integration_test(
+        "EVPInnerProduct", deglib::distances::Metric::EVP_InnerProduct, 0.95, base_evp.data(), query_evp.data(), base_count, query_count, dim, gt_evp
+    );
 }
-
-
-

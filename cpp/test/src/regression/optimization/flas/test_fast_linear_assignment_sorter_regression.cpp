@@ -1,17 +1,17 @@
-#include <gtest/gtest.h>
-
-#include <chrono>
-#include <iostream>
-#include <random>
-#include <vector>
-#include <span>
-#include <algorithm>
-#include <unordered_set>
-#include <cmath>
-
+#include "common/test_helpers.h"
 #include "deglib/optimization/flas/fast_linear_assignment_sorter.h"
 #include "deglib/optimization/flas/fast_linear_assignment_sorter_mt.h"
-#include "common/test_helpers.h"
+
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <iostream>
+#include <random>
+#include <span>
+#include <unordered_set>
+#include <vector>
 
 // ============================================================================
 // FLAS Regression Tests
@@ -27,8 +27,7 @@
 // elements in the sorted 1D grid. Lower values indicate better locality.
 // Uses L2 distance on the original feature vectors.
 // ---------------------------------------------------------------------------
-static float compute_1d_locality(const std::vector<float>& features, int N, int dim,
-                                 const std::vector<int>& sorted_ids) {
+static float compute_1d_locality(const std::vector<float>& features, int N, int dim, const std::vector<int>& sorted_ids) {
     const size_t dim_sz = static_cast<size_t>(dim);
     float total_dist = 0.0f;
     int count = 0;
@@ -49,9 +48,14 @@ static float compute_1d_locality(const std::vector<float>& features, int N, int 
 // ---------------------------------------------------------------------------
 // Helper: run FLAS sorting and return the sorted ID permutation
 // ---------------------------------------------------------------------------
-static std::vector<int> run_flas_sort(const float* features, int N, int dim,
-                                      unsigned int seed, const flas::FlasSettings& settings,
-                                      deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2) {
+static std::vector<int> run_flas_sort(
+    const float* features,
+    int N,
+    int dim,
+    unsigned int seed,
+    const flas::FlasSettings& settings,
+    deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2
+) {
     auto map_fields = flas::make_map_fields(features, N, dim);
     deglib::distances::FloatSpace space(dim, metric);
 
@@ -67,15 +71,17 @@ static std::vector<int> run_flas_sort(const float* features, int N, int dim,
 // Helper: build a DEG graph and measure build time
 // Returns build time in seconds and the built graph
 // ---------------------------------------------------------------------------
-static double build_deg_graph(deglib::graph::SizeBoundedGraph& graph,
-                              const std::vector<std::byte>& feature_bytes,
-                              size_t feature_bytes_per_vec,
-                              size_t base_count,
-                              deglib::builder::OptimizationTarget optimization_target,
-                              uint32_t /*edges_per_vertex*/,
-                              uint8_t extend_k,
-                              float extend_eps,
-                              uint32_t thread_count = 1) {
+static double build_deg_graph(
+    deglib::graph::SizeBoundedGraph& graph,
+    const std::vector<std::byte>& feature_bytes,
+    size_t feature_bytes_per_vec,
+    size_t base_count,
+    deglib::builder::OptimizationTarget optimization_target,
+    uint32_t /*edges_per_vertex*/,
+    uint8_t extend_k,
+    float extend_eps,
+    uint32_t thread_count = 1
+) {
     std::mt19937 rng(1337);
     const uint8_t improve_k = 0;
     const float improve_eps = 0.0f;
@@ -83,9 +89,9 @@ static double build_deg_graph(deglib::graph::SizeBoundedGraph& graph,
     const uint32_t swap_tries = 0;
     const uint32_t additional_swap_tries = 0;
 
-    deglib::builder::EvenRegularGraphBuilder builder(graph, rng, optimization_target,
-                                                     extend_k, extend_eps, improve_k, improve_eps,
-                                                     max_path_length, swap_tries, additional_swap_tries);
+    deglib::builder::EvenRegularGraphBuilder builder(
+        graph, rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, swap_tries, additional_swap_tries
+    );
     builder.setThreadCount(thread_count);
 
     for (size_t i = 0; i < base_count; ++i) {
@@ -113,9 +119,8 @@ static std::pair<double, double> search_deg_graph(
     size_t query_count,
     const std::vector<std::vector<uint32_t>>& gt_data,
     uint32_t search_k,
-    float search_eps) {
-
-
+    float search_eps
+) {
     size_t total_correct = 0;
     auto t_search_start = std::chrono::high_resolution_clock::now();
 
@@ -190,8 +195,7 @@ TEST(FlasRegression, SortingRuntimeAndQuality_1D_N500_D8) {
     for (int i = 0; i < N; ++i) raw_ids[i] = i;
     float raw_locality = compute_1d_locality(features, N, D, raw_ids);
 
-    std::cout << "[FLAS_Sort_1D_N500_D8] flas_locality=" << flas_locality
-              << "  raw_locality=" << raw_locality
+    std::cout << "[FLAS_Sort_1D_N500_D8] flas_locality=" << flas_locality << "  raw_locality=" << raw_locality
               << "  improvement=" << (raw_locality / flas_locality) << "x" << std::endl;
 
     // FLAS should produce a permutation (all elements present)
@@ -244,16 +248,20 @@ TEST(FlasRegression, SortingRuntimeAndQuality_2D_N500_D8) {
 // the sorted ID permutation. The single-thread path is exercised via
 // run_flas_sort above; this overload drives the parallel swap path.
 // ---------------------------------------------------------------------------
-static std::vector<int> run_flas_sort_mt(const float* features, int N, int dim,
-                                         unsigned int seed, const flas::FlasSettings& settings,
-                                         int num_threads,
-                                         deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2) {
+static std::vector<int> run_flas_sort_mt(
+    const float* features,
+    int N,
+    int dim,
+    unsigned int seed,
+    const flas::FlasSettings& settings,
+    int num_threads,
+    deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2
+) {
     auto map_fields = flas::make_map_fields(features, N, dim);
     deglib::distances::FloatSpace space(dim, metric);
 
     flas::RandomEngine rng(seed);
-    flas::do_sorting_1d(map_fields, space, settings, rng,
-                        [](float) { return false; }, num_threads);
+    flas::do_sorting_1d(map_fields, space, settings, rng, [](float) { return false; }, num_threads);
 
     std::vector<int> result(N);
     for (int i = 0; i < N; ++i) result[i] = map_fields[i].id;
@@ -298,16 +306,13 @@ TEST(FlasRegression, DEGGraphBuildAndSearch_RawVsFlasSorted) {
     std::memcpy(query_bytes_raw.data(), query_data.data(), query_count * feature_bytes_per_vec);
 
     deglib::distances::FloatSpace feature_space_raw(dim, deglib::distances::Metric::FP32_L2);
-    deglib::graph::SizeBoundedGraph graph_raw(static_cast<uint32_t>(base_count), edges_per_vertex,
-                                              std::move(feature_space_raw));
+    deglib::graph::SizeBoundedGraph graph_raw(static_cast<uint32_t>(base_count), edges_per_vertex, std::move(feature_space_raw));
 
-    double build_secs_raw = build_deg_graph(graph_raw, base_bytes_raw, feature_bytes_per_vec,
-                                            base_count,
-                                            deglib::builder::OptimizationTarget::LowLID,
-                                            edges_per_vertex, extend_k, extend_eps);
+    double build_secs_raw = build_deg_graph(
+        graph_raw, base_bytes_raw, feature_bytes_per_vec, base_count, deglib::builder::OptimizationTarget::LowLID, edges_per_vertex, extend_k, extend_eps
+    );
 
-    auto [qps_raw, recall_raw] = search_deg_graph(graph_raw, query_bytes_raw, feature_bytes_per_vec,
-                                                   query_count, gt_data, search_k, search_eps);
+    auto [qps_raw, recall_raw] = search_deg_graph(graph_raw, query_bytes_raw, feature_bytes_per_vec, query_count, gt_data, search_k, search_eps);
 
     std::vector<int> sorted_ids_raw(base_count);
     for (size_t i = 0; i < base_count; ++i) sorted_ids_raw[i] = static_cast<int>(i);
@@ -319,8 +324,7 @@ TEST(FlasRegression, DEGGraphBuildAndSearch_RawVsFlasSorted) {
     flas::FlasSettings flas_settings = flas::FlasSettings{};
     flas_settings.radius_decay = radius_decay;
     auto t_flas_start = std::chrono::high_resolution_clock::now();
-    auto sorted_ids_clean = run_flas_sort(base_data.data(), static_cast<int>(base_count),
-                                           static_cast<int>(dim), 42, flas_settings);
+    auto sorted_ids_clean = run_flas_sort(base_data.data(), static_cast<int>(base_count), static_cast<int>(dim), 42, flas_settings);
     auto t_flas_end = std::chrono::high_resolution_clock::now();
     double flas_secs_clean = std::chrono::duration<double>(t_flas_end - t_flas_start).count();
 
@@ -347,45 +351,46 @@ TEST(FlasRegression, DEGGraphBuildAndSearch_RawVsFlasSorted) {
     std::memcpy(base_bytes_clean.data(), base_data_clean.data(), base_count * feature_bytes_per_vec);
 
     deglib::distances::FloatSpace feature_space_clean(dim, deglib::distances::Metric::FP32_L2);
-    deglib::graph::SizeBoundedGraph graph_clean(static_cast<uint32_t>(base_count), edges_per_vertex,
-                                                   std::move(feature_space_clean));
+    deglib::graph::SizeBoundedGraph graph_clean(static_cast<uint32_t>(base_count), edges_per_vertex, std::move(feature_space_clean));
 
-    double build_secs_clean = build_deg_graph(graph_clean, base_bytes_clean, feature_bytes_per_vec,
-                                                base_count,
-                                                deglib::builder::OptimizationTarget::LowLID,
-                                                edges_per_vertex, extend_k, extend_eps);
+    double build_secs_clean = build_deg_graph(
+        graph_clean, base_bytes_clean, feature_bytes_per_vec, base_count, deglib::builder::OptimizationTarget::LowLID, edges_per_vertex, extend_k, extend_eps
+    );
 
-    auto [qps_clean, recall_clean] = search_deg_graph(graph_clean, query_bytes_raw, feature_bytes_per_vec,
-                                                         query_count, gt_data_clean, search_k, search_eps);
+    auto [qps_clean, recall_clean] = search_deg_graph(graph_clean, query_bytes_raw, feature_bytes_per_vec, query_count, gt_data_clean, search_k, search_eps);
     float locality_clean = compute_1d_locality(base_data, static_cast<int>(base_count), static_cast<int>(dim), sorted_ids_clean);
 
     // Print clean formatted results
     char buf[256];
-    std::snprintf(buf, sizeof(buf), "[DEGGraph_1_RAW]              locality=%-8.2f                   build_secs=%-7.4f  qps=%-8.1f  recall=%.3f",
-                  locality_raw, build_secs_raw, qps_raw, recall_raw);
+    std::snprintf(
+        buf, sizeof(buf), "[DEGGraph_1_RAW]              locality=%-8.2f                   build_secs=%-7.4f  qps=%-8.1f  recall=%.3f", locality_raw,
+        build_secs_raw, qps_raw, recall_raw
+    );
     std::cout << buf << std::endl;
 
-    std::snprintf(buf, sizeof(buf), "[DEGGraph_2_FlasSorted]         locality=%-8.2f  flas_secs=%-7.4f  build_secs=%-7.4f  qps=%-8.1f  recall=%.3f",
-                  locality_clean, flas_secs_clean, build_secs_clean, qps_clean, recall_clean);
+    std::snprintf(
+        buf, sizeof(buf), "[DEGGraph_2_FlasSorted]         locality=%-8.2f  flas_secs=%-7.4f  build_secs=%-7.4f  qps=%-8.1f  recall=%.3f", locality_clean,
+        flas_secs_clean, build_secs_clean, qps_clean, recall_clean
+    );
     std::cout << buf << std::endl;
 
     // -----------------------------------------------------------------------
     // 3. Build DEG graph on FLAS sorted data using 4 Threads (MT)
     // -----------------------------------------------------------------------
     deglib::distances::FloatSpace feature_space_mt(dim, deglib::distances::Metric::FP32_L2);
-    deglib::graph::SizeBoundedGraph graph_mt(static_cast<uint32_t>(base_count), edges_per_vertex,
-                                             std::move(feature_space_mt));
+    deglib::graph::SizeBoundedGraph graph_mt(static_cast<uint32_t>(base_count), edges_per_vertex, std::move(feature_space_mt));
 
-    double build_secs_mt = build_deg_graph(graph_mt, base_bytes_clean, feature_bytes_per_vec,
-                                           base_count,
-                                           deglib::builder::OptimizationTarget::LowLID,
-                                           edges_per_vertex, extend_k, extend_eps, /*thread_count=*/4);
+    double build_secs_mt = build_deg_graph(
+        graph_mt, base_bytes_clean, feature_bytes_per_vec, base_count, deglib::builder::OptimizationTarget::LowLID, edges_per_vertex, extend_k, extend_eps,
+        /*thread_count=*/4
+    );
 
-    auto [qps_mt, recall_mt] = search_deg_graph(graph_mt, query_bytes_raw, feature_bytes_per_vec,
-                                                 query_count, gt_data_clean, search_k, search_eps);
+    auto [qps_mt, recall_mt] = search_deg_graph(graph_mt, query_bytes_raw, feature_bytes_per_vec, query_count, gt_data_clean, search_k, search_eps);
 
-    std::snprintf(buf, sizeof(buf), "[DEGGraph_3_FlasSorted_MT4]      locality=%-8.2f  flas_secs=%-7.4f  build_secs=%-7.4f  qps=%-8.1f  recall=%.3f",
-                  locality_clean, flas_secs_clean, build_secs_mt, qps_mt, recall_mt);
+    std::snprintf(
+        buf, sizeof(buf), "[DEGGraph_3_FlasSorted_MT4]      locality=%-8.2f  flas_secs=%-7.4f  build_secs=%-7.4f  qps=%-8.1f  recall=%.3f", locality_clean,
+        flas_secs_clean, build_secs_mt, qps_mt, recall_mt
+    );
     std::cout << buf << std::endl;
 
     EXPECT_GE(recall_raw + 1e-5, 0.5);
@@ -489,8 +494,7 @@ TEST(FlasRegression, ParallelSwaps_ValidityAndLocality) {
     check_valid_permutation(sorted_serial, "serial");
     const float locality_serial = compute_1d_locality(features, N, D, sorted_serial);
 
-    std::cout << "[ParallelSwaps_Serial] locality=" << locality_serial
-              << "  raw=" << locality_raw << "  secs=" << secs_serial << std::endl;
+    std::cout << "[ParallelSwaps_Serial] locality=" << locality_serial << "  raw=" << locality_raw << "  secs=" << secs_serial << std::endl;
 
     for (int tc : {2, 4, 8}) {
         auto t2 = std::chrono::high_resolution_clock::now();
@@ -501,14 +505,11 @@ TEST(FlasRegression, ParallelSwaps_ValidityAndLocality) {
         check_valid_permutation(sorted_mt, ("mt-t" + std::to_string(tc)).c_str());
         const float locality_mt = compute_1d_locality(features, N, D, sorted_mt);
 
-        std::cout << "[ParallelSwaps_MT_" << tc << "] locality=" << locality_mt
-                  << " (serial=" << locality_serial << ", raw=" << locality_raw << ")"
-                  << "  secs=" << secs_mt << "  speedup=" << (secs_serial / secs_mt) << "x"
-                  << std::endl;
+        std::cout << "[ParallelSwaps_MT_" << tc << "] locality=" << locality_mt << " (serial=" << locality_serial << ", raw=" << locality_raw << ")"
+                  << "  secs=" << secs_mt << "  speedup=" << (secs_serial / secs_mt) << "x" << std::endl;
 
         // MT must improve over the raw input (the whole point of FLAS).
-        EXPECT_LT(locality_mt, locality_raw)
-            << "MT run with " << tc << " threads did not improve locality vs raw";
+        EXPECT_LT(locality_mt, locality_raw) << "MT run with " << tc << " threads did not improve locality vs raw";
     }
 }
 
@@ -524,10 +525,8 @@ TEST(FlasRegression, ParallelSwaps_SingleThreadMatchesSerial) {
     flas::FlasSettings settings;
 
     const auto sorted_serial = run_flas_sort(features.data(), N, D, 42, settings);
-    const auto sorted_mt1   = run_flas_sort_mt(features.data(), N, D, 42, settings, 1);
+    const auto sorted_mt1 = run_flas_sort_mt(features.data(), N, D, 42, settings, 1);
 
     // num_threads == 1 must take the identical serial fast path.
     EXPECT_EQ(sorted_serial, sorted_mt1);
 }
-
-

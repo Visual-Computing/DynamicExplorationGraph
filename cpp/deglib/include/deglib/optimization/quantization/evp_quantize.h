@@ -1,5 +1,7 @@
 #pragma once
 
+#include "deglib/concurrent.h"
+
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -7,8 +9,6 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-
-#include "deglib/concurrent.h"
 
 namespace deglib::quantization::evp {
 
@@ -42,10 +42,9 @@ inline std::vector<std::byte> quantize_single(const float* embedding, uint32_t d
     for (uint32_t i = 0; i < dim; ++i) {
         abs_vals[i] = {std::abs(embedding[i]), i};
     }
-    std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(),
-                 [](const auto& a, const auto& b) {
-                     return a.first != b.first ? a.first < b.first : a.second < b.second;
-                 });
+    std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(), [](const auto& a, const auto& b) {
+        return a.first != b.first ? a.first < b.first : a.second < b.second;
+    });
 
     std::vector<uint8_t> is_top(dim, 0);
     for (uint32_t j = dim - non_zeros; j < dim; ++j) {
@@ -95,8 +94,7 @@ inline std::vector<std::byte> quantize_single(const float* embedding, uint32_t d
  * @return std::vector<std::byte> with count * 2 * dim/8 bytes
  * @throws std::invalid_argument if dim % 8 != 0 or non_zeros >= dim
  */
-inline std::vector<std::byte> quantize_batch(const float* data, size_t count, uint32_t dim,
-                                              uint32_t non_zeros, size_t numThreads = 0) {
+inline std::vector<std::byte> quantize_batch(const float* data, size_t count, uint32_t dim, uint32_t non_zeros, size_t numThreads = 0) {
     if (dim % 8 != 0) {
         throw std::invalid_argument("quantize_batch: dim must be divisible by 8, got " + std::to_string(dim));
     }
@@ -112,8 +110,7 @@ inline std::vector<std::byte> quantize_batch(const float* data, size_t count, ui
     const size_t num_chunks = (count + chunk_size - 1) / chunk_size;
 
     deglib::concurrent::parallel_for(
-        static_cast<size_t>(0), num_chunks, numThreads,
-        [data, count, dim, non_zeros, mask_bytes, bytes_per_evp, chunk_size, &result](size_t chunk_id, size_t) {
+        static_cast<size_t>(0), num_chunks, numThreads, [data, count, dim, non_zeros, mask_bytes, bytes_per_evp, chunk_size, &result](size_t chunk_id, size_t) {
             size_t start = chunk_id * chunk_size;
             size_t end = std::min(start + chunk_size, count);
 
@@ -129,10 +126,9 @@ inline std::vector<std::byte> quantize_batch(const float* data, size_t count, ui
                 for (uint32_t k = 0; k < dim; ++k) {
                     abs_vals[k] = {std::abs(emb[k]), k};
                 }
-                std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(),
-                             [](const auto& a, const auto& b) {
-                                 return a.first != b.first ? a.first < b.first : a.second < b.second;
-                             });
+                std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(), [](const auto& a, const auto& b) {
+                    return a.first != b.first ? a.first < b.first : a.second < b.second;
+                });
 
                 is_top.assign(dim, 0);
                 for (uint32_t j = dim - non_zeros; j < dim; ++j) {
@@ -163,7 +159,8 @@ inline std::vector<std::byte> quantize_batch(const float* data, size_t count, ui
                     negs_dst[byte_idx] = static_cast<std::byte>(bv);
                 }
             }
-        });
+        }
+    );
 
     return result;
 }
@@ -212,8 +209,7 @@ inline std::vector<std::byte> quantize_batch(const float* data, size_t count, ui
  * @return std::vector<std::byte> with count * 2 * dim/8 bytes
  * @throws std::invalid_argument if dim % 8 != 0 or non_zeros >= dim
  */
-inline std::vector<std::byte> quantize_batch(const uint16_t* data, size_t count, uint32_t dim,
-                                              uint32_t non_zeros, size_t numThreads = 0) {
+inline std::vector<std::byte> quantize_batch(const uint16_t* data, size_t count, uint32_t dim, uint32_t non_zeros, size_t numThreads = 0) {
     if (dim % 8 != 0) {
         throw std::invalid_argument("quantize_batch: dim must be divisible by 8, got " + std::to_string(dim));
     }
@@ -229,8 +225,7 @@ inline std::vector<std::byte> quantize_batch(const uint16_t* data, size_t count,
     const size_t num_chunks = (count + chunk_size - 1) / chunk_size;
 
     deglib::concurrent::parallel_for(
-        static_cast<size_t>(0), num_chunks, numThreads,
-        [data, count, dim, non_zeros, mask_bytes, bytes_per_evp, chunk_size, &result](size_t chunk_id, size_t) {
+        static_cast<size_t>(0), num_chunks, numThreads, [data, count, dim, non_zeros, mask_bytes, bytes_per_evp, chunk_size, &result](size_t chunk_id, size_t) {
             size_t start = chunk_id * chunk_size;
             size_t end = std::min(start + chunk_size, count);
 
@@ -246,10 +241,9 @@ inline std::vector<std::byte> quantize_batch(const uint16_t* data, size_t count,
                 for (uint32_t k = 0; k < dim; ++k) {
                     abs_vals[k] = {static_cast<uint16_t>(emb[k] & 0x7FFFu), k};
                 }
-                std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(),
-                             [](const auto& a, const auto& b) {
-                                 return a.first != b.first ? a.first < b.first : a.second < b.second;
-                             });
+                std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(), [](const auto& a, const auto& b) {
+                    return a.first != b.first ? a.first < b.first : a.second < b.second;
+                });
 
                 is_top.assign(dim, 0);
                 for (uint32_t j = dim - non_zeros; j < dim; ++j) {
@@ -286,7 +280,8 @@ inline std::vector<std::byte> quantize_batch(const uint16_t* data, size_t count,
                     negs_dst[byte_idx] = static_cast<std::byte>(bv);
                 }
             }
-        });
+        }
+    );
 
     return result;
 }
@@ -304,8 +299,7 @@ inline std::vector<std::byte> quantize_batch(const uint16_t* data, size_t count,
  * @return std::vector<std::byte> with count * 2 * dim/8 bytes
  * @throws std::invalid_argument if dim % 8 != 0 or non_zeros >= dim
  */
-inline std::vector<std::byte> quantize_batch(const std::vector<std::vector<std::byte>>& data, uint32_t dim,
-                                              uint32_t non_zeros, size_t numThreads = 0) {
+inline std::vector<std::byte> quantize_batch(const std::vector<std::vector<std::byte>>& data, uint32_t dim, uint32_t non_zeros, size_t numThreads = 0) {
     const size_t count = data.size();
     if (dim % 8 != 0) {
         throw std::invalid_argument("quantize_batch: dim must be divisible by 8, got " + std::to_string(dim));
@@ -339,10 +333,9 @@ inline std::vector<std::byte> quantize_batch(const std::vector<std::vector<std::
                 for (uint32_t k = 0; k < dim; ++k) {
                     abs_vals[k] = {static_cast<uint16_t>(emb[k] & 0x7FFFu), k};
                 }
-                std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(),
-                             [](const auto& a, const auto& b) {
-                                 return a.first != b.first ? a.first < b.first : a.second < b.second;
-                             });
+                std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(), [](const auto& a, const auto& b) {
+                    return a.first != b.first ? a.first < b.first : a.second < b.second;
+                });
 
                 is_top.assign(dim, 0);
                 for (uint32_t j = dim - non_zeros; j < dim; ++j) {
@@ -379,7 +372,8 @@ inline std::vector<std::byte> quantize_batch(const std::vector<std::vector<std::
                     negs_dst[byte_idx] = static_cast<std::byte>(bv);
                 }
             }
-        });
+        }
+    );
 
     return result;
 }
@@ -392,4 +386,3 @@ inline std::vector<std::byte> quantize_single(const uint16_t* embedding, uint32_
 }
 
 }  // namespace deglib::quantization::evp
-

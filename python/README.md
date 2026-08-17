@@ -63,6 +63,14 @@ Run the test suite using `pytest`:
 uv run pytest
 ```
 
+### Code Formatting & Linting
+
+Format Python files using `ruff`:
+
+```bash
+uv run ruff format .
+```
+
 ### Building Packages
 
 Build source distributions (`sdist`) and binary wheels:
@@ -138,11 +146,7 @@ space = FloatSpace.create(dims, metric=Metric.FP32_L2)
 graph = deglib.DynamicExplorationGraph.create_empty(max_capacity, space, edges_per_vertex)
 
 # 2. Initialize builder
-builder = GraphBuilder(
-    graph,
-    optimization_target=OptimizationTarget.StreamingData,
-    seed=42
-)
+builder = GraphBuilder(graph, optimization_target=OptimizationTarget.StreamingData, seed=42)
 
 # 3. Add entries (individually or in batches)
 labels = np.arange(100, dtype=np.uint32)
@@ -164,12 +168,7 @@ DEG supports exploratory search directly from existing vertex labels:
 
 ```python
 # Explore graph starting from entry vertex label 105
-explored_labels, distances = graph.explore(
-    entry_label=105, 
-    k=10, 
-    eps=0.1, 
-    include_entry=False
-)
+explored_labels, distances = graph.explore(entry_label=105, k=10, eps=0.1, include_entry=False)
 ```
 
 ---

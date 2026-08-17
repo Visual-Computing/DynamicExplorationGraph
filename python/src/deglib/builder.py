@@ -20,6 +20,7 @@ class OptimizationTarget(enum.IntEnum):
     - HighLID: Optimized for datasets with high local intrinsic dimensionality (above 15)
     - LowLID: Optimized for datasets with low local intrinsic dimensionality (below 15)
     """
+
     StreamingData = deglib_cpp.OptimizationTarget.StreamingData
     HighLID = deglib_cpp.OptimizationTarget.HighLID
     LowLID = deglib_cpp.OptimizationTarget.LowLID
@@ -38,7 +39,7 @@ class OptimizationTarget(enum.IntEnum):
         elif self == OptimizationTarget.LowLID:
             return deglib_cpp.OptimizationTarget.LowLID
         else:
-            raise ValueError('Unknown OptimizationTarget: {}'.format(self))
+            raise ValueError("Unknown OptimizationTarget: {}".format(self))
 
 
 class GraphBuilder:
@@ -48,12 +49,19 @@ class GraphBuilder:
     This class provides functionality to incrementally build and optimize a graph structure
     by adding/removing vertices and improving edge connections through various strategies.
     """
+
     def __init__(
-            self, graph: DynamicExplorationGraph, seed: int | None = None,
-            optimization_target: OptimizationTarget = OptimizationTarget.LowLID,
-            extend_k: int = 0, extend_eps: float = 0.1,
-            improve_k: int = 0, improve_eps: float = 0.001, max_path_length: int = 5,
-            swap_tries: int = 0, additional_swap_tries: int = 0
+        self,
+        graph: DynamicExplorationGraph,
+        seed: int | None = None,
+        optimization_target: OptimizationTarget = OptimizationTarget.LowLID,
+        extend_k: int = 0,
+        extend_eps: float = 0.1,
+        improve_k: int = 0,
+        improve_eps: float = 0.001,
+        max_path_length: int = 5,
+        swap_tries: int = 0,
+        additional_swap_tries: int = 0,
     ):
         """
         Initialize a GraphBuilder with the specified parameters.
@@ -76,8 +84,16 @@ class GraphBuilder:
         if extend_k < graph.get_edges_per_vertex():
             extend_k = graph.get_edges_per_vertex()
         self.builder_cpp = deglib_cpp.GraphBuilder(
-            graph.dynamic_exploration_graph_cpp, seed, optimization_target.to_cpp(), extend_k, extend_eps, improve_k, improve_eps,
-            max_path_length, swap_tries, additional_swap_tries
+            graph.dynamic_exploration_graph_cpp,
+            seed,
+            optimization_target.to_cpp(),
+            extend_k,
+            extend_eps,
+            improve_k,
+            improve_eps,
+            max_path_length,
+            swap_tries,
+            additional_swap_tries,
         )
         self.graph = graph
         self.optimization_target = optimization_target
@@ -99,18 +115,18 @@ class GraphBuilder:
         if len(feature.shape) == 1:
             feature = feature.reshape(1, -1)
         if len(feature.shape) != 2:
-            raise InvalidShapeException('invalid feature shape: {}'.format(feature.shape))
+            raise InvalidShapeException("invalid feature shape: {}".format(feature.shape))
         valid_dtype = self.graph.get_feature_space().metric().get_dtype()
-        feature = assure_array(feature, 'feature', valid_dtype)
+        feature = assure_array(feature, "feature", valid_dtype)
 
         # standardize external label
         if isinstance(external_label, int):
             external_label = np.array([external_label], dtype=np.uint32)
         elif isinstance(external_label, Iterable) and not isinstance(external_label, np.ndarray):
             external_label = np.array(external_label, dtype=np.uint32)
-        assure_array(external_label, 'external_label', np.uint32)
+        assure_array(external_label, "external_label", np.uint32)
 
-        assert feature.shape[0] == external_label.shape[0], 'Got {} features, but {} labels'.format(
+        assert feature.shape[0] == external_label.shape[0], "Got {} features, but {} labels".format(
             feature.shape[0], external_label.shape[0]
         )
 
@@ -190,8 +206,7 @@ class GraphBuilder:
         return self.builder_cpp.get_batch_size()
 
     def build(
-            self, callback: Union[Callable[[deglib_cpp.BuilderStatus], None], str, None] = None,
-            infinite: bool = False
+        self, callback: Union[Callable[[deglib_cpp.BuilderStatus], None], str, None] = None, infinite: bool = False
     ) -> deglib_cpp.BuilderStatus:
         """
         Build the graph. This could be run on a separate thread in an infinite loop. Call stop() to end this process.
@@ -208,7 +223,7 @@ class GraphBuilder:
         if callback is None:
             return self.builder_cpp.build_silent(infinite)
         else:
-            if not infinite and callback == 'progress':
+            if not infinite and callback == "progress":
                 callback = ProgressCallback(self.get_num_new_entries(), self.get_num_remove_entries())
             return self.builder_cpp.build(callback, infinite)
 
@@ -227,19 +242,27 @@ class GraphBuilder:
         :return: String representation showing the number of vertices added
         :rtype: str
         """
-        return 'GraphBuilder(vertices_added={})'.format(self.graph.size())
+        return "GraphBuilder(vertices_added={})".format(self.graph.size())
 
 
 def build_from_data(
-        data: np.ndarray, labels: Union[Iterable[int], np.ndarray, None] = None, edges_per_vertex: int = 32,
-        capacity: int = -1,
-        metric: Metric | str = Metric.FP32_L2, instruction: InstructionSet | str = InstructionSet.Auto,
-        seed: int | None = None,
-        optimization_target: OptimizationTarget = OptimizationTarget.LowLID, extend_k: int = 0, extend_eps: float = 0.2,
-        improve_k: int = 0, improve_eps: float = 0.001, max_path_length: int = 5,
-        swap_tries: int = 0, additional_swap_tries: int = 0,
-        thread_count: int = 0,
-        callback: Union[Callable[[deglib_cpp.BuilderStatus], None], str, None] = None
+    data: np.ndarray,
+    labels: Union[Iterable[int], np.ndarray, None] = None,
+    edges_per_vertex: int = 32,
+    capacity: int = -1,
+    metric: Metric | str = Metric.FP32_L2,
+    instruction: InstructionSet | str = InstructionSet.Auto,
+    seed: int | None = None,
+    optimization_target: OptimizationTarget = OptimizationTarget.LowLID,
+    extend_k: int = 0,
+    extend_eps: float = 0.2,
+    improve_k: int = 0,
+    improve_eps: float = 0.001,
+    max_path_length: int = 5,
+    swap_tries: int = 0,
+    additional_swap_tries: int = 0,
+    thread_count: int = 0,
+    callback: Union[Callable[[deglib_cpp.BuilderStatus], None], str, None] = None,
 ) -> DynamicExplorationGraph:
     """
     Create a new graph built from the given data using a GraphBuilder.
@@ -290,9 +313,16 @@ def build_from_data(
     feature_space = FloatSpace.create(data.shape[1], metric, instruction)
     graph = DynamicExplorationGraph.create_empty(capacity, feature_space, edges_per_vertex)
     builder = GraphBuilder(
-        graph, seed=seed, optimization_target=optimization_target, extend_k=extend_k, extend_eps=extend_eps,
-        improve_k=improve_k, improve_eps=improve_eps, max_path_length=max_path_length, swap_tries=swap_tries,
-        additional_swap_tries=additional_swap_tries
+        graph,
+        seed=seed,
+        optimization_target=optimization_target,
+        extend_k=extend_k,
+        extend_eps=extend_eps,
+        improve_k=improve_k,
+        improve_eps=improve_eps,
+        max_path_length=max_path_length,
+        swap_tries=swap_tries,
+        additional_swap_tries=additional_swap_tries,
     )
 
     if labels is None:
@@ -315,8 +345,9 @@ class ProgressCallback:
     Provides a visual progress bar showing the completion status of graph building operations,
     including both addition and removal of entries.
     """
+
     def __init__(
-            self, num_new_entries: int, num_remove_entries: int, bar_length: int = 60, min_print_interval: float = 0.1
+        self, num_new_entries: int, num_remove_entries: int, bar_length: int = 60, min_print_interval: float = 0.1
     ):
         """
         Initialize the progress callback with build parameters.
@@ -356,9 +387,9 @@ class ProgressCallback:
 
             progress = num_steps / self.maximal
             block = int(self.bar_length * progress)
-            bar = '#' * block + '-' * (self.bar_length - block)
+            bar = "#" * block + "-" * (self.bar_length - block)
             percentage = progress * 100
-            sys.stdout.write(f'\r{percentage:6.2f}% [{bar}] ({num_steps:{self.len_max}} / {self.maximal})')
+            sys.stdout.write(f"\r{percentage:6.2f}% [{bar}] ({num_steps:{self.len_max}} / {self.maximal})")
             if last_step:
-                sys.stdout.write('\n')  # newline at the end
+                sys.stdout.write("\n")  # newline at the end
             sys.stdout.flush()

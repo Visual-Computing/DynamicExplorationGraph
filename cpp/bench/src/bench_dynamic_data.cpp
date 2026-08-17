@@ -1,3 +1,12 @@
+#include "benchmark.h"
+#include "build.h"
+#include "dataset.h"
+#include "file_io.h"
+#include "logging.h"
+#include "stats.h"
+#include "stopwatch.h"
+
+#include <deglib/deglib.h>
 #include <fmt/core.h>
 #include <fmt/format.h>
 
@@ -8,15 +17,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-
-#include "benchmark.h"
-#include "build.h"
-#include "dataset.h"
-#include <deglib/deglib.h>
-#include "file_io.h"
-#include "logging.h"
-#include "stats.h"
-#include "stopwatch.h"
 
 using namespace deglib::benchmark;
 
@@ -29,20 +29,21 @@ struct DynamicConfig {
     uint32_t anns_repeat = 1;
     uint32_t anns_threads = 1;
     std::vector<float> eps_parameter = {0.01f, 0.05f, 0.1f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f, 1.0f};
-    std::vector<DataStreamType> stream_types = {
-        DataStreamType::AddHalf,
-        DataStreamType::AddHalfRemoveAndAddOneAtATime,
-        DataStreamType::AddAllRemoveHalf
-    };
+    std::vector<DataStreamType> stream_types = {DataStreamType::AddHalf, DataStreamType::AddHalfRemoveAndAddOneAtATime, DataStreamType::AddAllRemoveHalf};
 };
 
 static std::string ds_type_str(DataStreamType ds) {
     switch (ds) {
-        case DataStreamType::AddAll: return "AddAll";
-        case DataStreamType::AddHalf: return "AddHalf";
-        case DataStreamType::AddAllRemoveHalf: return "AddAllRemoveHalf";
-        case DataStreamType::AddHalfRemoveAndAddOneAtATime: return "AddHalfRemoveAndAddOneAtATime";
-        default: return "Unknown";
+        case DataStreamType::AddAll:
+            return "AddAll";
+        case DataStreamType::AddHalf:
+            return "AddHalf";
+        case DataStreamType::AddAllRemoveHalf:
+            return "AddAllRemoveHalf";
+        case DataStreamType::AddHalfRemoveAndAddOneAtATime:
+            return "AddHalfRemoveAndAddOneAtATime";
+        default:
+            return "Unknown";
     }
 }
 
@@ -136,20 +137,10 @@ void run_dynamic_benchmark(const DatasetName& ds_name, const std::filesystem::pa
 
         if (!std::filesystem::exists(graph_path) || force_rebuild) {
             log("Building dynamic graph...\n");
-            create_graph(base_repository,
-                         ds_type,
-                         graph_path,
-                         ds.info().metric,
-                         config.lid,
-                         config.k,
-                         config.k_ext,
-                         config.eps_ext,
-                         0, 0, 0,
-                         1,
-                         true,
-                         ds.info().scale,
-                         false,
-                         instruction);
+            create_graph(
+                base_repository, ds_type, graph_path, ds.info().metric, config.lid, config.k, config.k_ext, config.eps_ext, 0, 0, 0, 1, true, ds.info().scale,
+                false, instruction
+            );
         } else {
             log("Graph already exists: {}\n", graph_path);
         }
@@ -168,15 +159,10 @@ void run_dynamic_benchmark(const DatasetName& ds_name, const std::filesystem::pa
             log("\n--- ANNS Test (k={}) ---\n", config.anns_k);
             {
                 auto ground_truth = ds.load_groundtruth(config.anns_k, use_half);
-                test_graph_anns(graph,
-                                query_repository,
-                                ground_truth,
-                                config.anns_repeat,
-                                config.anns_threads,
-                                config.anns_k,
-                                config.eps_parameter,
-                                nullptr,
-                                linear_baseline_us);
+                test_graph_anns(
+                    graph, query_repository, ground_truth, config.anns_repeat, config.anns_threads, config.anns_k, config.eps_parameter, nullptr,
+                    linear_baseline_us
+                );
             }
         } else {
             log("ERROR: Graph file not found: {}\n", graph_path);

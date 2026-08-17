@@ -5,6 +5,11 @@
 // tests with real feature vectors and multiple distance functions (L2,
 // InnerProduct, L2_Uint8, EvpBits).
 
+#include "deglib/builder.h"
+#include "deglib/distances.h"
+#include "deglib/graph/sizebounded_graph.h"
+#include "gtest/gtest.h"
+
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -13,11 +18,6 @@
 #include <random>
 #include <unordered_map>
 #include <vector>
-
-#include "deglib/builder.h"
-#include "deglib/distances.h"
-#include "deglib/graph/sizebounded_graph.h"
-#include "gtest/gtest.h"
 
 // ---------------------------------------------------------------------------
 //  UnionFind
@@ -36,7 +36,7 @@ TEST(UnionFind, FindUnknownElement) {
 
 TEST(UnionFind, SingleElement) {
     deglib::builder::UnionFind uf(10);
-    uf.Update(5, 5); // element is its own parent
+    uf.Update(5, 5);  // element is its own parent
     EXPECT_EQ(uf.Find(5), 5u);
 }
 
@@ -49,7 +49,7 @@ TEST(UnionFind, UnionTwoElements) {
     // After Union(5, 7), one becomes parent of the other
     uint32_t root5 = uf.Find(5);
     uint32_t root7 = uf.Find(7);
-    EXPECT_EQ(root5, root7); // same root
+    EXPECT_EQ(root5, root7);  // same root
 }
 
 TEST(UnionFind, ChainFind) {
@@ -58,8 +58,8 @@ TEST(UnionFind, ChainFind) {
     uf.Update(2, 2);
     uf.Update(3, 3);
 
-    uf.Union(1, 2); // 1 → 2 or 2 → 1
-    uf.Union(2, 3); // chain: 1-2-3
+    uf.Union(1, 2);  // 1 → 2 or 2 → 1
+    uf.Union(2, 3);  // chain: 1-2-3
 
     uint32_t root1 = uf.Find(1);
     uint32_t root2 = uf.Find(2);
@@ -72,7 +72,7 @@ TEST(UnionFind, UpdateDirectParent) {
     deglib::builder::UnionFind uf(10);
     uf.Update(1, 1);
     uf.Update(2, 2);
-    uf.Update(1, 2); // directly set 1's parent to 2
+    uf.Update(1, 2);  // directly set 1's parent to 2
 
     EXPECT_EQ(uf.Find(1), 2u);
     EXPECT_EQ(uf.Find(2), 2u);
@@ -90,7 +90,7 @@ TEST(UnionFind, DisjointSets) {
 
     EXPECT_EQ(uf.Find(1), uf.Find(2));
     EXPECT_EQ(uf.Find(5), uf.Find(6));
-    EXPECT_NE(uf.Find(1), uf.Find(5)); // different sets
+    EXPECT_NE(uf.Find(1), uf.Find(5));  // different sets
 }
 
 TEST(UnionFind, LargeIds) {
@@ -100,7 +100,7 @@ TEST(UnionFind, LargeIds) {
     uf.Union(999, 500);
 
     EXPECT_EQ(uf.Find(999), uf.Find(500));
-    EXPECT_NE(uf.Find(1), uf.Find(500)); // 1 is unknown
+    EXPECT_NE(uf.Find(1), uf.Find(500));  // 1 is unknown
 }
 
 // ---------------------------------------------------------------------------
@@ -165,15 +165,15 @@ TEST(BuilderStatus, DefaultValues) {
 TEST(ReachableGroup, Ctor) {
     deglib::builder::ReachableGroup rg(5, 10);
     EXPECT_EQ(rg.getVertexIndex(), 5u);
-    EXPECT_EQ(rg.size(), 1u); // starts with self
-    EXPECT_EQ(rg.getMissingEdgeSize(), 1u); // self-loop missing
+    EXPECT_EQ(rg.size(), 1u);                // starts with self
+    EXPECT_EQ(rg.getMissingEdgeSize(), 1u);  // self-loop missing
 }
 
 TEST(ReachableGroup, HasEdgeRemovesFromMissing) {
     deglib::builder::ReachableGroup rg(5, 10);
     EXPECT_EQ(rg.getMissingEdgeSize(), 1u);
 
-    rg.hasEdge(5); // self is now connected
+    rg.hasEdge(5);  // self is now connected
     EXPECT_EQ(rg.getMissingEdgeSize(), 0u);
     EXPECT_EQ(rg.size(), 1u);
 }
@@ -199,7 +199,7 @@ TEST(ReachableGroup, CopyFromSelf) {
     deglib::builder::ReachableGroup rg(1, 10);
     rg.missing_edges_.insert(99);
     auto before = rg.missing_edges_.size();
-    rg.copyFrom(rg); // should be a no-op
+    rg.copyFrom(rg);  // should be a no-op
     EXPECT_EQ(rg.missing_edges_.size(), before);
 }
 
@@ -226,7 +226,7 @@ std::vector<std::byte> createUint8Feature(const std::vector<uint8_t>& values) {
 std::vector<std::byte> createEvpBitsFeature(const std::vector<uint8_t>& bit_values) {
     size_t byte_count = bit_values.size() / 8;
     std::vector<std::byte> feature(2 * byte_count);
-    
+
     // Pack ones and negative_ones separately
     uint8_t ones_byte = 0, negatives_byte = 0;
     for (size_t i = 0; i < bit_values.size(); ++i) {
@@ -235,7 +235,7 @@ std::vector<std::byte> createEvpBitsFeature(const std::vector<uint8_t>& bit_valu
         } else if (bit_values[i] < 0) {
             negatives_byte |= (1 << (i % 8));
         }
-        
+
         if (i % 8 == 7) {
             feature[i / 8] = std::byte(ones_byte);
             feature[byte_count + i / 8] = std::byte(negatives_byte);
@@ -257,23 +257,15 @@ TEST(BuilderStatus, BuildReturnsStatusAndTracksIds) {
     std::mt19937 rnd(42);
     deglib::builder::EvenRegularGraphBuilder builder(graph, rnd);
 
-    std::vector<std::vector<float>> features = {
-        {1.0f, 2.0f, 3.0f, 4.0f},
-        {5.0f, 6.0f, 7.0f, 8.0f},
-        {10.0f, 10.0f, 10.0f, 10.0f},
-        {15.0f, 15.0f, 15.0f, 15.0f},
-        {20.0f, 20.0f, 20.0f, 20.0f},
-        {25.0f, 25.0f, 25.0f, 25.0f}
-    };
+    std::vector<std::vector<float>> features = {{1.0f, 2.0f, 3.0f, 4.0f},     {5.0f, 6.0f, 7.0f, 8.0f},     {10.0f, 10.0f, 10.0f, 10.0f},
+                                                {15.0f, 15.0f, 15.0f, 15.0f}, {20.0f, 20.0f, 20.0f, 20.0f}, {25.0f, 25.0f, 25.0f, 25.0f}};
 
     for (uint32_t i = 0; i < features.size(); ++i) {
         builder.addEntry(i, createFloatFeature(features[i]));
     }
 
     std::vector<deglib::builder::BuilderStatus> callback_statuses;
-    auto callback = [&callback_statuses](deglib::builder::BuilderStatus& status) {
-        callback_statuses.push_back(status);
-    };
+    auto callback = [&callback_statuses](deglib::builder::BuilderStatus& status) { callback_statuses.push_back(status); };
 
     deglib::builder::BuilderStatus result = builder.build(callback);
 
@@ -290,9 +282,10 @@ TEST(BuilderStatus, BuildReturnsStatusAndTracksIds) {
     // Verify step_added_ids were populated during the build
     for (const auto& cb_status : callback_statuses) {
         EXPECT_EQ(cb_status.total_added_ids.size(), cb_status.added);
-        EXPECT_EQ(cb_status.step_added_ids.size(), 
-                  cb_status.total_added_ids.size() - 
-                  (cb_status.step > 1 ? callback_statuses[cb_status.step - 2].total_added_ids.size() : 0));
+        EXPECT_EQ(
+            cb_status.step_added_ids.size(),
+            cb_status.total_added_ids.size() - (cb_status.step > 1 ? callback_statuses[cb_status.step - 2].total_added_ids.size() : 0)
+        );
     }
 
     // Verify the last callback status matches the return value
@@ -313,16 +306,9 @@ TEST(BuilderStatus, BuildWithDeleteTracksIds) {
     std::mt19937 rnd(42);
     deglib::builder::EvenRegularGraphBuilder builder(graph, rnd);
 
-    std::vector<std::vector<float>> features = {
-        {1.0f, 2.0f, 3.0f, 4.0f},
-        {5.0f, 6.0f, 7.0f, 8.0f},
-        {10.0f, 10.0f, 10.0f, 10.0f},
-        {15.0f, 15.0f, 15.0f, 15.0f},
-        {20.0f, 20.0f, 20.0f, 20.0f},
-        {25.0f, 25.0f, 25.0f, 25.0f},
-        {30.0f, 30.0f, 30.0f, 30.0f},
-        {35.0f, 35.0f, 35.0f, 35.0f}
-    };
+    std::vector<std::vector<float>> features = {{1.0f, 2.0f, 3.0f, 4.0f},     {5.0f, 6.0f, 7.0f, 8.0f},     {10.0f, 10.0f, 10.0f, 10.0f},
+                                                {15.0f, 15.0f, 15.0f, 15.0f}, {20.0f, 20.0f, 20.0f, 20.0f}, {25.0f, 25.0f, 25.0f, 25.0f},
+                                                {30.0f, 30.0f, 30.0f, 30.0f}, {35.0f, 35.0f, 35.0f, 35.0f}};
 
     for (uint32_t i = 0; i < features.size(); ++i) {
         builder.addEntry(i, createFloatFeature(features[i]));
@@ -363,20 +349,10 @@ TEST(EvenRegularGraphBuilder, BuildGraphWithL2Float) {
     deglib::builder::EvenRegularGraphBuilder builder(graph, rnd);
 
     // Add float feature vectors
-    std::vector<std::vector<float>> features = {
-        {1.0f, 2.0f, 3.0f, 4.0f},
-        {1.1f, 2.1f, 3.1f, 4.1f},
-        {5.0f, 6.0f, 7.0f, 8.0f},
-        {5.1f, 6.1f, 7.1f, 8.1f},
-        {10.0f, 10.0f, 10.0f, 10.0f},
-        {10.1f, 10.1f, 10.1f, 10.1f},
-        {15.0f, 15.0f, 15.0f, 15.0f},
-        {15.1f, 15.1f, 15.1f, 15.1f},
-        {20.0f, 20.0f, 20.0f, 20.0f},
-        {20.1f, 20.1f, 20.1f, 20.1f},
-        {25.0f, 25.0f, 25.0f, 25.0f},
-        {25.1f, 25.1f, 25.1f, 25.1f}
-    };
+    std::vector<std::vector<float>> features = {{1.0f, 2.0f, 3.0f, 4.0f},     {1.1f, 2.1f, 3.1f, 4.1f},     {5.0f, 6.0f, 7.0f, 8.0f},
+                                                {5.1f, 6.1f, 7.1f, 8.1f},     {10.0f, 10.0f, 10.0f, 10.0f}, {10.1f, 10.1f, 10.1f, 10.1f},
+                                                {15.0f, 15.0f, 15.0f, 15.0f}, {15.1f, 15.1f, 15.1f, 15.1f}, {20.0f, 20.0f, 20.0f, 20.0f},
+                                                {20.1f, 20.1f, 20.1f, 20.1f}, {25.0f, 25.0f, 25.0f, 25.0f}, {25.1f, 25.1f, 25.1f, 25.1f}};
 
     for (uint32_t i = 0; i < features.size(); ++i) {
         builder.addEntry(i, createFloatFeature(features[i]));
@@ -409,18 +385,10 @@ TEST(EvenRegularGraphBuilder, BuildGraphWithInnerProductFloat) {
     deglib::builder::EvenRegularGraphBuilder builder(graph, rnd);
 
     // Normalized float vectors for inner product
-    std::vector<std::vector<float>> features = {
-        {0.5f, 0.5f, 0.5f, 0.5f},
-        {0.51f, 0.51f, 0.51f, 0.51f},
-        {0.707f, 0.0f, 0.707f, 0.0f},
-        {0.7f, 0.0f, 0.71f, 0.0f},
-        {0.0f, 0.707f, 0.0f, 0.707f},
-        {0.0f, 0.71f, 0.0f, 0.71f},
-        {0.5f, 0.0f, 0.5f, 0.707f},
-        {0.51f, 0.0f, 0.51f, 0.7f},
-        {0.707f, 0.5f, 0.0f, 0.5f},
-        {0.71f, 0.51f, 0.0f, 0.51f}
-    };
+    std::vector<std::vector<float>> features = {{0.5f, 0.5f, 0.5f, 0.5f},   {0.51f, 0.51f, 0.51f, 0.51f}, {0.707f, 0.0f, 0.707f, 0.0f},
+                                                {0.7f, 0.0f, 0.71f, 0.0f},  {0.0f, 0.707f, 0.0f, 0.707f}, {0.0f, 0.71f, 0.0f, 0.71f},
+                                                {0.5f, 0.0f, 0.5f, 0.707f}, {0.51f, 0.0f, 0.51f, 0.7f},   {0.707f, 0.5f, 0.0f, 0.5f},
+                                                {0.71f, 0.51f, 0.0f, 0.51f}};
 
     for (uint32_t i = 0; i < features.size(); ++i) {
         builder.addEntry(i, createFloatFeature(features[i]));
@@ -450,18 +418,8 @@ TEST(EvenRegularGraphBuilder, BuildGraphWithL2Uint8) {
     deglib::builder::EvenRegularGraphBuilder builder(graph, rnd);
 
     // Uint8 feature vectors (quantized values 0-255)
-    std::vector<std::vector<uint8_t>> features = {
-        {100, 120, 130, 140},
-        {101, 121, 131, 141},
-        {150, 160, 170, 180},
-        {151, 161, 171, 181},
-        {200, 210, 220, 230},
-        {201, 211, 221, 231},
-        {220, 230, 240, 250},
-        {221, 231, 241, 251},
-        {240, 245, 250, 255},
-        {241, 246, 251, 255}
-    };
+    std::vector<std::vector<uint8_t>> features = {{100, 120, 130, 140}, {101, 121, 131, 141}, {150, 160, 170, 180}, {151, 161, 171, 181}, {200, 210, 220, 230},
+                                                  {201, 211, 221, 231}, {220, 230, 240, 250}, {221, 231, 241, 251}, {240, 245, 250, 255}, {241, 246, 251, 255}};
 
     for (uint32_t i = 0; i < features.size(); ++i) {
         builder.addEntry(i, createUint8Feature(features[i]));
@@ -530,7 +488,7 @@ TEST(EvenRegularGraphBuilder, BuildGraphLargerDataset) {
 
     // Verify graph structure
     EXPECT_EQ(graph.size(), size);
-    
+
     // Verify each vertex has at least some neighbors
     for (uint32_t i = 0; i < graph.size(); ++i) {
         uint32_t internal_idx = graph.getInternalIndex(i);
@@ -562,9 +520,7 @@ TEST(EvenRegularGraphBuilder, BuildGraphWithCustomParameters) {
 
     // Create builder with custom parameters
     deglib::builder::EvenRegularGraphBuilder builder(
-        graph,
-        rnd,
-        deglib::builder::OptimizationTarget::HighLID,
+        graph, rnd, deglib::builder::OptimizationTarget::HighLID,
         6,      // extend_k
         0.2f,   // extend_eps
         4,      // improve_k
@@ -577,15 +533,9 @@ TEST(EvenRegularGraphBuilder, BuildGraphWithCustomParameters) {
     // Create feature vectors
     std::vector<std::vector<float>> features;
     std::uniform_real_distribution<float> dist(0.0f, 10.0f);
-    
+
     for (int i = 0; i < 12; ++i) {
-        features.push_back({
-            dist(rnd),
-            dist(rnd),
-            dist(rnd),
-            dist(rnd),
-            dist(rnd)
-        });
+        features.push_back({dist(rnd), dist(rnd), dist(rnd), dist(rnd), dist(rnd)});
     }
 
     for (uint32_t i = 0; i < features.size(); ++i) {
@@ -617,16 +567,15 @@ TEST(EvenRegularGraphBuilder, VerifyEdgeWeights) {
 
     // Create well-separated vectors so distances are predictable
     std::vector<std::vector<float>> features = {
-        {0.0f, 0.0f, 0.0f, 0.0f},
-        {1.0f, 0.0f, 0.0f, 0.0f},    // distance = 1.0
-        {0.0f, 1.0f, 0.0f, 0.0f},    // distance = 1.0
-        {0.0f, 0.0f, 1.0f, 0.0f},    // distance = 1.0
-        {10.0f, 0.0f, 0.0f, 0.0f},   // distance = 10.0
-        {0.0f, 10.0f, 0.0f, 0.0f},   // distance = 10.0
-        {0.0f, 0.0f, 10.0f, 0.0f},   // distance = 10.0
-        {20.0f, 0.0f, 0.0f, 0.0f},   // distance = 20.0
-        {0.0f, 20.0f, 0.0f, 0.0f},   // distance = 20.0
-        {0.0f, 0.0f, 20.0f, 0.0f}    // distance = 20.0
+        {0.0f, 0.0f, 0.0f, 0.0f},  {1.0f, 0.0f, 0.0f, 0.0f},  // distance = 1.0
+        {0.0f, 1.0f, 0.0f, 0.0f},                             // distance = 1.0
+        {0.0f, 0.0f, 1.0f, 0.0f},                             // distance = 1.0
+        {10.0f, 0.0f, 0.0f, 0.0f},                            // distance = 10.0
+        {0.0f, 10.0f, 0.0f, 0.0f},                            // distance = 10.0
+        {0.0f, 0.0f, 10.0f, 0.0f},                            // distance = 10.0
+        {20.0f, 0.0f, 0.0f, 0.0f},                            // distance = 20.0
+        {0.0f, 20.0f, 0.0f, 0.0f},                            // distance = 20.0
+        {0.0f, 0.0f, 20.0f, 0.0f}                             // distance = 20.0
     };
 
     for (uint32_t i = 0; i < features.size(); ++i) {
@@ -648,10 +597,7 @@ TEST(EvenRegularGraphBuilder, VerifyEdgeWeights) {
 
 // Test: Build graph with different optimization targets
 TEST(EvenRegularGraphBuilder, BuildGraphWithDifferentOptimizationTargets) {
-    std::vector<deglib::builder::OptimizationTarget> targets = {
-        deglib::builder::OptimizationTarget::HighLID,
-        deglib::builder::OptimizationTarget::LowLID
-    };
+    std::vector<deglib::builder::OptimizationTarget> targets = {deglib::builder::OptimizationTarget::HighLID, deglib::builder::OptimizationTarget::LowLID};
 
     size_t feature_dim = 4;
 
@@ -663,23 +609,12 @@ TEST(EvenRegularGraphBuilder, BuildGraphWithDifferentOptimizationTargets) {
         deglib::graph::SizeBoundedGraph graph(size, edges_per_vertex, std::move(feature_space));
         std::mt19937 rnd(999);
 
-        deglib::builder::EvenRegularGraphBuilder builder(
-            graph, rnd, target, 4, 0.1f, 2, 0.05f);
+        deglib::builder::EvenRegularGraphBuilder builder(graph, rnd, target, 4, 0.1f, 2, 0.05f);
 
-        std::vector<std::vector<float>> features = {
-            {1.0f, 2.0f, 3.0f, 4.0f},
-            {1.1f, 2.1f, 3.1f, 4.1f},
-            {5.0f, 6.0f, 7.0f, 8.0f},
-            {5.1f, 6.1f, 7.1f, 8.1f},
-            {10.0f, 11.0f, 12.0f, 13.0f},
-            {10.1f, 11.1f, 12.1f, 13.1f},
-            {15.0f, 16.0f, 17.0f, 18.0f},
-            {15.1f, 16.1f, 17.1f, 18.1f},
-            {20.0f, 21.0f, 22.0f, 23.0f},
-            {20.1f, 21.1f, 22.1f, 23.1f},
-            {25.0f, 26.0f, 27.0f, 28.0f},
-            {25.1f, 26.1f, 27.1f, 28.1f}
-        };
+        std::vector<std::vector<float>> features = {{1.0f, 2.0f, 3.0f, 4.0f},     {1.1f, 2.1f, 3.1f, 4.1f},     {5.0f, 6.0f, 7.0f, 8.0f},
+                                                    {5.1f, 6.1f, 7.1f, 8.1f},     {10.0f, 11.0f, 12.0f, 13.0f}, {10.1f, 11.1f, 12.1f, 13.1f},
+                                                    {15.0f, 16.0f, 17.0f, 18.0f}, {15.1f, 16.1f, 17.1f, 18.1f}, {20.0f, 21.0f, 22.0f, 23.0f},
+                                                    {20.1f, 21.1f, 22.1f, 23.1f}, {25.0f, 26.0f, 27.0f, 28.0f}, {25.1f, 26.1f, 27.1f, 28.1f}};
 
         for (uint32_t i = 0; i < features.size(); ++i) {
             builder.addEntry(i, createFloatFeature(features[i]));
@@ -804,7 +739,7 @@ TEST(EvenRegularGraphBuilder, DynamicExplorationGraphWrapperAndSpanAddEntry) {
     sample_vector[0] = 5.0f;
     auto results = deg.search(std::span<const float>(sample_vector), 1);
     EXPECT_EQ(results.size(), 1u);
-    EXPECT_EQ(results.top().getIdentifier(), 105u); // Closest vector is label 105
+    EXPECT_EQ(results.top().getIdentifier(), 105u);  // Closest vector is label 105
     EXPECT_FLOAT_EQ(results.top().getDistance(), 0.0f);
 }
 
@@ -818,9 +753,7 @@ TEST(BuilderBuildFromData, FloatL2Basic) {
     std::vector<float> dataset(num_vectors * dims);
     for (auto& val : dataset) val = dist(rng);
 
-    auto graph = deglib::builder::build_from_data(
-        std::span<const float>(dataset), dims, {}, edges_per_vertex, deglib::distances::Metric::FP32_L2
-    );
+    auto graph = deglib::builder::build_from_data(std::span<const float>(dataset), dims, {}, edges_per_vertex, deglib::distances::Metric::FP32_L2);
 
     EXPECT_EQ(graph.size(), num_vectors);
     EXPECT_EQ(graph.getEdgesPerVertex(), edges_per_vertex);
@@ -846,16 +779,11 @@ TEST(BuilderBuildFromData, CustomLabelsAndThreads) {
     }
 
     uint32_t callback_count = 0;
-    auto callback = [&](deglib::builder::BuilderStatus& status) {
-        callback_count++;
-    };
+    auto callback = [&](deglib::builder::BuilderStatus& status) { callback_count++; };
 
     auto graph = deglib::builder::build_from_data(
-        std::span<const float>(dataset), dims, std::span<const uint32_t>(custom_labels),
-        edges_per_vertex, deglib::distances::Metric::FP32_L2,
-        deglib::builder::OptimizationTarget::StreamingData,
-        0, 0.2f, 0, 0.001f, 5, 0, 0,
-        2, 123, callback
+        std::span<const float>(dataset), dims, std::span<const uint32_t>(custom_labels), edges_per_vertex, deglib::distances::Metric::FP32_L2,
+        deglib::builder::OptimizationTarget::StreamingData, 0, 0.2f, 0, 0.001f, 5, 0, 0, 2, 123, callback
     );
 
     EXPECT_EQ(graph.size(), num_vectors);
@@ -871,23 +799,13 @@ TEST(BuilderBuildFromData, InvalidArguments) {
     std::vector<float> dataset = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
 
     // Dims = 0
-    EXPECT_THROW(
-        deglib::builder::build_from_data(std::span<const float>(dataset), 0),
-        std::invalid_argument
-    );
+    EXPECT_THROW(deglib::builder::build_from_data(std::span<const float>(dataset), 0), std::invalid_argument);
 
     // Data size (5) not divisible by dims (2)
-    EXPECT_THROW(
-        deglib::builder::build_from_data(std::span<const float>(dataset), 2),
-        std::invalid_argument
-    );
+    EXPECT_THROW(deglib::builder::build_from_data(std::span<const float>(dataset), 2), std::invalid_argument);
 
     // Label count mismatch
     std::vector<float> valid_dataset = {1.0f, 2.0f, 3.0f, 4.0f};
-    std::vector<uint32_t> wrong_labels = {1, 2, 3}; // 3 labels for 2 vectors
-    EXPECT_THROW(
-        deglib::builder::build_from_data(std::span<const float>(valid_dataset), 2, std::span<const uint32_t>(wrong_labels)),
-        std::invalid_argument
-    );
+    std::vector<uint32_t> wrong_labels = {1, 2, 3};  // 3 labels for 2 vectors
+    EXPECT_THROW(deglib::builder::build_from_data(std::span<const float>(valid_dataset), 2, std::span<const uint32_t>(wrong_labels)), std::invalid_argument);
 }
-

@@ -1,15 +1,14 @@
-#include <gtest/gtest.h>
-#include "deglib/optimization/flas/fast_linear_assignment_sorter.h"
 #include "common/test_helpers.h"
+#include "deglib/optimization/flas/fast_linear_assignment_sorter.h"
 
-#include <vector>
-#include <random>
-#include <cmath>
+#include <gtest/gtest.h>
+
 #include <algorithm>
+#include <cmath>
+#include <random>
+#include <vector>
 
-static flas::FlasSettings local_default_flas_settings() {
-    return flas::FlasSettings{};
-}
+static flas::FlasSettings local_default_flas_settings() { return flas::FlasSettings{}; }
 
 // ============================================================================
 //  MapField utility tests
@@ -39,7 +38,8 @@ TEST(MapFieldTest, GetNumSwappable) {
 //  FLAS sorting — 1D sort quality (columns=1, rows=N)
 // ============================================================================
 
-static std::vector<int> run_flas_1d(const float* features, int N, int dim, unsigned int seed, deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2) {
+static std::vector<int>
+run_flas_1d(const float* features, int N, int dim, unsigned int seed, deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2) {
     auto mf = flas::make_map_fields(features, N, dim);
     deglib::distances::FloatSpace space(dim, metric);
 
@@ -220,11 +220,10 @@ TEST(FlasSort, CallbackEarlyTermination) {
     flas::RandomEngine flas_rng(42);
 
     bool callback_called = false;
-    flas::do_sorting_1d(map_fields, space, settings, flas_rng,
-                    [&callback_called](float progress) {
-                        callback_called = true;
-                        return true; // terminate immediately
-                    });
+    flas::do_sorting_1d(map_fields, space, settings, flas_rng, [&callback_called](float progress) {
+        callback_called = true;
+        return true;  // terminate immediately
+    });
 
     EXPECT_TRUE(callback_called);
 }
@@ -294,9 +293,7 @@ static void run_1d_comparison_benchmark(int N, int D, unsigned int seed, int num
     std::cout << "  - FLAS Sorted:                    Locality=" << loc << " | Time=" << time_ms << " ms" << std::endl;
 }
 
-TEST(Flas1DComparison, Benchmark_N1000_D128) {
-    run_1d_comparison_benchmark(1000, 128, 42, 20);
-}
+TEST(Flas1DComparison, Benchmark_N1000_D128) { run_1d_comparison_benchmark(1000, 128, 42, 20); }
 
 TEST(Flas1DTest, SortShuffled0To100) {
     const int N = 101;

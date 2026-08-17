@@ -1,3 +1,12 @@
+#include "benchmark.h"
+#include "build.h"
+#include "dataset.h"
+#include "file_io.h"
+#include "logging.h"
+#include "stats.h"
+#include "stopwatch.h"
+
+#include <deglib/deglib.h>
 #include <fmt/core.h>
 #include <fmt/format.h>
 
@@ -8,15 +17,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-
-#include "benchmark.h"
-#include "build.h"
-#include "dataset.h"
-#include <deglib/deglib.h>
-#include "file_io.h"
-#include "logging.h"
-#include "stats.h"
-#include "stopwatch.h"
 
 using namespace deglib::benchmark;
 
@@ -91,7 +91,12 @@ static deglib::cpu::InstructionSet parse_instruction_set(const std::string& str)
     return deglib::cpu::InstructionSet::Auto;
 }
 
-void run_edge_optimization_benchmark(const DatasetName& ds_name, const std::filesystem::path& data_path, const Config& config, deglib::cpu::InstructionSet instruction) {
+void run_edge_optimization_benchmark(
+    const DatasetName& ds_name,
+    const std::filesystem::path& data_path,
+    const Config& config,
+    deglib::cpu::InstructionSet instruction
+) {
     Dataset ds(ds_name, data_path);
 
     log("\n=== Edge Optimization Benchmark for Dataset: {} ===\n", ds.name());
@@ -118,8 +123,8 @@ void run_edge_optimization_benchmark(const DatasetName& ds_name, const std::file
     log("\n=== Optimizing Graph Edges (in memory) ===\n");
     auto rnd = std::mt19937(7);
     auto builder = deglib::builder::EvenRegularGraphBuilder(
-        graph, rnd, deglib::builder::OptimizationTarget::LowLID, 0, 0,
-        config.k_opt, config.eps_opt, config.max_path_length, 1, 0);
+        graph, rnd, deglib::builder::OptimizationTarget::LowLID, 0, 0, config.k_opt, config.eps_opt, config.max_path_length, 1, 0
+    );
 
     auto start = std::chrono::steady_clock::now();
     auto last_status = deglib::builder::BuilderStatus{};
@@ -144,8 +149,8 @@ void run_edge_optimization_benchmark(const DatasetName& ds_name, const std::file
             }
 
             auto recall = estimate_recall(graph, query_repository, ground_truth, config.max_distance_count_test, config.k_test);
-            log("{:5}s, with {:8} / {:8} improvements ({:.1f}% rate), AEW {:.2f}, Recall [{}], connected {}\n",
-                duration, improved, tries, improv_rate, avg_edge_weight, fmt::join(recall, ", "), connected);
+            log("{:5}s, with {:8} / {:8} improvements ({:.1f}% rate), AEW {:.2f}, Recall [{}], connected {}\n", duration, improved, tries, improv_rate,
+                avg_edge_weight, fmt::join(recall, ", "), connected);
 
             last_status = status;
             start = std::chrono::steady_clock::now();
@@ -162,12 +167,17 @@ void run_edge_optimization_benchmark(const DatasetName& ds_name, const std::file
     analyze_graph(graph);
 
     log("\n--- ANNS Test (k={}) ---\n", config.anns_k);
-    test_graph_anns(graph, query_repository, ground_truth, config.anns_repeat, config.anns_threads, config.anns_k, config.eps_parameter, nullptr, linear_baseline_us);
+    test_graph_anns(
+        graph, query_repository, ground_truth, config.anns_repeat, config.anns_threads, config.anns_k, config.eps_parameter, nullptr, linear_baseline_us
+    );
 
     log("\n--- Exploration Test (k={}) ---\n", config.explore_k);
     auto entry_vertices = ds.load_explore_entry_vertices();
     auto explore_gt = ds.load_explore_groundtruth(config.explore_k);
-    test_graph_explore(graph, entry_vertices, explore_gt, true, config.explore_repeat, config.explore_k, config.explore_threads, nullptr, ds.info().explore_depth, linear_baseline_us);
+    test_graph_explore(
+        graph, entry_vertices, explore_gt, true, config.explore_repeat, config.explore_k, config.explore_threads, nullptr, ds.info().explore_depth,
+        linear_baseline_us
+    );
 }
 
 int main(int argc, char* argv[]) {

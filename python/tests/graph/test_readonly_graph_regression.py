@@ -80,11 +80,18 @@ def test_readonly_graph_regression_fp32_l2():
     explore_gt_data = compute_groundtruth_l2(base_data, explore_data, search_k)
 
     # Build DynamicExplorationGraph
-    mutable_graph = deglib.DynamicExplorationGraph.create_empty(base_count, FloatSpace.create(dim, Metric.FP32_L2), edges_per_vertex)
+    mutable_graph = deglib.DynamicExplorationGraph.create_empty(
+        base_count, FloatSpace.create(dim, Metric.FP32_L2), edges_per_vertex
+    )
 
     builder = deglib.GraphBuilder(
-        mutable_graph, seed=42, optimization_target=deglib.builder.OptimizationTarget.LowLID,
-        extend_k=edges_per_vertex, extend_eps=extend_eps, improve_k=0, improve_eps=0.0
+        mutable_graph,
+        seed=42,
+        optimization_target=deglib.builder.OptimizationTarget.LowLID,
+        extend_k=edges_per_vertex,
+        extend_eps=extend_eps,
+        improve_k=0,
+        improve_eps=0.0,
     )
     builder.set_thread_count(1)
     builder.add_entry(range(base_count), base_data)
@@ -132,7 +139,9 @@ def test_readonly_graph_regression_fp32_l2():
 
     for run in range(benchmark_runs):
         entry_indices = np.array([(run * 13 + i) % base_count for i in range(query_count)], dtype=np.uint32)
-        indices, _ = graph.explore(entry_indices, k=search_k, include_entry=True, max_distance_computation_count=explore_max_calcs, threads=1)
+        indices, _ = graph.explore(
+            entry_indices, k=search_k, include_entry=True, max_distance_computation_count=explore_max_calcs, threads=1
+        )
         if run == 0:
             last_explore_results = indices
 
@@ -191,11 +200,18 @@ def test_readonly_graph_regression_fp32_inner_product():
     explore_gt_data = compute_groundtruth_innerproduct(base_data, explore_data, search_k)
 
     # Build DynamicExplorationGraph
-    mutable_graph = deglib.DynamicExplorationGraph.create_empty(base_count, FloatSpace.create(dim, Metric.FP32_InnerProduct), edges_per_vertex)
+    mutable_graph = deglib.DynamicExplorationGraph.create_empty(
+        base_count, FloatSpace.create(dim, Metric.FP32_InnerProduct), edges_per_vertex
+    )
 
     builder = deglib.GraphBuilder(
-        mutable_graph, seed=42, optimization_target=deglib.builder.OptimizationTarget.LowLID,
-        extend_k=edges_per_vertex, extend_eps=extend_eps, improve_k=0, improve_eps=0.0
+        mutable_graph,
+        seed=42,
+        optimization_target=deglib.builder.OptimizationTarget.LowLID,
+        extend_k=edges_per_vertex,
+        extend_eps=extend_eps,
+        improve_k=0,
+        improve_eps=0.0,
     )
     builder.set_thread_count(1)
     builder.add_entry(range(base_count), base_data)
@@ -243,7 +259,9 @@ def test_readonly_graph_regression_fp32_inner_product():
 
     for run in range(benchmark_runs):
         entry_indices = np.array([(run * 13 + i) % base_count for i in range(query_count)], dtype=np.uint32)
-        indices, _ = graph.explore(entry_indices, k=search_k, include_entry=True, max_distance_computation_count=explore_max_calcs, threads=1)
+        indices, _ = graph.explore(
+            entry_indices, k=search_k, include_entry=True, max_distance_computation_count=explore_max_calcs, threads=1
+        )
         if run == 0:
             last_explore_results = indices
 
@@ -308,11 +326,18 @@ def test_readonly_graph_regression_evp_inner_product():
     query_quant = deglib.distances.quantize_batch(query_data, non_zeros=non_zeros, num_threads=8)
 
     # Build DynamicExplorationGraph with EVP_InnerProduct metric
-    mutable_graph = deglib.DynamicExplorationGraph.create_empty(base_count, FloatSpace.create(dim, Metric.EVP_InnerProduct), edges_per_vertex)
+    mutable_graph = deglib.DynamicExplorationGraph.create_empty(
+        base_count, FloatSpace.create(dim, Metric.EVP_InnerProduct), edges_per_vertex
+    )
 
     builder = deglib.GraphBuilder(
-        mutable_graph, seed=42, optimization_target=deglib.builder.OptimizationTarget.LowLID,
-        extend_k=edges_per_vertex, extend_eps=extend_eps, improve_k=0, improve_eps=0.0
+        mutable_graph,
+        seed=42,
+        optimization_target=deglib.builder.OptimizationTarget.LowLID,
+        extend_k=edges_per_vertex,
+        extend_eps=extend_eps,
+        improve_k=0,
+        improve_eps=0.0,
     )
     builder.set_thread_count(1)
     builder.add_entry(range(base_count), base_quant)
@@ -360,7 +385,9 @@ def test_readonly_graph_regression_evp_inner_product():
 
     for run in range(benchmark_runs):
         entry_indices = np.array([(run * 13 + i) % base_count for i in range(query_count)], dtype=np.uint32)
-        indices, _ = graph.explore(entry_indices, k=search_k, include_entry=True, max_distance_computation_count=explore_max_calcs, threads=1)
+        indices, _ = graph.explore(
+            entry_indices, k=search_k, include_entry=True, max_distance_computation_count=explore_max_calcs, threads=1
+        )
         if run == 0:
             last_explore_results = indices
 

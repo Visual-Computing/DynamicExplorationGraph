@@ -5,6 +5,10 @@
  * @brief Dataset management utilities for deglib benchmarks.
  */
 
+#include "file_io.h"
+#include "repository.h"
+
+#include <deglib/deglib.h>
 #include <fmt/core.h>
 #include <fmt/format.h>
 
@@ -21,17 +25,13 @@
 #include <string>
 #include <vector>
 
-#include <deglib/deglib.h>
-#include "repository.h"
-#include "file_io.h"
-
 namespace deglib::benchmark {
 
 struct DatasetInfo;
 class Dataset;
 
 class DatasetName {
-public:
+  public:
     static const DatasetName SIFT1M;
     static const DatasetName DEEP1M;
     static const DatasetName GLOVE;
@@ -66,7 +66,7 @@ public:
     bool operator==(const DatasetName& other) const { return name_ == other.name_; }
     bool operator!=(const DatasetName& other) const { return name_ != other.name_; }
 
-private:
+  private:
     constexpr DatasetName(const char* name) : name_(name) {}
     const char* name_;
 };
@@ -156,9 +156,7 @@ inline DatasetInfo make_dataset_info(const DatasetName& ds) {
     return info;
 }
 
-inline DatasetInfo DatasetName::info() const {
-    return make_dataset_info(*this);
-}
+inline DatasetInfo DatasetName::info() const { return make_dataset_info(*this); }
 
 inline std::filesystem::path get_default_data_path() {
     if (const char* env_path = std::getenv("DEG_DATA_PATH")) {
@@ -170,13 +168,9 @@ inline std::filesystem::path get_default_data_path() {
 }
 
 class Dataset {
-public:
+  public:
     Dataset(const DatasetName& name, const std::filesystem::path& data_root)
-        : name_(name),
-          data_root_(data_root),
-          dataset_dir_(data_root / name.name()),
-          files_dir_(data_root / name.name() / name.name()),
-          info_(name.info()) {}
+        : name_(name), data_root_(data_root), dataset_dir_(data_root / name.name()), files_dir_(data_root / name.name() / name.name()), info_(name.info()) {}
 
     const DatasetName& dataset_name() const { return name_; }
     const char* name() const { return name_.name(); }
@@ -208,7 +202,7 @@ public:
         return load_groundtruth_from_file(gt_file, k);
     }
 
-private:
+  private:
     std::vector<std::vector<uint32_t>> load_groundtruth_from_file(const std::string& gt_file, size_t k) const {
         size_t ground_truth_dims = 0;
         size_t ground_truth_size = 0;
@@ -233,7 +227,7 @@ private:
         return answers;
     }
 
-public:
+  public:
     std::vector<uint32_t> load_explore_entry_vertices() const {
         size_t dims = 0, count = 0;
         auto data = deglib::fvecs_read(explore_entry_vertex_file().c_str(), dims, count);
@@ -267,7 +261,7 @@ public:
         return answers;
     }
 
-private:
+  private:
     DatasetName name_;
     std::filesystem::path data_root_;
     std::filesystem::path dataset_dir_;
@@ -275,12 +269,14 @@ private:
     DatasetInfo info_;
 };
 
-inline std::vector<uint32_t> compute_knn_groundtruth(const deglib::FeatureRepository& base_repo,
-                                                     const deglib::FeatureRepository& query_repo,
-                                                     const deglib::distances::Metric metric,
-                                                     const uint32_t k_target,
-                                                     const size_t base_limit = 0,
-                                                     const uint32_t thread_count = 1) {
+inline std::vector<uint32_t> compute_knn_groundtruth(
+    const deglib::FeatureRepository& base_repo,
+    const deglib::FeatureRepository& query_repo,
+    const deglib::distances::Metric metric,
+    const uint32_t k_target,
+    const size_t base_limit = 0,
+    const uint32_t thread_count = 1
+) {
     const auto base_size = base_limit > 0 ? (uint32_t)std::min(base_limit, base_repo.size()) : (uint32_t)base_repo.size();
     const auto query_size = (uint32_t)query_repo.size();
     const auto dims = base_repo.dims();
@@ -322,13 +318,8 @@ inline std::vector<uint32_t> compute_knn_groundtruth(const deglib::FeatureReposi
 
         uint32_t count = ++progress;
         if (count % 100 == 0 || count == query_size) {
-            const auto duration_ms =
-                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
-            fmt::print("  Ground truth progress: {}/{} queries ({:.1f}%) after {}ms\n",
-                       count,
-                       query_size,
-                       100.0f * count / query_size,
-                       duration_ms);
+            const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+            fmt::print("  Ground truth progress: {}/{} queries ({:.1f}%) after {}ms\n", count, query_size, 100.0f * count / query_size, duration_ms);
         }
     });
 
@@ -524,7 +515,8 @@ inline bool setup_enron_files(const Dataset& ds) {
 
 }  // namespace detail
 
-inline bool generate_exploration_files(const Dataset& ds, const deglib::FeatureRepository& base_repo, const uint32_t thread_count = 4, bool include_half = true) {
+inline bool
+generate_exploration_files(const Dataset& ds, const deglib::FeatureRepository& base_repo, const uint32_t thread_count = 4, bool include_half = true) {
     const auto& info = ds.info();
     const size_t base_size = base_repo.size();
     const size_t half_base_size = base_size / 2;
@@ -532,8 +524,8 @@ inline bool generate_exploration_files(const Dataset& ds, const deglib::FeatureR
     const uint32_t topk = DatasetInfo::EXPLORE_TOPK;
     const uint32_t dims = (uint32_t)base_repo.dims();
 
-    bool all_exist = file_exists(ds.explore_query_file()) && file_exists(ds.explore_entry_vertex_file()) &&
-                     file_exists(ds.explore_groundtruth_file()) && (!include_half || file_exists(ds.explore_groundtruth_half_file()));
+    bool all_exist = file_exists(ds.explore_query_file()) && file_exists(ds.explore_entry_vertex_file()) && file_exists(ds.explore_groundtruth_file()) &&
+                     (!include_half || file_exists(ds.explore_groundtruth_half_file()));
 
     if (all_exist) return true;
 
@@ -598,7 +590,8 @@ inline bool generate_exploration_files(const Dataset& ds, const deglib::FeatureR
     return true;
 }
 
-inline bool generate_anns_groundtruth_files(const Dataset& ds, const deglib::FeatureRepository& base_repo, const uint32_t thread_count = 4, bool include_half = true) {
+inline bool
+generate_anns_groundtruth_files(const Dataset& ds, const deglib::FeatureRepository& base_repo, const uint32_t thread_count = 4, bool include_half = true) {
     const auto& info = ds.info();
     const size_t base_size = base_repo.size();
     const size_t half_base_size = base_size / 2;

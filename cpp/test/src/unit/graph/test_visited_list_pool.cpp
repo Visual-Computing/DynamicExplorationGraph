@@ -1,11 +1,11 @@
 // test_visited_list_pool.cpp — Unit tests for VisitedList and VisitedListPool
 
+#include "deglib/graph/visited_list_pool.h"
+#include "gtest/gtest.h"
+
 #include <cstdint>
 #include <thread>
 #include <vector>
-
-#include "deglib/graph/visited_list_pool.h"
-#include "gtest/gtest.h"
 
 // ---------------------------------------------------------------------------
 //  VisitedList
@@ -102,7 +102,7 @@ TEST(VisitedListPool, ReleaseReusesList) {
         auto* slots = fl->get_visited();
         auto tag = fl->get_tag();
         slots[3] = tag;
-    } // released
+    }  // released
 
     {
         auto fl = pool.getFreeVisitedList();
@@ -110,7 +110,7 @@ TEST(VisitedListPool, ReleaseReusesList) {
         // The old value remains but the new tag won't match it.
         auto* slots = fl->get_visited();
         auto tag = fl->get_tag();
-        EXPECT_NE(slots[3], tag); // old value, new tag -> mismatch
+        EXPECT_NE(slots[3], tag);  // old value, new tag -> mismatch
     }
 }
 
