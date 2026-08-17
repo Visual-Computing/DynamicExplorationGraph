@@ -79,6 +79,7 @@ DATASET_PRESETS: Dict[str, Dict[str, Any]] = {
     },
 }
 
+
 def get_preset(dataset_key: str) -> Dict[str, Any]:
     """Returns preset graph build and benchmark parameters for dataset_key."""
     key = dataset_key.lower()

@@ -25,6 +25,7 @@ class DataStreamType(Enum):
     - AddHalfRemoveAndAddOneAtATime: Interleaved insertion and deletion operations.
     - AddAllRemoveHalf:              Insert all vectors, then remove the second half.
     """
+
     AddHalf = "AddHalf"
     AddHalfRemoveAndAddOneAtATime = "AddHalfRemoveAndAddOneAtATime"
     AddAllRemoveHalf = "AddAllRemoveHalf"
@@ -47,6 +48,7 @@ _STREAM_MARKERS = ["o", "s", "^"]
 
 # Give up opening the plot window if no benchmark data arrived within this many seconds.
 _FIRST_DATA_TIMEOUT = 3600.0
+
 
 def _render_combined_anns_plot(
     queue: multiprocessing.Queue,
@@ -130,24 +132,27 @@ def _render_combined_anns_plot(
         plt.close("all")
 
 
-
-
 # ---------------------------------------------------------------------------
 # Linear search baseline
 # ---------------------------------------------------------------------------
 
-def compute_linear_search_baseline(base_vecs: np.ndarray, float_space: deglib.distances.FloatSpace, sample_size: int = 100) -> float:
+
+def compute_linear_search_baseline(
+    base_vecs: np.ndarray, float_space: deglib.distances.FloatSpace, sample_size: int = 100
+) -> float:
     n_base = len(base_vecs)
     query_count = min(sample_size, n_base)
     rng = np.random.default_rng(7)
     sample_indices = rng.choice(n_base, size=query_count, replace=False)
 
     print(f"\n--- Computing Linear Search Baseline ---")
-    print(f"Computing linear search baseline with {query_count} random queries on {n_base} base vectors "
-          f"using C++ {float_space.metric().name} ({float_space.get_instruction().name})...")
+    print(
+        f"Computing linear search baseline with {query_count} random queries on {n_base} base vectors "
+        f"using C++ {float_space.metric().name} ({float_space.get_instruction().name})..."
+    )
 
     start_time = time.perf_counter()
-    min_dist = float('inf')
+    min_dist = float("inf")
 
     for idx in sample_indices:
         dists = float_space.compute_distances(base_vecs[idx], base_vecs)
@@ -158,8 +163,10 @@ def compute_linear_search_baseline(base_vecs: np.ndarray, float_space: deglib.di
     total_time_us = (time.perf_counter() - start_time) * 1e6
     time_per_query_us = total_time_us / max(query_count, 1)
     linear_baseline_us = time_per_query_us * 2
-    print(f"Linear search baseline: {int(time_per_query_us)}us per query "
-          f"(total: {int(total_time_us / 1000)}ms for {query_count} queries) with min distance {min_dist:.6f}")
+    print(
+        f"Linear search baseline: {int(time_per_query_us)}us per query "
+        f"(total: {int(total_time_us / 1000)}ms for {query_count} queries) with min distance {min_dist:.6f}"
+    )
     return linear_baseline_us
 
 
@@ -167,6 +174,7 @@ def compute_linear_search_baseline(base_vecs: np.ndarray, float_space: deglib.di
 # Graph filename (mirrors C++ bench_dynamic_data.cpp naming)
 # {dims}D_K{k}_{stream_type_str}.deg  in  <graph_dir>/
 # ---------------------------------------------------------------------------
+
 
 def build_dynamic_graph_filename(graph_dir: Path, dims: int, k: int, stream_type: DataStreamType) -> Path:
     """
@@ -181,6 +189,7 @@ def build_dynamic_graph_filename(graph_dir: Path, dims: int, k: int, stream_type
 # ---------------------------------------------------------------------------
 # Graph building – simulation of the three DataStreamTypes
 # ---------------------------------------------------------------------------
+
 
 def build_dynamic_graph(
     base_vecs: np.ndarray,
@@ -251,7 +260,9 @@ def build_dynamic_graph(
         # 2nd loop: add base_size_quarter pairs from [quarter, half) and remove same number
         for i in range(quarter):
             builder.add_entry(int(all_labels[quarter + i]), base_vecs[quarter + i : quarter + i + 1])
-            builder.add_entry(int(all_labels[half + quarter + i]), base_vecs[half + quarter + i : half + quarter + i + 1])
+            builder.add_entry(
+                int(all_labels[half + quarter + i]), base_vecs[half + quarter + i : half + quarter + i + 1]
+            )
             builder.remove_entry(int(all_labels[half + (i * 2) + 0]))
             builder.remove_entry(int(all_labels[half + (i * 2) + 1]))
 
@@ -266,18 +277,19 @@ def build_dynamic_graph(
     build_time = time.perf_counter() - build_start
     print(f"Graph built in {build_time:.2f} seconds ({graph_mut.size()} vertices).")
 
-        if graph_path:
-            graph_path.parent.mkdir(parents=True, exist_ok=True)
-            graph_mut.save_graph(str(graph_path))
-            print(f"Graph saved to: {graph_path}")
-            return deglib.load_readonly_graph(str(graph_path))
-        else:
-            return graph_mut.to_readonly()
+    if graph_path:
+        graph_path.parent.mkdir(parents=True, exist_ok=True)
+        graph_mut.save_graph(str(graph_path))
+        print(f"Graph saved to: {graph_path}")
+        return deglib.load_readonly_graph(str(graph_path))
+    else:
+        return graph_mut.to_readonly()
 
 
 # ---------------------------------------------------------------------------
 # Main benchmark function
 # ---------------------------------------------------------------------------
+
 
 def run_dynamic_benchmark(
     dataset_key: str,
@@ -317,7 +329,9 @@ def run_dynamic_benchmark(
     print(f"Selected Instruction Set: {instruction_set}")
     print(f"Build Threads: {build_threads}")
     print(f"Base vectors: {base_vecs.shape[0]} | Dimension: {dims}")
-    print(f"Query vectors: {query_vecs.shape[0]} | Full-GT shape: {gt_vecs_full.shape} | Half-GT shape: {gt_vecs_half.shape}")
+    print(
+        f"Query vectors: {query_vecs.shape[0]} | Full-GT shape: {gt_vecs_full.shape} | Half-GT shape: {gt_vecs_half.shape}"
+    )
 
     feature_space = deglib.distances.FloatSpace.create(dims, metric, instruction_enum)
     actual_inst = str(feature_space.get_instruction().name)
@@ -418,7 +432,9 @@ def run_dynamic_benchmark(
             anns_recalls.append(recall)
             anns_qps.append(qps)
 
-            print(f"eps {eps:6.3f} \trecall {recall:.5f} \ttime_us_per_query {time_us_per_query:6d}us \t{qps:9.1f} qps \tsearch time: {int(search_time_us / 1000):6d}ms")
+            print(
+                f"eps {eps:6.3f} \trecall {recall:.5f} \ttime_us_per_query {time_us_per_query:6d}us \t{qps:9.1f} qps \tsearch time: {int(search_time_us / 1000):6d}ms"
+            )
 
             if linear_baseline_us > 0 and time_us_per_query > linear_baseline_us:
                 print(f"eps {eps:.3f} \t ABORTED ({time_us_per_query}us/query > {int(linear_baseline_us)}us baseline)")

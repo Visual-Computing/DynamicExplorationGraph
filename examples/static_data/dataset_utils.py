@@ -13,8 +13,10 @@ def ivecs_read(filename: str | Path) -> np.ndarray:
     d = a[0]
     return a.reshape(-1, d + 1)[:, 1:].copy()
 
+
 def fvecs_read(filename: str | Path) -> np.ndarray:
     return ivecs_read(filename).view(np.float32)
+
 
 DATASET_METADATA: Dict[str, Dict[str, Any]] = {
     "sift1m": {
@@ -94,8 +96,10 @@ DATASET_METADATA: Dict[str, Dict[str, Any]] = {
     },
 }
 
+
 def resolve_dataset_key(key: str) -> str:
     return key.lower()
+
 
 def get_default_cache_dir() -> Path:
     """Returns the default dataset cache directory (~/.cache/deg_datasets or DEG_CACHE_DIR)."""
@@ -106,6 +110,7 @@ def get_default_cache_dir() -> Path:
         path = Path.home() / ".cache" / "deg_datasets"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
 
 def download_file(url: str, dest_path: Path):
     """Downloads a file from url to dest_path with progress indication."""
@@ -137,6 +142,7 @@ def download_file(url: str, dest_path: Path):
     temp_path.rename(dest_path)
     print(f"Download complete: {dest_path}")
 
+
 def ivecs_write(filename: str | Path, data: np.ndarray):
     """Writes a 2D int32 numpy array to ivecs format."""
     filename = Path(filename)
@@ -146,6 +152,7 @@ def ivecs_write(filename: str | Path, data: np.ndarray):
     d_col = np.full((n, 1), d, dtype=np.int32)
     with_d = np.hstack([d_col, data.astype(np.int32)])
     with_d.tofile(filename)
+
 
 def fvecs_write(filename: str | Path, data: np.ndarray):
     """Writes a 2D float32 numpy array to fvecs format."""
@@ -157,6 +164,7 @@ def fvecs_write(filename: str | Path, data: np.ndarray):
     d_col = np.full((n, 1), d_float, dtype=np.float32)
     with_d = np.hstack([d_col, data.astype(np.float32)])
     with_d.tofile(filename)
+
 
 def cleanup_legacy_gt(folder: Path):
     """Deletes legacy/broken groundtruth files extracted from old dataset archives."""
@@ -182,15 +190,16 @@ def cleanup_legacy_gt(folder: Path):
             except Exception as e:
                 print(f"Warning: Failed to remove legacy GT file {p}: {e}")
 
+
 def ensure_dataset(dataset_key: str, cache_dir: Path) -> Path:
     """Ensures the dataset is downloaded and extracted in cache_dir, returning folder path."""
     key = resolve_dataset_key(dataset_key)
     if key not in DATASET_METADATA:
         raise ValueError(f"Unknown dataset '{dataset_key}'. Choose from: {list(DATASET_METADATA.keys())}")
-    
+
     meta = DATASET_METADATA[key]
     archive_path = cache_dir / meta["archive"]
-    
+
     # 1. Check if direct folder (e.g., D:\Data\DEG\sift1m or D:\Data\DEG\sift) exists
     extracted_folder = cache_dir / meta["folder"]
     if not extracted_folder.is_dir():
@@ -208,7 +217,7 @@ def ensure_dataset(dataset_key: str, cache_dir: Path) -> Path:
                 archive_path = archive_matches[0]
             else:
                 download_file(meta["url"], archive_path)
-        
+
         print(f"Extracting {archive_path} into {cache_dir}...")
         with tarfile.open(archive_path, "r:gz") as tar:
             tar.extractall(path=cache_dir)
@@ -225,8 +234,16 @@ def ensure_dataset(dataset_key: str, cache_dir: Path) -> Path:
     return extracted_folder
 
 
-
-def build_graph_filename(dataset_key: str, cache_dir: Path, dims: int, k: int, extend_k: int, extend_eps: float, optimization_target_str: str, metric_str: str) -> Path:
+def build_graph_filename(
+    dataset_key: str,
+    cache_dir: Path,
+    dims: int,
+    k: int,
+    extend_k: int,
+    extend_eps: float,
+    optimization_target_str: str,
+    metric_str: str,
+) -> Path:
     """
     Builds the graph path matching C++ filename formatting:
     <dataset_dir>/deg/{dims}D_{metric}_K{k}_AddK{k_ext}Eps{eps_ext:.1f}_{lid}.deg
@@ -237,12 +254,15 @@ def build_graph_filename(dataset_key: str, cache_dir: Path, dims: int, k: int, e
     filename = f"{dims}D_{metric_str}_K{k}_AddK{extend_k}Eps{extend_eps:.1f}_{optimization_target_str}.deg"
     return deg_dir / filename
 
-def compute_and_save_anns_gt(base_vecs: np.ndarray, query_vecs: np.ndarray, float_space: FloatSpace, k: int, out_path: Path):
+
+def compute_and_save_anns_gt(
+    base_vecs: np.ndarray, query_vecs: np.ndarray, float_space: FloatSpace, k: int, out_path: Path
+):
     n_queries = len(query_vecs)
     gt_matrix = np.zeros((n_queries, k), dtype=np.int32)
     print(f"Generating ANNS Ground Truth (Full Dataset, top-{k})...")
     start_t = time.perf_counter()
-    
+
     for q in range(n_queries):
         dists = float_space.compute_distances(query_vecs[q], base_vecs)
         top_k = np.argpartition(dists, k)[:k]
@@ -250,12 +270,19 @@ def compute_and_save_anns_gt(base_vecs: np.ndarray, query_vecs: np.ndarray, floa
         gt_matrix[q, :] = top_k
         if (q + 1) % 100 == 0 or (q + 1) == n_queries:
             elapsed_ms = int((time.perf_counter() - start_t) * 1000)
-            print(f"\r  Ground truth progress: {q + 1}/{n_queries} ({100.0 * (q + 1) / n_queries:.1f}%) after {elapsed_ms}ms", end="", flush=True)
+            print(
+                f"\r  Ground truth progress: {q + 1}/{n_queries} ({100.0 * (q + 1) / n_queries:.1f}%) after {elapsed_ms}ms",
+                end="",
+                flush=True,
+            )
     print()
     ivecs_write(out_path, gt_matrix)
     print(f"ANNS Ground Truth generated and saved to {out_path}")
 
-def generate_explore_entry_and_query(base_vecs: np.ndarray, entry_path: Path, query_path: Path, sample_count: int = 10000):
+
+def generate_explore_entry_and_query(
+    base_vecs: np.ndarray, entry_path: Path, query_path: Path, sample_count: int = 10000
+):
     print("Generating exploration entry vertices and explore queries...")
     half_base_size = len(base_vecs) // 2
     step = float(half_base_size) / sample_count
@@ -271,12 +298,15 @@ def generate_explore_entry_and_query(base_vecs: np.ndarray, entry_path: Path, qu
     explore_features = base_vecs[entry_ids[:, 0]]
     fvecs_write(query_path, explore_features)
 
-def compute_and_save_explore_gt(base_vecs: np.ndarray, explore_query_vecs: np.ndarray, float_space: FloatSpace, k: int, out_path: Path):
+
+def compute_and_save_explore_gt(
+    base_vecs: np.ndarray, explore_query_vecs: np.ndarray, float_space: FloatSpace, k: int, out_path: Path
+):
     n_queries = len(explore_query_vecs)
     gt_matrix = np.zeros((n_queries, k), dtype=np.int32)
     print(f"Generating Exploration Ground Truth (Full Dataset, top-{k})...")
     start_t = time.perf_counter()
-    
+
     for q in range(n_queries):
         dists = float_space.compute_distances(explore_query_vecs[q], base_vecs)
         top_k = np.argpartition(dists, k)[:k]
@@ -284,12 +314,19 @@ def compute_and_save_explore_gt(base_vecs: np.ndarray, explore_query_vecs: np.nd
         gt_matrix[q, :] = top_k
         if (q + 1) % 500 == 0 or (q + 1) == n_queries:
             elapsed_ms = int((time.perf_counter() - start_t) * 1000)
-            print(f"\r  Exploration ground truth progress: {q + 1}/{n_queries} ({100.0 * (q + 1) / n_queries:.1f}%) after {elapsed_ms}ms", end="", flush=True)
+            print(
+                f"\r  Exploration ground truth progress: {q + 1}/{n_queries} ({100.0 * (q + 1) / n_queries:.1f}%) after {elapsed_ms}ms",
+                end="",
+                flush=True,
+            )
     print()
     ivecs_write(out_path, gt_matrix)
     print(f"Exploration Ground Truth generated and saved to {out_path}")
 
-def load_dataset(dataset_key: str, cache_dir: Path) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Any, Any, Dict[str, Any]]:
+
+def load_dataset(
+    dataset_key: str, cache_dir: Path
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Any, Any, Dict[str, Any]]:
     """
     Downloads/extracts dataset if needed and loads (base, query, groundtruth) numpy arrays.
     Returns (base_features, query_features, ground_truth, explore_entry, explore_gt, metadata).

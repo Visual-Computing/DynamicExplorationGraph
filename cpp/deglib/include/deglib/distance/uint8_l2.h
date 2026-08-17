@@ -3,6 +3,7 @@
 #include "deglib/distance/residual_mode.h"
 #include "deglib/distance/uint8.h"
 
+#include <stdexcept>
 #include <variant>
 
 namespace deglib::distances::uint8_l2 {

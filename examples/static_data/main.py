@@ -19,9 +19,10 @@ from dataset_utils import (
 from presets import get_preset
 from graph_analysis import analyze_graph
 
+
 def _render_anns_plot(dataset_name: str, instruction_set: str, search_k: int, anns_recalls: list, anns_qps: list):
     plt.figure(figsize=(8, 6))
-    plt.plot(anns_recalls, anns_qps, marker='o', linewidth=2, color='tab:blue', label=f"DEG ({dataset_name})")
+    plt.plot(anns_recalls, anns_qps, marker="o", linewidth=2, color="tab:blue", label=f"DEG ({dataset_name})")
     plt.xlabel(f"Recall@{search_k}")
     plt.ylabel("Queries Per Second (QPS)")
     plt.title(f"DEG ANNS Search Benchmark on {dataset_name} ({instruction_set})")
@@ -30,25 +31,25 @@ def _render_anns_plot(dataset_name: str, instruction_set: str, search_k: int, an
     plt.tight_layout()
     plt.show()
 
+
 def plot_anns_results(
-    dataset_name: str,
-    instruction_set: str,
-    search_k: int,
-    anns_recalls: list,
-    anns_qps: list,
-    no_show: bool = False
+    dataset_name: str, instruction_set: str, search_k: int, anns_recalls: list, anns_qps: list, no_show: bool = False
 ):
     if not no_show and anns_recalls:
         print("\nDisplaying interactive ANNS plot window (in separate GUI process)...")
         p = multiprocessing.Process(
-            target=_render_anns_plot,
-            args=(dataset_name, instruction_set, search_k, list(anns_recalls), list(anns_qps))
+            target=_render_anns_plot, args=(dataset_name, instruction_set, search_k, list(anns_recalls), list(anns_qps))
         )
         p.start()
 
-def _render_explore_plot(dataset_name: str, instruction_set: str, explore_k: int, explore_recalls: list, explore_qps: list):
+
+def _render_explore_plot(
+    dataset_name: str, instruction_set: str, explore_k: int, explore_recalls: list, explore_qps: list
+):
     plt.figure(figsize=(8, 6))
-    plt.plot(explore_recalls, explore_qps, marker='s', linewidth=2, color='tab:orange', label=f"DEG Explore ({dataset_name})")
+    plt.plot(
+        explore_recalls, explore_qps, marker="s", linewidth=2, color="tab:orange", label=f"DEG Explore ({dataset_name})"
+    )
     plt.xlabel(f"Explore Recall@{explore_k}")
     plt.ylabel("Queries Per Second (QPS)")
     plt.title(f"DEG Graph Exploration Benchmark on {dataset_name} ({instruction_set})")
@@ -57,33 +58,39 @@ def _render_explore_plot(dataset_name: str, instruction_set: str, explore_k: int
     plt.tight_layout()
     plt.show()
 
+
 def plot_explore_results(
     dataset_name: str,
     instruction_set: str,
     explore_k: int,
     explore_recalls: list,
     explore_qps: list,
-    no_show: bool = False
+    no_show: bool = False,
 ):
     if not no_show and explore_recalls:
         print("\nDisplaying interactive Exploration plot window...")
         p = multiprocessing.Process(
             target=_render_explore_plot,
-            args=(dataset_name, instruction_set, explore_k, list(explore_recalls), list(explore_qps))
+            args=(dataset_name, instruction_set, explore_k, list(explore_recalls), list(explore_qps)),
         )
         p.start()
 
-def compute_linear_search_baseline(base_vecs: np.ndarray, float_space: deglib.distances.FloatSpace, sample_size: int = 100) -> float:
+
+def compute_linear_search_baseline(
+    base_vecs: np.ndarray, float_space: deglib.distances.FloatSpace, sample_size: int = 100
+) -> float:
     n_base = len(base_vecs)
     query_count = min(sample_size, n_base)
     rng = np.random.default_rng(7)
     sample_indices = rng.choice(n_base, size=query_count, replace=False)
 
     print(f"\n--- Computing Linear Search Baseline ---")
-    print(f"Computing linear search baseline with {query_count} random queries on {n_base} base vectors using C++ {float_space.metric().name} ({float_space.get_instruction().name})...")
+    print(
+        f"Computing linear search baseline with {query_count} random queries on {n_base} base vectors using C++ {float_space.metric().name} ({float_space.get_instruction().name})..."
+    )
 
     start_time = time.perf_counter()
-    min_dist = float('inf')
+    min_dist = float("inf")
 
     for idx in sample_indices:
         dists = float_space.compute_distances(base_vecs[idx], base_vecs)
@@ -94,8 +101,11 @@ def compute_linear_search_baseline(base_vecs: np.ndarray, float_space: deglib.di
     total_time_us = (time.perf_counter() - start_time) * 1e6
     time_per_query_us = total_time_us / max(query_count, 1)
     linear_baseline_us = time_per_query_us * 2
-    print(f"Linear search baseline: {int(time_per_query_us)}us per query (total: {int(total_time_us / 1000)}ms for {query_count} queries) with min distance {min_dist:.6f}")
+    print(
+        f"Linear search baseline: {int(time_per_query_us)}us per query (total: {int(total_time_us / 1000)}ms for {query_count} queries) with min distance {min_dist:.6f}"
+    )
     return linear_baseline_us
+
 
 def run_static_benchmark(
     dataset_key: str,
@@ -104,11 +114,11 @@ def run_static_benchmark(
     instruction_set: str,
     build_threads: int,
     max_base_vecs: int | None,
-    no_show: bool
+    no_show: bool,
 ):
     resolved_key = resolve_dataset_key(dataset_key)
     preset = get_preset(resolved_key)
-    
+
     # Load dataset
     base_vecs, query_vecs, gt_vecs, explore_entry, explore_gt, meta = load_dataset(resolved_key, cache_dir)
 
@@ -234,7 +244,9 @@ def run_static_benchmark(
         anns_recalls.append(recall)
         anns_qps.append(qps)
 
-        print(f"eps {eps:6.3f} \trecall {recall:.5f} \ttime_us_per_query {time_us_per_query:6d}us \t{qps:9.1f} qps \tsearch time: {int(search_time_us / 1000):6d}ms")
+        print(
+            f"eps {eps:6.3f} \trecall {recall:.5f} \ttime_us_per_query {time_us_per_query:6d}us \t{qps:9.1f} qps \tsearch time: {int(search_time_us / 1000):6d}ms"
+        )
 
         if linear_baseline_us > 0 and time_us_per_query > linear_baseline_us:
             print(f"eps {eps:.3f} \t ABORTED ({time_us_per_query}us/query > {int(linear_baseline_us)}us baseline)")
@@ -245,7 +257,7 @@ def run_static_benchmark(
             break
 
     plot_anns_results(
-        dataset_name=meta['name'],
+        dataset_name=meta["name"],
         instruction_set=instruction_set,
         search_k=search_k,
         anns_recalls=anns_recalls,
@@ -305,10 +317,14 @@ def run_static_benchmark(
             explore_recalls.append(recall)
             explore_qps.append(qps)
 
-            print(f"k {actual_explore_k:5d}, max_distance_count {max_dist:6d}, recall {recall:.4f}, time_us_per_query {time_us_per_query:6d}us, {qps:9.1f} qps")
+            print(
+                f"k {actual_explore_k:5d}, max_distance_count {max_dist:6d}, recall {recall:.4f}, time_us_per_query {time_us_per_query:6d}us, {qps:9.1f} qps"
+            )
 
             if linear_baseline_us > 0 and time_us_per_query > linear_baseline_us:
-                print(f"max_distance_count {max_dist:5d}, k {actual_explore_k:4d}, ABORTED ({time_us_per_query}us/query > {int(linear_baseline_us)}us baseline)")
+                print(
+                    f"max_distance_count {max_dist:5d}, k {actual_explore_k:4d}, ABORTED ({time_us_per_query}us/query > {int(linear_baseline_us)}us baseline)"
+                )
                 break
 
             if recall == last_recall:
@@ -321,13 +337,14 @@ def run_static_benchmark(
                 break
 
         plot_explore_results(
-            dataset_name=meta['name'],
+            dataset_name=meta["name"],
             instruction_set=instruction_set,
             explore_k=actual_explore_k,
             explore_recalls=explore_recalls,
             explore_qps=explore_qps,
             no_show=no_show,
         )
+
 
 def main():
     parser = argparse.ArgumentParser(description="DEG Benchmark Tool: bench_static_data (Python)")
@@ -339,10 +356,8 @@ def main():
         help="Dataset name (e.g. sift1m, deep1m, glove, audio, enron, all) (default: audio)",
     )
     parser.add_argument(
-        "--graph-path",
-        type=Path,
-        default=None,
-        help="Save generated .deg graph files to this path. (default: none)")
+        "--graph-path", type=Path, default=None, help="Save generated .deg graph files to this path. (default: none)"
+    )
     parser.add_argument(
         "--instruction",
         choices=["auto", "scalar", "avx2", "avx512"],
@@ -354,33 +369,21 @@ def main():
         action="store_true",
         help="Force rebuilding graph files even if they exist",
     )
-    parser.add_argument(
-        "--threads",
-        type=int,
-        default=1,
-        help="Number of threads used for building the graph"
-    )
+    parser.add_argument("--threads", type=int, default=1, help="Number of threads used for building the graph")
     parser.add_argument(
         "--cache-dir",
         type=str,
         default=None,
-        help="Custom directory to cache datasets (default: ~/.cache/deg_datasets)"
+        help="Custom directory to cache datasets (default: ~/.cache/deg_datasets)",
     )
+    parser.add_argument("--no-show", action="store_true", help="Do not display interactive plot window")
     parser.add_argument(
-        "--no-show",
-        action="store_true",
-        help="Do not display interactive plot window"
-    )
-    parser.add_argument(
-        "--max-base-vecs",
-        type=int,
-        default=None,
-        help="Optional limit on base vectors for quick debugging/testing"
+        "--max-base-vecs", type=int, default=None, help="Optional limit on base vectors for quick debugging/testing"
     )
 
     args = parser.parse_args()
 
-    dataset_name = args.dataset 
+    dataset_name = args.dataset
     cache_dir = Path(args.cache_dir) if args.cache_dir else get_default_cache_dir()
 
     # Detect CPU Instruction Set
@@ -413,6 +416,7 @@ def main():
         )
 
     print("\nStatic Benchmark Finished Successfully.")
+
 
 if __name__ == "__main__":
     main()

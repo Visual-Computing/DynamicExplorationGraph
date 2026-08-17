@@ -1,6 +1,7 @@
 """
 dataset_utils.py — Helper utilities for downloading and loading SISAP 2026 Task 1 datasets (HDF5 format).
 """
+
 from __future__ import annotations
 
 import os
@@ -25,6 +26,7 @@ def ensure_small_dataset(cache_dir: Path | None = None) -> Path:
     # 1. Try HuggingFace Hub native download/cache
     try:
         from huggingface_hub import hf_hub_download
+
         downloaded = hf_hub_download(
             repo_id=HF_REPO_ID,
             filename=HF_SMALL_FILE,
@@ -49,9 +51,12 @@ def ensure_small_dataset(cache_dir: Path | None = None) -> Path:
 
     # Fallback to direct HTTP download with progress reporter
     print(f"Downloading small dataset from {HF_SMALL_URL} to {target_path}...")
+
     def _progress(count, block_size, total_size):
         percent = int(count * block_size * 100 / max(total_size, 1))
-        sys.stdout.write(f"\rDownloading dataset... {percent}% ({count * block_size / 1024 / 1024:.1f} MB / {total_size / 1024 / 1024:.1f} MB)")
+        sys.stdout.write(
+            f"\rDownloading dataset... {percent}% ({count * block_size / 1024 / 1024:.1f} MB / {total_size / 1024 / 1024:.1f} MB)"
+        )
         sys.stdout.flush()
 
     urllib.request.urlretrieve(HF_SMALL_URL, target_path, _progress)
@@ -71,7 +76,7 @@ def load_hdf5_dataset(file_path: str | Path, max_vecs: int | None = None) -> tup
     with h5py.File(path, "r") as f:
         if "train" not in f:
             raise KeyError(f"Expected dataset key 'train' not found in {path}. Keys found: {list(f.keys())}")
-        
+
         dataset = f["train"]
         if max_vecs is not None and max_vecs < dataset.shape[0]:
             train_data = dataset[:max_vecs]
@@ -116,7 +121,7 @@ def generate_synthetic_dataset(num_vecs: int = 2000, dims: int = 1024, seed: int
 
     # Compute exact inner product matrix for ground truth top 15
     sim_matrix = np.dot(data, data.T)
-    np.fill_diagonal(sim_matrix, -np.inf) # Exclude self
+    np.fill_diagonal(sim_matrix, -np.inf)  # Exclude self
     gt_data = np.argsort(-sim_matrix, axis=1)[:, :15]
 
     return data, gt_data

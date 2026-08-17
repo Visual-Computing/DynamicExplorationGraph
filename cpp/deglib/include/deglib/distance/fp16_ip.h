@@ -4,6 +4,7 @@
 #include "deglib/distance/residual_mode.h"
 
 #include <cmath>
+#include <stdexcept>
 #include <variant>
 
 namespace deglib::distances::fp16_ip {

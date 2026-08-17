@@ -1,6 +1,7 @@
 """
 dataset_utils.py — Helper utilities for downloading and loading SISAP 2026 Task 2 MIPS dataset (HDF5 format).
 """
+
 from __future__ import annotations
 
 import sys
@@ -24,6 +25,7 @@ def ensure_mips_dataset(cache_dir: Path | None = None) -> Path:
     # 1. Try HuggingFace Hub native download/cache
     try:
         from huggingface_hub import hf_hub_download
+
         downloaded = hf_hub_download(
             repo_id=HF_REPO_ID,
             filename=HF_MIPS_FILE,
@@ -48,9 +50,12 @@ def ensure_mips_dataset(cache_dir: Path | None = None) -> Path:
 
     # Fallback to direct HTTP download
     print(f"Downloading llama-dev dataset from {HF_MIPS_URL} to {target_path}...")
+
     def _progress(count, block_size, total_size):
         percent = int(count * block_size * 100 / max(total_size, 1))
-        sys.stdout.write(f"\rDownloading dataset... {percent}% ({count * block_size / 1024 / 1024:.1f} MB / {total_size / 1024 / 1024:.1f} MB)")
+        sys.stdout.write(
+            f"\rDownloading dataset... {percent}% ({count * block_size / 1024 / 1024:.1f} MB / {total_size / 1024 / 1024:.1f} MB)"
+        )
         sys.stdout.flush()
 
     urllib.request.urlretrieve(HF_MIPS_URL, target_path, _progress)
@@ -114,4 +119,3 @@ def compute_recall(gt_knns: np.ndarray, result_knns: np.ndarray, k_top: int) -> 
         total_hits += len(gt_set_0based.intersection(res_set))
 
     return total_hits / float(n_queries * k_top)
-

@@ -1,15 +1,15 @@
 import enum
 import sys
 import time
-from typing import Callable, Iterable, Union
+from collections.abc import Callable, Iterable
 
-import numpy as np
 import deglib_cpp
+import numpy as np
 
-from .distances import FloatSpace, Metric
 from .cpu import InstructionSet
+from .distances import FloatSpace, Metric
 from .graph import DynamicExplorationGraph
-from .utils import assure_array, InvalidShapeException
+from .utils import InvalidShapeException, assure_array
 
 
 class OptimizationTarget(enum.IntEnum):
@@ -39,7 +39,7 @@ class OptimizationTarget(enum.IntEnum):
         elif self == OptimizationTarget.LowLID:
             return deglib_cpp.OptimizationTarget.LowLID
         else:
-            raise ValueError("Unknown OptimizationTarget: {}".format(self))
+            raise ValueError(f"Unknown OptimizationTarget: {self}")
 
 
 class GraphBuilder:
@@ -81,8 +81,7 @@ class GraphBuilder:
         :param swap_tries: Number of improvement attempts per build step
         :param additional_swap_tries: Additional improvement attempts after a successful improvement
         """
-        if extend_k < graph.get_edges_per_vertex():
-            extend_k = graph.get_edges_per_vertex()
+        extend_k = max(extend_k, graph.get_edges_per_vertex())
         self.builder_cpp = deglib_cpp.GraphBuilder(
             graph.dynamic_exploration_graph_cpp,
             seed,
@@ -115,7 +114,7 @@ class GraphBuilder:
         if len(feature.shape) == 1:
             feature = feature.reshape(1, -1)
         if len(feature.shape) != 2:
-            raise InvalidShapeException("invalid feature shape: {}".format(feature.shape))
+            raise InvalidShapeException(f"invalid feature shape: {feature.shape}")
         valid_dtype = self.graph.get_feature_space().metric().get_dtype()
         feature = assure_array(feature, "feature", valid_dtype)
 
@@ -126,8 +125,8 @@ class GraphBuilder:
             external_label = np.array(external_label, dtype=np.uint32)
         assure_array(external_label, "external_label", np.uint32)
 
-        assert feature.shape[0] == external_label.shape[0], "Got {} features, but {} labels".format(
-            feature.shape[0], external_label.shape[0]
+        assert feature.shape[0] == external_label.shape[0], (
+            f"Got {feature.shape[0]} features, but {external_label.shape[0]} labels"
         )
 
         self.builder_cpp.add_entry(external_label, feature)
@@ -206,7 +205,7 @@ class GraphBuilder:
         return self.builder_cpp.get_batch_size()
 
     def build(
-        self, callback: Union[Callable[[deglib_cpp.BuilderStatus], None], str, None] = None, infinite: bool = False
+        self, callback: Callable[[deglib_cpp.BuilderStatus], None] | str | None = None, infinite: bool = False
     ) -> deglib_cpp.BuilderStatus:
         """
         Build the graph. This could be run on a separate thread in an infinite loop. Call stop() to end this process.
@@ -242,12 +241,12 @@ class GraphBuilder:
         :return: String representation showing the number of vertices added
         :rtype: str
         """
-        return "GraphBuilder(vertices_added={})".format(self.graph.size())
+        return f"GraphBuilder(vertices_added={self.graph.size()})"
 
 
 def build_from_data(
     data: np.ndarray,
-    labels: Union[Iterable[int], np.ndarray, None] = None,
+    labels: Iterable[int] | np.ndarray | None = None,
     edges_per_vertex: int = 32,
     capacity: int = -1,
     metric: Metric | str = Metric.FP32_L2,
@@ -262,7 +261,7 @@ def build_from_data(
     swap_tries: int = 0,
     additional_swap_tries: int = 0,
     thread_count: int = 0,
-    callback: Union[Callable[[deglib_cpp.BuilderStatus], None], str, None] = None,
+    callback: Callable[[deglib_cpp.BuilderStatus], None] | str | None = None,
 ) -> DynamicExplorationGraph:
     """
     Create a new graph built from the given data using a GraphBuilder.

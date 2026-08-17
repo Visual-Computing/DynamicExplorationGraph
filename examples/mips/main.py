@@ -1,7 +1,7 @@
 """
 main.py — Maximum Inner Product Search (MIPS) Example (SISAP Challenge 2026 Task 2 mode5_flas).
 
-Demonstrates fast construction and exploration of a MIPS graph on high-dimensional vectors 
+Demonstrates fast construction and exploration of a MIPS graph on high-dimensional vectors
 (Llama embeddings) using Dynamic Exploration Graph (DEG), (d+1)-dimensional L2 transformation,
 1D FLAS pre-sorting, and FP16 inner product search.
 
@@ -9,6 +9,7 @@ Usage
 -----
     uv run main.py                                      # Runs benchmark with default dataset
 """
+
 from __future__ import annotations
 
 import argparse
@@ -81,7 +82,15 @@ def plot_mips_results(
 
     fig, ax = plt.subplots(figsize=(8, 6))
 
-    ax.plot(search_times_ms, recalls, marker="o", color="#C44E52", linewidth=2, markersize=7, label=f"DEG MIPS (eps={eps_search})")
+    ax.plot(
+        search_times_ms,
+        recalls,
+        marker="o",
+        color="#C44E52",
+        linewidth=2,
+        markersize=7,
+        label=f"DEG MIPS (eps={eps_search})",
+    )
 
     for t, r, md in zip(search_times_ms, recalls, max_dists):
         ax.annotate(
@@ -91,7 +100,7 @@ def plot_mips_results(
             textcoords="offset points",
             fontsize=9,
             fontweight="bold",
-            color="#2B2B2B"
+            color="#2B2B2B",
         )
 
     ax.set_xlabel("Total Search Time (ms)", fontsize=11, fontweight="bold")
@@ -158,18 +167,24 @@ def construct_and_search_mips(
 
     n_vecs, dims = train_vectors.shape
     n_queries = query_vectors.shape[0]
-    print(f"Dataset shape: {n_vecs} train vectors, {n_queries} queries, {dims} dimensions (dtype: {train_vectors.dtype})")
-    print(f"MIPS Config: k_top={k_top}, k_graph={k_graph}, k_ext={k_ext}, eps_ext={eps_ext}, use_flas={use_flas}, "
-          f"opt_target={optimization_target.name}, "
-          f"build_threads={build_threads}, search_threads={search_threads}, num_runs={num_runs}, "
-          f"instruction={instruction.name}")
+    print(
+        f"Dataset shape: {n_vecs} train vectors, {n_queries} queries, {dims} dimensions (dtype: {train_vectors.dtype})"
+    )
+    print(
+        f"MIPS Config: k_top={k_top}, k_graph={k_graph}, k_ext={k_ext}, eps_ext={eps_ext}, use_flas={use_flas}, "
+        f"opt_target={optimization_target.name}, "
+        f"build_threads={build_threads}, search_threads={search_threads}, num_runs={num_runs}, "
+        f"instruction={instruction.name}"
+    )
 
     # 1. (d+1)-dimensional L2 Transformation Phase
     t0 = time.perf_counter()
     train_transformed, max_norm = mips_l2_transform(train_vectors)
     t_transform = time.perf_counter() - t0
     new_dims = train_transformed.shape[1]
-    print(f"L2 Transformation completed in {t_transform * 1000:.2f}ms (Max norm M = {max_norm:.6f}, new_dims = {new_dims})")
+    print(
+        f"L2 Transformation completed in {t_transform * 1000:.2f}ms (Max norm M = {max_norm:.6f}, new_dims = {new_dims})"
+    )
 
     # 2. 1D FLAS Pre-Sorting Phase
     t0 = time.perf_counter()
@@ -178,7 +193,9 @@ def construct_and_search_mips(
     if use_flas:
         flas_space = FloatSpace.create(new_dims, Metric.FP32_L2)
         dist_before = compute_1d_distortion(train_transformed)
-        print(f"Running FLAS 1D Pre-sorting: N={n_vecs}, dim={new_dims}, decay={flas_radius_decay}, metric={flas_space.metric().name} ({flas_space.get_instruction().name}), threads={build_threads}...")
+        print(
+            f"Running FLAS 1D Pre-sorting: N={n_vecs}, dim={new_dims}, decay={flas_radius_decay}, metric={flas_space.metric().name} ({flas_space.get_instruction().name}), threads={build_threads}..."
+        )
 
         def flas_progress_cb(prog: float) -> bool:
             pct = int(prog * 100.0)
@@ -193,20 +210,24 @@ def construct_and_search_mips(
             space=FloatSpace.create(new_dims, Metric.FP32_L2, instruction),
             radius_decay=flas_radius_decay,
             threads=build_threads,
-            callback=flas_progress_cb
+            callback=flas_progress_cb,
         )
         t_flas = time.perf_counter() - t0
 
         dist_after = compute_1d_distortion(train_transformed, sorted_indices)
         improv = dist_before / dist_after if dist_after > 1e-7 else 0.0
-        print(f"FLAS 1D Pre-sorting completed in {t_flas:.3f}s (Distortion: {dist_before:.4f} -> {dist_after:.4f}, improvement: {improv:.2f}x)")
+        print(
+            f"FLAS 1D Pre-sorting completed in {t_flas:.3f}s (Distortion: {dist_before:.4f} -> {dist_after:.4f}, improvement: {improv:.2f}x)"
+        )
     else:
         t_flas = time.perf_counter() - t0
 
     # 3. Graph Construction Phase (in FP32_InnerProduct space for d+1 dims)
     t0 = time.perf_counter()
     build_space = FloatSpace.create(new_dims, Metric.FP32_L2, instruction)
-    print(f"Building graph: k_graph={k_graph}, k_ext={k_ext}, eps_ext={eps_ext:.4f}, opt_target={optimization_target.name}, metric={build_space.metric().name} ({build_space.get_instruction().name}), build_threads={build_threads}...")
+    print(
+        f"Building graph: k_graph={k_graph}, k_ext={k_ext}, eps_ext={eps_ext:.4f}, opt_target={optimization_target.name}, metric={build_space.metric().name} ({build_space.get_instruction().name}), build_threads={build_threads}..."
+    )
     graph = deglib.DynamicExplorationGraph.create_empty(n_vecs, build_space, k_graph)
     builder = deglib.GraphBuilder(
         graph,
@@ -217,7 +238,7 @@ def construct_and_search_mips(
         max_path_length=5,
         swap_tries=0,
         additional_swap_tries=0,
-        optimization_target=optimization_target
+        optimization_target=optimization_target,
     )
     builder.set_thread_count(build_threads)
     builder.set_batch_size(100, 100)
@@ -248,7 +269,9 @@ def construct_and_search_mips(
     t_qconvert = time.perf_counter() - t0
 
     # 6. FP16 Inner Product Search Phase (Sweep over max_dist_list with num_runs averaging)
-    print(f"\n--- FP16 Inner Product Search Sweep (eps_search={eps_search}, search_threads={search_threads}, num_runs={num_runs}) ---")
+    print(
+        f"\n--- FP16 Inner Product Search Sweep (eps_search={eps_search}, search_threads={search_threads}, num_runs={num_runs}) ---"
+    )
     recalls = []
     search_times_ms = []
     qps_list = []
@@ -269,7 +292,7 @@ def construct_and_search_mips(
                 max_distance_computation_count=max_dist,
                 threads=search_threads,
                 return_distances=False,
-                unsorted=False
+                unsorted=False,
             )
             t_search = time.perf_counter() - t0
             run_times.append(t_search)
@@ -287,7 +310,9 @@ def construct_and_search_mips(
         max_dists.append(max_dist)
 
         if recall >= 0:
-            print(f"  max_dist={max_dist:5d} | Recall@{k_top}: {recall * 100.0:6.2f}% | Search Time: {search_time_ms:6.1f}ms | QPS: {qps:8.1f}")
+            print(
+                f"  max_dist={max_dist:5d} | Recall@{k_top}: {recall * 100.0:6.2f}% | Search Time: {search_time_ms:6.1f}ms | QPS: {qps:8.1f}"
+            )
         else:
             print(f"  max_dist={max_dist:5d} | Search Time: {search_time_ms:6.1f}ms | QPS: {qps:8.1f}")
 
@@ -307,7 +332,9 @@ def construct_and_search_mips(
     print(f"FP16 Swap Time:        {t_swap * 1000:8.2f} ms")
     print(f"Total Index Time:      {t_total_index:8.3f} s")
     if best_recall >= 0:
-        print(f"Best Search Time:      {best_search_time * 1000.0:8.1f} ms (max_dist={best_max_dist}, Recall@{k_top}={best_recall * 100.0:.2f}%)")
+        print(
+            f"Best Search Time:      {best_search_time * 1000.0:8.1f} ms (max_dist={best_max_dist}, Recall@{k_top}={best_recall * 100.0:.2f}%)"
+        )
 
     # FINAL SUMMARY table
     total_elapsed_s = t_total_index + (t_qconvert / 1000.0) + (best_search_time / 1000.0)
@@ -384,27 +411,59 @@ def parse_max_dist(s: str) -> list[int]:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Maximum Inner Product Search (MIPS) Example (SISAP Task 2 mode5_flas)")
-    parser.add_argument("--dataset", type=str, default="llama-dev", help="Path to HDF5 dataset file or 'llama-dev' (default: llama-dev)")
+    parser = argparse.ArgumentParser(
+        description="Maximum Inner Product Search (MIPS) Example (SISAP Task 2 mode5_flas)"
+    )
+    parser.add_argument(
+        "--dataset", type=str, default="llama-dev", help="Path to HDF5 dataset file or 'llama-dev' (default: llama-dev)"
+    )
     parser.add_argument("--k-graph", type=int, default=DEFAULT_K_GRAPH, help="Graph degree per vertex")
     parser.add_argument("--k-ext", type=int, default=DEFAULT_K_EXT, help="Builder search size parameter")
     parser.add_argument("--eps-ext", type=float, default=DEFAULT_EPS_EXT, help="Builder search expansion factor")
     parser.add_argument("--eps-search", type=float, default=DEFAULT_EPS_SEARCH, help="Epsilon search factor")
-    parser.add_argument("--flas", action=argparse.BooleanOptionalAction, default=DEFAULT_USE_FLAS, help="Enable or disable FLAS 1D pre-sorting")
-    parser.add_argument("--flas-decay", type=float, default=DEFAULT_FLAS_DECAY, help="FLAS neighborhood radius decay rate")
-    parser.add_argument("--build-threads", type=int, default=DEFAULT_BUILD_THREADS, help="Number of threads for graph building")
-    parser.add_argument("--search-threads", type=int, default=DEFAULT_SEARCH_THREADS, help="Number of parallel threads for query search")
+    parser.add_argument(
+        "--flas",
+        action=argparse.BooleanOptionalAction,
+        default=DEFAULT_USE_FLAS,
+        help="Enable or disable FLAS 1D pre-sorting",
+    )
+    parser.add_argument(
+        "--flas-decay", type=float, default=DEFAULT_FLAS_DECAY, help="FLAS neighborhood radius decay rate"
+    )
+    parser.add_argument(
+        "--build-threads", type=int, default=DEFAULT_BUILD_THREADS, help="Number of threads for graph building"
+    )
+    parser.add_argument(
+        "--search-threads", type=int, default=DEFAULT_SEARCH_THREADS, help="Number of parallel threads for query search"
+    )
     opt_target_choices = [t.name for t in deglib.builder.OptimizationTarget]
-    parser.add_argument("--opt-target", type=parse_opt_target, default=DEFAULT_OPT_TARGET,
-                        choices=opt_target_choices,
-                        help="Optimization target: StreamingData, LowLID, HighLID (default: LowLID)")
-    parser.add_argument("--num-runs", type=int, default=DEFAULT_NUM_RUNS, help="Number of search repetitions for averaging (default: 100)")
-    parser.add_argument("--max-dist", type=parse_max_dist, default=DEFAULT_MAX_DIST_LIST,
-                        help="Comma-separated list of max distance budgets (default: 6000,6500,7000,7500,8000,9000)")
+    parser.add_argument(
+        "--opt-target",
+        type=parse_opt_target,
+        default=DEFAULT_OPT_TARGET,
+        choices=opt_target_choices,
+        help="Optimization target: StreamingData, LowLID, HighLID (default: LowLID)",
+    )
+    parser.add_argument(
+        "--num-runs",
+        type=int,
+        default=DEFAULT_NUM_RUNS,
+        help="Number of search repetitions for averaging (default: 100)",
+    )
+    parser.add_argument(
+        "--max-dist",
+        type=parse_max_dist,
+        default=DEFAULT_MAX_DIST_LIST,
+        help="Comma-separated list of max distance budgets (default: 6000,6500,7000,7500,8000,9000)",
+    )
     instruction_choices = [i.name for i in InstructionSet]
-    parser.add_argument("--instruction", type=parse_instruction, default=DEFAULT_INSTRUCTION_SET,
-                        choices=instruction_choices,
-                        help="SIMD instruction set: Auto, Scalar, AVX2, AVX512 (default: Auto)")
+    parser.add_argument(
+        "--instruction",
+        type=parse_instruction,
+        default=DEFAULT_INSTRUCTION_SET,
+        choices=instruction_choices,
+        help="SIMD instruction set: Auto, Scalar, AVX2, AVX512 (default: Auto)",
+    )
     parser.add_argument("--output-plot", type=str, default=None, help="Path to save timing chart PNG")
     parser.add_argument("--no-show", action="store_true", help="Disable GUI plot display")
 
