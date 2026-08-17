@@ -2,6 +2,9 @@
 
 This example demonstrates how to build and query a **Maximum Inner Product Search (MIPS)** graph using **Dynamic Exploration Graph (DEG)** in Python, based on Task 2 (`mode5_flas`) from the **SISAP 2026 Indexing Challenge**.
 
+> [!NOTE]
+> All runtime and throughput results published in our papers were evaluated using the native C++ implementation (`cpp/`). Due to language bindings and runtime dynamics, Python executions may have a small overhead.
+
 ## Problem & Algorithmic Approach
 
 Standard graph-based nearest neighbor search algorithms (e.g. DEG, HNSW) are optimized for metric spaces such as Euclidean distance ($L_2$). For Maximum Inner Product Search (MIPS), the goal is to find database vectors $x_i$ maximizing $\langle q, x_i \rangle$ for a query vector $q$.

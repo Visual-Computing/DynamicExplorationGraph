@@ -2,6 +2,9 @@
 
 This example demonstrates how to build a **k-Nearest Neighbor Graph (k-NNG)** using **Dynamic Exploration Graph (DEG)** based on Task 1 from the **SISAP 2026 Indexing Challenge**.
 
+> [!NOTE]
+> All runtime and throughput results published in our papers were evaluated using the native C++ implementation (`cpp/`). Due to language bindings and runtime dynamics, Python executions may have a small overhead.
+
 ## Problem & Approach
 
 Given $N$ high-dimensional vectors, the goal of k-NNG construction (self-join) is to compute the top-$K$ ($K=15$) nearest neighbors for every vector in the dataset.

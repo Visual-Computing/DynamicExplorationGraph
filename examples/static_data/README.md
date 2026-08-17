@@ -2,6 +2,9 @@
 
 This example project demonstrates how to download paper datasets from `readme.md`, build a DEG graph with preset parameters, run search queries, measure Recall vs. QPS (Queries Per Second), and display the results plot interactively.
 
+> [!NOTE]
+> All runtime and throughput results published in our papers were evaluated using the native C++ implementation (`cpp/`). Due to language bindings and runtime dynamics, Python executions may have a small overhead.
+
 ## Available Datasets
 
 - `audio` (192D, 53k base vectors, L2 distance)

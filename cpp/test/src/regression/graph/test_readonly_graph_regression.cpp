@@ -405,3 +405,90 @@ TEST(ReadOnlyGraphRegression, SearchAndExplore_EVP_InnerProduct)
               << (total_explore_ms / total_explorations) << " ms/q), "
               << explore_qps << " QPS, recall=" << (explore_recall * 100.0f) << "%\n";
 }
+
+TEST(ReadOnlyGraphRegression, MultiThreadedSearch_HighDim_Scaling)
+{
+    const size_t dim = 1024;
+    const size_t base_count = 10000;
+    const size_t query_count = 100;
+    const size_t num_clusters = 100;
+    const uint32_t edges_per_vertex = 16;
+    const float extend_eps = 0.1f;
+    const float search_eps = 0.001f;
+    const uint32_t search_k = 100;
+    const int benchmark_runs = 100;
+
+    std::vector<float> base_data;
+    std::vector<float> query_data;
+    generate_synthetic_clustered_dataset(base_count, dim, base_data, query_data, query_count, num_clusters);
+
+    deglib::distances::FloatSpace feature_space(dim, deglib::distances::Metric::FP32_L2);
+    auto dist_func = feature_space.get_dist_func();
+    auto gt_data = compute_groundtruth(base_data, base_count, query_data, query_count, dim, search_k, dist_func);
+
+    deglib::graph::SizeBoundedGraph mutable_graph(static_cast<uint32_t>(base_count), edges_per_vertex, feature_space);
+
+    std::mt19937 rnd(42);
+    deglib::builder::EvenRegularGraphBuilder builder(
+        mutable_graph, rnd, deglib::builder::OptimizationTarget::LowLID, edges_per_vertex, extend_eps, 0, 0.0f
+    );
+    builder.setThreadCount(1);
+
+    for (size_t i = 0; i < base_count; ++i) {
+        std::vector<std::byte> feat(dim * sizeof(float));
+        std::memcpy(feat.data(), &base_data[i * dim], dim * sizeof(float));
+        builder.addEntry(static_cast<uint32_t>(i), std::move(feat));
+    }
+    auto dummy_callback = [](deglib::builder::BuilderStatus&) {};
+    builder.build(dummy_callback, false);
+
+    // Convert to ReadOnlyGraph
+    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), edges_per_vertex, feature_space, mutable_graph);
+
+    run_multithreaded_search_benchmark("ReadOnlyGraph FP32_L2 (1024D)", graph, query_data, query_count, dim, search_k, search_eps, gt_data, {1, 2, 4, 8}, benchmark_runs);
+}
+
+TEST(ReadOnlyGraphRegression, MultiThreadedSearch_LowDim_Scaling)
+{
+    const size_t dim = 64;
+    const size_t base_count = 100000;
+    const size_t query_count = 100;
+    const size_t num_clusters = 1000;
+    const uint32_t edges_per_vertex = 32;
+    const float extend_eps = 0.1f;
+    const float search_eps = 0.01f;
+    const uint32_t search_k = 10;
+    const int benchmark_runs = 200;
+
+    std::vector<float> base_data;
+    std::vector<float> query_data;
+    generate_synthetic_clustered_dataset(base_count, dim, base_data, query_data, query_count, num_clusters);
+
+    deglib::distances::FloatSpace feature_space(dim, deglib::distances::Metric::FP32_L2);
+    auto dist_func = feature_space.get_dist_func();
+    auto gt_data = compute_groundtruth(base_data, base_count, query_data, query_count, dim, search_k, dist_func);
+
+    deglib::graph::SizeBoundedGraph mutable_graph(static_cast<uint32_t>(base_count), edges_per_vertex, feature_space);
+
+    std::mt19937 rnd(42);
+    deglib::builder::EvenRegularGraphBuilder builder(
+        mutable_graph, rnd, deglib::builder::OptimizationTarget::LowLID, edges_per_vertex, extend_eps, 0, 0.0f
+    );
+    builder.setThreadCount(1);
+
+    for (size_t i = 0; i < base_count; ++i) {
+        std::vector<std::byte> feat(dim * sizeof(float));
+        std::memcpy(feat.data(), &base_data[i * dim], dim * sizeof(float));
+        builder.addEntry(static_cast<uint32_t>(i), std::move(feat));
+    }
+    auto dummy_callback = [](deglib::builder::BuilderStatus&) {};
+    builder.build(dummy_callback, false);
+
+    // Convert to ReadOnlyGraph
+    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), edges_per_vertex, feature_space, mutable_graph);
+
+    run_multithreaded_search_benchmark("ReadOnlyGraph FP32_L2 (64D)", graph, query_data, query_count, dim, search_k, search_eps, gt_data, {1, 2, 4, 8}, benchmark_runs);
+}
+
+
+

@@ -131,7 +131,7 @@ The following standard datasets are used for benchmarking and evaluation:
 | GloVe-100 | `glove-100.tar.gz` | 100       | 1,183,514    | 10,000        | [Stanford GloVe](https://nlp.stanford.edu/projects/glove/) |
 
 > [!NOTE]
-> When executing the benchmarks in [cpp/](cpp/), datasets are automatically downloaded and prepared in the configured data directory on first run.
+> When executing the benchmarks in [cpp/](cpp/) or the [Python examples](examples/), datasets are automatically downloaded and prepared in the configured data directory on first run.
 
 ### Pre-built Graphs
 

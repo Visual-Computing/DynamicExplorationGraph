@@ -4,6 +4,9 @@ Python mirror of `cpp/bench/src/bench_dynamic_data.cpp`.
 
 Builds and evaluates DEG graphs under three dynamic data streaming conditions and measures ANNS recall vs. QPS performance against the **half-dataset ground truth** (first half of base vectors).
 
+> [!NOTE]
+> All runtime and throughput results published in our papers were evaluated using the native C++ implementation (`cpp/`). Due to language bindings and runtime dynamics, Python executions may have a small overhead.
+
 ## Tested Data Stream Patterns
 
 | Stream Type | Description |

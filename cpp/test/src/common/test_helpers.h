@@ -755,6 +755,135 @@ inline static void run_regression_test(const char* name, deglib::distances::Metr
 }
 
 // ---------------------------------------------------------------------------
+// Multi-threaded Search Benchmark Helper
+// ---------------------------------------------------------------------------
+template <typename GraphType>
+inline void run_multithreaded_search_benchmark(
+    const std::string& name,
+    const GraphType& graph,
+    const std::vector<float>& query_data,
+    size_t query_count,
+    size_t dim,
+    uint32_t search_k,
+    float search_eps,
+    const std::vector<std::vector<uint32_t>>& gt_data,
+    const std::vector<uint32_t>& thread_counts = {1, 2, 4, 8},
+    size_t num_runs = 50)
+{
+    const size_t feature_bytes = dim * sizeof(float);
+    const std::byte* query_bytes = reinterpret_cast<const std::byte*>(query_data.data());
+
+    std::cout << "\n--- [" << name << "] Multi-Threaded Search Scaling ---" << std::endl;
+
+    double baseline_qps = 0.0;
+
+    for (uint32_t num_threads : thread_counts)
+    {
+        // Warmup
+        {
+            std::vector<std::thread> warmup_threads;
+            warmup_threads.reserve(num_threads);
+            for (uint32_t t = 0; t < num_threads; ++t)
+            {
+                warmup_threads.emplace_back([&, t]() {
+                    size_t q_start = (t * query_count) / num_threads;
+                    size_t q_end = ((t + 1) * query_count) / num_threads;
+                    for (size_t q = q_start; q < q_end; ++q)
+                    {
+                        const std::byte* q_ptr = query_bytes + q * feature_bytes;
+                        std::span<const float> q_span(reinterpret_cast<const float*>(q_ptr), dim);
+                        auto result = graph.search(q_span, search_k, search_eps, nullptr, 0);
+                    }
+                });
+            }
+            for (auto& wt : warmup_threads) wt.join();
+        }
+
+        // Measured benchmark runs: spawn threads once and run all benchmark iterations inside workers
+        std::atomic<size_t> total_correct{0};
+        std::vector<std::thread> workers;
+        workers.reserve(num_threads);
+
+        auto t_start = std::chrono::high_resolution_clock::now();
+
+        for (uint32_t t = 0; t < num_threads; ++t)
+        {
+            workers.emplace_back([&, t]() {
+                size_t local_correct = 0;
+                size_t q_start = (t * query_count) / num_threads;
+                size_t q_end = ((t + 1) * query_count) / num_threads;
+
+                for (size_t r = 0; r < num_runs; ++r)
+                {
+                    for (size_t q = q_start; q < q_end; ++q)
+                    {
+                        const std::byte* q_ptr = query_bytes + q * feature_bytes;
+                        std::span<const float> q_span(reinterpret_cast<const float*>(q_ptr), dim);
+                        auto result = graph.search(q_span, search_k, search_eps, nullptr, 0);
+
+                        if (r == 0)
+                        {
+                            std::unordered_set<uint32_t> gt_set;
+                            if (!gt_data.empty() && q < gt_data.size())
+                            {
+                                size_t eval_k = std::min(static_cast<size_t>(search_k), gt_data[q].size());
+                                for (size_t i = 0; i < eval_k; ++i)
+                                {
+                                    gt_set.insert(gt_data[q][i]);
+                                }
+                            }
+
+                            while (!result.empty())
+                            {
+                                auto top_item = result.top();
+                                result.pop();
+                                uint32_t ext_label = graph.getExternalLabel(top_item.getIdentifier());
+                                if (gt_set.count(ext_label))
+                                {
+                                    local_correct++;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                total_correct += local_correct;
+            });
+        }
+
+        for (auto& worker : workers)
+        {
+            worker.join();
+        }
+
+        auto t_end = std::chrono::high_resolution_clock::now();
+        double duration_secs = std::chrono::duration<double>(t_end - t_start).count();
+        size_t total_queries = query_count * num_runs;
+        double avg_qps = static_cast<double>(total_queries) / duration_secs;
+        double avg_recall = static_cast<double>(total_correct.load()) / static_cast<double>(query_count * search_k);
+
+        if (num_threads == 1 || baseline_qps == 0.0)
+        {
+            baseline_qps = avg_qps;
+            std::cout << "  Threads: " << num_threads
+                      << " | QPS: " << std::fixed << std::setprecision(1) << avg_qps
+                      << " | Recall: " << std::setprecision(3) << avg_recall
+                      << " | Speedup: 1.00x (baseline)" << std::endl;
+        }
+        else
+        {
+            double speedup = avg_qps / baseline_qps;
+            std::cout << "  Threads: " << num_threads
+                      << " | QPS: " << std::fixed << std::setprecision(1) << avg_qps
+                      << " | Recall: " << std::setprecision(3) << avg_recall
+                      << " | Speedup: " << std::setprecision(2) << speedup << "x" << std::endl;
+        }
+
+        EXPECT_GE(avg_recall + 1e-5, 0.85);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Checksums for dataset determinism verification
 // ---------------------------------------------------------------------------
 

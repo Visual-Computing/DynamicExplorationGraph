@@ -4,6 +4,9 @@ This directory contains standalone Python projects demonstrating various feature
 
 Each directory inside `examples/` is a self-contained [`uv`](https://docs.astral.sh/uv/) project with its own `pyproject.toml`.
 
+> [!NOTE]
+> All runtime and throughput results published in our papers were evaluated using the native C++ implementation (`cpp/`). Due to language bindings and runtime dynamics, Python executions may have a small overhead.
+
 ## Prerequisites & UV Setup
 
 We use [`uv`](https://docs.astral.sh/uv/) for fast Python environment and dependency management.
