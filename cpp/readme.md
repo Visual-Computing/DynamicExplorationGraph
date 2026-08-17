@@ -224,13 +224,13 @@ You can configure the dataset path using any of the following methods (evaluated
 
 ## Architecture & API Reference
 
-For a complete breakdown of namespaces, class hierarchies, and header layouts, refer to [ARCHITECTURE.md](ARCHITECTURE.md):
+For a complete breakdown of namespaces, class hierarchies, and public operations, refer to [API.md](API.md):
 
 - `deglib::`: High-level user facade (`DynamicExplorationGraph`).
 - `deglib::graph::`: Low-level graph representations (`SizeBoundedGraph`, `DynamicGraph`, `ReadOnlyGraph`, `InternalGraph`).
 - `deglib::builder::`: Construction and multithreaded builders (`EvenRegularGraphBuilder`).
 - `deglib::distances::`: Feature spaces and SIMD metrics (`FloatSpace`, `Metric`).
-- `deglib::optimization::`: Graph topology refinement and edge pruning.
+- `deglib::optimization::`: Graph topology refinement, FLAS pre-sorting, quantization, and edge pruning.
 - `deglib::analysis::`: Graph health metrics, degree statistics, and reachability.
 
 ---

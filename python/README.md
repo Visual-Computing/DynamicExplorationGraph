@@ -206,6 +206,12 @@ Controls the topology optimization strategy:
 
 ---
 
+## API Reference
+
+For a complete overview of all Python modules, classes, and function signatures, see [API.md](API.md).
+
+---
+
 ## Example Projects
 
 Ready-to-run example scripts with visual progress and evaluation are located in the [examples/](../examples/) directory:
