@@ -18,6 +18,7 @@
 #include <limits>
 #include <queue>
 #include <random>
+#include <stdexcept>
 #include <unordered_map>
 
 namespace deglib::graph {

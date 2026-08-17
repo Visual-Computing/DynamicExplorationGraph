@@ -8,7 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <deque>
+#include <stdexcept>
 #include <variant>
 #include <vector>
 
