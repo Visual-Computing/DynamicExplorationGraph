@@ -11,7 +11,7 @@ Given $N$ high-dimensional vectors, the goal of k-NNG construction (self-join) i
 
 The approach demonstrates **Mode 4 (`evp-rerank`)**, which achieves state-of-the-art trade-offs between construction speed and neighbor recall ($\ge 88\%$):
 
-1. **EVP Quantization**: Feature vectors are converted to compact sparse EVP-bit representations using the C++ `deglib_cpp.quantize_batch` function (`--non-zeros 512`).
+1. **EVP Quantization**: Feature vectors are converted to compact sparse EVP-bit representations using `deglib.optimization.quantize_batch` (`--non-zeros 512`).
 2. **DEG Construction**: A dynamic exploration graph is constructed using DEG's `GraphBuilder` with the `EVP_InnerProduct` metric for fast quantized distance computation.
 3. **Graph Exploration**: Exploration for vertex $i$ walks the DEG graph neighborhood using fast EVP bit-level inner product distances to collect candidates (`evpK = 50`).
 4. **FP16 Candidate Reranking**: Exact inner-product distances are computed using `deglib_cpp.floats_to_fp16` and `deglib_cpp.fp16_to_floats` for candidate sets to produce final $k$-nearest neighbor edges.

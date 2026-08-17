@@ -629,7 +629,7 @@ py::array_t<float> float_space_compute_distances(const deglib::distances::FloatS
     return result;
 }
 
-py::object float_space_rerank(
+py::object search_rerank(
     const deglib::distances::FloatSpace& space,
     py::array queries,
     py::array_t<uint32_t> candidate_indices,
@@ -1113,16 +1113,15 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def("get_data_size", &deglib::distances::FloatSpace::get_data_size)
         .def("get_instruction", &deglib::distances::FloatSpace::get_instruction)
         .def("compute_distance", &float_space_compute_distance, py::arg("vec1"), py::arg("vec2"))
-        .def("compute_distances", &float_space_compute_distances, py::arg("query"), py::arg("targets"))
-        .def(
-            "rerank", &float_space_rerank, py::arg("queries"), py::arg("candidate_indices"), py::arg("base_vectors") = py::none(), py::arg("k_top") = 0,
-            py::arg("num_threads") = 0, py::arg("return_distances") = true, py::arg("unsorted") = false
-        );
+        .def("compute_distances", &float_space_compute_distances, py::arg("query"), py::arg("targets"));
 
     // quantization functions in distances submodule
-    distances_module.def("quantize_batch", &quantize_batch_wrapper, "Quantize float32 or float16/uint16 vectors to byte-packed EVP format");
     distances_module.def("floats_to_fp16", &floats_to_fp16_wrapper, "Convert float32 array to FP16 (uint16_t)");
     distances_module.def("fp16_to_floats", &fp16_to_floats_wrapper, "Convert FP16 (uint16_t) array to float32");
+
+    // optimization submodule
+    py::module_ optimization_module = m.def_submodule("optimization", "Graph optimization and EVP quantization utilities");
+    optimization_module.def("quantize_batch", &quantize_batch_wrapper, "Quantize float32 or float16/uint16 vectors to byte-packed EVP format");
 
     // search submodule
     py::module_ search_module = m.def_submodule("search", "Search utilities including Filter");
@@ -1138,6 +1137,11 @@ PYBIND11_MODULE(deglib_cpp, m) {
         size_t size = labels_info.shape[0];
         return new deglib::search::Filter(ptr, size, max_value, max_label_count);
     });
+
+    search_module.def(
+        "rerank", &search_rerank, py::arg("space"), py::arg("queries"), py::arg("candidate_indices"), py::arg("base_vectors") = py::none(),
+        py::arg("k_top") = 0, py::arg("num_threads") = 0, py::arg("return_distances") = false, py::arg("unsorted") = false
+    );
 
     // graphs
     py::class_<deglib::DynamicExplorationGraph>(m, "DynamicExplorationGraph")

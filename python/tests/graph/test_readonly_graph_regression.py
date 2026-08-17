@@ -321,9 +321,9 @@ def test_readonly_graph_regression_evp_inner_product():
     search_gt_data = compute_groundtruth_innerproduct(base_data, query_data, search_k)
     explore_gt_data = compute_groundtruth_innerproduct(base_data, explore_data, search_k)
 
-    # Quantize data to EVP using deglib.distances.quantize_batch
-    base_quant = deglib.distances.quantize_batch(base_data, non_zeros=non_zeros, num_threads=8)
-    query_quant = deglib.distances.quantize_batch(query_data, non_zeros=non_zeros, num_threads=8)
+    # Quantize data to EVP using deglib.optimization.quantize_batch
+    base_quant = deglib.optimization.quantize_batch(base_data, non_zeros=non_zeros, num_threads=8)
+    query_quant = deglib.optimization.quantize_batch(query_data, non_zeros=non_zeros, num_threads=8)
 
     # Build DynamicExplorationGraph with EVP_InnerProduct metric
     mutable_graph = deglib.DynamicExplorationGraph.create_empty(

@@ -24,7 +24,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import deglib
-from deglib.distances import FloatSpace, Metric, quantize_batch
+from deglib.distances import FloatSpace, Metric
+from deglib.optimization import quantize_batch
+from deglib.search import rerank
 from dataset_utils import load_hdf5_dataset, ensure_small_dataset, DEFAULT_CACHE_DIR
 
 DEFAULT_K_TOP = 15
@@ -125,7 +127,8 @@ def construct_knng(
     t0 = time.perf_counter()
     rerank_space = FloatSpace.create(dims, Metric.FP16_InnerProduct)
     print(f"Rerank Space: {rerank_space.metric().name} ({rerank_space.get_instruction().name})")
-    final_knng_edges = rerank_space.rerank(
+    final_knng_edges = rerank(
+        space=rerank_space,
         queries=train_vectors,
         candidate_indices=indices,
         base_vectors=train_vectors,

@@ -1,6 +1,7 @@
 import pytest
 import numpy as np
 
+import deglib
 from deglib.distances import FloatSpace, Metric
 
 
@@ -14,7 +15,7 @@ class TestRerankUnit:
         base = np.zeros((1, self.dims), dtype=np.float32)
         candidates = np.array([[0]], dtype=np.uint32)
 
-        result = self.space.rerank(queries, candidates, base, k_top=1)
+        result = deglib.search.rerank(self.space, queries, candidates, base, k_top=1)
         assert result.shape == (1, 1)
         assert result[0, 0] == 0
 
@@ -26,7 +27,7 @@ class TestRerankUnit:
         base[2, 0] = 0.5
         candidates = np.array([[0, 1, 2]], dtype=np.uint32)
 
-        result = self.space.rerank(queries, candidates, base, k_top=2)
+        result = deglib.search.rerank(self.space, queries, candidates, base, k_top=2)
         assert result.shape == (1, 2)
         # Closest 2: idx 2 (dist=0.25), idx 0 (dist=1.0)
         assert result[0, 0] == 2
@@ -40,7 +41,7 @@ class TestRerankUnit:
         base[2, 0] = 0.5
         candidates = np.array([[0, 1, 2]], dtype=np.uint32)
 
-        indices, distances = self.space.rerank(queries, candidates, base, k_top=2, return_distances=True)
+        indices, distances = deglib.search.rerank(self.space, queries, candidates, base, k_top=2, return_distances=True)
         assert indices.shape == (1, 2)
         assert distances.shape == (1, 2)
         assert indices[0, 0] == 2
@@ -56,7 +57,7 @@ class TestRerankUnit:
         base[2, 0] = 3.0
         candidates = np.array([[0, 1, 2]], dtype=np.uint32)
 
-        result = self.space.rerank(queries, candidates, base, k_top=0)
+        result = deglib.search.rerank(self.space, queries, candidates, base, k_top=0)
         assert result.shape == (1, 3)
         assert result[0, 0] == 0
         assert result[0, 1] == 1
@@ -68,7 +69,7 @@ class TestRerankUnit:
         base[0, 0] = 1.0
         candidates = np.array([[0]], dtype=np.uint32)
 
-        result = self.space.rerank(queries, candidates, base, k_top=5)
+        result = deglib.search.rerank(self.space, queries, candidates, base, k_top=5)
         assert result.shape == (1, 1)
         assert result[0, 0] == 0
 
@@ -82,7 +83,7 @@ class TestRerankUnit:
         )
         candidates = np.array([[0, 1], [0, 1]], dtype=np.uint32)
 
-        result = self.space.rerank(queries, candidates, k_top=2)
+        result = deglib.search.rerank(self.space, queries, candidates, k_top=2)
         assert result.shape == (2, 2)
         # Query 0: idx 0 (dist=0), idx 1 (dist=1)
         assert result[0, 0] == 0
@@ -98,7 +99,7 @@ class TestRerankUnit:
         # idx 99 is out of bounds, should be skipped
         candidates = np.array([[0, 99]], dtype=np.uint32)
 
-        result = self.space.rerank(queries, candidates, base, k_top=2)
+        result = deglib.search.rerank(self.space, queries, candidates, base, k_top=2)
         assert result.shape == (1, 2)
         assert result[0, 0] == 0
         assert result[0, 1] == np.iinfo(np.uint32).max  # unfilled candidate is padded with uint32 max
@@ -120,7 +121,7 @@ class TestRerankUnit:
         )
         candidates = np.array([[0, 1], [0, 1]], dtype=np.uint32)
 
-        result = self.space.rerank(queries, candidates, base, k_top=2)
+        result = deglib.search.rerank(self.space, queries, candidates, base, k_top=2)
         assert result.shape == (2, 2)
         # Query 0: idx 0 (dist=0), idx 1 (dist=2)
         assert result[0, 0] == 0
@@ -139,7 +140,7 @@ class TestRerankUnit:
         base[2, 0] = 0.5
         candidates = np.array([[0, 1, 2]], dtype=np.uint32)
 
-        result = space.rerank(query, candidates, base, k_top=2)
+        result = deglib.search.rerank(space, query, candidates, base, k_top=2)
         assert result.shape == (1, 2)
         # Inner product: higher is better → idx 1 (ip=2), idx 0 (ip=1)
         assert result[0, 0] == 1
@@ -153,7 +154,7 @@ class TestRerankUnit:
         base[2, 0] = 0.5
         candidates = np.array([[0, 1, 2]], dtype=np.uint32)
 
-        indices, distances = self.space.rerank(queries, candidates, base, k_top=3, return_distances=True)
+        indices, distances = deglib.search.rerank(self.space, queries, candidates, base, k_top=3, return_distances=True)
         assert indices.shape == (1, 3)
         assert distances.shape == (1, 3)
         # Verify distances are correct and sorted ascending
@@ -178,7 +179,7 @@ class TestRerankUnit:
         )
         candidates = np.array([[0, 1], [0, 1]], dtype=np.uint32)
 
-        result = self.space.rerank(queries, candidates, base, k_top=2, num_threads=4)
+        result = deglib.search.rerank(self.space, queries, candidates, base, k_top=2, num_threads=4)
         assert result.shape == (2, 2)
         assert result[0, 0] == 0
         assert result[0, 1] == 1
@@ -194,11 +195,11 @@ class TestRerankUnit:
         candidates = np.array([[0, 1, 2]], dtype=np.uint32)
 
         # Sorted returns idx 2 then idx 0
-        sorted_res = self.space.rerank(queries, candidates, base, k_top=2, unsorted=False)
+        sorted_res = deglib.search.rerank(self.space, queries, candidates, base, k_top=2, unsorted=False)
         assert sorted_res[0, 0] == 2
         assert sorted_res[0, 1] == 0
 
         # Unsorted returns top 2 without sorting
-        unsorted_res = self.space.rerank(queries, candidates, base, k_top=2, unsorted=True)
+        unsorted_res = deglib.search.rerank(self.space, queries, candidates, base, k_top=2, unsorted=True)
         assert unsorted_res.shape == (1, 2)
         assert set(unsorted_res[0]) == {0, 2}

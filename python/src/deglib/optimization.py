@@ -115,6 +115,15 @@ def mips_l2_transform(database: np.ndarray) -> tuple[np.ndarray, float]:
     return deglib_cpp.mips_l2_transform(db_f32)
 
 
+def quantize_batch(vectors: np.ndarray, non_zeros: int, num_threads: int = 0) -> np.ndarray:
+    """
+    Quantize float32 or float16/uint16 vectors to byte-packed EVP format using C++ multi-threading.
+    """
+    if vectors.dtype == np.float16:
+        vectors = vectors.view(np.uint16)
+    return deglib_cpp.optimization.quantize_batch(vectors, non_zeros, num_threads)
+
+
 def mips_l2_transform_query(queries: np.ndarray) -> np.ndarray:
     """
     Pads query vectors from d-dimensional space to (d+1)-dimensional space
@@ -136,4 +145,5 @@ __all__ = [
     "presort",
     "mips_l2_transform",
     "mips_l2_transform_query",
+    "quantize_batch",
 ]

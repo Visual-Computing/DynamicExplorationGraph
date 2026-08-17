@@ -16,9 +16,9 @@ import deglib
 |---|---|---|
 | [`deglib`](#1-root-package-deglib) | `DynamicExplorationGraph`, `build_from_data`, `load_*` | Main user facade for querying, exploration, and graph lifecycle. |
 | [`deglib.builder`](#2-module-deglibbuilder) | `GraphBuilder`, `OptimizationTarget`, `BuilderStatus`, `build_from_data` | Incremental vector addition/deletion, parallel batch construction, and optimization. |
-| [`deglib.distances`](#3-module-deglibdistances) | `FloatSpace`, `Metric`, `quantize_batch`, `floats_to_fp16`, `fp16_to_floats` | Vector metrics, SIMD feature spaces, batch distance evaluation, and quantization. |
-| [`deglib.search`](#4-module-deglibsearch) | `Filter` | Bitset-based label filtering for ANNS search and exploration. |
-| [`deglib.optimization`](#5-module-degliboptimization) | `prune_*`, `presort`, `mips_l2_*` | MRNG graph pruning, FLAS 1D dataset presorting, and MIPS L2 transformations. |
+| [`deglib.distances`](#3-module-deglibdistances) | `FloatSpace`, `Metric`, `floats_to_fp16`, `fp16_to_floats` | Vector metrics, SIMD feature spaces, and batch distance evaluation. |
+| [`deglib.search`](#4-module-deglibsearch) | `Filter`, `rerank` | Bitset-based label filtering and exact distance candidate reranking for ANNS search. |
+| [`deglib.optimization`](#5-module-degliboptimization) | `prune_*`, `presort`, `mips_l2_*`, `quantize_batch` | MRNG graph pruning, FLAS 1D dataset presorting, MIPS L2 transformations, and EVP quantization. |
 | [`deglib.analysis`](#6-module-deglibanalysis) | `analyze_graph`, `check_*`, `calc_*` | Graph validation, connectivity verification, and reachability metrics. |
 | [`deglib.cpu`](#7-module-deglibcpu) | `InstructionSet`, `has_avx2`, `has_avx512` | Runtime CPU SIMD capability detection and instruction set enum. |
 
@@ -191,7 +191,7 @@ class GraphBuilder:
 Vector metrics, SIMD feature spaces, batch distance evaluation, and quantization.
 
 ```python
-from deglib.distances import FloatSpace, Metric, quantize_batch, floats_to_fp16, fp16_to_floats
+from deglib.distances import FloatSpace, Metric, floats_to_fp16, fp16_to_floats
 
 # Supported distance metrics
 class Metric:
@@ -219,19 +219,8 @@ class FloatSpace:
     # Compute 1D array of distances between query [D] and a batch of targets [N, D]
     compute_distances(query, targets) -> np.ndarray
 
-    # Multi-threaded exact distance candidate reranking in C++.
-    # queries: 2D array [Q, D]
-    # candidate_indices: 2D uint32 array [Q, K_cand]
-    # base_vectors: 2D array [N, D] (defaults to queries if None)
-    # k_top: Number of nearest candidates to return per query (0 = all)
-    # return_distances: If True, returns (indices, distances) tuple
-    rerank(queries, candidate_indices, base_vectors=None, k_top=0, num_threads=0, return_distances=False, unsorted=False)
 
-
-# --- Quantization & Type Conversion ---
-
-# Quantize float32 or float16 vectors to byte-packed EVP format using C++ multithreading
-quantize_batch(vectors, non_zeros, num_threads=0) -> np.ndarray
+# --- Type Conversion ---
 
 # Convert float32 numpy array to uint16-packed FP16 representation
 floats_to_fp16(floats) -> np.ndarray
@@ -244,10 +233,10 @@ fp16_to_floats(fp16_vals) -> np.ndarray
 
 ## 4. Module: `deglib.search`
 
-Bitset-based label filtering for search and exploration.
+Bitset-based label filtering and exact distance candidate reranking for search and exploration.
 
 ```python
-from deglib.search import Filter
+from deglib.search import Filter, rerank
 
 class Filter:
     def __init__(valid_labels, max_value=-1, max_label_count=-1)
@@ -261,13 +250,26 @@ class Filter:
 
     # Static factory supporting None, numpy array, or existing Filter
     create_filter(filter_labels, graph_size) -> cpp_filter
+
+
+# Multi-threaded exact distance candidate reranking in C++.
+# space: FloatSpace used to compute distances (metric + SIMD instruction set)
+# queries: 2D array [Q, D]
+# candidate_indices: 2D uint32 array [Q, K_cand]
+# base_vectors: 2D array [N, D] (defaults to queries if None)
+# k_top: Number of nearest candidates to return per query (0 = all)
+# num_threads: Number of threads (0 = all CPU cores)
+# return_distances: If True, returns (indices, distances) tuple
+# unsorted: If True, skips sorting the resulting candidates
+# Returns 2D uint32 array [Q, k_top] of candidate IDs, or (indices, distances) if return_distances is True.
+rerank(space, queries, candidate_indices, base_vectors=None, k_top=0, num_threads=0, return_distances=False, unsorted=False)
 ```
 
 ---
 
 ## 5. Module: `deglib.optimization`
 
-Graph topology refinement, FLAS 1D dataset presorting, and MIPS L2 transformations.
+Graph topology refinement, FLAS 1D dataset presorting, MIPS L2 transformations, and EVP quantization.
 
 ```python
 from deglib.optimization import (
@@ -276,7 +278,11 @@ from deglib.optimization import (
     presort,
     mips_l2_transform,
     mips_l2_transform_query,
+    quantize_batch,
 )
+
+# Quantize float32 or float16 vectors to byte-packed EVP format using C++ multithreading
+quantize_batch(vectors, non_zeros, num_threads=0) -> np.ndarray
 
 # Remove all edges violating the Monotonic Relative Neighbor Graph (MRNG) rule. Returns removed edge count.
 prune_non_mrng_edges(graph, num_threads=0) -> int

@@ -3,6 +3,7 @@ import numpy as np
 
 import deglib_cpp.search as cpp_search
 
+from deglib.distances import FloatSpace
 from deglib.utils import assure_contiguous
 
 
@@ -48,4 +49,40 @@ class Filter:
         return filter_labels.create_filter_obj(graph_size)
 
 
-__all__ = ["Filter"]
+def rerank(
+    space: FloatSpace,
+    queries: np.ndarray,
+    candidate_indices: np.ndarray,
+    base_vectors: np.ndarray | None = None,
+    k_top: int = 0,
+    num_threads: int = 0,
+    return_distances: bool = False,
+    unsorted: bool = False,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+    """
+    Reranks candidate vectors for queries using SIMD distance computations in C++.
+
+    :param space: FloatSpace used to compute distances (metric + SIMD instruction set).
+    :param queries: 2D array of query vectors (shape: N_queries x D)
+    :param candidate_indices: 2D uint32 array of candidate feature IDs for each query (shape: N_queries x K_cand)
+    :param base_vectors: 2D array of dataset feature vectors (shape: N_base x D). If None, defaults to `queries`.
+    :param k_top: Number of top nearest candidates to return per query (default 0 returns all K_cand sorted).
+    :param num_threads: Number of threads (0 for hardware concurrency).
+    :param return_distances: If True, returns a tuple `(indices, distances)` containing candidate IDs and distance scores.
+    :param unsorted: If True, skips sorting the resulting candidates.
+    :return: 2D uint32 NumPy array of candidate IDs, or tuple `(indices, distances)` if return_distances is True.
+    """
+    cpp_space = space.to_cpp() if hasattr(space, "to_cpp") else space
+    return cpp_search.rerank(
+        cpp_space,
+        queries,
+        candidate_indices.astype(np.uint32, copy=False),
+        base_vectors,
+        k_top,
+        num_threads,
+        return_distances,
+        unsorted,
+    )
+
+
+__all__ = ["Filter", "rerank"]
