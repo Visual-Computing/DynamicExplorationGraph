@@ -42,8 +42,8 @@ jobs:
         CIBW_ARCHS: auto64
         CIBW_BUILD_FRONTEND: "pip; args: --verbose"
         CIBW_ENVIRONMENT: "FORCE_AVX2=1 CMAKE_BUILD_PARALLEL_LEVEL=4"
-        CIBW_ENVIRONMENT_MACOS: "FORCE_AVX2=1 MACOSX_DEPLOYMENT_TARGET=11.00 CMAKE_BUILD_PARALLEL_LEVEL=4"
-        CIBW_SKIP: "cp314t-* pp*win*"
+        CIBW_ENVIRONMENT_MACOS: "FORCE_AVX2=1 MACOSX_DEPLOYMENT_TARGET=13.3 CMAKE_BUILD_PARALLEL_LEVEL=4"
+        CIBW_SKIP: "cp*t-* pp*win*"
 
     # upload artifacts
     - name: Upload Build Artifacts

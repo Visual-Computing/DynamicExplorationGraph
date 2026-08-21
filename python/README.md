@@ -79,8 +79,9 @@ Build source distributions (`sdist`) and binary wheels:
 uv run python -m build
 ```
 
-To build manylinux/musllinux wheels for Linux distribution via PyPI:
+To build manylinux/musllinux wheels for Linux distribution via PyPI (ensure `copy_build_files` has been executed first):
 ```bash
+uv run python setup.py copy_build_files
 cibuildwheel --archs auto64 --output-dir dist
 ```
 

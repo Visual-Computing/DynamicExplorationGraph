@@ -137,14 +137,14 @@ py::object graph_search_single_wrapper(
     }
 
     const size_t count = result.size();
-    py::array_t<uint32_t> result_indices({static_cast<py::ssize_t>(count)});
+    py::array_t<uint32_t> result_indices(static_cast<py::ssize_t>(count));
     py::buffer_info result_indices_info = result_indices.request();
     auto result_indices_ptr = static_cast<uint32_t*>(result_indices_info.ptr);
 
     py::array_t<float> result_distances;
     float* result_distances_ptr = nullptr;
     if (return_distances) {
-        result_distances = py::array_t<float>({static_cast<py::ssize_t>(count)});
+        result_distances = py::array_t<float>(static_cast<py::ssize_t>(count));
         result_distances_ptr = static_cast<float*>(result_distances.request().ptr);
     }
 
@@ -374,14 +374,14 @@ py::object graph_explore_single_wrapper(
     }
 
     const size_t count = result.size();
-    py::array_t<uint32_t> result_indices({static_cast<py::ssize_t>(count)});
+    py::array_t<uint32_t> result_indices(static_cast<py::ssize_t>(count));
     py::buffer_info result_indices_info = result_indices.request();
     auto result_indices_ptr = static_cast<uint32_t*>(result_indices_info.ptr);
 
     py::array_t<float> result_distances;
     float* result_distances_ptr = nullptr;
     if (return_distances) {
-        result_distances = py::array_t<float>({static_cast<py::ssize_t>(count)});
+        result_distances = py::array_t<float>(static_cast<py::ssize_t>(count));
         result_distances_ptr = static_cast<float*>(result_distances.request().ptr);
     }
 
@@ -416,11 +416,11 @@ graph_has_path_wrapper(const G& graph, const std::vector<uint32_t>& entry_vertex
     std::vector<deglib::search::ObjectDistance> path = graph.hasPath(entry_vertex_indices, to_vertex, eps, k);
 
     const size_t count = path.size();
-    py::array_t<uint32_t> result_indices({static_cast<py::ssize_t>(count)});
+    py::array_t<uint32_t> result_indices(static_cast<py::ssize_t>(count));
     py::buffer_info result_indices_info = result_indices.request();
     auto result_indices_ptr = static_cast<uint32_t*>(result_indices_info.ptr);
 
-    py::array_t<float> result_distances({static_cast<py::ssize_t>(count)});
+    py::array_t<float> result_distances(static_cast<py::ssize_t>(count));
     py::buffer_info result_distances_info = result_distances.request();
     auto result_distances_ptr = static_cast<float*>(result_distances_info.ptr);
 
@@ -534,12 +534,12 @@ std::tuple<py::array_t<uint32_t>, py::array_t<float>> dynamic_exploration_graph_
 ) {
     deglib::search::ResultSet result = graph.explore(entry_external_label, k, max_distance_computation_count, eps, include_entry, filter);
 
-    py::array_t<uint32_t> result_indices({static_cast<py::ssize_t>(k)});
+    py::array_t<uint32_t> result_indices(static_cast<py::ssize_t>(k));
     py::buffer_info result_indices_info = result_indices.request();
     auto result_indices_ptr = static_cast<uint32_t*>(result_indices_info.ptr);
     std::fill_n(result_indices_ptr, k, 0);
 
-    py::array_t<float> result_distances({static_cast<py::ssize_t>(k)});
+    py::array_t<float> result_distances(static_cast<py::ssize_t>(k));
     py::buffer_info result_distances_info = result_distances.request();
     auto result_distances_ptr = static_cast<float*>(result_distances_info.ptr);
     std::fill_n(result_distances_ptr, k, std::numeric_limits<float>::quiet_NaN());

@@ -55,6 +55,11 @@ class CopyBuildCommand(Command):
         copy_dirs = [(os.path.join("..", "cpp"), "lib")]
 
         for src, dst in copy_dirs:
+            if not os.path.exists(src):
+                if os.path.exists(dst) and any(Path(dst).iterdir()):
+                    print(f"Source '{src}' not found, but '{dst}' already exists and contains files. Skipping copy.")
+                    continue
+                raise FileNotFoundError(f"Source directory '{src}' does not exist and '{dst}' is not populated.")
             print(f"Copying {src} to {dst}")
             shutil.copytree(src, dst, dirs_exist_ok=True, ignore=ignore_dirs)
         print("Files copied successfully.")

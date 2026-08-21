@@ -79,7 +79,6 @@ class GraphBuilder:
         self.graph = graph
         self.optimization_target = optimization_target
 
-
     def add_entry(self, external_label: int | Iterable[int] | np.ndarray, feature: np.ndarray):
         """
         Provide the builder with new entries to be added to the graph during the build process.
