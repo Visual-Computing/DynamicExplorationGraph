@@ -724,10 +724,13 @@ TEST(EvenRegularGraphBuilder, DynamicExplorationGraphWrapperAndSpanAddEntry) {
     std::mt19937 rng(42);
     deglib::builder::EvenRegularGraphBuilder builder(deg, rng);
 
-    std::vector<float> sample_vector(dims, 1.0f);
+    std::uniform_real_distribution<float> dist(0.0f, 10.0f);
+    std::vector<float> dataset(num_vectors * dims);
+    for (auto& val : dataset) val = dist(rng);
+
     for (uint32_t i = 0; i < num_vectors; ++i) {
-        sample_vector[0] = static_cast<float>(i);
-        builder.addEntry(100 + i, std::span<const float>(sample_vector));
+        std::span<const float> vec(dataset.data() + i * dims, dims);
+        builder.addEntry(100 + i, vec);
     }
 
     auto status = builder.build();
@@ -735,8 +738,8 @@ TEST(EvenRegularGraphBuilder, DynamicExplorationGraphWrapperAndSpanAddEntry) {
     EXPECT_EQ(deg.size(), num_vectors);
 
     // Verify search works on the built graph
-    sample_vector[0] = 5.0f;
-    auto results = deg.search(std::span<const float>(sample_vector), 1);
+    std::span<const float> query(dataset.data() + 5 * dims, dims);
+    auto results = deg.search(query, 1, 0.2f);
     EXPECT_EQ(results.size(), 1u);
     EXPECT_EQ(results.top().getIdentifier(), 105u);  // Closest vector is label 105
     EXPECT_FLOAT_EQ(results.top().getDistance(), 0.0f);

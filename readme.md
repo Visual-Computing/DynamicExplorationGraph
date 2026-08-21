@@ -19,8 +19,8 @@ High-throughput approximate nearest neighbor and exploratory search library impl
 
 - **C++20 header-only library** with native Python bindings (`deglib`)
 - **Dynamic streaming**: Incremental addition, removal, and continuous edge optimization
-- **Multi-threaded construction** and batch vector search with SIMD acceleration (AVX2, AVX-512, NEON)
-- **Supported data types**: `float32`, `uint8`, `float16`
+- **Multi-threaded construction** and batch vector search with SIMD acceleration (AVX2, AVX-512)
+- **Supported data types**: `float32`, `uint8`, `float16`, `evp-bits`
 - **Supported metrics**: Euclidean ($L_2$), Inner Product / Cosine, quantized EVP
 - **Exploratory graph traversal** and label-filtered nearest neighbor search
 - Compact graph serialization and lightweight read-only deployment mode
@@ -61,7 +61,7 @@ print("Distances:", distances)
 graph.save_graph("index.deg")
 ```
 
-For incremental dynamic updates (adding / deleting vectors on the fly) and advanced filtering, see the [Python Tutorials](https://dynamic-exploration-graph.readthedocs.io/en/latest/tutorials/building_graphs.html).
+For more Python examples, check the [examples/](https://github.com/Visual-Computing/DynamicExplorationGraph/blob/main/examples) directory or read the [Official Documentation](https://dynamic-exploration-graph.readthedocs.io/en/latest/tutorials/quickstart.html).
 
 ---
 
@@ -107,8 +107,20 @@ int main() {
 }
 ```
 
-For CMake presets, test execution, and C++ benchmarks, see the [C++ README](cpp/readme.md).
+For full C++ build instructions, CMake presets, and architecture details, refer to the [cpp/ README](https://github.com/Visual-Computing/DynamicExplorationGraph/blob/main/cpp/readme.md).
 
+---
+
+## Repository Structure
+
+```
+DynamicExplorationGraph/
+├── cpp/          # High-performance C++20 Header-Only library, CMake Presets, Tests & Benchmarks
+├── python/       # Python Bindings (deglib), Pytest Suite & Wheel Build Configuration
+├── examples/     # Ready-to-run Python examples (knng, dynamic_data, static_data, mips)
+├── java/         # Java implementation & Benchmarks
+└── docs/         # Sphinx / ReadTheDocs Documentation
+```
 
 ---
 
