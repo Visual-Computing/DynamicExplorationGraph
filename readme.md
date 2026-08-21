@@ -5,12 +5,14 @@ High-throughput approximate nearest neighbor and exploratory search library impl
 <br/>
 
 <div align="center">
+    <a href="https://github.com/Visual-Computing/DynamicExplorationGraph/actions/workflows/cpp-ci.yml"><img src="https://github.com/Visual-Computing/DynamicExplorationGraph/actions/workflows/cpp-ci.yml/badge.svg" alt="CI Build & Tests" /></a>
     <a href="https://link.springer.com/chapter/10.1007/978-981-96-2054-8_25"><img src="https://img.shields.io/badge/Paper-MMM%20'25-salmon" alt="Paper" /></a>
     <a href="https://dynamic-exploration-graph.readthedocs.io/"><img src="https://img.shields.io/badge/docs-ReadTheDocs-blue.svg" alt="Documentation" /></a>
     <a href="https://pypi.org/project/deglib/"><img src="https://img.shields.io/pypi/v/deglib?color=blue" alt="PyPI" /></a>
     <a href="https://github.com/Visual-Computing/DynamicExplorationGraph/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Visual-Computing/DynamicExplorationGraph" alt="License" /></a>
     <a href="https://github.com/Visual-Computing/DynamicExplorationGraph/stargazers"><img src="https://img.shields.io/github/stars/Visual-Computing/DynamicExplorationGraph" alt="GitHub stars" /></a>
 </div>
+
 
 
 ---
@@ -113,10 +115,10 @@ For CMake presets, test execution, and C++ benchmarks, see the [C++ README](cpp/
 ## Performance
 
 **Approximate Nearest Neighbor Search (ANNS)**: Querying unindexed vectors across various graph exploration margins ($\epsilon$).  
-<img src="figures/anns_qps_vs_recall.jpg" alt="ANNS QPS vs Recall" width="48%" />
+<img src="figures/anns_qps_vs_recall.jpg" alt="ANNS QPS vs Recall" />
 
 **Exploratory Search (Indexed Queries)**: Navigating from existing indexed vertices to discover immediate neighbor clusters.
-<img src="figures/exploration_qps_vs_recall.jpg" alt="Exploration QPS vs Recall" width="48%" />
+<img src="figures/exploration_qps_vs_recall.jpg" alt="Exploration QPS vs Recall" />
 
 ---
 
@@ -139,7 +141,9 @@ The following standard datasets and pre-built graph files are supported in bench
 
 ## Citation
 
-If you use DEG in an academic context, please cite our publications:
+If you use the library in an academic context, please consider citing our papers:
+
+> Hezel, N., Barthel, K.U., Schilling, B., Schall, K., Jung, K. Dynamic Exploration Graph: A Novel Approach for Efficient Nearest Neighbor Search in Evolving Multimedia Datasets. MultiMedia Modeling (MMM 2025): 333–347.
 
 ```bibtex
 @article{Hezel2025,
@@ -152,6 +156,8 @@ If you use DEG in an academic context, please cite our publications:
   year      = {2025}
 }
 ```
+
+> Hezel, N., Barthel, K.U., Schall, K., Jung, K. An Exploration Graph with Continuous Refinement for Efficient Multimedia Retrieval. Proceedings of the 2024 International Conference on Multimedia Retrieval (ICMR '24): 657–665.
 
 ```bibtex
 @inproceedings{Hezel2024,
@@ -166,6 +172,7 @@ If you use DEG in an academic context, please cite our publications:
   year      = {2024}
 }
 ```
+
 
 ---
 
