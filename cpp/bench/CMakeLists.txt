@@ -15,3 +15,7 @@ target_link_libraries(bench_dynamic_data PUBLIC DEG_LIB compile-options fmt::fmt
 add_executable(bench_edge_optimization ${PROJECT_SOURCE_DIR}/src/bench_edge_optimization.cpp)
 target_include_directories(bench_edge_optimization PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(bench_edge_optimization PUBLIC DEG_LIB compile-options fmt::fmt)
+
+add_executable(bench_flas_presort ${PROJECT_SOURCE_DIR}/src/bench_flas_presort.cpp)
+target_include_directories(bench_flas_presort PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(bench_flas_presort PUBLIC DEG_LIB compile-options fmt::fmt)

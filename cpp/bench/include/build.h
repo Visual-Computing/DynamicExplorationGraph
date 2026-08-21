@@ -60,7 +60,8 @@ inline void create_graph(
     const bool use_rng = true,
     const uint32_t scale = 1,
     const bool use_path_verification = false,
-    const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto
+    const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto,
+    const std::vector<uint32_t>& insertion_order = {}
 ) {
     auto rnd = std::mt19937(7);
     const uint32_t improve_tries = 0;
@@ -109,7 +110,17 @@ inline void create_graph(
         }
     } else {
         base_size /= (data_stream_type == DataStreamType::AddHalf) ? 2 : 1;
-        for (uint32_t i = 0; i < base_size; i++) addEntry(i);
+        if (insertion_order.empty()) {
+            for (uint32_t i = 0; i < base_size; i++) addEntry(i);
+        } else {
+            if (insertion_order.size() != base_size) {
+                std::fprintf(stderr, "insertion order size %zu does not match base size %u \n", insertion_order.size(), base_size);
+                std::perror("");
+                std::abort();
+            }
+            log("Adding entries in custom insertion order\n");
+            for (const auto idx : insertion_order) addEntry(idx);
+        }
 
         if (data_stream_type == DataStreamType::AddAllRemoveHalf)
             for (uint32_t i = base_size / 2; i < base_size; i++) builder.removeEntry(i);

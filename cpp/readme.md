@@ -173,6 +173,7 @@ Benchmark executables are generated in the build directory (`build/<preset>/benc
 - `bench_static_data`: Evaluates static dataset graph construction and search throughput/recall.
 - `bench_dynamic_data`: Evaluates dynamic vertex additions and deletions under streaming conditions.
 - `bench_edge_optimization`: Evaluates continuous edge refinement algorithms and query performance.
+- `bench_flas_presort`: Builds the same graph twice with natural vs. FLAS 1D pre-sorted insertion order and compares build time as well as search quality.
 
 #### Dataset Acquisition & Directory Structure
 
@@ -209,6 +210,9 @@ You can configure the dataset path using any of the following methods (evaluated
 
   # Run dynamic streaming benchmark on Audio dataset
   ./build/linux-gcc-avx2/bench/bench_dynamic_data audio
+
+  # Compare natural vs. FLAS pre-sorted graph construction on SIFT1M
+  ./build/linux-gcc-avx2/bench/bench_flas_presort sift1m --data-path ./data
   ```
 
 - **Windows (PowerShell)**:
@@ -218,6 +222,9 @@ You can configure the dataset path using any of the following methods (evaluated
 
   # Run dynamic streaming benchmark on Audio dataset
   .\build\windows-msvc-avx2\bench\Release\bench_dynamic_data.exe audio
+
+  # Compare natural vs. FLAS pre-sorted graph construction on SIFT1M
+  .\build\windows-msvc-avx2\bench\Release\bench_flas_presort.exe sift1m --data-path ./data
   ```
 
 ---
