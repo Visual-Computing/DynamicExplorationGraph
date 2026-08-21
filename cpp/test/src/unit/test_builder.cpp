@@ -526,8 +526,7 @@ TEST(EvenRegularGraphBuilder, BuildGraphWithCustomParameters) {
         4,      // improve_k
         0.15f,  // improve_eps
         5,      // max_path_length
-        2,      // swap_tries
-        1       // additional_swap_tries
+        2       // improve_tries
     );
 
     // Create feature vectors
@@ -783,7 +782,7 @@ TEST(BuilderBuildFromData, CustomLabelsAndThreads) {
 
     auto graph = deglib::builder::build_from_data(
         std::span<const float>(dataset), dims, std::span<const uint32_t>(custom_labels), edges_per_vertex, deglib::distances::Metric::FP32_L2,
-        deglib::builder::OptimizationTarget::StreamingData, 0, 0.2f, 0, 0.001f, 5, 0, 0, 2, 123, callback
+        deglib::builder::OptimizationTarget::StreamingData, 0, 0.2f, 0, 0.001f, 5, 0, 2, 123, callback
     );
 
     EXPECT_EQ(graph.size(), num_vectors);

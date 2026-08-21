@@ -170,7 +170,7 @@ inline uint32_t prune_non_rng_edges_iterative(deglib::graph::MutableGraph& graph
 inline void optimize_edges(deglib::graph::MutableGraph& graph, const uint8_t k_opt, const float eps_opt, const uint8_t i_opt, const uint32_t iterations) {
     auto rnd = std::mt19937(7);
 
-    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::StreamingData, 0, 0.0f, k_opt, eps_opt, i_opt, 1, 0);
+    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::StreamingData, 0, 0.0f, k_opt, eps_opt, i_opt, 1);
 
     auto start = std::chrono::steady_clock::now();
     uint64_t duration_ms = 0;

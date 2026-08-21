@@ -123,7 +123,7 @@ void run_edge_optimization_benchmark(
     log("\n=== Optimizing Graph Edges (in memory) ===\n");
     auto rnd = std::mt19937(7);
     auto builder = deglib::builder::EvenRegularGraphBuilder(
-        graph, rnd, deglib::builder::OptimizationTarget::LowLID, 0, 0, config.k_opt, config.eps_opt, config.max_path_length, 1, 0
+        graph, rnd, deglib::builder::OptimizationTarget::LowLID, 0, 0, config.k_opt, config.eps_opt, config.max_path_length, 1
     );
 
     auto start = std::chrono::steady_clock::now();

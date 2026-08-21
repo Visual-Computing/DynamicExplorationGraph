@@ -217,8 +217,7 @@ class EvenRegularGraphBuilder {
     const uint8_t improve_k_;               // k value for improving the graph
     const float improve_eps_;               // eps value for improving the graph
     const uint8_t max_path_length_;         // max amount of changes before canceling an improvement try
-    const uint32_t swap_tries_;             // number of improvement attempts per build step
-    const uint32_t additional_swap_tries_;  // additional improvement attempts after a successful improvement
+    const uint32_t improve_tries_;          // number of improvement attempts per build step
 
     std::mt19937& rnd_;                   // Reference to a random number generator used for randomized operations
     deglib::graph::MutableGraph& graph_;  // Reference to the mutable graph being built and optimized
@@ -252,8 +251,7 @@ class EvenRegularGraphBuilder {
      * @param improve_k Number of neighbors to consider when improving the graph.
      * @param improve_eps Epsilon value for neighbor search during graph improvement.
      * @param max_path_length Maximum number of edge swaps in a single improvement attempt (default: 5).
-     * @param swap_tries Number of improvement attempts per build step (default: 0).
-     * @param additional_swap_tries Additional improvement attempts after a successful improvement (default: 0).
+     * @param improve_tries Number of improvement attempts per build step (default: 0).
      *
      * This constructor initializes the builder with the provided parameters and sets up internal
      * batching and threading parameters for efficient graph construction and optimization.
@@ -261,14 +259,13 @@ class EvenRegularGraphBuilder {
     EvenRegularGraphBuilder(
         deglib::graph::MutableGraph& graph,
         std::mt19937& rnd,
-        const OptimizationTarget optimization_target,
-        const uint8_t extend_k,
-        const float extend_eps,
-        const uint8_t improve_k,
-        const float improve_eps,
+        const OptimizationTarget optimization_target = OptimizationTarget::LowLID,
+        const uint8_t extend_k = 0,
+        const float extend_eps = 0.1f,
+        const uint8_t improve_k = 0,
+        const float improve_eps = 0.001f,
         const uint8_t max_path_length = 5,
-        const uint32_t swap_tries = 0,
-        const uint32_t additional_swap_tries = 0
+        const uint32_t improve_tries = 0
     )
         : optimizationTarget_(optimization_target),
           extend_k_(extend_k),
@@ -276,8 +273,7 @@ class EvenRegularGraphBuilder {
           improve_k_(improve_k),
           improve_eps_(improve_eps),
           max_path_length_(max_path_length),
-          swap_tries_(swap_tries),
-          additional_swap_tries_(additional_swap_tries),
+          improve_tries_(improve_tries),
           rnd_(rnd),
           graph_(graph),
           build_status_() {
@@ -287,29 +283,6 @@ class EvenRegularGraphBuilder {
     }
 
     /**
-     * @brief Constructs an EvenRegularGraphBuilder with default parameters for streaming data.
-     *
-     * @param graph Reference to a MutableGraph object to be built and optimized.
-     * @param rnd Reference to a random number generator (std::mt19937) used for randomized operations.
-     * @param swaps Number of improvement attempts per build step (used for both swap_tries and additional_swap_tries).
-     *
-     * This constructor is a convenience overload for quickly creating a builder for streaming data
-     * with default extension and improvement parameters.
-     */
-    EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd, const uint32_t swaps)
-        : EvenRegularGraphBuilder(graph, rnd, OptimizationTarget::StreamingData, graph.getEdgesPerVertex(), 0.1f, 0, 0.0f, 5, swaps, swaps) {}
-
-    /**
-     * @brief Constructs an EvenRegularGraphBuilder with default parameters and a single swap attempt.
-     *
-     * @param graph Reference to a MutableGraph object to be built and optimized.
-     * @param rnd Reference to a random number generator (std::mt19937) used for randomized operations.
-     *
-     * This constructor is a convenience overload for quickly creating a builder with minimal configuration.
-     */
-    EvenRegularGraphBuilder(deglib::graph::MutableGraph& graph, std::mt19937& rnd) : EvenRegularGraphBuilder(graph, rnd, 1) {}
-
-    /**
      * @brief Constructs an EvenRegularGraphBuilder wrapping a DynamicExplorationGraph facade.
      *
      * @throws std::invalid_argument If the DynamicExplorationGraph is not mutable.
@@ -317,14 +290,13 @@ class EvenRegularGraphBuilder {
     EvenRegularGraphBuilder(
         deglib::DynamicExplorationGraph& graph,
         std::mt19937& rnd,
-        const OptimizationTarget optimization_target,
-        const uint8_t extend_k,
-        const float extend_eps,
-        const uint8_t improve_k,
-        const float improve_eps,
+        const OptimizationTarget optimization_target = OptimizationTarget::LowLID,
+        const uint8_t extend_k = 0,
+        const float extend_eps = 0.1f,
+        const uint8_t improve_k = 0,
+        const float improve_eps = 0.001f,
         const uint8_t max_path_length = 5,
-        const uint32_t swap_tries = 0,
-        const uint32_t additional_swap_tries = 0
+        const uint32_t improve_tries = 0
     )
         : EvenRegularGraphBuilder(
               check_and_get_mutable_graph(graph),
@@ -335,20 +307,8 @@ class EvenRegularGraphBuilder {
               improve_k,
               improve_eps,
               max_path_length,
-              swap_tries,
-              additional_swap_tries
+              improve_tries
           ) {}
-
-    /**
-     * @brief Constructs an EvenRegularGraphBuilder wrapping a DynamicExplorationGraph with default parameters for streaming data.
-     */
-    EvenRegularGraphBuilder(deglib::DynamicExplorationGraph& graph, std::mt19937& rnd, const uint32_t swaps)
-        : EvenRegularGraphBuilder(check_and_get_mutable_graph(graph), rnd, swaps) {}
-
-    /**
-     * @brief Constructs an EvenRegularGraphBuilder wrapping a DynamicExplorationGraph with default parameters and a single swap attempt.
-     */
-    EvenRegularGraphBuilder(deglib::DynamicExplorationGraph& graph, std::mt19937& rnd) : EvenRegularGraphBuilder(check_and_get_mutable_graph(graph), rnd, 1) {}
 
   private:
     static deglib::graph::MutableGraph& check_and_get_mutable_graph(deglib::DynamicExplorationGraph& graph) {
@@ -1494,12 +1454,11 @@ class EvenRegularGraphBuilder {
 
             // try to improve the graph
             if (graph_.size() > edge_per_vertex && improve_k_ > 0) {
-                for (int64_t swap_try = 0; swap_try < int64_t(this->swap_tries_); swap_try++) {
+                for (uint32_t try_idx = 0; try_idx < this->improve_tries_; try_idx++) {
                     this->build_status_.tries++;
 
                     if (this->improveEdges()) {
                         this->build_status_.improved++;
-                        swap_try -= this->additional_swap_tries_;
                     }
                 }
             }
@@ -1539,8 +1498,7 @@ class EvenRegularGraphBuilder {
  * @param improve_k Number of neighbors to consider during improvement (default: 0).
  * @param improve_eps Epsilon value for neighbor search during improvement (default: 0.001f).
  * @param max_path_length Maximum number of edge swaps in a single improvement (default: 5).
- * @param swap_tries Number of improvement attempts per build step (default: 0).
- * @param additional_swap_tries Additional improvement attempts after successful improvement (default: 0).
+ * @param improve_tries Number of improvement attempts per build step (default: 0).
  * @param thread_count Number of threads for construction (0 = single-threaded / default).
  * @param seed Random seed for deterministic construction (default: 42).
  * @param callback Optional progress callback invoked during build.
@@ -1559,8 +1517,7 @@ DynamicExplorationGraph build_from_data(
     const uint8_t improve_k = 0,
     const float improve_eps = 0.001f,
     const uint8_t max_path_length = 5,
-    const uint32_t swap_tries = 0,
-    const uint32_t additional_swap_tries = 0,
+    const uint32_t improve_tries = 0,
     const size_t thread_count = 0,
     const uint32_t seed = 42,
     std::function<void(deglib::builder::BuilderStatus&)> callback = nullptr
@@ -1582,7 +1539,7 @@ DynamicExplorationGraph build_from_data(
 
     std::mt19937 rng(seed);
     auto builder = EvenRegularGraphBuilder(
-        graph, rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, swap_tries, additional_swap_tries
+        graph, rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, improve_tries
     );
 
     if (thread_count > 0) {

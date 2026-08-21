@@ -44,8 +44,7 @@ class GraphBuilder:
         improve_k: int = 0,
         improve_eps: float = 0.001,
         max_path_length: int = 5,
-        swap_tries: int = 0,
-        additional_swap_tries: int = 0,
+        improve_tries: int = 0,
     ):
         """
         Initialize a GraphBuilder with the specified parameters.
@@ -62,8 +61,7 @@ class GraphBuilder:
         :param improve_k: Number of neighbors to consider when improving the graph
         :param improve_eps: Epsilon value for neighbor search during graph improvement
         :param max_path_length: Maximum number of edge swaps in a single improvement attempt
-        :param swap_tries: Number of improvement attempts per build step
-        :param additional_swap_tries: Additional improvement attempts after a successful improvement
+        :param improve_tries: Number of improvement attempts per build step
         """
         if extend_k <= graph.get_edges_per_vertex():
             extend_k = graph.get_edges_per_vertex() * 2
@@ -76,8 +74,7 @@ class GraphBuilder:
             improve_k,
             improve_eps,
             max_path_length,
-            swap_tries,
-            additional_swap_tries,
+            improve_tries,
         )
         self.graph = graph
         self.optimization_target = optimization_target
@@ -243,8 +240,7 @@ def build_from_data(
     improve_k: int = 0,
     improve_eps: float = 0.001,
     max_path_length: int = 5,
-    swap_tries: int = 0,
-    additional_swap_tries: int = 0,
+    improve_tries: int = 0,
     thread_count: int = 0,
     callback: Callable[[deglib_cpp.BuilderStatus], None] | str | None = None,
 ) -> DynamicExplorationGraph:
@@ -283,10 +279,8 @@ def build_from_data(
     :type improve_eps: float
     :param max_path_length: Maximum number of edge swaps in a single improvement attempt
     :type max_path_length: int
-    :param swap_tries: Number of improvement attempts per build step
-    :type swap_tries: int
-    :param additional_swap_tries: Additional improvement attempts after a successful improvement
-    :type additional_swap_tries: int
+    :param improve_tries: Number of improvement attempts per build step
+    :type improve_tries: int
     :param thread_count: Number of threads to use for parallel building. If 0, uses hardware concurrency.
     :type thread_count: int
     :param callback: Callback function for build progress reporting. If "progress", shows progress bar
@@ -307,8 +301,7 @@ def build_from_data(
         improve_k=improve_k,
         improve_eps=improve_eps,
         max_path_length=max_path_length,
-        swap_tries=swap_tries,
-        additional_swap_tries=additional_swap_tries,
+        improve_tries=improve_tries,
     )
 
     if labels is None:

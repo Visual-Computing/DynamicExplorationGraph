@@ -448,8 +448,7 @@ inline static void run_integration_test(
     const uint8_t improve_k = 0;
     const float improve_eps = 0.0f;
     const uint8_t max_path_length = 5;
-    const uint32_t swap_tries = 0;
-    const uint32_t additional_swap_tries = 0;
+    const uint32_t improve_tries = 0;
     const uint32_t thread_count = 1;
 
     // Build DEG Graph using the specified metric feature space
@@ -462,7 +461,7 @@ inline static void run_integration_test(
 
     std::mt19937 rng(1337);
     deglib::builder::EvenRegularGraphBuilder builder(
-        graph, rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, swap_tries, additional_swap_tries
+        graph, rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, improve_tries
     );
     builder.setThreadCount(thread_count);
 
@@ -530,11 +529,10 @@ inline static std::vector<uint32_t> build_graph_for_determinism(
     const uint8_t improve_k = 0;
     const float improve_eps = 0.0f;
     const uint8_t max_path_length = 5;
-    const uint32_t swap_tries = 0;
-    const uint32_t additional_swap_tries = 0;
+    const uint32_t improve_tries = 0;
 
     deglib::builder::EvenRegularGraphBuilder builder(
-        graph, rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, swap_tries, additional_swap_tries
+        graph, rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, improve_tries
     );
     builder.setThreadCount(1);
 
@@ -662,8 +660,7 @@ inline static void run_regression_test(
     const uint8_t improve_k = 0;
     const float improve_eps = 0.0f;
     const uint8_t max_path_length = 5;
-    const uint32_t swap_tries = 0;
-    const uint32_t additional_swap_tries = 0;
+    const uint32_t improve_tries = 0;
 
     // Build DEG Graph using the specified metric feature space
     const deglib::distances::FloatSpace feature_space =
@@ -675,7 +672,7 @@ inline static void run_regression_test(
 
     std::mt19937 rng(1337);
     deglib::builder::EvenRegularGraphBuilder builder(
-        graph, rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, swap_tries, additional_swap_tries
+        graph, rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, improve_tries
     );
     builder.setThreadCount(thread_count);
     auto t_build_start = std::chrono::high_resolution_clock::now();

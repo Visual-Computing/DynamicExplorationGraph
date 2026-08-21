@@ -86,11 +86,10 @@ static double build_deg_graph(
     const uint8_t improve_k = 0;
     const float improve_eps = 0.0f;
     const uint8_t max_path_length = 5;
-    const uint32_t swap_tries = 0;
-    const uint32_t additional_swap_tries = 0;
+    const uint32_t improve_tries = 0;
 
     deglib::builder::EvenRegularGraphBuilder builder(
-        graph, rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, swap_tries, additional_swap_tries
+        graph, rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, improve_tries
     );
     builder.setThreadCount(thread_count);
 

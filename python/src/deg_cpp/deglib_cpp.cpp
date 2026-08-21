@@ -1316,7 +1316,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def(
             py::init([](deglib::DynamicExplorationGraph& graph, std::optional<uint32_t> seed, const deglib::builder::OptimizationTarget optimization_target,
                         const uint8_t extend_k, const float extend_eps, const uint8_t improve_k, const float improve_eps, const uint8_t max_path_length,
-                        const uint32_t swap_tries, const uint32_t additional_swap_tries) {
+                        const uint32_t improve_tries) {
                 if (!graph.isMutable()) {
                     throw std::runtime_error("Graph must be mutable to use GraphBuilder");
                 }
@@ -1324,7 +1324,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
                 auto* rng = new std::mt19937(seed_val);
                 return new deglib::builder::EvenRegularGraphBuilder(
                     static_cast<deglib::graph::MutableGraph&>(graph.internal()), *rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps,
-                    max_path_length, swap_tries, additional_swap_tries
+                    max_path_length, improve_tries
                 );
             })
         )

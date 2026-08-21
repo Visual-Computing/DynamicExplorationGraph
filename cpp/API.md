@@ -128,8 +128,7 @@ DynamicExplorationGraph build_from_data(
     uint8_t improve_k = 0,
     float improve_eps = 0.001f,
     uint8_t max_path_length = 5,
-    uint32_t swap_tries = 0,
-    uint32_t additional_swap_tries = 0,
+    uint32_t improve_tries = 0,
     size_t thread_count = 0,
     uint32_t seed = 42,
     function<void(BuilderStatus&)> callback = nullptr
@@ -176,14 +175,13 @@ public:
     EvenRegularGraphBuilder(
         DynamicExplorationGraph& graph,
         mt19937& rnd,
-        OptimizationTarget target = OptimizationTarget::StreamingData,
+        OptimizationTarget target = OptimizationTarget::LowLID,
         uint8_t extend_k = 0,
         float extend_eps = 0.1f,
         uint8_t improve_k = 0,
         float improve_eps = 0.001f,
         uint8_t max_path_length = 5,
-        uint32_t swap_tries = 0,
-        uint32_t additional_swap_tries = 0
+        uint32_t improve_tries = 0
     );
 
     // --- Entry Queue Management ---

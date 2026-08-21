@@ -63,8 +63,7 @@ inline void create_graph(
     const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto
 ) {
     auto rnd = std::mt19937(7);
-    const uint32_t swap_tries = 0;
-    const uint32_t additional_swap_tries = 0;
+    const uint32_t improve_tries = 0;
 
     const auto dims = repository.dims();
     const uint32_t max_vertex_count = uint32_t(repository.size());
@@ -76,7 +75,7 @@ inline void create_graph(
 
     auto graph = deglib::graph::SizeBoundedGraph(max_vertex_count, k, feature_space);
 
-    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, lid, k_ext, eps_ext, k_opt, eps_opt, i_opt, swap_tries, additional_swap_tries);
+    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, lid, k_ext, eps_ext, k_opt, eps_opt, i_opt, improve_tries);
     builder.setThreadCount(thread_count);
     builder.setBatchSize(10, 10);
 
@@ -166,7 +165,7 @@ inline void optimize_graph(
     const uint32_t scale = 1
 ) {
     auto rnd = std::mt19937(7);
-    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::OptimizationTarget::LowLID, 0, 0, k_opt, eps_opt, i_opt, 1, 0);
+    auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rnd, deglib::builder::OptimizationTarget::LowLID, 0, 0, k_opt, eps_opt, i_opt, 1);
 
     auto initial_avg_edge_weight = deglib::analysis::calc_avg_edge_weight(graph, scale);
     log("Optimizing graph with initial AEW {:.2f}\n", initial_avg_edge_weight);

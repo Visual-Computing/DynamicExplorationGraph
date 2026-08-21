@@ -43,8 +43,7 @@ deglib.build_from_data(
     improve_k=0,                               # Number of neighbors during edge improvement
     improve_eps=0.001,                         # Search expansion epsilon during edge improvement
     max_path_length=5,                         # Maximum edge swaps before canceling an improvement try
-    swap_tries=0,                              # Number of improvement attempts per build step
-    additional_swap_tries=0,                   # Additional improvement attempts after successful improvement
+    improve_tries=0,                           # Number of improvement attempts per build step
     thread_count=0,                            # Worker thread count (0 = all available CPU cores)
     seed=None,                                 # Random seed (None = default seed)
     callback=None                              # Callback function(BuilderStatus) or "progress" for CLI bar
@@ -156,8 +155,7 @@ class GraphBuilder:
         improve_k=0,                           # Neighbors during edge improvement
         improve_eps=0.001,                     # Epsilon for neighbor search during improvement
         max_path_length=5,                     # Max edge swaps per improvement attempt
-        swap_tries=0,                          # Improvement attempts per build step
-        additional_swap_tries=0                # Extra attempts after a successful swap
+        improve_tries=0                        # Improvement attempts per build step
     )
 
     # Queue a single vector [D] or batch [N, D] for addition

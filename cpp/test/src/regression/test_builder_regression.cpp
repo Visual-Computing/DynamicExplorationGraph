@@ -48,7 +48,7 @@ TEST(DeglibBuilderRegression, DynamicGraph_vs_SizeBoundedGraph_100k_Benchmark) {
         std::mt19937 rng(1337);
         deglib::builder::EvenRegularGraphBuilder builder(
             graph, rng, deglib::builder::OptimizationTarget::LowLID, extend_k, extend_eps, /*improve_k=*/0, /*improve_eps=*/0.0f,
-            /*max_path_length=*/5, /*swap_tries=*/0, /*additional_swap_tries=*/0
+            /*max_path_length=*/5, /*improve_tries=*/0
         );
         builder.setThreadCount(thread_count);
 

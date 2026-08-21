@@ -124,12 +124,9 @@ Improvement & Deletion Parameters (Used after Deletions or during Continuous Ref
    * - ``max_path_length``
      - ``5``
      - Maximum number of consecutive edge swaps in a single improvement sequence.
-   * - ``swap_tries``
+   * - ``improve_tries``
      - ``0``
      - Number of improvement attempts executed per build step.
-   * - ``additional_swap_tries``
-     - ``0``
-     - Extra improvement attempts executed immediately after a successful edge swap.
 
 .. note::
 

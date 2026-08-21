@@ -236,8 +236,6 @@ def construct_and_search_mips(
         improve_k=0,
         improve_eps=0.0,
         max_path_length=5,
-        swap_tries=0,
-        additional_swap_tries=0,
         optimization_target=optimization_target,
     )
     builder.set_thread_count(build_threads)
