@@ -1,36 +1,78 @@
 Installation
 ============
 
-Via pip
--------
-Install from `PyPI <https://pypi.org/project/deglib/>`_. This is best for most users.
+Requirements
+------------
 
-.. code-block:: sh
+- **Python**: 3.10 or newer
+- **Operating Systems**: Linux (x86_64), Windows (x86_64), macOS (Apple Silicon / ARM64)
+- **Dependencies**: `numpy`
 
-    pip install deglib
+Standard Installation
+---------------------
 
-From Source
------------
-You can also compile `deglib` yourself.
+The easiest and recommended way to install `deglib` is from `PyPI <https://pypi.org/project/deglib/>`_:
 
-This can be useful if you want to:
+Using pip:
 
-* make use of AVX512 instructions
-* have the newest version
-* develop new features
+.. code-block:: bash
 
-.. code-block:: sh
+   pip install deglib
 
-    # get the source
-    git clone https://github.com/Visual-Computing/DynamicExplorationGraph.git
-    cd DynamicExplorationGraph/python/
+Using uv:
 
-    # create virtualenv
-    python -m venv venv && . venv/bin/activate
+.. code-block:: bash
 
-    # install build dependencies
-    pip install setuptools==83.0.0 pybind11==3.0.4 build==1.5.0
-    python setup.py copy_build_files  # copy c++ library to ./lib/
+   uv add deglib
 
-    # install
-    pip install .
+Building from Source
+--------------------
+
+If you want the latest development version or need to build directly on your machine:
+
+1. Clone the repository:
+
+   .. code-block:: bash
+
+      git clone https://github.com/Visual-Computing/DynamicExplorationGraph.git
+      cd DynamicExplorationGraph/python/
+
+2. Install pinned build dependencies and copy required files:
+
+   .. code-block:: bash
+
+      pip install setuptools==83.0.0 pybind11==3.0.4 build==1.5.0 wheel==0.48.0
+      python setup.py copy_build_files
+
+   Or using ``uv``:
+
+   .. code-block:: bash
+
+      uv pip install setuptools==83.0.0 pybind11==3.0.4 build==1.5.0 wheel==0.48.0
+      uv run python setup.py copy_build_files
+
+
+3. Build and install:
+
+   .. code-block:: bash
+
+      pip install -e . --no-build-isolation
+
+   Or with ``uv``:
+
+   .. code-block:: bash
+
+      uv pip install -e . --no-build-isolation
+
+Verifying Installation
+----------------------
+
+Verify that `deglib` is installed correctly and check the active version:
+
+.. code-block:: python
+
+   import deglib
+   print(f"deglib version: {deglib.__version__}")
+   print(f"AVX2 support: {deglib.cpu.has_avx2()}")
+
+

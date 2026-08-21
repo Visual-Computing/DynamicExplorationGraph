@@ -109,7 +109,7 @@ inline void prune_worst_edges(deglib::graph::MutableGraph& graph, const uint8_t 
 }
 
 /**
- * @brief Remove all edges that do not satisfy the MRNG condition.
+ * @brief Remove all edges that do not satisfy the RNG condition.
  *
  * Parallelized across hardware threads. For each vertex, checks each neighbor
  * using the RNG condition and removes non-conforming edges.
@@ -118,12 +118,12 @@ inline void prune_worst_edges(deglib::graph::MutableGraph& graph, const uint8_t 
  * @param numThreads Number of threads to use (0 = use hardware concurrency).
  * @return Number of edges removed.
  */
-inline uint32_t prune_non_mrng_edges(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
-    return deglib::optimization::pruning::prune_non_mrng_edges(graph, numThreads);
+inline uint32_t prune_non_rng_edges(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
+    return deglib::optimization::pruning::prune_non_rng_edges(graph, numThreads);
 }
 
 /**
- * @brief Remove non-MRNG edges using a weight-sorted global strategy.
+ * @brief Remove non-RNG edges using a weight-sorted global strategy.
  *
  * Collects all non-RNG edges, sorts them by weight (ascending), then removes
  * them in that order. Collection is multi-threaded; removal is single-threaded.
@@ -132,12 +132,12 @@ inline uint32_t prune_non_mrng_edges(deglib::graph::MutableGraph& graph, const s
  * @param numThreads Number of threads to use for collection (0 = use hardware concurrency).
  * @return Number of edges removed.
  */
-inline uint32_t prune_non_mrng_edges_weight_sorted(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
-    return deglib::optimization::pruning::prune_non_mrng_edges_weight_sorted(graph, numThreads);
+inline uint32_t prune_non_rng_edges_weight_sorted(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
+    return deglib::optimization::pruning::prune_non_rng_edges_weight_sorted(graph, numThreads);
 }
 
 /**
- * @brief Remove non-MRNG edges using an iterative per-vertex strategy.
+ * @brief Remove non-RNG edges using an iterative per-vertex strategy.
  *
  * For each vertex, iteratively removes non-RNG edges in a do-while loop until
  * no more edges can be removed. This accounts for cascading effects where
@@ -147,8 +147,8 @@ inline uint32_t prune_non_mrng_edges_weight_sorted(deglib::graph::MutableGraph& 
  * @param numThreads Number of threads to use (0 = use hardware concurrency).
  * @return Number of edges removed.
  */
-inline uint32_t prune_non_mrng_edges_iterative(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
-    return deglib::optimization::pruning::prune_non_mrng_edges_iterative(graph, numThreads);
+inline uint32_t prune_non_rng_edges_iterative(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
+    return deglib::optimization::pruning::prune_non_rng_edges_iterative(graph, numThreads);
 }
 
 // ========================================================================

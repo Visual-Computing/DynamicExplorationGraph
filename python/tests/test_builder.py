@@ -29,7 +29,7 @@ class TestGraphs:
 
     @pytest.mark.parametrize("batch", [True, False])
     def test_add_entry(self, batch):
-        graph = deglib.DynamicExplorationGraph.create_empty(
+        graph = deglib.create_empty(
             self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
         )
         builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
@@ -43,7 +43,7 @@ class TestGraphs:
 
     @pytest.mark.parametrize("optimization_target", list(deglib.builder.OptimizationTarget))
     def test_build_simple(self, optimization_target):
-        graph = deglib.DynamicExplorationGraph.create_empty(
+        graph = deglib.create_empty(
             self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
         )
         builder = deglib.GraphBuilder(
@@ -57,7 +57,7 @@ class TestGraphs:
 
     @pytest.mark.parametrize("optimization_target", list(deglib.builder.OptimizationTarget))
     def test_build_batch(self, optimization_target):
-        graph = deglib.DynamicExplorationGraph.create_empty(
+        graph = deglib.create_empty(
             self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
         )
         builder = deglib.GraphBuilder(
@@ -68,7 +68,7 @@ class TestGraphs:
         builder.build()
 
     def test_build_with_remove(self):
-        graph = deglib.DynamicExplorationGraph.create_empty(
+        graph = deglib.create_empty(
             self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
         )
         builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
@@ -84,7 +84,7 @@ class TestGraphs:
         builder.build()
 
     def test_get_num_entries(self):
-        graph = deglib.DynamicExplorationGraph.create_empty(
+        graph = deglib.create_empty(
             self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
         )
         builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
@@ -114,7 +114,7 @@ class TestGraphs:
         _check_entries(self.data.shape[0] // 2, "remove")
 
     def test_callback(self):
-        graph = deglib.DynamicExplorationGraph.create_empty(
+        graph = deglib.create_empty(
             self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
         )
         builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
@@ -127,7 +127,7 @@ class TestGraphs:
         assert tester.last_status.step > 0
 
     def test_concurrency_settings(self):
-        graph = deglib.DynamicExplorationGraph.create_empty(
+        graph = deglib.create_empty(
             self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
         )
         builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
@@ -144,7 +144,7 @@ class TestGraphs:
         builder.build()
 
     def test_stop(self):
-        graph = deglib.DynamicExplorationGraph.create_empty(
+        graph = deglib.create_empty(
             self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
         )
         builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
@@ -161,7 +161,7 @@ class TestGraphs:
         assert stopped_in_callback
 
     def test_build_returns_status(self):
-        graph = deglib.DynamicExplorationGraph.create_empty(
+        graph = deglib.create_empty(
             self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
         )
         builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
@@ -175,7 +175,7 @@ class TestGraphs:
         assert len(status.total_deleted_ids) == 0
 
     def test_build_status_callback_step_ids(self):
-        graph = deglib.DynamicExplorationGraph.create_empty(
+        graph = deglib.create_empty(
             self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
         )
         builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
@@ -202,7 +202,7 @@ class TestGraphs:
         assert last_cb.total_deleted_ids == result.total_deleted_ids
 
     def test_build_mixed_add_delete(self):
-        graph = deglib.DynamicExplorationGraph.create_empty(
+        graph = deglib.create_empty(
             self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
         )
         builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)

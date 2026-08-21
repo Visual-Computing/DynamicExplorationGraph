@@ -810,6 +810,12 @@ deglib::DynamicExplorationGraph load_readonly_graph_wrapper(const char* path) {
     return deglib::DynamicExplorationGraph(*heap_graph);
 }
 
+deglib::DynamicExplorationGraph load_sizebounded_graph_wrapper(const char* path, const uint32_t capacity = 0) {
+    auto graph = deglib::graph::load_sizebounded_graph(path, capacity);
+    auto heap_graph = std::make_unique<deglib::graph::SizeBoundedGraph>(std::move(graph));
+    return deglib::DynamicExplorationGraph(std::move(heap_graph));
+}
+
 std::tuple<py::array_t<float>, float> mips_l2_transform_wrapper(py::array_t<float, py::array::c_style> vectors) {
     py::buffer_info buf = vectors.request();
     if (buf.ndim != 2) {
@@ -1276,6 +1282,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
 
     m.def("load_readonly_graph", &load_readonly_graph_wrapper);
     m.def("load_dynamic_graph", &load_dynamic_graph_wrapper, py::arg("path"), py::arg("chunk_size") = 1024);
+    m.def("load_sizebounded_graph", &load_sizebounded_graph_wrapper, py::arg("path"), py::arg("capacity") = 0);
     m.def(
         "read_only_graph_from_graph", &read_only_graph_from_graph_wrapper, py::arg("graph"), py::arg("custom_feature_space") = py::none(),
         py::arg("custom_features") = py::none()
@@ -1390,12 +1397,12 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def_readonly("memory_bytes", &deglib::analysis::GraphStats::memory_bytes);
     m.def("analyze_graph", &analyze_graph_wrapper, py::arg("graph"));
     m.def(
-        "prune_non_mrng_edges",
+        "prune_non_rng_edges",
         [](deglib::DynamicExplorationGraph& graph, const size_t num_threads) {
             if (!graph.isMutable()) {
-                throw std::runtime_error("Graph must be mutable to prune non-mrng edges");
+                throw std::runtime_error("Graph must be mutable to prune non-rng edges");
             }
-            deglib::optimization::prune_non_mrng_edges(static_cast<deglib::graph::MutableGraph&>(graph.internal()), num_threads);
+            return deglib::optimization::prune_non_rng_edges(static_cast<deglib::graph::MutableGraph&>(graph.internal()), num_threads);
         },
         py::arg("graph"), py::arg("num_threads") = 0
     );

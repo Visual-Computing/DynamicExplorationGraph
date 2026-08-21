@@ -6,25 +6,41 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
+import datetime
+import deglib
+
 project = 'Dynamic Exploration Graph'
-copyright = '2025, Nico Hezel, Bruno Schilling'
+current_year = datetime.date.today().year
+copyright = f'{current_year}, Nico Hezel, Bruno Schilling'
 author = 'Nico Hezel, Bruno Schilling'
-release = '0.1.5'
+release = deglib.__version__
+version = deglib.__version__
+
+
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
-    'sphinx.ext.autodoc'
+    'sphinx.ext.autodoc',
+    'sphinx_rtd_theme',
 ]
 
 templates_path = ['_templates']
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+exclude_patterns = ['_build', '.venv', 'Thumbs.db', '.DS_Store']
 
 
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = 'alabaster'
+html_theme = 'sphinx_rtd_theme'
+html_theme_options = {
+    'navigation_depth': 4,
+    'collapse_navigation': False,
+    'sticky_navigation': True,
+}
 html_static_path = ['_static']
+html_css_files = [
+    'custom.css',
+]

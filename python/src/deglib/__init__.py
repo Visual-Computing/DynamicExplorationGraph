@@ -7,16 +7,30 @@ from . import optimization
 from . import search
 
 from .builder import GraphBuilder, build_from_data
-from .graph import DynamicExplorationGraph, load_readonly_graph, load_dynamic_graph
+from .graph import (
+    DynamicExplorationGraph,
+    create_empty,
+    create_mutable_empty,
+    create_dynamic_empty,
+    create_random_graph,
+    load_readonly_graph,
+    load_dynamic_graph,
+    load_mutable_graph,
+)
 from .distances import FloatSpace, Metric
 
 __version__ = "0.1.6"
 
 __all__ = [
     "DynamicExplorationGraph",
-    "GraphBuilder",
+    "create_empty",
+    "create_mutable_empty",
+    "create_dynamic_empty",
+    "create_random_graph",
     "load_readonly_graph",
     "load_dynamic_graph",
+    "load_mutable_graph",
+    "GraphBuilder",
     "build_from_data",
     "FloatSpace",
     "Metric",

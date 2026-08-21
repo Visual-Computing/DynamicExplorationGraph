@@ -2,31 +2,38 @@ import sys
 import typing
 import numpy as np
 import deglib_cpp
+import sys
+import typing
+import numpy as np
+import deglib_cpp
 import deglib_cpp.distances as cpp_distances
 
 from .graph import DynamicExplorationGraph
 from .distances import FloatSpace, Metric
 
 
-def prune_non_mrng_edges(graph: DynamicExplorationGraph, num_threads: int = 0) -> int:
+def prune_non_rng_edges(graph: DynamicExplorationGraph, num_threads: int = 0) -> int:
     """
-    Remove all edges which do not satisfy the MRNG condition.
+    Remove all graph edges that violate the Relative Neighborhood Graph (RNG) rule.
+
+    An edge between vertices `u` and `v` is pruned if there exists another vertex `w`
+    such that distance(u, w) < distance(u, v) and distance(v, w) < distance(u, v).
+    Pruning non-RNG edges reduces graph redundancy and accelerates query traversal.
 
     :param graph: The graph to optimize. Must be mutable.
-    :param num_threads: Number of threads to use for parallel processing. If 0, uses hardware concurrency.
-    :return: Number of edges removed.
+    :param num_threads: Number of worker threads (0 uses all available CPU cores).
+    :return: Total number of edges removed.
     """
-    return deglib_cpp.prune_non_mrng_edges(graph.dynamic_exploration_graph_cpp, num_threads)
+    return deglib_cpp.prune_non_rng_edges(graph.dynamic_exploration_graph_cpp, num_threads)
 
 
 def prune_worst_edges(graph: DynamicExplorationGraph, prune_worst: int, num_threads: int = 0):
     """
-    Prune the worst (highest-weight) `prune_worst` neighbors of each vertex
-    by replacing them with self-loops.
+    Prune the longest (highest-weight) edges of each vertex by replacing them with self-loops.
 
     :param graph: The graph to optimize. Must be mutable.
-    :param prune_worst: Number of worst neighbors to replace with self-loops per vertex.
-    :param num_threads: Number of threads to use for parallel processing. If 0, uses hardware concurrency.
+    :param prune_worst: Number of worst neighbor edges to replace per vertex.
+    :param num_threads: Number of worker threads (0 uses all available CPU cores).
     """
     deglib_cpp.prune_worst_edges(graph.dynamic_exploration_graph_cpp, prune_worst, num_threads)
 
@@ -42,17 +49,20 @@ def presort(
     space: FloatSpace | None = None,
 ) -> np.ndarray:
     """
-    Perform 1D pre-sorting of dataset feature vectors using FLAS.
+    Perform 1D pre-sorting of dataset feature vectors using Fast Linear Alignment Scheme (FLAS).
+
+    Sorting high-dimensional vectors onto a 1D curve improves data locality and index construction speed.
 
     :param vectors: 2D float32 NumPy array of shape (count, dim).
     :param space_or_metric: FloatSpace instance or Metric type used for distance computation during sorting.
     :param radius_decay: Decay factor per iteration for neighborhood radius (default 0.9).
-    :param threads: Number of worker threads (0 = use hardware concurrency).
-    :param callback: Optional callback for reporting sorting progress. If 'progress', prints progress to stdout.
-                     If a function, receives progress float in range [0.0, 1.0]. Returning True cancels sorting early.
+    :param threads: Number of worker threads (0 uses all available CPU cores).
+    :param callback: Optional callback for reporting sorting progress.
+                     If ``'progress'``, prints progress to stdout.
+                     If a function, receives progress float in range [0.0, 1.0]. Returning True cancels sorting.
     :param metric: Alias for space_or_metric.
     :param space: Alias for space_or_metric.
-    :return: 1D uint32 NumPy array containing the sorted permutation of original vector indices [0..count-1].
+    :return: 1D uint32 NumPy array containing the sorted permutation of original vector indices.
     """
     target = (
         space
@@ -71,7 +81,7 @@ def presort(
         metric_val = getattr(cpp_distances.Metric, target)
         cpp_space = cpp_distances.FloatSpace(dim, cpp_distances.Metric(int(metric_val)))
     elif isinstance(target, Metric):
-        cpp_space = cpp_distances.FloatSpace(dim, target.to_cpp())
+        cpp_space = cpp_distances.FloatSpace(dim, cpp_distances.Metric(int(target)))
     elif isinstance(target, cpp_distances.Metric):
         cpp_space = cpp_distances.FloatSpace(dim, target)
     else:
@@ -101,12 +111,16 @@ def presort(
 
 def mips_l2_transform(database: np.ndarray) -> tuple[np.ndarray, float]:
     """
-    Transforms database vectors from d-dimensional space to (d+1)-dimensional space
+    Transform database vectors from d-dimensional space to (d+1)-dimensional space
     for Maximum Inner Product Search (MIPS) using L2 distance.
 
-    For each vector x_i in R^d:
-        x'_i = [x_i, sqrt(M^2 - ||x_i||^2)] in R^(d+1)
-    where M^2 = max_i ||x_i||^2.
+    For each vector :math:`x_i \\in \\mathbb{R}^d`:
+
+    .. math::
+
+        x'_i = [x_i, \\sqrt{M^2 - \\|x_i\\|^2}] \\in \\mathbb{R}^{d+1}
+
+    where :math:`M^2 = \\max_i \\|x_i\\|^2`.
 
     :param database: 2D float32 NumPy array of shape (N, d).
     :return: Tuple of (transformed_database array of shape (N, d+1), max_norm float M).
@@ -117,7 +131,12 @@ def mips_l2_transform(database: np.ndarray) -> tuple[np.ndarray, float]:
 
 def quantize_batch(vectors: np.ndarray, non_zeros: int, num_threads: int = 0) -> np.ndarray:
     """
-    Quantize float32 or float16/uint16 vectors to byte-packed EVP format using C++ multi-threading.
+    Quantize float32 or float16 vectors into byte-packed extreme value representation (EVP).
+
+    :param vectors: 2D float32 or float16 NumPy array of vectors.
+    :param non_zeros: Target number of non-zero entries to retain per quantized vector.
+    :param num_threads: Number of worker threads (0 uses all available CPU cores).
+    :return: 2D uint8 NumPy array of quantized vectors.
     """
     if vectors.dtype == np.float16:
         vectors = vectors.view(np.uint16)
@@ -126,11 +145,14 @@ def quantize_batch(vectors: np.ndarray, non_zeros: int, num_threads: int = 0) ->
 
 def mips_l2_transform_query(queries: np.ndarray) -> np.ndarray:
     """
-    Pads query vectors from d-dimensional space to (d+1)-dimensional space
+    Pad query vectors from d-dimensional space to (d+1)-dimensional space
     for MIPS queries against an L2-transformed database.
 
-    For each query vector q_i in R^d:
-        q'_i = [q_i, 0] in R^(d+1).
+    For each query vector :math:`q_i \\in \\mathbb{R}^d`:
+
+    .. math::
+
+        q'_i = [q_i, 0] \\in \\mathbb{R}^{d+1}
 
     :param queries: 1D or 2D float32 NumPy array.
     :return: Transformed queries array of shape (d+1) or (Q, d+1).
@@ -140,7 +162,7 @@ def mips_l2_transform_query(queries: np.ndarray) -> np.ndarray:
 
 
 __all__ = [
-    "prune_non_mrng_edges",
+    "prune_non_rng_edges",
     "prune_worst_edges",
     "presort",
     "mips_l2_transform",

@@ -92,7 +92,7 @@ def construct_knng(
     t0 = time.perf_counter()
     space = FloatSpace.create(dims, Metric.EVP_InnerProduct)
     print(f"Graph Construction: {space.metric().name} ({space.get_instruction().name})")
-    graph = deglib.DynamicExplorationGraph.create_empty(n_vecs, space, k_graph)
+    graph = deglib.create_empty(n_vecs, space, k_graph)
     builder = deglib.GraphBuilder(graph, extend_k=k_ext, extend_eps=0.001)
     builder.set_thread_count(threads)
 

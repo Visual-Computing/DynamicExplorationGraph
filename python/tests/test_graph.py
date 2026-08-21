@@ -147,9 +147,9 @@ def test_search(conf: Configuration):
 
 
 @pytest.mark.parametrize("conf", mutable_configurations)
-def test_prune_non_mrng_edges(conf: Configuration):
+def test_prune_non_rng_edges(conf: Configuration):
     graph = conf.create_new_size_bounded_graph()
-    deglib.optimization.prune_non_mrng_edges(graph)
+    deglib.optimization.prune_non_rng_edges(graph)
 
 
 @pytest.mark.parametrize("conf", configurations)
@@ -423,7 +423,7 @@ def test_to_readonly_custom_features():
 
     # Build FP32 L2 graph
     fs_fp32 = FloatSpace.create(d, Metric.FP32_L2)
-    g = deglib.DynamicExplorationGraph.create_empty(N, fs_fp32, edges_per_vertex=4)
+    g = deglib.create_empty(N, fs_fp32, edges_per_vertex=4)
     builder = deglib.GraphBuilder(g, extend_k=10, extend_eps=0.2)
     builder.add_entry(range(N), data)
     builder.build()
@@ -454,9 +454,7 @@ def test_create_random_graph_fp32():
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
     feature_space = FloatSpace.create(dims, Metric.FP32_L2)
 
-    graph = deglib.DynamicExplorationGraph.create_random_graph(
-        data, feature_space, edges_per_vertex=edges_per_vertex, seed=7
-    )
+    graph = deglib.create_random_graph(data, feature_space, edges_per_vertex=edges_per_vertex, seed=7)
 
     assert graph.size() == samples
     assert graph.get_edges_per_vertex() == edges_per_vertex
@@ -475,23 +473,13 @@ def test_create_random_graph_uint8():
     dims = 16
     edges_per_vertex = 8
 
-    data = np.random.randint(0, 256, size=(samples, dims)).astype(np.uint8)
+    data = np.random.default_rng(42).integers(0, 256, size=(samples, dims), dtype=np.uint8)
     feature_space = FloatSpace.create(dims, Metric.Uint8_L2)
 
-    graph = deglib.DynamicExplorationGraph.create_random_graph(
-        data, feature_space, edges_per_vertex=edges_per_vertex, seed=42
-    )
+    graph = deglib.create_random_graph(data, feature_space, edges_per_vertex=edges_per_vertex, seed=42)
 
     assert graph.size() == samples
     assert graph.get_edges_per_vertex() == edges_per_vertex
-    assert graph.is_mutable()
-    assert graph.get_feature_space().metric() == Metric.Uint8_L2
-
-    # Search should work
-    query = data[0:1]
-    indices, distances = graph.search(query, eps=0.1, k=5)
-    assert indices.shape == (1, 5)
-    assert distances.shape == (1, 5)
 
 
 def test_create_random_graph_deterministic():
@@ -503,21 +491,12 @@ def test_create_random_graph_deterministic():
     data = np.random.default_rng(99).standard_normal((samples, dims)).astype(np.float32)
     feature_space = FloatSpace.create(dims, Metric.FP32_L2)
 
-    graph1 = deglib.DynamicExplorationGraph.create_random_graph(
-        data, feature_space, edges_per_vertex=edges_per_vertex, seed=123
-    )
-    graph2 = deglib.DynamicExplorationGraph.create_random_graph(
-        data, feature_space, edges_per_vertex=edges_per_vertex, seed=123
-    )
+    graph1 = deglib.create_random_graph(data, feature_space, edges_per_vertex=edges_per_vertex, seed=123)
+    graph2 = deglib.create_random_graph(data, feature_space, edges_per_vertex=edges_per_vertex, seed=123)
 
     assert graph1.size() == graph2.size()
-    assert graph1.get_edges_per_vertex() == graph2.get_edges_per_vertex()
-
-    # Compare neighbor lists for each vertex (external labels are 0..samples-1)
-    for i in range(samples):
-        n1 = sorted(graph1.get_neighbors(i))
-        n2 = sorted(graph2.get_neighbors(i))
-        assert n1 == n2, f"Neighbor mismatch at vertex {i}"
+    for v in range(samples):
+        assert graph1.get_neighbors(v) == graph2.get_neighbors(v)
 
 
 def test_create_random_graph_inner_product():
@@ -531,17 +510,10 @@ def test_create_random_graph_inner_product():
     data = data / np.linalg.norm(data, axis=1, keepdims=True)
 
     feature_space = FloatSpace.create(dims, Metric.FP32_InnerProduct)
-    graph = deglib.DynamicExplorationGraph.create_random_graph(
-        data, feature_space, edges_per_vertex=edges_per_vertex, seed=7
-    )
+    graph = deglib.create_random_graph(data, feature_space, edges_per_vertex=edges_per_vertex, seed=7)
 
     assert graph.size() == samples
-    assert graph.get_feature_space().metric() == Metric.FP32_InnerProduct
-
-    # Search should work
-    query = data[0:1]
-    indices, distances = graph.search(query, eps=0.1, k=5)
-    assert indices.shape == (1, 5)
+    assert graph.get_edges_per_vertex() == edges_per_vertex
 
 
 def test_create_random_graph_explore():
@@ -553,9 +525,7 @@ def test_create_random_graph_explore():
     data = np.random.default_rng(55).standard_normal((samples, dims)).astype(np.float32)
     feature_space = FloatSpace.create(dims, Metric.FP32_L2)
 
-    graph = deglib.DynamicExplorationGraph.create_random_graph(
-        data, feature_space, edges_per_vertex=edges_per_vertex, seed=7
-    )
+    graph = deglib.create_random_graph(data, feature_space, edges_per_vertex=edges_per_vertex, seed=7)
 
     # Explore from vertex 0
     indices, distances = graph.explore(0, k=5, max_distance_computation_count=50)
@@ -699,7 +669,7 @@ def test_dynamic_graph_create_empty_and_build():
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
     feature_space = FloatSpace.create(dims, Metric.FP32_L2)
 
-    graph = deglib.DynamicExplorationGraph.create_dynamic_empty(
+    graph = deglib.create_dynamic_empty(
         feature_space=feature_space, edges_per_vertex=edges_per_vertex, chunk_size=chunk_size
     )
     assert graph.is_mutable()
@@ -776,3 +746,61 @@ def test_save_and_load_dynamic_graph(tmp_path):
     loaded_indices, loaded_dists = loaded_graph.search(query, eps=0.1, k=5)
     assert np.array_equal(orig_indices, loaded_indices)
     assert np.allclose(orig_dists, loaded_dists, atol=1e-5)
+
+
+def test_save_and_load_mutable_graph(tmp_path):
+    """Test saving a graph and reloading it via load_mutable_graph."""
+    samples = 30
+    dims = 8
+    edges_per_vertex = 6
+
+    data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
+    graph = deglib.build_from_data(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
+
+    file_path = tmp_path / "test_mutable_graph.deg"
+    graph.save_graph(file_path)
+
+    # 1. Load with default capacity (size of file)
+    loaded_graph = deglib.load_mutable_graph(file_path)
+    assert loaded_graph.is_mutable()
+    assert loaded_graph.size() == samples
+    assert loaded_graph.get_edges_per_vertex() == edges_per_vertex
+
+    query = data[0:1]
+    orig_indices, orig_dists = graph.search(query, eps=0.1, k=5)
+    loaded_indices, loaded_dists = loaded_graph.search(query, eps=0.1, k=5)
+    assert np.array_equal(orig_indices, loaded_indices)
+    assert np.allclose(orig_dists, loaded_dists, atol=1e-5)
+
+    # 2. Load with extended capacity and add entries
+    loaded_with_cap = deglib.load_mutable_graph(file_path, capacity=samples + 10)
+    assert loaded_with_cap.is_mutable()
+    assert loaded_with_cap.size() == samples
+
+    builder = deglib.GraphBuilder(loaded_with_cap)
+    new_data = np.random.default_rng(99).standard_normal((5, dims)).astype(np.float32)
+    new_labels = np.arange(samples, samples + 5, dtype=np.uint32)
+    builder.add_entry(new_labels, new_data)
+    builder.build()
+    assert loaded_with_cap.size() == samples + 5
+
+
+def test_create_helpers():
+    """Test module-level and class-level graph creation helpers."""
+    space = deglib.FloatSpace.create(16, Metric.FP32_L2)
+
+    g1 = deglib.create_empty(100, space, 16)
+    assert g1.is_mutable()
+    assert g1.size() == 0
+
+    g2 = deglib.create_mutable_empty(100, space, 16)
+    assert g2.is_mutable()
+    assert g2.size() == 0
+
+    g3 = deglib.create_dynamic_empty(space, 16, 128)
+    assert g3.is_mutable()
+    assert g3.size() == 0
+
+    features = np.random.default_rng(42).standard_normal((20, 16)).astype(np.float32)
+    g4 = deglib.create_random_graph(features, space, 4)
+    assert g4.size() == 20

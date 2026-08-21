@@ -46,7 +46,7 @@ uv venv
 
 **2. Install Build Dependencies & Copy Core C++ Files**
 ```bash
-uv pip install setuptools==83.0.0 pybind11==3.0.4 build==1.5.0 wheel
+uv pip install setuptools==83.0.0 pybind11==3.0.4 build==1.5.0 wheel==0.48.0
 uv run python setup.py copy_build_files
 ```
 

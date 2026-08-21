@@ -8,15 +8,15 @@ from deglib.utils import assure_contiguous
 
 
 class Filter:
-    def __init__(self, valid_labels: np.ndarray, max_value: int = -1, max_label_count: int = -1):
-        """
-        Creates an object that can be used to limit the set of possible results.
+    """
+    Search filter used to restrict nearest-neighbor search results to a subset of valid labels.
 
-        :param valid_labels: A numpy array with dtype int32, that contains all labels that can be returned.
-                              All other labels will not be included in the result set.
-        :param max_value: The maximum value in valid_labels. Will be computed automatically, if set to -1.
-        :param max_label_count: The size of the whole dataset. If not set, the size of the search graph is assumed.
-        """
+    :param valid_labels: 1D NumPy array of valid int32 labels/IDs that are allowed in the result set.
+    :param max_value: Maximum label value in `valid_labels`. Computed automatically if negative.
+    :param max_label_count: Total size of dataset. Defaults to the search graph size if not provided.
+    """
+
+    def __init__(self, valid_labels: np.ndarray, max_value: int = -1, max_label_count: int = -1):
         self.valid_labels = valid_labels
         if max_value < 0:
             max_value = np.max(valid_labels)
@@ -25,8 +25,7 @@ class Filter:
 
     def create_filter_obj(self, graph_size: int) -> cpp_search.Filter:
         """
-        Only for internal use.
-        Creates a filter object that can be used to limit the set of possible results.
+        Create a backend filter representation for the specified graph size.
         """
         valid_labels = assure_contiguous(self.valid_labels.astype(np.int32, copy=False), "filter_labels")
         filter_obj = None
@@ -40,6 +39,9 @@ class Filter:
 
     @staticmethod
     def create_filter(filter_labels: Union[None, np.ndarray, "Filter"], graph_size: int) -> Optional[cpp_search.Filter]:
+        """
+        Helper method to construct a filter object from an array, Filter instance, or None.
+        """
         if filter_labels is None:
             return None
         if isinstance(filter_labels, np.ndarray):
@@ -60,19 +62,22 @@ def rerank(
     unsorted: bool = False,
 ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     """
-    Reranks candidate vectors for queries using SIMD distance computations in C++.
+    Re-evaluate and rank candidate vector indices for each query.
 
-    :param space: FloatSpace used to compute distances (metric + SIMD instruction set).
-    :param queries: 2D array of query vectors (shape: N_queries x D)
-    :param candidate_indices: 2D uint32 array of candidate feature IDs for each query (shape: N_queries x K_cand)
-    :param base_vectors: 2D array of dataset feature vectors (shape: N_base x D). If None, defaults to `queries`.
-    :param k_top: Number of top nearest candidates to return per query (default 0 returns all K_cand sorted).
-    :param num_threads: Number of threads (0 for hardware concurrency).
-    :param return_distances: If True, returns a tuple `(indices, distances)` containing candidate IDs and distance scores.
-    :param unsorted: If True, skips sorting the resulting candidates.
-    :return: 2D uint32 NumPy array of candidate IDs, or tuple `(indices, distances)` if return_distances is True.
+    Useful in two-stage retrieval pipelines where a fast first-stage search provides
+    a candidate pool that is re-scored with exact distance calculations.
+
+    :param space: FloatSpace instance defining the distance metric and dimensionality.
+    :param queries: 2D NumPy array of query vectors (shape: N_queries x dim).
+    :param candidate_indices: 2D uint32 NumPy array of candidate indices per query (shape: N_queries x K_candidates).
+    :param base_vectors: 2D array of dataset vectors (shape: N_base x dim). If None, defaults to `queries`.
+    :param k_top: Number of top nearest candidates to return per query (0 returns all candidates sorted).
+    :param num_threads: Number of worker threads (0 uses all available CPU cores).
+    :param return_distances: If True, returns a tuple ``(indices, distances)``.
+    :param unsorted: If True, skips sorting candidate results by distance.
+    :return: 2D uint32 NumPy array of candidate IDs, or tuple ``(indices, distances)`` if `return_distances` is True.
     """
-    cpp_space = space.to_cpp() if hasattr(space, "to_cpp") else space
+    cpp_space = space.float_space_cpp if hasattr(space, "float_space_cpp") else space
     return cpp_search.rerank(
         cpp_space,
         queries,

@@ -228,7 +228,7 @@ def construct_and_search_mips(
     print(
         f"Building graph: k_graph={k_graph}, k_ext={k_ext}, eps_ext={eps_ext:.4f}, opt_target={optimization_target.name}, metric={build_space.metric().name} ({build_space.get_instruction().name}), build_threads={build_threads}..."
     )
-    graph = deglib.DynamicExplorationGraph.create_empty(n_vecs, build_space, k_graph)
+    graph = deglib.create_empty(n_vecs, build_space, k_graph)
     builder = deglib.GraphBuilder(
         graph,
         extend_k=k_ext,

@@ -1,55 +1,109 @@
 Searching
 =========
 
-The main functionality of deglib is to search for similar feature vectors.
+This guide covers approximate nearest neighbor search, search parameters, label filtering, exploratory search, and candidate re-ranking.
+
+Vector Search (k-NN)
+--------------------
+
+Querying the graph finds the `k` closest feature vectors to a query vector:
 
 .. code-block:: python
 
-    import numpy as np
-    import deglib
+   import numpy as np
+   import deglib
 
-    # build the graph ...
+   # Assume graph is already built (dimension 128)
+   dim = 128
+   query = np.random.randn(dim).astype(np.float32)
 
-    # generate query
-    query = np.random.random(DIMS).astype(np.float32)
+   # Single query search
+   indices, distances = graph.search(query, k=10, eps=0.1)
 
-    # search query
-    indices, distances = graph.search(query, eps=0.1, k=16)
+   print("Top-10 nearest neighbor IDs:", indices)
+   print("Distances:", distances)
 
-    print(indices)    # data[result_indices] will show the 16 closest datapoints to "query"
-    print(distances)  # numpy array with 16 distances to the results
+Batch Search
+^^^^^^^^^^^^
 
-This will give the 16 indices of the datapoints closest to the query as well as their distances to the query.
-
-Multiple queries at once
-************************
-
-It is also possible to search for multiple queries at once:
+Pass a 2D NumPy array of shape ``(N_queries, dim)`` to search multiple queries in parallel:
 
 .. code-block:: python
 
-    N_QUERIES = 10
-    query = np.random.random(N_QUERIES, DIMS).astype(np.float32)
+   queries = np.random.randn(100, dim).astype(np.float32)
+   indices, distances = graph.search(queries, k=10, eps=0.1, threads=0)
 
-    indices, distances = graph.search(query, eps=0.1, k=16)
+   # Result shapes: (100, 10)
+   print("Batch result indices shape:", indices.shape)
 
-In this case `indices` and `distances` will have shape `(10, 16)` (16 indices for 10 queries).
+---
 
-Parameters
-**********
+Search Parameter: `eps`
+-----------------------
 
-There are a lot of parameters to control the search speed and recall. See :ref:`dynamic_exploration_graph` for more details.
+The primary parameter controlling the search trade-off is ``eps`` (epsilon):
 
-Filters
-*******
+- **Small `eps`** (e.g. ``0.0`` to ``0.05``): Maximum query throughput (QPS) with low latency.
+- **Higher `eps`** (e.g. ``0.1`` to ``0.3``): Higher recall rate by evaluating more candidate nodes during graph traversal.
 
-Sometimes you want to exclude some samples of your dataset from search. This can be done using filters:
+---
+
+Filtering
+---------
+
+Search can be constrained to a specific subset of valid vertex IDs using :class:`~deglib.search.Filter`:
 
 .. code-block:: python
 
-    valid_labels = np.array([0, 3, 34, 52, 108])
-    query = np.random.random(dims).astype(np.float32)
+   from deglib.search import Filter
 
-    results, distances = graph.search(query, filter_labels=valid_labels, eps=0.01, k=4)
+   # Only allow these specific external labels in search results
+   allowed_ids = np.array([5, 12, 42, 108, 500], dtype=np.int32)
+   search_filter = Filter(allowed_ids)
 
-In this case results will only include values in `valid_labels`.
+   indices, distances = graph.search(query, k=5, eps=0.1, filter_labels=search_filter)
+
+---
+
+Exploration (Graph Walk)
+------------------------
+
+Instead of providing a new feature vector, you can explore the neighborhood starting from an existing vertex label using :meth:`~deglib.graph.DynamicExplorationGraph.explore`:
+
+.. code-block:: python
+
+   # Explore the graph starting from vertex ID 42
+   neighbor_ids, distances = graph.explore(
+       entry_external_label=42,
+       k=10,
+       eps=0.1,
+       include_entry=False,  # exclude the start vertex itself
+   )
+
+   print("Exploration results from vertex 42:", neighbor_ids)
+
+---
+
+Re-Ranking
+----------
+
+In two-stage retrieval pipelines, a fast preliminary search provides a pool of candidate IDs that can be re-ranked with exact distances using :func:`deglib.search.rerank`:
+
+.. code-block:: python
+
+   import deglib
+
+   space = deglib.FloatSpace.create(dim=dim, metric=deglib.Metric.FP32_L2)
+   candidate_pool = np.random.randint(0, graph.size(), size=(10, 50), dtype=np.uint32)
+   dataset = np.random.randn(graph.size(), dim).astype(np.float32)
+
+   # Re-rank top 10 from the 50 candidates per query
+   top_indices, top_distances = deglib.search.rerank(
+       space=space,
+       queries=queries[:10],
+       candidate_indices=candidate_pool,
+       base_vectors=dataset,
+       k_top=10,
+       return_distances=True,
+   )
+

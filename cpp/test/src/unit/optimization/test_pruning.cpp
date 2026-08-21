@@ -137,14 +137,14 @@ TEST(PruningTest, PruneWorstEdgesAllBecomesSelfLoops) {
 }
 
 // ---------------------------------------------------------------------------
-//  prune_non_mrng_edges
+//  prune_non_rng_edges
 // ---------------------------------------------------------------------------
 
-TEST(PruningTest, RemoveNonMrngEdgesReducesNonRngCount) {
+TEST(PruningTest, RemoveNonRngEdgesReducesNonRngCount) {
     auto graph = create_test_graph();
 
     uint32_t before = deglib::analysis::calc_non_rng_edges(graph);
-    uint32_t removed = deglib::optimization::pruning::prune_non_mrng_edges(graph, 1);
+    uint32_t removed = deglib::optimization::pruning::prune_non_rng_edges(graph, 1);
     uint32_t after = deglib::analysis::calc_non_rng_edges(graph);
 
     EXPECT_GT(before, 0u);
@@ -152,15 +152,15 @@ TEST(PruningTest, RemoveNonMrngEdgesReducesNonRngCount) {
     EXPECT_LT(after, before);
 }
 
-TEST(PruningTest, RemoveNonMrngEdgesIdempotent) {
+TEST(PruningTest, RemoveNonRngEdgesIdempotent) {
     auto graph = create_test_graph();
 
     // First removal
-    deglib::optimization::pruning::prune_non_mrng_edges(graph, 1);
+    deglib::optimization::pruning::prune_non_rng_edges(graph, 1);
     uint32_t after_first = deglib::analysis::calc_non_rng_edges(graph);
 
-    // Second removal should not remove anything (already MRNG)
-    uint32_t removed_second = deglib::optimization::pruning::prune_non_mrng_edges(graph, 1);
+    // Second removal should not remove anything (already RNG conform)
+    uint32_t removed_second = deglib::optimization::pruning::prune_non_rng_edges(graph, 1);
     uint32_t after_second = deglib::analysis::calc_non_rng_edges(graph);
 
     EXPECT_EQ(removed_second, 0u);
@@ -168,14 +168,14 @@ TEST(PruningTest, RemoveNonMrngEdgesIdempotent) {
 }
 
 // ---------------------------------------------------------------------------
-//  prune_non_mrng_edges_weight_sorted
+//  prune_non_rng_edges_weight_sorted
 // ---------------------------------------------------------------------------
 
-TEST(PruningTest, RemoveNonMrngEdgesWeightSortedReducesNonRngCount) {
+TEST(PruningTest, RemoveNonRngEdgesWeightSortedReducesNonRngCount) {
     auto graph = create_test_graph();
 
     uint32_t before = deglib::analysis::calc_non_rng_edges(graph);
-    uint32_t removed = deglib::optimization::pruning::prune_non_mrng_edges_weight_sorted(graph, 1);
+    uint32_t removed = deglib::optimization::pruning::prune_non_rng_edges_weight_sorted(graph, 1);
     uint32_t after = deglib::analysis::calc_non_rng_edges(graph);
 
     EXPECT_GT(before, 0u);
@@ -183,13 +183,13 @@ TEST(PruningTest, RemoveNonMrngEdgesWeightSortedReducesNonRngCount) {
     EXPECT_LT(after, before);
 }
 
-TEST(PruningTest, RemoveNonMrngEdgesWeightSortedIdempotent) {
+TEST(PruningTest, RemoveNonRngEdgesWeightSortedIdempotent) {
     auto graph = create_test_graph();
 
-    deglib::optimization::pruning::prune_non_mrng_edges_weight_sorted(graph, 1);
+    deglib::optimization::pruning::prune_non_rng_edges_weight_sorted(graph, 1);
     uint32_t after_first = deglib::analysis::calc_non_rng_edges(graph);
 
-    uint32_t removed_second = deglib::optimization::pruning::prune_non_mrng_edges_weight_sorted(graph, 1);
+    uint32_t removed_second = deglib::optimization::pruning::prune_non_rng_edges_weight_sorted(graph, 1);
     uint32_t after_second = deglib::analysis::calc_non_rng_edges(graph);
 
     EXPECT_EQ(removed_second, 0u);
@@ -197,14 +197,14 @@ TEST(PruningTest, RemoveNonMrngEdgesWeightSortedIdempotent) {
 }
 
 // ---------------------------------------------------------------------------
-//  prune_non_mrng_edges_iterative
+//  prune_non_rng_edges_iterative
 // ---------------------------------------------------------------------------
 
-TEST(PruningTest, RemoveNonMrngEdgesIterativeReducesNonRngCount) {
+TEST(PruningTest, RemoveNonRngEdgesIterativeReducesNonRngCount) {
     auto graph = create_test_graph();
 
     uint32_t before = deglib::analysis::calc_non_rng_edges(graph);
-    uint32_t removed = deglib::optimization::pruning::prune_non_mrng_edges_iterative(graph, 1);
+    uint32_t removed = deglib::optimization::pruning::prune_non_rng_edges_iterative(graph, 1);
     uint32_t after = deglib::analysis::calc_non_rng_edges(graph);
 
     EXPECT_GT(before, 0u);
@@ -212,13 +212,13 @@ TEST(PruningTest, RemoveNonMrngEdgesIterativeReducesNonRngCount) {
     EXPECT_LT(after, before);
 }
 
-TEST(PruningTest, RemoveNonMrngEdgesIterativeIdempotent) {
+TEST(PruningTest, RemoveNonRngEdgesIterativeIdempotent) {
     auto graph = create_test_graph();
 
-    deglib::optimization::pruning::prune_non_mrng_edges_iterative(graph, 1);
+    deglib::optimization::pruning::prune_non_rng_edges_iterative(graph, 1);
     uint32_t after_first = deglib::analysis::calc_non_rng_edges(graph);
 
-    uint32_t removed_second = deglib::optimization::pruning::prune_non_mrng_edges_iterative(graph, 1);
+    uint32_t removed_second = deglib::optimization::pruning::prune_non_rng_edges_iterative(graph, 1);
     uint32_t after_second = deglib::analysis::calc_non_rng_edges(graph);
 
     EXPECT_EQ(removed_second, 0u);
@@ -229,16 +229,16 @@ TEST(PruningTest, RemoveNonMrngEdgesIterativeIdempotent) {
 //  Cross-method consistency
 // ---------------------------------------------------------------------------
 
-TEST(PruningTest, AllMethodsProduceMrngConformGraph) {
+TEST(PruningTest, AllMethodsProduceRngConformGraph) {
     auto graph1 = create_test_graph();
     auto graph2 = create_test_graph();
     auto graph3 = create_test_graph();
 
-    uint32_t removed1 = deglib::optimization::pruning::prune_non_mrng_edges(graph1, 1);
-    uint32_t removed2 = deglib::optimization::pruning::prune_non_mrng_edges_weight_sorted(graph2, 1);
-    uint32_t removed3 = deglib::optimization::pruning::prune_non_mrng_edges_iterative(graph3, 1);
+    uint32_t removed1 = deglib::optimization::pruning::prune_non_rng_edges(graph1, 1);
+    uint32_t removed2 = deglib::optimization::pruning::prune_non_rng_edges_weight_sorted(graph2, 1);
+    uint32_t removed3 = deglib::optimization::pruning::prune_non_rng_edges_iterative(graph3, 1);
 
-    // All methods should reduce non-RNG edges to zero (MRNG-conform graph)
+    // All methods should reduce non-RNG edges to zero (RNG-conform graph)
     EXPECT_EQ(deglib::analysis::calc_non_rng_edges(graph1), 0u);
     EXPECT_EQ(deglib::analysis::calc_non_rng_edges(graph2), 0u);
     EXPECT_EQ(deglib::analysis::calc_non_rng_edges(graph3), 0u);

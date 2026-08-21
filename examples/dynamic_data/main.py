@@ -216,7 +216,7 @@ def build_dynamic_graph(
     else:
         print("Output: (in RAM, no file)")
 
-    graph_mut = deglib.DynamicExplorationGraph.create_empty(
+    graph_mut = deglib.create_empty(
         capacity=n,
         feature_space=deglib.distances.FloatSpace.create(dims, metric, instruction_enum),
         edges_per_vertex=k,

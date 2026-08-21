@@ -8,7 +8,7 @@ import numpy as np
 
 from .cpu import InstructionSet
 from .distances import FloatSpace, Metric
-from .graph import DynamicExplorationGraph
+from .graph import DynamicExplorationGraph, create_empty
 from .utils import InvalidShapeException, assure_array
 
 
@@ -24,22 +24,6 @@ class OptimizationTarget(enum.IntEnum):
     StreamingData = deglib_cpp.OptimizationTarget.StreamingData
     HighLID = deglib_cpp.OptimizationTarget.HighLID
     LowLID = deglib_cpp.OptimizationTarget.LowLID
-
-    def to_cpp(self) -> deglib_cpp.OptimizationTarget:
-        """
-        Convert the Python OptimizationTarget enum to its C++ equivalent.
-
-        :return: The corresponding C++ OptimizationTarget enum value
-        :rtype: deglib_cpp.OptimizationTarget
-        """
-        if self == OptimizationTarget.StreamingData:
-            return deglib_cpp.OptimizationTarget.StreamingData
-        elif self == OptimizationTarget.HighLID:
-            return deglib_cpp.OptimizationTarget.HighLID
-        elif self == OptimizationTarget.LowLID:
-            return deglib_cpp.OptimizationTarget.LowLID
-        else:
-            raise ValueError(f"Unknown OptimizationTarget: {self}")
 
 
 class GraphBuilder:
@@ -72,20 +56,21 @@ class GraphBuilder:
         :type seed: int | None
         :param optimization_target: Optimization strategy based on data distribution characteristics
         :type optimization_target: OptimizationTarget
-        :param extend_k: Number of neighbors to consider when extending the graph. Defaults to graph's edges_per_vertex
-        if smaller
-        :param extend_eps: Epsilon value for neighbor search during graph extension
+        :param extend_k: Number of neighbors to consider when extending the graph (must be > edges_per_vertex).
+                         Defaults to ``edges_per_vertex * 2`` if 0 or <= edges_per_vertex.
+        :param extend_eps: Epsilon value for neighbor search during graph extension (default: 0.1)
         :param improve_k: Number of neighbors to consider when improving the graph
         :param improve_eps: Epsilon value for neighbor search during graph improvement
         :param max_path_length: Maximum number of edge swaps in a single improvement attempt
         :param swap_tries: Number of improvement attempts per build step
         :param additional_swap_tries: Additional improvement attempts after a successful improvement
         """
-        extend_k = max(extend_k, graph.get_edges_per_vertex())
+        if extend_k <= graph.get_edges_per_vertex():
+            extend_k = graph.get_edges_per_vertex() * 2
         self.builder_cpp = deglib_cpp.GraphBuilder(
             graph.dynamic_exploration_graph_cpp,
             seed,
-            optimization_target.to_cpp(),
+            deglib_cpp.OptimizationTarget(int(optimization_target)),
             extend_k,
             extend_eps,
             improve_k,
@@ -96,6 +81,7 @@ class GraphBuilder:
         )
         self.graph = graph
         self.optimization_target = optimization_target
+
 
     def add_entry(self, external_label: int | Iterable[int] | np.ndarray, feature: np.ndarray):
         """
@@ -108,7 +94,7 @@ class GraphBuilder:
                               should be a list or array with length N matching the number of features
         :param feature: The feature vector(s) to be added. Shape [D] for single entry or [N, D] for batch
         :raises InvalidShapeException: If feature array has invalid shape (not 1D or 2D)
-        :raises AssertionError: If number of features doesn't match number of labels in batch processing
+        :raises ValueError: If number of features doesn't match number of labels in batch processing
         """
         # standardize feature shape
         if len(feature.shape) == 1:
@@ -125,9 +111,8 @@ class GraphBuilder:
             external_label = np.array(external_label, dtype=np.uint32)
         assure_array(external_label, "external_label", np.uint32)
 
-        assert feature.shape[0] == external_label.shape[0], (
-            f"Got {feature.shape[0]} features, but {external_label.shape[0]} labels"
-        )
+        if feature.shape[0] != external_label.shape[0]:
+            raise ValueError(f"Got {feature.shape[0]} features, but {external_label.shape[0]} labels")
 
         self.builder_cpp.add_entry(external_label, feature)
 
@@ -254,7 +239,7 @@ def build_from_data(
     seed: int | None = None,
     optimization_target: OptimizationTarget = OptimizationTarget.LowLID,
     extend_k: int = 0,
-    extend_eps: float = 0.2,
+    extend_eps: float = 0.1,
     improve_k: int = 0,
     improve_eps: float = 0.001,
     max_path_length: int = 5,
@@ -286,10 +271,12 @@ def build_from_data(
     :type seed: int | None
     :param optimization_target: Optimization strategy based on data distribution characteristics
     :type optimization_target: OptimizationTarget
-    :param extend_k: Number of neighbors to consider when extending the graph
+    :param extend_k: Number of neighbors to consider when extending the graph (must be > edges_per_vertex).
+                     Defaults to ``edges_per_vertex * 2``.
     :type extend_k: int
-    :param extend_eps: Epsilon value for neighbor search during graph extension
+    :param extend_eps: Epsilon value for neighbor search during graph extension (default: 0.1)
     :type extend_eps: float
+
     :param improve_k: Number of neighbors to consider when improving the graph
     :type improve_k: int
     :param improve_eps: Epsilon value for neighbor search during graph improvement
@@ -310,7 +297,7 @@ def build_from_data(
     if capacity <= 0:
         capacity = data.shape[0]
     feature_space = FloatSpace.create(data.shape[1], metric, instruction)
-    graph = DynamicExplorationGraph.create_empty(capacity, feature_space, edges_per_vertex)
+    graph = create_empty(capacity, feature_space, edges_per_vertex)
     builder = GraphBuilder(
         graph,
         seed=seed,

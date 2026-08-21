@@ -174,7 +174,7 @@ def run_static_benchmark(
             print(f"\n=== Building Graph with {build_threads} threads (in RAM, no file path specified) ===")
 
         build_start = time.perf_counter()
-        graph_mut = deglib.DynamicExplorationGraph.create_empty(
+        graph_mut = deglib.create_empty(
             capacity=base_vecs.shape[0],
             feature_space=deglib.distances.FloatSpace.create(dims, metric, instruction_enum),
             edges_per_vertex=preset["k"],

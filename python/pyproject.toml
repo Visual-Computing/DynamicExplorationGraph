@@ -2,11 +2,12 @@
 requires = [
     "setuptools==83.0.0",
     "pybind11==3.0.4",
-    "wheel",
+    "wheel==0.48.0",
     "ninja",
     "cmake>=3.12"
 ]
 build-backend = "setuptools.build_meta"
+
 
 [project]
 name = "deglib"

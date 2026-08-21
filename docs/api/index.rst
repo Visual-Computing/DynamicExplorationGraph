@@ -1,11 +1,16 @@
-API
-===
+API Reference
+=============
 
-This is the API Documentation for the deglib project.
+Complete Python API reference for the `deglib` package.
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: Modules:
 
-   graphs/index
+   graph
    builder
+   distances
+   search
+   analysis
+   optimization
+   cpu

@@ -398,9 +398,10 @@ class EvenRegularGraphBuilder {
      * Set the number of threads used to extend the graph during building.
      *
      * When the thread count is greater than 1 and the optimization target is not StreamingData,
-     * the builder will utilize multiple threads to add elements to the graph in parallel.
-     * By default, all available CPU cores/threads are used unless specified.
-     * Note: The order in which elements are added is not guaranteed when using multiple threads.
+     * the builder will utilize multiple threads to search neighbors and connect edges in parallel.
+     * The default thread count is 1.
+     * Note: Elements are always appended to the graph in insertion order. Only the neighbor
+     * search and edge creation of the elements within a batch are processed in parallel.
      *
      * @param thread_count Number of threads which are used to extend the graph.
      */
@@ -417,10 +418,13 @@ class EvenRegularGraphBuilder {
      * (how fast changed are added to the graph), specify the batch size should be considered.
      *
      * e.g.
-     * thread count = 1 and batch size = 1: low throuput, medium latency, order of elements is guaranteed
-     * thread count > 1 and batch size = 1: high throuput, low latency, order of elements is not guaranteed
-     * thread count > 1 and batch size > 1: highest throuput, highest latency, order of elements is not guaranteed
+     * thread count = 1 and batch size = 1: low throughput, medium latency
+     * thread count > 1 and batch size = 1: high throughput, low latency
+     * thread count > 1 and batch size > 1: highest throughput, highest latency
      * * Please note that the optimization target StreamingData only uses a thread count of 1.
+     *
+     * The elements of a batch are always appended to the graph in insertion order.
+     * Only the neighbor search and edge creation within a batch are processed in parallel.
      *
      * The batch size is calculated as:
      *   batch_size = thread_count * tasks_per_batch * task_size
@@ -432,8 +436,8 @@ class EvenRegularGraphBuilder {
      * A low tasks_per_batch improves the latency but reduces the throughput.
      * Therefore it is recommended to use a higher task_size value.
      *
-     * @param tasks_per_batch Number of tasks for each thread in one batch. (default: 32)
-     * @param task_size Number of elements each thread processes in one task. (default: 10)
+     * @param tasks_per_batch Number of tasks for each thread in one batch. (default: 10)
+     * @param task_size Number of elements each thread processes in one task. (default: 32)
      */
     void setBatchSize(uint32_t tasks_per_batch, uint32_t task_size) {
         extend_thread_task_size = task_size;

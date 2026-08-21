@@ -1,12 +1,12 @@
 #pragma once
 
-#include <assert.h>
 #include <stdio.h>
 
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <stdexcept>
 #include <unordered_map>
 
 namespace deglib {
@@ -73,10 +73,14 @@ auto fvecs_read(const char* fname, size_t& d_out, size_t& n_out) {
     // read dimension header
     uint32_t dims = 0;
     ifstream.read(reinterpret_cast<char*>(&dims), sizeof(dims));
-    assert((dims > 0 && dims < 1'000'000) && "unreasonable dimension");
+    if (dims == 0 || dims >= 1'000'000) {
+        throw std::runtime_error("unreasonable dimension in fvecs file");
+    }
 
     // compute number of rows
-    assert(file_size % ((dims + 1) * sizeof(float)) == 0 || !"weird file size");
+    if (file_size % ((dims + 1) * sizeof(float)) != 0) {
+        throw std::runtime_error("weird file size in fvecs file");
+    }
     size_t n = (size_t)file_size / ((dims + 1) * sizeof(float));
     d_out = dims;
     n_out = n;
@@ -85,7 +89,9 @@ auto fvecs_read(const char* fname, size_t& d_out, size_t& n_out) {
     auto x = std::make_unique<std::byte[]>(file_size);
     ifstream.seekg(0);
     ifstream.read(reinterpret_cast<char*>(x.get()), file_size);
-    if (!ifstream) assert(ifstream.gcount() == static_cast<int>(file_size) || !"could not read whole file");
+    if (!ifstream && ifstream.gcount() != static_cast<std::streamsize>(file_size)) {
+        throw std::runtime_error("could not read whole file");
+    }
 
     // shift array to remove row headers
     for (size_t i = 0; i < n; i++) std::memmove(&x[i * dims * sizeof(float)], &x[sizeof(dims) + i * (dims + 1) * sizeof(float)], dims * sizeof(float));
@@ -113,10 +119,14 @@ auto u8vecs_read(const char* fname, size_t& d_out, size_t& n_out) {
     // read dimension header
     uint32_t dims = 0;
     ifstream.read(reinterpret_cast<char*>(&dims), sizeof(dims));
-    assert((dims > 0 && dims < 1'000'000) && "unreasonable dimension");
+    if (dims == 0 || dims >= 1'000'000) {
+        throw std::runtime_error("unreasonable dimension in u8vecs file");
+    }
 
     // compute number of rows
-    assert(file_size % (dims + 4) == 0 || !"weird file size");
+    if (file_size % (dims + 4) != 0) {
+        throw std::runtime_error("weird file size in u8vecs file");
+    }
     size_t n = (size_t)file_size / (dims + 4);
     d_out = dims;
     n_out = n;
@@ -125,7 +135,9 @@ auto u8vecs_read(const char* fname, size_t& d_out, size_t& n_out) {
     auto x = std::make_unique<std::byte[]>(file_size);
     ifstream.seekg(0);
     ifstream.read(reinterpret_cast<char*>(x.get()), file_size);
-    if (!ifstream) assert(ifstream.gcount() == static_cast<int>(file_size) || !"could not read whole file");
+    if (!ifstream && ifstream.gcount() != static_cast<std::streamsize>(file_size)) {
+        throw std::runtime_error("could not read whole file");
+    }
 
     // shift array to remove row headers
     for (size_t i = 0; i < n; i++) std::memmove(&x[i * dims], &x[sizeof(dims) + i * (dims + sizeof(dims))], dims);

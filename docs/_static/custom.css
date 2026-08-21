@@ -1,0 +1,15 @@
+/* Set content area to dynamic wide layout */
+.wy-nav-content {
+    max-width: 1400px !important;
+}
+
+/* Ensure table cells wrap cleanly without forcing horizontal scrollbars */
+.wy-table-responsive table td,
+.wy-table-responsive table th,
+table.docutils td,
+table.docutils th {
+    white-space: normal !important;
+    word-break: normal;
+    overflow-wrap: break-word;
+}
+

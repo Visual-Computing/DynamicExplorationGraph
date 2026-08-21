@@ -1,0 +1,21 @@
+[project]
+name = "deglib-docs"
+version = "0.1.0"
+description = "Sphinx documentation for Dynamic Exploration Graph (deglib)"
+requires-python = ">=3.10"
+dependencies = [
+    "sphinx>=7.1.2",
+    "sphinx-rtd-theme>=1.3.0",
+    "myst-parser>=2.0.0",
+    "deglib",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = []
+
+[tool.uv.sources]
+deglib = { path = "../python", editable = true }
