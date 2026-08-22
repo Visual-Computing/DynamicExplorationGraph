@@ -121,7 +121,7 @@ mutable_configurations = [c for c in configurations if c.graph.is_mutable()]
 
 @pytest.mark.parametrize("conf", configurations)
 def test_search(conf: Configuration):
-    if IS_MACOS_M1 and conf.metric == Metric.InnerProduct:
+    if IS_MACOS_M1 and conf.metric == Metric.FP32_InnerProduct:
         pytest.skip("This test is skipped on macOS with M1 chip, as avx2 is not supported on m1 chip.")
 
     k = 10
