@@ -21,7 +21,6 @@ It offers performance comparable to HNSW while providing dynamic graph modificat
 
    tutorials/building_graphs
    tutorials/searching
-   tutorials/memory_management
 
 .. toctree::
    :maxdepth: 2
