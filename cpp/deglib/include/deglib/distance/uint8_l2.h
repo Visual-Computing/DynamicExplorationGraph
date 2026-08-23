@@ -50,15 +50,14 @@ class L2Uint8 {
 // faster path for dimensions that are known to be SIMD-aligned.
 
 DEGLIB_TARGET_AVX2 inline static int64_t uint8_l2_hsum256(__m256i s) {
-    __m128i sum128 = _mm_add_epi32(_mm256_extracti128_si256(s, 0), _mm256_extracti128_si256(s, 1));
-    alignas(16) int sum_array[4];
-    _mm_store_si128(reinterpret_cast<__m128i*>(sum_array), sum128);
-    return static_cast<int64_t>(sum_array[0] + sum_array[1] + sum_array[2] + sum_array[3]);
+    __m128i sum128 = _mm_add_epi32(_mm256_castsi256_si128(s), _mm256_extracti128_si256(s, 1));
+    sum128 = _mm_add_epi32(sum128, _mm_shuffle_epi32(sum128, _MM_SHUFFLE(1, 0, 3, 2)));
+    sum128 = _mm_add_epi32(sum128, _mm_shuffle_epi32(sum128, _MM_SHUFFLE(2, 3, 0, 1)));
+    return static_cast<int64_t>(_mm_cvtsi128_si32(sum128));
 }
 
 DEGLIB_TARGET_AVX512 inline static int64_t uint8_l2_hsum512(__m512i s) {
-    __m256i sum256 = _mm256_add_epi32(_mm512_castsi512_si256(s), _mm512_extracti64x4_epi64(s, 1));
-    return uint8_l2_hsum256(sum256);
+    return static_cast<int64_t>(_mm512_reduce_add_epi32(s));
 }
 template <ResidualMode Mode = ResidualMode::Full>
 class L2Uint8_AVX512 {
