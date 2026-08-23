@@ -1,0 +1,24 @@
+Bootstrap: localimage
+From: base.sif
+
+%post
+  apt-get update && apt-get install -y --no-install-recommends \
+      build-essential \
+      cmake \
+      git \
+      libomp-dev \
+      ninja-build
+
+  # Install Python build dependencies
+  pip install --no-cache-dir \
+      setuptools==83.0.0 \
+      pybind11==3.0.4 \
+      wheel==0.48.0 \
+      numpy>=1.26.0
+
+  # Install deglib from source
+  git clone --depth 1 https://github.com/Visual-Computing/DynamicExplorationGraph.git /tmp/deg
+  cd /tmp/deg/python
+  python setup.py copy_build_files
+  pip install --no-cache-dir -e . --no-build-isolation
+  rm -rf /tmp/deg

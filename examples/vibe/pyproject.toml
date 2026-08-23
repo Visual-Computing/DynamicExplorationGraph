@@ -1,0 +1,17 @@
+[project]
+name = "vibe"
+version = "0.1.0"
+description = "VIBE (Vector Index Benchmark for Embeddings) ANNS benchmark reproduction using DEG"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "deglib",
+    "h5py>=3.11.0",
+    "matplotlib>=3.8.0",
+    "numpy>=1.26.0",
+    "pyyaml>=6.0.0",
+    "tqdm>=4.66.0",
+]
+
+[tool.uv.sources]
+deglib = { path = "../../python", editable = true }
