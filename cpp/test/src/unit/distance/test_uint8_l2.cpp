@@ -283,3 +283,14 @@ TEST(L2Uint8_Batch, PerformanceCompareVsBatch) {
     // Batch should be at least as fast (allowing for noise)
     EXPECT_LE(batch_us, single_us * 2) << "batch compare should not be significantly slower than single compare";
 }
+
+TEST(L2Uint8_SelectDist, AcceptsVNNIFallback) {
+#if defined(DEGLIB_X86)
+    if (deglib::cpu::has_avx512_vnni()) {
+        EXPECT_NO_THROW(deglib::distances::uint8_l2::select_dist(128, deglib::cpu::InstructionSet::AVX512_VNNI));
+    }
+    if (deglib::cpu::has_avx_vnni()) {
+        EXPECT_NO_THROW(deglib::distances::uint8_l2::select_dist(128, deglib::cpu::InstructionSet::AVX2_VNNI));
+    }
+#endif
+}

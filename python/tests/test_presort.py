@@ -6,13 +6,13 @@ from deglib.distances import FloatSpace, Metric
 
 
 @pytest.mark.parametrize("threads", [0, 1, 2])
-@pytest.mark.parametrize("metric", [Metric.FP32_L2, Metric.FP32_InnerProduct, "FP32_L2"])
+@pytest.mark.parametrize("metric", [Metric.FP32_L2, Metric.FP32_InnerProduct])
 def test_presort_basic(threads, metric):
     np.random.seed(42)
     N, d = 50, 16
     data = np.random.randn(N, d).astype(np.float32)
 
-    indices = presort(data, metric, radius_decay=0.9, threads=threads)
+    indices = presort(data, metric=metric, radius_decay=0.9, threads=threads)
 
     assert isinstance(indices, np.ndarray)
     assert indices.shape == (N,)
@@ -28,7 +28,7 @@ def test_presort_with_float_space():
     data = np.random.randn(N, d).astype(np.float32)
     space = FloatSpace.create(d, Metric.FP32_L2)
 
-    indices = presort(data, space_or_metric=space, radius_decay=0.9, threads=2)
+    indices = presort(data, metric=space, radius_decay=0.9, threads=2)
 
     assert isinstance(indices, np.ndarray)
     assert indices.shape == (N,)
@@ -60,7 +60,8 @@ def test_presort_callback():
 
 
 @pytest.mark.parametrize(
-    "invalid_metric", [Metric.Uint8_L2, Metric.FP16_InnerProduct, Metric.EVP_InnerProduct, "Uint8_L2"]
+    "invalid_metric",
+    [Metric.Uint8_L2, Metric.Uint8_InnerProduct, Metric.FP16_InnerProduct, Metric.EVP_InnerProduct],
 )
 def test_presort_non_fp32_metric_raises(invalid_metric):
     np.random.seed(42)
@@ -69,3 +70,28 @@ def test_presort_non_fp32_metric_raises(invalid_metric):
 
     with pytest.raises((ValueError, RuntimeError), match="FLAS only supports FP32"):
         presort(data, metric=invalid_metric)
+
+
+def test_presort_invalid_type_raises():
+    np.random.seed(42)
+    N, d = 20, 16
+    data = np.random.randn(N, d).astype(np.float32)
+
+    with pytest.raises(TypeError, match="Expected Metric or FloatSpace"):
+        presort(data, space_or_metric="invalid_string")
+
+
+def test_presort_conflicting_arguments_raises():
+    np.random.seed(42)
+    N, d = 20, 16
+    data = np.random.randn(N, d).astype(np.float32)
+    space = FloatSpace.create(d, Metric.FP32_L2)
+
+    with pytest.raises(ValueError, match="Cannot specify more than one"):
+        presort(data, metric=Metric.FP32_L2, space=space)
+
+    with pytest.raises(ValueError, match="Cannot specify more than one"):
+        presort(data, space_or_metric=Metric.FP32_L2, space=space)
+
+    with pytest.raises(ValueError, match="Cannot specify more than one"):
+        presort(data, space_or_metric=space, metric=Metric.FP32_L2)

@@ -74,6 +74,14 @@ TEST(SizeBoundedGraph, L2Uint8Metric) {
     EXPECT_EQ(graph.getFeatureSpace().dim(), 128u);
 }
 
+TEST(SizeBoundedGraph, InnerProductUint8Metric) {
+    deglib::distances::FloatSpace space(128, deglib::distances::Metric::Uint8_InnerProduct);
+    deglib::graph::SizeBoundedGraph graph(10, 4, space);
+
+    EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::Uint8_InnerProduct);
+    EXPECT_EQ(graph.getFeatureSpace().dim(), 128u);
+}
+
 // ---------------------------------------------------------------------------
 //  2. Vertex Management
 // ---------------------------------------------------------------------------

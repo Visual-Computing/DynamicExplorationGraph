@@ -24,6 +24,7 @@ class Metric(enum.IntEnum):
     FP32_L2 = cpp_distances.Metric.FP32_L2
     FP32_InnerProduct = cpp_distances.Metric.FP32_InnerProduct
     Uint8_L2 = cpp_distances.Metric.Uint8_L2
+    Uint8_InnerProduct = cpp_distances.Metric.Uint8_InnerProduct
     FP16_InnerProduct = cpp_distances.Metric.FP16_InnerProduct
     EVP_InnerProduct = cpp_distances.Metric.EVP_InnerProduct
 
@@ -33,7 +34,7 @@ class Metric(enum.IntEnum):
         """
         if self in (Metric.FP32_L2, Metric.FP32_InnerProduct):
             return np.float32
-        elif self == Metric.Uint8_L2:
+        elif self in (Metric.Uint8_L2, Metric.Uint8_InnerProduct):
             return np.uint8
         elif self == Metric.FP16_InnerProduct:
             return np.uint16

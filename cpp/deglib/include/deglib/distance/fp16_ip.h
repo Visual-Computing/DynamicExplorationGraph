@@ -45,15 +45,16 @@ class InnerProductFP16 {
 
 #if defined(DEGLIB_X86)
 DEGLIB_TARGET_AVX2 inline static float fp16_hsum256(__m256 s) {
-    __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(s, 0), _mm256_extractf128_ps(s, 1));
-    alignas(32) float f[4];
-    _mm_store_ps(f, sum128);
-    return f[0] + f[1] + f[2] + f[3];
+    __m128 sum128 = _mm_add_ps(_mm256_castps256_ps128(s), _mm256_extractf128_ps(s, 1));
+    __m128 shuf = _mm_movehdup_ps(sum128);
+    __m128 sums = _mm_add_ps(sum128, shuf);
+    shuf = _mm_movehl_ps(shuf, sums);
+    sums = _mm_add_ss(sums, shuf);
+    return _mm_cvtss_f32(sums);
 }
 
 DEGLIB_TARGET_AVX512 inline static float fp16_hsum512(__m512 s) {
-    __m256 sum256 = _mm256_add_ps(_mm512_extractf32x8_ps(s, 0), _mm512_extractf32x8_ps(s, 1));
-    return fp16_hsum256(sum256);
+    return _mm512_reduce_add_ps(s);
 }
 
 // -------------------------------------------------------------------
@@ -367,15 +368,10 @@ using DistanceVariant = std::variant<
     >;
 
 inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) {
-    if (instruction == deglib::cpu::InstructionSet::Scalar) {
-        return InnerProductFP16{};
-    }
+    const auto target = deglib::cpu::resolve_instruction_set(instruction);
 
 #if defined(DEGLIB_X86)
-    if (instruction == deglib::cpu::InstructionSet::AVX512 || (instruction == deglib::cpu::InstructionSet::Auto && deglib::cpu::has_avx512())) {
-        if (instruction == deglib::cpu::InstructionSet::AVX512 && !deglib::cpu::has_avx512()) {
-            throw std::runtime_error("AVX512 instruction set requested, but not supported by CPU");
-        }
+    if (target == deglib::cpu::InstructionSet::AVX512) {
         if (dim < 16) {
             return InnerProductFP16_AVX512<ResidualMode::TailOnly>{};
         } else if (dim < 32) {
@@ -391,10 +387,7 @@ inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::Instruct
             else
                 return InnerProductFP16_AVX512<ResidualMode::Full>{};
         }
-    } else if (instruction == deglib::cpu::InstructionSet::AVX2 || (instruction == deglib::cpu::InstructionSet::Auto && deglib::cpu::has_avx2())) {
-        if (instruction == deglib::cpu::InstructionSet::AVX2 && !deglib::cpu::has_avx2()) {
-            throw std::runtime_error("AVX2 instruction set requested, but not supported by CPU");
-        }
+    } else if (target == deglib::cpu::InstructionSet::AVX2) {
         if (dim < 8) {
             return InnerProductFP16_AVX2<ResidualMode::TailOnly>{};
         } else if (dim < 16) {
@@ -410,10 +403,6 @@ inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::Instruct
             else
                 return InnerProductFP16_AVX2<ResidualMode::Full>{};
         }
-    }
-#else
-    if (instruction != deglib::cpu::InstructionSet::Auto && instruction != deglib::cpu::InstructionSet::Scalar) {
-        throw std::runtime_error("Requested SIMD instruction set is not supported on this platform");
     }
 #endif
 

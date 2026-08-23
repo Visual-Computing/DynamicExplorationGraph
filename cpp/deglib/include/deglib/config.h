@@ -7,19 +7,16 @@
     #define DEGLIB_X86 1
 #endif
 
-// Compile methods with this attribute for AVX-512 functions on GCC/Clang
+// Compile methods with this attribute for AVX-512 base functions on GCC/Clang
 #if defined(DEGLIB_X86) && (defined(__GNUC__) || defined(__clang__))
-    #define DEGLIB_TARGET_AVX512 __attribute__((target("avx512f,avx512dq,avx512bw,avx512vpopcntdq,avx2,f16c,fma")))
-#else
-    #define DEGLIB_TARGET_AVX512
-#endif
-
-// Compile methods with this attribute for AVX2 F16C functions on GCC/Clang.
-// Covers AVX2, F16C, and FMA intrinsics used in fp16_ip.h and fp32_ip.h.
-// F16C is assumed available on all CPUs supporting AVX2.
-#if defined(DEGLIB_X86) && (defined(__GNUC__) || defined(__clang__))
+    #define DEGLIB_TARGET_AVX512 __attribute__((target("avx512f,avx512dq,avx512bw,avx512vpopcntdq")))
+    #define DEGLIB_TARGET_AVX512_VNNI __attribute__((target("avx512f,avx512dq,avx512bw,avx512vpopcntdq,avx512vnni")))
+    #define DEGLIB_TARGET_AVX2_VNNI __attribute__((target("avx2,f16c,fma,avxvnni")))
     #define DEGLIB_TARGET_AVX2 __attribute__((target("avx2,f16c,fma")))
 #else
+    #define DEGLIB_TARGET_AVX512
+    #define DEGLIB_TARGET_AVX512_VNNI
+    #define DEGLIB_TARGET_AVX2_VNNI
     #define DEGLIB_TARGET_AVX2
 #endif
 

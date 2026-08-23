@@ -437,6 +437,37 @@ TEST(EvenRegularGraphBuilder, BuildGraphWithL2Uint8) {
     }
 }
 
+// Test: Build graph with InnerProductUint8 distance on uint8 vectors
+TEST(EvenRegularGraphBuilder, BuildGraphWithInnerProductUint8) {
+    auto size = 10;
+    auto edges_per_vertex = 4;  // Must be even
+    size_t feature_dim = 4;
+
+    deglib::distances::FloatSpace feature_space(feature_dim, deglib::distances::Metric::Uint8_InnerProduct);
+    deglib::graph::SizeBoundedGraph graph(size, edges_per_vertex, std::move(feature_space));
+    std::mt19937 rnd(42);
+    deglib::builder::EvenRegularGraphBuilder builder(graph, rnd);
+
+    // Uint8 feature vectors (quantized values 0-255)
+    std::vector<std::vector<uint8_t>> features = {{100, 120, 130, 140}, {101, 121, 131, 141}, {150, 160, 170, 180}, {151, 161, 171, 181}, {200, 210, 220, 230},
+                                                  {201, 211, 221, 231}, {220, 230, 240, 250}, {221, 231, 241, 251}, {240, 245, 250, 255}, {241, 246, 251, 255}};
+
+    for (uint32_t i = 0; i < features.size(); ++i) {
+        builder.addEntry(i, createUint8Feature(features[i]));
+    }
+
+    auto callback = [](deglib::builder::BuilderStatus& status) {};
+    builder.build(callback);
+
+    EXPECT_EQ(graph.size(), 10u);
+    for (uint32_t i = 0; i < graph.size(); ++i) {
+        uint32_t internal_idx = graph.getInternalIndex(i);
+        auto neighbors = graph.getNeighborIndices(internal_idx);
+        EXPECT_GE(neighbors[0], 0u);
+        EXPECT_LT(neighbors[0], graph.size());
+    }
+}
+
 // Test: Build larger graph with multiple distance functions to verify consistency
 TEST(EvenRegularGraphBuilder, BuildGraphLargerDataset) {
     auto size = 30;

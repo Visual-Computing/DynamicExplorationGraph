@@ -90,11 +90,9 @@ inline static void generate_synthetic_clustered_dataset(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Dataset generation (uint8, for L2_Uint8)
-// ---------------------------------------------------------------------------
-
-// Generate cross-platform deterministic uint8 clustered dataset
+// Generate cross-platform deterministic clustered uint8 dataset.
+// Generates float vectors using generate_synthetic_clustered_dataset(),
+// then quantizes them to uint8 [0, 255] using deterministic linear mapping.
 inline static void generate_synthetic_clustered_dataset_uint8(
     size_t count,
     size_t dim,
@@ -103,37 +101,29 @@ inline static void generate_synthetic_clustered_dataset_uint8(
     size_t query_count,
     size_t num_clusters = 20
 ) {
+    std::vector<float> base_float;
+    std::vector<float> query_float;
+    generate_synthetic_clustered_dataset(count, dim, base_float, query_float, query_count, num_clusters);
+
     base.resize(count * dim);
     query.resize(query_count * dim);
 
-    uint32_t rng_state = 42;
-    std::vector<std::vector<int>> centroids(num_clusters, std::vector<int>(dim));
+    // Centroids are [-1000, 1000] + noise [-100, 100] -> range approx [-1100, 1100].
+    // Map [-1100, 1100] to [0, 255] deterministically.
+    constexpr float min_val = -1100.0f;
+    constexpr float max_val = 1100.0f;
+    constexpr float scale = 255.0f / (max_val - min_val);
 
-    for (size_t c = 0; c < num_clusters; ++c) {
-        for (size_t d = 0; d < dim; ++d) {
-            uint32_t val = deglib_prng_next(rng_state);
-            centroids[c][d] = 20 + static_cast<int>(val % 216);  // [20, 235]
-        }
+    for (size_t i = 0; i < base_float.size(); ++i) {
+        float normalized = (base_float[i] - min_val) * scale;
+        int val = static_cast<int>(std::round(normalized));
+        base[i] = static_cast<uint8_t>(std::clamp(val, 0, 255));
     }
 
-    for (size_t i = 0; i < count; ++i) {
-        size_t c = i % num_clusters;
-        for (size_t d = 0; d < dim; ++d) {
-            uint32_t val = deglib_prng_next(rng_state);
-            int noise = static_cast<int>(val % 31) - 15;  // [-15, 15]
-            int res = centroids[c][d] + noise;
-            base[i * dim + d] = static_cast<uint8_t>(std::clamp(res, 0, 255));
-        }
-    }
-
-    for (size_t q = 0; q < query_count; ++q) {
-        size_t c = q % num_clusters;
-        for (size_t d = 0; d < dim; ++d) {
-            uint32_t val = deglib_prng_next(rng_state);
-            int noise = static_cast<int>(val % 31) - 15;  // [-15, 15]
-            int res = centroids[c][d] + noise;
-            query[q * dim + d] = static_cast<uint8_t>(std::clamp(res, 0, 255));
-        }
+    for (size_t q = 0; q < query_float.size(); ++q) {
+        float normalized = (query_float[q] - min_val) * scale;
+        int val = static_cast<int>(std::round(normalized));
+        query[q] = static_cast<uint8_t>(std::clamp(val, 0, 255));
     }
 }
 
@@ -284,6 +274,21 @@ inline static std::vector<std::vector<uint32_t>> compute_groundtruth_l2_uint8(
 ) {
     return compute_groundtruth<uint8_t>(base, base_count, query, query_count, dim, k, [](const uint8_t* q_vec, const uint8_t* b_vec, const void* qty_ptr) {
         return deglib::distances::uint8_l2::L2Uint8::compare(q_vec, b_vec, qty_ptr);
+    });
+}
+
+// Compute exact brute-force InnerProduct groundtruth for uint8 vectors.
+// Uses the scalar InnerProductUint8::compare() from deglib.
+inline static std::vector<std::vector<uint32_t>> compute_groundtruth_uint8_ip(
+    const std::vector<uint8_t>& base,
+    size_t base_count,
+    const std::vector<uint8_t>& query,
+    size_t query_count,
+    size_t dim,
+    uint32_t k
+) {
+    return compute_groundtruth<uint8_t>(base, base_count, query, query_count, dim, k, [](const uint8_t* q_vec, const uint8_t* b_vec, const void* qty_ptr) {
+        return deglib::distances::uint8_ip::InnerProductUint8::compare(q_vec, b_vec, qty_ptr);
     });
 }
 
@@ -481,7 +486,7 @@ inline static void run_integration_test(
     size_t total_correct = 0;
     for (size_t q = 0; q < query_count; ++q) {
         const std::byte* q_ptr = query_bytes + q * feature_bytes;
-        std::span<const float> q_span(reinterpret_cast<const float*>(q_ptr), dim);
+        std::span<const std::byte> q_span(q_ptr, feature_bytes);
         auto result = graph.search(q_span, search_k, search_eps, nullptr, 0);
 
         std::unordered_set<uint32_t> gt_set;
@@ -698,7 +703,7 @@ inline static void run_regression_test(
         auto t_search_start = std::chrono::high_resolution_clock::now();
         for (size_t q = 0; q < query_count; ++q) {
             const std::byte* q_ptr = query_bytes + q * feature_bytes;
-            std::span<const float> q_span(reinterpret_cast<const float*>(q_ptr), dim);
+            std::span<const std::byte> q_span(q_ptr, feature_bytes);
             auto result = graph.search(q_span, search_k, search_eps, nullptr, 0);
 
             std::unordered_set<uint32_t> gt_set;

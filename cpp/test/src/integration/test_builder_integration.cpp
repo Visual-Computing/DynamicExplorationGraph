@@ -59,13 +59,18 @@ TEST(DeglibBuilderIntegration, Uint8DatasetBitExactness) {
     auto gt_u8 = compute_groundtruth_l2_uint8(base_data, base_count, query_data, query_count, dim, 10);
     const uint64_t gt_u8_hash = groundtruth_checksum(gt_u8);
 
+    auto gt_u8_ip = compute_groundtruth_uint8_ip(base_data, base_count, query_data, query_count, dim, 10);
+    const uint64_t gt_u8_ip_hash = groundtruth_checksum(gt_u8_ip);
+
     std::cout << "[Uint8DatasetBitExactness] uint8_base_hash = 0x" << std::hex << base_hash << std::dec << std::endl;
     std::cout << "[Uint8DatasetBitExactness] uint8_query_hash = 0x" << std::hex << query_hash << std::dec << std::endl;
     std::cout << "[Uint8DatasetBitExactness] gt_u8_hash = 0x" << std::hex << gt_u8_hash << std::dec << std::endl;
+    std::cout << "[Uint8DatasetBitExactness] gt_u8_ip_hash = 0x" << std::hex << gt_u8_ip_hash << std::dec << std::endl;
 
-    EXPECT_EQ(base_hash, 0xbef9335301e291bfULL) << "uint8_base_data checksum mismatch across platforms!";
-    EXPECT_EQ(query_hash, 0x499b735ff0f910e7ULL) << "uint8_query_data checksum mismatch across platforms!";
-    EXPECT_EQ(gt_u8_hash, 0x36b390a7cae8797dULL) << "gt_u8 checksum mismatch across platforms!";
+    EXPECT_EQ(base_hash, 0x8a69efc9e6281d7fULL) << "uint8_base_data checksum mismatch across platforms!";
+    EXPECT_EQ(query_hash, 0x62b4315d2c79ea26ULL) << "uint8_query_data checksum mismatch across platforms!";
+    EXPECT_EQ(gt_u8_hash, 0x1bcf28a6edbc3535ULL) << "gt_u8 checksum mismatch across platforms!";
+    EXPECT_EQ(gt_u8_ip_hash, 0xf92e429a49438fc0ULL) << "gt_u8_ip checksum mismatch across platforms!";
 }
 
 TEST(DeglibBuilderIntegration, LowLIDDeterminism) {
@@ -257,6 +262,45 @@ TEST(DeglibBuilderIntegration, L2_Uint8_Scalar) {
     run_builder_integration_test(
         "L2_Uint8_Scalar", deglib::distances::Metric::Uint8_L2, 0.99, 128, 10000, 100, 1000, deglib::distances::uint8_l2::L2Uint8{},
         deglib::builder::OptimizationTarget::LowLID
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Uint8 Inner Product Metric Builder Tests (10k)
+// ---------------------------------------------------------------------------
+
+TEST(DeglibBuilderIntegration, InnerProduct_Uint8_AVX512) {
+#if defined(DEGLIB_X86)
+    if (!deglib::cpu::has_avx512()) {
+        GTEST_SKIP() << "AVX512 not available on this CPU";
+    }
+    run_builder_integration_test(
+        "InnerProduct_Uint8_AVX512", deglib::distances::Metric::Uint8_InnerProduct, 0.98, 128, 10000, 100, 1000,
+        deglib::distances::uint8_ip::InnerProductUint8_AVX512<>{}, deglib::builder::OptimizationTarget::LowLID
+    );
+#else
+    GTEST_SKIP() << "AVX512 not available on this platform";
+#endif
+}
+
+TEST(DeglibBuilderIntegration, InnerProduct_Uint8_AVX2) {
+#if defined(DEGLIB_X86)
+    if (!deglib::cpu::has_avx2()) {
+        GTEST_SKIP() << "AVX2 not available on this CPU";
+    }
+    run_builder_integration_test(
+        "InnerProduct_Uint8_AVX2", deglib::distances::Metric::Uint8_InnerProduct, 0.98, 128, 10000, 100, 1000,
+        deglib::distances::uint8_ip::InnerProductUint8_AVX2<>{}, deglib::builder::OptimizationTarget::LowLID
+    );
+#else
+    GTEST_SKIP() << "AVX2 not available on this platform";
+#endif
+}
+
+TEST(DeglibBuilderIntegration, InnerProduct_Uint8_Scalar) {
+    run_builder_integration_test(
+        "InnerProduct_Uint8_Scalar", deglib::distances::Metric::Uint8_InnerProduct, 0.98, 128, 10000, 100, 1000,
+        deglib::distances::uint8_ip::InnerProductUint8{}, deglib::builder::OptimizationTarget::LowLID
     );
 }
 

@@ -28,16 +28,24 @@ TEST(CPUFeaturesTest, CpuHelperFunctionsMatchRawCPUID) {
     get_cpuid(7, 0, cpu_info);
     bool hw_avx2 = (cpu_info[1] & (1 << 5)) != 0;
     bool hw_avx512f = (cpu_info[1] & (1 << 16)) != 0;
+    bool hw_avx512_vnni = (cpu_info[2] & (1 << 11)) != 0;
+
+    get_cpuid(7, 1, cpu_info);
+    bool hw_avx_vnni = (cpu_info[0] & (1 << 4)) != 0;
 
     // Verify deglib::cpu helper functions match raw CPUID queries
     EXPECT_EQ(deglib::cpu::has_avx2(), hw_avx2) << "deglib::cpu::has_avx2() does not match raw CPUID";
+    EXPECT_EQ(deglib::cpu::has_avx_vnni(), hw_avx_vnni) << "deglib::cpu::has_avx_vnni() does not match raw CPUID";
     EXPECT_EQ(deglib::cpu::has_avx512(), hw_avx512f) << "deglib::cpu::has_avx512() does not match raw CPUID";
+    EXPECT_EQ(deglib::cpu::has_avx512_vnni(), hw_avx512_vnni) << "deglib::cpu::has_avx512_vnni() does not match raw CPUID";
 
-    std::cout << "[CPU Test] deglib::cpu helper functions verified against raw CPUID" << std::endl;
+    std::cout << "[CPU Test] AVX2: " << hw_avx2 << ", AVX_VNNI: " << hw_avx_vnni << ", AVX512F: " << hw_avx512f << ", AVX512_VNNI: " << hw_avx512_vnni << std::endl;
 #else
     // On non-x86 architectures (e.g. ARM), x86 feature flags must all be false
     EXPECT_FALSE(deglib::cpu::has_avx2());
+    EXPECT_FALSE(deglib::cpu::has_avx_vnni());
     EXPECT_FALSE(deglib::cpu::has_avx512());
+    EXPECT_FALSE(deglib::cpu::has_avx512_vnni());
 
     std::cout << "[CPU Test] Non-x86 architecture detected: all x86 SIMD features set to false as expected" << std::endl;
 #endif

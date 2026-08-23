@@ -103,6 +103,54 @@ TEST(DeglibDistanceSelection, Uint8_L2_SelectDist) {
 #endif
 }
 
+TEST(DeglibDistanceSelection, Uint8_IP_SelectDist) {
+#if defined(DEGLIB_X86)
+    if (deglib::cpu::has_avx512()) {
+        EXPECT_TRUE(
+            std::holds_alternative<deglib::distances::uint8_ip::InnerProductUint8_AVX512<ResidualMode::TailOnly>>(deglib::distances::uint8_ip::select_dist(15))
+        );
+        EXPECT_TRUE(
+            std::holds_alternative<deglib::distances::uint8_ip::InnerProductUint8_AVX512<ResidualMode::SimdOnly>>(deglib::distances::uint8_ip::select_dist(32))
+        );
+        EXPECT_TRUE(
+            std::holds_alternative<deglib::distances::uint8_ip::InnerProductUint8_AVX512<ResidualMode::SimdTail>>(deglib::distances::uint8_ip::select_dist(45))
+        );
+        EXPECT_TRUE(
+            std::holds_alternative<deglib::distances::uint8_ip::InnerProductUint8_AVX512<ResidualMode::DualOnly>>(deglib::distances::uint8_ip::select_dist(128))
+        );
+        EXPECT_TRUE(
+            std::holds_alternative<deglib::distances::uint8_ip::InnerProductUint8_AVX512<ResidualMode::DualPlusSimd>>(
+                deglib::distances::uint8_ip::select_dist(96)
+            )
+        );
+        EXPECT_TRUE(
+            std::holds_alternative<deglib::distances::uint8_ip::InnerProductUint8_AVX512<ResidualMode::Full>>(deglib::distances::uint8_ip::select_dist(127))
+        );
+    } else if (deglib::cpu::has_avx2()) {
+        EXPECT_TRUE(
+            std::holds_alternative<deglib::distances::uint8_ip::InnerProductUint8_AVX2<ResidualMode::TailOnly>>(deglib::distances::uint8_ip::select_dist(15))
+        );
+        EXPECT_TRUE(
+            std::holds_alternative<deglib::distances::uint8_ip::InnerProductUint8_AVX2<ResidualMode::SimdOnly>>(deglib::distances::uint8_ip::select_dist(16))
+        );
+        EXPECT_TRUE(
+            std::holds_alternative<deglib::distances::uint8_ip::InnerProductUint8_AVX2<ResidualMode::SimdTail>>(deglib::distances::uint8_ip::select_dist(25))
+        );
+        EXPECT_TRUE(
+            std::holds_alternative<deglib::distances::uint8_ip::InnerProductUint8_AVX2<ResidualMode::DualOnly>>(deglib::distances::uint8_ip::select_dist(32))
+        );
+        EXPECT_TRUE(
+            std::holds_alternative<deglib::distances::uint8_ip::InnerProductUint8_AVX2<ResidualMode::DualPlusSimd>>(
+                deglib::distances::uint8_ip::select_dist(48)
+            )
+        );
+        EXPECT_TRUE(
+            std::holds_alternative<deglib::distances::uint8_ip::InnerProductUint8_AVX2<ResidualMode::Full>>(deglib::distances::uint8_ip::select_dist(127))
+        );
+    }
+#endif
+}
+
 TEST(DeglibDistanceSelection, FP16_IP_SelectDist) {
 #if defined(DEGLIB_X86)
     if (deglib::cpu::has_avx512()) {
@@ -145,6 +193,27 @@ TEST(DeglibDistanceSelection, FP16_IP_SelectDist) {
         EXPECT_TRUE(
             std::holds_alternative<deglib::distances::fp16_ip::InnerProductFP16_AVX2<ResidualMode::Full>>(deglib::distances::fp16_ip::select_dist(127))
         );
+    }
+#endif
+}
+
+TEST(DeglibDistanceSelection, VNNIFallbackAcrossAllMetrics) {
+#if defined(DEGLIB_X86)
+    if (deglib::cpu::has_avx512_vnni()) {
+        EXPECT_NO_THROW(deglib::distances::fp32_l2::select_dist(128, deglib::cpu::InstructionSet::AVX512_VNNI));
+        EXPECT_NO_THROW(deglib::distances::fp32_ip::select_dist(128, deglib::cpu::InstructionSet::AVX512_VNNI));
+        EXPECT_NO_THROW(deglib::distances::fp16_ip::select_dist(128, deglib::cpu::InstructionSet::AVX512_VNNI));
+        EXPECT_NO_THROW(deglib::distances::uint8_l2::select_dist(128, deglib::cpu::InstructionSet::AVX512_VNNI));
+        EXPECT_NO_THROW(deglib::distances::uint8_ip::select_dist(128, deglib::cpu::InstructionSet::AVX512_VNNI));
+        EXPECT_NO_THROW(deglib::distances::evp_ip::select_dist(128, deglib::cpu::InstructionSet::AVX512_VNNI));
+    }
+    if (deglib::cpu::has_avx_vnni()) {
+        EXPECT_NO_THROW(deglib::distances::fp32_l2::select_dist(128, deglib::cpu::InstructionSet::AVX2_VNNI));
+        EXPECT_NO_THROW(deglib::distances::fp32_ip::select_dist(128, deglib::cpu::InstructionSet::AVX2_VNNI));
+        EXPECT_NO_THROW(deglib::distances::fp16_ip::select_dist(128, deglib::cpu::InstructionSet::AVX2_VNNI));
+        EXPECT_NO_THROW(deglib::distances::uint8_l2::select_dist(128, deglib::cpu::InstructionSet::AVX2_VNNI));
+        EXPECT_NO_THROW(deglib::distances::uint8_ip::select_dist(128, deglib::cpu::InstructionSet::AVX2_VNNI));
+        EXPECT_NO_THROW(deglib::distances::evp_ip::select_dist(128, deglib::cpu::InstructionSet::AVX2_VNNI));
     }
 #endif
 }

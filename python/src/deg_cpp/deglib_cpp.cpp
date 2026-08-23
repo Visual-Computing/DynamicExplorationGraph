@@ -1093,10 +1093,14 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .value("Auto", deglib::cpu::InstructionSet::Auto)
         .value("Scalar", deglib::cpu::InstructionSet::Scalar)
         .value("AVX2", deglib::cpu::InstructionSet::AVX2)
-        .value("AVX512", deglib::cpu::InstructionSet::AVX512);
+        .value("AVX2_VNNI", deglib::cpu::InstructionSet::AVX2_VNNI)
+        .value("AVX512", deglib::cpu::InstructionSet::AVX512)
+        .value("AVX512_VNNI", deglib::cpu::InstructionSet::AVX512_VNNI);
 
     cpu_module.def("has_avx2", &deglib::cpu::has_avx2, "Returns whether AVX2 instructions are available");
+    cpu_module.def("has_avx_vnni", &deglib::cpu::has_avx_vnni, "Returns whether AVX-VNNI (256-bit) instructions are available");
     cpu_module.def("has_avx512", &deglib::cpu::has_avx512, "Returns whether AVX512 instructions are available");
+    cpu_module.def("has_avx512_vnni", &deglib::cpu::has_avx512_vnni, "Returns whether AVX-512 VNNI instructions are available");
 
     // distances submodule
     py::module_ distances_module = m.def_submodule("distances", "Distance metrics and feature spaces");
@@ -1104,6 +1108,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .value("FP32_L2", deglib::distances::MetricType::FP32_L2)
         .value("FP32_InnerProduct", deglib::distances::MetricType::FP32_InnerProduct)
         .value("Uint8_L2", deglib::distances::MetricType::Uint8_L2)
+        .value("Uint8_InnerProduct", deglib::distances::MetricType::Uint8_InnerProduct)
         .value("FP16_InnerProduct", deglib::distances::MetricType::FP16_InnerProduct)
         .value("EVP_InnerProduct", deglib::distances::MetricType::EVP_InnerProduct);
 

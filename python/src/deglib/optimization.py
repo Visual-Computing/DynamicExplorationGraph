@@ -2,10 +2,6 @@ import sys
 import typing
 import numpy as np
 import deglib_cpp
-import sys
-import typing
-import numpy as np
-import deglib_cpp
 import deglib_cpp.distances as cpp_distances
 
 from .graph import DynamicExplorationGraph
@@ -40,18 +36,19 @@ def prune_worst_edges(graph: DynamicExplorationGraph, prune_worst: int, num_thre
 
 def presort(
     vectors: np.ndarray,
-    space_or_metric: FloatSpace | Metric | str | None = None,
+    space_or_metric: FloatSpace | Metric | None = None,
     radius_decay: float = 0.9,
     threads: int = 0,
     callback: typing.Callable[[float], typing.Union[bool, None]] | str | None = None,
     *,
-    metric: FloatSpace | Metric | str | None = None,
+    metric: Metric | None = None,
     space: FloatSpace | None = None,
 ) -> np.ndarray:
     """
     Perform 1D pre-sorting of dataset feature vectors using Fast Linear Alignment Scheme (FLAS).
 
     Sorting high-dimensional vectors onto a 1D curve improves data locality and index construction speed.
+    FLAS optimization is designed for FP32 feature spaces (FP32_L2, FP32_InnerProduct).
 
     :param vectors: 2D float32 NumPy array of shape (count, dim).
     :param space_or_metric: FloatSpace instance or Metric type used for distance computation during sorting.
@@ -60,15 +57,16 @@ def presort(
     :param callback: Optional callback for reporting sorting progress.
                      If ``'progress'``, prints progress to stdout.
                      If a function, receives progress float in range [0.0, 1.0]. Returning True cancels sorting.
-    :param metric: Alias for space_or_metric.
-    :param space: Alias for space_or_metric.
+    :param metric: Explicit Metric enum (cannot be combined with space or space_or_metric).
+    :param space: Explicit FloatSpace instance (cannot be combined with metric or space_or_metric).
     :return: 1D uint32 NumPy array containing the sorted permutation of original vector indices.
     """
-    target = (
-        space
-        if space is not None
-        else (metric if metric is not None else (space_or_metric if space_or_metric is not None else Metric.FP32_L2))
-    )
+    # Count how many of the three ways to specify distance/space were provided
+    specified = sum(x is not None for x in (space_or_metric, metric, space))
+    if specified > 1:
+        raise ValueError("Cannot specify more than one of 'space_or_metric', 'metric', or 'space'")
+
+    target = Metric.FP32_L2 if specified == 0 else (space_or_metric if space_or_metric is not None else (metric if metric is not None else space))
 
     vectors_f32 = np.ascontiguousarray(vectors, dtype=np.float32)
     dim = vectors_f32.shape[1] if vectors_f32.ndim == 2 else 0
@@ -77,15 +75,12 @@ def presort(
         cpp_space = target.float_space_cpp
     elif isinstance(target, cpp_distances.FloatSpace):
         cpp_space = target
-    elif isinstance(target, str):
-        metric_val = getattr(cpp_distances.Metric, target)
-        cpp_space = cpp_distances.FloatSpace(dim, cpp_distances.Metric(int(metric_val)))
     elif isinstance(target, Metric):
         cpp_space = cpp_distances.FloatSpace(dim, cpp_distances.Metric(int(target)))
     elif isinstance(target, cpp_distances.Metric):
         cpp_space = cpp_distances.FloatSpace(dim, target)
     else:
-        cpp_space = cpp_distances.FloatSpace(dim, cpp_distances.Metric(int(target)))
+        raise TypeError(f"Expected Metric or FloatSpace, got {type(target).__name__}")
 
     cb_fn = None
     if callback == "progress":

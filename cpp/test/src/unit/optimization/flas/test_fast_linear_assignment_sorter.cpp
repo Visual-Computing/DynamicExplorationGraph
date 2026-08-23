@@ -193,6 +193,9 @@ TEST(FlasSettingsTest, NonFP32MetricThrows) {
     deglib::distances::FloatSpace uint8_space(D, deglib::distances::Metric::Uint8_L2);
     EXPECT_THROW(flas::do_sorting_1d(map_fields, uint8_space, settings, flas_rng, [](float) { return false; }), std::invalid_argument);
 
+    deglib::distances::FloatSpace uint8_ip_space(D, deglib::distances::Metric::Uint8_InnerProduct);
+    EXPECT_THROW(flas::do_sorting_1d(map_fields, uint8_ip_space, settings, flas_rng, [](float) { return false; }), std::invalid_argument);
+
     deglib::distances::FloatSpace fp16_space(D, deglib::distances::Metric::FP16_InnerProduct);
     EXPECT_THROW(flas::do_sorting_1d(map_fields, fp16_space, settings, flas_rng, [](float) { return false; }), std::invalid_argument);
 

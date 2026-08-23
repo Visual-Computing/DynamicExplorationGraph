@@ -597,15 +597,10 @@ using DistanceVariant = std::variant<
     >;
 
 inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) {
-    if (instruction == deglib::cpu::InstructionSet::Scalar) {
-        return EvpInnerProduct{};
-    }
+    const auto target = deglib::cpu::resolve_instruction_set(instruction);
 
 #if defined(DEGLIB_X86)
-    if (instruction == deglib::cpu::InstructionSet::AVX512 || (instruction == deglib::cpu::InstructionSet::Auto && deglib::cpu::has_avx512())) {
-        if (instruction == deglib::cpu::InstructionSet::AVX512 && !deglib::cpu::has_avx512()) {
-            throw std::runtime_error("AVX512 instruction set requested, but not supported by CPU");
-        }
+    if (target == deglib::cpu::InstructionSet::AVX512) {
         if (dim < 512) {
             return EvpInnerProduct_AVX512<ResidualMode::TailOnly>{};
         } else if (dim < 1024) {
@@ -621,10 +616,7 @@ inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::Instruct
             else
                 return EvpInnerProduct_AVX512<ResidualMode::Full>{};
         }
-    } else if (instruction == deglib::cpu::InstructionSet::AVX2 || (instruction == deglib::cpu::InstructionSet::Auto && deglib::cpu::has_avx2())) {
-        if (instruction == deglib::cpu::InstructionSet::AVX2 && !deglib::cpu::has_avx2()) {
-            throw std::runtime_error("AVX2 instruction set requested, but not supported by CPU");
-        }
+    } else if (target == deglib::cpu::InstructionSet::AVX2) {
         if (dim < 256) {
             return EvpInnerProduct_AVX2<ResidualMode::TailOnly>{};
         } else if (dim < 512) {
@@ -640,10 +632,6 @@ inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::Instruct
             else
                 return EvpInnerProduct_AVX2<ResidualMode::Full>{};
         }
-    }
-#else
-    if (instruction != deglib::cpu::InstructionSet::Auto && instruction != deglib::cpu::InstructionSet::Scalar) {
-        throw std::runtime_error("Requested SIMD instruction set is not supported on this platform");
     }
 #endif
     return EvpInnerProduct{};
