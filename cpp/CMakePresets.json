@@ -89,73 +89,85 @@
       "name": "windows-msvc-debug",
       "displayName": "Windows Debug",
       "configurePreset": "windows-msvc",
-      "configuration": "Debug"
+      "configuration": "Debug",
+      "jobs": 6
     },
     {
       "name": "windows-msvc-release",
       "displayName": "Windows Release",
       "configurePreset": "windows-msvc",
-      "configuration": "Release"
+      "configuration": "Release",
+      "jobs": 6
     },
     {
       "name": "windows-msvc-avx2-debug",
       "displayName": "Windows AVX2 Debug",
       "configurePreset": "windows-msvc-avx2",
-      "configuration": "Debug"
+      "configuration": "Debug",
+      "jobs": 6
     },
     {
       "name": "windows-msvc-avx2-release",
       "displayName": "Windows AVX2 Release",
       "configurePreset": "windows-msvc-avx2",
-      "configuration": "Release"
+      "configuration": "Release",
+      "jobs": 6
     },
     {
       "name": "linux-gcc-debug",
       "displayName": "Linux Debug",
       "configurePreset": "linux-gcc",
-      "configuration": "Debug"
+      "configuration": "Debug",
+      "jobs": 6
     },
     {
       "name": "linux-gcc-release",
       "displayName": "Linux Release",
       "configurePreset": "linux-gcc",
-      "configuration": "Release"
+      "configuration": "Release",
+      "jobs": 6
     },
     {
       "name": "linux-gcc-avx2-debug",
       "displayName": "Linux AVX2 Debug",
       "configurePreset": "linux-gcc-avx2",
-      "configuration": "Debug"
+      "configuration": "Debug",
+      "jobs": 6
     },
     {
       "name": "linux-gcc-avx2-release",
       "displayName": "Linux AVX2 Release",
       "configurePreset": "linux-gcc-avx2",
-      "configuration": "Release"
+      "configuration": "Release",
+      "jobs": 6
     },
     {
       "name": "macos-clang-debug",
       "displayName": "macOS Debug",
       "configurePreset": "macos-clang",
-      "configuration": "Debug"
+      "configuration": "Debug",
+      "jobs": 6
     },
     {
       "name": "macos-clang-release",
       "displayName": "macOS Release",
       "configurePreset": "macos-clang",
-      "configuration": "Release"
+      "configuration": "Release",
+      "jobs": 6
     },
     {
       "name": "macos-clang-avx2-debug",
       "displayName": "macOS AVX2 Debug",
       "configurePreset": "macos-clang-avx2",
-      "configuration": "Debug"
+      "configuration": "Debug",
+      "jobs": 6
     },
     {
       "name": "macos-clang-avx2-release",
       "displayName": "macOS AVX2 Release",
       "configurePreset": "macos-clang-avx2",
-      "configuration": "Release"
+      "configuration": "Release",
+      "jobs": 6
     }
   ],
   "testPresets": [
