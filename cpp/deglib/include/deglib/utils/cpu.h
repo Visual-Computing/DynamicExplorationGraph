@@ -3,6 +3,7 @@
 #include "deglib/config.h"
 
 #include <cstdint>
+#include <stdexcept>
 
 namespace deglib::cpu {
 
