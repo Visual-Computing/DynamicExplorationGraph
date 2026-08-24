@@ -806,8 +806,8 @@ py::array_t<float> fp16_to_floats_wrapper(py::array_t<uint16_t, py::array::c_sty
 
 deglib::DynamicExplorationGraph load_readonly_graph_wrapper(const char* path) {
     auto graph = deglib::graph::load_readonly_graph(path);
-    auto* heap_graph = new deglib::graph::ReadOnlyGraph(std::move(graph));
-    return deglib::DynamicExplorationGraph(*heap_graph);
+    auto heap_graph = std::make_unique<deglib::graph::ReadOnlyGraph>(std::move(graph));
+    return deglib::DynamicExplorationGraph(std::move(heap_graph));
 }
 
 deglib::DynamicExplorationGraph load_sizebounded_graph_wrapper(const char* path, const uint32_t capacity = 0) {
