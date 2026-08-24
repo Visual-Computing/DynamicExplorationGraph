@@ -302,7 +302,7 @@ def main():
             opt_target = cfg["optimization_target"]
             imp_k = cfg.get("improve_k", 0)
             imp_eps = cfg.get("improve_eps", 0.0)
-            use_flas = args.use_flas if args.use_flas else cfg.get("use_flas", False)
+            use_flas = args.use_flas if args.use_flas else cfg.get("use_flas", True)
             eps_list = sorted(args.search_eps_list if args.search_eps_list is not None else cfg["search_eps_list"])
 
             graph_path = build_graph_filename(
