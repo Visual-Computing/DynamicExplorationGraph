@@ -214,9 +214,7 @@ def ensure_dataset(dataset_key: str, cache_dir: Path) -> Tuple[Path, Path, Dict[
     return dataset_dir, hdf5_path, meta
 
 
-def load_vibe_dataset(
-    dataset_key: str, cache_dir: Path
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, Any]]:
+def load_vibe_dataset(dataset_key: str, cache_dir: Path) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, Any]]:
     """
     Loads a VIBE dataset HDF5 file.
     Returns:
@@ -281,13 +279,15 @@ def build_graph_filename(
     extend_eps: float,
     optimization_target_str: str,
     metric_str: str,
+    use_flas: bool = False,
 ) -> Path:
     """
     Builds the graph path matching static_data / C++ conventions:
-    <dataset_dir>/deg/{dims}D_{metric}_K{k}_AddK{extend_k}Eps{extend_eps:.1f}_{optimization_target_str}.deg
+    <dataset_dir>/deg/{dims}D_{metric}_K{k}_AddK{extend_k}Eps{extend_eps:.1f}_{optimization_target_str}[_FLAS].deg
     """
     dataset_dir, _, _ = ensure_dataset(dataset_key, cache_dir)
     deg_dir = dataset_dir / "deg"
     deg_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"{dims}D_{metric_str}_K{k}_AddK{extend_k}Eps{extend_eps:.1f}_{optimization_target_str}.deg"
+    flas_suffix = "_FLAS" if use_flas else ""
+    filename = f"{dims}D_{metric_str}_K{k}_AddK{extend_k}Eps{extend_eps:.1f}_{optimization_target_str}{flas_suffix}.deg"
     return deg_dir / filename

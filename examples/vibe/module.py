@@ -1,10 +1,12 @@
 import numpy as np
 import deglib
+from deglib.optimization import presort
 
 # Try relative import when executed inside VIBE framework (vibe/algorithms/deg/module.py)
 try:
     from ..base.module import BaseANN
 except (ImportError, ValueError):
+
     class BaseANN:
         pass
 
@@ -34,6 +36,8 @@ class DegANN(BaseANN):
         improve_eps: float = 0.0,
         threads: int = 1,
         graph_path: str | None = None,
+        use_flas: bool = False,
+        flas_radius_decay: float = 0.9,
     ):
         self.raw_metric = metric
         self.k = int(k)
@@ -44,6 +48,8 @@ class DegANN(BaseANN):
         self.improve_eps = float(improve_eps)
         self.threads = int(threads)
         self.graph_path = graph_path
+        self.use_flas = bool(use_flas)
+        self.flas_radius_decay = float(flas_radius_decay)
 
         self.search_eps: float = 0.1
         self.is_cosine: bool = metric.lower().strip() == "cosine"
@@ -64,9 +70,15 @@ class DegANN(BaseANN):
         elif target == "":
             # Default fallback based on metric if empty
             m = metric.lower().strip()
-            return deglib.builder.OptimizationTarget.LowLID if m in ("euclidean", "l2", "fp32_l2") else deglib.builder.OptimizationTarget.HighLID
+            return (
+                deglib.builder.OptimizationTarget.LowLID
+                if m in ("euclidean", "l2", "fp32_l2")
+                else deglib.builder.OptimizationTarget.HighLID
+            )
         else:
-            raise ValueError(f"Unknown OptimizationTarget '{opt_target}'. Choose from: 'StreamingData', 'HighLID', 'LowLID', ''")
+            raise ValueError(
+                f"Unknown OptimizationTarget '{opt_target}'. Choose from: 'StreamingData', 'HighLID', 'LowLID', ''"
+            )
 
     def _map_metric(self, metric: str) -> deglib.Metric:
         m = metric.lower().strip()
@@ -91,6 +103,7 @@ class DegANN(BaseANN):
         Otherwise, the graph is built and saved to graph_path if specified.
         """
         import os
+        import time
         from pathlib import Path
 
         if self.graph_path and os.path.isfile(self.graph_path):
@@ -110,6 +123,41 @@ class DegANN(BaseANN):
         n_vectors, dims = X_mat.shape
 
         space = deglib.FloatSpace.create(dim=dims, metric=self.metric_enum)
+
+        # Optional FLAS 1D pre-sorting before graph construction
+        if self.use_flas and not is_uint8:
+            print(
+                f"Running FLAS 1D Pre-sorting: N={n_vectors:,}, dim={dims}, decay={self.flas_radius_decay}, metric={self.metric_enum.name}, threads={self.threads}..."
+            )
+            t_flas_start = time.perf_counter()
+
+            last_pct = -1
+
+            def flas_progress_cb(prog: float) -> bool:
+                nonlocal last_pct
+                pct = int(prog * 100.0)
+                if pct != last_pct or prog >= 1.0:
+                    last_pct = pct
+                    print(f"\r  FLAS Progress: {pct:3d} %", end="", flush=True)
+                if prog >= 1.0:
+                    print()
+                return False
+
+            sorted_indices = deglib.optimization.presort(
+                X_mat,
+                space=space,
+                radius_decay=self.flas_radius_decay,
+                threads=self.threads,
+                callback=flas_progress_cb,
+            )
+            t_flas = time.perf_counter() - t_flas_start
+            print(f"FLAS 1D Pre-sorting completed in {t_flas:.3f} s.")
+            labels = sorted_indices
+            features_to_add = X_mat[sorted_indices]
+        else:
+            labels = np.arange(n_vectors, dtype=np.uint32)
+            features_to_add = X_mat
+
         graph_mut = deglib.create_empty(
             capacity=n_vectors,
             feature_space=space,
@@ -129,8 +177,7 @@ class DegANN(BaseANN):
         if self.threads > 1:
             builder.set_thread_count(self.threads)
 
-        labels = np.arange(n_vectors, dtype=np.uint32)
-        builder.add_entry(labels, X_mat)
+        builder.add_entry(labels, features_to_add)
         builder.build(callback="progress")
 
         if self.graph_path:
@@ -157,7 +204,9 @@ class DegANN(BaseANN):
             if self.is_cosine:
                 query_mat = self._normalize(query_mat)
 
-        indices, _ = self.graph.search(query_mat, eps=self.search_eps, k=n, threads=1)
+        indices, _ = self.graph.search(
+            query_mat, eps=self.search_eps, k=n, threads=1, return_distances=False, unsorted=True
+        )
         return np.asarray(indices[0], dtype=np.int64)
 
     def batch_query(self, X: np.ndarray, n: int):

@@ -66,7 +66,11 @@ def presort(
     if specified > 1:
         raise ValueError("Cannot specify more than one of 'space_or_metric', 'metric', or 'space'")
 
-    target = Metric.FP32_L2 if specified == 0 else (space_or_metric if space_or_metric is not None else (metric if metric is not None else space))
+    target = (
+        Metric.FP32_L2
+        if specified == 0
+        else (space_or_metric if space_or_metric is not None else (metric if metric is not None else space))
+    )
 
     vectors_f32 = np.ascontiguousarray(vectors, dtype=np.float32)
     dim = vectors_f32.shape[1] if vectors_f32.ndim == 2 else 0

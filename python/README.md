@@ -212,7 +212,7 @@ top_indices, top_distances = rerank(
     candidate_indices=candidates,
     base_vectors=base_vectors,
     k_top=10,
-    return_distances=True
+    return_distances=True,
 )
 ```
 
