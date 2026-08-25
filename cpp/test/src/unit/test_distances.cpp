@@ -197,6 +197,28 @@ TEST(DeglibDistanceSelection, FP16_IP_SelectDist) {
 #endif
 }
 
+TEST(DeglibDistanceSelection, FP16_L2_SelectDist) {
+#if defined(DEGLIB_X86)
+    if (deglib::cpu::has_avx512()) {
+        EXPECT_TRUE(std::holds_alternative<deglib::distances::fp16_l2::L2FP16_AVX512<ResidualMode::TailOnly>>(deglib::distances::fp16_l2::select_dist(7)));
+        EXPECT_TRUE(std::holds_alternative<deglib::distances::fp16_l2::L2FP16_AVX512<ResidualMode::SimdOnly>>(deglib::distances::fp16_l2::select_dist(16)));
+        EXPECT_TRUE(std::holds_alternative<deglib::distances::fp16_l2::L2FP16_AVX512<ResidualMode::SimdTail>>(deglib::distances::fp16_l2::select_dist(25)));
+        EXPECT_TRUE(std::holds_alternative<deglib::distances::fp16_l2::L2FP16_AVX512<ResidualMode::DualOnly>>(deglib::distances::fp16_l2::select_dist(128)));
+        EXPECT_TRUE(
+            std::holds_alternative<deglib::distances::fp16_l2::L2FP16_AVX512<ResidualMode::DualPlusSimd>>(deglib::distances::fp16_l2::select_dist(112))
+        );
+        EXPECT_TRUE(std::holds_alternative<deglib::distances::fp16_l2::L2FP16_AVX512<ResidualMode::Full>>(deglib::distances::fp16_l2::select_dist(127)));
+    } else if (deglib::cpu::has_avx2()) {
+        EXPECT_TRUE(std::holds_alternative<deglib::distances::fp16_l2::L2FP16_AVX2<ResidualMode::TailOnly>>(deglib::distances::fp16_l2::select_dist(7)));
+        EXPECT_TRUE(std::holds_alternative<deglib::distances::fp16_l2::L2FP16_AVX2<ResidualMode::SimdOnly>>(deglib::distances::fp16_l2::select_dist(8)));
+        EXPECT_TRUE(std::holds_alternative<deglib::distances::fp16_l2::L2FP16_AVX2<ResidualMode::SimdTail>>(deglib::distances::fp16_l2::select_dist(13)));
+        EXPECT_TRUE(std::holds_alternative<deglib::distances::fp16_l2::L2FP16_AVX2<ResidualMode::DualOnly>>(deglib::distances::fp16_l2::select_dist(16)));
+        EXPECT_TRUE(std::holds_alternative<deglib::distances::fp16_l2::L2FP16_AVX2<ResidualMode::DualPlusSimd>>(deglib::distances::fp16_l2::select_dist(24)));
+        EXPECT_TRUE(std::holds_alternative<deglib::distances::fp16_l2::L2FP16_AVX2<ResidualMode::Full>>(deglib::distances::fp16_l2::select_dist(127)));
+    }
+#endif
+}
+
 TEST(DeglibDistanceSelection, VNNIFallbackAcrossAllMetrics) {
 #if defined(DEGLIB_X86)
     if (deglib::cpu::has_avx512_vnni()) {

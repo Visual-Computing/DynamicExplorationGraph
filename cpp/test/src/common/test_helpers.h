@@ -261,6 +261,21 @@ inline static std::vector<std::vector<uint32_t>> compute_groundtruth_fp16_ip(
     });
 }
 
+// Compute exact brute-force FP16 L2 groundtruth for top-K neighbors (distance = sum((a-b)^2)).
+// Uses the scalar L2FP16::compare() implementation from deglib.
+inline static std::vector<std::vector<uint32_t>> compute_groundtruth_fp16_l2(
+    const std::vector<uint16_t>& base,
+    size_t base_count,
+    const std::vector<uint16_t>& query,
+    size_t query_count,
+    size_t dim,
+    uint32_t k
+) {
+    return compute_groundtruth<uint16_t>(base, base_count, query, query_count, dim, k, [](const uint16_t* q_vec, const uint16_t* b_vec, const void* qty_ptr) {
+        return deglib::distances::fp16_l2::L2FP16::compare(q_vec, b_vec, qty_ptr);
+    });
+}
+
 // Compute exact brute-force L2 groundtruth for uint8 vectors.
 // Uses the scalar L2Uint8::compare() from deglib to ensure the ground-truth
 // distances match the actual distance computation exactly.
@@ -428,7 +443,9 @@ inline static void check_distance_recall_evp(
 }
 
 // ---------------------------------------------------------------------------
-// Graph builder + search recall runner (integration: no QPS / build-time checks)
+// Graph builder + search recall runner
+// ---------------------------------------------------------------------------
+// Universal builder integration test runner function for any metric
 // ---------------------------------------------------------------------------
 
 inline static void run_integration_test(
@@ -441,25 +458,23 @@ inline static void run_integration_test(
     size_t query_count,
     size_t dim,
     const std::vector<std::vector<uint32_t>>& gt_data,
-    std::optional<deglib::distances::DistanceVariant> dist_variant = std::nullopt,
-    deglib::builder::OptimizationTarget optimization_target = deglib::builder::OptimizationTarget::LowLID
+    deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto,
+    deglib::builder::OptimizationTarget optimization_target = deglib::builder::OptimizationTarget::LowLID,
+    uint32_t edges_per_vertex = 32,
+    uint8_t extend_k = 0,
+    float extend_eps = 0.1f,
+    uint32_t thread_count = 1
 ) {
     const uint32_t search_k = 10;
     const float search_eps = 0.05f;
 
-    const uint32_t edges_per_vertex = 32;
-    const uint8_t extend_k = static_cast<uint8_t>(edges_per_vertex);
-    const float extend_eps = 0.1f;
+    if (extend_k == 0) extend_k = static_cast<uint8_t>(edges_per_vertex);
     const uint8_t improve_k = 0;
     const float improve_eps = 0.0f;
     const uint8_t max_path_length = 5;
     const uint32_t improve_tries = 0;
-    const uint32_t thread_count = 1;
 
-    // Build DEG Graph using the specified metric feature space
-    const deglib::distances::FloatSpace feature_space =
-        dist_variant.has_value() ? deglib::distances::FloatSpace(dim, metric, dist_variant.value()) : deglib::distances::FloatSpace(dim, metric);
-
+    const deglib::distances::FloatSpace feature_space(dim, metric, instruction);
     const size_t feature_bytes = feature_space.get_data_size();
 
     deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(base_count), edges_per_vertex, std::move(feature_space));
@@ -507,10 +522,12 @@ inline static void run_integration_test(
         }
     }
 
-    double recall = static_cast<double>(total_correct) / static_cast<double>(query_count * search_k);
-    std::cout << "[" << name << "] recall=" << recall << std::endl;
+    size_t total_possible = query_count * search_k;
+    double recall = static_cast<double>(total_correct) / total_possible;
 
-    EXPECT_GE(recall + 1e-5, min_recall);
+    std::cout << "[" << name << " (10k)] Recall@" << search_k << ": " << std::fixed << std::setprecision(4) << recall << std::endl;
+
+    EXPECT_GE(recall + 1e-5, min_recall) << "Recall " << recall << " below threshold " << min_recall << " for " << name;
 }
 
 // ---------------------------------------------------------------------------
@@ -565,7 +582,7 @@ inline static std::vector<uint32_t> build_graph_for_determinism(
 
 // ---------------------------------------------------------------------------
 // Builder integration test runner — wraps run_integration_test with dataset
-// generation and groundtruth for a given metric, variant, and optimization target.
+// generation and groundtruth for a given metric, instruction, and optimization target.
 // ---------------------------------------------------------------------------
 
 inline static void run_builder_integration_test(
@@ -576,7 +593,7 @@ inline static void run_builder_integration_test(
     size_t base_count,
     size_t query_count,
     size_t num_clusters,
-    std::optional<deglib::distances::DistanceVariant> dist_variant,
+    deglib::cpu::InstructionSet instruction,
     deglib::builder::OptimizationTarget optimization_target
 ) {
     if (metric.get_data_type() == deglib::distances::MetricDataType::Uint8) {
@@ -585,13 +602,29 @@ inline static void run_builder_integration_test(
         std::vector<uint8_t> query_data;
         generate_synthetic_clustered_dataset_uint8(base_count, dim, base_data, query_data, query_count, num_clusters);
 
-        auto gt_data = compute_groundtruth_l2_uint8(base_data, base_count, query_data, query_count, dim, 10);
+        std::vector<std::vector<uint32_t>> gt_data;
+        if (metric == deglib::distances::Metric::Uint8_InnerProduct) {
+            gt_data = compute_groundtruth_uint8_ip(base_data, base_count, query_data, query_count, dim, 10);
+        } else {
+            gt_data = compute_groundtruth_l2_uint8(base_data, base_count, query_data, query_count, dim, 10);
+        }
 
         run_integration_test(
-            name, metric, min_recall, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data, dist_variant, optimization_target
+            name, metric, min_recall, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data, instruction, optimization_target
+        );
+    } else if (metric == deglib::distances::Metric::FP16_L2) {
+        // FP16 L2 metric
+        std::vector<uint16_t> base_data;
+        std::vector<uint16_t> query_data;
+        generate_synthetic_clustered_dataset_fp16(base_count, dim, base_data, query_data, query_count, num_clusters);
+
+        auto gt_data = compute_groundtruth_fp16_l2(base_data, base_count, query_data, query_count, dim, 10);
+
+        run_integration_test(
+            name, metric, min_recall, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data, instruction, optimization_target
         );
     } else if (metric == deglib::distances::Metric::FP16_InnerProduct) {
-        // FP16 metric
+        // FP16 IP metric
         std::vector<uint16_t> base_data;
         std::vector<uint16_t> query_data;
         generate_synthetic_clustered_dataset_fp16(base_count, dim, base_data, query_data, query_count, num_clusters);
@@ -599,7 +632,7 @@ inline static void run_builder_integration_test(
         auto gt_data = compute_groundtruth_fp16_ip(base_data, base_count, query_data, query_count, dim, 10);
 
         run_integration_test(
-            name, metric, min_recall, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data, dist_variant, optimization_target
+            name, metric, min_recall, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data, instruction, optimization_target
         );
     } else if (metric == deglib::distances::Metric::EVP_InnerProduct) {
         // EVP metric
@@ -610,7 +643,7 @@ inline static void run_builder_integration_test(
         auto gt_data = compute_groundtruth_evp(base_data, base_count, query_data, query_count, dim, 10);
 
         run_integration_test(
-            name, metric, min_recall, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data, dist_variant, optimization_target
+            name, metric, min_recall, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data, instruction, optimization_target
         );
     } else {
         // float metric (L2 or InnerProduct)
@@ -626,7 +659,7 @@ inline static void run_builder_integration_test(
         }
 
         run_integration_test(
-            name, metric, min_recall, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data, dist_variant, optimization_target
+            name, metric, min_recall, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data, instruction, optimization_target
         );
     }
 }

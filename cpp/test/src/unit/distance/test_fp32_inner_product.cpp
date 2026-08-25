@@ -120,12 +120,55 @@ TEST(InnerProductFloat_AVX512, MatchesNaive_IfSupported) {
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not supported";
     }
-    std::vector<size_t> dims = {16, 32, 64, 128, 256};
-    for (size_t dim : dims) {
+    // DualOnly: dim must be a multiple of 32 (at least 32)
+    for (size_t dim : {32, 64, 128, 256}) {
+        auto a = make_float_vec(dim);
+        auto b = make_float_vec(dim, dim);
+        float d = InnerProductFloat_AVX512<ResidualMode::DualOnly>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "DualOnly dim=" << dim;
+    }
+    // DualPlusSimd: dim = 32*k + 16 (e.g. 48, 80, 112)
+    for (size_t dim : {48, 80, 112, 144}) {
+        auto a = make_float_vec(dim);
+        auto b = make_float_vec(dim, dim);
+        float d = InnerProductFloat_AVX512<ResidualMode::DualPlusSimd>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "DualPlusSimd dim=" << dim;
+    }
+    // DualTail: dim = 32*k + rem (rem in 1..15, e.g. 33, 40, 47)
+    for (size_t dim : {33, 40, 47, 65, 70}) {
+        auto a = make_float_vec(dim);
+        auto b = make_float_vec(dim, dim);
+        float d = InnerProductFloat_AVX512<ResidualMode::DualTail>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "DualTail dim=" << dim;
+    }
+    // SimdOnly: dim = 16
+    {
+        size_t dim = 16;
+        auto a = make_float_vec(dim);
+        auto b = make_float_vec(dim, dim);
+        float d = InnerProductFloat_AVX512<ResidualMode::SimdOnly>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "SimdOnly dim=" << dim;
+    }
+    // SimdTail: dim = 16 + rem (rem in 1..15, e.g. 17, 24, 31)
+    for (size_t dim : {17, 24, 31}) {
+        auto a = make_float_vec(dim);
+        auto b = make_float_vec(dim, dim);
+        float d = InnerProductFloat_AVX512<ResidualMode::SimdTail>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "SimdTail dim=" << dim;
+    }
+    // TailOnly: dim in 1..15
+    for (size_t dim : {1, 4, 7, 15}) {
+        auto a = make_float_vec(dim);
+        auto b = make_float_vec(dim, dim);
+        float d = InnerProductFloat_AVX512<ResidualMode::TailOnly>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "TailOnly dim=" << dim;
+    }
+    // Full: requires all 3 parts (dim = 32*k + 16 + rem, where rem in 1..15)
+    for (size_t dim : {49, 55, 63, 81, 115}) {
         auto a = make_float_vec(dim);
         auto b = make_float_vec(dim, dim);
         float d = InnerProductFloat_AVX512<ResidualMode::Full>::compare(a.data(), b.data(), &dim);
-        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "dim=" << dim;
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "Full dim=" << dim;
     }
 }
 
@@ -133,12 +176,55 @@ TEST(InnerProductFloat_AVX2, MatchesNaive_IfSupported) {
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not supported";
     }
-    std::vector<size_t> dims = {8, 16, 32, 64, 128, 256};
-    for (size_t dim : dims) {
+    // DualOnly: dim must be a multiple of 16 (at least 16)
+    for (size_t dim : {16, 32, 64, 128, 256}) {
+        auto a = make_float_vec(dim);
+        auto b = make_float_vec(dim, dim);
+        float d = InnerProductFloat_AVX2<ResidualMode::DualOnly>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "DualOnly dim=" << dim;
+    }
+    // DualPlusSimd: dim = 16*k + 8 (e.g. 24, 40, 56)
+    for (size_t dim : {24, 40, 56, 72}) {
+        auto a = make_float_vec(dim);
+        auto b = make_float_vec(dim, dim);
+        float d = InnerProductFloat_AVX2<ResidualMode::DualPlusSimd>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "DualPlusSimd dim=" << dim;
+    }
+    // DualTail: dim = 16*k + rem (rem in 1..7, e.g. 17, 20, 23)
+    for (size_t dim : {17, 20, 23, 33, 35}) {
+        auto a = make_float_vec(dim);
+        auto b = make_float_vec(dim, dim);
+        float d = InnerProductFloat_AVX2<ResidualMode::DualTail>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "DualTail dim=" << dim;
+    }
+    // SimdOnly: dim = 8
+    {
+        size_t dim = 8;
+        auto a = make_float_vec(dim);
+        auto b = make_float_vec(dim, dim);
+        float d = InnerProductFloat_AVX2<ResidualMode::SimdOnly>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "SimdOnly dim=" << dim;
+    }
+    // SimdTail: dim = 8 + rem (rem in 1..7, e.g. 9, 12, 15)
+    for (size_t dim : {9, 12, 15}) {
+        auto a = make_float_vec(dim);
+        auto b = make_float_vec(dim, dim);
+        float d = InnerProductFloat_AVX2<ResidualMode::SimdTail>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "SimdTail dim=" << dim;
+    }
+    // TailOnly: dim in 1..7
+    for (size_t dim : {1, 3, 5, 7}) {
+        auto a = make_float_vec(dim);
+        auto b = make_float_vec(dim, dim);
+        float d = InnerProductFloat_AVX2<ResidualMode::TailOnly>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "TailOnly dim=" << dim;
+    }
+    // Full: requires all 3 parts (dim = 16*k + 8 + rem, where rem in 1..7)
+    for (size_t dim : {25, 29, 31, 41, 57}) {
         auto a = make_float_vec(dim);
         auto b = make_float_vec(dim, dim);
         float d = InnerProductFloat_AVX2<ResidualMode::Full>::compare(a.data(), b.data(), &dim);
-        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "dim=" << dim;
+        EXPECT_NEAR(d, 1.0f - ip_naive(a.data(), b.data(), dim), 1e-2f) << "Full dim=" << dim;
     }
 }
 

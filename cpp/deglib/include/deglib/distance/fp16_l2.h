@@ -7,19 +7,18 @@
 #include <stdexcept>
 #include <variant>
 
-namespace deglib::distances::fp16_ip {
+namespace deglib::distances::fp16_l2 {
 
 // ---------------------------------------------------------------------------------------------------------------------
-// ----------------------------------------------- FP16 Inner Product Dists ---------------------------------------------
+// ----------------------------------------------- FP16 L2 Dists -------------------------------------------------------
 // ---------------------------------------------------------------------------------------------------------------------
 // FP16 vectors are stored as uint16_t arrays (IEEE 754 half-precision bit patterns).
-// The distance is computed as 1.f - dot_product, where dot_product is the raw
-// inner product of the float-converted vectors.
+// The L2 distance is computed as the sum of squared differences: sum((a[i] - b[i])^2).
 // ---------------------------------------------------------------------------------------------------------------------
 
 // Scalar fallback — no SIMD required.
 // Uses std::fma for precise accumulation, converting each FP16 value to float.
-class InnerProductFP16 {
+class L2FP16 {
   public:
     static constexpr const char* get_instruction() { return "Scalar"; }
 
@@ -32,10 +31,12 @@ class InnerProductFP16 {
         for (size_t i = 0; i < size; ++i) {
             float fa = deglib::distances::fp16::fp16_to_float(a[i]);
             float fb = deglib::distances::fp16::fp16_to_float(b[i]);
-            result = std::fma(fa, fb, result);
+            float diff = fa - fb;
+            result = std::fma(diff, diff, result);
         }
-        return 1.f - result;
+        return result;
     }
+
     inline static void compare_batch(const void* query_ptr, const void* const* db_arr, size_t count, const void* qty_ptr, float* dists) {
         for (size_t i = 0; i < count; ++i) {
             dists[i] = compare(query_ptr, db_arr[i], qty_ptr);
@@ -44,7 +45,7 @@ class InnerProductFP16 {
 };
 
 #if defined(DEGLIB_X86)
-DEGLIB_TARGET_AVX2 inline static float fp16_hsum256(__m256 s) {
+DEGLIB_TARGET_AVX2 inline static float fp16_l2_hsum256(__m256 s) {
     __m128 sum128 = _mm_add_ps(_mm256_castps256_ps128(s), _mm256_extractf128_ps(s, 1));
     __m128 shuf = _mm_movehdup_ps(sum128);
     __m128 sums = _mm_add_ps(sum128, shuf);
@@ -53,10 +54,10 @@ DEGLIB_TARGET_AVX2 inline static float fp16_hsum256(__m256 s) {
     return _mm_cvtss_f32(sums);
 }
 
-DEGLIB_TARGET_AVX512 inline static float fp16_hsum512(__m512 s) { return _mm512_reduce_add_ps(s); }
+DEGLIB_TARGET_AVX512 inline static float fp16_l2_hsum512(__m512 s) { return _mm512_reduce_add_ps(s); }
 
 // -------------------------------------------------------------------
-// InnerProductFP16 SIMD implementations — process vectors with
+// L2FP16 SIMD implementations — process vectors with
 // aligned SIMD portions plus scalar residuals for any unaligned tail.
 // Separate classes per SIMD width so that compare() has zero
 // runtime dispatch overhead — select_dist() chooses the class.
@@ -67,7 +68,7 @@ DEGLIB_TARGET_AVX512 inline static float fp16_hsum512(__m512 s) { return _mm512_
 // -------------------------------------------------------------------
 
 template <ResidualMode Mode = ResidualMode::Full>
-class InnerProductFP16_AVX512 {
+class L2FP16_AVX512 {
     static constexpr bool HasDualSimd = has_flag(Mode, ResidualMode::DualSimd);
     static constexpr bool HasSimd = has_flag(Mode, ResidualMode::Simd);
     static constexpr bool HasTail = has_flag(Mode, ResidualMode::Tail);
@@ -88,12 +89,14 @@ class InnerProductFP16_AVX512 {
             while (a + 31 < last) {
                 __m512 va1 = _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(a)));
                 __m512 vb1 = _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b)));
-                sum512_1 = _mm512_fmadd_ps(va1, vb1, sum512_1);
+                __m512 diff1 = _mm512_sub_ps(va1, vb1);
+                sum512_1 = _mm512_fmadd_ps(diff1, diff1, sum512_1);
                 a += 16;
                 b += 16;
                 __m512 va2 = _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(a)));
                 __m512 vb2 = _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b)));
-                sum512_2 = _mm512_fmadd_ps(va2, vb2, sum512_2);
+                __m512 diff2 = _mm512_sub_ps(va2, vb2);
+                sum512_2 = _mm512_fmadd_ps(diff2, diff2, sum512_2);
                 a += 16;
                 b += 16;
             }
@@ -101,25 +104,27 @@ class InnerProductFP16_AVX512 {
         if constexpr (HasSimd) {
             __m512 va1 = _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(a)));
             __m512 vb1 = _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b)));
-            sum512_1 = _mm512_fmadd_ps(va1, vb1, sum512_1);
+            __m512 diff1 = _mm512_sub_ps(va1, vb1);
+            sum512_1 = _mm512_fmadd_ps(diff1, diff1, sum512_1);
             a += 16;
             b += 16;
         }
 
         // Horizontal reduce of SIMD accumulators
         __m512 sum512 = _mm512_add_ps(sum512_1, sum512_2);
-        float result = fp16_hsum512(sum512);
+        float result = fp16_l2_hsum512(sum512);
 
         // Scalar residual for the unaligned tail — eliminated at compile-time if HasTail == false
         if constexpr (HasTail) {
             while (a < last) {
                 float fa = deglib::distances::fp16::fp16_to_float(*a++);
                 float fb = deglib::distances::fp16::fp16_to_float(*b++);
-                result = std::fma(fa, fb, result);
+                float diff = fa - fb;
+                result = std::fma(diff, diff, result);
             }
         }
 
-        return 1.f - result;
+        return result;
     }
 
     DEGLIB_TARGET_AVX512 inline static void compare_batch(const void* query_ptr, const void* const* db_arr, size_t count, const void* qty_ptr, float* dists) {
@@ -149,8 +154,10 @@ class InnerProductFP16_AVX512 {
                         const uint16_t* db_ = static_cast<const uint16_t*>(db[j]);
                         __m256i r_lo_ = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&db_[idx]));
                         __m256i r_hi_ = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&db_[idx + 16]));
-                        s[j] = _mm512_fmadd_ps(q_lo, _mm512_cvtph_ps(r_lo_), s[j]);
-                        s[j] = _mm512_fmadd_ps(q_hi, _mm512_cvtph_ps(r_hi_), s[j]);
+                        __m512 diff_lo = _mm512_sub_ps(q_lo, _mm512_cvtph_ps(r_lo_));
+                        __m512 diff_hi = _mm512_sub_ps(q_hi, _mm512_cvtph_ps(r_hi_));
+                        s[j] = _mm512_fmadd_ps(diff_lo, diff_lo, s[j]);
+                        s[j] = _mm512_fmadd_ps(diff_hi, diff_hi, s[j]);
                     }
                 }
             }
@@ -162,30 +169,28 @@ class InnerProductFP16_AVX512 {
                 for (size_t j = 0; j < BATCH_SIZE; ++j) {
                     const uint16_t* db_ = static_cast<const uint16_t*>(db[j]);
                     __m256i r_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&db_[offset]));
-                    s[j] = _mm512_fmadd_ps(qf, _mm512_cvtph_ps(r_raw), s[j]);
+                    __m512 diff = _mm512_sub_ps(qf, _mm512_cvtph_ps(r_raw));
+                    s[j] = _mm512_fmadd_ps(diff, diff, s[j]);
                 }
                 offset += 16;
             }
 
             for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                out_dists[j] = fp16_hsum512(s[j]);
+                out_dists[j] = fp16_l2_hsum512(s[j]);
             }
 
             if constexpr (HasTail) {
                 for (size_t j = 0; j < BATCH_SIZE; ++j) {
                     const uint16_t* db_ptr = static_cast<const uint16_t*>(db[j]);
-                    float tail_dot = 0.0f;
+                    float tail_sum = 0.0f;
                     for (size_t k = offset; k < dim; ++k) {
                         float fa = deglib::distances::fp16::fp16_to_float(query[k]);
                         float fb = deglib::distances::fp16::fp16_to_float(db_ptr[k]);
-                        tail_dot = std::fma(fa, fb, tail_dot);
+                        float diff = fa - fb;
+                        tail_sum = std::fma(diff, diff, tail_sum);
                     }
-                    out_dists[j] += tail_dot;
+                    out_dists[j] += tail_sum;
                 }
-            }
-
-            for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                out_dists[j] = 1.0f - out_dists[j];
             }
         };
 
@@ -200,7 +205,7 @@ class InnerProductFP16_AVX512 {
 };
 
 template <ResidualMode Mode = ResidualMode::Full>
-class InnerProductFP16_AVX2 {
+class L2FP16_AVX2 {
     static constexpr bool HasDualSimd = has_flag(Mode, ResidualMode::DualSimd);
     static constexpr bool HasSimd = has_flag(Mode, ResidualMode::Simd);
     static constexpr bool HasTail = has_flag(Mode, ResidualMode::Tail);
@@ -221,12 +226,14 @@ class InnerProductFP16_AVX2 {
             while (a + 15 < last) {
                 __m256 va1 = _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(a)));
                 __m256 vb1 = _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(b)));
-                sum256_1 = _mm256_fmadd_ps(va1, vb1, sum256_1);
+                __m256 diff1 = _mm256_sub_ps(va1, vb1);
+                sum256_1 = _mm256_fmadd_ps(diff1, diff1, sum256_1);
                 a += 8;
                 b += 8;
                 __m256 va2 = _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(a)));
                 __m256 vb2 = _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(b)));
-                sum256_2 = _mm256_fmadd_ps(va2, vb2, sum256_2);
+                __m256 diff2 = _mm256_sub_ps(va2, vb2);
+                sum256_2 = _mm256_fmadd_ps(diff2, diff2, sum256_2);
                 a += 8;
                 b += 8;
             }
@@ -234,25 +241,27 @@ class InnerProductFP16_AVX2 {
         if constexpr (HasSimd) {
             __m256 va1 = _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(a)));
             __m256 vb1 = _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(b)));
-            sum256_1 = _mm256_fmadd_ps(va1, vb1, sum256_1);
+            __m256 diff1 = _mm256_sub_ps(va1, vb1);
+            sum256_1 = _mm256_fmadd_ps(diff1, diff1, sum256_1);
             a += 8;
             b += 8;
         }
 
         // Horizontal reduce of SIMD accumulators
         __m256 sum256 = _mm256_add_ps(sum256_1, sum256_2);
-        float result = fp16_hsum256(sum256);
+        float result = fp16_l2_hsum256(sum256);
 
         // Scalar residual for the unaligned tail — eliminated at compile-time if HasTail == false
         if constexpr (HasTail) {
             while (a < last) {
                 float fa = deglib::distances::fp16::fp16_to_float(*a++);
                 float fb = deglib::distances::fp16::fp16_to_float(*b++);
-                result = std::fma(fa, fb, result);
+                float diff = fa - fb;
+                result = std::fma(diff, diff, result);
             }
         }
 
-        return 1.f - result;
+        return result;
     }
 
     DEGLIB_TARGET_AVX2 inline static void compare_batch(const void* query_ptr, const void* const* db_arr, size_t count, const void* qty_ptr, float* dists) {
@@ -268,57 +277,56 @@ class InnerProductFP16_AVX2 {
             }
 
             if constexpr (HasDualSimd) {
-                const size_t nc = dim / 16;
-                offset = nc * 16;
+                const size_t nc16 = dim / 16;
+                offset = nc16 * 16;
 
-                for (size_t c = 0; c < nc; ++c) {
+                for (size_t c = 0; c < nc16; ++c) {
                     size_t idx = c * 16;
                     __m128i q_raw_lo = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&query[idx]));
                     __m128i q_raw_hi = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&query[idx + 8]));
-                    __m256 q_lo = _mm256_cvtph_ps(q_raw_lo);
-                    __m256 q_hi = _mm256_cvtph_ps(q_raw_hi);
+                    __m256 qf_lo = _mm256_cvtph_ps(q_raw_lo);
+                    __m256 qf_hi = _mm256_cvtph_ps(q_raw_hi);
 
                     for (size_t j = 0; j < BATCH_SIZE; ++j) {
                         const uint16_t* db_ = static_cast<const uint16_t*>(db[j]);
                         __m128i r_lo_ = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&db_[idx]));
                         __m128i r_hi_ = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&db_[idx + 8]));
-                        s[j] = _mm256_fmadd_ps(q_lo, _mm256_cvtph_ps(r_lo_), s[j]);
-                        s[j] = _mm256_fmadd_ps(q_hi, _mm256_cvtph_ps(r_hi_), s[j]);
+                        __m256 diff_lo = _mm256_sub_ps(qf_lo, _mm256_cvtph_ps(r_lo_));
+                        __m256 diff_hi = _mm256_sub_ps(qf_hi, _mm256_cvtph_ps(r_hi_));
+                        s[j] = _mm256_fmadd_ps(diff_lo, diff_lo, s[j]);
+                        s[j] = _mm256_fmadd_ps(diff_hi, diff_hi, s[j]);
                     }
                 }
             }
 
             if constexpr (HasSimd) {
                 __m128i q_raw = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&query[offset]));
-                __m256 q_vec = _mm256_cvtph_ps(q_raw);
+                __m256 qf = _mm256_cvtph_ps(q_raw);
                 for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                    const uint16_t* db_ptr = static_cast<const uint16_t*>(db[j]);
-                    __m128i r_raw = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&db_ptr[offset]));
-                    __m256 r_vec = _mm256_cvtph_ps(r_raw);
-                    s[j] = _mm256_fmadd_ps(q_vec, r_vec, s[j]);
+                    const uint16_t* db_ = static_cast<const uint16_t*>(db[j]);
+                    __m128i r_raw = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&db_[offset]));
+                    __m256 diff = _mm256_sub_ps(qf, _mm256_cvtph_ps(r_raw));
+                    s[j] = _mm256_fmadd_ps(diff, diff, s[j]);
                 }
                 offset += 8;
             }
 
             for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                out_dists[j] = fp16_hsum256(s[j]);
+                out_dists[j] = fp16_l2_hsum256(s[j]);
             }
 
             if constexpr (HasTail) {
                 for (size_t j = 0; j < BATCH_SIZE; ++j) {
                     const uint16_t* db_ptr = static_cast<const uint16_t*>(db[j]);
-                    float tail_dot = 0.0f;
+                    float tail_sum = 0.0f;
                     for (size_t k = offset; k < dim; ++k) {
                         float fa = deglib::distances::fp16::fp16_to_float(query[k]);
                         float fb = deglib::distances::fp16::fp16_to_float(db_ptr[k]);
-                        tail_dot = std::fma(fa, fb, tail_dot);
+                        float diff = fa - fb;
+                        tail_sum = std::fma(diff, diff, tail_sum);
                     }
-                    out_dists[j] += tail_dot;
+                    out_dists[j] += tail_sum;
                 }
-            }
-
-            for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                out_dists[j] = 1.0f - out_dists[j];
             }
         };
 
@@ -334,23 +342,23 @@ class InnerProductFP16_AVX2 {
 #endif
 
 using DistanceVariant = std::variant<
-    InnerProductFP16
+    L2FP16
 #if defined(DEGLIB_X86)
     ,
-    InnerProductFP16_AVX512<ResidualMode::Full>,
-    InnerProductFP16_AVX512<ResidualMode::DualPlusSimd>,
-    InnerProductFP16_AVX512<ResidualMode::DualTail>,
-    InnerProductFP16_AVX512<ResidualMode::DualOnly>,
-    InnerProductFP16_AVX512<ResidualMode::SimdTail>,
-    InnerProductFP16_AVX512<ResidualMode::SimdOnly>,
-    InnerProductFP16_AVX512<ResidualMode::TailOnly>,
-    InnerProductFP16_AVX2<ResidualMode::Full>,
-    InnerProductFP16_AVX2<ResidualMode::DualPlusSimd>,
-    InnerProductFP16_AVX2<ResidualMode::DualTail>,
-    InnerProductFP16_AVX2<ResidualMode::DualOnly>,
-    InnerProductFP16_AVX2<ResidualMode::SimdTail>,
-    InnerProductFP16_AVX2<ResidualMode::SimdOnly>,
-    InnerProductFP16_AVX2<ResidualMode::TailOnly>
+    L2FP16_AVX512<ResidualMode::Full>,
+    L2FP16_AVX512<ResidualMode::DualPlusSimd>,
+    L2FP16_AVX512<ResidualMode::DualTail>,
+    L2FP16_AVX512<ResidualMode::DualOnly>,
+    L2FP16_AVX512<ResidualMode::SimdTail>,
+    L2FP16_AVX512<ResidualMode::SimdOnly>,
+    L2FP16_AVX512<ResidualMode::TailOnly>,
+    L2FP16_AVX2<ResidualMode::Full>,
+    L2FP16_AVX2<ResidualMode::DualPlusSimd>,
+    L2FP16_AVX2<ResidualMode::DualTail>,
+    L2FP16_AVX2<ResidualMode::DualOnly>,
+    L2FP16_AVX2<ResidualMode::SimdTail>,
+    L2FP16_AVX2<ResidualMode::SimdOnly>,
+    L2FP16_AVX2<ResidualMode::TailOnly>
 #endif
     >;
 
@@ -360,46 +368,46 @@ inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::Instruct
 #if defined(DEGLIB_X86)
     if (target == deglib::cpu::InstructionSet::AVX512) {
         if (dim < 16) {
-            return InnerProductFP16_AVX512<ResidualMode::TailOnly>{};
+            return L2FP16_AVX512<ResidualMode::TailOnly>{};
         } else if (dim < 32) {
             if (dim == 16)
-                return InnerProductFP16_AVX512<ResidualMode::SimdOnly>{};
+                return L2FP16_AVX512<ResidualMode::SimdOnly>{};
             else
-                return InnerProductFP16_AVX512<ResidualMode::SimdTail>{};
+                return L2FP16_AVX512<ResidualMode::SimdTail>{};
         } else {
             const size_t rem = dim % 32;
             if (rem == 0)
-                return InnerProductFP16_AVX512<ResidualMode::DualOnly>{};
+                return L2FP16_AVX512<ResidualMode::DualOnly>{};
             else if (rem == 16)
-                return InnerProductFP16_AVX512<ResidualMode::DualPlusSimd>{};
+                return L2FP16_AVX512<ResidualMode::DualPlusSimd>{};
             else if (rem < 16)
-                return InnerProductFP16_AVX512<ResidualMode::DualTail>{};
+                return L2FP16_AVX512<ResidualMode::DualTail>{};
             else
-                return InnerProductFP16_AVX512<ResidualMode::Full>{};
+                return L2FP16_AVX512<ResidualMode::Full>{};
         }
     } else if (target == deglib::cpu::InstructionSet::AVX2) {
         if (dim < 8) {
-            return InnerProductFP16_AVX2<ResidualMode::TailOnly>{};
+            return L2FP16_AVX2<ResidualMode::TailOnly>{};
         } else if (dim < 16) {
             if (dim == 8)
-                return InnerProductFP16_AVX2<ResidualMode::SimdOnly>{};
+                return L2FP16_AVX2<ResidualMode::SimdOnly>{};
             else
-                return InnerProductFP16_AVX2<ResidualMode::SimdTail>{};
+                return L2FP16_AVX2<ResidualMode::SimdTail>{};
         } else {
             const size_t rem = dim % 16;
             if (rem == 0)
-                return InnerProductFP16_AVX2<ResidualMode::DualOnly>{};
+                return L2FP16_AVX2<ResidualMode::DualOnly>{};
             else if (rem == 8)
-                return InnerProductFP16_AVX2<ResidualMode::DualPlusSimd>{};
+                return L2FP16_AVX2<ResidualMode::DualPlusSimd>{};
             else if (rem < 8)
-                return InnerProductFP16_AVX2<ResidualMode::DualTail>{};
+                return L2FP16_AVX2<ResidualMode::DualTail>{};
             else
-                return InnerProductFP16_AVX2<ResidualMode::Full>{};
+                return L2FP16_AVX2<ResidualMode::Full>{};
         }
     }
 #endif
 
-    return InnerProductFP16{};
+    return L2FP16{};
 }
 
-}  // namespace deglib::distances::fp16_ip
+}  // namespace deglib::distances::fp16_l2

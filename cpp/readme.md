@@ -16,7 +16,7 @@ It supports both static and dynamic streaming datasets through incremental exten
 - **Multi-Threaded Builder**: `deglib::builder::EvenRegularGraphBuilder` with lock-free batch scheduling and customizable optimization profiles (`StreamingData`, `LowLID`, `HighLID`).
 - **Hardware-Accelerated SIMD**:
   - Hand-optimized AVX-512 and AVX2 vector kernels with automatic runtime/compiler dispatch and Scalar fallback.
-  - Metrics: `FP32_L2`, `FP32_InnerProduct`, `Uint8_L2`, `FP16_InnerProduct`, and quantized `EVP_InnerProduct`.
+  - Metrics: `FP32_L2`, `FP32_InnerProduct`, `Uint8_L2`, `Uint8_InnerProduct`, `FP16_L2`, `FP16_InnerProduct`, and quantized `EVP_InnerProduct`.
 - **Graph Optimization & Diagnostics**:
   - Topology pruning (`prune_worst_edges`, `prune_non_mrng_edges`).
   - Analysis suite (`analyze_graph`, connectivity validation, exploration reachability).

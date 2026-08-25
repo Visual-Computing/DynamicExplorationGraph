@@ -51,6 +51,7 @@ add_deglib_test(test_config src/unit/test_config.cpp)
 add_deglib_test(test_junker_volgenant_solver src/unit/optimization/flas/test_junker_volgenant_solver.cpp)
 add_deglib_test(test_flas src/unit/optimization/flas/test_fast_linear_assignment_sorter.cpp)
 add_deglib_test(test_fp16 src/unit/distance/test_fp16.cpp)
+add_deglib_test(test_fp16_l2 src/unit/distance/test_fp16_l2.cpp)
 add_deglib_test(test_fp16_inner_product src/unit/distance/test_fp16_inner_product.cpp)
 add_deglib_test(test_internal_graph src/unit/graph/test_internal_graph.cpp)
 add_deglib_test(test_search src/unit/test_search.cpp)
@@ -86,4 +87,5 @@ add_deglib_test_no_ctest(test_readonly_graph_regression src/regression/graph/tes
 add_deglib_test_no_ctest(test_evp_quantize_regression src/regression/optimization/quantization/test_evp_quantize_regression.cpp)
 add_deglib_test_no_ctest(test_search_regression src/regression/test_search_regression.cpp)
 add_deglib_test_no_ctest(test_filter_regression src/regression/test_filter_regression.cpp)
+add_deglib_test_no_ctest(test_distances_regression src/regression/test_distances_regression.cpp)
 

@@ -47,12 +47,12 @@ DEGLIB_TARGET_AVX2 inline static int64_t uint8_ip_hsum256(__m256i s) {
 }
 
 DEGLIB_TARGET_AVX512 inline static int64_t uint8_ip_hsum512(__m512i s) {
-#if defined(DEGLIB_X86)
+    #if defined(DEGLIB_X86)
     return static_cast<int64_t>(_mm512_reduce_add_epi32(s));
-#else
+    #else
     __m256i sum256 = _mm256_add_epi32(_mm512_castsi512_si256(s), _mm512_extracti32x8_epi32(s, 1));
     return uint8_ip_hsum256(sum256);
-#endif
+    #endif
 }
 
 template <ResidualMode Mode = ResidualMode::Full>
@@ -88,13 +88,11 @@ class InnerProductUint8_AVX512 {
             }
         }
         if constexpr (HasSimd) {
-            while (a + 31 < last) {
-                __m256i v1 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
-                __m256i v2 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
-                sum512_1 = _mm512_add_epi32(sum512_1, _mm512_madd_epi16(_mm512_cvtepu8_epi16(v1), _mm512_cvtepu8_epi16(v2)));
-                a += 32;
-                b += 32;
-            }
+            __m256i q_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
+            __m256i r_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
+            sum512_1 = _mm512_add_epi32(sum512_1, _mm512_madd_epi16(_mm512_cvtepu8_epi16(q_raw), _mm512_cvtepu8_epi16(r_raw)));
+            a += 32;
+            b += 32;
         }
 
         // Horizontal reduce
@@ -140,15 +138,13 @@ class InnerProductUint8_AVX512 {
             }
 
             if constexpr (HasTail) {
-                if (offset < dim) {
-                    for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                        const unsigned char* db_ptr = static_cast<const unsigned char*>(db[j]);
-                        int64_t tail_sum = 0;
-                        for (size_t k = offset; k < dim; ++k) {
-                            tail_sum += int64_t(query[k]) * int64_t(db_ptr[k]);
-                        }
-                        out_dists[j] -= static_cast<float>(tail_sum);
+                for (size_t j = 0; j < BATCH_SIZE; ++j) {
+                    const unsigned char* db_ptr = static_cast<const unsigned char*>(db[j]);
+                    int64_t tail_sum = 0;
+                    for (size_t k = offset; k < dim; ++k) {
+                        tail_sum += int64_t(query[k]) * int64_t(db_ptr[k]);
                     }
+                    out_dists[j] -= static_cast<float>(tail_sum);
                 }
             }
         };
@@ -196,13 +192,11 @@ class InnerProductUint8_AVX2 {
             }
         }
         if constexpr (HasSimd) {
-            while (a + 15 < last) {
-                __m128i v1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
-                __m128i v2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b));
-                sum256_1 = _mm256_add_epi32(sum256_1, _mm256_madd_epi16(_mm256_cvtepu8_epi16(v1), _mm256_cvtepu8_epi16(v2)));
-                a += 16;
-                b += 16;
-            }
+            __m128i v1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
+            __m128i v2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b));
+            sum256_1 = _mm256_add_epi32(sum256_1, _mm256_madd_epi16(_mm256_cvtepu8_epi16(v1), _mm256_cvtepu8_epi16(v2)));
+            a += 16;
+            b += 16;
         }
 
         // Horizontal reduce
@@ -248,15 +242,13 @@ class InnerProductUint8_AVX2 {
             }
 
             if constexpr (HasTail) {
-                if (offset < dim) {
-                    for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                        const unsigned char* db_ptr = static_cast<const unsigned char*>(db[j]);
-                        int64_t tail_sum = 0;
-                        for (size_t k = offset; k < dim; ++k) {
-                            tail_sum += int64_t(query[k]) * int64_t(db_ptr[k]);
-                        }
-                        out_dists[j] -= static_cast<float>(tail_sum);
+                for (size_t j = 0; j < BATCH_SIZE; ++j) {
+                    const unsigned char* db_ptr = static_cast<const unsigned char*>(db[j]);
+                    int64_t tail_sum = 0;
+                    for (size_t k = offset; k < dim; ++k) {
+                        tail_sum += int64_t(query[k]) * int64_t(db_ptr[k]);
                     }
+                    out_dists[j] -= static_cast<float>(tail_sum);
                 }
             }
         };
@@ -307,10 +299,13 @@ inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::Instruct
             else
                 return InnerProductUint8_AVX512<ResidualMode::SimdTail>{};
         } else {
-            if (dim % 64 == 0)
+            const size_t rem = dim % 64;
+            if (rem == 0)
                 return InnerProductUint8_AVX512<ResidualMode::DualOnly>{};
-            else if (dim % 32 == 0)
+            else if (rem == 32)
                 return InnerProductUint8_AVX512<ResidualMode::DualPlusSimd>{};
+            else if (rem < 32)
+                return InnerProductUint8_AVX512<ResidualMode::DualTail>{};
             else
                 return InnerProductUint8_AVX512<ResidualMode::Full>{};
         }
@@ -323,10 +318,13 @@ inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::Instruct
             else
                 return InnerProductUint8_AVX2<ResidualMode::SimdTail>{};
         } else {
-            if (dim % 32 == 0)
+            const size_t rem = dim % 32;
+            if (rem == 0)
                 return InnerProductUint8_AVX2<ResidualMode::DualOnly>{};
-            else if (dim % 16 == 0)
+            else if (rem == 16)
                 return InnerProductUint8_AVX2<ResidualMode::DualPlusSimd>{};
+            else if (rem < 16)
+                return InnerProductUint8_AVX2<ResidualMode::DualTail>{};
             else
                 return InnerProductUint8_AVX2<ResidualMode::Full>{};
         }

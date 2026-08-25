@@ -13,6 +13,7 @@
 // Modular distance headers - contain all distance function class definitions
 #include "deglib/distance/evp_inner_product.h"
 #include "deglib/distance/fp16_ip.h"
+#include "deglib/distance/fp16_l2.h"
 #include "deglib/distance/fp32_ip.h"
 #include "deglib/distance/fp32_l2.h"
 #include "deglib/distance/uint8_ip.h"
@@ -25,12 +26,13 @@ enum class MetricDataType : uint8_t { FP32 = 0x00, Uint8 = 0x10, FP16 = 0x20, EV
 enum class MetricDistanceKind : uint8_t { L2 = 0x01, InnerProduct = 0x02 };
 
 enum class MetricType : uint8_t {
-    FP32_L2 = static_cast<uint8_t>(MetricDataType::FP32) | static_cast<uint8_t>(MetricDistanceKind::L2),                      // 0x01
-    FP32_InnerProduct = static_cast<uint8_t>(MetricDataType::FP32) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),  // 0x02
-    Uint8_L2 = static_cast<uint8_t>(MetricDataType::Uint8) | static_cast<uint8_t>(MetricDistanceKind::L2),                    // 0x11
-    Uint8_InnerProduct = static_cast<uint8_t>(MetricDataType::Uint8) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),// 0x12
-    FP16_InnerProduct = static_cast<uint8_t>(MetricDataType::FP16) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),  // 0x22
-    EVP_InnerProduct = static_cast<uint8_t>(MetricDataType::EVP) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct)     // 0x32
+    FP32_L2 = static_cast<uint8_t>(MetricDataType::FP32) | static_cast<uint8_t>(MetricDistanceKind::L2),                        // 0x01
+    FP32_InnerProduct = static_cast<uint8_t>(MetricDataType::FP32) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),    // 0x02
+    Uint8_L2 = static_cast<uint8_t>(MetricDataType::Uint8) | static_cast<uint8_t>(MetricDistanceKind::L2),                      // 0x11
+    Uint8_InnerProduct = static_cast<uint8_t>(MetricDataType::Uint8) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),  // 0x12
+    FP16_L2 = static_cast<uint8_t>(MetricDataType::FP16) | static_cast<uint8_t>(MetricDistanceKind::L2),                        // 0x21
+    FP16_InnerProduct = static_cast<uint8_t>(MetricDataType::FP16) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),    // 0x22
+    EVP_InnerProduct = static_cast<uint8_t>(MetricDataType::EVP) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct)       // 0x32
 };
 
 /**
@@ -49,6 +51,7 @@ struct Metric {
     static constexpr MetricType FP32_InnerProduct = MetricType::FP32_InnerProduct;
     static constexpr MetricType Uint8_L2 = MetricType::Uint8_L2;
     static constexpr MetricType Uint8_InnerProduct = MetricType::Uint8_InnerProduct;
+    static constexpr MetricType FP16_L2 = MetricType::FP16_L2;
     static constexpr MetricType FP16_InnerProduct = MetricType::FP16_InnerProduct;
     static constexpr MetricType EVP_InnerProduct = MetricType::EVP_InnerProduct;
 
@@ -127,6 +130,7 @@ using variant_concat_t = typename variant_concat<Variants...>::type;
 using DistanceVariant = variant_concat_t<
     deglib::distances::fp32_l2::DistanceVariant,
     deglib::distances::fp32_ip::DistanceVariant,
+    deglib::distances::fp16_l2::DistanceVariant,
     deglib::distances::fp16_ip::DistanceVariant,
     deglib::distances::uint8_l2::DistanceVariant,
     deglib::distances::uint8_ip::DistanceVariant,
@@ -201,6 +205,8 @@ class FloatSpace {
                 return to_flat_variant(deglib::distances::fp32_l2::select_dist(dim, instruction));
             case Metric::FP32_InnerProduct:
                 return to_flat_variant(deglib::distances::fp32_ip::select_dist(dim, instruction));
+            case Metric::FP16_L2:
+                return to_flat_variant(deglib::distances::fp16_l2::select_dist(dim, instruction));
             case Metric::FP16_InnerProduct:
                 return to_flat_variant(deglib::distances::fp16_ip::select_dist(dim, instruction));
             case Metric::Uint8_L2:

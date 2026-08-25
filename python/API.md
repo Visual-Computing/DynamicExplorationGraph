@@ -196,6 +196,8 @@ class Metric:
     FP32_L2            # Single-precision Euclidean L2 distance (dtype: np.float32)
     FP32_InnerProduct  # Single-precision Inner Product (1 - <a,b>, dtype: np.float32)
     Uint8_L2           # 8-bit unsigned integer L2 distance (dtype: np.uint8)
+    Uint8_InnerProduct # 8-bit unsigned integer Inner Product (dtype: np.uint8)
+    FP16_L2            # Half-precision FP16 Euclidean L2 distance (dtype: np.uint16)
     FP16_InnerProduct  # Half-precision FP16 Inner Product (dtype: np.uint16)
     EVP_InnerProduct   # Extreme Vector Quantization binary/ternary IP (dtype: np.uint8)
 

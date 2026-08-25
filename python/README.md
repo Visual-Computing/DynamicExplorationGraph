@@ -262,6 +262,8 @@ Controls the topology optimization strategy:
 - `Metric.FP32_L2`: Euclidean distance (`np.float32`)
 - `Metric.FP32_InnerProduct`: Inner product / cosine distance (`np.float32`)
 - `Metric.Uint8_L2`: 8-bit unsigned integer Euclidean distance (`np.uint8`)
+- `Metric.Uint8_InnerProduct`: 8-bit unsigned integer inner product (`np.uint8`)
+- `Metric.FP16_L2`: 16-bit half-precision Euclidean distance (`np.uint16`)
 - `Metric.FP16_InnerProduct`: 16-bit half-precision inner product (`np.uint16`)
 - `Metric.EVP_InnerProduct`: Quantized Extreme Value Property bit-packed vectors (`np.uint8`)
 

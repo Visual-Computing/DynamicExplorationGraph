@@ -1109,6 +1109,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .value("FP32_InnerProduct", deglib::distances::MetricType::FP32_InnerProduct)
         .value("Uint8_L2", deglib::distances::MetricType::Uint8_L2)
         .value("Uint8_InnerProduct", deglib::distances::MetricType::Uint8_InnerProduct)
+        .value("FP16_L2", deglib::distances::MetricType::FP16_L2)
         .value("FP16_InnerProduct", deglib::distances::MetricType::FP16_InnerProduct)
         .value("EVP_InnerProduct", deglib::distances::MetricType::EVP_InnerProduct);
 

@@ -451,6 +451,38 @@ def test_to_readonly_custom_features():
     assert res_dists.shape == (2, 3)
 
 
+def test_to_readonly_swap_fp16_l2():
+    """Test swapping a mutable graph's feature space to FP16 L2 ReadOnlyGraph."""
+    rng = np.random.default_rng(42)
+    N, d = 20, 8
+    data = rng.standard_normal((N, d)).astype(np.float32)
+
+    # Build FP32 L2 graph
+    fs_fp32 = FloatSpace.create(d, Metric.FP32_L2)
+    g = deglib.create_empty(N, fs_fp32, edges_per_vertex=4)
+    builder = deglib.GraphBuilder(g, extend_k=10, extend_eps=0.2)
+    builder.add_entry(range(N), data)
+    builder.build()
+
+    # Convert features to FP16
+    fp16_data = deglib.distances.floats_to_fp16(data)
+    fs_fp16 = FloatSpace.create(d, Metric.FP16_L2)
+
+    # Swap to FP16 L2 ReadOnlyGraph
+    ro_g = g.to_readonly(feature_space=fs_fp16, custom_features=fp16_data)
+    assert ro_g.size() == N
+    assert not ro_g.is_mutable()
+    assert ro_g.get_feature_space().metric() == Metric.FP16_L2
+
+    # Search on FP16 ReadOnlyGraph
+    query_fp16 = deglib.distances.floats_to_fp16(data[0:2])
+    res_indices, res_dists = ro_g.search(query_fp16, eps=0.1, k=3)
+    assert res_indices.shape == (2, 3)
+    assert res_dists.shape == (2, 3)
+    assert res_indices[0, 0] == 0
+    assert res_dists[0, 0] < 1e-4
+
+
 def test_create_random_graph_fp32():
     """Test DynamicExplorationGraph.create_random_graph with FP32 L2 data."""
     samples = 100

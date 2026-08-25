@@ -88,12 +88,55 @@ TEST(InnerProductUint8_AVX512, MatchesNaive_IfSupported) {
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not supported";
     }
-    std::vector<size_t> dims = {16, 32, 64, 128, 256};
-    for (size_t dim : dims) {
+    // DualOnly: dim must be a multiple of 64 (at least 64)
+    for (size_t dim : {64, 128, 256}) {
+        auto a = make_uint8_vec(dim);
+        auto b = make_uint8_vec(dim, dim);
+        float d = InnerProductUint8_AVX512<ResidualMode::DualOnly>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "DualOnly dim=" << dim;
+    }
+    // DualPlusSimd: dim = 64*k + 32 (e.g. 96, 160, 224)
+    for (size_t dim : {96, 160, 224}) {
+        auto a = make_uint8_vec(dim);
+        auto b = make_uint8_vec(dim, dim);
+        float d = InnerProductUint8_AVX512<ResidualMode::DualPlusSimd>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "DualPlusSimd dim=" << dim;
+    }
+    // DualTail: dim = 64*k + rem (rem in 1..31, e.g. 65, 70, 95)
+    for (size_t dim : {65, 70, 80, 95}) {
+        auto a = make_uint8_vec(dim);
+        auto b = make_uint8_vec(dim, dim);
+        float d = InnerProductUint8_AVX512<ResidualMode::DualTail>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "DualTail dim=" << dim;
+    }
+    // SimdOnly: dim = 32
+    {
+        size_t dim = 32;
+        auto a = make_uint8_vec(dim);
+        auto b = make_uint8_vec(dim, dim);
+        float d = InnerProductUint8_AVX512<ResidualMode::SimdOnly>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "SimdOnly dim=" << dim;
+    }
+    // SimdTail: dim = 32 + rem (rem in 1..31, e.g. 33, 40, 63)
+    for (size_t dim : {33, 40, 63}) {
+        auto a = make_uint8_vec(dim);
+        auto b = make_uint8_vec(dim, dim);
+        float d = InnerProductUint8_AVX512<ResidualMode::SimdTail>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "SimdTail dim=" << dim;
+    }
+    // TailOnly: dim in 1..31
+    for (size_t dim : {1, 4, 15, 31}) {
+        auto a = make_uint8_vec(dim);
+        auto b = make_uint8_vec(dim, dim);
+        float d = InnerProductUint8_AVX512<ResidualMode::TailOnly>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "TailOnly dim=" << dim;
+    }
+    // Full: requires all 3 parts (dim = 64*k + 32 + rem, where rem in 1..31)
+    for (size_t dim : {97, 105, 127, 161}) {
         auto a = make_uint8_vec(dim);
         auto b = make_uint8_vec(dim, dim);
         float d = InnerProductUint8_AVX512<ResidualMode::Full>::compare(a.data(), b.data(), &dim);
-        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "dim=" << dim;
+        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "Full dim=" << dim;
     }
 }
 
@@ -101,12 +144,55 @@ TEST(InnerProductUint8_AVX2, MatchesNaive_IfSupported) {
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not supported";
     }
-    std::vector<size_t> dims = {8, 16, 32, 64, 128, 256};
-    for (size_t dim : dims) {
+    // DualOnly: dim must be a multiple of 32 (at least 32)
+    for (size_t dim : {32, 64, 128, 256}) {
+        auto a = make_uint8_vec(dim);
+        auto b = make_uint8_vec(dim, dim);
+        float d = InnerProductUint8_AVX2<ResidualMode::DualOnly>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "DualOnly dim=" << dim;
+    }
+    // DualPlusSimd: dim = 32*k + 16 (e.g. 48, 80, 112)
+    for (size_t dim : {48, 80, 112, 144}) {
+        auto a = make_uint8_vec(dim);
+        auto b = make_uint8_vec(dim, dim);
+        float d = InnerProductUint8_AVX2<ResidualMode::DualPlusSimd>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "DualPlusSimd dim=" << dim;
+    }
+    // DualTail: dim = 32*k + rem (rem in 1..15, e.g. 33, 40, 47)
+    for (size_t dim : {33, 40, 47, 65, 70}) {
+        auto a = make_uint8_vec(dim);
+        auto b = make_uint8_vec(dim, dim);
+        float d = InnerProductUint8_AVX2<ResidualMode::DualTail>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "DualTail dim=" << dim;
+    }
+    // SimdOnly: dim = 16
+    {
+        size_t dim = 16;
+        auto a = make_uint8_vec(dim);
+        auto b = make_uint8_vec(dim, dim);
+        float d = InnerProductUint8_AVX2<ResidualMode::SimdOnly>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "SimdOnly dim=" << dim;
+    }
+    // SimdTail: dim = 16 + rem (rem in 1..15, e.g. 17, 24, 31)
+    for (size_t dim : {17, 24, 31}) {
+        auto a = make_uint8_vec(dim);
+        auto b = make_uint8_vec(dim, dim);
+        float d = InnerProductUint8_AVX2<ResidualMode::SimdTail>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "SimdTail dim=" << dim;
+    }
+    // TailOnly: dim in 1..15
+    for (size_t dim : {1, 4, 7, 15}) {
+        auto a = make_uint8_vec(dim);
+        auto b = make_uint8_vec(dim, dim);
+        float d = InnerProductUint8_AVX2<ResidualMode::TailOnly>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "TailOnly dim=" << dim;
+    }
+    // Full: requires all 3 parts (dim = 32*k + 16 + rem, where rem in 1..15)
+    for (size_t dim : {49, 55, 63, 81, 115}) {
         auto a = make_uint8_vec(dim);
         auto b = make_uint8_vec(dim, dim);
         float d = InnerProductUint8_AVX2<ResidualMode::Full>::compare(a.data(), b.data(), &dim);
-        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "dim=" << dim;
+        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "Full dim=" << dim;
     }
 }
 

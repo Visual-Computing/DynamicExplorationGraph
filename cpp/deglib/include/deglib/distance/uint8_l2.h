@@ -56,9 +56,7 @@ DEGLIB_TARGET_AVX2 inline static int64_t uint8_l2_hsum256(__m256i s) {
     return static_cast<int64_t>(_mm_cvtsi128_si32(sum128));
 }
 
-DEGLIB_TARGET_AVX512 inline static int64_t uint8_l2_hsum512(__m512i s) {
-    return static_cast<int64_t>(_mm512_reduce_add_epi32(s));
-}
+DEGLIB_TARGET_AVX512 inline static int64_t uint8_l2_hsum512(__m512i s) { return static_cast<int64_t>(_mm512_reduce_add_epi32(s)); }
 template <ResidualMode Mode = ResidualMode::Full>
 class L2Uint8_AVX512 {
     static constexpr bool HasDualSimd = has_flag(Mode, ResidualMode::DualSimd);
@@ -93,15 +91,14 @@ class L2Uint8_AVX512 {
                 b += 32;
             }
         }
+
         if constexpr (HasSimd) {
-            while (a + 31 < last) {
-                __m256i v1 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
-                __m256i v2 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
-                __m512i diff = _mm512_sub_epi16(_mm512_cvtepu8_epi16(v1), _mm512_cvtepu8_epi16(v2));
-                sum512_1 = _mm512_add_epi32(sum512_1, _mm512_madd_epi16(diff, diff));
-                a += 32;
-                b += 32;
-            }
+            __m256i q_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
+            __m256i r_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
+            __m512i diff = _mm512_sub_epi16(_mm512_cvtepu8_epi16(q_raw), _mm512_cvtepu8_epi16(r_raw));
+            sum512_1 = _mm512_add_epi32(sum512_1, _mm512_madd_epi16(diff, diff));
+            a += 32;
+            b += 32;
         }
 
         // Horizontal reduce of SIMD accumulators
@@ -130,56 +127,55 @@ class L2Uint8_AVX512 {
         const size_t dim = *((const size_t*)qty_ptr);
 
         auto batch_impl = [query, dim](const void* const* db, float* out_dists) DEGLIB_TARGET_AVX512 {
-            const size_t nc32 = dim / 32;
-            size_t offset = nc32 * 32;
-
+            size_t offset = 0;
             alignas(64) __m512i s[BATCH_SIZE];
             for (size_t j = 0; j < BATCH_SIZE; ++j) {
                 s[j] = _mm512_setzero_si512();
             }
 
-            for (size_t c = 0; c < nc32; ++c) {
-                size_t idx = c * 32;
-                __m256i q_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&query[idx]));
-                __m512i q_vec = _mm512_cvtepu8_epi16(q_raw);
+            if constexpr (HasDualSimd) {
+                const size_t nc32 = dim / 32;
+                offset = nc32 * 32;
 
+                for (size_t c = 0; c < nc32; ++c) {
+                    size_t idx = c * 32;
+                    __m256i q_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&query[idx]));
+                    __m512i q_vec = _mm512_cvtepu8_epi16(q_raw);
+
+                    for (size_t j = 0; j < BATCH_SIZE; ++j) {
+                        const unsigned char* db_ = static_cast<const unsigned char*>(db[j]);
+                        __m256i r_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&db_[idx]));
+                        __m512i diff = _mm512_sub_epi16(q_vec, _mm512_cvtepu8_epi16(r_raw));
+                        s[j] = _mm512_add_epi32(s[j], _mm512_madd_epi16(diff, diff));
+                    }
+                }
+            }
+
+            if constexpr (HasSimd) {
+                __m256i q_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&query[offset]));
+                __m512i q_vec = _mm512_cvtepu8_epi16(q_raw);
                 for (size_t j = 0; j < BATCH_SIZE; ++j) {
                     const unsigned char* db_ = static_cast<const unsigned char*>(db[j]);
-                    __m256i r_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&db_[idx]));
+                    __m256i r_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&db_[offset]));
                     __m512i diff = _mm512_sub_epi16(q_vec, _mm512_cvtepu8_epi16(r_raw));
                     s[j] = _mm512_add_epi32(s[j], _mm512_madd_epi16(diff, diff));
                 }
+                offset += 32;
             }
 
             for (size_t j = 0; j < BATCH_SIZE; ++j) {
                 out_dists[j] = static_cast<float>(uint8_l2_hsum512(s[j]));
             }
 
-            if constexpr (HasSimd) {
-                if (offset + 32 <= dim) {
-                    __m256i q_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&query[offset]));
-                    __m512i q_vec = _mm512_cvtepu8_epi16(q_raw);
-                    for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                        const unsigned char* db_ = static_cast<const unsigned char*>(db[j]);
-                        __m256i r_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&db_[offset]));
-                        __m512i diff = _mm512_sub_epi16(q_vec, _mm512_cvtepu8_epi16(r_raw));
-                        out_dists[j] += static_cast<float>(uint8_l2_hsum512(_mm512_madd_epi16(diff, diff)));
-                    }
-                    offset += 32;
-                }
-            }
-
             if constexpr (HasTail) {
-                if (offset < dim) {
-                    for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                        const unsigned char* db_ptr = static_cast<const unsigned char*>(db[j]);
-                        int64_t tail_sum = 0;
-                        for (size_t k = offset; k < dim; ++k) {
-                            int32_t diff = int32_t(query[k]) - int32_t(db_ptr[k]);
-                            tail_sum += int64_t(diff) * diff;
-                        }
-                        out_dists[j] += static_cast<float>(tail_sum);
+                for (size_t j = 0; j < BATCH_SIZE; ++j) {
+                    const unsigned char* db_ptr = static_cast<const unsigned char*>(db[j]);
+                    int64_t tail_sum = 0;
+                    for (size_t k = offset; k < dim; ++k) {
+                        int32_t diff = int32_t(query[k]) - int32_t(db_ptr[k]);
+                        tail_sum += int64_t(diff) * diff;
                     }
+                    out_dists[j] += static_cast<float>(tail_sum);
                 }
             }
         };
@@ -228,14 +224,12 @@ class L2Uint8_AVX2 {
             }
         }
         if constexpr (HasSimd) {
-            while (a + 15 < last) {
-                __m128i v1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
-                __m128i v2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b));
-                __m256i diff = _mm256_sub_epi16(_mm256_cvtepu8_epi16(v1), _mm256_cvtepu8_epi16(v2));
-                sum256_1 = _mm256_add_epi32(sum256_1, _mm256_madd_epi16(diff, diff));
-                a += 16;
-                b += 16;
-            }
+            __m128i v1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
+            __m128i v2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b));
+            __m256i diff = _mm256_sub_epi16(_mm256_cvtepu8_epi16(v1), _mm256_cvtepu8_epi16(v2));
+            sum256_1 = _mm256_add_epi32(sum256_1, _mm256_madd_epi16(diff, diff));
+            a += 16;
+            b += 16;
         }
 
         // Horizontal reduce of SIMD accumulators
@@ -262,56 +256,55 @@ class L2Uint8_AVX2 {
         const size_t dim = *((const size_t*)qty_ptr);
 
         auto batch_impl = [query, dim](const void* const* db, float* out_dists) DEGLIB_TARGET_AVX2 {
-            const size_t nc16 = dim / 16;
-            size_t offset = nc16 * 16;
-
+            size_t offset = 0;
             alignas(32) __m256i s[BATCH_SIZE];
             for (size_t j = 0; j < BATCH_SIZE; ++j) {
                 s[j] = _mm256_setzero_si256();
             }
 
-            for (size_t c = 0; c < nc16; ++c) {
-                size_t idx = c * 16;
-                __m128i q_raw = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&query[idx]));
-                __m256i q_vec = _mm256_cvtepu8_epi16(q_raw);
+            if constexpr (HasDualSimd) {
+                const size_t nc16 = dim / 16;
+                offset = nc16 * 16;
 
+                for (size_t c = 0; c < nc16; ++c) {
+                    size_t idx = c * 16;
+                    __m128i q_raw = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&query[idx]));
+                    __m256i q_vec = _mm256_cvtepu8_epi16(q_raw);
+
+                    for (size_t j = 0; j < BATCH_SIZE; ++j) {
+                        const unsigned char* db_ = static_cast<const unsigned char*>(db[j]);
+                        __m128i r_raw = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&db_[idx]));
+                        __m256i diff = _mm256_sub_epi16(q_vec, _mm256_cvtepu8_epi16(r_raw));
+                        s[j] = _mm256_add_epi32(s[j], _mm256_madd_epi16(diff, diff));
+                    }
+                }
+            }
+
+            if constexpr (HasSimd) {
+                __m128i q_raw = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&query[offset]));
+                __m256i q_vec = _mm256_cvtepu8_epi16(q_raw);
                 for (size_t j = 0; j < BATCH_SIZE; ++j) {
                     const unsigned char* db_ = static_cast<const unsigned char*>(db[j]);
-                    __m128i r_raw = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&db_[idx]));
+                    __m128i r_raw = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&db_[offset]));
                     __m256i diff = _mm256_sub_epi16(q_vec, _mm256_cvtepu8_epi16(r_raw));
                     s[j] = _mm256_add_epi32(s[j], _mm256_madd_epi16(diff, diff));
                 }
+                offset += 16;
             }
 
             for (size_t j = 0; j < BATCH_SIZE; ++j) {
                 out_dists[j] = static_cast<float>(uint8_l2_hsum256(s[j]));
             }
 
-            if constexpr (HasSimd) {
-                if (offset + 16 <= dim) {
-                    __m128i q_raw = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&query[offset]));
-                    __m256i q_vec = _mm256_cvtepu8_epi16(q_raw);
-                    for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                        const unsigned char* db_ = static_cast<const unsigned char*>(db[j]);
-                        __m128i r_raw = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&db_[offset]));
-                        __m256i diff = _mm256_sub_epi16(q_vec, _mm256_cvtepu8_epi16(r_raw));
-                        out_dists[j] += static_cast<float>(uint8_l2_hsum256(_mm256_madd_epi16(diff, diff)));
-                    }
-                    offset += 16;
-                }
-            }
-
             if constexpr (HasTail) {
-                if (offset < dim) {
-                    for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                        const unsigned char* db_ptr = static_cast<const unsigned char*>(db[j]);
-                        int64_t tail_sum = 0;
-                        for (size_t k = offset; k < dim; ++k) {
-                            int32_t diff = int32_t(query[k]) - int32_t(db_ptr[k]);
-                            tail_sum += int64_t(diff) * diff;
-                        }
-                        out_dists[j] += static_cast<float>(tail_sum);
+                for (size_t j = 0; j < BATCH_SIZE; ++j) {
+                    const unsigned char* db_ptr = static_cast<const unsigned char*>(db[j]);
+                    int64_t tail_sum = 0;
+                    for (size_t k = offset; k < dim; ++k) {
+                        int32_t diff = int32_t(query[k]) - int32_t(db_ptr[k]);
+                        tail_sum += int64_t(diff) * diff;
                     }
+                    out_dists[j] += static_cast<float>(tail_sum);
                 }
             }
         };
@@ -362,10 +355,13 @@ inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::Instruct
             else
                 return L2Uint8_AVX512<ResidualMode::SimdTail>{};
         } else {
-            if (dim % 64 == 0)
+            const size_t rem = dim % 64;
+            if (rem == 0)
                 return L2Uint8_AVX512<ResidualMode::DualOnly>{};
-            else if (dim % 32 == 0)
+            else if (rem == 32)
                 return L2Uint8_AVX512<ResidualMode::DualPlusSimd>{};
+            else if (rem < 32)
+                return L2Uint8_AVX512<ResidualMode::DualTail>{};
             else
                 return L2Uint8_AVX512<ResidualMode::Full>{};
         }
@@ -378,10 +374,13 @@ inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::Instruct
             else
                 return L2Uint8_AVX2<ResidualMode::SimdTail>{};
         } else {
-            if (dim % 32 == 0)
+            const size_t rem = dim % 32;
+            if (rem == 0)
                 return L2Uint8_AVX2<ResidualMode::DualOnly>{};
-            else if (dim % 16 == 0)
+            else if (rem == 16)
                 return L2Uint8_AVX2<ResidualMode::DualPlusSimd>{};
+            else if (rem < 16)
+                return L2Uint8_AVX2<ResidualMode::DualTail>{};
             else
                 return L2Uint8_AVX2<ResidualMode::Full>{};
         }

@@ -61,7 +61,7 @@ def test_presort_callback():
 
 @pytest.mark.parametrize(
     "invalid_metric",
-    [Metric.Uint8_L2, Metric.Uint8_InnerProduct, Metric.FP16_InnerProduct, Metric.EVP_InnerProduct],
+    [Metric.Uint8_L2, Metric.Uint8_InnerProduct, Metric.FP16_L2, Metric.FP16_InnerProduct, Metric.EVP_InnerProduct],
 )
 def test_presort_non_fp32_metric_raises(invalid_metric):
     np.random.seed(42)

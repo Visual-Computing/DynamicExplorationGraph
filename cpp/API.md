@@ -228,6 +228,8 @@ enum class Metric {
     FP32_L2,           ///< Single-precision Euclidean L2 distance
     FP32_InnerProduct, ///< Single-precision Inner Product distance (1 - <a, b>)
     Uint8_L2,          ///< Unsigned 8-bit integer L2 distance
+    Uint8_InnerProduct,///< Unsigned 8-bit integer Inner Product distance
+    FP16_L2,           ///< Half-precision FP16 Euclidean L2 distance
     FP16_InnerProduct, ///< Half-precision FP16 Inner Product distance
     EVP_InnerProduct   ///< Extreme Vector Quantization (1-bit / ternary) Inner Product
 };

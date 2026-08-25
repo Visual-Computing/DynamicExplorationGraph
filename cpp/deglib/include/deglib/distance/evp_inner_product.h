@@ -609,10 +609,13 @@ inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::Instruct
             else
                 return EvpInnerProduct_AVX512<ResidualMode::SimdTail>{};
         } else {
-            if (dim % 1024 == 0)
+            const size_t rem = dim % 1024;
+            if (rem == 0)
                 return EvpInnerProduct_AVX512<ResidualMode::DualOnly>{};
-            else if (dim % 512 == 0)
+            else if (rem == 512)
                 return EvpInnerProduct_AVX512<ResidualMode::DualPlusSimd>{};
+            else if (rem < 512)
+                return EvpInnerProduct_AVX512<ResidualMode::DualTail>{};
             else
                 return EvpInnerProduct_AVX512<ResidualMode::Full>{};
         }
@@ -625,10 +628,13 @@ inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::Instruct
             else
                 return EvpInnerProduct_AVX2<ResidualMode::SimdTail>{};
         } else {
-            if (dim % 512 == 0)
+            const size_t rem = dim % 512;
+            if (rem == 0)
                 return EvpInnerProduct_AVX2<ResidualMode::DualOnly>{};
-            else if (dim % 256 == 0)
+            else if (rem == 256)
                 return EvpInnerProduct_AVX2<ResidualMode::DualPlusSimd>{};
+            else if (rem < 256)
+                return EvpInnerProduct_AVX2<ResidualMode::DualTail>{};
             else
                 return EvpInnerProduct_AVX2<ResidualMode::Full>{};
         }
