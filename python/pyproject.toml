@@ -39,7 +39,9 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/Visual-Computing/DynamicExplorationGraph"
-
+Documentation = "https://dynamic-exploration-graph.readthedocs.io/"
+Repository = "https://github.com/Visual-Computing/DynamicExplorationGraph"
+Changelog = "https://github.com/Visual-Computing/DynamicExplorationGraph/blob/main/RELEASE_NOTES.md"
 [project.optional-dependencies]
 test = ["pytest>=8.0"]
 

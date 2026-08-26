@@ -8,9 +8,7 @@ Python bindings for the high-performance C++ Dynamic Exploration Graph (DEG) lib
 
 - [Installation](#installation)
   - [From PyPI](#from-pypi)
-  - [Development & Compiling from Source](#development--compiling-from-source)
-  - [Running Tests](#running-tests)
-  - [Building Packages](#building-packages)
+  - [Build from Source](#build-from-source)
 - [Quickstart & Examples](#quickstart--examples)
   - [Basic Usage](#basic-usage)
   - [Graph Types & Lifecycles](#graph-types--lifecycles)
@@ -18,14 +16,14 @@ Python bindings for the high-performance C++ Dynamic Exploration Graph (DEG) lib
   - [Incremental / Streaming Graph Construction](#incremental--streaming-graph-construction)
   - [Filtered Search & Candidate Reranking](#filtered-search--candidate-reranking)
   - [Exploratory Search & Graph Navigation](#exploratory-search--graph-navigation)
-  - [Graph Optimization & Pruning](#graph-optimization--pruning)
+  - [Graph Optimization, Quantization & Reranking Pipeline](#graph-optimization-quantization--reranking-pipeline)
 - [Concepts & Parameters](#concepts--parameters)
   - [OptimizationTarget](#optimizationtarget)
   - [Search Parameter `eps`](#search-parameter-eps)
   - [Supported Metrics & Data Types](#supported-metrics--data-types)
 - [Example Projects](#example-projects)
 - [API Reference](#api-reference)
-
+- [Development Setup](#development-setup)
 ---
 
 ## Installation
@@ -36,55 +34,14 @@ Python bindings for the high-performance C++ Dynamic Exploration Graph (DEG) lib
 pip install deglib
 ```
 
-### Development & Compiling from Source
+### Build from Source
 
-We recommend using [`uv`](https://docs.astral.sh/uv/) for fast virtual environment and dependency management.
+To build and install the package directly from the repository:
 
-**1. Create and Activate Virtual Environment**
 ```bash
 cd python/
-uv venv
-```
-
-**2. Install Build Dependencies & Copy Core C++ Files**
-```bash
-uv pip install setuptools==83.0.0 pybind11==3.0.4 build==1.5.0 wheel==0.48.0
-uv run python setup.py copy_build_files
-```
-
-**3. Install in Editable Mode**
-```bash
-uv pip install -e . --no-build-isolation --verbose
-```
-
-### Running Tests
-
-Run the test suite using `pytest`:
-
-```bash
-uv run pytest
-```
-
-### Code Formatting & Linting
-
-Format Python files using `ruff`:
-
-```bash
-uv run ruff format .
-```
-
-### Building Packages
-
-Build source distributions (`sdist`) and binary wheels:
-
-```bash
-uv run python -m build
-```
-
-To build manylinux/musllinux wheels for Linux distribution via PyPI (ensure `copy_build_files` has been executed first):
-```bash
-uv run python setup.py copy_build_files
-cibuildwheel --archs auto64 --output-dir dist
+python setup.py copy_build_files
+pip install .
 ```
 
 ---
@@ -229,18 +186,60 @@ explored_labels, distances = graph.explore(entry_external_label=105, k=10, eps=0
 
 ---
 
-### Graph Optimization & Pruning
+### Graph Optimization, Quantization & Reranking Pipeline
+
+A complete end-to-end pipeline demonstrating **FLAS pre-sorting**, **multithreaded graph building**, **RNG edge pruning**, **Int8 quantization**, **ReadOnlyGraph conversion**, and **exact FP32 candidate reranking**:
 
 ```python
-from deglib.optimization import prune_non_rng_edges, presort
+import numpy as np
+import deglib
+from deglib.optimization import presort, prune_non_rng_edges, quantize_int8
+from deglib.search import rerank
 
-# 1. 1D pre-sorting of vectors using FLAS for improved memory locality and build speed
-perm = presort(data, metric=deglib.Metric.FP32_L2, callback="progress")
+num_vectors, dims = 10_000, 128
+data = np.random.randn(num_vectors, dims).astype(np.float32)
+query = np.random.randn(1, dims).astype(np.float32)
+
+# 1. Pre-sort vectors using FLAS for improved memory locality and index construction speed
+perm = presort(data, metric=deglib.Metric.FP32_InnerProduct, callback="progress")
 sorted_data = data[perm]
 
-# 2. Remove redundant non-RNG edges after graph construction
-removed_edges = prune_non_rng_edges(graph)
-print(f"Removed {removed_edges} non-RNG edges.")
+# 2. Build exploration graph on unquantized/original data
+graph = deglib.builder.build_from_data(
+    sorted_data,
+    metric=deglib.Metric.FP32_InnerProduct,
+    edges_per_vertex=32,
+    callback="progress",
+)
+
+# 3. Prune redundant non-RNG edges to optimize graph topology
+pruned_count = prune_non_rng_edges(graph)
+print(f"Pruned {pruned_count} redundant edges.")
+
+# 4. Quantize dataset to Int8 for memory reduction and ultra-fast quantized graph search
+quant_int8_data = quantize_int8(sorted_data)
+int8_space = deglib.FloatSpace.create(dims, deglib.Metric.Int8_InnerProduct)
+
+# 5. Convert mutable graph to a compact ReadOnlyGraph equipped with the quantized features
+readonly_graph = graph.to_readonly(feature_space=int8_space, custom_features=quant_int8_data)
+
+# 6. Search candidates on the quantized ReadOnlyGraph (fetch 2x candidates for reranking)
+quant_query = quantize_int8(query)
+candidate_indices = readonly_graph.search(quant_query, k=20, eps=0.1, return_distances=False)
+
+# 7. Exact distance reranking of top candidates on original float32 data
+fp32_space = deglib.FloatSpace.create(dims, deglib.Metric.FP32_InnerProduct)
+final_top_indices, distances = rerank(
+    space=fp32_space,
+    queries=query,
+    candidate_indices=candidate_indices,
+    base_vectors=sorted_data,
+    k_top=10,
+    return_distances=True,
+)
+
+print("Top-10 nearest neighbor indices:", final_top_indices[0])
+print("Top-10 exact distances:", distances[0])
 ```
 
 ---
@@ -281,7 +280,36 @@ For a complete overview of all Python modules, classes, and function signatures,
 
 Ready-to-run example scripts with visual progress and evaluation are located in the [examples/](../examples/) directory:
 
-- [examples/knng/](../examples/knng/): k-NN graph construction and evaluation.
-- [examples/dynamic_data/](../examples/dynamic_data/): Dynamic streaming additions and deletions.
+- [examples/knng/](../examples/knng/): k-NN graph construction benchmark using EVP quantization and FP16 reranking (SISAP 2026 Challenge Task 1).
+- [examples/mips/](../examples/mips/): Maximum Inner Product Search (MIPS) benchmark using $(d+1)$-dimensional $L_2$ transformation, FLAS pre-sorting, and SIMD FP16 inner products (SISAP 2026 Challenge Task 2).
 - [examples/static_data/](../examples/static_data/): Static dataset indexing and ANNS benchmark.
-- [examples/mips/](../examples/mips/): Maximum Inner Product Search (MIPS).
+- [examples/vibe/](../examples/vibe/): VIBE benchmark for modern embedding datasets with scalar quantization and interactive Plotly visualizations.
+- [examples/dynamic_data/](../examples/dynamic_data/): Dynamic streaming additions and deletions.
+- [examples/sliding_window/](../examples/sliding_window/): Sliding window continuous update benchmark against CleANN.
+
+
+---
+
+## Development Setup
+
+If you want to contribute, modify C++ bindings, run tests, or build release packages:
+
+```bash
+# 1. Setup virtual environment and dependencies (using uv)
+cd python/
+uv venv
+uv pip install setuptools==83.0.0 pybind11==3.0.4 build==1.5.0 wheel==0.48.0
+uv run python setup.py copy_build_files
+
+# 2. Install in editable mode
+uv pip install -e . --no-build-isolation --verbose
+
+# 3. Run test suite
+uv run pytest
+
+# 4. Format code
+uv run ruff format .
+
+# 5. Build distribution packages (sdist and binary wheels)
+uv run python -m build
+```

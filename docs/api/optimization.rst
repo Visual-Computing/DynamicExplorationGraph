@@ -34,10 +34,13 @@ Maximum Inner Product Search (MIPS) can be mapped to Euclidean (L2) distance sea
 Quantization
 ------------
 
-Quantize floating point vectors into compact byte-packed representations.
+Quantize floating point vectors into compact byte-packed EVP or scalar INT8/UINT8 representations.
 
 .. autofunction:: deglib.optimization.quantize_batch
 
+.. autofunction:: deglib.optimization.quantize_int8
+
+.. autofunction:: deglib.optimization.quantize_uint8
 Example Usage
 -------------
 

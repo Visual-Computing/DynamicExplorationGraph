@@ -117,7 +117,7 @@ For full C++ build instructions, CMake presets, and architecture details, refer 
 DynamicExplorationGraph/
 ├── cpp/          # High-performance C++20 Header-Only library, CMake Presets, Tests & Benchmarks
 ├── python/       # Python Bindings (deglib), Pytest Suite & Wheel Build Configuration
-├── examples/     # Ready-to-run Python examples (knng, dynamic_data, static_data, mips)
+├── examples/     # Ready-to-run Python examples (knng, mips, static_data, vibe, dynamic_data, sliding_window)
 ├── java/         # Java implementation & Benchmarks
 └── docs/         # Sphinx / ReadTheDocs Documentation
 ```
@@ -136,7 +136,7 @@ DynamicExplorationGraph/
 
 ## Datasets & Pre-built Graphs
 
-The following standard datasets and pre-built graph files are supported in benchmarks and examples:
+The following standard datasets and pre-built graph files are supported in [benchmarks](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/main/cpp/bench) and [examples/](https://github.com/Visual-Computing/DynamicExplorationGraph/blob/main/examples) :
 
 | Dataset | Dimension | Base Vectors | Query Vectors | Pre-built Graph | Reference |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -147,7 +147,7 @@ The following standard datasets and pre-built graph files are supported in bench
 | **Enron** | 1,369 | 94,987 | 200 | *Auto-generated* | [CMU Enron](https://www.cs.cmu.edu/~enron/) |
 
 > [!NOTE]
-> When executing benchmarks or Python examples, datasets are automatically downloaded and prepared on first run.
+> When executing [benchmarks](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/main/cpp/bench) or Python [examples/](https://github.com/Visual-Computing/DynamicExplorationGraph/blob/main/examples) , datasets are automatically downloaded and prepared on first run.
 
 ---
 

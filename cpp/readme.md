@@ -177,7 +177,7 @@ Benchmark executables are generated in the build directory (`build/<preset>/benc
 
 #### Dataset Acquisition & Directory Structure
 
-Benchmarks automatically download the required `.tar.gz` archive, extract it, and generate any required ground truth files in the data root directory on first run.
+[Benchmarks](https://github.com/Visual-Computing/DynamicExplorationGraph/tree/main/cpp/bench) automatically download the required `.tar.gz` archive, extract it, and generate any required ground truth files in the data root directory on first run.
 
 When prepared, the directory hierarchy under `<data-root>` is structured as follows:
 
