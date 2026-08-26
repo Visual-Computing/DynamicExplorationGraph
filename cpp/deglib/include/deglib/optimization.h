@@ -7,6 +7,7 @@
 
 // Vector Quantization techniques
 #include "deglib/optimization/quantization/evp_quantize.h"
+#include "deglib/optimization/quantization/scalar_quantize.h"
 
 // Graph pruning techniques
 #include "deglib/optimization/pruning.h"
@@ -88,6 +89,37 @@ inline std::vector<std::byte> quantize_evp_batch(const float* data, size_t count
  */
 inline std::vector<std::byte> quantize_evp_batch(const uint16_t* data, size_t count, uint32_t dim, uint32_t non_zeros, size_t numThreads = 0) {
     return deglib::quantization::evp::quantize_batch(data, count, dim, non_zeros, numThreads);
+}
+
+/**
+ * Quantize FP32 vectors to symmetric signed INT8 [-127, 127] (ideal for InnerProduct / Cosine).
+ */
+inline std::vector<int8_t> quantize_int8_batch(
+    const float* data, size_t count, uint32_t dim, float drop_ratio = 0.0f, size_t numThreads = 0
+) {
+    return deglib::quantization::scalar::quantize_int8_symmetric(data, count, dim, drop_ratio, numThreads);
+}
+
+/**
+ * Quantize FP16 (uint16_t) vectors to symmetric signed INT8 [-127, 127].
+ */
+inline std::vector<int8_t> quantize_int8_batch(
+    const uint16_t* data, size_t count, uint32_t dim, float drop_ratio = 0.0f, size_t numThreads = 0
+) {
+    return deglib::quantization::scalar::quantize_int8_symmetric(data, count, dim, drop_ratio, numThreads);
+}
+
+/**
+ * Quantize FP32 vectors to unsigned UINT8 [0, 255] (ideal for L2).
+ */
+inline std::vector<uint8_t> quantize_uint8_batch(
+    const float* data, size_t count, uint32_t dim, bool per_dim = false, float drop_ratio = 0.0f, size_t numThreads = 0
+) {
+    if (per_dim) {
+        return deglib::quantization::scalar::quantize_uint8_affine_perdim(data, count, dim, drop_ratio, numThreads);
+    } else {
+        return deglib::quantization::scalar::quantize_uint8_affine(data, count, dim, drop_ratio, numThreads);
+    }
 }
 
 // ========================================================================

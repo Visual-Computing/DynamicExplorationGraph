@@ -142,6 +142,41 @@ def quantize_batch(vectors: np.ndarray, non_zeros: int, num_threads: int = 0) ->
     return deglib_cpp.optimization.quantize_batch(vectors, non_zeros, num_threads)
 
 
+
+def quantize_int8(
+    vectors: np.ndarray, drop_ratio: float = 0.0, num_threads: int = 0
+) -> np.ndarray:
+    """
+    Quantize float32 or float16 vectors into symmetric signed INT8 [-127, 127] format (ideal for Cosine / InnerProduct).
+
+    :param vectors: 2D float32 or float16 NumPy array of vectors.
+    :param drop_ratio: Optional percentile clipping factor for outliers (default 0.0).
+    :param num_threads: Number of worker threads (0 uses all available CPU cores).
+    :return: 2D int8 NumPy array of quantized vectors.
+    """
+    if vectors.dtype == np.float16:
+        vectors = vectors.view(np.uint16)
+    elif vectors.dtype != np.float32 and vectors.dtype != np.uint16:
+        vectors = np.ascontiguousarray(vectors, dtype=np.float32)
+    return deglib_cpp.optimization.quantize_int8(vectors, drop_ratio, num_threads)
+
+
+def quantize_uint8(
+    vectors: np.ndarray, per_dim: bool = False, drop_ratio: float = 0.0, num_threads: int = 0
+) -> np.ndarray:
+    """
+    Quantize float32 vectors into unsigned UINT8 [0, 255] format (ideal for L2).
+
+    :param vectors: 2D float32 NumPy array of vectors.
+    :param per_dim: Whether to calibrate min/max independently per dimension.
+    :param drop_ratio: Optional percentile clipping factor for outliers (default 0.0).
+    :param num_threads: Number of worker threads (0 uses all available CPU cores).
+    :return: 2D uint8 NumPy array of quantized vectors.
+    """
+    if vectors.dtype != np.float32:
+        vectors = np.ascontiguousarray(vectors, dtype=np.float32)
+    return deglib_cpp.optimization.quantize_uint8(vectors, per_dim, drop_ratio, num_threads)
+
 def mips_l2_transform_query(queries: np.ndarray) -> np.ndarray:
     """
     Pad query vectors from d-dimensional space to (d+1)-dimensional space
@@ -167,4 +202,6 @@ __all__ = [
     "mips_l2_transform",
     "mips_l2_transform_query",
     "quantize_batch",
+    "quantize_int8",
+    "quantize_uint8",
 ]

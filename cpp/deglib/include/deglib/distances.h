@@ -11,7 +11,7 @@
 #include "deglib/distance/residual_mode.h"
 
 // Modular distance headers - contain all distance function class definitions
-#include "deglib/distance/evp_inner_product.h"
+#include "deglib/distance/evp_ip.h"
 #include "deglib/distance/fp16_ip.h"
 #include "deglib/distance/fp16_l2.h"
 #include "deglib/distance/fp32_ip.h"

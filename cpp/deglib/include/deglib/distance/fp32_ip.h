@@ -346,7 +346,7 @@ inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::Instruct
     const auto target = deglib::cpu::resolve_instruction_set(instruction);
 
 #if defined(DEGLIB_X86)
-    if (target == deglib::cpu::InstructionSet::AVX512) {
+    if (target == deglib::cpu::InstructionSet::AVX512 || target == deglib::cpu::InstructionSet::AVX512_VNNI) {
         if (dim < 16) {
             return InnerProductFloat_AVX512<ResidualMode::TailOnly>{};
         } else if (dim < 32) {
@@ -365,7 +365,7 @@ inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::Instruct
             else
                 return InnerProductFloat_AVX512<ResidualMode::Full>{};
         }
-    } else if (target == deglib::cpu::InstructionSet::AVX2) {
+    } else if (target == deglib::cpu::InstructionSet::AVX2 || target == deglib::cpu::InstructionSet::AVX2_VNNI) {
         if (dim < 8) {
             return InnerProductFloat_AVX2<ResidualMode::TailOnly>{};
         } else if (dim < 16) {

@@ -56,6 +56,7 @@ add_deglib_test(test_fp16_inner_product src/unit/distance/test_fp16_inner_produc
 add_deglib_test(test_internal_graph src/unit/graph/test_internal_graph.cpp)
 add_deglib_test(test_search src/unit/test_search.cpp)
 add_deglib_test(test_evp_quantize src/unit/optimization/quantization/test_evp_quantize.cpp)
+add_deglib_test(test_scalar_quantize src/unit/optimization/quantization/test_scalar_quantize.cpp)
 add_deglib_test(test_concurrent src/unit/test_concurrent.cpp)
 add_deglib_test(test_filter src/unit/test_filter.cpp)
 add_deglib_test(test_visited_list_pool src/unit/graph/test_visited_list_pool.cpp)

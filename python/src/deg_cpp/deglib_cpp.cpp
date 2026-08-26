@@ -775,6 +775,79 @@ py::array_t<uint8_t> quantize_batch_wrapper(py::array vectors, uint32_t non_zero
 }
 
 // ============================================================================
+// Scalar Quantization (SQ8 / Int8 / Uint8) Bindings
+// ============================================================================
+
+py::array_t<int8_t> quantize_int8_batch_wrapper(
+    py::array vectors,
+    float drop_ratio,
+    size_t num_threads
+) {
+    py::buffer_info buf = vectors.request();
+    if (buf.ndim != 2) {
+        throw std::invalid_argument("vectors must be a 2D array");
+    }
+    size_t count = buf.shape[0];
+    uint32_t dim = static_cast<uint32_t>(buf.shape[1]);
+
+    std::vector<int8_t> result;
+    if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+        result = deglib::optimization::quantize_int8_batch(
+            static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio, num_threads
+        );
+    } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+        result = deglib::optimization::quantize_int8_batch(
+            static_cast<const float*>(buf.ptr), count, dim, drop_ratio, num_threads
+        );
+    } else {
+        throw std::invalid_argument(
+            std::format(
+                "vectors must be float32 (format 'f') or FP16/uint16 "
+                "(format 'e'/'H'), got format '{}' with itemsize {}",
+                buf.format, buf.itemsize
+            )
+        );
+    }
+
+    py::array_t<int8_t> output({count, static_cast<size_t>(dim)});
+    py::buffer_info out_buf = output.request();
+    std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(int8_t));
+    return output;
+}
+
+py::array_t<uint8_t> quantize_uint8_batch_wrapper(
+    py::array vectors,
+    bool per_dim,
+    float drop_ratio,
+    size_t num_threads
+) {
+    py::buffer_info buf = vectors.request();
+    if (buf.ndim != 2) {
+        throw std::invalid_argument("vectors must be a 2D array");
+    }
+    size_t count = buf.shape[0];
+    uint32_t dim = static_cast<uint32_t>(buf.shape[1]);
+
+    if (!(buf.itemsize == 4 && (buf.format == "f" || buf.format == "float"))) {
+        throw std::invalid_argument(
+            std::format(
+                "vectors must be float32 (format 'f'), got format '{}' with itemsize {}",
+                buf.format, buf.itemsize
+            )
+        );
+    }
+
+    std::vector<uint8_t> result = deglib::optimization::quantize_uint8_batch(
+        static_cast<const float*>(buf.ptr), count, dim, per_dim, drop_ratio, num_threads
+    );
+
+    py::array_t<uint8_t> output({count, static_cast<size_t>(dim)});
+    py::buffer_info out_buf = output.request();
+    std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(uint8_t));
+    return output;
+}
+
+// ============================================================================
 // FP16 Conversion Bindings
 // ============================================================================
 
@@ -1134,9 +1207,18 @@ PYBIND11_MODULE(deglib_cpp, m) {
     distances_module.def("fp16_to_floats", &fp16_to_floats_wrapper, "Convert FP16 (uint16_t) array to float32");
 
     // optimization submodule
-    py::module_ optimization_module = m.def_submodule("optimization", "Graph optimization and EVP quantization utilities");
+    py::module_ optimization_module = m.def_submodule("optimization", "Graph optimization and quantization utilities");
     optimization_module.def("quantize_batch", &quantize_batch_wrapper, "Quantize float32 or float16/uint16 vectors to byte-packed EVP format");
-
+    optimization_module.def(
+        "quantize_int8", &quantize_int8_batch_wrapper,
+        py::arg("vectors"), py::arg("drop_ratio") = 0.0f, py::arg("num_threads") = 0,
+        "Quantize float32 or float16 vectors to symmetric signed INT8 [-127, 127] format"
+    );
+    optimization_module.def(
+        "quantize_uint8", &quantize_uint8_batch_wrapper,
+        py::arg("vectors"), py::arg("per_dim") = false, py::arg("drop_ratio") = 0.0f, py::arg("num_threads") = 0,
+        "Quantize float32 vectors to unsigned UINT8 [0, 255] format"
+    );
     // search submodule
     py::module_ search_module = m.def_submodule("search", "Search utilities including Filter");
     py::class_<deglib::search::Filter>(search_module, "Filter").def(py::init<const int*, size_t, size_t, size_t>());

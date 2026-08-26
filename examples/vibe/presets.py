@@ -24,11 +24,10 @@ def load_vibe_config(config_path: Path | None = None) -> Dict[str, Any]:
         "opt_target_list": args.get("opt_target", ["HighLID"]),
         "improve_k_list": args.get("improve_k", [0]),
         "improve_eps_list": args.get("improve_eps", [0.0]),
-        "use_flas_list": args.get("use_flas", [False]),
+        "prune_non_rng_list": args.get("prune_non_rng", [False]),
         "threads_list": args.get("threads", [1]),
         "search_eps_list": query_args.get("search_eps", [0.0, 0.05, 0.1, 0.2, 0.3, 0.5, 1.0]),
     }
-
 
 import itertools
 
@@ -51,15 +50,15 @@ def get_config_grid_presets(dataset_key: str) -> List[Dict[str, Any]]:
             resolved_opt_targets.append(target_name)
 
     grid = []
-    # Cartesian product: iterate over opt_target first, then all k and flas variants
-    for opt_target, k, extend_k, build_eps, imp_k, imp_eps, use_flas in itertools.product(
+    # Cartesian product: iterate over opt_target first, then all k, improvement and pruning variants
+    for opt_target, k, extend_k, build_eps, imp_k, imp_eps, prune_non_rng in itertools.product(
         resolved_opt_targets,
         cfg["k_list"],
         cfg["extend_k_list"],
         cfg["build_eps_list"],
         cfg["improve_k_list"],
         cfg["improve_eps_list"],
-        cfg["use_flas_list"],
+        cfg["prune_non_rng_list"],
     ):
         grid.append(
             {
@@ -69,7 +68,7 @@ def get_config_grid_presets(dataset_key: str) -> List[Dict[str, Any]]:
                 "optimization_target": opt_target,
                 "improve_k": imp_k,
                 "improve_eps": imp_eps,
-                "use_flas": use_flas,
+                "prune_non_rng": prune_non_rng,
                 "anns_k": 100,
                 "anns_repeat": 1,
                 "search_eps_list": cfg["search_eps_list"],

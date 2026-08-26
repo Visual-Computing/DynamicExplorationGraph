@@ -1,6 +1,6 @@
 #include "common/test_helpers.h"
 #include "deglib/builder.h"
-#include "deglib/distance/evp_inner_product.h"
+#include "deglib/distance/evp_ip.h"
 #include "deglib/graph/sizebounded_graph.h"
 #include "deglib/optimization/quantization/evp_quantize.h"
 #include "gtest/gtest.h"
