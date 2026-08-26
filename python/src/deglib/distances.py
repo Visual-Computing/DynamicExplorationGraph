@@ -21,6 +21,8 @@ class Metric(enum.IntEnum):
     - ``FP16_L2``: Euclidean (L2) distance for 16-bit half-precision floating point vectors.
     - ``FP16_InnerProduct``: Inner product distance for 16-bit half-precision floating point vectors.
     - ``EVP_InnerProduct``: Inner product distance for quantized byte-packed (EVP) vectors.
+    - ``Int8_InnerProduct``: Inner product distance for 8-bit signed integer vectors.
+    - ``Int8_L2``: Euclidean (L2) distance for 8-bit signed integer vectors.
     """
 
     FP32_L2 = cpp_distances.Metric.FP32_L2
@@ -30,7 +32,8 @@ class Metric(enum.IntEnum):
     FP16_L2 = cpp_distances.Metric.FP16_L2
     FP16_InnerProduct = cpp_distances.Metric.FP16_InnerProduct
     EVP_InnerProduct = cpp_distances.Metric.EVP_InnerProduct
-
+    Int8_InnerProduct = cpp_distances.Metric.Int8_InnerProduct
+    Int8_L2 = cpp_distances.Metric.Int8_L2
     def get_dtype(self):
         """
         Return the corresponding NumPy dtype for feature data with this metric.
@@ -39,6 +42,8 @@ class Metric(enum.IntEnum):
             return np.float32
         elif self in (Metric.Uint8_L2, Metric.Uint8_InnerProduct):
             return np.uint8
+        elif self in (Metric.Int8_InnerProduct, Metric.Int8_L2):
+            return np.int8
         elif self in (Metric.FP16_L2, Metric.FP16_InnerProduct):
             return np.uint16
         elif self == Metric.EVP_InnerProduct:

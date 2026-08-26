@@ -231,7 +231,9 @@ enum class Metric {
     Uint8_InnerProduct,///< Unsigned 8-bit integer Inner Product distance
     FP16_L2,           ///< Half-precision FP16 Euclidean L2 distance
     FP16_InnerProduct, ///< Half-precision FP16 Inner Product distance
-    EVP_InnerProduct   ///< Extreme Vector Quantization (1-bit / ternary) Inner Product
+    EVP_InnerProduct,  ///< Extreme Vector Quantization (1-bit / ternary) Inner Product
+    Int8_InnerProduct, ///< Signed 8-bit integer Inner Product distance
+    Int8_L2            ///< Signed 8-bit integer L2 distance
 };
 
 /// Represents a vector feature space (dimensionality, metric, byte layout, and SIMD kernel)

@@ -28,16 +28,17 @@ def get_ranking(features: np.ndarray, graph: deglib.DynamicExplorationGraph, que
     """
     query = query.reshape(1, graph.get_feature_space().dim())
 
-    if features.dtype == np.uint8:
+
+    if features.dtype in (np.uint8, np.int8):
         features = features.astype(np.float32)
-    if query.dtype == np.uint8:
+    if query.dtype in (np.uint8, np.int8):
         query = query.astype(np.float32)
 
-    if graph.get_feature_space().metric() in (Metric.FP32_L2, Metric.Uint8_L2):
+    if graph.get_feature_space().metric() in (Metric.FP32_L2, Metric.Uint8_L2, Metric.Int8_L2):
         distances = np.sum(np.square(features - query), axis=1)
     elif graph.get_feature_space().metric() == Metric.FP32_InnerProduct:
         distances = 1.0 - np.dot(features, query.T).flatten()
-    elif graph.get_feature_space().metric() == Metric.Uint8_InnerProduct:
+    elif graph.get_feature_space().metric() in (Metric.Uint8_InnerProduct, Metric.Int8_InnerProduct):
         distances = -np.dot(features, query.T).flatten()
     else:
         raise ValueError(f"unknown metric: {graph.get_feature_space().metric()}")
@@ -83,6 +84,12 @@ class Configuration:
         elif metric == Metric.Uint8_InnerProduct:
             data = np.random.randint(0, 256, size=(samples, dims)).astype(np.uint8)
             query = np.random.randint(0, 256, size=(dims,)).astype(np.uint8)
+        elif metric == Metric.Int8_L2:
+            data = np.random.randint(-128, 128, size=(samples, dims)).astype(np.int8)
+            query = np.random.randint(-128, 128, size=(dims,)).astype(np.int8)
+        elif metric == Metric.Int8_InnerProduct:
+            data = np.random.randint(-128, 128, size=(samples, dims)).astype(np.int8)
+            query = np.random.randint(-128, 128, size=(dims,)).astype(np.int8)
         else:
             raise ValueError(f"Unsupported metric: {metric}")
 
@@ -114,8 +121,10 @@ class Configuration:
 configurations = [
     *Configuration.generate(100, 128, Metric.FP32_L2, 10),
     *Configuration.generate(100, 128, Metric.Uint8_L2, 10),
+    *Configuration.generate(100, 128, Metric.Int8_L2, 10),
     *Configuration.generate(100, 128, Metric.FP32_InnerProduct, 10),
     *Configuration.generate(100, 128, Metric.Uint8_InnerProduct, 10),
+    *Configuration.generate(100, 128, Metric.Int8_InnerProduct, 10),
 ]
 
 large_configurations = [

@@ -1111,7 +1111,9 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .value("Uint8_InnerProduct", deglib::distances::MetricType::Uint8_InnerProduct)
         .value("FP16_L2", deglib::distances::MetricType::FP16_L2)
         .value("FP16_InnerProduct", deglib::distances::MetricType::FP16_InnerProduct)
-        .value("EVP_InnerProduct", deglib::distances::MetricType::EVP_InnerProduct);
+        .value("EVP_InnerProduct", deglib::distances::MetricType::EVP_InnerProduct)
+        .value("Int8_InnerProduct", deglib::distances::MetricType::Int8_InnerProduct)
+        .value("Int8_L2", deglib::distances::MetricType::Int8_L2);
 
     py::class_<deglib::distances::FloatSpace>(distances_module, "FloatSpace")
         .def(

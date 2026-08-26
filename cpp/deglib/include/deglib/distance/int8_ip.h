@@ -4,6 +4,7 @@
 #include "deglib/distance/residual_mode.h"
 
 #include <cstdint>
+#include <cstring>
 #include <stdexcept>
 #include <variant>
 

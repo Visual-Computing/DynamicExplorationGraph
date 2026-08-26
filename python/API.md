@@ -200,6 +200,8 @@ class Metric:
     FP16_L2            # Half-precision FP16 Euclidean L2 distance (dtype: np.uint16)
     FP16_InnerProduct  # Half-precision FP16 Inner Product (dtype: np.uint16)
     EVP_InnerProduct   # Extreme Vector Quantization binary/ternary IP (dtype: np.uint8)
+    Int8_InnerProduct  # 8-bit signed integer Inner Product (dtype: np.int8)
+    Int8_L2            # 8-bit signed integer L2 distance (dtype: np.int8)
 
     get_dtype() -> np.dtype # Expected numpy data type for feature vectors
 

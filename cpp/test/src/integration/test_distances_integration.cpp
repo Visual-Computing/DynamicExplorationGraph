@@ -575,3 +575,96 @@ TEST(DeglibDistanceIntegration, DistanceRecall_EVP) {
         return deglib::distances::evp_ip::EvpInnerProduct::compare(a, b, qty);
     });
 }
+// ---------------------------------------------------------------------------
+// L2 Int8 distance recall tests
+// ---------------------------------------------------------------------------
+
+TEST(DeglibDistanceIntegration, DistanceRecall_L2Int8_AVX512_Modes) {
+#if defined(DEGLIB_X86)
+    if (!deglib::cpu::has_avx512()) {
+        GTEST_SKIP() << "AVX512 not available on this CPU";
+    }
+    const size_t base_count = 10000;
+    const size_t query_count = 100;
+    const uint32_t k = 10;
+
+    auto test_mode = [&](const char* name, size_t dim, auto dist_fn) {
+        std::vector<int8_t> base_data, query_data;
+        generate_synthetic_clustered_dataset_int8(base_count, dim, base_data, query_data, query_count, 1000);
+        auto gt_scalar = compute_groundtruth_int8_l2(base_data, base_count, query_data, query_count, dim, k);
+        check_distance_recall(name, base_data, base_count, query_data, query_count, dim, k, gt_scalar, dist_fn);
+    };
+
+    test_mode("L2Int8_AVX512_Full", 127, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::int8_l2::L2Int8_AVX512<ResidualMode::Full>::compare(a, b, qty);
+    });
+    test_mode("L2Int8_AVX512_DualOnly", 128, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::int8_l2::L2Int8_AVX512<ResidualMode::DualOnly>::compare(a, b, qty);
+    });
+    test_mode("L2Int8_AVX512_DualPlusSimd", 96, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::int8_l2::L2Int8_AVX512<ResidualMode::DualPlusSimd>::compare(a, b, qty);
+    });
+    test_mode("L2Int8_AVX512_SimdOnly", 32, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::int8_l2::L2Int8_AVX512<ResidualMode::SimdOnly>::compare(a, b, qty);
+    });
+    test_mode("L2Int8_AVX512_TailOnly", 15, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::int8_l2::L2Int8_AVX512<ResidualMode::TailOnly>::compare(a, b, qty);
+    });
+#else
+    GTEST_SKIP() << "AVX512 not available on this platform";
+#endif
+}
+
+TEST(DeglibDistanceIntegration, DistanceRecall_L2Int8_AVX2_Modes) {
+#if defined(DEGLIB_X86)
+    if (!deglib::cpu::has_avx2()) {
+        GTEST_SKIP() << "AVX2 not available on this CPU";
+    }
+    const size_t base_count = 10000;
+    const size_t query_count = 100;
+    const uint32_t k = 10;
+
+    auto test_mode = [&](const char* name, size_t dim, auto dist_fn) {
+        std::vector<int8_t> base_data, query_data;
+        generate_synthetic_clustered_dataset_int8(base_count, dim, base_data, query_data, query_count, 1000);
+        auto gt_scalar = compute_groundtruth_int8_l2(base_data, base_count, query_data, query_count, dim, k);
+        check_distance_recall(name, base_data, base_count, query_data, query_count, dim, k, gt_scalar, dist_fn);
+    };
+
+    test_mode("L2Int8_AVX2_Full", 127, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::int8_l2::L2Int8_AVX2<ResidualMode::Full>::compare(a, b, qty);
+    });
+    test_mode("L2Int8_AVX2_DualOnly", 32, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::int8_l2::L2Int8_AVX2<ResidualMode::DualOnly>::compare(a, b, qty);
+    });
+    test_mode("L2Int8_AVX2_DualPlusSimd", 48, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::int8_l2::L2Int8_AVX2<ResidualMode::DualPlusSimd>::compare(a, b, qty);
+    });
+    test_mode("L2Int8_AVX2_SimdOnly", 16, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::int8_l2::L2Int8_AVX2<ResidualMode::SimdOnly>::compare(a, b, qty);
+    });
+    test_mode("L2Int8_AVX2_TailOnly", 15, [](const void* a, const void* b, const void* qty) {
+        return deglib::distances::int8_l2::L2Int8_AVX2<ResidualMode::TailOnly>::compare(a, b, qty);
+    });
+#else
+    GTEST_SKIP() << "AVX2 not available on this platform";
+#endif
+}
+
+TEST(DeglibDistanceIntegration, DistanceRecall_L2Int8) {
+    const size_t dim = 128;
+    const size_t base_count = 10000;
+    const size_t query_count = 100;
+    const uint32_t k = 10;
+
+    std::vector<int8_t> base_data;
+    std::vector<int8_t> query_data;
+    generate_synthetic_clustered_dataset_int8(base_count, dim, base_data, query_data, query_count, 1000);
+
+    auto gt_scalar = compute_groundtruth_int8_l2(base_data, base_count, query_data, query_count, dim, k);
+
+    check_distance_recall(
+        "L2Int8", base_data, base_count, query_data, query_count, dim, k, gt_scalar,
+        [](const void* a, const void* b, const void* qty) { return deglib::distances::int8_l2::L2Int8::compare(a, b, qty); }
+    );
+}

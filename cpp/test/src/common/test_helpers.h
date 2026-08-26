@@ -358,6 +358,20 @@ inline static std::vector<std::vector<uint32_t>> compute_groundtruth_int8_ip(
         return deglib::distances::int8_ip::InnerProductInt8::compare(q_vec, b_vec, qty_ptr);
     });
 }
+// Compute exact brute-force L2 groundtruth for int8 vectors.
+// Uses the scalar L2Int8::compare() from deglib.
+inline static std::vector<std::vector<uint32_t>> compute_groundtruth_int8_l2(
+    const std::vector<int8_t>& base,
+    size_t base_count,
+    const std::vector<int8_t>& query,
+    size_t query_count,
+    size_t dim,
+    uint32_t k
+) {
+    return compute_groundtruth<int8_t>(base, base_count, query, query_count, dim, k, [](const int8_t* q_vec, const int8_t* b_vec, const void* qty_ptr) {
+        return deglib::distances::int8_l2::L2Int8::compare(q_vec, b_vec, qty_ptr);
+    });
+}
 
 // Compute exact brute-force EVP InnerProduct groundtruth for top-K neighbors.
 // Uses the scalar EvpInnerProduct::compare() from deglib to ensure

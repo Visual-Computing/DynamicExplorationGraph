@@ -4,6 +4,7 @@
 #include "deglib/distance/uint8.h"
 
 #include <stdexcept>
+#include <cstring>
 #include <variant>
 
 namespace deglib::distances::uint8_ip {
