@@ -127,6 +127,43 @@ inline static void generate_synthetic_clustered_dataset_uint8(
     }
 }
 
+// Generate cross-platform deterministic clustered int8 dataset.
+// Generates float vectors using generate_synthetic_clustered_dataset(),
+// then quantizes them to int8 [-128, 127] using deterministic linear mapping.
+inline static void generate_synthetic_clustered_dataset_int8(
+    size_t count,
+    size_t dim,
+    std::vector<int8_t>& base,
+    std::vector<int8_t>& query,
+    size_t query_count,
+    size_t num_clusters = 20
+) {
+    std::vector<float> base_float;
+    std::vector<float> query_float;
+    generate_synthetic_clustered_dataset(count, dim, base_float, query_float, query_count, num_clusters);
+
+    base.resize(count * dim);
+    query.resize(query_count * dim);
+
+    // Centroids are [-1000, 1000] + noise [-100, 100] -> range approx [-1100, 1100].
+    // Map [-1100, 1100] to [-128, 127] deterministically.
+    constexpr float min_val = -1100.0f;
+    constexpr float max_val = 1100.0f;
+    constexpr float scale = 255.0f / (max_val - min_val);
+
+    for (size_t i = 0; i < base_float.size(); ++i) {
+        float normalized = (base_float[i] - min_val) * scale - 128.0f;
+        int val = static_cast<int>(std::round(normalized));
+        base[i] = static_cast<int8_t>(std::clamp(val, -128, 127));
+    }
+
+    for (size_t q = 0; q < query_float.size(); ++q) {
+        float normalized = (query_float[q] - min_val) * scale - 128.0f;
+        int val = static_cast<int>(std::round(normalized));
+        query[q] = static_cast<int8_t>(std::clamp(val, -128, 127));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Dataset generation (FP16, for FP16InnerProduct)
 // ---------------------------------------------------------------------------
@@ -304,6 +341,21 @@ inline static std::vector<std::vector<uint32_t>> compute_groundtruth_uint8_ip(
 ) {
     return compute_groundtruth<uint8_t>(base, base_count, query, query_count, dim, k, [](const uint8_t* q_vec, const uint8_t* b_vec, const void* qty_ptr) {
         return deglib::distances::uint8_ip::InnerProductUint8::compare(q_vec, b_vec, qty_ptr);
+    });
+}
+
+// Compute exact brute-force InnerProduct groundtruth for int8 vectors.
+// Uses the scalar InnerProductInt8::compare() from deglib.
+inline static std::vector<std::vector<uint32_t>> compute_groundtruth_int8_ip(
+    const std::vector<int8_t>& base,
+    size_t base_count,
+    const std::vector<int8_t>& query,
+    size_t query_count,
+    size_t dim,
+    uint32_t k
+) {
+    return compute_groundtruth<int8_t>(base, base_count, query, query_count, dim, k, [](const int8_t* q_vec, const int8_t* b_vec, const void* qty_ptr) {
+        return deglib::distances::int8_ip::InnerProductInt8::compare(q_vec, b_vec, qty_ptr);
     });
 }
 

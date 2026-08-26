@@ -18,10 +18,11 @@
 #include "deglib/distance/fp32_l2.h"
 #include "deglib/distance/uint8_ip.h"
 #include "deglib/distance/uint8_l2.h"
+#include "deglib/distance/int8_ip.h"
 
 namespace deglib::distances {
 
-enum class MetricDataType : uint8_t { FP32 = 0x00, Uint8 = 0x10, FP16 = 0x20, EVP = 0x30 };
+enum class MetricDataType : uint8_t { FP32 = 0x00, Uint8 = 0x10, FP16 = 0x20, EVP = 0x30, Int8 = 0x40 };
 
 enum class MetricDistanceKind : uint8_t { L2 = 0x01, InnerProduct = 0x02 };
 
@@ -32,7 +33,8 @@ enum class MetricType : uint8_t {
     Uint8_InnerProduct = static_cast<uint8_t>(MetricDataType::Uint8) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),  // 0x12
     FP16_L2 = static_cast<uint8_t>(MetricDataType::FP16) | static_cast<uint8_t>(MetricDistanceKind::L2),                        // 0x21
     FP16_InnerProduct = static_cast<uint8_t>(MetricDataType::FP16) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),    // 0x22
-    EVP_InnerProduct = static_cast<uint8_t>(MetricDataType::EVP) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct)       // 0x32
+    EVP_InnerProduct = static_cast<uint8_t>(MetricDataType::EVP) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),       // 0x32
+    Int8_InnerProduct = static_cast<uint8_t>(MetricDataType::Int8) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct)     // 0x42
 };
 
 /**
@@ -54,6 +56,7 @@ struct Metric {
     static constexpr MetricType FP16_L2 = MetricType::FP16_L2;
     static constexpr MetricType FP16_InnerProduct = MetricType::FP16_InnerProduct;
     static constexpr MetricType EVP_InnerProduct = MetricType::EVP_InnerProduct;
+    static constexpr MetricType Int8_InnerProduct = MetricType::Int8_InnerProduct;
 
     constexpr MetricDataType get_data_type() const { return static_cast<MetricDataType>(static_cast<uint8_t>(value) & 0xF0); }
 
@@ -69,8 +72,9 @@ struct Metric {
                 return "FP16";
             case MetricDataType::EVP:
                 return "EVP";
+            case MetricDataType::Int8:
+                return "Int8";
         }
-        return "Unknown";
     }
 
     constexpr const char* get_distance_name() const {
@@ -134,7 +138,8 @@ using DistanceVariant = variant_concat_t<
     deglib::distances::fp16_ip::DistanceVariant,
     deglib::distances::uint8_l2::DistanceVariant,
     deglib::distances::uint8_ip::DistanceVariant,
-    deglib::distances::evp_ip::DistanceVariant>;
+    deglib::distances::evp_ip::DistanceVariant,
+    deglib::distances::int8_ip::DistanceVariant>;
 
 // Compile-time verification that every type in DistanceVariant fulfills the DistanceFunction concept
 static_assert(
@@ -215,6 +220,8 @@ class FloatSpace {
                 return to_flat_variant(deglib::distances::uint8_ip::select_dist(dim, instruction));
             case Metric::EVP_InnerProduct:
                 return to_flat_variant(deglib::distances::evp_ip::select_dist(dim, instruction));
+            case Metric::Int8_InnerProduct:
+                return to_flat_variant(deglib::distances::int8_ip::select_dist(dim, instruction));
             default:
                 throw std::invalid_argument("Unsupported metric type in select_dist_variant");
         }
@@ -230,6 +237,8 @@ class FloatSpace {
                 return dim * sizeof(uint16_t);
             case MetricDataType::EVP:
                 return 2 * (dim / 8);  // EVP: [ones (dim/8 bytes)][negs (dim/8 bytes)]
+            case MetricDataType::Int8:
+                return dim * sizeof(int8_t);
             default:
                 throw std::invalid_argument("Unsupported metric data type in calculate_data_size");
         }

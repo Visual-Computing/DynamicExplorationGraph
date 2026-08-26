@@ -8,11 +8,21 @@
 #include <iostream>
 #include <vector>
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#elif defined(__linux__)
+#include <pthread.h>
+#include <sched.h>
+#endif
 // ============================================================================
 // Distance Calculation Performance Regression Benchmarks
 // ============================================================================
 // Measures throughput (Distance Comparisons/sec, Element Throughput, QPS, Latency)
 // for all distance metrics and instruction sets:
+//   - Int8_InnerProduct (Scalar, AVX2, AVX2_VNNI, AVX512, AVX512_VNNI)
 //   - FP32_L2 (Scalar, AVX2, AVX512)
 //   - FP32_InnerProduct (Scalar, AVX2, AVX512)
 //   - FP16_L2 (Scalar, AVX2, AVX512)
@@ -20,12 +30,25 @@
 //   - Uint8_L2 (Scalar, AVX2, AVX512)
 //   - Uint8_InnerProduct (Scalar, AVX2, AVX512)
 //   - EVP_InnerProduct (Scalar, AVX2, AVX512)
-//
 // These benchmarks detect performance regressions in raw distance kernels.
 // Correctness is verified in unit tests.
 // ============================================================================
 
 namespace {
+
+inline void pin_current_thread_to_core(int core_id = 0) {
+#if defined(_WIN32)
+    HANDLE thread = GetCurrentThread();
+    DWORD_PTR mask = static_cast<DWORD_PTR>(1) << (core_id % (sizeof(DWORD_PTR) * 8));
+    SetThreadAffinityMask(thread, mask);
+    SetThreadPriority(thread, THREAD_PRIORITY_HIGHEST);
+#elif defined(__linux__)
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(core_id % CPU_SETSIZE, &cpuset);
+    pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+#endif
+}
 
 struct DistBenchmarkResult {
     double qps;        // Queries / sec (single compare)
@@ -44,6 +67,7 @@ inline DistBenchmarkResult benchmark_distance_metric(
     size_t dim,
     size_t iterations
 ) {
+    pin_current_thread_to_core(0);
     const deglib::distances::FloatSpace space(dim, metric, instruction);
     const auto dist_func = space.get_dist_func();
     const auto batch_dist_func = space.get_batch_dist_func();
@@ -119,6 +143,53 @@ inline DistBenchmarkResult benchmark_distance_metric(
 // ---------------------------------------------------------------------------
 // Main Regression Test Suites for Distance Kernels
 // ---------------------------------------------------------------------------
+
+TEST(DistancesRegression, Int8_InnerProduct_Throughput) {
+    const size_t base_count = 10000;
+    const size_t query_count = 100;
+    const size_t iterations_scalar = 5;
+    const size_t iterations_simd = 50;
+    std::vector<size_t> dims = {64, 128, 200, 256, 384, 512, 640, 768, 1024};
+
+    std::cout << "\n============= Int8 InnerProduct Distance Throughput (10k Base, 100 Queries) =============\n";
+    for (size_t dim : dims) {
+        std::vector<int8_t> base_data, query_data;
+        generate_synthetic_clustered_dataset_int8(base_count, dim, base_data, query_data, query_count, 1000);
+
+        benchmark_distance_metric(
+            "Int8_IP (Scalar)", deglib::distances::Metric::Int8_InnerProduct, deglib::cpu::InstructionSet::Scalar, base_data, base_count, query_data,
+            query_count, dim, iterations_scalar
+        );
+
+#if defined(DEGLIB_X86)
+        if (deglib::cpu::has_avx2()) {
+            benchmark_distance_metric(
+                "Int8_IP (AVX2)", deglib::distances::Metric::Int8_InnerProduct, deglib::cpu::InstructionSet::AVX2, base_data, base_count, query_data,
+                query_count, dim, iterations_simd
+            );
+        }
+        if (deglib::cpu::has_avx_vnni()) {
+            benchmark_distance_metric(
+                "Int8_IP (AVX2_VNNI)", deglib::distances::Metric::Int8_InnerProduct, deglib::cpu::InstructionSet::AVX2_VNNI, base_data, base_count, query_data,
+                query_count, dim, iterations_simd
+            );
+        }
+        if (deglib::cpu::has_avx512()) {
+            benchmark_distance_metric(
+                "Int8_IP (AVX512)", deglib::distances::Metric::Int8_InnerProduct, deglib::cpu::InstructionSet::AVX512, base_data, base_count, query_data,
+                query_count, dim, iterations_simd
+            );
+        }
+        if (deglib::cpu::has_avx512_vnni()) {
+            benchmark_distance_metric(
+                "Int8_IP (AVX512_VNNI)", deglib::distances::Metric::Int8_InnerProduct, deglib::cpu::InstructionSet::AVX512_VNNI, base_data, base_count,
+                query_data, query_count, dim, iterations_simd
+            );
+        }
+#endif
+        std::cout << "--------------------------------------------------------------------------------------\n";
+    }
+}
 
 TEST(DistancesRegression, FP32_L2_Throughput) {
     const size_t base_count = 10000;
