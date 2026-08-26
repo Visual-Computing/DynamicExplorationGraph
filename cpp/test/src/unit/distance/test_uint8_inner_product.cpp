@@ -82,7 +82,35 @@ namespace {
 
 using deglib::distances::ResidualMode;
 using deglib::distances::uint8_ip::InnerProductUint8_AVX2;
+using deglib::distances::uint8_ip::InnerProductUint8_AVX2_VNNI;
 using deglib::distances::uint8_ip::InnerProductUint8_AVX512;
+using deglib::distances::uint8_ip::InnerProductUint8_AVX512_VNNI;
+
+TEST(InnerProductUint8_AVX512_VNNI, MatchesNaive_IfSupported) {
+    if (!deglib::cpu::has_avx512_vnni()) {
+        GTEST_SKIP() << "AVX512_VNNI not supported";
+    }
+    for (size_t dim : {1, 15, 32, 63, 64, 96, 127, 128, 160, 200, 256}) {
+        auto a = make_uint8_vec(dim);
+        auto b = make_uint8_vec(dim, static_cast<int>(dim));
+        auto dist_variant = deglib::distances::uint8_ip::select_dist(dim, deglib::cpu::InstructionSet::AVX512_VNNI);
+        float d = std::visit([&](auto&& dist) { return dist.compare(a.data(), b.data(), &dim); }, dist_variant);
+        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "AVX512_VNNI dim=" << dim;
+    }
+}
+
+TEST(InnerProductUint8_AVX2_VNNI, MatchesNaive_IfSupported) {
+    if (!deglib::cpu::has_avx_vnni()) {
+        GTEST_SKIP() << "AVX2_VNNI not supported";
+    }
+    for (size_t dim : {1, 15, 16, 31, 32, 48, 63, 64, 100, 128, 200, 256}) {
+        auto a = make_uint8_vec(dim);
+        auto b = make_uint8_vec(dim, static_cast<int>(dim));
+        auto dist_variant = deglib::distances::uint8_ip::select_dist(dim, deglib::cpu::InstructionSet::AVX2_VNNI);
+        float d = std::visit([&](auto&& dist) { return dist.compare(a.data(), b.data(), &dim); }, dist_variant);
+        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "AVX2_VNNI dim=" << dim;
+    }
+}
 
 TEST(InnerProductUint8_AVX512, MatchesNaive_IfSupported) {
     if (!deglib::cpu::has_avx512()) {

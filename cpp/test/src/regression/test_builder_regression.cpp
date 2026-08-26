@@ -25,7 +25,7 @@ TEST(DeglibBuilderRegression, Int8_InnerProduct_Benchmark_AVX512_VNNI) {
     if (!deglib::cpu::has_avx512_vnni()) {
         GTEST_SKIP() << "AVX512-VNNI not available on this CPU";
     }
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -38,7 +38,7 @@ TEST(DeglibBuilderRegression, Int8_InnerProduct_Benchmark_AVX512_VNNI) {
 
     run_regression_test(
         "Int8_InnerProduct_AVX512_VNNI", deglib::distances::Metric::Int8_InnerProduct, 63000.0, 3.7, 0.857, base_data.data(), query_data.data(), base_count,
-        query_count, dim, gt_data, deglib::distances::int8_ip::InnerProductInt8_AVX512_VNNI<deglib::distances::ResidualMode::DualOnly>{}, 500
+        query_count, dim, gt_data, deglib::cpu::InstructionSet::AVX512_VNNI, 500
     );
 #else
     GTEST_SKIP() << "AVX512-VNNI not available on this platform";
@@ -50,7 +50,7 @@ TEST(DeglibBuilderRegression, Int8_InnerProduct_Benchmark_AVX512) {
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
     }
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -63,7 +63,7 @@ TEST(DeglibBuilderRegression, Int8_InnerProduct_Benchmark_AVX512) {
 
     run_regression_test(
         "Int8_InnerProduct_AVX512", deglib::distances::Metric::Int8_InnerProduct, 63000.0, 3.7, 0.857, base_data.data(), query_data.data(), base_count,
-        query_count, dim, gt_data, deglib::distances::int8_ip::InnerProductInt8_AVX512<deglib::distances::ResidualMode::DualOnly>{}, 500
+        query_count, dim, gt_data, deglib::cpu::InstructionSet::AVX512, 500
     );
 #else
     GTEST_SKIP() << "AVX512 not available on this platform";
@@ -75,7 +75,7 @@ TEST(DeglibBuilderRegression, Int8_InnerProduct_Benchmark_AVX2_VNNI) {
     if (!deglib::cpu::has_avx_vnni()) {
         GTEST_SKIP() << "AVX2-VNNI not available on this CPU";
     }
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -88,7 +88,7 @@ TEST(DeglibBuilderRegression, Int8_InnerProduct_Benchmark_AVX2_VNNI) {
 
     run_regression_test(
         "Int8_InnerProduct_AVX2_VNNI", deglib::distances::Metric::Int8_InnerProduct, 63000.0, 3.7, 0.857, base_data.data(), query_data.data(), base_count,
-        query_count, dim, gt_data, deglib::distances::int8_ip::InnerProductInt8_AVX2_VNNI<deglib::distances::ResidualMode::DualOnly>{}, 500
+        query_count, dim, gt_data, deglib::cpu::InstructionSet::AVX2_VNNI, 500
     );
 #else
     GTEST_SKIP() << "AVX2-VNNI not available on this platform";
@@ -100,7 +100,7 @@ TEST(DeglibBuilderRegression, Int8_InnerProduct_Benchmark_AVX2) {
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
     }
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -113,7 +113,7 @@ TEST(DeglibBuilderRegression, Int8_InnerProduct_Benchmark_AVX2) {
 
     run_regression_test(
         "Int8_InnerProduct_AVX2", deglib::distances::Metric::Int8_InnerProduct, 63000.0, 3.7, 0.857, base_data.data(), query_data.data(), base_count,
-        query_count, dim, gt_data, deglib::distances::int8_ip::InnerProductInt8_AVX2<deglib::distances::ResidualMode::DualOnly>{}, 500
+        query_count, dim, gt_data, deglib::cpu::InstructionSet::AVX2, 500
     );
 #else
     GTEST_SKIP() << "AVX2 not available on this platform";
@@ -121,7 +121,7 @@ TEST(DeglibBuilderRegression, Int8_InnerProduct_Benchmark_AVX2) {
 }
 
 TEST(DeglibBuilderRegression, Int8_InnerProduct_Benchmark_Scalar) {
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -134,7 +134,7 @@ TEST(DeglibBuilderRegression, Int8_InnerProduct_Benchmark_Scalar) {
 
     run_regression_test(
         "Int8_InnerProduct_Scalar", deglib::distances::Metric::Int8_InnerProduct, 32000.0, 6.8, 0.857, base_data.data(), query_data.data(), base_count,
-        query_count, dim, gt_data, deglib::distances::int8_ip::InnerProductInt8{}, 500
+        query_count, dim, gt_data, deglib::cpu::InstructionSet::Scalar, 500
     );
 }
 
@@ -147,7 +147,7 @@ TEST(DeglibBuilderRegression, Uint8_L2_Benchmark_AVX512) {
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
     }
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -160,7 +160,7 @@ TEST(DeglibBuilderRegression, Uint8_L2_Benchmark_AVX512) {
 
     run_regression_test(
         "Uint8_L2_AVX512", deglib::distances::Metric::Uint8_L2, 74000.0, 4.6, 0.98, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-        deglib::distances::uint8_l2::L2Uint8_AVX512<deglib::distances::ResidualMode::DualOnly>{}, 500
+        deglib::cpu::InstructionSet::AVX512, 500
     );
 #else
     GTEST_SKIP() << "AVX512 not available on this platform";
@@ -172,7 +172,7 @@ TEST(DeglibBuilderRegression, Uint8_L2_Benchmark_AVX2) {
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
     }
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -185,7 +185,7 @@ TEST(DeglibBuilderRegression, Uint8_L2_Benchmark_AVX2) {
 
     run_regression_test(
         "Uint8_L2_AVX2", deglib::distances::Metric::Uint8_L2, 74000.0, 4.7, 0.98, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-        deglib::distances::uint8_l2::L2Uint8_AVX2<deglib::distances::ResidualMode::DualOnly>{}, 500
+        deglib::cpu::InstructionSet::AVX2, 500
     );
 #else
     GTEST_SKIP() << "AVX2 not available on this platform";
@@ -193,7 +193,7 @@ TEST(DeglibBuilderRegression, Uint8_L2_Benchmark_AVX2) {
 }
 
 TEST(DeglibBuilderRegression, Uint8_L2_Benchmark_Scalar) {
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -206,7 +206,7 @@ TEST(DeglibBuilderRegression, Uint8_L2_Benchmark_Scalar) {
 
     run_regression_test(
         "Uint8_L2_Scalar", deglib::distances::Metric::Uint8_L2, 55000.0, 5.8, 0.98, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-        deglib::distances::uint8_l2::L2Uint8{}, 500
+        deglib::cpu::InstructionSet::Scalar, 500
     );
 }
 
@@ -219,7 +219,7 @@ TEST(DeglibBuilderRegression, Uint8_InnerProduct_Benchmark_AVX512) {
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
     }
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -232,7 +232,7 @@ TEST(DeglibBuilderRegression, Uint8_InnerProduct_Benchmark_AVX512) {
 
     run_regression_test(
         "Uint8_InnerProduct_AVX512", deglib::distances::Metric::Uint8_InnerProduct, 20000.0, 25.5, 0.94, base_data.data(), query_data.data(), base_count,
-        query_count, dim, gt_data, deglib::distances::uint8_ip::InnerProductUint8_AVX512<deglib::distances::ResidualMode::DualOnly>{}, 500
+        query_count, dim, gt_data, deglib::cpu::InstructionSet::AVX512, 500
     );
 #else
     GTEST_SKIP() << "AVX512 not available on this platform";
@@ -244,7 +244,7 @@ TEST(DeglibBuilderRegression, Uint8_InnerProduct_Benchmark_AVX2) {
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
     }
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -257,7 +257,7 @@ TEST(DeglibBuilderRegression, Uint8_InnerProduct_Benchmark_AVX2) {
 
     run_regression_test(
         "Uint8_InnerProduct_AVX2", deglib::distances::Metric::Uint8_InnerProduct, 20000.0, 25.5, 0.94, base_data.data(), query_data.data(), base_count,
-        query_count, dim, gt_data, deglib::distances::uint8_ip::InnerProductUint8_AVX2<deglib::distances::ResidualMode::DualOnly>{}, 500
+        query_count, dim, gt_data, deglib::cpu::InstructionSet::AVX2, 500
     );
 #else
     GTEST_SKIP() << "AVX2 not available on this platform";
@@ -265,7 +265,7 @@ TEST(DeglibBuilderRegression, Uint8_InnerProduct_Benchmark_AVX2) {
 }
 
 TEST(DeglibBuilderRegression, Uint8_InnerProduct_Benchmark_Scalar) {
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -278,7 +278,7 @@ TEST(DeglibBuilderRegression, Uint8_InnerProduct_Benchmark_Scalar) {
 
     run_regression_test(
         "Uint8_InnerProduct_Scalar", deglib::distances::Metric::Uint8_InnerProduct, 12000.0, 45.5, 0.94, base_data.data(), query_data.data(), base_count,
-        query_count, dim, gt_data, deglib::distances::uint8_ip::InnerProductUint8{}, 500
+        query_count, dim, gt_data, deglib::cpu::InstructionSet::Scalar, 500
     );
 }
 
@@ -287,7 +287,7 @@ TEST(DeglibBuilderRegression, Uint8_InnerProduct_Benchmark_Scalar) {
 // ---------------------------------------------------------------------------
 
 TEST(DeglibBuilderRegression, DynamicGraph_vs_SizeBoundedGraph_100k_Benchmark) {
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -410,7 +410,7 @@ TEST(DeglibBuilderRegression, DynamicGraph_vs_SizeBoundedGraph_100k_Benchmark) {
 // ---------------------------------------------------------------------------
 
 TEST(DeglibBuilderRegression, MultiThreaded_1_Thread_Benchmark) {
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -423,14 +423,14 @@ TEST(DeglibBuilderRegression, MultiThreaded_1_Thread_Benchmark) {
 
     run_regression_test(
         "MultiThreaded_1Thread", deglib::distances::Metric::FP32_L2, 45000.0, 4.0, 0.882, base_data.data(), query_data.data(), base_count, query_count, dim,
-        gt_data, std::nullopt, 50, deglib::builder::OptimizationTarget::LowLID,
+        gt_data, deglib::cpu::InstructionSet::Auto, 50, deglib::builder::OptimizationTarget::LowLID,
         /*edges_per_vertex=*/32, /*extend_k=*/32, /*extend_eps=*/0.01f,
         /*thread_count=*/1
     );
 }
 
 TEST(DeglibBuilderRegression, MultiThreaded_2_Threads_Benchmark) {
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -443,14 +443,14 @@ TEST(DeglibBuilderRegression, MultiThreaded_2_Threads_Benchmark) {
 
     run_regression_test(
         "MultiThreaded_2Threads", deglib::distances::Metric::FP32_L2, 45000.0, 2.4, 0.89201, base_data.data(), query_data.data(), base_count, query_count, dim,
-        gt_data, std::nullopt, 50, deglib::builder::OptimizationTarget::LowLID,
+        gt_data, deglib::cpu::InstructionSet::Auto, 50, deglib::builder::OptimizationTarget::LowLID,
         /*edges_per_vertex=*/32, /*extend_k=*/32, /*extend_eps=*/0.01f,
         /*thread_count=*/2
     );
 }
 
 TEST(DeglibBuilderRegression, MultiThreaded_4_Threads_Benchmark) {
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -463,7 +463,7 @@ TEST(DeglibBuilderRegression, MultiThreaded_4_Threads_Benchmark) {
 
     run_regression_test(
         "MultiThreaded_4Threads", deglib::distances::Metric::FP32_L2, 45000.0, 1.5, 0.89001, base_data.data(), query_data.data(), base_count, query_count, dim,
-        gt_data, std::nullopt, 50, deglib::builder::OptimizationTarget::LowLID,
+        gt_data, deglib::cpu::InstructionSet::Auto, 50, deglib::builder::OptimizationTarget::LowLID,
         /*edges_per_vertex=*/32, /*extend_k=*/32, /*extend_eps=*/0.01f,
         /*thread_count=*/4
     );
@@ -491,7 +491,7 @@ TEST(DeglibBuilderRegression, EVP_InnerProduct_Benchmark_AVX512) {
 
     run_regression_test(
         "EVP_InnerProduct_AVX512", deglib::distances::Metric::EVP_InnerProduct, 35000.0, 6.0, 0.898, base_data.data(), query_data.data(), base_count,
-        query_count, dim, gt_data, deglib::distances::evp_ip::EvpInnerProduct_AVX512<deglib::distances::ResidualMode::SimdOnly>{}, 50,
+        query_count, dim, gt_data, deglib::cpu::InstructionSet::AVX512, 50,
         deglib::builder::OptimizationTarget::LowLID,
         /*edges_per_vertex=*/32, /*extend_k=*/32, /*extend_eps=*/0.01f
     );
@@ -514,7 +514,7 @@ TEST(DeglibBuilderRegression, EVP_InnerProduct_Benchmark_AVX2) {
 
     run_regression_test(
         "EVP_InnerProduct_AVX2", deglib::distances::Metric::EVP_InnerProduct, 41000.0, 4.7, 0.85301, base_data.data(), query_data.data(), base_count,
-        query_count, dim, gt_data, deglib::distances::evp_ip::EvpInnerProduct_AVX2<deglib::distances::ResidualMode::SimdOnly>{}, 50,
+        query_count, dim, gt_data, deglib::cpu::InstructionSet::AVX2, 50,
         deglib::builder::OptimizationTarget::LowLID,
         /*edges_per_vertex=*/32, /*extend_k=*/32, /*extend_eps=*/0.01f
     );
@@ -522,7 +522,7 @@ TEST(DeglibBuilderRegression, EVP_InnerProduct_Benchmark_AVX2) {
 #endif
 
 TEST(DeglibBuilderRegression, EVP_InnerProduct_Benchmark_Scalar) {
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -535,7 +535,7 @@ TEST(DeglibBuilderRegression, EVP_InnerProduct_Benchmark_Scalar) {
 
     run_regression_test(
         "EVP_InnerProduct_Scalar", deglib::distances::Metric::EVP_InnerProduct, 47000.0, 4.0, 0.741, base_data.data(), query_data.data(), base_count,
-        query_count, dim, gt_data, deglib::distances::evp_ip::EvpInnerProduct{}, 50, deglib::builder::OptimizationTarget::LowLID,
+        query_count, dim, gt_data, deglib::cpu::InstructionSet::Scalar, 50, deglib::builder::OptimizationTarget::LowLID,
         /*edges_per_vertex=*/32, /*extend_k=*/32, /*extend_eps=*/0.01f
     );
 }
@@ -549,7 +549,7 @@ TEST(DeglibBuilderRegression, FP32_L2_Benchmark_AVX512) {
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
     }
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -562,7 +562,7 @@ TEST(DeglibBuilderRegression, FP32_L2_Benchmark_AVX512) {
 
     run_regression_test(
         "FP32_L2_AVX512", deglib::distances::Metric::FP32_L2, 53000.0, 5.6, 0.961, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-        deglib::distances::fp32_l2::L2Float_AVX512<deglib::distances::ResidualMode::DualOnly>{}, 100
+        deglib::cpu::InstructionSet::AVX512, 100
     );
 #else
     GTEST_SKIP() << "AVX512 not available on this platform";
@@ -574,7 +574,7 @@ TEST(DeglibBuilderRegression, FP32_L2_Benchmark_AVX2) {
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
     }
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -587,7 +587,7 @@ TEST(DeglibBuilderRegression, FP32_L2_Benchmark_AVX2) {
 
     run_regression_test(
         "FP32_L2_AVX2", deglib::distances::Metric::FP32_L2, 53000.0, 5.6, 0.961, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-        deglib::distances::fp32_l2::L2Float_AVX2<deglib::distances::ResidualMode::DualOnly>{}, 100
+        deglib::cpu::InstructionSet::AVX2, 100
     );
 #else
     GTEST_SKIP() << "AVX2 not available on this platform";
@@ -595,7 +595,7 @@ TEST(DeglibBuilderRegression, FP32_L2_Benchmark_AVX2) {
 }
 
 TEST(DeglibBuilderRegression, FP32_L2_Benchmark_Scalar) {
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -608,7 +608,7 @@ TEST(DeglibBuilderRegression, FP32_L2_Benchmark_Scalar) {
 
     run_regression_test(
         "FP32_L2_Scalar", deglib::distances::Metric::FP32_L2, 22000.0, 14.0, 0.971, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-        deglib::distances::fp32_l2::L2Float{}, 100
+        deglib::cpu::InstructionSet::Scalar, 100
     );
 }
 
@@ -621,7 +621,7 @@ TEST(DeglibBuilderRegression, FP32_InnerProduct_Benchmark_AVX512) {
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
     }
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -634,7 +634,7 @@ TEST(DeglibBuilderRegression, FP32_InnerProduct_Benchmark_AVX512) {
 
     run_regression_test(
         "FP32_InnerProduct_AVX512", deglib::distances::Metric::FP32_InnerProduct, 42000.0, 4.3, 0.866, base_data.data(), query_data.data(), base_count,
-        query_count, dim, gt_data, deglib::distances::fp32_ip::InnerProductFloat_AVX512<deglib::distances::ResidualMode::DualOnly>{}, 50
+        query_count, dim, gt_data, deglib::cpu::InstructionSet::AVX512, 50
     );
 #else
     GTEST_SKIP() << "AVX512 not available on this platform";
@@ -646,7 +646,7 @@ TEST(DeglibBuilderRegression, FP32_InnerProduct_Benchmark_AVX2) {
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
     }
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -659,7 +659,7 @@ TEST(DeglibBuilderRegression, FP32_InnerProduct_Benchmark_AVX2) {
 
     run_regression_test(
         "FP32_InnerProduct_AVX2", deglib::distances::Metric::FP32_InnerProduct, 42000.0, 4.3, 0.866, base_data.data(), query_data.data(), base_count,
-        query_count, dim, gt_data, deglib::distances::fp32_ip::InnerProductFloat_AVX2<deglib::distances::ResidualMode::DualOnly>{}, 50
+        query_count, dim, gt_data, deglib::cpu::InstructionSet::AVX2, 50
     );
 #else
     GTEST_SKIP() << "AVX2 not available on this platform";
@@ -667,7 +667,7 @@ TEST(DeglibBuilderRegression, FP32_InnerProduct_Benchmark_AVX2) {
 }
 
 TEST(DeglibBuilderRegression, FP32_InnerProduct_Benchmark_Scalar) {
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -680,7 +680,7 @@ TEST(DeglibBuilderRegression, FP32_InnerProduct_Benchmark_Scalar) {
 
     run_regression_test(
         "FP32_InnerProduct_Scalar", deglib::distances::Metric::FP32_InnerProduct, 20000.0, 9.8, 0.867, base_data.data(), query_data.data(), base_count,
-        query_count, dim, gt_data, deglib::distances::fp32_ip::InnerProductFloat{}, 50
+        query_count, dim, gt_data, deglib::cpu::InstructionSet::Scalar, 50
     );
 }
 
@@ -693,7 +693,7 @@ TEST(DeglibBuilderRegression, FP16_InnerProduct_Benchmark_AVX512) {
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
     }
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -706,7 +706,7 @@ TEST(DeglibBuilderRegression, FP16_InnerProduct_Benchmark_AVX512) {
 
     run_regression_test(
         "FP16_InnerProduct_AVX512", deglib::distances::Metric::FP16_InnerProduct, 52000.0, 4.2, 0.866, base_data.data(), query_data.data(), base_count,
-        query_count, dim, gt_data, deglib::distances::fp16_ip::InnerProductFP16_AVX512<deglib::distances::ResidualMode::DualOnly>{}, 50
+        query_count, dim, gt_data, deglib::cpu::InstructionSet::AVX512, 50
     );
 #else
     GTEST_SKIP() << "AVX512 not available on this platform";
@@ -718,7 +718,7 @@ TEST(DeglibBuilderRegression, FP16_InnerProduct_Benchmark_AVX2) {
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
     }
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -731,7 +731,7 @@ TEST(DeglibBuilderRegression, FP16_InnerProduct_Benchmark_AVX2) {
 
     run_regression_test(
         "FP16_InnerProduct_AVX2", deglib::distances::Metric::FP16_InnerProduct, 52000.0, 4.2, 0.866, base_data.data(), query_data.data(), base_count,
-        query_count, dim, gt_data, deglib::distances::fp16_ip::InnerProductFP16_AVX2<deglib::distances::ResidualMode::DualOnly>{}, 50
+        query_count, dim, gt_data, deglib::cpu::InstructionSet::AVX2, 50
     );
 #else
     GTEST_SKIP() << "AVX2 not available on this platform";
@@ -739,7 +739,7 @@ TEST(DeglibBuilderRegression, FP16_InnerProduct_Benchmark_AVX2) {
 }
 
 TEST(DeglibBuilderRegression, FP16_InnerProduct_Benchmark_Scalar) {
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -752,7 +752,7 @@ TEST(DeglibBuilderRegression, FP16_InnerProduct_Benchmark_Scalar) {
 
     run_regression_test(
         "FP16_InnerProduct_Scalar", deglib::distances::Metric::FP16_InnerProduct, 8000.0, 25.0, 0.867, base_data.data(), query_data.data(), base_count,
-        query_count, dim, gt_data, deglib::distances::fp16_ip::InnerProductFP16{}, 50
+        query_count, dim, gt_data, deglib::cpu::InstructionSet::Scalar, 50
     );
 }
 
@@ -765,7 +765,7 @@ TEST(DeglibBuilderRegression, FP16_L2_Benchmark_AVX512) {
     if (!deglib::cpu::has_avx512()) {
         GTEST_SKIP() << "AVX512 not available on this CPU";
     }
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -778,7 +778,7 @@ TEST(DeglibBuilderRegression, FP16_L2_Benchmark_AVX512) {
 
     run_regression_test(
         "FP16_L2_AVX512", deglib::distances::Metric::FP16_L2, 52000.0, 4.2, 0.98, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-        deglib::distances::fp16_l2::L2FP16_AVX512<deglib::distances::ResidualMode::DualOnly>{}, 500
+        deglib::cpu::InstructionSet::AVX512, 500
     );
 #else
     GTEST_SKIP() << "AVX512 not available on this platform";
@@ -790,7 +790,7 @@ TEST(DeglibBuilderRegression, FP16_L2_Benchmark_AVX2) {
     if (!deglib::cpu::has_avx2()) {
         GTEST_SKIP() << "AVX2 not available on this CPU";
     }
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -803,7 +803,7 @@ TEST(DeglibBuilderRegression, FP16_L2_Benchmark_AVX2) {
 
     run_regression_test(
         "FP16_L2_AVX2", deglib::distances::Metric::FP16_L2, 52000.0, 4.2, 0.98, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-        deglib::distances::fp16_l2::L2FP16_AVX2<deglib::distances::ResidualMode::DualOnly>{}, 500
+        deglib::cpu::InstructionSet::AVX2, 500
     );
 #else
     GTEST_SKIP() << "AVX2 not available on this platform";
@@ -811,7 +811,7 @@ TEST(DeglibBuilderRegression, FP16_L2_Benchmark_AVX2) {
 }
 
 TEST(DeglibBuilderRegression, FP16_L2_Benchmark_Scalar) {
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -824,7 +824,7 @@ TEST(DeglibBuilderRegression, FP16_L2_Benchmark_Scalar) {
 
     run_regression_test(
         "FP16_L2_Scalar", deglib::distances::Metric::FP16_L2, 8000.0, 25.0, 0.98, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-        deglib::distances::fp16_l2::L2FP16{}, 500
+        deglib::cpu::InstructionSet::Scalar, 500
     );
 }
 
@@ -833,7 +833,7 @@ TEST(DeglibBuilderRegression, FP16_L2_Benchmark_Scalar) {
 // ---------------------------------------------------------------------------
 
 TEST(DeglibBuilderRegression, Benchmark_LowLID) {
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -846,12 +846,12 @@ TEST(DeglibBuilderRegression, Benchmark_LowLID) {
 
     run_regression_test(
         "LowLID", deglib::distances::Metric::FP32_L2, 20000.0, 14, 0.971, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-        deglib::distances::fp32_l2::L2Float{}, 100, deglib::builder::OptimizationTarget::LowLID
+        deglib::cpu::InstructionSet::Scalar, 100, deglib::builder::OptimizationTarget::LowLID
     );
 }
 
 TEST(DeglibBuilderRegression, Benchmark_HighLID) {
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -864,12 +864,12 @@ TEST(DeglibBuilderRegression, Benchmark_HighLID) {
 
     run_regression_test(
         "HighLID", deglib::distances::Metric::FP32_L2, 12000.0, 14.4, 0.96, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-        deglib::distances::fp32_l2::L2Float{}, 100, deglib::builder::OptimizationTarget::HighLID
+        deglib::cpu::InstructionSet::Scalar, 100, deglib::builder::OptimizationTarget::HighLID
     );
 }
 
 TEST(DeglibBuilderRegression, Benchmark_StreamingData) {
-    const size_t dim = 128;
+    const size_t dim = 200;
     const size_t base_count = 100000;
     const size_t query_count = 100;
     const size_t num_clusters = 1000;
@@ -882,6 +882,6 @@ TEST(DeglibBuilderRegression, Benchmark_StreamingData) {
 
     run_regression_test(
         "StreamingData", deglib::distances::Metric::FP32_L2, 16000.0, 30, 0.91, base_data.data(), query_data.data(), base_count, query_count, dim, gt_data,
-        deglib::distances::fp32_l2::L2Float{}, 100, deglib::builder::OptimizationTarget::StreamingData
+        deglib::cpu::InstructionSet::Scalar, 100, deglib::builder::OptimizationTarget::StreamingData
     );
 }

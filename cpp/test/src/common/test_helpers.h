@@ -735,7 +735,7 @@ inline static void run_regression_test(
     size_t query_count,
     size_t dim,
     const std::vector<std::vector<uint32_t>>& gt_data,
-    std::optional<deglib::distances::DistanceVariant> dist_variant = std::nullopt,
+    deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto,
     size_t num_runs = 5,
     deglib::builder::OptimizationTarget optimization_target = deglib::builder::OptimizationTarget::LowLID,
     uint32_t edges_per_vertex = 32,
@@ -752,9 +752,8 @@ inline static void run_regression_test(
     const uint8_t max_path_length = 5;
     const uint32_t improve_tries = 0;
 
-    // Build DEG Graph using the specified metric feature space
-    const deglib::distances::FloatSpace feature_space =
-        dist_variant.has_value() ? deglib::distances::FloatSpace(dim, metric, dist_variant.value()) : deglib::distances::FloatSpace(dim, metric);
+    // Build DEG Graph using the specified metric feature space with instruction set dispatching
+    const deglib::distances::FloatSpace feature_space(dim, metric, instruction);
 
     const size_t feature_bytes = feature_space.get_data_size();
 

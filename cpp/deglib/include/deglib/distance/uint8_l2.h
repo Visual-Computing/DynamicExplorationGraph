@@ -57,6 +57,44 @@ DEGLIB_TARGET_AVX2 inline static int64_t uint8_l2_hsum256(__m256i s) {
 }
 
 DEGLIB_TARGET_AVX512 inline static int64_t uint8_l2_hsum512(__m512i s) { return static_cast<int64_t>(_mm512_reduce_add_epi32(s)); }
+
+template <size_t BATCH_SIZE = 8>
+inline static void process_batch_tail(
+    const uint8_t* query,
+    const void* const* db,
+    size_t offset,
+    size_t dim,
+    float* out_dists
+) {
+    const size_t tail_len = dim - offset;
+    if (tail_len >= 8) {
+        uint64_t q64;
+        std::memcpy(&q64, query + offset, sizeof(uint64_t));
+        const uint8_t* q_bytes = reinterpret_cast<const uint8_t*>(&q64);
+        for (size_t j = 0; j < BATCH_SIZE; ++j) {
+            const uint8_t* db_ptr = static_cast<const uint8_t*>(db[j]);
+            uint64_t db64;
+            std::memcpy(&db64, db_ptr + offset, sizeof(uint64_t));
+            const uint8_t* db_bytes = reinterpret_cast<const uint8_t*>(&db64);
+            int32_t tsum = 0;
+            for (size_t k = 0; k < 8; ++k) {
+                int32_t diff = int32_t(q_bytes[k]) - int32_t(db_bytes[k]);
+                tsum += diff * diff;
+            }
+            out_dists[j] += static_cast<float>(tsum);
+        }
+        offset += 8;
+    }
+    for (size_t k = offset; k < dim; ++k) {
+        const int32_t q_val = static_cast<int32_t>(query[k]);
+        for (size_t j = 0; j < BATCH_SIZE; ++j) {
+            const uint8_t* db_ptr = static_cast<const uint8_t*>(db[j]);
+            int32_t diff = q_val - static_cast<int32_t>(db_ptr[k]);
+            out_dists[j] += static_cast<float>(diff * diff);
+        }
+    }
+}
+
 template <ResidualMode Mode = ResidualMode::Full>
 class L2Uint8_AVX512 {
     static constexpr bool HasDualSimd = has_flag(Mode, ResidualMode::DualSimd);
@@ -168,15 +206,7 @@ class L2Uint8_AVX512 {
             }
 
             if constexpr (HasTail) {
-                for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                    const unsigned char* db_ptr = static_cast<const unsigned char*>(db[j]);
-                    int64_t tail_sum = 0;
-                    for (size_t k = offset; k < dim; ++k) {
-                        int32_t diff = int32_t(query[k]) - int32_t(db_ptr[k]);
-                        tail_sum += int64_t(diff) * diff;
-                    }
-                    out_dists[j] += static_cast<float>(tail_sum);
-                }
+                process_batch_tail<BATCH_SIZE>(query, db, offset, dim, out_dists);
             }
         };
 
@@ -297,15 +327,7 @@ class L2Uint8_AVX2 {
             }
 
             if constexpr (HasTail) {
-                for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                    const unsigned char* db_ptr = static_cast<const unsigned char*>(db[j]);
-                    int64_t tail_sum = 0;
-                    for (size_t k = offset; k < dim; ++k) {
-                        int32_t diff = int32_t(query[k]) - int32_t(db_ptr[k]);
-                        tail_sum += int64_t(diff) * diff;
-                    }
-                    out_dists[j] += static_cast<float>(tail_sum);
-                }
+                process_batch_tail<BATCH_SIZE>(query, db, offset, dim, out_dists);
             }
         };
 

@@ -81,33 +81,51 @@ inline bool has_avx512() { return detail::features().avx512f; }
 inline bool has_avx512_vnni() { return detail::features().avx512_vnni; }
 
 // Validates the requested InstructionSet against CPU capabilities
-// and resolves Auto / VNNI aliases to the concrete InstructionSet (AVX512, AVX2, or Scalar).
+// and resolves Auto to the highest available InstructionSet (AVX512_VNNI, AVX512, AVX2_VNNI, AVX2, or Scalar).
 inline InstructionSet resolve_instruction_set(InstructionSet instruction) {
     if (instruction == InstructionSet::Scalar) {
         return InstructionSet::Scalar;
     }
 
 #if defined(DEGLIB_X86)
-    if (instruction == InstructionSet::AVX512 && !has_avx512()) {
-        throw std::runtime_error("AVX512 instruction set requested, but not supported by CPU");
+    if (instruction == InstructionSet::AVX512_VNNI) {
+        if (!has_avx512_vnni()) {
+            throw std::runtime_error("AVX512-VNNI instruction set requested, but not supported by CPU");
+        }
+        return InstructionSet::AVX512_VNNI;
     }
-    if (instruction == InstructionSet::AVX512_VNNI && !has_avx512_vnni()) {
-        throw std::runtime_error("AVX512-VNNI instruction set requested, but not supported by CPU");
-    }
-    if (instruction == InstructionSet::AVX2 && !has_avx2()) {
-        throw std::runtime_error("AVX2 instruction set requested, but not supported by CPU");
-    }
-    if (instruction == InstructionSet::AVX2_VNNI && !has_avx_vnni()) {
-        throw std::runtime_error("AVX-VNNI instruction set requested, but not supported by CPU");
-    }
-
-    if (instruction == InstructionSet::AVX512 || instruction == InstructionSet::AVX512_VNNI ||
-        (instruction == InstructionSet::Auto && has_avx512())) {
+    if (instruction == InstructionSet::AVX512) {
+        if (!has_avx512()) {
+            throw std::runtime_error("AVX512 instruction set requested, but not supported by CPU");
+        }
         return InstructionSet::AVX512;
     }
-    if (instruction == InstructionSet::AVX2 || instruction == InstructionSet::AVX2_VNNI ||
-        (instruction == InstructionSet::Auto && has_avx2())) {
+    if (instruction == InstructionSet::AVX2_VNNI) {
+        if (!has_avx_vnni()) {
+            throw std::runtime_error("AVX-VNNI instruction set requested, but not supported by CPU");
+        }
+        return InstructionSet::AVX2_VNNI;
+    }
+    if (instruction == InstructionSet::AVX2) {
+        if (!has_avx2()) {
+            throw std::runtime_error("AVX2 instruction set requested, but not supported by CPU");
+        }
         return InstructionSet::AVX2;
+    }
+
+    if (instruction == InstructionSet::Auto) {
+        if (has_avx512_vnni()) {
+            return InstructionSet::AVX512_VNNI;
+        }
+        if (has_avx512()) {
+            return InstructionSet::AVX512;
+        }
+        if (has_avx_vnni()) {
+            return InstructionSet::AVX2_VNNI;
+        }
+        if (has_avx2()) {
+            return InstructionSet::AVX2;
+        }
     }
 #else
     if (instruction != InstructionSet::Auto && instruction != InstructionSet::Scalar) {
