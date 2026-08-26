@@ -21,12 +21,18 @@ jobs:
         if: env.RTD_WEBHOOK_URL != ''
         env:
           RTD_WEBHOOK_URL: ${{ secrets.RTD_WEBHOOK_URL }}
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
         run: |
           REF_NAME="${{ github.ref_name }}"
+          AUTH_HEADER=()
+          if [ -n "${RTD_TOKEN}" ]; then
+            AUTH_HEADER=(-H "Authorization: Token ${RTD_TOKEN}")
+          fi
+
           if [ "${{ github.ref_type }}" = "tag" ]; then
             echo "Triggering RTD build for tag: ${REF_NAME}"
-            curl -sS -X POST -d "branches=${REF_NAME}" "${RTD_WEBHOOK_URL}"
+            curl -sSf -X POST "${AUTH_HEADER[@]}" -d "branches=${REF_NAME}" "${RTD_WEBHOOK_URL}"
           else
             echo "Triggering RTD build for branch: ${REF_NAME}"
-            curl -sS -X POST -d "branches=${REF_NAME}" "${RTD_WEBHOOK_URL}"
+            curl -sSf -X POST "${AUTH_HEADER[@]}" -d "branches=${REF_NAME}" "${RTD_WEBHOOK_URL}"
           fi
