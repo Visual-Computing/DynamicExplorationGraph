@@ -19,6 +19,8 @@ VIBE provides realistic embedding datasets covering in-distribution and out-of-d
 | `yandex` | Yandex-200 | Out-of-Distribution | 1,000,000 | 200 | Cosine |
 | `yahoo-minilm` | Yahoo-minilm | In-Distribution | 677,305 | 384 | Inner Product |
 
+---
+
 ## Quick Start
 
 ### 1. Environment Setup
@@ -30,31 +32,61 @@ uv sync
 
 ### 2. Run Benchmark
 
-Datasets are automatically downloaded on demand directly from the official [VIBE Hugging Face repository](https://huggingface.co/datasets/vector-index-bench/vibe) and stored in `D:/Data/VIBE` (or `~/.cache/vibe` / `VIBE_CACHE_DIR`).
+Datasets are automatically downloaded on demand directly from the official [VIBE Hugging Face repository](https://huggingface.co/datasets/vector-index-bench/vibe) and stored in `D:/Data/DEG` (or `~/.cache/deg` / `VIBE_CACHE_DIR`).
 
 ```bash
-# Run on AGNews-mxbai (compact dataset ~120k vectors)
-uv run main.py --dataset agnews-mxbai
+# Run benchmark on LAION-clip (generates and opens interactive HTML plot)
+uv run main.py --dataset laion-clip
 
-# Run on Yahoo-MiniLM (677k vectors)
-uv run main.py --dataset yahoo-minilm
-
-# Run without GUI plot popups
-uv run main.py --dataset arxiv-nomic --no-show
+# Run on Yahoo-MiniLM without opening browser popup
+uv run main.py --dataset yahoo-minilm --no-show
 ```
 
-### 3. Command-Line Options
+### 3. Interactive Plot Viewer / Log Explorer
+
+You can explore existing benchmark log files and generate standalone interactive Plotly charts at any time:
 
 ```bash
-uv run main.py --help
+# Open interactive GUI Log Explorer (browse dataset logs & view plots)
+uv run plot_from_log.py
+
+# Render and open interactive plot directly for a specific dataset
+uv run plot_from_log.py --dataset laion-clip
+
+# Render and open interactive plot directly from an explicit log file
+uv run plot_from_log.py --log D:/Data/DEG/laion-clip/deg-fp32/laion-clip_benchmark.log
 ```
 
-- `--dataset`, `-d`: Dataset name to benchmark (e.g. `agnews-mxbai`, `arxiv-nomic`, `landmark-dino`, `msmarco-qwen`, `gooaq-distilroberta`, `laion-clip`, `imagenet-align`, `imagenet-clip`, `yandex`, `yahoo-minilm`).
-- `--cache-dir`, `-c`: Custom directory for dataset files and saved `.deg` graphs.
-- `--build-threads`, `-t`: Number of CPU threads for graph building (default: half of CPU cores, `threads // 2`).
-- `--k`: Graph degree $k$ (out-degree per vertex).
-- `--extend-k`: Exploration width during graph building.
-- `--eps`: Build $\varepsilon$ parameter.
-- `--anns-k`: Number of nearest neighbors to evaluate (default: 100).
-- `--rebuild-graph`: Force graph re-construction even if a cached graph file exists.
-- `--no-show`: Do not open interactive matplotlib plot window.
+---
+
+## Interactive Plot Features
+
+The generated benchmark visualizations (`*_anns_benchmark.html`) provide:
+- **Grouped Interactive Legend**: Filter curves by **Optimization Target** (`LowLID`, `StreamingData`, `HighLID`), **Pruning Status** (`Unpruned`, `MRNG Pruned`), **Graph Degree $K$** ($16, 24, 30, 40, 48$), and **Rerank Factors** ($1.0\times, 1.2\times, 1.5\times, 2.0\times$).
+- **Locked Plot Axes**: Filtering curves turns elements on and off smoothly without jumpy axis rescaling.
+- **Mouse Navigation**: Stufenloser **Mouse-Wheel Zoom** and click-and-drag **Panning**. Double-click resets view.
+- **Detailed Tooltips**: Hover over data points to inspect exact Recall@100, QPS, search $\varepsilon$, graph parameters, and rerank configuration.
+
+---
+
+## Configuration & Command-Line Options
+
+### Configuration via `config.yml`
+All benchmark search parameters, graph degrees, optimization targets, pruning options, search $\varepsilon$ ranges, and reranking factors are configured centrally in [`config.yml`](file:///C:/Lang/cpp/DynamicExplorationGraph/examples/vibe/config.yml):
+- **Graph parameters**: `k`, `opt_target`, `prune_non_rng`, `threads`, `query_dtype`.
+- **Query parameters**: `search_eps`, `rerank_size_factor`.
+
+### `main.py`
+- `--dataset`, `-d`: Dataset name (e.g. `laion-clip`, `arxiv-nomic`, `agnews-mxbai`, etc.).
+- `--cache-dir`, `-c`: Custom directory for datasets and graphs (default: `D:/Data/DEG` or `~/.cache/deg`).
+- `--build-threads`, `-t`: Number of CPU threads for graph building (default: `cpu_count // 2`).
+- `--query-dtype`: Override query and feature storage precision (`float32`, `int8`).
+- `--cpu`, `--cpu-affinity`: Pin the benchmark process to specific CPU core ID(s).
+- `--no-show`: Do not open browser window after benchmark completes.
+
+### `plot_from_log.py`
+- *(No arguments)*: Launches the dark-themed **GUI Log Explorer** to browse logs across all VIBE dataset folders.
+- `--dataset`, `-d`: Dataset name to resolve standard log path.
+- `--log`, `-l`: Explicit path to a `*.log` benchmark file.
+- `--output`, `-o`: Output HTML file path.
+- `--no-open`: Do not automatically open the generated HTML in the default web browser.

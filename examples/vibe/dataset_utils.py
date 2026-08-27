@@ -18,24 +18,23 @@ VIBE_DATASETS: Dict[str, Dict[str, Any]] = {
     "agnews-mxbai": {
         "name": "AGNews-mxbai",
         "file": "agnews-mxbai-1024-euclidean.hdf5",
-        "metric": Metric.FP32_L2,
+        "metric": "euclidean",
         "type": "in-distribution",
         "dim": 1024,
-        "size": 120000,
+        "size": 769382,
     },
     "arxiv-nomic": {
         "name": "ArXiv-nomic",
         "file": "arxiv-nomic-768-normalized.hdf5",
-        "metric": Metric.FP32_InnerProduct,
+        "metric": "normalized",
         "type": "in-distribution",
         "dim": 768,
-        "size": 2000000,
+        "size": 1344643,
     },
     "landmark-dino": {
         "name": "Landmark-dino",
         "file": "landmark-dino-768-cosine.hdf5",
-        "metric": Metric.FP32_InnerProduct,
-        "normalize": True,
+        "metric": "cosine",
         "type": "in-distribution",
         "dim": 768,
         "size": 760757,
@@ -43,31 +42,31 @@ VIBE_DATASETS: Dict[str, Dict[str, Any]] = {
     "msmarco-qwen": {
         "name": "MSMARCO-qwen",
         "file": "msmarco-qwen-1024-normalized.hdf5",
-        "metric": Metric.FP32_InnerProduct,
+        "metric": "normalized",
         "type": "in-distribution",
         "dim": 1024,
-        "size": 8841823,
+        "size": 8840823,
     },
     "gooaq-distilroberta": {
         "name": "GooAQ-distilroberta",
         "file": "gooaq-distilroberta-768-normalized.hdf5",
-        "metric": Metric.FP32_InnerProduct,
+        "metric": "normalized",
         "type": "in-distribution",
         "dim": 768,
-        "size": 1471375,
+        "size": 1475024,
     },
     "laion-clip": {
         "name": "LAION-clip",
         "file": "laion-clip-512-normalized.hdf5",
-        "metric": Metric.FP32_InnerProduct,
+        "metric": "normalized",
         "type": "out-of-distribution",
         "dim": 512,
-        "size": 1000000,
+        "size": 1000448,
     },
     "imagenet-align": {
         "name": "ImageNet-align",
         "file": "imagenet-align-640-normalized.hdf5",
-        "metric": Metric.FP32_InnerProduct,
+        "metric": "normalized",
         "type": "out-of-distribution",
         "dim": 640,
         "size": 1281167,
@@ -75,7 +74,7 @@ VIBE_DATASETS: Dict[str, Dict[str, Any]] = {
     "imagenet-clip": {
         "name": "ImageNet-clip",
         "file": "imagenet-clip-512-normalized.hdf5",
-        "metric": Metric.FP32_InnerProduct,
+        "metric": "normalized",
         "type": "in-distribution",
         "dim": 512,
         "size": 1281167,
@@ -83,8 +82,7 @@ VIBE_DATASETS: Dict[str, Dict[str, Any]] = {
     "yandex": {
         "name": "Yandex-200",
         "file": "yandex-200-cosine.hdf5",
-        "metric": Metric.FP32_InnerProduct,
-        "normalize": True,
+        "metric": "cosine",
         "type": "out-of-distribution",
         "dim": 200,
         "size": 1000000,
@@ -92,7 +90,7 @@ VIBE_DATASETS: Dict[str, Dict[str, Any]] = {
     "yahoo-minilm": {
         "name": "Yahoo-minilm",
         "file": "yahoo-minilm-384-normalized.hdf5",
-        "metric": Metric.FP32_InnerProduct,
+        "metric": "normalized",
         "type": "in-distribution",
         "dim": 384,
         "size": 677305,
@@ -251,21 +249,10 @@ def load_vibe_dataset(dataset_key: str, cache_dir: Path) -> Tuple[np.ndarray, np
         if "point_type" in f.attrs:
             meta["hdf5_point_type"] = str(f.attrs["point_type"])
 
-    # If cosine distance is required, normalize to unit sphere for Inner Product metric
-    if meta.get("normalize", False):
-        print("  Normalizing vectors to unit L2-norm for Cosine / InnerProduct metric...")
-        norm_b = np.linalg.norm(base_vecs, axis=1, keepdims=True)
-        norm_b[norm_b == 0] = 1.0
-        base_vecs = np.ascontiguousarray(base_vecs / norm_b, dtype=np.float32)
-
-        norm_q = np.linalg.norm(query_vecs, axis=1, keepdims=True)
-        norm_q[norm_q == 0] = 1.0
-        query_vecs = np.ascontiguousarray(query_vecs / norm_q, dtype=np.float32)
-
     print(
         f"Dataset '{meta['name']}' loaded successfully: {base_vecs.shape[0]:,} base vectors, "
         f"{query_vecs.shape[0]:,} query vectors, {base_vecs.shape[1]} dimensions, "
-        f"metric={meta['metric'].name}."
+        f"metric={meta['metric']}."
     )
     return base_vecs, query_vecs, gt_neighbors, meta
 
