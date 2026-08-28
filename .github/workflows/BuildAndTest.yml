@@ -3,6 +3,9 @@ name: BuildAndTest
 on:
   workflow_dispatch:
 
+concurrency:
+  group: build-and-test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 defaults:
   run:
     working-directory: python
