@@ -2,36 +2,55 @@
 
 ## deglib v0.2.1
 
-### Highlights
-* **New Distance Metrics:**
-  * **`FP16_L2` Metric:** Added native IEEE 754 half-precision Euclidean distance (`Metric::FP16_L2`) with AVX-512, AVX2 (F16C/FMA), and Scalar kernels, fully integrated into C++ `FloatSpace` and Python bindings (`deglib.Metric.FP16_L2`).
-  * **`Int8_InnerProduct` Metric:** Added signed 8-bit integer inner product (`Metric::Int8_InnerProduct`) with AVX-512, AVX512-VNNI, AVX2, AVX2-VNNI, and Scalar kernels.
-  * **`Int8_L2` Metric:** Added signed 8-bit integer L2 distance (`Metric::Int8_L2`) with AVX-512, AVX2, and Scalar kernels, including Python bindings support (`np.int8`).
-  * **`Uint8_InnerProduct` Metric:** Added native 8-bit unsigned integer inner product distance (`Metric::Uint8_InnerProduct`) with AVX-512, AVX512-VNNI, AVX2, AVX2-VNNI, and Scalar kernels.
-* **Scalar Quantization (`deglib::optimization::quantization`):**
-  * Added `SymCalibratorInt8` for symmetric Int8 quantization ($[-127, 127]$).
-  * Added `AffineCalibratorUint8` for affine/asymmetric UInt8 quantization ($[0, 255]$ with scale and offset).
-  * Python APIs exposed via `deglib.optimization.quantize_sym_int8(data)` and `deglib.optimization.quantize_affine_uint8(data)`.
-* **SIMD & VNNI Optimizations:**
-  * Added dedicated AVX-VNNI and AVX512-VNNI hardware acceleration for 8-bit integer dot products (`Int8_IP` and `UInt8_IP`).
-  * Accelerated 8-bit integer distance computations with optimized SIMD horizontal reductions in AVX-512 (`_mm512_reduce_add_epi32`) and AVX2.
-  * Centralized CPU instruction set detection and fallback resolution in `deglib::cpu::resolve_instruction_set()`.
-  * Fixed SIMD instruction fallback selection in distance kernels when running on VNNI-capable CPUs.
-* **Cross-Platform & Header Consistency Fixes:**
-  * Added missing `<stdexcept>` header in `cpu.h` fixing `std::runtime_error` compilation errors on GCC and Clang (Linux / macOS).
-  * Added missing `<cstring>` includes across integer distance headers for portable builds.
-  * Fixed GCC/Clang inlining error (`target specific option mismatch` in `_mm256_cvtph_ps`) by including `avx2,f16c,fma` in `DEGLIB_TARGET_AVX512` and `DEGLIB_TARGET_AVX512_VNNI` target attributes.
-  * Renamed `evp_inner_product.h` to `evp_ip.h` for consistent header naming convention across distance modules.
-* **Python Memory Leak Fix:** Resolved memory leak in Python bindings when sequentially loading multiple graph instances from disk.
-* **VIBE Benchmark Suite (`examples/vibe`):**
-  * Added complete Vector Index Benchmark (VIBE) runner with automated Hugging Face HDF5 dataset downloads, grid evaluations, Pareto frontier plotting, and default FLAS pre-sorting.
-  * Extended VIBE DegANN with support for query feature quantization, FP16 reranking, and MRNG edge pruning.
-  * Enhanced benchmark visualizer with color-coded targets, $k$-intensity curves, and dashed styling for pruned graphs.
-* **Sliding Window Streaming Demo (`examples/sliding_window`):** Added an interactive dynamic graph benchmark showcasing real-time sliding window ingestion (continuous additions and deletions).
-* **Build & CI Improvements:**
-  * Configured MSVC `/MP` (multi-threaded compilation) and `/bigobj` (extended object section limit) in CMake compilation options.
-  * Updated Read the Docs webhook trigger in CI to pass authentication tokens as POST form data.
-  * Updated `python/README.md` and removed obsolete memory safety documentation.
+### Overview
+deglib v0.2.1 expands metric support with native half-precision and 8-bit integer formats, introduces scalar quantization tools with AVX-VNNI hardware acceleration, fixes a sequential memory leak in Python bindings, and adds the comprehensive VIBE benchmark suite.
+
+---
+
+### 🚀 Key Features & Improvements
+
+#### New Distance Metrics
+* **`FP16_L2` Metric:** Native IEEE 754 half-precision Euclidean distance (`Metric::FP16_L2`) with AVX-512, AVX2 (F16C/FMA), and Scalar kernels, fully integrated into C++ `FloatSpace` and Python bindings (`deglib.Metric.FP16_L2`).
+* **`Int8_InnerProduct` Metric:** Signed 8-bit integer inner product (`Metric::Int8_InnerProduct`) with AVX-512, AVX512-VNNI, AVX2, AVX2-VNNI, and Scalar kernels.
+* **`Int8_L2` Metric:** Signed 8-bit integer Euclidean distance (`Metric::Int8_L2`) with AVX-512, AVX2, and Scalar kernels, including Python bindings support (`np.int8`).
+* **`Uint8_InnerProduct` Metric:** 8-bit unsigned integer inner product distance (`Metric::Uint8_InnerProduct`) with AVX-512, AVX512-VNNI, AVX2, AVX2-VNNI, and Scalar kernels.
+
+#### Scalar Quantization (`deglib::optimization::quantization`)
+* **Symmetric Int8 Quantization:** Added `SymCalibratorInt8` for signed Int8 mapping ($[-127, 127]$), ideal for Cosine and Inner Product spaces.
+* **Affine UInt8 Quantization:** Added `AffineCalibratorUint8` for unsigned 8-bit mapping ($[0, 255]$ with dynamic scale and offset calibration), optimized for Euclidean ($L_2$) search.
+* **Python APIs:** Exposed via `deglib.optimization.quantize_int8()` and `deglib.optimization.quantize_uint8()`.
+
+#### SIMD & Hardware Acceleration (AVX-VNNI)
+* **VNNI Acceleration:** Dedicated AVX-VNNI and AVX512-VNNI hardware vector dot product instructions for 8-bit integer inner products (`Int8_IP` and `UInt8_IP`).
+* **Fast Horizontal Reductions:** Accelerated integer distance evaluation using optimized SIMD horizontal reductions in AVX-512 (`_mm512_reduce_add_epi32`) and AVX2.
+* **Centralized CPU Dispatch:** Streamlined CPU instruction set detection and runtime fallback resolution in `deglib::cpu::resolve_instruction_set()`.
+
+#### Benchmarks & Example Workflows
+* **VIBE Benchmark Suite (`examples/vibe`):** Added Vector Index Benchmark runner with automated Hugging Face dataset downloads, grid evaluations, interactive Plotly HTML visualizations with GUI log exploration, query feature quantization, and FP16/FP32 candidate reranking.
+* **Sliding Window Streaming Benchmark (`examples/sliding_window`):** Added dynamic streaming experiment reproducing continuous updates against DEG from the CleANN benchmark.
+
+---
+
+### 🛠️ Bug Fixes & Stability
+
+* **Python Memory Leak:** Resolved a memory leak in Python bindings when sequentially loading or converting multiple graph instances from disk.
+* **Compiler Compatibility (GCC / Clang):**
+  * Added missing `<stdexcept>` header in `cpu.h` fixing `std::runtime_error` compilation failures on Linux and macOS.
+  * Added missing `<cstring>` headers across integer distance implementations for standard portability.
+  * Fixed GCC/Clang inlining errors (`target specific option mismatch` in `_mm256_cvtph_ps`) by including `avx2,f16c,fma` in `DEGLIB_TARGET_AVX512` target attributes.
+* **Header Consistency:** Renamed `evp_inner_product.h` to `evp_ip.h` for uniform naming across all distance headers.
+* **Deterministic CI Tests:** Configured fixed seeds across graph integration tests to guarantee 100% test reproducibility across all platforms and Python versions.
+
+---
+
+### 🐍 Python API Summary
+
+* **Quantization Functions:**
+  * `deglib.optimization.quantize_int8(vectors, drop_ratio=0.0, num_threads=0) -> np.ndarray`
+  * `deglib.optimization.quantize_uint8(vectors, per_dim=False, drop_ratio=0.0, num_threads=0) -> np.ndarray`
+* **New Metrics:** `Metric.FP16_L2`, `Metric.Int8_InnerProduct`, `Metric.Int8_L2`, `Metric.Uint8_InnerProduct`.
+* **Reranking:** `deglib.search.rerank(space, queries, candidate_indices, base_vectors, k_top=..., return_distances=...)`
+
 ---
 
 ## deglib v0.2.0
