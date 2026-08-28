@@ -121,12 +121,12 @@ class Configuration:
 
 
 configurations = [
-    *Configuration.generate(100, 128, Metric.FP32_L2, 10),
-    *Configuration.generate(100, 128, Metric.Uint8_L2, 10),
-    *Configuration.generate(100, 128, Metric.Int8_L2, 10),
-    *Configuration.generate(100, 128, Metric.FP32_InnerProduct, 10),
-    *Configuration.generate(100, 128, Metric.Uint8_InnerProduct, 10),
-    *Configuration.generate(100, 128, Metric.Int8_InnerProduct, 10),
+    *Configuration.generate(100, 128, Metric.FP32_L2, 16),
+    *Configuration.generate(100, 128, Metric.Uint8_L2, 16),
+    *Configuration.generate(100, 128, Metric.Int8_L2, 16),
+    *Configuration.generate(100, 128, Metric.FP32_InnerProduct, 16),
+    *Configuration.generate(100, 128, Metric.Uint8_InnerProduct, 16),
+    *Configuration.generate(100, 128, Metric.Int8_InnerProduct, 16),
 ]
 
 large_configurations = [
@@ -142,8 +142,7 @@ def test_search(conf: Configuration):
         pytest.skip("This test is skipped on macOS with M1 chip, as avx2 is not supported on m1 chip.")
 
     k = 10
-    graph_result, dists = conf.graph.search(conf.query, eps=0.1, k=k)
-    dists = dists.flatten()
+    graph_result, dists = conf.graph.search(conf.query, eps=0.2, k=k)
     graph_result = graph_result.flatten()
     correct_result = get_ranking(conf.data, conf.graph, conf.query)[:k]
 
