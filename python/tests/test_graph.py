@@ -68,28 +68,29 @@ class Configuration:
 
     @staticmethod
     def generate(samples, dims, metric, edges_per_vertex):
+        rng = np.random.RandomState(42 + int(metric.value) * 17)
         if metric == Metric.FP32_InnerProduct:
             # normalize data
-            data = np.random.random((samples, dims)).astype(np.float32)
+            data = rng.random_sample((samples, dims)).astype(np.float32)
             data /= np.linalg.norm(data, axis=1).reshape(-1, 1)
 
-            query = np.random.random((dims,)).astype(np.float32)
+            query = rng.random_sample((dims,)).astype(np.float32)
             query /= np.linalg.norm(query)
         elif metric == Metric.FP32_L2:
-            data = np.random.normal(size=(samples, dims)).astype(np.float32)
-            query = np.random.normal(size=(dims,)).astype(np.float32)
+            data = rng.normal(size=(samples, dims)).astype(np.float32)
+            query = rng.normal(size=(dims,)).astype(np.float32)
         elif metric == Metric.Uint8_L2:
-            data = np.random.randint(0, 256, size=(samples, dims)).astype(np.uint8)
-            query = np.random.randint(0, 256, size=(dims,)).astype(np.uint8)
+            data = rng.randint(0, 256, size=(samples, dims)).astype(np.uint8)
+            query = rng.randint(0, 256, size=(dims,)).astype(np.uint8)
         elif metric == Metric.Uint8_InnerProduct:
-            data = np.random.randint(0, 256, size=(samples, dims)).astype(np.uint8)
-            query = np.random.randint(0, 256, size=(dims,)).astype(np.uint8)
+            data = rng.randint(0, 256, size=(samples, dims)).astype(np.uint8)
+            query = rng.randint(0, 256, size=(dims,)).astype(np.uint8)
         elif metric == Metric.Int8_L2:
-            data = np.random.randint(-128, 128, size=(samples, dims)).astype(np.int8)
-            query = np.random.randint(-128, 128, size=(dims,)).astype(np.int8)
+            data = rng.randint(-128, 128, size=(samples, dims)).astype(np.int8)
+            query = rng.randint(-128, 128, size=(dims,)).astype(np.int8)
         elif metric == Metric.Int8_InnerProduct:
-            data = np.random.randint(-128, 128, size=(samples, dims)).astype(np.int8)
-            query = np.random.randint(-128, 128, size=(dims,)).astype(np.int8)
+            data = rng.randint(-128, 128, size=(samples, dims)).astype(np.int8)
+            query = rng.randint(-128, 128, size=(dims,)).astype(np.int8)
         else:
             raise ValueError(f"Unsupported metric: {metric}")
 
@@ -98,6 +99,7 @@ class Configuration:
             edges_per_vertex=edges_per_vertex,
             metric=metric,
             optimization_target=deglib.builder.OptimizationTarget.LowLID,
+            seed=42,
         )
 
         graph_path = get_tmp_graph_file(samples, dims)
