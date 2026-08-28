@@ -3,10 +3,17 @@ name: C++ CI
 on:
   push:
     branches: [ main, master ]
+    paths:
+      - 'cpp/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/cpp-ci.yml'
   pull_request:
     branches: [ main, master ]
+    paths:
+      - 'cpp/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/cpp-ci.yml'
   workflow_dispatch:
-
 concurrency:
   group: cpp-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
