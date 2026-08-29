@@ -19,11 +19,7 @@ def load_vibe_config(config_path: Path | None = None) -> Dict[str, Any]:
 
     return {
         "k_list": args.get("k", [30]),
-        "extend_k_list": args.get("extend_k", [60]),
-        "extend_eps_list": args.get("extend_eps", args.get("build_eps", [0.1])),
         "opt_target_list": args.get("opt_target", ["HighLID"]),
-        "improve_k_list": args.get("improve_k", [0]),
-        "improve_eps_list": args.get("improve_eps", [0.0]),
         "prune_non_rng_list": args.get("prune_non_rng", [False]),
         "threads_list": args.get("threads", [1]),
         "query_dtype_list": args.get("query_dtype", ["float32"]),
@@ -53,25 +49,17 @@ def get_config_grid_presets(dataset_key: str) -> List[Dict[str, Any]]:
             resolved_opt_targets.append(target_name)
 
     grid = []
-    # Cartesian product: iterate over opt_target first, then all k, improvement, pruning and query_dtype variants
-    for opt_target, k, extend_k, extend_eps, imp_k, imp_eps, prune_non_rng, q_dtype in itertools.product(
+    # Cartesian product: iterate over opt_target first, then all k, pruning and query_dtype variants
+    for opt_target, k, prune_non_rng, q_dtype in itertools.product(
         resolved_opt_targets,
         cfg["k_list"],
-        cfg["extend_k_list"],
-        cfg["extend_eps_list"],
-        cfg["improve_k_list"],
-        cfg["improve_eps_list"],
         cfg["prune_non_rng_list"],
         cfg["query_dtype_list"],
     ):
         grid.append(
             {
                 "k": k,
-                "extend_k": extend_k,
-                "extend_eps": extend_eps,
                 "optimization_target": opt_target,
-                "improve_k": imp_k,
-                "improve_eps": imp_eps,
                 "prune_non_rng": prune_non_rng,
                 "query_dtype": q_dtype,
                 "anns_k": 100,
@@ -90,13 +78,9 @@ def get_default_config_preset(dataset_key: str) -> Dict[str, Any]:
         if presets
         else {
             "k": 30,
-            "extend_k": 60,
-            "extend_eps": 0.1,
             "optimization_target": "LowLID"
             if ("euclidean" in dataset_key.lower() or "agnews" in dataset_key.lower())
             else "HighLID",
-            "improve_k": 0,
-            "improve_eps": 0.0,
             "prune_non_rng": False,
             "query_dtype": "float32",
             "anns_k": 100,

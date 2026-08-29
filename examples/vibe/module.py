@@ -29,6 +29,8 @@ _OPT_TARGET_MAP = {
     "streamingdata": deglib.builder.OptimizationTarget.StreamingData,
 }
 
+_VALID_QUERY_DTYPES = ("float32", "int8")
+
 
 class DegANN(BaseANN):
     """
@@ -38,7 +40,7 @@ class DegANN(BaseANN):
       - k: Degree / edges per vertex (e.g. 16, 24, 30, 40, 48)
       - opt_target: 'HighLID' (for Cosine/IP/Normalized), 'LowLID' (for Euclidean), or 'StreamingData'
       - threads: CPU threads during graph build
-      - query_dtype: Dtype used to search graph ('float32', 'float16', 'int8')
+      - query_dtype: Dtype used to search graph ('float32', 'int8')
       - prune_non_rng: Optional MRNG edge pruning
     """
 
@@ -58,14 +60,14 @@ class DegANN(BaseANN):
         self.needs_normalization: bool = (self.metric == "cosine")
 
         self.k = int(k)
-        self.opt_target = str(opt_target)
         self.extend_k = 60
         self.extend_eps = 0.1
+        self.opt_target = str(opt_target)
         self.prune_non_rng = bool(prune_non_rng)
         self.threads = int(threads)
         self.query_dtype = query_dtype.lower().strip()
-        if self.query_dtype not in ("float32", "int8"):
-            raise ValueError(f"Unsupported dtype '{self.query_dtype}'. Choose from: 'float32', 'int8'")
+        if self.query_dtype not in _VALID_QUERY_DTYPES:
+            raise ValueError(f"Unsupported dtype '{self.query_dtype}'. Choose from: {_VALID_QUERY_DTYPES}")
         self.search_eps: float = 0.1
         self.rerank_size_factor: float = 1.0
 
@@ -75,6 +77,7 @@ class DegANN(BaseANN):
         self.metric_enum = self.query_metric_enum
         self.opt_enum = self._map_opt_target(self.opt_target)
 
+        self.quantizer = None
         self.graph: deglib.ReadOnlyGraph | None = None
         self.original_features_fp16: np.ndarray | None = None
         self.rerank_space_fp16: deglib.FloatSpace | None = None
@@ -163,18 +166,38 @@ class DegANN(BaseANN):
         filename = f"{dims}D_{build_metric_str}_K{self.k}_AddK{self.extend_k}Eps{self.extend_eps:.1f}_{self.opt_target}_FLAS.deg"
         return deg_dir / filename
 
+    def _init_and_calibrate_quantizer(self, X_f32: np.ndarray) -> np.ndarray | None:
+        """Calibrates the appropriate quantizer on base vectors and returns the quantized features."""
+        if self.query_dtype == "float32":
+            self.quantizer = None
+            return None
+        elif self.query_dtype == "int8":
+            self.quantizer = deglib.optimization.make_scalar_quantizer_int8(X_f32)
+            return self.quantizer.quantize(X_f32, num_threads=self.threads)
+        else:
+            raise ValueError(f"Unknown query_dtype: {self.query_dtype}")
+
     def fit(self, X: np.ndarray):
         """Builds or loads the DEG graph for corpus X, applies optional pruning and quantizes for search."""
         X_f32 = self._prepare_input(X)
         n_vectors, dims = X_f32.shape
 
-        # Store original features in FP16 for fast and memory-efficient reranking
-        if self.query_dtype == "int8":
-            self.original_features_fp16 = deglib.distances.floats_to_fp16(X_f32)
-            self.rerank_space_fp16 = deglib.FloatSpace.create(dim=dims, metric=_METRIC_MAP[(self.is_l2, "float16")])
-
         # Automatically resolve graph save/load path
         graph_path = self._resolve_graph_path(n_vectors, dims)
+
+        print(
+            f"Index Configuration: K={self.k}, ExtendK={self.extend_k}, ExtendEps={self.extend_eps:.2f}, "
+            f"Opt={self.opt_target}, Threads={self.threads}, QueryType={self.query_dtype}, "
+            f"PruneNonRNG={self.prune_non_rng}"
+        )
+
+        # Always calibrate quantizer on base dataset (even when loading cached graph)
+        quantized_features = self._init_and_calibrate_quantizer(X_f32)
+
+        # Store original features in FP16 for fast and memory-efficient reranking if quantized
+        if self.query_dtype != "float32":
+            self.original_features_fp16 = deglib.distances.floats_to_fp16(X_f32)
+            self.rerank_space_fp16 = deglib.FloatSpace.create(dim=dims, metric=_METRIC_MAP[(self.is_l2, "float16")])
 
         # 1. Obtain base graph in FP32 (either by loading cached file or by building)
         if graph_path and graph_path.is_file():
@@ -182,6 +205,7 @@ class DegANN(BaseANN):
             print(f"Loading cached DEG graph from: {graph_path}")
             graph = load_fn(str(graph_path))
         else:
+            print(f"No cached graph found at {graph_path}. Building from scratch...")
             graph = self._build_graph(X_f32, graph_path=graph_path)
 
         # 2. Optional MRNG edge pruning on SizeBoundedGraph (MutableGraph)
@@ -193,11 +217,10 @@ class DegANN(BaseANN):
             graph = mut_graph
 
         # 3. Finalize ReadOnlyGraph with query_dtype features
-        if self.query_dtype == "int8":
-            print(f"Finalizing ReadOnlyGraph with INT8 (Metric: {self.query_metric_enum.name})...")
-            int8_features = deglib.optimization.quantize_int8(X_f32, num_threads=self.threads)
+        if quantized_features is not None:
+            print(f"Finalizing ReadOnlyGraph with {self.query_dtype.upper()} (Metric: {self.query_metric_enum.name})...")
             target_space = deglib.FloatSpace.create(dim=dims, metric=self.query_metric_enum)
-            self.graph = graph.to_readonly(target_space, int8_features)
+            self.graph = graph.to_readonly(target_space, quantized_features)
         else:
             self.graph = graph if not graph.is_mutable() else graph.to_readonly()
 
@@ -206,6 +229,15 @@ class DegANN(BaseANN):
         self.search_eps = float(search_eps)
         self.rerank_size_factor = float(rerank_size_factor)
 
+    def _prepare_query_vectors(self, q_f32: np.ndarray, threads: int = 1) -> np.ndarray:
+        """Transforms query vectors using the base-calibrated quantizer."""
+        if self.query_dtype == "float32":
+            return q_f32
+        elif self.quantizer is not None:
+            return self.quantizer.quantize(q_f32, num_threads=threads)
+        else:
+            return q_f32
+
     def _search_and_rerank(self, queries: np.ndarray, n: int, threads: int = 1) -> np.ndarray:
         """Unified search and optional FP16 reranking engine."""
         if self.graph is None:
@@ -213,7 +245,7 @@ class DegANN(BaseANN):
 
         fetch_k = max(n, int(round(n * self.rerank_size_factor)))
         q_f32 = self._prepare_input(queries)
-        query_mat = deglib.optimization.quantize_int8(q_f32, num_threads=threads) if self.query_dtype == "int8" else q_f32
+        query_mat = self._prepare_query_vectors(q_f32, threads=threads)
         res = self.graph.search(query_mat, eps=self.search_eps, k=fetch_k, threads=threads, return_distances=False, unsorted=True)
         indices = res[0] if isinstance(res, tuple) else res
 

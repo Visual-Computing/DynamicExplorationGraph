@@ -194,7 +194,7 @@ def main():
         print(f"\n--- System & Distance Config ---")
         print(f"Metric: {metric_str} ({metric_enum.name}), Dimensions: {dims}")
         print(f"Vector Space Type: FloatSpace ({instruction_set})")
-        print(f"Query Dtype: {args.query_dtype.upper()}")
+        print(f"Query Dtype: {args.query_dtype.upper() if args.query_dtype else 'FROM CONFIG.YML'}")
         print(f"Hardware AVX: {avx_usable()}, AVX-512: {avx512_usable()}")
 
         # Linear scan baseline
@@ -225,15 +225,13 @@ def main():
                 threads=args.build_threads,
                 query_dtype=query_dtype,
             )
-            print(
-                f"\n--- [{cfg_idx + 1}/{len(configs_to_run)}] Fitting / Loading Index: K={k}, Opt={opt_target}, Threads={args.build_threads}, QueryType={query_dtype}, PruneNonRNG={is_pruned} ---"
-            )
+            print(f"\n--- [{cfg_idx + 1}/{len(configs_to_run)}] Processing Graph Configuration ---")
             adapter.fit(base_vecs)
 
             deglib.analysis.analyze_graph(adapter.graph)
 
-            # Determine rerank factors to evaluate
-            if query_dtype == "int8":
+            # Determine rerank factors to evaluate (for all quantized formats)
+            if query_dtype != "float32":
                 factors_to_eval = cfg.get("rerank_size_factors", [1.0, 1.2, 1.5, 2.0])
             else:
                 factors_to_eval = [1.0]
