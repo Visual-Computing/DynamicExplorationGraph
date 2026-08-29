@@ -233,11 +233,6 @@ class DegANN(BaseANN):
             rerank_factor=self.rerank_size_factor,
         )
 
-        # Clean up temporary data / graphs and wait briefly for threads/CPU to settle
-        del graph, X_f32, quantized_features
-        gc.collect()
-        time.sleep(5)
-
     def set_query_arguments(self, search_eps: float, rerank_size_factor: float = 1.0):
         """Sets query-time search_eps and rerank scaling factor."""
         self.search_eps = float(search_eps)

@@ -830,13 +830,13 @@ class SearcherPy {
         if (buf.ndim != 1 && (buf.ndim != 2 || buf.shape[0] != 1)) {
             throw std::invalid_argument("search query must be 1D vector (or 1xDim 2D array)");
         }
-        auto result = py::array_t<uint32_t>({size_t(k)});
+        py::array_t<uint32_t> result(static_cast<py::ssize_t>(k));
         uint32_t* out_ptr = static_cast<uint32_t*>(result.request().ptr);
 
         py::array_t<float> dist_result;
         float* dist_ptr = nullptr;
         if (return_distances) {
-            dist_result = py::array_t<float>({size_t(k)});
+            dist_result = py::array_t<float>(static_cast<py::ssize_t>(k));
             dist_ptr = static_cast<float*>(dist_result.request().ptr);
         }
 
