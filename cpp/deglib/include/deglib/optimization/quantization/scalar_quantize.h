@@ -7,6 +7,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <format>
+#include <limits>
 #include <queue>
 #include <stdexcept>
 #include <string>
@@ -16,7 +18,7 @@
 namespace deglib::quantization::scalar {
 
 // ============================================================================
-// Calibration Helpers (finding min/max/absmax with optional drop_ratio / clipping)
+// Calibration Helpers (internal percentile / min / max scanning)
 // ============================================================================
 
 inline float limit_range(float x, float low = 0.0f, float high = 1.0f) {
@@ -31,10 +33,6 @@ inline float limit_range_sym(float x, float bound = 1.0f) {
     return x;
 }
 
-/**
- * Finds global min and max across all items, with optional drop_ratio (percentile clipping).
- * If drop_ratio == 0.0f, computes exact min and max via linear scan.
- */
 inline std::pair<float, float> find_minmax(const float* data, size_t total_items, float drop_ratio = 0.0f) {
     if (total_items == 0) return {0.0f, 0.0f};
 
@@ -50,8 +48,8 @@ inline std::pair<float, float> find_minmax(const float* data, size_t total_items
     }
 
     size_t top = static_cast<size_t>(static_cast<double>(total_items) * drop_ratio) + 1;
-    std::priority_queue<float, std::vector<float>, std::less<float>> max_heap;     // keeps smallest top elements
-    std::priority_queue<float, std::vector<float>, std::greater<float>> min_heap;  // keeps largest top elements
+    std::priority_queue<float, std::vector<float>, std::less<float>> max_heap;
+    std::priority_queue<float, std::vector<float>, std::greater<float>> min_heap;
 
     for (size_t i = 0; i < total_items; ++i) {
         float x = data[i];
@@ -73,10 +71,6 @@ inline std::pair<float, float> find_minmax(const float* data, size_t total_items
     return {max_heap.top(), min_heap.top()};
 }
 
-/**
- * Finds absolute maximum across all items, with optional drop_ratio (percentile clipping).
- * If drop_ratio == 0.0f, computes exact abs_max via linear scan.
- */
 inline float find_absmax(const float* data, size_t total_items, float drop_ratio = 0.0f) {
     if (total_items == 0) return 0.0f;
 
@@ -105,9 +99,43 @@ inline float find_absmax(const float* data, size_t total_items, float drop_ratio
     return min_heap.top();
 }
 
-/**
- * Per-dimension min and max calibration.
- */
+inline void find_absmax_perdim(std::vector<float>& abs_maxs, const float* data, size_t n, uint32_t dim, float drop_ratio = 0.0f) {
+    abs_maxs.assign(dim, 0.0f);
+    if (n == 0 || dim == 0) return;
+
+    if (drop_ratio <= 0.0f) {
+        for (size_t i = 0; i < n; ++i) {
+            const float* row = data + i * dim;
+            for (uint32_t d = 0; d < dim; ++d) {
+                float v = std::abs(row[d]);
+                if (v > abs_maxs[d]) abs_maxs[d] = v;
+            }
+        }
+        return;
+    }
+
+    size_t top = static_cast<size_t>(static_cast<double>(n) * drop_ratio) + 1;
+    std::vector<std::priority_queue<float, std::vector<float>, std::greater<float>>> min_heaps(dim);
+
+    for (size_t i = 0; i < n; ++i) {
+        const float* row = data + i * dim;
+        for (uint32_t d = 0; d < dim; ++d) {
+            float x = std::abs(row[d]);
+            auto& mi_h = min_heaps[d];
+            if (mi_h.size() < top) {
+                mi_h.push(x);
+            } else if (x > mi_h.top()) {
+                mi_h.pop();
+                mi_h.push(x);
+            }
+        }
+    }
+
+    for (uint32_t d = 0; d < dim; ++d) {
+        abs_maxs[d] = min_heaps[d].top();
+    }
+}
+
 inline void find_minmax_perdim(std::vector<float>& mins, std::vector<float>& maxs, const float* data, size_t n, uint32_t dim, float drop_ratio = 0.0f) {
     mins.assign(dim, std::numeric_limits<float>::max());
     maxs.assign(dim, std::numeric_limits<float>::lowest());
@@ -159,23 +187,55 @@ inline void find_minmax_perdim(std::vector<float>& mins, std::vector<float>& max
 }
 
 // ============================================================================
-// Calibrators
+// Object-Oriented State-Aware Quantizers
 // ============================================================================
 
-struct SymCalibratorInt8 {
+/**
+ * Symmetric Signed INT8 Quantizer [-127, 127] (global scale).
+ * Supports FP32 and FP16 (uint16_t) inputs.
+ */
+class ScalarQuantizerInt8 {
+public:
     float abs_max = 1.0f;
-    float scale = 127.0f;       // scale = 127.0f / abs_max
-    float inv_scale = 1.0f / 127.0f; // inv_scale = abs_max / 127.0f
+    float scale = 127.0f;
+    float inv_scale = 1.0f / 127.0f;
+    bool is_fitted = false;
 
-    SymCalibratorInt8() = default;
+    ScalarQuantizerInt8() = default;
+    explicit ScalarQuantizerInt8(float abs_max_val) {
+        set_abs_max(abs_max_val);
+    }
 
-    void calibrate(const float* data, size_t total_items, float drop_ratio = 0.0f) {
-        abs_max = find_absmax(data, total_items, drop_ratio);
-        if (abs_max <= 1e-12f) {
-            abs_max = 1.0f;
-        }
+    void set_abs_max(float val) {
+        abs_max = (val <= 1e-12f) ? 1.0f : val;
         scale = 127.0f / abs_max;
         inv_scale = abs_max / 127.0f;
+        is_fitted = true;
+    }
+
+    void fit(const float* data, size_t count, uint32_t dim, float drop_ratio = 0.0f) {
+        if (count == 0 || dim == 0) return;
+        float found_max = find_absmax(data, count * dim, drop_ratio);
+        set_abs_max(found_max);
+    }
+
+    void fit(const uint16_t* data_fp16, size_t count, uint32_t dim, float drop_ratio = 0.0f) {
+        if (count == 0 || dim == 0) return;
+        if (drop_ratio <= 0.0f) {
+            uint16_t max_half = 0;
+            for (size_t i = 0; i < count * dim; ++i) {
+                uint16_t mag = data_fp16[i] & 0x7FFFu;
+                if (mag > max_half) max_half = mag;
+            }
+            float val = deglib::distances::fp16::fp16_to_float(max_half);
+            set_abs_max(val);
+        } else {
+            std::vector<float> converted(count * dim);
+            for (size_t i = 0; i < count * dim; ++i) {
+                converted[i] = deglib::distances::fp16::fp16_to_float(data_fp16[i]);
+            }
+            fit(converted.data(), count, dim, drop_ratio);
+        }
     }
 
     inline int8_t transform(float x) const {
@@ -188,25 +248,265 @@ struct SymCalibratorInt8 {
     inline float transform_back(int8_t x) const {
         return static_cast<float>(x) * inv_scale;
     }
+
+    void quantize(const float* src, int8_t* dst, size_t count, uint32_t dim, size_t numThreads = 0) const {
+        if (count == 0 || dim == 0) return;
+        deglib::concurrent::parallel_batch_for(0, count, numThreads, [src, dst, dim, this](size_t begin, size_t end, size_t) {
+            for (size_t i = begin; i < end; ++i) {
+                const float* s = src + i * dim;
+                int8_t* d = dst + i * dim;
+                for (uint32_t j = 0; j < dim; ++j) {
+                    d[j] = this->transform(s[j]);
+                }
+            }
+        });
+    }
+
+    void quantize(const uint16_t* src_fp16, int8_t* dst, size_t count, uint32_t dim, size_t numThreads = 0) const {
+        if (count == 0 || dim == 0) return;
+        deglib::concurrent::parallel_batch_for(0, count, numThreads, [src_fp16, dst, dim, this](size_t begin, size_t end, size_t) {
+            for (size_t i = begin; i < end; ++i) {
+                const uint16_t* s = src_fp16 + i * dim;
+                int8_t* d = dst + i * dim;
+                for (uint32_t j = 0; j < dim; ++j) {
+                    float val = deglib::distances::fp16::fp16_to_float(s[j]);
+                    d[j] = this->transform(val);
+                }
+            }
+        });
+    }
+
+    std::vector<int8_t> quantize(const float* src, size_t count, uint32_t dim, size_t numThreads = 0) const {
+        if (count == 0 || dim == 0) return {};
+        std::vector<int8_t> result(count * dim);
+        quantize(src, result.data(), count, dim, numThreads);
+        return result;
+    }
+
+    std::vector<int8_t> quantize(const uint16_t* src_fp16, size_t count, uint32_t dim, size_t numThreads = 0) const {
+        if (count == 0 || dim == 0) return {};
+        std::vector<int8_t> result(count * dim);
+        quantize(src_fp16, result.data(), count, dim, numThreads);
+        return result;
+    }
+
+    void dequantize(const int8_t* src, float* dst, size_t count, uint32_t dim, size_t numThreads = 0) const {
+        if (count == 0 || dim == 0) return;
+        deglib::concurrent::parallel_batch_for(0, count, numThreads, [src, dst, dim, this](size_t begin, size_t end, size_t) {
+            for (size_t i = begin; i < end; ++i) {
+                const int8_t* s = src + i * dim;
+                float* d = dst + i * dim;
+                for (uint32_t j = 0; j < dim; ++j) {
+                    d[j] = this->transform_back(s[j]);
+                }
+            }
+        });
+    }
+
+    std::vector<float> dequantize(const int8_t* src, size_t count, uint32_t dim, size_t numThreads = 0) const {
+        if (count == 0 || dim == 0) return {};
+        std::vector<float> result(count * dim);
+        dequantize(src, result.data(), count, dim, numThreads);
+        return result;
+    }
+
+    std::vector<int8_t> fit_quantize(const float* data, size_t count, uint32_t dim, float drop_ratio = 0.0f, size_t numThreads = 0) {
+        fit(data, count, dim, drop_ratio);
+        return quantize(data, count, dim, numThreads);
+    }
+
+    std::vector<int8_t> fit_quantize(const uint16_t* data_fp16, size_t count, uint32_t dim, float drop_ratio = 0.0f, size_t numThreads = 0) {
+        fit(data_fp16, count, dim, drop_ratio);
+        return quantize(data_fp16, count, dim, numThreads);
+    }
 };
 
-struct AffineCalibratorUint8 {
+/**
+ * Per-dimension Symmetric Signed INT8 Quantizer [-127, 127].
+ * Calibrates abs_max per dimension. Supports FP32 and FP16 (uint16_t) inputs.
+ */
+class ScalarQuantizerInt8PerDim {
+public:
+    uint32_t dim = 0;
+    std::vector<float> abs_maxs;
+    std::vector<float> scales;
+    std::vector<float> inv_scales;
+    bool is_fitted = false;
+
+    ScalarQuantizerInt8PerDim() = default;
+    explicit ScalarQuantizerInt8PerDim(uint32_t d) : dim(d), abs_maxs(d), scales(d), inv_scales(d) {}
+
+    void set_abs_maxs(const std::vector<float>& max_vals) {
+        dim = static_cast<uint32_t>(max_vals.size());
+        abs_maxs = max_vals;
+        scales.resize(dim);
+        inv_scales.resize(dim);
+        for (uint32_t j = 0; j < dim; ++j) {
+            float m = (abs_maxs[j] <= 1e-12f) ? 1.0f : abs_maxs[j];
+            abs_maxs[j] = m;
+            scales[j] = 127.0f / m;
+            inv_scales[j] = m / 127.0f;
+        }
+        is_fitted = true;
+    }
+
+    void fit(const float* data, size_t count, uint32_t d, float drop_ratio = 0.0f) {
+        if (count == 0 || d == 0) return;
+        dim = d;
+        find_absmax_perdim(abs_maxs, data, count, dim, drop_ratio);
+        scales.resize(dim);
+        inv_scales.resize(dim);
+        for (uint32_t j = 0; j < dim; ++j) {
+            float m = (abs_maxs[j] <= 1e-12f) ? 1.0f : abs_maxs[j];
+            abs_maxs[j] = m;
+            scales[j] = 127.0f / m;
+            inv_scales[j] = m / 127.0f;
+        }
+        is_fitted = true;
+    }
+
+    void fit(const uint16_t* data_fp16, size_t count, uint32_t d, float drop_ratio = 0.0f) {
+        if (count == 0 || d == 0) return;
+        std::vector<float> converted(count * d);
+        for (size_t i = 0; i < count * d; ++i) {
+            converted[i] = deglib::distances::fp16::fp16_to_float(data_fp16[i]);
+        }
+        fit(converted.data(), count, d, drop_ratio);
+    }
+
+    inline int8_t transform(float x, uint32_t d) const {
+        float scaled = std::round(x * scales[d]);
+        if (scaled < -127.0f) return -127;
+        if (scaled > 127.0f) return 127;
+        return static_cast<int8_t>(scaled);
+    }
+
+    inline float transform_back(int8_t x, uint32_t d) const {
+        return static_cast<float>(x) * inv_scales[d];
+    }
+
+    void quantize(const float* src, int8_t* dst, size_t count, uint32_t d, size_t numThreads = 0) const {
+        if (count == 0 || d == 0) return;
+        if (d != dim) {
+            throw std::invalid_argument(std::format("Dimension mismatch in ScalarQuantizerInt8PerDim: expected {}, got {}", dim, d));
+        }
+        deglib::concurrent::parallel_batch_for(0, count, numThreads, [src, dst, d, this](size_t begin, size_t end, size_t) {
+            for (size_t i = begin; i < end; ++i) {
+                const float* s = src + i * d;
+                int8_t* dst_row = dst + i * d;
+                for (uint32_t j = 0; j < d; ++j) {
+                    dst_row[j] = this->transform(s[j], j);
+                }
+            }
+        });
+    }
+
+    void quantize(const uint16_t* src_fp16, int8_t* dst, size_t count, uint32_t d, size_t numThreads = 0) const {
+        if (count == 0 || d == 0) return;
+        if (d != dim) {
+            throw std::invalid_argument(std::format("Dimension mismatch in ScalarQuantizerInt8PerDim: expected {}, got {}", dim, d));
+        }
+        deglib::concurrent::parallel_batch_for(0, count, numThreads, [src_fp16, dst, d, this](size_t begin, size_t end, size_t) {
+            for (size_t i = begin; i < end; ++i) {
+                const uint16_t* s = src_fp16 + i * d;
+                int8_t* dst_row = dst + i * d;
+                for (uint32_t j = 0; j < d; ++j) {
+                    float val = deglib::distances::fp16::fp16_to_float(s[j]);
+                    dst_row[j] = this->transform(val, j);
+                }
+            }
+        });
+    }
+
+    std::vector<int8_t> quantize(const float* src, size_t count, uint32_t d, size_t numThreads = 0) const {
+        if (count == 0 || d == 0) return {};
+        std::vector<int8_t> result(count * d);
+        quantize(src, result.data(), count, d, numThreads);
+        return result;
+    }
+
+    std::vector<int8_t> quantize(const uint16_t* src_fp16, size_t count, uint32_t d, size_t numThreads = 0) const {
+        if (count == 0 || d == 0) return {};
+        std::vector<int8_t> result(count * d);
+        quantize(src_fp16, result.data(), count, d, numThreads);
+        return result;
+    }
+
+    void dequantize(const int8_t* src, float* dst, size_t count, uint32_t d, size_t numThreads = 0) const {
+        if (count == 0 || d == 0) return;
+        if (d != dim) {
+            throw std::invalid_argument(std::format("Dimension mismatch in ScalarQuantizerInt8PerDim: expected {}, got {}", dim, d));
+        }
+        deglib::concurrent::parallel_batch_for(0, count, numThreads, [src, dst, d, this](size_t begin, size_t end, size_t) {
+            for (size_t i = begin; i < end; ++i) {
+                const int8_t* s = src + i * d;
+                float* dst_row = dst + i * d;
+                for (uint32_t j = 0; j < d; ++j) {
+                    dst_row[j] = this->transform_back(s[j], j);
+                }
+            }
+        });
+    }
+
+    std::vector<float> dequantize(const int8_t* src, size_t count, uint32_t d, size_t numThreads = 0) const {
+        if (count == 0 || d == 0) return {};
+        std::vector<float> result(count * d);
+        dequantize(src, result.data(), count, d, numThreads);
+        return result;
+    }
+
+    std::vector<int8_t> fit_quantize(const float* data, size_t count, uint32_t d, float drop_ratio = 0.0f, size_t numThreads = 0) {
+        fit(data, count, d, drop_ratio);
+        return quantize(data, count, d, numThreads);
+    }
+
+    std::vector<int8_t> fit_quantize(const uint16_t* data_fp16, size_t count, uint32_t d, float drop_ratio = 0.0f, size_t numThreads = 0) {
+        fit(data_fp16, count, d, drop_ratio);
+        return quantize(data_fp16, count, d, numThreads);
+    }
+};
+
+/**
+ * Global Affine UINT8 Quantizer [0, 255] (ideal for Euclidean L2).
+ * Supports FP32 and FP16 (uint16_t) inputs.
+ */
+class ScalarQuantizerUint8 {
+public:
     float min_val = 0.0f;
     float max_val = 1.0f;
     float dif = 1.0f;
     float scale = 255.0f;
+    bool is_fitted = false;
 
-    AffineCalibratorUint8() = default;
+    ScalarQuantizerUint8() = default;
+    ScalarQuantizerUint8(float min_v, float max_v) {
+        set_range(min_v, max_v);
+    }
 
-    void calibrate(const float* data, size_t total_items, float drop_ratio = 0.0f) {
-        auto [mi, ma] = find_minmax(data, total_items, drop_ratio);
-        min_val = mi;
-        max_val = ma;
+    void set_range(float min_v, float max_v) {
+        min_val = min_v;
+        max_val = max_v;
         dif = max_val - min_val;
         if (dif <= 1e-12f) {
             dif = 1.0f;
         }
         scale = 255.0f / dif;
+        is_fitted = true;
+    }
+
+    void fit(const float* data, size_t count, uint32_t dim, float drop_ratio = 0.0f) {
+        if (count == 0 || dim == 0) return;
+        auto [mi, ma] = find_minmax(data, count * dim, drop_ratio);
+        set_range(mi, ma);
+    }
+
+    void fit(const uint16_t* data_fp16, size_t count, uint32_t dim, float drop_ratio = 0.0f) {
+        if (count == 0 || dim == 0) return;
+        std::vector<float> converted(count * dim);
+        for (size_t i = 0; i < count * dim; ++i) {
+            converted[i] = deglib::distances::fp16::fp16_to_float(data_fp16[i]);
+        }
+        fit(converted.data(), count, dim, drop_ratio);
     }
 
     inline uint8_t transform(float x) const {
@@ -219,21 +519,102 @@ struct AffineCalibratorUint8 {
     inline float transform_back(uint8_t x) const {
         return static_cast<float>(x) / 255.0f * dif + min_val;
     }
+
+    void quantize(const float* src, uint8_t* dst, size_t count, uint32_t dim, size_t numThreads = 0) const {
+        if (count == 0 || dim == 0) return;
+        deglib::concurrent::parallel_batch_for(0, count, numThreads, [src, dst, dim, this](size_t begin, size_t end, size_t) {
+            for (size_t i = begin; i < end; ++i) {
+                const float* s = src + i * dim;
+                uint8_t* d = dst + i * dim;
+                for (uint32_t j = 0; j < dim; ++j) {
+                    d[j] = this->transform(s[j]);
+                }
+            }
+        });
+    }
+
+    void quantize(const uint16_t* src_fp16, uint8_t* dst, size_t count, uint32_t dim, size_t numThreads = 0) const {
+        if (count == 0 || dim == 0) return;
+        deglib::concurrent::parallel_batch_for(0, count, numThreads, [src_fp16, dst, dim, this](size_t begin, size_t end, size_t) {
+            for (size_t i = begin; i < end; ++i) {
+                const uint16_t* s = src_fp16 + i * dim;
+                uint8_t* d = dst + i * dim;
+                for (uint32_t j = 0; j < dim; ++j) {
+                    float val = deglib::distances::fp16::fp16_to_float(s[j]);
+                    d[j] = this->transform(val);
+                }
+            }
+        });
+    }
+
+    std::vector<uint8_t> quantize(const float* src, size_t count, uint32_t dim, size_t numThreads = 0) const {
+        if (count == 0 || dim == 0) return {};
+        std::vector<uint8_t> result(count * dim);
+        quantize(src, result.data(), count, dim, numThreads);
+        return result;
+    }
+
+    std::vector<uint8_t> quantize(const uint16_t* src_fp16, size_t count, uint32_t dim, size_t numThreads = 0) const {
+        if (count == 0 || dim == 0) return {};
+        std::vector<uint8_t> result(count * dim);
+        quantize(src_fp16, result.data(), count, dim, numThreads);
+        return result;
+    }
+
+    void dequantize(const uint8_t* src, float* dst, size_t count, uint32_t dim, size_t numThreads = 0) const {
+        if (count == 0 || dim == 0) return;
+        deglib::concurrent::parallel_batch_for(0, count, numThreads, [src, dst, dim, this](size_t begin, size_t end, size_t) {
+            for (size_t i = begin; i < end; ++i) {
+                const uint8_t* s = src + i * dim;
+                float* d = dst + i * dim;
+                for (uint32_t j = 0; j < dim; ++j) {
+                    d[j] = this->transform_back(s[j]);
+                }
+            }
+        });
+    }
+
+    std::vector<float> dequantize(const uint8_t* src, size_t count, uint32_t dim, size_t numThreads = 0) const {
+        if (count == 0 || dim == 0) return {};
+        std::vector<float> result(count * dim);
+        dequantize(src, result.data(), count, dim, numThreads);
+        return result;
+    }
+
+    std::vector<uint8_t> fit_quantize(const float* data, size_t count, uint32_t dim, float drop_ratio = 0.0f, size_t numThreads = 0) {
+        fit(data, count, dim, drop_ratio);
+        return quantize(data, count, dim, numThreads);
+    }
+
+    std::vector<uint8_t> fit_quantize(const uint16_t* data_fp16, size_t count, uint32_t dim, float drop_ratio = 0.0f, size_t numThreads = 0) {
+        fit(data_fp16, count, dim, drop_ratio);
+        return quantize(data_fp16, count, dim, numThreads);
+    }
 };
 
-struct AffinePerDimCalibratorUint8 {
+/**
+ * Per-dimension Affine UINT8 Quantizer [0, 255] (ideal for Euclidean L2 with varying dimensional scales).
+ * Supports FP32 and FP16 (uint16_t) inputs.
+ */
+class ScalarQuantizerUint8PerDim {
+public:
     uint32_t dim = 0;
     std::vector<float> mins;
     std::vector<float> maxs;
     std::vector<float> difs;
     std::vector<float> scales;
+    bool is_fitted = false;
 
-    AffinePerDimCalibratorUint8() = default;
-    explicit AffinePerDimCalibratorUint8(uint32_t d) : dim(d), mins(d), maxs(d), difs(d), scales(d) {}
+    ScalarQuantizerUint8PerDim() = default;
+    explicit ScalarQuantizerUint8PerDim(uint32_t d) : dim(d), mins(d), maxs(d), difs(d), scales(d) {}
 
-    void calibrate(const float* data, size_t n, uint32_t d, float drop_ratio = 0.0f) {
-        dim = d;
-        find_minmax_perdim(mins, maxs, data, n, dim, drop_ratio);
+    void set_ranges(const std::vector<float>& min_vals, const std::vector<float>& max_vals) {
+        if (min_vals.size() != max_vals.size()) {
+            throw std::invalid_argument("min_vals and max_vals size mismatch");
+        }
+        dim = static_cast<uint32_t>(min_vals.size());
+        mins = min_vals;
+        maxs = max_vals;
         difs.resize(dim);
         scales.resize(dim);
         for (uint32_t j = 0; j < dim; ++j) {
@@ -241,6 +622,30 @@ struct AffinePerDimCalibratorUint8 {
             if (difs[j] <= 1e-12f) difs[j] = 1.0f;
             scales[j] = 255.0f / difs[j];
         }
+        is_fitted = true;
+    }
+
+    void fit(const float* data, size_t count, uint32_t d, float drop_ratio = 0.0f) {
+        if (count == 0 || d == 0) return;
+        dim = d;
+        find_minmax_perdim(mins, maxs, data, count, dim, drop_ratio);
+        difs.resize(dim);
+        scales.resize(dim);
+        for (uint32_t j = 0; j < dim; ++j) {
+            difs[j] = maxs[j] - mins[j];
+            if (difs[j] <= 1e-12f) difs[j] = 1.0f;
+            scales[j] = 255.0f / difs[j];
+        }
+        is_fitted = true;
+    }
+
+    void fit(const uint16_t* data_fp16, size_t count, uint32_t d, float drop_ratio = 0.0f) {
+        if (count == 0 || d == 0) return;
+        std::vector<float> converted(count * d);
+        for (size_t i = 0; i < count * d; ++i) {
+            converted[i] = deglib::distances::fp16::fp16_to_float(data_fp16[i]);
+        }
+        fit(converted.data(), count, d, drop_ratio);
     }
 
     inline uint8_t transform(float x, uint32_t d) const {
@@ -253,170 +658,86 @@ struct AffinePerDimCalibratorUint8 {
     inline float transform_back(uint8_t x, uint32_t d) const {
         return static_cast<float>(x) / 255.0f * difs[d] + mins[d];
     }
+
+    void quantize(const float* src, uint8_t* dst, size_t count, uint32_t d, size_t numThreads = 0) const {
+        if (count == 0 || d == 0) return;
+        if (d != dim) {
+            throw std::invalid_argument(std::format("Dimension mismatch in ScalarQuantizerUint8PerDim: expected {}, got {}", dim, d));
+        }
+        deglib::concurrent::parallel_batch_for(0, count, numThreads, [src, dst, d, this](size_t begin, size_t end, size_t) {
+            for (size_t i = begin; i < end; ++i) {
+                const float* s = src + i * d;
+                uint8_t* dst_row = dst + i * d;
+                for (uint32_t j = 0; j < d; ++j) {
+                    dst_row[j] = this->transform(s[j], j);
+                }
+            }
+        });
+    }
+
+    void quantize(const uint16_t* src_fp16, uint8_t* dst, size_t count, uint32_t d, size_t numThreads = 0) const {
+        if (count == 0 || d == 0) return;
+        if (d != dim) {
+            throw std::invalid_argument(std::format("Dimension mismatch in ScalarQuantizerUint8PerDim: expected {}, got {}", dim, d));
+        }
+        deglib::concurrent::parallel_batch_for(0, count, numThreads, [src_fp16, dst, d, this](size_t begin, size_t end, size_t) {
+            for (size_t i = begin; i < end; ++i) {
+                const uint16_t* s = src_fp16 + i * d;
+                uint8_t* dst_row = dst + i * d;
+                for (uint32_t j = 0; j < d; ++j) {
+                    float val = deglib::distances::fp16::fp16_to_float(s[j]);
+                    dst_row[j] = this->transform(val, j);
+                }
+            }
+        });
+    }
+
+    std::vector<uint8_t> quantize(const float* src, size_t count, uint32_t d, size_t numThreads = 0) const {
+        if (count == 0 || d == 0) return {};
+        std::vector<uint8_t> result(count * d);
+        quantize(src, result.data(), count, d, numThreads);
+        return result;
+    }
+
+    std::vector<uint8_t> quantize(const uint16_t* src_fp16, size_t count, uint32_t d, size_t numThreads = 0) const {
+        if (count == 0 || d == 0) return {};
+        std::vector<uint8_t> result(count * d);
+        quantize(src_fp16, result.data(), count, d, numThreads);
+        return result;
+    }
+
+    void dequantize(const uint8_t* src, float* dst, size_t count, uint32_t d, size_t numThreads = 0) const {
+        if (count == 0 || d == 0) return;
+        if (d != dim) {
+            throw std::invalid_argument(std::format("Dimension mismatch in ScalarQuantizerUint8PerDim: expected {}, got {}", dim, d));
+        }
+        deglib::concurrent::parallel_batch_for(0, count, numThreads, [src, dst, d, this](size_t begin, size_t end, size_t) {
+            for (size_t i = begin; i < end; ++i) {
+                const uint8_t* s = src + i * d;
+                float* dst_row = dst + i * d;
+                for (uint32_t j = 0; j < d; ++j) {
+                    dst_row[j] = this->transform_back(s[j], j);
+                }
+            }
+        });
+    }
+
+    std::vector<float> dequantize(const uint8_t* src, size_t count, uint32_t d, size_t numThreads = 0) const {
+        if (count == 0 || d == 0) return {};
+        std::vector<float> result(count * d);
+        dequantize(src, result.data(), count, d, numThreads);
+        return result;
+    }
+
+    std::vector<uint8_t> fit_quantize(const float* data, size_t count, uint32_t d, float drop_ratio = 0.0f, size_t numThreads = 0) {
+        fit(data, count, d, drop_ratio);
+        return quantize(data, count, d, numThreads);
+    }
+
+    std::vector<uint8_t> fit_quantize(const uint16_t* data_fp16, size_t count, uint32_t d, float drop_ratio = 0.0f, size_t numThreads = 0) {
+        fit(data_fp16, count, d, drop_ratio);
+        return quantize(data_fp16, count, d, numThreads);
+    }
 };
-
-// ============================================================================
-// Batch & Single Quantization APIs
-// ============================================================================
-
-/**
- * Quantize FP32 vectors to symmetric signed INT8 [-127, 127] (ideal for InnerProduct / Cosine).
- * Multi-threaded using deglib::concurrent::parallel_batch_for.
- *
- * @param data       Pointer to [count x dim] float data
- * @param count      Number of vectors
- * @param dim        Dimension of each vector
- * @param drop_ratio Optional percentile clipping for calibration (default 0.0)
- * @param numThreads Worker threads (0 = auto-detect hardware concurrency)
- * @param out_calibrator Optional pointer to receive the fitted calibrator
- * @return std::vector<int8_t> with count * dim bytes
- */
-inline std::vector<int8_t> quantize_int8_symmetric(
-    const float* data,
-    size_t count,
-    uint32_t dim,
-    float drop_ratio = 0.0f,
-    size_t numThreads = 0,
-    SymCalibratorInt8* out_calibrator = nullptr
-) {
-    if (count == 0 || dim == 0) return {};
-
-    SymCalibratorInt8 cal;
-    cal.calibrate(data, count * dim, drop_ratio);
-    if (out_calibrator) {
-        *out_calibrator = cal;
-    }
-
-    std::vector<int8_t> result(count * dim);
-
-    deglib::concurrent::parallel_batch_for(0, count, numThreads, [data, dim, &cal, &result](size_t begin, size_t end, size_t) {
-        for (size_t i = begin; i < end; ++i) {
-            const float* src = data + i * dim;
-            int8_t* dst = result.data() + i * dim;
-            for (uint32_t d = 0; d < dim; ++d) {
-                dst[d] = cal.transform(src[d]);
-            }
-        }
-    });
-
-    return result;
-}
-
-/**
- * Quantize FP16 (uint16_t) vectors to symmetric signed INT8 [-127, 127].
- * First converts FP16 to FP32 during processing.
- */
-inline std::vector<int8_t> quantize_int8_symmetric(
-    const uint16_t* data,
-    size_t count,
-    uint32_t dim,
-    float drop_ratio = 0.0f,
-    size_t numThreads = 0,
-    SymCalibratorInt8* out_calibrator = nullptr
-) {
-    if (count == 0 || dim == 0) return {};
-
-    // Convert sample/all to float for calibration
-    // For calibration, find absmax across half floats:
-    // IEEE half-precision: abs(x) magnitude is monotonic in (x & 0x7FFF)
-    uint16_t max_half = 0;
-    for (size_t i = 0; i < count * dim; ++i) {
-        uint16_t mag = data[i] & 0x7FFFu;
-        if (mag > max_half) max_half = mag;
-    }
-    float abs_max = deglib::distances::fp16::fp16_to_float(max_half);
-
-    SymCalibratorInt8 cal;
-    if (abs_max <= 1e-12f) abs_max = 1.0f;
-    cal.abs_max = abs_max;
-    cal.scale = 127.0f / abs_max;
-    cal.inv_scale = abs_max / 127.0f;
-    if (out_calibrator) {
-        *out_calibrator = cal;
-    }
-
-    std::vector<int8_t> result(count * dim);
-
-    deglib::concurrent::parallel_batch_for(0, count, numThreads, [data, dim, &cal, &result](size_t begin, size_t end, size_t) {
-        for (size_t i = begin; i < end; ++i) {
-            const uint16_t* src = data + i * dim;
-            int8_t* dst = result.data() + i * dim;
-            for (uint32_t d = 0; d < dim; ++d) {
-                float val = deglib::distances::fp16::fp16_to_float(src[d]);
-                dst[d] = cal.transform(val);
-            }
-        }
-    });
-
-    return result;
-}
-
-/**
- * Quantize FP32 vectors to unsigned UINT8 [0, 255] using global affine mapping (ideal for L2).
- */
-inline std::vector<uint8_t> quantize_uint8_affine(
-    const float* data,
-    size_t count,
-    uint32_t dim,
-    float drop_ratio = 0.0f,
-    size_t numThreads = 0,
-    AffineCalibratorUint8* out_calibrator = nullptr
-) {
-    if (count == 0 || dim == 0) return {};
-
-    AffineCalibratorUint8 cal;
-    cal.calibrate(data, count * dim, drop_ratio);
-    if (out_calibrator) {
-        *out_calibrator = cal;
-    }
-
-    std::vector<uint8_t> result(count * dim);
-
-    deglib::concurrent::parallel_batch_for(0, count, numThreads, [data, dim, &cal, &result](size_t begin, size_t end, size_t) {
-        for (size_t i = begin; i < end; ++i) {
-            const float* src = data + i * dim;
-            uint8_t* dst = result.data() + i * dim;
-            for (uint32_t d = 0; d < dim; ++d) {
-                dst[d] = cal.transform(src[d]);
-            }
-        }
-    });
-
-    return result;
-}
-
-/**
- * Quantize FP32 vectors to unsigned UINT8 [0, 255] using per-dimension affine mapping.
- */
-inline std::vector<uint8_t> quantize_uint8_affine_perdim(
-    const float* data,
-    size_t count,
-    uint32_t dim,
-    float drop_ratio = 0.0f,
-    size_t numThreads = 0,
-    AffinePerDimCalibratorUint8* out_calibrator = nullptr
-) {
-    if (count == 0 || dim == 0) return {};
-
-    AffinePerDimCalibratorUint8 cal(dim);
-    cal.calibrate(data, count, dim, drop_ratio);
-    if (out_calibrator) {
-        *out_calibrator = cal;
-    }
-
-    std::vector<uint8_t> result(count * dim);
-
-    deglib::concurrent::parallel_batch_for(0, count, numThreads, [data, dim, &cal, &result](size_t begin, size_t end, size_t) {
-        for (size_t i = begin; i < end; ++i) {
-            const float* src = data + i * dim;
-            uint8_t* dst = result.data() + i * dim;
-            for (uint32_t d = 0; d < dim; ++d) {
-                dst[d] = cal.transform(src[d], d);
-            }
-        }
-    });
-
-    return result;
-}
 
 }  // namespace deglib::quantization::scalar

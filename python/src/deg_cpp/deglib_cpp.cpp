@@ -778,73 +778,15 @@ py::array_t<uint8_t> quantize_batch_wrapper(py::array vectors, uint32_t non_zero
 // Scalar Quantization (SQ8 / Int8 / Uint8) Bindings
 // ============================================================================
 
-py::array_t<int8_t> quantize_int8_batch_wrapper(
-    py::array vectors,
-    float drop_ratio,
-    size_t num_threads
-) {
-    py::buffer_info buf = vectors.request();
+// ============================================================================
+// Scalar Quantization Helper
+// ============================================================================
+
+inline std::pair<size_t, uint32_t> get_2d_shape(const py::buffer_info& buf) {
     if (buf.ndim != 2) {
-        throw std::invalid_argument("vectors must be a 2D array");
+        throw std::invalid_argument(std::format("Expected 2D array, got {} dimensions", buf.ndim));
     }
-    size_t count = buf.shape[0];
-    uint32_t dim = static_cast<uint32_t>(buf.shape[1]);
-
-    std::vector<int8_t> result;
-    if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-        result = deglib::optimization::quantize_int8_batch(
-            static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio, num_threads
-        );
-    } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-        result = deglib::optimization::quantize_int8_batch(
-            static_cast<const float*>(buf.ptr), count, dim, drop_ratio, num_threads
-        );
-    } else {
-        throw std::invalid_argument(
-            std::format(
-                "vectors must be float32 (format 'f') or FP16/uint16 "
-                "(format 'e'/'H'), got format '{}' with itemsize {}",
-                buf.format, buf.itemsize
-            )
-        );
-    }
-
-    py::array_t<int8_t> output({count, static_cast<size_t>(dim)});
-    py::buffer_info out_buf = output.request();
-    std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(int8_t));
-    return output;
-}
-
-py::array_t<uint8_t> quantize_uint8_batch_wrapper(
-    py::array vectors,
-    bool per_dim,
-    float drop_ratio,
-    size_t num_threads
-) {
-    py::buffer_info buf = vectors.request();
-    if (buf.ndim != 2) {
-        throw std::invalid_argument("vectors must be a 2D array");
-    }
-    size_t count = buf.shape[0];
-    uint32_t dim = static_cast<uint32_t>(buf.shape[1]);
-
-    if (!(buf.itemsize == 4 && (buf.format == "f" || buf.format == "float"))) {
-        throw std::invalid_argument(
-            std::format(
-                "vectors must be float32 (format 'f'), got format '{}' with itemsize {}",
-                buf.format, buf.itemsize
-            )
-        );
-    }
-
-    std::vector<uint8_t> result = deglib::optimization::quantize_uint8_batch(
-        static_cast<const float*>(buf.ptr), count, dim, per_dim, drop_ratio, num_threads
-    );
-
-    py::array_t<uint8_t> output({count, static_cast<size_t>(dim)});
-    py::buffer_info out_buf = output.request();
-    std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(uint8_t));
-    return output;
+    return {static_cast<size_t>(buf.shape[0]), static_cast<uint32_t>(buf.shape[1])};
 }
 
 // ============================================================================
@@ -1208,17 +1150,393 @@ PYBIND11_MODULE(deglib_cpp, m) {
 
     // optimization submodule
     py::module_ optimization_module = m.def_submodule("optimization", "Graph optimization and quantization utilities");
+
+    // ScalarQuantizerInt8
+    py::class_<deglib::quantization::scalar::ScalarQuantizerInt8>(optimization_module, "ScalarQuantizerInt8")
+        .def(py::init<>())
+        .def(py::init<float>(), py::arg("abs_max"))
+        .def_readwrite("abs_max", &deglib::quantization::scalar::ScalarQuantizerInt8::abs_max)
+        .def_readwrite("scale", &deglib::quantization::scalar::ScalarQuantizerInt8::scale)
+        .def_readwrite("inv_scale", &deglib::quantization::scalar::ScalarQuantizerInt8::inv_scale)
+        .def_readonly("is_fitted", &deglib::quantization::scalar::ScalarQuantizerInt8::is_fitted)
+        .def(
+            "fit",
+            [](deglib::quantization::scalar::ScalarQuantizerInt8& q, py::array vectors, float drop_ratio) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+            },
+            py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+        )
+        .def(
+            "quantize",
+            [](const deglib::quantization::scalar::ScalarQuantizerInt8& q, py::array vectors, size_t num_threads) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                std::vector<int8_t> result;
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    result = q.quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, num_threads);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    result = q.quantize(static_cast<const float*>(buf.ptr), count, dim, num_threads);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+                py::array_t<int8_t> output({count, static_cast<size_t>(dim)});
+                py::buffer_info out_buf = output.request();
+                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(int8_t));
+                return output;
+            },
+            py::arg("vectors"), py::arg("num_threads") = 0
+        )
+        .def(
+            "fit_quantize",
+            [](deglib::quantization::scalar::ScalarQuantizerInt8& q, py::array vectors, float drop_ratio, size_t num_threads) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                std::vector<int8_t> result;
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    result = q.fit_quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio, num_threads);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    result = q.fit_quantize(static_cast<const float*>(buf.ptr), count, dim, drop_ratio, num_threads);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+                py::array_t<int8_t> output({count, static_cast<size_t>(dim)});
+                py::buffer_info out_buf = output.request();
+                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(int8_t));
+                return output;
+            },
+            py::arg("vectors"), py::arg("drop_ratio") = 0.0f, py::arg("num_threads") = 0
+        )
+        .def(
+            "dequantize",
+            [](const deglib::quantization::scalar::ScalarQuantizerInt8& q, py::array_t<int8_t, py::array::c_style> quantized, size_t num_threads) {
+                py::buffer_info buf = quantized.request();
+                auto [count, dim] = get_2d_shape(buf);
+                std::vector<float> result = q.dequantize(static_cast<const int8_t*>(buf.ptr), count, dim, num_threads);
+                py::array_t<float> output({count, static_cast<size_t>(dim)});
+                py::buffer_info out_buf = output.request();
+                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(float));
+                return output;
+            },
+            py::arg("quantized"), py::arg("num_threads") = 0
+        );
+
+    // ScalarQuantizerInt8PerDim
+    py::class_<deglib::quantization::scalar::ScalarQuantizerInt8PerDim>(optimization_module, "ScalarQuantizerInt8PerDim")
+        .def(py::init<>())
+        .def(py::init<uint32_t>(), py::arg("dim"))
+        .def_readwrite("dim", &deglib::quantization::scalar::ScalarQuantizerInt8PerDim::dim)
+        .def_readwrite("abs_maxs", &deglib::quantization::scalar::ScalarQuantizerInt8PerDim::abs_maxs)
+        .def_readwrite("scales", &deglib::quantization::scalar::ScalarQuantizerInt8PerDim::scales)
+        .def_readwrite("inv_scales", &deglib::quantization::scalar::ScalarQuantizerInt8PerDim::inv_scales)
+        .def_readonly("is_fitted", &deglib::quantization::scalar::ScalarQuantizerInt8PerDim::is_fitted)
+        .def(
+            "fit",
+            [](deglib::quantization::scalar::ScalarQuantizerInt8PerDim& q, py::array vectors, float drop_ratio) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+            },
+            py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+        )
+        .def(
+            "quantize",
+            [](const deglib::quantization::scalar::ScalarQuantizerInt8PerDim& q, py::array vectors, size_t num_threads) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                std::vector<int8_t> result;
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    result = q.quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, num_threads);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    result = q.quantize(static_cast<const float*>(buf.ptr), count, dim, num_threads);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+                py::array_t<int8_t> output({count, static_cast<size_t>(dim)});
+                py::buffer_info out_buf = output.request();
+                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(int8_t));
+                return output;
+            },
+            py::arg("vectors"), py::arg("num_threads") = 0
+        )
+        .def(
+            "fit_quantize",
+            [](deglib::quantization::scalar::ScalarQuantizerInt8PerDim& q, py::array vectors, float drop_ratio, size_t num_threads) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                std::vector<int8_t> result;
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    result = q.fit_quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio, num_threads);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    result = q.fit_quantize(static_cast<const float*>(buf.ptr), count, dim, drop_ratio, num_threads);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+                py::array_t<int8_t> output({count, static_cast<size_t>(dim)});
+                py::buffer_info out_buf = output.request();
+                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(int8_t));
+                return output;
+            },
+            py::arg("vectors"), py::arg("drop_ratio") = 0.0f, py::arg("num_threads") = 0
+        )
+        .def(
+            "dequantize",
+            [](const deglib::quantization::scalar::ScalarQuantizerInt8PerDim& q, py::array_t<int8_t, py::array::c_style> quantized, size_t num_threads) {
+                py::buffer_info buf = quantized.request();
+                auto [count, dim] = get_2d_shape(buf);
+                std::vector<float> result = q.dequantize(static_cast<const int8_t*>(buf.ptr), count, dim, num_threads);
+                py::array_t<float> output({count, static_cast<size_t>(dim)});
+                py::buffer_info out_buf = output.request();
+                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(float));
+                return output;
+            },
+            py::arg("quantized"), py::arg("num_threads") = 0
+        );
+
+    // ScalarQuantizerUint8
+    py::class_<deglib::quantization::scalar::ScalarQuantizerUint8>(optimization_module, "ScalarQuantizerUint8")
+        .def(py::init<>())
+        .def(py::init<float, float>(), py::arg("min_val"), py::arg("max_val"))
+        .def_readwrite("min_val", &deglib::quantization::scalar::ScalarQuantizerUint8::min_val)
+        .def_readwrite("max_val", &deglib::quantization::scalar::ScalarQuantizerUint8::max_val)
+        .def_readwrite("dif", &deglib::quantization::scalar::ScalarQuantizerUint8::dif)
+        .def_readwrite("scale", &deglib::quantization::scalar::ScalarQuantizerUint8::scale)
+        .def_readonly("is_fitted", &deglib::quantization::scalar::ScalarQuantizerUint8::is_fitted)
+        .def(
+            "fit",
+            [](deglib::quantization::scalar::ScalarQuantizerUint8& q, py::array vectors, float drop_ratio) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+            },
+            py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+        )
+        .def(
+            "quantize",
+            [](const deglib::quantization::scalar::ScalarQuantizerUint8& q, py::array vectors, size_t num_threads) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                std::vector<uint8_t> result;
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    result = q.quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, num_threads);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    result = q.quantize(static_cast<const float*>(buf.ptr), count, dim, num_threads);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+                py::array_t<uint8_t> output({count, static_cast<size_t>(dim)});
+                py::buffer_info out_buf = output.request();
+                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(uint8_t));
+                return output;
+            },
+            py::arg("vectors"), py::arg("num_threads") = 0
+        )
+        .def(
+            "fit_quantize",
+            [](deglib::quantization::scalar::ScalarQuantizerUint8& q, py::array vectors, float drop_ratio, size_t num_threads) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                std::vector<uint8_t> result;
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    result = q.fit_quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio, num_threads);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    result = q.fit_quantize(static_cast<const float*>(buf.ptr), count, dim, drop_ratio, num_threads);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+                py::array_t<uint8_t> output({count, static_cast<size_t>(dim)});
+                py::buffer_info out_buf = output.request();
+                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(uint8_t));
+                return output;
+            },
+            py::arg("vectors"), py::arg("drop_ratio") = 0.0f, py::arg("num_threads") = 0
+        )
+        .def(
+            "dequantize",
+            [](const deglib::quantization::scalar::ScalarQuantizerUint8& q, py::array_t<uint8_t, py::array::c_style> quantized, size_t num_threads) {
+                py::buffer_info buf = quantized.request();
+                auto [count, dim] = get_2d_shape(buf);
+                std::vector<float> result = q.dequantize(static_cast<const uint8_t*>(buf.ptr), count, dim, num_threads);
+                py::array_t<float> output({count, static_cast<size_t>(dim)});
+                py::buffer_info out_buf = output.request();
+                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(float));
+                return output;
+            },
+            py::arg("quantized"), py::arg("num_threads") = 0
+        );
+
+    // ScalarQuantizerUint8PerDim
+    py::class_<deglib::quantization::scalar::ScalarQuantizerUint8PerDim>(optimization_module, "ScalarQuantizerUint8PerDim")
+        .def(py::init<>())
+        .def(py::init<uint32_t>(), py::arg("dim"))
+        .def_readwrite("dim", &deglib::quantization::scalar::ScalarQuantizerUint8PerDim::dim)
+        .def_readwrite("mins", &deglib::quantization::scalar::ScalarQuantizerUint8PerDim::mins)
+        .def_readwrite("maxs", &deglib::quantization::scalar::ScalarQuantizerUint8PerDim::maxs)
+        .def_readwrite("difs", &deglib::quantization::scalar::ScalarQuantizerUint8PerDim::difs)
+        .def_readwrite("scales", &deglib::quantization::scalar::ScalarQuantizerUint8PerDim::scales)
+        .def_readonly("is_fitted", &deglib::quantization::scalar::ScalarQuantizerUint8PerDim::is_fitted)
+        .def(
+            "fit",
+            [](deglib::quantization::scalar::ScalarQuantizerUint8PerDim& q, py::array vectors, float drop_ratio) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+            },
+            py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+        )
+        .def(
+            "quantize",
+            [](const deglib::quantization::scalar::ScalarQuantizerUint8PerDim& q, py::array vectors, size_t num_threads) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                std::vector<uint8_t> result;
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    result = q.quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, num_threads);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    result = q.quantize(static_cast<const float*>(buf.ptr), count, dim, num_threads);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+                py::array_t<uint8_t> output({count, static_cast<size_t>(dim)});
+                py::buffer_info out_buf = output.request();
+                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(uint8_t));
+                return output;
+            },
+            py::arg("vectors"), py::arg("num_threads") = 0
+        )
+        .def(
+            "fit_quantize",
+            [](deglib::quantization::scalar::ScalarQuantizerUint8PerDim& q, py::array vectors, float drop_ratio, size_t num_threads) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                std::vector<uint8_t> result;
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    result = q.fit_quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio, num_threads);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    result = q.fit_quantize(static_cast<const float*>(buf.ptr), count, dim, drop_ratio, num_threads);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+                py::array_t<uint8_t> output({count, static_cast<size_t>(dim)});
+                py::buffer_info out_buf = output.request();
+                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(uint8_t));
+                return output;
+            },
+            py::arg("vectors"), py::arg("drop_ratio") = 0.0f, py::arg("num_threads") = 0
+        )
+        .def(
+            "dequantize",
+            [](const deglib::quantization::scalar::ScalarQuantizerUint8PerDim& q, py::array_t<uint8_t, py::array::c_style> quantized, size_t num_threads) {
+                py::buffer_info buf = quantized.request();
+                auto [count, dim] = get_2d_shape(buf);
+                std::vector<float> result = q.dequantize(static_cast<const uint8_t*>(buf.ptr), count, dim, num_threads);
+                py::array_t<float> output({count, static_cast<size_t>(dim)});
+                py::buffer_info out_buf = output.request();
+                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(float));
+                return output;
+            },
+            py::arg("quantized"), py::arg("num_threads") = 0
+        );
+
+    optimization_module.def(
+        "make_scalar_quantizer_int8",
+        [](py::array vectors, float drop_ratio) {
+            py::buffer_info buf = vectors.request();
+            auto [count, dim] = get_2d_shape(buf);
+            deglib::quantization::scalar::ScalarQuantizerInt8 q;
+            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
+            } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
+            } else {
+                throw std::invalid_argument("vectors must be float32 or float16");
+            }
+            return q;
+        },
+        py::arg("vectors"), py::arg("drop_ratio") = 0.0f,
+        "Make, fit, and return a ScalarQuantizerInt8 instance from vectors"
+    );
+    optimization_module.def(
+        "make_scalar_quantizer_int8_perdim",
+        [](py::array vectors, float drop_ratio) {
+            py::buffer_info buf = vectors.request();
+            auto [count, dim] = get_2d_shape(buf);
+            deglib::quantization::scalar::ScalarQuantizerInt8PerDim q;
+            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
+            } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
+            } else {
+                throw std::invalid_argument("vectors must be float32 or float16");
+            }
+            return q;
+        },
+        py::arg("vectors"), py::arg("drop_ratio") = 0.0f,
+        "Make, fit, and return a ScalarQuantizerInt8PerDim instance from vectors"
+    );
+    optimization_module.def(
+        "make_scalar_quantizer_uint8",
+        [](py::array vectors, float drop_ratio) {
+            py::buffer_info buf = vectors.request();
+            auto [count, dim] = get_2d_shape(buf);
+            deglib::quantization::scalar::ScalarQuantizerUint8 q;
+            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
+            } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
+            } else {
+                throw std::invalid_argument("vectors must be float32 or float16");
+            }
+            return q;
+        },
+        py::arg("vectors"), py::arg("drop_ratio") = 0.0f,
+        "Make, fit, and return a ScalarQuantizerUint8 instance from vectors"
+    );
+    optimization_module.def(
+        "make_scalar_quantizer_uint8_perdim",
+        [](py::array vectors, float drop_ratio) {
+            py::buffer_info buf = vectors.request();
+            auto [count, dim] = get_2d_shape(buf);
+            deglib::quantization::scalar::ScalarQuantizerUint8PerDim q;
+            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
+            } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
+            } else {
+                throw std::invalid_argument("vectors must be float32 or float16");
+            }
+            return q;
+        },
+        py::arg("vectors"), py::arg("drop_ratio") = 0.0f,
+        "Make, fit, and return a ScalarQuantizerUint8PerDim instance from vectors"
+    );
+
     optimization_module.def("quantize_batch", &quantize_batch_wrapper, "Quantize float32 or float16/uint16 vectors to byte-packed EVP format");
-    optimization_module.def(
-        "quantize_int8", &quantize_int8_batch_wrapper,
-        py::arg("vectors"), py::arg("drop_ratio") = 0.0f, py::arg("num_threads") = 0,
-        "Quantize float32 or float16 vectors to symmetric signed INT8 [-127, 127] format"
-    );
-    optimization_module.def(
-        "quantize_uint8", &quantize_uint8_batch_wrapper,
-        py::arg("vectors"), py::arg("per_dim") = false, py::arg("drop_ratio") = 0.0f, py::arg("num_threads") = 0,
-        "Quantize float32 vectors to unsigned UINT8 [0, 255] format"
-    );
     // search submodule
     py::module_ search_module = m.def_submodule("search", "Search utilities including Filter");
     py::class_<deglib::search::Filter>(search_module, "Filter").def(py::init<const int*, size_t, size_t, size_t>());

@@ -91,35 +91,96 @@ inline std::vector<std::byte> quantize_evp_batch(const uint16_t* data, size_t co
     return deglib::quantization::evp::quantize_batch(data, count, dim, non_zeros, numThreads);
 }
 
+// ========================================================================
+// Scalar Quantization Factory Methods (make and fit Quantizer instance)
+// ========================================================================
+
 /**
- * Quantize FP32 vectors to symmetric signed INT8 [-127, 127] (ideal for InnerProduct / Cosine).
+ * Make and fit a ScalarQuantizerInt8 from FP32 dataset.
  */
-inline std::vector<int8_t> quantize_int8_batch(
-    const float* data, size_t count, uint32_t dim, float drop_ratio = 0.0f, size_t numThreads = 0
+inline deglib::quantization::scalar::ScalarQuantizerInt8 make_scalar_quantizer_int8(
+    const float* data, size_t count, uint32_t dim, float drop_ratio = 0.0f
 ) {
-    return deglib::quantization::scalar::quantize_int8_symmetric(data, count, dim, drop_ratio, numThreads);
+    deglib::quantization::scalar::ScalarQuantizerInt8 quantizer;
+    quantizer.fit(data, count, dim, drop_ratio);
+    return quantizer;
 }
 
 /**
- * Quantize FP16 (uint16_t) vectors to symmetric signed INT8 [-127, 127].
+ * Make and fit a ScalarQuantizerInt8 from FP16 (uint16_t) dataset.
  */
-inline std::vector<int8_t> quantize_int8_batch(
-    const uint16_t* data, size_t count, uint32_t dim, float drop_ratio = 0.0f, size_t numThreads = 0
+inline deglib::quantization::scalar::ScalarQuantizerInt8 make_scalar_quantizer_int8(
+    const uint16_t* data_fp16, size_t count, uint32_t dim, float drop_ratio = 0.0f
 ) {
-    return deglib::quantization::scalar::quantize_int8_symmetric(data, count, dim, drop_ratio, numThreads);
+    deglib::quantization::scalar::ScalarQuantizerInt8 quantizer;
+    quantizer.fit(data_fp16, count, dim, drop_ratio);
+    return quantizer;
 }
 
 /**
- * Quantize FP32 vectors to unsigned UINT8 [0, 255] (ideal for L2).
+ * Make and fit a ScalarQuantizerInt8PerDim from FP32 dataset.
  */
-inline std::vector<uint8_t> quantize_uint8_batch(
-    const float* data, size_t count, uint32_t dim, bool per_dim = false, float drop_ratio = 0.0f, size_t numThreads = 0
+inline deglib::quantization::scalar::ScalarQuantizerInt8PerDim make_scalar_quantizer_int8_perdim(
+    const float* data, size_t count, uint32_t dim, float drop_ratio = 0.0f
 ) {
-    if (per_dim) {
-        return deglib::quantization::scalar::quantize_uint8_affine_perdim(data, count, dim, drop_ratio, numThreads);
-    } else {
-        return deglib::quantization::scalar::quantize_uint8_affine(data, count, dim, drop_ratio, numThreads);
-    }
+    deglib::quantization::scalar::ScalarQuantizerInt8PerDim quantizer;
+    quantizer.fit(data, count, dim, drop_ratio);
+    return quantizer;
+}
+
+/**
+ * Make and fit a ScalarQuantizerInt8PerDim from FP16 (uint16_t) dataset.
+ */
+inline deglib::quantization::scalar::ScalarQuantizerInt8PerDim make_scalar_quantizer_int8_perdim(
+    const uint16_t* data_fp16, size_t count, uint32_t dim, float drop_ratio = 0.0f
+) {
+    deglib::quantization::scalar::ScalarQuantizerInt8PerDim quantizer;
+    quantizer.fit(data_fp16, count, dim, drop_ratio);
+    return quantizer;
+}
+
+/**
+ * Make and fit a ScalarQuantizerUint8 from FP32 dataset.
+ */
+inline deglib::quantization::scalar::ScalarQuantizerUint8 make_scalar_quantizer_uint8(
+    const float* data, size_t count, uint32_t dim, float drop_ratio = 0.0f
+) {
+    deglib::quantization::scalar::ScalarQuantizerUint8 quantizer;
+    quantizer.fit(data, count, dim, drop_ratio);
+    return quantizer;
+}
+
+/**
+ * Make and fit a ScalarQuantizerUint8 from FP16 (uint16_t) dataset.
+ */
+inline deglib::quantization::scalar::ScalarQuantizerUint8 make_scalar_quantizer_uint8(
+    const uint16_t* data_fp16, size_t count, uint32_t dim, float drop_ratio = 0.0f
+) {
+    deglib::quantization::scalar::ScalarQuantizerUint8 quantizer;
+    quantizer.fit(data_fp16, count, dim, drop_ratio);
+    return quantizer;
+}
+
+/**
+ * Make and fit a ScalarQuantizerUint8PerDim from FP32 dataset.
+ */
+inline deglib::quantization::scalar::ScalarQuantizerUint8PerDim make_scalar_quantizer_uint8_perdim(
+    const float* data, size_t count, uint32_t dim, float drop_ratio = 0.0f
+) {
+    deglib::quantization::scalar::ScalarQuantizerUint8PerDim quantizer;
+    quantizer.fit(data, count, dim, drop_ratio);
+    return quantizer;
+}
+
+/**
+ * Make and fit a ScalarQuantizerUint8PerDim from FP16 (uint16_t) dataset.
+ */
+inline deglib::quantization::scalar::ScalarQuantizerUint8PerDim make_scalar_quantizer_uint8_perdim(
+    const uint16_t* data_fp16, size_t count, uint32_t dim, float drop_ratio = 0.0f
+) {
+    deglib::quantization::scalar::ScalarQuantizerUint8PerDim quantizer;
+    quantizer.fit(data_fp16, count, dim, drop_ratio);
+    return quantizer;
 }
 
 // ========================================================================

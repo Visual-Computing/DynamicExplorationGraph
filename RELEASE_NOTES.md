@@ -1,5 +1,31 @@
 # Release Notes
 
+## deglib v0.2.2
+
+### Overview
+deglib v0.2.2 introduces a strictly object-oriented **Fit-then-Quantize** scalar quantization suite (`ScalarQuantizerInt8`, `ScalarQuantizerInt8PerDim`, `ScalarQuantizerUint8`, `ScalarQuantizerUint8PerDim`), `make_scalar_quantizer_*` factory functions, full native FP16 (`uint16_t` / `np.float16`) and FP32 quantization support across all classes, and removes legacy one-shot procedural helpers.
+
+---
+
+### 🚀 Key Features & Improvements
+
+#### State-Aware Scalar Quantization (`deglib::optimization::quantization`)
+* **Pure Object-Oriented Design:** Quantizers preserve learned database distribution parameters across database batches and query vectors via `.fit()`, `.quantize()`, `.fit_quantize()`, and `.dequantize()`.
+* **Complete Symmetrical Quantizer Suite:**
+  * `ScalarQuantizerInt8`: Global symmetric signed Int8 mapping ($[-127, 127]$) for Cosine and Inner Product spaces.
+  * `ScalarQuantizerInt8PerDim`: Per-dimension symmetric signed Int8 mapping ($[-127, 127]$).
+  * `ScalarQuantizerUint8`: Global affine unsigned 8-bit mapping ($[0, 255]$ with dynamic scale and offset calibration) for Euclidean ($L_2$) search.
+  * `ScalarQuantizerUint8PerDim`: Per-dimension affine unsigned 8-bit mapping ($[0, 255]$).
+* **Native FP16 Support:** All quantizers natively accept both FP32 (`float`) and IEEE 754 half-precision FP16 (`uint16_t` / `np.float16`) inputs.
+* **Factory Functions (`make_scalar_quantizer_*`):**
+  * `make_scalar_quantizer_int8(vectors, drop_ratio=0.0)`
+  * `make_scalar_quantizer_int8_perdim(vectors, drop_ratio=0.0)`
+  * `make_scalar_quantizer_uint8(vectors, drop_ratio=0.0)`
+  * `make_scalar_quantizer_uint8_perdim(vectors, drop_ratio=0.0)`
+* **Python API Clean-Up:** Removed obsolete procedural batch helpers (`quantize_int8`, `quantize_uint8`, etc.) in favor of the pure `ScalarQuantizer*` classes and `make_scalar_quantizer_*` factory methods in `deglib.optimization`.
+
+---
+
 ## deglib v0.2.1
 
 ### Overview
@@ -14,11 +40,6 @@ deglib v0.2.1 expands metric support with native half-precision and 8-bit intege
 * **`Int8_InnerProduct` Metric:** Signed 8-bit integer inner product (`Metric::Int8_InnerProduct`) with AVX-512, AVX512-VNNI, AVX2, AVX2-VNNI, and Scalar kernels.
 * **`Int8_L2` Metric:** Signed 8-bit integer Euclidean distance (`Metric::Int8_L2`) with AVX-512, AVX2, and Scalar kernels, including Python bindings support (`np.int8`).
 * **`Uint8_InnerProduct` Metric:** 8-bit unsigned integer inner product distance (`Metric::Uint8_InnerProduct`) with AVX-512, AVX512-VNNI, AVX2, AVX2-VNNI, and Scalar kernels.
-
-#### Scalar Quantization (`deglib::optimization::quantization`)
-* **Symmetric Int8 Quantization:** Added `SymCalibratorInt8` for signed Int8 mapping ($[-127, 127]$), ideal for Cosine and Inner Product spaces.
-* **Affine UInt8 Quantization:** Added `AffineCalibratorUint8` for unsigned 8-bit mapping ($[0, 255]$ with dynamic scale and offset calibration), optimized for Euclidean ($L_2$) search.
-* **Python APIs:** Exposed via `deglib.optimization.quantize_int8()` and `deglib.optimization.quantize_uint8()`.
 
 #### SIMD & Hardware Acceleration (AVX-VNNI)
 * **VNNI Acceleration:** Dedicated AVX-VNNI and AVX512-VNNI hardware vector dot product instructions for 8-bit integer inner products (`Int8_IP` and `UInt8_IP`).
@@ -40,16 +61,6 @@ deglib v0.2.1 expands metric support with native half-precision and 8-bit intege
   * Fixed GCC/Clang inlining errors (`target specific option mismatch` in `_mm256_cvtph_ps`) by including `avx2,f16c,fma` in `DEGLIB_TARGET_AVX512` target attributes.
 * **Header Consistency:** Renamed `evp_inner_product.h` to `evp_ip.h` for uniform naming across all distance headers.
 * **Deterministic CI Tests:** Configured fixed seeds across graph integration tests to guarantee 100% test reproducibility across all platforms and Python versions.
-
----
-
-### 🐍 Python API Summary
-
-* **Quantization Functions:**
-  * `deglib.optimization.quantize_int8(vectors, drop_ratio=0.0, num_threads=0) -> np.ndarray`
-  * `deglib.optimization.quantize_uint8(vectors, per_dim=False, drop_ratio=0.0, num_threads=0) -> np.ndarray`
-* **New Metrics:** `Metric.FP16_L2`, `Metric.Int8_InnerProduct`, `Metric.Int8_L2`, `Metric.Uint8_InnerProduct`.
-* **Reranking:** `deglib.search.rerank(space, queries, candidate_indices, base_vectors, k_top=..., return_distances=...)`
 
 ---
 

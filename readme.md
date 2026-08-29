@@ -17,10 +17,10 @@ High-throughput approximate nearest neighbor and exploratory search library impl
 
 ---
 
-- **C++20 header-only library** with native Python bindings (`deglib`)
+- **C++20 header-only library** with native Python bindings (`deglib`)s
 - **Dynamic streaming**: Incremental addition, removal, and continuous edge optimization
 - **Multi-threaded construction** and batch vector search with SIMD acceleration (AVX2, AVX-512)
-- **Supported data types**: `float32`, `uint8`, `float16`, `evp-bits`
+- **Supported data types**: `float32`, `float16`, `int8`, `uint8`, `evp-bits`
 - **Supported metrics**: Euclidean ($L_2$), Inner Product / Cosine, quantized EVP
 - **Exploratory graph traversal** and label-filtered nearest neighbor search
 - Compact graph serialization and lightweight read-only deployment mode

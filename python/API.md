@@ -281,18 +281,37 @@ from deglib.optimization import (
     mips_l2_transform,
     mips_l2_transform_query,
     quantize_batch,
-    quantize_int8,
-    quantize_uint8,
+    ScalarQuantizerInt8,
+    ScalarQuantizerInt8PerDim,
+    ScalarQuantizerUint8,
+    ScalarQuantizerUint8PerDim,
+    make_scalar_quantizer_int8,
+    make_scalar_quantizer_int8_perdim,
+    make_scalar_quantizer_uint8,
+    make_scalar_quantizer_uint8_perdim,
 )
 
-# Quantize float32 or float16 vectors to byte-packed EVP format using C++ multithreading
+# 1. State-aware Scalar Quantization (All classes support float32 & float16)
+# INT8 Quantizer [-127, 127] (Cosine / InnerProduct)
+quantizer = make_scalar_quantizer_int8(base_vectors, drop_ratio=0.0)
+quant_base = quantizer.quantize(base_vectors)
+quant_query = quantizer.quantize(query_vectors)
+dequant_vectors = quantizer.dequantize(quant_query)
+
+# INT8 Per-Dimension Quantizer [-127, 127]
+int8_pdim = make_scalar_quantizer_int8_perdim(base_vectors)
+quant_int8_pdim = int8_pdim.quantize(base_vectors)
+
+# UINT8 Quantizer [0, 255] (Euclidean L2)
+l2_quantizer = make_scalar_quantizer_uint8(base_vectors)
+quant_l2_base = l2_quantizer.quantize(base_vectors)
+
+# UINT8 Per-Dimension Quantizer [0, 255]
+perdim_quantizer = make_scalar_quantizer_uint8_perdim(base_vectors)
+quant_perdim_base = perdim_quantizer.quantize(base_vectors)
+
+# 2. EVP Quantization (float32 or float16 vectors to byte-packed EVP format)
 quantize_batch(vectors, non_zeros, num_threads=0) -> np.ndarray
-
-# Quantize float32 or float16 vectors into symmetric signed INT8 [-127, 127] format (ideal for Cosine / InnerProduct)
-quantize_int8(vectors, drop_ratio=0.0, num_threads=0) -> np.ndarray
-
-# Quantize float32 vectors into unsigned UINT8 [0, 255] format (ideal for L2)
-quantize_uint8(vectors, per_dim=False, drop_ratio=0.0, num_threads=0) -> np.ndarray
 
 # Remove all edges violating the Relative Neighborhood Graph (RNG) rule. Returns removed edge count.
 prune_non_rng_edges(graph, num_threads=0) -> int

@@ -193,7 +193,7 @@ A complete end-to-end pipeline demonstrating **FLAS pre-sorting**, **multithread
 ```python
 import numpy as np
 import deglib
-from deglib.optimization import presort, prune_non_rng_edges, quantize_int8
+from deglib.optimization import presort, prune_non_rng_edges, ScalarQuantizerInt8
 from deglib.search import rerank
 
 num_vectors, dims = 10_000, 128
@@ -216,15 +216,17 @@ graph = deglib.builder.build_from_data(
 pruned_count = prune_non_rng_edges(graph)
 print(f"Pruned {pruned_count} redundant edges.")
 
-# 4. Quantize dataset to Int8 for memory reduction and ultra-fast quantized graph search
-quant_int8_data = quantize_int8(sorted_data)
+# 4. Fit Int8 quantizer on base dataset and quantize features for memory reduction and ultra-fast search
+quantizer = ScalarQuantizerInt8()
+quantizer.fit(sorted_data)
+quant_int8_data = quantizer.quantize(sorted_data)
 int8_space = deglib.FloatSpace.create(dims, deglib.Metric.Int8_InnerProduct)
 
 # 5. Convert mutable graph to a compact ReadOnlyGraph equipped with the quantized features
 readonly_graph = graph.to_readonly(feature_space=int8_space, custom_features=quant_int8_data)
 
-# 6. Search candidates on the quantized ReadOnlyGraph (fetch 2x candidates for reranking)
-quant_query = quantize_int8(query)
+# 6. Quantize query using the EXACT SAME calibrated scale, then search
+quant_query = quantizer.quantize(query)
 candidate_indices = readonly_graph.search(quant_query, k=20, eps=0.1, return_distances=False)
 
 # 7. Exact distance reranking of top candidates on original float32 data
