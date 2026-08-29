@@ -738,6 +738,154 @@ py::object search_rerank(
 }
 
 // ============================================================================
+// Fast Searcher Wrapper
+// ============================================================================
+
+class SearcherPy {
+  private:
+    std::unique_ptr<deglib::search::SearcherBase> searcher_;
+    py::array base_vectors_holder_;
+
+  public:
+    SearcherPy(
+        const deglib::DynamicExplorationGraph& graph,
+        py::object quantizer = py::none(),
+        std::optional<deglib::distances::FloatSpace> rerank_space = std::nullopt,
+        std::optional<py::array> base_vectors = std::nullopt,
+        float search_eps = 0.1f,
+        float rerank_factor = 1.0f
+    ) {
+        const void* base_vectors_ptr = nullptr;
+        size_t num_base_vectors = 0;
+        bool is_fp16_base = false;
+
+        if (base_vectors.has_value() && !base_vectors->is_none()) {
+            base_vectors_holder_ = *base_vectors;
+            auto buf = base_vectors_holder_.request();
+            if (buf.ndim != 2) {
+                throw std::invalid_argument("base_vectors must be a 2D array");
+            }
+            base_vectors_ptr = buf.ptr;
+            num_base_vectors = buf.shape[0];
+            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                is_fp16_base = true;
+            }
+        }
+
+        auto make_searcher_for_quant = [&]<typename QuantT>(QuantT q) {
+            if (rerank_space.has_value() && base_vectors_ptr != nullptr) {
+                if (is_fp16_base) {
+                    using RefinerT = deglib::search::ExactRefiner<uint16_t>;
+                    searcher_ = std::make_unique<deglib::search::SearcherImpl<QuantT, RefinerT>>(
+                        graph.internal(), std::move(q), RefinerT(*rerank_space, static_cast<const uint16_t*>(base_vectors_ptr), num_base_vectors), search_eps, rerank_factor
+                    );
+                } else {
+                    using RefinerT = deglib::search::ExactRefiner<float>;
+                    searcher_ = std::make_unique<deglib::search::SearcherImpl<QuantT, RefinerT>>(
+                        graph.internal(), std::move(q), RefinerT(*rerank_space, static_cast<const float*>(base_vectors_ptr), num_base_vectors), search_eps, rerank_factor
+                    );
+                }
+            } else {
+                using RefinerT = deglib::search::NoRefiner;
+                searcher_ = std::make_unique<deglib::search::SearcherImpl<QuantT, RefinerT>>(
+                    graph.internal(), std::move(q), RefinerT{}, search_eps, rerank_factor
+                );
+            }
+        };
+
+        if (quantizer.is_none()) {
+            make_searcher_for_quant(deglib::search::NoQuantizer{});
+        } else if (py::isinstance<deglib::quantization::scalar::ScalarQuantizerInt8>(quantizer)) {
+            auto q = py::cast<deglib::quantization::scalar::ScalarQuantizerInt8>(quantizer);
+            make_searcher_for_quant(deglib::search::ScalarInt8Quantizer(q));
+        } else if (py::isinstance<deglib::quantization::scalar::ScalarQuantizerInt8PerDim>(quantizer)) {
+            auto q = py::cast<deglib::quantization::scalar::ScalarQuantizerInt8PerDim>(quantizer);
+            make_searcher_for_quant(deglib::search::ScalarInt8PerDimQuantizer(q));
+        } else if (py::isinstance<deglib::quantization::scalar::ScalarQuantizerUint8>(quantizer)) {
+            auto q = py::cast<deglib::quantization::scalar::ScalarQuantizerUint8>(quantizer);
+            make_searcher_for_quant(deglib::search::ScalarUint8Quantizer(q));
+        } else if (py::isinstance<deglib::quantization::scalar::ScalarQuantizerUint8PerDim>(quantizer)) {
+            auto q = py::cast<deglib::quantization::scalar::ScalarQuantizerUint8PerDim>(quantizer);
+            make_searcher_for_quant(deglib::search::ScalarUint8PerDimQuantizer(q));
+        } else if (py::isinstance<py::int_>(quantizer)) {
+            uint32_t nz = py::cast<uint32_t>(quantizer);
+            make_searcher_for_quant(deglib::search::EVPQuantizer(nz));
+        } else {
+            throw std::invalid_argument("Unsupported quantizer type provided to create_searcher.");
+        }
+    }
+
+    void set_query_arguments(float search_eps, float rerank_factor = 1.0f) {
+        searcher_->set_query_arguments(search_eps, rerank_factor);
+    }
+
+    void set_search_eps(float search_eps) { searcher_->set_search_eps(search_eps); }
+    float get_search_eps() const { return searcher_->get_search_eps(); }
+
+    void set_rerank_factor(float rerank_factor) { searcher_->set_rerank_factor(rerank_factor); }
+    float get_rerank_factor() const { return searcher_->get_rerank_factor(); }
+
+    py::object search(py::array query, uint32_t k, bool return_distances = false, bool unsorted = false) {
+        auto buf = query.request();
+        if (buf.ndim != 1 && (buf.ndim != 2 || buf.shape[0] != 1)) {
+            throw std::invalid_argument("search query must be 1D vector (or 1xDim 2D array)");
+        }
+        auto result = py::array_t<uint32_t>({size_t(k)});
+        uint32_t* out_ptr = static_cast<uint32_t*>(result.request().ptr);
+
+        py::array_t<float> dist_result;
+        float* dist_ptr = nullptr;
+        if (return_distances) {
+            dist_result = py::array_t<float>({size_t(k)});
+            dist_ptr = static_cast<float*>(dist_result.request().ptr);
+        }
+
+        uint32_t count = 0;
+        if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+            count = searcher_->search_f16(static_cast<const uint16_t*>(buf.ptr), k, out_ptr, dist_ptr, unsorted);
+        } else {
+            count = searcher_->search_f32(static_cast<const float*>(buf.ptr), k, out_ptr, dist_ptr, unsorted);
+        }
+
+        if (return_distances) {
+            return py::make_tuple(result, dist_result);
+        }
+        return result;
+    }
+
+    py::object search_batch(py::array queries, uint32_t k, size_t num_threads = 1, bool return_distances = false, bool unsorted = false) {
+        auto buf = queries.request();
+        if (buf.ndim != 2) {
+            throw std::invalid_argument("search_batch queries must be 2D array");
+        }
+        size_t n_queries = buf.shape[0];
+        auto result = py::array_t<uint32_t>({n_queries, size_t(k)});
+        uint32_t* out_ptr = static_cast<uint32_t*>(result.request().ptr);
+
+        py::array_t<float> dist_result;
+        float* dist_ptr = nullptr;
+        if (return_distances) {
+            dist_result = py::array_t<float>({n_queries, size_t(k)});
+            dist_ptr = static_cast<float*>(dist_result.request().ptr);
+        }
+
+        {
+            py::gil_scoped_release release;
+            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                searcher_->search_batch_f16(static_cast<const uint16_t*>(buf.ptr), n_queries, k, out_ptr, dist_ptr, num_threads, unsorted);
+            } else {
+                searcher_->search_batch_f32(static_cast<const float*>(buf.ptr), n_queries, k, out_ptr, dist_ptr, num_threads, unsorted);
+            }
+        }
+
+        if (return_distances) {
+            return py::make_tuple(result, dist_result);
+        }
+        return result;
+    }
+};
+
+// ============================================================================
 // EVP Quantization Bindings
 // ============================================================================
 
@@ -1556,6 +1704,38 @@ PYBIND11_MODULE(deglib_cpp, m) {
         "rerank", &search_rerank, py::arg("space"), py::arg("queries"), py::arg("candidate_indices"), py::arg("base_vectors") = py::none(),
         py::arg("k_top") = 0, py::arg("num_threads") = 0, py::arg("return_distances") = false, py::arg("unsorted") = false
     );
+
+    py::class_<SearcherPy>(search_module, "Searcher")
+        .def(
+            py::init<
+                const deglib::DynamicExplorationGraph&,
+                py::object,
+                std::optional<deglib::distances::FloatSpace>,
+                std::optional<py::array>,
+                float,
+                float
+            >(),
+            py::arg("graph"),
+            py::arg("quantizer") = py::none(),
+            py::arg("rerank_space") = std::nullopt,
+            py::arg("base_vectors") = std::nullopt,
+            py::arg("search_eps") = 0.1f,
+            py::arg("rerank_factor") = 1.0f,
+            py::keep_alive<1, 2>()
+        )
+        .def("set_query_arguments", &SearcherPy::set_query_arguments, py::arg("search_eps"), py::arg("rerank_factor") = 1.0f)
+        .def("set_search_eps", &SearcherPy::set_search_eps, py::arg("search_eps"))
+        .def("get_search_eps", &SearcherPy::get_search_eps)
+        .def("set_rerank_factor", &SearcherPy::set_rerank_factor, py::arg("rerank_factor"))
+        .def("get_rerank_factor", &SearcherPy::get_rerank_factor)
+        .def(
+            "search", &SearcherPy::search, py::arg("query"), py::arg("k"), py::arg("return_distances") = false,
+            py::arg("unsorted") = false
+        )
+        .def(
+            "search_batch", &SearcherPy::search_batch, py::arg("queries"), py::arg("k"), py::arg("num_threads") = 1,
+            py::arg("return_distances") = false, py::arg("unsorted") = false
+        );
 
     // graphs
     py::class_<deglib::DynamicExplorationGraph>(m, "DynamicExplorationGraph")

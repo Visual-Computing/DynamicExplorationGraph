@@ -1,3 +1,4 @@
+import gc
 from pathlib import Path
 import time
 import numpy as np
@@ -60,7 +61,7 @@ class DegANN(BaseANN):
         self.needs_normalization: bool = (self.metric == "cosine")
 
         self.k = int(k)
-        self.extend_k = 60
+        self.extend_k = self.k*2
         self.extend_eps = 0.1
         self.opt_target = str(opt_target)
         self.prune_non_rng = bool(prune_non_rng)
@@ -81,7 +82,7 @@ class DegANN(BaseANN):
         self.graph: deglib.ReadOnlyGraph | None = None
         self.original_features_fp16: np.ndarray | None = None
         self.rerank_space_fp16: deglib.FloatSpace | None = None
-        self._batch_results: np.ndarray | None = None
+        self.searcher = None
 
     def _map_opt_target(self, opt_target: str) -> deglib.builder.OptimizationTarget:
         target = opt_target.lower().strip()
@@ -210,11 +211,9 @@ class DegANN(BaseANN):
 
         # 2. Optional MRNG edge pruning on SizeBoundedGraph (MutableGraph)
         if self.prune_non_rng:
-            mut_graph = graph if graph.is_mutable() else graph.to_mutable()
             print("Pruning non-RNG edges on SizeBoundedGraph...")
-            removed = deglib.optimization.prune_non_rng_edges(mut_graph, num_threads=self.threads)
+            removed = deglib.optimization.prune_non_rng_edges(graph, num_threads=self.threads)
             print(f"Pruned {removed:,} non-RNG edges.")
-            graph = mut_graph
 
         # 3. Finalize ReadOnlyGraph with query_dtype features
         if quantized_features is not None:
@@ -224,59 +223,35 @@ class DegANN(BaseANN):
         else:
             self.graph = graph if not graph.is_mutable() else graph.to_readonly()
 
+        # Initialize high-performance C++ Searcher (Zero-overhead query loop)
+        self.searcher = deglib.search.create_searcher(
+            graph=self.graph,
+            quantizer=self.quantizer,
+            refine_space=self.rerank_space_fp16 if self.query_dtype != "float32" else None,
+            refine_data=self.original_features_fp16 if self.query_dtype != "float32" else None,
+            search_eps=self.search_eps,
+            rerank_factor=self.rerank_size_factor,
+        )
+
+        # Clean up temporary data / graphs and wait briefly for threads/CPU to settle
+        del graph, X_f32, quantized_features
+        gc.collect()
+        time.sleep(5)
+
     def set_query_arguments(self, search_eps: float, rerank_size_factor: float = 1.0):
         """Sets query-time search_eps and rerank scaling factor."""
         self.search_eps = float(search_eps)
         self.rerank_size_factor = float(rerank_size_factor)
-
-    def _prepare_query_vectors(self, q_f32: np.ndarray, threads: int = 1) -> np.ndarray:
-        """Transforms query vectors using the base-calibrated quantizer."""
-        if self.query_dtype == "float32":
-            return q_f32
-        elif self.quantizer is not None:
-            return self.quantizer.quantize(q_f32, num_threads=threads)
-        else:
-            return q_f32
-
-    def _search_and_rerank(self, queries: np.ndarray, n: int, threads: int = 1) -> np.ndarray:
-        """Unified search and optional FP16 reranking engine."""
-        if self.graph is None:
-            raise RuntimeError("Index not fitted. Call fit(X) first.")
-
-        fetch_k = max(n, int(round(n * self.rerank_size_factor)))
-        q_f32 = self._prepare_input(queries)
-        query_mat = self._prepare_query_vectors(q_f32, threads=threads)
-        res = self.graph.search(query_mat, eps=self.search_eps, k=fetch_k, threads=threads, return_distances=False, unsorted=True)
-        indices = res[0] if isinstance(res, tuple) else res
-
-        # Only perform reranking if we fetched more candidates than n and original features are available
-        if fetch_k > n and self.original_features_fp16 is not None:
-            queries_fp16 = deglib.distances.floats_to_fp16(q_f32)
-            reranked = deglib.search.rerank(
-                space=self.rerank_space_fp16,
-                queries=queries_fp16,
-                candidate_indices=np.ascontiguousarray(indices, dtype=np.uint32),
-                base_vectors=self.original_features_fp16,
-                k_top=n,
-                num_threads=threads,
-                unsorted=True,
-            )
-            return np.asarray(reranked, dtype=np.int64)
-
-        return np.asarray(indices[:, :n] if indices.ndim == 2 else indices[:n], dtype=np.int64)
+        if self.searcher is not None:
+            self.searcher.set_query_arguments(self.search_eps, self.rerank_size_factor)
 
     def query(self, v: np.ndarray, n: int) -> np.ndarray:
-        """Single query search on 1 thread with optional FP16 reranking."""
-        return self._search_and_rerank(v.reshape(1, -1), n=n, threads=1)[0]
-
-    def batch_query(self, X: np.ndarray, n: int):
-        """Batch query search on 1 thread with optional FP16 reranking."""
-        self._batch_results = self._search_and_rerank(X, n=n, threads=1)
-
-    def get_batch_results(self) -> np.ndarray:
-        if self._batch_results is None:
-            raise RuntimeError("No batch results available.")
-        return self._batch_results
+        """Single query search on 1 thread with optional FP16 reranking directly in C++."""
+        if self.searcher is None:
+            raise RuntimeError("Index not fitted. Call fit(X) first.")
+        if self.needs_normalization:
+            v = v / np.linalg.norm(v)
+        return self.searcher.search(np.ascontiguousarray(v, dtype=np.float32), n, return_distances=False, unsorted=True)
 
     def __str__(self) -> str:
         return (

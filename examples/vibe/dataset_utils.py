@@ -212,11 +212,13 @@ def ensure_dataset(dataset_key: str, cache_dir: Path) -> Tuple[Path, Path, Dict[
     return dataset_dir, hdf5_path, meta
 
 
-def load_vibe_dataset(dataset_key: str, cache_dir: Path) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, Any]]:
+def load_vibe_dataset(
+    dataset_key: str, cache_dir: Path
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None, Dict[str, Any]]:
     """
     Loads a VIBE dataset HDF5 file.
     Returns:
-        (train_base_vectors, test_query_vectors, gt_neighbor_indices, metadata)
+        (train_base_vectors, test_query_vectors, gt_neighbor_indices, gt_distances, metadata)
     """
     key = resolve_dataset_key(dataset_key)
     dataset_dir, hdf5_path, meta = ensure_dataset(key, cache_dir)
@@ -241,7 +243,12 @@ def load_vibe_dataset(dataset_key: str, cache_dir: Path) -> Tuple[np.ndarray, np
         print(f"  Reading ground truth neighbors ({neighbors_ds.shape}, dtype={neighbors_ds.dtype})...")
         gt_neighbors = np.ascontiguousarray(neighbors_ds[:], dtype=np.int32)
 
-        # Update metadata if actual attributes are in HDF5
+        # Load ground truth distances if available in HDF5 (for distance-threshold recall evaluation)
+        gt_distances = None
+        if "distances" in f:
+            dist_ds = f["distances"]
+            print(f"  Reading ground truth distances ({dist_ds.shape}, dtype={dist_ds.dtype})...")
+            gt_distances = np.ascontiguousarray(dist_ds[:], dtype=np.float32)
         if "dimension" in f.attrs:
             meta["hdf5_dim"] = int(f.attrs["dimension"])
         if "distance" in f.attrs:
@@ -254,7 +261,7 @@ def load_vibe_dataset(dataset_key: str, cache_dir: Path) -> Tuple[np.ndarray, np
         f"{query_vecs.shape[0]:,} query vectors, {base_vecs.shape[1]} dimensions, "
         f"metric={meta['metric']}."
     )
-    return base_vecs, query_vecs, gt_neighbors, meta
+    return base_vecs, query_vecs, gt_neighbors, gt_distances, meta
 
 
 def build_graph_filename(

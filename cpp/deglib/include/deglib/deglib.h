@@ -8,6 +8,7 @@
 #include "deglib/graph.h"
 #include "deglib/optimization.h"
 #include "deglib/search.h"
+#include "deglib/search/searcher.h"
 #include "deglib/utils/memory.h"
 #include "deglib/utils/random.h"
 

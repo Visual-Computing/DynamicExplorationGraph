@@ -1,7 +1,36 @@
 # Release Notes
 
-## deglib v0.2.2
+## deglib v0.2.3
 
+### Overview
+deglib v0.2.3 introduces a zero-overhead C++20 templated **`Searcher`** pipeline for inference (`deglib::search::Searcher` / `deglib.search.create_searcher`), eliminating Python bridge and memory allocation overhead in single-query loops by bundling query quantization, graph search, and exact SIMD candidate reranking into a single native invocation. Additionally, it brings official VIBE distance-tolerance recall calculation and clean C++20 `std::span` convenience interfaces.
+
+---
+
+### 🚀 Key Features & Improvements
+
+#### High-Performance Inference Pipeline (`deglib::search::Searcher`)
+* **Zero-Overhead End-to-End Querying:** Integrates query quantization (FP32/FP16 $\rightarrow$ INT8/UINT8/EVP), graph traversal on quantized indices, and SIMD candidate refinement against FP16/FP32 base features in a single C++ call.
+* **Static Template Specialization (`SearcherImpl<QuantT, RefinerT>`):**
+  * Compile-time `if constexpr` branch elimination avoiding virtual method dispatch in the hot search loop.
+  * Full support for all quantizers (`NoQuantizer`, `ScalarInt8Quantizer`, `ScalarInt8PerDimQuantizer`, `ScalarUint8Quantizer`, `ScalarUint8PerDimQuantizer`, `EVPQuantizer`).
+  * Support for unquantized and quantized candidate refiners (`NoRefiner`, `ExactRefiner<uint16_t>`, `ExactRefiner<float>`).
+* **Modern C++20 Interface:**
+  * `std::span<const T>` and `SearchResult` helpers for safe, expressive, and allocation-free querying.
+  * Direct result count reporting (`uint32_t count`) indicating valid found neighbors.
+  * Fast `unsorted=true` mode skipping heap sorting for pure candidate set retrieval.
+  * Optional `return_distances=true` flag for returning both neighbor IDs and exact distance values.
+* **Python Factory & Bindings (`deglib.search.create_searcher`):**
+  * Automatic type deduction from graph and quantizer instances without manual `query_dtype` flags.
+
+#### VIBE Benchmark Enhancements (`examples/vibe`)
+* **Official VIBE Distance-Tolerance Recall:** Implemented official ground-truth distance threshold evaluation ($t = \text{gt\_distances}[k-1] + 10^{-3}$) using exact metric math (`euclidean`, `cosine`, `normalized`, `ip`) identical to `vibe/distance.py`.
+* **Single-Query Evaluation Loop:** Benchmark runner uses `adapter.query(v, n)` powered by the C++ `Searcher` with `unsorted=True` for peak single-threaded QPS without Python bridge latency.
+* **Garbage Collection & Cooldown:** Memory cleanup and settling pause after graph fitting.
+
+---
+
+## deglib v0.2.2
 ### Overview
 deglib v0.2.2 introduces a strictly object-oriented **Fit-then-Quantize** scalar quantization suite (`ScalarQuantizerInt8`, `ScalarQuantizerInt8PerDim`, `ScalarQuantizerUint8`, `ScalarQuantizerUint8PerDim`), `make_scalar_quantizer_*` factory functions, full native FP16 (`uint16_t` / `np.float16`) and FP32 quantization support across all classes, and removes legacy one-shot procedural helpers.
 

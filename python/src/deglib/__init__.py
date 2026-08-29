@@ -5,6 +5,7 @@ from . import distances
 from . import graph
 from . import optimization
 from . import search
+from .search import Searcher, create_searcher
 
 from .builder import GraphBuilder, build_from_data
 from .graph import (
@@ -19,7 +20,7 @@ from .graph import (
 )
 from .distances import FloatSpace, Metric
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 
 __all__ = [
     "DynamicExplorationGraph",
@@ -39,5 +40,7 @@ __all__ = [
     "analysis",
     "distances",
     "search",
+    "Searcher",
+    "create_searcher",
     "cpu",
 ]

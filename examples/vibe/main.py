@@ -70,6 +70,42 @@ def set_cpu_affinity(cpu_ids: list[int] | None = None) -> list[int] | None:
 from plot_utils import export_interactive_html
 
 
+def _euclidean_distance(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    if a.ndim == 1 and b.ndim == 2:
+        return np.linalg.norm(b - a, axis=1)
+    if a.ndim == 2 and b.ndim == 1:
+        return np.linalg.norm(a - b, axis=1)
+    return np.linalg.norm(a - b)
+
+
+def _cosine_distance(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    if a.ndim == 1 and b.ndim == 2:
+        return np.clip(1.0 - np.dot(b, a) / (np.linalg.norm(a) * np.linalg.norm(b, axis=1)), a_min=0.0, a_max=2.0)
+    if a.ndim == 2 and b.ndim == 1:
+        return np.clip(1.0 - np.dot(a, b) / (np.linalg.norm(a, axis=1) * np.linalg.norm(b)), a_min=0.0, a_max=2.0)
+    return np.clip(1.0 - np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)), a_min=0.0, a_max=2.0)
+
+
+def _ip_distance(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    if a.ndim == 1 and b.ndim == 2:
+        return -np.dot(b, a)
+    if a.ndim == 2 and b.ndim == 1:
+        return -np.dot(a, b)
+    return -np.dot(a, b)
+
+
+def _normalized_cosine_distance(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    # cosine distance assuming a and b are already normalized
+    return np.clip(1.0 + _ip_distance(a, b), a_min=0.0, a_max=2.0)
+
+
+_VIBE_METRICS = {
+    "euclidean": _euclidean_distance,
+    "l2": _euclidean_distance,
+    "cosine": _cosine_distance,
+    "ip": _ip_distance,
+    "normalized": _normalized_cosine_distance,
+}
 def compute_linear_search_baseline(
     base_vecs: np.ndarray, float_space: deglib.distances.FloatSpace, sample_size: int = 10
 ) -> float:
@@ -183,7 +219,7 @@ def main():
             set_cpu_affinity(args.cpu_affinity)
 
         # Load dataset
-        base_vecs, query_vecs, gt_vecs, meta = load_vibe_dataset(dataset_key, cache_dir)
+        base_vecs, query_vecs, gt_vecs, gt_distances, meta = load_vibe_dataset(dataset_key, cache_dir)
         dims = base_vecs.shape[1]
         metric_str = meta["metric"]
         is_l2 = metric_str.lower().strip() in ("euclidean", "l2", "fp32_l2")
@@ -257,22 +293,31 @@ def main():
 
                 for eps in eps_list:
                     adapter.set_query_arguments(search_eps=eps, rerank_size_factor=r_factor)
+                    results_indices = []
                     start_time = time.perf_counter()
-                    adapter.batch_query(query_vecs, n=actual_k)
+                    for q_idx in range(n_queries):
+                        results_indices.append(adapter.query(query_vecs[q_idx], actual_k))
                     elapsed_sec = time.perf_counter() - start_time
-                    indices_batch = adapter.get_batch_results()
+                    indices_batch = np.array(results_indices, dtype=np.int64)
 
                     search_time_us = elapsed_sec * 1e6
                     time_us_per_query = int(search_time_us / max(n_queries, 1))
                     qps = n_queries / max(elapsed_sec, 1e-9)
-
                     hits = 0
-                    total_returned = 0
-                    for i in range(n_queries):
-                        gt_set = set(gt_vecs[i, :actual_k])
-                        ret_set = set(indices_batch[i])
-                        hits += len(gt_set.intersection(ret_set))
-                        total_returned += len(gt_set)
+                    total_returned = n_queries * actual_k
+                    if gt_distances is not None:
+                        # Official VIBE distance-tolerance recall calculation (exact 1:1 match with vibe/distance.py)
+                        dist_fn = _VIBE_METRICS.get(metric_str.lower().strip(), _ip_distance)
+                        for i in range(n_queries):
+                            t = gt_distances[i, actual_k - 1] + 1e-3
+                            ret_vecs = base_vecs[indices_batch[i, :actual_k]]
+                            pred_dists = dist_fn(query_vecs[i], ret_vecs)
+                            hits += int((pred_dists <= t).sum())
+                    else:
+                        for i in range(n_queries):
+                            gt_set = set(gt_vecs[i, :actual_k])
+                            ret_set = set(indices_batch[i, :actual_k])
+                            hits += len(gt_set.intersection(ret_set))
 
                     recall = hits / max(total_returned, 1)
                     anns_recalls.append(recall)
