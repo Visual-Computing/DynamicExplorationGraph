@@ -258,7 +258,7 @@ TEST(InnerProductFloat_FloatSpace, InnerProductMetric) {
 }
 
 TEST(InnerProductFloat_FloatSpace, VariousDims) {
-    std::vector<size_t> dims = {4, 8, 16, 32, 64, 128, 256, 512};
+    std::vector<size_t> dims = {4, 8, 16, 32, 48, 64, 80, 100, 128, 256, 512, 784};
     for (size_t dim : dims) {
         deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_InnerProduct);
 
@@ -271,7 +271,7 @@ TEST(InnerProductFloat_FloatSpace, VariousDims) {
 }
 
 TEST(InnerProductFloat_Batch, MatchesSingleCompare) {
-    std::vector<size_t> dims = {8, 16, 32, 64, 128, 256, 768};
+    std::vector<size_t> dims = {8, 16, 32, 48, 64, 80, 100, 128, 256, 768, 784};
     std::vector<size_t> counts = {1, 3, 4, 7, 8, 9, 15, 16, 25};
 
     for (size_t dim : dims) {

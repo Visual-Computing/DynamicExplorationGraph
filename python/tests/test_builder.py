@@ -221,3 +221,31 @@ class TestGraphs:
         assert status.deleted > 0
         assert len(status.total_added_ids) == self.data.shape[0]
         assert len(status.total_deleted_ids) > 0
+
+    @pytest.mark.parametrize("dim", [48, 80, 100, 784])
+    @pytest.mark.parametrize("metric", [Metric.FP32_L2, Metric.FP32_InnerProduct])
+    def test_build_unaligned_dimensions(self, dim, metric):
+        samples = 60
+        edges_per_vertex = 16
+        np.random.seed(42)
+        data = np.random.random((samples, dim)).astype(np.float32)
+        if metric == Metric.FP32_InnerProduct:
+            data = data / np.linalg.norm(data, axis=1, keepdims=True)
+
+        graph = deglib.create_empty(samples, FloatSpace.create(dim, metric), edges_per_vertex)
+        builder = deglib.GraphBuilder(
+            graph,
+            extend_k=32,
+            extend_eps=0.1,
+            optimization_target=deglib.builder.OptimizationTarget.LowLID if metric == Metric.FP32_L2 else deglib.builder.OptimizationTarget.HighLID,
+        )
+        builder.add_entry(range(samples), data)
+        status = builder.build()
+        assert status.added == samples
+        assert graph.size() == samples
+
+        # Verify search works and returns valid neighbors
+        res = graph.search(data[0], k=10, eps=0.1)
+        indices, dists = res
+        assert len(indices) == 10
+        assert not np.isnan(dists).any()

@@ -245,7 +245,7 @@ TEST(L2Uint8_FloatSpace, L2Uint8Metric) {
 }
 
 TEST(L2Uint8_FloatSpace, VariousDims) {
-    std::vector<size_t> dims = {4, 8, 16, 32, 64, 128, 256};
+    std::vector<size_t> dims = {4, 8, 16, 32, 48, 64, 80, 100, 128, 256, 784};
     for (size_t dim : dims) {
         deglib::distances::FloatSpace space(dim, deglib::distances::Metric::Uint8_L2);
 
@@ -258,7 +258,7 @@ TEST(L2Uint8_FloatSpace, VariousDims) {
 }
 
 TEST(L2Uint8_Batch, MatchesSingleCompare) {
-    std::vector<size_t> dims = {16, 32, 64, 128, 256, 768};
+    std::vector<size_t> dims = {16, 32, 48, 64, 80, 100, 128, 256, 768, 784};
     std::vector<size_t> counts = {1, 3, 4, 7, 8, 9, 15, 16, 25};
 
     for (size_t dim : dims) {

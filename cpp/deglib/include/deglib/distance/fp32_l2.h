@@ -142,17 +142,20 @@ class L2Float_AVX512 {
             }
 
             if constexpr (HasDualSimd) {
-                const size_t nc16 = dim / 16;
-                offset = nc16 * 16;
+                const size_t nc32 = dim / 32;
+                offset = nc32 * 32;
 
-                for (size_t c = 0; c < nc16; ++c) {
-                    size_t idx = c * 16;
-                    __m512 q_vec = _mm512_loadu_ps(&query[idx]);
+                for (size_t c = 0; c < nc32; ++c) {
+                    size_t idx = c * 32;
+                    __m512 q_vec_lo = _mm512_loadu_ps(&query[idx]);
+                    __m512 q_vec_hi = _mm512_loadu_ps(&query[idx + 16]);
 
                     for (size_t j = 0; j < BATCH_SIZE; ++j) {
                         const float* db_ = static_cast<const float*>(db[j]);
-                        __m512 diff = _mm512_sub_ps(q_vec, _mm512_loadu_ps(&db_[idx]));
-                        s[j] = _mm512_fmadd_ps(diff, diff, s[j]);
+                        __m512 diff_lo = _mm512_sub_ps(q_vec_lo, _mm512_loadu_ps(&db_[idx]));
+                        __m512 diff_hi = _mm512_sub_ps(q_vec_hi, _mm512_loadu_ps(&db_[idx + 16]));
+                        s[j] = _mm512_fmadd_ps(diff_lo, diff_lo, s[j]);
+                        s[j] = _mm512_fmadd_ps(diff_hi, diff_hi, s[j]);
                     }
                 }
             }
@@ -264,17 +267,20 @@ class L2Float_AVX2 {
             }
 
             if constexpr (HasDualSimd) {
-                const size_t nc8 = dim / 8;
-                offset = nc8 * 8;
+                const size_t nc16 = dim / 16;
+                offset = nc16 * 16;
 
-                for (size_t c = 0; c < nc8; ++c) {
-                    size_t idx = c * 8;
-                    __m256 q_vec = _mm256_loadu_ps(&query[idx]);
+                for (size_t c = 0; c < nc16; ++c) {
+                    size_t idx = c * 16;
+                    __m256 q_vec_lo = _mm256_loadu_ps(&query[idx]);
+                    __m256 q_vec_hi = _mm256_loadu_ps(&query[idx + 8]);
 
                     for (size_t j = 0; j < BATCH_SIZE; ++j) {
                         const float* db_ = static_cast<const float*>(db[j]);
-                        __m256 diff = _mm256_sub_ps(q_vec, _mm256_loadu_ps(&db_[idx]));
-                        s[j] = _mm256_fmadd_ps(diff, diff, s[j]);
+                        __m256 diff_lo = _mm256_sub_ps(q_vec_lo, _mm256_loadu_ps(&db_[idx]));
+                        __m256 diff_hi = _mm256_sub_ps(q_vec_hi, _mm256_loadu_ps(&db_[idx + 8]));
+                        s[j] = _mm256_fmadd_ps(diff_lo, diff_lo, s[j]);
+                        s[j] = _mm256_fmadd_ps(diff_hi, diff_hi, s[j]);
                     }
                 }
             }

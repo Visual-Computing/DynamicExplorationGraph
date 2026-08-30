@@ -169,19 +169,24 @@ class L2Int8_AVX512 {
             }
 
             if constexpr (HasDualSimd) {
-                const size_t nc32 = dim / 32;
-                offset = nc32 * 32;
+                const size_t nc64 = dim / 64;
+                offset = nc64 * 64;
 
-                for (size_t c = 0; c < nc32; ++c) {
-                    size_t idx = c * 32;
-                    __m256i q_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&query[idx]));
-                    __m512i q_vec = _mm512_cvtepi8_epi16(q_raw);
+                for (size_t c = 0; c < nc64; ++c) {
+                    size_t idx = c * 64;
+                    __m256i q_raw_lo = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&query[idx]));
+                    __m256i q_raw_hi = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&query[idx + 32]));
+                    __m512i q_vec_lo = _mm512_cvtepi8_epi16(q_raw_lo);
+                    __m512i q_vec_hi = _mm512_cvtepi8_epi16(q_raw_hi);
 
                     for (size_t j = 0; j < BATCH_SIZE; ++j) {
                         const int8_t* db_ = static_cast<const int8_t*>(db[j]);
-                        __m256i r_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&db_[idx]));
-                        __m512i diff = _mm512_sub_epi16(q_vec, _mm512_cvtepi8_epi16(r_raw));
-                        s[j] = _mm512_add_epi32(s[j], _mm512_madd_epi16(diff, diff));
+                        __m256i r_raw_lo = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&db_[idx]));
+                        __m256i r_raw_hi = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&db_[idx + 32]));
+                        __m512i diff_lo = _mm512_sub_epi16(q_vec_lo, _mm512_cvtepi8_epi16(r_raw_lo));
+                        __m512i diff_hi = _mm512_sub_epi16(q_vec_hi, _mm512_cvtepi8_epi16(r_raw_hi));
+                        s[j] = _mm512_add_epi32(s[j], _mm512_madd_epi16(diff_lo, diff_lo));
+                        s[j] = _mm512_add_epi32(s[j], _mm512_madd_epi16(diff_hi, diff_hi));
                     }
                 }
             }
@@ -290,19 +295,24 @@ class L2Int8_AVX2 {
             }
 
             if constexpr (HasDualSimd) {
-                const size_t nc16 = dim / 16;
-                offset = nc16 * 16;
+                const size_t nc32 = dim / 32;
+                offset = nc32 * 32;
 
-                for (size_t c = 0; c < nc16; ++c) {
-                    size_t idx = c * 16;
-                    __m128i q_raw = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&query[idx]));
-                    __m256i q_vec = _mm256_cvtepi8_epi16(q_raw);
+                for (size_t c = 0; c < nc32; ++c) {
+                    size_t idx = c * 32;
+                    __m128i q_raw_lo = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&query[idx]));
+                    __m128i q_raw_hi = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&query[idx + 16]));
+                    __m256i q_vec_lo = _mm256_cvtepi8_epi16(q_raw_lo);
+                    __m256i q_vec_hi = _mm256_cvtepi8_epi16(q_raw_hi);
 
                     for (size_t j = 0; j < BATCH_SIZE; ++j) {
                         const int8_t* db_ = static_cast<const int8_t*>(db[j]);
-                        __m128i r_raw = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&db_[idx]));
-                        __m256i diff = _mm256_sub_epi16(q_vec, _mm256_cvtepi8_epi16(r_raw));
-                        s[j] = _mm256_add_epi32(s[j], _mm256_madd_epi16(diff, diff));
+                        __m128i r_raw_lo = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&db_[idx]));
+                        __m128i r_raw_hi = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&db_[idx + 16]));
+                        __m256i diff_lo = _mm256_sub_epi16(q_vec_lo, _mm256_cvtepi8_epi16(r_raw_lo));
+                        __m256i diff_hi = _mm256_sub_epi16(q_vec_hi, _mm256_cvtepi8_epi16(r_raw_hi));
+                        s[j] = _mm256_add_epi32(s[j], _mm256_madd_epi16(diff_lo, diff_lo));
+                        s[j] = _mm256_add_epi32(s[j], _mm256_madd_epi16(diff_hi, diff_hi));
                     }
                 }
             }
