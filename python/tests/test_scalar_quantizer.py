@@ -35,15 +35,6 @@ def test_int8_quantizer_fit_and_quantize():
     # Query elements should have smaller absolute quantized values because they are on the db scale
     assert np.max(np.abs(quant_query)) < np.max(np.abs(quant_db))
 
-    # Dequantize round-trip check
-    dequant_db = quantizer.dequantize(quant_db)
-    assert dequant_db.shape == (100, 32)
-    assert dequant_db.dtype == np.float32
-    np.testing.assert_allclose(dequant_db, db_vectors, atol=0.1)
-
-    dequant_query = quantizer.dequantize(quant_query)
-    np.testing.assert_allclose(dequant_query, query_vectors, atol=0.1)
-
 
 def test_make_scalar_quantizer_factory_functions():
     np.random.seed(42)
@@ -71,7 +62,7 @@ def test_make_scalar_quantizer_factory_functions():
     assert q_perdim.quantize(vectors).shape == (50, 16)
 
 
-def test_int8_quantizer_fit_quantize():
+def test_int8_quantizer_fit_and_quantize():
     np.random.seed(42)
     vectors = np.random.randn(50, 16).astype(np.float32)
 
@@ -79,11 +70,9 @@ def test_int8_quantizer_fit_quantize():
     q1.fit(vectors)
     res1 = q1.quantize(vectors)
 
-    q2 = ScalarQuantizerInt8()
-    res2 = q2.fit_quantize(vectors)
-
-    assert np.array_equal(res1, res2)
-    assert q1.abs_max == pytest.approx(q2.abs_max)
+    assert q1.is_fitted
+    assert res1.shape == (50, 16)
+    assert res1.dtype == np.int8
 
 
 def test_int8_quantizer_fp16_input():
@@ -92,10 +81,12 @@ def test_int8_quantizer_fp16_input():
     vectors_f16 = vectors_f32.astype(np.float16)
 
     q_f32 = ScalarQuantizerInt8()
-    res_f32 = q_f32.fit_quantize(vectors_f32)
+    q_f32.fit(vectors_f32)
+    res_f32 = q_f32.quantize(vectors_f32)
 
     q_f16 = ScalarQuantizerInt8()
-    res_f16 = q_f16.fit_quantize(vectors_f16)
+    q_f16.fit(vectors_f16)
+    res_f16 = q_f16.quantize(vectors_f16)
 
     assert q_f32.abs_max == pytest.approx(q_f16.abs_max, rel=1e-3)
     np.testing.assert_allclose(res_f32, res_f16, atol=1)
@@ -110,8 +101,8 @@ def test_uint8_quantizer_fit_and_quantize():
     quantizer.fit(db_vectors)
 
     assert quantizer.is_fitted
-    assert quantizer.min_val >= 9.0 and quantizer.min_val <= 11.0
-    assert quantizer.max_val >= 49.0 and quantizer.max_val <= 51.0
+    assert quantizer.min_val == pytest.approx(np.min(db_vectors))
+    assert quantizer.max_val == pytest.approx(np.max(db_vectors))
 
     quant_db = quantizer.quantize(db_vectors)
     quant_query = quantizer.quantize(query_vectors)
@@ -120,13 +111,6 @@ def test_uint8_quantizer_fit_and_quantize():
     assert quant_db.dtype == np.uint8
     assert quant_query.shape == (10, 16)
     assert quant_query.dtype == np.uint8
-
-    # Check that dequantize recovers values with high accuracy
-    dequant_db = quantizer.dequantize(quant_db)
-    np.testing.assert_allclose(dequant_db, db_vectors, atol=0.2)
-
-    dequant_query = quantizer.dequantize(quant_query)
-    np.testing.assert_allclose(dequant_query, query_vectors, atol=0.2)
 
 
 def test_uint8_per_dim_quantizer():
@@ -138,7 +122,8 @@ def test_uint8_per_dim_quantizer():
     ], dtype=np.float32)
 
     quantizer = ScalarQuantizerUint8PerDim()
-    quant_db = quantizer.fit_quantize(db_vectors)
+    quantizer.fit(db_vectors)
+    quant_db = quantizer.quantize(db_vectors)
 
     assert quantizer.is_fitted
     assert quantizer.dim == 2
@@ -166,9 +151,6 @@ def test_uint8_per_dim_quantizer():
     # 5.0 in [-10, 10] -> round((5 - (-10))/20 * 255) = round(15/20 * 255) = 191
     assert quant_query[0, 1] == 191
 
-    dequant = quantizer.dequantize(quant_query)
-    np.testing.assert_allclose(dequant, query, atol=0.5)
-
 
 def test_int8_per_dim_quantizer():
     from deglib.optimization import ScalarQuantizerInt8PerDim, make_scalar_quantizer_int8_perdim
@@ -194,7 +176,8 @@ def test_int8_per_dim_quantizer():
     # FP16 test
     db_f16 = db_vectors.astype(np.float16)
     q_f16 = ScalarQuantizerInt8PerDim()
-    quant_f16 = q_f16.fit_quantize(db_f16)
+    q_f16.fit(db_f16)
+    quant_f16 = q_f16.quantize(db_f16)
     assert np.array_equal(quant_db, quant_f16)
 
 
@@ -206,17 +189,21 @@ def test_uint8_fp16_input():
     from deglib.optimization import ScalarQuantizerUint8, ScalarQuantizerUint8PerDim
 
     q_u8_f32 = ScalarQuantizerUint8()
-    res_u8_f32 = q_u8_f32.fit_quantize(vectors_f32)
+    q_u8_f32.fit(vectors_f32)
+    res_u8_f32 = q_u8_f32.quantize(vectors_f32)
 
     q_u8_f16 = ScalarQuantizerUint8()
-    res_u8_f16 = q_u8_f16.fit_quantize(vectors_f16)
+    q_u8_f16.fit(vectors_f16)
+    res_u8_f16 = q_u8_f16.quantize(vectors_f16)
 
     np.testing.assert_allclose(res_u8_f32, res_u8_f16, atol=1)
 
     q_pdim_f32 = ScalarQuantizerUint8PerDim()
-    res_pdim_f32 = q_pdim_f32.fit_quantize(vectors_f32)
+    q_pdim_f32.fit(vectors_f32)
+    res_pdim_f32 = q_pdim_f32.quantize(vectors_f32)
 
     q_pdim_f16 = ScalarQuantizerUint8PerDim()
-    res_pdim_f16 = q_pdim_f16.fit_quantize(vectors_f16)
+    q_pdim_f16.fit(vectors_f16)
+    res_pdim_f16 = q_pdim_f16.quantize(vectors_f16)
 
     np.testing.assert_allclose(res_pdim_f32, res_pdim_f16, atol=1)

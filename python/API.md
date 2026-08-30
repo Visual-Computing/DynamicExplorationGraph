@@ -296,7 +296,6 @@ from deglib.optimization import (
 quantizer = make_scalar_quantizer_int8(base_vectors, drop_ratio=0.0)
 quant_base = quantizer.quantize(base_vectors)
 quant_query = quantizer.quantize(query_vectors)
-dequant_vectors = quantizer.dequantize(quant_query)
 
 # INT8 Per-Dimension Quantizer [-127, 127]
 int8_pdim = make_scalar_quantizer_int8_perdim(base_vectors)

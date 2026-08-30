@@ -27,12 +27,11 @@ TEST(SearcherTest, DirectFP32Search) {
     auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
 
     auto searcher = deglib::search::make_searcher(graph.internal());
-    searcher->set_query_arguments(0.1f, 1.0f);
 
     // 1. Raw buffer search
     std::vector<uint32_t> out_indices(5);
     std::vector<float> out_distances(5);
-    uint32_t found = searcher->search_f32(data.data(), 5, out_indices.data(), out_distances.data());
+    uint32_t found = searcher->search_f32(data.data(), 5, 0.1f, 1.0f, out_indices.data(), out_distances.data());
 
     EXPECT_EQ(found, 5u);
     EXPECT_EQ(out_indices[0], 0u);
@@ -42,7 +41,7 @@ TEST(SearcherTest, DirectFP32Search) {
     }
 
     // 2. Modern C++20 span / SearchResult search
-    auto span_res = searcher->search(std::span<const float>(data.data(), dim), 5, /*return_distances=*/true);
+    auto span_res = searcher->search(std::span<const float>(data.data(), dim), 5, 0.1f, 1.0f, /*return_distances=*/true);
     EXPECT_EQ(span_res.size(), 5u);
     EXPECT_EQ(span_res.indices[0], 0u);
     EXPECT_NEAR(span_res.distances[0], 0.0f, 1e-5f);
@@ -73,20 +72,17 @@ TEST(SearcherTest, QuantizedInt8WithFP16Refiner) {
     deglib::distances::fp16::floats_to_fp16(data.data(), base_fp16.data(), data.size());
     auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP16_L2);
 
-    using QuantT = deglib::search::ScalarInt8Quantizer;
     using RefinerT = deglib::search::ExactRefiner<uint16_t>;
 
     auto searcher = deglib::search::make_searcher(
         ro_graph,
-        QuantT(quantizer),
-        RefinerT(rerank_space, base_fp16.data(), count),
-        /*search_eps=*/0.2f,
-        /*rerank_factor=*/2.0f
+        quantizer,
+        RefinerT(rerank_space, base_fp16.data(), count)
     );
 
     // Query for 5th item
     auto q = std::span<const float>(data.data() + 5 * dim, dim);
-    auto res = searcher->search(q, 5, /*return_distances=*/true);
+    auto res = searcher->search(q, 5, /*eps=*/0.2f, /*rerank_factor=*/2.0f, /*return_distances=*/true);
 
     EXPECT_EQ(res.size(), 5u);
     EXPECT_EQ(res.indices[0], 5u);
@@ -114,19 +110,16 @@ TEST(SearcherTest, QuantizedUint8WithFP32Refiner) {
 
     auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP32_L2);
 
-    using QuantT = deglib::search::ScalarUint8Quantizer;
     using RefinerT = deglib::search::ExactRefiner<float>;
 
     auto searcher = deglib::search::make_searcher(
         ro_graph,
-        QuantT(quantizer),
-        RefinerT(rerank_space, data.data(), count),
-        0.2f,
-        1.5f
+        quantizer,
+        RefinerT(rerank_space, data.data(), count)
     );
 
     auto q = std::span<const float>(data.data() + 2 * dim, dim);
-    auto res = searcher->search(q, 3, /*return_distances=*/true);
+    auto res = searcher->search(q, 3, /*eps=*/0.2f, /*rerank_factor=*/1.5f, /*return_distances=*/true);
 
     EXPECT_GE(res.size(), 1u);
     EXPECT_EQ(res.indices[0], 2u);
@@ -168,15 +161,74 @@ TEST(SearcherTest, EVPQuantizerWithFP32Refiner) {
     auto searcher = deglib::search::make_searcher(
         ro_graph,
         QuantT(non_zeros),
-        RefinerT(rerank_space, data.data(), count),
-        0.3f,
-        2.0f
+        RefinerT(rerank_space, data.data(), count)
     );
 
     auto q = std::span<const float>(data.data() + 3 * dim, dim);
-    auto res = searcher->search(q, 3, /*return_distances=*/true);
+    auto res = searcher->search(q, 3, /*eps=*/0.3f, /*rerank_factor=*/2.0f, /*return_distances=*/true);
 
     EXPECT_GE(res.size(), 1u);
     EXPECT_EQ(res.indices[0], 3u);
     EXPECT_NEAR(res.distances[0], 0.0f, 1e-4f);
+
+    // FP16 query test with EVPQuantizer
+    std::vector<uint16_t> q_fp16(dim);
+    deglib::distances::fp16::floats_to_fp16(data.data() + 3 * dim, q_fp16.data(), dim);
+    auto res_fp16 = searcher->search(std::span<const uint16_t>(q_fp16.data(), dim), 3, /*eps=*/0.3f, /*rerank_factor=*/2.0f, /*return_distances=*/true);
+    EXPECT_GE(res_fp16.size(), 1u);
+    EXPECT_EQ(res_fp16.indices[0], 3u);
+    EXPECT_NEAR(res_fp16.distances[0], 0.0f, 1e-3f);
 }
+
+TEST(SearcherTest, FlatBatchAndIntoSearch) {
+    const uint32_t dim = 4;
+    const uint32_t count = 30;
+
+    std::vector<float> data(count * dim);
+    for (size_t i = 0; i < data.size(); ++i) {
+        data[i] = static_cast<float>(i * 0.5f + 0.1f);
+    }
+
+    auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
+    auto searcher = deglib::search::make_searcher(graph.internal());
+
+    const size_t n_queries = 5;
+    const uint32_t k = 4;
+
+    // 1. search_batch returning SearchResultBatch (flat buffer)
+    auto flat_res = searcher->search_batch(
+        std::span<const float>(data.data(), n_queries * dim), n_queries, k,
+        /*eps=*/0.1f, /*rerank_factor=*/1.0f,
+        /*threads=*/2, /*return_distances=*/true
+    );
+    EXPECT_EQ(flat_res.size(), n_queries);
+    EXPECT_EQ(flat_res.k, k);
+    EXPECT_EQ(flat_res.indices.size(), n_queries * k);
+    EXPECT_EQ(flat_res.distances.size(), n_queries * k);
+
+    for (size_t q = 0; q < n_queries; ++q) {
+        auto q_indices = flat_res.get_indices(q);
+        auto q_dists = flat_res.get_distances(q);
+        EXPECT_EQ(q_indices[0], static_cast<uint32_t>(q));
+        EXPECT_NEAR(q_dists[0], 0.0f, 1e-5f);
+    }
+
+    // 2. search_batch into preallocated buffers
+    std::vector<uint32_t> preallocated_indices(n_queries * k, 9999);
+    std::vector<float> preallocated_dists(n_queries * k, 9999.0f);
+    searcher->search_batch(
+        std::span<const float>(data.data(), n_queries * dim),
+        n_queries, k,
+        std::span<uint32_t>(preallocated_indices),
+        std::span<float>(preallocated_dists),
+        /*eps=*/0.1f, /*rerank_factor=*/1.0f,
+        /*threads=*/1,
+        /*return_distances=*/true
+    );
+
+    for (size_t q = 0; q < n_queries; ++q) {
+        EXPECT_EQ(preallocated_indices[q * k], static_cast<uint32_t>(q));
+        EXPECT_NEAR(preallocated_dists[q * k], 0.0f, 1e-5f);
+    }
+}
+

@@ -1,13 +1,25 @@
 Search & Re-Ranking
 =====================
 
-Query search filtering and re-ranking routines.
+Query search filtering, high-performance execution, and re-ranking routines.
 
 Overview
 --------
 
-``deglib`` provides tools to constrain nearest-neighbor exploration (via :class:`~deglib.search.Filter`)
-and to execute exact re-ranking across candidate index pools (via :func:`~deglib.search.rerank`).
+``deglib`` provides tools to constrain nearest-neighbor exploration (via :class:`~deglib.search.Filter`),
+to execute exact re-ranking across candidate index pools (via :func:`~deglib.search.rerank`),
+and to run high-throughput, end-to-end query pipelines (via :class:`~deglib.search.Searcher`).
+
+Searcher
+--------
+
+.. autoclass:: deglib.search.Searcher
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :member-order: bysource
+
+.. autofunction:: deglib.search.create_searcher
 
 Filter
 ------
@@ -25,6 +37,44 @@ Re-Ranking
 
 Example Usage
 -------------
+
+High-Performance Searcher with Reranking
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+   import deglib
+   import numpy as np
+
+   dim = 128
+   data = np.random.randn(10000, dim).astype(np.float32)
+   query = np.random.randn(dim).astype(np.float32)
+
+   # Build base graph
+   graph = deglib.builder.build_from_data(data, metric=deglib.Metric.FP32_L2)
+
+   # Quantize to INT8 for compact storage and ultra-fast exploration
+   quantizer = deglib.optimization.ScalarQuantizerInt8()
+   quantizer.fit(data)
+   int8_data = quantizer.quantize(data)
+   ro_graph = graph.to_readonly(deglib.FloatSpace.create(dim, deglib.Metric.Int8_L2), int8_data)
+
+   # Deploy with Searcher (query is automatically quantized, top candidates reranked on FP32 data)
+   searcher = deglib.create_searcher(
+       graph=ro_graph,
+       quantizer=quantizer,
+       refine_space=deglib.FloatSpace.create(dim, deglib.Metric.FP32_L2),
+       refine_data=data,
+   )
+
+   # Single query
+   indices, distances = searcher.search(query, k=10, eps=0.1, rerank_factor=1.5, return_distances=True)
+
+   # Batch query
+   batch_queries = np.random.randn(100, dim).astype(np.float32)
+   batch_indices, batch_distances = searcher.search(
+       batch_queries, k=10, eps=0.1, rerank_factor=1.5, threads=8, return_distances=True
+   )
 
 Filtered Search
 ^^^^^^^^^^^^^^^

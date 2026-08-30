@@ -201,3 +201,35 @@ TEST(Rerank, InnerProductMetric) {
     res.pop();
     EXPECT_EQ(res.top().getIdentifier(), 1u);
 }
+
+TEST(Rerank, SingleQuerySpanOverloads) {
+    deglib::distances::FloatSpace fs(2, deglib::distances::Metric::FP32_L2);
+    std::vector<float> query = {0.0f, 0.0f};
+    std::vector<float> base = {
+        0.0f, 1.0f,  // dist^2 = 1
+        0.0f, 3.0f,  // dist^2 = 9
+        0.0f, 2.0f,  // dist^2 = 4
+    };
+    std::vector<uint32_t> candidates = {0, 1, 2};
+
+    auto q_span = std::span<const std::byte>(reinterpret_cast<const std::byte*>(query.data()), query.size() * sizeof(float));
+
+    // 1. Single query returning ResultSet
+    auto heap = deglib::search::rerank(fs, q_span, base.data(), 3, std::span<const uint32_t>(candidates), 2);
+    EXPECT_EQ(heap.size(), 2u);
+
+    // 2. Single query in-place span (sorted, with distances)
+    std::vector<uint32_t> out_indices(2);
+    std::vector<float> out_dists(2);
+    uint32_t count = deglib::search::rerank(
+        fs, q_span, base.data(), 3, std::span<const uint32_t>(candidates), 2,
+        std::span<uint32_t>(out_indices), std::span<float>(out_dists),
+        /*return_distances=*/true, /*unsorted=*/false
+    );
+
+    EXPECT_EQ(count, 2u);
+    EXPECT_EQ(out_indices[0], 0u);
+    EXPECT_NEAR(out_dists[0], 1.0f, 1e-5f);
+    EXPECT_EQ(out_indices[1], 2u);
+    EXPECT_NEAR(out_dists[1], 4.0f, 1e-5f);
+}

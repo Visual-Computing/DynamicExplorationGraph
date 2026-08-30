@@ -196,9 +196,9 @@ inline void find_minmax_perdim(std::vector<float>& mins, std::vector<float>& max
  */
 class ScalarQuantizerInt8 {
 public:
+    using output_type = int8_t;
     float abs_max = 1.0f;
     float scale = 127.0f;
-    float inv_scale = 1.0f / 127.0f;
     bool is_fitted = false;
 
     ScalarQuantizerInt8() = default;
@@ -209,7 +209,6 @@ public:
     void set_abs_max(float val) {
         abs_max = (val <= 1e-12f) ? 1.0f : val;
         scale = 127.0f / abs_max;
-        inv_scale = abs_max / 127.0f;
         is_fitted = true;
     }
 
@@ -238,40 +237,32 @@ public:
         }
     }
 
-    inline int8_t transform(float x) const {
-        float scaled = std::round(x * scale);
-        if (scaled < -127.0f) return -127;
-        if (scaled > 127.0f) return 127;
-        return static_cast<int8_t>(scaled);
-    }
-
-    inline float transform_back(int8_t x) const {
-        return static_cast<float>(x) * inv_scale;
-    }
-
     void quantize(const float* src, int8_t* dst, size_t count, uint32_t dim, size_t numThreads = 0) const {
         if (count == 0 || dim == 0) return;
+        if (numThreads == 1 || count == 1) {
+            for (size_t i = 0; i < count; ++i) {
+                this->transform_row(src + i * dim, dst + i * dim, dim);
+            }
+            return;
+        }
         deglib::concurrent::parallel_batch_for(0, count, numThreads, [src, dst, dim, this](size_t begin, size_t end, size_t) {
             for (size_t i = begin; i < end; ++i) {
-                const float* s = src + i * dim;
-                int8_t* d = dst + i * dim;
-                for (uint32_t j = 0; j < dim; ++j) {
-                    d[j] = this->transform(s[j]);
-                }
+                this->transform_row(src + i * dim, dst + i * dim, dim);
             }
         });
     }
 
     void quantize(const uint16_t* src_fp16, int8_t* dst, size_t count, uint32_t dim, size_t numThreads = 0) const {
         if (count == 0 || dim == 0) return;
+        if (numThreads == 1 || count == 1) {
+            for (size_t i = 0; i < count; ++i) {
+                this->transform_row(src_fp16 + i * dim, dst + i * dim, dim);
+            }
+            return;
+        }
         deglib::concurrent::parallel_batch_for(0, count, numThreads, [src_fp16, dst, dim, this](size_t begin, size_t end, size_t) {
             for (size_t i = begin; i < end; ++i) {
-                const uint16_t* s = src_fp16 + i * dim;
-                int8_t* d = dst + i * dim;
-                for (uint32_t j = 0; j < dim; ++j) {
-                    float val = deglib::distances::fp16::fp16_to_float(s[j]);
-                    d[j] = this->transform(val);
-                }
+                this->transform_row(src_fp16 + i * dim, dst + i * dim, dim);
             }
         });
     }
@@ -290,34 +281,37 @@ public:
         return result;
     }
 
-    void dequantize(const int8_t* src, float* dst, size_t count, uint32_t dim, size_t numThreads = 0) const {
-        if (count == 0 || dim == 0) return;
-        deglib::concurrent::parallel_batch_for(0, count, numThreads, [src, dst, dim, this](size_t begin, size_t end, size_t) {
-            for (size_t i = begin; i < end; ++i) {
-                const int8_t* s = src + i * dim;
-                float* d = dst + i * dim;
-                for (uint32_t j = 0; j < dim; ++j) {
-                    d[j] = this->transform_back(s[j]);
-                }
-            }
-        });
+private:
+    inline int8_t transform(float x) const {
+        float scaled = std::round(x * scale);
+        if (scaled < -127.0f) return -127;
+        if (scaled > 127.0f) return 127;
+        return static_cast<int8_t>(scaled);
     }
 
-    std::vector<float> dequantize(const int8_t* src, size_t count, uint32_t dim, size_t numThreads = 0) const {
-        if (count == 0 || dim == 0) return {};
-        std::vector<float> result(count * dim);
-        dequantize(src, result.data(), count, dim, numThreads);
-        return result;
+    inline int8_t transform(uint16_t fp16_bits) const {
+        return transform(deglib::distances::fp16::fp16_to_float(fp16_bits));
     }
 
-    std::vector<int8_t> fit_quantize(const float* data, size_t count, uint32_t dim, float drop_ratio = 0.0f, size_t numThreads = 0) {
-        fit(data, count, dim, drop_ratio);
-        return quantize(data, count, dim, numThreads);
+    inline void transform_row(const float* src, int8_t* dst, uint32_t dim) const {
+        for (uint32_t j = 0; j < dim; ++j) {
+            dst[j] = transform(src[j]);
+        }
     }
 
-    std::vector<int8_t> fit_quantize(const uint16_t* data_fp16, size_t count, uint32_t dim, float drop_ratio = 0.0f, size_t numThreads = 0) {
-        fit(data_fp16, count, dim, drop_ratio);
-        return quantize(data_fp16, count, dim, numThreads);
+    inline void transform_row(const uint16_t* src_fp16, int8_t* dst, uint32_t dim) const {
+        constexpr uint32_t CHUNK = 64;
+        float chunk_buf[CHUNK];
+        uint32_t i = 0;
+        for (; i + CHUNK <= dim; i += CHUNK) {
+            deglib::distances::fp16::fp16_to_floats(src_fp16 + i, chunk_buf, CHUNK);
+            transform_row(chunk_buf, dst + i, CHUNK);
+        }
+        if (i < dim) {
+            uint32_t rem = dim - i;
+            deglib::distances::fp16::fp16_to_floats(src_fp16 + i, chunk_buf, rem);
+            transform_row(chunk_buf, dst + i, rem);
+        }
     }
 };
 
@@ -327,25 +321,23 @@ public:
  */
 class ScalarQuantizerInt8PerDim {
 public:
+    using output_type = int8_t;
     uint32_t dim = 0;
     std::vector<float> abs_maxs;
     std::vector<float> scales;
-    std::vector<float> inv_scales;
     bool is_fitted = false;
 
     ScalarQuantizerInt8PerDim() = default;
-    explicit ScalarQuantizerInt8PerDim(uint32_t d) : dim(d), abs_maxs(d), scales(d), inv_scales(d) {}
+    explicit ScalarQuantizerInt8PerDim(uint32_t d) : dim(d), abs_maxs(d), scales(d) {}
 
     void set_abs_maxs(const std::vector<float>& max_vals) {
         dim = static_cast<uint32_t>(max_vals.size());
         abs_maxs = max_vals;
         scales.resize(dim);
-        inv_scales.resize(dim);
         for (uint32_t j = 0; j < dim; ++j) {
             float m = (abs_maxs[j] <= 1e-12f) ? 1.0f : abs_maxs[j];
             abs_maxs[j] = m;
             scales[j] = 127.0f / m;
-            inv_scales[j] = m / 127.0f;
         }
         is_fitted = true;
     }
@@ -355,12 +347,10 @@ public:
         dim = d;
         find_absmax_perdim(abs_maxs, data, count, dim, drop_ratio);
         scales.resize(dim);
-        inv_scales.resize(dim);
         for (uint32_t j = 0; j < dim; ++j) {
             float m = (abs_maxs[j] <= 1e-12f) ? 1.0f : abs_maxs[j];
             abs_maxs[j] = m;
             scales[j] = 127.0f / m;
-            inv_scales[j] = m / 127.0f;
         }
         is_fitted = true;
     }
@@ -374,29 +364,20 @@ public:
         fit(converted.data(), count, d, drop_ratio);
     }
 
-    inline int8_t transform(float x, uint32_t d) const {
-        float scaled = std::round(x * scales[d]);
-        if (scaled < -127.0f) return -127;
-        if (scaled > 127.0f) return 127;
-        return static_cast<int8_t>(scaled);
-    }
-
-    inline float transform_back(int8_t x, uint32_t d) const {
-        return static_cast<float>(x) * inv_scales[d];
-    }
-
     void quantize(const float* src, int8_t* dst, size_t count, uint32_t d, size_t numThreads = 0) const {
         if (count == 0 || d == 0) return;
         if (d != dim) {
             throw std::invalid_argument(std::format("Dimension mismatch in ScalarQuantizerInt8PerDim: expected {}, got {}", dim, d));
         }
+        if (numThreads == 1 || count == 1) {
+            for (size_t i = 0; i < count; ++i) {
+                this->transform_row(src + i * d, dst + i * d, d);
+            }
+            return;
+        }
         deglib::concurrent::parallel_batch_for(0, count, numThreads, [src, dst, d, this](size_t begin, size_t end, size_t) {
             for (size_t i = begin; i < end; ++i) {
-                const float* s = src + i * d;
-                int8_t* dst_row = dst + i * d;
-                for (uint32_t j = 0; j < d; ++j) {
-                    dst_row[j] = this->transform(s[j], j);
-                }
+                this->transform_row(src + i * d, dst + i * d, d);
             }
         });
     }
@@ -406,14 +387,15 @@ public:
         if (d != dim) {
             throw std::invalid_argument(std::format("Dimension mismatch in ScalarQuantizerInt8PerDim: expected {}, got {}", dim, d));
         }
+        if (numThreads == 1 || count == 1) {
+            for (size_t i = 0; i < count; ++i) {
+                this->transform_row(src_fp16 + i * dim, dst + i * dim, d);
+            }
+            return;
+        }
         deglib::concurrent::parallel_batch_for(0, count, numThreads, [src_fp16, dst, d, this](size_t begin, size_t end, size_t) {
             for (size_t i = begin; i < end; ++i) {
-                const uint16_t* s = src_fp16 + i * d;
-                int8_t* dst_row = dst + i * d;
-                for (uint32_t j = 0; j < d; ++j) {
-                    float val = deglib::distances::fp16::fp16_to_float(s[j]);
-                    dst_row[j] = this->transform(val, j);
-                }
+                this->transform_row(src_fp16 + i * dim, dst + i * dim, d);
             }
         });
     }
@@ -432,37 +414,37 @@ public:
         return result;
     }
 
-    void dequantize(const int8_t* src, float* dst, size_t count, uint32_t d, size_t numThreads = 0) const {
-        if (count == 0 || d == 0) return;
-        if (d != dim) {
-            throw std::invalid_argument(std::format("Dimension mismatch in ScalarQuantizerInt8PerDim: expected {}, got {}", dim, d));
+private:
+    inline int8_t transform(float x, uint32_t d) const {
+        float scaled = std::round(x * scales[d]);
+        if (scaled < -127.0f) return -127;
+        if (scaled > 127.0f) return 127;
+        return static_cast<int8_t>(scaled);
+    }
+
+    inline int8_t transform(uint16_t fp16_bits, uint32_t d) const {
+        return transform(deglib::distances::fp16::fp16_to_float(fp16_bits), d);
+    }
+
+    inline void transform_row(const float* src, int8_t* dst, uint32_t d, uint32_t d_offset = 0) const {
+        for (uint32_t j = 0; j < d; ++j) {
+            dst[j] = transform(src[j], d_offset + j);
         }
-        deglib::concurrent::parallel_batch_for(0, count, numThreads, [src, dst, d, this](size_t begin, size_t end, size_t) {
-            for (size_t i = begin; i < end; ++i) {
-                const int8_t* s = src + i * d;
-                float* dst_row = dst + i * d;
-                for (uint32_t j = 0; j < d; ++j) {
-                    dst_row[j] = this->transform_back(s[j], j);
-                }
-            }
-        });
     }
 
-    std::vector<float> dequantize(const int8_t* src, size_t count, uint32_t d, size_t numThreads = 0) const {
-        if (count == 0 || d == 0) return {};
-        std::vector<float> result(count * d);
-        dequantize(src, result.data(), count, d, numThreads);
-        return result;
-    }
-
-    std::vector<int8_t> fit_quantize(const float* data, size_t count, uint32_t d, float drop_ratio = 0.0f, size_t numThreads = 0) {
-        fit(data, count, d, drop_ratio);
-        return quantize(data, count, d, numThreads);
-    }
-
-    std::vector<int8_t> fit_quantize(const uint16_t* data_fp16, size_t count, uint32_t d, float drop_ratio = 0.0f, size_t numThreads = 0) {
-        fit(data_fp16, count, d, drop_ratio);
-        return quantize(data_fp16, count, d, numThreads);
+    inline void transform_row(const uint16_t* src_fp16, int8_t* dst, uint32_t d) const {
+        constexpr uint32_t CHUNK = 64;
+        float chunk_buf[CHUNK];
+        uint32_t i = 0;
+        for (; i + CHUNK <= d; i += CHUNK) {
+            deglib::distances::fp16::fp16_to_floats(src_fp16 + i, chunk_buf, CHUNK);
+            transform_row(chunk_buf, dst + i, CHUNK, i);
+        }
+        if (i < d) {
+            uint32_t rem = d - i;
+            deglib::distances::fp16::fp16_to_floats(src_fp16 + i, chunk_buf, rem);
+            transform_row(chunk_buf, dst + i, rem, i);
+        }
     }
 };
 
@@ -472,6 +454,7 @@ public:
  */
 class ScalarQuantizerUint8 {
 public:
+    using output_type = uint8_t;
     float min_val = 0.0f;
     float max_val = 1.0f;
     float dif = 1.0f;
@@ -509,40 +492,32 @@ public:
         fit(converted.data(), count, dim, drop_ratio);
     }
 
-    inline uint8_t transform(float x) const {
-        float scaled = std::round((x - min_val) * scale);
-        if (scaled < 0.0f) return 0;
-        if (scaled > 255.0f) return 255;
-        return static_cast<uint8_t>(scaled);
-    }
-
-    inline float transform_back(uint8_t x) const {
-        return static_cast<float>(x) / 255.0f * dif + min_val;
-    }
-
     void quantize(const float* src, uint8_t* dst, size_t count, uint32_t dim, size_t numThreads = 0) const {
         if (count == 0 || dim == 0) return;
+        if (numThreads == 1 || count == 1) {
+            for (size_t i = 0; i < count; ++i) {
+                this->transform_row(src + i * dim, dst + i * dim, dim);
+            }
+            return;
+        }
         deglib::concurrent::parallel_batch_for(0, count, numThreads, [src, dst, dim, this](size_t begin, size_t end, size_t) {
             for (size_t i = begin; i < end; ++i) {
-                const float* s = src + i * dim;
-                uint8_t* d = dst + i * dim;
-                for (uint32_t j = 0; j < dim; ++j) {
-                    d[j] = this->transform(s[j]);
-                }
+                this->transform_row(src + i * dim, dst + i * dim, dim);
             }
         });
     }
 
     void quantize(const uint16_t* src_fp16, uint8_t* dst, size_t count, uint32_t dim, size_t numThreads = 0) const {
         if (count == 0 || dim == 0) return;
+        if (numThreads == 1 || count == 1) {
+            for (size_t i = 0; i < count; ++i) {
+                this->transform_row(src_fp16 + i * dim, dst + i * dim, dim);
+            }
+            return;
+        }
         deglib::concurrent::parallel_batch_for(0, count, numThreads, [src_fp16, dst, dim, this](size_t begin, size_t end, size_t) {
             for (size_t i = begin; i < end; ++i) {
-                const uint16_t* s = src_fp16 + i * dim;
-                uint8_t* d = dst + i * dim;
-                for (uint32_t j = 0; j < dim; ++j) {
-                    float val = deglib::distances::fp16::fp16_to_float(s[j]);
-                    d[j] = this->transform(val);
-                }
+                this->transform_row(src_fp16 + i * dim, dst + i * dim, dim);
             }
         });
     }
@@ -561,34 +536,37 @@ public:
         return result;
     }
 
-    void dequantize(const uint8_t* src, float* dst, size_t count, uint32_t dim, size_t numThreads = 0) const {
-        if (count == 0 || dim == 0) return;
-        deglib::concurrent::parallel_batch_for(0, count, numThreads, [src, dst, dim, this](size_t begin, size_t end, size_t) {
-            for (size_t i = begin; i < end; ++i) {
-                const uint8_t* s = src + i * dim;
-                float* d = dst + i * dim;
-                for (uint32_t j = 0; j < dim; ++j) {
-                    d[j] = this->transform_back(s[j]);
-                }
-            }
-        });
+private:
+    inline uint8_t transform(float x) const {
+        float scaled = std::round((x - min_val) * scale);
+        if (scaled < 0.0f) return 0;
+        if (scaled > 255.0f) return 255;
+        return static_cast<uint8_t>(scaled);
     }
 
-    std::vector<float> dequantize(const uint8_t* src, size_t count, uint32_t dim, size_t numThreads = 0) const {
-        if (count == 0 || dim == 0) return {};
-        std::vector<float> result(count * dim);
-        dequantize(src, result.data(), count, dim, numThreads);
-        return result;
+    inline uint8_t transform(uint16_t fp16_bits) const {
+        return transform(deglib::distances::fp16::fp16_to_float(fp16_bits));
     }
 
-    std::vector<uint8_t> fit_quantize(const float* data, size_t count, uint32_t dim, float drop_ratio = 0.0f, size_t numThreads = 0) {
-        fit(data, count, dim, drop_ratio);
-        return quantize(data, count, dim, numThreads);
+    inline void transform_row(const float* src, uint8_t* dst, uint32_t dim) const {
+        for (uint32_t j = 0; j < dim; ++j) {
+            dst[j] = transform(src[j]);
+        }
     }
 
-    std::vector<uint8_t> fit_quantize(const uint16_t* data_fp16, size_t count, uint32_t dim, float drop_ratio = 0.0f, size_t numThreads = 0) {
-        fit(data_fp16, count, dim, drop_ratio);
-        return quantize(data_fp16, count, dim, numThreads);
+    inline void transform_row(const uint16_t* src_fp16, uint8_t* dst, uint32_t dim) const {
+        constexpr uint32_t CHUNK = 64;
+        float chunk_buf[CHUNK];
+        uint32_t i = 0;
+        for (; i + CHUNK <= dim; i += CHUNK) {
+            deglib::distances::fp16::fp16_to_floats(src_fp16 + i, chunk_buf, CHUNK);
+            transform_row(chunk_buf, dst + i, CHUNK);
+        }
+        if (i < dim) {
+            uint32_t rem = dim - i;
+            deglib::distances::fp16::fp16_to_floats(src_fp16 + i, chunk_buf, rem);
+            transform_row(chunk_buf, dst + i, rem);
+        }
     }
 };
 
@@ -598,6 +576,7 @@ public:
  */
 class ScalarQuantizerUint8PerDim {
 public:
+    using output_type = uint8_t;
     uint32_t dim = 0;
     std::vector<float> mins;
     std::vector<float> maxs;
@@ -648,29 +627,20 @@ public:
         fit(converted.data(), count, d, drop_ratio);
     }
 
-    inline uint8_t transform(float x, uint32_t d) const {
-        float scaled = std::round((x - mins[d]) * scales[d]);
-        if (scaled < 0.0f) return 0;
-        if (scaled > 255.0f) return 255;
-        return static_cast<uint8_t>(scaled);
-    }
-
-    inline float transform_back(uint8_t x, uint32_t d) const {
-        return static_cast<float>(x) / 255.0f * difs[d] + mins[d];
-    }
-
     void quantize(const float* src, uint8_t* dst, size_t count, uint32_t d, size_t numThreads = 0) const {
         if (count == 0 || d == 0) return;
         if (d != dim) {
             throw std::invalid_argument(std::format("Dimension mismatch in ScalarQuantizerUint8PerDim: expected {}, got {}", dim, d));
         }
+        if (numThreads == 1 || count == 1) {
+            for (size_t i = 0; i < count; ++i) {
+                this->transform_row(src + i * d, dst + i * d, d);
+            }
+            return;
+        }
         deglib::concurrent::parallel_batch_for(0, count, numThreads, [src, dst, d, this](size_t begin, size_t end, size_t) {
             for (size_t i = begin; i < end; ++i) {
-                const float* s = src + i * d;
-                uint8_t* dst_row = dst + i * d;
-                for (uint32_t j = 0; j < d; ++j) {
-                    dst_row[j] = this->transform(s[j], j);
-                }
+                this->transform_row(src + i * d, dst + i * d, d);
             }
         });
     }
@@ -680,14 +650,15 @@ public:
         if (d != dim) {
             throw std::invalid_argument(std::format("Dimension mismatch in ScalarQuantizerUint8PerDim: expected {}, got {}", dim, d));
         }
+        if (numThreads == 1 || count == 1) {
+            for (size_t i = 0; i < count; ++i) {
+                this->transform_row(src_fp16 + i * dim, dst + i * dim, d);
+            }
+            return;
+        }
         deglib::concurrent::parallel_batch_for(0, count, numThreads, [src_fp16, dst, d, this](size_t begin, size_t end, size_t) {
             for (size_t i = begin; i < end; ++i) {
-                const uint16_t* s = src_fp16 + i * d;
-                uint8_t* dst_row = dst + i * d;
-                for (uint32_t j = 0; j < d; ++j) {
-                    float val = deglib::distances::fp16::fp16_to_float(s[j]);
-                    dst_row[j] = this->transform(val, j);
-                }
+                this->transform_row(src_fp16 + i * dim, dst + i * dim, d);
             }
         });
     }
@@ -706,37 +677,37 @@ public:
         return result;
     }
 
-    void dequantize(const uint8_t* src, float* dst, size_t count, uint32_t d, size_t numThreads = 0) const {
-        if (count == 0 || d == 0) return;
-        if (d != dim) {
-            throw std::invalid_argument(std::format("Dimension mismatch in ScalarQuantizerUint8PerDim: expected {}, got {}", dim, d));
+private:
+    inline uint8_t transform(float x, uint32_t d) const {
+        float scaled = std::round((x - mins[d]) * scales[d]);
+        if (scaled < 0.0f) return 0;
+        if (scaled > 255.0f) return 255;
+        return static_cast<uint8_t>(scaled);
+    }
+
+    inline uint8_t transform(uint16_t fp16_bits, uint32_t d) const {
+        return transform(deglib::distances::fp16::fp16_to_float(fp16_bits), d);
+    }
+
+    inline void transform_row(const float* src, uint8_t* dst, uint32_t d, uint32_t d_offset = 0) const {
+        for (uint32_t j = 0; j < d; ++j) {
+            dst[j] = transform(src[j], d_offset + j);
         }
-        deglib::concurrent::parallel_batch_for(0, count, numThreads, [src, dst, d, this](size_t begin, size_t end, size_t) {
-            for (size_t i = begin; i < end; ++i) {
-                const uint8_t* s = src + i * d;
-                float* dst_row = dst + i * d;
-                for (uint32_t j = 0; j < d; ++j) {
-                    dst_row[j] = this->transform_back(s[j], j);
-                }
-            }
-        });
     }
 
-    std::vector<float> dequantize(const uint8_t* src, size_t count, uint32_t d, size_t numThreads = 0) const {
-        if (count == 0 || d == 0) return {};
-        std::vector<float> result(count * d);
-        dequantize(src, result.data(), count, d, numThreads);
-        return result;
-    }
-
-    std::vector<uint8_t> fit_quantize(const float* data, size_t count, uint32_t d, float drop_ratio = 0.0f, size_t numThreads = 0) {
-        fit(data, count, d, drop_ratio);
-        return quantize(data, count, d, numThreads);
-    }
-
-    std::vector<uint8_t> fit_quantize(const uint16_t* data_fp16, size_t count, uint32_t d, float drop_ratio = 0.0f, size_t numThreads = 0) {
-        fit(data_fp16, count, d, drop_ratio);
-        return quantize(data_fp16, count, d, numThreads);
+    inline void transform_row(const uint16_t* src_fp16, uint8_t* dst, uint32_t d) const {
+        constexpr uint32_t CHUNK = 64;
+        float chunk_buf[CHUNK];
+        uint32_t i = 0;
+        for (; i + CHUNK <= d; i += CHUNK) {
+            deglib::distances::fp16::fp16_to_floats(src_fp16 + i, chunk_buf, CHUNK);
+            transform_row(chunk_buf, dst + i, CHUNK, i);
+        }
+        if (i < d) {
+            uint32_t rem = d - i;
+            deglib::distances::fp16::fp16_to_floats(src_fp16 + i, chunk_buf, rem);
+            transform_row(chunk_buf, dst + i, rem, i);
+        }
     }
 };
 

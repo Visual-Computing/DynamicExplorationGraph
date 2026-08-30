@@ -55,11 +55,6 @@ TEST(ScalarQuantize, Int8SymmetricBasic) {
     EXPECT_EQ(result[2], 0);
     EXPECT_EQ(result[3], 64);
     EXPECT_EQ(result[4], 127);
-
-    // Test dequantization
-    auto dequant = quantizer.dequantize(result.data(), count, dim, 1);
-    EXPECT_NEAR(dequant[0], -1.0f, 1e-2f);
-    EXPECT_NEAR(dequant[4], 1.0f, 1e-2f);
 }
 
 TEST(ScalarQuantize, Int8FitThenQuantizeDistributionConsistency) {
@@ -82,10 +77,6 @@ TEST(ScalarQuantize, Int8FitThenQuantizeDistributionConsistency) {
 
     // In query, 0.5 maps to round(0.5 / 2.0 * 127) = round(31.75) = 32
     EXPECT_EQ(quant_query[2], 32);
-
-    // Dequantizing query gives back ~0.5039f
-    auto dequant_query = quantizer.dequantize(quant_query.data(), 1, dim);
-    EXPECT_NEAR(dequant_query[2], 0.5f, 0.02f);
 }
 
 TEST(ScalarQuantize, Int8SymmetricBatchMultiThreadConsistent) {
@@ -152,10 +143,6 @@ TEST(ScalarQuantize, Uint8AffineGlobalBasic) {
     EXPECT_EQ(result[2], 128u);
     EXPECT_EQ(result[3], 191u);
     EXPECT_EQ(result[4], 255u);
-
-    auto dequant = quantizer.dequantize(result.data(), count, dim, 1);
-    EXPECT_NEAR(dequant[0], 0.0f, 1e-2f);
-    EXPECT_NEAR(dequant[4], 1.0f, 1e-2f);
 }
 
 TEST(ScalarQuantize, Uint8AffinePerDimBasic) {
@@ -179,12 +166,6 @@ TEST(ScalarQuantize, Uint8AffinePerDimBasic) {
     // vector 1: (10.0 -> 255), (5.0 -> 255)
     EXPECT_EQ(result[2], 255u);
     EXPECT_EQ(result[3], 255u);
-
-    auto dequant = quantizer.dequantize(result.data(), count, dim, 1);
-    EXPECT_NEAR(dequant[0], 0.0f, 1e-2f);
-    EXPECT_NEAR(dequant[1], -5.0f, 1e-2f);
-    EXPECT_NEAR(dequant[2], 10.0f, 1e-2f);
-    EXPECT_NEAR(dequant[3], 5.0f, 1e-2f);
 }
 
 // ============================================================================
@@ -237,10 +218,6 @@ TEST(ScalarQuantize, Int8PerDimBasic) {
     EXPECT_EQ(result[1], -127);
     EXPECT_EQ(result[2], 127);
     EXPECT_EQ(result[3], 127);
-
-    auto dequant = quantizer.dequantize(result.data(), count, dim);
-    EXPECT_NEAR(dequant[0], -100.0f, 1.0f);
-    EXPECT_NEAR(dequant[1], -1.0f, 0.02f);
 }
 
 TEST(ScalarQuantize, Uint8AndUint8PerDimFP16) {
@@ -264,3 +241,47 @@ TEST(ScalarQuantize, Uint8AndUint8PerDimFP16) {
     auto quant_pdim = q_pdim.quantize(data_fp16.data(), count, dim);
     EXPECT_EQ(quant_pdim.size(), count * dim);
 }
+
+TEST(ScalarQuantize, DirectFP16QuantizeSingle) {
+    const uint32_t dim = 4;
+    std::vector<float> f32_vec = {-1.0f, 0.0f, 0.5f, 1.0f};
+    std::vector<uint16_t> fp16_vec(dim);
+    deglib::distances::fp16::floats_to_fp16(f32_vec.data(), fp16_vec.data(), dim);
+
+    // 1. Int8
+    deglib::quantization::scalar::ScalarQuantizerInt8 q_i8;
+    q_i8.set_abs_max(1.0f);
+    int8_t out_i8[4];
+    q_i8.quantize(fp16_vec.data(), out_i8, 1, dim);
+    EXPECT_EQ(out_i8[0], -127);
+    EXPECT_EQ(out_i8[1], 0);
+    EXPECT_EQ(out_i8[2], 64);
+    EXPECT_EQ(out_i8[3], 127);
+
+    // 2. Uint8
+    deglib::quantization::scalar::ScalarQuantizerUint8 q_u8;
+    q_u8.set_range(-1.0f, 1.0f);
+    uint8_t out_u8[4];
+    q_u8.quantize(fp16_vec.data(), out_u8, 1, dim);
+    EXPECT_EQ(out_u8[0], 0);
+    EXPECT_NEAR(out_u8[1], 128, 1);
+    EXPECT_NEAR(out_u8[2], 191, 1);
+    EXPECT_EQ(out_u8[3], 255);
+
+    // 3. Int8PerDim
+    deglib::quantization::scalar::ScalarQuantizerInt8PerDim q_i8_pd(dim);
+    q_i8_pd.set_abs_maxs({1.0f, 1.0f, 1.0f, 1.0f});
+    int8_t out_i8_pd[4];
+    q_i8_pd.quantize(fp16_vec.data(), out_i8_pd, 1, dim);
+    EXPECT_EQ(out_i8_pd[0], -127);
+    EXPECT_EQ(out_i8_pd[3], 127);
+
+    // 4. Uint8PerDim
+    deglib::quantization::scalar::ScalarQuantizerUint8PerDim q_u8_pd(dim);
+    q_u8_pd.set_ranges({-1.0f, -1.0f, -1.0f, -1.0f}, {1.0f, 1.0f, 1.0f, 1.0f});
+    uint8_t out_u8_pd[4];
+    q_u8_pd.quantize(fp16_vec.data(), out_u8_pd, 1, dim);
+    EXPECT_EQ(out_u8_pd[0], 0);
+    EXPECT_EQ(out_u8_pd[3], 255);
+}
+

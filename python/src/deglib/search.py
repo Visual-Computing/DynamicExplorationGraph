@@ -91,7 +91,7 @@ def rerank(
 
 class Searcher:
     """
-    High-performance Searcher for fast single-query and batch-query execution.
+    High-performance Stateless Searcher for fast single-query and batch-query execution.
 
     Performs end-to-end query transformation (quantization), graph search, and exact distance
     candidate refinement within C++ in a single native invocation, eliminating Python interpreter
@@ -101,8 +101,6 @@ class Searcher:
     :param quantizer: Optional scalar or EVP quantizer instance (or integer non_zeros for EVP).
     :param refine_space: Optional FloatSpace for exact candidate reranking.
     :param refine_data: Optional base feature matrix for candidate reranking.
-    :param search_eps: Initial search epsilon.
-    :param rerank_factor: Initial candidate expansion factor for reranking.
     """
 
     def __init__(
@@ -111,8 +109,6 @@ class Searcher:
         quantizer=None,
         refine_space: FloatSpace | None = None,
         refine_data: np.ndarray | None = None,
-        search_eps: float = 0.1,
-        rerank_factor: float = 1.0,
     ):
         cpp_graph = graph.dynamic_exploration_graph_cpp if hasattr(graph, "dynamic_exploration_graph_cpp") else graph
         cpp_refine_space = (
@@ -125,63 +121,47 @@ class Searcher:
             quantizer=cpp_quantizer,
             rerank_space=cpp_refine_space,
             base_vectors=refine_data,
-            search_eps=float(search_eps),
-            rerank_factor=float(rerank_factor),
         )
 
-    def set_query_arguments(self, search_eps: float, rerank_factor: float = 1.0) -> None:
-        """Sets query-time search_eps and rerank scaling factor."""
-        self.searcher_cpp.set_query_arguments(float(search_eps), float(rerank_factor))
-
-    def set_search_eps(self, search_eps: float) -> None:
-        """Sets query-time search_eps."""
-        self.searcher_cpp.set_search_eps(float(search_eps))
-
-    def get_search_eps(self) -> float:
-        """Returns the current search_eps value."""
-        return self.searcher_cpp.get_search_eps()
-
-    def set_rerank_factor(self, rerank_factor: float) -> None:
-        """Sets candidate expansion scaling factor for reranking."""
-        self.searcher_cpp.set_rerank_factor(float(rerank_factor))
-
-    def get_rerank_factor(self) -> float:
-        """Returns the current rerank factor."""
-        return self.searcher_cpp.get_rerank_factor()
-
     def search(
-        self, query: np.ndarray, k: int, return_distances: bool = False, unsorted: bool = False
-    ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
-        """
-        Search for nearest neighbors of a single query vector.
-
-        :param query: 1D query feature vector (float32 or float16).
-        :param k: Number of top nearest neighbors to return.
-        :param return_distances: If True, returns a tuple ``(indices, distances)``.
-        :param unsorted: If True, returns candidates in heap order instead of ascending distance order.
-        :return: 1D uint32 NumPy array of candidate IDs, or tuple ``(indices, distances)`` if `return_distances` is True.
-        """
-        return self.searcher_cpp.search(query, int(k), return_distances, unsorted)
-
-    def search_batch(
         self,
-        queries: np.ndarray,
+        query: np.ndarray,
         k: int,
-        num_threads: int = 1,
+        eps: float = 0.1,
+        rerank_factor: float = 1.0,
+        threads: int = 1,
         return_distances: bool = False,
         unsorted: bool = False,
     ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         """
-        Search for nearest neighbors for a batch of query vectors across multiple threads.
+        Search for nearest neighbors of a single query vector (1D or 2D with 1 vector) or a batch of query vectors (2D).
 
-        :param queries: 2D NumPy array of query vectors (N_queries x dim).
-        :param k: Number of nearest neighbors per query.
-        :param num_threads: Number of worker threads (default: 1).
+        - If `query` represents a single vector (`ndim == 1` or `(1, dim)` or `(dim, 1)`):
+          returns 1D array of shape `(k,)` (or tuple of 1D arrays if `return_distances` is True).
+        - If `query` is a batch (`(N, dim)` with N > 1):
+          returns 2D array of shape `(N, k)` (or tuple of 2D arrays if `return_distances` is True).
+
+        :param query: Query array (1D vector or 2D batch).
+        :param k: Number of top nearest neighbors to return per query.
+        :param eps: Search expansion factor (controls speed vs. recall trade-off, default: 0.1).
+        :param rerank_factor: Candidate expansion factor for exact reranking (default: 1.0).
+        :param threads: Number of worker threads for batch search (default: 1).
         :param return_distances: If True, returns a tuple ``(indices, distances)``.
-        :param unsorted: If True, returns candidates in heap order.
-        :return: 2D uint32 NumPy array of candidate IDs, or tuple ``(indices, distances)`` if `return_distances` is True.
+        :param unsorted: If True, returns candidates in heap order instead of ascending distance order.
+        :return: NumPy array of nearest neighbor IDs, or tuple ``(indices, distances)`` if `return_distances` is True.
         """
-        return self.searcher_cpp.search_batch(queries, int(k), int(num_threads), return_distances, unsorted)
+        if query.ndim == 1 or (query.ndim == 2 and (query.shape[0] == 1 or query.shape[1] == 1)):
+            flat_query = np.ascontiguousarray(query.ravel())
+            return self.searcher_cpp.search(
+                flat_query, int(k), float(eps), float(rerank_factor), return_distances, unsorted
+            )
+        elif query.ndim == 2:
+            contiguous_queries = np.ascontiguousarray(query)
+            return self.searcher_cpp.search_batch(
+                contiguous_queries, int(k), float(eps), float(rerank_factor), int(threads), return_distances, unsorted
+            )
+        else:
+            raise ValueError(f"query must be 1D or 2D NumPy array, got ndim={query.ndim} with shape {query.shape}")
 
 
 def create_searcher(
@@ -189,8 +169,6 @@ def create_searcher(
     quantizer=None,
     refine_space: FloatSpace | None = None,
     refine_data: np.ndarray | None = None,
-    search_eps: float = 0.1,
-    rerank_factor: float = 1.0,
 ) -> Searcher:
     """
     Factory function to create a Searcher instance.
@@ -200,8 +178,6 @@ def create_searcher(
         quantizer=quantizer,
         refine_space=refine_space,
         refine_data=refine_data,
-        search_eps=search_eps,
-        rerank_factor=rerank_factor,
     )
 
 

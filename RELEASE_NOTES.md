@@ -1,5 +1,35 @@
 # Release Notes
 
+## deglib v0.2.4
+
+### Overview
+deglib v0.2.4 refactors the query execution pipeline to be fully stateless and thread-safe, eliminates query-time allocations, streamlines candidate reranking, and optimizes FP16 quantization kernels. It updates `Searcher` to accept search parameters (`eps`, `rerank_factor`) directly per query, adds contiguous flat batch search (`SearchResultBatch`), separates inner loop branches for result extraction, and consolidates the Python search interface.
+
+---
+
+### ⚠️ Breaking Changes & Migration Guide
+
+* **Stateless `Searcher` API:** Removed mutable internal search parameters (`search_eps_`, `rerank_factor_`) and their setters/getters (`set_query_arguments`, `set_search_eps`, `set_rerank_factor`). `eps` and `rerank_factor` are now query-level parameters passed directly to `search()` and `search_batch()`.
+* **Rerank API Consolidation (`deglib::search::rerank`):** Removed disparate internal helpers (`rerank_into`, etc.) and exposed overloaded `deglib::search::rerank` functions with explicit `return_distances` and `unsorted` boolean flags.
+* **Unified Python `Searcher.search`:** Single entry point handling 1D vectors, row-vectors `(1, dim)`, column-vectors `(dim, 1)`, and 2D batch matrices `(N, dim)` with `threads`. Removed redundant `search_batch` from the Python class.
+
+---
+
+### 🚀 Key Features & Improvements
+
+#### Stateless & Thread-Safe Search Execution (`deglib::search`)
+* **Reentrant Querying:** Searcher instances are fully thread-safe and reentrant, allowing multiple threads to query the same instance with varying `eps` and `rerank_factor` trade-offs without data races or locks.
+* **Branch-Free Result Extraction:** Separated neighbor index unpacking and optional distance copying into distinct, branchless loops (`populate_graph_results` and `drain_heap_into`) to eliminate per-element conditional branches on the hot path.
+* **Contiguous Batch Search (`SearchResultBatch`):** Flat 1D vector layout for indices and distances (`n_queries * k`) with zero-overhead `get_indices(q)` and `get_distances(q)` row slicing. Supports zero-allocation execution with user-provided `std::span` buffers.
+* **Small Buffer Optimization (SBO):** Uses stack buffers for transformed query bytes and candidate indices for vectors $\le 512$ bytes, avoiding heap allocations during search.
+
+#### Quantization & Kernel Optimizations (`deglib::optimization::quantization`)
+* **Chunked SIMD FP16 Quantization:** Processes FP16 (`uint16_t`) vectors in fixed 64-element chunks via `fp16_to_floats`, ensuring complete auto-vectorization (AVX2/F16C/AVX-512) without dimension limits.
+* **In-Place EVP Query Quantization:** Direct query quantization into preallocated search buffers without intermediate vector allocations.
+* **API Clean-Up:** Encapsulated internal quantizer row transformations (`transform`, `transform_row`, `transform_back`) as private. Removed obsolete methods (`dequantize`, `fit_quantize`, `inv_scale`).
+
+---
+
 ## deglib v0.2.3
 
 ### Overview
@@ -13,7 +43,7 @@ deglib v0.2.3 introduces a zero-overhead C++20 templated **`Searcher`** pipeline
 * **Zero-Overhead End-to-End Querying:** Integrates query quantization (FP32/FP16 $\rightarrow$ INT8/UINT8/EVP), graph traversal on quantized indices, and SIMD candidate refinement against FP16/FP32 base features in a single C++ call.
 * **Static Template Specialization (`SearcherImpl<QuantT, RefinerT>`):**
   * Compile-time `if constexpr` branch elimination avoiding virtual method dispatch in the hot search loop.
-  * Full support for all quantizers (`NoQuantizer`, `ScalarInt8Quantizer`, `ScalarInt8PerDimQuantizer`, `ScalarUint8Quantizer`, `ScalarUint8PerDimQuantizer`, `EVPQuantizer`).
+  * Full support for all quantizers (`NoQuantizer`, `ScalarQuantizerInt8`, `ScalarQuantizerInt8PerDim`, `ScalarQuantizerUint8`, `ScalarQuantizerUint8PerDim`, `EVPQuantizer`).
   * Support for unquantized and quantized candidate refiners (`NoRefiner`, `ExactRefiner<uint16_t>`, `ExactRefiner<float>`).
 * **Modern C++20 Interface:**
   * `std::span<const T>` and `SearchResult` helpers for safe, expressive, and allocation-free querying.

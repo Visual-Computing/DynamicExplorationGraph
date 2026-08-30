@@ -751,9 +751,7 @@ class SearcherPy {
         const deglib::DynamicExplorationGraph& graph,
         py::object quantizer = py::none(),
         std::optional<deglib::distances::FloatSpace> rerank_space = std::nullopt,
-        std::optional<py::array> base_vectors = std::nullopt,
-        float search_eps = 0.1f,
-        float rerank_factor = 1.0f
+        std::optional<py::array> base_vectors = std::nullopt
     ) {
         const void* base_vectors_ptr = nullptr;
         size_t num_base_vectors = 0;
@@ -777,18 +775,18 @@ class SearcherPy {
                 if (is_fp16_base) {
                     using RefinerT = deglib::search::ExactRefiner<uint16_t>;
                     searcher_ = std::make_unique<deglib::search::SearcherImpl<QuantT, RefinerT>>(
-                        graph.internal(), std::move(q), RefinerT(*rerank_space, static_cast<const uint16_t*>(base_vectors_ptr), num_base_vectors), search_eps, rerank_factor
+                        graph.internal(), std::move(q), RefinerT(*rerank_space, static_cast<const uint16_t*>(base_vectors_ptr), num_base_vectors)
                     );
                 } else {
                     using RefinerT = deglib::search::ExactRefiner<float>;
                     searcher_ = std::make_unique<deglib::search::SearcherImpl<QuantT, RefinerT>>(
-                        graph.internal(), std::move(q), RefinerT(*rerank_space, static_cast<const float*>(base_vectors_ptr), num_base_vectors), search_eps, rerank_factor
+                        graph.internal(), std::move(q), RefinerT(*rerank_space, static_cast<const float*>(base_vectors_ptr), num_base_vectors)
                     );
                 }
             } else {
                 using RefinerT = deglib::search::NoRefiner;
                 searcher_ = std::make_unique<deglib::search::SearcherImpl<QuantT, RefinerT>>(
-                    graph.internal(), std::move(q), RefinerT{}, search_eps, rerank_factor
+                    graph.internal(), std::move(q), RefinerT{}
                 );
             }
         };
@@ -797,16 +795,16 @@ class SearcherPy {
             make_searcher_for_quant(deglib::search::NoQuantizer{});
         } else if (py::isinstance<deglib::quantization::scalar::ScalarQuantizerInt8>(quantizer)) {
             auto q = py::cast<deglib::quantization::scalar::ScalarQuantizerInt8>(quantizer);
-            make_searcher_for_quant(deglib::search::ScalarInt8Quantizer(q));
+            make_searcher_for_quant(std::move(q));
         } else if (py::isinstance<deglib::quantization::scalar::ScalarQuantizerInt8PerDim>(quantizer)) {
             auto q = py::cast<deglib::quantization::scalar::ScalarQuantizerInt8PerDim>(quantizer);
-            make_searcher_for_quant(deglib::search::ScalarInt8PerDimQuantizer(q));
+            make_searcher_for_quant(std::move(q));
         } else if (py::isinstance<deglib::quantization::scalar::ScalarQuantizerUint8>(quantizer)) {
             auto q = py::cast<deglib::quantization::scalar::ScalarQuantizerUint8>(quantizer);
-            make_searcher_for_quant(deglib::search::ScalarUint8Quantizer(q));
+            make_searcher_for_quant(std::move(q));
         } else if (py::isinstance<deglib::quantization::scalar::ScalarQuantizerUint8PerDim>(quantizer)) {
             auto q = py::cast<deglib::quantization::scalar::ScalarQuantizerUint8PerDim>(quantizer);
-            make_searcher_for_quant(deglib::search::ScalarUint8PerDimQuantizer(q));
+            make_searcher_for_quant(std::move(q));
         } else if (py::isinstance<py::int_>(quantizer)) {
             uint32_t nz = py::cast<uint32_t>(quantizer);
             make_searcher_for_quant(deglib::search::EVPQuantizer(nz));
@@ -815,20 +813,10 @@ class SearcherPy {
         }
     }
 
-    void set_query_arguments(float search_eps, float rerank_factor = 1.0f) {
-        searcher_->set_query_arguments(search_eps, rerank_factor);
-    }
-
-    void set_search_eps(float search_eps) { searcher_->set_search_eps(search_eps); }
-    float get_search_eps() const { return searcher_->get_search_eps(); }
-
-    void set_rerank_factor(float rerank_factor) { searcher_->set_rerank_factor(rerank_factor); }
-    float get_rerank_factor() const { return searcher_->get_rerank_factor(); }
-
-    py::object search(py::array query, uint32_t k, bool return_distances = false, bool unsorted = false) {
+    py::object search(py::array query, uint32_t k, float eps = 0.1f, float rerank_factor = 1.0f, bool return_distances = false, bool unsorted = false) {
         auto buf = query.request();
-        if (buf.ndim != 1 && (buf.ndim != 2 || buf.shape[0] != 1)) {
-            throw std::invalid_argument("search query must be 1D vector (or 1xDim 2D array)");
+        if (buf.ndim != 1 && (buf.ndim != 2 || (buf.shape[0] != 1 && buf.shape[1] != 1))) {
+            throw std::invalid_argument("search query must be 1D vector (or 1xDim / Dimx1 2D array)");
         }
         py::array_t<uint32_t> result(static_cast<py::ssize_t>(k));
         uint32_t* out_ptr = static_cast<uint32_t*>(result.request().ptr);
@@ -842,9 +830,9 @@ class SearcherPy {
 
         uint32_t count = 0;
         if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-            count = searcher_->search_f16(static_cast<const uint16_t*>(buf.ptr), k, out_ptr, dist_ptr, unsorted);
+            count = searcher_->search_f16(static_cast<const uint16_t*>(buf.ptr), k, eps, rerank_factor, out_ptr, dist_ptr, unsorted);
         } else {
-            count = searcher_->search_f32(static_cast<const float*>(buf.ptr), k, out_ptr, dist_ptr, unsorted);
+            count = searcher_->search_f32(static_cast<const float*>(buf.ptr), k, eps, rerank_factor, out_ptr, dist_ptr, unsorted);
         }
 
         if (return_distances) {
@@ -853,7 +841,7 @@ class SearcherPy {
         return result;
     }
 
-    py::object search_batch(py::array queries, uint32_t k, size_t num_threads = 1, bool return_distances = false, bool unsorted = false) {
+    py::object search_batch(py::array queries, uint32_t k, float eps = 0.1f, float rerank_factor = 1.0f, size_t num_threads = 1, bool return_distances = false, bool unsorted = false) {
         auto buf = queries.request();
         if (buf.ndim != 2) {
             throw std::invalid_argument("search_batch queries must be 2D array");
@@ -872,9 +860,9 @@ class SearcherPy {
         {
             py::gil_scoped_release release;
             if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                searcher_->search_batch_f16(static_cast<const uint16_t*>(buf.ptr), n_queries, k, out_ptr, dist_ptr, num_threads, unsorted);
+                searcher_->search_batch_f16(static_cast<const uint16_t*>(buf.ptr), n_queries, k, eps, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted);
             } else {
-                searcher_->search_batch_f32(static_cast<const float*>(buf.ptr), n_queries, k, out_ptr, dist_ptr, num_threads, unsorted);
+                searcher_->search_batch_f32(static_cast<const float*>(buf.ptr), n_queries, k, eps, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted);
             }
         }
 
@@ -1305,7 +1293,6 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def(py::init<float>(), py::arg("abs_max"))
         .def_readwrite("abs_max", &deglib::quantization::scalar::ScalarQuantizerInt8::abs_max)
         .def_readwrite("scale", &deglib::quantization::scalar::ScalarQuantizerInt8::scale)
-        .def_readwrite("inv_scale", &deglib::quantization::scalar::ScalarQuantizerInt8::inv_scale)
         .def_readonly("is_fitted", &deglib::quantization::scalar::ScalarQuantizerInt8::is_fitted)
         .def(
             "fit",
@@ -1341,39 +1328,6 @@ PYBIND11_MODULE(deglib_cpp, m) {
                 return output;
             },
             py::arg("vectors"), py::arg("num_threads") = 0
-        )
-        .def(
-            "fit_quantize",
-            [](deglib::quantization::scalar::ScalarQuantizerInt8& q, py::array vectors, float drop_ratio, size_t num_threads) {
-                py::buffer_info buf = vectors.request();
-                auto [count, dim] = get_2d_shape(buf);
-                std::vector<int8_t> result;
-                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    result = q.fit_quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio, num_threads);
-                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                    result = q.fit_quantize(static_cast<const float*>(buf.ptr), count, dim, drop_ratio, num_threads);
-                } else {
-                    throw std::invalid_argument("vectors must be float32 or float16");
-                }
-                py::array_t<int8_t> output({count, static_cast<size_t>(dim)});
-                py::buffer_info out_buf = output.request();
-                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(int8_t));
-                return output;
-            },
-            py::arg("vectors"), py::arg("drop_ratio") = 0.0f, py::arg("num_threads") = 0
-        )
-        .def(
-            "dequantize",
-            [](const deglib::quantization::scalar::ScalarQuantizerInt8& q, py::array_t<int8_t, py::array::c_style> quantized, size_t num_threads) {
-                py::buffer_info buf = quantized.request();
-                auto [count, dim] = get_2d_shape(buf);
-                std::vector<float> result = q.dequantize(static_cast<const int8_t*>(buf.ptr), count, dim, num_threads);
-                py::array_t<float> output({count, static_cast<size_t>(dim)});
-                py::buffer_info out_buf = output.request();
-                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(float));
-                return output;
-            },
-            py::arg("quantized"), py::arg("num_threads") = 0
         );
 
     // ScalarQuantizerInt8PerDim
@@ -1383,7 +1337,6 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def_readwrite("dim", &deglib::quantization::scalar::ScalarQuantizerInt8PerDim::dim)
         .def_readwrite("abs_maxs", &deglib::quantization::scalar::ScalarQuantizerInt8PerDim::abs_maxs)
         .def_readwrite("scales", &deglib::quantization::scalar::ScalarQuantizerInt8PerDim::scales)
-        .def_readwrite("inv_scales", &deglib::quantization::scalar::ScalarQuantizerInt8PerDim::inv_scales)
         .def_readonly("is_fitted", &deglib::quantization::scalar::ScalarQuantizerInt8PerDim::is_fitted)
         .def(
             "fit",
@@ -1419,39 +1372,6 @@ PYBIND11_MODULE(deglib_cpp, m) {
                 return output;
             },
             py::arg("vectors"), py::arg("num_threads") = 0
-        )
-        .def(
-            "fit_quantize",
-            [](deglib::quantization::scalar::ScalarQuantizerInt8PerDim& q, py::array vectors, float drop_ratio, size_t num_threads) {
-                py::buffer_info buf = vectors.request();
-                auto [count, dim] = get_2d_shape(buf);
-                std::vector<int8_t> result;
-                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    result = q.fit_quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio, num_threads);
-                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                    result = q.fit_quantize(static_cast<const float*>(buf.ptr), count, dim, drop_ratio, num_threads);
-                } else {
-                    throw std::invalid_argument("vectors must be float32 or float16");
-                }
-                py::array_t<int8_t> output({count, static_cast<size_t>(dim)});
-                py::buffer_info out_buf = output.request();
-                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(int8_t));
-                return output;
-            },
-            py::arg("vectors"), py::arg("drop_ratio") = 0.0f, py::arg("num_threads") = 0
-        )
-        .def(
-            "dequantize",
-            [](const deglib::quantization::scalar::ScalarQuantizerInt8PerDim& q, py::array_t<int8_t, py::array::c_style> quantized, size_t num_threads) {
-                py::buffer_info buf = quantized.request();
-                auto [count, dim] = get_2d_shape(buf);
-                std::vector<float> result = q.dequantize(static_cast<const int8_t*>(buf.ptr), count, dim, num_threads);
-                py::array_t<float> output({count, static_cast<size_t>(dim)});
-                py::buffer_info out_buf = output.request();
-                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(float));
-                return output;
-            },
-            py::arg("quantized"), py::arg("num_threads") = 0
         );
 
     // ScalarQuantizerUint8
@@ -1497,39 +1417,6 @@ PYBIND11_MODULE(deglib_cpp, m) {
                 return output;
             },
             py::arg("vectors"), py::arg("num_threads") = 0
-        )
-        .def(
-            "fit_quantize",
-            [](deglib::quantization::scalar::ScalarQuantizerUint8& q, py::array vectors, float drop_ratio, size_t num_threads) {
-                py::buffer_info buf = vectors.request();
-                auto [count, dim] = get_2d_shape(buf);
-                std::vector<uint8_t> result;
-                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    result = q.fit_quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio, num_threads);
-                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                    result = q.fit_quantize(static_cast<const float*>(buf.ptr), count, dim, drop_ratio, num_threads);
-                } else {
-                    throw std::invalid_argument("vectors must be float32 or float16");
-                }
-                py::array_t<uint8_t> output({count, static_cast<size_t>(dim)});
-                py::buffer_info out_buf = output.request();
-                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(uint8_t));
-                return output;
-            },
-            py::arg("vectors"), py::arg("drop_ratio") = 0.0f, py::arg("num_threads") = 0
-        )
-        .def(
-            "dequantize",
-            [](const deglib::quantization::scalar::ScalarQuantizerUint8& q, py::array_t<uint8_t, py::array::c_style> quantized, size_t num_threads) {
-                py::buffer_info buf = quantized.request();
-                auto [count, dim] = get_2d_shape(buf);
-                std::vector<float> result = q.dequantize(static_cast<const uint8_t*>(buf.ptr), count, dim, num_threads);
-                py::array_t<float> output({count, static_cast<size_t>(dim)});
-                py::buffer_info out_buf = output.request();
-                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(float));
-                return output;
-            },
-            py::arg("quantized"), py::arg("num_threads") = 0
         );
 
     // ScalarQuantizerUint8PerDim
@@ -1576,39 +1463,6 @@ PYBIND11_MODULE(deglib_cpp, m) {
                 return output;
             },
             py::arg("vectors"), py::arg("num_threads") = 0
-        )
-        .def(
-            "fit_quantize",
-            [](deglib::quantization::scalar::ScalarQuantizerUint8PerDim& q, py::array vectors, float drop_ratio, size_t num_threads) {
-                py::buffer_info buf = vectors.request();
-                auto [count, dim] = get_2d_shape(buf);
-                std::vector<uint8_t> result;
-                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    result = q.fit_quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio, num_threads);
-                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                    result = q.fit_quantize(static_cast<const float*>(buf.ptr), count, dim, drop_ratio, num_threads);
-                } else {
-                    throw std::invalid_argument("vectors must be float32 or float16");
-                }
-                py::array_t<uint8_t> output({count, static_cast<size_t>(dim)});
-                py::buffer_info out_buf = output.request();
-                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(uint8_t));
-                return output;
-            },
-            py::arg("vectors"), py::arg("drop_ratio") = 0.0f, py::arg("num_threads") = 0
-        )
-        .def(
-            "dequantize",
-            [](const deglib::quantization::scalar::ScalarQuantizerUint8PerDim& q, py::array_t<uint8_t, py::array::c_style> quantized, size_t num_threads) {
-                py::buffer_info buf = quantized.request();
-                auto [count, dim] = get_2d_shape(buf);
-                std::vector<float> result = q.dequantize(static_cast<const uint8_t*>(buf.ptr), count, dim, num_threads);
-                py::array_t<float> output({count, static_cast<size_t>(dim)});
-                py::buffer_info out_buf = output.request();
-                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(float));
-                return output;
-            },
-            py::arg("quantized"), py::arg("num_threads") = 0
         );
 
     optimization_module.def(
@@ -1711,30 +1565,23 @@ PYBIND11_MODULE(deglib_cpp, m) {
                 const deglib::DynamicExplorationGraph&,
                 py::object,
                 std::optional<deglib::distances::FloatSpace>,
-                std::optional<py::array>,
-                float,
-                float
+                std::optional<py::array>
             >(),
             py::arg("graph"),
             py::arg("quantizer") = py::none(),
             py::arg("rerank_space") = std::nullopt,
             py::arg("base_vectors") = std::nullopt,
-            py::arg("search_eps") = 0.1f,
-            py::arg("rerank_factor") = 1.0f,
             py::keep_alive<1, 2>()
         )
-        .def("set_query_arguments", &SearcherPy::set_query_arguments, py::arg("search_eps"), py::arg("rerank_factor") = 1.0f)
-        .def("set_search_eps", &SearcherPy::set_search_eps, py::arg("search_eps"))
-        .def("get_search_eps", &SearcherPy::get_search_eps)
-        .def("set_rerank_factor", &SearcherPy::set_rerank_factor, py::arg("rerank_factor"))
-        .def("get_rerank_factor", &SearcherPy::get_rerank_factor)
         .def(
-            "search", &SearcherPy::search, py::arg("query"), py::arg("k"), py::arg("return_distances") = false,
-            py::arg("unsorted") = false
+            "search", &SearcherPy::search,
+            py::arg("query"), py::arg("k"), py::arg("eps") = 0.1f, py::arg("rerank_factor") = 1.0f,
+            py::arg("return_distances") = false, py::arg("unsorted") = false
         )
         .def(
-            "search_batch", &SearcherPy::search_batch, py::arg("queries"), py::arg("k"), py::arg("num_threads") = 1,
-            py::arg("return_distances") = false, py::arg("unsorted") = false
+            "search_batch", &SearcherPy::search_batch,
+            py::arg("queries"), py::arg("k"), py::arg("eps") = 0.1f, py::arg("rerank_factor") = 1.0f,
+            py::arg("num_threads") = 1, py::arg("return_distances") = false, py::arg("unsorted") = false
         );
 
     // graphs

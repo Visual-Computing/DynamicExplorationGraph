@@ -17,17 +17,17 @@ namespace deglib::quantization::evp {
 // ============================================================================
 
 /**
- * Quantizes a single fp32 vector to EVP bytes.
+ * Quantizes a single fp32 vector directly into a pre-allocated EVP byte buffer.
  *
  * Layout: [ones (dim/8 bytes)][negative_ones (dim/8 bytes)]
  *
  * @param embedding  Pointer to dim float values (row-major)
  * @param dim        Dimension (must be divisible by 8)
  * @param non_zeros  Number of top-K elements by absolute value
- * @return std::vector<std::byte> with 2 * dim/8 bytes
+ * @param out_bytes  Pointer to buffer of at least 2 * dim/8 bytes
  * @throws std::invalid_argument if dim % 8 != 0 or non_zeros >= dim
  */
-inline std::vector<std::byte> quantize_single(const float* embedding, uint32_t dim, uint32_t non_zeros) {
+inline void quantize_single_into(const float* embedding, uint32_t dim, uint32_t non_zeros, std::byte* out_bytes) {
     if (dim % 8 != 0) {
         throw std::invalid_argument("quantize_single: dim must be divisible by 8, got " + std::to_string(dim));
     }
@@ -36,8 +36,6 @@ inline std::vector<std::byte> quantize_single(const float* embedding, uint32_t d
     }
 
     const size_t mask_bytes = dim / 8;
-    std::vector<std::byte> result(2 * mask_bytes);
-
     std::vector<std::pair<float, uint32_t>> abs_vals(dim);
     for (uint32_t i = 0; i < dim; ++i) {
         abs_vals[i] = {std::abs(embedding[i]), i};
@@ -51,8 +49,8 @@ inline std::vector<std::byte> quantize_single(const float* embedding, uint32_t d
         is_top[abs_vals[j].second] = 1;
     }
 
-    std::byte* ones_dst = result.data();
-    std::byte* negs_dst = result.data() + mask_bytes;
+    std::byte* ones_dst = out_bytes;
+    std::byte* negs_dst = out_bytes + mask_bytes;
 
     for (uint32_t byte_idx = 0; byte_idx < mask_bytes; ++byte_idx) {
         int byte_val = 0;
@@ -77,7 +75,23 @@ inline std::vector<std::byte> quantize_single(const float* embedding, uint32_t d
         }
         negs_dst[byte_idx] = static_cast<std::byte>(byte_val);
     }
+}
 
+/**
+ * Quantizes a single fp32 vector to EVP bytes.
+ *
+ * Layout: [ones (dim/8 bytes)][negative_ones (dim/8 bytes)]
+ *
+ * @param embedding  Pointer to dim float values (row-major)
+ * @param dim        Dimension (must be divisible by 8)
+ * @param non_zeros  Number of top-K elements by absolute value
+ * @return std::vector<std::byte> with 2 * dim/8 bytes
+ * @throws std::invalid_argument if dim % 8 != 0 or non_zeros >= dim
+ */
+inline std::vector<std::byte> quantize_single(const float* embedding, uint32_t dim, uint32_t non_zeros) {
+    const size_t mask_bytes = dim / 8;
+    std::vector<std::byte> result(2 * mask_bytes);
+    quantize_single_into(embedding, dim, non_zeros, result.data());
     return result;
 }
 
@@ -379,10 +393,68 @@ inline std::vector<std::byte> quantize_batch(const std::vector<std::vector<std::
 }
 
 /**
+ * Quantizes a single FP16 (uint16_t) vector directly into a pre-allocated EVP byte buffer.
+ *
+ * Layout: [ones (dim/8 bytes)][negative_ones (dim/8 bytes)]
+ */
+inline void quantize_single_into(const uint16_t* embedding, uint32_t dim, uint32_t non_zeros, std::byte* out_bytes) {
+    if (dim % 8 != 0) {
+        throw std::invalid_argument("quantize_single: dim must be divisible by 8, got " + std::to_string(dim));
+    }
+    if (non_zeros >= dim) {
+        throw std::invalid_argument("quantize_single: non_zeros must be < dim");
+    }
+
+    const size_t mask_bytes = dim / 8;
+    std::vector<std::pair<uint16_t, uint32_t>> abs_vals(dim);
+    for (uint32_t i = 0; i < dim; ++i) {
+        abs_vals[i] = {static_cast<uint16_t>(embedding[i] & 0x7FFFu), i};
+    }
+    std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(), [](const auto& a, const auto& b) {
+        return a.first != b.first ? a.first < b.first : a.second < b.second;
+    });
+
+    std::vector<uint8_t> is_top(dim, 0);
+    for (uint32_t j = dim - non_zeros; j < dim; ++j) {
+        is_top[abs_vals[j].second] = 1;
+    }
+
+    std::byte* ones_dst = out_bytes;
+    std::byte* negs_dst = out_bytes + mask_bytes;
+
+    for (uint32_t byte_idx = 0; byte_idx < mask_bytes; ++byte_idx) {
+        int bv = 0;
+        for (int bit = 0; bit < 8; ++bit) {
+            const uint32_t bit_idx = byte_idx * 8 + bit;
+            if (bit_idx >= dim) break;
+            if (is_top[bit_idx] && (embedding[bit_idx] & 0x8000u) == 0 && (embedding[bit_idx] & 0x7FFFu) > 0) {
+                bv |= (1 << bit);
+            }
+        }
+        ones_dst[byte_idx] = static_cast<std::byte>(bv);
+    }
+
+    for (uint32_t byte_idx = 0; byte_idx < mask_bytes; ++byte_idx) {
+        int bv = 0;
+        for (int bit = 0; bit < 8; ++bit) {
+            const uint32_t bit_idx = byte_idx * 8 + bit;
+            if (bit_idx >= dim) break;
+            if (is_top[bit_idx] && (embedding[bit_idx] & 0x8000u) != 0 && (embedding[bit_idx] & 0x7FFFu) > 0) {
+                bv |= (1 << bit);
+            }
+        }
+        negs_dst[byte_idx] = static_cast<std::byte>(bv);
+    }
+}
+
+/**
  * Quantizes a single FP16 (uint16_t) vector to EVP bytes.
  */
 inline std::vector<std::byte> quantize_single(const uint16_t* embedding, uint32_t dim, uint32_t non_zeros) {
-    return quantize_batch(embedding, 1, dim, non_zeros, 1);
+    const size_t mask_bytes = dim / 8;
+    std::vector<std::byte> result(2 * mask_bytes);
+    quantize_single_into(embedding, dim, non_zeros, result.data());
+    return result;
 }
 
 }  // namespace deglib::quantization::evp

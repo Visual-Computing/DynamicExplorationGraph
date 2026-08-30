@@ -188,17 +188,17 @@ explored_labels, distances = graph.explore(entry_external_label=105, k=10, eps=0
 
 ### Graph Optimization, Quantization & Reranking Pipeline
 
-A complete end-to-end pipeline demonstrating **FLAS pre-sorting**, **multithreaded graph building**, **RNG edge pruning**, **Int8 quantization**, **ReadOnlyGraph conversion**, and **exact FP32 candidate reranking**:
+A complete end-to-end pipeline demonstrating **FLAS pre-sorting**, **multithreaded graph building**, **RNG edge pruning**, **Int8 quantization**, **ReadOnlyGraph conversion**, and deployment with **`Searcher`** for automatic query quantization and high-precision reranking:
 
 ```python
 import numpy as np
 import deglib
 from deglib.optimization import presort, prune_non_rng_edges, ScalarQuantizerInt8
-from deglib.search import rerank
+from deglib.search import create_searcher
 
 num_vectors, dims = 10_000, 128
 data = np.random.randn(num_vectors, dims).astype(np.float32)
-query = np.random.randn(1, dims).astype(np.float32)
+query = np.random.randn(dims).astype(np.float32)
 
 # 1. Pre-sort vectors using FLAS for improved memory locality and index construction speed
 perm = presort(data, metric=deglib.Metric.FP32_InnerProduct, callback="progress")
@@ -225,23 +225,19 @@ int8_space = deglib.FloatSpace.create(dims, deglib.Metric.Int8_InnerProduct)
 # 5. Convert mutable graph to a compact ReadOnlyGraph equipped with the quantized features
 readonly_graph = graph.to_readonly(feature_space=int8_space, custom_features=quant_int8_data)
 
-# 6. Quantize query using the EXACT SAME calibrated scale, then search
-quant_query = quantizer.quantize(query)
-candidate_indices = readonly_graph.search(quant_query, k=20, eps=0.1, return_distances=False)
-
-# 7. Exact distance reranking of top candidates on original float32 data
-fp32_space = deglib.FloatSpace.create(dims, deglib.Metric.FP32_InnerProduct)
-final_top_indices, distances = rerank(
-    space=fp32_space,
-    queries=query,
-    candidate_indices=candidate_indices,
-    base_vectors=sorted_data,
-    k_top=10,
-    return_distances=True,
+# 6. Create high-performance Searcher equipped with base vectors for exact candidate reranking
+rerank_space = deglib.FloatSpace.create(dims, deglib.Metric.FP32_InnerProduct)
+searcher = create_searcher(
+    graph=readonly_graph,
+    quantizer=quantizer,
+    refine_space=rerank_space,
+    refine_data=sorted_data,
 )
 
-print("Top-10 nearest neighbor indices:", final_top_indices[0])
-print("Top-10 exact distances:", distances[0])
+# 7. Query search (query is automatically quantized and top candidates are reranked)
+indices, distances = searcher.search(query, k=10, eps=0.1, rerank_factor=1.5, return_distances=True)
+print("Top-10 nearest neighbor indices:", indices)
+print("Top-10 exact distances:", distances)
 ```
 
 ---

@@ -229,16 +229,12 @@ class DegANN(BaseANN):
             quantizer=self.quantizer,
             refine_space=self.rerank_space_fp16 if self.query_dtype != "float32" else None,
             refine_data=self.original_features_fp16 if self.query_dtype != "float32" else None,
-            search_eps=self.search_eps,
-            rerank_factor=self.rerank_size_factor,
         )
 
     def set_query_arguments(self, search_eps: float, rerank_size_factor: float = 1.0):
         """Sets query-time search_eps and rerank scaling factor."""
         self.search_eps = float(search_eps)
         self.rerank_size_factor = float(rerank_size_factor)
-        if self.searcher is not None:
-            self.searcher.set_query_arguments(self.search_eps, self.rerank_size_factor)
 
     def query(self, v: np.ndarray, n: int) -> np.ndarray:
         """Single query search on 1 thread with optional FP16 reranking directly in C++."""
@@ -246,7 +242,14 @@ class DegANN(BaseANN):
             raise RuntimeError("Index not fitted. Call fit(X) first.")
         if self.needs_normalization:
             v = v / np.linalg.norm(v)
-        return self.searcher.search(np.ascontiguousarray(v, dtype=np.float32), n, return_distances=False, unsorted=True)
+        return self.searcher.search(
+            np.ascontiguousarray(v, dtype=np.float32),
+            n,
+            eps=self.search_eps,
+            rerank_factor=self.rerank_size_factor,
+            return_distances=False,
+            unsorted=True,
+        )
 
     def __str__(self) -> str:
         return (
