@@ -1,5 +1,31 @@
 # Release Notes
 
+## deglib v0.2.5
+
+### Overview
+deglib v0.2.5 fixes a critical buffer overread bug in the AVX512 and AVX2 batch distance calculation kernels (`compare_batch`) for vector dimensions that require dual-SIMD and residual/tail processing (such as dimension 784 in MNIST / Fashion-MNIST, or other dimensions where $\text{dim} \pmod{32} \neq 0$ or $\text{dim} \pmod{64} \neq 0$).
+
+---
+
+### 🐛 Bug Fixes
+
+* **SIMD Batch Distance Stepping (`compare_batch`):** Fixed chunk step and loop iteration counts in `HasDualSimd` blocks across `fp32_l2.h`, `fp32_ip.h`, `int8_l2.h`, and `uint8_l2.h`:
+  * `L2Float_AVX512` / `InnerProductFloat_AVX512`: Dual-SIMD chunk count corrected to $\frac{\text{dim}}{32}$ (processing two 16-float vectors per iteration) instead of $\frac{\text{dim}}{16}$.
+  * `L2Float_AVX2` / `InnerProductFloat_AVX2`: Dual-SIMD chunk count corrected to $\frac{\text{dim}}{16}$ (processing two 8-float vectors per iteration) instead of $\frac{\text{dim}}{8}$.
+  * `L2Int8_AVX512` / `L2UInt8_AVX512`: Dual-SIMD chunk count corrected to $\frac{\text{dim}}{64}$ (processing two 32-byte vectors per iteration) instead of $\frac{\text{dim}}{32}$.
+  * `L2Int8_AVX2` / `L2UInt8_AVX2`: Dual-SIMD chunk count corrected to $\frac{\text{dim}}{32}$ (processing two 16-byte vectors per iteration) instead of $\frac{\text{dim}}{16}$.
+  * Prevents reading out-of-bounds memory in the subsequent `HasSimd` and `HasTail` branches, eliminating segmentation faults (Exit Code 139) and NaN distance calculations during graph construction and search on datasets with unaligned dimensions.
+
+---
+
+### 🧪 Testing
+
+* **Unaligned Dimension Test Coverage:**
+  * Added parameterized tests in Python (`test_build_unaligned_dimensions`) covering dimensions `48`, `80`, `100`, and `784` across `FP32_L2` and `FP32_InnerProduct`.
+  * Expanded C++ distance test suite (`test_fp32_l2`, `test_fp32_inner_product`, `test_int8_l2`, `test_uint8_l2`) with unaligned dimension coverage in `VariousDims` and `MatchesSingleCompare`.
+
+---
+
 ## deglib v0.2.4
 
 ### Overview

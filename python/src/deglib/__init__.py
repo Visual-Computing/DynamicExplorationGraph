@@ -20,7 +20,7 @@ from .graph import (
 )
 from .distances import FloatSpace, Metric
 
-__version__ = "0.2.4"
+__version__ = "0.2.5"
 
 __all__ = [
     "DynamicExplorationGraph",
