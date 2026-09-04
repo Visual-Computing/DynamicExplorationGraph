@@ -126,6 +126,186 @@ struct ExactRefiner {
                 space, q_span, base_vectors, num_base_vectors, cands_span, k, out_idx_span, out_dist_span, return_distances, unsorted
             );
         } else if constexpr (std::is_same_v<QueryT, float> && std::is_same_v<RefineDataT, uint16_t>) {
+#if defined(DEGLIB_X86)
+            if (space.metric() == deglib::distances::Metric::FP16_InnerProduct) {
+                struct CandDist {
+                    uint32_t id;
+                    float dist;
+                };
+                alignas(64) CandDist stack_cand_dists[512];
+                std::unique_ptr<CandDist[]> heap_cand_dists;
+                CandDist* items = stack_cand_dists;
+                if (num_cands > 512) {
+                    heap_cand_dists = std::make_unique<CandDist[]>(num_cands);
+                    items = heap_cand_dists.get();
+                }
+
+                if (dim == 200) {
+                    const __m512 q0  = _mm512_loadu_ps(query + 0);
+                    const __m512 q1  = _mm512_loadu_ps(query + 16);
+                    const __m512 q2  = _mm512_loadu_ps(query + 32);
+                    const __m512 q3  = _mm512_loadu_ps(query + 48);
+                    const __m512 q4  = _mm512_loadu_ps(query + 64);
+                    const __m512 q5  = _mm512_loadu_ps(query + 80);
+                    const __m512 q6  = _mm512_loadu_ps(query + 96);
+                    const __m512 q7  = _mm512_loadu_ps(query + 112);
+                    const __m512 q8  = _mm512_loadu_ps(query + 128);
+                    const __m512 q9  = _mm512_loadu_ps(query + 144);
+                    const __m512 q10 = _mm512_loadu_ps(query + 160);
+                    const __m512 q11 = _mm512_loadu_ps(query + 176);
+                    const __m512 q12 = _mm512_insertf32x8(_mm512_setzero_ps(), _mm256_loadu_ps(query + 192), 0);
+
+                    size_t j = 0;
+                    for (; j + 4 <= num_cands; j += 4) {
+                        uint32_t idx0 = candidate_indices[j];
+                        uint32_t idx1 = candidate_indices[j + 1];
+                        uint32_t idx2 = candidate_indices[j + 2];
+                        uint32_t idx3 = candidate_indices[j + 3];
+
+                        if (j + 8 <= num_cands) {
+                            const char* pf0 = reinterpret_cast<const char*>(base_vectors + static_cast<size_t>(candidate_indices[j + 4]) * 200);
+                            const char* pf1 = reinterpret_cast<const char*>(base_vectors + static_cast<size_t>(candidate_indices[j + 5]) * 200);
+                            _mm_prefetch(pf0, _MM_HINT_T0);
+                            _mm_prefetch(pf0 + 64, _MM_HINT_T0);
+                            _mm_prefetch(pf0 + 128, _MM_HINT_T0);
+                            _mm_prefetch(pf0 + 192, _MM_HINT_T0);
+                            _mm_prefetch(pf1, _MM_HINT_T0);
+                            _mm_prefetch(pf1 + 64, _MM_HINT_T0);
+                            _mm_prefetch(pf1 + 128, _MM_HINT_T0);
+                            _mm_prefetch(pf1 + 192, _MM_HINT_T0);
+                        }
+
+                        const uint16_t* ptr0 = base_vectors + static_cast<size_t>(idx0) * 200;
+                        const uint16_t* ptr1 = base_vectors + static_cast<size_t>(idx1) * 200;
+                        const uint16_t* ptr2 = base_vectors + static_cast<size_t>(idx2) * 200;
+                        const uint16_t* ptr3 = base_vectors + static_cast<size_t>(idx3) * 200;
+
+                        #define FMA_CHUNK(offset, q_reg) \
+                            sum0 = _mm512_fmadd_ps(q_reg, _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr0 + offset))), sum0); \
+                            sum1 = _mm512_fmadd_ps(q_reg, _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr1 + offset))), sum1); \
+                            sum2 = _mm512_fmadd_ps(q_reg, _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr2 + offset))), sum2); \
+                            sum3 = _mm512_fmadd_ps(q_reg, _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr3 + offset))), sum3);
+
+                        __m512 sum0 = _mm512_setzero_ps();
+                        __m512 sum1 = _mm512_setzero_ps();
+                        __m512 sum2 = _mm512_setzero_ps();
+                        __m512 sum3 = _mm512_setzero_ps();
+
+                        FMA_CHUNK(0, q0);
+                        FMA_CHUNK(16, q1);
+                        FMA_CHUNK(32, q2);
+                        FMA_CHUNK(48, q3);
+                        FMA_CHUNK(64, q4);
+                        FMA_CHUNK(80, q5);
+                        FMA_CHUNK(96, q6);
+                        FMA_CHUNK(112, q7);
+                        FMA_CHUNK(128, q8);
+                        FMA_CHUNK(144, q9);
+                        FMA_CHUNK(160, q10);
+                        FMA_CHUNK(176, q11);
+
+                        #undef FMA_CHUNK
+
+                        __m512 t0 = _mm512_insertf32x8(_mm512_setzero_ps(), _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr0 + 192))), 0);
+                        __m512 t1 = _mm512_insertf32x8(_mm512_setzero_ps(), _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr1 + 192))), 0);
+                        __m512 t2 = _mm512_insertf32x8(_mm512_setzero_ps(), _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr2 + 192))), 0);
+                        __m512 t3 = _mm512_insertf32x8(_mm512_setzero_ps(), _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr3 + 192))), 0);
+
+                        sum0 = _mm512_fmadd_ps(q12, t0, sum0);
+                        sum1 = _mm512_fmadd_ps(q12, t1, sum1);
+                        sum2 = _mm512_fmadd_ps(q12, t2, sum2);
+                        sum3 = _mm512_fmadd_ps(q12, t3, sum3);
+
+                        float d0 = 1.0f - _mm512_reduce_add_ps(sum0);
+                        float d1 = 1.0f - _mm512_reduce_add_ps(sum1);
+                        float d2 = 1.0f - _mm512_reduce_add_ps(sum2);
+                        float d3 = 1.0f - _mm512_reduce_add_ps(sum3);
+
+                        items[j]     = {idx0, d0};
+                        items[j + 1] = {idx1, d1};
+                        items[j + 2] = {idx2, d2};
+                        items[j + 3] = {idx3, d3};
+                    }
+
+                    for (; j < num_cands; ++j) {
+                        uint32_t idx = candidate_indices[j];
+                        const uint16_t* ptr = base_vectors + static_cast<size_t>(idx) * 200;
+
+                        __m512 sum = _mm512_setzero_ps();
+                        sum = _mm512_fmadd_ps(q0,  _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr + 0))),   sum);
+                        sum = _mm512_fmadd_ps(q1,  _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr + 16))),  sum);
+                        sum = _mm512_fmadd_ps(q2,  _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr + 32))),  sum);
+                        sum = _mm512_fmadd_ps(q3,  _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr + 48))),  sum);
+                        sum = _mm512_fmadd_ps(q4,  _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr + 64))),  sum);
+                        sum = _mm512_fmadd_ps(q5,  _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr + 80))),  sum);
+                        sum = _mm512_fmadd_ps(q6,  _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr + 96))),  sum);
+                        sum = _mm512_fmadd_ps(q7,  _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr + 112))), sum);
+                        sum = _mm512_fmadd_ps(q8,  _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr + 128))), sum);
+                        sum = _mm512_fmadd_ps(q9,  _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr + 144))), sum);
+                        sum = _mm512_fmadd_ps(q10, _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr + 160))), sum);
+                        sum = _mm512_fmadd_ps(q11, _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr + 176))), sum);
+
+                        __m512 t = _mm512_insertf32x8(_mm512_setzero_ps(), _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr + 192))), 0);
+                        sum = _mm512_fmadd_ps(q12, t, sum);
+
+                        float d = 1.0f - _mm512_reduce_add_ps(sum);
+                        items[j] = {idx, d};
+                    }
+                } else {
+                    const size_t chunks16 = dim / 16;
+                    for (size_t j = 0; j < num_cands; ++j) {
+                        uint32_t idx = candidate_indices[j];
+                        const uint16_t* ptr = base_vectors + static_cast<size_t>(idx) * dim;
+                        __m512 sum = _mm512_setzero_ps();
+                        for (size_t c = 0; c < chunks16; ++c) {
+                            __m512 q = _mm512_loadu_ps(query + c * 16);
+                            __m512 v = _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr + c * 16)));
+                            sum = _mm512_fmadd_ps(q, v, sum);
+                        }
+                        float dot = _mm512_reduce_add_ps(sum);
+                        for (size_t c = chunks16 * 16; c < dim; ++c) {
+                            dot += query[c] * deglib::distances::fp16::fp16_to_float(ptr[c]);
+                        }
+                        items[j] = {idx, 1.0f - dot};
+                    }
+                }
+
+                const size_t top_n = std::min<size_t>(k, num_cands);
+                if (unsorted) {
+                    if (top_n < num_cands) {
+                        std::nth_element(items, items + top_n, items + num_cands, [](const CandDist& a, const CandDist& b) noexcept {
+                            return a.dist < b.dist;
+                        });
+                    }
+                } else {
+                    if (top_n < num_cands) {
+                        std::partial_sort(items, items + top_n, items + num_cands, [](const CandDist& a, const CandDist& b) noexcept {
+                            return a.dist < b.dist;
+                        });
+                    } else {
+                        std::sort(items, items + top_n, [](const CandDist& a, const CandDist& b) noexcept {
+                            return a.dist < b.dist;
+                        });
+                    }
+                }
+
+                for (size_t i = 0; i < top_n; ++i) {
+                    out_indices[i] = items[i].id;
+                }
+                if (return_distances && out_distances) {
+                    for (size_t i = 0; i < top_n; ++i) {
+                        out_distances[i] = items[i].dist;
+                    }
+                }
+                for (size_t i = top_n; i < k; ++i) {
+                    out_indices[i] = std::numeric_limits<uint32_t>::max();
+                    if (return_distances && out_distances) {
+                        out_distances[i] = std::numeric_limits<float>::max();
+                    }
+                }
+                return static_cast<uint32_t>(top_n);
+            }
+#endif
             std::vector<uint16_t> q_fp16(dim);
             deglib::distances::fp16::floats_to_fp16(query, q_fp16.data(), dim);
             auto q_span = std::span<const std::byte>(reinterpret_cast<const std::byte*>(q_fp16.data()), dim * sizeof(uint16_t));
