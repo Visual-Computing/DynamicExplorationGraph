@@ -564,11 +564,9 @@ class InternalGraph {
                     int32_t edge_size = 0;
                     for (size_t i = 0; i < edges_per_vertex; ++i) {
                         uint32_t v = neighbor_indices[i];
-                        if (pool.check_visited(v)) {
-                            continue;
+                        if (!pool.test_and_set_visited(v)) {
+                            edge_buf[edge_size++] = v;
                         }
-                        pool.set_visited(v);
-                        edge_buf[edge_size++] = v;
                     }
 
                     for (int32_t i = 0; i < std::min<int32_t>(po, edge_size); ++i) {
@@ -646,11 +644,9 @@ class InternalGraph {
             int32_t edge_size = 0;
             for (size_t i = 0; i < edges_per_vertex; ++i) {
                 uint32_t v = neighbor_indices[i];
-                if (pool.check_visited(v)) {
-                    continue;
+                if (!pool.test_and_set_visited(v)) {
+                    edge_buf[edge_size++] = v;
                 }
-                pool.set_visited(v);
-                edge_buf[edge_size++] = v;
             }
 
             for (int32_t i = 0; i < std::min<int32_t>(po, edge_size); ++i) {

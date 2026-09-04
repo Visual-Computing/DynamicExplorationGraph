@@ -47,6 +47,13 @@ struct Bitset {
     [[nodiscard]] inline bool get(uint32_t i) const noexcept {
         return (data[i / block_size] >> (i & (block_size - 1))) & 1;
     }
+    [[nodiscard]] inline bool test_and_set(uint32_t i) noexcept {
+        Block mask = Block(1) << (i & (block_size - 1));
+        Block& word = data[i / block_size];
+        if (word & mask) return true;
+        word |= mask;
+        return false;
+    }
 };
 
 template <typename DistT = float>
@@ -179,6 +186,9 @@ struct LinearPool {
 
     [[nodiscard]] inline bool check_visited(uint32_t u) const noexcept {
         return vis.get(u);
+    }
+    [[nodiscard]] inline bool test_and_set_visited(uint32_t u) noexcept {
+        return vis.test_and_set(u);
     }
 
     void to_sorted(uint32_t *ids, float *scores, int32_t length) const noexcept {
