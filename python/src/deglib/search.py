@@ -164,6 +164,55 @@ class Searcher:
         else:
             raise ValueError(f"query must be 1D or 2D NumPy array, got ndim={query.ndim} with shape {query.shape}")
 
+    def set_prefetch(self, po: int, pl: int):
+        """Sets prefetch offset (po) and prefetch cachelines (pl)."""
+        self.searcher_cpp.set_prefetch(int(po), int(pl))
+
+    def get_prefetch(self) -> tuple[int, int]:
+        """Returns (po, pl) currently configured."""
+        return self.searcher_cpp.get_prefetch()
+
+    def optimize(
+        self,
+        sample_queries: np.ndarray,
+        k: int = 100,
+        ef: int = 200,
+        try_pos: list[int] | None = None,
+        try_pls: list[int] | None = None,
+    ) -> tuple[int, int]:
+        """
+        Empirically benchmarks different (po, pl) combinations on host CPU using sample queries,
+        and sets the fastest configuration.
+        """
+        import time
+
+        if try_pos is None:
+            try_pos = [2, 4, 6, 8, 10, 12, 14, 16]
+        if try_pls is None:
+            try_pls = [1, 2, 3, 4]
+
+        sample_queries = np.ascontiguousarray(sample_queries)
+        warmup_queries = sample_queries[:min(10, len(sample_queries))]
+
+        best_time = float("inf")
+        best_po, best_pl = 8, 3
+
+        for po in try_pos:
+            for pl in try_pls:
+                self.set_prefetch(po, pl)
+                for q in warmup_queries:
+                    self.search(q, k=k, ef=ef)
+                t0 = time.perf_counter()
+                for q in sample_queries:
+                    self.search(q, k=k, ef=ef)
+                elapsed = time.perf_counter() - t0
+                if elapsed < best_time:
+                    best_time = elapsed
+                    best_po, best_pl = po, pl
+
+        self.set_prefetch(best_po, best_pl)
+        return best_po, best_pl
+
 
 def create_searcher(
     graph,

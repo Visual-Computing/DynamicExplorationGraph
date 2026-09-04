@@ -887,6 +887,14 @@ class SearcherPy {
         }
         return result;
     }
+
+    void set_prefetch(int32_t po, int32_t pl) {
+        searcher_->set_prefetch(po, pl);
+    }
+
+    std::pair<int32_t, int32_t> get_prefetch() const {
+        return searcher_->get_prefetch();
+    }
 };
 
 // ============================================================================
@@ -1598,7 +1606,9 @@ PYBIND11_MODULE(deglib_cpp, m) {
             "search_batch", &SearcherPy::search_batch,
             py::arg("queries"), py::arg("k"), py::arg("eps") = 0.1f, py::arg("rerank_factor") = 1.0f,
             py::arg("num_threads") = 1, py::arg("return_distances") = false, py::arg("unsorted") = false, py::arg("ef") = 0
-        );
+        )
+        .def("set_prefetch", &SearcherPy::set_prefetch, py::arg("po"), py::arg("pl"))
+        .def("get_prefetch", &SearcherPy::get_prefetch);
 
     // graphs
     py::class_<deglib::DynamicExplorationGraph>(m, "DynamicExplorationGraph")
@@ -1650,6 +1660,9 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def("has_vertex", &deglib::DynamicExplorationGraph::hasVertex)
         .def("get_entry_vertex_indices", &deglib::DynamicExplorationGraph::getEntryVertexIndices)
         .def("set_entry_vertex_indices", &deglib::DynamicExplorationGraph::setEntryVertexIndices, py::arg("indices"))
+        .def("set_prefetch", &deglib::DynamicExplorationGraph::setPrefetch, py::arg("po"), py::arg("pl"))
+        .def("get_po", &deglib::DynamicExplorationGraph::getPo)
+        .def("get_pl", &deglib::DynamicExplorationGraph::getPl)
         .def("get_neighbors", &deglib::DynamicExplorationGraph::getNeighbors)
         .def("is_mutable", &deglib::DynamicExplorationGraph::isMutable)
         .def("to_readonly", &deglib::DynamicExplorationGraph::to_readonly)

@@ -149,8 +149,8 @@ class InternalGraph {
     virtual const bool hasEdge(const uint32_t internal_index, const uint32_t neighbor_index) const = 0;
   protected:
     std::vector<uint32_t> entry_vertex_indices_{0};
-    int32_t po_ = 8;
-    int32_t pl_ = 3;
+    mutable int32_t po_ = 8;
+    mutable int32_t pl_ = 3;
 
   public:
     const std::vector<uint32_t>& getEntryVertexIndices() const { return entry_vertex_indices_; }
@@ -161,7 +161,7 @@ class InternalGraph {
     }
     int32_t getPo() const noexcept { return po_; }
     int32_t getPl() const noexcept { return pl_; }
-    void setPrefetch(int32_t po, int32_t pl) noexcept {
+    void setPrefetch(int32_t po, int32_t pl) const noexcept {
         if (po > 0) po_ = po;
         if (pl > 0) pl_ = pl;
     }
@@ -536,6 +536,14 @@ class InternalGraph {
                 }
             }
         }
+
+        return pool;
+    }
+
+    template <typename GraphType>
+    static deglib::search::LinearPool<float> searchEfInternImpl(
+        const GraphType& self,
+        const std::vector<uint32_t>& entry_vertex_indices,
         const std::byte* query,
         const uint32_t k,
         const uint32_t ef

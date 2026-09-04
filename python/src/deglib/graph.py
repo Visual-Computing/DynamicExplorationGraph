@@ -204,6 +204,18 @@ class DynamicExplorationGraph:
         """Sets the list of internal entry vertex indices."""
         self.dynamic_exploration_graph_cpp.set_entry_vertex_indices(list(indices))
 
+    def get_po(self) -> int:
+        """Returns current prefetch offset."""
+        return self.dynamic_exploration_graph_cpp.get_po()
+
+    def get_pl(self) -> int:
+        """Returns current prefetch cachelines."""
+        return self.dynamic_exploration_graph_cpp.get_pl()
+
+    def set_prefetch(self, po: int, pl: int):
+        """Sets prefetch offset (po) and prefetch cachelines (pl)."""
+        self.dynamic_exploration_graph_cpp.set_prefetch(int(po), int(pl))
+
     def to_readonly(
         self, feature_space: Optional[FloatSpace] = None, custom_features: Optional[np.ndarray] = None
     ) -> "DynamicExplorationGraph":

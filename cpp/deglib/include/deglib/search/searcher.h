@@ -165,6 +165,9 @@ class SearcherBase {
     virtual void search_batch_ef_f32(const float* queries, size_t n_queries, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const = 0;
     virtual void search_batch_ef_f16(const uint16_t* queries, size_t n_queries, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const = 0;
 
+    virtual void set_prefetch(int32_t po, int32_t pl) = 0;
+    virtual std::pair<int32_t, int32_t> get_prefetch() const = 0;
+
     // --- Modern C++20 std::span and std::vector Convenience API ---
 
     /**
@@ -583,6 +586,14 @@ class SearcherImpl : public SearcherBase {
             float* d_ptr = out_distances ? (out_distances + q * k) : nullptr;
             search_f16(queries + q * dim, k, eps, rerank_factor, out_indices + q * k, d_ptr, unsorted);
         });
+    }
+
+    void set_prefetch(int32_t po, int32_t pl) override {
+        graph_->setPrefetch(po, pl);
+    }
+
+    std::pair<int32_t, int32_t> get_prefetch() const override {
+        return {graph_->getPo(), graph_->getPl()};
     }
 };
 
