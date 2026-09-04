@@ -464,33 +464,6 @@ class InternalGraph {
 
         deglib::search::LinearPool<float> pool(static_cast<uint32_t>(vertex_count), static_cast<int32_t>(ef), capacity);
 
-        uint32_t ep1 = entry_vertex_indices.empty() ? 0 : entry_vertex_indices[0];
-        uint32_t ep2 = ep1;
-        float dist1 = std::numeric_limits<float>::max();
-        float dist2 = std::numeric_limits<float>::max();
-        for (auto ep : entry_vertex_indices) {
-            if (ep < vertex_count) {
-                const auto feature = self.feature_by_index(ep);
-                float distance = COMPARATOR::compare(query, feature, dist_func_param);
-                if (distance < dist1) {
-                    dist2 = dist1;
-                    ep2 = ep1;
-                    dist1 = distance;
-                    ep1 = ep;
-                } else if (distance < dist2) {
-                    dist2 = distance;
-                    ep2 = ep;
-                }
-            }
-        }
-        if (ep1 < vertex_count) {
-            pool.set_visited(ep1);
-            pool.insert(ep1, dist1);
-        }
-        if (ep2 < vertex_count && ep2 != ep1) {
-            pool.set_visited(ep2);
-            pool.insert(ep2, dist2);
-        }
 
         const int32_t po = self.getPo();
         const int32_t pl = self.getPl();
@@ -531,6 +504,59 @@ class InternalGraph {
                 const int64_t q_correction = deglib::distances::int8_ip::int8_ip_hsum512(q_comp) * 128;
                 const __m512i xor_mask = _mm512_set1_epi8(static_cast<char>(0x80));
 
+                uint32_t ep1 = entry_vertex_indices.empty() ? 0 : entry_vertex_indices[0];
+                uint32_t ep2 = ep1;
+                float dist1 = std::numeric_limits<float>::max();
+                float dist2 = std::numeric_limits<float>::max();
+
+                // Pipelined SIMD scan over entry medoids
+                for (size_t i = 0; i < std::min<size_t>(po, entry_vertex_indices.size()); ++i) {
+                    prefetch_feature(reinterpret_cast<const char*>(self.feature_by_index(entry_vertex_indices[i])));
+                }
+                for (size_t i = 0; i < entry_vertex_indices.size(); ++i) {
+                    if (i + po < entry_vertex_indices.size()) {
+                        prefetch_feature(reinterpret_cast<const char*>(self.feature_by_index(entry_vertex_indices[i + po])));
+                    }
+                    const auto ep = entry_vertex_indices[i];
+                    if (ep < vertex_count) {
+                        const int8_t* feat = reinterpret_cast<const int8_t*>(self.feature_by_index(ep));
+                        __m512i raw_b0 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat));
+                        __m512i raw_b1 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 64));
+                        __m512i raw_b2 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 128));
+                        __m512i raw_b3 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 192));
+
+                        __m512i u_b0 = _mm512_xor_si512(raw_b0, xor_mask);
+                        __m512i u_b1 = _mm512_xor_si512(raw_b1, xor_mask);
+                        __m512i u_b2 = _mm512_xor_si512(raw_b2, xor_mask);
+                        __m512i u_b3 = _mm512_xor_si512(raw_b3, xor_mask);
+
+                        __m512i s0 = _mm512_dpbusd_epi32(_mm512_setzero_si512(), u_b0, q0);
+                        __m512i s1 = _mm512_dpbusd_epi32(_mm512_setzero_si512(), u_b1, q1);
+                        s0 = _mm512_dpbusd_epi32(s0, u_b2, q2);
+                        s1 = _mm512_dpbusd_epi32(s1, u_b3, q3);
+                        __m512i sum = _mm512_add_epi32(s0, s1);
+
+                        int64_t total = deglib::distances::int8_ip::int8_ip_hsum512(sum) - q_correction;
+                        float distance = -static_cast<float>(total);
+                        if (distance < dist1) {
+                            dist2 = dist1;
+                            ep2 = ep1;
+                            dist1 = distance;
+                            ep1 = ep;
+                        } else if (distance < dist2) {
+                            dist2 = distance;
+                            ep2 = ep;
+                        }
+                    }
+                }
+                if (ep1 < vertex_count) {
+                    pool.set_visited(ep1);
+                    pool.insert(ep1, dist1);
+                }
+                if (ep2 < vertex_count && ep2 != ep1) {
+                    pool.set_visited(ep2);
+                    pool.insert(ep2, dist2);
+                }
                 while (pool.has_next()) {
                     uint32_t u = pool.pop();
                     const auto neighbor_indices = self.neighbors_by_index(u);
@@ -556,21 +582,21 @@ class InternalGraph {
                         uint32_t v = edge_buf[i];
                         const int8_t* feat = reinterpret_cast<const int8_t*>(self.feature_by_index(v));
 
-                        __m512i raw_b0 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(feat));
-                        __m512i raw_b1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(feat + 64));
-                        __m512i raw_b2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(feat + 128));
-                        __m512i raw_b3 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(feat + 192));
+                        __m512i raw_b0 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat));
+                        __m512i raw_b1 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 64));
+                        __m512i raw_b2 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 128));
+                        __m512i raw_b3 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 192));
 
                         __m512i u_b0 = _mm512_xor_si512(raw_b0, xor_mask);
                         __m512i u_b1 = _mm512_xor_si512(raw_b1, xor_mask);
                         __m512i u_b2 = _mm512_xor_si512(raw_b2, xor_mask);
                         __m512i u_b3 = _mm512_xor_si512(raw_b3, xor_mask);
 
-                        __m512i sum = _mm512_dpbusd_epi32(_mm512_setzero_si512(), u_b0, q0);
-                        sum = _mm512_dpbusd_epi32(sum, u_b1, q1);
-                        sum = _mm512_dpbusd_epi32(sum, u_b2, q2);
-                        sum = _mm512_dpbusd_epi32(sum, u_b3, q3);
-
+                        __m512i s0 = _mm512_dpbusd_epi32(_mm512_setzero_si512(), u_b0, q0);
+                        __m512i s1 = _mm512_dpbusd_epi32(_mm512_setzero_si512(), u_b1, q1);
+                        s0 = _mm512_dpbusd_epi32(s0, u_b2, q2);
+                        s1 = _mm512_dpbusd_epi32(s1, u_b3, q3);
+                        __m512i sum = _mm512_add_epi32(s0, s1);
                         int64_t total = deglib::distances::int8_ip::int8_ip_hsum512(sum) - q_correction;
                         float dist = -static_cast<float>(total);
                         if (pool.insert(v, dist)) {
@@ -578,7 +604,6 @@ class InternalGraph {
                             _mm_prefetch(n_ptr, _MM_HINT_T0);
                             _mm_prefetch(n_ptr + 64, _MM_HINT_T0);
                             _mm_prefetch(n_ptr + 128, _MM_HINT_T0);
-                            _mm_prefetch(n_ptr + 192, _MM_HINT_T0);
                         }
                     }
                 }
@@ -586,6 +611,34 @@ class InternalGraph {
             }
         }
         #endif
+
+        uint32_t ep1 = entry_vertex_indices.empty() ? 0 : entry_vertex_indices[0];
+        uint32_t ep2 = ep1;
+        float dist1 = std::numeric_limits<float>::max();
+        float dist2 = std::numeric_limits<float>::max();
+        for (auto ep : entry_vertex_indices) {
+            if (ep < vertex_count) {
+                const auto feature = self.feature_by_index(ep);
+                float distance = COMPARATOR::compare(query, feature, dist_func_param);
+                if (distance < dist1) {
+                    dist2 = dist1;
+                    ep2 = ep1;
+                    dist1 = distance;
+                    ep1 = ep;
+                } else if (distance < dist2) {
+                    dist2 = distance;
+                    ep2 = ep;
+                }
+            }
+        }
+        if (ep1 < vertex_count) {
+            pool.set_visited(ep1);
+            pool.insert(ep1, dist1);
+        }
+        if (ep2 < vertex_count && ep2 != ep1) {
+            pool.set_visited(ep2);
+            pool.insert(ep2, dist2);
+        }
         while (pool.has_next()) {
             uint32_t u = pool.pop();
             const auto neighbor_indices = self.neighbors_by_index(u);
