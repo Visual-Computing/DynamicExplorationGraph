@@ -464,21 +464,32 @@ class InternalGraph {
 
         deglib::search::LinearPool<float> pool(static_cast<uint32_t>(vertex_count), static_cast<int32_t>(ef), capacity);
 
-        uint32_t best_ep = entry_vertex_indices.empty() ? 0 : entry_vertex_indices[0];
-        float best_ep_dist = std::numeric_limits<float>::max();
+        uint32_t ep1 = entry_vertex_indices.empty() ? 0 : entry_vertex_indices[0];
+        uint32_t ep2 = ep1;
+        float dist1 = std::numeric_limits<float>::max();
+        float dist2 = std::numeric_limits<float>::max();
         for (auto ep : entry_vertex_indices) {
             if (ep < vertex_count) {
                 const auto feature = self.feature_by_index(ep);
                 float distance = COMPARATOR::compare(query, feature, dist_func_param);
-                if (distance < best_ep_dist) {
-                    best_ep_dist = distance;
-                    best_ep = ep;
+                if (distance < dist1) {
+                    dist2 = dist1;
+                    ep2 = ep1;
+                    dist1 = distance;
+                    ep1 = ep;
+                } else if (distance < dist2) {
+                    dist2 = distance;
+                    ep2 = ep;
                 }
             }
         }
-        if (best_ep < vertex_count) {
-            pool.set_visited(best_ep);
-            pool.insert(best_ep, best_ep_dist);
+        if (ep1 < vertex_count) {
+            pool.set_visited(ep1);
+            pool.insert(ep1, dist1);
+        }
+        if (ep2 < vertex_count && ep2 != ep1) {
+            pool.set_visited(ep2);
+            pool.insert(ep2, dist2);
         }
 
         const int32_t po = self.getPo();
