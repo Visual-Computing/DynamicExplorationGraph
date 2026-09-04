@@ -75,6 +75,9 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
     // list of vertices (vertex: feature vector, indices of neighbor vertices, external label)
     std::unique_ptr<std::byte[]> vertices_;
     std::byte* vertices_memory_;
+    std::unique_ptr<std::byte[]> contiguous_features_;
+    std::byte* contiguous_features_memory_ = nullptr;
+    size_t contiguous_stride_ = 0;
 
     // map from the label of a vertex to the internal vertex index
     std::unordered_map<uint32_t, uint32_t> label_to_index_;
@@ -132,7 +135,14 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
     )
         : ReadOnlyGraph(max_vertex_count, edges_per_vertex, feature_space) {
         const auto custom_feature_bytes = reinterpret_cast<const std::byte*>(custom_features);
-
+        const size_t raw_feature_bytes = feature_space.get_data_size();
+        contiguous_stride_ = ((raw_feature_bytes + 63) / 64) * 64;
+        contiguous_features_ = std::make_unique<std::byte[]>(size_t(max_vertex_count) * contiguous_stride_ + 64);
+        void* align_ptr = contiguous_features_.get();
+        size_t align_space = std::numeric_limits<size_t>::max();
+        std::align(64, 0, align_ptr, align_space);
+        contiguous_features_memory_ = static_cast<std::byte*>(align_ptr);
+        std::memset(contiguous_features_memory_, 0, size_t(max_vertex_count) * contiguous_stride_);
         for (uint32_t i = 0; i < max_vertex_count; i++) {
             auto vertex = reinterpret_cast<char*>(this->vertex_by_index(i));
             const auto label = input_graph.getExternalLabel(i);
@@ -140,9 +150,11 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
             if (custom_features != nullptr) {
                 const auto feature = custom_feature_bytes + size_t(label) * feature_space.get_data_size();
                 std::memcpy(vertex, feature, feature_space.get_data_size());
+                std::memcpy(contiguous_features_memory_ + size_t(i) * contiguous_stride_, feature, raw_feature_bytes);
             } else {
                 const auto feature = input_graph.getFeatureVector(i);
                 std::memcpy(vertex, feature, feature_space.get_data_size());
+                std::memcpy(contiguous_features_memory_ + size_t(i) * contiguous_stride_, feature, raw_feature_bytes);
             }
             vertex += feature_space.get_data_size();
 
@@ -179,7 +191,12 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
         return *reinterpret_cast<const int32_t*>(vertex_by_index(internal_idx) + external_label_offset_);
     }
 
-    inline const std::byte* feature_by_index(const uint32_t internal_idx) const { return vertex_by_index(internal_idx); }
+    inline const std::byte* feature_by_index(const uint32_t internal_idx) const {
+        if (contiguous_features_memory_) {
+            return contiguous_features_memory_ + size_t(internal_idx) * contiguous_stride_;
+        }
+        return vertex_by_index(internal_idx);
+    }
 
     inline const uint32_t* neighbors_by_index(const uint32_t internal_idx) const {
         return reinterpret_cast<uint32_t*>(vertex_by_index(internal_idx) + neighbor_indices_offset_);

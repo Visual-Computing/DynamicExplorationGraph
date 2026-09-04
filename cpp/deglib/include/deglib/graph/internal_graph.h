@@ -510,11 +510,14 @@ class InternalGraph {
         #if defined(DEGLIB_X86)
         if constexpr (std::string_view(COMPARATOR::get_instruction()) == "AVX512_VNNI") {
             if (self.feature_space_.metric() == deglib::distances::Metric::Int8_InnerProduct && self.feature_space_.dim() == 200) {
-                const int8_t* q_ptr = reinterpret_cast<const int8_t*>(query);
-                const __m512i q0 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(q_ptr));
-                const __m512i q1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(q_ptr + 64));
-                const __m512i q2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(q_ptr + 128));
-                const __m128i q_tail_16 = _mm_cvtepi8_epi16(_mm_loadu_si64(q_ptr + 192));
+                alignas(64) int8_t q_padded[256];
+                std::memset(q_padded, 0, 256);
+                std::memcpy(q_padded, query, 200);
+
+                const __m512i q0 = _mm512_load_si512(reinterpret_cast<const __m512i*>(q_padded));
+                const __m512i q1 = _mm512_load_si512(reinterpret_cast<const __m512i*>(q_padded + 64));
+                const __m512i q2 = _mm512_load_si512(reinterpret_cast<const __m512i*>(q_padded + 128));
+                const __m512i q3 = _mm512_load_si512(reinterpret_cast<const __m512i*>(q_padded + 192));
 
                 __m512i q_comp = _mm512_setzero_si512();
                 auto add_q = [&](__m512i q_raw) {
@@ -524,6 +527,7 @@ class InternalGraph {
                 add_q(q0);
                 add_q(q1);
                 add_q(q2);
+                add_q(q3);
                 const int64_t q_correction = deglib::distances::int8_ip::int8_ip_hsum512(q_comp) * 128;
                 const __m512i xor_mask = _mm512_set1_epi8(static_cast<char>(0x80));
 
@@ -555,23 +559,19 @@ class InternalGraph {
                         __m512i raw_b0 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(feat));
                         __m512i raw_b1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(feat + 64));
                         __m512i raw_b2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(feat + 128));
+                        __m512i raw_b3 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(feat + 192));
 
                         __m512i u_b0 = _mm512_xor_si512(raw_b0, xor_mask);
                         __m512i u_b1 = _mm512_xor_si512(raw_b1, xor_mask);
                         __m512i u_b2 = _mm512_xor_si512(raw_b2, xor_mask);
+                        __m512i u_b3 = _mm512_xor_si512(raw_b3, xor_mask);
 
                         __m512i sum = _mm512_dpbusd_epi32(_mm512_setzero_si512(), u_b0, q0);
                         sum = _mm512_dpbusd_epi32(sum, u_b1, q1);
                         sum = _mm512_dpbusd_epi32(sum, u_b2, q2);
+                        sum = _mm512_dpbusd_epi32(sum, u_b3, q3);
 
                         int64_t total = deglib::distances::int8_ip::int8_ip_hsum512(sum) - q_correction;
-
-                        __m128i b_tail_16 = _mm_cvtepi8_epi16(_mm_loadu_si64(feat + 192));
-                        __m128i prod32 = _mm_madd_epi16(q_tail_16, b_tail_16);
-                        prod32 = _mm_add_epi32(prod32, _mm_shuffle_epi32(prod32, _MM_SHUFFLE(1, 0, 3, 2)));
-                        prod32 = _mm_add_epi32(prod32, _mm_shuffle_epi32(prod32, _MM_SHUFFLE(2, 3, 0, 1)));
-                        total += _mm_cvtsi128_si32(prod32);
-
                         float dist = -static_cast<float>(total);
                         if (pool.insert(v, dist)) {
                             const char* n_ptr = reinterpret_cast<const char*>(self.neighbors_by_index(v));
