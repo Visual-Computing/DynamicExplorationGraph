@@ -514,8 +514,7 @@ class InternalGraph {
                 const __m512i q0 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(q_ptr));
                 const __m512i q1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(q_ptr + 64));
                 const __m512i q2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(q_ptr + 128));
-                uint64_t q_tail = 0;
-                std::memcpy(&q_tail, q_ptr + 192, sizeof(uint64_t));
+                const __m128i q_tail_16 = _mm_cvtepi8_epi16(_mm_loadu_si64(q_ptr + 192));
 
                 __m512i q_comp = _mm512_setzero_si512();
                 auto add_q = [&](__m512i q_raw) {
@@ -527,7 +526,6 @@ class InternalGraph {
                 add_q(q2);
                 const int64_t q_correction = deglib::distances::int8_ip::int8_ip_hsum512(q_comp) * 128;
                 const __m512i xor_mask = _mm512_set1_epi8(static_cast<char>(0x80));
-                const int8_t* q_t = reinterpret_cast<const int8_t*>(&q_tail);
 
                 while (pool.has_next()) {
                     uint32_t u = pool.pop();
@@ -568,14 +566,11 @@ class InternalGraph {
 
                         int64_t total = deglib::distances::int8_ip::int8_ip_hsum512(sum) - q_correction;
 
-                        uint64_t b_tail;
-                        std::memcpy(&b_tail, feat + 192, sizeof(uint64_t));
-                        const int8_t* b_t = reinterpret_cast<const int8_t*>(&b_tail);
-                        int32_t tsum = 0;
-                        for (size_t k = 0; k < 8; ++k) {
-                            tsum += int32_t(q_t[k]) * int32_t(b_t[k]);
-                        }
-                        total += tsum;
+                        __m128i b_tail_16 = _mm_cvtepi8_epi16(_mm_loadu_si64(feat + 192));
+                        __m128i prod32 = _mm_madd_epi16(q_tail_16, b_tail_16);
+                        prod32 = _mm_add_epi32(prod32, _mm_shuffle_epi32(prod32, _MM_SHUFFLE(1, 0, 3, 2)));
+                        prod32 = _mm_add_epi32(prod32, _mm_shuffle_epi32(prod32, _MM_SHUFFLE(2, 3, 0, 1)));
+                        total += _mm_cvtsi128_si32(prod32);
 
                         float dist = -static_cast<float>(total);
                         if (pool.insert(v, dist)) {
@@ -583,6 +578,7 @@ class InternalGraph {
                             _mm_prefetch(n_ptr, _MM_HINT_T0);
                             _mm_prefetch(n_ptr + 64, _MM_HINT_T0);
                             _mm_prefetch(n_ptr + 128, _MM_HINT_T0);
+                            _mm_prefetch(n_ptr + 192, _MM_HINT_T0);
                         }
                     }
                 }
