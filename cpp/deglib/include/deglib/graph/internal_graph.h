@@ -464,34 +464,6 @@ class InternalGraph {
 
         deglib::search::LinearPool<float> pool(static_cast<uint32_t>(vertex_count), static_cast<int32_t>(ef), capacity);
 
-        uint32_t ep1 = entry_vertex_indices.empty() ? 0 : entry_vertex_indices[0];
-        uint32_t ep2 = ep1;
-        float dist1 = std::numeric_limits<float>::max();
-        float dist2 = std::numeric_limits<float>::max();
-        for (auto ep : entry_vertex_indices) {
-            if (ep < vertex_count) {
-                const auto feature = self.feature_by_index(ep);
-                float distance = COMPARATOR::compare(query, feature, dist_func_param);
-                if (distance < dist1) {
-                    dist2 = dist1;
-                    ep2 = ep1;
-                    dist1 = distance;
-                    ep1 = ep;
-                } else if (distance < dist2) {
-                    dist2 = distance;
-                    ep2 = ep;
-                }
-            }
-        }
-        if (ep1 < vertex_count) {
-            pool.set_visited(ep1);
-            pool.insert(ep1, dist1);
-        }
-        if (ep2 < vertex_count && ep2 != ep1) {
-            pool.set_visited(ep2);
-            pool.insert(ep2, dist2);
-        }
-
         const int32_t po = self.getPo();
         const int32_t pl = self.getPl();
         const size_t edges_per_vertex = self.edges_per_vertex_;
@@ -506,6 +478,112 @@ class InternalGraph {
                 #endif
             }
         };
+
+        uint32_t ep1 = entry_vertex_indices.empty() ? 0 : entry_vertex_indices[0];
+        uint32_t ep2 = ep1;
+        float dist1 = std::numeric_limits<float>::max();
+        float dist2 = std::numeric_limits<float>::max();
+
+        // 2-level hierarchical medoid routing (16 primary + 128 secondary = 144 total entries)
+        if (entry_vertex_indices.size() == 144) {
+            constexpr size_t NUM_PRIM = 16;
+            constexpr size_t SUB_PER_PRIM = 8;
+            size_t best_c1 = 0;
+            size_t best_c2 = 0;
+            float best_c1_dist = std::numeric_limits<float>::max();
+            float best_c2_dist = std::numeric_limits<float>::max();
+
+            // Pass 1: scan 16 primary medoids with prefetching
+            for (size_t c = 0; c < NUM_PRIM; ++c) {
+                if (c + 1 < NUM_PRIM) {
+                    const auto next_ep = entry_vertex_indices[c + 1];
+                    if (next_ep < vertex_count) {
+                        prefetch_feature(reinterpret_cast<const char*>(self.feature_by_index(next_ep)));
+                    }
+                }
+                const auto ep = entry_vertex_indices[c];
+                if (ep < vertex_count) {
+                    const auto feature = self.feature_by_index(ep);
+                    float distance = COMPARATOR::compare(query, feature, dist_func_param);
+                    if (distance < best_c1_dist) {
+                        best_c2_dist = best_c1_dist;
+                        best_c2 = best_c1;
+                        best_c1_dist = distance;
+                        best_c1 = c;
+                    } else if (distance < best_c2_dist) {
+                        best_c2_dist = distance;
+                        best_c2 = c;
+                    }
+                }
+            }
+
+            // Initialize candidate pool with the 2 primary medoids
+            ep1 = entry_vertex_indices[best_c1];
+            dist1 = best_c1_dist;
+            ep2 = entry_vertex_indices[best_c2];
+            dist2 = best_c2_dist;
+
+            // Pass 2: evaluate sub-medoids for best_c1 and best_c2
+            auto eval_sub_cluster = [&](size_t cluster_idx) {
+                const size_t start_idx = NUM_PRIM + cluster_idx * SUB_PER_PRIM;
+                for (size_t i = 0; i < SUB_PER_PRIM; ++i) {
+                    if (i + 1 < SUB_PER_PRIM) {
+                        const auto next_ep = entry_vertex_indices[start_idx + i + 1];
+                        if (next_ep < vertex_count) {
+                            prefetch_feature(reinterpret_cast<const char*>(self.feature_by_index(next_ep)));
+                        }
+                    }
+                    const auto ep = entry_vertex_indices[start_idx + i];
+                    if (ep < vertex_count) {
+                        const auto feature = self.feature_by_index(ep);
+                        float distance = COMPARATOR::compare(query, feature, dist_func_param);
+                        if (distance < dist1) {
+                            dist2 = dist1;
+                            ep2 = ep1;
+                            dist1 = distance;
+                            ep1 = ep;
+                        } else if (distance < dist2) {
+                            dist2 = distance;
+                            ep2 = ep;
+                        }
+                    }
+                }
+            };
+            eval_sub_cluster(best_c1);
+            eval_sub_cluster(best_c2);
+        } else {
+            // Flat scan fallback
+            for (size_t i = 0; i < entry_vertex_indices.size(); ++i) {
+                if (i + 1 < entry_vertex_indices.size()) {
+                    const auto next_ep = entry_vertex_indices[i + 1];
+                    if (next_ep < vertex_count) {
+                        prefetch_feature(reinterpret_cast<const char*>(self.feature_by_index(next_ep)));
+                    }
+                }
+                const auto ep = entry_vertex_indices[i];
+                if (ep < vertex_count) {
+                    const auto feature = self.feature_by_index(ep);
+                    float distance = COMPARATOR::compare(query, feature, dist_func_param);
+                    if (distance < dist1) {
+                        dist2 = dist1;
+                        ep2 = ep1;
+                        dist1 = distance;
+                        ep1 = ep;
+                    } else if (distance < dist2) {
+                        dist2 = distance;
+                        ep2 = ep;
+                    }
+                }
+            }
+        }
+        if (ep1 < vertex_count) {
+            pool.set_visited(ep1);
+            pool.insert(ep1, dist1);
+        }
+        if (ep2 < vertex_count && ep2 != ep1) {
+            pool.set_visited(ep2);
+            pool.insert(ep2, dist2);
+        }
 
         #if defined(DEGLIB_X86)
         if constexpr (std::string_view(COMPARATOR::get_instruction()) == "AVX512_VNNI") {
