@@ -78,6 +78,8 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
     std::unique_ptr<std::byte[]> contiguous_features_;
     std::byte* contiguous_features_memory_ = nullptr;
     size_t contiguous_stride_ = 0;
+    std::unique_ptr<uint32_t[]> contiguous_edges_;
+    uint32_t* contiguous_edges_memory_ = nullptr;
 
     // map from the label of a vertex to the internal vertex index
     std::unordered_map<uint32_t, uint32_t> label_to_index_;
@@ -112,6 +114,13 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
      */
     ReadOnlyGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::distances::FloatSpace feature_space, std::ifstream& ifstream)
         : ReadOnlyGraph(max_vertex_count, edges_per_vertex, feature_space) {
+        const size_t total_edges = size_t(max_vertex_count) * edges_per_vertex;
+        contiguous_edges_ = std::make_unique<uint32_t[]>(total_edges + 16);
+        void* align_edges_ptr = contiguous_edges_.get();
+        size_t align_edges_space = (total_edges + 16) * sizeof(uint32_t);
+        std::align(64, total_edges * sizeof(uint32_t), align_edges_ptr, align_edges_space);
+        contiguous_edges_memory_ = static_cast<uint32_t*>(align_edges_ptr);
+
         // copy the old data over
         uint32_t vertex_without_external = uint32_t(feature_space.get_data_size()) + uint32_t(edges_per_vertex) * sizeof(uint32_t);
         for (uint32_t i = 0; i < max_vertex_count; i++) {
@@ -120,6 +129,9 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
             ifstream.ignore(uint32_t(edges_per_vertex) * sizeof(float));        // skip the weights
             ifstream.read(vertex + vertex_without_external, sizeof(uint32_t));  // read the external label
             label_to_index_.emplace(this->getExternalLabel(i), i);
+            if (contiguous_edges_memory_) {
+                std::memcpy(contiguous_edges_memory_ + size_t(i) * edges_per_vertex, vertex + this->neighbor_indices_offset_, sizeof(uint32_t) * edges_per_vertex);
+            }
         }
     }
 
@@ -143,6 +155,13 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
         std::align(64, 0, align_ptr, align_space);
         contiguous_features_memory_ = static_cast<std::byte*>(align_ptr);
         std::memset(contiguous_features_memory_, 0, size_t(max_vertex_count) * contiguous_stride_);
+
+        const size_t total_edges = size_t(max_vertex_count) * edges_per_vertex;
+        contiguous_edges_ = std::make_unique<uint32_t[]>(total_edges + 16);
+        void* align_edges_ptr = contiguous_edges_.get();
+        size_t align_edges_space = (total_edges + 16) * sizeof(uint32_t);
+        std::align(64, total_edges * sizeof(uint32_t), align_edges_ptr, align_edges_space);
+        contiguous_edges_memory_ = static_cast<uint32_t*>(align_edges_ptr);
         for (uint32_t i = 0; i < max_vertex_count; i++) {
             auto vertex = reinterpret_cast<char*>(this->vertex_by_index(i));
             const auto label = input_graph.getExternalLabel(i);
@@ -160,8 +179,10 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
 
             const auto neighbor_indices = input_graph.getNeighborIndices(i);
             std::memcpy(vertex, neighbor_indices, sizeof(uint32_t) * uint32_t(edges_per_vertex));
+            if (contiguous_edges_memory_) {
+                std::memcpy(contiguous_edges_memory_ + size_t(i) * edges_per_vertex, neighbor_indices, sizeof(uint32_t) * edges_per_vertex);
+            }
             vertex += sizeof(uint32_t) * uint32_t(edges_per_vertex);
-
             std::memcpy(vertex, &label, sizeof(uint32_t));
             label_to_index_.emplace(label, i);
         }
@@ -199,6 +220,9 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
     }
 
     inline const uint32_t* neighbors_by_index(const uint32_t internal_idx) const {
+        if (contiguous_edges_memory_) {
+            return contiguous_edges_memory_ + size_t(internal_idx) * edges_per_vertex_;
+        }
         return reinterpret_cast<uint32_t*>(vertex_by_index(internal_idx) + neighbor_indices_offset_);
     }
 

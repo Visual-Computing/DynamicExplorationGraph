@@ -634,10 +634,10 @@ class InternalGraph {
                         uint32_t v = edge_buf[i];
                         const int8_t* feat = reinterpret_cast<const int8_t*>(self.feature_by_index(v));
 
-                        __m512i raw_b0 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(feat));
-                        __m512i raw_b1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(feat + 64));
-                        __m512i raw_b2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(feat + 128));
-                        __m512i raw_b3 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(feat + 192));
+                        __m512i raw_b0 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat));
+                        __m512i raw_b1 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 64));
+                        __m512i raw_b2 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 128));
+                        __m512i raw_b3 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 192));
 
                         __m512i u_b0 = _mm512_xor_si512(raw_b0, xor_mask);
                         __m512i u_b1 = _mm512_xor_si512(raw_b1, xor_mask);
@@ -656,7 +656,6 @@ class InternalGraph {
                             _mm_prefetch(n_ptr, _MM_HINT_T0);
                             _mm_prefetch(n_ptr + 64, _MM_HINT_T0);
                             _mm_prefetch(n_ptr + 128, _MM_HINT_T0);
-                            _mm_prefetch(n_ptr + 192, _MM_HINT_T0);
                         }
                     }
                 }
