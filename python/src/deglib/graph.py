@@ -196,6 +196,14 @@ class DynamicExplorationGraph:
         """
         self.dynamic_exploration_graph_cpp.save_graph(str(path))
 
+    def get_entry_vertex_indices(self) -> list[int]:
+        """Returns the list of internal entry vertex indices."""
+        return self.dynamic_exploration_graph_cpp.get_entry_vertex_indices()
+
+    def set_entry_vertex_indices(self, indices: list[int] | np.ndarray):
+        """Sets the list of internal entry vertex indices."""
+        self.dynamic_exploration_graph_cpp.set_entry_vertex_indices(list(indices))
+
     def to_readonly(
         self, feature_space: Optional[FloatSpace] = None, custom_features: Optional[np.ndarray] = None
     ) -> "DynamicExplorationGraph":

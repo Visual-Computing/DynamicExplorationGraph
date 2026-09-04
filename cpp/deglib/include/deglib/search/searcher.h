@@ -159,6 +159,12 @@ class SearcherBase {
     virtual void search_batch_f32(const float* queries, size_t n_queries, uint32_t k, float eps, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const = 0;
     virtual void search_batch_f16(const uint16_t* queries, size_t n_queries, uint32_t k, float eps, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const = 0;
 
+    virtual uint32_t search_ef_f32(const float* query, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false) const = 0;
+    virtual uint32_t search_ef_f16(const uint16_t* query, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false) const = 0;
+
+    virtual void search_batch_ef_f32(const float* queries, size_t n_queries, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const = 0;
+    virtual void search_batch_ef_f16(const uint16_t* queries, size_t n_queries, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const = 0;
+
     // --- Modern C++20 std::span and std::vector Convenience API ---
 
     /**
@@ -448,6 +454,111 @@ class SearcherImpl : public SearcherBase {
             }
         }
         return static_cast<uint32_t>(top_n);
+    }
+
+    template <typename QueryT>
+    inline uint32_t search_single_ef_typed(
+        const QueryT* query, uint32_t k, uint32_t ef, float rerank_factor,
+        uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false
+    ) const {
+        const uint32_t dim = graph_->getFeatureSpace().dim();
+        const uint32_t fetch_k = std::max(k, static_cast<uint32_t>(std::round(k * rerank_factor)));
+        const size_t graph_feature_bytes = graph_->getFeatureSpace().get_data_size();
+
+        // 1. Static Query Transformation (Zero-copy bypass for NoQuantizer)
+        const std::byte* query_bytes = nullptr;
+        alignas(64) std::byte stack_query_bytes[512];
+        std::unique_ptr<std::byte[]> heap_query_bytes;
+
+        if constexpr (std::is_same_v<QuantT, NoQuantizer>) {
+            query_bytes = reinterpret_cast<const std::byte*>(query);
+        } else {
+            std::byte* q_buf = stack_query_bytes;
+            if (graph_feature_bytes > sizeof(stack_query_bytes)) {
+                heap_query_bytes = std::make_unique<std::byte[]>(graph_feature_bytes);
+                q_buf = heap_query_bytes.get();
+            }
+
+            if constexpr (requires { quantizer_.quantize(query, q_buf, 1, dim); }) {
+                quantizer_.quantize(query, q_buf, 1, dim);
+            } else {
+                quantizer_.quantize(query, reinterpret_cast<typename QuantT::output_type*>(q_buf), 1, dim);
+            }
+            query_bytes = q_buf;
+        }
+
+        // 2. Direct Graph Search with LinearPool
+        auto pool = graph_->search_ef(
+            std::span<const std::byte>(query_bytes, graph_feature_bytes),
+            fetch_k, ef
+        );
+        const size_t found_count = pool.size();
+
+        // 3. Static Compile-Time Reranker Check
+        if constexpr (RefinerT::enabled) {
+            if (fetch_k > k && found_count > 0) {
+                uint32_t stack_cand_indices[256];
+                std::unique_ptr<uint32_t[]> heap_cand_indices;
+                uint32_t* cands = stack_cand_indices;
+                const size_t cands_to_refine = std::min<size_t>(found_count, fetch_k);
+                if (cands_to_refine > (sizeof(stack_cand_indices) / sizeof(uint32_t))) {
+                    heap_cand_indices = std::make_unique<uint32_t[]>(cands_to_refine);
+                    cands = heap_cand_indices.get();
+                }
+
+                for (size_t i = 0; i < cands_to_refine; ++i) {
+                    cands[i] = graph_->getExternalLabel(pool.id(static_cast<int32_t>(i)));
+                }
+
+                uint32_t ref_count = refiner_.rerank(
+                    query, dim, cands, cands_to_refine, k,
+                    out_indices, out_distances, out_distances != nullptr, unsorted
+                );
+                if (ref_count > 0) {
+                    return ref_count;
+                }
+            }
+        }
+
+        // Direct return without rerank
+        const size_t top_n = std::min<size_t>(k, found_count);
+        for (size_t i = 0; i < top_n; ++i) {
+            out_indices[i] = graph_->getExternalLabel(pool.id(static_cast<int32_t>(i)));
+            if (out_distances) {
+                out_distances[i] = pool.dist(static_cast<int32_t>(i));
+            }
+        }
+        for (size_t i = top_n; i < k; ++i) {
+            out_indices[i] = std::numeric_limits<uint32_t>::max();
+            if (out_distances) {
+                out_distances[i] = std::numeric_limits<float>::max();
+            }
+        }
+        return static_cast<uint32_t>(top_n);
+    }
+
+    uint32_t search_ef_f32(const float* query, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false) const override {
+        return search_single_ef_typed<float>(query, k, ef, rerank_factor, out_indices, out_distances, unsorted);
+    }
+
+    uint32_t search_ef_f16(const uint16_t* query, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false) const override {
+        return search_single_ef_typed<uint16_t>(query, k, ef, rerank_factor, out_indices, out_distances, unsorted);
+    }
+
+    void search_batch_ef_f32(const float* queries, size_t n_queries, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const override {
+        const uint32_t dim = graph_->getFeatureSpace().dim();
+        deglib::concurrent::parallel_for(0, n_queries, threads, [&](size_t q, size_t) {
+            float* d_ptr = out_distances ? (out_distances + q * k) : nullptr;
+            search_ef_f32(queries + q * dim, k, ef, rerank_factor, out_indices + q * k, d_ptr, unsorted);
+        });
+    }
+
+    void search_batch_ef_f16(const uint16_t* queries, size_t n_queries, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const override {
+        const uint32_t dim = graph_->getFeatureSpace().dim();
+        deglib::concurrent::parallel_for(0, n_queries, threads, [&](size_t q, size_t) {
+            float* d_ptr = out_distances ? (out_distances + q * k) : nullptr;
+            search_ef_f16(queries + q * dim, k, ef, rerank_factor, out_indices + q * k, d_ptr, unsorted);
+        });
     }
 
     uint32_t search_f32(const float* query, uint32_t k, float eps, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false) const override {
