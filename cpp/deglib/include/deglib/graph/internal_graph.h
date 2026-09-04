@@ -507,6 +507,89 @@ class InternalGraph {
             }
         };
 
+        #if defined(DEGLIB_X86)
+        if constexpr (std::string_view(COMPARATOR::get_instruction()) == "AVX512_VNNI") {
+            if (self.feature_space_.metric() == deglib::distances::Metric::Int8_InnerProduct && self.feature_space_.dim() == 200) {
+                const int8_t* q_ptr = reinterpret_cast<const int8_t*>(query);
+                const __m512i q0 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(q_ptr));
+                const __m512i q1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(q_ptr + 64));
+                const __m512i q2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(q_ptr + 128));
+                uint64_t q_tail = 0;
+                std::memcpy(&q_tail, q_ptr + 192, sizeof(uint64_t));
+
+                __m512i q_comp = _mm512_setzero_si512();
+                auto add_q = [&](__m512i q_raw) {
+                    q_comp = _mm512_add_epi32(q_comp, _mm512_madd_epi16(_mm512_cvtepi8_epi16(_mm512_castsi512_si256(q_raw)), _mm512_set1_epi16(1)));
+                    q_comp = _mm512_add_epi32(q_comp, _mm512_madd_epi16(_mm512_cvtepi8_epi16(_mm512_extracti64x4_epi64(q_raw, 1)), _mm512_set1_epi16(1)));
+                };
+                add_q(q0);
+                add_q(q1);
+                add_q(q2);
+                const int64_t q_correction = deglib::distances::int8_ip::int8_ip_hsum512(q_comp) * 128;
+                const __m512i xor_mask = _mm512_set1_epi8(static_cast<char>(0x80));
+                const int8_t* q_t = reinterpret_cast<const int8_t*>(&q_tail);
+
+                while (pool.has_next()) {
+                    uint32_t u = pool.pop();
+                    const auto neighbor_indices = self.neighbors_by_index(u);
+
+                    int32_t edge_size = 0;
+                    for (size_t i = 0; i < edges_per_vertex; ++i) {
+                        uint32_t v = neighbor_indices[i];
+                        if (pool.check_visited(v)) {
+                            continue;
+                        }
+                        pool.set_visited(v);
+                        edge_buf[edge_size++] = v;
+                    }
+
+                    for (int32_t i = 0; i < std::min<int32_t>(po, edge_size); ++i) {
+                        prefetch_feature(reinterpret_cast<const char*>(self.feature_by_index(edge_buf[i])));
+                    }
+
+                    for (int32_t i = 0; i < edge_size; ++i) {
+                        if (i + po < edge_size) {
+                            prefetch_feature(reinterpret_cast<const char*>(self.feature_by_index(edge_buf[i + po])));
+                        }
+                        uint32_t v = edge_buf[i];
+                        const int8_t* feat = reinterpret_cast<const int8_t*>(self.feature_by_index(v));
+
+                        __m512i raw_b0 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(feat));
+                        __m512i raw_b1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(feat + 64));
+                        __m512i raw_b2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(feat + 128));
+
+                        __m512i u_b0 = _mm512_xor_si512(raw_b0, xor_mask);
+                        __m512i u_b1 = _mm512_xor_si512(raw_b1, xor_mask);
+                        __m512i u_b2 = _mm512_xor_si512(raw_b2, xor_mask);
+
+                        __m512i sum = _mm512_dpbusd_epi32(_mm512_setzero_si512(), u_b0, q0);
+                        sum = _mm512_dpbusd_epi32(sum, u_b1, q1);
+                        sum = _mm512_dpbusd_epi32(sum, u_b2, q2);
+
+                        int64_t total = deglib::distances::int8_ip::int8_ip_hsum512(sum) - q_correction;
+
+                        uint64_t b_tail;
+                        std::memcpy(&b_tail, feat + 192, sizeof(uint64_t));
+                        const int8_t* b_t = reinterpret_cast<const int8_t*>(&b_tail);
+                        int32_t tsum = 0;
+                        for (size_t k = 0; k < 8; ++k) {
+                            tsum += int32_t(q_t[k]) * int32_t(b_t[k]);
+                        }
+                        total += tsum;
+
+                        float dist = -static_cast<float>(total);
+                        if (pool.insert(v, dist)) {
+                            const char* n_ptr = reinterpret_cast<const char*>(self.neighbors_by_index(v));
+                            _mm_prefetch(n_ptr, _MM_HINT_T0);
+                            _mm_prefetch(n_ptr + 64, _MM_HINT_T0);
+                            _mm_prefetch(n_ptr + 128, _MM_HINT_T0);
+                        }
+                    }
+                }
+                return pool;
+            }
+        }
+        #endif
         while (pool.has_next()) {
             uint32_t u = pool.pop();
             const auto neighbor_indices = self.neighbors_by_index(u);
