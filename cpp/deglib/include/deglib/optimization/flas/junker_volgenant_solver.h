@@ -3,6 +3,7 @@
 #define EVP_FLAS_JUNKER_VOLGENANT_SOLVER_H
 
 #include <algorithm>
+#include <climits>
 #include <concepts>
 #include <cstddef>
 #include <vector>

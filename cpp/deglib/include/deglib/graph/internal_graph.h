@@ -4,6 +4,7 @@
 #include "deglib/filter.h"
 #include "deglib/graph/visited_list_pool.h"
 #include "deglib/utils/memory.h"
+#include "deglib/utils/cpu.h"
 #include "deglib/search/linear_pool.h"
 
 #include <algorithm>
@@ -449,6 +450,161 @@ class InternalGraph {
         });
     }
 
+   // AVX-512 VNNI fast path for D=200 INT8 inner-product ef-search: pipelined medoid
+   // scan plus dual-accumulator VNNI search loop. Kept in its own target-attributed
+   // function so portable (non-AVX-512) builds keep generic code free of AVX-512
+   // instructions; only invoked on CPUs with AVX-512 VNNI.
+#if defined(DEGLIB_X86)
+   template <typename GraphType>
+  static DEGLIB_TARGET_AVX512_VNNI deglib::search::LinearPool<float> searchEfImplAvx512VnniD200(
+       const GraphType& self,
+       const std::vector<uint32_t>& entry_vertex_indices,
+       const std::byte* query,
+       const uint32_t k,
+       const uint32_t ef
+  ) {
+       const size_t vertex_count = self.size();
+       const int32_t capacity = static_cast<int32_t>(std::max(k, ef));
+
+       deglib::search::LinearPool<float> pool(static_cast<uint32_t>(vertex_count), static_cast<int32_t>(ef), capacity);
+
+       const int32_t po = self.getPo();
+       const int32_t pl = self.getPl();
+       const size_t edges_per_vertex = self.edges_per_vertex_;
+       alignas(64) uint32_t edge_buf[256];
+
+       auto prefetch_feature = [pl](const char* ptr) {
+           for (int32_t l = 0; l < pl; ++l) {
+               _mm_prefetch(ptr + l * 64, _MM_HINT_T0);
+           }
+       };
+
+        alignas(64) int8_t q_padded[256];
+        std::memset(q_padded, 0, 256);
+        std::memcpy(q_padded, query, 200);
+
+        const __m512i q0 = _mm512_load_si512(reinterpret_cast<const __m512i*>(q_padded));
+        const __m512i q1 = _mm512_load_si512(reinterpret_cast<const __m512i*>(q_padded + 64));
+        const __m512i q2 = _mm512_load_si512(reinterpret_cast<const __m512i*>(q_padded + 128));
+        const __m512i q3 = _mm512_load_si512(reinterpret_cast<const __m512i*>(q_padded + 192));
+
+        __m512i q_comp = _mm512_setzero_si512();
+        auto add_q = [&](__m512i q_raw) DEGLIB_TARGET_AVX512_VNNI {
+            q_comp = _mm512_add_epi32(q_comp, _mm512_madd_epi16(_mm512_cvtepi8_epi16(_mm512_castsi512_si256(q_raw)), _mm512_set1_epi16(1)));
+            q_comp = _mm512_add_epi32(q_comp, _mm512_madd_epi16(_mm512_cvtepi8_epi16(_mm512_extracti64x4_epi64(q_raw, 1)), _mm512_set1_epi16(1)));
+        };
+        add_q(q0);
+        add_q(q1);
+        add_q(q2);
+        add_q(q3);
+        const int64_t q_correction = deglib::distances::int8_ip::int8_ip_hsum512(q_comp) * 128;
+        const __m512i xor_mask = _mm512_set1_epi8(static_cast<char>(0x80));
+
+        uint32_t ep1 = entry_vertex_indices.empty() ? 0 : entry_vertex_indices[0];
+        uint32_t ep2 = ep1;
+        float dist1 = std::numeric_limits<float>::max();
+        float dist2 = std::numeric_limits<float>::max();
+
+        // Pipelined SIMD scan over entry medoids
+        for (size_t i = 0; i < std::min<size_t>(po, entry_vertex_indices.size()); ++i) {
+            prefetch_feature(reinterpret_cast<const char*>(self.feature_by_index(entry_vertex_indices[i])));
+        }
+        for (size_t i = 0; i < entry_vertex_indices.size(); ++i) {
+            if (i + po < entry_vertex_indices.size()) {
+                prefetch_feature(reinterpret_cast<const char*>(self.feature_by_index(entry_vertex_indices[i + po])));
+            }
+            const auto ep = entry_vertex_indices[i];
+            if (ep < vertex_count) {
+                const int8_t* feat = reinterpret_cast<const int8_t*>(self.feature_by_index(ep));
+                __m512i raw_b0 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat));
+                __m512i raw_b1 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 64));
+                __m512i raw_b2 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 128));
+                __m512i raw_b3 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 192));
+
+                __m512i u_b0 = _mm512_xor_si512(raw_b0, xor_mask);
+                __m512i u_b1 = _mm512_xor_si512(raw_b1, xor_mask);
+                __m512i u_b2 = _mm512_xor_si512(raw_b2, xor_mask);
+                __m512i u_b3 = _mm512_xor_si512(raw_b3, xor_mask);
+
+                __m512i s0 = _mm512_dpbusd_epi32(_mm512_setzero_si512(), u_b0, q0);
+                __m512i s1 = _mm512_dpbusd_epi32(_mm512_setzero_si512(), u_b1, q1);
+                s0 = _mm512_dpbusd_epi32(s0, u_b2, q2);
+                s1 = _mm512_dpbusd_epi32(s1, u_b3, q3);
+                __m512i sum = _mm512_add_epi32(s0, s1);
+
+                int64_t total = deglib::distances::int8_ip::int8_ip_hsum512(sum) - q_correction;
+                float distance = -static_cast<float>(total);
+                if (distance < dist1) {
+                    dist2 = dist1;
+                    ep2 = ep1;
+                    dist1 = distance;
+                    ep1 = ep;
+                } else if (distance < dist2) {
+                    dist2 = distance;
+                    ep2 = ep;
+                }
+            }
+        }
+        if (ep1 < vertex_count) {
+            pool.set_visited(ep1);
+            pool.insert(ep1, dist1);
+        }
+        if (ep2 < vertex_count && ep2 != ep1) {
+            pool.set_visited(ep2);
+            pool.insert(ep2, dist2);
+        }
+        while (pool.has_next()) {
+            uint32_t u = pool.pop();
+            const auto neighbor_indices = self.neighbors_by_index(u);
+
+            int32_t edge_size = 0;
+            for (size_t i = 0; i < edges_per_vertex; ++i) {
+                uint32_t v = neighbor_indices[i];
+                if (!pool.test_and_set_visited(v)) {
+                    edge_buf[edge_size++] = v;
+                }
+            }
+
+            for (int32_t i = 0; i < std::min<int32_t>(po, edge_size); ++i) {
+                prefetch_feature(reinterpret_cast<const char*>(self.feature_by_index(edge_buf[i])));
+            }
+
+            for (int32_t i = 0; i < edge_size; ++i) {
+                if (i + po < edge_size) {
+                    prefetch_feature(reinterpret_cast<const char*>(self.feature_by_index(edge_buf[i + po])));
+                }
+                uint32_t v = edge_buf[i];
+                const int8_t* feat = reinterpret_cast<const int8_t*>(self.feature_by_index(v));
+
+                __m512i raw_b0 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat));
+                __m512i raw_b1 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 64));
+                __m512i raw_b2 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 128));
+                __m512i raw_b3 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 192));
+
+                __m512i u_b0 = _mm512_xor_si512(raw_b0, xor_mask);
+                __m512i u_b1 = _mm512_xor_si512(raw_b1, xor_mask);
+                __m512i u_b2 = _mm512_xor_si512(raw_b2, xor_mask);
+                __m512i u_b3 = _mm512_xor_si512(raw_b3, xor_mask);
+
+                __m512i s0 = _mm512_dpbusd_epi32(_mm512_setzero_si512(), u_b0, q0);
+                __m512i s1 = _mm512_dpbusd_epi32(_mm512_setzero_si512(), u_b1, q1);
+                s0 = _mm512_dpbusd_epi32(s0, u_b2, q2);
+                s1 = _mm512_dpbusd_epi32(s1, u_b3, q3);
+                __m512i sum = _mm512_add_epi32(s0, s1);
+                int64_t total = deglib::distances::int8_ip::int8_ip_hsum512(sum) - q_correction;
+                float dist = -static_cast<float>(total);
+                if (pool.insert(v, dist)) {
+                    const char* n_ptr = reinterpret_cast<const char*>(self.neighbors_by_index(v));
+                    _mm_prefetch(n_ptr, _MM_HINT_T0);
+                    _mm_prefetch(n_ptr + 64, _MM_HINT_T0);
+                    _mm_prefetch(n_ptr + 128, _MM_HINT_T0);
+                }
+            }
+        }
+        return pool;
+   }
+#endif
+
     template <typename GraphType, deglib::distances::DistanceFunction COMPARATOR>
     static deglib::search::LinearPool<float> searchEfImpl(
         const GraphType& self,
@@ -480,135 +636,13 @@ class InternalGraph {
             }
         };
 
-        #if defined(DEGLIB_X86)
-        if constexpr (std::string_view(COMPARATOR::get_instruction()) == "AVX512_VNNI") {
-            if (self.feature_space_.metric() == deglib::distances::Metric::Int8_InnerProduct && self.feature_space_.dim() == 200) {
-                alignas(64) int8_t q_padded[256];
-                std::memset(q_padded, 0, 256);
-                std::memcpy(q_padded, query, 200);
-
-                const __m512i q0 = _mm512_load_si512(reinterpret_cast<const __m512i*>(q_padded));
-                const __m512i q1 = _mm512_load_si512(reinterpret_cast<const __m512i*>(q_padded + 64));
-                const __m512i q2 = _mm512_load_si512(reinterpret_cast<const __m512i*>(q_padded + 128));
-                const __m512i q3 = _mm512_load_si512(reinterpret_cast<const __m512i*>(q_padded + 192));
-
-                __m512i q_comp = _mm512_setzero_si512();
-                auto add_q = [&](__m512i q_raw) {
-                    q_comp = _mm512_add_epi32(q_comp, _mm512_madd_epi16(_mm512_cvtepi8_epi16(_mm512_castsi512_si256(q_raw)), _mm512_set1_epi16(1)));
-                    q_comp = _mm512_add_epi32(q_comp, _mm512_madd_epi16(_mm512_cvtepi8_epi16(_mm512_extracti64x4_epi64(q_raw, 1)), _mm512_set1_epi16(1)));
-                };
-                add_q(q0);
-                add_q(q1);
-                add_q(q2);
-                add_q(q3);
-                const int64_t q_correction = deglib::distances::int8_ip::int8_ip_hsum512(q_comp) * 128;
-                const __m512i xor_mask = _mm512_set1_epi8(static_cast<char>(0x80));
-
-                uint32_t ep1 = entry_vertex_indices.empty() ? 0 : entry_vertex_indices[0];
-                uint32_t ep2 = ep1;
-                float dist1 = std::numeric_limits<float>::max();
-                float dist2 = std::numeric_limits<float>::max();
-
-                // Pipelined SIMD scan over entry medoids
-                for (size_t i = 0; i < std::min<size_t>(po, entry_vertex_indices.size()); ++i) {
-                    prefetch_feature(reinterpret_cast<const char*>(self.feature_by_index(entry_vertex_indices[i])));
-                }
-                for (size_t i = 0; i < entry_vertex_indices.size(); ++i) {
-                    if (i + po < entry_vertex_indices.size()) {
-                        prefetch_feature(reinterpret_cast<const char*>(self.feature_by_index(entry_vertex_indices[i + po])));
-                    }
-                    const auto ep = entry_vertex_indices[i];
-                    if (ep < vertex_count) {
-                        const int8_t* feat = reinterpret_cast<const int8_t*>(self.feature_by_index(ep));
-                        __m512i raw_b0 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat));
-                        __m512i raw_b1 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 64));
-                        __m512i raw_b2 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 128));
-                        __m512i raw_b3 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 192));
-
-                        __m512i u_b0 = _mm512_xor_si512(raw_b0, xor_mask);
-                        __m512i u_b1 = _mm512_xor_si512(raw_b1, xor_mask);
-                        __m512i u_b2 = _mm512_xor_si512(raw_b2, xor_mask);
-                        __m512i u_b3 = _mm512_xor_si512(raw_b3, xor_mask);
-
-                        __m512i s0 = _mm512_dpbusd_epi32(_mm512_setzero_si512(), u_b0, q0);
-                        __m512i s1 = _mm512_dpbusd_epi32(_mm512_setzero_si512(), u_b1, q1);
-                        s0 = _mm512_dpbusd_epi32(s0, u_b2, q2);
-                        s1 = _mm512_dpbusd_epi32(s1, u_b3, q3);
-                        __m512i sum = _mm512_add_epi32(s0, s1);
-
-                        int64_t total = deglib::distances::int8_ip::int8_ip_hsum512(sum) - q_correction;
-                        float distance = -static_cast<float>(total);
-                        if (distance < dist1) {
-                            dist2 = dist1;
-                            ep2 = ep1;
-                            dist1 = distance;
-                            ep1 = ep;
-                        } else if (distance < dist2) {
-                            dist2 = distance;
-                            ep2 = ep;
-                        }
-                    }
-                }
-                if (ep1 < vertex_count) {
-                    pool.set_visited(ep1);
-                    pool.insert(ep1, dist1);
-                }
-                if (ep2 < vertex_count && ep2 != ep1) {
-                    pool.set_visited(ep2);
-                    pool.insert(ep2, dist2);
-                }
-                while (pool.has_next()) {
-                    uint32_t u = pool.pop();
-                    const auto neighbor_indices = self.neighbors_by_index(u);
-
-                    int32_t edge_size = 0;
-                    for (size_t i = 0; i < edges_per_vertex; ++i) {
-                        uint32_t v = neighbor_indices[i];
-                        if (!pool.test_and_set_visited(v)) {
-                            edge_buf[edge_size++] = v;
-                        }
-                    }
-
-                    for (int32_t i = 0; i < std::min<int32_t>(po, edge_size); ++i) {
-                        prefetch_feature(reinterpret_cast<const char*>(self.feature_by_index(edge_buf[i])));
-                    }
-
-                    for (int32_t i = 0; i < edge_size; ++i) {
-                        if (i + po < edge_size) {
-                            prefetch_feature(reinterpret_cast<const char*>(self.feature_by_index(edge_buf[i + po])));
-                        }
-                        uint32_t v = edge_buf[i];
-                        const int8_t* feat = reinterpret_cast<const int8_t*>(self.feature_by_index(v));
-
-                        __m512i raw_b0 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat));
-                        __m512i raw_b1 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 64));
-                        __m512i raw_b2 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 128));
-                        __m512i raw_b3 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 192));
-
-                        __m512i u_b0 = _mm512_xor_si512(raw_b0, xor_mask);
-                        __m512i u_b1 = _mm512_xor_si512(raw_b1, xor_mask);
-                        __m512i u_b2 = _mm512_xor_si512(raw_b2, xor_mask);
-                        __m512i u_b3 = _mm512_xor_si512(raw_b3, xor_mask);
-
-                        __m512i s0 = _mm512_dpbusd_epi32(_mm512_setzero_si512(), u_b0, q0);
-                        __m512i s1 = _mm512_dpbusd_epi32(_mm512_setzero_si512(), u_b1, q1);
-                        s0 = _mm512_dpbusd_epi32(s0, u_b2, q2);
-                        s1 = _mm512_dpbusd_epi32(s1, u_b3, q3);
-                        __m512i sum = _mm512_add_epi32(s0, s1);
-                        int64_t total = deglib::distances::int8_ip::int8_ip_hsum512(sum) - q_correction;
-                        float dist = -static_cast<float>(total);
-                        if (pool.insert(v, dist)) {
-                            const char* n_ptr = reinterpret_cast<const char*>(self.neighbors_by_index(v));
-                            _mm_prefetch(n_ptr, _MM_HINT_T0);
-                            _mm_prefetch(n_ptr + 64, _MM_HINT_T0);
-                            _mm_prefetch(n_ptr + 128, _MM_HINT_T0);
-                        }
-                    }
-                }
-                return pool;
-            }
-        }
-        #endif
+       #if defined(DEGLIB_X86)
+       if constexpr (std::string_view(COMPARATOR::get_instruction()) == "AVX512_VNNI") {
+           if (deglib::cpu::has_avx512_vnni() && self.feature_space_.metric() == deglib::distances::Metric::Int8_InnerProduct && self.feature_space_.dim() == 200) {
+               return searchEfImplAvx512VnniD200<GraphType>(self, entry_vertex_indices, query, k, ef);
+           }
+       }
+       #endif
 
         uint32_t ep1 = entry_vertex_indices.empty() ? 0 : entry_vertex_indices[0];
         uint32_t ep2 = ep1;
