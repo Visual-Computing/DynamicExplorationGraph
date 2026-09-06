@@ -664,99 +664,100 @@ class SearcherImpl : public SearcherBase {
        return cosine_;
    }
 
-   std::vector<uint32_t> build_kmeans_medoids(const float* data, size_t n_vectors, uint32_t n_clusters, uint32_t n_iter, size_t sample_size, uint32_t seed) override {
-       const uint32_t dim = graph_->getFeatureSpace().dim();
-       std::mt19937 rng(seed);
+  std::vector<uint32_t> build_kmeans_medoids(const float* data, size_t n_vectors, uint32_t n_clusters, uint32_t n_iter, size_t sample_size, uint32_t seed) override {
+      const uint32_t dim = graph_->getFeatureSpace().dim();
+      std::mt19937 rng(seed);
 
-       // Sample vectors
-       size_t actual_sample = std::min(sample_size, n_vectors);
-       std::vector<uint32_t> sample_indices(actual_sample);
-       std::iota(sample_indices.begin(), sample_indices.end(), 0);
-       std::shuffle(sample_indices.begin(), sample_indices.end(), rng);
-       sample_indices.resize(actual_sample);
+      // Sample vectors (matching Python: rng.choice(len(X), size=min(sample_size, len(X)), replace=False))
+      size_t actual_sample = std::min(sample_size, n_vectors);
+      std::vector<uint32_t> all_indices(n_vectors);
+      std::iota(all_indices.begin(), all_indices.end(), 0);
+      std::shuffle(all_indices.begin(), all_indices.end(), rng);
+      all_indices.resize(actual_sample);
 
-       // Initialize centroids by picking random samples
-       n_clusters = std::min(n_clusters, static_cast<uint32_t>(actual_sample));
-       std::vector<float> centroids(n_clusters * dim);
-       for (uint32_t c = 0; c < n_clusters; ++c) {
-           uint32_t idx = sample_indices[c];
-           const float* vec = data + static_cast<size_t>(idx) * dim;
-           std::copy(vec, vec + dim, centroids.data() + c * dim);
-       }
+      // Initialize centroids by picking random samples (matching Python: rng.choice(len(sub_X), size=n_clusters, replace=False))
+      n_clusters = std::min(n_clusters, static_cast<uint32_t>(actual_sample));
+      std::vector<uint32_t> init_indices(all_indices.begin(), all_indices.begin() + n_clusters);
+      std::vector<float> centroids(n_clusters * dim);
+      for (uint32_t c = 0; c < n_clusters; ++c) {
+          uint32_t idx = init_indices[c];
+          const float* vec = data + static_cast<size_t>(idx) * dim;
+          std::copy(vec, vec + dim, centroids.data() + c * dim);
+      }
 
-       // K-Means iterations
-       std::vector<uint32_t> labels(actual_sample);
-       for (uint32_t iter = 0; iter < n_iter; ++iter) {
-           // Assignment step
-           for (size_t i = 0; i < actual_sample; ++i) {
-               const float* vec = data + sample_indices[i] * dim;
-               float best_sim = -std::numeric_limits<float>::max();
-               uint32_t best_c = 0;
-               for (uint32_t c = 0; c < n_clusters; ++c) {
-                   const float* cent = centroids.data() + c * dim;
-                   float sim = 0.0f;
-                   for (uint32_t d = 0; d < dim; ++d) {
-                       sim += vec[d] * cent[d];
-                   }
-                   if (sim > best_sim) {
-                       best_sim = sim;
-                       best_c = c;
-                   }
-               }
-               labels[i] = best_c;
-           }
+      // K-Means iterations
+      std::vector<uint32_t> labels(actual_sample);
+      for (uint32_t iter = 0; iter < n_iter; ++iter) {
+          // Assignment step: find closest centroid using inner product
+          for (size_t i = 0; i < actual_sample; ++i) {
+              const float* vec = data + all_indices[i] * dim;
+              float best_sim = -std::numeric_limits<float>::max();
+              uint32_t best_c = 0;
+              for (uint32_t c = 0; c < n_clusters; ++c) {
+                  const float* cent = centroids.data() + c * dim;
+                  float sim = 0.0f;
+                  for (uint32_t d = 0; d < dim; ++d) {
+                      sim += vec[d] * cent[d];
+                  }
+                  if (sim > best_sim) {
+                      best_sim = sim;
+                      best_c = c;
+                  }
+              }
+              labels[i] = best_c;
+          }
 
-           // Update step
-           std::vector<float> sums(n_clusters * dim, 0.0f);
-           std::vector<uint32_t> counts(n_clusters, 0);
-           for (size_t i = 0; i < actual_sample; ++i) {
-               uint32_t c = labels[i];
-               counts[c]++;
-               const float* vec = data + sample_indices[i] * dim;
-               float* sum = sums.data() + c * dim;
-               for (uint32_t d = 0; d < dim; ++d) {
-                   sum[d] += vec[d];
-               }
-           }
-           for (uint32_t c = 0; c < n_clusters; ++c) {
-               if (counts[c] > 0) {
-                   float* cent = centroids.data() + c * dim;
-                   float norm_sq = 0.0f;
-                   for (uint32_t d = 0; d < dim; ++d) {
-                       cent[d] = sums[c * dim + d] / counts[c];
-                       norm_sq += cent[d] * cent[d];
-                   }
-                   float norm = std::sqrt(norm_sq);
-                   if (norm > 1e-6f) {
-                       for (uint32_t d = 0; d < dim; ++d) {
-                           cent[d] /= norm;
-                       }
-                   }
-               }
-           }
-       }
+          // Update step: compute mean and normalize (matching Python: mean_vec / norm)
+          std::vector<float> sums(n_clusters * dim, 0.0f);
+          std::vector<uint32_t> counts(n_clusters, 0);
+          for (size_t i = 0; i < actual_sample; ++i) {
+              uint32_t c = labels[i];
+              counts[c]++;
+              const float* vec = data + all_indices[i] * dim;
+              float* sum = sums.data() + c * dim;
+              for (uint32_t d = 0; d < dim; ++d) {
+                  sum[d] += vec[d];
+              }
+          }
+          for (uint32_t c = 0; c < n_clusters; ++c) {
+              if (counts[c] > 0) {
+                  float* cent = centroids.data() + c * dim;
+                  float norm_sq = 0.0f;
+                  for (uint32_t d = 0; d < dim; ++d) {
+                      cent[d] = sums[c * dim + d] / counts[c];
+                      norm_sq += cent[d] * cent[d];
+                  }
+                  float norm = std::sqrt(norm_sq);
+                  if (norm > 1e-6f) {
+                      for (uint32_t d = 0; d < dim; ++d) {
+                          cent[d] /= norm;
+                      }
+                  }
+              }
+          }
+      }
 
-       // Find medoids: for each centroid, find the closest actual vector
-       std::vector<uint32_t> medoids(n_clusters);
-       for (uint32_t c = 0; c < n_clusters; ++c) {
-           const float* cent = centroids.data() + c * dim;
-           float best_sim = -std::numeric_limits<float>::max();
-           uint32_t best_idx = sample_indices[0];
-           for (size_t i = 0; i < actual_sample; ++i) {
-               const float* vec = data + sample_indices[i] * dim;
-               float sim = 0.0f;
-               for (uint32_t d = 0; d < dim; ++d) {
-                   sim += vec[d] * cent[d];
-               }
-               if (sim > best_sim) {
-                   best_sim = sim;
-                   best_idx = sample_indices[i];
-               }
-           }
-           medoids[c] = best_idx;
-       }
-       return medoids;
-   }
+      // Find medoids: for each centroid, find the closest actual vector (matching Python: np.argmax(np.dot(sub_X, centroids[c])))
+      std::vector<uint32_t> medoids(n_clusters);
+      for (uint32_t c = 0; c < n_clusters; ++c) {
+          const float* cent = centroids.data() + c * dim;
+          float best_sim = -std::numeric_limits<float>::max();
+          uint32_t best_idx = all_indices[0];
+          for (size_t i = 0; i < actual_sample; ++i) {
+              const float* vec = data + all_indices[i] * dim;
+              float sim = 0.0f;
+              for (uint32_t d = 0; d < dim; ++d) {
+                  sim += vec[d] * cent[d];
+              }
+              if (sim > best_sim) {
+                  best_sim = sim;
+                  best_idx = all_indices[i];
+              }
+          }
+          medoids[c] = best_idx;
+      }
+      return medoids;
+  }
 
    std::pair<int32_t, int32_t> optimize_prefetch(const float* sample_queries, size_t n_queries, uint32_t k, uint32_t ef, const std::vector<int32_t>& try_pos, const std::vector<int32_t>& try_pls) override {
        const uint32_t dim = graph_->getFeatureSpace().dim();
