@@ -9,6 +9,7 @@
 #include "deglib/optimization/quantization/scalar_quantize.h"
 #include "deglib/search.h"
 #include "deglib/utils/cpu.h"
+#include "deglib/utils/random.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -169,6 +170,13 @@ class SearcherBase {
 
     virtual void set_prefetch(int32_t po, int32_t pl) = 0;
     virtual std::pair<int32_t, int32_t> get_prefetch() const = 0;
+
+   // --- Cosine preprocessing (for Cosine-normalized datasets) ---
+   virtual void normalize_query_f32(const float* query, float* out) const = 0;
+   virtual void quantize_query_f32(const float* query, uint16_t* out_fp16) const = 0;
+
+   // --- K-Means medoid selection (replaces Python find_kmeans_medoids) ---
+   virtual uint32_t select_kmeans_medoid(const float* query, uint32_t k, float eps, float rerank_factor) const = 0;
 
     // --- Modern C++20 std::span and std::vector Convenience API ---
 
@@ -597,6 +605,54 @@ class SearcherImpl : public SearcherBase {
     std::pair<int32_t, int32_t> get_prefetch() const override {
         return {graph_->getPo(), graph_->getPl()};
     }
+
+   void normalize_query_f32(const float* query, float* out) const override {
+       const uint32_t dim = graph_->getFeatureSpace().dim();
+       float norm_sq = 0.0f;
+       for (uint32_t d = 0; d < dim; ++d) {
+           norm_sq += query[d] * query[d];
+       }
+       const float inv_norm = 1.0f / std::sqrt(norm_sq);
+       for (uint32_t d = 0; d < dim; ++d) {
+           out[d] = query[d] * inv_norm;
+       }
+   }
+
+   void quantize_query_f32(const float* query, uint16_t* out_fp16) const override {
+       const uint32_t dim = graph_->getFeatureSpace().dim();
+       for (uint32_t d = 0; d < dim; ++d) {
+           out_fp16[d] = deglib::distances::fp16::float_to_fp16(query[d]);
+       }
+   }
+
+   uint32_t select_kmeans_medoid(const float* query, uint32_t k, float eps, float rerank_factor) const override {
+       // Search for k candidates, return the one with the best (smallest) distance
+       alignas(64) uint32_t stack_indices[256];
+       alignas(64) float stack_distances[256];
+       std::unique_ptr<uint32_t[]> heap_indices;
+       std::unique_ptr<float[]> heap_distances;
+       uint32_t* indices = stack_indices;
+       float* distances = stack_distances;
+       if (k > 256) {
+           heap_indices = std::make_unique<uint32_t[]>(k);
+           heap_distances = std::make_unique<float[]>(k);
+           indices = heap_indices.get();
+           distances = heap_distances.get();
+       }
+       uint32_t found = search_f32(query, k, eps, rerank_factor, indices, distances, true);
+       if (found == 0) return 0;
+
+       // Find the candidate with the smallest distance (the medoid)
+       uint32_t best_idx = 0;
+       float best_dist = distances[0];
+       for (uint32_t i = 1; i < found; ++i) {
+           if (distances[i] < best_dist) {
+               best_dist = distances[i];
+               best_idx = i;
+           }
+       }
+       return indices[best_idx];
+   }
 };
 
 // ============================================================================
