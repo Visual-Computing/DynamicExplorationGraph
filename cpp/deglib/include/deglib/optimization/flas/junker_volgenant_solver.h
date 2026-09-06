@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <limits>
 #include <concepts>
 #include <cstddef>
 #include <vector>
@@ -138,7 +139,7 @@ inline void compute_assignment(const int* matrix, int dim, JVScratch& scratch) {
             num_free++;
         } else if (matches[i] == 1) {
             j1 = out_perm[i];
-            min = INT_MAX;
+            min = std::numeric_limits<int>::max();
             for (j = 0; j < dim; j++) {
                 if (j != j1 && matrix[i * dim + j] - v[j] < min) {
                     min = matrix[i * dim + j] - v[j];
@@ -157,7 +158,7 @@ inline void compute_assignment(const int* matrix, int dim, JVScratch& scratch) {
             k++;
             int umin = matrix[i * dim + 0] - v[0];
             j1 = 0;
-            int usubmin = INT_MAX;
+            int usubmin = std::numeric_limits<int>::max();
 
             for (j = 1; j < dim; j++) {
                 int h = matrix[i * dim + j] - v[j];
