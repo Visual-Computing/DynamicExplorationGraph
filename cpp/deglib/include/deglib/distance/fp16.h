@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 
 namespace deglib::distances {
 
@@ -297,6 +298,38 @@ inline void fp16_to_floats(const uint16_t* fp16_vals, float* floats, size_t coun
     for (size_t i = 0; i < count; ++i) {
         floats[i] = fp16_to_float_scalar(fp16_vals[i]);
     }
+}
+
+// ---------------------------------------------------------------------------
+// L2 normalization for FP16 vectors (for Cosine metric)
+// ---------------------------------------------------------------------------
+// Normalizes an FP16 vector in-place or to a separate buffer.
+// Converts to float, normalizes, then converts back to FP16.
+// ---------------------------------------------------------------------------
+
+inline void normalize_f16(const uint16_t* in, uint16_t* out, size_t dim) {
+    // Convert to float
+    alignas(64) float stack_float_buf[512];
+    std::unique_ptr<float[]> heap_float_buf;
+    float* float_buf = stack_float_buf;
+    if (dim * sizeof(float) > sizeof(stack_float_buf)) {
+        heap_float_buf = std::make_unique<float[]>(dim);
+        float_buf = heap_float_buf.get();
+    }
+    fp16_to_floats(in, float_buf, dim);
+
+    // Normalize in float space
+    double norm_sq = 0.0;
+    for (size_t i = 0; i < dim; ++i) {
+        norm_sq += float_buf[i] * float_buf[i];
+    }
+    float inv_norm = 1.0f / std::sqrt(static_cast<float>(norm_sq));
+    for (size_t i = 0; i < dim; ++i) {
+        float_buf[i] *= inv_norm;
+    }
+
+    // Convert back to FP16
+    floats_to_fp16(float_buf, out, dim);
 }
 
 }  // namespace fp16

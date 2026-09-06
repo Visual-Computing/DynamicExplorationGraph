@@ -110,6 +110,7 @@ class Searcher:
         refine_space: FloatSpace | None = None,
         refine_data: np.ndarray | None = None,
     ):
+        self.graph = graph
         cpp_graph = graph.dynamic_exploration_graph_cpp if hasattr(graph, "dynamic_exploration_graph_cpp") else graph
         cpp_refine_space = (
             refine_space.float_space_cpp if (refine_space is not None and hasattr(refine_space, "float_space_cpp")) else refine_space
@@ -172,46 +173,44 @@ class Searcher:
         """Returns (po, pl) currently configured."""
         return self.searcher_cpp.get_prefetch()
 
-    def optimize(
-        self,
-        sample_queries: np.ndarray,
-        k: int = 100,
-        ef: int = 200,
-        try_pos: list[int] | None = None,
-        try_pls: list[int] | None = None,
-    ) -> tuple[int, int]:
-        """
-        Empirically benchmarks different (po, pl) combinations on host CPU using sample queries,
-        and sets the fastest configuration.
-        """
-        import time
+    def set_cosine(self, enabled: bool):
+        """Enable/disable cosine normalization in the C++ searcher."""
+        self.searcher_cpp.set_cosine(bool(enabled))
 
+    def get_cosine(self) -> bool:
+        """Returns whether cosine normalization is enabled."""
+        return self.searcher_cpp.get_cosine()
+
+    def build_kmeans_medoids(self, data: np.ndarray, n_clusters: int = 128, n_iter: int = 15, sample_size: int = 30000, seed: int = 42) -> np.ndarray:
+        """Build K-Means medoids in C++ (replaces Python find_kmeans_medoids)."""
+        contiguous = np.ascontiguousarray(data, dtype=np.float32)
+        return self.searcher_cpp.build_kmeans_medoids(contiguous, int(n_clusters), int(n_iter), int(sample_size), int(seed))
+
+    def optimize_prefetch(self, sample_queries: np.ndarray, k: int, ef: int, try_pos: list[int] | None = None, try_pls: list[int] | None = None) -> tuple[int, int]:
+        """Optimize prefetch parameters in C++ (replaces Python optimize)."""
         if try_pos is None:
             try_pos = [2, 4, 6, 8, 10, 12, 14, 16]
         if try_pls is None:
             try_pls = [1, 2, 3, 4]
+        contiguous = np.ascontiguousarray(sample_queries, dtype=np.float32)
+        return self.searcher_cpp.optimize_prefetch(contiguous, int(k), int(ef), try_pos, try_pls)
 
-        sample_queries = np.ascontiguousarray(sample_queries)
-        warmup_queries = sample_queries[:min(10, len(sample_queries))]
-
-        best_time = float("inf")
-        best_po, best_pl = 8, 3
-
-        for po in try_pos:
-            for pl in try_pls:
-                self.set_prefetch(po, pl)
-                for q in warmup_queries:
-                    self.search(q, k=k, ef=ef)
-                t0 = time.perf_counter()
-                for q in sample_queries:
-                    self.search(q, k=k, ef=ef)
-                elapsed = time.perf_counter() - t0
-                if elapsed < best_time:
-                    best_time = elapsed
-                    best_po, best_pl = po, pl
-
-        self.set_prefetch(best_po, best_pl)
-        return best_po, best_pl
+    def optimize(
+        self,
+        data: np.ndarray,
+        n_clusters: int = 128,
+        n_iter: int = 15,
+        sample_size: int = 30000,
+        seed: int = 42,
+    ) -> None:
+        """
+        Build K-Means medoids in C++ and set them as entry indices on the graph.
+        """
+        contiguous = np.ascontiguousarray(data, dtype=np.float32)
+        entry_indices = self.searcher_cpp.build_kmeans_medoids(contiguous, int(n_clusters), int(n_iter), int(sample_size), int(seed))
+        # Set entry indices on the graph
+        if hasattr(self, 'graph') and self.graph is not None:
+            self.graph.set_entry_vertex_indices(entry_indices)
 
 
 def create_searcher(

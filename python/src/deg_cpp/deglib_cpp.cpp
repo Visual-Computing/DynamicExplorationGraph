@@ -896,6 +896,55 @@ class SearcherPy {
     std::pair<int32_t, int32_t> get_prefetch() const {
         return searcher_->get_prefetch();
     }
+
+   void set_cosine(bool enabled) {
+       searcher_->set_cosine(enabled);
+   }
+
+   bool get_cosine() const {
+       return searcher_->get_cosine();
+   }
+
+   py::array_t<uint32_t> build_kmeans_medoids(py::array_t<float> data, uint32_t n_clusters, uint32_t n_iter, size_t sample_size, uint32_t seed) {
+       auto buf = data.request();
+       if (buf.ndim != 2) {
+           throw std::invalid_argument("build_kmeans_medoids: data must be 2D array (n_vectors, dim)");
+       }
+       size_t n_vectors = buf.shape[0];
+       std::vector<uint32_t> medoids;
+       {
+           py::gil_scoped_release release;
+           medoids = searcher_->build_kmeans_medoids(static_cast<const float*>(buf.ptr), n_vectors, n_clusters, n_iter, sample_size, seed);
+       }
+       py::array_t<uint32_t> result(medoids.size());
+       std::copy(medoids.begin(), medoids.end(), static_cast<uint32_t*>(result.request().ptr));
+       return result;
+   }
+
+   std::pair<int32_t, int32_t> optimize_prefetch(py::array_t<float> sample_queries, uint32_t k, uint32_t ef, std::vector<int32_t> try_pos, std::vector<int32_t> try_pls) {
+       auto buf = sample_queries.request();
+       if (buf.ndim != 2) {
+           throw std::invalid_argument("optimize_prefetch: sample_queries must be 2D array (n_queries, dim)");
+       }
+       size_t n_queries = buf.shape[0];
+       std::pair<int32_t, int32_t> result;
+       {
+           py::gil_scoped_release release;
+           result = searcher_->optimize_prefetch(static_cast<const float*>(buf.ptr), n_queries, k, ef, try_pos, try_pls);
+       }
+       return result;
+   }
+   void optimize(py::array_t<float> data, uint32_t n_clusters, uint32_t n_iter, size_t sample_size, uint32_t seed) {
+       auto buf = data.request();
+       if (buf.ndim != 2) {
+           throw std::invalid_argument("optimize: data must be 2D array (n_vectors, dim)");
+       }
+       size_t n_vectors = buf.shape[0];
+       {
+           py::gil_scoped_release release;
+           searcher_->optimize(static_cast<const float*>(buf.ptr), n_vectors, n_clusters, n_iter, sample_size, seed);
+       }
+   }
 };
 
 // ============================================================================
@@ -1608,9 +1657,13 @@ PYBIND11_MODULE(deglib_cpp, m) {
             py::arg("queries"), py::arg("k"), py::arg("eps") = 0.1f, py::arg("rerank_factor") = 1.0f,
             py::arg("num_threads") = 1, py::arg("return_distances") = false, py::arg("unsorted") = false, py::arg("ef") = 0
         )
-        .def("set_prefetch", &SearcherPy::set_prefetch, py::arg("po"), py::arg("pl"))
-        .def("get_prefetch", &SearcherPy::get_prefetch);
-
+      .def("set_prefetch", &SearcherPy::set_prefetch, py::arg("po"), py::arg("pl"))
+      .def("get_prefetch", &SearcherPy::get_prefetch)
+      .def("set_cosine", &SearcherPy::set_cosine, py::arg("enabled"))
+      .def("get_cosine", &SearcherPy::get_cosine)
+     .def("optimize", &SearcherPy::optimize, py::arg("data"), py::arg("n_clusters"), py::arg("n_iter"), py::arg("sample_size"), py::arg("seed") = 42)
+      .def("build_kmeans_medoids", &SearcherPy::build_kmeans_medoids, py::arg("data"), py::arg("n_clusters"), py::arg("n_iter"), py::arg("sample_size"), py::arg("seed") = 42)
+      .def("optimize_prefetch", &SearcherPy::optimize_prefetch, py::arg("sample_queries"), py::arg("k"), py::arg("ef"), py::arg("try_pos"), py::arg("try_pls"));
     // graphs
     py::class_<deglib::DynamicExplorationGraph>(m, "DynamicExplorationGraph")
         .def(py::init<deglib::graph::InternalGraph&>())

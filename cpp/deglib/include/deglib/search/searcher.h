@@ -2,6 +2,7 @@
 
 #include "deglib/concurrent.h"
 #include "deglib/distance/fp16.h"
+#include "deglib/distance/fp32.h"
 #include "deglib/distances.h"
 #include "deglib/filter.h"
 #include "deglib/graph/internal_graph.h"
@@ -10,6 +11,9 @@
 #include "deglib/search.h"
 #include "deglib/utils/cpu.h"
 #include "deglib/utils/random.h"
+#include <chrono>
+#include <numeric>
+#include <random>
 
 #include <algorithm>
 #include <cstddef>
@@ -172,11 +176,15 @@ class SearcherBase {
     virtual std::pair<int32_t, int32_t> get_prefetch() const = 0;
 
    // --- Cosine preprocessing (for Cosine-normalized datasets) ---
-   virtual void normalize_query_f32(const float* query, float* out) const = 0;
-   virtual void quantize_query_f32(const float* query, uint16_t* out_fp16) const = 0;
+   virtual void set_cosine(bool enabled) = 0;
+   virtual bool get_cosine() const = 0;
 
    // --- K-Means medoid selection (replaces Python find_kmeans_medoids) ---
-   virtual uint32_t select_kmeans_medoid(const float* query, uint32_t k, float eps, float rerank_factor) const = 0;
+   virtual std::vector<uint32_t> build_kmeans_medoids(const float* data, size_t n_vectors, uint32_t n_clusters, uint32_t n_iter, size_t sample_size, uint32_t seed) = 0;
+
+  // --- Optimization: build K-Means medoids and set entry indices ---
+  virtual void optimize(const float* data, size_t n_vectors, uint32_t n_clusters, uint32_t n_iter, size_t sample_size, uint32_t seed) = 0;
+   virtual std::pair<int32_t, int32_t> optimize_prefetch(const float* sample_queries, size_t n_queries, uint32_t k, uint32_t ef, const std::vector<int32_t>& try_pos, const std::vector<int32_t>& try_pls) = 0;
 
     // --- Modern C++20 std::span and std::vector Convenience API ---
 
@@ -340,15 +348,15 @@ class SearcherBase {
 // ============================================================================
 // Pure Templated Searcher Implementation (Zero-Dispatch / Zero-Branch Loop)
 // ============================================================================
-
 template <typename QuantT, typename RefinerT>
 class SearcherImpl : public SearcherBase {
-  private:
-    const deglib::graph::InternalGraph* graph_ = nullptr;
-    QuantT quantizer_;
-    RefinerT refiner_;
+ private:
+   mutable const deglib::graph::InternalGraph* graph_ = nullptr;
+   QuantT quantizer_;
+   RefinerT refiner_;
+   mutable bool cosine_ = false;
 
-  public:
+ public:
     SearcherImpl(
         const deglib::graph::InternalGraph& graph,
         QuantT quantizer,
@@ -356,39 +364,65 @@ class SearcherImpl : public SearcherBase {
     )
         : graph_(&graph),
           quantizer_(std::move(quantizer)),
-          refiner_(std::move(refiner)) {}
+          refiner_(std::move(refiner)),
+          cosine_(false) {}
 
     template <typename QueryT>
     inline uint32_t search_single_typed(
         const QueryT* query, uint32_t k, float eps, float rerank_factor,
         uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false
     ) const {
-        const uint32_t dim = graph_->getFeatureSpace().dim();
-        const uint32_t fetch_k = std::max(k, static_cast<uint32_t>(std::round(k * rerank_factor)));
-        const size_t graph_feature_bytes = graph_->getFeatureSpace().get_data_size();
+       const uint32_t dim = graph_->getFeatureSpace().dim();
+       const uint32_t fetch_k = std::max(k, static_cast<uint32_t>(std::round(k * rerank_factor)));
+       const size_t graph_feature_bytes = graph_->getFeatureSpace().get_data_size();
 
-        // 1. Static Query Transformation (Zero-copy bypass for NoQuantizer)
-        const std::byte* query_bytes = nullptr;
-        alignas(64) std::byte stack_query_bytes[512];
-        std::unique_ptr<std::byte[]> heap_query_bytes;
+  // 0. Cosine normalization (if graph uses InnerProduct metric)
+  const QueryT* query_ptr = query;
+  std::unique_ptr<float[]> heap_norm_query;
+  float* norm_buf = nullptr;
+  if (cosine_) {
+      heap_norm_query = std::make_unique<float[]>(dim);
+      norm_buf = heap_norm_query.get();
+      if constexpr (std::is_same_v<QueryT, float>) {
+          deglib::distances::normalize_f32(query, norm_buf, dim);
+      } else {
+          for (uint32_t d = 0; d < dim; ++d) {
+              norm_buf[d] = static_cast<float>(query[d]);
+          }
+          deglib::distances::normalize_f32(norm_buf, norm_buf, dim);
+      }
+  }
 
-        if constexpr (std::is_same_v<QuantT, NoQuantizer>) {
-            // Direct zero-copy: query is already in unquantized format
-            query_bytes = reinterpret_cast<const std::byte*>(query);
-        } else {
-            std::byte* q_buf = stack_query_bytes;
-            if (graph_feature_bytes > sizeof(stack_query_bytes)) {
-                heap_query_bytes = std::make_unique<std::byte[]>(graph_feature_bytes);
-                q_buf = heap_query_bytes.get();
-            }
+      // 1. Static Query Transformation (Zero-copy bypass for NoQuantizer)
+      const std::byte* query_bytes = nullptr;
+      std::unique_ptr<std::byte[]> heap_query_bytes;
+   if constexpr (std::is_same_v<QuantT, NoQuantizer>) {
+       // Direct zero-copy: query is already in unquantized format
+       if (norm_buf) {
+           query_bytes = reinterpret_cast<const std::byte*>(norm_buf);
+       } else {
+           query_bytes = reinterpret_cast<const std::byte*>(query_ptr);
+       }
+   } else {
+       heap_query_bytes = std::make_unique<std::byte[]>(graph_feature_bytes);
+       std::byte* q_buf = heap_query_bytes.get();
 
-            if constexpr (requires { quantizer_.quantize(query, q_buf, 1, dim); }) {
-                quantizer_.quantize(query, q_buf, 1, dim);
-            } else {
-                quantizer_.quantize(query, reinterpret_cast<typename QuantT::output_type*>(q_buf), 1, dim);
-            }
-            query_bytes = q_buf;
-        }
+       if (norm_buf) {
+           if constexpr (requires { quantizer_.quantize(norm_buf, q_buf, 1, dim); }) {
+               quantizer_.quantize(norm_buf, q_buf, 1, dim);
+           } else {
+               quantizer_.quantize(norm_buf, reinterpret_cast<typename QuantT::output_type*>(q_buf), 1, dim);
+           }
+       } else {
+           if constexpr (requires { quantizer_.quantize(query_ptr, q_buf, 1, dim); }) {
+               quantizer_.quantize(query_ptr, q_buf, 1, dim);
+           } else {
+               quantizer_.quantize(query_ptr, reinterpret_cast<typename QuantT::output_type*>(q_buf), 1, dim);
+           }
+       }
+       query_bytes = q_buf;
+     }
+
 
         // 2. Direct Graph Search
         auto result = graph_->search(
@@ -398,23 +432,19 @@ class SearcherImpl : public SearcherBase {
         const size_t found_count = result.size();
 
         // 3. Static Compile-Time Reranker Check
-        if constexpr (RefinerT::enabled) {
-            if (fetch_k > k) {
-                uint32_t stack_cand_indices[256];
-                std::unique_ptr<uint32_t[]> heap_cand_indices;
-                uint32_t* cands = stack_cand_indices;
-                if (found_count > (sizeof(stack_cand_indices) / sizeof(uint32_t))) {
-                    heap_cand_indices = std::make_unique<uint32_t[]>(found_count);
-                    cands = heap_cand_indices.get();
-                }
+       if constexpr (RefinerT::enabled) {
+           if (fetch_k > k) {
+               std::unique_ptr<uint32_t[]> heap_cand_indices;
+               heap_cand_indices = std::make_unique<uint32_t[]>(found_count);
+               uint32_t* cands = heap_cand_indices.get();
 
                 for (size_t i = 0; i < found_count; ++i) {
                     cands[i] = graph_->getExternalLabel(result[i].getIdentifier());
                 }
 
                 const bool return_distances = (out_distances != nullptr);
-                uint32_t ref_count = refiner_.rerank(
-                    query, dim, cands, found_count, k, out_indices, out_distances, return_distances, unsorted
+               uint32_t ref_count = refiner_.rerank(
+                   query_ptr, dim, cands, found_count, k, out_indices, out_distances, return_distances, unsorted
                 );
                 if (ref_count > 0) {
                     return ref_count;
@@ -474,31 +504,55 @@ class SearcherImpl : public SearcherBase {
         const QueryT* query, uint32_t k, uint32_t ef, float rerank_factor,
         uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false
     ) const {
-        const uint32_t dim = graph_->getFeatureSpace().dim();
-        const uint32_t fetch_k = std::max(k, static_cast<uint32_t>(std::round(k * rerank_factor)));
-        const size_t graph_feature_bytes = graph_->getFeatureSpace().get_data_size();
+       const uint32_t dim = graph_->getFeatureSpace().dim();
+       const uint32_t fetch_k = std::max(k, static_cast<uint32_t>(std::round(k * rerank_factor)));
+       const size_t graph_feature_bytes = graph_->getFeatureSpace().get_data_size();
 
-        // 1. Static Query Transformation (Zero-copy bypass for NoQuantizer)
-        const std::byte* query_bytes = nullptr;
-        alignas(64) std::byte stack_query_bytes[512];
-        std::unique_ptr<std::byte[]> heap_query_bytes;
+    // 0. Cosine normalization (if graph uses InnerProduct metric)
+   const QueryT* query_ptr = query;
+   std::unique_ptr<float[]> heap_norm_query;
+   float* norm_buf = nullptr;
+   if (cosine_) {
+       heap_norm_query = std::make_unique<float[]>(dim);
+       norm_buf = heap_norm_query.get();
+      if constexpr (std::is_same_v<QueryT, float>) {
+          deglib::distances::normalize_f32(query, norm_buf, dim);
+      } else {
+          // For non-float query types, convert to float, normalize
+          for (uint32_t d = 0; d < dim; ++d) {
+              norm_buf[d] = static_cast<float>(query[d]);
+          }
+          deglib::distances::normalize_f32(norm_buf, norm_buf, dim);
+      }
+   }
+     const std::byte* query_bytes = nullptr;
+     std::unique_ptr<std::byte[]> heap_query_bytes;
 
-        if constexpr (std::is_same_v<QuantT, NoQuantizer>) {
-            query_bytes = reinterpret_cast<const std::byte*>(query);
+    if constexpr (std::is_same_v<QuantT, NoQuantizer>) {
+        if (norm_buf) {
+            query_bytes = reinterpret_cast<const std::byte*>(norm_buf);
         } else {
-            std::byte* q_buf = stack_query_bytes;
-            if (graph_feature_bytes > sizeof(stack_query_bytes)) {
-                heap_query_bytes = std::make_unique<std::byte[]>(graph_feature_bytes);
-                q_buf = heap_query_bytes.get();
-            }
-
-            if constexpr (requires { quantizer_.quantize(query, q_buf, 1, dim); }) {
-                quantizer_.quantize(query, q_buf, 1, dim);
-            } else {
-                quantizer_.quantize(query, reinterpret_cast<typename QuantT::output_type*>(q_buf), 1, dim);
-            }
-            query_bytes = q_buf;
+            query_bytes = reinterpret_cast<const std::byte*>(query_ptr);
         }
+    } else {
+        heap_query_bytes = std::make_unique<std::byte[]>(graph_feature_bytes);
+        std::byte* q_buf = heap_query_bytes.get();
+
+        if (norm_buf) {
+            if constexpr (requires { quantizer_.quantize(norm_buf, q_buf, 1, dim); }) {
+                quantizer_.quantize(norm_buf, q_buf, 1, dim);
+            } else {
+                quantizer_.quantize(norm_buf, reinterpret_cast<typename QuantT::output_type*>(q_buf), 1, dim);
+            }
+        } else {
+            if constexpr (requires { quantizer_.quantize(query_ptr, q_buf, 1, dim); }) {
+                quantizer_.quantize(query_ptr, q_buf, 1, dim);
+            } else {
+                quantizer_.quantize(query_ptr, reinterpret_cast<typename QuantT::output_type*>(q_buf), 1, dim);
+            }
+        }
+        query_bytes = q_buf;
+    }
 
         // 2. Direct Graph Search with LinearPool
         auto pool = graph_->search_ef(
@@ -508,24 +562,20 @@ class SearcherImpl : public SearcherBase {
         const size_t found_count = pool.size();
 
         // 3. Static Compile-Time Reranker Check
-        if constexpr (RefinerT::enabled) {
-            if (fetch_k > k && found_count > 0) {
-                uint32_t stack_cand_indices[256];
-                std::unique_ptr<uint32_t[]> heap_cand_indices;
-                uint32_t* cands = stack_cand_indices;
-                const size_t cands_to_refine = std::min<size_t>(found_count, fetch_k);
-                if (cands_to_refine > (sizeof(stack_cand_indices) / sizeof(uint32_t))) {
-                    heap_cand_indices = std::make_unique<uint32_t[]>(cands_to_refine);
-                    cands = heap_cand_indices.get();
-                }
+       if constexpr (RefinerT::enabled) {
+           if (fetch_k > k && found_count > 0) {
+               std::unique_ptr<uint32_t[]> heap_cand_indices;
+               const size_t cands_to_refine = std::min<size_t>(found_count, fetch_k);
+               heap_cand_indices = std::make_unique<uint32_t[]>(cands_to_refine);
+               uint32_t* cands = heap_cand_indices.get();
 
                 for (size_t i = 0; i < cands_to_refine; ++i) {
                     cands[i] = graph_->getExternalLabel(pool.id(static_cast<int32_t>(i)));
                 }
 
-                uint32_t ref_count = refiner_.rerank(
-                    query, dim, cands, cands_to_refine, k,
-                    out_indices, out_distances, out_distances != nullptr, unsorted
+               uint32_t ref_count = refiner_.rerank(
+                   query_ptr, dim, cands, cands_to_refine, k,
+                   out_indices, out_distances, out_distances != nullptr, unsorted
                 );
                 if (ref_count > 0) {
                     return ref_count;
@@ -604,56 +654,147 @@ class SearcherImpl : public SearcherBase {
 
     std::pair<int32_t, int32_t> get_prefetch() const override {
         return {graph_->getPo(), graph_->getPl()};
-    }
+       }
 
-   void normalize_query_f32(const float* query, float* out) const override {
-       const uint32_t dim = graph_->getFeatureSpace().dim();
-       float norm_sq = 0.0f;
-       for (uint32_t d = 0; d < dim; ++d) {
-           norm_sq += query[d] * query[d];
-       }
-       const float inv_norm = 1.0f / std::sqrt(norm_sq);
-       for (uint32_t d = 0; d < dim; ++d) {
-           out[d] = query[d] * inv_norm;
-       }
+   void set_cosine(bool enabled) override {
+       cosine_ = enabled;
    }
 
-   void quantize_query_f32(const float* query, uint16_t* out_fp16) const override {
-       const uint32_t dim = graph_->getFeatureSpace().dim();
-       for (uint32_t d = 0; d < dim; ++d) {
-           out_fp16[d] = deglib::distances::fp16::float_to_fp16(query[d]);
-       }
+   bool get_cosine() const override {
+       return cosine_;
    }
 
-   uint32_t select_kmeans_medoid(const float* query, uint32_t k, float eps, float rerank_factor) const override {
-       // Search for k candidates, return the one with the best (smallest) distance
-       alignas(64) uint32_t stack_indices[256];
-       alignas(64) float stack_distances[256];
-       std::unique_ptr<uint32_t[]> heap_indices;
-       std::unique_ptr<float[]> heap_distances;
-       uint32_t* indices = stack_indices;
-       float* distances = stack_distances;
-       if (k > 256) {
-           heap_indices = std::make_unique<uint32_t[]>(k);
-           heap_distances = std::make_unique<float[]>(k);
-           indices = heap_indices.get();
-           distances = heap_distances.get();
-       }
-       uint32_t found = search_f32(query, k, eps, rerank_factor, indices, distances, true);
-       if (found == 0) return 0;
+   std::vector<uint32_t> build_kmeans_medoids(const float* data, size_t n_vectors, uint32_t n_clusters, uint32_t n_iter, size_t sample_size, uint32_t seed) override {
+       const uint32_t dim = graph_->getFeatureSpace().dim();
+       std::mt19937 rng(seed);
 
-       // Find the candidate with the smallest distance (the medoid)
-       uint32_t best_idx = 0;
-       float best_dist = distances[0];
-       for (uint32_t i = 1; i < found; ++i) {
-           if (distances[i] < best_dist) {
-               best_dist = distances[i];
-               best_idx = i;
+       // Sample vectors
+       size_t actual_sample = std::min(sample_size, n_vectors);
+       std::vector<uint32_t> sample_indices(actual_sample);
+       std::iota(sample_indices.begin(), sample_indices.end(), 0);
+       std::shuffle(sample_indices.begin(), sample_indices.end(), rng);
+       sample_indices.resize(actual_sample);
+
+       // Initialize centroids by picking random samples
+       n_clusters = std::min(n_clusters, static_cast<uint32_t>(actual_sample));
+       std::vector<float> centroids(n_clusters * dim);
+       for (uint32_t c = 0; c < n_clusters; ++c) {
+           uint32_t idx = sample_indices[c];
+           const float* vec = data + static_cast<size_t>(idx) * dim;
+           std::copy(vec, vec + dim, centroids.data() + c * dim);
+       }
+
+       // K-Means iterations
+       std::vector<uint32_t> labels(actual_sample);
+       for (uint32_t iter = 0; iter < n_iter; ++iter) {
+           // Assignment step
+           for (size_t i = 0; i < actual_sample; ++i) {
+               const float* vec = data + sample_indices[i] * dim;
+               float best_sim = -std::numeric_limits<float>::max();
+               uint32_t best_c = 0;
+               for (uint32_t c = 0; c < n_clusters; ++c) {
+                   const float* cent = centroids.data() + c * dim;
+                   float sim = 0.0f;
+                   for (uint32_t d = 0; d < dim; ++d) {
+                       sim += vec[d] * cent[d];
+                   }
+                   if (sim > best_sim) {
+                       best_sim = sim;
+                       best_c = c;
+                   }
+               }
+               labels[i] = best_c;
+           }
+
+           // Update step
+           std::vector<float> sums(n_clusters * dim, 0.0f);
+           std::vector<uint32_t> counts(n_clusters, 0);
+           for (size_t i = 0; i < actual_sample; ++i) {
+               uint32_t c = labels[i];
+               counts[c]++;
+               const float* vec = data + sample_indices[i] * dim;
+               float* sum = sums.data() + c * dim;
+               for (uint32_t d = 0; d < dim; ++d) {
+                   sum[d] += vec[d];
+               }
+           }
+           for (uint32_t c = 0; c < n_clusters; ++c) {
+               if (counts[c] > 0) {
+                   float* cent = centroids.data() + c * dim;
+                   float norm_sq = 0.0f;
+                   for (uint32_t d = 0; d < dim; ++d) {
+                       cent[d] = sums[c * dim + d] / counts[c];
+                       norm_sq += cent[d] * cent[d];
+                   }
+                   float norm = std::sqrt(norm_sq);
+                   if (norm > 1e-6f) {
+                       for (uint32_t d = 0; d < dim; ++d) {
+                           cent[d] /= norm;
+                       }
+                   }
+               }
            }
        }
-       return indices[best_idx];
+
+       // Find medoids: for each centroid, find the closest actual vector
+       std::vector<uint32_t> medoids(n_clusters);
+       for (uint32_t c = 0; c < n_clusters; ++c) {
+           const float* cent = centroids.data() + c * dim;
+           float best_sim = -std::numeric_limits<float>::max();
+           uint32_t best_idx = sample_indices[0];
+           for (size_t i = 0; i < actual_sample; ++i) {
+               const float* vec = data + sample_indices[i] * dim;
+               float sim = 0.0f;
+               for (uint32_t d = 0; d < dim; ++d) {
+                   sim += vec[d] * cent[d];
+               }
+               if (sim > best_sim) {
+                   best_sim = sim;
+                   best_idx = sample_indices[i];
+               }
+           }
+           medoids[c] = best_idx;
+       }
+       return medoids;
+   }
+
+   std::pair<int32_t, int32_t> optimize_prefetch(const float* sample_queries, size_t n_queries, uint32_t k, uint32_t ef, const std::vector<int32_t>& try_pos, const std::vector<int32_t>& try_pls) override {
+       const uint32_t dim = graph_->getFeatureSpace().dim();
+       auto best_time = std::numeric_limits<double>::max();
+       int32_t best_po = 8, best_pl = 3;
+
+       // Warmup
+       size_t warmup = std::min<size_t>(10, n_queries);
+       for (size_t i = 0; i < warmup; ++i) {
+           alignas(64) uint32_t indices[256];
+           search_ef_f32(sample_queries + i * dim, k, ef, 1.0f, indices, nullptr, true);
+       }
+
+       for (int32_t po : try_pos) {
+           for (int32_t pl : try_pls) {
+               graph_->setPrefetch(po, pl);
+               auto t0 = std::chrono::high_resolution_clock::now();
+               for (size_t i = 0; i < n_queries; ++i) {
+                   alignas(64) uint32_t indices[256];
+                   search_ef_f32(sample_queries + i * dim, k, ef, 1.0f, indices, nullptr, true);
+               }
+               auto t1 = std::chrono::high_resolution_clock::now();
+               double elapsed = std::chrono::duration<double>(t1 - t0).count();
+               if (elapsed < best_time) {
+                   best_time = elapsed;
+                   best_po = po;
+                   best_pl = pl;
+               }
+           }
+       }
+   }
+
+   void optimize(const float* data, size_t n_vectors, uint32_t n_clusters, uint32_t n_iter, size_t sample_size, uint32_t seed) override {
+       auto medoids = build_kmeans_medoids(data, n_vectors, n_clusters, n_iter, sample_size, seed);
+       graph_->setEntryVertexIndices(medoids);
    }
 };
+
 
 // ============================================================================
 // Modern C++20 Factory Functions

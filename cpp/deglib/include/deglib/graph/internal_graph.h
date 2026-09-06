@@ -149,17 +149,17 @@ class InternalGraph {
     virtual const bool hasVertex(const uint32_t external_label) const = 0;
     virtual const bool hasEdge(const uint32_t internal_index, const uint32_t neighbor_index) const = 0;
   protected:
-    std::vector<uint32_t> entry_vertex_indices_{0};
+    mutable std::vector<uint32_t> entry_vertex_indices_{0};
     mutable int32_t po_ = 8;
     mutable int32_t pl_ = 3;
 
   public:
     const std::vector<uint32_t>& getEntryVertexIndices() const { return entry_vertex_indices_; }
-    void setEntryVertexIndices(std::vector<uint32_t> indices) {
-        if (!indices.empty()) {
-            entry_vertex_indices_ = std::move(indices);
-        }
-    }
+   void setEntryVertexIndices(std::vector<uint32_t> indices) const {
+       if (!indices.empty()) {
+           entry_vertex_indices_ = std::move(indices);
+       }
+   }
     int32_t getPo() const noexcept { return po_; }
     int32_t getPl() const noexcept { return pl_; }
     void setPrefetch(int32_t po, int32_t pl) const noexcept {
