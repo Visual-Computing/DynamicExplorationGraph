@@ -501,9 +501,7 @@ class InternalGraph {
         const __m512i xor_mask = _mm512_set1_epi8(static_cast<char>(0x80));
 
         uint32_t ep1 = entry_vertex_indices.empty() ? 0 : entry_vertex_indices[0];
-        uint32_t ep2 = ep1;
         float dist1 = std::numeric_limits<float>::max();
-        float dist2 = std::numeric_limits<float>::max();
 
         // Pipelined SIMD scan over entry medoids
         for (size_t i = 0; i < std::min<size_t>(po, entry_vertex_indices.size()); ++i) {
@@ -535,13 +533,8 @@ class InternalGraph {
                 int64_t total = deglib::distances::int8_ip::int8_ip_hsum512(sum) - q_correction;
                 float distance = -static_cast<float>(total);
                 if (distance < dist1) {
-                    dist2 = dist1;
-                    ep2 = ep1;
                     dist1 = distance;
                     ep1 = ep;
-                } else if (distance < dist2) {
-                    dist2 = distance;
-                    ep2 = ep;
                 }
             }
         }
@@ -641,21 +634,14 @@ class InternalGraph {
        #endif
 
         uint32_t ep1 = entry_vertex_indices.empty() ? 0 : entry_vertex_indices[0];
-        uint32_t ep2 = ep1;
         float dist1 = std::numeric_limits<float>::max();
-        float dist2 = std::numeric_limits<float>::max();
         for (auto ep : entry_vertex_indices) {
             if (ep < vertex_count) {
                 const auto feature = self.feature_by_index(ep);
                 float distance = COMPARATOR::compare(query, feature, dist_func_param);
                 if (distance < dist1) {
-                    dist2 = dist1;
-                    ep2 = ep1;
                     dist1 = distance;
                     ep1 = ep;
-                } else if (distance < dist2) {
-                    dist2 = distance;
-                    ep2 = ep;
                 }
             }
         }

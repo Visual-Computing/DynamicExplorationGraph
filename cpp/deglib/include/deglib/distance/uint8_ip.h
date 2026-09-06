@@ -126,10 +126,8 @@ class InnerProductUint8_AVX512_VNNI {
         const uint8_t* last = a + size;
 
         const __m512i xor_mask = _mm512_set1_epi8(static_cast<char>(0x80));
-        __m512i sum512_1 = _mm512_setzero_si512();
-        __m512i sum512_2 = _mm512_setzero_si512();
-        __m512i q_comp_1 = _mm512_setzero_si512();
-        __m512i q_comp_2 = _mm512_setzero_si512();
+       __m512i sum512_1 = _mm512_setzero_si512();
+       __m512i q_comp_1 = _mm512_setzero_si512();
 
         if constexpr (HasDualSimd) {
             while (a + 127 < last) {
@@ -146,9 +144,9 @@ class InnerProductUint8_AVX512_VNNI {
                 __m512i raw_a2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(a));
                 __m512i raw_b2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(b));
                 __m512i s_b2 = _mm512_xor_si512(raw_b2, xor_mask);
-                sum512_2 = _mm512_dpbusd_epi32(sum512_2, raw_a2, s_b2);
-                q_comp_2 = _mm512_add_epi32(q_comp_2, _mm512_madd_epi16(_mm512_cvtepu8_epi16(_mm512_castsi512_si256(raw_a2)), _mm512_set1_epi16(1)));
-                q_comp_2 = _mm512_add_epi32(q_comp_2, _mm512_madd_epi16(_mm512_cvtepu8_epi16(_mm512_extracti64x4_epi64(raw_a2, 1)), _mm512_set1_epi16(1)));
+               sum512_1 = _mm512_dpbusd_epi32(sum512_1, raw_a2, s_b2);
+               q_comp_1 = _mm512_add_epi32(q_comp_1, _mm512_madd_epi16(_mm512_cvtepu8_epi16(_mm512_castsi512_si256(raw_a2)), _mm512_set1_epi16(1)));
+               q_comp_1 = _mm512_add_epi32(q_comp_1, _mm512_madd_epi16(_mm512_cvtepu8_epi16(_mm512_extracti64x4_epi64(raw_a2, 1)), _mm512_set1_epi16(1)));
 
                 a += 64;
                 b += 64;
@@ -166,10 +164,7 @@ class InnerProductUint8_AVX512_VNNI {
             b += 64;
         }
 
-        // Horizontal reduce
-        __m512i sum512 = _mm512_add_epi32(sum512_1, sum512_2);
-        __m512i q_comp = _mm512_add_epi32(q_comp_1, q_comp_2);
-        int64_t result = uint8_ip_hsum512(sum512) + (uint8_ip_hsum512(q_comp) * 128);
+       int64_t result = uint8_ip_hsum512(sum512_1) + (uint8_ip_hsum512(q_comp_1) * 128);
 
         if constexpr (HasTail) {
             while (a < last) {
