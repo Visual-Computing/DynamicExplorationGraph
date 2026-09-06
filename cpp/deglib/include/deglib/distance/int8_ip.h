@@ -240,6 +240,69 @@ class InnerProductInt8_AVX512_VNNI {
 };
 
 // ---------------------------------------------------------------------------------------------------------------------
+// AVX512-VNNI D=200 specialized comparator: aligned 4×64B loads, precomputed
+// query registers (q0–q3) and correction. Used by the search loop for
+// yandex-200-cosine (dim=200, INT8 inner product).
+// ---------------------------------------------------------------------------------------------------------------------
+#if defined(DEGLIB_X86)
+class InnerProductInt8_AVX512_VNNI_D200 {
+ public:
+   static constexpr const char* get_instruction() { return "AVX512_VNNI_D200"; }
+
+   struct QueryState {
+       __m512i q0, q1, q2, q3;
+       int64_t q_correction;
+       __m512i xor_mask;
+   };
+
+   DEGLIB_TARGET_AVX512_VNNI static inline void prepare_query(const int8_t* query, QueryState& st) {
+       alignas(64) int8_t q_padded[256];
+       std::memset(q_padded, 0, 256);
+       std::memcpy(q_padded, query, 200);
+
+       st.q0 = _mm512_load_si512(reinterpret_cast<const __m512i*>(q_padded));
+       st.q1 = _mm512_load_si512(reinterpret_cast<const __m512i*>(q_padded + 64));
+       st.q2 = _mm512_load_si512(reinterpret_cast<const __m512i*>(q_padded + 128));
+       st.q3 = _mm512_load_si512(reinterpret_cast<const __m512i*>(q_padded + 192));
+
+       __m512i q_comp = _mm512_setzero_si512();
+      auto add_q = [&](__m512i q_raw) DEGLIB_TARGET_AVX512_VNNI {
+           q_comp = _mm512_add_epi32(q_comp, _mm512_madd_epi16(_mm512_cvtepi8_epi16(_mm512_castsi512_si256(q_raw)), _mm512_set1_epi16(1)));
+           q_comp = _mm512_add_epi32(q_comp, _mm512_madd_epi16(_mm512_cvtepi8_epi16(_mm512_extracti64x4_epi64(q_raw, 1)), _mm512_set1_epi16(1)));
+       };
+       add_q(st.q0);
+       add_q(st.q1);
+       add_q(st.q2);
+       add_q(st.q3);
+       st.q_correction = int8_ip_hsum512(q_comp) * 128;
+       st.xor_mask = _mm512_set1_epi8(static_cast<char>(0x80));
+   }
+
+   DEGLIB_TARGET_AVX512_VNNI static inline float compare_prepared(const void* db, const QueryState& st) {
+       const int8_t* feat = static_cast<const int8_t*>(db);
+       __m512i raw_b0 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat));
+       __m512i raw_b1 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 64));
+       __m512i raw_b2 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 128));
+       __m512i raw_b3 = _mm512_load_si512(reinterpret_cast<const __m512i*>(feat + 192));
+
+       __m512i u_b0 = _mm512_xor_si512(raw_b0, st.xor_mask);
+       __m512i u_b1 = _mm512_xor_si512(raw_b1, st.xor_mask);
+       __m512i u_b2 = _mm512_xor_si512(raw_b2, st.xor_mask);
+       __m512i u_b3 = _mm512_xor_si512(raw_b3, st.xor_mask);
+
+       __m512i s0 = _mm512_dpbusd_epi32(_mm512_setzero_si512(), u_b0, st.q0);
+       __m512i s1 = _mm512_dpbusd_epi32(_mm512_setzero_si512(), u_b1, st.q1);
+       s0 = _mm512_dpbusd_epi32(s0, u_b2, st.q2);
+       s1 = _mm512_dpbusd_epi32(s1, u_b3, st.q3);
+       __m512i sum = _mm512_add_epi32(s0, s1);
+
+       int64_t total = int8_ip_hsum512(sum) - st.q_correction;
+       return -static_cast<float>(total);
+   }
+};
+#endif
+
+// ---------------------------------------------------------------------------------------------------------------------
 // AVX512 (Standard AVX-512 BW/DQ/F)
 // ---------------------------------------------------------------------------------------------------------------------
 template <ResidualMode Mode = ResidualMode::Full>
