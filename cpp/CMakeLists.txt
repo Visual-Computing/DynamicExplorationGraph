@@ -70,12 +70,11 @@ else()  # Native build
 
   # setup compiler flags
   if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Portable native build: generic code is compiled for the build machine's
+  # baseline ISA only (no explicit AVX-512), so the module imports cleanly on
+  # CPUs without AVX-512. AVX-512 kernels are per-function target attributes
+  # (DEGLIB_TARGET_AVX512*), gated at runtime by deglib::cpu::select_dist().
     target_compile_options(compile-options INTERFACE -O3 -march=native -fpic -w -pthread -ftree-vectorize)
-    if(SUPPORT_AVX512F)
-      target_compile_options(compile-options INTERFACE -mavx512f -mfma)
-    elseif(SUPPORT_AVX2)
-      target_compile_options(compile-options INTERFACE -mavx2 -mfma)
-    endif()
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
     target_compile_options(compile-options INTERFACE -O2 -DNDEBUG -march=native -fpic)
   elseif(MSVC)

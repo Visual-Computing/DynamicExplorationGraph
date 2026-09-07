@@ -15,6 +15,7 @@
 #include <pybind11/stl.h>
 
 #include <algorithm>
+#include <climits>
 #include <limits>
 #include <optional>
 #include <stdexcept>
