@@ -1535,7 +1535,7 @@ DynamicExplorationGraph build_from_data(
     }
 
     auto feature_space = deglib::distances::FloatSpace(dims, metric);
-    auto graph = deglib::DynamicExplorationGraph::create_empty(vertex_count, edges_per_vertex, feature_space);
+    auto graph = DynamicExplorationGraph(std::make_unique<deglib::graph::SizeBoundedGraph>(vertex_count, edges_per_vertex, feature_space));
 
     std::mt19937 rng(seed);
     auto builder = EvenRegularGraphBuilder(
@@ -1555,4 +1555,103 @@ DynamicExplorationGraph build_from_data(
     return graph;
 }
 
+/**
+ * Populate a MutableGraph with a random k-regular graph.
+ *
+ * @param graph The mutable graph instance to populate.
+ * @param feature_data Pointer to contiguous feature data bytes.
+ * @param vertex_count Number of vertices to insert.
+ * @param seed Random seed for deterministic graph construction (default: 7).
+ */
+inline void populate_random_graph(
+    deglib::graph::MutableGraph& graph,
+    const std::byte* feature_data,
+    const uint32_t vertex_count,
+    const uint32_t seed = 7
+) {
+    const auto& feature_space = graph.getFeatureSpace();
+    const auto edges_per_vertex = graph.getEdgesPerVertex();
+    const auto dist_func = feature_space.get_dist_func();
+    const auto dist_func_param = feature_space.get_dist_func_param();
+
+    // add the initial vertices (edges_per_vertex + 1)
+    {
+        const auto size = static_cast<uint32_t>(edges_per_vertex + 1);
+        for (uint32_t y = 0; y < size; y++) {
+            const auto query = feature_data + size_t(y) * feature_space.get_data_size();
+            const auto internal_index = graph.addVertex(y, query);
+
+            auto neighbor_indices = std::vector<uint32_t>();
+            auto neighbor_weights = std::vector<float>();
+            for (uint32_t x = 0; x < size; x++) {
+                if (x == internal_index) continue;
+                neighbor_indices.emplace_back(x);
+                neighbor_weights.emplace_back(dist_func(query, feature_data + size_t(x) * feature_space.get_data_size(), dist_func_param));
+            }
+            graph.changeEdges(internal_index, neighbor_indices.data(), neighbor_weights.data());
+        }
+    }
+
+    // random order of vertices
+    auto rnd = std::mt19937(seed);
+    auto rnd_neighbor = deglib::random::DeterministicUniformIntDistribution<uint32_t>(0, edges_per_vertex - 1);
+
+    // add the remaining vertices
+    for (uint32_t label = edges_per_vertex + 1; label < vertex_count; label++) {
+        const auto new_vertex_feature = feature_data + size_t(label) * feature_space.get_data_size();
+        const auto internal_index = graph.addVertex(label, new_vertex_feature);
+        auto top_list = deglib::random::DeterministicUniformIntDistribution<uint32_t>(0, label - 1);
+
+        // remove the worst edge of the good neighbors and connect them with this new vertex
+        auto new_neighbors = std::vector<std::pair<uint32_t, float>>();
+        while (new_neighbors.size() < edges_per_vertex) {
+            const auto candidate_index = static_cast<uint32_t>(top_list(rnd));
+
+            // check if the vertex is already in the edge list of the new vertex (added during a previous loop-run)
+            // since all edges are undirected and the edge information of the new vertex does not yet exist, we search the other way around.
+            if (graph.hasEdge(candidate_index, internal_index)) continue;
+
+            // find a new random neighbor
+            uint32_t new_neighbor_index = 0;
+            float new_neighbor_weight = 0;
+            bool found = false;
+            const auto neighbor_weights = graph.getNeighborWeights(candidate_index);
+            const auto neighbor_indices = graph.getNeighborIndices(candidate_index);
+            while (!found) {
+                const auto edge_idx = static_cast<uint32_t>(rnd_neighbor(rnd));
+                const auto neighbor_index = neighbor_indices[edge_idx];
+                const auto neighbor_weight = neighbor_weights[edge_idx];
+
+                // the suggested neighbors might already be in the edge list of the new vertex
+                if (!graph.hasEdge(neighbor_index, internal_index)) {
+                    new_neighbor_index = neighbor_index;
+                    new_neighbor_weight = neighbor_weight;
+                    found = true;
+                }
+            }
+
+            // place the new vertex in the edge list of the result-vertex
+            const auto candidate_dist = dist_func(new_vertex_feature, graph.getFeatureVector(candidate_index), dist_func_param);
+            graph.changeEdge(candidate_index, new_neighbor_index, internal_index, candidate_dist);
+            new_neighbors.emplace_back(candidate_index, candidate_dist);
+
+            // place the new vertex in the edge list of the worst edge neighbor
+            const auto new_neighbor_dist = dist_func(new_vertex_feature, graph.getFeatureVector(new_neighbor_index), dist_func_param);
+            graph.changeEdge(new_neighbor_index, candidate_index, internal_index, new_neighbor_dist);
+            new_neighbors.emplace_back(new_neighbor_index, new_neighbor_dist);
+        }
+
+        // sort the neighbors by their neighbor indices and store them in the new vertex
+        std::sort(new_neighbors.begin(), new_neighbors.end(), [](const auto& x, const auto& y) { return x.first < y.first; });
+        auto neighbor_indices = std::vector<uint32_t>();
+        auto neighbor_weights = std::vector<float>();
+        for (auto&& neighbor : new_neighbors) {
+            neighbor_indices.emplace_back(neighbor.first);
+            neighbor_weights.emplace_back(neighbor.second);
+        }
+        graph.changeEdges(internal_index, neighbor_indices.data(), neighbor_weights.data());
+    }
+}
+
 }  // end namespace deglib::builder
+

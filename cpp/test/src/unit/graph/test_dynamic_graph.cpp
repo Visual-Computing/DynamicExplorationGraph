@@ -1,4 +1,5 @@
 #include "deglib/analysis.h"
+#include "deglib/deglib.h"
 #include "deglib/filter.h"
 #include "deglib/graph/dynamic_graph.h"
 #include "deglib/graph/readonly_graph.h"
@@ -238,7 +239,8 @@ TEST(DynamicGraph, RandomGraphAndSearch) {
         data[i] = static_cast<float>(i % 17) * 0.1f;
     }
 
-    auto graph = deglib::graph::DynamicGraph::create_random_graph(reinterpret_cast<const std::byte*>(data.data()), count, edges, space, 42, /*chunk_size=*/8);
+    auto graph = deglib::graph::DynamicGraph(edges, space, /*chunk_size=*/8);
+    deglib::builder::populate_random_graph(graph, reinterpret_cast<const std::byte*>(data.data()), count, 42);
 
     EXPECT_EQ(graph.size(), count);
     EXPECT_EQ(graph.getEdgesPerVertex(), edges);
@@ -275,8 +277,8 @@ TEST(DynamicGraph, SaveAndLoad) {
         data[i] = static_cast<float>(i) * 0.05f;
     }
 
-    auto orig_graph =
-        deglib::graph::DynamicGraph::create_random_graph(reinterpret_cast<const std::byte*>(data.data()), count, edges, space, 123, /*chunk_size=*/8);
+    auto orig_graph = deglib::graph::DynamicGraph(edges, space, /*chunk_size=*/8);
+    deglib::builder::populate_random_graph(orig_graph, reinterpret_cast<const std::byte*>(data.data()), count, 123);
 
     std::filesystem::path temp_path = std::filesystem::temp_directory_path() / "test_dynamic_graph.deg";
     EXPECT_TRUE(orig_graph.saveGraph(temp_path.string().c_str()));
@@ -308,7 +310,7 @@ TEST(DynamicGraph, FacadeConversion) {
     deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
 
     std::vector<float> data(count * 4, 1.0f);
-    auto deg = deglib::DynamicExplorationGraph::create_random_graph(reinterpret_cast<const std::byte*>(data.data()), count, edges, space, 7);
+    auto deg = deglib::create_random_graph(reinterpret_cast<const std::byte*>(data.data()), count, edges, space, 7);
 
     // Convert from SizeBoundedGraph to DynamicGraph
     auto dynamic_deg = deg.to_dynamic(/*chunk_size=*/8);

@@ -41,7 +41,9 @@ inline deglib::graph::SizeBoundedGraph create_random_graph(
     const uint32_t vertex_count = (max_size > 0 && max_size < repository.size()) ? max_size : uint32_t(repository.size());
     const auto feature_data = repository.getFeature(0);
 
-    return deglib::graph::SizeBoundedGraph::create_random_graph(feature_data, vertex_count, k, feature_space);
+    auto graph = deglib::graph::SizeBoundedGraph(vertex_count, k, feature_space);
+    deglib::builder::populate_random_graph(graph, feature_data, vertex_count);
+    return graph;
 }
 
 inline void create_graph(

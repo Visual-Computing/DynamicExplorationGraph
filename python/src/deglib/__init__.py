@@ -11,7 +11,6 @@ from .builder import GraphBuilder, build_from_data
 from .graph import (
     DynamicExplorationGraph,
     create_empty,
-    create_mutable_empty,
     create_dynamic_empty,
     create_random_graph,
     load_readonly_graph,
@@ -25,7 +24,6 @@ __version__ = "0.2.5"
 __all__ = [
     "DynamicExplorationGraph",
     "create_empty",
-    "create_mutable_empty",
     "create_dynamic_empty",
     "create_random_graph",
     "load_readonly_graph",

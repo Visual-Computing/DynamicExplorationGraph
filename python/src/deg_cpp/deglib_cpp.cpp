@@ -956,15 +956,11 @@ py::array_t<float> fp16_to_floats_wrapper(py::array_t<uint16_t, py::array::c_sty
 }
 
 deglib::DynamicExplorationGraph load_readonly_graph_wrapper(const char* path) {
-    auto graph = deglib::graph::load_readonly_graph(path);
-    auto heap_graph = std::make_unique<deglib::graph::ReadOnlyGraph>(std::move(graph));
-    return deglib::DynamicExplorationGraph(std::move(heap_graph));
+    return deglib::load_readonly_graph(path);
 }
 
 deglib::DynamicExplorationGraph load_sizebounded_graph_wrapper(const char* path, const uint32_t capacity = 0) {
-    auto graph = deglib::graph::load_sizebounded_graph(path, capacity);
-    auto heap_graph = std::make_unique<deglib::graph::SizeBoundedGraph>(std::move(graph));
-    return deglib::DynamicExplorationGraph(std::move(heap_graph));
+    return deglib::load_mutable_graph(path, capacity);
 }
 
 std::tuple<py::array_t<float>, float> mips_l2_transform_wrapper(py::array_t<float, py::array::c_style> vectors) {
@@ -1112,9 +1108,7 @@ deglib::DynamicExplorationGraph dynamic_graph_from_graph_wrapper(
 }
 
 deglib::DynamicExplorationGraph load_dynamic_graph_wrapper(const char* path, const uint32_t chunk_size = 1024) {
-    auto graph = deglib::graph::load_dynamic_graph(path, chunk_size);
-    auto heap_graph = std::make_unique<deglib::graph::DynamicGraph>(std::move(graph));
-    return deglib::DynamicExplorationGraph(std::move(heap_graph));
+    return deglib::load_dynamic_graph(path, chunk_size);
 }
 
 deglib::DynamicExplorationGraph size_bounded_graph_from_graph_wrapper(
@@ -1150,14 +1144,12 @@ deglib::DynamicExplorationGraph size_bounded_graph_from_graph_wrapper(
 
 deglib::DynamicExplorationGraph
 create_size_bounded_graph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::distances::FloatSpace& feature_space) {
-    auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(max_vertex_count, edges_per_vertex, feature_space);
-    return deglib::DynamicExplorationGraph(std::move(graph));
+    return deglib::create_empty(max_vertex_count, edges_per_vertex, feature_space);
 }
 
 deglib::DynamicExplorationGraph
 create_dynamic_graph(const uint8_t edges_per_vertex, const deglib::distances::FloatSpace& feature_space, const uint32_t chunk_size = 1024) {
-    auto graph = std::make_unique<deglib::graph::DynamicGraph>(edges_per_vertex, feature_space, chunk_size);
-    return deglib::DynamicExplorationGraph(std::move(graph));
+    return deglib::create_dynamic_empty(edges_per_vertex, feature_space, chunk_size);
 }
 
 deglib::DynamicExplorationGraph
@@ -1180,10 +1172,7 @@ create_random_graph(py::array features, const uint8_t edges_per_vertex, const de
     }
 
     const std::byte* feature_data = static_cast<const std::byte*>(buf.ptr);
-    auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(
-        deglib::graph::SizeBoundedGraph::create_random_graph(feature_data, vertex_count, edges_per_vertex, feature_space, seed)
-    );
-    return deglib::DynamicExplorationGraph(std::move(graph));
+    return deglib::create_random_graph(feature_data, vertex_count, edges_per_vertex, feature_space, seed);
 }
 
 // ============================================================================
@@ -1590,14 +1579,14 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def_static(
             "create_empty",
             [](const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::distances::FloatSpace& feature_space) {
-                return deglib::DynamicExplorationGraph::create_empty(max_vertex_count, edges_per_vertex, feature_space);
+                return deglib::create_empty(max_vertex_count, edges_per_vertex, feature_space);
             },
             py::arg("max_vertex_count"), py::arg("edges_per_vertex"), py::arg("feature_space")
         )
         .def_static(
             "create_dynamic_empty",
             [](const uint8_t edges_per_vertex, const deglib::distances::FloatSpace& feature_space, const uint32_t chunk_size) {
-                return deglib::DynamicExplorationGraph::create_dynamic_empty(edges_per_vertex, feature_space, chunk_size);
+                return deglib::create_dynamic_empty(edges_per_vertex, feature_space, chunk_size);
             },
             py::arg("edges_per_vertex"), py::arg("feature_space"), py::arg("chunk_size") = 1024
         )
@@ -1619,7 +1608,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
                         )
                     );
                 }
-                return deglib::DynamicExplorationGraph::create_random_graph(
+                return deglib::create_random_graph(
                     static_cast<const std::byte*>(buf.ptr), static_cast<uint32_t>(buf.shape[0]), edges_per_vertex, feature_space, seed
                 );
             },

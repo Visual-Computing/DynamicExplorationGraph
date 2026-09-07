@@ -29,41 +29,84 @@ Include the umbrella header to access all functionalities:
 
 ---
 
-## 1. Namespace: `deglib::` (User Facade)
+## 1. Namespace: `deglib::` (User Facade & Top-Level Functions)
 
-Header: `<deglib/graph.h>`
+Header: `<deglib/deglib.h>` / `<deglib/graph.h>`
 
-The root namespace provides [`DynamicExplorationGraph`](#class-dynamicexplorationgraph), the primary user-facing class that wraps internal graph structures and maps external object labels (`uint32_t`) to internal graph indices.
+The root namespace provides [`DynamicExplorationGraph`](#class-dynamicexplorationgraph), the primary user-facing class that wraps internal graph structures and maps external object labels (`uint32_t`) to internal graph indices, as well as high-level factory and loading functions.
 
 ```cpp
 namespace deglib {
 
+// --- Top-Level Graph Creation, Building & Loading Functions ---
+
+/// Build and optimize a DynamicExplorationGraph directly from contiguous feature data in one call
+template <typename T = float>
+DynamicExplorationGraph build_from_data(
+    std::span<const T> data,
+    uint32_t dims,
+    std::span<const uint32_t> labels = {},
+    uint8_t edges_per_vertex = 32,
+    Metric metric = Metric::FP32_L2,
+    OptimizationTarget target = OptimizationTarget::LowLID,
+    uint8_t extend_k = 64,
+    float extend_eps = 0.1f,
+    uint8_t improve_k = 0,
+    float improve_eps = 0.001f,
+    uint8_t max_path_length = 5,
+    uint32_t improve_tries = 0,
+    size_t thread_count = 0,
+    uint32_t seed = 42,
+    std::function<void(BuilderStatus&)> callback = nullptr
+);
+
+/// Create an empty mutable graph with fixed maximum capacity (backed by SizeBoundedGraph)
+DynamicExplorationGraph create_empty(
+    uint32_t max_vertex_count,
+    uint8_t edges_per_vertex,
+    const FloatSpace& feature_space
+);
+
+/// Create an empty mutable graph with dynamic chunk-allocated growth (backed by DynamicGraph)
+DynamicExplorationGraph create_dynamic_empty(
+    uint8_t edges_per_vertex,
+    const FloatSpace& feature_space,
+    uint32_t chunk_size = 1024
+);
+
+/// Create a randomized exploration graph from raw feature data
+DynamicExplorationGraph create_random_graph(
+    const std::byte* feature_data,
+    uint32_t vertex_count,
+    uint8_t edges_per_vertex,
+    const FloatSpace& feature_space,
+    uint32_t seed = 7
+);
+
+/// Load a saved graph file as an immutable, compact graph (backed by ReadOnlyGraph)
+DynamicExplorationGraph load_readonly_graph(const char* path_graph);
+
+/// Load a saved graph file as a dynamic chunk-allocated mutable graph (backed by DynamicGraph)
+DynamicExplorationGraph load_dynamic_graph(const char* path_graph, uint32_t chunk_size = 1024);
+
+/// Load a saved graph file as a fixed-capacity mutable graph (backed by SizeBoundedGraph)
+DynamicExplorationGraph load_mutable_graph(const char* path_graph, uint32_t new_max_size = 0);
+
+/// Create an EvenRegularGraphBuilder directly for a DynamicExplorationGraph
+EvenRegularGraphBuilder create_builder(
+    DynamicExplorationGraph& graph,
+    std::mt19937& rnd,
+    OptimizationTarget optimization_target = OptimizationTarget::LowLID,
+    uint8_t extend_k = 0,
+    float extend_eps = 0.1f,
+    uint8_t improve_k = 0,
+    float improve_eps = 0.001f,
+    uint8_t max_path_length = 5,
+    uint32_t improve_tries = 0
+);
+
 class DynamicExplorationGraph {
 public:
-    // --- Factory Methods ---
-
-    /// Create an empty mutable graph with fixed maximum capacity (SizeBoundedGraph)
-    static DynamicExplorationGraph create_empty(
-        uint32_t max_vertex_count,
-        uint8_t edges_per_vertex,
-        FloatSpace feature_space
-    );
-
-    /// Create an empty mutable graph with dynamic chunk-allocated growth (DynamicGraph)
-    static DynamicExplorationGraph create_dynamic_empty(
-        uint8_t edges_per_vertex,
-        FloatSpace feature_space,
-        uint32_t chunk_size = 1024
-    );
-
-    /// Create a randomized exploration graph from raw feature data
-    static DynamicExplorationGraph create_random_graph(
-        byte* feature_data,
-        uint32_t vertex_count,
-        uint8_t edges_per_vertex,
-        FloatSpace feature_space,
-        uint32_t seed = 7
-    );
 
     // --- Search & Exploration ---
 
@@ -114,25 +157,6 @@ public:
     /// Save graph topology and features to disk (graph must be mutable)
     bool saveGraph(string path);
 };
-
-/// Build and optimize a DynamicExplorationGraph directly from contiguous feature data
-DynamicExplorationGraph build_from_data(
-    span<float> data,
-    uint32_t dims,
-    span<uint32_t> labels = {},
-    uint8_t edges_per_vertex = 32,
-    Metric metric = Metric::FP32_L2,
-    OptimizationTarget target = OptimizationTarget::LowLID,
-    uint8_t extend_k = 64,
-    float extend_eps = 0.1f,
-    uint8_t improve_k = 0,
-    float improve_eps = 0.001f,
-    uint8_t max_path_length = 5,
-    uint32_t improve_tries = 0,
-    size_t thread_count = 0,
-    uint32_t seed = 42,
-    function<void(BuilderStatus&)> callback = nullptr
-);
 
 } // namespace deglib
 ```
@@ -504,7 +528,7 @@ class SizeBoundedGraph : public MutableGraph {
 public:
     SizeBoundedGraph(uint32_t max_vertex_count, uint8_t edges_per_vertex, FloatSpace feature_space);
 
-    static SizeBoundedGraph create_random_graph(byte* feature_data, uint32_t vertex_count, uint8_t edges_per_vertex, FloatSpace feature_space, uint32_t seed = 7);
+    static SizeBoundedGraph create_empty(uint32_t max_vertex_count, uint8_t edges_per_vertex, FloatSpace feature_space);
     static SizeBoundedGraph from_graph(InternalGraph& graph, uint32_t new_max_size = 0);
     static SizeBoundedGraph from_graph(InternalGraph& graph, FloatSpace custom_space, void* custom_features = nullptr, uint32_t new_max_size = 0);
     static SizeBoundedGraph load_from_file(const char* file_path, FloatSpace feature_space);

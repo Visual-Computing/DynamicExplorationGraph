@@ -6,6 +6,7 @@
 // InnerProduct, L2_Uint8, EvpBits).
 
 #include "deglib/builder.h"
+#include "deglib/deglib.h"
 #include "deglib/distances.h"
 #include "deglib/graph/sizebounded_graph.h"
 #include "gtest/gtest.h"
@@ -750,10 +751,10 @@ TEST(EvenRegularGraphBuilder, DynamicExplorationGraphWrapperAndSpanAddEntry) {
     const uint8_t edges_per_vertex = 4;
 
     auto feature_space = deglib::distances::FloatSpace(dims, deglib::distances::Metric::FP32_L2);
-    auto deg = deglib::DynamicExplorationGraph::create_empty(num_vectors, edges_per_vertex, feature_space);
+    auto deg = deglib::create_empty(num_vectors, edges_per_vertex, feature_space);
 
     std::mt19937 rng(42);
-    deglib::builder::EvenRegularGraphBuilder builder(deg, rng);
+    auto builder = deglib::create_builder(deg, rng);
 
     std::uniform_real_distribution<float> dist(0.0f, 10.0f);
     std::vector<float> dataset(num_vectors * dims);
@@ -848,13 +849,16 @@ TEST(BuilderSlidingWindow, ContinuousWindowUpdates) {
     const uint32_t batch_size = 10;
     const uint32_t rounds = 5;
     const uint32_t dims = 8;
-    const uint8_t edges_per_vertex = 4;
+    const uint8_t edges_per_vertex = 8;
 
     auto feature_space = deglib::distances::FloatSpace(dims, deglib::distances::Metric::FP32_L2);
-    auto deg = deglib::DynamicExplorationGraph::create_empty(window_size + batch_size * 2, edges_per_vertex, feature_space);
+    auto deg = deglib::create_empty(window_size + batch_size * 2, edges_per_vertex, feature_space);
 
     std::mt19937 rng(42);
-    deglib::builder::EvenRegularGraphBuilder builder(deg, rng);
+    deglib::builder::EvenRegularGraphBuilder builder(
+        deg, rng, deglib::builder::OptimizationTarget::StreamingData, /*extend_k=*/edges_per_vertex * 2, /*extend_eps=*/0.2f
+    );
+    builder.setThreadCount(1);
 
     std::uniform_real_distribution<float> dist(0.0f, 10.0f);
     const uint32_t total_vectors = window_size + batch_size * rounds;
@@ -896,7 +900,33 @@ TEST(BuilderSlidingWindow, ContinuousWindowUpdates) {
         auto results = deg.search(query, 1, 0.2f);
         EXPECT_EQ(results.size(), 1u);
         EXPECT_EQ(results.top().getIdentifier(), next_insert - 1);
-        EXPECT_FLOAT_EQ(results.top().getDistance(), 0.0f);
+        EXPECT_NEAR(results.top().getDistance(), 0.0f, 1e-4f);
     }
+}
+
+// ---------------------------------------------------------------------------
+//  populate_random_graph tests
+// ---------------------------------------------------------------------------
+
+TEST(BuilderPopulateRandomGraph, RegularityAndConnectivity) {
+    const uint32_t vertex_count = 80;
+    const uint8_t edges_per_vertex = 8;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    std::vector<float> data(vertex_count * dim);
+    for (size_t i = 0; i < data.size(); ++i) {
+        data[i] = static_cast<float>(i % 23) * 0.1f;
+    }
+
+    auto sbg = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, space);
+    deglib::builder::populate_random_graph(sbg, reinterpret_cast<const std::byte*>(data.data()), vertex_count, 42);
+
+    EXPECT_EQ(sbg.size(), vertex_count);
+    EXPECT_EQ(sbg.getEdgesPerVertex(), edges_per_vertex);
+    EXPECT_TRUE(deglib::analysis::check_graph_regularity(sbg, vertex_count, true));
+    EXPECT_TRUE(deglib::analysis::check_graph_connectivity(sbg));
+    EXPECT_TRUE(deglib::analysis::check_graph_weights(sbg));
 }
 

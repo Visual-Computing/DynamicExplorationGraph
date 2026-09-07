@@ -19,8 +19,6 @@ Factory & Loader Functions
 
 .. autofunction:: deglib.graph.create_empty
 
-.. autofunction:: deglib.graph.create_mutable_empty
-
 .. autofunction:: deglib.graph.create_dynamic_empty
 
 .. autofunction:: deglib.graph.create_random_graph

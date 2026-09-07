@@ -4,6 +4,7 @@
 // feature storage, capacity, search, save/load, multi-operation cycles.
 
 #include "deglib/analysis.h"
+#include "deglib/builder.h"
 #include "deglib/filter.h"
 #include "deglib/graph/readonly_graph.h"
 #include "deglib/graph/sizebounded_graph.h"
@@ -858,7 +859,8 @@ TEST(SizeBoundedGraph, CreateRandomGraphFP32) {
         }
     }
 
-    auto graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto graph = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, space);
+    deglib::builder::populate_random_graph(graph, feature_bytes.get(), vertex_count, 7);
 
     // Validate graph structure
     EXPECT_EQ(graph.size(), vertex_count);
@@ -889,7 +891,8 @@ TEST(SizeBoundedGraph, CreateRandomGraphUInt8) {
         }
     }
 
-    auto graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 42);
+    auto graph = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, space);
+    deglib::builder::populate_random_graph(graph, feature_bytes.get(), vertex_count, 42);
 
     EXPECT_EQ(graph.size(), vertex_count);
     EXPECT_EQ(graph.getEdgesPerVertex(), edges_per_vertex);
@@ -911,7 +914,7 @@ TEST(SizeBoundedGraph, FromGraphSameFeatures) {
 
     deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
 
-    // Build a source graph using create_random_graph
+    // Build a source graph using populate_random_graph
     auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
     float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
     for (uint32_t i = 0; i < vertex_count; i++) {
@@ -920,7 +923,8 @@ TEST(SizeBoundedGraph, FromGraphSameFeatures) {
         }
     }
 
-    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, space);
+    deglib::builder::populate_random_graph(source_graph, feature_bytes.get(), vertex_count, 7);
 
     // Copy using from_graph with the same feature space
     auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph, space);
@@ -980,7 +984,8 @@ TEST(SizeBoundedGraph, FromGraphDefaultFeatureSpace) {
         }
     }
 
-    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, space);
+    deglib::builder::populate_random_graph(source_graph, feature_bytes.get(), vertex_count, 7);
 
     // Copy using from_graph without specifying feature space (fast-path copy)
     const uint32_t new_capacity = 50;
@@ -1016,7 +1021,8 @@ TEST(SizeBoundedGraph, FromGraphFromReadOnly) {
         }
     }
 
-    auto source_sbg = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_sbg = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, space);
+    deglib::builder::populate_random_graph(source_sbg, feature_bytes.get(), vertex_count, 7);
 
     // Convert to ReadOnlyGraph
     auto readonly = deglib::graph::convert_to_readonly_graph(source_sbg);
@@ -1067,7 +1073,8 @@ TEST(SizeBoundedGraph, FromGraphCustomFeatures) {
         }
     }
 
-    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, space);
+    deglib::builder::populate_random_graph(source_graph, feature_bytes.get(), vertex_count, 7);
 
     // Create custom features with a different scale (multiply by 10)
     auto custom_feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
@@ -1124,7 +1131,8 @@ TEST(SizeBoundedGraph, FromGraphNewMaxSize) {
         }
     }
 
-    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, space);
+    deglib::builder::populate_random_graph(source_graph, feature_bytes.get(), vertex_count, 7);
 
     // Copy with a larger capacity
     const uint32_t new_capacity = 100;
@@ -1156,7 +1164,8 @@ TEST(SizeBoundedGraph, FromGraphInnerProduct) {
         }
     }
 
-    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, space);
+    deglib::builder::populate_random_graph(source_graph, feature_bytes.get(), vertex_count, 7);
 
     // Copy with same feature space (InnerProduct)
     auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph, space);
@@ -1193,7 +1202,8 @@ TEST(SizeBoundedGraph, FromGraphSearchable) {
         }
     }
 
-    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, space);
+    deglib::builder::populate_random_graph(source_graph, feature_bytes.get(), vertex_count, 7);
 
     // Copy using from_graph
     auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph, space);
@@ -1232,7 +1242,8 @@ TEST(SizeBoundedGraph, FromGraphDifferentFeatureSpace) {
         }
     }
 
-    auto source_graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space_l2, 7);
+    auto source_graph = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, space_l2);
+    deglib::builder::populate_random_graph(source_graph, feature_bytes.get(), vertex_count, 7);
 
     // Copy with a different feature space (InnerProduct)
     auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph, space_ip);
@@ -1278,7 +1289,8 @@ TEST(SizeBoundedGraph, CreateRandomGraphSearchable) {
         }
     }
 
-    auto graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto graph = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, space);
+    deglib::builder::populate_random_graph(graph, feature_bytes.get(), vertex_count, 7);
 
     // Use explore from vertex 0 (internal index 0) — should find vertex 0 as nearest
     auto results = graph.explore(0, 5, 0, 0.0f, /*include_entry=*/true, nullptr);
@@ -1310,8 +1322,10 @@ TEST(SizeBoundedGraph, CreateRandomGraphDeterministic) {
         }
     }
 
-    auto graph1 = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 123);
-    auto graph2 = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 123);
+    auto graph1 = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, space);
+    deglib::builder::populate_random_graph(graph1, feature_bytes.get(), vertex_count, 123);
+    auto graph2 = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, space);
+    deglib::builder::populate_random_graph(graph2, feature_bytes.get(), vertex_count, 123);
 
     // Same seed should produce same graph
     EXPECT_EQ(graph1.size(), graph2.size());
@@ -1342,8 +1356,10 @@ TEST(SizeBoundedGraph, CreateRandomGraphDifferentSeeds) {
         }
     }
 
-    auto graph1 = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 1);
-    auto graph2 = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 999);
+    auto graph1 = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, space);
+    deglib::builder::populate_random_graph(graph1, feature_bytes.get(), vertex_count, 1);
+    auto graph2 = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, space);
+    deglib::builder::populate_random_graph(graph2, feature_bytes.get(), vertex_count, 999);
 
     // Different seeds may produce different graphs (not guaranteed, but likely)
     // At minimum, both should be valid
@@ -1373,7 +1389,8 @@ TEST(SizeBoundedGraph, CreateRandomGraphInnerProduct) {
         }
     }
 
-    auto graph = deglib::graph::SizeBoundedGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto graph = deglib::graph::SizeBoundedGraph(vertex_count, edges_per_vertex, space);
+    deglib::builder::populate_random_graph(graph, feature_bytes.get(), vertex_count, 7);
 
     EXPECT_EQ(graph.size(), vertex_count);
     EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::FP32_InnerProduct);

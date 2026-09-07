@@ -48,53 +48,7 @@ class DynamicExplorationGraph {
     DynamicExplorationGraph(const DynamicExplorationGraph&) = delete;
     DynamicExplorationGraph& operator=(const DynamicExplorationGraph&) = delete;
 
-    /**
-     * Create an empty mutable DynamicExplorationGraph with the given capacity,
-     * edges per vertex, and feature space.
-     */
-    static DynamicExplorationGraph
-    create_empty(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::distances::FloatSpace& feature_space) {
-        auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(max_vertex_count, edges_per_vertex, feature_space);
-        return DynamicExplorationGraph(std::move(graph));
-    }
 
-    /**
-     * Create an empty mutable DynamicExplorationGraph with chunk-based dynamic memory allocation.
-     *
-     * @param edges_per_vertex Number of edges per vertex (must be even).
-     * @param feature_space The feature space defining dimensionality and metric.
-     * @param chunk_size Target number of vertices per memory chunk (default = 1024).
-     *                   Will be automatically rounded up to the nearest power of 2 (e.g. 600 -> 1024).
-     */
-    static DynamicExplorationGraph
-    create_dynamic_empty(const uint8_t edges_per_vertex, const deglib::distances::FloatSpace& feature_space, const uint32_t chunk_size = 1024) {
-        auto graph = std::make_unique<deglib::graph::DynamicGraph>(edges_per_vertex, feature_space, chunk_size);
-        return DynamicExplorationGraph(std::move(graph));
-    }
-
-    /**
-     * Create a random exploration graph from the given feature data.
-     *
-     * @param feature_data Pointer to a contiguous array of feature vectors.
-     *                     Each vector is feature_space.get_data_size() bytes.
-     * @param vertex_count Number of vertices to insert.
-     * @param edges_per_vertex Number of edges per vertex (must be even).
-     * @param feature_space The feature space defining dimensionality and metric.
-     * @param seed Random seed for deterministic graph construction.
-     * @return A new DynamicExplorationGraph wrapping the created random graph.
-     */
-    static DynamicExplorationGraph create_random_graph(
-        const std::byte* feature_data,
-        const uint32_t vertex_count,
-        const uint8_t edges_per_vertex,
-        const deglib::distances::FloatSpace& feature_space,
-        const uint32_t seed = 7
-    ) {
-        auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(
-            deglib::graph::SizeBoundedGraph::create_random_graph(feature_data, vertex_count, edges_per_vertex, feature_space, seed)
-        );
-        return DynamicExplorationGraph(std::move(graph));
-    }
 
     const uint32_t size() const { return internal_graph_->size(); }
 

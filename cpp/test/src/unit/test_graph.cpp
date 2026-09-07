@@ -9,7 +9,7 @@
 // fail test assertions.
 
 #include "deglib/analysis.h"
-#include "deglib/graph.h"
+#include "deglib/deglib.h"
 #include "deglib/graph/mutable_graph.h"
 #include "deglib/graph/readonly_graph.h"
 #include "gtest/gtest.h"
@@ -320,7 +320,7 @@ TEST(DEGExploreReturnsExternalLabels, ExploreWithReadOnlyGraphBackend) {
 
 TEST(DynamicExplorationGraphCreateEmpty, CreatesEmptyGraph) {
     deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
-    auto graph = deglib::DynamicExplorationGraph::create_empty(100, 4, space);
+    auto graph = deglib::create_empty(100, 4, space);
 
     EXPECT_EQ(graph.size(), 0u);
     EXPECT_EQ(graph.getEdgesPerVertex(), 4u);
@@ -331,7 +331,7 @@ TEST(DynamicExplorationGraphCreateEmpty, CreatesEmptyGraph) {
 
 TEST(DynamicExplorationGraphCreateEmpty, CreatesEmptyGraphUint8) {
     deglib::distances::FloatSpace space(128, deglib::distances::Metric::Uint8_L2);
-    auto graph = deglib::DynamicExplorationGraph::create_empty(50, 6, space);
+    auto graph = deglib::create_empty(50, 6, space);
 
     EXPECT_EQ(graph.size(), 0u);
     EXPECT_EQ(graph.getEdgesPerVertex(), 6u);
@@ -354,7 +354,7 @@ TEST(DynamicExplorationGraphCreateRandomGraph, CreatesValidGraph) {
         }
     }
 
-    auto graph = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto graph = deglib::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     EXPECT_EQ(graph.size(), vertex_count);
     EXPECT_EQ(graph.getEdgesPerVertex(), edges_per_vertex);
@@ -380,7 +380,7 @@ TEST(DynamicExplorationGraphCreateRandomGraph, SearchReturnsExternalLabels) {
         }
     }
 
-    auto graph = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto graph = deglib::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Search returns external labels
     std::vector<float> query = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -416,8 +416,8 @@ TEST(DynamicExplorationGraphCreateRandomGraph, DeterministicWithSameSeed) {
         }
     }
 
-    auto graph1 = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 123);
-    auto graph2 = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 123);
+    auto graph1 = deglib::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 123);
+    auto graph2 = deglib::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 123);
 
     EXPECT_EQ(graph1.size(), graph2.size());
 
@@ -448,7 +448,7 @@ TEST(DynamicExplorationGraphCreateRandomGraph, UInt8Metric) {
         }
     }
 
-    auto graph = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto graph = deglib::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     EXPECT_EQ(graph.size(), vertex_count);
     EXPECT_EQ(graph.getFeatureSpace().metric(), deglib::distances::Metric::Uint8_L2);
@@ -476,7 +476,7 @@ TEST(DynamicExplorationGraphFromGraph, FromGraphCreatesMutableGraph) {
         }
     }
 
-    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Convert to ReadOnlyGraph first
     auto readonly = source_graph.to_readonly();
@@ -509,7 +509,7 @@ TEST(DynamicExplorationGraphFromGraph, FromGraphStaticFactory) {
         }
     }
 
-    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Use to_mutable to create a mutable copy from the source graph
     auto mutable_graph = source_graph.to_mutable();
@@ -543,7 +543,7 @@ TEST(DynamicExplorationGraphFromGraph, ToMutableSearchWorks) {
         }
     }
 
-    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Convert to readonly, then back to mutable
     auto readonly = source_graph.to_readonly();
@@ -582,7 +582,7 @@ TEST(DynamicExplorationGraphFromGraph, ToMutableWithCustomFeatures) {
         }
     }
 
-    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Create scaled custom features
     auto custom_feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
@@ -640,7 +640,7 @@ TEST(DynamicExplorationGraphFromGraph, ToMutableWithNewMaxSize) {
         }
     }
 
-    auto source_graph = deglib::DynamicExplorationGraph::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
+    auto source_graph = deglib::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 7);
 
     // Convert to mutable with larger capacity using the direct to_mutable(new_max_size) overload
     const uint32_t new_capacity = 50;
@@ -655,3 +655,46 @@ TEST(DynamicExplorationGraphFromGraph, ToMutableWithNewMaxSize) {
     EXPECT_EQ(mutable_graph.size(), vertex_count + 1);
     EXPECT_TRUE(mutable_graph.hasVertex(9999));
 }
+
+// ===========================================================================
+//  deglib Top-Level Load Functions
+// ===========================================================================
+
+TEST(DeglibLoadFunctions, LoadReadOnlyDynamicAndMutable) {
+    const uint32_t vertex_count = 20;
+    const uint8_t edges_per_vertex = 4;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        for (uint32_t d = 0; d < dim; d++) {
+            feature_floats[i * dim + d] = static_cast<float>(i + d);
+        }
+    }
+
+    auto source = deglib::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space, 42);
+
+    const auto temp_path = std::filesystem::temp_directory_path() / "test_deglib_load_functions.deg";
+    source.saveGraph(temp_path.string().c_str());
+
+    // 1. load_readonly_graph
+    auto ro_graph = deglib::load_readonly_graph(temp_path.string().c_str());
+    EXPECT_EQ(ro_graph.size(), vertex_count);
+    EXPECT_FALSE(ro_graph.isMutable());
+
+    // 2. load_dynamic_graph
+    auto dyn_graph = deglib::load_dynamic_graph(temp_path.string().c_str(), 16);
+    EXPECT_EQ(dyn_graph.size(), vertex_count);
+    EXPECT_TRUE(dyn_graph.isMutable());
+
+    // 3. load_mutable_graph
+    auto mut_graph = deglib::load_mutable_graph(temp_path.string().c_str(), 50);
+    EXPECT_EQ(mut_graph.size(), vertex_count);
+    EXPECT_TRUE(mut_graph.isMutable());
+
+    std::filesystem::remove(temp_path);
+}
+

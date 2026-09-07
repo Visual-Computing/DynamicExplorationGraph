@@ -78,11 +78,11 @@ For streaming workloads with dynamic insertions and deletions, use `DynamicExplo
 ```cpp
 // 1. Create a mutable high-level graph
 auto feature_space = deglib::distances::FloatSpace(dims, deglib::distances::Metric::FP32_L2);
-auto graph = deglib::DynamicExplorationGraph::create_empty(num_vectors, /*edges_per_vertex=*/32, feature_space);
+auto graph = deglib::create_empty(num_vectors, /*edges_per_vertex=*/32, feature_space);
 
-// 2. Initialize builder directly with the DynamicExplorationGraph facade
+// 2. Initialize builder directly via root deglib factory
 std::mt19937 rng(42);
-auto builder = deglib::builder::EvenRegularGraphBuilder(graph, rng);
+auto builder = deglib::create_builder(graph, rng);
 
 // 3. Add feature vectors using typed std::span
 for (uint32_t i = 0; i < num_vectors; ++i) {
@@ -93,6 +93,22 @@ builder.build();
 
 // 4. Query
 auto results = graph.search(std::span<const float>(query), /*k=*/10, /*eps=*/0.1f);
+```
+
+### Saving and Loading Graphs
+
+```cpp
+// 1. Save mutable graph to disk
+graph.saveGraph("index.deg");
+
+// 2. Load as compact, optimized read-only graph for search
+auto readonly_graph = deglib::load_readonly_graph("index.deg");
+
+// 3. Load as chunk-allocated dynamic graph (supports streaming additions/removals)
+auto dynamic_graph = deglib::load_dynamic_graph("index.deg", /*chunk_size=*/1024);
+
+// 4. Load as fixed-capacity mutable graph
+auto mutable_graph = deglib::load_mutable_graph("index.deg", /*new_max_size=*/10000);
 ```
 
 ---

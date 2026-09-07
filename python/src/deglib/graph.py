@@ -282,7 +282,6 @@ def get_num_useful_threads(requested: int, max_limit: int):
 __all__ = [
     "DynamicExplorationGraph",
     "create_empty",
-    "create_mutable_empty",
     "create_dynamic_empty",
     "create_random_graph",
     "load_readonly_graph",
@@ -304,18 +303,6 @@ def create_empty(capacity: int, feature_space: FloatSpace, edges_per_vertex: int
     return DynamicExplorationGraph(graph_cpp)
 
 
-def create_mutable_empty(
-    capacity: int, feature_space: FloatSpace, edges_per_vertex: int = 32
-) -> DynamicExplorationGraph:
-    """
-    Create an empty mutable DynamicExplorationGraph (SizeBoundedGraph). Alias for create_empty.
-
-    :param capacity: The maximal number of vertices of this graph.
-    :param feature_space: A FloatSpace object defining dimensionality, metric, and instruction set.
-    :param edges_per_vertex: Number of neighbors for each vertex. Defaults to 32.
-    :return: A new mutable DynamicExplorationGraph.
-    """
-    return create_empty(capacity, feature_space, edges_per_vertex)
 
 
 def create_dynamic_empty(

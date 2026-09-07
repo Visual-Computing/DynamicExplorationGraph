@@ -841,14 +841,10 @@ def test_create_helpers():
     assert g1.is_mutable()
     assert g1.size() == 0
 
-    g2 = deglib.create_mutable_empty(100, space, 16)
+    g2 = deglib.create_dynamic_empty(space, 16, 128)
     assert g2.is_mutable()
     assert g2.size() == 0
 
-    g3 = deglib.create_dynamic_empty(space, 16, 128)
-    assert g3.is_mutable()
-    assert g3.size() == 0
-
     features = np.random.default_rng(42).standard_normal((20, 16)).astype(np.float32)
-    g4 = deglib.create_random_graph(features, space, 4)
-    assert g4.size() == 20
+    g3 = deglib.create_random_graph(features, space, 4)
+    assert g3.size() == 20

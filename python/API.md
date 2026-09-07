@@ -49,9 +49,19 @@ deglib.build_from_data(
     callback=None                              # Callback function(BuilderStatus) or "progress" for CLI bar
 ) -> DynamicExplorationGraph
 
+# Create empty mutable graph with fixed capacity in preallocated memory (SizeBoundedGraph)
+deglib.create_empty(capacity, feature_space, edges_per_vertex=32) -> DynamicExplorationGraph
+
+# Create empty mutable graph with chunk-based memory that grows dynamically (DynamicGraph)
+deglib.create_dynamic_empty(feature_space, edges_per_vertex=32, chunk_size=1024) -> DynamicExplorationGraph
+
+# Create a randomized initial exploration graph from a numpy feature array
+deglib.create_random_graph(features, feature_space, edges_per_vertex=32, seed=7) -> DynamicExplorationGraph
+
 # Load saved graphs from disk
 deglib.load_readonly_graph(path) -> DynamicExplorationGraph
 deglib.load_dynamic_graph(path, chunk_size=1024) -> DynamicExplorationGraph
+deglib.load_mutable_graph(path, capacity=0) -> DynamicExplorationGraph
 ```
 
 ### Class: `deglib.DynamicExplorationGraph`
