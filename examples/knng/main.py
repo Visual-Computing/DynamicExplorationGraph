@@ -27,7 +27,7 @@ import deglib
 from deglib.distances import FloatSpace, Metric
 from deglib.optimization import quantize_batch
 from deglib.search import rerank
-from dataset_utils import load_hdf5_dataset, ensure_small_dataset, DEFAULT_CACHE_DIR
+from dataset import load_hdf5_dataset, ensure_small_dataset, DEFAULT_CACHE_DIR
 
 DEFAULT_K_TOP = 15
 DEFAULT_K_GRAPH = 16

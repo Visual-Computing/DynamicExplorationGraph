@@ -813,6 +813,11 @@ class SearcherPy {
         }
     }
 
+    void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 30000, uint32_t seed = 42, size_t num_threads = 0) {
+        py::gil_scoped_release release;
+        searcher_->optimize(n_clusters, n_iter, sample_size, seed, num_threads);
+    }
+
     py::object search(py::array query, uint32_t k, float eps = 0.1f, float rerank_factor = 1.0f, bool return_distances = false, bool unsorted = false) {
         auto buf = query.request();
         if (buf.ndim != 1 && (buf.ndim != 2 || (buf.shape[0] != 1 && buf.shape[1] != 1))) {
@@ -1571,6 +1576,11 @@ PYBIND11_MODULE(deglib_cpp, m) {
             "search_batch", &SearcherPy::search_batch,
             py::arg("queries"), py::arg("k"), py::arg("eps") = 0.1f, py::arg("rerank_factor") = 1.0f,
             py::arg("num_threads") = 1, py::arg("return_distances") = false, py::arg("unsorted") = false
+        )
+        .def(
+            "optimize", &SearcherPy::optimize,
+            py::arg("n_clusters") = 128, py::arg("n_iter") = 15,
+            py::arg("sample_size") = 30000, py::arg("seed") = 42, py::arg("num_threads") = 0
         );
 
     // graphs

@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 import deglib
 from deglib_cpp import avx_usable, avx512_usable
-from dataset_utils import (
+from dataset import (
     load_dataset_for_dynamic,
     get_default_cache_dir,
     resolve_dataset_key,

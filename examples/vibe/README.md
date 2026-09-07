@@ -32,10 +32,13 @@ uv sync
 
 ### 2. Run Benchmark
 
-Datasets are automatically downloaded on demand directly from the official [VIBE Hugging Face repository](https://huggingface.co/datasets/vector-index-bench/vibe) and stored in `D:/Data/DEG` (or `~/.cache/deg` / `VIBE_CACHE_DIR`).
+Datasets are automatically downloaded on demand directly from the official [VIBE Hugging Face repository](https://huggingface.co/datasets/vector-index-bench/vibe) and stored in `~/.cache/deg_datasets` (or overridden via `DEG_CACHE_DIR` / `VIBE_CACHE_DIR`).
 
 ```bash
-# Run benchmark on LAION-clip (generates and opens interactive HTML plot)
+# Run benchmark on default dataset (AGNews-mxbai)
+uv run main.py
+
+# Run on specific dataset
 uv run main.py --dataset laion-clip
 
 # Run on Yahoo-MiniLM without opening browser popup
@@ -48,13 +51,13 @@ You can explore existing benchmark log files and generate standalone interactive
 
 ```bash
 # Open interactive GUI Log Explorer (browse dataset logs & view plots)
-uv run plot_from_log.py
+uv run plot.py
 
 # Render and open interactive plot directly for a specific dataset
-uv run plot_from_log.py --dataset laion-clip
+uv run plot.py --dataset laion-clip
 
 # Render and open interactive plot directly from an explicit log file
-uv run plot_from_log.py --log D:/Data/DEG/laion-clip/deg-fp32/laion-clip_benchmark.log
+uv run plot.py --log ~/.cache/deg_datasets/laion-clip/deg/laion-clip_benchmark.log
 ```
 
 ---
@@ -78,13 +81,13 @@ All benchmark search parameters, graph degrees, optimization targets, pruning op
 
 ### `main.py`
 - `--dataset`, `-d`: Dataset name (e.g. `laion-clip`, `arxiv-nomic`, `agnews-mxbai`, etc.).
-- `--cache-dir`, `-c`: Custom directory for datasets and graphs (default: `D:/Data/DEG` or `~/.cache/deg`).
+- `--cache-dir`, `-c`: Custom directory for datasets and graphs (default: `~/.cache/deg_datasets` or `DEG_CACHE_DIR`).
 - `--build-threads`, `-t`: Number of CPU threads for graph building (default: `cpu_count // 2`).
 - `--query-dtype`: Override query and feature storage precision (`float32`, `int8`).
 - `--cpu`, `--cpu-affinity`: Pin the benchmark process to specific CPU core ID(s).
 - `--no-show`: Do not open browser window after benchmark completes.
 
-### `plot_from_log.py`
+### `plot.py`
 - *(No arguments)*: Launches the dark-themed **GUI Log Explorer** to browse logs across all VIBE dataset folders.
 - `--dataset`, `-d`: Dataset name to resolve standard log path.
 - `--log`, `-l`: Explicit path to a `*.log` benchmark file.

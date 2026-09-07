@@ -123,6 +123,16 @@ class Searcher:
             base_vectors=refine_data,
         )
 
+    def optimize(
+        self,
+        n_clusters: int = 128,
+        n_iter: int = 15,
+        sample_size: int = 30000,
+        seed: int = 42,
+        num_threads: int = 0,
+    ) -> None:
+        self.searcher_cpp.optimize(int(n_clusters), int(n_iter), int(sample_size), int(seed), int(num_threads))
+
     def search(
         self,
         query: np.ndarray,
@@ -141,6 +151,8 @@ class Searcher:
         - If `query` is a batch (`(N, dim)` with N > 1):
           returns 2D array of shape `(N, k)` (or tuple of 2D arrays if `return_distances` is True).
 
+        Entry vertices come solely from ``optimize()``.
+
         :param query: Query array (1D vector or 2D batch).
         :param k: Number of top nearest neighbors to return per query.
         :param eps: Search expansion factor (controls speed vs. recall trade-off, default: 0.1).
@@ -153,12 +165,12 @@ class Searcher:
         if query.ndim == 1 or (query.ndim == 2 and (query.shape[0] == 1 or query.shape[1] == 1)):
             flat_query = np.ascontiguousarray(query.ravel())
             return self.searcher_cpp.search(
-                flat_query, int(k), float(eps), float(rerank_factor), return_distances, unsorted
+                flat_query, int(k), float(eps), float(rerank_factor), return_distances, unsorted,
             )
         elif query.ndim == 2:
             contiguous_queries = np.ascontiguousarray(query)
             return self.searcher_cpp.search_batch(
-                contiguous_queries, int(k), float(eps), float(rerank_factor), int(threads), return_distances, unsorted
+                contiguous_queries, int(k), float(eps), float(rerank_factor), int(threads), return_distances, unsorted,
             )
         else:
             raise ValueError(f"query must be 1D or 2D NumPy array, got ndim={query.ndim} with shape {query.shape}")

@@ -132,18 +132,11 @@ def resolve_dataset_key(key: str) -> str:
 
 
 def get_default_cache_dir() -> Path:
-    """Returns the default dataset cache directory (~/.cache/deg_datasets, DEG_CACHE_DIR, or D:/Data/DEG)."""
+    """Returns the default dataset cache directory (~/.cache/deg_datasets, DEG_CACHE_DIR, or VIBE_CACHE_DIR)."""
     env_dir = os.environ.get("DEG_CACHE_DIR") or os.environ.get("VIBE_CACHE_DIR") or os.environ.get("VIBE_CACHE")
     if env_dir:
         path = Path(env_dir)
     else:
-        d_drive = Path("D:/Data/DEG")
-        try:
-            if d_drive.parent.exists():
-                d_drive.mkdir(parents=True, exist_ok=True)
-                return d_drive
-        except (PermissionError, OSError):
-            pass
         path = Path.home() / ".cache" / "deg_datasets"
     path.mkdir(parents=True, exist_ok=True)
     return path

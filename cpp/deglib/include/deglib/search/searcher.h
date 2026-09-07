@@ -8,6 +8,7 @@
 #include "deglib/optimization/quantization/evp_quantize.h"
 #include "deglib/optimization/quantization/scalar_quantize.h"
 #include "deglib/search.h"
+#include "deglib/search/kmeans.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -51,9 +52,7 @@ struct SearchResultBatch {
     bool empty() const noexcept { return n_queries == 0; }
     bool has_distances() const noexcept { return !distances.empty(); }
 
-    std::span<const uint32_t> get_indices(size_t q) const noexcept {
-        return {indices.data() + q * k, k};
-    }
+    std::span<const uint32_t> get_indices(size_t q) const noexcept { return {indices.data() + q * k, k}; }
     std::span<const float> get_distances(size_t q) const noexcept {
         return distances.empty() ? std::span<const float>{} : std::span<const float>{distances.data() + q * k, k};
     }
@@ -76,9 +75,7 @@ struct EVPQuantizer {
     inline void quantize(const InT* in, OutByteT* out_bytes, size_t count, uint32_t dim) const {
         for (size_t i = 0; i < count; ++i) {
             const size_t mask_bytes = dim / 8;
-            deglib::quantization::evp::quantize_single_into(
-                in + i * dim, dim, non_zeros, reinterpret_cast<std::byte*>(out_bytes) + i * 2 * mask_bytes
-            );
+            deglib::quantization::evp::quantize_single_into(in + i * dim, dim, non_zeros, reinterpret_cast<std::byte*>(out_bytes) + i * 2 * mask_bytes);
         }
     }
 };
@@ -91,10 +88,7 @@ struct NoRefiner {
     static constexpr bool enabled = false;
 
     template <typename QueryT>
-    static inline uint32_t rerank(
-        const QueryT*, uint32_t, const uint32_t*, size_t, uint32_t,
-        uint32_t*, float*, bool, bool
-    ) {
+    static inline uint32_t rerank(const QueryT*, uint32_t, const uint32_t*, size_t, uint32_t, uint32_t*, float*, bool, bool) {
         return 0;
     }
 };
@@ -106,13 +100,19 @@ struct ExactRefiner {
     const RefineDataT* base_vectors = nullptr;
     size_t num_base_vectors = 0;
 
-    ExactRefiner(deglib::distances::FloatSpace sp, const RefineDataT* base, size_t count)
-        : space(std::move(sp)), base_vectors(base), num_base_vectors(count) {}
+    ExactRefiner(deglib::distances::FloatSpace sp, const RefineDataT* base, size_t count) : space(std::move(sp)), base_vectors(base), num_base_vectors(count) {}
 
     template <typename QueryT>
     inline uint32_t rerank(
-        const QueryT* query, uint32_t dim, const uint32_t* candidate_indices, size_t num_cands,
-        uint32_t k, uint32_t* out_indices, float* out_distances, bool return_distances, bool unsorted
+        const QueryT* query,
+        uint32_t dim,
+        const uint32_t* candidate_indices,
+        size_t num_cands,
+        uint32_t k,
+        uint32_t* out_indices,
+        float* out_distances,
+        bool return_distances,
+        bool unsorted
     ) const {
         if (!base_vectors || num_cands == 0 || k == 0) return 0;
 
@@ -152,12 +152,50 @@ class SearcherBase {
   public:
     virtual ~SearcherBase() = default;
 
-    // --- Raw buffer API (Zero Overhead) ---
-    virtual uint32_t search_f32(const float* query, uint32_t k, float eps, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false) const = 0;
-    virtual uint32_t search_f16(const uint16_t* query, uint32_t k, float eps, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false) const = 0;
+    // --- Raw buffer API (Zero Overhead). ---
+    virtual uint32_t search_f32(
+        const float* query,
+        uint32_t k,
+        float eps,
+        float rerank_factor,
+        uint32_t* out_indices,
+        float* out_distances = nullptr,
+        bool unsorted = false
+    ) const = 0;
+    virtual uint32_t search_f16(
+        const uint16_t* query,
+        uint32_t k,
+        float eps,
+        float rerank_factor,
+        uint32_t* out_indices,
+        float* out_distances = nullptr,
+        bool unsorted = false
+    ) const = 0;
 
-    virtual void search_batch_f32(const float* queries, size_t n_queries, uint32_t k, float eps, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const = 0;
-    virtual void search_batch_f16(const uint16_t* queries, size_t n_queries, uint32_t k, float eps, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const = 0;
+    virtual void search_batch_f32(
+        const float* queries,
+        size_t n_queries,
+        uint32_t k,
+        float eps,
+        float rerank_factor,
+        uint32_t* out_indices,
+        float* out_distances = nullptr,
+        size_t threads = 1,
+        bool unsorted = false
+    ) const = 0;
+    virtual void search_batch_f16(
+        const uint16_t* queries,
+        size_t n_queries,
+        uint32_t k,
+        float eps,
+        float rerank_factor,
+        uint32_t* out_indices,
+        float* out_distances = nullptr,
+        size_t threads = 1,
+        bool unsorted = false
+    ) const = 0;
+
+    virtual void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 30000, uint32_t seed = 42, size_t threads = 0) = 0;
 
     // --- Modern C++20 std::span and std::vector Convenience API ---
 
@@ -213,21 +251,14 @@ class SearcherBase {
      * @return                  SearchResult containing vector of indices and optional distances
      */
     template <typename T>
-    SearchResult search(
-        std::span<const T> query,
-        uint32_t k,
-        float eps = 0.1f,
-        float rerank_factor = 1.0f,
-        bool return_distances = false,
-        bool unsorted = false
-    ) const {
+    SearchResult
+    search(std::span<const T> query, uint32_t k, float eps = 0.1f, float rerank_factor = 1.0f, bool return_distances = false, bool unsorted = false) const {
         SearchResult res;
         res.indices.resize(k);
         if (return_distances) res.distances.resize(k);
         uint32_t count = search<T>(
-            query, k, std::span<uint32_t>(res.indices),
-            return_distances ? std::span<float>(res.distances) : std::span<float>{},
-            eps, rerank_factor, return_distances, unsorted
+            query, k, std::span<uint32_t>(res.indices), return_distances ? std::span<float>(res.distances) : std::span<float>{}, eps, rerank_factor,
+            return_distances, unsorted
         );
         res.indices.resize(count);
         if (return_distances) res.distances.resize(count);
@@ -309,10 +340,8 @@ class SearcherBase {
             result.distances.resize(n_queries * k);
         }
         search_batch<T>(
-            queries, n_queries, k,
-            std::span<uint32_t>(result.indices),
-            return_distances ? std::span<float>(result.distances) : std::span<float>{},
-            eps, rerank_factor, threads, return_distances, unsorted
+            queries, n_queries, k, std::span<uint32_t>(result.indices), return_distances ? std::span<float>(result.distances) : std::span<float>{}, eps,
+            rerank_factor, threads, return_distances, unsorted
         );
         return result;
     }
@@ -328,21 +357,25 @@ class SearcherImpl : public SearcherBase {
     const deglib::graph::InternalGraph* graph_ = nullptr;
     QuantT quantizer_;
     RefinerT refiner_;
+    std::vector<uint32_t> entry_vertex_indices_;
 
   public:
-    SearcherImpl(
-        const deglib::graph::InternalGraph& graph,
-        QuantT quantizer,
-        RefinerT refiner
-    )
-        : graph_(&graph),
-          quantizer_(std::move(quantizer)),
-          refiner_(std::move(refiner)) {}
+    SearcherImpl(const deglib::graph::InternalGraph& graph, QuantT quantizer, RefinerT refiner)
+        : graph_(&graph), quantizer_(std::move(quantizer)), refiner_(std::move(refiner)) {}
+
+    void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 30000, uint32_t seed = 42, size_t threads = 0) override {
+        entry_vertex_indices_ = graph_kmeans_medoids(*graph_, n_clusters, n_iter, sample_size, seed, threads);
+    }
 
     template <typename QueryT>
     inline uint32_t search_single_typed(
-        const QueryT* query, uint32_t k, float eps, float rerank_factor,
-        uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false
+        const QueryT* query,
+        uint32_t k,
+        float eps,
+        float rerank_factor,
+        uint32_t* out_indices,
+        float* out_distances = nullptr,
+        bool unsorted = false
     ) const {
         const uint32_t dim = graph_->getFeatureSpace().dim();
         const uint32_t fetch_k = std::max(k, static_cast<uint32_t>(std::round(k * rerank_factor)));
@@ -371,11 +404,10 @@ class SearcherImpl : public SearcherBase {
             query_bytes = q_buf;
         }
 
-        // 2. Direct Graph Search
-        auto result = graph_->search(
-            std::span<const std::byte>(query_bytes, graph_feature_bytes),
-            fetch_k, eps, nullptr, 0
-        );
+        // 2. Direct Graph Search (entries come solely from optimize())
+        const std::span<const std::byte> query_span(query_bytes, graph_feature_bytes);
+        deglib::graph::ResultSet result = entry_vertex_indices_.empty() ? graph_->search(query_span, fetch_k, eps, nullptr, 0)
+                                                                        : graph_->search(query_span, entry_vertex_indices_, fetch_k, eps, nullptr, 0);
         const size_t found_count = result.size();
 
         // 3. Static Compile-Time Reranker Check
@@ -394,9 +426,7 @@ class SearcherImpl : public SearcherBase {
                 }
 
                 const bool return_distances = (out_distances != nullptr);
-                uint32_t ref_count = refiner_.rerank(
-                    query, dim, cands, found_count, k, out_indices, out_distances, return_distances, unsorted
-                );
+                uint32_t ref_count = refiner_.rerank(query, dim, cands, found_count, k, out_indices, out_distances, return_distances, unsorted);
                 if (ref_count > 0) {
                     return ref_count;
                 }
@@ -416,9 +446,7 @@ class SearcherImpl : public SearcherBase {
     }
 
     template <bool HAS_DISTANCES, typename ResultSetT>
-    inline uint32_t populate_graph_results(
-        ResultSetT& result, uint32_t k, uint32_t* out_indices, float* out_distances, bool unsorted
-    ) const {
+    inline uint32_t populate_graph_results(ResultSetT& result, uint32_t k, uint32_t* out_indices, float* out_distances, bool unsorted) const {
         const size_t top_n = result.size();
         if (unsorted) {
             for (size_t i = 0; i < top_n; ++i) {
@@ -450,15 +478,41 @@ class SearcherImpl : public SearcherBase {
         return static_cast<uint32_t>(top_n);
     }
 
-    uint32_t search_f32(const float* query, uint32_t k, float eps, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false) const override {
+    uint32_t search_f32(
+        const float* query,
+        uint32_t k,
+        float eps,
+        float rerank_factor,
+        uint32_t* out_indices,
+        float* out_distances = nullptr,
+        bool unsorted = false
+    ) const override {
         return search_single_typed<float>(query, k, eps, rerank_factor, out_indices, out_distances, unsorted);
     }
 
-    uint32_t search_f16(const uint16_t* query, uint32_t k, float eps, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false) const override {
+    uint32_t search_f16(
+        const uint16_t* query,
+        uint32_t k,
+        float eps,
+        float rerank_factor,
+        uint32_t* out_indices,
+        float* out_distances = nullptr,
+        bool unsorted = false
+    ) const override {
         return search_single_typed<uint16_t>(query, k, eps, rerank_factor, out_indices, out_distances, unsorted);
     }
 
-    void search_batch_f32(const float* queries, size_t n_queries, uint32_t k, float eps, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const override {
+    void search_batch_f32(
+        const float* queries,
+        size_t n_queries,
+        uint32_t k,
+        float eps,
+        float rerank_factor,
+        uint32_t* out_indices,
+        float* out_distances = nullptr,
+        size_t threads = 1,
+        bool unsorted = false
+    ) const override {
         const uint32_t dim = graph_->getFeatureSpace().dim();
         deglib::concurrent::parallel_for(0, n_queries, threads, [&](size_t q, size_t) {
             float* d_ptr = out_distances ? (out_distances + q * k) : nullptr;
@@ -466,7 +520,17 @@ class SearcherImpl : public SearcherBase {
         });
     }
 
-    void search_batch_f16(const uint16_t* queries, size_t n_queries, uint32_t k, float eps, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const override {
+    void search_batch_f16(
+        const uint16_t* queries,
+        size_t n_queries,
+        uint32_t k,
+        float eps,
+        float rerank_factor,
+        uint32_t* out_indices,
+        float* out_distances = nullptr,
+        size_t threads = 1,
+        bool unsorted = false
+    ) const override {
         const uint32_t dim = graph_->getFeatureSpace().dim();
         deglib::concurrent::parallel_for(0, n_queries, threads, [&](size_t q, size_t) {
             float* d_ptr = out_distances ? (out_distances + q * k) : nullptr;
@@ -480,14 +544,9 @@ class SearcherImpl : public SearcherBase {
 // ============================================================================
 
 template <typename QuantT = NoQuantizer, typename RefinerT = NoRefiner>
-inline std::unique_ptr<SearcherBase> make_searcher(
-    const deglib::graph::InternalGraph& graph,
-    QuantT quantizer = NoQuantizer{},
-    RefinerT refiner = NoRefiner{}
-) {
-    return std::make_unique<SearcherImpl<QuantT, RefinerT>>(
-        graph, std::move(quantizer), std::move(refiner)
-    );
+inline std::unique_ptr<SearcherBase>
+make_searcher(const deglib::graph::InternalGraph& graph, QuantT quantizer = NoQuantizer{}, RefinerT refiner = NoRefiner{}) {
+    return std::make_unique<SearcherImpl<QuantT, RefinerT>>(graph, std::move(quantizer), std::move(refiner));
 }
 
 }  // namespace deglib::search

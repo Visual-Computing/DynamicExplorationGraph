@@ -1,9 +1,7 @@
-import gc
-from pathlib import Path
 import time
+from pathlib import Path
 import numpy as np
 import deglib
-
 
 # Try relative import when executed inside VIBE framework (vibe/algorithms/deg/module.py)
 try:
@@ -14,247 +12,336 @@ except (ImportError, ValueError):
         pass
 
 
-# Mapping: (is_l2: bool, dtype_str: str) -> deglib.Metric
 _METRIC_MAP = {
-    (True, "float32"): deglib.Metric.FP32_L2,
-    (True, "float16"): deglib.Metric.FP16_L2,
-    (True, "int8"): deglib.Metric.Int8_L2,
-    (False, "float32"): deglib.Metric.FP32_InnerProduct,
-    (False, "float16"): deglib.Metric.FP16_InnerProduct,
-    (False, "int8"): deglib.Metric.Int8_InnerProduct,
+    "euclidean": (deglib.Metric.FP32_L2, deglib.Metric.Int8_L2, deglib.Metric.FP16_L2),
+    "cosine": (deglib.Metric.FP32_InnerProduct, deglib.Metric.Int8_InnerProduct, deglib.Metric.FP16_InnerProduct),
+    "ip": (deglib.Metric.FP32_InnerProduct, deglib.Metric.Int8_InnerProduct, deglib.Metric.FP16_InnerProduct),
+    "normalized": (deglib.Metric.FP32_InnerProduct, deglib.Metric.Int8_InnerProduct, deglib.Metric.FP16_InnerProduct),
 }
 
-_OPT_TARGET_MAP = {
-    "highlid": deglib.builder.OptimizationTarget.HighLID,
-    "lowlid": deglib.builder.OptimizationTarget.LowLID,
-    "streamingdata": deglib.builder.OptimizationTarget.StreamingData,
-}
 
-_VALID_QUERY_DTYPES = ("float32", "int8")
+def _resolve_graph_cache_path(
+    metric: str,
+    k: int,
+    opt_target: str,
+    n_vectors: int,
+    dims: int,
+    extend_k: int | None = None,
+    extend_eps: float = 0.1,
+    cache_dir: Path | None = None,
+) -> Path:
+    """Resolves standard cache path using get_default_cache_dir()."""
+    dataset_name = f"corpus_{n_vectors}_{dims}d"
+    if cache_dir is None:
+        try:
+            from dataset import VIBE_DATASETS, get_default_cache_dir
+
+            cache_dir = get_default_cache_dir()
+            for key, meta in VIBE_DATASETS.items():
+                if meta.get("dim") == dims and abs(meta.get("size", 0) - n_vectors) < 1000:
+                    dataset_name = key
+                    break
+        except ImportError:
+            cache_dir = Path.home() / ".cache" / "deg_datasets"
+    else:
+        try:
+            from dataset import VIBE_DATASETS
+
+            for key, meta in VIBE_DATASETS.items():
+                if meta.get("dim") == dims and abs(meta.get("size", 0) - n_vectors) < 1000:
+                    dataset_name = key
+                    break
+        except ImportError:
+            pass
+
+    deg_dir = cache_dir / dataset_name / "deg"
+    deg_dir.mkdir(parents=True, exist_ok=True)
+
+    build_metric_str = deglib.Metric.FP32_L2.name if metric == "euclidean" else deglib.Metric.FP32_InnerProduct.name
+    ext_k = extend_k if extend_k is not None else k * 2
+    
+    # 1. Preferred filename with AddK
+    filename = f"{dims}D_{build_metric_str}_K{k}_AddK{ext_k}Eps{extend_eps:.1f}_{opt_target}_FLAS.deg"
+    full_path = deg_dir / filename
+    if full_path.exists():
+        return full_path
+
+    # 2. Check alternative without AddK
+    alt_filename = f"{dims}D_{build_metric_str}_K{k}_{opt_target}_FLAS.deg"
+    if (deg_dir / alt_filename).exists():
+        return deg_dir / alt_filename
+
+    # 3. Check for any AddK variations (e.g. AddK60)
+    matches = list(deg_dir.glob(f"{dims}D_{build_metric_str}_K{k}_AddK*_{opt_target}_FLAS.deg"))
+    if matches:
+        return matches[0]
+
+    return full_path
 
 
-class DegANN(BaseANN):
+class DEG(BaseANN):
     """
-    VIBE BaseANN adapter for Dynamic Exploration Graph (DEG).
-    Standard parameters:
-      - metric: Distance metric ('euclidean', 'cosine', 'ip', 'normalized', 'hamming')
-      - k: Degree / edges per vertex (e.g. 16, 24, 30, 40, 48)
-      - opt_target: 'HighLID' (for Cosine/IP/Normalized), 'LowLID' (for Euclidean), or 'StreamingData'
-      - threads: CPU threads during graph build
-      - query_dtype: Dtype used to search graph ('float32', 'int8')
-      - prune_non_rng: Optional MRNG edge pruning
+    Dynamic Exploration Graph (DEG) using Float32 throughout.
     """
 
     def __init__(
         self,
         metric: str,
         k: int = 30,
-        opt_target: str = "HighLID",
+        opt_target: str = "LowLID",
         prune_non_rng: bool = False,
         threads: int = 1,
-        query_dtype: str = "float32",
     ):
         self.metric = metric.lower().strip()
-        if self.metric not in ("euclidean", "cosine", "ip", "normalized"):
-            raise ValueError(f"Unsupported metric '{self.metric}'. Choose from: euclidean, cosine, ip, normalized")
-        self.is_l2: bool = (self.metric == "euclidean")
-        self.needs_normalization: bool = (self.metric == "cosine")
+        if self.metric not in _METRIC_MAP:
+            raise ValueError(f"Unsupported metric '{self.metric}'. Choose from: {list(_METRIC_MAP.keys())}")
 
         self.k = int(k)
-        self.extend_k = self.k*2
-        self.extend_eps = 0.1
-        self.opt_target = str(opt_target)
+        self.opt_target = opt_target
         self.prune_non_rng = bool(prune_non_rng)
         self.threads = int(threads)
-        self.query_dtype = query_dtype.lower().strip()
-        if self.query_dtype not in _VALID_QUERY_DTYPES:
-            raise ValueError(f"Unsupported dtype '{self.query_dtype}'. Choose from: {_VALID_QUERY_DTYPES}")
-        self.search_eps: float = 0.1
-        self.rerank_size_factor: float = 1.0
+        self.search_eps = 0.1
 
-        # Distance metric resolution for graph build and query space
-        self.base_metric_enum = _METRIC_MAP[(self.is_l2, "float32")]
-        self.query_metric_enum = _METRIC_MAP[(self.is_l2, self.query_dtype)]
-        self.metric_enum = self.query_metric_enum
-        self.opt_enum = self._map_opt_target(self.opt_target)
-
-        self.quantizer = None
-        self.graph: deglib.ReadOnlyGraph | None = None
-        self.original_features_fp16: np.ndarray | None = None
-        self.rerank_space_fp16: deglib.FloatSpace | None = None
+        self.metric_enum = _METRIC_MAP[self.metric][0]
+        self.opt_enum = deglib.builder.OptimizationTarget[self.opt_target]
+        self.graph = None
         self.searcher = None
 
-    def _map_opt_target(self, opt_target: str) -> deglib.builder.OptimizationTarget:
-        target = opt_target.lower().strip()
-        if target not in _OPT_TARGET_MAP:
-            raise ValueError(f"Unknown OptimizationTarget '{opt_target}'. Choose from: 'StreamingData', 'HighLID', 'LowLID'")
-        return _OPT_TARGET_MAP[target]
+    def fit(self, X: np.ndarray, cache_dir: Path | None = None):
+        """Builds or loads the DEG graph in FP32."""
+        if self.metric == "cosine":
+            X = X / np.linalg.norm(X, axis=1)[:, np.newaxis]
+        X = np.ascontiguousarray(X, dtype=np.float32)
+        n_vectors, dims = X.shape
 
-    def _prepare_input(self, X: np.ndarray) -> np.ndarray:
-        """Ensures contiguous float32 and applies L2-normalization for Cosine metric."""
-        if self.needs_normalization:
-            norms = np.linalg.norm(X, axis=-1, keepdims=True)
-            norms[norms == 0] = 1.0
-            X = X / norms
-        return np.ascontiguousarray(X, dtype=np.float32)
-
-    def _build_graph(self, X_f32: np.ndarray, graph_path: Path | None = None) -> deglib.DynamicExplorationGraph:
-        """
-        Phase 1: Graph Construction.
-        - FLAS 1D pre-sorting is always executed in FP32 with radius_decay=0.9.
-        - Graph is constructed as SizeBoundedGraph in FP32 for maximum accuracy and topology quality.
-        - Saved to disk if graph_path is specified.
-        """
-        n_vectors, dims = X_f32.shape
-
-        # 1. FLAS 1D Pre-sorting ALWAYS in float32
-        print(f"Running FLAS 1D Pre-sorting in float32: N={n_vectors:,}, dim={dims}, threads={self.threads}...")
-        t_start = time.perf_counter()
-        sorted_indices = deglib.optimization.presort(
-            X_f32,
-            metric=self.base_metric_enum,
-            radius_decay=0.9,
-            threads=self.threads,
-            callback="progress",
-        )
-        print(f"FLAS 1D Pre-sorting completed in {time.perf_counter() - t_start:.3f} s.")
-
-        # 2. Build graph ALWAYS in FP32
-        print(f"Constructing DEG graph in float32 (Metric: {self.base_metric_enum.name})...")
-        graph_mut = deglib.builder.build_from_data(
-            data=X_f32[sorted_indices],
-            labels=sorted_indices,
-            edges_per_vertex=self.k,
-            metric=self.base_metric_enum,
-            seed=7,
-            optimization_target=self.opt_enum,
-            extend_k=self.extend_k,
-            thread_count=self.threads,
-            callback="progress",
+        cache_file = _resolve_graph_cache_path(
+            metric=self.metric,
+            k=self.k,
+            opt_target=self.opt_target,
+            n_vectors=n_vectors,
+            dims=dims,
+            cache_dir=cache_dir,
         )
 
-        # Save graph in FP32 format if graph_path is given
-        if graph_path:
-            p = Path(graph_path).resolve()
-            p.parent.mkdir(parents=True, exist_ok=True)
-            graph_mut.save_graph(str(p))
-            print(f"Saved built DEG graph to: {p}")
-
-        return graph_mut
-
-    def _resolve_graph_path(self, n_vectors: int, dims: int) -> Path:
-        """Determines default cache directory and graph filename for the corpus."""
-        cache_dir = Path("D:/Data/DEG")
-        if not cache_dir.exists() and not cache_dir.parent.exists():
-            cache_dir = Path.home() / ".cache" / "deg_datasets"
-
-        # Try to match known dataset by size & dim
-        dataset_name = f"corpus_{n_vectors}_{dims}d"
-        try:
-            from dataset_utils import VIBE_DATASETS, get_default_cache_dir
-
-            cache_dir = get_default_cache_dir()
-            for key, meta in VIBE_DATASETS.items():
-                if meta["dim"] == dims and abs(meta["size"] - n_vectors) < 1000:
-                    dataset_name = key
-                    break
-        except ImportError:
-            pass
-
-        build_metric_str = deglib.Metric.FP32_L2.name if self.is_l2 else deglib.Metric.FP32_InnerProduct.name
-        deg_dir = cache_dir / dataset_name / "deg"
-        deg_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"{dims}D_{build_metric_str}_K{self.k}_AddK{self.extend_k}Eps{self.extend_eps:.1f}_{self.opt_target}_FLAS.deg"
-        return deg_dir / filename
-
-    def _init_and_calibrate_quantizer(self, X_f32: np.ndarray) -> np.ndarray | None:
-        """Calibrates the appropriate quantizer on base vectors and returns the quantized features."""
-        if self.query_dtype == "float32":
-            self.quantizer = None
-            return None
-        elif self.query_dtype == "int8":
-            self.quantizer = deglib.optimization.make_scalar_quantizer_int8(X_f32)
-            return self.quantizer.quantize(X_f32, num_threads=self.threads)
-        else:
-            raise ValueError(f"Unknown query_dtype: {self.query_dtype}")
-
-    def fit(self, X: np.ndarray):
-        """Builds or loads the DEG graph for corpus X, applies optional pruning and quantizes for search."""
-        X_f32 = self._prepare_input(X)
-        n_vectors, dims = X_f32.shape
-
-        # Automatically resolve graph save/load path
-        graph_path = self._resolve_graph_path(n_vectors, dims)
-
-        print(
-            f"Index Configuration: K={self.k}, ExtendK={self.extend_k}, ExtendEps={self.extend_eps:.2f}, "
-            f"Opt={self.opt_target}, Threads={self.threads}, QueryType={self.query_dtype}, "
-            f"PruneNonRNG={self.prune_non_rng}"
-        )
-
-        # Always calibrate quantizer on base dataset (even when loading cached graph)
-        quantized_features = self._init_and_calibrate_quantizer(X_f32)
-
-        # Store original features in FP16 for fast and memory-efficient reranking if quantized
-        if self.query_dtype != "float32":
-            self.original_features_fp16 = deglib.distances.floats_to_fp16(X_f32)
-            self.rerank_space_fp16 = deglib.FloatSpace.create(dim=dims, metric=_METRIC_MAP[(self.is_l2, "float16")])
-
-        # 1. Obtain base graph in FP32 (either by loading cached file or by building)
-        if graph_path and graph_path.is_file():
+        if cache_file.exists():
+            print(f"Loading cached DEG graph from {cache_file}...", flush=True)
             load_fn = deglib.load_mutable_graph if self.prune_non_rng else deglib.load_readonly_graph
-            print(f"Loading cached DEG graph from: {graph_path}")
-            graph = load_fn(str(graph_path))
+            graph = load_fn(str(cache_file))
         else:
-            print(f"No cached graph found at {graph_path}. Building from scratch...")
-            graph = self._build_graph(X_f32, graph_path=graph_path)
+            # 1. FLAS 1D Pre-sorting
+            print(f"Running FLAS 1D Pre-sorting (threads={self.threads})...", flush=True)
+            sorted_indices = deglib.optimization.presort(
+                X,
+                metric=self.metric_enum,
+                threads=self.threads,
+                callback="progress",
+            )
 
-        # 2. Optional MRNG edge pruning on SizeBoundedGraph (MutableGraph)
+            # 2. Build graph in FP32
+            print(f"Building DEG graph (K={self.k}, Opt={self.opt_target}, threads={self.threads})...", flush=True)
+            graph = deglib.builder.build_from_data(
+                data=X[sorted_indices],
+                labels=sorted_indices,
+                edges_per_vertex=self.k,
+                metric=self.metric_enum,
+                seed=7,
+                optimization_target=self.opt_enum,
+                thread_count=self.threads,
+                callback="progress",
+            )
+
+            print(f"Saving graph to cache {cache_file}...", flush=True)
+            graph.save_graph(str(cache_file))
+
+        # 3. Optional MRNG edge pruning
         if self.prune_non_rng:
-            print("Pruning non-RNG edges on SizeBoundedGraph...")
-            removed = deglib.optimization.prune_non_rng_edges(graph, num_threads=self.threads)
-            print(f"Pruned {removed:,} non-RNG edges.")
+            deglib.optimization.prune_non_rng_edges(graph, num_threads=1)
 
-        # 3. Finalize ReadOnlyGraph with query_dtype features
-        if quantized_features is not None:
-            print(f"Finalizing ReadOnlyGraph with {self.query_dtype.upper()} (Metric: {self.query_metric_enum.name})...")
-            target_space = deglib.FloatSpace.create(dim=dims, metric=self.query_metric_enum)
-            self.graph = graph.to_readonly(target_space, quantized_features)
-        else:
-            self.graph = graph if not graph.is_mutable() else graph.to_readonly()
+        self.graph = graph.to_readonly() if graph.is_mutable() else graph
+        self.searcher = deglib.search.create_searcher(graph=self.graph)
 
-        # Initialize high-performance C++ Searcher (Zero-overhead query loop)
-        self.searcher = deglib.search.create_searcher(
-            graph=self.graph,
-            quantizer=self.quantizer,
-            refine_space=self.rerank_space_fp16 if self.query_dtype != "float32" else None,
-            refine_data=self.original_features_fp16 if self.query_dtype != "float32" else None,
-        )
-
-    def set_query_arguments(self, search_eps: float, rerank_size_factor: float = 1.0):
-        """Sets query-time search_eps and rerank scaling factor."""
-        self.search_eps = float(search_eps)
-        self.rerank_size_factor = float(rerank_size_factor)
+    def set_query_arguments(self, *args, **kwargs):
+        """Sets query-time search_eps (supports float or search_eps keyword)."""
+        if args:
+            self.search_eps = float(args[0])
+        elif "search_eps" in kwargs:
+            self.search_eps = float(kwargs["search_eps"])
+        elif "eps" in kwargs:
+            self.search_eps = float(kwargs["eps"])
 
     def query(self, v: np.ndarray, n: int) -> np.ndarray:
-        """Single query search on 1 thread with optional FP16 reranking directly in C++."""
-        if self.searcher is None:
-            raise RuntimeError("Index not fitted. Call fit(X) first.")
-        if self.needs_normalization:
+        """Single query search on 1 thread with Float32 via C++ searcher."""
+        if self.metric == "cosine":
             v = v / np.linalg.norm(v)
         return self.searcher.search(
             np.ascontiguousarray(v, dtype=np.float32),
-            n,
+            k=n,
             eps=self.search_eps,
-            rerank_factor=self.rerank_size_factor,
+            threads=1,
             return_distances=False,
             unsorted=True,
         )
 
     def __str__(self) -> str:
+        return f"DEG(k={self.k}, opt={self.opt_target}, prune_rng={self.prune_non_rng}, eps={self.search_eps})"
+
+
+class QG(BaseANN):
+    """
+    Quantized DEG (DEG-QG): Graph search with INT8 quantized vectors and FP16 reranking.
+    """
+
+    def __init__(
+        self,
+        metric: str,
+        k: int = 30,
+        opt_target: str = "LowLID",
+        prune_non_rng: bool = False,
+        threads: int = 1,
+    ):
+        self.metric = metric.lower().strip()
+        if self.metric not in _METRIC_MAP:
+            raise ValueError(f"Unsupported metric '{self.metric}'. Choose from: {list(_METRIC_MAP.keys())}")
+
+        self.k = int(k)
+        self.opt_target = opt_target
+        self.prune_non_rng = bool(prune_non_rng)
+        self.threads = int(threads)
+        self.rerank_size_factor = 1.0
+        self.search_eps = 0.1
+        self.ef = 0
+
+        self.base_metric, self.int8_metric, self.fp16_metric = _METRIC_MAP[self.metric]
+        self.opt_enum = deglib.builder.OptimizationTarget[self.opt_target]
+
+        self.graph = None
+        self.searcher = None
+        self.quantizer = None
+        self.original_features_fp16 = None
+        self.rerank_space_fp16 = None
+
+    def fit(self, X: np.ndarray, cache_dir: Path | None = None):
+        """Builds DEG graph, quantizes vectors to INT8 using ScalarQuantizer, and prepares C++ searcher."""
+        if self.metric == "cosine":
+            X = X / np.linalg.norm(X, axis=1)[:, np.newaxis]
+        X = np.ascontiguousarray(X, dtype=np.float32)
+        n_vectors, dims = X.shape
+
+        self.original_features_fp16 = deglib.distances.floats_to_fp16(X)
+        self.rerank_space_fp16 = deglib.FloatSpace.create(dim=dims, metric=self.fp16_metric)
+
+        cache_file = _resolve_graph_cache_path(
+            metric=self.metric,
+            k=self.k,
+            opt_target=self.opt_target,
+            n_vectors=n_vectors,
+            dims=dims,
+            cache_dir=cache_dir,
+        )
+
+        if cache_file.exists():
+            print(f"Loading cached DEG graph from {cache_file}...", flush=True)
+            load_fn = deglib.load_mutable_graph if self.prune_non_rng else deglib.load_readonly_graph
+            loaded_graph = load_fn(str(cache_file))
+        else:
+            # 1. FLAS 1D Pre-sorting
+            print(f"Running FLAS 1D Pre-sorting (threads={self.threads})...", flush=True)
+            sorted_indices = deglib.optimization.presort(
+                X,
+                metric=self.base_metric,
+                threads=self.threads,
+                callback="progress",
+            )
+
+            # 2. Build graph in FP32
+            print(f"Building DEG graph (K={self.k}, Opt={self.opt_target}, threads={self.threads})...", flush=True)
+            graph = deglib.builder.build_from_data(
+                data=X[sorted_indices],
+                labels=sorted_indices,
+                edges_per_vertex=self.k,
+                metric=self.base_metric,
+                seed=7,
+                optimization_target=self.opt_enum,
+                thread_count=self.threads,
+                callback="progress",
+            )
+
+            print(f"Saving graph to cache {cache_file}...", flush=True)
+            graph.save_graph(str(cache_file))
+            loaded_graph = graph
+
+        # 3. Optional MRNG edge pruning
+        if self.prune_non_rng:
+            deglib.optimization.prune_non_rng_edges(loaded_graph, num_threads=1)
+
+        # 4. Finalize ReadOnlyGraph with INT8 features using calibrated ScalarQuantizer
+        self.quantizer = deglib.optimization.make_scalar_quantizer_int8(X)
+        int8_features = self.quantizer.quantize(X, num_threads=1)
+        target_space = deglib.FloatSpace.create(dim=dims, metric=self.int8_metric)
+        self.graph = loaded_graph.to_readonly(target_space, int8_features)
+
+        # 5. Initialize C++ Zero-overhead Searcher
+        self.searcher = deglib.search.create_searcher(
+            graph=self.graph,
+            quantizer=self.quantizer,
+            refine_space=self.rerank_space_fp16,
+            refine_data=self.original_features_fp16,
+        )
+
+        # 6. Optimize entry vertices via K-Means cluster medoids computed in C++
+        t_km = time.time()
+        self.searcher.optimize()
+        print(f"K-Means 128 cluster medoids computed in {time.time() - t_km:.2f}s", flush=True)
+
+    def set_query_arguments(self, *args, **kwargs):
+        """Sets query-time parameters: supports (rerank_factor, search_eps) or (rerank_factor, ef)."""
+        self.rerank_size_factor = float(kwargs.get("rerank_size_factor", 1.0))
+        self.search_eps = float(kwargs.get("search_eps", 0.0))
+        self.ef = int(kwargs.get("ef", 0))
+
+        if len(args) == 1:
+            val = args[0]
+            if isinstance(val, int) or (isinstance(val, float) and val >= 1.0 and val.is_integer()):
+                self.ef = int(val)
+            else:
+                self.search_eps = float(val)
+        elif len(args) == 2:
+            self.rerank_size_factor = float(args[0])
+            val = args[1]
+            if isinstance(val, int) or (isinstance(val, float) and val >= 1.0 and val.is_integer()):
+                self.ef = int(val)
+                self.search_eps = 0.0
+            else:
+                self.search_eps = float(val)
+                self.ef = 0
+        elif len(args) >= 3:
+            self.rerank_size_factor = float(args[0])
+            self.search_eps = float(args[1])
+            self.ef = int(args[2])
+
+    def query(self, v: np.ndarray, n: int) -> np.ndarray:
+        """Single query search on 1 thread with INT8 search and FP16 reranking directly in C++."""
+        if self.metric == "cosine":
+            v = v / np.linalg.norm(v)
+        return self.searcher.search(
+            np.ascontiguousarray(v, dtype=np.float32),
+            k=n,
+            eps=self.search_eps,
+            rerank_factor=self.rerank_size_factor,
+            threads=1,
+            return_distances=False,
+            unsorted=True,
+            ef=self.ef,
+        )
+
+    def __str__(self) -> str:
+        if getattr(self, "ef", 0) > 0:
+            return (
+                f"DEG-QG(k={self.k}, opt={self.opt_target}, prune_rng={self.prune_non_rng}, "
+                f"rerank_factor={self.rerank_size_factor}, ef={self.ef})"
+            )
         return (
-            f"DEG(k={self.k}, extend_k={self.extend_k}, extend_eps={self.extend_eps}, "
-            f"opt={self.opt_target}, "
-            f"threads={self.threads}, query_dtype={self.query_dtype}, "
+            f"DEG-QG(k={self.k}, opt={self.opt_target}, prune_rng={self.prune_non_rng}, "
             f"rerank_factor={self.rerank_size_factor}, eps={self.search_eps})"
         )
+

@@ -9,7 +9,7 @@ import numpy as np
 import deglib
 from deglib_cpp import avx_usable, avx512_usable
 
-from dataset_utils import (
+from dataset import (
     VIBE_DATASETS,
     build_graph_filename,
     ensure_dataset,
@@ -17,7 +17,7 @@ from dataset_utils import (
     load_vibe_dataset,
     resolve_dataset_key,
 )
-from module import DegANN
+from module import DEG, QG
 from presets import get_config_grid_presets, get_default_config_preset, load_vibe_config
 
 
@@ -67,7 +67,7 @@ def set_cpu_affinity(cpu_ids: list[int] | None = None) -> list[int] | None:
     return None
 
 
-from plot_utils import export_interactive_html
+from plot import export_interactive_html
 
 
 def _euclidean_distance(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -179,6 +179,14 @@ def main():
         help="Pin benchmark process to specific CPU core ID(s) (e.g. --cpu 0 or --cpu 0 1 2 3).",
     )
     parser.add_argument(
+        "--algorithm",
+        "-a",
+        type=str,
+        default=None,
+        choices=["deg", "deg-qg", "qg", "all"],
+        help="Select specific algorithm to benchmark ('deg', 'deg-qg' / 'qg', or 'all'). Default: run all enabled in config.yml.",
+    )
+    parser.add_argument(
         "--query-dtype",
         type=str,
         default=None,
@@ -236,8 +244,14 @@ def main():
         # Linear scan baseline
         linear_baseline_us = compute_linear_search_baseline(base_vecs, float_space)
 
-        # Get configurations to run from config.yml
-        configs_to_run = get_config_grid_presets(dataset_key)
+        # Filter algorithm if requested (e.g. --algorithm deg or --algorithm deg-qg)
+        alg_filter = args.algorithm
+        if alg_filter == "qg":
+            alg_filter = "deg-qg"
+        elif alg_filter == "all":
+            alg_filter = None
+
+        configs_to_run = get_config_grid_presets(dataset_key, algorithm_name=alg_filter)
 
 
         actual_k = min(cfg_k_target := 100, gt_vecs.shape[1])
@@ -250,49 +264,59 @@ def main():
         for cfg_idx, cfg in enumerate(configs_to_run):
             k = cfg["k"]
             opt_target = cfg["optimization_target"]
-            eps_list = sorted(cfg["search_eps_list"])
-            query_dtype = args.query_dtype or cfg.get("query_dtype", "float32")
             is_pruned = cfg.get("prune_non_rng", False)
-            adapter = DegANN(
-                metric=metric_str,
-                k=k,
-                opt_target=opt_target,
-                prune_non_rng=is_pruned,
-                threads=args.build_threads,
-                query_dtype=query_dtype,
-            )
-            print(f"\n--- [{cfg_idx + 1}/{len(configs_to_run)}] Processing Graph Configuration ---")
-            adapter.fit(base_vecs)
+            constructor_name = cfg.get("constructor", "DEG")
+            alg_name = cfg.get("alg_name", "deg")
 
-            deglib.analysis.analyze_graph(adapter.graph)
-
-            # Determine rerank factors to evaluate (for all quantized formats)
-            if query_dtype != "float32":
-                factors_to_eval = cfg.get("rerank_size_factors", [1.0, 1.2, 1.5, 2.0])
+            if constructor_name == "QG":
+                adapter = QG(
+                    metric=metric_str,
+                    k=k,
+                    opt_target=opt_target,
+                    prune_non_rng=is_pruned,
+                    threads=args.build_threads,
+                )
+                query_dtype = "int8"
             else:
-                factors_to_eval = [1.0]
+                adapter = DEG(
+                    metric=metric_str,
+                    k=k,
+                    opt_target=opt_target,
+                    prune_non_rng=is_pruned,
+                    threads=args.build_threads,
+                )
+                query_dtype = "float32"
+
+            print(f"\n--- [{cfg_idx + 1}/{len(configs_to_run)}] Processing Algorithm '{alg_name}' ({constructor_name}) ---")
+            adapter.fit(base_vecs, cache_dir=cache_dir)
+
+            if adapter.graph is not None:
+                deglib.analysis.analyze_graph(adapter.graph)
+
+            # Determine query evaluation parameter grid
+            factors_to_eval = cfg.get("rerank_size_factors", [1.0])
+            eps_list = sorted(cfg.get("search_eps_list", []))
+            ef_list = sorted(cfg.get("ef_list", []))
 
             prune_label = ", MRNG" if is_pruned else ""
 
             for r_factor in factors_to_eval:
-                fetch_k = max(actual_k, int(round(actual_k * r_factor)))
-                rerank_label = f", Rerank={r_factor:.1f}x" if r_factor > 1.0 else ""
+                rerank_label = f", Rerank={r_factor:.2f}x" if r_factor > 1.0 else ""
+                eval_params = [(eps, 0) for eps in eps_list] if eps_list else [(0.0, ef) for ef in ef_list]
+                param_str = f"eps: {', '.join(f'{e:.3f}' for e in eps_list)}" if eps_list else f"ef: {', '.join(str(ef) for ef in ef_list)}"
 
-                if r_factor > 1.0:
-                    eval_msg = f"rerank_factor={r_factor:.1f}, fetch_k={fetch_k}"
-                else:
-                    eval_msg = f"rerank_factor=1.0, fetch_k={fetch_k}, no reranking"
-
-                print(
-                    f"\nEvaluating top-{actual_k} search ({eval_msg}) for eps: {', '.join(f'{e:.3f}' for e in eps_list)}"
-                )
+                print(f"\nEvaluating top-{actual_k} search (rerank_factor={r_factor:.2f}) for {param_str}")
 
                 anns_recalls = []
                 anns_qps = []
                 n_queries = len(query_vecs)
 
-                for eps in eps_list:
-                    adapter.set_query_arguments(search_eps=eps, rerank_size_factor=r_factor)
+                for (eps, ef) in eval_params:
+                    if ef > 0:
+                        adapter.set_query_arguments(rerank_size_factor=r_factor, ef=ef)
+                    else:
+                        adapter.set_query_arguments(rerank_size_factor=r_factor, search_eps=eps)
+
                     results_indices = []
                     start_time = time.perf_counter()
                     for q_idx in range(n_queries):
@@ -306,7 +330,7 @@ def main():
                     hits = 0
                     total_returned = n_queries * actual_k
                     if gt_distances is not None:
-                        # Official VIBE distance-tolerance recall calculation (exact 1:1 match with vibe/distance.py)
+                        # Official VIBE distance-tolerance recall calculation
                         dist_fn = _VIBE_METRICS.get(metric_str.lower().strip(), _ip_distance)
                         for i in range(n_queries):
                             t = gt_distances[i, actual_k - 1] + 1e-3
@@ -323,13 +347,14 @@ def main():
                     anns_recalls.append(recall)
                     anns_qps.append(qps)
 
+                    lbl = f"ef {ef:4d}" if ef > 0 else f"eps {eps:6.3f}"
                     print(
-                        f"  eps {eps:6.3f} \trecall@{actual_k}: {recall:.5f} \t{time_us_per_query:6d} us/query \t{qps:9.1f} QPS \tsearch time: {int(search_time_us / 1000):6d}ms"
+                        f"  {lbl} \trecall@{actual_k}: {recall:.5f} \t{time_us_per_query:6d} us/query \t{qps:9.1f} QPS \tsearch time: {int(search_time_us / 1000):6d}ms"
                     )
 
                     if linear_baseline_us > 0 and time_us_per_query > linear_baseline_us:
                         print(
-                            f"  eps {eps:.3f} \t ABORTED ({time_us_per_query}us/query > {int(linear_baseline_us)}us baseline)"
+                            f"  ABORTED ({time_us_per_query}us/query > {int(linear_baseline_us)}us baseline)"
                         )
                         break
 
@@ -339,10 +364,10 @@ def main():
 
                 results_series.append(
                     {
-                        "label": f"DEG ({opt_target}, K={k}{prune_label}{rerank_label})",
+                        "label": f"{alg_name.upper()} ({opt_target}, K={k}{prune_label}{rerank_label})",
                         "opt_target": opt_target,
                         "k": k,
-                        "query_dtype": args.query_dtype,
+                        "query_dtype": query_dtype,
                         "prune_non_rng": is_pruned,
                         "rerank_factor": r_factor,
                         "recalls": anns_recalls,

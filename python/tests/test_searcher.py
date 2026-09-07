@@ -164,3 +164,21 @@ def test_searcher_evp_quantizer():
     assert len(res_fp16) == 3
     assert res_fp16[0] == 3
     assert dists_fp16[0] == pytest.approx(0.0, abs=1e-3)
+
+
+def test_searcher_optimize_sets_kmeans_entries():
+    np.random.seed(42)
+    dim = 16
+    n = 200
+    data = np.random.randn(n, dim).astype(np.float32)
+    data = data / np.linalg.norm(data, axis=1, keepdims=True)
+    labels = np.random.permutation(n).astype(np.uint32)
+
+    graph = deglib.builder.build_from_data(data, labels=labels, edges_per_vertex=16, metric=Metric.FP32_InnerProduct)
+    searcher = create_searcher(graph)
+
+    searcher.optimize(n_clusters=8, n_iter=5, sample_size=100, seed=42)
+
+    res = searcher.search(data[0], k=5, eps=0.3)
+    assert len(res) == 5
+    assert res[0] == labels[0]

@@ -25,7 +25,7 @@ from deglib.distances import FloatSpace, Metric
 from deglib.cpu import InstructionSet
 from deglib.optimization import mips_l2_transform, presort
 
-from dataset_utils import (
+from dataset import (
     ensure_mips_dataset,
     load_hdf5_dataset,
     compute_recall,

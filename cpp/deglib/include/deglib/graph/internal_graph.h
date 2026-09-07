@@ -147,7 +147,8 @@ class InternalGraph {
     virtual const bool hasVertex(const uint32_t external_label) const = 0;
     virtual const bool hasEdge(const uint32_t internal_index, const uint32_t neighbor_index) const = 0;
 
-    virtual const std::vector<uint32_t> getEntryVertexIndices() const { return std::vector<uint32_t>{0}; }
+    // Default entry points as graph-internal indices (not external labels).
+    const std::vector<uint32_t> getEntryVertexIndices() const { return std::vector<uint32_t>{0}; }
 
     /**
      * Perform a search but stops when the to_vertex was found.
@@ -173,6 +174,43 @@ class InternalGraph {
             );
         }
         return search_intern(getEntryVertexIndices(), reinterpret_cast<const std::byte*>(query.data()), k, eps, true, filter, max_distance_computation_count);
+    }
+
+    template <typename T>
+    deglib::graph::ResultSet search(
+        std::span<const T> query,
+        const std::vector<uint32_t>& entry_vertex_indices,
+        const uint32_t k,
+        const float eps = 0.0f,
+        const deglib::search::Filter* filter = nullptr,
+        const uint32_t max_distance_computation_count = 0
+    ) const {
+        if (query.size_bytes() < getFeatureSpace().get_data_size()) {
+            throw std::invalid_argument(
+                "Search query buffer mismatch: expected at least " + std::to_string(getFeatureSpace().get_data_size()) +
+                " bytes (dim=" + std::to_string(getFeatureSpace().dim()) + "), got " + std::to_string(query.size_bytes()) + " bytes"
+            );
+        }
+        if (entry_vertex_indices.empty()) {
+            return search_intern(getEntryVertexIndices(), reinterpret_cast<const std::byte*>(query.data()), k, eps, true, filter, max_distance_computation_count);
+        }
+        return search_intern(entry_vertex_indices, reinterpret_cast<const std::byte*>(query.data()), k, eps, true, filter, max_distance_computation_count);
+    }
+
+    template <typename T>
+    deglib::graph::ResultSet search(
+        std::span<const T> query,
+        std::span<const uint32_t> entry_vertex_indices,
+        const uint32_t k,
+        const float eps = 0.0f,
+        const deglib::search::Filter* filter = nullptr,
+        const uint32_t max_distance_computation_count = 0
+    ) const {
+        if (entry_vertex_indices.empty()) {
+            return search(query, k, eps, filter, max_distance_computation_count);
+        }
+        const std::vector<uint32_t> entries(entry_vertex_indices.begin(), entry_vertex_indices.end());
+        return search(query, entries, k, eps, filter, max_distance_computation_count);
     }
 
     /**
