@@ -24,52 +24,6 @@
 namespace deglib::graph {
 
 /**
- * A continuous memory pool (ringbuffer) for vertex indices.
- */
-class IndexPool {
-    std::vector<uint32_t> free_indices_;
-    size_t head_ = 0;
-    size_t tail_ = 0;
-    size_t count_ = 0;
-    size_t capacity_ = 0;
-
-  public:
-    IndexPool() = default;
-
-    explicit IndexPool(uint32_t capacity) : free_indices_(capacity), capacity_(capacity), count_(capacity), tail_(0) {
-        for (uint32_t i = 0; i < capacity; ++i) free_indices_[i] = i;
-    }
-
-    uint32_t pop() {
-        if (count_ == 0) throw std::runtime_error("IndexPool is empty: capacity exhausted.");
-        uint32_t idx = free_indices_[head_];
-        head_ = (head_ + 1) % capacity_;
-        --count_;
-        return idx;
-    }
-
-    void push(uint32_t idx) {
-        if (count_ >= capacity_) throw std::runtime_error("IndexPool is full.");
-        free_indices_[tail_] = idx;
-        tail_ = (tail_ + 1) % capacity_;
-        ++count_;
-    }
-
-    bool empty() const { return count_ == 0; }
-    size_t size() const { return count_; }
-    size_t capacity() const { return capacity_; }
-
-    /**
-     * Reset pool for custom initialization (e.g. after loading from file)
-     */
-    void reset_empty() {
-        head_ = 0;
-        tail_ = 0;
-        count_ = 0;
-    }
-};
-
-/**
  * A size bounded undirected and weighted n-regular graph.
  *
  * The vertex count and number of edges per vertices is bounded to a fixed value at
@@ -131,9 +85,6 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
     std::unique_ptr<std::byte[]> vertices_;
     std::byte* vertices_memory_;
 
-    // pool of free internal vertex indices
-    IndexPool free_indices_pool_;
-
     // map from the label of a vertex to the internal vertex index
     std::unordered_map<uint32_t, uint32_t> label_to_index_;
 
@@ -155,8 +106,6 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
 
           vertices_(std::make_unique<std::byte[]>(size_t(max_vertex_count) * byte_size_per_vertex_ + object_alignment)),
           vertices_memory_(compute_aligned_pointer(vertices_, object_alignment)),
-
-          free_indices_pool_(max_vertex_count),
 
           feature_space_(feature_space),
           visited_list_pool_(std::make_unique<VisitedListPool>(1, max_vertex_count)) {
@@ -182,8 +131,6 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
         const uint32_t size
     )
         : SizeBoundedGraph(max_vertex_count, edges_per_vertex, std::move(feature_space)) {
-        free_indices_pool_.reset_empty();
-
         // copy the data over
         uint32_t file_byte_size_per_vertex = compute_aligned_byte_size_per_vertex(this->edges_per_vertex_, this->feature_byte_size_, 0);
         for (uint32_t i = 0; i < size; i++) {
@@ -191,13 +138,7 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
             const uint32_t lbl = this->getExternalLabel(i);
             if (lbl != INVALID_LABEL) {
                 label_to_index_.emplace(lbl, i);
-            } else {
-                free_indices_pool_.push(i);
             }
-        }
-        // Any unread indices up to max_vertex_count are also free
-        for (uint32_t i = size; i < max_vertex_count; i++) {
-            free_indices_pool_.push(i);
         }
     }
 
@@ -275,9 +216,8 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
             // Copy external label
             std::memcpy(vertex_memory + external_label_offset_, &label, sizeof(uint32_t));
 
-            // Register label and consume a free index
+            // Register label
             label_to_index_.emplace(label, i);
-            free_indices_pool_.pop();
         }
     }
 
@@ -537,7 +477,10 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
      * @return the internal index of the new vertex
      */
     uint32_t addVertex(const uint32_t external_label, const std::byte* feature_vector) override {
-        const auto new_internal_index = free_indices_pool_.pop();
+        const auto new_internal_index = static_cast<uint32_t>(this->label_to_index_.size());
+        if (new_internal_index >= max_vertex_count_) {
+            throw std::runtime_error("SizeBoundedGraph is full: capacity exhausted.");
+        }
         label_to_index_.emplace(external_label, new_internal_index);
 
         auto vertex_memory = vertex_by_index(new_internal_index);
@@ -550,10 +493,18 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
     }
 
     /**
-     * Remove an existing vertex.
+     * Remove an existing vertex by swapping with the last vertex in the graph.
      */
     std::vector<uint32_t> removeVertex(const uint32_t external_label) override {
         const auto internal_index = getInternalIndex(external_label);
+        const auto last_internal_index = static_cast<uint32_t>(this->label_to_index_.size() - 1);
+
+        // since the last_internal_index will be moved to the internal_index,
+        // update the current neighbor list if the last_internal_index is present
+        if (hasEdge(internal_index, last_internal_index)) {
+            changeEdge(internal_index, last_internal_index, internal_index, 0);
+            changeEdge(last_internal_index, internal_index, last_internal_index, 0);
+        }
 
         // copy the neighbor list to return it later
         const auto neighbor_indices = neighbors_by_index(internal_index);
@@ -562,15 +513,28 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
         // replace all references to the internal_index with a self-reference of the corresponding vertex
         for (size_t index = 0; index < this->edges_per_vertex_; index++) changeEdge(neighbor_indices[index], internal_index, neighbor_indices[index], 0);
 
-        // mark external label as INVALID_LABEL in memory
+        // the last index will be moved to the internal_index position and overwrite its content
+        if (internal_index != last_internal_index) {
+            // update the neighbor list of the last vertex to reflect its new vertex index
+            const auto last_neighbor_indices = neighbors_by_index(last_internal_index);
+            const auto last_neighbor_weights = weights_by_index(last_internal_index);
+            for (size_t index = 0; index < this->edges_per_vertex_; index++)
+                changeEdge(last_neighbor_indices[index], last_internal_index, internal_index, last_neighbor_weights[index]);
+
+            // copy the last vertex to the vertex which gets removed
+            std::memcpy(vertex_by_index(internal_index), vertex_by_index(last_internal_index), this->byte_size_per_vertex_);
+
+            // update the index position of the last label
+            const auto last_label = label_by_index(last_internal_index);
+            label_to_index_[last_label] = internal_index;
+        }
+
+        // mark external label as INVALID_LABEL at the last_internal_index slot
         uint32_t inv = INVALID_LABEL;
-        std::memcpy(vertex_by_index(internal_index) + external_label_offset_, &inv, sizeof(uint32_t));
+        std::memcpy(vertex_by_index(last_internal_index) + external_label_offset_, &inv, sizeof(uint32_t));
 
         // remove the external label from the hash map
         label_to_index_.erase(external_label);
-
-        // return free index to pool
-        free_indices_pool_.push(internal_index);
 
         // return all neighbors of the deleted vertex
         return involved_indices;

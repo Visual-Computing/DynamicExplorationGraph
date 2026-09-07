@@ -842,3 +842,61 @@ TEST(BuilderBuildFromData, InvalidArguments) {
     std::vector<uint32_t> wrong_labels = {1, 2, 3};  // 3 labels for 2 vectors
     EXPECT_THROW(deglib::builder::build_from_data(std::span<const float>(valid_dataset), 2, std::span<const uint32_t>(wrong_labels)), std::invalid_argument);
 }
+
+TEST(BuilderSlidingWindow, ContinuousWindowUpdates) {
+    const uint32_t window_size = 50;
+    const uint32_t batch_size = 10;
+    const uint32_t rounds = 5;
+    const uint32_t dims = 8;
+    const uint8_t edges_per_vertex = 4;
+
+    auto feature_space = deglib::distances::FloatSpace(dims, deglib::distances::Metric::FP32_L2);
+    auto deg = deglib::DynamicExplorationGraph::create_empty(window_size + batch_size * 2, edges_per_vertex, feature_space);
+
+    std::mt19937 rng(42);
+    deglib::builder::EvenRegularGraphBuilder builder(deg, rng);
+
+    std::uniform_real_distribution<float> dist(0.0f, 10.0f);
+    const uint32_t total_vectors = window_size + batch_size * rounds;
+    std::vector<float> dataset(total_vectors * dims);
+    for (auto& val : dataset) val = dist(rng);
+
+    // Initial build with window_size
+    for (uint32_t i = 0; i < window_size; ++i) {
+        std::span<const float> vec(dataset.data() + i * dims, dims);
+        builder.addEntry(i, vec);
+    }
+    builder.build();
+    EXPECT_EQ(deg.size(), window_size);
+
+    uint32_t active_start = 0;
+    uint32_t next_insert = window_size;
+
+    for (uint32_t r = 0; r < rounds; ++r) {
+        // Remove batch_size oldest
+        for (uint32_t lbl = active_start; lbl < active_start + batch_size; ++lbl) {
+            builder.removeEntry(lbl);
+        }
+
+        // Add batch_size newest
+        for (uint32_t lbl = next_insert; lbl < next_insert + batch_size; ++lbl) {
+            std::span<const float> vec(dataset.data() + lbl * dims, dims);
+            builder.addEntry(lbl, vec);
+        }
+
+        builder.build();
+
+        active_start += batch_size;
+        next_insert += batch_size;
+
+        EXPECT_EQ(deg.size(), window_size);
+
+        // Search for one of the newly added items
+        std::span<const float> query(dataset.data() + (next_insert - 1) * dims, dims);
+        auto results = deg.search(query, 1, 0.2f);
+        EXPECT_EQ(results.size(), 1u);
+        EXPECT_EQ(results.top().getIdentifier(), next_insert - 1);
+        EXPECT_FLOAT_EQ(results.top().getDistance(), 0.0f);
+    }
+}
+

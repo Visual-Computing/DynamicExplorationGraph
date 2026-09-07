@@ -147,7 +147,7 @@ class InternalGraph {
     virtual const bool hasVertex(const uint32_t external_label) const = 0;
     virtual const bool hasEdge(const uint32_t internal_index, const uint32_t neighbor_index) const = 0;
 
-    const std::vector<uint32_t> getEntryVertexIndices() const { return std::vector<uint32_t>{0}; }
+    virtual const std::vector<uint32_t> getEntryVertexIndices() const { return std::vector<uint32_t>{0}; }
 
     /**
      * Perform a search but stops when the to_vertex was found.

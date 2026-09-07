@@ -1381,3 +1381,134 @@ TEST(SizeBoundedGraph, CreateRandomGraphInnerProduct) {
     EXPECT_TRUE(deglib::analysis::check_graph_connectivity(graph));
     EXPECT_TRUE(deglib::analysis::check_graph_weights(graph));
 }
+
+// ---------------------------------------------------------------------------
+//  Sliding Window Deletion & ReadOnlyGraph Conversion / Save & Load
+// ---------------------------------------------------------------------------
+
+TEST(SizeBoundedGraph, RemoveFirstVerticesSaveAndLoadReadOnlyGraphSearch) {
+    const uint32_t initial_count = 50;
+    const uint32_t remove_count = 10;
+    const uint8_t edges_per_vertex = 4;
+    const uint32_t dim = 8;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    std::vector<float> features(size_t(initial_count) * dim);
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(0.0f, 10.0f);
+    for (auto& val : features) val = dist(rng);
+
+    // Create and build a navigable graph
+    auto graph = deglib::graph::SizeBoundedGraph::create_empty(initial_count, edges_per_vertex, space);
+    for (uint32_t i = 0; i < initial_count; ++i) {
+        graph.addVertex(i, reinterpret_cast<const std::byte*>(features.data() + size_t(i) * dim));
+    }
+    // Connect initial 4-regular ring
+    for (uint32_t i = 0; i < initial_count; ++i) {
+        uint32_t n[4] = {(i + initial_count - 2) % initial_count, (i + initial_count - 1) % initial_count, (i + 1) % initial_count, (i + 2) % initial_count};
+        std::sort(n, n + 4);
+        float w[4];
+        for (int e = 0; e < 4; ++e) {
+            w[e] = space.get_dist_func()(graph.getFeatureVector(i), graph.getFeatureVector(n[e]), space.get_dist_func_param());
+        }
+        graph.changeEdges(i, n, w);
+    }
+    EXPECT_EQ(graph.size(), initial_count);
+
+    // Remove the first remove_count vertices (0 .. remove_count - 1)
+    for (uint32_t lbl = 0; lbl < remove_count; ++lbl) {
+        graph.removeVertex(lbl);
+    }
+    EXPECT_EQ(graph.size(), initial_count - remove_count);
+
+    // Save to temp file
+    const auto temp_path = std::filesystem::temp_directory_path() / "test_sbg_remove_save_ro.deg";
+    EXPECT_TRUE(graph.saveGraph(temp_path.string().c_str()));
+
+    // Load as ReadOnlyGraph
+    auto ro_graph = deglib::graph::load_readonly_graph(temp_path.string().c_str());
+    EXPECT_EQ(ro_graph.size(), initial_count - remove_count);
+    EXPECT_EQ(ro_graph.getEdgesPerVertex(), edges_per_vertex);
+
+    // Verify removed vertices are gone, and remaining vertices exist
+    for (uint32_t lbl = 0; lbl < remove_count; ++lbl) {
+        EXPECT_FALSE(ro_graph.hasVertex(lbl));
+    }
+    for (uint32_t lbl = remove_count; lbl < initial_count; ++lbl) {
+        EXPECT_TRUE(ro_graph.hasVertex(lbl));
+    }
+
+    // Verify internal structures of ro_graph
+    EXPECT_EQ(ro_graph.size(), initial_count - remove_count);
+    for (uint32_t i = 0; i < ro_graph.size(); ++i) {
+        uint32_t lbl = ro_graph.getExternalLabel(i);
+        EXPECT_GE(lbl, remove_count);
+        EXPECT_LT(lbl, initial_count);
+        EXPECT_EQ(ro_graph.getInternalIndex(lbl), i);
+    }
+
+    std::filesystem::remove(temp_path);
+}
+
+TEST(SizeBoundedGraph, RemoveFirstVerticesInMemoryConvertToReadOnlyGraphSearch) {
+    const uint32_t initial_count = 50;
+    const uint32_t remove_count = 10;
+    const uint8_t edges_per_vertex = 4;
+    const uint32_t dim = 8;
+
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    std::vector<float> features(size_t(initial_count) * dim);
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(0.0f, 10.0f);
+    for (auto& val : features) val = dist(rng);
+
+    // Create and build graph
+    auto graph = deglib::graph::SizeBoundedGraph::create_empty(initial_count, edges_per_vertex, space);
+    for (uint32_t i = 0; i < initial_count; ++i) {
+        graph.addVertex(i, reinterpret_cast<const std::byte*>(features.data() + size_t(i) * dim));
+    }
+    // Connect initial 4-regular ring
+    for (uint32_t i = 0; i < initial_count; ++i) {
+        uint32_t n[4] = {(i + initial_count - 2) % initial_count, (i + initial_count - 1) % initial_count, (i + 1) % initial_count, (i + 2) % initial_count};
+        std::sort(n, n + 4);
+        float w[4];
+        for (int e = 0; e < 4; ++e) {
+            w[e] = space.get_dist_func()(graph.getFeatureVector(i), graph.getFeatureVector(n[e]), space.get_dist_func_param());
+        }
+        graph.changeEdges(i, n, w);
+    }
+    EXPECT_EQ(graph.size(), initial_count);
+
+    // Remove the first remove_count vertices (0 .. remove_count - 1)
+    for (uint32_t lbl = 0; lbl < remove_count; ++lbl) {
+        graph.removeVertex(lbl);
+    }
+    EXPECT_EQ(graph.size(), initial_count - remove_count);
+
+    // Transform in-memory to ReadOnlyGraph
+    auto ro_graph = deglib::graph::convert_to_readonly_graph(graph);
+    EXPECT_EQ(ro_graph.size(), initial_count - remove_count);
+    EXPECT_EQ(ro_graph.getEdgesPerVertex(), edges_per_vertex);
+
+    // Verify removed vertices are gone, and remaining vertices exist
+    for (uint32_t lbl = 0; lbl < remove_count; ++lbl) {
+        EXPECT_FALSE(ro_graph.hasVertex(lbl));
+    }
+    for (uint32_t lbl = remove_count; lbl < initial_count; ++lbl) {
+        EXPECT_TRUE(ro_graph.hasVertex(lbl));
+    }
+
+    // Verify internal structures of ro_graph
+    EXPECT_EQ(ro_graph.size(), initial_count - remove_count);
+    for (uint32_t i = 0; i < ro_graph.size(); ++i) {
+        uint32_t lbl = ro_graph.getExternalLabel(i);
+        EXPECT_GE(lbl, remove_count);
+        EXPECT_LT(lbl, initial_count);
+        EXPECT_EQ(ro_graph.getInternalIndex(lbl), i);
+    }
+}
+
+
+

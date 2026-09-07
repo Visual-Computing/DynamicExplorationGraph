@@ -249,3 +249,50 @@ class TestGraphs:
         indices, dists = res
         assert len(indices) == 10
         assert not np.isnan(dists).any()
+
+    def test_sliding_window_continuous_updates(self):
+        window_size = 50
+        batch_size = 10
+        rounds = 5
+        dims = 16
+        edges_per_vertex = 8
+
+        np.random.seed(42)
+        total_vectors = window_size + batch_size * rounds
+        all_data = np.random.random((total_vectors, dims)).astype(np.float32)
+
+        graph = deglib.create_empty(window_size + batch_size * 2, FloatSpace.create(dims, Metric.FP32_L2), edges_per_vertex)
+        builder = deglib.GraphBuilder(graph, extend_k=16, extend_eps=0.1, improve_k=8, optimization_target=deglib.builder.OptimizationTarget.LowLID)
+
+        # Initial build
+        builder.add_entry(range(window_size), all_data[:window_size])
+        builder.build()
+        assert graph.size() == window_size
+
+        active_start = 0
+        next_insert = window_size
+
+        for r in range(rounds):
+            # Remove oldest
+            for lbl in range(active_start, active_start + batch_size):
+                builder.remove_entry(lbl)
+
+            # Add newest
+            new_labels = list(range(next_insert, next_insert + batch_size))
+            new_data = all_data[next_insert : next_insert + batch_size]
+            builder.add_entry(new_labels, new_data)
+
+            builder.build()
+
+            active_start += batch_size
+            next_insert += batch_size
+
+            assert graph.size() == window_size
+
+            # Test search on latest added vector
+            query = all_data[next_insert - 1]
+            indices, dists = graph.search(query, k=1, eps=0.1)
+            assert len(indices) == 1
+            assert indices[0] == next_insert - 1
+            assert np.isclose(dists[0], 0.0, atol=1e-5)
+

@@ -649,7 +649,7 @@ class EvenRegularGraphBuilder {
             const auto dist_func_param = graph.getFeatureSpace().get_dist_func_param();
 
             // find good neighbors for the new vertex
-            const std::vector<uint32_t> entry_vertex_indices = {0};
+            const auto entry_vertex_indices = graph.getEntryVertexIndices();
             auto top_list =
                 graph.search_intern(entry_vertex_indices, new_vertex_feature, std::max(uint32_t(this->extend_k_), edges_per_vertex), this->extend_eps_);
             const auto results = topListAscending(top_list);
