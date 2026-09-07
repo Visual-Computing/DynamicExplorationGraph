@@ -40,39 +40,6 @@ DATASET_METADATA: Dict[str, Dict[str, Any]] = {
         "metric": Metric.FP32_L2,  # Normalized angular embeddings -> L2 space
         "dim": 512,
     },
-    "sift1m": {
-        "name": "SIFT1M",
-        "url": "https://static.visual-computing.com/paper/DEG/sift.tar.gz",
-        "archive": "sift.tar.gz",
-        "folder": "sift1m",
-        "format": "tar_fvecs",
-        "metric": Metric.FP32_L2,
-        "dim": 128,
-        "base_file": "sift1m_base.fvecs",
-        "query_file": "sift1m_query.fvecs",
-    },
-    "glove": {
-        "name": "GloVe-100",
-        "url": "https://static.visual-computing.com/paper/DEG/glove-100.tar.gz",
-        "archive": "glove-100.tar.gz",
-        "folder": "glove",
-        "format": "tar_fvecs",
-        "metric": Metric.FP32_InnerProduct,
-        "dim": 100,
-        "base_file": "glove_base.fvecs",
-        "query_file": "glove_query.fvecs",
-    },
-    "deep1m": {
-        "name": "DEEP1M",
-        "url": "https://static.visual-computing.com/paper/DEG/deep1m.tar.gz",
-        "archive": "deep1m.tar.gz",
-        "folder": "deep1m",
-        "format": "tar_fvecs",
-        "metric": Metric.FP32_L2,
-        "dim": 96,
-        "base_file": "deep1m_base.fvecs",
-        "query_file": "deep1m_query.fvecs",
-    },
 }
 
 
@@ -218,40 +185,7 @@ def ensure_dataset(dataset_key: str, cache_dir: Path) -> Tuple[Path, Path, Dict[
 
         return dataset_dir, target_file, meta
 
-    elif fmt == "tar_fvecs":
-        archive_path = cache_dir / meta["archive"]
-        extracted_folder = dataset_dir
-
-        if not (extracted_folder / meta["base_file"]).is_file():
-            if not archive_path.is_file():
-                download_file(meta["url"], archive_path)
-
-            print(f"Extracting {archive_path} into {cache_dir}...")
-            with tarfile.open(archive_path, "r:gz") as tar:
-                tar.extractall(path=cache_dir)
-            print("Extraction complete.")
-
-        base_path = extracted_folder / meta["base_file"] if (extracted_folder / meta["base_file"]).is_file() else (cache_dir / meta["folder"] / meta["base_file"])
-        return dataset_dir, base_path, meta
-
-
-def build_graph_filename(
-    dataset_dir: Path,
-    dims: int,
-    k: int,
-    extend_k: int,
-    extend_eps: float,
-    optimization_target_str: str = "StreamingData",
-    metric_str: str = "L2",
-) -> Path:
-    """
-    Builds the graph path matching standard DEG format:
-    <dataset_dir>/deg/{dims}D_{metric}_K{k}_AddK{extend_k}Eps{extend_eps:.1f}_{optimization_target_str}.deg
-    """
-    deg_dir = dataset_dir / "deg"
-    deg_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"{dims}D_{metric_str}_K{k}_AddK{extend_k}Eps{extend_eps:.1f}_{optimization_target_str}.deg"
-    return deg_dir / filename
+    raise ValueError(f"Unsupported dataset format '{fmt}'")
 
 
 def load_benchmark_dataset(
@@ -267,35 +201,20 @@ def load_benchmark_dataset(
 
     key = dataset_key.lower()
     dataset_dir, file_path, meta = ensure_dataset(key, cache_dir)
-    fmt = meta["format"]
 
-    if fmt == "hdf5":
-        print(f"Reading HDF5 dataset from {file_path}...")
-        with h5py.File(file_path, "r") as h5:
-            base_vecs = np.array(h5["train"], dtype=np.float32)
-            query_vecs = np.array(h5["test"], dtype=np.float32)
+    print(f"Reading HDF5 dataset from {file_path}...")
+    with h5py.File(file_path, "r") as h5:
+        base_vecs = np.array(h5["train"], dtype=np.float32)
+        query_vecs = np.array(h5["test"], dtype=np.float32)
 
-        # Normalize if not already unit vectors
-        norms = np.linalg.norm(base_vecs[:100], axis=1)
-        if not np.allclose(norms, 1.0, atol=1e-3):
-            print("Normalizing base and query embeddings to unit length...")
-            base_vecs /= np.linalg.norm(base_vecs, axis=1, keepdims=True)
-            query_vecs /= np.linalg.norm(query_vecs, axis=1, keepdims=True)
+    # Normalize if not already unit vectors
+    norms = np.linalg.norm(base_vecs[:100], axis=1)
+    if not np.allclose(norms, 1.0, atol=1e-3):
+        print("Normalizing base and query embeddings to unit length...")
+        base_vecs /= np.linalg.norm(base_vecs, axis=1, keepdims=True)
+        query_vecs /= np.linalg.norm(query_vecs, axis=1, keepdims=True)
 
-        return base_vecs, query_vecs, meta["metric"], dataset_dir
-
-    elif fmt == "tar_fvecs":
-        files_dir = dataset_dir
-        base_path = files_dir / meta["base_file"]
-        query_path = files_dir / meta["query_file"]
-
-        print(f"Loading base features from {base_path}...")
-        base_vecs = fvecs_read(base_path)
-
-        print(f"Loading query features from {query_path}...")
-        query_vecs = fvecs_read(query_path)
-
-        return base_vecs, query_vecs, meta["metric"], dataset_dir
+    return base_vecs, query_vecs, meta["metric"], dataset_dir
 
 
 def compute_exact_topk_labels(

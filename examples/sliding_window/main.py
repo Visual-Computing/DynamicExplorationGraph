@@ -107,11 +107,9 @@ def run_sliding_window_benchmark(
     print("=" * 75)
 
     # 1. Initialize Space and Preallocated DEG Graph
-    # Preallocate graph with capacity for window_size + batch_size buffer
-    max_capacity = window_size + batch_size + 1000
     space = deglib.FloatSpace.create(dim=dims, metric=metric)
     graph = deglib.create_empty(
-        capacity=max_capacity,
+        capacity=window_size,
         feature_space=space,
         edges_per_vertex=edges_per_vertex,
     )
@@ -122,6 +120,9 @@ def run_sliding_window_benchmark(
         optimization_target=deglib.builder.OptimizationTarget.StreamingData,
         extend_k=edges_per_vertex * 2,
         extend_eps=0.1,
+        improve_k=edges_per_vertex,
+        improve_eps=0.001,
+        improve_tries=0
     )
     builder.set_thread_count(1)
 
@@ -129,13 +130,10 @@ def run_sliding_window_benchmark(
     print(f"\n[Step 1/2] Building initial graph with {window_size:,} vectors...")
     t0 = time.perf_counter()
 
-    chunk_size = 50_000
-    for i in range(0, window_size, chunk_size):
-        end_i = min(i + chunk_size, window_size)
-        labels = np.arange(i, end_i, dtype=np.uint32)
-        features = base_vectors[i:end_i]
-        builder.add_entry(labels, features)
-        builder.build()
+    initial_labels = np.arange(0, window_size, dtype=np.uint32)
+    initial_features = base_vectors[:window_size]
+    builder.add_entry(initial_labels, initial_features)
+    builder.build(callback="progress")
 
     build_time = time.perf_counter() - t0
     print(f"Initial graph built in {build_time:.2f}s (Throughput: {window_size / build_time:,.0f} vec/s)\n")
@@ -143,14 +141,15 @@ def run_sliding_window_benchmark(
     # Tracking metrics across rounds
     round_recalls = []
     round_search_qps = []
-    round_update_throughput = []  # updates / ms
+    round_search_per_ms = []      # searches / ms (QPS / 1000)
+    round_update_per_ms = []      # updates / ms
 
     active_start_idx = 0
     next_insert_idx = window_size
 
     print(f"[Step 2/2] Running {rounds} sliding window update rounds...")
-    print(f"{'Round':>6} | {'Recall@' + str(search_k):>11} | {'Search QPS':>12} | {'Search ms':>10} | {'Update/ms':>10}")
-    print("-" * 62)
+    print(f"{'Round':>6} | {'Recall@' + str(search_k):>11} | {'QPS':>10} | {'Search/ms':>11} | {'Update/ms':>11}")
+    print("-" * 60)
 
     for r in range(rounds):
         # ---------------------------------------------------------------------
@@ -158,25 +157,24 @@ def run_sliding_window_benchmark(
         # ---------------------------------------------------------------------
         t_update_start = time.perf_counter()
 
+        # Remove M oldest active vectors
+        for remove_lbl in range(active_start_idx, active_start_idx + batch_size):
+            builder.remove_entry(remove_lbl)
+
         # Add M new vectors
         new_labels = np.arange(next_insert_idx, next_insert_idx + batch_size, dtype=np.uint32)
         new_features = base_vectors[next_insert_idx : next_insert_idx + batch_size]
         builder.add_entry(new_labels, new_features)
 
-        # Remove M oldest active vectors
-        # DEG handles edge reconnection and navigability repair automatically upon removal
-        for remove_lbl in range(active_start_idx, active_start_idx + batch_size):
-            builder.remove_entry(remove_lbl)
-
         # Process pending insertions and deletions
         builder.build()
         t_update_end = time.perf_counter()
         update_duration_sec = t_update_end - t_update_start
+        update_duration_ms = update_duration_sec * 1000.0
 
-        # Total operations in update batch = insertions + deletions
-        total_ops = batch_size * 2
-        update_ops_per_ms = (total_ops / update_duration_sec) / 1000.0
-        round_update_throughput.append(update_ops_per_ms)
+        # Throughput (updates / ms)
+        update_per_ms = batch_size / update_duration_ms
+        round_update_per_ms.append(update_per_ms)
 
         active_start_idx += batch_size
         next_insert_idx += batch_size
@@ -204,12 +202,13 @@ def run_sliding_window_benchmark(
             eps=search_eps,
             threads=1,
             return_distances=False,
+            unsorted=True
         )
         t_query_end = time.perf_counter()
 
         query_duration_sec = t_query_end - t_query_start
         search_qps = len(query_vectors) / query_duration_sec
-        search_ms = (query_duration_sec / len(query_vectors)) * 1000.0
+        search_per_ms = search_qps / 1000.0
 
         # Calculate Recall@k
         num_matches = 0
@@ -223,15 +222,16 @@ def run_sliding_window_benchmark(
         recall = num_matches / total_k
         round_recalls.append(recall)
         round_search_qps.append(search_qps)
+        round_search_per_ms.append(search_per_ms)
 
-        if (r + 1) % 5 == 0 or r == 0 or r == rounds - 1:
-            print(f"{r + 1:6d} | {recall * 100:10.2f}% | {search_qps:12,.1f} | {search_ms:10.3f} | {update_ops_per_ms:10.2f}")
+        print(f"{r + 1:6d} | {recall * 100:10.2f}% | {search_qps:10,.1f} | {search_per_ms:11.2f} | {update_per_ms:11.2f}")
 
-    print("-" * 62)
+    print("-" * 60)
     print("\nBenchmark Summary:")
     print(f"  Average Recall@{search_k}:       {np.mean(round_recalls) * 100:.2f}% (std: {np.std(round_recalls) * 100:.2f}%)")
-    print(f"  Average Search QPS:        {np.mean(round_search_qps):,.1f}")
-    print(f"  Average Update Throughput: {np.mean(round_update_throughput):.2f} updates/ms")
+    print(f"  Average QPS:               {np.mean(round_search_qps):,.1f}")
+    print(f"  Average Search / ms:       {np.mean(round_search_per_ms):.2f}")
+    print(f"  Average Update / ms:       {np.mean(round_update_per_ms):.2f}")
 
     # -------------------------------------------------------------------------
     # Plotting Results: Reproducing CleANN Paper Fig. 20 & Fig. 21
@@ -239,6 +239,7 @@ def run_sliding_window_benchmark(
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5.5))
 
     # Panel 1: Recall over rounds (reproduces Figure 20 in CleANN paper)
+    update_fraction = batch_size / window_size
     ax1.plot(range(1, rounds + 1), round_recalls, color="#1f77b4", linewidth=2, label="DEG (eps=0.03)")
     ax1.set_xlabel("Round (Sliding Window Batch)")
     ax1.set_ylabel(f"Recall@{search_k}")
@@ -255,8 +256,8 @@ def run_sliding_window_benchmark(
     ax2.grid(True, linestyle="--", alpha=0.6)
 
     ax2_twin = ax2.twinx()
-    ax2_twin.plot(range(1, rounds + 1), round_update_throughput, color="#2ca02c", linestyle=":", linewidth=2, label="Update Throughput (ops/ms)")
-    ax2_twin.set_ylabel("Update Throughput (ops/ms)", color="#2ca02c")
+    ax2_twin.plot(range(1, rounds + 1), round_update_per_ms, color="#2ca02c", linestyle=":", linewidth=2, label="Update Throughput (updates/ms)")
+    ax2_twin.set_ylabel("Update Throughput (updates/ms)", color="#2ca02c")
     ax2_twin.tick_params(axis="y", labelcolor="#2ca02c")
 
     ax2.set_title("Figure 21 Reproduction: Search & Update Throughput\n(Single-Threaded Execution)")
