@@ -34,13 +34,37 @@ Maximum Inner Product Search (MIPS) can be mapped to Euclidean (L2) distance sea
 Quantization
 ------------
 
-Quantize floating point vectors into compact byte-packed EVP or scalar INT8/UINT8 representations.
+Stateful quantizers compress floating point vectors into compact EVP bit-packed
+or scalar INT8/UINT8 representations.
 
-.. autofunction:: deglib.optimization.quantize_batch
+Construct (or fit) one shared instance and reuse it for database and query
+vectors so both sides share the same settings.
 
-.. autofunction:: deglib.optimization.quantize_int8
+.. autoclass:: deglib.optimization.EvpQuantizer
+   :members:
 
-.. autofunction:: deglib.optimization.quantize_uint8
+.. autoclass:: deglib.optimization.ScalarQuantizerInt8
+   :members:
+
+.. autoclass:: deglib.optimization.ScalarQuantizerInt8PerDim
+   :members:
+
+.. autoclass:: deglib.optimization.ScalarQuantizerUint8
+   :members:
+
+.. autoclass:: deglib.optimization.ScalarQuantizerUint8PerDim
+   :members:
+
+.. autofunction:: deglib.optimization.make_evp_quantizer
+
+.. autofunction:: deglib.optimization.make_scalar_quantizer_int8
+
+.. autofunction:: deglib.optimization.make_scalar_quantizer_int8_perdim
+
+.. autofunction:: deglib.optimization.make_scalar_quantizer_uint8
+
+.. autofunction:: deglib.optimization.make_scalar_quantizer_uint8_perdim
+
 Example Usage
 -------------
 
@@ -56,8 +80,12 @@ Example Usage
    sorted_indices = deglib.optimization.presort(data)
    sorted_data = data[sorted_indices]
 
-   # Build graph from pre-sorted data
-   graph = deglib.builder.build_from_data(sorted_data)
+   # Fit one shared quantizer and quantize the sorted data
+   quantizer = deglib.optimization.make_scalar_quantizer_int8(sorted_data)
+   sorted_quantized_data = quantizer.quantize(sorted_data)
+
+   # Build graph from pre-sorted, quantized data
+   graph = deglib.builder.build_from_data(sorted_quantized_data, metric=deglib.Metric.Int8_L2)
 
    # Optimize graph edges using RNG pruning
    edges_removed = deglib.optimization.prune_non_rng_edges(graph)

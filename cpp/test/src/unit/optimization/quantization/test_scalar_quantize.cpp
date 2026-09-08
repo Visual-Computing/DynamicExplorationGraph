@@ -1,13 +1,20 @@
 // test_scalar_quantize.cpp — Unit tests for deglib::quantization::scalar (Int8 and Uint8 scalar quantization)
 
 #include "deglib/distance/fp16.h"
+#include "deglib/optimization/quantization/quantizer_concept.h"
 #include "deglib/optimization/quantization/scalar_quantize.h"
 #include "gtest/gtest.h"
 
 #include <cmath>
 #include <cstdint>
 #include <random>
+#include <span>
 #include <vector>
+
+static_assert(deglib::quantization::Quantizer<deglib::quantization::scalar::ScalarQuantizerInt8>);
+static_assert(deglib::quantization::Quantizer<deglib::quantization::scalar::ScalarQuantizerInt8PerDim>);
+static_assert(deglib::quantization::Quantizer<deglib::quantization::scalar::ScalarQuantizerUint8>);
+static_assert(deglib::quantization::Quantizer<deglib::quantization::scalar::ScalarQuantizerUint8PerDim>);
 
 namespace {
 
@@ -283,5 +290,45 @@ TEST(ScalarQuantize, DirectFP16QuantizeSingle) {
     q_u8_pd.quantize(fp16_vec.data(), out_u8_pd, 1, dim);
     EXPECT_EQ(out_u8_pd[0], 0);
     EXPECT_EQ(out_u8_pd[3], 255);
+}
+
+namespace {
+
+template <typename Q>
+void check_span_matches_pointer(Q& q, const std::vector<float>& data, size_t count, uint32_t dim) {
+    const std::span<const float> src(data.data(), data.size());
+    EXPECT_EQ(q.quantize(src, dim), q.quantize(data.data(), count, dim));
+    std::vector<typename Q::output_type> dst(count * dim);
+    q.quantize(src, std::span<typename Q::output_type>(dst), dim);
+    EXPECT_EQ(dst, q.quantize(data.data(), count, dim));
+}
+
+}  // namespace
+
+TEST(ScalarQuantize, SpanOverloadsMatchPointer) {
+    const uint32_t dim = 8;
+    const size_t count = 4;
+    auto data = generate_random_floats(count, dim);
+
+    deglib::quantization::scalar::ScalarQuantizerInt8 q_i8;
+    q_i8.fit(data.data(), count, dim);
+    check_span_matches_pointer(q_i8, data, count, dim);
+
+    deglib::quantization::scalar::ScalarQuantizerInt8PerDim q_i8_pd;
+    q_i8_pd.fit(data.data(), count, dim);
+    check_span_matches_pointer(q_i8_pd, data, count, dim);
+
+    deglib::quantization::scalar::ScalarQuantizerUint8 q_u8;
+    q_u8.fit(data.data(), count, dim);
+    check_span_matches_pointer(q_u8, data, count, dim);
+
+    deglib::quantization::scalar::ScalarQuantizerUint8PerDim q_u8_pd;
+    q_u8_pd.fit(data.data(), count, dim);
+    check_span_matches_pointer(q_u8_pd, data, count, dim);
+
+    const std::span<const float> src(data.data(), data.size());
+    std::vector<int8_t> dst(count * dim);
+    EXPECT_THROW(q_i8.quantize(src, std::span<int8_t>(dst), dim + 1), std::invalid_argument);
+    EXPECT_THROW(q_i8.quantize(src, 0), std::invalid_argument);
 }
 

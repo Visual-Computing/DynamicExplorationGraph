@@ -290,11 +290,12 @@ from deglib.optimization import (
     presort,
     mips_l2_transform,
     mips_l2_transform_query,
-    quantize_batch,
+    EvpQuantizer,
     ScalarQuantizerInt8,
     ScalarQuantizerInt8PerDim,
     ScalarQuantizerUint8,
     ScalarQuantizerUint8PerDim,
+    make_evp_quantizer,
     make_scalar_quantizer_int8,
     make_scalar_quantizer_int8_perdim,
     make_scalar_quantizer_uint8,
@@ -320,7 +321,10 @@ perdim_quantizer = make_scalar_quantizer_uint8_perdim(base_vectors)
 quant_perdim_base = perdim_quantizer.quantize(base_vectors)
 
 # 2. EVP Quantization (float32 or float16 vectors to byte-packed EVP format)
-quantize_batch(vectors, non_zeros, num_threads=0) -> np.ndarray
+# One shared quantizer for database and query vectors guarantees matching non_zeros.
+quantizer = EvpQuantizer(non_zeros)  # or make_evp_quantizer(non_zeros)
+quant_base = quantizer.quantize(base_vectors, num_threads=0)
+quant_query = quantizer.quantize(query_vectors, num_threads=0)
 
 # Remove all edges violating the Relative Neighborhood Graph (RNG) rule. Returns removed edge count.
 prune_non_rng_edges(graph, num_threads=0) -> int

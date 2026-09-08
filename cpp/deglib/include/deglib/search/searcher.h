@@ -6,6 +6,7 @@
 #include "deglib/filter.h"
 #include "deglib/graph/internal_graph.h"
 #include "deglib/optimization/quantization/evp_quantize.h"
+#include "deglib/optimization/quantization/quantizer_concept.h"
 #include "deglib/optimization/quantization/scalar_quantize.h"
 #include "deglib/search.h"
 #include "deglib/search/kmeans.h"
@@ -60,25 +61,13 @@ struct SearchResultBatch {
 
 // ============================================================================
 // Quantizer Concept
-// A Quantizer Q provides:
-//   q.quantize(const InT* in, OutByteT* out_bytes, size_t count = 1, uint32_t dim)
-// Both ScalarQuantizers and EVPQuantizer provide this method.
+// A Quantizer Q satisfies deglib::quantization::Quantizer: it exposes its
+// packed element type via output_type and pointer- plus span-based quantize
+// methods for float and uint16_t (fp16) inputs, in-place and returning.
+// NoQuantizer bypasses quantization via zero-copy and is exempt.
 // ============================================================================
 
 struct NoQuantizer {};
-
-struct EVPQuantizer {
-    uint32_t non_zeros = 0;
-    explicit EVPQuantizer(uint32_t nz) : non_zeros(nz) {}
-
-    template <typename InT, typename OutByteT>
-    inline void quantize(const InT* in, OutByteT* out_bytes, size_t count, uint32_t dim) const {
-        for (size_t i = 0; i < count; ++i) {
-            const size_t mask_bytes = dim / 8;
-            deglib::quantization::evp::quantize_single_into(in + i * dim, dim, non_zeros, reinterpret_cast<std::byte*>(out_bytes) + i * 2 * mask_bytes);
-        }
-    }
-};
 
 // ============================================================================
 // Refiner Concept Wrappers
@@ -361,6 +350,7 @@ class SearcherBase {
 // ============================================================================
 
 template <typename QuantT, typename RefinerT>
+    requires deglib::quantization::Quantizer<QuantT> || std::is_same_v<QuantT, NoQuantizer>
 class SearcherImpl : public SearcherBase {
   private:
     const deglib::graph::InternalGraph* graph_ = nullptr;
@@ -416,11 +406,7 @@ class SearcherImpl : public SearcherBase {
                 q_buf = heap_query_bytes.get();
             }
 
-            if constexpr (requires { quantizer_.quantize(query, q_buf, 1, dim); }) {
-                quantizer_.quantize(query, q_buf, 1, dim);
-            } else {
-                quantizer_.quantize(query, reinterpret_cast<typename QuantT::output_type*>(q_buf), 1, dim);
-            }
+            quantizer_.quantize(query, reinterpret_cast<typename QuantT::output_type*>(q_buf), 1, dim);
             query_bytes = q_buf;
         }
 
@@ -567,6 +553,7 @@ class SearcherImpl : public SearcherBase {
 // ============================================================================
 
 template <typename QuantT = NoQuantizer, typename RefinerT = NoRefiner>
+    requires deglib::quantization::Quantizer<QuantT> || std::is_same_v<QuantT, NoQuantizer>
 inline std::unique_ptr<SearcherBase>
 make_searcher(const deglib::graph::InternalGraph& graph, QuantT quantizer = NoQuantizer{}, RefinerT refiner = NoRefiner{}) {
     return std::make_unique<SearcherImpl<QuantT, RefinerT>>(graph, std::move(quantizer), std::move(refiner));

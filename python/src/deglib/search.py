@@ -98,7 +98,7 @@ class Searcher:
     and bridge overhead in query loops.
 
     :param graph: DynamicExplorationGraph (Mutable or ReadOnly) instance.
-    :param quantizer: Optional scalar or EVP quantizer instance (or integer non_zeros for EVP).
+    :param quantizer: Optional EvpQuantizer or scalar quantizer instance.
     :param refine_space: Optional FloatSpace for exact candidate reranking.
     :param refine_data: Optional base feature matrix for candidate reranking.
     """
@@ -128,8 +128,8 @@ class Searcher:
         n_clusters: int = 128,
         n_iter: int = 15,
         sample_size: int = 0,
-        seed: int = 42,
-        num_threads: int = 0,
+        seed: int = 7,
+        num_threads: int = 1,
     ) -> None:
         """Select entry vertices via k-means medoids.
 
@@ -192,6 +192,8 @@ def create_searcher(
 ) -> Searcher:
     """
     Factory function to create a Searcher instance.
+
+    :param quantizer: Optional EvpQuantizer or scalar quantizer instance.
     """
     return Searcher(
         graph=graph,

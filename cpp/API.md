@@ -379,13 +379,17 @@ vector<uint32_t> presort(
 
 // --- Extreme Vector Quantization (EVP) ---
 
-/// Quantize a single vector to packed EVP representation
-vector<byte> quantize_evp_single(float* embedding, uint32_t dim, uint32_t non_zeros);
-vector<byte> quantize_evp_single(uint16_t* embedding, uint32_t dim, uint32_t non_zeros);
-
-/// Quantize a batch of vectors to packed EVP representation
-vector<byte> quantize_evp_batch(float* data, size_t count, uint32_t dim, uint32_t non_zeros, size_t num_threads = 0);
-vector<byte> quantize_evp_batch(uint16_t* data, size_t count, uint32_t dim, uint32_t non_zeros, size_t num_threads = 0);
+/// Stateful EVP quantizer holding the shared non_zeros setting.
+/// Construct once and reuse for database and query quantization.
+class EvpQuantizer {
+    explicit EvpQuantizer(uint32_t non_zeros);
+    void quantize(float* src, byte* dst, size_t count, uint32_t dim, size_t num_threads = 0);
+    void quantize(uint16_t* src, byte* dst, size_t count, uint32_t dim, size_t num_threads = 0);
+    vector<byte> quantize(float* src, size_t count, uint32_t dim, size_t num_threads = 0);
+    vector<byte> quantize(uint16_t* src, size_t count, uint32_t dim, size_t num_threads = 0);
+    // Same four flavors with std::span (count derived from span size, validated).
+};
+EvpQuantizer make_evp_quantizer(uint32_t non_zeros);
 
 // --- MIPS to L2 Space Transformation ---
 

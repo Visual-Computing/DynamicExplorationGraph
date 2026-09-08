@@ -2,7 +2,6 @@
 We copy the pybind11 include dir and the deglib include dir to ./include to make it available for this package.
 """
 
-import codecs
 import os
 import re
 import shutil
@@ -25,9 +24,9 @@ PLAT_TO_CMAKE = {
 }
 
 
-def read(rel_path: str):
+def read(rel_path: str) -> str:
     here = os.path.abspath(os.path.dirname(os.path.abspath(__file__)))
-    with codecs.open(os.path.join(here, rel_path), "r") as fp:
+    with open(os.path.join(here, rel_path), "r", encoding="utf-8") as fp:
         return fp.read()
 
 

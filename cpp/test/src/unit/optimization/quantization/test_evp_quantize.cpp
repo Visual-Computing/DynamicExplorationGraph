@@ -2,11 +2,16 @@
 
 #include "deglib/distance/fp16.h"
 #include "deglib/optimization/quantization/evp_quantize.h"
+#include "deglib/optimization/quantization/quantizer_concept.h"
 #include "gtest/gtest.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <random>
+#include <span>
 #include <vector>
+
+static_assert(deglib::quantization::Quantizer<deglib::quantization::evp::EvpQuantizer>);
 
 // ============================================================================
 // Single vector quantization (float)
@@ -163,4 +168,24 @@ TEST(EvpQuantize, InvalidArguments) {
     // non_zeros >= dim
     EXPECT_THROW(deglib::quantization::evp::quantize_single(vec, dim, dim), std::invalid_argument);
     EXPECT_THROW(deglib::quantization::evp::quantize_batch(vec, 1, dim, dim), std::invalid_argument);
+}
+
+TEST(EvpQuantize, ClassSpanOverloadsMatchPointer) {
+    const uint32_t dim = 16;
+    const size_t count = 4;
+    const uint32_t non_zeros = 4;
+    std::mt19937 rng(42);
+    std::normal_distribution<float> dist(0.0f, 1.0f);
+    std::vector<float> data(count * dim);
+    for (auto& v : data) v = dist(rng);
+
+    deglib::quantization::evp::EvpQuantizer q(non_zeros);
+    const std::span<const float> src(data.data(), data.size());
+    EXPECT_EQ(q.quantize(src, dim), q.quantize(data.data(), count, dim));
+
+    std::vector<std::byte> dst(count * 2 * dim / 8);
+    q.quantize(src, std::span<std::byte>(dst), dim);
+    EXPECT_EQ(dst, q.quantize(data.data(), count, dim));
+
+    EXPECT_THROW(q.quantize(src, 0), std::invalid_argument);
 }

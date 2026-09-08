@@ -5,12 +5,33 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace deglib::quantization::evp {
+
+// Validates span-based quantize inputs, returns the vector count.
+inline size_t checked_span_count(size_t src_size, size_t dst_size, uint32_t dim) {
+    if (dim == 0) {
+        if (src_size == 0 && dst_size == 0) return 0;
+        throw std::invalid_argument("quantize: dim must be > 0");
+    }
+    if (dim % 8 != 0) {
+        throw std::invalid_argument("quantize: dim must be divisible by 8");
+    }
+    if (src_size % dim != 0) {
+        throw std::invalid_argument("quantize: src span size must be a multiple of dim");
+    }
+    const size_t count = src_size / dim;
+    if (dst_size < count * 2 * (dim / 8)) {
+        throw std::invalid_argument("quantize: dst span too small for src span and dim");
+    }
+    return count;
+}
 
 // ============================================================================
 // Conversion: fp32 → EVP bytes
@@ -456,5 +477,80 @@ inline std::vector<std::byte> quantize_single(const uint16_t* embedding, uint32_
     quantize_single_into(embedding, dim, non_zeros, result.data());
     return result;
 }
+
+/**
+ * Stateful EVP quantizer holding the non_zeros parameter.
+ *
+ * Construct once and reuse for database and query quantization so both sides
+ * always share the same non_zeros setting. Mirrors the ScalarQuantizer API.
+ */
+class EvpQuantizer {
+  public:
+    using output_type = std::byte;
+    uint32_t non_zeros = 0;
+
+    EvpQuantizer() = default;
+    explicit EvpQuantizer(uint32_t nz) : non_zeros(nz) {}
+
+    void quantize(const float* src, std::byte* dst, size_t count, uint32_t dim, size_t numThreads = 0) const {
+        if (count == 0 || dim == 0) return;
+        if (count == 1) {
+            quantize_single_into(src, dim, non_zeros, dst);
+            return;
+        }
+        auto tmp = quantize_batch(src, count, dim, non_zeros, numThreads);
+        std::memcpy(dst, tmp.data(), tmp.size());
+    }
+
+    void quantize(const uint16_t* src_fp16, std::byte* dst, size_t count, uint32_t dim, size_t numThreads = 0) const {
+        if (count == 0 || dim == 0) return;
+        if (count == 1) {
+            quantize_single_into(src_fp16, dim, non_zeros, dst);
+            return;
+        }
+        auto tmp = quantize_batch(src_fp16, count, dim, non_zeros, numThreads);
+        std::memcpy(dst, tmp.data(), tmp.size());
+    }
+
+    std::vector<std::byte> quantize(const float* src, size_t count, uint32_t dim, size_t numThreads = 0) const {
+        if (count == 0 || dim == 0) return {};
+        return quantize_batch(src, count, dim, non_zeros, numThreads);
+    }
+
+    std::vector<std::byte> quantize(const uint16_t* src_fp16, size_t count, uint32_t dim, size_t numThreads = 0) const {
+        if (count == 0 || dim == 0) return {};
+        return quantize_batch(src_fp16, count, dim, non_zeros, numThreads);
+    }
+
+    void quantize(std::span<const float> src, std::span<std::byte> dst, uint32_t dim, size_t numThreads = 0) const {
+        quantize(src.data(), dst.data(), checked_span_count(src.size(), dst.size(), dim), dim, numThreads);
+    }
+
+    void quantize(std::span<const uint16_t> src_fp16, std::span<std::byte> dst, uint32_t dim, size_t numThreads = 0) const {
+        quantize(src_fp16.data(), dst.data(), checked_span_count(src_fp16.size(), dst.size(), dim), dim, numThreads);
+    }
+
+    std::vector<std::byte> quantize(std::span<const float> src, uint32_t dim, size_t numThreads = 0) const {
+        if (dim == 0) {
+            if (src.empty()) return {};
+            throw std::invalid_argument("quantize: dim must be > 0");
+        }
+        if (src.size() % dim != 0) {
+            throw std::invalid_argument("quantize: src span size must be a multiple of dim");
+        }
+        return quantize(src.data(), src.size() / dim, dim, numThreads);
+    }
+
+    std::vector<std::byte> quantize(std::span<const uint16_t> src_fp16, uint32_t dim, size_t numThreads = 0) const {
+        if (dim == 0) {
+            if (src_fp16.empty()) return {};
+            throw std::invalid_argument("quantize: dim must be > 0");
+        }
+        if (src_fp16.size() % dim != 0) {
+            throw std::invalid_argument("quantize: src span size must be a multiple of dim");
+        }
+        return quantize(src_fp16.data(), src_fp16.size() / dim, dim, numThreads);
+    }
+};
 
 }  // namespace deglib::quantization::evp

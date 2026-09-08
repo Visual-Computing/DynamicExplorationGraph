@@ -140,15 +140,15 @@ def test_searcher_evp_quantizer():
 
     graph = deglib.builder.build_from_data(data, edges_per_vertex=16, metric=Metric.FP32_InnerProduct)
 
-    # 16 non-zeros for EVP
-    non_zeros = 16
-    evp_data = deglib.optimization.quantize_batch(data, non_zeros=non_zeros)
+    # 16 non-zeros for EVP, shared by database and query quantization
+    quantizer = deglib.optimization.EvpQuantizer(non_zeros=16)
+    evp_data = quantizer.quantize(data)
     target_space = FloatSpace.create(dim=dim, metric=Metric.EVP_InnerProduct)
     ro_graph = graph.to_readonly(target_space, evp_data)
 
     searcher = create_searcher(
         graph=ro_graph,
-        quantizer=non_zeros,
+        quantizer=quantizer,
         refine_space=FloatSpace.create(dim=dim, metric=Metric.FP32_InnerProduct),
         refine_data=data,
     )

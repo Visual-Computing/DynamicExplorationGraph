@@ -128,27 +128,14 @@ def mips_l2_transform(database: np.ndarray) -> tuple[np.ndarray, float]:
     return deglib_cpp.mips_l2_transform(db_f32)
 
 
-def quantize_batch(vectors: np.ndarray, non_zeros: int, num_threads: int = 0) -> np.ndarray:
-    """
-    Quantize float32 or float16 vectors into byte-packed extreme value representation (EVP).
-
-    :param vectors: 2D float32 or float16 NumPy array of vectors.
-    :param non_zeros: Target number of non-zero entries to retain per quantized vector.
-    :param num_threads: Number of worker threads (0 uses all available CPU cores).
-    :return: 2D uint8 NumPy array of quantized vectors.
-    """
-    if vectors.dtype == np.float16:
-        vectors = vectors.view(np.uint16)
-    return deglib_cpp.optimization.quantize_batch(vectors, non_zeros, num_threads)
-
-
-
-# Scalar Quantizer Classes & Factory Functions
+# EVP + Scalar Quantizer Classes & Factory Functions
+EvpQuantizer = deglib_cpp.optimization.EvpQuantizer
 ScalarQuantizerInt8 = deglib_cpp.optimization.ScalarQuantizerInt8
 ScalarQuantizerInt8PerDim = deglib_cpp.optimization.ScalarQuantizerInt8PerDim
 ScalarQuantizerUint8 = deglib_cpp.optimization.ScalarQuantizerUint8
 ScalarQuantizerUint8PerDim = deglib_cpp.optimization.ScalarQuantizerUint8PerDim
 
+make_evp_quantizer = deglib_cpp.optimization.make_evp_quantizer
 make_scalar_quantizer_int8 = deglib_cpp.optimization.make_scalar_quantizer_int8
 make_scalar_quantizer_int8_perdim = deglib_cpp.optimization.make_scalar_quantizer_int8_perdim
 make_scalar_quantizer_uint8 = deglib_cpp.optimization.make_scalar_quantizer_uint8
@@ -179,11 +166,12 @@ __all__ = [
     "presort",
     "mips_l2_transform",
     "mips_l2_transform_query",
-    "quantize_batch",
+    "EvpQuantizer",
     "ScalarQuantizerInt8",
     "ScalarQuantizerInt8PerDim",
     "ScalarQuantizerUint8",
     "ScalarQuantizerUint8PerDim",
+    "make_evp_quantizer",
     "make_scalar_quantizer_int8",
     "make_scalar_quantizer_int8_perdim",
     "make_scalar_quantizer_uint8",

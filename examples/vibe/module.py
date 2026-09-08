@@ -290,7 +290,7 @@ class QG(BaseANN):
 
         # 6. Optimize entry vertices via K-Means cluster medoids computed in C++
         t_km = time.time()
-        #self.searcher.optimize()
+        self.searcher.optimize(n_clusters=256, n_iter=20, sample_size=50000, seed=7, num_threads=1)
         print(f"K-Means 128 cluster medoids computed in {time.time() - t_km:.2f}s", flush=True)
 
     def set_query_arguments(self, *args, **kwargs):

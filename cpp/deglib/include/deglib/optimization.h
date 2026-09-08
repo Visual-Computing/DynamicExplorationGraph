@@ -63,32 +63,15 @@ inline std::vector<uint32_t> presort(
     return result;
 }
 
-/**
- * Quantize a single FP32 vector using EVP quantization.
- */
-inline std::vector<std::byte> quantize_evp_single(const float* embedding, uint32_t dim, uint32_t non_zeros) {
-    return deglib::quantization::evp::quantize_single(embedding, dim, non_zeros);
-}
+// ========================================================================
+// EVP Quantizer Factory Method
+// ========================================================================
 
 /**
- * Quantize a single FP16 (uint16_t) vector using EVP quantization.
+ * Make an EvpQuantizer holding the shared non_zeros setting.
  */
-inline std::vector<std::byte> quantize_evp_single(const uint16_t* embedding, uint32_t dim, uint32_t non_zeros) {
-    return deglib::quantization::evp::quantize_single(embedding, dim, non_zeros);
-}
-
-/**
- * Quantize a batch of FP32 vectors using EVP quantization.
- */
-inline std::vector<std::byte> quantize_evp_batch(const float* data, size_t count, uint32_t dim, uint32_t non_zeros, size_t numThreads = 0) {
-    return deglib::quantization::evp::quantize_batch(data, count, dim, non_zeros, numThreads);
-}
-
-/**
- * Quantize a batch of FP16 (uint16_t) vectors using EVP quantization.
- */
-inline std::vector<std::byte> quantize_evp_batch(const uint16_t* data, size_t count, uint32_t dim, uint32_t non_zeros, size_t numThreads = 0) {
-    return deglib::quantization::evp::quantize_batch(data, count, dim, non_zeros, numThreads);
+inline deglib::quantization::evp::EvpQuantizer make_evp_quantizer(uint32_t non_zeros) {
+    return deglib::quantization::evp::EvpQuantizer(non_zeros);
 }
 
 // ========================================================================

@@ -806,9 +806,9 @@ class SearcherPy {
         } else if (py::isinstance<deglib::quantization::scalar::ScalarQuantizerUint8PerDim>(quantizer)) {
             auto q = py::cast<deglib::quantization::scalar::ScalarQuantizerUint8PerDim>(quantizer);
             make_searcher_for_quant(std::move(q));
-        } else if (py::isinstance<py::int_>(quantizer)) {
-            uint32_t nz = py::cast<uint32_t>(quantizer);
-            make_searcher_for_quant(deglib::search::EVPQuantizer(nz));
+        } else if (py::isinstance<deglib::quantization::evp::EvpQuantizer>(quantizer)) {
+            auto q = py::cast<deglib::quantization::evp::EvpQuantizer>(quantizer);
+            make_searcher_for_quant(std::move(q));
         } else {
             throw std::invalid_argument("Unsupported quantizer type provided to create_searcher.");
         }
@@ -880,42 +880,6 @@ class SearcherPy {
 };
 
 // ============================================================================
-// EVP Quantization Bindings
-// ============================================================================
-
-py::array_t<uint8_t> quantize_batch_wrapper(py::array vectors, uint32_t non_zeros, size_t num_threads) {
-    py::buffer_info buf = vectors.request();
-    if (buf.ndim != 2) {
-        throw std::invalid_argument("vectors must be a 2D array");
-    }
-    size_t count = buf.shape[0];
-    uint32_t dim = static_cast<uint32_t>(buf.shape[1]);
-    if (dim % 8 != 0) {
-        throw std::invalid_argument(std::format("Vector dimension ({}) must be a multiple of 8 for EVP quantization", dim));
-    }
-    size_t evp_bytes = 2 * (dim / 8);
-
-    std::vector<std::byte> result;
-    if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-        result = deglib::optimization::quantize_evp_batch(static_cast<const uint16_t*>(buf.ptr), count, dim, non_zeros, num_threads);
-    } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-        result = deglib::optimization::quantize_evp_batch(static_cast<const float*>(buf.ptr), count, dim, non_zeros, num_threads);
-    } else {
-        throw std::invalid_argument(
-            std::format(
-                "vectors must be float32 (format 'f') or FP16/uint16 "
-                "(format 'e'/'H'), got format '{}' with itemsize {}",
-                buf.format, buf.itemsize
-            )
-        );
-    }
-
-    py::array_t<uint8_t> output({count, evp_bytes});
-    py::buffer_info out_buf = output.request();
-    std::memcpy(out_buf.ptr, result.data(), count * evp_bytes);
-    return output;
-}
-
 // ============================================================================
 // Scalar Quantization (SQ8 / Int8 / Uint8) Bindings
 // ============================================================================
@@ -1533,7 +1497,43 @@ PYBIND11_MODULE(deglib_cpp, m) {
         "Make, fit, and return a ScalarQuantizerUint8PerDim instance from vectors"
     );
 
-    optimization_module.def("quantize_batch", &quantize_batch_wrapper, "Quantize float32 or float16/uint16 vectors to byte-packed EVP format");
+    optimization_module.def(
+        "make_evp_quantizer",
+        [](uint32_t non_zeros) { return deglib::quantization::evp::EvpQuantizer(non_zeros); },
+        py::arg("non_zeros"),
+        "Make and return an EvpQuantizer instance holding the shared non_zeros setting"
+    );
+
+    // EvpQuantizer
+    py::class_<deglib::quantization::evp::EvpQuantizer>(optimization_module, "EvpQuantizer")
+        .def(py::init<>())
+        .def(py::init<uint32_t>(), py::arg("non_zeros"))
+        .def_readwrite("non_zeros", &deglib::quantization::evp::EvpQuantizer::non_zeros)
+        .def(
+            "quantize",
+            [](const deglib::quantization::evp::EvpQuantizer& q, py::array vectors, size_t num_threads) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                if (dim % 8 != 0) {
+                    throw std::invalid_argument(std::format("Vector dimension ({}) must be a multiple of 8 for EVP quantization", dim));
+                }
+                size_t evp_bytes = 2 * (dim / 8);
+                std::vector<std::byte> result;
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    result = q.quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, num_threads);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    result = q.quantize(static_cast<const float*>(buf.ptr), count, dim, num_threads);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+                py::array_t<uint8_t> output({count, evp_bytes});
+                py::buffer_info out_buf = output.request();
+                std::memcpy(out_buf.ptr, result.data(), count * evp_bytes);
+                return output;
+            },
+            py::arg("vectors"), py::arg("num_threads") = 0
+        );
+
     // search submodule
     py::module_ search_module = m.def_submodule("search", "Search utilities including Filter");
     py::class_<deglib::search::Filter>(search_module, "Filter").def(py::init<const int*, size_t, size_t, size_t>());

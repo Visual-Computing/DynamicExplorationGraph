@@ -5,7 +5,7 @@ Demonstrates fast construction and exploration of a k-NN graph on high-dimension
 using Dynamic Exploration Graph (DEG), EVP feature quantization, and FP16 candidate reranking.
 
 Uses deglib_cpp C++ bindings for:
-  - quantize_batch: Fast EVP quantization of float32 vectors to byte-packed EVP format
+  - EvpQuantizer.quantize: Fast EVP quantization of float32 vectors to byte-packed EVP format
   - floats_to_fp16 / fp16_to_floats: IEEE 754 half-precision conversion for reranking
   - EVP_InnerProduct metric: Bit-level inner product distance for quantized graph search
 
@@ -25,7 +25,6 @@ import matplotlib.pyplot as plt
 
 import deglib
 from deglib.distances import FloatSpace, Metric
-from deglib.optimization import quantize_batch
 from deglib.search import rerank
 from dataset import load_hdf5_dataset, ensure_small_dataset, DEFAULT_CACHE_DIR
 
@@ -58,7 +57,7 @@ def quantize_vectors(
     """
     dims = vectors.shape[1]
     effective_non_zeros = min(non_zeros, dims - 1)
-    return quantize_batch(vectors, effective_non_zeros, num_threads)
+    return deglib.optimization.EvpQuantizer(effective_non_zeros).quantize(vectors, num_threads=num_threads)
 
 
 def construct_knng(

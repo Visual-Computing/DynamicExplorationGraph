@@ -149,18 +149,19 @@ TEST(SearcherTest, EVPQuantizerWithFP32Refiner) {
 
     auto base_graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_InnerProduct);
 
-    auto evp_data = deglib::quantization::evp::quantize_batch(data.data(), count, dim, non_zeros);
+    deglib::quantization::evp::EvpQuantizer quantizer(non_zeros);
+    auto evp_data = quantizer.quantize(data.data(), count, dim);
     auto target_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::EVP_InnerProduct);
     auto ro_graph = deglib::graph::convert_to_readonly_graph(base_graph.internal(), target_space, evp_data.data());
 
     auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP32_InnerProduct);
 
-    using QuantT = deglib::search::EVPQuantizer;
+    using QuantT = deglib::quantization::evp::EvpQuantizer;
     using RefinerT = deglib::search::ExactRefiner<float>;
 
     auto searcher = deglib::search::make_searcher(
         ro_graph,
-        QuantT(non_zeros),
+        quantizer,
         RefinerT(rerank_space, data.data(), count)
     );
 

@@ -10,12 +10,29 @@
 #include <format>
 #include <limits>
 #include <queue>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace deglib::quantization::scalar {
+
+// Validates span-based quantize inputs, returns the vector count.
+inline size_t checked_span_count(size_t src_size, size_t dst_size, uint32_t dim) {
+    if (dim == 0) {
+        if (src_size == 0 && dst_size == 0) return 0;
+        throw std::invalid_argument("quantize: dim must be > 0");
+    }
+    if (src_size % dim != 0) {
+        throw std::invalid_argument("quantize: src span size must be a multiple of dim");
+    }
+    const size_t count = src_size / dim;
+    if (dst_size < count * dim) {
+        throw std::invalid_argument("quantize: dst span too small for src span and dim");
+    }
+    return count;
+}
 
 // ============================================================================
 // Calibration Helpers (internal percentile / min / max scanning)
@@ -281,6 +298,36 @@ public:
         return result;
     }
 
+    void quantize(std::span<const float> src, std::span<output_type> dst, uint32_t dim, size_t numThreads = 0) const {
+        quantize(src.data(), dst.data(), checked_span_count(src.size(), dst.size(), dim), dim, numThreads);
+    }
+
+    void quantize(std::span<const uint16_t> src_fp16, std::span<output_type> dst, uint32_t dim, size_t numThreads = 0) const {
+        quantize(src_fp16.data(), dst.data(), checked_span_count(src_fp16.size(), dst.size(), dim), dim, numThreads);
+    }
+
+    std::vector<output_type> quantize(std::span<const float> src, uint32_t dim, size_t numThreads = 0) const {
+        if (dim == 0) {
+            if (src.empty()) return {};
+            throw std::invalid_argument("quantize: dim must be > 0");
+        }
+        if (src.size() % dim != 0) {
+            throw std::invalid_argument("quantize: src span size must be a multiple of dim");
+        }
+        return quantize(src.data(), src.size() / dim, dim, numThreads);
+    }
+
+    std::vector<output_type> quantize(std::span<const uint16_t> src_fp16, uint32_t dim, size_t numThreads = 0) const {
+        if (dim == 0) {
+            if (src_fp16.empty()) return {};
+            throw std::invalid_argument("quantize: dim must be > 0");
+        }
+        if (src_fp16.size() % dim != 0) {
+            throw std::invalid_argument("quantize: src span size must be a multiple of dim");
+        }
+        return quantize(src_fp16.data(), src_fp16.size() / dim, dim, numThreads);
+    }
+
 private:
     inline int8_t transform(float x) const {
         float scaled = std::round(x * scale);
@@ -414,6 +461,36 @@ public:
         return result;
     }
 
+    void quantize(std::span<const float> src, std::span<output_type> dst, uint32_t dim, size_t numThreads = 0) const {
+        quantize(src.data(), dst.data(), checked_span_count(src.size(), dst.size(), dim), dim, numThreads);
+    }
+
+    void quantize(std::span<const uint16_t> src_fp16, std::span<output_type> dst, uint32_t dim, size_t numThreads = 0) const {
+        quantize(src_fp16.data(), dst.data(), checked_span_count(src_fp16.size(), dst.size(), dim), dim, numThreads);
+    }
+
+    std::vector<output_type> quantize(std::span<const float> src, uint32_t dim, size_t numThreads = 0) const {
+        if (dim == 0) {
+            if (src.empty()) return {};
+            throw std::invalid_argument("quantize: dim must be > 0");
+        }
+        if (src.size() % dim != 0) {
+            throw std::invalid_argument("quantize: src span size must be a multiple of dim");
+        }
+        return quantize(src.data(), src.size() / dim, dim, numThreads);
+    }
+
+    std::vector<output_type> quantize(std::span<const uint16_t> src_fp16, uint32_t dim, size_t numThreads = 0) const {
+        if (dim == 0) {
+            if (src_fp16.empty()) return {};
+            throw std::invalid_argument("quantize: dim must be > 0");
+        }
+        if (src_fp16.size() % dim != 0) {
+            throw std::invalid_argument("quantize: src span size must be a multiple of dim");
+        }
+        return quantize(src_fp16.data(), src_fp16.size() / dim, dim, numThreads);
+    }
+
 private:
     inline int8_t transform(float x, uint32_t d) const {
         float scaled = std::round(x * scales[d]);
@@ -534,6 +611,36 @@ public:
         std::vector<uint8_t> result(count * dim);
         quantize(src_fp16, result.data(), count, dim, numThreads);
         return result;
+    }
+
+    void quantize(std::span<const float> src, std::span<output_type> dst, uint32_t dim, size_t numThreads = 0) const {
+        quantize(src.data(), dst.data(), checked_span_count(src.size(), dst.size(), dim), dim, numThreads);
+    }
+
+    void quantize(std::span<const uint16_t> src_fp16, std::span<output_type> dst, uint32_t dim, size_t numThreads = 0) const {
+        quantize(src_fp16.data(), dst.data(), checked_span_count(src_fp16.size(), dst.size(), dim), dim, numThreads);
+    }
+
+    std::vector<output_type> quantize(std::span<const float> src, uint32_t dim, size_t numThreads = 0) const {
+        if (dim == 0) {
+            if (src.empty()) return {};
+            throw std::invalid_argument("quantize: dim must be > 0");
+        }
+        if (src.size() % dim != 0) {
+            throw std::invalid_argument("quantize: src span size must be a multiple of dim");
+        }
+        return quantize(src.data(), src.size() / dim, dim, numThreads);
+    }
+
+    std::vector<output_type> quantize(std::span<const uint16_t> src_fp16, uint32_t dim, size_t numThreads = 0) const {
+        if (dim == 0) {
+            if (src_fp16.empty()) return {};
+            throw std::invalid_argument("quantize: dim must be > 0");
+        }
+        if (src_fp16.size() % dim != 0) {
+            throw std::invalid_argument("quantize: src span size must be a multiple of dim");
+        }
+        return quantize(src_fp16.data(), src_fp16.size() / dim, dim, numThreads);
     }
 
 private:
@@ -675,6 +782,36 @@ public:
         std::vector<uint8_t> result(count * d);
         quantize(src_fp16, result.data(), count, d, numThreads);
         return result;
+    }
+
+    void quantize(std::span<const float> src, std::span<output_type> dst, uint32_t dim, size_t numThreads = 0) const {
+        quantize(src.data(), dst.data(), checked_span_count(src.size(), dst.size(), dim), dim, numThreads);
+    }
+
+    void quantize(std::span<const uint16_t> src_fp16, std::span<output_type> dst, uint32_t dim, size_t numThreads = 0) const {
+        quantize(src_fp16.data(), dst.data(), checked_span_count(src_fp16.size(), dst.size(), dim), dim, numThreads);
+    }
+
+    std::vector<output_type> quantize(std::span<const float> src, uint32_t dim, size_t numThreads = 0) const {
+        if (dim == 0) {
+            if (src.empty()) return {};
+            throw std::invalid_argument("quantize: dim must be > 0");
+        }
+        if (src.size() % dim != 0) {
+            throw std::invalid_argument("quantize: src span size must be a multiple of dim");
+        }
+        return quantize(src.data(), src.size() / dim, dim, numThreads);
+    }
+
+    std::vector<output_type> quantize(std::span<const uint16_t> src_fp16, uint32_t dim, size_t numThreads = 0) const {
+        if (dim == 0) {
+            if (src_fp16.empty()) return {};
+            throw std::invalid_argument("quantize: dim must be > 0");
+        }
+        if (src_fp16.size() % dim != 0) {
+            throw std::invalid_argument("quantize: src span size must be a multiple of dim");
+        }
+        return quantize(src_fp16.data(), src_fp16.size() / dim, dim, numThreads);
     }
 
 private:
