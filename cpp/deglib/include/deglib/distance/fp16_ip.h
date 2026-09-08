@@ -263,14 +263,6 @@ class InnerProductFP16_AVX2 {
 
         // Vectorized residual tail for arbitrary dimensions
         if constexpr (HasTail) {
-            if ((last - a) >= 8) {
-                __m256 va8 = _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(a)));
-                __m256 vb8 = _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(b)));
-                __m256 prod8 = _mm256_mul_ps(va8, vb8);
-                result += fp16_hsum256(prod8);
-                a += 8;
-                b += 8;
-            }
             if ((last - a) >= 4) {
                 __m128 va4 = _mm_cvtph_ps(_mm_loadu_si64(a));
                 __m128 vb4 = _mm_cvtph_ps(_mm_loadu_si64(b));

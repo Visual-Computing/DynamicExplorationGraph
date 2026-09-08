@@ -232,3 +232,21 @@
 | **ef 250 (rf=1.35)** | 0.98144 | 3.727 QPS (268 µs) | **4.291 QPS (233 µs)** | **+15.1%** |
 | **ef 320 (rf=1.35)** | 0.98812 | 2.903 QPS (344 µs) | **3.488 QPS (286 µs)** | **+20.2%** |
 | **ef 400 (rf=1.35)** | 0.99223 | 2.412 QPS (414 µs) | **2.832 QPS (353 µs)** | **+17.4%** |
+
+
+---
+
+## 9. C++ Unit Test Verifikation aller Distanz-Funktionen
+
+Alle generischen Tail-Vektorisierungen (SIMD 32B/16B/8B/4B) in den C++ Distanz-Headern wurden mit GoogleTest direkt gegen die unoptimierten Naive-Implementierungen und bekannte mathematische Identitäten verifiziert:
+
+- **test_int8_inner_product.exe**: 14/14 Tests PASSED (0 ms)
+- **test_fp16_inner_product.exe**: 14/14 Tests PASSED (0 ms)
+- **test_fp16_l2.exe**: 13/13 Tests PASSED (0 ms)
+- **test_fp32_inner_product.exe**: 16/16 Tests PASSED (1 ms)
+- **test_fp32_l2.exe**: 19/19 Tests PASSED (0 ms)
+- **test_uint8_inner_product.exe**: 14/14 Tests PASSED (0 ms)
+- **test_uint8_l2.exe**: 15/15 Tests PASSED (0 ms)
+- **test_int8_l2.exe**: 13/13 Tests PASSED (0 ms)
+
+**Gesamtergebnis: 118 von 118 Distanz-Unit-Tests erfolgreich bestanden.**

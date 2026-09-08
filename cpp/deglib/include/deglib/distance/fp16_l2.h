@@ -115,7 +115,27 @@ class L2FP16_AVX512 {
         float result = fp16_l2_hsum512(sum512);
 
         // Scalar residual for the unaligned tail — eliminated at compile-time if HasTail == false
+        // Vectorized residual tail for arbitrary dimensions
         if constexpr (HasTail) {
+            if ((last - a) >= 8) {
+                __m256 va8 = _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(a)));
+                __m256 vb8 = _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(b)));
+                __m256 diff8 = _mm256_sub_ps(va8, vb8);
+                result += fp16_l2_hsum256(_mm256_mul_ps(diff8, diff8));
+                a += 8;
+                b += 8;
+            }
+            if ((last - a) >= 4) {
+                __m128 va4 = _mm_cvtph_ps(_mm_loadu_si64(a));
+                __m128 vb4 = _mm_cvtph_ps(_mm_loadu_si64(b));
+                __m128 diff4 = _mm_sub_ps(va4, vb4);
+                __m128 prod4 = _mm_mul_ps(diff4, diff4);
+                prod4 = _mm_add_ps(prod4, _mm_movehl_ps(prod4, prod4));
+                prod4 = _mm_add_ss(prod4, _mm_shuffle_ps(prod4, prod4, 1));
+                result += _mm_cvtss_f32(prod4);
+                a += 4;
+                b += 4;
+            }
             while (a < last) {
                 float fa = deglib::distances::fp16::fp16_to_float(*a++);
                 float fb = deglib::distances::fp16::fp16_to_float(*b++);
@@ -251,8 +271,19 @@ class L2FP16_AVX2 {
         __m256 sum256 = _mm256_add_ps(sum256_1, sum256_2);
         float result = fp16_l2_hsum256(sum256);
 
-        // Scalar residual for the unaligned tail — eliminated at compile-time if HasTail == false
+        // Vectorized residual tail for arbitrary dimensions
         if constexpr (HasTail) {
+            if ((last - a) >= 4) {
+                __m128 va4 = _mm_cvtph_ps(_mm_loadu_si64(a));
+                __m128 vb4 = _mm_cvtph_ps(_mm_loadu_si64(b));
+                __m128 diff4 = _mm_sub_ps(va4, vb4);
+                __m128 prod4 = _mm_mul_ps(diff4, diff4);
+                prod4 = _mm_add_ps(prod4, _mm_movehl_ps(prod4, prod4));
+                prod4 = _mm_add_ss(prod4, _mm_shuffle_ps(prod4, prod4, 1));
+                result += _mm_cvtss_f32(prod4);
+                a += 4;
+                b += 4;
+            }
             while (a < last) {
                 float fa = deglib::distances::fp16::fp16_to_float(*a++);
                 float fb = deglib::distances::fp16::fp16_to_float(*b++);
