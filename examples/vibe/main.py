@@ -309,6 +309,7 @@ def main():
 
                 anns_recalls = []
                 anns_qps = []
+                anns_params = []
                 n_queries = len(query_vecs)
 
                 for (eps, ef) in eval_params:
@@ -346,6 +347,7 @@ def main():
                     recall = hits / max(total_returned, 1)
                     anns_recalls.append(recall)
                     anns_qps.append(qps)
+                    anns_params.append(f"ef={ef}" if ef > 0 else f"eps={eps:g}")
 
                     lbl = f"ef {ef:4d}" if ef > 0 else f"eps {eps:6.3f}"
                     print(
@@ -372,6 +374,7 @@ def main():
                         "rerank_factor": r_factor,
                         "recalls": anns_recalls,
                         "qps": anns_qps,
+                        "search_params": anns_params,
                     }
                 )
 

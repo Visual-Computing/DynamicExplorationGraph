@@ -84,15 +84,19 @@ def export_interactive_html(
         rerank_txt = f"{r_factor:.1f}x (FP16)" if r_factor > 1.0 else "None (1.0x)"
 
         query_info = f"Query Dtype: {query_dt}<br>" if query_dt else ""
-        hover_texts = [
-            f"<b>{display_opt} (K={k})</b><br>"
-            f"{query_info}"
-            f"Status: {prune_txt}<br>"
-            f"Rerank: {rerank_txt}<br>"
-            f"<b>Recall@{search_k}:</b> {x:.5f}<br>"
-            f"<b>QPS:</b> {y:,.1f}"
-            for x, y in zip(recalls, qps)
-        ]
+        search_params = entry.get("search_params", [])
+        hover_texts = []
+        for idx, (x, y) in enumerate(zip(recalls, qps)):
+            param_str = f"Param: {search_params[idx]}<br>" if idx < len(search_params) and search_params[idx] else ""
+            hover_texts.append(
+                f"<b>{display_opt} (K={k})</b><br>"
+                f"{query_info}"
+                f"Status: {prune_txt}<br>"
+                f"Rerank: {rerank_txt}<br>"
+                f"{param_str}"
+                f"<b>Recall@{search_k}:</b> {x:.5f}<br>"
+                f"<b>QPS:</b> {y:,.1f}"
+            )
 
         trace_dtype_str = f", {query_dt}" if query_dt else ""
         trace_name = f"{display_opt} K={k} ({prune_txt}, {rerank_txt}{trace_dtype_str})"
@@ -510,6 +514,7 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
     current_rerank_factor = 1.0
     current_recalls = []
     current_qps = []
+    current_params = []
 
     re_dataset = re.compile(r"Selected VIBE Dataset:\s*([^\r\n]+)", re.IGNORECASE)
     re_space = re.compile(r"Vector Space Type:\s*FloatSpace\s*\(([^)]+)\)", re.IGNORECASE)
@@ -524,10 +529,13 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
         re.IGNORECASE,
     )
     re_eval_old = re.compile(r"Evaluating top-(\d+)\s*search for eps:", re.IGNORECASE)
-    re_line = re.compile(r"eps\s+([\d.]+)\s+recall@\d+:\s+([\d.]+)\s+[\d.]+\s+us/query\s+([\d.]+)\s+QPS", re.IGNORECASE)
+    re_line = re.compile(
+        r"(?:eps\s+([\d.]+)|ef\s+(\d+))\s+recall@\d+:\s+([\d.]+)\s+[\d.]+\s+us/query\s+([\d.]+)\s+QPS",
+        re.IGNORECASE,
+    )
 
     def save_current_series():
-        nonlocal current_config, current_rerank_factor, current_recalls, current_qps
+        nonlocal current_config, current_rerank_factor, current_recalls, current_qps, current_params
         if current_config is not None and current_recalls and current_qps:
             results_series.append(
                 {
@@ -538,10 +546,12 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
                     "rerank_factor": current_rerank_factor,
                     "recalls": list(current_recalls),
                     "qps": list(current_qps),
+                    "search_params": list(current_params),
                 }
             )
         current_recalls = []
         current_qps = []
+        current_params = []
 
     with open(log_path, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
@@ -599,10 +609,15 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
 
             m = re_line.search(line_str)
             if m and current_config is not None:
-                recall = float(m.group(2))
-                qps = float(m.group(3))
+                if m.group(1) is not None:
+                    param_val = f"eps={float(m.group(1)):g}"
+                else:
+                    param_val = f"ef={int(m.group(2))}"
+                recall = float(m.group(3))
+                qps = float(m.group(4))
                 current_recalls.append(recall)
                 current_qps.append(qps)
+                current_params.append(param_val)
 
     save_current_series()
     return dataset_name, instruction_set, search_k, results_series

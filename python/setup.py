@@ -39,34 +39,23 @@ def get_version(rel_path):
         raise RuntimeError("Unable to find version string.")
 
 
-class CopyBuildCommand(Command):
-    description = "Copy necessary build files"
-    user_options = []
-
-    def initialize_options(self):
-        pass
-
-    def finalize_options(self):
-        pass
+class CopySDist(sdist_class):
+    """Packages the C++ sources into lib/ when creating a standalone source distribution (PyPI sdist)."""
 
     def run(self):
         ignore_dirs = shutil.ignore_patterns("external", "cmake-build*", "build", "benchmark", ".venv", ".git*")
-        copy_dirs = [(os.path.join("..", "cpp"), "lib")]
+        src = os.path.join("..", "cpp")
+        dst = "lib"
 
-        for src, dst in copy_dirs:
-            if not os.path.exists(src):
-                if os.path.exists(dst) and any(Path(dst).iterdir()):
-                    print(f"Source '{src}' not found, but '{dst}' already exists and contains files. Skipping copy.")
-                    continue
-                raise FileNotFoundError(f"Source directory '{src}' does not exist and '{dst}' is not populated.")
-            print(f"Copying {src} to {dst}")
+        if os.path.exists(src):
+            if os.path.exists(dst):
+                shutil.rmtree(dst, ignore_errors=True)
+            print(f"[setup.py] Packaging: Copying {src} -> {dst}")
             shutil.copytree(src, dst, dirs_exist_ok=True, ignore=ignore_dirs)
-        print("Files copied successfully.")
+            print("[setup.py] Files copied successfully.")
+        elif not os.path.exists(dst) or not any(Path(dst).iterdir()):
+            raise FileNotFoundError(f"Source directory '{src}' does not exist and '{dst}' is not populated.")
 
-
-class CopySDist(sdist_class):
-    def run(self):
-        self.run_command("copy_build_files")
         super().run()
 
 
@@ -178,12 +167,11 @@ class CMakeBuild(build_ext):
                 # CMake 3.12+ only.
                 build_args += [f"-j{self.parallel}"]
 
-        # Copy cpp/ to python/lib/ first
-        self.run_command("copy_build_files")
-
+        # Ensure clean build directory so MSVC compiles fresh objects
         build_temp = Path(self.build_temp) / ext.name
-        if not build_temp.exists():
-            build_temp.mkdir(parents=True)
+        if build_temp.exists():
+            shutil.rmtree(build_temp, ignore_errors=True)
+        build_temp.mkdir(parents=True)
 
         print("python interpreter in setup.py:", sys.executable, sys.version)
         print("calling cmake")
@@ -207,7 +195,6 @@ setup(
     version=get_version(os.path.join("src", "deglib", "__init__.py")),
     ext_modules=[CMakeExtension("deglib_cpp")],
     cmdclass={
-        "copy_build_files": CopyBuildCommand,
         "sdist": CopySDist,
         "build_ext": CMakeBuild,
     },
