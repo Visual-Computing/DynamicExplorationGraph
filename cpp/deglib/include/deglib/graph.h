@@ -212,7 +212,11 @@ class DynamicExplorationGraph {
     void setEntryVertexIndices(std::vector<uint32_t> indices) { internal_graph_->setEntryVertexIndices(std::move(indices)); }
     int32_t getPo() const { return internal_graph_->getPo(); }
     int32_t getPl() const { return internal_graph_->getPl(); }
-    void setPrefetch(int32_t po, int32_t pl) { internal_graph_->setPrefetch(po, pl); }
+    int32_t getNl() const { return internal_graph_->getNl(); }
+    void setPo(int32_t po) { internal_graph_->setPo(po); }
+    void setPl(int32_t pl) { internal_graph_->setPl(pl); }
+    void setNl(int32_t nl) { internal_graph_->setNl(nl); }
+    void setPrefetch(int32_t po, int32_t pl, int32_t nl = 3) { internal_graph_->setPrefetch(po, pl, nl); }
 
     bool saveGraph(const std::string& path) const {
         const auto* mutable_graph = dynamic_cast<const deglib::graph::MutableGraph*>(internal_graph_);

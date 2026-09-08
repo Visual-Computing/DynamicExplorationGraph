@@ -151,6 +151,7 @@ class InternalGraph {
     std::vector<uint32_t> entry_vertex_indices_{0};
     int32_t po_ = 8;
     int32_t pl_ = 3;
+    int32_t nl_ = 3;
 
   public:
     const std::vector<uint32_t>& getEntryVertexIndices() const { return entry_vertex_indices_; }
@@ -161,9 +162,14 @@ class InternalGraph {
     }
     int32_t getPo() const noexcept { return po_; }
     int32_t getPl() const noexcept { return pl_; }
-    void setPrefetch(int32_t po, int32_t pl) noexcept {
+    int32_t getNl() const noexcept { return nl_; }
+    void setPo(int32_t po) noexcept { if (po > 0) po_ = po; }
+    void setPl(int32_t pl) noexcept { if (pl > 0) pl_ = pl; }
+    void setNl(int32_t nl) noexcept { if (nl > 0) nl_ = nl; }
+    void setPrefetch(int32_t po, int32_t pl, int32_t nl = 3) noexcept {
         if (po > 0) po_ = po;
         if (pl > 0) pl_ = pl;
+        if (nl > 0) nl_ = nl;
     }
     /**
      * Perform a search but stops when the to_vertex was found.
@@ -538,19 +544,13 @@ class InternalGraph {
         }
 
         const int32_t po = self.getPo();
+        const int32_t pl = self.getPl();
+        const int32_t nl = self.getNl();
         const size_t edges_per_vertex = self.edges_per_vertex_;
-        const int32_t pl = std::max<int32_t>(1, static_cast<int32_t>((feature_size + 63) / 64));
-        const int32_t nl = std::max<int32_t>(1, static_cast<int32_t>((edges_per_vertex * sizeof(uint32_t) + 63) / 64));
         alignas(64) uint32_t edge_buf[256];
 
         auto prefetch_feature = [pl](const char* ptr) {
-            for (int32_t l = 0; l < pl; ++l) {
-                #if defined(DEGLIB_X86)
-                _mm_prefetch(ptr + l * 64, _MM_HINT_T0);
-                #elif defined(__GNUC__) || defined(__clang__)
-                __builtin_prefetch(ptr + l * 64, 0, 3);
-                #endif
-            }
+            deglib::memory::prefetch(ptr, static_cast<size_t>(pl) * deglib::memory::L1_CACHE_LINE_SIZE);
         };
 
         while (pool.has_next()) {
@@ -579,14 +579,10 @@ class InternalGraph {
                 const auto feature = self.feature_by_index(v);
                 float dist = COMPARATOR::compare(query, feature, dist_func_param);
                 if (pool.insert(v, dist)) {
-                    const char* n_ptr = reinterpret_cast<const char*>(self.neighbors_by_index(v));
-                    for (int32_t l = 0; l < nl; ++l) {
-                        #if defined(DEGLIB_X86)
-                        _mm_prefetch(n_ptr + l * 64, _MM_HINT_T0);
-                        #elif defined(__GNUC__) || defined(__clang__)
-                        __builtin_prefetch(n_ptr + l * 64, 0, 3);
-                        #endif
-                    }
+                    deglib::memory::prefetch(
+                        reinterpret_cast<const char*>(self.neighbors_by_index(v)),
+                        static_cast<size_t>(nl) * deglib::memory::L1_CACHE_LINE_SIZE
+                    );
                 }
             }
         }

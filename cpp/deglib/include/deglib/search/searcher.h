@@ -378,7 +378,61 @@ class SearcherImpl : public SearcherBase {
      * @param threads     Number of worker threads.
      */
     void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 0, uint32_t seed = 7, size_t threads = 1) override {
+        // 1. K-Means entry points selection
         entry_selector_.optimize(n_clusters, n_iter, sample_size, seed, threads);
+
+        // 2. Pure C++ prefetch auto-tuning directly within optimize()
+        if (graph_->size() < 10) return;
+
+        const size_t test_q_count = std::min(size_t(50), size_t(graph_->size()));
+        const uint32_t dim = graph_->getFeatureSpace().dim();
+        std::vector<float> sample_queries(test_q_count * size_t(dim));
+
+        // Sample queries from graph vertices (zero Python dependency)
+        for (size_t i = 0; i < test_q_count; ++i) {
+            const auto* feat = reinterpret_cast<const float*>(graph_->getFeatureVector(static_cast<uint32_t>(i)));
+            std::memcpy(sample_queries.data() + i * size_t(dim), feat, size_t(dim) * sizeof(float));
+        }
+
+        const std::vector<int32_t> try_pos = {4, 8, 12, 16};
+        const std::vector<int32_t> try_pls = {2, 3, 4};
+        const std::vector<int32_t> try_nls = {2, 3, 4};
+
+        int32_t best_po = graph_->getPo();
+        int32_t best_pl = graph_->getPl();
+        int32_t best_nl = graph_->getNl();
+        double best_time = std::numeric_limits<double>::max();
+
+        std::vector<uint32_t> dummy_out(100);
+
+        for (int32_t po : try_pos) {
+            for (int32_t pl : try_pls) {
+                for (int32_t nl : try_nls) {
+                    const_cast<deglib::graph::InternalGraph*>(graph_)->setPrefetch(po, pl, nl);
+
+                    // Warmup
+                    for (size_t i = 0; i < std::min(size_t(3), test_q_count); ++i) {
+                        search_single_ef_typed(sample_queries.data() + i * size_t(dim), 100, 200, 1.0f, dummy_out.data(), nullptr, true);
+                    }
+
+                    auto t_start = std::chrono::high_resolution_clock::now();
+                    for (size_t i = 0; i < test_q_count; ++i) {
+                        search_single_ef_typed(sample_queries.data() + i * size_t(dim), 100, 200, 1.0f, dummy_out.data(), nullptr, true);
+                    }
+                    auto t_end = std::chrono::high_resolution_clock::now();
+                    double dur = std::chrono::duration<double, std::micro>(t_end - t_start).count();
+
+                    if (dur < best_time) {
+                        best_time = dur;
+                        best_po = po;
+                        best_pl = pl;
+                        best_nl = nl;
+                    }
+                }
+            }
+        }
+
+        const_cast<deglib::graph::InternalGraph*>(graph_)->setPrefetch(best_po, best_pl, best_nl);
     }
 
     template <typename QueryT>
