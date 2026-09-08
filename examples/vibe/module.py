@@ -288,10 +288,10 @@ class QG(BaseANN):
             refine_data=self.original_features_fp16,
         )
 
-        # 6. Optimize entry vertices via K-Means cluster medoids computed in C++
+        # 6. Optimize entry vertices and prefetch values
         t_km = time.time()
-        self.searcher.optimize(n_clusters=256, n_iter=20, sample_size=50000, seed=7, num_threads=1)
-        print(f"K-Means 128 cluster medoids computed in {time.time() - t_km:.2f}s", flush=True)
+        self.searcher.optimize()  
+        print(f"Optimized Searcher for the provided graph and hardware in {time.time() - t_km:.2f}s", flush=True)
 
     def set_query_arguments(self, *args, **kwargs):
         """Sets query-time parameters: supports (rerank_factor, search_eps) or (rerank_factor, ef)."""

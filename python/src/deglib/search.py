@@ -125,8 +125,8 @@ class Searcher:
 
     def optimize(
         self,
-        n_clusters: int = 128,
-        n_iter: int = 15,
+        n_clusters: int = 256,
+        n_iter: int = 20,
         sample_size: int = 0,
         seed: int = 7,
         num_threads: int = 1,
