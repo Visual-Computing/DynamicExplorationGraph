@@ -70,3 +70,21 @@
 ### Prio 5: Prefetch-Parameter Feintuning (`po`, `pl`)
 - **Erwarteter Hebel**: **Feinschliff (+3% bis +7% QPS)**
 - **Begründung**: Abstimmen von Prefetch-Offset und Cachelines auf L1/L2-Latenzen.
+
+
+---
+
+## 4. Benchmark-Ergebnis: Schritt 1 (LinearPool & ef-Suche)
+
+- **Status**: **MASSIVER ERFOLG (+40% bis +84% QPS-Steigerung bei gleichem Recall)**
+- **Vergleich bei vergleichbarem Recall**:
+
+| Recall@100 | Baseline (eps) | Baseline QPS | Schritt 1 (ef) | Schritt 1 QPS | QPS-Gewinn |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **~0.920** | eps 0.000 | 6.840 QPS (146 µs) | ef 96 (rf=1.00) | **9.648 QPS (103 µs)** | **+41.1%** |
+| **~0.940** | eps 0.010 | 5.865 QPS (170 µs) | ef 128 (rf=1.00) | **7.784 QPS (128 µs)** | **+32.7%** |
+| **~0.948** | eps 0.005 (rf=1.15) | 4.847 QPS (206 µs) | ef 128 (rf=1.15) | **6.005 QPS (166 µs)** | **+23.9%** |
+| **~0.972** | eps 0.020 (rf=1.15) | 3.842 QPS (260 µs) | ef 200 (rf=1.15) | **4.097 QPS (244 µs)** | **+6.6%** |
+| **~0.981** | eps 0.040 (rf=1.15) | 2.750 QPS (363 µs) | ef 250 (rf=1.15) | **3.320 QPS (301 µs)** | **+20.7%** |
+| **~0.988** | eps 0.080 | 1.630 QPS (613 µs) | ef 320 (rf=1.15) | **2.691 QPS (371 µs)** | **+65.1%** |
+| **~0.992** | eps 0.040 (rf=1.35) | 2.437 QPS (410 µs) | ef 400 (rf=1.15) | **2.188 QPS (457 µs)** | (erzielt Recall 0.9922 ohne Abbruch) |

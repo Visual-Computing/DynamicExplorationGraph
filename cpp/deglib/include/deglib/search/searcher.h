@@ -161,6 +161,12 @@ class SearcherBase {
         bool unsorted = false
     ) const = 0;
 
+    virtual uint32_t search_ef_f32(const float* query, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false) const = 0;
+    virtual uint32_t search_ef_f16(const uint16_t* query, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false) const = 0;
+
+    virtual void search_batch_ef_f32(const float* queries, size_t n_queries, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const = 0;
+    virtual void search_batch_ef_f16(const uint16_t* queries, size_t n_queries, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const = 0;
+
     virtual void search_batch_f32(
         const float* queries,
         size_t n_queries,
@@ -546,17 +552,110 @@ class SearcherImpl : public SearcherBase {
             search_f16(queries + q * dim, k, eps, rerank_factor, out_indices + q * k, d_ptr, unsorted);
         });
     }
+
+    template <typename QueryT>
+    inline uint32_t search_single_ef_typed(
+        const QueryT* query,
+        uint32_t k,
+        uint32_t ef,
+        float rerank_factor,
+        uint32_t* out_indices,
+        float* out_distances = nullptr,
+        bool unsorted = false
+    ) const {
+        const uint32_t dim = graph_->getFeatureSpace().dim();
+        const uint32_t fetch_k = std::max(k, static_cast<uint32_t>(std::round(k * rerank_factor)));
+        const size_t graph_feature_bytes = graph_->getFeatureSpace().get_data_size();
+
+        if (graph_->size() == 0) throw std::invalid_argument("Searcher: graph is empty");
+
+        // 1. Static Query Transformation
+        const std::byte* query_bytes = nullptr;
+        alignas(64) std::byte stack_query_bytes[512];
+        std::unique_ptr<std::byte[]> heap_query_bytes;
+
+        if constexpr (std::is_same_v<QuantT, NoQuantizer>) {
+            query_bytes = reinterpret_cast<const std::byte*>(query);
+        } else {
+            std::byte* q_buf = stack_query_bytes;
+            if (graph_feature_bytes > sizeof(stack_query_bytes)) {
+                heap_query_bytes = std::make_unique<std::byte[]>(graph_feature_bytes);
+                q_buf = heap_query_bytes.get();
+            }
+
+            quantizer_.quantize(query, reinterpret_cast<typename QuantT::output_type*>(q_buf), 1, dim);
+            query_bytes = q_buf;
+        }
+
+        // 2. Entry selection via selector
+        const std::span<const std::byte> query_span(query_bytes, graph_feature_bytes);
+        const std::vector<uint32_t> entries = entry_selector_.top_entries(query_span, 2);
+
+        // 3. Search using search_ef
+        deglib::search::LinearPool<float> pool = entries.empty()
+            ? graph_->search_ef(query_span, fetch_k, ef)
+            : graph_->search_ef(query_span, entries, fetch_k, ef);
+
+        // 4. Rerank or return
+        const size_t found_count = static_cast<size_t>(pool.size());
+        if (found_count == 0) return 0;
+
+        if constexpr (RefinerT::enabled) {
+            if (fetch_k > k) {
+                uint32_t stack_cand_indices[256];
+                std::unique_ptr<uint32_t[]> heap_cand_indices;
+                uint32_t* cands = stack_cand_indices;
+                if (found_count > 256) {
+                    heap_cand_indices = std::make_unique<uint32_t[]>(found_count);
+                    cands = heap_cand_indices.get();
+                }
+
+                for (size_t i = 0; i < found_count; ++i) {
+                    cands[i] = graph_->getExternalLabel(pool.id(static_cast<int32_t>(i)));
+                }
+
+                const bool return_distances = (out_distances != nullptr);
+                return refiner_.rerank(
+                    query, dim, cands, found_count, k,
+                    out_indices, out_distances,
+                    return_distances, unsorted
+                );
+            }
+        }
+
+        const uint32_t result_count = std::min(k, static_cast<uint32_t>(found_count));
+        for (uint32_t i = 0; i < result_count; ++i) {
+            out_indices[i] = graph_->getExternalLabel(pool.id(static_cast<int32_t>(i)));
+        }
+        if (out_distances != nullptr) {
+            for (uint32_t i = 0; i < result_count; ++i) {
+                out_distances[i] = pool.dist(static_cast<int32_t>(i));
+            }
+        }
+        return result_count;
+    }
+
+    uint32_t search_ef_f32(const float* query, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false) const override {
+        return search_single_ef_typed(query, k, ef, rerank_factor, out_indices, out_distances, unsorted);
+    }
+
+    uint32_t search_ef_f16(const uint16_t* query, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false) const override {
+        return search_single_ef_typed(query, k, ef, rerank_factor, out_indices, out_distances, unsorted);
+    }
+
+    void search_batch_ef_f32(const float* queries, size_t n_queries, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const override {
+        const uint32_t dim = graph_->getFeatureSpace().dim();
+        for (size_t q = 0; q < n_queries; ++q) {
+            search_ef_f32(queries + q * dim, k, ef, rerank_factor, out_indices + q * k, out_distances ? out_distances + q * k : nullptr, unsorted);
+        }
+    }
+
+    void search_batch_ef_f16(const uint16_t* queries, size_t n_queries, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const override {
+        const uint32_t dim = graph_->getFeatureSpace().dim();
+        for (size_t q = 0; q < n_queries; ++q) {
+            search_ef_f16(queries + q * dim, k, ef, rerank_factor, out_indices + q * k, out_distances ? out_distances + q * k : nullptr, unsorted);
+        }
+    }
 };
-
-// ============================================================================
-// Modern C++20 Factory Functions
-// ============================================================================
-
-template <typename QuantT = NoQuantizer, typename RefinerT = NoRefiner>
-    requires deglib::quantization::Quantizer<QuantT> || std::is_same_v<QuantT, NoQuantizer>
-inline std::unique_ptr<SearcherBase>
-make_searcher(const deglib::graph::InternalGraph& graph, QuantT quantizer = NoQuantizer{}, RefinerT refiner = NoRefiner{}) {
-    return std::make_unique<SearcherImpl<QuantT, RefinerT>>(graph, std::move(quantizer), std::move(refiner));
-}
 
 }  // namespace deglib::search

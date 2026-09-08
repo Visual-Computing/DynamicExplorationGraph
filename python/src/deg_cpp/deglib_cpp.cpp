@@ -819,7 +819,7 @@ class SearcherPy {
         searcher_->optimize(n_clusters, n_iter, sample_size, seed, num_threads);
     }
 
-    py::object search(py::array query, uint32_t k, float eps = 0.1f, float rerank_factor = 1.0f, bool return_distances = false, bool unsorted = false) {
+    py::object search(py::array query, uint32_t k, float eps = 0.1f, float rerank_factor = 1.0f, bool return_distances = false, bool unsorted = false, uint32_t ef = 0) {
         auto buf = query.request();
         if (buf.ndim != 1 && (buf.ndim != 2 || (buf.shape[0] != 1 && buf.shape[1] != 1))) {
             throw std::invalid_argument("search query must be 1D vector (or 1xDim / Dimx1 2D array)");
@@ -835,10 +835,18 @@ class SearcherPy {
         }
 
         uint32_t count = 0;
-        if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-            count = searcher_->search_f16(static_cast<const uint16_t*>(buf.ptr), k, eps, rerank_factor, out_ptr, dist_ptr, unsorted);
+        if (ef > 0) {
+            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                count = searcher_->search_ef_f16(static_cast<const uint16_t*>(buf.ptr), k, ef, rerank_factor, out_ptr, dist_ptr, unsorted);
+            } else {
+                count = searcher_->search_ef_f32(static_cast<const float*>(buf.ptr), k, ef, rerank_factor, out_ptr, dist_ptr, unsorted);
+            }
         } else {
-            count = searcher_->search_f32(static_cast<const float*>(buf.ptr), k, eps, rerank_factor, out_ptr, dist_ptr, unsorted);
+            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                count = searcher_->search_f16(static_cast<const uint16_t*>(buf.ptr), k, eps, rerank_factor, out_ptr, dist_ptr, unsorted);
+            } else {
+                count = searcher_->search_f32(static_cast<const float*>(buf.ptr), k, eps, rerank_factor, out_ptr, dist_ptr, unsorted);
+            }
         }
 
         if (return_distances) {
@@ -847,7 +855,7 @@ class SearcherPy {
         return result;
     }
 
-    py::object search_batch(py::array queries, uint32_t k, float eps = 0.1f, float rerank_factor = 1.0f, size_t num_threads = 1, bool return_distances = false, bool unsorted = false) {
+    py::object search_batch(py::array queries, uint32_t k, float eps = 0.1f, float rerank_factor = 1.0f, size_t num_threads = 1, bool return_distances = false, bool unsorted = false, uint32_t ef = 0) {
         auto buf = queries.request();
         if (buf.ndim != 2) {
             throw std::invalid_argument("search_batch queries must be 2D array");
@@ -865,10 +873,18 @@ class SearcherPy {
 
         {
             py::gil_scoped_release release;
-            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                searcher_->search_batch_f16(static_cast<const uint16_t*>(buf.ptr), n_queries, k, eps, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted);
+            if (ef > 0) {
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    searcher_->search_batch_ef_f16(static_cast<const uint16_t*>(buf.ptr), n_queries, k, ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted);
+                } else {
+                    searcher_->search_batch_ef_f32(static_cast<const float*>(buf.ptr), n_queries, k, ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted);
+                }
             } else {
-                searcher_->search_batch_f32(static_cast<const float*>(buf.ptr), n_queries, k, eps, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted);
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    searcher_->search_batch_f16(static_cast<const uint16_t*>(buf.ptr), n_queries, k, eps, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted);
+                } else {
+                    searcher_->search_batch_f32(static_cast<const float*>(buf.ptr), n_queries, k, eps, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted);
+                }
             }
         }
 
@@ -1571,12 +1587,12 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def(
             "search", &SearcherPy::search,
             py::arg("query"), py::arg("k"), py::arg("eps") = 0.1f, py::arg("rerank_factor") = 1.0f,
-            py::arg("return_distances") = false, py::arg("unsorted") = false
+            py::arg("return_distances") = false, py::arg("unsorted") = false, py::arg("ef") = 0
         )
         .def(
             "search_batch", &SearcherPy::search_batch,
             py::arg("queries"), py::arg("k"), py::arg("eps") = 0.1f, py::arg("rerank_factor") = 1.0f,
-            py::arg("num_threads") = 1, py::arg("return_distances") = false, py::arg("unsorted") = false
+            py::arg("num_threads") = 1, py::arg("return_distances") = false, py::arg("unsorted") = false, py::arg("ef") = 0
         )
         .def(
             "optimize", &SearcherPy::optimize,
@@ -1714,7 +1730,9 @@ PYBIND11_MODULE(deglib_cpp, m) {
             py::arg("max_distance_computation_count") = 0, py::arg("eps") = 0.0f, py::arg("include_entry") = true, py::arg("filter") = nullptr,
             py::arg("threads") = 1, py::arg("return_distances") = true, py::arg("unsorted") = false
         )
-        .def("save_graph", [](deglib::DynamicExplorationGraph& g, const char* path) { g.saveGraph(path); }, py::arg("path"));
+        .def("save_graph", [](deglib::DynamicExplorationGraph& g, const char* path) { g.saveGraph(path); }, py::arg("path"))
+        .def("get_entry_vertex_indices", &deglib::DynamicExplorationGraph::getEntryVertexIndices)
+        .def("set_entry_vertex_indices", &deglib::DynamicExplorationGraph::setEntryVertexIndices, py::arg("indices"));
 
     m.def("load_readonly_graph", &load_readonly_graph_wrapper);
     m.def("load_dynamic_graph", &load_dynamic_graph_wrapper, py::arg("path"), py::arg("chunk_size") = 1024);

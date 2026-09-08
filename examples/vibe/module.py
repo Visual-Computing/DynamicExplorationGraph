@@ -331,7 +331,7 @@ class QG(BaseANN):
             threads=1,
             return_distances=False,
             unsorted=True,
-            #ef=self.ef,
+            ef=self.ef,
         )
 
     def __str__(self) -> str:

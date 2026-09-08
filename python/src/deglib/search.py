@@ -150,6 +150,7 @@ class Searcher:
         threads: int = 1,
         return_distances: bool = False,
         unsorted: bool = False,
+        ef: int = 0,
     ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         """
         Search for nearest neighbors of a single query vector (1D or 2D with 1 vector) or a batch of query vectors (2D).
@@ -173,12 +174,12 @@ class Searcher:
         if query.ndim == 1 or (query.ndim == 2 and (query.shape[0] == 1 or query.shape[1] == 1)):
             flat_query = np.ascontiguousarray(query.ravel())
             return self.searcher_cpp.search(
-                flat_query, int(k), float(eps), float(rerank_factor), return_distances, unsorted,
+                flat_query, int(k), float(eps), float(rerank_factor), return_distances, unsorted, int(ef),
             )
         elif query.ndim == 2:
             contiguous_queries = np.ascontiguousarray(query)
             return self.searcher_cpp.search_batch(
-                contiguous_queries, int(k), float(eps), float(rerank_factor), int(threads), return_distances, unsorted,
+                contiguous_queries, int(k), float(eps), float(rerank_factor), int(threads), return_distances, unsorted, int(ef),
             )
         else:
             raise ValueError(f"query must be 1D or 2D NumPy array, got ndim={query.ndim} with shape {query.shape}")
