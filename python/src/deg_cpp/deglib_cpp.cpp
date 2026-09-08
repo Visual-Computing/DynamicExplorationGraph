@@ -814,7 +814,7 @@ class SearcherPy {
         }
     }
 
-    void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 30000, uint32_t seed = 42, size_t num_threads = 0) {
+    void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 0, uint32_t seed = 42, size_t num_threads = 0) {
         py::gil_scoped_release release;
         searcher_->optimize(n_clusters, n_iter, sample_size, seed, num_threads);
     }
@@ -1581,7 +1581,8 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def(
             "optimize", &SearcherPy::optimize,
             py::arg("n_clusters") = 128, py::arg("n_iter") = 15,
-            py::arg("sample_size") = 30000, py::arg("seed") = 42, py::arg("num_threads") = 0
+            py::arg("sample_size") = 0, py::arg("seed") = 42, py::arg("num_threads") = 0,
+            "Select entry vertices via k-means medoids.\n\nArgs:\n    n_clusters: number of entry vertices to select.\n    n_iter: number of k-means iterations.\n    sample_size: vertices sampled for clustering, 0 selects 3% of the graph size.\n    seed: random seed for sampling and centroid init.\n    num_threads: worker threads, 0 selects a library default."
         );
 
     // graphs

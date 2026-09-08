@@ -195,7 +195,16 @@ class SearcherBase {
         bool unsorted = false
     ) const = 0;
 
-    virtual void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 30000, uint32_t seed = 42, size_t threads = 0) = 0;
+    /**
+     * Select entry vertices via k-means medoids.
+     *
+     * @param n_clusters  Number of entry vertices to select.
+     * @param n_iter      Number of k-means iterations.
+     * @param sample_size Number of vertices sampled for clustering, 0 selects 3% of the graph size.
+     * @param seed        Random seed for sampling and centroid init.
+     * @param threads     Number of worker threads, 0 selects a library default.
+     */
+    virtual void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 0, uint32_t seed = 42, size_t threads = 0) = 0;
 
     // --- Modern C++20 std::span and std::vector Convenience API ---
 
@@ -357,14 +366,23 @@ class SearcherImpl : public SearcherBase {
     const deglib::graph::InternalGraph* graph_ = nullptr;
     QuantT quantizer_;
     RefinerT refiner_;
-    std::vector<uint32_t> entry_vertex_indices_;
+    KMeansEntrySelector entry_selector_;
 
   public:
     SearcherImpl(const deglib::graph::InternalGraph& graph, QuantT quantizer, RefinerT refiner)
-        : graph_(&graph), quantizer_(std::move(quantizer)), refiner_(std::move(refiner)) {}
+        : graph_(&graph), quantizer_(std::move(quantizer)), refiner_(std::move(refiner)), entry_selector_(graph) {}
 
-    void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 30000, uint32_t seed = 42, size_t threads = 0) override {
-        entry_vertex_indices_ = graph_kmeans_medoids(*graph_, n_clusters, n_iter, sample_size, seed, threads);
+    /**
+     * Select entry vertices via k-means medoids.
+     *
+     * @param n_clusters  Number of entry vertices to select.
+     * @param n_iter      Number of k-means iterations.
+     * @param sample_size Number of vertices sampled for clustering, 0 selects 3% of the graph size.
+     * @param seed        Random seed for sampling and centroid init.
+     * @param threads     Number of worker threads.
+     */
+    void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 0, uint32_t seed = 7, size_t threads = 1) override {
+        entry_selector_.optimize(n_clusters, n_iter, sample_size, seed, threads);
     }
 
     template <typename QueryT>
@@ -380,6 +398,8 @@ class SearcherImpl : public SearcherBase {
         const uint32_t dim = graph_->getFeatureSpace().dim();
         const uint32_t fetch_k = std::max(k, static_cast<uint32_t>(std::round(k * rerank_factor)));
         const size_t graph_feature_bytes = graph_->getFeatureSpace().get_data_size();
+
+        if (graph_->size() == 0) throw std::invalid_argument("Searcher: graph is empty");
 
         // 1. Static Query Transformation (Zero-copy bypass for NoQuantizer)
         const std::byte* query_bytes = nullptr;
@@ -404,15 +424,18 @@ class SearcherImpl : public SearcherBase {
             query_bytes = q_buf;
         }
 
-        // 2. Direct Graph Search (entries come solely from optimize())
+        // 2. Entry selection via selector (falls back to vertex 0) + Direct Graph Search
         const std::span<const std::byte> query_span(query_bytes, graph_feature_bytes);
-        deglib::graph::ResultSet result = entry_vertex_indices_.empty() ? graph_->search(query_span, fetch_k, eps, nullptr, 0)
-                                                                        : graph_->search(query_span, entry_vertex_indices_, fetch_k, eps, nullptr, 0);
-        const size_t found_count = result.size();
+        const std::vector<uint32_t> entries = entry_selector_.top_entries(query_span, 2);
+        deglib::graph::ResultSet result =
+            entries.empty() ? graph_->search(query_span, fetch_k, eps, nullptr, 0) : graph_->search(query_span, entries, fetch_k, eps, nullptr, 0);
 
         // 3. Static Compile-Time Reranker Check
         if constexpr (RefinerT::enabled) {
             if (fetch_k > k) {
+                const size_t found_count = result.size();
+
+                // Stack fast path for up to 256 candidates, heap fallback beyond that without result limit.
                 uint32_t stack_cand_indices[256];
                 std::unique_ptr<uint32_t[]> heap_cand_indices;
                 uint32_t* cands = stack_cand_indices;

@@ -28,6 +28,7 @@
 #include <span>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace deglib::search {
@@ -40,22 +41,15 @@ concept DistanceCallable = requires(F f, const float* a, const float* b) {
 };
 
 // Decodes one native graph feature vector into `dim` floats.
-inline void decode_feature_vector(
-    const deglib::distances::FloatSpace& space, const std::byte* native, float* out
-) {
+inline void decode_feature_vector(const deglib::distances::FloatSpace& space, const std::byte* native, float* out) {
     const size_t dim = space.dim();
     using deglib::distances::MetricDataType;
     switch (space.metric().get_data_type()) {
         case MetricDataType::FP32:
-            std::copy(
-                reinterpret_cast<const float*>(native),
-                reinterpret_cast<const float*>(native) + dim, out
-            );
+            std::copy(reinterpret_cast<const float*>(native), reinterpret_cast<const float*>(native) + dim, out);
             break;
         case MetricDataType::FP16:
-            deglib::distances::fp16::fp16_to_floats(
-                reinterpret_cast<const uint16_t*>(native), out, dim
-            );
+            deglib::distances::fp16::fp16_to_floats(reinterpret_cast<const uint16_t*>(native), out, dim);
             break;
         case MetricDataType::Uint8: {
             const auto* v = reinterpret_cast<const uint8_t*>(native);
@@ -89,19 +83,12 @@ inline void decode_feature_vector(
     }
 }
 
-// Lloyd k-means over caller-provided rows. Centroids are normalized means
-// (cosine-style, matching the previous Python behavior); empty or degenerate
-// clusters keep their previous centroid. Returns medoid positions into `rows`.
+// Lloyd k-means over caller-provided rows. Centroids are normalized means.
+// empty or degenerate clusters keep their previous centroid.
+// Returns medoid positions (indices) into `rows`.
 template <DistanceCallable DistFn>
-[[nodiscard]] std::vector<uint32_t> kmeans_medoids(
-    std::span<const float* const> rows,
-    uint32_t dim,
-    DistFn&& distance,
-    uint32_t n_clusters,
-    uint32_t n_iter,
-    uint32_t seed,
-    size_t threads
-) {
+[[nodiscard]] std::vector<uint32_t>
+kmeans_medoids(std::span<const float* const> rows, uint32_t dim, DistFn&& distance, uint32_t n_clusters, uint32_t n_iter, uint32_t seed, size_t threads) {
     if (rows.empty() || dim == 0) {
         throw std::invalid_argument("kmeans_medoids: empty input");
     }
@@ -128,7 +115,7 @@ template <DistanceCallable DistFn>
     std::vector<float> sums(static_cast<size_t>(n_clusters) * dim);
     std::vector<uint32_t> counts(n_clusters);
     for (uint32_t iter = 0; iter < n_iter; ++iter) {
-        // Assignment: embarrassingly parallel over rows.
+        // Assignment: parallel over rows.
         deglib::concurrent::parallel_for(0, rows.size(), threads, [&](size_t i, size_t) {
             const float* vec = rows[i];
             float best_dist = std::numeric_limits<float>::max();
@@ -203,8 +190,8 @@ template <DistanceCallable DistFn>
     uint32_t n_clusters,
     uint32_t n_iter,
     size_t sample_size,
-    uint32_t seed,
-    size_t threads
+    uint32_t seed = 7,
+    size_t threads = 1
 ) {
     const size_t n_vectors = graph.size();
     if (n_vectors == 0) {
@@ -238,20 +225,14 @@ template <DistanceCallable DistFn>
     }
 
     const bool is_l2 = space.metric().get_distance_kind() == deglib::distances::MetricDistanceKind::L2;
-    const deglib::distances::FloatSpace float_space(
-        dim, is_l2 ? deglib::distances::Metric::FP32_L2 : deglib::distances::Metric::FP32_InnerProduct
-    );
+    const deglib::distances::FloatSpace float_space(dim, is_l2 ? deglib::distances::Metric::FP32_L2 : deglib::distances::Metric::FP32_InnerProduct);
     const std::span<const float* const> row_view(rows.data(), rows.size());
     const uint32_t dim32 = static_cast<uint32_t>(dim);
     const std::vector<uint32_t> positions = float_space.compute([&](const auto& kernel) {
         // Static dispatch: the concrete SIMD kernel inlines into the loop.
         return kmeans_medoids(
             row_view, dim32,
-            [&](const float* a, const float* b) -> float {
-                return std::decay_t<decltype(kernel)>::compare(
-                    a, b, float_space.get_dist_func_param()
-                );
-            },
+            [&](const float* a, const float* b) -> float { return std::decay_t<decltype(kernel)>::compare(a, b, float_space.get_dist_func_param()); },
             n_clusters, n_iter, seed, threads
         );
     });
@@ -263,5 +244,98 @@ template <DistanceCallable DistFn>
     }
     return medoids;
 }
+
+/**
+ * Owns the k-means entry vertices for one graph.
+ *
+ * @param graph Graph the entry vertices refer to, must outlive this selector.
+ */
+class KMeansEntrySelector {
+  public:
+    explicit KMeansEntrySelector(const deglib::graph::InternalGraph& graph) : graph_(&graph) {}
+
+    /**
+     * Select entry vertices via k-means medoids.
+     *
+     * @param n_clusters  Number of entry vertices to select.
+     * @param n_iter      Number of k-means iterations.
+     * @param sample_size Number of vertices sampled for clustering, 0 selects 3% of the graph size.
+     * @param seed        Random seed for sampling and centroid init.
+     * @param threads     Number of worker threads.
+     */
+    void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 0, uint32_t seed = 7, size_t threads = 1) {
+        if (sample_size == 0) {
+            const size_t n = graph_->size();
+            sample_size = n * 3 / 100;
+            if (sample_size == 0 && n > 0) sample_size = n;
+        }
+        entries_ = graph_kmeans_medoids(*graph_, n_clusters, n_iter, sample_size, seed, threads);
+    }
+
+    /**
+     * Nearest entry vertices for a query, nearest first.
+     *
+     * Falls back to vertex 0 when no usable entry exists.
+     *
+     * @param query Native query bytes sized to the graph feature size.
+     * @param count Maximum number of entries to return.
+     */
+    [[nodiscard]] std::vector<uint32_t> top_entries(std::span<const std::byte> query, size_t count = 2) const {
+        const uint32_t n = graph_->size();
+        if (n == 0 || count == 0) return {};
+        const auto dist_func = graph_->getFeatureSpace().get_dist_func();
+        const auto dist_param = graph_->getFeatureSpace().get_dist_func_param();
+        std::vector<uint32_t> valid;
+        valid.reserve(entries_.size());
+        for (auto ep : entries_) {
+            if (ep < n) valid.push_back(ep);
+        }
+        if (valid.empty()) return {0};
+        if (valid.size() <= count) return valid;
+        if (count == 2) {
+            uint32_t ep1 = valid[0], ep2 = valid[0];
+            float dist1 = std::numeric_limits<float>::max(), dist2 = std::numeric_limits<float>::max();
+            for (auto ep : valid) {
+                float d = dist_func(query.data(), graph_->getFeatureVector(ep), dist_param);
+                if (d < dist1) {
+                    dist2 = dist1;
+                    ep2 = ep1;
+                    dist1 = d;
+                    ep1 = ep;
+                } else if (d < dist2) {
+                    dist2 = d;
+                    ep2 = ep;
+                }
+            }
+            if (ep1 == ep2) return {ep1};
+            return {ep1, ep2};
+        }
+        std::vector<std::pair<float, uint32_t>> scored;
+        scored.reserve(valid.size());
+        for (auto ep : valid) {
+            scored.emplace_back(dist_func(query.data(), graph_->getFeatureVector(ep), dist_param), ep);
+        }
+        std::nth_element(scored.begin(), scored.begin() + count, scored.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        scored.resize(count);
+        std::sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        std::vector<uint32_t> top;
+        top.reserve(count);
+        for (const auto& s : scored) top.push_back(s.second);
+        return top;
+    }
+
+    /** Stored entry vertices as graph internal indices. */
+    [[nodiscard]] const std::vector<uint32_t>& entries() const noexcept { return entries_; }
+
+    /** True when optimize() has not produced entries yet. */
+    [[nodiscard]] bool empty() const noexcept { return entries_.empty(); }
+
+    /** Number of stored entry vertices. */
+    [[nodiscard]] size_t size() const noexcept { return entries_.size(); }
+
+  private:
+    const deglib::graph::InternalGraph* graph_ = nullptr;
+    std::vector<uint32_t> entries_;
+};
 
 }  // namespace deglib::search

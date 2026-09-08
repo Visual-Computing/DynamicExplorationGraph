@@ -127,10 +127,18 @@ class Searcher:
         self,
         n_clusters: int = 128,
         n_iter: int = 15,
-        sample_size: int = 30000,
+        sample_size: int = 0,
         seed: int = 42,
         num_threads: int = 0,
     ) -> None:
+        """Select entry vertices via k-means medoids.
+
+        :param n_clusters: Number of entry vertices to select.
+        :param n_iter: Number of k-means iterations.
+        :param sample_size: Number of vertices sampled for clustering, 0 selects 3% of the graph size.
+        :param seed: Random seed for sampling and centroid init.
+        :param num_threads: Number of worker threads, 0 selects a library default.
+        """
         self.searcher_cpp.optimize(int(n_clusters), int(n_iter), int(sample_size), int(seed), int(num_threads))
 
     def search(
