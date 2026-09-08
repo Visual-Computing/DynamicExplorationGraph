@@ -176,6 +176,34 @@ class InnerProductInt8_AVX512_VNNI {
         int64_t result = int8_ip_hsum512(sum512) - (int8_ip_hsum512(q_comp) * 128);
 
         if constexpr (HasTail) {
+            const size_t rem = last - a;
+            if (rem >= 32) {
+                __m256i raw_a256 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
+                __m256i raw_b256 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
+                __m256i prod1 = _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_castsi256_si128(raw_a256)), _mm256_cvtepi8_epi16(_mm256_castsi256_si128(raw_b256)));
+                __m256i prod2 = _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_extracti128_si256(raw_a256, 1)), _mm256_cvtepi8_epi16(_mm256_extracti128_si256(raw_b256, 1)));
+                result += int8_ip_hsum256(_mm256_add_epi32(prod1, prod2));
+                a += 32;
+                b += 32;
+            }
+            if ((last - a) >= 16) {
+                __m128i raw_a128 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
+                __m128i raw_b128 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b));
+                __m256i prod = _mm256_madd_epi16(_mm256_cvtepi8_epi16(raw_a128), _mm256_cvtepi8_epi16(raw_b128));
+                result += int8_ip_hsum256(prod);
+                a += 16;
+                b += 16;
+            }
+            if ((last - a) >= 8) {
+                __m128i raw_a64 = _mm_loadu_si64(a);
+                __m128i raw_b64 = _mm_loadu_si64(b);
+                __m128i prod = _mm_madd_epi16(_mm_cvtepi8_epi16(raw_a64), _mm_cvtepi8_epi16(raw_b64));
+                prod = _mm_add_epi32(prod, _mm_shuffle_epi32(prod, _MM_SHUFFLE(1, 0, 3, 2)));
+                prod = _mm_add_epi32(prod, _mm_shuffle_epi32(prod, _MM_SHUFFLE(2, 3, 0, 1)));
+                result += static_cast<int64_t>(_mm_cvtsi128_si32(prod));
+                a += 8;
+                b += 8;
+            }
             while (a < last) {
                 result += int64_t(*a++) * int64_t(*b++);
             }
@@ -291,6 +319,34 @@ class InnerProductInt8_AVX512 {
         int64_t result = int8_ip_hsum512(sum512);
 
         if constexpr (HasTail) {
+            const size_t rem = last - a;
+            if (rem >= 32) {
+                __m256i raw_a256 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
+                __m256i raw_b256 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
+                __m256i prod1 = _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_castsi256_si128(raw_a256)), _mm256_cvtepi8_epi16(_mm256_castsi256_si128(raw_b256)));
+                __m256i prod2 = _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_extracti128_si256(raw_a256, 1)), _mm256_cvtepi8_epi16(_mm256_extracti128_si256(raw_b256, 1)));
+                result += int8_ip_hsum256(_mm256_add_epi32(prod1, prod2));
+                a += 32;
+                b += 32;
+            }
+            if ((last - a) >= 16) {
+                __m128i raw_a128 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
+                __m128i raw_b128 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b));
+                __m256i prod = _mm256_madd_epi16(_mm256_cvtepi8_epi16(raw_a128), _mm256_cvtepi8_epi16(raw_b128));
+                result += int8_ip_hsum256(prod);
+                a += 16;
+                b += 16;
+            }
+            if ((last - a) >= 8) {
+                __m128i raw_a64 = _mm_loadu_si64(a);
+                __m128i raw_b64 = _mm_loadu_si64(b);
+                __m128i prod = _mm_madd_epi16(_mm_cvtepi8_epi16(raw_a64), _mm_cvtepi8_epi16(raw_b64));
+                prod = _mm_add_epi32(prod, _mm_shuffle_epi32(prod, _MM_SHUFFLE(1, 0, 3, 2)));
+                prod = _mm_add_epi32(prod, _mm_shuffle_epi32(prod, _MM_SHUFFLE(2, 3, 0, 1)));
+                result += static_cast<int64_t>(_mm_cvtsi128_si32(prod));
+                a += 8;
+                b += 8;
+            }
             while (a < last) {
                 result += int64_t(*a++) * int64_t(*b++);
             }
@@ -410,6 +466,34 @@ class InnerProductInt8_AVX2_VNNI {
         int64_t result = int8_ip_hsum256(sum256) - (int8_ip_hsum256(q_comp) * 128);
 
         if constexpr (HasTail) {
+            const size_t rem = last - a;
+            if (rem >= 32) {
+                __m256i raw_a256 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
+                __m256i raw_b256 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
+                __m256i prod1 = _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_castsi256_si128(raw_a256)), _mm256_cvtepi8_epi16(_mm256_castsi256_si128(raw_b256)));
+                __m256i prod2 = _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_extracti128_si256(raw_a256, 1)), _mm256_cvtepi8_epi16(_mm256_extracti128_si256(raw_b256, 1)));
+                result += int8_ip_hsum256(_mm256_add_epi32(prod1, prod2));
+                a += 32;
+                b += 32;
+            }
+            if ((last - a) >= 16) {
+                __m128i raw_a128 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
+                __m128i raw_b128 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b));
+                __m256i prod = _mm256_madd_epi16(_mm256_cvtepi8_epi16(raw_a128), _mm256_cvtepi8_epi16(raw_b128));
+                result += int8_ip_hsum256(prod);
+                a += 16;
+                b += 16;
+            }
+            if ((last - a) >= 8) {
+                __m128i raw_a64 = _mm_loadu_si64(a);
+                __m128i raw_b64 = _mm_loadu_si64(b);
+                __m128i prod = _mm_madd_epi16(_mm_cvtepi8_epi16(raw_a64), _mm_cvtepi8_epi16(raw_b64));
+                prod = _mm_add_epi32(prod, _mm_shuffle_epi32(prod, _MM_SHUFFLE(1, 0, 3, 2)));
+                prod = _mm_add_epi32(prod, _mm_shuffle_epi32(prod, _MM_SHUFFLE(2, 3, 0, 1)));
+                result += static_cast<int64_t>(_mm_cvtsi128_si32(prod));
+                a += 8;
+                b += 8;
+            }
             while (a < last) {
                 result += int64_t(*a++) * int64_t(*b++);
             }
@@ -524,6 +608,34 @@ class InnerProductInt8_AVX2 {
         int64_t result = int8_ip_hsum256(sum256);
 
         if constexpr (HasTail) {
+            const size_t rem = last - a;
+            if (rem >= 32) {
+                __m256i raw_a256 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
+                __m256i raw_b256 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
+                __m256i prod1 = _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_castsi256_si128(raw_a256)), _mm256_cvtepi8_epi16(_mm256_castsi256_si128(raw_b256)));
+                __m256i prod2 = _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_extracti128_si256(raw_a256, 1)), _mm256_cvtepi8_epi16(_mm256_extracti128_si256(raw_b256, 1)));
+                result += int8_ip_hsum256(_mm256_add_epi32(prod1, prod2));
+                a += 32;
+                b += 32;
+            }
+            if ((last - a) >= 16) {
+                __m128i raw_a128 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
+                __m128i raw_b128 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b));
+                __m256i prod = _mm256_madd_epi16(_mm256_cvtepi8_epi16(raw_a128), _mm256_cvtepi8_epi16(raw_b128));
+                result += int8_ip_hsum256(prod);
+                a += 16;
+                b += 16;
+            }
+            if ((last - a) >= 8) {
+                __m128i raw_a64 = _mm_loadu_si64(a);
+                __m128i raw_b64 = _mm_loadu_si64(b);
+                __m128i prod = _mm_madd_epi16(_mm_cvtepi8_epi16(raw_a64), _mm_cvtepi8_epi16(raw_b64));
+                prod = _mm_add_epi32(prod, _mm_shuffle_epi32(prod, _MM_SHUFFLE(1, 0, 3, 2)));
+                prod = _mm_add_epi32(prod, _mm_shuffle_epi32(prod, _MM_SHUFFLE(2, 3, 0, 1)));
+                result += static_cast<int64_t>(_mm_cvtsi128_si32(prod));
+                a += 8;
+                b += 8;
+            }
             while (a < last) {
                 result += int64_t(*a++) * int64_t(*b++);
             }

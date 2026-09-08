@@ -88,3 +88,23 @@
 | **~0.981** | eps 0.040 (rf=1.15) | 2.750 QPS (363 µs) | ef 250 (rf=1.15) | **3.320 QPS (301 µs)** | **+20.7%** |
 | **~0.988** | eps 0.080 | 1.630 QPS (613 µs) | ef 320 (rf=1.15) | **2.691 QPS (371 µs)** | **+65.1%** |
 | **~0.992** | eps 0.040 (rf=1.35) | 2.437 QPS (410 µs) | ef 400 (rf=1.15) | **2.188 QPS (457 µs)** | (erzielt Recall 0.9922 ohne Abbruch) |
+
+
+---
+
+## 5. Benchmark-Ergebnis: Schritt 2 (Generische VNNI-Restvektorisierung in distance/int8_ip.h)
+
+- **Status**: **POSITIV (+3% bis +6% QPS-Steigerung über alle ef-Werte bei 100% identischem Recall)**
+- **Vergleich zu Schritt 1**:
+
+| Search Parameter | Recall@100 | Schritt 1 QPS | Schritt 2 QPS | Differenz |
+| :--- | :--- | :--- | :--- | :--- |
+| **ef 64 (rf=1.00)** | 0.87940 | 12.608 QPS (79 µs) | **12.636 QPS (79 µs)** | +0.2% |
+| **ef 96 (rf=1.00)** | 0.91589 | 9.648 QPS (103 µs) | **10.013 QPS (99 µs)** | **+3.8%** |
+| **ef 128 (rf=1.00)** | 0.93844 | 7.784 QPS (128 µs) | **8.033 QPS (124 µs)** | **+3.2%** |
+| **ef 160 (rf=1.00)** | 0.95395 | 6.397 QPS (156 µs) | **6.707 QPS (149 µs)** | **+4.8%** |
+| **ef 200 (rf=1.00)** | 0.96305 | 5.267 QPS (189 µs) | **5.567 QPS (179 µs)** | **+5.7%** |
+| **ef 250 (rf=1.00)** | 0.97152 | 4.435 QPS (225 µs) | **4.633 QPS (215 µs)** | **+4.5%** |
+| **ef 320 (rf=1.00)** | 0.97870 | 3.577 QPS (279 µs) | **3.708 QPS (269 µs)** | **+3.7%** |
+| **ef 250 (rf=1.15)** | 0.98144 | 3.320 QPS (301 µs) | **3.434 QPS (291 µs)** | **+3.4%** |
+| **ef 64 (rf=1.35)** | 0.88605 | 7.432 QPS (134 µs) | **8.290 QPS (120 µs)** | **+11.5%** |
