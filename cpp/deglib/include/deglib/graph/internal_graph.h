@@ -538,8 +538,9 @@ class InternalGraph {
         }
 
         const int32_t po = self.getPo();
-        const int32_t pl = self.getPl();
         const size_t edges_per_vertex = self.edges_per_vertex_;
+        const int32_t pl = std::max<int32_t>(1, static_cast<int32_t>((feature_size + 63) / 64));
+        const int32_t nl = std::max<int32_t>(1, static_cast<int32_t>((edges_per_vertex * sizeof(uint32_t) + 63) / 64));
         alignas(64) uint32_t edge_buf[256];
 
         auto prefetch_feature = [pl](const char* ptr) {
@@ -578,17 +579,14 @@ class InternalGraph {
                 const auto feature = self.feature_by_index(v);
                 float dist = COMPARATOR::compare(query, feature, dist_func_param);
                 if (pool.insert(v, dist)) {
-                    #if defined(DEGLIB_X86)
                     const char* n_ptr = reinterpret_cast<const char*>(self.neighbors_by_index(v));
-                    _mm_prefetch(n_ptr, _MM_HINT_T0);
-                    _mm_prefetch(n_ptr + 64, _MM_HINT_T0);
-                    _mm_prefetch(n_ptr + 128, _MM_HINT_T0);
-                    #elif defined(__GNUC__) || defined(__clang__)
-                    const char* n_ptr = reinterpret_cast<const char*>(self.neighbors_by_index(v));
-                    __builtin_prefetch(n_ptr, 0, 3);
-                    __builtin_prefetch(n_ptr + 64, 0, 3);
-                    __builtin_prefetch(n_ptr + 128, 0, 3);
-                    #endif
+                    for (int32_t l = 0; l < nl; ++l) {
+                        #if defined(DEGLIB_X86)
+                        _mm_prefetch(n_ptr + l * 64, _MM_HINT_T0);
+                        #elif defined(__GNUC__) || defined(__clang__)
+                        __builtin_prefetch(n_ptr + l * 64, 0, 3);
+                        #endif
+                    }
                 }
             }
         }
