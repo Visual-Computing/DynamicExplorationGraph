@@ -4,7 +4,7 @@
 #include "deglib/filter.h"
 #include "deglib/graph/visited_list_pool.h"
 #include "deglib/utils/memory.h"
-#include "deglib/search/linear_pool.h"
+#include "deglib/search/result_list.h"
 
 #include <algorithm>
 #include <array>
@@ -23,37 +23,6 @@ class EvenRegularGraphBuilder;
 }
 
 namespace deglib::graph {
-
-/**
- * Represents a pair of a vertex identifier and its corresponding distance.
- * Designed as a trivially default-constructible type (POD) for zero-overhead allocations.
- */
-class ObjectDistance {
-    uint32_t identifier_;
-    float distance_;
-
-  public:
-    // Default constructor generates zero instructions (uninitialized memory for maximum performance)
-    ObjectDistance() = default;
-
-    constexpr ObjectDistance(const uint32_t identifier, const float distance) noexcept : identifier_(identifier), distance_(distance) {}
-
-    [[nodiscard]] constexpr uint32_t getIdentifier() const noexcept { return identifier_; }
-
-    [[nodiscard]] constexpr float getDistance() const noexcept { return distance_; }
-
-    constexpr bool operator==(const ObjectDistance& o) const noexcept { return distance_ == o.distance_ && identifier_ == o.identifier_; }
-
-    constexpr bool operator<(const ObjectDistance& o) const noexcept {
-        if (distance_ == o.distance_) return identifier_ < o.identifier_;
-        return distance_ < o.distance_;
-    }
-
-    constexpr bool operator>(const ObjectDistance& o) const noexcept {
-        if (distance_ == o.distance_) return identifier_ > o.identifier_;
-        return distance_ > o.distance_;
-    }
-};
 
 /**
  * Priority Queue based on std::vector using binary heap operations.
@@ -244,10 +213,10 @@ class InternalGraph {
     }
 
     /**
-     * Bounds-checked internal search for query vectors using LinearPool with fixed ef budget.
+     * Bounds-checked internal search for query vectors using ResultList with fixed ef budget.
      */
     template <typename T>
-    deglib::search::LinearPool<float> search_ef(std::span<const T> query, const uint32_t k, const uint32_t ef) const {
+    std::vector<deglib::graph::ObjectDistance> search_ef(std::span<const T> query, const uint32_t k, const uint32_t ef) const {
         if (query.size_bytes() < getFeatureSpace().get_data_size()) {
             throw std::invalid_argument(
                 "Search query buffer mismatch: expected at least " + std::to_string(getFeatureSpace().get_data_size()) +
@@ -258,7 +227,7 @@ class InternalGraph {
     }
 
     template <typename T>
-    deglib::search::LinearPool<float>
+    std::vector<deglib::graph::ObjectDistance>
     search_ef(std::span<const T> query, const std::vector<uint32_t>& entry_vertex_indices, const uint32_t k, const uint32_t ef) const {
         if (query.size_bytes() < getFeatureSpace().get_data_size()) {
             throw std::invalid_argument(
@@ -301,7 +270,7 @@ class InternalGraph {
         const uint32_t max_distance_computation_count = 0
     ) const = 0;
 
-    virtual deglib::search::LinearPool<float>
+    virtual std::vector<deglib::graph::ObjectDistance>
     search_ef_intern(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const uint32_t k, const uint32_t ef) const = 0;
 
     /**
@@ -509,7 +478,7 @@ class InternalGraph {
     }
 
     template <typename GraphType, deglib::distances::DistanceFunction COMPARATOR>
-    static deglib::search::LinearPool<float>
+    static std::vector<deglib::graph::ObjectDistance>
     searchEfImpl(const GraphType& self, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const uint32_t k, const uint32_t ef) {
         const auto dist_func_param = self.feature_space_.get_dist_func_param();
         const auto feature_size = self.feature_space_.get_data_size();
@@ -521,7 +490,7 @@ class InternalGraph {
         auto* checked_ids = vl->get_visited();
         const auto checked_ids_tag = vl->get_tag();
 
-        deglib::search::LinearPool<float> pool(static_cast<int32_t>(ef), capacity);
+        deglib::search::ResultList pool(static_cast<int32_t>(ef), capacity);
 
         uint32_t best_ep = entry_vertex_indices.empty() ? 0 : entry_vertex_indices[0];
         float best_ep_dist = std::numeric_limits<float>::max();
@@ -581,13 +550,13 @@ class InternalGraph {
             }
         }
 
-        return pool;
+        return std::move(pool).to_vector(k);
     }
 
     template <typename GraphType>
-    static deglib::search::LinearPool<float>
+    static std::vector<deglib::graph::ObjectDistance>
     searchEfInternImpl(const GraphType& self, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const uint32_t k, const uint32_t ef) {
-        return self.feature_space_.compute([&]<deglib::distances::DistanceFunction Dist>(Dist) -> deglib::search::LinearPool<float> {
+        return self.feature_space_.compute([&]<deglib::distances::DistanceFunction Dist>(Dist) -> std::vector<deglib::graph::ObjectDistance> {
             return searchEfImpl<GraphType, Dist>(self, entry_vertex_indices, query, k, ef);
         });
     }

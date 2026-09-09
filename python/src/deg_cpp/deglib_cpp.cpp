@@ -69,7 +69,7 @@ std::tuple<py::array_t<uint32_t>, py::array_t<float>> graph_search_batch_wrapper
             const size_t query_bytes = query_info.shape[1] * query_info.itemsize;
             std::span<const std::byte> query_span(query_ptr, query_bytes);
 
-            deglib::search::ResultSet result = graph.search(query_span, k, eps, filter, max_distance_computation_count);
+            deglib::graph::ResultSet result = graph.search(query_span, k, eps, filter, max_distance_computation_count);
 
             // Limit results to at most k elements
             while (result.size() > k) {
@@ -131,7 +131,7 @@ py::object graph_search_single_wrapper(
     const std::byte* query_ptr = static_cast<const std::byte*>(query_info.ptr);
     std::span<const std::byte> query_span(query_ptr, query_bytes);
 
-    deglib::search::ResultSet result = graph.search(query_span, k, eps, filter, max_distance_computation_count);
+    deglib::graph::ResultSet result = graph.search(query_span, k, eps, filter, max_distance_computation_count);
 
     while (result.size() > k) {
         result.pop();
@@ -214,7 +214,7 @@ std::tuple<py::array_t<uint32_t>, py::array_t<float>> graph_explore_wrapper(
     auto explore_range = [&](size_t begin, size_t end) {
         for (size_t q = begin; q < end; ++q) {
             uint32_t entry_idx = entry_ptr[q];
-            deglib::search::ResultSet result = graph.explore(entry_idx, k, include_entry, max_distance_computation_count);
+            deglib::graph::ResultSet result = graph.explore(entry_idx, k, include_entry, max_distance_computation_count);
 
             // Limit results to at most k elements
             while (result.size() > k) {
@@ -303,7 +303,7 @@ py::object dynamic_exploration_graph_search_batch_wrapper(
                 const size_t query_bytes = query_info.shape[1] * query_info.itemsize;
                 std::span<const std::byte> query_span(query_ptr, query_bytes);
 
-                deglib::search::ResultSet result = graph.search(query_span, k, eps, filter, max_distance_computation_count);
+                deglib::graph::ResultSet result = graph.search(query_span, k, eps, filter, max_distance_computation_count);
 
                 // Limit results to at most k elements
                 while (result.size() > k) {
@@ -368,7 +368,7 @@ py::object graph_explore_single_wrapper(
     const bool return_distances = true,
     const bool unsorted = false
 ) {
-    deglib::search::ResultSet result = graph.explore(entry_external_label, k, max_distance_computation_count, eps, include_entry, filter);
+    deglib::graph::ResultSet result = graph.explore(entry_external_label, k, max_distance_computation_count, eps, include_entry, filter);
 
     while (result.size() > k) {
         result.pop();
@@ -471,7 +471,7 @@ py::object dynamic_exploration_graph_explore_batch_wrapper(
         auto explore_range = [&](size_t begin, size_t end) {
             for (size_t q = begin; q < end; ++q) {
                 uint32_t entry_label = entry_ptr[q];
-                deglib::search::ResultSet result = graph.explore(entry_label, k, max_distance_computation_count, eps, include_entry, filter);
+                deglib::graph::ResultSet result = graph.explore(entry_label, k, max_distance_computation_count, eps, include_entry, filter);
 
                 // Limit results to at most k elements
                 while (result.size() > k) {
@@ -533,7 +533,7 @@ std::tuple<py::array_t<uint32_t>, py::array_t<float>> dynamic_exploration_graph_
     const bool include_entry,
     const deglib::search::Filter* filter
 ) {
-    deglib::search::ResultSet result = graph.explore(entry_external_label, k, max_distance_computation_count, eps, include_entry, filter);
+    deglib::graph::ResultSet result = graph.explore(entry_external_label, k, max_distance_computation_count, eps, include_entry, filter);
 
     py::array_t<uint32_t> result_indices(static_cast<py::ssize_t>(k));
     py::buffer_info result_indices_info = result_indices.request();

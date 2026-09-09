@@ -161,11 +161,47 @@ class SearcherBase {
         bool unsorted = false
     ) const = 0;
 
-    virtual uint32_t search_ef_f32(const float* query, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false) const = 0;
-    virtual uint32_t search_ef_f16(const uint16_t* query, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false) const = 0;
+    virtual uint32_t search_ef_f32(
+        const float* query,
+        uint32_t k,
+        uint32_t ef,
+        float rerank_factor,
+        uint32_t* out_indices,
+        float* out_distances = nullptr,
+        bool unsorted = false
+    ) const = 0;
+    virtual uint32_t search_ef_f16(
+        const uint16_t* query,
+        uint32_t k,
+        uint32_t ef,
+        float rerank_factor,
+        uint32_t* out_indices,
+        float* out_distances = nullptr,
+        bool unsorted = false
+    ) const = 0;
 
-    virtual void search_batch_ef_f32(const float* queries, size_t n_queries, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const = 0;
-    virtual void search_batch_ef_f16(const uint16_t* queries, size_t n_queries, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const = 0;
+    virtual void search_batch_ef_f32(
+        const float* queries,
+        size_t n_queries,
+        uint32_t k,
+        uint32_t ef,
+        float rerank_factor,
+        uint32_t* out_indices,
+        float* out_distances = nullptr,
+        size_t threads = 1,
+        bool unsorted = false
+    ) const = 0;
+    virtual void search_batch_ef_f16(
+        const uint16_t* queries,
+        size_t n_queries,
+        uint32_t k,
+        uint32_t ef,
+        float rerank_factor,
+        uint32_t* out_indices,
+        float* out_distances = nullptr,
+        size_t threads = 1,
+        bool unsorted = false
+    ) const = 0;
 
     virtual void search_batch_f32(
         const float* queries,
@@ -646,9 +682,7 @@ class SearcherImpl : public SearcherBase {
         const std::vector<uint32_t> entries = entry_selector_.top_entries(query_span, 2);
 
         // 3. Search using search_ef
-        deglib::search::LinearPool<float> pool = entries.empty()
-            ? graph_->search_ef(query_span, fetch_k, ef)
-            : graph_->search_ef(query_span, entries, fetch_k, ef);
+        const auto pool = entries.empty() ? graph_->search_ef(query_span, fetch_k, ef) : graph_->search_ef(query_span, entries, fetch_k, ef);
 
         // 4. Rerank or return
         const size_t found_count = static_cast<size_t>(pool.size());
@@ -665,46 +699,78 @@ class SearcherImpl : public SearcherBase {
                 }
 
                 for (size_t i = 0; i < found_count; ++i) {
-                    cands[i] = graph_->getExternalLabel(pool.id(static_cast<int32_t>(i)));
+                    cands[i] = graph_->getExternalLabel(pool[i].getIdentifier());
                 }
 
                 const bool return_distances = (out_distances != nullptr);
-                return refiner_.rerank(
-                    query, dim, cands, found_count, k,
-                    out_indices, out_distances,
-                    return_distances, unsorted
-                );
+                return refiner_.rerank(query, dim, cands, found_count, k, out_indices, out_distances, return_distances, unsorted);
             }
         }
 
         const uint32_t result_count = std::min(k, static_cast<uint32_t>(found_count));
         for (uint32_t i = 0; i < result_count; ++i) {
-            out_indices[i] = graph_->getExternalLabel(pool.id(static_cast<int32_t>(i)));
+            out_indices[i] = graph_->getExternalLabel(pool[i].getIdentifier());
         }
         if (out_distances != nullptr) {
             for (uint32_t i = 0; i < result_count; ++i) {
-                out_distances[i] = pool.dist(static_cast<int32_t>(i));
+                out_distances[i] = pool[i].getDistance();
             }
         }
         return result_count;
     }
 
-    uint32_t search_ef_f32(const float* query, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false) const override {
+    uint32_t search_ef_f32(
+        const float* query,
+        uint32_t k,
+        uint32_t ef,
+        float rerank_factor,
+        uint32_t* out_indices,
+        float* out_distances = nullptr,
+        bool unsorted = false
+    ) const override {
         return search_single_ef_typed(query, k, ef, rerank_factor, out_indices, out_distances, unsorted);
     }
 
-    uint32_t search_ef_f16(const uint16_t* query, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, bool unsorted = false) const override {
+    uint32_t search_ef_f16(
+        const uint16_t* query,
+        uint32_t k,
+        uint32_t ef,
+        float rerank_factor,
+        uint32_t* out_indices,
+        float* out_distances = nullptr,
+        bool unsorted = false
+    ) const override {
         return search_single_ef_typed(query, k, ef, rerank_factor, out_indices, out_distances, unsorted);
     }
 
-    void search_batch_ef_f32(const float* queries, size_t n_queries, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const override {
+    void search_batch_ef_f32(
+        const float* queries,
+        size_t n_queries,
+        uint32_t k,
+        uint32_t ef,
+        float rerank_factor,
+        uint32_t* out_indices,
+        float* out_distances = nullptr,
+        size_t threads = 1,
+        bool unsorted = false
+    ) const override {
         const uint32_t dim = graph_->getFeatureSpace().dim();
         for (size_t q = 0; q < n_queries; ++q) {
             search_ef_f32(queries + q * dim, k, ef, rerank_factor, out_indices + q * k, out_distances ? out_distances + q * k : nullptr, unsorted);
         }
     }
 
-    void search_batch_ef_f16(const uint16_t* queries, size_t n_queries, uint32_t k, uint32_t ef, float rerank_factor, uint32_t* out_indices, float* out_distances = nullptr, size_t threads = 1, bool unsorted = false) const override {
+    void search_batch_ef_f16(
+        const uint16_t* queries,
+        size_t n_queries,
+        uint32_t k,
+        uint32_t ef,
+        float rerank_factor,
+        uint32_t* out_indices,
+        float* out_distances = nullptr,
+        size_t threads = 1,
+        bool unsorted = false
+    ) const override {
         const uint32_t dim = graph_->getFeatureSpace().dim();
         for (size_t q = 0; q < n_queries; ++q) {
             search_ef_f16(queries + q * dim, k, ef, rerank_factor, out_indices + q * k, out_distances ? out_distances + q * k : nullptr, unsorted);

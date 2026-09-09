@@ -3,7 +3,7 @@
 #include "deglib/distances.h"
 #include "deglib/graph/internal_graph.h"
 #include "deglib/graph/visited_list_pool.h"
-#include "deglib/search/linear_pool.h"
+#include "deglib/search/result_list.h"
 #include "deglib/utils/memory.h"
 
 #include <cmath>
@@ -29,7 +29,7 @@ namespace deglib::graph {
 class ReadOnlyGraph : public deglib::graph::InternalGraph {
     friend class deglib::graph::InternalGraph;
 
-    static const uint8_t alignment = 64; // 64-byte alignment for SIMD vector access
+    static const uint8_t alignment = 64;  // 64-byte alignment for SIMD vector access
 
     const uint32_t max_vertex_count_;
     const uint8_t edges_per_vertex_;
@@ -133,13 +133,9 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
     const deglib::distances::FloatSpace& getFeatureSpace() const override { return this->feature_space_; }
 
   private:
-    inline const uint32_t label_by_index(const uint32_t internal_idx) const {
-        return labels_[internal_idx];
-    }
+    inline const uint32_t label_by_index(const uint32_t internal_idx) const { return labels_[internal_idx]; }
 
-    inline const std::byte* feature_by_index(const uint32_t internal_idx) const {
-        return features_ + size_t(internal_idx) * feature_stride_;
-    }
+    inline const std::byte* feature_by_index(const uint32_t internal_idx) const { return features_ + size_t(internal_idx) * feature_stride_; }
 
     inline const uint32_t* neighbors_by_index(const uint32_t internal_idx) const {
         return neighbors_.data() + size_t(internal_idx) * size_t(edges_per_vertex_);
@@ -163,12 +159,8 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
         return hasPathImpl(*this, entry_vertex_indices, to_vertex, eps, k);
     }
 
-    deglib::search::LinearPool<float> search_ef_intern(
-        const std::vector<uint32_t>& entry_vertex_indices,
-        const std::byte* query,
-        const uint32_t k,
-        const uint32_t ef
-    ) const override {
+    std::vector<deglib::graph::ObjectDistance>
+    search_ef_intern(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const uint32_t k, const uint32_t ef) const override {
         return searchEfInternImpl(*this, entry_vertex_indices, query, k, ef);
     }
 

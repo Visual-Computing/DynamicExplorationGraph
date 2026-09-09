@@ -43,11 +43,11 @@
 
 ## 3. Priorisierter Optimierungsplan
 
-### Prio 1: Generischer `LinearPool` & `searchEfImpl` Suchpipeline
+### Prio 1: Generische `ResultList` & `searchEfImpl` Suchpipeline
 - **Erwarteter Hebel**: **Maximal (tauscht die gesamte Suchschleife aus)**
-- **Begründung**: Ersetzt den Heap-basierten `search_intern` durch das flache, sortierte `LinearPool`-Array mit `VisitedListPool`, Multi-Medoid-Einstiegsscan und Pipelined-Prefetching.
+- **Begründung**: Ersetzt den Heap-basierten `search_intern` durch das flache, sortierte `ResultList`-Array mit `VisitedListPool`, Multi-Medoid-Einstiegsscan und Pipelined-Prefetching.
 - **Komponenten**:
-  - `cpp/deglib/include/deglib/search/linear_pool.h`: Header mit `LinearPool<DistType>`.
+  - `cpp/deglib/include/deglib/search/result_list.h`: Header mit `ResultList`.
   - `cpp/deglib/include/deglib/graph/internal_graph.h`: Generisches `searchEfImpl` mit `COMPARATOR::compare(...)`, ohne jegliche ISA- oder Dimensionsbeschränkung.
   - `search_ef_intern(...)` in den Graph-Klassen (`ReadOnlyGraph`, etc.).
   - Aufruf in `Searcher::search(...)` bei `ef > 0`.
@@ -74,7 +74,7 @@
 
 ---
 
-## 4. Benchmark-Ergebnis: Schritt 1 (LinearPool & ef-Suche)
+## 4. Benchmark-Ergebnis: Schritt 1 (ResultList & ef-Suche)
 
 - **Status**: **MASSIVER ERFOLG (+40% bis +84% QPS-Steigerung bei gleichem Recall)**
 - **Vergleich bei vergleichbarem Recall**:

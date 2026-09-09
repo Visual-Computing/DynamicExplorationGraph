@@ -253,8 +253,8 @@ class MockInternalGraph : public deglib::graph::InternalGraph {
     ) const override {
         return deglib::graph::ResultSet();
     }
-    deglib::search::LinearPool<float> search_ef_intern(const std::vector<uint32_t>&, const std::byte*, const uint32_t, const uint32_t) const override {
-        return deglib::search::LinearPool<float>();
+    std::vector<deglib::graph::ObjectDistance> search_ef_intern(const std::vector<uint32_t>&, const std::byte*, const uint32_t, const uint32_t) const override {
+        return {};
     }
 
     // helpers for test setup

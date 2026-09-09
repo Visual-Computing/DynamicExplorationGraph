@@ -16,8 +16,6 @@
 
 namespace deglib::search {
 
-using ObjectDistance = deglib::graph::ObjectDistance;
-using ResultSet = deglib::graph::ResultSet;
 
 namespace detail {
 
@@ -26,7 +24,7 @@ namespace detail {
  * and returns the top-k nearest candidates in a max-heap.
  */
 template <typename DistFuncObj, typename DistFuncParam>
-inline ResultSet rerank_single_heap(
+inline deglib::graph::ResultSet rerank_single_heap(
     const DistFuncObj& dist_func_obj,
     DistFuncParam param,
     const uint8_t* query_ptr,
@@ -37,7 +35,7 @@ inline ResultSet rerank_single_heap(
     size_t num_candidates,
     size_t k
 ) {
-    ResultSet heap;
+    deglib::graph::ResultSet heap;
     heap.reserve(k);
     float max_dist = std::numeric_limits<float>::max();
 
@@ -65,14 +63,8 @@ inline ResultSet rerank_single_heap(
 /**
  * Internal helper: Drains a ResultSet into pre-allocated destination spans without inner branching.
  */
-inline uint32_t drain_heap_into(
-    ResultSet& heap,
-    uint32_t k,
-    std::span<uint32_t> out_indices,
-    std::span<float> out_distances,
-    bool return_distances,
-    bool unsorted
-) {
+inline uint32_t
+drain_heap_into(deglib::graph::ResultSet& heap, uint32_t k, std::span<uint32_t> out_indices, std::span<float> out_distances, bool return_distances, bool unsorted) {
     const size_t top_n = std::min<size_t>(k, heap.size());
 
     if (unsorted) {
@@ -124,7 +116,7 @@ inline uint32_t drain_heap_into(
  * @param k                     Number of top results to return
  * @return                      ResultSet containing top-k nearest candidates in max-heap order
  */
-inline ResultSet rerank(
+inline deglib::graph::ResultSet rerank(
     const deglib::distances::FloatSpace& space,
     std::span<const std::byte> query,
     const void* base_vectors,
@@ -133,7 +125,7 @@ inline ResultSet rerank(
     uint32_t k
 ) {
     if (query.empty() || candidate_indices.empty() || base_vectors == nullptr || k == 0) {
-        return ResultSet{};
+        return deglib::graph::ResultSet{};
     }
 
     const size_t byte_stride_target = space.get_data_size();
@@ -141,11 +133,10 @@ inline ResultSet rerank(
     const uint8_t* t_ptr = static_cast<const uint8_t*>(base_vectors);
     const auto param = space.get_dist_func_param();
 
-    ResultSet heap;
+    deglib::graph::ResultSet heap;
     space.compute([&](const auto& dist_func_obj) {
         heap = detail::rerank_single_heap(
-            dist_func_obj, param, query_ptr, t_ptr, num_base_vectors, byte_stride_target,
-            candidate_indices.data(), candidate_indices.size(), k
+            dist_func_obj, param, query_ptr, t_ptr, num_base_vectors, byte_stride_target, candidate_indices.data(), candidate_indices.size(), k
         );
     });
     return heap;
@@ -185,7 +176,7 @@ inline uint32_t rerank(
         throw std::invalid_argument("rerank: return_distances is true but out_distances span is smaller than k");
     }
 
-    ResultSet heap = rerank(space, query, base_vectors, num_base_vectors, candidate_indices, k);
+    deglib::graph::ResultSet heap = rerank(space, query, base_vectors, num_base_vectors, candidate_indices, k);
     return detail::drain_heap_into(heap, k, out_indices, out_distances, return_distances, unsorted);
 }
 
@@ -203,7 +194,7 @@ inline uint32_t rerank(
  * @param num_threads          Number of worker threads (0 = auto-detect)
  * @return                     std::vector<ResultSet> containing the top-k result sets per query (unsorted heap order)
  */
-inline std::vector<ResultSet> rerank(
+inline std::vector<deglib::graph::ResultSet> rerank(
     const deglib::distances::FloatSpace& space,
     const void* queries,
     size_t num_queries,
@@ -233,17 +224,15 @@ inline std::vector<ResultSet> rerank(
 
     const auto param = space.get_dist_func_param();
 
-    std::vector<ResultSet> results(num_queries);
+    std::vector<deglib::graph::ResultSet> results(num_queries);
 
     space.compute([&](const auto& dist_func_obj) {
         deglib::concurrent::parallel_for(0, num_queries, num_threads, [&](size_t i, size_t) {
             const uint8_t* query_ptr = q_ptr + i * byte_stride_query;
             const uint32_t* cand_row = base_candidates + i * candidates_per_query;
 
-            results[i] = detail::rerank_single_heap(
-                dist_func_obj, param, query_ptr, t_ptr, target_count, byte_stride_target,
-                cand_row, candidates_per_query, k_top
-            );
+            results[i] =
+                detail::rerank_single_heap(dist_func_obj, param, query_ptr, t_ptr, target_count, byte_stride_target, cand_row, candidates_per_query, k_top);
         });
     });
 

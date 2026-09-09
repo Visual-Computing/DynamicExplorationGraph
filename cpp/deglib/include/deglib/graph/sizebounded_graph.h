@@ -502,12 +502,8 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
     }
 
   protected:
-    deglib::search::LinearPool<float> search_ef_intern(
-        const std::vector<uint32_t>& entry_vertex_indices,
-        const std::byte* query,
-        const uint32_t k,
-        const uint32_t ef
-    ) const override {
+    std::vector<deglib::graph::ObjectDistance>
+    search_ef_intern(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const uint32_t k, const uint32_t ef) const override {
         return searchEfInternImpl(*this, entry_vertex_indices, query, k, ef);
     }
 
