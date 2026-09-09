@@ -143,9 +143,24 @@ cmake --preset linux-gcc-avx2
 cmake --preset macos-clang-avx2
 ```
 
+> **Tip (Fast Development / Test-Only Configuration):**  
+> By default, both benchmarks (`ENABLE_BENCHMARKS=ON`) and tests (`ENABLE_TESTING=ON`) are compiled. To skip compiling the heavy benchmark suites and drastically speed up configure and build times during development, disable benchmarks:
+> ```bash
+> cmake --preset windows-msvc-avx2 -DENABLE_BENCHMARKS=OFF
+> ```
+
 ### 2. Build
 
-Build the project in **Release** configuration:
+#### Build Specific Targets (Recommended for Fast Development)
+To avoid compiling all benchmarks and tests at once, build only the specific targets you need using `--target`:
+
+```bash
+# Build specific executables
+cmake --build --preset windows-msvc-avx2-release --target test_readonly_graph 
+```
+
+#### Build All Targets (Default)
+Build the entire project (all tests, benchmarks, and tools) in **Release** configuration:
 
 ```bash
 # Windows
@@ -160,8 +175,7 @@ cmake --build --preset macos-clang-avx2-release
 
 ### 3. Run Tests
 
-All unit, integration, and regression tests are executed via `ctest`:
-
+#### Run All Tests via CTest
 ```bash
 # Windows
 ctest --preset windows-msvc-avx2-release --output-on-failure
@@ -173,6 +187,27 @@ ctest --preset linux-gcc-avx2-release --output-on-failure
 ctest --preset macos-clang-avx2-release --output-on-failure
 ```
 
+#### Run Specific Tests via CTest Filter (`-R`)
+Run only matching test suites without executing the entire suite:
+
+```bash
+# Run only graph unit tests
+ctest --preset windows-msvc-avx2-release -R "graph" --output-on-failure
+
+# Run only SIMD distance tests
+ctest --preset windows-msvc-avx2-release -R "test_fp|test_uint|test_int" --output-on-failure
+```
+
+#### Run Test Binaries Directly
+Test executables can also be run directly from the build directory, allowing GoogleTest flags like `--gtest_filter`:
+
+```bash
+# Windows
+.\build\windows-msvc-avx2\test\Release\test_readonly_graph.exe --gtest_filter="ReadOnlyGraph.Search*"
+
+# Linux / macOS
+./build/linux-gcc-avx2/test/test_readonly_graph --gtest_filter="ReadOnlyGraph.Search*"
+```
 ### 4. Code Formatting
 
 Format all C++ source files using `clang-format` according to the repository's root `.clang-format` rules:

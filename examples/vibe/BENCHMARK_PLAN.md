@@ -45,7 +45,7 @@
 
 ### Prio 1: Generischer `LinearPool` & `searchEfImpl` Suchpipeline
 - **Erwarteter Hebel**: **Maximal (tauscht die gesamte Suchschleife aus)**
-- **Begründung**: Ersetzt den Heap-basierten `search_intern` durch das flache, sortierte `LinearPool`-Array mit integrierter Bitset-Visited-List, Multi-Medoid-Einstiegsscan und Pipelined-Prefetching.
+- **Begründung**: Ersetzt den Heap-basierten `search_intern` durch das flache, sortierte `LinearPool`-Array mit `VisitedListPool`, Multi-Medoid-Einstiegsscan und Pipelined-Prefetching.
 - **Komponenten**:
   - `cpp/deglib/include/deglib/search/linear_pool.h`: Header mit `LinearPool<DistType>`.
   - `cpp/deglib/include/deglib/graph/internal_graph.h`: Generisches `searchEfImpl` mit `COMPARATOR::compare(...)`, ohne jegliche ISA- oder Dimensionsbeschränkung.

@@ -147,6 +147,7 @@ class InternalGraph {
 
     virtual const bool hasVertex(const uint32_t external_label) const = 0;
     virtual const bool hasEdge(const uint32_t internal_index, const uint32_t neighbor_index) const = 0;
+
   protected:
     std::vector<uint32_t> entry_vertex_indices_{0};
     int32_t po_ = 8;
@@ -163,9 +164,15 @@ class InternalGraph {
     int32_t getPo() const noexcept { return po_; }
     int32_t getPl() const noexcept { return pl_; }
     int32_t getNl() const noexcept { return nl_; }
-    void setPo(int32_t po) noexcept { if (po > 0) po_ = po; }
-    void setPl(int32_t pl) noexcept { if (pl > 0) pl_ = pl; }
-    void setNl(int32_t nl) noexcept { if (nl > 0) nl_ = nl; }
+    void setPo(int32_t po) noexcept {
+        if (po > 0) po_ = po;
+    }
+    void setPl(int32_t pl) noexcept {
+        if (pl > 0) pl_ = pl;
+    }
+    void setNl(int32_t nl) noexcept {
+        if (nl > 0) nl_ = nl;
+    }
     void setPrefetch(int32_t po, int32_t pl, int32_t nl = 3) noexcept {
         if (po > 0) po_ = po;
         if (pl > 0) pl_ = pl;
@@ -213,7 +220,9 @@ class InternalGraph {
             );
         }
         if (entry_vertex_indices.empty()) {
-            return search_intern(getEntryVertexIndices(), reinterpret_cast<const std::byte*>(query.data()), k, eps, true, filter, max_distance_computation_count);
+            return search_intern(
+                getEntryVertexIndices(), reinterpret_cast<const std::byte*>(query.data()), k, eps, true, filter, max_distance_computation_count
+            );
         }
         return search_intern(entry_vertex_indices, reinterpret_cast<const std::byte*>(query.data()), k, eps, true, filter, max_distance_computation_count);
     }
@@ -238,11 +247,7 @@ class InternalGraph {
      * Bounds-checked internal search for query vectors using LinearPool with fixed ef budget.
      */
     template <typename T>
-    deglib::search::LinearPool<float> search_ef(
-        std::span<const T> query,
-        const uint32_t k,
-        const uint32_t ef
-    ) const {
+    deglib::search::LinearPool<float> search_ef(std::span<const T> query, const uint32_t k, const uint32_t ef) const {
         if (query.size_bytes() < getFeatureSpace().get_data_size()) {
             throw std::invalid_argument(
                 "Search query buffer mismatch: expected at least " + std::to_string(getFeatureSpace().get_data_size()) +
@@ -253,12 +258,8 @@ class InternalGraph {
     }
 
     template <typename T>
-    deglib::search::LinearPool<float> search_ef(
-        std::span<const T> query,
-        const std::vector<uint32_t>& entry_vertex_indices,
-        const uint32_t k,
-        const uint32_t ef
-    ) const {
+    deglib::search::LinearPool<float>
+    search_ef(std::span<const T> query, const std::vector<uint32_t>& entry_vertex_indices, const uint32_t k, const uint32_t ef) const {
         if (query.size_bytes() < getFeatureSpace().get_data_size()) {
             throw std::invalid_argument(
                 "Search query buffer mismatch: expected at least " + std::to_string(getFeatureSpace().get_data_size()) +
@@ -300,12 +301,8 @@ class InternalGraph {
         const uint32_t max_distance_computation_count = 0
     ) const = 0;
 
-    virtual deglib::search::LinearPool<float> search_ef_intern(
-        const std::vector<uint32_t>& entry_vertex_indices,
-        const std::byte* query,
-        const uint32_t k,
-        const uint32_t ef
-    ) const = 0;
+    virtual deglib::search::LinearPool<float>
+    search_ef_intern(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const uint32_t k, const uint32_t ef) const = 0;
 
     /**
      * Statically dispatched exploration and k-NN search implementation.
@@ -512,19 +509,19 @@ class InternalGraph {
     }
 
     template <typename GraphType, deglib::distances::DistanceFunction COMPARATOR>
-    static deglib::search::LinearPool<float> searchEfImpl(
-        const GraphType& self,
-        const std::vector<uint32_t>& entry_vertex_indices,
-        const std::byte* query,
-        const uint32_t k,
-        const uint32_t ef
-    ) {
+    static deglib::search::LinearPool<float>
+    searchEfImpl(const GraphType& self, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const uint32_t k, const uint32_t ef) {
         const auto dist_func_param = self.feature_space_.get_dist_func_param();
         const auto feature_size = self.feature_space_.get_data_size();
         const size_t vertex_count = self.size();
         const int32_t capacity = static_cast<int32_t>(std::max(k, ef));
 
-        deglib::search::LinearPool<float> pool(static_cast<uint32_t>(vertex_count), static_cast<int32_t>(ef), capacity);
+        // set of checked vertex ids
+        const auto vl = self.visited_list_pool_->getFreeVisitedList();
+        auto* checked_ids = vl->get_visited();
+        const auto checked_ids_tag = vl->get_tag();
+
+        deglib::search::LinearPool<float> pool(static_cast<int32_t>(ef), capacity);
 
         uint32_t best_ep = entry_vertex_indices.empty() ? 0 : entry_vertex_indices[0];
         float best_ep_dist = std::numeric_limits<float>::max();
@@ -539,7 +536,7 @@ class InternalGraph {
             }
         }
         if (best_ep < vertex_count) {
-            pool.set_visited(best_ep);
+            checked_ids[best_ep] = checked_ids_tag;
             pool.insert(best_ep, best_ep_dist);
         }
 
@@ -549,9 +546,7 @@ class InternalGraph {
         const size_t edges_per_vertex = self.edges_per_vertex_;
         alignas(64) uint32_t edge_buf[256];
 
-        auto prefetch_feature = [pl](const char* ptr) {
-            deglib::memory::prefetch(ptr, static_cast<size_t>(pl) * deglib::memory::L1_CACHE_LINE_SIZE);
-        };
+        auto prefetch_feature = [pl](const char* ptr) { deglib::memory::prefetch(ptr, static_cast<size_t>(pl) * deglib::memory::L1_CACHE_LINE_SIZE); };
 
         while (pool.has_next()) {
             uint32_t u = pool.pop();
@@ -560,10 +555,10 @@ class InternalGraph {
             int32_t edge_size = 0;
             for (size_t i = 0; i < edges_per_vertex; ++i) {
                 uint32_t v = neighbor_indices[i];
-                if (pool.check_visited(v)) {
+                if (checked_ids[v] == checked_ids_tag) {
                     continue;
                 }
-                pool.set_visited(v);
+                checked_ids[v] = checked_ids_tag;
                 edge_buf[edge_size++] = v;
             }
 
@@ -580,8 +575,7 @@ class InternalGraph {
                 float dist = COMPARATOR::compare(query, feature, dist_func_param);
                 if (pool.insert(v, dist)) {
                     deglib::memory::prefetch(
-                        reinterpret_cast<const char*>(self.neighbors_by_index(v)),
-                        static_cast<size_t>(nl) * deglib::memory::L1_CACHE_LINE_SIZE
+                        reinterpret_cast<const char*>(self.neighbors_by_index(v)), static_cast<size_t>(nl) * deglib::memory::L1_CACHE_LINE_SIZE
                     );
                 }
             }
@@ -591,13 +585,8 @@ class InternalGraph {
     }
 
     template <typename GraphType>
-    static deglib::search::LinearPool<float> searchEfInternImpl(
-        const GraphType& self,
-        const std::vector<uint32_t>& entry_vertex_indices,
-        const std::byte* query,
-        const uint32_t k,
-        const uint32_t ef
-    ) {
+    static deglib::search::LinearPool<float>
+    searchEfInternImpl(const GraphType& self, const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const uint32_t k, const uint32_t ef) {
         return self.feature_space_.compute([&]<deglib::distances::DistanceFunction Dist>(Dist) -> deglib::search::LinearPool<float> {
             return searchEfImpl<GraphType, Dist>(self, entry_vertex_indices, query, k, ef);
         });
