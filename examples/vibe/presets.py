@@ -24,6 +24,8 @@ def load_vibe_config(config_path: Path | None = None) -> List[Dict[str, Any]]:
         for rg_name, rg_data in run_groups.items():
             args = rg_data.get("args", {})
             query_args = rg_data.get("query_args", {})
+            raw_search_vals = query_args.get("eps_or_ef", [])
+
             algorithms.append(
                 {
                     "name": alg_name,
@@ -32,8 +34,7 @@ def load_vibe_config(config_path: Path | None = None) -> List[Dict[str, Any]]:
                     "k_list": args.get("k", [30]),
                     "opt_target_list": args.get("opt_target", ["LowLID"]),
                     "prune_non_rng_list": args.get("prune_non_rng", [False]),
-                    "search_eps_list": query_args.get("search_eps", []),
-                    "ef_list": query_args.get("ef", []),
+                    "eps_or_ef_list": [float(v) for v in raw_search_vals],
                     "rerank_size_factors": query_args.get("rerank_size_factor", [1.0]),
                 }
             )
@@ -75,8 +76,7 @@ def get_config_grid_presets(dataset_key: str, algorithm_name: str | None = None)
                     "optimization_target": opt_target,
                     "prune_non_rng": prune_non_rng,
                     "anns_k": 100,
-                    "search_eps_list": alg["search_eps_list"],
-                    "ef_list": alg["ef_list"],
+                    "eps_or_ef_list": alg["eps_or_ef_list"],
                     "rerank_size_factors": alg["rerank_size_factors"],
                 }
             )
@@ -98,8 +98,7 @@ def get_default_config_preset(dataset_key: str) -> Dict[str, Any]:
             else "HighLID",
             "prune_non_rng": False,
             "anns_k": 100,
-            "search_eps_list": [0.0, 0.05, 0.1, 0.2, 0.3],
-            "ef_list": [],
+            "eps_or_ef_list": [0.0, 0.05, 0.1, 0.2, 0.3],
             "rerank_size_factors": [1.0],
         }
     )

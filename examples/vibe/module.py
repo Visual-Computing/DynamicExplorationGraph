@@ -101,7 +101,7 @@ class DEG(BaseANN):
         self.prune_non_rng = bool(prune_non_rng)
         self.threads = int(threads)
         self.search_eps = 0.1
-
+        self.ef = 0
         self.metric_enum = _METRIC_MAP[self.metric][0]
         self.opt_enum = deglib.builder.OptimizationTarget[self.opt_target]
         self.graph = None
@@ -160,14 +160,20 @@ class DEG(BaseANN):
         self.graph = graph.to_readonly() if graph.is_mutable() else graph
         self.searcher = deglib.search.create_searcher(graph=self.graph)
 
-    def set_query_arguments(self, *args, **kwargs):
-        """Sets query-time search_eps (supports float or search_eps keyword)."""
-        if args:
-            self.search_eps = float(args[0])
-        elif "search_eps" in kwargs:
-            self.search_eps = float(kwargs["search_eps"])
-        elif "eps" in kwargs:
-            self.search_eps = float(kwargs["eps"])
+        # 4s. Optimize entry vertices and prefetch values
+        t_km = time.time()
+        self.searcher.optimize()  
+        print(f"Optimized Searcher for the provided graph and hardware in {time.time() - t_km:.2f}s", flush=True)
+
+    def set_query_arguments(self, eps_or_ef: float | int):
+        """Sets query-time parameter: values > 1.0 are treated as ef, <= 1.0 as eps."""
+        val = float(eps_or_ef)
+        if val > 1.0:
+            self.ef = int(round(val))
+            self.search_eps = 0.0
+        else:
+            self.search_eps = val
+            self.ef = 0
 
     def query(self, v: np.ndarray, n: int) -> np.ndarray:
         """Single query search on 1 thread with Float32 via C++ searcher."""
@@ -176,6 +182,7 @@ class DEG(BaseANN):
         return self.searcher.search(
             np.ascontiguousarray(v, dtype=np.float32),
             k=n,
+            ef=self.ef,
             eps=self.search_eps,
             threads=1,
             return_distances=False,
@@ -183,6 +190,8 @@ class DEG(BaseANN):
         )
 
     def __str__(self) -> str:
+        if self.ef > 0:
+            return f"DEG(k={self.k}, opt={self.opt_target}, prune_rng={self.prune_non_rng}, ef={self.ef})"
         return f"DEG(k={self.k}, opt={self.opt_target}, prune_rng={self.prune_non_rng}, eps={self.search_eps})"
 
 
@@ -208,7 +217,7 @@ class QG(BaseANN):
         self.prune_non_rng = bool(prune_non_rng)
         self.threads = int(threads)
         self.rerank_size_factor = 1.0
-        self.search_eps = 0.1
+        self.search_eps = 0.0
         self.ef = 0
 
         self.base_metric, self.int8_metric, self.fp16_metric = _METRIC_MAP[self.metric]
@@ -293,31 +302,16 @@ class QG(BaseANN):
         self.searcher.optimize()  
         print(f"Optimized Searcher for the provided graph and hardware in {time.time() - t_km:.2f}s", flush=True)
 
-    def set_query_arguments(self, *args, **kwargs):
-        """Sets query-time parameters: supports (rerank_factor, search_eps) or (rerank_factor, ef)."""
-        self.rerank_size_factor = float(kwargs.get("rerank_size_factor", 1.0))
-        self.search_eps = float(kwargs.get("search_eps", 0.0))
-        self.ef = int(kwargs.get("ef", 0))
-
-        if len(args) == 1:
-            val = args[0]
-            if isinstance(val, int) or (isinstance(val, float) and val >= 1.0 and val.is_integer()):
-                self.ef = int(val)
-            else:
-                self.search_eps = float(val)
-        elif len(args) == 2:
-            self.rerank_size_factor = float(args[0])
-            val = args[1]
-            if isinstance(val, int) or (isinstance(val, float) and val >= 1.0 and val.is_integer()):
-                self.ef = int(val)
-                self.search_eps = 0.0
-            else:
-                self.search_eps = float(val)
-                self.ef = 0
-        elif len(args) >= 3:
-            self.rerank_size_factor = float(args[0])
-            self.search_eps = float(args[1])
-            self.ef = int(args[2])
+    def set_query_arguments(self, eps_or_ef: float | int, rerank_size_factor: float = 1.0):
+        """Sets query-time parameters: values > 1.0 are treated as ef, <= 1.0 as eps."""
+        self.rerank_size_factor = float(rerank_size_factor)
+        val = float(eps_or_ef)
+        if val > 1.0:
+            self.ef = int(round(val))
+            self.search_eps = 0.0
+        else:
+            self.search_eps = val
+            self.ef = 0
 
     def query(self, v: np.ndarray, n: int) -> np.ndarray:
         """Single query search on 1 thread with INT8 search and FP16 reranking directly in C++."""
@@ -326,12 +320,12 @@ class QG(BaseANN):
         return self.searcher.search(
             np.ascontiguousarray(v, dtype=np.float32),
             k=n,
+            ef=self.ef,
             eps=self.search_eps,
             rerank_factor=self.rerank_size_factor,
             threads=1,
             return_distances=False,
             unsorted=True,
-            ef=self.ef,
         )
 
     def __str__(self) -> str:

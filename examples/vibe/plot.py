@@ -35,7 +35,6 @@ def export_interactive_html(
         return
 
     OPT_HUES = {"lowlid": 0.60, "streamingdata": 0.33, "streaming": 0.33, "highlid": 0.02}
-    RERANK_SYMBOLS = {1.0: "circle", 1.2: "square", 1.5: "triangle-up", 2.0: "diamond"}
 
     all_opt_targets = []
     for entry in results_series:
@@ -49,7 +48,16 @@ def export_interactive_html(
 
     has_pruned = any(bool(entry.get("prune_non_rng", False)) for entry in results_series)
     has_unpruned = any(not bool(entry.get("prune_non_rng", False)) for entry in results_series)
-    all_rerank_factors = sorted(list({float(entry.get("rerank_factor", 1.0)) for entry in results_series}))
+    all_rerank_factors = sorted(list({round(float(entry.get("rerank_factor", 1.0)), 2) for entry in results_series}))
+
+    # Dynamically assign distinct symbols to any rerank factors found in results_series
+    _PLOTLY_MARKERS = ["circle", "square", "triangle-up", "diamond", "star", "cross", "x", "hexagon"]
+    _UNICODE_MARKERS = ["●", "■", "▲", "◆", "★", "✚", "✖", "⬢"]
+    rerank_symbols = {}
+    rerank_unicode = {}
+    for idx, rf in enumerate(all_rerank_factors):
+        rerank_symbols[rf] = _PLOTLY_MARKERS[idx % len(_PLOTLY_MARKERS)]
+        rerank_unicode[rf] = _UNICODE_MARKERS[idx % len(_UNICODE_MARKERS)]
 
     data_traces = []
 
@@ -63,7 +71,7 @@ def export_interactive_html(
         opt_target = str(entry.get("opt_target", "")).lower().strip()
         k = entry.get("k", 30)
         is_pruned = bool(entry.get("prune_non_rng", False))
-        r_factor = float(entry.get("rerank_factor", 1.0))
+        r_factor = round(float(entry.get("rerank_factor", 1.0)), 2)
 
         hue = OPT_HUES.get(opt_target, 0.60)
         k_ratio = (k - min_k) / (max_k - min_k) if max_k > min_k else 0.5
@@ -73,7 +81,7 @@ def export_interactive_html(
         hex_color = f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
 
         dash = "dash" if is_pruned else "solid"
-        symbol = RERANK_SYMBOLS.get(r_factor, "circle")
+        symbol = rerank_symbols.get(r_factor, "circle")
         display_opt = (
             "StreamingData"
             if "stream" in opt_target
@@ -81,7 +89,7 @@ def export_interactive_html(
         )
         prune_txt = "MRNG Pruned" if is_pruned else "Unpruned"
         query_dt = str(entry.get("query_dtype", "")).upper()
-        rerank_txt = f"{r_factor:.1f}x (FP16)" if r_factor > 1.0 else "None (1.0x)"
+        rerank_txt = f"{r_factor:g}x (FP16)" if r_factor > 1.0 else "None (1.0x)"
 
         query_info = f"Query Dtype: {query_dt}<br>" if query_dt else ""
         search_params = entry.get("search_params", [])
@@ -224,16 +232,16 @@ def export_interactive_html(
 
     # Section D: Rerank Factors (only if multiple rerank factors exist or factor > 1.0)
     rerank_html_section = ""
-    rerank_js_obj = {f"{rf:.1f}": True for rf in all_rerank_factors}
+    rerank_js_obj = {f"{rf:g}": True for rf in all_rerank_factors}
     has_meaningful_rerank = len(all_rerank_factors) > 1 or (
         len(all_rerank_factors) == 1 and all_rerank_factors[0] > 1.0
     )
     if has_meaningful_rerank:
         rerank_rows = ""
         for rf in all_rerank_factors:
-            sym_char = "●" if rf == 1.0 else ("■" if rf == 1.2 else ("▲" if rf == 1.5 else "◆"))
-            lbl = f"{sym_char} {rf:.1f}x" + (" (None)" if rf == 1.0 else "")
-            rf_key = f"{rf:.1f}"
+            sym_char = rerank_unicode.get(rf, "●")
+            lbl = f"{sym_char} {rf:g}x" + (" (None)" if rf == 1.0 else "")
+            rf_key = f"{rf:g}"
             rerank_rows += f"""
                     <div class="legend-row" id="rerank-{rf_key}" onclick="toggleFilter('rerank', '{rf_key}')">
                         <span class="legend-label">{lbl}</span>
@@ -439,7 +447,7 @@ def export_interactive_html(
                 const optVisible = activeFilters.opt[meta.opt_target] !== false;
                 const pruneVisible = activeFilters.prune[meta.is_pruned.toString()] !== false;
                 const kVisible = activeFilters.k[meta.k.toString()] !== false;
-                const rerankKey = parseFloat(meta.rerank_factor).toFixed(1);
+                const rerankKey = String(parseFloat(Number(meta.rerank_factor).toFixed(4)));
                 const rerankVisible = activeFilters.rerank[rerankKey] !== false;
 
                 const isVisible = optVisible && pruneVisible && kVisible && rerankVisible;
@@ -449,7 +457,7 @@ def export_interactive_html(
         }}
 
         function toggleFilter(category, val) {{
-            const key = (category === 'rerank') ? parseFloat(val).toFixed(1) : val.toString();
+            const key = (category === 'rerank') ? String(parseFloat(Number(val).toFixed(4))) : val.toString();
             activeFilters[category][key] = !activeFilters[category][key];
             const elemId = category + '-' + key;
             const elem = document.getElementById(elemId);
@@ -519,8 +527,20 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
     re_dataset = re.compile(r"Selected VIBE Dataset:\s*([^\r\n]+)", re.IGNORECASE)
     re_space = re.compile(r"Vector Space Type:\s*FloatSpace\s*\(([^)]+)\)", re.IGNORECASE)
     re_dtypes = re.compile(r"Query Dtype:\s*([a-zA-Z0-9_-]+)", re.IGNORECASE)
-    re_header = re.compile(
+    re_header_old = re.compile(
         r"---\s*\[\d+/\d+\]\s*Fitting\s*/\s*Loading Index:\s*K=(\d+)(?:,\s*ExtendK=\d+)?(?:,\s*(?:ExtendEps|Eps)=([\d.]+))?(?:,\s*Opt=([a-zA-Z0-9_-]+))?(?:,\s*Threads=\d+)?(?:,\s*(?:Dtype|QueryType)=([a-zA-Z0-9_-]+))?",
+        re.IGNORECASE,
+    )
+    re_index_config = re.compile(
+        r"Index Config:\s*K=(\d+),\s*Opt=([a-zA-Z0-9_-]+),\s*Prune=(True|False),\s*QueryType=([a-zA-Z0-9_-]+)",
+        re.IGNORECASE,
+    )
+    re_build_graph = re.compile(
+        r"Building DEG graph\s*\(K=(\d+),\s*Opt=([a-zA-Z0-9_-]+)",
+        re.IGNORECASE,
+    )
+    re_cached_graph = re.compile(
+        r"Loading cached DEG graph from .*[\\/](\d+)D_[^_]+_K(\d+)_.*?(LowLID|StreamingData|Quality|HighLID)",
         re.IGNORECASE,
     )
     re_prune = re.compile(r"Pruning non-RNG edges", re.IGNORECASE)
@@ -528,9 +548,9 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
         r"Evaluating top-(\d+)\s*search(?:\s*\((?:rerank_factor=([\d.]+))?(?:,\s*fetch_k=\d+)?(?:,\s*[^)]*)?\))?",
         re.IGNORECASE,
     )
-    re_eval_old = re.compile(r"Evaluating top-(\d+)\s*search for eps:", re.IGNORECASE)
+    re_eval_old = re.compile(r"Evaluating top-(\d+)\s*search for (?:eps|ef|eps_or_ef):", re.IGNORECASE)
     re_line = re.compile(
-        r"(?:eps\s+([\d.]+)|ef\s+(\d+))\s+recall@\d+:\s+([\d.]+)\s+[\d.]+\s+us/query\s+([\d.]+)\s+QPS",
+        r"(?:eps\s+([\d.]+)|ef\s+(\d+)|(?:eps_or_ef|param)\s+([\d.]+))\s+recall@\d+:\s+([\d.]+)\s+[\d.]+\s+us/query\s+([\d.]+)\s+QPS",
         re.IGNORECASE,
     )
 
@@ -541,7 +561,7 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
                 {
                     "opt_target": current_config["opt_target"],
                     "k": current_config["k"],
-                    "query_dtype": file_query_dtype,
+                    "query_dtype": current_config.get("query_dtype", file_query_dtype),
                     "prune_non_rng": current_config["is_pruned"],
                     "rerank_factor": current_rerank_factor,
                     "recalls": list(current_recalls),
@@ -572,7 +592,23 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
                 file_query_dtype = m.group(1).strip().lower()
                 continue
 
-            m = re_header.search(line_str)
+            m = re_index_config.search(line_str)
+            if m:
+                save_current_series()
+                k = int(m.group(1))
+                opt_target = m.group(2).strip()
+                is_pruned = (m.group(3).lower() == "true")
+                q_dtype = m.group(4).strip().lower()
+                current_config = {
+                    "k": k,
+                    "opt_target": opt_target,
+                    "is_pruned": is_pruned,
+                    "query_dtype": q_dtype,
+                }
+                current_rerank_factor = 1.0
+                continue
+
+            m = re_header_old.search(line_str)
             if m:
                 save_current_series()
                 k = int(m.group(1))
@@ -585,6 +621,31 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
                     "build_eps": build_eps,
                     "opt_target": opt_target,
                     "is_pruned": False,
+                    "query_dtype": file_query_dtype,
+                }
+                current_rerank_factor = 1.0
+                continue
+
+            m = re_build_graph.search(line_str)
+            if m and (current_config is None or current_config.get("k") != int(m.group(1))):
+                save_current_series()
+                current_config = {
+                    "k": int(m.group(1)),
+                    "opt_target": m.group(2).strip(),
+                    "is_pruned": False,
+                    "query_dtype": file_query_dtype,
+                }
+                current_rerank_factor = 1.0
+                continue
+
+            m = re_cached_graph.search(line_str)
+            if m and (current_config is None or current_config.get("k") != int(m.group(2))):
+                save_current_series()
+                current_config = {
+                    "k": int(m.group(2)),
+                    "opt_target": m.group(3).strip(),
+                    "is_pruned": False,
+                    "query_dtype": file_query_dtype,
                 }
                 current_rerank_factor = 1.0
                 continue
@@ -611,12 +672,13 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
             if m and current_config is not None:
                 if m.group(1) is not None:
                     param_val = f"eps={float(m.group(1)):g}"
-                else:
+                elif m.group(2) is not None:
                     param_val = f"ef={int(m.group(2))}"
-                recall = float(m.group(3))
-                qps = float(m.group(4))
-                current_recalls.append(recall)
-                current_qps.append(qps)
+                else:
+                    val = float(m.group(3))
+                    param_val = f"ef={int(round(val))}" if val > 1.0 else f"eps={val:g}"
+                recall = float(m.group(4))
+                qps = float(m.group(5))
                 current_params.append(param_val)
 
     save_current_series()

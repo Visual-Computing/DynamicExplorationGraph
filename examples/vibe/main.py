@@ -193,6 +193,11 @@ def main():
         choices=["float32", "int8"],
         help="Override feature storage and search vector dtype ('float32', 'int8'). Defaults to config.yml.",
     )
+    parser.add_argument(
+        "--no-stop",
+        action="store_true",
+        help="Do not abort benchmark iterations when query time exceeds the linear baseline.",
+    )
     args = parser.parse_args()
 
     cache_dir = args.cache_dir or get_default_cache_dir()
@@ -288,6 +293,7 @@ def main():
                 query_dtype = "float32"
 
             print(f"\n--- [{cfg_idx + 1}/{len(configs_to_run)}] Processing Algorithm '{alg_name}' ({constructor_name}) ---")
+            print(f"Index Config: K={k}, Opt={opt_target}, Prune={is_pruned}, QueryType={query_dtype}")
             adapter.fit(base_vecs, cache_dir=cache_dir)
 
             if adapter.graph is not None:
@@ -295,28 +301,26 @@ def main():
 
             # Determine query evaluation parameter grid
             factors_to_eval = cfg.get("rerank_size_factors", [1.0])
-            eps_list = sorted(cfg.get("search_eps_list", []))
-            ef_list = sorted(cfg.get("ef_list", []))
+            eps_or_ef_list = cfg.get("eps_or_ef_list", [])
 
             prune_label = ", MRNG" if is_pruned else ""
 
             for r_factor in factors_to_eval:
                 rerank_label = f", Rerank={r_factor:.2f}x" if r_factor > 1.0 else ""
-                eval_params = [(eps, 0) for eps in eps_list] if eps_list else [(0.0, ef) for ef in ef_list]
-                param_str = f"eps: {', '.join(f'{e:.3f}' for e in eps_list)}" if eps_list else f"ef: {', '.join(str(ef) for ef in ef_list)}"
+                param_str = ", ".join(f"{v:g}" if v <= 1.0 else str(int(round(v))) for v in eps_or_ef_list)
 
-                print(f"\nEvaluating top-{actual_k} search (rerank_factor={r_factor:.2f}) for {param_str}")
+                print(f"\nEvaluating top-{actual_k} search (rerank_factor={r_factor:.2f}) for eps_or_ef: {param_str}")
 
                 anns_recalls = []
                 anns_qps = []
                 anns_params = []
                 n_queries = len(query_vecs)
 
-                for (eps, ef) in eval_params:
-                    if ef > 0:
-                        adapter.set_query_arguments(rerank_size_factor=r_factor, ef=ef)
+                for val in eps_or_ef_list:
+                    if constructor_name == "QG":
+                        adapter.set_query_arguments(eps_or_ef=val, rerank_size_factor=r_factor)
                     else:
-                        adapter.set_query_arguments(rerank_size_factor=r_factor, search_eps=eps)
+                        adapter.set_query_arguments(eps_or_ef=val)
 
                     results_indices = []
                     start_time = time.perf_counter()
@@ -347,14 +351,16 @@ def main():
                     recall = hits / max(total_returned, 1)
                     anns_recalls.append(recall)
                     anns_qps.append(qps)
-                    anns_params.append(f"ef={ef}" if ef > 0 else f"eps={eps:g}")
+                    is_ef = val > 1.0
+                    param_tag = f"ef={int(round(val))}" if is_ef else f"eps={val:g}"
+                    anns_params.append(param_tag)
 
-                    lbl = f"ef {ef:4d}" if ef > 0 else f"eps {eps:6.3f}"
+                    lbl = f"ef  {int(round(val)):4d}" if is_ef else f"eps {val:6.3f}"
                     print(
                         f"  {lbl} \trecall@{actual_k}: {recall:.5f} \t{time_us_per_query:6d} us/query \t{qps:9.1f} QPS \tsearch time: {int(search_time_us / 1000):6d}ms"
                     )
 
-                    if linear_baseline_us > 0 and time_us_per_query > linear_baseline_us:
+                    if not args.no_stop and linear_baseline_us > 0 and time_us_per_query > linear_baseline_us:
                         print(
                             f"  ABORTED ({time_us_per_query}us/query > {int(linear_baseline_us)}us baseline)"
                         )
