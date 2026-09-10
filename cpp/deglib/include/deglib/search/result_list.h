@@ -57,7 +57,6 @@ class ObjectDistance {
     }
 };
 
-
 /**
  * Internal candidate buffer and beam-search frontier used during graph traversal.
  */
@@ -81,22 +80,6 @@ class ResultList {
     ResultList& operator=(const ResultList&) = delete;
     ResultList& operator=(ResultList&& rhs) noexcept = default;
 
-    /**
-     * Resets the list for reuse with new exploration parameters without reallocating unless capacity grows.
-     *
-     * @param ef  New exploration budget.
-     * @param cap New maximum capacity.
-     */
-    void reset(int32_t ef, int32_t cap) {
-        size_ = 0;
-        cur_ = 0;
-        ef_ = ef;
-        capacity_ = cap;
-        if (static_cast<int32_t>(data_.size()) < cap + 1) {
-            data_.resize(cap + 1);
-        }
-    }
-
     // --- Search Traversal API ---
 
     /**
@@ -109,12 +92,13 @@ class ResultList {
      * @return     True if candidate was inserted into the retained capacity, false if rejected.
      */
     inline bool insert(uint32_t u, float dist) noexcept {
-        if (size_ == capacity_ && dist >= data_[size_ - 1].getDistance()) {
+        const ObjectDistance cand(u, dist);
+        if (size_ == capacity_ && !(cand < data_[size_ - 1])) {
             return false;
         }
-        int32_t lo = find_bsearch(dist);
+        int32_t lo = find_bsearch(cand);
         std::memmove(&data_[lo + 1], &data_[lo], (size_ - lo) * sizeof(ObjectDistance));
-        data_[lo] = ObjectDistance(u, dist);
+        data_[lo] = cand;
         if (size_ < capacity_) {
             size_++;
         }
@@ -194,6 +178,24 @@ class ResultList {
     /// Explicit const iterator to the end of the valid results.
     [[nodiscard]] auto cend() const noexcept { return data_.cbegin() + size_; }
 
+    /// Const reverse iterator to the reverse beginning of the valid results.
+    [[nodiscard]] auto rbegin() const noexcept { return std::make_reverse_iterator(end()); }
+
+    /// Const reverse iterator to the reverse end of the valid results.
+    [[nodiscard]] auto rend() const noexcept { return std::make_reverse_iterator(begin()); }
+
+    /// Mutable reverse iterator to the reverse beginning of the valid results.
+    [[nodiscard]] auto rbegin() noexcept { return std::make_reverse_iterator(end()); }
+
+    /// Mutable reverse iterator to the reverse end of the valid results.
+    [[nodiscard]] auto rend() noexcept { return std::make_reverse_iterator(begin()); }
+
+    /// Explicit const reverse iterator to the reverse beginning of the valid results.
+    [[nodiscard]] auto crbegin() const noexcept { return std::make_reverse_iterator(cend()); }
+
+    /// Explicit const reverse iterator to the reverse end of the valid results.
+    [[nodiscard]] auto crend() const noexcept { return std::make_reverse_iterator(cbegin()); }
+
     /// Returns a C++20 std::span viewing all valid ObjectDistance results.
     [[nodiscard]] inline std::span<const ObjectDistance> span() const noexcept { return {data_.data(), static_cast<size_t>(size_)}; }
 
@@ -217,11 +219,11 @@ class ResultList {
     /**
      * Binary search to locate the insertion index for a given distance to maintain ascending order.
      */
-    [[nodiscard]] inline int32_t find_bsearch(float dist) const noexcept {
+    [[nodiscard]] inline int32_t find_bsearch(const ObjectDistance& cand) const noexcept {
         int32_t lo = 0, hi = size_;
         while (lo < hi) {
             int32_t mid = (lo + hi) / 2;
-            if (data_[mid].getDistance() > dist) {
+            if (data_[mid] > cand) {
                 hi = mid;
             } else {
                 lo = mid + 1;
