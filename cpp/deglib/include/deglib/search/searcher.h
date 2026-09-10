@@ -778,4 +778,24 @@ class SearcherImpl : public SearcherBase {
     }
 };
 
+// ============================================================================
+// Factory Functions
+// ============================================================================
+
+inline std::unique_ptr<SearcherBase> make_searcher(const deglib::graph::InternalGraph& graph) {
+    return std::make_unique<SearcherImpl<NoQuantizer, NoRefiner>>(graph, NoQuantizer{}, NoRefiner{});
+}
+
+template <typename QuantT>
+    requires deglib::quantization::Quantizer<QuantT>
+inline std::unique_ptr<SearcherBase> make_searcher(const deglib::graph::InternalGraph& graph, QuantT quantizer) {
+    return std::make_unique<SearcherImpl<QuantT, NoRefiner>>(graph, std::move(quantizer), NoRefiner{});
+}
+
+template <typename QuantT, typename RefinerT>
+    requires(deglib::quantization::Quantizer<QuantT> || std::is_same_v<QuantT, NoQuantizer>)
+inline std::unique_ptr<SearcherBase> make_searcher(const deglib::graph::InternalGraph& graph, QuantT quantizer, RefinerT refiner) {
+    return std::make_unique<SearcherImpl<QuantT, RefinerT>>(graph, std::move(quantizer), std::move(refiner));
+}
+
 }  // namespace deglib::search
