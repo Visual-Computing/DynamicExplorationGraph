@@ -1,5 +1,42 @@
 # Release Notes
 
+## deglib v0.2.6
+
+### Overview
+deglib v0.2.6 adds a second search strategy alongside the existing relative-epsilon search: **`ef` fixed-pool search**, now selectable through a single `eps_or_ef` query parameter. The new `ef` mode supports candidate filtering and a distance-computation budget. `Searcher::optimize()` gained K-Means entry-point selection and prefetch auto-tuning, and a set of graph-layout and SIMD improvements makes both build and search faster.
+
+---
+
+### 🚀 Key Features & Improvements
+
+#### `ef` Fixed-Pool Search (new)
+* **Second exploration strategy:** In addition to the existing relative-epsilon (`eps`) search, queries can now run a fixed candidate-pool (`ef`) best-first search.
+* **Single `eps_or_ef` parameter:** One argument selects the mode — values $\ge 1.0$ are treated as a fixed pool size (`ef`), values $< 1.0$ run the relative-epsilon search. Applies to the C++ `Searcher` and the Python bindings.
+* **Candidate filtering:** `ef` search accepts a filter predicate; filtered candidates guide exploration but never occupy the result set, so the search radius is not prematurely collapsed.
+* **Distance-computation budget:** `ef` search can cap the number of distance evaluations per query (`max_distance_computation_count`) for predictable worst-case latency.
+
+#### Searcher Tuning (`Searcher::optimize()`)
+* **K-Means entry points:** Clusters graph features to pick better search entry points, improving recall at a given effort.
+* **Prefetch auto-tuning:** Automatically tunes memory-prefetch parameters for the target machine.
+
+#### Performance
+* **Faster distance kernels:** Vectorized SIMD tail handling across the FP32/FP16/Int8/UInt8 distance headers, plus feature and neighbor prefetching during graph traversal.
+* **Cache-friendly graph layout:** `ReadOnlyGraph` now stores features in a contiguous, aligned layout.
+
+---
+
+### ⚠️ Breaking Changes & Migration Guide
+
+* **`Searcher` search parameter:** `search()` / `search_batch()` (C++ and Python) now take `eps_or_ef` in place of `eps`. Existing relative-epsilon callers keep the same behavior by passing a value $< 1.0$.
+* **Graph creation & loading API:** `create_empty`, `create_dynamic_empty`, and `create_random_graph` moved to the `deglib` namespace, and `create_builder` / `load_readonly_graph` / `load_dynamic_graph` / `load_mutable_graph` are exposed from `deglib.h`. Update call sites to the new locations.
+* **EVP quantization:** `EvpQuantizer` is now a stateful object shared by database and queries; the `quantize_evp_*` free functions were removed. Use the quantizer instance directly.
+
+---
+
+### 🛠️ Bug Fixes
+
+* **Dynamic graph deletions:** Removing vertices from `SizeBoundedGraph` now keeps internal indices contiguous (swap-with-last compaction), fixing sliding-window graph extensions and `ReadOnlyGraph` serialization after deletions.
+
 ## deglib v0.2.5
 
 ### Overview

@@ -39,23 +39,40 @@ def get_version(rel_path):
         raise RuntimeError("Unable to find version string.")
 
 
+def copy_cpp_sources(src: str = os.path.join("..", "cpp"), dst: str = "lib") -> None:
+    """Copies the sibling ../cpp C++ sources into lib/ so standalone/containerized builds find them."""
+    ignore_dirs = shutil.ignore_patterns("external", "cmake-build*", "build", "benchmark", ".venv", ".git*")
+    if os.path.exists(src):
+        if os.path.exists(dst):
+            shutil.rmtree(dst, ignore_errors=True)
+        print(f"[setup.py] Copying {src} -> {dst}")
+        shutil.copytree(src, dst, dirs_exist_ok=True, ignore=ignore_dirs)
+        print("[setup.py] Files copied successfully.")
+    elif not os.path.exists(dst) or not any(Path(dst).iterdir()):
+        raise FileNotFoundError(f"Source directory '{src}' does not exist and '{dst}' is not populated.")
+
+
+class CopyBuildFiles(Command):
+    """Populates lib/ from ../cpp before cibuildwheel ships only python/ into build containers."""
+
+    description = "Copy the C++ sources from ../cpp into lib/"
+    user_options = []
+
+    def initialize_options(self):
+        pass
+
+    def finalize_options(self):
+        pass
+
+    def run(self):
+        copy_cpp_sources()
+
+
 class CopySDist(sdist_class):
     """Packages the C++ sources into lib/ when creating a standalone source distribution (PyPI sdist)."""
 
     def run(self):
-        ignore_dirs = shutil.ignore_patterns("external", "cmake-build*", "build", "benchmark", ".venv", ".git*")
-        src = os.path.join("..", "cpp")
-        dst = "lib"
-
-        if os.path.exists(src):
-            if os.path.exists(dst):
-                shutil.rmtree(dst, ignore_errors=True)
-            print(f"[setup.py] Packaging: Copying {src} -> {dst}")
-            shutil.copytree(src, dst, dirs_exist_ok=True, ignore=ignore_dirs)
-            print("[setup.py] Files copied successfully.")
-        elif not os.path.exists(dst) or not any(Path(dst).iterdir()):
-            raise FileNotFoundError(f"Source directory '{src}' does not exist and '{dst}' is not populated.")
-
+        copy_cpp_sources()
         super().run()
 
 
@@ -195,6 +212,7 @@ setup(
     version=get_version(os.path.join("src", "deglib", "__init__.py")),
     ext_modules=[CMakeExtension("deglib_cpp")],
     cmdclass={
+        "copy_build_files": CopyBuildFiles,
         "sdist": CopySDist,
         "build_ext": CMakeBuild,
     },
