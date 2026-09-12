@@ -233,3 +233,42 @@ TEST(SearcherTest, FlatBatchAndIntoSearch) {
     }
 }
 
+TEST(SearcherTest, SearchEfSingleAndBatch) {
+    const uint32_t dim = 4;
+    const uint32_t count = 30;
+
+    std::vector<float> data(count * dim);
+    for (size_t i = 0; i < data.size(); ++i) {
+        data[i] = static_cast<float>(i * 0.5f + 0.1f);
+    }
+
+    auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
+    auto searcher = deglib::search::make_searcher(graph.internal());
+
+    const uint32_t k = 4;
+    const float ef = 32.0f;
+
+    // 1. Single search with eps_or_ef >= 1.0 (ef mode)
+    auto q0 = std::span<const float>(data.data(), dim);
+    auto single_res = searcher->search(q0, k, /*eps_or_ef=*/ef, /*rerank_factor=*/1.0f, /*return_distances=*/true);
+    EXPECT_GE(single_res.size(), 1u);
+    EXPECT_EQ(single_res.indices[0], 0u);
+    EXPECT_NEAR(single_res.distances[0], 0.0f, 1e-5f);
+
+    // 2. Batch search with eps_or_ef >= 1.0 (ef mode) with flat result and 2 worker threads
+    const size_t n_queries = 5;
+    auto batch_res = searcher->search_batch(
+        std::span<const float>(data.data(), n_queries * dim),
+        n_queries, k, /*eps_or_ef=*/ef, /*rerank_factor=*/1.0f, /*threads=*/2, /*return_distances=*/true
+    );
+    EXPECT_EQ(batch_res.size(), n_queries);
+    EXPECT_EQ(batch_res.k, k);
+    for (size_t q = 0; q < n_queries; ++q) {
+        auto q_indices = batch_res.get_indices(q);
+        auto q_dists = batch_res.get_distances(q);
+        EXPECT_EQ(q_indices[0], static_cast<uint32_t>(q));
+        EXPECT_NEAR(q_dists[0], 0.0f, 1e-5f);
+    }
+}
+
+

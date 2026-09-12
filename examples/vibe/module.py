@@ -100,8 +100,7 @@ class DEG(BaseANN):
         self.opt_target = opt_target
         self.prune_non_rng = bool(prune_non_rng)
         self.threads = int(threads)
-        self.search_eps = 0.1
-        self.ef = 0
+        self.eps_or_ef = 0.1
         self.metric_enum = _METRIC_MAP[self.metric][0]
         self.opt_enum = deglib.builder.OptimizationTarget[self.opt_target]
         self.graph = None
@@ -166,14 +165,8 @@ class DEG(BaseANN):
         print(f"Optimized Searcher for the provided graph and hardware in {time.time() - t_km:.2f}s", flush=True)
 
     def set_query_arguments(self, eps_or_ef: float | int):
-        """Sets query-time parameter: values > 1.0 are treated as ef, <= 1.0 as eps."""
-        val = float(eps_or_ef)
-        if val > 1.0:
-            self.ef = int(round(val))
-            self.search_eps = 0.0
-        else:
-            self.search_eps = val
-            self.ef = 0
+        """Sets query-time parameter: values >= 1.0 are treated as ef, < 1.0 as eps."""
+        self.eps_or_ef = float(eps_or_ef)
 
     def query(self, v: np.ndarray, n: int) -> np.ndarray:
         """Single query search on 1 thread with Float32 via C++ searcher."""
@@ -182,17 +175,16 @@ class DEG(BaseANN):
         return self.searcher.search(
             np.ascontiguousarray(v, dtype=np.float32),
             k=n,
-            ef=self.ef,
-            eps=self.search_eps,
+            eps_or_ef=self.eps_or_ef,
             threads=1,
             return_distances=False,
             unsorted=True,
         )
 
     def __str__(self) -> str:
-        if self.ef > 0:
-            return f"DEG(k={self.k}, opt={self.opt_target}, prune_rng={self.prune_non_rng}, ef={self.ef})"
-        return f"DEG(k={self.k}, opt={self.opt_target}, prune_rng={self.prune_non_rng}, eps={self.search_eps})"
+        if self.eps_or_ef >= 1.0:
+            return f"DEG(k={self.k}, opt={self.opt_target}, prune_rng={self.prune_non_rng}, ef={int(round(self.eps_or_ef))})"
+        return f"DEG(k={self.k}, opt={self.opt_target}, prune_rng={self.prune_non_rng}, eps={self.eps_or_ef})"
 
 
 class QG(BaseANN):
@@ -303,15 +295,9 @@ class QG(BaseANN):
         print(f"Optimized Searcher for the provided graph and hardware in {time.time() - t_km:.2f}s", flush=True)
 
     def set_query_arguments(self, eps_or_ef: float | int, rerank_size_factor: float = 1.0):
-        """Sets query-time parameters: values > 1.0 are treated as ef, <= 1.0 as eps."""
+        """Sets query-time parameters: values >= 1.0 are treated as ef, < 1.0 as eps."""
         self.rerank_size_factor = float(rerank_size_factor)
-        val = float(eps_or_ef)
-        if val > 1.0:
-            self.ef = int(round(val))
-            self.search_eps = 0.0
-        else:
-            self.search_eps = val
-            self.ef = 0
+        self.eps_or_ef = float(eps_or_ef)
 
     def query(self, v: np.ndarray, n: int) -> np.ndarray:
         """Single query search on 1 thread with INT8 search and FP16 reranking directly in C++."""
@@ -320,8 +306,7 @@ class QG(BaseANN):
         return self.searcher.search(
             np.ascontiguousarray(v, dtype=np.float32),
             k=n,
-            ef=self.ef,
-            eps=self.search_eps,
+            eps_or_ef=self.eps_or_ef,
             rerank_factor=self.rerank_size_factor,
             threads=1,
             return_distances=False,
@@ -329,13 +314,13 @@ class QG(BaseANN):
         )
 
     def __str__(self) -> str:
-        if getattr(self, "ef", 0) > 0:
+        if self.eps_or_ef >= 1.0:
             return (
                 f"DEG-QG(k={self.k}, opt={self.opt_target}, prune_rng={self.prune_non_rng}, "
-                f"rerank_factor={self.rerank_size_factor}, ef={self.ef})"
+                f"rerank_factor={self.rerank_size_factor}, ef={int(round(self.eps_or_ef))})"
             )
         return (
             f"DEG-QG(k={self.k}, opt={self.opt_target}, prune_rng={self.prune_non_rng}, "
-            f"rerank_factor={self.rerank_size_factor}, eps={self.search_eps})"
+            f"rerank_factor={self.rerank_size_factor}, eps={self.eps_or_ef})"
         )
 

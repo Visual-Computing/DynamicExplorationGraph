@@ -250,10 +250,21 @@ Controls the topology optimization strategy:
 - `OptimizationTarget.HighLID`: Optimized for datasets with high local intrinsic dimensionality (supports multithreaded building).
 - `OptimizationTarget.StreamingData`: Optimized for continuous dynamic additions and deletions.
 
-### Search Parameter `eps`
-- The epsilon parameter expands the search priority queue during graph exploration.
-- Small values (e.g. `eps=0.001` or `eps=0.01`): Faster query execution.
-- Higher values (e.g. `eps=0.1` to `eps=0.3`): Higher recall rate.
+### Unified Search Parameter: `eps_or_ef`
+`Searcher` provides a unified exploration parameter `eps_or_ef`:
+- **Relative Distance Margin (`eps_or_ef < 1.0`)**: Standard DEG dynamic distance exploration bound $(1 + \epsilon) \cdot d_{\text{cur}}$.
+  - Small values (e.g. `eps_or_ef=0.001` or `0.01`): Faster query execution.
+  - Higher values (e.g. `eps_or_ef=0.1` to `0.3`): Higher recall rate.
+- **Fixed Candidate Pool (`eps_or_ef >= 1.0`)**: HNSW-style search with a fixed candidate pool size of `round(eps_or_ef)` during exploration.
+  - Typical values: `64`, `96`, `128`, `200`, `400`.
+
+```python
+# Mode 1: Relative distance margin (default: eps_or_ef=0.1)
+indices, distances = searcher.search(query, k=10, eps_or_ef=0.1)
+
+# Mode 2: Fixed candidate pool (HNSW-style)
+indices, distances = searcher.search(query, k=10, eps_or_ef=128)
+```
 
 ### Supported Metrics & Data Types
 - `Metric.FP32_L2`: Euclidean distance (`np.float32`)

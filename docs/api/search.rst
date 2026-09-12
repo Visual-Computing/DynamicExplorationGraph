@@ -67,13 +67,16 @@ High-Performance Searcher with Reranking
        refine_data=data,
    )
 
-   # Single query
-   indices, distances = searcher.search(query, k=10, eps=0.1, rerank_factor=1.5, return_distances=True)
+   # Single query using relative margin (eps_or_ef < 1.0)
+   indices, distances = searcher.search(query, k=10, eps_or_ef=0.1, rerank_factor=1.5, return_distances=True)
 
-   # Batch query
+   # Single query using fixed pool exploration (eps_or_ef >= 1.0, HNSW-style)
+   indices_ef, distances_ef = searcher.search(query, k=10, eps_or_ef=128, rerank_factor=1.5, return_distances=True)
+
+   # Multithreaded batch query (supports eps_or_ef < 1.0 or >= 1.0)
    batch_queries = np.random.randn(100, dim).astype(np.float32)
    batch_indices, batch_distances = searcher.search(
-       batch_queries, k=10, eps=0.1, rerank_factor=1.5, threads=8, return_distances=True
+       batch_queries, k=10, eps_or_ef=128, rerank_factor=1.5, threads=8, return_distances=True
    )
 
 Filtered Search

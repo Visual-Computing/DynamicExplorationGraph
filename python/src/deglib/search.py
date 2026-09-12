@@ -145,12 +145,11 @@ class Searcher:
         self,
         query: np.ndarray,
         k: int,
-        eps: float = 0.1,
+        eps_or_ef: float = 0.1,
         rerank_factor: float = 1.0,
         threads: int = 1,
         return_distances: bool = False,
         unsorted: bool = False,
-        ef: int = 0,
     ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         """
         Search for nearest neighbors of a single query vector (1D or 2D with 1 vector) or a batch of query vectors (2D).
@@ -164,8 +163,11 @@ class Searcher:
 
         :param query: Query array (1D vector or 2D batch).
         :param k: Number of top nearest neighbors to return per query.
-        :param eps: Search expansion factor (controls speed vs. recall trade-off, default: 0.1).
+        :param eps_or_ef: Exploration parameter (controls speed vs. recall trade-off, default: 0.1).
+            Values >= 1.0 are treated as fixed candidate pool size (``ef``, HNSW-style search).
+            Values < 1.0 are treated as relative exploration distance margin (``eps``).
         :param rerank_factor: Candidate expansion factor for exact reranking (default: 1.0).
+            The initial graph search retrieves ``ceil(k * rerank_factor)`` candidates.
         :param threads: Number of worker threads for batch search (default: 1).
         :param return_distances: If True, returns a tuple ``(indices, distances)``.
         :param unsorted: If True, returns candidates in heap order instead of ascending distance order.
@@ -174,12 +176,12 @@ class Searcher:
         if query.ndim == 1 or (query.ndim == 2 and (query.shape[0] == 1 or query.shape[1] == 1)):
             flat_query = np.ascontiguousarray(query.ravel())
             return self.searcher_cpp.search(
-                flat_query, int(k), float(eps), float(rerank_factor), return_distances, unsorted, int(ef),
+                flat_query, int(k), float(eps_or_ef), float(rerank_factor), return_distances, unsorted,
             )
         elif query.ndim == 2:
             contiguous_queries = np.ascontiguousarray(query)
             return self.searcher_cpp.search_batch(
-                contiguous_queries, int(k), float(eps), float(rerank_factor), int(threads), return_distances, unsorted, int(ef),
+                contiguous_queries, int(k), float(eps_or_ef), float(rerank_factor), int(threads), return_distances, unsorted,
             )
         else:
             raise ValueError(f"query must be 1D or 2D NumPy array, got ndim={query.ndim} with shape {query.shape}")

@@ -111,6 +111,24 @@ auto dynamic_graph = deglib::load_dynamic_graph("index.deg", /*chunk_size=*/1024
 auto mutable_graph = deglib::load_mutable_graph("index.deg", /*new_max_size=*/10000);
 ```
 
+### High-Performance Searcher (`eps_or_ef`)
+
+`deglib::search::Searcher` provides a high-throughput query execution pipeline supporting entry vertex optimization, optional on-the-fly query quantization, exact candidate reranking, and multithreaded batch search with unified exploration parameter `eps_or_ef`:
+
+```cpp
+#include <deglib/search/searcher.h>
+
+// 1. Create searcher on top of a graph (optionally with quantizer & refiner)
+auto searcher = deglib::search::make_searcher(readonly_graph);
+searcher->optimize(/*n_clusters=*/128); // entry vertex medoids via k-means
+
+// 2. Query with relative distance margin (eps_or_ef < 1.0)
+auto eps_results = searcher->search(std::span<const float>(query), /*k=*/10, /*eps_or_ef=*/0.1f);
+
+// 3. Query with fixed candidate pool size (eps_or_ef >= 1.0, HNSW-style)
+auto ef_results = searcher->search(std::span<const float>(query), /*k=*/10, /*eps_or_ef=*/128.0f);
+```
+
 ---
 
 ## Prerequisites

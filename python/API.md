@@ -275,6 +275,27 @@ class Filter:
 # unsorted: If True, skips sorting the resulting candidates
 # Returns 2D uint32 array [Q, k_top] of candidate IDs, or (indices, distances) if return_distances is True.
 rerank(space, queries, candidate_indices, base_vectors=None, k_top=0, num_threads=0, return_distances=False, unsorted=False)
+
+
+# High-performance searcher with optional on-the-fly quantization and exact reranking.
+class Searcher:
+    # Constructor via create_searcher(graph, quantizer=None, refine_space=None, refine_data=None)
+
+    # Entry vertex optimization via k-means medoids
+    optimize(n_clusters=128, n_iter=15, sample_size=0, seed=42, num_threads=0)
+
+    # Search for nearest neighbors of a single query (1D) or a batch of queries (2D).
+    # query: 1D vector [D] or 2D batch [N, D]
+    # k: Number of nearest neighbors to return
+    # eps_or_ef: Exploration parameter. Values >= 1.0 are treated as fixed pool size (ef),
+    #            values < 1.0 are treated as relative distance margin (eps). Default: 0.1.
+    # rerank_factor: Candidate expansion factor for exact reranking (retrieves ceil(k * rerank_factor) candidates)
+    # threads: Number of worker threads for batch queries
+    # return_distances: If True, returns (indices, distances) tuple
+    # unsorted: If True, returns candidates in heap order instead of ascending distance order
+    search(query, k, eps_or_ef=0.1, rerank_factor=1.0, threads=1, return_distances=False, unsorted=False) -> np.ndarray | tuple[np.ndarray, np.ndarray]
+
+create_searcher(graph, quantizer=None, refine_space=None, refine_data=None) -> Searcher
 ```
 
 ---
