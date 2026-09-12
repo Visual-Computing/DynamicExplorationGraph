@@ -15,7 +15,7 @@ float:
           opt_target: ['LowLID']
           prune_non_rng: [false]
         query_args:
-          eps_or_ef: [64, 96, 128, 160, 200, 250, 320, 400, 0.0, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.1, 0.12, 0.15, 0.2, 0.25, 0.3]
+          eps_or_ef: [0.0, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.1, 0.12, 0.15, 0.2, 0.25, 0.3]
   - name: deg-qg
     module: vibe.algorithms.deg
     constructor: QG
@@ -32,4 +32,4 @@ float:
           prune_non_rng: [false]
         query_args:
           rerank_size_factor: [1.0, 1.15, 1.35]
-          eps_or_ef: [64, 96, 128, 160, 200, 250, 320, 400]
+          eps_or_ef: [0.0, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.1, 0.12, 0.15, 0.2, 0.25, 0.3]
