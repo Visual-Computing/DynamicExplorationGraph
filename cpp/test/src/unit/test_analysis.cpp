@@ -70,6 +70,17 @@ class MockInternalGraph : public deglib::graph::InternalGraph {
     ) const override {
         return deglib::graph::ResultSet();
     }
+    std::vector<deglib::graph::ObjectDistance> search_ef_intern(
+        const std::vector<uint32_t>&,
+        const std::byte*,
+        const uint32_t,
+        const uint32_t,
+        const bool = true,
+        const deglib::search::Filter* = nullptr,
+        const uint32_t = 0
+    ) const override {
+        return {};
+    }
 
     // helpers for test setup
     void setLabel(uint32_t idx, uint32_t label) { labels_[idx] = label; }

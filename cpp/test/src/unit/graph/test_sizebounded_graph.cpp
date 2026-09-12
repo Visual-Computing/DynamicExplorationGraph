@@ -10,11 +10,16 @@
 #include "deglib/graph/sizebounded_graph.h"
 #include "gtest/gtest.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <numeric>
 #include <random>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -376,6 +381,203 @@ TEST(SizeBoundedGraph, SearchWithFilter) {
     auto results = graph.search(std::span<const float>(query, 4), 3, 0.0f, &filter);
 
     EXPECT_GE(results.size(), 0u);
+}
+
+// ---------------------------------------------------------------------------
+//  6b. Search ef
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/**
+ * Deterministic random graph, keeping the raw features around so that tests can
+ * derive exact nearest-neighbour ground truth by brute force.
+ */
+class EfFixture {
+  public:
+    static constexpr uint32_t vertex_count = 256;
+    static constexpr size_t dim = 8;
+
+    explicit EfFixture(uint8_t edges_per_vertex = 16) {
+        deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+        graph_ = std::make_unique<deglib::graph::SizeBoundedGraph>(vertex_count, edges_per_vertex, std::move(space));
+
+        std::mt19937 value_rng(1234);
+        std::uniform_real_distribution<float> uniform(0.0f, 1.0f);
+        features_.resize(vertex_count);
+        for (auto& feature : features_) {
+            feature.resize(dim);
+            for (auto& value : feature) value = uniform(value_rng);
+        }
+
+        std::mt19937 builder_rng(7);
+        deglib::builder::EvenRegularGraphBuilder builder(*graph_, builder_rng);
+        for (uint32_t label = 0; label < vertex_count; ++label) {
+            builder.addEntry(label, to_bytes(features_[label]));
+        }
+        builder.build([](deglib::builder::BuilderStatus&) {});
+    }
+
+    const deglib::graph::SizeBoundedGraph& graph() const { return *graph_; }
+    const std::vector<float>& feature(const uint32_t label) const { return features_[label]; }
+    uint32_t label_of(const uint32_t internal_index) const { return graph_->getExternalLabel(internal_index); }
+
+    std::vector<uint32_t> labels_of(const std::vector<deglib::graph::ObjectDistance>& results) const {
+        std::vector<uint32_t> labels;
+        labels.reserve(results.size());
+        for (const auto& result : results) labels.push_back(label_of(result.getIdentifier()));
+        return labels;
+    }
+
+    /// Exact k nearest labels of the query, ascending, restricted to the filter when one is given.
+    std::vector<uint32_t> brute_force(const std::vector<float>& query, uint32_t k, const deglib::search::Filter* filter = nullptr) const {
+        std::vector<uint32_t> labels(vertex_count);
+        std::iota(labels.begin(), labels.end(), 0u);
+        if (filter != nullptr) {
+            labels.erase(std::remove_if(labels.begin(), labels.end(), [&](uint32_t l) { return !filter->is_valid(static_cast<int>(l)); }), labels.end());
+        }
+        std::sort(labels.begin(), labels.end(), [&](uint32_t a, uint32_t b) { return squared_l2(query, a) < squared_l2(query, b); });
+        labels.resize(std::min<size_t>(k, labels.size()));
+        return labels;
+    }
+
+    float squared_l2(const std::vector<float>& query, const uint32_t label) const {
+        float sum = 0.0f;
+        for (size_t i = 0; i < dim; ++i) {
+            const float diff = query[i] - features_[label][i];
+            sum += diff * diff;
+        }
+        return sum;
+    }
+
+  private:
+    static std::vector<std::byte> to_bytes(const std::vector<float>& feature) {
+        std::vector<std::byte> bytes(feature.size() * sizeof(float));
+        std::memcpy(bytes.data(), feature.data(), bytes.size());
+        return bytes;
+    }
+
+    std::unique_ptr<deglib::graph::SizeBoundedGraph> graph_;
+    std::vector<std::vector<float>> features_;
+};
+
+}  // namespace
+
+TEST(SizeBoundedGraph, SearchEfReturnsSortedExactTopK) {
+    EfFixture fixture;
+    const auto& query = fixture.feature(3);
+    const auto results = fixture.graph().search_ef(std::span<const float>(query.data(), EfFixture::dim), 10, 128);
+
+    ASSERT_EQ(results.size(), 10u);
+    for (size_t i = 1; i < results.size(); ++i) {
+        EXPECT_LE(results[i - 1].getDistance(), results[i].getDistance());
+    }
+    EXPECT_EQ(fixture.labels_of(results), fixture.brute_force(query, 10));
+}
+
+TEST(SizeBoundedGraph, SearchEfFilterKeepsOnlyValidLabels) {
+    EfFixture fixture;
+    std::vector<int> valid;
+    for (uint32_t label = 0; label < EfFixture::vertex_count; label += 2) valid.push_back(static_cast<int>(label));
+    const deglib::search::Filter filter(valid.data(), valid.size(), EfFixture::vertex_count - 1, EfFixture::vertex_count);
+
+    const auto& query = fixture.feature(3);
+    const auto results = fixture.graph().search_ef(std::span<const float>(query.data(), EfFixture::dim), 10, 128, true, &filter);
+
+    const auto labels = fixture.labels_of(results);
+    ASSERT_EQ(labels.size(), 10u);
+    for (const auto label : labels) EXPECT_EQ(label % 2, 0u);
+    EXPECT_EQ(labels, fixture.brute_force(query, 10, &filter));
+}
+
+TEST(SizeBoundedGraph, SearchEfSparseFilterReachesDistantValidResults) {
+    EfFixture fixture;
+    // Only eight scattered labels pass. Letting invalid candidates occupy the result capacity would
+    // collapse the search radius against them and end the traversal before any valid vertex is seen.
+    std::vector<int> valid = {5, 40, 91, 120, 177, 203, 240, 251};
+    const deglib::search::Filter filter(valid.data(), valid.size(), EfFixture::vertex_count - 1, EfFixture::vertex_count);
+
+    const auto& query = fixture.feature(3);
+    const auto results = fixture.graph().search_ef(std::span<const float>(query.data(), EfFixture::dim), 4, 32, true, &filter);
+
+    EXPECT_EQ(fixture.labels_of(results), fixture.brute_force(query, 4, &filter));
+}
+
+TEST(SizeBoundedGraph, SearchEfIncludeEntryReportsEntryVertices) {
+    EfFixture fixture;
+    const std::vector<uint32_t> entries = {fixture.graph().getInternalIndex(0), fixture.graph().getInternalIndex(1)};
+    const auto& query = fixture.feature(0);
+
+    const auto results = fixture.graph().search_ef(std::span<const float>(query.data(), EfFixture::dim), entries, 10, 64, true);
+
+    ASSERT_FALSE(results.empty());
+    EXPECT_EQ(fixture.label_of(results[0].getIdentifier()), 0u);
+    EXPECT_FLOAT_EQ(results[0].getDistance(), 0.0f);
+}
+
+TEST(SizeBoundedGraph, SearchEfExcludeEntryOmitsEntryVertices) {
+    EfFixture fixture;
+    const std::vector<uint32_t> entries = {fixture.graph().getInternalIndex(0), fixture.graph().getInternalIndex(1)};
+    const auto& query = fixture.feature(0);
+
+    const auto results = fixture.graph().search_ef(std::span<const float>(query.data(), EfFixture::dim), entries, 10, 64, false);
+
+    const auto labels = fixture.labels_of(results);
+    ASSERT_EQ(labels.size(), 10u);
+    for (const auto entry : entries) {
+        EXPECT_EQ(std::find(labels.begin(), labels.end(), fixture.label_of(entry)), labels.end());
+    }
+
+    // The query is the exact feature of entry 0, so an inclusive search would report it first.
+    std::vector<uint32_t> expected;
+    for (const auto label : fixture.brute_force(query, EfFixture::vertex_count)) {
+        if (label == 0 || label == 1) continue;
+        expected.push_back(label);
+        if (expected.size() == 10) break;
+    }
+    EXPECT_EQ(labels, expected);
+}
+
+TEST(SizeBoundedGraph, SearchEfMaxDistanceComputationCountBoundsWork) {
+    EfFixture fixture;
+    const auto& query = fixture.feature(3);
+    const auto span = std::span<const float>(query.data(), EfFixture::dim);
+
+    const auto unlimited = fixture.graph().search_ef(span, 10, 128);
+    ASSERT_EQ(unlimited.size(), 10u);
+
+    // A budget of one is already spent by the entry vertex itself.
+    const auto starved = fixture.graph().search_ef(span, 10, 128, true, nullptr, 1);
+    EXPECT_LE(starved.size(), 1u);
+    EXPECT_LT(starved.size(), unlimited.size());
+
+    // Every reported vertex costs one distance computation, so the budget bounds the result count.
+    EXPECT_LT(fixture.graph().search_ef(span, 10, 128, true, nullptr, 5).size(), unlimited.size());
+
+    // Zero disables the budget, and a budget that cannot be exhausted changes nothing.
+    EXPECT_EQ(fixture.graph().search_ef(span, 10, 128, true, nullptr, 0), unlimited);
+    EXPECT_EQ(fixture.graph().search_ef(span, 10, 128, true, nullptr, EfFixture::vertex_count * 2), unlimited);
+}
+
+TEST(SizeBoundedGraph, SearchEfFilterHonoursDistanceBudget) {
+    EfFixture fixture;
+    std::vector<int> valid;
+    for (uint32_t label = 0; label < EfFixture::vertex_count; label += 2) valid.push_back(static_cast<int>(label));
+    const deglib::search::Filter filter(valid.data(), valid.size(), EfFixture::vertex_count - 1, EfFixture::vertex_count);
+
+    const auto& query = fixture.feature(3);
+    const auto span = std::span<const float>(query.data(), EfFixture::dim);
+    const std::vector<uint32_t> entries = {fixture.graph().getInternalIndex(3)};
+
+    // The single allowed distance computation goes to the entry vertex, which the filter rejects.
+    EXPECT_TRUE(fixture.graph().search_ef(span, entries, 16, 64, true, &filter, 1).empty());
+
+    // A budget of eight permits at most eight distance computations, so it cannot fill k.
+    EXPECT_LT(fixture.graph().search_ef(span, entries, 16, 64, true, &filter, 8).size(), 16u);
+
+    // A budget that cannot be exhausted resolves the filter exactly.
+    const auto complete = fixture.graph().search_ef(span, entries, 10, 64, true, &filter, EfFixture::vertex_count * 2);
+    EXPECT_EQ(fixture.labels_of(complete), fixture.brute_force(query, 10, &filter));
 }
 
 // ---------------------------------------------------------------------------
@@ -1526,6 +1728,3 @@ TEST(SizeBoundedGraph, RemoveFirstVerticesInMemoryConvertToReadOnlyGraphSearch) 
         EXPECT_EQ(ro_graph.getInternalIndex(lbl), i);
     }
 }
-
-
-

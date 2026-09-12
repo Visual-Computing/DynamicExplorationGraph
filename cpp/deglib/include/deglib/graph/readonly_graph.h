@@ -159,9 +159,16 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
         return hasPathImpl(*this, entry_vertex_indices, to_vertex, eps, k);
     }
 
-    std::vector<deglib::graph::ObjectDistance>
-    search_ef_intern(const std::vector<uint32_t>& entry_vertex_indices, const std::byte* query, const uint32_t k, const uint32_t ef) const override {
-        return searchEfInternImpl(*this, entry_vertex_indices, query, k, ef);
+    std::vector<deglib::graph::ObjectDistance> search_ef_intern(
+        const std::vector<uint32_t>& entry_vertex_indices,
+        const std::byte* query,
+        const uint32_t k,
+        const uint32_t ef,
+        const bool include_entry = true,
+        const deglib::search::Filter* filter = nullptr,
+        const uint32_t max_distance_computation_count = 0
+    ) const override {
+        return searchEfInternImpl(*this, entry_vertex_indices, query, k, ef, include_entry, filter, max_distance_computation_count);
     }
 
   protected:
