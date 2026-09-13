@@ -31,6 +31,9 @@ jobs:
       with:
         submodules: recursive
 
+    - name: Install Ninja
+      run: pip install ninja
+
     - name: Setup ccache
       uses: hendrikmuhs/ccache-action@v1.2
       with:
@@ -38,10 +41,10 @@ jobs:
         restore-keys: ${{ matrix.os }}-ccache-${{ github.ref_name }}-
 
     - name: Configure CMake
-      run: cmake -B build -S cpp -DFORCE_AVX2=ON -DENABLE_BENCHMARKS=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      run: cmake -B build -S cpp -G Ninja -DCMAKE_BUILD_TYPE=Release -DFORCE_AVX2=ON -DENABLE_BENCHMARKS=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
     - name: Build
-      run: cmake --build build --config Release --parallel 4
+      run: cmake --build build --config Release --parallel 2
 
     - name: Run Tests
       run: ctest --test-dir build --output-on-failure -C Release
