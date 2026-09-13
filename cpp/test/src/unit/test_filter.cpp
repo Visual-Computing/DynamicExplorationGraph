@@ -3,8 +3,6 @@
 #include "deglib/filter.h"
 #include "gtest/gtest.h"
 
-#include <cstdint>
-#include <cstdlib>
 #include <vector>
 
 // ---------------------------------------------------------------------------

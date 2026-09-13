@@ -10,7 +10,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <numeric>
 #include <random>
 #include <span>
 #include <vector>

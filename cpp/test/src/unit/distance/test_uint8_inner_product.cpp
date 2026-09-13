@@ -6,7 +6,6 @@
 #include "deglib/distances.h"
 #include "gtest/gtest.h"
 
-#include <chrono>
 #include <vector>
 
 namespace {

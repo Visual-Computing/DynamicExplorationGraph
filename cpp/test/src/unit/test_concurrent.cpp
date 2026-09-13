@@ -5,9 +5,7 @@
 #include <atomic>
 #include <cstddef>
 #include <mutex>
-#include <set>
 #include <stdexcept>
-#include <thread>
 #include <vector>
 
 // ============================================================================

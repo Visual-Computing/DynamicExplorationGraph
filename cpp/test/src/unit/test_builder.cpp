@@ -11,13 +11,11 @@
 #include "deglib/graph/sizebounded_graph.h"
 #include "gtest/gtest.h"
 
-#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <functional>
 #include <limits>
 #include <random>
-#include <unordered_map>
 #include <vector>
 
 // ---------------------------------------------------------------------------
