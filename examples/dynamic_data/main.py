@@ -273,7 +273,7 @@ def build_dynamic_graph(
             builder.add_entry(int(all_labels[rem_idx]), base_vecs[rem_idx : rem_idx + 1])
 
     build_start = time.perf_counter()
-    builder.build(callback="progress")
+    builder.build(show_progress=True)
     build_time = time.perf_counter() - build_start
     print(f"Graph built in {build_time:.2f} seconds ({graph_mut.size()} vertices).")
 

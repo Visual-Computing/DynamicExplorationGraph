@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 
 import deglib
-import deglib_cpp
 from deglib.distances import FloatSpace, Metric
 
 
@@ -11,8 +10,8 @@ class CallbackTester:
         self.num_callbacks = 0
         self.last_status = None
 
-    def __call__(self, status: deglib_cpp.BuilderStatus):
-        assert isinstance(status, deglib_cpp.BuilderStatus), (
+    def __call__(self, status: deglib.BuilderStatus):
+        assert isinstance(status, deglib.BuilderStatus), (
             'Got instance of type "{}" for builder_status in callback'.format(type(status))
         )
         self.last_status = status
@@ -152,7 +151,7 @@ class TestGraphs:
 
         stopped_in_callback = False
 
-        def _stopping_callback(status: deglib_cpp.BuilderStatus):
+        def _stopping_callback(status: deglib.BuilderStatus):
             nonlocal stopped_in_callback
             stopped_in_callback = True
             builder.stop()
@@ -168,11 +167,26 @@ class TestGraphs:
         builder.add_entry(range(self.data.shape[0]), self.data)
 
         status = builder.build()
-        assert isinstance(status, deglib_cpp.BuilderStatus), "Expected BuilderStatus, got {}".format(type(status))
+        assert isinstance(status, deglib.BuilderStatus), "Expected BuilderStatus, got {}".format(type(status))
         assert status.added == self.data.shape[0]
         assert status.deleted == 0
         assert len(status.total_added_ids) == self.data.shape[0]
         assert len(status.total_deleted_ids) == 0
+
+    def test_show_progress(self):
+        graph = deglib.create_empty(
+            self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
+        )
+        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder.add_entry(range(self.data.shape[0]), self.data)
+
+        status = builder.build(show_progress=True)
+        assert isinstance(status, deglib.BuilderStatus)
+        assert status.added == self.data.shape[0]
+
+    def test_builder_status_facade_exposed(self):
+        assert hasattr(deglib, "BuilderStatus")
+        assert hasattr(deglib.builder, "BuilderStatus")
 
     def test_build_status_callback_step_ids(self):
         graph = deglib.create_empty(
@@ -183,7 +197,7 @@ class TestGraphs:
 
         callback_statuses = []
 
-        def _collect_callback(status: deglib_cpp.BuilderStatus):
+        def _collect_callback(status: deglib.BuilderStatus):
             callback_statuses.append(status)
 
         result = builder.build(callback=_collect_callback)
@@ -216,7 +230,7 @@ class TestGraphs:
             builder.remove_entry(label)
 
         status = builder.build()
-        assert isinstance(status, deglib_cpp.BuilderStatus)
+        assert isinstance(status, deglib.BuilderStatus)
         assert status.added == self.data.shape[0]
         assert status.deleted > 0
         assert len(status.total_added_ids) == self.data.shape[0]

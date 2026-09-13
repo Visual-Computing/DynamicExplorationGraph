@@ -7,7 +7,7 @@ from . import optimization
 from . import search
 from .search import Searcher, create_searcher
 
-from .builder import GraphBuilder, build_from_data
+from .builder import GraphBuilder, BuilderStatus, build_from_data
 from .graph import (
     DynamicExplorationGraph,
     create_empty,
@@ -30,6 +30,7 @@ __all__ = [
     "load_dynamic_graph",
     "load_mutable_graph",
     "GraphBuilder",
+    "BuilderStatus",
     "build_from_data",
     "FloatSpace",
     "Metric",

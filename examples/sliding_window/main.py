@@ -133,7 +133,7 @@ def run_sliding_window_benchmark(
     initial_labels = np.arange(0, window_size, dtype=np.uint32)
     initial_features = base_vectors[:window_size]
     builder.add_entry(initial_labels, initial_features)
-    builder.build(callback="progress")
+    builder.build(show_progress=True)
 
     build_time = time.perf_counter() - t0
     print(f"Initial graph built in {build_time:.2f}s (Throughput: {window_size / build_time:,.0f} vec/s)\n")

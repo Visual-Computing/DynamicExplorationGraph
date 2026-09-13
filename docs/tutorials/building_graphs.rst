@@ -155,7 +155,7 @@ To build an index from a 2D NumPy array in a single call:
        k=30,                     # Number of edges per vertex
        eps=0.1,                  # Exploration margin during build
        threads=0,                # 0 = use all available CPU cores
-       callback="progress",      # Print progress bar to stdout
+       show_progress=True,        # Print progress bar to stdout
    )
 
 ---

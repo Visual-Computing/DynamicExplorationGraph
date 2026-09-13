@@ -133,7 +133,7 @@ class DEG(BaseANN):
                 X,
                 metric=self.metric_enum,
                 threads=self.threads,
-                callback="progress",
+                show_progress=True,
             )
 
             # 2. Build graph in FP32
@@ -146,7 +146,7 @@ class DEG(BaseANN):
                 seed=7,
                 optimization_target=self.opt_enum,
                 thread_count=self.threads,
-                callback="progress",
+                show_progress=True,
             )
 
             print(f"Saving graph to cache {cache_file}...", flush=True)
@@ -251,7 +251,7 @@ class QG(BaseANN):
                 X,
                 metric=self.base_metric,
                 threads=self.threads,
-                callback="progress",
+                show_progress=True,
             )
 
             # 2. Build graph in FP32
@@ -264,7 +264,7 @@ class QG(BaseANN):
                 seed=7,
                 optimization_target=self.opt_enum,
                 thread_count=self.threads,
-                callback="progress",
+                show_progress=True,
             )
 
             print(f"Saving graph to cache {cache_file}...", flush=True)

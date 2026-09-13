@@ -194,7 +194,7 @@ def run_static_benchmark(
 
         labels = np.arange(base_vecs.shape[0], dtype=np.uint32)
         builder.add_entry(labels, base_vecs)
-        builder.build(callback="progress")
+        builder.build(show_progress=True)
 
         build_time = time.perf_counter() - build_start
         print(f"Graph built in {build_time:.2f} seconds ({graph_mut.size()} vertices).")

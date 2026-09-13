@@ -20,7 +20,7 @@ def main():
         vec: np.ndarray
         builder.add_entry(i, vec)
 
-    builder.build(callback="progress")
+    builder.build(show_progress=True)
 
     valid_labels = np.random.choice(graph.size(), size=5, replace=False)
 
@@ -41,7 +41,7 @@ def main2():
 
     # build index
     data = np.random.random((samples, dims)).astype(np.float32)
-    index = deglib.builder.build_from_data(data, extend_eps=0.1, callback="progress")
+    index = deglib.builder.build_from_data(data, extend_eps=0.1, show_progress=True)
 
     # search
     query = np.random.random(dims).astype(np.float32)
@@ -89,7 +89,7 @@ def do_build_with_remove(seed, edges_per_vertex):
     for label in range(0, data.shape[0], 2):
         builder.remove_entry(label)
 
-    builder.build(callback="progress")
+    builder.build(show_progress=True)
 
 
 KNOWN_CRASHES = {(1, 10)}

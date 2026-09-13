@@ -39,10 +39,11 @@ def presort(
     space_or_metric: FloatSpace | Metric | None = None,
     radius_decay: float = 0.9,
     threads: int = 0,
-    callback: typing.Callable[[float], typing.Union[bool, None]] | str | None = None,
+    callback: typing.Callable[[float], typing.Union[bool, None]] | None = None,
     *,
     metric: Metric | None = None,
     space: FloatSpace | None = None,
+    show_progress: bool = False,
 ) -> np.ndarray:
     """
     Perform 1D pre-sorting of dataset feature vectors using Fast Linear Alignment Scheme (FLAS).
@@ -54,11 +55,11 @@ def presort(
     :param space_or_metric: FloatSpace instance or Metric type used for distance computation during sorting.
     :param radius_decay: Decay factor per iteration for neighborhood radius (default 0.9).
     :param threads: Number of worker threads (0 uses all available CPU cores).
-    :param callback: Optional callback for reporting sorting progress.
-                     If ``'progress'``, prints progress to stdout.
-                     If a function, receives progress float in range [0.0, 1.0]. Returning True cancels sorting.
+    :param callback: Optional callback for reporting sorting progress. Receives a progress float in range
+                     [0.0, 1.0]. Returning True cancels sorting.
     :param metric: Explicit Metric enum (cannot be combined with space or space_or_metric).
     :param space: Explicit FloatSpace instance (cannot be combined with metric or space_or_metric).
+    :param show_progress: If True and no callback is given, prints progress to stdout.
     :return: 1D uint32 NumPy array containing the sorted permutation of original vector indices.
     """
     # Count how many of the three ways to specify distance/space were provided
@@ -87,7 +88,9 @@ def presort(
         raise TypeError(f"Expected Metric or FloatSpace, got {type(target).__name__}")
 
     cb_fn = None
-    if callback == "progress":
+    if callback is not None:
+        cb_fn = callback
+    elif show_progress:
         last_pct = [-1]
 
         def progress_cb(prog: float) -> bool:
@@ -102,8 +105,6 @@ def presort(
             return False
 
         cb_fn = progress_cb
-    elif callable(callback):
-        cb_fn = callback
 
     return deglib_cpp.presort(vectors_f32, cpp_space, radius_decay, threads, cb_fn)
 

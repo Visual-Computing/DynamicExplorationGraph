@@ -26,6 +26,74 @@ class OptimizationTarget(enum.IntEnum):
     LowLID = deglib_cpp.OptimizationTarget.LowLID
 
 
+class BuilderStatus:
+    """
+    Snapshot of the graph build progress.
+
+    Instances are created internally and passed to the ``callback`` of
+    :meth:`GraphBuilder.build`, and returned by :meth:`GraphBuilder.build`.
+    This facade wraps the native status object so that end users never have to
+    interact with the ``deglib_cpp`` bindings directly.
+
+    The instance handed to a progress ``callback`` is only valid for the
+    duration of that callback invocation.
+    """
+
+    def __init__(self, status_cpp: deglib_cpp.BuilderStatus):
+        self._status_cpp = status_cpp
+
+    @property
+    def step(self) -> int:
+        """Number of graph manipulation steps completed."""
+        return self._status_cpp.step
+
+    @property
+    def added(self) -> int:
+        """Total number of vertices added so far."""
+        return self._status_cpp.added
+
+    @property
+    def deleted(self) -> int:
+        """Total number of vertices deleted so far."""
+        return self._status_cpp.deleted
+
+    @property
+    def improved(self) -> int:
+        """Total number of successful edge improvements so far."""
+        return self._status_cpp.improved
+
+    @property
+    def tries(self) -> int:
+        """Total number of improvement attempts so far."""
+        return self._status_cpp.tries
+
+    @property
+    def step_added_ids(self):
+        """External labels added during the current build step."""
+        return self._status_cpp.step_added_ids
+
+    @property
+    def step_deleted_ids(self):
+        """External labels deleted during the current build step."""
+        return self._status_cpp.step_deleted_ids
+
+    @property
+    def total_added_ids(self):
+        """All external labels added across the entire build."""
+        return self._status_cpp.total_added_ids
+
+    @property
+    def total_deleted_ids(self):
+        """All external labels deleted across the entire build."""
+        return self._status_cpp.total_deleted_ids
+
+    def __repr__(self) -> str:
+        return (
+            f"BuilderStatus(step={self.step}, added={self.added}, deleted={self.deleted}, "
+            f"improved={self.improved}, tries={self.tries})"
+        )
+
+
 class GraphBuilder:
     """
     Constructs a GraphBuilder for building and optimizing a regular graph.
@@ -186,26 +254,33 @@ class GraphBuilder:
         return self.builder_cpp.get_batch_size()
 
     def build(
-        self, callback: Callable[[deglib_cpp.BuilderStatus], None] | str | None = None, infinite: bool = False
-    ) -> deglib_cpp.BuilderStatus:
+        self,
+        callback: Callable[[BuilderStatus], None] | None = None,
+        show_progress: bool = False,
+        infinite: bool = False,
+    ) -> BuilderStatus:
         """
         Build the graph. This could be run on a separate thread in an infinite loop. Call stop() to end this process.
 
         :param callback: The callback that is called after each step of the build process. A BuilderStatus
-                                     is the only argument to the function.
-                                     If None nothing is printed.
-                                     If callback is the string "progress", a simple progress bar is printed to stdout.
+                                     is the only argument to the function. If None nothing is printed.
+        :param show_progress: If True and no callback is given, a simple progress bar is printed to stdout.
+                              Ignored when running in infinite mode (total workload is unknown).
         :param infinite: If set to True, blocks indefinitely, until the stop() function is called. Can be used, if
                          build() is run in a separate thread.
         :return: BuilderStatus containing build metrics and ID vectors for added/deleted vertices.
-        :rtype: deglib_cpp.BuilderStatus
+        :rtype: BuilderStatus
         """
+        if callback is None and show_progress and not infinite:
+            callback = ProgressCallback(self.get_num_new_entries(), self.get_num_remove_entries())
+
         if callback is None:
-            return self.builder_cpp.build_silent(infinite)
-        else:
-            if not infinite and callback == "progress":
-                callback = ProgressCallback(self.get_num_new_entries(), self.get_num_remove_entries())
-            return self.builder_cpp.build(callback, infinite)
+            return BuilderStatus(self.builder_cpp.build_silent(infinite))
+
+        def _callback(status_cpp) -> None:
+            callback(BuilderStatus(status_cpp))
+
+        return BuilderStatus(self.builder_cpp.build(_callback, infinite))
 
     def stop(self):
         """
@@ -241,7 +316,8 @@ def build_from_data(
     max_path_length: int = 5,
     improve_tries: int = 0,
     thread_count: int = 0,
-    callback: Callable[[deglib_cpp.BuilderStatus], None] | str | None = None,
+    callback: Callable[[BuilderStatus], None] | None = None,
+    show_progress: bool = False,
 ) -> DynamicExplorationGraph:
     """
     Create a new graph built from the given data using a GraphBuilder.
@@ -282,8 +358,10 @@ def build_from_data(
     :type improve_tries: int
     :param thread_count: Number of threads to use for parallel building. If 0, uses hardware concurrency.
     :type thread_count: int
-    :param callback: Callback function for build progress reporting. If "progress", shows progress bar
-    :type callback: Callable[[deglib_cpp.BuilderStatus], None] | str | None
+    :param callback: Callback function for build progress reporting, receiving a BuilderStatus. If None, nothing is reported.
+    :type callback: Callable[[BuilderStatus], None] | None
+    :param show_progress: If True and no callback is given, a simple progress bar is printed to stdout.
+    :type show_progress: bool
     :return: The constructed and optimized graph
     :rtype: DynamicExplorationGraph
     """
@@ -311,7 +389,7 @@ def build_from_data(
     if thread_count > 0:
         builder.set_thread_count(thread_count)
 
-    builder.build(callback=callback)
+    builder.build(callback=callback, show_progress=show_progress)
 
     return graph
 
@@ -347,7 +425,7 @@ class ProgressCallback:
         self.last_print_time = 0
         self.min_print_interval = min_print_interval
 
-    def __call__(self, builder_status: deglib_cpp.BuilderStatus):
+    def __call__(self, builder_status: BuilderStatus):
         """
         Display the current build progress as a formatted progress bar.
 
@@ -355,7 +433,7 @@ class ProgressCallback:
         by min_print_interval to avoid excessive output, except for the final step.
 
         :param builder_status: Current status of the build process containing step counts
-        :type builder_status: deglib_cpp.BuilderStatus
+        :type builder_status: BuilderStatus
         """
         current_time = time.time()
         num_steps = builder_status.added + builder_status.deleted
