@@ -15,12 +15,12 @@ import deglib
 | Module | Primary Elements | Purpose |
 |---|---|---|
 | [`deglib`](#1-root-package-deglib) | `DynamicExplorationGraph`, `build_from_data`, `load_*` | Main user facade for querying, exploration, and graph lifecycle. |
-| [`deglib.builder`](#2-module-deglibbuilder) | `GraphBuilder`, `OptimizationTarget`, `BuilderStatus`, `build_from_data` | Incremental vector addition/deletion, parallel batch construction, and optimization. |
+| [`deglib.builder`](#2-module-deglibbuilder) | `GraphBuilder`, `OptimizationTarget`, `build_from_data` | Incremental vector addition/deletion, parallel batch construction, and optimization. |
 | [`deglib.distances`](#3-module-deglibdistances) | `FloatSpace`, `Metric`, `floats_to_fp16`, `fp16_to_floats` | Vector metrics, SIMD feature spaces, and batch distance evaluation. |
 | [`deglib.search`](#4-module-deglibsearch) | `Filter`, `rerank` | Bitset-based label filtering and exact distance candidate reranking for ANNS search. |
 | [`deglib.optimization`](#5-module-degliboptimization) | `prune_*`, `presort`, `mips_l2_*`, `quantize_*` | RNG graph pruning, FLAS 1D dataset presorting, MIPS L2 transformations, EVP and Scalar quantization (Int8/Uint8). |
 | [`deglib.analysis`](#6-module-deglibanalysis) | `analyze_graph`, `check_*`, `calc_*` | Graph validation, connectivity verification, and reachability metrics. |
-| [`deglib.cpu`](#7-module-deglibcpu) | `InstructionSet`, `has_avx2`, `has_avx512` | Runtime CPU SIMD capability detection and instruction set enum. |
+| [`deglib.cpu`](#7-module-deglibcpu) | `InstructionSet`, `has_avx2`, `has_avx_vnni`, `has_avx512`, `has_avx512_vnni` | Runtime CPU SIMD capability detection and instruction set enum. |
 
 ---
 
@@ -39,14 +39,15 @@ deglib.build_from_data(
     instruction="Auto",                        # SIMD instruction set ("Auto", "AVX2", "AVX512", "Scalar")
     optimization_target=OptimizationTarget.LowLID, # OptimizationTarget (LowLID, HighLID, StreamingData)
     extend_k=0,                                # Number of neighbors during graph extension (0 = edges_per_vertex)
-    extend_eps=0.2,                            # Search expansion epsilon during graph extension
+    extend_eps=0.1,                            # Search expansion epsilon during graph extension
     improve_k=0,                               # Number of neighbors during edge improvement
     improve_eps=0.001,                         # Search expansion epsilon during edge improvement
     max_path_length=5,                         # Maximum edge swaps before canceling an improvement try
     improve_tries=0,                           # Number of improvement attempts per build step
     thread_count=0,                            # Worker thread count (0 = all available CPU cores)
     seed=None,                                 # Random seed (None = default seed)
-    callback=None                              # Callback function(BuilderStatus) or "progress" for CLI bar
+    callback=None,                             # Optional callback function(BuilderStatus) for progress reporting
+    show_progress=False                        # If True and no callback, prints a progress bar to stdout
 ) -> DynamicExplorationGraph
 
 # Create empty mutable graph with fixed capacity in preallocated memory (SizeBoundedGraph)
@@ -100,7 +101,7 @@ class DynamicExplorationGraph:
 
     # Explore graph starting from entry vertex label(s) (supports single int or batch array).
     # Returns (indices, distances) if return_distances=True, otherwise indices array.
-    explore(entry_label, k, max_distance_computation_count=0, eps=0.0, include_entry=True, threads=1, filter_labels=None, return_distances=True, unsorted=False)
+    explore(entry_external_label, k, max_distance_computation_count=0, eps=0.0, include_entry=True, threads=1, filter_labels=None, return_distances=True, unsorted=False)
 
     # Returns list of neighbor external labels connected to a given vertex
     get_neighbors(external_label) -> list[int]
@@ -133,7 +134,7 @@ class DynamicExplorationGraph:
 Provides graph construction, incremental updates, and multithreaded edge optimization.
 
 ```python
-from deglib.builder import GraphBuilder, OptimizationTarget, BuilderStatus, build_from_data
+from deglib.builder import GraphBuilder, OptimizationTarget, build_from_data
 
 # Optimization strategy based on dataset characteristics
 class OptimizationTarget:
@@ -184,9 +185,10 @@ class GraphBuilder:
     get_batch_size() -> int                    # Current total batch size (threads * tasks * task_size)
 
     # Execute build/optimization loop.
-    # callback: function(BuilderStatus) or "progress" for console progress bar
+    # callback: function(BuilderStatus) for custom progress reporting
+    # show_progress: If True and no callback, prints a console progress bar
     # infinite: If True, runs indefinitely until stop() is called from another thread
-    build(callback=None, infinite=False) -> BuilderStatus
+    build(callback=None, show_progress=False, infinite=False) -> BuilderStatus
 
     # Request graceful termination of the build loop between steps
     stop()
@@ -282,7 +284,7 @@ class Searcher:
     # Constructor via create_searcher(graph, quantizer=None, refine_space=None, refine_data=None)
 
     # Entry vertex optimization via k-means medoids
-    optimize(n_clusters=128, n_iter=15, sample_size=0, seed=42, num_threads=0)
+    optimize(n_clusters=256, n_iter=20, sample_size=0, seed=7, num_threads=1)
 
     # Search for nearest neighbors of a single query (1D) or a batch of queries (2D).
     # query: 1D vector [D] or 2D batch [N, D]
@@ -357,9 +359,10 @@ prune_worst_edges(graph, prune_worst, num_threads=0)
 # space_or_metric: FloatSpace or Metric enum (default: Metric.FP32_L2)
 # radius_decay: Neighborhood decay factor (default: 0.9)
 # threads: Worker threads (0 = all CPU cores)
-# callback: function(progress_float) or "progress" for console output
+# callback: function(progress_float) for custom progress reporting
+# show_progress: If True and no callback, prints progress to stdout
 # Returns 1D uint32 permutation array [N] of sorted vector indices.
-presort(vectors, space_or_metric=None, radius_decay=0.9, threads=0, callback=None) -> np.ndarray
+presort(vectors, space_or_metric=None, radius_decay=0.9, threads=0, callback=None, *, show_progress=False) -> np.ndarray
 
 # Transform database vectors from d dimensions to (d+1) dimensions for MIPS via L2 distance.
 # database: 2D float32 array [N, d]
@@ -424,7 +427,7 @@ check_graph_connectivity(graph) -> bool
 calc_avg_edge_weight(graph, scale=1) -> float
 
 # Calculate 10-bin histogram of graph edge weights
-calc_edge_weight_histogram(graph, sort=True, scale=1) -> list[float]
+calc_edge_weight_histogram(graph, sort, scale=1) -> list[float]
 
 # Count total non-RNG conform edges
 calc_non_rng_edges(graph) -> int
@@ -443,15 +446,19 @@ calc_exploration_reach(graph) -> float
 SIMD capability detection and instruction set enumeration.
 
 ```python
-from deglib.cpu import InstructionSet, has_avx2, has_avx512
+from deglib.cpu import InstructionSet, has_avx2, has_avx_vnni, has_avx512, has_avx512_vnni
 
 class InstructionSet:
-    Auto    # Automatically select highest supported instruction set
-    Scalar  # Standard scalar operations
-    AVX2    # 256-bit AVX2 + FMA SIMD
-    AVX512  # 512-bit AVX-512 SIMD
+    Auto         # Automatically select highest supported instruction set
+    Scalar       # Standard scalar operations
+    AVX2         # 256-bit AVX2 + FMA SIMD
+    AVX2_VNNI    # 256-bit AVX2 with VNNI acceleration
+    AVX512       # 512-bit AVX-512 SIMD
+    AVX512_VNNI  # 512-bit AVX-512 with VNNI acceleration
 
 # Runtime hardware support checks
-has_avx2() -> bool    # Returns True if host CPU supports AVX2
-has_avx512() -> bool  # Returns True if host CPU supports AVX-512
+has_avx2() -> bool         # Returns True if host CPU supports AVX2
+has_avx_vnni() -> bool     # Returns True if host CPU supports AVX-VNNI (256-bit)
+has_avx512() -> bool       # Returns True if host CPU supports AVX-512
+has_avx512_vnni() -> bool  # Returns True if host CPU supports AVX-512 VNNI
 ```

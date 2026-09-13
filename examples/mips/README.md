@@ -22,10 +22,10 @@ We use a 5-step pipeline that reduces MIPS to $L_2$ graph search while retaining
    A `DynamicExplorationGraph` is constructed using `GraphBuilder` in $(d+1)$-dimensional `Metric.FP32_L2` space ($K_{\text{graph}} = 32, K_{\text{ext}} = 64$).
 
 4. **FP16 Feature Swapping & `ReadOnlyGraph`**:
-   The original $d$-dimensional FP32 database vectors are converted to 16-bit half-precision floats (`deglib.floats_to_fp16`). The graph topology built in step 3 is converted to a `ReadOnlyGraph` with `Metric.FP16_InnerProduct` space by passing the FP16 feature buffer (`graph.to_readonly(feature_space=..., custom_features=...)`).
+   The original $d$-dimensional FP32 database vectors are converted to 16-bit half-precision floats (`deglib.distances.floats_to_fp16`). The graph topology built in step 3 is converted to a `ReadOnlyGraph` with `Metric.FP16_InnerProduct` space by passing the FP16 feature buffer (`graph.to_readonly(feature_space=..., custom_features=...)`).
 
 5. **SIMD FP16 Inner Product Search**:
-   Query vectors are converted to FP16 (`deglib.floats_to_fp16`) and searched on the `ReadOnlyGraph` using fast SIMD FP16 inner product distance routines ($\varepsilon_{\text{search}} = 0.18$, max distance evaluation budget sweep: `6000, 6500, 7000, 7500, 8000, 9000`).
+   Query vectors are converted to FP16 (`deglib.distances.floats_to_fp16`) and searched on the `ReadOnlyGraph` using fast SIMD FP16 inner product distance routines ($\varepsilon_{\text{search}} = 0.18$, max distance evaluation budget sweep: `6000, 6500, 7000, 7500, 8000, 9000`).
 
 ---
 
@@ -33,7 +33,7 @@ We use a 5-step pipeline that reduces MIPS to $L_2$ graph search while retaining
 
 This example benchmarks on the **SISAP 2026 `llama-dev`** dataset (Llama embeddings):
 - **Repository**: [`SISAP-Challenges/SISAP2026`](https://huggingface.co/datasets/SISAP-Challenges/SISAP2026)
-- **Files**: `llama-dev/llama-dev.h5` and `config.json`
+- **Files**: `llama-dev/llama-dev.h5`
 - **Data Structure**:
   - `train`: Floating-point database vectors ($N$ vectors, $d$ dimensions)
   - `test/queries`: Query vectors
@@ -74,19 +74,29 @@ The script displays an interactive Matplotlib trade-off plot (Recall vs Search T
 ```
 usage: main.py [-h] [--dataset DATASET] [--k-graph K_GRAPH] [--k-ext K_EXT]
                [--eps-ext EPS_EXT] [--eps-search EPS_SEARCH] [--no-flas]
-               [--flas-decay FLAS_DECAY] [--prune-worst PRUNE_WORST]
-               [--threads THREADS] [--output-plot OUTPUT_PLOT] [--no-show]
+               [--flas-decay FLAS_DECAY] [--build-threads BUILD_THREADS]
+               [--search-threads SEARCH_THREADS]
+               [--opt-target {StreamingData,LowLID,HighLID}]
+               [--num-runs NUM_RUNS] [--max-dist MAX_DIST]
+               [--instruction {Auto,Scalar,AVX2,AVX512}]
+               [--output-plot OUTPUT_PLOT] [--no-show]
 
 options:
   --dataset DATASET               Path to HDF5 dataset file or 'llama-dev' (default: llama-dev)
   --k-graph K_GRAPH               Graph degree per vertex (default: 32)
   --k-ext K_EXT                   Builder search size parameter (default: 64)
-  --eps-ext EPS_EXT               Builder search expansion factor (default: 0.2)
+  --eps-ext EPS_EXT               Builder search expansion factor (default: 0.001)
   --eps-search EPS_SEARCH         Epsilon search factor (default: 0.18)
   --no-flas                       Disable FLAS 1D pre-sorting
   --flas-decay FLAS_DECAY         FLAS neighborhood radius decay rate (default: 0.9)
-  --prune-worst PRUNE_WORST       Number of worst neighbors to replace with self-loops (default: 0)
-  --threads THREADS               Number of parallel threads (default: 8)
+  --build-threads BUILD_THREADS   Number of threads for graph building (default: 1)
+  --search-threads SEARCH_THREADS Number of parallel threads for query search (default: 8)
+  --opt-target {StreamingData,LowLID,HighLID}
+                                  Optimization target: StreamingData, LowLID, HighLID (default: LowLID)
+  --num-runs NUM_RUNS             Number of search repetitions for averaging (default: 100)
+  --max-dist MAX_DIST             Comma-separated list of max distance budgets (default: 6000,6500,7000,7500,8000,9000)
+  --instruction {Auto,Scalar,AVX2,AVX512}
+                                  SIMD instruction set: Auto, Scalar, AVX2, AVX512 (default: Auto)
   --output-plot OUTPUT_PLOT       Path to save trade-off curve PNG
   --no-show                       Disable GUI plot display
 ```

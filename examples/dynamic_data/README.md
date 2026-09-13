@@ -26,7 +26,7 @@ uv run python main.py [dataset] [options]
 ### Datasets
 - `sift1m` — SIFT1M (1M vectors, 128D, default)
 - `deep1m` — DEEP1M (1M vectors, 96D)
-- `glove` / `glove-100` — GloVe (1.18M vectors, 100D)
+- `glove` — GloVe (1.18M vectors, 100D)
 - `audio` — Audio (53.3k vectors, 192D)
 - `enron` — Enron (94.9k vectors, 1369D)
 - `all` — Run all datasets sequentially

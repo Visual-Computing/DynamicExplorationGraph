@@ -56,6 +56,9 @@ Each round prints the core evaluation metrics:
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
+| `--dataset` | `str` | `redcaps` | Benchmark dataset to download & use (use `custom` with `--base-file`). |
+| `--base-file` | `str` | `None` | Path to a custom `.fvecs` / `.fbin` / `.hdf5` base vector file. |
+| `--query-file` | `str` | `None` | Path to a custom `.fvecs` / `.fbin` / `.hdf5` query vector file. |
 | `--window-size` | `int` | `500000` | Size of sliding window ($N$). |
 | `--batch-size` | `int` | `5000` | Inserts and deletes per round ($M$). |
 | `--rounds` | `int` | `100` | Number of update rounds. |

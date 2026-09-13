@@ -18,7 +18,7 @@ It supports both static and dynamic streaming datasets through incremental exten
   - Hand-optimized AVX-512 and AVX2 vector kernels with automatic runtime/compiler dispatch and Scalar fallback.
   - Metrics: `FP32_L2`, `FP32_InnerProduct`, `Uint8_L2`, `Uint8_InnerProduct`, `Int8_L2`, `Int8_InnerProduct`, `FP16_L2`, `FP16_InnerProduct`, and quantized `EVP_InnerProduct`.
 - **Graph Optimization & Diagnostics**:
-  - Topology pruning (`prune_worst_edges`, `prune_non_mrng_edges`).
+  - Topology pruning (`prune_worst_edges`, `prune_non_rng_edges`).
   - Analysis suite (`analyze_graph`, connectivity validation, exploration reachability).
 - **Label Filtering**: Metadata and boolean ID filtering during search via `deglib::search::Filter`.
 
@@ -113,13 +113,13 @@ auto mutable_graph = deglib::load_mutable_graph("index.deg", /*new_max_size=*/10
 
 ### High-Performance Searcher (`eps_or_ef`)
 
-`deglib::search::Searcher` provides a high-throughput query execution pipeline supporting entry vertex optimization, optional on-the-fly query quantization, exact candidate reranking, and multithreaded batch search with unified exploration parameter `eps_or_ef`:
+`deglib::search::SearcherBase` provides a high-throughput query execution pipeline supporting entry vertex optimization, optional on-the-fly query quantization, exact candidate reranking, and multithreaded batch search with unified exploration parameter `eps_or_ef`:
 
 ```cpp
-#include <deglib/search/searcher.h>
+#include <deglib/deglib.h>
 
 // 1. Create searcher on top of a graph (optionally with quantizer & refiner)
-auto searcher = deglib::search::make_searcher(readonly_graph);
+auto searcher = deglib::make_searcher(readonly_graph);
 searcher->optimize(/*n_clusters=*/128); // entry vertex medoids via k-means
 
 // 2. Query with relative distance margin (eps_or_ef < 1.0)

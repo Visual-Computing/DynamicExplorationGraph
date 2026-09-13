@@ -11,7 +11,7 @@ This example project demonstrates how to download paper datasets from `readme.md
 - `enron` (1369D, 94k base vectors, L2 distance)
 - `sift1m` (128D, 1M base vectors, L2 distance)
 - `deep1m` (96D, 1M base vectors, L2 distance)
-- `glove-100` (100D, 1.18M base vectors, Angular / InnerProduct distance)
+- `glove` (100D, 1.18M base vectors, Angular / InnerProduct distance)
 
 ## Prerequisites: Building the Python Library (`deglib`)
 
@@ -36,19 +36,22 @@ uv sync --reinstall-package deglib
 ### 1. Run Full Benchmark (e.g. SIFT1M)
 
 ```bash
-uv run main.py --dataset sift1m
+uv run main.py sift1m
 ```
 
 ### 2. Fast Test Run (e.g. Audio dataset with 1,000 vectors)
 
 ```bash
-uv run main.py --dataset audio --max-base-vecs 1000
+uv run main.py audio --max-base-vecs 1000
 ```
 
 ## Options
 
-- `--dataset`: Dataset name (`sift1m`, `audio`, `enron`, `deep1m`, `glove-100`). Default: `sift1m`.
+- `dataset`: Positional dataset name (`sift1m`, `deep1m`, `glove`, `audio`, `enron`, `all`). Default: `audio`.
+- `--graph-path`: Save the generated `.deg` graph file to this path. Default: none (graph kept in RAM).
+- `--instruction`: SIMD instruction set (`auto`, `scalar`, `avx2`, `avx512`). Default: `auto`.
+- `--force-rebuild`: Force rebuilding graph files even if they already exist.
+- `--threads`: Number of threads used for building the graph. Default: `1`.
 - `--cache-dir`: Persistent cache folder for datasets. Default: `~/.cache/deg_datasets`.
-- `--output-plot`: Optional path to also save the plot to a PNG image (e.g. `--output-plot recall_vs_qps.png`).
 - `--no-show`: Disable opening the interactive plot window (useful for headless CI environments).
 - `--max-base-vecs`: Limit base vectors for fast debugging / testing.

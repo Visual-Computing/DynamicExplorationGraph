@@ -8,12 +8,12 @@ VIBE provides realistic embedding datasets covering in-distribution and out-of-d
 
 | Dataset Key | VIBE Name | Type | Size ($N$) | Dimension ($D$) | Metric |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `agnews-mxbai` | AGNews-mxbai | In-Distribution | 120,000 | 1,024 | L2 (Euclidean) |
-| `arxiv-nomic` | ArXiv-nomic | In-Distribution | 2,000,000 | 768 | Inner Product |
+| `agnews-mxbai` | AGNews-mxbai | In-Distribution | 769,382 | 1,024 | L2 (Euclidean) |
+| `arxiv-nomic` | ArXiv-nomic | In-Distribution | 1,344,643 | 768 | Inner Product |
 | `landmark-dino` | Landmark-dino | In-Distribution | 760,757 | 768 | Cosine |
-| `msmarco-qwen` | MSMARCO-qwen | In-Distribution | 8,841,823 | 1,024 | Inner Product |
-| `gooaq-distilroberta`| GooAQ-distilroberta | In-Distribution | 1,471,375 | 768 | Inner Product |
-| `laion-clip` | LAION-clip | Out-of-Distribution | 1,000,000 | 512 | Inner Product |
+| `msmarco-qwen` | MSMARCO-qwen | In-Distribution | 8,840,823 | 1,024 | Inner Product |
+| `gooaq-distilroberta`| GooAQ-distilroberta | In-Distribution | 1,475,024 | 768 | Inner Product |
+| `laion-clip` | LAION-clip | Out-of-Distribution | 1,000,448 | 512 | Inner Product |
 | `imagenet-align` | ImageNet-align | Out-of-Distribution | 1,281,167 | 640 | Inner Product |
 | `imagenet-clip` | ImageNet-clip | In-Distribution | 1,281,167 | 512 | Inner Product |
 | `yandex` | Yandex-200 | Out-of-Distribution | 1,000,000 | 200 | Cosine |
@@ -65,7 +65,7 @@ uv run plot.py --log ~/.cache/deg_datasets/laion-clip/deg/laion-clip_benchmark.l
 ## Interactive Plot Features
 
 The generated benchmark visualizations (`*_anns_benchmark.html`) provide:
-- **Grouped Interactive Legend**: Filter curves by **Optimization Target** (`LowLID`, `StreamingData`, `HighLID`), **Pruning Status** (`Unpruned`, `MRNG Pruned`), **Graph Degree $K$** ($16, 24, 30, 40, 48$), and **Rerank Factors** ($1.0\times, 1.2\times, 1.5\times, 2.0\times$).
+- **Grouped Interactive Legend**: Filter curves by **Optimization Target** (`LowLID`, `StreamingData`, `HighLID`), **Pruning Status** (`Unpruned`, `MRNG Pruned`), **Graph Degree $K$** ($16, 24, 30, 40, 48$), and **Rerank Factors** ($1.0\times, 1.15\times, 1.35\times$). The default `config.yml` only sweeps `LowLID` and `StreamingData`, so `HighLID` curves do not appear unless the config is edited.
 - **Locked Plot Axes**: Filtering curves turns elements on and off smoothly without jumpy axis rescaling.
 - **Mouse Navigation**: Stufenloser **Mouse-Wheel Zoom** and click-and-drag **Panning**. Double-click resets view.
 - **Detailed Tooltips**: Hover over data points to inspect exact Recall@100, QPS, search $\varepsilon$, graph parameters, and rerank configuration.
@@ -76,20 +76,23 @@ The generated benchmark visualizations (`*_anns_benchmark.html`) provide:
 
 ### Configuration via `config.yml`
 All benchmark search parameters, graph degrees, optimization targets, pruning options, search $\varepsilon$ ranges, and reranking factors are configured centrally in [`config.yml`](file:///C:/Lang/cpp/DynamicExplorationGraph/examples/vibe/config.yml):
-- **Graph parameters**: `k`, `opt_target`, `prune_non_rng`, `threads`, `query_dtype`.
-- **Query parameters**: `search_eps`, `rerank_size_factor`.
+- **Graph parameters**: `k`, `opt_target`, `prune_non_rng`.
+- **Query parameters**: `eps_or_ef`, `rerank_size_factor`.
 
 ### `main.py`
 - `--dataset`, `-d`: Dataset name (e.g. `laion-clip`, `arxiv-nomic`, `agnews-mxbai`, etc.).
+- `--algorithm`, `-a`: Benchmark a specific algorithm (`deg`, `deg-qg` / `qg`, or `all`). Default: run all enabled in `config.yml`.
 - `--cache-dir`, `-c`: Custom directory for datasets and graphs (default: `~/.cache/deg_datasets` or `DEG_CACHE_DIR`).
 - `--build-threads`, `-t`: Number of CPU threads for graph building (default: `cpu_count // 2`).
 - `--query-dtype`: Override query and feature storage precision (`float32`, `int8`).
 - `--cpu`, `--cpu-affinity`: Pin the benchmark process to specific CPU core ID(s).
 - `--no-show`: Do not open browser window after benchmark completes.
+- `--no-stop`: Do not abort benchmark iterations when query time exceeds the linear baseline.
 
 ### `plot.py`
 - *(No arguments)*: Launches the dark-themed **GUI Log Explorer** to browse logs across all VIBE dataset folders.
 - `--dataset`, `-d`: Dataset name to resolve standard log path.
 - `--log`, `-l`: Explicit path to a `*.log` benchmark file.
+- `--cache-dir`, `-c`: Base cache directory (default: standard cache directory).
 - `--output`, `-o`: Output HTML file path.
 - `--no-open`: Do not automatically open the generated HTML in the default web browser.

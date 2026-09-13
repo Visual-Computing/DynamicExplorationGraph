@@ -1,7 +1,7 @@
 // test_pruning.cpp — Unit tests for deglib::optimization::pruning methods
 //
-// Covers: prune_worst_edges, prune_non_mrng_edges, prune_non_mrng_edges_weight_sorted,
-//         prune_non_mrng_edges_iterative
+// Covers: prune_worst_edges, prune_non_rng_edges, prune_non_rng_edges_weight_sorted,
+//         prune_non_rng_edges_iterative
 
 #include "deglib/analysis.h"
 #include "deglib/graph/sizebounded_graph.h"

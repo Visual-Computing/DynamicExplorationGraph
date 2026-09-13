@@ -19,7 +19,7 @@ Python bindings for the high-performance C++ Dynamic Exploration Graph (DEG) lib
   - [Graph Optimization, Quantization & Reranking Pipeline](#graph-optimization-quantization--reranking-pipeline)
 - [Concepts & Parameters](#concepts--parameters)
   - [OptimizationTarget](#optimizationtarget)
-  - [Search Parameter `eps`](#search-parameter-eps)
+  - [Unified Search Parameter `eps_or_ef`](#unified-search-parameter-eps_or_ef)
   - [Supported Metrics & Data Types](#supported-metrics--data-types)
 - [Example Projects](#example-projects)
 - [API Reference](#api-reference)
@@ -40,8 +40,10 @@ To build and install the package directly from the repository:
 
 ```bash
 cd python/
-python setup.py copy_build_files
-pip install .
+uv venv
+uv pip install setuptools==83.0.0 pybind11==3.0.4 build==1.5.0 wheel==0.48.0
+uv run python setup.py copy_build_files
+uv pip install . --no-build-isolation
 ```
 
 ---
@@ -61,7 +63,7 @@ data = np.random.random((num_samples, dims)).astype(np.float32)
 query = np.random.random(dims).astype(np.float32)
 
 # 2. Build index directly from data (multithreaded by default)
-graph = deglib.builder.build_from_data(data, edges_per_vertex=32, callback="progress")
+graph = deglib.builder.build_from_data(data, edges_per_vertex=32, show_progress=True)
 
 # 3. Query top-k nearest neighbors
 indices, distances = graph.search(query, k=10, eps=0.1)
@@ -78,7 +80,7 @@ All search graphs are represented by `DynamicExplorationGraph`, backed by one of
 
 1. **Fixed-Capacity Mutable (`SizeBoundedGraph`)**: Memory is preallocated for a fixed maximum capacity. Fast and memory-efficient for static/batch datasets.
    ```python
-   space = deglib.FloatSpace.create(dims=128, metric=deglib.Metric.FP32_L2)
+   space = deglib.FloatSpace.create(dim=128, metric=deglib.Metric.FP32_L2)
    graph = deglib.create_empty(capacity=10_000, feature_space=space, edges_per_vertex=32)
    ```
 
@@ -201,7 +203,7 @@ data = np.random.randn(num_vectors, dims).astype(np.float32)
 query = np.random.randn(dims).astype(np.float32)
 
 # 1. Pre-sort vectors using FLAS for improved memory locality and index construction speed
-perm = presort(data, metric=deglib.Metric.FP32_InnerProduct, callback="progress")
+perm = presort(data, metric=deglib.Metric.FP32_InnerProduct, show_progress=True)
 sorted_data = data[perm]
 
 # 2. Build exploration graph on unquantized/original data
@@ -209,7 +211,7 @@ graph = deglib.builder.build_from_data(
     sorted_data,
     metric=deglib.Metric.FP32_InnerProduct,
     edges_per_vertex=32,
-    callback="progress",
+    show_progress=True,
 )
 
 # 3. Prune redundant non-RNG edges to optimize graph topology
@@ -235,7 +237,7 @@ searcher = create_searcher(
 )
 
 # 7. Query search (query is automatically quantized and top candidates are reranked)
-indices, distances = searcher.search(query, k=10, eps=0.1, rerank_factor=1.5, return_distances=True)
+indices, distances = searcher.search(query, k=10, eps_or_ef=0.1, rerank_factor=1.5, return_distances=True)
 print("Top-10 nearest neighbor indices:", indices)
 print("Top-10 exact distances:", distances)
 ```

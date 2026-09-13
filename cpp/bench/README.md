@@ -100,12 +100,12 @@ Simulates streaming workloads and incremental graph maintenance:
 Evaluates edge refinement and quality improvement on regular graphs over iterations:
 
 ```bash
-./bench_edge_optimization audio --threads 8
+./bench_edge_optimization audio
 ```
 
 **Options:**
 * `--log-after <iters>`: Number of edge-swapping iterations between benchmark checkpoints (default: `100,000`).
-* `--max-iterations <iters>`: Maximum total swap iterations (default: `1,000,000`).
+* `--iterations <iters>`: Maximum total swap iterations (default: `1,000,000`).
 
 ---
 
@@ -115,7 +115,7 @@ Compares graph build time, cache locality, and resulting ANNS search performance
 2. FLAS (Fast Linear Assignment Sorter) 1D pre-sorted ordering.
 
 ```bash
-./bench_flas_presort sift1m --decay 0.9 --threads 12
+./bench_flas_presort sift1m --flas-decay 0.9 --threads 12
 ```
 
 ---

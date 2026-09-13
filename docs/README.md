@@ -24,14 +24,6 @@ uv run sphinx-build -b html . _build/html
 
 Once built, open `_build/html/index.html` in your browser.
 
-### Build Markdown
-
-To build Markdown documentation:
-
-```bash
-uv run sphinx-build -b markdown . _build/markdown
-```
-
 ### Clean Build Directory
 
 To remove previous build artifacts:

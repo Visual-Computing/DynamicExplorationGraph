@@ -352,14 +352,14 @@ namespace deglib::optimization {
 /// Prune the worst (longest/highest-weight) neighbors per vertex, replacing them with self-loops
 void prune_worst_edges(MutableGraph& graph, uint8_t prune_worst, size_t num_threads = 0);
 
-/// Parallel removal of edges violating the Monotonic Relative Neighbor Graph (MRNG) rule
-uint32_t prune_non_mrng_edges(MutableGraph& graph, size_t num_threads = 0);
+/// Parallel removal of edges violating the Relative Neighborhood Graph (RNG) rule
+uint32_t prune_non_rng_edges(MutableGraph& graph, size_t num_threads = 0);
 
-/// Remove non-MRNG edges using a globally weight-sorted strategy
-uint32_t prune_non_mrng_edges_weight_sorted(MutableGraph& graph, size_t num_threads = 0);
+/// Remove non-RNG edges using a globally weight-sorted strategy
+uint32_t prune_non_rng_edges_weight_sorted(MutableGraph& graph, size_t num_threads = 0);
 
-/// Iteratively remove non-MRNG edges per-vertex until convergence
-uint32_t prune_non_mrng_edges_iterative(MutableGraph& graph, size_t num_threads = 0);
+/// Iteratively remove non-RNG edges per-vertex until convergence
+uint32_t prune_non_rng_edges_iterative(MutableGraph& graph, size_t num_threads = 0);
 
 /// Optimize graph edges using continuous EvenRegularGraphBuilder improvement steps
 void optimize_edges(MutableGraph& graph, uint8_t k_opt, float eps_opt, uint8_t i_opt, uint32_t iterations);
@@ -381,6 +381,7 @@ vector<uint32_t> presort(
 
 /// Stateful EVP quantizer holding the shared non_zeros setting.
 /// Construct once and reuse for database and query quantization.
+/// Defined in deglib::quantization::evp; the factory make_evp_quantizer lives in deglib::optimization.
 class EvpQuantizer {
     explicit EvpQuantizer(uint32_t non_zeros);
     void quantize(float* src, byte* dst, size_t count, uint32_t dim, size_t num_threads = 0);
@@ -506,7 +507,7 @@ public:
     uint32_t getExternalLabel(uint32_t internal_index);
     uint32_t getInternalIndex(uint32_t label);
     uint32_t* getNeighborIndices(uint32_t internal_index);
-    uint32_t* getEntryVertexIndices();
+    const std::vector<uint32_t>& getEntryVertexIndices() const;
     bool hasEdge(uint32_t from_index, uint32_t to_index);
 
     ResultSet search(span<float> query, uint32_t k, float eps = 0.0f, Filter* filter = nullptr, uint32_t max_dc = 0);
@@ -516,8 +517,8 @@ public:
 /// Abstract base interface for mutable graphs supporting vertex & edge updates
 class MutableGraph : public InternalGraph {
 public:
-    bool addVertex(uint32_t label, byte* feature_vector);
-    bool removeVertex(uint32_t label);
+    uint32_t addVertex(uint32_t label, byte* feature_vector);
+    std::vector<uint32_t> removeVertex(uint32_t label);
     void changeEdges(uint32_t internal_index, uint32_t* neighbor_indices, float* neighbor_weights);
     float* getNeighborWeights(uint32_t internal_index);
     float getEdgeWeight(uint32_t from_index, uint32_t to_index);
@@ -535,7 +536,7 @@ public:
     static SizeBoundedGraph create_empty(uint32_t max_vertex_count, uint8_t edges_per_vertex, FloatSpace feature_space);
     static SizeBoundedGraph from_graph(InternalGraph& graph, uint32_t new_max_size = 0);
     static SizeBoundedGraph from_graph(InternalGraph& graph, FloatSpace custom_space, void* custom_features = nullptr, uint32_t new_max_size = 0);
-    static SizeBoundedGraph load_from_file(const char* file_path, FloatSpace feature_space);
+    // Loading is done via the free function deglib::graph::load_sizebounded_graph(const char* file_path, uint32_t new_max_size = 0)
 };
 
 /// Mutable graph with chunk-allocated dynamically growing memory
@@ -545,7 +546,7 @@ public:
 
     static DynamicGraph from_graph(InternalGraph& graph, uint32_t chunk_size = 1024);
     static DynamicGraph from_graph(InternalGraph& graph, FloatSpace custom_space, void* custom_features = nullptr, uint32_t chunk_size = 1024);
-    static DynamicGraph load_from_file(const char* file_path, FloatSpace feature_space, uint32_t chunk_size = 1024);
+    // Loading is done via the free function deglib::graph::load_dynamic_graph(const char* file_path, uint32_t chunk_size = 1024)
 };
 
 /// Compact immutable graph layout optimized for query serving
@@ -554,7 +555,7 @@ public:
     ReadOnlyGraph(uint32_t max_vertex_count, uint8_t edges_per_vertex, FloatSpace feature_space);
     ReadOnlyGraph(uint32_t max_vertex_count, uint8_t edges_per_vertex, FloatSpace feature_space, InternalGraph& graph);
 
-    static ReadOnlyGraph load_from_file(const char* file_path, FloatSpace feature_space);
+    // Loading is done via the free function deglib::graph::load_readonly_graph(const char* file_path)
 };
 
 } // namespace deglib::graph
@@ -571,11 +572,13 @@ Runtime hardware feature detection and SIMD instruction set configuration.
 ```cpp
 namespace deglib::cpu {
 
-enum class InstructionSet {
-    Auto,   ///< Automatically select the highest instruction set supported by host CPU
-    Scalar, ///< Standard scalar operations
-    AVX2,   ///< 256-bit AVX2 + FMA SIMD
-    AVX512  ///< 512-bit AVX-512 SIMD
+enum class InstructionSet : uint8_t {
+    Auto = 0,        ///< Automatically select the highest instruction set supported by host CPU
+    Scalar = 1,      ///< Standard scalar operations
+    AVX2 = 2,        ///< 256-bit AVX2 + FMA SIMD
+    AVX2_VNNI = 3,   ///< 256-bit AVX2 with VNNI acceleration
+    AVX512 = 4,      ///< 512-bit AVX-512 SIMD
+    AVX512_VNNI = 5  ///< 512-bit AVX-512 with VNNI acceleration
 };
 
 /// Runtime AVX2 support check
@@ -584,7 +587,7 @@ bool has_avx2();
 /// Runtime AVX-512 support check
 bool has_avx512();
 
-/// Returns string representation ("Auto", "Scalar", "AVX2", "AVX512")
+/// Returns string representation ("Auto", "Scalar", "AVX2", "AVX2_VNNI", "AVX512", "AVX512_VNNI")
 const char* instruction_set_to_string(InstructionSet inst);
 
 } // namespace deglib::cpu
@@ -602,7 +605,7 @@ Cache line prefetching utilities.
 namespace deglib::memory {
 
 /// Prefetches memory into L1 cache for subsequent distance computations
-void prefetch(void* ptr, size_t size = 128);
+void prefetch(const char* ptr, size_t size = 128);
 
 } // namespace deglib::memory
 ```

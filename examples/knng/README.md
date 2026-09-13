@@ -11,10 +11,10 @@ Given $N$ high-dimensional vectors, the goal of k-NNG construction (self-join) i
 
 The approach demonstrates **Mode 4 (`evp-rerank`)**, which achieves state-of-the-art trade-offs between construction speed and neighbor recall ($\ge 88\%$):
 
-1. **EVP Quantization**: Feature vectors are converted to compact sparse EVP-bit representations using `deglib.optimization.EvpQuantizer` (`--non-zeros 512`).
+1. **EVP Quantization**: Feature vectors are converted to compact sparse EVP-bit representations using `deglib.optimization.EvpQuantizer` (`--non-zeros 700`).
 2. **DEG Construction**: A dynamic exploration graph is constructed using DEG's `GraphBuilder` with the `EVP_InnerProduct` metric for fast quantized distance computation.
 3. **Graph Exploration**: Exploration for vertex $i$ walks the DEG graph neighborhood using fast EVP bit-level inner product distances to collect candidates (`evpK = 50`).
-4. **FP16 Candidate Reranking**: Exact inner-product distances are computed using `deglib_cpp.floats_to_fp16` and `deglib_cpp.fp16_to_floats` for candidate sets to produce final $k$-nearest neighbor edges.
+4. **FP16 Candidate Reranking**: Candidate sets are reranked with exact half-precision inner-product distances via `deglib.search.rerank` (using an `FP16_InnerProduct` space) to produce final $k$-nearest neighbor edges.
 
 ## Prerequisites: Building the Python Library (`deglib`)
 
@@ -34,7 +34,7 @@ uv sync --reinstall-package deglib
 
 ## Running the Benchmark with `uv`
 
-### 1. Run Full Benchmark (200K Wikipedia BGE-M3 vectors)
+### 1. Run Benchmark (small Wikipedia BGE-M3 dataset, ~10K vectors)
 
 ```bash
 uv run main.py
@@ -45,11 +45,13 @@ uv run main.py
 
 ## Command-Line Options
 
-- `--dataset`: Path to HDF5 dataset file or `"small"` (default: downloads/uses Wikipedia BGE-M3 200K dataset).
-- `--max-vecs`: Limit vector count for fast verification.
+- `--dataset`: Path to HDF5 dataset file or `"small"` (default: downloads/uses the small Wikipedia BGE-M3 dataset).
 - `--non-zeros`: Number of non-zero active components in EVP quantization 
 - `--k-graph`: Graph degree per vertex 
+- `--k-ext`: Builder search size (extension) parameter 
 - `--max-dist`: Maximum distance calculation budget per query 
 - `--evpK`: Number of candidate vertices retrieved before FP16 reranking 
+- `--prune-worst`: Number of worst neighbors to replace with self-loops 
 - `--threads`: Number of parallel execution threads
 - `--output-plot`: Save execution time breakdown chart to a file.
+- `--no-show`: Disable GUI plot display.
