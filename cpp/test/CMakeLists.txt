@@ -8,6 +8,8 @@ set(GTEST_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../external/fmt/test/gtest)
 set(DEGLIB_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../deglib/include)
 set(TEST_MAIN ${CMAKE_CURRENT_SOURCE_DIR}/test_main.cpp)
 
+option(BUILD_REGRESSION_TESTS "build heavy regression test binaries (runtime performance benchmarks)" OFF)
+
 # Static library for GoogleTest to avoid compiling gmock-gtest-all.cc multiple times
 add_library(gtest STATIC ${GTEST_SOURCE})
 target_include_directories(gtest SYSTEM PUBLIC ${GTEST_INCLUDE})
@@ -70,7 +72,10 @@ add_deglib_test(test_uint8_inner_product src/unit/distance/test_uint8_inner_prod
 add_deglib_test(test_int8_inner_product src/unit/distance/test_int8_inner_product.cpp)
 add_deglib_test(test_int8_l2 src/unit/distance/test_int8_l2.cpp)
 add_deglib_test(test_sizebounded_graph src/unit/graph/test_sizebounded_graph.cpp)
-add_deglib_test(test_dynamic_graph src/unit/graph/test_dynamic_graph.cpp)
+add_deglib_test(test_dynamic_graph_construct src/unit/graph/test_dynamic_graph_construct.cpp)
+add_deglib_test(test_dynamic_graph_growth src/unit/graph/test_dynamic_graph_growth.cpp)
+add_deglib_test(test_dynamic_graph_edges src/unit/graph/test_dynamic_graph_edges.cpp)
+add_deglib_test(test_dynamic_graph_search src/unit/graph/test_dynamic_graph_search.cpp)
 add_deglib_test(test_readonly_graph src/unit/graph/test_readonly_graph.cpp)
 add_deglib_test(test_graph src/unit/test_graph.cpp)
 add_deglib_test(test_pruning src/unit/optimization/test_pruning.cpp)
@@ -82,7 +87,10 @@ add_deglib_test(test_evp_inner_product src/unit/distance/test_evp_inner_product.
 add_deglib_integration_test(test_builder_integration src/integration/test_builder_integration.cpp)
 add_deglib_integration_test(test_distances_integration src/integration/test_distances_integration.cpp)
 
-# Regression tests (100k vectors, performance benchmarking — built but NOT registered with CTest)
+# Regression tests (100k vectors, performance benchmarking). Gated behind
+# BUILD_REGRESSION_TESTS: heavy to compile and never run by ctest, so CI and
+# fast local builds skip them.
+if(BUILD_REGRESSION_TESTS)
 add_deglib_test_no_ctest(test_builder_regression src/regression/test_builder_regression.cpp)
 add_deglib_test_no_ctest(test_flas_regression src/regression/optimization/flas/test_fast_linear_assignment_sorter_regression.cpp)
 add_deglib_test_no_ctest(test_sizebounded_graph_regression src/regression/graph/test_sizebounded_graph_regression.cpp)
@@ -92,4 +100,5 @@ add_deglib_test_no_ctest(test_evp_quantize_regression src/regression/optimizatio
 add_deglib_test_no_ctest(test_search_regression src/regression/test_search_regression.cpp)
 add_deglib_test_no_ctest(test_filter_regression src/regression/test_filter_regression.cpp)
 add_deglib_test_no_ctest(test_distances_regression src/regression/test_distances_regression.cpp)
+endif()
 
