@@ -115,4 +115,25 @@ inline DynamicExplorationGraph load_mutable_graph(const char* path_graph, const 
     return DynamicExplorationGraph(std::move(graph));
 }
 
+/**
+ * Create a high-performance Searcher over a DynamicExplorationGraph facade.
+ * Convenience overloads that forward to deglib::search::make_searcher using the graph's internal representation,
+ * so end users can pass the public graph type directly.
+ */
+inline std::unique_ptr<deglib::search::SearcherBase> make_searcher(const DynamicExplorationGraph& graph) {
+    return deglib::search::make_searcher(graph.internal());
+}
+
+template <typename QuantT>
+    requires deglib::quantization::Quantizer<QuantT>
+inline std::unique_ptr<deglib::search::SearcherBase> make_searcher(const DynamicExplorationGraph& graph, QuantT quantizer) {
+    return deglib::search::make_searcher(graph.internal(), std::move(quantizer));
+}
+
+template <typename QuantT, typename RefinerT>
+    requires(deglib::quantization::Quantizer<QuantT> || std::is_same_v<QuantT, deglib::search::NoQuantizer>)
+inline std::unique_ptr<deglib::search::SearcherBase> make_searcher(const DynamicExplorationGraph& graph, QuantT quantizer, RefinerT refiner) {
+    return deglib::search::make_searcher(graph.internal(), std::move(quantizer), std::move(refiner));
+}
+
 }  // namespace deglib

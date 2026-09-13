@@ -1,6 +1,7 @@
 // test_searcher.cpp — Unit tests for deglib::search::Searcher (searcher.h)
 
 #include "deglib/builder.h"
+#include "deglib/deglib.h"
 #include "deglib/distances.h"
 #include "deglib/graph.h"
 #include "deglib/optimization.h"
@@ -45,6 +46,27 @@ TEST(SearcherTest, DirectFP32Search) {
     EXPECT_EQ(span_res.size(), 5u);
     EXPECT_EQ(span_res.indices[0], 0u);
     EXPECT_NEAR(span_res.distances[0], 0.0f, 1e-5f);
+}
+
+TEST(SearcherTest, MakeSearcherAcceptsFacade) {
+    const uint32_t dim = 4;
+    const uint32_t count = 20;
+
+    std::vector<float> data(count * dim);
+    for (size_t i = 0; i < data.size(); ++i) {
+        data[i] = static_cast<float>(i * 1.5f + 0.1f);
+    }
+
+    auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
+
+    // The facade-level overload accepts a DynamicExplorationGraph directly (no .internal() bridge needed).
+    auto searcher = deglib::make_searcher(graph);
+    ASSERT_NE(searcher, nullptr);
+
+    auto res = searcher->search(std::span<const float>(data.data(), dim), 5, 0.1f, 1.0f, /*return_distances=*/true);
+    EXPECT_EQ(res.size(), 5u);
+    EXPECT_EQ(res.indices[0], 0u);
+    EXPECT_NEAR(res.distances[0], 0.0f, 1e-5f);
 }
 
 TEST(SearcherTest, QuantizedInt8WithFP16Refiner) {
