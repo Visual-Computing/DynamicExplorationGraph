@@ -32,6 +32,7 @@ jobs:
         submodules: recursive
 
     - name: Install Ninja
+      if: runner.os != 'Windows'
       run: pip install ninja
 
     - name: Setup ccache
@@ -40,7 +41,12 @@ jobs:
         key: ${{ matrix.os }}-ccache-${{ github.ref_name }}-${{ github.sha }}
         restore-keys: ${{ matrix.os }}-ccache-${{ github.ref_name }}-
 
-    - name: Configure CMake
+    - name: Configure CMake (Windows)
+      if: runner.os == 'Windows'
+      run: cmake -B build -S cpp -DFORCE_AVX2=ON -DENABLE_BENCHMARKS=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+    - name: Configure CMake (Non-Windows)
+      if: runner.os != 'Windows'
       run: cmake -B build -S cpp -G Ninja -DCMAKE_BUILD_TYPE=Release -DFORCE_AVX2=ON -DENABLE_BENCHMARKS=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
     - name: Build
