@@ -93,7 +93,7 @@ TEST(SearcherTest, QuantizedInt8WithFP16Refiner) {
     deglib::distances::fp16::floats_to_fp16(data.data(), base_fp16.data(), data.size());
     auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP16_L2);
 
-    using RefinerT = deglib::search::ExactRefiner<uint16_t>;
+    using RefinerT = deglib::search::Reranker<uint16_t>;
 
     auto searcher = deglib::search::make_searcher(
         ro_graph,
@@ -131,7 +131,7 @@ TEST(SearcherTest, QuantizedUint8WithFP32Refiner) {
 
     auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP32_L2);
 
-    using RefinerT = deglib::search::ExactRefiner<float>;
+    using RefinerT = deglib::search::Reranker<float>;
 
     auto searcher = deglib::search::make_searcher(
         ro_graph,
@@ -178,7 +178,7 @@ TEST(SearcherTest, EVPQuantizerWithFP32Refiner) {
     auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP32_InnerProduct);
 
     using QuantT = deglib::quantization::evp::EvpQuantizer;
-    using RefinerT = deglib::search::ExactRefiner<float>;
+    using RefinerT = deglib::search::Reranker<float>;
 
     auto searcher = deglib::search::make_searcher(
         ro_graph,

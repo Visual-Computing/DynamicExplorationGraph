@@ -54,10 +54,10 @@ TEST(SearchRegression, Rerank_FP32_L2_Benchmark) {
         }
     }
 
-    // Warm-up run
-    auto warm_results = deglib::search::rerank(
-        space, query_vectors.data(), num_queries, base_vectors.data(), num_base, candidates.data(), candidates_per_query, k_top, num_threads
-    );
+   deglib::search::Reranker<float> reranker(space, base_vectors.data(), num_base);
+
+   // Warm-up run
+   auto warm_results = reranker.rerank(query_vectors.data(), num_queries, candidates.data(), candidates_per_query, k_top, num_threads);
     EXPECT_EQ(warm_results.size(), num_queries);
 
     // Benchmark run
@@ -65,9 +65,7 @@ TEST(SearchRegression, Rerank_FP32_L2_Benchmark) {
     auto start = std::chrono::high_resolution_clock::now();
 
     for (int it = 0; it < iterations; ++it) {
-        auto results = deglib::search::rerank(
-            space, query_vectors.data(), num_queries, base_vectors.data(), num_base, candidates.data(), candidates_per_query, k_top, num_threads
-        );
+       auto results = reranker.rerank(query_vectors.data(), num_queries, candidates.data(), candidates_per_query, k_top, num_threads);
     }
 
     auto end = std::chrono::high_resolution_clock::now();
@@ -113,10 +111,10 @@ TEST(SearchRegression, Rerank_FP16_InnerProduct_Benchmark) {
         }
     }
 
-    // Warm-up run
-    auto warm_results = deglib::search::rerank(
-        space, query_vectors.data(), num_queries, base_vectors.data(), num_base, candidates.data(), candidates_per_query, k_top, num_threads
-    );
+   deglib::search::Reranker<uint16_t> reranker(space, base_vectors.data(), num_base);
+
+   // Warm-up run
+   auto warm_results = reranker.rerank(query_vectors.data(), num_queries, candidates.data(), candidates_per_query, k_top, num_threads);
     EXPECT_EQ(warm_results.size(), num_queries);
 
     // Benchmark run
@@ -124,9 +122,7 @@ TEST(SearchRegression, Rerank_FP16_InnerProduct_Benchmark) {
     auto start = std::chrono::high_resolution_clock::now();
 
     for (int it = 0; it < iterations; ++it) {
-        auto results = deglib::search::rerank(
-            space, query_vectors.data(), num_queries, base_vectors.data(), num_base, candidates.data(), candidates_per_query, k_top, num_threads
-        );
+       auto results = reranker.rerank(query_vectors.data(), num_queries, candidates.data(), candidates_per_query, k_top, num_threads);
     }
 
     auto end = std::chrono::high_resolution_clock::now();

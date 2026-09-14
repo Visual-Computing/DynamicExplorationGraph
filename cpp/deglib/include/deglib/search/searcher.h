@@ -71,68 +71,10 @@ struct NoQuantizer {};
 
 // ============================================================================
 // Refiner Concept Wrappers
-// ============================================================================
+// Concrete refiners are deglib::search::Reranker<DataT> instances from <deglib/search.h>.
+// NoRefiner bypasses reranking at compile-time via zero overhead.
 
-struct NoRefiner {
-    static constexpr bool enabled = false;
-
-    template <typename QueryT>
-    static inline uint32_t rerank(const QueryT*, uint32_t, const uint32_t*, size_t, uint32_t, uint32_t*, float*, bool, bool) {
-        return 0;
-    }
-};
-
-template <typename RefineDataT>
-struct ExactRefiner {
-    static constexpr bool enabled = true;
-    deglib::distances::FloatSpace space;
-    const RefineDataT* base_vectors = nullptr;
-    size_t num_base_vectors = 0;
-
-    ExactRefiner(deglib::distances::FloatSpace sp, const RefineDataT* base, size_t count) : space(std::move(sp)), base_vectors(base), num_base_vectors(count) {}
-
-    template <typename QueryT>
-    inline uint32_t rerank(
-        const QueryT* query,
-        uint32_t dim,
-        const uint32_t* candidate_indices,
-        size_t num_cands,
-        uint32_t k,
-        uint32_t* out_indices,
-        float* out_distances,
-        bool return_distances,
-        bool unsorted
-    ) const {
-        if (!base_vectors || num_cands == 0 || k == 0) return 0;
-
-        auto cands_span = std::span<const uint32_t>(candidate_indices, num_cands);
-        auto out_idx_span = std::span<uint32_t>(out_indices, k);
-        auto out_dist_span = (return_distances && out_distances) ? std::span<float>(out_distances, k) : std::span<float>{};
-
-        if constexpr (std::is_same_v<QueryT, RefineDataT>) {
-            auto q_span = std::span<const std::byte>(reinterpret_cast<const std::byte*>(query), dim * sizeof(QueryT));
-            return deglib::search::rerank(
-                space, q_span, base_vectors, num_base_vectors, cands_span, k, out_idx_span, out_dist_span, return_distances, unsorted
-            );
-        } else if constexpr (std::is_same_v<QueryT, float> && std::is_same_v<RefineDataT, uint16_t>) {
-            std::vector<uint16_t> q_fp16(dim);
-            deglib::distances::fp16::floats_to_fp16(query, q_fp16.data(), dim);
-            auto q_span = std::span<const std::byte>(reinterpret_cast<const std::byte*>(q_fp16.data()), dim * sizeof(uint16_t));
-            return deglib::search::rerank(
-                space, q_span, base_vectors, num_base_vectors, cands_span, k, out_idx_span, out_dist_span, return_distances, unsorted
-            );
-        } else if constexpr (std::is_same_v<QueryT, uint16_t> && std::is_same_v<RefineDataT, float>) {
-            std::vector<float> q_f32(dim);
-            deglib::distances::fp16::fp16_to_floats(query, q_f32.data(), dim);
-            auto q_span = std::span<const std::byte>(reinterpret_cast<const std::byte*>(q_f32.data()), dim * sizeof(float));
-            return deglib::search::rerank(
-                space, q_span, base_vectors, num_base_vectors, cands_span, k, out_idx_span, out_dist_span, return_distances, unsorted
-            );
-        }
-        return 0;
-    }
-};
-
+struct NoRefiner {};
 // ============================================================================
 // Abstract Searcher Interface
 // ============================================================================
@@ -612,7 +554,7 @@ class SearcherImpl : public SearcherBase {
             entries.empty() ? graph_->search(query_span, fetch_k, eps, nullptr, 0) : graph_->search(query_span, entries, fetch_k, eps, nullptr, 0);
 
         // 3. Static Compile-Time Reranker Check
-        if constexpr (RefinerT::enabled) {
+        if constexpr (!std::is_same_v<RefinerT, NoRefiner>) {
             if (fetch_k > k) {
                 const size_t found_count = result.size();
 
@@ -787,7 +729,7 @@ class SearcherImpl : public SearcherBase {
         const size_t found_count = static_cast<size_t>(pool.size());
         if (found_count == 0) return 0;
 
-        if constexpr (RefinerT::enabled) {
+        if constexpr (!std::is_same_v<RefinerT, NoRefiner>) {
             if (fetch_k > k) {
                 uint32_t stack_cand_indices[256];
                 std::unique_ptr<uint32_t[]> heap_cand_indices;

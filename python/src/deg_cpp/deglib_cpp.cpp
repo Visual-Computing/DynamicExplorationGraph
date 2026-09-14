@@ -629,114 +629,111 @@ py::array_t<float> float_space_compute_distances(const deglib::distances::FloatS
 
     return result;
 }
+// ============================================================================
+// Standalone Reranker Wrapper
+// ============================================================================
 
-py::object search_rerank(
-    const deglib::distances::FloatSpace& space,
-    py::array queries,
-    py::array_t<uint32_t> candidate_indices,
-    py::object base_vectors = py::none(),
-    size_t k_top = 0,
-    size_t num_threads = 0,
-    bool return_distances = false,
-    bool unsorted = false
-) {
-    auto q_buf = queries.request();
-    if (q_buf.ndim != 2) {
-        throw std::invalid_argument("queries must be a 2D array");
-    }
-    const size_t req_bytes = space.get_data_size();
-    const size_t query_stride_bytes = size_t(q_buf.shape[1]) * q_buf.itemsize;
-    if (query_stride_bytes != req_bytes) {
-        throw std::invalid_argument(
-            std::format(
-                "Query row size in bytes ({}) does not match required "
-                "feature space data size ({})",
-                query_stride_bytes, req_bytes
-            )
-        );
-    }
-    size_t n_queries = q_buf.shape[0];
+class RerankerPy {
+  private:
+    py::array base_vectors_holder_;
+    deglib::search::Reranker<std::byte> reranker_;
 
-    auto cand_buf = candidate_indices.request();
-    if (cand_buf.ndim != 2) {
-        throw std::invalid_argument("candidate_indices must be a 2D array");
-    }
-    size_t n_cand_rows = cand_buf.shape[0];
-    size_t evp_k = cand_buf.shape[1];
-
-    if (n_cand_rows != n_queries) {
-        throw std::invalid_argument("Number of candidate rows must match number of queries");
-    }
-
-    if (k_top == 0 || k_top > evp_k) {
-        k_top = evp_k;
-    }
-
-    bool has_base_vectors = !base_vectors.is_none();
-    py::buffer_info base_buf;
-    if (has_base_vectors) {
-        base_buf = py::cast<py::array>(base_vectors).request();
-        if (base_buf.ndim != 2) {
+    static const std::byte* validate_and_get_ptr(const deglib::distances::FloatSpace& space, const py::array& base_vectors) {
+        auto buf = base_vectors.request();
+        if (buf.ndim != 2) {
             throw std::invalid_argument("base_vectors must be a 2D array");
         }
-        const size_t base_stride_bytes = size_t(base_buf.shape[1]) * base_buf.itemsize;
-        if (base_stride_bytes != req_bytes) {
-            throw std::invalid_argument(
-                std::format(
-                    "Base vector row size in bytes ({}) does not match "
-                    "required feature space data size ({})",
-                    base_stride_bytes, req_bytes
-                )
-            );
+        const size_t req_bytes = space.get_data_size();
+        const size_t stride_bytes = size_t(buf.shape[1]) * buf.itemsize;
+        if (stride_bytes != req_bytes) {
+            throw std::invalid_argument(std::format(
+                "Base vector row size ({}) does not match feature space data size ({})",
+                stride_bytes, req_bytes));
         }
+        return static_cast<const std::byte*>(buf.ptr);
     }
 
-    const void* base_ptr = has_base_vectors ? base_buf.ptr : nullptr;
-    size_t num_base_vectors = has_base_vectors ? base_buf.shape[0] : 0;
+  public:
+    RerankerPy(const deglib::distances::FloatSpace& space, py::array base_vectors)
+        : base_vectors_holder_(std::move(base_vectors)),
+          reranker_(space, validate_and_get_ptr(space, base_vectors_holder_), base_vectors_holder_.request().shape[0]) {}
 
-    auto results =
-        deglib::search::rerank(space, q_buf.ptr, n_queries, base_ptr, num_base_vectors, static_cast<const uint32_t*>(cand_buf.ptr), evp_k, k_top, num_threads);
+    size_t get_num_base_vectors() const noexcept { return reranker_.getNumBaseVectors(); }
 
-    auto result_indices = py::array_t<uint32_t>({n_queries, k_top});
-    auto res_indices_buf = result_indices.request();
-    uint32_t* ind_ptr = static_cast<uint32_t*>(res_indices_buf.ptr);
-
-    py::array_t<float> result_distances;
-    float* dist_ptr = nullptr;
-    if (return_distances) {
-        result_distances = py::array_t<float>({n_queries, k_top});
-        dist_ptr = static_cast<float*>(result_distances.request().ptr);
-    }
-
-    // search query has producted a ResultSet (a heap)
-    for (size_t i = 0; i < n_queries; ++i) {
-        auto& res_set = results[i];
-        if (!unsorted) {
-            res_set.sort();
+    py::object rerank(
+        py::array queries,
+        py::array_t<uint32_t> candidate_indices,
+        size_t k_top = 0,
+        size_t num_threads = 0,
+        bool return_distances = false,
+        bool unsorted = false
+    ) const {
+        auto q_buf = queries.request();
+        if (q_buf.ndim != 2) {
+            throw std::invalid_argument("queries must be a 2D array");
         }
-        size_t actual_k = res_set.size();
-        uint32_t* row_ind = ind_ptr + i * k_top;
-        float* row_dist = dist_ptr ? (dist_ptr + i * k_top) : nullptr;
+        const size_t req_bytes = reranker_.getSpace().get_data_size();
+        const size_t query_stride_bytes = size_t(q_buf.shape[1]) * q_buf.itemsize;
+        if (query_stride_bytes != req_bytes) {
+            throw std::invalid_argument(std::format(
+                "Query row size in bytes ({}) does not match required feature space data size ({})",
+                query_stride_bytes, req_bytes));
+        }
+        const size_t n_queries = q_buf.shape[0];
 
-        for (size_t k = 0; k < actual_k; ++k) {
-            row_ind[k] = res_set[k].getIdentifier();
-            if (row_dist) {
-                row_dist[k] = res_set[k].getDistance();
+        auto cand_buf = candidate_indices.request();
+        if (cand_buf.ndim != 2) {
+            throw std::invalid_argument("candidate_indices must be a 2D array");
+        }
+        if (static_cast<size_t>(cand_buf.shape[0]) != n_queries) {
+            throw std::invalid_argument("Number of candidate rows must match number of queries");
+        }
+
+        const size_t evp_k = cand_buf.shape[1];
+        if (k_top == 0 || k_top > evp_k) {
+            k_top = evp_k;
+        }
+
+        auto results = reranker_.rerank(q_buf.ptr, n_queries, static_cast<const uint32_t*>(cand_buf.ptr), evp_k, k_top, num_threads);
+
+        auto result_indices = py::array_t<uint32_t>({n_queries, k_top});
+        uint32_t* ind_ptr = static_cast<uint32_t*>(result_indices.request().ptr);
+
+        py::array_t<float> result_distances;
+        float* dist_ptr = nullptr;
+        if (return_distances) {
+            result_distances = py::array_t<float>({n_queries, k_top});
+            dist_ptr = static_cast<float*>(result_distances.request().ptr);
+        }
+
+        for (size_t i = 0; i < n_queries; ++i) {
+            auto& res_set = results[i];
+            if (!unsorted) {
+                res_set.sort();
+            }
+            const size_t actual_k = res_set.size();
+            uint32_t* row_ind = ind_ptr + i * k_top;
+            float* row_dist = dist_ptr ? (dist_ptr + i * k_top) : nullptr;
+            for (size_t k = 0; k < actual_k; ++k) {
+                row_ind[k] = res_set[k].getIdentifier();
+                if (row_dist) {
+                    row_dist[k] = res_set[k].getDistance();
+                }
+            }
+            for (size_t k = actual_k; k < k_top; ++k) {
+                row_ind[k] = std::numeric_limits<uint32_t>::max();
+                if (row_dist) {
+                    row_dist[k] = std::numeric_limits<float>::max();
+                }
             }
         }
-        for (size_t k = actual_k; k < k_top; ++k) {
-            row_ind[k] = std::numeric_limits<uint32_t>::max();
-            if (row_dist) {
-                row_dist[k] = std::numeric_limits<float>::max();
-            }
-        }
-    }
 
-    if (return_distances) {
-        return py::make_tuple(result_indices, result_distances);
+        if (return_distances) {
+            return py::make_tuple(result_indices, result_distances);
+        }
+        return result_indices;
     }
-    return result_indices;
-}
+};
 
 // ============================================================================
 // Fast Searcher Wrapper
@@ -774,12 +771,12 @@ class SearcherPy {
         auto make_searcher_for_quant = [&]<typename QuantT>(QuantT q) {
             if (rerank_space.has_value() && base_vectors_ptr != nullptr) {
                 if (is_fp16_base) {
-                    using RefinerT = deglib::search::ExactRefiner<uint16_t>;
+                    using RefinerT = deglib::search::Reranker<uint16_t>;
                     searcher_ = std::make_unique<deglib::search::SearcherImpl<QuantT, RefinerT>>(
                         graph.internal(), std::move(q), RefinerT(*rerank_space, static_cast<const uint16_t*>(base_vectors_ptr), num_base_vectors)
                     );
                 } else {
-                    using RefinerT = deglib::search::ExactRefiner<float>;
+                    using RefinerT = deglib::search::Reranker<float>;
                     searcher_ = std::make_unique<deglib::search::SearcherImpl<QuantT, RefinerT>>(
                         graph.internal(), std::move(q), RefinerT(*rerank_space, static_cast<const float*>(base_vectors_ptr), num_base_vectors)
                     );
@@ -1567,10 +1564,24 @@ PYBIND11_MODULE(deglib_cpp, m) {
         return new deglib::search::Filter(ptr, size, max_value, max_label_count);
     });
 
-    search_module.def(
-        "rerank", &search_rerank, py::arg("space"), py::arg("queries"), py::arg("candidate_indices"), py::arg("base_vectors") = py::none(),
-        py::arg("k_top") = 0, py::arg("num_threads") = 0, py::arg("return_distances") = false, py::arg("unsorted") = false
-    );
+    py::class_<RerankerPy>(search_module, "Reranker")
+        .def(
+            py::init<const deglib::distances::FloatSpace&, py::array>(),
+            py::arg("space"),
+            py::arg("base_vectors"),
+            py::keep_alive<1, 3>()
+        )
+        .def("get_num_base_vectors", &RerankerPy::get_num_base_vectors)
+        .def(
+            "rerank",
+            &RerankerPy::rerank,
+            py::arg("queries"),
+            py::arg("candidate_indices"),
+            py::arg("k_top") = 0,
+            py::arg("num_threads") = 0,
+            py::arg("return_distances") = false,
+            py::arg("unsorted") = false
+        );
 
     py::class_<SearcherPy>(search_module, "Searcher")
         .def(

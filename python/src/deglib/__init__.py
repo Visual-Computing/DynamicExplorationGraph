@@ -5,7 +5,7 @@ from . import distances
 from . import graph
 from . import optimization
 from . import search
-from .search import Searcher, create_searcher
+from .search import Reranker, Searcher, create_searcher
 
 from .builder import GraphBuilder, BuilderStatus, build_from_data
 from .graph import (
@@ -34,7 +34,7 @@ __all__ = [
     "build_from_data",
     "FloatSpace",
     "Metric",
-    "builder",
+    "Reranker",
     "optimization",
     "analysis",
     "distances",

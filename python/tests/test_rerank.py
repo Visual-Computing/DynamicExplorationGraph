@@ -203,3 +203,47 @@ class TestRerankUnit:
         unsorted_res = deglib.search.rerank(self.space, queries, candidates, base, k_top=2, unsorted=True)
         assert unsorted_res.shape == (1, 2)
         assert set(unsorted_res[0]) == {0, 2}
+
+
+class TestRerankerClass:
+    def setup_method(self):
+        self.dims = 16
+        self.space = FloatSpace.create(self.dims, Metric.FP32_L2)
+
+    def test_reranker_class(self):
+        queries = np.zeros((1, self.dims), dtype=np.float32)
+        base = np.zeros((3, self.dims), dtype=np.float32)
+        base[0, 0] = 1.0
+        base[1, 0] = 3.0
+        base[2, 0] = 0.5
+        candidates = np.array([[0, 1, 2]], dtype=np.uint32)
+
+        reranker = deglib.Reranker(self.space, base)
+        assert reranker.get_num_base_vectors() == 3
+
+        res = reranker.rerank(queries, candidates, k_top=2)
+        assert res.shape == (1, 2)
+        assert res[0, 0] == 2
+        assert res[0, 1] == 0
+
+        indices, distances = reranker.rerank(queries, candidates, k_top=2, return_distances=True)
+        assert indices.shape == (1, 2)
+        assert distances.shape == (1, 2)
+        np.testing.assert_allclose(distances[0, 0], 0.25, rtol=1e-5)
+        np.testing.assert_allclose(distances[0, 1], 1.0, rtol=1e-5)
+
+    def test_reranker_rejects_mismatched_base_vectors(self):
+        mismatched = np.zeros((3, self.dims + 1), dtype=np.float32)
+        with pytest.raises(ValueError):
+            deglib.Reranker(self.space, mismatched)
+
+    def test_reranker_matches_free_function(self):
+        queries = np.zeros((2, self.dims), dtype=np.float32)
+        base = np.zeros((4, self.dims), dtype=np.float32)
+        for i in range(4):
+            base[i, 0] = float(i)
+        candidates = np.array([[0, 1, 2, 3], [3, 2, 1, 0]], dtype=np.uint32)
+
+        via_class = deglib.Reranker(self.space, base).rerank(queries, candidates, k_top=3)
+        via_function = deglib.search.rerank(self.space, queries, candidates, base, k_top=3)
+        np.testing.assert_array_equal(via_class, via_function)

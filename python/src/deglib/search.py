@@ -51,6 +51,54 @@ class Filter:
         return filter_labels.create_filter_obj(graph_size)
 
 
+class Reranker:
+    """
+    High-performance candidate reranker re-evaluating graph candidates with exact distances.
+
+    :param space: FloatSpace defining the distance metric and vector dimensionality.
+    :param base_vectors: 2D NumPy array of dataset vectors (shape: N_base x dim).
+    """
+
+    def __init__(self, space: FloatSpace, base_vectors: np.ndarray):
+        cpp_space = space.float_space_cpp if hasattr(space, "float_space_cpp") else space
+        contiguous_base = np.ascontiguousarray(base_vectors)
+        self.reranker_cpp = cpp_search.Reranker(cpp_space, contiguous_base)
+        self.base_vectors = contiguous_base
+
+    def get_num_base_vectors(self) -> int:
+        """Number of base vectors the reranker scores candidates against."""
+        return self.reranker_cpp.get_num_base_vectors()
+
+    def rerank(
+        self,
+        queries: np.ndarray,
+        candidate_indices: np.ndarray,
+        k_top: int = 0,
+        num_threads: int = 0,
+        return_distances: bool = False,
+        unsorted: bool = False,
+    ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+        """
+        Re-evaluate and rank candidate vector indices for each query against the base vectors.
+
+        :param queries: 2D NumPy array of query vectors (shape: N_queries x dim).
+        :param candidate_indices: 2D uint32 NumPy array of candidate indices per query (shape: N_queries x K_candidates).
+        :param k_top: Number of top nearest candidates to return per query (0 returns all candidates).
+        :param num_threads: Number of worker threads (0 uses all available CPU cores).
+        :param return_distances: If True, returns a tuple ``(indices, distances)``.
+        :param unsorted: If True, skips sorting candidate results by distance.
+        :return: 2D uint32 NumPy array of candidate IDs, or tuple ``(indices, distances)`` if `return_distances` is True.
+        """
+        return self.reranker_cpp.rerank(
+            np.ascontiguousarray(queries),
+            candidate_indices.astype(np.uint32, copy=False),
+            int(k_top),
+            int(num_threads),
+            bool(return_distances),
+            bool(unsorted),
+        )
+
+
 def rerank(
     space: FloatSpace,
     queries: np.ndarray,
@@ -77,17 +125,11 @@ def rerank(
     :param unsorted: If True, skips sorting candidate results by distance.
     :return: 2D uint32 NumPy array of candidate IDs, or tuple ``(indices, distances)`` if `return_distances` is True.
     """
-    cpp_space = space.float_space_cpp if hasattr(space, "float_space_cpp") else space
-    return cpp_search.rerank(
-        cpp_space,
-        queries,
-        candidate_indices.astype(np.uint32, copy=False),
-        base_vectors,
-        k_top,
-        num_threads,
-        return_distances,
-        unsorted,
+    target_vectors = queries if base_vectors is None else base_vectors
+    return Reranker(space, target_vectors).rerank(
+        queries, candidate_indices, k_top, num_threads, return_distances, unsorted
     )
+
 
 class Searcher:
     """
@@ -206,4 +248,4 @@ def create_searcher(
     )
 
 
-__all__ = ["Filter", "rerank", "Searcher", "create_searcher"]
+__all__ = ["Filter", "Reranker", "rerank", "Searcher", "create_searcher"]
