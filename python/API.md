@@ -113,6 +113,13 @@ class DynamicExplorationGraph:
     has_vertex(external_label) -> bool         # True if label exists in graph
     is_mutable() -> bool                       # True if graph can be modified via GraphBuilder
 
+   # --- Traversal Tuning ---
+   # Auto-tune traversal prefetch parameters (po, pl, nl) by timing traversal over sampled vertices.
+   # The graph self-samples its own features as queries; call once after construction.
+   # sample_count: vertices sampled as queries (capped at graph size); k: expected result count;
+   # ef: beam width (clamped to >= k); seed: sampling seed.
+   optimize(sample_count=50, k=100, ef=200, seed=7)
+
     # --- Conversions & Saving ---
     # Convert to compact, immutable graph (ReadOnlyGraph) for maximum query throughput
     to_readonly(feature_space=None, custom_features=None) -> DynamicExplorationGraph
@@ -250,7 +257,7 @@ fp16_to_floats(fp16_vals) -> np.ndarray
 Bitset-based label filtering and exact distance candidate reranking for search and exploration.
 
 ```python
-from deglib.search import Filter, rerank
+from deglib.search import Filter, rerank, Reranker
 
 class Filter:
     def __init__(valid_labels, max_value=-1, max_label_count=-1)
@@ -277,6 +284,38 @@ class Filter:
 # unsorted: If True, skips sorting the resulting candidates
 # Returns 2D uint32 array [Q, k_top] of candidate IDs, or (indices, distances) if return_distances is True.
 rerank(space, queries, candidate_indices, base_vectors=None, k_top=0, num_threads=0, return_distances=False, unsorted=False)
+
+
+# Stateful reranker holding base vectors for repeated exact-distance reranking.
+class Reranker:
+    # Constructor: Reranker(space, base_vectors)
+    # space: FloatSpace (metric + SIMD instruction set)
+    # base_vectors: 2D array [N, D] the candidates are scored against
+
+    # Auto-tune the reranker's prefetch parameters (po, pl) by timing reranking over sampled base
+    # vectors. Self-samples its own base vectors; call once after construction to tune for the
+    # expected operating point.
+    # sample_count: base vectors used as sample queries (capped at the base count)
+    # num_candidates: candidates scored per query (clamped to the base count)
+    # k: candidates kept per query after reranking (clamped to num_candidates)
+    optimize(sample_count=50, num_candidates=100, k=10)
+
+    # Read the active prefetch knobs: po is the lookahead offset in candidates (0 disables
+    # prefetching), pl the cache lines per candidate (0 prefetches the whole vector).
+    get_po() -> int
+    get_pl() -> int
+
+    # Override the prefetch knobs without auto-tuning. Prefetching is on by default (po=8, pl=0),
+    # which is the right starting point whenever the base vectors do not fit in cache.
+    # po/pl values <= 0 disable the respective knob.
+    set_prefetch(po, pl)
+
+    # Re-evaluate and rank candidate indices per query against the base vectors.
+    # Returns 2D uint32 array [Q, k_top], or (indices, distances) if return_distances is True.
+    rerank(queries, candidate_indices, k_top=0, num_threads=0, return_distances=False, unsorted=False) -> np.ndarray | tuple[np.ndarray, np.ndarray]
+
+    # Number of base vectors the reranker scores candidates against.
+    get_num_base_vectors() -> int
 
 
 # High-performance searcher with optional on-the-fly quantization and exact reranking.

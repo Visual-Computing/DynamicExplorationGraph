@@ -218,6 +218,20 @@ class DynamicExplorationGraph {
     void setNl(int32_t nl) { internal_graph_->setNl(nl); }
     void setPrefetch(int32_t po, int32_t pl, int32_t nl = 3) { internal_graph_->setPrefetch(po, pl, nl); }
 
+    /**
+     * Auto-tune the graph's traversal prefetch parameters (po, pl, nl) by empirically timing
+     * traversal over sampled vertices. The graph self-samples its own stored features as queries,
+     * so no external query buffer is needed. Forwards to the internal graph's optimize().
+     *
+     * @param sample_count  Number of vertices sampled as queries (capped at the graph size).
+     * @param k             Result count per traversal (the expected query operating point).
+     * @param ef            Beam width per traversal; clamped to at least k.
+     * @param seed          Random seed for query sampling.
+     */
+    void optimize(size_t sample_count = 50, uint32_t k = 100, uint32_t ef = 200, uint32_t seed = 7) const {
+        internal_graph_->optimize(sample_count, k, ef, seed);
+    }
+
     bool saveGraph(const std::string& path) const {
         const auto* mutable_graph = dynamic_cast<const deglib::graph::MutableGraph*>(internal_graph_);
         if (mutable_graph == nullptr) {

@@ -658,6 +658,15 @@ class RerankerPy {
 
     size_t get_num_base_vectors() const noexcept { return reranker_.getNumBaseVectors(); }
 
+    int32_t get_po() const noexcept { return reranker_.getPo(); }
+    int32_t get_pl() const noexcept { return reranker_.getPl(); }
+    void set_prefetch(int32_t po, int32_t pl) { reranker_.setPrefetch(po, pl); }
+
+    void optimize(size_t sample_count = 50, size_t num_candidates = 100, uint32_t k = 10) {
+        py::gil_scoped_release release;
+        reranker_.optimize(sample_count, num_candidates, k);
+    }
+
     py::object rerank(
         py::array queries,
         py::array_t<uint32_t> candidate_indices,
@@ -1571,6 +1580,20 @@ PYBIND11_MODULE(deglib_cpp, m) {
     py::class_<RerankerPy>(search_module, "Reranker")
         .def(py::init<const deglib::distances::FloatSpace&, py::array>(), py::arg("space"), py::arg("base_vectors"), py::keep_alive<1, 3>())
         .def("get_num_base_vectors", &RerankerPy::get_num_base_vectors)
+        .def("get_po", &RerankerPy::get_po, "Prefetch lookahead offset (0 disables rerank prefetching).")
+        .def("get_pl", &RerankerPy::get_pl, "Cache lines prefetched per feature vector (0 prefetches the whole vector).")
+        .def(
+            "set_prefetch", &RerankerPy::set_prefetch, py::arg("po"), py::arg("pl"),
+            "Override the rerank prefetch parameters. Values <= 0 disable the respective knob."
+        )
+        .def(
+            "optimize", &RerankerPy::optimize, py::arg("sample_count") = 50, py::arg("num_candidates") = 100, py::arg("k") = 10,
+            "Auto-tune the reranker's prefetch parameters (po, pl) by timing reranking over sampled base vectors.\n\n"
+            "Args:\n"
+            "    sample_count: number of base vectors used as sample queries (capped at the base count).\n"
+            "    num_candidates: candidates scored per query (clamped to the base count).\n"
+            "    k: candidates kept per query after reranking (clamped to num_candidates)."
+        )
         .def(
             "rerank", &RerankerPy::rerank, py::arg("queries"), py::arg("candidate_indices"), py::arg("k_top") = 0, py::arg("num_threads") = 0,
             py::arg("return_distances") = false, py::arg("unsorted") = false
@@ -1661,6 +1684,9 @@ PYBIND11_MODULE(deglib_cpp, m) {
         )
         .def("size", &deglib::DynamicExplorationGraph::size)
         .def("get_edges_per_vertex", &deglib::DynamicExplorationGraph::getEdgesPerVertex)
+        .def("get_po", &deglib::DynamicExplorationGraph::getPo)
+        .def("get_pl", &deglib::DynamicExplorationGraph::getPl)
+        .def("get_nl", &deglib::DynamicExplorationGraph::getNl)
         .def(
             "get_feature_space", [](const deglib::DynamicExplorationGraph& g) -> const deglib::distances::FloatSpace& { return g.getFeatureSpace(); },
             py::return_value_policy::reference
@@ -1751,7 +1777,16 @@ PYBIND11_MODULE(deglib_cpp, m) {
             "save_graph", [](deglib::DynamicExplorationGraph& g, const char* path) { g.saveGraph(path); }, py::arg("path")
         )
         .def("get_entry_vertex_indices", &deglib::DynamicExplorationGraph::getEntryVertexIndices)
-        .def("set_entry_vertex_indices", &deglib::DynamicExplorationGraph::setEntryVertexIndices, py::arg("indices"));
+        .def("set_entry_vertex_indices", &deglib::DynamicExplorationGraph::setEntryVertexIndices, py::arg("indices"))
+        .def(
+            "optimize", &deglib::DynamicExplorationGraph::optimize, py::arg("sample_count") = 50, py::arg("k") = 100, py::arg("ef") = 200, py::arg("seed") = 7,
+            "Auto-tune the graph's traversal prefetch parameters (po, pl, nl) by timing traversal over sampled vertices.\n\n"
+            "Args:\n"
+            "    sample_count: number of vertices sampled as queries (capped at the graph size).\n"
+            "    k: result count per traversal (the expected query operating point).\n"
+            "    ef: beam width per traversal; clamped to at least k.\n"
+            "    seed: random seed for query sampling."
+        );
 
     m.def("load_readonly_graph", &load_readonly_graph_wrapper);
     m.def("load_dynamic_graph", &load_dynamic_graph_wrapper, py::arg("path"), py::arg("chunk_size") = 1024);

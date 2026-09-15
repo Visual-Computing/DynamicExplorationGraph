@@ -515,6 +515,23 @@ def test_create_random_graph_fp32():
     assert distances.shape == (1, 5)
 
 
+def test_graph_optimize_preserves_search_results():
+    """graph.optimize() tunes traversal prefetch parameters but must not change search results."""
+    samples = 200
+    dims = 8
+    data = np.random.default_rng(1).standard_normal((samples, dims)).astype(np.float32)
+    feature_space = FloatSpace.create(dims, Metric.FP32_L2)
+    graph = deglib.create_random_graph(data, feature_space, edges_per_vertex=16, seed=7)
+
+    query = data[0:1]
+    before, _ = graph.search(query, eps=0.1, k=5)
+
+    graph.optimize(sample_count=32, k=5, ef=50, seed=3)
+
+    after, _ = graph.search(query, eps=0.1, k=5)
+    np.testing.assert_array_equal(before, after)
+
+
 def test_create_random_graph_uint8():
     """Test DynamicExplorationGraph.create_random_graph with Uint8 L2 data."""
     samples = 50

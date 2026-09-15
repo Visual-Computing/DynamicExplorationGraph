@@ -34,7 +34,7 @@ class Reranker {
     deglib::distances::FloatSpace space_;
     const DataT* base_vectors_ = nullptr;
     size_t num_base_vectors_ = 0;
-    int32_t po_ = 0;  // Prefetch lookahead offset for candidate feature vectors (0 disables prefetch).
+    int32_t po_ = 8;  // Prefetch lookahead offset for candidate feature vectors (0 disables prefetch).
     int32_t pl_ = 0;  // Cache lines to prefetch per feature vector (0 = prefetch the full vector).
 
     /**
@@ -169,11 +169,17 @@ class Reranker {
     size_t getNumBaseVectors() const noexcept { return num_base_vectors_; }
     int32_t getPo() const noexcept { return po_; }
     int32_t getPl() const noexcept { return pl_; }
+    void setPo(int32_t po) noexcept { po_ = (po > 0) ? po : 0; }
+    void setPl(int32_t pl) noexcept { pl_ = (pl > 0) ? pl : 0; }
+    void setPrefetch(int32_t po, int32_t pl) noexcept {
+        po_ = (po > 0) ? po : 0;
+        pl_ = (pl > 0) ? pl : 0;
+    }
 
     /**
      * Auto-tunes the rerank prefetch parameters (po, pl) using empirical timing on sample queries.
      * The tuning reflects the real operating point: each query scores `num_candidates` candidates and
-     * reduces them to the top `k`. po_ = 0 keeps the non-prefetch path.
+     * reduces them to the top `k`. Prefetch is on by default (po = 8, pl = 0); tuning only replaces one good setting with another.
      *
      * @param sample_queries  Pointer to contiguous sample queries of dimension dim.
      * @param n_queries       Number of sample queries.

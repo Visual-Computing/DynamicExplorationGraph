@@ -232,6 +232,47 @@ class TestRerankerClass:
         np.testing.assert_allclose(distances[0, 0], 0.25, rtol=1e-5)
         np.testing.assert_allclose(distances[0, 1], 1.0, rtol=1e-5)
 
+    def test_reranker_optimize_preserves_results(self):
+        rng = np.random.default_rng(0)
+        base = rng.random((64, self.dims), dtype=np.float32)
+        query = rng.random((1, self.dims), dtype=np.float32)
+        candidates = np.array([list(range(64))], dtype=np.uint32)
+
+        reranker = deglib.Reranker(self.space, base)
+        before = reranker.rerank(query, candidates, k_top=5)
+
+        # Prefetch auto-tuning must not change reranking results.
+        reranker.optimize(sample_count=16, num_candidates=32, k=5)
+
+        after = reranker.rerank(query, candidates, k_top=5)
+        np.testing.assert_array_equal(before, after)
+
+    def test_reranker_prefetch_defaults_and_override(self):
+        rng = np.random.default_rng(3)
+        base = rng.random((64, self.dims), dtype=np.float32)
+        query = rng.random((1, self.dims), dtype=np.float32)
+        candidates = np.array([list(range(64))], dtype=np.uint32)
+
+        reranker = deglib.Reranker(self.space, base)
+
+        # Prefetching must be on out of the box, otherwise out-of-cache reranking silently loses throughput.
+        assert reranker.get_po() > 0
+        assert reranker.get_pl() == 0
+
+        reranker.set_prefetch(12, 4)
+        assert reranker.get_po() == 12
+        assert reranker.get_pl() == 4
+
+        reranker.set_prefetch(0, -1)
+        assert reranker.get_po() == 0
+        assert reranker.get_pl() == 0
+
+        # Both configs must rank identically; prefetching is a speed knob only.
+        unprefetched = reranker.rerank(query, candidates, k_top=5)
+        reranker.set_prefetch(8, 0)
+        prefetched = reranker.rerank(query, candidates, k_top=5)
+        np.testing.assert_array_equal(unprefetched, prefetched)
+
     def test_reranker_rejects_mismatched_base_vectors(self):
         mismatched = np.zeros((3, self.dims + 1), dtype=np.float32)
         with pytest.raises(ValueError):

@@ -7,7 +7,6 @@
 #include "deglib/optimization.h"
 #include "deglib/search/searcher.h"
 #include "gtest/gtest.h"
-
 #include <algorithm>
 #include <cstdint>
 #include <random>
@@ -191,6 +190,42 @@ TEST(SearcherTest, OptimizeTunesFp16Reranker) {
     EXPECT_NEAR(res.distances[0], 0.0f, 1e-2f);
 }
 
+TEST(SearcherTest, OptimizeSelectsValidPrefetchConfigAndPreservesResults) {
+   // optimize() tunes traversal prefetch (po, pl, nl) to the best of its search grid. The actual
+   // speedup is workload/hardware dependent (it only materialises when the working set exceeds
+   // cache), so it is reported by the regression benchmark, not asserted here. This test pins the
+   // deterministic contract: the tuner lands on a valid grid value and search stays correct.
+   const uint32_t dim = 16;
+   const uint32_t count = 500;
+
+   std::mt19937 rng(123);
+   std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+   std::vector<float> data(count * dim);
+   for (auto& v : data) v = dist(rng);
+
+   auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 16, deglib::distances::Metric::FP32_L2);
+   auto searcher = deglib::search::make_searcher(graph.internal());
+
+   searcher->optimize(/*n_clusters=*/32, /*n_iter=*/5, /*sample_size=*/0, /*k=*/10, /*seed=*/7, /*threads=*/1);
+
+   // Tuner must land on a value from its own search grid (proves it actually tuned, not garbage).
+   const int32_t po = graph.getPo();
+   const int32_t pl = graph.getPl();
+   const int32_t nl = graph.getNl();
+   const std::vector<int32_t> grid_po = {4, 8, 12, 16};
+   const std::vector<int32_t> grid_small = {2, 3, 4};
+   EXPECT_NE(std::find(grid_po.begin(), grid_po.end(), po), grid_po.end());
+   EXPECT_NE(std::find(grid_small.begin(), grid_small.end(), pl), grid_small.end());
+   EXPECT_NE(std::find(grid_small.begin(), grid_small.end(), nl), grid_small.end());
+
+   // Search still returns the exact nearest neighbour (the query is a base vector).
+   std::vector<uint32_t> idx(3);
+   std::vector<float> d(3);
+   const uint32_t q = 5;
+   searcher->search_f32(data.data() + static_cast<size_t>(q) * dim, 3, 0.1f, 1.0f, idx.data(), d.data());
+   EXPECT_EQ(idx[0], q);
+   EXPECT_NEAR(d[0], 0.0f, 1e-4f);
+}
 TEST(SearcherTest, EVPQuantizerWithFP32Refiner) {
     const uint32_t dim = 16;
     const uint32_t count = 50;

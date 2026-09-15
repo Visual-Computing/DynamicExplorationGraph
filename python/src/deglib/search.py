@@ -69,6 +69,38 @@ class Reranker:
         """Number of base vectors the reranker scores candidates against."""
         return self.reranker_cpp.get_num_base_vectors()
 
+    def get_po(self) -> int:
+        """Prefetch lookahead offset for candidate feature vectors (0 disables rerank prefetching)."""
+        return self.reranker_cpp.get_po()
+
+    def get_pl(self) -> int:
+        """Cache lines prefetched per feature vector (0 prefetches the whole vector)."""
+        return self.reranker_cpp.get_pl()
+
+    def set_prefetch(self, po: int, pl: int) -> None:
+        """Override the rerank prefetch parameters, bypassing auto-tuning.
+
+        Prefetching is enabled by default (``po=8``, ``pl=0``), which is the right starting point
+        whenever the base vectors do not fit in cache. Pass ``po=0`` to score candidates without
+        issuing any prefetch, for example when the working set is already cache-resident.
+
+        :param po: Lookahead offset in candidates; values <= 0 disable prefetching.
+        :param pl: Cache lines per candidate; values <= 0 prefetch the whole vector.
+        """
+        self.reranker_cpp.set_prefetch(int(po), int(pl))
+
+    def optimize(self, sample_count: int = 50, num_candidates: int = 100, k: int = 10) -> None:
+        """Auto-tune the reranker's prefetch parameters (po, pl) by timing reranking over sampled base vectors.
+
+        The reranker samples its own base vectors as queries, so no external query buffer is needed.
+        Call once after construction to tune for the expected operating point before reranking.
+
+        :param sample_count: Number of base vectors used as sample queries (capped at the base count).
+        :param num_candidates: Candidates scored per query (clamped to the base count).
+        :param k: Candidates kept per query after reranking (clamped to num_candidates).
+        """
+        self.reranker_cpp.optimize(int(sample_count), int(num_candidates), int(k))
+
     def rerank(
         self,
         queries: np.ndarray,

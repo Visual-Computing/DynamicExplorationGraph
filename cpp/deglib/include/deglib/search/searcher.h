@@ -467,64 +467,10 @@ class SearcherImpl : public SearcherBase {
             refiner_.optimize(50, 100, k);
         }
 
-        // 3. Prefetch auto-tuning for graph traversal. Needs a graph at least one neighborhood
-        //    wide; below that the traversal does no real work and the timing is meaningless.
-        if (graph_->size() < graph_->getEdgesPerVertex()) return;
-
-        const size_t test_q_count = std::min(size_t(50), size_t(graph_->size()));
-        const uint32_t dim = graph_->getFeatureSpace().dim();
-
-        // Synthetic float queries in the searcher's input space. The graph stores features in its
-        // own (possibly quantized) feature space, so reinterpreting getFeatureVector() as float
-        // would read out of bounds and produce meaningless values; the searcher quantizes these
-        // queries before traversal, which is exactly the path being timed.
-        std::vector<float> sample_queries(test_q_count * size_t(dim));
-        uint32_t rng = seed * 2654435761u + 1u;
-        for (auto& v : sample_queries) {
-            rng ^= rng << 13;
-            rng ^= rng >> 17;
-            rng ^= rng << 5;
-            v = (static_cast<float>(rng & 0xFFFFFF) / 8388608.0f) - 1.0f;  // [-1, 1)
-        }
-
-        const std::vector<int32_t> try_pos = {4, 8, 12, 16};
-        const std::vector<int32_t> try_pls = {2, 3, 4};
-        const std::vector<int32_t> try_nls = {2, 3, 4};
-
-        int32_t best_po = graph_->getPo();
-        int32_t best_pl = graph_->getPl();
-        int32_t best_nl = graph_->getNl();
-        double best_time = std::numeric_limits<double>::max();
-        std::vector<uint32_t> dummy_out(k);
-        const uint32_t ef = std::max<uint32_t>(200, k);
-
-        for (int32_t po : try_pos) {
-            for (int32_t pl : try_pls) {
-                for (int32_t nl : try_nls) {
-                    const_cast<deglib::graph::InternalGraph*>(graph_)->setPrefetch(po, pl, nl);
-
-                    for (size_t i = 0; i < std::min(size_t(3), test_q_count); ++i) {
-                        search_single_ef_typed(sample_queries.data() + i * size_t(dim), k, ef, 1.0f, dummy_out.data(), nullptr, true);
-                    }
-
-                    auto t_start = std::chrono::high_resolution_clock::now();
-                    for (size_t i = 0; i < test_q_count; ++i) {
-                        search_single_ef_typed(sample_queries.data() + i * size_t(dim), k, ef, 1.0f, dummy_out.data(), nullptr, true);
-                    }
-                    auto t_end = std::chrono::high_resolution_clock::now();
-                    double dur = std::chrono::duration<double, std::micro>(t_end - t_start).count();
-
-                    if (dur < best_time) {
-                        best_time = dur;
-                        best_po = po;
-                        best_pl = pl;
-                        best_nl = nl;
-                    }
-                }
-            }
-        }
-
-        const_cast<deglib::graph::InternalGraph*>(graph_)->setPrefetch(best_po, best_pl, best_nl);
+        // 3. Auto-tune the graph's traversal prefetch parameters. The graph self-samples its own
+        //    stored features as queries, so no external query buffer or quantization round-trip is
+        //    needed; it guards the too-small-graph case internally.
+        graph_->optimize(50, k, std::max<uint32_t>(200, k), seed);
     }
 
     template <typename QueryT>

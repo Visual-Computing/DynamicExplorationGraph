@@ -8,6 +8,7 @@
 #include "gtest/gtest.h"
 
 #include <cstdint>
+#include <random>
 #include <span>
 #include <vector>
 
@@ -264,4 +265,74 @@ TEST(Rerank, RerankerClassDirectUsage) {
    EXPECT_NEAR(out_dists[0], 1.0f, 1e-5f);
    EXPECT_EQ(out_indices[1], 2u);
    EXPECT_NEAR(out_dists[1], 4.0f, 1e-5f);
+}
+
+TEST(Rerank, PrefetchEnabledByDefaultAndTogglesCleanly) {
+   deglib::distances::FloatSpace fs(2, deglib::distances::Metric::FP32_L2);
+   std::vector<float> base = {0.0f, 1.0f, 0.0f, 3.0f, 0.0f, 2.0f};
+   std::vector<uint32_t> candidates = {0, 1, 2};
+   std::vector<float> query = {0.0f, 0.0f};
+
+   deglib::search::Reranker<float> reranker(fs, base.data(), 3);
+
+   // Default must be the prefetching config, otherwise large out-of-cache rerank runs silently lose throughput.
+   EXPECT_GT(reranker.getPo(), 0);
+
+   reranker.setPo(0);
+   EXPECT_EQ(reranker.getPo(), 0);
+   reranker.setPl(-4);
+   EXPECT_EQ(reranker.getPl(), 0);
+
+   reranker.setPrefetch(12, 3);
+   EXPECT_EQ(reranker.getPo(), 12);
+   EXPECT_EQ(reranker.getPl(), 3);
+
+   // Toggling the prefetch config must not change the ranking.
+   std::vector<uint32_t> out_indices(2);
+   std::vector<float> out_dists(2);
+   uint32_t count = reranker.rerank(query.data(), 2, candidates.data(), candidates.size(), 2, out_indices.data(), out_dists.data(), true, false);
+   EXPECT_EQ(count, 2u);
+   EXPECT_EQ(out_indices[0], 0u);
+   EXPECT_NEAR(out_dists[0], 1.0f, 1e-5f);
+   EXPECT_EQ(out_indices[1], 2u);
+   EXPECT_NEAR(out_dists[1], 4.0f, 1e-5f);
+}
+
+TEST(Rerank, PrefetchAndNoPrefetchPathsAgreeOnOutOfCacheWorkingSet) {
+   // 40k x 128-dim float32 = 20 MB of base vectors with random candidate order: every candidate
+   // misses cache, which is the regime the lookahead prefetcher exists for. Both paths must
+   // produce byte-identical top-k, so the prefetcher is a pure speed knob and never a semantic one.
+   const uint32_t dim = 128;
+   const size_t num_base = 40000;
+   const size_t num_queries = 200;
+   const size_t candidates_per_query = 200;
+   const uint32_t k_top = 10;
+
+   std::mt19937 rng(1234);
+   std::uniform_real_distribution<float> uniform(-1.0f, 1.0f);
+
+   std::vector<float> base(num_base * dim);
+   for (auto& v : base) v = uniform(rng);
+   std::vector<float> queries(num_queries * dim);
+   for (auto& v : queries) v = uniform(rng);
+   std::vector<uint32_t> candidates(num_queries * candidates_per_query);
+   for (auto& c : candidates) c = rng() % num_base;
+
+   deglib::distances::FloatSpace fs(dim, deglib::distances::Metric::FP32_L2);
+   deglib::search::Reranker<float> reranker(fs, base.data(), num_base);
+
+   reranker.setPrefetch(0, 0);
+   auto unprefetched = reranker.rerank(queries.data(), num_queries, candidates.data(), candidates_per_query, k_top, 1);
+   reranker.setPrefetch(8, 0);
+   auto prefetched = reranker.rerank(queries.data(), num_queries, candidates.data(), candidates_per_query, k_top, 1);
+
+   ASSERT_EQ(unprefetched.size(), num_queries);
+   ASSERT_EQ(prefetched.size(), num_queries);
+   for (size_t q = 0; q < num_queries; ++q) {
+       ASSERT_EQ(unprefetched[q].size(), k_top) << "query " << q;
+       for (size_t i = 0; i < k_top; ++i) {
+           EXPECT_EQ(unprefetched[q][i].getIdentifier(), prefetched[q][i].getIdentifier()) << "query " << q << " rank " << i;
+           EXPECT_FLOAT_EQ(unprefetched[q][i].getDistance(), prefetched[q][i].getDistance()) << "query " << q << " rank " << i;
+       }
+   }
 }

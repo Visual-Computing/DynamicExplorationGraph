@@ -41,6 +41,24 @@ class DynamicExplorationGraph:
         """
         return self.dynamic_exploration_graph_cpp.get_edges_per_vertex()
 
+    def get_po(self) -> int:
+        """
+        :return: the traversal feature prefetch offset (candidates prefetched ahead)
+        """
+        return self.dynamic_exploration_graph_cpp.get_po()
+
+    def get_pl(self) -> int:
+        """
+        :return: the traversal feature prefetch look-ahead (cache lines per feature)
+        """
+        return self.dynamic_exploration_graph_cpp.get_pl()
+
+    def get_nl(self) -> int:
+        """
+        :return: the traversal neighbor prefetch look-ahead
+        """
+        return self.dynamic_exploration_graph_cpp.get_nl()
+
     def get_feature_space(self) -> FloatSpace:
         """
         :return: the feature space
@@ -203,6 +221,19 @@ class DynamicExplorationGraph:
     def set_entry_vertex_indices(self, indices: list[int] | np.ndarray):
         """Sets the list of internal entry vertex indices."""
         self.dynamic_exploration_graph_cpp.set_entry_vertex_indices(list(indices))
+
+    def optimize(self, sample_count: int = 50, k: int = 100, ef: int = 200, seed: int = 7) -> None:
+        """Auto-tune the graph's traversal prefetch parameters (po, pl, nl) by timing traversal over sampled vertices.
+
+        The graph self-samples its own stored features as queries, so no external query buffer is
+        needed. Call once after construction to tune traversal for the expected operating point.
+
+        :param sample_count: Number of vertices sampled as queries (capped at the graph size).
+        :param k: Result count per traversal (the expected query operating point).
+        :param ef: Beam width per traversal; clamped to at least k.
+        :param seed: Random seed for query sampling.
+        """
+        self.dynamic_exploration_graph_cpp.optimize(int(sample_count), int(k), int(ef), int(seed))
 
     def to_readonly(
         self, feature_space: Optional[FloatSpace] = None, custom_features: Optional[np.ndarray] = None

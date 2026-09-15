@@ -7,6 +7,7 @@
 #include "deglib/search/result_list.h"
 
 #include <algorithm>
+#include <chrono>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -119,9 +120,11 @@ class InternalGraph {
 
   protected:
     std::vector<uint32_t> entry_vertex_indices_{0};
-    int32_t po_ = 8;
-    int32_t pl_ = 3;
-    int32_t nl_ = 3;
+    // Prefetch tuning knobs: performance cache state, not logical identity, hence mutable so
+    // optimize()/setPrefetch() can run through a const InternalGraph reference.
+    mutable int32_t po_ = 8;
+    mutable int32_t pl_ = 3;
+    mutable int32_t nl_ = 3;
 
   public:
     const std::vector<uint32_t>& getEntryVertexIndices() const { return entry_vertex_indices_; }
@@ -133,19 +136,82 @@ class InternalGraph {
     int32_t getPo() const noexcept { return po_; }
     int32_t getPl() const noexcept { return pl_; }
     int32_t getNl() const noexcept { return nl_; }
-    void setPo(int32_t po) noexcept {
+    void setPo(int32_t po) const noexcept {
         if (po > 0) po_ = po;
     }
-    void setPl(int32_t pl) noexcept {
+    void setPl(int32_t pl) const noexcept {
         if (pl > 0) pl_ = pl;
     }
-    void setNl(int32_t nl) noexcept {
+    void setNl(int32_t nl) const noexcept {
         if (nl > 0) nl_ = nl;
     }
-    void setPrefetch(int32_t po, int32_t pl, int32_t nl = 3) noexcept {
+    void setPrefetch(int32_t po, int32_t pl, int32_t nl = 3) const noexcept {
         if (po > 0) po_ = po;
         if (pl > 0) pl_ = pl;
         if (nl > 0) nl_ = nl;
+    }
+
+    /**
+     * Auto-tunes the traversal prefetch parameters (po, pl, nl) by empirically timing graph
+     * traversal over sampled vertices. Mirrors Reranker::optimize: the graph self-samples its own
+     * stored features as queries, so no external query buffer or quantization round-trip is needed
+     * and the timing exercises the real traversal path (search_ef_intern).
+     *
+     * @param sample_count  Number of vertices sampled as queries (capped at the graph size).
+     * @param k             Result count per traversal (the expected query operating point).
+     * @param ef            Beam width per traversal; clamped to at least k.
+     * @param seed          Random seed for query sampling.
+     */
+    void optimize(size_t sample_count = 50, uint32_t k = 100, uint32_t ef = 200, uint32_t seed = 7) const {
+        const uint32_t n_vertices = size();
+        const size_t n_queries = std::min(sample_count, static_cast<size_t>(n_vertices));
+        // Below one full neighborhood the traversal does no real work; the timing would be meaningless.
+        if (n_queries == 0 || k == 0 || n_queries < getEdgesPerVertex()) return;
+        ef = std::max(ef, k);
+
+        std::vector<uint32_t> sample_idx(n_queries);
+        uint32_t rng = seed * 2654435761u + 1u;
+        for (auto& idx : sample_idx) {
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            idx = rng % n_vertices;
+        }
+
+        const std::vector<int32_t> try_pos = {4, 8, 12, 16};
+        const std::vector<int32_t> try_pls = {2, 3, 4};
+        const std::vector<int32_t> try_nls = {2, 3, 4};
+
+        const std::vector<uint32_t>& entries = getEntryVertexIndices();
+        int32_t best_po = po_;
+        int32_t best_pl = pl_;
+        int32_t best_nl = nl_;
+        double best_time = std::numeric_limits<double>::max();
+
+        for (int32_t po : try_pos) {
+            for (int32_t pl : try_pls) {
+                for (int32_t nl : try_nls) {
+                    setPrefetch(po, pl, nl);
+
+                    for (size_t i = 0; i < std::min<size_t>(3, n_queries); ++i) {
+                        search_ef_intern(entries, getFeatureVector(sample_idx[i]), k, ef);
+                    }
+                    const auto t_start = std::chrono::high_resolution_clock::now();
+                    for (size_t i = 0; i < n_queries; ++i) {
+                        search_ef_intern(entries, getFeatureVector(sample_idx[i]), k, ef);
+                    }
+                    const double dur = std::chrono::duration<double, std::micro>(std::chrono::high_resolution_clock::now() - t_start).count();
+
+                    if (dur < best_time) {
+                        best_time = dur;
+                        best_po = po;
+                        best_pl = pl;
+                        best_nl = nl;
+                    }
+                }
+            }
+        }
+        setPrefetch(best_po, best_pl, best_nl);
     }
     /**
      * Perform a search but stops when the to_vertex was found.

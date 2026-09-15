@@ -141,6 +141,12 @@ public:
     bool isMutable();                                      ///< Check if graph allows modifications
     InternalGraph& internal();                             ///< Access underlying internal graph
 
+   // --- Traversal Tuning ---
+
+   /// Auto-tune traversal prefetch parameters (po, pl, nl) by timing traversal over sampled vertices.
+   /// The graph self-samples its own stored features as queries; call once after construction.
+   void optimize(size_t sample_count = 50, uint32_t k = 100, uint32_t ef = 200, uint32_t seed = 7);
+
     // --- Conversions & Persistence ---
 
     /// Convert to a compact, read-only graph (ReadOnlyGraph) optimized for search
@@ -333,6 +339,34 @@ vector<ResultSet> rerank(
     size_t num_threads = 0
 );
 
+/// Stateful reranker holding base vectors for repeated exact-distance candidate reranking
+template <typename DataT>
+class Reranker {
+public:
+    Reranker(FloatSpace space, const DataT* base_vectors, size_t num_base_vectors);
+
+    FloatSpace getSpace() const;                    ///< Distance metric and dimensionality
+    const DataT* getBaseVectors() const;            ///< Held base vectors
+    size_t getNumBaseVectors() const;               ///< Number of held base vectors
+    int32_t getPo() const;                          ///< Rerank feature prefetch offset (0 = prefetch disabled)
+    int32_t getPl() const;                          ///< Cache lines prefetched per feature vector (0 = whole vector)
+    void setPo(int32_t po);                         ///< Set the prefetch offset; values <= 0 disable prefetching
+    void setPl(int32_t pl);                         ///< Set the prefetch length; values <= 0 prefetch the whole vector
+    void setPrefetch(int32_t po, int32_t pl);       ///< Set both prefetch parameters at once
+
+    /// Rerank candidate indices for one query, returning the top-k as a ResultSet (max-heap)
+    ResultSet rerank(span<const byte> query, span<const uint32_t> candidate_indices, uint32_t k) const;
+
+    /// Multi-threaded batch reranking of candidate indices for many queries
+    vector<ResultSet> rerank(
+        const void* queries, size_t num_queries, const uint32_t* base_candidates,
+        size_t candidates_per_query, size_t k_top = 0, size_t num_threads = 0
+    ) const;
+
+    /// Auto-tune rerank prefetch parameters (po, pl) by timing reranking over sampled base vectors
+    void optimize(size_t sample_count = 50, size_t num_candidates = 100, uint32_t k = 10);
+};
+
 } // namespace deglib::search
 ```
 
@@ -512,6 +546,14 @@ public:
 
     ResultSet search(span<float> query, uint32_t k, float eps = 0.0f, Filter* filter = nullptr, uint32_t max_dc = 0);
     ResultSet explore(uint32_t entry_index, uint32_t k, uint32_t max_dc = 0, float eps = 0.0f, bool include_entry = true, Filter* filter = nullptr);
+
+    // --- Traversal Prefetch Tuning ---
+    int32_t getPo() const;                               ///< Feature prefetch offset (candidates ahead)
+    int32_t getPl() const;                               ///< Feature prefetch look-ahead (cache lines)
+    int32_t getNl() const;                               ///< Neighbor prefetch look-ahead
+    void setPrefetch(int32_t po, int32_t pl, int32_t nl = 3);
+    /// Auto-tune (po, pl, nl) by timing traversal over sampled vertices (self-sampled features).
+    void optimize(size_t sample_count = 50, uint32_t k = 100, uint32_t ef = 200, uint32_t seed = 7);
 };
 
 /// Abstract base interface for mutable graphs supporting vertex & edge updates
