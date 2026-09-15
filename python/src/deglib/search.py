@@ -170,6 +170,7 @@ class Searcher:
         n_clusters: int = 256,
         n_iter: int = 20,
         sample_size: int = 0,
+        k: int = 100,
         seed: int = 7,
         num_threads: int = 1,
     ) -> None:
@@ -178,10 +179,11 @@ class Searcher:
         :param n_clusters: Number of entry vertices to select.
         :param n_iter: Number of k-means iterations.
         :param sample_size: Number of vertices sampled for clustering, 0 selects 3% of the graph size.
+        :param k: Expected result count; sets the reranker and traversal prefetch tuning operating point.
         :param seed: Random seed for sampling and centroid init.
         :param num_threads: Number of worker threads, 0 selects a library default.
         """
-        self.searcher_cpp.optimize(int(n_clusters), int(n_iter), int(sample_size), int(seed), int(num_threads))
+        self.searcher_cpp.optimize(int(n_clusters), int(n_iter), int(sample_size), int(k), int(seed), int(num_threads))
 
     def search(
         self,

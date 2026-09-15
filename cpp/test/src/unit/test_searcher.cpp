@@ -95,11 +95,7 @@ TEST(SearcherTest, QuantizedInt8WithFP16Refiner) {
 
     using RefinerT = deglib::search::Reranker<uint16_t>;
 
-    auto searcher = deglib::search::make_searcher(
-        ro_graph,
-        quantizer,
-        RefinerT(rerank_space, base_fp16.data(), count)
-    );
+    auto searcher = deglib::search::make_searcher(ro_graph, quantizer, RefinerT(rerank_space, base_fp16.data(), count));
 
     // Query for 5th item
     auto q = std::span<const float>(data.data() + 5 * dim, dim);
@@ -133,11 +129,7 @@ TEST(SearcherTest, QuantizedUint8WithFP32Refiner) {
 
     using RefinerT = deglib::search::Reranker<float>;
 
-    auto searcher = deglib::search::make_searcher(
-        ro_graph,
-        quantizer,
-        RefinerT(rerank_space, data.data(), count)
-    );
+    auto searcher = deglib::search::make_searcher(ro_graph, quantizer, RefinerT(rerank_space, data.data(), count));
 
     auto q = std::span<const float>(data.data() + 2 * dim, dim);
     auto res = searcher->search(q, 3, /*eps=*/0.2f, /*rerank_factor=*/1.5f, /*return_distances=*/true);
@@ -145,6 +137,58 @@ TEST(SearcherTest, QuantizedUint8WithFP32Refiner) {
     EXPECT_GE(res.size(), 1u);
     EXPECT_EQ(res.indices[0], 2u);
     EXPECT_NEAR(res.distances[0], 0.0f, 1e-4f);
+}
+
+TEST(SearcherTest, OptimizeTunesRerankerAndPreservesResults) {
+    const uint32_t dim = 8;
+    const uint32_t count = 60;
+
+    std::mt19937 rng(7);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    std::vector<float> data(count * dim);
+    for (auto& v : data) v = dist(rng);
+
+    auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
+
+    auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP32_L2);
+    auto searcher =
+        deglib::search::make_searcher(graph.internal(), deglib::search::NoQuantizer{}, deglib::search::Reranker<float>(rerank_space, data.data(), count));
+
+    // Exercises the reranker prefetch auto-tuning path wired into SearcherImpl::optimize().
+    searcher->optimize(/*n_clusters=*/8, /*n_iter=*/5);
+
+    auto q = std::span<const float>(data.data() + 5 * dim, dim);
+    auto res = searcher->search(q, 3, /*eps=*/0.2f, /*rerank_factor=*/2.0f, /*return_distances=*/true);
+    EXPECT_EQ(res.indices[0], 5u);
+    EXPECT_NEAR(res.distances[0], 0.0f, 1e-4f);
+}
+
+TEST(SearcherTest, OptimizeTunesFp16Reranker) {
+    const uint32_t dim = 8;
+    const uint32_t count = 60;
+
+    std::mt19937 rng(7);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    std::vector<float> data(count * dim);
+    for (auto& v : data) v = dist(rng);
+
+    std::vector<uint16_t> base_fp16(count * dim);
+    deglib::distances::fp16::floats_to_fp16(data.data(), base_fp16.data(), data.size());
+
+    auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
+
+    auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP16_L2);
+    auto searcher = deglib::search::make_searcher(
+        graph.internal(), deglib::search::NoQuantizer{}, deglib::search::Reranker<uint16_t>(rerank_space, base_fp16.data(), count)
+    );
+
+    // Reranker<uint16_t> self-samples its fp16 base vectors; no float reinterpretation.
+    searcher->optimize(/*n_clusters=*/8, /*n_iter=*/5);
+
+    auto q = std::span<const float>(data.data() + 5 * dim, dim);
+    auto res = searcher->search(q, 3, /*eps=*/0.2f, /*rerank_factor=*/2.0f, /*return_distances=*/true);
+    EXPECT_EQ(res.indices[0], 5u);
+    EXPECT_NEAR(res.distances[0], 0.0f, 1e-2f);
 }
 
 TEST(SearcherTest, EVPQuantizerWithFP32Refiner) {
@@ -180,11 +224,7 @@ TEST(SearcherTest, EVPQuantizerWithFP32Refiner) {
     using QuantT = deglib::quantization::evp::EvpQuantizer;
     using RefinerT = deglib::search::Reranker<float>;
 
-    auto searcher = deglib::search::make_searcher(
-        ro_graph,
-        quantizer,
-        RefinerT(rerank_space, data.data(), count)
-    );
+    auto searcher = deglib::search::make_searcher(ro_graph, quantizer, RefinerT(rerank_space, data.data(), count));
 
     auto q = std::span<const float>(data.data() + 3 * dim, dim);
     auto res = searcher->search(q, 3, /*eps=*/0.3f, /*rerank_factor=*/2.0f, /*return_distances=*/true);
@@ -239,10 +279,7 @@ TEST(SearcherTest, FlatBatchAndIntoSearch) {
     std::vector<uint32_t> preallocated_indices(n_queries * k, 9999);
     std::vector<float> preallocated_dists(n_queries * k, 9999.0f);
     searcher->search_batch(
-        std::span<const float>(data.data(), n_queries * dim),
-        n_queries, k,
-        std::span<uint32_t>(preallocated_indices),
-        std::span<float>(preallocated_dists),
+        std::span<const float>(data.data(), n_queries * dim), n_queries, k, std::span<uint32_t>(preallocated_indices), std::span<float>(preallocated_dists),
         /*eps=*/0.1f, /*rerank_factor=*/1.0f,
         /*threads=*/1,
         /*return_distances=*/true
@@ -279,8 +316,7 @@ TEST(SearcherTest, SearchEfSingleAndBatch) {
     // 2. Batch search with eps_or_ef >= 1.0 (ef mode) with flat result and 2 worker threads
     const size_t n_queries = 5;
     auto batch_res = searcher->search_batch(
-        std::span<const float>(data.data(), n_queries * dim),
-        n_queries, k, /*eps_or_ef=*/ef, /*rerank_factor=*/1.0f, /*threads=*/2, /*return_distances=*/true
+        std::span<const float>(data.data(), n_queries * dim), n_queries, k, /*eps_or_ef=*/ef, /*rerank_factor=*/1.0f, /*threads=*/2, /*return_distances=*/true
     );
     EXPECT_EQ(batch_res.size(), n_queries);
     EXPECT_EQ(batch_res.k, k);
@@ -291,5 +327,3 @@ TEST(SearcherTest, SearchEfSingleAndBatch) {
         EXPECT_NEAR(q_dists[0], 0.0f, 1e-5f);
     }
 }
-
-

@@ -646,9 +646,7 @@ class RerankerPy {
         const size_t req_bytes = space.get_data_size();
         const size_t stride_bytes = size_t(buf.shape[1]) * buf.itemsize;
         if (stride_bytes != req_bytes) {
-            throw std::invalid_argument(std::format(
-                "Base vector row size ({}) does not match feature space data size ({})",
-                stride_bytes, req_bytes));
+            throw std::invalid_argument(std::format("Base vector row size ({}) does not match feature space data size ({})", stride_bytes, req_bytes));
         }
         return static_cast<const std::byte*>(buf.ptr);
     }
@@ -675,9 +673,9 @@ class RerankerPy {
         const size_t req_bytes = reranker_.getSpace().get_data_size();
         const size_t query_stride_bytes = size_t(q_buf.shape[1]) * q_buf.itemsize;
         if (query_stride_bytes != req_bytes) {
-            throw std::invalid_argument(std::format(
-                "Query row size in bytes ({}) does not match required feature space data size ({})",
-                query_stride_bytes, req_bytes));
+            throw std::invalid_argument(
+                std::format("Query row size in bytes ({}) does not match required feature space data size ({})", query_stride_bytes, req_bytes)
+            );
         }
         const size_t n_queries = q_buf.shape[0];
 
@@ -783,9 +781,7 @@ class SearcherPy {
                 }
             } else {
                 using RefinerT = deglib::search::NoRefiner;
-                searcher_ = std::make_unique<deglib::search::SearcherImpl<QuantT, RefinerT>>(
-                    graph.internal(), std::move(q), RefinerT{}
-                );
+                searcher_ = std::make_unique<deglib::search::SearcherImpl<QuantT, RefinerT>>(graph.internal(), std::move(q), RefinerT{});
             }
         };
 
@@ -811,9 +807,9 @@ class SearcherPy {
         }
     }
 
-    void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 0, uint32_t seed = 42, size_t num_threads = 0) {
+    void optimize(uint32_t n_clusters = 256, uint32_t n_iter = 20, size_t sample_size = 0, uint32_t k = 100, uint32_t seed = 7, size_t num_threads = 1) {
         py::gil_scoped_release release;
-        searcher_->optimize(n_clusters, n_iter, sample_size, seed, num_threads);
+        searcher_->optimize(n_clusters, n_iter, sample_size, k, seed, num_threads);
     }
 
     py::object search(py::array query, uint32_t k, float eps_or_ef = 0.1f, float rerank_factor = 1.0f, bool return_distances = false, bool unsorted = false) {
@@ -853,7 +849,15 @@ class SearcherPy {
         return result;
     }
 
-    py::object search_batch(py::array queries, uint32_t k, float eps_or_ef = 0.1f, float rerank_factor = 1.0f, size_t num_threads = 1, bool return_distances = false, bool unsorted = false) {
+    py::object search_batch(
+        py::array queries,
+        uint32_t k,
+        float eps_or_ef = 0.1f,
+        float rerank_factor = 1.0f,
+        size_t num_threads = 1,
+        bool return_distances = false,
+        bool unsorted = false
+    ) {
         auto buf = queries.request();
         if (buf.ndim != 2) {
             throw std::invalid_argument("search_batch queries must be 2D array");
@@ -874,15 +878,23 @@ class SearcherPy {
             if (eps_or_ef >= 1.0f) {
                 const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
                 if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    searcher_->search_batch_ef_f16(static_cast<const uint16_t*>(buf.ptr), n_queries, k, ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted);
+                    searcher_->search_batch_ef_f16(
+                        static_cast<const uint16_t*>(buf.ptr), n_queries, k, ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted
+                    );
                 } else {
-                    searcher_->search_batch_ef_f32(static_cast<const float*>(buf.ptr), n_queries, k, ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted);
+                    searcher_->search_batch_ef_f32(
+                        static_cast<const float*>(buf.ptr), n_queries, k, ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted
+                    );
                 }
             } else {
                 if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    searcher_->search_batch_f16(static_cast<const uint16_t*>(buf.ptr), n_queries, k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted);
+                    searcher_->search_batch_f16(
+                        static_cast<const uint16_t*>(buf.ptr), n_queries, k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted
+                    );
                 } else {
-                    searcher_->search_batch_f32(static_cast<const float*>(buf.ptr), n_queries, k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted);
+                    searcher_->search_batch_f32(
+                        static_cast<const float*>(buf.ptr), n_queries, k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted
+                    );
                 }
             }
         }
@@ -940,9 +952,7 @@ py::array_t<float> fp16_to_floats_wrapper(py::array_t<uint16_t, py::array::c_sty
     return output;
 }
 
-deglib::DynamicExplorationGraph load_readonly_graph_wrapper(const char* path) {
-    return deglib::load_readonly_graph(path);
-}
+deglib::DynamicExplorationGraph load_readonly_graph_wrapper(const char* path) { return deglib::load_readonly_graph(path); }
 
 deglib::DynamicExplorationGraph load_sizebounded_graph_wrapper(const char* path, const uint32_t capacity = 0) {
     return deglib::load_mutable_graph(path, capacity);
@@ -1454,8 +1464,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
             }
             return q;
         },
-        py::arg("vectors"), py::arg("drop_ratio") = 0.0f,
-        "Make, fit, and return a ScalarQuantizerInt8 instance from vectors"
+        py::arg("vectors"), py::arg("drop_ratio") = 0.0f, "Make, fit, and return a ScalarQuantizerInt8 instance from vectors"
     );
     optimization_module.def(
         "make_scalar_quantizer_int8_perdim",
@@ -1472,8 +1481,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
             }
             return q;
         },
-        py::arg("vectors"), py::arg("drop_ratio") = 0.0f,
-        "Make, fit, and return a ScalarQuantizerInt8PerDim instance from vectors"
+        py::arg("vectors"), py::arg("drop_ratio") = 0.0f, "Make, fit, and return a ScalarQuantizerInt8PerDim instance from vectors"
     );
     optimization_module.def(
         "make_scalar_quantizer_uint8",
@@ -1490,8 +1498,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
             }
             return q;
         },
-        py::arg("vectors"), py::arg("drop_ratio") = 0.0f,
-        "Make, fit, and return a ScalarQuantizerUint8 instance from vectors"
+        py::arg("vectors"), py::arg("drop_ratio") = 0.0f, "Make, fit, and return a ScalarQuantizerUint8 instance from vectors"
     );
     optimization_module.def(
         "make_scalar_quantizer_uint8_perdim",
@@ -1508,14 +1515,11 @@ PYBIND11_MODULE(deglib_cpp, m) {
             }
             return q;
         },
-        py::arg("vectors"), py::arg("drop_ratio") = 0.0f,
-        "Make, fit, and return a ScalarQuantizerUint8PerDim instance from vectors"
+        py::arg("vectors"), py::arg("drop_ratio") = 0.0f, "Make, fit, and return a ScalarQuantizerUint8PerDim instance from vectors"
     );
 
     optimization_module.def(
-        "make_evp_quantizer",
-        [](uint32_t non_zeros) { return deglib::quantization::evp::EvpQuantizer(non_zeros); },
-        py::arg("non_zeros"),
+        "make_evp_quantizer", [](uint32_t non_zeros) { return deglib::quantization::evp::EvpQuantizer(non_zeros); }, py::arg("non_zeros"),
         "Make and return an EvpQuantizer instance holding the shared non_zeros setting"
     );
 
@@ -1565,41 +1569,21 @@ PYBIND11_MODULE(deglib_cpp, m) {
     });
 
     py::class_<RerankerPy>(search_module, "Reranker")
-        .def(
-            py::init<const deglib::distances::FloatSpace&, py::array>(),
-            py::arg("space"),
-            py::arg("base_vectors"),
-            py::keep_alive<1, 3>()
-        )
+        .def(py::init<const deglib::distances::FloatSpace&, py::array>(), py::arg("space"), py::arg("base_vectors"), py::keep_alive<1, 3>())
         .def("get_num_base_vectors", &RerankerPy::get_num_base_vectors)
         .def(
-            "rerank",
-            &RerankerPy::rerank,
-            py::arg("queries"),
-            py::arg("candidate_indices"),
-            py::arg("k_top") = 0,
-            py::arg("num_threads") = 0,
-            py::arg("return_distances") = false,
-            py::arg("unsorted") = false
+            "rerank", &RerankerPy::rerank, py::arg("queries"), py::arg("candidate_indices"), py::arg("k_top") = 0, py::arg("num_threads") = 0,
+            py::arg("return_distances") = false, py::arg("unsorted") = false
         );
 
     py::class_<SearcherPy>(search_module, "Searcher")
         .def(
-            py::init<
-                const deglib::DynamicExplorationGraph&,
-                py::object,
-                std::optional<deglib::distances::FloatSpace>,
-                std::optional<py::array>
-            >(),
-            py::arg("graph"),
-            py::arg("quantizer") = py::none(),
-            py::arg("rerank_space") = std::nullopt,
-            py::arg("base_vectors") = std::nullopt,
+            py::init<const deglib::DynamicExplorationGraph&, py::object, std::optional<deglib::distances::FloatSpace>, std::optional<py::array>>(),
+            py::arg("graph"), py::arg("quantizer") = py::none(), py::arg("rerank_space") = std::nullopt, py::arg("base_vectors") = std::nullopt,
             py::keep_alive<1, 2>()
         )
         .def(
-            "search", &SearcherPy::search,
-            py::arg("query"), py::arg("k"), py::arg("eps_or_ef") = 0.1f, py::arg("rerank_factor") = 1.0f,
+            "search", &SearcherPy::search, py::arg("query"), py::arg("k"), py::arg("eps_or_ef") = 0.1f, py::arg("rerank_factor") = 1.0f,
             py::arg("return_distances") = false, py::arg("unsorted") = false,
             "Search for nearest neighbors of a single query vector.\n\n"
             "Args:\n"
@@ -1612,8 +1596,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
             "    unsorted: If True, returns candidates in heap order instead of ascending distance."
         )
         .def(
-            "search_batch", &SearcherPy::search_batch,
-            py::arg("queries"), py::arg("k"), py::arg("eps_or_ef") = 0.1f, py::arg("rerank_factor") = 1.0f,
+            "search_batch", &SearcherPy::search_batch, py::arg("queries"), py::arg("k"), py::arg("eps_or_ef") = 0.1f, py::arg("rerank_factor") = 1.0f,
             py::arg("num_threads") = 1, py::arg("return_distances") = false, py::arg("unsorted") = false,
             "Search for nearest neighbors for a batch of query vectors.\n\n"
             "Args:\n"
@@ -1627,10 +1610,12 @@ PYBIND11_MODULE(deglib_cpp, m) {
             "    unsorted: If True, returns candidates in heap order instead of ascending distance."
         )
         .def(
-            "optimize", &SearcherPy::optimize,
-            py::arg("n_clusters") = 128, py::arg("n_iter") = 15,
-            py::arg("sample_size") = 0, py::arg("seed") = 42, py::arg("num_threads") = 0,
-            "Select entry vertices via k-means medoids.\n\nArgs:\n    n_clusters: number of entry vertices to select.\n    n_iter: number of k-means iterations.\n    sample_size: vertices sampled for clustering, 0 selects 3% of the graph size.\n    seed: random seed for sampling and centroid init.\n    num_threads: worker threads, 0 selects a library default."
+            "optimize", &SearcherPy::optimize, py::arg("n_clusters") = 256, py::arg("n_iter") = 20, py::arg("sample_size") = 0, py::arg("k") = 100,
+            py::arg("seed") = 7, py::arg("num_threads") = 1,
+            "Select entry vertices via k-means medoids.\n\nArgs:\n    n_clusters: number of entry vertices to select.\n    n_iter: number of k-means "
+            "iterations.\n    sample_size: vertices sampled for clustering, 0 selects 3% of the graph size.\n    k: expected result count; sets the reranker "
+            "and traversal prefetch tuning operating point.\n    seed: random seed for sampling and centroid init.\n    num_threads: worker threads, 0 selects "
+            "a library default."
         );
 
     // graphs
@@ -1762,7 +1747,9 @@ PYBIND11_MODULE(deglib_cpp, m) {
             py::arg("max_distance_computation_count") = 0, py::arg("eps") = 0.0f, py::arg("include_entry") = true, py::arg("filter") = nullptr,
             py::arg("threads") = 1, py::arg("return_distances") = true, py::arg("unsorted") = false
         )
-        .def("save_graph", [](deglib::DynamicExplorationGraph& g, const char* path) { g.saveGraph(path); }, py::arg("path"))
+        .def(
+            "save_graph", [](deglib::DynamicExplorationGraph& g, const char* path) { g.saveGraph(path); }, py::arg("path")
+        )
         .def("get_entry_vertex_indices", &deglib::DynamicExplorationGraph::getEntryVertexIndices)
         .def("set_entry_vertex_indices", &deglib::DynamicExplorationGraph::setEntryVertexIndices, py::arg("indices"));
 

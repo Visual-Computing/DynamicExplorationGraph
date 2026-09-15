@@ -284,7 +284,7 @@ class Searcher:
     # Constructor via create_searcher(graph, quantizer=None, refine_space=None, refine_data=None)
 
     # Entry vertex optimization via k-means medoids
-    optimize(n_clusters=256, n_iter=20, sample_size=0, seed=7, num_threads=1)
+    optimize(n_clusters=256, n_iter=20, sample_size=0, k=100, seed=7, num_threads=1)
 
     # Search for nearest neighbors of a single query (1D) or a batch of queries (2D).
     # query: 1D vector [D] or 2D batch [N, D]

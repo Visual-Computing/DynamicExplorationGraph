@@ -241,10 +241,11 @@ class SearcherBase {
      * @param n_clusters  Number of entry vertices to select.
      * @param n_iter      Number of k-means iterations.
      * @param sample_size Number of vertices sampled for clustering, 0 selects 3% of the graph size.
+     * @param k           Expected result count; sets the operating point for reranker and traversal prefetch tuning.
      * @param seed        Random seed for sampling and centroid init.
      * @param threads     Number of worker threads, 0 selects a library default.
      */
-    virtual void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 0, uint32_t seed = 42, size_t threads = 0) = 0;
+    virtual void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 0, uint32_t k = 100, uint32_t seed = 42, size_t threads = 0) = 0;
 
     // --- Modern C++20 std::span and std::vector Convenience API ---
 
@@ -421,8 +422,8 @@ class SearcherBase {
             result.distances.resize(n_queries * k);
         }
         search_batch<T>(
-            queries, n_queries, k, std::span<uint32_t>(result.indices), return_distances ? std::span<float>(result.distances) : std::span<float>{},
-            eps_or_ef, rerank_factor, threads, return_distances, unsorted
+            queries, n_queries, k, std::span<uint32_t>(result.indices), return_distances ? std::span<float>(result.distances) : std::span<float>{}, eps_or_ef,
+            rerank_factor, threads, return_distances, unsorted
         );
         return result;
     }
@@ -451,24 +452,39 @@ class SearcherImpl : public SearcherBase {
      * @param n_clusters  Number of entry vertices to select.
      * @param n_iter      Number of k-means iterations.
      * @param sample_size Number of vertices sampled for clustering, 0 selects 3% of the graph size.
+     * @param k           Expected result count; sizes the reranker and traversal tuning workload and the dummy output buffer.
      * @param seed        Random seed for sampling and centroid init.
      * @param threads     Number of worker threads.
      */
-    void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 0, uint32_t seed = 7, size_t threads = 1) override {
+    void optimize(uint32_t n_clusters = 256, uint32_t n_iter = 20, size_t sample_size = 0, uint32_t k = 100, uint32_t seed = 7, size_t threads = 1) override {
         // 1. K-Means entry points selection
         entry_selector_.optimize(n_clusters, n_iter, sample_size, seed, threads);
 
-        // 2. Pure C++ prefetch auto-tuning directly within optimize()
-        if (graph_->size() < 10) return;
+        // 2. Auto-tune the reranker's prefetch parameters when a reranker is active.
+        //    The reranker samples its own base vectors, so this is type-correct for fp32/fp16 and
+        //    independent of the graph size.
+        if constexpr (!std::is_same_v<RefinerT, NoRefiner>) {
+            refiner_.optimize(50, 100, k);
+        }
+
+        // 3. Prefetch auto-tuning for graph traversal. Needs a graph at least one neighborhood
+        //    wide; below that the traversal does no real work and the timing is meaningless.
+        if (graph_->size() < graph_->getEdgesPerVertex()) return;
 
         const size_t test_q_count = std::min(size_t(50), size_t(graph_->size()));
         const uint32_t dim = graph_->getFeatureSpace().dim();
-        std::vector<float> sample_queries(test_q_count * size_t(dim));
 
-        // Sample queries from graph vertices (zero Python dependency)
-        for (size_t i = 0; i < test_q_count; ++i) {
-            const auto* feat = reinterpret_cast<const float*>(graph_->getFeatureVector(static_cast<uint32_t>(i)));
-            std::memcpy(sample_queries.data() + i * size_t(dim), feat, size_t(dim) * sizeof(float));
+        // Synthetic float queries in the searcher's input space. The graph stores features in its
+        // own (possibly quantized) feature space, so reinterpreting getFeatureVector() as float
+        // would read out of bounds and produce meaningless values; the searcher quantizes these
+        // queries before traversal, which is exactly the path being timed.
+        std::vector<float> sample_queries(test_q_count * size_t(dim));
+        uint32_t rng = seed * 2654435761u + 1u;
+        for (auto& v : sample_queries) {
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            v = (static_cast<float>(rng & 0xFFFFFF) / 8388608.0f) - 1.0f;  // [-1, 1)
         }
 
         const std::vector<int32_t> try_pos = {4, 8, 12, 16};
@@ -479,22 +495,21 @@ class SearcherImpl : public SearcherBase {
         int32_t best_pl = graph_->getPl();
         int32_t best_nl = graph_->getNl();
         double best_time = std::numeric_limits<double>::max();
-
-        std::vector<uint32_t> dummy_out(100);
+        std::vector<uint32_t> dummy_out(k);
+        const uint32_t ef = std::max<uint32_t>(200, k);
 
         for (int32_t po : try_pos) {
             for (int32_t pl : try_pls) {
                 for (int32_t nl : try_nls) {
                     const_cast<deglib::graph::InternalGraph*>(graph_)->setPrefetch(po, pl, nl);
 
-                    // Warmup
                     for (size_t i = 0; i < std::min(size_t(3), test_q_count); ++i) {
-                        search_single_ef_typed(sample_queries.data() + i * size_t(dim), 100, 200, 1.0f, dummy_out.data(), nullptr, true);
+                        search_single_ef_typed(sample_queries.data() + i * size_t(dim), k, ef, 1.0f, dummy_out.data(), nullptr, true);
                     }
 
                     auto t_start = std::chrono::high_resolution_clock::now();
                     for (size_t i = 0; i < test_q_count; ++i) {
-                        search_single_ef_typed(sample_queries.data() + i * size_t(dim), 100, 200, 1.0f, dummy_out.data(), nullptr, true);
+                        search_single_ef_typed(sample_queries.data() + i * size_t(dim), k, ef, 1.0f, dummy_out.data(), nullptr, true);
                     }
                     auto t_end = std::chrono::high_resolution_clock::now();
                     double dur = std::chrono::duration<double, std::micro>(t_end - t_start).count();

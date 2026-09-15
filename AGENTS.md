@@ -92,6 +92,27 @@ cd python/
 uv run pytest
 ```
 
+
+## Verification Workflow
+
+The Python extension (`deglib_cpp`) compiles the header-only C++ library, so a single Python build both **catches C++ compile errors** and **exercises behavior** via `pytest`. Prefer it as the primary gate during iteration instead of running a separate C++ test build plus a Python build.
+
+1. **Primary gate (one build):** rebuild the extension and run the Python tests.
+   ```bash
+   cd python/
+   uv pip install -e . --no-build-isolation
+   uv run pytest
+   ```
+2. **If the Python build fails:** drop to a targeted C++ build for fast, incremental diagnosis of the affected header/template (recompiles only the changed TU, faster than the full monolithic binding TU):
+   ```bash
+   cd cpp/
+   cmake --build --preset windows-msvc-avx2-release --target <test_target>
+   ctest --preset windows-msvc-avx2-release -R <regex> --output-on-failure
+   ```
+3. **C++ unit tests are not redundant:** they cover edge cases the Python suite does not (span/typed `rerank` overloads, null/throw paths, specific `QuantT` x `RefinerT` template combinations, prefetch `optimize()` tuning). Run the relevant C++ test targets before finalizing a change to the C++ library, and whenever a code path is not reachable from Python.
+
+Note: the Python build recompiles the entire `deglib_cpp.cpp` translation unit (~2-3 min) on every header change, so it saves build *steps*, not necessarily wall-clock time versus an incremental C++ build.
+
 ### Code Formatting (C++ & Python)
 
 ```bash
