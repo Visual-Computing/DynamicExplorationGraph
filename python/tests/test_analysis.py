@@ -94,3 +94,27 @@ def test_analyze_graph_values_consistent():
     # total in-degree should equal total edges
     # avg_in_degree * vertex_count should equal edge_count
     assert np.isclose(stats["avg_in_degree"] * stats["vertex_count"], stats["edge_count"])
+
+
+def test_calc_graph_quality():
+    """Test calc_graph_quality with synthetic ground truth."""
+    graph, _ = _build_test_graph(samples=20, dims=8, edges_per_vertex=4)
+    size = graph.size()
+    # Labels are 0, 10, 20, ..., 190
+    max_label = (size - 1) * 10
+    row_count = max_label + 1
+    base_top = np.full((row_count, 10), 99999, dtype=np.uint32)
+
+    # Fill base_top so that each vertex's first outgoing edge matches
+    for i in range(size):
+        ext_v = i * 10
+        neighbors = graph.get_neighbors(ext_v)
+        if len(neighbors) > 0:
+            # Match first neighbor
+            base_top[ext_v, 0] = neighbors[0]
+
+    quality = deglib.analysis.calc_graph_quality(graph, base_top)
+    # Each vertex has 4 edges and exactly 1 match in top-4 -> quality should be 1/4 = 0.25
+    assert 0.0 < quality <= 1.0
+    assert np.isclose(quality, 0.25, atol=1e-3)
+

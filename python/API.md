@@ -476,7 +476,11 @@ calc_search_reachability(graph) -> float
 
 # Average exploration reachability across all starting vertices (0.0 to 1.0)
 calc_exploration_reach(graph) -> float
+
+# Average graph quality against a precomputed base_top groundtruth (0.0 to 1.0)
+calc_graph_quality(graph, base_top, sample_size=0, num_threads=0) -> float
 ```
+
 
 ---
 

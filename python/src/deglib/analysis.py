@@ -10,6 +10,7 @@ from deglib_cpp import (
     calc_search_reachability as calc_search_reachability_cpp,
     calc_exploration_reach as calc_exploration_reach_cpp,
     analyze_graph as analyze_graph_cpp,
+    calc_graph_quality as calc_graph_quality_cpp,
 )
 from .graph import DynamicExplorationGraph
 
@@ -150,3 +151,39 @@ def analyze_graph(graph: DynamicExplorationGraph) -> Dict[str, Any]:
         "exploration_reachability": stats.exploration_reachability,
         "memory_bytes": stats.memory_bytes,
     }
+
+
+def calc_graph_quality(
+    graph: DynamicExplorationGraph,
+    base_top: Any,
+    sample_size: int = 0,
+    num_threads: int = 0,
+) -> float:
+    """
+    Computes graph quality comparing each vertex's outgoing edges against its true nearest neighbors.
+
+    For each vertex v with d outgoing edges (where d = len(neighbors(v))):
+    We check how many of its d edges are among the true top-d nearest neighbors in base_top.
+    Quality = total_hits / total_edges across all evaluated vertices.
+
+    :param graph: The graph to evaluate (DynamicExplorationGraph or ReadOnlyGraph).
+    :param base_top: 2D numpy array of shape (N, K) containing external labels of nearest neighbors.
+    :param sample_size: Max number of vertices to evaluate (0 evaluates all vertices).
+    :param num_threads: Number of worker threads (0 uses all available CPU threads).
+    :return: Quality ratio between 0.0 and 1.0 (total_hits / total_edges).
+    """
+    import numpy as np
+
+    if not isinstance(base_top, np.ndarray):
+        base_top = np.asarray(base_top, dtype=np.uint32)
+    elif base_top.dtype != np.uint32:
+        base_top = np.ascontiguousarray(base_top, dtype=np.uint32)
+
+    return float(
+        calc_graph_quality_cpp(
+            graph.dynamic_exploration_graph_cpp,
+            base_top,
+            sample_size=sample_size,
+            num_threads=num_threads,
+        )
+    )

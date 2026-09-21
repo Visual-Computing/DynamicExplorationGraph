@@ -471,6 +471,9 @@ struct GraphStats {
 /// Perform comprehensive graph analysis
 GraphStats analyze_graph(InternalGraph& graph);
 
+/// Compute graph quality against base_top ground truth (0.0 to 1.0)
+float calc_graph_quality(const InternalGraph& graph, const uint32_t* base_top_data, size_t base_top_rows, size_t base_top_k, size_t sample_size = 0, size_t num_threads = 0);
+
 /// Verify graph regularity (correct vertex count, ascending sorted unique neighbors, no self-loops)
 bool check_graph_regularity(InternalGraph& graph, uint32_t expected_vertices, bool check_back_link = false);
 

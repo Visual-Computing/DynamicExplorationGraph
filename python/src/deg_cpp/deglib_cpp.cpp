@@ -1223,6 +1223,28 @@ float calc_exploration_reach_wrapper(const deglib::DynamicExplorationGraph& grap
 
 deglib::analysis::GraphStats analyze_graph_wrapper(const deglib::DynamicExplorationGraph& graph) { return deglib::analysis::analyze_graph(graph.internal()); }
 
+float calc_graph_quality_wrapper(
+    const deglib::DynamicExplorationGraph& graph,
+    py::array_t<uint32_t, py::array::c_style | py::array::forcecast> base_top,
+    const size_t sample_size = 0,
+    const size_t num_threads = 0
+) {
+    py::buffer_info buf = base_top.request();
+    if (buf.ndim != 2) {
+        throw std::invalid_argument("base_top must be a 2D numpy array");
+    }
+    const size_t rows = static_cast<size_t>(buf.shape[0]);
+    const size_t k = static_cast<size_t>(buf.shape[1]);
+    const auto* ptr = static_cast<const uint32_t*>(buf.ptr);
+
+    float result = 0.0f;
+    {
+        py::gil_scoped_release release;
+        result = deglib::analysis::calc_graph_quality(graph.internal(), ptr, rows, k, sample_size, num_threads);
+    }
+    return result;
+}
+
 // ============================================================================
 
 PYBIND11_MODULE(deglib_cpp, m) {
@@ -1904,6 +1926,15 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def_readonly("exploration_reachability", &deglib::analysis::GraphStats::exploration_reachability)
         .def_readonly("memory_bytes", &deglib::analysis::GraphStats::memory_bytes);
     m.def("analyze_graph", &analyze_graph_wrapper, py::arg("graph"));
+    m.def(
+        "calc_graph_quality",
+        &calc_graph_quality_wrapper,
+        py::arg("graph"),
+        py::arg("base_top"),
+        py::arg("sample_size") = 0,
+        py::arg("num_threads") = 0,
+        "Computes graph quality comparing each vertex's outgoing edges against its true nearest neighbors."
+    );
     m.def(
         "prune_non_rng_edges",
         [](deglib::DynamicExplorationGraph& graph, const size_t num_threads) {

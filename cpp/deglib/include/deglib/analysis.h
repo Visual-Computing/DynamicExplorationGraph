@@ -521,4 +521,110 @@ static GraphStats analyze_graph(const deglib::graph::InternalGraph& graph) {
     return stats;
 }
 
+/**
+ * Compute the average graph quality against a precomputed base ground truth matrix.
+ *
+ * For each vertex in the graph:
+ * - Its external label identifies the corresponding row in base_top.
+ * - If that row exists in base_top, we inspect its d valid outgoing neighbors (translated to external labels).
+ * - We check how many of its d outgoing edges are in the top-d nearest neighbors in base_top[ext_label, :d].
+ * - Quality is the ratio of total hits over total edges across evaluated vertices.
+ *
+ * @param graph Search graph (InternalGraph)
+ * @param base_top_data Pointer to contiguous 2D row-major array of shape [base_top_rows, base_top_k] of external labels
+ * @param base_top_rows Number of rows in base_top
+ * @param base_top_k Number of nearest neighbors per row in base_top
+ * @param sample_size Max number of vertices to evaluate (0 means all vertices)
+ * @param num_threads Number of worker threads (0 uses std::thread::hardware_concurrency)
+ * @return Average graph quality ratio between 0.0f and 1.0f (total_hits / total_edges)
+ */
+static float calc_graph_quality(
+    const deglib::graph::InternalGraph& graph,
+    const uint32_t* base_top_data,
+    const size_t base_top_rows,
+    const size_t base_top_k,
+    const size_t sample_size = 0,
+    const size_t num_threads = 0
+) {
+    const auto graph_size = graph.size();
+    if (graph_size == 0 || base_top_data == nullptr || base_top_rows == 0 || base_top_k == 0) {
+        return 0.0f;
+    }
+
+    size_t total_eval = graph_size;
+    if (sample_size > 0 && sample_size < total_eval) {
+        total_eval = sample_size;
+    }
+
+    const auto edges_per_vertex = graph.getEdgesPerVertex();
+    const size_t actual_threads = (num_threads == 0) ? std::max(1u, std::thread::hardware_concurrency()) : num_threads;
+
+    std::vector<uint64_t> thread_hits(actual_threads, 0);
+    std::vector<uint64_t> thread_edges(actual_threads, 0);
+
+    deglib::concurrent::parallel_batch_for(0, total_eval, actual_threads, [&](size_t start_idx, size_t end_idx, size_t thread_id) {
+        uint64_t hits = 0;
+        uint64_t edges = 0;
+
+        // Stack buffer for valid neighbor external labels (edges_per_vertex is typically <= 128)
+        std::vector<uint32_t> nbr_labels;
+        nbr_labels.reserve(edges_per_vertex);
+
+        for (size_t v = start_idx; v < end_idx; ++v) {
+            const auto ext_label = graph.getExternalLabel(static_cast<uint32_t>(v));
+            if (ext_label >= base_top_rows) {
+                continue;
+            }
+
+            const auto neighbors = graph.getNeighborIndices(static_cast<uint32_t>(v));
+            nbr_labels.clear();
+            for (uint8_t e = 0; e < edges_per_vertex; ++e) {
+                const auto n_idx = neighbors[e];
+                if (n_idx != (std::numeric_limits<uint32_t>::max)()) {
+                    nbr_labels.push_back(graph.getExternalLabel(n_idx));
+                }
+            }
+
+            const auto d = nbr_labels.size();
+            if (d == 0) {
+                continue;
+            }
+
+            edges += d;
+            const auto top_d_len = std::min(d, base_top_k);
+            const uint32_t* gt_row = base_top_data + (static_cast<size_t>(ext_label) * base_top_k);
+
+            // Count intersection between nbr_labels and gt_row[0 .. top_d_len)
+            for (size_t i = 0; i < d; ++i) {
+                const auto lbl = nbr_labels[i];
+                for (size_t j = 0; j < top_d_len; ++j) {
+                    if (lbl == gt_row[j]) {
+                        hits++;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (thread_id < thread_hits.size()) {
+            thread_hits[thread_id] += hits;
+            thread_edges[thread_id] += edges;
+        }
+    });
+
+    uint64_t total_hits = 0;
+    uint64_t total_edges = 0;
+    for (size_t t = 0; t < actual_threads; ++t) {
+        total_hits += thread_hits[t];
+        total_edges += thread_edges[t];
+    }
+
+    if (total_edges == 0) {
+        return 0.0f;
+    }
+
+    return static_cast<float>(total_hits) / static_cast<float>(total_edges);
+}
+
 }  // end namespace deglib::analysis
+
