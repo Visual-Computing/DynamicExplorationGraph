@@ -208,7 +208,7 @@ def run_static_benchmark(
             graph = graph_mut.to_readonly()
 
     # Graph Analysis
-    analyze_graph(graph)
+    analyze_graph(graph, dataset_key=resolved_key, cache_dir=cache_dir)
 
     # ANNS Test
     search_k = min(preset["anns_k"], gt_vecs.shape[1])

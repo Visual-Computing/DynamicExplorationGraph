@@ -14,44 +14,43 @@ from dataset import (
     resolve_dataset_key,
     ivecs_write,
     ivecs_read,
+    compute_and_save_explore_gt,
+    FloatSpace,
     DATASET_METADATA,
 )
 from presets import get_preset
 
 
-def find_default_graph(dataset_key: str, dataset_dir: Path) -> Optional[Path]:
+def find_default_graph(dataset_key: str, dataset_dir: Path, half: bool = False) -> Optional[Path]:
     """
-    Search for the most suitable existing graph (.deg) for the given dataset.
-    Prioritizes optimized/sorted graphs, then mainBranch, then any .deg file.
+    Search for existing graph (.deg) strictly in <dataset_dir>/deg/.
+    - If half=True: looks only for *AddHalf*.deg
+    - If half=False: looks only for *LowLID.deg or *HighLID.deg
     """
-    # 1. Look in <dataset_dir>/deg/
     deg_dir = dataset_dir / "deg"
-    if deg_dir.is_dir():
-        # Prefer FlasRamSorted, FlasSorted, RamSorted, or standard build
-        for pattern in ["*_FlasRamSorted.deg", "*_FlasSorted.deg", "*_RamSorted.deg", "*LowLID.deg", "*HighLID.deg"]:
-            matches = list(deg_dir.glob(pattern))
-            if matches:
-                return matches[0]
-        # Any .deg directly in deg/
-        deg_files = [f for f in deg_dir.glob("*.deg") if not f.name.startswith("Eval_")]
-        if deg_files:
-            return deg_files[0]
+    if not deg_dir.is_dir():
+        return None
 
-    # 2. Look in <dataset_dir>/deg_mainBranch/
-    main_dir = dataset_dir / "deg_mainBranch"
-    if main_dir.is_dir():
-        matches = list(main_dir.glob("*.deg"))
+    if half:
+        # Strictly look for AddHalf graph
+        matches = list(deg_dir.rglob("*AddHalf*.deg"))
         if matches:
             return matches[0]
+        return None
 
-    # 3. Recursive search in dataset_dir (excluding dynamic/eval variations if possible)
-    all_deg = list(dataset_dir.rglob("*.deg"))
-    if all_deg:
-        # Prefer non-dynamic, non-eval
-        candidates = [f for f in all_deg if "dynamic" not in str(f).lower() and not f.name.startswith("Eval_")]
-        if candidates:
-            return candidates[0]
-        return all_deg[0]
+    # Full graph: strictly look for LowLID or HighLID in deg/
+    preset = get_preset(dataset_key)
+    target_str = preset.get("optimization_target", "LowLID")
+    primary_pattern = f"*{target_str}.deg"
+    secondary_pattern = "*HighLID.deg" if target_str == "LowLID" else "*LowLID.deg"
+
+    matches = list(deg_dir.glob(primary_pattern))
+    if matches:
+        return matches[0]
+
+    matches = list(deg_dir.glob(secondary_pattern))
+    if matches:
+        return matches[0]
 
     return None
 
@@ -87,7 +86,7 @@ def tune_explore_eps(
             entry_labels,
             k=k,
             eps=eps,
-            include_entry=True,
+            include_entry=False,
             threads=threads,
             return_distances=False,
         )
@@ -110,6 +109,11 @@ def tune_explore_eps(
             print(f"--> Target recall reached with eps = {best_eps:.3f} (Recall: {best_recall:.4f})")
             return best_eps, best_recall
 
+        # If recall has plateaued and does not improve anymore, break early
+        if recall <= best_recall and best_recall > 0.0:
+            print(f"--> Recall plateaued at {best_recall:.4f}, stopping sweep early.")
+            break
+
         if recall > best_recall:
             best_recall = recall
             best_eps = eps
@@ -123,9 +127,10 @@ def generate_base_top(
     cache_dir: Path,
     k: int = 100,
     target_recall: float = 0.99,
+    half: bool = False,
     graph_path_arg: Optional[str] = None,
     output_path_arg: Optional[str] = None,
-    chunk_size: int = 50000,
+    chunk_size: int = 1000,
     threads: int = 0,
     eps_override: Optional[float] = None,
 ):
@@ -134,13 +139,31 @@ def generate_base_top(
         raise ValueError(f"Unknown dataset '{dataset_key}'. Choose from: {list(DATASET_METADATA.keys())}")
 
     print(f"\n=======================================================")
-    print(f"Processing Dataset: {DATASET_METADATA[resolved_key]['name']} ({resolved_key})")
+    print(f"Processing Dataset: {DATASET_METADATA[resolved_key]['name']} ({resolved_key}) {'[HALF]' if half else '[FULL]'}")
     print(f"=======================================================")
 
     # 1. Load dataset metadata & exploration GT
     base_vecs, query_vecs, gt_vecs, explore_entry, explore_gt, meta = load_dataset(resolved_key, cache_dir)
-    n_base = len(base_vecs)
+    n_base = len(base_vecs) // 2 if half else len(base_vecs)
     preset = get_preset(resolved_key)
+
+    files_dir = cache_dir / meta["folder"]
+    if (files_dir / meta["folder"]).is_dir():
+        files_dir = files_dir / meta["folder"]
+
+    # If half is requested, load or compute explore_groundtruth_half_top1000.ivecs
+    if half:
+        half_gt_file = files_dir / f"{meta['folder']}_explore_groundtruth_half_top1000.ivecs"
+        if half_gt_file.is_file():
+            print(f"Loading half exploration ground truth from {half_gt_file}...")
+            explore_gt = ivecs_read(half_gt_file)
+        else:
+            print(f"Computing half exploration ground truth (top-1000 on first {n_base} vectors)...")
+            explore_query_path = files_dir / meta["explore_query_file"]
+            explore_query_vecs = ivecs_read(explore_query_path).view(np.float32)
+            float_space = FloatSpace.create(base_vecs.shape[1], meta["metric"])
+            compute_and_save_explore_gt(base_vecs[:n_base], explore_query_vecs, float_space, 1000, half_gt_file)
+            explore_gt = ivecs_read(half_gt_file)
 
     # 2. Determine graph path
     if graph_path_arg:
@@ -149,16 +172,21 @@ def generate_base_top(
             raise FileNotFoundError(f"Specified graph file does not exist: {graph_path}")
     else:
         dataset_folder = cache_dir / meta["folder"]
-        graph_path = find_default_graph(resolved_key, dataset_folder)
+        graph_path = find_default_graph(resolved_key, dataset_folder, half=half)
         if not graph_path:
-            raise FileNotFoundError(f"Could not find any existing .deg graph for {resolved_key} in {dataset_folder}")
+            raise FileNotFoundError(f"Could not find any existing .deg graph for {resolved_key} (half={half}) in {dataset_folder}")
 
     print(f"Using Graph: {graph_path}")
     t_load = time.perf_counter()
     graph = deglib.load_readonly_graph(str(graph_path))
     print(f"Graph loaded in {time.perf_counter() - t_load:.2f}s | Vertices: {graph.size()}")
 
-    if graph.size() < n_base:
+    if half and graph.size() != n_base:
+        raise ValueError(
+            f"Graph size ({graph.size()}) does not match expected half dataset size ({n_base}) for '{resolved_key}'. "
+            f"Please build an AddHalf graph first (e.g. via dynamic_data/main.py)!"
+        )
+    elif not half and graph.size() < n_base:
         print(f"Warning: Graph size ({graph.size()}) is smaller than base vector count ({n_base})!")
 
     # 3. Determine search threads
@@ -187,10 +215,8 @@ def generate_base_top(
     if output_path_arg:
         out_file = Path(output_path_arg)
     else:
-        files_dir = cache_dir / meta["folder"]
-        if (files_dir / meta["folder"]).is_dir():
-            files_dir = files_dir / meta["folder"]
-        out_file = files_dir / f"{meta['folder']}_base_top{k}.ivecs"
+        suffix = f"_half_top{k}.ivecs" if half else f"_top{k}.ivecs"
+        out_file = files_dir / f"{meta['folder']}_base{suffix}"
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
     print(f"\nTarget output file: {out_file}")
@@ -200,9 +226,6 @@ def generate_base_top(
     print(f"\nStarting Exploration for all {n_base} elements (k={k}, eps={chosen_eps:.3f}, {total_chunks} chunks)...")
 
     start_explore_time = time.perf_counter()
-    
-    # We will write directly in chunks into an output file in ivecs format
-    # In ivecs: each vector is preceded by int32(k), followed by k * int32(id)
     k_int32 = np.int32(k)
 
     with open(out_file, "wb") as f_out:
@@ -215,12 +238,11 @@ def generate_base_top(
                     batch_labels,
                     k=k,
                     eps=chosen_eps,
-                    include_entry=True,
+                    include_entry=False,
                     threads=threads,
                     return_distances=False,
                 )
 
-                # Format as ivecs: [k, id_0, id_1, ..., id_k-1] per row
                 n_chunk = len(batch_labels)
                 k_col = np.full((n_chunk, 1), k_int32, dtype=np.int32)
                 ivecs_chunk = np.hstack([k_col, indices_chunk.astype(np.int32)])
@@ -245,6 +267,11 @@ def main():
         type=str,
         default="audio",
         help="Dataset name (e.g. audio, enron, deep1m, glove, sift1m, or 'all').",
+    )
+    parser.add_argument(
+        "--half",
+        action="store_true",
+        help="Generate base_half_topK.ivecs for the first half of the dataset.",
     )
     parser.add_argument(
         "--k",
@@ -279,8 +306,8 @@ def main():
     parser.add_argument(
         "--chunk-size",
         type=int,
-        default=50000,
-        help="Batch chunk size for exploration and streaming file write (default: 50000).",
+        default=1000,
+        help="Batch chunk size for exploration and streaming file write (default: 1000).",
     )
     parser.add_argument(
         "--threads",
@@ -311,6 +338,7 @@ def main():
                 cache_dir=cache_dir,
                 k=args.k,
                 target_recall=args.target_recall,
+                half=args.half,
                 graph_path_arg=args.graph_path,
                 output_path_arg=args.out,
                 chunk_size=args.chunk_size,
