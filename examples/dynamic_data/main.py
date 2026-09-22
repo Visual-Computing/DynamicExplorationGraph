@@ -1,5 +1,6 @@
 import argparse
 import multiprocessing
+import sys
 import time
 from enum import Enum
 from pathlib import Path
@@ -15,6 +16,26 @@ from dataset import (
     DATASET_METADATA,
 )
 from presets import get_preset
+
+
+class TeeLogger:
+    """Duplicates stream writes to both the original terminal stream and a log file."""
+
+    def __init__(self, stream, log_file):
+        self.stream = stream
+        self.log_file = log_file
+
+    def write(self, message):
+        self.stream.write(message)
+        self.log_file.write(message)
+        self.log_file.flush()
+
+    def flush(self):
+        self.stream.flush()
+        self.log_file.flush()
+
+    def isatty(self):
+        return getattr(self.stream, "isatty", lambda: False)()
 
 
 class DataStreamType(Enum):
@@ -356,100 +377,122 @@ def run_dynamic_benchmark(
 
     # Iterate over all three stream types (mirrors C++ bench_dynamic_data.cpp)
     for stream_type in STREAM_TYPES:
-        print(f"\n=== Testing DataStreamType: {stream_type.value} ===")
-
-        # Resolve graph file path
+        # Resolve graph file path and log file path
         if graph_dir is not None:
             graph_path = build_dynamic_graph_filename(graph_dir, dims, preset["k"], stream_type)
+            log_path = graph_path.with_suffix(".deg.log")
         else:
             graph_path = None
+            log_path = None
 
-        graph = None
+        log_file = None
+        orig_stdout = sys.stdout
+        orig_stderr = sys.stderr
+        if log_path is not None:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_file = open(log_path, "w", encoding="utf-8")
+            sys.stdout = TeeLogger(orig_stdout, log_file)
+            sys.stderr = TeeLogger(orig_stderr, log_file)
 
-        # Load from file if it exists and force_rebuild is not set
-        if graph_path and graph_path.exists() and not force_rebuild:
-            print(f"Loading existing graph: {graph_path}")
-            graph = deglib.load_readonly_graph(str(graph_path))
-            print(f"Loaded dynamic graph with {graph.size()} vertices")
-        else:
-            if graph_path and force_rebuild:
-                print(f"Force rebuild requested, rebuilding graph: {graph_path}")
-            elif graph_path:
-                print(f"Graph not found, building: {graph_path}")
+        try:
+            print(f"\n=== Testing DataStreamType: {stream_type.value} ===")
+            if graph_path:
+                print(f"Graph path: {graph_path}")
+            if log_path:
+                print(f"Logging to file: {log_path}")
+
+            graph = None
+
+            # Load from file if it exists and force_rebuild is not set
+            if graph_path and graph_path.exists() and not force_rebuild:
+                print(f"Loading existing graph: {graph_path}")
+                graph = deglib.load_readonly_graph(str(graph_path))
+                print(f"Loaded dynamic graph with {graph.size()} vertices")
             else:
-                print("No --graph-dir specified, building graph in RAM only.")
+                if graph_path and force_rebuild:
+                    print(f"Force rebuild requested, rebuilding graph: {graph_path}")
+                elif graph_path:
+                    print(f"Graph not found, building: {graph_path}")
+                else:
+                    print("No --graph-dir specified, building graph in RAM only.")
 
-            graph = build_dynamic_graph(
-                base_vecs=base_vecs,
-                stream_type=stream_type,
-                graph_path=graph_path,
-                preset=preset,
-                instruction_enum=instruction_enum,
-                build_threads=build_threads,
-            )
+                graph = build_dynamic_graph(
+                    base_vecs=base_vecs,
+                    stream_type=stream_type,
+                    graph_path=graph_path,
+                    preset=preset,
+                    instruction_enum=instruction_enum,
+                    build_threads=build_threads,
+                )
 
-        if graph is None:
-            print(f"ERROR: Could not build or load graph for {stream_type.value}")
-            continue
+            if graph is None:
+                print(f"ERROR: Could not build or load graph for {stream_type.value}")
+                continue
 
-        print(f"Graph size: {graph.size()} vertices")
+            print(f"Graph size: {graph.size()} vertices")
 
-        # Graph analysis
-        deglib.analysis.analyze_graph(graph)
+            # Graph analysis
+            deglib.analysis.analyze_graph(graph)
 
-        # ANNS Test using half ground truth
-        # C++: use_half = (ds_type != DataStreamType::AddAll) -> always True for our 3 types
-        search_k = min(preset["anns_k"], gt_vecs_half.shape[1])
-        repeat = preset.get("anns_repeat", 1)
-        eps_list = sorted(preset["search_eps_list"])
+            # ANNS Test using half ground truth
+            # C++: use_half = (ds_type != DataStreamType::AddAll) -> always True for our 3 types
+            search_k = min(preset["anns_k"], gt_vecs_half.shape[1])
+            repeat = preset.get("anns_repeat", 1)
+            eps_list = sorted(preset["search_eps_list"])
 
-        print(f"\n--- ANNS Test (k={search_k}, using half-dataset GT) ---")
-        print(f"Compute TOP{search_k} for eps {', '.join(f'{e:.3f}' for e in eps_list)}")
+            print(f"\n--- ANNS Test (k={search_k}, using half-dataset GT) ---")
+            print(f"Compute TOP{search_k} for eps {', '.join(f'{e:.3f}' for e in eps_list)}")
 
-        anns_recalls = []
-        anns_qps = []
-        n_queries = len(query_vecs)
+            anns_recalls = []
+            anns_qps = []
+            n_queries = len(query_vecs)
 
-        for eps in eps_list:
-            start_time = time.perf_counter()
-            for _ in range(repeat):
-                indices_batch, _ = graph.search(query_vecs, eps=eps, k=search_k, threads=1)
-            elapsed_sec = time.perf_counter() - start_time
+            for eps in eps_list:
+                start_time = time.perf_counter()
+                for _ in range(repeat):
+                    indices_batch, _ = graph.search(query_vecs, eps=eps, k=search_k, threads=1)
+                elapsed_sec = time.perf_counter() - start_time
 
-            search_time_us = elapsed_sec * 1e6
-            time_us_per_query = int((search_time_us / max(n_queries, 1)) / repeat)
-            qps = n_queries / max(elapsed_sec / repeat, 1e-9)
+                search_time_us = elapsed_sec * 1e6
+                time_us_per_query = int((search_time_us / max(n_queries, 1)) / repeat)
+                qps = n_queries / max(elapsed_sec / repeat, 1e-9)
 
-            hits = 0
-            total_returned = 0
-            for i in range(n_queries):
-                gt_set = set(gt_vecs_half[i, :search_k])
-                ret_set = set(indices_batch[i])
-                hits += len(gt_set.intersection(ret_set))
-                total_returned += len(gt_set)
+                hits = 0
+                total_returned = 0
+                for i in range(n_queries):
+                    gt_set = set(gt_vecs_half[i, :search_k])
+                    ret_set = set(indices_batch[i])
+                    hits += len(gt_set.intersection(ret_set))
+                    total_returned += len(gt_set)
 
-            recall = hits / max(total_returned, 1)
-            anns_recalls.append(recall)
-            anns_qps.append(qps)
+                recall = hits / max(total_returned, 1)
+                anns_recalls.append(recall)
+                anns_qps.append(qps)
 
-            print(
-                f"eps {eps:6.3f} \trecall {recall:.5f} \ttime_us_per_query {time_us_per_query:6d}us \t{qps:9.1f} qps \tsearch time: {int(search_time_us / 1000):6d}ms"
-            )
+                print(
+                    f"eps {eps:6.3f} \trecall {recall:.5f} \ttime_us_per_query {time_us_per_query:6d}us \t{qps:9.1f} qps \tsearch time: {int(search_time_us / 1000):6d}ms"
+                )
 
-            if linear_baseline_us > 0 and time_us_per_query > linear_baseline_us:
-                print(f"eps {eps:.3f} \t ABORTED ({time_us_per_query}us/query > {int(linear_baseline_us)}us baseline)")
-                break
+                if linear_baseline_us > 0 and time_us_per_query > linear_baseline_us:
+                    print(f"eps {eps:.3f} \t ABORTED ({time_us_per_query}us/query > {int(linear_baseline_us)}us baseline)")
+                    break
 
-            if recall > 0.997:
-                print("Reached recall > 0.997, stopping further tests.")
-                break
+                if recall > 0.997:
+                    print("Reached recall > 0.997, stopping further tests.")
+                    break
 
-        # Send this stream type's results to the combined plot process
-        if plot_queue is not None and anns_recalls:
-            plot_queue.put((stream_type.value, list(anns_recalls), list(anns_qps)))
+            # Send this stream type's results to the combined plot process
+            if plot_queue is not None and anns_recalls:
+                plot_queue.put((stream_type.value, list(anns_recalls), list(anns_qps)))
 
-        # Release graph memory before building the next one
-        del graph
+            # Release graph memory before building the next one
+            del graph
+
+        finally:
+            if log_file is not None:
+                sys.stdout = orig_stdout
+                sys.stderr = orig_stderr
+                log_file.close()
 
     # Signal the plot process that all data has been sent, then wait for the user to close it
     if plot_queue is not None:
