@@ -16,6 +16,7 @@ from dataset import (
     DATASET_METADATA,
 )
 from presets import get_preset
+from graph_analysis import analyze_graph
 
 
 class TeeLogger:
@@ -432,7 +433,7 @@ def run_dynamic_benchmark(
             print(f"Graph size: {graph.size()} vertices")
 
             # Graph analysis
-            deglib.analysis.analyze_graph(graph)
+            analyze_graph(graph, dataset_key=resolved_key, cache_dir=cache_dir, is_half=True)
 
             # ANNS Test using half ground truth
             # C++: use_half = (ds_type != DataStreamType::AddAll) -> always True for our 3 types
@@ -477,8 +478,8 @@ def run_dynamic_benchmark(
                     print(f"eps {eps:.3f} \t ABORTED ({time_us_per_query}us/query > {int(linear_baseline_us)}us baseline)")
                     break
 
-                if recall > 0.997:
-                    print("Reached recall > 0.997, stopping further tests.")
+                if recall >= 0.995:
+                    print("Reached recall >= 0.995, stopping further tests.")
                     break
 
             # Send this stream type's results to the combined plot process

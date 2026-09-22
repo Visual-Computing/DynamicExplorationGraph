@@ -252,8 +252,8 @@ def run_static_benchmark(
             print(f"eps {eps:.3f} \t ABORTED ({time_us_per_query}us/query > {int(linear_baseline_us)}us baseline)")
             break
 
-        if recall > 0.997:
-            print("Reached recall > 0.997, stopping further tests.")
+        if recall >= 0.995:
+            print("Reached recall >= 0.995, stopping further tests.")
             break
 
     plot_anns_results(
