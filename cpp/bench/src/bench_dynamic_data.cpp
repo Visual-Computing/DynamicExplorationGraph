@@ -24,6 +24,9 @@ struct DynamicConfig {
     uint8_t k = 30;
     uint8_t k_ext = 60;
     float eps_ext = 0.1f;
+    uint8_t k_opt = 30;
+    float eps_opt = 0.001f;
+    uint8_t i_opt = 5;
     deglib::builder::OptimizationTarget lid = deglib::builder::OptimizationTarget::StreamingData;
     uint32_t anns_k = 100;
     uint32_t anns_repeat = 1;
@@ -52,6 +55,7 @@ static DynamicConfig get_dataset_config(const DatasetName& dataset_name) {
     if (dataset_name == DatasetName::AUDIO) {
         conf.k = 20;
         conf.k_ext = 40;
+        conf.k_opt = 20;
         conf.anns_repeat = 50;
         conf.eps_parameter = {0.00f, 0.03f, 0.05f, 0.07f, 0.09f, 0.12f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.8f, 1.2f, 1.6f, 2.0f};
     } else if (dataset_name == DatasetName::ENRON) {
@@ -138,7 +142,7 @@ void run_dynamic_benchmark(const DatasetName& ds_name, const std::filesystem::pa
         if (!std::filesystem::exists(graph_path) || force_rebuild) {
             log("Building dynamic graph...\n");
             create_graph(
-                base_repository, ds_type, graph_path, ds.info().metric, config.lid, config.k, config.k_ext, config.eps_ext, 0, 0, 0, 1, true, ds.info().scale,
+                base_repository, ds_type, graph_path, ds.info().metric, config.lid, config.k, config.k_ext, config.eps_ext, config.k_opt, config.eps_opt, config.i_opt, 1, true, ds.info().scale,
                 false, instruction
             );
         } else {
@@ -174,7 +178,7 @@ int main(int argc, char* argv[]) {
     auto data_path = deglib::benchmark::get_default_data_path();
     DatasetName ds_name = DatasetName::AUDIO;
     bool force_rebuild = false;
-    deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::AVX2;
+    deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
