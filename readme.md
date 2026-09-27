@@ -117,7 +117,7 @@ For full C++ build instructions, CMake presets, and architecture details, refer 
 DynamicExplorationGraph/
 ├── cpp/          # High-performance C++20 Header-Only library, CMake Presets, Tests & Benchmarks
 ├── python/       # Python Bindings (deglib), Pytest Suite & Wheel Build Configuration
-├── examples/     # Ready-to-run Python examples (knng, mips, static_data, vibe, dynamic_data, sliding_window)
+├── examples/     # Ready-to-run Python examples (graph_2d, knng, mips, static_data, vibe, dynamic_data, sliding_window)
 ├── java/         # Java implementation & Benchmarks
 └── docs/         # Sphinx / ReadTheDocs Documentation
 ```

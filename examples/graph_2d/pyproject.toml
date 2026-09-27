@@ -1,0 +1,28 @@
+[project]
+name = "graph-2d-example"
+version = "0.1.0"
+description = "Interactive visualisation of a DEG (k=4) built on synthetic 2D point clouds"
+requires-python = ">=3.10"
+dependencies = [
+   "numpy>=1.24.0",
+   "matplotlib>=3.7.0",
+   "deglib",
+]
+
+[dependency-groups]
+dev = [
+   "pytest>=8.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["main", "dataset", "deg_graph", "theory", "viewer"]
+
+[tool.uv.sources]
+deglib = { path = "../../python", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["."]
