@@ -285,7 +285,7 @@ def construct_and_search_mips(
             t0 = time.perf_counter()
             indices = fp16_graph.search(
                 queries_fp16,
-                eps=eps_search,
+                eps_or_ef=eps_search,
                 k=k_top,
                 max_distance_computation_count=max_dist,
                 threads=search_threads,

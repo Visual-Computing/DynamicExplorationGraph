@@ -103,7 +103,7 @@ def test_readonly_graph_regression_fp32_l2():
     t_start_search = time.perf_counter()
 
     for run in range(benchmark_runs):
-        indices, _ = graph.search(query_data, eps=search_eps, k=search_k, threads=1)
+        indices, _ = graph.search(query_data, eps_or_ef=search_eps, k=search_k, threads=1)
         if run == 0:
             last_search_results = indices
 
@@ -221,7 +221,7 @@ def test_readonly_graph_regression_fp32_inner_product():
     t_start_search = time.perf_counter()
 
     for run in range(benchmark_runs):
-        indices, _ = graph.search(query_data, eps=search_eps, k=search_k, threads=1)
+        indices, _ = graph.search(query_data, eps_or_ef=search_eps, k=search_k, threads=1)
         if run == 0:
             last_search_results = indices
 
@@ -346,7 +346,7 @@ def test_readonly_graph_regression_evp_inner_product():
     t_start_search = time.perf_counter()
 
     for run in range(benchmark_runs):
-        indices, _ = graph.search(query_quant, eps=search_eps, k=search_k, threads=1)
+        indices, _ = graph.search(query_quant, eps_or_ef=search_eps, k=search_k, threads=1)
         if run == 0:
             last_search_results = indices
 

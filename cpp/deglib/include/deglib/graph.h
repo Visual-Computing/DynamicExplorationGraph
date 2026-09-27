@@ -84,7 +84,32 @@ class DynamicExplorationGraph {
 
         return res;
     }
+
     /**
+     * Search for similar feature vectors using query data with fixed ef budget.
+     * Returns a vector of ObjectDistance where internal indices are mapped to external_labels.
+     */
+    template <typename T>
+    std::vector<deglib::graph::ObjectDistance> search_ef(
+        std::span<const T> query,
+        const uint32_t k,
+        const uint32_t ef,
+        const bool include_entry = true,
+        const deglib::search::Filter* filter = nullptr,
+        const uint32_t max_distance_computation_count = 0
+    ) const {
+        auto res = internal_graph_->search_ef(query, k, ef, include_entry, filter, max_distance_computation_count);
+
+        // Modify internal vertex IDs to external labels in-place
+        for (auto& od : res) {
+            uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
+            od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
+        }
+
+        return res;
+    }
+    /**
+
      * Exploration starting at a specific external_label.
      * Maps entry external_label to internal_index, performs search, and maps result back to external_labels.
      *

@@ -90,7 +90,7 @@ class DynamicExplorationGraph:
     def search(
         self,
         query: np.ndarray,
-        eps: float = 0.0,
+        eps_or_ef: float = 0.0,
         k: int = 10,
         filter_labels: Union[None, np.ndarray, Filter] = None,
         max_distance_computation_count: int = 0,
@@ -102,7 +102,8 @@ class DynamicExplorationGraph:
         Search for nearest neighbors of query vector(s).
 
         :param query: Query feature vector(s) as numpy array.
-        :param eps: Controls how many nodes are checked during search.
+        :param eps_or_ef: Exploration parameter. Values >= 1.0 are treated as fixed pool size (ef),
+                          values < 1.0 are treated as relative distance margin (eps). Default: 0.0.
         :param k: The number of results to return per query.
         :param filter_labels: Filter for labels to include.
         :param max_distance_computation_count: Distance computation budget limit.
@@ -131,7 +132,7 @@ class DynamicExplorationGraph:
         filter_obj = Filter.create_filter(filter_labels, self.size())
         threads = get_num_useful_threads(threads, query.shape[0])
         indices_or_tuple = self.dynamic_exploration_graph_cpp.search_batch(
-            query, eps, k, filter_obj, max_distance_computation_count, threads, return_distances, unsorted
+            query, eps_or_ef, k, filter_obj, max_distance_computation_count, threads, return_distances, unsorted
         )
 
         if return_distances:
@@ -150,7 +151,7 @@ class DynamicExplorationGraph:
         entry_external_label: Union[int, np.ndarray, list],
         k: int,
         max_distance_computation_count: int = 0,
-        eps: float = 0.0,
+        eps_or_ef: float = 0.0,
         include_entry: bool = True,
         threads: int = 1,
         filter_labels: Union[None, np.ndarray, Filter] = None,
@@ -165,7 +166,8 @@ class DynamicExplorationGraph:
         :param entry_external_label: The external label of the vertex to start exploration from.
         :param k: The number of similar feature vectors to return.
         :param max_distance_computation_count: Limit the number of distance calculations.
-        :param eps: Controls how many nodes are checked during search.
+        :param eps_or_ef: Exploration parameter. Values >= 1.0 are treated as fixed pool size (ef),
+                          values < 1.0 are treated as relative distance margin (eps). Default: 0.0.
         :param include_entry: If True, the entry vertex is included in the result set.
         :param threads: The number of threads to use for parallel processing.
         :param filter_labels: Labels filter.
@@ -191,7 +193,7 @@ class DynamicExplorationGraph:
                 arr,
                 k,
                 max_distance_computation_count,
-                eps,
+                eps_or_ef,
                 include_entry,
                 filter_obj,
                 threads,
@@ -200,7 +202,7 @@ class DynamicExplorationGraph:
             )
         else:
             indices, distances = self.dynamic_exploration_graph_cpp.explore(
-                int(entry_external_label), k, max_distance_computation_count, eps, include_entry
+                int(entry_external_label), k, max_distance_computation_count, eps_or_ef, include_entry
             )
             if return_distances:
                 return indices, distances

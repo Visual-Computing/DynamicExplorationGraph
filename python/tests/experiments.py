@@ -26,7 +26,7 @@ def main():
 
     query = np.random.random(dims).astype(np.float32)
 
-    results, dists = graph.search(query, filter_labels=valid_labels, eps=0.0, k=8)
+    results, dists = graph.search(query, filter_labels=valid_labels, eps_or_ef=0.0, k=8)
 
     print(results)
 
@@ -45,7 +45,7 @@ def main2():
 
     # search
     query = np.random.random(dims).astype(np.float32)
-    result_indices, dists = index.search(query, eps=0.1, k=16)
+    result_indices, dists = index.search(query, eps_or_ef=0.1, k=16)
 
     print(result_indices)
     print(dists)

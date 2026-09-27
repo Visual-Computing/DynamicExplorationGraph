@@ -52,20 +52,20 @@ class TestFilterIntegration:
     def test_filter_matching_results(self):
         valid_labels = np.array([0, 10, 20, 30, 40], dtype=np.int32)
         k = 3
-        results, _ = self.graph.search(self.query, filter_labels=Filter(valid_labels), eps=0.1, k=k)
+        results, _ = self.graph.search(self.query, filter_labels=Filter(valid_labels), eps_or_ef=0.1, k=k)
         assert results.shape[-1] == k
         assert np.all(np.isin(results, valid_labels))
 
     def test_filter_all_labels(self):
         all_labels = np.arange(self.samples, dtype=np.int32)
         k = 10
-        results, _ = self.graph.search(self.query, filter_labels=Filter(all_labels), eps=0.1, k=k)
+        results, _ = self.graph.search(self.query, filter_labels=Filter(all_labels), eps_or_ef=0.1, k=k)
         assert results.shape[-1] == k
 
     def test_filter_no_valid_labels(self):
         no_labels = np.array([], dtype=np.int32)
         k = 5
-        results, dists = self.graph.search(self.query, filter_labels=Filter(no_labels, max_value=0), eps=0.1, k=k)
+        results, dists = self.graph.search(self.query, filter_labels=Filter(no_labels, max_value=0), eps_or_ef=0.1, k=k)
         assert results.shape[-1] == k
         assert np.all(results == np.iinfo(np.uint32).max)
         assert np.all(np.isnan(dists))

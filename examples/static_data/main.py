@@ -225,7 +225,7 @@ def run_static_benchmark(
     for eps in eps_list:
         start_time = time.perf_counter()
         for _ in range(repeat):
-            indices_batch, _ = graph.search(query_vecs, eps=eps, k=search_k, threads=1)
+            indices_batch, _ = graph.search(query_vecs, eps_or_ef=eps, k=search_k, threads=1)
         elapsed_sec = time.perf_counter() - start_time
 
         search_time_us = elapsed_sec * 1e6

@@ -259,7 +259,7 @@ class TestGraphs:
         assert graph.size() == samples
 
         # Verify search works and returns valid neighbors
-        res = graph.search(data[0], k=10, eps=0.1)
+        res = graph.search(data[0], k=10, eps_or_ef=0.1)
         indices, dists = res
         assert len(indices) == 10
         assert not np.isnan(dists).any()
@@ -305,7 +305,7 @@ class TestGraphs:
 
             # Test search on latest added vector
             query = all_data[next_insert - 1]
-            indices, dists = graph.search(query, k=1, eps=0.1)
+            indices, dists = graph.search(query, k=1, eps_or_ef=0.1)
             assert len(indices) == 1
             assert indices[0] == next_insert - 1
             assert np.isclose(dists[0], 0.0, atol=1e-5)

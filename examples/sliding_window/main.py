@@ -199,7 +199,7 @@ def run_sliding_window_benchmark(
         returned_labels = graph.search(
             query_vectors,
             k=search_k,
-            eps=search_eps,
+            eps_or_ef=search_eps,
             threads=1,
             return_distances=False,
             unsorted=True
