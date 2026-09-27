@@ -103,6 +103,11 @@ class DynamicExplorationGraph:
     # Returns (indices, distances) if return_distances=True, otherwise indices array.
     explore(entry_external_label, k, max_distance_computation_count=0, eps=0.0, include_entry=True, threads=1, filter_labels=None, return_distances=True, unsorted=False)
 
+    # Greedy best-first traversal towards a stored vertex, using the target vertex's own feature as query.
+    # Returns the traversed path ordered from the target back to the entry as (path, distances) if
+    # return_distances=True, otherwise the path array. Empty when the target was not reached.
+    has_path(entry_external_labels, to_external_label, eps=0.0, k=1, return_distances=True)
+
     # Returns list of neighbor external labels connected to a given vertex
     get_neighbors(external_label) -> list[int]
 

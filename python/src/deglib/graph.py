@@ -208,6 +208,37 @@ class DynamicExplorationGraph:
                 return indices, distances
             return indices
 
+    def has_path(
+        self,
+        entry_external_labels: Union[int, np.ndarray, list],
+        to_external_label: int,
+        eps: float = 0.0,
+        k: int = 1,
+        return_distances: bool = True,
+    ) -> Union[Tuple[np.ndarray, np.ndarray], np.ndarray]:
+        """
+        Greedy best-first traversal towards a stored vertex, returning the traversed path.
+
+        The target vertex's own feature vector is used as the query, so the traversal follows the
+        graph's greedy structure from the entry vertices until the target is reached. With
+        eps = 0.0 and k = 1 this is a pure greedy descent; larger eps widen the exploration radius
+        and allow escaping local optima at the cost of more distance computations.
+
+        :param entry_external_labels: External label(s) of the vertices to start the traversal from.
+        :param to_external_label: External label of the vertex the path should end at.
+        :param eps: Exploration factor widening the search radius. Default: 0.0 (greedy descent).
+        :param k: Size of the result list driving the exploration radius. Default: 1.
+        :param return_distances: If True, returns (path, distances). If False, returns only the path.
+        :returns: (path, distances) tuple if return_distances is True, otherwise the path array.
+                  The path is ordered from the target back to the entry vertex. Both arrays are
+                  empty if the target was not reached within the given budget.
+        """
+        if isinstance(entry_external_labels, (int, np.integer)):
+            entries = [int(entry_external_labels)]
+        else:
+            entries = [int(label) for label in entry_external_labels]
+        return self.dynamic_exploration_graph_cpp.has_path(entries, int(to_external_label), float(eps), int(k), return_distances)
+
     def save_graph(self, path: pathlib.Path | str):
         """
         Save graph to specified file. Creates necessary directories.

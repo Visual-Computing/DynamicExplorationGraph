@@ -448,6 +448,68 @@ def test_facade_explore_batch():
     assert indices_unsorted.shape == (2, 5)
     assert distances_unsorted.shape == (2, 5)
 
+def test_facade_has_path_reaches_adjacent_target():
+    """has_path should walk from the entry to an adjacent target and return external labels."""
+    g, _ = _build_test_graph_with_distinct_labels()
+    entry = 0
+    neighbors = [int(n) for n in g.get_neighbors(entry)]
+    target = next(n for n in neighbors if n != entry and n != 0xFFFFFFFF)
+
+    path, distances = g.has_path([entry], target, eps=0.0, k=1)
+
+    assert len(path) == 2
+    assert int(path[0]) == target
+    assert int(path[1]) == entry
+    assert len(distances) == 2
+    assert distances[0] == 0.0
+    assert distances[1] > 0.0
+
+
+def test_facade_has_path_traverses_multiple_hops():
+    """has_path should backtrack the whole traversal chain, not only direct neighbors."""
+    g, _ = _build_test_graph_with_distinct_labels()
+    entry = 0
+    neighbors = {int(n) for n in g.get_neighbors(entry)}
+    far = next(label for label in range(0, 500, 10) if label != entry and label not in neighbors)
+
+    path, distances = g.has_path([entry], far, eps=0.5, k=1)
+
+    assert len(path) > 2, "a non-adjacent target requires a multi-hop path"
+    assert int(path[0]) == far
+    assert int(path[-1]) == entry
+    assert len(distances) == len(path)
+    for label in path:
+        assert int(label) % 10 == 0, f"has_path should return external labels, got {label}"
+
+
+def test_facade_has_path_accepts_scalar_entry_without_distances():
+    """has_path should accept a single entry label and honor return_distances=False."""
+    g, _ = _build_test_graph_with_distinct_labels()
+    entry = 0
+    target = next(int(n) for n in g.get_neighbors(entry) if int(n) != entry and int(n) != 0xFFFFFFFF)
+
+    path = g.has_path(entry, target, return_distances=False)
+
+    assert isinstance(path, np.ndarray)
+    assert [int(label) for label in path] == [target, entry]
+
+
+def test_facade_has_path_from_multiple_entries():
+    """has_path should accept several entry vertices and end the path at the entry that reached the target."""
+    g, data = _build_test_graph_with_distinct_labels()
+    entries = [0, 10, 20, 30]
+    target = 250
+    # The traversal pops the entry closest to the target first, so that one must close the path.
+    target_feature = data[target // 10]
+    closest = min(entries, key=lambda label: float(np.sum((data[label // 10] - target_feature) ** 2)))
+
+    path, distances = g.has_path(entries, target, eps=0.5, k=1)
+
+    assert len(path) == len(distances)
+    assert len(path) >= 2
+    assert int(path[0]) == target
+    assert int(path[-1]) == closest
+
 
 def test_facade_search_return_distances_false():
     """search with return_distances=False should return only indices."""

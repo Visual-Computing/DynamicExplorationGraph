@@ -317,6 +317,42 @@ py::object graph_explore_single_wrapper(
     }
 }
 
+template <typename G>
+py::object graph_has_path_wrapper(
+    const G& graph,
+    const std::vector<uint32_t>& entry_external_labels,
+    const uint32_t to_external_label,
+    const float eps,
+    const uint32_t k,
+    const bool return_distances = true
+) {
+    const std::vector<deglib::graph::ObjectDistance> path = graph.hasPath(entry_external_labels, to_external_label, eps, k);
+
+    const size_t count = path.size();
+    py::array_t<uint32_t> path_indices(static_cast<py::ssize_t>(count));
+    auto path_indices_ptr = static_cast<uint32_t*>(path_indices.request().ptr);
+
+    py::array_t<float> path_distances;
+    float* path_distances_ptr = nullptr;
+    if (return_distances) {
+        path_distances = py::array_t<float>(static_cast<py::ssize_t>(count));
+        path_distances_ptr = static_cast<float*>(path_distances.request().ptr);
+    }
+
+    for (size_t i = 0; i < count; ++i) {
+        path_indices_ptr[i] = path[i].getIdentifier();
+        if (path_distances_ptr) {
+            path_distances_ptr[i] = path[i].getDistance();
+        }
+    }
+
+    if (return_distances) {
+        return py::make_tuple(path_indices, path_distances);
+    } else {
+        return path_indices;
+    }
+}
+
 py::object dynamic_exploration_graph_explore_batch_wrapper(
     const deglib::DynamicExplorationGraph& graph,
     const py::array_t<uint32_t, py::array::c_style> entry_external_labels,
@@ -1621,6 +1657,10 @@ PYBIND11_MODULE(deglib_cpp, m) {
             "explore_batch", &dynamic_exploration_graph_explore_batch_wrapper, py::arg("entry_external_labels"), py::arg("k"),
             py::arg("max_distance_computation_count") = 0, py::arg("eps_or_ef") = 0.0f, py::arg("include_entry") = true, py::arg("filter") = nullptr,
             py::arg("threads") = 1, py::arg("return_distances") = true, py::arg("unsorted") = false
+        )
+        .def(
+            "has_path", &graph_has_path_wrapper<deglib::DynamicExplorationGraph>, py::arg("entry_external_labels"), py::arg("to_external_label"),
+            py::arg("eps") = 0.0f, py::arg("k") = 1, py::arg("return_distances") = true
         )
         .def(
             "save_graph", [](deglib::DynamicExplorationGraph& g, const char* path) { g.saveGraph(path); }, py::arg("path")

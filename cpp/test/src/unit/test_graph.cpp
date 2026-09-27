@@ -71,6 +71,24 @@ deglib::graph::SizeBoundedGraph build_test_graph() {
     return graph;
 }
 
+// Build a chain 1005 - 9999 - 42 - 707 so that hasPath has to traverse multiple hops.
+deglib::graph::SizeBoundedGraph build_chain_graph() {
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
+    deglib::graph::SizeBoundedGraph graph(4, 4, space);
+
+    graph.addVertex(kExternalLabels[0], make_float_bytes(make_vec_4d(0.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExternalLabels[1], make_float_bytes(make_vec_4d(1.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExternalLabels[2], make_float_bytes(make_vec_4d(2.0f, 0.0f, 0.0f, 0.0f)).get());
+    graph.addVertex(kExternalLabels[3], make_float_bytes(make_vec_4d(3.0f, 0.0f, 0.0f, 0.0f)).get());
+
+    set_edges(graph, 0, {0, 0, 0, 1}, {0.0f, 0.0f, 0.0f, 1.0f});
+    set_edges(graph, 1, {0, 1, 1, 2}, {1.0f, 0.0f, 0.0f, 1.0f});
+    set_edges(graph, 2, {1, 2, 2, 3}, {1.0f, 0.0f, 0.0f, 1.0f});
+    set_edges(graph, 3, {2, 3, 3, 3}, {1.0f, 0.0f, 0.0f, 0.0f});
+
+    return graph;
+}
+
 }  // anonymous namespace
 
 // ===========================================================================
@@ -231,6 +249,60 @@ TEST(DEGGetNeighborsReturnsExternalLabels, GetNeighborsFromDifferentVertex) {
     for (uint32_t n : neighbors) {
         EXPECT_TRUE(valid_labels.contains(n)) << "Neighbor " << n << " is not a valid external label";
     }
+}
+
+// ===========================================================================
+//  DynamicExplorationGraph: hasPath() accepts external labels, returns external labels
+// ===========================================================================
+
+TEST(DEGHasPathReturnsExternalLabels, HasPathReturnsExternalLabels) {
+    auto graph = build_test_graph();
+    deglib::DynamicExplorationGraph deg(graph);
+
+    // 9999 (internal 1) is adjacent to the entry vertex 1005 (internal 0)
+    auto path = deg.hasPath({kExternalLabels[0]}, kExternalLabels[1], 0.0f, 5);
+
+    ASSERT_EQ(path.size(), 2u);
+    // Ordered from the target back to the entry, carrying external labels
+    EXPECT_EQ(path[0].getIdentifier(), kExternalLabels[1]);
+    EXPECT_EQ(path[1].getIdentifier(), kExternalLabels[0]);
+    EXPECT_FLOAT_EQ(path[0].getDistance(), 0.0f);
+    EXPECT_GT(path[1].getDistance(), 0.0f);
+}
+
+TEST(DEGHasPathReturnsExternalLabels, HasPathMapsEveryVertexOfAMultiHopPath) {
+    auto graph = build_chain_graph();
+    deglib::DynamicExplorationGraph deg(graph);
+
+    // Greedy descent along the chain: 1005 -> 9999 -> 42 -> 707
+    auto path = deg.hasPath({kExternalLabels[0]}, kExternalLabels[3], 0.0f, 1);
+
+    ASSERT_EQ(path.size(), 4u);
+    EXPECT_EQ(path[0].getIdentifier(), kExternalLabels[3]);
+    EXPECT_EQ(path[1].getIdentifier(), kExternalLabels[2]);
+    EXPECT_EQ(path[2].getIdentifier(), kExternalLabels[1]);
+    EXPECT_EQ(path[3].getIdentifier(), kExternalLabels[0]);
+}
+
+TEST(DEGHasPathReturnsExternalLabels, HasPathEmptyForUnreachableTarget) {
+    auto graph = build_test_graph();
+    deglib::DynamicExplorationGraph deg(graph);
+
+    // 12345 (internal 4) only holds self-loops and is unreachable
+    auto path = deg.hasPath({kExternalLabels[0]}, kExternalLabels[4], 0.0f, 5);
+    EXPECT_TRUE(path.empty());
+}
+
+TEST(DEGHasPathReturnsExternalLabels, HasPathWithReadOnlyGraphBackend) {
+    auto size_bounded = build_test_graph();
+    auto readonly = deglib::graph::convert_to_readonly_graph(size_bounded);
+    deglib::DynamicExplorationGraph deg(readonly);
+
+    auto path = deg.hasPath({kExternalLabels[0]}, kExternalLabels[2], 0.0f, 5);
+
+    ASSERT_EQ(path.size(), 2u);
+    EXPECT_EQ(path.front().getIdentifier(), kExternalLabels[2]);
+    EXPECT_EQ(path.back().getIdentifier(), kExternalLabels[0]);
 }
 
 // ===========================================================================
