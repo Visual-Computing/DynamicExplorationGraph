@@ -11,7 +11,7 @@ from deglib.builder import OptimizationTarget, build_from_data
 from deglib.distances import FloatSpace, Metric
 from deglib.optimization import mips_l2_transform_query
 from pysearch import epsilon_search
-from theory import TheoryReport, compare, dissimilarities
+from theory import TheoryReport, compare, dissimilarities, knng_edges, nsw_edges
 
 __all__ = [
     "DEFAULT_K",
@@ -240,74 +240,6 @@ class QueryResult:
         return bool(self.exact in self.deg_indices)
 
 
-def _nearest_neighbours(points: np.ndarray, k: int, metric: Metric) -> np.ndarray:
-    """
-    The `[n, m]` matrix of each vertex's `m = min(k, n - 1)` nearest neighbour indices under `metric`.
-
-    The knng reads its links from this one computation. The neighbour set is read from the same
-    dissimilarity the reference graphs use (`theory.dissimilarities`, whose infinite diagonal keeps a
-    vertex out of its own neighbour set), so an inner-product cloud links by inner product and an L2
-    cloud by Euclidean distance. The indices are distinct by construction, so a vertex's out-degree is
-    exactly `m`.
-    """
-    points = np.asarray(points)
-    num_points = int(points.shape[0])
-    neighbours = min(int(k), max(num_points - 1, 0))
-    if num_points < 2 or neighbours <= 0:
-        return np.zeros((num_points, 0), dtype=np.int64)
-    distances = dissimilarities(points, metric)
-    return np.argsort(distances, axis=1)[:, :neighbours].astype(np.int64)
-
-
-def knng_edges(points: np.ndarray, k: int, metric: Metric = Metric.FP32_L2) -> np.ndarray:
-    """
-    The directed k-nearest-neighbour graph over `points`, as a directed `[e, 2]` int32 edge list.
-
-    Each vertex points at its `k` nearest neighbours under `metric`, read from the shared neighbour
-    computation, and the link is kept in the direction it was chosen — the edge list holds `(v, neighbour)`
-    for every selection and is never symmetrized. So the out-degree is exactly `k` per vertex (fewer only
-    when `k` exceeds the number of other vertices), while an in-degree can exceed `k` when a vertex is a
-    popular neighbour. A vertex can only walk the neighbours it chose itself.
-    """
-    points = np.asarray(points)
-    num_points = int(points.shape[0])
-    nearest = _nearest_neighbours(points, k, metric)
-    neighbours = int(nearest.shape[1])
-    if neighbours <= 0:
-        return np.zeros((0, 2), dtype=np.int32)
-
-    sources = np.repeat(np.arange(num_points, dtype=np.int32), neighbours)
-    targets = nearest.reshape(-1).astype(np.int32)
-    return np.column_stack((sources, targets)).astype(np.int32).reshape(-1, 2)
-
-
-def nsw_edges(points: np.ndarray, k: int, metric: Metric = Metric.FP32_L2) -> np.ndarray:
-    """
-    The navigable small world over `points`, built incrementally as an undirected `[e, 2]` int32 edge list.
-
-    Vertices are inserted in index order, and each new vertex links — undirected — to its `k` nearest among
-    the vertices already in the graph, the same dissimilarity the reference graphs read. Because a later
-    vertex can add a link to an earlier one, an earlier vertex ends up with more than `k` neighbours: the
-    degree is the count of vertices that chose it plus the `k` it chose itself, so the maximum degree is
-    unbounded. The first vertex has no earlier vertex to link and the first few hold fewer than `k` links,
-    simply because too few vertices precede them.
-    """
-    points = np.asarray(points)
-    num_points = int(points.shape[0])
-    if num_points < 2:
-        return np.zeros((0, 2), dtype=np.int32)
-
-    distances = dissimilarities(points, metric)
-    kept: list[tuple[int, int]] = []
-    for i in range(1, num_points):
-        earlier = distances[i, :i]
-        chosen = min(int(k), i)
-        nearest = np.argpartition(earlier, chosen - 1)[:chosen]
-        nearest = nearest[np.argsort(earlier[nearest], kind="stable")]
-        kept.extend((i, int(j)) for j in nearest)
-    return np.asarray(kept, dtype=np.int32).reshape(-1, 2)
-
-
 def build_model(
     points: np.ndarray,
     groups: np.ndarray,
@@ -382,7 +314,7 @@ def build_model(
         metric=metric,
         mips=mips,
         graph=graph,
-        theory=compare(points, edges, metric) if theory else None,
+        theory=compare(points, edges, metric, k) if theory else None,
     )
 
 

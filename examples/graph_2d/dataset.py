@@ -7,7 +7,19 @@ import numpy as np
 __all__ = ["MAX_POINTS", "MIN_POINTS", "PRESETS", "make_points"]
 
 #: Synthetic 2D distributions the graph can be built on.
-PRESETS: tuple[str, ...] = ("blobs", "moons", "circles", "spiral", "grid", "uniform")
+PRESETS: tuple[str, ...] = (
+    "blobs",
+    "moons",
+    "circles",
+    "spiral",
+    "grid",
+    "uniform",
+    "s-curve",
+    "annulus",
+    "overlap",
+    "twins",
+    "segments",
+)
 
 #: Smallest and largest cloud the example accepts. The upper bound is not a memory limit but a runtime
 #: one: the theoretical reference graphs in `theory.py` compare the DEG against the Delaunay graph, the
@@ -70,6 +82,54 @@ def _uniform(num_points: int, rng: np.random.Generator) -> tuple[np.ndarray, np.
     return rng.uniform(0.0, 10.0, size=(num_points, 2)), np.zeros(num_points, dtype=np.int64)
 
 
+def _s_curve(num_points: int, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+    """A sine-wave manifold with thickness — a narrow curved strip to navigate along."""
+    t = rng.uniform(0.0, 3.0 * np.pi, size=num_points)
+    points = np.column_stack([t, np.sin(t) * 3.0])
+    points = points + rng.standard_normal((num_points, 2)) * 0.18
+    group = (np.sin(t) > 0.0).astype(np.int64)
+    return points, group
+
+
+def _annulus(num_points: int, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+    """A filled disc whose density falls off toward the rim, grouped by radius band."""
+    bands = 3
+    theta = rng.uniform(0.0, 2.0 * np.pi, size=num_points)
+    radius = rng.uniform(0.0, 1.0, size=num_points) ** 1.6 * 4.6
+    group = np.minimum((radius / 4.6 * bands).astype(np.int64), bands - 1)
+    return np.column_stack([radius * np.cos(theta), radius * np.sin(theta)]), group
+
+
+def _overlap(num_points: int, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+    """A dense blob laid over a uniform fill — heterogeneous density that shares space."""
+    group = (rng.random(num_points) < 0.5).astype(np.int64)
+    dense = rng.standard_normal((num_points, 2)) * 0.7 + np.array([1.5, 1.0])
+    flat = rng.uniform(-5.0, 5.0, size=(num_points, 2))
+    return np.where(group[:, None] == 1, dense, flat), group
+
+
+def _twins(num_points: int, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+    """Two spiral arms wound in opposite senses — strongly non-linearly separable."""
+    arms = 2
+    group = np.arange(num_points) % arms
+    radius = np.sqrt(rng.uniform(0.0, 1.0, size=num_points)) * 4.5
+    sense = np.where(group == 0, 1.0, -1.0)
+    theta = radius * 1.5 * sense + group * np.pi
+    points = np.column_stack([radius * np.cos(theta), radius * np.sin(theta)])
+    return points + rng.standard_normal((num_points, 2)) * 0.07, group
+
+
+def _segments(num_points: int, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+    """Points strung along a handful of random line segments — sparse, filamentary structure."""
+    lines = int(np.clip(num_points // 120, 3, 8))
+    start = rng.uniform(-5.0, 5.0, size=(lines, 2))
+    end = rng.uniform(-5.0, 5.0, size=(lines, 2))
+    group = np.arange(num_points) % lines
+    t = rng.uniform(0.0, 1.0, size=num_points)
+    points = start[group] * (1.0 - t[:, None]) + end[group] * t[:, None]
+    return points + rng.standard_normal((num_points, 2)) * 0.12, group
+
+
 _GENERATORS = {
     "blobs": _blobs,
     "moons": _moons,
@@ -77,6 +137,11 @@ _GENERATORS = {
     "spiral": _spiral,
     "grid": _grid,
     "uniform": _uniform,
+    "s-curve": _s_curve,
+    "annulus": _annulus,
+    "overlap": _overlap,
+    "twins": _twins,
+    "segments": _segments,
 }
 
 

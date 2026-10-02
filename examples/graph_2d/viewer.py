@@ -76,7 +76,9 @@ EXACT_COLOR = "#188038"
 #: misread as one of the traversal's own marks.
 FREE_QUERY_COLOR = "#e8710a"
 #: Reference-graph colours: blue Delaunay and green RNG as in the 2d-graph reference
-#: project, extended by orange Gabriel, violet MST and a crimson MRNG.
+#: project, extended by orange Gabriel, violet MST and a crimson MRNG. These are exactly the graphs the
+#: overlay paints and the colour key lists. The NSG, knng and NSW are scored in the panel but never
+#: coloured — they are drawn in their own view colour and carry no entry here.
 OVERLAP_COLORS = {
     "delaunay": "blue",
     "gabriel": "#e8710a",
@@ -126,8 +128,8 @@ KNNG_VIEW = "knng"
 NSW_VIEW = "nsw"
 #: The NSG's monotonic relative neighbourhood graph over the current feature space, built by the viewer
 #: like the knng and the NSW and offered under every metric: the directed greedy graph each vertex walks
-#: in increasing distance, keeping the nearest free neighbour. It is drawn directed but never compared
-#: against the DEG — it has no entry in the report, no colour-key switch and no overlap share.
+#: in increasing distance, keeping the nearest free neighbour. It is drawn directed and is scored against
+#: the DEG in the panel's report, but it stays out of the colour key — it paints no edge and earns no swatch.
 NSG_VIEW = "nsg"
 #: The empty view: no edges are drawn and a query on it names the missing graph rather than searching.
 NONE_VIEW = "none"
@@ -320,7 +322,10 @@ def edge_colours(model: GraphModel, overlays: Iterable[str] = OVERLAP_ORDER) -> 
     """
     if model.theory is None:
         return matplotlib.colors.to_rgba_array(EDGE_COLOR)
-    palette = [EDGE_COLOR, *[OVERLAP_COLORS[item.name] for item in model.theory.graphs]]
+    # One palette slot per report graph, so a membership code (its position in `report.graphs`) indexes
+    # the palette directly. Graphs outside `OVERLAP_ORDER` — the NSG, knng and NSW — are never painted,
+    # so their slot takes the neutral colour and is never read; they need no entry in `OVERLAP_COLORS`.
+    palette = [EDGE_COLOR, *[OVERLAP_COLORS.get(item.name, EDGE_COLOR) for item in model.theory.graphs]]
     allowed = set(overlays)
     order = tuple(name for name in OVERLAP_ORDER if name in allowed)
     return matplotlib.colors.to_rgba_array(palette)[model.theory.membership(order) + 1]
@@ -1396,7 +1401,14 @@ class GraphViewer:
     def _sync_k_enabled(self) -> None:
         """The k field drives the DEG, the knng and the NSW, so it is greyed out for every other view."""
         if self._k_spin is not None:
-            self._k_spin.configure(state="normal" if self.view in (DEG_VIEW, KNNG_VIEW, NSW_VIEW) else "disabled")
+            active = self.view in (DEG_VIEW, KNNG_VIEW, NSW_VIEW)
+            # The DEG builds at an even degree, so its arrows step by 2: a step of 1 lands on an odd value
+            # that snaps back up to the same even, which leaves the down arrow inert. The knng and NSW read
+            # k raw as a neighbour count, so they keep the finer step of 1.
+            self._k_spin.configure(
+                state="normal" if active else "disabled",
+                increment=2 if self.view == DEG_VIEW else 1,
+            )
 
     def _on_vertices(self, value: float) -> None:
         num_points = int(value)
@@ -1749,17 +1761,15 @@ class GraphViewer:
         inner product — has no switch to remember and defaults to on. Hence the new overlay is the held
         graphs kept down to those previously on, widened by those never seen: `held & (on | held - seen)`.
         """
-        # The DEG, the knng, the NSW, the NSG and the empty view are offered under every metric; only the
-        # reference graphs — the undirected MRNG among them — come and go with the report. The NSG is built
-        # by the viewer like the knng and the NSW, so it is always offered but never compared against the DEG.
-        self.views = (
-            DEG_VIEW,
-            KNNG_VIEW,
-            NSW_VIEW,
-            *(self.model.theory.names if self.model.theory is not None else ()),
-            NSG_VIEW,
-            NONE_VIEW,
-        )
+        # The DEG, the knng, the NSW, the NSG and the empty view are offered under every metric; the
+        # reference graphs — the undirected MRNG among them — come and go with the report. The knng, the
+        # NSW and the NSG are built by the viewer like the DEG, so they are offered even when the report is
+        # absent. The menu keeps `GRAPH_ORDER`'s order, listing a graph only when the report carries it (or
+        # it is one of the always-available views), so a metric that drops Delaunay and Gabriel drops them
+        # from the menu too.
+        names = set(self.model.theory.names) if self.model.theory is not None else set()
+        available = names | {DEG_VIEW, KNNG_VIEW, NSW_VIEW, NSG_VIEW, NONE_VIEW}
+        self.views = tuple(view for view in GRAPH_ORDER if view in available)
         held = self._held_graphs()
         self.overlays = held & (self.overlays | (held - self._held_seen))
         self._held_seen = held

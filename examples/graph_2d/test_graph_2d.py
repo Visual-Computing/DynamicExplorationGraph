@@ -387,8 +387,8 @@ def test_describe_covers_the_built_graph(model) -> None:
 
     assert "vertices" in text and "build" in text and "4" in text
     overlap = [line for line in lines if line.startswith("∩")]
-    assert [line.split()[1] for line in overlap] == ["delaunay", "gabriel", "rng", "mst", "mrng"], (
-        "one line per reference"
+    assert [line.split()[1] for line in overlap] == ["knng", "nsw", "delaunay", "gabriel", "rng", "mst", "mrng", "nsg"], (
+        "one line per reference, in the selector's order"
     )
     for line, item in zip(overlap, model.theory.graphs):
         assert f"{item.edges:6d}" in line and f"{item.shared:7d}" in line, "the panel quotes the report"
@@ -1052,9 +1052,11 @@ def test_the_k_field_follows_the_view_it_lands_on(viewer: GraphViewer) -> None:
 
     class _SpinStub:
         state = "normal"
+        increment = 1
 
-        def configure(self, state: str) -> None:
+        def configure(self, state: str, increment: int = 1) -> None:
             self.state = state
+            self.increment = increment
 
     viewer._k_spin = _SpinStub()
     try:
@@ -1069,6 +1071,31 @@ def test_the_k_field_follows_the_view_it_lands_on(viewer: GraphViewer) -> None:
 
         viewer._on_view("rng")
         assert viewer._k_spin.state == "disabled", "the rng reads no k either"
+    finally:
+        viewer._k_spin = None
+
+
+def test_the_k_field_steps_by_two_only_for_the_deg(viewer: GraphViewer) -> None:
+    """The DEG builds at an even degree, so its k arrows step by 2; the knng and NSW read k raw and step by 1."""
+
+    class _SpinStub:
+        state = "normal"
+        increment = 1
+
+        def configure(self, state: str, increment: int = 1) -> None:
+            self.state = state
+            self.increment = increment
+
+    viewer._k_spin = _SpinStub()
+    try:
+        viewer._on_view(DEG_VIEW)
+        assert viewer._k_spin.increment == 2, "the DEG snaps k to even, so a step of 1 would leave the down arrow inert"
+
+        viewer._on_view(KNNG_VIEW)
+        assert viewer._k_spin.increment == 1, "the knng reads the raw neighbour count, so it steps by 1"
+
+        viewer._on_view(NSW_VIEW)
+        assert viewer._k_spin.increment == 1, "the NSW reads the raw k too"
     finally:
         viewer._k_spin = None
 
@@ -1112,9 +1139,11 @@ def test_the_mrng_view_is_offered_undirected_and_timed(viewer: GraphViewer) -> N
 
     class _SpinStub:
         state = "normal"
+        increment = 1
 
-        def configure(self, state: str) -> None:
+        def configure(self, state: str, increment: int = 1) -> None:
             self.state = state
+            self.increment = increment
 
     viewer._k_spin = _SpinStub()
     try:
@@ -1138,19 +1167,22 @@ def test_the_mrng_view_is_offered_undirected_and_timed(viewer: GraphViewer) -> N
     assert drawn <= symmetrised, "and that graph is a subgraph of the symmetrised NSG graph"
 
 
-def test_the_nsg_view_is_offered_directed_but_never_compared(viewer: GraphViewer) -> None:
+def test_the_nsg_view_is_offered_directed_and_scored_in_the_report(viewer: GraphViewer) -> None:
     """
     The NSG is a viewer-built view like the knng and the NSW: offered under every metric, drawn directed,
-    reads no k — yet it holds no report entry, so it is never scored against the DEG.
+    reads no k. It carries a report entry, so the panel scores it against the DEG — yet it stays out of
+    the colour key, so its own view states its edge count and time, never a DEG share.
     """
     assert NSG_VIEW in viewer.views, "the NSG is offered in the selector"
-    assert NSG_VIEW not in viewer.model.theory.names, "but it is not a reference graph in the comparison"
+    assert NSG_VIEW in viewer.model.theory.names, "the NSG is scored against the DEG in the report"
 
     class _SpinStub:
         state = "normal"
+        increment = 1
 
-        def configure(self, state: str) -> None:
+        def configure(self, state: str, increment: int = 1) -> None:
             self.state = state
+            self.increment = increment
 
     viewer._k_spin = _SpinStub()
     try:
@@ -1162,7 +1194,7 @@ def test_the_nsg_view_is_offered_directed_but_never_compared(viewer: GraphViewer
     assert viewer._view_directed(), "the NSG is drawn directed"
     panel = viewer._panel_text.get_text()
     assert panel.startswith("nsg"), "the column heads with the NSG's name"
-    assert "of DEG" not in panel, "the NSG states no DEG share — it is not compared"
+    assert "of DEG" not in panel, "the NSG view states its own edge count and time, not a DEG share"
 
     drawn = {(int(u), int(v)) for u, v in viewer._display_edges()}
     library = {
@@ -1499,7 +1531,7 @@ def test_compare_counts_the_deg_edges_each_graph_shares() -> None:
 
     undirected = {tuple(sorted(edge)) for edge in scene.edges.reshape(-1, 2)}
     assert report.deg_edges == len(undirected)
-    assert tuple(item.name for item in report.graphs) == ("delaunay", "gabriel", "rng", "mst", "mrng")
+    assert tuple(item.name for item in report.graphs) == ("knng", "nsw", "delaunay", "gabriel", "rng", "mst", "mrng", "nsg")
     assert all(0 < item.shared <= min(report.deg_edges, item.edges) for item in report.graphs)
 
     by_name = {item.name: item for item in report.graphs}
@@ -1631,8 +1663,8 @@ def test_an_inner_product_report_carries_only_the_graphs_it_can_decide() -> None
     euclidean = build_scene("blobs", 120, DEFAULT_K, 5, Metric.FP32_L2, threads=1).theory
     inner = build_scene("blobs", 120, DEFAULT_K, 5, Metric.FP32_InnerProduct, threads=1).theory
 
-    assert euclidean.names == ("delaunay", "gabriel", "rng", "mst", "mrng")
-    assert inner.names == ("rng", "mst", "mrng")
+    assert euclidean.names == ("knng", "nsw", "delaunay", "gabriel", "rng", "mst", "mrng", "nsg")
+    assert inner.names == ("knng", "nsw", "rng", "mst", "mrng", "nsg")
 
 
 def test_the_colour_key_names_only_what_the_report_holds() -> None:
@@ -1831,7 +1863,7 @@ def test_viewer_reports_the_theory_overlap_on_every_build(viewer: GraphViewer) -
 
     assert viewer.model.theory is not None, "a fresh cloud is compared again"
     names = tuple(item.name for item in viewer.model.theory.graphs)
-    assert len(names) == 5, "every reference graph is listed"
+    assert len(names) == 8, "every graph the selector offers is listed, the knng and NSW among them"
     assert all(f"∩ {name}" in viewer._panel_text.get_text() for name in names), "the reseeded panel lists them all"
     assert all(f"∩ {name}" in text for name in names), "and so did the panel before the reseed"
     assert all(item.shared > 0 for item in viewer.model.theory.graphs)
@@ -1925,13 +1957,13 @@ def test_an_overlay_switch_survives_a_rebuild(viewer: GraphViewer) -> None:
 
     viewer._on_metric("IP")
 
-    assert viewer.overlays == {"mst", "mrng"}, "the graphs that were on stay on, the hidden one stays off"
+    assert viewer.overlays == {"mst", "mrng", "nsg", "knng", "nsw"}, "the graphs that were on stay on, the hidden one stays off"
     assert viewer._legend_names() == ("DEG only", "rng", "mrng", "mst"), "and the key names exactly those"
 
     viewer._on_metric("L2")
 
     assert "rng" not in viewer.overlays, "the graph is still hidden when the metric brings it back"
-    assert viewer.overlays == {"delaunay", "gabriel", "mst", "mrng"}
+    assert viewer.overlays == {"delaunay", "gabriel", "mst", "mrng", "nsg", "knng", "nsw"}
 
 
 def test_a_graph_new_to_the_report_defaults_on(viewer: GraphViewer) -> None:
@@ -2117,16 +2149,20 @@ def test_viewer_draws_the_graph_the_selector_picks(viewer: GraphViewer) -> None:
         DEG_VIEW,
         KNNG_VIEW,
         NSW_VIEW,
-        *(overlap.name for overlap in viewer.model.theory.graphs),
+        "delaunay",
+        "gabriel",
+        "rng",
+        "mst",
+        "mrng",
         NSG_VIEW,
         NONE_VIEW,
-    ), "the DEG, the knng, the NSW, the reference graphs, the NSG and the empty view are the selector's entries"
+    ), "the selector lists every graph in GRAPH_ORDER's order, the knng, NSW and NSG among them"
 
     viewer._fig.canvas.draw()
     assert len(viewer._edges.get_segments()) == viewer.model.edges.shape[0], "the DEG view draws the graph itself"
     assert viewer._legend.get_visible(), "and has to explain what its edge colours mean"
 
-    for name in viewer.model.theory.names:
+    for name in (n for n in OVERLAP_ORDER if n in viewer.model.theory.names):
         viewer._on_view(name)
         viewer._fig.canvas.draw()
 

@@ -255,6 +255,73 @@ def mst_edges(distances: np.ndarray) -> np.ndarray:
     return np.asarray(kept, dtype=np.int32).reshape(-1, 2)
 
 
+def _nearest_neighbours(points: np.ndarray, k: int, metric: Metric) -> np.ndarray:
+    """
+    The `[n, m]` matrix of each vertex's `m = min(k, n - 1)` nearest neighbour indices under `metric`.
+
+    The knng reads its links from this one computation. The neighbour set is read from the same
+    dissimilarity the reference graphs use (`dissimilarities`, whose infinite diagonal keeps a vertex out
+    of its own neighbour set), so an inner-product cloud links by inner product and an L2 cloud by
+    Euclidean distance. The indices are distinct by construction, so a vertex's out-degree is exactly `m`.
+    """
+    points = np.asarray(points)
+    num_points = int(points.shape[0])
+    neighbours = min(int(k), max(num_points - 1, 0))
+    if num_points < 2 or neighbours <= 0:
+        return np.zeros((num_points, 0), dtype=np.int64)
+    distances = dissimilarities(points, metric)
+    return np.argsort(distances, axis=1)[:, :neighbours].astype(np.int64)
+
+
+def knng_edges(points: np.ndarray, k: int, metric: Metric = Metric.FP32_L2) -> np.ndarray:
+    """
+    The directed k-nearest-neighbour graph over `points`, as a directed `[e, 2]` int32 edge list.
+
+    Each vertex points at its `k` nearest neighbours under `metric`, read from the shared neighbour
+    computation, and the link is kept in the direction it was chosen — the edge list holds `(v, neighbour)`
+    for every selection and is never symmetrized. So the out-degree is exactly `k` per vertex (fewer only
+    when `k` exceeds the number of other vertices), while an in-degree can exceed `k` when a vertex is a
+    popular neighbour. A vertex can only walk the neighbours it chose itself.
+    """
+    points = np.asarray(points)
+    num_points = int(points.shape[0])
+    nearest = _nearest_neighbours(points, k, metric)
+    neighbours = int(nearest.shape[1])
+    if neighbours <= 0:
+        return np.zeros((0, 2), dtype=np.int32)
+
+    sources = np.repeat(np.arange(num_points, dtype=np.int32), neighbours)
+    targets = nearest.reshape(-1).astype(np.int32)
+    return np.column_stack((sources, targets)).astype(np.int32).reshape(-1, 2)
+
+
+def nsw_edges(points: np.ndarray, k: int, metric: Metric = Metric.FP32_L2) -> np.ndarray:
+    """
+    The navigable small world over `points`, built incrementally as an undirected `[e, 2]` int32 edge list.
+
+    Vertices are inserted in index order, and each new vertex links — undirected — to its `k` nearest among
+    the vertices already in the graph, the same dissimilarity the reference graphs read. Because a later
+    vertex can add a link to an earlier one, an earlier vertex ends up with more than `k` neighbours: the
+    degree is the count of vertices that chose it plus the `k` it chose itself, so the maximum degree is
+    unbounded. The first vertex has no earlier vertex to link and the first few hold fewer than `k` links,
+    simply because too few vertices precede them.
+    """
+    points = np.asarray(points)
+    num_points = int(points.shape[0])
+    if num_points < 2:
+        return np.zeros((0, 2), dtype=np.int32)
+
+    distances = dissimilarities(points, metric)
+    kept: list[tuple[int, int]] = []
+    for i in range(1, num_points):
+        earlier = distances[i, :i]
+        chosen = min(int(k), i)
+        nearest = np.argpartition(earlier, chosen - 1)[:chosen]
+        nearest = nearest[np.argsort(earlier[nearest], kind="stable")]
+        kept.extend((i, int(j)) for j in nearest)
+    return np.asarray(kept, dtype=np.int32).reshape(-1, 2)
+
+
 @dataclass(frozen=True)
 class GraphOverlap:
     """One theoretical graph and the part of the DEG it shares."""
@@ -323,22 +390,25 @@ class TheoryReport:
         return codes
 
 
-def compare(points: np.ndarray, deg_edges: np.ndarray, metric: Metric = Metric.FP32_L2) -> TheoryReport:
+def compare(points: np.ndarray, deg_edges: np.ndarray, metric: Metric = Metric.FP32_L2, k: int = 4) -> TheoryReport:
     """
     Builds the reference graphs under `metric` and counts, for each, how many of the DEG's edges it holds.
 
     The MRNG is built from the NSG graph: the directed greedy graph is symmetrised and transitively
-    reduced, and only the resulting undirected graph is compared against the DEG. This is the
-    slow part of the example — the distance matrix is quadratic in memory and the lune and disc sweeps
-    are quadratic on top of it — which is why the vertex count is capped.
+    reduced, and the resulting undirected graph is compared against the DEG. The directed NSG graph is
+    reported in its own right as well, so the panel scores every graph the viewer offers against the DEG.
+    The knng and the NSW — the viewer's own directed and incremental graphs, both built at the field's
+    `k` — are scored the same way, so the report lists every graph the selector offers. This is the slow
+    part of the example — the distance matrix is quadratic in memory and the lune and disc sweeps are
+    quadratic on top of it — which is why the vertex count is capped.
 
     Delaunay and Gabriel are statements about the plane — a triangulation, a diametral disc — so they are
     only built over a Euclidean matrix; an inner-product report carries the graphs its dissimilarity
     can decide. Delaunay is gated on the plane twice over: it triangulates the two drawing coordinates, so
     on a lifted feature space it would silently report the Delaunay graph of the projection, and a genuine
     3D triangulation is degenerate because the MIPS transform places every vector at the same norm. The
-    Gabriel, RNG, MRNG and MST graphs are read from the distance matrix alone and stay valid in any
-    dimension, so they survive the lift.
+    Gabriel, RNG, MRNG, MST, NSG, knng and NSW graphs are read from the distance matrix alone and stay
+    valid in any dimension, so they survive the lift.
     """
     num_points = int(points.shape[0])
     deg = _keys(deg_edges, num_points)
@@ -350,15 +420,25 @@ def compare(points: np.ndarray, deg_edges: np.ndarray, metric: Metric = Metric.F
     nsg_began = time.perf_counter()
     nsg = nsg_edges(distances)
     nsg_seconds = time.perf_counter() - nsg_began
+    # The report lists the graphs in the order the viewer's selector offers them, so the panel's table and
+    # the dropdown agree: the viewer-built knng and NSW lead, then the Euclidean-only Delaunay and Gabriel,
+    # then the matrix graphs, with the directed NSG last.
     builders: list[tuple[str, Callable[[], np.ndarray], float]] = [
-        ("rng", lambda: rng_edges(distances), 0.0),
-        ("mst", lambda: mst_edges(distances), 0.0),
-        ("mrng", lambda: _undirected_mrng(nsg, distances), nsg_seconds),
+        ("knng", lambda: knng_edges(points, k, metric), 0.0),
+        ("nsw", lambda: nsw_edges(points, k, metric), 0.0),
     ]
     if metric == Metric.FP32_L2:
-        builders = [("gabriel", lambda: gabriel_edges(distances), 0.0), *builders]
         if points.shape[1] == 2:
-            builders = [("delaunay", lambda: delaunay_edges(points), 0.0), *builders]
+            builders.append(("delaunay", lambda: delaunay_edges(points), 0.0))
+        builders.append(("gabriel", lambda: gabriel_edges(distances), 0.0))
+    builders += [
+        ("rng", lambda: rng_edges(distances), 0.0),
+        ("mst", lambda: mst_edges(distances), 0.0),
+        ("mrng", lambda: _undirected_mrng(nsg, distances), 0.0),
+        # The directed NSG graph is reported alongside the rest, so the panel scores it against the DEG too.
+        # Its build time is the one measured above; the MRNG reduction reuses the very same graph.
+        ("nsg", lambda: nsg, nsg_seconds),
+    ]
     graphs: list[GraphOverlap] = []
     for name, build, preset_seconds in builders:
         began = time.perf_counter()
