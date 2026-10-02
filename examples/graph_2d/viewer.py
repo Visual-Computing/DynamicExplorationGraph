@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import time
 import tkinter
-from tkinter import filedialog, ttk
 from collections.abc import Callable, Iterable
 from pathlib import Path
+from tkinter import filedialog, ttk
+from tkinter.simpledialog import askstring
 from typing import NamedTuple
 
 import matplotlib
@@ -35,13 +36,27 @@ from matplotlib.lines import Line2D
 from matplotlib.text import Text
 from matplotlib.widgets import Button, CheckButtons
 from theory import TheoryReport, dissimilarities, graph_stats, nsg_edges
+from viewer_3d import Viewer3D
+from viewer_controls import CHECK_LABEL_GAP_PX, MOUSE_HELP, make_dropdown, make_field, wire_dropdown
+from viewer_panel import (
+    NEIGHBOR_LABEL,
+    PANEL_LINE_PITCH,
+    PANEL_STYLES,
+    PANEL_WIDTH,
+    SEARCH_LABEL,
+    StyledPanel,
+    format_search_lines,
+)
 
 __all__ = [
-    "GraphViewer",
     "KNNG_VIEW",
     "NONE_VIEW",
     "NSG_VIEW",
     "NSW_VIEW",
+    "PANEL_LINE_PITCH",
+    "PANEL_STYLES",
+    "SEARCH_LABEL",
+    "GraphViewer",
     "arrowhead_triangles",
     "edge_colours",
     "edge_segments",
@@ -53,8 +68,11 @@ __all__ = [
 GroupColors = matplotlib.colormaps["tab10"]
 
 SELECT_COLOR = "#d81b60"
-HOVER_COLOR = "#1a73e8"
-EDGE_COLOR = "#b3b9c2"
+#: The blue ring around the single-clicked target vertex.
+SELECT_RING_COLOR = "#1a73e8"
+#: The green edges lit under the hovered vertex, in 2D and 3D.
+HOVER_EDGE_COLOR = "#188038"
+EDGE_COLOR = "#5f6368"
 #: The knng's own colour: a teal no reference graph and no DEG overlay wears, so a knng edge is never
 #: mistaken for a Delaunay, Gabriel, RNG, MST or MRNG one.
 KNNG_COLOR = "#00897b"
@@ -72,6 +90,9 @@ ARROWHEAD_WIDTH_PX = 10.0
 ENTRY_COLOR = "#5f6368"
 TERMINAL_COLOR = "#d81b60"
 EXACT_COLOR = "#188038"
+#: The correct-answer end marker: a green fill with a neutral grey rim so it reads as a solid node.
+EXACT_FILL = "#5A9C3F"
+MARKER_EDGE = "#595959"
 #: The free-space query cross. The overlay's orange: no vertex marker wears it, so the cross cannot be
 #: misread as one of the traversal's own marks.
 FREE_QUERY_COLOR = "#e8710a"
@@ -108,12 +129,15 @@ EPS_MAX = 10.0
 ZOOM_FACTOR = 0.2
 #: How far the view may shrink relative to the initial framing.
 MIN_ZOOM = 0.02
-FLAG_LABELS = ("coords", "edges", "vertex ids", "theory colours", "query")
+FLAG_LABELS = ("coords", "edges", "vertex ids", "edge colors", "query", "light bg")
 #: Which overlays are on when the window opens, in the order of `FLAG_LABELS`. The key bindings and the
 #: checkboxes both move this state, so a test that reuses one window across cases needs it to know what
 #: "as it started" means. The coordinate system leads and starts on, so the coordinate cross greets the
 #: user and is switched off only for a clean screenshot.
-FLAG_START = (True, True, False, True, True)
+FLAG_START = (True, True, False, True, True, False)
+#: The 2D plot's background: white by default, the light grey the "light bg" checkbox switches to.
+BG_DEFAULT = "#ffffff"
+BG_LIGHT = "#EFF0F1"
 #: The view drawing the built graph; every other view draws one reference graph from the report, the
 #: knng, or nothing at all.
 DEG_VIEW = "deg"
@@ -140,90 +164,7 @@ NONE_VIEW = "none"
 #: builds neither Delaunay nor Gabriel — so the menu lists only the graphs the current report holds, while
 #: the DEG, the knng, the NSW, the NSG and the empty view are always available.
 GRAPH_ORDER = (DEG_VIEW, KNNG_VIEW, NSW_VIEW, "delaunay", "gabriel", "rng", "mst", "mrng", NSG_VIEW, NONE_VIEW)
-#: The pointer gestures, which no key table can carry. The help window prints these above the keys it
-#: reads from its own binding table, so the sheet has one source for everything it claims.
-MOUSE_HELP = (
-    ("left click", "pick a target vertex, or click empty space to query those coordinates"),
-    ("right click", "set the traversal start node"),
-    ("double click", "run the path query"),
-    ("drag", "pan the zoomed view"),
-    ("scroll", "zoom towards the cursor"),
-)
-#: Extra space, in figure pixels, opened between each checkbox frame and its label. Matplotlib's
-#: layout places a label 5.5 pt from the frame's centre — barely past the frame's own edge — which
-#: reads as text fused to the box.
-CHECK_LABEL_GAP_PX = 6
-
-#: The panel column holds this many monospace characters; a longer line spills out of the column
-#: into the figure's edge. Measured: the column is 353 px wide at 7 px per character.
-PANEL_WIDTH = 50
-#: The label a neighbour list starts behind, and that continuation lines repeat as blank padding.
-NEIGHBOR_LABEL = "  neighbors  "
-
-#: The panel's line styles by name. The column is no longer one monospace block: the drawn graph is
-#: named in a heading, its shape summarised beneath, block labels stand out in bold blue, the DEG's
-#: own statistics fade to grey, and a query's verdict is coloured — so the eye finds the section it
-#: wants without reading every line.
-PANEL_STYLES: dict[str, dict] = {
-    "head": {"fontsize": 11, "fontweight": "bold", "color": "#202124", "family": "DejaVu Sans"},
-    "sub": {"fontsize": 8.5, "color": "#5f6368", "family": "DejaVu Sans"},
-    "label": {"fontsize": 8.5, "fontweight": "bold", "color": "#1a73e8", "family": "DejaVu Sans Mono"},
-    "body": {"fontsize": 8.5, "color": "#202124", "family": "DejaVu Sans Mono"},
-    "dim": {"fontsize": 8, "color": "#5f6368", "family": "DejaVu Sans Mono"},
-    "good": {"fontsize": 8.5, "fontweight": "bold", "color": "#188038", "family": "DejaVu Sans Mono"},
-    "bad": {"fontsize": 8.5, "fontweight": "bold", "color": "#d81b60", "family": "DejaVu Sans Mono"},
-    "warn": {"fontsize": 8.5, "fontweight": "bold", "color": "#e8710a", "family": "DejaVu Sans Mono"},
-}
-#: Vertical distance between panel lines, in axes fraction — sized for the tallest style with room.
-PANEL_LINE_PITCH = 0.026
-
-
-class _PanelText:
-    """
-    The right-hand column as a stack of individually styled lines.
-
-    One `Text` artist cannot vary its font per line, so the panel keeps one artist per line and is
-    rewritten wholesale whenever the state changes — the column is at most thirty lines, and the
-    repaint that follows costs what a single text update cost before. `get_text` and
-    `get_window_extent` keep the shape of a `Text`, so the panel still reads as one block.
-    """
-
-    def __init__(self, ax: Axes) -> None:
-        self._ax = ax
-        self._lines: list[tuple[str, str]] = []
-        self._artists: list[Text] = []
-
-    def set_text(self, lines: str | list[tuple[str, str]]) -> None:
-        """Draws the column from `(text, style)` pairs; a plain string becomes one body line each."""
-        self._lines = [(line, "body") for line in lines.split("\n")] if isinstance(lines, str) else list(lines)
-        for artist in self._artists:
-            artist.remove()
-        self._artists = [
-            self._ax.text(
-                0.0,
-                1.0 - position * PANEL_LINE_PITCH,
-                text,
-                transform=self._ax.transAxes,
-                ha="left",
-                va="top",
-                **PANEL_STYLES[style],
-            )
-            for position, (text, style) in enumerate(self._lines)
-        ]
-
-    def get_text(self) -> str:
-        return "\n".join(text for text, _ in self._lines)
-
-    def get_window_extent(self, renderer) -> matplotlib.transforms.Bbox:
-        boxes = [artist.get_window_extent(renderer) for artist in self._artists if artist.get_text()]
-        return (
-            matplotlib.transforms.Bbox.union(boxes) if boxes else matplotlib.transforms.Bbox([[0.0, 0.0], [0.0, 0.0]])
-        )
-
-
-#: The label the first search result starts behind, and that the remaining ranks repeat as blank
-#: padding, so a widened result list reads as one block.
-SEARCH_LABEL = "  search   "
+_PanelText = StyledPanel
 
 
 class _Drag(NamedTuple):
@@ -432,7 +373,8 @@ class GraphViewer:
         self._drag: _Drag | None = None
         self.query: QueryResult | None = None
         self.status: str | None = None
-        self.show_coords, self.show_edges, self.show_ids, self.show_colours, self.show_query = FLAG_START
+        self.show_coords, self.show_edges, self.show_ids, self.show_colours, self.show_query, self.show_light_bg = FLAG_START
+        self.show_3d = False
         self.view = DEG_VIEW
 
         self._fig: Figure = plt.figure("DEG 2D Explorer", figsize=(18.0, 8.5))
@@ -446,17 +388,19 @@ class GraphViewer:
         # together with the tick labels and the spines, so the whole reference frame turns on and off as
         # one without restyling it each time.
         self._cross = (
-            self._ax.axvline(0.0, color="#9aa0a6", linewidth=0.8, zorder=0),
-            self._ax.axhline(0.0, color="#9aa0a6", linewidth=0.8, zorder=0),
+            self._ax.axvline(0.0, color="#9aa0a6", linewidth=0.8, linestyle="--", zorder=0),
+            self._ax.axhline(0.0, color="#9aa0a6", linewidth=0.8, linestyle="--", zorder=0),
         )
         self._ax.format_coord = self._format_coord
+        self._cube_3d = Viewer3D(self)
 
-        # The panel column now runs down to just above the overlay checkboxes: the numeric settings that
-        # used to sit on sliders below it moved into the top strip, so the freed right column is given to
-        # the text. At the widget caps — the widest vertex ids, the widest degree and a top-k list of
-        # eight — its text is twenty-seven lines tall, and the column has to hold that without touching
-        # the checkbox row below it.
-        self._panel = self._fig.add_axes([0.755, 0.135, 0.235, 0.83])
+        # The panel column now runs down to just above the 3D section: the numeric settings that used to
+        # sit on sliders below it moved into the top strip, and the 3D camera controls moved out of that
+        # strip into their own section at the foot of this column, so the panel's bottom is raised to
+        # open a band for it. At the widget caps — the widest vertex ids, the widest degree and a top-k
+        # list of eight — its text is twenty-seven lines tall, and the column has to hold that without
+        # touching the 3D section below it.
+        self._panel = self._fig.add_axes([0.755, 0.42, 0.235, 0.545])
         self._panel.axis("off")
         self._panel_text = _PanelText(self._panel)
 
@@ -467,8 +411,10 @@ class GraphViewer:
 
         # The selectors and numeric fields are native Tk widgets in the strip above the canvas, so this
         # column carries only the overlay checkboxes and the reseed button, stacked below the panel.
-        self._check_ax = self._fig.add_axes([0.755, 0.06, 0.235, 0.055])
-        self._check_ax.axis("off")
+        self._check_ax1 = self._fig.add_axes([0.755, 0.1, 0.235, 0.055])
+        self._check_ax1.axis("off")
+        self._check_ax2 = self._fig.add_axes([0.755, 0.045, 0.235, 0.055])
+        self._check_ax2.axis("off")
         self._reseed_ax = self._fig.add_axes([0.755, 0.01, 0.11, 0.033])
         self._edges = self._ax.add_collection(LineCollection([], colors=EDGE_COLOR, linewidths=0.55, zorder=1))
         #: The arrowheads of a directed graph (the knng and the NSG). A directed edge is drawn as a line
@@ -479,28 +425,30 @@ class GraphViewer:
         self._arrowheads = self._ax.add_collection(
             PolyCollection([], facecolors=EDGE_COLOR, edgecolors="none", zorder=1)
         )
-        self._path = self._ax.add_collection(LineCollection([], linewidths=2.6, zorder=3))
-        self._focus = self._ax.add_collection(LineCollection([], colors=SELECT_COLOR, linewidths=1.4, zorder=4))
-        #: The heads of the focused vertex's edges on a directed graph, in the focus colour, so a
-        #: highlighted link keeps the direction the plain shafts would otherwise hide under the highlight.
-        self._focus_arrows = self._ax.add_collection(
-            PolyCollection([], facecolors=SELECT_COLOR, edgecolors="none", zorder=4)
+        self._path = self._ax.add_collection(LineCollection([], colors=TERMINAL_COLOR, linewidths=2.6, zorder=3))
+        #: The green edges lit under the hovered vertex.
+        self._hover_focus = self._ax.add_collection(
+            LineCollection([], colors=HOVER_EDGE_COLOR, linewidths=1.4, zorder=4)
         )
         self._vertices = self._ax.scatter([], [], s=16, edgecolors="#2a2e35", linewidths=0.35, zorder=2)
         self._ring = self._ax.scatter(
-            [], [], s=200, facecolors="none", edgecolors=SELECT_COLOR, linewidths=1.6, zorder=5
+            [], [], s=200, facecolors="none", edgecolors=SELECT_RING_COLOR, linewidths=1.6, zorder=5
         )
         self._hover_ring = self._ax.scatter(
-            [], [], s=120, facecolors="none", edgecolors=HOVER_COLOR, linewidths=1.1, zorder=5
+            [], [], s=200, facecolors="none", edgecolors=HOVER_EDGE_COLOR, linewidths=1.6, zorder=5
         )
         self._entry_mark = self._ax.scatter(
-            [], [], s=170, marker="s", facecolors="white", edgecolors=ENTRY_COLOR, linewidths=1.4, zorder=6
+            [], [], s=170, marker="s", facecolors="white", edgecolors=ENTRY_COLOR, linewidths=2.2, alpha=1.0, zorder=6
         )
-        self._terminal_mark = self._ax.scatter([], [], s=170, marker="X", color=TERMINAL_COLOR, zorder=6)
+        self._terminal_mark = self._ax.scatter([], [], s=170, marker="o", color=TERMINAL_COLOR, alpha=1.0, zorder=6)
         self._exact_mark = self._ax.scatter(
-            [], [], s=260, marker="*", facecolors="none", edgecolors=EXACT_COLOR, linewidths=1.6, zorder=6
+            [], [], s=150, marker="*", facecolors="none", edgecolors=EXACT_FILL, linewidths=1.6, zorder=6
         )
         self._free_mark = self._ax.scatter([], [], s=170, marker="+", color=FREE_QUERY_COLOR, linewidths=1.6, zorder=6)
+        # The free query's dashed tail to the vertex the search would target, mirroring the 3D cube.
+        self._free_line = Line2D([], [], linestyle="--", color=FREE_QUERY_COLOR, linewidth=1.4, zorder=2)
+        self._free_line.set_visible(False)
+        self._ax.add_line(self._free_line)
         # The query's dashed tail. On an arrived walk it runs from the X to the star, measuring how far
         # the search's answer sat from the truth; on a stalled walk it runs from the stop point to the
         # answer the walk never reached. It sits below the path so a reached walk paints over it, and
@@ -531,23 +479,33 @@ class GraphViewer:
         # colour alone. The 'x' check is drawn by its edge, so a pinned edge leaves the mark on screen
         # whatever the state. The constructor instead folds `color` into face colour and leaves edge
         # colour at scatter's per-point 'face' default, so hiding a check hides its stroke too.
-        self._checks = CheckButtons(
-            self._check_ax,
-            list(FLAG_LABELS),
-            list(FLAG_START),
+        self._checks1 = CheckButtons(
+            self._check_ax1,
+            list(FLAG_LABELS[:3]),
+            list(FLAG_START[:3]),
+            layout="horizontal",
+            check_props={"color": "#1a73e8", "linewidth": 2.2, "s": 85},
+            frame_props={"edgecolor": "#80868b", "facecolor": "#ffffff", "linewidth": 1.2, "s": 85},
+        )
+        self._checks2 = CheckButtons(
+            self._check_ax2,
+            list(FLAG_LABELS[3:]),
+            list(FLAG_START[3:]),
             layout="horizontal",
             check_props={"color": "#1a73e8", "linewidth": 2.2, "s": 85},
             frame_props={"edgecolor": "#80868b", "facecolor": "#ffffff", "linewidth": 1.2, "s": 85},
         )
         # The layout algorithm leaves barely a pixel between a frame's edge and its label; nudge
         # every label a few figure pixels right, scaled to the row's own width, to open a gap.
-        row_px = self._fig.get_size_inches()[0] * self._fig.dpi * self._check_ax.get_position().width
-        for lbl in self._checks.labels:
-            lbl.set_fontsize(9)
-            lbl.set_color("#202124")
-            x, y = lbl.get_position()
-            lbl.set_position((x + CHECK_LABEL_GAP_PX / row_px, y))
-        self._checks.on_clicked(self._on_check)
+        row_px = self._fig.get_size_inches()[0] * self._fig.dpi * self._check_ax1.get_position().width
+        for checks in (self._checks1, self._checks2):
+            for lbl in checks.labels:
+                lbl.set_fontsize(8)
+                lbl.set_color("#202124")
+                x, y = lbl.get_position()
+                lbl.set_position((x + CHECK_LABEL_GAP_PX / row_px, y))
+        self._checks1.on_clicked(self._on_check)
+        self._checks2.on_clicked(self._on_check)
         # The canvas holds widget callbacks weakly, so the button must stay referenced here.
         self._reseed_button = Button(self._reseed_ax, "reseed", color="#ffffff", hovercolor="#e8f0fe")
         self._reseed_button.label.set_color("#202124")
@@ -570,8 +528,20 @@ class GraphViewer:
         self._search_menu: ttk.Combobox | None = None
         self._top_k_spin: ttk.Spinbox | None = None
         self._k_spin: ttk.Spinbox | None = None
+        self._3d_empty_press: bool = False
         self._build_selectors()
+        self._build_3d_panel()
         self._adopt_views()
+        self._3d_nav: dict[str, Callable[[], None]] = {
+            "left": lambda: self._rotate_3d(0, -15),
+            "right": lambda: self._rotate_3d(0, 15),
+            "up": lambda: self._rotate_3d(10, 0),
+            "down": lambda: self._rotate_3d(-10, 0),
+            "+": self._zoom_3d_in,
+            "=": self._zoom_3d_in,
+            "-": self._zoom_3d_out,
+            "0": self._reset_3d_view,
+        }
 
         # One table feeds both the key dispatch and the help window, so a binding cannot be added without
         # the window learning about it, and the window cannot advertise a key that does nothing.
@@ -583,6 +553,7 @@ class GraphViewer:
             "i": ("i", "show or hide the vertex ids", lambda: self._toggle_flag(2)),
             "c": ("c", "colour the edges by their reference graph", lambda: self._toggle_flag(3)),
             "q": ("q", "show or hide the query markers — start node, path and target", lambda: self._toggle_flag(4)),
+            "3": ("3", "switch to the 3D cube view (MIPS transform must be on)", self._toggle_3d),
             "0": ("0", "restore the initial framing", self._reset_view),
             "escape": ("Esc", "release the selection; the start node re-defaults", self._clear_focus),
             "h": ("h", "open and close the control sheet", self._toggle_help),
@@ -597,6 +568,8 @@ class GraphViewer:
         self.redraw()
 
     # ---------------------------------------------------------------- selectors
+
+    # ---------------------------------------------------------------- selectors & controls
 
     def _build_selectors(self) -> None:
         """
@@ -687,32 +660,7 @@ class GraphViewer:
         width: int = 4,
         format: str | None = None,
     ) -> tuple[tkinter.StringVar, ttk.Spinbox]:
-        """
-        Adds one labelled spinbox field to the strip and hands back the pair the viewer has to keep.
-
-        A numeric setting is a spinbox rather than a dropdown: the arrows commit on their own, and a
-        typed value commits on Return or on losing the focus — the same contract every field here uses,
-        so a half-typed value never reaches the graph. `commit` parses, clamps and reverts the raw text.
-        """
-        tkinter.Label(strip, text=label, bg="#f2f4f7", fg="#5f6368", font=("DejaVu Sans", 9, "bold")).pack(
-            side="left", padx=(0, 6)
-        )
-        variable = tkinter.StringVar(strip, value=value)
-        spinbox = ttk.Spinbox(
-            strip,
-            from_=from_,
-            to=to,
-            increment=increment,
-            width=width,
-            textvariable=variable,
-            command=lambda: commit(variable.get()),
-            **({"format": format} if format is not None else {}),
-        )
-        spinbox.configure(font=("DejaVu Sans", 9), background="#ffffff")
-        spinbox.bind("<Return>", lambda _event: commit(variable.get()))
-        spinbox.bind("<FocusOut>", lambda _event: commit(variable.get()))
-        spinbox.pack(side="left", padx=(0, 18))
-        return variable, spinbox
+        return make_field(strip, label, value, from_, to, increment, commit, width=width, format=format)
 
     def _dropdown(
         self,
@@ -722,31 +670,448 @@ class GraphViewer:
         chosen: str,
         choose: Callable[[str], None],
     ) -> tuple[tkinter.StringVar, ttk.Combobox]:
-        """
-        Adds one labelled dropdown to the strip and hands back the pair the viewer has to keep.
+        return make_dropdown(strip, label, options, chosen, choose)
 
-        The combobox is sized to its longest entry instead of a fixed width. Four of them share one
-        row above a 1500 px window, and a flat eleven characters each — right for `delaunay`, eleven
-        too many for `IP` — asks for 1496 of the 1506 px the strip is given. Sizing to the content
-        leaves the row room to spare whatever the toolkit's font metrics turn out to be.
-        """
-        tkinter.Label(strip, text=label, bg="#f2f4f7", fg="#5f6368", font=("DejaVu Sans", 9, "bold")).pack(
-            side="left", padx=(0, 6)
-        )
-        variable = tkinter.StringVar(strip, value=chosen)
-        combobox = ttk.Combobox(
-            strip,
-            textvariable=variable,
-            values=options,
-            state="readonly",
-            width=max(len(option) for option in options) + 2,
-        )
-        combobox.configure(font=("DejaVu Sans", 9))
-        combobox.bind("<<ComboboxSelected>>", lambda _event: choose(combobox.get()))
-        combobox.pack(side="left", padx=(0, 18))
-        return variable, combobox
+    def _wire_dropdown(self, combo: ttk.Combobox, choose: Callable[[str], None]) -> None:
+        wire_dropdown(combo, choose)
 
-    # ---------------------------------------------------------------- rendering
+    def _cycle_view(self) -> None:
+        """Moves to the next graph in the selector, so the views can be walked without the mouse."""
+        self._on_view(self.views[(self.views.index(self.view) + 1) % len(self.views)])
+
+    def _snap_even(self, value: int) -> int:
+        """The even degree the DEG builds with for a field value: clamped to `MIN_K`..`K_LIMIT`, odd snapped up."""
+        clamped = min(max(int(value), MIN_K), K_LIMIT)
+        return clamped if clamped % 2 == 0 else min(clamped + 1, K_LIMIT)
+
+    def _deg_k(self) -> int:
+        """The even degree the DEG is built at, snapped from the k field's current value."""
+        return self._snap_even(self.k)
+
+    def _sync_k_enabled(self) -> None:
+        """The k field drives the DEG, the knng and the NSW, so it is greyed out for every other view."""
+        if self._k_spin is not None:
+            active = self.view in (DEG_VIEW, KNNG_VIEW, NSW_VIEW)
+            # The DEG builds at an even degree, so its arrows step by 2: a step of 1 lands on an odd value
+            # that snaps back up to the same even, which leaves the down arrow inert. The knng and NSW read
+            # k raw as a neighbour count, so they keep the finer step of 1.
+            self._k_spin.configure(
+                state="normal" if active else "disabled",
+                increment=2 if self.view == DEG_VIEW else 1,
+            )
+
+    def _on_preset(self, label: str) -> None:
+        """
+        Switches to another distribution, the one change that starts the search over.
+
+        A vertex index names a different point on every cloud, so the target, the start node and any
+        free-space query are released before the rebuild; every other knob keeps them where they are.
+        """
+        if label != self.preset:
+            self.preset = label
+            self.selected = None
+            self.free_query = None
+            self.entry = None
+            self._rebuild()
+
+    def _on_vertices(self, value: float) -> None:
+        num_points = int(value)
+        if num_points != self.num_points:
+            self.num_points = num_points
+            self._rebuild()
+
+    def _commit_vertices(self, raw: str) -> None:
+        """Reads a committed vertex count: clamped into the cloud's bounds, garbage answered by the stored value."""
+        try:
+            num_points = min(max(int(raw), MIN_POINTS), MAX_POINTS)
+        except ValueError:
+            num_points = self.num_points
+        if self._num_var is not None:
+            self._num_var.set(str(num_points))
+        self._on_vertices(num_points)
+
+    def _on_k(self, value: float) -> None:
+        """
+        Sets the k field's value and rebuilds.
+
+        While the DEG is on screen the field is snapped to the even degree it builds with, so an odd
+        value cannot sit in the field beside a graph that never uses it; the knng keeps the raw value,
+        which is its neighbour count directly. The DEG is rebuilt at the snapped degree either way.
+        """
+        value = int(value)
+        if self.view == DEG_VIEW:
+            value = self._snap_even(value)
+            if self._k_var is not None:
+                self._k_var.set(str(value))
+        if value != self.k:
+            self.k = value
+            self._rebuild()
+
+    def _commit_k(self, raw: str) -> None:
+        """Reads a committed k: clamped to the field's bounds, garbage answered by the stored value."""
+        try:
+            value = min(max(int(raw), K_MIN), K_LIMIT)
+        except ValueError:
+            value = self.k
+        if self._k_var is not None:
+            self._k_var.set(str(value))
+        self._on_k(value)
+
+    def _on_mips(self, label: str) -> None:
+        """
+        Lifts the cloud into the MIPS→L2 spherical space or drops it back, which rebuilds the graph.
+
+        The transform changes what the graph is built on — a third coordinate of equal norm — so unlike a
+        search-metric switch this is a real rebuild. The projected cloud is regenerated from the same seed,
+        so the drawing does not move; only the features the graph and searches run on gain a dimension.
+        """
+        mips = label == "on"
+        if mips != self.mips:
+            self.mips = mips
+            if not mips and self.show_3d:
+                self.show_3d = False
+                self._set_3d_visible(False)
+                if self._3d_toggle is not None:
+                    self._3d_toggle.set_active(0, False)
+            self._sync_3d_panel()
+            self._rebuild()
+
+    def _on_view(self, name: str) -> None:
+        """
+        Switches which graph is drawn and re-runs the open query on it.
+
+        A graph the current metric does not build is refused with a status line instead of drawn. The
+        dropdown only lists graphs the report holds, but the `v` key drives the same choice and a switch
+        to inner product can leave the graph already on screen without a report entry behind it. Switching
+        to the DEG snaps the k field to the even value the DEG builds with, since an odd field value is
+        only meaningful to the knng. A target and a start node survive the switch — the search runs over
+        any graph now — so the query is replayed on the new one instead of being dropped.
+        """
+        if name not in self.views:
+            self.status = f"{name} needs L2 — not built under {METRIC_LABELS[self.metric]}"
+            self._panel_text.set_text(self._panel_lines())
+            self._fig.canvas.draw_idle()
+            return
+        if name == DEG_VIEW and self.k != self._deg_k():
+            self.k = self._deg_k()
+            if self._k_var is not None:
+                self._k_var.set(str(self.k))
+        if self._view_var is not None:
+            self._view_var.set(name)  # the `v` key changes the view without the dropdown knowing
+        # Arrow-key browsing in the open dropdown already applied this graph and the popup's own event
+        # then repeats the choice — the redraw must not run twice, but the snap and the sync below are
+        # owed to every choice. The k field is synced after the draw, since it follows the view the
+        # draw installs, not the one still on screen.
+        if name != self.view:
+            self._draw_view(name)
+        self._sync_k_enabled()
+
+    def _draw_view(self, name: str) -> None:
+        """
+        Draws one view and replays the open query on it.
+
+        The query survives a graph switch whenever its target and the start node are still there —
+        searching the graph on screen is the point — while the empty view has nothing to search and
+        answers with the status line naming the missing graph.
+        """
+        self.view = name
+        self.query = None
+        self.status = None
+        self.redraw()
+        target = self.selected if self.selected is not None else self.free_query
+        if name == NONE_VIEW:
+            self.status = "no graph — pick one"
+            self._panel_text.set_text(self._panel_lines())
+            self._fig.canvas.draw_idle()
+        elif target is not None and self.entry is not None:
+            self.run_query()
+
+    def _on_metric(self, label: str) -> None:
+        """Rebuilds under the other metric; the reference graphs follow it, being read from the same matrix."""
+        metric = METRIC_BY_LABEL[label]
+        if metric == self.metric:
+            return
+        self.metric = metric
+        self._rebuild()
+
+    def _on_search_metric(self, label: str) -> None:
+        """
+        Switches the comparator the traversal ranks its neighbours by, which needs no rebuild.
+
+        The graph keeps the edges it was built with — only the greedy step's choice of neighbour
+        changes — so an open query is re-run and redrawn while the cloud stays exactly where it was.
+        That is the point of keeping the two metrics apart: one graph, two answers.
+        """
+        metric = METRIC_BY_LABEL[label]
+        if metric == self.search_metric:
+            return
+        self.search_metric = metric
+        if self.query is not None:
+            self.run_query()
+
+    def _on_top_k(self, value: int) -> None:
+        """Re-runs the current query with a wider result list; the graph itself is unaffected."""
+        top_k = int(value)
+        if top_k == self.top_k:
+            return
+        self.top_k = top_k
+        if self.query is not None:
+            self.run_query()
+
+    def _commit_top_k(self, raw: str) -> None:
+        """
+        Reads a committed top-k value: an integer is clamped into the bounds and stored, garbage is
+        answered by putting the stored value back into the field.
+
+        The field is free text between the arrows, so a half-typed value must not search for nothing —
+        the same contract the spinbox's own arrows enforce by only ever producing a number.
+        """
+        try:
+            top_k = min(max(int(raw), TOP_K_MIN), TOP_K_MAX)
+        except ValueError:
+            top_k = self.top_k
+        if self._top_k_var is not None:
+            self._top_k_var.set(str(top_k))
+        self._on_top_k(top_k)
+
+    def _on_eps(self, value: float) -> None:
+        """Re-runs the current query at a new exploration factor; the graph itself is unaffected."""
+        eps = float(value)
+        if eps == self.path_eps:
+            return
+        self.path_eps = eps
+        if self.query is not None:
+            self.run_query()
+
+    def _commit_eps(self, raw: str) -> None:
+        """Reads a committed exploration factor: clamped to the field's bounds, garbage answered by the stored value."""
+        try:
+            eps = min(max(float(raw), EPS_MIN), EPS_MAX)
+        except ValueError:
+            eps = self.path_eps
+        if self._eps_var is not None:
+            self._eps_var.set(f"{eps:.2f}")
+        self._on_eps(eps)
+
+    def _on_check(self, _label: str) -> None:
+        self._apply_flags()
+
+    def _apply_flags(self) -> None:
+        checked = set(self._checks1.get_checked_labels()) | set(self._checks2.get_checked_labels())
+        self.show_coords = FLAG_LABELS[0] in checked
+        self.show_edges = FLAG_LABELS[1] in checked
+        self.show_ids = FLAG_LABELS[2] in checked
+        self.show_colours = FLAG_LABELS[3] in checked
+        self.show_query = FLAG_LABELS[4] in checked
+        self.show_light_bg = FLAG_LABELS[5] in checked
+        self._ax.set_facecolor(BG_LIGHT if self.show_light_bg else BG_DEFAULT)
+        self._apply_coords()
+        self.redraw()
+
+    def _toggle_flag(self, index: int) -> None:
+        checks = self._checks1 if index < 3 else self._checks2
+        local = index if index < 3 else index - 3
+        checks.set_active(local, not checks.get_status()[local])
+        self._apply_flags()
+
+    def _apply_coords(self) -> None:
+        """Turns the coordinate system — the cross through the origin, the tick labels and the spines — on or off as one overlay."""
+        for line in self._cross:
+            line.set_visible(self.show_coords)
+        self._ax.tick_params(labelbottom=self.show_coords, labelleft=self.show_coords)
+        for spine in self._ax.spines.values():
+            spine.set_visible(self.show_coords)
+
+    def _build_3d_panel(self) -> None:
+        """
+        Builds the 3D camera section at the foot of the right column, above the overlay checkboxes.
+
+        It is a matplotlib section, so it rides the same canvas as the checkboxes and the reseed button
+        beside it and is present on every backend. Every control is a `Button` or a `CheckButtons` — never
+        a `TextBox`: a text box embeds a native entry that the canvas re-syncs on every draw, which made
+        panning stutter. A button is a plain rectangle and label, and the angles are edited through a
+        one-shot dialog on click, so the section costs the redraw nothing. The section reads top to bottom
+        as a toggle that opens the cube, the camera's current angle (click to set it), and three slots that
+        each store a target angle and glide the camera to it. Every widget is kept on `self`, because the
+        canvas holds widget callbacks weakly.
+        """
+        x0, w = 0.755, 0.235
+        self._3d_toggle_syncing = False
+        self._3d_slot_targets: list[tuple[float, float, float]] = [(90.0, -90.0, 1.6), (45.0, 0.0, 1.6), (18.0, -60.6, 1.17)]
+        box = {"color": "#1a73e8", "linewidth": 2.2, "s": 85}
+        frame = {"edgecolor": "#80868b", "facecolor": "#ffffff", "linewidth": 1.2, "s": 85}
+
+        self._3d_toggle_ax = self._fig.add_axes([x0, 0.365, w, 0.045])
+        self._3d_toggle_ax.axis("off")
+        self._3d_toggle = CheckButtons(
+            self._3d_toggle_ax, ["3D view"], [self.show_3d], layout="horizontal", check_props=box, frame_props=frame
+        )
+        self._3d_toggle.labels[0].set_fontsize(8)
+        self._3d_toggle.labels[0].set_color("#202124")
+        # Match the overlay rows' box-to-label gap: the layout leaves the label tight on the frame, so
+        # nudge it the same figure-pixel distance right, scaled to this row's own width.
+        toggle_px = self._fig.get_size_inches()[0] * self._fig.dpi * self._3d_toggle_ax.get_position().width
+        lx, ly = self._3d_toggle.labels[0].get_position()
+        self._3d_toggle.labels[0].set_position((lx + CHECK_LABEL_GAP_PX / toggle_px, ly))
+        self._3d_toggle.on_clicked(self._on_3d_check)
+
+        self._3d_live = self._make_3d_button([x0, 0.316, w, 0.038], "elev 90.0 · azim -90.0 · zoom 1.60x", self._edit_live_angles)
+        self._3d_slot_edit: list[Button] = []
+        self._3d_animate_buttons: list[Button] = []
+        self._3d_gif_buttons: list[Button] = []
+        for slot in range(3):
+            y = 0.268 - slot * 0.042
+            elev, azim, zoom = self._3d_slot_targets[slot]
+            self._3d_slot_edit.append(
+                self._make_3d_button(
+                    [x0, y, w * 0.4, 0.034], f"{elev:.1f}, {azim:.1f}, {zoom:.2f}", lambda _e, i=slot: self._edit_slot(i)
+                )
+            )
+            self._3d_animate_buttons.append(
+                self._make_3d_button([x0 + w * 0.42, y, w * 0.28, 0.034], "animate", lambda _e, i=slot: self._on_animate(i))
+            )
+            self._3d_gif_buttons.append(
+                self._make_3d_button([x0 + w * 0.72, y, w * 0.28, 0.034], "to gif", lambda _e, i=slot: self._on_animate_gif(i))
+            )
+        self._sync_3d_panel()
+
+    def _make_3d_button(self, rect: list[float], label: str, command) -> Button:
+        """A flat, styled button in the 3D section, kept referenced and wired to `command`."""
+        button = Button(self._fig.add_axes(rect), label, color="#ffffff", hovercolor="#e8f0fe")
+        button.label.set_fontsize(7)
+        button.label.set_color("#202124")
+        for spine in button.ax.spines.values():
+            spine.set_edgecolor("#80868b")
+            spine.set_linewidth(1.0)
+        button.on_clicked(command)
+        return button
+
+    def _ask_angles(self, title: str, elev: float, azim: float, zoom: float) -> tuple[float, float, float] | None:
+        """Prompts for an "elev, azim, zoom" triple in a one-shot dialog; None on cancel or unparseable input."""
+        raw = askstring(
+            title, "elevation, azimuth, zoom", initialvalue=f"{elev:.1f}, {azim:.1f}, {zoom:.2f}", parent=self._tk_canvas()
+        )
+        if raw is None:
+            return None
+        try:
+            elev_part, azim_part, zoom_part = raw.split(",")
+            return float(elev_part), float(azim_part), float(zoom_part)
+        except (TypeError, ValueError):
+            return None
+
+    def _edit_live_angles(self, _event=None) -> None:
+        """Click on the live-angle button: set the camera directly from a dialog."""
+        if not self.show_3d or self._ax3d is None:
+            return
+        angles = self._ask_angles("Current angles", self._ax3d.elev, self._ax3d.azim, self._cube_3d.zoom())
+        if angles is not None:
+            self._set_3d_angles(elev=angles[0], azim=angles[1])
+            self._cube_3d.set_zoom(angles[2])
+
+    def _edit_slot(self, index: int) -> None:
+        """Click on a slot's angle button: store a new target angle and zoom for its animate button."""
+        if not self.show_3d:
+            return
+        elev, azim, zoom = self._3d_slot_targets[index]
+        angles = self._ask_angles(f"Slot {index + 1} target", elev, azim, zoom)
+        if angles is None:
+            return
+        target_elev = max(-90.0, min(90.0, angles[0]))
+        target_azim = ((angles[1] + 180.0) % 360.0) - 180.0
+        target_zoom = max(0.2, min(20.0, angles[2]))
+        self._3d_slot_targets[index] = (target_elev, target_azim, target_zoom)
+        self._3d_slot_edit[index].label.set_text(f"{target_elev:.1f}, {target_azim:.1f}, {target_zoom:.2f}")
+        self._fig.canvas.draw_idle()
+
+    def _on_3d_check(self, _label: str = "") -> None:
+        """The 3D section's toggle: switches the cube on or off, reverting the box when MIPS is off."""
+        if self._3d_toggle_syncing:
+            return
+        wanted = bool(self._3d_toggle.get_status()[0])
+        if wanted and not self.mips:
+            self._3d_toggle.set_active(0, False)
+            return
+        self._set_show_3d(wanted)
+
+    def _set_show_3d(self, wanted: bool) -> None:
+        """Applies the cube's on/off state to the view, the toggle's box and the section's widgets."""
+        self.show_3d = wanted
+        self._set_3d_visible(wanted)
+        # `set_active` re-fires the click callback, so the box is only nudged when it disagrees with the
+        # state and the callback is muted while it does — otherwise the two call each other in a loop.
+        if self._3d_toggle is not None and self._3d_toggle.get_status()[0] != wanted:
+            self._3d_toggle_syncing = True
+            try:
+                self._3d_toggle.set_active(0, wanted)
+            finally:
+                self._3d_toggle_syncing = False
+        self._sync_3d_panel()
+        self.redraw()
+
+    def _on_animate(self, index: int) -> None:
+        """Glides the camera to the target stored in slot `index`; a no-op outside cube mode."""
+        if not self.show_3d or self._ax3d is None:
+            return
+        elev, azim, zoom = self._3d_slot_targets[index]
+        self._cube_3d.animate_to(elev, azim, zoom)
+
+    def _on_animate_gif(self, index: int) -> None:
+        """Glides the camera to slot `index`'s target and records the move into a GIF; a no-op outside cube mode."""
+        if not self.show_3d or self._ax3d is None:
+            return
+        canvas = self._tk_canvas()
+        if canvas is None:
+            return
+        path = filedialog.asksaveasfilename(
+            parent=canvas.master,
+            defaultextension=".gif",
+            filetypes=[("GIF animation", "*.gif"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        elev, azim, zoom = self._3d_slot_targets[index]
+        self._cube_3d.animate_to_gif(elev, azim, zoom, path=path, steps=24, fps=10)
+
+    def _toggle_3d(self) -> None:
+        """Toggles the 3D cube view from the keyboard; a no-op while the MIPS transform is off."""
+        if not self.mips:
+            return
+        self._set_show_3d(not self.show_3d)
+
+    def _set_3d_angles(self, elev: float | None = None, azim: float | None = None) -> None:
+        """Applies an elevation/azimuth typed into the 3D section, clamping elevation and wrapping azimuth."""
+        if self._ax3d is None:
+            return
+        elev = self._ax3d.elev if elev is None else max(-90.0, min(90.0, elev))
+        azim = self._ax3d.azim if azim is None else ((azim + 180.0) % 360.0) - 180.0
+        self._ax3d.view_init(elev=elev, azim=azim)
+        self._sync_3d_angles()
+        self._fig.canvas.draw_idle()
+
+    def _sync_3d_angles(self) -> None:
+        """Writes the cube's live elevation, azimuth and zoom into the 3D section's current-angle button."""
+        if self._ax3d is None or self._3d_live is None:
+            return
+        self._3d_live.label.set_text(
+            f"elev {self._ax3d.elev:.1f} · azim {self._ax3d.azim:.1f} · zoom {self._cube_3d.zoom():.2f}x"
+        )
+
+    def _sync_3d_panel(self) -> None:
+        """
+        Shows the 3D section by mode: the toggle only under the transform, the angle controls only in cube view.
+
+        Outside cube view the angle and slot buttons are hidden outright, not just greyed, so a 2D pan
+        redraws nothing of the section; the toggle stays so the cube can be opened.
+        """
+        if self._3d_toggle is None:
+            return
+        self._3d_toggle.labels[0].set_color("#202124" if self.mips else "#b0b5bd")
+        self._3d_live.ax.set_visible(self.show_3d)
+        for button in (*self._3d_slot_edit, *self._3d_animate_buttons, *self._3d_gif_buttons):
+            button.ax.set_visible(self.show_3d)
+        self._sync_3d_angles()
+
+    # ---------------------------------------------------------------- 2D rendering
 
     def _knng_for(self) -> np.ndarray:
         """
@@ -804,6 +1169,9 @@ class GraphViewer:
 
     def redraw(self) -> None:
         """Re-derives every artist from the current model, view, focus and overlay flags."""
+        if self.show_3d:
+            self._redraw_3d()
+            return
         model = self.model
         # Frame the cloud before any head is derived: the heads are measured in display pixels through the
         # axis transform, so the framing they are measured against must already be the one they draw under.
@@ -840,7 +1208,6 @@ class GraphViewer:
         self._vertices.set_offsets(model.plot_points)
         self._vertices.set_facecolor(vertex_colors(model))
         self._paint_focus()
-        self._paint_free_query()
         self._paint_query()
         self._paint_labels()
         name = "DEG" if self.view == DEG_VIEW else self.view
@@ -851,60 +1218,47 @@ class GraphViewer:
         self._fig.canvas.draw_idle()
 
     def _paint_focus(self) -> None:
-        # The start node, the selected vertex's ring and its highlighted edges are the traversal's own
-        # marks; the `query` overlay switches them off as a set for a clean picture.
+        # The start node and the target's blue ring are the traversal's own marks; the `query` overlay
+        # switches them off as a set for a clean picture. The hovered vertex's green edges are pure
+        # navigation feedback and stay lit regardless of the overlay.
         if not self.show_query:
             self._entry_mark.set_offsets(NO_POINTS)
-            self._focus.set_segments([])
-            self._focus_arrows.set_paths([])
             self._ring.set_offsets(NO_POINTS)
-            return
-        # The start node is drawn whenever one is set — the empty view is the one exception, since a
-        # traversal seed without a graph to walk would mark a start to a journey that cannot happen.
-        show_entry = self.entry is not None and self.view != NONE_VIEW
-        self._entry_mark.set_offsets(NO_POINTS if not show_entry else self.model.plot_points[[self.entry]])
-        if self.selected is None:
-            self._focus.set_segments([])
-            self._focus_arrows.set_paths([])
-            self._ring.set_offsets(NO_POINTS)
+        else:
+            # The start node is drawn whenever one is set — the empty view is the one exception, since a
+            # traversal seed without a graph to walk would mark a start to a journey that cannot happen.
+            show_entry = self.entry is not None and self.view != NONE_VIEW
+            self._entry_mark.set_offsets(NO_POINTS if not show_entry else self.model.plot_points[[self.entry]])
+            self._ring.set_offsets(self.model.plot_points[[self.selected]] if self.selected is not None else NO_POINTS)
+        self._paint_hover_edges()
+
+    def _paint_hover_edges(self) -> None:
+        """Lights the hovered vertex's edges in green, reading off the drawn edge list so the highlight follows the graph on screen."""
+        if self.hovered is None:
+            self._hover_focus.set_segments([])
             return
         edges = self._display_edges()
         if edges.size:
-            # Read off the drawn edge list rather than the DEG adjacency, so the highlight follows
-            # whichever graph is on screen.
-            touching = (edges[:, 0] == self.selected) | (edges[:, 1] == self.selected)
-            focused = self.model.plot_points[edges[touching]]
-            self._focus.set_segments(focused)
-            if self._view_directed():
-                self._focus_arrows.set_paths(
-                    arrowhead_triangles(focused, self._ax.transData, ARROWHEAD_PX, ARROWHEAD_WIDTH_PX)
-                )
-            else:
-                self._focus_arrows.set_paths([])
+            touching = np.isin(edges[:, 0], self.hovered) | np.isin(edges[:, 1], self.hovered)
+            self._hover_focus.set_segments(self.model.plot_points[edges[touching]])
         else:
-            self._focus.set_segments([])
-            self._focus_arrows.set_paths([])
-        self._ring.set_offsets(self.model.plot_points[[self.selected]])
-
-    def _paint_free_query(self) -> None:
-        """
-        Places the cross that marks a free-space query; hidden while no free query is set.
-
-        The empty view hides it as it hides the start node: a query marker on a screen without a graph
-        points at a search that cannot run. The point itself stays chosen — switch back to any graph and
-        the cross, and the query it marks, are exactly where they were.
-        """
-        show = self.free_query is not None and self.view != NONE_VIEW and self.show_query
-        self._free_mark.set_offsets(NO_POINTS if not show else self.free_query[None, :])
+            self._hover_focus.set_segments([])
 
     def _paint_query(self) -> None:
         query, points = self.query, self.model.plot_points
+        # The free-space query's orange cross marks the chosen point; its dashed tail runs to the star,
+        # the ground-truth best match the search is scored against. The cross shows as soon as a point is
+        # chosen (the query it marks is kept across rebuilds); the tail joins it to the star once a search
+        # has produced one. The empty view hides the cross as it hides the start node.
+        free = self.free_query is not None and self.view != NONE_VIEW
+        self._free_mark.set_offsets(NO_POINTS if not (free and self.show_query) else self.free_query[None, :])
         if not self.show_query:
             self._path.set_segments([])
             self._path.set_array(None)
             self._terminal_mark.set_offsets(NO_POINTS)
             self._exact_mark.set_offsets(NO_POINTS)
             self._connector.set_visible(False)
+            self._free_line.set_visible(False)
             return
         if query is None:
             self._path.set_segments([])
@@ -912,8 +1266,15 @@ class GraphViewer:
             self._terminal_mark.set_offsets(NO_POINTS)
             self._exact_mark.set_offsets(NO_POINTS)
             self._connector.set_visible(False)
+            self._free_line.set_visible(False)
             return
         self._exact_mark.set_offsets(points[[query.exact]])
+        if free:
+            p = points[query.exact]
+            self._free_line.set_data([self.free_query[0], p[0]], [self.free_query[1], p[1]])
+            self._free_line.set_visible(True)
+        else:
+            self._free_line.set_visible(False)
         if query.deg_indices.size == 0:
             # A search that returned nothing has no answer to aim the traversal at, so there is no X
             # to mark and no walk that could have been taken — only the star of the ground truth stays.
@@ -928,16 +1289,16 @@ class GraphViewer:
         # an answer and it ends on that answer — the walk never stalls before what the search returned.
         walk = points[query.path]
         self._path.set_segments(np.stack([walk[:-1], walk[1:]], axis=1))
-        if query.hops:
-            self._path.set_array(np.linspace(0.15, 0.95, query.hops))
-            self._path.set_cmap("cividis")
-        else:
-            self._path.set_array(None)
+        self._path.set_array(None)
         # The walk ends on the search's answer: a green X when that answer is the ground truth — the search
         # answered correctly — and a red one when it is not, with a dashed line from the X to the star
         # measuring the miss the search took.
         self._terminal_mark.set_offsets(points[[answer]])
-        self._terminal_mark.set_color(EXACT_COLOR if answer == query.exact else TERMINAL_COLOR)
+        if answer == query.exact:
+            self._terminal_mark.set_facecolor(EXACT_FILL)
+            self._terminal_mark.set_edgecolor(MARKER_EDGE)
+        else:
+            self._terminal_mark.set_color(TERMINAL_COLOR)
         self._connector.set_data([target[0], star[0]], [target[1], star[1]])
         self._connector.set_visible(answer != query.exact)
 
@@ -964,6 +1325,97 @@ class GraphViewer:
             self._labels.append(
                 self._ax.text(x, y, str(index), fontsize=6, color="#5f6368", ha="left", va="bottom", zorder=7)
             )
+
+    def _paint_legend(self) -> None:
+        """
+        Rebuilds the colour key from the report the current model carries. Switching the metric takes two
+        reference graphs and their swatches away with it, so the key cannot be built once at startup.
+        """
+        entries = legend_entries(self.model.theory)
+        self._legend = self._legend_ax.legend(
+            handles=[Line2D([], [], color=color, linewidth=2.4) for _, color in entries],
+            labels=[name for name, _ in entries],
+            frameon=False,
+            fontsize=8.5,
+            loc="center left",
+            ncol=len(entries),
+            borderpad=0.0,
+            columnspacing=2.4,
+            handlelength=1.7,
+            handletextpad=0.6,
+        )
+        self._legend.set_visible(False)
+        self._style_legend()
+
+    def _held_graphs(self) -> set[str]:
+        """The reference graphs the current report carries, all of them switched on."""
+        return set(self.model.theory.names) if self.model.theory is not None else set()
+
+    def _legend_names(self) -> tuple[str, ...]:
+        """The key's entries in the legend's own order, `DEG only` first."""
+        return tuple(name for name, _ in legend_entries(self.model.theory))
+
+    def _style_legend(self) -> None:
+        """Dims the entries that are switched off, so the key reads as the switch it now is."""
+        names = self._legend_names()
+        for position, (handle, text) in enumerate(zip(self._legend.legend_handles, self._legend.get_texts())):
+            live = position == 0 or names[position] in self.overlays
+            handle.set_alpha(1.0 if live else 0.2)
+            text.set_color("#2a2e35" if live else "#b0b5bd")
+
+    # ---------------------------------------------------------------- 3D cube view
+
+    @property
+    def _ax3d(self) -> Axes | None:
+        return self._cube_3d.ax3d
+
+    @_ax3d.setter
+    def _ax3d(self, value: Axes | None) -> None:
+        self._cube_3d.ax3d = value
+
+    def _ensure_3d_axes(self) -> Axes:
+        return self._cube_3d.ensure_axes()
+
+    def _install_turntable(self, ax: Axes) -> None:
+        self._cube_3d.install_turntable(ax)
+
+    def _set_3d_visible(self, visible: bool) -> None:
+        self._cube_3d.set_visible(visible)
+
+    def _rotate_3d(self, d_elev: float, d_azim: float) -> None:
+        self._cube_3d.rotate(d_elev, d_azim)
+
+    def _zoom_3d_in(self) -> None:
+        self._cube_3d.zoom_in()
+
+    def _zoom_3d_out(self) -> None:
+        self._cube_3d.zoom_out()
+
+    def _scale_3d(self, factor: float) -> None:
+        self._cube_3d.scale(factor)
+
+    def _reset_3d_view(self) -> None:
+        self._cube_3d.reset_view()
+
+    def _redraw_3d(self) -> None:
+        self._cube_3d.redraw()
+
+    def _nearest_to_free_query(self) -> int | None:
+        return self._cube_3d.nearest_to_free_query()
+
+    def _paint_3d_marks(self, ax: Axes) -> None:
+        self._cube_3d.paint_marks(ax)
+
+    def _paint_3d_path(self, ax: Axes) -> None:
+        self._cube_3d.paint_path(ax)
+
+    def _paint_3d_ground(self, ax: Axes) -> None:
+        self._cube_3d.paint_ground(ax)
+
+    def _paint_3d_labels(self, ax: Axes) -> None:
+        self._cube_3d.paint_labels(ax)
+
+    # ---------------------------------------------------------------- panel statistics & text
 
     def _view_directed(self) -> bool:
         """
@@ -1104,8 +1556,10 @@ class GraphViewer:
                 ("", "body"),
                 (f"QUERY    {METRIC_LABELS[self.query.metric]}  eps={self.query.eps:.2f}  from {start}", "label"),
                 (
-                    f"  route    {self.query.hops} hops · {self.query.distance_computations} dist"
-                    f" · {self.query.expanded} checked",
+                    (
+                        f"  route    {self.query.hops} hops · {self.query.distance_computations} dist"
+                        f" · {self.query.expanded} checked"
+                    ),
                     "body",
                 ),
                 *self._search_lines(self.query),
@@ -1130,25 +1584,7 @@ class GraphViewer:
         return lines
 
     def _search_lines(self, query: QueryResult) -> list[tuple[str, str]]:
-        """
-        The search block: one line per result, in the search's own ranking order.
-
-        The first result sits behind `SEARCH_LABEL` and the rest repeat it as blank padding, so a widened
-        list reads as one block. The `hit` marker lands on whichever line names the best match — and that
-        line turns green, so a recovered search shows from across the room while the plain results stay
-        quiet. An empty result list says so in the warning colour rather than printing nothing.
-        """
-        if query.deg_indices.size == 0:
-            return [(f"{SEARCH_LABEL}no result", "warn")]
-        pad = " " * len(SEARCH_LABEL)
-        return [
-            (
-                f"{SEARCH_LABEL if rank == 1 else pad}#{rank} {int(index)} (d={distance:.3f})"
-                + (" hit" if int(index) == query.exact else ""),
-                "good" if int(index) == query.exact else "body",
-            )
-            for rank, (index, distance) in enumerate(zip(query.deg_indices, query.deg_distances), start=1)
-        ]
+        return format_search_lines(query)
 
     def _format_coord(self, x: float, y: float) -> str:
         text = f"x={x:6.3f}  y={y:6.3f}"
@@ -1156,7 +1592,7 @@ class GraphViewer:
             text += f"  ·  vertex {self.hovered}"
         return text
 
-    # ---------------------------------------------------------------- interaction
+    # ---------------------------------------------------------------- event handling & interaction
 
     def _nearest(self, event: MouseEvent) -> int | None:
         if event.inaxes is not self._ax or self.model.num_points == 0:
@@ -1166,6 +1602,15 @@ class GraphViewer:
         index = int(np.argmin(squared))
         return index if squared[index] <= PICK_RADIUS_PX**2 else None
 
+    def _project_3d(self, xyz: np.ndarray) -> np.ndarray:
+        return self._cube_3d.project(xyz)
+
+    def _nearest_3d(self, event: MouseEvent) -> int | None:
+        return self._cube_3d.nearest(event)
+
+    def _plane_point_from_click(self, event: MouseEvent) -> np.ndarray | None:
+        return self._cube_3d.plane_point_from_click(event)
+
     def _on_click(self, event: MouseEvent) -> None:
         """
         Left-click selects a vertex, or — on empty space — places a free-space query at the clicked
@@ -1173,8 +1618,18 @@ class GraphViewer:
         """
         if self._on_legend(event):
             return
-        # Clicks on the control widgets must not be read as "empty space" — that would place a free
-        # query the widget is about to act on.
+        if event.button == 1 and event.inaxes is None:
+            if event.dblclick:
+                self.query = None
+                self.free_query = None
+                self.redraw()
+                return
+            if self.selected is not None:
+                self.select(None)
+            return
+        if self.show_3d:
+            self._on_click_3d(event)
+            return
         if event.button not in (1, 3) or event.inaxes is not self._ax:
             return
         index = self._nearest(event)
@@ -1182,7 +1637,12 @@ class GraphViewer:
             self.set_entry(index)
             return
         if index is None:
-            self.set_free_query(np.array([event.xdata, event.ydata], dtype=np.float32))
+            if event.dblclick:
+                self.set_free_query(np.array([event.xdata, event.ydata], dtype=np.float32))
+        elif event.dblclick:
+            self.set_free_query(self.model.plot_points[index].astype(np.float32))
+        elif index == self.selected:
+            self.select(None)
         else:
             self.select(index)
         if event.dblclick:
@@ -1191,7 +1651,13 @@ class GraphViewer:
         else:
             self._drag = _capture_drag(self._ax, event)
 
+    def _on_click_3d(self, event: MouseEvent) -> None:
+        self._cube_3d.on_click(event)
+
     def _on_motion(self, event: MouseEvent) -> None:
+        if self.show_3d:
+            self._on_motion_3d(event)
+            return
         if self._drag is not None:
             self._pan(self._drag, event)
             return
@@ -1200,21 +1666,113 @@ class GraphViewer:
             return
         self.hovered = index
         self._hover_ring.set_offsets(NO_POINTS if index is None else self.model.plot_points[[index]])
+        self._paint_focus()
         self._panel_text.set_text(self._panel_lines())
         self._fig.canvas.draw_idle()
 
+    def _on_motion_3d(self, event: MouseEvent) -> None:
+        self._cube_3d.on_motion(event)
+
+    def _on_release(self, _event: MouseEvent) -> None:
+        self._drag = None
+        if self._3d_empty_press:
+            self._3d_empty_press = False
+            self.select(None)
+            self.redraw()
+
+    def _on_scroll(self, event: MouseEvent) -> None:
+        """Zooms towards the cursor, never further out than the initial framing."""
+        if self.show_3d:
+            self._cube_3d.on_scroll(event)
+            return
+        if event.inaxes is not self._ax or not event.step or self._home is None:
+            return
+        home_x0, home_x1 = self._home[0]
+        x0, x1 = self._ax.get_xlim()
+        y0, y1 = self._ax.get_ylim()
+        scale = 1.0 / (1.0 + ZOOM_FACTOR * event.step)
+        if (x1 - x0) * scale >= home_x1 - home_x0:
+            self._reset_view()
+            return
+        if (x1 - x0) * scale <= (home_x1 - home_x0) * MIN_ZOOM:
+            return
+        x, y = event.xdata, event.ydata
+        self._ax.set_xlim(x - (x - x0) * scale, x + (x1 - x) * scale)
+        self._ax.set_ylim(y - (y - y0) * scale, y + (y1 - y) * scale)
+        self._fig.canvas.draw_idle()
+
+    def _pan(self, drag: _Drag, event: MouseEvent) -> None:
+        """Shifts the framing so the cloud follows the cursor, never leaving the initial box."""
+        if event.x is None or event.y is None or self._home is None:
+            return
+        x0, x1 = drag.xlim
+        y0, y1 = drag.ylim
+        # Measured from the press snapshot, not from the previous event, so a framing the backend
+        # adjusts to keep the aspect square cannot drift the cloud away over a long drag.
+        shifted_x = x0 - (event.x - drag.x) / drag.px_per_unit_x, x1 - (event.x - drag.x) / drag.px_per_unit_x
+        shifted_y = y0 - (event.y - drag.y) / drag.px_per_unit_y, y1 - (event.y - drag.y) / drag.px_per_unit_y
+        self._ax.set_xlim(*_slide(*shifted_x, self._home[0]))
+        self._ax.set_ylim(*_slide(*shifted_y, self._home[1]))
+        self._fig.canvas.draw_idle()
+
+    def _on_legend(self, event: MouseEvent) -> bool:
+        """
+        Consumes a click that lands on the colour key, switching that reference graph's colour.
+
+        `DEG only` is deliberately not a switch: the whole overlay already has one in the `theory
+        colours` checkbox, and a second control for the same state would only get out of step with it.
+        Switching a graph off hands its edges to the next graph in the override order that holds them,
+        which is what makes peeling the nesting apart — the tree out of the Gabriel graph out of the
+        Delaunay — something the eye can follow.
+        """
+        if event.inaxes is not self._legend_ax or not self._legend.get_visible():
+            return False
+        names = self._legend_names()
+        renderer = self._fig.canvas.get_renderer()
+        legend_bbox = self._legend_ax.get_window_extent(renderer)
+        boxes = []
+        for handle, text in zip(self._legend.legend_handles, self._legend.get_texts()):
+            hb = handle.get_window_extent(renderer)
+            tb = text.get_window_extent(renderer)
+            # Matplotlib Bbox.union takes a list of bboxes and computes their true bounding envelope
+            boxes.append(matplotlib.transforms.Bbox.union([hb, tb]))
+
+        for position, box in enumerate(boxes):
+            hit_box = box.padded(10.0)
+            hit_box.y0 = legend_bbox.y0
+            hit_box.y1 = legend_bbox.y1
+            if hit_box.contains(event.x, event.y) and position > 0:
+                self.overlays ^= {names[position]}
+                self.redraw()
+                return True
+        return True
+
+    def _on_key(self, event: MouseEvent) -> None:
+        key = (event.key or "").lower()
+        if self.show_3d and self._ax3d is not None:
+            nav = self._3d_nav.get(key)
+            if nav is not None:
+                nav()
+                return
+        binding = self._bindings.get("h" if key == "?" else key)
+        if binding is not None:
+            binding[2]()
+
     def _clear_focus(self) -> None:
-        """Releases the selection and the free-space query; the start node falls back to its default, since one always exists."""
+        """Releases the selection, query and free-space query; the start node falls back to its default."""
         self.free_query = None
+        self.query = None
         self.select(None)
         self.set_entry(None)
         self.redraw()
 
-    def _on_key(self, event: MouseEvent) -> None:
-        key = (event.key or "").lower()
-        binding = self._bindings.get("h" if key == "?" else key)
-        if binding is not None:
-            binding[2]()
+    def _reset_view(self) -> None:
+        """Restores the framing derived from the current model."""
+        if self._home is None:
+            return
+        self._ax.set_xlim(self._home[0])
+        self._ax.set_ylim(self._home[1])
+        self._fig.canvas.draw_idle()
 
     def _tk_canvas(self) -> tkinter.Misc | None:
         """The Tk widget this canvas draws into, or `None` on a backend that is not Tk's."""
@@ -1256,348 +1814,13 @@ class GraphViewer:
         if window is not None:
             window.destroy()
 
-    def _on_preset(self, label: str) -> None:
-        """
-        Switches to another distribution, the one change that starts the search over.
-
-        A vertex index names a different point on every cloud, so the target, the start node and any
-        free-space query are released before the rebuild; every other knob keeps them where they are.
-        """
-        if label != self.preset:
-            self.preset = label
-            self.selected = None
-            self.free_query = None
-            self.entry = None
-            self._rebuild()
-
-    def _on_mips(self, label: str) -> None:
-        """
-        Lifts the cloud into the MIPS→L2 spherical space or drops it back, which rebuilds the graph.
-
-        The transform changes what the graph is built on — a third coordinate of equal norm — so unlike a
-        search-metric switch this is a real rebuild. The projected cloud is regenerated from the same seed,
-        so the drawing does not move; only the features the graph and searches run on gain a dimension.
-        """
-        mips = label == "on"
-        if mips != self.mips:
-            self.mips = mips
-            self._rebuild()
-
-    def _on_view(self, name: str) -> None:
-        """
-        Switches which graph is drawn and re-runs the open query on it.
-
-        A graph the current metric does not build is refused with a status line instead of drawn. The
-        dropdown only lists graphs the report holds, but the `v` key drives the same choice and a switch
-        to inner product can leave the graph already on screen without a report entry behind it. Switching
-        to the DEG snaps the k field to the even value the DEG builds with, since an odd field value is
-        only meaningful to the knng. A target and a start node survive the switch — the search runs over
-        any graph now — so the query is replayed on the new one instead of being dropped.
-        """
-        if name not in self.views:
-            self.status = f"{name} needs L2 — not built under {METRIC_LABELS[self.metric]}"
-            self._panel_text.set_text(self._panel_lines())
-            self._fig.canvas.draw_idle()
-            return
-        if name == DEG_VIEW and self.k != self._deg_k():
-            self.k = self._deg_k()
-            if self._k_var is not None:
-                self._k_var.set(str(self.k))
-        if self._view_var is not None:
-            self._view_var.set(name)  # the `v` key changes the view without the dropdown knowing
-        # Arrow-key browsing in the open dropdown already applied this graph and the popup's own event
-        # then repeats the choice — the redraw must not run twice, but the snap and the sync below are
-        # owed to every choice. The k field is synced after the draw, since it follows the view the
-        # draw installs, not the one still on screen.
-        if name != self.view:
-            self._draw_view(name)
-        self._sync_k_enabled()
-
-    def _draw_view(self, name: str) -> None:
-        """
-        Draws one view and replays the open query on it.
-
-        The query survives a graph switch whenever its target and the start node are still there —
-        searching the graph on screen is the point — while the empty view has nothing to search and
-        answers with the status line naming the missing graph.
-        """
-        self.view = name
-        self.query = None
-        self.status = None
-        self.redraw()
-        target = self.selected if self.selected is not None else self.free_query
-        if name == NONE_VIEW:
-            self.status = "no graph — pick one"
-            self._panel_text.set_text(self._panel_lines())
-            self._fig.canvas.draw_idle()
-        elif target is not None and self.entry is not None:
-            self.run_query()
-
-    def _wire_dropdown(self, combo: ttk.Combobox, choose: Callable[[str], None]) -> None:
-        """
-        Lets the arrow keys choose from an open dropdown exactly as a click would.
-
-        ttk's popdown is a Tcl-owned listbox that arrives at the first opening with its bindtags
-        emptied — not even its own path, its class or `all` — so nothing it receives reaches any
-        binding. Wiring therefore waits for the popdown to exist, restores those tags and binds
-        `KeyRelease` and `Motion` at the Tcl level: whatever entry the cursor stands on is applied
-        through `choose` and the combobox's own value follows it, so closing the popup — by click,
-        key or focus loss — keeps the selection instead of reverting it.
-        """
-        listbox = f"{combo}.popdown.f.l"
-        wired = [False]
-
-        def on_browse(*_args) -> None:
-            try:
-                if not int(combo.tk.call("winfo", "ismapped", listbox)):
-                    return
-                selected = combo.tk.call(listbox, "curselection")
-                if not selected:
-                    return
-                value = str(combo.tk.call(listbox, "get", selected[0]))
-                if value == combo.get():
-                    return
-                combo.set(value)
-                choose(value)
-            except tkinter.TclError:
-                pass
-
-        def wire() -> None:
-            if wired[0]:
-                return
-            try:
-                if not int(combo.tk.call("winfo", "exists", listbox)):
-                    return
-                widget_class = combo.tk.call("winfo", "class", listbox)
-                combo.tk.call("bind", "tags", listbox, (listbox, widget_class, "all"))
-                for sequence in ("<KeyRelease>", "<Motion>"):
-                    command = f"choose_{sequence.strip('<>')}_{id(combo)}"
-                    combo.tk.createcommand(command, on_browse)
-                    combo.tk.call("bind", listbox, sequence, command)
-                wired[0] = True
-            except tkinter.TclError:
-                return
-
-        def schedule(*_args) -> None:
-            combo.after_idle(wire)
-
-        wire()
-        combo.bind("<Button-1>", schedule, add="+")
-        combo.bind("<KeyPress>", schedule, add="+")
-
-    def _cycle_view(self) -> None:
-        """Moves to the next graph in the selector, so the views can be walked without the mouse."""
-        self._on_view(self.views[(self.views.index(self.view) + 1) % len(self.views)])
-
-    def _snap_even(self, value: int) -> int:
-        """The even degree the DEG builds with for a field value: clamped to `MIN_K`..`K_LIMIT`, odd snapped up."""
-        clamped = min(max(int(value), MIN_K), K_LIMIT)
-        return clamped if clamped % 2 == 0 else min(clamped + 1, K_LIMIT)
-
-    def _deg_k(self) -> int:
-        """The even degree the DEG is built at, snapped from the k field's current value."""
-        return self._snap_even(self.k)
-
-    def _sync_k_enabled(self) -> None:
-        """The k field drives the DEG, the knng and the NSW, so it is greyed out for every other view."""
-        if self._k_spin is not None:
-            active = self.view in (DEG_VIEW, KNNG_VIEW, NSW_VIEW)
-            # The DEG builds at an even degree, so its arrows step by 2: a step of 1 lands on an odd value
-            # that snaps back up to the same even, which leaves the down arrow inert. The knng and NSW read
-            # k raw as a neighbour count, so they keep the finer step of 1.
-            self._k_spin.configure(
-                state="normal" if active else "disabled",
-                increment=2 if self.view == DEG_VIEW else 1,
-            )
-
-    def _on_vertices(self, value: float) -> None:
-        num_points = int(value)
-        if num_points != self.num_points:
-            self.num_points = num_points
-            self._rebuild()
-
-    def _commit_vertices(self, raw: str) -> None:
-        """Reads a committed vertex count: clamped into the cloud's bounds, garbage answered by the stored value."""
-        try:
-            num_points = min(max(int(raw), MIN_POINTS), MAX_POINTS)
-        except ValueError:
-            num_points = self.num_points
-        if self._num_var is not None:
-            self._num_var.set(str(num_points))
-        self._on_vertices(num_points)
-
-    def _on_k(self, value: float) -> None:
-        """
-        Sets the k field's value and rebuilds.
-
-        While the DEG is on screen the field is snapped to the even degree it builds with, so an odd
-        value cannot sit in the field beside a graph that never uses it; the knng keeps the raw value,
-        which is its neighbour count directly. The DEG is rebuilt at the snapped degree either way.
-        """
-        value = int(value)
-        if self.view == DEG_VIEW:
-            value = self._snap_even(value)
-            if self._k_var is not None:
-                self._k_var.set(str(value))
-        if value != self.k:
-            self.k = value
-            self._rebuild()
-
-    def _commit_k(self, raw: str) -> None:
-        """Reads a committed k: clamped to the field's bounds, garbage answered by the stored value."""
-        try:
-            value = min(max(int(raw), K_MIN), K_LIMIT)
-        except ValueError:
-            value = self.k
-        if self._k_var is not None:
-            self._k_var.set(str(value))
-        self._on_k(value)
-
-    def _on_metric(self, label: str) -> None:
-        """Rebuilds under the other metric; the reference graphs follow it, being read from the same matrix."""
-        metric = METRIC_BY_LABEL[label]
-        if metric == self.metric:
-            return
-        self.metric = metric
-        self._rebuild()
-
-    def _on_search_metric(self, label: str) -> None:
-        """
-        Switches the comparator the traversal ranks its neighbours by, which needs no rebuild.
-
-        The graph keeps the edges it was built with — only the greedy step's choice of neighbour
-        changes — so an open query is re-run and redrawn while the cloud stays exactly where it was.
-        That is the point of keeping the two metrics apart: one graph, two answers.
-        """
-        metric = METRIC_BY_LABEL[label]
-        if metric == self.search_metric:
-            return
-        self.search_metric = metric
-        if self.query is not None:
-            self.run_query()
-
-    def _on_eps(self, value: float) -> None:
-        """Re-runs the current query at a new exploration factor; the graph itself is unaffected."""
-        eps = float(value)
-        if eps == self.path_eps:
-            return
-        self.path_eps = eps
-        if self.query is not None:
-            self.run_query()
-
-    def _commit_eps(self, raw: str) -> None:
-        """Reads a committed exploration factor: clamped to the field's bounds, garbage answered by the stored value."""
-        try:
-            eps = min(max(float(raw), EPS_MIN), EPS_MAX)
-        except ValueError:
-            eps = self.path_eps
-        if self._eps_var is not None:
-            self._eps_var.set(f"{eps:.2f}")
-        self._on_eps(eps)
-
-    def _on_top_k(self, value: int) -> None:
-        """Re-runs the current query with a wider result list; the graph itself is unaffected."""
-        top_k = int(value)
-        if top_k == self.top_k:
-            return
-        self.top_k = top_k
-        if self.query is not None:
-            self.run_query()
-
-    def _commit_top_k(self, raw: str) -> None:
-        """
-        Reads a committed top-k value: an integer is clamped into the bounds and stored, garbage is
-        answered by putting the stored value back into the field.
-
-        The field is free text between the arrows, so a half-typed value must not search for nothing —
-        the same contract the spinbox's own arrows enforce by only ever producing a number.
-        """
-        try:
-            top_k = min(max(int(raw), TOP_K_MIN), TOP_K_MAX)
-        except ValueError:
-            top_k = self.top_k
-        if self._top_k_var is not None:
-            self._top_k_var.set(str(top_k))
-        self._on_top_k(top_k)
-
-    def _on_check(self, _label: str) -> None:
-        self._apply_flags()
-
-    def _apply_flags(self) -> None:
-        checked = set(self._checks.get_checked_labels())
-        self.show_coords = FLAG_LABELS[0] in checked
-        self.show_edges = FLAG_LABELS[1] in checked
-        self.show_ids = FLAG_LABELS[2] in checked
-        self.show_colours = FLAG_LABELS[3] in checked
-        self.show_query = FLAG_LABELS[4] in checked
-        self._apply_coords()
-        self.redraw()
-
-    def _apply_coords(self) -> None:
-        """Turns the coordinate system — the cross through the origin, the tick labels and the spines — on or off as one overlay."""
-        for line in self._cross:
-            line.set_visible(self.show_coords)
-        self._ax.tick_params(labelbottom=self.show_coords, labelleft=self.show_coords)
-        for spine in self._ax.spines.values():
-            spine.set_visible(self.show_coords)
-
-    def _toggle_flag(self, index: int) -> None:
-        self._checks.set_active(index, not self._checks.get_status()[index])
-        self._apply_flags()
-
-    # ---------------------------------------------------------------- view
-
-    def _on_scroll(self, event: MouseEvent) -> None:
-        """Zooms towards the cursor, never further out than the initial framing."""
-        if event.inaxes is not self._ax or not event.step or self._home is None:
-            return
-        home_x0, home_x1 = self._home[0]
-        x0, x1 = self._ax.get_xlim()
-        y0, y1 = self._ax.get_ylim()
-        scale = 1.0 / (1.0 + ZOOM_FACTOR * event.step)
-        if (x1 - x0) * scale >= home_x1 - home_x0:
-            self._reset_view()
-            return
-        if (x1 - x0) * scale <= (home_x1 - home_x0) * MIN_ZOOM:
-            return
-        x, y = event.xdata, event.ydata
-        self._ax.set_xlim(x - (x - x0) * scale, x + (x1 - x) * scale)
-        self._ax.set_ylim(y - (y - y0) * scale, y + (y1 - y) * scale)
-        self._fig.canvas.draw_idle()
-
-    def _reset_view(self) -> None:
-        """Restores the framing derived from the current model."""
-        if self._home is None:
-            return
-        self._ax.set_xlim(self._home[0])
-        self._ax.set_ylim(self._home[1])
-        self._fig.canvas.draw_idle()
-
-    def _on_release(self, _event: MouseEvent) -> None:
-        self._drag = None
-
-    def _pan(self, drag: _Drag, event: MouseEvent) -> None:
-        """Shifts the framing so the cloud follows the cursor, never leaving the initial box."""
-        if event.x is None or event.y is None or self._home is None:
-            return
-        x0, x1 = drag.xlim
-        y0, y1 = drag.ylim
-        # Measured from the press snapshot, not from the previous event, so a framing the backend
-        # adjusts to keep the aspect square cannot drift the cloud away over a long drag.
-        shifted_x = x0 - (event.x - drag.x) / drag.px_per_unit_x, x1 - (event.x - drag.x) / drag.px_per_unit_x
-        shifted_y = y0 - (event.y - drag.y) / drag.px_per_unit_y, y1 - (event.y - drag.y) / drag.px_per_unit_y
-        self._ax.set_xlim(*_slide(*shifted_x, self._home[0]))
-        self._ax.set_ylim(*_slide(*shifted_y, self._home[1]))
-        self._fig.canvas.draw_idle()
-
-    # ---------------------------------------------------------------- commands
+    # ---------------------------------------------------------------- commands & lifecycle
 
     def select(self, index: int | None) -> None:
-        """Focuses a vertex — the target of the next path query — which releases any free-space query."""
+        """Focuses a vertex — the target of the next path query. It leaves any open query (and its marker) untouched."""
         if index == self.selected:
             return
         self.selected = index
-        self.free_query = None
         self.redraw()
 
     def set_free_query(self, point: np.ndarray | None) -> None:
@@ -1639,7 +1862,10 @@ class GraphViewer:
         if self.view == NONE_VIEW:
             self.query = None
             self.status = "no graph — pick one"
-            self._paint_query()
+            if self.show_3d:
+                self._redraw_3d()
+            else:
+                self._paint_query()
             self._panel_text.set_text(self._panel_lines())
             self._fig.canvas.draw_idle()
             return None
@@ -1672,79 +1898,13 @@ class GraphViewer:
                 self.status = str(error)
             else:
                 self.status = None
-        self._paint_query()
+        if self.show_3d:
+            self._redraw_3d()
+        else:
+            self._paint_query()
         self._panel_text.set_text(self._panel_lines())
         self._fig.canvas.draw_idle()
         return self.query
-
-    def _paint_legend(self) -> None:
-        """
-        Rebuilds the colour key from the report the current model carries. Switching the metric takes two
-        reference graphs and their swatches away with it, so the key cannot be built once at startup.
-        """
-        entries = legend_entries(self.model.theory)
-        self._legend = self._legend_ax.legend(
-            handles=[Line2D([], [], color=color, linewidth=2.4) for _, color in entries],
-            labels=[name for name, _ in entries],
-            frameon=False,
-            fontsize=8.5,
-            loc="center left",
-            ncol=len(entries),
-            borderpad=0.0,
-            columnspacing=2.4,
-            handlelength=1.7,
-            handletextpad=0.6,
-        )
-        self._legend.set_visible(False)
-        self._style_legend()
-
-    def _held_graphs(self) -> set[str]:
-        """The reference graphs the current report carries, all of them switched on."""
-        return set(self.model.theory.names) if self.model.theory is not None else set()
-
-    def _legend_names(self) -> tuple[str, ...]:
-        """The key's entries in the legend's own order, `DEG only` first."""
-        return tuple(name for name, _ in legend_entries(self.model.theory))
-
-    def _style_legend(self) -> None:
-        """Dims the entries that are switched off, so the key reads as the switch it now is."""
-        names = self._legend_names()
-        for position, (handle, text) in enumerate(zip(self._legend.legend_handles, self._legend.get_texts())):
-            live = position == 0 or names[position] in self.overlays
-            handle.set_alpha(1.0 if live else 0.2)
-            text.set_color("#2a2e35" if live else "#b0b5bd")
-
-    def _on_legend(self, event: MouseEvent) -> bool:
-        """
-        Consumes a click that lands on the colour key, switching that reference graph's colour.
-
-        `DEG only` is deliberately not a switch: the whole overlay already has one in the `theory
-        colours` checkbox, and a second control for the same state would only get out of step with it.
-        Switching a graph off hands its edges to the next graph in the override order that holds them,
-        which is what makes peeling the nesting apart — the tree out of the Gabriel graph out of the
-        Delaunay — something the eye can follow.
-        """
-        if event.inaxes is not self._legend_ax or not self._legend.get_visible():
-            return False
-        names = self._legend_names()
-        renderer = self._fig.canvas.get_renderer()
-        legend_bbox = self._legend_ax.get_window_extent(renderer)
-        boxes = []
-        for handle, text in zip(self._legend.legend_handles, self._legend.get_texts()):
-            hb = handle.get_window_extent(renderer)
-            tb = text.get_window_extent(renderer)
-            # Matplotlib Bbox.union takes a list of bboxes and computes their true bounding envelope
-            boxes.append(matplotlib.transforms.Bbox.union([hb, tb]))
-
-        for position, box in enumerate(boxes):
-            hit_box = box.padded(10.0)
-            hit_box.y0 = legend_bbox.y0
-            hit_box.y1 = legend_bbox.y1
-            if hit_box.contains(event.x, event.y) and position > 0:
-                self.overlays ^= {names[position]}
-                self.redraw()
-                return True
-        return True
 
     def _adopt_views(self) -> None:
         """
@@ -1796,6 +1956,7 @@ class GraphViewer:
         dropped before the repaint and only ever comes back through `run_query`.
         """
         self.model = self._build(self.preset, self.num_points, self._deg_k(), self.seed, self.metric, self.mips)
+        self._cube_3d.reset_limits()
         # The knng, the NSW and the NSG are read off the feature space, so a fresh cloud, degree or metric
         # makes the cached edge lists stale; drop them and let the next draw rebuild the one it needs.
         self._knng_edges = None

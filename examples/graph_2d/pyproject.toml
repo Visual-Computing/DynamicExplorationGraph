@@ -19,7 +19,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["main", "dataset", "deg_graph", "theory", "viewer"]
+py-modules = ["main", "dataset", "deg_graph", "theory", "viewer", "viewer_3d", "viewer_controls", "viewer_panel"]
 
 [tool.uv.sources]
 deglib = { path = "../../python", editable = true }

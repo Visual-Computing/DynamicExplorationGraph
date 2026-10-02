@@ -7,10 +7,10 @@ import matplotlib.colors
 
 matplotlib.use("Agg")
 
+import tkinter
 from dataclasses import replace
 from functools import partial
 from itertools import pairwise
-import tkinter
 from tkinter import ttk
 
 import numpy as np
@@ -35,22 +35,26 @@ from theory import (
     rng_edges,
 )
 from viewer import (
+    BG_DEFAULT,
+    BG_LIGHT,
     DEG_VIEW,
     EDGE_COLOR,
     EXACT_COLOR,
+    EXACT_FILL,
+    MARKER_EDGE,
     FLAG_START,
+    HOVER_EDGE_COLOR,
     K_LIMIT,
     KNNG_COLOR,
     KNNG_VIEW,
     NEIGHBOR_LABEL,
+    NONE_VIEW,
+    NSG_VIEW,
     NSW_COLOR,
     NSW_VIEW,
-    NSG_COLOR,
-    NSG_VIEW,
-    PANEL_STYLES,
-    NONE_VIEW,
     OVERLAP_COLORS,
     OVERLAP_ORDER,
+    PANEL_STYLES,
     PANEL_WIDTH,
     PICK_RADIUS_PX,
     TERMINAL_COLOR,
@@ -387,9 +391,16 @@ def test_describe_covers_the_built_graph(model) -> None:
 
     assert "vertices" in text and "build" in text and "4" in text
     overlap = [line for line in lines if line.startswith("∩")]
-    assert [line.split()[1] for line in overlap] == ["knng", "nsw", "delaunay", "gabriel", "rng", "mst", "mrng", "nsg"], (
-        "one line per reference, in the selector's order"
-    )
+    assert [line.split()[1] for line in overlap] == [
+        "knng",
+        "nsw",
+        "delaunay",
+        "gabriel",
+        "rng",
+        "mst",
+        "mrng",
+        "nsg",
+    ], "one line per reference, in the selector's order"
     for line, item in zip(overlap, model.theory.graphs):
         assert f"{item.edges:6d}" in line and f"{item.shared:7d}" in line, "the panel quotes the report"
 
@@ -459,7 +470,9 @@ def viewer(window: GraphViewer) -> GraphViewer:
     # back (done above), and the next `_rebuild` drops the cached knng edges so no stale list survives.
     window._knng_edges = None
     for position, wanted in enumerate(FLAG_START):
-        if window._checks.get_status()[position] != wanted:
+        checks = window._checks1 if position < 3 else window._checks2
+        local = position if position < 3 else position - 3
+        if checks.get_status()[local] != wanted:
             window._toggle_flag(position)  # through the viewer's own path, not the widget's internals
     if stale:
         window._rebuild()  # re-defaults the start node on the rebuilt model
@@ -518,8 +531,8 @@ def _empty_spot(viewer: GraphViewer) -> tuple[float, float]:
     return float(x), float(y)
 
 
-def _click_empty(viewer: GraphViewer, at: tuple[float, float], dblclick: bool = False) -> None:
-    """Left-clicks a display point far from every vertex, placing a free-space query."""
+def _click_empty(viewer: GraphViewer, at: tuple[float, float], dblclick: bool = True) -> None:
+    """Double-clicks a display point far from every vertex, placing and running a free-space query."""
     x, y = at
     viewer._on_click(MouseEvent("button_press_event", viewer._fig.canvas, x, y, button=1, dblclick=dblclick))
     viewer._on_release(MouseEvent("button_release_event", viewer._fig.canvas, x, y, button=1))
@@ -563,11 +576,13 @@ def _check_mark_visible(viewer: GraphViewer, index: int) -> bool:
     hidden only when that point's face *and* edge colour are both 'none'; a pinned edge colour — the
     bug — leaves the stroke on screen however the state reads.
     """
-    face = viewer._checks._buttons.get_facecolor()
-    edge = viewer._checks._buttons.get_edgecolor()
+    checks = viewer._checks1 if index < 3 else viewer._checks2
+    local = index if index < 3 else index - 3
+    face = checks._buttons.get_facecolor()
+    edge = checks._buttons.get_edgecolor()
     none = matplotlib.colors.to_rgba("none")
-    face = face[index] if len(face) > index else face[0]
-    edge = edge[index] if len(edge) > index else edge[0]
+    face = face[local] if len(face) > local else face[0]
+    edge = edge[local] if len(edge) > local else edge[0]
     return not (matplotlib.colors.same_color(face, none) and matplotlib.colors.same_color(edge, none))
 
 
@@ -578,10 +593,16 @@ def _click_check(viewer: GraphViewer, index: int, *, on_label: bool) -> None:
     """
     viewer._fig.canvas.draw()
     if on_label:
-        box = viewer._checks.labels[index].get_window_extent(viewer._fig.canvas.get_renderer())
+        box = (
+            (viewer._checks1 if index < 3 else viewer._checks2)
+            .labels[index if index < 3 else index - 3]
+            .get_window_extent(viewer._fig.canvas.get_renderer())
+        )
         x, y = (box.x0 + box.x1) / 2.0, (box.y0 + box.y1) / 2.0
     else:
-        x, y = viewer._check_ax.transAxes.transform(viewer._checks._buttons.get_offsets()[index])
+        checks = viewer._checks1 if index < 3 else viewer._checks2
+        ax = viewer._check_ax1 if index < 3 else viewer._check_ax2
+        x, y = ax.transAxes.transform(checks._buttons.get_offsets()[index if index < 3 else index - 3])
     canvas = viewer._fig.canvas
     canvas.callbacks.process("button_press_event", MouseEvent("button_press_event", canvas, x, y, button=1))
 
@@ -592,17 +613,32 @@ def test_viewer_starts_with_the_requested_graph(viewer: GraphViewer) -> None:
     assert viewer._edges.get_segments().__len__() == viewer.model.edges.shape[0]
 
 
-def test_viewer_selecting_a_vertex_highlights_its_fan(viewer: GraphViewer) -> None:
+def test_viewer_selecting_a_vertex_draws_only_its_ring(viewer: GraphViewer) -> None:
+    """A single-clicked target gets the blue ring and no edge highlight — the edges stay plain."""
     viewer.selected = 7
     viewer.redraw()
 
-    assert viewer._ring.get_offsets().__len__() == 1
-    assert viewer._focus.get_segments().__len__() == viewer.model.adjacency[7].size
+    assert viewer._ring.get_offsets().__len__() == 1, "the target ring is drawn"
+    assert viewer._hover_focus.get_segments().__len__() == 0, "selecting lights no edges"
     assert "TARGET   7" in viewer._panel_text.get_text()
 
     viewer.selected = None
     viewer.redraw()
-    assert viewer._focus.get_segments().__len__() == 0
+    assert viewer._ring.get_offsets().__len__() == 0, "the ring goes with the target"
+
+
+def test_viewer_hovering_a_vertex_lights_its_edges_green(viewer: GraphViewer) -> None:
+    """Hovering a vertex lights its edges in the green hover colour, reading off the drawn graph."""
+    viewer.hovered = 7
+    viewer._paint_hover_edges()
+
+    segments = viewer._hover_focus.get_segments()
+    assert len(segments) == viewer.model.adjacency[7].size, "the hovered vertex's edges light up"
+    assert matplotlib.colors.to_hex(viewer._hover_focus.get_color()) == matplotlib.colors.to_hex(HOVER_EDGE_COLOR)
+
+    viewer.hovered = None
+    viewer._paint_hover_edges()
+    assert viewer._hover_focus.get_segments().__len__() == 0, "un-hovering clears the green edges"
 
 
 def test_viewer_overlay_flags_toggle_rendering(viewer: GraphViewer) -> None:
@@ -818,7 +854,10 @@ def test_a_correct_answer_marks_the_star_in_green_and_hides_the_connector(viewer
     assert result is not None and result.walked
     assert int(result.deg_indices[0]) == result.exact == 199, "the search recovers the best match"
     np.testing.assert_allclose(
-        viewer._terminal_mark.get_facecolor()[0], matplotlib.colors.to_rgba(EXACT_COLOR), atol=1e-6
+        viewer._terminal_mark.get_facecolor()[0], matplotlib.colors.to_rgba(EXACT_FILL), atol=1e-6
+    )
+    np.testing.assert_allclose(
+        viewer._terminal_mark.get_edgecolor()[0], matplotlib.colors.to_rgba(MARKER_EDGE), atol=1e-6
     )
     np.testing.assert_allclose(viewer._terminal_mark.get_offsets()[0], viewer._exact_mark.get_offsets()[0], atol=1e-6)
     assert not viewer._connector.get_visible(), "a correct answer leaves no miss to measure"
@@ -902,8 +941,28 @@ def test_viewer_double_click_runs_the_query(viewer: GraphViewer) -> None:
 
     _click_vertex(viewer, 7, dblclick=True)
     assert viewer.query is not None, "a double-click runs the query at once"
-    assert (viewer.query.target, viewer.query.entry) == (7, 211)
+    assert viewer.free_query is not None, "the double-click sets the orange query cross on the vertex"
+    assert viewer.selected is None, "the double-click queries the point, releasing the vertex selection"
+    np.testing.assert_array_equal(viewer.free_query, viewer.model.plot_points[7], "the cross sits on the vertex")
+    assert (viewer.query.entry) == 211
     assert viewer._path.get_segments().__len__() == viewer.query.hops
+
+
+def test_a_free_query_draws_a_dashed_line_to_the_star(viewer: GraphViewer) -> None:
+    """The free query's cross is joined by a dashed line running to the star — the ground-truth best match."""
+    viewer.set_free_query(np.array([0.5, 0.5], dtype=np.float32))
+    viewer.run_query()
+    viewer.redraw()
+    star = viewer.query.exact
+
+    assert viewer._free_line.get_visible(), "the dashed tail is drawn for an open free query"
+    np.testing.assert_allclose(viewer._free_line.get_xdata(), [viewer.free_query[0], viewer.model.plot_points[star, 0]], atol=1e-6)
+    np.testing.assert_allclose(viewer._free_line.get_ydata(), [viewer.free_query[1], viewer.model.plot_points[star, 1]], atol=1e-6)
+
+    viewer.set_free_query(None)
+    viewer.redraw()
+
+    assert not viewer._free_line.get_visible(), "releasing the free query hides the tail"
 
 
 def test_clicking_empty_space_places_a_free_query(viewer: GraphViewer) -> None:
@@ -919,8 +978,11 @@ def test_clicking_empty_space_places_a_free_query(viewer: GraphViewer) -> None:
     _click_vertex(viewer, 42)
 
     assert viewer.selected == 42
-    assert viewer.free_query is None, "a vertex click takes the query back from the empty space"
-    assert viewer._free_mark.get_offsets().__len__() == 0, "and the cross goes with it"
+    assert viewer.free_query is not None, "a vertex click leaves the open query in place"
+    assert viewer._free_mark.get_offsets().__len__() == 1, "and its cross stays with the query it marks"
+
+    _click_vertex(viewer, 42)
+    assert viewer.selected is None, "clicking the selected vertex again deselects it in 2D"
 
 
 def test_the_none_view_hides_the_free_query_cross(viewer: GraphViewer) -> None:
@@ -980,11 +1042,12 @@ def test_double_click_on_empty_space_runs_the_free_query(viewer: GraphViewer) ->
     viewer._on_eps(0.5)
     spot = _empty_spot(viewer)
 
-    _click_empty(viewer, spot)
-    assert viewer.query is None, "a single click places the query but must not search"
+    _click_empty(viewer, spot, dblclick=False)
+    assert viewer.free_query is None, "a single click on empty space places nothing"
 
     _click_empty(viewer, spot, dblclick=True)
-    assert viewer.query is not None and viewer.query.target is None, "a double-click runs it at once"
+    assert viewer.free_query is not None, "a double-click places the query"
+    assert viewer.query is not None and viewer.query.target is None, "and runs it at once"
 
 
 def test_escape_clears_the_free_query(viewer: GraphViewer) -> None:
@@ -1014,7 +1077,7 @@ def test_viewer_buttons_react_to_clicks(viewer: GraphViewer) -> None:
     assert not np.array_equal(before, viewer.model.points), "the reseed button must rebuild the cloud"
 
     viewer.select(7)
-    _click(viewer, viewer._check_ax)
+    _click(viewer, viewer._check_ax1)
     assert viewer.selected == 7, "a click on a widget must not read as empty space"
 
 
@@ -1197,9 +1260,7 @@ def test_the_nsg_view_is_offered_directed_and_scored_in_the_report(viewer: Graph
     assert "of DEG" not in panel, "the NSG view states its own edge count and time, not a DEG share"
 
     drawn = {(int(u), int(v)) for u, v in viewer._display_edges()}
-    library = {
-        (int(u), int(v)) for u, v in nsg_edges(dissimilarities(viewer.model.points, viewer.metric))
-    }
+    library = {(int(u), int(v)) for u, v in nsg_edges(dissimilarities(viewer.model.points, viewer.metric))}
     assert drawn == library, "the view draws exactly the library's directed NSG edges"
 
 
@@ -1531,7 +1592,16 @@ def test_compare_counts_the_deg_edges_each_graph_shares() -> None:
 
     undirected = {tuple(sorted(edge)) for edge in scene.edges.reshape(-1, 2)}
     assert report.deg_edges == len(undirected)
-    assert tuple(item.name for item in report.graphs) == ("knng", "nsw", "delaunay", "gabriel", "rng", "mst", "mrng", "nsg")
+    assert tuple(item.name for item in report.graphs) == (
+        "knng",
+        "nsw",
+        "delaunay",
+        "gabriel",
+        "rng",
+        "mst",
+        "mrng",
+        "nsg",
+    )
     assert all(0 < item.shared <= min(report.deg_edges, item.edges) for item in report.graphs)
 
     by_name = {item.name: item for item in report.graphs}
@@ -1712,13 +1782,24 @@ def test_the_vertices_field_clamps_reverts_and_rebuilds(viewer: GraphViewer) -> 
     assert viewer.num_points == MAX_POINTS, "garbage leaves the stored value where it was"
 
 
-def test_viewer_overlay_toggles_share_one_row(viewer: GraphViewer) -> None:
-    labels = viewer._checks.labels
+def test_viewer_overlay_toggles_share_two_rows(viewer: GraphViewer) -> None:
+    labels = viewer._checks1.labels + viewer._checks2.labels
 
-    assert [label.get_text() for label in labels] == ["coords", "edges", "vertex ids", "theory colours", "query"]
-    positions = [label.get_position() for label in labels]
-    assert all(y == pytest.approx(positions[0][1]) for _, y in positions), "all toggles share a row"
-    assert [x for x, _ in positions] == sorted(x for x, _ in positions), "and run left to right"
+    assert [label.get_text() for label in labels] == [
+        "coords",
+        "edges",
+        "vertex ids",
+        "edge colors",
+        "query",
+        "light bg",
+    ]
+    row1_y = [y for _, y in (l.get_position() for l in viewer._checks1.labels)]
+    row2_y = [y for _, y in (l.get_position() for l in viewer._checks2.labels)]
+    assert all(y == pytest.approx(row1_y[0]) for y in row1_y), "row 1 shares a y"
+    assert all(y == pytest.approx(row2_y[0]) for y in row2_y), "row 2 shares a y"
+    assert [x for x, _ in (l.get_position() for l in viewer._checks1.labels)] == sorted(
+        x for x, _ in (l.get_position() for l in viewer._checks1.labels)
+    ), "row 1 runs left to right"
 
 
 def test_clicking_a_checkbox_frame_or_label_flips_it_exactly_once(viewer: GraphViewer) -> None:
@@ -1731,18 +1812,22 @@ def test_clicking_a_checkbox_frame_or_label_flips_it_exactly_once(viewer: GraphV
     flags = ("show_coords", "show_edges", "show_ids", "show_colours", "show_query")
     for on_label in (False, True):
         for index, flag in enumerate(flags):
-            start = viewer._checks.get_status()[index]
+            start = (viewer._checks1 if index < 3 else viewer._checks2).get_status()[index if index < 3 else index - 3]
             assert _check_mark_visible(viewer, index) is start, "the mark agrees with the state to begin"
 
             _click_check(viewer, index, on_label=on_label)
 
-            assert viewer._checks.get_status()[index] is not start, "the click flips the state once"
+            assert (viewer._checks1 if index < 3 else viewer._checks2).get_status()[
+                index if index < 3 else index - 3
+            ] is not start, "the click flips the state once"
             assert getattr(viewer, flag) is (not start), "and the viewer flag follows it"
             assert _check_mark_visible(viewer, index) is (not start), "the mark repaints to the new state"
 
             _click_check(viewer, index, on_label=on_label)
 
-            assert viewer._checks.get_status()[index] is start, "a second click flips it back"
+            assert (viewer._checks1 if index < 3 else viewer._checks2).get_status()[
+                index if index < 3 else index - 3
+            ] is start, "a second click flips it back"
             assert getattr(viewer, flag) is start, "and the flag returns with it"
             assert _check_mark_visible(viewer, index) is start, "and so does the mark"
 
@@ -1806,6 +1891,22 @@ def test_show_coords_survives_a_rebuild(viewer: GraphViewer) -> None:
     assert not any(line.get_visible() for line in viewer._cross), "the cross stays off across it"
     assert not viewer._ax.get_xticklabels(), "and so do the tick labels"
     assert not any(spine.get_visible() for spine in viewer._ax.spines.values()), "and the spines"
+
+
+def test_the_light_bg_checkbox_switches_the_2d_background(viewer: GraphViewer) -> None:
+    """The bottom-right 'light bg' checkbox paints the 2D plot #EFF0F1 and back to white."""
+    assert viewer.show_light_bg is False
+    assert matplotlib.colors.to_hex(viewer._ax.get_facecolor()).lower() == BG_DEFAULT.lower()
+
+    viewer._toggle_flag(5)
+
+    assert viewer.show_light_bg is True, "the flag is on"
+    assert matplotlib.colors.to_hex(viewer._ax.get_facecolor()).lower() == BG_LIGHT.lower(), "the plot turns light grey"
+
+    viewer._toggle_flag(5)
+
+    assert viewer.show_light_bg is False
+    assert matplotlib.colors.to_hex(viewer._ax.get_facecolor()).lower() == BG_DEFAULT.lower(), "and back to white"
 
 
 def test_the_query_overlay_switches_the_traversal_markers(viewer: GraphViewer) -> None:
@@ -1957,7 +2058,9 @@ def test_an_overlay_switch_survives_a_rebuild(viewer: GraphViewer) -> None:
 
     viewer._on_metric("IP")
 
-    assert viewer.overlays == {"mst", "mrng", "nsg", "knng", "nsw"}, "the graphs that were on stay on, the hidden one stays off"
+    assert viewer.overlays == {"mst", "mrng", "nsg", "knng", "nsw"}, (
+        "the graphs that were on stay on, the hidden one stays off"
+    )
     assert viewer._legend_names() == ("DEG only", "rng", "mrng", "mst"), "and the key names exactly those"
 
     viewer._on_metric("L2")
@@ -1985,7 +2088,7 @@ def test_the_key_table_is_the_only_binding_table(viewer: GraphViewer) -> None:
     The control sheet and the key handler read one table, so a key the sheet lists cannot be dead — the
     one thing a help window gets wrong without anyone noticing.
     """
-    assert set(viewer._bindings) == {"r", "v", "g", "e", "i", "c", "q", "0", "escape", "h"}
+    assert set(viewer._bindings) == {"r", "v", "g", "e", "i", "c", "q", "3", "0", "escape", "h"}
     assert all(callable(action) for _, _, action in viewer._bindings.values())
     assert all(label and meaning for label, meaning, _ in viewer._bindings.values())
 
@@ -2048,7 +2151,7 @@ def test_panel_text_stays_inside_its_area(viewer: GraphViewer) -> None:
 
     text = viewer._panel_text.get_window_extent(renderer)
     panel = viewer._panel.get_window_extent(renderer)
-    below = viewer._check_ax.get_window_extent(renderer)
+    below = viewer._check_ax1.get_window_extent(renderer)
 
     assert "∩ delaunay" in viewer._panel_text.get_text(), "the fullest panel is the one that must fit"
     assert text.y1 <= panel.y1 + 1.0, "the panel starts inside its area"
@@ -2069,7 +2172,7 @@ def test_panel_fits_at_the_widget_caps(viewer: GraphViewer) -> None:
 
     text = viewer._panel_text.get_window_extent(renderer)
     panel = viewer._panel.get_window_extent(renderer)
-    below = viewer._check_ax.get_window_extent(renderer)
+    below = viewer._check_ax1.get_window_extent(renderer)
 
     body = viewer._panel_text.get_text()
     assert f"{MAX_POINTS} vertices · k={K_LIMIT}" in body, "the heading names the DEG's own shape"
@@ -2259,17 +2362,18 @@ def test_the_view_selector_draws_what_it_names_and_refuses_the_rest(viewer: Grap
     assert viewer.view == "rng", "re-choosing the drawn graph changes nothing"
 
 
-def test_the_focus_highlight_follows_the_drawn_graph(viewer: GraphViewer) -> None:
-    viewer.select(42)
+def test_the_hover_highlight_follows_the_drawn_graph(viewer: GraphViewer) -> None:
+    viewer.hovered = 42
+    viewer._paint_hover_edges()
 
-    assert len(viewer._focus.get_segments()) == viewer.model.k, "the DEG view lights all k edges of the vertex"
+    assert len(viewer._hover_focus.get_segments()) == viewer.model.k, "the DEG view lights all k edges of the vertex"
 
     viewer._on_view("mst")
 
     tree = viewer.model.theory.edges_of("mst", viewer.model.num_points)
     degree = int(np.count_nonzero((tree[:, 0] == 42) | (tree[:, 1] == 42)))
     assert degree < viewer.model.k, "a spanning tree cannot reach the degree of a k-regular graph"
-    assert len(viewer._focus.get_segments()) == degree, "the tree view lights only the edges the tree really has"
+    assert len(viewer._hover_focus.get_segments()) == degree, "the tree view lights only the edges the tree really has"
 
 
 def test_the_view_key_walks_the_selector_and_wraps(viewer: GraphViewer) -> None:
@@ -2300,7 +2404,8 @@ def test_viewer_groups_the_controls_below_the_panel(viewer: GraphViewer) -> None
     panel = viewer._panel.get_window_extent(renderer)
 
     rows = (
-        ("overlay", viewer._check_ax),
+        ("overlay", viewer._check_ax1),
+        ("overlay2", viewer._check_ax2),
         ("reseed", viewer._reseed_ax),
     )
     boxes = [(name, ax.get_window_extent(renderer)) for name, ax in rows]
@@ -2455,8 +2560,14 @@ def mips_viewer(mips_window: GraphViewer) -> GraphViewer:
     mips_window._held_seen = set(mips_window.overlays)
     mips_window._knng_edges = None
     for position, wanted in enumerate(FLAG_START):
-        if mips_window._checks.get_status()[position] != wanted:
+        checks = mips_window._checks1 if position < 3 else mips_window._checks2
+        local = position if position < 3 else position - 3
+        if checks.get_status()[local] != wanted:
             mips_window._toggle_flag(position)
+    if mips_window.show_3d:
+        mips_window.show_3d = False
+        mips_window._set_3d_visible(False)
+    mips_window._cube_3d.reset_limits()
     if stale:
         mips_window._rebuild()
     else:

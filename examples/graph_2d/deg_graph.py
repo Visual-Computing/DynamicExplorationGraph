@@ -11,7 +11,7 @@ from deglib.builder import OptimizationTarget, build_from_data
 from deglib.distances import FloatSpace, Metric
 from deglib.optimization import mips_l2_transform_query
 from pysearch import epsilon_search
-from theory import TheoryReport, compare, dissimilarities, knng_edges, nsw_edges
+from theory import TheoryReport, compare, knng_edges, nsw_edges
 
 __all__ = [
     "DEFAULT_K",

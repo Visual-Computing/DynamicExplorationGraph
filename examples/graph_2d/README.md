@@ -103,7 +103,7 @@ construction cost in milliseconds.
 The colour key under the plot is itself a control: clicking an entry withdraws that reference graph's colour
 and the edges it claimed fall through to the next graph holding them, which is how the nesting gets peeled
 apart one layer at a time. `DEG only` names the remainder and is deliberately not a switch — the
-`theory colours` checkbox owns that flag on its own.
+`edge colors` checkbox owns that flag on its own.
 
 | Action | Key |
 |---|---|
@@ -112,7 +112,7 @@ apart one layer at a time. `DEG only` names the remainder and is deliberately no
 | Release the selection or the start node | `Esc` |
 | Next graph | `v` |
 | New sample from the same distribution | `r` |
-| Overlays: coordinate cross, edges, vertex ids, theory colours, query markers | `g` / `e` / `i` / `c` / `q` |
+| Overlays: coordinate cross, edges, vertex ids, edge colors, query markers | `g` / `e` / `i` / `c` / `q` |
 | Zoom at the cursor / pan by dragging / restore the framing | scroll / drag / `0` |
 | Control sheet | `h` or `?` |
 

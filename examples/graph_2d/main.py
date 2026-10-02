@@ -50,9 +50,7 @@ def build_scene(
     """
     points, groups = make_points(preset, num_points, seed)
     features = mips_l2_transform(points)[0] if mips else points
-    return build_model(
-        features, groups, k=k, seed=seed, threads=threads, metric=metric, plot_points=points, mips=mips
-    )
+    return build_model(features, groups, k=k, seed=seed, threads=threads, metric=metric, plot_points=points, mips=mips)
 
 
 def main() -> None:
