@@ -89,7 +89,7 @@ class DEG(BaseANN):
         metric: str,
         k: int = 30,
         opt_target: str = "LowLID",
-        prune_non_rng: bool = False,
+        prune_non_mrng: bool = False,
         threads: int = 1,
     ):
         self.metric = metric.lower().strip()
@@ -98,7 +98,7 @@ class DEG(BaseANN):
 
         self.k = int(k)
         self.opt_target = opt_target
-        self.prune_non_rng = bool(prune_non_rng)
+        self.prune_non_mrng = bool(prune_non_mrng)
         self.threads = int(threads)
         self.eps_or_ef = 0.1
         self.metric_enum = _METRIC_MAP[self.metric][0]
@@ -124,7 +124,7 @@ class DEG(BaseANN):
 
         if cache_file.exists():
             print(f"Loading cached DEG graph from {cache_file}...", flush=True)
-            load_fn = deglib.load_mutable_graph if self.prune_non_rng else deglib.load_readonly_graph
+            load_fn = deglib.load_mutable_graph if self.prune_non_mrng else deglib.load_readonly_graph
             graph = load_fn(str(cache_file))
         else:
             # 1. FLAS 1D Pre-sorting
@@ -153,8 +153,8 @@ class DEG(BaseANN):
             graph.save_graph(str(cache_file))
 
         # 3. Optional MRNG edge pruning
-        if self.prune_non_rng:
-            deglib.optimization.prune_non_rng_edges(graph, num_threads=1)
+        if self.prune_non_mrng:
+            deglib.optimization.prune_non_mrng_edges(graph, num_threads=1)
 
         self.graph = graph.to_readonly() if graph.is_mutable() else graph
         self.searcher = deglib.search.create_searcher(graph=self.graph)
@@ -183,8 +183,8 @@ class DEG(BaseANN):
 
     def __str__(self) -> str:
         if self.eps_or_ef >= 1.0:
-            return f"DEG(k={self.k}, opt={self.opt_target}, prune_rng={self.prune_non_rng}, ef={int(round(self.eps_or_ef))})"
-        return f"DEG(k={self.k}, opt={self.opt_target}, prune_rng={self.prune_non_rng}, eps={self.eps_or_ef})"
+            return f"DEG(k={self.k}, opt={self.opt_target}, prune_mrng={self.prune_non_mrng}, ef={int(round(self.eps_or_ef))})"
+        return f"DEG(k={self.k}, opt={self.opt_target}, prune_mrng={self.prune_non_mrng}, eps={self.eps_or_ef})"
 
 
 class QG(BaseANN):
@@ -197,7 +197,7 @@ class QG(BaseANN):
         metric: str,
         k: int = 30,
         opt_target: str = "LowLID",
-        prune_non_rng: bool = False,
+        prune_non_mrng: bool = False,
         threads: int = 1,
     ):
         self.metric = metric.lower().strip()
@@ -206,7 +206,7 @@ class QG(BaseANN):
 
         self.k = int(k)
         self.opt_target = opt_target
-        self.prune_non_rng = bool(prune_non_rng)
+        self.prune_non_mrng = bool(prune_non_mrng)
         self.threads = int(threads)
         self.rerank_size_factor = 1.0
         self.search_eps = 0.0
@@ -242,7 +242,7 @@ class QG(BaseANN):
 
         if cache_file.exists():
             print(f"Loading cached DEG graph from {cache_file}...", flush=True)
-            load_fn = deglib.load_mutable_graph if self.prune_non_rng else deglib.load_readonly_graph
+            load_fn = deglib.load_mutable_graph if self.prune_non_mrng else deglib.load_readonly_graph
             loaded_graph = load_fn(str(cache_file))
         else:
             # 1. FLAS 1D Pre-sorting
@@ -272,8 +272,8 @@ class QG(BaseANN):
             loaded_graph = graph
 
         # 3. Optional MRNG edge pruning
-        if self.prune_non_rng:
-            deglib.optimization.prune_non_rng_edges(loaded_graph, num_threads=1)
+        if self.prune_non_mrng:
+            deglib.optimization.prune_non_mrng_edges(loaded_graph, num_threads=1)
 
         # 4. Finalize ReadOnlyGraph with INT8 features using calibrated ScalarQuantizer
         self.quantizer = deglib.optimization.make_scalar_quantizer_int8(X)
@@ -316,11 +316,11 @@ class QG(BaseANN):
     def __str__(self) -> str:
         if self.eps_or_ef >= 1.0:
             return (
-                f"DEG-QG(k={self.k}, opt={self.opt_target}, prune_rng={self.prune_non_rng}, "
+                f"DEG-QG(k={self.k}, opt={self.opt_target}, prune_mrng={self.prune_non_mrng}, "
                 f"rerank_factor={self.rerank_size_factor}, ef={int(round(self.eps_or_ef))})"
             )
         return (
-            f"DEG-QG(k={self.k}, opt={self.opt_target}, prune_rng={self.prune_non_rng}, "
+            f"DEG-QG(k={self.k}, opt={self.opt_target}, prune_mrng={self.prune_non_mrng}, "
             f"rerank_factor={self.rerank_size_factor}, eps={self.eps_or_ef})"
         )
 

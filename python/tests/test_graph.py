@@ -196,9 +196,9 @@ def test_search_eps_or_ef(conf: Configuration):
 
 @pytest.mark.parametrize("conf", mutable_configurations)
 
-def test_prune_non_rng_edges(conf: Configuration):
+def test_prune_non_mrng_edges(conf: Configuration):
     graph = conf.create_new_size_bounded_graph()
-    deglib.optimization.prune_non_rng_edges(graph)
+    deglib.optimization.prune_non_mrng_edges(graph)
 
 
 @pytest.mark.parametrize("conf", configurations)

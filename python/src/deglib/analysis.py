@@ -6,7 +6,7 @@ from deglib_cpp import (
     check_graph_weights as check_graph_weights_cpp,
     check_graph_regularity as check_graph_regularity_cpp,
     check_graph_connectivity as check_graph_connectivity_cpp,
-    calc_non_rng_edges as calc_non_rng_edges_cpp,
+    calc_non_mrng_edges as calc_non_mrng_edges_cpp,
     calc_search_reachability as calc_search_reachability_cpp,
     calc_exploration_reach as calc_exploration_reach_cpp,
     analyze_graph as analyze_graph_cpp,
@@ -76,14 +76,14 @@ def check_graph_connectivity(graph: DynamicExplorationGraph) -> bool:
     return check_graph_connectivity_cpp(graph.dynamic_exploration_graph_cpp)
 
 
-def calc_non_rng_edges(graph: DynamicExplorationGraph) -> int:
+def calc_non_mrng_edges(graph: DynamicExplorationGraph) -> int:
     """
-    Count the number of edges in the graph that violate the Relative Neighborhood Graph (RNG) rule.
+    Count the number of edges in the graph that violate the Monotonic Relative Neighborhood Graph (MRNG) rule.
 
     :param graph: The graph to analyze.
-    :return: Total number of non-RNG edges.
+    :return: Total number of non-MRNG edges.
     """
-    return calc_non_rng_edges_cpp(graph.dynamic_exploration_graph_cpp)
+    return calc_non_mrng_edges_cpp(graph.dynamic_exploration_graph_cpp)
 
 
 def calc_search_reachability(graph: DynamicExplorationGraph) -> float:

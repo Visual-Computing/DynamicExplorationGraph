@@ -149,11 +149,11 @@ static auto check_graph_weights(const deglib::graph::MutableGraph& graph) {
 }
 
 /**
- * Is the vertex_index a RNG conform neighbor if it gets connected to target_index?
+ * Is the vertex_index a MRNG conform neighbor if it gets connected to target_index?
  *
  * Does vertex_index has a neighbor which is connected to the target_index and has a lower weight?
  */
-static auto checkRNG(
+static auto checkMRNG(
     const deglib::graph::MutableGraph& graph,
     const uint32_t edges_per_vertex,
     const uint32_t vertex_index,
@@ -171,32 +171,32 @@ static auto checkRNG(
     return true;
 }
 
-static uint32_t calc_non_rng_edges(const deglib::graph::MutableGraph& graph) {
+static uint32_t calc_non_mrng_edges(const deglib::graph::MutableGraph& graph) {
     const auto vertex_count = graph.size();
     const auto edge_per_vertex = graph.getEdgesPerVertex();
 
     const auto thread_count = std::thread::hardware_concurrency();
-    auto removed_rng_edges_per_thread = std::vector<uint32_t>(thread_count);
+    auto removed_mrng_edges_per_thread = std::vector<uint32_t>(thread_count);
     deglib::concurrent::parallel_for(0, vertex_count, thread_count, [&](size_t vertex_index, size_t thread_id) {
-        uint32_t removed_rng_edges = 0;
+        uint32_t removed_mrng_edges = 0;
         const auto neighbor_indices = graph.getNeighborIndices(vertex_index);
         const auto neighbor_weights = graph.getNeighborWeights(vertex_index);
 
-        // find all none rng conform neighbors
+        // find all none mrng conform neighbors
         for (uint32_t n = 0; n < edge_per_vertex; n++) {
             const auto neighbor_index = neighbor_indices[n];
             const auto neighbor_weight = neighbor_weights[n];
 
-            if (checkRNG(graph, edge_per_vertex, vertex_index, neighbor_index, neighbor_weight) == false) removed_rng_edges++;
+            if (checkMRNG(graph, edge_per_vertex, vertex_index, neighbor_index, neighbor_weight) == false) removed_mrng_edges++;
         }
-        removed_rng_edges_per_thread[thread_id] += removed_rng_edges;
+        removed_mrng_edges_per_thread[thread_id] += removed_mrng_edges;
     });
 
     // aggregate
-    uint32_t removed_rng_edges = 0;
-    for (uint32_t i = 0; i < thread_count; i++) removed_rng_edges += removed_rng_edges_per_thread[i];
+    uint32_t removed_mrng_edges = 0;
+    for (uint32_t i = 0; i < thread_count; i++) removed_mrng_edges += removed_mrng_edges_per_thread[i];
 
-    return removed_rng_edges;
+    return removed_mrng_edges;
 }
 
 /**

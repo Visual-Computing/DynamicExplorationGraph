@@ -68,58 +68,58 @@ inline void prune_worst_edges(deglib::graph::MutableGraph& graph, const uint8_t 
 }
 
 /**
- * @brief Remove all edges that do not satisfy the RNG condition.
+ * @brief Remove all edges that do not satisfy the MRNG condition.
  *
  * Iterates over all vertices and their neighbors, removing any edge that does
- * not satisfy the RNG condition. Each vertex is processed in parallel via
+ * not satisfy the MRNG condition. Each vertex is processed in parallel via
  * parallel_for; non-conforming edges are replaced with self-loops.
  *
  * @param graph Reference to the MutableGraph to be processed.
  * @param numThreads Number of threads to use (0 = use hardware concurrency).
  * @return Number of edges removed.
  */
-inline uint32_t prune_non_rng_edges(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
+inline uint32_t prune_non_mrng_edges(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
     const auto vertex_count = graph.size();
     const auto edge_per_vertex = graph.getEdgesPerVertex();
     const auto thread_count = numThreads == 0 ? std::thread::hardware_concurrency() : numThreads;
 
-    auto removed_rng_edges_per_thread = std::vector<uint32_t>(thread_count);
+    auto removed_mrng_edges_per_thread = std::vector<uint32_t>(thread_count);
     deglib::concurrent::parallel_for(0, vertex_count, thread_count, [&](size_t vertex_index, size_t thread_id) {
-        uint32_t removed_rng_edges = 0;
+        uint32_t removed_mrng_edges = 0;
         const auto u = static_cast<uint32_t>(vertex_index);
 
         const auto neighbor_indices = graph.getNeighborIndices(u);
         const auto neighbor_weights = graph.getNeighborWeights(u);
 
-        // find all none rng conform neighbors
+        // find all none mrng conform neighbors
         std::vector<uint32_t> remove_neighbor_ids;
         for (uint32_t n = 0; n < edge_per_vertex; n++) {
             const auto neighbor_index = neighbor_indices[n];
             const auto neighbor_weight = neighbor_weights[n];
 
-            if (deglib::analysis::checkRNG(graph, edge_per_vertex, u, neighbor_index, neighbor_weight) == false) {
+            if (deglib::analysis::checkMRNG(graph, edge_per_vertex, u, neighbor_index, neighbor_weight) == false) {
                 remove_neighbor_ids.emplace_back(neighbor_index);
             }
         }
 
         for (uint32_t n = 0; n < remove_neighbor_ids.size(); n++) {
             graph.changeEdge(u, remove_neighbor_ids[n], u, 0);
-            removed_rng_edges++;
+            removed_mrng_edges++;
         }
-        removed_rng_edges_per_thread[thread_id] += removed_rng_edges;
+        removed_mrng_edges_per_thread[thread_id] += removed_mrng_edges;
     });
 
     // aggregate
-    uint32_t removed_rng_edges = 0;
-    for (uint32_t i = 0; i < thread_count; i++) removed_rng_edges += removed_rng_edges_per_thread[i];
+    uint32_t removed_mrng_edges = 0;
+    for (uint32_t i = 0; i < thread_count; i++) removed_mrng_edges += removed_mrng_edges_per_thread[i];
 
-    return removed_rng_edges;
+    return removed_mrng_edges;
 }
 
 /**
- * @brief Remove non-RNG edges using a weight-sorted global strategy.
+ * @brief Remove non-MRNG edges using a weight-sorted global strategy.
  *
- * Collects all non-RNG edges across the graph, sorts them by weight (ascending),
+ * Collects all non-MRNG edges across the graph, sorts them by weight (ascending),
  * then removes them in that order. This allows lower-weight (more important) edges
  * to be considered first, potentially preserving better graph connectivity.
  * Collection is multi-threaded; removal is single-threaded.
@@ -128,7 +128,7 @@ inline uint32_t prune_non_rng_edges(deglib::graph::MutableGraph& graph, const si
  * @param numThreads Number of threads to use for collection (0 = use hardware concurrency).
  * @return Number of edges removed.
  */
-inline uint32_t prune_non_rng_edges_weight_sorted(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
+inline uint32_t prune_non_mrng_edges_weight_sorted(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
     struct WeightedEdge {
         uint32_t from_vertex;
         uint32_t to_vertex;
@@ -139,8 +139,8 @@ inline uint32_t prune_non_rng_edges_weight_sorted(deglib::graph::MutableGraph& g
     const auto edge_per_vertex = graph.getEdgesPerVertex();
     const auto thread_count = numThreads == 0 ? std::thread::hardware_concurrency() : numThreads;
 
-    // Collect all non-RNG edges (multi-threaded, per-thread buffers to avoid data races)
-    std::vector<std::vector<WeightedEdge>> non_rng_edges_per_thread(thread_count);
+    // Collect all non-MRNG edges (multi-threaded, per-thread buffers to avoid data races)
+    std::vector<std::vector<WeightedEdge>> non_mrng_edges_per_thread(thread_count);
     deglib::concurrent::parallel_for(0, vertex_count, thread_count, [&](size_t vertex_index, size_t thread_id) {
         const auto u = static_cast<uint32_t>(vertex_index);
         const auto neighbor_indices = graph.getNeighborIndices(u);
@@ -149,54 +149,54 @@ inline uint32_t prune_non_rng_edges_weight_sorted(deglib::graph::MutableGraph& g
         for (uint32_t n = 0; n < edge_per_vertex; n++) {
             const auto neighbor_index = neighbor_indices[n];
             const auto neighbor_weight = neighbor_weights[n];
-            if (deglib::analysis::checkRNG(graph, edge_per_vertex, u, neighbor_index, neighbor_weight) == false) {
-                non_rng_edges_per_thread[thread_id].push_back({u, neighbor_index, neighbor_weight});
+            if (deglib::analysis::checkMRNG(graph, edge_per_vertex, u, neighbor_index, neighbor_weight) == false) {
+                non_mrng_edges_per_thread[thread_id].push_back({u, neighbor_index, neighbor_weight});
             }
         }
     });
 
     // Merge per-thread results
-    std::vector<WeightedEdge> non_rng_edges;
+    std::vector<WeightedEdge> non_mrng_edges;
     for (size_t i = 0; i < thread_count; i++) {
-        non_rng_edges.insert(non_rng_edges.end(), non_rng_edges_per_thread[i].begin(), non_rng_edges_per_thread[i].end());
+        non_mrng_edges.insert(non_mrng_edges.end(), non_mrng_edges_per_thread[i].begin(), non_mrng_edges_per_thread[i].end());
     }
 
     // Sort by weight ascending
-    std::sort(non_rng_edges.begin(), non_rng_edges.end(), [](const auto& x, const auto& y) { return x.weight < y.weight; });
+    std::sort(non_mrng_edges.begin(), non_mrng_edges.end(), [](const auto& x, const auto& y) { return x.weight < y.weight; });
 
-    // Remove edges that are still non-RNG (single-threaded)
-    size_t removed_rng_edges = 0;
-    for (size_t i = 0; i < non_rng_edges.size(); i++) {
-        const auto& edge = non_rng_edges[i];
-        if (deglib::analysis::checkRNG(graph, edge_per_vertex, edge.from_vertex, edge.to_vertex, edge.weight) == false) {
+    // Remove edges that are still non-MRNG (single-threaded)
+    size_t removed_mrng_edges = 0;
+    for (size_t i = 0; i < non_mrng_edges.size(); i++) {
+        const auto& edge = non_mrng_edges[i];
+        if (deglib::analysis::checkMRNG(graph, edge_per_vertex, edge.from_vertex, edge.to_vertex, edge.weight) == false) {
             graph.changeEdge(edge.from_vertex, edge.to_vertex, edge.from_vertex, 0);
-            removed_rng_edges++;
+            removed_mrng_edges++;
         }
     }
 
-    return static_cast<uint32_t>(removed_rng_edges);
+    return static_cast<uint32_t>(removed_mrng_edges);
 }
 
 /**
- * @brief Remove non-RNG edges using an iterative per-vertex strategy.
+ * @brief Remove non-MRNG edges using an iterative per-vertex strategy.
  *
- * For each vertex, iteratively removes non-RNG edges in a do-while loop until
+ * For each vertex, iteratively removes non-MRNG edges in a do-while loop until
  * no more edges can be removed. This accounts for cascading effects where
- * removing one edge may make another edge RNG-conform (or vice versa).
+ * removing one edge may make another edge MRNG-conform (or vice versa).
  * Multi-threaded per vertex.
  *
  * @param graph Reference to the MutableGraph to be processed.
  * @param numThreads Number of threads to use (0 = use hardware concurrency).
  * @return Number of edges removed.
  */
-inline uint32_t prune_non_rng_edges_iterative(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
+inline uint32_t prune_non_mrng_edges_iterative(deglib::graph::MutableGraph& graph, const size_t numThreads = 0) {
     const auto vertex_count = graph.size();
     const auto edge_per_vertex = graph.getEdgesPerVertex();
     const auto thread_count = numThreads == 0 ? std::thread::hardware_concurrency() : numThreads;
 
-    auto removed_rng_edges_per_thread = std::vector<uint32_t>(thread_count);
+    auto removed_mrng_edges_per_thread = std::vector<uint32_t>(thread_count);
     deglib::concurrent::parallel_for(0, vertex_count, thread_count, [&](size_t vertex_index, size_t thread_id) {
-        uint32_t removed_rng_edges = 0;
+        uint32_t removed_mrng_edges = 0;
         const auto vertex_index_u32 = static_cast<uint32_t>(vertex_index);
 
         // Sort neighbors by their weight (highest to lowest)
@@ -210,40 +210,40 @@ inline uint32_t prune_non_rng_edges_iterative(deglib::graph::MutableGraph& graph
             std::sort(neighbors.begin(), neighbors.end(), [](const auto& x, const auto& y) { return x.second < y.second; });
         }
 
-        // Find all non-RNG conform neighbors (indices into the sorted neighbors vector)
-        std::vector<uint32_t> non_rng_edges;
+        // Find all non-MRNG conform neighbors (indices into the sorted neighbors vector)
+        std::vector<uint32_t> non_mrng_edges;
         for (uint32_t n = 0; n < neighbors.size(); n++) {
             const auto neighbor_index = neighbors[n].first;
             const auto neighbor_weight = neighbors[n].second;
-            if (deglib::analysis::checkRNG(graph, edge_per_vertex, vertex_index_u32, neighbor_index, neighbor_weight) == false) non_rng_edges.emplace_back(n);
+            if (deglib::analysis::checkMRNG(graph, edge_per_vertex, vertex_index_u32, neighbor_index, neighbor_weight) == false) non_mrng_edges.emplace_back(n);
         }
 
         // Iteratively remove edges until stable
         bool removed_edge = false;
         do {
             removed_edge = false;
-            for (uint32_t n = 0; n < non_rng_edges.size(); n++) {
-                const auto neighbor_index = neighbors[non_rng_edges[n]].first;
-                const auto neighbor_weight = neighbors[non_rng_edges[n]].second;
+            for (uint32_t n = 0; n < non_mrng_edges.size(); n++) {
+                const auto neighbor_index = neighbors[non_mrng_edges[n]].first;
+                const auto neighbor_weight = neighbors[non_mrng_edges[n]].second;
 
-                if (deglib::analysis::checkRNG(graph, edge_per_vertex, vertex_index_u32, neighbor_index, neighbor_weight) == false) {
-                    non_rng_edges.erase(non_rng_edges.begin() + n);
+                if (deglib::analysis::checkMRNG(graph, edge_per_vertex, vertex_index_u32, neighbor_index, neighbor_weight) == false) {
+                    non_mrng_edges.erase(non_mrng_edges.begin() + n);
                     graph.changeEdge(vertex_index_u32, neighbor_index, vertex_index_u32, 0);
-                    removed_rng_edges++;
+                    removed_mrng_edges++;
                     removed_edge = true;
                     break;
                 }
             }
         } while (removed_edge);
 
-        removed_rng_edges_per_thread[thread_id] += removed_rng_edges;
+        removed_mrng_edges_per_thread[thread_id] += removed_mrng_edges;
     });
 
     // Aggregate
-    uint32_t removed_rng_edges = 0;
-    for (uint32_t i = 0; i < thread_count; i++) removed_rng_edges += removed_rng_edges_per_thread[i];
+    uint32_t removed_mrng_edges = 0;
+    for (uint32_t i = 0; i < thread_count; i++) removed_mrng_edges += removed_mrng_edges_per_thread[i];
 
-    return removed_rng_edges;
+    return removed_mrng_edges;
 }
 
 }  // namespace deglib::optimization::pruning

@@ -1089,11 +1089,11 @@ bool check_graph_weights_wrapper(const deglib::DynamicExplorationGraph& graph) {
     return deglib::analysis::check_graph_weights(static_cast<const deglib::graph::MutableGraph&>(graph.internal()));
 }
 
-uint32_t calc_non_rng_edges_wrapper(const deglib::DynamicExplorationGraph& graph) {
+uint32_t calc_non_mrng_edges_wrapper(const deglib::DynamicExplorationGraph& graph) {
     if (!graph.isMutable()) {
-        throw std::runtime_error("Graph must be mutable for calc_non_rng_edges");
+        throw std::runtime_error("Graph must be mutable for calc_non_mrng_edges");
     }
-    return deglib::analysis::calc_non_rng_edges(static_cast<const deglib::graph::MutableGraph&>(graph.internal()));
+    return deglib::analysis::calc_non_mrng_edges(static_cast<const deglib::graph::MutableGraph&>(graph.internal()));
 }
 
 bool check_graph_regularity_wrapper(const deglib::DynamicExplorationGraph& graph, const uint32_t expected_vertices, const bool check_back_link) {
@@ -1774,7 +1774,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
     m.def("check_graph_weights", &check_graph_weights_wrapper, py::arg("graph"));
     m.def("check_graph_regularity", &check_graph_regularity_wrapper, py::arg("graph"), py::arg("expected_vertices"), py::arg("check_back_link") = false);
     m.def("check_graph_connectivity", &check_graph_connectivity_wrapper, py::arg("graph"));
-    m.def("calc_non_rng_edges", &calc_non_rng_edges_wrapper, py::arg("graph"));
+    m.def("calc_non_mrng_edges", &calc_non_mrng_edges_wrapper, py::arg("graph"));
     m.def("calc_search_reachability", &calc_search_reachability_wrapper, py::arg("graph"));
     m.def("calc_exploration_reach", &calc_exploration_reach_wrapper, py::arg("graph"));
     py::class_<deglib::analysis::GraphStats>(m, "GraphStats")
@@ -1794,12 +1794,12 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def_readonly("memory_bytes", &deglib::analysis::GraphStats::memory_bytes);
     m.def("analyze_graph", &analyze_graph_wrapper, py::arg("graph"));
     m.def(
-        "prune_non_rng_edges",
+        "prune_non_mrng_edges",
         [](deglib::DynamicExplorationGraph& graph, const size_t num_threads) {
             if (!graph.isMutable()) {
-                throw std::runtime_error("Graph must be mutable to prune non-rng edges");
+                throw std::runtime_error("Graph must be mutable to prune non-mrng edges");
             }
-            return deglib::optimization::prune_non_rng_edges(static_cast<deglib::graph::MutableGraph&>(graph.internal()), num_threads);
+            return deglib::optimization::prune_non_mrng_edges(static_cast<deglib::graph::MutableGraph&>(graph.internal()), num_threads);
         },
         py::arg("graph"), py::arg("num_threads") = 0
     );

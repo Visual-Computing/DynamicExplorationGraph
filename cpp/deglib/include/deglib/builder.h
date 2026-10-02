@@ -214,10 +214,10 @@ class EvenRegularGraphBuilder {
     const uint8_t extend_k_;  // k value for extending the graph
     const float extend_eps_;  // eps value for extending the graph
 
-    const uint8_t improve_k_;               // k value for improving the graph
-    const float improve_eps_;               // eps value for improving the graph
-    const uint8_t max_path_length_;         // max amount of changes before canceling an improvement try
-    const uint32_t improve_tries_;          // number of improvement attempts per build step
+    const uint8_t improve_k_;        // k value for improving the graph
+    const float improve_eps_;        // eps value for improving the graph
+    const uint8_t max_path_length_;  // max amount of changes before canceling an improvement try
+    const uint32_t improve_tries_;   // number of improvement attempts per build step
 
     std::mt19937& rnd_;                   // Reference to a random number generator used for randomized operations
     deglib::graph::MutableGraph& graph_;  // Reference to the mutable graph being built and optimized
@@ -524,8 +524,8 @@ class EvenRegularGraphBuilder {
         // add an empty vertex to the graph (no neighbor information yet)
         const auto internal_index = graph.addVertex(external_label, new_vertex_feature);
 
-        // adding neighbors happens in two phases, the first tries to retain RNG, the second adds them without checking
-        bool check_rng_phase = true;  // true = activated, false = deactived
+        // adding neighbors happens in two phases, the first tries to retain MRNG, the second adds them without checking
+        bool check_mrng_phase = true;  // true = activated, false = deactived
 
         // list of potential isolates vertices
         auto isolated_vertices = std::vector<uint32_t>();
@@ -543,7 +543,7 @@ class EvenRegularGraphBuilder {
                 if (graph.hasEdge(candidate_index, internal_index)) continue;
 
                 // does the candidate has a neighbor which is connected to the new vertex and has a lower distance?
-                if (check_rng_phase && deglib::analysis::checkRNG(graph, edges_per_vertex, candidate_index, internal_index, candidate_weight) == false)
+                if (check_mrng_phase && deglib::analysis::checkMRNG(graph, edges_per_vertex, candidate_index, internal_index, candidate_weight) == false)
                     continue;
 
                 // the vertex is already missing an edge (one of its longer edges was removed during a previous iteration),
@@ -595,7 +595,7 @@ class EvenRegularGraphBuilder {
                 isolated_vertices.emplace_back(new_neighbor_index);
             }
 
-            check_rng_phase = false;
+            check_mrng_phase = false;
         }
 
         // get all vertices which are missing an edge
@@ -661,8 +661,8 @@ class EvenRegularGraphBuilder {
                 std::abort();
             }
 
-            // adding neighbors happens in two phases, the first tries to retain RNG, the second adds them without checking
-            bool check_rng_phase = true;  // true = activated, false = deactived
+            // adding neighbors happens in two phases, the first tries to retain MRNG, the second adds them without checking
+            bool check_mrng_phase = true;  // true = activated, false = deactived
 
             // remove an edge of the good neighbors and connect them with this new vertex
             auto new_neighbors = std::vector<std::pair<uint32_t, float>>();
@@ -676,7 +676,7 @@ class EvenRegularGraphBuilder {
                     if (graph.hasEdge(candidate_index, internal_index)) continue;
 
                     // does the candidate has a neighbor which is connected to the new vertex and has a lower distance?
-                    if (check_rng_phase && deglib::analysis::checkRNG(graph, edges_per_vertex, candidate_index, internal_index, candidate_weight) == false)
+                    if (check_mrng_phase && deglib::analysis::checkMRNG(graph, edges_per_vertex, candidate_index, internal_index, candidate_weight) == false)
                         continue;
 
                     // SchemeC: This version is good for high OptimizationTarget datasets or small graphs with low distance count limit during ANNS
@@ -763,7 +763,7 @@ class EvenRegularGraphBuilder {
                     }
                 }
 
-                check_rng_phase = false;
+                check_mrng_phase = false;
             }
 
             if (new_neighbors.size() < edges_per_vertex) {
@@ -1379,7 +1379,7 @@ class EvenRegularGraphBuilder {
 
         for (size_t edge_idx = 0; edge_idx < edges_per_vertex; edge_idx++) {
             const auto vertex2 = neighbor_indices[edge_idx];
-            if (graph.hasEdge(vertex1, vertex2) && deglib::analysis::checkRNG(graph, edges_per_vertex, vertex2, vertex1, neighbor_weights[edge_idx]) == false)
+            if (graph.hasEdge(vertex1, vertex2) && deglib::analysis::checkMRNG(graph, edges_per_vertex, vertex2, vertex1, neighbor_weights[edge_idx]) == false)
                 success |= improveEdges(vertex1, vertex2, neighbor_weights[edge_idx]);
         }
 
@@ -1538,9 +1538,7 @@ DynamicExplorationGraph build_from_data(
     auto graph = DynamicExplorationGraph(std::make_unique<deglib::graph::SizeBoundedGraph>(vertex_count, edges_per_vertex, feature_space));
 
     std::mt19937 rng(seed);
-    auto builder = EvenRegularGraphBuilder(
-        graph, rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, improve_tries
-    );
+    auto builder = EvenRegularGraphBuilder(graph, rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, improve_tries);
 
     if (thread_count > 0) {
         builder.setThreadCount(thread_count);
@@ -1563,12 +1561,7 @@ DynamicExplorationGraph build_from_data(
  * @param vertex_count Number of vertices to insert.
  * @param seed Random seed for deterministic graph construction (default: 7).
  */
-inline void populate_random_graph(
-    deglib::graph::MutableGraph& graph,
-    const std::byte* feature_data,
-    const uint32_t vertex_count,
-    const uint32_t seed = 7
-) {
+inline void populate_random_graph(deglib::graph::MutableGraph& graph, const std::byte* feature_data, const uint32_t vertex_count, const uint32_t seed = 7) {
     const auto& feature_space = graph.getFeatureSpace();
     const auto edges_per_vertex = graph.getEdgesPerVertex();
     const auto dist_func = feature_space.get_dist_func();
@@ -1654,4 +1647,3 @@ inline void populate_random_graph(
 }
 
 }  // end namespace deglib::builder
-

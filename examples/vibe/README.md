@@ -76,7 +76,7 @@ The generated benchmark visualizations (`*_anns_benchmark.html`) provide:
 
 ### Configuration via `config.yml`
 All benchmark search parameters, graph degrees, optimization targets, pruning options, search $\varepsilon$ ranges, and reranking factors are configured centrally in [`config.yml`](file:///C:/Lang/cpp/DynamicExplorationGraph/examples/vibe/config.yml):
-- **Graph parameters**: `k`, `opt_target`, `prune_non_rng`.
+- **Graph parameters**: `k`, `opt_target`, `prune_non_mrng`.
 - **Query parameters**: `eps_or_ef`, `rerank_size_factor`.
 
 ### `main.py`

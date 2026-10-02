@@ -6,6 +6,7 @@
 #include "deglib/analysis.h"
 #include "deglib/distances.h"
 #include "deglib/graph/internal_graph.h"
+#include "deglib/graph/sizebounded_graph.h"
 #include "gtest/gtest.h"
 
 #include <algorithm>
@@ -232,4 +233,85 @@ TEST(DegAnalysisAnalyzeGraph, EmptyGraph) {
     EXPECT_FLOAT_EQ(stats.avg_in_degree, 0.0f);
     EXPECT_FLOAT_EQ(stats.search_reachability, 0.0f);
     EXPECT_FLOAT_EQ(stats.exploration_reachability, 0.0f);
+}
+
+// ---------------------------------------------------------------------------
+//  checkMRNG tests
+// ---------------------------------------------------------------------------
+
+namespace {
+
+static std::unique_ptr<std::byte[]> make_vec(float x, float y, float z, float w) {
+    std::vector<float> v = {x, y, z, w};
+    auto bytes = std::make_unique<std::byte[]>(v.size() * sizeof(float));
+    std::memcpy(bytes.get(), v.data(), v.size() * sizeof(float));
+    return bytes;
+}
+
+}  // namespace
+
+TEST(DegAnalysisCheckMRNG, SameBehaviorOnExistingTriangles) {
+    // 3 vertices on a line: 0 at x=0, 1 at x=1, 2 at x=2
+    // Metric: L2 squared
+    // d(0, 1) = 1.0, d(1, 2) = 1.0, d(0, 2) = 4.0
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
+    deglib::graph::SizeBoundedGraph graph(3, 4, space);
+
+    graph.addVertex(0, make_vec(0.0f, 0.0f, 0.0f, 0.0f).get());
+    graph.addVertex(1, make_vec(1.0f, 0.0f, 0.0f, 0.0f).get());
+    graph.addVertex(2, make_vec(2.0f, 0.0f, 0.0f, 0.0f).get());
+
+    // Connect fully (triangle 0-1, 1-2, 0-2)
+    graph.changeEdge(0, 0, 1, 1.0f);
+    graph.changeEdge(0, 0, 2, 4.0f);
+
+    graph.changeEdge(1, 1, 0, 1.0f);
+    graph.changeEdge(1, 1, 2, 1.0f);
+
+    graph.changeEdge(2, 2, 0, 4.0f);
+    graph.changeEdge(2, 2, 1, 1.0f);
+
+    // Testing candidate edge (0, 2) with weight 4.0:
+    // Neighbor 1 is in lune(0, 2) because d(0, 1)=1.0 < 4.0 and d(1, 2)=1.0 < 4.0.
+    // checkMRNG should reject it.
+    EXPECT_FALSE(deglib::analysis::checkMRNG(graph, 4, 0, 2, 4.0f));
+
+    // Testing candidate edge (0, 1) with weight 1.0:
+    // Neither neighbor is in lune(0, 1), it should accept.
+    EXPECT_TRUE(deglib::analysis::checkMRNG(graph, 4, 0, 1, 1.0f));
+}
+
+TEST(DegAnalysisCheckMRNG, AcceptsWhenOccluderNotConnectedToTarget) {
+    // 3 vertices on a line: 0 at x=0, 1 at x=1, 2 at x=2
+    // d(0, 1) = 1.0, d(1, 2) = 1.0, d(0, 2) = 4.0
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
+    deglib::graph::SizeBoundedGraph graph(3, 4, space);
+
+    graph.addVertex(0, make_vec(0.0f, 0.0f, 0.0f, 0.0f).get());
+    graph.addVertex(1, make_vec(1.0f, 0.0f, 0.0f, 0.0f).get());
+    graph.addVertex(2, make_vec(2.0f, 0.0f, 0.0f, 0.0f).get());
+
+    // Only connect 0-1.
+    // Vertex 1 is NOT connected to Vertex 2 in the graph!
+    graph.changeEdge(0, 0, 1, 1.0f);
+    graph.changeEdge(1, 1, 0, 1.0f);
+
+    // Can vertex 0 connect to vertex 2 (weight 4.0)?
+    //
+    // checkMRNG looks at neighbor 1 of vertex 0. Since edge (1, 2) does not exist in graph,
+    // graph.getEdgeWeight(1, 2) returns -1.0f. checkMRNG ignores neighbor 1 and returns TRUE.
+    EXPECT_TRUE(deglib::analysis::checkMRNG(graph, 4, 0, 2, 4.0f));
+}
+
+TEST(DegAnalysisCheckMRNG, SelfLoopsAndEmptySlotsIgnored) {
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
+    deglib::graph::SizeBoundedGraph graph(3, 4, space);
+
+    graph.addVertex(0, make_vec(0.0f, 0.0f, 0.0f, 0.0f).get());
+    graph.addVertex(1, make_vec(1.0f, 0.0f, 0.0f, 0.0f).get());
+    graph.addVertex(2, make_vec(2.0f, 0.0f, 0.0f, 0.0f).get());
+
+    // All slots are self-loops (empty).
+    // checkMRNG should not block connecting 0 to 1.
+    EXPECT_TRUE(deglib::analysis::checkMRNG(graph, 4, 0, 1, 1.0f));
 }

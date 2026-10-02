@@ -8,19 +8,19 @@ from .graph import DynamicExplorationGraph
 from .distances import FloatSpace, Metric
 
 
-def prune_non_rng_edges(graph: DynamicExplorationGraph, num_threads: int = 0) -> int:
+def prune_non_mrng_edges(graph: DynamicExplorationGraph, num_threads: int = 0) -> int:
     """
-    Remove all graph edges that violate the Relative Neighborhood Graph (RNG) rule.
+    Remove all graph edges that violate the Monotonic Relative Neighborhood Graph (MRNG) rule.
 
     An edge between vertices `u` and `v` is pruned if there exists another vertex `w`
     such that distance(u, w) < distance(u, v) and distance(v, w) < distance(u, v).
-    Pruning non-RNG edges reduces graph redundancy and accelerates query traversal.
+    Pruning non-MRNG edges reduces graph redundancy and accelerates query traversal.
 
     :param graph: The graph to optimize. Must be mutable.
     :param num_threads: Number of worker threads (0 uses all available CPU cores).
     :return: Total number of edges removed.
     """
-    return deglib_cpp.prune_non_rng_edges(graph.dynamic_exploration_graph_cpp, num_threads)
+    return deglib_cpp.prune_non_mrng_edges(graph.dynamic_exploration_graph_cpp, num_threads)
 
 
 def prune_worst_edges(graph: DynamicExplorationGraph, prune_worst: int, num_threads: int = 0):
@@ -162,7 +162,7 @@ def mips_l2_transform_query(queries: np.ndarray) -> np.ndarray:
 
 
 __all__ = [
-    "prune_non_rng_edges",
+    "prune_non_mrng_edges",
     "prune_worst_edges",
     "presort",
     "mips_l2_transform",

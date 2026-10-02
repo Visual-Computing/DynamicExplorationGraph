@@ -269,7 +269,7 @@ def main():
         for cfg_idx, cfg in enumerate(configs_to_run):
             k = cfg["k"]
             opt_target = cfg["optimization_target"]
-            is_pruned = cfg.get("prune_non_rng", False)
+            is_pruned = cfg.get("prune_non_mrng", False)
             constructor_name = cfg.get("constructor", "DEG")
             alg_name = cfg.get("alg_name", "deg")
 
@@ -278,7 +278,7 @@ def main():
                     metric=metric_str,
                     k=k,
                     opt_target=opt_target,
-                    prune_non_rng=is_pruned,
+                    prune_non_mrng=is_pruned,
                     threads=args.build_threads,
                 )
                 query_dtype = "int8"
@@ -287,7 +287,7 @@ def main():
                     metric=metric_str,
                     k=k,
                     opt_target=opt_target,
-                    prune_non_rng=is_pruned,
+                    prune_non_mrng=is_pruned,
                     threads=args.build_threads,
                 )
                 query_dtype = "float32"
@@ -376,7 +376,7 @@ def main():
                         "opt_target": opt_target,
                         "k": k,
                         "query_dtype": query_dtype,
-                        "prune_non_rng": is_pruned,
+                        "prune_non_mrng": is_pruned,
                         "rerank_factor": r_factor,
                         "recalls": anns_recalls,
                         "qps": anns_qps,

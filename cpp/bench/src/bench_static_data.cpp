@@ -60,6 +60,10 @@ static Config get_dataset_config(const DatasetName& dataset_name) {
 
 static std::string build_graph_filename(const Dataset& ds, const Config& cg, uint32_t dims) {
     std::string metric_str = ds.info().metric.to_string();
+    if (metric_str.find("InnerProduct") != std::string::npos) {
+        auto pos = metric_str.find("InnerProduct");
+        metric_str.replace(pos, std::string("InnerProduct").length(), "IP");
+    }
     std::string lid_str;
     switch (cg.lid) {
         case deglib::builder::OptimizationTarget::HighLID:

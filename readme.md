@@ -159,7 +159,7 @@ If you use the library in an academic context, please consider citing our papers
 
 ```bibtex
 @article{Hezel2025,
-  author    = {Hezel, Nico and Barthel, Uwe Kai and Schilling, Bruno and Schall, Konstantin and Jung, Klaus},
+  author    = {Hezel, Nico and Barthel, Kai Uwe and Schilling, Bruno and Schall, Konstantin and Jung, Klaus},
   title     = {Dynamic Exploration Graph: A Novel Approach for Efficient Nearest Neighbor Search in Evolving Multimedia Datasets},
   booktitle = {MultiMedia Modeling},
   publisher = {Springer Nature},
@@ -173,7 +173,7 @@ If you use the library in an academic context, please consider citing our papers
 
 ```bibtex
 @inproceedings{Hezel2024,
-  author    = {Hezel, Nico and Barthel, Uwe Kai and Schall, Konstantin and Jung, Klaus},
+  author    = {Hezel, Nico and Barthel, Kai Uwe and Schall, Konstantin and Jung, Klaus},
   title     = {An Exploration Graph with Continuous Refinement for Efficient Multimedia Retrieval},
   booktitle = {Proceedings of the 2024 International Conference on Multimedia Retrieval},
   publisher = {Association for Computing Machinery},

@@ -165,7 +165,7 @@ inline void create_graph(
         duration_ms / 1000);
 
     graph.saveGraph(graph_file.c_str());
-    log("The graph contains {} non-RNG edges\n", deglib::analysis::calc_non_rng_edges(graph));
+    log("The graph contains {} non-MRNG edges\n", deglib::analysis::calc_non_mrng_edges(graph));
 }
 
 inline void optimize_graph(
@@ -211,8 +211,8 @@ inline void optimize_graph(
 
     builder.build(improvement_callback, true);
 
-    log("Optimization complete. Final AEW: {:.2f}, non-RNG edges: {}\n", deglib::analysis::calc_avg_edge_weight(graph, scale),
-        deglib::analysis::calc_non_rng_edges(graph));
+    log("Optimization complete. Final AEW: {:.2f}, non-MRNG edges: {}\n", deglib::analysis::calc_avg_edge_weight(graph, scale),
+        deglib::analysis::calc_non_mrng_edges(graph));
 }
 
 }  // namespace deglib::benchmark

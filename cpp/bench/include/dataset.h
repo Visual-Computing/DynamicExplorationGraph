@@ -131,7 +131,6 @@ inline DatasetInfo make_dataset_info(const DatasetName& ds) {
         info.scale = 100;
         info.explore_depth = 2;
     } else if (ds == DatasetName::GLOVE) {
-        info.metric = deglib::distances::Metric::FP32_InnerProduct;
         info.download_url = "https://static.visual-computing.com/paper/DEG/glove-100.tar.gz";
         info.base_count = 1183514;
         info.query_count = 10000;

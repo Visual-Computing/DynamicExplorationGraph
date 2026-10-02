@@ -46,8 +46,8 @@ def export_interactive_html(
     min_k = min(all_k_values) if all_k_values else 16
     max_k = max(all_k_values) if all_k_values else 48
 
-    has_pruned = any(bool(entry.get("prune_non_rng", False)) for entry in results_series)
-    has_unpruned = any(not bool(entry.get("prune_non_rng", False)) for entry in results_series)
+    has_pruned = any(bool(entry.get("prune_non_mrng", False)) for entry in results_series)
+    has_unpruned = any(not bool(entry.get("prune_non_mrng", False)) for entry in results_series)
     all_rerank_factors = sorted(list({round(float(entry.get("rerank_factor", 1.0)), 2) for entry in results_series}))
 
     # Dynamically assign distinct symbols to any rerank factors found in results_series
@@ -70,7 +70,7 @@ def export_interactive_html(
 
         opt_target = str(entry.get("opt_target", "")).lower().strip()
         k = entry.get("k", 30)
-        is_pruned = bool(entry.get("prune_non_rng", False))
+        is_pruned = bool(entry.get("prune_non_mrng", False))
         r_factor = round(float(entry.get("rerank_factor", 1.0)), 2)
 
         hue = OPT_HUES.get(opt_target, 0.60)
@@ -543,7 +543,7 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
         r"Loading cached DEG graph from .*[\\/](\d+)D_[^_]+_K(\d+)_.*?(LowLID|StreamingData|Quality|HighLID)",
         re.IGNORECASE,
     )
-    re_prune = re.compile(r"Pruning non-RNG edges", re.IGNORECASE)
+    re_prune = re.compile(r"Pruning non-MRNG edges", re.IGNORECASE)
     re_eval = re.compile(
         r"Evaluating top-(\d+)\s*search(?:\s*\((?:rerank_factor=([\d.]+))?(?:,\s*fetch_k=\d+)?(?:,\s*[^)]*)?\))?",
         re.IGNORECASE,
@@ -562,7 +562,7 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
                     "opt_target": current_config["opt_target"],
                     "k": current_config["k"],
                     "query_dtype": current_config.get("query_dtype", file_query_dtype),
-                    "prune_non_rng": current_config["is_pruned"],
+                    "prune_non_mrng": current_config["is_pruned"],
                     "rerank_factor": current_rerank_factor,
                     "recalls": list(current_recalls),
                     "qps": list(current_qps),
