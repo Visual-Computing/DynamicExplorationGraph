@@ -55,9 +55,9 @@ class EvpInnerProduct {
     }
 
     inline static float compare_naive(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-        const std::byte* a = (const std::byte*)pVect1v;
-        const std::byte* b = (const std::byte*)pVect2v;
-        uint32_t dim = *((uint32_t*)qty_ptr);
+        const std::byte* a = static_cast<const std::byte*>(pVect1v);
+        const std::byte* b = static_cast<const std::byte*>(pVect2v);
+        const uint32_t dim = *static_cast<const uint32_t*>(qty_ptr);
         const size_t mask_bytes = dim / 8;
 
         const std::byte* ones_a = a;
@@ -65,7 +65,8 @@ class EvpInnerProduct {
         const std::byte* ones_b = b;
         const std::byte* negs_b = b + mask_bytes;
 
-        uint32_t aa = 0, bb = 0, cc = 0, dd = 0;
+        uint32_t same_sign = 0;
+        uint32_t diff_sign = 0;
 
         size_t i = 0;
         for (; i + sizeof(uint64_t) <= mask_bytes; i += sizeof(uint64_t)) {
@@ -73,24 +74,22 @@ class EvpInnerProduct {
             const uint64_t o2 = *reinterpret_cast<const uint64_t*>(&ones_b[i]);
             const uint64_t n1 = *reinterpret_cast<const uint64_t*>(&negs_a[i]);
             const uint64_t n2 = *reinterpret_cast<const uint64_t*>(&negs_b[i]);
-            aa += std::popcount(o1 & o2);
-            bb += std::popcount(n1 & n2);
-            cc += std::popcount(o1 & n2);
-            dd += std::popcount(o2 & n1);
+
+            same_sign += std::popcount((o1 & o2) | (n1 & n2));
+            diff_sign += std::popcount((o1 & n2) | (o2 & n1));
         }
 
         for (; i < mask_bytes; ++i) {
-            unsigned int b1 = static_cast<unsigned int>(static_cast<uint8_t>(ones_a[i]));
-            unsigned int b2 = static_cast<unsigned int>(static_cast<uint8_t>(ones_b[i]));
-            unsigned int n1 = static_cast<unsigned int>(static_cast<uint8_t>(negs_a[i]));
-            unsigned int n2 = static_cast<unsigned int>(static_cast<uint8_t>(negs_b[i]));
-            aa += std::popcount(b1 & b2);
-            bb += std::popcount(n1 & n2);
-            cc += std::popcount(b1 & n2);
-            dd += std::popcount(b2 & n1);
+            const unsigned int o1 = static_cast<uint8_t>(ones_a[i]);
+            const unsigned int o2 = static_cast<uint8_t>(ones_b[i]);
+            const unsigned int n1 = static_cast<uint8_t>(negs_a[i]);
+            const unsigned int n2 = static_cast<uint8_t>(negs_b[i]);
+
+            same_sign += std::popcount((o1 & o2) | (n1 & n2));
+            diff_sign += std::popcount((o1 & n2) | (o2 & n1));
         }
 
-        return static_cast<float>(aa + bb + dim) - static_cast<float>(cc + dd);
+        return static_cast<float>(same_sign + dim) - static_cast<float>(diff_sign);
     }
 };  // EvpInnerProduct
 
@@ -127,9 +126,9 @@ class EvpInnerProduct_AVX512 {
     static constexpr const char* get_instruction() { return "AVX512"; }
 
     DEGLIB_TARGET_AVX512 inline static float compare(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-        const std::byte* a = (const std::byte*)pVect1v;
-        const std::byte* b = (const std::byte*)pVect2v;
-        uint32_t dim = *((uint32_t*)qty_ptr);
+        const std::byte* a = static_cast<const std::byte*>(pVect1v);
+        const std::byte* b = static_cast<const std::byte*>(pVect2v);
+        const uint32_t dim = *static_cast<const uint32_t*>(qty_ptr);
         const size_t mask_bytes = dim / 8;
 
         const std::byte* ones_a = a;
@@ -137,10 +136,8 @@ class EvpInnerProduct_AVX512 {
         const std::byte* ones_b = b;
         const std::byte* negs_b = b + mask_bytes;
 
-        __m512i acc_aa = _mm512_setzero_si512();
-        __m512i acc_bb = _mm512_setzero_si512();
-        __m512i acc_cc = _mm512_setzero_si512();
-        __m512i acc_dd = _mm512_setzero_si512();
+        __m512i acc_same = _mm512_setzero_si512();
+        __m512i acc_diff = _mm512_setzero_si512();
 
         const size_t block = 64;
         size_t i = 0;
@@ -151,20 +148,22 @@ class EvpInnerProduct_AVX512 {
                 __m512i n1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&negs_a[i]));
                 __m512i n2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&negs_b[i]));
 
-                acc_aa = _mm512_add_epi64(acc_aa, _mm512_popcnt_epi64(_mm512_and_si512(o1, o2)));
-                acc_bb = _mm512_add_epi64(acc_bb, _mm512_popcnt_epi64(_mm512_and_si512(n1, n2)));
-                acc_cc = _mm512_add_epi64(acc_cc, _mm512_popcnt_epi64(_mm512_and_si512(o1, n2)));
-                acc_dd = _mm512_add_epi64(acc_dd, _mm512_popcnt_epi64(_mm512_and_si512(o2, n1)));
+                __m512i same = _mm512_or_si512(_mm512_and_si512(o1, o2), _mm512_and_si512(n1, n2));
+                __m512i diff = _mm512_or_si512(_mm512_and_si512(o1, n2), _mm512_and_si512(o2, n1));
+
+                acc_same = _mm512_add_epi64(acc_same, _mm512_popcnt_epi64(same));
+                acc_diff = _mm512_add_epi64(acc_diff, _mm512_popcnt_epi64(diff));
 
                 __m512i o1b = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&ones_a[i + block]));
                 __m512i o2b = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&ones_b[i + block]));
                 __m512i n1b = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&negs_a[i + block]));
                 __m512i n2b = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&negs_b[i + block]));
 
-                acc_aa = _mm512_add_epi64(acc_aa, _mm512_popcnt_epi64(_mm512_and_si512(o1b, o2b)));
-                acc_bb = _mm512_add_epi64(acc_bb, _mm512_popcnt_epi64(_mm512_and_si512(n1b, n2b)));
-                acc_cc = _mm512_add_epi64(acc_cc, _mm512_popcnt_epi64(_mm512_and_si512(o1b, n2b)));
-                acc_dd = _mm512_add_epi64(acc_dd, _mm512_popcnt_epi64(_mm512_and_si512(o2b, n1b)));
+                __m512i same_b = _mm512_or_si512(_mm512_and_si512(o1b, o2b), _mm512_and_si512(n1b, n2b));
+                __m512i diff_b = _mm512_or_si512(_mm512_and_si512(o1b, n2b), _mm512_and_si512(o2b, n1b));
+
+                acc_same = _mm512_add_epi64(acc_same, _mm512_popcnt_epi64(same_b));
+                acc_diff = _mm512_add_epi64(acc_diff, _mm512_popcnt_epi64(diff_b));
             }
         }
         if constexpr (HasSimd) {
@@ -174,61 +173,52 @@ class EvpInnerProduct_AVX512 {
                 __m512i n1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&negs_a[i]));
                 __m512i n2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&negs_b[i]));
 
-                acc_aa = _mm512_add_epi64(acc_aa, _mm512_popcnt_epi64(_mm512_and_si512(o1, o2)));
-                acc_bb = _mm512_add_epi64(acc_bb, _mm512_popcnt_epi64(_mm512_and_si512(n1, n2)));
-                acc_cc = _mm512_add_epi64(acc_cc, _mm512_popcnt_epi64(_mm512_and_si512(o1, n2)));
-                acc_dd = _mm512_add_epi64(acc_dd, _mm512_popcnt_epi64(_mm512_and_si512(o2, n1)));
+                __m512i same = _mm512_or_si512(_mm512_and_si512(o1, o2), _mm512_and_si512(n1, n2));
+                __m512i diff = _mm512_or_si512(_mm512_and_si512(o1, n2), _mm512_and_si512(o2, n1));
+
+                acc_same = _mm512_add_epi64(acc_same, _mm512_popcnt_epi64(same));
+                acc_diff = _mm512_add_epi64(acc_diff, _mm512_popcnt_epi64(diff));
             }
         }
 
         // Horizontal reduce of SIMD accumulators
         alignas(64) int64_t arr[8];
-        _mm512_storeu_si512(reinterpret_cast<__m512i*>(arr), acc_aa);
-        uint64_t aa = arr[0] + arr[1] + arr[2] + arr[3] + arr[4] + arr[5] + arr[6] + arr[7];
-        _mm512_storeu_si512(reinterpret_cast<__m512i*>(arr), acc_bb);
-        uint64_t bb = arr[0] + arr[1] + arr[2] + arr[3] + arr[4] + arr[5] + arr[6] + arr[7];
-        _mm512_storeu_si512(reinterpret_cast<__m512i*>(arr), acc_cc);
-        uint64_t cc = arr[0] + arr[1] + arr[2] + arr[3] + arr[4] + arr[5] + arr[6] + arr[7];
-        _mm512_storeu_si512(reinterpret_cast<__m512i*>(arr), acc_dd);
-        uint64_t dd = arr[0] + arr[1] + arr[2] + arr[3] + arr[4] + arr[5] + arr[6] + arr[7];
+        _mm512_storeu_si512(reinterpret_cast<__m512i*>(arr), acc_same);
+        uint64_t same_count = arr[0] + arr[1] + arr[2] + arr[3] + arr[4] + arr[5] + arr[6] + arr[7];
+        _mm512_storeu_si512(reinterpret_cast<__m512i*>(arr), acc_diff);
+        uint64_t diff_count = arr[0] + arr[1] + arr[2] + arr[3] + arr[4] + arr[5] + arr[6] + arr[7];
 
         // Scalar residual for the unaligned tail — eliminated at compile-time if HasTail == false
         if constexpr (HasTail) {
             for (; i < mask_bytes; ++i) {
-                unsigned int b1 = static_cast<unsigned int>(static_cast<uint8_t>(ones_a[i]));
-                unsigned int b2 = static_cast<unsigned int>(static_cast<uint8_t>(ones_b[i]));
-                unsigned int n1 = static_cast<unsigned int>(static_cast<uint8_t>(negs_a[i]));
-                unsigned int n2 = static_cast<unsigned int>(static_cast<uint8_t>(negs_b[i]));
-                aa += std::popcount(b1 & b2);
-                bb += std::popcount(n1 & n2);
-                cc += std::popcount(b1 & n2);
-                dd += std::popcount(b2 & n1);
+                const unsigned int o1 = static_cast<uint8_t>(ones_a[i]);
+                const unsigned int o2 = static_cast<uint8_t>(ones_b[i]);
+                const unsigned int n1 = static_cast<uint8_t>(negs_a[i]);
+                const unsigned int n2 = static_cast<uint8_t>(negs_b[i]);
+                same_count += std::popcount((o1 & o2) | (n1 & n2));
+                diff_count += std::popcount((o1 & n2) | (o2 & n1));
             }
         }
 
-        const float sim = static_cast<float>(aa + bb + dim) - static_cast<float>(cc + dd);
+        const float sim = static_cast<float>(same_count + dim) - static_cast<float>(diff_count);
         return 1.f - sim / (2.f * static_cast<float>(dim));
     }
 
     DEGLIB_TARGET_AVX512 inline static void compare_batch(const void* query_ptr, const void* const* db_arr, size_t count, const void* qty_ptr, float* dists) {
         static constexpr size_t BATCH_SIZE = 4;
         const std::byte* query = static_cast<const std::byte*>(query_ptr);
-        uint32_t dim = *((uint32_t*)qty_ptr);
+        const uint32_t dim = *static_cast<const uint32_t*>(qty_ptr);
         const size_t mask_bytes = dim / 8;
 
         auto batch_impl = [query, mask_bytes, dim](const void* const* db, float* out_dists) DEGLIB_TARGET_AVX512 {
             const std::byte* q_ones = query;
             const std::byte* q_negs = query + mask_bytes;
 
-            alignas(64) __m512i acc_aa[BATCH_SIZE];
-            alignas(64) __m512i acc_bb[BATCH_SIZE];
-            alignas(64) __m512i acc_cc[BATCH_SIZE];
-            alignas(64) __m512i acc_dd[BATCH_SIZE];
+            alignas(64) __m512i acc_same[BATCH_SIZE];
+            alignas(64) __m512i acc_diff[BATCH_SIZE];
             for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                acc_aa[j] = _mm512_setzero_si512();
-                acc_bb[j] = _mm512_setzero_si512();
-                acc_cc[j] = _mm512_setzero_si512();
-                acc_dd[j] = _mm512_setzero_si512();
+                acc_same[j] = _mm512_setzero_si512();
+                acc_diff[j] = _mm512_setzero_si512();
             }
 
             const size_t block = 64;
@@ -247,14 +237,15 @@ class EvpInnerProduct_AVX512 {
                         __m512i o2b = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&db_[i + block]));
                         __m512i n2b = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&db_[i + block + mask_bytes]));
 
-                        acc_aa[j] = _mm512_add_epi64(acc_aa[j], _mm512_popcnt_epi64(_mm512_and_si512(q_o1, o2)));
-                        acc_bb[j] = _mm512_add_epi64(acc_bb[j], _mm512_popcnt_epi64(_mm512_and_si512(q_n1, n2)));
-                        acc_cc[j] = _mm512_add_epi64(acc_cc[j], _mm512_popcnt_epi64(_mm512_and_si512(q_o1, n2)));
-                        acc_dd[j] = _mm512_add_epi64(acc_dd[j], _mm512_popcnt_epi64(_mm512_and_si512(o2, q_n1)));
-                        acc_aa[j] = _mm512_add_epi64(acc_aa[j], _mm512_popcnt_epi64(_mm512_and_si512(q_o1b, o2b)));
-                        acc_bb[j] = _mm512_add_epi64(acc_bb[j], _mm512_popcnt_epi64(_mm512_and_si512(q_n1b, n2b)));
-                        acc_cc[j] = _mm512_add_epi64(acc_cc[j], _mm512_popcnt_epi64(_mm512_and_si512(q_o1b, n2b)));
-                        acc_dd[j] = _mm512_add_epi64(acc_dd[j], _mm512_popcnt_epi64(_mm512_and_si512(o2b, q_n1b)));
+                        __m512i same = _mm512_or_si512(_mm512_and_si512(q_o1, o2), _mm512_and_si512(q_n1, n2));
+                        __m512i diff = _mm512_or_si512(_mm512_and_si512(q_o1, n2), _mm512_and_si512(o2, q_n1));
+                        acc_same[j] = _mm512_add_epi64(acc_same[j], _mm512_popcnt_epi64(same));
+                        acc_diff[j] = _mm512_add_epi64(acc_diff[j], _mm512_popcnt_epi64(diff));
+
+                        __m512i same_b = _mm512_or_si512(_mm512_and_si512(q_o1b, o2b), _mm512_and_si512(q_n1b, n2b));
+                        __m512i diff_b = _mm512_or_si512(_mm512_and_si512(q_o1b, n2b), _mm512_and_si512(o2b, q_n1b));
+                        acc_same[j] = _mm512_add_epi64(acc_same[j], _mm512_popcnt_epi64(same_b));
+                        acc_diff[j] = _mm512_add_epi64(acc_diff[j], _mm512_popcnt_epi64(diff_b));
                     }
                 }
             }
@@ -268,40 +259,36 @@ class EvpInnerProduct_AVX512 {
                         __m512i o2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&db_[i]));
                         __m512i n2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&db_[i + mask_bytes]));
 
-                        acc_aa[j] = _mm512_add_epi64(acc_aa[j], _mm512_popcnt_epi64(_mm512_and_si512(q_o1, o2)));
-                        acc_bb[j] = _mm512_add_epi64(acc_bb[j], _mm512_popcnt_epi64(_mm512_and_si512(q_n1, n2)));
-                        acc_cc[j] = _mm512_add_epi64(acc_cc[j], _mm512_popcnt_epi64(_mm512_and_si512(q_o1, n2)));
-                        acc_dd[j] = _mm512_add_epi64(acc_dd[j], _mm512_popcnt_epi64(_mm512_and_si512(o2, q_n1)));
+                        __m512i same = _mm512_or_si512(_mm512_and_si512(q_o1, o2), _mm512_and_si512(q_n1, n2));
+                        __m512i diff = _mm512_or_si512(_mm512_and_si512(q_o1, n2), _mm512_and_si512(o2, q_n1));
+                        acc_same[j] = _mm512_add_epi64(acc_same[j], _mm512_popcnt_epi64(same));
+                        acc_diff[j] = _mm512_add_epi64(acc_diff[j], _mm512_popcnt_epi64(diff));
                     }
                 }
             }
 
-            alignas(64) uint64_t aa[BATCH_SIZE], bb[BATCH_SIZE], cc[BATCH_SIZE], dd[BATCH_SIZE];
+            alignas(64) uint64_t same_res[BATCH_SIZE], diff_res[BATCH_SIZE];
             for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                aa[j] = evp_hsum512(acc_aa[j]);
-                bb[j] = evp_hsum512(acc_bb[j]);
-                cc[j] = evp_hsum512(acc_cc[j]);
-                dd[j] = evp_hsum512(acc_dd[j]);
+                same_res[j] = evp_hsum512(acc_same[j]);
+                diff_res[j] = evp_hsum512(acc_diff[j]);
             }
 
             if constexpr (HasTail) {
                 for (; i < mask_bytes; ++i) {
-                    unsigned int q_b1 = static_cast<unsigned int>(static_cast<uint8_t>(q_ones[i]));
-                    unsigned int q_n1 = static_cast<unsigned int>(static_cast<uint8_t>(q_negs[i]));
+                    const unsigned int q_b1 = static_cast<uint8_t>(q_ones[i]);
+                    const unsigned int q_n1 = static_cast<uint8_t>(q_negs[i]);
                     for (size_t j = 0; j < BATCH_SIZE; ++j) {
                         const std::byte* db_ = static_cast<const std::byte*>(db[j]);
-                        unsigned int b2 = static_cast<unsigned int>(static_cast<uint8_t>(db_[i]));
-                        unsigned int n2 = static_cast<unsigned int>(static_cast<uint8_t>(db_[i + mask_bytes]));
-                        aa[j] += std::popcount(q_b1 & b2);
-                        bb[j] += std::popcount(q_n1 & n2);
-                        cc[j] += std::popcount(q_b1 & n2);
-                        dd[j] += std::popcount(b2 & q_n1);
+                        const unsigned int b2 = static_cast<uint8_t>(db_[i]);
+                        const unsigned int n2 = static_cast<uint8_t>(db_[i + mask_bytes]);
+                        same_res[j] += std::popcount((q_b1 & b2) | (q_n1 & n2));
+                        diff_res[j] += std::popcount((q_b1 & n2) | (b2 & q_n1));
                     }
                 }
             }
 
             for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                float sim = static_cast<float>(aa[j] + bb[j] + dim) - static_cast<float>(cc[j] + dd[j]);
+                const float sim = static_cast<float>(same_res[j] + dim) - static_cast<float>(diff_res[j]);
                 out_dists[j] = 1.f - sim / (2.f * static_cast<float>(dim));
             }
         };
@@ -325,9 +312,9 @@ class EvpInnerProduct_AVX2 {
   public:
     static constexpr const char* get_instruction() { return "AVX2"; }
     DEGLIB_TARGET_AVX2 inline static float compare(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-        const std::byte* a = (const std::byte*)pVect1v;
-        const std::byte* b = (const std::byte*)pVect2v;
-        uint32_t dim = *((uint32_t*)qty_ptr);
+        const std::byte* a = static_cast<const std::byte*>(pVect1v);
+        const std::byte* b = static_cast<const std::byte*>(pVect2v);
+        const uint32_t dim = *static_cast<const uint32_t*>(qty_ptr);
         const size_t mask_bytes = dim / 8;
 
         const std::byte* ones_a = a;
@@ -335,14 +322,20 @@ class EvpInnerProduct_AVX2 {
         const std::byte* ones_b = b;
         const std::byte* negs_b = b + mask_bytes;
 
-        __m256i acc_aa = _mm256_setzero_si256();
-        __m256i acc_bb = _mm256_setzero_si256();
-        __m256i acc_cc = _mm256_setzero_si256();
-        __m256i acc_dd = _mm256_setzero_si256();
+        __m256i acc_same = _mm256_setzero_si256();
+        __m256i acc_diff = _mm256_setzero_si256();
 
         const __m256i lookup = _mm256_setr_epi8(0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4, 0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4);
         const __m256i low_mask = _mm256_set1_epi8(0x0F);
         const __m256i zero = _mm256_setzero_si256();
+
+        auto vector_popcnt = [&](__m256i vec) {
+            __m256i lo = _mm256_and_si256(vec, low_mask);
+            __m256i hi = _mm256_and_si256(_mm256_srli_epi16(vec, 4), low_mask);
+            __m256i popcnt1 = _mm256_shuffle_epi8(lookup, lo);
+            __m256i popcnt2 = _mm256_shuffle_epi8(lookup, hi);
+            return _mm256_add_epi8(popcnt1, popcnt2);
+        };
 
         const size_t block = 32;
         size_t i = 0;
@@ -353,38 +346,22 @@ class EvpInnerProduct_AVX2 {
                 __m256i n1 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&negs_a[i]));
                 __m256i n2 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&negs_b[i]));
 
-                __m256i and_aa = _mm256_and_si256(o1, o2);
-                __m256i and_bb = _mm256_and_si256(n1, n2);
-                __m256i and_cc = _mm256_and_si256(o1, n2);
-                __m256i and_dd = _mm256_and_si256(o2, n1);
+                __m256i same = _mm256_or_si256(_mm256_and_si256(o1, o2), _mm256_and_si256(n1, n2));
+                __m256i diff = _mm256_or_si256(_mm256_and_si256(o1, n2), _mm256_and_si256(o2, n1));
 
-                auto vector_popcnt = [&](__m256i vec) {
-                    __m256i lo = _mm256_and_si256(vec, low_mask);
-                    __m256i hi = _mm256_and_si256(_mm256_srli_epi16(vec, 4), low_mask);
-                    __m256i popcnt1 = _mm256_shuffle_epi8(lookup, lo);
-                    __m256i popcnt2 = _mm256_shuffle_epi8(lookup, hi);
-                    return _mm256_add_epi8(popcnt1, popcnt2);
-                };
-
-                acc_aa = _mm256_add_epi64(acc_aa, _mm256_sad_epu8(vector_popcnt(and_aa), zero));
-                acc_bb = _mm256_add_epi64(acc_bb, _mm256_sad_epu8(vector_popcnt(and_bb), zero));
-                acc_cc = _mm256_add_epi64(acc_cc, _mm256_sad_epu8(vector_popcnt(and_cc), zero));
-                acc_dd = _mm256_add_epi64(acc_dd, _mm256_sad_epu8(vector_popcnt(and_dd), zero));
+                acc_same = _mm256_add_epi64(acc_same, _mm256_sad_epu8(vector_popcnt(same), zero));
+                acc_diff = _mm256_add_epi64(acc_diff, _mm256_sad_epu8(vector_popcnt(diff), zero));
 
                 __m256i o1b = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&ones_a[i + block]));
                 __m256i o2b = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&ones_b[i + block]));
                 __m256i n1b = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&negs_a[i + block]));
                 __m256i n2b = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&negs_b[i + block]));
 
-                __m256i and_aab = _mm256_and_si256(o1b, o2b);
-                __m256i and_bbb = _mm256_and_si256(n1b, n2b);
-                __m256i and_ccb = _mm256_and_si256(o1b, n2b);
-                __m256i and_ddb = _mm256_and_si256(o2b, n1b);
+                __m256i same_b = _mm256_or_si256(_mm256_and_si256(o1b, o2b), _mm256_and_si256(n1b, n2b));
+                __m256i diff_b = _mm256_or_si256(_mm256_and_si256(o1b, n2b), _mm256_and_si256(o2b, n1b));
 
-                acc_aa = _mm256_add_epi64(acc_aa, _mm256_sad_epu8(vector_popcnt(and_aab), zero));
-                acc_bb = _mm256_add_epi64(acc_bb, _mm256_sad_epu8(vector_popcnt(and_bbb), zero));
-                acc_cc = _mm256_add_epi64(acc_cc, _mm256_sad_epu8(vector_popcnt(and_ccb), zero));
-                acc_dd = _mm256_add_epi64(acc_dd, _mm256_sad_epu8(vector_popcnt(and_ddb), zero));
+                acc_same = _mm256_add_epi64(acc_same, _mm256_sad_epu8(vector_popcnt(same_b), zero));
+                acc_diff = _mm256_add_epi64(acc_diff, _mm256_sad_epu8(vector_popcnt(diff_b), zero));
             }
         }
         if constexpr (HasSimd) {
@@ -394,59 +371,41 @@ class EvpInnerProduct_AVX2 {
                 __m256i n1 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&negs_a[i]));
                 __m256i n2 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&negs_b[i]));
 
-                __m256i and_aa = _mm256_and_si256(o1, o2);
-                __m256i and_bb = _mm256_and_si256(n1, n2);
-                __m256i and_cc = _mm256_and_si256(o1, n2);
-                __m256i and_dd = _mm256_and_si256(o2, n1);
+                __m256i same = _mm256_or_si256(_mm256_and_si256(o1, o2), _mm256_and_si256(n1, n2));
+                __m256i diff = _mm256_or_si256(_mm256_and_si256(o1, n2), _mm256_and_si256(o2, n1));
 
-                auto vector_popcnt = [&](__m256i vec) {
-                    __m256i lo = _mm256_and_si256(vec, low_mask);
-                    __m256i hi = _mm256_and_si256(_mm256_srli_epi16(vec, 4), low_mask);
-                    __m256i popcnt1 = _mm256_shuffle_epi8(lookup, lo);
-                    __m256i popcnt2 = _mm256_shuffle_epi8(lookup, hi);
-                    return _mm256_add_epi8(popcnt1, popcnt2);
-                };
-
-                acc_aa = _mm256_add_epi64(acc_aa, _mm256_sad_epu8(vector_popcnt(and_aa), zero));
-                acc_bb = _mm256_add_epi64(acc_bb, _mm256_sad_epu8(vector_popcnt(and_bb), zero));
-                acc_cc = _mm256_add_epi64(acc_cc, _mm256_sad_epu8(vector_popcnt(and_cc), zero));
-                acc_dd = _mm256_add_epi64(acc_dd, _mm256_sad_epu8(vector_popcnt(and_dd), zero));
+                acc_same = _mm256_add_epi64(acc_same, _mm256_sad_epu8(vector_popcnt(same), zero));
+                acc_diff = _mm256_add_epi64(acc_diff, _mm256_sad_epu8(vector_popcnt(diff), zero));
             }
         }
 
         // Horizontal reduce of SIMD accumulators
         alignas(32) int64_t arr[4];
-        _mm256_storeu_si256(reinterpret_cast<__m256i*>(arr), acc_aa);
-        uint64_t aa = arr[0] + arr[1] + arr[2] + arr[3];
-        _mm256_storeu_si256(reinterpret_cast<__m256i*>(arr), acc_bb);
-        uint64_t bb = arr[0] + arr[1] + arr[2] + arr[3];
-        _mm256_storeu_si256(reinterpret_cast<__m256i*>(arr), acc_cc);
-        uint64_t cc = arr[0] + arr[1] + arr[2] + arr[3];
-        _mm256_storeu_si256(reinterpret_cast<__m256i*>(arr), acc_dd);
-        uint64_t dd = arr[0] + arr[1] + arr[2] + arr[3];
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(arr), acc_same);
+        uint64_t same_count = arr[0] + arr[1] + arr[2] + arr[3];
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(arr), acc_diff);
+        uint64_t diff_count = arr[0] + arr[1] + arr[2] + arr[3];
 
         // Scalar residual for the unaligned tail — eliminated at compile-time if HasTail == false
         if constexpr (HasTail) {
             for (; i < mask_bytes; ++i) {
-                unsigned int b1 = static_cast<unsigned int>(static_cast<uint8_t>(ones_a[i]));
-                unsigned int b2 = static_cast<unsigned int>(static_cast<uint8_t>(ones_b[i]));
-                unsigned int n1 = static_cast<unsigned int>(static_cast<uint8_t>(negs_a[i]));
-                unsigned int n2 = static_cast<unsigned int>(static_cast<uint8_t>(negs_b[i]));
-                aa += std::popcount(b1 & b2);
-                bb += std::popcount(n1 & n2);
-                cc += std::popcount(b1 & n2);
-                dd += std::popcount(b2 & n1);
+                const unsigned int o1 = static_cast<uint8_t>(ones_a[i]);
+                const unsigned int o2 = static_cast<uint8_t>(ones_b[i]);
+                const unsigned int n1 = static_cast<uint8_t>(negs_a[i]);
+                const unsigned int n2 = static_cast<uint8_t>(negs_b[i]);
+                same_count += std::popcount((o1 & o2) | (n1 & n2));
+                diff_count += std::popcount((o1 & n2) | (o2 & n1));
             }
         }
 
-        const float sim = static_cast<float>(aa + bb + dim) - static_cast<float>(cc + dd);
+        const float sim = static_cast<float>(same_count + dim) - static_cast<float>(diff_count);
         return 1.f - sim / (2.f * static_cast<float>(dim));
     }
 
     DEGLIB_TARGET_AVX2 inline static void compare_batch(const void* query_ptr, const void* const* db_arr, size_t count, const void* qty_ptr, float* dists) {
         static constexpr size_t BATCH_SIZE = 4;
         const std::byte* query = static_cast<const std::byte*>(query_ptr);
-        uint32_t dim = *((uint32_t*)qty_ptr);
+        const uint32_t dim = *static_cast<const uint32_t*>(qty_ptr);
         const size_t mask_bytes = dim / 8;
 
         auto batch_impl = [query, mask_bytes, dim](const void* const* db, float* out_dists) DEGLIB_TARGET_AVX2 {
@@ -465,15 +424,11 @@ class EvpInnerProduct_AVX2 {
                 return _mm256_add_epi8(popcnt1, popcnt2);
             };
 
-            alignas(32) __m256i acc_aa[BATCH_SIZE];
-            alignas(32) __m256i acc_bb[BATCH_SIZE];
-            alignas(32) __m256i acc_cc[BATCH_SIZE];
-            alignas(32) __m256i acc_dd[BATCH_SIZE];
+            alignas(32) __m256i acc_same[BATCH_SIZE];
+            alignas(32) __m256i acc_diff[BATCH_SIZE];
             for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                acc_aa[j] = _mm256_setzero_si256();
-                acc_bb[j] = _mm256_setzero_si256();
-                acc_cc[j] = _mm256_setzero_si256();
-                acc_dd[j] = _mm256_setzero_si256();
+                acc_same[j] = _mm256_setzero_si256();
+                acc_diff[j] = _mm256_setzero_si256();
             }
 
             const size_t block = 32;
@@ -492,23 +447,15 @@ class EvpInnerProduct_AVX2 {
                         __m256i o2b = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&db_[i + block]));
                         __m256i n2b = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&db_[i + block + mask_bytes]));
 
-                        __m256i and_aa = _mm256_and_si256(q_o1, o2);
-                        __m256i and_bb = _mm256_and_si256(q_n1, n2);
-                        __m256i and_cc = _mm256_and_si256(q_o1, n2);
-                        __m256i and_dd = _mm256_and_si256(o2, q_n1);
-                        acc_aa[j] = _mm256_add_epi64(acc_aa[j], _mm256_sad_epu8(vector_popcnt(and_aa), zero));
-                        acc_bb[j] = _mm256_add_epi64(acc_bb[j], _mm256_sad_epu8(vector_popcnt(and_bb), zero));
-                        acc_cc[j] = _mm256_add_epi64(acc_cc[j], _mm256_sad_epu8(vector_popcnt(and_cc), zero));
-                        acc_dd[j] = _mm256_add_epi64(acc_dd[j], _mm256_sad_epu8(vector_popcnt(and_dd), zero));
+                        __m256i same = _mm256_or_si256(_mm256_and_si256(q_o1, o2), _mm256_and_si256(q_n1, n2));
+                        __m256i diff = _mm256_or_si256(_mm256_and_si256(q_o1, n2), _mm256_and_si256(o2, q_n1));
+                        acc_same[j] = _mm256_add_epi64(acc_same[j], _mm256_sad_epu8(vector_popcnt(same), zero));
+                        acc_diff[j] = _mm256_add_epi64(acc_diff[j], _mm256_sad_epu8(vector_popcnt(diff), zero));
 
-                        __m256i and_aab = _mm256_and_si256(q_o1b, o2b);
-                        __m256i and_bbb = _mm256_and_si256(q_n1b, n2b);
-                        __m256i and_ccb = _mm256_and_si256(q_o1b, n2b);
-                        __m256i and_ddb = _mm256_and_si256(o2b, q_n1b);
-                        acc_aa[j] = _mm256_add_epi64(acc_aa[j], _mm256_sad_epu8(vector_popcnt(and_aab), zero));
-                        acc_bb[j] = _mm256_add_epi64(acc_bb[j], _mm256_sad_epu8(vector_popcnt(and_bbb), zero));
-                        acc_cc[j] = _mm256_add_epi64(acc_cc[j], _mm256_sad_epu8(vector_popcnt(and_ccb), zero));
-                        acc_dd[j] = _mm256_add_epi64(acc_dd[j], _mm256_sad_epu8(vector_popcnt(and_ddb), zero));
+                        __m256i same_b = _mm256_or_si256(_mm256_and_si256(q_o1b, o2b), _mm256_and_si256(q_n1b, n2b));
+                        __m256i diff_b = _mm256_or_si256(_mm256_and_si256(q_o1b, n2b), _mm256_and_si256(o2b, q_n1b));
+                        acc_same[j] = _mm256_add_epi64(acc_same[j], _mm256_sad_epu8(vector_popcnt(same_b), zero));
+                        acc_diff[j] = _mm256_add_epi64(acc_diff[j], _mm256_sad_epu8(vector_popcnt(diff_b), zero));
                     }
                 }
             }
@@ -522,44 +469,36 @@ class EvpInnerProduct_AVX2 {
                         __m256i o2 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&db_[i]));
                         __m256i n2 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&db_[i + mask_bytes]));
 
-                        __m256i and_aa = _mm256_and_si256(q_o1, o2);
-                        __m256i and_bb = _mm256_and_si256(q_n1, n2);
-                        __m256i and_cc = _mm256_and_si256(q_o1, n2);
-                        __m256i and_dd = _mm256_and_si256(o2, q_n1);
-                        acc_aa[j] = _mm256_add_epi64(acc_aa[j], _mm256_sad_epu8(vector_popcnt(and_aa), zero));
-                        acc_bb[j] = _mm256_add_epi64(acc_bb[j], _mm256_sad_epu8(vector_popcnt(and_bb), zero));
-                        acc_cc[j] = _mm256_add_epi64(acc_cc[j], _mm256_sad_epu8(vector_popcnt(and_cc), zero));
-                        acc_dd[j] = _mm256_add_epi64(acc_dd[j], _mm256_sad_epu8(vector_popcnt(and_dd), zero));
+                        __m256i same = _mm256_or_si256(_mm256_and_si256(q_o1, o2), _mm256_and_si256(q_n1, n2));
+                        __m256i diff = _mm256_or_si256(_mm256_and_si256(q_o1, n2), _mm256_and_si256(o2, q_n1));
+                        acc_same[j] = _mm256_add_epi64(acc_same[j], _mm256_sad_epu8(vector_popcnt(same), zero));
+                        acc_diff[j] = _mm256_add_epi64(acc_diff[j], _mm256_sad_epu8(vector_popcnt(diff), zero));
                     }
                 }
             }
 
-            alignas(32) uint64_t aa[BATCH_SIZE], bb[BATCH_SIZE], cc[BATCH_SIZE], dd[BATCH_SIZE];
+            alignas(32) uint64_t same_res[BATCH_SIZE], diff_res[BATCH_SIZE];
             for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                aa[j] = evp_hsum256(acc_aa[j]);
-                bb[j] = evp_hsum256(acc_bb[j]);
-                cc[j] = evp_hsum256(acc_cc[j]);
-                dd[j] = evp_hsum256(acc_dd[j]);
+                same_res[j] = evp_hsum256(acc_same[j]);
+                diff_res[j] = evp_hsum256(acc_diff[j]);
             }
 
             if constexpr (HasTail) {
                 for (; i < mask_bytes; ++i) {
-                    unsigned int q_b1 = static_cast<unsigned int>(static_cast<uint8_t>(q_ones[i]));
-                    unsigned int q_n1 = static_cast<unsigned int>(static_cast<uint8_t>(q_negs[i]));
+                    const unsigned int q_b1 = static_cast<uint8_t>(q_ones[i]);
+                    const unsigned int q_n1 = static_cast<uint8_t>(q_negs[i]);
                     for (size_t j = 0; j < BATCH_SIZE; ++j) {
                         const std::byte* db_ = static_cast<const std::byte*>(db[j]);
-                        unsigned int b2 = static_cast<unsigned int>(static_cast<uint8_t>(db_[i]));
-                        unsigned int n2 = static_cast<unsigned int>(static_cast<uint8_t>(db_[i + mask_bytes]));
-                        aa[j] += std::popcount(q_b1 & b2);
-                        bb[j] += std::popcount(q_n1 & n2);
-                        cc[j] += std::popcount(q_b1 & n2);
-                        dd[j] += std::popcount(b2 & q_n1);
+                        const unsigned int b2 = static_cast<uint8_t>(db_[i]);
+                        const unsigned int n2 = static_cast<uint8_t>(db_[i + mask_bytes]);
+                        same_res[j] += std::popcount((q_b1 & b2) | (q_n1 & n2));
+                        diff_res[j] += std::popcount((q_b1 & n2) | (b2 & q_n1));
                     }
                 }
             }
 
             for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                float sim = static_cast<float>(aa[j] + bb[j] + dim) - static_cast<float>(cc[j] + dd[j]);
+                const float sim = static_cast<float>(same_res[j] + dim) - static_cast<float>(diff_res[j]);
                 out_dists[j] = 1.f - sim / (2.f * static_cast<float>(dim));
             }
         };
