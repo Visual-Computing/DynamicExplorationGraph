@@ -1,10 +1,14 @@
 #pragma once
 
 #include "deglib/config.h"
+#include "deglib/concurrent.h"
 
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <thread>
+#include <utility>
+#include <vector>
 
 namespace deglib::distances {
 
@@ -309,6 +313,134 @@ inline void fp16_to_floats(const uint16_t* fp16_vals, float* floats, size_t coun
         floats[i] = fp16_to_float_scalar(fp16_vals[i]);
     }
 }
+
+/**
+ * Computes centered vector (fp16 - mean) in float, and populates abs_vals for sorting.
+ */
+inline void center_and_abs(
+    const uint16_t* src_fp16,
+    const float* mean,
+    uint32_t dim,
+    float* out_centered,
+    std::pair<float, uint32_t>* out_abs_vals
+) {
+    uint32_t d = 0;
+#if defined(DEGLIB_X86)
+    if (deglib::cpu::has_avx2()) {
+        for (; d + 8 <= dim; d += 8) {
+            __m128i vhp = _mm_loadu_si128(reinterpret_cast<const __m128i*>(src_fp16 + d));
+            __m256 val = _mm256_cvtph_ps(vhp);
+            __m256 m = _mm256_loadu_ps(mean + d);
+            __m256 diff = _mm256_sub_ps(val, m);
+            _mm256_storeu_ps(out_centered + d, diff);
+            __m256 abs_diff = _mm256_andnot_ps(_mm256_set1_ps(-0.0f), diff);
+            alignas(32) float abs_arr[8];
+            _mm256_store_ps(abs_arr, abs_diff);
+            for (int k = 0; k < 8; ++k) {
+                out_abs_vals[d + k] = {abs_arr[k], d + k};
+            }
+        }
+    }
+#endif
+    for (; d < dim; ++d) {
+        float diff = fp16_to_float(src_fp16[d]) - mean[d];
+        out_centered[d] = diff;
+        out_abs_vals[d] = {std::abs(diff), d};
+    }
+}
+
+/**
+ * Directly subtracts mean_fp16 from src_fp16 in native FP16 hardware without converting to float,
+ * writes the FP16 difference into out_diff_fp16, and writes {abs_val (uint16_t), index} pairs.
+ */
+inline void sub_and_abs_fp16(
+    const uint16_t* src_fp16,
+    const uint16_t* mean_fp16,
+    uint32_t dim,
+    uint16_t* out_diff_fp16,
+    std::pair<uint16_t, uint32_t>* out_abs_vals
+) {
+    uint32_t d = 0;
+#if defined(DEGLIB_X86)
+    if (deglib::cpu::has_avx2()) {
+        for (; d + 8 <= dim; d += 8) {
+            __m128i a_h = _mm_loadu_si128(reinterpret_cast<const __m128i*>(src_fp16 + d));
+            __m128i b_h = _mm_loadu_si128(reinterpret_cast<const __m128i*>(mean_fp16 + d));
+            __m256 a_f = _mm256_cvtph_ps(a_h);
+            __m256 b_f = _mm256_cvtph_ps(b_h);
+            __m256 diff_f = _mm256_sub_ps(a_f, b_f);
+            __m128i diff_h = _mm256_cvtps_ph(diff_f, 0);
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(out_diff_fp16 + d), diff_h);
+
+            __m128i abs_h = _mm_and_si128(diff_h, _mm_set1_epi16(0x7fff));
+            alignas(16) uint16_t abs_arr[8];
+            _mm_store_si128(reinterpret_cast<__m128i*>(abs_arr), abs_h);
+            for (int k = 0; k < 8; ++k) {
+                out_abs_vals[d + k] = {abs_arr[k], d + k};
+            }
+        }
+    }
+#endif
+    for (; d < dim; ++d) {
+        float diff = fp16_to_float(src_fp16[d]) - fp16_to_float(mean_fp16[d]);
+        uint16_t h = float_to_fp16(diff);
+        out_diff_fp16[d] = h;
+        out_abs_vals[d] = {static_cast<uint16_t>(h & 0x7FFFu), d};
+    }
+}
+
+/**
+ * Computes dimension-wise (column-wise) mean of a batch of FP16 vectors.
+ * Accumulates directly from FP16 in SIMD registers into per-thread sums without
+ * allocating intermediate float arrays and without any mutex locks.
+ */
+inline void compute_column_mean(const uint16_t* src_fp16, size_t count, uint32_t dim, float* out_mean, size_t numThreads = 0) {
+    if (count == 0 || dim == 0 || src_fp16 == nullptr || out_mean == nullptr) return;
+
+    const size_t actual_threads = (numThreads == 0) ? std::clamp(static_cast<size_t>(std::thread::hardware_concurrency()), size_t{1}, size_t{64}) : numThreads;
+    std::vector<double> thread_sums(actual_threads * dim, 0.0);
+
+    deglib::concurrent::parallel_batch_for(static_cast<size_t>(0), count, actual_threads, [&](size_t begin, size_t end, size_t thread_id) {
+        double* my_sum = thread_sums.data() + thread_id * dim;
+#if defined(DEGLIB_X86)
+        if (deglib::cpu::has_avx2()) {
+            for (size_t i = begin; i < end; ++i) {
+                const uint16_t* vec = src_fp16 + i * dim;
+                uint32_t d = 0;
+                for (; d + 8 <= dim; d += 8) {
+                    __m128i vhp = _mm_loadu_si128(reinterpret_cast<const __m128i*>(vec + d));
+                    __m256 va = _mm256_cvtph_ps(vhp);
+                    alignas(32) float f_vals[8];
+                    _mm256_store_ps(f_vals, va);
+                    for (int k = 0; k < 8; ++k) {
+                        my_sum[d + k] += f_vals[k];
+                    }
+                }
+                for (; d < dim; ++d) {
+                    my_sum[d] += fp16_to_float(vec[d]);
+                }
+            }
+            return;
+        }
+#endif
+        for (size_t i = begin; i < end; ++i) {
+            const uint16_t* vec = src_fp16 + i * dim;
+            for (uint32_t d = 0; d < dim; ++d) {
+                my_sum[d] += fp16_to_float(vec[d]);
+            }
+        }
+    });
+
+    const double inv_count = 1.0 / static_cast<double>(count);
+    for (uint32_t d = 0; d < dim; ++d) {
+        double total = 0.0;
+        for (size_t t = 0; t < actual_threads; ++t) {
+            total += thread_sums[t * dim + d];
+        }
+        out_mean[d] = static_cast<float>(total * inv_count);
+    }
+}
+
 }  // namespace fp16
 
 }  // end namespace deglib::distances

@@ -1405,13 +1405,62 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def(py::init<>())
         .def(py::init<uint32_t>(), py::arg("non_zeros"))
         .def_readwrite("non_zeros", &deglib::quantization::evp::EvpQuantizer::non_zeros)
+        .def_property_readonly(
+            "mean",
+            [](const deglib::quantization::evp::EvpQuantizer& q) -> py::object {
+                if (!q.has_mean()) return py::none();
+                const auto& m = q.get_mean();
+                py::array_t<float> arr(static_cast<py::ssize_t>(m.size()));
+                std::memcpy(arr.request().ptr, m.data(), m.size() * sizeof(float));
+                return arr;
+            },
+            "Current 1D mean vector subtracted during quantization, or None if not set"
+        )
+        .def("clear_mean", &deglib::quantization::evp::EvpQuantizer::clear_mean, "Clears the mean vector")
+        .def(
+            "set_mean",
+            [](deglib::quantization::evp::EvpQuantizer& q, py::array_t<float, py::array::c_style> mean) {
+                py::buffer_info info = mean.request();
+                if (info.ndim != 1) {
+                    throw std::invalid_argument("mean must be a 1D float32 array");
+                }
+                q.set_mean(std::span<const float>(static_cast<const float*>(info.ptr), info.shape[0]));
+            },
+            py::arg("mean"), "Set the 1D dimension-wise mean vector subtracted during quantization"
+        )
+        .def(
+            "fit_mean",
+            [](deglib::quantization::evp::EvpQuantizer& q, py::array vectors, size_t num_threads) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                const bool is_fp16 = (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e"));
+                const bool is_fp32 = (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float"));
+                if (!is_fp16 && !is_fp32) {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+                py::gil_scoped_release release;
+                if (is_fp16) {
+                    q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, num_threads);
+                } else {
+                    q.fit(static_cast<const float*>(buf.ptr), count, dim, num_threads);
+                }
+            },
+            py::arg("vectors"), py::arg("num_threads") = 0, "Computes and sets the 1D mean vector using parallel C++ SIMD"
+        )
         .def(
             "quantize",
-            [](const deglib::quantization::evp::EvpQuantizer& q, py::array vectors, size_t num_threads) {
+            [](deglib::quantization::evp::EvpQuantizer& q, py::array vectors, size_t num_threads, std::optional<py::array_t<float, py::array::c_style>> mean) {
                 py::buffer_info buf = vectors.request();
                 auto [count, dim] = get_2d_shape(buf);
                 if (dim % 8 != 0) {
                     throw std::invalid_argument(std::format("Vector dimension ({}) must be a multiple of 8 for EVP quantization", dim));
+                }
+                if (mean.has_value() && !mean->is_none()) {
+                    py::buffer_info mean_info = mean->request();
+                    if (mean_info.ndim != 1) {
+                        throw std::invalid_argument("mean must be a 1D float32 array");
+                    }
+                    q.set_mean(std::span<const float>(static_cast<const float*>(mean_info.ptr), mean_info.shape[0]));
                 }
                 const bool is_fp16 = (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e"));
                 const bool is_fp32 = (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float"));
@@ -1434,7 +1483,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
                 }
                 return output;
             },
-            py::arg("vectors"), py::arg("num_threads") = 0
+            py::arg("vectors"), py::arg("num_threads") = 0, py::arg("mean") = py::none()
         );
 
     // search submodule

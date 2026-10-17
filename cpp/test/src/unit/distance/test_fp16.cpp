@@ -478,3 +478,154 @@ TEST(FP16ConversionTest, BenchmarkConversionSpeed) {
         EXPECT_LT(simd_ms, current_ms) << "SIMD path should be faster than scalar when AVX2 is available";
     }
 }
+
+TEST(FP16ConversionTest, CenterAndAbsSIMDvsScalar) {
+    const uint32_t dim = 137;  // Non-multiple of 8 to test remainder handling
+    std::mt19937 rng(1234);
+    std::uniform_real_distribution<float> dist(-10.0f, 10.0f);
+
+    std::vector<float> floats(dim);
+    std::vector<float> mean(dim);
+    for (size_t i = 0; i < dim; ++i) {
+        floats[i] = dist(rng);
+        mean[i] = dist(rng);
+    }
+
+    std::vector<uint16_t> fp16_vals(dim);
+    floats_to_fp16(floats.data(), fp16_vals.data(), dim);
+
+    std::vector<float> centered(dim);
+    std::vector<std::pair<float, uint32_t>> abs_vals(dim);
+    center_and_abs(fp16_vals.data(), mean.data(), dim, centered.data(), abs_vals.data());
+
+    for (uint32_t d = 0; d < dim; ++d) {
+        float expected_diff = fp16_to_float(fp16_vals[d]) - mean[d];
+        EXPECT_NEAR(centered[d], expected_diff, 1e-5f) << "at dim " << d;
+        EXPECT_NEAR(abs_vals[d].first, std::abs(expected_diff), 1e-5f) << "at dim " << d;
+        EXPECT_EQ(abs_vals[d].second, d) << "at dim " << d;
+    }
+}
+
+TEST(FP16ConversionTest, ComputeColumnMeanAccuracy) {
+    const size_t count = 100;
+    const uint32_t dim = 64;
+    std::mt19937 rng(42);
+    std::normal_distribution<float> dist(5.0f, 2.0f);
+
+    std::vector<float> floats(count * dim);
+    for (auto& v : floats) v = dist(rng);
+
+    std::vector<uint16_t> fp16_data(count * dim);
+    floats_to_fp16(floats.data(), fp16_data.data(), count * dim);
+
+    std::vector<float> mean_mt(dim);
+    compute_column_mean(fp16_data.data(), count, dim, mean_mt.data(), 4);
+
+    std::vector<double> expected(dim, 0.0);
+    for (size_t i = 0; i < count; ++i) {
+        for (uint32_t d = 0; d < dim; ++d) {
+            expected[d] += fp16_to_float(fp16_data[i * dim + d]);
+        }
+    }
+
+    for (uint32_t d = 0; d < dim; ++d) {
+        EXPECT_NEAR(mean_mt[d], static_cast<float>(expected[d] / count), 1e-4f);
+    }
+}
+
+TEST(FP16Benchmark, CompareMeanAndSubtractionMethods) {
+    const size_t count = 50000;
+    const uint32_t dim = 1024;
+    std::cout << "\n================ FP16 OPTIMIZATION BENCHMARK ================\n";
+    std::cout << "Testing with " << count << " vectors of dimension " << dim << " ...\n";
+
+    std::mt19937 rng(42);
+    std::normal_distribution<float> dist(0.0f, 1.0f);
+    std::vector<uint16_t> fp16_data(count * dim);
+    for (size_t i = 0; i < count * dim; ++i) {
+        fp16_data[i] = float_to_fp16(dist(rng));
+    }
+
+    // 1. BENCHMARK: Mean calculation
+    // Approach A: Naive FP16 -> Float scalar accumulation
+    std::vector<float> mean_a(dim, 0.0f);
+    auto t0 = std::chrono::high_resolution_clock::now();
+    {
+        std::vector<double> sum(dim, 0.0);
+        for (size_t i = 0; i < count; ++i) {
+            const uint16_t* vec = fp16_data.data() + i * dim;
+            for (uint32_t d = 0; d < dim; ++d) {
+                sum[d] += fp16_to_float(vec[d]);
+            }
+        }
+        const double inv_count = 1.0 / static_cast<double>(count);
+        for (uint32_t d = 0; d < dim; ++d) {
+            mean_a[d] = static_cast<float>(sum[d] * inv_count);
+        }
+    }
+    auto t1 = std::chrono::high_resolution_clock::now();
+    double time_mean_a = std::chrono::duration<double, std::milli>(t1 - t0).count();
+
+    // Approach B: Lock-free SIMD compute_column_mean
+    std::vector<float> mean_b(dim, 0.0f);
+    auto t2 = std::chrono::high_resolution_clock::now();
+    compute_column_mean(fp16_data.data(), count, dim, mean_b.data(), 8);
+    auto t3 = std::chrono::high_resolution_clock::now();
+    double time_mean_b = std::chrono::duration<double, std::milli>(t3 - t2).count();
+
+    std::cout << "\n[1] COLUMN MEAN CALCULATION (" << count << " x " << dim << "):\n";
+    std::cout << "  Approach A (FP16->Float scalar):    " << time_mean_a << " ms\n";
+    std::cout << "  Approach B (Lock-free SIMD FP16):   " << time_mean_b << " ms\n";
+    std::cout << "  Speedup:                            " << (time_mean_a / time_mean_b) << "x\n";
+
+    float max_mean_diff = 0.0f;
+    for (uint32_t d = 0; d < dim; ++d) {
+        max_mean_diff = std::max(max_mean_diff, std::abs(mean_a[d] - mean_b[d]));
+    }
+    std::cout << "  Max absolute diff between A and B:  " << max_mean_diff << "\n";
+    EXPECT_LT(max_mean_diff, 1e-4f);
+
+    // 2. BENCHMARK: Subtraction + Abs + Top-K selection (EVP Quantization workload)
+    const size_t sub_count = 10000;
+    const uint32_t non_zeros = 700;
+    std::vector<uint16_t> mean_fp16(dim);
+    floats_to_fp16(mean_b.data(), mean_fp16.data(), dim);
+
+    // Approach A: FP16 to Float -> float center_and_abs -> float nth_element
+    auto t4 = std::chrono::high_resolution_clock::now();
+    {
+        std::vector<float> centered(dim);
+        std::vector<std::pair<float, uint32_t>> abs_vals(dim);
+        for (size_t i = 0; i < sub_count; ++i) {
+            const uint16_t* vec = fp16_data.data() + i * dim;
+            center_and_abs(vec, mean_b.data(), dim, centered.data(), abs_vals.data());
+            std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(), [](const auto& a, const auto& b) {
+                return a.first != b.first ? a.first < b.first : a.second < b.second;
+            });
+        }
+    }
+    auto t5 = std::chrono::high_resolution_clock::now();
+    double time_sub_a = std::chrono::duration<double, std::milli>(t5 - t4).count();
+
+    // Approach B: Native FP16 sub_and_abs_fp16 -> uint16_t nth_element
+    auto t6 = std::chrono::high_resolution_clock::now();
+    {
+        std::vector<uint16_t> diff_buf(dim);
+        std::vector<std::pair<uint16_t, uint32_t>> abs_vals(dim);
+        for (size_t i = 0; i < sub_count; ++i) {
+            const uint16_t* vec = fp16_data.data() + i * dim;
+            sub_and_abs_fp16(vec, mean_fp16.data(), dim, diff_buf.data(), abs_vals.data());
+            std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(), [](const auto& a, const auto& b) {
+                return a.first != b.first ? a.first < b.first : a.second < b.second;
+            });
+        }
+    }
+    auto t7 = std::chrono::high_resolution_clock::now();
+    double time_sub_b = std::chrono::duration<double, std::milli>(t7 - t6).count();
+
+    std::cout << "\n[2] SUBTRACTION + ABS + SORT (" << sub_count << " vectors, dim=" << dim << ", nz=" << non_zeros << "):\n";
+    std::cout << "  Approach A (Float centered + float sort):   " << time_sub_a << " ms\n";
+    std::cout << "  Approach B (Native FP16 SIMD + uint16 sort): " << time_sub_b << " ms\n";
+    std::cout << "  Speedup:                                    " << (time_sub_a / time_sub_b) << "x\n";
+    std::cout << "=============================================================\n\n";
+}
