@@ -104,11 +104,16 @@ inline float fp16_to_float_msvc(uint16_t h) {
 
 inline void floats_to_fp16_msvc(const float* floats, uint16_t* fp16_vals, size_t count) {
     size_t i = 0;
+    // Process 8 floats per step with _mm256_cvtps_ph
+    for (; i + 8 <= count; i += 8) {
+        __m256 va = _mm256_loadu_ps(floats + i);
+        __m128i vhp = _mm256_cvtps_ph(va, 0);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(fp16_vals + i), vhp);
+    }
     // Process 4 floats per step with _mm_cvtps_ph
     for (; i + 4 <= count; i += 4) {
         __m128 va = _mm_loadu_ps(floats + i);
         __m128i vhp = _mm_cvtps_ph(va, 0);
-        // Store 4 uint16_t values (8 bytes) into destination directly
         _mm_storel_epi64(reinterpret_cast<__m128i*>(fp16_vals + i), vhp);
     }
     // Scalar fallback for remaining 0-3 elements
@@ -119,6 +124,12 @@ inline void floats_to_fp16_msvc(const float* floats, uint16_t* fp16_vals, size_t
 
 inline void fp16_to_floats_msvc(const uint16_t* fp16_vals, float* floats, size_t count) {
     size_t i = 0;
+    // Process 8 uint16_t per step with _mm256_cvtph_ps
+    for (; i + 8 <= count; i += 8) {
+        __m128i vhp = _mm_loadu_si128(reinterpret_cast<const __m128i*>(fp16_vals + i));
+        __m256 va = _mm256_cvtph_ps(vhp);
+        _mm256_storeu_ps(floats + i, va);
+    }
     // Process 4 uint16_t per step with _mm_cvtph_ps
     for (; i + 4 <= count; i += 4) {
         __m128i vhp = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(fp16_vals + i));
@@ -298,7 +309,6 @@ inline void fp16_to_floats(const uint16_t* fp16_vals, float* floats, size_t coun
         floats[i] = fp16_to_float_scalar(fp16_vals[i]);
     }
 }
-
 }  // namespace fp16
 
 }  // end namespace deglib::distances

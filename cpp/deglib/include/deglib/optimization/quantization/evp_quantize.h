@@ -14,6 +14,11 @@
 
 namespace deglib::quantization::evp {
 
+// ============================================================================
+// Internal Implementation Details (Low-level kernels & buffer helpers)
+// ============================================================================
+namespace detail {
+
 // Validates span-based quantize inputs, returns the vector count.
 inline size_t checked_span_count(size_t src_size, size_t dst_size, uint32_t dim) {
     if (dim == 0) {
@@ -33,20 +38,10 @@ inline size_t checked_span_count(size_t src_size, size_t dst_size, uint32_t dim)
     return count;
 }
 
-// ============================================================================
-// Conversion: fp32 → EVP bytes
-// ============================================================================
-
 /**
  * Quantizes a single fp32 vector directly into a pre-allocated EVP byte buffer.
  *
  * Layout: [ones (dim/8 bytes)][negative_ones (dim/8 bytes)]
- *
- * @param embedding  Pointer to dim float values (row-major)
- * @param dim        Dimension (must be divisible by 8)
- * @param non_zeros  Number of top-K elements by absolute value
- * @param out_bytes  Pointer to buffer of at least 2 * dim/8 bytes
- * @throws std::invalid_argument if dim % 8 != 0 or non_zeros >= dim
  */
 inline void quantize_single_into(const float* embedding, uint32_t dim, uint32_t non_zeros, std::byte* out_bytes) {
     if (dim % 8 != 0) {
@@ -55,8 +50,15 @@ inline void quantize_single_into(const float* embedding, uint32_t dim, uint32_t 
     if (non_zeros >= dim) {
         throw std::invalid_argument("quantize_single: non_zeros must be < dim");
     }
+    if (embedding == nullptr || out_bytes == nullptr) {
+        throw std::invalid_argument("quantize_single: embedding and out_bytes must not be null");
+    }
 
     const size_t mask_bytes = dim / 8;
+    std::byte* ones_dst = out_bytes;
+    std::byte* negs_dst = out_bytes + mask_bytes;
+    std::memset(out_bytes, 0, 2 * mask_bytes);
+
     std::vector<std::pair<float, uint32_t>> abs_vals(dim);
     for (uint32_t i = 0; i < dim; ++i) {
         abs_vals[i] = {std::abs(embedding[i]), i};
@@ -64,353 +66,71 @@ inline void quantize_single_into(const float* embedding, uint32_t dim, uint32_t 
     std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(), [](const auto& a, const auto& b) {
         return a.first != b.first ? a.first < b.first : a.second < b.second;
     });
-
-    std::vector<uint8_t> is_top(dim, 0);
     for (uint32_t j = dim - non_zeros; j < dim; ++j) {
-        is_top[abs_vals[j].second] = 1;
-    }
-
-    std::byte* ones_dst = out_bytes;
-    std::byte* negs_dst = out_bytes + mask_bytes;
-
-    for (uint32_t byte_idx = 0; byte_idx < mask_bytes; ++byte_idx) {
-        int byte_val = 0;
-        for (int bit = 0; bit < 8; ++bit) {
-            const uint32_t bit_idx = byte_idx * 8 + bit;
-            if (bit_idx >= dim) break;
-            if (is_top[bit_idx] && embedding[bit_idx] > 0.0f) {
-                byte_val |= (1 << bit);
-            }
+        const uint32_t bit_idx = abs_vals[j].second;
+        const float val = embedding[bit_idx];
+        if (val > 0.0f) {
+            ones_dst[bit_idx >> 3] |= static_cast<std::byte>(1 << (bit_idx & 7));
+        } else if (val < 0.0f) {
+            negs_dst[bit_idx >> 3] |= static_cast<std::byte>(1 << (bit_idx & 7));
         }
-        ones_dst[byte_idx] = static_cast<std::byte>(byte_val);
-    }
-
-    for (uint32_t byte_idx = 0; byte_idx < mask_bytes; ++byte_idx) {
-        int byte_val = 0;
-        for (int bit = 0; bit < 8; ++bit) {
-            const uint32_t bit_idx = byte_idx * 8 + bit;
-            if (bit_idx >= dim) break;
-            if (is_top[bit_idx] && embedding[bit_idx] < 0.0f) {
-                byte_val |= (1 << bit);
-            }
-        }
-        negs_dst[byte_idx] = static_cast<std::byte>(byte_val);
     }
 }
 
 /**
- * Quantizes a single fp32 vector to EVP bytes.
- *
- * Layout: [ones (dim/8 bytes)][negative_ones (dim/8 bytes)]
- *
- * @param embedding  Pointer to dim float values (row-major)
- * @param dim        Dimension (must be divisible by 8)
- * @param non_zeros  Number of top-K elements by absolute value
- * @return std::vector<std::byte> with 2 * dim/8 bytes
- * @throws std::invalid_argument if dim % 8 != 0 or non_zeros >= dim
- */
-inline std::vector<std::byte> quantize_single(const float* embedding, uint32_t dim, uint32_t non_zeros) {
-    const size_t mask_bytes = dim / 8;
-    std::vector<std::byte> result(2 * mask_bytes);
-    quantize_single_into(embedding, dim, non_zeros, result.data());
-    return result;
-}
-
-/**
- * Quantizes a batch of fp32 vectors to EVP bytes, multi-threaded.
+ * Quantizes a batch of fp32 vectors directly into a pre-allocated destination buffer, multi-threaded.
  *
  * Layout: [count][ones (dim/8)][negative_ones (dim/8)]
- *
- * @param data       Pointer to [count x dim] float data (row-major)
- * @param count      Number of vectors
- * @param dim        Dimension (must be divisible by 8)
- * @param non_zeros  Number of top-K elements per vector
- * @param numThreads Number of threads (0 = auto-detect)
- * @return std::vector<std::byte> with count * 2 * dim/8 bytes
- * @throws std::invalid_argument if dim % 8 != 0 or non_zeros >= dim
  */
-inline std::vector<std::byte> quantize_batch(const float* data, size_t count, uint32_t dim, uint32_t non_zeros, size_t numThreads = 0) {
+inline void quantize_batch_into(const float* data, size_t count, uint32_t dim, uint32_t non_zeros, std::byte* out_bytes, size_t numThreads = 0) {
     if (dim % 8 != 0) {
         throw std::invalid_argument("quantize_batch: dim must be divisible by 8, got " + std::to_string(dim));
     }
     if (non_zeros >= dim) {
         throw std::invalid_argument("quantize_batch: non_zeros must be < dim");
     }
+    if (count == 0) return;
+    if (data == nullptr || out_bytes == nullptr) {
+        throw std::invalid_argument("quantize_batch: data and out_bytes must not be null");
+    }
 
     const size_t mask_bytes = dim / 8;
     const size_t bytes_per_evp = 2 * mask_bytes;
-    std::vector<std::byte> result(count * bytes_per_evp);
-
     const size_t chunk_size = 8192;
     const size_t num_chunks = (count + chunk_size - 1) / chunk_size;
 
     deglib::concurrent::parallel_for(
-        static_cast<size_t>(0), num_chunks, numThreads, [data, count, dim, non_zeros, mask_bytes, bytes_per_evp, chunk_size, &result](size_t chunk_id, size_t) {
-            size_t start = chunk_id * chunk_size;
-            size_t end = std::min(start + chunk_size, count);
-
-            // Thread-local buffers
+        static_cast<size_t>(0), num_chunks, numThreads,
+        [data, count, dim, non_zeros, mask_bytes, bytes_per_evp, chunk_size, out_bytes](size_t chunk_id, size_t) {
+            const size_t start = chunk_id * chunk_size;
+            const size_t end = std::min(start + chunk_size, count);
             std::vector<std::pair<float, uint32_t>> abs_vals(dim);
-            std::vector<uint8_t> is_top(dim, 0);
 
             for (size_t i = start; i < end; ++i) {
                 const float* emb = &data[i * dim];
-                std::byte* dst = &result[i * bytes_per_evp];
+                std::byte* dst = &out_bytes[i * bytes_per_evp];
+                std::byte* ones_dst = dst;
+                std::byte* negs_dst = dst + mask_bytes;
+                std::memset(dst, 0, bytes_per_evp);
 
-                // Step 1: top non_zeros by absolute value
                 for (uint32_t k = 0; k < dim; ++k) {
                     abs_vals[k] = {std::abs(emb[k]), k};
                 }
                 std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(), [](const auto& a, const auto& b) {
                     return a.first != b.first ? a.first < b.first : a.second < b.second;
                 });
-
-                is_top.assign(dim, 0);
                 for (uint32_t j = dim - non_zeros; j < dim; ++j) {
-                    is_top[abs_vals[j].second] = 1;
-                }
-
-                // Step 2: write ones + negs masks
-                std::byte* ones_dst = dst;
-                std::byte* negs_dst = dst + mask_bytes;
-
-                for (uint32_t byte_idx = 0; byte_idx < mask_bytes; ++byte_idx) {
-                    int bv = 0;
-                    for (int bit = 0; bit < 8; ++bit) {
-                        const uint32_t bit_idx = byte_idx * 8 + bit;
-                        if (bit_idx >= dim) break;
-                        if (is_top[bit_idx] && emb[bit_idx] > 0.0f) bv |= (1 << bit);
+                    const uint32_t bit_idx = abs_vals[j].second;
+                    const float val = emb[bit_idx];
+                    if (val > 0.0f) {
+                        ones_dst[bit_idx >> 3] |= static_cast<std::byte>(1 << (bit_idx & 7));
+                    } else if (val < 0.0f) {
+                        negs_dst[bit_idx >> 3] |= static_cast<std::byte>(1 << (bit_idx & 7));
                     }
-                    ones_dst[byte_idx] = static_cast<std::byte>(bv);
-                }
-
-                for (uint32_t byte_idx = 0; byte_idx < mask_bytes; ++byte_idx) {
-                    int bv = 0;
-                    for (int bit = 0; bit < 8; ++bit) {
-                        const uint32_t bit_idx = byte_idx * 8 + bit;
-                        if (bit_idx >= dim) break;
-                        if (is_top[bit_idx] && emb[bit_idx] < 0.0f) bv |= (1 << bit);
-                    }
-                    negs_dst[byte_idx] = static_cast<std::byte>(bv);
                 }
             }
         }
     );
-
-    return result;
-}
-
-/**
- * Quantizes a batch of FP16 (uint16_t) vectors to EVP bytes, multi-threaded.
- *
- * --- Why this works directly on uint16_t ---
- * IEEE 754 half-precision floats (binary16 format) are structured as:
- *   [1 sign bit (bit 15)] [5 exponent bits (bits 10-14)] [10 mantissa bits (bits 0-9)]
- *
- * Floating-point numbers formatted in standard IEEE 754 binary representation
- * exhibit a highly useful property: their absolute lexicographical ordering.
- * By clearing the sign bit (bit 15) via a bitwise AND (x & 0x7FFFu), the remaining
- * 15 bits representing the magnitude (exponent and mantissa) sort as unsigned
- * integers in the exact same monotonic order as their real absolute floating-point
- * values.
- *
- * Consequently:
- *   abs(float_value_A) < abs(float_value_B)
- * is mathematically identical to:
- *   (uint16_value_A & 0x7FFFu) < (uint16_value_B & 0x7FFFu)
- *
- * Note that the sign of each selected element is not ignored; the sign bit (bit 15)
- * is checked using a fast bitwise test: (x & 0x8000u) != 0 for negative, and == 0 for positive.
- * This routes positive elements into the 'ones' mask and negative elements into the 'negative_ones'
- * mask, perfectly matching the mathematical behavior of standard float quantization.
- *
- * This allows us to perform the Top-K selection and sign routing using single-cycle integer
- * bitwise operations. This entirely avoids slow floating-point conversions and float arithmetic,
- * yielding substantial performance benefits.
- *
- * --- Requirements ---
- * 1. The input data must be structured in standard IEEE 754 half-precision float format
- *    (binary16), passed as uint16_t.
- * 2. The data must not contain NaNs (since NaNs violate the strict ordering assumption
- *    of floating-point values). Standard embedding datasets normally do not have NaNs.
- *
- * Layout: [count][ones (dim/8)][negative_ones (dim/8)]
- *
- * @param data       Pointer to [count x dim] uint16_t FP16 data (row-major)
- * @param count      Number of vectors
- * @param dim        Dimension (must be divisible by 8)
- * @param non_zeros  Number of top-K elements per vector
- * @param numThreads Number of threads (0 = auto-detect)
- * @return std::vector<std::byte> with count * 2 * dim/8 bytes
- * @throws std::invalid_argument if dim % 8 != 0 or non_zeros >= dim
- */
-inline std::vector<std::byte> quantize_batch(const uint16_t* data, size_t count, uint32_t dim, uint32_t non_zeros, size_t numThreads = 0) {
-    if (dim % 8 != 0) {
-        throw std::invalid_argument("quantize_batch: dim must be divisible by 8, got " + std::to_string(dim));
-    }
-    if (non_zeros >= dim) {
-        throw std::invalid_argument("quantize_batch: non_zeros must be < dim");
-    }
-
-    const size_t mask_bytes = dim / 8;
-    const size_t bytes_per_evp = 2 * mask_bytes;
-    std::vector<std::byte> result(count * bytes_per_evp);
-
-    const size_t chunk_size = 8192;
-    const size_t num_chunks = (count + chunk_size - 1) / chunk_size;
-
-    deglib::concurrent::parallel_for(
-        static_cast<size_t>(0), num_chunks, numThreads, [data, count, dim, non_zeros, mask_bytes, bytes_per_evp, chunk_size, &result](size_t chunk_id, size_t) {
-            size_t start = chunk_id * chunk_size;
-            size_t end = std::min(start + chunk_size, count);
-
-            // Thread-local buffers
-            std::vector<std::pair<uint16_t, uint32_t>> abs_vals(dim);
-            std::vector<uint8_t> is_top(dim, 0);
-
-            for (size_t i = start; i < end; ++i) {
-                const uint16_t* emb = &data[i * dim];
-                std::byte* dst = &result[i * bytes_per_evp];
-
-                // Step 1: top non_zeros by absolute value (ignoring sign bit in FP16)
-                for (uint32_t k = 0; k < dim; ++k) {
-                    abs_vals[k] = {static_cast<uint16_t>(emb[k] & 0x7FFFu), k};
-                }
-                std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(), [](const auto& a, const auto& b) {
-                    return a.first != b.first ? a.first < b.first : a.second < b.second;
-                });
-
-                is_top.assign(dim, 0);
-                for (uint32_t j = dim - non_zeros; j < dim; ++j) {
-                    is_top[abs_vals[j].second] = 1;
-                }
-
-                // Step 2: write ones + negs masks
-                std::byte* ones_dst = dst;
-                std::byte* negs_dst = dst + mask_bytes;
-
-                for (uint32_t byte_idx = 0; byte_idx < mask_bytes; ++byte_idx) {
-                    int bv = 0;
-                    for (int bit = 0; bit < 8; ++bit) {
-                        const uint32_t bit_idx = byte_idx * 8 + bit;
-                        if (bit_idx >= dim) break;
-                        // Positive: sign bit (0x8000) is 0 and absolute value is > 0
-                        if (is_top[bit_idx] && (emb[bit_idx] & 0x8000u) == 0 && (emb[bit_idx] & 0x7FFFu) > 0) {
-                            bv |= (1 << bit);
-                        }
-                    }
-                    ones_dst[byte_idx] = static_cast<std::byte>(bv);
-                }
-
-                for (uint32_t byte_idx = 0; byte_idx < mask_bytes; ++byte_idx) {
-                    int bv = 0;
-                    for (int bit = 0; bit < 8; ++bit) {
-                        const uint32_t bit_idx = byte_idx * 8 + bit;
-                        if (bit_idx >= dim) break;
-                        // Negative: sign bit (0x8000) is 1 and absolute value is > 0
-                        if (is_top[bit_idx] && (emb[bit_idx] & 0x8000u) != 0 && (emb[bit_idx] & 0x7FFFu) > 0) {
-                            bv |= (1 << bit);
-                        }
-                    }
-                    negs_dst[byte_idx] = static_cast<std::byte>(bv);
-                }
-            }
-        }
-    );
-
-    return result;
-}
-
-/**
- * Quantizes a batch of FP16 (uint16_t) vectors stored as a vector of vectors (std::vector<std::vector<std::byte>>)
- * to EVP bytes, multi-threaded. This completely avoids contiguous allocation copies of the raw dataset.
- *
- * Layout of output: [count][ones (dim/8)][negative_ones (dim/8)]
- *
- * @param data       Vector of vectors containing FP16 float data
- * @param dim        Dimension (must be divisible by 8)
- * @param non_zeros  Number of top-K elements per vector
- * @param numThreads Number of threads (0 = auto-detect)
- * @return std::vector<std::byte> with count * 2 * dim/8 bytes
- * @throws std::invalid_argument if dim % 8 != 0 or non_zeros >= dim
- */
-inline std::vector<std::byte> quantize_batch(const std::vector<std::vector<std::byte>>& data, uint32_t dim, uint32_t non_zeros, size_t numThreads = 0) {
-    const size_t count = data.size();
-    if (dim % 8 != 0) {
-        throw std::invalid_argument("quantize_batch: dim must be divisible by 8, got " + std::to_string(dim));
-    }
-    if (non_zeros >= dim) {
-        throw std::invalid_argument("quantize_batch: non_zeros must be < dim");
-    }
-
-    const size_t mask_bytes = dim / 8;
-    const size_t bytes_per_evp = 2 * mask_bytes;
-    std::vector<std::byte> result(count * bytes_per_evp);
-
-    const size_t chunk_size = 8192;
-    const size_t num_chunks = (count + chunk_size - 1) / chunk_size;
-
-    deglib::concurrent::parallel_for(
-        static_cast<size_t>(0), num_chunks, numThreads,
-        [&data, count, dim, non_zeros, mask_bytes, bytes_per_evp, chunk_size, &result](size_t chunk_id, size_t) {
-            size_t start = chunk_id * chunk_size;
-            size_t end = std::min(start + chunk_size, count);
-
-            // Thread-local buffers
-            std::vector<std::pair<uint16_t, uint32_t>> abs_vals(dim);
-            std::vector<uint8_t> is_top(dim, 0);
-
-            for (size_t i = start; i < end; ++i) {
-                const uint16_t* emb = reinterpret_cast<const uint16_t*>(data[i].data());
-                std::byte* dst = &result[i * bytes_per_evp];
-
-                // Step 1: top non_zeros by absolute value (ignoring sign bit in FP16)
-                for (uint32_t k = 0; k < dim; ++k) {
-                    abs_vals[k] = {static_cast<uint16_t>(emb[k] & 0x7FFFu), k};
-                }
-                std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(), [](const auto& a, const auto& b) {
-                    return a.first != b.first ? a.first < b.first : a.second < b.second;
-                });
-
-                is_top.assign(dim, 0);
-                for (uint32_t j = dim - non_zeros; j < dim; ++j) {
-                    is_top[abs_vals[j].second] = 1;
-                }
-
-                // Step 2: write ones + negs masks
-                std::byte* ones_dst = dst;
-                std::byte* negs_dst = dst + mask_bytes;
-
-                for (uint32_t byte_idx = 0; byte_idx < mask_bytes; ++byte_idx) {
-                    int bv = 0;
-                    for (int bit = 0; bit < 8; ++bit) {
-                        const uint32_t bit_idx = byte_idx * 8 + bit;
-                        if (bit_idx >= dim) break;
-                        // Positive: sign bit (0x8000) is 0 and absolute value is > 0
-                        if (is_top[bit_idx] && (emb[bit_idx] & 0x8000u) == 0 && (emb[bit_idx] & 0x7FFFu) > 0) {
-                            bv |= (1 << bit);
-                        }
-                    }
-                    ones_dst[byte_idx] = static_cast<std::byte>(bv);
-                }
-
-                for (uint32_t byte_idx = 0; byte_idx < mask_bytes; ++byte_idx) {
-                    int bv = 0;
-                    for (int bit = 0; bit < 8; ++bit) {
-                        const uint32_t bit_idx = byte_idx * 8 + bit;
-                        if (bit_idx >= dim) break;
-                        // Negative: sign bit (0x8000) is 1 and absolute value is > 0
-                        if (is_top[bit_idx] && (emb[bit_idx] & 0x8000u) != 0 && (emb[bit_idx] & 0x7FFFu) > 0) {
-                            bv |= (1 << bit);
-                        }
-                    }
-                    negs_dst[byte_idx] = static_cast<std::byte>(bv);
-                }
-            }
-        }
-    );
-
-    return result;
 }
 
 /**
@@ -425,8 +145,15 @@ inline void quantize_single_into(const uint16_t* embedding, uint32_t dim, uint32
     if (non_zeros >= dim) {
         throw std::invalid_argument("quantize_single: non_zeros must be < dim");
     }
+    if (embedding == nullptr || out_bytes == nullptr) {
+        throw std::invalid_argument("quantize_single: embedding and out_bytes must not be null");
+    }
 
     const size_t mask_bytes = dim / 8;
+    std::byte* ones_dst = out_bytes;
+    std::byte* negs_dst = out_bytes + mask_bytes;
+    std::memset(out_bytes, 0, 2 * mask_bytes);
+
     std::vector<std::pair<uint16_t, uint32_t>> abs_vals(dim);
     for (uint32_t i = 0; i < dim; ++i) {
         abs_vals[i] = {static_cast<uint16_t>(embedding[i] & 0x7FFFu), i};
@@ -435,54 +162,92 @@ inline void quantize_single_into(const uint16_t* embedding, uint32_t dim, uint32
         return a.first != b.first ? a.first < b.first : a.second < b.second;
     });
 
-    std::vector<uint8_t> is_top(dim, 0);
     for (uint32_t j = dim - non_zeros; j < dim; ++j) {
-        is_top[abs_vals[j].second] = 1;
-    }
-
-    std::byte* ones_dst = out_bytes;
-    std::byte* negs_dst = out_bytes + mask_bytes;
-
-    for (uint32_t byte_idx = 0; byte_idx < mask_bytes; ++byte_idx) {
-        int bv = 0;
-        for (int bit = 0; bit < 8; ++bit) {
-            const uint32_t bit_idx = byte_idx * 8 + bit;
-            if (bit_idx >= dim) break;
-            if (is_top[bit_idx] && (embedding[bit_idx] & 0x8000u) == 0 && (embedding[bit_idx] & 0x7FFFu) > 0) {
-                bv |= (1 << bit);
+        const uint32_t bit_idx = abs_vals[j].second;
+        const uint16_t h = embedding[bit_idx];
+        if ((h & 0x7FFFu) > 0) {
+            if ((h & 0x8000u) == 0) {
+                ones_dst[bit_idx >> 3] |= static_cast<std::byte>(1 << (bit_idx & 7));
+            } else {
+                negs_dst[bit_idx >> 3] |= static_cast<std::byte>(1 << (bit_idx & 7));
             }
         }
-        ones_dst[byte_idx] = static_cast<std::byte>(bv);
-    }
-
-    for (uint32_t byte_idx = 0; byte_idx < mask_bytes; ++byte_idx) {
-        int bv = 0;
-        for (int bit = 0; bit < 8; ++bit) {
-            const uint32_t bit_idx = byte_idx * 8 + bit;
-            if (bit_idx >= dim) break;
-            if (is_top[bit_idx] && (embedding[bit_idx] & 0x8000u) != 0 && (embedding[bit_idx] & 0x7FFFu) > 0) {
-                bv |= (1 << bit);
-            }
-        }
-        negs_dst[byte_idx] = static_cast<std::byte>(bv);
     }
 }
 
 /**
- * Quantizes a single FP16 (uint16_t) vector to EVP bytes.
- */
-inline std::vector<std::byte> quantize_single(const uint16_t* embedding, uint32_t dim, uint32_t non_zeros) {
-    const size_t mask_bytes = dim / 8;
-    std::vector<std::byte> result(2 * mask_bytes);
-    quantize_single_into(embedding, dim, non_zeros, result.data());
-    return result;
-}
-
-/**
- * Stateful EVP quantizer holding the non_zeros parameter.
+ * Quantizes a batch of FP16 (uint16_t) vectors directly into a pre-allocated destination buffer, multi-threaded.
  *
- * Construct once and reuse for database and query quantization so both sides
- * always share the same non_zeros setting. Mirrors the ScalarQuantizer API.
+ * Layout: [count][ones (dim/8)][negative_ones (dim/8)]
+ */
+inline void quantize_batch_into(const uint16_t* data, size_t count, uint32_t dim, uint32_t non_zeros, std::byte* out_bytes, size_t numThreads = 0) {
+    if (dim % 8 != 0) {
+        throw std::invalid_argument("quantize_batch: dim must be divisible by 8, got " + std::to_string(dim));
+    }
+    if (non_zeros >= dim) {
+        throw std::invalid_argument("quantize_batch: non_zeros must be < dim");
+    }
+    if (count == 0) return;
+    if (data == nullptr || out_bytes == nullptr) {
+        throw std::invalid_argument("quantize_batch: data and out_bytes must not be null");
+    }
+
+    const size_t mask_bytes = dim / 8;
+    const size_t bytes_per_evp = 2 * mask_bytes;
+    const size_t chunk_size = 8192;
+    const size_t num_chunks = (count + chunk_size - 1) / chunk_size;
+
+    deglib::concurrent::parallel_for(
+        static_cast<size_t>(0), num_chunks, numThreads,
+        [data, count, dim, non_zeros, mask_bytes, bytes_per_evp, chunk_size, out_bytes](size_t chunk_id, size_t) {
+            const size_t start = chunk_id * chunk_size;
+            const size_t end = std::min(start + chunk_size, count);
+            std::vector<std::pair<uint16_t, uint32_t>> abs_vals(dim);
+
+            for (size_t i = start; i < end; ++i) {
+                const uint16_t* emb = &data[i * dim];
+                std::byte* dst = &out_bytes[i * bytes_per_evp];
+                std::byte* ones_dst = dst;
+                std::byte* negs_dst = dst + mask_bytes;
+                std::memset(dst, 0, bytes_per_evp);
+
+                for (uint32_t k = 0; k < dim; ++k) {
+                    abs_vals[k] = {static_cast<uint16_t>(emb[k] & 0x7FFFu), k};
+                }
+                std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(), [](const auto& a, const auto& b) {
+                    return a.first != b.first ? a.first < b.first : a.second < b.second;
+                });
+
+                for (uint32_t j = dim - non_zeros; j < dim; ++j) {
+                    const uint32_t bit_idx = abs_vals[j].second;
+                    const uint16_t h = emb[bit_idx];
+                    if ((h & 0x7FFFu) > 0) {
+                        if ((h & 0x8000u) == 0) {
+                            ones_dst[bit_idx >> 3] |= static_cast<std::byte>(1 << (bit_idx & 7));
+                        } else {
+                            negs_dst[bit_idx >> 3] |= static_cast<std::byte>(1 << (bit_idx & 7));
+                        }
+                    }
+                }
+            }
+        }
+    );
+}
+
+}  // namespace detail
+
+// ============================================================================
+// Public API: EvpQuantizer
+// Satisfies deglib::quantization::Quantizer concept
+// ============================================================================
+
+/**
+ * EVP quantizer holding the non_zeros hyperparameter.
+ *
+ * Converts floating point vectors into ternary EVP byte-packed format:
+ * [ones (dim/8 bytes)][negative_ones (dim/8 bytes)].
+ *
+ * Purely stateless: requires no mean vector storage or loading.
  */
 class EvpQuantizer {
   public:
@@ -492,42 +257,45 @@ class EvpQuantizer {
     EvpQuantizer() = default;
     explicit EvpQuantizer(uint32_t nz) : non_zeros(nz) {}
 
+    // --- Quantization ---
     void quantize(const float* src, std::byte* dst, size_t count, uint32_t dim, size_t numThreads = 0) const {
         if (count == 0 || dim == 0) return;
         if (count == 1) {
-            quantize_single_into(src, dim, non_zeros, dst);
+            detail::quantize_single_into(src, dim, non_zeros, dst);
             return;
         }
-        auto tmp = quantize_batch(src, count, dim, non_zeros, numThreads);
-        std::memcpy(dst, tmp.data(), tmp.size());
+        detail::quantize_batch_into(src, count, dim, non_zeros, dst, numThreads);
     }
 
     void quantize(const uint16_t* src_fp16, std::byte* dst, size_t count, uint32_t dim, size_t numThreads = 0) const {
         if (count == 0 || dim == 0) return;
         if (count == 1) {
-            quantize_single_into(src_fp16, dim, non_zeros, dst);
+            detail::quantize_single_into(src_fp16, dim, non_zeros, dst);
             return;
         }
-        auto tmp = quantize_batch(src_fp16, count, dim, non_zeros, numThreads);
-        std::memcpy(dst, tmp.data(), tmp.size());
+        detail::quantize_batch_into(src_fp16, count, dim, non_zeros, dst, numThreads);
     }
 
     std::vector<std::byte> quantize(const float* src, size_t count, uint32_t dim, size_t numThreads = 0) const {
         if (count == 0 || dim == 0) return {};
-        return quantize_batch(src, count, dim, non_zeros, numThreads);
+        std::vector<std::byte> result(count * 2 * (dim / 8));
+        quantize(src, result.data(), count, dim, numThreads);
+        return result;
     }
 
     std::vector<std::byte> quantize(const uint16_t* src_fp16, size_t count, uint32_t dim, size_t numThreads = 0) const {
         if (count == 0 || dim == 0) return {};
-        return quantize_batch(src_fp16, count, dim, non_zeros, numThreads);
+        std::vector<std::byte> result(count * 2 * (dim / 8));
+        quantize(src_fp16, result.data(), count, dim, numThreads);
+        return result;
     }
 
     void quantize(std::span<const float> src, std::span<std::byte> dst, uint32_t dim, size_t numThreads = 0) const {
-        quantize(src.data(), dst.data(), checked_span_count(src.size(), dst.size(), dim), dim, numThreads);
+        quantize(src.data(), dst.data(), detail::checked_span_count(src.size(), dst.size(), dim), dim, numThreads);
     }
 
     void quantize(std::span<const uint16_t> src_fp16, std::span<std::byte> dst, uint32_t dim, size_t numThreads = 0) const {
-        quantize(src_fp16.data(), dst.data(), checked_span_count(src_fp16.size(), dst.size(), dim), dim, numThreads);
+        quantize(src_fp16.data(), dst.data(), detail::checked_span_count(src_fp16.size(), dst.size(), dim), dim, numThreads);
     }
 
     std::vector<std::byte> quantize(std::span<const float> src, uint32_t dim, size_t numThreads = 0) const {
@@ -552,5 +320,25 @@ class EvpQuantizer {
         return quantize(src_fp16.data(), src_fp16.size() / dim, dim, numThreads);
     }
 };
+
+// ============================================================================
+// Convenience Free Functions
+// ============================================================================
+
+inline std::vector<std::byte> quantize_single(const float* embedding, uint32_t dim, uint32_t non_zeros) {
+    return EvpQuantizer(non_zeros).quantize(embedding, 1, dim);
+}
+
+inline std::vector<std::byte> quantize_single(const uint16_t* embedding, uint32_t dim, uint32_t non_zeros) {
+    return EvpQuantizer(non_zeros).quantize(embedding, 1, dim);
+}
+
+inline std::vector<std::byte> quantize_batch(const float* data, size_t count, uint32_t dim, uint32_t non_zeros, size_t numThreads = 0) {
+    return EvpQuantizer(non_zeros).quantize(data, count, dim, numThreads);
+}
+
+inline std::vector<std::byte> quantize_batch(const uint16_t* data, size_t count, uint32_t dim, uint32_t non_zeros, size_t numThreads = 0) {
+    return EvpQuantizer(non_zeros).quantize(data, count, dim, numThreads);
+}
 
 }  // namespace deglib::quantization::evp

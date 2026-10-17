@@ -189,8 +189,7 @@ py::object dynamic_exploration_graph_search_batch_wrapper(
                     const size_t query_bytes = query_info.shape[1] * query_info.itemsize;
                     std::span<const std::byte> query_span(query_ptr, query_bytes);
 
-                    std::vector<deglib::graph::ObjectDistance> result =
-                        graph.search_ef(query_span, k, ef, true, filter, max_distance_computation_count);
+                    std::vector<deglib::graph::ObjectDistance> result = graph.search_ef(query_span, k, ef, true, filter, max_distance_computation_count);
 
                     const size_t count = result.size();
                     const size_t base_offset = q * k;
@@ -586,8 +585,6 @@ class RerankerPy {
             k_top = evp_k;
         }
 
-        auto results = reranker_.rerank(q_buf.ptr, n_queries, static_cast<const uint32_t*>(cand_buf.ptr), evp_k, k_top, num_threads);
-
         auto result_indices = py::array_t<uint32_t>({n_queries, k_top});
         uint32_t* ind_ptr = static_cast<uint32_t*>(result_indices.request().ptr);
 
@@ -598,26 +595,12 @@ class RerankerPy {
             dist_ptr = static_cast<float*>(result_distances.request().ptr);
         }
 
-        for (size_t i = 0; i < n_queries; ++i) {
-            auto& res_set = results[i];
-            if (!unsorted) {
-                res_set.sort();
-            }
-            const size_t actual_k = res_set.size();
-            uint32_t* row_ind = ind_ptr + i * k_top;
-            float* row_dist = dist_ptr ? (dist_ptr + i * k_top) : nullptr;
-            for (size_t k = 0; k < actual_k; ++k) {
-                row_ind[k] = res_set[k].getIdentifier();
-                if (row_dist) {
-                    row_dist[k] = res_set[k].getDistance();
-                }
-            }
-            for (size_t k = actual_k; k < k_top; ++k) {
-                row_ind[k] = std::numeric_limits<uint32_t>::max();
-                if (row_dist) {
-                    row_dist[k] = std::numeric_limits<float>::max();
-                }
-            }
+        {
+            py::gil_scoped_release release;
+            reranker_.rerank(
+                q_buf.ptr, n_queries, static_cast<const uint32_t*>(cand_buf.ptr), evp_k, static_cast<uint32_t>(k_top), ind_ptr, dist_ptr, return_distances,
+                unsorted, num_threads
+            );
         }
 
         if (return_distances) {
@@ -1430,18 +1413,25 @@ PYBIND11_MODULE(deglib_cpp, m) {
                 if (dim % 8 != 0) {
                     throw std::invalid_argument(std::format("Vector dimension ({}) must be a multiple of 8 for EVP quantization", dim));
                 }
-                size_t evp_bytes = 2 * (dim / 8);
-                std::vector<std::byte> result;
-                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    result = q.quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, num_threads);
-                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                    result = q.quantize(static_cast<const float*>(buf.ptr), count, dim, num_threads);
-                } else {
+                const bool is_fp16 = (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e"));
+                const bool is_fp32 = (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float"));
+                if (!is_fp16 && !is_fp32) {
                     throw std::invalid_argument("vectors must be float32 or float16");
                 }
+
+                const size_t evp_bytes = 2 * (dim / 8);
                 py::array_t<uint8_t> output({count, evp_bytes});
                 py::buffer_info out_buf = output.request();
-                std::memcpy(out_buf.ptr, result.data(), count * evp_bytes);
+                std::byte* dst = static_cast<std::byte*>(out_buf.ptr);
+
+                {
+                    py::gil_scoped_release release;
+                    if (is_fp16) {
+                        q.quantize(static_cast<const uint16_t*>(buf.ptr), dst, count, dim, num_threads);
+                    } else {
+                        q.quantize(static_cast<const float*>(buf.ptr), dst, count, dim, num_threads);
+                    }
+                }
                 return output;
             },
             py::arg("vectors"), py::arg("num_threads") = 0

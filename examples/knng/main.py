@@ -17,16 +17,15 @@ Usage
 from __future__ import annotations
 
 import argparse
-import sys
 import time
 from pathlib import Path
-import numpy as np
-import matplotlib.pyplot as plt
 
 import deglib
+import matplotlib.pyplot as plt
+import numpy as np
+from dataset import ensure_small_dataset, load_hdf5_dataset
 from deglib.distances import FloatSpace, Metric
 from deglib.search import rerank
-from dataset import load_hdf5_dataset, ensure_small_dataset, DEFAULT_CACHE_DIR
 
 DEFAULT_K_TOP = 15
 DEFAULT_K_GRAPH = 16
@@ -156,7 +155,7 @@ def construct_knng(
         recall = correct / max(total_gt, 1)
         print(f"\n---> k-NNG Quality (Recall@{k_top}): {recall * 100.0:.2f}%")
 
-    print(f"\n--- Timing Summary ---")
+    print("\n--- Timing Summary ---")
     print(f"Quantization Time: {t_quant:.3f}s")
     print(f"Graph Build Time:  {t_build:.3f}s")
     print(f"Prune Time:        {t_prune:.3f}s")

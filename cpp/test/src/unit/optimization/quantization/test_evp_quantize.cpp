@@ -112,7 +112,8 @@ TEST(EvpQuantize, SingleVsBatchConsistency) {
         data[i] = dist(rng);
     }
 
-    auto batch_result = deglib::quantization::evp::quantize_batch(data.data(), count, dim, non_zeros);
+    deglib::quantization::evp::EvpQuantizer q(non_zeros);
+    auto batch_result = q.quantize(data.data(), count, dim);
 
     for (size_t i = 0; i < count; ++i) {
         auto single_result = deglib::quantization::evp::quantize_single(&data[i * dim], dim, non_zeros);
@@ -188,4 +189,22 @@ TEST(EvpQuantize, ClassSpanOverloadsMatchPointer) {
     EXPECT_EQ(dst, q.quantize(data.data(), count, dim));
 
     EXPECT_THROW(q.quantize(src, 0), std::invalid_argument);
+}
+
+TEST(EvpQuantize, QuantizeBatchIntoMatchesQuantizeBatch) {
+    const uint32_t dim = 64;
+    const size_t count = 32;
+    const uint32_t non_zeros = 16;
+    std::mt19937 rng(42);
+    std::normal_distribution<float> dist(0.0f, 1.0f);
+    std::vector<float> data(count * dim);
+    for (auto& v : data) v = dist(rng);
+
+    auto batch_vec = deglib::quantization::evp::quantize_batch(data.data(), count, dim, non_zeros, 2);
+
+    const size_t bytes_per_evp = 2 * (dim / 8);
+    std::vector<std::byte> into_buf(count * bytes_per_evp);
+    deglib::quantization::evp::detail::quantize_batch_into(data.data(), count, dim, non_zeros, into_buf.data(), 2);
+
+    EXPECT_EQ(batch_vec, into_buf);
 }

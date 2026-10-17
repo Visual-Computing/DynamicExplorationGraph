@@ -413,7 +413,7 @@ vector<uint32_t> presort(
 
 // --- Extreme Vector Quantization (EVP) ---
 
-/// Stateful EVP quantizer holding the shared non_zeros setting.
+/// EVP quantizer holding the shared non_zeros setting.
 /// Construct once and reuse for database and query quantization.
 /// Defined in deglib::quantization::evp; the factory make_evp_quantizer lives in deglib::optimization.
 class EvpQuantizer {
