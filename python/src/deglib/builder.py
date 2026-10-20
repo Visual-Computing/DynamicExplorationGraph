@@ -165,7 +165,10 @@ class GraphBuilder:
             feature = feature.reshape(1, -1)
         if len(feature.shape) != 2:
             raise InvalidShapeException(f"invalid feature shape: {feature.shape}")
-        valid_dtype = self.graph.get_feature_space().metric().get_dtype()
+        if self.graph.has_transformations():
+            valid_dtype = np.float32
+        else:
+            valid_dtype = self.graph.get_feature_space().metric().get_dtype()
         feature = assure_array(feature, "feature", valid_dtype)
 
         # standardize external label

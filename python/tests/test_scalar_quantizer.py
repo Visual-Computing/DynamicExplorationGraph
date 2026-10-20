@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from deglib.optimization import (
+from deglib.transformation import (
     ScalarQuantizerInt8,
     ScalarQuantizerUint8,
     ScalarQuantizerUint8PerDim,
@@ -40,7 +40,7 @@ def test_make_scalar_quantizer_factory_functions():
     np.random.seed(42)
     vectors = np.random.randn(50, 16).astype(np.float32)
 
-    from deglib.optimization import (
+    from deglib.transformation import (
         make_scalar_quantizer_int8,
         make_scalar_quantizer_uint8,
         make_scalar_quantizer_uint8_perdim,
@@ -115,11 +115,14 @@ def test_uint8_quantizer_fit_and_quantize():
 
 def test_uint8_per_dim_quantizer():
     # Dim 0: [0, 100], Dim 1: [-10, 10]
-    db_vectors = np.array([
-        [0.0, -10.0],
-        [50.0, 0.0],
-        [100.0, 10.0],
-    ], dtype=np.float32)
+    db_vectors = np.array(
+        [
+            [0.0, -10.0],
+            [50.0, 0.0],
+            [100.0, 10.0],
+        ],
+        dtype=np.float32,
+    )
 
     quantizer = ScalarQuantizerUint8PerDim()
     quantizer.fit(db_vectors)
@@ -153,13 +156,16 @@ def test_uint8_per_dim_quantizer():
 
 
 def test_int8_per_dim_quantizer():
-    from deglib.optimization import ScalarQuantizerInt8PerDim, make_scalar_quantizer_int8_perdim
+    from deglib.transformation import ScalarQuantizerInt8PerDim, make_scalar_quantizer_int8_perdim
 
-    db_vectors = np.array([
-        [-100.0, -1.0],
-        [0.0, 0.0],
-        [100.0, 1.0],
-    ], dtype=np.float32)
+    db_vectors = np.array(
+        [
+            [-100.0, -1.0],
+            [0.0, 0.0],
+            [100.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
 
     quantizer = make_scalar_quantizer_int8_perdim(db_vectors)
     assert quantizer.is_fitted
@@ -186,7 +192,7 @@ def test_uint8_fp16_input():
     vectors_f32 = (np.random.uniform(5.0, 50.0, size=(30, 8))).astype(np.float32)
     vectors_f16 = vectors_f32.astype(np.float16)
 
-    from deglib.optimization import ScalarQuantizerUint8, ScalarQuantizerUint8PerDim
+    from deglib.transformation import ScalarQuantizerUint8, ScalarQuantizerUint8PerDim
 
     q_u8_f32 = ScalarQuantizerUint8()
     q_u8_f32.fit(vectors_f32)

@@ -17,7 +17,7 @@ All search graphs in `deglib` are instances of :class:`~deglib.graph.DynamicExpl
      - Purpose & Behavior
    * - **Read-Only**
      - :func:`~deglib.graph.load_readonly_graph`, :meth:`~deglib.graph.DynamicExplorationGraph.to_readonly`
-     - Immutable and stripped of all mutation structures. Provides minimal memory consumption and maximum query throughput. Cannot be saved again.
+     - Immutable and stripped of all mutation structures. Provides minimal memory consumption and maximum query throughput. Can be saved to disk via :meth:`~deglib.graph.DynamicExplorationGraph.save_graph`.
    * - **Fixed-Capacity Mutable**
      - :func:`~deglib.graph.create_empty`, :func:`~deglib.graph.load_mutable_graph`
      - Mutable graph with a pre-allocated capacity. Ideal when the total number of vectors is known beforehand (e.g. batch indexing fixed datasets).
@@ -205,12 +205,12 @@ For streaming or incremental updates where vertices are added or removed over ti
 Saving & Loading
 ----------------
 
-Any mutable graph (Fixed-Capacity or Dynamic) can be saved to disk with :meth:`~deglib.graph.DynamicExplorationGraph.save_graph`.
+Any graph (whether Read-Only, Fixed-Capacity Mutable, or Dynamic Mutable) can be saved to disk with :meth:`~deglib.graph.DynamicExplorationGraph.save_graph`.
 
 
 .. code-block:: python
 
-   # Save the mutable graph to a file
+   # Save the graph to a file
    graph.save_graph("my_graph.deg")
 
 When loading a saved graph file, you can choose any of the three graph modes depending on how you plan to use it:

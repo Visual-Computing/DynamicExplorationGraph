@@ -98,7 +98,7 @@ auto results = graph.search(std::span<const float>(query), /*k=*/10, /*eps=*/0.1
 ### Saving and Loading Graphs
 
 ```cpp
-// 1. Save mutable graph to disk
+// 1. Save graph (both mutable and read-only graphs supported) to disk
 graph.saveGraph("index.deg");
 
 // 2. Load as compact, optimized read-only graph for search
@@ -111,9 +111,64 @@ auto dynamic_graph = deglib::load_dynamic_graph("index.deg", /*chunk_size=*/1024
 auto mutable_graph = deglib::load_mutable_graph("index.deg", /*new_max_size=*/10000);
 ```
 
-### High-Performance Searcher (`eps_or_ef`)
+### High-Throughput Batch Search & Parallel Exploration
 
-`deglib::search::SearcherBase` provides a high-throughput query execution pipeline supporting entry vertex optimization, optional on-the-fly query quantization, exact candidate reranking, and multithreaded batch search with unified exploration parameter `eps_or_ef`:
+`DynamicExplorationGraph` provides zero-allocation batch operations for production query serving:
+
+```cpp
+const size_t num_queries = 1000;
+const uint32_t k = 10;
+
+// Flat pre-allocated buffers for maximum throughput without per-query heap allocations
+std::vector<uint32_t> out_indices(num_queries * k);
+std::vector<float> out_distances(num_queries * k);
+
+// 1. Batch search with dynamic exploration radius (eps)
+graph.search_batch(
+    std::span<const float>(batch_queries),
+    num_queries,
+    k,
+    std::span<uint32_t>(out_indices),
+    std::span<float>(out_distances),
+    /*eps=*/0.1f,
+    /*filter=*/nullptr,
+    /*max_distance_computation_count=*/0,
+    /*threads=*/8
+);
+
+// 2. Batch search with fixed candidate beam width (ef)
+graph.search_batch_ef(
+    std::span<const float>(batch_queries),
+    num_queries,
+    k,
+    /*ef=*/128,
+    std::span<uint32_t>(out_indices),
+    std::span<float>(out_distances),
+    /*include_entry=*/true,
+    /*filter=*/nullptr,
+    /*max_distance_computation_count=*/0,
+    /*threads=*/8
+);
+
+// 3. Batch neighbor retrieval and graph exploration
+std::vector<uint32_t> start_labels = {42, 108, 999};
+auto [explore_ids, explore_dists] = graph.explore_batch(
+    std::span<const uint32_t>(start_labels),
+    /*k=*/10,
+    /*max_distance_computation_count=*/0,
+    /*eps=*/0.1f,
+    /*include_entry=*/false,
+    /*filter=*/nullptr,
+    /*threads=*/4
+);
+
+// 4. Auto-tune CPU cache prefetch parameters for host hardware
+graph.optimize(/*sample_count=*/50, /*k=*/100, /*ef=*/200);
+```
+
+### High-Performance Searcher Pipeline
+
+`deglib::search::SearcherBase` provides a specialized query execution pipeline supporting entry vertex optimization, optional on-the-fly query quantization, exact candidate reranking, and multithreaded batch search with unified exploration parameter `eps_or_ef`:
 
 ```cpp
 #include <deglib/deglib.h>

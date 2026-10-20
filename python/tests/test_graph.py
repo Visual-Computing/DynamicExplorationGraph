@@ -28,7 +28,6 @@ def get_ranking(features: np.ndarray, graph: deglib.DynamicExplorationGraph, que
     """
     query = query.reshape(1, graph.get_feature_space().dim())
 
-
     if features.dtype in (np.uint8, np.int8):
         features = features.astype(np.float32)
     if query.dtype in (np.uint8, np.int8):
@@ -195,7 +194,6 @@ def test_search_eps_or_ef(conf: Configuration):
 
 
 @pytest.mark.parametrize("conf", mutable_configurations)
-
 def test_prune_non_mrng_edges(conf: Configuration):
     graph = conf.create_new_size_bounded_graph()
     deglib.optimization.prune_non_mrng_edges(graph)
@@ -322,7 +320,9 @@ def test_filter_edge_cases(conf: Configuration):
 
     # No valid labels filter with max_value specified
     no_labels = np.array([], dtype=np.int32)
-    results_none, dists_none = conf.graph.search(conf.query, filter_labels=Filter(no_labels, max_value=0), eps_or_ef=0.1, k=k)
+    results_none, dists_none = conf.graph.search(
+        conf.query, filter_labels=Filter(no_labels, max_value=0), eps_or_ef=0.1, k=k
+    )
     assert results_none.shape[-1] == k
     assert np.all(results_none == np.iinfo(np.uint32).max)
     assert np.all(np.isnan(dists_none))
@@ -339,6 +339,7 @@ def _build_test_graph_with_distinct_labels(samples=50, dims=16, edges_per_vertex
         optimization_target=deglib.builder.OptimizationTarget.LowLID,
         extend_k=10,
         extend_eps=0.001,
+        seed=42,
     )
     return graph, data
 
@@ -447,6 +448,44 @@ def test_facade_explore_batch():
     indices_unsorted, distances_unsorted = g.explore(labels, k=5, max_distance_computation_count=50, unsorted=True)
     assert indices_unsorted.shape == (2, 5)
     assert distances_unsorted.shape == (2, 5)
+
+
+def test_facade_explore_ef():
+    """explore and explore_batch with eps_or_ef >= 1.0 (ef mode)."""
+    g, _ = _build_test_graph_with_distinct_labels()
+    labels = np.array([0, 10], dtype=np.uint32)
+
+    # Single explore with ef
+    ind_single, dist_single = g.explore(0, k=5, max_distance_computation_count=50, eps_or_ef=10.0)
+    assert len(ind_single) == 5
+    assert len(dist_single) == 5
+    assert ind_single[0] == 0
+
+    # Batch explore with ef
+    indices, distances = g.explore(labels, k=5, max_distance_computation_count=50, eps_or_ef=10.0)
+    assert indices.shape == (2, 5)
+    assert distances.shape == (2, 5)
+    assert indices[0, 0] == 0
+    assert indices[1, 0] == 10
+
+
+def test_facade_get_neighbors_batch():
+    """get_neighbors with batch array and get_neighbors_batch method."""
+    g, _ = _build_test_graph_with_distinct_labels()
+    labels = np.array([0, 10], dtype=np.uint32)
+    edges = g.get_edges_per_vertex()
+
+    # Via get_neighbors(array)
+    batch_neighbors = g.get_neighbors(labels)
+    assert batch_neighbors.shape == (2, edges)
+    assert set(batch_neighbors[0]) == set(g.get_neighbors(0))
+    assert set(batch_neighbors[1]) == set(g.get_neighbors(10))
+
+    # Via get_neighbors_batch(array)
+    direct_batch = g.get_neighbors_batch(labels)
+    assert direct_batch.shape == (2, edges)
+    np.testing.assert_array_equal(batch_neighbors, direct_batch)
+
 
 def test_facade_has_path_reaches_adjacent_target():
     """has_path should walk from the entry to an adjacent target and return external labels."""

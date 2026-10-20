@@ -1,8 +1,8 @@
 // test_scalar_quantize.cpp — Unit tests for deglib::quantization::scalar (Int8 and Uint8 scalar quantization)
 
 #include "deglib/distance/fp16.h"
-#include "deglib/optimization/quantization/quantizer_concept.h"
-#include "deglib/optimization/quantization/scalar_quantize.h"
+#include "deglib/transformation.h"
+#include "deglib/transformation/scalar.h"
 #include "gtest/gtest.h"
 
 #include <cmath>
@@ -11,10 +11,10 @@
 #include <span>
 #include <vector>
 
-static_assert(deglib::quantization::Quantizer<deglib::quantization::scalar::ScalarQuantizerInt8>);
-static_assert(deglib::quantization::Quantizer<deglib::quantization::scalar::ScalarQuantizerInt8PerDim>);
-static_assert(deglib::quantization::Quantizer<deglib::quantization::scalar::ScalarQuantizerUint8>);
-static_assert(deglib::quantization::Quantizer<deglib::quantization::scalar::ScalarQuantizerUint8PerDim>);
+static_assert(deglib::quantization::Quantizer<deglib::transformation::ScalarQuantizerInt8>);
+static_assert(deglib::quantization::Quantizer<deglib::transformation::ScalarQuantizerInt8PerDim>);
+static_assert(deglib::quantization::Quantizer<deglib::transformation::ScalarQuantizerUint8>);
+static_assert(deglib::quantization::Quantizer<deglib::transformation::ScalarQuantizerUint8PerDim>);
 
 namespace {
 
@@ -51,7 +51,7 @@ TEST(ScalarQuantize, Int8SymmetricBasic) {
     const uint32_t dim = 5;
     const size_t count = 1;
 
-    deglib::quantization::scalar::ScalarQuantizerInt8 quantizer;
+    deglib::transformation::ScalarQuantizerInt8 quantizer;
     quantizer.fit(vec.data(), count, dim, 0.0f);
     auto result = quantizer.quantize(vec.data(), count, dim, 1);
 
@@ -72,7 +72,7 @@ TEST(ScalarQuantize, Int8FitThenQuantizeDistributionConsistency) {
     std::vector<float> query_vec = {-0.5f, 0.0f, 0.5f, -0.25f, 0.25f};
     const uint32_t dim = 5;
 
-    deglib::quantization::scalar::ScalarQuantizerInt8 quantizer;
+    deglib::transformation::ScalarQuantizerInt8 quantizer;
     quantizer.fit(db_vec.data(), 1, dim);
     EXPECT_NEAR(quantizer.abs_max, 2.0f, 1e-5f);
 
@@ -91,7 +91,7 @@ TEST(ScalarQuantize, Int8SymmetricBatchMultiThreadConsistent) {
     const uint32_t dim = 128;
     auto data = generate_random_floats(count, dim, 123);
 
-    deglib::quantization::scalar::ScalarQuantizerInt8 quantizer;
+    deglib::transformation::ScalarQuantizerInt8 quantizer;
     quantizer.fit(data.data(), count, dim, 0.0f);
 
     auto single_thread = quantizer.quantize(data.data(), count, dim, 1);
@@ -111,10 +111,10 @@ TEST(ScalarQuantize, Int8FP16Equivalence) {
     std::vector<uint16_t> data_fp16(count * dim);
     deglib::distances::fp16::floats_to_fp16(data_f32.data(), data_fp16.data(), count * dim);
 
-    deglib::quantization::scalar::ScalarQuantizerInt8 q_f32;
+    deglib::transformation::ScalarQuantizerInt8 q_f32;
     q_f32.fit(data_f32.data(), count, dim, 0.0f);
 
-    deglib::quantization::scalar::ScalarQuantizerInt8 q_fp16;
+    deglib::transformation::ScalarQuantizerInt8 q_fp16;
     q_fp16.fit(data_fp16.data(), count, dim, 0.0f);
 
     auto result_from_f32 = q_f32.quantize(data_f32.data(), count, dim, 2);
@@ -140,7 +140,7 @@ TEST(ScalarQuantize, Uint8AffineGlobalBasic) {
     const uint32_t dim = 5;
     const size_t count = 1;
 
-    deglib::quantization::scalar::ScalarQuantizerUint8 quantizer;
+    deglib::transformation::ScalarQuantizerUint8 quantizer;
     quantizer.fit(vec.data(), count, dim, 0.0f);
     auto result = quantizer.quantize(vec.data(), count, dim, 1);
 
@@ -162,7 +162,7 @@ TEST(ScalarQuantize, Uint8AffinePerDimBasic) {
     const uint32_t dim = 2;
     const size_t count = 2;
 
-    deglib::quantization::scalar::ScalarQuantizerUint8PerDim quantizer(dim);
+    deglib::transformation::ScalarQuantizerUint8PerDim quantizer(dim);
     quantizer.fit(vec.data(), count, dim, 0.0f);
     auto result = quantizer.quantize(vec.data(), count, dim, 1);
 
@@ -179,29 +179,27 @@ TEST(ScalarQuantize, Uint8AffinePerDimBasic) {
 // Factory Function Tests (make_scalar_quantizer_*)
 // ============================================================================
 
-#include "deglib/optimization.h"
-
 TEST(ScalarQuantize, FactoryFunctionsMakeAndQuantize) {
     const size_t count = 50;
     const uint32_t dim = 16;
     auto data = generate_random_floats(count, dim, 42);
 
-    auto q_int8 = deglib::optimization::make_scalar_quantizer_int8(data.data(), count, dim);
+    auto q_int8 = deglib::transformation::make_scalar_quantizer_int8(data.data(), count, dim);
     EXPECT_TRUE(q_int8.is_fitted);
     auto quant_int8 = q_int8.quantize(data.data(), count, dim);
     EXPECT_EQ(quant_int8.size(), count * dim);
 
-    auto q_uint8 = deglib::optimization::make_scalar_quantizer_uint8(data.data(), count, dim);
+    auto q_uint8 = deglib::transformation::make_scalar_quantizer_uint8(data.data(), count, dim);
     EXPECT_TRUE(q_uint8.is_fitted);
     auto quant_uint8 = q_uint8.quantize(data.data(), count, dim);
     EXPECT_EQ(quant_uint8.size(), count * dim);
 
-    auto q_perdim = deglib::optimization::make_scalar_quantizer_uint8_perdim(data.data(), count, dim);
+    auto q_perdim = deglib::transformation::make_scalar_quantizer_uint8_perdim(data.data(), count, dim);
     EXPECT_TRUE(q_perdim.is_fitted);
     auto quant_perdim = q_perdim.quantize(data.data(), count, dim);
     EXPECT_EQ(quant_perdim.size(), count * dim);
 
-    auto q_int8_pdim = deglib::optimization::make_scalar_quantizer_int8_perdim(data.data(), count, dim);
+    auto q_int8_pdim = deglib::transformation::make_scalar_quantizer_int8_perdim(data.data(), count, dim);
     EXPECT_TRUE(q_int8_pdim.is_fitted);
     auto quant_int8_pdim = q_int8_pdim.quantize(data.data(), count, dim);
     EXPECT_EQ(quant_int8_pdim.size(), count * dim);
@@ -215,7 +213,7 @@ TEST(ScalarQuantize, Int8PerDimBasic) {
     const uint32_t dim = 2;
     const size_t count = 2;
 
-    deglib::quantization::scalar::ScalarQuantizerInt8PerDim quantizer;
+    deglib::transformation::ScalarQuantizerInt8PerDim quantizer;
     quantizer.fit(vec.data(), count, dim, 0.0f);
     EXPECT_NEAR(quantizer.abs_maxs[0], 100.0f, 1e-4f);
     EXPECT_NEAR(quantizer.abs_maxs[1], 1.0f, 1e-4f);
@@ -237,13 +235,13 @@ TEST(ScalarQuantize, Uint8AndUint8PerDimFP16) {
     }
 
     // ScalarQuantizerUint8 with FP16
-    deglib::quantization::scalar::ScalarQuantizerUint8 q_u8;
+    deglib::transformation::ScalarQuantizerUint8 q_u8;
     q_u8.fit(data_fp16.data(), count, dim);
     auto quant_u8 = q_u8.quantize(data_fp16.data(), count, dim);
     EXPECT_EQ(quant_u8.size(), count * dim);
 
     // ScalarQuantizerUint8PerDim with FP16
-    deglib::quantization::scalar::ScalarQuantizerUint8PerDim q_pdim;
+    deglib::transformation::ScalarQuantizerUint8PerDim q_pdim;
     q_pdim.fit(data_fp16.data(), count, dim);
     auto quant_pdim = q_pdim.quantize(data_fp16.data(), count, dim);
     EXPECT_EQ(quant_pdim.size(), count * dim);
@@ -256,7 +254,7 @@ TEST(ScalarQuantize, DirectFP16QuantizeSingle) {
     deglib::distances::fp16::floats_to_fp16(f32_vec.data(), fp16_vec.data(), dim);
 
     // 1. Int8
-    deglib::quantization::scalar::ScalarQuantizerInt8 q_i8;
+    deglib::transformation::ScalarQuantizerInt8 q_i8;
     q_i8.set_abs_max(1.0f);
     int8_t out_i8[4];
     q_i8.quantize(fp16_vec.data(), out_i8, 1, dim);
@@ -266,7 +264,7 @@ TEST(ScalarQuantize, DirectFP16QuantizeSingle) {
     EXPECT_EQ(out_i8[3], 127);
 
     // 2. Uint8
-    deglib::quantization::scalar::ScalarQuantizerUint8 q_u8;
+    deglib::transformation::ScalarQuantizerUint8 q_u8;
     q_u8.set_range(-1.0f, 1.0f);
     uint8_t out_u8[4];
     q_u8.quantize(fp16_vec.data(), out_u8, 1, dim);
@@ -276,7 +274,7 @@ TEST(ScalarQuantize, DirectFP16QuantizeSingle) {
     EXPECT_EQ(out_u8[3], 255);
 
     // 3. Int8PerDim
-    deglib::quantization::scalar::ScalarQuantizerInt8PerDim q_i8_pd(dim);
+    deglib::transformation::ScalarQuantizerInt8PerDim q_i8_pd(dim);
     q_i8_pd.set_abs_maxs({1.0f, 1.0f, 1.0f, 1.0f});
     int8_t out_i8_pd[4];
     q_i8_pd.quantize(fp16_vec.data(), out_i8_pd, 1, dim);
@@ -284,7 +282,7 @@ TEST(ScalarQuantize, DirectFP16QuantizeSingle) {
     EXPECT_EQ(out_i8_pd[3], 127);
 
     // 4. Uint8PerDim
-    deglib::quantization::scalar::ScalarQuantizerUint8PerDim q_u8_pd(dim);
+    deglib::transformation::ScalarQuantizerUint8PerDim q_u8_pd(dim);
     q_u8_pd.set_ranges({-1.0f, -1.0f, -1.0f, -1.0f}, {1.0f, 1.0f, 1.0f, 1.0f});
     uint8_t out_u8_pd[4];
     q_u8_pd.quantize(fp16_vec.data(), out_u8_pd, 1, dim);
@@ -310,19 +308,19 @@ TEST(ScalarQuantize, SpanOverloadsMatchPointer) {
     const size_t count = 4;
     auto data = generate_random_floats(count, dim);
 
-    deglib::quantization::scalar::ScalarQuantizerInt8 q_i8;
+    deglib::transformation::ScalarQuantizerInt8 q_i8;
     q_i8.fit(data.data(), count, dim);
     check_span_matches_pointer(q_i8, data, count, dim);
 
-    deglib::quantization::scalar::ScalarQuantizerInt8PerDim q_i8_pd;
+    deglib::transformation::ScalarQuantizerInt8PerDim q_i8_pd;
     q_i8_pd.fit(data.data(), count, dim);
     check_span_matches_pointer(q_i8_pd, data, count, dim);
 
-    deglib::quantization::scalar::ScalarQuantizerUint8 q_u8;
+    deglib::transformation::ScalarQuantizerUint8 q_u8;
     q_u8.fit(data.data(), count, dim);
     check_span_matches_pointer(q_u8, data, count, dim);
 
-    deglib::quantization::scalar::ScalarQuantizerUint8PerDim q_u8_pd;
+    deglib::transformation::ScalarQuantizerUint8PerDim q_u8_pd;
     q_u8_pd.fit(data.data(), count, dim);
     check_span_matches_pointer(q_u8_pd, data, count, dim);
 

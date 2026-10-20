@@ -34,6 +34,7 @@ class Metric(enum.IntEnum):
     EVP_InnerProduct = cpp_distances.Metric.EVP_InnerProduct
     Int8_InnerProduct = cpp_distances.Metric.Int8_InnerProduct
     Int8_L2 = cpp_distances.Metric.Int8_L2
+
     def get_dtype(self):
         """
         Return the corresponding NumPy dtype for feature data with this metric.

@@ -99,7 +99,7 @@ All search graphs are represented by `DynamicExplorationGraph`, backed by one of
 ### Saving and Loading Graphs
 
 ```python
-# Save mutable graph to disk
+# Save graph to disk (supports both mutable and read-only graphs)
 graph.save_graph("index.deg")
 
 # Load as compact, optimized read-only graph for production search
@@ -158,7 +158,7 @@ from deglib.search import Filter, rerank
 allowed_ids = np.array([1, 5, 10, 42, 99], dtype=np.int32)
 search_filter = Filter(allowed_ids)
 
-indices, distances = graph.search(query, k=5, eps=0.1, filter_labels=search_filter)
+indices, distances = graph.search(query, k=5, eps_or_ef=0.1, filter_labels=search_filter)
 
 # Exact distance reranking across candidates
 queries = np.random.random((10, dims)).astype(np.float32)
@@ -179,11 +179,19 @@ top_indices, top_distances = rerank(
 
 ### Exploratory Search & Graph Navigation
 
-DEG supports exploratory search directly from existing vertex labels:
+DEG supports exploratory search directly from existing vertex labels (single or batch):
 
 ```python
 # Explore graph starting from entry vertex label 105
-explored_labels, distances = graph.explore(entry_external_label=105, k=10, eps=0.1, include_entry=False)
+explored_labels, distances = graph.explore(entry_external_label=105, k=10, eps_or_ef=0.1, include_entry=False)
+
+# Batch exploration from multiple entry vertices in parallel
+batch_entries = np.array([105, 210, 315], dtype=np.uint32)
+batch_labels, batch_distances = graph.explore(batch_entries, k=10, eps_or_ef=0.1, threads=4)
+
+# Retrieve graph neighbors directly
+neighbors = graph.get_neighbors(105)
+batch_neighbors = graph.get_neighbors_batch(batch_entries, threads=4) # shape: (3, edges_per_vertex)
 ```
 
 ---

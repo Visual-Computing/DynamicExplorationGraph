@@ -9,6 +9,7 @@
 #include "deglib/optimization.h"
 #include "deglib/search.h"
 #include "deglib/search/searcher.h"
+#include "deglib/transformation.h"
 #include "deglib/utils/memory.h"
 #include "deglib/utils/random.h"
 
@@ -43,10 +44,11 @@ inline builder::EvenRegularGraphBuilder create_builder(
 inline DynamicExplorationGraph create_empty(
     const uint32_t max_vertex_count,
     const uint8_t edges_per_vertex,
-    const deglib::distances::FloatSpace& feature_space
+    const deglib::distances::FloatSpace& feature_space,
+    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
 ) {
     auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(max_vertex_count, edges_per_vertex, feature_space);
-    return DynamicExplorationGraph(std::move(graph));
+    return DynamicExplorationGraph(std::move(graph), std::move(transformations));
 }
 
 /**
@@ -60,10 +62,11 @@ inline DynamicExplorationGraph create_empty(
 inline DynamicExplorationGraph create_dynamic_empty(
     const uint8_t edges_per_vertex,
     const deglib::distances::FloatSpace& feature_space,
-    const uint32_t chunk_size = 1024
+    const uint32_t chunk_size = 1024,
+    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
 ) {
     auto graph = std::make_unique<deglib::graph::DynamicGraph>(edges_per_vertex, feature_space, chunk_size);
-    return DynamicExplorationGraph(std::move(graph));
+    return DynamicExplorationGraph(std::move(graph), std::move(transformations));
 }
 
 /**
@@ -82,27 +85,28 @@ inline DynamicExplorationGraph create_random_graph(
     const uint32_t vertex_count,
     const uint8_t edges_per_vertex,
     const deglib::distances::FloatSpace& feature_space,
-    const uint32_t seed = 7
+    const uint32_t seed = 7,
+    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
 ) {
     auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(vertex_count, edges_per_vertex, feature_space);
     deglib::builder::populate_random_graph(*graph, feature_data, vertex_count, seed);
-    return DynamicExplorationGraph(std::move(graph));
+    return DynamicExplorationGraph(std::move(graph), std::move(transformations));
 }
 
 /**
  * Load a saved graph from disk as a compact, immutable DynamicExplorationGraph (backed by ReadOnlyGraph).
  */
-inline DynamicExplorationGraph load_readonly_graph(const char* path_graph) {
-    auto graph = std::make_unique<deglib::graph::ReadOnlyGraph>(deglib::graph::load_readonly_graph(path_graph));
-    return DynamicExplorationGraph(std::move(graph));
-}
+inline DynamicExplorationGraph load_readonly_graph(const char* path_graph) { return DynamicExplorationGraph::loadGraph(path_graph); }
 
 /**
  * Load a saved graph from disk as a chunk-allocated mutable DynamicExplorationGraph (backed by DynamicGraph).
  */
 inline DynamicExplorationGraph load_dynamic_graph(const char* path_graph, const uint32_t chunk_size = 1024) {
-    auto graph = std::make_unique<deglib::graph::DynamicGraph>(deglib::graph::load_dynamic_graph(path_graph, chunk_size));
-    return DynamicExplorationGraph(std::move(graph));
+    auto data = deglib::serialization::read_graph_file(path_graph);
+    auto graph = std::make_unique<deglib::graph::DynamicGraph>(data.edges_per_vertex, std::move(*data.feature_space), data.vertex_bytes, data.size, chunk_size);
+    graph->setPrefetch(data.po, data.pl, data.nl);
+    graph->setEntryVertexIndices(std::move(data.entry_vertex_indices));
+    return DynamicExplorationGraph(std::move(graph), std::move(data.transformations));
 }
 
 /**
@@ -111,8 +115,16 @@ inline DynamicExplorationGraph load_dynamic_graph(const char* path_graph, const 
  * @param new_max_size Optional capacity override. If 0, uses the graph's serialized size.
  */
 inline DynamicExplorationGraph load_mutable_graph(const char* path_graph, const uint32_t new_max_size = 0) {
-    auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(deglib::graph::load_sizebounded_graph(path_graph, new_max_size));
-    return DynamicExplorationGraph(std::move(graph));
+    auto data = deglib::serialization::read_graph_file(path_graph);
+    uint32_t cap = (new_max_size == 0) ? data.size : new_max_size;
+    if (cap < data.size) {
+        std::fprintf(stderr, "The graph in %s has %u vertices but new_max_size is %u\n", path_graph, data.size, cap);
+        abort();
+    }
+    auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(cap, data.edges_per_vertex, std::move(*data.feature_space), data.vertex_bytes, data.size);
+    graph->setPrefetch(data.po, data.pl, data.nl);
+    graph->setEntryVertexIndices(std::move(data.entry_vertex_indices));
+    return DynamicExplorationGraph(std::move(graph), std::move(data.transformations));
 }
 
 /**

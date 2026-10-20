@@ -23,6 +23,7 @@ Include the umbrella header to access all functionalities:
 | [`deglib::optimization::`](#5-namespace-degliboptimization) | `<deglib/optimization.h>` | MRNG pruning, FLAS 1D presorting, EVP quantization, and MIPS L2 transformations. |
 | [`deglib::analysis::`](#6-namespace-deglibanalysis) | `<deglib/analysis.h>` | Graph health diagnostics, regularity validation, and reachability metrics. |
 | [`deglib::graph::`](#7-namespace-deglibgraph-internal-graphs--results) | `<deglib/graph/*.h>` | Low-level internal graph hierarchy (`0..N-1` indices) and search `ResultSet` (max-heap). |
+| [`deglib::transformation::`](#11-namespace-deglibtransformation) | `<deglib/transformation.h>` | Query and database feature transformation and quantization pipeline. |
 | [`deglib::cpu::`](#8-namespace-deglibcpu) | `<deglib/utils/cpu.h>` | Hardware feature detection (AVX2, AVX512) and `InstructionSet` configuration. |
 | [`deglib::memory::`](#9-namespace-deglibmemory) | `<deglib/utils/memory.h>` | CPU cache line prefetching utilities. |
 | [`deglib::concurrent::`](#10-namespace-deglibconcurrent) | `<deglib/concurrent.h>` | Parallel execution loops (`parallel_for`, `parallel_batch_for`). |
@@ -107,61 +108,250 @@ EvenRegularGraphBuilder create_builder(
 
 class DynamicExplorationGraph {
 public:
-
-    // --- Search & Exploration ---
-
-    /// Search for the k-nearest neighbors of a query vector
-    ResultSet search(
-        span<float> query,
-        uint32_t k,
-        float eps = 0.0f,
-        Filter* filter = nullptr,
-        uint32_t max_distance_computations = 0
+    // --- Constructors & Ownership ---
+    explicit DynamicExplorationGraph(
+        std::unique_ptr<deglib::graph::InternalGraph> graph,
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
+    );
+    explicit DynamicExplorationGraph(
+        deglib::graph::InternalGraph& graph,
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
     );
 
-    /// Explore the graph starting from an existing vertex label
+    // --- Search (Single Query) ---
+
+    /// Search k-nearest neighbors using dynamic exploration radius (eps) -> returns max-heap ResultSet
+    template <typename T = float>
+    ResultSet search(
+        std::span<const T> query,
+        uint32_t k,
+        float eps = 0.0f,
+        const Filter* filter = nullptr,
+        uint32_t max_distance_computations = 0
+    ) const;
+
+    /// Search k-nearest neighbors using fixed beam width (ef) -> returns ascending sorted vector
+    template <typename T = float>
+    std::vector<ObjectDistance> search_ef(
+        std::span<const T> query,
+        uint32_t k,
+        uint32_t ef,
+        bool include_entry = true,
+        const Filter* filter = nullptr,
+        uint32_t max_distance_computations = 0
+    ) const;
+
+    // --- Search Batch (Parallel Multithreaded) ---
+
+    /// Batch search with dynamic exploration radius (eps) returning container of ResultSets
+    template <typename T = float>
+    std::vector<ResultSet> search_batch(
+        std::span<const T> queries,
+        size_t count,
+        uint32_t k,
+        float eps = 0.0f,
+        const Filter* filter = nullptr,
+        uint32_t max_distance_computations = 0,
+        size_t threads = 1
+    ) const;
+
+    /// High-performance zero-allocation batch search into pre-allocated flat spans (eps)
+    template <typename T = float>
+    void search_batch(
+        std::span<const T> queries,
+        size_t count,
+        uint32_t k,
+        std::span<uint32_t> out_indices,
+        std::span<float> out_distances = {},
+        float eps = 0.0f,
+        const Filter* filter = nullptr,
+        uint32_t max_distance_computations = 0,
+        size_t threads = 1,
+        bool unsorted = false
+    ) const;
+
+    /// High-performance zero-allocation batch search into pre-allocated flat spans (ef beam width)
+    template <typename T = float>
+    void search_batch_ef(
+        std::span<const T> queries,
+        size_t count,
+        uint32_t k,
+        uint32_t ef,
+        std::span<uint32_t> out_indices,
+        std::span<float> out_distances = {},
+        bool include_entry = true,
+        const Filter* filter = nullptr,
+        uint32_t max_distance_computations = 0,
+        size_t threads = 1,
+        bool unsorted = false
+    ) const;
+
+    /// Batch search with fixed beam width (ef) returning vector of sorted results
+    template <typename T = float>
+    std::vector<std::vector<ObjectDistance>> search_batch_ef(
+        std::span<const T> queries,
+        size_t count,
+        uint32_t k,
+        uint32_t ef,
+        bool include_entry = true,
+        const Filter* filter = nullptr,
+        uint32_t max_distance_computations = 0,
+        size_t threads = 1
+    ) const;
+
+    // --- Exploration & Path Traversal ---
+
+    /// Explore starting from an existing external label using dynamic exploration radius (eps)
     ResultSet explore(
-        uint32_t entry_label,
+        uint32_t entry_external_label,
         uint32_t k,
         uint32_t max_distance_computations = 0,
         float eps = 0.0f,
         bool include_entry = true,
-        Filter* filter = nullptr
-    );
+        const Filter* filter = nullptr
+    ) const;
 
-    /// Returns the neighbor labels connected to a given vertex
-    vector<uint32_t> getNeighbors(uint32_t label);
+    /// Explore starting from an existing external label using fixed beam width (ef)
+    std::vector<ObjectDistance> explore_ef(
+        uint32_t entry_external_label,
+        uint32_t k,
+        uint32_t ef,
+        uint32_t max_distance_computations = 0,
+        bool include_entry = true,
+        const Filter* filter = nullptr
+    ) const;
+
+    /// Batch exploration into pre-allocated flat spans (eps)
+    void explore_batch(
+        std::span<const uint32_t> entry_external_labels,
+        uint32_t k,
+        std::span<uint32_t> out_indices,
+        std::span<float> out_distances = {},
+        uint32_t max_distance_computations = 0,
+        float eps = 0.0f,
+        bool include_entry = true,
+        const Filter* filter = nullptr,
+        size_t threads = 1,
+        bool unsorted = false
+    ) const;
+
+    /// Batch exploration returning flat indices and optional distances (eps)
+    std::pair<std::vector<uint32_t>, std::vector<float>> explore_batch(
+        std::span<const uint32_t> entry_external_labels,
+        uint32_t k,
+        uint32_t max_distance_computations = 0,
+        float eps = 0.0f,
+        bool include_entry = true,
+        const Filter* filter = nullptr,
+        size_t threads = 1,
+        bool return_distances = true,
+        bool unsorted = false
+    ) const;
+
+    /// Batch exploration into pre-allocated flat spans (ef)
+    void explore_batch_ef(
+        std::span<const uint32_t> entry_external_labels,
+        uint32_t k,
+        uint32_t ef,
+        std::span<uint32_t> out_indices,
+        std::span<float> out_distances = {},
+        uint32_t max_distance_computations = 0,
+        bool include_entry = true,
+        const Filter* filter = nullptr,
+        size_t threads = 1,
+        bool unsorted = false
+    ) const;
+
+    /// Batch exploration returning flat indices and optional distances (ef)
+    std::pair<std::vector<uint32_t>, std::vector<float>> explore_batch_ef(
+        std::span<const uint32_t> entry_external_labels,
+        uint32_t k,
+        uint32_t ef,
+        uint32_t max_distance_computations = 0,
+        bool include_entry = true,
+        const Filter* filter = nullptr,
+        size_t threads = 1,
+        bool return_distances = true,
+        bool unsorted = false
+    ) const;
+
+    /// Greedy best-first reachability search towards a stored vertex; backtracks traversal path
+    std::vector<ObjectDistance> hasPath(
+        const std::vector<uint32_t>& entry_external_labels,
+        uint32_t to_external_label,
+        float eps = 0.0f,
+        uint32_t k = 1
+    ) const;
+
+    // --- Neighbor Retrieval ---
+
+    /// Retrieve neighbor external labels for a single vertex
+    std::vector<uint32_t> getNeighbors(uint32_t external_label) const;
+
+    /// Batch retrieve neighbor external labels into caller-supplied flat span
+    void getNeighbors_batch(
+        std::span<const uint32_t> external_labels,
+        std::span<uint32_t> out_neighbors,
+        size_t threads = 1
+    ) const;
+
+    /// Batch retrieve neighbor external labels returning flat vector
+    std::vector<uint32_t> getNeighbors_batch(
+        std::span<const uint32_t> external_labels,
+        size_t threads = 1
+    ) const;
 
     // --- State & Inspection ---
 
-    uint32_t size();                                       ///< Total number of active vertices
-    uint8_t getEdgesPerVertex();                           ///< Outgoing edges per vertex
-    FloatSpace getFeatureSpace();                          ///< Graph metric and dimensionality
-    bool hasVertex(uint32_t label);                        ///< Check if label exists
-    bool isMutable();                                      ///< Check if graph allows modifications
+    uint32_t size() const;                                 ///< Total number of active vertices
+    uint8_t getEdgesPerVertex() const;                     ///< Outgoing edges per vertex
+    const FloatSpace& getFeatureSpace() const;             ///< Graph metric and dimensionality
+    bool hasVertex(uint32_t external_label) const;         ///< Check if external label exists
+    bool isMutable() const;                                ///< Check if graph allows modifications
     InternalGraph& internal();                             ///< Access underlying internal graph
+    const InternalGraph& internal() const;
 
-   // --- Traversal Tuning ---
+    // --- Transformations Pipeline ---
 
-   /// Auto-tune traversal prefetch parameters (po, pl, nl) by timing traversal over sampled vertices.
-   /// The graph self-samples its own stored features as queries; call once after construction.
-   void optimize(size_t sample_count = 50, uint32_t k = 100, uint32_t ef = 200, uint32_t seed = 7);
+    bool hasTransformations() const noexcept;              ///< True if query transformations are attached
+    size_t getInputDim() const noexcept;                   ///< Expected raw query dimensionality
+    const auto& getTransformations() const noexcept;       ///< Attached transformation stages
+
+    // --- Traversal Prefetch Tuning & Entry Vertices ---
+
+    const std::vector<uint32_t>& getEntryVertexIndices() const;
+    void setEntryVertexIndices(std::vector<uint32_t> indices);
+    int32_t getPo() const;                                 ///< Feature prefetch offset
+    int32_t getPl() const;                                 ///< Feature cache line prefetch count
+    int32_t getNl() const;                                 ///< Neighbor prefetch look-ahead
+    void setPo(int32_t po);
+    void setPl(int32_t pl);
+    void setNl(int32_t nl);
+    void setPrefetch(int32_t po, int32_t pl, int32_t nl = 3);
+
+    /// Auto-tune traversal prefetch parameters (po, pl, nl) by timing traversal over sampled vertices
+    void optimize(size_t sample_count = 50, uint32_t k = 100, uint32_t ef = 200, uint32_t seed = 7) const;
 
     // --- Conversions & Persistence ---
 
     /// Convert to a compact, read-only graph (ReadOnlyGraph) optimized for search
-    DynamicExplorationGraph to_readonly();
+    DynamicExplorationGraph to_readonly() const;
 
     /// Convert to a mutable SizeBoundedGraph (fixed capacity)
-    DynamicExplorationGraph to_mutable(uint32_t new_max_size = 0);
-    DynamicExplorationGraph to_mutable(FloatSpace new_space, void* new_features = nullptr, uint32_t new_max_size = 0);
+    DynamicExplorationGraph to_mutable(uint32_t new_max_size = 0) const;
+    DynamicExplorationGraph to_mutable(const FloatSpace& new_space, const void* new_features = nullptr, uint32_t new_max_size = 0) const;
 
     /// Convert to a mutable DynamicGraph (chunk-allocated dynamic growth)
-    DynamicExplorationGraph to_dynamic(uint32_t chunk_size = 1024);
-    DynamicExplorationGraph to_dynamic(FloatSpace new_space, void* new_features = nullptr, uint32_t chunk_size = 1024);
+    DynamicExplorationGraph to_dynamic(uint32_t chunk_size = 1024) const;
+    DynamicExplorationGraph to_dynamic(const FloatSpace& new_space, const void* new_features = nullptr, uint32_t chunk_size = 1024) const;
 
-    /// Save graph topology and features to disk (graph must be mutable)
-    bool saveGraph(string path);
+    /// Save graph topology, features, transformations, and prefetch parameters to binary file
+    bool saveGraph(const char* path) const;
+    bool saveGraph(const std::string& path) const;
+
+    /// Load graph from binary file
+    static DynamicExplorationGraph loadGraph(const char* path);
+    static DynamicExplorationGraph loadGraph(const std::string& path);
 };
 
 } // namespace deglib
@@ -201,7 +391,20 @@ struct BuilderStatus {
 
 class EvenRegularGraphBuilder {
 public:
-    /// Construct builder for a DynamicExplorationGraph facade or MutableGraph
+    /// Construct builder for a MutableGraph
+    EvenRegularGraphBuilder(
+        deglib::graph::MutableGraph& graph,
+        mt19937& rnd,
+        OptimizationTarget target = OptimizationTarget::LowLID,
+        uint8_t extend_k = 0,
+        float extend_eps = 0.1f,
+        uint8_t improve_k = 0,
+        float improve_eps = 0.001f,
+        uint8_t max_path_length = 5,
+        uint32_t improve_tries = 0
+    );
+
+    /// Construct builder for a DynamicExplorationGraph facade (inherits transformations)
     EvenRegularGraphBuilder(
         DynamicExplorationGraph& graph,
         mt19937& rnd,
@@ -544,8 +747,11 @@ public:
     const std::vector<uint32_t>& getEntryVertexIndices() const;
     bool hasEdge(uint32_t from_index, uint32_t to_index);
 
-    ResultSet search(span<float> query, uint32_t k, float eps = 0.0f, Filter* filter = nullptr, uint32_t max_dc = 0);
-    ResultSet explore(uint32_t entry_index, uint32_t k, uint32_t max_dc = 0, float eps = 0.0f, bool include_entry = true, Filter* filter = nullptr);
+    ResultSet search(std::span<const float> query, uint32_t k, float eps = 0.0f, const Filter* filter = nullptr, uint32_t max_dc = 0);
+    std::vector<ObjectDistance> search_ef(std::span<const float> query, uint32_t k, uint32_t ef, bool include_entry = true, const Filter* filter = nullptr, uint32_t max_dc = 0);
+    ResultSet explore(uint32_t entry_index, uint32_t k, uint32_t max_dc = 0, float eps = 0.0f, bool include_entry = true, const Filter* filter = nullptr);
+    std::vector<ObjectDistance> explore_ef(uint32_t entry_index, uint32_t k, uint32_t ef, uint32_t max_dc = 0, bool include_entry = true, const Filter* filter = nullptr);
+    virtual std::vector<ObjectDistance> hasPath(const std::vector<uint32_t>& entry_indices, uint32_t to_vertex, float eps, uint32_t k) const = 0;
 
     // --- Traversal Prefetch Tuning ---
     int32_t getPo() const;                               ///< Feature prefetch offset (candidates ahead)
@@ -671,3 +877,54 @@ void parallel_batch_for(size_t start, size_t end, size_t num_threads, auto fn);
 
 } // namespace deglib::concurrent
 ```
+
+---
+
+## 11. Namespace: `deglib::transformation::`
+
+Header: `<deglib/transformation.h>`
+
+Vector transformation pipeline for preprocessing and quantizing query and database vectors transparently.
+
+```cpp
+namespace deglib::transformation {
+
+/// Base interface for vector feature transformations and quantization stages
+class FeatureTransformation {
+public:
+    virtual ~FeatureTransformation() = default;
+    virtual size_t input_dim() const = 0;
+    virtual size_t output_dim() const = 0;
+    virtual size_t output_bytes() const = 0;
+    virtual TransformationType type() const = 0;
+    virtual void transform_database(const float* in, std::byte* out, size_t count) const = 0;
+    virtual void transform_query(const float* in, std::byte* out, size_t count) const = 0;
+};
+
+/// Workspace buffer for query transformation without heap allocations on search path
+class QueryWorkspace {
+public:
+    std::byte* get_buffer_a(size_t bytes);
+    std::byte* get_buffer_b(size_t bytes);
+};
+
+// --- Pipeline Functions ---
+
+/// Calculate total output byte size of the final transformation stage
+size_t get_output_bytes(const std::vector<std::shared_ptr<FeatureTransformation>>& chain);
+
+/// Apply sequential transformations to database vectors
+void apply_database(const std::vector<std::shared_ptr<FeatureTransformation>>& chain, const float* in, std::byte* out, size_t count);
+
+/// Apply sequential transformations to query vectors
+void apply_query(const std::vector<std::shared_ptr<FeatureTransformation>>& chain, const float* in, std::byte* out, size_t count);
+
+/// Serialize transformations to binary byte stream
+std::vector<std::byte> serialize_transformations(const std::vector<std::shared_ptr<FeatureTransformation>>& chain);
+
+/// Deserialize transformations from binary byte stream
+std::vector<std::shared_ptr<FeatureTransformation>> deserialize_transformations(const std::byte* data, size_t size);
+
+} // namespace deglib::transformation
+```
+

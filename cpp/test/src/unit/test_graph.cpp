@@ -770,3 +770,124 @@ TEST(DeglibLoadFunctions, LoadReadOnlyDynamicAndMutable) {
     std::filesystem::remove(temp_path);
 }
 
+// ===========================================================================
+//  DynamicExplorationGraph Batch Functions
+// ===========================================================================
+
+TEST(DEGBatchFunctions, SearchBatchFlatBuffer) {
+    auto graph = build_test_graph();
+    deglib::DynamicExplorationGraph deg(graph);
+
+    // 2 queries: one at vertex 0 (label 1005), one at vertex 1 (label 9999)
+    std::vector<float> queries = {0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f};
+    const size_t count = 2;
+    const uint32_t k = 3;
+
+    std::vector<uint32_t> out_indices(count * k, 0);
+    std::vector<float> out_distances(count * k, 0.0f);
+
+    deg.search_batch<float>(
+        std::span<const float>(queries), count, k, std::span<uint32_t>(out_indices), std::span<float>(out_distances),
+        /*eps=*/0.0f, nullptr, 0, /*threads=*/2, /*unsorted=*/false
+    );
+
+    // Query 0 closest should be 1005
+    EXPECT_EQ(out_indices[0], 1005u);
+    EXPECT_NEAR(out_distances[0], 0.0f, 1e-5f);
+
+    // Query 1 closest should be 9999
+    EXPECT_EQ(out_indices[k], 9999u);
+    EXPECT_NEAR(out_distances[k], 0.0f, 1e-5f);
+}
+
+TEST(DEGBatchFunctions, SearchBatchEfFlatAndContainer) {
+    auto graph = build_test_graph();
+    deglib::DynamicExplorationGraph deg(graph);
+
+    std::vector<float> queries = {0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f};
+    const size_t count = 2;
+    const uint32_t k = 2;
+    const uint32_t ef = 10;
+
+    // Container overload
+    auto container_res = deg.search_batch_ef<float>(
+        std::span<const float>(queries), count, k, ef,
+        /*include_entry=*/true, nullptr, 0, /*threads=*/2
+    );
+    ASSERT_EQ(container_res.size(), count);
+    ASSERT_GE(container_res[0].size(), 1u);
+    ASSERT_GE(container_res[1].size(), 1u);
+    EXPECT_EQ(container_res[0][0].getIdentifier(), 1005u);
+    EXPECT_EQ(container_res[1][0].getIdentifier(), 9999u);
+
+    // Flat buffer overload
+    std::vector<uint32_t> out_indices(count * k, 0);
+    std::vector<float> out_distances(count * k, 0.0f);
+    deg.search_batch_ef<float>(
+        std::span<const float>(queries), count, k, ef, std::span<uint32_t>(out_indices), std::span<float>(out_distances),
+        /*include_entry=*/true, nullptr, 0, /*threads=*/2
+    );
+    EXPECT_EQ(out_indices[0], 1005u);
+    EXPECT_EQ(out_indices[k], 9999u);
+}
+
+TEST(DEGBatchFunctions, ExploreEfSingle) {
+    auto graph = build_test_graph();
+    deglib::DynamicExplorationGraph deg(graph);
+
+    auto res = deg.explore_ef(1005u, 3, /*ef=*/10, 0, /*include_entry=*/true);
+    ASSERT_GE(res.size(), 1u);
+    EXPECT_EQ(res[0].getIdentifier(), 1005u);
+    EXPECT_NEAR(res[0].getDistance(), 0.0f, 1e-5f);
+}
+
+TEST(DEGBatchFunctions, ExploreBatchFlatAndContainer) {
+    auto graph = build_test_graph();
+    deglib::DynamicExplorationGraph deg(graph);
+
+    std::vector<uint32_t> entry_labels = {1005u, 9999u};
+    const uint32_t k = 3;
+
+    // 1. eps exploration with explore_batch
+    auto [indices_eps, dists_eps] = deg.explore_batch(
+        std::span<const uint32_t>(entry_labels), k,
+        /*max_distance_computation_count=*/50, /*eps=*/0.0f,
+        /*include_entry=*/true, nullptr, /*threads=*/2, /*return_distances=*/true
+    );
+    ASSERT_EQ(indices_eps.size(), entry_labels.size() * k);
+    EXPECT_EQ(indices_eps[0], 1005u);
+    EXPECT_EQ(indices_eps[k], 9999u);
+
+    // 2. ef exploration with explore_batch_ef
+    std::vector<uint32_t> out_indices_ef(entry_labels.size() * k, 0);
+    std::vector<float> out_dists_ef(entry_labels.size() * k, 0.0f);
+    deg.explore_batch_ef(
+        std::span<const uint32_t>(entry_labels), k, /*ef=*/10, std::span<uint32_t>(out_indices_ef), std::span<float>(out_dists_ef),
+        /*max_distance_computation_count=*/50,
+        /*include_entry=*/true, nullptr, /*threads=*/2
+    );
+    EXPECT_EQ(out_indices_ef[0], 1005u);
+    EXPECT_EQ(out_indices_ef[k], 9999u);
+}
+
+TEST(DEGBatchFunctions, GetNeighborsBatchFlatAndContainer) {
+    auto graph = build_test_graph();
+    deglib::DynamicExplorationGraph deg(graph);
+
+    std::vector<uint32_t> labels = {1005u, 9999u};
+    const uint8_t edges = deg.getEdgesPerVertex();
+
+    // Container overload
+    auto all_neighbors = deg.getNeighbors_batch(std::span<const uint32_t>(labels), /*threads=*/2);
+    ASSERT_EQ(all_neighbors.size(), labels.size() * edges);
+
+    std::unordered_set<uint32_t> expected = {1005, 9999, 42, 707};
+    std::unordered_set<uint32_t> actual0(all_neighbors.begin(), all_neighbors.begin() + edges);
+    EXPECT_EQ(actual0, expected);
+
+    // Flat buffer overload
+    std::vector<uint32_t> flat_out(labels.size() * edges, 0);
+    deg.getNeighbors_batch(std::span<const uint32_t>(labels), std::span<uint32_t>(flat_out), /*threads=*/2);
+    std::unordered_set<uint32_t> actual_flat(flat_out.begin(), flat_out.begin() + edges);
+    EXPECT_EQ(actual_flat, expected);
+}

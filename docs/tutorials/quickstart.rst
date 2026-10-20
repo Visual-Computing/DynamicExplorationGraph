@@ -35,17 +35,17 @@ Complete Example
 
    # 3. Query the index for the 10 nearest neighbors
    query = np.random.randn(dim).astype(np.float32)
-   indices, distances = graph.search(query, k=10, eps=0.1)
+   indices, distances = graph.search(query, k=10, eps_or_ef=0.1)
 
    print("Top-10 nearest neighbor IDs:", indices)
    print("Corresponding distances:", distances)
 
-   # 4. Save and reload the graph
+   # 4. Save and reload the graph (works for all graph types)
    graph.save_graph("my_graph.deg")
 
    # Load read-only graph for fast serving
    loaded_graph = deglib.graph.load_readonly_graph("my_graph.deg")
-   loaded_indices, _ = loaded_graph.search(query, k=10, eps=0.1)
+   loaded_indices, _ = loaded_graph.search(query, k=10, eps_or_ef=0.1)
 
 Batch Querying
 --------------
@@ -56,18 +56,20 @@ You can search multiple query vectors in parallel by passing a 2D NumPy array:
 
    # Search for 100 queries simultaneously using available CPU threads
    queries = np.random.randn(100, dim).astype(np.float32)
-   indices, distances = graph.search(queries, k=10, eps=0.1, threads=0)
+   indices, distances = graph.search(queries, k=10, eps_or_ef=0.1, threads=0)
 
    # Result shapes: (100, 10)
    print("Batch result shape:", indices.shape)
 
-Understanding the `eps` Parameter
----------------------------------
+Understanding the `eps_or_ef` Parameter
+---------------------------------------
 
-The `eps` (epsilon) parameter controls the exploration margin during graph traversal:
+The ``eps_or_ef`` parameter controls graph traversal trade-offs:
 
-- **Higher `eps`** (e.g. `0.2`): Examines more candidate nodes, yielding higher recall at slightly lower QPS.
-- **Lower `eps`** (e.g. `0.0` to `0.05`): Faster search speed with a small trade-off in accuracy.
+- **Relative Margin Mode (``eps_or_ef < 1.0``)**: Traversal evaluates candidates within :math:`(1 + \epsilon) \cdot d_{\text{best}}`.
+  - Higher values (e.g. ``0.2``): Higher recall at slightly lower QPS.
+  - Lower values (e.g. ``0.0`` to ``0.05``): High throughput search with low latency.
+- **Fixed Pool Mode (``eps_or_ef >= 1.0``)**: Fixed candidate beam width (e.g. ``64``, ``128``) similar to HNSW's ``efSearch``.
 
 Next Steps
 ----------

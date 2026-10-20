@@ -3,6 +3,7 @@
 #include "deglib/graph/mutable_graph.h"
 #include "deglib/graph/visited_list_pool.h"
 #include "deglib/search.h"
+#include "deglib/serialization.h"
 #include "deglib/utils/memory.h"
 #include "deglib/utils/random.h"
 
@@ -12,7 +13,6 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -139,31 +139,28 @@ class DynamicGraph : public deglib::graph::MutableGraph {
         if (edges_per_vertex % 2 != 0) throw std::invalid_argument("edges_per_vertex must be even.");
     }
 
+
     /**
-     * Load from an open binary file stream.
-     *
-     * @param edges_per_vertex Number of edges per vertex.
-     * @param feature_space Distance metric and vector dimensionality.
-     * @param ifstream Open binary input stream positioned at the vertex data.
-     * @param size Total number of vertices to read from the stream.
-     * @param chunk_size Target number of vertices per memory chunk (rounded up to nearest power of 2, default = 1024).
+     * Load from contiguous memory buffer (e.g. from container 'VERT' section).
      */
     DynamicGraph(
         const uint8_t edges_per_vertex,
         const deglib::distances::FloatSpace feature_space,
-        std::ifstream& ifstream,
+        const void* buffer,
         const uint32_t size,
         const uint32_t chunk_size = 1024
     )
         : DynamicGraph(edges_per_vertex, std::move(feature_space), chunk_size) {
         label_to_index_.reserve(size);
         const uint32_t file_byte_size_per_vertex = compute_aligned_byte_size_per_vertex(this->edges_per_vertex_, this->feature_byte_size_, 0);
+        const char* ptr = reinterpret_cast<const char*>(buffer);
 
         for (uint32_t i = 0; i < size; i++) {
             if (i >= capacity()) {
                 allocate_chunk();
             }
-            ifstream.read(reinterpret_cast<char*>(this->vertex_by_index(i)), file_byte_size_per_vertex);
+            std::memcpy(this->vertex_by_index(i), ptr, file_byte_size_per_vertex);
+            ptr += file_byte_size_per_vertex;
             const uint32_t lbl = this->getExternalLabel(i);
             label_to_index_.emplace(lbl, i);
         }
@@ -355,31 +352,7 @@ class DynamicGraph : public deglib::graph::MutableGraph {
         auto neighbor_indices_end = neighbor_indices + this->edges_per_vertex_;
         return std::binary_search(neighbor_indices, neighbor_indices_end, neighbor_index);
     }
-
-    const bool saveGraph(const char* path_to_graph) const override {
-        std::filesystem::create_directories(std::filesystem::path(path_to_graph).parent_path());
-
-        auto out = std::ofstream(path_to_graph, std::ios::out | std::ios::binary);
-        if (!out.is_open()) {
-            std::fprintf(stderr, "Error opening file for write: %s\n", path_to_graph);
-            return false;
-        }
-
-        uint8_t metric_type = static_cast<uint8_t>(feature_space_.metric().value);
-        out.write(reinterpret_cast<const char*>(&metric_type), sizeof(metric_type));
-        uint16_t dim = uint16_t(this->feature_space_.dim());
-        out.write(reinterpret_cast<const char*>(&dim), sizeof(dim));
-
-        uint32_t graph_size = uint32_t(this->size());
-        out.write(reinterpret_cast<const char*>(&graph_size), sizeof(graph_size));
-        out.write(reinterpret_cast<const char*>(&this->edges_per_vertex_), sizeof(this->edges_per_vertex_));
-
-        uint32_t file_byte_size_per_vertex = compute_aligned_byte_size_per_vertex(this->edges_per_vertex_, this->feature_byte_size_, 0);
-        for (uint32_t i = 0; i < graph_size; i++) out.write(reinterpret_cast<const char*>(this->vertex_by_index(i)), file_byte_size_per_vertex);
-        out.close();
-
-        return true;
-    }
+    const bool saveGraph(const char* path_to_graph) const override { return deglib::serialization::save_graph(path_to_graph, *this); }
 
     /**
      * Add a new vertex. The neighbor indices will be prefilled with a self-loop, the weights will be 0.
@@ -529,6 +502,15 @@ class DynamicGraph : public deglib::graph::MutableGraph {
     ) const override {
         return searchInternImpl(*this, entry_vertex_indices, query, k, eps, include_entry, filter, max_distance_computation_count);
     }
+
+  public:
+    static DynamicGraph loadGraph(const char* path_graph, const uint32_t chunk_size = 1024) {
+        auto data = deglib::serialization::read_graph_file(path_graph);
+        auto graph = DynamicGraph(data.edges_per_vertex, std::move(*data.feature_space), data.vertex_bytes, data.size, chunk_size);
+        graph.setPrefetch(data.po, data.pl, data.nl);
+        graph.setEntryVertexIndices(std::move(data.entry_vertex_indices));
+        return graph;
+    }
 };
 
 /**
@@ -537,38 +519,7 @@ class DynamicGraph : public deglib::graph::MutableGraph {
  * @param path_graph File path to the saved graph file.
  * @param chunk_size Target number of vertices per memory chunk (rounded up to nearest power of 2, default = 1024).
  */
-inline auto load_dynamic_graph(const char* path_graph, uint32_t chunk_size = 1024) {
-    std::error_code ec{};
-    auto file_size = std::filesystem::file_size(path_graph, ec);
-    if (ec != std::error_code{}) {
-        std::fprintf(stderr, "error when accessing file, size is: %ju message: %s \n", file_size, ec.message().c_str());
-        perror("");
-        abort();
-    }
-
-    auto ifstream = std::ifstream(path_graph, std::ios::binary);
-    if (!ifstream.is_open()) {
-        std::fprintf(stderr, "could not open %s\n", path_graph);
-        perror("");
-        abort();
-    }
-
-    uint8_t metric_type;
-    ifstream.read(reinterpret_cast<char*>(&metric_type), sizeof(metric_type));
-    uint16_t dim;
-    ifstream.read(reinterpret_cast<char*>(&dim), sizeof(dim));
-    const auto feature_space = deglib::distances::FloatSpace(dim, static_cast<deglib::distances::Metric>(metric_type));
-
-    uint32_t size;
-    ifstream.read(reinterpret_cast<char*>(&size), sizeof(size));
-    uint8_t edges_per_vertex;
-    ifstream.read(reinterpret_cast<char*>(&edges_per_vertex), sizeof(edges_per_vertex));
-
-    auto graph = deglib::graph::DynamicGraph(edges_per_vertex, std::move(feature_space), ifstream, size, chunk_size);
-    ifstream.close();
-
-    return graph;
-}
+inline auto load_dynamic_graph(const char* path_graph, uint32_t chunk_size = 1024) { return DynamicGraph::loadGraph(path_graph, chunk_size); }
 
 /**
  * Convert the given graph to a DynamicGraph, copying topology, labels,

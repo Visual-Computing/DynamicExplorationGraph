@@ -214,13 +214,29 @@ class InternalGraph {
         setPrefetch(best_po, best_pl, best_nl);
     }
     /**
-     * Perform a search but stops when the to_vertex was found.
+     * @brief Traverses the graph from the given entry vertices towards to_vertex and backtracks the path.
+     *
+     * @param entry_vertex_indices Internal indices to start search from.
+     * @param to_vertex Target internal index.
+     * @param eps Exploration factor widening the search radius (0.0 = greedy descent).
+     * @param k Size of result set driving exploration radius.
+     * @return Path from target back to entry vertex with internal indices and distances; empty if unreachable.
      */
     virtual std::vector<deglib::graph::ObjectDistance>
     hasPath(const std::vector<uint32_t>& entry_vertex_indices, const uint32_t to_vertex, const float eps, const uint32_t k) const = 0;
 
     /**
-     * Bounds-checked internal search for query vectors.
+     * @brief Performs approximate nearest neighbor search using dynamic exploration radius (eps).
+     *
+     * Traverses the graph starting from default entry vertices. Operates directly on internal indices (0..N-1).
+     *
+     * @tparam T Query element type (e.g., float, uint16_t, std::byte).
+     * @param query Span of query vector elements.
+     * @param k The number of nearest neighbors to return.
+     * @param eps Relative exploration expansion margin (default 0.0f).
+     * @param filter Optional predicate filter to restrict eligible internal vertices.
+     * @param max_distance_computation_count Maximum number of distance evaluations allowed (0 = unlimited).
+     * @return deglib::graph::ResultSet Max-heap containing nearest ObjectDistance entries with internal vertex indices.
      */
     template <typename T>
     deglib::graph::ResultSet search(
@@ -239,6 +255,18 @@ class InternalGraph {
         return search_intern(getEntryVertexIndices(), reinterpret_cast<const std::byte*>(query.data()), k, eps, true, filter, max_distance_computation_count);
     }
 
+    /**
+     * @brief Performs approximate nearest neighbor search starting from custom entry vertices using dynamic exploration radius (eps).
+     *
+     * @tparam T Query element type (e.g., float, uint16_t, std::byte).
+     * @param query Span of query vector elements.
+     * @param entry_vertex_indices List of internal indices to start search from (uses default entries if empty).
+     * @param k The number of nearest neighbors to return.
+     * @param eps Relative exploration expansion margin (default 0.0f).
+     * @param filter Optional predicate filter to restrict eligible internal vertices.
+     * @param max_distance_computation_count Maximum number of distance evaluations allowed (0 = unlimited).
+     * @return deglib::graph::ResultSet Max-heap containing nearest ObjectDistance entries with internal vertex indices.
+     */
     template <typename T>
     deglib::graph::ResultSet search(
         std::span<const T> query,
@@ -262,6 +290,18 @@ class InternalGraph {
         return search_intern(entry_vertex_indices, reinterpret_cast<const std::byte*>(query.data()), k, eps, true, filter, max_distance_computation_count);
     }
 
+    /**
+     * @brief Performs approximate nearest neighbor search starting from a span of custom entry vertices using dynamic exploration radius (eps).
+     *
+     * @tparam T Query element type (e.g., float, uint16_t, std::byte).
+     * @param query Span of query vector elements.
+     * @param entry_vertex_indices Span of internal indices to start search from (uses default entries if empty).
+     * @param k The number of nearest neighbors to return.
+     * @param eps Relative exploration expansion margin (default 0.0f).
+     * @param filter Optional predicate filter to restrict eligible internal vertices.
+     * @param max_distance_computation_count Maximum number of distance evaluations allowed (0 = unlimited).
+     * @return deglib::graph::ResultSet Max-heap containing nearest ObjectDistance entries with internal vertex indices.
+     */
     template <typename T>
     deglib::graph::ResultSet search(
         std::span<const T> query,
@@ -279,7 +319,18 @@ class InternalGraph {
     }
 
     /**
-     * Bounds-checked internal search for query vectors using ResultList with fixed ef budget.
+     * @brief Performs approximate nearest neighbor search using fixed candidate pool size (ef).
+     *
+     * Traverses the graph maintaining a beam of size ef. Operates directly on internal indices (0..N-1).
+     *
+     * @tparam T Query element type (e.g., float, uint16_t, std::byte).
+     * @param query Span of query vector elements.
+     * @param k The number of nearest neighbors to return.
+     * @param ef Fixed candidate pool / beam width (clamped to at least k).
+     * @param include_entry Whether entry vertex candidates should be eligible in results (default true).
+     * @param filter Optional predicate filter to restrict eligible internal vertices.
+     * @param max_distance_computation_count Maximum number of distance evaluations allowed (0 = unlimited).
+     * @return std::vector<deglib::graph::ObjectDistance> Vector of nearest neighbors sorted ascending by distance with internal vertex indices.
      */
     template <typename T>
     std::vector<deglib::graph::ObjectDistance> search_ef(
@@ -301,6 +352,19 @@ class InternalGraph {
         );
     }
 
+    /**
+     * @brief Performs approximate nearest neighbor search starting from custom entry vertices using fixed candidate pool size (ef).
+     *
+     * @tparam T Query element type (e.g., float, uint16_t, std::byte).
+     * @param query Span of query vector elements.
+     * @param entry_vertex_indices List of internal indices to start search from (uses default entries if empty).
+     * @param k The number of nearest neighbors to return.
+     * @param ef Fixed candidate pool / beam width (clamped to at least k).
+     * @param include_entry Whether entry vertex candidates should be eligible in results (default true).
+     * @param filter Optional predicate filter to restrict eligible internal vertices.
+     * @param max_distance_computation_count Maximum number of distance evaluations allowed (0 = unlimited).
+     * @return std::vector<deglib::graph::ObjectDistance> Vector of nearest neighbors sorted ascending by distance with internal vertex indices.
+     */
     template <typename T>
     std::vector<deglib::graph::ObjectDistance> search_ef(
         std::span<const T> query,
@@ -328,7 +392,17 @@ class InternalGraph {
     }
 
     /**
-     * Internal graph exploration starting at entry_vertex_index.
+     * @brief Explores the graph starting from an internal vertex index using dynamic exploration radius (eps).
+     *
+     * Uses the vertex's stored feature vector as the query. Operates directly on internal indices (0..N-1).
+     *
+     * @param entry_vertex_index Internal index of starting vertex.
+     * @param k The number of nearest neighbors to return.
+     * @param max_distance_computation_count Maximum number of distance evaluations allowed (0 = unlimited).
+     * @param eps Relative exploration expansion margin (default 0.0f).
+     * @param include_entry If true, starting vertex itself is eligible in results (default true).
+     * @param filter Optional predicate filter to restrict eligible internal vertices.
+     * @return deglib::graph::ResultSet Max-heap of nearest ObjectDistance entries with internal vertex indices.
      */
     deglib::graph::ResultSet explore(
         const uint32_t entry_vertex_index,
@@ -340,6 +414,31 @@ class InternalGraph {
     ) const {
         const auto query_ptr = getFeatureVector(entry_vertex_index);
         return search_intern({entry_vertex_index}, query_ptr, k, eps, include_entry, filter, max_distance_computation_count);
+    }
+
+    /**
+     * @brief Explores the graph starting from an internal vertex index using fixed beam width (ef).
+     *
+     * Uses the vertex's stored feature vector as the query. Operates directly on internal indices (0..N-1).
+     *
+     * @param entry_vertex_index Internal index of starting vertex.
+     * @param k The number of nearest neighbors to return.
+     * @param ef Fixed candidate pool / beam width (clamped to at least k).
+     * @param max_distance_computation_count Maximum number of distance evaluations allowed (0 = unlimited).
+     * @param include_entry If true, starting vertex itself is eligible in results (default true).
+     * @param filter Optional predicate filter to restrict eligible internal vertices.
+     * @return std::vector<deglib::graph::ObjectDistance> Vector of nearest neighbors sorted ascending by distance with internal vertex indices.
+     */
+    std::vector<deglib::graph::ObjectDistance> explore_ef(
+        const uint32_t entry_vertex_index,
+        const uint32_t k,
+        const uint32_t ef,
+        const uint32_t max_distance_computation_count = 0,
+        const bool include_entry = true,
+        const deglib::search::Filter* filter = nullptr
+    ) const {
+        const auto query_ptr = getFeatureVector(entry_vertex_index);
+        return search_ef_intern({entry_vertex_index}, query_ptr, k, ef, include_entry, filter, max_distance_computation_count);
     }
 
   protected:

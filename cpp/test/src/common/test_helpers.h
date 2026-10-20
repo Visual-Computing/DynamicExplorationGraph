@@ -1,7 +1,6 @@
 #pragma once
 
 #include "deglib/distance/evp_ip.h"
-#include "deglib/optimization/quantization/evp_quantize.h"
 
 #include <deglib/deglib.h>
 #include <gtest/gtest.h>

@@ -8,7 +8,7 @@
 
 #include "common/test_helpers.h"
 #include "deglib/distances.h"
-#include "deglib/optimization/quantization/evp_quantize.h"
+#include "deglib/transformation/evp.h"
 #include "gtest/gtest.h"
 
 #include <bit>
@@ -27,7 +27,7 @@ static std::pair<std::vector<std::byte>, std::vector<std::byte>> make_evp_pair(u
     std::normal_distribution<float> dist(0.0f, 1.0f);
     for (auto& x : a) x = dist(rng_a);
     for (auto& x : b) x = dist(rng_b);
-    return {deglib::quantization::evp::quantize_single(a.data(), dim, non_zeros), deglib::quantization::evp::quantize_single(b.data(), dim, non_zeros)};
+    return {deglib::transformation::quantize_single(a.data(), dim, non_zeros), deglib::transformation::quantize_single(b.data(), dim, non_zeros)};
 }
 
 // ============================================================================

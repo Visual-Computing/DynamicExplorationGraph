@@ -775,6 +775,27 @@ TEST(EvenRegularGraphBuilder, DynamicExplorationGraphWrapperAndSpanAddEntry) {
     EXPECT_FLOAT_EQ(results.top().getDistance(), 0.0f);
 }
 
+TEST(EvenRegularGraphBuilder, DynamicExplorationGraphConstructorAndRejection) {
+    const uint32_t num_vectors = 10;
+    const uint32_t dims = 8;
+    const uint8_t edges_per_vertex = 4;
+
+    auto feature_space = deglib::distances::FloatSpace(dims, deglib::distances::Metric::FP32_L2);
+    auto deg = deglib::create_empty(num_vectors, edges_per_vertex, feature_space);
+
+    std::mt19937 rng(123);
+    // Direct constructor taking DynamicExplorationGraph&
+    deglib::builder::EvenRegularGraphBuilder builder(deg, rng);
+    EXPECT_FALSE(builder.hasTransformations());
+    EXPECT_EQ(builder.getInputDim(), dims);
+
+    // Verify rejection of immutable/readonly graph
+    auto readonly_internal = std::make_unique<deglib::graph::ReadOnlyGraph>(num_vectors, edges_per_vertex, feature_space);
+    deglib::DynamicExplorationGraph readonly_deg(std::move(readonly_internal));
+    EXPECT_FALSE(readonly_deg.isMutable());
+    EXPECT_THROW(deglib::builder::EvenRegularGraphBuilder invalid_builder(readonly_deg, rng), std::invalid_argument);
+}
+
 TEST(BuilderBuildFromData, FloatL2Basic) {
     const uint32_t num_vectors = 30;
     const uint32_t dims = 8;
@@ -853,7 +874,7 @@ TEST(BuilderSlidingWindow, ContinuousWindowUpdates) {
     auto deg = deglib::create_empty(window_size + batch_size * 2, edges_per_vertex, feature_space);
 
     std::mt19937 rng(42);
-    deglib::builder::EvenRegularGraphBuilder builder(
+    auto builder = deglib::create_builder(
         deg, rng, deglib::builder::OptimizationTarget::StreamingData, /*extend_k=*/edges_per_vertex * 2, /*extend_eps=*/0.2f
     );
     builder.setThreadCount(1);

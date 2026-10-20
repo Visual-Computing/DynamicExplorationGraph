@@ -109,72 +109,8 @@ def presort(
     return deglib_cpp.presort(vectors_f32, cpp_space, radius_decay, threads, cb_fn)
 
 
-def mips_l2_transform(database: np.ndarray) -> tuple[np.ndarray, float]:
-    """
-    Transform database vectors from d-dimensional space to (d+1)-dimensional space
-    for Maximum Inner Product Search (MIPS) using L2 distance.
-
-    For each vector :math:`x_i \\in \\mathbb{R}^d`:
-
-    .. math::
-
-        x'_i = [x_i, \\sqrt{M^2 - \\|x_i\\|^2}] \\in \\mathbb{R}^{d+1}
-
-    where :math:`M^2 = \\max_i \\|x_i\\|^2`.
-
-    :param database: 2D float32 NumPy array of shape (N, d).
-    :return: Tuple of (transformed_database array of shape (N, d+1), max_norm float M).
-    """
-    db_f32 = np.ascontiguousarray(database, dtype=np.float32)
-    return deglib_cpp.mips_l2_transform(db_f32)
-
-
-# EVP + Scalar Quantizer Classes & Factory Functions
-EvpQuantizer = deglib_cpp.optimization.EvpQuantizer
-ScalarQuantizerInt8 = deglib_cpp.optimization.ScalarQuantizerInt8
-ScalarQuantizerInt8PerDim = deglib_cpp.optimization.ScalarQuantizerInt8PerDim
-ScalarQuantizerUint8 = deglib_cpp.optimization.ScalarQuantizerUint8
-ScalarQuantizerUint8PerDim = deglib_cpp.optimization.ScalarQuantizerUint8PerDim
-
-make_evp_quantizer = deglib_cpp.optimization.make_evp_quantizer
-make_scalar_quantizer_int8 = deglib_cpp.optimization.make_scalar_quantizer_int8
-make_scalar_quantizer_int8_perdim = deglib_cpp.optimization.make_scalar_quantizer_int8_perdim
-make_scalar_quantizer_uint8 = deglib_cpp.optimization.make_scalar_quantizer_uint8
-make_scalar_quantizer_uint8_perdim = deglib_cpp.optimization.make_scalar_quantizer_uint8_perdim
-
-
-def mips_l2_transform_query(queries: np.ndarray) -> np.ndarray:
-    """
-    Pad query vectors from d-dimensional space to (d+1)-dimensional space
-    for MIPS queries against an L2-transformed database.
-
-    For each query vector :math:`q_i \\in \\mathbb{R}^d`:
-
-    .. math::
-
-        q'_i = [q_i, 0] \\in \\mathbb{R}^{d+1}
-
-    :param queries: 1D or 2D float32 NumPy array.
-    :return: Transformed queries array of shape (d+1) or (Q, d+1).
-    """
-    queries_f32 = np.ascontiguousarray(queries, dtype=np.float32)
-    return deglib_cpp.mips_l2_transform_query(queries_f32)
-
-
 __all__ = [
     "prune_non_mrng_edges",
     "prune_worst_edges",
     "presort",
-    "mips_l2_transform",
-    "mips_l2_transform_query",
-    "EvpQuantizer",
-    "ScalarQuantizerInt8",
-    "ScalarQuantizerInt8PerDim",
-    "ScalarQuantizerUint8",
-    "ScalarQuantizerUint8PerDim",
-    "make_evp_quantizer",
-    "make_scalar_quantizer_int8",
-    "make_scalar_quantizer_int8_perdim",
-    "make_scalar_quantizer_uint8",
-    "make_scalar_quantizer_uint8_perdim",
 ]

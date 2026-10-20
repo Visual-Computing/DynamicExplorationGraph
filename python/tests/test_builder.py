@@ -251,7 +251,9 @@ class TestGraphs:
             graph,
             extend_k=32,
             extend_eps=0.1,
-            optimization_target=deglib.builder.OptimizationTarget.LowLID if metric == Metric.FP32_L2 else deglib.builder.OptimizationTarget.HighLID,
+            optimization_target=deglib.builder.OptimizationTarget.LowLID
+            if metric == Metric.FP32_L2
+            else deglib.builder.OptimizationTarget.HighLID,
         )
         builder.add_entry(range(samples), data)
         status = builder.build()
@@ -275,8 +277,16 @@ class TestGraphs:
         total_vectors = window_size + batch_size * rounds
         all_data = np.random.random((total_vectors, dims)).astype(np.float32)
 
-        graph = deglib.create_empty(window_size + batch_size * 2, FloatSpace.create(dims, Metric.FP32_L2), edges_per_vertex)
-        builder = deglib.GraphBuilder(graph, extend_k=16, extend_eps=0.1, improve_k=8, optimization_target=deglib.builder.OptimizationTarget.LowLID)
+        graph = deglib.create_empty(
+            window_size + batch_size * 2, FloatSpace.create(dims, Metric.FP32_L2), edges_per_vertex
+        )
+        builder = deglib.GraphBuilder(
+            graph,
+            extend_k=16,
+            extend_eps=0.1,
+            improve_k=8,
+            optimization_target=deglib.builder.OptimizationTarget.LowLID,
+        )
 
         # Initial build
         builder.add_entry(range(window_size), all_data[:window_size])
@@ -309,4 +319,3 @@ class TestGraphs:
             assert len(indices) == 1
             assert indices[0] == next_insert - 1
             assert np.isclose(dists[0], 0.0, atol=1e-5)
-

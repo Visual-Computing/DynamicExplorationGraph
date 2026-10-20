@@ -23,6 +23,8 @@ Factory & Loader Functions
 
 .. autofunction:: deglib.graph.create_random_graph
 
+.. autofunction:: deglib.graph.load_graph
+
 .. autofunction:: deglib.graph.load_readonly_graph
 
 .. autofunction:: deglib.graph.load_dynamic_graph

@@ -32,7 +32,7 @@ Edge & Weight Diagnostics
 
 .. autofunction:: deglib.analysis.calc_edge_weight_histogram
 
-.. autofunction:: deglib.analysis.calc_non_rng_edges
+.. autofunction:: deglib.analysis.calc_non_mrng_edges
 
 .. autofunction:: deglib.analysis.check_graph_weights
 

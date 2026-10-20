@@ -19,11 +19,12 @@ High-throughput approximate nearest neighbor and exploratory search library impl
 
 - **C++20 header-only library** with native Python bindings (`deglib`)
 - **Dynamic streaming**: Incremental addition, removal, and continuous edge optimization
-- **Multi-threaded construction** and batch vector search with SIMD acceleration (AVX2, AVX-512)
+- **Multi-threaded construction** and zero-allocation batch search with SIMD acceleration (AVX2, AVX-512)
 - **Supported data types**: `float32`, `float16`, `int8`, `uint8`, `evp-bits`
 - **Supported metrics**: Euclidean ($L_2$), Inner Product / Cosine, quantized EVP
-- **Exploratory graph traversal** and label-filtered nearest neighbor search
-- Compact graph serialization and lightweight read-only deployment mode
+- **Feature transformation & quantization pipeline**: Integrated scalar INT8/UINT8, bit-packed EVP, and MIPS transforms
+- **Exploratory graph traversal**: High-throughput parallel exploration, path reachability, and batch neighbor lookups
+- **Compact serialization**: Unified `.deg` container format supporting all graph types (Read-Only, SizeBounded, Dynamic)
 
 ---
 
@@ -50,14 +51,17 @@ query = np.random.randn(128).astype(np.float32)
 # 1. Build search index directly from data
 graph = deglib.builder.build_from_data(data, metric=deglib.Metric.FP32_L2)
 
-# 2. Search top-10 nearest neighbors
-indices, distances = graph.search(query, k=10, eps=0.1)
+# 2. Search top-10 nearest neighbors (eps_or_ef: < 1.0 = relative eps, >= 1.0 = ef beam width)
+indices, distances = graph.search(query, k=10, eps_or_ef=0.1)
 
+# Or multi-threaded batch search across multiple queries:
+# queries = np.random.randn(100, 128).astype(np.float32)
+# batch_indices, batch_distances = graph.search(queries, k=10, eps_or_ef=0.1, threads=4)
 
 print("Top-10 neighbor IDs:", indices)
 print("Distances:", distances)
 
-# 3. Save graph for serving
+# 3. Save graph for serving (works for both mutable and read-only graphs)
 graph.save_graph("index.deg")
 ```
 

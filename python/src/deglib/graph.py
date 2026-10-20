@@ -78,14 +78,51 @@ class DynamicExplorationGraph:
         """
         return self.dynamic_exploration_graph_cpp.is_mutable()
 
-    def get_neighbors(self, external_label: int) -> List[int]:
+    def get_neighbors(
+        self, external_label: Union[int, np.ndarray, list, tuple], threads: int = 1
+    ) -> Union[List[int], np.ndarray]:
         """
-        Get the neighbor external labels of the given external label.
+        Get the neighbor external labels of the given external label(s).
 
-        :param external_label: The external label to get the neighbors of
-        :returns: The external labels of the neighbors
+        :param external_label: The external label to get the neighbors of, or an array/list of external labels.
+        :param threads: The number of worker threads to use for batch retrieval.
+        :returns: List of neighbor external labels (for single label) or 2D array of shape (N, edges) for batch.
         """
-        return self.dynamic_exploration_graph_cpp.get_neighbors(external_label)
+        if isinstance(external_label, (np.ndarray, list, tuple)):
+            arr = np.ascontiguousarray(external_label, dtype=np.uint32)
+            if arr.ndim == 2:
+                arr = arr[:, 0]
+            threads = get_num_useful_threads(threads, arr.shape[0])
+            return self.dynamic_exploration_graph_cpp.get_neighbors_batch(arr, threads)
+        return self.dynamic_exploration_graph_cpp.get_neighbors(int(external_label))
+
+    def get_neighbors_batch(
+        self, external_labels: Union[np.ndarray, list, tuple], threads: int = 1
+    ) -> np.ndarray:
+        """
+        Get neighbor external labels for a batch of external labels.
+
+        :param external_labels: 1D array or sequence of external labels.
+        :param threads: The number of worker threads to use.
+        :returns: 2D numpy array of shape (N, edges_per_vertex).
+        """
+        arr = np.ascontiguousarray(external_labels, dtype=np.uint32)
+        if arr.ndim == 2:
+            arr = arr[:, 0]
+        threads = get_num_useful_threads(threads, arr.shape[0])
+        return self.dynamic_exploration_graph_cpp.get_neighbors_batch(arr, threads)
+
+    def has_transformations(self) -> bool:
+        """
+        :return: whether the graph has associated feature transformations / quantizers
+        """
+        return self.dynamic_exploration_graph_cpp.has_transformations()
+
+    def get_transformations(self):
+        """
+        :return: the list of associated FeatureTransformation objects
+        """
+        return self.dynamic_exploration_graph_cpp.get_transformations()
 
     def search(
         self,
@@ -127,7 +164,10 @@ class DynamicExplorationGraph:
             )
             k = self.size()
 
-        valid_dtype = self.get_feature_space().metric().get_dtype()
+        if self.has_transformations():
+            valid_dtype = np.float32
+        else:
+            valid_dtype = self.get_feature_space().metric().get_dtype()
         query = assure_array(query, "query", valid_dtype)
         filter_obj = Filter.create_filter(filter_labels, self.size())
         threads = get_num_useful_threads(threads, query.shape[0])
@@ -237,7 +277,9 @@ class DynamicExplorationGraph:
             entries = [int(entry_external_labels)]
         else:
             entries = [int(label) for label in entry_external_labels]
-        return self.dynamic_exploration_graph_cpp.has_path(entries, int(to_external_label), float(eps), int(k), return_distances)
+        return self.dynamic_exploration_graph_cpp.has_path(
+            entries, int(to_external_label), float(eps), int(k), return_distances
+        )
 
     def save_graph(self, path: pathlib.Path | str):
         """
@@ -282,6 +324,8 @@ class DynamicExplorationGraph:
         :param custom_features: Optional NumPy array containing replacement feature vectors.
         :return: A new read-only DynamicExplorationGraph.
         """
+        if feature_space is None and custom_features is None:
+            return DynamicExplorationGraph(self.dynamic_exploration_graph_cpp.to_readonly())
         fs_cpp = feature_space.float_space_cpp if feature_space is not None else None
         feat_cpp = np.ascontiguousarray(custom_features) if custom_features is not None else None
         graph_cpp = deglib_cpp.read_only_graph_from_graph(self.dynamic_exploration_graph_cpp, fs_cpp, feat_cpp)
@@ -307,10 +351,11 @@ class DynamicExplorationGraph:
         """
         fs_cpp = feature_space.float_space_cpp if feature_space is not None else None
         feat_cpp = np.ascontiguousarray(custom_features) if custom_features is not None else None
-        graph_cpp = deglib_cpp.size_bounded_graph_from_graph(
-            self.dynamic_exploration_graph_cpp, fs_cpp, feat_cpp, capacity
+        return DynamicExplorationGraph(
+            self.dynamic_exploration_graph_cpp.to_mutable(
+                custom_feature_space=fs_cpp, custom_features=feat_cpp, new_max_size=capacity
+            )
         )
-        return DynamicExplorationGraph(graph_cpp)
 
     def to_dynamic(
         self,
@@ -333,10 +378,11 @@ class DynamicExplorationGraph:
         """
         fs_cpp = feature_space.float_space_cpp if feature_space is not None else None
         feat_cpp = np.ascontiguousarray(custom_features) if custom_features is not None else None
-        graph_cpp = deglib_cpp.dynamic_graph_from_graph(
-            self.dynamic_exploration_graph_cpp, fs_cpp, feat_cpp, chunk_size
+        return DynamicExplorationGraph(
+            self.dynamic_exploration_graph_cpp.to_dynamic(
+                custom_feature_space=fs_cpp, custom_features=feat_cpp, chunk_size=chunk_size
+            )
         )
-        return DynamicExplorationGraph(graph_cpp)
 
     def __repr__(self) -> str:
         return (
@@ -356,29 +402,42 @@ __all__ = [
     "create_empty",
     "create_dynamic_empty",
     "create_random_graph",
+    "load_graph",
     "load_readonly_graph",
     "load_dynamic_graph",
     "load_mutable_graph",
 ]
 
 
-def create_empty(capacity: int, feature_space: FloatSpace, edges_per_vertex: int = 32) -> DynamicExplorationGraph:
+def _normalize_transformations(transformations):
+    if transformations is None:
+        return []
+    if isinstance(transformations, (list, tuple)):
+        return list(transformations)
+    return [transformations]
+
+
+def create_empty(
+    capacity: int, feature_space: FloatSpace, edges_per_vertex: int = 32, transformations=None
+) -> DynamicExplorationGraph:
     """
     Create an empty mutable DynamicExplorationGraph (SizeBoundedGraph).
 
     :param capacity: The maximal number of vertices of this graph.
     :param feature_space: A FloatSpace object defining dimensionality, metric, and instruction set.
     :param edges_per_vertex: Number of neighbors for each vertex. Defaults to 32.
+    :param transformations: Optional list of FeatureTransformation objects (or single FeatureTransformation) attached to the graph.
     :return: A new mutable DynamicExplorationGraph.
     """
-    graph_cpp = deglib_cpp.create_size_bounded_graph(capacity, edges_per_vertex, feature_space.float_space_cpp)
+    xfrms = _normalize_transformations(transformations)
+    graph_cpp = deglib_cpp.create_size_bounded_graph(
+        capacity, edges_per_vertex, feature_space.float_space_cpp, xfrms
+    )
     return DynamicExplorationGraph(graph_cpp)
 
 
-
-
 def create_dynamic_empty(
-    feature_space: FloatSpace, edges_per_vertex: int = 32, chunk_size: int = 1024
+    feature_space: FloatSpace, edges_per_vertex: int = 32, chunk_size: int = 1024, transformations=None
 ) -> DynamicExplorationGraph:
     """
     Create an empty mutable DynamicExplorationGraph with dynamic chunk-based memory allocation (DynamicGraph).
@@ -387,14 +446,16 @@ def create_dynamic_empty(
     :param edges_per_vertex: Number of neighbors for each vertex (must be even). Defaults to 32.
     :param chunk_size: Target number of vertices per memory chunk (default = 1024).
                        Will be automatically rounded up to the nearest power of 2 (e.g. 600 -> 1024).
+    :param transformations: Optional list of FeatureTransformation objects (or single FeatureTransformation) attached to the graph.
     :return: A new mutable DynamicExplorationGraph.
     """
-    graph_cpp = deglib_cpp.create_dynamic_graph(edges_per_vertex, feature_space.float_space_cpp, chunk_size)
+    xfrms = _normalize_transformations(transformations)
+    graph_cpp = deglib_cpp.create_dynamic_graph(edges_per_vertex, feature_space.float_space_cpp, chunk_size, xfrms)
     return DynamicExplorationGraph(graph_cpp)
 
 
 def create_random_graph(
-    features: np.ndarray, feature_space: FloatSpace, edges_per_vertex: int = 32, seed: int = 7
+    features: np.ndarray, feature_space: FloatSpace, edges_per_vertex: int = 32, seed: int = 7, transformations=None
 ) -> DynamicExplorationGraph:
     """
     Create a random exploration graph from the given feature data.
@@ -407,12 +468,29 @@ def create_random_graph(
     :param feature_space: A FloatSpace object defining dimensionality, metric, and instruction set.
     :param edges_per_vertex: Number of neighbors for each vertex. Must be even. Defaults to 32.
     :param seed: Random seed for deterministic graph construction. Defaults to 7.
+    :param transformations: Optional list of FeatureTransformation objects (or single FeatureTransformation) attached to the graph.
     :return: A new DynamicExplorationGraph with a random exploration graph.
     """
     valid_dtype = feature_space.metric().get_dtype()
     features = assure_array(features, "features", valid_dtype)
-    graph_cpp = deglib_cpp.create_random_graph(features, edges_per_vertex, feature_space.float_space_cpp, seed)
+    xfrms = _normalize_transformations(transformations)
+    graph_cpp = deglib_cpp.create_random_graph(
+        features, edges_per_vertex, feature_space.float_space_cpp, seed, xfrms
+    )
     return DynamicExplorationGraph(graph_cpp)
+
+
+def load_graph(path: pathlib.Path | str) -> DynamicExplorationGraph:
+    """
+    Load a saved DynamicExplorationGraph from disk (.deg container format or legacy v1).
+    Automatically restores internal graph, prefetch configuration, entry vertices,
+    and feature transformation / quantization pipeline.
+
+    :param path: The path where to look for the file
+    :raises FileNotFoundError: If the given file does not exist
+    :return: A DynamicExplorationGraph.
+    """
+    return load_readonly_graph(path)
 
 
 def load_readonly_graph(path: pathlib.Path | str) -> DynamicExplorationGraph:

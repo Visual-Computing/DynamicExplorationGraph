@@ -19,6 +19,7 @@ import deglib
 | [`deglib.distances`](#3-module-deglibdistances) | `FloatSpace`, `Metric`, `floats_to_fp16`, `fp16_to_floats` | Vector metrics, SIMD feature spaces, and batch distance evaluation. |
 | [`deglib.search`](#4-module-deglibsearch) | `Filter`, `rerank` | Bitset-based label filtering and exact distance candidate reranking for ANNS search. |
 | [`deglib.optimization`](#5-module-degliboptimization) | `prune_*`, `presort`, `mips_l2_*`, `quantize_*` | RNG graph pruning, FLAS 1D dataset presorting, MIPS L2 transformations, EVP and Scalar quantization (Int8/Uint8). |
+| [`deglib.transformation`](#8-module-deglibtransformation) | `FeatureTransformation`, `MipsTransform`, `EvpQuantizer`, `ScalarQuantizer*` | Vector feature transformations, quantizers, and serialization pipeline. |
 | [`deglib.analysis`](#6-module-deglibanalysis) | `analyze_graph`, `check_*`, `calc_*` | Graph validation, connectivity verification, and reachability metrics. |
 | [`deglib.cpu`](#7-module-deglibcpu) | `InstructionSet`, `has_avx2`, `has_avx_vnni`, `has_avx512`, `has_avx512_vnni` | Runtime CPU SIMD capability detection and instruction set enum. |
 
@@ -90,26 +91,31 @@ class DynamicExplorationGraph:
     # --- Search & Querying ---
     # Search nearest neighbors for 1D (single) or 2D (batch) query vectors.
     # query: 1D [D] or 2D [Q, D] numpy array
-    # eps: Search expansion factor (higher = more accurate, slower)
+    # eps_or_ef: Exploration parameter. Values < 1.0 are treated as relative distance margin (eps),
+    #            values >= 1.0 are treated as fixed candidate pool size / beam width (ef). Default: 0.0.
     # k: Number of nearest neighbors to return per query
     # filter_labels: Filter object or numpy array of valid external labels
     # max_distance_computation_count: Budget cap for distance calculations (0 = unlimited)
     # threads: Worker thread count for batch queries (0 = all CPU cores)
     # return_distances: If True, returns (indices, distances) tuple; if False, returns only indices
     # unsorted: If True, skips sorting results in ascending distance order
-    search(query, eps=0.0, k=10, filter_labels=None, max_distance_computation_count=0, threads=0, return_distances=True, unsorted=False)
+    search(query, eps_or_ef=0.0, k=10, filter_labels=None, max_distance_computation_count=0, threads=0, return_distances=True, unsorted=False)
 
-    # Explore graph starting from entry vertex label(s) (supports single int or batch array).
+    # Explore graph starting from entry vertex label(s) (supports single int or 1D/2D batch array).
     # Returns (indices, distances) if return_distances=True, otherwise indices array.
-    explore(entry_external_label, k, max_distance_computation_count=0, eps=0.0, include_entry=True, threads=1, filter_labels=None, return_distances=True, unsorted=False)
+    # When entry_external_label is an array/list, operations execute in parallel across worker threads.
+    explore(entry_external_label, k, max_distance_computation_count=0, eps_or_ef=0.0, include_entry=True, threads=1, filter_labels=None, return_distances=True, unsorted=False)
 
     # Greedy best-first traversal towards a stored vertex, using the target vertex's own feature as query.
     # Returns the traversed path ordered from the target back to the entry as (path, distances) if
     # return_distances=True, otherwise the path array. Empty when the target was not reached.
     has_path(entry_external_labels, to_external_label, eps=0.0, k=1, return_distances=True)
 
-    # Returns list of neighbor external labels connected to a given vertex
-    get_neighbors(external_label) -> list[int]
+    # Returns neighbor external labels connected to a given vertex (or 2D array if passed array of labels)
+    get_neighbors(external_label, threads=1) -> list[int] | np.ndarray
+
+    # High-throughput batch retrieval of neighbor external labels for an array of labels
+    get_neighbors_batch(external_labels, threads=1) -> np.ndarray # shape: [N, edges_per_vertex]
 
     # --- State & Inspection ---
     size() -> int                              # Number of active vertices
@@ -118,12 +124,22 @@ class DynamicExplorationGraph:
     has_vertex(external_label) -> bool         # True if label exists in graph
     is_mutable() -> bool                       # True if graph can be modified via GraphBuilder
 
-   # --- Traversal Tuning ---
-   # Auto-tune traversal prefetch parameters (po, pl, nl) by timing traversal over sampled vertices.
-   # The graph self-samples its own features as queries; call once after construction.
-   # sample_count: vertices sampled as queries (capped at graph size); k: expected result count;
-   # ef: beam width (clamped to >= k); seed: sampling seed.
-   optimize(sample_count=50, k=100, ef=200, seed=7)
+    # --- Feature Transformations Pipeline ---
+    has_transformations() -> bool              # True if graph has attached quantizers/transformations
+    get_transformations() -> list              # List of attached FeatureTransformation stages
+
+    # --- Traversal Tuning & Entry Vertices ---
+    get_entry_vertex_indices() -> list[int]    # List of internal entry vertex indices
+    set_entry_vertex_indices(indices)          # Set internal entry vertex indices
+    get_po() -> int                            # Feature prefetch offset
+    get_pl() -> int                            # Feature prefetch look-ahead (cache lines)
+    get_nl() -> int                            # Neighbor prefetch look-ahead
+
+    # Auto-tune traversal prefetch parameters (po, pl, nl) by timing traversal over sampled vertices.
+    # The graph self-samples its own features as queries; call once after construction.
+    # sample_count: vertices sampled as queries (capped at graph size); k: expected result count;
+    # ef: beam width (clamped to >= k); seed: sampling seed.
+    optimize(sample_count=50, k=100, ef=200, seed=7)
 
     # --- Conversions & Saving ---
     # Convert to compact, immutable graph (ReadOnlyGraph) for maximum query throughput
@@ -135,7 +151,7 @@ class DynamicExplorationGraph:
     # Convert to mutable chunk-allocated graph (DynamicGraph) that expands dynamically
     to_dynamic(feature_space=None, custom_features=None, chunk_size=1024) -> DynamicExplorationGraph
 
-    # Save graph topology and features to disk (graph must be mutable)
+    # Save graph topology, features, transformations, and prefetch parameters to disk
     save_graph(path)
 ```
 
@@ -506,3 +522,58 @@ has_avx_vnni() -> bool     # Returns True if host CPU supports AVX-VNNI (256-bit
 has_avx512() -> bool       # Returns True if host CPU supports AVX-512
 has_avx512_vnni() -> bool  # Returns True if host CPU supports AVX-512 VNNI
 ```
+
+---
+
+## 8. Module: `deglib.transformation`
+
+Feature preprocessing, coordinate space transformations, and vector quantization pipelines.
+
+```python
+from deglib.transformation import (
+    FeatureTransformation,
+    MipsTransform,
+    EvpQuantizer,
+    ScalarQuantizerInt8,
+    ScalarQuantizerUint8,
+    ScalarQuantizerInt8PerDim,
+    ScalarQuantizerUint8PerDim,
+    make_evp_quantizer,
+    make_scalar_quantizer_int8,
+    make_scalar_quantizer_int8_perdim,
+    make_scalar_quantizer_uint8,
+    make_scalar_quantizer_uint8_perdim,
+    apply_database,
+    apply_query,
+    serialize_transformations,
+    deserialize_transformations,
+    mips_l2_transform,
+    mips_l2_transform_query,
+)
+
+# 1. Quantizer Factories
+evp_quantizer = make_evp_quantizer(non_zeros=32)
+sq_int8 = make_scalar_quantizer_int8(base_vectors, drop_ratio=0.0)
+sq_uint8 = make_scalar_quantizer_uint8(base_vectors)
+sq_int8_perdim = make_scalar_quantizer_int8_perdim(base_vectors)
+sq_uint8_perdim = make_scalar_quantizer_uint8_perdim(base_vectors)
+
+# 2. Sequential Pipeline Execution
+# Apply a sequence of transformations to database vectors:
+quantized_db = apply_database(transformations, base_vectors)
+
+# Apply a sequence of transformations to query vectors:
+quantized_query = apply_query(transformations, query_vectors)
+
+# 3. Pipeline Serialization
+# Serialize transformation stages into binary bytes:
+binary_blob = serialize_transformations(transformations)
+
+# Deserialize transformation stages from binary bytes:
+restored_transformations = deserialize_transformations(binary_blob)
+
+# 4. MIPS to L2 Coordinates
+transformed_db, max_norm = mips_l2_transform(database)
+transformed_queries = mips_l2_transform_query(queries)
+```
+

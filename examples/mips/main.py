@@ -23,7 +23,8 @@ import deglib
 import deglib_cpp
 from deglib.distances import FloatSpace, Metric
 from deglib.cpu import InstructionSet
-from deglib.optimization import mips_l2_transform, presort
+from deglib.transformation import mips_l2_transform
+from deglib.optimization import presort
 
 from dataset import (
     ensure_mips_dataset,

@@ -185,10 +185,18 @@ class Searcher:
         refine_data: np.ndarray | None = None,
     ):
         cpp_graph = graph.dynamic_exploration_graph_cpp if hasattr(graph, "dynamic_exploration_graph_cpp") else graph
+        if quantizer is None and hasattr(graph, "has_transformations") and graph.has_transformations():
+            transformations = graph.get_transformations()
+            if transformations:
+                quantizer = transformations[-1]
         cpp_refine_space = (
-            refine_space.float_space_cpp if (refine_space is not None and hasattr(refine_space, "float_space_cpp")) else refine_space
+            refine_space.float_space_cpp
+            if (refine_space is not None and hasattr(refine_space, "float_space_cpp"))
+            else refine_space
         )
-        cpp_quantizer = quantizer.quantizer_cpp if (quantizer is not None and hasattr(quantizer, "quantizer_cpp")) else quantizer
+        cpp_quantizer = (
+            quantizer.quantizer_cpp if (quantizer is not None and hasattr(quantizer, "quantizer_cpp")) else quantizer
+        )
 
         self.searcher_cpp = cpp_search.Searcher(
             graph=cpp_graph,
@@ -252,12 +260,23 @@ class Searcher:
         if query.ndim == 1 or (query.ndim == 2 and (query.shape[0] == 1 or query.shape[1] == 1)):
             flat_query = np.ascontiguousarray(query.ravel())
             return self.searcher_cpp.search(
-                flat_query, int(k), float(eps_or_ef), float(rerank_factor), return_distances, unsorted,
+                flat_query,
+                int(k),
+                float(eps_or_ef),
+                float(rerank_factor),
+                return_distances,
+                unsorted,
             )
         elif query.ndim == 2:
             contiguous_queries = np.ascontiguousarray(query)
             return self.searcher_cpp.search_batch(
-                contiguous_queries, int(k), float(eps_or_ef), float(rerank_factor), int(threads), return_distances, unsorted,
+                contiguous_queries,
+                int(k),
+                float(eps_or_ef),
+                float(rerank_factor),
+                int(threads),
+                return_distances,
+                unsorted,
             )
         else:
             raise ValueError(f"query must be 1D or 2D NumPy array, got ndim={query.ndim} with shape {query.shape}")

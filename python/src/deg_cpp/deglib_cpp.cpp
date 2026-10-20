@@ -2,13 +2,11 @@
 // Created by Bruno Schilling on 29.05.24.
 //
 
-// #define PYBIND11_DETAILED_ERROR_MESSAGES
 #include <deglib/deglib.h>
 #include <deglib/distance/fp16.h>
 #include <deglib/optimization.h>
 #include <deglib/optimization/pruning.h>
-#include <deglib/optimization/quantization/evp_quantize.h>
-#include <deglib/optimization/transform.h>
+#include <deglib/transformation.h>
 #include <pybind11/functional.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -35,6 +33,75 @@ py::object graph_search_single_wrapper(
     const bool unsorted = false
 ) {
     py::buffer_info query_info = query.request();
+    if constexpr (std::is_same_v<G, deglib::DynamicExplorationGraph>) {
+        if (graph.hasTransformations() && (query_info.format == "f" || (query_info.itemsize == 4 && query_info.format != "i" && query_info.format != "I"))) {
+            const size_t in_dim = graph.getInputDim();
+            if (query_info.size != in_dim) {
+                throw std::invalid_argument(std::format("Query vector size ({}) does not match transformations input dim ({})", query_info.size, in_dim));
+            }
+            const float* f_query = static_cast<const float*>(query_info.ptr);
+            std::span<const float> q_span(f_query, in_dim);
+
+            if (eps_or_ef >= 1.0f) {
+                const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
+                std::vector<deglib::graph::ObjectDistance> result = graph.search_ef(q_span, k, ef, true, filter, max_distance_computation_count);
+                const size_t count = result.size();
+                py::array_t<uint32_t> result_indices(static_cast<py::ssize_t>(count));
+                auto result_indices_ptr = static_cast<uint32_t*>(result_indices.request().ptr);
+
+                py::array_t<float> result_distances;
+                float* result_distances_ptr = nullptr;
+                if (return_distances) {
+                    result_distances = py::array_t<float>(static_cast<py::ssize_t>(count));
+                    result_distances_ptr = static_cast<float*>(result_distances.request().ptr);
+                }
+
+                for (size_t i = 0; i < count; ++i) {
+                    result_indices_ptr[i] = result[i].getIdentifier();
+                    if (result_distances_ptr) {
+                        result_distances_ptr[i] = result[i].getDistance();
+                    }
+                }
+
+                if (return_distances)
+                    return py::make_tuple(result_indices, result_distances);
+                else
+                    return py::object(result_indices);
+            } else {
+                deglib::graph::ResultSet result = graph.search(q_span, k, eps_or_ef, filter, max_distance_computation_count);
+                while (result.size() > k) result.pop();
+                const size_t count = result.size();
+                py::array_t<uint32_t> result_indices(static_cast<py::ssize_t>(count));
+                auto result_indices_ptr = static_cast<uint32_t*>(result_indices.request().ptr);
+
+                py::array_t<float> result_distances;
+                float* result_distances_ptr = nullptr;
+                if (return_distances) {
+                    result_distances = py::array_t<float>(static_cast<py::ssize_t>(count));
+                    result_distances_ptr = static_cast<float*>(result_distances.request().ptr);
+                }
+
+                if (unsorted) {
+                    for (size_t i = 0; i < count; ++i) {
+                        result_indices_ptr[i] = result[i].getIdentifier();
+                        if (result_distances_ptr) result_distances_ptr[i] = result[i].getDistance();
+                    }
+                } else {
+                    for (size_t i = count; i > 0; --i) {
+                        deglib::search::ObjectDistance next_result = result.top();
+                        result_indices_ptr[i - 1] = next_result.getIdentifier();
+                        if (result_distances_ptr) result_distances_ptr[i - 1] = next_result.getDistance();
+                        result.pop();
+                    }
+                }
+
+                if (return_distances)
+                    return py::make_tuple(result_indices, result_distances);
+                else
+                    return py::object(result_indices);
+            }
+        }
+    }
     const size_t req_bytes = graph.getFeatureSpace().get_data_size();
     const size_t query_bytes = query_info.size * query_info.itemsize;
     if (query_bytes != req_bytes) {
@@ -151,113 +218,66 @@ py::object dynamic_exploration_graph_search_batch_wrapper(
     if (query_info.ndim != 2) {
         throw std::invalid_argument(std::format("Expected query to have two dimensions, got {}", query_info.ndim));
     }
-    const size_t req_bytes = graph.getFeatureSpace().get_data_size();
-    const size_t query_stride_bytes = size_t(query_info.shape[1]) * query_info.itemsize;
-    if (query_stride_bytes != req_bytes) {
-        throw std::invalid_argument(
-            std::format(
-                "Query row size in bytes ({}) does not match required "
-                "feature space data size ({})",
-                query_stride_bytes, req_bytes
-            )
-        );
-    }
 
     const uint32_t n_queries = static_cast<uint32_t>(query_info.shape[0]);
-
     py::array_t<uint32_t> result_indices({n_queries, k});
-    py::buffer_info result_indices_info = result_indices.request();
-    auto result_indices_ptr = static_cast<uint32_t*>(result_indices_info.ptr);
-    std::fill_n(result_indices_ptr, n_queries * k, std::numeric_limits<uint32_t>::max());
+    auto result_indices_ptr = static_cast<uint32_t*>(result_indices.request().ptr);
 
     py::array_t<float> result_distances;
     float* result_distances_ptr = nullptr;
     if (return_distances) {
         result_distances = py::array_t<float>({n_queries, k});
         result_distances_ptr = static_cast<float*>(result_distances.request().ptr);
-        std::fill_n(result_distances_ptr, n_queries * k, std::numeric_limits<float>::quiet_NaN());
     }
 
-    {
-        py::gil_scoped_release release;  // release the gil
+    std::span<uint32_t> out_indices_span(result_indices_ptr, static_cast<size_t>(n_queries) * k);
+    std::span<float> out_distances_span = return_distances ? std::span<float>(result_distances_ptr, static_cast<size_t>(n_queries) * k) : std::span<float>{};
 
-        auto search_range = [&](size_t begin, size_t end) {
+    {
+        py::gil_scoped_release release;
+
+        if (graph.hasTransformations() && (query_info.format == "f" || (query_info.itemsize == 4 && query_info.format != "i" && query_info.format != "I"))) {
+            const size_t in_dim = graph.getInputDim();
+            if (size_t(query_info.shape[1]) != in_dim) {
+                throw std::invalid_argument(std::format("Query row dimension ({}) does not match transformations input dim ({})", query_info.shape[1], in_dim));
+            }
+            std::span<const float> queries_span(static_cast<const float*>(query_info.ptr), n_queries * in_dim);
             if (eps_or_ef >= 1.0f) {
                 const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
-                for (size_t q = begin; q < end; ++q) {
-                    const std::byte* query_ptr = static_cast<const std::byte*>(query_info.ptr) + query_info.strides[0] * q;
-                    const size_t query_bytes = query_info.shape[1] * query_info.itemsize;
-                    std::span<const std::byte> query_span(query_ptr, query_bytes);
-
-                    std::vector<deglib::graph::ObjectDistance> result = graph.search_ef(query_span, k, ef, true, filter, max_distance_computation_count);
-
-                    const size_t count = result.size();
-                    const size_t base_offset = q * k;
-
-                    for (size_t idx = 0; idx < count; ++idx) {
-                        result_indices_ptr[base_offset + idx] = result[idx].getIdentifier();
-                        if (result_distances_ptr) {
-                            result_distances_ptr[base_offset + idx] = result[idx].getDistance();
-                        }
-                    }
-                }
+                graph.search_batch_ef<float>(
+                    queries_span, n_queries, k, ef, out_indices_span, out_distances_span, true, filter, max_distance_computation_count, threads, unsorted
+                );
             } else {
-                for (size_t q = begin; q < end; ++q) {
-                    const std::byte* query_ptr = static_cast<const std::byte*>(query_info.ptr) + query_info.strides[0] * q;
-                    const size_t query_bytes = query_info.shape[1] * query_info.itemsize;
-                    std::span<const std::byte> query_span(query_ptr, query_bytes);
-
-                    deglib::graph::ResultSet result = graph.search(query_span, k, eps_or_ef, filter, max_distance_computation_count);
-
-                    // Limit results to at most k elements
-                    while (result.size() > k) {
-                        result.pop();
-                    }
-
-                    const size_t count = result.size();
-                    const size_t base_offset = q * k;
-
-                    if (unsorted) {
-                        for (size_t idx = 0; idx < count; ++idx) {
-                            result_indices_ptr[base_offset + idx] = result[idx].getIdentifier();
-                            if (result_distances_ptr) {
-                                result_distances_ptr[base_offset + idx] = result[idx].getDistance();
-                            }
-                        }
-                    } else {
-                        // Extract elements from heap in descending order (furthest to closest)
-                        for (size_t i = count; i > 0; --i) {
-                            deglib::search::ObjectDistance next_result = result.top();
-                            result_indices_ptr[base_offset + i - 1] = next_result.getIdentifier();
-                            if (result_distances_ptr) {
-                                result_distances_ptr[base_offset + i - 1] = next_result.getDistance();
-                            }
-                            result.pop();
-                        }
-                    }
-                }
+                graph.search_batch<float>(
+                    queries_span, n_queries, k, out_indices_span, out_distances_span, eps_or_ef, filter, max_distance_computation_count, threads, unsorted
+                );
             }
-        };
-
-        if (threads <= 1) {
-            search_range(0, n_queries);
         } else {
-            const size_t chunk_size =
-                std::clamp((n_queries + static_cast<size_t>(threads) * 8 - 1) / (static_cast<size_t>(threads) * 8), size_t{1}, size_t{8196});
-            const size_t num_chunks = (n_queries + chunk_size - 1) / chunk_size;
-
-            deglib::concurrent::parallel_for(static_cast<size_t>(0), num_chunks, threads, [&](size_t chunk_id, size_t) {
-                size_t start = chunk_id * chunk_size;
-                size_t end = std::min(start + chunk_size, static_cast<size_t>(n_queries));
-                search_range(start, end);
-            });
+            const size_t req_bytes = graph.getFeatureSpace().get_data_size();
+            const size_t query_stride_bytes = size_t(query_info.shape[1]) * query_info.itemsize;
+            if (query_stride_bytes != req_bytes) {
+                throw std::invalid_argument(
+                    std::format("Query row size in bytes ({}) does not match required feature space data size ({})", query_stride_bytes, req_bytes)
+                );
+            }
+            std::span<const std::byte> queries_span(static_cast<const std::byte*>(query_info.ptr), n_queries * req_bytes);
+            if (eps_or_ef >= 1.0f) {
+                const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
+                graph.search_batch_ef<std::byte>(
+                    queries_span, n_queries, k, ef, out_indices_span, out_distances_span, true, filter, max_distance_computation_count, threads, unsorted
+                );
+            } else {
+                graph.search_batch<std::byte>(
+                    queries_span, n_queries, k, out_indices_span, out_distances_span, eps_or_ef, filter, max_distance_computation_count, threads, unsorted
+                );
+            }
         }
     }
 
     if (return_distances) {
         return py::make_tuple(result_indices, result_distances);
     } else {
-        return result_indices;
+        return py::object(result_indices);
     }
 }
 
@@ -273,6 +293,34 @@ py::object graph_explore_single_wrapper(
     const bool return_distances = true,
     const bool unsorted = false
 ) {
+    if (eps_or_ef >= 1.0f) {
+        const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
+        auto result = graph.explore_ef(entry_external_label, k, ef, max_distance_computation_count, include_entry, filter);
+        const size_t count = result.size();
+        py::array_t<uint32_t> result_indices(static_cast<py::ssize_t>(count));
+        auto result_indices_ptr = static_cast<uint32_t*>(result_indices.request().ptr);
+
+        py::array_t<float> result_distances;
+        float* result_distances_ptr = nullptr;
+        if (return_distances) {
+            result_distances = py::array_t<float>(static_cast<py::ssize_t>(count));
+            result_distances_ptr = static_cast<float*>(result_distances.request().ptr);
+        }
+
+        for (size_t i = 0; i < count; ++i) {
+            result_indices_ptr[i] = result[i].getIdentifier();
+            if (result_distances_ptr) {
+                result_distances_ptr[i] = result[i].getDistance();
+            }
+        }
+
+        if (return_distances) {
+            return py::make_tuple(result_indices, result_distances);
+        } else {
+            return result_indices;
+        }
+    }
+
     deglib::graph::ResultSet result = graph.explore(entry_external_label, k, max_distance_computation_count, eps_or_ef, include_entry, filter);
 
     while (result.size() > k) {
@@ -281,8 +329,7 @@ py::object graph_explore_single_wrapper(
 
     const size_t count = result.size();
     py::array_t<uint32_t> result_indices(static_cast<py::ssize_t>(count));
-    py::buffer_info result_indices_info = result_indices.request();
-    auto result_indices_ptr = static_cast<uint32_t*>(result_indices_info.ptr);
+    auto result_indices_ptr = static_cast<uint32_t*>(result_indices.request().ptr);
 
     py::array_t<float> result_distances;
     float* result_distances_ptr = nullptr;
@@ -373,67 +420,30 @@ py::object dynamic_exploration_graph_explore_batch_wrapper(
     const uint32_t n_queries = entry_info.shape[0];
 
     py::array_t<uint32_t> result_indices({n_queries, k});
-    py::buffer_info result_indices_info = result_indices.request();
-    auto result_indices_ptr = static_cast<uint32_t*>(result_indices_info.ptr);
-    std::fill_n(result_indices_ptr, n_queries * k, std::numeric_limits<uint32_t>::max());
+    auto result_indices_ptr = static_cast<uint32_t*>(result_indices.request().ptr);
 
     py::array_t<float> result_distances;
     float* result_distances_ptr = nullptr;
     if (return_distances) {
         result_distances = py::array_t<float>({n_queries, k});
         result_distances_ptr = static_cast<float*>(result_distances.request().ptr);
-        std::fill_n(result_distances_ptr, n_queries * k, std::numeric_limits<float>::quiet_NaN());
     }
 
+    std::span<const uint32_t> entries_span(entry_ptr, n_queries);
+    std::span<uint32_t> out_indices_span(result_indices_ptr, static_cast<size_t>(n_queries) * k);
+    std::span<float> out_distances_span = return_distances ? std::span<float>(result_distances_ptr, static_cast<size_t>(n_queries) * k) : std::span<float>{};
+
     {
-        py::gil_scoped_release release;  // release the gil
-
-        auto explore_range = [&](size_t begin, size_t end) {
-            for (size_t q = begin; q < end; ++q) {
-                uint32_t entry_label = entry_ptr[q];
-                deglib::graph::ResultSet result = graph.explore(entry_label, k, max_distance_computation_count, eps_or_ef, include_entry, filter);
-
-                // Limit results to at most k elements
-                while (result.size() > k) {
-                    result.pop();
-                }
-
-                const size_t count = result.size();
-                const size_t base_offset = q * k;
-
-                if (unsorted) {
-                    for (size_t idx = 0; idx < count; ++idx) {
-                        result_indices_ptr[base_offset + idx] = result[idx].getIdentifier();
-                        if (result_distances_ptr) {
-                            result_distances_ptr[base_offset + idx] = result[idx].getDistance();
-                        }
-                    }
-                } else {
-                    // Extract elements from heap in descending order (furthest to closest)
-                    for (size_t i = count; i > 0; --i) {
-                        deglib::search::ObjectDistance next_result = result.top();
-                        result_indices_ptr[base_offset + i - 1] = next_result.getIdentifier();
-                        if (result_distances_ptr) {
-                            result_distances_ptr[base_offset + i - 1] = next_result.getDistance();
-                        }
-                        result.pop();
-                    }
-                }
-            }
-        };
-
-        if (threads <= 1) {
-            explore_range(0, n_queries);
+        py::gil_scoped_release release;
+        if (eps_or_ef >= 1.0f) {
+            const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
+            graph.explore_batch_ef(
+                entries_span, k, ef, out_indices_span, out_distances_span, max_distance_computation_count, include_entry, filter, threads, unsorted
+            );
         } else {
-            const size_t chunk_size =
-                std::clamp((n_queries + static_cast<size_t>(threads) * 8 - 1) / (static_cast<size_t>(threads) * 8), size_t{1}, size_t{8196});
-            const size_t num_chunks = (n_queries + chunk_size - 1) / chunk_size;
-
-            deglib::concurrent::parallel_for(static_cast<size_t>(0), num_chunks, threads, [&](size_t chunk_id, size_t) {
-                size_t start = chunk_id * chunk_size;
-                size_t end = std::min(start + chunk_size, static_cast<size_t>(n_queries));
-                explore_range(start, end);
-            });
+            graph.explore_batch(
+                entries_span, k, out_indices_span, out_distances_span, max_distance_computation_count, eps_or_ef, include_entry, filter, threads, unsorted
+            );
         }
     }
 
@@ -663,21 +673,40 @@ class SearcherPy {
         };
 
         if (quantizer.is_none()) {
+            if (graph.hasTransformations() && !graph.getTransformations().empty()) {
+                auto& t = graph.getTransformations().back();
+                if (t->tag() == deglib::transformation::TAG_SQI8) {
+                    make_searcher_for_quant(*std::dynamic_pointer_cast<deglib::transformation::ScalarQuantizerInt8>(t));
+                    return;
+                } else if (t->tag() == deglib::transformation::TAG_SQ8P) {
+                    make_searcher_for_quant(*std::dynamic_pointer_cast<deglib::transformation::ScalarQuantizerInt8PerDim>(t));
+                    return;
+                } else if (t->tag() == deglib::transformation::TAG_SQU8) {
+                    make_searcher_for_quant(*std::dynamic_pointer_cast<deglib::transformation::ScalarQuantizerUint8>(t));
+                    return;
+                } else if (t->tag() == deglib::transformation::TAG_SQUP) {
+                    make_searcher_for_quant(*std::dynamic_pointer_cast<deglib::transformation::ScalarQuantizerUint8PerDim>(t));
+                    return;
+                } else if (t->tag() == deglib::transformation::TAG_EVPQ) {
+                    make_searcher_for_quant(*std::dynamic_pointer_cast<deglib::transformation::EvpQuantizer>(t));
+                    return;
+                }
+            }
             make_searcher_for_quant(deglib::search::NoQuantizer{});
-        } else if (py::isinstance<deglib::quantization::scalar::ScalarQuantizerInt8>(quantizer)) {
-            auto q = py::cast<deglib::quantization::scalar::ScalarQuantizerInt8>(quantizer);
+        } else if (py::isinstance<deglib::transformation::ScalarQuantizerInt8>(quantizer)) {
+            auto q = py::cast<deglib::transformation::ScalarQuantizerInt8>(quantizer);
             make_searcher_for_quant(std::move(q));
-        } else if (py::isinstance<deglib::quantization::scalar::ScalarQuantizerInt8PerDim>(quantizer)) {
-            auto q = py::cast<deglib::quantization::scalar::ScalarQuantizerInt8PerDim>(quantizer);
+        } else if (py::isinstance<deglib::transformation::ScalarQuantizerInt8PerDim>(quantizer)) {
+            auto q = py::cast<deglib::transformation::ScalarQuantizerInt8PerDim>(quantizer);
             make_searcher_for_quant(std::move(q));
-        } else if (py::isinstance<deglib::quantization::scalar::ScalarQuantizerUint8>(quantizer)) {
-            auto q = py::cast<deglib::quantization::scalar::ScalarQuantizerUint8>(quantizer);
+        } else if (py::isinstance<deglib::transformation::ScalarQuantizerUint8>(quantizer)) {
+            auto q = py::cast<deglib::transformation::ScalarQuantizerUint8>(quantizer);
             make_searcher_for_quant(std::move(q));
-        } else if (py::isinstance<deglib::quantization::scalar::ScalarQuantizerUint8PerDim>(quantizer)) {
-            auto q = py::cast<deglib::quantization::scalar::ScalarQuantizerUint8PerDim>(quantizer);
+        } else if (py::isinstance<deglib::transformation::ScalarQuantizerUint8PerDim>(quantizer)) {
+            auto q = py::cast<deglib::transformation::ScalarQuantizerUint8PerDim>(quantizer);
             make_searcher_for_quant(std::move(q));
-        } else if (py::isinstance<deglib::quantization::evp::EvpQuantizer>(quantizer)) {
-            auto q = py::cast<deglib::quantization::evp::EvpQuantizer>(quantizer);
+        } else if (py::isinstance<deglib::transformation::EvpQuantizer>(quantizer)) {
+            auto q = py::cast<deglib::transformation::EvpQuantizer>(quantizer);
             make_searcher_for_quant(std::move(q));
         } else {
             throw std::invalid_argument("Unsupported quantizer type provided to create_searcher.");
@@ -849,7 +878,7 @@ std::tuple<py::array_t<float>, float> mips_l2_transform_wrapper(py::array_t<floa
     float max_norm = 0.0f;
     {
         py::gil_scoped_release release;
-        max_norm = deglib::optimization::mips_l2_transform(static_cast<const float*>(buf.ptr), count, dim, static_cast<float*>(out_buf.ptr));
+        max_norm = deglib::transformation::mips_l2_transform(static_cast<const float*>(buf.ptr), count, dim, static_cast<float*>(out_buf.ptr));
     }
     return std::make_tuple(output, max_norm);
 }
@@ -868,7 +897,7 @@ py::array_t<float> mips_l2_transform_query_wrapper(py::array_t<float, py::array:
 
     {
         py::gil_scoped_release release;
-        deglib::optimization::mips_l2_transform_query(static_cast<const float*>(buf.ptr), count, dim, static_cast<float*>(out_buf.ptr));
+        deglib::transformation::mips_l2_transform_query(static_cast<const float*>(buf.ptr), count, dim, static_cast<float*>(out_buf.ptr));
     }
     return output;
 }
@@ -945,7 +974,7 @@ deglib::DynamicExplorationGraph read_only_graph_from_graph_wrapper(
                                                  : deglib::graph::convert_to_readonly_graph(graph.internal());
 
     auto heap_graph = std::make_unique<deglib::graph::ReadOnlyGraph>(std::move(read_only));
-    return deglib::DynamicExplorationGraph(std::move(heap_graph));
+    return deglib::DynamicExplorationGraph(std::move(heap_graph), graph.getTransformations());
 }
 
 deglib::DynamicExplorationGraph dynamic_graph_from_graph_wrapper(
@@ -976,7 +1005,7 @@ deglib::DynamicExplorationGraph dynamic_graph_from_graph_wrapper(
                                          : deglib::graph::convert_to_dynamic_graph(graph.internal(), chunk_size);
 
     auto heap_graph = std::make_unique<deglib::graph::DynamicGraph>(std::move(dynamic_graph));
-    return deglib::DynamicExplorationGraph(std::move(heap_graph));
+    return deglib::DynamicExplorationGraph(std::move(heap_graph), graph.getTransformations());
 }
 
 deglib::DynamicExplorationGraph load_dynamic_graph_wrapper(const char* path, const uint32_t chunk_size = 1024) {
@@ -1011,21 +1040,34 @@ deglib::DynamicExplorationGraph size_bounded_graph_from_graph_wrapper(
                                          : deglib::graph::convert_to_sizebounded_graph(graph.internal());
 
     auto heap_graph = std::make_unique<deglib::graph::SizeBoundedGraph>(std::move(size_bounded));
-    return deglib::DynamicExplorationGraph(std::move(heap_graph));
+    return deglib::DynamicExplorationGraph(std::move(heap_graph), graph.getTransformations());
 }
 
-deglib::DynamicExplorationGraph
-create_size_bounded_graph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::distances::FloatSpace& feature_space) {
-    return deglib::create_empty(max_vertex_count, edges_per_vertex, feature_space);
+deglib::DynamicExplorationGraph create_size_bounded_graph(
+    const uint32_t max_vertex_count,
+    const uint8_t edges_per_vertex,
+    const deglib::distances::FloatSpace& feature_space,
+    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
+) {
+    return deglib::create_empty(max_vertex_count, edges_per_vertex, feature_space, std::move(transformations));
 }
 
-deglib::DynamicExplorationGraph
-create_dynamic_graph(const uint8_t edges_per_vertex, const deglib::distances::FloatSpace& feature_space, const uint32_t chunk_size = 1024) {
-    return deglib::create_dynamic_empty(edges_per_vertex, feature_space, chunk_size);
+deglib::DynamicExplorationGraph create_dynamic_graph(
+    const uint8_t edges_per_vertex,
+    const deglib::distances::FloatSpace& feature_space,
+    const uint32_t chunk_size = 1024,
+    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
+) {
+    return deglib::create_dynamic_empty(edges_per_vertex, feature_space, chunk_size, std::move(transformations));
 }
 
-deglib::DynamicExplorationGraph
-create_random_graph(py::array features, const uint8_t edges_per_vertex, const deglib::distances::FloatSpace& feature_space, const uint32_t seed) {
+deglib::DynamicExplorationGraph create_random_graph(
+    py::array features,
+    const uint8_t edges_per_vertex,
+    const deglib::distances::FloatSpace& feature_space,
+    const uint32_t seed,
+    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
+) {
     py::buffer_info buf = features.request();
     if (buf.ndim != 2) {
         throw std::invalid_argument(std::format("Expected features to have two dimensions, got {}", buf.ndim));
@@ -1044,7 +1086,7 @@ create_random_graph(py::array features, const uint8_t edges_per_vertex, const de
     }
 
     const std::byte* feature_data = static_cast<const std::byte*>(buf.ptr);
-    return deglib::create_random_graph(feature_data, vertex_count, edges_per_vertex, feature_space, seed);
+    return deglib::create_random_graph(feature_data, vertex_count, edges_per_vertex, feature_space, seed, std::move(transformations));
 }
 
 // ============================================================================
@@ -1146,268 +1188,207 @@ PYBIND11_MODULE(deglib_cpp, m) {
     distances_module.def("fp16_to_floats", &fp16_to_floats_wrapper, "Convert FP16 (uint16_t) array to float32");
 
     // optimization submodule
-    py::module_ optimization_module = m.def_submodule("optimization", "Graph optimization and quantization utilities");
+    py::module_ optimization_module = m.def_submodule("optimization", "Graph optimization and layout utilities");
+    optimization_module.def(
+        "presort", &presort_wrapper, py::arg("vectors"), py::arg("space"), py::arg("radius_decay") = 0.9f, py::arg("threads") = 0,
+        py::arg("callback") = py::none(), "Perform 1D pre-sorting of dataset feature vectors using FLAS"
+    );
+    optimization_module.def(
+        "prune_non_mrng_edges",
+        [](deglib::DynamicExplorationGraph& graph, const size_t num_threads) {
+            if (!graph.isMutable()) {
+                throw std::runtime_error("Graph must be mutable to prune non-mrng edges");
+            }
+            return deglib::optimization::prune_non_mrng_edges(static_cast<deglib::graph::MutableGraph&>(graph.internal()), num_threads);
+        },
+        py::arg("graph"), py::arg("num_threads") = 0, "Prune edges that violate the MRNG condition"
+    );
+    optimization_module.def(
+        "prune_worst_edges",
+        [](deglib::DynamicExplorationGraph& graph, const uint8_t prune_worst, const size_t num_threads) {
+            if (!graph.isMutable()) {
+                throw std::runtime_error("Graph must be mutable to prune worst edges");
+            }
+            deglib::optimization::pruning::prune_worst_edges(static_cast<deglib::graph::MutableGraph&>(graph.internal()), prune_worst, num_threads);
+        },
+        py::arg("graph"), py::arg("prune_worst"), py::arg("num_threads") = 0, "Prune the worst edges of each vertex"
+    );
 
-    // ScalarQuantizerInt8
-    py::class_<deglib::quantization::scalar::ScalarQuantizerInt8>(optimization_module, "ScalarQuantizerInt8")
-        .def(py::init<>())
-        .def(py::init<float>(), py::arg("abs_max"))
-        .def_readwrite("abs_max", &deglib::quantization::scalar::ScalarQuantizerInt8::abs_max)
-        .def_readwrite("scale", &deglib::quantization::scalar::ScalarQuantizerInt8::scale)
-        .def_readonly("is_fitted", &deglib::quantization::scalar::ScalarQuantizerInt8::is_fitted)
-        .def(
-            "fit",
-            [](deglib::quantization::scalar::ScalarQuantizerInt8& q, py::array vectors, float drop_ratio) {
-                py::buffer_info buf = vectors.request();
-                auto [count, dim] = get_2d_shape(buf);
-                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
-                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                    q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
-                } else {
-                    throw std::invalid_argument("vectors must be float32 or float16");
-                }
-            },
-            py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+    // transformation submodule
+    py::module_ transformation_module = m.def_submodule("transformation", "Feature transformation and quantization");
+
+    auto transform_single_array = [](const deglib::transformation::FeatureTransformation& t, py::array in_arr, bool is_database) -> py::array {
+        py::buffer_info buf = in_arr.request();
+        bool is_1d = (buf.ndim == 1);
+        size_t count = is_1d ? 1 : buf.shape[0];
+        size_t dim = is_1d ? buf.shape[0] : buf.shape[1];
+        if (dim != t.input_dim()) {
+            throw std::invalid_argument(std::format("Input dimension ({}) does not match transformation input_dim ({})", dim, t.input_dim()));
+        }
+        py::array_t<float, py::array::c_style> f_arr;
+        const float* f_ptr = nullptr;
+        if (buf.itemsize == sizeof(float) && (buf.format == "f" || buf.format == "float")) {
+            f_ptr = static_cast<const float*>(buf.ptr);
+        } else {
+            f_arr = py::array_t<float, py::array::c_style>(in_arr);
+            f_ptr = static_cast<const float*>(f_arr.request().ptr);
+        }
+        const size_t out_stride = t.output_bytes();
+        const uint32_t tag = t.tag();
+        if (tag == deglib::transformation::TAG_SQI8 || tag == deglib::transformation::TAG_SQ8P) {
+            std::vector<py::ssize_t> shape = is_1d ? std::vector<py::ssize_t>{static_cast<py::ssize_t>(out_stride)}
+                                                   : std::vector<py::ssize_t>{static_cast<py::ssize_t>(count), static_cast<py::ssize_t>(out_stride)};
+            py::array_t<int8_t> out(shape);
+            if (is_database)
+                t.transform_database(f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
+            else
+                t.transform_query(f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
+            return out;
+        } else if (tag == deglib::transformation::TAG_SQU8 || tag == deglib::transformation::TAG_SQUP || tag == deglib::transformation::TAG_EVPQ) {
+            std::vector<py::ssize_t> shape = is_1d ? std::vector<py::ssize_t>{static_cast<py::ssize_t>(out_stride)}
+                                                   : std::vector<py::ssize_t>{static_cast<py::ssize_t>(count), static_cast<py::ssize_t>(out_stride)};
+            py::array_t<uint8_t> out(shape);
+            if (is_database)
+                t.transform_database(f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
+            else
+                t.transform_query(f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
+            return out;
+        } else {
+            std::vector<py::ssize_t> shape = is_1d ? std::vector<py::ssize_t>{static_cast<py::ssize_t>(t.output_dim())}
+                                                   : std::vector<py::ssize_t>{static_cast<py::ssize_t>(count), static_cast<py::ssize_t>(t.output_dim())};
+            py::array_t<float> out(shape);
+            if (is_database)
+                t.transform_database(f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
+            else
+                t.transform_query(f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
+            return out;
+        }
+    };
+
+    auto apply_transformations_array = [](const std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>& transformations, py::array in_arr,
+                                          bool is_database) -> py::array {
+        if (transformations.empty()) return in_arr;
+        py::buffer_info buf = in_arr.request();
+        bool is_1d = (buf.ndim == 1);
+        size_t count = is_1d ? 1 : buf.shape[0];
+        size_t dim = is_1d ? buf.shape[0] : buf.shape[1];
+        if (dim != transformations.front()->input_dim()) {
+            throw std::invalid_argument(
+                std::format("Input dimension ({}) does not match transformation input_dim ({})", dim, transformations.front()->input_dim())
+            );
+        }
+        py::array_t<float, py::array::c_style> f_arr;
+        const float* f_ptr = nullptr;
+        if (buf.itemsize == sizeof(float) && (buf.format == "f" || buf.format == "float")) {
+            f_ptr = static_cast<const float*>(buf.ptr);
+        } else {
+            f_arr = py::array_t<float, py::array::c_style>(in_arr);
+            f_ptr = static_cast<const float*>(f_arr.request().ptr);
+        }
+        const size_t out_stride = transformations.back()->output_bytes();
+        const uint32_t tag = transformations.back()->tag();
+        if (tag == deglib::transformation::TAG_SQI8 || tag == deglib::transformation::TAG_SQ8P) {
+            std::vector<py::ssize_t> shape = is_1d ? std::vector<py::ssize_t>{static_cast<py::ssize_t>(out_stride)}
+                                                   : std::vector<py::ssize_t>{static_cast<py::ssize_t>(count), static_cast<py::ssize_t>(out_stride)};
+            py::array_t<int8_t> out(shape);
+            if (is_database)
+                deglib::transformation::apply_database(transformations, f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
+            else
+                deglib::transformation::apply_query(transformations, f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
+            return out;
+        } else if (tag == deglib::transformation::TAG_SQU8 || tag == deglib::transformation::TAG_SQUP || tag == deglib::transformation::TAG_EVPQ) {
+            std::vector<py::ssize_t> shape = is_1d ? std::vector<py::ssize_t>{static_cast<py::ssize_t>(out_stride)}
+                                                   : std::vector<py::ssize_t>{static_cast<py::ssize_t>(count), static_cast<py::ssize_t>(out_stride)};
+            py::array_t<uint8_t> out(shape);
+            if (is_database)
+                deglib::transformation::apply_database(transformations, f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
+            else
+                deglib::transformation::apply_query(transformations, f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
+            return out;
+        } else {
+            std::vector<py::ssize_t> shape =
+                is_1d ? std::vector<py::ssize_t>{static_cast<py::ssize_t>(transformations.back()->output_dim())}
+                      : std::vector<py::ssize_t>{static_cast<py::ssize_t>(count), static_cast<py::ssize_t>(transformations.back()->output_dim())};
+            py::array_t<float> out(shape);
+            if (is_database)
+                deglib::transformation::apply_database(transformations, f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
+            else
+                deglib::transformation::apply_query(transformations, f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
+            return out;
+        }
+    };
+
+    py::class_<deglib::transformation::FeatureTransformation, std::shared_ptr<deglib::transformation::FeatureTransformation>>(
+        transformation_module, "FeatureTransformation"
+    )
+        .def_property_readonly("name", [](const deglib::transformation::FeatureTransformation& t) { return std::string(t.name()); })
+        .def_property_readonly("tag", &deglib::transformation::FeatureTransformation::tag)
+        .def_property_readonly("input_dim", &deglib::transformation::FeatureTransformation::input_dim)
+        .def_property_readonly("output_dim", &deglib::transformation::FeatureTransformation::output_dim)
+        .def_property_readonly("input_bytes", &deglib::transformation::FeatureTransformation::input_bytes)
+        .def_property_readonly("output_bytes", &deglib::transformation::FeatureTransformation::output_bytes)
+        .def_property_readonly(
+            "output_dtype",
+            [](const deglib::transformation::FeatureTransformation& t) -> py::object {
+                uint32_t tag = t.tag();
+                py::module_ np = py::module_::import("numpy");
+                if (tag == deglib::transformation::TAG_SQI8 || tag == deglib::transformation::TAG_SQ8P) return np.attr("int8");
+                if (tag == deglib::transformation::TAG_SQU8 || tag == deglib::transformation::TAG_SQUP || tag == deglib::transformation::TAG_EVPQ)
+                    return np.attr("uint8");
+                return np.attr("float32");
+            }
         )
         .def(
-            "quantize",
-            [](const deglib::quantization::scalar::ScalarQuantizerInt8& q, py::array vectors, size_t num_threads) {
-                py::buffer_info buf = vectors.request();
-                auto [count, dim] = get_2d_shape(buf);
-                std::vector<int8_t> result;
-                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    result = q.quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, num_threads);
-                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                    result = q.quantize(static_cast<const float*>(buf.ptr), count, dim, num_threads);
-                } else {
-                    throw std::invalid_argument("vectors must be float32 or float16");
-                }
-                py::array_t<int8_t> output({count, static_cast<size_t>(dim)});
-                py::buffer_info out_buf = output.request();
-                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(int8_t));
-                return output;
+            "transform_database",
+            [transform_single_array](const deglib::transformation::FeatureTransformation& t, py::array in_arr) {
+                return transform_single_array(t, in_arr, true);
             },
-            py::arg("vectors"), py::arg("num_threads") = 0
-        );
-
-    // ScalarQuantizerInt8PerDim
-    py::class_<deglib::quantization::scalar::ScalarQuantizerInt8PerDim>(optimization_module, "ScalarQuantizerInt8PerDim")
-        .def(py::init<>())
-        .def(py::init<uint32_t>(), py::arg("dim"))
-        .def_readwrite("dim", &deglib::quantization::scalar::ScalarQuantizerInt8PerDim::dim)
-        .def_readwrite("abs_maxs", &deglib::quantization::scalar::ScalarQuantizerInt8PerDim::abs_maxs)
-        .def_readwrite("scales", &deglib::quantization::scalar::ScalarQuantizerInt8PerDim::scales)
-        .def_readonly("is_fitted", &deglib::quantization::scalar::ScalarQuantizerInt8PerDim::is_fitted)
-        .def(
-            "fit",
-            [](deglib::quantization::scalar::ScalarQuantizerInt8PerDim& q, py::array vectors, float drop_ratio) {
-                py::buffer_info buf = vectors.request();
-                auto [count, dim] = get_2d_shape(buf);
-                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
-                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                    q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
-                } else {
-                    throw std::invalid_argument("vectors must be float32 or float16");
-                }
-            },
-            py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+            py::arg("vectors")
         )
         .def(
-            "quantize",
-            [](const deglib::quantization::scalar::ScalarQuantizerInt8PerDim& q, py::array vectors, size_t num_threads) {
-                py::buffer_info buf = vectors.request();
-                auto [count, dim] = get_2d_shape(buf);
-                std::vector<int8_t> result;
-                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    result = q.quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, num_threads);
-                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                    result = q.quantize(static_cast<const float*>(buf.ptr), count, dim, num_threads);
-                } else {
-                    throw std::invalid_argument("vectors must be float32 or float16");
-                }
-                py::array_t<int8_t> output({count, static_cast<size_t>(dim)});
-                py::buffer_info out_buf = output.request();
-                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(int8_t));
-                return output;
+            "transform_query",
+            [transform_single_array](const deglib::transformation::FeatureTransformation& t, py::array in_arr) {
+                return transform_single_array(t, in_arr, false);
             },
-            py::arg("vectors"), py::arg("num_threads") = 0
-        );
+            py::arg("queries")
+        )
+        .def("serialize", [](const deglib::transformation::FeatureTransformation& t) -> py::bytes {
+            std::ostringstream ss(std::ios::binary);
+            t.serialize(ss);
+            return py::bytes(ss.str());
+        });
 
-    // ScalarQuantizerUint8
-    py::class_<deglib::quantization::scalar::ScalarQuantizerUint8>(optimization_module, "ScalarQuantizerUint8")
-        .def(py::init<>())
-        .def(py::init<float, float>(), py::arg("min_val"), py::arg("max_val"))
-        .def_readwrite("min_val", &deglib::quantization::scalar::ScalarQuantizerUint8::min_val)
-        .def_readwrite("max_val", &deglib::quantization::scalar::ScalarQuantizerUint8::max_val)
-        .def_readwrite("dif", &deglib::quantization::scalar::ScalarQuantizerUint8::dif)
-        .def_readwrite("scale", &deglib::quantization::scalar::ScalarQuantizerUint8::scale)
-        .def_readonly("is_fitted", &deglib::quantization::scalar::ScalarQuantizerUint8::is_fitted)
+    py::class_<deglib::transformation::MipsTransform, deglib::transformation::FeatureTransformation, std::shared_ptr<deglib::transformation::MipsTransform>>(
+        transformation_module, "MipsTransform"
+    )
+        .def(py::init<uint32_t, float>(), py::arg("dim"), py::arg("max_norm") = 0.0f)
+        .def_property_readonly("max_norm", &deglib::transformation::MipsTransform::max_norm)
         .def(
             "fit",
-            [](deglib::quantization::scalar::ScalarQuantizerUint8& q, py::array vectors, float drop_ratio) {
-                py::buffer_info buf = vectors.request();
-                auto [count, dim] = get_2d_shape(buf);
-                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
-                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                    q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
-                } else {
-                    throw std::invalid_argument("vectors must be float32 or float16");
-                }
+            [](deglib::transformation::MipsTransform& t, py::array_t<float, py::array::c_style> data) {
+                auto buf = data.request();
+                if (buf.ndim != 2) throw std::invalid_argument("data must be a 2D float32 array");
+                t.fit(static_cast<const float*>(buf.ptr), buf.shape[0]);
             },
-            py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+            py::arg("data")
         )
-        .def(
-            "quantize",
-            [](const deglib::quantization::scalar::ScalarQuantizerUint8& q, py::array vectors, size_t num_threads) {
-                py::buffer_info buf = vectors.request();
-                auto [count, dim] = get_2d_shape(buf);
-                std::vector<uint8_t> result;
-                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    result = q.quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, num_threads);
-                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                    result = q.quantize(static_cast<const float*>(buf.ptr), count, dim, num_threads);
-                } else {
-                    throw std::invalid_argument("vectors must be float32 or float16");
-                }
-                py::array_t<uint8_t> output({count, static_cast<size_t>(dim)});
-                py::buffer_info out_buf = output.request();
-                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(uint8_t));
-                return output;
-            },
-            py::arg("vectors"), py::arg("num_threads") = 0
-        );
+        .def_static("deserialize", [](py::bytes b) {
+            std::string s = b;
+            std::istringstream ss(s, std::ios::binary);
+            return deglib::transformation::MipsTransform::deserialize(ss);
+        });
 
-    // ScalarQuantizerUint8PerDim
-    py::class_<deglib::quantization::scalar::ScalarQuantizerUint8PerDim>(optimization_module, "ScalarQuantizerUint8PerDim")
-        .def(py::init<>())
-        .def(py::init<uint32_t>(), py::arg("dim"))
-        .def_readwrite("dim", &deglib::quantization::scalar::ScalarQuantizerUint8PerDim::dim)
-        .def_readwrite("mins", &deglib::quantization::scalar::ScalarQuantizerUint8PerDim::mins)
-        .def_readwrite("maxs", &deglib::quantization::scalar::ScalarQuantizerUint8PerDim::maxs)
-        .def_readwrite("difs", &deglib::quantization::scalar::ScalarQuantizerUint8PerDim::difs)
-        .def_readwrite("scales", &deglib::quantization::scalar::ScalarQuantizerUint8PerDim::scales)
-        .def_readonly("is_fitted", &deglib::quantization::scalar::ScalarQuantizerUint8PerDim::is_fitted)
-        .def(
-            "fit",
-            [](deglib::quantization::scalar::ScalarQuantizerUint8PerDim& q, py::array vectors, float drop_ratio) {
-                py::buffer_info buf = vectors.request();
-                auto [count, dim] = get_2d_shape(buf);
-                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
-                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                    q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
-                } else {
-                    throw std::invalid_argument("vectors must be float32 or float16");
-                }
-            },
-            py::arg("vectors"), py::arg("drop_ratio") = 0.0f
-        )
-        .def(
-            "quantize",
-            [](const deglib::quantization::scalar::ScalarQuantizerUint8PerDim& q, py::array vectors, size_t num_threads) {
-                py::buffer_info buf = vectors.request();
-                auto [count, dim] = get_2d_shape(buf);
-                std::vector<uint8_t> result;
-                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    result = q.quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, num_threads);
-                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                    result = q.quantize(static_cast<const float*>(buf.ptr), count, dim, num_threads);
-                } else {
-                    throw std::invalid_argument("vectors must be float32 or float16");
-                }
-                py::array_t<uint8_t> output({count, static_cast<size_t>(dim)});
-                py::buffer_info out_buf = output.request();
-                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(uint8_t));
-                return output;
-            },
-            py::arg("vectors"), py::arg("num_threads") = 0
-        );
-
-    optimization_module.def(
-        "make_scalar_quantizer_int8",
-        [](py::array vectors, float drop_ratio) {
-            py::buffer_info buf = vectors.request();
-            auto [count, dim] = get_2d_shape(buf);
-            deglib::quantization::scalar::ScalarQuantizerInt8 q;
-            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
-            } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
-            } else {
-                throw std::invalid_argument("vectors must be float32 or float16");
-            }
-            return q;
-        },
-        py::arg("vectors"), py::arg("drop_ratio") = 0.0f, "Make, fit, and return a ScalarQuantizerInt8 instance from vectors"
-    );
-    optimization_module.def(
-        "make_scalar_quantizer_int8_perdim",
-        [](py::array vectors, float drop_ratio) {
-            py::buffer_info buf = vectors.request();
-            auto [count, dim] = get_2d_shape(buf);
-            deglib::quantization::scalar::ScalarQuantizerInt8PerDim q;
-            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
-            } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
-            } else {
-                throw std::invalid_argument("vectors must be float32 or float16");
-            }
-            return q;
-        },
-        py::arg("vectors"), py::arg("drop_ratio") = 0.0f, "Make, fit, and return a ScalarQuantizerInt8PerDim instance from vectors"
-    );
-    optimization_module.def(
-        "make_scalar_quantizer_uint8",
-        [](py::array vectors, float drop_ratio) {
-            py::buffer_info buf = vectors.request();
-            auto [count, dim] = get_2d_shape(buf);
-            deglib::quantization::scalar::ScalarQuantizerUint8 q;
-            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
-            } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
-            } else {
-                throw std::invalid_argument("vectors must be float32 or float16");
-            }
-            return q;
-        },
-        py::arg("vectors"), py::arg("drop_ratio") = 0.0f, "Make, fit, and return a ScalarQuantizerUint8 instance from vectors"
-    );
-    optimization_module.def(
-        "make_scalar_quantizer_uint8_perdim",
-        [](py::array vectors, float drop_ratio) {
-            py::buffer_info buf = vectors.request();
-            auto [count, dim] = get_2d_shape(buf);
-            deglib::quantization::scalar::ScalarQuantizerUint8PerDim q;
-            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
-            } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
-            } else {
-                throw std::invalid_argument("vectors must be float32 or float16");
-            }
-            return q;
-        },
-        py::arg("vectors"), py::arg("drop_ratio") = 0.0f, "Make, fit, and return a ScalarQuantizerUint8PerDim instance from vectors"
-    );
-
-    optimization_module.def(
-        "make_evp_quantizer", [](uint32_t non_zeros) { return deglib::quantization::evp::EvpQuantizer(non_zeros); }, py::arg("non_zeros"),
-        "Make and return an EvpQuantizer instance holding the shared non_zeros setting"
-    );
-
-    // EvpQuantizer
-    py::class_<deglib::quantization::evp::EvpQuantizer>(optimization_module, "EvpQuantizer")
+    py::class_<deglib::transformation::EvpQuantizer, deglib::transformation::FeatureTransformation, std::shared_ptr<deglib::transformation::EvpQuantizer>>(
+        transformation_module, "EvpQuantizer"
+    )
         .def(py::init<>())
         .def(py::init<uint32_t>(), py::arg("non_zeros"))
-        .def_readwrite("non_zeros", &deglib::quantization::evp::EvpQuantizer::non_zeros)
+        .def(py::init<uint32_t, uint32_t>(), py::arg("dim"), py::arg("non_zeros"))
+        .def_readwrite("dim", &deglib::transformation::EvpQuantizer::dim)
+        .def_readwrite("non_zeros", &deglib::transformation::EvpQuantizer::non_zeros)
         .def_property_readonly(
             "mean",
-            [](const deglib::quantization::evp::EvpQuantizer& q) -> py::object {
+            [](const deglib::transformation::EvpQuantizer& q) -> py::object {
                 if (!q.has_mean()) return py::none();
                 const auto& m = q.get_mean();
                 py::array_t<float> arr(static_cast<py::ssize_t>(m.size()));
@@ -1416,10 +1397,10 @@ PYBIND11_MODULE(deglib_cpp, m) {
             },
             "Current 1D mean vector subtracted during quantization, or None if not set"
         )
-        .def("clear_mean", &deglib::quantization::evp::EvpQuantizer::clear_mean, "Clears the mean vector")
+        .def("clear_mean", &deglib::transformation::EvpQuantizer::clear_mean, "Clears the mean vector")
         .def(
             "set_mean",
-            [](deglib::quantization::evp::EvpQuantizer& q, py::array_t<float, py::array::c_style> mean) {
+            [](deglib::transformation::EvpQuantizer& q, py::array_t<float, py::array::c_style> mean) {
                 py::buffer_info info = mean.request();
                 if (info.ndim != 1) {
                     throw std::invalid_argument("mean must be a 1D float32 array");
@@ -1430,7 +1411,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
         )
         .def(
             "fit_mean",
-            [](deglib::quantization::evp::EvpQuantizer& q, py::array vectors, size_t num_threads) {
+            [](deglib::transformation::EvpQuantizer& q, py::array vectors, size_t num_threads) {
                 py::buffer_info buf = vectors.request();
                 auto [count, dim] = get_2d_shape(buf);
                 const bool is_fp16 = (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e"));
@@ -1448,8 +1429,27 @@ PYBIND11_MODULE(deglib_cpp, m) {
             py::arg("vectors"), py::arg("num_threads") = 0, "Computes and sets the 1D mean vector using parallel C++ SIMD"
         )
         .def(
+            "fit",
+            [](deglib::transformation::EvpQuantizer& q, py::array vectors, size_t num_threads) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                const bool is_fp16 = (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e"));
+                const bool is_fp32 = (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float"));
+                if (!is_fp16 && !is_fp32) {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+                py::gil_scoped_release release;
+                if (is_fp16) {
+                    q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, num_threads);
+                } else {
+                    q.fit(static_cast<const float*>(buf.ptr), count, dim, num_threads);
+                }
+            },
+            py::arg("vectors"), py::arg("num_threads") = 0
+        )
+        .def(
             "quantize",
-            [](deglib::quantization::evp::EvpQuantizer& q, py::array vectors, size_t num_threads, std::optional<py::array_t<float, py::array::c_style>> mean) {
+            [](deglib::transformation::EvpQuantizer& q, py::array vectors, size_t num_threads, std::optional<py::array_t<float, py::array::c_style>> mean) {
                 py::buffer_info buf = vectors.request();
                 auto [count, dim] = get_2d_shape(buf);
                 if (dim % 8 != 0) {
@@ -1484,7 +1484,352 @@ PYBIND11_MODULE(deglib_cpp, m) {
                 return output;
             },
             py::arg("vectors"), py::arg("num_threads") = 0, py::arg("mean") = py::none()
-        );
+        )
+        .def_static("deserialize", [](py::bytes b) {
+            std::string s = b;
+            std::istringstream ss(s, std::ios::binary);
+            return deglib::transformation::EvpQuantizer::deserialize(ss);
+        });
+
+    py::class_<
+        deglib::transformation::ScalarQuantizerInt8, deglib::transformation::FeatureTransformation,
+        std::shared_ptr<deglib::transformation::ScalarQuantizerInt8>>(transformation_module, "ScalarQuantizerInt8")
+        .def(py::init<>())
+        .def(py::init<float>(), py::arg("abs_max"))
+        .def(py::init<uint32_t, float>(), py::arg("dim"), py::arg("abs_max") = 1.0f)
+        .def_readwrite("dim", &deglib::transformation::ScalarQuantizerInt8::dim)
+        .def_readwrite("abs_max", &deglib::transformation::ScalarQuantizerInt8::abs_max)
+        .def_readwrite("scale", &deglib::transformation::ScalarQuantizerInt8::scale)
+        .def_readonly("is_fitted", &deglib::transformation::ScalarQuantizerInt8::is_fitted)
+        .def(
+            "fit",
+            [](deglib::transformation::ScalarQuantizerInt8& q, py::array vectors, float drop_ratio) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+            },
+            py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+        )
+        .def(
+            "quantize",
+            [](const deglib::transformation::ScalarQuantizerInt8& q, py::array vectors, size_t num_threads) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                std::vector<int8_t> result;
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    result = q.quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, num_threads);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    result = q.quantize(static_cast<const float*>(buf.ptr), count, dim, num_threads);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+                py::array_t<int8_t> output({count, static_cast<size_t>(dim)});
+                py::buffer_info out_buf = output.request();
+                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(int8_t));
+                return output;
+            },
+            py::arg("vectors"), py::arg("num_threads") = 0
+        )
+        .def_static("deserialize", [](py::bytes b) {
+            std::string s = b;
+            std::istringstream ss(s, std::ios::binary);
+            return deglib::transformation::ScalarQuantizerInt8::deserialize(ss);
+        });
+
+    py::class_<
+        deglib::transformation::ScalarQuantizerInt8PerDim, deglib::transformation::FeatureTransformation,
+        std::shared_ptr<deglib::transformation::ScalarQuantizerInt8PerDim>>(transformation_module, "ScalarQuantizerInt8PerDim")
+        .def(py::init<>())
+        .def(py::init<uint32_t>(), py::arg("dim"))
+        .def(py::init<std::vector<float>>(), py::arg("abs_maxs"))
+        .def(py::init<uint32_t, std::vector<float>>(), py::arg("dim"), py::arg("abs_maxs") = std::vector<float>{})
+        .def_readwrite("dim", &deglib::transformation::ScalarQuantizerInt8PerDim::dim)
+        .def_readwrite("abs_maxs", &deglib::transformation::ScalarQuantizerInt8PerDim::abs_maxs)
+        .def_readwrite("scales", &deglib::transformation::ScalarQuantizerInt8PerDim::scales)
+        .def_readonly("is_fitted", &deglib::transformation::ScalarQuantizerInt8PerDim::is_fitted)
+        .def(
+            "fit",
+            [](deglib::transformation::ScalarQuantizerInt8PerDim& q, py::array vectors, float drop_ratio) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+            },
+            py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+        )
+        .def(
+            "quantize",
+            [](const deglib::transformation::ScalarQuantizerInt8PerDim& q, py::array vectors, size_t num_threads) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                std::vector<int8_t> result;
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    result = q.quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, num_threads);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    result = q.quantize(static_cast<const float*>(buf.ptr), count, dim, num_threads);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+                py::array_t<int8_t> output({count, static_cast<size_t>(dim)});
+                py::buffer_info out_buf = output.request();
+                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(int8_t));
+                return output;
+            },
+            py::arg("vectors"), py::arg("num_threads") = 0
+        )
+        .def_static("deserialize", [](py::bytes b) {
+            std::string s = b;
+            std::istringstream ss(s, std::ios::binary);
+            return deglib::transformation::ScalarQuantizerInt8PerDim::deserialize(ss);
+        });
+
+    py::class_<
+        deglib::transformation::ScalarQuantizerUint8, deglib::transformation::FeatureTransformation,
+        std::shared_ptr<deglib::transformation::ScalarQuantizerUint8>>(transformation_module, "ScalarQuantizerUint8")
+        .def(py::init<>())
+        .def(py::init<float, float>(), py::arg("min_val"), py::arg("max_val"))
+        .def(py::init<uint32_t, float, float>(), py::arg("dim"), py::arg("min_val") = 0.0f, py::arg("max_val") = 1.0f)
+        .def_readwrite("dim", &deglib::transformation::ScalarQuantizerUint8::dim)
+        .def_readwrite("min_val", &deglib::transformation::ScalarQuantizerUint8::min_val)
+        .def_readwrite("max_val", &deglib::transformation::ScalarQuantizerUint8::max_val)
+        .def_readwrite("dif", &deglib::transformation::ScalarQuantizerUint8::dif)
+        .def_readwrite("scale", &deglib::transformation::ScalarQuantizerUint8::scale)
+        .def_readonly("is_fitted", &deglib::transformation::ScalarQuantizerUint8::is_fitted)
+        .def(
+            "fit",
+            [](deglib::transformation::ScalarQuantizerUint8& q, py::array vectors, float drop_ratio) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+            },
+            py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+        )
+        .def(
+            "quantize",
+            [](const deglib::transformation::ScalarQuantizerUint8& q, py::array vectors, size_t num_threads) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                std::vector<uint8_t> result;
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    result = q.quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, num_threads);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    result = q.quantize(static_cast<const float*>(buf.ptr), count, dim, num_threads);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+                py::array_t<uint8_t> output({count, static_cast<size_t>(dim)});
+                py::buffer_info out_buf = output.request();
+                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(uint8_t));
+                return output;
+            },
+            py::arg("vectors"), py::arg("num_threads") = 0
+        )
+        .def_static("deserialize", [](py::bytes b) {
+            std::string s = b;
+            std::istringstream ss(s, std::ios::binary);
+            return deglib::transformation::ScalarQuantizerUint8::deserialize(ss);
+        });
+
+    py::class_<
+        deglib::transformation::ScalarQuantizerUint8PerDim, deglib::transformation::FeatureTransformation,
+        std::shared_ptr<deglib::transformation::ScalarQuantizerUint8PerDim>>(transformation_module, "ScalarQuantizerUint8PerDim")
+        .def(py::init<>())
+        .def(py::init<uint32_t>(), py::arg("dim"))
+        .def(py::init<std::vector<float>, std::vector<float>>(), py::arg("mins"), py::arg("maxs"))
+        .def(
+            py::init<uint32_t, std::vector<float>, std::vector<float>>(), py::arg("dim"), py::arg("mins") = std::vector<float>{},
+            py::arg("maxs") = std::vector<float>{}
+        )
+        .def_readwrite("dim", &deglib::transformation::ScalarQuantizerUint8PerDim::dim)
+        .def_readwrite("mins", &deglib::transformation::ScalarQuantizerUint8PerDim::mins)
+        .def_readwrite("maxs", &deglib::transformation::ScalarQuantizerUint8PerDim::maxs)
+        .def_readwrite("scales", &deglib::transformation::ScalarQuantizerUint8PerDim::scales)
+        .def_readonly("is_fitted", &deglib::transformation::ScalarQuantizerUint8PerDim::is_fitted)
+        .def(
+            "fit",
+            [](deglib::transformation::ScalarQuantizerUint8PerDim& q, py::array vectors, float drop_ratio) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    q.fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    q.fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+            },
+            py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+        )
+        .def(
+            "quantize",
+            [](const deglib::transformation::ScalarQuantizerUint8PerDim& q, py::array vectors, size_t num_threads) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                std::vector<uint8_t> result;
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    result = q.quantize(static_cast<const uint16_t*>(buf.ptr), count, dim, num_threads);
+                } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                    result = q.quantize(static_cast<const float*>(buf.ptr), count, dim, num_threads);
+                } else {
+                    throw std::invalid_argument("vectors must be float32 or float16");
+                }
+                py::array_t<uint8_t> output({count, static_cast<size_t>(dim)});
+                py::buffer_info out_buf = output.request();
+                std::memcpy(out_buf.ptr, result.data(), count * dim * sizeof(uint8_t));
+                return output;
+            },
+            py::arg("vectors"), py::arg("num_threads") = 0
+        )
+        .def_static("deserialize", [](py::bytes b) {
+            std::string s = b;
+            std::istringstream ss(s, std::ios::binary);
+            return deglib::transformation::ScalarQuantizerUint8PerDim::deserialize(ss);
+        });
+
+    transformation_module.def(
+        "make_scalar_quantizer_int8",
+        [](py::array vectors, float drop_ratio) {
+            py::buffer_info buf = vectors.request();
+            auto [count, dim] = get_2d_shape(buf);
+            auto q = std::make_shared<deglib::transformation::ScalarQuantizerInt8>();
+            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                q->fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
+            } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                q->fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
+            } else {
+                throw std::invalid_argument("vectors must be float32 or float16");
+            }
+            return q;
+        },
+        py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+    );
+
+    transformation_module.def(
+        "make_scalar_quantizer_int8_perdim",
+        [](py::array vectors, float drop_ratio) {
+            py::buffer_info buf = vectors.request();
+            auto [count, dim] = get_2d_shape(buf);
+            auto q = std::make_shared<deglib::transformation::ScalarQuantizerInt8PerDim>();
+            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                q->fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
+            } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                q->fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
+            } else {
+                throw std::invalid_argument("vectors must be float32 or float16");
+            }
+            return q;
+        },
+        py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+    );
+
+    transformation_module.def(
+        "make_scalar_quantizer_uint8",
+        [](py::array vectors, float drop_ratio) {
+            py::buffer_info buf = vectors.request();
+            auto [count, dim] = get_2d_shape(buf);
+            auto q = std::make_shared<deglib::transformation::ScalarQuantizerUint8>();
+            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                q->fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
+            } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                q->fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
+            } else {
+                throw std::invalid_argument("vectors must be float32 or float16");
+            }
+            return q;
+        },
+        py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+    );
+
+    transformation_module.def(
+        "make_scalar_quantizer_uint8_perdim",
+        [](py::array vectors, float drop_ratio) {
+            py::buffer_info buf = vectors.request();
+            auto [count, dim] = get_2d_shape(buf);
+            auto q = std::make_shared<deglib::transformation::ScalarQuantizerUint8PerDim>();
+            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                q->fit(static_cast<const uint16_t*>(buf.ptr), count, dim, drop_ratio);
+            } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                q->fit(static_cast<const float*>(buf.ptr), count, dim, drop_ratio);
+            } else {
+                throw std::invalid_argument("vectors must be float32 or float16");
+            }
+            return q;
+        },
+        py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+    );
+
+    transformation_module.def(
+        "make_evp_quantizer", [](uint32_t non_zeros) { return std::make_shared<deglib::transformation::EvpQuantizer>(non_zeros); }, py::arg("non_zeros")
+    );
+
+    transformation_module.def("mips_l2_transform", &mips_l2_transform_wrapper, py::arg("vectors"));
+    transformation_module.def("mips_l2_transform_query", &mips_l2_transform_query_wrapper, py::arg("queries"));
+
+    transformation_module.def(
+        "serialize_transformations",
+        [](const std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>& transformations) -> py::bytes {
+            std::ostringstream ss(std::ios::binary);
+            deglib::transformation::serialize_transformations(transformations, ss);
+            return py::bytes(ss.str());
+        },
+        py::arg("transformations")
+    );
+
+    transformation_module.def(
+        "deserialize_transformations",
+        [](py::bytes b) {
+            std::string s = b;
+            std::istringstream ss(s, std::ios::binary);
+            return deglib::transformation::deserialize_transformations(ss);
+        },
+        py::arg("bytes")
+    );
+
+    transformation_module.def(
+        "apply_database",
+        [apply_transformations_array](const std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>& transformations, py::array in_arr) {
+            return apply_transformations_array(transformations, in_arr, true);
+        },
+        py::arg("transformations"), py::arg("vectors")
+    );
+
+    transformation_module.def(
+        "apply_query",
+        [apply_transformations_array](const std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>& transformations, py::array in_arr) {
+            return apply_transformations_array(transformations, in_arr, false);
+        },
+        py::arg("transformations"), py::arg("queries")
+    );
+
+    m.attr("FeatureTransformation") = transformation_module.attr("FeatureTransformation");
+    m.attr("MipsTransform") = transformation_module.attr("MipsTransform");
+    m.attr("EvpQuantizer") = transformation_module.attr("EvpQuantizer");
+    m.attr("ScalarQuantizerInt8") = transformation_module.attr("ScalarQuantizerInt8");
+    m.attr("ScalarQuantizerUint8") = transformation_module.attr("ScalarQuantizerUint8");
+    m.attr("ScalarQuantizerInt8PerDim") = transformation_module.attr("ScalarQuantizerInt8PerDim");
+    m.attr("ScalarQuantizerUint8PerDim") = transformation_module.attr("ScalarQuantizerUint8PerDim");
+    m.attr("make_evp_quantizer") = transformation_module.attr("make_evp_quantizer");
+    m.attr("make_scalar_quantizer_int8") = transformation_module.attr("make_scalar_quantizer_int8");
+    m.attr("make_scalar_quantizer_int8_perdim") = transformation_module.attr("make_scalar_quantizer_int8_perdim");
+    m.attr("make_scalar_quantizer_uint8") = transformation_module.attr("make_scalar_quantizer_uint8");
+    m.attr("make_scalar_quantizer_uint8_perdim") = transformation_module.attr("make_scalar_quantizer_uint8_perdim");
 
     // search submodule
     py::module_ search_module = m.def_submodule("search", "Search utilities including Filter");
@@ -1617,6 +1962,27 @@ PYBIND11_MODULE(deglib_cpp, m) {
         )
         .def("has_vertex", &deglib::DynamicExplorationGraph::hasVertex)
         .def("get_neighbors", &deglib::DynamicExplorationGraph::getNeighbors)
+        .def(
+            "get_neighbors_batch",
+            [](const deglib::DynamicExplorationGraph& g, const py::array_t<uint32_t, py::array::c_style> labels, size_t threads) {
+                auto info = labels.request();
+                if (info.ndim != 1) {
+                    throw std::invalid_argument(std::format("Expected labels to have 1 dimension, got {}", info.ndim));
+                }
+                const uint32_t n_labels = static_cast<uint32_t>(info.shape[0]);
+                const uint8_t edges = g.getEdgesPerVertex();
+                py::array_t<uint32_t> result({n_labels, static_cast<uint32_t>(edges)});
+                auto out_ptr = static_cast<uint32_t*>(result.request().ptr);
+                std::span<const uint32_t> labels_span(static_cast<const uint32_t*>(info.ptr), n_labels);
+                std::span<uint32_t> out_span(out_ptr, static_cast<size_t>(n_labels) * edges);
+                {
+                    py::gil_scoped_release release;
+                    g.getNeighbors_batch(labels_span, out_span, threads);
+                }
+                return result;
+            },
+            py::arg("external_labels"), py::arg("threads") = 1
+        )
         .def("is_mutable", &deglib::DynamicExplorationGraph::isMutable)
         .def("to_readonly", &deglib::DynamicExplorationGraph::to_readonly)
         .def(
@@ -1704,6 +2070,8 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def(
             "save_graph", [](deglib::DynamicExplorationGraph& g, const char* path) { g.saveGraph(path); }, py::arg("path")
         )
+        .def("has_transformations", &deglib::DynamicExplorationGraph::hasTransformations)
+        .def("get_transformations", [](const deglib::DynamicExplorationGraph& g) { return g.getTransformations(); })
         .def("get_entry_vertex_indices", &deglib::DynamicExplorationGraph::getEntryVertexIndices)
         .def("set_entry_vertex_indices", &deglib::DynamicExplorationGraph::setEntryVertexIndices, py::arg("indices"))
         .def(
@@ -1738,9 +2106,18 @@ PYBIND11_MODULE(deglib_cpp, m) {
     m.def("mips_l2_transform", &mips_l2_transform_wrapper, py::arg("vectors"));
     m.def("mips_l2_transform_query", &mips_l2_transform_query_wrapper, py::arg("queries"));
 
-    m.def("create_size_bounded_graph", &create_size_bounded_graph, py::arg("max_vertex_count"), py::arg("edges_per_vertex"), py::arg("feature_space"));
-    m.def("create_dynamic_graph", &create_dynamic_graph, py::arg("edges_per_vertex"), py::arg("feature_space"), py::arg("chunk_size") = 1024);
-    m.def("create_random_graph", &create_random_graph, py::arg("features"), py::arg("edges_per_vertex"), py::arg("feature_space"), py::arg("seed") = 7);
+    m.def(
+        "create_size_bounded_graph", &create_size_bounded_graph, py::arg("max_vertex_count"), py::arg("edges_per_vertex"), py::arg("feature_space"),
+        py::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}
+    );
+    m.def(
+        "create_dynamic_graph", &create_dynamic_graph, py::arg("edges_per_vertex"), py::arg("feature_space"), py::arg("chunk_size") = 1024,
+        py::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}
+    );
+    m.def(
+        "create_random_graph", &create_random_graph, py::arg("features"), py::arg("edges_per_vertex"), py::arg("feature_space"), py::arg("seed") = 7,
+        py::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}
+    );
 
     // GraphBuilder (renamed from EvenRegularGraphBuilder)
     py::enum_<deglib::builder::OptimizationTarget>(m, "OptimizationTarget")
@@ -1759,33 +2136,37 @@ PYBIND11_MODULE(deglib_cpp, m) {
                 uint32_t seed_val = seed.value_or(5489);
                 auto* rng = new std::mt19937(seed_val);
                 return new deglib::builder::EvenRegularGraphBuilder(
-                    static_cast<deglib::graph::MutableGraph&>(graph.internal()), *rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps,
-                    max_path_length, improve_tries
+                    graph, *rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, improve_tries
                 );
             })
         )
         .def(
             "add_entry",
             [](deglib::builder::EvenRegularGraphBuilder& builder, const py::array_t<uint32_t, py::array::c_style>& label, const py::array& feature) {
-                // label buffer
                 const auto label_access = label.unchecked<1>();
-
-                // feature buffer
                 const py::buffer_info feature_info = feature.request();
-                const std::byte* feature_ptr = static_cast<std::byte*>(feature_info.ptr);
                 if (feature_info.ndim != 2) {
                     throw std::invalid_argument(std::format("Expected feature to have two dimensions, got {}", feature_info.ndim));
                 }
 
                 py::gil_scoped_release release;  // release the gil
+                const size_t num_entries = feature_info.shape[0];
+                const size_t dim = feature_info.shape[1];
 
-                // add entries
-                const size_t feature_len = feature_info.itemsize * feature_info.shape[1];
-                for (uint32_t i = 0; i < feature_info.shape[0]; i++) {
-                    // copy to vector
-                    std::vector<std::byte> feature_vec(feature_ptr + (feature_len * i), feature_ptr + (feature_len * (i + 1)));
-                    const uint32_t current_label = label_access(i);
-                    builder.addEntry(current_label, std::move(feature_vec));
+                if (builder.hasTransformations() && feature_info.itemsize == sizeof(float) && (feature_info.format == "f" || feature_info.format == "float")) {
+                    const float* f_ptr = static_cast<const float*>(feature_info.ptr);
+                    for (uint32_t i = 0; i < num_entries; i++) {
+                        const uint32_t current_label = label_access(i);
+                        builder.addEntry(current_label, std::span<const float>(f_ptr + i * dim, dim));
+                    }
+                } else {
+                    const std::byte* feature_ptr = static_cast<const std::byte*>(feature_info.ptr);
+                    const size_t feature_len = feature_info.itemsize * dim;
+                    for (uint32_t i = 0; i < num_entries; i++) {
+                        std::vector<std::byte> feature_vec(feature_ptr + (feature_len * i), feature_ptr + (feature_len * (i + 1)));
+                        const uint32_t current_label = label_access(i);
+                        builder.addEntry(current_label, std::move(feature_vec));
+                    }
                 }
             }
         )

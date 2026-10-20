@@ -29,7 +29,9 @@ def test_searcher_direct_f32():
         assert distances[i] >= distances[i - 1]
 
     # With unsorted
-    indices_unsorted, distances_unsorted = searcher.search(query, k=5, eps_or_ef=0.1, return_distances=True, unsorted=True)
+    indices_unsorted, distances_unsorted = searcher.search(
+        query, k=5, eps_or_ef=0.1, return_distances=True, unsorted=True
+    )
     assert len(indices_unsorted) == 5
     assert set(indices_unsorted) == set(indices)
 
@@ -64,7 +66,7 @@ def test_searcher_quantized_int8_with_rerank():
     graph = deglib.builder.build_from_data(data, edges_per_vertex=16, metric=Metric.FP32_L2)
 
     # 2. INT8 Quantization
-    quantizer = deglib.optimization.make_scalar_quantizer_int8(data)
+    quantizer = deglib.transformation.make_scalar_quantizer_int8(data)
     int8_data = quantizer.quantize(data)
     target_space = FloatSpace.create(dim=dim, metric=Metric.Int8_L2)
     ro_graph = graph.to_readonly(target_space, int8_data)
@@ -108,7 +110,7 @@ def test_searcher_quantized_uint8_with_rerank():
 
     graph = deglib.builder.build_from_data(data, edges_per_vertex=16, metric=Metric.FP32_L2)
 
-    quantizer = deglib.optimization.make_scalar_quantizer_uint8(data)
+    quantizer = deglib.transformation.make_scalar_quantizer_uint8(data)
     uint8_data = quantizer.quantize(data)
     target_space = FloatSpace.create(dim=dim, metric=Metric.Uint8_L2)
     ro_graph = graph.to_readonly(target_space, uint8_data)
@@ -141,7 +143,7 @@ def test_searcher_evp_quantizer():
     graph = deglib.builder.build_from_data(data, edges_per_vertex=16, metric=Metric.FP32_InnerProduct)
 
     # 16 non-zeros for EVP, shared by database and query quantization
-    quantizer = deglib.optimization.EvpQuantizer(non_zeros=16)
+    quantizer = deglib.transformation.EvpQuantizer(non_zeros=16)
     evp_data = quantizer.quantize(data)
     target_space = FloatSpace.create(dim=dim, metric=Metric.EVP_InnerProduct)
     ro_graph = graph.to_readonly(target_space, evp_data)
@@ -210,4 +212,3 @@ def test_searcher_eps_or_ef_dual_modes():
     assert batch_ef.shape == (5, 5)
     for i in range(5):
         assert batch_ef[i, 0] == i
-

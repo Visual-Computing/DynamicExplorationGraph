@@ -4,13 +4,13 @@
 #include "deglib/graph/internal_graph.h"
 #include "deglib/graph/visited_list_pool.h"
 #include "deglib/search/result_list.h"
+#include "deglib/serialization.h"
 #include "deglib/utils/memory.h"
 
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <limits>
 #include <memory>
 #include <random>
@@ -74,21 +74,26 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
         }
     }
 
+
     /**
-     *  Load from file (file format stores per vertex: features, neighbors, weights [ignored], label)
+     *  Load from contiguous memory buffer (e.g. from container 'VERT' section)
      */
-    ReadOnlyGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::distances::FloatSpace feature_space, std::ifstream& ifstream)
+    ReadOnlyGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::distances::FloatSpace feature_space, const void* buffer)
         : ReadOnlyGraph(max_vertex_count, edges_per_vertex, feature_space) {
         const size_t feat_size = feature_space_.get_data_size();
         const size_t neighbor_bytes = size_t(edges_per_vertex_) * sizeof(uint32_t);
         const size_t weight_bytes = size_t(edges_per_vertex_) * sizeof(float);
+        const char* ptr = reinterpret_cast<const char*>(buffer);
 
         for (uint32_t i = 0; i < max_vertex_count_; i++) {
-            ifstream.read(reinterpret_cast<char*>(features_ + size_t(i) * feature_stride_), feat_size);
-            ifstream.read(reinterpret_cast<char*>(neighbors_.data() + size_t(i) * size_t(edges_per_vertex_)), neighbor_bytes);
-            ifstream.ignore(weight_bytes);
+            std::memcpy(features_ + size_t(i) * feature_stride_, ptr, feat_size);
+            ptr += feat_size;
+            std::memcpy(neighbors_.data() + size_t(i) * size_t(edges_per_vertex_), ptr, neighbor_bytes);
+            ptr += neighbor_bytes;
+            ptr += weight_bytes;  // skip weights
             uint32_t lbl = 0;
-            ifstream.read(reinterpret_cast<char*>(&lbl), sizeof(uint32_t));
+            std::memcpy(&lbl, ptr, sizeof(uint32_t));
+            ptr += sizeof(uint32_t);
             labels_[i] = lbl;
             label_to_index_.emplace(lbl, i);
         }
@@ -183,45 +188,23 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
     ) const override {
         return searchInternImpl(*this, entry_vertex_indices, query, k, eps, include_entry, filter, max_distance_computation_count);
     }
+
+  public:
+    bool saveGraph(const char* path_to_graph) const { return deglib::serialization::save_graph(path_to_graph, *this); }
+
+    static ReadOnlyGraph loadGraph(const char* path_graph) {
+        auto data = deglib::serialization::read_graph_file(path_graph);
+        auto graph = ReadOnlyGraph(data.size, data.edges_per_vertex, std::move(*data.feature_space), data.vertex_bytes);
+        graph.setPrefetch(data.po, data.pl, data.nl);
+        graph.setEntryVertexIndices(std::move(data.entry_vertex_indices));
+        return graph;
+    }
 };
 
 /**
- * Load the graph
+ * Load the graph (supports both DEG v2 Container format and legacy v1 format)
  */
-inline auto load_readonly_graph(const char* path_graph) {
-    std::error_code ec{};
-    auto file_size = std::filesystem::file_size(path_graph, ec);
-    if (ec != std::error_code{}) {
-        std::fprintf(stderr, "error when accessing graph file %s, size is: %ju message: %s\n", path_graph, file_size, ec.message().c_str());
-        perror("");
-        abort();
-    }
-
-    auto ifstream = std::ifstream(path_graph, std::ios::binary);
-    if (!ifstream.is_open()) {
-        std::fprintf(stderr, "could not open %s\n", path_graph);
-        perror("");
-        abort();
-    }
-
-    // create feature space
-    uint8_t metric_type;
-    ifstream.read(reinterpret_cast<char*>(&metric_type), sizeof(metric_type));
-    uint16_t dim;
-    ifstream.read(reinterpret_cast<char*>(&dim), sizeof(dim));
-    const auto feature_space = deglib::distances::FloatSpace(dim, static_cast<deglib::distances::Metric>(metric_type));
-
-    // create the graph
-    uint32_t size;
-    ifstream.read(reinterpret_cast<char*>(&size), sizeof(size));
-    uint8_t edges_per_vertex;
-    ifstream.read(reinterpret_cast<char*>(&edges_per_vertex), sizeof(edges_per_vertex));
-
-    auto graph = deglib::graph::ReadOnlyGraph(size, edges_per_vertex, std::move(feature_space), ifstream);
-    ifstream.close();
-
-    return graph;
-}
+inline auto load_readonly_graph(const char* path_graph) { return ReadOnlyGraph::loadGraph(path_graph); }
 
 /**
  * Convert the given graph to a readonly graph

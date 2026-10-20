@@ -3,6 +3,7 @@
 #include "deglib/analysis.h"
 #include "deglib/concurrent.h"
 #include "deglib/graph.h"
+#include "deglib/transformation.h"
 #include "deglib/utils/random.h"
 
 #include <algorithm>
@@ -239,6 +240,9 @@ class EvenRegularGraphBuilder {
     // Flag to indicate if the build loop should stop
     bool stop_building_ = false;
 
+    // Optional feature transformations for automatic compact ingestion
+    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations_;
+
   public:
     /**
      * @brief Constructs an EvenRegularGraphBuilder for building and optimizing a regular graph.
@@ -276,16 +280,26 @@ class EvenRegularGraphBuilder {
           improve_tries_(improve_tries),
           rnd_(rnd),
           graph_(graph),
-          build_status_() {
+          build_status_(),
+          transformations_() {
         // each core processes extend_thread_batch_size element per tasks, there are 10 tasks per threads
         extend_thread_count = std::thread::hardware_concurrency();
         extend_batch_size = extend_thread_count * extend_thread_task_count * extend_thread_task_size;
     }
 
     /**
-     * @brief Constructs an EvenRegularGraphBuilder wrapping a DynamicExplorationGraph facade.
+     * @brief Constructs an EvenRegularGraphBuilder from a DynamicExplorationGraph facade.
+     * Inherits any transformations associated with the graph and operates on its internal MutableGraph.
      *
-     * @throws std::invalid_argument If the DynamicExplorationGraph is not mutable.
+     * @param graph Reference to a DynamicExplorationGraph object to be built and optimized. Must be mutable.
+     * @param rnd Reference to a random number generator (std::mt19937) used for randomized operations.
+     * @param optimization_target Optimization target, determines the graph extension strategy (StreamingData, HighLID, LowLID).
+     * @param extend_k Number of neighbors to consider when extending the graph.
+     * @param extend_eps Epsilon value for neighbor search during graph extension.
+     * @param improve_k Number of neighbors to consider when improving the graph.
+     * @param improve_eps Epsilon value for neighbor search during graph improvement.
+     * @param max_path_length Maximum number of edge swaps in a single improvement attempt (default: 5).
+     * @param improve_tries Number of improvement attempts per build step (default: 0).
      */
     EvenRegularGraphBuilder(
         deglib::DynamicExplorationGraph& graph,
@@ -298,27 +312,28 @@ class EvenRegularGraphBuilder {
         const uint8_t max_path_length = 5,
         const uint32_t improve_tries = 0
     )
-        : EvenRegularGraphBuilder(
-              check_and_get_mutable_graph(graph),
-              rnd,
-              optimization_target,
-              extend_k,
-              extend_eps,
-              improve_k,
-              improve_eps,
-              max_path_length,
-              improve_tries
-          ) {}
-
-  private:
-    static deglib::graph::MutableGraph& check_and_get_mutable_graph(deglib::DynamicExplorationGraph& graph) {
-        if (!graph.isMutable()) {
-            throw std::invalid_argument("DynamicExplorationGraph must be mutable for EvenRegularGraphBuilder");
-        }
-        return dynamic_cast<deglib::graph::MutableGraph&>(graph.internal());
+        : optimizationTarget_(optimization_target),
+          extend_k_(extend_k),
+          extend_eps_(extend_eps),
+          improve_k_(improve_k),
+          improve_eps_(improve_eps),
+          max_path_length_(max_path_length),
+          improve_tries_(improve_tries),
+          rnd_(rnd),
+          graph_(graph.asMutable()),
+          build_status_(),
+          transformations_(graph.getTransformations()) {
+        extend_thread_count = std::thread::hardware_concurrency();
+        extend_batch_size = extend_thread_count * extend_thread_task_count * extend_thread_task_size;
     }
 
   public:
+    bool hasTransformations() const noexcept { return !transformations_.empty(); }
+    const std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>& getTransformations() const noexcept { return transformations_; }
+    size_t getInputDim() const noexcept {
+        return transformations_.empty() ? graph_.getFeatureSpace().dim() : transformations_.front()->input_dim();
+    }
+
     /**
      * Provide the builder a new entry which it will append to the graph in the build() process.
      */
@@ -329,11 +344,73 @@ class EvenRegularGraphBuilder {
 
     /**
      * Provide the builder a new entry using a typed span (e.g. std::span<const float>, std::span<const uint8_t>).
+     * If transforms are attached, float / fp16 vectors are transformed immediately at the front door into
+     * target compact bytes, avoiding high memory overhead in the builder queues.
      */
     template <typename T>
     void addEntry(const uint32_t label, std::span<const T> feature) {
+        if constexpr (std::is_same_v<T, float> || std::is_same_v<T, uint16_t>) {
+            if (hasTransformations()) {
+                if (feature.size() != getInputDim()) {
+                    throw std::invalid_argument(
+                        std::format("Dimension mismatch in addEntry: transformations expect {}, got {}", getInputDim(), feature.size())
+                    );
+                }
+                const size_t target_size = graph_.getFeatureSpace().get_data_size();
+                std::vector<std::byte> compact(target_size);
+                if constexpr (std::is_same_v<T, float>) {
+                    deglib::transformation::apply_database(transformations_, feature.data(), compact.data(), 1);
+                } else {
+                    std::vector<float> f_feat(feature.size());
+                    deglib::distances::fp16::fp16_to_floats(feature.data(), f_feat.data(), feature.size());
+                    deglib::transformation::apply_database(transformations_, f_feat.data(), compact.data(), 1);
+                }
+                addEntry(label, std::move(compact));
+                return;
+            }
+        }
         const auto* byte_ptr = reinterpret_cast<const std::byte*>(feature.data());
         addEntry(label, std::vector<std::byte>(byte_ptr, byte_ptr + feature.size_bytes()));
+    }
+
+    /**
+     * Ingest a batch of entries. Transforms all features in-place or via transforms in parallel chunks.
+     */
+    template <typename T>
+    void addEntries(std::span<const uint32_t> labels, std::span<const T> features) {
+        const size_t count = labels.size();
+        if (count == 0) return;
+        const uint32_t in_dim = hasTransformations() ? getInputDim() : graph_.getFeatureSpace().dim();
+        if (features.size() != count * in_dim) {
+            throw std::invalid_argument(std::format("addEntries size mismatch: expected {} * {} = {}, got {}", count, in_dim, count * in_dim, features.size()));
+        }
+
+        if constexpr (std::is_same_v<T, float> || std::is_same_v<T, uint16_t>) {
+            if (hasTransformations()) {
+                const size_t target_size = graph_.getFeatureSpace().get_data_size();
+                std::vector<std::byte> compact_batch(count * target_size);
+
+                if constexpr (std::is_same_v<T, float>) {
+                    deglib::transformation::apply_database(transformations_, features.data(), compact_batch.data(), count);
+                } else {
+                    std::vector<float> f_feat(features.size());
+                    deglib::distances::fp16::fp16_to_floats(features.data(), f_feat.data(), features.size());
+                    deglib::transformation::apply_database(transformations_, f_feat.data(), compact_batch.data(), count);
+                }
+
+                for (size_t i = 0; i < count; ++i) {
+                    const auto* src = compact_batch.data() + i * target_size;
+                    addEntry(labels[i], std::vector<std::byte>(src, src + target_size));
+                }
+                return;
+            }
+        }
+
+        const size_t feat_stride = in_dim * sizeof(T);
+        for (size_t i = 0; i < count; ++i) {
+            const auto* src = reinterpret_cast<const std::byte*>(features.data() + i * in_dim);
+            addEntry(labels[i], std::vector<std::byte>(src, src + feat_stride));
+        }
     }
 
     /**
@@ -1535,10 +1612,11 @@ DynamicExplorationGraph build_from_data(
     }
 
     auto feature_space = deglib::distances::FloatSpace(dims, metric);
-    auto graph = DynamicExplorationGraph(std::make_unique<deglib::graph::SizeBoundedGraph>(vertex_count, edges_per_vertex, feature_space));
+    auto inner_graph = std::make_unique<deglib::graph::SizeBoundedGraph>(vertex_count, edges_per_vertex, feature_space);
 
     std::mt19937 rng(seed);
-    auto builder = EvenRegularGraphBuilder(graph, rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, improve_tries);
+    auto builder =
+        EvenRegularGraphBuilder(*inner_graph, rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, improve_tries);
 
     if (thread_count > 0) {
         builder.setThreadCount(thread_count);
@@ -1550,7 +1628,7 @@ DynamicExplorationGraph build_from_data(
     }
 
     builder.build(callback);
-    return graph;
+    return DynamicExplorationGraph(std::move(inner_graph));
 }
 
 /**

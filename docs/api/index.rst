@@ -10,6 +10,7 @@ Complete Python API reference for the `deglib` package.
    graph
    builder
    distances
+   transformation
    search
    analysis
    optimization

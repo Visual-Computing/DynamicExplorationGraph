@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from deglib.optimization import mips_l2_transform, mips_l2_transform_query
+from deglib.transformation import mips_l2_transform, mips_l2_transform_query
 
 
 def test_mips_l2_transform_basic():

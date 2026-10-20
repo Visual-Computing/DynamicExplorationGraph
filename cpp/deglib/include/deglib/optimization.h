@@ -5,15 +5,8 @@
 #include "deglib/optimization/flas/fast_linear_assignment_sorter_mt.h"
 #include "deglib/optimization/flas/junker_volgenant_solver.h"
 
-// Vector Quantization techniques
-#include "deglib/optimization/quantization/evp_quantize.h"
-#include "deglib/optimization/quantization/scalar_quantize.h"
-
 // Graph pruning techniques
 #include "deglib/optimization/pruning.h"
-
-// Vector transformation techniques (MIPS L2 transformation)
-#include "deglib/optimization/transform.h"
 
 // Builder (needed for optimize_edges)
 #include "deglib/builder.h"
@@ -61,109 +54,6 @@ inline std::vector<uint32_t> presort(
         result[i] = static_cast<uint32_t>(map_fields[i].id);
     }
     return result;
-}
-
-// ========================================================================
-// EVP Quantizer Factory Method
-// ========================================================================
-
-/**
- * Make an EvpQuantizer holding the shared non_zeros setting.
- */
-inline deglib::quantization::evp::EvpQuantizer make_evp_quantizer(uint32_t non_zeros) {
-    return deglib::quantization::evp::EvpQuantizer(non_zeros);
-}
-
-// ========================================================================
-// Scalar Quantization Factory Methods (make and fit Quantizer instance)
-// ========================================================================
-
-/**
- * Make and fit a ScalarQuantizerInt8 from FP32 dataset.
- */
-inline deglib::quantization::scalar::ScalarQuantizerInt8 make_scalar_quantizer_int8(
-    const float* data, size_t count, uint32_t dim, float drop_ratio = 0.0f
-) {
-    deglib::quantization::scalar::ScalarQuantizerInt8 quantizer;
-    quantizer.fit(data, count, dim, drop_ratio);
-    return quantizer;
-}
-
-/**
- * Make and fit a ScalarQuantizerInt8 from FP16 (uint16_t) dataset.
- */
-inline deglib::quantization::scalar::ScalarQuantizerInt8 make_scalar_quantizer_int8(
-    const uint16_t* data_fp16, size_t count, uint32_t dim, float drop_ratio = 0.0f
-) {
-    deglib::quantization::scalar::ScalarQuantizerInt8 quantizer;
-    quantizer.fit(data_fp16, count, dim, drop_ratio);
-    return quantizer;
-}
-
-/**
- * Make and fit a ScalarQuantizerInt8PerDim from FP32 dataset.
- */
-inline deglib::quantization::scalar::ScalarQuantizerInt8PerDim make_scalar_quantizer_int8_perdim(
-    const float* data, size_t count, uint32_t dim, float drop_ratio = 0.0f
-) {
-    deglib::quantization::scalar::ScalarQuantizerInt8PerDim quantizer;
-    quantizer.fit(data, count, dim, drop_ratio);
-    return quantizer;
-}
-
-/**
- * Make and fit a ScalarQuantizerInt8PerDim from FP16 (uint16_t) dataset.
- */
-inline deglib::quantization::scalar::ScalarQuantizerInt8PerDim make_scalar_quantizer_int8_perdim(
-    const uint16_t* data_fp16, size_t count, uint32_t dim, float drop_ratio = 0.0f
-) {
-    deglib::quantization::scalar::ScalarQuantizerInt8PerDim quantizer;
-    quantizer.fit(data_fp16, count, dim, drop_ratio);
-    return quantizer;
-}
-
-/**
- * Make and fit a ScalarQuantizerUint8 from FP32 dataset.
- */
-inline deglib::quantization::scalar::ScalarQuantizerUint8 make_scalar_quantizer_uint8(
-    const float* data, size_t count, uint32_t dim, float drop_ratio = 0.0f
-) {
-    deglib::quantization::scalar::ScalarQuantizerUint8 quantizer;
-    quantizer.fit(data, count, dim, drop_ratio);
-    return quantizer;
-}
-
-/**
- * Make and fit a ScalarQuantizerUint8 from FP16 (uint16_t) dataset.
- */
-inline deglib::quantization::scalar::ScalarQuantizerUint8 make_scalar_quantizer_uint8(
-    const uint16_t* data_fp16, size_t count, uint32_t dim, float drop_ratio = 0.0f
-) {
-    deglib::quantization::scalar::ScalarQuantizerUint8 quantizer;
-    quantizer.fit(data_fp16, count, dim, drop_ratio);
-    return quantizer;
-}
-
-/**
- * Make and fit a ScalarQuantizerUint8PerDim from FP32 dataset.
- */
-inline deglib::quantization::scalar::ScalarQuantizerUint8PerDim make_scalar_quantizer_uint8_perdim(
-    const float* data, size_t count, uint32_t dim, float drop_ratio = 0.0f
-) {
-    deglib::quantization::scalar::ScalarQuantizerUint8PerDim quantizer;
-    quantizer.fit(data, count, dim, drop_ratio);
-    return quantizer;
-}
-
-/**
- * Make and fit a ScalarQuantizerUint8PerDim from FP16 (uint16_t) dataset.
- */
-inline deglib::quantization::scalar::ScalarQuantizerUint8PerDim make_scalar_quantizer_uint8_perdim(
-    const uint16_t* data_fp16, size_t count, uint32_t dim, float drop_ratio = 0.0f
-) {
-    deglib::quantization::scalar::ScalarQuantizerUint8PerDim quantizer;
-    quantizer.fit(data_fp16, count, dim, drop_ratio);
-    return quantizer;
 }
 
 // ========================================================================

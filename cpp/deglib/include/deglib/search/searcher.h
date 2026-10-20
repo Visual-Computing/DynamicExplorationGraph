@@ -5,10 +5,8 @@
 #include "deglib/distances.h"
 #include "deglib/filter.h"
 #include "deglib/graph/internal_graph.h"
-#include "deglib/optimization/quantization/evp_quantize.h"
-#include "deglib/optimization/quantization/quantizer_concept.h"
-#include "deglib/optimization/quantization/scalar_quantize.h"
 #include "deglib/search.h"
+#include "deglib/transformation.h"
 #include "deglib/search/kmeans.h"
 
 #include <algorithm>

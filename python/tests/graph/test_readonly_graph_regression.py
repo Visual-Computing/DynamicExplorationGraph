@@ -318,7 +318,7 @@ def test_readonly_graph_regression_evp_inner_product():
     explore_gt_data = compute_groundtruth_innerproduct(base_data, explore_data, search_k)
 
     # Quantize data to EVP with a shared quantizer for database and queries
-    quantizer = deglib.optimization.EvpQuantizer(non_zeros=non_zeros)
+    quantizer = deglib.transformation.EvpQuantizer(non_zeros=non_zeros)
     base_quant = quantizer.quantize(base_data, num_threads=8)
     query_quant = quantizer.quantize(query_data, num_threads=8)
 

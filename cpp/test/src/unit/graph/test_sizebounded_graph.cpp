@@ -619,26 +619,11 @@ TEST(SizeBoundedGraph, SaveLoadHeader) {
     std::string path = "test/graph_load_test.deg";
     graph.saveGraph(path.c_str());
 
-    std::ifstream ifs(path, std::ios::binary);
-    EXPECT_TRUE(ifs.is_open());
-
-    if (ifs.is_open()) {
-        uint8_t metric_type = 0;
-        uint16_t dim = 0;
-        uint32_t graph_size = 0;
-        uint8_t edges = 0;
-        ifs.read(reinterpret_cast<char*>(&metric_type), sizeof(metric_type));
-        ifs.read(reinterpret_cast<char*>(&dim), sizeof(dim));
-        ifs.read(reinterpret_cast<char*>(&graph_size), sizeof(graph_size));
-        ifs.read(reinterpret_cast<char*>(&edges), sizeof(edges));
-
-        EXPECT_EQ(static_cast<int>(metric_type), 1);  // L2
-        EXPECT_EQ(dim, 4u);
-        EXPECT_EQ(graph_size, 2u);
-        EXPECT_EQ(edges, 4u);
-
-        ifs.close();
-    }
+    auto loaded = deglib::graph::SizeBoundedGraph::loadGraph(path.c_str());
+    EXPECT_EQ(loaded.getFeatureSpace().metric(), deglib::distances::Metric::FP32_L2);
+    EXPECT_EQ(loaded.getFeatureSpace().dim(), 4u);
+    EXPECT_EQ(loaded.size(), 2u);
+    EXPECT_EQ(loaded.getEdgesPerVertex(), 4u);
 
     std::filesystem::remove(path);
 }
