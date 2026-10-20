@@ -151,43 +151,24 @@ class DynamicExplorationGraph:
                   If fewer than k results are found, unfilled elements are padded with
                   np.iinfo(np.uint32).max (for indices) and np.nan / infinity (for distances).
         """
-        # handle query shapes
-        single_query = len(query.shape) == 1
-        if single_query:
-            query = query.reshape(1, -1)
-        if len(query.shape) != 2:
-            raise InvalidShapeException("invalid query shape: {}".format(query.shape))
+        filter_obj = None if filter_labels is None else Filter.create_filter(filter_labels, self.size())
 
-        if k > self.size():
-            warnings.warn(
-                "k={} is smaller than number of vertices in graph={}. Setting k={}".format(k, self.size(), self.size())
+        if isinstance(query, np.ndarray) and query.flags["C_CONTIGUOUS"]:
+            contiguous_query = query
+        else:
+            contiguous_query = np.ascontiguousarray(query)
+
+        if contiguous_query.ndim == 1:
+            return self.dynamic_exploration_graph_cpp.search(
+                contiguous_query, eps_or_ef, k, filter_obj, max_distance_computation_count, return_distances, unsorted
             )
-            k = self.size()
-
-        if self.has_transformations():
-            if query.dtype == np.float16:
-                valid_dtype = np.float16
-            else:
-                valid_dtype = np.float32
+        elif contiguous_query.ndim == 2:
+            threads = get_num_useful_threads(threads, contiguous_query.shape[0])
+            return self.dynamic_exploration_graph_cpp.search_batch(
+                contiguous_query, eps_or_ef, k, filter_obj, max_distance_computation_count, threads, return_distances, unsorted
+            )
         else:
-            valid_dtype = self.get_feature_space().metric().get_dtype()
-        query = assure_array(query, "query", valid_dtype)
-        filter_obj = Filter.create_filter(filter_labels, self.size())
-        threads = get_num_useful_threads(threads, query.shape[0])
-        indices_or_tuple = self.dynamic_exploration_graph_cpp.search_batch(
-            query, eps_or_ef, k, filter_obj, max_distance_computation_count, threads, return_distances, unsorted
-        )
-
-        if return_distances:
-            indices, distances = indices_or_tuple
-            if single_query:
-                return indices[0], distances[0]
-            return indices, distances
-        else:
-            indices = indices_or_tuple
-            if single_query:
-                return indices[0]
-            return indices
+            raise InvalidShapeException("invalid query shape: {}".format(query.shape))
 
     def explore(
         self,

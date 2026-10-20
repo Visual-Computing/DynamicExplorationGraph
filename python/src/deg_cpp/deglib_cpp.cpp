@@ -41,45 +41,31 @@ py::object graph_search_single_wrapper(
             }
             const bool is_fp16 = (query_info.format == "e" || (query_info.itemsize == 2 && query_info.format != "h" && query_info.format != "H"));
             auto perform_search = [&](auto q_span) -> py::object {
+                py::array_t<uint32_t> result_indices(static_cast<py::ssize_t>(k));
+                auto result_indices_ptr = result_indices.mutable_data();
+
+                py::array_t<float> result_distances;
+                float* result_distances_ptr = nullptr;
+                if (return_distances) {
+                    result_distances = py::array_t<float>(static_cast<py::ssize_t>(k));
+                    result_distances_ptr = result_distances.mutable_data();
+                }
+
+                size_t count = 0;
                 if (eps_or_ef >= 1.0f) {
                     const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
                     std::vector<deglib::graph::ObjectDistance> result = graph.search_ef(q_span, k, ef, true, filter, max_distance_computation_count);
-                    const size_t count = result.size();
-                    py::array_t<uint32_t> result_indices(static_cast<py::ssize_t>(count));
-                    auto result_indices_ptr = static_cast<uint32_t*>(result_indices.request().ptr);
-
-                    py::array_t<float> result_distances;
-                    float* result_distances_ptr = nullptr;
-                    if (return_distances) {
-                        result_distances = py::array_t<float>(static_cast<py::ssize_t>(count));
-                        result_distances_ptr = static_cast<float*>(result_distances.request().ptr);
-                    }
-
+                    count = std::min(static_cast<size_t>(k), result.size());
                     for (size_t i = 0; i < count; ++i) {
                         result_indices_ptr[i] = result[i].getIdentifier();
                         if (result_distances_ptr) {
                             result_distances_ptr[i] = result[i].getDistance();
                         }
                     }
-
-                    if (return_distances)
-                        return py::make_tuple(result_indices, result_distances);
-                    else
-                        return py::object(result_indices);
                 } else {
                     deglib::graph::ResultSet result = graph.search(q_span, k, eps_or_ef, filter, max_distance_computation_count);
                     while (result.size() > k) result.pop();
-                    const size_t count = result.size();
-                    py::array_t<uint32_t> result_indices(static_cast<py::ssize_t>(count));
-                    auto result_indices_ptr = static_cast<uint32_t*>(result_indices.request().ptr);
-
-                    py::array_t<float> result_distances;
-                    float* result_distances_ptr = nullptr;
-                    if (return_distances) {
-                        result_distances = py::array_t<float>(static_cast<py::ssize_t>(count));
-                        result_distances_ptr = static_cast<float*>(result_distances.request().ptr);
-                    }
-
+                    count = result.size();
                     if (unsorted) {
                         for (size_t i = 0; i < count; ++i) {
                             result_indices_ptr[i] = result[i].getIdentifier();
@@ -93,18 +79,27 @@ py::object graph_search_single_wrapper(
                             result.pop();
                         }
                     }
-
-                    if (return_distances)
-                        return py::make_tuple(result_indices, result_distances);
-                    else
-                        return py::object(result_indices);
                 }
+
+                for (size_t i = count; i < k; ++i) {
+                    result_indices_ptr[i] = std::numeric_limits<uint32_t>::max();
+                    if (result_distances_ptr) {
+                        result_distances_ptr[i] = std::numeric_limits<float>::quiet_NaN();
+                    }
+                }
+
+                if (return_distances)
+                    return py::make_tuple(result_indices, result_distances);
+                else
+                    return py::object(result_indices);
             };
 
             if (is_fp16) {
                 return perform_search(std::span<const uint16_t>(static_cast<const uint16_t*>(query_info.ptr), in_dim));
-            } else {
+            } else if (query_info.itemsize == sizeof(float) && (query_info.format == "f" || query_info.format == "float")) {
                 return perform_search(std::span<const float>(static_cast<const float*>(query_info.ptr), in_dim));
+            } else {
+                throw std::invalid_argument(std::format("Unsupported query dtype (format: {}, itemsize: {})", query_info.format, query_info.itemsize));
             }
         }
     }
@@ -122,22 +117,21 @@ py::object graph_search_single_wrapper(
     const std::byte* query_ptr = static_cast<const std::byte*>(query_info.ptr);
     std::span<const std::byte> query_span(query_ptr, query_bytes);
 
+    py::array_t<uint32_t> result_indices(static_cast<py::ssize_t>(k));
+    auto result_indices_ptr = result_indices.mutable_data();
+
+    py::array_t<float> result_distances;
+    float* result_distances_ptr = nullptr;
+    if (return_distances) {
+        result_distances = py::array_t<float>(static_cast<py::ssize_t>(k));
+        result_distances_ptr = result_distances.mutable_data();
+    }
+
+    size_t count = 0;
     if (eps_or_ef >= 1.0f) {
         const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
         std::vector<deglib::graph::ObjectDistance> result = graph.search_ef(query_span, k, ef, true, filter, max_distance_computation_count);
-
-        const size_t count = result.size();
-        py::array_t<uint32_t> result_indices(static_cast<py::ssize_t>(count));
-        py::buffer_info result_indices_info = result_indices.request();
-        auto result_indices_ptr = static_cast<uint32_t*>(result_indices_info.ptr);
-
-        py::array_t<float> result_distances;
-        float* result_distances_ptr = nullptr;
-        if (return_distances) {
-            result_distances = py::array_t<float>(static_cast<py::ssize_t>(count));
-            result_distances_ptr = static_cast<float*>(result_distances.request().ptr);
-        }
-
+        count = std::min(static_cast<size_t>(k), result.size());
         for (size_t i = 0; i < count; ++i) {
             if constexpr (std::is_same_v<G, deglib::DynamicExplorationGraph>) {
                 result_indices_ptr[i] = result[i].getIdentifier();
@@ -148,31 +142,12 @@ py::object graph_search_single_wrapper(
                 result_distances_ptr[i] = result[i].getDistance();
             }
         }
-
-        if (return_distances) {
-            return py::make_tuple(result_indices, result_distances);
-        } else {
-            return result_indices;
-        }
     } else {
         deglib::graph::ResultSet result = graph.search(query_span, k, eps_or_ef, filter, max_distance_computation_count);
-
         while (result.size() > k) {
             result.pop();
         }
-
-        const size_t count = result.size();
-        py::array_t<uint32_t> result_indices(static_cast<py::ssize_t>(count));
-        py::buffer_info result_indices_info = result_indices.request();
-        auto result_indices_ptr = static_cast<uint32_t*>(result_indices_info.ptr);
-
-        py::array_t<float> result_distances;
-        float* result_distances_ptr = nullptr;
-        if (return_distances) {
-            result_distances = py::array_t<float>(static_cast<py::ssize_t>(count));
-            result_distances_ptr = static_cast<float*>(result_distances.request().ptr);
-        }
-
+        count = result.size();
         if (unsorted) {
             for (size_t i = 0; i < count; ++i) {
                 if constexpr (std::is_same_v<G, deglib::DynamicExplorationGraph>) {
@@ -198,12 +173,19 @@ py::object graph_search_single_wrapper(
                 result.pop();
             }
         }
+    }
 
-        if (return_distances) {
-            return py::make_tuple(result_indices, result_distances);
-        } else {
-            return result_indices;
+    for (size_t i = count; i < k; ++i) {
+        result_indices_ptr[i] = std::numeric_limits<uint32_t>::max();
+        if (result_distances_ptr) {
+            result_distances_ptr[i] = std::numeric_limits<float>::quiet_NaN();
         }
+    }
+
+    if (return_distances) {
+        return py::make_tuple(result_indices, result_distances);
+    } else {
+        return py::object(result_indices);
     }
 }
 
