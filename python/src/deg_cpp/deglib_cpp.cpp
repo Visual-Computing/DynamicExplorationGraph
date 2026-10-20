@@ -34,71 +34,77 @@ py::object graph_search_single_wrapper(
 ) {
     py::buffer_info query_info = query.request();
     if constexpr (std::is_same_v<G, deglib::DynamicExplorationGraph>) {
-        if (graph.hasTransformations() && (query_info.format == "f" || (query_info.itemsize == 4 && query_info.format != "i" && query_info.format != "I"))) {
+        if (graph.hasTransformations()) {
             const size_t in_dim = graph.getInputDim();
             if (query_info.size != in_dim) {
                 throw std::invalid_argument(std::format("Query vector size ({}) does not match transformations input dim ({})", query_info.size, in_dim));
             }
-            const float* f_query = static_cast<const float*>(query_info.ptr);
-            std::span<const float> q_span(f_query, in_dim);
+            const bool is_fp16 = (query_info.format == "e" || (query_info.itemsize == 2 && query_info.format != "h" && query_info.format != "H"));
+            auto perform_search = [&](auto q_span) -> py::object {
+                if (eps_or_ef >= 1.0f) {
+                    const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
+                    std::vector<deglib::graph::ObjectDistance> result = graph.search_ef(q_span, k, ef, true, filter, max_distance_computation_count);
+                    const size_t count = result.size();
+                    py::array_t<uint32_t> result_indices(static_cast<py::ssize_t>(count));
+                    auto result_indices_ptr = static_cast<uint32_t*>(result_indices.request().ptr);
 
-            if (eps_or_ef >= 1.0f) {
-                const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
-                std::vector<deglib::graph::ObjectDistance> result = graph.search_ef(q_span, k, ef, true, filter, max_distance_computation_count);
-                const size_t count = result.size();
-                py::array_t<uint32_t> result_indices(static_cast<py::ssize_t>(count));
-                auto result_indices_ptr = static_cast<uint32_t*>(result_indices.request().ptr);
-
-                py::array_t<float> result_distances;
-                float* result_distances_ptr = nullptr;
-                if (return_distances) {
-                    result_distances = py::array_t<float>(static_cast<py::ssize_t>(count));
-                    result_distances_ptr = static_cast<float*>(result_distances.request().ptr);
-                }
-
-                for (size_t i = 0; i < count; ++i) {
-                    result_indices_ptr[i] = result[i].getIdentifier();
-                    if (result_distances_ptr) {
-                        result_distances_ptr[i] = result[i].getDistance();
+                    py::array_t<float> result_distances;
+                    float* result_distances_ptr = nullptr;
+                    if (return_distances) {
+                        result_distances = py::array_t<float>(static_cast<py::ssize_t>(count));
+                        result_distances_ptr = static_cast<float*>(result_distances.request().ptr);
                     }
-                }
 
-                if (return_distances)
-                    return py::make_tuple(result_indices, result_distances);
-                else
-                    return py::object(result_indices);
-            } else {
-                deglib::graph::ResultSet result = graph.search(q_span, k, eps_or_ef, filter, max_distance_computation_count);
-                while (result.size() > k) result.pop();
-                const size_t count = result.size();
-                py::array_t<uint32_t> result_indices(static_cast<py::ssize_t>(count));
-                auto result_indices_ptr = static_cast<uint32_t*>(result_indices.request().ptr);
-
-                py::array_t<float> result_distances;
-                float* result_distances_ptr = nullptr;
-                if (return_distances) {
-                    result_distances = py::array_t<float>(static_cast<py::ssize_t>(count));
-                    result_distances_ptr = static_cast<float*>(result_distances.request().ptr);
-                }
-
-                if (unsorted) {
                     for (size_t i = 0; i < count; ++i) {
                         result_indices_ptr[i] = result[i].getIdentifier();
-                        if (result_distances_ptr) result_distances_ptr[i] = result[i].getDistance();
+                        if (result_distances_ptr) {
+                            result_distances_ptr[i] = result[i].getDistance();
+                        }
                     }
-                } else {
-                    for (size_t i = count; i > 0; --i) {
-                        deglib::search::ObjectDistance next_result = result.top();
-                        result_indices_ptr[i - 1] = next_result.getIdentifier();
-                        if (result_distances_ptr) result_distances_ptr[i - 1] = next_result.getDistance();
-                        result.pop();
-                    }
-                }
 
-                if (return_distances)
-                    return py::make_tuple(result_indices, result_distances);
-                else
-                    return py::object(result_indices);
+                    if (return_distances)
+                        return py::make_tuple(result_indices, result_distances);
+                    else
+                        return py::object(result_indices);
+                } else {
+                    deglib::graph::ResultSet result = graph.search(q_span, k, eps_or_ef, filter, max_distance_computation_count);
+                    while (result.size() > k) result.pop();
+                    const size_t count = result.size();
+                    py::array_t<uint32_t> result_indices(static_cast<py::ssize_t>(count));
+                    auto result_indices_ptr = static_cast<uint32_t*>(result_indices.request().ptr);
+
+                    py::array_t<float> result_distances;
+                    float* result_distances_ptr = nullptr;
+                    if (return_distances) {
+                        result_distances = py::array_t<float>(static_cast<py::ssize_t>(count));
+                        result_distances_ptr = static_cast<float*>(result_distances.request().ptr);
+                    }
+
+                    if (unsorted) {
+                        for (size_t i = 0; i < count; ++i) {
+                            result_indices_ptr[i] = result[i].getIdentifier();
+                            if (result_distances_ptr) result_distances_ptr[i] = result[i].getDistance();
+                        }
+                    } else {
+                        for (size_t i = count; i > 0; --i) {
+                            deglib::search::ObjectDistance next_result = result.top();
+                            result_indices_ptr[i - 1] = next_result.getIdentifier();
+                            if (result_distances_ptr) result_distances_ptr[i - 1] = next_result.getDistance();
+                            result.pop();
+                        }
+                    }
+
+                    if (return_distances)
+                        return py::make_tuple(result_indices, result_distances);
+                    else
+                        return py::object(result_indices);
+                }
+            };
+
+            if (is_fp16) {
+                return perform_search(std::span<const uint16_t>(static_cast<const uint16_t*>(query_info.ptr), in_dim));
+            } else {
+                return perform_search(std::span<const float>(static_cast<const float*>(query_info.ptr), in_dim));
             }
         }
     }
@@ -236,21 +242,36 @@ py::object dynamic_exploration_graph_search_batch_wrapper(
     {
         py::gil_scoped_release release;
 
-        if (graph.hasTransformations() && (query_info.format == "f" || (query_info.itemsize == 4 && query_info.format != "i" && query_info.format != "I"))) {
+        if (graph.hasTransformations()) {
             const size_t in_dim = graph.getInputDim();
             if (size_t(query_info.shape[1]) != in_dim) {
                 throw std::invalid_argument(std::format("Query row dimension ({}) does not match transformations input dim ({})", query_info.shape[1], in_dim));
             }
-            std::span<const float> queries_span(static_cast<const float*>(query_info.ptr), n_queries * in_dim);
-            if (eps_or_ef >= 1.0f) {
-                const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
-                graph.search_batch_ef<float>(
-                    queries_span, n_queries, k, ef, out_indices_span, out_distances_span, true, filter, max_distance_computation_count, threads, unsorted
-                );
+            const bool is_fp16 = (query_info.format == "e" || (query_info.itemsize == 2 && query_info.format != "h" && query_info.format != "H"));
+            if (is_fp16) {
+                std::span<const uint16_t> queries_span(static_cast<const uint16_t*>(query_info.ptr), n_queries * in_dim);
+                if (eps_or_ef >= 1.0f) {
+                    const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
+                    graph.search_batch_ef<uint16_t>(
+                        queries_span, n_queries, k, ef, out_indices_span, out_distances_span, true, filter, max_distance_computation_count, threads, unsorted
+                    );
+                } else {
+                    graph.search_batch<uint16_t>(
+                        queries_span, n_queries, k, out_indices_span, out_distances_span, eps_or_ef, filter, max_distance_computation_count, threads, unsorted
+                    );
+                }
             } else {
-                graph.search_batch<float>(
-                    queries_span, n_queries, k, out_indices_span, out_distances_span, eps_or_ef, filter, max_distance_computation_count, threads, unsorted
-                );
+                std::span<const float> queries_span(static_cast<const float*>(query_info.ptr), n_queries * in_dim);
+                if (eps_or_ef >= 1.0f) {
+                    const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
+                    graph.search_batch_ef<float>(
+                        queries_span, n_queries, k, ef, out_indices_span, out_distances_span, true, filter, max_distance_computation_count, threads, unsorted
+                    );
+                } else {
+                    graph.search_batch<float>(
+                        queries_span, n_queries, k, out_indices_span, out_distances_span, eps_or_ef, filter, max_distance_computation_count, threads, unsorted
+                    );
+                }
             }
         } else {
             const size_t req_bytes = graph.getFeatureSpace().get_data_size();
@@ -1979,7 +2000,36 @@ PYBIND11_MODULE(deglib_cpp, m) {
             py::arg("external_labels"), py::arg("threads") = 1
         )
         .def("is_mutable", &deglib::DynamicExplorationGraph::isMutable)
-        .def("to_readonly", &deglib::DynamicExplorationGraph::to_readonly)
+        .def(
+            "to_readonly",
+            [](const deglib::DynamicExplorationGraph& g, std::optional<deglib::distances::FloatSpace> custom_feature_space,
+               std::optional<py::array> custom_features) {
+                const void* feat_ptr = nullptr;
+                py::buffer_info feat_info;
+                if (custom_features.has_value() && !custom_features->is_none()) {
+                    feat_info = custom_features->request();
+                    feat_ptr = feat_info.ptr;
+                    if (custom_feature_space.has_value()) {
+                        size_t expected_bytes = g.size() * custom_feature_space->get_data_size();
+                        size_t actual_bytes = feat_info.size * feat_info.itemsize;
+                        if (actual_bytes != expected_bytes) {
+                            throw std::invalid_argument(
+                                std::format(
+                                    "custom_features buffer size ({} bytes) does not match expected size for graph ({} bytes)", actual_bytes, expected_bytes
+                                )
+                            );
+                        }
+                    }
+                }
+                if (custom_feature_space.has_value() || feat_ptr != nullptr) {
+                    const auto& fs = custom_feature_space.value_or(g.getFeatureSpace());
+                    return g.to_readonly(fs, feat_ptr);
+                } else {
+                    return g.to_readonly();
+                }
+            },
+            py::arg("custom_feature_space") = py::none(), py::arg("custom_features") = py::none()
+        )
         .def(
             "to_mutable",
             [](const deglib::DynamicExplorationGraph& g, std::optional<deglib::distances::FloatSpace> custom_feature_space,

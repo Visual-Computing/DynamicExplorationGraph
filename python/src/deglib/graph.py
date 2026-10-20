@@ -165,7 +165,10 @@ class DynamicExplorationGraph:
             k = self.size()
 
         if self.has_transformations():
-            valid_dtype = np.float32
+            if query.dtype == np.float16:
+                valid_dtype = np.float16
+            else:
+                valid_dtype = np.float32
         else:
             valid_dtype = self.get_feature_space().metric().get_dtype()
         query = assure_array(query, "query", valid_dtype)
@@ -324,12 +327,9 @@ class DynamicExplorationGraph:
         :param custom_features: Optional NumPy array containing replacement feature vectors.
         :return: A new read-only DynamicExplorationGraph.
         """
-        if feature_space is None and custom_features is None:
-            return DynamicExplorationGraph(self.dynamic_exploration_graph_cpp.to_readonly())
         fs_cpp = feature_space.float_space_cpp if feature_space is not None else None
         feat_cpp = np.ascontiguousarray(custom_features) if custom_features is not None else None
-        graph_cpp = deglib_cpp.read_only_graph_from_graph(self.dynamic_exploration_graph_cpp, fs_cpp, feat_cpp)
-        return DynamicExplorationGraph(graph_cpp)
+        return DynamicExplorationGraph(self.dynamic_exploration_graph_cpp.to_readonly(fs_cpp, feat_cpp))
 
     def to_mutable(
         self,

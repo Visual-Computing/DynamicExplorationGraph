@@ -279,3 +279,42 @@ def test_legacy_v1_compatibility(tmp_path):
     # Search on legacy graph works with float query
     indices, _ = loaded_ro.search(data[0], eps_or_ef=0.2, k=3)
     assert len(indices) == 3
+
+
+def test_transformation_graph_search_fp16():
+    N, dim, edges_per_vertex = 30, 16, 4
+    np.random.seed(42)
+    data_f32 = np.random.randn(N, dim).astype(np.float32)
+
+    transform = ScalarQuantizerInt8(dim, abs_max=float(np.max(np.abs(data_f32))))
+    space = FloatSpace.create(dim, Metric.Int8_L2)
+
+    graph = create_empty(N, space, edges_per_vertex=edges_per_vertex, transformations=[transform])
+    builder = deglib.GraphBuilder(graph, extend_k=8, extend_eps=0.1)
+    builder.add_entry(np.arange(N, dtype=np.uint32), data_f32)
+    builder.build()
+
+    ro_graph = graph.to_readonly()
+
+    # Query in FP16
+    queries_f16 = data_f32[:5].astype(np.float16)
+
+    # 1. Single query FP16
+    idx_single, dist_single = ro_graph.search(queries_f16[0], eps_or_ef=0.1, k=3)
+    assert idx_single[0] == 0
+
+    # 2. Batch query FP16 (eps mode)
+    idx_batch, dist_batch = ro_graph.search(queries_f16, eps_or_ef=0.1, k=3)
+    assert idx_batch.shape == (5, 3)
+    assert dist_batch.shape == (5, 3)
+    np.testing.assert_array_equal(idx_batch[0], idx_single)
+    np.testing.assert_allclose(dist_batch[0], dist_single, rtol=1e-5)
+
+    # 3. Batch query FP16 (ef mode)
+    idx_batch_ef, dist_batch_ef = ro_graph.search(queries_f16, eps_or_ef=16.0, k=3)
+    assert idx_batch_ef.shape == (5, 3)
+    assert dist_batch_ef.shape == (5, 3)
+    idx_single_ef, dist_single_ef = ro_graph.search(queries_f16[0], eps_or_ef=16.0, k=3)
+    np.testing.assert_array_equal(idx_batch_ef[0], idx_single_ef)
+    np.testing.assert_allclose(dist_batch_ef[0], dist_single_ef, rtol=1e-5)
+
