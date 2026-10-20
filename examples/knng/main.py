@@ -28,13 +28,26 @@ from deglib.distances import FloatSpace, Metric
 from deglib.search import rerank
 
 DEFAULT_K_TOP = 15
-DEFAULT_K_GRAPH = 16
-DEFAULT_K_EXT = 32
-DEFAULT_NON_ZEROS = 700
-DEFAULT_MAX_DIST = 400
-DEFAULT_EVP_K = 50
-DEFAULT_PRUNE_WORST = 6
 DEFAULT_THREADS = 8
+
+# Optimized parameter configurations for small (~200k) and large (~6.35M) datasets
+CONFIG_SMALL = {
+    "k_graph": 16,
+    "k_ext": 32,
+    "non_zeros": 700,
+    "max_dist": 400,
+    "evp_k": 50,
+    "prune_worst": 6,
+}
+
+CONFIG_LARGE = {
+    "k_graph": 26,
+    "k_ext": 32,
+    "non_zeros": 600,
+    "max_dist": 700,
+    "evp_k": 50,
+    "prune_worst": 9,
+}
 
 
 def prune_worst_edges(graph: deglib.DynamicExplorationGraph, prune_worst: int) -> None:
@@ -48,13 +61,15 @@ def prune_worst_edges(graph: deglib.DynamicExplorationGraph, prune_worst: int) -
 
 
 def quantize_vectors(
-    vectors: np.ndarray, non_zeros: int = DEFAULT_NON_ZEROS, num_threads: int = DEFAULT_THREADS
+    vectors: np.ndarray, non_zeros: int | None = None, num_threads: int = DEFAULT_THREADS
 ) -> np.ndarray:
     """
     Quantizes floating point vectors to sparse EVP-bit representation using deglib.
     Applies top `non_zeros` active component feature projection via C++ implementation.
     """
     dims = vectors.shape[1]
+    if non_zeros is None:
+        non_zeros = CONFIG_LARGE["non_zeros"] if vectors.shape[0] > 500_000 else CONFIG_SMALL["non_zeros"]
     effective_non_zeros = min(non_zeros, dims - 1)
     return deglib.optimization.EvpQuantizer(effective_non_zeros).quantize(vectors, num_threads=num_threads)
 
@@ -63,18 +78,27 @@ def construct_knng(
     train_vectors: np.ndarray,
     ground_truth: np.ndarray | None = None,
     k_top: int = DEFAULT_K_TOP,
-    k_graph: int = DEFAULT_K_GRAPH,
-    k_ext: int = DEFAULT_K_EXT,
-    non_zeros: int = DEFAULT_NON_ZEROS,
-    max_dist: int = DEFAULT_MAX_DIST,
-    evp_k: int = DEFAULT_EVP_K,
-    prune_worst: int = DEFAULT_PRUNE_WORST,
+    k_graph: int | None = None,
+    k_ext: int | None = None,
+    non_zeros: int | None = None,
+    max_dist: int | None = None,
+    evp_k: int | None = None,
+    prune_worst: int | None = None,
     threads: int = DEFAULT_THREADS,
 ) -> dict[str, float]:
     """
     Constructs and evaluates a k-Nearest Neighbor Graph (k-NNG) using DEG.
+    Automatically applies presets for small vs. large datasets when parameters are None.
     """
     n_vecs, dims = train_vectors.shape
+    default_cfg = CONFIG_LARGE if n_vecs > 500_000 else CONFIG_SMALL
+
+    k_graph = k_graph if k_graph is not None else default_cfg["k_graph"]
+    k_ext = k_ext if k_ext is not None else default_cfg["k_ext"]
+    non_zeros = non_zeros if non_zeros is not None else default_cfg["non_zeros"]
+    max_dist = max_dist if max_dist is not None else default_cfg["max_dist"]
+    evp_k = evp_k if evp_k is not None else default_cfg["evp_k"]
+    prune_worst = prune_worst if prune_worst is not None else default_cfg["prune_worst"]
     print(f"Dataset shape: {n_vecs} vectors, {dims} dimensions (dtype: {train_vectors.dtype})")
     print(
         f"k-NNG Construction Config: k_top={k_top}, k_graph={k_graph}, non_zeros={non_zeros}, max_dist={max_dist}, evp_k={evp_k}, prune_worst={prune_worst}, threads={threads}"
@@ -179,16 +203,27 @@ def main():
     parser.add_argument(
         "--dataset", type=str, default="small", help="Path to HDF5 dataset file or 'small' (default: small dataset)"
     )
-    parser.add_argument("--non-zeros", type=int, default=DEFAULT_NON_ZEROS, help="EVP quantization non-zero components")
-    parser.add_argument("--k-graph", type=int, default=DEFAULT_K_GRAPH, help="Graph degree per vertex")
-    parser.add_argument("--k-ext", type=int, default=DEFAULT_K_EXT, help="Builder search size parameter")
-    parser.add_argument("--max-dist", type=int, default=DEFAULT_MAX_DIST, help="Search step budget per query")
-    parser.add_argument("--evpK", type=int, default=DEFAULT_EVP_K, help="Candidate list size before FP16 reranking")
+    parser.add_argument(
+        "--non-zeros",
+        type=int,
+        default=None,
+        help="EVP quantization non-zero components (default: 700 small, 600 large)",
+    )
+    parser.add_argument(
+        "--k-graph", type=int, default=None, help="Graph degree per vertex (default: 16 small, 26 large)"
+    )
+    parser.add_argument("--k-ext", type=int, default=None, help="Builder search size parameter (default: 32)")
+    parser.add_argument(
+        "--max-dist", type=int, default=None, help="Search step budget per query (default: 400 small, 700 large)"
+    )
+    parser.add_argument(
+        "--evpK", type=int, default=None, help="Candidate list size before FP16 reranking (default: 50)"
+    )
     parser.add_argument(
         "--prune-worst",
         type=int,
-        default=DEFAULT_PRUNE_WORST,
-        help="Number of worst neighbors to replace with self-loops",
+        default=None,
+        help="Number of worst neighbors to replace with self-loops (default: 6 small, 9 large)",
     )
     parser.add_argument("--threads", type=int, default=DEFAULT_THREADS, help="Number of parallel threads")
     parser.add_argument("--output-plot", type=str, default=None, help="Path to save timing chart PNG")
