@@ -23,7 +23,7 @@ from pathlib import Path
 import deglib
 import matplotlib.pyplot as plt
 import numpy as np
-from dataset import ensure_small_dataset, load_hdf5_dataset
+from dataset import ensure_large_dataset, ensure_small_dataset, load_hdf5_dataset
 from deglib.distances import FloatSpace, Metric
 from deglib.search import rerank
 
@@ -198,6 +198,8 @@ def main():
 
     if args.dataset in (None, "small", "small_dataset"):
         dataset_path = ensure_small_dataset()
+    elif args.dataset in ("large", "large_dataset", "wikipedia"):
+        dataset_path = ensure_large_dataset()
     else:
         dataset_path = Path(args.dataset)
 

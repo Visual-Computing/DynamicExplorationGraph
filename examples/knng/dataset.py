@@ -16,6 +16,8 @@ DEFAULT_CACHE_DIR = Path.home() / ".cache" / "deg_datasets"
 HF_REPO_ID = "SISAP-Challenges/SISAP2026"
 HF_SMALL_FILE = "wikipedia-small/benchmark-dev-wikipedia-bge-m3-small.h5"
 HF_SMALL_URL = f"https://huggingface.co/datasets/{HF_REPO_ID}/resolve/main/{HF_SMALL_FILE}"
+HF_LARGE_FILE = "wikipedia/benchmark-dev-wikipedia-bge-m3.h5"
+HF_LARGE_URL = f"https://huggingface.co/datasets/{HF_REPO_ID}/resolve/main/{HF_LARGE_FILE}"
 
 
 def ensure_small_dataset(cache_dir: Path | None = None) -> Path:
@@ -60,6 +62,49 @@ def ensure_small_dataset(cache_dir: Path | None = None) -> Path:
         sys.stdout.flush()
 
     urllib.request.urlretrieve(HF_SMALL_URL, target_path, _progress)
+    print("\nDownload complete.")
+    return target_path
+
+
+def ensure_large_dataset(cache_dir: Path | None = None) -> Path:
+    """
+    Ensures that benchmark-dev-wikipedia-bge-m3.h5 (large dataset, 6.35M vectors) exists in local cache directory.
+    Uses Hugging Face Hub native caching to avoid duplicate file downloads.
+    """
+    try:
+        from huggingface_hub import hf_hub_download
+
+        downloaded = hf_hub_download(
+            repo_id=HF_REPO_ID,
+            filename=HF_LARGE_FILE,
+            repo_type="dataset",
+        )
+        path = Path(downloaded)
+        if path.is_file() and path.stat().st_size > 0:
+            print(f"Using cached dataset: {path}")
+            return path
+    except Exception as err:
+        print(f"huggingface_hub check ({err}), trying fallback location...")
+
+    if cache_dir is None:
+        cache_dir = DEFAULT_CACHE_DIR
+    target_path = cache_dir / "wikipedia" / "benchmark-dev-wikipedia-bge-m3.h5"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if target_path.is_file() and target_path.stat().st_size > 0:
+        print(f"Using cached dataset: {target_path}")
+        return target_path
+
+    print(f"Downloading large dataset from {HF_LARGE_URL} to {target_path}...")
+
+    def _progress(count, block_size, total_size):
+        percent = int(count * block_size * 100 / max(total_size, 1))
+        sys.stdout.write(
+            f"\rDownloading dataset... {percent}% ({count * block_size / 1024 / 1024:.1f} MB / {total_size / 1024 / 1024:.1f} MB)"
+        )
+        sys.stdout.flush()
+
+    urllib.request.urlretrieve(HF_LARGE_URL, target_path, _progress)
     print("\nDownload complete.")
     return target_path
 
