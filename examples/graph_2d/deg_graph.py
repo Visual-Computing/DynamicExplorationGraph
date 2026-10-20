@@ -9,7 +9,7 @@ import numpy as np
 from deglib import DynamicExplorationGraph
 from deglib.builder import OptimizationTarget, build_from_data
 from deglib.distances import FloatSpace, Metric
-from deglib.optimization import mips_l2_transform_query
+from deglib.transformation import mips_l2_transform_query
 from pysearch import epsilon_search
 from theory import TheoryReport, compare, knng_edges, nsw_edges
 

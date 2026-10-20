@@ -25,7 +25,7 @@ import argparse
 from dataset import MAX_POINTS, MIN_POINTS, PRESETS, make_points
 from deg_graph import DEFAULT_K, METRIC_BY_LABEL, METRIC_LABELS, MIN_K, GraphModel, build_model, describe
 from deglib.distances import Metric
-from deglib.optimization import mips_l2_transform
+from deglib.transformation import mips_l2_transform
 
 DEFAULT_VERTICES = 200
 

@@ -71,7 +71,7 @@ def quantize_vectors(
     if non_zeros is None:
         non_zeros = CONFIG_LARGE["non_zeros"] if vectors.shape[0] > 500_000 else CONFIG_SMALL["non_zeros"]
     effective_non_zeros = min(non_zeros, dims - 1)
-    return deglib.optimization.EvpQuantizer(effective_non_zeros).quantize(vectors, num_threads=num_threads)
+    return deglib.transformation.EvpQuantizer(effective_non_zeros).quantize(vectors, num_threads=num_threads)
 
 
 def construct_knng(

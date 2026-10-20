@@ -276,7 +276,7 @@ class QG(BaseANN):
             deglib.optimization.prune_non_mrng_edges(loaded_graph, num_threads=1)
 
         # 4. Finalize ReadOnlyGraph with INT8 features using calibrated ScalarQuantizer
-        self.quantizer = deglib.optimization.make_scalar_quantizer_int8(X)
+        self.quantizer = deglib.transformation.make_scalar_quantizer_int8(X)
         int8_features = self.quantizer.quantize(X, num_threads=1)
         target_space = deglib.FloatSpace.create(dim=dims, metric=self.int8_metric)
         self.graph = loaded_graph.to_readonly(target_space, int8_features)
