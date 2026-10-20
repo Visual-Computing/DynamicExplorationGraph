@@ -336,6 +336,7 @@ public:
 
     /// Convert to a compact, read-only graph (ReadOnlyGraph) optimized for search
     DynamicExplorationGraph to_readonly() const;
+    DynamicExplorationGraph to_readonly(const FloatSpace& new_space, const void* new_features = nullptr) const;
 
     /// Convert to a mutable SizeBoundedGraph (fixed capacity)
     DynamicExplorationGraph to_mutable(uint32_t new_max_size = 0) const;

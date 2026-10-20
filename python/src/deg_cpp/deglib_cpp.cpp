@@ -969,12 +969,7 @@ deglib::DynamicExplorationGraph read_only_graph_from_graph_wrapper(
         }
     }
 
-    deglib::graph::ReadOnlyGraph read_only = custom_feature_space.has_value()
-                                                 ? deglib::graph::convert_to_readonly_graph(graph.internal(), custom_feature_space.value(), feat_ptr)
-                                                 : deglib::graph::convert_to_readonly_graph(graph.internal());
-
-    auto heap_graph = std::make_unique<deglib::graph::ReadOnlyGraph>(std::move(read_only));
-    return deglib::DynamicExplorationGraph(std::move(heap_graph), graph.getTransformations());
+    return custom_feature_space.has_value() ? graph.to_readonly(custom_feature_space.value(), feat_ptr) : graph.to_readonly();
 }
 
 deglib::DynamicExplorationGraph dynamic_graph_from_graph_wrapper(

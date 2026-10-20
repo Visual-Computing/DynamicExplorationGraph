@@ -1104,6 +1104,22 @@ class DynamicExplorationGraph {
     }
 
     /**
+     * @brief Converts this graph to a compact read-only graph with a custom feature space and features buffer.
+     *
+     * Replaces feature representation (e.g. uncompressed float to quantized bytes or FP16).
+     *
+     * @param custom_feature_space The new target feature space.
+     * @param custom_features Pointer to replacement raw feature memory (size = size() * custom_feature_space.get_data_size()).
+     * @return A new read-only DynamicExplorationGraph.
+     */
+    DynamicExplorationGraph to_readonly(const deglib::distances::FloatSpace& custom_feature_space, const void* custom_features = nullptr) const {
+        auto graph = std::make_unique<deglib::graph::ReadOnlyGraph>(
+            internal_graph_->size(), internal_graph_->getEdgesPerVertex(), custom_feature_space, *internal_graph_, custom_features
+        );
+        return DynamicExplorationGraph(std::move(graph), transformations_);
+    }
+
+    /**
      * @brief Converts this graph to a mutable SizeBoundedGraph with a fixed capacity.
      *
      * @param new_max_size Desired vertex capacity. If 0 or less than size(), capacity is set to size().

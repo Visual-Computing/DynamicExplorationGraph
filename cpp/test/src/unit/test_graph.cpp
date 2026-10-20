@@ -566,6 +566,32 @@ TEST(DynamicExplorationGraphFromGraph, FromGraphCreatesMutableGraph) {
     EXPECT_TRUE(deglib::analysis::check_graph_weights(static_cast<const deglib::graph::MutableGraph&>(mutable_graph.internal())));
 }
 
+TEST(DynamicExplorationGraphFromGraph, ToReadOnlyCustomFeatures) {
+    const uint32_t vertex_count = 20;
+    const uint8_t edges_per_vertex = 4;
+    const uint32_t dim = 4;
+
+    deglib::distances::FloatSpace space_f32(dim, deglib::distances::Metric::FP32_L2);
+    deglib::distances::FloatSpace space_f16(dim, deglib::distances::Metric::FP16_L2);
+
+    auto feature_bytes = std::make_unique<std::byte[]>(size_t(vertex_count) * dim * sizeof(float));
+    float* feature_floats = reinterpret_cast<float*>(feature_bytes.get());
+    for (uint32_t i = 0; i < vertex_count * dim; i++) {
+        feature_floats[i] = static_cast<float>(i);
+    }
+
+    auto source_graph = deglib::create_random_graph(feature_bytes.get(), vertex_count, edges_per_vertex, space_f32, 7);
+
+    std::vector<uint16_t> fp16_data(size_t(vertex_count) * dim);
+    deglib::distances::fp16::floats_to_fp16(feature_floats, fp16_data.data(), vertex_count * dim);
+
+    auto readonly_f16 = source_graph.to_readonly(space_f16, fp16_data.data());
+    EXPECT_FALSE(readonly_f16.isMutable());
+    EXPECT_EQ(readonly_f16.size(), vertex_count);
+    EXPECT_EQ(readonly_f16.getEdgesPerVertex(), edges_per_vertex);
+    EXPECT_EQ(readonly_f16.getFeatureSpace().metric(), deglib::distances::Metric::FP16_L2);
+}
+
 TEST(DynamicExplorationGraphFromGraph, FromGraphStaticFactory) {
     const uint32_t vertex_count = 20;
     const uint8_t edges_per_vertex = 4;
