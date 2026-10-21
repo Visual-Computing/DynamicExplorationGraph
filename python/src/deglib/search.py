@@ -169,10 +169,10 @@ class Searcher:
 
     Performs end-to-end query transformation (quantization), graph search, and exact distance
     candidate refinement within C++ in a single native invocation, eliminating Python interpreter
-    and bridge overhead in query loops.
+    and bridge overhead in query loops. Any transformations or quantization are derived directly
+    from the attached graph.
 
     :param graph: DynamicExplorationGraph (Mutable or ReadOnly) instance.
-    :param quantizer: Optional EvpQuantizer or scalar quantizer instance.
     :param refine_space: Optional FloatSpace for exact candidate reranking.
     :param refine_data: Optional base feature matrix for candidate reranking.
     """
@@ -180,27 +180,18 @@ class Searcher:
     def __init__(
         self,
         graph,
-        quantizer=None,
         refine_space: FloatSpace | None = None,
         refine_data: np.ndarray | None = None,
     ):
         cpp_graph = graph.dynamic_exploration_graph_cpp if hasattr(graph, "dynamic_exploration_graph_cpp") else graph
-        if quantizer is None and hasattr(graph, "has_transformations") and graph.has_transformations():
-            transformations = graph.get_transformations()
-            if transformations:
-                quantizer = transformations[-1]
         cpp_refine_space = (
             refine_space.float_space_cpp
             if (refine_space is not None and hasattr(refine_space, "float_space_cpp"))
             else refine_space
         )
-        cpp_quantizer = (
-            quantizer.quantizer_cpp if (quantizer is not None and hasattr(quantizer, "quantizer_cpp")) else quantizer
-        )
 
         self.searcher_cpp = cpp_search.Searcher(
             graph=cpp_graph,
-            quantizer=cpp_quantizer,
             rerank_space=cpp_refine_space,
             base_vectors=refine_data,
         )
@@ -284,18 +275,18 @@ class Searcher:
 
 def create_searcher(
     graph,
-    quantizer=None,
     refine_space: FloatSpace | None = None,
     refine_data: np.ndarray | None = None,
 ) -> Searcher:
     """
     Factory function to create a Searcher instance.
 
-    :param quantizer: Optional EvpQuantizer or scalar quantizer instance.
+    :param graph: DynamicExplorationGraph (Mutable or ReadOnly) instance.
+    :param refine_space: Optional FloatSpace for exact candidate reranking.
+    :param refine_data: Optional base feature matrix for candidate reranking.
     """
     return Searcher(
         graph=graph,
-        quantizer=quantizer,
         refine_space=refine_space,
         refine_data=refine_data,
     )

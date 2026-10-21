@@ -63,7 +63,7 @@ DATASET_PRESETS: Dict[str, Dict[str, Any]] = {
         "search_eps_list": [0.01, 0.02, 0.03, 0.04, 0.06, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5, 2.0],
     },
     "glove": {
-        "metric": Metric.FP32_InnerProduct,
+        "metric": Metric.FP32_L2,
         "k": 30,
         "extend_k": 60,
         "build_eps": 0.1,

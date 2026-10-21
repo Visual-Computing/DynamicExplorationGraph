@@ -32,9 +32,7 @@ inline builder::EvenRegularGraphBuilder create_builder(
     const uint8_t max_path_length = 5,
     const uint32_t improve_tries = 0
 ) {
-    return builder::EvenRegularGraphBuilder(
-        graph, rnd, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, improve_tries
-    );
+    return builder::EvenRegularGraphBuilder(graph, rnd, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, improve_tries);
 }
 
 /**
@@ -132,20 +130,35 @@ inline DynamicExplorationGraph load_mutable_graph(const char* path_graph, const 
  * Convenience overloads that forward to deglib::search::make_searcher using the graph's internal representation,
  * so end users can pass the public graph type directly.
  */
+template <typename RefinerT>
+inline std::unique_ptr<deglib::search::SearcherBase> make_searcher(const DynamicExplorationGraph& graph, RefinerT refiner) {
+    if (graph.hasTransformations() && !graph.getTransformations().empty()) {
+        auto& t = graph.getTransformations().back();
+        if (t->tag() == deglib::transformation::TAG_SQI8) {
+            return deglib::search::make_searcher(
+                graph.internal(), *std::dynamic_pointer_cast<deglib::transformation::ScalarQuantizerInt8>(t), std::move(refiner)
+            );
+        } else if (t->tag() == deglib::transformation::TAG_SQ8P) {
+            return deglib::search::make_searcher(
+                graph.internal(), *std::dynamic_pointer_cast<deglib::transformation::ScalarQuantizerInt8PerDim>(t), std::move(refiner)
+            );
+        } else if (t->tag() == deglib::transformation::TAG_SQU8) {
+            return deglib::search::make_searcher(
+                graph.internal(), *std::dynamic_pointer_cast<deglib::transformation::ScalarQuantizerUint8>(t), std::move(refiner)
+            );
+        } else if (t->tag() == deglib::transformation::TAG_SQUP) {
+            return deglib::search::make_searcher(
+                graph.internal(), *std::dynamic_pointer_cast<deglib::transformation::ScalarQuantizerUint8PerDim>(t), std::move(refiner)
+            );
+        } else if (t->tag() == deglib::transformation::TAG_EVPQ) {
+            return deglib::search::make_searcher(graph.internal(), *std::dynamic_pointer_cast<deglib::transformation::EvpQuantizer>(t), std::move(refiner));
+        }
+    }
+    return deglib::search::make_searcher(graph.internal(), deglib::search::NoQuantizer{}, std::move(refiner));
+}
+
 inline std::unique_ptr<deglib::search::SearcherBase> make_searcher(const DynamicExplorationGraph& graph) {
-    return deglib::search::make_searcher(graph.internal());
-}
-
-template <typename QuantT>
-    requires deglib::quantization::Quantizer<QuantT>
-inline std::unique_ptr<deglib::search::SearcherBase> make_searcher(const DynamicExplorationGraph& graph, QuantT quantizer) {
-    return deglib::search::make_searcher(graph.internal(), std::move(quantizer));
-}
-
-template <typename QuantT, typename RefinerT>
-    requires(deglib::quantization::Quantizer<QuantT> || std::is_same_v<QuantT, deglib::search::NoQuantizer>)
-inline std::unique_ptr<deglib::search::SearcherBase> make_searcher(const DynamicExplorationGraph& graph, QuantT quantizer, RefinerT refiner) {
-    return deglib::search::make_searcher(graph.internal(), std::move(quantizer), std::move(refiner));
+    return make_searcher(graph, deglib::search::NoRefiner{});
 }
 
 }  // namespace deglib

@@ -113,6 +113,13 @@ class DynamicExplorationGraph {
     bool hasTransformations() const noexcept { return !transformations_.empty(); }
 
     /**
+     * @brief Set or replace the query feature transformations for this graph.
+     */
+    void setTransformations(std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations) {
+        transformations_ = std::move(transformations);
+    }
+
+    /**
      * @brief Returns the expected input dimension of uncompressed query vectors.
      * If transformations are present, returns the input dimension of the first transformation;
      * otherwise returns the feature space dimension.
@@ -1112,11 +1119,16 @@ class DynamicExplorationGraph {
      * @param custom_features Pointer to replacement raw feature memory (size = size() * custom_feature_space.get_data_size()).
      * @return A new read-only DynamicExplorationGraph.
      */
-    DynamicExplorationGraph to_readonly(const deglib::distances::FloatSpace& custom_feature_space, const void* custom_features = nullptr) const {
+    DynamicExplorationGraph to_readonly(
+        const deglib::distances::FloatSpace& custom_feature_space,
+        const void* custom_features = nullptr,
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
+    ) const {
         auto graph = std::make_unique<deglib::graph::ReadOnlyGraph>(
             internal_graph_->size(), internal_graph_->getEdgesPerVertex(), custom_feature_space, *internal_graph_, custom_features
         );
-        return DynamicExplorationGraph(std::move(graph), transformations_);
+        auto xfrms = !transformations.empty() ? std::move(transformations) : transformations_;
+        return DynamicExplorationGraph(std::move(graph), std::move(xfrms));
     }
 
     /**
@@ -1138,14 +1150,20 @@ class DynamicExplorationGraph {
      * @param custom_feature_space The new target feature space.
      * @param custom_features Pointer to replacement raw feature memory (size = size() * custom_feature_space.get_data_size()).
      * @param new_max_size Desired vertex capacity. If 0 or less than size(), capacity is set to size().
+     * @param transformations Optional sequence of feature transformations/quantizers to attach.
      * @return A new mutable DynamicExplorationGraph.
      */
-    DynamicExplorationGraph
-    to_mutable(const deglib::distances::FloatSpace& custom_feature_space, const void* custom_features = nullptr, const uint32_t new_max_size = 0) const {
+    DynamicExplorationGraph to_mutable(
+        const deglib::distances::FloatSpace& custom_feature_space,
+        const void* custom_features = nullptr,
+        const uint32_t new_max_size = 0,
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
+    ) const {
         auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(
             deglib::graph::SizeBoundedGraph::from_graph(*internal_graph_, custom_feature_space, custom_features, new_max_size)
         );
-        return DynamicExplorationGraph(std::move(graph), transformations_);
+        auto xfrms = !transformations.empty() ? std::move(transformations) : transformations_;
+        return DynamicExplorationGraph(std::move(graph), std::move(xfrms));
     }
 
     /**
@@ -1167,14 +1185,20 @@ class DynamicExplorationGraph {
      * @param custom_feature_space The new target feature space.
      * @param custom_features Pointer to replacement raw feature memory.
      * @param chunk_size Number of vertices allocated per memory chunk (default 1024). Rounded to power of 2.
+     * @param transformations Optional sequence of feature transformations/quantizers to attach.
      * @return A new mutable DynamicExplorationGraph.
      */
-    DynamicExplorationGraph
-    to_dynamic(const deglib::distances::FloatSpace& custom_feature_space, const void* custom_features = nullptr, const uint32_t chunk_size = 1024) const {
+    DynamicExplorationGraph to_dynamic(
+        const deglib::distances::FloatSpace& custom_feature_space,
+        const void* custom_features = nullptr,
+        const uint32_t chunk_size = 1024,
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
+    ) const {
         auto graph = std::make_unique<deglib::graph::DynamicGraph>(
             deglib::graph::DynamicGraph::from_graph(*internal_graph_, custom_feature_space, custom_features, chunk_size)
         );
-        return DynamicExplorationGraph(std::move(graph), transformations_);
+        auto xfrms = !transformations.empty() ? std::move(transformations) : transformations_;
+        return DynamicExplorationGraph(std::move(graph), std::move(xfrms));
     }
 
     /**

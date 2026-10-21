@@ -16,6 +16,14 @@ from .search import Filter
 from .utils import assure_array, InvalidShapeException
 
 
+def _normalize_transformations(transformations):
+    if transformations is None:
+        return []
+    if isinstance(transformations, (list, tuple)):
+        return list(transformations)
+    return [transformations]
+
+
 class DynamicExplorationGraph:
     """
     Public DynamicExplorationGraph Facade for End Users.
@@ -96,9 +104,7 @@ class DynamicExplorationGraph:
             return self.dynamic_exploration_graph_cpp.get_neighbors_batch(arr, threads)
         return self.dynamic_exploration_graph_cpp.get_neighbors(int(external_label))
 
-    def get_neighbors_batch(
-        self, external_labels: Union[np.ndarray, list, tuple], threads: int = 1
-    ) -> np.ndarray:
+    def get_neighbors_batch(self, external_labels: Union[np.ndarray, list, tuple], threads: int = 1) -> np.ndarray:
         """
         Get neighbor external labels for a batch of external labels.
 
@@ -165,7 +171,14 @@ class DynamicExplorationGraph:
         elif contiguous_query.ndim == 2:
             threads = get_num_useful_threads(threads, contiguous_query.shape[0])
             return self.dynamic_exploration_graph_cpp.search_batch(
-                contiguous_query, eps_or_ef, k, filter_obj, max_distance_computation_count, threads, return_distances, unsorted
+                contiguous_query,
+                eps_or_ef,
+                k,
+                filter_obj,
+                max_distance_computation_count,
+                threads,
+                return_distances,
+                unsorted,
             )
         else:
             raise InvalidShapeException("invalid query shape: {}".format(query.shape))
@@ -294,29 +307,43 @@ class DynamicExplorationGraph:
         """
         self.dynamic_exploration_graph_cpp.optimize(int(sample_count), int(k), int(ef), int(seed))
 
+    def set_transformations(self, transformations: Union[None, list, tuple, object]) -> None:
+        """
+        Sets or replaces the query feature transformations attached to this graph.
+        """
+        xfrms = _normalize_transformations(transformations)
+        self.dynamic_exploration_graph_cpp.set_transformations(xfrms)
+
     def to_readonly(
-        self, feature_space: Optional[FloatSpace] = None, custom_features: Optional[np.ndarray] = None
+        self,
+        feature_space: Optional[FloatSpace] = None,
+        custom_features: Optional[np.ndarray] = None,
+        transformations: Optional[Union[list, tuple, object]] = None,
     ) -> "DynamicExplorationGraph":
         """
         Create a read-only graph from the given graph by only keeping information
         that is useful for searching.
 
         Optionally overrides feature space and replaces feature vectors with a custom features buffer
-        (e.g., swapping FP32 (d+1) features for FP16 d features while preserving graph topology).
+        (e.g., swapping FP32 (d+1) features for FP16 d features while preserving graph topology),
+        and attaches query feature transformations.
 
         :param feature_space: Optional FloatSpace specifying the target feature space.
         :param custom_features: Optional NumPy array containing replacement feature vectors.
+        :param transformations: Optional sequence of FeatureTransformation objects attached to the graph.
         :return: A new read-only DynamicExplorationGraph.
         """
         fs_cpp = feature_space.float_space_cpp if feature_space is not None else None
         feat_cpp = np.ascontiguousarray(custom_features) if custom_features is not None else None
-        return DynamicExplorationGraph(self.dynamic_exploration_graph_cpp.to_readonly(fs_cpp, feat_cpp))
+        xfrms = _normalize_transformations(transformations)
+        return DynamicExplorationGraph(self.dynamic_exploration_graph_cpp.to_readonly(fs_cpp, feat_cpp, xfrms))
 
     def to_mutable(
         self,
         feature_space: Optional[FloatSpace] = None,
         custom_features: Optional[np.ndarray] = None,
         capacity: int = 0,
+        transformations: Optional[Union[list, tuple, object]] = None,
     ) -> "DynamicExplorationGraph":
         """
         Create a mutable SizeBoundedGraph from the given graph (ReadOnly or SizeBounded),
@@ -328,13 +355,15 @@ class DynamicExplorationGraph:
         :param custom_features: Optional NumPy array containing replacement feature vectors.
         :param capacity: If > 0, sets the capacity to max(capacity, graph.size()).
                          If 0, capacity equals graph.size().
+        :param transformations: Optional sequence of FeatureTransformation objects attached to the graph.
         :return: A new mutable DynamicExplorationGraph.
         """
         fs_cpp = feature_space.float_space_cpp if feature_space is not None else None
         feat_cpp = np.ascontiguousarray(custom_features) if custom_features is not None else None
+        xfrms = _normalize_transformations(transformations)
         return DynamicExplorationGraph(
             self.dynamic_exploration_graph_cpp.to_mutable(
-                custom_feature_space=fs_cpp, custom_features=feat_cpp, new_max_size=capacity
+                custom_feature_space=fs_cpp, custom_features=feat_cpp, new_max_size=capacity, transformations=xfrms
             )
         )
 
@@ -343,6 +372,7 @@ class DynamicExplorationGraph:
         feature_space: Optional[FloatSpace] = None,
         custom_features: Optional[np.ndarray] = None,
         chunk_size: int = 1024,
+        transformations: Optional[Union[list, tuple, object]] = None,
     ) -> "DynamicExplorationGraph":
         """
         Create a mutable DynamicGraph with chunk-based dynamic memory allocation
@@ -355,13 +385,15 @@ class DynamicExplorationGraph:
         :param custom_features: Optional NumPy array containing replacement feature vectors.
         :param chunk_size: Target number of vertices per memory chunk (default = 1024).
                            Will be automatically rounded up to the nearest power of 2 (e.g. 600 -> 1024).
+        :param transformations: Optional sequence of FeatureTransformation objects attached to the graph.
         :return: A new mutable DynamicExplorationGraph.
         """
         fs_cpp = feature_space.float_space_cpp if feature_space is not None else None
         feat_cpp = np.ascontiguousarray(custom_features) if custom_features is not None else None
+        xfrms = _normalize_transformations(transformations)
         return DynamicExplorationGraph(
             self.dynamic_exploration_graph_cpp.to_dynamic(
-                custom_feature_space=fs_cpp, custom_features=feat_cpp, chunk_size=chunk_size
+                custom_feature_space=fs_cpp, custom_features=feat_cpp, chunk_size=chunk_size, transformations=xfrms
             )
         )
 
@@ -390,14 +422,6 @@ __all__ = [
 ]
 
 
-def _normalize_transformations(transformations):
-    if transformations is None:
-        return []
-    if isinstance(transformations, (list, tuple)):
-        return list(transformations)
-    return [transformations]
-
-
 def create_empty(
     capacity: int, feature_space: FloatSpace, edges_per_vertex: int = 32, transformations=None
 ) -> DynamicExplorationGraph:
@@ -411,9 +435,7 @@ def create_empty(
     :return: A new mutable DynamicExplorationGraph.
     """
     xfrms = _normalize_transformations(transformations)
-    graph_cpp = deglib_cpp.create_size_bounded_graph(
-        capacity, edges_per_vertex, feature_space.float_space_cpp, xfrms
-    )
+    graph_cpp = deglib_cpp.create_size_bounded_graph(capacity, edges_per_vertex, feature_space.float_space_cpp, xfrms)
     return DynamicExplorationGraph(graph_cpp)
 
 
@@ -455,9 +477,7 @@ def create_random_graph(
     valid_dtype = feature_space.metric().get_dtype()
     features = assure_array(features, "features", valid_dtype)
     xfrms = _normalize_transformations(transformations)
-    graph_cpp = deglib_cpp.create_random_graph(
-        features, edges_per_vertex, feature_space.float_space_cpp, seed, xfrms
-    )
+    graph_cpp = deglib_cpp.create_random_graph(features, edges_per_vertex, feature_space.float_space_cpp, seed, xfrms)
     return DynamicExplorationGraph(graph_cpp)
 
 

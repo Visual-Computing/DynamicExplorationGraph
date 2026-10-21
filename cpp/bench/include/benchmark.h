@@ -8,7 +8,6 @@
 #include "dataset.h"
 #include "file_io.h"
 #include "logging.h"
-#include "stats.h"
 #include "stopwatch.h"
 
 #include <deglib/deglib.h>
@@ -17,14 +16,51 @@
 #include <fmt/ostream.h>
 #include <fmt/ranges.h>
 
+#include <algorithm>
 #include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <limits>
 #include <random>
 #include <span>
+#include <vector>
 
 namespace deglib::benchmark {
+
+/**
+ * Analyze a search graph, compute all statistics via deglib::analysis, and log them.
+ *
+ * @param graph The search graph to analyze
+ * @param base_gt Optional contiguous BaseGroundTruth buffer
+ * @return GraphStats with all computed statistics
+ */
+inline deglib::analysis::GraphStats analyze_graph(
+    const deglib::graph::InternalGraph& graph,
+    const BaseGroundTruth& base_gt = {}
+) {
+    auto stats = deglib::analysis::analyze_graph(graph, base_gt.data(), base_gt.rows, base_gt.k);
+
+    log("Graph Statistics:\n");
+    log("  Vertices: {}\n", stats.vertex_count);
+    log("  Total edges: {}\n", stats.edge_count);
+    log("  Feature dimensions: {}\n", stats.feature_dims);
+    log("  Edges per vertex (k): {}\n", stats.edges_per_vertex);
+    log("  Out-degree: avg={:.2f}, min={}, max={}\n", stats.avg_out_degree, stats.min_out_degree, stats.max_out_degree);
+    log("  In-degree:  avg={:.2f}, min={}, max={}, source_vertices={}\n", stats.avg_in_degree, stats.min_in_degree, stats.max_in_degree, stats.source_vertices);
+
+    if (stats.graph_quality >= 0.0f) {
+        log("  Graph Quality: {:.2f}%\n", stats.graph_quality * 100.0f);
+    }
+    if (stats.search_reachability >= 0.0f) {
+        log("  Search Reachability: {:.2f}%\n", stats.search_reachability * 100.0f);
+    }
+    if (stats.exploration_reachability >= 0.0f) {
+        log("  Exploration Reachability: {:.2f}%\n", stats.exploration_reachability * 100.0f);
+    }
+
+    log("  Estimated memory: {:.2f} MB\n", stats.memory_bytes / (1024.0 * 1024.0));
+    return stats;
+}
 
 /**
  * @brief Compute baseline time per query using linear distance computation.

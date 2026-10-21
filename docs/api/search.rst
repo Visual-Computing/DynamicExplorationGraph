@@ -54,15 +54,14 @@ High-Performance Searcher with Reranking
    graph = deglib.builder.build_from_data(data, metric=deglib.Metric.FP32_L2)
 
    # Quantize to INT8 for compact storage and ultra-fast exploration
-   quantizer = deglib.optimization.ScalarQuantizerInt8()
+   quantizer = deglib.transformation.ScalarQuantizerInt8()
    quantizer.fit(data)
    int8_data = quantizer.quantize(data)
-   ro_graph = graph.to_readonly(deglib.FloatSpace.create(dim, deglib.Metric.Int8_L2), int8_data)
+   ro_graph = graph.to_readonly(deglib.FloatSpace.create(dim, deglib.Metric.Int8_L2), int8_data, transformations=[quantizer])
 
    # Deploy with Searcher (query is automatically quantized, top candidates reranked on FP32 data)
    searcher = deglib.create_searcher(
        graph=ro_graph,
-       quantizer=quantizer,
        refine_space=deglib.FloatSpace.create(dim, deglib.Metric.FP32_L2),
        refine_data=data,
    )

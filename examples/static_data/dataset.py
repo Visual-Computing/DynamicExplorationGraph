@@ -2,13 +2,20 @@ import os
 import tarfile
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
+import deglib
 from deglib.distances import Metric, FloatSpace
 
 
-def ivecs_read(filename: str | Path) -> np.ndarray:
+def ivecs_read(filename: str | Path, mmap: bool = False) -> np.ndarray:
+    if mmap:
+        with open(filename, "rb") as f:
+            d = np.fromfile(f, dtype=np.int32, count=1)[0]
+        mm = np.memmap(filename, dtype=np.int32, mode="r")
+        return mm.reshape(-1, d + 1)[:, 1:]
     a = np.fromfile(filename, dtype=np.int32)
     d = a[0]
     return a.reshape(-1, d + 1)[:, 1:].copy()
@@ -84,7 +91,7 @@ DATASET_METADATA: Dict[str, Dict[str, Any]] = {
         "url": "https://static.visual-computing.com/paper/DEG/glove-100.tar.gz",
         "archive": "glove-100.tar.gz",
         "folder": "glove",
-        "metric": Metric.FP32_InnerProduct,
+        "metric": Metric.FP32_L2,
         "dim": 100,
         "base_count": 1183514,
         "base_file": "glove_base.fvecs",
@@ -381,3 +388,393 @@ def load_dataset(
     explore_gt = ivecs_read(explore_gt_path)
 
     return base_vecs, query_vecs, gt_vecs, explore_entry, explore_gt, meta
+
+
+def find_default_graph(dataset_key: str, dataset_folder: Path) -> Optional[Path]:
+    """Finds the default or best matching .deg graph in dataset directory."""
+    deg_dir = dataset_folder / "deg"
+    if not deg_dir.is_dir():
+        deg_dir = dataset_folder
+
+    deg_files = list(deg_dir.rglob("*.deg"))
+    if not deg_files:
+        return None
+
+    for f in deg_files:
+        if dataset_key.lower() in f.name.lower():
+            return f
+    return deg_files[0]
+
+
+def tune_explore_eps(
+    graph,
+    explore_entry: np.ndarray,
+    explore_gt: np.ndarray,
+    k: int = 100,
+    target_recall: float = 0.99,
+    eps_candidates: Optional[list] = None,
+    threads: int = 4,
+) -> Tuple[float, float]:
+    """Finds the minimum exploration eps achieving target recall on explore groundtruth."""
+    if eps_candidates is None:
+        eps_candidates = [0.01, 0.05, 0.1, 0.12, 0.15, 0.2, 0.25, 0.3, 0.4]
+
+    query_count = min(len(explore_entry), 2000)
+    eval_entry = np.ascontiguousarray(explore_entry[:query_count], dtype=np.uint32)
+    eval_gt = explore_gt[:query_count, :k]
+
+    print(f"\n--- Tuning Exploration eps on {query_count} explore queries (Target Recall: {target_recall}) ---")
+
+    best_eps = eps_candidates[-1]
+    best_recall = 0.0
+
+    for eps in eps_candidates:
+        indices_batch, _ = graph.explore(
+            eval_entry,
+            k=k,
+            eps=eps,
+            include_entry=True,
+            threads=threads,
+            return_distances=False,
+        )
+
+        hits = 0
+        total_returned = 0
+        for i in range(query_count):
+            gt_set = set(eval_gt[i])
+            ret_set = set(indices_batch[i])
+            hits += len(gt_set.intersection(ret_set))
+            total_returned += len(gt_set)
+
+        recall = hits / max(total_returned, 1)
+        print(f"  eps {eps:6.3f} -> Recall@{k}: {recall:.4f}")
+
+        if recall >= target_recall:
+            best_eps = eps
+            best_recall = recall
+            print(f"--> Target recall reached with eps = {best_eps:.3f} (Recall: {best_recall:.4f})")
+            return best_eps, best_recall
+
+        if recall > best_recall:
+            best_recall = recall
+            best_eps = eps
+
+    print(f"--> Target recall not fully reached in sweep. Best eps: {best_eps:.3f} (Recall: {best_recall:.4f})")
+    return best_eps, best_recall
+
+
+def compute_linear_groundtruth_chunk(
+    query_chunk: np.ndarray,
+    base_target: np.ndarray,
+    metric: Metric,
+    k: int,
+    pool: ThreadPoolExecutor,
+    query_offset: Optional[int] = None,
+) -> np.ndarray:
+    """Computes exact top-k nearest neighbor indices for query_chunk against base_target (excluding self if query_offset provided)."""
+    n_queries = len(query_chunk)
+    n_base = len(base_target)
+    actual_k = min(k, n_base if query_offset is None else max(0, n_base - 1))
+
+    if metric == Metric.FP32_InnerProduct:
+        sims = np.dot(query_chunk, base_target.T)
+        if query_offset is not None:
+            for i in range(n_queries):
+                self_idx = query_offset + i
+                if self_idx < n_base:
+                    sims[i, self_idx] = -np.inf
+
+        def _sort_ip(idx):
+            row = sims[idx]
+            part = np.argpartition(-row, actual_k)[:actual_k]
+            return part[np.argsort(-row[part])]
+
+        results = list(pool.map(_sort_ip, range(n_queries)))
+    else:
+        q_norm = np.sum(query_chunk**2, axis=1, keepdims=True)
+        b_norm = np.sum(base_target**2, axis=1, keepdims=True).T
+        dists_sq = q_norm + b_norm - 2.0 * np.dot(query_chunk, base_target.T)
+        if query_offset is not None:
+            for i in range(n_queries):
+                self_idx = query_offset + i
+                if self_idx < n_base:
+                    dists_sq[i, self_idx] = np.inf
+
+        def _sort_l2(idx):
+            row = dists_sq[idx]
+            part = np.argpartition(row, actual_k)[:actual_k]
+            return part[np.argsort(row[part])]
+
+        results = list(pool.map(_sort_l2, range(n_queries)))
+
+    return np.asarray(results, dtype=np.int32)
+
+
+def generate_base_top_linear(
+    base_vecs: np.ndarray,
+    metric: Metric,
+    k: int,
+    out_file: Path,
+    total_queries: int,
+    base_limit: int = 0,
+    chunk_size: int = 1000,
+    num_threads: int = 0,
+):
+    effective_threads = num_threads if num_threads > 0 else (os.cpu_count() or 4)
+    base_target = base_vecs[:base_limit] if base_limit > 0 else base_vecs
+    n_base = len(base_target)
+    actual_k = min(k, n_base)
+
+    print(
+        f"\nStarting Exact Linear Search: {total_queries} queries against {n_base} base vectors "
+        f"(k={actual_k}, metric={metric.name}, {effective_threads} threads, chunk={chunk_size})..."
+    )
+
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    temp_file = out_file.with_suffix(".tmp")
+    if temp_file.exists():
+        temp_file.unlink()
+
+    k_int32 = np.int32(actual_k)
+    start_t = time.perf_counter()
+
+    with ThreadPoolExecutor(max_workers=effective_threads) as pool:
+        with open(temp_file, "wb") as f_out:
+            for start_idx in range(0, total_queries, chunk_size):
+                end_idx = min(start_idx + chunk_size, total_queries)
+                chunk_q = base_vecs[start_idx:end_idx]
+
+                top_indices = compute_linear_groundtruth_chunk(
+                    chunk_q, base_target, metric, actual_k, pool, query_offset=start_idx
+                )
+
+                n_chunk = len(chunk_q)
+                d_col = np.full((n_chunk, 1), k_int32, dtype=np.int32)
+                with_d = np.hstack([d_col, top_indices])
+                f_out.write(with_d.tobytes())
+
+                elapsed = time.perf_counter() - start_t
+                qps = end_idx / max(elapsed, 1e-9)
+                pct = 100.0 * end_idx / total_queries
+                print(
+                    f"\r  Progress: {end_idx}/{total_queries} ({pct:.1f}%) in {elapsed:.1f}s ({qps:.1f} vec/s)",
+                    end="",
+                    flush=True,
+                )
+
+    print()
+    if out_file.exists():
+        out_file.unlink()
+    temp_file.rename(out_file)
+
+    total_time = time.perf_counter() - start_t
+    mb = out_file.stat().st_size / (1024 * 1024)
+    print(f"Linear search complete: {out_file} ({mb:.2f} MB in {total_time:.1f}s)")
+
+
+def generate_base_top_anns(
+    base_vecs: np.ndarray,
+    dataset_key: str,
+    cache_dir: Path,
+    k: int,
+    out_file: Path,
+    total_queries: int,
+    graph_path_arg: Optional[str] = None,
+    chunk_size: int = 25000,
+    threads: int = 0,
+    eps_override: Optional[float] = None,
+    target_recall: float = 0.99,
+):
+    effective_threads = threads if threads > 0 else (os.cpu_count() or 4)
+    meta = DATASET_METADATA[dataset_key]
+
+    if graph_path_arg:
+        graph_path = Path(graph_path_arg)
+        if not graph_path.is_file():
+            raise FileNotFoundError(f"Specified graph file does not exist: {graph_path}")
+    else:
+        dataset_folder = cache_dir / meta["folder"]
+        graph_path = find_default_graph(dataset_key, dataset_folder)
+        if not graph_path:
+            raise FileNotFoundError(f"Could not find any existing .deg graph for {dataset_key} in {dataset_folder}")
+
+    print(f"Using Graph: {graph_path}")
+    t_load = time.perf_counter()
+    graph = deglib.load_readonly_graph(str(graph_path))
+    print(f"Graph loaded in {time.perf_counter() - t_load:.2f}s | Vertices: {graph.size()}")
+
+    if eps_override is not None:
+        chosen_eps = eps_override
+    else:
+        from presets import get_preset
+
+        preset = get_preset(dataset_key)
+        eps_candidates = sorted(preset.get("search_eps_list", [0.01, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4]))
+        files_dir = cache_dir / meta["folder"]
+        if (files_dir / meta["folder"]).is_dir():
+            files_dir = files_dir / meta["folder"]
+        explore_entry = ivecs_read(files_dir / meta["explore_entry_file"])
+        explore_gt = ivecs_read(files_dir / meta["explore_gt_file"])
+
+        chosen_eps, _ = tune_explore_eps(
+            graph=graph,
+            explore_entry=explore_entry,
+            explore_gt=explore_gt,
+            k=k,
+            target_recall=target_recall,
+            eps_candidates=eps_candidates,
+            threads=effective_threads,
+        )
+
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    temp_file = out_file.with_suffix(".tmp")
+    if temp_file.exists():
+        temp_file.unlink()
+
+    k_int32 = np.int32(k)
+    start_t = time.perf_counter()
+
+    with open(temp_file, "wb") as f_out:
+        for start_idx in range(0, total_queries, chunk_size):
+            end_idx = min(start_idx + chunk_size, total_queries)
+            batch_labels = np.arange(start_idx, end_idx, dtype=np.uint32)
+
+            indices_chunk = graph.explore(
+                batch_labels,
+                k=k,
+                eps=chosen_eps,
+                include_entry=False,
+                threads=effective_threads,
+                return_distances=False,
+            )
+
+            n_chunk = len(batch_labels)
+            d_col = np.full((n_chunk, 1), k_int32, dtype=np.int32)
+            with_d = np.hstack([d_col, indices_chunk.astype(np.int32)])
+            f_out.write(with_d.tobytes())
+
+            elapsed = time.perf_counter() - start_t
+            qps = end_idx / max(elapsed, 1e-9)
+            pct = 100.0 * end_idx / total_queries
+            print(
+                f"\r  Progress: {end_idx}/{total_queries} ({pct:.1f}%) in {elapsed:.1f}s ({qps:.1f} vec/s)",
+                end="",
+                flush=True,
+            )
+
+    print()
+    if out_file.exists():
+        out_file.unlink()
+    temp_file.rename(out_file)
+
+    total_time = time.perf_counter() - start_t
+    mb = out_file.stat().st_size / (1024 * 1024)
+    print(f"ANNS explore complete: {out_file} ({mb:.2f} MB in {total_time:.1f}s)")
+
+
+def generate_base_groundtruth(
+    dataset_key: str,
+    cache_dir: Path,
+    k: int = 1000,
+    quality_mode: str = "exact",
+    graph_path: Optional[Union[str, Path]] = None,
+    include_half: bool = False,
+    threads: int = 0,
+):
+    key = resolve_dataset_key(dataset_key)
+    meta = DATASET_METADATA[key]
+    folder = ensure_dataset(key, cache_dir)
+    files_dir = folder / meta["folder"] if (folder / meta["folder"]).is_dir() else folder
+
+    base_path = files_dir / meta["base_file"]
+    base_vecs = fvecs_read(base_path)
+    n_base = len(base_vecs)
+    half_base = n_base // 2
+    metric = meta["metric"]
+    use_anns = quality_mode.lower() in ("approximated", "approx", "anns")
+
+    out_file = files_dir / f"{meta['folder']}_base_top{k}.ivecs"
+    if not out_file.is_file():
+        if use_anns:
+            generate_base_top_anns(
+                base_vecs=base_vecs,
+                dataset_key=key,
+                cache_dir=cache_dir,
+                k=k,
+                out_file=out_file,
+                total_queries=n_base,
+                graph_path_arg=str(graph_path) if graph_path else None,
+                threads=threads,
+            )
+        else:
+            generate_base_top_linear(
+                base_vecs=base_vecs,
+                metric=metric,
+                k=k,
+                out_file=out_file,
+                total_queries=n_base,
+                base_limit=0,
+                num_threads=threads,
+            )
+
+    if include_half:
+        half_out = files_dir / f"{meta['folder']}_base_half_top{k}.ivecs"
+        if not half_out.is_file():
+            if use_anns:
+                generate_base_top_anns(
+                    base_vecs=base_vecs,
+                    dataset_key=key,
+                    cache_dir=cache_dir,
+                    k=k,
+                    out_file=half_out,
+                    total_queries=half_base,
+                    graph_path_arg=str(graph_path) if graph_path else None,
+                    threads=threads,
+                )
+            else:
+                generate_base_top_linear(
+                    base_vecs=base_vecs,
+                    metric=metric,
+                    k=k,
+                    out_file=half_out,
+                    total_queries=half_base,
+                    base_limit=half_base,
+                    num_threads=threads,
+                )
+
+
+def load_base_groundtruth(
+    dataset_key: str,
+    cache_dir: Path,
+    graph_quality: str = "none",
+    graph_path: Optional[Union[str, Path]] = None,
+) -> Optional[np.ndarray]:
+    """
+    Loads base_top1000 ground truth for graph quality analysis.
+    If the file does not exist and graph_quality is 'exact' or 'approximated',
+    it is automatically computed and cached.
+    """
+    if not graph_quality or graph_quality.lower() == "none":
+        return None
+
+    key = resolve_dataset_key(dataset_key)
+    meta = DATASET_METADATA[key]
+    folder = ensure_dataset(key, cache_dir)
+    files_dir = folder / meta["folder"] if (folder / meta["folder"]).is_dir() else folder
+    base_top_path = files_dir / f"{meta['folder']}_base_top1000.ivecs"
+
+    if not base_top_path.is_file():
+        print(f"Base Top Ground Truth not found at {base_top_path}. Generating...")
+        generate_base_groundtruth(
+            dataset_key=key,
+            cache_dir=cache_dir,
+            k=1000,
+            quality_mode=graph_quality,
+            graph_path=graph_path,
+        )
+
+    if base_top_path.is_file():
+        print(f"Loading base ground truth for graph quality from {base_top_path} (mmap)...")
+        return ivecs_read(base_top_path, mmap=True)
+
+    return None

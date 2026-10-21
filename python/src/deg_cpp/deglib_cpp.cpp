@@ -635,7 +635,6 @@ class SearcherPy {
   public:
     SearcherPy(
         const deglib::DynamicExplorationGraph& graph,
-        py::object quantizer = py::none(),
         std::optional<deglib::distances::FloatSpace> rerank_space = std::nullopt,
         std::optional<py::array> base_vectors = std::nullopt
     ) {
@@ -656,63 +655,16 @@ class SearcherPy {
             }
         }
 
-        auto make_searcher_for_quant = [&]<typename QuantT>(QuantT q) {
-            if (rerank_space.has_value() && base_vectors_ptr != nullptr) {
-                if (is_fp16_base) {
-                    using RefinerT = deglib::search::Reranker<uint16_t>;
-                    searcher_ = std::make_unique<deglib::search::SearcherImpl<QuantT, RefinerT>>(
-                        graph.internal(), std::move(q), RefinerT(*rerank_space, static_cast<const uint16_t*>(base_vectors_ptr), num_base_vectors)
-                    );
-                } else {
-                    using RefinerT = deglib::search::Reranker<float>;
-                    searcher_ = std::make_unique<deglib::search::SearcherImpl<QuantT, RefinerT>>(
-                        graph.internal(), std::move(q), RefinerT(*rerank_space, static_cast<const float*>(base_vectors_ptr), num_base_vectors)
-                    );
-                }
+        if (rerank_space.has_value() && base_vectors_ptr != nullptr) {
+            if (is_fp16_base) {
+                using RefinerT = deglib::search::Reranker<uint16_t>;
+                searcher_ = deglib::make_searcher(graph, RefinerT(*rerank_space, static_cast<const uint16_t*>(base_vectors_ptr), num_base_vectors));
             } else {
-                using RefinerT = deglib::search::NoRefiner;
-                searcher_ = std::make_unique<deglib::search::SearcherImpl<QuantT, RefinerT>>(graph.internal(), std::move(q), RefinerT{});
+                using RefinerT = deglib::search::Reranker<float>;
+                searcher_ = deglib::make_searcher(graph, RefinerT(*rerank_space, static_cast<const float*>(base_vectors_ptr), num_base_vectors));
             }
-        };
-
-        if (quantizer.is_none()) {
-            if (graph.hasTransformations() && !graph.getTransformations().empty()) {
-                auto& t = graph.getTransformations().back();
-                if (t->tag() == deglib::transformation::TAG_SQI8) {
-                    make_searcher_for_quant(*std::dynamic_pointer_cast<deglib::transformation::ScalarQuantizerInt8>(t));
-                    return;
-                } else if (t->tag() == deglib::transformation::TAG_SQ8P) {
-                    make_searcher_for_quant(*std::dynamic_pointer_cast<deglib::transformation::ScalarQuantizerInt8PerDim>(t));
-                    return;
-                } else if (t->tag() == deglib::transformation::TAG_SQU8) {
-                    make_searcher_for_quant(*std::dynamic_pointer_cast<deglib::transformation::ScalarQuantizerUint8>(t));
-                    return;
-                } else if (t->tag() == deglib::transformation::TAG_SQUP) {
-                    make_searcher_for_quant(*std::dynamic_pointer_cast<deglib::transformation::ScalarQuantizerUint8PerDim>(t));
-                    return;
-                } else if (t->tag() == deglib::transformation::TAG_EVPQ) {
-                    make_searcher_for_quant(*std::dynamic_pointer_cast<deglib::transformation::EvpQuantizer>(t));
-                    return;
-                }
-            }
-            make_searcher_for_quant(deglib::search::NoQuantizer{});
-        } else if (py::isinstance<deglib::transformation::ScalarQuantizerInt8>(quantizer)) {
-            auto q = py::cast<deglib::transformation::ScalarQuantizerInt8>(quantizer);
-            make_searcher_for_quant(std::move(q));
-        } else if (py::isinstance<deglib::transformation::ScalarQuantizerInt8PerDim>(quantizer)) {
-            auto q = py::cast<deglib::transformation::ScalarQuantizerInt8PerDim>(quantizer);
-            make_searcher_for_quant(std::move(q));
-        } else if (py::isinstance<deglib::transformation::ScalarQuantizerUint8>(quantizer)) {
-            auto q = py::cast<deglib::transformation::ScalarQuantizerUint8>(quantizer);
-            make_searcher_for_quant(std::move(q));
-        } else if (py::isinstance<deglib::transformation::ScalarQuantizerUint8PerDim>(quantizer)) {
-            auto q = py::cast<deglib::transformation::ScalarQuantizerUint8PerDim>(quantizer);
-            make_searcher_for_quant(std::move(q));
-        } else if (py::isinstance<deglib::transformation::EvpQuantizer>(quantizer)) {
-            auto q = py::cast<deglib::transformation::EvpQuantizer>(quantizer);
-            make_searcher_for_quant(std::move(q));
         } else {
-            throw std::invalid_argument("Unsupported quantizer type provided to create_searcher.");
+            searcher_ = deglib::make_searcher(graph);
         }
     }
 
@@ -953,7 +905,8 @@ py::array_t<uint32_t> presort_wrapper(
 deglib::DynamicExplorationGraph read_only_graph_from_graph_wrapper(
     const deglib::DynamicExplorationGraph& graph,
     std::optional<deglib::distances::FloatSpace> custom_feature_space = std::nullopt,
-    std::optional<py::array> custom_features = std::nullopt
+    std::optional<py::array> custom_features = std::nullopt,
+    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> custom_transformations = {}
 ) {
     const void* feat_ptr = nullptr;
     py::buffer_info feat_info;
@@ -972,14 +925,20 @@ deglib::DynamicExplorationGraph read_only_graph_from_graph_wrapper(
         }
     }
 
-    return custom_feature_space.has_value() ? graph.to_readonly(custom_feature_space.value(), feat_ptr) : graph.to_readonly();
+    if (custom_feature_space.has_value() || feat_ptr != nullptr || !custom_transformations.empty()) {
+        const auto& fs = custom_feature_space.value_or(graph.getFeatureSpace());
+        return graph.to_readonly(fs, feat_ptr, std::move(custom_transformations));
+    } else {
+        return graph.to_readonly();
+    }
 }
 
 deglib::DynamicExplorationGraph dynamic_graph_from_graph_wrapper(
     const deglib::DynamicExplorationGraph& graph,
     std::optional<deglib::distances::FloatSpace> custom_feature_space = std::nullopt,
     std::optional<py::array> custom_features = std::nullopt,
-    const uint32_t chunk_size = 1024
+    const uint32_t chunk_size = 1024,
+    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> custom_transformations = {}
 ) {
     const void* feat_ptr = nullptr;
     py::buffer_info feat_info;
@@ -1003,7 +962,8 @@ deglib::DynamicExplorationGraph dynamic_graph_from_graph_wrapper(
                                          : deglib::graph::convert_to_dynamic_graph(graph.internal(), chunk_size);
 
     auto heap_graph = std::make_unique<deglib::graph::DynamicGraph>(std::move(dynamic_graph));
-    return deglib::DynamicExplorationGraph(std::move(heap_graph), graph.getTransformations());
+    auto xfrms = !custom_transformations.empty() ? std::move(custom_transformations) : graph.getTransformations();
+    return deglib::DynamicExplorationGraph(std::move(heap_graph), std::move(xfrms));
 }
 
 deglib::DynamicExplorationGraph load_dynamic_graph_wrapper(const char* path, const uint32_t chunk_size = 1024) {
@@ -1014,7 +974,8 @@ deglib::DynamicExplorationGraph size_bounded_graph_from_graph_wrapper(
     const deglib::DynamicExplorationGraph& graph,
     std::optional<deglib::distances::FloatSpace> custom_feature_space = std::nullopt,
     std::optional<py::array> custom_features = std::nullopt,
-    const uint32_t new_max_size = 0
+    const uint32_t new_max_size = 0,
+    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> custom_transformations = {}
 ) {
     const void* feat_ptr = nullptr;
     py::buffer_info feat_info;
@@ -1038,7 +999,8 @@ deglib::DynamicExplorationGraph size_bounded_graph_from_graph_wrapper(
                                          : deglib::graph::convert_to_sizebounded_graph(graph.internal());
 
     auto heap_graph = std::make_unique<deglib::graph::SizeBoundedGraph>(std::move(size_bounded));
-    return deglib::DynamicExplorationGraph(std::move(heap_graph), graph.getTransformations());
+    auto xfrms = !custom_transformations.empty() ? std::move(custom_transformations) : graph.getTransformations();
+    return deglib::DynamicExplorationGraph(std::move(heap_graph), std::move(xfrms));
 }
 
 deglib::DynamicExplorationGraph create_size_bounded_graph(
@@ -1129,7 +1091,66 @@ uint32_t calc_search_reachability_wrapper(const deglib::DynamicExplorationGraph&
 
 float calc_exploration_reach_wrapper(const deglib::DynamicExplorationGraph& graph) { return deglib::analysis::calc_exploration_reach(graph.internal()); }
 
-deglib::analysis::GraphStats analyze_graph_wrapper(const deglib::DynamicExplorationGraph& graph) { return deglib::analysis::analyze_graph(graph.internal()); }
+deglib::analysis::GraphStats analyze_graph_wrapper(
+    const deglib::DynamicExplorationGraph& graph,
+    std::optional<py::array_t<uint32_t>> base_top = std::nullopt,
+    const size_t sample_size = 0,
+    const size_t num_threads = 0
+) {
+    const uint32_t* ptr = nullptr;
+    size_t rows = 0;
+    size_t k = 0;
+    size_t row_stride = 0;
+
+    if (base_top.has_value() && base_top->size() > 0) {
+        py::buffer_info buf = base_top->request();
+        if (buf.ndim != 2) {
+            throw std::invalid_argument("base_top must be a 2D numpy array");
+        }
+        rows = static_cast<size_t>(buf.shape[0]);
+        k = static_cast<size_t>(buf.shape[1]);
+        const size_t col_stride = static_cast<size_t>(buf.strides[1]) / sizeof(uint32_t);
+        if (col_stride != 1) {
+            throw std::invalid_argument("base_top columns must be contiguous");
+        }
+        row_stride = static_cast<size_t>(buf.strides[0]) / sizeof(uint32_t);
+        ptr = static_cast<const uint32_t*>(buf.ptr);
+    }
+
+    deglib::analysis::GraphStats result;
+    {
+        py::gil_scoped_release release;
+        result = deglib::analysis::analyze_graph(graph.internal(), ptr, rows, k, sample_size, num_threads, row_stride);
+    }
+    return result;
+}
+
+float calc_graph_quality_wrapper(
+    const deglib::DynamicExplorationGraph& graph,
+    py::array_t<uint32_t> base_top,
+    const size_t sample_size = 0,
+    const size_t num_threads = 0
+) {
+    py::buffer_info buf = base_top.request();
+    if (buf.ndim != 2) {
+        throw std::invalid_argument("base_top must be a 2D numpy array");
+    }
+    const size_t rows = static_cast<size_t>(buf.shape[0]);
+    const size_t k = static_cast<size_t>(buf.shape[1]);
+    const size_t col_stride = static_cast<size_t>(buf.strides[1]) / sizeof(uint32_t);
+    if (col_stride != 1) {
+        throw std::invalid_argument("base_top columns must be contiguous");
+    }
+    const size_t row_stride = static_cast<size_t>(buf.strides[0]) / sizeof(uint32_t);
+    const auto* ptr = static_cast<const uint32_t*>(buf.ptr);
+
+    float result = 0.0f;
+    {
+        py::gil_scoped_release release;
+        result = deglib::analysis::calc_graph_quality(graph.internal(), ptr, rows, k, sample_size, num_threads, row_stride);
+    }
+    return result;
+}
 
 // ============================================================================
 
@@ -1868,9 +1889,8 @@ PYBIND11_MODULE(deglib_cpp, m) {
 
     py::class_<SearcherPy>(search_module, "Searcher")
         .def(
-            py::init<const deglib::DynamicExplorationGraph&, py::object, std::optional<deglib::distances::FloatSpace>, std::optional<py::array>>(),
-            py::arg("graph"), py::arg("quantizer") = py::none(), py::arg("rerank_space") = std::nullopt, py::arg("base_vectors") = std::nullopt,
-            py::keep_alive<1, 2>()
+            py::init<const deglib::DynamicExplorationGraph&, std::optional<deglib::distances::FloatSpace>, std::optional<py::array>>(), py::arg("graph"),
+            py::arg("rerank_space") = std::nullopt, py::arg("base_vectors") = std::nullopt, py::keep_alive<1, 2>()
         )
         .def(
             "search", &SearcherPy::search, py::arg("query"), py::arg("k"), py::arg("eps_or_ef") = 0.1f, py::arg("rerank_factor") = 1.0f,
@@ -1985,7 +2005,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def(
             "to_readonly",
             [](const deglib::DynamicExplorationGraph& g, std::optional<deglib::distances::FloatSpace> custom_feature_space,
-               std::optional<py::array> custom_features) {
+               std::optional<py::array> custom_features, std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations) {
                 const void* feat_ptr = nullptr;
                 py::buffer_info feat_info;
                 if (custom_features.has_value() && !custom_features->is_none()) {
@@ -2003,19 +2023,22 @@ PYBIND11_MODULE(deglib_cpp, m) {
                         }
                     }
                 }
-                if (custom_feature_space.has_value() || feat_ptr != nullptr) {
+                if (custom_feature_space.has_value() || feat_ptr != nullptr || !transformations.empty()) {
                     const auto& fs = custom_feature_space.value_or(g.getFeatureSpace());
-                    return g.to_readonly(fs, feat_ptr);
+                    return g.to_readonly(fs, feat_ptr, std::move(transformations));
                 } else {
                     return g.to_readonly();
                 }
             },
-            py::arg("custom_feature_space") = py::none(), py::arg("custom_features") = py::none()
+            py::arg("custom_feature_space") = py::none(), py::arg("custom_features") = py::none(),
+            py::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}
         )
+        .def("set_transformations", &deglib::DynamicExplorationGraph::setTransformations, py::arg("transformations"))
         .def(
             "to_mutable",
             [](const deglib::DynamicExplorationGraph& g, std::optional<deglib::distances::FloatSpace> custom_feature_space,
-               std::optional<py::array> custom_features, uint32_t new_max_size) {
+               std::optional<py::array> custom_features, uint32_t new_max_size,
+               std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations) {
                 const void* feat_ptr = nullptr;
                 py::buffer_info feat_info;
                 if (custom_features.has_value() && !custom_features->is_none()) {
@@ -2033,19 +2056,21 @@ PYBIND11_MODULE(deglib_cpp, m) {
                         }
                     }
                 }
-                if (custom_feature_space.has_value() || feat_ptr != nullptr) {
+                if (custom_feature_space.has_value() || feat_ptr != nullptr || !transformations.empty()) {
                     const auto& fs = custom_feature_space.value_or(g.getFeatureSpace());
-                    return g.to_mutable(fs, feat_ptr, new_max_size);
+                    return g.to_mutable(fs, feat_ptr, new_max_size, std::move(transformations));
                 } else {
                     return g.to_mutable(new_max_size);
                 }
             },
-            py::arg("custom_feature_space") = py::none(), py::arg("custom_features") = py::none(), py::arg("new_max_size") = 0
+            py::arg("custom_feature_space") = py::none(), py::arg("custom_features") = py::none(), py::arg("new_max_size") = 0,
+            py::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}
         )
         .def(
             "to_dynamic",
             [](const deglib::DynamicExplorationGraph& g, std::optional<deglib::distances::FloatSpace> custom_feature_space,
-               std::optional<py::array> custom_features, uint32_t chunk_size) {
+               std::optional<py::array> custom_features, uint32_t chunk_size,
+               std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations) {
                 const void* feat_ptr = nullptr;
                 py::buffer_info feat_info;
                 if (custom_features.has_value() && !custom_features->is_none()) {
@@ -2063,14 +2088,15 @@ PYBIND11_MODULE(deglib_cpp, m) {
                         }
                     }
                 }
-                if (custom_feature_space.has_value() || feat_ptr != nullptr) {
+                if (custom_feature_space.has_value() || feat_ptr != nullptr || !transformations.empty()) {
                     const auto& fs = custom_feature_space.value_or(g.getFeatureSpace());
-                    return g.to_dynamic(fs, feat_ptr, chunk_size);
+                    return g.to_dynamic(fs, feat_ptr, chunk_size, std::move(transformations));
                 } else {
                     return g.to_dynamic(chunk_size);
                 }
             },
-            py::arg("custom_feature_space") = py::none(), py::arg("custom_features") = py::none(), py::arg("chunk_size") = 1024
+            py::arg("custom_feature_space") = py::none(), py::arg("custom_features") = py::none(), py::arg("chunk_size") = 1024,
+            py::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}
         )
         .def(
             "search", &graph_search_single_wrapper<deglib::DynamicExplorationGraph>, py::arg("query"), py::arg("eps_or_ef"), py::arg("k"),
@@ -2116,15 +2142,18 @@ PYBIND11_MODULE(deglib_cpp, m) {
     m.def("load_sizebounded_graph", &load_sizebounded_graph_wrapper, py::arg("path"), py::arg("capacity") = 0);
     m.def(
         "read_only_graph_from_graph", &read_only_graph_from_graph_wrapper, py::arg("graph"), py::arg("custom_feature_space") = py::none(),
-        py::arg("custom_features") = py::none()
+        py::arg("custom_features") = py::none(),
+        py::arg("custom_transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}
     );
     m.def(
         "dynamic_graph_from_graph", &dynamic_graph_from_graph_wrapper, py::arg("graph"), py::arg("custom_feature_space") = py::none(),
-        py::arg("custom_features") = py::none(), py::arg("chunk_size") = 1024
+        py::arg("custom_features") = py::none(), py::arg("chunk_size") = 1024,
+        py::arg("custom_transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}
     );
     m.def(
         "size_bounded_graph_from_graph", &size_bounded_graph_from_graph_wrapper, py::arg("graph"), py::arg("custom_feature_space") = py::none(),
-        py::arg("custom_features") = py::none(), py::arg("new_max_size") = 0
+        py::arg("custom_features") = py::none(), py::arg("new_max_size") = 0,
+        py::arg("custom_transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}
     );
     m.def(
         "presort", &presort_wrapper, py::arg("vectors"), py::arg("space"), py::arg("radius_decay") = 0.9f, py::arg("threads") = 0,
@@ -2238,8 +2267,13 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def_readonly("source_vertices", &deglib::analysis::GraphStats::source_vertices)
         .def_readonly("search_reachability", &deglib::analysis::GraphStats::search_reachability)
         .def_readonly("exploration_reachability", &deglib::analysis::GraphStats::exploration_reachability)
+        .def_readonly("graph_quality", &deglib::analysis::GraphStats::graph_quality)
         .def_readonly("memory_bytes", &deglib::analysis::GraphStats::memory_bytes);
-    m.def("analyze_graph", &analyze_graph_wrapper, py::arg("graph"));
+    m.def("analyze_graph", &analyze_graph_wrapper, py::arg("graph"), py::arg("base_top") = py::none(), py::arg("sample_size") = 0, py::arg("num_threads") = 0);
+    m.def(
+        "calc_graph_quality", &calc_graph_quality_wrapper, py::arg("graph"), py::arg("base_top"), py::arg("sample_size") = 0, py::arg("num_threads") = 0,
+        "Computes graph quality comparing each vertex's outgoing edges against its true nearest neighbors."
+    );
     m.def(
         "prune_non_mrng_edges",
         [](deglib::DynamicExplorationGraph& graph, const size_t num_threads) {

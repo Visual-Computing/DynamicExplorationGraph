@@ -156,7 +156,7 @@ TEST(SearchRegression, Reranker_Prefetch_Optimize_Benchmark) {
     // is workload and hardware dependent and only appears once the base vectors exceed cache. This
     // benchmark reports the measured ratio and guards against a regression (tuned must not be materially
     // slower). A default that silently disables prefetching shows up here as the default line collapsing.
-    const size_t dim = 512;
+    const uint32_t dim = 512;
     const size_t num_queries = 2000;
     const size_t num_base = 100000;
     const size_t candidates_per_query = 200;

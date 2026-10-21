@@ -341,7 +341,7 @@ class Reranker:
 
 # High-performance searcher with optional on-the-fly quantization and exact reranking.
 class Searcher:
-    # Constructor via create_searcher(graph, quantizer=None, refine_space=None, refine_data=None)
+    # Constructor via create_searcher(graph, refine_space=None, refine_data=None)
 
     # Entry vertex optimization via k-means medoids
     optimize(n_clusters=256, n_iter=20, sample_size=0, k=100, seed=7, num_threads=1)
@@ -357,7 +357,7 @@ class Searcher:
     # unsorted: If True, returns candidates in heap order instead of ascending distance order
     search(query, k, eps_or_ef=0.1, rerank_factor=1.0, threads=1, return_distances=False, unsorted=False) -> np.ndarray | tuple[np.ndarray, np.ndarray]
 
-create_searcher(graph, quantizer=None, refine_space=None, refine_data=None) -> Searcher
+create_searcher(graph, refine_space=None, refine_data=None) -> Searcher
 ```
 
 ---
@@ -439,24 +439,26 @@ mips_l2_transform_query(queries) -> np.ndarray
 
 ## 6. Module: `deglib.analysis`
 
-Graph health diagnostics, regularity validation, and reachability metrics.
+Graph health diagnostics, regularity validation, quality evaluation, and reachability metrics.
 
 ```python
 from deglib.analysis import (
+    GraphStats,
     analyze_graph,
+    calc_graph_quality,
     check_graph_regularity,
     check_graph_weights,
     check_graph_connectivity,
     calc_avg_edge_weight,
     calc_edge_weight_histogram,
-    calc_non_rng_edges,
+    calc_non_mrng_edges,
     calc_search_reachability,
     calc_exploration_reach,
 )
 
-# Comprehensive graph analysis returning a dictionary of topology and health metrics
-analyze_graph(graph) -> dict
-# Returns dictionary:
+# Comprehensive graph analysis returning a GraphStats object (dual attribute and dict-like access; printable via str()/print())
+analyze_graph(graph, base_top=None, sample_size=0, num_threads=0) -> GraphStats
+# Returns GraphStats:
 # {
 #     "vertex_count": int,              # Total active vertices
 #     "edge_count": int,                # Total valid edges
@@ -471,8 +473,12 @@ analyze_graph(graph) -> dict
 #     "source_vertices": int,           # Vertices with in-degree = 0 (unreachable as targets)
 #     "search_reachability": float,     # Ratio of vertices reachable from entry points (0.0 to 1.0)
 #     "exploration_reachability": float,# Average exploration reachability across all vertices (0.0 to 1.0)
+#     "graph_quality": float,           # Ratio of edges matching true NN ground truth (if base_top provided)
 #     "memory_bytes": int               # Estimated memory footprint in bytes
 # }
+
+# Calculate ratio of outgoing edges matching true nearest-neighbor ground truth (supports strided views / mmap)
+calc_graph_quality(graph, base_top, sample_size=0, num_threads=0) -> float
 
 # Verify that vertex count, ascending edge ordering, and neighbor uniqueness are valid
 check_graph_regularity(graph, expected_vertices, check_back_link=False) -> bool

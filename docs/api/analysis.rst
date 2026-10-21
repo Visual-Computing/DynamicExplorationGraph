@@ -14,6 +14,8 @@ Full Graph Summary
 
 .. autofunction:: deglib.analysis.analyze_graph
 
+.. autofunction:: deglib.analysis.calc_graph_quality
+
 Reachability & Connectivity
 ---------------------------
 
@@ -48,8 +50,11 @@ Example Usage
 
    # Obtain full structural diagnostics
    stats = deglib.analysis.analyze_graph(graph)
-   print(f"Vertex Count: {stats['vertex_count']}")
-   print(f"Average Out-Degree: {stats['avg_out_degree']:.2f}")
-   print(f"Search Reachability: {stats['search_reachability']:.2%}")
-   print(f"Exploration Reachability: {stats['exploration_reachability']:.2%}")
+   print(f"Vertex Count: {stats.vertex_count}")
+   print(f"Average Out-Degree: {stats.avg_out_degree:.2f}")
+   print(f"Search Reachability: {stats.search_reachability:.2%}")
+   print(f"Exploration Reachability: {stats.exploration_reachability:.2%}")
+
+   # Pretty-print all graph statistics
+   print(stats)
 

@@ -3,7 +3,6 @@
 #include "dataset.h"
 #include "file_io.h"
 #include "logging.h"
-#include "stats.h"
 #include "stopwatch.h"
 
 #include <deglib/deglib.h>
@@ -142,8 +141,8 @@ void run_dynamic_benchmark(const DatasetName& ds_name, const std::filesystem::pa
         if (!std::filesystem::exists(graph_path) || force_rebuild) {
             log("Building dynamic graph...\n");
             create_graph(
-                base_repository, ds_type, graph_path, ds.info().metric, config.lid, config.k, config.k_ext, config.eps_ext, config.k_opt, config.eps_opt, config.i_opt, 1, true, ds.info().scale,
-                false, instruction
+                base_repository, ds_type, graph_path, ds.info().metric, config.lid, config.k, config.k_ext, config.eps_ext, config.k_opt, config.eps_opt,
+                config.i_opt, 1, true, ds.info().scale, false, instruction
             );
         } else {
             log("Graph already exists: {}\n", graph_path);

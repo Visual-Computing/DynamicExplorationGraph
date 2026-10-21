@@ -74,3 +74,5 @@ __pycache__/
 
 # Python build artifacts
 python/build_cmake/
+*.pyd
+*.old

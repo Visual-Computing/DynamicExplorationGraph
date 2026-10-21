@@ -81,6 +81,15 @@ Builds a complete exploration graph from scratch (or loads a cached `.deg` file)
 * `--force-rebuild`: Forces graph rebuilding even if a cached `.deg` exists.
 * `--instruction <inst>`: SIMD instruction set (`auto`, `avx512`, `avx2`, `scalar`).
 * `--threads <count>`: Thread count for graph construction.
+* `--graph-quality, -q <mode>`: Evaluate graph quality (`none` [default], `exact`, `approximated`). Missing ground truth files are automatically generated if needed.
+
+#### Graph Quality Metric
+Graph quality evaluates how closely the graph's edge topology approximates an exact $k$-nearest-neighbor graph (KNNG). For every vertex $v \in V$ with out-degree $d_v$, it computes the ratio of outgoing edges that point to its true $d_v$ nearest neighbors in the feature space:
+$$\text{Quality}(G) = \frac{1}{|V|} \sum_{v \in V} \frac{|N(v) \cap \text{KNN}_{d_v}(v)|}{d_v}$$
+
+* **`none` (default)**: Skips quality calculation.
+* **`exact`**: Uses exact brute-force linear search ground truth (`*_base_top1000.ivecs`). Automatically generated if not present.
+* **`approximated`**: Uses ANNS graph exploration ground truth. Automatically generated if not present.
 
 ---
 

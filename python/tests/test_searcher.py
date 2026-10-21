@@ -69,7 +69,7 @@ def test_searcher_quantized_int8_with_rerank():
     quantizer = deglib.transformation.make_scalar_quantizer_int8(data)
     int8_data = quantizer.quantize(data)
     target_space = FloatSpace.create(dim=dim, metric=Metric.Int8_L2)
-    ro_graph = graph.to_readonly(target_space, int8_data)
+    ro_graph = graph.to_readonly(target_space, int8_data, transformations=[quantizer])
 
     # 3. Refine features in FP16
     base_fp16 = deglib.distances.floats_to_fp16(data)
@@ -78,7 +78,6 @@ def test_searcher_quantized_int8_with_rerank():
     # 4. Create Searcher
     searcher = create_searcher(
         graph=ro_graph,
-        quantizer=quantizer,
         refine_space=rerank_space,
         refine_data=base_fp16,
     )
@@ -113,11 +112,10 @@ def test_searcher_quantized_uint8_with_rerank():
     quantizer = deglib.transformation.make_scalar_quantizer_uint8(data)
     uint8_data = quantizer.quantize(data)
     target_space = FloatSpace.create(dim=dim, metric=Metric.Uint8_L2)
-    ro_graph = graph.to_readonly(target_space, uint8_data)
+    ro_graph = graph.to_readonly(target_space, uint8_data, transformations=[quantizer])
 
     searcher = create_searcher(
         graph=ro_graph,
-        quantizer=quantizer,
         refine_space=FloatSpace.create(dim=dim, metric=Metric.FP32_L2),
         refine_data=data,
     )
@@ -146,11 +144,10 @@ def test_searcher_evp_quantizer():
     quantizer = deglib.transformation.EvpQuantizer(non_zeros=16)
     evp_data = quantizer.quantize(data)
     target_space = FloatSpace.create(dim=dim, metric=Metric.EVP_InnerProduct)
-    ro_graph = graph.to_readonly(target_space, evp_data)
+    ro_graph = graph.to_readonly(target_space, evp_data, transformations=[quantizer])
 
     searcher = create_searcher(
         graph=ro_graph,
-        quantizer=quantizer,
         refine_space=FloatSpace.create(dim=dim, metric=Metric.FP32_InnerProduct),
         refine_data=data,
     )
@@ -166,6 +163,26 @@ def test_searcher_evp_quantizer():
     assert len(res_fp16) == 3
     assert res_fp16[0] == 3
     assert dists_fp16[0] == pytest.approx(0.0, abs=1e-3)
+
+
+def test_searcher_quantized_without_refiner():
+    np.random.seed(42)
+    dim = 8
+    n = 100
+    data = np.random.uniform(-1.0, 1.0, size=(n, dim)).astype(np.float32)
+
+    graph = deglib.builder.build_from_data(data, edges_per_vertex=16, metric=Metric.FP32_L2)
+
+    quantizer = deglib.transformation.make_scalar_quantizer_int8(data)
+    int8_data = quantizer.quantize(data)
+    target_space = FloatSpace.create(dim=dim, metric=Metric.Int8_L2)
+    ro_graph = graph.to_readonly(target_space, int8_data, transformations=[quantizer])
+
+    searcher = create_searcher(graph=ro_graph)
+    query = data[5]
+    res = searcher.search(query, k=5, eps_or_ef=0.2)
+    assert len(res) == 5
+    assert res[0] == 5
 
 
 def test_searcher_optimize_sets_kmeans_entries():

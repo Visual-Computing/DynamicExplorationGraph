@@ -3,7 +3,6 @@
 #include "dataset.h"
 #include "file_io.h"
 #include "logging.h"
-#include "stats.h"
 #include "stopwatch.h"
 
 #include <deglib/deglib.h>

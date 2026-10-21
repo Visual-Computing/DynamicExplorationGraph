@@ -315,3 +315,69 @@ TEST(DegAnalysisCheckMRNG, SelfLoopsAndEmptySlotsIgnored) {
     // checkMRNG should not block connecting 0 to 1.
     EXPECT_TRUE(deglib::analysis::checkMRNG(graph, 4, 0, 1, 1.0f));
 }
+
+TEST(DegAnalysisCalcGraphQuality, EmptyOrNullInputs) {
+    auto k4 = build_fully_connected_graph();
+    std::vector<uint32_t> base_top = {1, 2, 3, 0, 2, 3, 0, 1, 3, 0, 1, 2};
+
+    // null base_top
+    EXPECT_FLOAT_EQ(deglib::analysis::calc_graph_quality(k4, nullptr, 4, 3), 0.0f);
+    // rows == 0
+    EXPECT_FLOAT_EQ(deglib::analysis::calc_graph_quality(k4, base_top.data(), 0, 3), 0.0f);
+    // k == 0
+    EXPECT_FLOAT_EQ(deglib::analysis::calc_graph_quality(k4, base_top.data(), 4, 0), 0.0f);
+}
+
+TEST(DegAnalysisCalcGraphQuality, PerfectQuality) {
+    // 4 vertices fully connected: 3 edges each. Total edges = 12.
+    // base_top has the exact neighbors for each vertex.
+    auto k4 = build_fully_connected_graph();
+    std::vector<uint32_t> base_top = {
+        1, 2, 3,  // v0 neighbors
+        0, 2, 3,  // v1 neighbors
+        0, 1, 3,  // v2 neighbors
+        0, 1, 2   // v3 neighbors
+    };
+
+    float q = deglib::analysis::calc_graph_quality(k4, base_top.data(), 4, 3);
+    EXPECT_FLOAT_EQ(q, 1.0f);
+}
+
+TEST(DegAnalysisCalcGraphQuality, PartialQualityAndSampling) {
+    auto k4 = build_fully_connected_graph();
+
+    // Vertex 0 has neighbors {1, 2, 3}. If base_top is {1, 99, 99}, only 1 matches out of 3.
+    // Vertex 1 has neighbors {0, 2, 3}. If base_top is {0, 2, 99}, 2 match out of 3.
+    // Vertex 2 has neighbors {0, 1, 3}. If base_top is {99, 99, 99}, 0 match out of 3.
+    // Vertex 3 has neighbors {0, 1, 2}. If base_top is {0, 1, 2}, 3 match out of 3.
+    // Total hits: 1 + 2 + 0 + 3 = 6. Total edges: 12. Quality = 6/12 = 0.5.
+    std::vector<uint32_t> base_top = {1, 99, 99, 0, 2, 99, 99, 99, 99, 0, 1, 2};
+
+    float q = deglib::analysis::calc_graph_quality(k4, base_top.data(), 4, 3);
+    EXPECT_FLOAT_EQ(q, 0.5f);
+
+    // If sample_size = 1 (only vertex 0 evaluated): 1 hit / 3 edges = 1/3 = 0.3333333f
+    float q_sample = deglib::analysis::calc_graph_quality(k4, base_top.data(), 4, 3, 1);
+    EXPECT_NEAR(q_sample, 1.0f / 3.0f, 1e-6);
+}
+
+TEST(DegAnalysisCalcGraphQuality, DistinctExternalLabels) {
+    // 2 vertices, epv=1
+    // vertex 0: internal 0 -> label 10, neighbor internal 1 (label 20)
+    // vertex 1: internal 1 -> label 20, neighbor internal 0 (label 10)
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
+    MockInternalGraph graph(2, 1, std::move(space));
+    graph.setLabel(0, 10);
+    graph.setLabel(1, 20);
+    graph.setNeighbors(0, {1});
+    graph.setNeighbors(1, {0});
+
+    // base_top indexed by external label (needs at least size 21 rows, k=1)
+    std::vector<uint32_t> base_top(21 * 1, 999);
+    base_top[10] = 20;  // 10's true NN is 20 -> matches graph neighbor (ext label 20)
+    base_top[20] = 20;  // 20's true NN is 20 -> does not match graph neighbor (ext label 10)
+
+    // Total hits: 1 (from vertex 0) + 0 (from vertex 1) = 1. Total edges = 2. Quality = 0.5
+    float q = deglib::analysis::calc_graph_quality(graph, base_top.data(), 21, 1);
+    EXPECT_FLOAT_EQ(q, 0.5f);
+}

@@ -3,7 +3,6 @@
 #include "dataset.h"
 #include "file_io.h"
 #include "logging.h"
-#include "stats.h"
 #include "stopwatch.h"
 
 #include <deglib/deglib.h>
@@ -98,11 +97,12 @@ void print_help(const char* program_name) {
     log("  enron    - Enron (94.9k vectors, 1369D, K=30)\n");
     log("  all      - Execute benchmarks for all datasets sequentially\n\n");
     log("Options:\n");
-    log("  --data-path, -d <path> Path to datasets directory (default: env DEG_DATA_PATH or ./data)\n");
-    log("  --force-rebuild        Force rebuilding the graph even if the graph file already exists\n");
-    log("  --instruction <inst>   Select distance instruction set (auto, avx512, avx2, scalar)\n");
-    log("  --threads <count>      Number of threads used for building the graph (default: hardware_concurrency / 2)\n");
-    log("  --help, -h             Display this detailed help message\n\n");
+    log("  --data-path, -d <path>     Path to datasets directory (default: env DEG_DATA_PATH or ./data)\n");
+    log("  --force-rebuild            Force rebuilding the graph even if the graph file already exists\n");
+    log("  --instruction <inst>       Select distance instruction set (auto, avx512, avx2, scalar)\n");
+    log("  --threads <count>          Number of threads used for building the graph (default: hardware_concurrency / 2)\n");
+    log("  --graph-quality, -q <mode> Evaluate graph quality (none [default], exact, approximated)\n");
+    log("  --help, -h                 Display this detailed help message\n\n");
 }
 
 static deglib::cpu::InstructionSet parse_instruction_set(const std::string& str) {
@@ -119,7 +119,8 @@ void run_static_benchmark(
     const std::filesystem::path& data_path,
     bool force_rebuild,
     deglib::cpu::InstructionSet instruction,
-    uint32_t build_threads
+    uint32_t build_threads,
+    GraphQualityMode quality_mode = GraphQualityMode::None
 ) {
     Dataset ds(ds_name, data_path);
     auto config = get_dataset_config(ds_name);
@@ -127,15 +128,8 @@ void run_static_benchmark(
 
     log("\n=== Benchmarking Static Graph Creation & Evaluation for Dataset: {} ===\n", ds.name());
 
-    auto setup_threads = std::thread::hardware_concurrency() / 2;
-    if (!setup_dataset(ds, setup_threads, /*include_half=*/false, /*include_exploration=*/true)) {
-        log("ERROR: Failed to setup dataset {}\n", ds.name());
-        return;
-    }
-
-    auto base_repository = ds.load_base();
-    auto query_repository = ds.load_query();
-    const uint32_t dims = (uint32_t)base_repository.dims();
+    auto setup_threads = std::max(1u, std::thread::hardware_concurrency());
+    const uint32_t dims = ds.info().dims;
 
     std::string graph_path = build_graph_filename(ds, config, dims);
     ensure_directory(std::filesystem::path(graph_path).parent_path());
@@ -143,6 +137,14 @@ void run_static_benchmark(
     std::string log_path = graph_path + ".log";
     set_log_file(log_path, false);
     log("Logging to file: {}\n", log_path);
+
+    if (!setup_dataset(ds, setup_threads, /*include_half=*/false, /*include_exploration=*/true, quality_mode, graph_path)) {
+        log("ERROR: Failed to setup dataset {}\n", ds.name());
+        return;
+    }
+
+    auto base_repository = ds.load_base();
+    auto query_repository = ds.load_query();
 
     log("\n--- Computing Linear Search Baseline ---\n");
     uint64_t linear_baseline_us = compute_linear_search_baseline(base_repository, ds.info().metric, 100, instruction) * 2;
@@ -164,7 +166,8 @@ void run_static_benchmark(
 
         log("\n--- Graph Analysis ---\n");
         {
-            analyze_graph(graph);
+            auto base_gt = (quality_mode != GraphQualityMode::None) ? ds.load_base_groundtruth(false) : BaseGroundTruth{};
+            analyze_graph(graph, base_gt);
         }
 
         log("\n--- ANNS Test (k={}) ---\n", config.anns_k);
@@ -194,7 +197,8 @@ int main(int argc, char* argv[]) {
     DatasetName ds_name = DatasetName::SIFT1M;
     bool force_rebuild = false;
     deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto;
-    uint32_t build_threads = 1;
+    uint32_t build_threads = std::max(1u, std::thread::hardware_concurrency() / 2);
+    GraphQualityMode quality_mode = GraphQualityMode::None;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -209,6 +213,8 @@ int main(int argc, char* argv[]) {
             instruction = parse_instruction_set(argv[++i]);
         } else if (arg == "--threads" && i + 1 < argc) {
             build_threads = (uint32_t)std::stoul(argv[++i]);
+        } else if ((arg == "--graph-quality" || arg == "-q") && i + 1 < argc) {
+            quality_mode = parse_graph_quality_mode(argv[++i]);
         } else {
             auto parsed = DatasetName::from_string(arg);
             if (parsed.is_valid()) {
@@ -231,7 +237,7 @@ int main(int argc, char* argv[]) {
     }
 
     for (const auto& current_ds : datasets_to_run) {
-        run_static_benchmark(current_ds, data_path, force_rebuild, instruction, build_threads);
+        run_static_benchmark(current_ds, data_path, force_rebuild, instruction, build_threads, quality_mode);
     }
 
     log("\nStatic Benchmark Finished Successfully.\n");

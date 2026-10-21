@@ -59,7 +59,7 @@ def _resolve_graph_cache_path(
 
     build_metric_str = deglib.Metric.FP32_L2.name if metric == "euclidean" else deglib.Metric.FP32_InnerProduct.name
     ext_k = extend_k if extend_k is not None else k * 2
-    
+
     # 1. Preferred filename with AddK
     filename = f"{dims}D_{build_metric_str}_K{k}_AddK{ext_k}Eps{extend_eps:.1f}_{opt_target}_FLAS.deg"
     full_path = deg_dir / filename
@@ -161,7 +161,7 @@ class DEG(BaseANN):
 
         # 4s. Optimize entry vertices and prefetch values
         t_km = time.time()
-        self.searcher.optimize()  
+        self.searcher.optimize()
         print(f"Optimized Searcher for the provided graph and hardware in {time.time() - t_km:.2f}s", flush=True)
 
     def set_query_arguments(self, eps_or_ef: float | int):
@@ -279,19 +279,18 @@ class QG(BaseANN):
         self.quantizer = deglib.transformation.make_scalar_quantizer_int8(X)
         int8_features = self.quantizer.quantize(X, num_threads=1)
         target_space = deglib.FloatSpace.create(dim=dims, metric=self.int8_metric)
-        self.graph = loaded_graph.to_readonly(target_space, int8_features)
+        self.graph = loaded_graph.to_readonly(target_space, int8_features, transformations=[self.quantizer])
 
         # 5. Initialize C++ Zero-overhead Searcher
         self.searcher = deglib.search.create_searcher(
             graph=self.graph,
-            quantizer=self.quantizer,
             refine_space=self.rerank_space_fp16,
             refine_data=self.original_features_fp16,
         )
 
         # 6. Optimize entry vertices and prefetch values
         t_km = time.time()
-        self.searcher.optimize()  
+        self.searcher.optimize()
         print(f"Optimized Searcher for the provided graph and hardware in {time.time() - t_km:.2f}s", flush=True)
 
     def set_query_arguments(self, eps_or_ef: float | int, rerank_size_factor: float = 1.0):
@@ -323,4 +322,3 @@ class QG(BaseANN):
             f"DEG-QG(k={self.k}, opt={self.opt_target}, prune_mrng={self.prune_non_mrng}, "
             f"rerank_factor={self.rerank_size_factor}, eps={self.eps_or_ef})"
         )
-

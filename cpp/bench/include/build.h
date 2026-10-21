@@ -24,10 +24,10 @@ namespace deglib::benchmark {
 enum DataStreamType { AddAll, AddHalf, AddAllRemoveHalf, AddHalfRemoveAndAddOneAtATime };
 
 /**
- * Create a random exploration graph from the given StaticFeatureRepository.
+ * Create a random exploration graph from the given FeatureRepository.
  */
 inline deglib::graph::SizeBoundedGraph create_random_graph(
-    const deglib::StaticFeatureRepository& repository,
+    const deglib::FeatureRepository& repository,
     deglib::distances::Metric metric,
     const uint8_t k,
     const uint32_t max_size = 0,
@@ -47,7 +47,7 @@ inline deglib::graph::SizeBoundedGraph create_random_graph(
 }
 
 inline void create_graph(
-    const deglib::StaticFeatureRepository& repository,
+    const deglib::FeatureRepository& repository,
     const DataStreamType data_stream_type,
     const std::string& graph_file,
     deglib::distances::Metric metric,

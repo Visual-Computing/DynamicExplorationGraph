@@ -80,7 +80,7 @@ TEST(SearcherTest, QuantizedInt8WithFP16Refiner) {
     auto base_graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
 
     // Quantize to INT8
-    auto quantizer = deglib::optimization::make_scalar_quantizer_int8(data.data(), count, dim);
+    auto quantizer = deglib::transformation::make_scalar_quantizer_int8(data.data(), count, dim);
     std::vector<int8_t> int8_data(count * dim);
     quantizer.quantize(data.data(), int8_data.data(), count, dim);
 
@@ -117,7 +117,7 @@ TEST(SearcherTest, QuantizedUint8WithFP32Refiner) {
 
     auto base_graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
 
-    auto quantizer = deglib::optimization::make_scalar_quantizer_uint8(data.data(), count, dim);
+    auto quantizer = deglib::transformation::make_scalar_quantizer_uint8(data.data(), count, dim);
     std::vector<uint8_t> uint8_data(count * dim);
     quantizer.quantize(data.data(), uint8_data.data(), count, dim);
 
@@ -191,40 +191,40 @@ TEST(SearcherTest, OptimizeTunesFp16Reranker) {
 }
 
 TEST(SearcherTest, OptimizeSelectsValidPrefetchConfigAndPreservesResults) {
-   // optimize() tunes traversal prefetch (po, pl, nl) to the best of its search grid. The actual
-   // speedup is workload/hardware dependent (it only materialises when the working set exceeds
-   // cache), so it is reported by the regression benchmark, not asserted here. This test pins the
-   // deterministic contract: the tuner lands on a valid grid value and search stays correct.
-   const uint32_t dim = 16;
-   const uint32_t count = 500;
+    // optimize() tunes traversal prefetch (po, pl, nl) to the best of its search grid. The actual
+    // speedup is workload/hardware dependent (it only materialises when the working set exceeds
+    // cache), so it is reported by the regression benchmark, not asserted here. This test pins the
+    // deterministic contract: the tuner lands on a valid grid value and search stays correct.
+    const uint32_t dim = 16;
+    const uint32_t count = 500;
 
-   std::mt19937 rng(123);
-   std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-   std::vector<float> data(count * dim);
-   for (auto& v : data) v = dist(rng);
+    std::mt19937 rng(123);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    std::vector<float> data(count * dim);
+    for (auto& v : data) v = dist(rng);
 
-   auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 16, deglib::distances::Metric::FP32_L2);
-   auto searcher = deglib::search::make_searcher(graph.internal());
+    auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 16, deglib::distances::Metric::FP32_L2);
+    auto searcher = deglib::search::make_searcher(graph.internal());
 
-   searcher->optimize(/*n_clusters=*/32, /*n_iter=*/5, /*sample_size=*/0, /*k=*/10, /*seed=*/7, /*threads=*/1);
+    searcher->optimize(/*n_clusters=*/32, /*n_iter=*/5, /*sample_size=*/0, /*k=*/10, /*seed=*/7, /*threads=*/1);
 
-   // Tuner must land on a value from its own search grid (proves it actually tuned, not garbage).
-   const int32_t po = graph.getPo();
-   const int32_t pl = graph.getPl();
-   const int32_t nl = graph.getNl();
-   const std::vector<int32_t> grid_po = {4, 8, 12, 16};
-   const std::vector<int32_t> grid_small = {2, 3, 4};
-   EXPECT_NE(std::find(grid_po.begin(), grid_po.end(), po), grid_po.end());
-   EXPECT_NE(std::find(grid_small.begin(), grid_small.end(), pl), grid_small.end());
-   EXPECT_NE(std::find(grid_small.begin(), grid_small.end(), nl), grid_small.end());
+    // Tuner must land on a value from its own search grid (proves it actually tuned, not garbage).
+    const int32_t po = graph.getPo();
+    const int32_t pl = graph.getPl();
+    const int32_t nl = graph.getNl();
+    const std::vector<int32_t> grid_po = {4, 8, 12, 16};
+    const std::vector<int32_t> grid_small = {2, 3, 4};
+    EXPECT_NE(std::find(grid_po.begin(), grid_po.end(), po), grid_po.end());
+    EXPECT_NE(std::find(grid_small.begin(), grid_small.end(), pl), grid_small.end());
+    EXPECT_NE(std::find(grid_small.begin(), grid_small.end(), nl), grid_small.end());
 
-   // Search still returns the exact nearest neighbour (the query is a base vector).
-   std::vector<uint32_t> idx(3);
-   std::vector<float> d(3);
-   const uint32_t q = 5;
-   searcher->search_f32(data.data() + static_cast<size_t>(q) * dim, 3, 0.1f, 1.0f, idx.data(), d.data());
-   EXPECT_EQ(idx[0], q);
-   EXPECT_NEAR(d[0], 0.0f, 1e-4f);
+    // Search still returns the exact nearest neighbour (the query is a base vector).
+    std::vector<uint32_t> idx(3);
+    std::vector<float> d(3);
+    const uint32_t q = 5;
+    searcher->search_f32(data.data() + static_cast<size_t>(q) * dim, 3, 0.1f, 1.0f, idx.data(), d.data());
+    EXPECT_EQ(idx[0], q);
+    EXPECT_NEAR(d[0], 0.0f, 1e-4f);
 }
 TEST(SearcherTest, EVPQuantizerWithFP32Refiner) {
     const uint32_t dim = 16;
@@ -249,14 +249,14 @@ TEST(SearcherTest, EVPQuantizerWithFP32Refiner) {
 
     auto base_graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_InnerProduct);
 
-    deglib::quantization::evp::EvpQuantizer quantizer(non_zeros);
+    deglib::transformation::EvpQuantizer quantizer(non_zeros);
     auto evp_data = quantizer.quantize(data.data(), count, dim);
     auto target_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::EVP_InnerProduct);
     auto ro_graph = deglib::graph::convert_to_readonly_graph(base_graph.internal(), target_space, evp_data.data());
 
     auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP32_InnerProduct);
 
-    using QuantT = deglib::quantization::evp::EvpQuantizer;
+    using QuantT = deglib::transformation::EvpQuantizer;
     using RefinerT = deglib::search::Reranker<float>;
 
     auto searcher = deglib::search::make_searcher(ro_graph, quantizer, RefinerT(rerank_space, data.data(), count));
@@ -361,4 +361,47 @@ TEST(SearcherTest, SearchEfSingleAndBatch) {
         EXPECT_EQ(q_indices[0], static_cast<uint32_t>(q));
         EXPECT_NEAR(q_dists[0], 0.0f, 1e-5f);
     }
+}
+
+TEST(SearcherTest, DynamicExplorationGraphWithTransformationMakeSearcher) {
+    const uint32_t dim = 8;
+    const uint32_t count = 50;
+
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+    std::vector<float> data(count * dim);
+    for (auto& v : data) v = dist(rng);
+
+    auto base_graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
+
+    auto quantizer = std::make_shared<deglib::transformation::ScalarQuantizerInt8>(deglib::transformation::make_scalar_quantizer_int8(data.data(), count, dim));
+    std::vector<int8_t> int8_data(count * dim);
+    quantizer->quantize(data.data(), int8_data.data(), count, dim);
+
+    auto target_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::Int8_L2);
+    auto ro_graph =
+        base_graph.to_readonly(target_space, int8_data.data(), std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{quantizer});
+
+    EXPECT_TRUE(ro_graph.hasTransformations());
+
+    // 1. make_searcher(DynamicExplorationGraph) without refiner: automatically uses attached quantizer
+    auto searcher_no_refiner = deglib::make_searcher(ro_graph);
+    ASSERT_NE(searcher_no_refiner, nullptr);
+
+    auto q = std::span<const float>(data.data() + 5 * dim, dim);
+    auto res1 = searcher_no_refiner->search(q, 5, /*eps=*/0.2f, /*rerank_factor=*/1.0f, /*return_distances=*/true);
+    EXPECT_GE(res1.size(), 1u);
+    EXPECT_EQ(res1.indices[0], 5u);
+
+    // 2. make_searcher(DynamicExplorationGraph, refiner): automatically uses attached quantizer + refiner
+    auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP32_L2);
+    using RefinerT = deglib::search::Reranker<float>;
+    auto searcher_with_refiner = deglib::make_searcher(ro_graph, RefinerT(rerank_space, data.data(), count));
+    ASSERT_NE(searcher_with_refiner, nullptr);
+
+    auto res2 = searcher_with_refiner->search(q, 5, /*eps=*/0.2f, /*rerank_factor=*/2.0f, /*return_distances=*/true);
+    EXPECT_GE(res2.size(), 1u);
+    EXPECT_EQ(res2.indices[0], 5u);
+    EXPECT_NEAR(res2.distances[0], 0.0f, 1e-4f);
 }

@@ -317,4 +317,3 @@ def test_transformation_graph_search_fp16():
     idx_single_ef, dist_single_ef = ro_graph.search(queries_f16[0], eps_or_ef=16.0, k=3)
     np.testing.assert_array_equal(idx_batch_ef[0], idx_single_ef)
     np.testing.assert_allclose(dist_batch_ef[0], dist_single_ef, rtol=1e-5)
-

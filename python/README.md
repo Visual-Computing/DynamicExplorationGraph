@@ -191,7 +191,7 @@ batch_labels, batch_distances = graph.explore(batch_entries, k=10, eps_or_ef=0.1
 
 # Retrieve graph neighbors directly
 neighbors = graph.get_neighbors(105)
-batch_neighbors = graph.get_neighbors_batch(batch_entries, threads=4) # shape: (3, edges_per_vertex)
+batch_neighbors = graph.get_neighbors_batch(batch_entries, threads=4)  # shape: (3, edges_per_vertex)
 ```
 
 ---
@@ -203,7 +203,8 @@ A complete end-to-end pipeline demonstrating **FLAS pre-sorting**, **multithread
 ```python
 import numpy as np
 import deglib
-from deglib.optimization import presort, prune_non_rng_edges, ScalarQuantizerInt8
+from deglib.optimization import presort, prune_non_mrng_edges
+from deglib.transformation import ScalarQuantizerInt8
 from deglib.search import create_searcher
 
 num_vectors, dims = 10_000, 128
@@ -222,8 +223,8 @@ graph = deglib.builder.build_from_data(
     show_progress=True,
 )
 
-# 3. Prune redundant non-RNG edges to optimize graph topology
-pruned_count = prune_non_rng_edges(graph)
+# 3. Prune redundant non-MRNG edges to optimize graph topology
+pruned_count = prune_non_mrng_edges(graph)
 print(f"Pruned {pruned_count} redundant edges.")
 
 # 4. Fit Int8 quantizer on base dataset and quantize features for memory reduction and ultra-fast search
@@ -233,13 +234,14 @@ quant_int8_data = quantizer.quantize(sorted_data)
 int8_space = deglib.FloatSpace.create(dims, deglib.Metric.Int8_InnerProduct)
 
 # 5. Convert mutable graph to a compact ReadOnlyGraph equipped with the quantized features
-readonly_graph = graph.to_readonly(feature_space=int8_space, custom_features=quant_int8_data)
+readonly_graph = graph.to_readonly(
+    feature_space=int8_space, custom_features=quant_int8_data, transformations=[quantizer]
+)
 
 # 6. Create high-performance Searcher equipped with base vectors for exact candidate reranking
 rerank_space = deglib.FloatSpace.create(dims, deglib.Metric.FP32_InnerProduct)
 searcher = create_searcher(
     graph=readonly_graph,
-    quantizer=quantizer,
     refine_space=rerank_space,
     refine_data=sorted_data,
 )

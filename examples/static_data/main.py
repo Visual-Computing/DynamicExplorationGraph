@@ -1,23 +1,20 @@
 import argparse
-import os
-import sys
-import time
 import multiprocessing
+import time
 from pathlib import Path
-import numpy as np
-import matplotlib.pyplot as plt
 
 import deglib
-from deglib_cpp import avx_usable, avx512_usable
+import matplotlib.pyplot as plt
+import numpy as np
 from dataset import (
-    load_dataset,
     get_default_cache_dir,
+    load_base_groundtruth,
+    load_dataset,
     resolve_dataset_key,
-    build_graph_filename,
-    DATASET_METADATA,
 )
+from deglib_cpp import avx512_usable, avx_usable
 from presets import get_preset
-from graph_analysis import analyze_graph
+from deglib.analysis import analyze_graph
 
 
 def _render_anns_plot(dataset_name: str, instruction_set: str, search_k: int, anns_recalls: list, anns_qps: list):
@@ -84,7 +81,7 @@ def compute_linear_search_baseline(
     rng = np.random.default_rng(7)
     sample_indices = rng.choice(n_base, size=query_count, replace=False)
 
-    print(f"\n--- Computing Linear Search Baseline ---")
+    print("\n--- Computing Linear Search Baseline ---")
     print(
         f"Computing linear search baseline with {query_count} random queries on {n_base} base vectors using C++ {float_space.metric().name} ({float_space.get_instruction().name})..."
     )
@@ -95,8 +92,7 @@ def compute_linear_search_baseline(
     for idx in sample_indices:
         dists = float_space.compute_distances(base_vecs[idx], base_vecs)
         d_min = float(np.min(dists))
-        if d_min < min_dist:
-            min_dist = d_min
+        min_dist = min(min_dist, d_min)
 
     total_time_us = (time.perf_counter() - start_time) * 1e6
     time_per_query_us = total_time_us / max(query_count, 1)
@@ -115,6 +111,7 @@ def run_static_benchmark(
     build_threads: int,
     max_base_vecs: int | None,
     no_show: bool,
+    graph_quality: str = "none",
 ):
     resolved_key = resolve_dataset_key(dataset_key)
     preset = get_preset(resolved_key)
@@ -208,7 +205,9 @@ def run_static_benchmark(
             graph = graph_mut.to_readonly()
 
     # Graph Analysis
-    analyze_graph(graph)
+    base_gt = load_base_groundtruth(resolved_key, cache_dir, graph_quality=graph_quality, graph_path=graph_path)
+    stats = analyze_graph(graph, base_top=base_gt)
+    print(stats)
 
     # ANNS Test
     search_k = min(preset["anns_k"], gt_vecs.shape[1])
@@ -333,7 +332,7 @@ def run_static_benchmark(
             last_recall = recall
 
             if recall >= 0.997:
-                print(f"Recall target 0.997 reached, stopping exploration sweep")
+                print("Recall target 0.997 reached, stopping exploration sweep")
                 break
 
         plot_explore_results(
@@ -380,6 +379,13 @@ def main():
     parser.add_argument(
         "--max-base-vecs", type=int, default=None, help="Optional limit on base vectors for quick debugging/testing"
     )
+    parser.add_argument(
+        "--graph-quality",
+        "-q",
+        choices=["none", "exact", "approximated"],
+        default="none",
+        help="Evaluate graph quality: 'none' (default), 'exact' (via linear search groundtruth), 'approximated' (via ANNS graph exploration)",
+    )
 
     args = parser.parse_args()
 
@@ -413,6 +419,7 @@ def main():
             build_threads=args.threads,
             max_base_vecs=args.max_base_vecs,
             no_show=args.no_show,
+            graph_quality=args.graph_quality,
         )
 
     print("\nStatic Benchmark Finished Successfully.")

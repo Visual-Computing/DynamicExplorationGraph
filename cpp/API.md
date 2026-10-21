@@ -669,11 +669,31 @@ struct GraphStats {
     uint32_t source_vertices;           ///< Vertices with 0 in-degree (unreachable as targets)
     float search_reachability;          ///< Ratio of vertices reachable from entry points
     float exploration_reachability;     ///< Average exploration reachability across all vertices
+    float graph_quality = -1.0f;        ///< Ratio of edges matching true NN ground truth (-1.0 if not computed)
     size_t memory_bytes;                ///< Estimated memory footprint in bytes
 };
 
-/// Perform comprehensive graph analysis
-GraphStats analyze_graph(InternalGraph& graph);
+/// Perform comprehensive graph analysis (optionally with ground truth quality calculation)
+GraphStats analyze_graph(
+    const InternalGraph& graph,
+    const uint32_t* base_top_data = nullptr,
+    size_t base_top_rows = 0,
+    size_t base_top_k = 0,
+    size_t sample_size = 0,
+    size_t num_threads = 0,
+    size_t base_top_stride = 0
+);
+
+/// Calculate ratio of outgoing edges matching true nearest-neighbor ground truth
+float calc_graph_quality(
+    const InternalGraph& graph,
+    const uint32_t* base_top_data,
+    size_t base_top_rows,
+    size_t base_top_k,
+    size_t sample_size = 0,
+    size_t num_threads = 0,
+    size_t base_top_stride = 0
+);
 
 /// Verify graph regularity (correct vertex count, ascending sorted unique neighbors, no self-loops)
 bool check_graph_regularity(InternalGraph& graph, uint32_t expected_vertices, bool check_back_link = false);
@@ -690,8 +710,8 @@ float calc_avg_edge_weight(MutableGraph& graph, int scale = 1);
 /// Calculate 10-bin histogram of graph edge weights
 vector<float> calc_edge_weight_histogram(MutableGraph& graph, bool sorted, int scale = 1);
 
-/// Count number of non-RNG conform edges
-uint32_t calc_non_rng_edges(MutableGraph& graph);
+/// Count number of non-MRNG conform edges
+uint32_t calc_non_mrng_edges(MutableGraph& graph);
 
 /// Calculate number of vertices reachable from graph entry points via BFS
 uint32_t calc_search_reachability(InternalGraph& graph);

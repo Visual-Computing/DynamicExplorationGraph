@@ -11,7 +11,7 @@ This example project demonstrates how to download paper datasets from `readme.md
 - `enron` (1369D, 94k base vectors, L2 distance)
 - `sift1m` (128D, 1M base vectors, L2 distance)
 - `deep1m` (96D, 1M base vectors, L2 distance)
-- `glove` (100D, 1.18M base vectors, Angular / InnerProduct distance)
+- `glove` (100D, 1.18M base vectors, L2 distance)
 
 ## Prerequisites: Building the Python Library (`deglib`)
 
@@ -45,6 +45,12 @@ uv run main.py sift1m
 uv run main.py audio --max-base-vecs 1000
 ```
 
+### 3. Evaluate Graph Quality
+
+```bash
+uv run main.py audio --graph-quality exact
+```
+
 ## Options
 
 - `dataset`: Positional dataset name (`sift1m`, `deep1m`, `glove`, `audio`, `enron`, `all`). Default: `audio`.
@@ -55,3 +61,4 @@ uv run main.py audio --max-base-vecs 1000
 - `--cache-dir`: Persistent cache folder for datasets. Default: `~/.cache/deg_datasets`.
 - `--no-show`: Disable opening the interactive plot window (useful for headless CI environments).
 - `--max-base-vecs`: Limit base vectors for fast debugging / testing.
+- `--graph-quality, -q`: Evaluate graph quality: `none` (default), `exact` (via linear search ground truth), or `approximated` (via ANNS graph exploration). If missing, ground truth files are automatically generated.

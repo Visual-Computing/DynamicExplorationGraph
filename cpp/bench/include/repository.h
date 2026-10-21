@@ -7,45 +7,59 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
-#include <unordered_map>
+#include <algorithm>
+#include <limits>
+#include <memory>
 
 namespace deglib {
+
 /**
- * A repository of float feature vectors.
+ * A contiguous repository of feature vectors with zero-copy subview support.
  */
 class FeatureRepository {
   public:
-    virtual size_t dims() const = 0;
-    virtual size_t size() const = 0;
-    virtual const std::byte* getFeature(const uint32_t vertexid) const = 0;
-    virtual void clear() = 0;
-};
+    FeatureRepository() = default;
 
-/**
- * A repository of float feature vectors. Since the repository deals
- * with static data, a single contiguous array is preserved internally.
- */
-class StaticFeatureRepository : public FeatureRepository {
-  public:
-    StaticFeatureRepository(std::unique_ptr<std::byte[]> contiguous_features, const size_t dims, const size_t count, const size_t bytes_per_dim)
-        : bytes_per_dim_{bytes_per_dim},
-          dims_{dims},
-          count_{count},
-          contiguous_features_{
-              std::move(contiguous_features),
-          } {}
+    // Owning constructor
+    FeatureRepository(std::unique_ptr<std::byte[]> data, const size_t dims, const size_t count, const size_t bytes_per_dim)
+        : storage_(std::move(data)), data_(storage_.get()), dims_{dims}, count_{count}, bytes_per_dim_{bytes_per_dim}, offset_{0} {}
 
-    size_t dims() const override { return dims_; }
-    size_t size() const override { return count_; }
-    const std::byte* getFeature(const uint32_t idx) const override { return &contiguous_features_[idx * dims_ * bytes_per_dim_]; }
-    void clear() override { contiguous_features_.reset(); }
+    // Non-owning view constructor sharing storage lifetime
+    FeatureRepository(std::shared_ptr<std::byte[]> storage, const std::byte* data, const size_t dims, const size_t count, const size_t bytes_per_dim, const size_t offset = 0)
+        : storage_(std::move(storage)), data_(data), dims_{dims}, count_{count}, bytes_per_dim_{bytes_per_dim}, offset_{offset} {}
+
+    // Non-owning view constructor from raw pointer
+    FeatureRepository(const std::byte* data, const size_t dims, const size_t count, const size_t bytes_per_dim, const size_t offset = 0)
+        : storage_(nullptr), data_(data), dims_{dims}, count_{count}, bytes_per_dim_{bytes_per_dim}, offset_{offset} {}
+
+    size_t dims() const noexcept { return dims_; }
+    size_t size() const noexcept { return count_; }
+    size_t offset() const noexcept { return offset_; }
+    size_t bytes_per_dim() const noexcept { return bytes_per_dim_; }
+
+    const std::byte* getFeature(const uint32_t idx) const noexcept { 
+        return &data_[idx * dims_ * bytes_per_dim_]; 
+    }
+
+    FeatureRepository subview(const size_t offset, const size_t count = (std::numeric_limits<size_t>::max)()) const noexcept {
+        const size_t actual_offset = std::min(offset, count_);
+        const size_t actual_count = std::min(count, count_ - actual_offset);
+        const auto* sub_data = (actual_count > 0) ? getFeature(static_cast<uint32_t>(actual_offset)) : nullptr;
+        return FeatureRepository(storage_, sub_data, dims_, actual_count, bytes_per_dim_, offset_ + actual_offset);
+    }
+
+    void clear() noexcept { storage_.reset(); data_ = nullptr; count_ = 0; offset_ = 0; }
 
   private:
-    const size_t bytes_per_dim_;
-    const size_t dims_;
-    const size_t count_;
-    std::unique_ptr<std::byte[]> contiguous_features_;
+    std::shared_ptr<std::byte[]> storage_;
+    const std::byte* data_ = nullptr;
+    size_t dims_ = 0;
+    size_t count_ = 0;
+    size_t bytes_per_dim_ = 0;
+    size_t offset_ = 0;
 };
+
+using StaticFeatureRepository = FeatureRepository;
 
 /*****************************************************
  * I/O functions for fvecs and ivecs
@@ -146,7 +160,7 @@ auto u8vecs_read(const char* fname, size_t& d_out, size_t& n_out) {
     return x;
 }
 
-bool string_ends_with(const char* str, const char* suffix) {
+inline bool string_ends_with(const char* str, const char* suffix) {
     size_t str_len = std::strlen(str);
     size_t suffix_len = std::strlen(suffix);
 
@@ -156,22 +170,26 @@ bool string_ends_with(const char* str, const char* suffix) {
     return std::strcmp(str + str_len - suffix_len, suffix) == 0;
 }
 
-StaticFeatureRepository load_static_repository(const char* path_repository) {
+inline FeatureRepository load_repository(const char* path_repository) {
     if (string_ends_with(path_repository, "fvecs")) {
         size_t dims;
         size_t count;
         auto contiguous_features = fvecs_read(path_repository, dims, count);
-        return StaticFeatureRepository(std::move(contiguous_features), dims, count, sizeof(float));
+        return FeatureRepository(std::move(contiguous_features), dims, count, sizeof(float));
     } else if (string_ends_with(path_repository, "u8vecs")) {
         size_t dims;
         size_t count;
         auto contiguous_features = u8vecs_read(path_repository, dims, count);
-        return StaticFeatureRepository(std::move(contiguous_features), dims, count, sizeof(uint8_t));
+        return FeatureRepository(std::move(contiguous_features), dims, count, sizeof(uint8_t));
     }
 
     std::fprintf(stderr, "unsupported file extension, only fvecs and u8vecs are supported, but got %s \n", path_repository);
     std::perror("");
     std::abort();
+}
+
+inline FeatureRepository load_static_repository(const char* path_repository) {
+    return load_repository(path_repository);
 }
 
 }  // namespace deglib
