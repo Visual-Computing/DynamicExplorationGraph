@@ -1,16 +1,14 @@
 #pragma once
 
-// K-Means medoid selection for search entry vertices.
+// K-Means medoid selection for query routing entry vertices.
 //
 // Design:
 // - Rows are addressed through pointer-of-pointer (`span<const float* const>`), so
-//   float features stored in the graph are referenced directly without copying.
-//   Only quantized feature types (FP16/UInt8/Int8/EVP) are decoded once into a
-//   scratch buffer; distances always run on the library SIMD kernels.
-// - The distance is a C++20 concept-constrained callable, letting the compiler
-//   inline the selected SIMD kernel into the Lloyd loop (no indirect calls).
-// - Medoids are returned as positions into the row span; mapping those to graph
-//   internal indices is the caller's job (see `graph_kmeans_medoids`).
+//   float features stored in the graph or base vectors are referenced directly without copying.
+// - Medoids are dynamic query-routing centers owned exclusively by KMeansEntrySelector
+//   in Searcher. They do not mutate or pollute InternalGraph's topological entry vertices.
+// - Distance evaluation during query routing evaluates SIMD batch distances in the native
+//   feature space of the graph.
 
 #include "deglib/concurrent.h"
 #include "deglib/distance/fp16.h"
@@ -43,57 +41,6 @@ concept DistanceCallable = requires(F f, const float* a, const float* b) {
 };
 
 /**
- * Decodes one native graph feature vector into `dim` floats.
- *
- * Handles FP32 (direct copy), FP16, UInt8, Int8, and EVP binary packed quantized representations.
- *
- * @param space   FloatSpace containing metric metadata and dimensionality.
- * @param native  Raw byte pointer to the feature vector in native storage format.
- * @param out     Destination float buffer of size `space.dim()`.
- */
-inline void decode_feature_vector(const deglib::distances::FloatSpace& space, const std::byte* native, float* out) {
-    const size_t dim = space.dim();
-    using deglib::distances::MetricDataType;
-    switch (space.metric().get_data_type()) {
-        case MetricDataType::FP32:
-            std::copy(reinterpret_cast<const float*>(native), reinterpret_cast<const float*>(native) + dim, out);
-            break;
-        case MetricDataType::FP16:
-            deglib::distances::fp16::fp16_to_floats(reinterpret_cast<const uint16_t*>(native), out, dim);
-            break;
-        case MetricDataType::Uint8: {
-            const auto* v = reinterpret_cast<const uint8_t*>(native);
-            for (size_t d = 0; d < dim; ++d) {
-                out[d] = static_cast<float>(v[d]);
-            }
-            break;
-        }
-        case MetricDataType::Int8: {
-            const auto* v = reinterpret_cast<const int8_t*>(native);
-            for (size_t d = 0; d < dim; ++d) {
-                out[d] = static_cast<float>(v[d]);
-            }
-            break;
-        }
-        case MetricDataType::EVP: {
-            // Layout [ones (dim/8 bytes)][negs (dim/8 bytes)], dimension d lives
-            // in bit (d % 8) of byte (d / 8), matching the EVP quantizer.
-            const size_t mask_bytes = dim / 8;
-            const auto* bytes = reinterpret_cast<const uint8_t*>(native);
-            const uint8_t* ones = bytes;
-            const uint8_t* negs = bytes + mask_bytes;
-            for (size_t d = 0; d < dim; ++d) {
-                const uint8_t bit = static_cast<uint8_t>(1u << (d % 8));
-                out[d] = (ones[d / 8] & bit) ? 1.0f : ((negs[d / 8] & bit) ? -1.0f : 0.0f);
-            }
-            break;
-        }
-        default:
-            throw std::invalid_argument("decode_feature_vector: unsupported metric data type");
-    }
-}
-
-/**
  * Standard Lloyd k-means clustering over caller-provided row pointers.
  * Centroids are normalized means; empty or degenerate clusters preserve previous centroids.
  *
@@ -119,8 +66,6 @@ kmeans_medoids(std::span<const float* const> rows, uint32_t dim, DistFn&& distan
     n_clusters = std::min(n_clusters, static_cast<uint32_t>(rows.size()));
     std::mt19937 rng(seed);
 
-    // K-means++ style init omitted on purpose: partial Fisher-Yates over the
-    // rows is cheaper and matches the established entry-point quality.
     std::vector<uint32_t> order(rows.size());
     std::iota(order.begin(), order.end(), 0);
     std::vector<float> centroids(static_cast<size_t>(n_clusters) * dim);
@@ -151,7 +96,7 @@ kmeans_medoids(std::span<const float* const> rows, uint32_t dim, DistFn&& distan
             labels[i] = best_c;
         });
 
-        // Update: single bandwidth-bound pass, kept serial.
+        // Update: single bandwidth-bound pass.
         std::fill(sums.begin(), sums.end(), 0.0f);
         std::fill(counts.begin(), counts.end(), 0);
         for (size_t i = 0; i < rows.size(); ++i) {
@@ -202,129 +147,109 @@ kmeans_medoids(std::span<const float* const> rows, uint32_t dim, DistFn&& distan
     return medoids;
 }
 
-/**
- * Entry-vertex optimization over graph-native features.
- * Samples `sample_size` vertices (0 = all), references FP32 features in place and decodes quantized
- * types once, clusters with the FP32 SIMD kernel matching the graph metric kind (L2 vs Inner Product),
- * and returns medoids as graph internal vertex indices.
- *
- * @param graph       Internal graph containing feature data and topology.
- * @param n_clusters  Number of clusters / entry vertices to identify.
- * @param n_iter      Maximum number of k-means iterations.
- * @param sample_size Number of graph vertices to sample for clustering (0 = all).
- * @param seed        Random seed for sampling and initial centroids.
- * @param threads     Number of worker threads for parallel assignment and medoid search.
- * @return            List of graph vertex indices representing cluster medoids.
- */
-[[nodiscard]] inline std::vector<uint32_t> graph_kmeans_medoids(
-    const deglib::graph::InternalGraph& graph,
-    uint32_t n_clusters,
-    uint32_t n_iter,
-    size_t sample_size,
-    uint32_t seed = 7,
-    size_t threads = 1
-) {
-    const size_t n_vectors = graph.size();
-    if (n_vectors == 0) {
-        throw std::invalid_argument("graph_kmeans_medoids: graph is empty");
-    }
-    const deglib::distances::FloatSpace& space = graph.getFeatureSpace();
-    const size_t dim = space.dim();
-    const size_t actual_sample = sample_size == 0 ? n_vectors : std::min(sample_size, n_vectors);
-
-    std::vector<uint32_t> sample(n_vectors);
-    std::iota(sample.begin(), sample.end(), 0);
-    std::mt19937 rng(seed);
-    std::shuffle(sample.begin(), sample.end(), rng);
-    sample.resize(actual_sample);
-
-    // Row pointers into graph memory (FP32) or into the decode scratch buffer.
-    std::vector<const float*> rows(actual_sample);
-    std::vector<float> decoded;
-    if (space.metric().get_data_type() == deglib::distances::MetricDataType::FP32) {
-        for (size_t i = 0; i < actual_sample; ++i) {
-            rows[i] = reinterpret_cast<const float*>(graph.getFeatureVector(sample[i]));
-        }
-    } else {
-        decoded.resize(actual_sample * dim);
-        deglib::concurrent::parallel_for(0, actual_sample, threads, [&](size_t i, size_t) {
-            decode_feature_vector(space, graph.getFeatureVector(sample[i]), decoded.data() + i * dim);
-        });
-        for (size_t i = 0; i < actual_sample; ++i) {
-            rows[i] = decoded.data() + i * dim;
-        }
-    }
-
-    const bool is_l2 = space.metric().get_distance_kind() == deglib::distances::MetricDistanceKind::L2;
-    const deglib::distances::FloatSpace float_space(dim, is_l2 ? deglib::distances::Metric::FP32_L2 : deglib::distances::Metric::FP32_InnerProduct);
-    const std::span<const float* const> row_view(rows.data(), rows.size());
-    const uint32_t dim32 = static_cast<uint32_t>(dim);
-    const std::vector<uint32_t> positions = float_space.compute([&](const auto& kernel) {
-        // Static dispatch: the concrete SIMD kernel inlines into the loop.
-        return kmeans_medoids(
-            row_view, dim32,
-            [&](const float* a, const float* b) -> float { return std::decay_t<decltype(kernel)>::compare(a, b, float_space.get_dist_func_param()); },
-            n_clusters, n_iter, seed, threads
-        );
-    });
-
-    std::vector<uint32_t> medoids;
-    medoids.reserve(positions.size());
-    for (const uint32_t p : positions) {
-        medoids.push_back(sample[p]);
-    }
-    return medoids;
-}
-
 }  // namespace cluster
 
 /**
  * Manages k-means entry vertices (medoids) for fast query initialization on a graph.
  *
- * During optimization (`optimize`), k-means clustering identifies representative medoids
- * distributed across the graph. At search time (`top_entries`), SIMD vectorized batch distance
- * functions evaluate distances to all candidate medoids simultaneously, selecting the nearest
- * start vertices with minimal latency and zero heap allocations for standard query configurations.
+ * During optimization (`optimize` / `fit`), k-means clustering identifies representative medoids
+ * distributed across the feature space. At search time (`top_entries`), SIMD vectorized batch distance
+ * functions evaluate distances to all candidate medoids simultaneously in the graph's native space,
+ * selecting the nearest start vertices with minimal latency and zero heap allocations.
  *
- * @param graph Reference to the underlying InternalGraph (must outlive this selector).
+ * Crucially, KMeansEntrySelector is a query router owned by Searcher; it never mutates the graph.
  */
 class KMeansEntrySelector {
   public:
-    explicit KMeansEntrySelector(const deglib::graph::InternalGraph& graph) : graph_(&graph) {}
-
-    /**
-     * Compute and store entry vertices using k-means medoid clustering on a sample of graph vertices.
-     *
-     * @param n_clusters  Number of cluster medoids (entry vertices) to generate (e.g. 128..512).
-     * @param n_iter      Maximum number of Lloyd k-means iterations.
-     * @param sample_size Number of vertices sampled for clustering (0 automatically selects 3% of graph size).
-     * @param seed        Random seed for deterministic initialization and sampling.
-     * @param threads     Number of worker threads used for parallel clustering.
-     */
-    void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 0, uint32_t seed = 7, size_t threads = 1) {
-        if (sample_size == 0) {
-            const size_t n = graph_->size();
-            sample_size = n * 3 / 100;
-            if (sample_size == 0 && n > 0) sample_size = n;
+    explicit KMeansEntrySelector(const deglib::graph::InternalGraph& graph) : graph_(&graph) {
+        // If graph already has non-default entry vertices (e.g. loaded from .deg TAG_ENTR), initialize with them
+        if (graph.getEntryVertexIndices().size() > 1 || (!graph.getEntryVertexIndices().empty() && graph.getEntryVertexIndices()[0] != 0)) {
+            entries_ = graph.getEntryVertexIndices();
         }
-        entries_ = cluster::graph_kmeans_medoids(*graph_, n_clusters, n_iter, sample_size, seed, threads);
     }
 
     /**
-     * Finds the nearest entry vertices for a given query vector, ordered nearest-first.
+     * Fit cluster medoids directly on provided float row pointers.
      *
-     * Evaluates distances to all medoids in a single SIMD-vectorized batch comparison call (AVX-512 / AVX2).
-     * For `count == 1` and `count == 2` (common DEG search entry sizes), fast single-pass selection
-     * runs completely on stack buffers without heap allocations.
+     * @param rows        Pointers to dim-sized float vectors.
+     * @param dim         Vector dimensionality.
+     * @param is_l2       True for L2 metric, false for Inner Product.
+     * @param n_clusters  Number of clusters / medoids to generate.
+     * @param n_iter      Maximum number of Lloyd iterations.
+     * @param seed        Random seed.
+     * @param threads     Worker thread count.
+     */
+    void
+    fit(std::span<const float* const> rows, uint32_t dim, bool is_l2, uint32_t n_clusters = 128, uint32_t n_iter = 15, uint32_t seed = 7, size_t threads = 1) {
+        if (rows.empty() || dim == 0) return;
+        const deglib::distances::FloatSpace float_space(dim, is_l2 ? deglib::distances::Metric::FP32_L2 : deglib::distances::Metric::FP32_InnerProduct);
+        const auto positions = float_space.compute([&](const auto& kernel) {
+            return cluster::kmeans_medoids(
+                rows, dim,
+                [&](const float* a, const float* b) -> float { return std::decay_t<decltype(kernel)>::compare(a, b, float_space.get_dist_func_param()); },
+                n_clusters, n_iter, seed, threads
+            );
+        });
+        entries_ = positions;
+    }
+
+    /**
+     * Compute and store entry vertices using k-means medoid clustering on a sample of graph vertices.
+     * If graph features are FP32, clusters them directly.
+     */
+    void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 0, uint32_t seed = 7, size_t threads = 1) {
+        if (!graph_ || graph_->size() == 0) return;
+        const size_t n_vectors = graph_->size();
+        const auto& space = graph_->getFeatureSpace();
+        const size_t dim = space.dim();
+
+        if (sample_size == 0) {
+            sample_size = n_vectors * 3 / 100;
+            if (sample_size == 0 && n_vectors > 0) sample_size = n_vectors;
+        }
+        const size_t actual_sample = std::min(sample_size, n_vectors);
+
+        std::vector<uint32_t> sample(n_vectors);
+        std::iota(sample.begin(), sample.end(), 0);
+        std::mt19937 rng(seed);
+        std::shuffle(sample.begin(), sample.end(), rng);
+        sample.resize(actual_sample);
+
+        if (space.metric().get_data_type() == deglib::distances::MetricDataType::FP32) {
+            std::vector<const float*> rows(actual_sample);
+            for (size_t i = 0; i < actual_sample; ++i) {
+                rows[i] = reinterpret_cast<const float*>(graph_->getFeatureVector(sample[i]));
+            }
+            const bool is_l2 = space.metric().get_distance_kind() == deglib::distances::MetricDistanceKind::L2;
+            const deglib::distances::FloatSpace float_space(dim, is_l2 ? deglib::distances::Metric::FP32_L2 : deglib::distances::Metric::FP32_InnerProduct);
+            const auto positions = float_space.compute([&](const auto& kernel) {
+                return cluster::kmeans_medoids(
+                    std::span<const float* const>(rows.data(), rows.size()), static_cast<uint32_t>(dim),
+                    [&](const float* a, const float* b) -> float { return std::decay_t<decltype(kernel)>::compare(a, b, float_space.get_dist_func_param()); },
+                    n_clusters, n_iter, seed, threads
+                );
+            });
+            entries_.clear();
+            entries_.reserve(positions.size());
+            for (const uint32_t p : positions) {
+                entries_.push_back(sample[p]);
+            }
+        }
+    }
+
+    /**
+     * Finds the nearest entry vertices for a given native query vector, ordered nearest-first.
+     *
+     * Evaluates distances to all medoids simultaneously via SIMD vectorized batch comparison kernel
+     * in the graph's native feature space.
      * Falls back to vertex 0 when no entries exist.
      *
      * @param query Native query vector bytes sized to the graph feature space.
      * @param count Maximum number of nearest entry vertex indices to return (typically 1 or 2).
-     * @return std::vector<uint32_t> List of up to `count` internal graph vertex indices.
+     * @return List of up to `count` internal graph vertex indices.
      */
     [[nodiscard]] std::vector<uint32_t> top_entries(std::span<const std::byte> query, size_t count = 2) const {
-        const uint32_t n = graph_->size();
-        if (n == 0 || count == 0) return {};
+        if (!graph_ || graph_->size() == 0 || count == 0) return {};
         if (entries_.empty()) return {0};
         if (entries_.size() <= count) return entries_;
 
@@ -334,7 +259,6 @@ class KMeansEntrySelector {
         const auto dist_param = feature_space.get_dist_func_param();
 
         // Stack-allocated scratch arrays for up to 512 medoids to eliminate heap allocation overhead.
-        // Falls back to dynamic heap buffers only for exceptionally large cluster counts (> 512).
         const void* stack_ptrs[512];
         float stack_dists[512];
         std::unique_ptr<const void*[]> heap_ptrs;
@@ -411,11 +335,17 @@ class KMeansEntrySelector {
         return top;
     }
 
+    /** Set stored entry vertices explicitly. */
+    void set_entries(std::vector<uint32_t> entries) { entries_ = std::move(entries); }
+
     /** Stored entry vertices as graph internal indices. */
     [[nodiscard]] const std::vector<uint32_t>& entries() const noexcept { return entries_; }
 
-    /** True when optimize() has not produced entries yet. */
+    /** True when no medoids are stored. */
     [[nodiscard]] bool empty() const noexcept { return entries_.empty(); }
+
+    /** True when medoids are stored. */
+    [[nodiscard]] bool has_entries() const noexcept { return !entries_.empty(); }
 
     /** Number of stored entry vertices. */
     [[nodiscard]] size_t size() const noexcept { return entries_.size(); }

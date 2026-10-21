@@ -1,5 +1,7 @@
 #pragma once
 
+#include "deglib/distances.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -41,6 +43,10 @@ class FeatureTransformation {
     virtual uint32_t output_dim() const noexcept = 0;
     virtual size_t input_bytes() const noexcept = 0;
     virtual size_t output_bytes() const noexcept = 0;
+
+    virtual deglib::distances::Metric get_target_metric(deglib::distances::Metric input_metric) const {
+        return input_metric;
+    }
 
     // Transform database / training vectors (e.g. at ingestion time in Builder)
     virtual void transform_database(const float* in, std::byte* out, size_t count) const = 0;
@@ -202,6 +208,17 @@ inline uint32_t get_output_dim(const std::vector<std::shared_ptr<FeatureTransfor
 
 inline size_t get_output_bytes(const std::vector<std::shared_ptr<FeatureTransformation>>& transformations) noexcept {
     return transformations.empty() ? 0 : transformations.back()->output_bytes();
+}
+
+inline deglib::distances::Metric get_target_metric(
+    const std::vector<std::shared_ptr<FeatureTransformation>>& transformations,
+    deglib::distances::Metric input_metric
+) {
+    deglib::distances::Metric cur = input_metric;
+    for (const auto& t : transformations) {
+        if (t) cur = t->get_target_metric(cur);
+    }
+    return cur;
 }
 
 }  // namespace deglib::transformation

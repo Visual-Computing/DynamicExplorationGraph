@@ -205,11 +205,11 @@ def test_container_persistence_roundtrip():
         assert ro_indices[0] == 7
 
         # 4. Searcher with loaded graph
-        refine_space = FloatSpace.create(dim, Metric.FP32_L2)
+        rerank_space = FloatSpace.create(dim, Metric.FP32_L2)
         searcher = create_searcher(
             graph=ro_g,
-            refine_space=refine_space,
-            refine_data=data,
+            rerank_space=rerank_space,
+            rerank_data=data,
         )
         searcher.optimize(n_clusters=min(N, 16), n_iter=5, sample_size=N, k=5)
         res_searcher = searcher.search(query, k=5, eps_or_ef=0.2, rerank_factor=1.5)

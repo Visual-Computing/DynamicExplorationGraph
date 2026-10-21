@@ -243,7 +243,7 @@ class FeatureTransformation;
 class EvpQuantizer : public FeatureTransformation {
   public:
     using output_type = std::byte;
-    uint32_t dim = 0;
+    mutable uint32_t dim = 0;
     uint32_t non_zeros = 16;
 
     EvpQuantizer() = default;
@@ -260,6 +260,10 @@ class EvpQuantizer : public FeatureTransformation {
     uint32_t output_dim() const noexcept { return dim; }
     size_t input_bytes() const noexcept { return dim * sizeof(float); }
     size_t output_bytes() const noexcept { return 2 * (dim / 8); }
+
+    deglib::distances::Metric get_target_metric(deglib::distances::Metric) const override {
+        return deglib::distances::Metric::EVP_InnerProduct;
+    }
 
     bool has_mean() const noexcept { return !mean_.empty(); }
     const std::vector<float>& get_mean() const noexcept { return mean_; }
@@ -322,6 +326,7 @@ class EvpQuantizer : public FeatureTransformation {
 
     void quantize(const float* src, std::byte* dst, size_t count, uint32_t d, size_t numThreads = 0) {
         if (count == 0 || d == 0) return;
+        if (dim == 0) dim = d;
         if (!mean_.empty() && mean_.size() != d) {
             throw std::invalid_argument(std::format("EvpQuantizer: mean dimension ({}) does not match vector dimension ({})", mean_.size(), d));
         }
@@ -345,6 +350,7 @@ class EvpQuantizer : public FeatureTransformation {
 
     void quantize(const float* src, std::byte* dst, size_t count, uint32_t d, size_t numThreads = 0) const {
         if (count == 0 || d == 0) return;
+        if (dim == 0) dim = d;
         if (!mean_.empty() && mean_.size() != d) {
             throw std::invalid_argument(std::format("EvpQuantizer: mean dimension ({}) does not match vector dimension ({})", mean_.size(), d));
         }

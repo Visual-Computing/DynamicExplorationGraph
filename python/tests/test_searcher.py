@@ -78,8 +78,8 @@ def test_searcher_quantized_int8_with_rerank():
     # 4. Create Searcher
     searcher = create_searcher(
         graph=ro_graph,
-        refine_space=rerank_space,
-        refine_data=base_fp16,
+        rerank_space=rerank_space,
+        rerank_data=base_fp16,
     )
 
     query = data[5]
@@ -116,8 +116,8 @@ def test_searcher_quantized_uint8_with_rerank():
 
     searcher = create_searcher(
         graph=ro_graph,
-        refine_space=FloatSpace.create(dim=dim, metric=Metric.FP32_L2),
-        refine_data=data,
+        rerank_space=FloatSpace.create(dim=dim, metric=Metric.FP32_L2),
+        rerank_data=data,
     )
 
     query = data[12]
@@ -148,8 +148,8 @@ def test_searcher_evp_quantizer():
 
     searcher = create_searcher(
         graph=ro_graph,
-        refine_space=FloatSpace.create(dim=dim, metric=Metric.FP32_InnerProduct),
-        refine_data=data,
+        rerank_space=FloatSpace.create(dim=dim, metric=Metric.FP32_InnerProduct),
+        rerank_data=data,
     )
 
     query = data[3]
@@ -165,7 +165,7 @@ def test_searcher_evp_quantizer():
     assert dists_fp16[0] == pytest.approx(0.0, abs=1e-3)
 
 
-def test_searcher_quantized_without_refiner():
+def test_searcher_quantized_without_reranker():
     np.random.seed(42)
     dim = 8
     n = 100

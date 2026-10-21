@@ -284,8 +284,8 @@ class QG(BaseANN):
         # 5. Initialize C++ Zero-overhead Searcher
         self.searcher = deglib.search.create_searcher(
             graph=self.graph,
-            refine_space=self.rerank_space_fp16,
-            refine_data=self.original_features_fp16,
+            rerank_space=self.rerank_space_fp16,
+            rerank_data=self.original_features_fp16,
         )
 
         # 6. Optimize entry vertices and prefetch values

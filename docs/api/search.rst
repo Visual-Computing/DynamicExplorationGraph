@@ -62,8 +62,8 @@ High-Performance Searcher with Reranking
    # Deploy with Searcher (query is automatically quantized, top candidates reranked on FP32 data)
    searcher = deglib.create_searcher(
        graph=ro_graph,
-       refine_space=deglib.FloatSpace.create(dim, deglib.Metric.FP32_L2),
-       refine_data=data,
+       rerank_space=deglib.FloatSpace.create(dim, deglib.Metric.FP32_L2),
+       rerank_data=data,
    )
 
    # Single query using relative margin (eps_or_ef < 1.0)

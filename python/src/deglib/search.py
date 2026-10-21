@@ -168,32 +168,32 @@ class Searcher:
     High-performance Stateless Searcher for fast single-query and batch-query execution.
 
     Performs end-to-end query transformation (quantization), graph search, and exact distance
-    candidate refinement within C++ in a single native invocation, eliminating Python interpreter
+    candidate reranking within C++ in a single native invocation, eliminating Python interpreter
     and bridge overhead in query loops. Any transformations or quantization are derived directly
     from the attached graph.
 
     :param graph: DynamicExplorationGraph (Mutable or ReadOnly) instance.
-    :param refine_space: Optional FloatSpace for exact candidate reranking.
-    :param refine_data: Optional base feature matrix for candidate reranking.
+    :param rerank_space: Optional FloatSpace for exact candidate reranking.
+    :param rerank_data: Optional base feature matrix for candidate reranking.
     """
 
     def __init__(
         self,
         graph,
-        refine_space: FloatSpace | None = None,
-        refine_data: np.ndarray | None = None,
+        rerank_space: FloatSpace | None = None,
+        rerank_data: np.ndarray | None = None,
     ):
         cpp_graph = graph.dynamic_exploration_graph_cpp if hasattr(graph, "dynamic_exploration_graph_cpp") else graph
-        cpp_refine_space = (
-            refine_space.float_space_cpp
-            if (refine_space is not None and hasattr(refine_space, "float_space_cpp"))
-            else refine_space
+        cpp_rerank_space = (
+            rerank_space.float_space_cpp
+            if (rerank_space is not None and hasattr(rerank_space, "float_space_cpp"))
+            else rerank_space
         )
 
         self.searcher_cpp = cpp_search.Searcher(
             graph=cpp_graph,
-            rerank_space=cpp_refine_space,
-            base_vectors=refine_data,
+            rerank_space=cpp_rerank_space,
+            base_vectors=rerank_data,
         )
 
     def optimize(
@@ -275,20 +275,20 @@ class Searcher:
 
 def create_searcher(
     graph,
-    refine_space: FloatSpace | None = None,
-    refine_data: np.ndarray | None = None,
+    rerank_space: FloatSpace | None = None,
+    rerank_data: np.ndarray | None = None,
 ) -> Searcher:
     """
     Factory function to create a Searcher instance.
 
     :param graph: DynamicExplorationGraph (Mutable or ReadOnly) instance.
-    :param refine_space: Optional FloatSpace for exact candidate reranking.
-    :param refine_data: Optional base feature matrix for candidate reranking.
+    :param rerank_space: Optional FloatSpace for exact candidate reranking.
+    :param rerank_data: Optional base feature matrix for candidate reranking.
     """
     return Searcher(
         graph=graph,
-        refine_space=refine_space,
-        refine_data=refine_data,
+        rerank_space=rerank_space,
+        rerank_data=rerank_data,
     )
 
 

@@ -130,35 +130,12 @@ inline DynamicExplorationGraph load_mutable_graph(const char* path_graph, const 
  * Convenience overloads that forward to deglib::search::make_searcher using the graph's internal representation,
  * so end users can pass the public graph type directly.
  */
-template <typename RefinerT>
-inline std::unique_ptr<deglib::search::SearcherBase> make_searcher(const DynamicExplorationGraph& graph, RefinerT refiner) {
-    if (graph.hasTransformations() && !graph.getTransformations().empty()) {
-        auto& t = graph.getTransformations().back();
-        if (t->tag() == deglib::transformation::TAG_SQI8) {
-            return deglib::search::make_searcher(
-                graph.internal(), *std::dynamic_pointer_cast<deglib::transformation::ScalarQuantizerInt8>(t), std::move(refiner)
-            );
-        } else if (t->tag() == deglib::transformation::TAG_SQ8P) {
-            return deglib::search::make_searcher(
-                graph.internal(), *std::dynamic_pointer_cast<deglib::transformation::ScalarQuantizerInt8PerDim>(t), std::move(refiner)
-            );
-        } else if (t->tag() == deglib::transformation::TAG_SQU8) {
-            return deglib::search::make_searcher(
-                graph.internal(), *std::dynamic_pointer_cast<deglib::transformation::ScalarQuantizerUint8>(t), std::move(refiner)
-            );
-        } else if (t->tag() == deglib::transformation::TAG_SQUP) {
-            return deglib::search::make_searcher(
-                graph.internal(), *std::dynamic_pointer_cast<deglib::transformation::ScalarQuantizerUint8PerDim>(t), std::move(refiner)
-            );
-        } else if (t->tag() == deglib::transformation::TAG_EVPQ) {
-            return deglib::search::make_searcher(graph.internal(), *std::dynamic_pointer_cast<deglib::transformation::EvpQuantizer>(t), std::move(refiner));
-        }
-    }
-    return deglib::search::make_searcher(graph.internal(), deglib::search::NoQuantizer{}, std::move(refiner));
+inline std::unique_ptr<deglib::search::Searcher> make_searcher(const DynamicExplorationGraph& graph) {
+    return std::make_unique<deglib::search::Searcher>(graph.internal(), graph.getTransformations());
 }
 
-inline std::unique_ptr<deglib::search::SearcherBase> make_searcher(const DynamicExplorationGraph& graph) {
-    return make_searcher(graph, deglib::search::NoRefiner{});
+inline std::unique_ptr<deglib::search::Searcher> make_searcher(const DynamicExplorationGraph& graph, deglib::search::Reranker reranker) {
+    return std::make_unique<deglib::search::Searcher>(graph.internal(), graph.getTransformations(), std::move(reranker));
 }
 
 }  // namespace deglib

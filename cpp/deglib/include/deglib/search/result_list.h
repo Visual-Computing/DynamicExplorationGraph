@@ -233,6 +233,39 @@ class ResultList {
     }
 };
 
+// ============================================================================
+// Search Result Structs for Modern C++20 API
+// ============================================================================
+
+struct SearchResult {
+    std::vector<uint32_t> indices;
+    std::vector<float> distances;
+
+    size_t size() const noexcept { return indices.size(); }
+    bool empty() const noexcept { return indices.empty(); }
+    bool has_distances() const noexcept { return !distances.empty(); }
+};
+
+/**
+ * Contiguous, zero-overhead batch search result structure.
+ * Avoids N separate vector heap allocations when searching batches.
+ */
+struct SearchResultBatch {
+    size_t n_queries = 0;
+    uint32_t k = 0;
+    std::vector<uint32_t> indices;
+    std::vector<float> distances;
+
+    size_t size() const noexcept { return n_queries; }
+    bool empty() const noexcept { return n_queries == 0; }
+    bool has_distances() const noexcept { return !distances.empty(); }
+
+    std::span<const uint32_t> get_indices(size_t q) const noexcept { return {indices.data() + q * k, k}; }
+    std::span<const float> get_distances(size_t q) const noexcept {
+        return distances.empty() ? std::span<const float>{} : std::span<const float>{distances.data() + q * k, k};
+    }
+};
+
 }  // namespace deglib::search
 
 namespace deglib::graph {

@@ -341,7 +341,7 @@ class Reranker:
 
 # High-performance searcher with optional on-the-fly quantization and exact reranking.
 class Searcher:
-    # Constructor via create_searcher(graph, refine_space=None, refine_data=None)
+    # Constructor via create_searcher(graph, rerank_space=None, rerank_data=None)
 
     # Entry vertex optimization via k-means medoids
     optimize(n_clusters=256, n_iter=20, sample_size=0, k=100, seed=7, num_threads=1)
@@ -357,7 +357,7 @@ class Searcher:
     # unsorted: If True, returns candidates in heap order instead of ascending distance order
     search(query, k, eps_or_ef=0.1, rerank_factor=1.0, threads=1, return_distances=False, unsorted=False) -> np.ndarray | tuple[np.ndarray, np.ndarray]
 
-create_searcher(graph, refine_space=None, refine_data=None) -> Searcher
+create_searcher(graph, rerank_space=None, rerank_data=None) -> Searcher
 ```
 
 ---

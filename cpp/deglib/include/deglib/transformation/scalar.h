@@ -231,6 +231,13 @@ class ScalarQuantizerInt8 : public FeatureTransformation {
     size_t input_bytes() const noexcept { return dim * sizeof(float); }
     size_t output_bytes() const noexcept { return dim * sizeof(int8_t); }
 
+    deglib::distances::Metric get_target_metric(deglib::distances::Metric input_metric) const override {
+        auto kind = input_metric.get_distance_kind();
+        return (kind == deglib::distances::MetricDistanceKind::InnerProduct)
+            ? deglib::distances::Metric::Int8_InnerProduct
+            : deglib::distances::Metric::Int8_L2;
+    }
+
     void fit(const float* data, size_t count, uint32_t d, float drop_ratio = 0.0f) {
         if (count == 0 || d == 0) return;
         dim = d;
@@ -430,6 +437,13 @@ class ScalarQuantizerUint8 : public FeatureTransformation {
     size_t input_bytes() const noexcept { return dim * sizeof(float); }
     size_t output_bytes() const noexcept { return dim * sizeof(uint8_t); }
 
+    deglib::distances::Metric get_target_metric(deglib::distances::Metric input_metric) const override {
+        auto kind = input_metric.get_distance_kind();
+        return (kind == deglib::distances::MetricDistanceKind::InnerProduct)
+            ? deglib::distances::Metric::Uint8_InnerProduct
+            : deglib::distances::Metric::Uint8_L2;
+    }
+
     void fit(const float* data, size_t count, uint32_t d, float drop_ratio = 0.0f) {
         if (count == 0 || d == 0) return;
         dim = d;
@@ -623,6 +637,13 @@ class ScalarQuantizerInt8PerDim : public FeatureTransformation {
     uint32_t output_dim() const noexcept { return dim; }
     size_t input_bytes() const noexcept { return dim * sizeof(float); }
     size_t output_bytes() const noexcept { return dim * sizeof(int8_t); }
+
+    deglib::distances::Metric get_target_metric(deglib::distances::Metric input_metric) const override {
+        auto kind = input_metric.get_distance_kind();
+        return (kind == deglib::distances::MetricDistanceKind::InnerProduct)
+            ? deglib::distances::Metric::Int8_InnerProduct
+            : deglib::distances::Metric::Int8_L2;
+    }
 
     void fit(const float* data, size_t count, uint32_t d, float drop_ratio = 0.0f) {
         if (count == 0 || d == 0) return;
@@ -819,6 +840,13 @@ class ScalarQuantizerUint8PerDim : public FeatureTransformation {
     uint32_t output_dim() const noexcept { return dim; }
     size_t input_bytes() const noexcept { return dim * sizeof(float); }
     size_t output_bytes() const noexcept { return dim * sizeof(uint8_t); }
+
+    deglib::distances::Metric get_target_metric(deglib::distances::Metric input_metric) const override {
+        auto kind = input_metric.get_distance_kind();
+        return (kind == deglib::distances::MetricDistanceKind::InnerProduct)
+            ? deglib::distances::Metric::Uint8_InnerProduct
+            : deglib::distances::Metric::Uint8_L2;
+    }
 
     void fit(const float* data, size_t count, uint32_t d, float drop_ratio = 0.0f) {
         if (count == 0 || d == 0) return;

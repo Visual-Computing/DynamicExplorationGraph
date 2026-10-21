@@ -242,8 +242,8 @@ readonly_graph = graph.to_readonly(
 rerank_space = deglib.FloatSpace.create(dims, deglib.Metric.FP32_InnerProduct)
 searcher = create_searcher(
     graph=readonly_graph,
-    refine_space=rerank_space,
-    refine_data=sorted_data,
+    rerank_space=rerank_space,
+    rerank_data=sorted_data,
 )
 
 # 7. Query search (query is automatically quantized and top candidates are reranked)

@@ -168,12 +168,12 @@ graph.optimize(/*sample_count=*/50, /*k=*/100, /*ef=*/200);
 
 ### High-Performance Searcher Pipeline
 
-`deglib::search::SearcherBase` provides a specialized query execution pipeline supporting entry vertex optimization, optional on-the-fly query quantization, exact candidate reranking, and multithreaded batch search with unified exploration parameter `eps_or_ef`:
+`deglib::search::Searcher` provides a specialized query execution pipeline supporting entry vertex optimization, optional on-the-fly query quantization, exact candidate reranking, and multithreaded batch search with unified exploration parameter `eps_or_ef`:
 
 ```cpp
 #include <deglib/deglib.h>
 
-// 1. Create searcher on top of a graph (optionally with quantizer & refiner)
+// 1. Create searcher on top of a graph (optionally with quantizer & reranker)
 auto searcher = deglib::make_searcher(readonly_graph);
 searcher->optimize(/*n_clusters=*/128); // entry vertex medoids via k-means
 

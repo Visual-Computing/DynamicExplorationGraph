@@ -105,6 +105,10 @@ class MipsTransform : public FeatureTransformation {
     size_t output_bytes() const noexcept { return (dim_ + 1) * sizeof(float); }
     float max_norm() const noexcept { return max_norm_; }
 
+    deglib::distances::Metric get_target_metric(deglib::distances::Metric) const override {
+        return deglib::distances::Metric::FP32_L2;
+    }
+
     void fit(const float* data, size_t count) {
         if (count == 0 || dim_ == 0) return;
         double max_norm_sq = 0.0;

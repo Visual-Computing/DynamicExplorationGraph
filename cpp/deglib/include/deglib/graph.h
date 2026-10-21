@@ -37,6 +37,66 @@ class DynamicExplorationGraph {
     deglib::graph::InternalGraph* internal_graph_;
     std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations_;
 
+    struct PreparedConversionFeatures {
+        deglib::distances::FloatSpace target_space;
+        const void* feature_ptr = nullptr;
+        std::vector<std::byte> storage;
+    };
+
+    PreparedConversionFeatures prepare_conversion_features(
+        std::optional<deglib::distances::FloatSpace> custom_feature_space,
+        const void* custom_features,
+        const std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>& xfrms
+    ) const {
+        auto resolve_space = [&]() -> deglib::distances::FloatSpace {
+            if (custom_feature_space.has_value()) {
+                return *custom_feature_space;
+            } else if (!xfrms.empty()) {
+                const uint32_t target_dim = deglib::transformation::get_output_dim(xfrms);
+                const auto target_metric = deglib::transformation::get_target_metric(xfrms, getFeatureSpace().metric());
+                return deglib::distances::FloatSpace(target_dim, target_metric);
+            }
+            return getFeatureSpace();
+        };
+
+        PreparedConversionFeatures res{resolve_space(), custom_features, {}};
+
+        if (custom_features != nullptr) {
+            res.feature_ptr = custom_features;
+        } else if (!xfrms.empty() && (getFeatureSpace().metric() != res.target_space.metric()) && size() > 0) {
+            uint32_t max_label = 0;
+            for (uint32_t i = 0; i < size(); ++i) {
+                max_label = std::max(max_label, internal_graph_->getExternalLabel(i));
+            }
+            const size_t target_stride = res.target_space.get_data_size();
+            res.storage.resize((size_t(max_label) + 1) * target_stride);
+
+            const auto src_metric = getFeatureSpace().metric();
+            const uint32_t in_dim = getFeatureSpace().dim();
+
+            if (src_metric.get_data_type() == deglib::distances::MetricDataType::FP32) {
+                for (uint32_t i = 0; i < size(); ++i) {
+                    const uint32_t label = internal_graph_->getExternalLabel(i);
+                    const float* src = reinterpret_cast<const float*>(internal_graph_->getFeatureVector(i));
+                    deglib::transformation::apply_database(xfrms, src, res.storage.data() + size_t(label) * target_stride, 1);
+                }
+            } else if (src_metric.get_data_type() == deglib::distances::MetricDataType::FP16) {
+                std::vector<float> f_buf(in_dim);
+                for (uint32_t i = 0; i < size(); ++i) {
+                    const uint32_t label = internal_graph_->getExternalLabel(i);
+                    const uint16_t* src_fp16 = reinterpret_cast<const uint16_t*>(internal_graph_->getFeatureVector(i));
+                    deglib::distances::fp16::fp16_to_floats(src_fp16, f_buf.data(), in_dim);
+                    deglib::transformation::apply_database(xfrms, f_buf.data(), res.storage.data() + size_t(label) * target_stride, 1);
+                }
+            } else {
+                throw std::invalid_argument("DynamicExplorationGraph: cannot self-transform from non-float base features");
+            }
+            res.feature_ptr = res.storage.data();
+        }
+
+        return res;
+    }
+
   public:
     /**
      * @brief Constructs a DynamicExplorationGraph by taking ownership of an InternalGraph.
@@ -211,7 +271,8 @@ class DynamicExplorationGraph {
                     deglib::transformation::apply_query(transformations_, f_query, q_buf, 1);
                 }
 
-                auto res = internal_graph_->search(std::span<const std::byte>(q_buf, out_bytes), k, eps, filter, max_distance_computation_count);
+                std::span<const std::byte> single_q(q_buf, out_bytes);
+                auto res = internal_graph_->search(single_q, k, eps, filter, max_distance_computation_count);
                 for (auto& od : res) {
                     uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
                     od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
@@ -269,8 +330,8 @@ class DynamicExplorationGraph {
                     deglib::transformation::apply_query(transformations_, f_query, q_buf, 1);
                 }
 
-                auto res =
-                    internal_graph_->search_ef(std::span<const std::byte>(q_buf, out_bytes), k, ef, include_entry, filter, max_distance_computation_count);
+                std::span<const std::byte> single_q(q_buf, out_bytes);
+                auto res = internal_graph_->search_ef(single_q, k, ef, include_entry, filter, max_distance_computation_count);
                 for (auto& od : res) {
                     uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
                     od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
@@ -1103,31 +1164,27 @@ class DynamicExplorationGraph {
      *
      * @return A new read-only DynamicExplorationGraph.
      */
-    DynamicExplorationGraph to_readonly() const {
-        auto graph = std::make_unique<deglib::graph::ReadOnlyGraph>(
-            internal_graph_->size(), internal_graph_->getEdgesPerVertex(), internal_graph_->getFeatureSpace(), *internal_graph_
-        );
-        return DynamicExplorationGraph(std::move(graph), transformations_);
-    }
-
     /**
-     * @brief Converts this graph to a compact read-only graph with a custom feature space and features buffer.
-     *
+     * @brief Converts this graph to a compact read-only graph optimized for search.
      * Replaces feature representation (e.g. uncompressed float to quantized bytes or FP16).
+     * If custom_features is nullptr and transformations are provided, existing features are
+     * self-transformed directly into the target buffer without caller-side allocations.
      *
-     * @param custom_feature_space The new target feature space.
-     * @param custom_features Pointer to replacement raw feature memory (size = size() * custom_feature_space.get_data_size()).
+     * @param custom_feature_space Optional target feature space. If omitted and transformations exist, derived automatically.
+     * @param custom_features Optional pointer to replacement raw feature memory.
+     * @param transformations Optional sequence of feature transformations/quantizers to attach.
      * @return A new read-only DynamicExplorationGraph.
      */
     DynamicExplorationGraph to_readonly(
-        const deglib::distances::FloatSpace& custom_feature_space,
+        std::optional<deglib::distances::FloatSpace> custom_feature_space = std::nullopt,
         const void* custom_features = nullptr,
         std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
     ) const {
-        auto graph = std::make_unique<deglib::graph::ReadOnlyGraph>(
-            internal_graph_->size(), internal_graph_->getEdgesPerVertex(), custom_feature_space, *internal_graph_, custom_features
-        );
         auto xfrms = !transformations.empty() ? std::move(transformations) : transformations_;
+        auto prep = prepare_conversion_features(custom_feature_space, custom_features, xfrms);
+        auto graph = std::make_unique<deglib::graph::ReadOnlyGraph>(
+            internal_graph_->size(), internal_graph_->getEdgesPerVertex(), prep.target_space, *internal_graph_, prep.feature_ptr
+        );
         return DynamicExplorationGraph(std::move(graph), std::move(xfrms));
     }
 
@@ -1145,31 +1202,28 @@ class DynamicExplorationGraph {
     /**
      * @brief Converts this graph to a mutable SizeBoundedGraph with a custom feature space and features buffer.
      *
-     * Replaces feature representation (e.g. uncompressed float to quantized bytes or FP16) and recomputes all edge weights.
-     *
-     * @param custom_feature_space The new target feature space.
-     * @param custom_features Pointer to replacement raw feature memory (size = size() * custom_feature_space.get_data_size()).
+     * @param custom_feature_space Optional target feature space.
+     * @param custom_features Pointer to replacement raw feature memory.
      * @param new_max_size Desired vertex capacity. If 0 or less than size(), capacity is set to size().
      * @param transformations Optional sequence of feature transformations/quantizers to attach.
      * @return A new mutable DynamicExplorationGraph.
      */
     DynamicExplorationGraph to_mutable(
-        const deglib::distances::FloatSpace& custom_feature_space,
+        std::optional<deglib::distances::FloatSpace> custom_feature_space,
         const void* custom_features = nullptr,
         const uint32_t new_max_size = 0,
         std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
     ) const {
-        auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(
-            deglib::graph::SizeBoundedGraph::from_graph(*internal_graph_, custom_feature_space, custom_features, new_max_size)
-        );
         auto xfrms = !transformations.empty() ? std::move(transformations) : transformations_;
+        auto prep = prepare_conversion_features(custom_feature_space, custom_features, xfrms);
+        auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(
+            deglib::graph::SizeBoundedGraph::from_graph(*internal_graph_, prep.target_space, prep.feature_ptr, new_max_size)
+        );
         return DynamicExplorationGraph(std::move(graph), std::move(xfrms));
     }
 
     /**
      * @brief Converts this graph to a mutable DynamicGraph with chunked dynamic memory allocation.
-     *
-     * Allows unbounded growth and vertex removals using chunked vertex buffers.
      *
      * @param chunk_size Number of vertices allocated per memory chunk (default 1024). Rounded to power of 2.
      * @return A new mutable DynamicExplorationGraph.
@@ -1182,22 +1236,23 @@ class DynamicExplorationGraph {
     /**
      * @brief Converts this graph to a mutable DynamicGraph with a custom feature space and chunked allocation.
      *
-     * @param custom_feature_space The new target feature space.
+     * @param custom_feature_space Optional target feature space.
      * @param custom_features Pointer to replacement raw feature memory.
      * @param chunk_size Number of vertices allocated per memory chunk (default 1024). Rounded to power of 2.
      * @param transformations Optional sequence of feature transformations/quantizers to attach.
      * @return A new mutable DynamicExplorationGraph.
      */
     DynamicExplorationGraph to_dynamic(
-        const deglib::distances::FloatSpace& custom_feature_space,
+        std::optional<deglib::distances::FloatSpace> custom_feature_space,
         const void* custom_features = nullptr,
         const uint32_t chunk_size = 1024,
         std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
     ) const {
-        auto graph = std::make_unique<deglib::graph::DynamicGraph>(
-            deglib::graph::DynamicGraph::from_graph(*internal_graph_, custom_feature_space, custom_features, chunk_size)
-        );
         auto xfrms = !transformations.empty() ? std::move(transformations) : transformations_;
+        auto prep = prepare_conversion_features(custom_feature_space, custom_features, xfrms);
+        auto graph = std::make_unique<deglib::graph::DynamicGraph>(
+            deglib::graph::DynamicGraph::from_graph(*internal_graph_, prep.target_space, prep.feature_ptr, chunk_size)
+        );
         return DynamicExplorationGraph(std::move(graph), std::move(xfrms));
     }
 

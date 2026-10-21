@@ -60,10 +60,10 @@ TEST(SearchRegression, Rerank_FP32_L2_Benchmark) {
         }
     }
 
-   deglib::search::Reranker<float> reranker(space, base_vectors.data(), num_base);
+    deglib::search::Reranker reranker(space, base_vectors.data(), num_base);
 
-   // Warm-up run
-   auto warm_results = reranker.rerank(query_vectors.data(), num_queries, candidates.data(), candidates_per_query, k_top, num_threads);
+    // Warm-up run
+    auto warm_results = reranker.rerank(query_vectors.data(), num_queries, candidates.data(), candidates_per_query, k_top, num_threads);
     EXPECT_EQ(warm_results.size(), num_queries);
 
     // Benchmark run
@@ -71,7 +71,7 @@ TEST(SearchRegression, Rerank_FP32_L2_Benchmark) {
     auto start = std::chrono::high_resolution_clock::now();
 
     for (int it = 0; it < iterations; ++it) {
-       auto results = reranker.rerank(query_vectors.data(), num_queries, candidates.data(), candidates_per_query, k_top, num_threads);
+        auto results = reranker.rerank(query_vectors.data(), num_queries, candidates.data(), candidates_per_query, k_top, num_threads);
     }
 
     auto end = std::chrono::high_resolution_clock::now();
@@ -117,10 +117,10 @@ TEST(SearchRegression, Rerank_FP16_InnerProduct_Benchmark) {
         }
     }
 
-   deglib::search::Reranker<uint16_t> reranker(space, base_vectors.data(), num_base);
+    deglib::search::Reranker reranker(space, base_vectors.data(), num_base);
 
-   // Warm-up run
-   auto warm_results = reranker.rerank(query_vectors.data(), num_queries, candidates.data(), candidates_per_query, k_top, num_threads);
+    // Warm-up run
+    auto warm_results = reranker.rerank(query_vectors.data(), num_queries, candidates.data(), candidates_per_query, k_top, num_threads);
     EXPECT_EQ(warm_results.size(), num_queries);
 
     // Benchmark run
@@ -128,7 +128,7 @@ TEST(SearchRegression, Rerank_FP16_InnerProduct_Benchmark) {
     auto start = std::chrono::high_resolution_clock::now();
 
     for (int it = 0; it < iterations; ++it) {
-       auto results = reranker.rerank(query_vectors.data(), num_queries, candidates.data(), candidates_per_query, k_top, num_threads);
+        auto results = reranker.rerank(query_vectors.data(), num_queries, candidates.data(), candidates_per_query, k_top, num_threads);
     }
 
     auto end = std::chrono::high_resolution_clock::now();
@@ -178,7 +178,7 @@ TEST(SearchRegression, Reranker_Prefetch_Optimize_Benchmark) {
         }
     }
 
-    deglib::search::Reranker<float> reranker(space, base_vectors.data(), num_base);
+    deglib::search::Reranker reranker(space, base_vectors.data(), num_base);
 
     std::vector<uint32_t> out_indices(k_top);
     std::vector<float> out_distances(k_top);
@@ -231,58 +231,58 @@ TEST(SearchRegression, Reranker_Prefetch_Optimize_Benchmark) {
 }
 
 TEST(SearchRegression, SearcherTraversal_Optimize_Benchmark) {
-   // Reports traversal throughput for the prefetch config chosen by optimize() versus the graph's
-   // built-in default (po=8,pl=3,nl=3). The default lies inside the tuner's search grid, so the
-   // tuned config is never worse in the tuner's own measurement; the real speedup is workload and
-   // hardware dependent (it only appears once the working set exceeds cache). This benchmark reports
-   // the measured ratio and guards against a regression (tuned must not be materially slower).
-   const uint32_t dim = 128;
-   const uint32_t num_base = 60000;
-   const uint32_t num_queries = 512;
-   const int iterations = 5;
+    // Reports traversal throughput for the prefetch config chosen by optimize() versus the graph's
+    // built-in default (po=8,pl=3,nl=3). The default lies inside the tuner's search grid, so the
+    // tuned config is never worse in the tuner's own measurement; the real speedup is workload and
+    // hardware dependent (it only appears once the working set exceeds cache). This benchmark reports
+    // the measured ratio and guards against a regression (tuned must not be materially slower).
+    const uint32_t dim = 128;
+    const uint32_t num_base = 60000;
+    const uint32_t num_queries = 512;
+    const int iterations = 5;
 
-   std::vector<float> data(num_base * dim);
-   uint32_t rng = 9001;
-   for (auto& v : data) v = benchmark_float(rng);
+    std::vector<float> data(num_base * dim);
+    uint32_t rng = 9001;
+    for (auto& v : data) v = benchmark_float(rng);
 
-   deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
-   auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 16, deglib::distances::Metric::FP32_L2);
-   auto searcher = deglib::search::make_searcher(graph.internal());
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+    auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 16, deglib::distances::Metric::FP32_L2);
+    auto searcher = deglib::search::make_searcher(graph.internal());
 
-   searcher->optimize(/*n_clusters=*/64, /*n_iter=*/5, /*sample_size=*/0, /*k=*/10, /*seed=*/7, /*threads=*/1);
-   const int32_t tuned_po = graph.getPo();
-   const int32_t tuned_pl = graph.getPl();
-   const int32_t tuned_nl = graph.getNl();
+    searcher->optimize(/*n_clusters=*/64, /*n_iter=*/5, /*sample_size=*/0, /*k=*/10, /*seed=*/7, /*threads=*/1);
+    const int32_t tuned_po = graph.getPo();
+    const int32_t tuned_pl = graph.getPl();
+    const int32_t tuned_nl = graph.getNl();
 
-   std::vector<uint32_t> idx(10);
-   std::vector<float> d(10);
-   auto sweep_us = [&]() {
-       double best = std::numeric_limits<double>::max();
-       for (int it = 0; it < iterations; ++it) {
-           const auto t0 = std::chrono::high_resolution_clock::now();
-           for (uint32_t q = 0; q < num_queries; ++q) {
-               searcher->search_f32(data.data() + static_cast<size_t>(q) * dim, 10, 0.1f, 1.0f, idx.data(), d.data());
-           }
-           const auto t1 = std::chrono::high_resolution_clock::now();
-           best = std::min(best, std::chrono::duration<double, std::micro>(t1 - t0).count());
-       }
-       return best;
-   };
+    std::vector<uint32_t> idx(10);
+    std::vector<float> d(10);
+    auto sweep_us = [&]() {
+        double best = std::numeric_limits<double>::max();
+        for (int it = 0; it < iterations; ++it) {
+            const auto t0 = std::chrono::high_resolution_clock::now();
+            for (uint32_t q = 0; q < num_queries; ++q) {
+                searcher->search_f32(data.data() + static_cast<size_t>(q) * dim, 10, 0.1f, 1.0f, idx.data(), d.data());
+            }
+            const auto t1 = std::chrono::high_resolution_clock::now();
+            best = std::min(best, std::chrono::duration<double, std::micro>(t1 - t0).count());
+        }
+        return best;
+    };
 
-   // Default config (inside the tuner grid) vs the tuned config, entry points held constant.
-   graph.setPrefetch(8, 3, 3);
-   const double default_us = sweep_us();
-   graph.setPrefetch(tuned_po, tuned_pl, tuned_nl);
-   const double tuned_us = sweep_us();
+    // Default config (inside the tuner grid) vs the tuned config, entry points held constant.
+    graph.setPrefetch(8, 3, 3);
+    const double default_us = sweep_us();
+    graph.setPrefetch(tuned_po, tuned_pl, tuned_nl);
+    const double tuned_us = sweep_us();
 
-   const double speedup = default_us / tuned_us;
-   std::cout << "\n=== Searcher Traversal Prefetch Benchmark (FP32_L2, Instruction: " << space.get_instruction() << ") ===\n"
-             << "Vertices: " << num_base << ", Dim: " << dim << " (" << (static_cast<double>(num_base) * dim * 4 / 1e6) << " MB working set), Queries: " << num_queries
-             << ", Iterations: " << iterations << "\n"
-             << "Default prefetch (po=8,pl=3,nl=3): " << std::fixed << std::setprecision(1) << default_us << " us/sweep\n"
-             << "Tuned prefetch (po=" << tuned_po << ",pl=" << tuned_pl << ",nl=" << tuned_nl << "): " << tuned_us << " us/sweep\n"
-             << "Speedup: " << std::setprecision(3) << speedup << "x\n\n";
+    const double speedup = default_us / tuned_us;
+    std::cout << "\n=== Searcher Traversal Prefetch Benchmark (FP32_L2, Instruction: " << space.get_instruction() << ") ===\n"
+              << "Vertices: " << num_base << ", Dim: " << dim << " (" << (static_cast<double>(num_base) * dim * 4 / 1e6)
+              << " MB working set), Queries: " << num_queries << ", Iterations: " << iterations << "\n"
+              << "Default prefetch (po=8,pl=3,nl=3): " << std::fixed << std::setprecision(1) << default_us << " us/sweep\n"
+              << "Tuned prefetch (po=" << tuned_po << ",pl=" << tuned_pl << ",nl=" << tuned_nl << "): " << tuned_us << " us/sweep\n"
+              << "Speedup: " << std::setprecision(3) << speedup << "x\n\n";
 
-   // Regression guard: optimize() must not make traversal materially slower than the default.
-   EXPECT_GE(speedup, 0.85);
+    // Regression guard: optimize() must not make traversal materially slower than the default.
+    EXPECT_GE(speedup, 0.85);
 }
