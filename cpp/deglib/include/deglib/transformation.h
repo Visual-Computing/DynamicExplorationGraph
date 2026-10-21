@@ -143,7 +143,7 @@ class QueryWorkspace {
     }
 };
 
-inline void apply_query(const std::vector<std::shared_ptr<FeatureTransformation>>& transformations, const float* query, std::byte* out, size_t count = 1) {
+inline void apply_query(std::span<const std::shared_ptr<FeatureTransformation>> transformations, const float* query, std::byte* out, size_t count = 1) {
     if (transformations.empty()) {
         std::memcpy(out, query, count * sizeof(float));
         return;
@@ -168,7 +168,7 @@ inline void apply_query(const std::vector<std::shared_ptr<FeatureTransformation>
     }
 }
 
-inline void apply_database(const std::vector<std::shared_ptr<FeatureTransformation>>& transformations, const float* data, std::byte* out, size_t count) {
+inline void apply_database(std::span<const std::shared_ptr<FeatureTransformation>> transformations, const float* data, std::byte* out, size_t count) {
     if (transformations.empty()) {
         std::memcpy(out, data, count * sizeof(float));
         return;
@@ -198,20 +198,20 @@ inline void apply_database(const std::vector<std::shared_ptr<FeatureTransformati
     }
 }
 
-inline uint32_t get_input_dim(const std::vector<std::shared_ptr<FeatureTransformation>>& transformations) noexcept {
+inline uint32_t get_input_dim(std::span<const std::shared_ptr<FeatureTransformation>> transformations) noexcept {
     return transformations.empty() ? 0 : transformations.front()->input_dim();
 }
 
-inline uint32_t get_output_dim(const std::vector<std::shared_ptr<FeatureTransformation>>& transformations) noexcept {
+inline uint32_t get_output_dim(std::span<const std::shared_ptr<FeatureTransformation>> transformations) noexcept {
     return transformations.empty() ? 0 : transformations.back()->output_dim();
 }
 
-inline size_t get_output_bytes(const std::vector<std::shared_ptr<FeatureTransformation>>& transformations) noexcept {
+inline size_t get_output_bytes(std::span<const std::shared_ptr<FeatureTransformation>> transformations) noexcept {
     return transformations.empty() ? 0 : transformations.back()->output_bytes();
 }
 
 inline deglib::distances::Metric get_target_metric(
-    const std::vector<std::shared_ptr<FeatureTransformation>>& transformations,
+    std::span<const std::shared_ptr<FeatureTransformation>> transformations,
     deglib::distances::Metric input_metric
 ) {
     deglib::distances::Metric cur = input_metric;

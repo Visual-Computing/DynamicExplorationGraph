@@ -37,66 +37,6 @@ class DynamicExplorationGraph {
     deglib::graph::InternalGraph* internal_graph_;
     std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations_;
 
-    struct PreparedConversionFeatures {
-        deglib::distances::FloatSpace target_space;
-        const void* feature_ptr = nullptr;
-        std::vector<std::byte> storage;
-    };
-
-    PreparedConversionFeatures prepare_conversion_features(
-        std::optional<deglib::distances::FloatSpace> custom_feature_space,
-        const void* custom_features,
-        const std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>& xfrms
-    ) const {
-        auto resolve_space = [&]() -> deglib::distances::FloatSpace {
-            if (custom_feature_space.has_value()) {
-                return *custom_feature_space;
-            } else if (!xfrms.empty()) {
-                const uint32_t target_dim = deglib::transformation::get_output_dim(xfrms);
-                const auto target_metric = deglib::transformation::get_target_metric(xfrms, getFeatureSpace().metric());
-                return deglib::distances::FloatSpace(target_dim, target_metric);
-            }
-            return getFeatureSpace();
-        };
-
-        PreparedConversionFeatures res{resolve_space(), custom_features, {}};
-
-        if (custom_features != nullptr) {
-            res.feature_ptr = custom_features;
-        } else if (!xfrms.empty() && (getFeatureSpace().metric() != res.target_space.metric()) && size() > 0) {
-            uint32_t max_label = 0;
-            for (uint32_t i = 0; i < size(); ++i) {
-                max_label = std::max(max_label, internal_graph_->getExternalLabel(i));
-            }
-            const size_t target_stride = res.target_space.get_data_size();
-            res.storage.resize((size_t(max_label) + 1) * target_stride);
-
-            const auto src_metric = getFeatureSpace().metric();
-            const uint32_t in_dim = getFeatureSpace().dim();
-
-            if (src_metric.get_data_type() == deglib::distances::MetricDataType::FP32) {
-                for (uint32_t i = 0; i < size(); ++i) {
-                    const uint32_t label = internal_graph_->getExternalLabel(i);
-                    const float* src = reinterpret_cast<const float*>(internal_graph_->getFeatureVector(i));
-                    deglib::transformation::apply_database(xfrms, src, res.storage.data() + size_t(label) * target_stride, 1);
-                }
-            } else if (src_metric.get_data_type() == deglib::distances::MetricDataType::FP16) {
-                std::vector<float> f_buf(in_dim);
-                for (uint32_t i = 0; i < size(); ++i) {
-                    const uint32_t label = internal_graph_->getExternalLabel(i);
-                    const uint16_t* src_fp16 = reinterpret_cast<const uint16_t*>(internal_graph_->getFeatureVector(i));
-                    deglib::distances::fp16::fp16_to_floats(src_fp16, f_buf.data(), in_dim);
-                    deglib::transformation::apply_database(xfrms, f_buf.data(), res.storage.data() + size_t(label) * target_stride, 1);
-                }
-            } else {
-                throw std::invalid_argument("DynamicExplorationGraph: cannot self-transform from non-float base features");
-            }
-            res.feature_ptr = res.storage.data();
-        }
-
-        return res;
-    }
-
   public:
     /**
      * @brief Constructs a DynamicExplorationGraph by taking ownership of an InternalGraph.
@@ -1181,9 +1121,8 @@ class DynamicExplorationGraph {
         std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
     ) const {
         auto xfrms = !transformations.empty() ? std::move(transformations) : transformations_;
-        auto prep = prepare_conversion_features(custom_feature_space, custom_features, xfrms);
         auto graph = std::make_unique<deglib::graph::ReadOnlyGraph>(
-            internal_graph_->size(), internal_graph_->getEdgesPerVertex(), prep.target_space, *internal_graph_, prep.feature_ptr
+            deglib::graph::ReadOnlyGraph::from_graph(*internal_graph_, custom_feature_space, custom_features, xfrms)
         );
         return DynamicExplorationGraph(std::move(graph), std::move(xfrms));
     }
@@ -1215,9 +1154,8 @@ class DynamicExplorationGraph {
         std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
     ) const {
         auto xfrms = !transformations.empty() ? std::move(transformations) : transformations_;
-        auto prep = prepare_conversion_features(custom_feature_space, custom_features, xfrms);
         auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(
-            deglib::graph::SizeBoundedGraph::from_graph(*internal_graph_, prep.target_space, prep.feature_ptr, new_max_size)
+            deglib::graph::SizeBoundedGraph::from_graph(*internal_graph_, custom_feature_space, custom_features, xfrms, new_max_size)
         );
         return DynamicExplorationGraph(std::move(graph), std::move(xfrms));
     }
@@ -1249,9 +1187,8 @@ class DynamicExplorationGraph {
         std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
     ) const {
         auto xfrms = !transformations.empty() ? std::move(transformations) : transformations_;
-        auto prep = prepare_conversion_features(custom_feature_space, custom_features, xfrms);
         auto graph = std::make_unique<deglib::graph::DynamicGraph>(
-            deglib::graph::DynamicGraph::from_graph(*internal_graph_, prep.target_space, prep.feature_ptr, chunk_size)
+            deglib::graph::DynamicGraph::from_graph(*internal_graph_, custom_feature_space, custom_features, xfrms, chunk_size)
         );
         return DynamicExplorationGraph(std::move(graph), std::move(xfrms));
     }
@@ -1326,12 +1263,17 @@ class DynamicExplorationGraph {
 
     /**
      * @brief Saves the graph and any attached transformations to a binary file.
+     * Graph must be mutable (SizeBoundedGraph or DynamicGraph) to be saved.
      *
      * @param path File path to write to (C-string).
      * @return True if save succeeded, false otherwise.
      */
     bool saveGraph(const char* path) const {
-        return deglib::serialization::save_graph(path, *internal_graph_, transformations_.empty() ? nullptr : &transformations_);
+        const auto* mutable_graph = dynamic_cast<const deglib::graph::MutableGraph*>(internal_graph_);
+        if (mutable_graph == nullptr) {
+            throw std::runtime_error("Graph must be mutable to save; read-only graphs do not store edge weights.");
+        }
+        return deglib::serialization::save_graph(path, *mutable_graph, transformations_.empty() ? nullptr : &transformations_);
     }
 
     /**
@@ -1345,27 +1287,50 @@ class DynamicExplorationGraph {
     /**
      * @brief Loads a graph from a binary file into a read-only DynamicExplorationGraph.
      *
-     * Reads graph topology, feature space, stored features, entry vertices, prefetch parameters,
-     * and any embedded feature transformations/quantizers.
-     *
      * @param path File path to read from (C-string).
      * @return Loaded DynamicExplorationGraph.
      */
-    static DynamicExplorationGraph loadGraph(const char* path) {
-        auto data = deglib::serialization::read_graph_file(path);
-        auto graph = std::make_unique<deglib::graph::ReadOnlyGraph>(data.size, data.edges_per_vertex, std::move(*data.feature_space), data.vertex_bytes);
-        graph->setPrefetch(data.po, data.pl, data.nl);
-        graph->setEntryVertexIndices(std::move(data.entry_vertex_indices));
-        return DynamicExplorationGraph(std::move(graph), std::move(data.transformations));
+    static DynamicExplorationGraph load_readonly(const char* path) {
+        auto transformations = deglib::serialization::read_transformations(path);
+        auto graph = std::make_unique<deglib::graph::ReadOnlyGraph>(deglib::graph::ReadOnlyGraph::loadGraph(path));
+        return DynamicExplorationGraph(std::move(graph), std::move(transformations));
+    }
+
+    static DynamicExplorationGraph load_readonly(const std::string& path) { return load_readonly(path.c_str()); }
+
+    /**
+     * @brief Loads a graph from a binary file directly into a mutable SizeBoundedGraph.
+     *
+     * @param path File path to read from (C-string).
+     * @param new_max_size Optional capacity override. If 0, uses the graph's serialized size.
+     * @return Loaded DynamicExplorationGraph.
+     */
+    static DynamicExplorationGraph load_mutable(const char* path, const uint32_t new_max_size = 0) {
+        auto transformations = deglib::serialization::read_transformations(path);
+        auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(deglib::graph::SizeBoundedGraph::loadGraph(path, new_max_size));
+        return DynamicExplorationGraph(std::move(graph), std::move(transformations));
+    }
+
+    static DynamicExplorationGraph load_mutable(const std::string& path, const uint32_t new_max_size = 0) {
+        return load_mutable(path.c_str(), new_max_size);
     }
 
     /**
-     * @brief Loads a graph from a binary file into a read-only DynamicExplorationGraph.
+     * @brief Loads a graph from a binary file directly into a mutable chunk-allocated DynamicGraph.
      *
-     * @param path File path to read from (std::string).
+     * @param path File path to read from (C-string).
+     * @param chunk_size Target number of vertices per memory chunk (default = 1024).
      * @return Loaded DynamicExplorationGraph.
      */
-    static DynamicExplorationGraph loadGraph(const std::string& path) { return loadGraph(path.c_str()); }
+    static DynamicExplorationGraph load_dynamic(const char* path, const uint32_t chunk_size = 1024) {
+        auto transformations = deglib::serialization::read_transformations(path);
+        auto graph = std::make_unique<deglib::graph::DynamicGraph>(deglib::graph::DynamicGraph::loadGraph(path, chunk_size));
+        return DynamicExplorationGraph(std::move(graph), std::move(transformations));
+    }
+
+    static DynamicExplorationGraph load_dynamic(const std::string& path, const uint32_t chunk_size = 1024) {
+        return load_dynamic(path.c_str(), chunk_size);
+    }
 };
 
 }  // namespace deglib

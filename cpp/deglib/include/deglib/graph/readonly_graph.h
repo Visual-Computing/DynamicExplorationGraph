@@ -5,6 +5,7 @@
 #include "deglib/graph/visited_list_pool.h"
 #include "deglib/search/result_list.h"
 #include "deglib/serialization.h"
+#include "deglib/transformation.h"
 #include "deglib/utils/memory.h"
 
 #include <cmath>
@@ -13,7 +14,9 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <random>
+#include <span>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -28,27 +31,6 @@ namespace deglib::graph {
  */
 class ReadOnlyGraph : public deglib::graph::InternalGraph {
     friend class deglib::graph::InternalGraph;
-
-    static const uint8_t alignment = 64;  // 64-byte alignment for SIMD vector access
-
-    const uint32_t max_vertex_count_;
-    const uint8_t edges_per_vertex_;
-    const uint16_t feature_byte_size_;
-    const size_t feature_stride_;
-
-    // Features: 64-byte aligned contiguous buffer, stride padded to multiple of 64 bytes
-    std::unique_ptr<std::byte[]> features_storage_;
-    std::byte* features_ = nullptr;
-
-    // Neighbors: contiguous array of edges_per_vertex_ entries per vertex
-    std::vector<uint32_t> neighbors_;
-
-    // Labels: contiguous array of external labels
-    std::vector<uint32_t> labels_;
-
-    std::unordered_map<uint32_t, uint32_t> label_to_index_;
-    const deglib::distances::FloatSpace feature_space_;
-    std::unique_ptr<VisitedListPool> visited_list_pool_;
 
   public:
     ReadOnlyGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::distances::FloatSpace feature_space)
@@ -74,79 +56,129 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
         }
     }
 
-
     /**
-     *  Load from contiguous memory buffer (e.g. from container 'VERT' section)
+     * Create a ReadOnlyGraph from an existing InternalGraph, copying topology and optionally
+     * replacing or directly transforming features into the strided ReadOnlyGraph memory layout.
+     *
+     * @param input_graph Source graph to copy topology and labels from.
+     * @param target_feature_space Optional target feature space (if nullopt, derived from transformations or input_graph).
+     * @param custom_features Optional raw byte pointer to new feature vectors (indexed by external label).
+     * @param transformations Optional sequence of transformations applied directly into destination memory.
      */
-    ReadOnlyGraph(const uint32_t max_vertex_count, const uint8_t edges_per_vertex, const deglib::distances::FloatSpace feature_space, const void* buffer)
-        : ReadOnlyGraph(max_vertex_count, edges_per_vertex, feature_space) {
-        const size_t feat_size = feature_space_.get_data_size();
-        const size_t neighbor_bytes = size_t(edges_per_vertex_) * sizeof(uint32_t);
-        const size_t weight_bytes = size_t(edges_per_vertex_) * sizeof(float);
-        const char* ptr = reinterpret_cast<const char*>(buffer);
-
-        for (uint32_t i = 0; i < max_vertex_count_; i++) {
-            std::memcpy(features_ + size_t(i) * feature_stride_, ptr, feat_size);
-            ptr += feat_size;
-            std::memcpy(neighbors_.data() + size_t(i) * size_t(edges_per_vertex_), ptr, neighbor_bytes);
-            ptr += neighbor_bytes;
-            ptr += weight_bytes;  // skip weights
-            uint32_t lbl = 0;
-            std::memcpy(&lbl, ptr, sizeof(uint32_t));
-            ptr += sizeof(uint32_t);
-            labels_[i] = lbl;
-            label_to_index_.emplace(lbl, i);
-        }
-    }
-
-    /**
-     *  Copy from input graph (with optional custom features buffer)
-     */
-    ReadOnlyGraph(
-        const uint32_t max_vertex_count,
-        const uint8_t edges_per_vertex,
-        const deglib::distances::FloatSpace feature_space,
+    static ReadOnlyGraph from_graph(
         const deglib::graph::InternalGraph& input_graph,
-        const void* custom_features = nullptr
-    )
-        : ReadOnlyGraph(max_vertex_count, edges_per_vertex, feature_space) {
+        std::optional<deglib::distances::FloatSpace> target_feature_space = std::nullopt,
+        const void* custom_features = nullptr,
+        std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
+    ) {
+        auto resolve_space = [&]() -> deglib::distances::FloatSpace {
+            if (target_feature_space.has_value()) {
+                return *target_feature_space;
+            } else if (!transformations.empty()) {
+                const uint32_t target_dim = deglib::transformation::get_output_dim(transformations);
+                const auto target_metric = deglib::transformation::get_target_metric(transformations, input_graph.getFeatureSpace().metric());
+                return deglib::distances::FloatSpace(target_dim, target_metric);
+            }
+            return input_graph.getFeatureSpace();
+        };
+
+        const auto feature_space = resolve_space();
+        const uint32_t count = input_graph.size();
+        const uint8_t edges = input_graph.getEdgesPerVertex();
+        ReadOnlyGraph target(count, edges, feature_space);
+
         const auto custom_feature_bytes = reinterpret_cast<const std::byte*>(custom_features);
-        const size_t feat_size = feature_space_.get_data_size();
-        const size_t neighbor_bytes = size_t(edges_per_vertex_) * sizeof(uint32_t);
+        const size_t feat_size = target.feature_space_.get_data_size();
+        const size_t neighbor_bytes = size_t(edges) * sizeof(uint32_t);
 
-        for (uint32_t i = 0; i < max_vertex_count_; i++) {
+        const auto src_metric = input_graph.getFeatureSpace().metric();
+        const uint32_t in_dim = input_graph.getFeatureSpace().dim();
+        std::vector<float> f_buf;
+        if (!transformations.empty() && src_metric.get_data_type() == deglib::distances::MetricDataType::FP16) {
+            f_buf.resize(in_dim);
+        }
+
+        for (uint32_t i = 0; i < count; ++i) {
             const auto label = input_graph.getExternalLabel(i);
-            labels_[i] = label;
-            label_to_index_.emplace(label, i);
+            target.labels_[i] = label;
+            target.label_to_index_.emplace(label, i);
 
-            if (custom_features != nullptr) {
+            // Copy topology
+            const auto neighbor_indices = input_graph.getNeighborIndices(i);
+            std::memcpy(target.neighbors_.data() + size_t(i) * size_t(edges), neighbor_indices, neighbor_bytes);
+
+            // Feature vector: direct transformation or copy into 64-byte strided destination
+            std::byte* dst_feat = target.features_ + size_t(i) * target.feature_stride_;
+            if (!transformations.empty() && (src_metric != target.feature_space_.metric())) {
+                const auto* src_feat = input_graph.getFeatureVector(i);
+                if (src_metric.get_data_type() == deglib::distances::MetricDataType::FP32) {
+                    deglib::transformation::apply_database(transformations, reinterpret_cast<const float*>(src_feat), dst_feat, 1);
+                } else if (src_metric.get_data_type() == deglib::distances::MetricDataType::FP16) {
+                    deglib::distances::fp16::fp16_to_floats(reinterpret_cast<const uint16_t*>(src_feat), f_buf.data(), in_dim);
+                    deglib::transformation::apply_database(transformations, f_buf.data(), dst_feat, 1);
+                } else {
+                    throw std::invalid_argument("ReadOnlyGraph::from_graph: cannot self-transform from non-float base features");
+                }
+            } else if (custom_features != nullptr) {
                 const auto feat_src = custom_feature_bytes + size_t(label) * feat_size;
-                std::memcpy(features_ + size_t(i) * feature_stride_, feat_src, feat_size);
+                std::memcpy(dst_feat, feat_src, feat_size);
             } else {
                 const auto feat_src = input_graph.getFeatureVector(i);
-                std::memcpy(features_ + size_t(i) * feature_stride_, feat_src, feat_size);
+                std::memcpy(dst_feat, feat_src, feat_size);
             }
-
-            const auto neighbor_indices = input_graph.getNeighborIndices(i);
-            std::memcpy(neighbors_.data() + size_t(i) * size_t(edges_per_vertex_), neighbor_indices, neighbor_bytes);
         }
+
+        target.setPrefetch(input_graph.getPo(), input_graph.getPl(), input_graph.getNl());
+        target.setEntryVertexIndices(input_graph.getEntryVertexIndices());
+        return target;
     }
 
+    static ReadOnlyGraph loadGraph(const char* path_graph) {
+        auto [is, header] = deglib::serialization::open_graph_file(path_graph);
+        ReadOnlyGraph graph(header.size, header.edges_per_vertex, *header.feature_space);
+        const size_t feat_size = header.feature_space->get_data_size();
+        const size_t neighbor_bytes = size_t(header.edges_per_vertex) * sizeof(uint32_t);
+        const size_t weight_bytes = size_t(header.edges_per_vertex) * sizeof(float);
+        const size_t file_record_size = feat_size + neighbor_bytes + weight_bytes + sizeof(uint32_t);
+
+        constexpr size_t BATCH_SIZE = 256;
+        std::vector<char> batch_buf(BATCH_SIZE * file_record_size);
+
+        for (uint32_t offset = 0; offset < header.size; offset += BATCH_SIZE) {
+            const uint32_t current_batch = std::min<uint32_t>(BATCH_SIZE, header.size - offset);
+            const size_t bytes_to_read = current_batch * file_record_size;
+            if (!is.read(batch_buf.data(), bytes_to_read)) {
+                throw std::runtime_error("ReadOnlyGraph::loadGraph: unexpected end of stream reading vertices");
+            }
+
+            const char* ptr = batch_buf.data();
+            for (uint32_t b = 0; b < current_batch; ++b) {
+                const uint32_t i = offset + b;
+                std::memcpy(graph.features_ + size_t(i) * graph.feature_stride_, ptr, feat_size);
+                ptr += feat_size;
+                std::memcpy(graph.neighbors_.data() + size_t(i) * size_t(graph.edges_per_vertex_), ptr, neighbor_bytes);
+                ptr += neighbor_bytes;
+                ptr += weight_bytes;  // skip weights
+                uint32_t lbl = 0;
+                std::memcpy(&lbl, ptr, sizeof(uint32_t));
+                ptr += sizeof(uint32_t);
+                graph.labels_[i] = lbl;
+                graph.label_to_index_.emplace(lbl, i);
+            }
+        }
+
+        graph.setPrefetch(header.po, header.pl, header.nl);
+        graph.setEntryVertexIndices(header.entry_vertex_indices);
+        return graph;
+    }
+
+    // --- Capacity & Metadata ---
     const auto capacity() const { return max_vertex_count_; }
-    const uint32_t size() const override { return (uint32_t)label_to_index_.size(); }
+    const uint32_t size() const override { return static_cast<uint32_t>(label_to_index_.size()); }
     const uint8_t getEdgesPerVertex() const override { return edges_per_vertex_; }
     const deglib::distances::FloatSpace& getFeatureSpace() const override { return this->feature_space_; }
 
-  private:
-    inline const uint32_t label_by_index(const uint32_t internal_idx) const { return labels_[internal_idx]; }
-
-    inline const std::byte* feature_by_index(const uint32_t internal_idx) const { return features_ + size_t(internal_idx) * feature_stride_; }
-
-    inline const uint32_t* neighbors_by_index(const uint32_t internal_idx) const {
-        return neighbors_.data() + size_t(internal_idx) * size_t(edges_per_vertex_);
-    }
-
-  public:
+    // --- Vertex & Topology Accessors ---
     inline const uint32_t getInternalIndex(const uint32_t external_label) const override { return label_to_index_.find(external_label)->second; }
     inline const uint32_t getExternalLabel(const uint32_t internal_idx) const override { return label_by_index(internal_idx); }
     inline const std::byte* getFeatureVector(const uint32_t internal_idx) const override { return feature_by_index(internal_idx); }
@@ -159,6 +191,7 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
         return std::binary_search(neighbor_indices, neighbor_indices_end, neighbor_index);
     }
 
+    // --- Traversal & Search ---
     std::vector<deglib::graph::ObjectDistance>
     hasPath(const std::vector<uint32_t>& entry_vertex_indices, const uint32_t to_vertex, const float eps, const uint32_t k) const override {
         return hasPathImpl(*this, entry_vertex_indices, to_vertex, eps, k);
@@ -189,16 +222,33 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
         return searchInternImpl(*this, entry_vertex_indices, query, k, eps, include_entry, filter, max_distance_computation_count);
     }
 
-  public:
-    bool saveGraph(const char* path_to_graph) const { return deglib::serialization::save_graph(path_to_graph, *this); }
+  private:
+    static const uint8_t alignment = 64;  // 64-byte alignment for SIMD vector access
 
-    static ReadOnlyGraph loadGraph(const char* path_graph) {
-        auto data = deglib::serialization::read_graph_file(path_graph);
-        auto graph = ReadOnlyGraph(data.size, data.edges_per_vertex, std::move(*data.feature_space), data.vertex_bytes);
-        graph.setPrefetch(data.po, data.pl, data.nl);
-        graph.setEntryVertexIndices(std::move(data.entry_vertex_indices));
-        return graph;
+    inline const uint32_t label_by_index(const uint32_t internal_idx) const { return labels_[internal_idx]; }
+    inline const std::byte* feature_by_index(const uint32_t internal_idx) const { return features_ + size_t(internal_idx) * feature_stride_; }
+    inline const uint32_t* neighbors_by_index(const uint32_t internal_idx) const {
+        return neighbors_.data() + size_t(internal_idx) * size_t(edges_per_vertex_);
     }
+
+    const uint32_t max_vertex_count_;
+    const uint8_t edges_per_vertex_;
+    const uint16_t feature_byte_size_;
+    const size_t feature_stride_;
+
+    // Features: 64-byte aligned contiguous buffer, stride padded to multiple of 64 bytes
+    std::unique_ptr<std::byte[]> features_storage_;
+    std::byte* features_ = nullptr;
+
+    // Neighbors: contiguous array of edges_per_vertex_ entries per vertex
+    std::vector<uint32_t> neighbors_;
+
+    // Labels: contiguous array of external labels
+    std::vector<uint32_t> labels_;
+
+    std::unordered_map<uint32_t, uint32_t> label_to_index_;
+    const deglib::distances::FloatSpace feature_space_;
+    std::unique_ptr<VisitedListPool> visited_list_pool_;
 };
 
 /**
@@ -210,9 +260,7 @@ inline auto load_readonly_graph(const char* path_graph) { return ReadOnlyGraph::
  * Convert the given graph to a readonly graph
  */
 inline auto convert_to_readonly_graph(const deglib::graph::InternalGraph& input_graph) {
-    auto size = input_graph.size();
-    auto edges_per_vertex = input_graph.getEdgesPerVertex();
-    return deglib::graph::ReadOnlyGraph(size, edges_per_vertex, input_graph.getFeatureSpace(), input_graph);
+    return deglib::graph::ReadOnlyGraph::from_graph(input_graph);
 }
 
 /**
@@ -223,8 +271,6 @@ inline auto convert_to_readonly_graph(
     const deglib::distances::FloatSpace feature_space,
     const void* custom_features = nullptr
 ) {
-    auto size = input_graph.size();
-    auto edges_per_vertex = input_graph.getEdgesPerVertex();
-    return deglib::graph::ReadOnlyGraph(size, edges_per_vertex, feature_space, input_graph, custom_features);
+    return deglib::graph::ReadOnlyGraph::from_graph(input_graph, feature_space, custom_features);
 }
 }  // namespace deglib::graph

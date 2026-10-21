@@ -49,6 +49,8 @@ class MutableGraph : public deglib::graph::InternalGraph {
 
     virtual const float getEdgeWeight(const uint32_t from_neighbor_index, const uint32_t to_neighbor_index) const = 0;
 
+    virtual const std::byte* getVertexRecord(const uint32_t internal_index) const = 0;
+
     virtual const bool saveGraph(const char* path_to_graph) const = 0;
 };
 

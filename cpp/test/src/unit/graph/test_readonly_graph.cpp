@@ -64,7 +64,7 @@ TEST(ReadOnlyGraph, CopyFromSizeBoundedGraph) {
     set_edges(mutable_graph, 1, {0, 1, 1, 1}, {1.0f, 0.0f, 0.0f, 0.0f});
     set_edges(mutable_graph, 2, {0, 2, 2, 2}, {2.0f, 0.0f, 0.0f, 0.0f});
 
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     EXPECT_EQ(graph.size(), 4u);
     EXPECT_EQ(graph.getEdgesPerVertex(), 4u);
@@ -93,7 +93,7 @@ TEST(ReadOnlyGraph, InternalExternalIndex) {
         mutable_graph.addVertex(i * 10, make_float_bytes(v).get());
     }
 
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     for (int i = 0; i < 4; ++i) {
         uint32_t ext = i * 10;
@@ -109,7 +109,7 @@ TEST(ReadOnlyGraph, FeatureVector) {
     std::vector<float> expected(4, 42.0f);
     mutable_graph.addVertex(0, make_float_bytes(expected).get());
 
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     const auto* feature = reinterpret_cast<const float*>(graph.getFeatureVector(0));
     for (int i = 0; i < 4; ++i) {
@@ -130,7 +130,7 @@ TEST(ReadOnlyGraph, NeighborIndices) {
     // fully connected graph (neighbors must be sorted ascending)
     set_edges(mutable_graph, 0, {0, 1, 2, 3}, {0.0f, 1.0f, 2.0f, 3.0f});
 
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     const auto* neighbors = graph.getNeighborIndices(0);
     // neighbors are sorted, self-loop at index 0
@@ -154,7 +154,7 @@ TEST(ReadOnlyGraph, HasEdge) {
     set_edges(mutable_graph, 0, {0, 0, 0, 1}, {0.0f, 0.0f, 0.0f, 1.0f});
     set_edges(mutable_graph, 1, {0, 1, 1, 1}, {1.0f, 0.0f, 0.0f, 0.0f});
 
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     EXPECT_TRUE(graph.hasEdge(0, 1));
     EXPECT_TRUE(graph.hasEdge(1, 0));
@@ -182,7 +182,7 @@ TEST(ReadOnlyGraph, Explore) {
     set_edges(mutable_graph, 2, {0, 1, 2, 3}, {1.0f, 1.414f, 0.0f, 1.414f});
     set_edges(mutable_graph, 3, {0, 1, 2, 3}, {1.0f, 1.414f, 1.414f, 0.0f});
 
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     // verify graph has 4 vertices
     EXPECT_EQ(graph.size(), 4u);
@@ -266,7 +266,7 @@ TEST(ReadOnlyGraph, Search) {
         set_edges(mutable_graph, static_cast<uint32_t>(i), sorted_neighbors, sorted_weights);
     }
 
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     // search for something close to vertex 4
     std::vector<float> query = {4.0f, 0.0f, 0.0f, 0.0f};
@@ -290,7 +290,7 @@ TEST(ReadOnlyGraph, HasPath) {
     }
 
     set_edges(mutable_graph, 0, {0, 1, 2, 3}, {0.0f, 1.0f, 4.0f, 9.0f});
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     auto path = graph.hasPath({0}, 1, 0.0f, 5);
     ASSERT_EQ(path.size(), 2u);
@@ -309,7 +309,7 @@ TEST(ReadOnlyGraph, HasPathNoConnection) {
         mutable_graph.addVertex(i, make_float_bytes(v).get());
     }
 
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     auto path = graph.hasPath({0}, 4, 0.0f, 5);
     EXPECT_EQ(path.size(), static_cast<size_t>(0));
@@ -326,7 +326,7 @@ TEST(ReadOnlyGraph, ExploreBasicIncludeEntry) {
     }
 
     set_edges(mutable_graph, 0, {0, 1, 2, 3}, {0.0f, 1.0f, 4.0f, 9.0f});
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     auto results = graph.explore(0, 3, 0, 0.0f, /*include_entry=*/true, nullptr);
     EXPECT_GT(results.size(), 0u);
@@ -352,7 +352,7 @@ TEST(ReadOnlyGraph, ExploreExcludeEntry) {
     }
 
     set_edges(mutable_graph, 0, {0, 1, 2, 3}, {0.0f, 1.0f, 4.0f, 9.0f});
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     auto results = graph.explore(0, 2, 0, 0.0f, /*include_entry=*/false, nullptr);
     EXPECT_GT(results.size(), 0u);
@@ -368,7 +368,7 @@ TEST(ReadOnlyGraph, ExploreWithMaxDistanceCount) {
         mutable_graph.addVertex(i, make_float_bytes(v).get());
     }
 
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     auto results = graph.explore(0, 5, 2, 0.0f, /*include_entry=*/true, nullptr);
     EXPECT_GT(results.size(), 0u);
@@ -412,7 +412,7 @@ TEST(ReadOnlyGraphInternalIndicesInSearch, SearchReturnsInternalIndices) {
     set_edges(mutable_graph, 3, {0, 1, 2, 3}, {3.0f, 2.0f, 1.0f, 0.0f});
     // Vertex 4 has self-loop only
 
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     // search() on InternalGraph returns internal indices in the ResultSet
     std::vector<float> query = {0.1f, 0.0f, 0.0f, 0.0f};
@@ -446,7 +446,7 @@ TEST(ReadOnlyGraphInternalIndicesInSearch, ExploreReturnsInternalIndices) {
     set_edges(mutable_graph, 2, {0, 1, 2, 3}, {2.0f, 1.0f, 0.0f, 1.0f});
     set_edges(mutable_graph, 3, {0, 1, 2, 3}, {3.0f, 2.0f, 1.0f, 0.0f});
 
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     // explore() takes an internal index and returns internal indices
     auto results = graph.explore(0, 3, 0, 0.0f, /*include_entry=*/true, nullptr);
@@ -479,7 +479,7 @@ TEST(ReadOnlyGraphInternalIndicesInSearch, HasPathReturnsInternalIndices) {
     set_edges(mutable_graph, 2, {0, 1, 2, 3}, {2.0f, 1.0f, 0.0f, 1.0f});
     set_edges(mutable_graph, 3, {0, 1, 2, 3}, {3.0f, 2.0f, 1.0f, 0.0f});
 
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     // hasPath() takes internal entry indices and a internal to_vertex index
     auto path = graph.hasPath({0}, 1, 0.0f, 5);
@@ -508,7 +508,7 @@ TEST(ReadOnlyGraphInternalIndicesInSearch, GetNeighborIndicesReturnsInternalIndi
 
     set_edges(mutable_graph, 0, {0, 1, 2, 3}, {0.0f, 1.0f, 2.0f, 3.0f});
 
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), 4, space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     // getNeighborIndices() takes an internal index and returns internal indices
     const auto* neighbors = graph.getNeighborIndices(0);

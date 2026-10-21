@@ -52,7 +52,7 @@ TEST(ReadOnlyGraphRegression, SearchAndExplore_FP32_L2) {
     builder.build(dummy_callback, false);
 
     // Convert to ReadOnlyGraph
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), edges_per_vertex, feature_space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     // 1. Search Benchmark
     std::vector<decltype(graph.search(std::span<const float>(), 0, 0.0f))> last_search_results(query_count);
@@ -176,7 +176,7 @@ TEST(ReadOnlyGraphRegression, SearchAndExplore_FP32_InnerProduct) {
     builder.build(dummy_callback, false);
 
     // Convert to ReadOnlyGraph
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), edges_per_vertex, feature_space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     // Search Benchmark
     std::vector<decltype(graph.search(std::span<const float>(), 0, 0.0f))> last_search_results(query_count);
@@ -307,7 +307,7 @@ TEST(ReadOnlyGraphRegression, SearchAndExplore_EVP_InnerProduct) {
     builder.build(dummy_callback, false);
 
     // Convert to ReadOnlyGraph
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), edges_per_vertex, feature_space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     // Search Benchmark
     std::vector<decltype(graph.search(std::span<const std::byte>(), 0, 0.0f))> last_search_results(query_count);
@@ -422,7 +422,7 @@ TEST(ReadOnlyGraphRegression, MultiThreadedSearch_HighDim_Scaling) {
     builder.build(dummy_callback, false);
 
     // Convert to ReadOnlyGraph
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), edges_per_vertex, feature_space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     run_multithreaded_search_benchmark(
         "ReadOnlyGraph FP32_L2 (1024D)", graph, query_data, query_count, dim, search_k, search_eps, gt_data, {1, 2, 4, 8}, benchmark_runs
@@ -463,7 +463,7 @@ TEST(ReadOnlyGraphRegression, MultiThreadedSearch_LowDim_Scaling) {
     builder.build(dummy_callback, false);
 
     // Convert to ReadOnlyGraph
-    deglib::graph::ReadOnlyGraph graph(mutable_graph.size(), edges_per_vertex, feature_space, mutable_graph);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(mutable_graph);
 
     run_multithreaded_search_benchmark(
         "ReadOnlyGraph FP32_L2 (64D)", graph, query_data, query_count, dim, search_k, search_eps, gt_data, {1, 2, 4, 8}, benchmark_runs

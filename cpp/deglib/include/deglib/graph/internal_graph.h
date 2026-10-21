@@ -118,15 +118,6 @@ class InternalGraph {
     virtual const bool hasVertex(const uint32_t external_label) const = 0;
     virtual const bool hasEdge(const uint32_t internal_index, const uint32_t neighbor_index) const = 0;
 
-  protected:
-    std::vector<uint32_t> entry_vertex_indices_{0};
-    // Prefetch tuning knobs: performance cache state, not logical identity, hence mutable so
-    // optimize()/setPrefetch() can run through a const InternalGraph reference.
-    mutable int32_t po_ = 8;
-    mutable int32_t pl_ = 3;
-    mutable int32_t nl_ = 3;
-
-  public:
     const std::vector<uint32_t>& getEntryVertexIndices() const { return entry_vertex_indices_; }
     void setEntryVertexIndices(std::vector<uint32_t> indices) {
         if (!indices.empty()) {
@@ -150,6 +141,8 @@ class InternalGraph {
         if (pl > 0) pl_ = pl;
         if (nl > 0) nl_ = nl;
     }
+
+
 
     /**
      * Auto-tunes the traversal prefetch parameters (po, pl, nl) by empirically timing graph
@@ -442,6 +435,13 @@ class InternalGraph {
     }
 
   protected:
+    std::vector<uint32_t> entry_vertex_indices_{0};
+    // Prefetch tuning knobs: performance cache state, not logical identity, hence mutable so
+    // optimize()/setPrefetch() can run through a const InternalGraph reference.
+    mutable int32_t po_ = 8;
+    mutable int32_t pl_ = 3;
+    mutable int32_t nl_ = 3;
+
     /**
      * Virtual internal search entry point implemented by derived graph classes.
      */

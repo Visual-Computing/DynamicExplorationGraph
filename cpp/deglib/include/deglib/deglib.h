@@ -94,17 +94,13 @@ inline DynamicExplorationGraph create_random_graph(
 /**
  * Load a saved graph from disk as a compact, immutable DynamicExplorationGraph (backed by ReadOnlyGraph).
  */
-inline DynamicExplorationGraph load_readonly_graph(const char* path_graph) { return DynamicExplorationGraph::loadGraph(path_graph); }
+inline DynamicExplorationGraph load_readonly_graph(const char* path_graph) { return DynamicExplorationGraph::load_readonly(path_graph); }
 
 /**
  * Load a saved graph from disk as a chunk-allocated mutable DynamicExplorationGraph (backed by DynamicGraph).
  */
 inline DynamicExplorationGraph load_dynamic_graph(const char* path_graph, const uint32_t chunk_size = 1024) {
-    auto data = deglib::serialization::read_graph_file(path_graph);
-    auto graph = std::make_unique<deglib::graph::DynamicGraph>(data.edges_per_vertex, std::move(*data.feature_space), data.vertex_bytes, data.size, chunk_size);
-    graph->setPrefetch(data.po, data.pl, data.nl);
-    graph->setEntryVertexIndices(std::move(data.entry_vertex_indices));
-    return DynamicExplorationGraph(std::move(graph), std::move(data.transformations));
+    return DynamicExplorationGraph::load_dynamic(path_graph, chunk_size);
 }
 
 /**
@@ -113,16 +109,7 @@ inline DynamicExplorationGraph load_dynamic_graph(const char* path_graph, const 
  * @param new_max_size Optional capacity override. If 0, uses the graph's serialized size.
  */
 inline DynamicExplorationGraph load_mutable_graph(const char* path_graph, const uint32_t new_max_size = 0) {
-    auto data = deglib::serialization::read_graph_file(path_graph);
-    uint32_t cap = (new_max_size == 0) ? data.size : new_max_size;
-    if (cap < data.size) {
-        std::fprintf(stderr, "The graph in %s has %u vertices but new_max_size is %u\n", path_graph, data.size, cap);
-        abort();
-    }
-    auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(cap, data.edges_per_vertex, std::move(*data.feature_space), data.vertex_bytes, data.size);
-    graph->setPrefetch(data.po, data.pl, data.nl);
-    graph->setEntryVertexIndices(std::move(data.entry_vertex_indices));
-    return DynamicExplorationGraph(std::move(graph), std::move(data.transformations));
+    return DynamicExplorationGraph::load_mutable(path_graph, new_max_size);
 }
 
 /**

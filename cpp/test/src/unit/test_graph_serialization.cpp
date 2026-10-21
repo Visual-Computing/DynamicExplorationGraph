@@ -68,7 +68,7 @@ TEST(GraphSerializationTest, BuildWithPipelineSaveAndLoadSearch) {
     EXPECT_EQ(ro_graph.size(), count);
 
     // 7. Graph aus Container-Datei neu laden
-    auto deg_loaded = DynamicExplorationGraph::loadGraph(test_file);
+    auto deg_loaded = DynamicExplorationGraph::load_readonly(test_file);
     EXPECT_EQ(deg_loaded.size(), count);
     EXPECT_TRUE(deg_loaded.hasTransformations());
     EXPECT_EQ(deg_loaded.getInputDim(), dim);
@@ -134,7 +134,7 @@ TEST(GraphSerializationTest, BuildWithEvpPipelineSaveAndLoad) {
     auto ro_graph = deglib::graph::ReadOnlyGraph::loadGraph(test_file.c_str());
     EXPECT_EQ(ro_graph.size(), count);
 
-    auto deg_loaded = DynamicExplorationGraph::loadGraph(test_file);
+    auto deg_loaded = DynamicExplorationGraph::load_readonly(test_file);
     EXPECT_TRUE(deg_loaded.hasTransformations());
     EXPECT_EQ(get_output_bytes(deg_loaded.getTransformations()), 2 * (dim / 8));
 

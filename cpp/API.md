@@ -350,9 +350,17 @@ public:
     bool saveGraph(const char* path) const;
     bool saveGraph(const std::string& path) const;
 
-    /// Load graph from binary file
-    static DynamicExplorationGraph loadGraph(const char* path);
-    static DynamicExplorationGraph loadGraph(const std::string& path);
+    /// Load graph from binary file into an immutable read-only graph (ReadOnlyGraph)
+    static DynamicExplorationGraph load_readonly(const char* path);
+    static DynamicExplorationGraph load_readonly(const std::string& path);
+
+    /// Load graph from binary file into a mutable SizeBoundedGraph
+    static DynamicExplorationGraph load_mutable(const char* path, uint32_t new_max_size = 0);
+    static DynamicExplorationGraph load_mutable(const std::string& path, uint32_t new_max_size = 0);
+
+    /// Load graph from binary file into a mutable chunk-allocated DynamicGraph
+    static DynamicExplorationGraph load_dynamic(const char* path, uint32_t chunk_size = 1024);
+    static DynamicExplorationGraph load_dynamic(const std::string& path, uint32_t chunk_size = 1024);
 };
 
 } // namespace deglib
