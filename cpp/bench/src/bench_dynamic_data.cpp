@@ -92,10 +92,11 @@ void print_help(const char* program_name) {
     log("  enron    - Enron (94.9k vectors, 1369D)\n");
     log("  all      - Execute dynamic benchmarks for all datasets sequentially\n\n");
     log("Options:\n");
-    log("  --data-path, -d <path> Path to datasets directory (default: env DEG_DATA_PATH or ./data)\n");
-    log("  --force-rebuild        Force rebuilding the graphs even if graph files already exist\n");
-    log("  --instruction <inst>   Select distance instruction set (auto, avx512, avx2, scalar)\n");
-    log("  --help, -h             Display this detailed help message\n\n");
+    log("  --data-path, -d <path>     Path to datasets directory (default: env DEG_DATA_PATH or ./data)\n");
+    log("  --force-rebuild            Force rebuilding the graphs even if graph files already exist\n");
+    log("  --instruction <inst>       Select distance instruction set (auto, avx512, avx2, scalar)\n");
+    log("  --graph-quality, -q <mode> Evaluate graph quality (none [default], exact, approximated)\n");
+    log("  --help, -h                 Display this detailed help message\n\n");
 }
 
 static deglib::cpu::InstructionSet parse_instruction_set(const std::string& str) {
@@ -107,13 +108,19 @@ static deglib::cpu::InstructionSet parse_instruction_set(const std::string& str)
     return deglib::cpu::InstructionSet::Auto;
 }
 
-void run_dynamic_benchmark(const DatasetName& ds_name, const std::filesystem::path& data_path, bool force_rebuild, deglib::cpu::InstructionSet instruction) {
+void run_dynamic_benchmark(
+    const DatasetName& ds_name,
+    const std::filesystem::path& data_path,
+    bool force_rebuild,
+    deglib::cpu::InstructionSet instruction,
+    GraphQualityMode quality_mode = GraphQualityMode::None
+) {
     Dataset ds(ds_name, data_path);
     auto config = get_dataset_config(ds_name);
 
     log("\n=== Benchmarking Dynamic Data Streams for Dataset: {} ===\n", ds.name());
 
-    auto setup_threads = std::thread::hardware_concurrency() / 2;
+    auto setup_threads = std::max(1u, std::thread::hardware_concurrency() / 2);
     if (!setup_dataset(ds, setup_threads, /*include_half=*/true, /*include_exploration=*/false)) {
         log("ERROR: Failed to setup dataset {}\n", ds.name());
         return;
@@ -128,6 +135,9 @@ void run_dynamic_benchmark(const DatasetName& ds_name, const std::filesystem::pa
 
     log("\n--- Computing Linear Search Baseline ---\n");
     uint64_t linear_baseline_us = compute_linear_search_baseline(base_repository, ds.info().metric, 100, instruction) * 2;
+
+    BaseGroundTruth base_gt_half{};
+    bool base_gt_half_loaded = false;
 
     for (DataStreamType ds_type : config.stream_types) {
         std::string graph_path = (dyn_dir / fmt::format("{}D_K{}_{}.deg", dims, config.k, ds_type_str(ds_type))).string();
@@ -156,7 +166,21 @@ void run_dynamic_benchmark(const DatasetName& ds_name, const std::filesystem::pa
 
             log("\n--- Graph Analysis ---\n");
             {
-                analyze_graph(graph);
+                if (use_half) {
+                    if (!base_gt_half_loaded) {
+                        if (quality_mode != GraphQualityMode::None) {
+                            generate_base_groundtruth_files(
+                                ds, base_repository, setup_threads, /*use_half_dataset=*/true, quality_mode, graph_path
+                            );
+                            base_gt_half = ds.load_base_groundtruth(/*use_half_dataset=*/true);
+                        }
+                        base_gt_half_loaded = true;
+                    }
+                    analyze_graph(graph, base_gt_half);
+                } else {
+                    auto base_gt = (quality_mode != GraphQualityMode::None) ? ds.load_base_groundtruth(false) : BaseGroundTruth{};
+                    analyze_graph(graph, base_gt);
+                }
             }
 
             log("\n--- ANNS Test (k={}) ---\n", config.anns_k);
@@ -178,6 +202,7 @@ int main(int argc, char* argv[]) {
     DatasetName ds_name = DatasetName::AUDIO;
     bool force_rebuild = false;
     deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto;
+    GraphQualityMode quality_mode = GraphQualityMode::None;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -190,6 +215,8 @@ int main(int argc, char* argv[]) {
             force_rebuild = true;
         } else if (arg == "--instruction" && i + 1 < argc) {
             instruction = parse_instruction_set(argv[++i]);
+        } else if ((arg == "--graph-quality" || arg == "-q") && i + 1 < argc) {
+            quality_mode = parse_graph_quality_mode(argv[++i]);
         } else {
             auto parsed = DatasetName::from_string(arg);
             if (parsed.is_valid()) {
@@ -212,7 +239,7 @@ int main(int argc, char* argv[]) {
     }
 
     for (const auto& current_ds : datasets_to_run) {
-        run_dynamic_benchmark(current_ds, data_path, force_rebuild, instruction);
+        run_dynamic_benchmark(current_ds, data_path, force_rebuild, instruction, quality_mode);
     }
 
     log("\nDynamic Benchmark Finished Successfully.\n");

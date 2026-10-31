@@ -887,71 +887,75 @@ class EvenRegularGraphBuilder {
      * @param improve_edges Whether to attempt to improve the new edges after reconnecting.
      */
     void restoreGraph(const std::vector<uint32_t>& involved_indices, bool improve_edges) {
+        if (involved_indices.empty()) return;
+
         auto& graph = this->graph_;
         const auto edges_per_vertex = std::min(graph.size(), uint32_t(graph.getEdgesPerVertex()));
 
         // 2 find pairs or groups of vertices which can reach each other
-        auto unique_groups = std::vector<std::shared_ptr<ReachableGroup>>();
+        auto isolated_groups = std::vector<std::shared_ptr<ReachableGroup>>();
+        auto reachable_groups = std::vector<std::shared_ptr<ReachableGroup>>();
         {
             auto path_map = UnionFind(edges_per_vertex);
-            auto reachable_groups = std::unordered_map<uint32_t, std::shared_ptr<ReachableGroup>>();
-            reachable_groups.reserve(edges_per_vertex);
+            auto group_map = std::unordered_map<uint32_t, std::shared_ptr<ReachableGroup>>();
+            group_map.reserve(involved_indices.size());
             for (const auto involved_index : involved_indices) {
-                reachable_groups.emplace(involved_index, std::make_shared<ReachableGroup>(involved_index, edges_per_vertex));
+                group_map.emplace(involved_index, std::make_shared<ReachableGroup>(involved_index, edges_per_vertex));
                 path_map.Update(involved_index, involved_index);
             }
 
-            // helper function to check if we need to find more connected components
-            auto is_enough_free_connections = [](const std::vector<uint32_t>& vertices, const UnionFind& paths,
-                                                 const std::unordered_map<uint32_t, std::shared_ptr<ReachableGroup>>& groups) {
+            // helper function to check if enough free connections exist for all isolated vertices
+            auto has_enough_free_connections = [&]() {
                 size_t isolated_vertex_counter = 0;
                 size_t available_connections_counter = 0;
-                for (const auto& involved_vertex : vertices) {
-                    const auto reachable_Vertex = paths.Find(involved_vertex);
-                    if (involved_vertex == reachable_Vertex) {
-                        const auto& group = groups.at(reachable_Vertex);
+                for (const auto involved_vertex : involved_indices) {
+                    const auto root_vertex = path_map.Find(involved_vertex);
+                    if (involved_vertex == root_vertex) {
+                        const auto& group = group_map.at(root_vertex);
                         if (group->size() == 1)
                             isolated_vertex_counter++;
                         else if (group->getMissingEdgeSize() > 2)
                             available_connections_counter += group->getMissingEdgeSize() - 2;
                     }
                 }
-                return available_connections_counter < isolated_vertex_counter;
+                return available_connections_counter >= isolated_vertex_counter;
             };
 
             // 2.1 start with checking the adjacent neighbors
             size_t neighbor_check_depth = 0;
-            auto check = std::unordered_set<uint32_t>(involved_indices.begin(), involved_indices.end());
-            auto check_next = std::unordered_set<uint32_t>();
-            while (is_enough_free_connections(involved_indices, path_map, reachable_groups)) {
+            auto check = std::vector<uint32_t>(involved_indices.begin(), involved_indices.end());
+            auto check_next = std::vector<uint32_t>();
+            do {
                 for (const auto check_vertex : check) {
-                    auto involved_vertex = path_map.Find(check_vertex);
-                    auto reachable_group = reachable_groups.at(involved_vertex);
+                    const auto involved_vertex = path_map.Find(check_vertex);
+                    auto& reachable_group = group_map.at(involved_vertex);
 
                     // check only involved vertices and vertices which can only reach 1 involved vertex
                     // no need for big groups to find other groups at the expense of processing power
                     if (neighbor_check_depth > 0 && reachable_group->size() > 1) continue;
 
-                    // check the neighbors of checkVertex if they can reach another reachableGroup
-                    auto neighbor_indices = graph.getNeighborIndices(check_vertex);
+                    // check the neighbors of check_vertex if they can reach another reachable_group
+                    const auto neighbor_indices = graph.getNeighborIndices(check_vertex);
                     for (uint32_t i = 0; i < edges_per_vertex; i++) {
-                        auto neighbor_index = neighbor_indices[i];
+                        const auto neighbor_index = neighbor_indices[i];
 
                         // skip self references (loops)
                         if (neighbor_index == check_vertex) continue;
 
                         // which other involved vertex can be reached by this neighbor
-                        auto other_involved_vertex = path_map.Find(neighbor_index);
+                        const auto other_involved_vertex = path_map.Find(neighbor_index);
 
                         // neighbor is not yet in the union find
                         if (other_involved_vertex == path_map.getDefaultValue()) {
                             path_map.Update(neighbor_index, involved_vertex);
-                            check_next.emplace(neighbor_index);
+                            if (reachable_group->size() == 1) {
+                                check_next.push_back(neighbor_index);
+                            }
                         }
                         // the neighbor can reach another involved vertex
                         else if (other_involved_vertex != involved_vertex) {
                             path_map.Update(other_involved_vertex, involved_vertex);
-                            reachable_group->copyFrom(*reachable_groups.at(other_involved_vertex));
+                            reachable_group->copyFrom(*group_map.at(other_involved_vertex));
                         }
                     }
                 }
@@ -960,32 +964,27 @@ class EvenRegularGraphBuilder {
                 std::swap(check, check_next);
                 check_next.clear();
                 neighbor_check_depth++;
-            }
+            } while (!has_enough_free_connections());
 
-            // copy the unique groups deterministically by root vertex ID
-            auto added_roots = std::unordered_set<uint32_t>();
+            // 2.2 partition unique root groups into isolated vertices and reachable groups
             for (const auto involved_index : involved_indices) {
-                uint32_t root = path_map.Find(involved_index);
-                if (added_roots.insert(root).second) {
-                    unique_groups.push_back(reachable_groups.at(root));
+                if (involved_index == path_map.Find(involved_index)) {
+                    auto& group = group_map.at(involved_index);
+                    if (group->size() == 1) {
+                        isolated_groups.push_back(group);
+                    } else {
+                        reachable_groups.push_back(group);
+                    }
                 }
             }
         }
 
-        // 2.2 get all isolated vertices
-        auto isolated_groups = std::vector<std::shared_ptr<ReachableGroup>>();
-        for (const auto& group : unique_groups)
-            if (group->size() == 1) isolated_groups.push_back(group);
-
-        // 2.3 find for every isolated vertex the best other involved vertex which is part of a unique group
+        // 2.3 find for every isolated vertex the best other involved vertex which is part of a reachable group
         auto new_edges = std::vector<GraphEdge>();
         const auto& feature_space = graph.getFeatureSpace();
         const auto dist_func = feature_space.get_dist_func();
         const auto dist_func_param = feature_space.get_dist_func_param();
         for (const auto& isolated_group : isolated_groups) {
-            // are you still isolated?
-            if (isolated_group->size() > 1) continue;
-
             const auto isolated_vertex = isolated_group->getVertexIndex();
             const auto isolated_vertex_feature = graph.getFeatureVector(isolated_vertex);
 
@@ -993,12 +992,12 @@ class EvenRegularGraphBuilder {
             uint32_t best_candidate_index = 0;
             float best_candidate_distance = std::numeric_limits<float>::max();
             deglib::builder::ReachableGroup* best_candidate_group = nullptr;
-            for (const auto& candidate_group : unique_groups) {
+            for (const auto& candidate_group : reachable_groups) {
                 // skip all groups which do not have enough vertices missing an edge
                 const auto& missing_edges = candidate_group->getMissingEdges();
                 if (missing_edges.size() <= 2) continue;
 
-                // missing_edges is already a sorted const std::vector<uint32_t>& from ReachableGroup!
+                // find the candidate with the best distance to the isolated vertex
                 for (const auto candidate : missing_edges) {
                     const auto candidate_feature = graph.getFeatureVector(candidate);
                     const auto distance = dist_func(isolated_vertex_feature, candidate_feature, dist_func_param);
@@ -1019,12 +1018,9 @@ class EvenRegularGraphBuilder {
             best_candidate_group->hasEdge(best_candidate_index);
             isolated_group->hasEdge(isolated_vertex);
             best_candidate_group->copyFrom(*isolated_group);
-
-            unique_groups.erase(std::remove(unique_groups.begin(), unique_groups.end(), isolated_group), unique_groups.end());
         }
 
         // 3 reconnect the groups
-        auto reachable_groups = unique_groups;
 
         // Define a custom comparison function based on the size of the sets, with a deterministic tie-breaker
         auto compareBySize = [](const std::shared_ptr<deglib::builder::ReachableGroup>& a, const std::shared_ptr<deglib::builder::ReachableGroup>& b) {

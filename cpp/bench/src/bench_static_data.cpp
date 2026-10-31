@@ -138,7 +138,7 @@ void run_static_benchmark(
     set_log_file(log_path, false);
     log("Logging to file: {}\n", log_path);
 
-    if (!setup_dataset(ds, setup_threads, /*include_half=*/false, /*include_exploration=*/true, quality_mode, graph_path)) {
+    if (!setup_dataset(ds, setup_threads, /*include_half=*/false, /*include_exploration=*/true)) {
         log("ERROR: Failed to setup dataset {}\n", ds.name());
         return;
     }
@@ -166,6 +166,9 @@ void run_static_benchmark(
 
         log("\n--- Graph Analysis ---\n");
         {
+            if (quality_mode != GraphQualityMode::None) {
+                generate_base_groundtruth_files(ds, base_repository, setup_threads, /*use_half_dataset=*/false, quality_mode, graph_path);
+            }
             auto base_gt = (quality_mode != GraphQualityMode::None) ? ds.load_base_groundtruth(false) : BaseGroundTruth{};
             analyze_graph(graph, base_gt);
         }

@@ -681,60 +681,23 @@ inline bool generate_base_groundtruth_files(
     const Dataset& ds,
     const deglib::FeatureRepository& base_repo,
     const uint32_t thread_count = 4,
-    bool include_half = false,
+    bool use_half_dataset = false,
     GraphQualityMode quality_mode = GraphQualityMode::Exact,
     const std::string& graph_path = ""
 ) {
     if (quality_mode == GraphQualityMode::None) return true;
 
+    const std::string out_file = use_half_dataset ? ds.base_groundtruth_half_file() : ds.base_groundtruth_file();
+    if (file_exists(out_file)) return true;
+
     const auto& info = ds.info();
-    const size_t base_size = base_repo.size();
-    const size_t half_base_size = base_size / 2;
+    const size_t total_queries = use_half_dataset ? (base_repo.size() / 2) : base_repo.size();
+    const size_t base_limit = use_half_dataset ? total_queries : 0;
     const uint32_t topk = DatasetInfo::EXPLORE_TOPK;
 
-    bool full_exists = file_exists(ds.base_groundtruth_file());
-    bool half_exists = file_exists(ds.base_groundtruth_half_file());
-
-    if (full_exists && (!include_half || half_exists)) return true;
-
-    auto compute_and_write_linear = [&](const std::string& out_file, size_t total_queries, size_t base_limit) {
-        fmt::print("Computing base ground truth (linear search) -> {} (total: {} queries, base limit: {})...\n", out_file, total_queries, base_limit);
-        const std::string tmp_file = out_file + ".tmp";
-        auto out = std::ofstream(tmp_file, std::ios::out | std::ios::binary);
-        if (!out.is_open()) {
-            fmt::print(stderr, "Failed to open {} for writing\n", tmp_file);
-            return false;
-        }
-
-        const size_t chunk_size = 25000;
-        const auto base_sub = (base_limit > 0) ? base_repo.subview(0, base_limit) : base_repo;
-        for (size_t start = 0; start < total_queries; start += chunk_size) {
-            const size_t count = std::min(chunk_size, total_queries - start);
-            auto gt = compute_knn_groundtruth(base_sub, base_repo.subview(start, count), info.metric, topk, thread_count, /*include_entry=*/false);
-
-            for (size_t i = 0; i < count; i++) {
-                out.write(reinterpret_cast<const char*>(&topk), sizeof(topk));
-                out.write(reinterpret_cast<const char*>(gt.data() + i * topk), sizeof(uint32_t) * topk);
-            }
-            out.flush();
-        }
-        out.close();
-        if (file_exists(out_file)) {
-            std::filesystem::remove(out_file);
-        }
-        std::filesystem::rename(tmp_file, out_file);
-        fmt::print("Wrote base ground truth: {}\n", out_file);
-        return true;
-    };
-
-    auto compute_and_write_anns = [&](const std::string& out_file, size_t total_queries, const std::string& g_path) {
-        fmt::print("Computing base ground truth (ANNS graph exploration) using {} -> {}\n", g_path, out_file);
-        if (!file_exists(g_path)) {
-            fmt::print(stderr, "Graph file not found: {}\n", g_path);
-            return false;
-        }
-
-        const auto graph = deglib::graph::load_readonly_graph(g_path.c_str());
+    if (quality_mode == GraphQualityMode::Approximated && !graph_path.empty() && file_exists(graph_path)) {
+        fmt::print("Computing base ground truth (ANNS graph exploration) using {} -> {}\n", graph_path, out_file);
+        const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
         const std::string tmp_file = out_file + ".tmp";
         auto out = std::ofstream(tmp_file, std::ios::out | std::ios::binary);
         if (!out.is_open()) {
@@ -748,9 +711,14 @@ inline bool generate_base_groundtruth_files(
             std::vector<uint32_t> chunk_ids(count * topk);
 
             deglib::concurrent::parallel_for(0, count, thread_count, [&](size_t i, size_t) {
-                const auto entry_idx = static_cast<uint32_t>(start + i);
-                auto result_queue = graph.explore(entry_idx, topk, 0, 0.1f, /*include_entry=*/false);
+                const auto ext_label = static_cast<uint32_t>(start + i);
                 auto* row = chunk_ids.data() + i * topk;
+                if (!graph.hasVertex(ext_label)) {
+                    std::fill(row, row + topk, (std::numeric_limits<uint32_t>::max)());
+                    return;
+                }
+                const auto entry_idx = graph.getInternalIndex(ext_label);
+                auto result_queue = graph.explore(entry_idx, topk, 0, 0.1f, /*include_entry=*/false);
                 for (int32_t j = static_cast<int32_t>(topk) - 1; j >= 0; --j) {
                     if (!result_queue.empty()) {
                         row[j] = graph.getExternalLabel(result_queue.top().getIdentifier());
@@ -774,24 +742,34 @@ inline bool generate_base_groundtruth_files(
         std::filesystem::rename(tmp_file, out_file);
         fmt::print("Wrote base ground truth (ANNS): {}\n", out_file);
         return true;
-    };
-
-    if (!full_exists) {
-        if (quality_mode == GraphQualityMode::Approximated && !graph_path.empty() && file_exists(graph_path)) {
-            if (!compute_and_write_anns(ds.base_groundtruth_file(), base_size, graph_path)) return false;
-        } else {
-            if (!compute_and_write_linear(ds.base_groundtruth_file(), base_size, 0)) return false;
-        }
     }
 
-    if (include_half && !half_exists) {
-        if (quality_mode == GraphQualityMode::Approximated && !graph_path.empty() && file_exists(graph_path)) {
-            if (!compute_and_write_anns(ds.base_groundtruth_half_file(), half_base_size, graph_path)) return false;
-        } else {
-            if (!compute_and_write_linear(ds.base_groundtruth_half_file(), half_base_size, half_base_size)) return false;
-        }
+    fmt::print("Computing base ground truth (linear search) -> {} (total: {} queries, base limit: {})...\n", out_file, total_queries, base_limit);
+    const std::string tmp_file = out_file + ".tmp";
+    auto out = std::ofstream(tmp_file, std::ios::out | std::ios::binary);
+    if (!out.is_open()) {
+        fmt::print(stderr, "Failed to open {} for writing\n", tmp_file);
+        return false;
     }
 
+    const size_t chunk_size = 25000;
+    const auto base_sub = (base_limit > 0) ? base_repo.subview(0, base_limit) : base_repo;
+    for (size_t start = 0; start < total_queries; start += chunk_size) {
+        const size_t count = std::min(chunk_size, total_queries - start);
+        auto gt = compute_knn_groundtruth(base_sub, base_repo.subview(start, count), info.metric, topk, thread_count, /*include_entry=*/false);
+
+        for (size_t i = 0; i < count; i++) {
+            out.write(reinterpret_cast<const char*>(&topk), sizeof(topk));
+            out.write(reinterpret_cast<const char*>(gt.data() + i * topk), sizeof(uint32_t) * topk);
+        }
+        out.flush();
+    }
+    out.close();
+    if (file_exists(out_file)) {
+        std::filesystem::remove(out_file);
+    }
+    std::filesystem::rename(tmp_file, out_file);
+    fmt::print("Wrote base ground truth: {}\n", out_file);
     return true;
 }
 

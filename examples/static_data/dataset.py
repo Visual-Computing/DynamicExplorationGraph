@@ -429,10 +429,10 @@ def tune_explore_eps(
     best_recall = 0.0
 
     for eps in eps_candidates:
-        indices_batch, _ = graph.explore(
+        indices_batch = graph.explore(
             eval_entry,
             k=k,
-            eps=eps,
+            eps_or_ef=eps,
             include_entry=True,
             threads=threads,
             return_distances=False,
@@ -642,7 +642,7 @@ def generate_base_top_anns(
             indices_chunk = graph.explore(
                 batch_labels,
                 k=k,
-                eps=chosen_eps,
+                eps_or_ef=chosen_eps,
                 include_entry=False,
                 threads=effective_threads,
                 return_distances=False,
@@ -778,3 +778,4 @@ def load_base_groundtruth(
         return ivecs_read(base_top_path, mmap=True)
 
     return None
+

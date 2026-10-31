@@ -207,7 +207,6 @@ def run_static_benchmark(
     # Graph Analysis
     base_gt = load_base_groundtruth(resolved_key, cache_dir, graph_quality=graph_quality, graph_path=graph_path)
     stats = analyze_graph(graph, base_top=base_gt)
-    print(stats)
 
     # ANNS Test
     search_k = min(preset["anns_k"], gt_vecs.shape[1])

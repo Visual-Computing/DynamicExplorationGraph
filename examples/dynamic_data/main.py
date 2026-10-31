@@ -1,4 +1,5 @@
 import argparse
+from datetime import datetime
 import multiprocessing
 import sys
 import time
@@ -10,6 +11,7 @@ import matplotlib.pyplot as plt
 import deglib
 from deglib_cpp import avx_usable, avx512_usable
 from dataset import (
+    load_base_half_groundtruth,
     load_dataset_for_dynamic,
     get_default_cache_dir,
     resolve_dataset_key,
@@ -250,6 +252,8 @@ def build_dynamic_graph(
         extend_eps=preset["build_eps"],
         improve_k=preset.get("improve_k", 0),
         improve_eps=preset.get("improve_eps", 0.0),
+        max_path_length=preset.get("max_path_length", 5),
+        improve_tries=preset.get("improve_tries", 0),
     )
     builder.set_batch_size(10, 10)
     if build_threads > 1:
@@ -321,6 +325,7 @@ def run_dynamic_benchmark(
     max_base_vecs: int | None,
     no_show: bool,
     force_rebuild: bool,
+    graph_quality: str = "none",
 ):
     resolved_key = resolve_dataset_key(dataset_key)
     preset = get_preset(resolved_key)
@@ -375,6 +380,9 @@ def run_dynamic_benchmark(
         plot_process.start()
         print("\nPlot window will open once the first results are ready.")
 
+    base_gt_half = None
+    base_gt_half_loaded = False
+
     # Iterate over all three stream types (mirrors C++ bench_dynamic_data.cpp)
     for stream_type in STREAM_TYPES:
         # Resolve graph file path and log file path
@@ -390,16 +398,33 @@ def run_dynamic_benchmark(
         orig_stderr = sys.stderr
         if log_path is not None:
             log_path.parent.mkdir(parents=True, exist_ok=True)
-            log_file = open(log_path, "w", encoding="utf-8")
+            graph_exists = graph_path is not None and graph_path.exists() and not force_rebuild
+            file_mode = "a" if (graph_exists and log_path.exists()) else "w"
+            log_file = open(log_path, file_mode, encoding="utf-8")
+            if file_mode == "a":
+                log_file.write(f"\n{'=' * 80}\n")
             sys.stdout = TeeLogger(orig_stdout, log_file)
             sys.stderr = TeeLogger(orig_stderr, log_file)
 
         try:
             print(f"\n=== Testing DataStreamType: {stream_type.value} ===")
+            print(f"Timestamp: {datetime.now().isoformat(timespec='seconds')} | deglib: {deglib.__version__}")
+            print(
+                f"Dataset: {meta['name']} ({resolved_key}) | Base: {base_vecs.shape[0]}x{dims} | "
+                f"Queries: {query_vecs.shape[0]} | Metric: {metric.name} ({actual_inst})"
+            )
+            print(
+                f"Preset Config: k={preset['k']}, extend_k={preset.get('extend_k', preset['k'])}, "
+                f"build_eps={preset['build_eps']}, improve_k={preset.get('improve_k', 0)}, "
+                f"improve_eps={preset.get('improve_eps', 0.0)}, max_path_length={preset.get('max_path_length', 5)}, "
+                f"improve_tries={preset.get('improve_tries', 0)}, threads={build_threads}, "
+                f"anns_k={search_k}, anns_repeat={preset.get('anns_repeat', 1)}, graph_quality={graph_quality}"
+            )
             if graph_path:
                 print(f"Graph path: {graph_path}")
             if log_path:
-                print(f"Logging to file: {log_path}")
+                mode_str = "Appending to" if log_file and log_file.mode == "a" else "Logging to"
+                print(f"{mode_str} file: {log_path}")
 
             graph = None
 
@@ -431,8 +456,18 @@ def run_dynamic_benchmark(
 
             print(f"Graph size: {graph.size()} vertices")
 
-            # Graph analysis
-            deglib.analysis.analyze_graph(graph)
+            # Graph analysis (including Graph Quality against half-base ground truth if available/requested)
+            if not base_gt_half_loaded:
+                base_gt_half = load_base_half_groundtruth(
+                    dataset_key=resolved_key,
+                    cache_dir=cache_dir,
+                    base_vecs=base_vecs,
+                    graph_quality=graph_quality,
+                    graph=graph,
+                    threads=build_threads,
+                )
+                base_gt_half_loaded = True
+            deglib.analysis.analyze_graph(graph, base_top=base_gt_half)
 
             # ANNS Test using half ground truth
             # C++: use_half = (ds_type != DataStreamType::AddAll) -> always True for our 3 types
@@ -554,6 +589,13 @@ def main():
         default=None,
         help="Optional limit on base vectors for quick debugging/testing",
     )
+    parser.add_argument(
+        "--graph-quality",
+        "-q",
+        choices=["none", "exact", "approximated"],
+        default="none",
+        help="Evaluate graph quality: 'none' (default), 'exact' (via linear search groundtruth), 'approximated' (via ANNS graph exploration)",
+    )
 
     args = parser.parse_args()
 
@@ -578,7 +620,7 @@ def main():
         print(f"Graph filename format: {{dims}}D_K{{k}}_{{stream_type}}.deg")
 
     if dataset_name.lower() == "all":
-        datasets_to_run = ["sift1m", "deep1m", "glove-100", "audio", "enron"]
+        datasets_to_run = ["sift1m", "deep1m", "glove", "audio", "enron"]
     else:
         datasets_to_run = [dataset_name]
 
@@ -592,6 +634,7 @@ def main():
             max_base_vecs=args.max_base_vecs,
             no_show=args.no_show,
             force_rebuild=args.force_rebuild,
+            graph_quality=args.graph_quality,
         )
 
     print("\nDynamic Benchmark Finished Successfully.")

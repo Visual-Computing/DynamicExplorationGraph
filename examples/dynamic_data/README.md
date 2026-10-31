@@ -42,6 +42,7 @@ uv run python main.py [dataset] [options]
 | `--cache-dir <path>` | Dataset cache directory (default: `~/.cache/deg_datasets`) |
 | `--no-show` | Do not display interactive plots |
 | `--max-base-vecs <n>` | Limit base vectors for quick testing |
+| `--graph-quality, -q <mode>` | Evaluate graph quality: `none` (default), `exact`, or `approximated` |
 
 ### Examples
 
@@ -71,11 +72,3 @@ uv sync --reinstall-package deglib
 ```
 
 > **Note:** A C++ compiler (MSVC on Windows, GCC/Clang on Linux/macOS) and CMake must be available in your system `PATH`. `setup.py` handles copying C++ files, running CMake, and compiling the extension during the `uv sync` step.
-
-## Key Differences from `static_data`
-
-- Iterates over 3 `DataStreamType`s instead of a single `AddAll`
-- Uses `StreamingData` optimization target for all datasets
-- ANNS test uses **half-dataset ground truth** (queries evaluated against first `base_count/2` vectors)
-- No exploration test
-- Graph files named `{dims}D_K{k}_{stream_type}.deg` (C++ compatible)

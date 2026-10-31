@@ -49,10 +49,14 @@ def analyze_graph(
     base_top: Optional[Any] = None,
     sample_size: int = 0,
     num_threads: int = 0,
+    print_stats: bool = True,
 ) -> GraphStats:
     """Perform comprehensive graph analysis and compute all structural and performance statistics."""
     bt = _prepare_base_top(base_top)
-    return _analyze_graph_cpp(_unwrap(graph), bt, sample_size, num_threads)
+    stats = _analyze_graph_cpp(_unwrap(graph), bt, sample_size, num_threads)
+    if print_stats:
+        print(stats)
+    return stats
 
 
 def calc_graph_quality(
