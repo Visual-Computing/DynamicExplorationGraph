@@ -330,9 +330,7 @@ class EvenRegularGraphBuilder {
   public:
     bool hasTransformations() const noexcept { return !transformations_.empty(); }
     const std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>& getTransformations() const noexcept { return transformations_; }
-    size_t getInputDim() const noexcept {
-        return transformations_.empty() ? graph_.getFeatureSpace().dim() : transformations_.front()->input_dim();
-    }
+    size_t getInputDim() const noexcept { return transformations_.empty() ? graph_.getFeatureSpace().dim() : transformations_.front()->input_dim(); }
 
     /**
      * Provide the builder a new entry which it will append to the graph in the build() process.
@@ -956,6 +954,11 @@ class EvenRegularGraphBuilder {
                         else if (other_involved_vertex != involved_vertex) {
                             path_map.Update(other_involved_vertex, involved_vertex);
                             reachable_group->copyFrom(*group_map.at(other_involved_vertex));
+
+                            // early exit if enough free connections are now available
+                            if (improve_edges == false && neighbor_check_depth > 0 && has_enough_free_connections()) {
+                                goto bfs_done;
+                            }
                         }
                     }
                 }
@@ -965,6 +968,7 @@ class EvenRegularGraphBuilder {
                 check_next.clear();
                 neighbor_check_depth++;
             } while (!has_enough_free_connections());
+        bfs_done:
 
             // 2.2 partition unique root groups into isolated vertices and reachable groups
             for (const auto involved_index : involved_indices) {
