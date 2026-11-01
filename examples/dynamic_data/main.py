@@ -249,7 +249,7 @@ def build_dynamic_graph(
         seed=7,
         optimization_target=deglib.builder.OptimizationTarget.StreamingData,
         extend_k=preset.get("extend_k", k),
-        extend_eps=preset["build_eps"],
+        extend_eps=preset["extend_eps"],
         improve_k=preset.get("improve_k", 0),
         improve_eps=preset.get("improve_eps", 0.0),
         max_path_length=preset.get("max_path_length", 5),
@@ -415,7 +415,7 @@ def run_dynamic_benchmark(
             )
             print(
                 f"Preset Config: k={preset['k']}, extend_k={preset.get('extend_k', preset['k'])}, "
-                f"build_eps={preset['build_eps']}, improve_k={preset.get('improve_k', 0)}, "
+                f"extend_eps={preset['extend_eps']}, improve_k={preset.get('improve_k', 0)}, "
                 f"improve_eps={preset.get('improve_eps', 0.0)}, max_path_length={preset.get('max_path_length', 5)}, "
                 f"improve_tries={preset.get('improve_tries', 0)}, threads={build_threads}, "
                 f"anns_k={search_k}, anns_repeat={preset.get('anns_repeat', 1)}, graph_quality={graph_quality}"

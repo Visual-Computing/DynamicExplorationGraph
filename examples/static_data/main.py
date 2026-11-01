@@ -181,7 +181,7 @@ def run_static_benchmark(
             seed=7,
             optimization_target=optimization_target,
             extend_k=preset.get("extend_k", preset["k"]),
-            extend_eps=preset["build_eps"],
+            extend_eps=preset["extend_eps"],
             improve_k=preset.get("improve_k", 0),
             improve_eps=preset.get("improve_eps", 0.0),
         )
