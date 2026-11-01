@@ -218,7 +218,6 @@ class QG(BaseANN):
         self.graph = None
         self.searcher = None
         self.quantizer = None
-        self.original_features_fp16 = None
         self.rerank_space_fp16 = None
 
     def fit(self, X: np.ndarray, cache_dir: Path | None = None):
@@ -228,7 +227,6 @@ class QG(BaseANN):
         X = np.ascontiguousarray(X, dtype=np.float32)
         n_vectors, dims = X.shape
 
-        self.original_features_fp16 = deglib.distances.floats_to_fp16(X)
         self.rerank_space_fp16 = deglib.FloatSpace.create(dim=dims, metric=self.fp16_metric)
 
         cache_file = _resolve_graph_cache_path(
@@ -244,6 +242,8 @@ class QG(BaseANN):
             print(f"Loading cached DEG graph from {cache_file}...", flush=True)
             load_fn = deglib.load_mutable_graph if self.prune_non_mrng else deglib.load_readonly_graph
             loaded_graph = load_fn(str(cache_file))
+            # Cache: Reconstruct graph-ordered features from original un-permuted X using saved labels
+            X_graph_order = X[loaded_graph.get_labels()]
         else:
             # 1. FLAS 1D Pre-sorting
             print(f"Running FLAS 1D Pre-sorting (threads={self.threads})...", flush=True)
@@ -254,10 +254,13 @@ class QG(BaseANN):
                 show_progress=True,
             )
 
+            # Standard static workflow: sort data once so builder, quantizer, and reranker all share the same array
+            X_graph_order = X[sorted_indices]
+
             # 2. Build graph in FP32
             print(f"Building DEG graph (K={self.k}, Opt={self.opt_target}, threads={self.threads})...", flush=True)
             graph = deglib.builder.build_from_data(
-                data=X[sorted_indices],
+                data=X_graph_order,
                 labels=sorted_indices,
                 edges_per_vertex=self.k,
                 metric=self.base_metric,
@@ -276,8 +279,9 @@ class QG(BaseANN):
             deglib.optimization.prune_non_mrng_edges(loaded_graph, num_threads=1)
 
         # 4. Finalize ReadOnlyGraph with INT8 features using calibrated ScalarQuantizer
+        # Both int8_features and rerank_data are derived directly from X_graph_order (row i = vertex i).
         self.quantizer = deglib.transformation.make_scalar_quantizer_int8(X)
-        int8_features = self.quantizer.quantize(X, num_threads=1)
+        int8_features = self.quantizer.quantize(X_graph_order, num_threads=1)
         target_space = deglib.FloatSpace.create(dim=dims, metric=self.int8_metric)
         self.graph = loaded_graph.to_readonly(target_space, int8_features, transformations=[self.quantizer])
 
@@ -285,7 +289,7 @@ class QG(BaseANN):
         self.searcher = deglib.search.create_searcher(
             graph=self.graph,
             rerank_space=self.rerank_space_fp16,
-            rerank_data=self.original_features_fp16,
+            rerank_data=deglib.distances.floats_to_fp16(X_graph_order),
         )
 
         # 6. Optimize entry vertices and prefetch values

@@ -23,6 +23,21 @@ namespace deglib::search {
 /**
  * High-performance candidate reranker holding base vectors and the distance metric used to
  * re-evaluate graph candidates against full-precision features.
+ *
+ * Indexing Contract:
+ * The Reranker is index-agnostic: candidate index c is evaluated directly against `base_vectors[c]`.
+ *
+ * - With Searcher (Most Common):
+ *   Searcher passes the graph's internal indices (0 .. size()-1) into the Reranker, and subsequently
+ *   remaps the winning results to external labels.
+ *   * Standard / Static Graphs (Default): Vertex i is simply the i-th vector given to the builder.
+ *     Pass the same base feature matrix directly!
+ *   * Custom Labels or Dynamic Graphs with Deletions:
+ *     Base vectors must be aligned so row i contains the vector for label `graph.getExternalLabels()[i]`.
+ *
+ * - Standalone Usage:
+ *   The row ordering of `base_vectors` must match whatever ID space you pass as candidates.
+ *   For example, if candidates are external labels in 0..N-1, row l must contain feature vector l.
  */
 class Reranker {
   private:
@@ -153,6 +168,16 @@ class Reranker {
     }
 
   public:
+    /**
+     * Constructs a candidate reranker.
+     *
+     * @param space            Distance metric and dimensionality for scoring.
+     * @param base_vectors     Row-addressed feature matrix; row c is scored for candidate index c.
+     *                         When used with a Searcher, candidates are internal indices (0 .. size()-1),
+     *                         so row c must correspond to internal vertex c in the graph (i.e. vector for
+     *                         label `graph.getExternalLabels()[c]`).
+     * @param num_base_vectors Number of rows in ``base_vectors``.
+     */
     Reranker(deglib::distances::FloatSpace space, const void* base_vectors, size_t num_base_vectors)
         : space_(std::move(space)), base_vectors_(base_vectors), num_base_vectors_(num_base_vectors) {}
 
@@ -247,6 +272,8 @@ class Reranker {
 
     /**
      * Single-query candidate reranking returning a ResultSet.
+     *
+     * @param candidate_indices Row indices into base_vectors; each is scored as base_vectors[c].
      */
     inline deglib::graph::ResultSet rerank(std::span<const std::byte> query, std::span<const uint32_t> candidate_indices, uint32_t k) const {
         if (query.empty() || candidate_indices.empty() || base_vectors_ == nullptr || k == 0) {

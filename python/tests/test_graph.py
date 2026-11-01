@@ -789,6 +789,35 @@ def test_sizebounded_graph_from_graph_custom_features():
         assert orig_neighbors == new_neighbors, f"Neighbor mismatch at vertex {i}"
 
 
+def test_graph_get_labels_and_custom_features_with_permuted_labels():
+    """Verify get_labels() returns internal index order and custom_features respects internal order."""
+    samples = 30
+    dims = 8
+    rng = np.random.default_rng(123)
+    data = rng.standard_normal((samples, dims)).astype(np.float32)
+    # Non-trivial external labels (large values, permuted)
+    external_labels = (rng.permutation(samples) * 100 + 7).astype(np.uint32)
+
+    graph = deglib.build_from_data(
+        data, labels=external_labels, edges_per_vertex=4, metric=Metric.FP32_L2, seed=42
+    )
+
+    labels_in_order = graph.get_labels()
+    assert len(labels_in_order) == samples
+    # For a newly built graph, internal order matches builder insertion order
+    np.testing.assert_array_equal(labels_in_order, external_labels)
+
+    # Prepare custom features aligned to internal order
+    scaled_data = data * 2.0
+    # Provide custom_features in internal order
+    readonly_graph = graph.to_readonly(
+        feature_space=FloatSpace.create(dims, Metric.FP32_L2),
+        custom_features=scaled_data,
+    )
+    assert readonly_graph.size() == samples
+    np.testing.assert_array_equal(readonly_graph.get_labels(), external_labels)
+
+
 def test_sizebounded_graph_from_graph_capacity():
     """Test to_mutable() with new_max_size (capacity) parameter."""
     samples = 20

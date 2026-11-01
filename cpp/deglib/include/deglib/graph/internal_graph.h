@@ -112,6 +112,26 @@ class InternalGraph {
 
     virtual const uint32_t getExternalLabel(const uint32_t internal_index) const = 0;
     virtual const uint32_t getInternalIndex(const uint32_t external_label) const = 0;
+
+    /**
+     * @brief Returns all external labels ordered by their internal index (0 .. size()-1).
+     *
+     * In static graphs (ReadOnlyGraph or mutable graphs without deletions), this matches the builder's
+     * insertion order. In dynamic graphs, deletions swap vertices, so internal positions shift; this
+     * method reflects the current internal layout.
+     *
+     * Use this vector to align external feature arrays (e.g. for custom_features or rerank_data)
+     * into the contiguous internal order expected by C++ methods.
+     */
+    virtual std::vector<uint32_t> getExternalLabels() const {
+        const uint32_t n = size();
+        std::vector<uint32_t> labels(n);
+        for (uint32_t i = 0; i < n; ++i) {
+            labels[i] = getExternalLabel(i);
+        }
+        return labels;
+    }
+
     virtual const uint32_t* getNeighborIndices(const uint32_t internal_index) const = 0;
     virtual const std::byte* getFeatureVector(const uint32_t internal_index) const = 0;
 

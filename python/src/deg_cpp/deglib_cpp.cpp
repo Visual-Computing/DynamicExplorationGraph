@@ -1839,8 +1839,14 @@ PYBIND11_MODULE(deglib_cpp, m) {
         return new deglib::search::Filter(ptr, size, max_value, max_label_count);
     });
 
-    py::class_<RerankerPy>(search_module, "Reranker")
-        .def(py::init<const deglib::distances::FloatSpace&, py::array>(), py::arg("space"), py::arg("base_vectors"), py::keep_alive<1, 3>())
+    py::class_<RerankerPy>(search_module, "Reranker", "Candidate reranker.")
+        .def(
+            py::init<const deglib::distances::FloatSpace&, py::array>(),
+            py::arg("space"),
+            py::arg("base_vectors"),
+            py::keep_alive<1, 3>(),
+            "The reranker is index-agnostic: candidate index c is scored as base_vectors[c]; the caller chooses the index space."
+        )
         .def("get_num_base_vectors", &RerankerPy::get_num_base_vectors)
         .def("get_po", &RerankerPy::get_po, "Prefetch lookahead offset (0 disables rerank prefetching).")
         .def("get_pl", &RerankerPy::get_pl, "Cache lines prefetched per feature vector (0 prefetches the whole vector).")
@@ -1861,10 +1867,11 @@ PYBIND11_MODULE(deglib_cpp, m) {
             py::arg("return_distances") = false, py::arg("unsorted") = false
         );
 
-    py::class_<SearcherPy>(search_module, "Searcher")
+    py::class_<SearcherPy>(search_module, "Searcher", "Search pipeline. Results are the graph's labels.")
         .def(
             py::init<const deglib::DynamicExplorationGraph&, std::optional<deglib::distances::FloatSpace>, std::optional<py::array>>(), py::arg("graph"),
-            py::arg("rerank_space") = std::nullopt, py::arg("base_vectors") = std::nullopt, py::keep_alive<1, 2>()
+            py::arg("rerank_space") = std::nullopt, py::arg("base_vectors") = std::nullopt, py::keep_alive<1, 2>(),
+            "base_vectors must follow the graph's internal index order (0 .. size()-1, see graph.get_labels()). Valid for static graphs."
         )
         .def(
             "search", &SearcherPy::search, py::arg("query"), py::arg("k"), py::arg("eps_or_ef") = 0.1f, py::arg("rerank_factor") = 1.0f,
@@ -1953,6 +1960,16 @@ PYBIND11_MODULE(deglib_cpp, m) {
             py::return_value_policy::reference
         )
         .def("has_vertex", &deglib::DynamicExplorationGraph::hasVertex)
+        .def(
+            "get_labels",
+            [](const deglib::DynamicExplorationGraph& g) {
+                auto labels = g.getExternalLabels();
+                py::array_t<uint32_t> arr(labels.size());
+                std::memcpy(arr.mutable_data(), labels.data(), labels.size() * sizeof(uint32_t));
+                return arr;
+            },
+            "Returns a 1D numpy array of all external labels ordered by their internal graph index (0 .. size()-1)."
+        )
         .def("get_neighbors", &deglib::DynamicExplorationGraph::getNeighbors)
         .def(
             "get_neighbors_batch",

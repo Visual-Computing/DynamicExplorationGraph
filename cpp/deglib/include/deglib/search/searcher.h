@@ -233,15 +233,41 @@ class Searcher {
     }
 
   public:
+    /**
+     * Constructs a Searcher without transformations or reranking.
+     *
+     * @param graph Underlying graph to search. Results are mapped back to the graph's external labels.
+     */
     explicit Searcher(const deglib::graph::InternalGraph& graph) : graph_(&graph), entry_selector_(graph) {}
 
+    /**
+     * Constructs a Searcher with attached query transformations/quantizers.
+     *
+     * @param graph           Underlying graph to search. Results are mapped back to external labels.
+     * @param transformations Feature transformations (e.g. quantizers) applied to incoming query vectors.
+     */
     Searcher(const deglib::graph::InternalGraph& graph, std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations)
         : graph_(&graph), transformations_(std::move(transformations)), entry_selector_(graph) {
         sync_transformations_dim();
     }
 
+    /**
+     * Constructs a Searcher with candidate reranking.
+     *
+     * @param graph    Underlying graph to search. Results are mapped back to external labels.
+     * @param reranker Reranker holding full-precision features. Its base_vectors must follow the
+     *                 graph's internal index order (0 .. size()-1, see graph.getExternalLabels()).
+     */
     Searcher(const deglib::graph::InternalGraph& graph, Reranker reranker) : graph_(&graph), entry_selector_(graph), reranker_(std::move(reranker)) {}
 
+    /**
+     * Constructs a Searcher with query transformations and candidate reranking.
+     *
+     * @param graph           Underlying graph to search. Results are mapped back to external labels.
+     * @param transformations Feature transformations (e.g. quantizers) applied to incoming query vectors.
+     * @param reranker        Reranker holding full-precision features. Its base_vectors must follow the
+     *                        graph's internal index order (0 .. size()-1, see graph.getExternalLabels()).
+     */
     Searcher(
         const deglib::graph::InternalGraph& graph,
         std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
@@ -251,6 +277,14 @@ class Searcher {
         sync_transformations_dim();
     }
 
+    /**
+     * Constructs a Searcher with query transformations and an optional candidate reranker.
+     *
+     * @param graph           Underlying graph to search. Results are mapped back to external labels.
+     * @param transformations Feature transformations (e.g. quantizers) applied to incoming query vectors.
+     * @param reranker        Optional reranker. If provided, its base_vectors must follow the
+     *                        graph's internal index order (0 .. size()-1, see graph.getExternalLabels()).
+     */
     Searcher(
         const deglib::graph::InternalGraph& graph,
         std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,

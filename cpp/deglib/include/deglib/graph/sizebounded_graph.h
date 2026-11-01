@@ -123,6 +123,12 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
      * graph is a MutableGraph with the same metric).
      *
      * If transformations are provided, features are transformed directly into destination memory.
+     *
+     * @param input_graph Source graph to copy topology and labels from.
+     * @param target_feature_space Optional target feature space.
+     * @param custom_features Optional raw byte pointer to new feature vectors in the graph's internal index order (0 .. size()-1, see input_graph.getExternalLabels()).
+     * @param transformations Optional sequence of feature transformations/quantizers to attach.
+     * @param new_max_size Desired vertex capacity. If 0 or less than size(), capacity is set to size().
      */
     static SizeBoundedGraph from_graph(
         const deglib::graph::InternalGraph& input_graph,
@@ -182,7 +188,7 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
                     throw std::invalid_argument("SizeBoundedGraph::from_graph: cannot self-transform from non-float base features");
                 }
             } else if (custom_features != nullptr) {
-                const auto feature = custom_feature_bytes + size_t(label) * feature_data_size;
+                const auto feature = custom_feature_bytes + size_t(i) * feature_data_size;
                 std::memcpy(vertex_memory, feature, feature_data_size);
             } else {
                 const auto feature = input_graph.getFeatureVector(i);
@@ -533,6 +539,11 @@ inline auto convert_to_sizebounded_graph(const deglib::graph::InternalGraph& inp
 
 /**
  * Convert the given graph to a SizeBoundedGraph, overriding feature space and feature vectors.
+ *
+ * @param input_graph Source graph to convert from.
+ * @param feature_space Target feature space (dimension and metric).
+ * @param custom_features Optional raw byte pointer to new feature vectors in the graph's internal index order (0 .. size()-1, see input_graph.getExternalLabels()).
+ * @param new_max_size Desired vertex capacity. If 0 or less than size(), capacity is set to size().
  */
 inline auto convert_to_sizebounded_graph(
     const deglib::graph::InternalGraph& input_graph,

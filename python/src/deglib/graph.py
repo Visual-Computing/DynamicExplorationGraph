@@ -118,6 +118,20 @@ class DynamicExplorationGraph:
         threads = get_num_useful_threads(threads, arr.shape[0])
         return self.dynamic_exploration_graph_cpp.get_neighbors_batch(arr, threads)
 
+    def get_labels(self) -> np.ndarray:
+        """
+        Returns a 1D NumPy uint32 array of all external labels ordered by their internal graph index (0 .. size()-1).
+
+        In static graphs, this matches the builder's insertion order. In dynamic graphs where vertices have
+        been deleted, this reflects the current internal memory layout.
+
+        Use this array to index/reorder external feature arrays (e.g. ``X[graph.get_labels()]``) so they match
+        the internal contiguous order required by ``to_readonly``, ``to_mutable``, and ``create_searcher``.
+
+        :return: 1D uint32 NumPy array of external labels of length ``size()``.
+        """
+        return self.dynamic_exploration_graph_cpp.get_labels()
+
     def has_transformations(self) -> bool:
         """
         :return: whether the graph has associated feature transformations / quantizers
@@ -329,7 +343,7 @@ class DynamicExplorationGraph:
         and attaches query feature transformations.
 
         :param feature_space: Optional FloatSpace specifying the target feature space.
-        :param custom_features: Optional NumPy array containing replacement feature vectors.
+        :param custom_features: Optional NumPy array containing replacement feature vectors. In standard static workflows, simply pass the same array used for building (row i = vertex i). Only if labels were permuted/deleted, pass features aligned with ``get_labels()``.
         :param transformations: Optional sequence of FeatureTransformation objects attached to the graph.
         :return: A new read-only DynamicExplorationGraph.
         """
@@ -352,7 +366,7 @@ class DynamicExplorationGraph:
 
         :param feature_space: Optional FloatSpace specifying the target feature space.
                               If None, uses the graph's existing feature space.
-        :param custom_features: Optional NumPy array containing replacement feature vectors.
+        :param custom_features: Optional NumPy array containing replacement feature vectors in internal index order (0 .. size()-1, see ``get_labels()``).
         :param capacity: If > 0, sets the capacity to max(capacity, graph.size()).
                          If 0, capacity equals graph.size().
         :param transformations: Optional sequence of FeatureTransformation objects attached to the graph.
@@ -382,7 +396,7 @@ class DynamicExplorationGraph:
 
         :param feature_space: Optional FloatSpace specifying the target feature space.
                               If None, uses the graph's existing feature space.
-        :param custom_features: Optional NumPy array containing replacement feature vectors.
+        :param custom_features: Optional NumPy array containing replacement feature vectors in internal index order (0 .. size()-1, see ``get_labels()``).
         :param chunk_size: Target number of vertices per memory chunk (default = 1024).
                            Will be automatically rounded up to the nearest power of 2 (e.g. 600 -> 1024).
         :param transformations: Optional sequence of FeatureTransformation objects attached to the graph.

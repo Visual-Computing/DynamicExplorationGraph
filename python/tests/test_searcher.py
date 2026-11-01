@@ -229,3 +229,39 @@ def test_searcher_eps_or_ef_dual_modes():
     assert batch_ef.shape == (5, 5)
     for i in range(5):
         assert batch_ef[i, 0] == i
+
+
+def test_searcher_rerank_insertion_order_with_permuted_labels():
+    """rerank_data is in the graph's insertion order (internal id space), independent of labels.
+
+    Builds a graph whose labels differ from insertion order (internal slot j -> label perm[j]) and
+    attaches a Reranker with rerank_data in insertion order. Self-matches must resolve to the
+    query's own external label, proving the reranker is scored on internal ids and the result is
+    remapped internal->label.
+    """
+    np.random.seed(7)
+    dim = 32
+    n = 300
+    data = np.random.randn(n, dim).astype(np.float32)
+    data /= np.linalg.norm(data, axis=1, keepdims=True)
+
+    # insertion slot j -> feature data[j], external label perm[j]
+    perm = np.random.permutation(n).astype(np.uint32)
+    graph = deglib.builder.build_from_data(
+        data, labels=perm, edges_per_vertex=24, metric=Metric.FP32_InnerProduct, seed=7
+    )
+
+    # rerank_data in insertion order: row k = the k-th vector given to the builder (= data[k])
+    rerank_data = np.ascontiguousarray(deglib.distances.floats_to_fp16(data), dtype=np.uint16)
+
+    searcher = create_searcher(
+        graph=graph,
+        rerank_space=FloatSpace.create(dim=dim, metric=Metric.FP16_InnerProduct),
+        rerank_data=rerank_data,
+    )
+
+    for j in (0, 5, 17, 99):
+        # feature data[j] sits at internal slot j with external label perm[j]
+        res = searcher.search(data[j], k=5, eps_or_ef=128, rerank_factor=1.5)
+        assert int(perm[j]) in set(int(x) for x in res)
+        assert res[0] == perm[j]

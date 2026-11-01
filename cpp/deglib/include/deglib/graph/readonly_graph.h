@@ -62,7 +62,7 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
      *
      * @param input_graph Source graph to copy topology and labels from.
      * @param target_feature_space Optional target feature space (if nullopt, derived from transformations or input_graph).
-     * @param custom_features Optional raw byte pointer to new feature vectors (indexed by external label).
+     * @param custom_features Optional raw byte pointer to new feature vectors in the graph's internal index order (0 .. size()-1, see input_graph.getExternalLabels()).
      * @param transformations Optional sequence of transformations applied directly into destination memory.
      */
     static ReadOnlyGraph from_graph(
@@ -120,7 +120,7 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
                     throw std::invalid_argument("ReadOnlyGraph::from_graph: cannot self-transform from non-float base features");
                 }
             } else if (custom_features != nullptr) {
-                const auto feat_src = custom_feature_bytes + size_t(label) * feat_size;
+                const auto feat_src = custom_feature_bytes + size_t(i) * feat_size;
                 std::memcpy(dst_feat, feat_src, feat_size);
             } else {
                 const auto feat_src = input_graph.getFeatureVector(i);
@@ -181,6 +181,16 @@ class ReadOnlyGraph : public deglib::graph::InternalGraph {
     // --- Vertex & Topology Accessors ---
     inline const uint32_t getInternalIndex(const uint32_t external_label) const override { return label_to_index_.find(external_label)->second; }
     inline const uint32_t getExternalLabel(const uint32_t internal_idx) const override { return label_by_index(internal_idx); }
+
+    /**
+     * @brief Returns all external labels ordered by their internal index (0 .. size()-1).
+     *
+     * In ReadOnlyGraph, this directly returns the immutable labels_ array, which reflects the
+     * builder's insertion order. Use this to align external feature arrays (e.g. for custom_features
+     * or Searcher rerank_data) into the contiguous internal order expected by C++ methods.
+     */
+    std::vector<uint32_t> getExternalLabels() const override { return labels_; }
+
     inline const std::byte* getFeatureVector(const uint32_t internal_idx) const override { return feature_by_index(internal_idx); }
     inline const uint32_t* getNeighborIndices(const uint32_t internal_idx) const override { return neighbors_by_index(internal_idx); }
     inline const bool hasVertex(const uint32_t external_label) const override { return label_to_index_.contains(external_label); }
@@ -265,6 +275,10 @@ inline auto convert_to_readonly_graph(const deglib::graph::InternalGraph& input_
 
 /**
  * Convert the given graph to a readonly graph, overriding feature space and feature vectors.
+ *
+ * @param input_graph Source graph to convert from.
+ * @param feature_space Target feature space (dimension and metric).
+ * @param custom_features Optional raw byte pointer to new feature vectors in the graph's internal index order (0 .. size()-1, see input_graph.getExternalLabels()).
  */
 inline auto convert_to_readonly_graph(
     const deglib::graph::InternalGraph& input_graph,

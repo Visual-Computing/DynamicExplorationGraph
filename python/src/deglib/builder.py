@@ -330,7 +330,7 @@ def build_from_data(
 
     :param data: Feature data with shape [N, D] where N is number of samples, D is dimensionality
     :type data: np.ndarray
-    :param labels: Labels for each data entry with shape [N]. If None, labels 0 to N-1 are created.
+    :param labels: External label for each data entry with shape [N]. These are the labels returned by search. If None, labels 0 to N-1 are created (insertion order).
                   If numpy array, should have dtype uint32
     :type labels: Iterable[int] | np.ndarray | None
     :param edges_per_vertex: Number of edges per vertex in the graph

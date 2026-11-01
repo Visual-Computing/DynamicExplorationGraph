@@ -55,6 +55,18 @@ class Reranker:
     """
     High-performance candidate reranker re-evaluating graph candidates with exact distances.
 
+    Indexing Contract:
+    The Reranker evaluates candidate index `c` directly as row `base_vectors[c]`.
+
+    1. Normal case (Static Dataset with Searcher):
+       Row i corresponds to the i-th vector given to the graph builder. Simply pass the same
+       feature matrix (or its FP16 cast) that was passed to `build_from_data`. No reordering needed!
+    2. Dynamic or Custom Labels case:
+       If external labels do not match builder input rows (e.g. dynamic deletions or arbitrary IDs),
+       row i must contain the vector for label `graph.get_labels()[i]`.
+    3. Standalone usage (without Searcher):
+       `base_vectors` matches whatever candidate ID space you pass to `rerank()`.
+
     :param space: FloatSpace defining the distance metric and vector dimensionality.
     :param base_vectors: 2D NumPy array of dataset vectors (shape: N_base x dim).
     """
@@ -149,8 +161,8 @@ def rerank(
 
     :param space: FloatSpace instance defining the distance metric and dimensionality.
     :param queries: 2D NumPy array of query vectors (shape: N_queries x dim).
-    :param candidate_indices: 2D uint32 NumPy array of candidate indices per query (shape: N_queries x K_candidates).
-    :param base_vectors: 2D array of dataset vectors (shape: N_base x dim). If None, defaults to `queries`.
+    :param candidate_indices: 2D uint32 NumPy array of candidate indices per query (shape: N_queries x K_candidates). Each value ``c`` is a row of ``base_vectors``.
+    :param base_vectors: 2D array of dataset vectors (shape: N_base x dim). If None, defaults to `queries`. Candidate ``c`` is scored as ``base_vectors[c]``.
     :param k_top: Number of top nearest candidates to return per query (0 returns all candidates sorted).
     :param num_threads: Number of worker threads (0 uses all available CPU cores).
     :param return_distances: If True, returns a tuple ``(indices, distances)``.
@@ -174,7 +186,7 @@ class Searcher:
 
     :param graph: DynamicExplorationGraph (Mutable or ReadOnly) instance.
     :param rerank_space: Optional FloatSpace for exact candidate reranking.
-    :param rerank_data: Optional base feature matrix for candidate reranking.
+    :param rerank_data: Optional base feature matrix in the graph's internal index order (0 .. size()-1, see ``graph.get_labels()``). Valid for static graphs.
     """
 
     def __init__(
@@ -283,7 +295,7 @@ def create_searcher(
 
     :param graph: DynamicExplorationGraph (Mutable or ReadOnly) instance.
     :param rerank_space: Optional FloatSpace for exact candidate reranking.
-    :param rerank_data: Optional base feature matrix for candidate reranking.
+    :param rerank_data: Optional base feature matrix. In standard static workflows, simply pass the same array used for building. If labels were permuted/deleted, pass features aligned with ``graph.get_labels()``.
     """
     return Searcher(
         graph=graph,

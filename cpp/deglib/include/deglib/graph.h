@@ -101,6 +101,19 @@ class DynamicExplorationGraph {
     bool hasVertex(const uint32_t external_label) const { return internal_graph_->hasVertex(external_label); }
 
     /**
+     * @brief Returns all external labels ordered by their internal index (0 .. size()-1).
+     *
+     * In static graphs, this matches the builder's insertion order. In dynamic graphs where vertices
+     * have been deleted, this reflects the current internal layout after compacting swaps.
+     *
+     * Use this vector to align external feature arrays (e.g. for to_readonly custom_features or
+     * Searcher rerank_data) into the contiguous internal order expected by C++ methods.
+     *
+     * @return Vector of external labels of size size(), where element i is at internal index i.
+     */
+    std::vector<uint32_t> getExternalLabels() const { return internal_graph_->getExternalLabels(); }
+
+    /**
      * @brief Returns the list of query feature transformations configured for this graph.
      * @return Const reference to vector of shared pointers to FeatureTransformation.
      */
@@ -1111,7 +1124,7 @@ class DynamicExplorationGraph {
      * self-transformed directly into the target buffer without caller-side allocations.
      *
      * @param custom_feature_space Optional target feature space. If omitted and transformations exist, derived automatically.
-     * @param custom_features Optional pointer to replacement raw feature memory.
+     * @param custom_features Optional pointer to replacement raw feature memory in the graph's internal index order (0 .. size()-1, see getExternalLabels()).
      * @param transformations Optional sequence of feature transformations/quantizers to attach.
      * @return A new read-only DynamicExplorationGraph.
      */
@@ -1142,7 +1155,7 @@ class DynamicExplorationGraph {
      * @brief Converts this graph to a mutable SizeBoundedGraph with a custom feature space and features buffer.
      *
      * @param custom_feature_space Optional target feature space.
-     * @param custom_features Pointer to replacement raw feature memory.
+     * @param custom_features Pointer to replacement raw feature memory in the graph's internal index order (0 .. size()-1, see getExternalLabels()).
      * @param new_max_size Desired vertex capacity. If 0 or less than size(), capacity is set to size().
      * @param transformations Optional sequence of feature transformations/quantizers to attach.
      * @return A new mutable DynamicExplorationGraph.
@@ -1175,7 +1188,7 @@ class DynamicExplorationGraph {
      * @brief Converts this graph to a mutable DynamicGraph with a custom feature space and chunked allocation.
      *
      * @param custom_feature_space Optional target feature space.
-     * @param custom_features Pointer to replacement raw feature memory.
+     * @param custom_features Pointer to replacement raw feature memory in the graph's internal index order (0 .. size()-1, see getExternalLabels()).
      * @param chunk_size Number of vertices allocated per memory chunk (default 1024). Rounded to power of 2.
      * @param transformations Optional sequence of feature transformations/quantizers to attach.
      * @return A new mutable DynamicExplorationGraph.

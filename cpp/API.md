@@ -307,6 +307,7 @@ public:
     uint8_t getEdgesPerVertex() const;                     ///< Outgoing edges per vertex
     const FloatSpace& getFeatureSpace() const;             ///< Graph metric and dimensionality
     bool hasVertex(uint32_t external_label) const;         ///< Check if external label exists
+    std::vector<uint32_t> getExternalLabels() const;       ///< All external labels ordered by internal index (0 .. size()-1)
     bool isMutable() const;                                ///< Check if graph allows modifications
     InternalGraph& internal();                             ///< Access underlying internal graph
     const InternalGraph& internal() const;
@@ -333,6 +334,11 @@ public:
     void optimize(size_t sample_count = 50, uint32_t k = 100, uint32_t ef = 200, uint32_t seed = 7) const;
 
     // --- Conversions & Persistence ---
+    // Feature Memory Ordering:
+    // Any replacement feature buffer (custom_features / new_features) must match the graph's internal index layout (row i = vertex i):
+    // 1. Standard / Static Graphs (Default): Vertex i is simply the i-th vector given to the builder. Pass the same feature array directly!
+    // 2. Custom Labels or Dynamic Graphs with Deletions: Vertices are indexed by their current internal slots.
+    //    Use getExternalLabels() to look up which label resides at which slot (e.g. data[labels[i]]).
 
     /// Convert to a compact, read-only graph (ReadOnlyGraph) optimized for search
     DynamicExplorationGraph to_readonly() const;
@@ -551,14 +557,23 @@ vector<ResultSet> rerank(
     size_t num_threads = 0
 );
 
-/// Stateful reranker holding base vectors for repeated exact-distance candidate reranking
+/// Stateful reranker holding base vectors for repeated exact-distance candidate reranking.
+///
+/// Candidate Indexing Contract:
+/// The Reranker evaluates candidate index `c` directly as row `base_vectors[c]`.
+/// - With Searcher (Most Common): Searcher passes graph internal indices (0 .. size()-1) into Reranker,
+///   then remaps winning results to external labels.
+///   * Standard / Static Graphs: Vertex i is simply the i-th vector given to the builder. Pass the same feature array directly!
+///   * Custom Labels or Dynamic Graphs with Deletions: Row i must contain the vector for label `graph.getExternalLabels()[i]`.
+/// - Standalone Usage: The row ordering of `base_vectors` matches whatever candidate ID space you pass
+///   (e.g. if candidates are external labels 0..N-1, row l contains feature vector l).
 template <typename DataT>
 class Reranker {
 public:
     Reranker(FloatSpace space, const DataT* base_vectors, size_t num_base_vectors);
 
     FloatSpace getSpace() const;                    ///< Distance metric and dimensionality
-    const DataT* getBaseVectors() const;            ///< Held base vectors
+    const DataT* getBaseVectors() const;            ///< Held base vectors (row c scored for candidate c)
     size_t getNumBaseVectors() const;               ///< Number of held base vectors
     int32_t getPo() const;                          ///< Rerank feature prefetch offset (0 = prefetch disabled)
     int32_t getPl() const;                          ///< Cache lines prefetched per feature vector (0 = whole vector)
