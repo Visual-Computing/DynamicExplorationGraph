@@ -29,40 +29,33 @@ TEST(GraphSerializationTest, BuildWithPipelineSaveAndLoadSearch) {
 
     std::vector<std::shared_ptr<FeatureTransformation>> transformations = {sqi8};
 
-    // 3. Mutable Graph mit INT8_L2 FeatureSpace anlegen
+    // 3. Float-Daten durch die Ingestion-Pipeline transformieren
+    const size_t out_bytes = get_output_bytes(transformations);
+    std::vector<std::byte> quantized_data(count * out_bytes);
+    apply_database(transformations, data.data(), quantized_data.data(), count);
+
+    // 4. Graph deterministisch und wohlgeformt mit create_random_graph erstellen
     const auto feature_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::Int8_L2);
-    auto sizebounded = std::make_unique<deglib::graph::SizeBoundedGraph>(count, edges_per_vertex, feature_space);
-    auto deg = DynamicExplorationGraph(std::move(sizebounded), transformations);
+    auto deg = deglib::create_random_graph(quantized_data.data(), count, edges_per_vertex, feature_space, 42, transformations);
 
     EXPECT_TRUE(deg.hasTransformations());
     EXPECT_EQ(get_output_bytes(deg.getTransformations()), dim * sizeof(int8_t));
-
-    // 4. Builder erstellen und Daten über Floats einspeisen (Ingestion-Kompression an der Eingangstür!)
-    auto builder = deglib::create_builder(deg, rnd);
-    EXPECT_TRUE(builder.hasTransformations());
-
-    for (uint32_t i = 0; i < count; ++i) {
-        std::span<const float> feat(data.data() + i * dim, dim);
-        builder.addEntry(i, feat);
-    }
-    builder.build();
     EXPECT_EQ(deg.size(), count);
 
-    // 5. Query-Suche mit Floats direkt über DEG Facade (ohne Searcher)
+    // 5. Query-Suche vor dem Speichern durchführen
     std::span<const float> q0(data.data(), dim);
     auto res_before = deg.search(q0, 5, 0.1f);
     EXPECT_FALSE(res_before.empty());
-    // Der Vektor 0 sollte der nächste Nachbar zu sich selbst sein
-    bool found_self = false;
-    for (const auto& od : res_before) {
-        if (od.getIdentifier() == 0) found_self = true;
-    }
-    EXPECT_TRUE(found_self);
+
+    std::vector<float> batch_queries(data.begin(), data.begin() + 3 * dim);
+    auto batch_results_before = deg.search_batch(std::span<const float>(batch_queries), 3, 5, 0.1f);
+    EXPECT_EQ(batch_results_before.size(), 3u);
 
     // 6. Graph in Datei speichern (.deg v2 Container)
     const std::string test_file = "test_graph_container_pipeline.deg";
     deg.saveGraph(test_file);
     EXPECT_TRUE(std::filesystem::exists(test_file));
+
     // InternalGraph (ReadOnlyGraph) kann die Datei direkt laden, ignoriert den DEGX-Trailer
     auto ro_graph = deglib::graph::ReadOnlyGraph::loadGraph(test_file.c_str());
     EXPECT_EQ(ro_graph.size(), count);
@@ -74,25 +67,33 @@ TEST(GraphSerializationTest, BuildWithPipelineSaveAndLoadSearch) {
     EXPECT_EQ(deg_loaded.getInputDim(), dim);
     EXPECT_EQ(get_output_bytes(deg_loaded.getTransformations()), dim * sizeof(int8_t));
 
-    // 8. Suche mit dem geladenen Graphen auf Float-Query
+    // 8. Suche nach dem Laden: Ergebnisse müssen exakt mit vor dem Speichern übereinstimmen
     auto res_after = deg_loaded.search(q0, 5, 0.1f);
-    EXPECT_FALSE(res_after.empty());
-    bool found_self_after = false;
-    for (const auto& od : res_after) {
-        if (od.getIdentifier() == 0) found_self_after = true;
-    }
-    EXPECT_TRUE(found_self_after);
+    EXPECT_EQ(res_before.size(), res_after.size());
 
-    // 9. Batch-Suche über DEG
-    std::vector<float> batch_queries(data.begin(), data.begin() + 3 * dim);
-    auto batch_results = deg_loaded.search_batch(std::span<const float>(batch_queries), 3, 5, 0.1f);
-    EXPECT_EQ(batch_results.size(), 3u);
+    // Sortierte Kopien der Ergebnisse vergleichen (Heap -> aufsteigend sortiert)
+    auto sorted_before = res_before;
+    sorted_before.sort();
+    auto sorted_after = res_after;
+    sorted_after.sort();
+    for (size_t i = 0; i < sorted_before.size(); ++i) {
+        EXPECT_EQ(sorted_before[i].getIdentifier(), sorted_after[i].getIdentifier());
+        EXPECT_FLOAT_EQ(sorted_before[i].getDistance(), sorted_after[i].getDistance());
+    }
+
+    // 9. Batch-Suche nach dem Laden vergleichen
+    auto batch_results_after = deg_loaded.search_batch(std::span<const float>(batch_queries), 3, 5, 0.1f);
+    EXPECT_EQ(batch_results_after.size(), 3u);
     for (size_t q = 0; q < 3; ++q) {
-        bool self_in_batch = false;
-        for (const auto& od : batch_results[q]) {
-            if (od.getIdentifier() == q) self_in_batch = true;
+        auto q_before = batch_results_before[q];
+        q_before.sort();
+        auto q_after = batch_results_after[q];
+        q_after.sort();
+        EXPECT_EQ(q_before.size(), q_after.size());
+        for (size_t i = 0; i < q_before.size(); ++i) {
+            EXPECT_EQ(q_before[i].getIdentifier(), q_after[i].getIdentifier());
+            EXPECT_FLOAT_EQ(q_before[i].getDistance(), q_after[i].getDistance());
         }
-        EXPECT_TRUE(self_in_batch);
     }
 
     // Cleanup
@@ -115,18 +116,17 @@ TEST(GraphSerializationTest, BuildWithEvpPipelineSaveAndLoad) {
 
     std::vector<std::shared_ptr<FeatureTransformation>> transformations = {evp};
 
-    const auto feature_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::EVP_InnerProduct);
-    auto sizebounded = std::make_unique<deglib::graph::SizeBoundedGraph>(count, edges_per_vertex, feature_space);
-    auto deg = DynamicExplorationGraph(std::move(sizebounded), transformations);
+    const size_t out_bytes = get_output_bytes(transformations);
+    std::vector<std::byte> quantized_data(count * out_bytes);
+    apply_database(transformations, data.data(), quantized_data.data(), count);
 
-    auto builder = deglib::create_builder(deg, rnd);
-    std::vector<uint32_t> initial_labels = {0, 1, 2, 3, 4};
-    builder.addEntries(std::span<const uint32_t>(initial_labels), std::span<const float>(data.data(), 5 * dim));
-    for (uint32_t i = 5; i < count; ++i) {
-        builder.addEntry(i, std::span<const float>(data.data() + i * dim, dim));
-    }
-    builder.build();
+    const auto feature_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::EVP_InnerProduct);
+    auto deg = deglib::create_random_graph(quantized_data.data(), count, edges_per_vertex, feature_space, 123, transformations);
     EXPECT_EQ(deg.size(), count);
+
+    std::span<const float> q0(data.data(), dim);
+    auto res_before = deg.search(q0, 3, 0.1f);
+    EXPECT_FALSE(res_before.empty());
 
     const std::string test_file = "test_graph_evp_container.deg";
     deg.saveGraph(test_file);
@@ -138,9 +138,17 @@ TEST(GraphSerializationTest, BuildWithEvpPipelineSaveAndLoad) {
     EXPECT_TRUE(deg_loaded.hasTransformations());
     EXPECT_EQ(get_output_bytes(deg_loaded.getTransformations()), 2 * (dim / 8));
 
-    std::span<const float> q0(data.data(), dim);
-    auto res = deg_loaded.search(q0, 3, 0.1f);
-    EXPECT_FALSE(res.empty());
+    auto res_after = deg_loaded.search(q0, 3, 0.1f);
+    EXPECT_EQ(res_before.size(), res_after.size());
+
+    auto sorted_before = res_before;
+    sorted_before.sort();
+    auto sorted_after = res_after;
+    sorted_after.sort();
+    for (size_t i = 0; i < sorted_before.size(); ++i) {
+        EXPECT_EQ(sorted_before[i].getIdentifier(), sorted_after[i].getIdentifier());
+        EXPECT_FLOAT_EQ(sorted_before[i].getDistance(), sorted_after[i].getDistance());
+    }
 
     std::filesystem::remove(test_file);
 }
