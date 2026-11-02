@@ -116,12 +116,19 @@ TEST(EvpQuantize, ArbitraryDimensionsNotDivisibleBy8) {
             }
         }
 
-        // Test FP16 equivalence on arbitrary dimension
+        // Test FP16 equivalence on arbitrary dimension (fit with fp16_data for float16-native precision)
         std::vector<uint16_t> fp16_data(count * dim);
         deglib::distances::fp16::floats_to_fp16(data.data(), fp16_data.data(), count * dim);
-        std::vector<std::byte> result_fp16(count * q.output_byte_size());
-        q.transform_database(std::span<const uint16_t>(fp16_data), std::span<std::byte>(result_fp16));
-        EXPECT_EQ(result, result_fp16);
+        deglib::distances::fp16::fp16_to_floats(fp16_data.data(), data.data(), count * dim);
+
+        deglib::transformation::EvpQuantizer q_fp16_fit(dim, non_zeros);
+        q_fp16_fit.fit(std::span<const float>(data));
+        std::vector<std::byte> result_f32_from_f16(count * q_fp16_fit.output_byte_size());
+        q_fp16_fit.transform_database(std::span<const float>(data), std::span<std::byte>(result_f32_from_f16));
+
+        std::vector<std::byte> result_fp16(count * q_fp16_fit.output_byte_size());
+        q_fp16_fit.transform_database(std::span<const uint16_t>(fp16_data), std::span<std::byte>(result_fp16));
+        EXPECT_EQ(result_f32_from_f16, result_fp16);
     }
 }
 
