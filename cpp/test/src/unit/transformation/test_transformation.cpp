@@ -78,7 +78,7 @@ TEST(TransformTest, EvpQuantizerRoundtrip) {
     EXPECT_EQ(evp_deser->output_dim(), evp->output_dim());
     EXPECT_EQ(evp_deser->output_byte_size(), evp->output_byte_size());
     EXPECT_EQ(evp_deser->non_zeros(), non_zeros);
-    EXPECT_EQ(evp_deser->get_mean().size(), dim);
+    EXPECT_EQ(evp_deser->mean().size(), dim);
 }
 
 TEST(TransformTest, ScalarQuantizersRoundtrip) {

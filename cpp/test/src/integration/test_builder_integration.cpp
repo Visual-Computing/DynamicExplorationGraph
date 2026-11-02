@@ -354,9 +354,9 @@ TEST(DeglibBuilderIntegration, EvpDatasetBitExactness) {
 
     // Hardcoded expected hashes computed on Windows (10k dataset)
     // Checksum verification ensures 100% bit-exact dataset generation and groundtruth across OS/compilers.
-    EXPECT_EQ(base_hash, 0x524834ef619bf297ULL) << "base_evp checksum mismatch across platforms!";
-    EXPECT_EQ(query_hash, 0x942208b0d125a817ULL) << "query_evp checksum mismatch across platforms!";
-    EXPECT_EQ(gt_evp_hash, 0x6c0ad164a1cbbd8dULL) << "gt_evp checksum mismatch across platforms!";
+    EXPECT_EQ(base_hash, 0xe89b99c5f67e4960ULL) << "base_evp checksum mismatch across platforms!";
+    EXPECT_EQ(query_hash, 0x2dc7fb43cf43cadfULL) << "query_evp checksum mismatch across platforms!";
+    EXPECT_EQ(gt_evp_hash, 0xe0dd38ffd5665f91ULL) << "gt_evp checksum mismatch across platforms!";
 }
 
 TEST(DeglibBuilderIntegration, EVPInnerProduct_Recall) {

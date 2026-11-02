@@ -287,7 +287,8 @@ TEST(DynamicGraphRegression, SearchAndExplore_EVP_InnerProduct) {
     auto explore_gt_data = compute_groundtruth(base_data, base_count, explore_data, query_count, dim, search_k, float_dist_func);
 
     // Quantize data to EVP
-    deglib::transformation::EvpQuantizer quantizer(dim, non_zeros, std::vector<float>(dim, 0.0f));
+    deglib::transformation::EvpQuantizer quantizer(dim, non_zeros);
+    quantizer.fit(base_data);
     size_t vec_bytes = quantizer.output_byte_size();
     std::vector<std::byte> base_quant(base_count * vec_bytes);
     std::vector<std::byte> query_quant(query_count * vec_bytes);

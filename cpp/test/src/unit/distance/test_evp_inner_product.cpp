@@ -28,7 +28,9 @@ static std::pair<std::vector<std::byte>, std::vector<std::byte>> make_evp_pair(u
     for (auto& x : a) x = dist(rng_a);
     for (auto& x : b) x = dist(rng_b);
 
-    deglib::transformation::EvpQuantizer q(dim, non_zeros, std::vector<float>(dim, 0.0f));
+    deglib::transformation::EvpQuantizer q(dim, non_zeros);
+    std::vector<float> zero_mean(dim, 0.0f);
+    q.fit(zero_mean);
     std::vector<std::byte> out_a(q.output_byte_size());
     std::vector<std::byte> out_b(q.output_byte_size());
     q.transform_database(std::span<const float>(a), std::span<std::byte>(out_a));
