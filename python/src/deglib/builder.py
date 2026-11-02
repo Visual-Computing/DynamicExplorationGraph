@@ -126,13 +126,15 @@ class GraphBuilder:
         :param extend_k: Number of neighbors to consider when extending the graph (must be > edges_per_vertex).
                          Defaults to ``edges_per_vertex * 2`` if 0 or <= edges_per_vertex.
         :param extend_eps: Epsilon value for neighbor search during graph extension (default: 0.1)
-        :param improve_k: Number of neighbors to consider when improving the graph
+        :param improve_k: Number of neighbors to consider when improving the graph (defaults to ``edges_per_vertex`` if 0)
         :param improve_eps: Epsilon value for neighbor search during graph improvement
         :param max_path_length: Maximum number of edge swaps in a single improvement attempt
         :param improve_tries: Number of improvement attempts per build step
         """
         if extend_k <= graph.get_edges_per_vertex():
             extend_k = graph.get_edges_per_vertex() * 2
+        if improve_k == 0:
+            improve_k = graph.get_edges_per_vertex()
         self.builder_cpp = deglib_cpp.GraphBuilder(
             graph.dynamic_exploration_graph_cpp,
             seed,
@@ -351,7 +353,7 @@ def build_from_data(
     :param extend_eps: Epsilon value for neighbor search during graph extension (default: 0.1)
     :type extend_eps: float
 
-    :param improve_k: Number of neighbors to consider when improving the graph
+    :param improve_k: Number of neighbors to consider when improving the graph (defaults to ``edges_per_vertex`` if 0)
     :type improve_k: int
     :param improve_eps: Epsilon value for neighbor search during graph improvement
     :type improve_eps: float

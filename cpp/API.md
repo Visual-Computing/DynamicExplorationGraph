@@ -603,7 +603,7 @@ public:
 
 Header: `<deglib/optimization.h>`
 
-Graph topology pruning, 1D dataset presorting (FLAS), EVP quantization, and MIPS transformations.
+Graph topology pruning and 1D dataset presorting (FLAS).
 
 ```cpp
 namespace deglib::optimization {
@@ -630,38 +630,13 @@ void optimize_edges(MutableGraph& graph, uint8_t k_opt, float eps_opt, uint8_t i
 /// 1D dataset pre-sorting for improved cache locality and graph quality.
 /// Returns permutation indices in sorted order.
 vector<uint32_t> presort(
-    float* data,
+    const float* data,
     size_t count,
-    FloatSpace space,
+    const deglib::distances::FloatSpace& space,
     float radius_decay = 0.9f,
     size_t num_threads = 0,
     function<bool(float)> callback = nullptr
 );
-
-// --- Extreme Vector Quantization (EVP) ---
-
-/// EVP quantizer holding the shared non_zeros setting.
-/// Construct once and reuse for database and query quantization.
-/// Defined in deglib::quantization::evp; the factory make_evp_quantizer lives in deglib::optimization.
-class EvpQuantizer {
-    explicit EvpQuantizer(uint32_t non_zeros);
-    void quantize(float* src, byte* dst, size_t count, uint32_t dim, size_t num_threads = 0);
-    void quantize(uint16_t* src, byte* dst, size_t count, uint32_t dim, size_t num_threads = 0);
-    vector<byte> quantize(float* src, size_t count, uint32_t dim, size_t num_threads = 0);
-    vector<byte> quantize(uint16_t* src, size_t count, uint32_t dim, size_t num_threads = 0);
-    // Same four flavors with std::span (count derived from span size, validated).
-};
-EvpQuantizer make_evp_quantizer(uint32_t non_zeros);
-
-// --- MIPS to L2 Space Transformation ---
-
-/// Transform database vectors from d dimensions to (d+1) dimensions for MIPS via L2 distance. Returns max norm.
-float mips_l2_transform(float* input, size_t count, size_t dim, float* output);
-pair<vector<float>, float> mips_l2_transform(vector<float> input, size_t count, size_t dim);
-
-/// Pad query vectors with 0 at dimension (d+1) for MIPS queries against an L2-transformed database
-void mips_l2_transform_query(float* input, size_t count, size_t dim, float* output);
-vector<float> mips_l2_transform_query(vector<float> input, size_t count, size_t dim);
 
 } // namespace deglib::optimization
 ```
@@ -937,37 +912,143 @@ namespace deglib::transformation {
 class FeatureTransformation {
 public:
     virtual ~FeatureTransformation() = default;
-    virtual size_t input_dim() const = 0;
-    virtual size_t output_dim() const = 0;
-    virtual size_t output_bytes() const = 0;
-    virtual TransformationType type() const = 0;
-    virtual void transform_database(const float* in, std::byte* out, size_t count) const = 0;
-    virtual void transform_query(const float* in, std::byte* out, size_t count) const = 0;
+
+    virtual uint32_t tag() const noexcept = 0;
+    virtual std::string_view name() const noexcept = 0;
+    virtual uint32_t input_dim() const noexcept = 0;
+    virtual uint32_t output_dim() const noexcept = 0;
+    virtual size_t input_byte_size() const noexcept = 0;
+    virtual size_t output_byte_size() const noexcept = 0;
+
+    virtual deglib::distances::Metric get_target_metric(deglib::distances::Metric input_metric) const;
+    virtual bool is_fitted() const noexcept;
+
+    virtual void fit(std::span<const float> data);
+    virtual void fit(std::span<const uint16_t> data_fp16);
+
+    virtual void transform_database(std::span<const float> in, std::span<std::byte> out) const = 0;
+    virtual void transform_database(std::span<const uint16_t> in_fp16, std::span<std::byte> out) const;
+
+    virtual void transform_query(std::span<const float> in, std::span<std::byte> out) const = 0;
+    virtual void transform_query(std::span<const uint16_t> in_fp16, std::span<std::byte> out) const;
+
+    virtual void serialize(std::ostream& os) const = 0;
 };
+
+// --- Scalar Quantization Classes ---
+
+/// Symmetric signed int8 scalar quantization
+class ScalarQuantizerInt8 : public FeatureTransformation {
+public:
+    ScalarQuantizerInt8(uint32_t dim, float abs_max = 0.0f);
+    float abs_max() const noexcept;
+    float scale() const noexcept;
+    void fit(std::span<const float> data, float drop_ratio = 0.0f);
+    void fit(std::span<const uint16_t> data_fp16, float drop_ratio = 0.0f);
+    void transform_database(std::span<const float> in, std::span<std::byte> out) const override;
+    void transform_query(std::span<const float> in, std::span<std::byte> out) const override;
+    void serialize(std::ostream& os) const override;
+    static std::unique_ptr<ScalarQuantizerInt8> deserialize(std::istream& is);
+};
+
+/// Per-dimension symmetric signed int8 scalar quantization
+class ScalarQuantizerInt8PerDim : public FeatureTransformation {
+public:
+    explicit ScalarQuantizerInt8PerDim(uint32_t dim);
+    std::span<const float> abs_maxs() const noexcept;
+    std::span<const float> scales() const noexcept;
+    void fit(std::span<const float> data, float drop_ratio = 0.0f);
+    void fit(std::span<const uint16_t> data_fp16, float drop_ratio = 0.0f);
+    void transform_database(std::span<const float> in, std::span<std::byte> out) const override;
+    void transform_query(std::span<const float> in, std::span<std::byte> out) const override;
+    void serialize(std::ostream& os) const override;
+    static std::unique_ptr<ScalarQuantizerInt8PerDim> deserialize(std::istream& is);
+};
+
+/// Asymmetric unsigned uint8 scalar quantization
+class ScalarQuantizerUint8 : public FeatureTransformation {
+public:
+    ScalarQuantizerUint8(uint32_t dim, float min_val = 0.0f, float max_val = 0.0f);
+    float min_val() const noexcept;
+    float max_val() const noexcept;
+    float scale() const noexcept;
+    void fit(std::span<const float> data, float drop_ratio = 0.0f);
+    void fit(std::span<const uint16_t> data_fp16, float drop_ratio = 0.0f);
+    void transform_database(std::span<const float> in, std::span<std::byte> out) const override;
+    void transform_query(std::span<const float> in, std::span<std::byte> out) const override;
+    void serialize(std::ostream& os) const override;
+    static std::unique_ptr<ScalarQuantizerUint8> deserialize(std::istream& is);
+};
+
+/// Per-dimension asymmetric unsigned uint8 scalar quantization
+class ScalarQuantizerUint8PerDim : public FeatureTransformation {
+public:
+    explicit ScalarQuantizerUint8PerDim(uint32_t dim);
+    std::span<const float> mins() const noexcept;
+    std::span<const float> maxs() const noexcept;
+    std::span<const float> scales() const noexcept;
+    void fit(std::span<const float> data, float drop_ratio = 0.0f);
+    void fit(std::span<const uint16_t> data_fp16, float drop_ratio = 0.0f);
+    void transform_database(std::span<const float> in, std::span<std::byte> out) const override;
+    void transform_query(std::span<const float> in, std::span<std::byte> out) const override;
+    void serialize(std::ostream& os) const override;
+    static std::unique_ptr<ScalarQuantizerUint8PerDim> deserialize(std::istream& is);
+};
+
+// --- Extreme Vector Quantization (EVP) ---
+
+class EvpQuantizer : public FeatureTransformation {
+public:
+    explicit EvpQuantizer(uint32_t non_zeros = 0, uint32_t dim = 0);
+    uint32_t non_zeros() const noexcept;
+    void transform_database(std::span<const float> in, std::span<std::byte> out, size_t num_threads) const;
+    void transform_database(std::span<const float> in, std::span<std::byte> out) const override;
+    void transform_query(std::span<const float> in, std::span<std::byte> out) const override;
+    void serialize(std::ostream& os) const override;
+    static std::unique_ptr<EvpQuantizer> deserialize(std::istream& is);
+};
+
+std::shared_ptr<EvpQuantizer> make_evp_quantizer(std::span<const float> data, uint32_t dim, uint32_t non_zeros = 0);
+
+// --- MIPS to L2 Space Transformation ---
+
+class MipsTransform : public FeatureTransformation {
+public:
+    MipsTransform(uint32_t dim, float max_norm = 0.0f);
+    float max_norm() const noexcept;
+    void transform_database(std::span<const float> in, std::span<std::byte> out) const override;
+    void transform_query(std::span<const float> in, std::span<std::byte> out) const override;
+    void serialize(std::ostream& os) const override;
+    static std::unique_ptr<MipsTransform> deserialize(std::istream& is);
+};
+
+float mips_l2_transform(std::span<const float> input, size_t count, size_t dim, std::span<float> output);
+void mips_l2_transform_query(std::span<const float> input, size_t count, size_t dim, std::span<float> output);
+
+// --- Workspace & Pipeline Execution Functions ---
 
 /// Workspace buffer for query transformation without heap allocations on search path
 class QueryWorkspace {
 public:
     std::byte* get_buffer_a(size_t bytes);
     std::byte* get_buffer_b(size_t bytes);
+    float* get_float_buffer(size_t count);
 };
 
-// --- Pipeline Functions ---
-
 /// Calculate total output byte size of the final transformation stage
-size_t get_output_bytes(const std::vector<std::shared_ptr<FeatureTransformation>>& chain);
+size_t get_output_byte_size(std::span<const std::shared_ptr<FeatureTransformation>> transformations) noexcept;
+uint32_t get_input_dim(std::span<const std::shared_ptr<FeatureTransformation>> transformations) noexcept;
+uint32_t get_output_dim(std::span<const std::shared_ptr<FeatureTransformation>> transformations) noexcept;
 
 /// Apply sequential transformations to database vectors
-void apply_database(const std::vector<std::shared_ptr<FeatureTransformation>>& chain, const float* in, std::byte* out, size_t count);
+void apply_database(std::span<const std::shared_ptr<FeatureTransformation>> transformations, const float* data, std::byte* out, size_t count);
 
 /// Apply sequential transformations to query vectors
-void apply_query(const std::vector<std::shared_ptr<FeatureTransformation>>& chain, const float* in, std::byte* out, size_t count);
+void apply_query(std::span<const std::shared_ptr<FeatureTransformation>> transformations, const float* query, std::byte* out, size_t count = 1);
 
-/// Serialize transformations to binary byte stream
-std::vector<std::byte> serialize_transformations(const std::vector<std::shared_ptr<FeatureTransformation>>& chain);
-
-/// Deserialize transformations from binary byte stream
-std::vector<std::shared_ptr<FeatureTransformation>> deserialize_transformations(const std::byte* data, size_t size);
+/// Stream serialization of transformation pipelines
+void serialize_transformations(const std::vector<std::shared_ptr<FeatureTransformation>>& transformations, std::ostream& os);
+std::vector<std::shared_ptr<FeatureTransformation>> deserialize_transformations(std::istream& is);
 
 } // namespace deglib::transformation
 ```

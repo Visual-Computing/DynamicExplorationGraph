@@ -11,7 +11,7 @@ Given $N$ high-dimensional vectors, the goal of k-NNG construction (self-join) i
 
 The approach demonstrates **Mode 4 (`evp-rerank`)**, which achieves state-of-the-art trade-offs between construction speed and neighbor recall ($\ge 88\%$):
 
-1. **EVP Quantization**: Feature vectors are converted to compact sparse EVP-bit representations using `deglib.transformation.EvpQuantizer` (`--non-zeros 700`).
+1. **EVP Quantization**: Feature vectors are converted to compact sparse EVP-bit representations using `deglib.transformation.EvpQuantizer` (automatically calibrated during `fit()`).
 2. **DEG Construction**: A dynamic exploration graph is constructed using DEG's `GraphBuilder` with the `EVP_InnerProduct` metric for fast quantized distance computation.
 3. **Graph Exploration**: Exploration for vertex $i$ walks the DEG graph neighborhood using fast EVP bit-level inner product distances to collect candidates (`evpK = 50`).
 4. **FP16 Candidate Reranking**: Candidate sets are reranked with exact half-precision inner-product distances via `deglib.search.rerank` (using an `FP16_InnerProduct` space) to produce final $k$-nearest neighbor edges.
@@ -45,8 +45,7 @@ uv run main.py
 
 ## Command-Line Options
 
-- `--dataset`: Path to HDF5 dataset file or `"small"` (default: downloads/uses the small Wikipedia BGE-M3 dataset).
-- `--non-zeros`: Number of non-zero active components in EVP quantization 
+- `--dataset`: Path to HDF5 dataset file or `"small"` / `"large"`.
 - `--k-graph`: Graph degree per vertex 
 - `--k-ext`: Builder search size (extension) parameter 
 - `--max-dist`: Maximum distance calculation budget per query 

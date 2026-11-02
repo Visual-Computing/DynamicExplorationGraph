@@ -41,18 +41,31 @@ class FeatureTransformation {
     virtual std::string_view name() const noexcept = 0;
     virtual uint32_t input_dim() const noexcept = 0;
     virtual uint32_t output_dim() const noexcept = 0;
-    virtual size_t input_bytes() const noexcept = 0;
-    virtual size_t output_bytes() const noexcept = 0;
+    virtual size_t input_byte_size() const noexcept = 0;
+    virtual size_t output_byte_size() const noexcept = 0;
+
+    // Backward compatibility aliases
+    size_t input_bytes() const noexcept { return input_byte_size(); }
+    size_t output_bytes() const noexcept { return output_byte_size(); }
 
     virtual deglib::distances::Metric get_target_metric(deglib::distances::Metric input_metric) const {
         return input_metric;
     }
 
+    // Indicates if transformation has been fitted and is ready to transform
+    virtual bool is_fitted() const noexcept { return true; }
+
+    // Fit methods (default no-op for parameter-free transformations)
+    virtual void fit(std::span<const float>) {}
+    virtual void fit(std::span<const uint16_t>) {}
+
     // Transform database / training vectors (e.g. at ingestion time in Builder)
-    virtual void transform_database(const float* in, std::byte* out, size_t count) const = 0;
+    virtual void transform_database(std::span<const float> in, std::span<std::byte> out) const = 0;
+    virtual void transform_database(std::span<const uint16_t> in_fp16, std::span<std::byte> out) const {}
 
     // Transform query vectors (at search time)
-    virtual void transform_query(const float* in, std::byte* out, size_t count) const = 0;
+    virtual void transform_query(std::span<const float> in, std::span<std::byte> out) const = 0;
+    virtual void transform_query(std::span<const uint16_t> in_fp16, std::span<std::byte> out) const {}
 
     // Binary serialization into stream
     virtual void serialize(std::ostream& os) const = 0;
@@ -149,21 +162,27 @@ inline void apply_query(std::span<const std::shared_ptr<FeatureTransformation>> 
         return;
     }
     if (transformations.size() == 1) {
-        transformations[0]->transform_query(query, out, count);
+        const auto& t = transformations[0];
+        t->transform_query(std::span<const float>(query, count * t->input_dim()), std::span<std::byte>(out, count * t->output_byte_size()));
         return;
     }
 
     thread_local QueryWorkspace workspace;
     const float* cur_in = query;
-    std::byte* cur_buf = workspace.get_buffer_a(transformations[0]->output_bytes() * count);
-    transformations[0]->transform_query(cur_in, cur_buf, count);
+    const size_t buf_a_size = transformations[0]->output_byte_size() * count;
+    std::byte* cur_buf = workspace.get_buffer_a(buf_a_size);
+    transformations[0]->transform_query(std::span<const float>(cur_in, count * transformations[0]->input_dim()),
+                                       std::span<std::byte>(cur_buf, buf_a_size));
 
     for (size_t i = 1; i < transformations.size(); ++i) {
         const bool is_last = (i == transformations.size() - 1);
+        const size_t cur_out_size = transformations[i]->output_byte_size() * count;
         std::byte* next_buf = is_last ? out
-                                      : ((i % 2 == 1) ? workspace.get_buffer_b(transformations[i]->output_bytes() * count)
-                                                      : workspace.get_buffer_a(transformations[i]->output_bytes() * count));
-        transformations[i]->transform_query(reinterpret_cast<const float*>(cur_buf), next_buf, count);
+                                      : ((i % 2 == 1) ? workspace.get_buffer_b(cur_out_size)
+                                                      : workspace.get_buffer_a(cur_out_size));
+        transformations[i]->transform_query(
+            std::span<const float>(reinterpret_cast<const float*>(cur_buf), count * transformations[i]->input_dim()),
+            std::span<std::byte>(next_buf, cur_out_size));
         cur_buf = next_buf;
     }
 }
@@ -174,26 +193,32 @@ inline void apply_database(std::span<const std::shared_ptr<FeatureTransformation
         return;
     }
     if (transformations.size() == 1) {
-        transformations[0]->transform_database(data, out, count);
+        const auto& t = transformations[0];
+        t->transform_database(std::span<const float>(data, count * t->input_dim()), std::span<std::byte>(out, count * t->output_byte_size()));
         return;
     }
 
-    std::vector<std::byte> buf_a(transformations[0]->output_bytes() * count);
+    const size_t buf_a_size = transformations[0]->output_byte_size() * count;
+    std::vector<std::byte> buf_a(buf_a_size);
     std::vector<std::byte> buf_b;
     const float* cur_in = data;
     std::byte* cur_buf = buf_a.data();
-    transformations[0]->transform_database(cur_in, cur_buf, count);
+    transformations[0]->transform_database(std::span<const float>(cur_in, count * transformations[0]->input_dim()),
+                                          std::span<std::byte>(cur_buf, buf_a_size));
 
     for (size_t i = 1; i < transformations.size(); ++i) {
         const bool is_last = (i == transformations.size() - 1);
+        const size_t cur_out_size = transformations[i]->output_byte_size() * count;
         if (!is_last) {
             if (i % 2 == 1)
-                buf_b.resize(transformations[i]->output_bytes() * count);
+                buf_b.resize(cur_out_size);
             else
-                buf_a.resize(transformations[i]->output_bytes() * count);
+                buf_a.resize(cur_out_size);
         }
         std::byte* next_buf = is_last ? out : ((i % 2 == 1) ? buf_b.data() : buf_a.data());
-        transformations[i]->transform_database(reinterpret_cast<const float*>(cur_buf), next_buf, count);
+        transformations[i]->transform_database(
+            std::span<const float>(reinterpret_cast<const float*>(cur_buf), count * transformations[i]->input_dim()),
+            std::span<std::byte>(next_buf, cur_out_size));
         cur_buf = next_buf;
     }
 }
@@ -206,8 +231,13 @@ inline uint32_t get_output_dim(std::span<const std::shared_ptr<FeatureTransforma
     return transformations.empty() ? 0 : transformations.back()->output_dim();
 }
 
+inline size_t get_output_byte_size(std::span<const std::shared_ptr<FeatureTransformation>> transformations) noexcept {
+    return transformations.empty() ? 0 : transformations.back()->output_byte_size();
+}
+
+// Backward compatibility alias
 inline size_t get_output_bytes(std::span<const std::shared_ptr<FeatureTransformation>> transformations) noexcept {
-    return transformations.empty() ? 0 : transformations.back()->output_bytes();
+    return get_output_byte_size(transformations);
 }
 
 inline deglib::distances::Metric get_target_metric(
@@ -222,30 +252,3 @@ inline deglib::distances::Metric get_target_metric(
 }
 
 }  // namespace deglib::transformation
-
-namespace deglib::quantization {
-
-template <typename Q>
-concept Quantizer = requires(
-    const Q& q,
-    const float* f32,
-    const uint16_t* f16,
-    typename Q::output_type* dst,
-    std::span<const float> f32_span,
-    std::span<const uint16_t> f16_span,
-    std::span<typename Q::output_type> dst_span,
-    size_t count,
-    uint32_t dim
-) {
-    typename Q::output_type;
-    { q.quantize(f32, dst, count, dim) } -> std::same_as<void>;
-    { q.quantize(f16, dst, count, dim) } -> std::same_as<void>;
-    { q.quantize(f32, count, dim) } -> std::same_as<std::vector<typename Q::output_type>>;
-    { q.quantize(f16, count, dim) } -> std::same_as<std::vector<typename Q::output_type>>;
-    { q.quantize(f32_span, dst_span, dim) } -> std::same_as<void>;
-    { q.quantize(f16_span, dst_span, dim) } -> std::same_as<void>;
-    { q.quantize(f32_span, dim) } -> std::same_as<std::vector<typename Q::output_type>>;
-    { q.quantize(f16_span, dim) } -> std::same_as<std::vector<typename Q::output_type>>;
-};
-
-}  // namespace deglib::quantization

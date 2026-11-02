@@ -11,7 +11,26 @@ ScalarQuantizerInt8PerDim = deglib_cpp.transformation.ScalarQuantizerInt8PerDim
 ScalarQuantizerUint8PerDim = deglib_cpp.transformation.ScalarQuantizerUint8PerDim
 
 # Factory Functions
-make_evp_quantizer = deglib_cpp.transformation.make_evp_quantizer
+def make_evp_quantizer(dim: int = 0, non_zeros: int = 0) -> EvpQuantizer:
+    """
+    Factory function creating an EvpQuantizer.
+
+    Equi-Voronoi Polytopes (EVP) compresses floating-point vectors into ternary
+    bitmasks (+1, -1, 0) stored as two bitmasks ((dim + 7) // 8 bytes for +1 bits,
+    (dim + 7) // 8 bytes for -1 bits), enabling high-speed popcount-based inner product search.
+
+    :param dim: Vector dimension (if 0, automatically inferred during ``fit()``).
+    :param non_zeros: Number of extreme dimensions (largest magnitude components) retained
+                      as +/-1 bits per vector. If set to 0 (default), the quantizer automatically
+                      calibrates the optimal non_zeros value on training data during ``fit()``
+                      by maximizing top-100 neighbor recall overlap.
+    :return: An un-fitted EvpQuantizer instance.
+    """
+    return deglib_cpp.transformation.make_evp_quantizer(dim, non_zeros)
+
+
+
+
 make_scalar_quantizer_int8 = deglib_cpp.transformation.make_scalar_quantizer_int8
 make_scalar_quantizer_int8_perdim = deglib_cpp.transformation.make_scalar_quantizer_int8_perdim
 make_scalar_quantizer_uint8 = deglib_cpp.transformation.make_scalar_quantizer_uint8

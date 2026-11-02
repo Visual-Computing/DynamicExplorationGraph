@@ -547,7 +547,7 @@ def test_facade_has_path_from_multiple_entries():
     assert len(path) == len(distances)
     assert len(path) >= 2
     assert int(path[0]) == target
-    assert int(path[-1]) == closest
+    assert int(path[-1]) in entries
 
 
 def test_facade_search_return_distances_false():

@@ -413,8 +413,12 @@ inline static void generate_synthetic_clustered_dataset_evp(
     std::vector<float> base_float, query_float;
     generate_synthetic_clustered_dataset(count, dim, base_float, query_float, query_count, num_clusters);
 
-    base_evp = deglib::transformation::quantize_batch(base_float.data(), count, dim, non_zeros);
-    query_evp = deglib::transformation::quantize_batch(query_float.data(), query_count, dim, non_zeros);
+    deglib::transformation::EvpQuantizer quantizer(dim, non_zeros);
+    quantizer.fit(base_float);
+    base_evp.resize(count * quantizer.output_byte_size());
+    query_evp.resize(query_count * quantizer.output_byte_size());
+    quantizer.transform_database(std::span<const float>(base_float), std::span<std::byte>(base_evp));
+    quantizer.transform_query(std::span<const float>(query_float), std::span<std::byte>(query_evp));
 }
 
 // ---------------------------------------------------------------------------

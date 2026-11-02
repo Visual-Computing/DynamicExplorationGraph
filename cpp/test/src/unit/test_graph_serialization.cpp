@@ -25,12 +25,12 @@ TEST(GraphSerializationTest, BuildWithPipelineSaveAndLoadSearch) {
 
     // 2. Quantizer trainieren (z. B. Scalar INT8)
     auto sqi8 = std::make_shared<ScalarQuantizerInt8>(dim, 3.0f);
-    sqi8->fit(data.data(), count);
+    sqi8->fit(std::span<const float>(data));
 
     std::vector<std::shared_ptr<FeatureTransformation>> transformations = {sqi8};
 
     // 3. Float-Daten durch die Ingestion-Pipeline transformieren
-    const size_t out_bytes = get_output_bytes(transformations);
+    const size_t out_bytes = get_output_byte_size(transformations);
     std::vector<std::byte> quantized_data(count * out_bytes);
     apply_database(transformations, data.data(), quantized_data.data(), count);
 
@@ -39,7 +39,7 @@ TEST(GraphSerializationTest, BuildWithPipelineSaveAndLoadSearch) {
     auto deg = deglib::create_random_graph(quantized_data.data(), count, edges_per_vertex, feature_space, 42, transformations);
 
     EXPECT_TRUE(deg.hasTransformations());
-    EXPECT_EQ(get_output_bytes(deg.getTransformations()), dim * sizeof(int8_t));
+    EXPECT_EQ(get_output_byte_size(deg.getTransformations()), dim * sizeof(int8_t));
     EXPECT_EQ(deg.size(), count);
 
     // 5. Query-Suche vor dem Speichern durchführen
@@ -65,7 +65,7 @@ TEST(GraphSerializationTest, BuildWithPipelineSaveAndLoadSearch) {
     EXPECT_EQ(deg_loaded.size(), count);
     EXPECT_TRUE(deg_loaded.hasTransformations());
     EXPECT_EQ(deg_loaded.getInputDim(), dim);
-    EXPECT_EQ(get_output_bytes(deg_loaded.getTransformations()), dim * sizeof(int8_t));
+    EXPECT_EQ(get_output_byte_size(deg_loaded.getTransformations()), dim * sizeof(int8_t));
 
     // 8. Suche nach dem Laden: Ergebnisse müssen exakt mit vor dem Speichern übereinstimmen
     auto res_after = deg_loaded.search(q0, 5, 0.1f);
@@ -112,11 +112,11 @@ TEST(GraphSerializationTest, BuildWithEvpPipelineSaveAndLoad) {
     for (auto& v : data) v = dist(rnd);
 
     auto evp = std::make_shared<EvpQuantizer>(dim, non_zeros);
-    evp->fit(data.data(), count);
+    evp->fit(std::span<const float>(data));
 
     std::vector<std::shared_ptr<FeatureTransformation>> transformations = {evp};
 
-    const size_t out_bytes = get_output_bytes(transformations);
+    const size_t out_bytes = get_output_byte_size(transformations);
     std::vector<std::byte> quantized_data(count * out_bytes);
     apply_database(transformations, data.data(), quantized_data.data(), count);
 
@@ -136,7 +136,7 @@ TEST(GraphSerializationTest, BuildWithEvpPipelineSaveAndLoad) {
 
     auto deg_loaded = DynamicExplorationGraph::load_readonly(test_file);
     EXPECT_TRUE(deg_loaded.hasTransformations());
-    EXPECT_EQ(get_output_bytes(deg_loaded.getTransformations()), 2 * (dim / 8));
+    EXPECT_EQ(get_output_byte_size(deg_loaded.getTransformations()), 2 * (dim / 8));
 
     auto res_after = deg_loaded.search(q0, 3, 0.1f);
     EXPECT_EQ(res_before.size(), res_after.size());

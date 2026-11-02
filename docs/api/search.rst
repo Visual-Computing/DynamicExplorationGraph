@@ -96,7 +96,7 @@ Filtered Search
 
    # Perform nearest-neighbor query with filter applied
    query = np.random.randn(64).astype(np.float32)
-   indices, distances = graph.search(query, k=5, eps=0.1, filter_labels=search_filter)
+   indices, distances = graph.search(query, k=5, eps_or_ef=0.1, filter_labels=search_filter)
    print("Filtered nearest neighbor indices:", indices)
    print("Distances:", distances)
 

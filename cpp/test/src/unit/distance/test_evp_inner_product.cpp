@@ -27,7 +27,13 @@ static std::pair<std::vector<std::byte>, std::vector<std::byte>> make_evp_pair(u
     std::normal_distribution<float> dist(0.0f, 1.0f);
     for (auto& x : a) x = dist(rng_a);
     for (auto& x : b) x = dist(rng_b);
-    return {deglib::transformation::quantize_single(a.data(), dim, non_zeros), deglib::transformation::quantize_single(b.data(), dim, non_zeros)};
+
+    deglib::transformation::EvpQuantizer q(dim, non_zeros, std::vector<float>(dim, 0.0f));
+    std::vector<std::byte> out_a(q.output_byte_size());
+    std::vector<std::byte> out_b(q.output_byte_size());
+    q.transform_database(std::span<const float>(a), std::span<std::byte>(out_a));
+    q.transform_database(std::span<const float>(b), std::span<std::byte>(out_b));
+    return {std::move(out_a), std::move(out_b)};
 }
 
 // ============================================================================

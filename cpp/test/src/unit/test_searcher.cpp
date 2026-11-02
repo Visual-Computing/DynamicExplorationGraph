@@ -80,9 +80,10 @@ TEST(SearcherTest, QuantizedInt8WithFP16Reranker) {
     auto base_graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
 
     // Quantize to INT8
-    auto quantizer = deglib::transformation::make_scalar_quantizer_int8(data.data(), count, dim);
+    auto quantizer = deglib::transformation::make_scalar_quantizer_int8(std::span<const float>(data), dim);
     std::vector<int8_t> int8_data(count * dim);
-    quantizer.quantize(data.data(), int8_data.data(), count, dim);
+    quantizer.transform_database(std::span<const float>(data),
+                                 std::span<std::byte>(reinterpret_cast<std::byte*>(int8_data.data()), count * dim * sizeof(int8_t)));
 
     auto target_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::Int8_L2);
     auto ro_graph = deglib::graph::convert_to_readonly_graph(base_graph.internal(), target_space, int8_data.data());
@@ -115,9 +116,10 @@ TEST(SearcherTest, QuantizedUint8WithFP32Reranker) {
 
     auto base_graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
 
-    auto quantizer = deglib::transformation::make_scalar_quantizer_uint8(data.data(), count, dim);
+    auto quantizer = deglib::transformation::make_scalar_quantizer_uint8(std::span<const float>(data), dim);
     std::vector<uint8_t> uint8_data(count * dim);
-    quantizer.quantize(data.data(), uint8_data.data(), count, dim);
+    quantizer.transform_database(std::span<const float>(data),
+                                 std::span<std::byte>(reinterpret_cast<std::byte*>(uint8_data.data()), count * dim * sizeof(uint8_t)));
 
     auto target_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::Uint8_L2);
     auto ro_graph = deglib::graph::convert_to_readonly_graph(base_graph.internal(), target_space, uint8_data.data());
@@ -243,7 +245,10 @@ TEST(SearcherTest, EVPQuantizerWithFP32Reranker) {
     auto base_graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_InnerProduct);
 
     deglib::transformation::EvpQuantizer quantizer(dim, non_zeros);
-    auto evp_data = quantizer.quantize(data.data(), count, dim);
+    quantizer.fit(std::span<const float>(data));
+    const size_t evp_bytes = quantizer.output_byte_size();
+    std::vector<std::byte> evp_data(count * evp_bytes);
+    quantizer.transform_database(std::span<const float>(data), std::span<std::byte>(evp_data));
     auto target_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::EVP_InnerProduct);
     auto ro_graph = deglib::graph::convert_to_readonly_graph(base_graph.internal(), target_space, evp_data.data());
 
@@ -365,9 +370,10 @@ TEST(SearcherTest, DynamicExplorationGraphWithTransformationMakeSearcher) {
 
     auto base_graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
 
-    auto quantizer = std::make_shared<deglib::transformation::ScalarQuantizerInt8>(deglib::transformation::make_scalar_quantizer_int8(data.data(), count, dim));
+    auto quantizer = std::make_shared<deglib::transformation::ScalarQuantizerInt8>(deglib::transformation::make_scalar_quantizer_int8(std::span<const float>(data), dim));
     std::vector<int8_t> int8_data(count * dim);
-    quantizer->quantize(data.data(), int8_data.data(), count, dim);
+    quantizer->transform_database(std::span<const float>(data),
+                                  std::span<std::byte>(reinterpret_cast<std::byte*>(int8_data.data()), count * dim * sizeof(int8_t)));
 
     auto target_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::Int8_L2);
     auto ro_graph =

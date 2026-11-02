@@ -243,7 +243,7 @@ class FloatSpace {
             case MetricDataType::FP16:
                 return dim * sizeof(uint16_t);
             case MetricDataType::EVP:
-                return 2 * (dim / 8);  // EVP: [ones (dim/8 bytes)][negs (dim/8 bytes)]
+                return 2 * ((dim + 7) / 8);  // EVP: [ones ((dim+7)/8 bytes)][negs ((dim+7)/8 bytes)]
             case MetricDataType::Int8:
                 return dim * sizeof(int8_t);
             default:

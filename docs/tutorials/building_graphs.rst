@@ -45,12 +45,24 @@ Before building a graph, choose a distance metric compatible with your feature v
    * - ``Metric.FP32_InnerProduct``
      - ``np.float32``
      - Inner product (dot product) distance for 32-bit float vectors.
-   * - ``Metric.Uint8_L2``
-     - ``np.uint8``
-     - Euclidean (L2) distance for 8-bit unsigned integer vectors.
+   * - ``Metric.FP16_L2``
+     - ``np.uint16``
+     - Euclidean (L2) distance for 16-bit half-precision floating point vectors.
    * - ``Metric.FP16_InnerProduct``
      - ``np.uint16``
      - Inner product distance for 16-bit half-precision floating point vectors.
+   * - ``Metric.Int8_L2``
+     - ``np.int8``
+     - Euclidean (L2) distance for 8-bit signed integer vectors.
+   * - ``Metric.Int8_InnerProduct``
+     - ``np.int8``
+     - Inner product distance for 8-bit signed integer vectors.
+   * - ``Metric.Uint8_L2``
+     - ``np.uint8``
+     - Euclidean (L2) distance for 8-bit unsigned integer vectors.
+   * - ``Metric.Uint8_InnerProduct``
+     - ``np.uint8``
+     - Inner product distance for 8-bit unsigned integer vectors.
    * - ``Metric.EVP_InnerProduct``
      - ``np.uint8``
      - Inner product distance for quantized byte-packed (EVP) vectors.
@@ -72,23 +84,29 @@ The :class:`~deglib.builder.OptimizationTarget` defines how new vertices are con
      - Best Used For
    * - ``OptimizationTarget.LowLID`` (Default)
      - Yes (Multi-Threaded)
-     - **Recommended for almost all standard datasets**. Enables parallel multi-core graph construction with high insertion throughput.
+     - **Recommended for almost all standard datasets** (LID :math:`\le` 15). 
    * - ``OptimizationTarget.HighLID``
      - Yes (Multi-Threaded)
-     - Datasets with high Local Intrinsic Dimensionality (LID > 15), applying specialized exploration paths during multi-threaded insertion.
+     - Datasets with high Local Intrinsic Dimensionality (LID > 15).
    * - ``OptimizationTarget.StreamingData``
      - No (Single-Threaded)
-     - Streaming scenarios with continuous deletions or sliding-window buffers.
+     - LID-agnostic. Works reliably across all datasets (whether low or high LID) and shifting distributions, but indexes slower.
 
----
+.. tip::
+
+   **Rule of thumb:**
+   - Use **``LowLID``** (or **``HighLID``** for datasets with LID > 15) to get full multi-threaded indexing speed.
+   - Use **``StreamingData``** if you are unsure about the data characteristics or want a distribution-agnostic fallback. All three targets support dynamic additions and deletions.
 
 Builder Parameters
 ------------------
 
-When creating a :class:`~deglib.builder.GraphBuilder` or calling :func:`~deglib.builder.build_from_data`, parameters are divided into **Graph Extension** (adding vertices) and **Graph Improvement / Deletion** (edge swaps and neighborhood repair):
+When creating a :class:`~deglib.builder.GraphBuilder` or calling :func:`~deglib.builder.build_from_data`, construction behavior is configured via **Extension Parameters** (finding entry neighbors for newly inserted vertices) and **Improvement Parameters** (2-hop edge swaps to repair distortion or graph regularity):
 
-Extension Parameters (Used by LowLID & HighLID)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Extension Parameters (Graph Extension)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Used by all optimization targets (``LowLID``, ``HighLID``, and ``StreamingData``) during vertex insertion.
 
 .. list-table::
    :header-rows: 1
@@ -99,14 +117,16 @@ Extension Parameters (Used by LowLID & HighLID)
      - Description
    * - ``extend_k``
      - ``edges_per_vertex * 2``
-     - Candidate search pool size when finding entry connections for new vertices. **Must be larger than ``edges_per_vertex``**.
+     - Number of candidate neighbors evaluated during graph extension search. If set to 0 or :math:`\le` ``edges_per_vertex``, automatically set to ``edges_per_vertex * 2``.
    * - ``extend_eps``
      - ``0.1``
-     - Exploration margin during vertex insertion. Higher values improve graph quality at the cost of build time.
+     - Exploration distance margin used during neighbor search when inserting new vertices. Higher values evaluate more candidate paths, improving initial edge quality at the cost of insertion speed.
 
 
-Improvement & Deletion Parameters (Used after Deletions or during Continuous Refinement)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Improvement Parameters (Edge Swapping & Neighborhood Optimization)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Controls 2-hop edge swapping attempts (executed during vertex deletion repair in ``reduceGraph()`` and optionally during build steps when ``improve_tries > 0``):
 
 .. list-table::
    :header-rows: 1
@@ -117,21 +137,22 @@ Improvement & Deletion Parameters (Used after Deletions or during Continuous Ref
      - Description
    * - ``improve_k``
      - ``edges_per_vertex``
-     - Neighborhood candidate pool size evaluated during 2-hop edge swaps.
+     - Search candidate pool size evaluated during 2-hop edge swaps. Defaults to ``edges_per_vertex`` when set to ``0``.
    * - ``improve_eps``
      - ``0.001``
-     - Exploration parameter used during improvement attempts.
+     - Exploration distance margin during improvement searches.
    * - ``max_path_length``
      - ``5``
-     - Maximum number of consecutive edge swaps in a single improvement sequence.
+     - Maximum number of consecutive edge swaps evaluated in a single improvement attempt.
    * - ``improve_tries``
      - ``0``
-     - Number of improvement attempts executed per build step.
+     - Number of random 2-hop improvement attempts executed per build step. Defaults to ``0`` (disabled during batch insertion to maximize build throughput). Kantenreparatur beim Löschen (``reduceGraph``) nutzt ``improve_k`` automatisch.
 
 .. note::
 
-   - **LowLID / HighLID**: Primary construction uses the multi-threaded extension parameters (``extend_k``, ``extend_eps``). Improvement parameters are used if vertex deletions occur or explicit continuous edge swaps are desired.
-   - **StreamingData**: Uses both extension and continuous improvement/swap parameters simultaneously to repair graph regularity after continuous insertions and deletions.
+   - **LowLID vs. HighLID**: Both run multi-threaded in parallel batches. ``LowLID`` computes distortion :math:`(d_1 + d_2) - d_{\text{removed}}` to pick the edge whose replacement minimizes metric stretch, while ``HighLID`` picks the neighbor's worst edge.
+   - **StreamingData**: Processes additions sequentially one by one, avoiding thread synchronizations when additions and deletions are interleaved.
+   - **Improvement during Batch Build**: For initial batch construction, keeping ``improve_tries = 0`` is recommended as ``extendGraphKnownLID`` already places edges near-optimally. In dynamic streaming scenarios, setting ``improve_tries > 0`` allows background self-healing of the graph topology.
 
 
 
@@ -152,10 +173,10 @@ To build an index from a 2D NumPy array in a single call:
    # Build graph using all available CPU threads (LowLID default)
    graph = deglib.builder.build_from_data(
        data,
-       k=30,                     # Number of edges per vertex
-       eps=0.1,                  # Exploration margin during build
-       threads=0,                # 0 = use all available CPU cores
-       show_progress=True,        # Print progress bar to stdout
+       edges_per_vertex=30,      # Number of edges per vertex
+       extend_eps=0.1,           # Exploration margin during build
+       thread_count=0,           # 0 = use all available CPU cores
+       show_progress=True,       # Print progress bar to stdout
    )
 
 ---
@@ -197,8 +218,9 @@ For streaming or incremental updates where vertices are added or removed over ti
    print("Build step:", status.step)
    print("Vertices added in this step:", status.added)
    print("Vertices deleted in this step:", status.deleted)
-   print("Added vertex IDs:", status.get_added_external_labels())
-   print("Deleted vertex IDs:", status.get_deleted_external_labels())
+   print("Added vertex IDs in this step:", status.step_added_ids)
+   print("Deleted vertex IDs in this step:", status.step_deleted_ids)
+
 
 ---
 

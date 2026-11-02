@@ -109,14 +109,16 @@ class Searcher {
             const auto& trans = transformations_[t];
             const bool is_last = (t + 1 == transformations_.size());
 
-            const size_t out_bytes = (trans->output_bytes() > 0) ? trans->output_bytes() : graph_->getFeatureSpace().get_data_size();
+            const size_t out_bytes = (trans->output_byte_size() > 0) ? trans->output_byte_size() : graph_->getFeatureSpace().get_data_size();
+            const size_t cur_dim = trans->input_dim();
+            std::span<const float> in_span(current_f32, cur_dim);
             if (is_last) {
                 ws.quant_buf1.resize(out_bytes);
-                trans->transform_query(current_f32, ws.quant_buf1.data(), 1);
+                trans->transform_query(in_span, std::span<std::byte>(ws.quant_buf1.data(), out_bytes));
                 return ws.quant_buf1.data();
             } else {
                 ws.quant_buf2.resize(out_bytes);
-                trans->transform_query(current_f32, ws.quant_buf2.data(), 1);
+                trans->transform_query(in_span, std::span<std::byte>(ws.quant_buf2.data(), out_bytes));
                 current_f32 = reinterpret_cast<const float*>(ws.quant_buf2.data());
             }
         }
@@ -247,9 +249,7 @@ class Searcher {
      * @param transformations Feature transformations (e.g. quantizers) applied to incoming query vectors.
      */
     Searcher(const deglib::graph::InternalGraph& graph, std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations)
-        : graph_(&graph), transformations_(std::move(transformations)), entry_selector_(graph) {
-        sync_transformations_dim();
-    }
+        : graph_(&graph), transformations_(std::move(transformations)), entry_selector_(graph) {}
 
     /**
      * Constructs a Searcher with candidate reranking.
@@ -273,9 +273,7 @@ class Searcher {
         std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
         Reranker reranker
     )
-        : graph_(&graph), transformations_(std::move(transformations)), entry_selector_(graph), reranker_(std::move(reranker)) {
-        sync_transformations_dim();
-    }
+        : graph_(&graph), transformations_(std::move(transformations)), entry_selector_(graph), reranker_(std::move(reranker)) {}
 
     /**
      * Constructs a Searcher with query transformations and an optional candidate reranker.
@@ -290,22 +288,7 @@ class Searcher {
         std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
         std::optional<Reranker> reranker
     )
-        : graph_(&graph), transformations_(std::move(transformations)), entry_selector_(graph), reranker_(std::move(reranker)) {
-        sync_transformations_dim();
-    }
-
-  private:
-    void sync_transformations_dim() {
-        if (!graph_) return;
-        const uint32_t g_dim = graph_->getFeatureSpace().dim();
-        for (auto& t : transformations_) {
-            if (t && t->input_dim() == 0) {
-                if (auto evp = std::dynamic_pointer_cast<deglib::transformation::EvpQuantizer>(t)) {
-                    evp->dim = g_dim;
-                }
-            }
-        }
-    }
+        : graph_(&graph), transformations_(std::move(transformations)), entry_selector_(graph), reranker_(std::move(reranker)) {}
 
   public:
     // --- Accessors ---

@@ -22,7 +22,7 @@ High-throughput approximate nearest neighbor and exploratory search library impl
 - **Multi-threaded construction** and zero-allocation batch search with SIMD acceleration (AVX2, AVX-512)
 - **Supported data types**: `float32`, `float16`, `int8`, `uint8`, `evp-bits`
 - **Supported metrics**: Euclidean ($L_2$), Inner Product / Cosine, quantized EVP
-- **Feature transformation & quantization pipeline**: Integrated scalar INT8/UINT8, bit-packed EVP, and MIPS transforms
+- **Feature transformation & quantization pipeline**: Integrated scalar INT8/UINT8, bit-packed EVP (with data-driven auto-calibration for sparsity / `non_zeros`), and MIPS transforms
 - **Exploratory graph traversal**: High-throughput parallel exploration, path reachability, and batch neighbor lookups
 - **Compact serialization**: Unified `.deg` container format supporting all graph types (Read-Only, SizeBounded, Dynamic)
 

@@ -141,7 +141,8 @@ def test_searcher_evp_quantizer():
     graph = deglib.builder.build_from_data(data, edges_per_vertex=16, metric=Metric.FP32_InnerProduct)
 
     # 16 non-zeros for EVP, shared by database and query quantization
-    quantizer = deglib.transformation.EvpQuantizer(non_zeros=16)
+    quantizer = deglib.transformation.EvpQuantizer(dim, non_zeros=16)
+    quantizer.fit(data)
     evp_data = quantizer.quantize(data)
     target_space = FloatSpace.create(dim=dim, metric=Metric.EVP_InnerProduct)
     ro_graph = graph.to_readonly(target_space, evp_data, transformations=[quantizer])

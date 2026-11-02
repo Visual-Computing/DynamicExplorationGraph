@@ -15,7 +15,7 @@ TEST(MipsTransformTest, MipsL2TransformBasic) {
     };
     std::vector<float> output(count * (dim + 1));
 
-    float max_norm = deglib::transformation::mips_l2_transform(input.data(), count, dim, output.data());
+    float max_norm = deglib::transformation::mips_l2_transform(input, count, dim, output);
 
     EXPECT_NEAR(max_norm, 5.0f, 1e-5f);
 
@@ -53,7 +53,7 @@ TEST(MipsTransformTest, MipsL2TransformQueryPadsZero) {
     std::vector<float> input = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
     std::vector<float> output(count * (dim + 1));
 
-    deglib::transformation::mips_l2_transform_query(input.data(), count, dim, output.data());
+    deglib::transformation::mips_l2_transform_query(input, count, dim, output);
 
     const size_t new_dim = dim + 1;
     EXPECT_FLOAT_EQ(output[0 * new_dim + 0], 1.0f);
@@ -77,8 +77,8 @@ TEST(MipsTransformTest, MipsL2TransformDistanceEquivalence) {
     std::vector<float> db_output(db_count * (dim + 1));
     std::vector<float> query_output(query_count * (dim + 1));
 
-    float max_norm = deglib::transformation::mips_l2_transform(db_input.data(), db_count, dim, db_output.data());
-    deglib::transformation::mips_l2_transform_query(query_input.data(), query_count, dim, query_output.data());
+    float max_norm = deglib::transformation::mips_l2_transform(db_input, db_count, dim, db_output);
+    deglib::transformation::mips_l2_transform_query(query_input, query_count, dim, query_output);
 
     float M_sq = max_norm * max_norm;
     const size_t new_dim = dim + 1;
@@ -107,4 +107,46 @@ TEST(MipsTransformTest, MipsL2TransformDistanceEquivalence) {
             EXPECT_NEAR(l2_dist_sq, expected_l2_dist_sq, 1e-4f);
         }
     }
+}
+
+TEST(MipsTransformTest, MipsTransformClassApi) {
+    const uint32_t dim = 2;
+    deglib::transformation::MipsTransform mips(dim);
+
+    EXPECT_EQ(mips.input_dim(), 2);
+    EXPECT_EQ(mips.output_dim(), 3);
+    EXPECT_EQ(mips.input_byte_size(), 2 * sizeof(float));
+    EXPECT_EQ(mips.output_byte_size(), 3 * sizeof(float));
+    EXPECT_FALSE(mips.is_fitted());
+
+    std::vector<float> input = {
+        3.0f, 4.0f,  // norm = 5
+        0.0f, 0.0f,
+        1.0f, 2.0f
+    };
+    std::vector<std::byte> db_out(input.size() / dim * 3 * sizeof(float));
+
+    // Calling transform before fit should throw
+    EXPECT_THROW(mips.transform_database(input, db_out), std::logic_error);
+
+    // Fit
+    mips.fit(input);
+    EXPECT_TRUE(mips.is_fitted());
+    EXPECT_NEAR(mips.max_norm(), 5.0f, 1e-5f);
+
+    // Transform database
+    mips.transform_database(input, db_out);
+    const float* f_out = reinterpret_cast<const float*>(db_out.data());
+    EXPECT_FLOAT_EQ(f_out[0], 3.0f);
+    EXPECT_FLOAT_EQ(f_out[1], 4.0f);
+    EXPECT_NEAR(f_out[2], 0.0f, 1e-5f);
+
+    // Transform query
+    std::vector<float> query = {1.0f, 2.0f};
+    std::vector<std::byte> q_out(1 * 3 * sizeof(float));
+    mips.transform_query(query, q_out);
+    const float* q_f_out = reinterpret_cast<const float*>(q_out.data());
+    EXPECT_FLOAT_EQ(q_f_out[0], 1.0f);
+    EXPECT_FLOAT_EQ(q_f_out[1], 2.0f);
+    EXPECT_FLOAT_EQ(q_f_out[2], 0.0f);
 }

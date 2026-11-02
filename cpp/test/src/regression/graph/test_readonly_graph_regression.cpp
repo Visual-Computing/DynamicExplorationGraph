@@ -287,9 +287,12 @@ TEST(ReadOnlyGraphRegression, SearchAndExplore_EVP_InnerProduct) {
     auto explore_gt_data = compute_groundtruth(base_data, base_count, explore_data, query_count, dim, search_k, float_dist_func);
 
     // Quantize data to EVP
-    auto base_quant = deglib::transformation::quantize_batch(base_data.data(), base_count, dim, non_zeros, 8);
-    auto query_quant = deglib::transformation::quantize_batch(query_data.data(), query_count, dim, non_zeros, 8);
-    size_t vec_bytes = 2 * (dim / 8);
+    deglib::transformation::EvpQuantizer quantizer(dim, non_zeros, std::vector<float>(dim, 0.0f));
+    size_t vec_bytes = quantizer.output_byte_size();
+    std::vector<std::byte> base_quant(base_count * vec_bytes);
+    std::vector<std::byte> query_quant(query_count * vec_bytes);
+    quantizer.transform_database(std::span<const float>(base_data), std::span<std::byte>(base_quant), 8);
+    quantizer.transform_query(std::span<const float>(query_data), std::span<std::byte>(query_quant), 8);
 
     deglib::distances::FloatSpace feature_space(dim, deglib::distances::Metric::EVP_InnerProduct);
     deglib::graph::SizeBoundedGraph mutable_graph(static_cast<uint32_t>(base_count), edges_per_vertex, feature_space);

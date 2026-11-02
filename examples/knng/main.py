@@ -34,7 +34,6 @@ DEFAULT_THREADS = 8
 CONFIG_SMALL = {
     "k_graph": 16,
     "k_ext": 32,
-    "non_zeros": 700,
     "max_dist": 400,
     "evp_k": 50,
     "prune_worst": 6,
@@ -43,7 +42,6 @@ CONFIG_SMALL = {
 CONFIG_LARGE = {
     "k_graph": 26,
     "k_ext": 32,
-    "non_zeros": 600,
     "max_dist": 700,
     "evp_k": 50,
     "prune_worst": 9,
@@ -60,18 +58,16 @@ def prune_worst_edges(graph: deglib.DynamicExplorationGraph, prune_worst: int) -
     deglib.optimization.prune_worst_edges(graph, prune_worst)
 
 
-def quantize_vectors(
-    vectors: np.ndarray, non_zeros: int | None = None, num_threads: int = DEFAULT_THREADS
-) -> np.ndarray:
+def quantize_vectors(vectors: np.ndarray, num_threads: int = DEFAULT_THREADS) -> np.ndarray:
     """
     Quantizes floating point vectors to sparse EVP-bit representation using deglib.
-    Applies top `non_zeros` active component feature projection via C++ implementation.
+    Automatically calibrates the optimal non_zeros value during fit().
     """
     dims = vectors.shape[1]
-    if non_zeros is None:
-        non_zeros = CONFIG_LARGE["non_zeros"] if vectors.shape[0] > 500_000 else CONFIG_SMALL["non_zeros"]
-    effective_non_zeros = min(non_zeros, dims - 1)
-    return deglib.transformation.EvpQuantizer(effective_non_zeros).quantize(vectors, num_threads=num_threads)
+    quantizer = deglib.transformation.EvpQuantizer(dims)
+    quantizer.fit(vectors, num_threads=num_threads)
+    print(f"Auto-calibrated non_zeros: {quantizer.non_zeros} (evaluated by fit())")
+    return quantizer.quantize(vectors, num_threads=num_threads)
 
 
 def construct_knng(
@@ -80,7 +76,6 @@ def construct_knng(
     k_top: int = DEFAULT_K_TOP,
     k_graph: int | None = None,
     k_ext: int | None = None,
-    non_zeros: int | None = None,
     max_dist: int | None = None,
     evp_k: int | None = None,
     prune_worst: int | None = None,
@@ -95,18 +90,17 @@ def construct_knng(
 
     k_graph = k_graph if k_graph is not None else default_cfg["k_graph"]
     k_ext = k_ext if k_ext is not None else default_cfg["k_ext"]
-    non_zeros = non_zeros if non_zeros is not None else default_cfg["non_zeros"]
     max_dist = max_dist if max_dist is not None else default_cfg["max_dist"]
     evp_k = evp_k if evp_k is not None else default_cfg["evp_k"]
     prune_worst = prune_worst if prune_worst is not None else default_cfg["prune_worst"]
     print(f"Dataset shape: {n_vecs} vectors, {dims} dimensions (dtype: {train_vectors.dtype})")
     print(
-        f"k-NNG Construction Config: k_top={k_top}, k_graph={k_graph}, non_zeros={non_zeros}, max_dist={max_dist}, evp_k={evp_k}, prune_worst={prune_worst}, threads={threads}"
+        f"k-NNG Construction Config: k_top={k_top}, k_graph={k_graph}, max_dist={max_dist}, evp_k={evp_k}, prune_worst={prune_worst}, threads={threads}"
     )
 
     # 1. Quantization Phase
     t0 = time.perf_counter()
-    quant_vectors = quantize_vectors(train_vectors, non_zeros=non_zeros, num_threads=threads)
+    quant_vectors = quantize_vectors(train_vectors, num_threads=threads)
     t_quant = time.perf_counter() - t0
     print(f"Quantization completed in {t_quant:.3f}s")
 
@@ -164,19 +158,25 @@ def construct_knng(
 
     t_total = t_quant + t_build + t_prune + t_explore + t_rerank
 
-    # 5. Recall@15 Evaluation against Ground Truth
+    # 5. Fast Vectorized Recall@15 Evaluation against Ground Truth
     recall = 0.0
     if ground_truth is not None:
-        correct = 0
-        total_gt = 0
-        for i in range(n_vecs):
-            # Ground truth list clean-up: remove self-references (i) if present
-            gt_row = [idx for idx in ground_truth[i] if idx != i][:k_top]
-            gt_set = set(gt_row)
-            pred_set = set(final_knng_edges[i])
-            correct += len(gt_set.intersection(pred_set))
-            total_gt += len(gt_set)
-        recall = correct / max(total_gt, 1)
+        chunk_size = 50000
+        total_correct = 0
+        total_gt = n_vecs * k_top
+        pred_arr = np.asarray(final_knng_edges, dtype=np.int64)
+        gt_arr = np.asarray(ground_truth, dtype=np.int64)
+
+        for start in range(0, n_vecs, chunk_size):
+            end = min(start + chunk_size, n_vecs)
+            p_chunk = pred_arr[start:end, :, None]
+            g_chunk = gt_arr[start:end, None, : k_top + 1]
+            matches = p_chunk == g_chunk
+            self_filter = np.arange(start, end, dtype=np.int64)[:, None, None]
+            valid_gt = g_chunk != self_filter
+            total_correct += int(np.sum(matches & valid_gt))
+
+        recall = total_correct / max(total_gt, 1)
         print(f"\n---> k-NNG Quality (Recall@{k_top}): {recall * 100.0:.2f}%")
 
     print("\n--- Timing Summary ---")
@@ -202,12 +202,6 @@ def main():
     parser = argparse.ArgumentParser(description="k-Nearest Neighbor Graph (k-NNG) Construction Example (SISAP Task 1)")
     parser.add_argument(
         "--dataset", type=str, default="small", help="Path to HDF5 dataset file or 'small' (default: small dataset)"
-    )
-    parser.add_argument(
-        "--non-zeros",
-        type=int,
-        default=None,
-        help="EVP quantization non-zero components (default: 700 small, 600 large)",
     )
     parser.add_argument(
         "--k-graph", type=int, default=None, help="Graph degree per vertex (default: 16 small, 26 large)"
@@ -247,7 +241,6 @@ def main():
         k_top=15,
         k_graph=args.k_graph,
         k_ext=args.k_ext,
-        non_zeros=args.non_zeros,
         max_dist=args.max_dist,
         evp_k=args.evpK,
         prune_worst=args.prune_worst,

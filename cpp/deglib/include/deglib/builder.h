@@ -274,7 +274,7 @@ class EvenRegularGraphBuilder {
         : optimizationTarget_(optimization_target),
           extend_k_(extend_k),
           extend_eps_(extend_eps),
-          improve_k_(improve_k),
+          improve_k_(improve_k == 0 ? graph.getEdgesPerVertex() : improve_k),
           improve_eps_(improve_eps),
           max_path_length_(max_path_length),
           improve_tries_(improve_tries),
@@ -296,7 +296,7 @@ class EvenRegularGraphBuilder {
      * @param optimization_target Optimization target, determines the graph extension strategy (StreamingData, HighLID, LowLID).
      * @param extend_k Number of neighbors to consider when extending the graph.
      * @param extend_eps Epsilon value for neighbor search during graph extension.
-     * @param improve_k Number of neighbors to consider when improving the graph.
+     * @param improve_k Number of neighbors to consider when improving the graph. If 0, defaults to graph edges_per_vertex.
      * @param improve_eps Epsilon value for neighbor search during graph improvement.
      * @param max_path_length Maximum number of edge swaps in a single improvement attempt (default: 5).
      * @param improve_tries Number of improvement attempts per build step (default: 0).
@@ -315,7 +315,7 @@ class EvenRegularGraphBuilder {
         : optimizationTarget_(optimization_target),
           extend_k_(extend_k),
           extend_eps_(extend_eps),
-          improve_k_(improve_k),
+          improve_k_(improve_k == 0 ? graph.getEdgesPerVertex() : improve_k),
           improve_eps_(improve_eps),
           max_path_length_(max_path_length),
           improve_tries_(improve_tries),
@@ -1572,7 +1572,7 @@ class EvenRegularGraphBuilder {
  * @param optimization_target Optimization target strategy (default: OptimizationTarget::LowLID).
  * @param extend_k Number of neighbors to consider during graph extension (default: 64).
  * @param extend_eps Epsilon value for neighbor search during extension (default: 0.1f).
- * @param improve_k Number of neighbors to consider during improvement (default: 0).
+ * @param improve_k Number of neighbors to consider during improvement (0 = default to edges_per_vertex).
  * @param improve_eps Epsilon value for neighbor search during improvement (default: 0.001f).
  * @param max_path_length Maximum number of edge swaps in a single improvement (default: 5).
  * @param improve_tries Number of improvement attempts per build step (default: 0).

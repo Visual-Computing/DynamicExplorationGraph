@@ -28,8 +28,8 @@ Complete Example
    # 2. Build the Exploration Graph
    graph = deglib.builder.build_from_data(
        data,
-       k=30,      # target number of edges per vertex
-       eps=0.1,   # exploration parameter during construction
+       edges_per_vertex=30,  # target number of edges per vertex
+       extend_eps=0.1,       # exploration parameter during construction
    )
    print(f"Graph built with {graph.size()} vertices.")
 

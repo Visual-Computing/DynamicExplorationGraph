@@ -21,7 +21,7 @@ namespace deglib::distances::evp_ip {
 // ---------------------------------------------------------------------------------------------------------------------
 // ----------------------------------------------- EVP Inner Product Dists ---------------------------------------------
 // ---------------------------------------------------------------------------------------------------------------------
-// EVP (Explicit Value Product) quantization converts a float vector into a bit-packed
+// EVP (Equi-Voronoi Polytopes) quantization converts a float vector into a bit-packed
 // representation: [ones (dim/8 bytes)][negative_ones (dim/8 bytes)]
 //
 // The symmetric EVP inner product distance computes popcount intersections:
@@ -32,7 +32,7 @@ namespace deglib::distances::evp_ip {
 //   similarity = aa + bb + dim - cc - dd
 //   distance = 1 - similarity / (2 * dim)
 //
-// qty_ptr points to the original float dimension (must be divisible by 8).
+// qty_ptr points to the original float dimension.
 // ---------------------------------------------------------------------------------------------------------------------
 
 // -------------------------------------------------------------------
@@ -58,7 +58,7 @@ class EvpInnerProduct {
         const std::byte* a = static_cast<const std::byte*>(pVect1v);
         const std::byte* b = static_cast<const std::byte*>(pVect2v);
         const uint32_t dim = *static_cast<const uint32_t*>(qty_ptr);
-        const size_t mask_bytes = dim / 8;
+        const size_t mask_bytes = (dim + 7) / 8;
 
         const std::byte* ones_a = a;
         const std::byte* negs_a = a + mask_bytes;
@@ -129,7 +129,7 @@ class EvpInnerProduct_AVX512 {
         const std::byte* a = static_cast<const std::byte*>(pVect1v);
         const std::byte* b = static_cast<const std::byte*>(pVect2v);
         const uint32_t dim = *static_cast<const uint32_t*>(qty_ptr);
-        const size_t mask_bytes = dim / 8;
+        const size_t mask_bytes = (dim + 7) / 8;
 
         const std::byte* ones_a = a;
         const std::byte* negs_a = a + mask_bytes;
@@ -208,7 +208,7 @@ class EvpInnerProduct_AVX512 {
         static constexpr size_t BATCH_SIZE = 4;
         const std::byte* query = static_cast<const std::byte*>(query_ptr);
         const uint32_t dim = *static_cast<const uint32_t*>(qty_ptr);
-        const size_t mask_bytes = dim / 8;
+        const size_t mask_bytes = (dim + 7) / 8;
 
         auto batch_impl = [query, mask_bytes, dim](const void* const* db, float* out_dists) DEGLIB_TARGET_AVX512 {
             const std::byte* q_ones = query;
@@ -315,7 +315,7 @@ class EvpInnerProduct_AVX2 {
         const std::byte* a = static_cast<const std::byte*>(pVect1v);
         const std::byte* b = static_cast<const std::byte*>(pVect2v);
         const uint32_t dim = *static_cast<const uint32_t*>(qty_ptr);
-        const size_t mask_bytes = dim / 8;
+        const size_t mask_bytes = (dim + 7) / 8;
 
         const std::byte* ones_a = a;
         const std::byte* negs_a = a + mask_bytes;
@@ -406,7 +406,7 @@ class EvpInnerProduct_AVX2 {
         static constexpr size_t BATCH_SIZE = 4;
         const std::byte* query = static_cast<const std::byte*>(query_ptr);
         const uint32_t dim = *static_cast<const uint32_t*>(qty_ptr);
-        const size_t mask_bytes = dim / 8;
+        const size_t mask_bytes = (dim + 7) / 8;
 
         auto batch_impl = [query, mask_bytes, dim](const void* const* db, float* out_dists) DEGLIB_TARGET_AVX2 {
             const std::byte* q_ones = query;

@@ -13,15 +13,9 @@
 
 namespace deglib::transformation {
 
-/**
- * @brief Transforms database vectors from d-dimensional space to (d+1)-dimensional space
- * for Maximum Inner Product Search (MIPS) using L2 distance.
- *
- * For each vector x_i in R^d:
- *   x'_i = [x_i, sqrt(M^2 - ||x_i||^2)] in R^(d+1)
- * where M^2 = max_i ||x_i||^2.
- */
-inline float mips_l2_transform(const float* input, size_t count, size_t dim, float* output) {
+namespace detail {
+
+inline float mips_l2_transform_raw(const float* input, size_t count, size_t dim, float* output) {
     if (input == nullptr || output == nullptr) {
         throw std::invalid_argument("mips_l2_transform: input and output pointers must not be null");
     }
@@ -54,11 +48,7 @@ inline float mips_l2_transform(const float* input, size_t count, size_t dim, flo
     return static_cast<float>(std::sqrt(max_norm_sq));
 }
 
-/**
- * @brief Pads query vectors from d-dimensional space to (d+1)-dimensional space
- * for MIPS queries against an L2-transformed database (q' = [q, 0]).
- */
-inline void mips_l2_transform_query(const float* input, size_t count, size_t dim, float* output) {
+inline void mips_l2_transform_query_raw(const float* input, size_t count, size_t dim, float* output) {
     if (input == nullptr || output == nullptr) {
         throw std::invalid_argument("mips_l2_transform_query: input and output pointers must not be null");
     }
@@ -73,20 +63,50 @@ inline void mips_l2_transform_query(const float* input, size_t count, size_t dim
     }
 }
 
-inline std::pair<std::vector<float>, float> mips_l2_transform(const std::vector<float>& input, size_t count, size_t dim) {
+}  // namespace detail
+
+/**
+ * @brief Transforms database vectors from d-dimensional space to (d+1)-dimensional space
+ * for Maximum Inner Product Search (MIPS) using L2 distance.
+ */
+inline float mips_l2_transform(std::span<const float> input, size_t count, size_t dim, std::span<float> output) {
+    if (count == 0 || dim == 0) return 0.0f;
+    if (input.size() < count * dim) {
+        throw std::invalid_argument("mips_l2_transform: input span too small");
+    }
+    if (output.size() < count * (dim + 1)) {
+        throw std::invalid_argument("mips_l2_transform: output span too small");
+    }
+    return detail::mips_l2_transform_raw(input.data(), count, dim, output.data());
+}
+
+/**
+ * @brief Pads query vectors from d-dimensional space to (d+1)-dimensional space
+ * for MIPS queries against an L2-transformed database (q' = [q, 0]).
+ */
+inline void mips_l2_transform_query(std::span<const float> input, size_t count, size_t dim, std::span<float> output) {
+    if (count == 0 || dim == 0) return;
+    if (input.size() < count * dim) {
+        throw std::invalid_argument("mips_l2_transform_query: input span too small");
+    }
+    if (output.size() < count * (dim + 1)) {
+        throw std::invalid_argument("mips_l2_transform_query: output span too small");
+    }
+    detail::mips_l2_transform_query_raw(input.data(), count, dim, output.data());
+}
+
+inline std::pair<std::vector<float>, float> mips_l2_transform(std::span<const float> input, size_t count, size_t dim) {
     std::vector<float> output(count * (dim + 1));
-    float max_norm = mips_l2_transform(input.data(), count, dim, output.data());
+    float max_norm = mips_l2_transform(input, count, dim, output);
     return {output, max_norm};
 }
 
-inline std::vector<float> mips_l2_transform_query(const std::vector<float>& input, size_t count, size_t dim) {
+inline std::vector<float> mips_l2_transform_query(std::span<const float> input, size_t count, size_t dim) {
     std::vector<float> output(count * (dim + 1));
-    mips_l2_transform_query(input.data(), count, dim, output.data());
+    mips_l2_transform_query(input, count, dim, output);
     return output;
 }
 
-// Forward declare FeatureTransformation if not yet defined
-class FeatureTransformation;
 
 class MipsTransform : public FeatureTransformation {
   private:
@@ -97,24 +117,29 @@ class MipsTransform : public FeatureTransformation {
     MipsTransform() = default;
     MipsTransform(uint32_t dim, float max_norm = 0.0f) : dim_(dim), max_norm_(max_norm) {}
 
-    uint32_t tag() const noexcept { return 0x5350494D; }  // 'MIPS'
-    std::string_view name() const noexcept { return "MipsTransform"; }
-    uint32_t input_dim() const noexcept { return dim_; }
-    uint32_t output_dim() const noexcept { return dim_ + 1; }
-    size_t input_bytes() const noexcept { return dim_ * sizeof(float); }
-    size_t output_bytes() const noexcept { return (dim_ + 1) * sizeof(float); }
+    uint32_t tag() const noexcept override { return 0x5350494D; }  // 'MIPS'
+    std::string_view name() const noexcept override { return "MipsTransform"; }
+    uint32_t input_dim() const noexcept override { return dim_; }
+    uint32_t output_dim() const noexcept override { return dim_ + 1; }
+    size_t input_byte_size() const noexcept override { return dim_ * sizeof(float); }
+    size_t output_byte_size() const noexcept override { return (dim_ + 1) * sizeof(float); }
     float max_norm() const noexcept { return max_norm_; }
 
     deglib::distances::Metric get_target_metric(deglib::distances::Metric) const override {
         return deglib::distances::Metric::FP32_L2;
     }
 
-    void fit(const float* data, size_t count) {
-        if (count == 0 || dim_ == 0) return;
+    bool is_fitted() const noexcept override { return dim_ > 0 && max_norm_ > 0.0f; }
+
+    void fit(std::span<const float> data) override {
+        if (data.empty()) return;
+        if (dim_ == 0) throw std::invalid_argument("MipsTransform: dim must be > 0 prior to fit()");
+        if (data.size() % dim_ != 0) throw std::invalid_argument("MipsTransform: data size must be multiple of dim");
+        const size_t count = data.size() / dim_;
         double max_norm_sq = 0.0;
         for (size_t i = 0; i < count; ++i) {
             double sum = 0.0;
-            const float* vec = data + i * dim_;
+            const float* vec = data.data() + i * dim_;
             for (size_t j = 0; j < dim_; ++j) {
                 double val = static_cast<double>(vec[j]);
                 sum += val * val;
@@ -124,12 +149,19 @@ class MipsTransform : public FeatureTransformation {
         max_norm_ = static_cast<float>(std::sqrt(max_norm_sq));
     }
 
-    void transform_database(const float* in, std::byte* out, size_t count) const {
-        float* f_out = reinterpret_cast<float*>(out);
+    void transform_database(std::span<const float> in, std::span<std::byte> out) const override {
+        if (in.empty()) return;
+        if (dim_ == 0) throw std::invalid_argument("MipsTransform: dim must be > 0");
+        if (in.size() % dim_ != 0) throw std::invalid_argument("MipsTransform: input size must be multiple of input_dim");
+        if (!is_fitted()) throw std::logic_error("MipsTransform: transform_database called before fit()");
+        const size_t count = in.size() / dim_;
         const size_t new_dim = dim_ + 1;
+        if (out.size() < count * new_dim * sizeof(float)) throw std::invalid_argument("MipsTransform: output buffer too small");
+
+        float* f_out = reinterpret_cast<float*>(out.data());
         const double max_norm_sq = double(max_norm_) * double(max_norm_);
         for (size_t i = 0; i < count; ++i) {
-            const float* in_vec = in + i * dim_;
+            const float* in_vec = in.data() + i * dim_;
             float* out_vec = f_out + i * new_dim;
             std::memcpy(out_vec, in_vec, dim_ * sizeof(float));
             double sum = 0.0;
@@ -143,11 +175,17 @@ class MipsTransform : public FeatureTransformation {
         }
     }
 
-    void transform_query(const float* in, std::byte* out, size_t count) const {
-        mips_l2_transform_query(in, count, dim_, reinterpret_cast<float*>(out));
+    void transform_query(std::span<const float> in, std::span<std::byte> out) const override {
+        if (in.empty()) return;
+        if (dim_ == 0) throw std::invalid_argument("MipsTransform: dim must be > 0");
+        if (in.size() % dim_ != 0) throw std::invalid_argument("MipsTransform: input size must be multiple of input_dim");
+        const size_t count = in.size() / dim_;
+        const size_t new_dim = dim_ + 1;
+        if (out.size() < count * new_dim * sizeof(float)) throw std::invalid_argument("MipsTransform: output buffer too small");
+        detail::mips_l2_transform_query_raw(in.data(), count, dim_, reinterpret_cast<float*>(out.data()));
     }
 
-    void serialize(std::ostream& os) const {
+    void serialize(std::ostream& os) const override {
         os.write(reinterpret_cast<const char*>(&dim_), sizeof(dim_));
         os.write(reinterpret_cast<const char*>(&max_norm_), sizeof(max_norm_));
     }
