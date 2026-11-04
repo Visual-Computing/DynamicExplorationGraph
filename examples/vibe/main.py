@@ -17,7 +17,7 @@ from dataset import (
     load_vibe_dataset,
     resolve_dataset_key,
 )
-from module import DEG, QG
+from module import DEG, QG, EVP
 from presets import get_config_grid_presets, get_default_config_preset, load_vibe_config
 
 
@@ -183,8 +183,8 @@ def main():
         "-a",
         type=str,
         default=None,
-        choices=["deg", "deg-qg", "qg", "all"],
-        help="Select specific algorithm to benchmark ('deg', 'deg-qg' / 'qg', or 'all'). Default: run all enabled in config.yml.",
+        choices=["deg", "deg-qg", "qg", "deg-evp", "evp", "all"],
+        help="Select specific algorithm to benchmark ('deg', 'deg-qg' / 'qg', 'deg-evp' / 'evp', or 'all'). Default: run all enabled in config.yml.",
     )
     parser.add_argument(
         "--query-dtype",
@@ -253,6 +253,8 @@ def main():
         alg_filter = args.algorithm
         if alg_filter == "qg":
             alg_filter = "deg-qg"
+        elif alg_filter == "evp":
+            alg_filter = "deg-evp"
         elif alg_filter == "all":
             alg_filter = None
 
@@ -282,6 +284,16 @@ def main():
                     threads=args.build_threads,
                 )
                 query_dtype = "int8"
+            elif constructor_name == "EVP":
+                adapter = EVP(
+                    metric=metric_str,
+                    k=k,
+                    opt_target=opt_target,
+                    prune_non_mrng=is_pruned,
+                    threads=args.build_threads,
+                    non_zeros=cfg.get("non_zeros", 0),
+                )
+                query_dtype = "evp"
             else:
                 adapter = DEG(
                     metric=metric_str,
@@ -301,13 +313,23 @@ def main():
 
             # Determine query evaluation parameter grid
             factors_to_eval = cfg.get("rerank_size_factors", [1.0])
-            eps_or_ef_list = cfg.get("eps_or_ef_list", [])
+            raw_param_list = cfg.get("eps_or_ef_list", [])
+
+            # Separate and sort ef and eps parameter lists independently
+            ef_values = sorted([v for v in raw_param_list if v >= 1.0])
+            eps_values = sorted([v for v in raw_param_list if v < 1.0])
+            param_groups = []
+            if ef_values:
+                param_groups.append(("ef", ef_values))
+            if eps_values:
+                param_groups.append(("eps", eps_values))
 
             prune_label = ", MRNG" if is_pruned else ""
 
             for r_factor in factors_to_eval:
                 rerank_label = f", Rerank={r_factor:.2f}x" if r_factor > 1.0 else ""
-                param_str = ", ".join(f"{v:g}" if v <= 1.0 else str(int(round(v))) for v in eps_or_ef_list)
+                formatted_params = [str(int(round(v))) for v in ef_values] + [f"{v:g}" for v in eps_values]
+                param_str = ", ".join(formatted_params)
 
                 print(f"\nEvaluating top-{actual_k} search (rerank_factor={r_factor:.2f}) for eps_or_ef: {param_str}")
 
@@ -316,59 +338,63 @@ def main():
                 anns_params = []
                 n_queries = len(query_vecs)
 
-                for val in eps_or_ef_list:
-                    if constructor_name == "QG":
-                        adapter.set_query_arguments(eps_or_ef=val, rerank_size_factor=r_factor)
-                    else:
-                        adapter.set_query_arguments(eps_or_ef=val)
+                for param_type, group_vals in param_groups:
+                    for val in group_vals:
+                        if constructor_name in ("QG", "EVP"):
+                            adapter.set_query_arguments(eps_or_ef=val, rerank_size_factor=r_factor)
+                        else:
+                            adapter.set_query_arguments(eps_or_ef=val)
 
-                    results_indices = []
-                    start_time = time.perf_counter()
-                    for q_idx in range(n_queries):
-                        results_indices.append(adapter.query(query_vecs[q_idx], actual_k))
-                    elapsed_sec = time.perf_counter() - start_time
-                    indices_batch = np.array(results_indices, dtype=np.int64)
+                        results_indices = []
+                        start_time = time.perf_counter()
+                        for q_idx in range(n_queries):
+                            results_indices.append(adapter.query(query_vecs[q_idx], actual_k))
+                        elapsed_sec = time.perf_counter() - start_time
+                        indices_batch = np.array(results_indices, dtype=np.int64)
 
-                    search_time_us = elapsed_sec * 1e6
-                    time_us_per_query = int(search_time_us / max(n_queries, 1))
-                    qps = n_queries / max(elapsed_sec, 1e-9)
-                    hits = 0
-                    total_returned = n_queries * actual_k
-                    if gt_distances is not None:
-                        # Official VIBE distance-tolerance recall calculation
-                        dist_fn = _VIBE_METRICS.get(metric_str.lower().strip(), _ip_distance)
-                        for i in range(n_queries):
-                            t = gt_distances[i, actual_k - 1] + 1e-3
-                            ret_vecs = base_vecs[indices_batch[i, :actual_k]]
-                            pred_dists = dist_fn(query_vecs[i], ret_vecs)
-                            hits += int((pred_dists <= t).sum())
-                    else:
-                        for i in range(n_queries):
-                            gt_set = set(gt_vecs[i, :actual_k])
-                            ret_set = set(indices_batch[i, :actual_k])
-                            hits += len(gt_set.intersection(ret_set))
+                        search_time_us = elapsed_sec * 1e6
+                        time_us_per_query = int(search_time_us / max(n_queries, 1))
+                        qps = n_queries / max(elapsed_sec, 1e-9)
+                        hits = 0
+                        total_returned = n_queries * actual_k
+                        if gt_distances is not None:
+                            # Official VIBE distance-tolerance recall calculation
+                            dist_fn = _VIBE_METRICS.get(metric_str.lower().strip(), _ip_distance)
+                            for i in range(n_queries):
+                                t = gt_distances[i, actual_k - 1] + 1e-3
+                                valid_indices = indices_batch[i, :actual_k]
+                                valid_mask = valid_indices < len(base_vecs)
+                                if np.any(valid_mask):
+                                    ret_vecs = base_vecs[valid_indices[valid_mask]]
+                                    pred_dists = dist_fn(query_vecs[i], ret_vecs)
+                                    hits += int((pred_dists <= t).sum())
+                        else:
+                            for i in range(n_queries):
+                                gt_set = set(gt_vecs[i, :actual_k])
+                                ret_set = set(indices_batch[i, :actual_k]) - {4294967295, -1}
+                                hits += len(gt_set.intersection(ret_set))
 
-                    recall = hits / max(total_returned, 1)
-                    anns_recalls.append(recall)
-                    anns_qps.append(qps)
-                    is_ef = val > 1.0
-                    param_tag = f"ef={int(round(val))}" if is_ef else f"eps={val:g}"
-                    anns_params.append(param_tag)
+                        recall = hits / max(total_returned, 1)
+                        anns_recalls.append(recall)
+                        anns_qps.append(qps)
+                        is_ef = (param_type == "ef")
+                        param_tag = f"ef={int(round(val))}" if is_ef else f"eps={val:g}"
+                        anns_params.append(param_tag)
 
-                    lbl = f"ef  {int(round(val)):4d}" if is_ef else f"eps {val:6.3f}"
-                    print(
-                        f"  {lbl} \trecall@{actual_k}: {recall:.5f} \t{time_us_per_query:6d} us/query \t{qps:9.1f} QPS \tsearch time: {int(search_time_us / 1000):6d}ms"
-                    )
-
-                    if not args.no_stop and linear_baseline_us > 0 and time_us_per_query > linear_baseline_us:
+                        lbl = f"ef  {int(round(val)):4d}" if is_ef else f"eps {val:6.3f}"
                         print(
-                            f"  ABORTED ({time_us_per_query}us/query > {int(linear_baseline_us)}us baseline)"
+                            f"  {lbl} \trecall@{actual_k}: {recall:.5f} \t{time_us_per_query:6d} us/query \t{qps:9.1f} QPS \tsearch time: {int(search_time_us / 1000):6d}ms"
                         )
-                        break
 
-                    if recall > 0.999:
-                        print("  Reached recall > 0.999, stopping further test iterations for this configuration.")
-                        break
+                        if not args.no_stop and linear_baseline_us > 0 and time_us_per_query > linear_baseline_us:
+                            print(
+                                f"  ABORTED {param_type.upper()} ({time_us_per_query}us/query > {int(linear_baseline_us)}us baseline)"
+                            )
+                            break
+
+                        if recall > 0.999:
+                            print(f"  Reached recall > 0.999 for {param_type.upper()}, stopping further {param_type.upper()} iterations.")
+                            break
 
                 results_series.append(
                     {

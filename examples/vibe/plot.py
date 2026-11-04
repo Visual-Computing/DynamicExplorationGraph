@@ -80,7 +80,21 @@ def export_interactive_html(
         r, g, b = colorsys.hls_to_rgb(hue, lightness, saturation)
         hex_color = f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
 
-        dash = "dash" if is_pruned else "solid"
+        algo_raw = str(entry.get("algo", "")).lower().strip()
+        query_dt_raw = str(entry.get("query_dtype", "")).lower().strip()
+        if "evp" in algo_raw or "evp" in query_dt_raw:
+            algo_key = "deg-evp"
+            algo_display = "DEG-EVP"
+            dash = "longdashdot" if is_pruned else "dot"
+        elif "qg" in algo_raw or "int8" in query_dt_raw:
+            algo_key = "deg-qg"
+            algo_display = "DEG-QG"
+            dash = "dashdot" if is_pruned else "dash"
+        else:
+            algo_key = "deg"
+            algo_display = "DEG"
+            dash = "dash" if is_pruned else "solid"
+
         symbol = rerank_symbols.get(r_factor, "circle")
         display_opt = (
             "StreamingData"
@@ -97,7 +111,7 @@ def export_interactive_html(
         for idx, (x, y) in enumerate(zip(recalls, qps)):
             param_str = f"Param: {search_params[idx]}<br>" if idx < len(search_params) and search_params[idx] else ""
             hover_texts.append(
-                f"<b>{display_opt} (K={k})</b><br>"
+                f"<b>{algo_display} &bull; {display_opt} (K={k})</b><br>"
                 f"{query_info}"
                 f"Status: {prune_txt}<br>"
                 f"Rerank: {rerank_txt}<br>"
@@ -107,8 +121,8 @@ def export_interactive_html(
             )
 
         trace_dtype_str = f", {query_dt}" if query_dt else ""
-        trace_name = f"{display_opt} K={k} ({prune_txt}, {rerank_txt}{trace_dtype_str})"
-        legend_group = f"{display_opt}"
+        trace_name = f"{algo_display} {display_opt} K={k} ({prune_txt}, {rerank_txt}{trace_dtype_str})"
+        legend_group = f"{algo_display}_{display_opt}"
 
         data_traces.append(
             {
@@ -123,6 +137,7 @@ def export_interactive_html(
                 "marker": {"symbol": symbol, "size": 7, "color": hex_color},
                 "showlegend": True,
                 "_meta": {
+                    "algo": algo_key,
                     "opt_target": opt_target,
                     "k": k,
                     "is_pruned": is_pruned,
@@ -175,6 +190,34 @@ def export_interactive_html(
     }
 
     # 2. Build dynamic HTML sections based only on available data
+    # Section 0: Algorithms & Line Styles
+    all_algos = []
+    for entry in results_series:
+        a_raw = str(entry.get("algo", "")).lower().strip()
+        q_raw = str(entry.get("query_dtype", "")).lower().strip()
+        a_key = "deg-evp" if ("evp" in a_raw or "evp" in q_raw) else ("deg-qg" if ("qg" in a_raw or "int8" in q_raw) else "deg")
+        if a_key not in all_algos:
+            all_algos.append(a_key)
+
+    ALGO_CONFIG = {
+        "deg": ("Solid (―)", "border-top: 2.5px solid #e2e8f0;", "DEG (Float32)"),
+        "deg-qg": ("Dashed (--)", "border-top: 2.5px dashed #e2e8f0;", "DEG-QG (Int8)"),
+        "deg-evp": ("Dotted (···)", "border-top: 2.5px dotted #e2e8f0;", "DEG-EVP (Sparse)"),
+    }
+    algo_html_rows = ""
+    algo_js_obj = {}
+    for a in all_algos:
+        style_desc, css_style, label = ALGO_CONFIG.get(a, ("Solid", "border-top: 2.5px solid #e2e8f0;", a.upper()))
+        algo_html_rows += f"""
+                <div class="legend-row" id="algo-{a}" onclick="toggleFilter('algo', '{a}')">
+                    <span class="legend-label">
+                        <span class="line-sample" style="{css_style}"></span>
+                        {label}
+                    </span>
+                    <span style="font-size: 11px; color: #94a3b8;">{style_desc}</span>
+                </div>"""
+        algo_js_obj[a] = True
+
     # Section A: Optimization Targets
     opt_html_rows = ""
     opt_js_obj = {}
@@ -202,17 +245,17 @@ def export_interactive_html(
     if has_pruned and has_unpruned:
         prune_html_section = """
             <div>
-                <div class="section-title">Pruning Status</div>
+                <div class="section-title">Pruning Status (Compound Lines)</div>
                 <div class="legend-row" id="prune-false" onclick="toggleFilter('prune', false)">
                     <span class="legend-label">
                         <span class="line-sample" style="border-top: 2.5px solid #e2e8f0;"></span>
-                        Unpruned Graph
+                        Unpruned (Base Style)
                     </span>
                 </div>
                 <div class="legend-row" id="prune-true" onclick="toggleFilter('prune', true)">
                     <span class="legend-label">
-                        <span class="line-sample" style="border-top: 2.5px dashed #e2e8f0;"></span>
-                        MRNG Pruned Graph
+                        <span class="line-sample" style="border-top: 2.5px double #e2e8f0;"></span>
+                        MRNG Pruned (+Alternating Dash)
                     </span>
                 </div>
             </div>"""
@@ -390,6 +433,12 @@ def export_interactive_html(
                 <span style="font-size: 11px; color: #64748b;">Click to Filter</span>
             </div>
 
+            <!-- Algorithm Line Styles -->
+            <div>
+                <div class="section-title">Algorithm &bull; Line Pattern</div>
+                {algo_html_rows}
+            </div>
+
             <!-- Optimization Targets -->
             <div>
                 <div class="section-title">Optimization Target</div>
@@ -432,6 +481,7 @@ def export_interactive_html(
 
         // Dynamic active filters matching available data
         const activeFilters = {{
+            algo: {json.dumps(algo_js_obj)},
             opt: {json.dumps(opt_js_obj)},
             prune: {json.dumps(prune_js_obj)},
             k: {json.dumps(k_js_obj)},
@@ -444,13 +494,14 @@ def export_interactive_html(
             const update = {{ visible: [] }};
             rawTraces.forEach(t => {{
                 const meta = t._meta;
+                const algoVisible = activeFilters.algo[meta.algo] !== false;
                 const optVisible = activeFilters.opt[meta.opt_target] !== false;
                 const pruneVisible = activeFilters.prune[meta.is_pruned.toString()] !== false;
                 const kVisible = activeFilters.k[meta.k.toString()] !== false;
                 const rerankKey = String(parseFloat(Number(meta.rerank_factor).toFixed(4)));
                 const rerankVisible = activeFilters.rerank[rerankKey] !== false;
 
-                const isVisible = optVisible && pruneVisible && kVisible && rerankVisible;
+                const isVisible = algoVisible && optVisible && pruneVisible && kVisible && rerankVisible;
                 update.visible.push(isVisible ? true : false);
             }});
             Plotly.restyle('plot', update);
@@ -524,6 +575,8 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
     current_qps = []
     current_params = []
 
+    re_algo = re.compile(r"---\s*\[\d+/\d+\]\s*Processing Algorithm\s*['\"]([^'\"]+)['\"]", re.IGNORECASE)
+    current_algo = None
     re_dataset = re.compile(r"Selected VIBE Dataset:\s*([^\r\n]+)", re.IGNORECASE)
     re_space = re.compile(r"Vector Space Type:\s*FloatSpace\s*\(([^)]+)\)", re.IGNORECASE)
     re_dtypes = re.compile(r"Query Dtype:\s*([a-zA-Z0-9_-]+)", re.IGNORECASE)
@@ -559,6 +612,7 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
         if current_config is not None and current_recalls and current_qps:
             results_series.append(
                 {
+                    "algo": current_config.get("algo", current_algo or "deg"),
                     "opt_target": current_config["opt_target"],
                     "k": current_config["k"],
                     "query_dtype": current_config.get("query_dtype", file_query_dtype),
@@ -576,6 +630,10 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
     with open(log_path, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
             line_str = line.strip()
+
+            m_algo = re_algo.search(line_str)
+            if m_algo:
+                current_algo = m_algo.group(1).lower().strip()
 
             m = re_dataset.search(line_str)
             if m:
@@ -600,6 +658,7 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
                 is_pruned = (m.group(3).lower() == "true")
                 q_dtype = m.group(4).strip().lower()
                 current_config = {
+                    "algo": current_algo or ("deg-evp" if q_dtype == "evp" else ("deg-qg" if q_dtype == "int8" else "deg")),
                     "k": k,
                     "opt_target": opt_target,
                     "is_pruned": is_pruned,
@@ -679,6 +738,8 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
                     param_val = f"ef={int(round(val))}" if val > 1.0 else f"eps={val:g}"
                 recall = float(m.group(4))
                 qps = float(m.group(5))
+                current_recalls.append(recall)
+                current_qps.append(qps)
                 current_params.append(param_val)
 
     save_current_series()

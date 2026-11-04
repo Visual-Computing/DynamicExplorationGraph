@@ -95,6 +95,30 @@ VIBE_DATASETS: Dict[str, Dict[str, Any]] = {
         "dim": 384,
         "size": 677305,
     },
+    "inaturalist-resnet": {
+        "name": "iNaturalist-resnet",
+        "file": "inaturalist-resnet-2048-cosine.hdf5",
+        "metric": "cosine",
+        "type": "out-of-distribution",
+        "dim": 2048,
+        "size": 499000,
+    },
+    "cqadupstack-lemur": {
+        "name": "CQADupStack-lemur",
+        "file": "cqadupstack-lemur-2048-ip.hdf5",
+        "metric": "ip",
+        "type": "out-of-distribution",
+        "dim": 2048,
+        "size": 457149,
+    },
+    "cqadupstack-muvera": {
+        "name": "CQADupStack-muvera",
+        "file": "cqadupstack-muvera-5120-ip.hdf5",
+        "metric": "ip",
+        "type": "out-of-distribution",
+        "dim": 5120,
+        "size": 457149,
+    },
 }
 
 ALIAS_MAP: Dict[str, str] = {
@@ -117,6 +141,18 @@ ALIAS_MAP: Dict[str, str] = {
     "yandex-200": "yandex",
     "yahoo": "yahoo-minilm",
     "yahoo-minilm": "yahoo-minilm",
+    "inaturalist": "inaturalist-resnet",
+    "inaturalist-resnet": "inaturalist-resnet",
+    "inaturalist-resnet-2048": "inaturalist-resnet",
+    "inaturalist-resnet-2048-cosine": "inaturalist-resnet",
+    "cqadupstack-lemur": "cqadupstack-lemur",
+    "cqadupstack-lemur-2048": "cqadupstack-lemur",
+    "cqadupstack-lemur-2048-ip": "cqadupstack-lemur",
+    "lemur": "cqadupstack-lemur",
+    "cqadupstack-muvera": "cqadupstack-muvera",
+    "cqadupstack-muvera-5120": "cqadupstack-muvera",
+    "cqadupstack-muvera-5120-ip": "cqadupstack-muvera",
+    "muvera": "cqadupstack-muvera",
 }
 
 

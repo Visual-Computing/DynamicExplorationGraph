@@ -34,6 +34,7 @@ def load_vibe_config(config_path: Path | None = None) -> List[Dict[str, Any]]:
                     "k_list": args.get("k", [30]),
                     "opt_target_list": args.get("opt_target", ["LowLID"]),
                     "prune_non_mrng_list": args.get("prune_non_mrng", [False]),
+                    "non_zeros_list": args.get("non_zeros", [0]),
                     "eps_or_ef_list": [float(v) for v in raw_search_vals],
                     "rerank_size_factors": query_args.get("rerank_size_factor", [1.0]),
                 }
@@ -63,10 +64,11 @@ def get_config_grid_presets(dataset_key: str, algorithm_name: str | None = None)
             if target_name not in resolved_opt_targets:
                 resolved_opt_targets.append(target_name)
 
-        for opt_target, k, prune_non_mrng in itertools.product(
+        for opt_target, k, prune_non_mrng, non_zeros in itertools.product(
             resolved_opt_targets,
             alg["k_list"],
             alg["prune_non_mrng_list"],
+            alg.get("non_zeros_list", [0]),
         ):
             grid.append(
                 {
@@ -75,6 +77,7 @@ def get_config_grid_presets(dataset_key: str, algorithm_name: str | None = None)
                     "k": k,
                     "optimization_target": opt_target,
                     "prune_non_mrng": prune_non_mrng,
+                    "non_zeros": non_zeros,
                     "anns_k": 100,
                     "eps_or_ef_list": alg["eps_or_ef_list"],
                     "rerank_size_factors": alg["rerank_size_factors"],

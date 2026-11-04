@@ -20,6 +20,44 @@ _METRIC_MAP = {
 }
 
 
+def _resolve_presort_cache_path(
+    metric: str,
+    n_vectors: int,
+    dims: int,
+    cache_dir: Path | None = None,
+) -> Path:
+    """Resolves cache path for presort indices (one per dataset+metric)."""
+    dataset_name = f"corpus_{n_vectors}_{dims}d"
+    if cache_dir is None:
+        try:
+            from dataset import VIBE_DATASETS, get_default_cache_dir
+
+            cache_dir = get_default_cache_dir()
+            for key, meta in VIBE_DATASETS.items():
+                if meta.get("dim") == dims and abs(meta.get("size", 0) - n_vectors) < 1000:
+                    dataset_name = key
+                    break
+        except ImportError:
+            cache_dir = Path.home() / ".cache" / "deg_datasets"
+    else:
+        try:
+            from dataset import VIBE_DATASETS
+
+            for key, meta in VIBE_DATASETS.items():
+                if meta.get("dim") == dims and abs(meta.get("size", 0) - n_vectors) < 1000:
+                    dataset_name = key
+                    break
+        except ImportError:
+            pass
+
+    deg_dir = cache_dir / dataset_name / "deg"
+    deg_dir.mkdir(parents=True, exist_ok=True)
+
+    presort_metric = "l2" if metric == "euclidean" else "ip"
+    filename = f"{dims}D_{presort_metric}_presort.npy"
+    return deg_dir / filename
+
+
 def _resolve_graph_cache_path(
     metric: str,
     k: int,
@@ -122,19 +160,32 @@ class DEG(BaseANN):
             cache_dir=cache_dir,
         )
 
+        presort_file = _resolve_presort_cache_path(
+            metric=self.metric,
+            n_vectors=n_vectors,
+            dims=dims,
+            cache_dir=cache_dir,
+        )
+
         if cache_file.exists():
             print(f"Loading cached DEG graph from {cache_file}...", flush=True)
             load_fn = deglib.load_mutable_graph if self.prune_non_mrng else deglib.load_readonly_graph
             graph = load_fn(str(cache_file))
         else:
             # 1. FLAS 1D Pre-sorting
-            print(f"Running FLAS 1D Pre-sorting (threads={self.threads})...", flush=True)
-            sorted_indices = deglib.optimization.presort(
-                X,
-                metric=self.metric_enum,
-                threads=self.threads,
-                show_progress=True,
-            )
+            if presort_file.exists():
+                print(f"Loading cached presort from {presort_file}...", flush=True)
+                sorted_indices = np.load(str(presort_file))
+            else:
+                print(f"Running FLAS 1D Pre-sorting (threads={self.threads})...", flush=True)
+                sorted_indices = deglib.optimization.presort(
+                    X,
+                    metric=self.metric_enum,
+                    threads=self.threads,
+                    show_progress=True,
+                )
+                print(f"Saving presort to cache {presort_file}...", flush=True)
+                np.save(str(presort_file), sorted_indices)
 
             # 2. Build graph in FP32
             print(f"Building DEG graph (K={self.k}, Opt={self.opt_target}, threads={self.threads})...", flush=True)
@@ -238,6 +289,13 @@ class QG(BaseANN):
             cache_dir=cache_dir,
         )
 
+        presort_file = _resolve_presort_cache_path(
+            metric=self.metric,
+            n_vectors=n_vectors,
+            dims=dims,
+            cache_dir=cache_dir,
+        )
+
         if cache_file.exists():
             print(f"Loading cached DEG graph from {cache_file}...", flush=True)
             load_fn = deglib.load_mutable_graph if self.prune_non_mrng else deglib.load_readonly_graph
@@ -246,13 +304,19 @@ class QG(BaseANN):
             X_graph_order = X[loaded_graph.get_labels()]
         else:
             # 1. FLAS 1D Pre-sorting
-            print(f"Running FLAS 1D Pre-sorting (threads={self.threads})...", flush=True)
-            sorted_indices = deglib.optimization.presort(
-                X,
-                metric=self.base_metric,
-                threads=self.threads,
-                show_progress=True,
-            )
+            if presort_file.exists():
+                print(f"Loading cached presort from {presort_file}...", flush=True)
+                sorted_indices = np.load(str(presort_file))
+            else:
+                print(f"Running FLAS 1D Pre-sorting (threads={self.threads})...", flush=True)
+                sorted_indices = deglib.optimization.presort(
+                    X,
+                    metric=self.base_metric,
+                    threads=self.threads,
+                    show_progress=True,
+                )
+                print(f"Saving presort to cache {presort_file}...", flush=True)
+                np.save(str(presort_file), sorted_indices)
 
             # Standard static workflow: sort data once so builder, quantizer, and reranker all share the same array
             X_graph_order = X[sorted_indices]
@@ -324,5 +388,161 @@ class QG(BaseANN):
             )
         return (
             f"DEG-QG(k={self.k}, opt={self.opt_target}, prune_mrng={self.prune_non_mrng}, "
+            f"rerank_factor={self.rerank_size_factor}, eps={self.eps_or_ef})"
+        )
+
+
+class EVP(BaseANN):
+    """
+    Extreme Vector Quantized DEG (DEG-EVP): Graph search with EVP (1-bit/ternary) vectors and FP16 reranking.
+    """
+
+    def __init__(
+        self,
+        metric: str,
+        k: int = 30,
+        opt_target: str = "LowLID",
+        prune_non_mrng: bool = False,
+        threads: int = 1,
+        non_zeros: int = 0,
+    ):
+        self.metric = metric.lower().strip()
+        if self.metric not in _METRIC_MAP:
+            raise ValueError(f"Unsupported metric '{self.metric}'. Choose from: {list(_METRIC_MAP.keys())}")
+
+        self.k = int(k)
+        self.opt_target = opt_target
+        self.prune_non_mrng = bool(prune_non_mrng)
+        self.threads = int(threads)
+        self.non_zeros = int(non_zeros)
+        self.rerank_size_factor = 1.0
+        self.search_eps = 0.0
+        self.ef = 0
+
+        self.base_metric, _, self.fp16_metric = _METRIC_MAP[self.metric]
+        self.opt_enum = deglib.builder.OptimizationTarget[self.opt_target]
+
+        self.graph = None
+        self.searcher = None
+        self.quantizer = None
+        self.rerank_space_fp16 = None
+
+    def fit(self, X: np.ndarray, cache_dir: Path | None = None):
+        """Builds DEG graph, quantizes vectors using EVP Quantizer, and prepares C++ searcher."""
+        if self.metric == "cosine":
+            X = X / np.linalg.norm(X, axis=1)[:, np.newaxis]
+        X = np.ascontiguousarray(X, dtype=np.float32)
+        n_vectors, dims = X.shape
+
+        self.rerank_space_fp16 = deglib.FloatSpace.create(dim=dims, metric=self.fp16_metric)
+
+        cache_file = _resolve_graph_cache_path(
+            metric=self.metric,
+            k=self.k,
+            opt_target=self.opt_target,
+            n_vectors=n_vectors,
+            dims=dims,
+            cache_dir=cache_dir,
+        )
+
+        presort_file = _resolve_presort_cache_path(
+            metric=self.metric,
+            n_vectors=n_vectors,
+            dims=dims,
+            cache_dir=cache_dir,
+        )
+
+        if cache_file.exists():
+            print(f"Loading cached DEG graph from {cache_file}...", flush=True)
+            load_fn = deglib.load_mutable_graph if self.prune_non_mrng else deglib.load_readonly_graph
+            loaded_graph = load_fn(str(cache_file))
+            X_graph_order = X[loaded_graph.get_labels()]
+        else:
+            # 1. FLAS 1D Pre-sorting
+            if presort_file.exists():
+                print(f"Loading cached presort from {presort_file}...", flush=True)
+                sorted_indices = np.load(str(presort_file))
+            else:
+                print(f"Running FLAS 1D Pre-sorting (threads={self.threads})...", flush=True)
+                sorted_indices = deglib.optimization.presort(
+                    X,
+                    metric=self.base_metric,
+                    threads=self.threads,
+                    show_progress=True,
+                )
+                print(f"Saving presort to cache {presort_file}...", flush=True)
+                np.save(str(presort_file), sorted_indices)
+
+            X_graph_order = X[sorted_indices]
+
+            # 2. Build graph in FP32
+            print(f"Building DEG graph (K={self.k}, Opt={self.opt_target}, threads={self.threads})...", flush=True)
+            graph = deglib.builder.build_from_data(
+                data=X_graph_order,
+                labels=sorted_indices,
+                edges_per_vertex=self.k,
+                metric=self.base_metric,
+                seed=7,
+                optimization_target=self.opt_enum,
+                thread_count=self.threads,
+                show_progress=True,
+            )
+
+            print(f"Saving graph to cache {cache_file}...", flush=True)
+            graph.save_graph(str(cache_file))
+            loaded_graph = graph
+
+        # 3. Optional MRNG edge pruning
+        if self.prune_non_mrng:
+            deglib.optimization.prune_non_mrng_edges(loaded_graph, num_threads=1)
+
+        # 4. Finalize ReadOnlyGraph with EVP features
+        # If self.non_zeros == 0, EvpQuantizer::fit() in C++ automatically calibrates the optimal nz value.
+        self.quantizer = deglib.transformation.EvpQuantizer(dims, self.non_zeros)
+        self.quantizer.fit(X)
+        print(f"Quantizing with EVP (dim={dims}, non_zeros={self.quantizer.non_zeros} [~{self.quantizer.non_zeros/dims*100:.1f}%])...", flush=True)
+        evp_features = self.quantizer.quantize(X_graph_order, num_threads=self.threads)
+        target_space = deglib.FloatSpace.create(dim=dims, metric=deglib.Metric.EVP_InnerProduct)
+        self.graph = loaded_graph.to_readonly(target_space, evp_features, transformations=[self.quantizer])
+
+        # 5. Initialize C++ Zero-overhead Searcher with FP16 base vectors
+        self.searcher = deglib.search.create_searcher(
+            graph=self.graph,
+            rerank_space=self.rerank_space_fp16,
+            rerank_data=deglib.distances.floats_to_fp16(X_graph_order),
+        )
+
+        # 6. Optimize entry vertices and prefetch values
+        t_km = time.time()
+        self.searcher.optimize()
+        print(f"Optimized Searcher for EVP graph in {time.time() - t_km:.2f}s", flush=True)
+
+    def set_query_arguments(self, eps_or_ef: float | int, rerank_size_factor: float = 1.0):
+        """Sets query-time parameters: values >= 1.0 are treated as ef, < 1.0 as eps."""
+        self.rerank_size_factor = float(rerank_size_factor)
+        self.eps_or_ef = float(eps_or_ef)
+
+    def query(self, v: np.ndarray, n: int) -> np.ndarray:
+        """Single query search on 1 thread with EVP search and FP16 reranking."""
+        if self.metric == "cosine":
+            v = v / np.linalg.norm(v)
+        return self.searcher.search(
+            np.ascontiguousarray(v, dtype=np.float32),
+            k=n,
+            eps_or_ef=self.eps_or_ef,
+            rerank_factor=self.rerank_size_factor,
+            threads=1,
+            return_distances=False,
+            unsorted=True,
+        )
+
+    def __str__(self) -> str:
+        if self.eps_or_ef >= 1.0:
+            return (
+                f"DEG-EVP(k={self.k}, nz={self.non_zeros}, opt={self.opt_target}, prune_mrng={self.prune_non_mrng}, "
+                f"rerank_factor={self.rerank_size_factor}, ef={int(round(self.eps_or_ef))})"
+            )
+        return (
+            f"DEG-EVP(k={self.k}, nz={self.non_zeros}, opt={self.opt_target}, prune_mrng={self.prune_non_mrng}, "
             f"rerank_factor={self.rerank_size_factor}, eps={self.eps_or_ef})"
         )
