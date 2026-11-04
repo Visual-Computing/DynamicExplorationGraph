@@ -287,31 +287,7 @@ class Searcher {
     )
         : graph_(&graph), transformations_(std::move(transformations)), entry_selector_(graph), reranker_(std::move(reranker)) {}
 
-    /**
-     * Constructs a Searcher with query transformations and an optional candidate reranker.
-     *
-     * @param graph           Underlying graph to search. Results are mapped back to external labels.
-     * @param transformations Feature transformations (e.g. quantizers) applied to incoming query vectors.
-     * @param reranker        Optional reranker. If provided, its base_vectors must follow the
-     *                        graph's internal index order (0 .. size()-1, see graph.getExternalLabels()).
-     */
-    Searcher(
-        const deglib::graph::InternalGraph& graph,
-        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
-        std::optional<Reranker> reranker
-    )
-        : graph_(&graph), transformations_(std::move(transformations)), entry_selector_(graph), reranker_(std::move(reranker)) {}
-
   public:
-    // --- Accessors ---
-
-    const deglib::graph::InternalGraph& get_graph() const noexcept { return *graph_; }
-    const KMeansEntrySelector& get_entry_selector() const noexcept { return entry_selector_; }
-    KMeansEntrySelector& get_entry_selector() noexcept { return entry_selector_; }
-    const std::optional<Reranker>& get_reranker() const noexcept { return reranker_; }
-    std::optional<Reranker>& get_reranker() noexcept { return reranker_; }
-    const std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>& get_transformations() const noexcept { return transformations_; }
-
     // --- Raw Buffer Single-Query Search ---
 
     uint32_t search_f32(
@@ -590,6 +566,8 @@ class Searcher {
      * 1. K-Means medoids for query routing (trained on float base vectors if available, else FP32 graph features).
      * 2. Candidate reranker prefetch lookahead (po, pl) auto-tuning.
      * 3. Graph traversal prefetch (po, pl, nl) auto-tuning.
+     *
+     * `n_clusters` is limited to 512 entry medoids. `sample_size` controls how many graph/base rows are sampled for K-Means candidates.
      */
     void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 0, uint32_t k = 100, uint32_t seed = 42, size_t threads = 0) {
         if (!graph_ || graph_->size() == 0) return;
@@ -597,50 +575,53 @@ class Searcher {
         if (threads == 0) threads = std::max<size_t>(1, std::thread::hardware_concurrency());
 
         // 1. K-Means medoids query-routing selection
+        const size_t actual_sample = sample_size == 0 ? std::min<size_t>(n, std::max<size_t>(1000, n * 3 / 100)) : std::min(sample_size, n);
+        std::vector<uint32_t> candidate_ids(n);
+        std::iota(candidate_ids.begin(), candidate_ids.end(), 0);
+        std::mt19937 rng(seed);
+        std::shuffle(candidate_ids.begin(), candidate_ids.end(), rng);
+        candidate_ids.resize(actual_sample);
+
+        auto fit_candidates = [&](std::span<const float* const> rows, uint32_t dim, bool is_l2) {
+            entry_selector_.fit(rows, candidate_ids, dim, is_l2, n_clusters, n_iter, seed, threads);
+        };
+
         if (reranker_.has_value() && reranker_->getBaseVectors() != nullptr && reranker_->getNumBaseVectors() >= n) {
             const auto& r_space = reranker_->getSpace();
             const uint32_t dim = r_space.dim();
             const bool is_l2 = r_space.metric().get_distance_kind() == deglib::distances::MetricDistanceKind::L2;
             const size_t byte_stride = r_space.get_data_size();
 
-            const size_t actual_sample = sample_size == 0 ? std::min<size_t>(n, std::max<size_t>(1000, n * 3 / 100)) : std::min(sample_size, n);
-            std::vector<uint32_t> sample_indices(n);
-            std::iota(sample_indices.begin(), sample_indices.end(), 0);
-            std::mt19937 rng(seed);
-            std::shuffle(sample_indices.begin(), sample_indices.end(), rng);
-            sample_indices.resize(actual_sample);
-
             if (byte_stride == dim * sizeof(float)) {
                 const float* base_f32 = static_cast<const float*>(reranker_->getBaseVectors());
                 std::vector<const float*> rows(actual_sample);
                 for (size_t i = 0; i < actual_sample; ++i) {
-                    rows[i] = base_f32 + static_cast<size_t>(sample_indices[i]) * dim;
+                    rows[i] = base_f32 + static_cast<size_t>(candidate_ids[i]) * dim;
                 }
-                entry_selector_.fit(rows, dim, is_l2, n_clusters, n_iter, seed, threads);
-                auto medoids = entry_selector_.entries();
-                for (auto& m : medoids) {
-                    if (m < sample_indices.size()) m = sample_indices[m];
-                }
-                entry_selector_.set_entries(std::move(medoids));
+                fit_candidates(rows, dim, is_l2);
             } else if (byte_stride == dim * sizeof(uint16_t)) {
                 const uint16_t* base_f16 = static_cast<const uint16_t*>(reranker_->getBaseVectors());
                 std::vector<float> decoded(actual_sample * dim);
                 deglib::concurrent::parallel_for(0, actual_sample, threads, [&](size_t i, size_t) {
-                    deglib::distances::fp16::fp16_to_floats(base_f16 + static_cast<size_t>(sample_indices[i]) * dim, decoded.data() + i * dim, dim);
+                    deglib::distances::fp16::fp16_to_floats(base_f16 + static_cast<size_t>(candidate_ids[i]) * dim, decoded.data() + i * dim, dim);
                 });
                 std::vector<const float*> rows(actual_sample);
                 for (size_t i = 0; i < actual_sample; ++i) {
                     rows[i] = decoded.data() + i * dim;
                 }
-                entry_selector_.fit(rows, dim, is_l2, n_clusters, n_iter, seed, threads);
-                auto medoids = entry_selector_.entries();
-                for (auto& m : medoids) {
-                    if (m < sample_indices.size()) m = sample_indices[m];
-                }
-                entry_selector_.set_entries(std::move(medoids));
+                fit_candidates(rows, dim, is_l2);
             }
         } else {
-            entry_selector_.optimize(n_clusters, n_iter, sample_size, seed, threads);
+            const auto& graph_space = graph_->getFeatureSpace();
+            if (graph_space.metric().get_data_type() == deglib::distances::MetricDataType::FP32) {
+                const uint32_t dim = graph_space.dim();
+                const bool is_l2 = graph_space.metric().get_distance_kind() == deglib::distances::MetricDistanceKind::L2;
+                std::vector<const float*> rows(actual_sample);
+                for (size_t i = 0; i < actual_sample; ++i) {
+                    rows[i] = reinterpret_cast<const float*>(graph_->getFeatureVector(candidate_ids[i]));
+                }
+                fit_candidates(rows, dim, is_l2);
+            }
         }
 
         // 2. Candidate reranker prefetch auto-tuning
@@ -660,21 +641,8 @@ class Searcher {
 
 inline std::unique_ptr<Searcher> make_searcher(const deglib::graph::InternalGraph& graph) { return std::make_unique<Searcher>(graph); }
 
-inline std::unique_ptr<Searcher>
-make_searcher(const deglib::graph::InternalGraph& graph, std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations) {
-    return std::make_unique<Searcher>(graph, std::move(transformations));
-}
-
 inline std::unique_ptr<Searcher> make_searcher(const deglib::graph::InternalGraph& graph, Reranker reranker) {
     return std::make_unique<Searcher>(graph, std::move(reranker));
-}
-
-inline std::unique_ptr<Searcher> make_searcher(
-    const deglib::graph::InternalGraph& graph,
-    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
-    Reranker reranker
-) {
-    return std::make_unique<Searcher>(graph, std::move(transformations), std::move(reranker));
 }
 
 // Convenience wrapper accepting concrete FeatureTransformation instances directly

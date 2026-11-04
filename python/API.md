@@ -343,7 +343,7 @@ class Reranker:
 class Searcher:
     # Constructor via create_searcher(graph, rerank_space=None, rerank_data=None)
 
-    # Entry vertex optimization via k-means medoids
+    # Entry vertex optimization via k-means medoids (n_clusters maximum 512)
     optimize(n_clusters=256, n_iter=20, sample_size=0, k=100, seed=7, num_threads=1)
 
     # Search for nearest neighbors of a single query (1D) or a batch of queries (2D).

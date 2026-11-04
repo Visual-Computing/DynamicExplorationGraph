@@ -400,3 +400,37 @@ TEST(SearcherTest, DynamicExplorationGraphWithTransformationMakeSearcher) {
     EXPECT_EQ(res2.indices[0], 5u);
     EXPECT_NEAR(res2.distances[0], 0.0f, 1e-4f);
 }
+
+TEST(SearcherTest, KMeansEntrySelectorFitMapsIdsAndTunesPrefetch) {
+    const uint32_t dim = 4;
+    const uint32_t count = 20;
+
+    std::vector<float> data(count * dim);
+    for (size_t i = 0; i < data.size(); ++i) {
+        data[i] = static_cast<float>(i * 1.5f + 0.1f);
+    }
+
+    auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
+    deglib::search::KMeansEntrySelector selector(graph.internal());
+
+    const std::vector<const float*> one_row{data.data()};
+    const std::vector<uint32_t> one_id{0};
+    EXPECT_THROW(selector.fit(one_row, one_id, dim, true, deglib::search::KMeansEntrySelector::kMaxMedoids + 1, 1), std::invalid_argument);
+
+    const std::vector<const float*> rows{data.data(), data.data() + dim, data.data() + 2 * dim};
+    const std::vector<uint32_t> ids{10, 11, 12};
+    selector.fit(rows, ids, dim, true, 2, 1);
+
+    EXPECT_EQ(selector.size(), 2u);
+    for (const uint32_t entry : selector.entries()) {
+        EXPECT_GE(entry, 10u);
+        EXPECT_LE(entry, 12u);
+    }
+
+    auto q = std::span<const std::byte>(reinterpret_cast<const std::byte*>(data.data()), graph.getFeatureSpace().get_data_size());
+    const auto first = selector.top_entries(q, 2);
+    const auto second = selector.top_entries(q, 2);
+
+    EXPECT_EQ(first, second);
+    EXPECT_FALSE(first.empty());
+}

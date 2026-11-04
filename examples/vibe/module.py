@@ -356,7 +356,7 @@ class QG(BaseANN):
             rerank_data=deglib.distances.floats_to_fp16(X_graph_order),
         )
 
-        # 6. Optimize entry vertices and prefetch values
+        # 6. Full searcher optimization
         t_km = time.time()
         self.searcher.optimize()
         print(f"Optimized Searcher for the provided graph and hardware in {time.time() - t_km:.2f}s", flush=True)

@@ -219,7 +219,7 @@ class Searcher:
     ) -> None:
         """Select entry vertices via k-means medoids.
 
-        :param n_clusters: Number of entry vertices to select.
+        :param n_clusters: Number of entry vertices to select (maximum 512).
         :param n_iter: Number of k-means iterations.
         :param sample_size: Number of vertices sampled for clustering, 0 selects 3% of the graph size.
         :param k: Expected result count; sets the reranker and traversal prefetch tuning operating point.

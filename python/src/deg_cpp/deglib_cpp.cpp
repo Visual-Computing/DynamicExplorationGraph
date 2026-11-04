@@ -1921,7 +1921,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def(
             "optimize", &SearcherPy::optimize, py::arg("n_clusters") = 256, py::arg("n_iter") = 20, py::arg("sample_size") = 0, py::arg("k") = 100,
             py::arg("seed") = 7, py::arg("num_threads") = 1,
-            "Select entry vertices via k-means medoids.\n\nArgs:\n    n_clusters: number of entry vertices to select.\n    n_iter: number of k-means "
+            "Select entry vertices via k-means medoids.\n\nArgs:\n    n_clusters: number of entry vertices to select (maximum 512).\n    n_iter: number of k-means "
             "iterations.\n    sample_size: vertices sampled for clustering, 0 selects 3% of the graph size.\n    k: expected result count; sets the reranker "
             "and traversal prefetch tuning operating point.\n    seed: random seed for sampling and centroid init.\n    num_threads: worker threads, 0 selects "
             "a library default."
