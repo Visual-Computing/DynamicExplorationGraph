@@ -27,9 +27,6 @@
 
 namespace deglib::search {
 
-// Tag struct for callers migrating from older API versions
-struct NoQuantizer {};
-
 // Thread-local scratch workspace for query transformations and conversions
 struct QueryWorkspace {
     std::vector<float> f32_buf;
@@ -181,18 +178,26 @@ class Searcher {
 
         const uint32_t num_candidates =
             reranker_.has_value() ? std::max<uint32_t>(k, static_cast<uint32_t>(std::ceil(static_cast<float>(k) * std::max(1.0f, rerank_factor)))) : k;
+        const bool should_rerank = reranker_.has_value() && (num_candidates > k);
 
         if (use_ef) {
             auto ef_res = graph_->search_ef(query_span, entry_vertices, num_candidates, ef);
             if (ef_res.empty()) return 0;
 
-            if (reranker_.has_value()) {
-                std::vector<uint32_t> cand_indices(ef_res.size());
+            if (should_rerank) {
+                uint32_t stack_cand_indices[256];
+                std::unique_ptr<uint32_t[]> heap_cand_indices;
+                uint32_t* cand_indices = stack_cand_indices;
+                if (ef_res.size() > 256) {
+                    heap_cand_indices = std::make_unique<uint32_t[]>(ef_res.size());
+                    cand_indices = heap_cand_indices.get();
+                }
+
                 for (size_t i = 0; i < ef_res.size(); ++i) {
                     cand_indices[i] = ef_res[i].getIdentifier();
                 }
                 uint32_t found =
-                    reranker_->rerank(query, dim, cand_indices.data(), cand_indices.size(), k, out_indices, out_distances, return_distances, unsorted);
+                    reranker_->rerank(query, dim, cand_indices, ef_res.size(), k, out_indices, out_distances, return_distances, unsorted);
                 for (size_t i = 0; i < found; ++i) {
                     out_indices[i] = graph_->getExternalLabel(out_indices[i]);
                 }
@@ -213,13 +218,20 @@ class Searcher {
             auto heap_res = graph_->search(query_span, entry_vertices, num_candidates, eps);
             if (heap_res.empty()) return 0;
 
-            if (reranker_.has_value()) {
-                std::vector<uint32_t> cand_indices(heap_res.size());
+            if (should_rerank) {
+                uint32_t stack_cand_indices[256];
+                std::unique_ptr<uint32_t[]> heap_cand_indices;
+                uint32_t* cand_indices = stack_cand_indices;
+                if (heap_res.size() > 256) {
+                    heap_cand_indices = std::make_unique<uint32_t[]>(heap_res.size());
+                    cand_indices = heap_cand_indices.get();
+                }
+
                 for (size_t i = 0; i < heap_res.size(); ++i) {
                     cand_indices[i] = heap_res[i].getIdentifier();
                 }
                 uint32_t found =
-                    reranker_->rerank(query, dim, cand_indices.data(), cand_indices.size(), k, out_indices, out_distances, return_distances, unsorted);
+                    reranker_->rerank(query, dim, cand_indices, heap_res.size(), k, out_indices, out_distances, return_distances, unsorted);
                 for (size_t i = 0; i < found; ++i) {
                     out_indices[i] = graph_->getExternalLabel(out_indices[i]);
                 }
