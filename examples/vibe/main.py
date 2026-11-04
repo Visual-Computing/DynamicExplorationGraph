@@ -346,10 +346,14 @@ def main():
                             adapter.set_query_arguments(eps_or_ef=val)
 
                         results_indices = []
-                        start_time = time.perf_counter()
+                        total_query_sec = 0.0
                         for q_idx in range(n_queries):
-                            results_indices.append(adapter.query(query_vecs[q_idx], actual_k))
-                        elapsed_sec = time.perf_counter() - start_time
+                            t_start = time.perf_counter()
+                            candidates = adapter.query(query_vecs[q_idx], actual_k)
+                            total_query_sec += time.perf_counter() - t_start
+                            results_indices.append(np.array(candidates, dtype=np.int64, copy=True))
+
+                        elapsed_sec = total_query_sec
                         indices_batch = np.array(results_indices, dtype=np.int64)
 
                         search_time_us = elapsed_sec * 1e6
