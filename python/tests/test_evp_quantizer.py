@@ -116,3 +116,17 @@ class TestEvpQuantizerUnit:
         with pytest.raises(Exception):
             q.quantize(vecs)
 
+    def test_evp_quantizer_dequantize(self):
+        dim = 8
+        non_zeros = 4
+        q = deglib.transformation.EvpQuantizer(dim, non_zeros)
+        # Train on zeros so mean is 0
+        q.fit(np.zeros((10, dim), dtype=np.float32))
+
+        vec = np.array([[1.0, -1.0, 2.0, -2.0, 3.0, -3.0, 4.0, -4.0]], dtype=np.float32)
+        quantized = q.quantize(vec)
+        dequantized = q.dequantize(quantized)
+
+        expected = np.array([[0.0, 0.0, 0.0, 0.0, 1.0, -1.0, 1.0, -1.0]], dtype=np.float32)
+        np.testing.assert_allclose(dequantized, expected)
+

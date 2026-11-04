@@ -385,6 +385,8 @@ TEST(SearcherTest, DynamicExplorationGraphWithTransformationMakeSearcher) {
     auto searcher_no_reranker = deglib::make_searcher(ro_graph);
     ASSERT_NE(searcher_no_reranker, nullptr);
 
+    searcher_no_reranker->optimize(/*n_clusters=*/8, /*n_iter=*/3, /*sample_size=*/0, /*k=*/5, /*seed=*/7, /*threads=*/1);
+
     auto q = std::span<const float>(data.data() + 5 * dim, dim);
     auto res1 = searcher_no_reranker->search(q, 5, /*eps=*/0.2f, /*rerank_factor=*/1.0f, /*return_distances=*/true);
     EXPECT_GE(res1.size(), 1u);
@@ -433,4 +435,27 @@ TEST(SearcherTest, KMeansEntrySelectorFitMapsIdsAndTunesPrefetch) {
 
     EXPECT_EQ(first, second);
     EXPECT_FALSE(first.empty());
+}
+
+TEST(SearcherTest, ScalarQuantizerDequantizeInt8AndUint8) {
+    const uint32_t dim = 4;
+    std::vector<float> data = {-1.0f, 0.0f, 0.25f, 1.0f};
+
+    auto int8_quant = std::make_shared<deglib::transformation::ScalarQuantizerInt8>(deglib::transformation::make_scalar_quantizer_int8(std::span<const float>(data), dim));
+    std::vector<std::byte> int8_bytes(dim * sizeof(int8_t));
+    int8_quant->transform_query(std::span<const float>(data), std::span<std::byte>(int8_bytes));
+    std::vector<float> int8_out(dim);
+    int8_quant->dequantize(std::span<const std::byte>(int8_bytes), std::span<float>(int8_out));
+    for (uint32_t d = 0; d < dim; ++d) {
+        EXPECT_NEAR(int8_out[d], data[d], 0.01f);
+    }
+
+    auto uint8_quant = std::make_shared<deglib::transformation::ScalarQuantizerUint8>(deglib::transformation::make_scalar_quantizer_uint8(std::span<const float>(data), dim));
+    std::vector<std::byte> uint8_bytes(dim * sizeof(uint8_t));
+    uint8_quant->transform_query(std::span<const float>(data), std::span<std::byte>(uint8_bytes));
+    std::vector<float> uint8_out(dim);
+    uint8_quant->dequantize(std::span<const std::byte>(uint8_bytes), std::span<float>(uint8_out));
+    for (uint32_t d = 0; d < dim; ++d) {
+        EXPECT_NEAR(uint8_out[d], data[d], 0.01f);
+    }
 }

@@ -742,6 +742,33 @@ class EvpQuantizer : public FeatureTransformation {
 
     void transform_query(std::span<const uint16_t> in_fp16, std::span<std::byte> out, size_t numThreads) const { transform_vectors(in_fp16, out, numThreads); }
 
+    void dequantize(std::span<const std::byte> in, std::span<float> out) const override {
+        if (dim_ == 0) throw std::invalid_argument("EvpQuantizer: dim must be > 0");
+        if (in.size() < output_byte_size()) throw std::invalid_argument("EvpQuantizer: dequantize input too small");
+        if (out.size() < dim_) throw std::invalid_argument("EvpQuantizer: dequantize output too small");
+
+        const size_t mask_bytes = (dim_ + 7) / 8;
+        const std::byte* ones_src = in.data();
+        const std::byte* negs_src = in.data() + mask_bytes;
+        const float* mean_ptr = mean_.empty() ? nullptr : mean_.data();
+
+        for (uint32_t d = 0; d < dim_; ++d) {
+            const size_t byte_idx = d >> 3;
+            const uint8_t bit_mask = static_cast<uint8_t>(1 << (d & 7));
+            const bool is_pos = (static_cast<uint8_t>(ones_src[byte_idx]) & bit_mask) != 0;
+            const bool is_neg = (static_cast<uint8_t>(negs_src[byte_idx]) & bit_mask) != 0;
+
+            float val = 0.0f;
+            if (is_pos) {
+                val = 1.0f;
+            } else if (is_neg) {
+                val = -1.0f;
+            }
+
+            out[d] = mean_ptr != nullptr ? (mean_ptr[d] + val) : val;
+        }
+    }
+
   private:
     void transform_vectors(std::span<const float> in, std::span<std::byte> out, size_t numThreads) const {
         if (in.empty()) return;

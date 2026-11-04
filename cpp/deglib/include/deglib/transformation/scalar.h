@@ -288,6 +288,17 @@ class ScalarQuantizerInt8 : public FeatureTransformation {
         transform_vectors(in_fp16, out, numThreads);
     }
 
+    void dequantize(std::span<const std::byte> in, std::span<float> out) const {
+        if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerInt8: dim must be > 0");
+        if (in.size() < output_byte_size()) throw std::invalid_argument("ScalarQuantizerInt8: dequantize input too small");
+        if (out.size() < dim_) throw std::invalid_argument("ScalarQuantizerInt8: dequantize output too small");
+        const int8_t* src = reinterpret_cast<const int8_t*>(in.data());
+        const float inv_scale = 1.0f / scale_;
+        for (uint32_t d = 0; d < dim_; ++d) {
+            out[d] = static_cast<float>(src[d]) * inv_scale;
+        }
+    }
+
     void serialize(std::ostream& os) const override {
         os.write(reinterpret_cast<const char*>(&dim_), sizeof(dim_));
         os.write(reinterpret_cast<const char*>(&abs_max_), sizeof(abs_max_));
@@ -497,6 +508,17 @@ class ScalarQuantizerUint8 : public FeatureTransformation {
 
     void transform_query(std::span<const uint16_t> in_fp16, std::span<std::byte> out, size_t numThreads) const {
         transform_vectors(in_fp16, out, numThreads);
+    }
+
+    void dequantize(std::span<const std::byte> in, std::span<float> out) const {
+        if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUint8: dim must be > 0");
+        if (in.size() < output_byte_size()) throw std::invalid_argument("ScalarQuantizerUint8: dequantize input too small");
+        if (out.size() < dim_) throw std::invalid_argument("ScalarQuantizerUint8: dequantize output too small");
+        const uint8_t* src = reinterpret_cast<const uint8_t*>(in.data());
+        const float inv_scale = 1.0f / scale_;
+        for (uint32_t d = 0; d < dim_; ++d) {
+            out[d] = min_val_ + static_cast<float>(src[d]) * inv_scale;
+        }
     }
 
     void serialize(std::ostream& os) const override {
@@ -722,6 +744,16 @@ class ScalarQuantizerInt8PerDim : public FeatureTransformation {
         transform_vectors(in_fp16, out, numThreads);
     }
 
+    void dequantize(std::span<const std::byte> in, std::span<float> out) const {
+        if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerInt8PerDim: dim must be > 0");
+        if (in.size() < output_byte_size()) throw std::invalid_argument("ScalarQuantizerInt8PerDim: dequantize input too small");
+        if (out.size() < dim_) throw std::invalid_argument("ScalarQuantizerInt8PerDim: dequantize output too small");
+        const int8_t* src = reinterpret_cast<const int8_t*>(in.data());
+        for (uint32_t d = 0; d < dim_; ++d) {
+            out[d] = static_cast<float>(src[d]) / scales_[d];
+        }
+    }
+
     void serialize(std::ostream& os) const override {
         os.write(reinterpret_cast<const char*>(&dim_), sizeof(dim_));
         os.write(reinterpret_cast<const char*>(abs_maxs_.data()), dim_ * sizeof(float));
@@ -943,6 +975,16 @@ class ScalarQuantizerUint8PerDim : public FeatureTransformation {
 
     void transform_query(std::span<const uint16_t> in_fp16, std::span<std::byte> out, size_t numThreads) const {
         transform_vectors(in_fp16, out, numThreads);
+    }
+
+    void dequantize(std::span<const std::byte> in, std::span<float> out) const {
+        if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUint8PerDim: dim must be > 0");
+        if (in.size() < output_byte_size()) throw std::invalid_argument("ScalarQuantizerUint8PerDim: dequantize input too small");
+        if (out.size() < dim_) throw std::invalid_argument("ScalarQuantizerUint8PerDim: dequantize output too small");
+        const uint8_t* src = reinterpret_cast<const uint8_t*>(in.data());
+        for (uint32_t d = 0; d < dim_; ++d) {
+            out[d] = mins_[d] + static_cast<float>(src[d]) / scales_[d];
+        }
     }
 
     void serialize(std::ostream& os) const override {

@@ -101,6 +101,27 @@ def test_searcher_quantized_int8_with_rerank():
         assert res_batch[i, 0] == i
 
 
+def test_searcher_quantized_int8_optimize_without_reranker():
+    np.random.seed(42)
+    dim = 32
+    n = 200
+    data = np.random.randn(n, dim).astype(np.float32)
+
+    graph = deglib.builder.build_from_data(data, edges_per_vertex=16, metric=Metric.FP32_L2)
+    quantizer = deglib.transformation.make_scalar_quantizer_int8(data)
+    int8_data = quantizer.quantize(data)
+    target_space = FloatSpace.create(dim=dim, metric=Metric.Int8_L2)
+    ro_graph = graph.to_readonly(target_space, int8_data, transformations=[quantizer])
+
+    searcher = create_searcher(graph=ro_graph)
+    searcher.optimize(n_clusters=16, n_iter=3, sample_size=0, k=5, seed=7)
+
+    query = data[5]
+    res = searcher.search(query, k=5, eps_or_ef=0.2, rerank_factor=1.0)
+    assert len(res) == 5
+    assert res[0] == 5
+
+
 def test_searcher_quantized_uint8_with_rerank():
     np.random.seed(42)
     dim = 32

@@ -196,8 +196,7 @@ class Searcher {
                 for (size_t i = 0; i < ef_res.size(); ++i) {
                     cand_indices[i] = ef_res[i].getIdentifier();
                 }
-                uint32_t found =
-                    reranker_->rerank(query, dim, cand_indices, ef_res.size(), k, out_indices, out_distances, return_distances, unsorted);
+                uint32_t found = reranker_->rerank(query, dim, cand_indices, ef_res.size(), k, out_indices, out_distances, return_distances, unsorted);
                 for (size_t i = 0; i < found; ++i) {
                     out_indices[i] = graph_->getExternalLabel(out_indices[i]);
                 }
@@ -230,8 +229,7 @@ class Searcher {
                 for (size_t i = 0; i < heap_res.size(); ++i) {
                     cand_indices[i] = heap_res[i].getIdentifier();
                 }
-                uint32_t found =
-                    reranker_->rerank(query, dim, cand_indices, heap_res.size(), k, out_indices, out_distances, return_distances, unsorted);
+                uint32_t found = reranker_->rerank(query, dim, cand_indices, heap_res.size(), k, out_indices, out_distances, return_distances, unsorted);
                 for (size_t i = 0; i < found; ++i) {
                     out_indices[i] = graph_->getExternalLabel(out_indices[i]);
                 }
@@ -586,42 +584,49 @@ class Searcher {
             entry_selector_.fit(rows, candidate_ids, dim, is_l2, n_clusters, n_iter, seed, threads);
         };
 
-        if (reranker_.has_value() && reranker_->getBaseVectors() != nullptr && reranker_->getNumBaseVectors() >= n) {
-            const auto& r_space = reranker_->getSpace();
-            const uint32_t dim = r_space.dim();
-            const bool is_l2 = r_space.metric().get_distance_kind() == deglib::distances::MetricDistanceKind::L2;
-            const size_t byte_stride = r_space.get_data_size();
+        const bool use_reranker = reranker_.has_value() && reranker_->getBaseVectors() != nullptr && reranker_->getNumBaseVectors() >= n;
+        const auto& space = use_reranker ? reranker_->getSpace() : graph_->getFeatureSpace();
+        const uint32_t dim = space.dim();
+        const bool is_l2 = space.metric().get_distance_kind() == deglib::distances::MetricDistanceKind::L2;
+        const auto data_type = space.metric().get_data_type();
 
-            if (byte_stride == dim * sizeof(float)) {
-                const float* base_f32 = static_cast<const float*>(reranker_->getBaseVectors());
-                std::vector<const float*> rows(actual_sample);
-                for (size_t i = 0; i < actual_sample; ++i) {
-                    rows[i] = base_f32 + static_cast<size_t>(candidate_ids[i]) * dim;
-                }
-                fit_candidates(rows, dim, is_l2);
-            } else if (byte_stride == dim * sizeof(uint16_t)) {
-                const uint16_t* base_f16 = static_cast<const uint16_t*>(reranker_->getBaseVectors());
-                std::vector<float> decoded(actual_sample * dim);
-                deglib::concurrent::parallel_for(0, actual_sample, threads, [&](size_t i, size_t) {
-                    deglib::distances::fp16::fp16_to_floats(base_f16 + static_cast<size_t>(candidate_ids[i]) * dim, decoded.data() + i * dim, dim);
-                });
-                std::vector<const float*> rows(actual_sample);
-                for (size_t i = 0; i < actual_sample; ++i) {
-                    rows[i] = decoded.data() + i * dim;
-                }
-                fit_candidates(rows, dim, is_l2);
+        auto get_raw_ptr = [&](uint32_t id) -> const void* {
+            if (use_reranker) {
+                return static_cast<const std::byte*>(reranker_->getBaseVectors()) + static_cast<size_t>(id) * space.get_data_size();
             }
+            return graph_->getFeatureVector(id);
+        };
+
+        if (data_type == deglib::distances::MetricDataType::FP32) {
+            std::vector<const float*> rows(actual_sample);
+            for (size_t i = 0; i < actual_sample; ++i) {
+                rows[i] = static_cast<const float*>(get_raw_ptr(candidate_ids[i]));
+            }
+            fit_candidates(rows, dim, is_l2);
         } else {
-            const auto& graph_space = graph_->getFeatureSpace();
-            if (graph_space.metric().get_data_type() == deglib::distances::MetricDataType::FP32) {
-                const uint32_t dim = graph_space.dim();
-                const bool is_l2 = graph_space.metric().get_distance_kind() == deglib::distances::MetricDistanceKind::L2;
-                std::vector<const float*> rows(actual_sample);
-                for (size_t i = 0; i < actual_sample; ++i) {
-                    rows[i] = reinterpret_cast<const float*>(graph_->getFeatureVector(candidate_ids[i]));
+            std::vector<float> decoded(actual_sample * dim);
+            std::vector<const float*> rows(actual_sample);
+
+            auto decode_row = [&](const void* src, float* dst) {
+                if (data_type == deglib::distances::MetricDataType::FP16) {
+                    deglib::distances::fp16::fp16_to_floats(static_cast<const uint16_t*>(src), dst, dim);
+                } else if (!transformations_.empty()) {
+                    transformations_.back()->dequantize({static_cast<const std::byte*>(src), space.get_data_size()}, {dst, dim});
+                } else if (data_type == deglib::distances::MetricDataType::Int8) {
+                    std::copy_n(static_cast<const int8_t*>(src), dim, dst);
+                } else if (data_type == deglib::distances::MetricDataType::Uint8) {
+                    std::copy_n(static_cast<const uint8_t*>(src), dim, dst);
                 }
-                fit_candidates(rows, dim, is_l2);
+            };
+
+            deglib::concurrent::parallel_for(0, actual_sample, threads, [&](size_t i, size_t) {
+                decode_row(get_raw_ptr(candidate_ids[i]), decoded.data() + i * dim);
+            });
+
+            for (size_t i = 0; i < actual_sample; ++i) {
+                rows[i] = decoded.data() + i * dim;
             }
+            fit_candidates(rows, dim, is_l2);
         }
 
         // 2. Candidate reranker prefetch auto-tuning

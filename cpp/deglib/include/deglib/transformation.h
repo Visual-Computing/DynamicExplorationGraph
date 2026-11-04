@@ -67,6 +67,11 @@ class FeatureTransformation {
     virtual void transform_query(std::span<const float> in, std::span<std::byte> out) const = 0;
     virtual void transform_query(std::span<const uint16_t> in_fp16, std::span<std::byte> out) const {}
 
+    /** Approximate inverse for native transformed feature rows. Supported by scalar quantizers and EVP. */
+    virtual void dequantize(std::span<const std::byte>, std::span<float>) const {
+        throw std::logic_error("FeatureTransformation::dequantize is not implemented");
+    }
+
     // Binary serialization into stream
     virtual void serialize(std::ostream& os) const = 0;
 };

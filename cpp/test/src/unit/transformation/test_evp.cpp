@@ -382,3 +382,29 @@ TEST(EvpQuantize, AutoCalibrateNonZeros) {
     std::vector<std::byte> bits_unfitted(count * q_unfitted.output_byte_size());
     EXPECT_THROW(q_unfitted.transform_database(std::span<const float>(data), std::span<std::byte>(bits_unfitted)), std::logic_error);
 }
+
+TEST(EvpQuantize, DequantizeApproximation) {
+    const uint32_t dim = 8;
+    const uint32_t non_zeros = 4;
+    // Mean is zero
+    std::vector<float> train_data(dim, 0.0f);
+    deglib::transformation::EvpQuantizer q(dim, non_zeros);
+    q.fit(train_data);
+
+    float vec[] = {1.0f, -1.0f, 2.0f, -2.0f, 3.0f, -3.0f, 4.0f, -4.0f};
+    std::vector<std::byte> bits(q.output_byte_size());
+    q.transform_database(std::span<const float>(vec, dim), std::span<std::byte>(bits));
+
+    std::vector<float> dequantized(dim);
+    q.dequantize(bits, dequantized);
+
+    // Indices 4,6 are positive (+1.0), 5,7 negative (-1.0), 0..3 are zero
+    EXPECT_FLOAT_EQ(dequantized[0], 0.0f);
+    EXPECT_FLOAT_EQ(dequantized[1], 0.0f);
+    EXPECT_FLOAT_EQ(dequantized[2], 0.0f);
+    EXPECT_FLOAT_EQ(dequantized[3], 0.0f);
+    EXPECT_FLOAT_EQ(dequantized[4], 1.0f);
+    EXPECT_FLOAT_EQ(dequantized[5], -1.0f);
+    EXPECT_FLOAT_EQ(dequantized[6], 1.0f);
+    EXPECT_FLOAT_EQ(dequantized[7], -1.0f);
+}

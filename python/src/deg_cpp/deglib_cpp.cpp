@@ -1474,6 +1474,32 @@ PYBIND11_MODULE(deglib_cpp, m) {
             },
             py::arg("vectors"), py::arg("num_threads") = 0
         )
+        .def(
+            "dequantize",
+            [](const deglib::transformation::EvpQuantizer& q, py::array_t<uint8_t> quantized) {
+                py::buffer_info buf = quantized.request();
+                auto [count, byte_size] = get_2d_shape(buf);
+                if (byte_size != q.output_byte_size()) {
+                    throw std::invalid_argument(std::format("quantized bytes per vector ({}) does not match expected ({})", byte_size, q.output_byte_size()));
+                }
+
+                const uint32_t dim = q.dim();
+                py::array_t<float> output({count, static_cast<size_t>(dim)});
+                py::buffer_info out_buf = output.request();
+                const std::byte* src = static_cast<const std::byte*>(buf.ptr);
+                float* dst = static_cast<float*>(out_buf.ptr);
+
+                {
+                    py::gil_scoped_release release;
+                    for (size_t i = 0; i < count; ++i) {
+                        q.dequantize({src + i * byte_size, byte_size}, {dst + i * dim, dim});
+                    }
+                }
+                return output;
+            },
+            py::arg("quantized"),
+            "Dequantizes bit-packed EVP representation back to approximate float vectors."
+        )
         .def_static("deserialize", [](py::bytes b) {
             std::string s = b;
             std::istringstream ss(s, std::ios::binary);
