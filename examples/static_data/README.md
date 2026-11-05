@@ -61,4 +61,4 @@ uv run main.py audio --graph-quality exact
 - `--cache-dir`: Persistent cache folder for datasets. Default: `~/.cache/deg_datasets`.
 - `--no-show`: Disable opening the interactive plot window (useful for headless CI environments).
 - `--max-base-vecs`: Limit base vectors for fast debugging / testing.
-- `--graph-quality, -q`: Evaluate graph quality: `none` (default), `exact` (via linear search ground truth), or `approximated` (via ANNS graph exploration). If missing, ground truth files are automatically generated.
+- `--graph-quality, -q`: Evaluate graph quality: `auto` (default, uses existing ground truth file if present, skips otherwise), `exact` (via linear search ground truth), or `approximated` (via ANNS graph exploration). If missing and `exact` or `approximated` is specified, ground truth files are automatically generated.

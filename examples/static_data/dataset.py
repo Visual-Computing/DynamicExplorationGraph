@@ -746,32 +746,43 @@ def generate_base_groundtruth(
 def load_base_groundtruth(
     dataset_key: str,
     cache_dir: Path,
-    graph_quality: str = "none",
+    graph_quality: str = "auto",
     graph_path: Optional[Union[str, Path]] = None,
 ) -> Optional[np.ndarray]:
     """
     Loads base_top1000 ground truth for graph quality analysis.
-    If the file does not exist and graph_quality is 'exact' or 'approximated',
-    it is automatically computed and cached.
+
+    Modes:
+    - 'auto' (default): Loads existing ground truth file if present; skips if not found.
+    - 'exact': Loads existing file if present, otherwise computes exact linear search ground truth.
+    - 'approximated': Loads existing file if present, otherwise computes ANNS exploration ground truth.
     """
-    if not graph_quality or graph_quality.lower() == "none":
-        return None
+    mode = (graph_quality or "auto").lower()
 
     key = resolve_dataset_key(dataset_key)
     meta = DATASET_METADATA[key]
     folder = ensure_dataset(key, cache_dir)
     files_dir = folder / meta["folder"] if (folder / meta["folder"]).is_dir() else folder
     base_top_path = files_dir / f"{meta['folder']}_base_top1000.ivecs"
+    alt_top_path = files_dir / f"{key}_base_top1000.ivecs"
 
-    if not base_top_path.is_file():
-        print(f"Base Top Ground Truth not found at {base_top_path}. Generating...")
-        generate_base_groundtruth(
-            dataset_key=key,
-            cache_dir=cache_dir,
-            k=1000,
-            quality_mode=graph_quality,
-            graph_path=graph_path,
-        )
+    existing_path = base_top_path if base_top_path.is_file() else (alt_top_path if alt_top_path.is_file() else None)
+    if existing_path is not None:
+        print(f"Loading base ground truth for graph quality from {existing_path} (mmap)...")
+        return ivecs_read(existing_path, mmap=True)
+
+    if mode == "auto":
+        print(f"Base Top Ground Truth not found at {base_top_path}. Skipping graph quality evaluation (mode: auto).")
+        return None
+
+    print(f"Base Top Ground Truth not found at {base_top_path}. Generating (mode: {mode})...")
+    generate_base_groundtruth(
+        dataset_key=key,
+        cache_dir=cache_dir,
+        k=1000,
+        quality_mode=mode,
+        graph_path=graph_path,
+    )
 
     if base_top_path.is_file():
         print(f"Loading base ground truth for graph quality from {base_top_path} (mmap)...")

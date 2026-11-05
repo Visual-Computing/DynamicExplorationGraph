@@ -111,7 +111,7 @@ def run_static_benchmark(
     build_threads: int,
     max_base_vecs: int | None,
     no_show: bool,
-    graph_quality: str = "none",
+    graph_quality: str = "auto",
 ):
     resolved_key = resolve_dataset_key(dataset_key)
     preset = get_preset(resolved_key)
@@ -186,7 +186,7 @@ def run_static_benchmark(
             improve_eps=preset.get("improve_eps", 0.0),
         )
         builder.set_batch_size(10, 10)
-        if build_threads > 1:
+        if build_threads > 0:
             builder.set_thread_count(build_threads)
 
         labels = np.arange(base_vecs.shape[0], dtype=np.uint32)
@@ -381,9 +381,9 @@ def main():
     parser.add_argument(
         "--graph-quality",
         "-q",
-        choices=["none", "exact", "approximated"],
-        default="none",
-        help="Evaluate graph quality: 'none' (default), 'exact' (via linear search groundtruth), 'approximated' (via ANNS graph exploration)",
+        choices=["auto", "exact", "approximated"],
+        default="auto",
+        help="Evaluate graph quality: 'auto' (default, uses existing file if available, skips otherwise), 'exact' (via linear search groundtruth), 'approximated' (via ANNS graph exploration)",
     )
 
     args = parser.parse_args()

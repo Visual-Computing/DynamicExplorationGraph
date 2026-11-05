@@ -571,7 +571,7 @@ def load_base_half_groundtruth(
     dataset_key: str,
     cache_dir: Path,
     base_vecs: np.ndarray,
-    graph_quality: str = "none",
+    graph_quality: str = "auto",
     graph: Optional[Any] = None,
     threads: int = 0,
 ) -> Optional[np.ndarray]:
@@ -579,13 +579,11 @@ def load_base_half_groundtruth(
     Loads (or generates) half-dataset base_half_top1000 ground truth for dynamic graph quality analysis.
 
     Modes:
-    - 'none' (default): Skips graph quality evaluation.
+    - 'auto' (default): Loads existing ground truth file if present; skips if not found.
     - 'exact': Loads cached file if present, otherwise computes exact linear search ground truth.
     - 'approximated': Loads cached file if present, otherwise computes ANNS exploration ground truth using `graph`.
     """
-    mode = (graph_quality or "none").lower()
-    if mode == "none":
-        return None
+    mode = (graph_quality or "auto").lower()
 
     key = resolve_dataset_key(dataset_key)
     meta = DATASET_METADATA[key]
@@ -596,6 +594,9 @@ def load_base_half_groundtruth(
 
     # Truncated debug run (--max-base-vecs): compute in-memory without reading/polluting full-dataset cache
     if len(base_vecs) < meta["base_count"]:
+        if mode == "auto":
+            # In debug/truncated runs, do not silently compute heavy GT unless explicitly requested
+            return None
         half_vecs = base_vecs[:n_half]
         if mode in ("approximated", "approx", "anns") and graph is not None:
             return generate_base_half_top_anns(graph, half_vecs, metric, k=1000, out_file=None, num_threads=threads)
@@ -610,6 +611,10 @@ def load_base_half_groundtruth(
     if existing_path is not None:
         print(f"Loading half-base ground truth for graph quality from {existing_path} (mmap)...")
         return ivecs_read(existing_path, mmap=True)
+
+    if mode == "auto":
+        print(f"Half-base ground truth not found at {base_half_path}. Skipping graph quality evaluation (mode: auto).")
+        return None
 
     half_vecs = base_vecs[:n_half]
     if mode in ("approximated", "approx", "anns"):

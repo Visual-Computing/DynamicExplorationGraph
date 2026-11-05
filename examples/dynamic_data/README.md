@@ -42,7 +42,7 @@ uv run python main.py [dataset] [options]
 | `--cache-dir <path>` | Dataset cache directory (default: `~/.cache/deg_datasets`) |
 | `--no-show` | Do not display interactive plots |
 | `--max-base-vecs <n>` | Limit base vectors for quick testing |
-| `--graph-quality, -q <mode>` | Evaluate graph quality: `none` (default), `exact`, or `approximated` |
+| `--graph-quality, -q <mode>` | Evaluate graph quality: `auto` (default, uses existing file if available, skips otherwise), `exact`, or `approximated` |
 
 ### Examples
 
