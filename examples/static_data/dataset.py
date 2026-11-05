@@ -36,10 +36,10 @@ DATASET_METADATA: Dict[str, Dict[str, Any]] = {
         "base_count": 1000000,
         "base_file": "sift1m_base.fvecs",
         "query_file": "sift1m_query.fvecs",
-        "gt_file": "sift1m_groundtruth_top100_nb1000000.ivecs",
+        "gt_stem": "sift1m_groundtruth_top100_nb1000000",
         "explore_entry_file": "sift1m_explore_entry_vertex.ivecs",
         "explore_query_file": "sift1m_explore_query.fvecs",
-        "explore_gt_file": "sift1m_explore_groundtruth_top1000.ivecs",
+        "explore_gt_stem": "sift1m_explore_groundtruth_top1000",
     },
     "audio": {
         "name": "Audio",
@@ -51,10 +51,10 @@ DATASET_METADATA: Dict[str, Dict[str, Any]] = {
         "base_count": 53387,
         "base_file": "audio_base.fvecs",
         "query_file": "audio_query.fvecs",
-        "gt_file": "audio_groundtruth_top100_nb53387.ivecs",
+        "gt_stem": "audio_groundtruth_top100_nb53387",
         "explore_entry_file": "audio_explore_entry_vertex.ivecs",
         "explore_query_file": "audio_explore_query.fvecs",
-        "explore_gt_file": "audio_explore_groundtruth_top1000.ivecs",
+        "explore_gt_stem": "audio_explore_groundtruth_top1000",
     },
     "enron": {
         "name": "Enron",
@@ -66,10 +66,10 @@ DATASET_METADATA: Dict[str, Dict[str, Any]] = {
         "base_count": 94987,
         "base_file": "enron_base.fvecs",
         "query_file": "enron_query.fvecs",
-        "gt_file": "enron_groundtruth_top100_nb94987.ivecs",
+        "gt_stem": "enron_groundtruth_top100_nb94987",
         "explore_entry_file": "enron_explore_entry_vertex.ivecs",
         "explore_query_file": "enron_explore_query.fvecs",
-        "explore_gt_file": "enron_explore_groundtruth_top1000.ivecs",
+        "explore_gt_stem": "enron_explore_groundtruth_top1000",
     },
     "deep1m": {
         "name": "DEEP1M",
@@ -81,10 +81,10 @@ DATASET_METADATA: Dict[str, Dict[str, Any]] = {
         "base_count": 1000000,
         "base_file": "deep1m_base.fvecs",
         "query_file": "deep1m_query.fvecs",
-        "gt_file": "deep1m_groundtruth_top100_nb1000000.ivecs",
+        "gt_stem": "deep1m_groundtruth_top100_nb1000000",
         "explore_entry_file": "deep1m_explore_entry_vertex.ivecs",
         "explore_query_file": "deep1m_explore_query.fvecs",
-        "explore_gt_file": "deep1m_explore_groundtruth_top1000.ivecs",
+        "explore_gt_stem": "deep1m_explore_groundtruth_top1000",
     },
     "glove": {
         "name": "GloVe-100",
@@ -96,10 +96,10 @@ DATASET_METADATA: Dict[str, Dict[str, Any]] = {
         "base_count": 1183514,
         "base_file": "glove_base.fvecs",
         "query_file": "glove_query.fvecs",
-        "gt_file": "glove_groundtruth_top100_nb1183514.ivecs",
+        "gt_stem": "glove_groundtruth_top100_nb1183514",
         "explore_entry_file": "glove_explore_entry_vertex.ivecs",
         "explore_query_file": "glove_explore_query.fvecs",
-        "explore_gt_file": "glove_explore_groundtruth_top1000.ivecs",
+        "explore_gt_stem": "glove_explore_groundtruth_top1000",
     },
 }
 
@@ -109,8 +109,8 @@ def resolve_dataset_key(key: str) -> str:
 
 
 def get_default_cache_dir() -> Path:
-    """Returns the default dataset cache directory (~/.cache/deg_datasets or DEG_CACHE_DIR)."""
-    env_dir = os.environ.get("DEG_CACHE_DIR")
+    """Returns the default dataset cache directory (~/.cache/deg_datasets or DEG_DATA_PATH)."""
+    env_dir = os.environ.get("DEG_DATA_PATH")
     if env_dir:
         path = Path(env_dir)
     else:
@@ -360,18 +360,18 @@ def load_dataset(
     float_space = FloatSpace.create(dims, metric)
 
     # 1. ANNS Ground Truth
-    gt_path = files_dir / meta["gt_file"]
+    gt_path = files_dir / f"{meta['gt_stem']}_{metric.name}.ivecs"
     if not gt_path.is_file():
-        print(f"ANNS Ground Truth not found at {gt_path}.")
+        print(f"ANNS Ground Truth not found at {gt_path} (metric: {metric.name}).")
         compute_and_save_anns_gt(base_vecs, query_vecs, float_space, 100, gt_path)
 
-    print(f"Loading groundtruth indices from {gt_path}...")
+    print(f"Loading groundtruth indices from {gt_path} (metric: {metric.name})...")
     gt_vecs = ivecs_read(gt_path)
 
     # 2. Exploration Entry Vertices, Exploration Query, and Exploration Ground Truth
     explore_entry_path = files_dir / meta["explore_entry_file"]
     explore_query_path = files_dir / meta["explore_query_file"]
-    explore_gt_path = files_dir / meta["explore_gt_file"]
+    explore_gt_path = files_dir / f"{meta['explore_gt_stem']}_{metric.name}.ivecs"
 
     if not explore_entry_path.is_file() or not explore_query_path.is_file():
         generate_explore_entry_and_query(base_vecs, explore_entry_path, explore_query_path)
@@ -380,11 +380,11 @@ def load_dataset(
     explore_entry = ivecs_read(explore_entry_path)
 
     if not explore_gt_path.is_file():
-        print(f"Exploration Ground Truth not found at {explore_gt_path}.")
+        print(f"Exploration Ground Truth not found at {explore_gt_path} (metric: {metric.name}).")
         explore_query_vecs = fvecs_read(explore_query_path)
         compute_and_save_explore_gt(base_vecs, explore_query_vecs, float_space, 1000, explore_gt_path)
 
-    print(f"Loading explore groundtruth from {explore_gt_path}...")
+    print(f"Loading explore groundtruth from {explore_gt_path} (metric: {metric.name})...")
     explore_gt = ivecs_read(explore_gt_path)
 
     return base_vecs, query_vecs, gt_vecs, explore_entry, explore_gt, meta
@@ -614,7 +614,7 @@ def generate_base_top_anns(
         if (files_dir / meta["folder"]).is_dir():
             files_dir = files_dir / meta["folder"]
         explore_entry = ivecs_read(files_dir / meta["explore_entry_file"])
-        explore_gt = ivecs_read(files_dir / meta["explore_gt_file"])
+        explore_gt = ivecs_read(files_dir / f"{meta['explore_gt_stem']}_{meta['metric'].name}.ivecs")
 
         chosen_eps, _ = tune_explore_eps(
             graph=graph,
@@ -693,7 +693,7 @@ def generate_base_groundtruth(
     metric = meta["metric"]
     use_anns = quality_mode.lower() in ("approximated", "approx", "anns")
 
-    out_file = files_dir / f"{meta['folder']}_base_top{k}.ivecs"
+    out_file = files_dir / f"{meta['folder']}_base_top{k}_{metric.name}.ivecs"
     if not out_file.is_file():
         if use_anns:
             generate_base_top_anns(
@@ -718,7 +718,7 @@ def generate_base_groundtruth(
             )
 
     if include_half:
-        half_out = files_dir / f"{meta['folder']}_base_half_top{k}.ivecs"
+        half_out = files_dir / f"{meta['folder']}_base_half_top{k}_{metric.name}.ivecs"
         if not half_out.is_file():
             if use_anns:
                 generate_base_top_anns(
@@ -763,19 +763,19 @@ def load_base_groundtruth(
     meta = DATASET_METADATA[key]
     folder = ensure_dataset(key, cache_dir)
     files_dir = folder / meta["folder"] if (folder / meta["folder"]).is_dir() else folder
-    base_top_path = files_dir / f"{meta['folder']}_base_top1000.ivecs"
-    alt_top_path = files_dir / f"{key}_base_top1000.ivecs"
+    base_top_path = files_dir / f"{meta['folder']}_base_top1000_{meta['metric'].name}.ivecs"
+    alt_top_path = files_dir / f"{key}_base_top1000_{meta['metric'].name}.ivecs"
 
     existing_path = base_top_path if base_top_path.is_file() else (alt_top_path if alt_top_path.is_file() else None)
     if existing_path is not None:
-        print(f"Loading base ground truth for graph quality from {existing_path} (mmap)...")
+        print(f"Loading base ground truth for graph quality from {existing_path} (metric: {meta['metric'].name}, mmap)...")
         return ivecs_read(existing_path, mmap=True)
 
     if mode == "auto":
-        print(f"Base Top Ground Truth not found at {base_top_path}. Skipping graph quality evaluation (mode: auto).")
+        print(f"Base Top Ground Truth not found at {base_top_path} (metric: {meta['metric'].name}). Skipping graph quality evaluation (mode: auto).")
         return None
 
-    print(f"Base Top Ground Truth not found at {base_top_path}. Generating (mode: {mode})...")
+    print(f"Base Top Ground Truth not found at {base_top_path} (metric: {meta['metric'].name}). Generating (mode: {mode})...")
     generate_base_groundtruth(
         dataset_key=key,
         cache_dir=cache_dir,
@@ -785,7 +785,7 @@ def load_base_groundtruth(
     )
 
     if base_top_path.is_file():
-        print(f"Loading base ground truth for graph quality from {base_top_path} (mmap)...")
+        print(f"Loading base ground truth for graph quality from {base_top_path} (metric: {meta['metric'].name}, mmap)...")
         return ivecs_read(base_top_path, mmap=True)
 
     return None

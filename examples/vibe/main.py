@@ -154,7 +154,7 @@ def main():
         "-c",
         type=Path,
         default=None,
-        help="Directory to store datasets and built graphs (default: ~/.cache/vibe)",
+        help="Directory to store datasets and built graphs (default: ~/.cache/deg_datasets, env: DEG_DATA_PATH)",
     )
     default_build_threads = max(1, (os.cpu_count() or 2) // 2)
     parser.add_argument(

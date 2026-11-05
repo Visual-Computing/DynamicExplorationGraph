@@ -115,11 +115,6 @@ inline DatasetInfo make_dataset_info(const DatasetName& ds) {
     info.query_file = name + "_query.fvecs";
     info.explore_query_file = name + "_explore_query.fvecs";
     info.explore_entry_vertex_file = name + "_explore_entry_vertex.ivecs";
-    info.explore_groundtruth_file = name + "_explore_groundtruth_top1000.ivecs";
-    info.explore_groundtruth_half_file = name + "_explore_groundtruth_half_top1000.ivecs";
-    info.base_groundtruth_file = name + "_base_top1000.ivecs";
-    info.base_groundtruth_half_file = name + "_base_half_top1000.ivecs";
-
     if (ds == DatasetName::SIFT1M) {
         info.download_url = "https://static.visual-computing.com/paper/DEG/sift.tar.gz";
         info.base_count = 1000000;
@@ -157,6 +152,13 @@ inline DatasetInfo make_dataset_info(const DatasetName& ds) {
         info.scale = 1;
         info.explore_depth = 1;
     }
+
+    // Encode metric in GT filenames so that a metric change invalidates cached files.
+    const std::string metric_suffix = "_" + info.metric.to_string();
+    info.explore_groundtruth_file = name + "_explore_groundtruth_top1000" + metric_suffix + ".ivecs";
+    info.explore_groundtruth_half_file = name + "_explore_groundtruth_half_top1000" + metric_suffix + ".ivecs";
+    info.base_groundtruth_file = name + "_base_top1000" + metric_suffix + ".ivecs";
+    info.base_groundtruth_half_file = name + "_base_half_top1000" + metric_suffix + ".ivecs";
 
     return info;
 }
@@ -209,7 +211,7 @@ class Dataset {
     std::string base_groundtruth_half_file() const { return (files_dir_ / info_.base_groundtruth_half_file).string(); }
 
     std::string groundtruth_file(size_t nb) const {
-        return (files_dir_ / fmt::format("{}_groundtruth_top{}_nb{}.ivecs", info_.name(), DatasetInfo::GROUNDTRUTH_TOPK, nb)).string();
+        return (files_dir_ / fmt::format("{}_groundtruth_top{}_nb{}_{}.ivecs", info_.name(), DatasetInfo::GROUNDTRUTH_TOPK, nb, info_.metric.to_string())).string();
     }
     std::string groundtruth_file_full() const { return groundtruth_file(info_.base_count); }
     std::string groundtruth_file_half() const { return groundtruth_file(info_.base_count / 2); }
@@ -219,6 +221,7 @@ class Dataset {
 
     std::vector<std::vector<uint32_t>> load_groundtruth(size_t k, bool use_half_dataset = false) const {
         std::string gt_file = use_half_dataset ? groundtruth_file_half() : groundtruth_file_full();
+        fmt::print("Loading ANNS ground truth from {} (metric: {})...\n", gt_file, info_.metric.to_string());
         size_t ground_truth_dims = 0;
         size_t ground_truth_size = 0;
         auto gt_data = deglib::fvecs_read(gt_file.c_str(), ground_truth_dims, ground_truth_size);
@@ -247,6 +250,7 @@ class Dataset {
         if (!file_exists(gt_file)) {
             return {};
         }
+        fmt::print("Loading base ground truth from {} (metric: {})...\n", gt_file, info_.metric.to_string());
         size_t ground_truth_dims = 0;
         size_t ground_truth_size = 0;
         auto gt_data = deglib::fvecs_read(gt_file.c_str(), ground_truth_dims, ground_truth_size);
@@ -268,6 +272,7 @@ class Dataset {
 
     std::vector<std::vector<uint32_t>> load_explore_groundtruth(size_t k = DatasetInfo::EXPLORE_TOPK, bool use_half_dataset = false) const {
         std::string gt_file = use_half_dataset ? explore_groundtruth_half_file() : explore_groundtruth_file();
+        fmt::print("Loading explore ground truth from {} (metric: {})...\n", gt_file, info_.metric.to_string());
 
         size_t dims = 0, count = 0;
         auto data = deglib::fvecs_read(gt_file.c_str(), dims, count);
@@ -604,7 +609,7 @@ generate_exploration_files(const Dataset& ds, const deglib::FeatureRepository& b
     deglib::FeatureRepository explore_query_repo(std::move(feature_bytes), dims, actual_sample_count, sizeof(float));
 
     if (!file_exists(ds.explore_groundtruth_file())) {
-        fmt::print("\nGenerating Exploration Ground Truth (Full Dataset)...\n");
+        fmt::print("\nGenerating Exploration Ground Truth (Full Dataset, metric: {})...\n", info.metric.to_string());
         auto gt = compute_knn_groundtruth(base_repo, explore_query_repo, info.metric, topk, thread_count);
         const std::string tmp_file = ds.explore_groundtruth_file() + ".tmp";
         ivecs_write(tmp_file.c_str(), topk, actual_sample_count, gt.data());
@@ -615,7 +620,7 @@ generate_exploration_files(const Dataset& ds, const deglib::FeatureRepository& b
     }
 
     if (include_half && !file_exists(ds.explore_groundtruth_half_file())) {
-        fmt::print("\nGenerating Exploration Ground Truth (Half Dataset)...\n");
+        fmt::print("\nGenerating Exploration Ground Truth (Half Dataset, metric: {})...\n", info.metric.to_string());
         auto gt_half = compute_knn_groundtruth(base_repo.subview(0, half_base_size), explore_query_repo, info.metric, topk, thread_count);
         const std::string tmp_file = ds.explore_groundtruth_half_file() + ".tmp";
         ivecs_write(tmp_file.c_str(), topk, actual_sample_count, gt_half.data());
@@ -643,13 +648,13 @@ generate_anns_groundtruth_files(const Dataset& ds, const deglib::FeatureReposito
     auto query_repo = ds.load_query();
 
     if (!full_exists) {
-        fmt::print("\nGenerating ANNS Ground Truth (Full Dataset)...\n");
+        fmt::print("\nGenerating ANNS Ground Truth (Full Dataset, metric: {})...\n", info.metric.to_string());
         auto gt = compute_knn_groundtruth(base_repo, query_repo, info.metric, topk, thread_count);
         ivecs_write(ds.groundtruth_file_full().c_str(), topk, query_repo.size(), gt.data());
     }
 
     if (include_half && !half_exists) {
-        fmt::print("\nGenerating ANNS Ground Truth (Half Dataset)...\n");
+        fmt::print("\nGenerating ANNS Ground Truth (Half Dataset, metric: {})...\n", info.metric.to_string());
         auto gt_half = compute_knn_groundtruth(base_repo.subview(0, half_base_size), query_repo, info.metric, topk, thread_count);
         ivecs_write(ds.groundtruth_file_half().c_str(), topk, query_repo.size(), gt_half.data());
     }
@@ -744,7 +749,7 @@ inline bool generate_base_groundtruth_files(
         return true;
     }
 
-    fmt::print("Computing base ground truth (linear search) -> {} (total: {} queries, base limit: {})...\n", out_file, total_queries, base_limit);
+    fmt::print("Computing base ground truth (linear search, metric: {}) -> {} (total: {} queries, base limit: {})...\n", info.metric.to_string(), out_file, total_queries, base_limit);
     const std::string tmp_file = out_file + ".tmp";
     auto out = std::ofstream(tmp_file, std::ios::out | std::ios::binary);
     if (!out.is_open()) {

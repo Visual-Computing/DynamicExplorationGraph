@@ -372,7 +372,7 @@ def main():
         "--cache-dir",
         type=str,
         default=None,
-        help="Custom directory to cache datasets (default: ~/.cache/deg_datasets)",
+        help="Custom directory to cache datasets (default: ~/.cache/deg_datasets, env: DEG_DATA_PATH)",
     )
     parser.add_argument("--no-show", action="store_true", help="Do not display interactive plot window")
     parser.add_argument(

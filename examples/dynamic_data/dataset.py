@@ -35,8 +35,8 @@ DATASET_METADATA: Dict[str, Dict[str, Any]] = {
         "base_count": 1000000,
         "base_file": "sift1m_base.fvecs",
         "query_file": "sift1m_query.fvecs",
-        "gt_file": "sift1m_groundtruth_top100_nb1000000.ivecs",
-        "gt_half_file": "sift1m_groundtruth_top100_nb500000.ivecs",
+        "gt_stem": "sift1m_groundtruth_top100_nb1000000",
+        "gt_half_stem": "sift1m_groundtruth_top100_nb500000",
     },
     "audio": {
         "name": "Audio",
@@ -48,8 +48,8 @@ DATASET_METADATA: Dict[str, Dict[str, Any]] = {
         "base_count": 53387,
         "base_file": "audio_base.fvecs",
         "query_file": "audio_query.fvecs",
-        "gt_file": "audio_groundtruth_top100_nb53387.ivecs",
-        "gt_half_file": "audio_groundtruth_top100_nb26693.ivecs",
+        "gt_stem": "audio_groundtruth_top100_nb53387",
+        "gt_half_stem": "audio_groundtruth_top100_nb26693",
     },
     "enron": {
         "name": "Enron",
@@ -61,8 +61,8 @@ DATASET_METADATA: Dict[str, Dict[str, Any]] = {
         "base_count": 94987,
         "base_file": "enron_base.fvecs",
         "query_file": "enron_query.fvecs",
-        "gt_file": "enron_groundtruth_top100_nb94987.ivecs",
-        "gt_half_file": "enron_groundtruth_top100_nb47493.ivecs",
+        "gt_stem": "enron_groundtruth_top100_nb94987",
+        "gt_half_stem": "enron_groundtruth_top100_nb47493",
     },
     "deep1m": {
         "name": "DEEP1M",
@@ -74,8 +74,8 @@ DATASET_METADATA: Dict[str, Dict[str, Any]] = {
         "base_count": 1000000,
         "base_file": "deep1m_base.fvecs",
         "query_file": "deep1m_query.fvecs",
-        "gt_file": "deep1m_groundtruth_top100_nb1000000.ivecs",
-        "gt_half_file": "deep1m_groundtruth_top100_nb500000.ivecs",
+        "gt_stem": "deep1m_groundtruth_top100_nb1000000",
+        "gt_half_stem": "deep1m_groundtruth_top100_nb500000",
     },
     "glove": {
         "name": "GloVe-100",
@@ -87,8 +87,8 @@ DATASET_METADATA: Dict[str, Dict[str, Any]] = {
         "base_count": 1183514,
         "base_file": "glove_base.fvecs",
         "query_file": "glove_query.fvecs",
-        "gt_file": "glove_groundtruth_top100_nb1183514.ivecs",
-        "gt_half_file": "glove_groundtruth_top100_nb591757.ivecs",
+        "gt_stem": "glove_groundtruth_top100_nb1183514",
+        "gt_half_stem": "glove_groundtruth_top100_nb591757",
     },
 }
 
@@ -98,8 +98,8 @@ def resolve_dataset_key(key: str) -> str:
 
 
 def get_default_cache_dir() -> Path:
-    """Returns the default dataset cache directory (~/.cache/deg_datasets or DEG_CACHE_DIR)."""
-    env_dir = os.environ.get("DEG_CACHE_DIR")
+    """Returns the default dataset cache directory (~/.cache/deg_datasets or DEG_DATA_PATH)."""
+    env_dir = os.environ.get("DEG_DATA_PATH")
     if env_dir:
         path = Path(env_dir)
     else:
@@ -321,21 +321,21 @@ def load_dataset_for_dynamic(
     float_space = FloatSpace.create(dims, metric)
 
     # Full ANNS Ground Truth
-    gt_path = files_dir / meta["gt_file"]
+    gt_path = files_dir / f"{meta['gt_stem']}_{metric.name}.ivecs"
     if not gt_path.is_file():
-        print(f"ANNS Full Ground Truth not found at {gt_path}.")
+        print(f"ANNS Full Ground Truth not found at {gt_path} (metric: {metric.name}).")
         compute_and_save_anns_gt(base_vecs, query_vecs, float_space, 100, gt_path)
 
-    print(f"Loading full groundtruth indices from {gt_path}...")
+    print(f"Loading full groundtruth indices from {gt_path} (metric: {metric.name})...")
     gt_vecs_full = ivecs_read(gt_path)
 
     # Half ANNS Ground Truth (against first base_count/2 vectors)
-    gt_half_path = files_dir / meta["gt_half_file"]
+    gt_half_path = files_dir / f"{meta['gt_half_stem']}_{metric.name}.ivecs"
     if not gt_half_path.is_file():
-        print(f"ANNS Half Ground Truth not found at {gt_half_path}.")
+        print(f"ANNS Half Ground Truth not found at {gt_half_path} (metric: {metric.name}).")
         compute_and_save_anns_gt_half(base_vecs, query_vecs, float_space, 100, gt_half_path)
 
-    print(f"Loading half groundtruth indices from {gt_half_path}...")
+    print(f"Loading half groundtruth indices from {gt_half_path} (metric: {metric.name})...")
     gt_vecs_half = ivecs_read(gt_half_path)
 
     return base_vecs, query_vecs, gt_vecs_full, gt_vecs_half, meta
@@ -604,16 +604,16 @@ def load_base_half_groundtruth(
 
     folder = ensure_dataset(key, cache_dir)
     files_dir = folder / meta["folder"] if (folder / meta["folder"]).is_dir() else folder
-    base_half_path = files_dir / f"{meta['folder']}_base_half_top1000.ivecs"
-    alt_half_path = files_dir / f"{key}_base_half_top1000.ivecs"
+    base_half_path = files_dir / f"{meta['folder']}_base_half_top1000_{metric.name}.ivecs"
+    alt_half_path = files_dir / f"{key}_base_half_top1000_{metric.name}.ivecs"
 
     existing_path = base_half_path if base_half_path.is_file() else (alt_half_path if alt_half_path.is_file() else None)
     if existing_path is not None:
-        print(f"Loading half-base ground truth for graph quality from {existing_path} (mmap)...")
+        print(f"Loading half-base ground truth for graph quality from {existing_path} (metric: {metric.name}, mmap)...")
         return ivecs_read(existing_path, mmap=True)
 
     if mode == "auto":
-        print(f"Half-base ground truth not found at {base_half_path}. Skipping graph quality evaluation (mode: auto).")
+        print(f"Half-base ground truth not found at {base_half_path} (metric: {metric.name}). Skipping graph quality evaluation (mode: auto).")
         return None
 
     half_vecs = base_vecs[:n_half]

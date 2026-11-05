@@ -168,8 +168,8 @@ def resolve_dataset_key(key: str) -> str:
 
 
 def get_default_cache_dir() -> Path:
-    """Returns the default dataset cache directory (~/.cache/deg_datasets, DEG_CACHE_DIR, or VIBE_CACHE_DIR)."""
-    env_dir = os.environ.get("DEG_CACHE_DIR") or os.environ.get("VIBE_CACHE_DIR") or os.environ.get("VIBE_CACHE")
+    """Returns the default dataset cache directory (~/.cache/deg_datasets or DEG_DATA_PATH)."""
+    env_dir = os.environ.get("DEG_DATA_PATH")
     if env_dir:
         path = Path(env_dir)
     else:

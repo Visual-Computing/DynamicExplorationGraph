@@ -32,7 +32,7 @@ uv sync
 
 ### 2. Run Benchmark
 
-Datasets are automatically downloaded on demand directly from the official [VIBE Hugging Face repository](https://huggingface.co/datasets/vector-index-bench/vibe) and stored in `~/.cache/deg_datasets` (or overridden via `DEG_CACHE_DIR` / `VIBE_CACHE_DIR`).
+Datasets are automatically downloaded on demand directly from the official [VIBE Hugging Face repository](https://huggingface.co/datasets/vector-index-bench/vibe) and stored in `~/.cache/deg_datasets` (or overridden via `DEG_DATA_PATH`).
 
 ```bash
 # Run benchmark on default dataset (AGNews-mxbai)
@@ -82,7 +82,7 @@ All benchmark search parameters, graph degrees, optimization targets, pruning op
 ### `main.py`
 - `--dataset`, `-d`: Dataset name (e.g. `laion-clip`, `arxiv-nomic`, `agnews-mxbai`, etc.).
 - `--algorithm`, `-a`: Benchmark a specific algorithm (`deg`, `deg-qg` / `qg`, or `all`). Default: run all enabled in `config.yml`.
-- `--cache-dir`, `-c`: Custom directory for datasets and graphs (default: `~/.cache/deg_datasets` or `DEG_CACHE_DIR`).
+- `--cache-dir`, `-c`: Custom directory for datasets and graphs (default: `~/.cache/deg_datasets` or `DEG_DATA_PATH`).
 - `--build-threads`, `-t`: Number of CPU threads for graph building (default: `cpu_count // 2`).
 - `--query-dtype`: Override query and feature storage precision (`float32`, `int8`).
 - `--cpu`, `--cpu-affinity`: Pin the benchmark process to specific CPU core ID(s).
