@@ -1536,19 +1536,19 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def_property_readonly("is_fitted", &deglib::transformation::ScalarQuantizerInt8::is_fitted)
         .def(
             "fit",
-            [](deglib::transformation::ScalarQuantizerInt8& q, py::array vectors, float drop_ratio) {
+            [](deglib::transformation::ScalarQuantizerInt8& q, py::array vectors, float quantile) {
                 py::buffer_info buf = vectors.request();
                 auto [count, dim] = get_2d_shape(buf);
                 if (q.dim() == 0) q.set_dim(dim);
                 if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    q.fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), drop_ratio);
+                    q.fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), quantile);
                 } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                    q.fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), drop_ratio);
+                    q.fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), quantile);
                 } else {
                     throw std::invalid_argument("vectors must be float32 or float16");
                 }
             },
-            py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+            py::arg("vectors"), py::arg("quantile") = 1.0f
         )
         .def(
             "quantize",
@@ -1590,19 +1590,19 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def_property_readonly("is_fitted", &deglib::transformation::ScalarQuantizerInt8PerDim::is_fitted)
         .def(
             "fit",
-            [](deglib::transformation::ScalarQuantizerInt8PerDim& q, py::array vectors, float drop_ratio) {
+            [](deglib::transformation::ScalarQuantizerInt8PerDim& q, py::array vectors, float quantile) {
                 py::buffer_info buf = vectors.request();
                 auto [count, dim] = get_2d_shape(buf);
                 if (q.dim() == 0) q.set_dim(dim);
                 if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    q.fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), drop_ratio);
+                    q.fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), quantile);
                 } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                    q.fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), drop_ratio);
+                    q.fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), quantile);
                 } else {
                     throw std::invalid_argument("vectors must be float32 or float16");
                 }
             },
-            py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+            py::arg("vectors"), py::arg("quantile") = 1.0f
         )
         .def(
             "quantize",
@@ -1646,19 +1646,19 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def_property_readonly("is_fitted", &deglib::transformation::ScalarQuantizerUint8::is_fitted)
         .def(
             "fit",
-            [](deglib::transformation::ScalarQuantizerUint8& q, py::array vectors, float drop_ratio) {
+            [](deglib::transformation::ScalarQuantizerUint8& q, py::array vectors, float quantile) {
                 py::buffer_info buf = vectors.request();
                 auto [count, dim] = get_2d_shape(buf);
                 if (q.dim() == 0) q.set_dim(dim);
                 if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    q.fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), drop_ratio);
+                    q.fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), quantile);
                 } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                    q.fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), drop_ratio);
+                    q.fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), quantile);
                 } else {
                     throw std::invalid_argument("vectors must be float32 or float16");
                 }
             },
-            py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+            py::arg("vectors"), py::arg("quantile") = 1.0f
         )
         .def(
             "quantize",
@@ -1705,19 +1705,19 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def_property_readonly("is_fitted", &deglib::transformation::ScalarQuantizerUint8PerDim::is_fitted)
         .def(
             "fit",
-            [](deglib::transformation::ScalarQuantizerUint8PerDim& q, py::array vectors, float drop_ratio) {
+            [](deglib::transformation::ScalarQuantizerUint8PerDim& q, py::array vectors, float quantile) {
                 py::buffer_info buf = vectors.request();
                 auto [count, dim] = get_2d_shape(buf);
                 if (q.dim() == 0) q.set_dim(dim);
                 if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    q.fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), drop_ratio);
+                    q.fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), quantile);
                 } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                    q.fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), drop_ratio);
+                    q.fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), quantile);
                 } else {
                     throw std::invalid_argument("vectors must be float32 or float16");
                 }
             },
-            py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+            py::arg("vectors"), py::arg("quantile") = 1.0f
         )
         .def(
             "quantize",
@@ -1756,24 +1756,23 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def_property_readonly("abs_max", &deglib::transformation::ScalarQuantizerFP16::abs_max)
         .def_property_readonly("scale", &deglib::transformation::ScalarQuantizerFP16::scale)
         .def_property_readonly("inv_scale", &deglib::transformation::ScalarQuantizerFP16::inv_scale)
-        .def_property_readonly("abs_max_quantile", &deglib::transformation::ScalarQuantizerFP16::abs_max_quantile)
+        .def_property_readonly("quantile", &deglib::transformation::ScalarQuantizerFP16::quantile)
         .def_property_readonly("is_fitted", &deglib::transformation::ScalarQuantizerFP16::is_fitted)
         .def(
             "fit",
-            [](deglib::transformation::ScalarQuantizerFP16& q, py::array vectors, float abs_max_quantile) {
+            [](deglib::transformation::ScalarQuantizerFP16& q, py::array vectors, float quantile) {
                 py::buffer_info buf = vectors.request();
                 auto [count, dim] = get_2d_shape(buf);
                 if (q.dim() == 0) q.set_dim(dim);
                 if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
                     q.fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim));
                 } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                    q.set_abs_max_quantile(abs_max_quantile);
-                    q.fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim));
+                    q.fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), quantile);
                 } else {
                     throw std::invalid_argument("vectors must be float32 or float16");
                 }
             },
-            py::arg("vectors"), py::arg("abs_max_quantile") = 1.0f
+            py::arg("vectors"), py::arg("quantile") = 1.0f
         )
         .def(
             "quantize",
@@ -1827,108 +1826,121 @@ PYBIND11_MODULE(deglib_cpp, m) {
 
     transformation_module.def(
         "make_scalar_quantizer_int8",
-        [](py::array vectors, float drop_ratio) {
+        [](py::array vectors, float quantile) {
             py::buffer_info buf = vectors.request();
             auto [count, dim] = get_2d_shape(buf);
             auto q = std::make_shared<deglib::transformation::ScalarQuantizerInt8>(dim, 1.0f);
             if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                q->fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), drop_ratio);
+                q->fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), quantile);
             } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                q->fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), drop_ratio);
+                q->fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), quantile);
             } else {
                 throw std::invalid_argument("vectors must be float32 or float16");
             }
             return q;
         },
-        py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+        py::arg("vectors"), py::arg("quantile") = 1.0f
     );
 
     transformation_module.def(
         "make_scalar_quantizer_int8_perdim",
-        [](py::array vectors, float drop_ratio) {
+        [](py::array vectors, float quantile) {
             py::buffer_info buf = vectors.request();
             auto [count, dim] = get_2d_shape(buf);
             auto q = std::make_shared<deglib::transformation::ScalarQuantizerInt8PerDim>(dim);
             if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                q->fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), drop_ratio);
+                q->fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), quantile);
             } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                q->fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), drop_ratio);
+                q->fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), quantile);
             } else {
                 throw std::invalid_argument("vectors must be float32 or float16");
             }
             return q;
         },
-        py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+        py::arg("vectors"), py::arg("quantile") = 1.0f
     );
 
     transformation_module.def(
         "make_scalar_quantizer_uint8",
-        [](py::array vectors, float drop_ratio) {
+        [](py::array vectors, float quantile) {
             py::buffer_info buf = vectors.request();
             auto [count, dim] = get_2d_shape(buf);
             auto q = std::make_shared<deglib::transformation::ScalarQuantizerUint8>(dim, 0.0f, 1.0f);
             if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                q->fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), drop_ratio);
+                q->fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), quantile);
             } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                q->fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), drop_ratio);
+                q->fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), quantile);
             } else {
                 throw std::invalid_argument("vectors must be float32 or float16");
             }
             return q;
         },
-        py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+        py::arg("vectors"), py::arg("quantile") = 1.0f
     );
 
     transformation_module.def(
         "make_scalar_quantizer_uint8_perdim",
-        [](py::array vectors, float drop_ratio) {
+        [](py::array vectors, float quantile) {
             py::buffer_info buf = vectors.request();
             auto [count, dim] = get_2d_shape(buf);
             auto q = std::make_shared<deglib::transformation::ScalarQuantizerUint8PerDim>(dim);
             if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                q->fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), drop_ratio);
+                q->fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), quantile);
             } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                q->fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), drop_ratio);
+                q->fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), quantile);
             } else {
                 throw std::invalid_argument("vectors must be float32 or float16");
             }
             return q;
         },
-        py::arg("vectors"), py::arg("drop_ratio") = 0.0f
+        py::arg("vectors"), py::arg("quantile") = 1.0f
     );
 
     transformation_module.def(
         "make_scalar_quantizer_fp16",
-        [](py::array vectors, float abs_max_quantile) {
+        [](py::array vectors, float quantile) {
             py::buffer_info buf = vectors.request();
             auto [count, dim] = get_2d_shape(buf);
-            auto q = std::make_shared<deglib::transformation::ScalarQuantizerFP16>(dim, 1.0f, abs_max_quantile);
+            auto q = std::make_shared<deglib::transformation::ScalarQuantizerFP16>(dim, 1.0f, quantile);
             if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
                 q->fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim));
             } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                q->fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim));
+                q->fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), quantile);
             } else {
                 throw std::invalid_argument("vectors must be float32 or float16");
             }
             return q;
         },
-        py::arg("vectors"), py::arg("abs_max_quantile") = 1.0f
+        py::arg("vectors"), py::arg("quantile") = 1.0f
     );
 
     transformation_module.def(
         "make_evp_quantizer",
-        [](uint32_t dim, uint32_t non_zeros) {
-            return std::make_shared<deglib::transformation::EvpQuantizer>(dim, non_zeros);
+        [](py::array vectors, uint32_t non_zeros, size_t num_threads) {
+            py::buffer_info buf = vectors.request();
+            auto [count, dim] = get_2d_shape(buf);
+            auto q = std::make_shared<deglib::transformation::EvpQuantizer>(dim, non_zeros);
+            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                q->fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), num_threads);
+            } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+                q->fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), num_threads);
+            } else {
+                throw std::invalid_argument("vectors must be float32 or float16");
+            }
+            return q;
         },
-        py::arg("dim") = 0,
+        py::arg("vectors"),
         py::arg("non_zeros") = 0,
-        "Factory function creating an EvpQuantizer.\n\n"
+        py::arg("num_threads") = 0,
+        "Factory function creating an EvpQuantizer calibrated on vectors.\n\n"
         "Parameters:\n"
         "-----------\n"
-        "dim : int, optional (default=0)\n"
-        "    Vector dimension (if 0, inferred during fit()).\n"
+        "vectors : np.ndarray\n"
+        "    Training vectors (float32 or float16) to fit the quantizer immediately.\n"
         "non_zeros : int, optional (default=0)\n"
-        "    Number of non-zero bits retained per vector. If 0, auto-calibrated during fit()."
+        "    Number of non-zero bits retained per vector. If 0, auto-calibrated during fit().\n"
+        "num_threads : int, optional (default=0)\n"
+        "    Number of worker threads used during fit(). 0 defaults to hardware concurrency."
     );
 
     transformation_module.def("mips_l2_transform", &mips_l2_transform_wrapper, py::arg("vectors"));

@@ -166,10 +166,7 @@ TEST(ScalarQuantize, Uint8AffineGlobalBasic) {
 TEST(ScalarQuantize, Uint8AffinePerDimBasic) {
     // 2 vectors, dim = 2
     // dim 0 in [0, 10], dim 1 in [-5, 5]
-    std::vector<float> vec = {
-        0.0f, -5.0f,
-        10.0f, 5.0f
-    };
+    std::vector<float> vec = {0.0f, -5.0f, 10.0f, 5.0f};
     const uint32_t dim = 2;
 
     deglib::transformation::ScalarQuantizerUint8PerDim quantizer(dim);
@@ -322,7 +319,7 @@ TEST(ScalarQuantize, MustBeFittedBeforeTransform) {
 TEST(ScalarQuantize, SizeValidationChecks) {
     const uint32_t dim = 4;
     deglib::transformation::ScalarQuantizerInt8 q_i8(dim, 1.0f);
-    std::vector<float> data(5, 1.0f); // Not multiple of dim
+    std::vector<float> data(5, 1.0f);  // Not multiple of dim
     std::vector<int8_t> out(4);
     std::span<std::byte> out_bytes(reinterpret_cast<std::byte*>(out.data()), sizeof(int8_t) * 4);
 
@@ -393,8 +390,7 @@ TEST(ScalarQuantize, FP16RoundtripPreservesL2Ordering) {
 
     // Dequantize first vector and compare to original within FP16 relative precision.
     std::vector<float> dequant(dim);
-    quantizer.dequantize(std::span<const std::byte>(reinterpret_cast<const std::byte*>(quant.data()), dim * sizeof(uint16_t)),
-                         std::span<float>(dequant));
+    quantizer.dequantize(std::span<const std::byte>(reinterpret_cast<const std::byte*>(quant.data()), dim * sizeof(uint16_t)), std::span<float>(dequant));
     for (uint32_t d = 0; d < dim; ++d) {
         float orig = data[d];
         // FP16 relative precision ~ 2^-11; scaling is power-of-two (exact), so error is only from FP16.
@@ -436,7 +432,9 @@ TEST(ScalarQuantize, FP16FactoryAndFP16InputEquivalence) {
 
     auto from_f32 = transform_db_helper<deglib::transformation::ScalarQuantizerFP16, float, uint16_t>(q, std::span<const float>(data_f32), 1);
     std::vector<uint16_t> from_fp16(count * dim);
-    q.transform_database(std::span<const uint16_t>(data_fp16), std::span<std::byte>(reinterpret_cast<std::byte*>(from_fp16.data()), from_fp16.size() * sizeof(uint16_t)));
+    q.transform_database(
+        std::span<const uint16_t>(data_fp16), std::span<std::byte>(reinterpret_cast<std::byte*>(from_fp16.data()), from_fp16.size() * sizeof(uint16_t))
+    );
     ASSERT_EQ(from_f32.size(), from_fp16.size());
     for (size_t i = 0; i < from_f32.size(); ++i) EXPECT_EQ(from_f32[i], from_fp16[i]);
 }
@@ -477,5 +475,5 @@ TEST(ScalarQuantize, FP16AbsMaxQuantile) {
     deglib::transformation::ScalarQuantizerFP16 q_q(dim, 1.0f, 0.75f);
     q_q.fit(std::span<const float>(data));
     EXPECT_LT(q_q.abs_max(), 1000000.0f);
-    EXPECT_FLOAT_EQ(q_q.abs_max_quantile(), 0.75f);
+    EXPECT_FLOAT_EQ(q_q.quantile(), 0.75f);
 }

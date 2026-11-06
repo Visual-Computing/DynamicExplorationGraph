@@ -387,7 +387,7 @@ from deglib.optimization import (
 
 # 1. State-aware Scalar Quantization (All classes support float32 & float16)
 # INT8 Quantizer [-127, 127] (Cosine / InnerProduct)
-quantizer = make_scalar_quantizer_int8(base_vectors, drop_ratio=0.0)
+quantizer = make_scalar_quantizer_int8(base_vectors, quantile=1.0)
 quant_base = quantizer.quantize(base_vectors)
 quant_query = quantizer.quantize(query_vectors)
 
@@ -559,7 +559,7 @@ from deglib.transformation import (
 
 # 1. Quantizer Factories
 evp_quantizer = make_evp_quantizer(non_zeros=32)
-sq_int8 = make_scalar_quantizer_int8(base_vectors, drop_ratio=0.0)
+sq_int8 = make_scalar_quantizer_int8(base_vectors, quantile=1.0)
 sq_uint8 = make_scalar_quantizer_uint8(base_vectors)
 sq_int8_perdim = make_scalar_quantizer_int8_perdim(base_vectors)
 sq_uint8_perdim = make_scalar_quantizer_uint8_perdim(base_vectors)

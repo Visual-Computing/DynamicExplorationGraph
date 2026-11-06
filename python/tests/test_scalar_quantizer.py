@@ -20,7 +20,7 @@ def test_int8_quantizer_fit_and_quantize():
     quantizer = ScalarQuantizerInt8()
     assert not quantizer.is_fitted
 
-    quantizer.fit(db_vectors, drop_ratio=0.0)
+    quantizer.fit(db_vectors, quantile=1.0)
     assert quantizer.is_fitted
     assert quantizer.abs_max > 4.5
     assert quantizer.scale == pytest.approx(127.0 / quantizer.abs_max, rel=1e-5)

@@ -24,10 +24,10 @@ namespace deglib::transformation {
 
 namespace detail {
 
-inline std::pair<float, float> find_minmax(const float* data, size_t total_items, float drop_ratio = 0.0f) {
+inline std::pair<float, float> find_minmax(const float* data, size_t total_items, float quantile = 1.0f) {
     if (total_items == 0) return {0.0f, 0.0f};
 
-    if (drop_ratio <= 0.0f) {
+    if (quantile >= 1.0f) {
         float min_val = data[0];
         float max_val = data[0];
         for (size_t i = 1; i < total_items; ++i) {
@@ -38,6 +38,7 @@ inline std::pair<float, float> find_minmax(const float* data, size_t total_items
         return {min_val, max_val};
     }
 
+    const float drop_ratio = std::max(0.0f, 1.0f - quantile);
     size_t top = static_cast<size_t>(static_cast<double>(total_items) * drop_ratio) + 1;
     std::priority_queue<float, std::vector<float>, std::less<float>> max_heap;
     std::priority_queue<float, std::vector<float>, std::greater<float>> min_heap;
@@ -62,10 +63,10 @@ inline std::pair<float, float> find_minmax(const float* data, size_t total_items
     return {max_heap.top(), min_heap.top()};
 }
 
-inline float find_absmax(const float* data, size_t total_items, float drop_ratio = 0.0f) {
+inline float find_absmax(const float* data, size_t total_items, float quantile = 1.0f) {
     if (total_items == 0) return 0.0f;
 
-    if (drop_ratio <= 0.0f) {
+    if (quantile >= 1.0f) {
         float abs_max = 0.0f;
         for (size_t i = 0; i < total_items; ++i) {
             float v = std::abs(data[i]);
@@ -74,6 +75,7 @@ inline float find_absmax(const float* data, size_t total_items, float drop_ratio
         return abs_max;
     }
 
+    const float drop_ratio = std::max(0.0f, 1.0f - quantile);
     size_t top = static_cast<size_t>(static_cast<double>(total_items) * drop_ratio) + 1;
     std::priority_queue<float, std::vector<float>, std::greater<float>> min_heap;
 
@@ -90,11 +92,11 @@ inline float find_absmax(const float* data, size_t total_items, float drop_ratio
     return min_heap.top();
 }
 
-inline void find_absmax_perdim(std::vector<float>& abs_maxs, const float* data, size_t n, uint32_t dim, float drop_ratio = 0.0f) {
+inline void find_absmax_perdim(std::vector<float>& abs_maxs, const float* data, size_t n, uint32_t dim, float quantile = 1.0f) {
     abs_maxs.assign(dim, 0.0f);
     if (n == 0 || dim == 0) return;
 
-    if (drop_ratio <= 0.0f) {
+    if (quantile >= 1.0f) {
         for (size_t i = 0; i < n; ++i) {
             const float* row = data + i * dim;
             for (uint32_t d = 0; d < dim; ++d) {
@@ -105,6 +107,7 @@ inline void find_absmax_perdim(std::vector<float>& abs_maxs, const float* data, 
         return;
     }
 
+    const float drop_ratio = std::max(0.0f, 1.0f - quantile);
     size_t top = static_cast<size_t>(static_cast<double>(n) * drop_ratio) + 1;
     std::vector<std::priority_queue<float, std::vector<float>, std::greater<float>>> min_heaps(dim);
 
@@ -127,13 +130,13 @@ inline void find_absmax_perdim(std::vector<float>& abs_maxs, const float* data, 
     }
 }
 
-inline void find_minmax_perdim(std::vector<float>& mins, std::vector<float>& maxs, const float* data, size_t n, uint32_t dim, float drop_ratio = 0.0f) {
+inline void find_minmax_perdim(std::vector<float>& mins, std::vector<float>& maxs, const float* data, size_t n, uint32_t dim, float quantile = 1.0f) {
     mins.assign(dim, std::numeric_limits<float>::max());
     maxs.assign(dim, std::numeric_limits<float>::lowest());
 
     if (n == 0 || dim == 0) return;
 
-    if (drop_ratio <= 0.0f) {
+    if (quantile >= 1.0f) {
         for (size_t i = 0; i < n; ++i) {
             const float* row = data + i * dim;
             for (uint32_t d = 0; d < dim; ++d) {
@@ -145,6 +148,7 @@ inline void find_minmax_perdim(std::vector<float>& mins, std::vector<float>& max
         return;
     }
 
+    const float drop_ratio = std::max(0.0f, 1.0f - quantile);
     size_t top = static_cast<size_t>(static_cast<double>(n) * drop_ratio) + 1;
     std::vector<std::priority_queue<float, std::vector<float>, std::less<float>>> max_heaps(dim);
     std::vector<std::priority_queue<float, std::vector<float>, std::greater<float>>> min_heaps(dim);
@@ -218,28 +222,28 @@ class ScalarQuantizerInt8 : public FeatureTransformation {
     bool is_fitted() const noexcept override { return is_fitted_; }
 
     void fit(std::span<const float> data) override {
-        fit(data, 0.0f);
+        fit(data, 1.0f);
     }
 
-    void fit(std::span<const float> data, float drop_ratio) {
+    void fit(std::span<const float> data, float quantile) {
         if (data.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerInt8: dim must be > 0 prior to fit()");
         if (data.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerInt8: data size must be multiple of dim");
         const size_t count = data.size() / dim_;
-        float found_max = detail::find_absmax(data.data(), count * dim_, drop_ratio);
+        float found_max = detail::find_absmax(data.data(), count * dim_, quantile);
         set_abs_max(found_max);
     }
 
     void fit(std::span<const uint16_t> data_fp16) override {
-        fit(data_fp16, 0.0f);
+        fit(data_fp16, 1.0f);
     }
 
-    void fit(std::span<const uint16_t> data_fp16, float drop_ratio) {
+    void fit(std::span<const uint16_t> data_fp16, float quantile) {
         if (data_fp16.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerInt8: dim must be > 0 prior to fit()");
         if (data_fp16.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerInt8: data size must be multiple of dim");
         const size_t total = data_fp16.size();
-        if (drop_ratio <= 0.0f) {
+        if (quantile >= 1.0f) {
             uint16_t max_half = 0;
             for (size_t i = 0; i < total; ++i) {
                 uint16_t mag = data_fp16[i] & 0x7FFFu;
@@ -252,7 +256,7 @@ class ScalarQuantizerInt8 : public FeatureTransformation {
             for (size_t i = 0; i < total; ++i) {
                 converted[i] = deglib::distances::fp16::fp16_to_float(data_fp16[i]);
             }
-            fit(std::span<const float>(converted), drop_ratio);
+            fit(std::span<const float>(converted), quantile);
         }
     }
 
@@ -450,23 +454,23 @@ class ScalarQuantizerUint8 : public FeatureTransformation {
     bool is_fitted() const noexcept override { return is_fitted_; }
 
     void fit(std::span<const float> data) override {
-        fit(data, 0.0f);
+        fit(data, 1.0f);
     }
 
-    void fit(std::span<const float> data, float drop_ratio) {
+    void fit(std::span<const float> data, float quantile) {
         if (data.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUint8: dim must be > 0 prior to fit()");
         if (data.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUint8: data size must be multiple of dim");
         const size_t count = data.size() / dim_;
-        auto [mi, ma] = detail::find_minmax(data.data(), count * dim_, drop_ratio);
+        auto [mi, ma] = detail::find_minmax(data.data(), count * dim_, quantile);
         set_range(mi, ma);
     }
 
     void fit(std::span<const uint16_t> data_fp16) override {
-        fit(data_fp16, 0.0f);
+        fit(data_fp16, 1.0f);
     }
 
-    void fit(std::span<const uint16_t> data_fp16, float drop_ratio) {
+    void fit(std::span<const uint16_t> data_fp16, float quantile) {
         if (data_fp16.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUint8: dim must be > 0 prior to fit()");
         if (data_fp16.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUint8: data size must be multiple of dim");
@@ -475,7 +479,7 @@ class ScalarQuantizerUint8 : public FeatureTransformation {
         for (size_t i = 0; i < total; ++i) {
             converted[i] = deglib::distances::fp16::fp16_to_float(data_fp16[i]);
         }
-        fit(std::span<const float>(converted), drop_ratio);
+        fit(std::span<const float>(converted), quantile);
     }
 
     void transform_database(std::span<const float> in, std::span<std::byte> out) const override {
@@ -664,10 +668,10 @@ class ScalarQuantizerFP16 : public FeatureTransformation {
     static constexpr float kFP16Max = 65504.0f;  // largest finite half-precision value
 
     ScalarQuantizerFP16() = default;
-    // abs_max_quantile: quantile in (0, 1] of the |value| distribution used as abs_max in fit().
+    // quantile: quantile in (0, 1] of the |value| distribution used as abs_max in fit().
     //   1.0 (default) -> strict maximum; 0.99 -> 99th percentile (top 1% clipped).
     explicit ScalarQuantizerFP16(float abs_max_val) { set_abs_max(abs_max_val); }
-    ScalarQuantizerFP16(uint32_t dim, float abs_max_val, float abs_max_quantile = 1.0f) : dim_(dim), abs_max_quantile_(abs_max_quantile) { set_abs_max(abs_max_val); }
+    ScalarQuantizerFP16(uint32_t dim, float abs_max_val, float quantile = 1.0f) : dim_(dim), quantile_(quantile) { set_abs_max(abs_max_val); }
 
     void set_abs_max(float val) {
         abs_max_ = (val <= 1e-12f) ? 1.0f : val;
@@ -678,7 +682,7 @@ class ScalarQuantizerFP16 : public FeatureTransformation {
     void set_dim(uint32_t d) noexcept { dim_ = d; }
 
     // Sets the |value| quantile in (0, 1] used by fit() to derive abs_max. See class doc.
-    void set_abs_max_quantile(float q) noexcept { abs_max_quantile_ = q; }
+    void set_quantile(float q) noexcept { quantile_ = q; }
 
     uint32_t tag() const noexcept override { return TAG_SQ16; }
     std::string_view name() const noexcept override { return "ScalarQuantizerFP16"; }
@@ -696,24 +700,31 @@ class ScalarQuantizerFP16 : public FeatureTransformation {
 
     uint32_t dim() const noexcept { return dim_; }
     float abs_max() const noexcept { return abs_max_; }
-    float abs_max_quantile() const noexcept { return abs_max_quantile_; }
+    float quantile() const noexcept { return quantile_; }
     float scale() const noexcept { return scale_; }
     float inv_scale() const noexcept { return inv_scale_; }
     bool is_fitted() const noexcept override { return is_fitted_; }
 
     void fit(std::span<const float> data) override {
+        fit(data, quantile_);
+    }
+
+    void fit(std::span<const float> data, float quantile) {
         if (data.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerFP16: dim must be > 0 prior to fit()");
         if (data.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerFP16: data size must be multiple of dim");
         const size_t count = data.size() / dim_;
-        // find_absmax takes a drop fraction (top fraction removed); quantile q -> drop (1 - q).
-        const float drop_ratio = 1.0f - abs_max_quantile_;
-        float found_max = detail::find_absmax(data.data(), count * dim_, drop_ratio);
+        quantile_ = quantile;
+        float found_max = detail::find_absmax(data.data(), count * dim_, quantile_);
         set_abs_max(found_max);
     }
 
     // Input is already FP16: nothing to quantize. No-op fit; vectors pass through unchanged.
     void fit(std::span<const uint16_t> data_fp16) override {
+        fit(data_fp16, 1.0f);
+    }
+
+    void fit(std::span<const uint16_t> data_fp16, float) {
         if (data_fp16.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerFP16: dim must be > 0 prior to fit()");
         if (data_fp16.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerFP16: data size must be multiple of dim");
@@ -851,7 +862,7 @@ class ScalarQuantizerFP16 : public FeatureTransformation {
     float abs_max_ = 1.0f;
     float scale_ = 1.0f;
     float inv_scale_ = 1.0f;
-    float abs_max_quantile_ = 1.0f;
+    float quantile_ = 1.0f;
     bool is_fitted_ = false;
 };
 
@@ -903,15 +914,15 @@ class ScalarQuantizerInt8PerDim : public FeatureTransformation {
     bool is_fitted() const noexcept override { return is_fitted_; }
 
     void fit(std::span<const float> data) override {
-        fit(data, 0.0f);
+        fit(data, 1.0f);
     }
 
-    void fit(std::span<const float> data, float drop_ratio) {
+    void fit(std::span<const float> data, float quantile) {
         if (data.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerInt8PerDim: dim must be > 0 prior to fit()");
         if (data.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerInt8PerDim: data size must be multiple of dim");
         const size_t count = data.size() / dim_;
-        detail::find_absmax_perdim(abs_maxs_, data.data(), count, dim_, drop_ratio);
+        detail::find_absmax_perdim(abs_maxs_, data.data(), count, dim_, quantile);
         scales_.resize(dim_);
         for (uint32_t j = 0; j < dim_; ++j) {
             float v = abs_maxs_[j];
@@ -922,10 +933,10 @@ class ScalarQuantizerInt8PerDim : public FeatureTransformation {
     }
 
     void fit(std::span<const uint16_t> data_fp16) override {
-        fit(data_fp16, 0.0f);
+        fit(data_fp16, 1.0f);
     }
 
-    void fit(std::span<const uint16_t> data_fp16, float drop_ratio) {
+    void fit(std::span<const uint16_t> data_fp16, float quantile) {
         if (data_fp16.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerInt8PerDim: dim must be > 0 prior to fit()");
         if (data_fp16.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerInt8PerDim: data size must be multiple of dim");
@@ -934,7 +945,7 @@ class ScalarQuantizerInt8PerDim : public FeatureTransformation {
         for (size_t i = 0; i < total; ++i) {
             converted[i] = deglib::distances::fp16::fp16_to_float(data_fp16[i]);
         }
-        fit(std::span<const float>(converted), drop_ratio);
+        fit(std::span<const float>(converted), quantile);
     }
 
     void transform_database(std::span<const float> in, std::span<std::byte> out) const override {
@@ -1136,15 +1147,15 @@ class ScalarQuantizerUint8PerDim : public FeatureTransformation {
     bool is_fitted() const noexcept override { return is_fitted_; }
 
     void fit(std::span<const float> data) override {
-        fit(data, 0.0f);
+        fit(data, 1.0f);
     }
 
-    void fit(std::span<const float> data, float drop_ratio) {
+    void fit(std::span<const float> data, float quantile) {
         if (data.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUint8PerDim: dim must be > 0 prior to fit()");
         if (data.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUint8PerDim: data size must be multiple of dim");
         const size_t count = data.size() / dim_;
-        detail::find_minmax_perdim(mins_, maxs_, data.data(), count, dim_, drop_ratio);
+        detail::find_minmax_perdim(mins_, maxs_, data.data(), count, dim_, quantile);
         scales_.resize(dim_);
         for (uint32_t j = 0; j < dim_; ++j) {
             float diff = maxs_[j] - mins_[j];
@@ -1155,10 +1166,10 @@ class ScalarQuantizerUint8PerDim : public FeatureTransformation {
     }
 
     void fit(std::span<const uint16_t> data_fp16) override {
-        fit(data_fp16, 0.0f);
+        fit(data_fp16, 1.0f);
     }
 
-    void fit(std::span<const uint16_t> data_fp16, float drop_ratio) {
+    void fit(std::span<const uint16_t> data_fp16, float quantile) {
         if (data_fp16.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUint8PerDim: dim must be > 0 prior to fit()");
         if (data_fp16.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUint8PerDim: data size must be multiple of dim");
@@ -1167,7 +1178,7 @@ class ScalarQuantizerUint8PerDim : public FeatureTransformation {
         for (size_t i = 0; i < total; ++i) {
             converted[i] = deglib::distances::fp16::fp16_to_float(data_fp16[i]);
         }
-        fit(std::span<const float>(converted), drop_ratio);
+        fit(std::span<const float>(converted), quantile);
     }
 
     void transform_database(std::span<const float> in, std::span<std::byte> out) const override {
@@ -1318,33 +1329,33 @@ class ScalarQuantizerUint8PerDim : public FeatureTransformation {
     bool is_fitted_ = false;
 };
 
-inline ScalarQuantizerInt8 make_scalar_quantizer_int8(std::span<const float> data, uint32_t dim, float drop_ratio = 0.0f) {
+inline ScalarQuantizerInt8 make_scalar_quantizer_int8(std::span<const float> data, uint32_t dim, float quantile = 1.0f) {
     ScalarQuantizerInt8 q(dim, 1.0f);
-    q.fit(data, drop_ratio);
+    q.fit(data, quantile);
     return q;
 }
 
-inline ScalarQuantizerUint8 make_scalar_quantizer_uint8(std::span<const float> data, uint32_t dim, float drop_ratio = 0.0f) {
+inline ScalarQuantizerUint8 make_scalar_quantizer_uint8(std::span<const float> data, uint32_t dim, float quantile = 1.0f) {
     ScalarQuantizerUint8 q(dim);
-    q.fit(data, drop_ratio);
+    q.fit(data, quantile);
     return q;
 }
 
-inline ScalarQuantizerFP16 make_scalar_quantizer_fp16(std::span<const float> data, uint32_t dim, float abs_max_quantile = 1.0f) {
-    ScalarQuantizerFP16 q(dim, 1.0f, abs_max_quantile);
+inline ScalarQuantizerFP16 make_scalar_quantizer_fp16(std::span<const float> data, uint32_t dim, float quantile = 1.0f) {
+    ScalarQuantizerFP16 q(dim, 1.0f, quantile);
     q.fit(data);
     return q;
 }
 
-inline ScalarQuantizerInt8PerDim make_scalar_quantizer_int8_perdim(std::span<const float> data, uint32_t dim, float drop_ratio = 0.0f) {
+inline ScalarQuantizerInt8PerDim make_scalar_quantizer_int8_perdim(std::span<const float> data, uint32_t dim, float quantile = 1.0f) {
     ScalarQuantizerInt8PerDim q(dim);
-    q.fit(data, drop_ratio);
+    q.fit(data, quantile);
     return q;
 }
 
-inline ScalarQuantizerUint8PerDim make_scalar_quantizer_uint8_perdim(std::span<const float> data, uint32_t dim, float drop_ratio = 0.0f) {
+inline ScalarQuantizerUint8PerDim make_scalar_quantizer_uint8_perdim(std::span<const float> data, uint32_t dim, float quantile = 1.0f) {
     ScalarQuantizerUint8PerDim q(dim);
-    q.fit(data, drop_ratio);
+    q.fit(data, quantile);
     return q;
 }
 

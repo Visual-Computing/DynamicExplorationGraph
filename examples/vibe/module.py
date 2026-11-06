@@ -1,7 +1,8 @@
 import time
 from pathlib import Path
-import numpy as np
+
 import deglib
+import numpy as np
 
 # Try relative import when executed inside VIBE framework (vibe/algorithms/deg/module.py)
 try:
@@ -205,7 +206,7 @@ class DEG(BaseANN):
 
         # 3. Optional MRNG edge pruning
         if self.prune_non_mrng:
-            deglib.optimization.prune_non_mrng_edges(graph, num_threads=1)
+            deglib.optimization.prune_non_mrng_edges(graph, num_threads=self.threads)
 
         self.graph = graph.to_readonly() if graph.is_mutable() else graph
         self.searcher = deglib.search.create_searcher(graph=self.graph)
@@ -215,7 +216,7 @@ class DEG(BaseANN):
         self.searcher.optimize()
         print(f"Optimized Searcher for the provided graph and hardware in {time.time() - t_km:.2f}s", flush=True)
 
-    def set_query_arguments(self, eps_or_ef: float | int):
+    def set_query_arguments(self, eps_or_ef: float):
         """Sets query-time parameter: values >= 1.0 are treated as ef, < 1.0 as eps."""
         self.eps_or_ef = float(eps_or_ef)
 
@@ -340,18 +341,18 @@ class QG(BaseANN):
 
         # 3. Optional MRNG edge pruning
         if self.prune_non_mrng:
-            deglib.optimization.prune_non_mrng_edges(loaded_graph, num_threads=1)
+            deglib.optimization.prune_non_mrng_edges(loaded_graph, num_threads=self.threads)
 
         # 4. Finalize ReadOnlyGraph with INT8 features using calibrated ScalarQuantizer
         # Both int8_features and rerank_data are derived directly from X_graph_order (row i = vertex i).
         self.quantizer = deglib.transformation.make_scalar_quantizer_int8(X)
-        int8_features = self.quantizer.quantize(X_graph_order, num_threads=1)
+        int8_features = self.quantizer.quantize(X_graph_order, num_threads=self.threads)
         target_space = deglib.FloatSpace.create(dim=dims, metric=self.int8_metric)
         self.graph = loaded_graph.to_readonly(target_space, int8_features, transformations=[self.quantizer])
 
         # 5. Initialize C++ Zero-overhead Searcher with FP16 Reranker & ScalarQuantizerFP16
         self.rerank_quantizer = deglib.transformation.make_scalar_quantizer_fp16(X)
-        rerank_features = self.rerank_quantizer.quantize(X_graph_order, num_threads=1)
+        rerank_features = self.rerank_quantizer.quantize(X_graph_order, num_threads=self.threads)
 
         self.searcher = deglib.search.create_searcher(
             graph=self.graph,
@@ -365,7 +366,7 @@ class QG(BaseANN):
         self.searcher.optimize()
         print(f"Optimized Searcher for the provided graph and hardware in {time.time() - t_km:.2f}s", flush=True)
 
-    def set_query_arguments(self, eps_or_ef: float | int, rerank_size_factor: float = 1.0):
+    def set_query_arguments(self, eps_or_ef: float, rerank_size_factor: float = 1.0):
         """Sets query-time parameters: values >= 1.0 are treated as ef, < 1.0 as eps."""
         self.rerank_size_factor = float(rerank_size_factor)
         self.eps_or_ef = float(eps_or_ef)
@@ -408,7 +409,6 @@ class EVP(BaseANN):
         opt_target: str = "LowLID",
         prune_non_mrng: bool = False,
         threads: int = 1,
-        non_zeros: int = 0,
     ):
         self.metric = metric.lower().strip()
         if self.metric not in _METRIC_MAP:
@@ -418,7 +418,6 @@ class EVP(BaseANN):
         self.opt_target = opt_target
         self.prune_non_mrng = bool(prune_non_mrng)
         self.threads = int(threads)
-        self.non_zeros = int(non_zeros)
         self.rerank_size_factor = 1.0
         self.search_eps = 0.0
         self.ef = 0
@@ -498,22 +497,28 @@ class EVP(BaseANN):
 
         # 3. Optional MRNG edge pruning
         if self.prune_non_mrng:
-            deglib.optimization.prune_non_mrng_edges(loaded_graph, num_threads=1)
+            deglib.optimization.prune_non_mrng_edges(loaded_graph, num_threads=self.threads)
 
         # 4. Finalize ReadOnlyGraph with EVP features
-        # If self.non_zeros == 0, EvpQuantizer::fit() in C++ automatically calibrates the optimal nz value.
-        self.quantizer = deglib.transformation.EvpQuantizer(dims, self.non_zeros)
-        self.quantizer.fit(X)
-        print(f"Quantizing with EVP (dim={dims}, non_zeros={self.quantizer.non_zeros} [~{self.quantizer.non_zeros/dims*100:.1f}%])...", flush=True)
+        # EvpQuantizer::fit() in C++ automatically calibrates the optimal nz value across threads.
+        self.quantizer = deglib.transformation.make_evp_quantizer(X, num_threads=self.threads)
+        print(
+            f"Quantizing with EVP (dim={dims}, non_zeros={self.quantizer.non_zeros} [~{self.quantizer.non_zeros / dims * 100:.1f}%])...",
+            flush=True,
+        )
         evp_features = self.quantizer.quantize(X_graph_order, num_threads=self.threads)
         target_space = deglib.FloatSpace.create(dim=dims, metric=deglib.Metric.EVP_InnerProduct)
         self.graph = loaded_graph.to_readonly(target_space, evp_features, transformations=[self.quantizer])
 
-        # 5. Initialize C++ Zero-overhead Searcher with FP16 base vectors
+        # 5. Initialize C++ Zero-overhead Searcher with FP16 base vectors & ScalarQuantizerFP16
+        self.rerank_quantizer = deglib.transformation.make_scalar_quantizer_fp16(X)
+        rerank_features = self.rerank_quantizer.quantize(X_graph_order, num_threads=self.threads)
+
         self.searcher = deglib.search.create_searcher(
             graph=self.graph,
             rerank_space=self.rerank_space_fp16,
-            rerank_data=deglib.distances.floats_to_fp16(X_graph_order),
+            rerank_data=rerank_features,
+            rerank_transformations=[self.rerank_quantizer],
         )
 
         # 6. Optimize entry vertices and prefetch values
@@ -521,7 +526,7 @@ class EVP(BaseANN):
         self.searcher.optimize()
         print(f"Optimized Searcher for EVP graph in {time.time() - t_km:.2f}s", flush=True)
 
-    def set_query_arguments(self, eps_or_ef: float | int, rerank_size_factor: float = 1.0):
+    def set_query_arguments(self, eps_or_ef: float, rerank_size_factor: float = 1.0):
         """Sets query-time parameters: values >= 1.0 are treated as ef, < 1.0 as eps."""
         self.rerank_size_factor = float(rerank_size_factor)
         self.eps_or_ef = float(eps_or_ef)
@@ -541,12 +546,13 @@ class EVP(BaseANN):
         )
 
     def __str__(self) -> str:
+        nz = self.quantizer.non_zeros if self.quantizer else 0
         if self.eps_or_ef >= 1.0:
             return (
-                f"DEG-EVP(k={self.k}, nz={self.non_zeros}, opt={self.opt_target}, prune_mrng={self.prune_non_mrng}, "
+                f"DEG-EVP(k={self.k}, nz={nz}, opt={self.opt_target}, prune_mrng={self.prune_non_mrng}, "
                 f"rerank_factor={self.rerank_size_factor}, ef={int(round(self.eps_or_ef))})"
             )
         return (
-            f"DEG-EVP(k={self.k}, nz={self.non_zeros}, opt={self.opt_target}, prune_mrng={self.prune_non_mrng}, "
+            f"DEG-EVP(k={self.k}, nz={nz}, opt={self.opt_target}, prune_mrng={self.prune_non_mrng}, "
             f"rerank_factor={self.rerank_size_factor}, eps={self.eps_or_ef})"
         )
