@@ -288,29 +288,15 @@ class Searcher:
         :param unsorted: If True, returns candidates in heap order instead of ascending distance order.
         :return: NumPy array of nearest neighbor IDs, or tuple ``(indices, distances)`` if `return_distances` is True.
         """
-        if query.ndim == 1 or (query.ndim == 2 and (query.shape[0] == 1 or query.shape[1] == 1)):
-            flat_query = np.ascontiguousarray(query.ravel())
-            return self.searcher_cpp.search(
-                flat_query,
-                int(k),
-                float(eps_or_ef),
-                float(rerank_factor),
-                return_distances,
-                unsorted,
-            )
-        elif query.ndim == 2:
-            contiguous_queries = np.ascontiguousarray(query)
-            return self.searcher_cpp.search_batch(
-                contiguous_queries,
-                int(k),
-                float(eps_or_ef),
-                float(rerank_factor),
-                int(threads),
-                return_distances,
-                unsorted,
-            )
-        else:
-            raise ValueError(f"query must be 1D or 2D NumPy array, got ndim={query.ndim} with shape {query.shape}")
+        return self.searcher_cpp.search(
+            query,
+            int(k),
+            float(eps_or_ef),
+            float(rerank_factor),
+            int(threads),
+            bool(return_distances),
+            bool(unsorted),
+        )
 
 
 def create_searcher(

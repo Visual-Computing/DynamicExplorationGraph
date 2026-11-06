@@ -666,41 +666,101 @@ class SearcherPy {
         searcher_->optimize(n_clusters, n_iter, sample_size, k, seed, num_threads);
     }
 
-    py::object search(py::array query, uint32_t k, float eps_or_ef = 0.1f, float rerank_factor = 1.0f, bool return_distances = false, bool unsorted = false) {
-        auto buf = query.request();
-        if (buf.ndim != 1 && (buf.ndim != 2 || (buf.shape[0] != 1 && buf.shape[1] != 1))) {
-            throw std::invalid_argument("search query must be 1D vector (or 1xDim / Dimx1 2D array)");
+    py::object search(
+        py::array query,
+        uint32_t k,
+        float eps_or_ef = 0.1f,
+        float rerank_factor = 1.0f,
+        size_t num_threads = 1,
+        bool return_distances = false,
+        bool unsorted = false
+    ) {
+        // Enforce C-contiguous array with zero-copy if already contiguous
+        auto c_query = py::array::ensure(query, py::array::c_style);
+        if (!c_query) {
+            throw std::invalid_argument("search: query must be convertible to a C-contiguous array");
         }
-        py::array_t<uint32_t> result(static_cast<py::ssize_t>(k));
-        uint32_t* out_ptr = static_cast<uint32_t*>(result.request().ptr);
+        auto buf = c_query.request();
 
-        py::array_t<float> dist_result;
-        float* dist_ptr = nullptr;
-        if (return_distances) {
-            dist_result = py::array_t<float>(static_cast<py::ssize_t>(k));
-            dist_ptr = static_cast<float*>(dist_result.request().ptr);
-        }
+        // 1D query or 2D single-row/single-column query -> execute fast single-query search
+        if (buf.ndim == 1 || (buf.ndim == 2 && (buf.shape[0] == 1 || buf.shape[1] == 1))) {
+            py::array_t<uint32_t> result(static_cast<py::ssize_t>(k));
+            uint32_t* out_ptr = static_cast<uint32_t*>(result.request().ptr);
 
-        uint32_t count = 0;
-        if (eps_or_ef >= 1.0f) {
-            const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
-            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                count = searcher_->search_ef_f16(static_cast<const uint16_t*>(buf.ptr), k, ef, rerank_factor, out_ptr, dist_ptr, unsorted);
-            } else {
-                count = searcher_->search_ef_f32(static_cast<const float*>(buf.ptr), k, ef, rerank_factor, out_ptr, dist_ptr, unsorted);
+            py::array_t<float> dist_result;
+            float* dist_ptr = nullptr;
+            if (return_distances) {
+                dist_result = py::array_t<float>(static_cast<py::ssize_t>(k));
+                dist_ptr = static_cast<float*>(dist_result.request().ptr);
             }
-        } else {
-            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                count = searcher_->search_f16(static_cast<const uint16_t*>(buf.ptr), k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, unsorted);
+
+            if (eps_or_ef >= 1.0f) {
+                const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    searcher_->search_ef_f16(static_cast<const uint16_t*>(buf.ptr), k, ef, rerank_factor, out_ptr, dist_ptr, unsorted);
+                } else {
+                    searcher_->search_ef_f32(static_cast<const float*>(buf.ptr), k, ef, rerank_factor, out_ptr, dist_ptr, unsorted);
+                }
             } else {
-                count = searcher_->search_f32(static_cast<const float*>(buf.ptr), k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, unsorted);
+                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                    searcher_->search_f16(static_cast<const uint16_t*>(buf.ptr), k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, unsorted);
+                } else {
+                    searcher_->search_f32(static_cast<const float*>(buf.ptr), k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, unsorted);
+                }
             }
+
+            if (return_distances) {
+                return py::make_tuple(result, dist_result);
+            }
+            return result;
         }
 
-        if (return_distances) {
-            return py::make_tuple(result, dist_result);
+        // 2D batch query
+        if (buf.ndim == 2) {
+            size_t n_queries = buf.shape[0];
+            auto result = py::array_t<uint32_t>({n_queries, size_t(k)});
+            uint32_t* out_ptr = static_cast<uint32_t*>(result.request().ptr);
+
+            py::array_t<float> dist_result;
+            float* dist_ptr = nullptr;
+            if (return_distances) {
+                dist_result = py::array_t<float>({n_queries, size_t(k)});
+                dist_ptr = static_cast<float*>(dist_result.request().ptr);
+            }
+
+            {
+                py::gil_scoped_release release;
+                if (eps_or_ef >= 1.0f) {
+                    const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
+                    if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                        searcher_->search_batch_ef_f16(
+                            static_cast<const uint16_t*>(buf.ptr), n_queries, k, ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted
+                        );
+                    } else {
+                        searcher_->search_batch_ef_f32(
+                            static_cast<const float*>(buf.ptr), n_queries, k, ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted
+                        );
+                    }
+                } else {
+                    if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+                        searcher_->search_batch_f16(
+                            static_cast<const uint16_t*>(buf.ptr), n_queries, k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted
+                        );
+                    } else {
+                        searcher_->search_batch_f32(
+                            static_cast<const float*>(buf.ptr), n_queries, k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted
+                        );
+                    }
+                }
+            }
+
+            if (return_distances) {
+                return py::make_tuple(result, dist_result);
+            }
+            return result;
         }
-        return result;
+
+        throw std::invalid_argument("search query must be 1D vector or 2D batch array");
     }
 
     py::object search_batch(
@@ -712,51 +772,7 @@ class SearcherPy {
         bool return_distances = false,
         bool unsorted = false
     ) {
-        auto buf = queries.request();
-        if (buf.ndim != 2) {
-            throw std::invalid_argument("search_batch queries must be 2D array");
-        }
-        size_t n_queries = buf.shape[0];
-        auto result = py::array_t<uint32_t>({n_queries, size_t(k)});
-        uint32_t* out_ptr = static_cast<uint32_t*>(result.request().ptr);
-
-        py::array_t<float> dist_result;
-        float* dist_ptr = nullptr;
-        if (return_distances) {
-            dist_result = py::array_t<float>({n_queries, size_t(k)});
-            dist_ptr = static_cast<float*>(dist_result.request().ptr);
-        }
-
-        {
-            py::gil_scoped_release release;
-            if (eps_or_ef >= 1.0f) {
-                const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
-                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    searcher_->search_batch_ef_f16(
-                        static_cast<const uint16_t*>(buf.ptr), n_queries, k, ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted
-                    );
-                } else {
-                    searcher_->search_batch_ef_f32(
-                        static_cast<const float*>(buf.ptr), n_queries, k, ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted
-                    );
-                }
-            } else {
-                if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    searcher_->search_batch_f16(
-                        static_cast<const uint16_t*>(buf.ptr), n_queries, k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted
-                    );
-                } else {
-                    searcher_->search_batch_f32(
-                        static_cast<const float*>(buf.ptr), n_queries, k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted
-                    );
-                }
-            }
-        }
-
-        if (return_distances) {
-            return py::make_tuple(result, dist_result);
-        }
-        return result;
+        return search(queries, k, eps_or_ef, rerank_factor, num_threads, return_distances, unsorted);
     }
 };
 
@@ -2106,14 +2122,15 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def_property("normalize_query", &SearcherPy::get_normalize_query, &SearcherPy::set_normalize_query)
         .def(
             "search", &SearcherPy::search, py::arg("query"), py::arg("k"), py::arg("eps_or_ef") = 0.1f, py::arg("rerank_factor") = 1.0f,
-            py::arg("return_distances") = false, py::arg("unsorted") = false,
-            "Search for nearest neighbors of a single query vector.\n\n"
+            py::arg("num_threads") = 1, py::arg("return_distances") = false, py::arg("unsorted") = false,
+            "Search for nearest neighbors of a single query vector (1D) or batch of query vectors (2D).\n\n"
             "Args:\n"
-            "    query: 1D query vector (or 1xDim 2D array).\n"
-            "    k: Number of nearest neighbors to return.\n"
+            "    query: 1D query vector or 2D batch array.\n"
+            "    k: Number of nearest neighbors to return per query.\n"
             "    eps_or_ef: Exploration parameter. Values >= 1.0 are treated as fixed pool size (ef),\n"
             "               values < 1.0 are treated as relative distance margin (eps).\n"
             "    rerank_factor: Expansion factor for exact candidate reranking (default: 1.0).\n"
+            "    num_threads: Number of worker threads for batch search (default: 1).\n"
             "    return_distances: If True, returns a tuple of (indices, distances).\n"
             "    unsorted: If True, returns candidates in heap order instead of ascending distance."
         )
