@@ -23,7 +23,7 @@ import deglib
 import deglib_cpp
 from deglib.distances import FloatSpace, Metric
 from deglib.cpu import InstructionSet
-from deglib.transformation import mips_l2_transform
+from deglib.transformation import mips_l2_transform, make_scalar_quantizer_fp16
 from deglib.optimization import presort
 
 from dataset import (
@@ -254,17 +254,24 @@ def construct_and_search_mips(
     t_build = time.perf_counter() - t0
     print(f"Graph construction completed in {t_build:.3f}s")
 
-    # 5. FP16 Feature Convert & Swap Phase
+    # 5. FP16 Feature Quantization & Swap Phase
     t0 = time.perf_counter()
-    database_fp16 = deglib.distances.floats_to_fp16(train_vectors)
+    quantizer = make_scalar_quantizer_fp16(train_vectors)
+    database_fp16 = quantizer.quantize(train_vectors, num_threads=build_threads)
     fp16_space = FloatSpace.create(dims, Metric.FP16_InnerProduct, instruction)
-    fp16_graph = graph.to_readonly(feature_space=fp16_space, custom_features=database_fp16)
+    fp16_graph = graph.to_readonly(
+        feature_space=fp16_space,
+        custom_features=database_fp16,
+        transformations=[quantizer],
+    )
     t_swap = time.perf_counter() - t0
-    print(f"FP16 feature conversion & ReadOnlyGraph swap completed in {t_swap * 1000:.2f}ms")
+    print(
+        f"FP16 quantization & ReadOnlyGraph swap completed in {t_swap * 1000:.2f}ms (scale: {quantizer.scale:.6g})"
+    )
 
-    # Convert queries to FP16
+    # Convert queries to FP16 using calibrated quantizer
     t0 = time.perf_counter()
-    queries_fp16 = deglib.distances.floats_to_fp16(query_vectors)
+    queries_fp16 = quantizer.quantize(query_vectors)
     t_qconvert = time.perf_counter() - t0
 
     # 6. FP16 Inner Product Search Phase (Sweep over max_dist_list with num_runs averaging)
