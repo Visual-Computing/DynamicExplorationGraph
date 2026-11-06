@@ -291,7 +291,6 @@ def main():
                     opt_target=opt_target,
                     prune_non_mrng=is_pruned,
                     threads=args.build_threads,
-                    non_zeros=cfg.get("non_zeros", 0),
                 )
                 query_dtype = "evp"
             else:
