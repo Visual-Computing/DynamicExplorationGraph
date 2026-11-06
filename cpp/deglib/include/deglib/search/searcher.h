@@ -29,6 +29,7 @@ namespace deglib::search {
 
 // Thread-local scratch workspace for query transformations and conversions
 struct QueryWorkspace {
+    std::vector<float> norm_buf;
     std::vector<float> f32_buf;
     std::vector<uint16_t> f16_buf;
     std::vector<std::byte> quant_buf1;
@@ -51,6 +52,7 @@ class Searcher {
     std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations_;
     KMeansEntrySelector entry_selector_;
     std::optional<Reranker> reranker_;
+    bool normalize_query_ = false;
 
     /**
      * Drains a ResultSet into destination buffers.
@@ -165,7 +167,17 @@ class Searcher {
         }
 
         const uint32_t dim = graph_->getFeatureSpace().dim();
-        const std::byte* graph_query_ptr = prepare_query(query, dim, ws);
+        const QueryT* effective_query = query;
+
+        if constexpr (std::is_same_v<QueryT, float>) {
+            if (normalize_query_) {
+                if (ws.norm_buf.size() < dim) ws.norm_buf.resize(dim);
+                deglib::transformation::detail::normalize_vector_l2(query, ws.norm_buf.data(), dim);
+                effective_query = ws.norm_buf.data();
+            }
+        }
+
+        const std::byte* graph_query_ptr = prepare_query(effective_query, dim, ws);
         const auto query_span = std::span<const std::byte>(graph_query_ptr, graph_->getFeatureSpace().get_data_size());
 
         // Select entry point: query routing medoid or static graph anchor
@@ -196,7 +208,7 @@ class Searcher {
                 for (size_t i = 0; i < ef_res.size(); ++i) {
                     cand_indices[i] = ef_res[i].getIdentifier();
                 }
-                uint32_t found = reranker_->rerank(query, dim, cand_indices, ef_res.size(), k, out_indices, out_distances, return_distances, unsorted);
+                uint32_t found = reranker_->rerank(effective_query, dim, cand_indices, ef_res.size(), k, out_indices, out_distances, return_distances, unsorted);
                 for (size_t i = 0; i < found; ++i) {
                     out_indices[i] = graph_->getExternalLabel(out_indices[i]);
                 }
@@ -229,7 +241,7 @@ class Searcher {
                 for (size_t i = 0; i < heap_res.size(); ++i) {
                     cand_indices[i] = heap_res[i].getIdentifier();
                 }
-                uint32_t found = reranker_->rerank(query, dim, cand_indices, heap_res.size(), k, out_indices, out_distances, return_distances, unsorted);
+                uint32_t found = reranker_->rerank(effective_query, dim, cand_indices, heap_res.size(), k, out_indices, out_distances, return_distances, unsorted);
                 for (size_t i = 0; i < found; ++i) {
                     out_indices[i] = graph_->getExternalLabel(out_indices[i]);
                 }
@@ -284,6 +296,9 @@ class Searcher {
         Reranker reranker
     )
         : graph_(&graph), transformations_(std::move(transformations)), entry_selector_(graph), reranker_(std::move(reranker)) {}
+
+    bool normalize_query() const noexcept { return normalize_query_; }
+    void set_normalize_query(bool val) noexcept { normalize_query_ = val; }
 
   public:
     // --- Raw Buffer Single-Query Search ---

@@ -196,6 +196,8 @@ class Searcher:
     :param graph: DynamicExplorationGraph (Mutable or ReadOnly) instance.
     :param rerank_space: Optional FloatSpace for exact candidate reranking.
     :param rerank_data: Optional base feature matrix in the graph's internal index order (0 .. size()-1, see ``graph.get_labels()``). Valid for static graphs.
+    :param rerank_transformations: Optional list of transformations applied to queries before candidate reranking.
+    :param normalize_query: If True, input queries are L2-normalized once before graph search and reranking.
     """
 
     def __init__(
@@ -204,6 +206,7 @@ class Searcher:
         rerank_space: FloatSpace | None = None,
         rerank_data: np.ndarray | None = None,
         rerank_transformations: list | None = None,
+        normalize_query: bool = False,
     ):
         cpp_graph = graph.dynamic_exploration_graph_cpp if hasattr(graph, "dynamic_exploration_graph_cpp") else graph
         cpp_rerank_space = (
@@ -221,7 +224,17 @@ class Searcher:
             rerank_space=cpp_rerank_space,
             base_vectors=rerank_data,
             rerank_transformations=cpp_rerank_transforms,
+            normalize_query=normalize_query,
         )
+
+    @property
+    def normalize_query(self) -> bool:
+        """Whether input queries are L2-normalized prior to search and rerank."""
+        return self.searcher_cpp.normalize_query
+
+    @normalize_query.setter
+    def normalize_query(self, val: bool) -> None:
+        self.searcher_cpp.normalize_query = bool(val)
 
     def optimize(
         self,
@@ -305,6 +318,7 @@ def create_searcher(
     rerank_space: FloatSpace | None = None,
     rerank_data: np.ndarray | None = None,
     rerank_transformations: list | None = None,
+    normalize_query: bool = False,
 ) -> Searcher:
     """
     Factory function to create a Searcher instance.
@@ -313,12 +327,14 @@ def create_searcher(
     :param rerank_space: Optional FloatSpace for exact candidate reranking.
     :param rerank_data: Optional base feature matrix. In standard static workflows, simply pass the same array used for building. If labels were permuted/deleted, pass features aligned with ``graph.get_labels()``.
     :param rerank_transformations: Optional list of transformations applied to queries before candidate reranking.
+    :param normalize_query: If True, input queries are L2-normalized once before graph search and reranking.
     """
     return Searcher(
         graph=graph,
         rerank_space=rerank_space,
         rerank_data=rerank_data,
         rerank_transformations=rerank_transformations,
+        normalize_query=normalize_query,
     )
 
 

@@ -20,6 +20,9 @@ Feature Transformations
 .. autoclass:: deglib.transformation.MipsTransform
    :members:
 
+.. autoclass:: deglib.transformation.L2NormalizeTransform
+   :members:
+
 .. autofunction:: deglib.transformation.mips_l2_transform
 
 .. autofunction:: deglib.transformation.mips_l2_transform_query
@@ -62,8 +65,13 @@ Quantizers
 .. autoclass:: deglib.transformation.ScalarQuantizerUint8PerDim
    :members:
 
-Quantizer Factories
--------------------
+.. autoclass:: deglib.transformation.ScalarQuantizerFP16
+   :members:
+
+Quantizer & Transform Factories
+-------------------------------
+
+.. autofunction:: deglib.transformation.make_l2_normalize_transform
 
 .. autofunction:: deglib.transformation.make_evp_quantizer
 
@@ -74,6 +82,8 @@ Quantizer Factories
 .. autofunction:: deglib.transformation.make_scalar_quantizer_uint8
 
 .. autofunction:: deglib.transformation.make_scalar_quantizer_uint8_perdim
+
+.. autofunction:: deglib.transformation.make_scalar_quantizer_fp16
 
 Pipeline Serialization & Application
 ------------------------------------
@@ -124,9 +134,8 @@ EVP Bit-Packing with Auto-Calibration
    dim = 512
    data = np.random.randn(10000, dim).astype(np.float32)
 
-   # dim=dim, non_zeros=0 enables data-driven auto-calibration on fit()
-   quantizer = deglib.transformation.make_evp_quantizer(dim=dim, non_zeros=0)
-   quantizer.fit(data)
+   # Auto-calibrates optimal non_zeros directly on data
+   quantizer = deglib.transformation.make_evp_quantizer(data)
    print(f"Calibrated optimal non_zeros: {quantizer.non_zeros}")
 
    # Quantize base data into packed bitmasks (2 * ((dim + 7) // 8) bytes per vector)

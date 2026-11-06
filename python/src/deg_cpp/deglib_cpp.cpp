@@ -642,7 +642,8 @@ class SearcherPy {
         const deglib::DynamicExplorationGraph& graph,
         std::optional<deglib::distances::FloatSpace> rerank_space = std::nullopt,
         std::optional<py::array> base_vectors = std::nullopt,
-        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> rerank_transformations = {}
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> rerank_transformations = {},
+        bool normalize_query = false
     ) {
         if (rerank_space.has_value() && base_vectors.has_value() && !base_vectors->is_none()) {
             base_vectors_holder_ = *base_vectors;
@@ -654,7 +655,11 @@ class SearcherPy {
         } else {
             searcher_ = deglib::make_searcher(graph);
         }
+        searcher_->set_normalize_query(normalize_query);
     }
+
+    bool get_normalize_query() const noexcept { return searcher_->normalize_query(); }
+    void set_normalize_query(bool val) noexcept { searcher_->set_normalize_query(val); }
 
     void optimize(uint32_t n_clusters = 256, uint32_t n_iter = 20, size_t sample_size = 0, uint32_t k = 100, uint32_t seed = 7, size_t num_threads = 1) {
         py::gil_scoped_release release;
@@ -1824,6 +1829,35 @@ PYBIND11_MODULE(deglib_cpp, m) {
             return std::shared_ptr<deglib::transformation::ScalarQuantizerFP16>(deglib::transformation::ScalarQuantizerFP16::deserialize(ss));
         });
 
+    py::class_<
+        deglib::transformation::L2NormalizeTransform, deglib::transformation::FeatureTransformation,
+        std::shared_ptr<deglib::transformation::L2NormalizeTransform>>(transformation_module, "L2NormalizeTransform")
+        .def(py::init<>())
+        .def(py::init<uint32_t>(), py::arg("dim"))
+        .def_property("dim", &deglib::transformation::L2NormalizeTransform::dim, &deglib::transformation::L2NormalizeTransform::set_dim)
+        .def(
+            "transform",
+            [](const deglib::transformation::L2NormalizeTransform& t, py::array_t<float, py::array::c_style> vectors, size_t num_threads) {
+                py::buffer_info buf = vectors.request();
+                auto [count, dim] = get_2d_shape(buf);
+                py::array_t<float> output({count, static_cast<size_t>(dim)});
+                py::buffer_info out_buf = output.request();
+                t.transform_database(
+                    std::span<const float>(static_cast<const float*>(buf.ptr), count * dim),
+                    std::span<std::byte>(static_cast<std::byte*>(out_buf.ptr), count * dim * sizeof(float)),
+                    num_threads
+                );
+                return output;
+            },
+            py::arg("vectors"), py::arg("num_threads") = 0,
+            "Normalizes vectors to unit L2 length (||x||_2 = 1.0)."
+        )
+        .def_static("deserialize", [](py::bytes b) {
+            std::string s = b;
+            std::istringstream ss(s, std::ios::binary);
+            return deglib::transformation::L2NormalizeTransform::deserialize(ss);
+        });
+
     transformation_module.def(
         "make_scalar_quantizer_int8",
         [](py::array vectors, float quantile) {
@@ -1943,6 +1977,15 @@ PYBIND11_MODULE(deglib_cpp, m) {
         "    Number of worker threads used during fit(). 0 defaults to hardware concurrency."
     );
 
+    transformation_module.def(
+        "make_l2_normalize_transform",
+        [](uint32_t dim) {
+            return std::make_shared<deglib::transformation::L2NormalizeTransform>(dim);
+        },
+        py::arg("dim") = 0,
+        "Factory function creating an L2NormalizeTransform."
+    );
+
     transformation_module.def("mips_l2_transform", &mips_l2_transform_wrapper, py::arg("vectors"));
     transformation_module.def("mips_l2_transform_query", &mips_l2_transform_query_wrapper, py::arg("queries"));
 
@@ -1990,6 +2033,8 @@ PYBIND11_MODULE(deglib_cpp, m) {
     m.attr("ScalarQuantizerInt8PerDim") = transformation_module.attr("ScalarQuantizerInt8PerDim");
     m.attr("ScalarQuantizerUint8PerDim") = transformation_module.attr("ScalarQuantizerUint8PerDim");
     m.attr("ScalarQuantizerFP16") = transformation_module.attr("ScalarQuantizerFP16");
+    m.attr("L2NormalizeTransform") = transformation_module.attr("L2NormalizeTransform");
+    m.attr("make_l2_normalize_transform") = transformation_module.attr("make_l2_normalize_transform");
     m.attr("make_evp_quantizer") = transformation_module.attr("make_evp_quantizer");
     m.attr("make_scalar_quantizer_int8") = transformation_module.attr("make_scalar_quantizer_int8");
     m.attr("make_scalar_quantizer_int8_perdim") = transformation_module.attr("make_scalar_quantizer_int8_perdim");
@@ -2047,15 +2092,18 @@ PYBIND11_MODULE(deglib_cpp, m) {
                 const deglib::DynamicExplorationGraph&,
                 std::optional<deglib::distances::FloatSpace>,
                 std::optional<py::array>,
-                std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>
+                std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>,
+                bool
             >(),
             py::arg("graph"),
             py::arg("rerank_space") = std::nullopt,
             py::arg("base_vectors") = std::nullopt,
             py::arg("rerank_transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{},
+            py::arg("normalize_query") = false,
             py::keep_alive<1, 2>(),
             "base_vectors must follow the graph's internal index order (0 .. size()-1, see graph.get_labels()). Valid for static graphs."
         )
+        .def_property("normalize_query", &SearcherPy::get_normalize_query, &SearcherPy::set_normalize_query)
         .def(
             "search", &SearcherPy::search, py::arg("query"), py::arg("k"), py::arg("eps_or_ef") = 0.1f, py::arg("rerank_factor") = 1.0f,
             py::arg("return_distances") = false, py::arg("unsorted") = false,

@@ -17,9 +17,9 @@ import deglib
 | [`deglib`](#1-root-package-deglib) | `DynamicExplorationGraph`, `build_from_data`, `load_*` | Main user facade for querying, exploration, and graph lifecycle. |
 | [`deglib.builder`](#2-module-deglibbuilder) | `GraphBuilder`, `OptimizationTarget`, `build_from_data` | Incremental vector addition/deletion, parallel batch construction, and optimization. |
 | [`deglib.distances`](#3-module-deglibdistances) | `FloatSpace`, `Metric`, `floats_to_fp16`, `fp16_to_floats` | Vector metrics, SIMD feature spaces, and batch distance evaluation. |
-| [`deglib.search`](#4-module-deglibsearch) | `Filter`, `rerank` | Bitset-based label filtering and exact distance candidate reranking for ANNS search. |
-| [`deglib.optimization`](#5-module-degliboptimization) | `prune_*`, `presort`, `mips_l2_*`, `quantize_*` | RNG graph pruning, FLAS 1D dataset presorting, MIPS L2 transformations, EVP and Scalar quantization (Int8/Uint8). |
-| [`deglib.transformation`](#8-module-deglibtransformation) | `FeatureTransformation`, `MipsTransform`, `EvpQuantizer`, `ScalarQuantizer*` | Vector feature transformations, quantizers, and serialization pipeline. |
+| [`deglib.search`](#4-module-deglibsearch) | `Filter`, `rerank`, `Searcher`, `create_searcher` | Bitset-based label filtering, exact distance candidate reranking, and unified query search pipeline. |
+| [`deglib.optimization`](#5-module-degliboptimization) | `prune_*`, `presort`, `mips_l2_*`, `quantize_*` | RNG graph pruning, FLAS 1D dataset presorting, MIPS L2 transformations, EVP and Scalar quantization (Int8/Uint8/FP16). |
+| [`deglib.transformation`](#8-module-deglibtransformation) | `FeatureTransformation`, `MipsTransform`, `L2NormalizeTransform`, `EvpQuantizer`, `ScalarQuantizer*` | Vector feature transformations, normalizers, quantizers, and serialization pipeline. |
 | [`deglib.analysis`](#6-module-deglibanalysis) | `analyze_graph`, `check_*`, `calc_*` | Graph validation, connectivity verification, and reachability metrics. |
 | [`deglib.cpu`](#7-module-deglibcpu) | `InstructionSet`, `has_avx2`, `has_avx_vnni`, `has_avx512`, `has_avx512_vnni` | Runtime CPU SIMD capability detection and instruction set enum. |
 
@@ -347,6 +347,24 @@ class Searcher:
     optimize(n_clusters=256, n_iter=20, sample_size=0, k=100, seed=7, num_threads=1)
 
     # Search for nearest neighbors of a single query (1D) or a batch of queries (2D).
+```python
+class Searcher:
+    def __init__(
+        self,
+        graph,
+        rerank_space=None,
+        rerank_data=None,
+        rerank_transformations=None,
+        normalize_query=False,
+    ):
+        ...
+
+    # Property to check or toggle query L2 normalization
+    normalize_query: bool
+
+    # Optimize entry vertices via k-means medoids and tune prefetch parameters
+    optimize(n_clusters=256, n_iter=20, sample_size=0, k=100, seed=7, num_threads=1) -> None
+
     # query: 1D vector [D] or 2D batch [N, D]
     # k: Number of nearest neighbors to return
     # eps_or_ef: Exploration parameter. Values >= 1.0 are treated as fixed pool size (ef),
@@ -357,7 +375,13 @@ class Searcher:
     # unsorted: If True, returns candidates in heap order instead of ascending distance order
     search(query, k, eps_or_ef=0.1, rerank_factor=1.0, threads=1, return_distances=False, unsorted=False) -> np.ndarray | tuple[np.ndarray, np.ndarray]
 
-create_searcher(graph, rerank_space=None, rerank_data=None) -> Searcher
+create_searcher(
+    graph,
+    rerank_space=None,
+    rerank_data=None,
+    rerank_transformations=None,
+    normalize_query=False,
+) -> Searcher
 ```
 
 ---
@@ -539,16 +563,20 @@ Feature preprocessing, coordinate space transformations, and vector quantization
 from deglib.transformation import (
     FeatureTransformation,
     MipsTransform,
+    L2NormalizeTransform,
     EvpQuantizer,
     ScalarQuantizerInt8,
     ScalarQuantizerUint8,
     ScalarQuantizerInt8PerDim,
     ScalarQuantizerUint8PerDim,
+    ScalarQuantizerFP16,
+    make_l2_normalize_transform,
     make_evp_quantizer,
     make_scalar_quantizer_int8,
     make_scalar_quantizer_int8_perdim,
     make_scalar_quantizer_uint8,
     make_scalar_quantizer_uint8_perdim,
+    make_scalar_quantizer_fp16,
     apply_database,
     apply_query,
     serialize_transformations,
@@ -557,12 +585,19 @@ from deglib.transformation import (
     mips_l2_transform_query,
 )
 
-# 1. Quantizer Factories
-evp_quantizer = make_evp_quantizer(non_zeros=32)
-sq_int8 = make_scalar_quantizer_int8(base_vectors, quantile=1.0)
-sq_uint8 = make_scalar_quantizer_uint8(base_vectors)
-sq_int8_perdim = make_scalar_quantizer_int8_perdim(base_vectors)
-sq_uint8_perdim = make_scalar_quantizer_uint8_perdim(base_vectors)
+# 1. Normalization & Transformations
+norm_transform = make_l2_normalize_transform(dim=128) # or L2NormalizeTransform(dim=128)
+norm_base = norm_transform.transform(base_vectors)
+
+# 2. State-aware Scalar & Float Quantization (All classes support float32 & float16)
+# INT8 Quantizer [-127, 127] (Cosine / InnerProduct)
+quantizer = make_scalar_quantizer_int8(base_vectors, quantile=1.0)
+quant_base = quantizer.quantize(base_vectors)
+quant_query = quantizer.quantize(query_vectors)
+
+# FP16 Cast Quantizer (Half-precision IEEE 754)
+fp16_quantizer = make_scalar_quantizer_fp16(base_vectors)
+quant_fp16_base = fp16_quantizer.quantize(base_vectors)
 
 # 2. Sequential Pipeline Execution
 # Apply a sequence of transformations to database vectors:

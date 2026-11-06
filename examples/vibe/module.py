@@ -209,7 +209,10 @@ class DEG(BaseANN):
             deglib.optimization.prune_non_mrng_edges(graph, num_threads=self.threads)
 
         self.graph = graph.to_readonly() if graph.is_mutable() else graph
-        self.searcher = deglib.search.create_searcher(graph=self.graph)
+        self.searcher = deglib.search.create_searcher(
+            graph=self.graph,
+            normalize_query=(self.metric == "cosine"),
+        )
 
         # 4s. Optimize entry vertices and prefetch values
         t_km = time.time()
@@ -222,8 +225,6 @@ class DEG(BaseANN):
 
     def query(self, v: np.ndarray, n: int) -> np.ndarray:
         """Single query search on 1 thread with Float32 via C++ searcher."""
-        if self.metric == "cosine":
-            v = v / np.linalg.norm(v)
         return self.searcher.search(
             np.ascontiguousarray(v, dtype=np.float32),
             k=n,
@@ -359,6 +360,7 @@ class QG(BaseANN):
             rerank_space=self.rerank_space_fp16,
             rerank_data=rerank_features,
             rerank_transformations=[self.rerank_quantizer],
+            normalize_query=(self.metric == "cosine"),
         )
 
         # 6. Full searcher optimization
@@ -373,8 +375,6 @@ class QG(BaseANN):
 
     def query(self, v: np.ndarray, n: int) -> np.ndarray:
         """Single query search on 1 thread with INT8 search and FP16 reranking directly in C++."""
-        if self.metric == "cosine":
-            v = v / np.linalg.norm(v)
         return self.searcher.search(
             np.ascontiguousarray(v, dtype=np.float32),
             k=n,
@@ -519,6 +519,7 @@ class EVP(BaseANN):
             rerank_space=self.rerank_space_fp16,
             rerank_data=rerank_features,
             rerank_transformations=[self.rerank_quantizer],
+            normalize_query=(self.metric == "cosine"),
         )
 
         # 6. Optimize entry vertices and prefetch values
@@ -533,8 +534,6 @@ class EVP(BaseANN):
 
     def query(self, v: np.ndarray, n: int) -> np.ndarray:
         """Single query search on 1 thread with EVP search and FP16 reranking."""
-        if self.metric == "cosine":
-            v = v / np.linalg.norm(v)
         return self.searcher.search(
             np.ascontiguousarray(v, dtype=np.float32),
             k=n,

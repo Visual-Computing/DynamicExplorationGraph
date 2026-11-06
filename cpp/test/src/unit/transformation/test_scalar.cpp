@@ -152,7 +152,7 @@ TEST(ScalarQuantize, Uint8AffineGlobalBasic) {
     const uint32_t dim = 5;
 
     deglib::transformation::ScalarQuantizerUint8 quantizer(dim);
-    quantizer.fit(std::span<const float>(vec), 0.0f);
+    quantizer.fit(std::span<const float>(vec), 1.0f);
     auto result = transform_db_helper<deglib::transformation::ScalarQuantizerUint8, float, uint8_t>(quantizer, std::span<const float>(vec), 1);
 
     ASSERT_EQ(result.size(), 5u);
@@ -170,7 +170,7 @@ TEST(ScalarQuantize, Uint8AffinePerDimBasic) {
     const uint32_t dim = 2;
 
     deglib::transformation::ScalarQuantizerUint8PerDim quantizer(dim);
-    quantizer.fit(std::span<const float>(vec), 0.0f);
+    quantizer.fit(std::span<const float>(vec), 1.0f);
     auto result = transform_db_helper<deglib::transformation::ScalarQuantizerUint8PerDim, float, uint8_t>(quantizer, std::span<const float>(vec), 1);
 
     ASSERT_EQ(result.size(), 4u);

@@ -4,6 +4,7 @@ import deglib_cpp
 # Core FeatureTransformation and Quantizer Classes
 FeatureTransformation = deglib_cpp.transformation.FeatureTransformation
 MipsTransform = deglib_cpp.transformation.MipsTransform
+L2NormalizeTransform = deglib_cpp.transformation.L2NormalizeTransform
 EvpQuantizer = deglib_cpp.transformation.EvpQuantizer
 ScalarQuantizerInt8 = deglib_cpp.transformation.ScalarQuantizerInt8
 ScalarQuantizerUint8 = deglib_cpp.transformation.ScalarQuantizerUint8
@@ -12,6 +13,7 @@ ScalarQuantizerUint8PerDim = deglib_cpp.transformation.ScalarQuantizerUint8PerDi
 ScalarQuantizerFP16 = deglib_cpp.transformation.ScalarQuantizerFP16
 
 # Factory Functions
+make_l2_normalize_transform = deglib_cpp.transformation.make_l2_normalize_transform
 make_evp_quantizer = deglib_cpp.transformation.make_evp_quantizer
 
 
@@ -71,12 +73,14 @@ def mips_l2_transform_query(queries: np.ndarray) -> np.ndarray:
 __all__ = [
     "FeatureTransformation",
     "MipsTransform",
+    "L2NormalizeTransform",
     "EvpQuantizer",
     "ScalarQuantizerInt8",
     "ScalarQuantizerUint8",
     "ScalarQuantizerInt8PerDim",
     "ScalarQuantizerUint8PerDim",
     "ScalarQuantizerFP16",
+    "make_l2_normalize_transform",
     "make_evp_quantizer",
     "make_scalar_quantizer_int8",
     "make_scalar_quantizer_int8_perdim",

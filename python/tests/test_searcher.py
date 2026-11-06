@@ -291,3 +291,36 @@ def test_searcher_rerank_insertion_order_with_permuted_labels():
         res = searcher.search(data[j], k=5, eps_or_ef=128, rerank_factor=1.5)
         assert int(perm[j]) in set(int(x) for x in res)
         assert res[0] == perm[j]
+
+
+def test_searcher_normalize_query():
+    np.random.seed(42)
+    dim = 32
+    n = 100
+    # Create unnormalized vectors
+    data = (np.random.randn(n, dim) * 5.0).astype(np.float32)
+    # Base graph uses normalized vectors with InnerProduct metric
+    norm_data = data / np.linalg.norm(data, axis=1, keepdims=True)
+    graph = deglib.builder.build_from_data(norm_data, edges_per_vertex=16, metric=Metric.FP32_InnerProduct)
+
+    # Searcher with normalize_query=True
+    searcher = create_searcher(graph, normalize_query=True)
+    assert searcher.normalize_query is True
+
+    # Search with unnormalized query
+    raw_query = data[10] * 3.5
+    res, dist = searcher.search(raw_query, k=5, eps_or_ef=0.2, return_distances=True)
+    assert res[0] == 10
+    # For normalized inner product (1 - <q, v>), identical directions yield distance ~ 0
+    assert dist[0] == pytest.approx(0.0, abs=1e-5)
+
+    # Batch search with normalize_query=True
+    raw_batch = data[:5] * 2.7
+    res_batch, dist_batch = searcher.search(raw_batch, k=5, eps_or_ef=0.2, return_distances=True, threads=2)
+    for i in range(5):
+        assert res_batch[i, 0] == i
+        assert dist_batch[i, 0] == pytest.approx(0.0, abs=1e-5)
+
+    # Toggle normalize_query setter
+    searcher.normalize_query = False
+    assert searcher.normalize_query is False

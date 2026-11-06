@@ -30,6 +30,7 @@ inline constexpr uint32_t TAG_SQ16 = make_fourcc('S', 'Q', '1', '6');
 inline constexpr uint32_t TAG_SQ8P = make_fourcc('S', 'Q', '8', 'P');
 inline constexpr uint32_t TAG_SQUP = make_fourcc('S', 'Q', 'U', 'P');
 inline constexpr uint32_t TAG_EVPQ = make_fourcc('E', 'V', 'P', 'Q');
+inline constexpr uint32_t TAG_NORM = make_fourcc('N', 'O', 'R', 'M');
 
 /**
  * @brief Abstract base class for all feature and vector transformations.
@@ -81,6 +82,7 @@ class FeatureTransformation {
 
 #include "deglib/transformation/evp.h"
 #include "deglib/transformation/mips.h"
+#include "deglib/transformation/normalize.h"
 #include "deglib/transformation/scalar.h"
 
 namespace deglib::transformation {
@@ -110,6 +112,8 @@ inline std::shared_ptr<FeatureTransformation> deserialize_transformation(std::is
             return ScalarQuantizerUint8PerDim::deserialize(ss);
         case TAG_EVPQ:
             return EvpQuantizer::deserialize(ss);
+        case TAG_NORM:
+            return L2NormalizeTransform::deserialize(ss);
         default:
             return nullptr;
     }

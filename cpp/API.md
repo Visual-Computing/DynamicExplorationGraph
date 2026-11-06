@@ -594,6 +594,34 @@ public:
     void optimize(size_t sample_count = 50, size_t num_candidates = 100, uint32_t k = 10);
 };
 
+/// High-performance stateless Searcher coordinating query transformation, graph exploration, and reranking.
+template <typename GraphT, typename QueryT = float>
+class Searcher {
+public:
+    bool normalize_query() const noexcept;
+    void set_normalize_query(bool val) noexcept;
+
+    void optimize(
+        uint32_t n_clusters = 256,
+        uint32_t n_iter = 20,
+        size_t sample_size = 0,
+        uint32_t k = 100,
+        uint32_t seed = 7,
+        size_t num_threads = 1
+    );
+
+    uint32_t search(
+        const QueryT* query,
+        uint32_t k,
+        float eps_or_ef = 0.1f,
+        float rerank_factor = 1.0f,
+        uint32_t* out_indices = nullptr,
+        float* out_distances = nullptr,
+        bool return_distances = false,
+        bool unsorted = false
+    );
+};
+
 } // namespace deglib::search
 ```
 
@@ -987,12 +1015,34 @@ public:
     std::span<const float> mins() const noexcept;
     std::span<const float> maxs() const noexcept;
     std::span<const float> scales() const noexcept;
-    void fit(std::span<const float> data, float drop_ratio = 0.0f);
-    void fit(std::span<const uint16_t> data_fp16, float drop_ratio = 0.0f);
+    void fit(std::span<const float> data, float quantile = 1.0f);
+    void fit(std::span<const uint16_t> data_fp16, float quantile = 1.0f);
     void transform_database(std::span<const float> in, std::span<std::byte> out) const override;
     void transform_query(std::span<const float> in, std::span<std::byte> out) const override;
     void serialize(std::ostream& os) const override;
     static std::unique_ptr<ScalarQuantizerUint8PerDim> deserialize(std::istream& is);
+};
+
+/// Half-precision IEEE 754 float16 cast transformation
+class ScalarQuantizerFP16 : public FeatureTransformation {
+public:
+    explicit ScalarQuantizerFP16(uint32_t dim = 0);
+    uint32_t dim() const noexcept;
+    void transform_database(std::span<const float> in, std::span<std::byte> out) const override;
+    void transform_query(std::span<const float> in, std::span<std::byte> out) const override;
+    void serialize(std::ostream& os) const override;
+    static std::unique_ptr<ScalarQuantizerFP16> deserialize(std::istream& is);
+};
+
+/// L2 Normalization transformation (||x||_2 = 1.0)
+class L2NormalizeTransform : public FeatureTransformation {
+public:
+    explicit L2NormalizeTransform(uint32_t dim = 0);
+    uint32_t dim() const noexcept;
+    void transform_database(std::span<const float> in, std::span<std::byte> out) const override;
+    void transform_query(std::span<const float> in, std::span<std::byte> out) const override;
+    void serialize(std::ostream& os) const override;
+    static std::unique_ptr<L2NormalizeTransform> deserialize(std::istream& is);
 };
 
 // --- Extreme Vector Quantization (EVP) ---
