@@ -5,6 +5,8 @@ from deglib.transformation import (
     ScalarQuantizerInt8,
     ScalarQuantizerUint8,
     ScalarQuantizerUint8PerDim,
+    ScalarQuantizerFP16,
+    make_scalar_quantizer_fp16,
 )
 
 
@@ -213,3 +215,88 @@ def test_uint8_fp16_input():
     res_pdim_f16 = q_pdim_f16.quantize(vectors_f16)
 
     np.testing.assert_allclose(res_pdim_f32, res_pdim_f16, atol=1)
+
+
+def test_fp16_quantizer_identity_in_range():
+    np.random.seed(42)
+    # Values well within FP16 range -> scale stays 1.0 (bit-exact conversion).
+    vectors = np.random.uniform(-2.0, 2.0, size=(40, 16)).astype(np.float32)
+
+    q = ScalarQuantizerFP16()
+    assert not q.is_fitted
+    q.fit(vectors)
+    assert q.is_fitted
+    assert q.scale == pytest.approx(1.0)
+    assert q.inv_scale == pytest.approx(1.0)
+
+    quant = q.quantize(vectors)
+    assert quant.shape == (40, 16)
+    assert quant.dtype == np.float16
+    # In-range, scale==1 -> quantized equals direct FP16 cast of the float32 input.
+    np.testing.assert_array_equal(quant, vectors.astype(np.float16))
+
+
+def test_fp16_quantizer_scales_large_values():
+    np.random.seed(42)
+    # Audio-like dataset with values far above FP16 max (65504).
+    vectors = (np.random.uniform(-100000.0, 100000.0, size=(64, 16))).astype(np.float32)
+
+    q = ScalarQuantizerFP16()
+    q.fit(vectors)
+    assert q.abs_max > 65504.0
+    assert q.scale < 1.0
+
+    quant = q.quantize(vectors)
+    assert quant.dtype == np.float16
+    assert not np.any(np.isinf(quant))
+    assert not np.any(np.isnan(quant))
+
+
+def test_fp16_quantizer_dequantize_roundtrip():
+    np.random.seed(42)
+    vectors = (np.random.uniform(-100000.0, 100000.0, size=(32, 16))).astype(np.float32)
+
+    q = ScalarQuantizerFP16()
+    q.fit(vectors)
+
+    quant = q.quantize(vectors)
+    dequant = q.dequantize(quant)
+    assert dequant.dtype == np.float32
+    assert dequant.shape == vectors.shape
+    # FP16 relative precision ~ 2^-11; power-of-two scaling is exact.
+    np.testing.assert_allclose(dequant, vectors, rtol=2e-3, atol=1.0)
+
+
+def test_fp16_quantizer_serialize_roundtrip():
+    np.random.seed(42)
+    vectors = (np.random.uniform(-90000.0, 90000.0, size=(20, 8))).astype(np.float32)
+
+    q = ScalarQuantizerFP16()
+    q.fit(vectors)
+
+    data = q.serialize()
+    q2 = ScalarQuantizerFP16.deserialize(data)
+    assert q2.dim == q.dim
+    assert q2.abs_max == pytest.approx(q.abs_max)
+    assert q2.scale == pytest.approx(q.scale)
+    assert q2.inv_scale == pytest.approx(q.inv_scale)
+    assert q2.is_fitted
+
+    # Quantization output identical after roundtrip.
+    np.testing.assert_array_equal(q2.quantize(vectors), q.quantize(vectors))
+
+
+def test_fp16_quantizer_factory_and_fp16_input():
+    np.random.seed(42)
+    vectors_f32 = np.random.uniform(-2.0, 2.0, size=(50, 16)).astype(np.float32)
+
+    q = make_scalar_quantizer_fp16(vectors_f32)
+    assert isinstance(q, ScalarQuantizerFP16)
+    assert q.is_fitted
+    assert q.quantize(vectors_f32).shape == (50, 16)
+
+    # FP16 input path (scale==1) matches float32 path.
+    vectors_f16 = vectors_f32.astype(np.float16)
+    q2 = ScalarQuantizerFP16()
+    q2.fit(vectors_f16)
+    np.testing.assert_array_equal(q.quantize(vectors_f32), q.quantize(vectors_f16))

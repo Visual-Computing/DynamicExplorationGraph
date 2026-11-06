@@ -17,6 +17,7 @@ from deglib import (
     ScalarQuantizerUint8,
     ScalarQuantizerInt8PerDim,
     ScalarQuantizerUint8PerDim,
+    ScalarQuantizerFP16,
     EvpQuantizer,
     MipsTransform,
 )
@@ -54,6 +55,36 @@ def test_scalar_int8_transform_serialization_and_transform():
 
     out_deser = apply_database(deserialized, data)
     np.testing.assert_array_equal(out_deser, expected)
+
+
+def test_scalar_fp16_transform_serialization_and_transform():
+    dim = 16
+    # Audio-like large-range data exceeding FP16 max (65504) -> forces power-of-two scaling.
+    transform = ScalarQuantizerFP16(dim, abs_max=100000.0)
+    transformations = [transform]
+
+    assert transform.input_dim == dim
+    assert transform.output_dim == dim
+    assert transform.output_dtype == np.float16
+    assert transform.scale < 1.0
+
+    data = np.random.uniform(-100000.0, 100000.0, size=(10, dim)).astype(np.float32)
+    out = apply_database(transformations, data)
+    assert out.dtype == np.float16
+    assert out.shape == (10, dim)
+    assert not np.any(np.isinf(out))
+    assert not np.any(np.isnan(out))
+
+    # Roundtrip via dequantize approximates the scaled input within FP16 precision.
+    deq = transform.dequantize(out)
+    np.testing.assert_allclose(deq, data, rtol=2e-3, atol=1.0)
+
+    # Serialization roundtrip through the generic transformation list.
+    deserialized = deserialize_transformations(serialize_transformations(transformations))
+    assert len(deserialized) == 1
+    assert deserialized[0].output_dtype == np.float16
+    out_deser = apply_database(deserialized, data)
+    np.testing.assert_array_equal(out_deser.view(np.uint16), out.view(np.uint16))
 
 
 def test_scalar_uint8_transform_serialization_and_transform():

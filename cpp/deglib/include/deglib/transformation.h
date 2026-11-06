@@ -26,6 +26,7 @@ constexpr uint32_t make_fourcc(char a, char b, char c, char d) noexcept {
 inline constexpr uint32_t TAG_MIPS = make_fourcc('M', 'I', 'P', 'S');
 inline constexpr uint32_t TAG_SQI8 = make_fourcc('S', 'Q', 'I', '8');
 inline constexpr uint32_t TAG_SQU8 = make_fourcc('S', 'Q', 'U', '8');
+inline constexpr uint32_t TAG_SQ16 = make_fourcc('S', 'Q', '1', '6');
 inline constexpr uint32_t TAG_SQ8P = make_fourcc('S', 'Q', '8', 'P');
 inline constexpr uint32_t TAG_SQUP = make_fourcc('S', 'Q', 'U', 'P');
 inline constexpr uint32_t TAG_EVPQ = make_fourcc('E', 'V', 'P', 'Q');
@@ -101,6 +102,8 @@ inline std::shared_ptr<FeatureTransformation> deserialize_transformation(std::is
             return ScalarQuantizerInt8::deserialize(ss);
         case TAG_SQU8:
             return ScalarQuantizerUint8::deserialize(ss);
+        case TAG_SQ16:
+            return ScalarQuantizerFP16::deserialize(ss);
         case TAG_SQ8P:
             return ScalarQuantizerInt8PerDim::deserialize(ss);
         case TAG_SQUP:

@@ -28,11 +28,13 @@ from .transformation import (
     ScalarQuantizerUint8,
     ScalarQuantizerInt8PerDim,
     ScalarQuantizerUint8PerDim,
+    ScalarQuantizerFP16,
     make_evp_quantizer,
     make_scalar_quantizer_int8,
     make_scalar_quantizer_int8_perdim,
     make_scalar_quantizer_uint8,
     make_scalar_quantizer_uint8_perdim,
+    make_scalar_quantizer_fp16,
 )
 
 __version__ = "0.2.6"
@@ -61,11 +63,13 @@ __all__ = [
     "ScalarQuantizerUint8",
     "ScalarQuantizerInt8PerDim",
     "ScalarQuantizerUint8PerDim",
+    "ScalarQuantizerFP16",
     "make_evp_quantizer",
     "make_scalar_quantizer_int8",
     "make_scalar_quantizer_int8_perdim",
     "make_scalar_quantizer_uint8",
     "make_scalar_quantizer_uint8_perdim",
+    "make_scalar_quantizer_fp16",
     "analysis",
     "distances",
     "search",
