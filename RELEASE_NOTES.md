@@ -1,5 +1,87 @@
 # Release Notes
 
+## deglib v0.2.7
+
+### Overview
+deglib v0.2.7 is a major architecture, performance, and tooling release (+26,500 lines across 62 commits since v0.2.6). It introduces an end-to-end **Zero-Overhead Query Execution Pipeline** eliminating Python bridge latency and memory allocations, a modular **Feature Transformation & Quantization Engine** with native index serialization (`DEGX` extension container), native **`ScalarQuantizerFP16`** with power-of-two exponent scaling, an **interleaved ReadOnlyGraph layout** for peak cache locality, a completely rewritten **Concrete Search & Reranker Architecture**, zero-copy ground-truth analysis with memory-mapped files, and an interactive **2D & 3D Graph Exploration Tool**.
+
+---
+
+### 🚀 Key Features & Improvements
+
+#### 1. Zero-Overhead Query Execution & Searcher Unification
+* **Unified Single & Batch Search (`Searcher.search`):**
+  * `Searcher.search()` directly accepts 1D queries (`[D]`), 2D single-vector queries (`[1, D]` / `[D, 1]`), and 2D query batches (`[N, D]`) through a single unified C++ method.
+  * Completely eliminated Python-side dimension checks, `.ravel()`, and `np.ascontiguousarray` calls in query loops.
+  * C++ employs Zero-Copy C-contiguous buffer verification via NumPy C-API (`py::array::ensure`). If contiguous, memory is directly mapped without allocations or copies.
+  * Direct GIL release during batch exploration with dynamic thread pool distribution.
+* **Built-in Query Normalization (`normalize_query`):**
+  * `Searcher` and `create_searcher(..., normalize_query=True)` support automatic in-place $L_2$ query normalization ($q \leftarrow q / \|q\|_2$) directly in thread-local scratch memory.
+  * Queries are normalized once prior to graph traversal and candidate reranking, eliminating duplicate normalizations and Python math overhead.
+* **Smart Searcher Optimization (`Searcher::optimize`):**
+  * Automatically dequantizes quantized graph features (FP16, INT8, UINT8, EVP) to compute exact K-Means medoid entry points, capped at 512 clusters.
+  * Tunes cache line prefetch offsets (`po`) and lengths (`pl`) for candidate reranking on the host CPU.
+
+#### 2. Embedded Feature Transformation & Quantization Engine (`deglib::transformation`)
+* **Pipeline Integration & Container Serialization (`DEGX` Trailer):**
+  * Graphs can embed a sequence of feature transformations (`setTransformations`, `getTransformations`) that are automatically applied to incoming queries during search.
+  * Graph files now support an extensible `DEGX` container trailer with Tag-Length-Value blocks for the transformation pipeline (`TAG_XFRM`), tuned prefetch settings (`TAG_PREF`), and entry points (`TAG_ENTR`), automatically restored on `load_readonly_graph()` and `load_dynamic_graph()`.
+  * Transformation stages serialize using FourCC chunk tags (`TAG_SQ8`, `TAG_EVP`, `TAG_MIPS`, `TAG_NORM`, `TAG_FP16`).
+* **Standalone `Reranker` & Query Transformation Pipeline:**
+  * Introduced standalone candidate reranker (`deglib::search::Reranker` / `deglib.search.Reranker`) with dedicated `FloatSpace`, base vector storage, and prefetch auto-tuning (`optimize()`).
+  * `Reranker` and `Searcher` accept query transformation pipelines (`rerank_transformations`), allowing candidates from quantized graphs (e.g. INT8 or EVP) to be scored against custom feature representations (e.g. FP16 base features) without separate manual conversions.
+* **`ScalarQuantizerFP16` (New):**
+  * High-precision FP32-to-FP16 cast transformation (`make_scalar_quantizer_fp16`).
+  * Features power-of-two exponent scaling to map large feature magnitudes safely into the IEEE 754 float16 range without Inf/NaN or numerical underflow.
+* **`L2NormalizeTransform` (New):**
+  * Standalone serializable transformation stage (`make_l2_normalize_transform`, FourCC `NORM`) providing vector $L_2$ normalization for arbitrary pipeline workflows.
+* **Data-Driven EVP Auto-Calibration (`EvpQuantizer`):**
+  * `non_zeros=0` (default) evaluates candidate sparsity levels across logarithmic and linear scales during `fit()` and automatically selects the optimal non-zero bit count.
+  * Supports per-dimension mean subtraction and SIMD-accelerated popcount distance execution (`Metric.EVP_InnerProduct`).
+
+#### 3. Graph Architecture & Cache Locality
+* **Interleaved ReadOnlyGraph Layout:**
+  * `ReadOnlyGraph` stores feature data and outgoing edge neighbor lists in an interleaved memory layout, ensuring that traversing a vertex's edges automatically loads its feature into the L1/L2 CPU cache.
+* **Topology & Path Reachability:**
+  * Added `has_path` reachability validation to C++ `DynamicExplorationGraph` and Python bindings to verify graph connectivity and path reachability between arbitrary vertices.
+  * Streaming data optimization: `OptimizationTarget::StreamingData` utilizes early termination during graph restoration to prevent rebuild degradation.
+* **MRNG Terminology Alignment:**
+  * Renamed legacy RNG methods and heuristics consistently to Monotonic Relative Neighborhood Graph (`MRNG`).
+
+#### 4. Tooling, Visualization & Benchmarks
+* **Interactive 2D/3D Graph Explorer (`examples/graph_2d`):**
+  * Full interactive visualization tool for exploring DEG topology on synthetic and custom 2D distributions (Uniform, Gaussian, Spiral, Swiss Roll).
+  * Real-time greedy search route visualization, MRNG edge violation inspection, and 3D visualization of the lifted MIPS dimension.
+* **Zero-Copy Ground Truth & Graph Analysis (`deglib::analysis`):**
+  * Ground-truth evaluation in `analyze_graph()` and `calc_graph_quality()` supports memory-mapped files (`mmap`) and strided array views with zero memory copies.
+* **Builder Progress Interface:**
+  * Replaced the string-based `"progress"` callback in Python with the clean boolean flag `show_progress=True`.
+* **Enhanced VIBE Benchmark Suite:**
+  * Integrated EVP quantization and FP16 candidate reranking in `examples/vibe`.
+  * Automatic ground-truth metric detection and streamlined query evaluation loop.
+
+---
+
+### ⚠️ Breaking Changes & Migration Guide
+
+* **Quantizer `drop_ratio` replaced by `quantile`:**
+  All scalar quantizers (`ScalarQuantizerInt8`, `ScalarQuantizerUint8`, `ScalarQuantizer*PerDim`) now take `quantile` (e.g. `1.0` for no clipping, `0.99` for 1% clipping) instead of `drop_ratio`.
+* **Transformation Module Imports:**
+  Transformations must be imported from `deglib.transformation` (or directly from `deglib`) instead of `deglib.optimization`.
+* **Search Parameter Handling:**
+  Python `Searcher.search()` delegates directly to C++. Any callers passing unaligned non-array inputs should provide standard NumPy arrays.
+
+---
+
+### 🛠️ Bug Fixes
+
+* **Reranker Memory Safety:** Validated base vector buffer dimensions against graph size and handled zero-candidate sets without out-of-bounds reads.
+* **EVP Mean on FP16:** Fixed mean calculation across arbitrary dimensions for half-precision floating-point data.
+* **Searcher Bypass:** Bypassed redundant candidate rerank execution when `rerank_factor == 1.0` and no reranker is attached.
+* **Compiler & Platform Support:** Added `-mf16c` compilation flag to GCC/Clang AVX2 builds, resolved MSVC generator ABI compatibility, and updated GitHub Actions for Node 24 runtime support.
+
+---
+
 ## deglib v0.2.6
 
 ### Overview
