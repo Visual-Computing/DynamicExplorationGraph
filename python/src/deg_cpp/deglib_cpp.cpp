@@ -531,11 +531,8 @@ py::array_t<float> float_space_compute_distances(const deglib::distances::FloatS
 // ============================================================================
 
 class RerankerPy {
-  private:
-    py::array base_vectors_holder_;
-    deglib::search::Reranker reranker_;
-
-    static const std::byte* validate_and_get_ptr(const deglib::distances::FloatSpace& space, const py::array& base_vectors) {
+  public:
+    static std::span<const std::byte> validate_and_get_span(const deglib::distances::FloatSpace& space, const py::array& base_vectors) {
         auto buf = base_vectors.request();
         if (buf.ndim != 2) {
             throw std::invalid_argument("base_vectors must be a 2D array");
@@ -545,13 +542,18 @@ class RerankerPy {
         if (stride_bytes != req_bytes) {
             throw std::invalid_argument(std::format("Base vector row size ({}) does not match feature space data size ({})", stride_bytes, req_bytes));
         }
-        return static_cast<const std::byte*>(buf.ptr);
+        const size_t total_bytes = size_t(buf.shape[0]) * stride_bytes;
+        return std::span<const std::byte>(static_cast<const std::byte*>(buf.ptr), total_bytes);
     }
+
+  private:
+    py::array base_vectors_holder_;
+    deglib::search::Reranker reranker_;
 
   public:
     RerankerPy(const deglib::distances::FloatSpace& space, py::array base_vectors)
         : base_vectors_holder_(std::move(base_vectors)),
-          reranker_(space, validate_and_get_ptr(space, base_vectors_holder_), base_vectors_holder_.request().shape[0]) {}
+          reranker_(space, validate_and_get_span(space, base_vectors_holder_), base_vectors_holder_.request().shape[0]) {}
 
     size_t get_num_base_vectors() const noexcept { return reranker_.getNumBaseVectors(); }
 
@@ -638,21 +640,10 @@ class SearcherPy {
         std::optional<deglib::distances::FloatSpace> rerank_space = std::nullopt,
         std::optional<py::array> base_vectors = std::nullopt
     ) {
-        const void* base_vectors_ptr = nullptr;
-        size_t num_base_vectors = 0;
-
-        if (base_vectors.has_value() && !base_vectors->is_none()) {
+        if (rerank_space.has_value() && base_vectors.has_value() && !base_vectors->is_none()) {
             base_vectors_holder_ = *base_vectors;
-            auto buf = base_vectors_holder_.request();
-            if (buf.ndim != 2) {
-                throw std::invalid_argument("base_vectors must be a 2D array");
-            }
-            base_vectors_ptr = buf.ptr;
-            num_base_vectors = buf.shape[0];
-        }
-
-        if (rerank_space.has_value() && base_vectors_ptr != nullptr) {
-            deglib::search::Reranker reranker(*rerank_space, base_vectors_ptr, num_base_vectors);
+            auto base_span = RerankerPy::validate_and_get_span(*rerank_space, base_vectors_holder_);
+            deglib::search::Reranker reranker(*rerank_space, base_span, base_vectors_holder_.request().shape[0]);
             searcher_ = deglib::make_searcher(graph, std::move(reranker));
         } else {
             searcher_ = deglib::make_searcher(graph);

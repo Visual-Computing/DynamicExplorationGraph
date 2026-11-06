@@ -93,7 +93,7 @@ TEST(SearcherTest, QuantizedInt8WithFP16Reranker) {
     deglib::distances::fp16::floats_to_fp16(data.data(), base_fp16.data(), data.size());
     auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP16_L2);
 
-    auto searcher = deglib::search::make_searcher(ro_graph, quantizer, deglib::search::Reranker(rerank_space, base_fp16.data(), count));
+    auto searcher = deglib::search::make_searcher(ro_graph, quantizer, deglib::search::Reranker(rerank_space, std::as_bytes(std::span(base_fp16)), count));
 
     // Query for 5th item
     auto q = std::span<const float>(data.data() + 5 * dim, dim);
@@ -126,7 +126,7 @@ TEST(SearcherTest, QuantizedUint8WithFP32Reranker) {
 
     auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP32_L2);
 
-    auto searcher = deglib::search::make_searcher(ro_graph, quantizer, deglib::search::Reranker(rerank_space, data.data(), count));
+    auto searcher = deglib::search::make_searcher(ro_graph, quantizer, deglib::search::Reranker(rerank_space, std::as_bytes(std::span(data)), count));
 
     auto q = std::span<const float>(data.data() + 2 * dim, dim);
     auto res = searcher->search(q, 3, /*eps=*/0.2f, /*rerank_factor=*/1.5f, /*return_distances=*/true);
@@ -148,7 +148,7 @@ TEST(SearcherTest, OptimizeTunesRerankerAndPreservesResults) {
     auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
 
     auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP32_L2);
-    auto searcher = deglib::search::make_searcher(graph.internal(), deglib::search::Reranker(rerank_space, data.data(), count));
+    auto searcher = deglib::search::make_searcher(graph.internal(), deglib::search::Reranker(rerank_space, std::as_bytes(std::span(data)), count));
 
     // Exercises the reranker prefetch auto-tuning path wired into SearcherImpl::optimize().
     searcher->optimize(/*n_clusters=*/8, /*n_iter=*/5);
@@ -174,7 +174,7 @@ TEST(SearcherTest, OptimizeTunesFp16Reranker) {
     auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
 
     auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP16_L2);
-    auto searcher = deglib::search::make_searcher(graph.internal(), deglib::search::Reranker(rerank_space, base_fp16.data(), count));
+    auto searcher = deglib::search::make_searcher(graph.internal(), deglib::search::Reranker(rerank_space, std::as_bytes(std::span(base_fp16)), count));
 
     // Reranker<uint16_t> self-samples its fp16 base vectors; no float reinterpretation.
     searcher->optimize(/*n_clusters=*/8, /*n_iter=*/5);
@@ -254,7 +254,7 @@ TEST(SearcherTest, EVPQuantizerWithFP32Reranker) {
 
     auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP32_InnerProduct);
 
-    auto searcher = deglib::search::make_searcher(ro_graph, quantizer, deglib::search::Reranker(rerank_space, data.data(), count));
+    auto searcher = deglib::search::make_searcher(ro_graph, quantizer, deglib::search::Reranker(rerank_space, std::as_bytes(std::span(data)), count));
 
     auto q = std::span<const float>(data.data() + 3 * dim, dim);
     auto res = searcher->search(q, 3, /*eps=*/0.3f, /*rerank_factor=*/2.0f, /*return_distances=*/true);
@@ -394,7 +394,7 @@ TEST(SearcherTest, DynamicExplorationGraphWithTransformationMakeSearcher) {
 
     // 2. make_searcher(DynamicExplorationGraph, reranker): automatically uses attached quantizer + reranker
     auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP32_L2);
-    auto searcher_with_reranker = deglib::make_searcher(ro_graph, deglib::search::Reranker(rerank_space, data.data(), count));
+    auto searcher_with_reranker = deglib::make_searcher(ro_graph, deglib::search::Reranker(rerank_space, std::as_bytes(std::span(data)), count));
     ASSERT_NE(searcher_with_reranker, nullptr);
 
     auto res2 = searcher_with_reranker->search(q, 5, /*eps=*/0.2f, /*rerank_factor=*/2.0f, /*return_distances=*/true);

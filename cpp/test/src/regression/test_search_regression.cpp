@@ -60,7 +60,7 @@ TEST(SearchRegression, Rerank_FP32_L2_Benchmark) {
         }
     }
 
-    deglib::search::Reranker reranker(space, base_vectors.data(), num_base);
+    deglib::search::Reranker reranker(space, std::as_bytes(std::span(base_vectors)), num_base);
 
     // Warm-up run
     auto warm_results = reranker.rerank(query_vectors.data(), num_queries, candidates.data(), candidates_per_query, k_top, num_threads);
@@ -117,7 +117,7 @@ TEST(SearchRegression, Rerank_FP16_InnerProduct_Benchmark) {
         }
     }
 
-    deglib::search::Reranker reranker(space, base_vectors.data(), num_base);
+    deglib::search::Reranker reranker(space, std::as_bytes(std::span(base_vectors)), num_base);
 
     // Warm-up run
     auto warm_results = reranker.rerank(query_vectors.data(), num_queries, candidates.data(), candidates_per_query, k_top, num_threads);
@@ -178,7 +178,7 @@ TEST(SearchRegression, Reranker_Prefetch_Optimize_Benchmark) {
         }
     }
 
-    deglib::search::Reranker reranker(space, base_vectors.data(), num_base);
+    deglib::search::Reranker reranker(space, std::as_bytes(std::span(base_vectors)), num_base);
 
     std::vector<uint32_t> out_indices(k_top);
     std::vector<float> out_distances(k_top);

@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <limits>
 #include <span>
 #include <stdexcept>
@@ -172,14 +173,26 @@ class Reranker {
      * Constructs a candidate reranker.
      *
      * @param space            Distance metric and dimensionality for scoring.
-     * @param base_vectors     Row-addressed feature matrix; row c is scored for candidate index c.
+     * @param base_vectors     Contiguous byte span of the row-addressed feature matrix; row c is scored for candidate index c.
      *                         When used with a Searcher, candidates are internal indices (0 .. size()-1),
      *                         so row c must correspond to internal vertex c in the graph (i.e. vector for
      *                         label `graph.getExternalLabels()[c]`).
      * @param num_base_vectors Number of rows in ``base_vectors``.
      */
-    Reranker(deglib::distances::FloatSpace space, const void* base_vectors, size_t num_base_vectors)
-        : space_(std::move(space)), base_vectors_(base_vectors), num_base_vectors_(num_base_vectors) {}
+    Reranker(deglib::distances::FloatSpace space, std::span<const std::byte> base_vectors, size_t num_base_vectors)
+        : space_(std::move(space)), base_vectors_(base_vectors.data()), num_base_vectors_(num_base_vectors) {
+        if (num_base_vectors_ > 0) {
+            if (base_vectors.data() == nullptr) {
+                throw std::invalid_argument("Reranker: base_vectors buffer is null");
+            }
+            const size_t required_bytes = num_base_vectors_ * space_.get_data_size();
+            if (base_vectors.size() < required_bytes) {
+                throw std::invalid_argument(std::format(
+                    "Reranker: base_vectors span ({} bytes) is smaller than required ({} bytes)",
+                    base_vectors.size(), required_bytes));
+            }
+        }
+    }
 
     const deglib::distances::FloatSpace& getSpace() const noexcept { return space_; }
     const void* getBaseVectors() const noexcept { return base_vectors_; }

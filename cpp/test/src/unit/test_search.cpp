@@ -22,7 +22,7 @@ TEST(Rerank, SingleQuerySingleCandidate) {
     std::vector<float> base = {1.0f, 0.0f, 0.0f, 0.0f};
     uint32_t candidates[] = {0};
 
-    deglib::search::Reranker reranker(fs, base.data(), 1);
+    deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), 1);
     auto results = reranker.rerank(query.data(), 1, candidates, 1, 1, 1);
 
     ASSERT_EQ(results.size(), 1u);
@@ -41,7 +41,7 @@ TEST(Rerank, SingleQueryMultipleCandidates) {
     };
     uint32_t candidates[] = {0, 1, 2};
 
-    deglib::search::Reranker reranker(fs, base.data(), 3);
+    deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), 3);
     auto results = reranker.rerank(query.data(), 1, candidates, 3, 2, 1);
 
     ASSERT_EQ(results.size(), 1u);
@@ -70,7 +70,7 @@ TEST(Rerank, MultipleQueries) {
         0, 1,  // candidates for query 1
     };
 
-    deglib::search::Reranker reranker(fs, base.data(), 2);
+    deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), 2);
     auto results = reranker.rerank(queries.data(), 2, candidates, 2, 2, 1);
 
     ASSERT_EQ(results.size(), 2u);
@@ -98,7 +98,7 @@ TEST(Rerank, KTopZeroReturnsAllCandidates) {
     };
     uint32_t candidates[] = {0, 1, 2};
 
-    deglib::search::Reranker reranker(fs, base.data(), 3);
+    deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), 3);
     // k_top=0 should use all candidates
     auto results = reranker.rerank(query.data(), 1, candidates, 3, 0, 1);
 
@@ -114,7 +114,7 @@ TEST(Rerank, KTopLargerThanCandidates) {
     };
     uint32_t candidates[] = {0};
 
-    deglib::search::Reranker reranker(fs, base.data(), 1);
+    deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), 1);
     // k_top=3 but only 1 candidate — k_top is clamped to candidates_per_query
     auto results = reranker.rerank(query.data(), 1, candidates, 1, 3, 1);
 
@@ -126,7 +126,7 @@ TEST(Rerank, KTopLargerThanCandidates) {
 TEST(Rerank, NullQueriesThrows) {
     deglib::distances::FloatSpace fs(2, deglib::distances::Metric::FP32_L2);
     uint32_t candidates[] = {0};
-    deglib::search::Reranker reranker(fs, nullptr, 0);
+    deglib::search::Reranker reranker(fs, {}, 0);
 
     EXPECT_THROW(reranker.rerank(nullptr, 1, candidates, 1, 1, 1), std::invalid_argument);
 }
@@ -134,7 +134,7 @@ TEST(Rerank, NullQueriesThrows) {
 TEST(Rerank, NullCandidatesThrows) {
     deglib::distances::FloatSpace fs(2, deglib::distances::Metric::FP32_L2);
     std::vector<float> query = {0.0f, 0.0f};
-    deglib::search::Reranker reranker(fs, nullptr, 0);
+    deglib::search::Reranker reranker(fs, {}, 0);
 
     EXPECT_THROW(reranker.rerank(query.data(), 1, nullptr, 1, 1, 1), std::invalid_argument);
 }
@@ -148,7 +148,7 @@ TEST(Rerank, InvalidCandidateIndexSkipped) {
     // idx 99 is out of bounds, should be skipped
     uint32_t candidates[] = {0, 99};
 
-    deglib::search::Reranker reranker(fs, base.data(), 1);
+    deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), 1);
     auto results = reranker.rerank(query.data(), 1, candidates, 2, 2, 1);
 
     ASSERT_EQ(results.size(), 1u);
@@ -168,7 +168,7 @@ TEST(Rerank, SelfRerankWhenBaseVectorsAreQueries) {
     };
 
     // queries used as target base vectors
-    deglib::search::Reranker reranker(fs, query.data(), 2);
+    deglib::search::Reranker reranker(fs, std::as_bytes(std::span(query)), 2);
     auto results = reranker.rerank(query.data(), 2, candidates, 2, 2, 1);
 
     ASSERT_EQ(results.size(), 2u);
@@ -196,7 +196,7 @@ TEST(Rerank, InnerProductMetric) {
     };
     uint32_t candidates[] = {0, 1, 2};
 
-    deglib::search::Reranker reranker(fs, base.data(), 3);
+    deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), 3);
     auto results = reranker.rerank(query.data(), 1, candidates, 3, 2, 1);
 
     ASSERT_EQ(results.size(), 1u);
@@ -221,7 +221,7 @@ TEST(Rerank, SingleQuerySpanOverloads) {
     };
     std::vector<uint32_t> candidates = {0, 1, 2};
 
-    deglib::search::Reranker reranker(fs, base.data(), 3);
+    deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), 3);
     auto q_span = std::span<const std::byte>(reinterpret_cast<const std::byte*>(query.data()), query.size() * sizeof(float));
 
     // 1. Single query returning ResultSet
@@ -253,7 +253,7 @@ TEST(Rerank, RerankerClassDirectUsage) {
     };
     std::vector<uint32_t> candidates = {0, 1, 2};
 
-    deglib::search::Reranker reranker(fs, base.data(), 3);
+    deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), 3);
     EXPECT_EQ(reranker.getNumBaseVectors(), 3u);
     EXPECT_EQ(reranker.getBaseVectors(), base.data());
 
@@ -273,7 +273,7 @@ TEST(Rerank, PrefetchEnabledByDefaultAndTogglesCleanly) {
     std::vector<uint32_t> candidates = {0, 1, 2};
     std::vector<float> query = {0.0f, 0.0f};
 
-    deglib::search::Reranker reranker(fs, base.data(), 3);
+    deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), 3);
 
     // Default must be the prefetching config, otherwise large out-of-cache rerank runs silently lose throughput.
     EXPECT_GT(reranker.getPo(), 0);
@@ -319,7 +319,7 @@ TEST(Rerank, PrefetchAndNoPrefetchPathsAgreeOnOutOfCacheWorkingSet) {
     for (auto& c : candidates) c = rng() % num_base;
 
     deglib::distances::FloatSpace fs(dim, deglib::distances::Metric::FP32_L2);
-    deglib::search::Reranker reranker(fs, base.data(), num_base);
+    deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), num_base);
 
     reranker.setPrefetch(0, 0);
     auto unprefetched = reranker.rerank(queries.data(), num_queries, candidates.data(), candidates_per_query, k_top, 1);
@@ -357,7 +357,7 @@ TEST(Rerank, InPlaceBatchMatchesResultSetRerank) {
     for (auto& c : candidates) c = rng() % num_base;
 
     deglib::distances::FloatSpace fs(dim, deglib::distances::Metric::FP32_L2);
-    deglib::search::Reranker reranker(fs, base.data(), num_base);
+    deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), num_base);
 
     // 1. Reference heap-based rerank
     auto ref_results = reranker.rerank(queries.data(), num_queries, candidates.data(), cands_per_q, k_top, 2);
@@ -401,7 +401,7 @@ TEST(Rerank, InPlaceBatchPaddingWithMaxValues) {
     std::vector<uint32_t> candidates = {0, 99999, 1, 99999, 99999};
 
     deglib::distances::FloatSpace fs(dim, deglib::distances::Metric::FP32_L2);
-    deglib::search::Reranker reranker(fs, base.data(), num_base);
+    deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), num_base);
 
     std::vector<uint32_t> out_indices(k_top, 0);
     std::vector<float> out_distances(k_top, 0.0f);
@@ -433,7 +433,7 @@ TEST(Rerank, InPlaceBatchWithoutDistances) {
     std::vector<uint32_t> candidates = {2, 0, 1};
 
     deglib::distances::FloatSpace fs(dim, deglib::distances::Metric::FP32_L2);
-    deglib::search::Reranker reranker(fs, base.data(), num_base);
+    deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), num_base);
 
     std::vector<uint32_t> out_indices(2);
     // null out_distances when return_distances=false
@@ -441,4 +441,26 @@ TEST(Rerank, InPlaceBatchWithoutDistances) {
 
     EXPECT_EQ(out_indices[0], 0u);
     EXPECT_EQ(out_indices[1], 1u);
+}
+
+TEST(Rerank, RejectsMismatchedOrInsufficientBaseVectorsSpan) {
+    const uint32_t dim = 4;
+    deglib::distances::FloatSpace fs(dim, deglib::distances::Metric::FP32_L2);
+    std::vector<float> base = {
+        0.5f, 0.0f, 0.0f, 0.0f,
+        1.0f, 0.0f, 0.0f, 0.0f,
+    };
+    auto base_bytes = std::as_bytes(std::span(base));
+
+    // Valid: 2 vectors require 2 * 4 * 4 = 32 bytes
+    EXPECT_NO_THROW(deglib::search::Reranker(fs, base_bytes, 2));
+
+    // Invalid: span has only 32 bytes, but 3 vectors require 48 bytes
+    EXPECT_THROW(deglib::search::Reranker(fs, base_bytes, 3), std::invalid_argument);
+
+    // Invalid: empty/null span when num_base_vectors > 0
+    EXPECT_THROW(deglib::search::Reranker(fs, {}, 1), std::invalid_argument);
+
+    // Valid: 0 vectors with empty span
+    EXPECT_NO_THROW(deglib::search::Reranker(fs, {}, 0));
 }
