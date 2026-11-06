@@ -64,7 +64,7 @@ TEST(ScalarQuantize, Int8SymmetricBasic) {
     const uint32_t dim = 5;
 
     deglib::transformation::ScalarQuantizerInt8 quantizer(dim, 1.0f);
-    quantizer.fit(std::span<const float>(vec), 0.0f);
+    quantizer.fit(std::span<const float>(vec), 1.0f);
     auto result = transform_db_helper<deglib::transformation::ScalarQuantizerInt8, float, int8_t>(quantizer, std::span<const float>(vec), 1);
 
     ASSERT_EQ(result.size(), 5u);
@@ -104,7 +104,7 @@ TEST(ScalarQuantize, Int8SymmetricBatchMultiThreadConsistent) {
     auto data = generate_random_floats(count, dim, 123);
 
     deglib::transformation::ScalarQuantizerInt8 quantizer(dim, 1.0f);
-    quantizer.fit(std::span<const float>(data), 0.0f);
+    quantizer.fit(std::span<const float>(data), 1.0f);
 
     auto single_thread = transform_db_helper<deglib::transformation::ScalarQuantizerInt8, float, int8_t>(quantizer, std::span<const float>(data), 1);
     auto multi_thread = transform_db_helper<deglib::transformation::ScalarQuantizerInt8, float, int8_t>(quantizer, std::span<const float>(data), 4);
@@ -124,10 +124,10 @@ TEST(ScalarQuantize, Int8FP16Equivalence) {
     deglib::distances::fp16::floats_to_fp16(data_f32.data(), data_fp16.data(), count * dim);
 
     deglib::transformation::ScalarQuantizerInt8 q_f32(dim, 1.0f);
-    q_f32.fit(std::span<const float>(data_f32), 0.0f);
+    q_f32.fit(std::span<const float>(data_f32), 1.0f);
 
     deglib::transformation::ScalarQuantizerInt8 q_fp16(dim, 1.0f);
-    q_fp16.fit(std::span<const uint16_t>(data_fp16), 0.0f);
+    q_fp16.fit(std::span<const uint16_t>(data_fp16), 1.0f);
 
     auto result_from_f32 = transform_db_helper<deglib::transformation::ScalarQuantizerInt8, float, int8_t>(q_f32, std::span<const float>(data_f32), 2);
     auto result_from_fp16 = transform_db_helper<deglib::transformation::ScalarQuantizerInt8, uint16_t, int8_t>(q_fp16, std::span<const uint16_t>(data_fp16), 2);
@@ -220,7 +220,7 @@ TEST(ScalarQuantize, Int8PerDimBasic) {
     const uint32_t dim = 2;
 
     deglib::transformation::ScalarQuantizerInt8PerDim quantizer(dim);
-    quantizer.fit(std::span<const float>(vec), 0.0f);
+    quantizer.fit(std::span<const float>(vec), 1.0f);
     EXPECT_NEAR(quantizer.abs_maxs()[0], 100.0f, 1e-4f);
     EXPECT_NEAR(quantizer.abs_maxs()[1], 1.0f, 1e-4f);
 
