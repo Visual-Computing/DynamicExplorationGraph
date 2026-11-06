@@ -226,7 +226,7 @@ class DEG(BaseANN):
     def query(self, v: np.ndarray, n: int) -> np.ndarray:
         """Single query search on 1 thread with Float32 via C++ searcher."""
         return self.searcher.search(
-            np.ascontiguousarray(v, dtype=np.float32),
+            v,
             k=n,
             eps_or_ef=self.eps_or_ef,
             threads=1,
@@ -376,7 +376,7 @@ class QG(BaseANN):
     def query(self, v: np.ndarray, n: int) -> np.ndarray:
         """Single query search on 1 thread with INT8 search and FP16 reranking directly in C++."""
         return self.searcher.search(
-            np.ascontiguousarray(v, dtype=np.float32),
+            v,
             k=n,
             eps_or_ef=self.eps_or_ef,
             rerank_factor=self.rerank_size_factor,
@@ -535,7 +535,7 @@ class EVP(BaseANN):
     def query(self, v: np.ndarray, n: int) -> np.ndarray:
         """Single query search on 1 thread with EVP search and FP16 reranking."""
         return self.searcher.search(
-            np.ascontiguousarray(v, dtype=np.float32),
+            v,
             k=n,
             eps_or_ef=self.eps_or_ef,
             rerank_factor=self.rerank_size_factor,
