@@ -71,8 +71,9 @@ def test_searcher_quantized_int8_with_rerank():
     target_space = FloatSpace.create(dim=dim, metric=Metric.Int8_L2)
     ro_graph = graph.to_readonly(target_space, int8_data, transformations=[quantizer])
 
-    # 3. Refine features in FP16
-    base_fp16 = deglib.distances.floats_to_fp16(data)
+    # 3. Refine features in FP16 with calibrated ScalarQuantizerFP16
+    fp16_quantizer = deglib.transformation.make_scalar_quantizer_fp16(data)
+    base_fp16 = fp16_quantizer.quantize(data)
     rerank_space = FloatSpace.create(dim=dim, metric=Metric.FP16_L2)
 
     # 4. Create Searcher
@@ -80,6 +81,7 @@ def test_searcher_quantized_int8_with_rerank():
         graph=ro_graph,
         rerank_space=rerank_space,
         rerank_data=base_fp16,
+        rerank_transformations=[fp16_quantizer],
     )
 
     query = data[5]
@@ -274,12 +276,14 @@ def test_searcher_rerank_insertion_order_with_permuted_labels():
     )
 
     # rerank_data in insertion order: row k = the k-th vector given to the builder (= data[k])
-    rerank_data = np.ascontiguousarray(deglib.distances.floats_to_fp16(data), dtype=np.uint16)
+    fp16_quantizer = deglib.transformation.make_scalar_quantizer_fp16(data)
+    rerank_data = np.ascontiguousarray(fp16_quantizer.quantize(data))
 
     searcher = create_searcher(
         graph=graph,
         rerank_space=FloatSpace.create(dim=dim, metric=Metric.FP16_InnerProduct),
         rerank_data=rerank_data,
+        rerank_transformations=[fp16_quantizer],
     )
 
     for j in (0, 5, 17, 99):

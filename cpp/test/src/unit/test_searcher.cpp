@@ -88,12 +88,16 @@ TEST(SearcherTest, QuantizedInt8WithFP16Reranker) {
     auto target_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::Int8_L2);
     auto ro_graph = deglib::graph::convert_to_readonly_graph(base_graph.internal(), target_space, int8_data.data());
 
-    // Reranker with FP16 base features
+    // Reranker with FP16 base features and calibrated ScalarQuantizerFP16
+    auto fp16_quantizer = std::make_shared<deglib::transformation::ScalarQuantizerFP16>(
+        deglib::transformation::make_scalar_quantizer_fp16(std::span<const float>(data), dim)
+    );
     std::vector<uint16_t> base_fp16(count * dim);
-    deglib::distances::fp16::floats_to_fp16(data.data(), base_fp16.data(), data.size());
+    fp16_quantizer->transform_database(std::span<const float>(data), std::as_writable_bytes(std::span(base_fp16)));
     auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP16_L2);
 
-    auto searcher = deglib::search::make_searcher(ro_graph, quantizer, deglib::search::Reranker(rerank_space, std::as_bytes(std::span(base_fp16)), count));
+    auto reranker = deglib::search::Reranker(rerank_space, std::as_bytes(std::span(base_fp16)), count, {fp16_quantizer});
+    auto searcher = deglib::search::make_searcher(ro_graph, quantizer, std::move(reranker));
 
     // Query for 5th item
     auto q = std::span<const float>(data.data() + 5 * dim, dim);
@@ -168,13 +172,18 @@ TEST(SearcherTest, OptimizeTunesFp16Reranker) {
     std::vector<float> data(count * dim);
     for (auto& v : data) v = dist(rng);
 
+    auto fp16_quantizer = std::make_shared<deglib::transformation::ScalarQuantizerFP16>(
+        deglib::transformation::make_scalar_quantizer_fp16(std::span<const float>(data), dim)
+    );
     std::vector<uint16_t> base_fp16(count * dim);
-    deglib::distances::fp16::floats_to_fp16(data.data(), base_fp16.data(), data.size());
+    fp16_quantizer->transform_database(std::span<const float>(data), std::as_writable_bytes(std::span(base_fp16)));
 
     auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
 
     auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP16_L2);
-    auto searcher = deglib::search::make_searcher(graph.internal(), deglib::search::Reranker(rerank_space, std::as_bytes(std::span(base_fp16)), count));
+    auto searcher = deglib::search::make_searcher(
+        graph.internal(), deglib::search::Reranker(rerank_space, std::as_bytes(std::span(base_fp16)), count, {fp16_quantizer})
+    );
 
     // Reranker<uint16_t> self-samples its fp16 base vectors; no float reinterpretation.
     searcher->optimize(/*n_clusters=*/8, /*n_iter=*/5);

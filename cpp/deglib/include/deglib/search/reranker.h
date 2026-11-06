@@ -5,6 +5,7 @@
 #include "deglib/distances.h"
 #include "deglib/filter.h"
 #include "deglib/graph/internal_graph.h"
+#include "deglib/transformation.h"
 #include "deglib/utils/memory.h"
 
 #include <algorithm>
@@ -13,6 +14,7 @@
 #include <cstdint>
 #include <format>
 #include <limits>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -45,8 +47,13 @@ class Reranker {
     deglib::distances::FloatSpace space_;
     const void* base_vectors_ = nullptr;
     size_t num_base_vectors_ = 0;
+    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations_;
     int32_t po_ = 8;  // Prefetch lookahead offset for candidate feature vectors (0 disables prefetch).
     int32_t pl_ = 0;  // Cache lines to prefetch per feature vector (0 = prefetch the full vector).
+
+    // Pre-allocated scratch workspace for query transformations
+    mutable std::vector<std::byte> transform_buf1_;
+    mutable std::vector<std::byte> transform_buf2_;
 
     /**
      * Internal core: Evaluates candidate distances against base vectors using a distance function object
@@ -178,9 +185,17 @@ class Reranker {
      *                         so row c must correspond to internal vertex c in the graph (i.e. vector for
      *                         label `graph.getExternalLabels()[c]`).
      * @param num_base_vectors Number of rows in ``base_vectors``.
+     * @param transformations  Optional transformations executed on queries before scoring against base vectors.
      */
-    Reranker(deglib::distances::FloatSpace space, std::span<const std::byte> base_vectors, size_t num_base_vectors)
-        : space_(std::move(space)), base_vectors_(base_vectors.data()), num_base_vectors_(num_base_vectors) {
+    Reranker(
+        deglib::distances::FloatSpace space,
+        std::span<const std::byte> base_vectors,
+        size_t num_base_vectors,
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
+    ) : space_(std::move(space)),
+        base_vectors_(base_vectors.data()),
+        num_base_vectors_(num_base_vectors),
+        transformations_(std::move(transformations)) {
         if (num_base_vectors_ > 0) {
             if (base_vectors.data() == nullptr) {
                 throw std::invalid_argument("Reranker: base_vectors buffer is null");
@@ -197,6 +212,7 @@ class Reranker {
     const deglib::distances::FloatSpace& getSpace() const noexcept { return space_; }
     const void* getBaseVectors() const noexcept { return base_vectors_; }
     size_t getNumBaseVectors() const noexcept { return num_base_vectors_; }
+    const std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>& getTransformations() const noexcept { return transformations_; }
     int32_t getPo() const noexcept { return po_; }
     int32_t getPl() const noexcept { return pl_; }
     void setPo(int32_t po) noexcept { po_ = (po > 0) ? po : 0; }
@@ -331,7 +347,8 @@ class Reranker {
     }
 
     /**
-     * Typed single-query rerank for float32 queries. Handles conversion to FP16 if base space is FP16.
+     * Typed single-query rerank for float32 queries. Applies attached transformations if present,
+     * or ensures query space matches base space.
      */
     inline uint32_t rerank_f32(
         const float* query,
@@ -350,23 +367,42 @@ class Reranker {
         auto out_idx_span = std::span<uint32_t>(out_indices, k);
         auto out_dist_span = (return_distances && out_distances) ? std::span<float>(out_distances, k) : std::span<float>{};
 
-        const size_t byte_size = space_.get_data_size();
-        if (byte_size == dim * sizeof(float)) {
-            // Direct float space
+        if (!transformations_.empty()) {
+            const float* current_f32 = query;
+
+            for (size_t t = 0; t < transformations_.size(); ++t) {
+                const auto& trans = transformations_[t];
+                const bool is_last = (t + 1 == transformations_.size());
+                const size_t out_bytes = (trans->output_byte_size() > 0) ? trans->output_byte_size() : space_.get_data_size();
+                const size_t cur_dim = trans->input_dim();
+                std::span<const float> in_span(current_f32, cur_dim);
+
+                if (is_last) {
+                    if (transform_buf1_.size() < out_bytes) transform_buf1_.resize(out_bytes);
+                    trans->transform_query(in_span, std::span<std::byte>(transform_buf1_.data(), out_bytes));
+                    return rerank(std::span<const std::byte>(transform_buf1_.data(), out_bytes), cands_span, k, out_idx_span, out_dist_span, return_distances, unsorted);
+                } else {
+                    if (transform_buf2_.size() < out_bytes) transform_buf2_.resize(out_bytes);
+                    trans->transform_query(in_span, std::span<std::byte>(transform_buf2_.data(), out_bytes));
+                    current_f32 = reinterpret_cast<const float*>(transform_buf2_.data());
+                }
+            }
+        }
+
+        const auto dt = space_.metric().get_data_type();
+        if (dt == deglib::distances::MetricDataType::FP32) {
             auto q_span = std::span<const std::byte>(reinterpret_cast<const std::byte*>(query), dim * sizeof(float));
             return rerank(q_span, cands_span, k, out_idx_span, out_dist_span, return_distances, unsorted);
-        } else if (byte_size == dim * sizeof(uint16_t)) {
-            // FP16 base space: convert float query to fp16
-            std::vector<uint16_t> q_fp16(dim);
-            deglib::distances::fp16::floats_to_fp16(query, q_fp16.data(), dim);
-            auto q_span = std::span<const std::byte>(reinterpret_cast<const std::byte*>(q_fp16.data()), dim * sizeof(uint16_t));
-            return rerank(q_span, cands_span, k, out_idx_span, out_dist_span, return_distances, unsorted);
         }
-        return 0;
+
+        throw std::invalid_argument(std::format(
+            "Reranker: float32 query passed to Reranker with base data type {:#x}, but no transformations were configured. "
+            "A transformation (e.g. ScalarQuantizerFP16) is required to convert the query.",
+            static_cast<uint8_t>(dt)));
     }
 
     /**
-     * Typed single-query rerank for float16 queries. Handles conversion to float32 if base space is FP32.
+     * Typed single-query rerank for float16 queries.
      */
     inline uint32_t rerank_f16(
         const uint16_t* query,
@@ -385,19 +421,19 @@ class Reranker {
         auto out_idx_span = std::span<uint32_t>(out_indices, k);
         auto out_dist_span = (return_distances && out_distances) ? std::span<float>(out_distances, k) : std::span<float>{};
 
-        const size_t byte_size = space_.get_data_size();
-        if (byte_size == dim * sizeof(uint16_t)) {
-            // Direct fp16 space
+        const auto dt = space_.metric().get_data_type();
+        if (dt == deglib::distances::MetricDataType::FP16) {
             auto q_span = std::span<const std::byte>(reinterpret_cast<const std::byte*>(query), dim * sizeof(uint16_t));
             return rerank(q_span, cands_span, k, out_idx_span, out_dist_span, return_distances, unsorted);
-        } else if (byte_size == dim * sizeof(float)) {
-            // FP32 base space: convert fp16 query to float
+        } else if (dt == deglib::distances::MetricDataType::FP32) {
             std::vector<float> q_f32(dim);
             deglib::distances::fp16::fp16_to_floats(query, q_f32.data(), dim);
-            auto q_span = std::span<const std::byte>(reinterpret_cast<const std::byte*>(q_f32.data()), dim * sizeof(float));
-            return rerank(q_span, cands_span, k, out_idx_span, out_dist_span, return_distances, unsorted);
+            return rerank_f32(q_f32.data(), dim, candidate_indices, num_cands, k, out_indices, out_distances, return_distances, unsorted);
         }
-        return 0;
+
+        throw std::invalid_argument(std::format(
+            "Reranker: float16 query passed to Reranker with base data type {:#x}. Direct FP16 queries are only supported for FP16 or FP32 base spaces.",
+            static_cast<uint8_t>(dt)));
     }
 
     template <typename QueryT>

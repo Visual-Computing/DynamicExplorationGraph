@@ -349,11 +349,15 @@ class QG(BaseANN):
         target_space = deglib.FloatSpace.create(dim=dims, metric=self.int8_metric)
         self.graph = loaded_graph.to_readonly(target_space, int8_features, transformations=[self.quantizer])
 
-        # 5. Initialize C++ Zero-overhead Searcher
+        # 5. Initialize C++ Zero-overhead Searcher with FP16 Reranker & ScalarQuantizerFP16
+        self.rerank_quantizer = deglib.transformation.make_scalar_quantizer_fp16(X)
+        rerank_features = self.rerank_quantizer.quantize(X_graph_order, num_threads=1)
+
         self.searcher = deglib.search.create_searcher(
             graph=self.graph,
             rerank_space=self.rerank_space_fp16,
-            rerank_data=deglib.distances.floats_to_fp16(X_graph_order),
+            rerank_data=rerank_features,
+            rerank_transformations=[self.rerank_quantizer],
         )
 
         # 6. Full searcher optimization

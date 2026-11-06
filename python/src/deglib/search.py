@@ -71,10 +71,19 @@ class Reranker:
     :param base_vectors: 2D NumPy array of dataset vectors (shape: N_base x dim).
     """
 
-    def __init__(self, space: FloatSpace, base_vectors: np.ndarray):
+    def __init__(
+        self,
+        space: FloatSpace,
+        base_vectors: np.ndarray,
+        transformations: list | None = None,
+    ):
         cpp_space = space.float_space_cpp if hasattr(space, "float_space_cpp") else space
         contiguous_base = np.ascontiguousarray(base_vectors)
-        self.reranker_cpp = cpp_search.Reranker(cpp_space, contiguous_base)
+        cpp_transformations = []
+        if transformations:
+            for t in transformations:
+                cpp_transformations.append(t.transformation_cpp if hasattr(t, "transformation_cpp") else t)
+        self.reranker_cpp = cpp_search.Reranker(cpp_space, contiguous_base, cpp_transformations)
         self.base_vectors = contiguous_base
 
     def get_num_base_vectors(self) -> int:
@@ -194,6 +203,7 @@ class Searcher:
         graph,
         rerank_space: FloatSpace | None = None,
         rerank_data: np.ndarray | None = None,
+        rerank_transformations: list | None = None,
     ):
         cpp_graph = graph.dynamic_exploration_graph_cpp if hasattr(graph, "dynamic_exploration_graph_cpp") else graph
         cpp_rerank_space = (
@@ -201,11 +211,16 @@ class Searcher:
             if (rerank_space is not None and hasattr(rerank_space, "float_space_cpp"))
             else rerank_space
         )
+        cpp_rerank_transforms = []
+        if rerank_transformations:
+            for t in rerank_transformations:
+                cpp_rerank_transforms.append(t.transformation_cpp if hasattr(t, "transformation_cpp") else t)
 
         self.searcher_cpp = cpp_search.Searcher(
             graph=cpp_graph,
             rerank_space=cpp_rerank_space,
             base_vectors=rerank_data,
+            rerank_transformations=cpp_rerank_transforms,
         )
 
     def optimize(
@@ -289,6 +304,7 @@ def create_searcher(
     graph,
     rerank_space: FloatSpace | None = None,
     rerank_data: np.ndarray | None = None,
+    rerank_transformations: list | None = None,
 ) -> Searcher:
     """
     Factory function to create a Searcher instance.
@@ -296,11 +312,13 @@ def create_searcher(
     :param graph: DynamicExplorationGraph (Mutable or ReadOnly) instance.
     :param rerank_space: Optional FloatSpace for exact candidate reranking.
     :param rerank_data: Optional base feature matrix. In standard static workflows, simply pass the same array used for building. If labels were permuted/deleted, pass features aligned with ``graph.get_labels()``.
+    :param rerank_transformations: Optional list of transformations applied to queries before candidate reranking.
     """
     return Searcher(
         graph=graph,
         rerank_space=rerank_space,
         rerank_data=rerank_data,
+        rerank_transformations=rerank_transformations,
     )
 
 

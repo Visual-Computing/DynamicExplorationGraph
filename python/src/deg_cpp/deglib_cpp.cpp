@@ -551,9 +551,12 @@ class RerankerPy {
     deglib::search::Reranker reranker_;
 
   public:
-    RerankerPy(const deglib::distances::FloatSpace& space, py::array base_vectors)
-        : base_vectors_holder_(std::move(base_vectors)),
-          reranker_(space, validate_and_get_span(space, base_vectors_holder_), base_vectors_holder_.request().shape[0]) {}
+    RerankerPy(
+        const deglib::distances::FloatSpace& space,
+        py::array base_vectors,
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
+    ) : base_vectors_holder_(std::move(base_vectors)),
+        reranker_(space, validate_and_get_span(space, base_vectors_holder_), base_vectors_holder_.request().shape[0], std::move(transformations)) {}
 
     size_t get_num_base_vectors() const noexcept { return reranker_.getNumBaseVectors(); }
 
@@ -638,12 +641,15 @@ class SearcherPy {
     SearcherPy(
         const deglib::DynamicExplorationGraph& graph,
         std::optional<deglib::distances::FloatSpace> rerank_space = std::nullopt,
-        std::optional<py::array> base_vectors = std::nullopt
+        std::optional<py::array> base_vectors = std::nullopt,
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> rerank_transformations = {}
     ) {
         if (rerank_space.has_value() && base_vectors.has_value() && !base_vectors->is_none()) {
             base_vectors_holder_ = *base_vectors;
             auto base_span = RerankerPy::validate_and_get_span(*rerank_space, base_vectors_holder_);
-            deglib::search::Reranker reranker(*rerank_space, base_span, base_vectors_holder_.request().shape[0]);
+            deglib::search::Reranker reranker(
+                *rerank_space, base_span, base_vectors_holder_.request().shape[0], std::move(rerank_transformations)
+            );
             searcher_ = deglib::make_searcher(graph, std::move(reranker));
         } else {
             searcher_ = deglib::make_searcher(graph);
@@ -1996,9 +2002,10 @@ PYBIND11_MODULE(deglib_cpp, m) {
 
     py::class_<RerankerPy>(search_module, "Reranker", "Candidate reranker.")
         .def(
-            py::init<const deglib::distances::FloatSpace&, py::array>(),
+            py::init<const deglib::distances::FloatSpace&, py::array, std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>>(),
             py::arg("space"),
             py::arg("base_vectors"),
+            py::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{},
             py::keep_alive<1, 3>(),
             "The reranker is index-agnostic: candidate index c is scored as base_vectors[c]; the caller chooses the index space."
         )
@@ -2024,8 +2031,17 @@ PYBIND11_MODULE(deglib_cpp, m) {
 
     py::class_<SearcherPy>(search_module, "Searcher", "Search pipeline. Results are the graph's labels.")
         .def(
-            py::init<const deglib::DynamicExplorationGraph&, std::optional<deglib::distances::FloatSpace>, std::optional<py::array>>(), py::arg("graph"),
-            py::arg("rerank_space") = std::nullopt, py::arg("base_vectors") = std::nullopt, py::keep_alive<1, 2>(),
+            py::init<
+                const deglib::DynamicExplorationGraph&,
+                std::optional<deglib::distances::FloatSpace>,
+                std::optional<py::array>,
+                std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>
+            >(),
+            py::arg("graph"),
+            py::arg("rerank_space") = std::nullopt,
+            py::arg("base_vectors") = std::nullopt,
+            py::arg("rerank_transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{},
+            py::keep_alive<1, 2>(),
             "base_vectors must follow the graph's internal index order (0 .. size()-1, see graph.get_labels()). Valid for static graphs."
         )
         .def(
