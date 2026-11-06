@@ -173,19 +173,14 @@ class DynamicExplorationGraph:
         """
         filter_obj = None if filter_labels is None else Filter.create_filter(filter_labels, self.size())
 
-        if isinstance(query, np.ndarray) and query.flags["C_CONTIGUOUS"]:
-            contiguous_query = query
-        else:
-            contiguous_query = np.ascontiguousarray(query)
-
-        if contiguous_query.ndim == 1:
+        if query.ndim == 1:
             return self.dynamic_exploration_graph_cpp.search(
-                contiguous_query, eps_or_ef, k, filter_obj, max_distance_computation_count, return_distances, unsorted
+                query, eps_or_ef, k, filter_obj, max_distance_computation_count, return_distances, unsorted
             )
-        elif contiguous_query.ndim == 2:
-            threads = get_num_useful_threads(threads, contiguous_query.shape[0])
+        elif query.ndim == 2:
+            threads = get_num_useful_threads(threads, query.shape[0])
             return self.dynamic_exploration_graph_cpp.search_batch(
-                contiguous_query,
+                query,
                 eps_or_ef,
                 k,
                 filter_obj,

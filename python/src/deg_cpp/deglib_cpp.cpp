@@ -32,7 +32,11 @@ py::object graph_search_single_wrapper(
     const bool return_distances = true,
     const bool unsorted = false
 ) {
-    py::buffer_info query_info = query.request();
+    auto c_query = py::array::ensure(query, py::array::c_style);
+    if (!c_query) {
+        throw std::invalid_argument("search: query must be convertible to a C-contiguous array");
+    }
+    py::buffer_info query_info = c_query.request();
     if constexpr (std::is_same_v<G, deglib::DynamicExplorationGraph>) {
         if (graph.hasTransformations()) {
             const size_t in_dim = graph.getInputDim();
@@ -201,7 +205,11 @@ py::object dynamic_exploration_graph_search_batch_wrapper(
     const bool return_distances = true,
     const bool unsorted = false
 ) {
-    py::buffer_info query_info = query.request();
+    auto c_query = py::array::ensure(query, py::array::c_style);
+    if (!c_query) {
+        throw std::invalid_argument("search_batch: query must be convertible to a C-contiguous array");
+    }
+    py::buffer_info query_info = c_query.request();
 
     if (query_info.ndim != 2) {
         throw std::invalid_argument(std::format("Expected query to have two dimensions, got {}", query_info.ndim));
