@@ -4,11 +4,6 @@ main.py — k-Nearest Neighbor Graph (k-NNG) Construction Example (SISAP Challen
 Demonstrates fast construction and exploration of a k-NN graph on high-dimensional vectors
 using Dynamic Exploration Graph (DEG), EVP feature quantization, and FP16 candidate reranking.
 
-Uses deglib_cpp C++ bindings for:
-  - EvpQuantizer.quantize: Fast EVP quantization of float32 vectors to byte-packed EVP format
-  - floats_to_fp16 / fp16_to_floats: IEEE 754 half-precision conversion for reranking
-  - EVP_InnerProduct metric: Bit-level inner product distance for quantized graph search
-
 Usage
 -----
     uv run main.py                                      # Uses small dataset (10000 vectors by default)
