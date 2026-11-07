@@ -353,7 +353,6 @@ def main():
                             results_indices.append(np.array(candidates, dtype=np.int64, copy=True))
 
                         elapsed_sec = total_query_sec
-                        indices_batch = np.array(results_indices, dtype=np.int64)
 
                         search_time_us = elapsed_sec * 1e6
                         time_us_per_query = int(search_time_us / max(n_queries, 1))
@@ -365,16 +364,13 @@ def main():
                             dist_fn = _VIBE_METRICS.get(metric_str.lower().strip(), _ip_distance)
                             for i in range(n_queries):
                                 t = gt_distances[i, actual_k - 1] + 1e-3
-                                valid_indices = indices_batch[i, :actual_k]
-                                valid_mask = valid_indices < len(base_vecs)
-                                if np.any(valid_mask):
-                                    ret_vecs = base_vecs[valid_indices[valid_mask]]
-                                    pred_dists = dist_fn(query_vecs[i], ret_vecs)
-                                    hits += int((pred_dists <= t).sum())
+                                ret_vecs = base_vecs[results_indices[i]]
+                                pred_dists = dist_fn(query_vecs[i], ret_vecs)
+                                hits += int((pred_dists <= t).sum())
                         else:
                             for i in range(n_queries):
                                 gt_set = set(gt_vecs[i, :actual_k])
-                                ret_set = set(indices_batch[i, :actual_k]) - {4294967295, -1}
+                                ret_set = set(results_indices[i])
                                 hits += len(gt_set.intersection(ret_set))
 
                         recall = hits / max(total_returned, 1)

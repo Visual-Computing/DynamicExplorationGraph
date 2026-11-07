@@ -146,7 +146,7 @@ Controls 2-hop edge swapping attempts (executed during vertex deletion repair in
      - Maximum number of consecutive edge swaps evaluated in a single improvement attempt.
    * - ``improve_tries``
      - ``0``
-     - Number of random 2-hop improvement attempts executed per build step. Defaults to ``0`` (disabled during batch insertion to maximize build throughput). Kantenreparatur beim Löschen (``reduceGraph``) nutzt ``improve_k`` automatisch.
+     - Number of random 2-hop improvement attempts executed per build step. Defaults to ``0`` (disabled during batch insertion to maximize build throughput). Edge repair during deletions (``reduceGraph``) uses ``improve_k`` automatically.
 
 .. note::
 

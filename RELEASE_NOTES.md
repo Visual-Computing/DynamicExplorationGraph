@@ -1,5 +1,19 @@
 # Release Notes
 
+## deglib v0.2.8
+
+### Overview
+deglib v0.2.8 fixes result array sizing for single-query searches in Python. When fewer candidates than $k$ are found (such as during intentionally small exploration radii $ef < k$), single-query results are directly trimmed to the exact number of found neighbors without `UINT32_MAX` sentinels or memory allocations. Batch query matrices continue to preserve their regular rectangular $[N, k]$ shape with standard `UINT32_MAX` padding.
+
+### 🚀 Improvements & Fixes
+* **Exact Single-Query Result Sizing (`Searcher.search`):**
+  * Single queries (1D or single-row 2D) now return arrays sized to the exact count of found neighbors (`found <= k`), eliminating out-of-bounds `UINT32_MAX` (4294967295) indices when $ef < k$.
+  * Zero-allocation in-place shape adjustment (`result.resize({found})`) with 0ns overhead for the standard $found = k$ path.
+* **Benchmark & Example Cleanup:**
+  * Removed obsolete sentinel filter checks (`- {4294967295, -1}`) in `examples/vibe/main.py`.
+
+---
+
 ## deglib v0.2.7
 
 ### Overview

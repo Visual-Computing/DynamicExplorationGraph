@@ -702,18 +702,26 @@ class SearcherPy {
                 dist_ptr = static_cast<float*>(dist_result.request().ptr);
             }
 
+            uint32_t found = 0;
             if (eps_or_ef >= 1.0f) {
                 const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
                 if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    searcher_->search_ef_f16(static_cast<const uint16_t*>(buf.ptr), k, ef, rerank_factor, out_ptr, dist_ptr, unsorted);
+                    found = searcher_->search_ef_f16(static_cast<const uint16_t*>(buf.ptr), k, ef, rerank_factor, out_ptr, dist_ptr, unsorted);
                 } else {
-                    searcher_->search_ef_f32(static_cast<const float*>(buf.ptr), k, ef, rerank_factor, out_ptr, dist_ptr, unsorted);
+                    found = searcher_->search_ef_f32(static_cast<const float*>(buf.ptr), k, ef, rerank_factor, out_ptr, dist_ptr, unsorted);
                 }
             } else {
                 if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    searcher_->search_f16(static_cast<const uint16_t*>(buf.ptr), k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, unsorted);
+                    found = searcher_->search_f16(static_cast<const uint16_t*>(buf.ptr), k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, unsorted);
                 } else {
-                    searcher_->search_f32(static_cast<const float*>(buf.ptr), k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, unsorted);
+                    found = searcher_->search_f32(static_cast<const float*>(buf.ptr), k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, unsorted);
+                }
+            }
+
+            if (found < k) {
+                result.resize({static_cast<py::ssize_t>(found)});
+                if (return_distances) {
+                    dist_result.resize({static_cast<py::ssize_t>(found)});
                 }
             }
 

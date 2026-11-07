@@ -373,6 +373,11 @@ class Searcher:
     # threads: Number of worker threads for batch queries
     # return_distances: If True, returns (indices, distances) tuple
     # unsorted: If True, returns candidates in heap order instead of ascending distance order
+    # Note on result sizing:
+    #   - For single queries (1D or 1xDim), returns shape (found,) with found <= k
+    #     trimmed to the exact number of found elements (e.g. when ef < k).
+    #   - For batch queries (NxDim, N > 1), returns fixed 2D matrix [N, k] where unfilled positions
+    #     are padded with np.iinfo(np.uint32).max and infinity/NaN.
     search(query, k, eps_or_ef=0.1, rerank_factor=1.0, threads=1, return_distances=False, unsorted=False) -> np.ndarray | tuple[np.ndarray, np.ndarray]
 
 create_searcher(

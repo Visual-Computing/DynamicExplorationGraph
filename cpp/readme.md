@@ -15,7 +15,7 @@ It supports both static and dynamic streaming datasets through incremental exten
   - `deglib::graph::ReadOnlyGraph`: Compact, memory-efficient graph optimized for read-only ANNS search queries.
 - **Multi-Threaded Builder**: `deglib::builder::EvenRegularGraphBuilder` with lock-free batch scheduling and customizable optimization profiles (`StreamingData`, `LowLID`, `HighLID`).
 - **Hardware-Accelerated SIMD**:
-  - Hand-optimized AVX-512 and AVX2 vector kernels with automatic runtime/compiler dispatch and Scalar fallback.
+  - Hand-optimized AVX-512, AVX2, and VNNI vector kernels with automatic runtime/compiler dispatch and Scalar fallback.
   - Metrics: `FP32_L2`, `FP32_InnerProduct`, `Uint8_L2`, `Uint8_InnerProduct`, `Int8_L2`, `Int8_InnerProduct`, `FP16_L2`, `FP16_InnerProduct`, and quantized `EVP_InnerProduct`.
 - **Graph Optimization & Diagnostics**:
   - Topology pruning (`prune_worst_edges`, `prune_non_rng_edges`).
@@ -58,8 +58,8 @@ int main() {
     for (auto& val : query) val = dist(rng);
 
     const uint32_t k = 10;
-    const float eps = 0.1f;
-    auto results = graph.search(std::span<const float>(query), k, eps);
+    const float eps_or_ef = 0.1f;
+    auto results = graph.search(std::span<const float>(query), k, eps_or_ef);
 
     std::cout << "Top " << k << " nearest neighbors:" << std::endl;
     for (const auto& match : results) {

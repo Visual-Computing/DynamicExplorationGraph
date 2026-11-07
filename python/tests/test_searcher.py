@@ -324,3 +324,27 @@ def test_searcher_normalize_query():
     # Toggle normalize_query setter
     searcher.normalize_query = False
     assert searcher.normalize_query is False
+
+
+def test_searcher_single_query_small_ef_exact_sizing():
+    """When ef < k on a single query, the result array must be trimmed to found count without padding."""
+    np.random.seed(42)
+    dim = 8
+    n = 100
+    data = np.random.randn(n, dim).astype(np.float32)
+    graph = deglib.builder.build_from_data(data, edges_per_vertex=8, metric=Metric.FP32_L2)
+    searcher = create_searcher(graph)
+
+    # Ask for k=50 with small ef=4 (graph explore may expand fewer than 50 elements)
+    res = searcher.search(data[0], k=50, eps_or_ef=4)
+    # Result must not contain uint32 max padding and shape must equal actual found (found < 50)
+    assert len(res) < 50
+    assert np.all(res != np.iinfo(np.uint32).max)
+
+    # With return_distances=True
+    res_idx, res_dist = searcher.search(data[0], k=50, eps_or_ef=4, return_distances=True)
+    assert len(res_idx) == len(res_dist)
+    assert len(res_idx) < 50
+    assert np.all(res_idx != np.iinfo(np.uint32).max)
+    assert not np.any(np.isnan(res_dist))
+

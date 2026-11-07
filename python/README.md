@@ -66,7 +66,7 @@ query = np.random.random(dims).astype(np.float32)
 graph = deglib.builder.build_from_data(data, edges_per_vertex=32, show_progress=True)
 
 # 3. Query top-k nearest neighbors
-indices, distances = graph.search(query, k=10, eps=0.1)
+indices, distances = graph.search(query, k=10, eps_or_ef=0.1)
 
 print("Nearest neighbors:", indices)
 print("Distances:", distances)

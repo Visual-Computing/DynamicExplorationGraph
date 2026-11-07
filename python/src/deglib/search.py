@@ -269,11 +269,6 @@ class Searcher:
         """
         Search for nearest neighbors of a single query vector (1D or 2D with 1 vector) or a batch of query vectors (2D).
 
-        - If `query` represents a single vector (`ndim == 1` or `(1, dim)` or `(dim, 1)`):
-          returns 1D array of shape `(k,)` (or tuple of 1D arrays if `return_distances` is True).
-        - If `query` is a batch (`(N, dim)` with N > 1):
-          returns 2D array of shape `(N, k)` (or tuple of 2D arrays if `return_distances` is True).
-
         Entry vertices come solely from ``optimize()``.
 
         :param query: Query array (1D vector or 2D batch).
@@ -286,7 +281,12 @@ class Searcher:
         :param threads: Number of worker threads for batch search (default: 1).
         :param return_distances: If True, returns a tuple ``(indices, distances)``.
         :param unsorted: If True, returns candidates in heap order instead of ascending distance order.
-        :return: NumPy array of nearest neighbor IDs, or tuple ``(indices, distances)`` if `return_distances` is True.
+        :return: Nearest neighbor IDs, or tuple ``(indices, distances)`` if `return_distances` is True:
+            - Single query (1D or 1xDim): 1D array of shape `(found,)` where `found <= k`.
+              If fewer than `k` neighbors are found (e.g. when `ef < k`), trimmed to the exact number of found elements.
+            - Batch query (NxDim, N > 1): 2D array of shape `(N, k)`.
+              Unfilled positions when a query finds fewer than `k` candidates are padded with
+              `np.iinfo(np.uint32).max` (for indices) and `np.nan` or `infinity` (for distances).
         """
         return self.searcher_cpp.search(
             query,

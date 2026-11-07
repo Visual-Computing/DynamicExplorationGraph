@@ -39,7 +39,7 @@ from .transformation import (
     make_scalar_quantizer_fp16,
 )
 
-__version__ = "0.2.7"
+__version__ = "0.2.8"
 
 __all__ = [
     "DynamicExplorationGraph",
