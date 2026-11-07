@@ -280,7 +280,7 @@ indices, distances = searcher.search(query, k=10, eps_or_ef=128)
 - `Metric.Uint8_InnerProduct`: 8-bit unsigned integer inner product (`np.uint8`)
 - `Metric.FP16_L2`: 16-bit half-precision Euclidean distance (`np.uint16`)
 - `Metric.FP16_InnerProduct`: 16-bit half-precision inner product (`np.uint16`)
-- `Metric.EVP_InnerProduct`: Quantized Extreme Value Property bit-packed vectors (`np.uint8`)
+- `Metric.EVP_InnerProduct`: Quantized Equi-Voronoi Polytopes (EVP) bit-packed vectors (`np.uint8`)
 - `Metric.Int8_InnerProduct`: 8-bit signed integer inner product (`np.int8`)
 - `Metric.Int8_L2`: 8-bit signed integer Euclidean distance (`np.int8`)
 

@@ -479,7 +479,7 @@ enum class Metric {
     Uint8_InnerProduct,///< Unsigned 8-bit integer Inner Product distance
     FP16_L2,           ///< Half-precision FP16 Euclidean L2 distance
     FP16_InnerProduct, ///< Half-precision FP16 Inner Product distance
-    EVP_InnerProduct,  ///< Extreme Vector Quantization (1-bit / ternary) Inner Product
+    EVP_InnerProduct,  ///< Equi-Voronoi Polytopes (EVP, 1-bit / ternary) Inner Product
     Int8_InnerProduct, ///< Signed 8-bit integer Inner Product distance
     Int8_L2            ///< Signed 8-bit integer L2 distance
 };
@@ -1045,7 +1045,7 @@ public:
     static std::unique_ptr<L2NormalizeTransform> deserialize(std::istream& is);
 };
 
-// --- Extreme Vector Quantization (EVP) ---
+// --- Equi-Voronoi Polytopes Quantization (EVP) ---
 
 class EvpQuantizer : public FeatureTransformation {
 public:

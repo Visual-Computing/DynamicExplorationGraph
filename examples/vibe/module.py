@@ -399,7 +399,7 @@ class QG(BaseANN):
 
 class EVP(BaseANN):
     """
-    Extreme Vector Quantized DEG (DEG-EVP): Graph search with EVP (1-bit/ternary) vectors and FP16 reranking.
+    Equi-Voronoi Polytopes Quantized DEG (DEG-EVP): Graph search with EVP (1-bit/ternary) vectors and FP16 reranking.
     """
 
     def __init__(
