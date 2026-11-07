@@ -101,20 +101,13 @@ template <typename MTYPE>
 using DISTFUNC = MTYPE (*)(const void*, const void*, const void*);
 
 /**
- * Function pointer signature for batch distance comparison functions.
- */
-template <typename MTYPE>
-using BATCH_DISTFUNC = void (*)(const void* query_ptr, const void* const* db_arr, size_t count, const void* qty_ptr, MTYPE* dists);
-
-/**
  * Concept for distance function implementations that provide a static compare method
- * compatible with DISTFUNC<float> and a static compare_batch method compatible with BATCH_DISTFUNC<float>.
+ * compatible with DISTFUNC<float>.
  */
 template <typename T>
-concept DistanceFunction = requires(const void* a, const void* b, const void* const* db_arr, size_t count, const void* param, float* dists) {
+concept DistanceFunction = requires(const void* a, const void* b, const void* param) {
     { T::compare(a, b, param) } -> std::same_as<float>;
-    { T::compare_batch(a, db_arr, count, param, dists) };
-} && std::is_convertible_v<decltype(&T::compare), DISTFUNC<float>> && std::is_convertible_v<decltype(&T::compare_batch), BATCH_DISTFUNC<float>>;
+} && std::is_convertible_v<decltype(&T::compare), DISTFUNC<float>>;
 
 /**
  * Metaprogrammierung: Fügt mehere std::variants zu EINEM flachen std::variant zusammen.
@@ -161,20 +154,6 @@ inline DISTFUNC<float> to_dist_func(const DistanceVariant& variant) {
             using DistType = std::decay_t<decltype(dist)>;
             static_assert(deglib::distances::DistanceFunction<DistType>, "Selected distance variant must satisfy DistanceFunction concept");
             return &DistType::compare;
-        },
-        variant
-    );
-}
-
-/**
- * Extracts the BATCH_DISTFUNC<float> function pointer from a DistanceVariant object.
- */
-inline BATCH_DISTFUNC<float> to_batch_dist_func(const DistanceVariant& variant) {
-    return std::visit(
-        [](auto&& dist) -> BATCH_DISTFUNC<float> {
-            using DistType = std::decay_t<decltype(dist)>;
-            static_assert(deglib::distances::DistanceFunction<DistType>, "Selected distance variant must satisfy DistanceFunction concept");
-            return &DistType::compare_batch;
         },
         variant
     );
@@ -282,11 +261,6 @@ class FloatSpace {
      * Returns a function pointer to the selected distance comparison function.
      */
     const DISTFUNC<float> get_dist_func() const { return to_dist_func(dist_variant_); }
-
-    /**
-     * Returns a function pointer to the selected batch distance comparison function.
-     */
-    const BATCH_DISTFUNC<float> get_batch_dist_func() const { return to_batch_dist_func(dist_variant_); }
 
     /**
      * Returns the instruction set name (e.g. "AVX512", "AVX2", "Scalar") used by the distance function.

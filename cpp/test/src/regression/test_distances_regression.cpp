@@ -52,7 +52,6 @@ inline void pin_current_thread_to_core(int core_id = 0) {
 
 struct DistBenchmarkResult {
     double qps;        // Queries / sec (single compare)
-    double batch_qps;  // Queries / sec (compare_batch)
 };
 
 template <typename VectorType>
@@ -69,7 +68,6 @@ inline DistBenchmarkResult benchmark_distance_metric(
     pin_current_thread_to_core(0);
     const deglib::distances::FloatSpace space(dim, metric, instruction);
     const auto dist_func = space.get_dist_func();
-    const auto batch_dist_func = space.get_batch_dist_func();
     const auto* param = space.get_dist_func_param();
     const size_t raw_element_count = space.get_data_size() / sizeof(VectorType);
     const size_t raw_byte_size = space.get_data_size();
@@ -89,13 +87,6 @@ inline DistBenchmarkResult benchmark_distance_metric(
     }
 
     volatile float sink = 0.0f;
-
-    // Prepare pointer array for base data for batch testing (every pointer is 64-byte aligned)
-    std::vector<const void*> base_ptrs(base_count);
-    for (size_t i = 0; i < base_count; ++i) {
-        base_ptrs[i] = &aligned_base[i * stride_elements];
-    }
-    std::vector<float> dists_buffer(base_count);
 
     // Warmup single compare
     for (size_t q = 0; q < std::min<size_t>(query_count, 10); ++q) {
@@ -122,28 +113,8 @@ inline DistBenchmarkResult benchmark_distance_metric(
     double total_queries = static_cast<double>(query_count * iterations);
     double single_qps = total_queries / (total_ms_single / 1000.0);
 
-    // Warmup compare_batch
-    for (size_t q = 0; q < std::min<size_t>(query_count, 10); ++q) {
-        const void* q_vec = &aligned_query[q * stride_elements];
-        batch_dist_func(q_vec, base_ptrs.data(), base_count, param, dists_buffer.data());
-        sink += dists_buffer[0];
-    }
-
-    // Benchmark compare_batch
-    auto start_batch = std::chrono::high_resolution_clock::now();
-    for (size_t it = 0; it < iterations; ++it) {
-        for (size_t q = 0; q < query_count; ++q) {
-            const void* q_vec = &aligned_query[q * stride_elements];
-            batch_dist_func(q_vec, base_ptrs.data(), base_count, param, dists_buffer.data());
-            sink += dists_buffer[0];
-        }
-    }
-    auto end_batch = std::chrono::high_resolution_clock::now();
-    double total_ms_batch = std::chrono::duration<double, std::milli>(end_batch - start_batch).count();
-    double batch_qps = total_queries / (total_ms_batch / 1000.0);
     DistBenchmarkResult result;
     result.qps = single_qps;
-    result.batch_qps = batch_qps;
 
     std::string metric_str;
     switch (metric) {
@@ -159,8 +130,7 @@ inline DistBenchmarkResult benchmark_distance_metric(
     }
     std::string display_name = metric_str + " (" + space.get_instruction() + ")";
     std::cout << std::left << std::setw(30) << display_name << " | " << std::right << std::setw(6) << dim << " dim"
-              << " | " << std::setw(12) << std::fixed << std::setprecision(2) << result.qps << " QPS"
-              << " | " << std::setw(12) << std::fixed << std::setprecision(2) << result.batch_qps << " Batch QPS" << std::endl;
+              << " | " << std::setw(12) << std::fixed << std::setprecision(2) << result.qps << " QPS" << std::endl;
     return result;
 }
 

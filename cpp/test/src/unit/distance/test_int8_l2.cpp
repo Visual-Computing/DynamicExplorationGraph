@@ -257,45 +257,4 @@ TEST(L2Int8_FloatSpace, VariousDims) {
     }
 }
 
-TEST(L2Int8_Batch, MatchesSingleCompare) {
-    std::vector<size_t> dims = {16, 32, 48, 64, 80, 100, 128, 256, 768, 784};
-    std::vector<size_t> counts = {1, 3, 4, 7, 8, 9, 15, 16, 25};
-
-    for (size_t dim : dims) {
-        for (size_t count : counts) {
-            auto q = make_int8_vec(dim, -77);
-
-            std::vector<std::vector<int8_t>> db(count);
-            std::vector<const void*> db_ptrs(count);
-            for (size_t i = 0; i < count; ++i) {
-                db[i] = make_int8_vec(dim, static_cast<int>(i * 10 - 50));
-                db_ptrs[i] = db[i].data();
-            }
-
-            std::vector<float> batch_dists(count, 0.0f);
-            auto dist_variant = deglib::distances::int8_l2::select_dist(dim);
-
-            std::visit(
-                [&](auto&& dist) {
-                    using DistType = std::decay_t<decltype(dist)>;
-                    DistType::compare_batch(q.data(), db_ptrs.data(), count, &dim, batch_dists.data());
-                },
-                dist_variant
-            );
-
-            for (size_t i = 0; i < count; ++i) {
-                float single_dist = std::visit(
-                    [&](auto&& dist) {
-                        using DistType = std::decay_t<decltype(dist)>;
-                        return DistType::compare(q.data(), db_ptrs[i], &dim);
-                    },
-                    dist_variant
-                );
-
-                EXPECT_NEAR(batch_dists[i], single_dist, 1e-4f) << "dim=" << dim << ", count=" << count << ", index=" << i;
-            }
-        }
-    }
-}
-
 }  // anonymous namespace

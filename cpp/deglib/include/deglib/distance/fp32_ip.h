@@ -16,12 +16,6 @@ class InnerProductFloat {
   public:
     static constexpr const char* get_instruction() { return "Scalar"; }
     inline static float compare(const void* pVect1v, const void* pVect2v, const void* qty_ptr) { return 1.f - dot(pVect1v, pVect2v, qty_ptr); }
-    inline static void compare_batch(const void* query_ptr, const void* const* db_arr, size_t count, const void* qty_ptr, float* dists) {
-        for (size_t i = 0; i < count; ++i) {
-            dists[i] = compare(query_ptr, db_arr[i], qty_ptr);
-        }
-    }
-
     inline static float dot(const void* pVect1v, const void* pVect2v, const void* qty_ptr) { return ip_naive(pVect1v, pVect2v, qty_ptr); }
 
     inline static float ip_naive(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
@@ -150,76 +144,6 @@ class InnerProductFloat_AVX512 {
 
         return 1.f - result;
     }
-
-    DEGLIB_TARGET_AVX512 inline static void compare_batch(const void* query_ptr, const void* const* db_arr, size_t count, const void* qty_ptr, float* dists) {
-        static constexpr size_t BATCH_SIZE = 8;
-        const float* query = static_cast<const float*>(query_ptr);
-        const size_t dim = *((const size_t*)qty_ptr);
-
-        auto batch_impl = [query, dim](const void* const* db, float* out_dists) DEGLIB_TARGET_AVX512 {
-            size_t offset = 0;
-            alignas(64) __m512 s[BATCH_SIZE];
-            for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                s[j] = _mm512_setzero_ps();
-            }
-
-            if constexpr (HasDualSimd) {
-                const size_t nc32 = dim / 32;
-                offset = nc32 * 32;
-
-                for (size_t c = 0; c < nc32; ++c) {
-                    size_t idx = c * 32;
-                    __m512 q_vec_lo = _mm512_loadu_ps(&query[idx]);
-                    __m512 q_vec_hi = _mm512_loadu_ps(&query[idx + 16]);
-
-                    for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                        const float* db_ = static_cast<const float*>(db[j]);
-                        __m512 db_vec_lo = _mm512_loadu_ps(&db_[idx]);
-                        __m512 db_vec_hi = _mm512_loadu_ps(&db_[idx + 16]);
-                        s[j] = _mm512_fmadd_ps(q_vec_lo, db_vec_lo, s[j]);
-                        s[j] = _mm512_fmadd_ps(q_vec_hi, db_vec_hi, s[j]);
-                    }
-                }
-            }
-
-            if constexpr (HasSimd) {
-                __m512 q_vec = _mm512_loadu_ps(&query[offset]);
-                for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                    const float* db_ = static_cast<const float*>(db[j]);
-                    __m512 db_vec = _mm512_loadu_ps(&db_[offset]);
-                    s[j] = _mm512_fmadd_ps(q_vec, db_vec, s[j]);
-                }
-                offset += 16;
-            }
-
-            for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                out_dists[j] = fp32_hsum512(s[j]);
-            }
-
-            if constexpr (HasTail) {
-                for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                    const float* db_ptr = static_cast<const float*>(db[j]);
-                    float tail_dot = 0.0f;
-                    for (size_t k = offset; k < dim; ++k) {
-                        tail_dot = std::fma(query[k], db_ptr[k], tail_dot);
-                    }
-                    out_dists[j] += tail_dot;
-                }
-            }
-
-            for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                out_dists[j] = 1.0f - out_dists[j];
-            }
-        };
-
-        size_t i = 0;
-        for (; i + BATCH_SIZE <= count; i += BATCH_SIZE) {
-            batch_impl(&db_arr[i], &dists[i]);
-        }
-        for (; i < count; ++i) {
-            dists[i] = compare(query_ptr, db_arr[i], qty_ptr);
-        }
-    }
 };
 
 template <ResidualMode Mode = ResidualMode::Full>
@@ -284,76 +208,6 @@ class InnerProductFloat_AVX2 {
         }
 
         return 1.f - result;
-    }
-
-    DEGLIB_TARGET_AVX2 inline static void compare_batch(const void* query_ptr, const void* const* db_arr, size_t count, const void* qty_ptr, float* dists) {
-        static constexpr size_t BATCH_SIZE = 8;
-        const float* query = static_cast<const float*>(query_ptr);
-        const size_t dim = *((const size_t*)qty_ptr);
-
-        auto batch_impl = [query, dim](const void* const* db, float* out_dists) DEGLIB_TARGET_AVX2 {
-            size_t offset = 0;
-            alignas(32) __m256 s[BATCH_SIZE];
-            for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                s[j] = _mm256_setzero_ps();
-            }
-
-            if constexpr (HasDualSimd) {
-                const size_t nc16 = dim / 16;
-                offset = nc16 * 16;
-
-                for (size_t c = 0; c < nc16; ++c) {
-                    size_t idx = c * 16;
-                    __m256 q_vec_lo = _mm256_loadu_ps(&query[idx]);
-                    __m256 q_vec_hi = _mm256_loadu_ps(&query[idx + 8]);
-
-                    for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                        const float* db_ = static_cast<const float*>(db[j]);
-                        __m256 db_vec_lo = _mm256_loadu_ps(&db_[idx]);
-                        __m256 db_vec_hi = _mm256_loadu_ps(&db_[idx + 8]);
-                        s[j] = _mm256_fmadd_ps(q_vec_lo, db_vec_lo, s[j]);
-                        s[j] = _mm256_fmadd_ps(q_vec_hi, db_vec_hi, s[j]);
-                    }
-                }
-            }
-
-            if constexpr (HasSimd) {
-                __m256 q_vec = _mm256_loadu_ps(&query[offset]);
-                for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                    const float* db_ = static_cast<const float*>(db[j]);
-                    __m256 db_vec = _mm256_loadu_ps(&db_[offset]);
-                    s[j] = _mm256_fmadd_ps(q_vec, db_vec, s[j]);
-                }
-                offset += 8;
-            }
-
-            for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                out_dists[j] = fp32_hsum256(s[j]);
-            }
-
-            if constexpr (HasTail) {
-                for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                    const float* db_ptr = static_cast<const float*>(db[j]);
-                    float tail_dot = 0.0f;
-                    for (size_t k = offset; k < dim; ++k) {
-                        tail_dot = std::fma(query[k], db_ptr[k], tail_dot);
-                    }
-                    out_dists[j] += tail_dot;
-                }
-            }
-
-            for (size_t j = 0; j < BATCH_SIZE; ++j) {
-                out_dists[j] = 1.0f - out_dists[j];
-            }
-        };
-
-        size_t i = 0;
-        for (; i + BATCH_SIZE <= count; i += BATCH_SIZE) {
-            batch_impl(&db_arr[i], &dists[i]);
-        }
-        for (; i < count; ++i) {
-            dists[i] = compare(query_ptr, db_arr[i], qty_ptr);
-        }
     }
 };
 #endif

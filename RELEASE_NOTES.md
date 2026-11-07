@@ -3,9 +3,17 @@
 ## deglib v0.2.8
 
 ### Overview
-deglib v0.2.8 fixes result array sizing for single-query searches in Python. When fewer candidates than $k$ are found (such as during intentionally small exploration radii $ef < k$), single-query results are directly trimmed to the exact number of found neighbors without `UINT32_MAX` sentinels or memory allocations. Batch query matrices continue to preserve their regular rectangular $[N, k]$ shape with standard `UINT32_MAX` padding.
+deglib v0.2.8 streamlines distance computation kernels and search result handling:
+1. **Removal of Obsolete Batch Distance Kernels (`compare_batch`):** Eliminates unused dual-SIMD batch distance routines (`compare_batch`) across all metrics (`fp32_ip`, `fp32_l2`, `fp16_ip`, `fp16_l2`, `int8_ip`, `int8_l2`, `uint8_ip`, `uint8_l2`, `evp_ip`) and simplifies the `DistanceFunction` concept. K-Means entry selection in `kmeans.h` now invokes distance evaluation directly via standard `dist_func`.
+2. **Exact Single-Query Result Sizing (`Searcher.search`):** When fewer candidates than $k$ are found (such as during intentionally small exploration radii $ef < k$), single-query results in Python are directly trimmed to the exact number of found neighbors without `UINT32_MAX` sentinels or memory allocations. Batch query matrices continue to preserve their regular rectangular $[N, k]$ shape with standard `UINT32_MAX` padding.
 
 ### 🚀 Improvements & Fixes
+* **Removal of `compare_batch` & Distance Kernel Simplification:**
+  * Removed `compare_batch()` and `process_batch_tail()` across all distance headers in `deglib/distance/`.
+  * Removed `BATCH_DISTFUNC` function pointer signature, `to_batch_dist_func()`, and `FloatSpace::get_batch_dist_func()` from `distances.h`.
+  * Simplified `DistanceFunction` concept to focus cleanly on scalar/single-vector comparison (`compare`).
+  * Updated K-Means medoid query entry routing in `deglib::search::KMeansEntrySelector::top_entries()` to compute medoid distances directly through `feature_space.get_dist_func()`.
+  * Cleaned up all corresponding unit tests and regression benchmark suites.
 * **Exact Single-Query Result Sizing (`Searcher.search`):**
   * Single queries (1D or single-row 2D) now return arrays sized to the exact count of found neighbors (`found <= k`), eliminating out-of-bounds `UINT32_MAX` (4294967295) indices when $ef < k$.
   * Zero-allocation in-place shape adjustment (`result.resize({found})`) with 0ns overhead for the standard $found = k$ path.

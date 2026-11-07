@@ -7,7 +7,7 @@
 //   float features stored in the graph or base vectors are referenced directly without copying.
 // - Medoids are dynamic query-routing centers owned exclusively by KMeansEntrySelector
 //   in Searcher. They do not mutate or pollute InternalGraph's topological entry vertices.
-// - Distance evaluation during query routing evaluates SIMD batch distances in the native
+// - Distance evaluation during query routing evaluates distances in the native
 //   feature space of the graph.
 
 #include "deglib/concurrent.h"
@@ -253,10 +253,12 @@ class KMeansEntrySelector {
         float dists[kMaxMedoids];
         if (num_entries > kMaxMedoids) return entries_;
 
-        const auto batch_dist_func = feature_space.get_batch_dist_func();
+        const auto dist_func = feature_space.get_dist_func();
         if (medoid_ptrs_[0] == nullptr) return entries_;
 
-        batch_dist_func(query.data(), medoid_ptrs_.data(), num_entries, dist_param, dists);
+        for (size_t i = 0; i < num_entries; ++i) {
+            dists[i] = dist_func(query.data(), medoid_ptrs_[i], dist_param);
+        }
 
         // Fast-path: Single nearest entry point (linear scan over computed distances, 0 allocations)
         if (count == 1) {

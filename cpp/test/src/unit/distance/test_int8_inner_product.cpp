@@ -360,39 +360,4 @@ TEST(FloatSpace_Int8_InnerProduct, AllDimsMatchNaive) {
     }
 }
 
-TEST(FloatSpace_Int8_InnerProduct, BatchMatchesSingle) {
-    std::vector<size_t> test_dims = {8, 16, 32, 64, 128, 256};
-    std::vector<size_t> batch_counts = {1, 4, 7, 8, 9, 16, 23, 24, 32};
-
-    for (size_t dim : test_dims) {
-        for (size_t count : batch_counts) {
-            deglib::distances::FloatSpace space(dim, deglib::distances::Metric::Int8_InnerProduct);
-            auto dist_func = space.get_dist_func();
-            auto batch_func = space.get_batch_dist_func();
-            auto param = space.get_dist_func_param();
-
-            auto query = make_int8_vec(dim, -99);
-            std::vector<std::vector<int8_t>> db_vecs(count);
-            std::vector<const void*> db_ptrs(count);
-
-            for (size_t j = 0; j < count; ++j) {
-                db_vecs[j] = make_int8_vec(dim, static_cast<int>(j * 100) - 50);
-                db_ptrs[j] = db_vecs[j].data();
-            }
-
-            std::vector<float> single_dists(count);
-            for (size_t j = 0; j < count; ++j) {
-                single_dists[j] = dist_func(query.data(), db_ptrs[j], param);
-            }
-
-            std::vector<float> batch_dists(count, 0.0f);
-            batch_func(query.data(), db_ptrs.data(), count, param, batch_dists.data());
-
-            for (size_t j = 0; j < count; ++j) {
-                EXPECT_FLOAT_EQ(batch_dists[j], single_dists[j]) << "dim=" << dim << " count=" << count << " idx=" << j;
-            }
-        }
-    }
-}
-
 }  // anonymous namespace

@@ -264,40 +264,6 @@ TEST(InnerProductUint8_FloatSpace, VariousDims) {
     }
 }
 
-TEST(InnerProductUint8_Batch, MatchesSingleCompare) {
-    std::vector<size_t> dims = {16, 32, 64, 128, 256, 768};
-    std::vector<size_t> counts = {1, 3, 4, 7, 8, 9, 15, 16, 25};
-
-    for (size_t dim : dims) {
-        for (size_t count : counts) {
-            auto q = make_uint8_vec(dim, 77);
-            std::vector<std::vector<uint8_t>> db(count);
-            std::vector<const void*> db_ptrs(count);
-            for (size_t i = 0; i < count; ++i) {
-                db[i] = make_uint8_vec(dim, static_cast<int>(i * 13 + 1));
-                db_ptrs[i] = db[i].data();
-            }
-
-            deglib::distances::FloatSpace space(dim, deglib::distances::Metric::Uint8_InnerProduct);
-            auto dist_func = space.get_dist_func();
-            auto batch_func = space.get_batch_dist_func();
-            auto param = space.get_dist_func_param();
-
-            std::vector<float> single_dists(count);
-            for (size_t i = 0; i < count; ++i) {
-                single_dists[i] = dist_func(q.data(), db_ptrs[i], param);
-            }
-
-            std::vector<float> batch_dists(count, 0.0f);
-            batch_func(q.data(), db_ptrs.data(), count, param, batch_dists.data());
-
-            for (size_t i = 0; i < count; ++i) {
-                EXPECT_FLOAT_EQ(batch_dists[i], single_dists[i]) << "dim=" << dim << " count=" << count << " index=" << i;
-            }
-        }
-    }
-}
-
 TEST(InnerProductUint8_SelectDist, AcceptsVNNIFallback) {
 #if defined(DEGLIB_X86)
     if (deglib::cpu::has_avx512_vnni()) {
