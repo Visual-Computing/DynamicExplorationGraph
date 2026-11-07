@@ -97,7 +97,7 @@ def test_searcher_quantized_int8_with_rerank():
         assert distances[i] >= distances[i - 1]
 
     # Batch search
-    res_batch = searcher.search(data[:5], k=5, eps_or_ef=0.2, rerank_factor=1.5, threads=2)
+    res_batch = searcher.search(data[:5], k=5, eps_or_ef=32, rerank_factor=1.5, threads=2)
     assert res_batch.shape == (5, 5)
     for i in range(5):
         assert res_batch[i, 0] == i
