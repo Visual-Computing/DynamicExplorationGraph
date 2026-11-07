@@ -351,7 +351,7 @@ deglib v0.2.0 is a major release featuring API consolidation, dynamic graph stre
 * **Python API:** Available via `deglib.optimization.prune_worst_edges()`.
 
 #### Quantization: EVP & Native FP16
-* **EVP (Exact Vector Projection):** Bit-packed Top-K ternary masks ($2 \times \text{dim}/8$ bytes/vector) with hardware-accelerated symmetric inner product calculation (`Metric::EVP_InnerProduct`).
+* **EVP (Extreme Value Property):** Bit-packed Top-K ternary masks ($2 \times \text{dim}/8$ bytes/vector) with hardware-accelerated symmetric inner product calculation (`Metric::EVP_InnerProduct`).
 * **FP16 Inner Product:** Native IEEE 754 half-precision float distance kernel (`Metric::FP16_InnerProduct`) with AVX-512 / AVX2 F16C hardware acceleration and scalar round-to-nearest-even fallback.
 * **Safety Fix:** Resolved prototype buffer overflows by ensuring 64-bit aligned SIMD memory access (`_mm_storel_epi64`).
 
