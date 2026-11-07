@@ -19,7 +19,7 @@ We use [`uv`](https://docs.astral.sh/uv/) for fast Python environment and depend
   ```
 - **Windows (PowerShell)**:
   ```powershell
-  powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+  irm https://astral.sh/uv/install.ps1 | iex
   ```
 - **Via Pip**:
   ```bash

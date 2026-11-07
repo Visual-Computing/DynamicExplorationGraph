@@ -18,10 +18,10 @@ import deglib
 | [`deglib.builder`](#2-module-deglibbuilder) | `GraphBuilder`, `OptimizationTarget`, `build_from_data` | Incremental vector addition/deletion, parallel batch construction, and optimization. |
 | [`deglib.distances`](#3-module-deglibdistances) | `FloatSpace`, `Metric`, `floats_to_fp16`, `fp16_to_floats` | Vector metrics, SIMD feature spaces, and batch distance evaluation. |
 | [`deglib.search`](#4-module-deglibsearch) | `Filter`, `rerank`, `Searcher`, `create_searcher` | Bitset-based label filtering, exact distance candidate reranking, and unified query search pipeline. |
-| [`deglib.optimization`](#5-module-degliboptimization) | `prune_*`, `presort`, `mips_l2_*`, `quantize_*` | RNG graph pruning, FLAS 1D dataset presorting, MIPS L2 transformations, EVP and Scalar quantization (Int8/Uint8/FP16). |
-| [`deglib.transformation`](#8-module-deglibtransformation) | `FeatureTransformation`, `MipsTransform`, `L2NormalizeTransform`, `EvpQuantizer`, `ScalarQuantizer*` | Vector feature transformations, normalizers, quantizers, and serialization pipeline. |
+| [`deglib.optimization`](#5-module-degliboptimization) | `prune_*`, `presort` | MRNG graph pruning and FLAS 1D dataset presorting. |
 | [`deglib.analysis`](#6-module-deglibanalysis) | `analyze_graph`, `check_*`, `calc_*` | Graph validation, connectivity verification, and reachability metrics. |
 | [`deglib.cpu`](#7-module-deglibcpu) | `InstructionSet`, `has_avx2`, `has_avx_vnni`, `has_avx512`, `has_avx512_vnni` | Runtime CPU SIMD capability detection and instruction set enum. |
+| [`deglib.transformation`](#8-module-deglibtransformation) | `FeatureTransformation`, `MipsTransform`, `L2NormalizeTransform`, `EvpQuantizer`, `ScalarQuantizer*` | Vector feature transformations, normalizers, quantizers, and serialization pipeline. |
 
 ---
 
@@ -393,53 +393,18 @@ create_searcher(
 
 ## 5. Module: `deglib.optimization`
 
-Graph topology refinement, FLAS 1D dataset presorting, MIPS L2 transformations, EVP quantization, and Scalar quantization (Int8/Uint8).
+Graph topology refinement (edge pruning) and FLAS 1D dataset presorting.
 
 ```python
 from deglib.optimization import (
-    prune_non_rng_edges,
+    prune_non_mrng_edges,
     prune_worst_edges,
     presort,
-    mips_l2_transform,
-    mips_l2_transform_query,
-    EvpQuantizer,
-    ScalarQuantizerInt8,
-    ScalarQuantizerInt8PerDim,
-    ScalarQuantizerUint8,
-    ScalarQuantizerUint8PerDim,
-    make_evp_quantizer,
-    make_scalar_quantizer_int8,
-    make_scalar_quantizer_int8_perdim,
-    make_scalar_quantizer_uint8,
-    make_scalar_quantizer_uint8_perdim,
 )
 
-# 1. State-aware Scalar Quantization (All classes support float32 & float16)
-# INT8 Quantizer [-127, 127] (Cosine / InnerProduct)
-quantizer = make_scalar_quantizer_int8(base_vectors, quantile=1.0)
-quant_base = quantizer.quantize(base_vectors)
-quant_query = quantizer.quantize(query_vectors)
+# Remove all edges violating the Monotonic Relative Neighborhood Graph (MRNG) rule. Returns removed edge count.
+prune_non_mrng_edges(graph, num_threads=0) -> int
 
-# INT8 Per-Dimension Quantizer [-127, 127]
-int8_pdim = make_scalar_quantizer_int8_perdim(base_vectors)
-quant_int8_pdim = int8_pdim.quantize(base_vectors)
-
-# UINT8 Quantizer [0, 255] (Euclidean L2)
-l2_quantizer = make_scalar_quantizer_uint8(base_vectors)
-quant_l2_base = l2_quantizer.quantize(base_vectors)
-
-# UINT8 Per-Dimension Quantizer [0, 255]
-perdim_quantizer = make_scalar_quantizer_uint8_perdim(base_vectors)
-quant_perdim_base = perdim_quantizer.quantize(base_vectors)
-
-# 2. EVP Quantization (float32 or float16 vectors to byte-packed EVP format)
-# One shared quantizer for database and query vectors guarantees matching non_zeros.
-quantizer = EvpQuantizer(non_zeros)  # or make_evp_quantizer(non_zeros)
-quant_base = quantizer.quantize(base_vectors, num_threads=0)
-quant_query = quantizer.quantize(query_vectors, num_threads=0)
-
-# Remove all edges violating the Relative Neighborhood Graph (RNG) rule. Returns removed edge count.
-prune_non_rng_edges(graph, num_threads=0) -> int
 # Prune the worst (longest/highest-weight) neighbors per vertex by replacing them with self-loops
 prune_worst_edges(graph, prune_worst, num_threads=0)
 
@@ -452,16 +417,6 @@ prune_worst_edges(graph, prune_worst, num_threads=0)
 # show_progress: If True and no callback, prints progress to stdout
 # Returns 1D uint32 permutation array [N] of sorted vector indices.
 presort(vectors, space_or_metric=None, radius_decay=0.9, threads=0, callback=None, *, show_progress=False) -> np.ndarray
-
-# Transform database vectors from d dimensions to (d+1) dimensions for MIPS via L2 distance.
-# database: 2D float32 array [N, d]
-# Returns tuple (transformed_database [N, d+1], max_norm float M).
-mips_l2_transform(database) -> tuple[np.ndarray, float]
-
-# Pad query vectors with 0 at dimension (d+1) for MIPS queries against an L2-transformed database.
-# queries: 1D [d] or 2D [Q, d] float32 array
-# Returns transformed array of shape [d+1] or [Q, d+1].
-mips_l2_transform_query(queries) -> np.ndarray
 ```
 
 ---

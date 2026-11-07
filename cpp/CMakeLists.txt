@@ -6,7 +6,7 @@ cmake_policy(SET CMP0054 NEW)
 
 project(
   deg_lib
-  HOMEPAGE_URL "https://github.com/Neiko2002/DEG"
+  HOMEPAGE_URL "https://github.com/Visual-Computing/DynamicExplorationGraph"
   DESCRIPTION
     "Dynamic Exploration Graphs for fast approximate nearest neighbor search and navigation in large image datasets"
   VERSION 0.0.1
