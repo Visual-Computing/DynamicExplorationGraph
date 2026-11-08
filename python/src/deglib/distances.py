@@ -74,9 +74,7 @@ class FloatSpace:
         :param instruction: CPU instruction set (defaults to ``InstructionSet.Auto``).
         :return: Configured FloatSpace instance.
         """
-        return FloatSpace(
-            cpp_distances.FloatSpace(dim, cpp_distances.Metric(int(metric)), cpp_cpu.InstructionSet(int(instruction)))
-        )
+        return FloatSpace(cpp_distances.FloatSpace(dim, cpp_distances.Metric(int(metric)), cpp_cpu.InstructionSet(int(instruction))))
 
     def dim(self) -> int:
         """
@@ -112,15 +110,16 @@ class FloatSpace:
         """
         return float(self.float_space_cpp.compute_distance(vec1, vec2))
 
-    def compute_distances(self, query: np.ndarray, targets: np.ndarray) -> np.ndarray:
+    def compute_distances(self, query: np.ndarray, targets: np.ndarray, threads: int = 0) -> np.ndarray:
         """
-        Calculate distances between a query vector and multiple target vectors.
+        Calculate distances between query vector(s) and multiple target vectors.
 
-        :param query: 1D query vector.
-        :param targets: 2D array of target vectors (shape: N x dim).
-        :return: 1D NumPy array of computed distances.
+        :param query: 1D query vector [D] or 2D batch of queries [Q, D] (C-contiguous).
+        :param targets: 2D array of target vectors (shape: N x dim, C-contiguous).
+        :param threads: Worker threads for the query batch (0 = all CPU cores, 1 = serial).
+        :return: 2D NumPy array of distances (shape Q, N); a 1D query yields shape (1, N).
         """
-        return self.float_space_cpp.compute_distances(query, targets)
+        return self.float_space_cpp.compute_distances(query, targets, threads)
 
     def __repr__(self):
         return f"FloatSpace(size={self.get_data_size()} dim={self.dim()}, metric={self.metric()})"

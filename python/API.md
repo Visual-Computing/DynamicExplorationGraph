@@ -258,8 +258,10 @@ class FloatSpace:
     # Compute distance between two individual 1D feature vectors
     compute_distance(vec1, vec2) -> float
 
-    # Compute 1D array of distances between query [D] and a batch of targets [N, D]
-    compute_distances(query, targets) -> np.ndarray
+    # Compute 2D array of distances between query [D] (or batch [Q, D]) and targets [N, D]
+    # threads: worker threads for the query batch (0 = all cores, 1 = serial).
+    # Returns shape (Q, N); a 1D query yields shape (1, N).
+    compute_distances(query, targets, threads=0) -> np.ndarray
 
 
 # --- Type Conversion ---
