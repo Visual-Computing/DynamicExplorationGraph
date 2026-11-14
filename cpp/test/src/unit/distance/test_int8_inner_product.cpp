@@ -13,8 +13,8 @@ namespace {
 inline std::vector<int8_t> make_int8_vec(size_t n, int seed = 0) {
     std::vector<int8_t> v(n);
     for (size_t i = 0; i < n; ++i) {
-        int val = (seed + static_cast<int>(i) * 17) % 256;
-        if (val > 127) val -= 256;
+        // Clamped to [-127, 127] to match ScalarQuantizerInt8 symmetric range
+        int val = (seed + static_cast<int>(i) * 17) % 255 - 127;
         v[i] = static_cast<int8_t>(val);
     }
     return v;
@@ -99,51 +99,15 @@ TEST(InnerProductInt8_AVX512_VNNI, MatchesNaive_IfSupported) {
     if (!deglib::cpu::has_avx512_vnni()) {
         GTEST_SKIP() << "AVX512_VNNI not supported";
     }
-    // DualOnly: dim must be a multiple of 128
-    for (size_t dim : {128, 256}) {
-        auto a = make_int8_vec(dim, -40);
-        auto b = make_int8_vec(dim, 75);
-        float d = InnerProductInt8_AVX512_VNNI<ResidualMode::DualOnly>::compare(a.data(), b.data(), &dim);
-        EXPECT_NEAR(d, ip_int8_naive(a.data(), b.data(), dim), 1e-4f) << "DualOnly dim=" << dim;
-    }
-    // DualPlusSimd: dim = 128*k + 64 (e.g. 64, 192)
-    for (size_t dim : {192, 320}) {
-        auto a = make_int8_vec(dim, -40);
-        auto b = make_int8_vec(dim, 75);
-        float d = InnerProductInt8_AVX512_VNNI<ResidualMode::DualPlusSimd>::compare(a.data(), b.data(), &dim);
-        EXPECT_NEAR(d, ip_int8_naive(a.data(), b.data(), dim), 1e-4f) << "DualPlusSimd dim=" << dim;
-    }
-    // DualTail: dim = 128*k + rem (rem in 1..63)
-    for (size_t dim : {129, 140, 191}) {
-        auto a = make_int8_vec(dim, -40);
-        auto b = make_int8_vec(dim, 75);
-        float d = InnerProductInt8_AVX512_VNNI<ResidualMode::DualTail>::compare(a.data(), b.data(), &dim);
-        EXPECT_NEAR(d, ip_int8_naive(a.data(), b.data(), dim), 1e-4f) << "DualTail dim=" << dim;
-    }
-    // SimdOnly: dim = 64
-    {
-        size_t dim = 64;
+    // SimdOnly: dim must be a multiple of 64
+    for (size_t dim : {64, 128, 192, 256, 320, 512}) {
         auto a = make_int8_vec(dim, -40);
         auto b = make_int8_vec(dim, 75);
         float d = InnerProductInt8_AVX512_VNNI<ResidualMode::SimdOnly>::compare(a.data(), b.data(), &dim);
         EXPECT_NEAR(d, ip_int8_naive(a.data(), b.data(), dim), 1e-4f) << "SimdOnly dim=" << dim;
     }
-    // SimdTail: dim = 64 + rem (rem in 1..63)
-    for (size_t dim : {65, 80, 127}) {
-        auto a = make_int8_vec(dim, -40);
-        auto b = make_int8_vec(dim, 75);
-        float d = InnerProductInt8_AVX512_VNNI<ResidualMode::SimdTail>::compare(a.data(), b.data(), &dim);
-        EXPECT_NEAR(d, ip_int8_naive(a.data(), b.data(), dim), 1e-4f) << "SimdTail dim=" << dim;
-    }
-    // TailOnly: dim in 1..63
-    for (size_t dim : {1, 7, 32, 63}) {
-        auto a = make_int8_vec(dim, -40);
-        auto b = make_int8_vec(dim, 75);
-        float d = InnerProductInt8_AVX512_VNNI<ResidualMode::TailOnly>::compare(a.data(), b.data(), &dim);
-        EXPECT_NEAR(d, ip_int8_naive(a.data(), b.data(), dim), 1e-4f) << "TailOnly dim=" << dim;
-    }
-    // Full: dim = 128*k + 64 + rem (rem in 1..63)
-    for (size_t dim : {193, 220, 255}) {
+    // Full: across all dimensions (aligned, non-aligned, tails of 32, 16, 8, < 8)
+    for (size_t dim : {1, 7, 8, 15, 16, 31, 32, 63, 64, 65, 80, 127, 128, 129, 140, 191, 192, 193, 220, 255, 256, 295, 551, 1063}) {
         auto a = make_int8_vec(dim, -40);
         auto b = make_int8_vec(dim, 75);
         float d = InnerProductInt8_AVX512_VNNI<ResidualMode::Full>::compare(a.data(), b.data(), &dim);
@@ -211,51 +175,16 @@ TEST(InnerProductInt8_AVX2_VNNI, MatchesNaive_IfSupported) {
     if (!deglib::cpu::has_avx2_vnni()) {
         GTEST_SKIP() << "AVX_VNNI not supported";
     }
-    // DualOnly: dim must be a multiple of 64
-    for (size_t dim : {64, 128, 256}) {
-        auto a = make_int8_vec(dim, -80);
-        auto b = make_int8_vec(dim, 45);
-        float d = InnerProductInt8_AVX2_VNNI<ResidualMode::DualOnly>::compare(a.data(), b.data(), &dim);
-        EXPECT_NEAR(d, ip_int8_naive(a.data(), b.data(), dim), 1e-4f) << "DualOnly dim=" << dim;
-    }
-    // DualPlusSimd: dim = 64*k + 32
-    for (size_t dim : {96, 160, 224}) {
-        auto a = make_int8_vec(dim, -80);
-        auto b = make_int8_vec(dim, 45);
-        float d = InnerProductInt8_AVX2_VNNI<ResidualMode::DualPlusSimd>::compare(a.data(), b.data(), &dim);
-        EXPECT_NEAR(d, ip_int8_naive(a.data(), b.data(), dim), 1e-4f) << "DualPlusSimd dim=" << dim;
-    }
-    // DualTail: dim = 64*k + rem (rem in 1..31)
-    for (size_t dim : {65, 70, 80, 95}) {
-        auto a = make_int8_vec(dim, -80);
-        auto b = make_int8_vec(dim, 45);
-        float d = InnerProductInt8_AVX2_VNNI<ResidualMode::DualTail>::compare(a.data(), b.data(), &dim);
-        EXPECT_NEAR(d, ip_int8_naive(a.data(), b.data(), dim), 1e-4f) << "DualTail dim=" << dim;
-    }
-    // SimdOnly: dim = 32
-    {
-        size_t dim = 32;
+    // SimdOnly: dim must be a multiple of 32
+    for (size_t dim : {32, 64, 96, 128, 160, 224, 256, 512}) {
         auto a = make_int8_vec(dim, -80);
         auto b = make_int8_vec(dim, 45);
         float d = InnerProductInt8_AVX2_VNNI<ResidualMode::SimdOnly>::compare(a.data(), b.data(), &dim);
         EXPECT_NEAR(d, ip_int8_naive(a.data(), b.data(), dim), 1e-4f) << "SimdOnly dim=" << dim;
     }
-    // SimdTail: dim = 32 + rem (rem in 1..31)
-    for (size_t dim : {33, 40, 63}) {
-        auto a = make_int8_vec(dim, -80);
-        auto b = make_int8_vec(dim, 45);
-        float d = InnerProductInt8_AVX2_VNNI<ResidualMode::SimdTail>::compare(a.data(), b.data(), &dim);
-        EXPECT_NEAR(d, ip_int8_naive(a.data(), b.data(), dim), 1e-4f) << "SimdTail dim=" << dim;
-    }
-    // TailOnly: dim in 1..31
-    for (size_t dim : {1, 7, 16, 31}) {
-        auto a = make_int8_vec(dim, -80);
-        auto b = make_int8_vec(dim, 45);
-        float d = InnerProductInt8_AVX2_VNNI<ResidualMode::TailOnly>::compare(a.data(), b.data(), &dim);
-        EXPECT_NEAR(d, ip_int8_naive(a.data(), b.data(), dim), 1e-4f) << "TailOnly dim=" << dim;
-    }
-    // Full: dim = 64*k + 32 + rem (rem in 1..31)
-    for (size_t dim : {97, 105, 127, 161}) {
+    // Full: across all dimensions (aligned, non-aligned, tails of 16, 8, < 8)
+    for (size_t dim :
+         {1, 7, 8, 15, 16, 31, 32, 33, 40, 45, 63, 64, 65, 70, 80, 95, 96, 97, 105, 127, 128, 160, 161, 167, 256, 288, 295, 544, 551, 1056, 1063}) {
         auto a = make_int8_vec(dim, -80);
         auto b = make_int8_vec(dim, 45);
         float d = InnerProductInt8_AVX2_VNNI<ResidualMode::Full>::compare(a.data(), b.data(), &dim);

@@ -89,12 +89,27 @@ TEST(InnerProductUint8_AVX512_VNNI, MatchesNaive_IfSupported) {
     if (!deglib::cpu::has_avx512_vnni()) {
         GTEST_SKIP() << "AVX512_VNNI not supported";
     }
-    for (size_t dim : {1, 15, 32, 63, 64, 96, 127, 128, 160, 200, 256}) {
-        auto a = make_uint8_vec(dim);
-        auto b = make_uint8_vec(dim, static_cast<int>(dim));
+    std::vector<size_t> test_dims = {
+        1, 2, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33,
+        63, 64, 65, 127, 128, 129, 160, 167, 256,
+        288, 295, 512, 544, 551, 1024, 1056, 1063
+    };
+    for (size_t dim : test_dims) {
+        auto a = make_uint8_vec(dim, 42);
+        auto b = make_uint8_vec(dim, 99);
+        float expected = ip_uint8_naive(a.data(), b.data(), dim);
+
+        float actual_full = InnerProductUint8_AVX512_VNNI<ResidualMode::Full>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(actual_full, expected, 1e-4f) << "AVX512_VNNI<Full> dim=" << dim;
+
+        if (dim % 64 == 0) {
+            float actual_simd = InnerProductUint8_AVX512_VNNI<ResidualMode::SimdOnly>::compare(a.data(), b.data(), &dim);
+            EXPECT_NEAR(actual_simd, expected, 1e-4f) << "AVX512_VNNI<SimdOnly> dim=" << dim;
+        }
+
         auto dist_variant = deglib::distances::uint8_ip::select_dist(dim, deglib::cpu::InstructionSet::AVX512_VNNI);
         float d = std::visit([&](auto&& dist) { return dist.compare(a.data(), b.data(), &dim); }, dist_variant);
-        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "AVX512_VNNI dim=" << dim;
+        EXPECT_NEAR(d, expected, 1e-4f) << "AVX512_VNNI select_dist dim=" << dim;
     }
 }
 
@@ -102,12 +117,27 @@ TEST(InnerProductUint8_AVX2_VNNI, MatchesNaive_IfSupported) {
     if (!deglib::cpu::has_avx2_vnni()) {
         GTEST_SKIP() << "AVX2_VNNI not supported";
     }
-    for (size_t dim : {1, 15, 16, 31, 32, 48, 63, 64, 100, 128, 200, 256}) {
-        auto a = make_uint8_vec(dim);
-        auto b = make_uint8_vec(dim, static_cast<int>(dim));
+    std::vector<size_t> test_dims = {
+        1, 2, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33,
+        63, 64, 65, 127, 128, 129, 160, 167, 256,
+        288, 295, 512, 544, 551, 1024, 1056, 1063
+    };
+    for (size_t dim : test_dims) {
+        auto a = make_uint8_vec(dim, 42);
+        auto b = make_uint8_vec(dim, 99);
+        float expected = ip_uint8_naive(a.data(), b.data(), dim);
+
+        float actual_full = InnerProductUint8_AVX2_VNNI<ResidualMode::Full>::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(actual_full, expected, 1e-4f) << "AVX2_VNNI<Full> dim=" << dim;
+
+        if (dim % 32 == 0) {
+            float actual_simd = InnerProductUint8_AVX2_VNNI<ResidualMode::SimdOnly>::compare(a.data(), b.data(), &dim);
+            EXPECT_NEAR(actual_simd, expected, 1e-4f) << "AVX2_VNNI<SimdOnly> dim=" << dim;
+        }
+
         auto dist_variant = deglib::distances::uint8_ip::select_dist(dim, deglib::cpu::InstructionSet::AVX2_VNNI);
         float d = std::visit([&](auto&& dist) { return dist.compare(a.data(), b.data(), &dim); }, dist_variant);
-        EXPECT_NEAR(d, ip_uint8_naive(a.data(), b.data(), dim), 1e-4f) << "AVX2_VNNI dim=" << dim;
+        EXPECT_NEAR(d, expected, 1e-4f) << "AVX2_VNNI select_dist dim=" << dim;
     }
 }
 
