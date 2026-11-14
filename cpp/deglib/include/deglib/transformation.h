@@ -26,6 +26,9 @@ constexpr uint32_t make_fourcc(char a, char b, char c, char d) noexcept {
 inline constexpr uint32_t TAG_MIPS = make_fourcc('M', 'I', 'P', 'S');
 inline constexpr uint32_t TAG_SQI8 = make_fourcc('S', 'Q', 'I', '8');
 inline constexpr uint32_t TAG_SQU8 = make_fourcc('S', 'Q', 'U', '8');
+inline constexpr uint32_t TAG_SQU4 = make_fourcc('S', 'Q', 'U', '4');
+inline constexpr uint32_t TAG_SQI4 = make_fourcc('S', 'Q', 'I', '4');
+inline constexpr uint32_t TAG_SQU7 = make_fourcc('S', 'Q', 'U', '7');
 inline constexpr uint32_t TAG_SQ16 = make_fourcc('S', 'Q', '1', '6');
 inline constexpr uint32_t TAG_SQ8P = make_fourcc('S', 'Q', '8', 'P');
 inline constexpr uint32_t TAG_SQUP = make_fourcc('S', 'Q', 'U', 'P');
@@ -45,14 +48,13 @@ class FeatureTransformation {
     virtual uint32_t output_dim() const noexcept = 0;
     virtual size_t input_byte_size() const noexcept = 0;
     virtual size_t output_byte_size() const noexcept = 0;
+    virtual size_t query_byte_size() const noexcept { return output_byte_size(); }
 
     // Backward compatibility aliases
     size_t input_bytes() const noexcept { return input_byte_size(); }
     size_t output_bytes() const noexcept { return output_byte_size(); }
 
-    virtual deglib::distances::Metric get_target_metric(deglib::distances::Metric input_metric) const {
-        return input_metric;
-    }
+    virtual deglib::distances::Metric get_target_metric(deglib::distances::Metric input_metric) const { return input_metric; }
 
     // Indicates if transformation has been fitted and is ready to transform
     virtual bool is_fitted() const noexcept { return true; }
@@ -83,7 +85,13 @@ class FeatureTransformation {
 #include "deglib/transformation/evp.h"
 #include "deglib/transformation/mips.h"
 #include "deglib/transformation/normalize.h"
-#include "deglib/transformation/scalar.h"
+#include "deglib/transformation/scalar/common.h"
+#include "deglib/transformation/scalar/fp16.h"
+#include "deglib/transformation/scalar/int4.h"
+#include "deglib/transformation/scalar/int8.h"
+#include "deglib/transformation/scalar/uint4.h"
+#include "deglib/transformation/scalar/uint7.h"
+#include "deglib/transformation/scalar/uint8.h"
 
 namespace deglib::transformation {
 
@@ -102,6 +110,8 @@ inline std::shared_ptr<FeatureTransformation> deserialize_transformation(std::is
             return MipsTransform::deserialize(ss);
         case TAG_SQI8:
             return ScalarQuantizerInt8::deserialize(ss);
+        case TAG_SQU7:
+            return ScalarQuantizerUInt7::deserialize(ss);
         case TAG_SQU8:
             return ScalarQuantizerUint8::deserialize(ss);
         case TAG_SQ16:
@@ -175,7 +185,7 @@ inline void apply_query(std::span<const std::shared_ptr<FeatureTransformation>> 
     }
     if (transformations.size() == 1) {
         const auto& t = transformations[0];
-        t->transform_query(std::span<const float>(query, count * t->input_dim()), std::span<std::byte>(out, count * t->output_byte_size()));
+        t->transform_query(std::span<const float>(query, count * t->input_dim()), std::span<std::byte>(out, count * t->query_byte_size()));
         return;
     }
 
@@ -183,18 +193,16 @@ inline void apply_query(std::span<const std::shared_ptr<FeatureTransformation>> 
     const float* cur_in = query;
     const size_t buf_a_size = transformations[0]->output_byte_size() * count;
     std::byte* cur_buf = workspace.get_buffer_a(buf_a_size);
-    transformations[0]->transform_query(std::span<const float>(cur_in, count * transformations[0]->input_dim()),
-                                       std::span<std::byte>(cur_buf, buf_a_size));
+    transformations[0]->transform_query(std::span<const float>(cur_in, count * transformations[0]->input_dim()), std::span<std::byte>(cur_buf, buf_a_size));
 
     for (size_t i = 1; i < transformations.size(); ++i) {
         const bool is_last = (i == transformations.size() - 1);
         const size_t cur_out_size = transformations[i]->output_byte_size() * count;
-        std::byte* next_buf = is_last ? out
-                                      : ((i % 2 == 1) ? workspace.get_buffer_b(cur_out_size)
-                                                      : workspace.get_buffer_a(cur_out_size));
+        std::byte* next_buf = is_last ? out : ((i % 2 == 1) ? workspace.get_buffer_b(cur_out_size) : workspace.get_buffer_a(cur_out_size));
         transformations[i]->transform_query(
             std::span<const float>(reinterpret_cast<const float*>(cur_buf), count * transformations[i]->input_dim()),
-            std::span<std::byte>(next_buf, cur_out_size));
+            std::span<std::byte>(next_buf, cur_out_size)
+        );
         cur_buf = next_buf;
     }
 }
@@ -215,8 +223,7 @@ inline void apply_database(std::span<const std::shared_ptr<FeatureTransformation
     std::vector<std::byte> buf_b;
     const float* cur_in = data;
     std::byte* cur_buf = buf_a.data();
-    transformations[0]->transform_database(std::span<const float>(cur_in, count * transformations[0]->input_dim()),
-                                          std::span<std::byte>(cur_buf, buf_a_size));
+    transformations[0]->transform_database(std::span<const float>(cur_in, count * transformations[0]->input_dim()), std::span<std::byte>(cur_buf, buf_a_size));
 
     for (size_t i = 1; i < transformations.size(); ++i) {
         const bool is_last = (i == transformations.size() - 1);
@@ -230,7 +237,8 @@ inline void apply_database(std::span<const std::shared_ptr<FeatureTransformation
         std::byte* next_buf = is_last ? out : ((i % 2 == 1) ? buf_b.data() : buf_a.data());
         transformations[i]->transform_database(
             std::span<const float>(reinterpret_cast<const float*>(cur_buf), count * transformations[i]->input_dim()),
-            std::span<std::byte>(next_buf, cur_out_size));
+            std::span<std::byte>(next_buf, cur_out_size)
+        );
         cur_buf = next_buf;
     }
 }
@@ -252,10 +260,8 @@ inline size_t get_output_bytes(std::span<const std::shared_ptr<FeatureTransforma
     return get_output_byte_size(transformations);
 }
 
-inline deglib::distances::Metric get_target_metric(
-    std::span<const std::shared_ptr<FeatureTransformation>> transformations,
-    deglib::distances::Metric input_metric
-) {
+inline deglib::distances::Metric
+get_target_metric(std::span<const std::shared_ptr<FeatureTransformation>> transformations, deglib::distances::Metric input_metric) {
     deglib::distances::Metric cur = input_metric;
     for (const auto& t : transformations) {
         if (t) cur = t->get_target_metric(cur);
