@@ -141,7 +141,7 @@ TEST(DeglibBuilderRegression, Int8_InnerProduct_Benchmark_AVX512) {
 
 TEST(DeglibBuilderRegression, Int8_InnerProduct_Benchmark_AVX2_VNNI) {
 #if defined(DEGLIB_X86)
-    if (!deglib::cpu::has_avx_vnni()) {
+    if (!deglib::cpu::has_avx2_vnni()) {
         GTEST_SKIP() << "AVX2-VNNI not available on this CPU";
     }
     const size_t dim = 128;

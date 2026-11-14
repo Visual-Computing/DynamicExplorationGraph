@@ -20,10 +20,16 @@
 #include "deglib/distance/uint8_l2.h"
 #include "deglib/distance/int8_ip.h"
 #include "deglib/distance/int8_l2.h"
+#include "deglib/distance/uint4_ip.h"
+#include "deglib/distance/uint4_l2.h"
+#include "deglib/distance/int4_ip.h"
+#include "deglib/distance/int4_l2.h"
+#include "deglib/distance/uint7_ip.h"
+#include "deglib/distance/uint7_l2.h"
 
 namespace deglib::distances {
 
-enum class MetricDataType : uint8_t { FP32 = 0x00, Uint8 = 0x10, FP16 = 0x20, EVP = 0x30, Int8 = 0x40 };
+enum class MetricDataType : uint8_t { FP32 = 0x00, Uint8 = 0x10, FP16 = 0x20, EVP = 0x30, Int8 = 0x40, Uint4 = 0x50, Int4 = 0x60, UInt7 = 0x70 };
 
 enum class MetricDistanceKind : uint8_t { L2 = 0x01, InnerProduct = 0x02 };
 
@@ -34,9 +40,15 @@ enum class MetricType : uint8_t {
     Uint8_InnerProduct = static_cast<uint8_t>(MetricDataType::Uint8) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),  // 0x12
     FP16_L2 = static_cast<uint8_t>(MetricDataType::FP16) | static_cast<uint8_t>(MetricDistanceKind::L2),                        // 0x21
     FP16_InnerProduct = static_cast<uint8_t>(MetricDataType::FP16) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),    // 0x22
-    EVP_InnerProduct = static_cast<uint8_t>(MetricDataType::EVP) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),       // 0x32
+    EVP_InnerProduct = static_cast<uint8_t>(MetricDataType::EVP) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),      // 0x32
     Int8_L2 = static_cast<uint8_t>(MetricDataType::Int8) | static_cast<uint8_t>(MetricDistanceKind::L2),                        // 0x41
-    Int8_InnerProduct = static_cast<uint8_t>(MetricDataType::Int8) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct)     // 0x42
+    Int8_InnerProduct = static_cast<uint8_t>(MetricDataType::Int8) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),    // 0x42
+    Uint4_L2 = static_cast<uint8_t>(MetricDataType::Uint4) | static_cast<uint8_t>(MetricDistanceKind::L2),                      // 0x51
+    Uint4_InnerProduct = static_cast<uint8_t>(MetricDataType::Uint4) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),  // 0x52
+    Int4_L2 = static_cast<uint8_t>(MetricDataType::Int4) | static_cast<uint8_t>(MetricDistanceKind::L2),                        // 0x61
+    Int4_InnerProduct = static_cast<uint8_t>(MetricDataType::Int4) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),    // 0x62
+    UInt7_L2 = static_cast<uint8_t>(MetricDataType::UInt7) | static_cast<uint8_t>(MetricDistanceKind::L2),                        // 0x71
+    UInt7_InnerProduct = static_cast<uint8_t>(MetricDataType::UInt7) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct)    // 0x72
 };
 
 /**
@@ -60,6 +72,12 @@ struct Metric {
     static constexpr MetricType EVP_InnerProduct = MetricType::EVP_InnerProduct;
     static constexpr MetricType Int8_InnerProduct = MetricType::Int8_InnerProduct;
     static constexpr MetricType Int8_L2 = MetricType::Int8_L2;
+    static constexpr MetricType Uint4_L2 = MetricType::Uint4_L2;
+    static constexpr MetricType Uint4_InnerProduct = MetricType::Uint4_InnerProduct;
+    static constexpr MetricType Int4_L2 = MetricType::Int4_L2;
+    static constexpr MetricType Int4_InnerProduct = MetricType::Int4_InnerProduct;
+    static constexpr MetricType UInt7_L2 = MetricType::UInt7_L2;
+    static constexpr MetricType UInt7_InnerProduct = MetricType::UInt7_InnerProduct;
 
     constexpr MetricDataType get_data_type() const { return static_cast<MetricDataType>(static_cast<uint8_t>(value) & 0xF0); }
 
@@ -77,6 +95,12 @@ struct Metric {
                 return "EVP";
             case MetricDataType::Int8:
                 return "Int8";
+            case MetricDataType::Uint4:
+                return "Uint4";
+            case MetricDataType::Int4:
+                return "Int4";
+            case MetricDataType::UInt7:
+                return "UInt7";
         }
         return "Unknown";
     }
@@ -137,7 +161,13 @@ using DistanceVariant = variant_concat_t<
     deglib::distances::uint8_ip::DistanceVariant,
     deglib::distances::evp_ip::DistanceVariant,
     deglib::distances::int8_l2::DistanceVariant,
-    deglib::distances::int8_ip::DistanceVariant>;
+    deglib::distances::int8_ip::DistanceVariant,
+    deglib::distances::uint4_l2::DistanceVariant,
+    deglib::distances::uint4_ip::DistanceVariant,
+    deglib::distances::int4_l2::DistanceVariant,
+    deglib::distances::int4_ip::DistanceVariant,
+    deglib::distances::uint7_l2::DistanceVariant,
+    deglib::distances::uint7_ip::DistanceVariant>;
 
 // Compile-time verification that every type in DistanceVariant fulfills the DistanceFunction concept
 static_assert(
@@ -208,6 +238,18 @@ class FloatSpace {
                 return to_flat_variant(deglib::distances::int8_ip::select_dist(dim, instruction));
             case Metric::Int8_L2:
                 return to_flat_variant(deglib::distances::int8_l2::select_dist(dim, instruction));
+            case Metric::Uint4_InnerProduct:
+                return to_flat_variant(deglib::distances::uint4_ip::select_dist(dim, instruction));
+            case Metric::Uint4_L2:
+                return to_flat_variant(deglib::distances::uint4_l2::select_dist(dim, instruction));
+            case Metric::Int4_InnerProduct:
+                return to_flat_variant(deglib::distances::int4_ip::select_dist(dim, instruction));
+            case Metric::Int4_L2:
+                return to_flat_variant(deglib::distances::int4_l2::select_dist(dim, instruction));
+            case Metric::UInt7_L2:
+                return to_flat_variant(deglib::distances::uint7_l2::select_dist(dim, instruction));
+            case Metric::UInt7_InnerProduct:
+                return to_flat_variant(deglib::distances::uint7_ip::select_dist(dim, instruction));
             default:
                 throw std::invalid_argument("Unsupported metric type in select_dist_variant");
         }
@@ -225,22 +267,42 @@ class FloatSpace {
                 return 2 * ((dim + 7) / 8);  // EVP: [ones ((dim+7)/8 bytes)][negs ((dim+7)/8 bytes)]
             case MetricDataType::Int8:
                 return dim * sizeof(int8_t);
+            case MetricDataType::UInt7:
+                return dim * sizeof(int8_t);
+            case MetricDataType::Uint4:
+            case MetricDataType::Int4:
+                return (dim + 1) / 2;
             default:
                 throw std::invalid_argument("Unsupported metric data type in calculate_data_size");
         }
     }
 
-    const DistanceVariant dist_variant_;
-    const size_t data_size_;
-    const size_t dim_;
-    const Metric metric_;
+    static size_t calculate_query_data_size(const size_t dim, const Metric metric) {
+        return calculate_data_size(dim, metric);
+    }
+
+    DistanceVariant dist_variant_;
+    size_t data_size_ = 0;
+    size_t query_data_size_ = 0;
+    size_t dim_ = 0;
+    Metric metric_;
 
   public:
+    FloatSpace() : FloatSpace(0, Metric{}) {}
+
     FloatSpace(const size_t dim, const Metric metric, const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto)
-        : dist_variant_(select_dist_variant(dim, metric, instruction)), data_size_(calculate_data_size(dim, metric)), dim_(dim), metric_(metric) {}
+        : dist_variant_(select_dist_variant(dim, metric, instruction)),
+          data_size_(calculate_data_size(dim, metric)),
+          query_data_size_(calculate_query_data_size(dim, metric)),
+          dim_(dim),
+          metric_(metric) {}
 
     FloatSpace(const size_t dim, const Metric metric, DistanceVariant dist_variant)
-        : dist_variant_(std::move(dist_variant)), data_size_(calculate_data_size(dim, metric)), dim_(dim), metric_(metric) {}
+        : dist_variant_(std::move(dist_variant)),
+          data_size_(calculate_data_size(dim, metric)),
+          query_data_size_(calculate_query_data_size(dim, metric)),
+          dim_(dim),
+          metric_(metric) {}
 
     /**
      * Returns the dimension of feature vectors in this space.
@@ -256,6 +318,11 @@ class FloatSpace {
      * Returns the size in bytes of a single feature vector in this space.
      */
     const size_t get_data_size() const { return data_size_; }
+
+    /**
+     * Returns the size in bytes of a query vector for this space.
+     */
+    const size_t get_query_data_size() const { return query_data_size_; }
 
     /**
      * Returns a function pointer to the selected distance comparison function.

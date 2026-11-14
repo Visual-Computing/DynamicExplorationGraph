@@ -32,13 +32,13 @@ def has_avx2() -> bool:
     return cpp_cpu.has_avx2()
 
 
-def has_avx_vnni() -> bool:
+def has_avx2_vnni() -> bool:
     """
     Check whether the host CPU supports AVX-VNNI (256-bit) extensions.
 
     :return: True if AVX-VNNI is supported, False otherwise.
     """
-    return cpp_cpu.has_avx_vnni()
+    return cpp_cpu.has_avx2_vnni()
 
 
 def has_avx512() -> bool:

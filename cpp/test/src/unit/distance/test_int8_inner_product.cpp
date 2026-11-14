@@ -208,7 +208,7 @@ TEST(InnerProductInt8_AVX512, MatchesNaive_IfSupported) {
 }
 
 TEST(InnerProductInt8_AVX2_VNNI, MatchesNaive_IfSupported) {
-    if (!deglib::cpu::has_avx_vnni()) {
+    if (!deglib::cpu::has_avx2_vnni()) {
         GTEST_SKIP() << "AVX_VNNI not supported";
     }
     // DualOnly: dim must be a multiple of 64

@@ -317,13 +317,7 @@ inline void fp16_to_floats(const uint16_t* fp16_vals, float* floats, size_t coun
 /**
  * Computes centered vector (fp16 - mean) in float, and populates abs_vals for sorting.
  */
-inline void center_and_abs(
-    const uint16_t* src_fp16,
-    const float* mean,
-    uint32_t dim,
-    float* out_centered,
-    std::pair<float, uint32_t>* out_abs_vals
-) {
+inline void center_and_abs(const uint16_t* src_fp16, const float* mean, uint32_t dim, float* out_centered, std::pair<float, uint32_t>* out_abs_vals) {
     uint32_t d = 0;
 #if defined(DEGLIB_X86)
     if (deglib::cpu::has_avx2()) {
@@ -353,13 +347,8 @@ inline void center_and_abs(
  * Directly subtracts mean_fp16 from src_fp16 in native FP16 hardware without converting to float,
  * writes the FP16 difference into out_diff_fp16, and writes {abs_val (uint16_t), index} pairs.
  */
-inline void sub_and_abs_fp16(
-    const uint16_t* src_fp16,
-    const uint16_t* mean_fp16,
-    uint32_t dim,
-    uint16_t* out_diff_fp16,
-    std::pair<uint16_t, uint32_t>* out_abs_vals
-) {
+inline void
+sub_and_abs_fp16(const uint16_t* src_fp16, const uint16_t* mean_fp16, uint32_t dim, uint16_t* out_diff_fp16, std::pair<uint16_t, uint32_t>* out_abs_vals) {
     uint32_t d = 0;
 #if defined(DEGLIB_X86)
     if (deglib::cpu::has_avx2()) {

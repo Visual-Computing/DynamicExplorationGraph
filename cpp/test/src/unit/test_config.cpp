@@ -35,7 +35,7 @@ TEST(CPUFeaturesTest, CpuHelperFunctionsMatchRawCPUID) {
 
     // Verify deglib::cpu helper functions match raw CPUID queries
     EXPECT_EQ(deglib::cpu::has_avx2(), hw_avx2) << "deglib::cpu::has_avx2() does not match raw CPUID";
-    EXPECT_EQ(deglib::cpu::has_avx_vnni(), hw_avx_vnni) << "deglib::cpu::has_avx_vnni() does not match raw CPUID";
+    EXPECT_EQ(deglib::cpu::has_avx2_vnni(), hw_avx_vnni) << "deglib::cpu::has_avx2_vnni() does not match raw CPUID";
     EXPECT_EQ(deglib::cpu::has_avx512(), hw_avx512f) << "deglib::cpu::has_avx512() does not match raw CPUID";
     EXPECT_EQ(deglib::cpu::has_avx512_vnni(), hw_avx512_vnni) << "deglib::cpu::has_avx512_vnni() does not match raw CPUID";
 
@@ -43,7 +43,7 @@ TEST(CPUFeaturesTest, CpuHelperFunctionsMatchRawCPUID) {
 #else
     // On non-x86 architectures (e.g. ARM), x86 feature flags must all be false
     EXPECT_FALSE(deglib::cpu::has_avx2());
-    EXPECT_FALSE(deglib::cpu::has_avx_vnni());
+    EXPECT_FALSE(deglib::cpu::has_avx2_vnni());
     EXPECT_FALSE(deglib::cpu::has_avx512());
     EXPECT_FALSE(deglib::cpu::has_avx512_vnni());
 

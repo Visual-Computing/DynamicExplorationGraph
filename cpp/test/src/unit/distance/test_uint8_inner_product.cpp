@@ -99,7 +99,7 @@ TEST(InnerProductUint8_AVX512_VNNI, MatchesNaive_IfSupported) {
 }
 
 TEST(InnerProductUint8_AVX2_VNNI, MatchesNaive_IfSupported) {
-    if (!deglib::cpu::has_avx_vnni()) {
+    if (!deglib::cpu::has_avx2_vnni()) {
         GTEST_SKIP() << "AVX2_VNNI not supported";
     }
     for (size_t dim : {1, 15, 16, 31, 32, 48, 63, 64, 100, 128, 200, 256}) {
@@ -269,7 +269,7 @@ TEST(InnerProductUint8_SelectDist, AcceptsVNNIFallback) {
     if (deglib::cpu::has_avx512_vnni()) {
         EXPECT_NO_THROW(deglib::distances::uint8_ip::select_dist(128, deglib::cpu::InstructionSet::AVX512_VNNI));
     }
-    if (deglib::cpu::has_avx_vnni()) {
+    if (deglib::cpu::has_avx2_vnni()) {
         EXPECT_NO_THROW(deglib::distances::uint8_ip::select_dist(128, deglib::cpu::InstructionSet::AVX2_VNNI));
     }
 #endif

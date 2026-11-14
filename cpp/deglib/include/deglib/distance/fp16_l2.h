@@ -96,12 +96,14 @@ class L2FP16_AVX512 {
             }
         }
         if constexpr (HasSimd) {
-            __m512 va1 = _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(a)));
-            __m512 vb1 = _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b)));
-            __m512 diff1 = _mm512_sub_ps(va1, vb1);
-            sum512_1 = _mm512_fmadd_ps(diff1, diff1, sum512_1);
-            a += 16;
-            b += 16;
+            while (a + 15 < last) {
+                __m512 va1 = _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(a)));
+                __m512 vb1 = _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b)));
+                __m512 diff1 = _mm512_sub_ps(va1, vb1);
+                sum512_1 = _mm512_fmadd_ps(diff1, diff1, sum512_1);
+                a += 16;
+                b += 16;
+            }
         }
 
         // Horizontal reduce of SIMD accumulators
@@ -177,12 +179,14 @@ class L2FP16_AVX2 {
             }
         }
         if constexpr (HasSimd) {
-            __m256 va1 = _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(a)));
-            __m256 vb1 = _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(b)));
-            __m256 diff1 = _mm256_sub_ps(va1, vb1);
-            sum256_1 = _mm256_fmadd_ps(diff1, diff1, sum256_1);
-            a += 8;
-            b += 8;
+            while (a + 7 < last) {
+                __m256 va1 = _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(a)));
+                __m256 vb1 = _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(b)));
+                __m256 diff1 = _mm256_sub_ps(va1, vb1);
+                sum256_1 = _mm256_fmadd_ps(diff1, diff1, sum256_1);
+                a += 8;
+                b += 8;
+            }
         }
 
         // Horizontal reduce of SIMD accumulators

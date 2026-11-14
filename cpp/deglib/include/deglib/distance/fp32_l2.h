@@ -67,6 +67,28 @@ DEGLIB_TARGET_AVX2 inline static float fp32_l2_hsum256(__m256 s) {
 }
 
 DEGLIB_TARGET_AVX512 inline static float fp32_l2_hsum512(__m512 s) { return _mm512_reduce_add_ps(s); }
+
+// Non-temporal (streaming) FP32 L2 for the reranker: the candidate operand is read ONCE per query
+// (a 4KB row from a multi-GB base), so movntdqa stream-loads bypass L1/L2 to keep the reused query hot.
+// Requires 64B alignment on `c`; callers must check, else fall back to the cacheable kernel.
+DEGLIB_TARGET_AVX512 inline float l2_sqr_stream(const float* q, const float* c, size_t dim) {
+    __m512 sum1 = _mm512_setzero_ps();
+    __m512 sum2 = _mm512_setzero_ps();
+    size_t i = 0;
+    for (; i + 31 < dim; i += 32) {
+        __m512 d1 = _mm512_sub_ps(_mm512_loadu_ps(q + i), _mm512_castsi512_ps(_mm512_stream_load_si512(reinterpret_cast<void*>(const_cast<float*>(c + i)))));
+        sum1 = _mm512_fmadd_ps(d1, d1, sum1);
+        __m512 d2 = _mm512_sub_ps(_mm512_loadu_ps(q + i + 16), _mm512_castsi512_ps(_mm512_stream_load_si512(reinterpret_cast<void*>(const_cast<float*>(c + i + 16)))));
+        sum2 = _mm512_fmadd_ps(d2, d2, sum2);
+    }
+    for (; i + 15 < dim; i += 16) {
+        __m512 d1 = _mm512_sub_ps(_mm512_loadu_ps(q + i), _mm512_castsi512_ps(_mm512_stream_load_si512(reinterpret_cast<void*>(const_cast<float*>(c + i)))));
+        sum1 = _mm512_fmadd_ps(d1, d1, sum1);
+    }
+    float result = _mm512_reduce_add_ps(_mm512_add_ps(sum1, sum2));
+    for (; i < dim; ++i) { float d = q[i] - c[i]; result += d * d; }
+    return result;
+}
 template <ResidualMode Mode = ResidualMode::Full>
 class L2Float_AVX512 {
     static constexpr bool HasDualSimd = has_flag(Mode, ResidualMode::DualSimd);
@@ -100,10 +122,12 @@ class L2Float_AVX512 {
             }
         }
         if constexpr (HasSimd) {
-            __m512 v = _mm512_sub_ps(_mm512_loadu_ps(a), _mm512_loadu_ps(b));
-            sum512_1 = _mm512_fmadd_ps(v, v, sum512_1);
-            a += 16;
-            b += 16;
+            while (a + 15 < last) {
+                __m512 v = _mm512_sub_ps(_mm512_loadu_ps(a), _mm512_loadu_ps(b));
+                sum512_1 = _mm512_fmadd_ps(v, v, sum512_1);
+                a += 16;
+                b += 16;
+            }
         }
         __m512 sum512 = _mm512_add_ps(sum512_1, sum512_2);
         __m256 sum256 = _mm256_add_ps(_mm512_extractf32x8_ps(sum512, 0), _mm512_extractf32x8_ps(sum512, 1));
@@ -178,12 +202,14 @@ class L2Float_AVX2 {
             }
         }
         if constexpr (HasSimd) {
-            __m256 va1 = _mm256_loadu_ps(a);
-            __m256 vb1 = _mm256_loadu_ps(b);
-            __m256 diff1 = _mm256_sub_ps(va1, vb1);
-            sum256_1 = _mm256_fmadd_ps(diff1, diff1, sum256_1);
-            a += 8;
-            b += 8;
+            while (a + 7 < last) {
+                __m256 va1 = _mm256_loadu_ps(a);
+                __m256 vb1 = _mm256_loadu_ps(b);
+                __m256 diff1 = _mm256_sub_ps(va1, vb1);
+                sum256_1 = _mm256_fmadd_ps(diff1, diff1, sum256_1);
+                a += 8;
+                b += 8;
+            }
         }
 
         // Horizontal reduce of SIMD accumulators

@@ -26,17 +26,27 @@ struct CpuFeatures {
     bool avx2{false};
     bool avx_vnni{false};
     bool avx512f{false};
+    bool avx512_vbmi{false};
     bool avx512_vnni{false};
+    bool avx512_fp16{false};
+    bool fp16{false};
 
     CpuFeatures() {
 #if defined(DEGLIB_X86)
         int cpu_info[4] = {0};
 
-        // Leaf 7, subleaf 0: extended feature flags in EBX and ECX
+        // Leaf 1, subleaf 0: feature flags in ECX and EDX
+        // Bit 29 of ECX is F16C (half-precision conversion instructions)
+        cpuid(1, 0, cpu_info);
+        fp16 = (cpu_info[2] & (1 << 29)) != 0;
+
+        // Leaf 7, subleaf 0: extended feature flags in EBX, ECX, EDX
         cpuid(7, 0, cpu_info);
         avx2 = (cpu_info[1] & (1 << 5)) != 0;
         avx512f = (cpu_info[1] & (1 << 16)) != 0;
+        avx512_vbmi = (cpu_info[1] & (1 << 14)) != 0;
         avx512_vnni = (cpu_info[2] & (1 << 11)) != 0;
+        avx512_fp16 = (cpu_info[3] & (1 << 23)) != 0;
 
         // Leaf 7, subleaf 1: extended feature flags in EAX (AVX_VNNI is Bit 4)
         cpuid(7, 1, cpu_info);
@@ -76,9 +86,12 @@ inline const char* instruction_set_to_string(InstructionSet inst) {
 // These checks are performed once (cached) and have zero cost per call thereafter.
 
 inline bool has_avx2() { return detail::features().avx2; }
-inline bool has_avx_vnni() { return detail::features().avx_vnni; }
+inline bool has_avx2_vnni() { return detail::features().avx_vnni; }
 inline bool has_avx512() { return detail::features().avx512f; }
+inline bool has_avx512_vbmi() { return detail::features().avx512_vbmi; }
 inline bool has_avx512_vnni() { return detail::features().avx512_vnni; }
+inline bool has_avx512_fp16() { return detail::features().avx512_fp16; }
+inline bool has_fp16() { return detail::features().fp16; }
 
 // Validates the requested InstructionSet against CPU capabilities
 // and resolves Auto to the highest available InstructionSet (AVX512_VNNI, AVX512, AVX2_VNNI, AVX2, or Scalar).
@@ -101,8 +114,8 @@ inline InstructionSet resolve_instruction_set(InstructionSet instruction) {
         return InstructionSet::AVX512;
     }
     if (instruction == InstructionSet::AVX2_VNNI) {
-        if (!has_avx_vnni()) {
-            throw std::runtime_error("AVX-VNNI instruction set requested, but not supported by CPU");
+        if (!has_avx2_vnni()) {
+            throw std::runtime_error("AVX2-VNNI instruction set requested, but not supported by CPU");
         }
         return InstructionSet::AVX2_VNNI;
     }
@@ -120,7 +133,7 @@ inline InstructionSet resolve_instruction_set(InstructionSet instruction) {
         if (has_avx512()) {
             return InstructionSet::AVX512;
         }
-        if (has_avx_vnni()) {
+        if (has_avx2_vnni()) {
             return InstructionSet::AVX2_VNNI;
         }
         if (has_avx2()) {

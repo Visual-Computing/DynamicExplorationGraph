@@ -89,12 +89,14 @@ class L2Uint8_AVX512 {
         }
 
         if constexpr (HasSimd) {
-            __m256i q_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
-            __m256i r_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
-            __m512i diff = _mm512_sub_epi16(_mm512_cvtepu8_epi16(q_raw), _mm512_cvtepu8_epi16(r_raw));
-            sum512_1 = _mm512_add_epi32(sum512_1, _mm512_madd_epi16(diff, diff));
-            a += 32;
-            b += 32;
+            while (a + 31 < last) {
+                __m256i q_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
+                __m256i r_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
+                __m512i diff = _mm512_sub_epi16(_mm512_cvtepu8_epi16(q_raw), _mm512_cvtepu8_epi16(r_raw));
+                sum512_1 = _mm512_add_epi32(sum512_1, _mm512_madd_epi16(diff, diff));
+                a += 32;
+                b += 32;
+            }
         }
 
         // Horizontal reduce of SIMD accumulators
@@ -152,12 +154,14 @@ class L2Uint8_AVX2 {
             }
         }
         if constexpr (HasSimd) {
-            __m128i v1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
-            __m128i v2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b));
-            __m256i diff = _mm256_sub_epi16(_mm256_cvtepu8_epi16(v1), _mm256_cvtepu8_epi16(v2));
-            sum256_1 = _mm256_add_epi32(sum256_1, _mm256_madd_epi16(diff, diff));
-            a += 16;
-            b += 16;
+            while (a + 15 < last) {
+                __m128i v1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
+                __m128i v2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b));
+                __m256i diff = _mm256_sub_epi16(_mm256_cvtepu8_epi16(v1), _mm256_cvtepu8_epi16(v2));
+                sum256_1 = _mm256_add_epi32(sum256_1, _mm256_madd_epi16(diff, diff));
+                a += 16;
+                b += 16;
+            }
         }
 
         // Horizontal reduce of SIMD accumulators

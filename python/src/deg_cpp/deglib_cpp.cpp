@@ -1209,7 +1209,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .value("AVX512_VNNI", deglib::cpu::InstructionSet::AVX512_VNNI);
 
     cpu_module.def("has_avx2", &deglib::cpu::has_avx2, "Returns whether AVX2 instructions are available");
-    cpu_module.def("has_avx_vnni", &deglib::cpu::has_avx_vnni, "Returns whether AVX-VNNI (256-bit) instructions are available");
+    cpu_module.def("has_avx2_vnni", &deglib::cpu::has_avx2_vnni, "Returns whether AVX-VNNI (256-bit) instructions are available");
     cpu_module.def("has_avx512", &deglib::cpu::has_avx512, "Returns whether AVX512 instructions are available");
     cpu_module.def("has_avx512_vnni", &deglib::cpu::has_avx512_vnni, "Returns whether AVX-512 VNNI instructions are available");
 

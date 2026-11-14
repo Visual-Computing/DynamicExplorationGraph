@@ -99,11 +99,13 @@ class InnerProductFloat_AVX512 {
             }
         }
         if constexpr (HasSimd) {
-            __m512 q_vec = _mm512_loadu_ps(a);
-            __m512 db_vec = _mm512_loadu_ps(b);
-            sum512_1 = _mm512_fmadd_ps(q_vec, db_vec, sum512_1);
-            a += 16;
-            b += 16;
+            while (a + 15 < last) {
+                __m512 q_vec = _mm512_loadu_ps(a);
+                __m512 db_vec = _mm512_loadu_ps(b);
+                sum512_1 = _mm512_fmadd_ps(q_vec, db_vec, sum512_1);
+                a += 16;
+                b += 16;
+            }
         }
 
         // Horizontal reduce of SIMD accumulators
@@ -179,11 +181,13 @@ class InnerProductFloat_AVX2 {
             }
         }
         if constexpr (HasSimd) {
-            __m256 va1 = _mm256_loadu_ps(a);
-            __m256 vb1 = _mm256_loadu_ps(b);
-            sum256_1 = _mm256_fmadd_ps(va1, vb1, sum256_1);
-            a += 8;
-            b += 8;
+            while (a + 7 < last) {
+                __m256 va1 = _mm256_loadu_ps(a);
+                __m256 vb1 = _mm256_loadu_ps(b);
+                sum256_1 = _mm256_fmadd_ps(va1, vb1, sum256_1);
+                a += 8;
+                b += 8;
+            }
         }
 
         // Horizontal reduce of SIMD accumulators

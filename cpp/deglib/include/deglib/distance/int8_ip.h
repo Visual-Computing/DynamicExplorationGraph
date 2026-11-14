@@ -35,6 +35,14 @@ class InnerProductInt8 {
 
 #if defined(DEGLIB_X86)
 
+DEGLIB_TARGET_AVX512 inline static __m512i int8_ip_sign_epi8_512(__m512i a, __m512i b) {
+    const __m512i zero = _mm512_setzero_si512();
+    const __mmask64 blt0 = _mm512_movepi8_mask(b);
+    const __mmask64 ble0 = _mm512_cmple_epi8_mask(b, zero);
+    const __m512i a_blt0 = _mm512_mask_mov_epi8(zero, blt0, a);
+    return _mm512_mask_sub_epi8(a, ble0, zero, a_blt0);
+}
+
 DEGLIB_TARGET_AVX2 inline static int64_t int8_ip_hsum256(__m256i s) {
     __m128i sum128 = _mm_add_epi32(_mm256_castsi256_si128(s), _mm256_extracti128_si256(s, 1));
     sum128 = _mm_add_epi32(sum128, _mm_shuffle_epi32(sum128, _MM_SHUFFLE(1, 0, 3, 2)));
@@ -52,27 +60,9 @@ DEGLIB_TARGET_AVX512 inline static int64_t int8_ip_hsum512(__m512i s) {
 }
 // ---------------------------------------------------------------------------------------------------------------------
 // AVX512-VNNI (vpdpbusd with signed transform)
-//
-// Mathematical Background for Signed x Signed dot product via vpdpbusd:
-// Hardware vpdpbusd natively computes unsigned int8 (u) * signed int8 (s):
-//   dot(u, s) = sum(u_i * s_i)
-// To compute signed dot product sum(a_i * b_i):
-//   1. Map b_i (signed) to unsigned range [0, 255] by adding +128 (via XOR 0x80):
-//      u_b_i = b_i + 128
-//   2. Execute vpdpbusd(u_b, a):
-//      sum((b_i + 128) * a_i) = sum(a_i * b_i) + 128 * sum(a_i)
-//   3. Subtract the query bias compensation (q_correction = 128 * sum(a_i)):
-//      sum(a_i * b_i) = vpdpbusd_result - 128 * sum(a_i)
-//
-// Note on newer ISAs (AVX-VNNI-INT8 / AVX10.2):
-// Newer architectures (e.g., Intel Granite Rapids / Arrow Lake / Lunar Lake) introduce
-// native signed-signed instructions `vpdpbssd` / `vpdpbssds`, which compute signed x signed
-// directly in one instruction without requiring XOR 0x80 or q_correction.
 // ---------------------------------------------------------------------------------------------------------------------
 template <ResidualMode Mode = ResidualMode::Full>
 class InnerProductInt8_AVX512_VNNI {
-    static constexpr bool HasDualSimd = has_flag(Mode, ResidualMode::DualSimd);
-    static constexpr bool HasSimd = has_flag(Mode, ResidualMode::Simd);
     static constexpr bool HasTail = has_flag(Mode, ResidualMode::Tail);
 
   public:
@@ -82,63 +72,50 @@ class InnerProductInt8_AVX512_VNNI {
         size_t size = *((size_t*)qty_ptr);
         const int8_t* a = static_cast<const int8_t*>(pVect1v);
         const int8_t* b = static_cast<const int8_t*>(pVect2v);
-
         const int8_t* last = a + size;
 
-        const __m512i xor_mask = _mm512_set1_epi8(static_cast<char>(0x80));
         __m512i sum512_1 = _mm512_setzero_si512();
         __m512i sum512_2 = _mm512_setzero_si512();
-        __m512i q_comp_1 = _mm512_setzero_si512();
-        __m512i q_comp_2 = _mm512_setzero_si512();
 
-        if constexpr (HasDualSimd) {
-            while (a + 127 < last) {
-                __m512i raw_a1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(a));
-                __m512i raw_b1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(b));
-                __m512i u_b1 = _mm512_xor_si512(raw_b1, xor_mask);
-                sum512_1 = _mm512_dpbusd_epi32(sum512_1, u_b1, raw_a1);
-                q_comp_1 = _mm512_add_epi32(q_comp_1, _mm512_madd_epi16(_mm512_cvtepi8_epi16(_mm512_castsi512_si256(raw_a1)), _mm512_set1_epi16(1)));
-                q_comp_1 = _mm512_add_epi32(q_comp_1, _mm512_madd_epi16(_mm512_cvtepi8_epi16(_mm512_extracti64x4_epi64(raw_a1, 1)), _mm512_set1_epi16(1)));
+        while (a + 127 < last) {
+            __m512i raw_a1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(a));
+            __m512i raw_b1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(b));
+            __m512i abs_a1 = _mm512_abs_epi8(raw_a1);
+            __m512i sgn_b1 = int8_ip_sign_epi8_512(raw_b1, raw_a1);
+            sum512_1 = _mm512_dpbusd_epi32(sum512_1, abs_a1, sgn_b1);
+            a += 64;
+            b += 64;
 
-                a += 64;
-                b += 64;
-
-                __m512i raw_a2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(a));
-                __m512i raw_b2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(b));
-                __m512i u_b2 = _mm512_xor_si512(raw_b2, xor_mask);
-                sum512_2 = _mm512_dpbusd_epi32(sum512_2, u_b2, raw_a2);
-                q_comp_2 = _mm512_add_epi32(q_comp_2, _mm512_madd_epi16(_mm512_cvtepi8_epi16(_mm512_castsi512_si256(raw_a2)), _mm512_set1_epi16(1)));
-                q_comp_2 = _mm512_add_epi32(q_comp_2, _mm512_madd_epi16(_mm512_cvtepi8_epi16(_mm512_extracti64x4_epi64(raw_a2, 1)), _mm512_set1_epi16(1)));
-
-                a += 64;
-                b += 64;
-            }
-        }
-        if constexpr (HasSimd) {
-            __m512i raw_a = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(a));
-            __m512i raw_b = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(b));
-            __m512i u_b = _mm512_xor_si512(raw_b, xor_mask);
-            sum512_1 = _mm512_dpbusd_epi32(sum512_1, u_b, raw_a);
-            q_comp_1 = _mm512_add_epi32(q_comp_1, _mm512_madd_epi16(_mm512_cvtepi8_epi16(_mm512_castsi512_si256(raw_a)), _mm512_set1_epi16(1)));
-            q_comp_1 = _mm512_add_epi32(q_comp_1, _mm512_madd_epi16(_mm512_cvtepi8_epi16(_mm512_extracti64x4_epi64(raw_a, 1)), _mm512_set1_epi16(1)));
-
+            __m512i raw_a2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(a));
+            __m512i raw_b2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(b));
+            __m512i abs_a2 = _mm512_abs_epi8(raw_a2);
+            __m512i sgn_b2 = int8_ip_sign_epi8_512(raw_b2, raw_a2);
+            sum512_2 = _mm512_dpbusd_epi32(sum512_2, abs_a2, sgn_b2);
             a += 64;
             b += 64;
         }
 
-        // Horizontal reduce
+        if (a + 63 < last) {
+            __m512i raw_a = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(a));
+            __m512i raw_b = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(b));
+            __m512i abs_a = _mm512_abs_epi8(raw_a);
+            __m512i sgn_b = int8_ip_sign_epi8_512(raw_b, raw_a);
+            sum512_1 = _mm512_dpbusd_epi32(sum512_1, abs_a, sgn_b);
+            a += 64;
+            b += 64;
+        }
+
         __m512i sum512 = _mm512_add_epi32(sum512_1, sum512_2);
-        __m512i q_comp = _mm512_add_epi32(q_comp_1, q_comp_2);
-        int64_t result = int8_ip_hsum512(sum512) - (int8_ip_hsum512(q_comp) * 128);
+        int64_t result = int8_ip_hsum512(sum512);
 
         if constexpr (HasTail) {
-            const size_t rem = last - a;
-            if (rem >= 32) {
+            if ((last - a) >= 32) {
                 __m256i raw_a256 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
                 __m256i raw_b256 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
-                __m256i prod1 = _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_castsi256_si128(raw_a256)), _mm256_cvtepi8_epi16(_mm256_castsi256_si128(raw_b256)));
-                __m256i prod2 = _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_extracti128_si256(raw_a256, 1)), _mm256_cvtepi8_epi16(_mm256_extracti128_si256(raw_b256, 1)));
-                result += int8_ip_hsum256(_mm256_add_epi32(prod1, prod2));
+                __m256i abs_a = _mm256_sign_epi8(raw_a256, raw_a256);
+                __m256i sgn_b = _mm256_sign_epi8(raw_b256, raw_a256);
+                __m256i sum256 = _mm256_dpbusd_epi32(_mm256_setzero_si256(), abs_a, sgn_b);
+                result += int8_ip_hsum256(sum256);
                 a += 32;
                 b += 32;
             }
@@ -205,11 +182,13 @@ class InnerProductInt8_AVX512 {
             }
         }
         if constexpr (HasSimd) {
-            __m256i q_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
-            __m256i r_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
-            sum512_1 = _mm512_add_epi32(sum512_1, _mm512_madd_epi16(_mm512_cvtepi8_epi16(q_raw), _mm512_cvtepi8_epi16(r_raw)));
-            a += 32;
-            b += 32;
+            while (a + 31 < last) {
+                __m256i q_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
+                __m256i r_raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
+                sum512_1 = _mm512_add_epi32(sum512_1, _mm512_madd_epi16(_mm512_cvtepi8_epi16(q_raw), _mm512_cvtepi8_epi16(r_raw)));
+                a += 32;
+                b += 32;
+            }
         }
 
         // Horizontal reduce
@@ -221,8 +200,10 @@ class InnerProductInt8_AVX512 {
             if (rem >= 32) {
                 __m256i raw_a256 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
                 __m256i raw_b256 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
-                __m256i prod1 = _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_castsi256_si128(raw_a256)), _mm256_cvtepi8_epi16(_mm256_castsi256_si128(raw_b256)));
-                __m256i prod2 = _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_extracti128_si256(raw_a256, 1)), _mm256_cvtepi8_epi16(_mm256_extracti128_si256(raw_b256, 1)));
+                __m256i prod1 =
+                    _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_castsi256_si128(raw_a256)), _mm256_cvtepi8_epi16(_mm256_castsi256_si128(raw_b256)));
+                __m256i prod2 =
+                    _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_extracti128_si256(raw_a256, 1)), _mm256_cvtepi8_epi16(_mm256_extracti128_si256(raw_b256, 1)));
                 result += int8_ip_hsum256(_mm256_add_epi32(prod1, prod2));
                 a += 32;
                 b += 32;
@@ -255,13 +236,10 @@ class InnerProductInt8_AVX512 {
 };
 
 // ---------------------------------------------------------------------------------------------------------------------
-// AVX2-VNNI (AVX_VNNI: _mm256_dpbusd_epi32)
-// Uses the same signed x signed mathematical transform as AVX512_VNNI (see comments above).
+// AVX2-VNNI (AVX_VNNI: _mm256_dpbusd_epi32 with sign_epi8)
 // ---------------------------------------------------------------------------------------------------------------------
 template <ResidualMode Mode = ResidualMode::Full>
 class InnerProductInt8_AVX2_VNNI {
-    static constexpr bool HasDualSimd = has_flag(Mode, ResidualMode::DualSimd);
-    static constexpr bool HasSimd = has_flag(Mode, ResidualMode::Simd);
     static constexpr bool HasTail = has_flag(Mode, ResidualMode::Tail);
 
   public:
@@ -271,56 +249,51 @@ class InnerProductInt8_AVX2_VNNI {
         size_t size = *((size_t*)qty_ptr);
         const int8_t* a = static_cast<const int8_t*>(pVect1v);
         const int8_t* b = static_cast<const int8_t*>(pVect2v);
-
         const int8_t* last = a + size;
 
-        const __m256i xor_mask = _mm256_set1_epi8(static_cast<char>(0x80));
         __m256i sum256_1 = _mm256_setzero_si256();
         __m256i sum256_2 = _mm256_setzero_si256();
-        __m256i q_comp_1 = _mm256_setzero_si256();
-        __m256i q_comp_2 = _mm256_setzero_si256();
 
-        if constexpr (HasDualSimd) {
-            while (a + 63 < last) {
-                __m256i raw_a1 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
-                __m256i raw_b1 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
-                __m256i u_b1 = _mm256_xor_si256(raw_b1, xor_mask);
-                sum256_1 = _mm256_dpbusd_epi32(sum256_1, u_b1, raw_a1);
-                q_comp_1 = _mm256_add_epi32(q_comp_1, _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_castsi256_si128(raw_a1)), _mm256_set1_epi16(1)));
-                q_comp_1 = _mm256_add_epi32(q_comp_1, _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_extracti128_si256(raw_a1, 1)), _mm256_set1_epi16(1)));
+        while (a + 63 < last) {
+            __m256i raw_a1 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
+            __m256i raw_b1 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
+            __m256i abs_a1 = _mm256_sign_epi8(raw_a1, raw_a1);
+            __m256i sgn_b1 = _mm256_sign_epi8(raw_b1, raw_a1);
+            sum256_1 = _mm256_dpbusd_epi32(sum256_1, abs_a1, sgn_b1);
+            a += 32;
+            b += 32;
 
-                a += 32;
-                b += 32;
-
-                __m256i raw_a2 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
-                __m256i raw_b2 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
-                __m256i u_b2 = _mm256_xor_si256(raw_b2, xor_mask);
-                sum256_2 = _mm256_dpbusd_epi32(sum256_2, u_b2, raw_a2);
-                q_comp_2 = _mm256_add_epi32(q_comp_2, _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_castsi256_si128(raw_a2)), _mm256_set1_epi16(1)));
-                q_comp_2 = _mm256_add_epi32(q_comp_2, _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_extracti128_si256(raw_a2, 1)), _mm256_set1_epi16(1)));
-
-                a += 32;
-                b += 32;
-            }
-        }
-        if constexpr (HasSimd) {
-            __m256i raw_a = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
-            __m256i raw_b = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
-            __m256i u_b = _mm256_xor_si256(raw_b, xor_mask);
-            sum256_1 = _mm256_dpbusd_epi32(sum256_1, u_b, raw_a);
-            q_comp_1 = _mm256_add_epi32(q_comp_1, _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_castsi256_si128(raw_a)), _mm256_set1_epi16(1)));
-            q_comp_1 = _mm256_add_epi32(q_comp_1, _mm256_madd_epi16(_mm256_cvtepi8_epi16(_mm256_extracti128_si256(raw_a, 1)), _mm256_set1_epi16(1)));
-
+            __m256i raw_a2 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
+            __m256i raw_b2 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
+            __m256i abs_a2 = _mm256_sign_epi8(raw_a2, raw_a2);
+            __m256i sgn_b2 = _mm256_sign_epi8(raw_b2, raw_a2);
+            sum256_2 = _mm256_dpbusd_epi32(sum256_2, abs_a2, sgn_b2);
             a += 32;
             b += 32;
         }
 
-        // Horizontal reduce
+        if (a + 31 < last) {
+            __m256i raw_a = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
+            __m256i raw_b = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
+            __m256i abs_a = _mm256_sign_epi8(raw_a, raw_a);
+            __m256i sgn_b = _mm256_sign_epi8(raw_b, raw_a);
+            sum256_1 = _mm256_dpbusd_epi32(sum256_1, abs_a, sgn_b);
+            a += 32;
+            b += 32;
+        }
+
         __m256i sum256 = _mm256_add_epi32(sum256_1, sum256_2);
-        __m256i q_comp = _mm256_add_epi32(q_comp_1, q_comp_2);
-        int64_t result = int8_ip_hsum256(sum256) - (int8_ip_hsum256(q_comp) * 128);
+        int64_t result = int8_ip_hsum256(sum256);
 
         if constexpr (HasTail) {
+            if ((last - a) >= 16) {
+                __m128i raw_a128 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
+                __m128i raw_b128 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b));
+                __m256i prod = _mm256_madd_epi16(_mm256_cvtepi8_epi16(raw_a128), _mm256_cvtepi8_epi16(raw_b128));
+                result += int8_ip_hsum256(prod);
+                a += 16;
+                b += 16;
+            }
             if ((last - a) >= 8) {
                 __m128i raw_a64 = _mm_loadu_si64(a);
                 __m128i raw_b64 = _mm_loadu_si64(b);
@@ -376,11 +349,13 @@ class InnerProductInt8_AVX2 {
             }
         }
         if constexpr (HasSimd) {
-            __m128i v1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
-            __m128i v2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b));
-            sum256_1 = _mm256_add_epi32(sum256_1, _mm256_madd_epi16(_mm256_cvtepi8_epi16(v1), _mm256_cvtepi8_epi16(v2)));
-            a += 16;
-            b += 16;
+            while (a + 15 < last) {
+                __m128i v1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
+                __m128i v2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b));
+                sum256_1 = _mm256_add_epi32(sum256_1, _mm256_madd_epi16(_mm256_cvtepi8_epi16(v1), _mm256_cvtepi8_epi16(v2)));
+                a += 16;
+                b += 16;
+            }
         }
 
         // Horizontal reduce
@@ -414,12 +389,7 @@ using DistanceVariant = std::variant<
 #if defined(DEGLIB_X86)
     ,
     InnerProductInt8_AVX512_VNNI<ResidualMode::Full>,
-    InnerProductInt8_AVX512_VNNI<ResidualMode::DualPlusSimd>,
-    InnerProductInt8_AVX512_VNNI<ResidualMode::DualTail>,
-    InnerProductInt8_AVX512_VNNI<ResidualMode::DualOnly>,
-    InnerProductInt8_AVX512_VNNI<ResidualMode::SimdTail>,
     InnerProductInt8_AVX512_VNNI<ResidualMode::SimdOnly>,
-    InnerProductInt8_AVX512_VNNI<ResidualMode::TailOnly>,
 
     InnerProductInt8_AVX512<ResidualMode::Full>,
     InnerProductInt8_AVX512<ResidualMode::DualPlusSimd>,
@@ -430,12 +400,7 @@ using DistanceVariant = std::variant<
     InnerProductInt8_AVX512<ResidualMode::TailOnly>,
 
     InnerProductInt8_AVX2_VNNI<ResidualMode::Full>,
-    InnerProductInt8_AVX2_VNNI<ResidualMode::DualPlusSimd>,
-    InnerProductInt8_AVX2_VNNI<ResidualMode::DualTail>,
-    InnerProductInt8_AVX2_VNNI<ResidualMode::DualOnly>,
-    InnerProductInt8_AVX2_VNNI<ResidualMode::SimdTail>,
     InnerProductInt8_AVX2_VNNI<ResidualMode::SimdOnly>,
-    InnerProductInt8_AVX2_VNNI<ResidualMode::TailOnly>,
 
     InnerProductInt8_AVX2<ResidualMode::Full>,
     InnerProductInt8_AVX2<ResidualMode::DualPlusSimd>,
@@ -448,54 +413,14 @@ using DistanceVariant = std::variant<
     >;
 
 inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) {
-    auto target = instruction;
-#if defined(DEGLIB_X86)
-    if (target == deglib::cpu::InstructionSet::Auto) {
-        if (deglib::cpu::has_avx512_vnni()) {
-            target = deglib::cpu::InstructionSet::AVX512_VNNI;
-        } else if (deglib::cpu::has_avx512()) {
-            target = deglib::cpu::InstructionSet::AVX512;
-        } else if (deglib::cpu::has_avx_vnni()) {
-            target = deglib::cpu::InstructionSet::AVX2_VNNI;
-        } else if (deglib::cpu::has_avx2()) {
-            target = deglib::cpu::InstructionSet::AVX2;
-        } else {
-            target = deglib::cpu::InstructionSet::Scalar;
-        }
-    } else {
-        if (target == deglib::cpu::InstructionSet::AVX512_VNNI && !deglib::cpu::has_avx512_vnni()) {
-            throw std::runtime_error("AVX512-VNNI instruction set requested, but not supported by CPU");
-        }
-        if (target == deglib::cpu::InstructionSet::AVX512 && !deglib::cpu::has_avx512()) {
-            throw std::runtime_error("AVX512 instruction set requested, but not supported by CPU");
-        }
-        if (target == deglib::cpu::InstructionSet::AVX2_VNNI && !deglib::cpu::has_avx_vnni()) {
-            throw std::runtime_error("AVX-VNNI instruction set requested, but not supported by CPU");
-        }
-        if (target == deglib::cpu::InstructionSet::AVX2 && !deglib::cpu::has_avx2()) {
-            throw std::runtime_error("AVX2 instruction set requested, but not supported by CPU");
-        }
-    }
+    const auto target = deglib::cpu::resolve_instruction_set(instruction);
 
+#if defined(DEGLIB_X86)
     if (target == deglib::cpu::InstructionSet::AVX512_VNNI) {
-        if (dim < 64) {
-            return InnerProductInt8_AVX512_VNNI<ResidualMode::TailOnly>{};
-        } else if (dim < 128) {
-            if (dim == 64)
-                return InnerProductInt8_AVX512_VNNI<ResidualMode::SimdOnly>{};
-            else
-                return InnerProductInt8_AVX512_VNNI<ResidualMode::SimdTail>{};
-        } else {
-            const size_t rem = dim % 128;
-            if (rem == 0)
-                return InnerProductInt8_AVX512_VNNI<ResidualMode::DualOnly>{};
-            else if (rem == 64)
-                return InnerProductInt8_AVX512_VNNI<ResidualMode::DualPlusSimd>{};
-            else if (rem < 64)
-                return InnerProductInt8_AVX512_VNNI<ResidualMode::DualTail>{};
-            else
-                return InnerProductInt8_AVX512_VNNI<ResidualMode::Full>{};
-        }
+        if (dim % 64 == 0)
+            return InnerProductInt8_AVX512_VNNI<ResidualMode::SimdOnly>{};
+        else
+            return InnerProductInt8_AVX512_VNNI<ResidualMode::Full>{};
     } else if (target == deglib::cpu::InstructionSet::AVX512) {
         if (dim < 32) {
             return InnerProductInt8_AVX512<ResidualMode::TailOnly>{};
@@ -516,24 +441,10 @@ inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::Instruct
                 return InnerProductInt8_AVX512<ResidualMode::Full>{};
         }
     } else if (target == deglib::cpu::InstructionSet::AVX2_VNNI) {
-        if (dim < 32) {
-            return InnerProductInt8_AVX2_VNNI<ResidualMode::TailOnly>{};
-        } else if (dim < 64) {
-            if (dim == 32)
-                return InnerProductInt8_AVX2_VNNI<ResidualMode::SimdOnly>{};
-            else
-                return InnerProductInt8_AVX2_VNNI<ResidualMode::SimdTail>{};
-        } else {
-            const size_t rem = dim % 64;
-            if (rem == 0)
-                return InnerProductInt8_AVX2_VNNI<ResidualMode::DualOnly>{};
-            else if (rem == 32)
-                return InnerProductInt8_AVX2_VNNI<ResidualMode::DualPlusSimd>{};
-            else if (rem < 32)
-                return InnerProductInt8_AVX2_VNNI<ResidualMode::DualTail>{};
-            else
-                return InnerProductInt8_AVX2_VNNI<ResidualMode::Full>{};
-        }
+        if (dim % 32 == 0)
+            return InnerProductInt8_AVX2_VNNI<ResidualMode::SimdOnly>{};
+        else
+            return InnerProductInt8_AVX2_VNNI<ResidualMode::Full>{};
     } else if (target == deglib::cpu::InstructionSet::AVX2) {
         if (dim < 16) {
             return InnerProductInt8_AVX2<ResidualMode::TailOnly>{};

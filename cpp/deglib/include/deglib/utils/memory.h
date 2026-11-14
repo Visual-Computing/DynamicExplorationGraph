@@ -20,4 +20,37 @@ inline static void prefetch(const char* ptr, const size_t size = 128) {
     }
 }
 
+inline static void prefetch_lines(const void* ptr, int lines) {
+    const char* p = static_cast<const char*>(ptr);
+    switch (lines) {
+        case 8:
+            prefetch(p + 7 * L1_CACHE_LINE_SIZE, L1_CACHE_LINE_SIZE);
+            [[fallthrough]];
+        case 7:
+            prefetch(p + 6 * L1_CACHE_LINE_SIZE, L1_CACHE_LINE_SIZE);
+            [[fallthrough]];
+        case 6:
+            prefetch(p + 5 * L1_CACHE_LINE_SIZE, L1_CACHE_LINE_SIZE);
+            [[fallthrough]];
+        case 5:
+            prefetch(p + 4 * L1_CACHE_LINE_SIZE, L1_CACHE_LINE_SIZE);
+            [[fallthrough]];
+        case 4:
+            prefetch(p + 3 * L1_CACHE_LINE_SIZE, L1_CACHE_LINE_SIZE);
+            [[fallthrough]];
+        case 3:
+            prefetch(p + 2 * L1_CACHE_LINE_SIZE, L1_CACHE_LINE_SIZE);
+            [[fallthrough]];
+        case 2:
+            prefetch(p + L1_CACHE_LINE_SIZE, L1_CACHE_LINE_SIZE);
+            [[fallthrough]];
+        case 1:
+            prefetch(p, L1_CACHE_LINE_SIZE);
+            break;
+        default:
+            prefetch(p, L1_CACHE_LINE_SIZE);
+            break;
+    }
+}
+
 }  // namespace deglib::memory

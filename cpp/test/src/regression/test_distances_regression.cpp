@@ -164,7 +164,7 @@ TEST(DistancesRegression, Uint8_InnerProduct_Throughput) {
                 query_count, dim, iterations_simd
             );
         }
-        if (deglib::cpu::has_avx_vnni()) {
+        if (deglib::cpu::has_avx2_vnni()) {
             benchmark_distance_metric(
                 deglib::distances::Metric::Uint8_InnerProduct, deglib::cpu::InstructionSet::AVX2_VNNI, base_data, base_count, query_data,
                 query_count, dim, iterations_simd
@@ -211,7 +211,7 @@ TEST(DistancesRegression, Int8_InnerProduct_Throughput) {
                 query_count, dim, iterations_simd
             );
         }
-        if (deglib::cpu::has_avx_vnni()) {
+        if (deglib::cpu::has_avx2_vnni()) {
             benchmark_distance_metric(
                 deglib::distances::Metric::Int8_InnerProduct, deglib::cpu::InstructionSet::AVX2_VNNI, base_data, base_count, query_data,
                 query_count, dim, iterations_simd

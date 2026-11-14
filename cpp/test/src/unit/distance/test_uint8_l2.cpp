@@ -264,7 +264,7 @@ TEST(L2Uint8_SelectDist, AcceptsVNNIFallback) {
     if (deglib::cpu::has_avx512_vnni()) {
         EXPECT_NO_THROW(deglib::distances::uint8_l2::select_dist(128, deglib::cpu::InstructionSet::AVX512_VNNI));
     }
-    if (deglib::cpu::has_avx_vnni()) {
+    if (deglib::cpu::has_avx2_vnni()) {
         EXPECT_NO_THROW(deglib::distances::uint8_l2::select_dist(128, deglib::cpu::InstructionSet::AVX2_VNNI));
     }
 #endif
