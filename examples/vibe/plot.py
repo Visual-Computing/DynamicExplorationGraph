@@ -86,6 +86,14 @@ def export_interactive_html(
             algo_key = "deg-evp"
             algo_display = "DEG-EVP"
             dash = "longdashdot" if is_pruned else "dot"
+        elif "qg4" in algo_raw or "uint4" in algo_raw or query_dt_raw == "uint4":
+            algo_key = "deg-qg4"
+            algo_display = "DEG-QG4"
+            dash = "dashdot" if is_pruned else "dash"
+        elif "int4" in algo_raw or query_dt_raw == "int4":
+            algo_key = "deg-qg-int4"
+            algo_display = "DEG-QG-INT4"
+            dash = "longdash" if is_pruned else "solid"
         elif "qg" in algo_raw or "int8" in query_dt_raw:
             algo_key = "deg-qg"
             algo_display = "DEG-QG"
@@ -195,13 +203,24 @@ def export_interactive_html(
     for entry in results_series:
         a_raw = str(entry.get("algo", "")).lower().strip()
         q_raw = str(entry.get("query_dtype", "")).lower().strip()
-        a_key = "deg-evp" if ("evp" in a_raw or "evp" in q_raw) else ("deg-qg" if ("qg" in a_raw or "int8" in q_raw) else "deg")
+        if "evp" in a_raw or "evp" in q_raw:
+            a_key = "deg-evp"
+        elif "qg4" in a_raw or "uint4" in a_raw or q_raw == "uint4":
+            a_key = "deg-qg4"
+        elif "int4" in a_raw or q_raw == "int4":
+            a_key = "deg-qg-int4"
+        elif "qg" in a_raw or "int8" in q_raw:
+            a_key = "deg-qg"
+        else:
+            a_key = "deg"
         if a_key not in all_algos:
             all_algos.append(a_key)
 
     ALGO_CONFIG = {
         "deg": ("Solid (―)", "border-top: 2.5px solid #e2e8f0;", "DEG (Float32)"),
-        "deg-qg": ("Dashed (--)", "border-top: 2.5px dashed #e2e8f0;", "DEG-QG (Int8)"),
+        "deg-qg": ("Dashed (--)", "border-top: 2.5px dashed #38bdf8;", "DEG-QG (Int8)"),
+        "deg-qg4": ("Dash-Dot (-·)", "border-top: 2.5px dashed #4ade80;", "DEG-QG4 (Uint4)"),
+        "deg-qg-int4": ("Long-Dash (—)", "border-top: 2.5px dashed #f87171;", "DEG-QG-INT4 (Int4)"),
         "deg-evp": ("Dotted (···)", "border-top: 2.5px dotted #e2e8f0;", "DEG-EVP (Sparse)"),
     }
     algo_html_rows = ""
@@ -585,7 +604,7 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
         re.IGNORECASE,
     )
     re_index_config = re.compile(
-        r"Index Config:\s*K=(\d+),\s*Opt=([a-zA-Z0-9_-]+),\s*Prune=(True|False),\s*QueryType=([a-zA-Z0-9_-]+)",
+        r"Index Config:\s*K=(\d+),\s*Opt=([a-zA-Z0-9_-]+),(?:\s*QueryMetric=[^,]+,)?(?:\s*Prune=(True|False),)?\s*QueryType=([a-zA-Z0-9_-]+)",
         re.IGNORECASE,
     )
     re_build_graph = re.compile(
@@ -655,7 +674,7 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
                 save_current_series()
                 k = int(m.group(1))
                 opt_target = m.group(2).strip()
-                is_pruned = (m.group(3).lower() == "true")
+                is_pruned = bool(m.group(3) and m.group(3).lower() == "true")
                 q_dtype = m.group(4).strip().lower()
                 current_config = {
                     "algo": current_algo or ("deg-evp" if q_dtype == "evp" else ("deg-qg" if q_dtype == "int8" else "deg")),

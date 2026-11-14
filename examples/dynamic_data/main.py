@@ -9,7 +9,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import deglib
-from deglib_cpp import avx_usable, avx512_usable
 from dataset import (
     load_base_half_groundtruth,
     load_dataset_for_dynamic,
@@ -606,9 +605,9 @@ def main():
     # Detect CPU Instruction Set
     if args.instruction != "auto":
         instruction_set = args.instruction.upper()
-    elif avx512_usable():
+    elif deglib.cpu.has_avx512():
         instruction_set = "AVX512"
-    elif avx_usable():
+    elif deglib.cpu.has_avx2():
         instruction_set = "AVX2"
     else:
         instruction_set = "Scalar"

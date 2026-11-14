@@ -76,7 +76,7 @@ The generated benchmark visualizations (`*_anns_benchmark.html`) provide:
 
 ### Configuration via `config.yml`
 All benchmark search parameters, graph degrees, optimization targets, pruning options, search $\varepsilon$ ranges, and reranking factors are configured centrally in [`config.yml`](file:///C:/Lang/cpp/DynamicExplorationGraph/examples/vibe/config.yml):
-- **Graph parameters**: `k`, `opt_target`, `prune_non_mrng`.
+- **Graph parameters**: `k`, `opt_target`.
 - **Query parameters**: `eps_or_ef`, `rerank_size_factor`.
 
 ### `main.py`
@@ -96,3 +96,26 @@ All benchmark search parameters, graph degrees, optimization targets, pruning op
 - `--cache-dir`, `-c`: Base cache directory (default: standard cache directory).
 - `--output`, `-o`: Output HTML file path.
 - `--no-open`: Do not automatically open the generated HTML in the default web browser.
+
+---
+
+## Directory Structure
+
+```
+examples/vibe/
+├── main.py              # VIBE ANNS benchmark runner (main entry point)
+├── module.py            # DEG / QG / EVP algorithm implementations
+├── dataset.py           # VIBE dataset loading and caching
+├── presets.py           # Config preset definitions
+├── plot.py              # Interactive Plotly visualization / log explorer
+├── config.yml           # Benchmark sweep configuration
+├── run_bench.bat        # Batch runner for all VIBE datasets
+├── pyproject.toml       # Python project metadata
+└── glass_analysis/      # Glass vs. DEG performance analysis (see README.md)
+    ├── README.md        # Index of all analysis scripts
+    ├── single_query_bench.py   # Primary benchmark (produces glass_performance_analysis.md)
+    ├── bench_four_glass.py     # Glass native 4-variant sweep
+    ├── bench_four_deg.py       # DEG FLAS 4-variant sweep
+    ├── ...
+    └── evaluate_quant_matrix.py # Quantization grid evaluation
+```

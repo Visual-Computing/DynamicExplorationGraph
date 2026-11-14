@@ -14,10 +14,57 @@ except (ImportError, ValueError):
 
 
 _METRIC_MAP = {
-    "euclidean": (deglib.Metric.FP32_L2, deglib.Metric.Int8_L2, deglib.Metric.FP16_L2),
-    "cosine": (deglib.Metric.FP32_InnerProduct, deglib.Metric.Int8_InnerProduct, deglib.Metric.FP16_InnerProduct),
-    "ip": (deglib.Metric.FP32_InnerProduct, deglib.Metric.Int8_InnerProduct, deglib.Metric.FP16_InnerProduct),
-    "normalized": (deglib.Metric.FP32_InnerProduct, deglib.Metric.Int8_InnerProduct, deglib.Metric.FP16_InnerProduct),
+    "euclidean": (
+        deglib.Metric.FP32_L2,
+        deglib.Metric.Int8_L2,
+        deglib.Metric.FP16_L2,
+        deglib.Metric.Uint4_L2,
+        deglib.Metric.Int4_L2,
+        deglib.Metric.UInt7_L2,
+    ),
+    "cosine": (
+        deglib.Metric.FP32_InnerProduct,
+        deglib.Metric.Int8_InnerProduct,
+        deglib.Metric.FP16_InnerProduct,
+        deglib.Metric.Uint4_InnerProduct,
+        deglib.Metric.Int4_InnerProduct,
+        deglib.Metric.UInt7_InnerProduct,
+    ),
+    "ip": (
+        deglib.Metric.FP32_InnerProduct,
+        deglib.Metric.Int8_InnerProduct,
+        deglib.Metric.FP16_InnerProduct,
+        deglib.Metric.Uint4_InnerProduct,
+        deglib.Metric.Int4_InnerProduct,
+        deglib.Metric.UInt7_InnerProduct,
+    ),
+    "normalized": (
+        deglib.Metric.FP32_InnerProduct,
+        deglib.Metric.Int8_InnerProduct,
+        deglib.Metric.FP16_InnerProduct,
+        deglib.Metric.Uint4_InnerProduct,
+        deglib.Metric.Int4_InnerProduct,
+        deglib.Metric.UInt7_InnerProduct,
+    ),
+}
+
+
+_FP16_METRICS = {
+    "l2": deglib.Metric.FP16_L2,
+    "ip": deglib.Metric.FP16_InnerProduct,
+}
+
+_QUANT_METRICS = {
+    "l2": {
+        "int8-int8": deglib.Metric.Int8_L2,
+        "uint7-uint7": deglib.Metric.UInt7_L2,
+        "uint4-uint4": deglib.Metric.Uint4_L2,
+    },
+    "ip": {
+        "int8-int8": deglib.Metric.Int8_InnerProduct,
+        "uint7-uint7": deglib.Metric.UInt7_InnerProduct,
+        "uint4-uint4": deglib.Metric.Uint4_InnerProduct,
+    },
 }
 
 
@@ -128,7 +175,6 @@ class DEG(BaseANN):
         metric: str,
         k: int = 30,
         opt_target: str = "LowLID",
-        prune_non_mrng: bool = False,
         threads: int = 1,
     ):
         self.metric = metric.lower().strip()
@@ -137,7 +183,6 @@ class DEG(BaseANN):
 
         self.k = int(k)
         self.opt_target = opt_target
-        self.prune_non_mrng = bool(prune_non_mrng)
         self.threads = int(threads)
         self.eps_or_ef = 0.1
         self.metric_enum = _METRIC_MAP[self.metric][0]
@@ -170,8 +215,7 @@ class DEG(BaseANN):
 
         if cache_file.exists():
             print(f"Loading cached DEG graph from {cache_file}...", flush=True)
-            load_fn = deglib.load_mutable_graph if self.prune_non_mrng else deglib.load_readonly_graph
-            graph = load_fn(str(cache_file))
+            graph = deglib.load_readonly_graph(str(cache_file))
         else:
             # 1. FLAS 1D Pre-sorting
             if presort_file.exists():
@@ -204,10 +248,6 @@ class DEG(BaseANN):
             print(f"Saving graph to cache {cache_file}...", flush=True)
             graph.save_graph(str(cache_file))
 
-        # 3. Optional MRNG edge pruning
-        if self.prune_non_mrng:
-            deglib.optimization.prune_non_mrng_edges(graph, num_threads=self.threads)
-
         self.graph = graph.to_readonly() if graph.is_mutable() else graph
         self.searcher = deglib.search.create_searcher(
             graph=self.graph,
@@ -236,13 +276,13 @@ class DEG(BaseANN):
 
     def __str__(self) -> str:
         if self.eps_or_ef >= 1.0:
-            return f"DEG(k={self.k}, opt={self.opt_target}, prune_mrng={self.prune_non_mrng}, ef={int(round(self.eps_or_ef))})"
-        return f"DEG(k={self.k}, opt={self.opt_target}, prune_mrng={self.prune_non_mrng}, eps={self.eps_or_ef})"
+            return f"DEG(k={self.k}, opt={self.opt_target}, ef={int(round(self.eps_or_ef))})"
+        return f"DEG(k={self.k}, opt={self.opt_target}, eps={self.eps_or_ef})"
 
 
 class QG(BaseANN):
     """
-    Quantized DEG (DEG-QG): Graph search with INT8 quantized vectors and FP16 reranking.
+    Quantized DEG (DEG-QG): Graph search with INT8 or UINT4 quantized vectors and FP16 reranking.
     """
 
     def __init__(
@@ -250,8 +290,9 @@ class QG(BaseANN):
         metric: str,
         k: int = 30,
         opt_target: str = "LowLID",
-        prune_non_mrng: bool = False,
         threads: int = 1,
+        quant: str = "int8-int8",
+        query_metric: str = "auto",
     ):
         self.metric = metric.lower().strip()
         if self.metric not in _METRIC_MAP:
@@ -259,13 +300,28 @@ class QG(BaseANN):
 
         self.k = int(k)
         self.opt_target = opt_target
-        self.prune_non_mrng = bool(prune_non_mrng)
         self.threads = int(threads)
+        self.quant = (quant or "int8-int8").lower().strip()
+        qmetric = (query_metric or "auto").lower().strip()
+        if qmetric == "auto":
+            self.query_metric = "l2" if self.metric == "euclidean" else "ip"
+        elif qmetric == "l2":
+            self.query_metric = "l2"
+        elif qmetric == "innerproduct":
+            self.query_metric = "ip"
+        else:
+            raise ValueError(f"Unsupported query_metric '{query_metric}'. Choose from: ['L2', 'InnerProduct']")
         self.rerank_size_factor = 1.0
         self.search_eps = 0.0
         self.ef = 0
+        self.eps_or_ef = 0.0
 
-        self.base_metric, self.int8_metric, self.fp16_metric = _METRIC_MAP[self.metric]
+        self.base_metric, self.int8_metric, self.fp16_metric, self.uint4_metric, self.int4_metric, self.int7_metric = (
+            _METRIC_MAP[self.metric]
+        )
+        self.search_fp16_metric = _FP16_METRICS[self.query_metric]
+        self.target_metric = _QUANT_METRICS[self.query_metric][self.quant]
+        self.normalize_queries = self.query_metric == "ip" or self.metric == "cosine"
         self.opt_enum = deglib.builder.OptimizationTarget[self.opt_target]
 
         self.graph = None
@@ -280,7 +336,7 @@ class QG(BaseANN):
         X = np.ascontiguousarray(X, dtype=np.float32)
         n_vectors, dims = X.shape
 
-        self.rerank_space_fp16 = deglib.FloatSpace.create(dim=dims, metric=self.fp16_metric)
+        self.rerank_space_fp16 = deglib.FloatSpace.create(dim=dims, metric=self.search_fp16_metric)
 
         cache_file = _resolve_graph_cache_path(
             metric=self.metric,
@@ -300,8 +356,7 @@ class QG(BaseANN):
 
         if cache_file.exists():
             print(f"Loading cached DEG graph from {cache_file}...", flush=True)
-            load_fn = deglib.load_mutable_graph if self.prune_non_mrng else deglib.load_readonly_graph
-            loaded_graph = load_fn(str(cache_file))
+            loaded_graph = deglib.load_readonly_graph(str(cache_file))
             # Cache: Reconstruct graph-ordered features from original un-permuted X using saved labels
             X_graph_order = X[loaded_graph.get_labels()]
         else:
@@ -324,12 +379,18 @@ class QG(BaseANN):
             X_graph_order = X[sorted_indices]
 
             # 2. Build graph in FP32
-            print(f"Building DEG graph (K={self.k}, Opt={self.opt_target}, threads={self.threads})...", flush=True)
+            graph_data = X_graph_order
+            graph_metric = self.base_metric
+
+            print(
+                f"Building DEG graph (K={self.k}, Opt={self.opt_target}, threads={self.threads})...",
+                flush=True,
+            )
             graph = deglib.builder.build_from_data(
-                data=X_graph_order,
+                data=graph_data,
                 labels=sorted_indices,
                 edges_per_vertex=self.k,
-                metric=self.base_metric,
+                metric=graph_metric,
                 seed=7,
                 optimization_target=self.opt_enum,
                 thread_count=self.threads,
@@ -340,18 +401,25 @@ class QG(BaseANN):
             graph.save_graph(str(cache_file))
             loaded_graph = graph
 
-        # 3. Optional MRNG edge pruning
-        if self.prune_non_mrng:
-            deglib.optimization.prune_non_mrng_edges(loaded_graph, num_threads=self.threads)
+        # 3. Finalize ReadOnlyGraph with quantized features using calibrated ScalarQuantizer
+        # Both features and rerank_data are derived directly from X_graph_order (row i = vertex i).
+        target_space = deglib.FloatSpace.create(dim=dims, metric=self.target_metric)
+        if self.quant == "uint4-uint4":
+            self.quantizer = deglib.transformation.make_scalar_quantizer_uint4(X)
+            quant_features = self.quantizer.quantize(X_graph_order, num_threads=self.threads)
+        elif self.quant == "uint7-uint7":
+            self.quantizer = deglib.transformation.make_scalar_quantizer_uint7(X)
+            quant_features = self.quantizer.quantize(X_graph_order, num_threads=self.threads)
+        elif self.quant == "int8-int8":
+            self.quantizer = deglib.transformation.make_scalar_quantizer_int8(X)
+            quant_features = self.quantizer.quantize(X_graph_order, num_threads=self.threads)
+        else:
+            raise ValueError(f"Unsupported quant '{self.quant}'")
 
-        # 4. Finalize ReadOnlyGraph with INT8 features using calibrated ScalarQuantizer
-        # Both int8_features and rerank_data are derived directly from X_graph_order (row i = vertex i).
-        self.quantizer = deglib.transformation.make_scalar_quantizer_int8(X)
-        int8_features = self.quantizer.quantize(X_graph_order, num_threads=self.threads)
-        target_space = deglib.FloatSpace.create(dim=dims, metric=self.int8_metric)
-        self.graph = loaded_graph.to_readonly(target_space, int8_features, transformations=[self.quantizer])
+        # Convert the FP32 graph into a readonly graph that uses the quantized features and quantizer for the graph-based search
+        self.graph = loaded_graph.to_readonly(target_space, quant_features, transformations=[self.quantizer])
 
-        # 5. Initialize C++ Zero-overhead Searcher with FP16 Reranker & ScalarQuantizerFP16
+        # 5. Initialize a Searcher with FP16 Reranker & ScalarQuantizerFP16
         self.rerank_quantizer = deglib.transformation.make_scalar_quantizer_fp16(X)
         rerank_features = self.rerank_quantizer.quantize(X_graph_order, num_threads=self.threads)
 
@@ -360,12 +428,12 @@ class QG(BaseANN):
             rerank_space=self.rerank_space_fp16,
             rerank_data=rerank_features,
             rerank_transformations=[self.rerank_quantizer],
-            normalize_query=(self.metric == "cosine"),
+            normalize_query=self.normalize_queries,
         )
 
         # 6. Full searcher optimization
         t_km = time.time()
-        self.searcher.optimize()
+        self.searcher.optimize(k=self.k, use_routing=True, n_clusters=256, num_threads=self.threads)
         print(f"Optimized Searcher for the provided graph and hardware in {time.time() - t_km:.2f}s", flush=True)
 
     def set_query_arguments(self, eps_or_ef: float, rerank_size_factor: float = 1.0):
@@ -386,13 +454,14 @@ class QG(BaseANN):
         )
 
     def __str__(self) -> str:
+        qname = self.quant.upper()
         if self.eps_or_ef >= 1.0:
             return (
-                f"DEG-QG(k={self.k}, opt={self.opt_target}, prune_mrng={self.prune_non_mrng}, "
+                f"DEG-QG[{qname}](k={self.k}, opt={self.opt_target}, query_metric={self.query_metric.upper()}, "
                 f"rerank_factor={self.rerank_size_factor}, ef={int(round(self.eps_or_ef))})"
             )
         return (
-            f"DEG-QG(k={self.k}, opt={self.opt_target}, prune_mrng={self.prune_non_mrng}, "
+            f"DEG-QG[{qname}](k={self.k}, opt={self.opt_target}, query_metric={self.query_metric.upper()}, "
             f"rerank_factor={self.rerank_size_factor}, eps={self.eps_or_ef})"
         )
 
@@ -407,7 +476,6 @@ class EVP(BaseANN):
         metric: str,
         k: int = 30,
         opt_target: str = "LowLID",
-        prune_non_mrng: bool = False,
         threads: int = 1,
     ):
         self.metric = metric.lower().strip()
@@ -416,11 +484,11 @@ class EVP(BaseANN):
 
         self.k = int(k)
         self.opt_target = opt_target
-        self.prune_non_mrng = bool(prune_non_mrng)
         self.threads = int(threads)
         self.rerank_size_factor = 1.0
         self.search_eps = 0.0
         self.ef = 0
+        self.eps_or_ef = 0.0
 
         self.base_metric, _, self.fp16_metric = _METRIC_MAP[self.metric]
         self.opt_enum = deglib.builder.OptimizationTarget[self.opt_target]
@@ -457,8 +525,7 @@ class EVP(BaseANN):
 
         if cache_file.exists():
             print(f"Loading cached DEG graph from {cache_file}...", flush=True)
-            load_fn = deglib.load_mutable_graph if self.prune_non_mrng else deglib.load_readonly_graph
-            loaded_graph = load_fn(str(cache_file))
+            loaded_graph = deglib.load_readonly_graph(str(cache_file))
             X_graph_order = X[loaded_graph.get_labels()]
         else:
             # 1. FLAS 1D Pre-sorting
@@ -495,11 +562,7 @@ class EVP(BaseANN):
             graph.save_graph(str(cache_file))
             loaded_graph = graph
 
-        # 3. Optional MRNG edge pruning
-        if self.prune_non_mrng:
-            deglib.optimization.prune_non_mrng_edges(loaded_graph, num_threads=self.threads)
-
-        # 4. Finalize ReadOnlyGraph with EVP features
+        # 3. Finalize ReadOnlyGraph with EVP features
         # EvpQuantizer::fit() in C++ automatically calibrates the optimal nz value across threads.
         self.quantizer = deglib.transformation.make_evp_quantizer(X, num_threads=self.threads)
         print(
@@ -508,6 +571,7 @@ class EVP(BaseANN):
         )
         evp_features = self.quantizer.quantize(X_graph_order, num_threads=self.threads)
         target_space = deglib.FloatSpace.create(dim=dims, metric=deglib.Metric.EVP_InnerProduct)
+        # self.graph = loaded_graph.to_readonly(target_space, evp_features, transformations=[self.quantizer])
         self.graph = loaded_graph.to_readonly(target_space, evp_features, transformations=[self.quantizer])
 
         # 5. Initialize C++ Zero-overhead Searcher with FP16 base vectors & ScalarQuantizerFP16
@@ -548,10 +612,10 @@ class EVP(BaseANN):
         nz = self.quantizer.non_zeros if self.quantizer else 0
         if self.eps_or_ef >= 1.0:
             return (
-                f"DEG-EVP(k={self.k}, nz={nz}, opt={self.opt_target}, prune_mrng={self.prune_non_mrng}, "
+                f"DEG-EVP(k={self.k}, nz={nz}, opt={self.opt_target}, "
                 f"rerank_factor={self.rerank_size_factor}, ef={int(round(self.eps_or_ef))})"
             )
         return (
-            f"DEG-EVP(k={self.k}, nz={nz}, opt={self.opt_target}, prune_mrng={self.prune_non_mrng}, "
+            f"DEG-EVP(k={self.k}, nz={nz}, opt={self.opt_target}, "
             f"rerank_factor={self.rerank_size_factor}, eps={self.eps_or_ef})"
         )

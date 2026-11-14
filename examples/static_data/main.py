@@ -12,7 +12,7 @@ from dataset import (
     load_dataset,
     resolve_dataset_key,
 )
-from deglib_cpp import avx512_usable, avx_usable
+import deglib
 from presets import get_preset
 from deglib.analysis import analyze_graph
 
@@ -394,9 +394,9 @@ def main():
     # Detect CPU Instruction Set
     if args.instruction != "auto":
         instruction_set = args.instruction.upper()
-    elif avx512_usable():
+    elif deglib.cpu.has_avx512():
         instruction_set = "AVX512"
-    elif avx_usable():
+    elif deglib.cpu.has_avx2():
         instruction_set = "AVX2"
     else:
         instruction_set = "Scalar"

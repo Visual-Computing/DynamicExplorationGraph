@@ -33,7 +33,9 @@ def load_vibe_config(config_path: Path | None = None) -> List[Dict[str, Any]]:
                     "run_group": rg_name,
                     "k_list": args.get("k", [30]),
                     "opt_target_list": args.get("opt_target", ["LowLID"]),
-                    "prune_non_mrng_list": args.get("prune_non_mrng", [False]),
+                    "quant_list": args.get("quant", [None]),
+                    "quant_modes": args.get("quant_modes", []),
+                    "query_metric_list": args.get("query_metric", ["auto"]),
                     "eps_or_ef_list": [float(v) for v in raw_search_vals],
                     "rerank_size_factors": query_args.get("rerank_size_factor", [1.0]),
                 }
@@ -42,12 +44,16 @@ def load_vibe_config(config_path: Path | None = None) -> List[Dict[str, Any]]:
     return algorithms
 
 
-def get_config_grid_presets(dataset_key: str, algorithm_name: str | None = None) -> List[Dict[str, Any]]:
+def get_config_grid_presets(
+    dataset_key: str,
+    algorithm_name: str | None = None,
+    config_path: Path | None = None,
+) -> List[Dict[str, Any]]:
     """
     Returns the list of all index configurations (Cartesian product of build args)
     defined in config.yml.
     """
-    algorithms = load_vibe_config()
+    algorithms = load_vibe_config(config_path)
     is_l2 = "euclidean" in dataset_key.lower() or "agnews" in dataset_key.lower()
     default_opt = "LowLID" if is_l2 else "HighLID"
 
@@ -63,10 +69,33 @@ def get_config_grid_presets(dataset_key: str, algorithm_name: str | None = None)
             if target_name not in resolved_opt_targets:
                 resolved_opt_targets.append(target_name)
 
-        for opt_target, k, prune_non_mrng in itertools.product(
+        if alg.get("quant_modes"):
+            for opt_target, k, mode in itertools.product(
+                resolved_opt_targets,
+                alg["k_list"],
+                alg["quant_modes"],
+            ):
+                for query_metric in mode.get("query_metric", ["L2"]):
+                    grid.append(
+                        {
+                            "alg_name": alg["name"],
+                            "constructor": alg["constructor"],
+                            "k": k,
+                            "optimization_target": opt_target,
+                            "quant": mode["quant"],
+                            "query_metric": query_metric,
+                            "anns_k": 100,
+                            "eps_or_ef_list": alg["eps_or_ef_list"],
+                            "rerank_size_factors": alg["rerank_size_factors"],
+                        }
+                    )
+            continue
+
+        for opt_target, k, quant, query_metric in itertools.product(
             resolved_opt_targets,
             alg["k_list"],
-            alg["prune_non_mrng_list"],
+            alg.get("quant_list", [None]),
+            alg.get("query_metric_list", ["auto"]),
         ):
             grid.append(
                 {
@@ -74,7 +103,8 @@ def get_config_grid_presets(dataset_key: str, algorithm_name: str | None = None)
                     "constructor": alg["constructor"],
                     "k": k,
                     "optimization_target": opt_target,
-                    "prune_non_mrng": prune_non_mrng,
+                    "quant": quant,
+                    "query_metric": query_metric,
                     "anns_k": 100,
                     "eps_or_ef_list": alg["eps_or_ef_list"],
                     "rerank_size_factors": alg["rerank_size_factors"],
@@ -83,9 +113,9 @@ def get_config_grid_presets(dataset_key: str, algorithm_name: str | None = None)
     return grid
 
 
-def get_default_config_preset(dataset_key: str) -> Dict[str, Any]:
+def get_default_config_preset(dataset_key: str, config_path: Path | None = None) -> Dict[str, Any]:
     """Returns dataset-tailored defaults while reading search grid from config.yml."""
-    presets = get_config_grid_presets(dataset_key)
+    presets = get_config_grid_presets(dataset_key, config_path=config_path)
     return (
         presets[0]
         if presets
@@ -96,7 +126,6 @@ def get_default_config_preset(dataset_key: str) -> Dict[str, Any]:
             "optimization_target": "LowLID"
             if ("euclidean" in dataset_key.lower() or "agnews" in dataset_key.lower())
             else "HighLID",
-            "prune_non_mrng": False,
             "anns_k": 100,
             "eps_or_ef_list": [0.0, 0.05, 0.1, 0.2, 0.3],
             "rerank_size_factors": [1.0],

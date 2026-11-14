@@ -7,7 +7,6 @@ from pathlib import Path
 import numpy as np
 
 import deglib
-from deglib_cpp import avx_usable, avx512_usable
 
 from dataset import (
     VIBE_DATASETS,
@@ -183,8 +182,8 @@ def main():
         "-a",
         type=str,
         default=None,
-        choices=["deg", "deg-qg", "qg", "deg-evp", "evp", "all"],
-        help="Select specific algorithm to benchmark ('deg', 'deg-qg' / 'qg', 'deg-evp' / 'evp', or 'all'). Default: run all enabled in config.yml.",
+        choices=["deg", "deg-qg", "qg", "deg-qg4", "qg4", "deg-qg-int4", "qg-int4", "deg-qg-int7", "qg-int7", "deg-qg-int4-int7", "qg-int4-int7", "deg-evp", "evp", "all"],
+        help="Select specific algorithm to benchmark ('deg', 'deg-qg' / 'qg', 'deg-qg4', 'deg-qg-int4', 'deg-evp' / 'evp', or 'all'). Default: run all enabled in config.yml.",
     )
     parser.add_argument(
         "--query-dtype",
@@ -192,6 +191,12 @@ def main():
         default=None,
         choices=["float32", "int8"],
         help="Override feature storage and search vector dtype ('float32', 'int8'). Defaults to config.yml.",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Benchmark config YAML (default: examples/vibe/config.yml).",
     )
     parser.add_argument(
         "--no-stop",
@@ -243,22 +248,34 @@ def main():
         print(f"\n--- System & Distance Config ---")
         print(f"Metric: {metric_str} ({metric_enum.name}), Dimensions: {dims}")
         print(f"Vector Space Type: FloatSpace ({instruction_set})")
+        int8_metric_enum = deglib.Metric.Int8_L2 if is_l2 else deglib.Metric.Int8_InnerProduct
+        int8_space = deglib.distances.FloatSpace.create(dims, int8_metric_enum)
+        int8_instruction_set = int8_space.get_instruction().name
+        print(f"Int8 Feature Space: {int8_space.get_data_size()} bytes ({int8_instruction_set})")
         print(f"Query Dtype: {args.query_dtype.upper() if args.query_dtype else 'FROM CONFIG.YML'}")
-        print(f"Hardware AVX: {avx_usable()}, AVX-512: {avx512_usable()}")
+        print(f"Hardware AVX: {deglib.cpu.has_avx2()}, AVX-512: {deglib.cpu.has_avx512()}, AVX2-VNNI: {deglib.cpu.has_avx2_vnni()}, AVX-512-VNNI: {deglib.cpu.has_avx512_vnni()}")
 
         # Linear scan baseline
         linear_baseline_us = compute_linear_search_baseline(base_vecs, float_space)
 
         # Filter algorithm if requested (e.g. --algorithm deg or --algorithm deg-qg)
         alg_filter = args.algorithm
-        if alg_filter == "qg":
+        if alg_filter in ("qg", "deg-qg"):
             alg_filter = "deg-qg"
-        elif alg_filter == "evp":
+        elif alg_filter in ("qg4", "deg-qg4"):
+            alg_filter = "deg-qg4"
+        elif alg_filter in ("qg-int4", "deg-qg-int4"):
+            alg_filter = "deg-qg-int4"
+        elif alg_filter in ("qg-int7", "deg-qg-int7"):
+            alg_filter = "deg-qg-int7"
+        elif alg_filter in ("qg-int4-int7", "deg-qg-int4-int7"):
+            alg_filter = "deg-qg-int4-int7"
+        elif alg_filter in ("evp", "deg-evp"):
             alg_filter = "deg-evp"
         elif alg_filter == "all":
             alg_filter = None
 
-        configs_to_run = get_config_grid_presets(dataset_key, algorithm_name=alg_filter)
+        configs_to_run = get_config_grid_presets(dataset_key, algorithm_name=alg_filter, config_path=args.config)
 
 
         actual_k = min(cfg_k_target := 100, gt_vecs.shape[1])
@@ -271,25 +288,31 @@ def main():
         for cfg_idx, cfg in enumerate(configs_to_run):
             k = cfg["k"]
             opt_target = cfg["optimization_target"]
-            is_pruned = cfg.get("prune_non_mrng", False)
             constructor_name = cfg.get("constructor", "DEG")
             alg_name = cfg.get("alg_name", "deg")
 
+            query_metric = cfg.get("query_metric", "auto")
+            quant_type = cfg.get("quant", "fp32")
+
             if constructor_name == "QG":
+                quant_type = cfg.get("quant")
+                if not quant_type:
+                    raise ValueError(f"Missing quant for algorithm '{alg_name}'")
                 adapter = QG(
                     metric=metric_str,
                     k=k,
                     opt_target=opt_target,
-                    prune_non_mrng=is_pruned,
                     threads=args.build_threads,
+                    quant=quant_type,
+                    query_metric=query_metric,
                 )
-                query_dtype = "int8"
+                query_metric = adapter.query_metric.upper()
+                query_dtype = quant_type
             elif constructor_name == "EVP":
                 adapter = EVP(
                     metric=metric_str,
                     k=k,
                     opt_target=opt_target,
-                    prune_non_mrng=is_pruned,
                     threads=args.build_threads,
                 )
                 query_dtype = "evp"
@@ -298,14 +321,22 @@ def main():
                     metric=metric_str,
                     k=k,
                     opt_target=opt_target,
-                    prune_non_mrng=is_pruned,
                     threads=args.build_threads,
                 )
                 query_dtype = "float32"
 
             print(f"\n--- [{cfg_idx + 1}/{len(configs_to_run)}] Processing Algorithm '{alg_name}' ({constructor_name}) ---")
-            print(f"Index Config: K={k}, Opt={opt_target}, Prune={is_pruned}, QueryType={query_dtype}")
             adapter.fit(base_vecs, cache_dir=cache_dir)
+
+            feature_instruction = ""
+            if adapter.graph is not None:
+                feat_space = adapter.graph.get_feature_space()
+                feature_instruction = f", Features={feat_space.get_instruction().name}"
+            print(
+                f"Index Config: K={k}, Opt={opt_target}, "
+                f"QueryMetric={query_metric}, "
+                f"QueryType={query_dtype}{feature_instruction}"
+            )
 
             if adapter.graph is not None:
                 deglib.analysis.analyze_graph(adapter.graph)
@@ -322,8 +353,6 @@ def main():
                 param_groups.append(("ef", ef_values))
             if eps_values:
                 param_groups.append(("eps", eps_values))
-
-            prune_label = ", MRNG" if is_pruned else ""
 
             for r_factor in factors_to_eval:
                 rerank_label = f", Rerank={r_factor:.2f}x" if r_factor > 1.0 else ""
@@ -397,11 +426,16 @@ def main():
 
                 results_series.append(
                     {
-                        "label": f"{alg_name.upper()} ({opt_target}, K={k}{prune_label}{rerank_label})",
+                        "label": (
+                            f"{alg_name.upper()} ({opt_target}, K={k}, Quant={quant_type}, "
+                            f"QueryMetric={query_metric}{rerank_label})"
+                        ),
+                        "algo": alg_name,
                         "opt_target": opt_target,
                         "k": k,
+                        "quant": quant_type,
+                        "query_metric": query_metric,
                         "query_dtype": query_dtype,
-                        "prune_non_mrng": is_pruned,
                         "rerank_factor": r_factor,
                         "recalls": anns_recalls,
                         "qps": anns_qps,
