@@ -34,8 +34,8 @@ def test_int8_quantizer_fit_and_quantize():
     assert quant_query.shape == (10, 32)
     assert quant_query.dtype == np.int8
 
-    # Query elements should have smaller absolute quantized values because they are on the db scale
-    assert np.max(np.abs(quant_query)) < np.max(np.abs(quant_db))
+    # Query elements should have smaller quantized values because they are on the db scale
+    assert np.max(quant_query) < np.max(quant_db)
 
 
 def test_make_scalar_quantizer_factory_functions():
@@ -177,8 +177,10 @@ def test_int8_per_dim_quantizer():
 
     quant_db = quantizer.quantize(db_vectors)
     assert quant_db[0, 0] == -127
+    assert quant_db[1, 0] == 0
     assert quant_db[2, 0] == 127
     assert quant_db[0, 1] == -127
+    assert quant_db[1, 1] == 0
     assert quant_db[2, 1] == 127
 
     # FP16 test
@@ -300,3 +302,75 @@ def test_fp16_quantizer_factory_and_fp16_input():
     q2 = ScalarQuantizerFP16()
     q2.fit(vectors_f16)
     np.testing.assert_array_equal(q.quantize(vectors_f32), q.quantize(vectors_f16))
+
+
+def test_int7_quantizer_fit_and_quantize():
+    np.random.seed(42)
+    dim = 32
+    db_vectors = np.random.uniform(-5.0, 5.0, size=(100, dim)).astype(np.float32)
+
+    from deglib.transformation import ScalarQuantizerUInt7, make_scalar_quantizer_uint7
+
+    q = ScalarQuantizerUInt7()
+    assert not q.is_fitted
+    q.fit(db_vectors, quantile=1.0)
+    assert q.is_fitted
+    assert q.dim == dim
+
+    quant = q.quantize(db_vectors)
+    assert quant.shape == (100, dim)
+    assert quant.dtype == np.int8
+    assert quant.min() >= 0
+    assert quant.max() <= 127
+
+    q2 = make_scalar_quantizer_uint7(db_vectors)
+    np.testing.assert_array_equal(quant, q2.quantize(db_vectors))
+
+
+def test_uint7_distance_computation():
+    np.random.seed(7)
+    dim = 64
+    a = np.random.randint(0, 128, size=(1, dim)).astype(np.int8)
+    b = np.random.randint(0, 128, size=(1, dim)).astype(np.int8)
+
+    from deglib.distances import FloatSpace, Metric
+
+    space = FloatSpace.create(dim, Metric.UInt7_L2)
+    distance = space.compute_distance(a[0], b[0])
+    expected = np.sum((a[0].astype(np.int64) - b[0].astype(np.int64)) ** 2)
+    np.testing.assert_allclose(distance, expected, rtol=1e-5)
+
+
+def test_uint4_quantizer_fit_and_quantize():
+    np.random.seed(42)
+    dim = 32
+    db_vectors = np.random.uniform(-5.0, 5.0, size=(100, dim)).astype(np.float32)
+
+    from deglib.transformation import ScalarQuantizerUint4, make_scalar_quantizer_uint4
+
+    q = ScalarQuantizerUint4()
+    assert not q.is_fitted
+    q.fit(db_vectors, quantile=1.0)
+    assert q.is_fitted
+    assert q.dim == dim
+
+    quant = q.quantize(db_vectors)
+    assert quant.shape == (100, (dim + 1) // 2)
+    assert quant.dtype == np.uint8
+
+    # Test factory function
+    q2 = make_scalar_quantizer_uint4(db_vectors)
+    assert q2.is_fitted
+    assert q2.dim == dim
+    np.testing.assert_array_equal(q.quantize(db_vectors), q2.quantize(db_vectors))
+
+
+def test_uint4_distance_computation():
+    from deglib.distances import FloatSpace, Metric
+
+    dim = 32
+    space_l2 = FloatSpace.create(dim, Metric.Uint4_L2)
+    assert space_l2.get_data_size() == (dim + 1) // 2
+
+    space_ip = FloatSpace.create(dim, Metric.Uint4_InnerProduct)
+    assert space_ip.get_data_size() == (dim + 1) // 2

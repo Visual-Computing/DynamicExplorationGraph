@@ -879,8 +879,20 @@ enum class InstructionSet : uint8_t {
 /// Runtime AVX2 support check
 bool has_avx2();
 
+/// Runtime AVX2-VNNI (256-bit) support check
+bool has_avx2_vnni();
+
 /// Runtime AVX-512 support check
 bool has_avx512();
+
+/// Runtime AVX-512 VNNI support check
+bool has_avx512_vnni();
+
+/// Runtime AVX-512 FP16 (native arithmetic) support check
+bool has_avx512_fp16();
+
+/// Runtime FP16 support check (F16C half-precision conversion)
+bool has_fp16();
 
 /// Returns string representation ("Auto", "Scalar", "AVX2", "AVX2_VNNI", "AVX512", "AVX512_VNNI")
 const char* instruction_set_to_string(InstructionSet inst);

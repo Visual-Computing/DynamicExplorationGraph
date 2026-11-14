@@ -23,6 +23,8 @@ class Metric(enum.IntEnum):
     - ``EVP_InnerProduct``: Inner product distance for quantized byte-packed (EVP) vectors.
     - ``Int8_InnerProduct``: Inner product distance for 8-bit signed integer vectors.
     - ``Int8_L2``: Euclidean (L2) distance for 8-bit signed integer vectors.
+    - ``UInt7_InnerProduct``: Inner product distance for UInt7 codes in [0, 127].
+    - ``UInt7_L2``: Euclidean (L2) distance for UInt7 codes in [0, 127].
     """
 
     FP32_L2 = cpp_distances.Metric.FP32_L2
@@ -34,6 +36,12 @@ class Metric(enum.IntEnum):
     EVP_InnerProduct = cpp_distances.Metric.EVP_InnerProduct
     Int8_InnerProduct = cpp_distances.Metric.Int8_InnerProduct
     Int8_L2 = cpp_distances.Metric.Int8_L2
+    Uint4_L2 = cpp_distances.Metric.Uint4_L2
+    Uint4_InnerProduct = cpp_distances.Metric.Uint4_InnerProduct
+    Int4_L2 = cpp_distances.Metric.Int4_L2
+    Int4_InnerProduct = cpp_distances.Metric.Int4_InnerProduct
+    UInt7_L2 = cpp_distances.Metric.UInt7_L2
+    UInt7_InnerProduct = cpp_distances.Metric.UInt7_InnerProduct
 
     def get_dtype(self):
         """
@@ -41,16 +49,15 @@ class Metric(enum.IntEnum):
         """
         if self in (Metric.FP32_L2, Metric.FP32_InnerProduct):
             return np.float32
-        elif self in (Metric.Uint8_L2, Metric.Uint8_InnerProduct):
+        if self in (Metric.Uint8_L2, Metric.Uint8_InnerProduct, Metric.Uint4_L2, Metric.Uint4_InnerProduct, Metric.Int4_L2, Metric.Int4_InnerProduct):
             return np.uint8
-        elif self in (Metric.Int8_InnerProduct, Metric.Int8_L2):
+        if self in (Metric.Int8_InnerProduct, Metric.Int8_L2, Metric.UInt7_InnerProduct, Metric.UInt7_L2):
             return np.int8
-        elif self in (Metric.FP16_L2, Metric.FP16_InnerProduct):
+        if self in (Metric.FP16_L2, Metric.FP16_InnerProduct):
             return np.uint16
-        elif self == Metric.EVP_InnerProduct:
+        if self == Metric.EVP_InnerProduct:
             return np.uint8
-        else:
-            return np.float32
+        return np.float32
 
 
 class FloatSpace:
@@ -93,6 +100,12 @@ class FloatSpace:
         Return the memory size in bytes required per feature vector.
         """
         return self.float_space_cpp.get_data_size()
+
+    def get_query_data_size(self) -> int:
+        """
+        Return the memory size in bytes required per query vector.
+        """
+        return self.float_space_cpp.get_query_data_size()
 
     def get_instruction(self) -> InstructionSet:
         """

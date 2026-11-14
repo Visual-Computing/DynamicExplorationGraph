@@ -116,7 +116,7 @@ def test_searcher_quantized_int8_optimize_without_reranker():
     ro_graph = graph.to_readonly(target_space, int8_data, transformations=[quantizer])
 
     searcher = create_searcher(graph=ro_graph)
-    searcher.optimize(n_clusters=16, n_iter=3, sample_size=0, k=5, seed=7)
+    searcher.optimize(n_clusters=16, n_iter=3, sample_size=0, k=5)
 
     query = data[5]
     res = searcher.search(query, k=5, eps_or_ef=0.2, rerank_factor=1.0)
@@ -220,7 +220,7 @@ def test_searcher_optimize_sets_kmeans_entries():
     graph = deglib.builder.build_from_data(data, labels=labels, edges_per_vertex=16, metric=Metric.FP32_InnerProduct)
     searcher = create_searcher(graph)
 
-    searcher.optimize(n_clusters=8, n_iter=5, sample_size=100, seed=42)
+    searcher.optimize(n_clusters=8, n_iter=5, sample_size=100)
 
     res = searcher.search(data[0], k=5, eps_or_ef=0.3)
     assert len(res) == 5

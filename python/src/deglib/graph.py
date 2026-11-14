@@ -303,18 +303,18 @@ class DynamicExplorationGraph:
         """Sets the list of internal entry vertex indices."""
         self.dynamic_exploration_graph_cpp.set_entry_vertex_indices(list(indices))
 
-    def optimize(self, sample_count: int = 50, k: int = 100, ef: int = 200, seed: int = 7) -> None:
+    def optimize(self, sample_count: int = 300, k: int = 100, ef: int = 200, median_subset: int = 4096) -> None:
         """Auto-tune the graph's traversal prefetch parameters (po, pl, nl) by timing traversal over sampled vertices.
 
         The graph self-samples its own stored features as queries, so no external query buffer is
         needed. Call once after construction to tune traversal for the expected operating point.
 
-        :param sample_count: Number of vertices sampled as queries (capped at the graph size).
+        :param sample_count: Number of vertices sampled as queries (capped at the graph size; 300 for noise-stable tuning).
         :param k: Result count per traversal (the expected query operating point).
         :param ef: Beam width per traversal; clamped to at least k.
-        :param seed: Random seed for query sampling.
+        :param median_subset: Subset size for computing the graph-median entry point (<= 1 keeps native entries).
         """
-        self.dynamic_exploration_graph_cpp.optimize(int(sample_count), int(k), int(ef), int(seed))
+        self.dynamic_exploration_graph_cpp.optimize(int(sample_count), int(k), int(ef), int(median_subset))
 
     def set_transformations(self, transformations: Union[None, list, tuple, object]) -> None:
         """

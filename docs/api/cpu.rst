@@ -26,7 +26,15 @@ Hardware Detection
 
 .. autofunction:: deglib.cpu.has_avx2
 
+.. autofunction:: deglib.cpu.has_avx2_vnni
+
 .. autofunction:: deglib.cpu.has_avx512
+
+.. autofunction:: deglib.cpu.has_avx512_vnni
+
+.. autofunction:: deglib.cpu.has_avx512_fp16
+
+.. autofunction:: deglib.cpu.has_fp16
 
 Example Usage
 -------------
@@ -38,6 +46,7 @@ Example Usage
    # Check host CPU capabilities
    print("AVX2 supported:", deglib.cpu.has_avx2())
    print("AVX-512 supported:", deglib.cpu.has_avx512())
+   print("FP16 supported:", deglib.cpu.has_fp16())
 
    # Create a FloatSpace with automatic CPU instruction set selection
    space = deglib.FloatSpace.create(

@@ -44,7 +44,7 @@ def test_scalar_int8_transform_serialization_and_transform():
     data = np.random.uniform(-abs_max, abs_max, size=(10, dim)).astype(np.float32)
     out = apply_database(transformations, data)
     assert out.dtype == np.int8
-    expected = np.clip(np.round(data * scale), -128, 127).astype(np.int8)
+    expected = np.clip(np.round(data * scale), -127, 127).astype(np.int8)
     np.testing.assert_array_equal(out, expected)
 
     # Test serialization roundtrip
@@ -186,6 +186,26 @@ def test_builder_and_graph_search_with_int8_transforms():
     assert batch_indices.shape == (5, 5)
     for i in range(5):
         assert batch_indices[i, 0] == i
+
+
+def test_builder_and_graph_search_with_int8_inner_product_transform():
+    """Int8 IP quantization must keep zero-centered values; nonnegative S7 codes distort IP ranking."""
+    np.random.seed(123)
+    N, dim = 200, 32
+    data = np.random.randn(N, dim).astype(np.float32)
+    data /= np.linalg.norm(data, axis=1, keepdims=True)
+
+    abs_max = float(np.max(np.abs(data)))
+    transformations = [ScalarQuantizerInt8(dim, abs_max=abs_max)]
+    space = FloatSpace.create(dim, Metric.Int8_InnerProduct)
+    graph = create_empty(N, space, edges_per_vertex=16, transformations=transformations)
+
+    builder = deglib.GraphBuilder(graph, extend_k=10, extend_eps=0.2)
+    builder.add_entry(range(N), data)
+    builder.build()
+
+    indices, _ = graph.search(data[:20], eps_or_ef=64, k=1)
+    np.testing.assert_array_equal(indices[:, 0], np.arange(20))
 
 
 def test_container_persistence_roundtrip():
@@ -348,3 +368,33 @@ def test_transformation_graph_search_fp16():
     idx_single_ef, dist_single_ef = ro_graph.search(queries_f16[0], eps_or_ef=16.0, k=3)
     np.testing.assert_array_equal(idx_batch_ef[0], idx_single_ef)
     np.testing.assert_allclose(dist_batch_ef[0], dist_single_ef, rtol=1e-5)
+
+
+def test_uint4_transformation_graph_search():
+    from deglib.transformation import ScalarQuantizerUint4
+
+    N, dim, edges_per_vertex = 40, 16, 4
+    np.random.seed(42)
+    data_f32 = np.random.uniform(0.0, 10.0, size=(N, dim)).astype(np.float32)
+
+    transform = ScalarQuantizerUint4(dim, min_val=0.0, max_val=10.0)
+    space = FloatSpace.create(dim, Metric.Uint4_L2)
+
+    quantized_data = transform.quantize(data_f32)
+    assert quantized_data.shape == (N, (dim + 1) // 2)
+
+    # Build FP32 graph first, then convert to readonly with Uint4
+    fp32_space = FloatSpace.create(dim, Metric.FP32_L2)
+    graph = create_empty(N, fp32_space, edges_per_vertex=edges_per_vertex)
+    builder = deglib.GraphBuilder(graph, extend_k=8, extend_eps=0.1)
+    builder.add_entry(np.arange(N, dtype=np.uint32), data_f32)
+    builder.build()
+
+    ro_graph = graph.to_readonly(space, quantized_data, transformations=[transform])
+    searcher = create_searcher(ro_graph)
+
+    # Search with original float query
+    query = data_f32[0]
+    indices = searcher.search(query, k=5, eps_or_ef=0.1)
+    assert len(indices) == 5
+    assert indices[0] == 0

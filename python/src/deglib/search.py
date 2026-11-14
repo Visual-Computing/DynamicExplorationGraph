@@ -242,8 +242,8 @@ class Searcher:
         n_iter: int = 20,
         sample_size: int = 0,
         k: int = 100,
-        seed: int = 7,
         num_threads: int = 1,
+        use_routing: bool = False,
     ) -> None:
         """Select entry vertices via k-means medoids.
 
@@ -251,10 +251,10 @@ class Searcher:
         :param n_iter: Number of k-means iterations.
         :param sample_size: Number of vertices sampled for clustering, 0 selects 3% of the graph size.
         :param k: Expected result count; sets the reranker and traversal prefetch tuning operating point.
-        :param seed: Random seed for sampling and centroid init.
         :param num_threads: Number of worker threads, 0 selects a library default.
+        :param use_routing: Build a k-means routing graph for entry selection (the QG/query-graph searcher needs this).
         """
-        self.searcher_cpp.optimize(int(n_clusters), int(n_iter), int(sample_size), int(k), int(seed), int(num_threads))
+        self.searcher_cpp.optimize(int(n_clusters), int(n_iter), int(sample_size), int(k), int(num_threads), bool(use_routing))
 
     def search(
         self,

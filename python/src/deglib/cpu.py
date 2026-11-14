@@ -34,9 +34,9 @@ def has_avx2() -> bool:
 
 def has_avx2_vnni() -> bool:
     """
-    Check whether the host CPU supports AVX-VNNI (256-bit) extensions.
+    Check whether the host CPU supports AVX2-VNNI (256-bit) extensions.
 
-    :return: True if AVX-VNNI is supported, False otherwise.
+    :return: True if AVX2-VNNI is supported, False otherwise.
     """
     return cpp_cpu.has_avx2_vnni()
 
@@ -57,3 +57,21 @@ def has_avx512_vnni() -> bool:
     :return: True if AVX-512 VNNI is supported, False otherwise.
     """
     return cpp_cpu.has_avx512_vnni()
+
+
+def has_avx512_fp16() -> bool:
+    """
+    Check whether the host CPU supports AVX-512 FP16 (native arithmetic) extensions.
+
+    :return: True if AVX-512 FP16 is supported, False otherwise.
+    """
+    return cpp_cpu.has_avx512_fp16()
+
+
+def has_fp16() -> bool:
+    """
+    Check whether the host CPU supports FP16 (half-precision) extensions.
+
+    :return: True if FP16 is supported, False otherwise.
+    """
+    return cpp_cpu.has_fp16()

@@ -1,16 +1,15 @@
 import os
+import pathlib
 import platform
 import random
-from typing import Optional
-
-import pytest
-import pathlib
 import tempfile
+
 import numpy as np
+import pytest
 
 import deglib
+from deglib.distances import FloatSpace, Metric
 from deglib.search import Filter
-from deglib.distances import Metric, FloatSpace
 
 IS_MACOS_M1 = platform.system() == "Darwin" and platform.machine() == "arm64"
 
@@ -19,7 +18,7 @@ def get_tmp_graph_file(samples: int, dims: int) -> pathlib.Path:
     tmpdir = os.path.join(tempfile.gettempdir(), "deglib_test")
     os.makedirs(tmpdir, exist_ok=True)
 
-    return pathlib.Path(os.path.join(tmpdir, "test_graph_S{}_D{}.deg".format(samples, dims)))
+    return pathlib.Path(os.path.join(tmpdir, f"test_graph_S{samples}_D{dims}.deg"))
 
 
 def get_ranking(features: np.ndarray, graph: deglib.DynamicExplorationGraph, query: np.ndarray) -> np.ndarray:
@@ -52,7 +51,7 @@ class Configuration:
         dims: int,
         data: np.ndarray,
         graph: deglib.DynamicExplorationGraph,
-        graph_path: Optional[pathlib.Path],
+        graph_path: pathlib.Path | None,
         query: np.ndarray,
         metric: Metric,
     ):
@@ -78,15 +77,12 @@ class Configuration:
         elif metric == Metric.FP32_L2:
             data = rng.normal(size=(samples, dims)).astype(np.float32)
             query = rng.normal(size=(dims,)).astype(np.float32)
-        elif metric == Metric.Uint8_L2:
-            data = rng.randint(0, 256, size=(samples, dims)).astype(np.uint8)
-            query = rng.randint(0, 256, size=(dims,)).astype(np.uint8)
-        elif metric == Metric.Uint8_InnerProduct:
+        elif metric == Metric.Uint8_L2 or metric == Metric.Uint8_InnerProduct:
             data = rng.randint(0, 256, size=(samples, dims)).astype(np.uint8)
             query = rng.randint(0, 256, size=(dims,)).astype(np.uint8)
         elif metric == Metric.Int8_L2:
-            data = rng.randint(-128, 128, size=(samples, dims)).astype(np.int8)
-            query = rng.randint(-128, 128, size=(dims,)).astype(np.int8)
+            data = rng.randint(0, 128, size=(samples, dims)).astype(np.int8)
+            query = rng.randint(0, 128, size=(dims,)).astype(np.int8)
         elif metric == Metric.Int8_InnerProduct:
             data = rng.randint(-128, 128, size=(samples, dims)).astype(np.int8)
             query = rng.randint(-128, 128, size=(dims,)).astype(np.int8)
@@ -145,19 +141,17 @@ def test_search(conf: Configuration):
     graph_result = graph_result.flatten()
     correct_result = get_ranking(conf.data, conf.graph, conf.query)[:k]
 
-    assert graph_result.shape[-1] == k, "expected {} results, but got {}".format(k, graph_result.shape[-1])
+    assert graph_result.shape[-1] == k, f"expected {k} results, but got {graph_result.shape[-1]}"
 
     # test matches are good
     matches = set(graph_result).intersection(set(correct_result))
-    assert len(matches) >= k - 2, "expected at least {} matching results, but got only {}".format(k - 2, len(matches))
+    assert len(matches) >= k - 2, f"expected at least {k - 2} matching results, but got only {len(matches)}"
 
     # test result is sorted
     last_distance = float("-inf")
     for index, distance in enumerate(dists):
         assert last_distance <= distance, (
-            "ResultSet is not sorted.\ndistance {} at index {} larger than\ndistance {} at index {}".format(
-                last_distance, index - 1, distance, index
-            )
+            f"ResultSet is not sorted.\ndistance {last_distance} at index {index - 1} larger than\ndistance {distance} at index {index}"
         )
 
 
@@ -206,11 +200,9 @@ def test_threaded_search(conf: Configuration):
     for n_threads in range(2, 8):
         threaded_graph_result, threaded_dists = conf.graph.search(conf.query, eps_or_ef=0.1, k=k, threads=n_threads)
         assert np.all(np.equal(threaded_graph_result, graph_result)), (
-            "Threaded and non threaded results differ (n_threads={})".format(n_threads)
+            f"Threaded and non threaded results differ (n_threads={n_threads})"
         )
-        assert np.allclose(threaded_dists, dists), "Threaded and non threaded dists differ (n_threads={})".format(
-            n_threads
-        )
+        assert np.allclose(threaded_dists, dists), f"Threaded and non threaded dists differ (n_threads={n_threads})"
 
 
 @pytest.mark.parametrize("conf", configurations)
@@ -660,10 +652,15 @@ def test_graph_optimize_preserves_search_results():
     query = data[0:1]
     before, _ = graph.search(query, eps_or_ef=0.1, k=5)
 
-    graph.optimize(sample_count=32, k=5, ef=50, seed=3)
+    graph.optimize(sample_count=32, k=5, ef=50, median_subset=0)
 
     after, _ = graph.search(query, eps_or_ef=0.1, k=5)
     np.testing.assert_array_equal(before, after)
+
+    # Default median_subset computes a graph-median entry point and completes cleanly
+    graph.optimize(sample_count=32, k=5, ef=50)
+    after_median, _ = graph.search(query, eps_or_ef=0.1, k=5)
+    assert after_median.shape == (1, 5)
 
 
 def test_create_random_graph_uint8():
@@ -798,9 +795,7 @@ def test_graph_get_labels_and_custom_features_with_permuted_labels():
     # Non-trivial external labels (large values, permuted)
     external_labels = (rng.permutation(samples) * 100 + 7).astype(np.uint32)
 
-    graph = deglib.build_from_data(
-        data, labels=external_labels, edges_per_vertex=4, metric=Metric.FP32_L2, seed=42
-    )
+    graph = deglib.build_from_data(data, labels=external_labels, edges_per_vertex=4, metric=Metric.FP32_L2, seed=42)
 
     labels_in_order = graph.get_labels()
     assert len(labels_in_order) == samples

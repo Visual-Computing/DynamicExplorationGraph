@@ -20,7 +20,7 @@ import deglib
 | [`deglib.search`](#4-module-deglibsearch) | `Filter`, `rerank`, `Searcher`, `create_searcher` | Bitset-based label filtering, exact distance candidate reranking, and unified query search pipeline. |
 | [`deglib.optimization`](#5-module-degliboptimization) | `prune_*`, `presort` | MRNG graph pruning and FLAS 1D dataset presorting. |
 | [`deglib.analysis`](#6-module-deglibanalysis) | `analyze_graph`, `check_*`, `calc_*` | Graph validation, connectivity verification, and reachability metrics. |
-| [`deglib.cpu`](#7-module-deglibcpu) | `InstructionSet`, `has_avx2`, `has_avx_vnni`, `has_avx512`, `has_avx512_vnni` | Runtime CPU SIMD capability detection and instruction set enum. |
+| [`deglib.cpu`](#7-module-deglibcpu) | `InstructionSet`, `has_avx2`, `has_avx2_vnni`, `has_avx512`, `has_avx512_vnni`, `has_avx512_fp16`, `has_fp16` | Runtime CPU SIMD capability detection and instruction set enum. |
 | [`deglib.transformation`](#8-module-deglibtransformation) | `FeatureTransformation`, `MipsTransform`, `L2NormalizeTransform`, `EvpQuantizer`, `ScalarQuantizer*` | Vector feature transformations, normalizers, quantizers, and serialization pipeline. |
 
 ---
@@ -498,7 +498,7 @@ calc_exploration_reach(graph) -> float
 SIMD capability detection and instruction set enumeration.
 
 ```python
-from deglib.cpu import InstructionSet, has_avx2, has_avx_vnni, has_avx512, has_avx512_vnni
+from deglib.cpu import InstructionSet, has_avx2, has_avx2_vnni, has_avx512, has_avx512_vnni, has_avx512_fp16, has_fp16
 
 class InstructionSet:
     Auto         # Automatically select highest supported instruction set
@@ -510,9 +510,11 @@ class InstructionSet:
 
 # Runtime hardware support checks
 has_avx2() -> bool         # Returns True if host CPU supports AVX2
-has_avx_vnni() -> bool     # Returns True if host CPU supports AVX-VNNI (256-bit)
+has_avx2_vnni() -> bool    # Returns True if host CPU supports AVX2-VNNI (256-bit)
 has_avx512() -> bool       # Returns True if host CPU supports AVX-512
 has_avx512_vnni() -> bool  # Returns True if host CPU supports AVX-512 VNNI
+has_avx512_fp16() -> bool  # Returns True if host CPU supports AVX-512 FP16 (native arithmetic)
+has_fp16() -> bool         # Returns True if host CPU supports FP16 (F16C conversion)
 ```
 
 ---
