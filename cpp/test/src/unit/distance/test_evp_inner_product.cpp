@@ -79,8 +79,8 @@ TEST(EvpInnerProduct, Avx512MatchesNaive) {
 #if !defined(DEGLIB_X86) || !defined(DEGLIB_TARGET_AVX512)
     GTEST_SKIP() << "AVX-512 support was not compiled in";
 #else
-    if (!deglib::cpu::has_avx512()) {
-        GTEST_SKIP() << "CPU does not support AVX-512";
+    if (!deglib::cpu::has_avx512() || !deglib::cpu::has_avx512_vpopcntdq()) {
+        GTEST_SKIP() << "CPU does not support AVX-512 VPOPCNTDQ";
     }
     for (uint32_t dim : {64, 128, 256}) {
         auto [a, b] = make_evp_pair(dim, dim / 4);

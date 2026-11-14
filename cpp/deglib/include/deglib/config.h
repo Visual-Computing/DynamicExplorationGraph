@@ -9,13 +9,15 @@
 
 // Compile methods with this attribute for AVX-512 base functions on GCC/Clang
 #if defined(DEGLIB_X86) && (defined(__GNUC__) || defined(__clang__))
-    #define DEGLIB_TARGET_AVX512 __attribute__((target("avx512f,avx512dq,avx512bw,avx512vpopcntdq,avx2,f16c,fma")))
-    #define DEGLIB_TARGET_AVX512_VNNI __attribute__((target("avx512f,avx512dq,avx512bw,avx512vpopcntdq,avx512vnni,avx2,f16c,fma")))
+    #define DEGLIB_TARGET_AVX512 __attribute__((target("avx512f,avx512dq,avx512bw,avx512vl,avx2,f16c,fma")))
+    #define DEGLIB_TARGET_AVX512_VPOPCNTDQ __attribute__((target("avx512f,avx512dq,avx512bw,avx512vl,avx512vpopcntdq,avx2,f16c,fma")))
+    #define DEGLIB_TARGET_AVX512_VNNI __attribute__((target("avx512f,avx512dq,avx512bw,avx512vl,avx512vnni,avx2,f16c,fma")))
     #define DEGLIB_TARGET_AVX512_VBMI __attribute__((target("avx512f,avx512dq,avx512bw,avx512vl,avx512vpopcntdq,avx512vbmi,avx2,f16c,fma")))
     #define DEGLIB_TARGET_AVX2_VNNI __attribute__((target("avx2,f16c,fma,avxvnni")))
     #define DEGLIB_TARGET_AVX2 __attribute__((target("avx2,f16c,fma")))
 #else
     #define DEGLIB_TARGET_AVX512
+    #define DEGLIB_TARGET_AVX512_VPOPCNTDQ
     #define DEGLIB_TARGET_AVX512_VNNI
     #define DEGLIB_TARGET_AVX512_VBMI
     #define DEGLIB_TARGET_AVX2_VNNI

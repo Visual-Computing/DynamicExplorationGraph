@@ -119,7 +119,7 @@ class EvpInnerProduct_AVX512 {
   public:
     static constexpr const char* get_instruction() { return "AVX512"; }
 
-    DEGLIB_TARGET_AVX512 inline static float compare(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
+    DEGLIB_TARGET_AVX512_VPOPCNTDQ inline static float compare(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
         const std::byte* a = static_cast<const std::byte*>(pVect1v);
         const std::byte* b = static_cast<const std::byte*>(pVect2v);
         const uint32_t dim = *static_cast<const uint32_t*>(qty_ptr);
@@ -325,7 +325,7 @@ inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::Instruct
     const auto target = deglib::cpu::resolve_instruction_set(instruction);
 
 #if defined(DEGLIB_X86)
-    if (target == deglib::cpu::InstructionSet::AVX512 || target == deglib::cpu::InstructionSet::AVX512_VNNI) {
+    if ((target == deglib::cpu::InstructionSet::AVX512 || target == deglib::cpu::InstructionSet::AVX512_VNNI) && deglib::cpu::has_avx512_vpopcntdq()) {
         if (dim < 512) {
             return EvpInnerProduct_AVX512<ResidualMode::TailOnly>{};
         } else if (dim < 1024) {
@@ -344,7 +344,11 @@ inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::Instruct
             else
                 return EvpInnerProduct_AVX512<ResidualMode::Full>{};
         }
-    } else if (target == deglib::cpu::InstructionSet::AVX2 || target == deglib::cpu::InstructionSet::AVX2_VNNI) {
+    } else if (
+        target == deglib::cpu::InstructionSet::AVX512 || target == deglib::cpu::InstructionSet::AVX512_VNNI || target == deglib::cpu::InstructionSet::AVX2 ||
+        target == deglib::cpu::InstructionSet::AVX2_VNNI
+    ) {
+        // Fall back to AVX2 when AVX512_VPOPCNTDQ is not supported by the CPU (e.g. Cascade Lake).
         if (dim < 256) {
             return EvpInnerProduct_AVX2<ResidualMode::TailOnly>{};
         } else if (dim < 512) {

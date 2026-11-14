@@ -528,8 +528,8 @@ TEST(DeglibDistanceIntegration, DistanceRecall_EVP_AVX2_Modes) {
 
 TEST(DeglibDistanceIntegration, DistanceRecall_EVP_AVX512_Modes) {
 #if defined(DEGLIB_X86)
-    if (!deglib::cpu::has_avx512()) {
-        GTEST_SKIP() << "AVX-512 not available on this CPU";
+    if (!deglib::cpu::has_avx512() || !deglib::cpu::has_avx512_vpopcntdq()) {
+        GTEST_SKIP() << "AVX-512 VPOPCNTDQ not available on this CPU";
     }
     const size_t base_count = 10000;
     const size_t query_count = 100;

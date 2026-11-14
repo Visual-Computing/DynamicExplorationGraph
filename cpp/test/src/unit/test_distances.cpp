@@ -522,11 +522,19 @@ TEST(DeglibDistanceSelection, VNNIFallbackAcrossAllMetrics) {
                 deglib::distances::int8_l2::select_dist(127, deglib::cpu::InstructionSet::AVX512_VNNI)
             )
         );
-        EXPECT_TRUE(
-            std::holds_alternative<deglib::distances::evp_ip::EvpInnerProduct_AVX512<ResidualMode::Full>>(
-                deglib::distances::evp_ip::select_dist(1536 + 128, deglib::cpu::InstructionSet::AVX512_VNNI)
-            )
-        );
+        if (deglib::cpu::has_avx512_vpopcntdq()) {
+            EXPECT_TRUE(
+                std::holds_alternative<deglib::distances::evp_ip::EvpInnerProduct_AVX512<ResidualMode::Full>>(
+                    deglib::distances::evp_ip::select_dist(1536 + 128, deglib::cpu::InstructionSet::AVX512_VNNI)
+                )
+            );
+        } else {
+            EXPECT_TRUE(
+                std::holds_alternative<deglib::distances::evp_ip::EvpInnerProduct_AVX2<ResidualMode::Full>>(
+                    deglib::distances::evp_ip::select_dist(1536 + 128, deglib::cpu::InstructionSet::AVX512_VNNI)
+                )
+            );
+        }
     }
     if (deglib::cpu::has_avx2_vnni()) {
         EXPECT_TRUE(

@@ -28,6 +28,7 @@ struct CpuFeatures {
     bool avx512f{false};
     bool avx512_vbmi{false};
     bool avx512_vnni{false};
+    bool avx512_vpopcntdq{false};
     bool avx512_fp16{false};
     bool fp16{false};
 
@@ -46,6 +47,7 @@ struct CpuFeatures {
         avx512f = (cpu_info[1] & (1 << 16)) != 0;
         avx512_vbmi = (cpu_info[1] & (1 << 14)) != 0;
         avx512_vnni = (cpu_info[2] & (1 << 11)) != 0;
+        avx512_vpopcntdq = (cpu_info[2] & (1 << 14)) != 0;
         avx512_fp16 = (cpu_info[3] & (1 << 23)) != 0;
 
         // Leaf 7, subleaf 1: extended feature flags in EAX (AVX_VNNI is Bit 4)
@@ -90,6 +92,7 @@ inline bool has_avx2_vnni() { return detail::features().avx_vnni; }
 inline bool has_avx512() { return detail::features().avx512f; }
 inline bool has_avx512_vbmi() { return detail::features().avx512_vbmi; }
 inline bool has_avx512_vnni() { return detail::features().avx512_vnni; }
+inline bool has_avx512_vpopcntdq() { return detail::features().avx512_vpopcntdq; }
 inline bool has_avx512_fp16() { return detail::features().avx512_fp16; }
 inline bool has_fp16() { return detail::features().fp16; }
 
