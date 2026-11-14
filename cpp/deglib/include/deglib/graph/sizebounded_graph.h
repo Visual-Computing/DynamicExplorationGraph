@@ -261,25 +261,25 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
     /**
      * Number of vertices in the graph
      */
-    const uint32_t size() const override { return static_cast<uint32_t>(this->label_to_index_.size()); }
+    [[nodiscard]] uint32_t size() const noexcept override { return static_cast<uint32_t>(this->label_to_index_.size()); }
 
     /**
      * Number of edges per vertex
      */
-    const uint8_t getEdgesPerVertex() const override { return this->edges_per_vertex_; }
+    [[nodiscard]] uint8_t getEdgesPerVertex() const noexcept override { return this->edges_per_vertex_; }
 
-    const deglib::distances::FloatSpace& getFeatureSpace() const override { return this->feature_space_; }
+    [[nodiscard]] const deglib::distances::FloatSpace& getFeatureSpace() const noexcept override { return this->feature_space_; }
 
     /**
      * convert an external label to an internal index
      */
-    inline const uint32_t getInternalIndex(const uint32_t external_label) const override { return label_to_index_.find(external_label)->second; }
+    [[nodiscard]] uint32_t getInternalIndex(uint32_t external_label) const noexcept override { return label_to_index_.find(external_label)->second; }
 
-    inline const uint32_t getExternalLabel(const uint32_t internal_idx) const override { return label_by_index(internal_idx); }
+    [[nodiscard]] uint32_t getExternalLabel(uint32_t internal_idx) const noexcept override { return label_by_index(internal_idx); }
 
-    inline const std::byte* getFeatureVector(const uint32_t internal_idx) const override { return feature_by_index(internal_idx); }
+    [[nodiscard]] const std::byte* getFeatureVector(uint32_t internal_idx) const noexcept override { return feature_by_index(internal_idx); }
 
-    inline const uint32_t* getNeighborIndices(const uint32_t internal_idx) const override { return neighbors_by_index(internal_idx); }
+    [[nodiscard]] const uint32_t* getNeighborIndices(uint32_t internal_idx) const noexcept override { return neighbors_by_index(internal_idx); }
 
     inline const float* getNeighborWeights(const uint32_t internal_idx) const override { return weights_by_index(internal_idx); }
 
@@ -294,9 +294,9 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
         return -1;
     }
 
-    inline const bool hasVertex(const uint32_t external_label) const override { return label_to_index_.find(external_label) != label_to_index_.end(); }
+    [[nodiscard]] bool hasVertex(uint32_t external_label) const noexcept override { return label_to_index_.find(external_label) != label_to_index_.end(); }
 
-    inline const bool hasEdge(const uint32_t internal_index, const uint32_t neighbor_index) const override {
+    [[nodiscard]] bool hasEdge(uint32_t internal_index, uint32_t neighbor_index) const noexcept override {
         auto neighbor_indices = neighbors_by_index(internal_index);
         auto neighbor_indices_end = neighbor_indices + this->edges_per_vertex_;
         return std::binary_search(neighbor_indices, neighbor_indices_end, neighbor_index);

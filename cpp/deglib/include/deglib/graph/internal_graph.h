@@ -106,12 +106,13 @@ using UncheckedSet = PQV<std::greater<ObjectDistance>, ObjectDistance>;
 class InternalGraph {
   public:
     virtual ~InternalGraph() = default;
-    virtual const uint32_t size() const = 0;
-    virtual const uint8_t getEdgesPerVertex() const = 0;
-    virtual const deglib::distances::FloatSpace& getFeatureSpace() const = 0;
 
-    virtual const uint32_t getExternalLabel(const uint32_t internal_index) const = 0;
-    virtual const uint32_t getInternalIndex(const uint32_t external_label) const = 0;
+    [[nodiscard]] virtual uint32_t size() const noexcept = 0;
+    [[nodiscard]] virtual uint8_t getEdgesPerVertex() const noexcept = 0;
+    [[nodiscard]] virtual const deglib::distances::FloatSpace& getFeatureSpace() const noexcept = 0;
+
+    [[nodiscard]] virtual uint32_t getExternalLabel(uint32_t internal_index) const noexcept = 0;
+    [[nodiscard]] virtual uint32_t getInternalIndex(uint32_t external_label) const noexcept = 0;
 
     /**
      * @brief Returns all external labels ordered by their internal index (0 .. size()-1).
@@ -123,7 +124,7 @@ class InternalGraph {
      * Use this vector to align external feature arrays (e.g. for custom_features or rerank_data)
      * into the contiguous internal order expected by C++ methods.
      */
-    virtual std::vector<uint32_t> getExternalLabels() const {
+    [[nodiscard]] virtual std::vector<uint32_t> getExternalLabels() const {
         const uint32_t n = size();
         std::vector<uint32_t> labels(n);
         for (uint32_t i = 0; i < n; ++i) {
@@ -132,14 +133,14 @@ class InternalGraph {
         return labels;
     }
 
-    virtual const uint32_t* getNeighborIndices(const uint32_t internal_index) const = 0;
-    virtual const std::byte* getFeatureVector(const uint32_t internal_index) const = 0;
+    [[nodiscard]] virtual const uint32_t* getNeighborIndices(uint32_t internal_index) const noexcept = 0;
+    [[nodiscard]] virtual const std::byte* getFeatureVector(uint32_t internal_index) const noexcept = 0;
 
-    virtual const bool hasVertex(const uint32_t external_label) const = 0;
-    virtual const bool hasEdge(const uint32_t internal_index, const uint32_t neighbor_index) const = 0;
+    [[nodiscard]] virtual bool hasVertex(uint32_t external_label) const noexcept = 0;
+    [[nodiscard]] virtual bool hasEdge(uint32_t internal_index, uint32_t neighbor_index) const noexcept = 0;
 
     const std::vector<uint32_t>& getEntryVertexIndices() const { return entry_vertex_indices_; }
-    void setEntryVertexIndices(std::vector<uint32_t> indices) {
+    void setEntryVertexIndices(std::vector<uint32_t> indices) const {
         if (!indices.empty()) {
             entry_vertex_indices_ = std::move(indices);
         }
@@ -170,20 +171,50 @@ class InternalGraph {
      * stored features as queries, so no external query buffer or quantization round-trip is needed
      * and the timing exercises the real traversal path (search_ef_intern).
      *
-     * @param sample_count  Number of vertices sampled as queries (capped at the graph size).
+     * @param sample_count  Number of vertices sampled as queries (capped at the graph size; default 300 for noise-stable tuning).
      * @param k             Result count per traversal (the expected query operating point).
      * @param ef            Beam width per traversal; clamped to at least k.
-     * @param seed          Random seed for query sampling.
      */
-    void optimize(size_t sample_count = 50, uint32_t k = 100, uint32_t ef = 200, uint32_t seed = 7) const {
+    void optimize(size_t sample_count = 300, uint32_t k = 100, uint32_t ef = 200, size_t median_subset = 4096) const {
         const uint32_t n_vertices = size();
         const size_t n_queries = std::min(sample_count, static_cast<size_t>(n_vertices));
         // Below one full neighborhood the traversal does no real work; the timing would be meaningless.
         if (n_queries == 0 || k == 0 || n_queries < getEdgesPerVertex()) return;
         ef = std::max(ef, k);
 
+        // Graph-median entry point (1-median on a random subset of the graph's OWN stored features):
+        //   median = argmin_m  sum_{i in sample} dist_func(vec[m], vec[i])
+        // Uses only getFeatureVector + the graph's native dist_func, so it is quantizer- and data-type-free
+        // (no synthetic mean, no per-type decode). Replaces the entry vertices with this central vertex.
+        // median_subset <= 1 keeps the native entries (disabled). Cost: O(median_subset^2) dist calls, once.
+        if (median_subset > 1) {
+            const size_t S = std::min(median_subset, static_cast<size_t>(n_vertices));
+            std::vector<uint32_t> midx(S);
+            uint32_t mrng = 12345u;  // fixed: reproduces the validated median vertex (matches 8.1)
+            for (auto& idx : midx) {
+                mrng ^= mrng << 13;
+                mrng ^= mrng >> 17;
+                mrng ^= mrng << 5;
+                idx = mrng % n_vertices;
+            }
+            const auto med_dist = getFeatureSpace().get_dist_func();
+            const void* med_param = getFeatureSpace().get_dist_func_param();
+            double best_sum = std::numeric_limits<double>::max();
+            uint32_t median = midx[0];
+            for (size_t a = 0; a < S; ++a) {
+                const std::byte* va = getFeatureVector(midx[a]);
+                double sum = 0.0;
+                for (size_t b = 0; b < S; ++b) sum += static_cast<double>(med_dist(va, getFeatureVector(midx[b]), med_param));
+                if (sum < best_sum) {
+                    best_sum = sum;
+                    median = midx[a];
+                }
+            }
+            setEntryVertexIndices({median});
+        }
+
         std::vector<uint32_t> sample_idx(n_queries);
-        uint32_t rng = seed * 2654435761u + 1u;
+        uint32_t rng = 7u * 2654435761u + 1u;  // fixed sampling seed for the traversal tuning (not caller-facing).
         for (auto& idx : sample_idx) {
             rng ^= rng << 13;
             rng ^= rng >> 17;
@@ -192,8 +223,22 @@ class InternalGraph {
         }
 
         const std::vector<int32_t> try_pos = {4, 8, 12, 16};
-        const std::vector<int32_t> try_pls = {2, 3, 4};
         const std::vector<int32_t> try_nls = {2, 3, 4};
+        // Prefetch depth pl: cache lines per feature vector. Cap at code_size/64 (the full vector),
+        // so wide features (e.g. 1024D Int8 = 16 lines, 1024D FP32 = 64 lines) can be fully prefetched.
+        const size_t feature_bytes = getFeatureSpace().get_data_size();
+        const int32_t pl_max = static_cast<int32_t>(
+            (feature_bytes + deglib::memory::L1_CACHE_LINE_SIZE - 1) / deglib::memory::L1_CACHE_LINE_SIZE
+        );
+        std::vector<int32_t> try_pls;
+        for (const int32_t c : {2, 3, 4, 8, 16, 32, 64}) {
+            if (c <= pl_max) {
+                try_pls.push_back(c);
+            }
+        }
+        if (try_pls.empty() && pl_max > 0) {
+            try_pls.push_back(pl_max);
+        }
 
         const std::vector<uint32_t>& entries = getEntryVertexIndices();
         int32_t best_po = po_;
@@ -455,7 +500,7 @@ class InternalGraph {
     }
 
   protected:
-    std::vector<uint32_t> entry_vertex_indices_{0};
+    mutable std::vector<uint32_t> entry_vertex_indices_{0};
     // Prefetch tuning knobs: performance cache state, not logical identity, hence mutable so
     // optimize()/setPrefetch() can run through a const InternalGraph reference.
     mutable int32_t po_ = 8;

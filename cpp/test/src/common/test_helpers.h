@@ -128,7 +128,7 @@ inline static void generate_synthetic_clustered_dataset_uint8(
 
 // Generate cross-platform deterministic clustered int8 dataset.
 // Generates float vectors using generate_synthetic_clustered_dataset(),
-// then quantizes them to int8 [-128, 127] using deterministic linear mapping.
+// then quantizes them to S7 int8 [0, 127] using deterministic linear mapping.
 inline static void generate_synthetic_clustered_dataset_int8(
     size_t count,
     size_t dim,
@@ -145,21 +145,21 @@ inline static void generate_synthetic_clustered_dataset_int8(
     query.resize(query_count * dim);
 
     // Centroids are [-1000, 1000] + noise [-100, 100] -> range approx [-1100, 1100].
-    // Map [-1100, 1100] to [-128, 127] deterministically.
+    // Map [-1100, 1100] to [0, 127] deterministically.
     constexpr float min_val = -1100.0f;
     constexpr float max_val = 1100.0f;
-    constexpr float scale = 255.0f / (max_val - min_val);
+    constexpr float scale = 127.0f / (max_val - min_val);
 
     for (size_t i = 0; i < base_float.size(); ++i) {
-        float normalized = (base_float[i] - min_val) * scale - 128.0f;
+        float normalized = (base_float[i] - min_val) * scale;
         int val = static_cast<int>(std::round(normalized));
-        base[i] = static_cast<int8_t>(std::clamp(val, -128, 127));
+        base[i] = static_cast<int8_t>(std::clamp(val, 0, 127));
     }
 
     for (size_t q = 0; q < query_float.size(); ++q) {
-        float normalized = (query_float[q] - min_val) * scale - 128.0f;
+        float normalized = (query_float[q] - min_val) * scale;
         int val = static_cast<int>(std::round(normalized));
-        query[q] = static_cast<int8_t>(std::clamp(val, -128, 127));
+        query[q] = static_cast<int8_t>(std::clamp(val, 0, 127));
     }
 }
 

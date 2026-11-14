@@ -23,7 +23,7 @@ TEST(Rerank, SingleQuerySingleCandidate) {
     uint32_t candidates[] = {0};
 
     deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), 1);
-    auto results = reranker.rerank(query.data(), 1, candidates, 1, 1, 1);
+    auto results = reranker.rerank(std::as_bytes(std::span(query)), 1, std::span(candidates, 1u), 1, 1, 1);
 
     ASSERT_EQ(results.size(), 1u);
     auto res = std::move(results[0]);
@@ -42,7 +42,7 @@ TEST(Rerank, SingleQueryMultipleCandidates) {
     uint32_t candidates[] = {0, 1, 2};
 
     deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), 3);
-    auto results = reranker.rerank(query.data(), 1, candidates, 3, 2, 1);
+    auto results = reranker.rerank(std::as_bytes(std::span(query)), 1, std::span(candidates, 3u), 3, 2, 1);
 
     ASSERT_EQ(results.size(), 1u);
     auto res = std::move(results[0]);
@@ -71,11 +71,7 @@ TEST(Rerank, MultipleQueries) {
     };
 
     deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), 2);
-    auto results = reranker.rerank(queries.data(), 2, candidates, 2, 2, 1);
-
-    ASSERT_EQ(results.size(), 2u);
-
-    // Query 0: idx 0 (dist=0), idx 1 (dist=2). Top (worst) is idx 1.
+    auto results = reranker.rerank(std::as_bytes(std::span(queries)), 2, std::span(candidates, 4u), 2, 2, 1);
     auto res0 = std::move(results[0]);
     EXPECT_EQ(res0.top().getIdentifier(), 1u);
     res0.pop();
@@ -100,7 +96,7 @@ TEST(Rerank, KTopZeroReturnsAllCandidates) {
 
     deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), 3);
     // k_top=0 should use all candidates
-    auto results = reranker.rerank(query.data(), 1, candidates, 3, 0, 1);
+    auto results = reranker.rerank(std::as_bytes(std::span(query)), 1, std::span(candidates, 3u), 3, 0, 1);
 
     ASSERT_EQ(results.size(), 1u);
     EXPECT_EQ(results[0].size(), 3u);
@@ -116,7 +112,7 @@ TEST(Rerank, KTopLargerThanCandidates) {
 
     deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), 1);
     // k_top=3 but only 1 candidate — k_top is clamped to candidates_per_query
-    auto results = reranker.rerank(query.data(), 1, candidates, 1, 3, 1);
+    auto results = reranker.rerank(std::as_bytes(std::span(query)), 1, std::span(candidates, 1u), 1, 3, 1);
 
     ASSERT_EQ(results.size(), 1u);
     EXPECT_EQ(results[0].size(), 1u);
@@ -128,7 +124,7 @@ TEST(Rerank, NullQueriesThrows) {
     uint32_t candidates[] = {0};
     deglib::search::Reranker reranker(fs, {}, 0);
 
-    EXPECT_THROW(reranker.rerank(nullptr, 1, candidates, 1, 1, 1), std::invalid_argument);
+    EXPECT_THROW(reranker.rerank(std::span<const std::byte>{}, 1, std::span(candidates, 1u), 1, 1, 1), std::invalid_argument);
 }
 
 TEST(Rerank, NullCandidatesThrows) {
@@ -136,7 +132,7 @@ TEST(Rerank, NullCandidatesThrows) {
     std::vector<float> query = {0.0f, 0.0f};
     deglib::search::Reranker reranker(fs, {}, 0);
 
-    EXPECT_THROW(reranker.rerank(query.data(), 1, nullptr, 1, 1, 1), std::invalid_argument);
+    EXPECT_THROW(reranker.rerank(std::as_bytes(std::span(query)), 1, std::span<const uint32_t>{}, 1, 1, 1), std::invalid_argument);
 }
 
 TEST(Rerank, InvalidCandidateIndexSkipped) {
@@ -149,7 +145,7 @@ TEST(Rerank, InvalidCandidateIndexSkipped) {
     uint32_t candidates[] = {0, 99};
 
     deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), 1);
-    auto results = reranker.rerank(query.data(), 1, candidates, 2, 2, 1);
+    auto results = reranker.rerank(std::as_bytes(std::span(query)), 1, std::span(candidates, 2u), 2, 2, 1);
 
     ASSERT_EQ(results.size(), 1u);
     EXPECT_EQ(results[0].size(), 1u);
@@ -169,7 +165,7 @@ TEST(Rerank, SelfRerankWhenBaseVectorsAreQueries) {
 
     // queries used as target base vectors
     deglib::search::Reranker reranker(fs, std::as_bytes(std::span(query)), 2);
-    auto results = reranker.rerank(query.data(), 2, candidates, 2, 2, 1);
+    auto results = reranker.rerank(std::as_bytes(std::span(query)), 2, std::span(candidates, 4u), 2, 2, 1);
 
     ASSERT_EQ(results.size(), 2u);
 
@@ -197,7 +193,7 @@ TEST(Rerank, InnerProductMetric) {
     uint32_t candidates[] = {0, 1, 2};
 
     deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), 3);
-    auto results = reranker.rerank(query.data(), 1, candidates, 3, 2, 1);
+    auto results = reranker.rerank(std::as_bytes(std::span(query)), 1, std::span(candidates, 3u), 3, 2, 1);
 
     ASSERT_EQ(results.size(), 1u);
     auto res = std::move(results[0]);
@@ -259,7 +255,7 @@ TEST(Rerank, RerankerClassDirectUsage) {
 
     std::vector<uint32_t> out_indices(2);
     std::vector<float> out_dists(2);
-    uint32_t count = reranker.rerank(query.data(), 2, candidates.data(), candidates.size(), 2, out_indices.data(), out_dists.data(), true, false);
+    uint32_t count = reranker.rerank(std::span<const float>(query.data(), 2u), std::span<const uint32_t>(candidates), 2, std::span<uint32_t>(out_indices), std::span<float>(out_dists), true, false);
     EXPECT_EQ(count, 2u);
     EXPECT_EQ(out_indices[0], 0u);
     EXPECT_NEAR(out_dists[0], 1.0f, 1e-5f);
@@ -278,9 +274,8 @@ TEST(Rerank, PrefetchEnabledByDefaultAndTogglesCleanly) {
     // Default must be the prefetching config, otherwise large out-of-cache rerank runs silently lose throughput.
     EXPECT_GT(reranker.getPo(), 0);
 
-    reranker.setPo(0);
+    reranker.setPrefetch(0, -4);
     EXPECT_EQ(reranker.getPo(), 0);
-    reranker.setPl(-4);
     EXPECT_EQ(reranker.getPl(), 0);
 
     reranker.setPrefetch(12, 3);
@@ -290,7 +285,7 @@ TEST(Rerank, PrefetchEnabledByDefaultAndTogglesCleanly) {
     // Toggling the prefetch config must not change the ranking.
     std::vector<uint32_t> out_indices(2);
     std::vector<float> out_dists(2);
-    uint32_t count = reranker.rerank(query.data(), 2, candidates.data(), candidates.size(), 2, out_indices.data(), out_dists.data(), true, false);
+    uint32_t count = reranker.rerank(std::span<const float>(query.data(), 2u), std::span<const uint32_t>(candidates), 2, std::span<uint32_t>(out_indices), std::span<float>(out_dists), true, false);
     EXPECT_EQ(count, 2u);
     EXPECT_EQ(out_indices[0], 0u);
     EXPECT_NEAR(out_dists[0], 1.0f, 1e-5f);
@@ -322,9 +317,9 @@ TEST(Rerank, PrefetchAndNoPrefetchPathsAgreeOnOutOfCacheWorkingSet) {
     deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), num_base);
 
     reranker.setPrefetch(0, 0);
-    auto unprefetched = reranker.rerank(queries.data(), num_queries, candidates.data(), candidates_per_query, k_top, 1);
+    auto unprefetched = reranker.rerank(std::as_bytes(std::span(queries)), num_queries, std::span(candidates), candidates_per_query, k_top, 1);
     reranker.setPrefetch(8, 0);
-    auto prefetched = reranker.rerank(queries.data(), num_queries, candidates.data(), candidates_per_query, k_top, 1);
+    auto prefetched = reranker.rerank(std::as_bytes(std::span(queries)), num_queries, std::span(candidates), candidates_per_query, k_top, 1);
 
     ASSERT_EQ(unprefetched.size(), num_queries);
     ASSERT_EQ(prefetched.size(), num_queries);
@@ -360,12 +355,12 @@ TEST(Rerank, InPlaceBatchMatchesResultSetRerank) {
     deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), num_base);
 
     // 1. Reference heap-based rerank
-    auto ref_results = reranker.rerank(queries.data(), num_queries, candidates.data(), cands_per_q, k_top, 2);
+    auto ref_results = reranker.rerank(std::as_bytes(std::span(queries)), num_queries, std::span(candidates), cands_per_q, k_top, 2);
 
     // 2. In-place batch rerank (sorted)
     std::vector<uint32_t> out_indices(num_queries * k_top);
     std::vector<float> out_distances(num_queries * k_top);
-    reranker.rerank(queries.data(), num_queries, candidates.data(), cands_per_q, k_top, out_indices.data(), out_distances.data(), true, false, 2);
+    reranker.rerank(std::as_bytes(std::span(queries)), num_queries, std::span(candidates), cands_per_q, k_top, std::span(out_indices), std::span(out_distances), true, false, 2);
 
     for (size_t q = 0; q < num_queries; ++q) {
         auto res = std::move(ref_results[q]);
@@ -406,7 +401,7 @@ TEST(Rerank, InPlaceBatchPaddingWithMaxValues) {
     std::vector<uint32_t> out_indices(k_top, 0);
     std::vector<float> out_distances(k_top, 0.0f);
 
-    reranker.rerank(query.data(), num_queries, candidates.data(), cands_per_q, k_top, out_indices.data(), out_distances.data(), true, false, 1);
+    reranker.rerank(std::as_bytes(std::span(query)), num_queries, std::span(candidates), cands_per_q, k_top, std::span(out_indices), std::span(out_distances), true, false, 1);
 
     // Valid candidates: 0 (dist 0), 1 (dist 1)
     EXPECT_EQ(out_indices[0], 0u);
@@ -437,7 +432,7 @@ TEST(Rerank, InPlaceBatchWithoutDistances) {
 
     std::vector<uint32_t> out_indices(2);
     // null out_distances when return_distances=false
-    reranker.rerank(query.data(), 1, candidates.data(), 3, 2, out_indices.data(), nullptr, false, false, 1);
+    reranker.rerank(std::as_bytes(std::span(query)), 1, std::span(candidates), 3, 2, std::span(out_indices), std::span<float>{}, false, false, 1);
 
     EXPECT_EQ(out_indices[0], 0u);
     EXPECT_EQ(out_indices[1], 1u);

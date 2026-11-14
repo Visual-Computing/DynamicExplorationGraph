@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -51,128 +52,115 @@ class Reranker {
     int32_t po_ = 8;  // Prefetch lookahead offset for candidate feature vectors (0 disables prefetch).
     int32_t pl_ = 0;  // Cache lines to prefetch per feature vector (0 = prefetch the full vector).
 
-    // Pre-allocated scratch workspace for query transformations
-    mutable std::vector<std::byte> transform_buf1_;
-    mutable std::vector<std::byte> transform_buf2_;
+    // Per-thread scratch pools. The Reranker is used const from multiple threads (one per Searcher
+    // worker), so all per-query scratch is thread_local: reused across queries (zero allocation),
+    // private per thread (no data race).
+    static inline thread_local std::vector<deglib::graph::ObjectDistance> flat_scratch_;
+    static inline thread_local std::vector<std::byte> transform_buf1_;
+    static inline thread_local std::vector<std::byte> transform_buf2_;
+    static inline thread_local std::vector<float> fp16_query_buf_;
+
+    const std::byte* base() const noexcept { return static_cast<const std::byte*>(base_vectors_); }
+    size_t row_bytes() const noexcept { return space_.get_data_size(); }
 
     /**
-     * Internal core: Evaluates candidate distances against base vectors using a distance function object
-     * and returns the top-k nearest candidates in a max-heap.
+     * Scores valid candidates against the query into `scratch` (dtype-agnostic).
+     * Prefetches the `po`-th next row, `pl` cache lines per row, with `po > 0` hoisted out of the loop.
+     * Out-of-range base indices are skipped directly (no sentinel + isfinite scan needed).
+     * Returns the number of valid entries written to `scratch`.
      */
-    template <typename DistFuncObj, typename DistFuncParam>
-    static inline deglib::graph::ResultSet rerank_single_heap(
-        const DistFuncObj& dist_func_obj,
-        DistFuncParam param,
-        const uint8_t* query_ptr,
-        const uint8_t* target_vectors,
-        size_t target_count,
-        size_t byte_stride_target,
-        const uint32_t* candidate_indices,
-        size_t num_candidates,
-        size_t k,
-        int32_t po = 0,
-        int32_t pl = 0
+    template <typename DistT, typename ParamT>
+    static inline size_t score_all(
+        std::vector<deglib::graph::ObjectDistance>& scratch,
+        const DistT& dist,
+        ParamT param,
+        const std::byte* base,
+        size_t row_bytes,
+        size_t num_base,
+        std::span<const std::byte> query,
+        std::span<const uint32_t> candidates,
+        int32_t po,
+        int32_t pl
     ) {
-        deglib::graph::ResultSet heap;
-        heap.reserve(k);
-        float max_dist = std::numeric_limits<float>::max();
-
-        const auto accumulate = [&](uint32_t cand_idx, const uint8_t* cand_ptr) {
-            const float dist = dist_func_obj.compare(query_ptr, cand_ptr, param);
-            if (heap.size() < k) {
-                heap.emplace(cand_idx, dist);
-                if (heap.size() == k) {
-                    max_dist = heap.top().getDistance();
-                }
-            } else if (dist < max_dist) {
-                max_dist = heap.replace_top(cand_idx, dist).getDistance();
-            }
-        };
+        const auto* q = reinterpret_cast<const uint8_t*>(query.data());
+        const auto* base_bytes = reinterpret_cast<const uint8_t*>(base);
+        const size_t n = candidates.size();
+        if (scratch.size() < n) scratch.resize(n);
+        auto* dst = scratch.data();
+        size_t valid = 0;
 
         if (po > 0) {
-            const size_t prefetch_bytes = (pl > 0) ? (static_cast<size_t>(pl) * deglib::memory::L1_CACHE_LINE_SIZE) : byte_stride_target;
-            const auto prefetch_feature = [prefetch_bytes](const char* ptr) { deglib::memory::prefetch(ptr, prefetch_bytes); };
-
-            const size_t init_prefetch = std::min<size_t>(static_cast<size_t>(po), num_candidates);
-            for (size_t i = 0; i < init_prefetch; ++i) {
-                const uint32_t c_idx = candidate_indices[i];
-                if (c_idx < target_count) {
-                    prefetch_feature(reinterpret_cast<const char*>(target_vectors + c_idx * byte_stride_target));
+            const size_t prefetch_bytes = (pl > 0) ? static_cast<size_t>(pl) * deglib::memory::L1_CACHE_LINE_SIZE : row_bytes;
+            const auto prefetch_row = [prefetch_bytes, base_bytes, row_bytes, num_base](uint32_t row) {
+                if (row < num_base) {
+                    deglib::memory::prefetch(reinterpret_cast<const char*>(base_bytes + static_cast<size_t>(row) * row_bytes), prefetch_bytes);
                 }
+            };
+
+            const size_t lookahead = static_cast<size_t>(po);
+            const size_t warmup = std::min(lookahead, n);
+            for (size_t i = 0; i < warmup; ++i) {
+                prefetch_row(candidates[i]);
             }
 
-            for (size_t j = 0; j < num_candidates; ++j) {
-                if (j + static_cast<size_t>(po) < num_candidates) {
-                    const uint32_t next_idx = candidate_indices[j + static_cast<size_t>(po)];
-                    if (next_idx < target_count) {
-                        prefetch_feature(reinterpret_cast<const char*>(target_vectors + next_idx * byte_stride_target));
-                    }
+            for (size_t j = 0; j < n; ++j) {
+                if (j + lookahead < n) {
+                    prefetch_row(candidates[j + lookahead]);
                 }
-                const uint32_t cand_idx = candidate_indices[j];
-                if (cand_idx >= target_count) {
-                    continue;
-                }
-                accumulate(cand_idx, target_vectors + cand_idx * byte_stride_target);
+                const uint32_t cand = candidates[j];
+                if (cand >= num_base) continue;
+                const float d = dist.compare(q, base_bytes + static_cast<size_t>(cand) * row_bytes, param);
+                dst[valid++] = deglib::graph::ObjectDistance(cand, d);
             }
         } else {
-            for (size_t j = 0; j < num_candidates; ++j) {
-                const uint32_t cand_idx = candidate_indices[j];
-                if (cand_idx >= target_count) {
-                    continue;
-                }
-                accumulate(cand_idx, target_vectors + cand_idx * byte_stride_target);
+            for (size_t j = 0; j < n; ++j) {
+                const uint32_t cand = candidates[j];
+                if (cand >= num_base) continue;
+                const float d = dist.compare(q, base_bytes + static_cast<size_t>(cand) * row_bytes, param);
+                dst[valid++] = deglib::graph::ObjectDistance(cand, d);
             }
         }
-        return heap;
+        return valid;
     }
 
     /**
-     * Internal helper: Drains a ResultSet into pre-allocated destination spans without inner branching.
+     * Selects the top-k smallest distances from `scratch[0..valid)` into the output spans
+     * (sorted via partial_sort/sort, unsorted via nth_element). Pads the tail with max sentinels.
      */
-    static inline uint32_t drain_heap_into(
-        deglib::graph::ResultSet& heap,
+    static inline uint32_t select_top_k(
+        std::vector<deglib::graph::ObjectDistance>& scratch,
+        size_t valid,
         uint32_t k,
         std::span<uint32_t> out_indices,
         std::span<float> out_distances,
         bool return_distances,
         bool unsorted
     ) {
-        const size_t top_n = std::min<size_t>(k, heap.size());
-
-        if (unsorted) {
-            for (size_t i = 0; i < top_n; ++i) {
-                out_indices[i] = heap[i].getIdentifier();
-            }
-            if (return_distances) {
-                for (size_t i = 0; i < top_n; ++i) {
-                    out_distances[i] = heap[i].getDistance();
-                }
-            }
-        } else {
-            if (return_distances) {
-                for (size_t i = top_n; i > 0; --i) {
-                    const auto next = heap.top();
-                    out_indices[i - 1] = next.getIdentifier();
-                    out_distances[i - 1] = next.getDistance();
-                    heap.pop();
+        const size_t top = std::min<size_t>(k, valid);
+        if (top > 0) {
+            auto begin = scratch.begin();
+            auto end = begin + static_cast<std::ptrdiff_t>(valid);
+            if (unsorted) {
+                if (top < valid) {
+                    std::nth_element(begin, begin + static_cast<std::ptrdiff_t>(top), end);
                 }
             } else {
-                for (size_t i = top_n; i > 0; --i) {
-                    out_indices[i - 1] = heap.top().getIdentifier();
-                    heap.pop();
+                if (top < valid) {
+                    std::partial_sort(begin, begin + static_cast<std::ptrdiff_t>(top), end);
+                } else {
+                    std::sort(begin, end);
                 }
             }
-        }
-
-        for (size_t i = top_n; i < k; ++i) {
-            out_indices[i] = std::numeric_limits<uint32_t>::max();
-        }
-        if (return_distances) {
-            for (size_t i = top_n; i < k; ++i) {
-                out_distances[i] = std::numeric_limits<float>::max();
+            for (size_t i = 0; i < top; ++i) out_indices[i] = scratch[i].getIdentifier();
+            if (return_distances) {
+                for (size_t i = 0; i < top; ++i) out_distances[i] = scratch[i].getDistance();
             }
         }
-        return static_cast<uint32_t>(top_n);
+        for (size_t i = top; i < k; ++i) out_indices[i] = std::numeric_limits<uint32_t>::max();
+        if (return_distances) {
+            for (size_t i = top; i < k; ++i) out_distances[i] = std::numeric_limits<float>::max();
+        }
+        return static_cast<uint32_t>(top);
     }
 
   public:
@@ -181,9 +169,6 @@ class Reranker {
      *
      * @param space            Distance metric and dimensionality for scoring.
      * @param base_vectors     Contiguous byte span of the row-addressed feature matrix; row c is scored for candidate index c.
-     *                         When used with a Searcher, candidates are internal indices (0 .. size()-1),
-     *                         so row c must correspond to internal vertex c in the graph (i.e. vector for
-     *                         label `graph.getExternalLabels()[c]`).
      * @param num_base_vectors Number of rows in ``base_vectors``.
      * @param transformations  Optional transformations executed on queries before scoring against base vectors.
      */
@@ -192,19 +177,17 @@ class Reranker {
         std::span<const std::byte> base_vectors,
         size_t num_base_vectors,
         std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
-    ) : space_(std::move(space)),
-        base_vectors_(base_vectors.data()),
-        num_base_vectors_(num_base_vectors),
-        transformations_(std::move(transformations)) {
+    )
+        : space_(std::move(space)), base_vectors_(base_vectors.data()), num_base_vectors_(num_base_vectors), transformations_(std::move(transformations)) {
         if (num_base_vectors_ > 0) {
             if (base_vectors.data() == nullptr) {
                 throw std::invalid_argument("Reranker: base_vectors buffer is null");
             }
             const size_t required_bytes = num_base_vectors_ * space_.get_data_size();
             if (base_vectors.size() < required_bytes) {
-                throw std::invalid_argument(std::format(
-                    "Reranker: base_vectors span ({} bytes) is smaller than required ({} bytes)",
-                    base_vectors.size(), required_bytes));
+                throw std::invalid_argument(
+                    std::format("Reranker: base_vectors span ({} bytes) is smaller than required ({} bytes)", base_vectors.size(), required_bytes)
+                );
             }
         }
     }
@@ -215,120 +198,129 @@ class Reranker {
     const std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>& getTransformations() const noexcept { return transformations_; }
     int32_t getPo() const noexcept { return po_; }
     int32_t getPl() const noexcept { return pl_; }
-    void setPo(int32_t po) noexcept { po_ = (po > 0) ? po : 0; }
-    void setPl(int32_t pl) noexcept { pl_ = (pl > 0) ? pl : 0; }
+    // Prefetch (po, pl) is tuned by optimize(); the production Searcher/Reranker never sets it by hand
+    // (only dev sweep benches and the python knob call setPrefetch).
     void setPrefetch(int32_t po, int32_t pl) noexcept {
         po_ = (po > 0) ? po : 0;
         pl_ = (pl > 0) ? pl : 0;
     }
 
     /**
-     * Auto-tunes the rerank prefetch parameters (po, pl) using empirical timing on sample queries.
+     * Auto-tunes the prefetch parameters (po, pl) by timing the single-query rerank hot path on random
+     * candidate sets drawn from base_vectors. Sweeps po in {0,1,2,4,8} and pl up to code_size/64 (so a
+     * wide FP32 row, e.g. 1024D = 64 lines, can be fully prefetched); keeps the minimum of 3 timed passes
+     * per combination (peak performance, robust to OS jitter). Runs single-threaded.
      *
-     * @param sample_queries  Pointer to contiguous sample queries.
-     * @param n_queries       Number of sample queries.
-     * @param num_candidates  Candidates scored per query (clamped to the base count).
-     * @param k               Candidates kept per query after reranking (clamped to num_candidates).
+     * @param num_sample_queries  Sample queries drawn from base_vectors (~300 gives a stable optimum).
+     * @param num_candidates      Candidates scored per query (default 150 = the real rerank beam k*1.5).
+     * @param k                   Candidates kept per query after reranking.
+     * @param num_threads         Unused; kept for call-site compatibility.
      */
-    void optimize(const void* sample_queries, size_t n_queries, size_t num_candidates, uint32_t k) {
-        const uint32_t dim = space_.dim();
-        const size_t byte_stride = space_.get_data_size();
-        if (!base_vectors_ || num_base_vectors_ == 0 || n_queries == 0 || dim == 0 || num_candidates == 0 || k == 0 || byte_stride == 0) return;
+    void optimize(size_t num_sample_queries = 300, size_t num_candidates = 150, uint32_t k = 100, size_t num_threads = 1) {
+        if (base_vectors_ == nullptr || num_base_vectors_ == 0 || num_candidates == 0 || k == 0) return;
+
+        const size_t stride = space_.get_data_size();
+        if (stride == 0) return;
 
         num_candidates = std::min(num_candidates, num_base_vectors_);
         k = std::min<uint32_t>(k, static_cast<uint32_t>(num_candidates));
+        num_sample_queries = std::min(num_sample_queries, num_base_vectors_);
 
-        std::vector<uint32_t> sample_cands(n_queries * num_candidates);
+        // Deterministic random candidate sets (fixed seed -> reproducible tuning).
+        std::vector<uint32_t> sample_cands(num_sample_queries * num_candidates);
         uint32_t rng = 1337;
-        for (size_t i = 0; i < sample_cands.size(); ++i) {
+        for (auto& c : sample_cands) {
             rng ^= rng << 13;
             rng ^= rng >> 17;
             rng ^= rng << 5;
-            sample_cands[i] = rng % static_cast<uint32_t>(num_base_vectors_);
+            c = rng % static_cast<uint32_t>(num_base_vectors_);
         }
 
-        const std::vector<int32_t> try_pos = {0, 4, 8, 12, 16};
-        const std::vector<int32_t> try_pls = {0, 2, 4};
+        // pl grid (cache lines per candidate row); 0 = full row. Capped at code_size/64.
+        const int32_t pl_max = static_cast<int32_t>((stride + deglib::memory::L1_CACHE_LINE_SIZE - 1) / deglib::memory::L1_CACHE_LINE_SIZE);
+        std::vector<int32_t> try_pls{0};
+        for (const int32_t lines : {2, 4, 8, 16, 32, 64}) {
+            if (lines <= pl_max) try_pls.push_back(lines);
+        }
+        // po lookahead beyond 8 gives no measurable gain at the rerank candidate count (~150).
+        const std::vector<int32_t> try_pos = {0, 1, 2, 4, 8};
 
+        std::vector<uint32_t> out(k);
+        (void)num_threads;
+        double best_time = std::numeric_limits<double>::max();
         int32_t best_po = po_;
         int32_t best_pl = pl_;
-        double best_time = std::numeric_limits<double>::max();
 
-        std::vector<uint32_t> dummy_out_idx(k);
-        std::vector<float> dummy_out_dist(k);
-
-        const uint8_t* q_base = static_cast<const uint8_t*>(sample_queries);
-
-        for (int32_t test_po : try_pos) {
-            for (int32_t test_pl : try_pls) {
-                po_ = test_po;
-                pl_ = test_pl;
-
-                for (size_t q = 0; q < std::min<size_t>(3, n_queries); ++q) {
-                    auto q_span = std::span<const std::byte>(reinterpret_cast<const std::byte*>(q_base + q * byte_stride), byte_stride);
-                    auto c_span = std::span<const uint32_t>(sample_cands.data() + q * num_candidates, num_candidates);
-                    rerank(q_span, c_span, k, dummy_out_idx, dummy_out_dist, false, true);
+        // Time the real single-query hot path; keep the minimum of 3 passes so OS jitter cannot inflate the winner.
+        auto timeit = [&]() -> double {
+            double best = std::numeric_limits<double>::max();
+            for (int pass = 0; pass < 3; ++pass) {
+                auto t0 = std::chrono::high_resolution_clock::now();
+                for (size_t i = 0; i < num_sample_queries; ++i) {
+                    rerank(
+                        std::span<const std::byte>(base() + i * stride, stride),
+                        std::span<const uint32_t>(sample_cands.data() + i * num_candidates, num_candidates), k, std::span<uint32_t>(out.data(), k),
+                        std::span<float>{}, false, true
+                    );
                 }
+                auto t1 = std::chrono::high_resolution_clock::now();
+                best = std::min(best, std::chrono::duration<double, std::micro>(t1 - t0).count());
+            }
+            return best;
+        };
 
-                auto t_start = std::chrono::high_resolution_clock::now();
-                for (size_t q = 0; q < n_queries; ++q) {
-                    auto q_span = std::span<const std::byte>(reinterpret_cast<const std::byte*>(q_base + q * byte_stride), byte_stride);
-                    auto c_span = std::span<const uint32_t>(sample_cands.data() + q * num_candidates, num_candidates);
-                    rerank(q_span, c_span, k, dummy_out_idx, dummy_out_dist, false, true);
-                }
-                auto t_end = std::chrono::high_resolution_clock::now();
-                double dur = std::chrono::duration<double, std::micro>(t_end - t_start).count();
-
-                if (dur < best_time) {
+        for (const int32_t po : try_pos) {
+            for (const int32_t pl : try_pls) {
+                setPrefetch(po, pl);
+                timeit();  // warm-up
+                if (const double dur = timeit(); dur < best_time) {
                     best_time = dur;
-                    best_po = test_po;
-                    best_pl = test_pl;
+                    best_po = po;
+                    best_pl = pl;
                 }
             }
         }
 
-        po_ = best_po;
-        pl_ = best_pl;
+        setPrefetch(best_po, best_pl);
     }
 
     /**
-     * Auto-tunes prefetch parameters (po, pl) by sampling the reranker's own base vectors as queries.
-     */
-    void optimize(size_t sample_count = 50, size_t num_candidates = 100, uint32_t k = 10) {
-        const size_t n = std::min<size_t>(sample_count, num_base_vectors_);
-        optimize(base_vectors_, n, num_candidates, k);
-    }
-
-    /**
-     * Single-query candidate reranking returning a ResultSet.
+     * Single-query rerank returning a ResultSet (top-k, ordered by distance).
      *
-     * @param candidate_indices Row indices into base_vectors; each is scored as base_vectors[c].
+     * @param query     Raw query bytes (base encoding).
+     * @param candidates Row indices into base_vectors; each is scored as base_vectors[c].
      */
-    inline deglib::graph::ResultSet rerank(std::span<const std::byte> query, std::span<const uint32_t> candidate_indices, uint32_t k) const {
-        if (query.empty() || candidate_indices.empty() || base_vectors_ == nullptr || k == 0) {
-            return deglib::graph::ResultSet{};
+    inline deglib::graph::ResultSet rerank(std::span<const std::byte> query, std::span<const uint32_t> candidates, uint32_t k) const {
+        deglib::graph::ResultSet result;
+        if (base_vectors_ == nullptr || query.empty() || candidates.empty() || k == 0) {
+            return result;
         }
-
-        const size_t byte_stride_target = space_.get_data_size();
-        const uint8_t* query_ptr = reinterpret_cast<const uint8_t*>(query.data());
-        const uint8_t* t_ptr = reinterpret_cast<const uint8_t*>(base_vectors_);
+        auto& scratch = flat_scratch_;
         const auto param = space_.get_dist_func_param();
-
-        deglib::graph::ResultSet heap;
-        space_.compute([&](const auto& dist_func_obj) {
-            heap = rerank_single_heap(
-                dist_func_obj, param, query_ptr, t_ptr, num_base_vectors_, byte_stride_target, candidate_indices.data(), candidate_indices.size(), k, po_, pl_
-            );
+        space_.compute([&](const auto& dist) {
+            const size_t valid = score_all(scratch, dist, param, base(), row_bytes(), num_base_vectors_, query, candidates, po_, pl_);
+            const size_t top = std::min<size_t>(k, valid);
+            if (top > 0) {
+                auto begin = scratch.begin();
+                auto end = begin + static_cast<std::ptrdiff_t>(valid);
+                if (top < valid) {
+                    std::partial_sort(begin, begin + static_cast<std::ptrdiff_t>(top), end);
+                } else {
+                    std::sort(begin, end);
+                }
+                result.reserve(top);
+                for (size_t i = 0; i < top; ++i) result.emplace(scratch[i].getIdentifier(), scratch[i].getDistance());
+            }
         });
-        return heap;
+        return result;
     }
 
     /**
-     * Zero-allocation single-query candidate reranking writing directly into pre-allocated destination spans.
+     * Zero-allocation single-query rerank writing top-k into pre-allocated destination spans.
      */
     inline uint32_t rerank(
         std::span<const std::byte> query,
-        std::span<const uint32_t> candidate_indices,
+        std::span<const uint32_t> candidates,
         uint32_t k,
         std::span<uint32_t> out_indices,
         std::span<float> out_distances = {},
@@ -341,159 +333,160 @@ class Reranker {
         if (return_distances && out_distances.size() < k) {
             throw std::invalid_argument("rerank: return_distances is true but out_distances span is smaller than k");
         }
-
-        deglib::graph::ResultSet heap = rerank(query, candidate_indices, k);
-        return drain_heap_into(heap, k, out_indices, out_distances, return_distances, unsorted);
+        if (base_vectors_ == nullptr || query.empty() || candidates.empty() || k == 0) {
+            std::fill_n(out_indices.begin(), k, std::numeric_limits<uint32_t>::max());
+            if (return_distances) std::fill_n(out_distances.begin(), k, std::numeric_limits<float>::max());
+            return 0;
+        }
+        auto& scratch = flat_scratch_;
+        const auto param = space_.get_dist_func_param();
+        size_t valid = 0;
+        space_.compute([&](const auto& dist) { valid = score_all(scratch, dist, param, base(), row_bytes(), num_base_vectors_, query, candidates, po_, pl_); });
+        return select_top_k(scratch, valid, k, out_indices, out_distances, return_distances, unsorted);
     }
 
     /**
      * Typed single-query rerank for float32 queries. Applies attached transformations if present,
-     * or ensures query space matches base space.
+     * otherwise scores directly when the base space is FP32. Query dimension is taken from the span.
      */
     inline uint32_t rerank_f32(
-        const float* query,
-        uint32_t dim,
-        const uint32_t* candidate_indices,
-        size_t num_cands,
+        std::span<const float> query,
+        std::span<const uint32_t> candidates,
         uint32_t k,
-        uint32_t* out_indices,
-        float* out_distances,
-        bool return_distances,
-        bool unsorted
+        std::span<uint32_t> out_indices,
+        std::span<float> out_distances = {},
+        bool return_distances = false,
+        bool unsorted = false
     ) const {
-        if (!base_vectors_ || num_cands == 0 || k == 0 || query == nullptr) return 0;
-
-        auto cands_span = std::span<const uint32_t>(candidate_indices, num_cands);
-        auto out_idx_span = std::span<uint32_t>(out_indices, k);
-        auto out_dist_span = (return_distances && out_distances) ? std::span<float>(out_distances, k) : std::span<float>{};
-
         if (!transformations_.empty()) {
-            const float* current_f32 = query;
-
+            const float* current = query.data();
             for (size_t t = 0; t < transformations_.size(); ++t) {
                 const auto& trans = transformations_[t];
                 const bool is_last = (t + 1 == transformations_.size());
-                const size_t out_bytes = (trans->output_byte_size() > 0) ? trans->output_byte_size() : space_.get_data_size();
-                const size_t cur_dim = trans->input_dim();
-                std::span<const float> in_span(current_f32, cur_dim);
-
+                const size_t out_bytes = (trans->output_byte_size() > 0) ? trans->output_byte_size() : row_bytes();
+                const std::span<const float> in(current, trans->input_dim());
                 if (is_last) {
                     if (transform_buf1_.size() < out_bytes) transform_buf1_.resize(out_bytes);
-                    trans->transform_query(in_span, std::span<std::byte>(transform_buf1_.data(), out_bytes));
-                    return rerank(std::span<const std::byte>(transform_buf1_.data(), out_bytes), cands_span, k, out_idx_span, out_dist_span, return_distances, unsorted);
-                } else {
-                    if (transform_buf2_.size() < out_bytes) transform_buf2_.resize(out_bytes);
-                    trans->transform_query(in_span, std::span<std::byte>(transform_buf2_.data(), out_bytes));
-                    current_f32 = reinterpret_cast<const float*>(transform_buf2_.data());
+                    trans->transform_query(in, std::span<std::byte>(transform_buf1_.data(), out_bytes));
+                    return rerank(
+                        std::span<const std::byte>(transform_buf1_.data(), out_bytes), candidates, k, out_indices, out_distances, return_distances, unsorted
+                    );
                 }
+                if (transform_buf2_.size() < out_bytes) transform_buf2_.resize(out_bytes);
+                trans->transform_query(in, std::span<std::byte>(transform_buf2_.data(), out_bytes));
+                current = reinterpret_cast<const float*>(transform_buf2_.data());
             }
         }
 
-        const auto dt = space_.metric().get_data_type();
-        if (dt == deglib::distances::MetricDataType::FP32) {
-            auto q_span = std::span<const std::byte>(reinterpret_cast<const std::byte*>(query), dim * sizeof(float));
-            return rerank(q_span, cands_span, k, out_idx_span, out_dist_span, return_distances, unsorted);
+        if (space_.metric().get_data_type() == deglib::distances::MetricDataType::FP32) {
+            return rerank(std::as_bytes(query), candidates, k, out_indices, out_distances, return_distances, unsorted);
         }
-
-        throw std::invalid_argument(std::format(
-            "Reranker: float32 query passed to Reranker with base data type {:#x}, but no transformations were configured. "
-            "A transformation (e.g. ScalarQuantizerFP16) is required to convert the query.",
-            static_cast<uint8_t>(dt)));
+        throw std::invalid_argument(
+            std::format(
+                "Reranker: float32 query passed to Reranker with base data type {:#x}, but no transformations were configured. "
+                "A transformation (e.g. ScalarQuantizerFP16) is required to convert the query.",
+                static_cast<uint8_t>(space_.metric().get_data_type())
+            )
+        );
     }
 
     /**
-     * Typed single-query rerank for float16 queries.
+     * Typed single-query rerank for float16 queries (supported for FP16 and FP32 base spaces).
      */
     inline uint32_t rerank_f16(
-        const uint16_t* query,
-        uint32_t dim,
-        const uint32_t* candidate_indices,
-        size_t num_cands,
+        std::span<const uint16_t> query,
+        std::span<const uint32_t> candidates,
         uint32_t k,
-        uint32_t* out_indices,
-        float* out_distances,
-        bool return_distances,
-        bool unsorted
+        std::span<uint32_t> out_indices,
+        std::span<float> out_distances = {},
+        bool return_distances = false,
+        bool unsorted = false
     ) const {
-        if (!base_vectors_ || num_cands == 0 || k == 0 || query == nullptr) return 0;
-
-        auto cands_span = std::span<const uint32_t>(candidate_indices, num_cands);
-        auto out_idx_span = std::span<uint32_t>(out_indices, k);
-        auto out_dist_span = (return_distances && out_distances) ? std::span<float>(out_distances, k) : std::span<float>{};
-
         const auto dt = space_.metric().get_data_type();
         if (dt == deglib::distances::MetricDataType::FP16) {
-            auto q_span = std::span<const std::byte>(reinterpret_cast<const std::byte*>(query), dim * sizeof(uint16_t));
-            return rerank(q_span, cands_span, k, out_idx_span, out_dist_span, return_distances, unsorted);
-        } else if (dt == deglib::distances::MetricDataType::FP32) {
-            std::vector<float> q_f32(dim);
-            deglib::distances::fp16::fp16_to_floats(query, q_f32.data(), dim);
-            return rerank_f32(q_f32.data(), dim, candidate_indices, num_cands, k, out_indices, out_distances, return_distances, unsorted);
+            return rerank(std::as_bytes(query), candidates, k, out_indices, out_distances, return_distances, unsorted);
         }
-
-        throw std::invalid_argument(std::format(
-            "Reranker: float16 query passed to Reranker with base data type {:#x}. Direct FP16 queries are only supported for FP16 or FP32 base spaces.",
-            static_cast<uint8_t>(dt)));
+        if (dt == deglib::distances::MetricDataType::FP32) {
+            fp16_query_buf_.resize(query.size());
+            deglib::distances::fp16::fp16_to_floats(query.data(), fp16_query_buf_.data(), query.size());
+            return rerank_f32(std::span<const float>(fp16_query_buf_), candidates, k, out_indices, out_distances, return_distances, unsorted);
+        }
+        throw std::invalid_argument(
+            std::format(
+                "Reranker: float16 query passed to Reranker with base data type {:#x}. Direct FP16 queries are only supported for FP16 or FP32 base spaces.",
+                static_cast<uint8_t>(dt)
+            )
+        );
     }
 
+    /**
+     * Typed single-query rerank dispatch (float -> rerank_f32, uint16_t -> rerank_f16).
+     */
     template <typename QueryT>
     inline uint32_t rerank(
-        const QueryT* query,
-        uint32_t dim,
-        const uint32_t* candidate_indices,
-        size_t num_cands,
+        std::span<const QueryT> query,
+        std::span<const uint32_t> candidates,
         uint32_t k,
-        uint32_t* out_indices,
-        float* out_distances,
-        bool return_distances,
-        bool unsorted
+        std::span<uint32_t> out_indices,
+        std::span<float> out_distances = {},
+        bool return_distances = false,
+        bool unsorted = false
     ) const {
         if constexpr (std::is_same_v<QueryT, float>) {
-            return rerank_f32(query, dim, candidate_indices, num_cands, k, out_indices, out_distances, return_distances, unsorted);
+            return rerank_f32(query, candidates, k, out_indices, out_distances, return_distances, unsorted);
         } else if constexpr (std::is_same_v<QueryT, uint16_t>) {
-            return rerank_f16(query, dim, candidate_indices, num_cands, k, out_indices, out_distances, return_distances, unsorted);
+            return rerank_f16(query, candidates, k, out_indices, out_distances, return_distances, unsorted);
         } else {
             static_assert(sizeof(QueryT) == 0, "Unsupported QueryT: must be float or uint16_t");
         }
     }
 
     /**
-     * Batch candidate reranking returning a vector of ResultSets.
+     * Batch rerank returning one ResultSet per query (top-k, ordered by distance).
+     *
+     * @param queries             Flat query bytes, num_queries rows of get_data_size() each.
+     * @param candidates          Flat candidate indices, num_queries rows of candidates_per_query each.
      */
     inline std::vector<deglib::graph::ResultSet> rerank(
-        const void* queries,
+        std::span<const std::byte> queries,
         size_t num_queries,
-        const uint32_t* base_candidates,
+        std::span<const uint32_t> candidates,
         size_t candidates_per_query,
-        size_t k_top = 0,
+        uint32_t k_top = 0,
         size_t num_threads = 0
     ) const {
-        if (queries == nullptr || base_candidates == nullptr) {
-            throw std::invalid_argument("rerank: queries and base_candidates must not be null");
+        if (queries.data() == nullptr || candidates.data() == nullptr) {
+            throw std::invalid_argument("rerank: queries and candidates must not be null");
         }
-
         if (k_top == 0 || k_top > candidates_per_query) {
-            k_top = candidates_per_query;
+            k_top = static_cast<uint32_t>(candidates_per_query);
         }
 
-        const size_t byte_stride_query = space_.get_data_size();
-        const size_t byte_stride_target = space_.get_data_size();
-
-        const uint8_t* q_ptr = static_cast<const uint8_t*>(queries);
-        const uint8_t* t_ptr = reinterpret_cast<const uint8_t*>(base_vectors_);
-
+        const size_t stride = row_bytes();
+        std::vector<deglib::graph::ResultSet> results(num_queries);
         const auto param = space_.get_dist_func_param();
 
-        std::vector<deglib::graph::ResultSet> results(num_queries);
-
-        space_.compute([&](const auto& dist_func_obj) {
+        space_.compute([&](const auto& dist) {
             deglib::concurrent::parallel_for(0, num_queries, num_threads, [&](size_t i, size_t) {
-                const uint8_t* query_ptr = q_ptr + i * byte_stride_query;
-                const uint32_t* cand_row = base_candidates + i * candidates_per_query;
+                const auto q = queries.subspan(i * stride, stride);
+                const auto c = candidates.subspan(i * candidates_per_query, candidates_per_query);
+                auto& result = results[i];
+                if (c.empty() || k_top == 0) return;
 
-                results[i] = rerank_single_heap(
-                    dist_func_obj, param, query_ptr, t_ptr, num_base_vectors_, byte_stride_target, cand_row, candidates_per_query, k_top, po_, pl_
-                );
+                auto& scratch = flat_scratch_;
+                const size_t valid = score_all(scratch, dist, param, base(), stride, num_base_vectors_, q, c, po_, pl_);
+                const size_t top = std::min<size_t>(k_top, valid);
+                if (top > 0) {
+                    auto begin = scratch.begin();
+                    auto end = begin + static_cast<std::ptrdiff_t>(valid);
+                    if (top < valid) {
+                        std::partial_sort(begin, begin + static_cast<std::ptrdiff_t>(top), end);
+                    } else {
+                        std::sort(begin, end);
+                    }
+                    result.reserve(top);
+                    for (size_t j = 0; j < top; ++j) result.emplace(scratch[j].getIdentifier(), scratch[j].getDistance());
+                }
             });
         });
 
@@ -501,98 +494,46 @@ class Reranker {
     }
 
     /**
-     * Batch candidate reranking writing directly into pre-allocated destination buffers without per-query heap allocations.
+     * Batch rerank writing top-k per query into pre-allocated row-major destination spans.
      */
     inline void rerank(
-        const void* queries,
+        std::span<const std::byte> queries,
         size_t num_queries,
-        const uint32_t* base_candidates,
+        std::span<const uint32_t> candidates,
         size_t candidates_per_query,
         uint32_t k_top,
-        uint32_t* out_indices,
-        float* out_distances,
+        std::span<uint32_t> out_indices,
+        std::span<float> out_distances,
         bool return_distances,
         bool unsorted,
         size_t num_threads = 0
     ) const {
-        if (queries == nullptr || base_candidates == nullptr || out_indices == nullptr) {
-            throw std::invalid_argument("rerank: queries, base_candidates, and out_indices must not be null");
+        if (queries.data() == nullptr || candidates.data() == nullptr || out_indices.data() == nullptr) {
+            throw std::invalid_argument("rerank: queries, candidates, and out_indices must not be null");
         }
-        if (return_distances && out_distances == nullptr) {
-            throw std::invalid_argument("rerank: out_distances must not be null when return_distances is true");
+        if (return_distances && out_distances.data() == nullptr) {
+            throw std::invalid_argument("rerank: return_distances is true but out_distances is null");
         }
-
         if (k_top == 0 || k_top > candidates_per_query) {
             k_top = static_cast<uint32_t>(candidates_per_query);
         }
 
-        const size_t byte_stride_query = space_.get_data_size();
-        const size_t byte_stride_target = space_.get_data_size();
-
-        const uint8_t* q_ptr = static_cast<const uint8_t*>(queries);
-        const uint8_t* t_ptr = reinterpret_cast<const uint8_t*>(base_vectors_);
+        const size_t stride = row_bytes();
         const auto param = space_.get_dist_func_param();
 
-        space_.compute([&](const auto& dist_func_obj) {
+        space_.compute([&](const auto& dist) {
             deglib::concurrent::parallel_batch_for(0, num_queries, num_threads, [&](size_t begin, size_t end, size_t) {
-                deglib::graph::ResultSet heap;
-                heap.reserve(k_top);
+                std::vector<deglib::graph::ObjectDistance> scratch;
+                scratch.reserve(candidates_per_query);
 
                 for (size_t i = begin; i < end; ++i) {
-                    const uint8_t* query_ptr = q_ptr + i * byte_stride_query;
-                    const uint32_t* cand_row = base_candidates + i * candidates_per_query;
+                    const auto q = queries.subspan(i * stride, stride);
+                    const auto c = candidates.subspan(i * candidates_per_query, candidates_per_query);
 
-                    heap.clear();
-                    float max_dist = std::numeric_limits<float>::max();
-
-                    const auto accumulate = [&](uint32_t cand_idx, const uint8_t* cand_ptr) {
-                        const float dist = dist_func_obj.compare(query_ptr, cand_ptr, param);
-                        if (heap.size() < k_top) {
-                            heap.emplace(cand_idx, dist);
-                            if (heap.size() == k_top) {
-                                max_dist = heap.top().getDistance();
-                            }
-                        } else if (dist < max_dist) {
-                            max_dist = heap.replace_top(cand_idx, dist).getDistance();
-                        }
-                    };
-
-                    if (po_ > 0) {
-                        const size_t prefetch_bytes = (pl_ > 0) ? (static_cast<size_t>(pl_) * deglib::memory::L1_CACHE_LINE_SIZE) : byte_stride_target;
-                        const auto prefetch_feature = [prefetch_bytes](const char* ptr) { deglib::memory::prefetch(ptr, prefetch_bytes); };
-
-                        const size_t init_prefetch = std::min<size_t>(static_cast<size_t>(po_), candidates_per_query);
-                        for (size_t p = 0; p < init_prefetch; ++p) {
-                            const uint32_t c_idx = cand_row[p];
-                            if (c_idx < num_base_vectors_) {
-                                prefetch_feature(reinterpret_cast<const char*>(t_ptr + c_idx * byte_stride_target));
-                            }
-                        }
-
-                        for (size_t j = 0; j < candidates_per_query; ++j) {
-                            if (j + static_cast<size_t>(po_) < candidates_per_query) {
-                                const uint32_t next_idx = cand_row[j + static_cast<size_t>(po_)];
-                                if (next_idx < num_base_vectors_) {
-                                    prefetch_feature(reinterpret_cast<const char*>(t_ptr + next_idx * byte_stride_target));
-                                }
-                            }
-                            const uint32_t cand_idx = cand_row[j];
-                            if (cand_idx >= num_base_vectors_) continue;
-                            accumulate(cand_idx, t_ptr + cand_idx * byte_stride_target);
-                        }
-                    } else {
-                        for (size_t j = 0; j < candidates_per_query; ++j) {
-                            const uint32_t cand_idx = cand_row[j];
-                            if (cand_idx >= num_base_vectors_) continue;
-                            accumulate(cand_idx, t_ptr + cand_idx * byte_stride_target);
-                        }
-                    }
-
-                    uint32_t* row_indices = out_indices + i * k_top;
-                    float* row_distances = return_distances ? (out_distances + i * k_top) : nullptr;
-                    drain_heap_into(
-                        heap, k_top, std::span<uint32_t>(row_indices, k_top), return_distances ? std::span<float>(row_distances, k_top) : std::span<float>{},
-                        return_distances, unsorted
+                    const size_t valid = score_all(scratch, dist, param, base(), stride, num_base_vectors_, q, c, po_, pl_);
+                    select_top_k(
+                        scratch, valid, k_top, out_indices.subspan(i * k_top, k_top),
+                        return_distances ? out_distances.subspan(i * k_top, k_top) : std::span<float>{}, return_distances, unsorted
                     );
                 }
             });

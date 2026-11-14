@@ -1212,7 +1212,7 @@ TEST(SizeBoundedGraph, FromGraphFromReadOnly) {
     deglib::builder::populate_random_graph(source_sbg, feature_bytes.get(), vertex_count, 7);
 
     // Convert to ReadOnlyGraph
-    auto readonly = deglib::graph::convert_to_readonly_graph(source_sbg);
+    auto readonly = deglib::graph::ReadOnlyGraph::from_graph(source_sbg, space);
 
     // Copy from ReadOnlyGraph using from_graph
     auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(readonly, space);
@@ -1631,7 +1631,7 @@ TEST(SizeBoundedGraph, RemoveFirstVerticesSaveAndLoadReadOnlyGraphSearch) {
     EXPECT_TRUE(graph.saveGraph(temp_path.string().c_str()));
 
     // Load as ReadOnlyGraph
-    auto ro_graph = deglib::graph::load_readonly_graph(temp_path.string().c_str());
+    auto ro_graph = deglib::graph::ReadOnlyGraph::loadGraph(temp_path.string().c_str());
     EXPECT_EQ(ro_graph.size(), initial_count - remove_count);
     EXPECT_EQ(ro_graph.getEdgesPerVertex(), edges_per_vertex);
 
@@ -1692,7 +1692,7 @@ TEST(SizeBoundedGraph, RemoveFirstVerticesInMemoryConvertToReadOnlyGraphSearch) 
     EXPECT_EQ(graph.size(), initial_count - remove_count);
 
     // Transform in-memory to ReadOnlyGraph
-    auto ro_graph = deglib::graph::convert_to_readonly_graph(graph);
+    auto ro_graph = deglib::graph::ReadOnlyGraph::from_graph(graph);
     EXPECT_EQ(ro_graph.size(), initial_count - remove_count);
     EXPECT_EQ(ro_graph.getEdgesPerVertex(), edges_per_vertex);
 

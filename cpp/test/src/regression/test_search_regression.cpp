@@ -63,7 +63,7 @@ TEST(SearchRegression, Rerank_FP32_L2_Benchmark) {
     deglib::search::Reranker reranker(space, std::as_bytes(std::span(base_vectors)), num_base);
 
     // Warm-up run
-    auto warm_results = reranker.rerank(query_vectors.data(), num_queries, candidates.data(), candidates_per_query, k_top, num_threads);
+    auto warm_results = reranker.rerank(std::as_bytes(std::span(query_vectors)), num_queries, std::span(candidates), candidates_per_query, k_top, num_threads);
     EXPECT_EQ(warm_results.size(), num_queries);
 
     // Benchmark run
@@ -71,7 +71,7 @@ TEST(SearchRegression, Rerank_FP32_L2_Benchmark) {
     auto start = std::chrono::high_resolution_clock::now();
 
     for (int it = 0; it < iterations; ++it) {
-        auto results = reranker.rerank(query_vectors.data(), num_queries, candidates.data(), candidates_per_query, k_top, num_threads);
+        auto results = reranker.rerank(std::as_bytes(std::span(query_vectors)), num_queries, std::span(candidates), candidates_per_query, k_top, num_threads);
     }
 
     auto end = std::chrono::high_resolution_clock::now();
@@ -120,7 +120,7 @@ TEST(SearchRegression, Rerank_FP16_InnerProduct_Benchmark) {
     deglib::search::Reranker reranker(space, std::as_bytes(std::span(base_vectors)), num_base);
 
     // Warm-up run
-    auto warm_results = reranker.rerank(query_vectors.data(), num_queries, candidates.data(), candidates_per_query, k_top, num_threads);
+    auto warm_results = reranker.rerank(std::as_bytes(std::span(query_vectors)), num_queries, std::span(candidates), candidates_per_query, k_top, num_threads);
     EXPECT_EQ(warm_results.size(), num_queries);
 
     // Benchmark run
@@ -128,7 +128,7 @@ TEST(SearchRegression, Rerank_FP16_InnerProduct_Benchmark) {
     auto start = std::chrono::high_resolution_clock::now();
 
     for (int it = 0; it < iterations; ++it) {
-        auto results = reranker.rerank(query_vectors.data(), num_queries, candidates.data(), candidates_per_query, k_top, num_threads);
+        auto results = reranker.rerank(std::as_bytes(std::span(query_vectors)), num_queries, std::span(candidates), candidates_per_query, k_top, num_threads);
     }
 
     auto end = std::chrono::high_resolution_clock::now();
@@ -185,8 +185,9 @@ TEST(SearchRegression, Reranker_Prefetch_Optimize_Benchmark) {
     auto sweep_ms = [&]() {
         for (size_t q = 0; q < 8; ++q) {
             reranker.rerank(
-                query_vectors.data() + q * dim, dim, candidates.data() + q * candidates_per_query, candidates_per_query, k_top, out_indices.data(),
-                out_distances.data(), true, true
+                std::span<const float>(query_vectors.data() + q * dim, dim),
+                std::span<const uint32_t>(candidates.data() + q * candidates_per_query, candidates_per_query), k_top, std::span<uint32_t>(out_indices),
+                std::span<float>(out_distances), true, true
             );
         }
         double best = std::numeric_limits<double>::max();
@@ -194,8 +195,9 @@ TEST(SearchRegression, Reranker_Prefetch_Optimize_Benchmark) {
             const auto t0 = std::chrono::high_resolution_clock::now();
             for (size_t q = 0; q < num_queries; ++q) {
                 reranker.rerank(
-                    query_vectors.data() + q * dim, dim, candidates.data() + q * candidates_per_query, candidates_per_query, k_top, out_indices.data(),
-                    out_distances.data(), true, true
+                    std::span<const float>(query_vectors.data() + q * dim, dim),
+                    std::span<const uint32_t>(candidates.data() + q * candidates_per_query, candidates_per_query), k_top, std::span<uint32_t>(out_indices),
+                    std::span<float>(out_distances), true, true
                 );
             }
             const auto t1 = std::chrono::high_resolution_clock::now();
@@ -209,7 +211,7 @@ TEST(SearchRegression, Reranker_Prefetch_Optimize_Benchmark) {
     const int32_t default_pl = reranker.getPl();
     const double default_ms = sweep_ms();
 
-    reranker.optimize(query_vectors.data(), /*n_queries=*/30, candidates_per_query, k_top);
+    reranker.optimize(/*num_sample_queries=*/30, candidates_per_query, k_top);
     const int32_t tuned_po = reranker.getPo();
     const int32_t tuned_pl = reranker.getPl();
     const double tuned_ms = sweep_ms();
@@ -249,7 +251,7 @@ TEST(SearchRegression, SearcherTraversal_Optimize_Benchmark) {
     auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 16, deglib::distances::Metric::FP32_L2);
     auto searcher = deglib::search::make_searcher(graph.internal());
 
-    searcher->optimize(/*n_clusters=*/64, /*n_iter=*/5, /*sample_size=*/0, /*k=*/10, /*seed=*/7, /*threads=*/1);
+    searcher->optimize(/*n_clusters=*/64, /*n_iter=*/5, /*sample_size=*/0, /*k=*/10, /*threads=*/1);
     const int32_t tuned_po = graph.getPo();
     const int32_t tuned_pl = graph.getPl();
     const int32_t tuned_nl = graph.getNl();

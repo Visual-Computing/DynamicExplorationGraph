@@ -80,6 +80,17 @@ class ResultList {
     ResultList& operator=(const ResultList&) = delete;
     ResultList& operator=(ResultList&& rhs) noexcept = default;
 
+    /// Resets the list for reuse with a new ef/capacity, preserving the allocated storage.
+    void reset(int32_t ef, int32_t capacity) noexcept {
+        ef_ = ef;
+        capacity_ = capacity;
+        size_ = 0;
+        cur_ = 0;
+        if (static_cast<int32_t>(data_.size()) < capacity + 1) {
+            data_.resize(capacity + 1);
+        }
+    }
+
     // --- Search Traversal API ---
 
     /**

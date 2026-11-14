@@ -221,46 +221,46 @@ class MockInternalGraph : public deglib::graph::InternalGraph {
           weights_(size, std::vector<float>(epv, 0.0f)),
           features_(size, std::vector<std::byte>(feature_space_.get_data_size())) {}
 
-    const uint32_t size() const override { return size_; }
-    const uint8_t getEdgesPerVertex() const override { return edges_per_vertex_; }
-    const deglib::distances::FloatSpace& getFeatureSpace() const override { return feature_space_; }
+    [[nodiscard]] uint32_t size() const noexcept override { return size_; }
+    [[nodiscard]] uint8_t getEdgesPerVertex() const noexcept override { return edges_per_vertex_; }
+    [[nodiscard]] const deglib::distances::FloatSpace& getFeatureSpace() const noexcept override { return feature_space_; }
 
-    const uint32_t getExternalLabel(uint32_t idx) const override { return labels_[idx]; }
-    const uint32_t getInternalIndex(uint32_t label) const override {
+    [[nodiscard]] uint32_t getExternalLabel(uint32_t idx) const noexcept override { return labels_[idx]; }
+    [[nodiscard]] uint32_t getInternalIndex(uint32_t label) const noexcept override {
         for (uint32_t i = 0; i < size_; ++i)
             if (labels_[i] == label) return i;
         return 0;
     }
-    const uint32_t* getNeighborIndices(uint32_t idx) const override { return neighbors_[idx].data(); }
-    const std::byte* getFeatureVector(uint32_t idx) const override { return features_[idx].data(); }
+    [[nodiscard]] const uint32_t* getNeighborIndices(uint32_t idx) const noexcept override { return neighbors_[idx].data(); }
+    [[nodiscard]] const std::byte* getFeatureVector(uint32_t idx) const noexcept override { return features_[idx].data(); }
 
-    const bool hasVertex(uint32_t label) const override {
+    [[nodiscard]] bool hasVertex(uint32_t label) const noexcept override {
         for (uint32_t i = 0; i < size_; ++i)
             if (labels_[i] == label) return true;
         return false;
     }
-    const bool hasEdge(uint32_t idx, uint32_t neighbor) const override { return std::binary_search(neighbors_[idx].begin(), neighbors_[idx].end(), neighbor); }
+    [[nodiscard]] bool hasEdge(uint32_t idx, uint32_t neighbor) const noexcept override { return std::binary_search(neighbors_[idx].begin(), neighbors_[idx].end(), neighbor); }
 
-    std::vector<deglib::graph::ObjectDistance> hasPath(const std::vector<uint32_t>&, uint32_t, float, uint32_t) const override { return {}; }
+    [[nodiscard]] std::vector<deglib::graph::ObjectDistance> hasPath(const std::vector<uint32_t>&, uint32_t, float, uint32_t) const override { return {}; }
     deglib::graph::ResultSet search_intern(
         const std::vector<uint32_t>&,
         const std::byte*,
-        const uint32_t,
-        const float = 0.0f,
-        const bool = true,
+        uint32_t,
+        float = 0.0f,
+        bool = true,
         const deglib::search::Filter* = nullptr,
-        const uint32_t = 0
+        uint32_t = 0
     ) const override {
         return deglib::graph::ResultSet();
     }
     std::vector<deglib::graph::ObjectDistance> search_ef_intern(
         const std::vector<uint32_t>&,
         const std::byte*,
-        const uint32_t,
-        const uint32_t,
-        const bool = true,
+        uint32_t,
+        uint32_t,
+        bool = true,
         const deglib::search::Filter* = nullptr,
-        const uint32_t = 0
+        uint32_t = 0
     ) const override {
         return {};
     }

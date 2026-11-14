@@ -86,7 +86,7 @@ TEST(SearcherTest, QuantizedInt8WithFP16Reranker) {
                                  std::span<std::byte>(reinterpret_cast<std::byte*>(int8_data.data()), count * dim * sizeof(int8_t)));
 
     auto target_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::Int8_L2);
-    auto ro_graph = deglib::graph::convert_to_readonly_graph(base_graph.internal(), target_space, int8_data.data());
+    auto ro_graph = deglib::graph::ReadOnlyGraph::from_graph(base_graph.internal(), target_space, int8_data.data());
 
     // Reranker with FP16 base features and calibrated ScalarQuantizerFP16
     auto fp16_quantizer = std::make_shared<deglib::transformation::ScalarQuantizerFP16>(
@@ -126,7 +126,7 @@ TEST(SearcherTest, QuantizedUint8WithFP32Reranker) {
                                  std::span<std::byte>(reinterpret_cast<std::byte*>(uint8_data.data()), count * dim * sizeof(uint8_t)));
 
     auto target_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::Uint8_L2);
-    auto ro_graph = deglib::graph::convert_to_readonly_graph(base_graph.internal(), target_space, uint8_data.data());
+    auto ro_graph = deglib::graph::ReadOnlyGraph::from_graph(base_graph.internal(), target_space, uint8_data.data());
 
     auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP32_L2);
 
@@ -210,17 +210,28 @@ TEST(SearcherTest, OptimizeSelectsValidPrefetchConfigAndPreservesResults) {
     auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 16, deglib::distances::Metric::FP32_L2);
     auto searcher = deglib::search::make_searcher(graph.internal());
 
-    searcher->optimize(/*n_clusters=*/32, /*n_iter=*/5, /*sample_size=*/0, /*k=*/10, /*seed=*/7, /*threads=*/1);
+    searcher->optimize(/*n_clusters=*/32, /*n_iter=*/5, /*sample_size=*/0, /*k=*/10, /*threads=*/1);
 
     // Tuner must land on a value from its own search grid (proves it actually tuned, not garbage).
     const int32_t po = graph.getPo();
     const int32_t pl = graph.getPl();
     const int32_t nl = graph.getNl();
     const std::vector<int32_t> grid_po = {4, 8, 12, 16};
-    const std::vector<int32_t> grid_small = {2, 3, 4};
+    // Mirror the impl's data-dependent pl grid: capped at code_size/64 (full vector). For this
+    // dim=16 FP32 graph a feature is 64 B = 1 cache line, so the only valid depth is pl=1.
+    std::vector<int32_t> grid_pl;
+    for (const int32_t c : {2, 3, 4, 8, 16, 32, 64}) {
+        if (c <= 1) {
+            grid_pl.push_back(c);
+        }
+    }
+    if (grid_pl.empty()) {
+        grid_pl.push_back(1);
+    }
+    const std::vector<int32_t> grid_nl = {2, 3, 4};
     EXPECT_NE(std::find(grid_po.begin(), grid_po.end(), po), grid_po.end());
-    EXPECT_NE(std::find(grid_small.begin(), grid_small.end(), pl), grid_small.end());
-    EXPECT_NE(std::find(grid_small.begin(), grid_small.end(), nl), grid_small.end());
+    EXPECT_NE(std::find(grid_pl.begin(), grid_pl.end(), pl), grid_pl.end());
+    EXPECT_NE(std::find(grid_nl.begin(), grid_nl.end(), nl), grid_nl.end());
 
     // Search still returns the exact nearest neighbour (the query is a base vector).
     std::vector<uint32_t> idx(3);
@@ -230,6 +241,30 @@ TEST(SearcherTest, OptimizeSelectsValidPrefetchConfigAndPreservesResults) {
     EXPECT_EQ(idx[0], q);
     EXPECT_NEAR(d[0], 0.0f, 1e-4f);
 }
+TEST(SearcherTest, OptimizePrefetchDepthScalesWithFeatureWidth) {
+    // Wide features (1024D FP32 = 4096 B = 64 cache lines) must let the tuner pick deep prefetch
+    // (pl up to code_size/64 = 64), the capability that closed the gap to Glass for 1024D graphs.
+    const uint32_t dim = 1024;
+    const uint32_t count = 300;
+
+    std::mt19937 rng(11);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    std::vector<float> data(count * dim);
+    for (auto& v : data) v = dist(rng);
+
+    auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 16, deglib::distances::Metric::FP32_L2);
+    auto searcher = deglib::search::make_searcher(graph.internal());
+    searcher->optimize(/*n_clusters=*/8, /*n_iter=*/3, /*sample_size=*/50, /*k=*/10, /*threads=*/1);
+
+    const int32_t pl = graph.getPl();
+    const int32_t pl_max = static_cast<int32_t>(dim * 4 / 64);  // 64 lines for 1024D FP32
+    EXPECT_GE(pl, 1);
+    EXPECT_LE(pl, pl_max);
+    // Tuner must be able to reach beyond the old {2,3,4} cap on wide features.
+    const std::vector<int32_t> grid_pl = {2, 3, 4, 8, 16, 32, 64};
+    EXPECT_NE(std::find(grid_pl.begin(), grid_pl.end(), pl), grid_pl.end());
+}
+
 TEST(SearcherTest, EVPQuantizerWithFP32Reranker) {
     const uint32_t dim = 16;
     const uint32_t count = 50;
@@ -259,7 +294,7 @@ TEST(SearcherTest, EVPQuantizerWithFP32Reranker) {
     std::vector<std::byte> evp_data(count * evp_bytes);
     quantizer.transform_database(std::span<const float>(data), std::span<std::byte>(evp_data));
     auto target_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::EVP_InnerProduct);
-    auto ro_graph = deglib::graph::convert_to_readonly_graph(base_graph.internal(), target_space, evp_data.data());
+    auto ro_graph = deglib::graph::ReadOnlyGraph::from_graph(base_graph.internal(), target_space, evp_data.data());
 
     auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP32_InnerProduct);
 
@@ -367,6 +402,27 @@ TEST(SearcherTest, SearchEfSingleAndBatch) {
     }
 }
 
+TEST(SearcherTest, OptimizeRoutingDisabledUsesStaticEntryAndFindsNN) {
+    // optimize(use_routing=false) skips KMeans entry routing; search must still return the exact NN
+    // and must work (static graph entry path). Verifies the routing toggle is functional.
+    const uint32_t dim = 8;
+    const uint32_t count = 60;
+
+    std::mt19937 rng(5);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    std::vector<float> data(count * dim);
+    for (auto& v : data) v = dist(rng);
+
+    auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
+    auto searcher = deglib::search::make_searcher(graph.internal());
+    searcher->optimize(/*n_clusters=*/8, /*n_iter=*/3, /*sample_size=*/0, /*k=*/5, /*threads=*/1, /*use_routing=*/false);
+
+    auto q = std::span<const float>(data.data() + 7 * dim, dim);
+    auto res = searcher->search(q, 3, /*eps=*/0.2f, /*rerank_factor=*/1.0f, /*return_distances=*/true);
+    EXPECT_EQ(res.indices[0], 7u);
+    EXPECT_NEAR(res.distances[0], 0.0f, 1e-5f);
+}
+
 TEST(SearcherTest, DynamicExplorationGraphWithTransformationMakeSearcher) {
     const uint32_t dim = 8;
     const uint32_t count = 50;
@@ -394,7 +450,7 @@ TEST(SearcherTest, DynamicExplorationGraphWithTransformationMakeSearcher) {
     auto searcher_no_reranker = deglib::make_searcher(ro_graph);
     ASSERT_NE(searcher_no_reranker, nullptr);
 
-    searcher_no_reranker->optimize(/*n_clusters=*/8, /*n_iter=*/3, /*sample_size=*/0, /*k=*/5, /*seed=*/7, /*threads=*/1);
+    searcher_no_reranker->optimize(/*n_clusters=*/8, /*n_iter=*/3, /*sample_size=*/0, /*k=*/5, /*threads=*/1);
 
     auto q = std::span<const float>(data.data() + 5 * dim, dim);
     auto res1 = searcher_no_reranker->search(q, 5, /*eps=*/0.2f, /*rerank_factor=*/1.0f, /*return_distances=*/true);

@@ -14,9 +14,11 @@
 #include "deglib/distance/fp16.h"
 #include "deglib/distances.h"
 #include "deglib/graph/internal_graph.h"
+#include "deglib/utils/memory.h"
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <concepts>
 #include <cstddef>
@@ -231,86 +233,117 @@ class KMeansEntrySelector {
     }
 
     /**
-     * Finds the nearest entry vertices for a given native query vector, ordered nearest-first.
-     *
-     * Computes medoid distances with the graph's native batch-distance kernel from a contiguous medoid
-     * cache. Falls back to vertex 0 when no entries exist.
-     *
-     * @param query Native query vector bytes sized to the graph feature space.
-     * @param count Maximum number of nearest entry vertex indices to return (typically 1 or 2).
-     * @return List of up to `count` internal graph vertex indices.
+     * Zero-allocation overload writing up to `count` nearest entry vertex indices into `out`.
      */
-    [[nodiscard]] std::vector<uint32_t> top_entries(std::span<const std::byte> query, size_t count = 2) const {
-        if (!graph_ || graph_->size() == 0 || count == 0) return {};
-        if (entries_.empty()) return {0};
-        if (entries_.size() <= count) return entries_;
+    void top_entries(std::span<const std::byte> query, size_t count, std::vector<uint32_t>& out) const {
+        out.clear();
+        if (!graph_ || graph_->size() == 0 || count == 0) return;
+        if (entries_.empty()) {
+            out.push_back(0);
+            return;
+        }
+        if (entries_.size() <= count) {
+            out.assign(entries_.begin(), entries_.end());
+            return;
+        }
 
         const size_t num_entries = entries_.size();
+        if (num_entries > kMaxMedoids || aligned_medoids_ == nullptr || medoid_stride_ == 0) {
+            out.assign(entries_.begin(), entries_.end());
+            return;
+        }
+
         const auto& feature_space = graph_->getFeatureSpace();
         const auto dist_param = feature_space.get_dist_func_param();
+        const auto* q = reinterpret_cast<const uint8_t*>(query.data());
+        const auto* medoids = reinterpret_cast<const uint8_t*>(aligned_medoids_);
+        const size_t stride = medoid_stride_;
 
-        // Fixed-size scratch array for the enforced <= 512 medoid limit.
-        float dists[kMaxMedoids];
-        if (num_entries > kMaxMedoids) return entries_;
-
-        const auto dist_func = feature_space.get_dist_func();
-        if (medoid_ptrs_[0] == nullptr) return entries_;
-
-        for (size_t i = 0; i < num_entries; ++i) {
-            dists[i] = dist_func(query.data(), medoid_ptrs_[i], dist_param);
-        }
-
-        // Fast-path: Single nearest entry point (linear scan over computed distances, 0 allocations)
-        if (count == 1) {
-            size_t min_idx = 0;
-            float min_dist = dists[0];
-            for (size_t i = 1; i < num_entries; ++i) {
-                if (dists[i] < min_dist) {
-                    min_dist = dists[i];
-                    min_idx = i;
+        const auto scan = [&](size_t start, auto&& emit) {
+            const uint8_t* ptr = medoids + start * stride;
+            if (po_ > 0) {
+                const size_t lookahead = static_cast<size_t>(po_);
+                const size_t pf_bytes = (pl_ > 0) ? static_cast<size_t>(pl_) * deglib::memory::L1_CACHE_LINE_SIZE : stride;
+                const size_t warmup = std::min(start + lookahead, num_entries);
+                for (size_t i = start; i < warmup; ++i) {
+                    deglib::memory::prefetch(reinterpret_cast<const char*>(medoids + i * stride), pf_bytes);
+                }
+                for (size_t i = start; i < num_entries; ++i, ptr += stride) {
+                    if (i + lookahead < num_entries) {
+                        deglib::memory::prefetch(reinterpret_cast<const char*>(ptr + lookahead * stride), pf_bytes);
+                    }
+                    emit(i, ptr);
+                }
+            } else {
+                for (size_t i = start; i < num_entries; ++i, ptr += stride) {
+                    emit(i, ptr);
                 }
             }
-            return {entries_[min_idx]};
-        }
+        };
 
-        // Fast-path: Top 2 entry points (single-pass min1/min2 tracking, 0 allocations)
-        if (count == 2) {
-            uint32_t ep1 = entries_[0], ep2 = entries_[1];
-            float dist1 = dists[0], dist2 = dists[1];
-            if (dist2 < dist1) {
-                std::swap(dist1, dist2);
-                std::swap(ep1, ep2);
+        feature_space.compute([&](const auto& dist) {
+            if (count == 1) {
+                uint32_t best_ep = entries_[0];
+                float min_dist = dist.compare(q, medoids, dist_param);
+                scan(1, [&](size_t i, const uint8_t* ptr) {
+                    const float d = dist.compare(q, ptr, dist_param);
+                    if (d < min_dist) {
+                        min_dist = d;
+                        best_ep = entries_[i];
+                    }
+                });
+                out.push_back(best_ep);
+                return;
             }
-            for (size_t i = 2; i < num_entries; ++i) {
-                const float d = dists[i];
-                const uint32_t ep = entries_[i];
-                if (d < dist1) {
-                    dist2 = dist1;
-                    ep2 = ep1;
-                    dist1 = d;
-                    ep1 = ep;
-                } else if (d < dist2) {
-                    dist2 = d;
-                    ep2 = ep;
+
+            if (count == 2) {
+                uint32_t ep1 = entries_[0], ep2 = entries_[1];
+                float dist1 = dist.compare(q, medoids, dist_param);
+                float dist2 = dist.compare(q, medoids + stride, dist_param);
+                if (dist2 < dist1) {
+                    std::swap(dist1, dist2);
+                    std::swap(ep1, ep2);
                 }
+                scan(2, [&](size_t i, const uint8_t* ptr) {
+                    const float d = dist.compare(q, ptr, dist_param);
+                    if (d < dist1) {
+                        dist2 = dist1;
+                        ep2 = ep1;
+                        dist1 = d;
+                        ep1 = entries_[i];
+                    } else if (d < dist2) {
+                        dist2 = d;
+                        ep2 = entries_[i];
+                    }
+                });
+                out.push_back(ep1);
+                if (ep1 != ep2) out.push_back(ep2);
+                return;
             }
-            if (ep1 == ep2) return {ep1};
-            return {ep1, ep2};
-        }
 
-        // General fallback for count > 2: Partial sort via std::nth_element in O(N)
-        std::vector<std::pair<float, uint32_t>> scored;
-        scored.reserve(num_entries);
-        for (size_t i = 0; i < num_entries; ++i) {
-            scored.emplace_back(dists[i], entries_[i]);
-        }
-        std::nth_element(scored.begin(), scored.begin() + count, scored.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-        scored.resize(count);
-        std::sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+            float dists[kMaxMedoids];
+            scan(0, [&](size_t i, const uint8_t* ptr) { dists[i] = dist.compare(q, ptr, dist_param); });
 
+            std::vector<std::pair<float, uint32_t>> scored;
+            scored.reserve(num_entries);
+            for (size_t i = 0; i < num_entries; ++i) {
+                scored.emplace_back(dists[i], entries_[i]);
+            }
+            std::nth_element(scored.begin(), scored.begin() + count, scored.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+            scored.resize(count);
+            std::sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+
+            out.reserve(count);
+            for (const auto& s : scored) out.push_back(s.second);
+        });
+    }
+
+    /**
+     * Finds the nearest entry vertices for a given native query vector, ordered nearest-first.
+     */
+    [[nodiscard]] std::vector<uint32_t> top_entries(std::span<const std::byte> query, size_t count = 2) const {
         std::vector<uint32_t> top;
-        top.reserve(count);
-        for (const auto& s : scored) top.push_back(s.second);
+        top_entries(query, count, top);
         return top;
     }
 
@@ -326,11 +359,93 @@ class KMeansEntrySelector {
     /** Number of stored entry vertices. */
     [[nodiscard]] size_t size() const noexcept { return entries_.size(); }
 
+    [[nodiscard]] int32_t getPo() const noexcept { return po_; }
+    [[nodiscard]] int32_t getPl() const noexcept { return pl_; }
+    void setPrefetch(int32_t po, int32_t pl) noexcept {
+        po_ = (po > 0) ? po : 0;
+        pl_ = (pl > 0) ? pl : 0;
+    }
+
+    /**
+     * Auto-tunes prefetch parameters (po, pl) for top_entries() on sample native queries from the graph.
+     */
+    void optimize_prefetch(size_t num_sample_queries = 300) {
+        if (!graph_ || graph_->size() == 0 || aligned_medoids_ == nullptr || entries_.size() <= 2 || medoid_stride_ == 0) {
+            po_ = 0;
+            pl_ = 0;
+            return;
+        }
+
+        const size_t feature_bytes = graph_->getFeatureSpace().get_data_size();
+        if (feature_bytes == 0) return;
+
+        num_sample_queries = std::min<size_t>(num_sample_queries, graph_->size());
+        std::vector<uint32_t> sample_ids(num_sample_queries);
+        uint32_t rng = 1337;
+        for (auto& id : sample_ids) {
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            id = rng % static_cast<uint32_t>(graph_->size());
+        }
+
+        const int32_t pl_max = static_cast<int32_t>((medoid_stride_ + deglib::memory::L1_CACHE_LINE_SIZE - 1) / deglib::memory::L1_CACHE_LINE_SIZE);
+        std::vector<int32_t> try_pls{0};
+        for (const int32_t lines : {2, 4, 8, 16, 32}) {
+            if (lines <= pl_max) try_pls.push_back(lines);
+        }
+        const std::vector<int32_t> try_pos = {0, 1, 2, 4, 8};
+
+        std::vector<uint32_t> out;
+        out.reserve(2);
+        auto timeit = [&]() -> double {
+            double best = std::numeric_limits<double>::max();
+            for (int pass = 0; pass < 3; ++pass) {
+                auto t0 = std::chrono::high_resolution_clock::now();
+                for (const uint32_t id : sample_ids) {
+                    top_entries(std::span<const std::byte>(graph_->getFeatureVector(id), feature_bytes), 2, out);
+                }
+                auto t1 = std::chrono::high_resolution_clock::now();
+                best = std::min(best, std::chrono::duration<double, std::micro>(t1 - t0).count());
+            }
+            return best;
+        };
+
+        double best_time = std::numeric_limits<double>::max();
+        int32_t best_po = 0;
+        int32_t best_pl = 0;
+        for (const int32_t po : try_pos) {
+            for (const int32_t pl : try_pls) {
+                setPrefetch(po, pl);
+                timeit();  // warm-up
+                if (const double dur = timeit(); dur < best_time) {
+                    best_time = dur;
+                    best_po = po;
+                    best_pl = pl;
+                }
+            }
+        }
+        setPrefetch(best_po, best_pl);
+    }
+
+    /** Drop all stored medoids -> has_entries() becomes false (forces the static-entry path). */
+    void clear() {
+        entries_.clear();
+        medoid_features_.clear();
+        aligned_medoids_ = nullptr;
+        medoid_stride_ = 0;
+        po_ = 0;
+        pl_ = 0;
+    }
+
   private:
     const deglib::graph::InternalGraph* graph_ = nullptr;
     std::vector<uint32_t> entries_;
     std::vector<std::byte> medoid_features_;
-    std::array<const void*, kMaxMedoids> medoid_ptrs_{};
+    const std::byte* aligned_medoids_ = nullptr;
+    size_t medoid_stride_ = 0;
+    int32_t po_ = 0;
+    int32_t pl_ = 0;
 
     void set_graph_entries(std::vector<uint32_t> entries) {
         if (entries.size() > kMaxMedoids) {
@@ -341,19 +456,33 @@ class KMeansEntrySelector {
     }
 
     void update_medoid_features() {
-        medoid_ptrs_.fill(nullptr);
+        aligned_medoids_ = nullptr;
+        medoid_stride_ = 0;
         medoid_features_.clear();
         if (!graph_ || entries_.empty()) return;
 
         const size_t bytes = graph_->getFeatureSpace().get_data_size();
-        if (bytes == 0 || entries_.size() > medoid_ptrs_.size()) return;
+        if (bytes == 0 || entries_.size() > kMaxMedoids) return;
 
-        medoid_features_.resize(entries_.size() * bytes);
-        for (size_t i = 0; i < entries_.size(); ++i) {
-            std::byte* dst = medoid_features_.data() + i * bytes;
-            std::memcpy(dst, graph_->getFeatureVector(entries_[i]), bytes);
-            medoid_ptrs_[i] = static_cast<const void*>(dst);
+        constexpr size_t kAlignment = 64;
+        const size_t stride = (bytes + kAlignment - 1) & ~(kAlignment - 1);
+        const size_t total_bytes = entries_.size() * stride;
+
+        medoid_features_.resize(total_bytes + kAlignment);
+        void* ptr = medoid_features_.data();
+        size_t space = medoid_features_.size();
+        std::byte* aligned_base = static_cast<std::byte*>(std::align(kAlignment, total_bytes, ptr, space));
+        if (aligned_base == nullptr) {
+            throw std::runtime_error("KMeansEntrySelector: failed to align medoid feature storage");
         }
+        std::memset(aligned_base, 0, total_bytes);
+
+        for (size_t i = 0; i < entries_.size(); ++i) {
+            std::memcpy(aligned_base + i * stride, graph_->getFeatureVector(entries_[i]), bytes);
+        }
+        aligned_medoids_ = aligned_base;
+        medoid_stride_ = stride;
+        optimize_prefetch();
     }
 };
 

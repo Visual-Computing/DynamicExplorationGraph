@@ -2,7 +2,6 @@
 
 #include "deglib/distance/fp16.h"
 #include "deglib/transformation.h"
-#include "deglib/transformation/scalar.h"
 #include "gtest/gtest.h"
 
 #include <cmath>
@@ -69,8 +68,9 @@ TEST(ScalarQuantize, Int8SymmetricBasic) {
 
     ASSERT_EQ(result.size(), 5u);
     EXPECT_NEAR(quantizer.abs_max(), 1.0f, 1e-5f);
+    EXPECT_NEAR(quantizer.scale(), 127.0f, 1e-5f);
     EXPECT_EQ(result[0], -127);
-    EXPECT_EQ(result[1], -64);  // std::round(-0.5 * 127) = -64
+    EXPECT_EQ(result[1], -64);
     EXPECT_EQ(result[2], 0);
     EXPECT_EQ(result[3], 64);
     EXPECT_EQ(result[4], 127);
@@ -94,7 +94,7 @@ TEST(ScalarQuantize, Int8FitThenQuantizeDistributionConsistency) {
     // In db, 2.0 maps to 127
     EXPECT_EQ(quant_db[4], 127);
 
-    // In query, 0.5 maps to round(0.5 / 2.0 * 127) = round(31.75) = 32
+    // In query, 0.5 maps to round(0.5 * 127 / 2.0) = 32
     EXPECT_EQ(quant_query[2], 32);
 }
 
@@ -282,6 +282,8 @@ TEST(ScalarQuantize, DirectFP16QuantizeSingle) {
     int8_t out_i8_pd[4];
     q_i8_pd.transform_database(std::span<const uint16_t>(fp16_vec), std::span<std::byte>(reinterpret_cast<std::byte*>(out_i8_pd), sizeof(out_i8_pd)));
     EXPECT_EQ(out_i8_pd[0], -127);
+    EXPECT_EQ(out_i8_pd[1], 0);
+    EXPECT_EQ(out_i8_pd[2], 64);
     EXPECT_EQ(out_i8_pd[3], 127);
 
     // 4. Uint8PerDim
@@ -439,6 +441,29 @@ TEST(ScalarQuantize, FP16FactoryAndFP16InputEquivalence) {
     for (size_t i = 0; i < from_f32.size(); ++i) EXPECT_EQ(from_f32[i], from_fp16[i]);
 }
 
+TEST(ScalarQuantize, UInt7Basic) {
+    std::vector<float> vec = {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f};
+    const uint32_t dim = 5;
+
+    deglib::transformation::ScalarQuantizerUInt7 quantizer(dim, -1.0f, 1.0f);
+    quantizer.fit(std::span<const float>(vec), 1.0f);
+    EXPECT_NEAR(quantizer.min(), -1.0f, 1e-5f);
+    EXPECT_NEAR(quantizer.max(), 1.0f, 1e-5f);
+    EXPECT_NEAR(quantizer.scale(), 127.0f / 2.0f, 1e-5f);
+
+    auto result = transform_db_helper<deglib::transformation::ScalarQuantizerUInt7, float, int8_t>(quantizer, std::span<const float>(vec), 1);
+    ASSERT_EQ(result.size(), 5u);
+    EXPECT_EQ(result[0], 0);
+    EXPECT_EQ(result[1], 32);
+    EXPECT_EQ(result[2], 64);
+    EXPECT_EQ(result[3], 95);
+    EXPECT_EQ(result[4], 127);
+    EXPECT_EQ(quantizer.output_byte_size(), dim * sizeof(int8_t));
+    EXPECT_EQ(quantizer.tag(), deglib::transformation::TAG_SQU7);
+    EXPECT_EQ(quantizer.get_target_metric(deglib::distances::Metric::FP32_L2), deglib::distances::Metric::UInt7_L2);
+    EXPECT_EQ(quantizer.get_target_metric(deglib::distances::Metric::FP32_InnerProduct), deglib::distances::Metric::UInt7_InnerProduct);
+}
+
 TEST(ScalarQuantize, FP16MustBeFittedBeforeTransform) {
     const uint32_t dim = 8;
     std::vector<float> data(dim, 1.0f);
@@ -476,4 +501,222 @@ TEST(ScalarQuantize, FP16AbsMaxQuantile) {
     q_q.fit(std::span<const float>(data));
     EXPECT_LT(q_q.abs_max(), 1000000.0f);
     EXPECT_FLOAT_EQ(q_q.quantile(), 0.75f);
+}
+
+// ============================================================================
+// Uint4 Uniform Quantization Tests
+// ============================================================================
+
+TEST(ScalarQuantize, Uint4Basic) {
+    const uint32_t dim = 5;
+    std::vector<float> data = {0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
+
+    deglib::transformation::ScalarQuantizerUint4 q(dim, 0.0f, 1.0f);
+    const size_t out_bytes = (dim + 1) / 2;
+    std::vector<uint8_t> out(out_bytes);
+    std::span<std::byte> out_span(reinterpret_cast<std::byte*>(out.data()), out.size());
+
+    q.transform_database(std::span<const float>(data), out_span, 1);
+
+    // 0.0 -> 0, 0.25 -> round(0.25 * 15) = round(3.75) = 4
+    // byte 0: 0 | (4 << 4) = 0x40 = 64
+    EXPECT_EQ(out[0] & 0x0F, 0);
+    EXPECT_EQ((out[0] >> 4) & 0x0F, 4);
+
+    // 0.5 -> round(7.5) = 8, 0.75 -> round(11.25) = 11
+    EXPECT_EQ(out[1] & 0x0F, 8);
+    EXPECT_EQ((out[1] >> 4) & 0x0F, 11);
+
+    // 1.0 -> 15
+    EXPECT_EQ(out[2] & 0x0F, 15);
+
+    // Dequantize roundtrip
+    std::vector<float> deq(dim);
+    q.dequantize(out_span, std::span<float>(deq));
+    for (size_t i = 0; i < dim; ++i) {
+        EXPECT_NEAR(deq[i], data[i], 1.0f / 15.0f + 1e-4f);
+    }
+}
+
+TEST(ScalarQuantize, Uint4FitAndSerialize) {
+    const uint32_t dim = 4;
+    std::vector<float> data = {-10.0f, 0.0f, 10.0f, 20.0f};
+    deglib::transformation::ScalarQuantizerUint4 q(dim);
+    q.fit(std::span<const float>(data));
+
+    EXPECT_NEAR(q.min_val(), -10.0f, 1e-5f);
+    EXPECT_NEAR(q.max_val(), 20.0f, 1e-5f);
+
+    std::stringstream ss;
+    q.serialize(ss);
+
+    auto q_deser = deglib::transformation::ScalarQuantizerUint4::deserialize(ss);
+    EXPECT_EQ(q_deser->dim(), dim);
+    EXPECT_NEAR(q_deser->min_val(), -10.0f, 1e-5f);
+    EXPECT_NEAR(q_deser->max_val(), 20.0f, 1e-5f);
+    EXPECT_EQ(q_deser->tag(), deglib::transformation::TAG_SQU4);
+}
+
+TEST(ScalarQuantize, Uint4AutoOptimizeQuantile) {
+    const uint32_t dim = 64;
+    const size_t count = 500;
+    auto data = generate_random_floats(count, dim, 123);
+
+    // Default quantile is -1.0f (auto-optimize)
+    deglib::transformation::ScalarQuantizerUint4 q_auto(dim);
+    q_auto.fit(std::span<const float>(data));
+    EXPECT_TRUE(q_auto.is_fitted());
+    EXPECT_GT(q_auto.dif(), 0.0f);
+
+    // Explicit quantile 1.0f
+    deglib::transformation::ScalarQuantizerUint4 q_1(dim);
+    q_1.fit(std::span<const float>(data), 1.0f);
+    EXPECT_TRUE(q_1.is_fitted());
+
+    EXPECT_LE(q_auto.min_val(), q_auto.max_val());
+}
+
+// ============================================================================
+// Extended Baseline Tests for All Scalar Types
+// ============================================================================
+
+TEST(ScalarQuantize, Int4BasicAndTransform) {
+    const uint32_t dim = 4;
+    // Values within [-1.0, 1.0]. abs_max = 1.0 => scale = 8.0, clamp to [-8, 7]
+    std::vector<float> data = {-1.0f, -0.5f, 0.0f, 0.875f};
+    deglib::transformation::ScalarQuantizerInt4 q(dim, 1.0f);
+    EXPECT_TRUE(q.is_fitted());
+    EXPECT_EQ(q.tag(), deglib::transformation::TAG_SQI4);
+    EXPECT_EQ(q.output_byte_size(), 2u);
+
+    std::vector<uint8_t> out(2);
+    q.transform_database(std::span<const float>(data), std::span<std::byte>(reinterpret_cast<std::byte*>(out.data()), out.size()));
+
+    // byte 0 holds nibble0 and nibble1
+    // -1.0 * 8 = -8 -> clamped to -8 (nibble 0x8)
+    // -0.5 * 8 = -4 -> nibble 0xC
+    // byte 1 holds nibble2 and nibble3
+    // 0.0 * 8 = 0 -> nibble 0x0
+    // 0.875 * 8 = 7 -> nibble 0x7
+    EXPECT_EQ(out[0] & 0x0F, 0x08);
+    EXPECT_EQ((out[0] >> 4) & 0x0F, 0x0C);
+    EXPECT_EQ(out[1] & 0x0F, 0x00);
+    EXPECT_EQ((out[1] >> 4) & 0x0F, 0x07);
+
+    // Dequantize roundtrip
+    std::vector<float> deq(dim);
+    q.dequantize(std::span<const std::byte>(reinterpret_cast<const std::byte*>(out.data()), out.size()), std::span<float>(deq));
+    EXPECT_NEAR(deq[0], -1.0f, 1e-4f);
+    EXPECT_NEAR(deq[1], -0.5f, 1e-4f);
+    EXPECT_NEAR(deq[2], 0.0f, 1e-4f);
+    EXPECT_NEAR(deq[3], 0.875f, 1e-4f);
+}
+
+TEST(ScalarQuantize, Int4FitAndSerialize) {
+    const uint32_t dim = 8;
+    auto data = generate_random_floats(20, dim, 789);
+
+    deglib::transformation::ScalarQuantizerInt4 q(dim);
+    q.fit(std::span<const float>(data));
+    EXPECT_TRUE(q.is_fitted());
+    EXPECT_GT(q.abs_max(), 0.0f);
+
+    std::stringstream ss;
+    q.serialize(ss);
+
+    auto q_deser = deglib::transformation::ScalarQuantizerInt4::deserialize(ss);
+    EXPECT_EQ(q_deser->dim(), dim);
+    EXPECT_FLOAT_EQ(q_deser->abs_max(), q.abs_max());
+    EXPECT_FLOAT_EQ(q_deser->scale(), q.scale());
+    EXPECT_FLOAT_EQ(q_deser->inv_scale(), q.inv_scale());
+    EXPECT_TRUE(q_deser->is_fitted());
+}
+
+TEST(ScalarQuantize, UInt7SerializeRoundtrip) {
+    const uint32_t dim = 16;
+    auto data = generate_random_floats(25, dim, 101);
+
+    deglib::transformation::ScalarQuantizerUInt7 q(dim, -1.0f, 1.0f);
+    q.fit(std::span<const float>(data), 1.0f);
+    EXPECT_TRUE(q.is_fitted());
+
+    std::stringstream ss;
+    q.serialize(ss);
+
+    auto q_deser = deglib::transformation::ScalarQuantizerUInt7::deserialize(ss);
+    EXPECT_EQ(q_deser->dim(), dim);
+    EXPECT_FLOAT_EQ(q_deser->min(), q.min());
+    EXPECT_FLOAT_EQ(q_deser->max(), q.max());
+    EXPECT_FLOAT_EQ(q_deser->scale(), q.scale());
+    EXPECT_FLOAT_EQ(q_deser->inv_scale(), q.inv_scale());
+    EXPECT_TRUE(q_deser->is_fitted());
+
+    // Both should produce identical quantization output
+    std::vector<int8_t> out1(dim), out2(dim);
+    q.transform_database(std::span<const float>(data.data(), dim), std::span<std::byte>(reinterpret_cast<std::byte*>(out1.data()), out1.size()));
+    q_deser->transform_database(std::span<const float>(data.data(), dim), std::span<std::byte>(reinterpret_cast<std::byte*>(out2.data()), out2.size()));
+    for (size_t i = 0; i < dim; ++i) {
+        EXPECT_EQ(out1[i], out2[i]);
+    }
+}
+
+TEST(ScalarQuantize, Int8PerDimSerializeRoundtrip) {
+    const uint32_t dim = 4;
+    std::vector<float> abs_maxs = {1.0f, 2.5f, 0.5f, 10.0f};
+
+    deglib::transformation::ScalarQuantizerInt8PerDim q(dim, abs_maxs);
+    EXPECT_TRUE(q.is_fitted());
+
+    std::stringstream ss;
+    q.serialize(ss);
+
+    auto q_deser = deglib::transformation::ScalarQuantizerInt8PerDim::deserialize(ss);
+    EXPECT_EQ(q_deser->dim(), dim);
+    EXPECT_TRUE(q_deser->is_fitted());
+
+    const auto& deser_abs_maxs = q_deser->abs_maxs();
+    for (size_t i = 0; i < dim; ++i) {
+        EXPECT_FLOAT_EQ(deser_abs_maxs[i], abs_maxs[i]);
+    }
+}
+
+TEST(ScalarQuantize, Uint8PerDimSerializeRoundtrip) {
+    const uint32_t dim = 3;
+    std::vector<float> mins = {-5.0f, 0.0f, 10.0f};
+    std::vector<float> maxs = {5.0f, 100.0f, 20.0f};
+
+    deglib::transformation::ScalarQuantizerUint8PerDim q(dim, mins, maxs);
+    EXPECT_TRUE(q.is_fitted());
+
+    std::stringstream ss;
+    q.serialize(ss);
+
+    auto q_deser = deglib::transformation::ScalarQuantizerUint8PerDim::deserialize(ss);
+    EXPECT_EQ(q_deser->dim(), dim);
+    EXPECT_TRUE(q_deser->is_fitted());
+
+    const auto& deser_mins = q_deser->mins();
+    const auto& deser_maxs = q_deser->maxs();
+    for (size_t i = 0; i < dim; ++i) {
+        EXPECT_FLOAT_EQ(deser_mins[i], mins[i]);
+        EXPECT_FLOAT_EQ(deser_maxs[i], maxs[i]);
+    }
+}
+
+TEST(ScalarQuantize, OptimizeQuantileUint4FindsClippingOnOutliers) {
+    const uint32_t dim = 64;
+    const size_t count = 300;
+    auto data = generate_random_floats(count, dim, 999);
+
+    // Add severe outliers across multiple vectors to artificially expand the range
+    for (size_t i = 0; i < count; i += 30) {
+        data[i * dim + 0] = 50.0f;
+        data[i * dim + 1] = -50.0f;
+    }
+
+    float opt_q = deglib::transformation::detail::optimize_quantile_uint4(data.data(), count * dim, dim, true);
+    // Because 99% of data is normalized to unit length (~[-0.3, 0.3]) and only a few coordinates are +/-50,
+    // optimal clipping quantile MUST be strictly less than 1.0f.
+    EXPECT_LT(opt_q, 1.0f);
+    EXPECT_GE(opt_q, 0.90f);
 }

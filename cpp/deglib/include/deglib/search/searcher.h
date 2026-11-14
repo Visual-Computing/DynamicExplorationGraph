@@ -34,6 +34,7 @@ struct QueryWorkspace {
     std::vector<uint16_t> f16_buf;
     std::vector<std::byte> quant_buf1;
     std::vector<std::byte> quant_buf2;
+    std::vector<uint32_t> entry_buf;  // reusable entry-point buffer (avoids per-query allocation)
 };
 
 /**
@@ -108,7 +109,7 @@ class Searcher {
             const auto& trans = transformations_[t];
             const bool is_last = (t + 1 == transformations_.size());
 
-            const size_t out_bytes = (trans->output_byte_size() > 0) ? trans->output_byte_size() : graph_->getFeatureSpace().get_data_size();
+            const size_t out_bytes = std::max(std::max(trans->query_byte_size(), trans->output_byte_size()), graph_->getFeatureSpace().get_data_size());
             const size_t cur_dim = trans->input_dim();
             std::span<const float> in_span(current_f32, cur_dim);
             if (is_last) {
@@ -180,16 +181,23 @@ class Searcher {
         const std::byte* graph_query_ptr = prepare_query(effective_query, dim, ws);
         const auto query_span = std::span<const std::byte>(graph_query_ptr, graph_->getFeatureSpace().get_data_size());
 
-        // Select entry point: query routing medoid or static graph anchor
-        std::vector<uint32_t> entry_vertices;
+        // Rerank: flat top-k against full-precision features (zero per-query allocation).
+        auto do_rerank = [&](const uint32_t* cands, size_t ncand) -> uint32_t {
+            return reranker_->rerank(
+                std::span<const QueryT>(effective_query, dim), std::span<const uint32_t>(cands, ncand), k, std::span<uint32_t>(out_indices, k),
+                return_distances ? std::span<float>(out_distances, k) : std::span<float>{}, return_distances, unsorted
+            );
+        };
+
+        // Select entry point: query routing medoid or static graph anchor (reuse ws buffer, no per-query alloc).
+        auto& entry_vertices = ws.entry_buf;
         if (entry_selector_.has_entries()) {
-            entry_vertices = entry_selector_.top_entries(query_span, 2);
+            entry_selector_.top_entries(query_span, 2, entry_vertices);
         } else {
             entry_vertices = graph_->getEntryVertexIndices();
         }
 
-        const uint32_t num_candidates =
-            reranker_.has_value() ? std::max<uint32_t>(k, static_cast<uint32_t>(std::ceil(static_cast<float>(k) * std::max(1.0f, rerank_factor)))) : k;
+        const uint32_t num_candidates = reranker_.has_value() ? static_cast<uint32_t>(std::ceil(static_cast<float>(k) * std::max(1.0f, rerank_factor))) : k;
         const bool should_rerank = reranker_.has_value() && (num_candidates > k);
 
         if (use_ef) {
@@ -208,7 +216,7 @@ class Searcher {
                 for (size_t i = 0; i < ef_res.size(); ++i) {
                     cand_indices[i] = ef_res[i].getIdentifier();
                 }
-                uint32_t found = reranker_->rerank(effective_query, dim, cand_indices, ef_res.size(), k, out_indices, out_distances, return_distances, unsorted);
+                uint32_t found = do_rerank(cand_indices, ef_res.size());
                 for (size_t i = 0; i < found; ++i) {
                     out_indices[i] = graph_->getExternalLabel(out_indices[i]);
                 }
@@ -241,7 +249,7 @@ class Searcher {
                 for (size_t i = 0; i < heap_res.size(); ++i) {
                     cand_indices[i] = heap_res[i].getIdentifier();
                 }
-                uint32_t found = reranker_->rerank(effective_query, dim, cand_indices, heap_res.size(), k, out_indices, out_distances, return_distances, unsorted);
+                uint32_t found = do_rerank(cand_indices, heap_res.size());
                 for (size_t i = 0; i < found; ++i) {
                     out_indices[i] = graph_->getExternalLabel(out_indices[i]);
                 }
@@ -312,7 +320,7 @@ class Searcher {
         float* out_distances = nullptr,
         bool unsorted = false
     ) const {
-        QueryWorkspace ws;
+        thread_local QueryWorkspace ws;
         return execute_search_single(query, k, eps, 0, false, rerank_factor, out_indices, out_distances, out_distances != nullptr, unsorted, ws);
     }
 
@@ -325,7 +333,7 @@ class Searcher {
         float* out_distances = nullptr,
         bool unsorted = false
     ) const {
-        QueryWorkspace ws;
+        thread_local QueryWorkspace ws;
         return execute_search_single(query, k, eps, 0, false, rerank_factor, out_indices, out_distances, out_distances != nullptr, unsorted, ws);
     }
 
@@ -338,7 +346,7 @@ class Searcher {
         float* out_distances = nullptr,
         bool unsorted = false
     ) const {
-        QueryWorkspace ws;
+        thread_local QueryWorkspace ws;
         return execute_search_single(query, k, 0.0f, ef, true, rerank_factor, out_indices, out_distances, out_distances != nullptr, unsorted, ws);
     }
 
@@ -351,7 +359,7 @@ class Searcher {
         float* out_distances = nullptr,
         bool unsorted = false
     ) const {
-        QueryWorkspace ws;
+        thread_local QueryWorkspace ws;
         return execute_search_single(query, k, 0.0f, ef, true, rerank_factor, out_indices, out_distances, out_distances != nullptr, unsorted, ws);
     }
 
@@ -372,7 +380,7 @@ class Searcher {
         const uint32_t dim = graph_->getFeatureSpace().dim();
 
         deglib::concurrent::parallel_batch_for(0, n_queries, threads, [&](size_t begin, size_t end, size_t) {
-            QueryWorkspace ws;
+            thread_local QueryWorkspace ws;
             for (size_t q = begin; q < end; ++q) {
                 const float* q_ptr = queries + q * dim;
                 uint32_t* idx_ptr = out_indices + q * k;
@@ -397,7 +405,7 @@ class Searcher {
         const uint32_t dim = graph_->getFeatureSpace().dim();
 
         deglib::concurrent::parallel_batch_for(0, n_queries, threads, [&](size_t begin, size_t end, size_t) {
-            QueryWorkspace ws;
+            thread_local QueryWorkspace ws;
             for (size_t q = begin; q < end; ++q) {
                 const uint16_t* q_ptr = queries + q * dim;
                 uint32_t* idx_ptr = out_indices + q * k;
@@ -422,7 +430,7 @@ class Searcher {
         const uint32_t dim = graph_->getFeatureSpace().dim();
 
         deglib::concurrent::parallel_batch_for(0, n_queries, threads, [&](size_t begin, size_t end, size_t) {
-            QueryWorkspace ws;
+            thread_local QueryWorkspace ws;
             for (size_t q = begin; q < end; ++q) {
                 const float* q_ptr = queries + q * dim;
                 uint32_t* idx_ptr = out_indices + q * k;
@@ -447,7 +455,7 @@ class Searcher {
         const uint32_t dim = graph_->getFeatureSpace().dim();
 
         deglib::concurrent::parallel_batch_for(0, n_queries, threads, [&](size_t begin, size_t end, size_t) {
-            QueryWorkspace ws;
+            thread_local QueryWorkspace ws;
             for (size_t q = begin; q < end; ++q) {
                 const uint16_t* q_ptr = queries + q * dim;
                 uint32_t* idx_ptr = out_indices + q * k;
@@ -481,7 +489,7 @@ class Searcher {
         const uint32_t ef = use_ef ? static_cast<uint32_t>(std::lround(eps_or_ef)) : 0;
         const float eps = use_ef ? 0.0f : eps_or_ef;
 
-        QueryWorkspace ws;
+        thread_local QueryWorkspace ws;
         return execute_search_single(query.data(), k, eps, ef, use_ef, rerank_factor, out_indices.data(), d_ptr, return_distances, unsorted, ws);
     }
 
@@ -582,76 +590,84 @@ class Searcher {
      *
      * `n_clusters` is limited to 512 entry medoids. `sample_size` controls how many graph/base rows are sampled for K-Means candidates.
      */
-    void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 0, uint32_t k = 100, uint32_t seed = 42, size_t threads = 0) {
+    /// Optimize: K-Means query-routing entry selection + reranker prefetch (po,pl) auto-tuning + graph
+    /// traversal prefetch tuning. The reranker's (po,pl) is tuned by optimize() (300 sample queries);
+    /// the non-fast Searcher exposes no manual prefetch override (only the Fast variants tune by hand).
+    void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 0, uint32_t k = 100, size_t threads = 0, bool use_routing = false) {
         if (!graph_ || graph_->size() == 0) return;
+        constexpr uint32_t seed = 42;  // fixed sampling seed (K-Means candidate shuffle + init): not caller-facing.
         const size_t n = graph_->size();
         if (threads == 0) threads = std::max<size_t>(1, std::thread::hardware_concurrency());
 
-        // 1. K-Means medoids query-routing selection
-        const size_t actual_sample = sample_size == 0 ? std::min<size_t>(n, std::max<size_t>(1000, n * 3 / 100)) : std::min(sample_size, n);
-        std::vector<uint32_t> candidate_ids(n);
-        std::iota(candidate_ids.begin(), candidate_ids.end(), 0);
-        std::mt19937 rng(seed);
-        std::shuffle(candidate_ids.begin(), candidate_ids.end(), rng);
-        candidate_ids.resize(actual_sample);
+        // 1. K-Means medoids query-routing selection (skippable via use_routing=false -> static entry).
+        if (use_routing) {
+            const size_t actual_sample = sample_size == 0 ? std::min<size_t>(n, std::max<size_t>(1000, n * 3 / 100)) : std::min(sample_size, n);
+            std::vector<uint32_t> candidate_ids(n);
+            std::iota(candidate_ids.begin(), candidate_ids.end(), 0);
+            std::mt19937 rng(seed);
+            std::shuffle(candidate_ids.begin(), candidate_ids.end(), rng);
+            candidate_ids.resize(actual_sample);
 
-        auto fit_candidates = [&](std::span<const float* const> rows, uint32_t dim, bool is_l2) {
-            entry_selector_.fit(rows, candidate_ids, dim, is_l2, n_clusters, n_iter, seed, threads);
-        };
-
-        const bool use_reranker = reranker_.has_value() && reranker_->getBaseVectors() != nullptr && reranker_->getNumBaseVectors() >= n;
-        const auto& space = use_reranker ? reranker_->getSpace() : graph_->getFeatureSpace();
-        const uint32_t dim = space.dim();
-        const bool is_l2 = space.metric().get_distance_kind() == deglib::distances::MetricDistanceKind::L2;
-        const auto data_type = space.metric().get_data_type();
-
-        auto get_raw_ptr = [&](uint32_t id) -> const void* {
-            if (use_reranker) {
-                return static_cast<const std::byte*>(reranker_->getBaseVectors()) + static_cast<size_t>(id) * space.get_data_size();
-            }
-            return graph_->getFeatureVector(id);
-        };
-
-        if (data_type == deglib::distances::MetricDataType::FP32) {
-            std::vector<const float*> rows(actual_sample);
-            for (size_t i = 0; i < actual_sample; ++i) {
-                rows[i] = static_cast<const float*>(get_raw_ptr(candidate_ids[i]));
-            }
-            fit_candidates(rows, dim, is_l2);
-        } else {
-            std::vector<float> decoded(actual_sample * dim);
-            std::vector<const float*> rows(actual_sample);
-
-            auto decode_row = [&](const void* src, float* dst) {
-                if (data_type == deglib::distances::MetricDataType::FP16) {
-                    deglib::distances::fp16::fp16_to_floats(static_cast<const uint16_t*>(src), dst, dim);
-                } else if (!transformations_.empty()) {
-                    transformations_.back()->dequantize({static_cast<const std::byte*>(src), space.get_data_size()}, {dst, dim});
-                } else if (data_type == deglib::distances::MetricDataType::Int8) {
-                    std::copy_n(static_cast<const int8_t*>(src), dim, dst);
-                } else if (data_type == deglib::distances::MetricDataType::Uint8) {
-                    std::copy_n(static_cast<const uint8_t*>(src), dim, dst);
-                }
+            auto fit_candidates = [&](std::span<const float* const> rows, uint32_t dim, bool is_l2) {
+                entry_selector_.fit(rows, candidate_ids, dim, is_l2, n_clusters, n_iter, seed, threads);
             };
 
-            deglib::concurrent::parallel_for(0, actual_sample, threads, [&](size_t i, size_t) {
-                decode_row(get_raw_ptr(candidate_ids[i]), decoded.data() + i * dim);
-            });
+            const bool use_reranker = reranker_.has_value() && reranker_->getBaseVectors() != nullptr && reranker_->getNumBaseVectors() >= n;
+            const auto& space = use_reranker ? reranker_->getSpace() : graph_->getFeatureSpace();
+            const uint32_t dim = space.dim();
+            const bool is_l2 = space.metric().get_distance_kind() == deglib::distances::MetricDistanceKind::L2;
+            const auto data_type = space.metric().get_data_type();
 
-            for (size_t i = 0; i < actual_sample; ++i) {
-                rows[i] = decoded.data() + i * dim;
+            auto get_raw_ptr = [&](uint32_t id) -> const void* {
+                if (use_reranker) {
+                    return static_cast<const std::byte*>(reranker_->getBaseVectors()) + static_cast<size_t>(id) * space.get_data_size();
+                }
+                return graph_->getFeatureVector(id);
+            };
+
+            if (data_type == deglib::distances::MetricDataType::FP32) {
+                std::vector<const float*> rows(actual_sample);
+                for (size_t i = 0; i < actual_sample; ++i) {
+                    rows[i] = static_cast<const float*>(get_raw_ptr(candidate_ids[i]));
+                }
+                fit_candidates(rows, dim, is_l2);
+            } else {
+                std::vector<float> decoded(actual_sample * dim);
+                std::vector<const float*> rows(actual_sample);
+
+                auto decode_row = [&](const void* src, float* dst) {
+                    if (data_type == deglib::distances::MetricDataType::FP16) {
+                        deglib::distances::fp16::fp16_to_floats(static_cast<const uint16_t*>(src), dst, dim);
+                    } else if (!transformations_.empty()) {
+                        transformations_.back()->dequantize({static_cast<const std::byte*>(src), space.get_data_size()}, {dst, dim});
+                    } else if (data_type == deglib::distances::MetricDataType::Int8) {
+                        std::copy_n(static_cast<const int8_t*>(src), dim, dst);
+                    } else if (data_type == deglib::distances::MetricDataType::Uint8) {
+                        std::copy_n(static_cast<const uint8_t*>(src), dim, dst);
+                    }
+                };
+
+                deglib::concurrent::parallel_for(0, actual_sample, threads, [&](size_t i, size_t) {
+                    decode_row(get_raw_ptr(candidate_ids[i]), decoded.data() + i * dim);
+                });
+
+                for (size_t i = 0; i < actual_sample; ++i) {
+                    rows[i] = decoded.data() + i * dim;
+                }
+                fit_candidates(rows, dim, is_l2);
             }
-            fit_candidates(rows, dim, is_l2);
         }
 
-        // 2. Candidate reranker prefetch auto-tuning
+        // 2. Candidate reranker prefetch auto-tuning (library default: 300 sample queries = noise-stable).
+        const size_t num_cands = static_cast<size_t>(std::ceil(static_cast<float>(k) * 1.5f));
         if (reranker_.has_value()) {
-            const size_t num_cands = static_cast<size_t>(std::ceil(static_cast<float>(k) * 1.5f));
-            reranker_->optimize(50, num_cands, k);
+            reranker_->optimize(300, num_cands, k);
         }
 
-        // 3. Graph traversal prefetch tuning
-        graph_->optimize();
+        // 3. Graph traversal prefetch tuning. The graph re-selects a median entry from a subset; with
+        // routing the entry is the K-Means routing entry (set above), so median_subset=0 keeps it intact
+        // (otherwise the graph's median-entry selection would override the routing entry).
+        graph_->optimize(300, k, static_cast<uint32_t>(num_cands));
     }
 };
 

@@ -295,7 +295,7 @@ TEST(DEGHasPathReturnsExternalLabels, HasPathEmptyForUnreachableTarget) {
 
 TEST(DEGHasPathReturnsExternalLabels, HasPathWithReadOnlyGraphBackend) {
     auto size_bounded = build_test_graph();
-    auto readonly = deglib::graph::convert_to_readonly_graph(size_bounded);
+    auto readonly = deglib::graph::ReadOnlyGraph::from_graph(size_bounded);
     deglib::DynamicExplorationGraph deg(readonly);
 
     auto path = deg.hasPath({kExternalLabels[0]}, kExternalLabels[2], 0.0f, 5);
@@ -345,7 +345,7 @@ TEST(DEGHasVertexUsesExternalLabels, HasVertexFalseForInternalIndices) {
 
 TEST(DEGSearchReturnsExternalLabels, SearchWithReadOnlyGraphBackend) {
     auto size_bounded = build_test_graph();
-    auto readonly = deglib::graph::convert_to_readonly_graph(size_bounded);
+    auto readonly = deglib::graph::ReadOnlyGraph::from_graph(size_bounded);
     deglib::DynamicExplorationGraph deg(readonly);
 
     // Query near vertex 0 (external label 1005)
@@ -367,7 +367,7 @@ TEST(DEGSearchReturnsExternalLabels, SearchWithReadOnlyGraphBackend) {
 
 TEST(DEGExploreReturnsExternalLabels, ExploreWithReadOnlyGraphBackend) {
     auto size_bounded = build_test_graph();
-    auto readonly = deglib::graph::convert_to_readonly_graph(size_bounded);
+    auto readonly = deglib::graph::ReadOnlyGraph::from_graph(size_bounded);
     deglib::DynamicExplorationGraph deg(readonly);
 
     // Explore from external label 42 (internal index 2)

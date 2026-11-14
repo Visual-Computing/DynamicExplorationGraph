@@ -213,7 +213,7 @@ class DynamicExplorationGraph {
                     throw std::invalid_argument(std::format("Dimension mismatch: Transformations expect {} dims, query has {}", getInputDim(), query.size()));
                 }
                 thread_local deglib::transformation::QueryWorkspace workspace;
-                const size_t out_bytes = deglib::transformation::get_output_bytes(transformations_);
+                const size_t out_bytes = std::max(deglib::transformation::get_output_bytes(transformations_), internal_graph_->getFeatureSpace().get_data_size());
                 std::byte* q_buf = workspace.get_buffer_a(out_bytes);
 
                 if constexpr (std::is_same_v<T, float>) {
@@ -272,7 +272,7 @@ class DynamicExplorationGraph {
                     throw std::invalid_argument(std::format("Dimension mismatch: Transformations expect {} dims, query has {}", getInputDim(), query.size()));
                 }
                 thread_local deglib::transformation::QueryWorkspace workspace;
-                const size_t out_bytes = deglib::transformation::get_output_bytes(transformations_);
+                const size_t out_bytes = std::max(deglib::transformation::get_output_bytes(transformations_), internal_graph_->getFeatureSpace().get_data_size());
                 std::byte* q_buf = workspace.get_buffer_a(out_bytes);
 
                 if constexpr (std::is_same_v<T, float>) {
@@ -340,7 +340,7 @@ class DynamicExplorationGraph {
 
         if constexpr (std::is_same_v<T, float> || std::is_same_v<T, uint16_t>) {
             if (hasTransformations()) {
-                const size_t out_stride = deglib::transformation::get_output_bytes(transformations_);
+                const size_t out_stride = std::max(deglib::transformation::get_output_bytes(transformations_), internal_graph_->getFeatureSpace().get_data_size());
 
                 deglib::concurrent::parallel_for(0, count, threads, [&](size_t i, size_t) {
                     alignas(64) std::byte stack_buf[512];
@@ -476,7 +476,7 @@ class DynamicExplorationGraph {
 
         if constexpr (std::is_same_v<T, float> || std::is_same_v<T, uint16_t>) {
             if (hasTransformations()) {
-                const size_t out_stride = deglib::transformation::get_output_bytes(transformations_);
+                const size_t out_stride = std::max(deglib::transformation::get_output_bytes(transformations_), internal_graph_->getFeatureSpace().get_data_size());
 
                 deglib::concurrent::parallel_for(0, count, threads, [&](size_t q, size_t) {
                     alignas(64) std::byte stack_buf[512];
@@ -590,7 +590,7 @@ class DynamicExplorationGraph {
 
         if constexpr (std::is_same_v<T, float> || std::is_same_v<T, uint16_t>) {
             if (hasTransformations()) {
-                const size_t out_stride = deglib::transformation::get_output_bytes(transformations_);
+                const size_t out_stride = std::max(deglib::transformation::get_output_bytes(transformations_), internal_graph_->getFeatureSpace().get_data_size());
 
                 deglib::concurrent::parallel_for(0, count, threads, [&](size_t q, size_t) {
                     alignas(64) std::byte stack_buf[512];
@@ -668,7 +668,7 @@ class DynamicExplorationGraph {
 
         if constexpr (std::is_same_v<T, float> || std::is_same_v<T, uint16_t>) {
             if (hasTransformations()) {
-                const size_t out_stride = deglib::transformation::get_output_bytes(transformations_);
+                const size_t out_stride = std::max(deglib::transformation::get_output_bytes(transformations_), internal_graph_->getFeatureSpace().get_data_size());
 
                 deglib::concurrent::parallel_for(0, count, threads, [&](size_t i, size_t) {
                     alignas(64) std::byte stack_buf[512];
@@ -1131,11 +1131,12 @@ class DynamicExplorationGraph {
     DynamicExplorationGraph to_readonly(
         std::optional<deglib::distances::FloatSpace> custom_feature_space = std::nullopt,
         const void* custom_features = nullptr,
-        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
+        size_t custom_feature_stride = 0
     ) const {
         auto xfrms = !transformations.empty() ? std::move(transformations) : transformations_;
         auto graph = std::make_unique<deglib::graph::ReadOnlyGraph>(
-            deglib::graph::ReadOnlyGraph::from_graph(*internal_graph_, custom_feature_space, custom_features, xfrms)
+            deglib::graph::ReadOnlyGraph::from_graph(*internal_graph_, custom_feature_space, custom_features, xfrms, custom_feature_stride)
         );
         return DynamicExplorationGraph(std::move(graph), std::move(xfrms));
     }
@@ -1265,13 +1266,12 @@ class DynamicExplorationGraph {
      * traversal over sampled vertices. The graph self-samples its own stored features as queries,
      * so no external query buffer is needed. Forwards to the internal graph's optimize().
      *
-     * @param sample_count  Number of vertices sampled as queries (capped at the graph size).
+     * @param sample_count  Number of vertices sampled as queries (capped at the graph size; default 300 for noise-stable tuning).
      * @param k             Result count per traversal (the expected query operating point).
      * @param ef            Beam width per traversal; clamped to at least k.
-     * @param seed          Random seed for query sampling.
      */
-    void optimize(size_t sample_count = 50, uint32_t k = 100, uint32_t ef = 200, uint32_t seed = 7) const {
-        internal_graph_->optimize(sample_count, k, ef, seed);
+    void optimize(size_t sample_count = 300, uint32_t k = 100, uint32_t ef = 200, size_t median_subset = 4096) const {
+        internal_graph_->optimize(sample_count, k, ef, median_subset);
     }
 
     /**
@@ -1324,9 +1324,7 @@ class DynamicExplorationGraph {
         return DynamicExplorationGraph(std::move(graph), std::move(transformations));
     }
 
-    static DynamicExplorationGraph load_mutable(const std::string& path, const uint32_t new_max_size = 0) {
-        return load_mutable(path.c_str(), new_max_size);
-    }
+    static DynamicExplorationGraph load_mutable(const std::string& path, const uint32_t new_max_size = 0) { return load_mutable(path.c_str(), new_max_size); }
 
     /**
      * @brief Loads a graph from a binary file directly into a mutable chunk-allocated DynamicGraph.
@@ -1341,9 +1339,7 @@ class DynamicExplorationGraph {
         return DynamicExplorationGraph(std::move(graph), std::move(transformations));
     }
 
-    static DynamicExplorationGraph load_dynamic(const std::string& path, const uint32_t chunk_size = 1024) {
-        return load_dynamic(path.c_str(), chunk_size);
-    }
+    static DynamicExplorationGraph load_dynamic(const std::string& path, const uint32_t chunk_size = 1024) { return load_dynamic(path.c_str(), chunk_size); }
 };
 
 }  // namespace deglib
