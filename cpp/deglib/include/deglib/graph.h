@@ -1131,12 +1131,11 @@ class DynamicExplorationGraph {
     DynamicExplorationGraph to_readonly(
         std::optional<deglib::distances::FloatSpace> custom_feature_space = std::nullopt,
         const void* custom_features = nullptr,
-        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
-        size_t custom_feature_stride = 0
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
     ) const {
         auto xfrms = !transformations.empty() ? std::move(transformations) : transformations_;
         auto graph = std::make_unique<deglib::graph::ReadOnlyGraph>(
-            deglib::graph::ReadOnlyGraph::from_graph(*internal_graph_, custom_feature_space, custom_features, xfrms, custom_feature_stride)
+            deglib::graph::ReadOnlyGraph::from_graph(*internal_graph_, custom_feature_space, custom_features, xfrms)
         );
         return DynamicExplorationGraph(std::move(graph), std::move(xfrms));
     }

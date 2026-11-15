@@ -18,7 +18,7 @@
 
 namespace deglib::transformation {
 
-// Glass SQ8U-style affine uniform quantizer restricted to the signed range [0, 127].
+// Affine uniform quantizer restricted to the signed range [0, 127].
 class ScalarQuantizerUInt7 : public FeatureTransformation {
   public:
     using output_type = int8_t;

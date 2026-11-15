@@ -110,12 +110,5 @@ examples/vibe/
 ├── plot.py              # Interactive Plotly visualization / log explorer
 ├── config.yml           # Benchmark sweep configuration
 ├── run_bench.bat        # Batch runner for all VIBE datasets
-├── pyproject.toml       # Python project metadata
-└── glass_analysis/      # Glass vs. DEG performance analysis (see README.md)
-    ├── README.md        # Index of all analysis scripts
-    ├── single_query_bench.py   # Primary benchmark (produces glass_performance_analysis.md)
-    ├── bench_four_glass.py     # Glass native 4-variant sweep
-    ├── bench_four_deg.py       # DEG FLAS 4-variant sweep
-    ├── ...
-    └── evaluate_quant_matrix.py # Quantization grid evaluation
+└── pyproject.toml       # Python project metadata
 ```

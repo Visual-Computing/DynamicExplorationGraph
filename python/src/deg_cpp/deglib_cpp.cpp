@@ -976,15 +976,12 @@ deglib::DynamicExplorationGraph read_only_graph_from_graph_wrapper(
 ) {
     const void* feat_ptr = nullptr;
     py::buffer_info feat_info;
-    size_t custom_feature_stride = 0;
 
     if (custom_features.has_value() && !custom_features->is_none()) {
         feat_info = custom_features->request();
         feat_ptr = feat_info.ptr;
         if (custom_feature_space.has_value()) {
-            const size_t row_bytes = custom_transformations.empty() ? custom_feature_space->get_data_size() : custom_transformations.back()->output_byte_size();
-            custom_feature_stride = row_bytes;
-            const size_t expected_bytes = graph.size() * row_bytes;
+            const size_t expected_bytes = graph.size() * custom_feature_space->get_data_size();
             const size_t actual_bytes = feat_info.size * feat_info.itemsize;
             if (actual_bytes != expected_bytes) {
                 throw std::invalid_argument(
@@ -994,7 +991,7 @@ deglib::DynamicExplorationGraph read_only_graph_from_graph_wrapper(
         }
     }
 
-    return graph.to_readonly(custom_feature_space, feat_ptr, std::move(custom_transformations), custom_feature_stride);
+    return graph.to_readonly(custom_feature_space, feat_ptr, std::move(custom_transformations));
 }
 
 deglib::DynamicExplorationGraph dynamic_graph_from_graph_wrapper(
@@ -2548,15 +2545,11 @@ PYBIND11_MODULE(deglib_cpp, m) {
                std::optional<py::array> custom_features, std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations) {
                 const void* feat_ptr = nullptr;
                 py::buffer_info feat_info;
-                size_t custom_feature_stride = 0;
                 if (custom_features.has_value() && !custom_features->is_none()) {
                     feat_info = custom_features->request();
                     feat_ptr = feat_info.ptr;
                     if (custom_feature_space.has_value()) {
-                        const size_t row_bytes =
-                            transformations.empty() ? custom_feature_space->get_data_size() : transformations.back()->output_byte_size();
-                        custom_feature_stride = row_bytes;
-                        const size_t expected_bytes = g.size() * row_bytes;
+                        const size_t expected_bytes = g.size() * custom_feature_space->get_data_size();
                         const size_t actual_bytes = feat_info.size * feat_info.itemsize;
                         if (actual_bytes != expected_bytes) {
                             throw std::invalid_argument(
@@ -2567,7 +2560,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
                         }
                     }
                 }
-                return g.to_readonly(custom_feature_space, feat_ptr, std::move(transformations), custom_feature_stride);
+                return g.to_readonly(custom_feature_space, feat_ptr, std::move(transformations));
             },
             py::arg("custom_feature_space") = py::none(), py::arg("custom_features") = py::none(),
             py::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}

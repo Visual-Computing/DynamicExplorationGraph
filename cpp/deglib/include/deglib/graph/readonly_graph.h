@@ -26,13 +26,13 @@ namespace deglib::graph {
 
 namespace detail {
 
-inline constexpr size_t kGlassLayoutCacheLine = 64;
-inline constexpr size_t kGlassLayoutHugePage = 2u * 1024u * 1024u;
+inline constexpr size_t kCacheLineAlignment = 64;
+inline constexpr size_t kHugePageAlignment = 2u * 1024u * 1024u;
 
 inline constexpr size_t align_up(size_t value, size_t alignment) noexcept { return (value + alignment - 1) / alignment * alignment; }
 
 inline constexpr size_t storage_alignment(size_t bytes) noexcept {
-    return bytes >= kGlassLayoutHugePage ? kGlassLayoutHugePage : kGlassLayoutCacheLine;
+    return bytes >= kHugePageAlignment ? kHugePageAlignment : kCacheLineAlignment;
 }
 
 template <typename T>
@@ -64,12 +64,9 @@ class ReadOnlyGraph : public InternalGraph {
 
     ReadOnlyGraph() = default;
 
-    ReadOnlyGraph(uint32_t count, uint8_t edges_per_vertex, const deglib::distances::FloatSpace& space, size_t align_width = 64) {
+    ReadOnlyGraph(uint32_t count, uint8_t edges_per_vertex, const deglib::distances::FloatSpace& space) {
         if (count == 0 || edges_per_vertex == 0) {
             throw std::invalid_argument("ReadOnlyGraph requires count and edges_per_vertex > 0");
-        }
-        if (align_width == 0) {
-            throw std::invalid_argument("ReadOnlyGraph align_width must be > 0");
         }
 
         const size_t feature_bytes = space.get_data_size();
@@ -81,7 +78,7 @@ class ReadOnlyGraph : public InternalGraph {
         edges_per_vertex_ = edges_per_vertex;
         feature_dim_ = static_cast<int32_t>(space.dim());
         feature_byte_size_ = feature_bytes;
-        feature_stride_ = detail::align_up(feature_bytes, align_width);
+        feature_stride_ = detail::align_up(feature_bytes, detail::kCacheLineAlignment);
 
         const size_t feature_total = size_t(vertex_count_) * feature_stride_;
         const size_t edge_total = size_t(vertex_count_) * size_t(edges_per_vertex_) * sizeof(int32_t);
@@ -117,9 +114,7 @@ class ReadOnlyGraph : public InternalGraph {
         const InternalGraph& input_graph,
         std::optional<deglib::distances::FloatSpace> target_feature_space = std::nullopt,
         const void* custom_features = nullptr,
-        std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
-        size_t custom_feature_stride = 0,
-        size_t align_width = 64
+        std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
     ) {
         const auto resolved_feature_space = [&]() -> deglib::distances::FloatSpace {
             if (target_feature_space.has_value()) {
@@ -133,22 +128,9 @@ class ReadOnlyGraph : public InternalGraph {
             return input_graph.getFeatureSpace();
         }();
 
-        ReadOnlyGraph graph(input_graph.size(), input_graph.getEdgesPerVertex(), resolved_feature_space, align_width);
+        ReadOnlyGraph graph(input_graph.size(), input_graph.getEdgesPerVertex(), resolved_feature_space);
 
         const size_t target_feature_bytes = graph.feature_space_.get_data_size();
-        const size_t source_feature_stride = custom_feature_stride != 0 ? custom_feature_stride : target_feature_bytes;
-        const size_t required_feature_stride = custom_features == nullptr ? graph.feature_stride_ : std::max(graph.feature_stride_, detail::align_up(source_feature_stride, align_width));
-        if (required_feature_stride > graph.feature_stride_) {
-            auto storage = std::make_unique<std::byte[]>(size_t(graph.vertex_count_) * required_feature_stride);
-            std::memset(storage.get(), 0, size_t(graph.vertex_count_) * required_feature_stride);
-            for (uint32_t i = 0; i < graph.vertex_count_; ++i) {
-                std::memcpy(storage.get() + size_t(i) * required_feature_stride, graph.features_ + size_t(i) * graph.feature_stride_, graph.feature_stride_);
-            }
-            graph.feature_stride_ = required_feature_stride;
-            graph.features_storage_ = std::move(storage);
-            graph.features_ = graph.features_storage_.get();
-        }
-        const size_t copy_bytes = custom_features == nullptr ? target_feature_bytes : source_feature_stride;
         const std::byte* custom_source_features = custom_features == nullptr ? nullptr : static_cast<const std::byte*>(custom_features);
 
         const auto source_metric = input_graph.getFeatureSpace().metric();
@@ -177,8 +159,9 @@ class ReadOnlyGraph : public InternalGraph {
                     throw std::invalid_argument("ReadOnlyGraph::from_graph: cannot self-transform from non-float base features");
                 }
             } else {
-                const std::byte* source_features = custom_source_features == nullptr ? input_graph.getFeatureVector(i) : custom_source_features + size_t(i) * source_feature_stride;
-                std::memcpy(target_features, source_features, copy_bytes);
+                const std::byte* source_features =
+                    custom_source_features == nullptr ? input_graph.getFeatureVector(i) : custom_source_features + size_t(i) * target_feature_bytes;
+                std::memcpy(target_features, source_features, target_feature_bytes);
             }
 
             const uint32_t* neighbor_indices = input_graph.getNeighborIndices(i);
@@ -194,9 +177,9 @@ class ReadOnlyGraph : public InternalGraph {
         return graph;
     }
 
-    [[nodiscard]] static ReadOnlyGraph loadGraph(const char* path_graph, size_t align_width = 64) {
+    [[nodiscard]] static ReadOnlyGraph loadGraph(const char* path_graph) {
         auto [is, header] = deglib::serialization::open_graph_file(path_graph);
-        ReadOnlyGraph graph(header.size, header.edges_per_vertex, *header.feature_space, align_width);
+        ReadOnlyGraph graph(header.size, header.edges_per_vertex, *header.feature_space);
         graph.label_to_index_.clear();
         graph.label_to_index_.reserve(header.size);
 

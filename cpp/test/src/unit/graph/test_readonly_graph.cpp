@@ -217,7 +217,7 @@ TEST(ReadOnlyGraphTest, SerializesStandardGraphFormat) {
     source.setEntryVertexIndices({3});
     source.setPrefetch(5, 2, 1);
 
-    const auto path = std::filesystem::temp_directory_path() / "glass_layout_graph.bin";
+    const auto path = std::filesystem::temp_directory_path() / "readonly_layout_graph.bin";
     ASSERT_TRUE(source.saveGraph(path.string().c_str()));
 
     const auto graph = deglib::graph::ReadOnlyGraph::loadGraph(path.string().c_str());
@@ -248,7 +248,7 @@ TEST(ReadOnlyGraphTest, SerializesStandardGraphFormat) {
 
 TEST(ReadOnlyGraphTest, OptimizeIsNoopForEmptyGraph) {
     deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
-    deglib::graph::ReadOnlyGraph graph(1, 1, space, 64);
+    deglib::graph::ReadOnlyGraph graph(1, 1, space);
 
     graph.optimize(0, 5, 10);
 

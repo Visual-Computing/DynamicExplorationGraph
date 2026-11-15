@@ -243,7 +243,7 @@ TEST(SearcherTest, OptimizeSelectsValidPrefetchConfigAndPreservesResults) {
 }
 TEST(SearcherTest, OptimizePrefetchDepthScalesWithFeatureWidth) {
     // Wide features (1024D FP32 = 4096 B = 64 cache lines) must let the tuner pick deep prefetch
-    // (pl up to code_size/64 = 64), the capability that closed the gap to Glass for 1024D graphs.
+    // (pl up to code_size/64 = 64).
     const uint32_t dim = 1024;
     const uint32_t count = 300;
 
