@@ -31,6 +31,15 @@ jobs:
       with:
         submodules: recursive
 
+    - name: Enable Swap (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        sudo fallocate -l 16G /mnt/swapfile
+        sudo chmod 600 /mnt/swapfile
+        sudo mkswap /mnt/swapfile
+        sudo swapon /mnt/swapfile
+        free -h
+
     - name: Install Ninja
       if: runner.os != 'Windows'
       run: pip install ninja
