@@ -631,7 +631,8 @@ static GraphStats analyze_graph(
     if (graph_size == 0) stats.min_in_degree = 0;
 
     // Memory estimation
-    stats.memory_bytes = stats.vertex_count * (stats.edges_per_vertex * 4 + stats.edges_per_vertex * 4 + stats.feature_dims * 4);
+    const size_t feature_bytes = graph.getFeatureSpace().get_data_size();
+    stats.memory_bytes = static_cast<size_t>(stats.vertex_count) * (static_cast<size_t>(stats.edges_per_vertex) * 8 + feature_bytes);
 
     // Reachability metrics
     uint32_t reachable = calc_search_reachability(graph);
