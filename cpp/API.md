@@ -20,7 +20,7 @@ Include the umbrella header to access all functionalities:
 | [`deglib::builder::`](#2-namespace-deglibbuilder) | `<deglib/builder.h>` | Graph construction, streaming vector insertion/deletion, and continuous optimization. |
 | [`deglib::distances::`](#3-namespace-deglibdistances) | `<deglib/distances.h>` | Metric enums (`Metric`), feature spaces (`FloatSpace`), and distance functions. |
 | [`deglib::search::`](#4-namespace-deglibsearch) | `<deglib/search.h>`, `<deglib/filter.h>` | Search label filtering (`Filter`) and exact distance candidate reranking (`rerank`). |
-| [`deglib::optimization::`](#5-namespace-degliboptimization) | `<deglib/optimization.h>` | MRNG pruning, FLAS 1D presorting, EVP quantization, and MIPS L2 transformations. |
+| [`deglib::optimization::`](#5-namespace-degliboptimization) | `<deglib/optimization.h>` | MRNG pruning and FLAS 1D presorting. |
 | [`deglib::analysis::`](#6-namespace-deglibanalysis) | `<deglib/analysis.h>` | Graph health diagnostics, regularity validation, and reachability metrics. |
 | [`deglib::graph::`](#7-namespace-deglibgraph-internal-graphs--results) | `<deglib/graph/*.h>` | Low-level internal graph hierarchy (`0..N-1` indices) and search `ResultSet` (max-heap). |
 | [`deglib::transformation::`](#11-namespace-deglibtransformation) | `<deglib/transformation.h>` | Query and database feature transformation and quantization pipeline. |
@@ -277,7 +277,7 @@ public:
 
     /// Greedy best-first reachability search towards a stored vertex; backtracks traversal path
     std::vector<ObjectDistance> hasPath(
-        const std::vector<uint32_t>& entry_external_labels,
+        const std::vector<uint32_t>& from_external_labels,
         uint32_t to_external_label,
         float eps = 0.0f,
         uint32_t k = 1
@@ -331,7 +331,7 @@ public:
     void setPrefetch(int32_t po, int32_t pl, int32_t nl = 3);
 
     /// Auto-tune traversal prefetch parameters (po, pl, nl) by timing traversal over sampled vertices
-    void optimize(size_t sample_count = 50, uint32_t k = 100, uint32_t ef = 200, uint32_t seed = 7) const;
+    void optimize(size_t sample_count = 300, uint32_t k = 100, uint32_t ef = 200, size_t median_subset = 4096) const;
 
     // --- Conversions & Persistence ---
     // Feature Memory Ordering:
@@ -481,7 +481,13 @@ enum class Metric {
     FP16_InnerProduct, ///< Half-precision FP16 Inner Product distance
     EVP_InnerProduct,  ///< Equi-Voronoi Polytopes (EVP, 1-bit / ternary) Inner Product
     Int8_InnerProduct, ///< Signed 8-bit integer Inner Product distance
-    Int8_L2            ///< Signed 8-bit integer L2 distance
+    Int8_L2,           ///< Signed 8-bit integer L2 distance
+    Uint4_L2,          ///< Unsigned 4-bit integer L2 distance (packed 2 per byte)
+    Uint4_InnerProduct,///< Unsigned 4-bit integer Inner Product distance (packed 2 per byte)
+    Int4_L2,           ///< Signed 4-bit integer L2 distance (packed 2 per byte)
+    Int4_InnerProduct, ///< Signed 4-bit integer Inner Product distance (packed 2 per byte)
+    UInt7_L2,          ///< Unsigned 7-bit integer L2 distance in [0, 127]
+    UInt7_InnerProduct ///< Unsigned 7-bit integer Inner Product distance in [0, 127]
 };
 
 /// Represents a vector feature space (dimensionality, metric, byte layout, and SIMD kernel)
@@ -492,7 +498,7 @@ public:
     size_t dim();                  ///< Vector dimensionality
     Metric metric();               ///< Configured distance metric
     size_t get_data_size();        ///< Size in bytes of a single vector
-    const char* get_instruction(); ///< Active SIMD kernel ("AVX512", "AVX2", "Scalar")
+    const char* get_instruction(); ///< Active SIMD kernel ("AVX512_VNNI", "AVX512", "AVX2_VNNI", "AVX2", "Scalar")
 };
 
 // --- Distance Computation Functions ---
@@ -544,19 +550,6 @@ public:
     void for_each_valid_label(auto func);   ///< Iterate over all valid labels
 };
 
-/// Multi-threaded exact distance reranking of candidate neighbors for each query
-vector<ResultSet> rerank(
-    FloatSpace space,
-    void* queries,
-    size_t num_queries,
-    void* base_vectors,
-    size_t num_base_vectors,
-    uint32_t* base_candidates,
-    size_t candidates_per_query,
-    size_t k_top = 0,
-    size_t num_threads = 0
-);
-
 /// Stateful reranker holding base vectors for repeated exact-distance candidate reranking.
 ///
 /// Candidate Indexing Contract:
@@ -567,19 +560,21 @@ vector<ResultSet> rerank(
 ///   * Custom Labels or Dynamic Graphs with Deletions: Row i must contain the vector for label `graph.getExternalLabels()[i]`.
 /// - Standalone Usage: The row ordering of `base_vectors` matches whatever candidate ID space you pass
 ///   (e.g. if candidates are external labels 0..N-1, row l contains feature vector l).
-template <typename DataT>
 class Reranker {
 public:
-    Reranker(FloatSpace space, const DataT* base_vectors, size_t num_base_vectors);
+    Reranker(
+        FloatSpace space,
+        std::span<const std::byte> base_vectors,
+        size_t num_base_vectors,
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
+    );
 
-    FloatSpace getSpace() const;                    ///< Distance metric and dimensionality
-    const DataT* getBaseVectors() const;            ///< Held base vectors (row c scored for candidate c)
+    const FloatSpace& getSpace() const;             ///< Distance metric and dimensionality
+    const std::byte* getBaseVectors() const;        ///< Held base vectors (row c scored for candidate c)
     size_t getNumBaseVectors() const;               ///< Number of held base vectors
     int32_t getPo() const;                          ///< Rerank feature prefetch offset (0 = prefetch disabled)
     int32_t getPl() const;                          ///< Cache lines prefetched per feature vector (0 = whole vector)
-    void setPo(int32_t po);                         ///< Set the prefetch offset; values <= 0 disable prefetching
-    void setPl(int32_t pl);                         ///< Set the prefetch length; values <= 0 prefetch the whole vector
-    void setPrefetch(int32_t po, int32_t pl);       ///< Set both prefetch parameters at once
+    void setPrefetch(int32_t po, int32_t pl);       ///< Set both prefetch parameters at once (values <= 0 disable)
 
     /// Rerank candidate indices for one query, returning the top-k as a ResultSet (max-heap)
     ResultSet rerank(span<const byte> query, span<const uint32_t> candidate_indices, uint32_t k) const;
@@ -591,33 +586,32 @@ public:
     ) const;
 
     /// Auto-tune rerank prefetch parameters (po, pl) by timing reranking over sampled base vectors
-    void optimize(size_t sample_count = 50, size_t num_candidates = 100, uint32_t k = 10);
+    void optimize(size_t num_sample_queries = 300, size_t num_candidates = 150, uint32_t k = 100, size_t num_threads = 1);
 };
 
-/// High-performance stateless Searcher coordinating query transformation, graph exploration, and reranking.
-template <typename GraphT, typename QueryT = float>
+/// High-performance Searcher coordinating query transformation, graph exploration, and reranking.
 class Searcher {
 public:
     bool normalize_query() const noexcept;
     void set_normalize_query(bool val) noexcept;
 
     void optimize(
-        uint32_t n_clusters = 256,
-        uint32_t n_iter = 20,
+        uint32_t n_clusters = 128,
+        uint32_t n_iter = 15,
         size_t sample_size = 0,
         uint32_t k = 100,
-        uint32_t seed = 7,
-        size_t num_threads = 1
+        size_t threads = 0,
+        bool use_routing = true
     );
 
+    template <typename T>
     uint32_t search(
-        const QueryT* query,
+        std::span<const T> query,
         uint32_t k,
         float eps_or_ef = 0.1f,
         float rerank_factor = 1.0f,
         uint32_t* out_indices = nullptr,
         float* out_distances = nullptr,
-        bool return_distances = false,
         bool unsorted = false
     );
 };
@@ -641,14 +635,14 @@ namespace deglib::optimization {
 /// Prune the worst (longest/highest-weight) neighbors per vertex, replacing them with self-loops
 void prune_worst_edges(MutableGraph& graph, uint8_t prune_worst, size_t num_threads = 0);
 
-/// Parallel removal of edges violating the Relative Neighborhood Graph (RNG) rule
-uint32_t prune_non_rng_edges(MutableGraph& graph, size_t num_threads = 0);
+/// Parallel removal of edges violating the Monotonic Relative Neighborhood Graph (MRNG) rule
+uint32_t prune_non_mrng_edges(MutableGraph& graph, size_t num_threads = 0);
 
-/// Remove non-RNG edges using a globally weight-sorted strategy
-uint32_t prune_non_rng_edges_weight_sorted(MutableGraph& graph, size_t num_threads = 0);
+/// Remove non-MRNG edges using a globally weight-sorted strategy
+uint32_t prune_non_mrng_edges_weight_sorted(MutableGraph& graph, size_t num_threads = 0);
 
-/// Iteratively remove non-RNG edges per-vertex until convergence
-uint32_t prune_non_rng_edges_iterative(MutableGraph& graph, size_t num_threads = 0);
+/// Iteratively remove non-MRNG edges per-vertex until convergence
+uint32_t prune_non_mrng_edges_iterative(MutableGraph& graph, size_t num_threads = 0);
 
 /// Optimize graph edges using continuous EvenRegularGraphBuilder improvement steps
 void optimize_edges(MutableGraph& graph, uint8_t k_opt, float eps_opt, uint8_t i_opt, uint32_t iterations);
@@ -847,10 +841,15 @@ public:
 /// Compact immutable graph layout optimized for query serving
 class ReadOnlyGraph : public InternalGraph {
 public:
-    ReadOnlyGraph(uint32_t max_vertex_count, uint8_t edges_per_vertex, FloatSpace feature_space);
-    ReadOnlyGraph(uint32_t max_vertex_count, uint8_t edges_per_vertex, FloatSpace feature_space, InternalGraph& graph);
+    ReadOnlyGraph(uint32_t count, uint8_t edges_per_vertex, const FloatSpace& space);
 
-    // Loading is done via the free function deglib::graph::load_readonly_graph(const char* file_path)
+    static ReadOnlyGraph from_graph(
+        const InternalGraph& input_graph,
+        std::optional<FloatSpace> target_feature_space = std::nullopt,
+        const void* custom_features = nullptr,
+        std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
+    );
+    static ReadOnlyGraph loadGraph(const char* path_graph);
 };
 
 } // namespace deglib::graph
@@ -887,6 +886,9 @@ bool has_avx512();
 
 /// Runtime AVX-512 VNNI support check
 bool has_avx512_vnni();
+
+/// Runtime AVX-512 VPOPCNTDQ support check
+bool has_avx512_vpopcntdq();
 
 /// Runtime AVX-512 FP16 (native arithmetic) support check
 bool has_avx512_fp16();
@@ -983,8 +985,8 @@ public:
     ScalarQuantizerInt8(uint32_t dim, float abs_max = 0.0f);
     float abs_max() const noexcept;
     float scale() const noexcept;
-    void fit(std::span<const float> data, float drop_ratio = 0.0f);
-    void fit(std::span<const uint16_t> data_fp16, float drop_ratio = 0.0f);
+    void fit(std::span<const float> data, float quantile = 1.0f);
+    void fit(std::span<const uint16_t> data_fp16, float quantile = 1.0f);
     void transform_database(std::span<const float> in, std::span<std::byte> out) const override;
     void transform_query(std::span<const float> in, std::span<std::byte> out) const override;
     void serialize(std::ostream& os) const override;
@@ -997,8 +999,8 @@ public:
     explicit ScalarQuantizerInt8PerDim(uint32_t dim);
     std::span<const float> abs_maxs() const noexcept;
     std::span<const float> scales() const noexcept;
-    void fit(std::span<const float> data, float drop_ratio = 0.0f);
-    void fit(std::span<const uint16_t> data_fp16, float drop_ratio = 0.0f);
+    void fit(std::span<const float> data, float quantile = 1.0f);
+    void fit(std::span<const uint16_t> data_fp16, float quantile = 1.0f);
     void transform_database(std::span<const float> in, std::span<std::byte> out) const override;
     void transform_query(std::span<const float> in, std::span<std::byte> out) const override;
     void serialize(std::ostream& os) const override;
@@ -1012,8 +1014,8 @@ public:
     float min_val() const noexcept;
     float max_val() const noexcept;
     float scale() const noexcept;
-    void fit(std::span<const float> data, float drop_ratio = 0.0f);
-    void fit(std::span<const uint16_t> data_fp16, float drop_ratio = 0.0f);
+    void fit(std::span<const float> data, float quantile = 1.0f);
+    void fit(std::span<const uint16_t> data_fp16, float quantile = 1.0f);
     void transform_database(std::span<const float> in, std::span<std::byte> out) const override;
     void transform_query(std::span<const float> in, std::span<std::byte> out) const override;
     void serialize(std::ostream& os) const override;
@@ -1034,6 +1036,12 @@ public:
     void serialize(std::ostream& os) const override;
     static std::unique_ptr<ScalarQuantizerUint8PerDim> deserialize(std::istream& is);
 };
+
+/// Asymmetric 4-bit unsigned (uint4, packed 2 per byte), signed (int4, packed 2 per byte),
+/// and 7-bit unsigned (uint7 in [0, 127]) scalar quantizers are also provided:
+/// - ScalarQuantizerUint4
+/// - ScalarQuantizerInt4
+/// - ScalarQuantizerUInt7
 
 /// Half-precision IEEE 754 float16 cast transformation
 class ScalarQuantizerFP16 : public FeatureTransformation {

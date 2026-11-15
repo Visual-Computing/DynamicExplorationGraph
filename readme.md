@@ -22,9 +22,9 @@ High-throughput approximate nearest neighbor and exploratory search library impl
 - **Multi-threaded construction**: Parallel index building with dynamic edge optimization
 - **SIMD acceleration**: Hand-optimized AVX2, AVX-512, and VNNI kernels with automatic runtime dispatch
 - **Zero-overhead search**: Unified single and batch search with direct memory mapping and no bridge allocations
-- **Supported data types**: `float32`, `float16`, `int8`, `uint8`, `evp-bits`
+- **Supported data types**: `float32`, `float16`, `int8`, `uint8`, `int4`, `uint4`, `uint7`, `evp-bits`
 - **Supported metrics**: Euclidean ($L_2$), Inner Product / Cosine, quantized EVP
-- **Feature transformation & quantization pipeline**: Integrated scalar INT8/UINT8, bit-packed EVP, and MIPS transforms
+- **Feature transformation & quantization pipeline**: Integrated scalar INT8/UINT8/INT4/UINT4/UINT7/FP16, bit-packed EVP, and MIPS transforms
 - **Exploratory graph traversal**: High-throughput parallel exploration, path reachability, and batch neighbor lookups
 - **Serialization**: Native `.deg` file format for saving and loading graphs across C++ and Python
 

@@ -23,6 +23,10 @@ class Metric(enum.IntEnum):
     - ``EVP_InnerProduct``: Inner product distance for quantized byte-packed (EVP) vectors.
     - ``Int8_InnerProduct``: Inner product distance for 8-bit signed integer vectors.
     - ``Int8_L2``: Euclidean (L2) distance for 8-bit signed integer vectors.
+    - ``Uint4_L2``: Euclidean (L2) distance for 4-bit unsigned integer vectors (packed 2 per uint8).
+    - ``Uint4_InnerProduct``: Inner product distance for 4-bit unsigned integer vectors (packed 2 per uint8).
+    - ``Int4_L2``: Euclidean (L2) distance for 4-bit signed integer vectors (packed 2 per uint8).
+    - ``Int4_InnerProduct``: Inner product distance for 4-bit signed integer vectors (packed 2 per uint8).
     - ``UInt7_InnerProduct``: Inner product distance for UInt7 codes in [0, 127].
     - ``UInt7_L2``: Euclidean (L2) distance for UInt7 codes in [0, 127].
     """

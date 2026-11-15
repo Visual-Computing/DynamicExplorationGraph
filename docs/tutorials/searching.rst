@@ -146,8 +146,8 @@ Check whether a directed path exists between two vertices in the graph:
 
 .. code-block:: python
 
-   can_reach = graph.has_path(from_label=42, to_label=100)
-   print(f"Path from 42 to 100 exists: {can_reach}")
+   path, distances = graph.has_path(from_external_labels=[42], to_external_label=100)
+   print(f"Path from 42 to 100 (length {len(path)}):", path)
 
 ---
 

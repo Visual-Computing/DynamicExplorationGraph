@@ -63,6 +63,24 @@ Before building a graph, choose a distance metric compatible with your feature v
    * - ``Metric.Uint8_InnerProduct``
      - ``np.uint8``
      - Inner product distance for 8-bit unsigned integer vectors.
+   * - ``Metric.Uint4_L2``
+     - ``np.uint8``
+     - Euclidean (L2) distance for 4-bit unsigned integer vectors (packed 2 per uint8).
+   * - ``Metric.Uint4_InnerProduct``
+     - ``np.uint8``
+     - Inner product distance for 4-bit unsigned integer vectors (packed 2 per uint8).
+   * - ``Metric.Int4_L2``
+     - ``np.uint8``
+     - Euclidean (L2) distance for 4-bit signed integer vectors (packed 2 per uint8).
+   * - ``Metric.Int4_InnerProduct``
+     - ``np.uint8``
+     - Inner product distance for 4-bit signed integer vectors (packed 2 per uint8).
+   * - ``Metric.UInt7_L2``
+     - ``np.int8``
+     - Euclidean (L2) distance for 7-bit unsigned integer codes in [0, 127].
+   * - ``Metric.UInt7_InnerProduct``
+     - ``np.int8``
+     - Inner product distance for 7-bit unsigned integer codes in [0, 127].
    * - ``Metric.EVP_InnerProduct``
      - ``np.uint8``
      - Inner product distance for quantized byte-packed (EVP) vectors.
@@ -216,8 +234,8 @@ For streaming or incremental updates where vertices are added or removed over ti
    status = builder.build()
 
    print("Build step:", status.step)
-   print("Vertices added in this step:", status.added)
-   print("Vertices deleted in this step:", status.deleted)
+   print("Total vertices added:", status.added)
+   print("Total vertices deleted:", status.deleted)
    print("Added vertex IDs in this step:", status.step_added_ids)
    print("Deleted vertex IDs in this step:", status.step_deleted_ids)
 

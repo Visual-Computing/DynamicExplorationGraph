@@ -88,7 +88,7 @@ Graph quality evaluates how closely the graph's edge topology approximates an ex
 $$\text{Quality}(G) = \frac{1}{|V|} \sum_{v \in V} \frac{|N(v) \cap \text{KNN}_{d_v}(v)|}{d_v}$$
 
 * **`none` (default)**: Skips quality calculation.
-* **`exact`**: Uses exact brute-force linear search ground truth (`*_base_top1000.ivecs`). Automatically generated if not present.
+* **`exact`**: Uses exact brute-force linear search ground truth (`*_base_top1000_<metric>.ivecs`). Automatically generated if not present.
 * **`approximated`**: Uses ANNS graph exploration ground truth. Automatically generated if not present.
 
 ---

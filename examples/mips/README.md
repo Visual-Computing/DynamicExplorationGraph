@@ -73,12 +73,13 @@ The script displays an interactive Matplotlib trade-off plot (Recall vs Search T
 
 ```
 usage: main.py [-h] [--dataset DATASET] [--k-graph K_GRAPH] [--k-ext K_EXT]
-               [--eps-ext EPS_EXT] [--eps-search EPS_SEARCH] [--no-flas]
-               [--flas-decay FLAS_DECAY] [--build-threads BUILD_THREADS]
+               [--eps-ext EPS_EXT] [--eps-search EPS_SEARCH]
+               [--flas | --no-flas] [--flas-decay FLAS_DECAY]
+               [--build-threads BUILD_THREADS]
                [--search-threads SEARCH_THREADS]
                [--opt-target {StreamingData,LowLID,HighLID}]
                [--num-runs NUM_RUNS] [--max-dist MAX_DIST]
-               [--instruction {Auto,Scalar,AVX2,AVX512}]
+               [--instruction {Auto,Scalar,AVX2,AVX2_VNNI,AVX512,AVX512_VNNI}]
                [--output-plot OUTPUT_PLOT] [--no-show]
 
 options:
@@ -87,7 +88,7 @@ options:
   --k-ext K_EXT                   Builder search size parameter (default: 64)
   --eps-ext EPS_EXT               Builder search expansion factor (default: 0.001)
   --eps-search EPS_SEARCH         Epsilon search factor (default: 0.18)
-  --no-flas                       Disable FLAS 1D pre-sorting
+  --flas, --no-flas               Enable or disable FLAS 1D pre-sorting (default: enabled)
   --flas-decay FLAS_DECAY         FLAS neighborhood radius decay rate (default: 0.9)
   --build-threads BUILD_THREADS   Number of threads for graph building (default: 1)
   --search-threads SEARCH_THREADS Number of parallel threads for query search (default: 8)
@@ -95,8 +96,8 @@ options:
                                   Optimization target: StreamingData, LowLID, HighLID (default: LowLID)
   --num-runs NUM_RUNS             Number of search repetitions for averaging (default: 100)
   --max-dist MAX_DIST             Comma-separated list of max distance budgets (default: 6000,6500,7000,7500,8000,9000)
-  --instruction {Auto,Scalar,AVX2,AVX512}
-                                  SIMD instruction set: Auto, Scalar, AVX2, AVX512 (default: Auto)
+  --instruction {Auto,Scalar,AVX2,AVX2_VNNI,AVX512,AVX512_VNNI}
+                                  SIMD instruction set: Auto, Scalar, AVX2, AVX2_VNNI, AVX512, AVX512_VNNI (default: Auto)
   --output-plot OUTPUT_PLOT       Path to save trade-off curve PNG
   --no-show                       Disable GUI plot display
 ```

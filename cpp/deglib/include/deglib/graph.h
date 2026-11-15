@@ -1020,7 +1020,7 @@ class DynamicExplorationGraph {
      * the query, and backtracks the chain of vertices that reached the target. With eps = 0.0 and k = 1
      * this degenerates into a greedy descent; larger eps widen the exploration radius past local optima.
      *
-     * @param entry_external_labels The external labels of the vertices to start the traversal from.
+     * @param from_external_labels The external labels of the vertices to start the traversal from.
      * @param to_external_label The external label of the vertex the path should end at.
      * @param eps Exploration factor widening the search radius. 0.0 restricts the traversal to a greedy descent.
      * @param k Size of the result list driving the exploration radius.
@@ -1028,11 +1028,11 @@ class DynamicExplorationGraph {
      *         labels and distances to the target. Empty if the target was not reached within the budget.
      */
     std::vector<deglib::graph::ObjectDistance>
-    hasPath(const std::vector<uint32_t>& entry_external_labels, const uint32_t to_external_label, const float eps = 0.0f, const uint32_t k = 1) const {
+    hasPath(const std::vector<uint32_t>& from_external_labels, const uint32_t to_external_label, const float eps = 0.0f, const uint32_t k = 1) const {
         std::vector<uint32_t> entry_indices;
-        entry_indices.reserve(entry_external_labels.size());
-        for (const uint32_t entry_external_label : entry_external_labels) {
-            entry_indices.push_back(internal_graph_->getInternalIndex(entry_external_label));
+        entry_indices.reserve(from_external_labels.size());
+        for (const uint32_t from_external_label : from_external_labels) {
+            entry_indices.push_back(internal_graph_->getInternalIndex(from_external_label));
         }
 
         auto path = internal_graph_->hasPath(entry_indices, internal_graph_->getInternalIndex(to_external_label), eps, k);

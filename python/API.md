@@ -37,30 +37,31 @@ deglib.build_from_data(
     edges_per_vertex=32,                       # Number of outgoing edges per vertex (must be even)
     capacity=-1,                               # Max graph capacity (-1 = data.shape[0])
     metric=Metric.FP32_L2,                     # Distance metric (Metric enum or string e.g. "FP32_L2")
-    instruction="Auto",                        # SIMD instruction set ("Auto", "AVX2", "AVX512", "Scalar")
+    instruction="Auto",                        # SIMD instruction set ("Auto", "AVX2", "AVX512", "Scalar", ...)
+    seed=None,                                 # Random seed (None = default seed)
     optimization_target=OptimizationTarget.LowLID, # OptimizationTarget (LowLID, HighLID, StreamingData)
-    extend_k=0,                                # Number of neighbors during graph extension (0 = edges_per_vertex)
+    extend_k=0,                                # Number of neighbors during graph extension (<= edges_per_vertex defaults to edges_per_vertex * 2)
     extend_eps=0.1,                            # Search expansion epsilon during graph extension
     improve_k=0,                               # Number of neighbors during edge improvement
     improve_eps=0.001,                         # Search expansion epsilon during edge improvement
     max_path_length=5,                         # Maximum edge swaps before canceling an improvement try
     improve_tries=0,                           # Number of improvement attempts per build step
     thread_count=0,                            # Worker thread count (0 = all available CPU cores)
-    seed=None,                                 # Random seed (None = default seed)
     callback=None,                             # Optional callback function(BuilderStatus) for progress reporting
     show_progress=False                        # If True and no callback, prints a progress bar to stdout
 ) -> DynamicExplorationGraph
 
 # Create empty mutable graph with fixed capacity in preallocated memory (SizeBoundedGraph)
-deglib.create_empty(capacity, feature_space, edges_per_vertex=32) -> DynamicExplorationGraph
+deglib.create_empty(capacity, feature_space, edges_per_vertex=32, transformations=None) -> DynamicExplorationGraph
 
 # Create empty mutable graph with chunk-based memory that grows dynamically (DynamicGraph)
-deglib.create_dynamic_empty(feature_space, edges_per_vertex=32, chunk_size=1024) -> DynamicExplorationGraph
+deglib.create_dynamic_empty(feature_space, edges_per_vertex=32, chunk_size=1024, transformations=None) -> DynamicExplorationGraph
 
 # Create a randomized initial exploration graph from a numpy feature array
-deglib.create_random_graph(features, feature_space, edges_per_vertex=32, seed=7) -> DynamicExplorationGraph
+deglib.create_random_graph(features, feature_space, edges_per_vertex=32, seed=7, transformations=None) -> DynamicExplorationGraph
 
 # Load saved graphs from disk
+deglib.load_graph(path) -> DynamicExplorationGraph
 deglib.load_readonly_graph(path) -> DynamicExplorationGraph
 deglib.load_dynamic_graph(path, chunk_size=1024) -> DynamicExplorationGraph
 deglib.load_mutable_graph(path, capacity=0) -> DynamicExplorationGraph
@@ -72,22 +73,6 @@ The main graph facade used to search, explore, and convert exploration graphs. A
 
 ```python
 class DynamicExplorationGraph:
-    # --- Factories & Loading ---
-    # Create empty mutable graph with fixed capacity in preallocated memory (SizeBoundedGraph)
-    create_empty(capacity, feature_space, edges_per_vertex=32) -> DynamicExplorationGraph
-
-    # Create empty mutable graph with chunk-based memory that grows dynamically (DynamicGraph)
-    create_dynamic_empty(feature_space, edges_per_vertex=32, chunk_size=1024) -> DynamicExplorationGraph
-
-    # Create a randomized initial exploration graph from a numpy feature array
-    create_random_graph(features, feature_space, edges_per_vertex=32, seed=7) -> DynamicExplorationGraph
-
-    # Load a saved read-only graph file optimized for fast search
-    load_readonly_graph(path) -> DynamicExplorationGraph
-
-    # Load a saved graph file as a mutable dynamic chunk-allocated graph
-    load_dynamic_graph(path, chunk_size=1024) -> DynamicExplorationGraph
-
     # --- Search & Querying ---
     # Search nearest neighbors for 1D (single) or 2D (batch) query vectors.
     # query: 1D [D] or 2D [Q, D] numpy array
@@ -109,7 +94,7 @@ class DynamicExplorationGraph:
     # Greedy best-first traversal towards a stored vertex, using the target vertex's own feature as query.
     # Returns the traversed path ordered from the target back to the entry as (path, distances) if
     # return_distances=True, otherwise the path array. Empty when the target was not reached.
-    has_path(entry_external_labels, to_external_label, eps=0.0, k=1, return_distances=True)
+    has_path(from_external_labels, to_external_label, eps=0.0, k=1, return_distances=True)
 
     # Returns neighbor external labels connected to a given vertex (or 2D array if passed array of labels)
     get_neighbors(external_label, threads=1) -> list[int] | np.ndarray
@@ -121,12 +106,14 @@ class DynamicExplorationGraph:
     size() -> int                              # Number of active vertices
     get_edges_per_vertex() -> int              # Outgoing edges per vertex
     get_feature_space() -> FloatSpace          # Metric and dimensionality
+    get_labels() -> np.ndarray                 # 1D uint32 array of external labels in internal index order
     has_vertex(external_label) -> bool         # True if label exists in graph
     is_mutable() -> bool                       # True if graph can be modified via GraphBuilder
 
     # --- Feature Transformations Pipeline ---
     has_transformations() -> bool              # True if graph has attached quantizers/transformations
     get_transformations() -> list              # List of attached FeatureTransformation stages
+    set_transformations(transformations)       # Attach/replace FeatureTransformation stages
 
     # --- Traversal Tuning & Entry Vertices ---
     get_entry_vertex_indices() -> list[int]    # List of internal entry vertex indices
@@ -138,18 +125,18 @@ class DynamicExplorationGraph:
     # Auto-tune traversal prefetch parameters (po, pl, nl) by timing traversal over sampled vertices.
     # The graph self-samples its own features as queries; call once after construction.
     # sample_count: vertices sampled as queries (capped at graph size); k: expected result count;
-    # ef: beam width (clamped to >= k); seed: sampling seed.
-    optimize(sample_count=50, k=100, ef=200, seed=7)
+    # ef: beam width (clamped to >= k); median_subset: max vertices used for graph-median entry selection.
+    optimize(sample_count=300, k=100, ef=200, median_subset=4096)
 
     # --- Conversions & Saving ---
     # Convert to compact, immutable graph (ReadOnlyGraph) for maximum query throughput
-    to_readonly(feature_space=None, custom_features=None) -> DynamicExplorationGraph
+    to_readonly(feature_space=None, custom_features=None, transformations=None) -> DynamicExplorationGraph
 
     # Convert to mutable fixed-capacity graph (SizeBoundedGraph) with optional new metric/features
-    to_mutable(feature_space=None, custom_features=None, capacity=0) -> DynamicExplorationGraph
+    to_mutable(feature_space=None, custom_features=None, capacity=0, transformations=None) -> DynamicExplorationGraph
 
     # Convert to mutable chunk-allocated graph (DynamicGraph) that expands dynamically
-    to_dynamic(feature_space=None, custom_features=None, chunk_size=1024) -> DynamicExplorationGraph
+    to_dynamic(feature_space=None, custom_features=None, chunk_size=1024, transformations=None) -> DynamicExplorationGraph
 
     # Save graph topology, features, transformations, and prefetch parameters to disk
     save_graph(path)
@@ -162,7 +149,7 @@ class DynamicExplorationGraph:
 Provides graph construction, incremental updates, and multithreaded edge optimization.
 
 ```python
-from deglib.builder import GraphBuilder, OptimizationTarget, build_from_data
+from deglib.builder import BuilderStatus, GraphBuilder, OptimizationTarget, ProgressCallback, build_from_data
 
 # Optimization strategy based on dataset characteristics
 class OptimizationTarget:
@@ -189,7 +176,7 @@ class GraphBuilder:
         graph,                                 # Mutable DynamicExplorationGraph
         seed=None,                             # Random seed
         optimization_target=OptimizationTarget.LowLID, # Optimization target strategy
-        extend_k=0,                            # Neighbors during extension (0 = graph's edges_per_vertex)
+        extend_k=0,                            # Neighbors during extension (<= edges_per_vertex defaults to edges_per_vertex * 2)
         extend_eps=0.1,                        # Epsilon for neighbor search during extension
         improve_k=0,                           # Neighbors during edge improvement
         improve_eps=0.001,                     # Epsilon for neighbor search during improvement
@@ -242,6 +229,12 @@ class Metric:
     EVP_InnerProduct   # Equi-Voronoi Polytopes (EVP) binary/ternary IP (dtype: np.uint8)
     Int8_InnerProduct  # 8-bit signed integer Inner Product (dtype: np.int8)
     Int8_L2            # 8-bit signed integer L2 distance (dtype: np.int8)
+    Uint4_L2           # 4-bit unsigned integer L2 distance, packed 2 per byte (dtype: np.uint8)
+    Uint4_InnerProduct # 4-bit unsigned integer Inner Product, packed 2 per byte (dtype: np.uint8)
+    Int4_L2            # 4-bit signed integer L2 distance, packed 2 per byte (dtype: np.uint8)
+    Int4_InnerProduct  # 4-bit signed integer Inner Product, packed 2 per byte (dtype: np.uint8)
+    UInt7_L2           # 7-bit unsigned integer L2 distance in [0, 127] (dtype: np.int8)
+    UInt7_InnerProduct # 7-bit unsigned integer Inner Product in [0, 127] (dtype: np.int8)
 
     get_dtype() -> np.dtype # Expected numpy data type for feature vectors
 
@@ -253,7 +246,8 @@ class FloatSpace:
     dim() -> int                               # Dimensionality
     metric() -> Metric                         # Configured metric enum
     get_data_size() -> int                     # Byte size of a single vector
-    get_instruction() -> InstructionSet        # Active SIMD instruction set ("AVX512", "AVX2", "Scalar")
+    get_query_data_size() -> int               # Byte size of a single query vector
+    get_instruction() -> InstructionSet        # Active SIMD InstructionSet enum member
 
     # Compute distance between two individual 1D feature vectors
     compute_distance(vec1, vec2) -> float
@@ -280,7 +274,7 @@ fp16_to_floats(fp16_vals) -> np.ndarray
 Bitset-based label filtering and exact distance candidate reranking for search and exploration.
 
 ```python
-from deglib.search import Filter, rerank, Reranker
+from deglib.search import Filter, rerank, Reranker, Searcher, create_searcher
 
 class Filter:
     def __init__(valid_labels, max_value=-1, max_label_count=-1)
@@ -311,9 +305,10 @@ rerank(space, queries, candidate_indices, base_vectors=None, k_top=0, num_thread
 
 # Stateful reranker holding base vectors for repeated exact-distance reranking.
 class Reranker:
-    # Constructor: Reranker(space, base_vectors)
+    # Constructor: Reranker(space, base_vectors, transformations=None)
     # space: FloatSpace (metric + SIMD instruction set)
     # base_vectors: 2D array [N, D] the candidates are scored against
+    # transformations: optional list of FeatureTransformation stages
 
     # Auto-tune the reranker's prefetch parameters (po, pl) by timing reranking over sampled base
     # vectors. Self-samples its own base vectors; call once after construction to tune for the
@@ -343,14 +338,6 @@ class Reranker:
 
 # High-performance searcher with optional on-the-fly quantization and exact reranking.
 class Searcher:
-    # Constructor via create_searcher(graph, rerank_space=None, rerank_data=None)
-
-    # Entry vertex optimization via k-means medoids (n_clusters maximum 512)
-    optimize(n_clusters=256, n_iter=20, sample_size=0, k=100, seed=7, num_threads=1)
-
-    # Search for nearest neighbors of a single query (1D) or a batch of queries (2D).
-```python
-class Searcher:
     def __init__(
         self,
         graph,
@@ -365,7 +352,7 @@ class Searcher:
     normalize_query: bool
 
     # Optimize entry vertices via k-means medoids and tune prefetch parameters
-    optimize(n_clusters=256, n_iter=20, sample_size=0, k=100, seed=7, num_threads=1) -> None
+    optimize(n_clusters=256, n_iter=20, sample_size=0, k=100, num_threads=1, use_routing=True) -> None
 
     # query: 1D vector [D] or 2D batch [N, D]
     # k: Number of nearest neighbors to return
@@ -418,7 +405,7 @@ prune_worst_edges(graph, prune_worst, num_threads=0)
 # callback: function(progress_float) for custom progress reporting
 # show_progress: If True and no callback, prints progress to stdout
 # Returns 1D uint32 permutation array [N] of sorted vector indices.
-presort(vectors, space_or_metric=None, radius_decay=0.9, threads=0, callback=None, *, show_progress=False) -> np.ndarray
+presort(vectors, space_or_metric=None, radius_decay=0.9, threads=0, callback=None, *, show_progress=False, metric=None, space=None) -> np.ndarray
 ```
 
 ---
@@ -443,7 +430,7 @@ from deglib.analysis import (
 )
 
 # Comprehensive graph analysis returning a GraphStats object (dual attribute and dict-like access; printable via str()/print())
-analyze_graph(graph, base_top=None, sample_size=0, num_threads=0) -> GraphStats
+analyze_graph(graph, base_top=None, sample_size=0, num_threads=0, print_stats=True) -> GraphStats
 # Returns GraphStats:
 # {
 #     "vertex_count": int,              # Total active vertices
@@ -481,8 +468,8 @@ calc_avg_edge_weight(graph, scale=1) -> float
 # Calculate 10-bin histogram of graph edge weights
 calc_edge_weight_histogram(graph, sort, scale=1) -> list[float]
 
-# Count total non-RNG conform edges
-calc_non_rng_edges(graph) -> int
+# Count total non-MRNG conform edges
+calc_non_mrng_edges(graph) -> int
 
 # Fraction of vertices reachable from graph entry points via BFS (0.0 to 1.0)
 calc_search_reachability(graph) -> float
@@ -498,7 +485,7 @@ calc_exploration_reach(graph) -> float
 SIMD capability detection and instruction set enumeration.
 
 ```python
-from deglib.cpu import InstructionSet, has_avx2, has_avx2_vnni, has_avx512, has_avx512_vnni, has_avx512_fp16, has_fp16
+from deglib.cpu import InstructionSet, has_avx2, has_avx2_vnni, has_avx512, has_avx512_vnni, has_avx512_vpopcntdq, has_avx512_fp16, has_fp16
 
 class InstructionSet:
     Auto         # Automatically select highest supported instruction set
@@ -509,12 +496,13 @@ class InstructionSet:
     AVX512_VNNI  # 512-bit AVX-512 with VNNI acceleration
 
 # Runtime hardware support checks
-has_avx2() -> bool         # Returns True if host CPU supports AVX2
-has_avx2_vnni() -> bool    # Returns True if host CPU supports AVX2-VNNI (256-bit)
-has_avx512() -> bool       # Returns True if host CPU supports AVX-512
-has_avx512_vnni() -> bool  # Returns True if host CPU supports AVX-512 VNNI
-has_avx512_fp16() -> bool  # Returns True if host CPU supports AVX-512 FP16 (native arithmetic)
-has_fp16() -> bool         # Returns True if host CPU supports FP16 (F16C conversion)
+has_avx2() -> bool              # Returns True if host CPU supports AVX2
+has_avx2_vnni() -> bool         # Returns True if host CPU supports AVX2-VNNI (256-bit)
+has_avx512() -> bool            # Returns True if host CPU supports AVX-512
+has_avx512_vnni() -> bool       # Returns True if host CPU supports AVX-512 VNNI
+has_avx512_vpopcntdq() -> bool  # Returns True if host CPU supports AVX-512 VPOPCNTDQ
+has_avx512_fp16() -> bool       # Returns True if host CPU supports AVX-512 FP16 (native arithmetic)
+has_fp16() -> bool              # Returns True if host CPU supports FP16 (F16C conversion)
 ```
 
 ---
@@ -531,6 +519,9 @@ from deglib.transformation import (
     EvpQuantizer,
     ScalarQuantizerInt8,
     ScalarQuantizerUint8,
+    ScalarQuantizerUint4,
+    ScalarQuantizerInt4,
+    ScalarQuantizerUInt7,
     ScalarQuantizerInt8PerDim,
     ScalarQuantizerUint8PerDim,
     ScalarQuantizerFP16,
@@ -539,6 +530,9 @@ from deglib.transformation import (
     make_scalar_quantizer_int8,
     make_scalar_quantizer_int8_perdim,
     make_scalar_quantizer_uint8,
+    make_scalar_quantizer_uint4,
+    make_scalar_quantizer_int4,
+    make_scalar_quantizer_uint7,
     make_scalar_quantizer_uint8_perdim,
     make_scalar_quantizer_fp16,
     apply_database,

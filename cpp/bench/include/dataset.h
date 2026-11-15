@@ -363,7 +363,7 @@ namespace detail {
 
 inline bool setup_sift1m_files(const Dataset& ds) {
     const auto& info = ds.info();
-    const auto archive_file = ds.dataset_dir() / "sift.tar.gz";
+    const auto archive_file = ds.dataset_dir() / "sift1m.tar.gz";
     const auto tmp_dir = ds.dataset_dir() / "_tmp_extract";
 
     ensure_directory(ds.dataset_dir());

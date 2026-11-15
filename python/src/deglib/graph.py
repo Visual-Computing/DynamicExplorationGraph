@@ -256,7 +256,7 @@ class DynamicExplorationGraph:
 
     def has_path(
         self,
-        entry_external_labels: Union[int, np.ndarray, list],
+        from_external_labels: Union[int, np.ndarray, list],
         to_external_label: int,
         eps: float = 0.0,
         k: int = 1,
@@ -270,7 +270,7 @@ class DynamicExplorationGraph:
         eps = 0.0 and k = 1 this is a pure greedy descent; larger eps widen the exploration radius
         and allow escaping local optima at the cost of more distance computations.
 
-        :param entry_external_labels: External label(s) of the vertices to start the traversal from.
+        :param from_external_labels: External label(s) of the vertices to start the traversal from.
         :param to_external_label: External label of the vertex the path should end at.
         :param eps: Exploration factor widening the search radius. Default: 0.0 (greedy descent).
         :param k: Size of the result list driving the exploration radius. Default: 1.
@@ -279,10 +279,10 @@ class DynamicExplorationGraph:
                   The path is ordered from the target back to the entry vertex. Both arrays are
                   empty if the target was not reached within the given budget.
         """
-        if isinstance(entry_external_labels, (int, np.integer)):
-            entries = [int(entry_external_labels)]
+        if isinstance(from_external_labels, (int, np.integer)):
+            entries = [int(from_external_labels)]
         else:
-            entries = [int(label) for label in entry_external_labels]
+            entries = [int(label) for label in from_external_labels]
         return self.dynamic_exploration_graph_cpp.has_path(
             entries, int(to_external_label), float(eps), int(k), return_distances
         )

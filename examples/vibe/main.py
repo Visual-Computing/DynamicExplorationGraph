@@ -182,8 +182,8 @@ def main():
         "-a",
         type=str,
         default=None,
-        choices=["deg", "deg-qg", "qg", "deg-qg4", "qg4", "deg-qg-int4", "qg-int4", "deg-qg-int7", "qg-int7", "deg-qg-int4-int7", "qg-int4-int7", "deg-evp", "evp", "all"],
-        help="Select specific algorithm to benchmark ('deg', 'deg-qg' / 'qg', 'deg-qg4', 'deg-qg-int4', 'deg-evp' / 'evp', or 'all'). Default: run all enabled in config.yml.",
+        choices=["deg", "deg-qg", "qg", "deg-evp", "evp", "all"],
+        help="Select specific algorithm to benchmark ('deg', 'deg-qg' / 'qg', 'deg-evp' / 'evp', or 'all'). Default: run all enabled in config.yml.",
     )
     parser.add_argument(
         "--query-dtype",
@@ -262,14 +262,6 @@ def main():
         alg_filter = args.algorithm
         if alg_filter in ("qg", "deg-qg"):
             alg_filter = "deg-qg"
-        elif alg_filter in ("qg4", "deg-qg4"):
-            alg_filter = "deg-qg4"
-        elif alg_filter in ("qg-int4", "deg-qg-int4"):
-            alg_filter = "deg-qg-int4"
-        elif alg_filter in ("qg-int7", "deg-qg-int7"):
-            alg_filter = "deg-qg-int7"
-        elif alg_filter in ("qg-int4-int7", "deg-qg-int4-int7"):
-            alg_filter = "deg-qg-int4-int7"
         elif alg_filter in ("evp", "deg-evp"):
             alg_filter = "deg-evp"
         elif alg_filter == "all":

@@ -379,13 +379,13 @@ py::object graph_explore_single_wrapper(
 template <typename G>
 py::object graph_has_path_wrapper(
     const G& graph,
-    const std::vector<uint32_t>& entry_external_labels,
+    const std::vector<uint32_t>& from_external_labels,
     const uint32_t to_external_label,
     const float eps,
     const uint32_t k,
     const bool return_distances = true
 ) {
-    const std::vector<deglib::graph::ObjectDistance> path = graph.hasPath(entry_external_labels, to_external_label, eps, k);
+    const std::vector<deglib::graph::ObjectDistance> path = graph.hasPath(from_external_labels, to_external_label, eps, k);
 
     const size_t count = path.size();
     py::array_t<uint32_t> path_indices(static_cast<py::ssize_t>(count));
@@ -704,7 +704,7 @@ class SearcherPy {
     bool get_normalize_query() const noexcept { return searcher_->normalize_query(); }
     void set_normalize_query(bool val) noexcept { searcher_->set_normalize_query(val); }
 
-    void optimize(uint32_t n_clusters = 256, uint32_t n_iter = 20, size_t sample_size = 0, uint32_t k = 100, size_t num_threads = 1, bool use_routing = false) {
+    void optimize(uint32_t n_clusters = 256, uint32_t n_iter = 20, size_t sample_size = 0, uint32_t k = 100, size_t num_threads = 1, bool use_routing = true) {
         py::gil_scoped_release release;
         searcher_->optimize(n_clusters, n_iter, sample_size, k, num_threads, use_routing);
     }
@@ -2447,7 +2447,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
         )
         .def(
             "optimize", &SearcherPy::optimize, py::arg("n_clusters") = 256, py::arg("n_iter") = 20, py::arg("sample_size") = 0, py::arg("k") = 100,
-            py::arg("num_threads") = 1, py::arg("use_routing") = false,
+            py::arg("num_threads") = 1, py::arg("use_routing") = true,
             "Select entry vertices via k-means medoids.\n\nArgs:\n    n_clusters: number of entry vertices to select (maximum 512).\n    n_iter: number of "
             "k-means "
             "iterations.\n    sample_size: vertices sampled for clustering, 0 selects 3% of the graph size.\n    k: expected result count; sets the reranker "
@@ -2639,7 +2639,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
             py::arg("threads") = 1, py::arg("return_distances") = true, py::arg("unsorted") = false
         )
         .def(
-            "has_path", &graph_has_path_wrapper<deglib::DynamicExplorationGraph>, py::arg("entry_external_labels"), py::arg("to_external_label"),
+            "has_path", &graph_has_path_wrapper<deglib::DynamicExplorationGraph>, py::arg("from_external_labels"), py::arg("to_external_label"),
             py::arg("eps") = 0.0f, py::arg("k") = 1, py::arg("return_distances") = true
         )
         .def(

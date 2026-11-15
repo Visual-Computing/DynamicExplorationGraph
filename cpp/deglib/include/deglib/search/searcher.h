@@ -593,7 +593,7 @@ class Searcher {
     /// Optimize: K-Means query-routing entry selection + reranker prefetch (po,pl) auto-tuning + graph
     /// traversal prefetch tuning. The reranker's (po,pl) is tuned by optimize() (300 sample queries);
     /// the non-fast Searcher exposes no manual prefetch override (only the Fast variants tune by hand).
-    void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 0, uint32_t k = 100, size_t threads = 0, bool use_routing = false) {
+    void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 0, uint32_t k = 100, size_t threads = 0, bool use_routing = true) {
         if (!graph_ || graph_->size() == 0) return;
         constexpr uint32_t seed = 42;  // fixed sampling seed (K-Means candidate shuffle + init): not caller-facing.
         const size_t n = graph_->size();

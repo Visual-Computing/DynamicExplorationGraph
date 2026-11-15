@@ -1,7 +1,7 @@
 Transformation & Quantization
 =============================
 
-Feature transformations (MIPS-to-L2), vector quantization (INT8, UINT8, EVP), and transformation pipelines.
+Feature transformations (MIPS-to-L2), vector quantization (INT8, UINT8, INT4, UINT4, UINT7, FP16, EVP), and transformation pipelines.
 
 Overview
 --------
@@ -65,6 +65,15 @@ Quantizers
 .. autoclass:: deglib.transformation.ScalarQuantizerUint8PerDim
    :members:
 
+.. autoclass:: deglib.transformation.ScalarQuantizerUint4
+   :members:
+
+.. autoclass:: deglib.transformation.ScalarQuantizerInt4
+   :members:
+
+.. autoclass:: deglib.transformation.ScalarQuantizerUInt7
+   :members:
+
 .. autoclass:: deglib.transformation.ScalarQuantizerFP16
    :members:
 
@@ -82,6 +91,12 @@ Quantizer & Transform Factories
 .. autofunction:: deglib.transformation.make_scalar_quantizer_uint8
 
 .. autofunction:: deglib.transformation.make_scalar_quantizer_uint8_perdim
+
+.. autofunction:: deglib.transformation.make_scalar_quantizer_uint4
+
+.. autofunction:: deglib.transformation.make_scalar_quantizer_int4
+
+.. autofunction:: deglib.transformation.make_scalar_quantizer_uint7
 
 .. autofunction:: deglib.transformation.make_scalar_quantizer_fp16
 

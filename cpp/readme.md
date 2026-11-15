@@ -16,9 +16,9 @@ It supports both static and dynamic streaming datasets through incremental exten
 - **Multi-Threaded Builder**: `deglib::builder::EvenRegularGraphBuilder` with lock-free batch scheduling and customizable optimization profiles (`StreamingData`, `LowLID`, `HighLID`).
 - **Hardware-Accelerated SIMD**:
   - Hand-optimized AVX-512, AVX2, and VNNI vector kernels with automatic runtime/compiler dispatch and Scalar fallback.
-  - Metrics: `FP32_L2`, `FP32_InnerProduct`, `Uint8_L2`, `Uint8_InnerProduct`, `Int8_L2`, `Int8_InnerProduct`, `FP16_L2`, `FP16_InnerProduct`, and quantized `EVP_InnerProduct`.
+  - Metrics: `FP32_L2`, `FP32_InnerProduct`, `Uint8_L2`, `Uint8_InnerProduct`, `Int8_L2`, `Int8_InnerProduct`, `Uint4_L2`, `Uint4_InnerProduct`, `Int4_L2`, `Int4_InnerProduct`, `UInt7_L2`, `UInt7_InnerProduct`, `FP16_L2`, `FP16_InnerProduct`, and quantized `EVP_InnerProduct`.
 - **Graph Optimization & Diagnostics**:
-  - Topology pruning (`prune_worst_edges`, `prune_non_rng_edges`).
+  - Topology pruning (`prune_worst_edges`, `prune_non_mrng_edges`).
   - Analysis suite (`analyze_graph`, connectivity validation, exploration reachability).
 - **Label Filtering**: Metadata and boolean ID filtering during search via `deglib::search::Filter`.
 
@@ -98,7 +98,7 @@ auto results = graph.search(std::span<const float>(query), /*k=*/10, /*eps=*/0.1
 ### Saving and Loading Graphs
 
 ```cpp
-// 1. Save graph (both mutable and read-only graphs supported) to disk
+// 1. Save graph (mutable graphs supported; read-only graphs do not store edge weights) to disk
 graph.saveGraph("index.deg");
 
 // 2. Load as compact, optimized read-only graph for search
@@ -314,8 +314,8 @@ When prepared, the directory hierarchy under `<data-root>` is structured as foll
         ├── sift1m_query.fvecs          # Query vectors
         ├── sift1m_explore_query.fvecs  # Exploration queries
         ├── sift1m_explore_entry_vertex.ivecs
-        ├── sift1m_explore_groundtruth_top1000.ivecs
-        └── sift1m_groundtruth_top100_nb1000000.ivecs
+        ├── sift1m_explore_groundtruth_top1000_FP32_L2.ivecs
+        └── sift1m_base_top1000_FP32_L2.ivecs
 ```
 
 #### Specifying the Dataset Directory

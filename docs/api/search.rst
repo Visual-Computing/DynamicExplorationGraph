@@ -33,6 +33,12 @@ Filter
 Re-Ranking
 ----------
 
+.. autoclass:: deglib.search.Reranker
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :member-order: bysource
+
 .. autofunction:: deglib.search.rerank
 
 Example Usage

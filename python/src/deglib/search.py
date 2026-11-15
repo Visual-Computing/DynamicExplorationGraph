@@ -243,7 +243,7 @@ class Searcher:
         sample_size: int = 0,
         k: int = 100,
         num_threads: int = 1,
-        use_routing: bool = False,
+        use_routing: bool = True,
     ) -> None:
         """Select entry vertices via k-means medoids.
 
