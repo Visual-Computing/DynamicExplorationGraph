@@ -32,6 +32,7 @@ inline constexpr uint32_t TAG_SQU7 = make_fourcc('S', 'Q', 'U', '7');
 inline constexpr uint32_t TAG_SQ16 = make_fourcc('S', 'Q', '1', '6');
 inline constexpr uint32_t TAG_EVPQ = make_fourcc('E', 'V', 'P', 'Q');
 inline constexpr uint32_t TAG_NORM = make_fourcc('N', 'O', 'R', 'M');
+inline constexpr uint32_t TAG_FWHT = make_fourcc('F', 'W', 'H', 'T');
 
 /**
  * @brief Abstract base class for all feature and vector transformations.
@@ -83,6 +84,7 @@ class FeatureTransformation {
 #include "deglib/transformation/evp.h"
 #include "deglib/transformation/mips.h"
 #include "deglib/transformation/normalize.h"
+#include "deglib/transformation/rotation.h"
 #include "deglib/transformation/scalar/common.h"
 #include "deglib/transformation/scalar/fp16.h"
 #include "deglib/transformation/scalar/int4.h"
@@ -118,6 +120,8 @@ inline std::shared_ptr<FeatureTransformation> deserialize_transformation(std::is
             return EvpQuantizer::deserialize(ss);
         case TAG_NORM:
             return L2NormalizeTransform::deserialize(ss);
+        case TAG_FWHT:
+            return FastHadamardRotation::deserialize(ss);
         default:
             return nullptr;
     }
@@ -261,6 +265,80 @@ get_target_metric(std::span<const std::shared_ptr<FeatureTransformation>> transf
         if (t) cur = t->get_target_metric(cur);
     }
     return cur;
+}
+
+constexpr float default_rotation_kurtosis_threshold(deglib::distances::MetricDataType data_type, bool use_rerank = false) noexcept {
+    switch (data_type) {
+        case deglib::distances::MetricDataType::Uint4:
+        case deglib::distances::MetricDataType::Int4:
+            return 0.8f;
+        case deglib::distances::MetricDataType::UInt7:
+            return use_rerank ? 5.0f : 0.8f;
+        case deglib::distances::MetricDataType::Uint8:
+            return use_rerank ? 5.0f : 1.85f;
+        case deglib::distances::MetricDataType::Int8:
+            return use_rerank ? 25.0f : 1.85f;
+        default:
+            return -1.0f;
+    }
+}
+
+template <typename QuantT>
+inline std::vector<std::shared_ptr<FeatureTransformation>> build_quantizer_pipeline(
+    std::span<const float> data, uint32_t dim, float quantile, float kurtosis_threshold,
+    size_t num_threads = 0, uint64_t rotation_seed = 42
+) {
+    if (dim == 0) throw std::invalid_argument("make_quantizer_pipeline: dim must be > 0");
+    if (data.size() % dim != 0) throw std::invalid_argument("make_quantizer_pipeline: data size must be multiple of dim");
+
+    std::vector<std::shared_ptr<FeatureTransformation>> pipeline;
+    std::span<const float> fit_data = data;
+    std::vector<float> rotated;
+    if (kurtosis_threshold >= 0.0f) {
+        auto rot = std::make_shared<FastHadamardRotation>(dim, rotation_seed);
+        rot->fit_with_kurtosis(data, kurtosis_threshold);
+        if (rot->is_enabled()) {
+            rotated.resize(data.size());
+            rot->transform_database(data, std::as_writable_bytes(std::span<float>(rotated)), num_threads);
+            fit_data = rotated;
+            pipeline.push_back(std::move(rot));
+        }
+    }
+
+    auto quant = std::make_shared<QuantT>(dim);
+    quant->fit(fit_data, quantile);
+    pipeline.push_back(std::move(quant));
+    return pipeline;
+}
+
+inline std::vector<std::shared_ptr<FeatureTransformation>> make_quantizer_pipeline(
+    std::span<const float> data, uint32_t dim, deglib::distances::MetricDataType data_type,
+    float quantile = -1.0f, bool use_rerank = false, size_t num_threads = 0, uint64_t rotation_seed = 42
+) {
+    const float threshold = default_rotation_kurtosis_threshold(data_type, use_rerank);
+    switch (data_type) {
+        case deglib::distances::MetricDataType::Uint4:
+            return build_quantizer_pipeline<ScalarQuantizerUint4>(data, dim, quantile, threshold, num_threads, rotation_seed);
+        case deglib::distances::MetricDataType::Int4:
+            return build_quantizer_pipeline<ScalarQuantizerInt4>(data, dim, quantile, threshold, num_threads, rotation_seed);
+        case deglib::distances::MetricDataType::UInt7:
+            return build_quantizer_pipeline<ScalarQuantizerUInt7>(data, dim, quantile, threshold, num_threads, rotation_seed);
+        case deglib::distances::MetricDataType::Uint8:
+            return build_quantizer_pipeline<ScalarQuantizerUint8>(data, dim, quantile, threshold, num_threads, rotation_seed);
+        case deglib::distances::MetricDataType::Int8:
+            return build_quantizer_pipeline<ScalarQuantizerInt8>(data, dim, quantile, threshold, num_threads, rotation_seed);
+        case deglib::distances::MetricDataType::FP16:
+            return build_quantizer_pipeline<ScalarQuantizerFP16>(data, dim, quantile, -1.0f, num_threads, rotation_seed);
+        default:
+            throw std::invalid_argument("make_quantizer_pipeline: unsupported MetricDataType");
+    }
+}
+
+inline std::vector<std::shared_ptr<FeatureTransformation>> make_quantizer_pipeline(
+    std::span<const float> data, uint32_t dim, deglib::distances::Metric metric,
+    float quantile = -1.0f, bool use_rerank = false, size_t num_threads = 0, uint64_t rotation_seed = 42
+) {
+    return make_quantizer_pipeline(data, dim, metric.get_data_type(), quantile, use_rerank, num_threads, rotation_seed);
 }
 
 }  // namespace deglib::transformation

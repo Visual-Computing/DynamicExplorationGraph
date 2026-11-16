@@ -219,12 +219,12 @@ class ScalarQuantizerUint4 : public FeatureTransformation {
         if (data.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUint4: dim must be > 0 prior to fit()");
         if (data.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUint4: data size must be multiple of dim");
-        const size_t train_size = std::max<size_t>(dim_, data.size() / 10);
+        const size_t train_size = std::min(data.size(), std::max<size_t>(dim_, data.size() / 10));
         float actual_q = quantile;
         if (actual_q <= 0.0f) {
-            actual_q = detail::optimize_quantile_uint4(data.data(), std::min(data.size(), train_size), dim_, true);
+            actual_q = detail::optimize_quantile_uint4(data.data(), train_size, dim_, true);
         }
-        auto [mi, ma] = detail::find_minmax(data.data(), std::min(data.size(), train_size), actual_q);
+        auto [mi, ma] = detail::find_minmax(data.data(), train_size, actual_q);
         set_range(mi, ma);
     }
 

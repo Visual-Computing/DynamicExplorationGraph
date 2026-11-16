@@ -1,10 +1,13 @@
 #pragma once
 
+#include "deglib/distance/fp16.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
 #include <queue>
+#include <span>
 #include <utility>
 #include <vector>
 

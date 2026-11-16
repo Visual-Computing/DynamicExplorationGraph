@@ -5,6 +5,7 @@ import deglib_cpp
 FeatureTransformation = deglib_cpp.transformation.FeatureTransformation
 MipsTransform = deglib_cpp.transformation.MipsTransform
 L2NormalizeTransform = deglib_cpp.transformation.L2NormalizeTransform
+FastHadamardRotation = deglib_cpp.transformation.FastHadamardRotation
 EvpQuantizer = deglib_cpp.transformation.EvpQuantizer
 ScalarQuantizerInt8 = deglib_cpp.transformation.ScalarQuantizerInt8
 ScalarQuantizerUint8 = deglib_cpp.transformation.ScalarQuantizerUint8
@@ -15,6 +16,8 @@ ScalarQuantizerFP16 = deglib_cpp.transformation.ScalarQuantizerFP16
 
 # Factory Functions
 make_l2_normalize_transform = deglib_cpp.transformation.make_l2_normalize_transform
+make_fast_hadamard_rotation = deglib_cpp.transformation.make_fast_hadamard_rotation
+make_quantizer_pipeline = deglib_cpp.transformation.make_quantizer_pipeline
 make_evp_quantizer = deglib_cpp.transformation.make_evp_quantizer
 
 
@@ -76,6 +79,7 @@ __all__ = [
     "FeatureTransformation",
     "MipsTransform",
     "L2NormalizeTransform",
+    "FastHadamardRotation",
     "EvpQuantizer",
     "ScalarQuantizerInt8",
     "ScalarQuantizerUint8",
@@ -87,6 +91,8 @@ __all__ = [
     "make_scalar_quantizer_int4",
     "make_scalar_quantizer_uint7",
     "make_l2_normalize_transform",
+    "make_fast_hadamard_rotation",
+    "make_quantizer_pipeline",
     "make_evp_quantizer",
     "make_scalar_quantizer_int8",
     "make_scalar_quantizer_uint8",

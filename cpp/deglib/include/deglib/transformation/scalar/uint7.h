@@ -49,8 +49,8 @@ class ScalarQuantizerUInt7 : public FeatureTransformation {
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUInt7: dim must be > 0 prior to fit()");
         if (data.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUInt7: data size must be multiple of dim");
         if (quantile <= 0.0f) quantile = 1.0f;
-        const size_t train_size = std::max<size_t>(dim_, data.size() / 10);
-        const auto [mn, mx] = detail::find_minmax(data.data(), std::min(data.size(), train_size), quantile);
+        const size_t train_size = std::min(data.size(), std::max<size_t>(dim_, data.size() / 10));
+        const auto [mn, mx] = detail::find_minmax(data.data(), train_size, quantile);
         set_min_max(mn, mx);
     }
 

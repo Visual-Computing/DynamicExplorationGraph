@@ -1310,7 +1310,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
         std::span<const float> in_span(f_ptr, count * dim);
         const size_t out_stride = t.output_byte_size();
         const uint32_t tag = t.tag();
-        if (tag == deglib::transformation::TAG_SQI8) {
+        if (tag == deglib::transformation::TAG_SQI8 || tag == deglib::transformation::TAG_SQU7) {
             std::vector<py::ssize_t> shape = is_1d ? std::vector<py::ssize_t>{static_cast<py::ssize_t>(out_stride)}
                                                    : std::vector<py::ssize_t>{static_cast<py::ssize_t>(count), static_cast<py::ssize_t>(out_stride)};
             py::array_t<int8_t> out(shape);
@@ -1375,7 +1375,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
         }
         const size_t out_stride = transformations.back()->output_byte_size();
         const uint32_t tag = transformations.back()->tag();
-        if (tag == deglib::transformation::TAG_SQI8) {
+        if (tag == deglib::transformation::TAG_SQI8 || tag == deglib::transformation::TAG_SQU7) {
             std::vector<py::ssize_t> shape = is_1d ? std::vector<py::ssize_t>{static_cast<py::ssize_t>(out_stride)}
                                                    : std::vector<py::ssize_t>{static_cast<py::ssize_t>(count), static_cast<py::ssize_t>(out_stride)};
             py::array_t<int8_t> out(shape);
@@ -1983,95 +1983,144 @@ PYBIND11_MODULE(deglib_cpp, m) {
             return deglib::transformation::L2NormalizeTransform::deserialize(ss);
         });
 
+    auto bind_rotation_common = [](auto& cls) {
+        using RotT = typename std::decay_t<decltype(cls)>::type;
+        cls.def_property_readonly("dim", &RotT::dim)
+            .def_property_readonly("seed", &RotT::seed)
+            .def_property_readonly("is_enabled", &RotT::is_enabled)
+            .def_property("enabled", &RotT::is_enabled, &RotT::set_enabled)
+            .def_property_readonly("crest_factor", &RotT::crest_factor)
+            .def_property_readonly("excess_kurtosis", &RotT::excess_kurtosis)
+            .def(
+                "fit",
+                [](RotT& t, py::array_t<float, py::array::c_style> vectors, bool auto_detect) {
+                    py::buffer_info buf = vectors.request();
+                    auto [count, dim] = get_2d_shape(buf);
+                    if (t.dim() != 0 && t.dim() != static_cast<uint32_t>(dim)) {
+                        throw std::invalid_argument("Rotation dim does not match input vector dim");
+                    }
+                    t.fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), auto_detect);
+                },
+                py::arg("vectors"), py::arg("auto_detect") = true
+            )
+            .def(
+                "transform",
+                [](const RotT& t, py::array_t<float, py::array::c_style> vectors, size_t num_threads) {
+                    py::buffer_info buf = vectors.request();
+                    auto [count, dim] = get_2d_shape(buf);
+                    py::array_t<float> output({count, static_cast<size_t>(dim)});
+                    py::buffer_info out_buf = output.request();
+                    t.transform_database(
+                        std::span<const float>(static_cast<const float*>(buf.ptr), count * dim),
+                        std::span<std::byte>(static_cast<std::byte*>(out_buf.ptr), count * dim * sizeof(float)), num_threads
+                    );
+                    return output;
+                },
+                py::arg("vectors"), py::arg("num_threads") = 0
+            )
+            .def_static("deserialize", [](py::bytes b) {
+                std::string s = b;
+                std::istringstream ss(s, std::ios::binary);
+                return RotT::deserialize(ss);
+            });
+    };
+
+    auto fwht_cls = py::class_<
+        deglib::transformation::FastHadamardRotation, deglib::transformation::FeatureTransformation,
+        std::shared_ptr<deglib::transformation::FastHadamardRotation>>(transformation_module, "FastHadamardRotation")
+        .def(py::init<>())
+        .def(py::init<uint32_t, uint64_t, uint32_t>(), py::arg("dim"), py::arg("seed") = 42, py::arg("rounds") = 0)
+        .def_property_readonly("rounds", &deglib::transformation::FastHadamardRotation::rounds);
+    bind_rotation_common(fwht_cls);
+
+    auto make_scalar_quantizer_impl = [](auto type_tag, py::array vectors, float quantile) {
+        using QuantT = typename decltype(type_tag)::type;
+        py::buffer_info buf = vectors.request();
+        auto [count, dim] = get_2d_shape(buf);
+        auto q = std::make_shared<QuantT>(dim);
+        if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
+            q->fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), quantile);
+        } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
+            q->fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), quantile);
+        } else {
+            throw std::invalid_argument("vectors must be float32 or float16");
+        }
+        return q;
+    };
+
     transformation_module.def(
         "make_scalar_quantizer_int8",
-        [](py::array vectors, float quantile) {
-            py::buffer_info buf = vectors.request();
-            auto [count, dim] = get_2d_shape(buf);
-            auto q = std::make_shared<deglib::transformation::ScalarQuantizerInt8>(dim);
-            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                q->fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), quantile);
-            } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                q->fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), quantile);
-            } else {
-                throw std::invalid_argument("vectors must be float32 or float16");
-            }
-            return q;
+        [make_scalar_quantizer_impl](py::array vectors, float quantile) {
+            return make_scalar_quantizer_impl(std::type_identity<deglib::transformation::ScalarQuantizerInt8>{}, vectors, quantile);
         },
         py::arg("vectors"), py::arg("quantile") = -1.0f
     );
 
     transformation_module.def(
         "make_scalar_quantizer_uint8",
-        [](py::array vectors, float quantile) {
-            py::buffer_info buf = vectors.request();
-            auto [count, dim] = get_2d_shape(buf);
-            auto q = std::make_shared<deglib::transformation::ScalarQuantizerUint8>(dim);
-            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                q->fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), quantile);
-            } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                q->fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), quantile);
-            } else {
-                throw std::invalid_argument("vectors must be float32 or float16");
-            }
-            return q;
+        [make_scalar_quantizer_impl](py::array vectors, float quantile) {
+            return make_scalar_quantizer_impl(std::type_identity<deglib::transformation::ScalarQuantizerUint8>{}, vectors, quantile);
         },
         py::arg("vectors"), py::arg("quantile") = -1.0f
     );
 
     transformation_module.def(
         "make_scalar_quantizer_int4",
-        [](py::array vectors, float quantile) {
-            py::buffer_info buf = vectors.request();
-            auto [count, dim] = get_2d_shape(buf);
-            auto q = std::make_shared<deglib::transformation::ScalarQuantizerInt4>(dim);
-            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                q->fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), quantile);
-            } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                q->fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), quantile);
-            } else {
-                throw std::invalid_argument("vectors must be float32 or float16");
-            }
-            return q;
+        [make_scalar_quantizer_impl](py::array vectors, float quantile) {
+            return make_scalar_quantizer_impl(std::type_identity<deglib::transformation::ScalarQuantizerInt4>{}, vectors, quantile);
         },
         py::arg("vectors"), py::arg("quantile") = -1.0f
     );
 
     transformation_module.def(
         "make_scalar_quantizer_uint7",
-        [](py::array vectors, float quantile) {
-            py::buffer_info buf = vectors.request();
-            auto [count, dim] = get_2d_shape(buf);
-            auto q = std::make_shared<deglib::transformation::ScalarQuantizerUInt7>(dim);
-            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                q->fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), quantile);
-            } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                q->fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), quantile);
-            } else {
-                throw std::invalid_argument("vectors must be float32 or float16");
-            }
-            return q;
+        [make_scalar_quantizer_impl](py::array vectors, float quantile) {
+            return make_scalar_quantizer_impl(std::type_identity<deglib::transformation::ScalarQuantizerUInt7>{}, vectors, quantile);
         },
         py::arg("vectors"), py::arg("quantile") = -1.0f
     );
 
     transformation_module.def(
         "make_scalar_quantizer_uint4",
-        [](py::array vectors, float quantile) {
-            py::buffer_info buf = vectors.request();
-            auto [count, dim] = get_2d_shape(buf);
-            auto q = std::make_shared<deglib::transformation::ScalarQuantizerUint4>(dim);
-            if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                q->fit(std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), quantile);
-            } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
-                q->fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), quantile);
-            } else {
-                throw std::invalid_argument("vectors must be float32 or float16");
-            }
-            return q;
+        [make_scalar_quantizer_impl](py::array vectors, float quantile) {
+            return make_scalar_quantizer_impl(std::type_identity<deglib::transformation::ScalarQuantizerUint4>{}, vectors, quantile);
         },
         py::arg("vectors"), py::arg("quantile") = -1.0f,
         "Factory function creating a ScalarQuantizerUint4 calibrated on vectors. If quantile < 0 (default), auto-optimizes."
+    );
+
+    transformation_module.def(
+        "make_quantizer_pipeline",
+        [](py::array_t<float, py::array::c_style> vectors, py::object quant, float quantile, bool use_rerank, size_t num_threads, uint64_t seed) {
+            py::buffer_info buf = vectors.request();
+            auto [count, dim] = get_2d_shape(buf);
+            deglib::distances::MetricDataType data_type;
+            if (py::isinstance<deglib::distances::Metric>(quant)) {
+                data_type = quant.cast<deglib::distances::Metric>().get_data_type();
+            } else if (py::isinstance<py::int_>(quant)) {
+                data_type = deglib::distances::Metric(static_cast<deglib::distances::MetricType>(quant.cast<uint8_t>())).get_data_type();
+            } else if (py::isinstance<py::str>(quant)) {
+                std::string q_lower = quant.cast<std::string>();
+                for (char& c : q_lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                if (q_lower == "uint4") data_type = deglib::distances::MetricDataType::Uint4;
+                else if (q_lower == "int4") data_type = deglib::distances::MetricDataType::Int4;
+                else if (q_lower == "uint7") data_type = deglib::distances::MetricDataType::UInt7;
+                else if (q_lower == "uint8") data_type = deglib::distances::MetricDataType::Uint8;
+                else if (q_lower == "int8") data_type = deglib::distances::MetricDataType::Int8;
+                else if (q_lower == "fp16") data_type = deglib::distances::MetricDataType::FP16;
+                else throw std::invalid_argument("Unsupported quantizer data type: " + q_lower);
+            } else {
+                throw std::invalid_argument("quant must be a Metric or data type string (uint4, int4, uint7, uint8, int8, fp16)");
+            }
+
+            return deglib::transformation::make_quantizer_pipeline(
+                std::span<const float>(static_cast<const float*>(buf.ptr), count * dim),
+                static_cast<uint32_t>(dim), data_type, quantile, use_rerank, num_threads, seed
+            );
+        },
+        py::arg("vectors"), py::arg("quant"), py::arg("quantile") = -1.0f,
+        py::arg("use_rerank") = false, py::arg("num_threads") = 0, py::arg("seed") = 42,
+        "Builds a transformation pipeline [FastHadamardRotation, ScalarQuantizer] or [ScalarQuantizer] based on kurtosis."
     );
 
     transformation_module.def(
@@ -2124,6 +2173,19 @@ PYBIND11_MODULE(deglib_cpp, m) {
         "Factory function creating an L2NormalizeTransform."
     );
 
+    transformation_module.def(
+        "make_fast_hadamard_rotation",
+        [](py::array_t<float, py::array::c_style> vectors, uint64_t seed, uint32_t rounds, bool auto_detect) {
+            py::buffer_info buf = vectors.request();
+            auto [count, dim] = get_2d_shape(buf);
+            auto t = std::make_shared<deglib::transformation::FastHadamardRotation>(dim, seed, rounds);
+            t->fit(std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), auto_detect);
+            return t;
+        },
+        py::arg("vectors"), py::arg("seed") = 42, py::arg("rounds") = 0, py::arg("auto_detect") = true,
+        "Factory function creating a FastHadamardRotation fitted on vectors."
+    );
+
     transformation_module.def("mips_l2_transform", &mips_l2_transform_wrapper, py::arg("vectors"));
     transformation_module.def("mips_l2_transform_query", &mips_l2_transform_query_wrapper, py::arg("queries"));
 
@@ -2173,7 +2235,10 @@ PYBIND11_MODULE(deglib_cpp, m) {
     m.attr("ScalarQuantizerUInt7") = transformation_module.attr("ScalarQuantizerUInt7");
     m.attr("ScalarQuantizerFP16") = transformation_module.attr("ScalarQuantizerFP16");
     m.attr("L2NormalizeTransform") = transformation_module.attr("L2NormalizeTransform");
+    m.attr("FastHadamardRotation") = transformation_module.attr("FastHadamardRotation");
     m.attr("make_l2_normalize_transform") = transformation_module.attr("make_l2_normalize_transform");
+    m.attr("make_fast_hadamard_rotation") = transformation_module.attr("make_fast_hadamard_rotation");
+    m.attr("make_quantizer_pipeline") = transformation_module.attr("make_quantizer_pipeline");
     m.attr("make_evp_quantizer") = transformation_module.attr("make_evp_quantizer");
     m.attr("make_scalar_quantizer_int8") = transformation_module.attr("make_scalar_quantizer_int8");
     m.attr("make_scalar_quantizer_uint8") = transformation_module.attr("make_scalar_quantizer_uint8");
