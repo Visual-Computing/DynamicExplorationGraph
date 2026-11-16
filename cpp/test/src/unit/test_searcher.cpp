@@ -9,6 +9,7 @@
 #include "gtest/gtest.h"
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <random>
 #include <span>
 #include <vector>
@@ -507,5 +508,57 @@ TEST(SearcherTest, ScalarQuantizerDequantizeInt8AndUint8) {
     uint8_quant->dequantize(std::span<const std::byte>(uint8_bytes), std::span<float>(uint8_out));
     for (uint32_t d = 0; d < dim; ++d) {
         EXPECT_NEAR(uint8_out[d], data[d], 0.01f);
+    }
+}
+
+TEST(SearcherTest, MaxDistanceComputationCountBoundsSearch) {
+    const uint32_t dim = 8;
+    const uint32_t count = 200;
+
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    std::vector<float> data(count * dim);
+    for (float& v : data) v = dist(rng);
+
+    auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 16, deglib::distances::Metric::FP32_L2);
+    auto searcher = deglib::search::make_searcher(graph.internal());
+
+    const uint32_t k = 10;
+    const std::span<const float> query(data.data(), dim);
+
+    // Unlimited (0) finds k results and matches exact nearest neighbor 0
+    auto full_eps = searcher->search(query, k, 0.2f, 1.0f, true, false, 0);
+    EXPECT_EQ(full_eps.size(), k);
+    EXPECT_EQ(full_eps.indices[0], 0u);
+
+    auto full_ef = searcher->search(query, k, 64.0f, 1.0f, true, false, 0);
+    EXPECT_EQ(full_ef.size(), k);
+    EXPECT_EQ(full_ef.indices[0], 0u);
+
+    // Tight budget (5 distance computations) returns bounded valid results
+    auto bounded_eps = searcher->search(query, k, 0.2f, 1.0f, true, false, 5);
+    EXPECT_GE(bounded_eps.size(), 1u);
+    EXPECT_LE(bounded_eps.size(), 5u);
+
+    auto bounded_ef = searcher->search(query, k, 64.0f, 1.0f, true, false, 5);
+    EXPECT_GE(bounded_ef.size(), 1u);
+    EXPECT_LE(bounded_ef.size(), 5u);
+
+    // Batch search with tight budget (max_distance_computation_count = 5).
+    // Pre-fill with UINT32_MAX so unwritten slots beyond the returned count stay distinguishable.
+    std::vector<uint32_t> batch_out(4 * k, std::numeric_limits<uint32_t>::max());
+    searcher->search_batch<float>(
+        std::span<const float>(data.data(), 4 * dim), 4, k, std::span<uint32_t>(batch_out), {}, 64.0f, 1.0f, 2, false, false, 5
+    );
+    for (size_t q = 0; q < 4; ++q) {
+        size_t valid = 0;
+        for (uint32_t j = 0; j < k; ++j) {
+            if (batch_out[q * k + j] != std::numeric_limits<uint32_t>::max()) {
+                EXPECT_LT(batch_out[q * k + j], count);
+                ++valid;
+            }
+        }
+        EXPECT_GE(valid, 1u);
+        EXPECT_LE(valid, 5u);
     }
 }

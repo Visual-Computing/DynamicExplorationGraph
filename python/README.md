@@ -271,6 +271,9 @@ indices, distances = searcher.search(query, k=10, eps_or_ef=0.1)
 
 # Mode 2: Fixed candidate pool (HNSW-style)
 indices, distances = searcher.search(query, k=10, eps_or_ef=128)
+
+# Optional: hard per-query budget of graph distance computations (0 = unlimited)
+indices, distances = searcher.search(query, k=10, eps_or_ef=128, max_distance_computation_count=700)
 ```
 
 ### Supported Metrics & Data Types

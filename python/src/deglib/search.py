@@ -265,6 +265,7 @@ class Searcher:
         threads: int = 1,
         return_distances: bool = False,
         unsorted: bool = False,
+        max_distance_computation_count: int = 0,
     ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         """
         Search for nearest neighbors of a single query vector (1D or 2D with 1 vector) or a batch of query vectors (2D).
@@ -281,6 +282,7 @@ class Searcher:
         :param threads: Number of worker threads for batch search (default: 1).
         :param return_distances: If True, returns a tuple ``(indices, distances)``.
         :param unsorted: If True, returns candidates in heap order instead of ascending distance order.
+        :param max_distance_computation_count: Optional hard budget of distance computations per query (0 = unlimited).
         :return: Nearest neighbor IDs, or tuple ``(indices, distances)`` if `return_distances` is True:
             - Single query (1D or 1xDim): 1D array of shape `(found,)` where `found <= k`.
               If fewer than `k` neighbors are found (e.g. when `ef < k`), trimmed to the exact number of found elements.
@@ -296,6 +298,7 @@ class Searcher:
             int(threads),
             bool(return_distances),
             bool(unsorted),
+            int(max_distance_computation_count),
         )
 
 

@@ -716,7 +716,8 @@ class SearcherPy {
         float rerank_factor = 1.0f,
         size_t num_threads = 1,
         bool return_distances = false,
-        bool unsorted = false
+        bool unsorted = false,
+        uint32_t max_distance_computation_count = 0
     ) {
         // Enforce C-contiguous array with zero-copy if already contiguous
         auto c_query = py::array::ensure(query, py::array::c_style);
@@ -741,15 +742,23 @@ class SearcherPy {
             if (eps_or_ef >= 1.0f) {
                 const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
                 if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    found = searcher_->search_ef_f16(static_cast<const uint16_t*>(buf.ptr), k, ef, rerank_factor, out_ptr, dist_ptr, unsorted);
+                    found = searcher_->search_ef_f16(
+                        static_cast<const uint16_t*>(buf.ptr), k, ef, rerank_factor, out_ptr, dist_ptr, unsorted, max_distance_computation_count
+                    );
                 } else {
-                    found = searcher_->search_ef_f32(static_cast<const float*>(buf.ptr), k, ef, rerank_factor, out_ptr, dist_ptr, unsorted);
+                    found = searcher_->search_ef_f32(
+                        static_cast<const float*>(buf.ptr), k, ef, rerank_factor, out_ptr, dist_ptr, unsorted, max_distance_computation_count
+                    );
                 }
             } else {
                 if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
-                    found = searcher_->search_f16(static_cast<const uint16_t*>(buf.ptr), k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, unsorted);
+                    found = searcher_->search_f16(
+                        static_cast<const uint16_t*>(buf.ptr), k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, unsorted, max_distance_computation_count
+                    );
                 } else {
-                    found = searcher_->search_f32(static_cast<const float*>(buf.ptr), k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, unsorted);
+                    found = searcher_->search_f32(
+                        static_cast<const float*>(buf.ptr), k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, unsorted, max_distance_computation_count
+                    );
                 }
             }
 
@@ -785,21 +794,25 @@ class SearcherPy {
                     const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
                     if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
                         searcher_->search_batch_ef_f16(
-                            static_cast<const uint16_t*>(buf.ptr), n_queries, k, ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted
+                            static_cast<const uint16_t*>(buf.ptr), n_queries, k, ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted,
+                            max_distance_computation_count
                         );
                     } else {
                         searcher_->search_batch_ef_f32(
-                            static_cast<const float*>(buf.ptr), n_queries, k, ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted
+                            static_cast<const float*>(buf.ptr), n_queries, k, ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted,
+                            max_distance_computation_count
                         );
                     }
                 } else {
                     if (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e")) {
                         searcher_->search_batch_f16(
-                            static_cast<const uint16_t*>(buf.ptr), n_queries, k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted
+                            static_cast<const uint16_t*>(buf.ptr), n_queries, k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted,
+                            max_distance_computation_count
                         );
                     } else {
                         searcher_->search_batch_f32(
-                            static_cast<const float*>(buf.ptr), n_queries, k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted
+                            static_cast<const float*>(buf.ptr), n_queries, k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted,
+                            max_distance_computation_count
                         );
                     }
                 }
@@ -821,9 +834,10 @@ class SearcherPy {
         float rerank_factor = 1.0f,
         size_t num_threads = 1,
         bool return_distances = false,
-        bool unsorted = false
+        bool unsorted = false,
+        uint32_t max_distance_computation_count = 0
     ) {
-        return search(queries, k, eps_or_ef, rerank_factor, num_threads, return_distances, unsorted);
+        return search(queries, k, eps_or_ef, rerank_factor, num_threads, return_distances, unsorted, max_distance_computation_count);
     }
 };
 
@@ -2337,6 +2351,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def(
             "search", &SearcherPy::search, py::arg("query"), py::arg("k"), py::arg("eps_or_ef") = 0.1f, py::arg("rerank_factor") = 1.0f,
             py::arg("num_threads") = 1, py::arg("return_distances") = false, py::arg("unsorted") = false,
+            py::arg("max_distance_computation_count") = 0,
             "Search for nearest neighbors of a single query vector (1D) or batch of query vectors (2D).\n\n"
             "Args:\n"
             "    query: 1D query vector or 2D batch array.\n"
@@ -2346,11 +2361,13 @@ PYBIND11_MODULE(deglib_cpp, m) {
             "    rerank_factor: Expansion factor for exact candidate reranking (default: 1.0).\n"
             "    num_threads: Number of worker threads for batch search (default: 1).\n"
             "    return_distances: If True, returns a tuple of (indices, distances).\n"
-            "    unsorted: If True, returns candidates in heap order instead of ascending distance."
+            "    unsorted: If True, returns candidates in heap order instead of ascending distance.\n"
+            "    max_distance_computation_count: Optional hard budget of distance computations per query (0 = unlimited)."
         )
         .def(
             "search_batch", &SearcherPy::search_batch, py::arg("queries"), py::arg("k"), py::arg("eps_or_ef") = 0.1f, py::arg("rerank_factor") = 1.0f,
             py::arg("num_threads") = 1, py::arg("return_distances") = false, py::arg("unsorted") = false,
+            py::arg("max_distance_computation_count") = 0,
             "Search for nearest neighbors for a batch of query vectors.\n\n"
             "Args:\n"
             "    queries: 2D query array (shape N x Dim).\n"
@@ -2360,7 +2377,8 @@ PYBIND11_MODULE(deglib_cpp, m) {
             "    rerank_factor: Expansion factor for exact candidate reranking (default: 1.0).\n"
             "    num_threads: Number of worker threads for parallel search.\n"
             "    return_distances: If True, returns a tuple of (indices, distances).\n"
-            "    unsorted: If True, returns candidates in heap order instead of ascending distance."
+            "    unsorted: If True, returns candidates in heap order instead of ascending distance.\n"
+            "    max_distance_computation_count: Optional hard budget of distance computations per query (0 = unlimited)."
         )
         .def(
             "optimize", &SearcherPy::optimize, py::arg("n_clusters") = 256, py::arg("n_iter") = 20, py::arg("sample_size") = 0, py::arg("k") = 100,

@@ -348,3 +348,32 @@ def test_searcher_single_query_small_ef_exact_sizing():
     assert np.all(res_idx != np.iinfo(np.uint32).max)
     assert not np.any(np.isnan(res_dist))
 
+
+def test_searcher_max_distance_computation_count():
+    """Verify max_distance_computation_count bounds single and batch Searcher queries."""
+    np.random.seed(42)
+    dim = 8
+    n = 200
+    data = np.random.randn(n, dim).astype(np.float32)
+    graph = deglib.builder.build_from_data(data, edges_per_vertex=16, metric=Metric.FP32_L2)
+    searcher = create_searcher(graph)
+
+    # Unlimited (0) returns full k=10 and exact match 0
+    res_full = searcher.search(data[0], k=10, eps_or_ef=64, max_distance_computation_count=0)
+    assert len(res_full) == 10
+    assert res_full[0] == 0
+
+    # Tight budget (5) limits returned candidates in both eps and ef modes
+    res_bounded_eps = searcher.search(data[0], k=10, eps_or_ef=0.2, max_distance_computation_count=5)
+    assert 1 <= len(res_bounded_eps) <= 5
+
+    res_bounded_ef = searcher.search(data[0], k=10, eps_or_ef=64, max_distance_computation_count=5)
+    assert 1 <= len(res_bounded_ef) <= 5
+
+    # Batch search with tight budget (max_distance_computation_count=5)
+    batch_full = searcher.search(data[:4], k=10, eps_or_ef=64, threads=2, max_distance_computation_count=0)
+    batch_bounded = searcher.search(data[:4], k=10, eps_or_ef=64, threads=2, max_distance_computation_count=5)
+    assert batch_bounded.shape == (4, 10)
+    assert np.array_equal(batch_bounded[0, : len(res_bounded_ef)], res_bounded_ef)
+    assert not np.array_equal(batch_bounded[0, :5], batch_full[0, :5])
+

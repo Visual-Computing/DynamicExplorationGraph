@@ -165,7 +165,26 @@ class Searcher {
     }
 
     /**
-     * Internal single-query execution engine.
+     * @brief Internal single-query execution engine.
+     *
+     * Handles optional query normalization, query transformation/quantization,
+     * graph traversal (`search_ef` or `search`), optional full-precision reranking,
+     * and internal-to-external label mapping.
+     *
+     * @tparam QueryT                        Input query element type (`float` or `uint16_t`).
+     * @param  query                         Pointer to the input query vector of length `dim`.
+     * @param  k                             Number of nearest neighbors to return.
+     * @param  eps                           Relative distance margin (used when `use_ef` is false).
+     * @param  ef                            Fixed exploration pool size (used when `use_ef` is true).
+     * @param  use_ef                        Selects `search_ef` (`true`) or `search` (`false`).
+     * @param  rerank_factor                 Candidate expansion factor for exact reranking.
+     * @param  out_indices                   Caller-allocated output buffer of at least `k` labels.
+     * @param  out_distances                 Optional output buffer of at least `k` distances (may be null).
+     * @param  return_distances              Whether to write distances to `out_distances`.
+     * @param  unsorted                      If true, skip final ascending distance sort where supported.
+     * @param  max_distance_computation_count Hard per-query budget for graph distance computations (`0` = unlimited).
+     * @param  ws                            Reusable thread-local workspace buffers.
+     * @return Number of neighbors written to `out_indices` (at most `k`).
      */
     template <typename QueryT>
     inline uint32_t execute_search_single(
@@ -179,6 +198,7 @@ class Searcher {
         float* out_distances,
         bool return_distances,
         bool unsorted,
+        uint32_t max_distance_computation_count,
         QueryWorkspace& ws
     ) const {
         if (!graph_ || graph_->size() == 0 || k == 0 || query == nullptr || out_indices == nullptr) {
@@ -219,7 +239,7 @@ class Searcher {
         const bool should_rerank = reranker_.has_value() && (num_candidates > k);
 
         if (use_ef) {
-            auto ef_res = graph_->search_ef(query_span, entry_vertices, num_candidates, ef);
+            auto ef_res = graph_->search_ef(query_span, entry_vertices, num_candidates, ef, true, nullptr, max_distance_computation_count);
             if (ef_res.empty()) return 0;
 
             if (should_rerank) {
@@ -252,7 +272,7 @@ class Searcher {
                 return static_cast<uint32_t>(count);
             }
         } else {
-            auto heap_res = graph_->search(query_span, entry_vertices, num_candidates, eps);
+            auto heap_res = graph_->search(query_span, entry_vertices, num_candidates, eps, nullptr, max_distance_computation_count);
             if (heap_res.empty()) return 0;
 
             if (should_rerank) {
@@ -322,9 +342,65 @@ class Searcher {
     bool normalize_query() const noexcept { return normalize_query_; }
     void set_normalize_query(bool val) noexcept { normalize_query_ = val; }
 
+    /**
+     * @brief Shared parallel batch-search execution helper.
+     *
+     * Dispatches contiguous query rows across worker threads via `parallel_batch_for`,
+     * reusing a `thread_local QueryWorkspace` per worker thread.
+     *
+     * @tparam QueryT                        Input query element type (`float` or `uint16_t`).
+     * @tparam UseEf                         Compile-time switch between `search_ef` (`true`) and `search` (`false`).
+     */
+    template <typename QueryT, bool UseEf>
+    inline void execute_search_batch(
+        const QueryT* queries,
+        size_t n_queries,
+        uint32_t k,
+        float eps,
+        uint32_t ef,
+        float rerank_factor,
+        uint32_t* out_indices,
+        float* out_distances,
+        size_t threads,
+        bool unsorted,
+        uint32_t max_distance_computation_count
+    ) const {
+        if (!graph_ || n_queries == 0 || k == 0 || queries == nullptr || out_indices == nullptr) return;
+        const uint32_t dim = graph_->getFeatureSpace().dim();
+
+        deglib::concurrent::parallel_batch_for(
+            0, n_queries, threads,
+            [&](size_t begin, size_t end, size_t) {
+                thread_local QueryWorkspace ws;
+                for (size_t q = begin; q < end; ++q) {
+                    const QueryT* q_ptr = queries + q * dim;
+                    uint32_t* idx_ptr = out_indices + q * k;
+                    float* dist_ptr = out_distances ? (out_distances + q * k) : nullptr;
+                    execute_search_single(
+                        q_ptr, k, eps, ef, UseEf, rerank_factor, idx_ptr, dist_ptr, out_distances != nullptr, unsorted, max_distance_computation_count, ws
+                    );
+                }
+            },
+            16
+        );
+    }
+
   public:
     // --- Raw Buffer Single-Query Search ---
 
+    /**
+     * @brief Searches a single FP32 query using relative distance margin (`eps`).
+     *
+     * @param query                          Pointer to the query vector (`dim` floats).
+     * @param k                              Number of nearest neighbors to return.
+     * @param eps                            Relative exploration distance margin.
+     * @param rerank_factor                  Expansion factor for exact candidate reranking (`1.0f` disables expansion).
+     * @param out_indices                    Output buffer for up to `k` external neighbor labels.
+     * @param out_distances                  Optional output buffer for up to `k` distances (nullable).
+     * @param unsorted                       If true, returns candidates without final distance sorting.
+     * @param max_distance_computation_count Hard per-query limit on graph distance computations (`0` = unlimited).
+     * @return Number of neighbors written (at most `k`).
+     */
     uint32_t search_f32(
         const float* query,
         uint32_t k,
@@ -332,12 +408,20 @@ class Searcher {
         float rerank_factor,
         uint32_t* out_indices,
         float* out_distances = nullptr,
-        bool unsorted = false
+        bool unsorted = false,
+        uint32_t max_distance_computation_count = 0
     ) const {
         thread_local QueryWorkspace ws;
-        return execute_search_single(query, k, eps, 0, false, rerank_factor, out_indices, out_distances, out_distances != nullptr, unsorted, ws);
+        return execute_search_single(
+            query, k, eps, 0, false, rerank_factor, out_indices, out_distances, out_distances != nullptr, unsorted, max_distance_computation_count, ws
+        );
     }
 
+    /**
+     * @brief Searches a single IEEE-754 FP16 query (packed as `uint16_t`) using relative distance margin (`eps`).
+     *
+     * @copydetails search_f32
+     */
     uint32_t search_f16(
         const uint16_t* query,
         uint32_t k,
@@ -345,12 +429,28 @@ class Searcher {
         float rerank_factor,
         uint32_t* out_indices,
         float* out_distances = nullptr,
-        bool unsorted = false
+        bool unsorted = false,
+        uint32_t max_distance_computation_count = 0
     ) const {
         thread_local QueryWorkspace ws;
-        return execute_search_single(query, k, eps, 0, false, rerank_factor, out_indices, out_distances, out_distances != nullptr, unsorted, ws);
+        return execute_search_single(
+            query, k, eps, 0, false, rerank_factor, out_indices, out_distances, out_distances != nullptr, unsorted, max_distance_computation_count, ws
+        );
     }
 
+    /**
+     * @brief Searches a single FP32 query using a fixed exploration candidate pool (`ef`).
+     *
+     * @param query                          Pointer to the query vector (`dim` floats).
+     * @param k                              Number of nearest neighbors to return.
+     * @param ef                             Fixed candidate pool size during graph traversal.
+     * @param rerank_factor                  Expansion factor for exact candidate reranking (`1.0f` disables expansion).
+     * @param out_indices                    Output buffer for up to `k` external neighbor labels.
+     * @param out_distances                  Optional output buffer for up to `k` distances (nullable).
+     * @param unsorted                       If true, returns candidates without final distance sorting.
+     * @param max_distance_computation_count Hard per-query limit on graph distance computations (`0` = unlimited).
+     * @return Number of neighbors written (at most `k`).
+     */
     uint32_t search_ef_f32(
         const float* query,
         uint32_t k,
@@ -358,12 +458,20 @@ class Searcher {
         float rerank_factor,
         uint32_t* out_indices,
         float* out_distances = nullptr,
-        bool unsorted = false
+        bool unsorted = false,
+        uint32_t max_distance_computation_count = 0
     ) const {
         thread_local QueryWorkspace ws;
-        return execute_search_single(query, k, 0.0f, ef, true, rerank_factor, out_indices, out_distances, out_distances != nullptr, unsorted, ws);
+        return execute_search_single(
+            query, k, 0.0f, ef, true, rerank_factor, out_indices, out_distances, out_distances != nullptr, unsorted, max_distance_computation_count, ws
+        );
     }
 
+    /**
+     * @brief Searches a single IEEE-754 FP16 query (packed as `uint16_t`) using a fixed exploration pool (`ef`).
+     *
+     * @copydetails search_ef_f32
+     */
     uint32_t search_ef_f16(
         const uint16_t* query,
         uint32_t k,
@@ -371,14 +479,31 @@ class Searcher {
         float rerank_factor,
         uint32_t* out_indices,
         float* out_distances = nullptr,
-        bool unsorted = false
+        bool unsorted = false,
+        uint32_t max_distance_computation_count = 0
     ) const {
         thread_local QueryWorkspace ws;
-        return execute_search_single(query, k, 0.0f, ef, true, rerank_factor, out_indices, out_distances, out_distances != nullptr, unsorted, ws);
+        return execute_search_single(
+            query, k, 0.0f, ef, true, rerank_factor, out_indices, out_distances, out_distances != nullptr, unsorted, max_distance_computation_count, ws
+        );
     }
 
     // --- Raw Buffer Batch Search ---
 
+    /**
+     * @brief Parallel batch search for FP32 queries using relative distance margin (`eps`).
+     *
+     * @param queries                        Contiguous row-major buffer of `n_queries * dim` floats.
+     * @param n_queries                      Number of queries in the batch.
+     * @param k                              Number of nearest neighbors per query.
+     * @param eps                            Relative exploration distance margin.
+     * @param rerank_factor                  Expansion factor for exact candidate reranking.
+     * @param out_indices                    Output buffer of size `n_queries * k`.
+     * @param out_distances                  Optional output buffer of size `n_queries * k` (nullable).
+     * @param threads                        Number of worker threads (`1` runs sequentially on the calling thread).
+     * @param unsorted                       If true, skips final ascending distance sort where supported.
+     * @param max_distance_computation_count Hard per-query limit on graph distance computations (`0` = unlimited).
+     */
     void search_batch_f32(
         const float* queries,
         size_t n_queries,
@@ -388,26 +513,19 @@ class Searcher {
         uint32_t* out_indices,
         float* out_distances = nullptr,
         size_t threads = 1,
-        bool unsorted = false
+        bool unsorted = false,
+        uint32_t max_distance_computation_count = 0
     ) const {
-        if (!graph_ || n_queries == 0 || k == 0 || queries == nullptr || out_indices == nullptr) return;
-        const uint32_t dim = graph_->getFeatureSpace().dim();
-
-        deglib::concurrent::parallel_batch_for(
-            0, n_queries, threads,
-            [&](size_t begin, size_t end, size_t) {
-                thread_local QueryWorkspace ws;
-                for (size_t q = begin; q < end; ++q) {
-                    const float* q_ptr = queries + q * dim;
-                    uint32_t* idx_ptr = out_indices + q * k;
-                    float* dist_ptr = out_distances ? (out_distances + q * k) : nullptr;
-                    execute_search_single(q_ptr, k, eps, 0, false, rerank_factor, idx_ptr, dist_ptr, out_distances != nullptr, unsorted, ws);
-                }
-            },
-            16
+        execute_search_batch<float, false>(
+            queries, n_queries, k, eps, 0, rerank_factor, out_indices, out_distances, threads, unsorted, max_distance_computation_count
         );
     }
 
+    /**
+     * @brief Parallel batch search for IEEE-754 FP16 queries using relative distance margin (`eps`).
+     *
+     * @copydetails search_batch_f32
+     */
     void search_batch_f16(
         const uint16_t* queries,
         size_t n_queries,
@@ -417,26 +535,28 @@ class Searcher {
         uint32_t* out_indices,
         float* out_distances = nullptr,
         size_t threads = 1,
-        bool unsorted = false
+        bool unsorted = false,
+        uint32_t max_distance_computation_count = 0
     ) const {
-        if (!graph_ || n_queries == 0 || k == 0 || queries == nullptr || out_indices == nullptr) return;
-        const uint32_t dim = graph_->getFeatureSpace().dim();
-
-        deglib::concurrent::parallel_batch_for(
-            0, n_queries, threads,
-            [&](size_t begin, size_t end, size_t) {
-                thread_local QueryWorkspace ws;
-                for (size_t q = begin; q < end; ++q) {
-                    const uint16_t* q_ptr = queries + q * dim;
-                    uint32_t* idx_ptr = out_indices + q * k;
-                    float* dist_ptr = out_distances ? (out_distances + q * k) : nullptr;
-                    execute_search_single(q_ptr, k, eps, 0, false, rerank_factor, idx_ptr, dist_ptr, out_distances != nullptr, unsorted, ws);
-                }
-            },
-            16
+        execute_search_batch<uint16_t, false>(
+            queries, n_queries, k, eps, 0, rerank_factor, out_indices, out_distances, threads, unsorted, max_distance_computation_count
         );
     }
 
+    /**
+     * @brief Parallel batch search for FP32 queries using a fixed exploration pool (`ef`).
+     *
+     * @param queries                        Contiguous row-major buffer of `n_queries * dim` floats.
+     * @param n_queries                      Number of queries in the batch.
+     * @param k                              Number of nearest neighbors per query.
+     * @param ef                             Fixed candidate pool size during graph traversal.
+     * @param rerank_factor                  Expansion factor for exact candidate reranking.
+     * @param out_indices                    Output buffer of size `n_queries * k`.
+     * @param out_distances                  Optional output buffer of size `n_queries * k` (nullable).
+     * @param threads                        Number of worker threads (`1` runs sequentially on the calling thread).
+     * @param unsorted                       If true, skips final ascending distance sort where supported.
+     * @param max_distance_computation_count Hard per-query limit on graph distance computations (`0` = unlimited).
+     */
     void search_batch_ef_f32(
         const float* queries,
         size_t n_queries,
@@ -446,26 +566,19 @@ class Searcher {
         uint32_t* out_indices,
         float* out_distances = nullptr,
         size_t threads = 1,
-        bool unsorted = false
+        bool unsorted = false,
+        uint32_t max_distance_computation_count = 0
     ) const {
-        if (!graph_ || n_queries == 0 || k == 0 || queries == nullptr || out_indices == nullptr) return;
-        const uint32_t dim = graph_->getFeatureSpace().dim();
-
-        deglib::concurrent::parallel_batch_for(
-            0, n_queries, threads,
-            [&](size_t begin, size_t end, size_t) {
-                thread_local QueryWorkspace ws;
-                for (size_t q = begin; q < end; ++q) {
-                    const float* q_ptr = queries + q * dim;
-                    uint32_t* idx_ptr = out_indices + q * k;
-                    float* dist_ptr = out_distances ? (out_distances + q * k) : nullptr;
-                    execute_search_single(q_ptr, k, 0.0f, ef, true, rerank_factor, idx_ptr, dist_ptr, out_distances != nullptr, unsorted, ws);
-                }
-            },
-            16
+        execute_search_batch<float, true>(
+            queries, n_queries, k, 0.0f, ef, rerank_factor, out_indices, out_distances, threads, unsorted, max_distance_computation_count
         );
     }
 
+    /**
+     * @brief Parallel batch search for IEEE-754 FP16 queries using a fixed exploration pool (`ef`).
+     *
+     * @copydetails search_batch_ef_f32
+     */
     void search_batch_ef_f16(
         const uint16_t* queries,
         size_t n_queries,
@@ -475,28 +588,33 @@ class Searcher {
         uint32_t* out_indices,
         float* out_distances = nullptr,
         size_t threads = 1,
-        bool unsorted = false
+        bool unsorted = false,
+        uint32_t max_distance_computation_count = 0
     ) const {
-        if (!graph_ || n_queries == 0 || k == 0 || queries == nullptr || out_indices == nullptr) return;
-        const uint32_t dim = graph_->getFeatureSpace().dim();
-
-        deglib::concurrent::parallel_batch_for(
-            0, n_queries, threads,
-            [&](size_t begin, size_t end, size_t) {
-                thread_local QueryWorkspace ws;
-                for (size_t q = begin; q < end; ++q) {
-                    const uint16_t* q_ptr = queries + q * dim;
-                    uint32_t* idx_ptr = out_indices + q * k;
-                    float* dist_ptr = out_distances ? (out_distances + q * k) : nullptr;
-                    execute_search_single(q_ptr, k, 0.0f, ef, true, rerank_factor, idx_ptr, dist_ptr, out_distances != nullptr, unsorted, ws);
-                }
-            },
-            16
+        execute_search_batch<uint16_t, true>(
+            queries, n_queries, k, 0.0f, ef, rerank_factor, out_indices, out_distances, threads, unsorted, max_distance_computation_count
         );
     }
 
     // --- Modern C++20 API with eps_or_ef ---
 
+    /**
+     * @brief Searches a single query into caller-provided `std::span` output buffers.
+     *
+     * @tparam T                             Query element type (`float` or `uint16_t`).
+     * @param  query                         Span covering the query vector (`dim` elements).
+     * @param  k                             Number of nearest neighbors to return.
+     * @param  out_indices                   Destination span of at least `k` elements.
+     * @param  out_distances                 Optional destination span of at least `k` elements when `return_distances` is true.
+     * @param  eps_or_ef                     Exploration parameter: values `>= 1.0f` select fixed pool `ef = lround(eps_or_ef)`,
+     *                                       values `< 1.0f` select relative distance margin `eps`.
+     * @param  rerank_factor                 Candidate expansion factor for exact reranking (`1.0f` disables expansion).
+     * @param  return_distances              If true, writes distances to `out_distances`.
+     * @param  unsorted                      If true, skips final ascending distance sort where supported.
+     * @param  max_distance_computation_count Hard per-query limit on graph distance computations (`0` = unlimited).
+     * @return Number of neighbors written to `out_indices` (at most `k`).
+     * @throws std::invalid_argument         If `out_indices` or required `out_distances` is smaller than `k`.
+     */
     template <typename T>
     uint32_t search(
         std::span<const T> query,
@@ -506,7 +624,8 @@ class Searcher {
         float eps_or_ef = 0.1f,
         float rerank_factor = 1.0f,
         bool return_distances = false,
-        bool unsorted = false
+        bool unsorted = false,
+        uint32_t max_distance_computation_count = 0
     ) const {
         if (out_indices.size() < k) {
             throw std::invalid_argument("Searcher::search: out_indices span smaller than k");
@@ -520,9 +639,16 @@ class Searcher {
         const float eps = use_ef ? 0.0f : eps_or_ef;
 
         thread_local QueryWorkspace ws;
-        return execute_search_single(query.data(), k, eps, ef, use_ef, rerank_factor, out_indices.data(), d_ptr, return_distances, unsorted, ws);
+        return execute_search_single(
+            query.data(), k, eps, ef, use_ef, rerank_factor, out_indices.data(), d_ptr, return_distances, unsorted, max_distance_computation_count, ws
+        );
     }
 
+    /**
+     * @brief Searches a single query and returns a newly allocated `SearchResult`.
+     *
+     * @copydetails search(std::span<const T>, uint32_t, std::span<uint32_t>, std::span<float>, float, float, bool, bool, uint32_t) const
+     */
     template <typename T>
     SearchResult search(
         std::span<const T> query,
@@ -530,20 +656,38 @@ class Searcher {
         float eps_or_ef = 0.1f,
         float rerank_factor = 1.0f,
         bool return_distances = false,
-        bool unsorted = false
+        bool unsorted = false,
+        uint32_t max_distance_computation_count = 0
     ) const {
         SearchResult res;
         res.indices.resize(k);
         if (return_distances) res.distances.resize(k);
         uint32_t count = search<T>(
             query, k, std::span<uint32_t>(res.indices), return_distances ? std::span<float>(res.distances) : std::span<float>{}, eps_or_ef, rerank_factor,
-            return_distances, unsorted
+            return_distances, unsorted, max_distance_computation_count
         );
         res.indices.resize(count);
         if (return_distances) res.distances.resize(count);
         return res;
     }
 
+    /**
+     * @brief Searches a batch of queries in parallel into caller-provided `std::span` output buffers.
+     *
+     * @tparam T                             Query element type (`float` or `uint16_t`).
+     * @param  queries                       Span covering `n_queries * dim` elements in row-major order.
+     * @param  n_queries                     Number of queries in the batch.
+     * @param  k                             Number of nearest neighbors per query.
+     * @param  out_indices                   Destination span of at least `n_queries * k` elements.
+     * @param  out_distances                 Optional destination span of at least `n_queries * k` elements when `return_distances` is true.
+     * @param  eps_or_ef                     Exploration parameter: `>= 1.0f` uses fixed pool `ef`, `< 1.0f` uses margin `eps`.
+     * @param  rerank_factor                 Candidate expansion factor for exact reranking (`1.0f` disables expansion).
+     * @param  threads                       Number of worker threads (`1` runs sequentially).
+     * @param  return_distances              If true, writes distances to `out_distances`.
+     * @param  unsorted                      If true, skips final ascending distance sort where supported.
+     * @param  max_distance_computation_count Hard per-query limit on graph distance computations (`0` = unlimited).
+     * @throws std::invalid_argument         If `out_indices` or required `out_distances` is smaller than `n_queries * k`.
+     */
     template <typename T>
     void search_batch(
         std::span<const T> queries,
@@ -555,7 +699,8 @@ class Searcher {
         float rerank_factor = 1.0f,
         size_t threads = 1,
         bool return_distances = false,
-        bool unsorted = false
+        bool unsorted = false,
+        uint32_t max_distance_computation_count = 0
     ) const {
         if (out_indices.size() < n_queries * k) {
             throw std::invalid_argument("Searcher::search_batch: out_indices span smaller than n_queries * k");
@@ -568,22 +713,36 @@ class Searcher {
         if (eps_or_ef >= 1.0f) {
             const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
             if constexpr (std::is_same_v<T, float>) {
-                search_batch_ef_f32(queries.data(), n_queries, k, ef, rerank_factor, out_indices.data(), d_ptr, threads, unsorted);
+                search_batch_ef_f32(
+                    queries.data(), n_queries, k, ef, rerank_factor, out_indices.data(), d_ptr, threads, unsorted, max_distance_computation_count
+                );
             } else if constexpr (std::is_same_v<T, uint16_t>) {
-                search_batch_ef_f16(queries.data(), n_queries, k, ef, rerank_factor, out_indices.data(), d_ptr, threads, unsorted);
+                search_batch_ef_f16(
+                    queries.data(), n_queries, k, ef, rerank_factor, out_indices.data(), d_ptr, threads, unsorted, max_distance_computation_count
+                );
             } else {
                 static_assert(sizeof(T) == 0, "Unsupported query type: must be float or uint16_t");
             }
         } else {
             if constexpr (std::is_same_v<T, float>) {
-                search_batch_f32(queries.data(), n_queries, k, eps_or_ef, rerank_factor, out_indices.data(), d_ptr, threads, unsorted);
+                search_batch_f32(
+                    queries.data(), n_queries, k, eps_or_ef, rerank_factor, out_indices.data(), d_ptr, threads, unsorted, max_distance_computation_count
+                );
             } else if constexpr (std::is_same_v<T, uint16_t>) {
-                search_batch_f16(queries.data(), n_queries, k, eps_or_ef, rerank_factor, out_indices.data(), d_ptr, threads, unsorted);
+                search_batch_f16(
+                    queries.data(), n_queries, k, eps_or_ef, rerank_factor, out_indices.data(), d_ptr, threads, unsorted, max_distance_computation_count
+                );
             } else {
                 static_assert(sizeof(T) == 0, "Unsupported query type: must be float or uint16_t");
             }
         }
     }
+
+    /**
+     * @brief Searches a batch of queries in parallel and returns a newly allocated `SearchResultBatch`.
+     *
+     * @copydetails search_batch(std::span<const T>, size_t, uint32_t, std::span<uint32_t>, std::span<float>, float, float, size_t, bool, bool, uint32_t) const
+     */
 
     template <typename T>
     SearchResultBatch search_batch(
@@ -594,7 +753,8 @@ class Searcher {
         float rerank_factor = 1.0f,
         size_t threads = 1,
         bool return_distances = false,
-        bool unsorted = false
+        bool unsorted = false,
+        uint32_t max_distance_computation_count = 0
     ) const {
         SearchResultBatch result;
         result.n_queries = n_queries;
@@ -605,7 +765,7 @@ class Searcher {
         }
         search_batch<T>(
             queries, n_queries, k, std::span<uint32_t>(result.indices), return_distances ? std::span<float>(result.distances) : std::span<float>{}, eps_or_ef,
-            rerank_factor, threads, return_distances, unsorted
+            rerank_factor, threads, return_distances, unsorted, max_distance_computation_count
         );
         return result;
     }
