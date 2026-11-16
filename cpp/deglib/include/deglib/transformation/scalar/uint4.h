@@ -219,7 +219,7 @@ class ScalarQuantizerUint4 : public FeatureTransformation {
         if (data.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUint4: dim must be > 0 prior to fit()");
         if (data.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUint4: data size must be multiple of dim");
-        const size_t train_size = std::min(data.size(), std::max<size_t>(dim_, data.size() / 10));
+        const size_t train_size = std::min({data.size(), std::max<size_t>(dim_, data.size() / 10), static_cast<size_t>(10000) * dim_});
         float actual_q = quantile;
         if (actual_q <= 0.0f) {
             actual_q = detail::optimize_quantile_uint4(data.data(), train_size, dim_, true);
@@ -234,7 +234,7 @@ class ScalarQuantizerUint4 : public FeatureTransformation {
         if (data_fp16.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUint4: dim must be > 0 prior to fit()");
         if (data_fp16.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUint4: data size must be multiple of dim");
-        const size_t train_size = std::min(data_fp16.size(), std::max<size_t>(dim_, data_fp16.size() / 10));
+        const size_t train_size = std::min({data_fp16.size(), std::max<size_t>(dim_, data_fp16.size() / 10), static_cast<size_t>(10000) * dim_});
         if (quantile > 0.0f) {
             auto [mi, ma] = detail::find_minmax_fp16(data_fp16.first(train_size), quantile);
             set_range(mi, ma);
@@ -316,34 +316,28 @@ class ScalarQuantizerUint4 : public FeatureTransformation {
     }
 
     inline void transform_row(const float* src, uint8_t* dst, uint32_t d) const {
-        const size_t num_bytes = (d + 1) / 2;
-        std::memset(dst, 0, num_bytes);
-        for (uint32_t j = 0; j < d; ++j) {
-            uint8_t y = transform(src[j]);
-            if (j & 1) {
-                dst[j / 2] |= (y << 4);
-            } else {
-                dst[j / 2] |= (y & 0x0F);
-            }
+        uint32_t j = 0;
+        for (; j + 1 < d; j += 2) {
+            dst[j >> 1] = static_cast<uint8_t>(transform(src[j]) | (transform(src[j + 1]) << 4));
+        }
+        if (j < d) {
+            dst[j >> 1] = transform(src[j]);
         }
     }
 
     inline void transform_row(const uint16_t* src_fp16, uint8_t* dst, uint32_t dim) const {
         constexpr uint32_t CHUNK = 64;
         float chunk_buf[CHUNK];
-        const size_t num_bytes = (dim + 1) / 2;
-        std::memset(dst, 0, num_bytes);
         for (uint32_t i = 0; i < dim; i += CHUNK) {
             uint32_t cur = std::min(CHUNK, dim - i);
             deglib::distances::fp16::fp16_to_floats(src_fp16 + i, chunk_buf, cur);
-            for (uint32_t j = 0; j < cur; ++j) {
-                uint32_t glob_idx = i + j;
-                uint8_t y = transform(chunk_buf[j]);
-                if (glob_idx & 1) {
-                    dst[glob_idx / 2] |= (y << 4);
-                } else {
-                    dst[glob_idx / 2] |= (y & 0x0F);
-                }
+            uint32_t j = 0;
+            uint8_t* dst_chunk = dst + (i >> 1);
+            for (; j + 1 < cur; j += 2) {
+                dst_chunk[j >> 1] = static_cast<uint8_t>(transform(chunk_buf[j]) | (transform(chunk_buf[j + 1]) << 4));
+            }
+            if (j < cur) {
+                dst_chunk[j >> 1] = transform(chunk_buf[j]);
             }
         }
     }
