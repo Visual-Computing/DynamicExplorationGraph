@@ -1,5 +1,7 @@
 #pragma once
 
+#include "deglib/concurrent.h"
+#include "deglib/distance/fp16.h"
 #include "deglib/distances.h"
 
 #include <cstddef>
@@ -111,15 +113,18 @@ inline std::vector<std::shared_ptr<FeatureTransformation>> build_quantizer_pipel
     if (dim == 0) throw std::invalid_argument("make_quantizer_pipeline: dim must be > 0");
     if (data.size() % dim != 0) throw std::invalid_argument("make_quantizer_pipeline: data size must be multiple of dim");
 
+    const size_t sample_items = std::min(data.size(), static_cast<size_t>(10000) * dim);
+    std::span<const float> sample_data = data.first(sample_items);
+
     std::vector<std::shared_ptr<FeatureTransformation>> pipeline;
-    std::span<const float> fit_data = data;
+    std::span<const float> fit_data = sample_data;
     std::vector<float> rotated;
     if (kurtosis_threshold >= 0.0f) {
         auto rot = std::make_shared<FastHadamardRotation>(dim, rotation_seed);
-        rot->fit_with_kurtosis(data, kurtosis_threshold);
+        rot->fit_with_kurtosis(sample_data, kurtosis_threshold);
         if (rot->is_enabled()) {
-            rotated.resize(data.size());
-            rot->transform_database(data, std::as_writable_bytes(std::span<float>(rotated)), num_threads);
+            rotated.resize(sample_data.size());
+            rot->transform_database(sample_data, std::as_writable_bytes(std::span<float>(rotated)), num_threads);
             fit_data = rotated;
             pipeline.push_back(std::move(rot));
         }
@@ -248,40 +253,127 @@ inline void apply_query(std::span<const std::shared_ptr<FeatureTransformation>> 
     }
 }
 
-inline void apply_database(std::span<const std::shared_ptr<FeatureTransformation>> transformations, const float* data, std::byte* out, size_t count) {
+namespace detail {
+
+inline void apply_pipeline_one_float(
+    std::span<const std::shared_ptr<FeatureTransformation>> transformations,
+    const float* in_f32,
+    std::byte* out,
+    std::vector<std::byte>& buf_a,
+    std::vector<std::byte>& buf_b
+) {
+    const size_t n_xfrms = transformations.size();
+    if (n_xfrms == 1) {
+        const auto& t = transformations[0];
+        t->transform_database(std::span<const float>(in_f32, t->input_dim()), std::span<std::byte>(out, t->output_byte_size()));
+        return;
+    }
+
+    const size_t s0 = transformations[0]->output_byte_size();
+    if (buf_a.size() < s0) buf_a.resize(s0);
+    transformations[0]->transform_database(
+        std::span<const float>(in_f32, transformations[0]->input_dim()),
+        std::span<std::byte>(buf_a.data(), s0)
+    );
+    std::byte* cur_buf = buf_a.data();
+
+    for (size_t i = 1; i < n_xfrms; ++i) {
+        const bool is_last = (i == n_xfrms - 1);
+        const size_t out_bytes = transformations[i]->output_byte_size();
+        std::byte* next_buf = out;
+        if (!is_last) {
+            auto& target_vec = (i % 2 == 1) ? buf_b : buf_a;
+            if (target_vec.size() < out_bytes) target_vec.resize(out_bytes);
+            next_buf = target_vec.data();
+        }
+        transformations[i]->transform_database(
+            std::span<const float>(reinterpret_cast<const float*>(cur_buf), transformations[i]->input_dim()),
+            std::span<std::byte>(next_buf, out_bytes)
+        );
+        cur_buf = next_buf;
+    }
+}
+
+}  // namespace detail
+
+inline void apply_database(
+    std::span<const std::shared_ptr<FeatureTransformation>> transformations,
+    const float* data,
+    std::byte* out,
+    size_t count,
+    size_t num_threads = 0
+) {
     if (transformations.empty()) {
         std::memcpy(out, data, count * sizeof(float));
         return;
     }
+    if (count == 0) return;
     if (transformations.size() == 1) {
         const auto& t = transformations[0];
         t->transform_database(std::span<const float>(data, count * t->input_dim()), std::span<std::byte>(out, count * t->output_byte_size()));
         return;
     }
 
-    const size_t buf_a_size = transformations[0]->output_byte_size() * count;
-    std::vector<std::byte> buf_a(buf_a_size);
-    std::vector<std::byte> buf_b;
-    const float* cur_in = data;
-    std::byte* cur_buf = buf_a.data();
-    transformations[0]->transform_database(std::span<const float>(cur_in, count * transformations[0]->input_dim()), std::span<std::byte>(cur_buf, buf_a_size));
-
-    for (size_t i = 1; i < transformations.size(); ++i) {
-        const bool is_last = (i == transformations.size() - 1);
-        const size_t cur_out_size = transformations[i]->output_byte_size() * count;
-        if (!is_last) {
-            if (i % 2 == 1)
-                buf_b.resize(cur_out_size);
-            else
-                buf_a.resize(cur_out_size);
+    const uint32_t in_dim = transformations.front()->input_dim();
+    const size_t out_stride = transformations.back()->output_byte_size();
+    if (num_threads == 1 || count == 1) {
+        thread_local std::vector<std::byte> tls_a;
+        thread_local std::vector<std::byte> tls_b;
+        for (size_t v = 0; v < count; ++v) {
+            detail::apply_pipeline_one_float(transformations, data + v * in_dim, out + v * out_stride, tls_a, tls_b);
         }
-        std::byte* next_buf = is_last ? out : ((i % 2 == 1) ? buf_b.data() : buf_a.data());
-        transformations[i]->transform_database(
-            std::span<const float>(reinterpret_cast<const float*>(cur_buf), count * transformations[i]->input_dim()),
-            std::span<std::byte>(next_buf, cur_out_size)
-        );
-        cur_buf = next_buf;
+        return;
     }
+
+    deglib::concurrent::parallel_batch_for(
+        static_cast<size_t>(0), count, num_threads,
+        [&](size_t begin, size_t end, size_t) {
+            std::vector<std::byte> buf_a;
+            std::vector<std::byte> buf_b;
+            for (size_t v = begin; v < end; ++v) {
+                detail::apply_pipeline_one_float(transformations, data + v * in_dim, out + v * out_stride, buf_a, buf_b);
+            }
+        },
+        4
+    );
+}
+
+inline void apply_database(
+    std::span<const std::shared_ptr<FeatureTransformation>> transformations,
+    const uint16_t* data_fp16,
+    std::byte* out,
+    size_t count,
+    size_t num_threads = 0
+) {
+    if (count == 0 || transformations.empty()) return;
+    const uint32_t in_dim = transformations.front()->input_dim();
+    const size_t out_stride = transformations.back()->output_byte_size();
+
+    if (num_threads == 1 || count == 1) {
+        thread_local std::vector<float> tls_f;
+        thread_local std::vector<std::byte> tls_a;
+        thread_local std::vector<std::byte> tls_b;
+        if (tls_f.size() < in_dim) tls_f.resize(in_dim);
+        for (size_t v = 0; v < count; ++v) {
+            deglib::distances::fp16::fp16_to_floats(data_fp16 + v * in_dim, tls_f.data(), in_dim);
+            detail::apply_pipeline_one_float(transformations, tls_f.data(), out + v * out_stride, tls_a, tls_b);
+        }
+        return;
+    }
+
+    deglib::concurrent::parallel_batch_for(
+        static_cast<size_t>(0), count, num_threads,
+        [&](size_t begin, size_t end, size_t) {
+            std::vector<float> f_buf(in_dim);
+            std::vector<std::byte> buf_a;
+            std::vector<std::byte> buf_b;
+            for (size_t v = begin; v < end; ++v) {
+                deglib::distances::fp16::fp16_to_floats(data_fp16 + v * in_dim, f_buf.data(), in_dim);
+                detail::apply_pipeline_one_float(transformations, f_buf.data(), out + v * out_stride, buf_a, buf_b);
+            }
+        },
+        4
+    );
 }
 
 inline uint32_t get_input_dim(std::span<const std::shared_ptr<FeatureTransformation>> transformations) noexcept {
@@ -333,6 +425,25 @@ inline std::vector<std::shared_ptr<FeatureTransformation>> make_quantizer_pipeli
     float quantile = -1.0f, bool use_rerank = false, size_t num_threads = 0, uint64_t rotation_seed = 42
 ) {
     return make_quantizer_pipeline(data, dim, metric.get_data_type(), quantile, use_rerank, num_threads, rotation_seed);
+}
+
+inline std::vector<std::shared_ptr<FeatureTransformation>> make_quantizer_pipeline(
+    std::span<const uint16_t> data_fp16, uint32_t dim, deglib::distances::MetricDataType data_type,
+    float quantile = -1.0f, bool use_rerank = false, size_t num_threads = 0, uint64_t rotation_seed = 42
+) {
+    if (dim == 0) throw std::invalid_argument("make_quantizer_pipeline: dim must be > 0");
+    if (data_fp16.size() % dim != 0) throw std::invalid_argument("make_quantizer_pipeline: data size must be multiple of dim");
+    const size_t sample_items = std::min(data_fp16.size(), static_cast<size_t>(10000) * dim);
+    std::vector<float> sample_f32(sample_items);
+    deglib::distances::fp16::fp16_to_floats(data_fp16.data(), sample_f32.data(), sample_items);
+    return make_quantizer_pipeline(std::span<const float>(sample_f32), dim, data_type, quantile, use_rerank, num_threads, rotation_seed);
+}
+
+inline std::vector<std::shared_ptr<FeatureTransformation>> make_quantizer_pipeline(
+    std::span<const uint16_t> data_fp16, uint32_t dim, deglib::distances::Metric metric,
+    float quantile = -1.0f, bool use_rerank = false, size_t num_threads = 0, uint64_t rotation_seed = 42
+) {
+    return make_quantizer_pipeline(data_fp16, dim, metric.get_data_type(), quantile, use_rerank, num_threads, rotation_seed);
 }
 
 }  // namespace deglib::transformation
