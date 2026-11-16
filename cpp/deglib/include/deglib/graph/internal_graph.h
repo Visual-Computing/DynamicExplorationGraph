@@ -163,8 +163,6 @@ class InternalGraph {
         if (nl > 0) nl_ = nl;
     }
 
-
-
     /**
      * Auto-tunes the traversal prefetch parameters (po, pl, nl) by empirically timing graph
      * traversal over sampled vertices. Mirrors Reranker::optimize: the graph self-samples its own
@@ -244,12 +242,24 @@ class InternalGraph {
         timeit();
         timeit();
 
+        std::vector<int32_t> try_pos;
+        for (const int32_t p : {1, 2, 3, 4, 6, 8, 12, 16, 20}) {
+            if (p <= max_po) try_pos.push_back(p);
+        }
+        if (try_pos.empty() || try_pos.back() != max_po) try_pos.push_back(max_po);
+
+        std::vector<int32_t> try_pls;
+        for (const int32_t l : {1, 2, 3, 4, 6, 8, 12, 16, 20}) {
+            if (l <= max_pl) try_pls.push_back(l);
+        }
+        if (try_pls.empty() || try_pls.back() != max_pl) try_pls.push_back(max_pl);
+
         int32_t best_po = 1;
         int32_t best_pl = 1;
         double best_time = std::numeric_limits<double>::max();
 
-        for (int32_t po = 1; po <= max_po; ++po) {
-            for (int32_t pl = 1; pl <= max_pl; ++pl) {
+        for (const int32_t po : try_pos) {
+            for (const int32_t pl : try_pls) {
                 setPrefetch(po, pl, nl_fixed);
                 const double dur = timeit();
                 if (dur < best_time) {
@@ -460,8 +470,7 @@ class InternalGraph {
         const bool include_entry = true,
         const deglib::search::Filter* filter = nullptr
     ) const {
-        const auto query_ptr = getFeatureVector(entry_vertex_index);
-        return search_intern({entry_vertex_index}, query_ptr, k, eps, include_entry, filter, max_distance_computation_count);
+        return search_intern({entry_vertex_index}, nullptr, k, eps, include_entry, filter, max_distance_computation_count);
     }
 
     /**
@@ -485,8 +494,7 @@ class InternalGraph {
         const bool include_entry = true,
         const deglib::search::Filter* filter = nullptr
     ) const {
-        const auto query_ptr = getFeatureVector(entry_vertex_index);
-        return search_ef_intern({entry_vertex_index}, query_ptr, k, ef, include_entry, filter, max_distance_computation_count);
+        return search_ef_intern({entry_vertex_index}, nullptr, k, ef, include_entry, filter, max_distance_computation_count);
     }
 
   protected:
@@ -578,35 +586,71 @@ class InternalGraph {
         }
 
         // copy the initial entry vertices and their distances to the query into the three containers
-        for (auto&& index : entry_vertex_indices) {
-            if (checked_ids[index] != checked_ids_tag) {
-                checked_ids[index] = checked_ids_tag;
-
-                const auto feature = self.feature_by_index(index);
-                const auto distance = COMPARATOR::compare(query, feature, dist_func_param);
-                next_vertices.emplace(index, distance);
+        if (query == nullptr) {
+            if (entry_vertex_indices.empty()) return results;
+            const uint32_t self_idx = entry_vertex_indices[0];
+            if (self_idx < vertex_count) {
+                query = self.feature_by_index(self_idx);
+                checked_ids[self_idx] = checked_ids_tag;
                 if (include_entry) {
+                    const float self_dist = COMPARATOR::compare(query, query, dist_func_param);
                     if constexpr (use_filter) {
-                        if (filter->is_valid(self.label_by_index(index))) {
-                            results.emplace(index, distance);
-                        }
+                        if (filter->is_valid(self.label_by_index(self_idx))) results.emplace(self_idx, self_dist);
                     } else {
-                        results.emplace(index, distance);
+                        results.emplace(self_idx, self_dist);
                     }
                 }
+                if constexpr (requires { self.weights_by_index(uint32_t{0}); }) {
+                    const auto neighbor_indices = self.neighbors_by_index(self_idx);
+                    const auto neighbor_weights = self.weights_by_index(self_idx);
+                    for (size_t i = 0; i < self.edges_per_vertex_; ++i) {
+                        const uint32_t nb = neighbor_indices[i];
+                        if (checked_ids[nb] == checked_ids_tag) continue;
+                        checked_ids[nb] = checked_ids_tag;
+                        const float dist = neighbor_weights[i];
+                        next_vertices.emplace(nb, dist);
+                        if constexpr (use_filter) {
+                            if (filter->is_valid(self.label_by_index(nb))) results.emplace(nb, dist);
+                        } else {
+                            results.emplace(nb, dist);
+                        }
+                        if (results.size() > k) results.pop();
+                    }
+                } else {
+                    next_vertices.emplace(self_idx, -std::numeric_limits<float>::max());
+                }
+            }
+        } else {
+            for (auto&& index : entry_vertex_indices) {
+                if (checked_ids[index] != checked_ids_tag) {
+                    checked_ids[index] = checked_ids_tag;
 
-                // early stop after to many computations
-                if constexpr (use_max_distance_count) {
-                    if (++distance_computation_count >= max_distance_computation_count) {
-                        return results;
+                    const auto feature = self.feature_by_index(index);
+                    const auto distance = COMPARATOR::compare(query, feature, dist_func_param);
+                    next_vertices.emplace(index, distance);
+                    if (include_entry) {
+                        if constexpr (use_filter) {
+                            if (filter->is_valid(self.label_by_index(index))) {
+                                results.emplace(index, distance);
+                            }
+                        } else {
+                            results.emplace(index, distance);
+                        }
+                    }
+
+                    // early stop after to many computations
+                    if constexpr (use_max_distance_count) {
+                        if (++distance_computation_count >= max_distance_computation_count) {
+                            return results;
+                        }
                     }
                 }
             }
         }
 
         // search radius
-        auto radius = std::numeric_limits<float>::max();
-        auto exploration_radius = radius;
+        auto radius = (results.size() < k) ? std::numeric_limits<float>::max() : results.top().getDistance();
+        auto exploration_radius = (radius == std::numeric_limits<float>::max()) ? radius : radius * (1.0f + eps);
 
         const int32_t po = self.getPo();
         const int32_t pl = self.getPl();
@@ -763,25 +807,60 @@ class InternalGraph {
         deglib::search::ResultList valid_results(static_cast<int32_t>(ef), capacity);
 
         // seed the traversal with every entry vertex
-        for (auto ep : entry_vertex_indices) {
-            if (ep >= vertex_count || checked_ids[ep] == checked_ids_tag) continue;
-            checked_ids[ep] = checked_ids_tag;
-
-            const auto feature = self.feature_by_index(ep);
-            const float dist = COMPARATOR::compare(query, feature, dist_func_param);
-            next_vertices.emplace(ep, dist);
-            if (include_entry) {
-                if constexpr (use_filter) {
-                    if (filter->is_valid(self.label_by_index(ep))) valid_results.insert(ep, dist);
+        if (query == nullptr) {
+            if (entry_vertex_indices.empty()) return std::move(valid_results).to_vector(k);
+            const uint32_t self_idx = entry_vertex_indices[0];
+            if (self_idx < vertex_count) {
+                query = self.feature_by_index(self_idx);
+                checked_ids[self_idx] = checked_ids_tag;
+                if (include_entry) {
+                    const float self_dist = COMPARATOR::compare(query, query, dist_func_param);
+                    if constexpr (use_filter) {
+                        if (filter->is_valid(self.label_by_index(self_idx))) valid_results.insert(self_idx, self_dist);
+                    } else {
+                        valid_results.insert(self_idx, self_dist);
+                    }
+                }
+                if constexpr (requires { self.weights_by_index(uint32_t{0}); }) {
+                    const auto neighbor_indices = self.neighbors_by_index(self_idx);
+                    const auto neighbor_weights = self.weights_by_index(self_idx);
+                    for (size_t i = 0; i < self.edges_per_vertex_; ++i) {
+                        const uint32_t nb = neighbor_indices[i];
+                        if (checked_ids[nb] == checked_ids_tag) continue;
+                        checked_ids[nb] = checked_ids_tag;
+                        const float dist = neighbor_weights[i];
+                        next_vertices.emplace(nb, dist);
+                        if constexpr (use_filter) {
+                            if (filter->is_valid(self.label_by_index(nb))) valid_results.insert(nb, dist);
+                        } else {
+                            valid_results.insert(nb, dist);
+                        }
+                    }
                 } else {
-                    valid_results.insert(ep, dist);
+                    next_vertices.emplace(self_idx, -std::numeric_limits<float>::max());
                 }
             }
+        } else {
+            for (auto ep : entry_vertex_indices) {
+                if (ep >= vertex_count || checked_ids[ep] == checked_ids_tag) continue;
+                checked_ids[ep] = checked_ids_tag;
 
-            // early stop after to many computations
-            if constexpr (use_max_distance_count) {
-                if (++distance_computation_count >= max_distance_computation_count) {
-                    return std::move(valid_results).to_vector(k);
+                const auto feature = self.feature_by_index(ep);
+                const float dist = COMPARATOR::compare(query, feature, dist_func_param);
+                next_vertices.emplace(ep, dist);
+                if (include_entry) {
+                    if constexpr (use_filter) {
+                        if (filter->is_valid(self.label_by_index(ep))) valid_results.insert(ep, dist);
+                    } else {
+                        valid_results.insert(ep, dist);
+                    }
+                }
+
+                // early stop after to many computations
+                if constexpr (use_max_distance_count) {
+                    if (++distance_computation_count >= max_distance_computation_count) {
+                        return std::move(valid_results).to_vector(k);
+                    }
                 }
             }
         }
@@ -909,18 +988,38 @@ class InternalGraph {
             };
 
             // every entry vertex seeds the beam and is part of the result set
-            for (auto ep : entry_vertex_indices) {
-                if (ep >= vertex_count || checked_ids[ep] == checked_ids_tag) continue;
-                checked_ids[ep] = checked_ids_tag;
+            if (query == nullptr) {
+                if (entry_vertex_indices.empty()) return extract_top_k(pool);
+                const uint32_t self_idx = entry_vertex_indices[0];
+                if (self_idx < vertex_count) {
+                    query = self.feature_by_index(self_idx);
+                    checked_ids[self_idx] = checked_ids_tag;
+                    pool.insert(self_idx, COMPARATOR::compare(query, query, dist_func_param));
+                    if constexpr (requires { self.weights_by_index(uint32_t{0}); }) {
+                        const auto neighbor_indices = self.neighbors_by_index(self_idx);
+                        const auto neighbor_weights = self.weights_by_index(self_idx);
+                        for (size_t i = 0; i < self.edges_per_vertex_; ++i) {
+                            const uint32_t nb = neighbor_indices[i];
+                            if (checked_ids[nb] == checked_ids_tag) continue;
+                            checked_ids[nb] = checked_ids_tag;
+                            pool.insert(nb, neighbor_weights[i]);
+                        }
+                    }
+                }
+            } else {
+                for (auto ep : entry_vertex_indices) {
+                    if (ep >= vertex_count || checked_ids[ep] == checked_ids_tag) continue;
+                    checked_ids[ep] = checked_ids_tag;
 
-                const auto feature = self.feature_by_index(ep);
-                const float dist = COMPARATOR::compare(query, feature, dist_func_param);
-                pool.insert(ep, dist);
+                    const auto feature = self.feature_by_index(ep);
+                    const float dist = COMPARATOR::compare(query, feature, dist_func_param);
+                    pool.insert(ep, dist);
 
-                // early stop after to many computations
-                if constexpr (use_max_distance_count) {
-                    if (++distance_computation_count >= max_distance_computation_count) {
-                        return extract_top_k(pool);
+                    // early stop after to many computations
+                    if constexpr (use_max_distance_count) {
+                        if (++distance_computation_count >= max_distance_computation_count) {
+                            return extract_top_k(pool);
+                        }
                     }
                 }
             }
