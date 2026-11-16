@@ -652,13 +652,13 @@ def test_graph_optimize_preserves_search_results():
     query = data[0:1]
     before, _ = graph.search(query, eps_or_ef=0.1, k=5)
 
-    graph.optimize(sample_count=32, k=5, ef=50, median_subset=0)
+    graph.optimize(sample_count=32, median_subset=0)
 
     after, _ = graph.search(query, eps_or_ef=0.1, k=5)
     np.testing.assert_array_equal(before, after)
 
     # Default median_subset computes a graph-median entry point and completes cleanly
-    graph.optimize(sample_count=32, k=5, ef=50)
+    graph.optimize(sample_count=32)
     after_median, _ = graph.search(query, eps_or_ef=0.1, k=5)
     assert after_median.shape == (1, 5)
 

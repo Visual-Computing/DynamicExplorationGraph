@@ -395,7 +395,7 @@ class QG(BaseANN):
 
         # 6. Full searcher optimization
         t_km = time.time()
-        self.searcher.optimize(k=self.k, use_routing=True, n_clusters=256, num_threads=self.threads)
+        self.searcher.optimize(use_routing=True, n_clusters=256, num_threads=self.threads)
         print(f"Optimized Searcher for the provided graph and hardware in {time.time() - t_km:.2f}s", flush=True)
 
     def set_query_arguments(self, eps_or_ef: float, rerank_size_factor: float = 1.0):

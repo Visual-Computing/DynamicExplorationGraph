@@ -367,10 +367,14 @@ class KMeansEntrySelector {
 
     [[nodiscard]] int32_t getPo() const noexcept { return po_; }
     [[nodiscard]] int32_t getPl() const noexcept { return pl_; }
+
+  private:
     void setPrefetch(int32_t po, int32_t pl) noexcept {
         po_ = (po > 0) ? po : 0;
         pl_ = (pl > 0) ? pl : 0;
     }
+
+  public:
 
     /**
      * Auto-tunes prefetch parameters (po, pl) for top_entries() on sample native queries from the graph.

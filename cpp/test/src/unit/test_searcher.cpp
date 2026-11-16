@@ -211,7 +211,7 @@ TEST(SearcherTest, OptimizeSelectsValidPrefetchConfigAndPreservesResults) {
     auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 16, deglib::distances::Metric::FP32_L2);
     auto searcher = deglib::search::make_searcher(graph.internal());
 
-    searcher->optimize(/*n_clusters=*/32, /*n_iter=*/5, /*sample_size=*/0, /*k=*/10, /*threads=*/1);
+    searcher->optimize(/*n_clusters=*/32, /*n_iter=*/5, /*sample_size=*/0, /*threads=*/1);
 
     // Tuner must land within the valid search bounds (proves it actually tuned, not garbage).
     const int32_t po = graph.getPo();
@@ -243,7 +243,7 @@ TEST(SearcherTest, OptimizePrefetchDepthScalesWithFeatureWidth) {
 
     auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 16, deglib::distances::Metric::FP32_L2);
     auto searcher = deglib::search::make_searcher(graph.internal());
-    searcher->optimize(/*n_clusters=*/8, /*n_iter=*/3, /*sample_size=*/50, /*k=*/10, /*threads=*/1);
+    searcher->optimize(/*n_clusters=*/8, /*n_iter=*/3, /*sample_size=*/50, /*threads=*/1);
 
     const int32_t pl = graph.getPl();
     const int32_t pl_max = std::min<int32_t>(20, static_cast<int32_t>(dim * 4 / 64));  // capped at 20 cache lines
@@ -401,7 +401,7 @@ TEST(SearcherTest, OptimizeRoutingDisabledUsesStaticEntryAndFindsNN) {
 
     auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
     auto searcher = deglib::search::make_searcher(graph.internal());
-    searcher->optimize(/*n_clusters=*/8, /*n_iter=*/3, /*sample_size=*/0, /*k=*/5, /*threads=*/1, /*use_routing=*/false);
+    searcher->optimize(/*n_clusters=*/8, /*n_iter=*/3, /*sample_size=*/0, /*threads=*/1, /*use_routing=*/false);
 
     auto q = std::span<const float>(data.data() + 7 * dim, dim);
     auto res = searcher->search(q, 3, /*eps=*/0.2f, /*rerank_factor=*/1.0f, /*return_distances=*/true);
@@ -436,7 +436,7 @@ TEST(SearcherTest, DynamicExplorationGraphWithTransformationMakeSearcher) {
     auto searcher_no_reranker = deglib::make_searcher(ro_graph);
     ASSERT_NE(searcher_no_reranker, nullptr);
 
-    searcher_no_reranker->optimize(/*n_clusters=*/8, /*n_iter=*/3, /*sample_size=*/0, /*k=*/5, /*threads=*/1);
+    searcher_no_reranker->optimize(/*n_clusters=*/8, /*n_iter=*/3, /*sample_size=*/0, /*threads=*/1);
 
     auto q = std::span<const float>(data.data() + 5 * dim, dim);
     auto res1 = searcher_no_reranker->search(q, 5, /*eps=*/0.2f, /*rerank_factor=*/1.0f, /*return_distances=*/true);

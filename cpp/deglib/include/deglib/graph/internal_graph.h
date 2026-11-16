@@ -148,6 +148,8 @@ class InternalGraph {
     int32_t getPo() const noexcept { return po_; }
     int32_t getPl() const noexcept { return pl_; }
     int32_t getNl() const noexcept { return nl_; }
+
+  protected:
     void setPo(int32_t po) const noexcept {
         if (po > 0) po_ = po;
     }
@@ -163,22 +165,26 @@ class InternalGraph {
         if (nl > 0) nl_ = nl;
     }
 
+  public:
     /**
-     * Auto-tunes the traversal prefetch parameters (po, pl, nl) by empirically timing graph
-     * traversal over sampled vertices. Mirrors Reranker::optimize: the graph self-samples its own
-     * stored features as queries, so no external query buffer or quantization round-trip is needed
-     * and the timing exercises the real traversal path (search_ef_intern).
+     * @brief Auto-tunes traversal prefetch parameters (po, pl, nl) by empirically timing graph
+     * traversal over sampled vertices.
      *
-     * @param sample_count  Number of vertices sampled as queries (capped at the graph size; default 300 for noise-stable tuning).
-     * @param k             Result count per traversal (the expected query operating point).
-     * @param ef            Beam width per traversal; clamped to at least k.
+     * The graph self-samples its own stored features as queries and exercises `search_intern`
+     * with a fixed operating point (`k = 100`, `eps = 0.1f`, `max_distance_computation_count = 10000`).
+     * Optionally computes a 1-median entry vertex on `median_subset` sampled vertices.
+     *
+     * @param sample_count  Number of vertices sampled as queries (capped at graph size; default 300).
+     * @param median_subset Subset size for computing the graph-median entry point (`<= 1` keeps native entries).
      */
-    void optimize(size_t sample_count = 300, uint32_t k = 100, uint32_t ef = 200, size_t median_subset = 4096) const {
+    void optimize(size_t sample_count = 300, size_t median_subset = 4096) const {
         const uint32_t n_vertices = size();
         const size_t n_queries = std::min(sample_count, static_cast<size_t>(n_vertices));
         // Below one full neighborhood the traversal does no real work; the timing would be meaningless.
-        if (n_queries == 0 || k == 0 || n_queries < getEdgesPerVertex()) return;
-        ef = std::max(ef, k);
+        if (n_queries == 0 || n_queries < getEdgesPerVertex()) return;
+        constexpr uint32_t k = 100;
+        constexpr float eps = 0.1f;
+        constexpr uint32_t max_dist = 10000;
 
         // Graph-median entry point (1-median on a random subset of the graph's OWN stored features):
         //   median = argmin_m  sum_{i in sample} dist_func(vec[m], vec[i])
@@ -232,7 +238,7 @@ class InternalGraph {
         auto timeit = [&] {
             const auto t_start = std::chrono::high_resolution_clock::now();
             for (size_t i = 0; i < n_queries; ++i) {
-                search_ef_intern(entries, getFeatureVector(sample_idx[i]), k, ef);
+                search_intern(entries, getFeatureVector(sample_idx[i]), k, eps, true, nullptr, max_dist);
             }
             return std::chrono::duration<double, std::micro>(std::chrono::high_resolution_clock::now() - t_start).count();
         };

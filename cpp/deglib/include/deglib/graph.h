@@ -1294,35 +1294,16 @@ class DynamicExplorationGraph {
     int32_t getNl() const { return internal_graph_->getNl(); }
 
     /**
-     * @brief Sets the feature vector prefetch offset.
-     * @param po Prefetch offset (must be > 0).
-     */
-    void setPo(int32_t po) { internal_graph_->setPo(po); }
-
-    /**
-     * @brief Sets the feature vector prefetch look-ahead.
-     * @param pl Cache lines to prefetch (must be > 0).
-     */
-    void setPl(int32_t pl) { internal_graph_->setPl(pl); }
-
-    /**
-     * @brief Sets the neighbor index prefetch look-ahead.
-     * @param nl Neighbor prefetch look-ahead (must be > 0).
-     */
-    void setNl(int32_t nl) { internal_graph_->setNl(nl); }
-
-    /**
-     * @brief Auto-tune the graph's traversal prefetch parameters (po, pl, nl) by empirically timing
-     * traversal over sampled vertices. The graph self-samples its own stored features as queries,
-     * so no external query buffer is needed. Forwards to the internal graph's optimize().
+     * @brief Auto-tunes the graph's traversal prefetch parameters (po, pl, nl) by empirically timing
+     * traversal over sampled vertices.
      *
-     * @param sample_count  Number of vertices sampled as queries (capped at the graph size; default 300 for noise-stable tuning).
-     * @param k             Result count per traversal (the expected query operating point).
-     * @param ef            Beam width per traversal; clamped to at least k.
+     * The graph self-samples its own stored features as queries, so no external query buffer is needed.
+     * Forwards to `InternalGraph::optimize()`.
+     *
+     * @param sample_count  Number of vertices sampled as queries (capped at the graph size; default 300).
+     * @param median_subset Subset size for median entry point selection (`<= 1` keeps native entries).
      */
-    void optimize(size_t sample_count = 300, uint32_t k = 100, uint32_t ef = 200, size_t median_subset = 4096) const {
-        internal_graph_->optimize(sample_count, k, ef, median_subset);
-    }
+    void optimize(size_t sample_count = 300, size_t median_subset = 4096) const { internal_graph_->optimize(sample_count, median_subset); }
 
     /**
      * @brief Saves the graph and any attached transformations to a binary file.

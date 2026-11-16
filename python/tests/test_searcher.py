@@ -116,7 +116,7 @@ def test_searcher_quantized_int8_optimize_without_reranker():
     ro_graph = graph.to_readonly(target_space, int8_data, transformations=[quantizer])
 
     searcher = create_searcher(graph=ro_graph)
-    searcher.optimize(n_clusters=16, n_iter=3, sample_size=0, k=5)
+    searcher.optimize(n_clusters=16, n_iter=3, sample_size=0)
 
     query = data[5]
     res = searcher.search(query, k=5, eps_or_ef=0.2, rerank_factor=1.0)

@@ -98,19 +98,7 @@ class Reranker:
         """Cache lines prefetched per feature vector (0 prefetches the whole vector)."""
         return self.reranker_cpp.get_pl()
 
-    def set_prefetch(self, po: int, pl: int) -> None:
-        """Override the rerank prefetch parameters, bypassing auto-tuning.
-
-        Prefetching is enabled by default (``po=8``, ``pl=0``), which is the right starting point
-        whenever the base vectors do not fit in cache. Pass ``po=0`` to score candidates without
-        issuing any prefetch, for example when the working set is already cache-resident.
-
-        :param po: Lookahead offset in candidates; values <= 0 disable prefetching.
-        :param pl: Cache lines per candidate; values <= 0 prefetch the whole vector.
-        """
-        self.reranker_cpp.set_prefetch(int(po), int(pl))
-
-    def optimize(self, sample_count: int = 50, num_candidates: int = 100, k: int = 10) -> None:
+    def optimize(self, sample_count: int = 300, num_candidates: int = 150) -> None:
         """Auto-tune the reranker's prefetch parameters (po, pl) by timing reranking over sampled base vectors.
 
         The reranker samples its own base vectors as queries, so no external query buffer is needed.
@@ -118,9 +106,8 @@ class Reranker:
 
         :param sample_count: Number of base vectors used as sample queries (capped at the base count).
         :param num_candidates: Candidates scored per query (clamped to the base count).
-        :param k: Candidates kept per query after reranking (clamped to num_candidates).
         """
-        self.reranker_cpp.optimize(int(sample_count), int(num_candidates), int(k))
+        self.reranker_cpp.optimize(int(sample_count), int(num_candidates))
 
     def rerank(
         self,
@@ -241,20 +228,18 @@ class Searcher:
         n_clusters: int = 256,
         n_iter: int = 20,
         sample_size: int = 0,
-        k: int = 100,
         num_threads: int = 1,
         use_routing: bool = True,
     ) -> None:
-        """Select entry vertices via k-means medoids.
+        """Select entry vertices via k-means medoids and tune prefetch parameters.
 
         :param n_clusters: Number of entry vertices to select (maximum 512).
         :param n_iter: Number of k-means iterations.
         :param sample_size: Number of vertices sampled for clustering, 0 selects 3% of the graph size.
-        :param k: Expected result count; sets the reranker and traversal prefetch tuning operating point.
         :param num_threads: Number of worker threads, 0 selects a library default.
         :param use_routing: Build a k-means routing graph for entry selection (the QG/query-graph searcher needs this).
         """
-        self.searcher_cpp.optimize(int(n_clusters), int(n_iter), int(sample_size), int(k), int(num_threads), bool(use_routing))
+        self.searcher_cpp.optimize(int(n_clusters), int(n_iter), int(sample_size), int(num_threads), bool(use_routing))
 
     def search(
         self,

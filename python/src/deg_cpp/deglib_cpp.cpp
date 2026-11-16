@@ -599,11 +599,10 @@ class RerankerPy {
 
     int32_t get_po() const noexcept { return reranker_.getPo(); }
     int32_t get_pl() const noexcept { return reranker_.getPl(); }
-    void set_prefetch(int32_t po, int32_t pl) { reranker_.setPrefetch(po, pl); }
 
-    void optimize(size_t sample_count = 50, size_t num_candidates = 100, uint32_t k = 10) {
+    void optimize(size_t sample_count = 300, size_t num_candidates = 150) {
         py::gil_scoped_release release;
-        reranker_.optimize(sample_count, num_candidates, k);
+        reranker_.optimize(sample_count, num_candidates);
     }
 
     py::object rerank(
@@ -704,9 +703,9 @@ class SearcherPy {
     bool get_normalize_query() const noexcept { return searcher_->normalize_query(); }
     void set_normalize_query(bool val) noexcept { searcher_->set_normalize_query(val); }
 
-    void optimize(uint32_t n_clusters = 256, uint32_t n_iter = 20, size_t sample_size = 0, uint32_t k = 100, size_t num_threads = 1, bool use_routing = true) {
+    void optimize(uint32_t n_clusters = 256, uint32_t n_iter = 20, size_t sample_size = 0, size_t num_threads = 1, bool use_routing = true) {
         py::gil_scoped_release release;
-        searcher_->optimize(n_clusters, n_iter, sample_size, k, num_threads, use_routing);
+        searcher_->optimize(n_clusters, n_iter, sample_size, num_threads, use_routing);
     }
 
     py::object search(
@@ -2321,16 +2320,11 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def("get_po", &RerankerPy::get_po, "Prefetch lookahead offset (0 disables rerank prefetching).")
         .def("get_pl", &RerankerPy::get_pl, "Cache lines prefetched per feature vector (0 prefetches the whole vector).")
         .def(
-            "set_prefetch", &RerankerPy::set_prefetch, py::arg("po"), py::arg("pl"),
-            "Override the rerank prefetch parameters. Values <= 0 disable the respective knob."
-        )
-        .def(
-            "optimize", &RerankerPy::optimize, py::arg("sample_count") = 50, py::arg("num_candidates") = 100, py::arg("k") = 10,
+            "optimize", &RerankerPy::optimize, py::arg("sample_count") = 300, py::arg("num_candidates") = 150,
             "Auto-tune the reranker's prefetch parameters (po, pl) by timing reranking over sampled base vectors.\n\n"
             "Args:\n"
             "    sample_count: number of base vectors used as sample queries (capped at the base count).\n"
-            "    num_candidates: candidates scored per query (clamped to the base count).\n"
-            "    k: candidates kept per query after reranking (clamped to num_candidates)."
+            "    num_candidates: candidates scored per query (clamped to the base count)."
         )
         .def(
             "rerank", &RerankerPy::rerank, py::arg("queries"), py::arg("candidate_indices"), py::arg("k_top") = 0, py::arg("num_threads") = 0,
@@ -2381,12 +2375,11 @@ PYBIND11_MODULE(deglib_cpp, m) {
             "    max_distance_computation_count: Optional hard budget of distance computations per query (0 = unlimited)."
         )
         .def(
-            "optimize", &SearcherPy::optimize, py::arg("n_clusters") = 256, py::arg("n_iter") = 20, py::arg("sample_size") = 0, py::arg("k") = 100,
+            "optimize", &SearcherPy::optimize, py::arg("n_clusters") = 256, py::arg("n_iter") = 20, py::arg("sample_size") = 0,
             py::arg("num_threads") = 1, py::arg("use_routing") = true,
-            "Select entry vertices via k-means medoids.\n\nArgs:\n    n_clusters: number of entry vertices to select (maximum 512).\n    n_iter: number of "
+            "Select entry vertices via k-means medoids and tune prefetch parameters.\n\nArgs:\n    n_clusters: number of entry vertices to select (maximum 512).\n    n_iter: number of "
             "k-means "
-            "iterations.\n    sample_size: vertices sampled for clustering, 0 selects 3% of the graph size.\n    k: expected result count; sets the reranker "
-            "and traversal prefetch tuning operating point.\n    num_threads: worker threads, 0 selects "
+            "iterations.\n    sample_size: vertices sampled for clustering, 0 selects 3% of the graph size.\n    num_threads: worker threads, 0 selects "
             "a library default.\n    use_routing: build a k-means routing graph for entry selection (used by the QG/query-graph searcher)."
         );
 
@@ -2585,13 +2578,11 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def("get_entry_vertex_indices", &deglib::DynamicExplorationGraph::getEntryVertexIndices)
         .def("set_entry_vertex_indices", &deglib::DynamicExplorationGraph::setEntryVertexIndices, py::arg("indices"))
         .def(
-            "optimize", &deglib::DynamicExplorationGraph::optimize, py::arg("sample_count") = 300, py::arg("k") = 100, py::arg("ef") = 200, py::arg("median_subset") = 4096,
+            "optimize", &deglib::DynamicExplorationGraph::optimize, py::arg("sample_count") = 300, py::arg("median_subset") = 4096,
             "Auto-tune the graph's traversal prefetch parameters (po, pl, nl) by timing traversal over sampled vertices.\n\n"
             "Args:\n"
             "    sample_count: number of vertices sampled as queries (capped at the graph size).\n"
-            "    k: result count per traversal (the expected query operating point).\n"
-            "    ef: beam width per traversal; clamped to at least k.\n"
-            "    seed: random seed for query sampling."
+            "    median_subset: subset size for computing the graph-median entry point (<= 1 keeps native entries)."
         );
 
     m.def("load_readonly_graph", &load_readonly_graph_wrapper);

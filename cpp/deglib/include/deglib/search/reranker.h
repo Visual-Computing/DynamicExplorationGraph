@@ -198,32 +198,32 @@ class Reranker {
     const std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>& getTransformations() const noexcept { return transformations_; }
     int32_t getPo() const noexcept { return po_; }
     int32_t getPl() const noexcept { return pl_; }
-    // Prefetch (po, pl) is tuned by optimize(); the production Searcher/Reranker never sets it by hand
-    // (only dev sweep benches and the python knob call setPrefetch).
+
+  private:
     void setPrefetch(int32_t po, int32_t pl) noexcept {
         po_ = (po > 0) ? po : 0;
         pl_ = (pl > 0) ? pl : 0;
     }
 
+  public:
     /**
-     * Auto-tunes the prefetch parameters (po, pl) by timing the single-query rerank hot path on random
-     * candidate sets drawn from base_vectors. Sweeps po in {0,1,2,4,8} and pl up to code_size/64 (so a
-     * wide FP32 row, e.g. 1024D = 64 lines, can be fully prefetched); keeps the minimum of 3 timed passes
-     * per combination (peak performance, robust to OS jitter). Runs single-threaded.
+     * @brief Auto-tunes the prefetch parameters (po, pl) by timing the single-query rerank hot path
+     * on random candidate sets drawn from `base_vectors`.
      *
-     * @param num_sample_queries  Sample queries drawn from base_vectors (~300 gives a stable optimum).
-     * @param num_candidates      Candidates scored per query (default 150 = the real rerank beam k*1.5).
-     * @param k                   Candidates kept per query after reranking.
-     * @param num_threads         Unused; kept for call-site compatibility.
+     * Sweeps `po` in `{0, 1, 2, 4, 8}` and `pl` up to `code_size / 64`; keeps the minimum of 3 timed
+     * passes per combination (single-threaded).
+     *
+     * @param num_sample_queries Sample queries drawn from `base_vectors` (default 300).
+     * @param num_candidates     Candidates scored per query (default 150).
      */
-    void optimize(size_t num_sample_queries = 300, size_t num_candidates = 150, uint32_t k = 100, size_t num_threads = 1) {
-        if (base_vectors_ == nullptr || num_base_vectors_ == 0 || num_candidates == 0 || k == 0) return;
+    void optimize(size_t num_sample_queries = 300, size_t num_candidates = 150) {
+        if (base_vectors_ == nullptr || num_base_vectors_ == 0 || num_candidates == 0) return;
 
         const size_t stride = space_.get_data_size();
         if (stride == 0) return;
 
         num_candidates = std::min(num_candidates, num_base_vectors_);
-        k = std::min<uint32_t>(k, static_cast<uint32_t>(num_candidates));
+        const uint32_t k = std::min<uint32_t>(100, static_cast<uint32_t>(num_candidates));
         num_sample_queries = std::min(num_sample_queries, num_base_vectors_);
 
         // Deterministic random candidate sets (fixed seed -> reproducible tuning).
@@ -246,7 +246,6 @@ class Reranker {
         const std::vector<int32_t> try_pos = {0, 1, 2, 4, 8};
 
         std::vector<uint32_t> out(k);
-        (void)num_threads;
         double best_time = std::numeric_limits<double>::max();
         int32_t best_po = po_;
         int32_t best_pl = pl_;

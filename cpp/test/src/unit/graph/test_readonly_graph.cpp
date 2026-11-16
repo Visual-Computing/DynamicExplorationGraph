@@ -155,7 +155,7 @@ TEST(ReadOnlyGraphTest, OptimizeTunesPrefetchParameters) {
     deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
     auto graph = deglib::graph::ReadOnlyGraph::from_graph(source, space);
 
-    graph.optimize(8, 5, 10);
+    graph.optimize(8);
 
     EXPECT_GE(graph.getPo(), 0);
     EXPECT_GE(graph.getPl(), 1);
@@ -215,7 +215,6 @@ TEST(ReadOnlyGraphTest, SerializesStandardGraphFormat) {
 
     auto source = make_size_bounded_graph(n, dim, k, features, edges);
     source.setEntryVertexIndices({3});
-    source.setPrefetch(5, 2, 1);
 
     const auto path = std::filesystem::temp_directory_path() / "readonly_layout_graph.bin";
     ASSERT_TRUE(source.saveGraph(path.string().c_str()));
@@ -224,9 +223,9 @@ TEST(ReadOnlyGraphTest, SerializesStandardGraphFormat) {
     EXPECT_EQ(graph.size(), n);
     EXPECT_EQ(graph.getEdgesPerVertex(), k);
     EXPECT_EQ(graph.getEntryVertexIndices(), (std::vector<uint32_t>{3}));
-    EXPECT_EQ(graph.getPo(), 5);
-    EXPECT_EQ(graph.getPl(), 2);
-    EXPECT_EQ(graph.getNl(), 1);
+    EXPECT_EQ(graph.getPo(), source.getPo());
+    EXPECT_EQ(graph.getPl(), source.getPl());
+    EXPECT_EQ(graph.getNl(), source.getNl());
     EXPECT_EQ(graph.getExternalLabels(), source.getExternalLabels());
 
     for (uint32_t i = 0; i < n; ++i) {
@@ -250,7 +249,7 @@ TEST(ReadOnlyGraphTest, OptimizeIsNoopForEmptyGraph) {
     deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
     deglib::graph::ReadOnlyGraph graph(1, 1, space);
 
-    graph.optimize(0, 5, 10);
+    graph.optimize(0);
 
     EXPECT_EQ(graph.size(), 1u);
 }

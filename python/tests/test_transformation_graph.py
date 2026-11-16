@@ -1,29 +1,27 @@
 import os
 import struct
 import tempfile
+
 import numpy as np
-import pytest
 
 import deglib
 from deglib import (
+    EvpQuantizer,
     FloatSpace,
     Metric,
-    create_empty,
-    load_graph,
-    load_readonly_graph,
-    Searcher,
-    create_searcher,
+    MipsTransform,
+    ScalarQuantizerFP16,
     ScalarQuantizerInt8,
     ScalarQuantizerUint8,
-    ScalarQuantizerFP16,
-    EvpQuantizer,
-    MipsTransform,
+    create_empty,
+    create_searcher,
+    load_graph,
+    load_readonly_graph,
 )
 from deglib.transformation import (
-    serialize_transformations,
-    deserialize_transformations,
     apply_database,
-    apply_query,
+    deserialize_transformations,
+    serialize_transformations,
 )
 
 
@@ -245,7 +243,7 @@ def test_container_persistence_roundtrip():
             rerank_space=rerank_space,
             rerank_data=data,
         )
-        searcher.optimize(n_clusters=min(N, 16), n_iter=5, sample_size=N, k=5)
+        searcher.optimize(n_clusters=min(N, 16), n_iter=5, sample_size=N)
         res_searcher = searcher.search(query, k=5, eps_or_ef=0.2, rerank_factor=1.5)
         assert res_searcher[0] == 7
 

@@ -233,7 +233,7 @@ class Searcher {
             entry_selector_.top_entries(query_span, 2, ws.entry_buf);
             return ws.entry_buf;
         }()
-                                                                   : graph_->getEntryVertexIndices();
+            : graph_->getEntryVertexIndices();
 
         const uint32_t num_candidates = reranker_.has_value() ? static_cast<uint32_t>(std::ceil(static_cast<float>(k) * std::max(1.0f, rerank_factor))) : k;
         const bool should_rerank = reranker_.has_value() && (num_candidates > k);
@@ -773,17 +773,19 @@ class Searcher {
     // --- Optimization / Auto-Tuning ---
 
     /**
-     * Calibrates the search pipeline for the host CPU and graph:
-     * 1. K-Means medoids for query routing (trained on float base vectors if available, else FP32 graph features).
-     * 2. Candidate reranker prefetch lookahead (po, pl) auto-tuning.
-     * 3. Graph traversal prefetch (po, pl, nl) auto-tuning.
+     * @brief Calibrates the search pipeline for the host CPU and graph.
      *
-     * `n_clusters` is limited to 512 entry medoids. `sample_size` controls how many graph/base rows are sampled for K-Means candidates.
+     * 1. Trains K-Means medoids for query routing (when `use_routing` is true).
+     * 2. Auto-tunes candidate reranker prefetch lookahead (`po`, `pl`).
+     * 3. Auto-tunes graph traversal prefetch (`po`, `pl`, `nl`).
+     *
+     * @param n_clusters  Number of entry medoids to select (maximum 512).
+     * @param n_iter      Number of K-Means refinement iterations.
+     * @param sample_size Number of rows sampled for K-Means (`0` selects 3% of graph size, min 1000).
+     * @param threads     Worker thread count (`0` selects `hardware_concurrency()`).
+     * @param use_routing If true, builds the K-Means entry routing graph; otherwise keeps static entry points.
      */
-    /// Optimize: K-Means query-routing entry selection + reranker prefetch (po,pl) auto-tuning + graph
-    /// traversal prefetch tuning. The reranker's (po,pl) is tuned by optimize() (300 sample queries);
-    /// the non-fast Searcher exposes no manual prefetch override (only the Fast variants tune by hand).
-    void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 0, uint32_t k = 100, size_t threads = 0, bool use_routing = true) {
+    void optimize(uint32_t n_clusters = 128, uint32_t n_iter = 15, size_t sample_size = 0, size_t threads = 0, bool use_routing = true) {
         if (!graph_ || graph_->size() == 0) return;
         constexpr uint32_t seed = 42;  // fixed sampling seed (K-Means candidate shuffle + init): not caller-facing.
         const size_t n = graph_->size();
@@ -855,15 +857,12 @@ class Searcher {
         }
 
         // 2. Candidate reranker prefetch auto-tuning (library default: 300 sample queries = noise-stable).
-        const size_t num_cands = static_cast<size_t>(std::ceil(static_cast<float>(k) * 1.5f));
         if (reranker_.has_value()) {
-            reranker_->optimize(300, num_cands, k);
+            reranker_->optimize(300, 150);
         }
 
-        // 3. Graph traversal prefetch tuning. The graph re-selects a median entry from a subset; with
-        // routing the entry is the K-Means routing entry (set above), so median_subset=0 keeps it intact
-        // (otherwise the graph's median-entry selection would override the routing entry).
-        graph_->optimize(300, k, static_cast<uint32_t>(num_cands));
+        // 3. Graph traversal prefetch tuning.
+        graph_->optimize(300);
     }
 };
 

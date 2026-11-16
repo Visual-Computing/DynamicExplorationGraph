@@ -274,15 +274,6 @@ TEST(Rerank, PrefetchEnabledByDefaultAndTogglesCleanly) {
     // Default must be the prefetching config, otherwise large out-of-cache rerank runs silently lose throughput.
     EXPECT_GT(reranker.getPo(), 0);
 
-    reranker.setPrefetch(0, -4);
-    EXPECT_EQ(reranker.getPo(), 0);
-    EXPECT_EQ(reranker.getPl(), 0);
-
-    reranker.setPrefetch(12, 3);
-    EXPECT_EQ(reranker.getPo(), 12);
-    EXPECT_EQ(reranker.getPl(), 3);
-
-    // Toggling the prefetch config must not change the ranking.
     std::vector<uint32_t> out_indices(2);
     std::vector<float> out_dists(2);
     uint32_t count = reranker.rerank(std::span<const float>(query.data(), 2u), std::span<const uint32_t>(candidates), 2, std::span<uint32_t>(out_indices), std::span<float>(out_dists), true, false);
@@ -316,9 +307,8 @@ TEST(Rerank, PrefetchAndNoPrefetchPathsAgreeOnOutOfCacheWorkingSet) {
     deglib::distances::FloatSpace fs(dim, deglib::distances::Metric::FP32_L2);
     deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), num_base);
 
-    reranker.setPrefetch(0, 0);
     auto unprefetched = reranker.rerank(std::as_bytes(std::span(queries)), num_queries, std::span(candidates), candidates_per_query, k_top, 1);
-    reranker.setPrefetch(8, 0);
+    reranker.optimize();
     auto prefetched = reranker.rerank(std::as_bytes(std::span(queries)), num_queries, std::span(candidates), candidates_per_query, k_top, 1);
 
     ASSERT_EQ(unprefetched.size(), num_queries);

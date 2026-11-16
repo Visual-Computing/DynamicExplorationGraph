@@ -124,7 +124,7 @@ def construct_knng(
     print(f"Edge pruning completed in {t_prune:.3f}s")
 
     t_opt0 = time.perf_counter()
-    graph.optimize(k=evp_k, ef=evp_k)
+    graph.optimize()
     t_gopt = time.perf_counter() - t_opt0
     print(f"[Optimization] graph.optimize -> (po={graph.get_po()}, pl={graph.get_pl()}, nl={graph.get_nl()}) (took {t_gopt:.3f}s, excluded from total)")
 
@@ -148,7 +148,7 @@ def construct_knng(
     print(f"Rerank Space: {rerank_space.metric().name} ({rerank_space.get_instruction().name})")
     reranker = Reranker(rerank_space, train_vectors)
     t_ropt0 = time.perf_counter()
-    reranker.optimize(num_candidates=evp_k, k=k_top)
+    reranker.optimize(num_candidates=evp_k)
     t_ropt = time.perf_counter() - t_ropt0
     print(f"[Optimization] reranker.optimize -> (po={reranker.get_po()}, pl={reranker.get_pl()}) (took {t_ropt:.3f}s, excluded from total)")
 
