@@ -62,12 +62,8 @@ class ScalarQuantizerUint8 : public FeatureTransformation {
         if (data_fp16.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUint8: dim must be > 0 prior to fit()");
         if (data_fp16.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUint8: data size must be multiple of dim");
-        const size_t total = data_fp16.size();
-        std::vector<float> converted(total);
-        for (size_t i = 0; i < total; ++i) {
-            converted[i] = deglib::distances::fp16::fp16_to_float(data_fp16[i]);
-        }
-        fit(std::span<const float>(converted), quantile);
+        auto [mi, ma] = detail::find_minmax_fp16(data_fp16, quantile);
+        set_range(mi, ma);
     }
 
     void transform_database(std::span<const float> in, std::span<std::byte> out) const override { transform_vectors(in, out, 0); }
