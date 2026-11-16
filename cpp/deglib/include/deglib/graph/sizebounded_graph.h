@@ -273,7 +273,12 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
     /**
      * convert an external label to an internal index
      */
-    [[nodiscard]] uint32_t getInternalIndex(uint32_t external_label) const noexcept override { return label_to_index_.find(external_label)->second; }
+    [[nodiscard]] uint32_t getInternalIndex(uint32_t external_label) const noexcept override {
+        if (external_label < size() && label_by_index(external_label) == external_label) [[likely]] {
+            return external_label;
+        }
+        return label_to_index_.find(external_label)->second;
+    }
 
     [[nodiscard]] uint32_t getExternalLabel(uint32_t internal_idx) const noexcept override { return label_by_index(internal_idx); }
 
@@ -294,7 +299,12 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
         return -1;
     }
 
-    [[nodiscard]] bool hasVertex(uint32_t external_label) const noexcept override { return label_to_index_.find(external_label) != label_to_index_.end(); }
+    [[nodiscard]] bool hasVertex(uint32_t external_label) const noexcept override {
+        if (external_label < size() && label_by_index(external_label) == external_label) [[likely]] {
+            return true;
+        }
+        return label_to_index_.find(external_label) != label_to_index_.end();
+    }
 
     [[nodiscard]] bool hasEdge(uint32_t internal_index, uint32_t neighbor_index) const noexcept override {
         auto neighbor_indices = neighbors_by_index(internal_index);

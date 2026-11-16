@@ -255,4 +255,55 @@ TEST(ReadOnlyGraphTest, OptimizeIsNoopForEmptyGraph) {
     EXPECT_EQ(graph.size(), 1u);
 }
 
+TEST(ReadOnlyGraphTest, DenseAndSparseLabelLookup) {
+    constexpr uint32_t n = 16;
+    constexpr uint32_t dim = 4;
+    constexpr uint8_t k = 2;
+    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
+
+    // 1. Dense labels 0..n-1 (exercises O(1) fast path)
+    std::vector<float> features(n * dim, 0.0f);
+    std::vector<uint32_t> edges(n * k, 0);
+    for (uint32_t i = 0; i < n; ++i) {
+        features[i * dim] = static_cast<float>(i);
+        edges[i * k] = (i + 1) % n;
+        edges[i * k + 1] = (i + 2) % n;
+    }
+    auto sb_dense = make_size_bounded_graph(n, dim, k, features, edges);
+    for (uint32_t i = 0; i < n; ++i) {
+        EXPECT_TRUE(sb_dense.hasVertex(i));
+        EXPECT_EQ(sb_dense.getInternalIndex(i), i);
+    }
+    EXPECT_FALSE(sb_dense.hasVertex(n));
+
+    auto ro_dense = deglib::graph::ReadOnlyGraph::from_graph(sb_dense);
+    for (uint32_t i = 0; i < n; ++i) {
+        EXPECT_TRUE(ro_dense.hasVertex(i));
+        EXPECT_EQ(ro_dense.getInternalIndex(i), i);
+    }
+    EXPECT_FALSE(ro_dense.hasVertex(n));
+
+    // 2. Non-identity / sparse labels (exercises label_to_index_ fallback)
+    deglib::graph::SizeBoundedGraph sb_sparse(n, k, space);
+    std::vector<uint32_t> sparse_labels = {100, 0, 50, 2, 75, 1, 999, 7};
+    for (size_t idx = 0; idx < sparse_labels.size(); ++idx) {
+        std::array<float, dim> vec{static_cast<float>(idx), 0.0f, 0.0f, 0.0f};
+        sb_sparse.addVertex(sparse_labels[idx], reinterpret_cast<const std::byte*>(vec.data()));
+    }
+    for (uint32_t idx = 0; idx < sparse_labels.size(); ++idx) {
+        const uint32_t lbl = sparse_labels[idx];
+        EXPECT_TRUE(sb_sparse.hasVertex(lbl));
+        EXPECT_EQ(sb_sparse.getInternalIndex(lbl), idx);
+    }
+    EXPECT_FALSE(sb_sparse.hasVertex(3));
+
+    auto ro_sparse = deglib::graph::ReadOnlyGraph::from_graph(sb_sparse);
+    for (uint32_t idx = 0; idx < sparse_labels.size(); ++idx) {
+        const uint32_t lbl = sparse_labels[idx];
+        EXPECT_TRUE(ro_sparse.hasVertex(lbl));
+        EXPECT_EQ(ro_sparse.getInternalIndex(lbl), idx);
+    }
+    EXPECT_FALSE(ro_sparse.hasVertex(3));
+}
+
 }  // namespace

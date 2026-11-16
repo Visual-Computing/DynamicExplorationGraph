@@ -233,10 +233,20 @@ class ReadOnlyGraph : public InternalGraph {
     [[nodiscard]] const std::byte* getFeatureVector(uint32_t id) const noexcept override { return feature_by_index(id); }
     [[nodiscard]] const uint32_t* getNeighborIndices(uint32_t id) const noexcept override { return neighbors_by_index(id); }
     [[nodiscard]] uint32_t getExternalLabel(uint32_t id) const noexcept override { return labels_[id]; }
-    [[nodiscard]] uint32_t getInternalIndex(uint32_t label) const noexcept override { return label_to_index_.find(label)->second; }
+    [[nodiscard]] uint32_t getInternalIndex(uint32_t label) const noexcept override {
+        if (label < vertex_count_ && labels_[label] == label) [[likely]] {
+            return label;
+        }
+        return label_to_index_.find(label)->second;
+    }
     [[nodiscard]] std::vector<uint32_t> getExternalLabels() const override { return labels_; }
 
-    [[nodiscard]] bool hasVertex(uint32_t label) const noexcept override { return label_to_index_.find(label) != label_to_index_.end(); }
+    [[nodiscard]] bool hasVertex(uint32_t label) const noexcept override {
+        if (label < vertex_count_ && labels_[label] == label) [[likely]] {
+            return true;
+        }
+        return label_to_index_.find(label) != label_to_index_.end();
+    }
     [[nodiscard]] bool hasEdge(uint32_t internal_index, uint32_t neighbor_index) const noexcept override {
         const auto neighbor_indices = std::span(getNeighborIndices(internal_index), edges_per_vertex_);
         return std::ranges::binary_search(neighbor_indices, neighbor_index);
