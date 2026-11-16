@@ -910,7 +910,13 @@ class InternalGraph {
 
             uint32_t distance_computation_count = 0;
 
-            deglib::search::ResultList pool(static_cast<int32_t>(ef), capacity);
+            thread_local deglib::search::ResultList pool;
+            pool.reset(static_cast<int32_t>(ef), capacity);
+            auto extract_top_k = [k](const deglib::search::ResultList& p) {
+                const auto res = p.span();
+                const size_t count = std::min<size_t>(k, res.size());
+                return std::vector<deglib::graph::ObjectDistance>(res.begin(), res.begin() + count);
+            };
 
             // every entry vertex seeds the beam and is part of the result set
             for (auto ep : entry_vertex_indices) {
@@ -924,7 +930,7 @@ class InternalGraph {
                 // early stop after to many computations
                 if constexpr (use_max_distance_count) {
                     if (++distance_computation_count >= max_distance_computation_count) {
-                        return std::move(pool).to_vector(k);
+                        return extract_top_k(pool);
                     }
                 }
             }
@@ -977,13 +983,13 @@ class InternalGraph {
                     // early stop after to many computations
                     if constexpr (use_max_distance_count) {
                         if (++distance_computation_count >= max_distance_computation_count) {
-                            return std::move(pool).to_vector(k);
+                            return extract_top_k(pool);
                         }
                     }
                 }
             }
 
-            return std::move(pool).to_vector(k);
+            return extract_top_k(pool);
         }
     }
 

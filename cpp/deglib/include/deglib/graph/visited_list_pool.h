@@ -20,12 +20,12 @@ class VisitedList {
 
     VisitedList* next_;
     VisitedList* prev_;
-    std::unique_ptr<uint16_t[]> slots_;
+    std::unique_ptr<uint8_t[]> slots_;
     uint32_t num_elements_;
-    uint16_t current_tag_{1};
+    uint8_t current_tag_{1};
 
   public:
-    explicit VisitedList(uint32_t numelements1) : slots_(std::make_unique<uint16_t[]>(numelements1)), num_elements_(numelements1) {}
+    explicit VisitedList(uint32_t numelements1) : slots_(std::make_unique<uint8_t[]>(numelements1)), num_elements_(numelements1) {}
 
     [[nodiscard]] auto* get_visited() const { return slots_.get(); }
 
@@ -34,7 +34,7 @@ class VisitedList {
     void reset() {
         ++current_tag_;
         if (current_tag_ == 0) {
-            std::fill_n(slots_.get(), num_elements_, uint16_t{});
+            std::fill_n(slots_.get(), num_elements_, uint8_t{});
             ++current_tag_;
         }
     }
