@@ -1312,15 +1312,6 @@ class DynamicExplorationGraph {
     void setNl(int32_t nl) { internal_graph_->setNl(nl); }
 
     /**
-     * @brief Configures software prefetching parameters for graph traversal.
-     *
-     * @param po Prefetch offset for candidate feature vectors.
-     * @param pl Cache line look-ahead for feature vectors.
-     * @param nl Look-ahead for neighbor list prefetching (default 3).
-     */
-    void setPrefetch(int32_t po, int32_t pl, int32_t nl = 3) { internal_graph_->setPrefetch(po, pl, nl); }
-
-    /**
      * @brief Auto-tune the graph's traversal prefetch parameters (po, pl, nl) by empirically timing
      * traversal over sampled vertices. The graph self-samples its own stored features as queries,
      * so no external query buffer is needed. Forwards to the internal graph's optimize().

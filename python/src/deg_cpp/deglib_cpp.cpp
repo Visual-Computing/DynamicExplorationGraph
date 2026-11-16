@@ -1354,9 +1354,13 @@ PYBIND11_MODULE(deglib_cpp, m) {
     };
 
     auto apply_transformations_array = [](const std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>& transformations, py::array in_arr,
-                                          bool is_database) -> py::array {
+                                          bool is_database, size_t num_threads = 0) -> py::array {
         if (transformations.empty()) return in_arr;
-        py::buffer_info buf = in_arr.request();
+        auto c_arr = py::array::ensure(in_arr, py::array::c_style);
+        if (!c_arr) {
+            throw std::invalid_argument("Input array must be convertible to a C-contiguous array");
+        }
+        py::buffer_info buf = c_arr.request();
         bool is_1d = (buf.ndim == 1);
         size_t count = is_1d ? 1 : buf.shape[0];
         size_t dim = is_1d ? buf.shape[0] : buf.shape[1];
@@ -1365,53 +1369,60 @@ PYBIND11_MODULE(deglib_cpp, m) {
                 std::format("Input dimension ({}) does not match transformation input_dim ({})", dim, transformations.front()->input_dim())
             );
         }
+        const bool is_fp16 = (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e"));
+        const bool is_fp32 = (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float"));
         py::array_t<float, py::array::c_style> f_arr;
         const float* f_ptr = nullptr;
-        if (buf.itemsize == sizeof(float) && (buf.format == "f" || buf.format == "float")) {
+        const uint16_t* u16_ptr = nullptr;
+        if (is_database && is_fp16) {
+            u16_ptr = static_cast<const uint16_t*>(buf.ptr);
+        } else if (is_fp32) {
             f_ptr = static_cast<const float*>(buf.ptr);
         } else {
-            f_arr = py::array_t<float, py::array::c_style>(in_arr);
+            f_arr = py::array_t<float, py::array::c_style>(c_arr);
             f_ptr = static_cast<const float*>(f_arr.request().ptr);
         }
+
+        auto run_transform = [&](std::byte* out_ptr) {
+            py::gil_scoped_release release;
+            if (is_database) {
+                if (u16_ptr != nullptr) {
+                    deglib::transformation::apply_database(transformations, u16_ptr, out_ptr, count, num_threads);
+                } else {
+                    deglib::transformation::apply_database(transformations, f_ptr, out_ptr, count, num_threads);
+                }
+            } else {
+                deglib::transformation::apply_query(transformations, f_ptr, out_ptr, count);
+            }
+        };
+
         const size_t out_stride = transformations.back()->output_byte_size();
         const uint32_t tag = transformations.back()->tag();
         if (tag == deglib::transformation::TAG_SQI8 || tag == deglib::transformation::TAG_SQU7) {
             std::vector<py::ssize_t> shape = is_1d ? std::vector<py::ssize_t>{static_cast<py::ssize_t>(out_stride)}
                                                    : std::vector<py::ssize_t>{static_cast<py::ssize_t>(count), static_cast<py::ssize_t>(out_stride)};
             py::array_t<int8_t> out(shape);
-            if (is_database)
-                deglib::transformation::apply_database(transformations, f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
-            else
-                deglib::transformation::apply_query(transformations, f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
+            run_transform(reinterpret_cast<std::byte*>(out.request().ptr));
             return out;
         } else if (tag == deglib::transformation::TAG_SQU8 || tag == deglib::transformation::TAG_EVPQ || tag == deglib::transformation::TAG_SQU4 || tag == deglib::transformation::TAG_SQI4) {
             std::vector<py::ssize_t> shape = is_1d ? std::vector<py::ssize_t>{static_cast<py::ssize_t>(out_stride)}
                                                    : std::vector<py::ssize_t>{static_cast<py::ssize_t>(count), static_cast<py::ssize_t>(out_stride)};
             py::array_t<uint8_t> out(shape);
-            if (is_database)
-                deglib::transformation::apply_database(transformations, f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
-            else
-                deglib::transformation::apply_query(transformations, f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
+            run_transform(reinterpret_cast<std::byte*>(out.request().ptr));
             return out;
         } else if (tag == deglib::transformation::TAG_SQ16) {
             std::vector<py::ssize_t> shape =
                 is_1d ? std::vector<py::ssize_t>{static_cast<py::ssize_t>(transformations.back()->output_dim())}
                       : std::vector<py::ssize_t>{static_cast<py::ssize_t>(count), static_cast<py::ssize_t>(transformations.back()->output_dim())};
             py::array out(py::dtype("float16"), shape);
-            if (is_database)
-                deglib::transformation::apply_database(transformations, f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
-            else
-                deglib::transformation::apply_query(transformations, f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
+            run_transform(reinterpret_cast<std::byte*>(out.request().ptr));
             return out;
         } else {
             std::vector<py::ssize_t> shape =
                 is_1d ? std::vector<py::ssize_t>{static_cast<py::ssize_t>(transformations.back()->output_dim())}
                       : std::vector<py::ssize_t>{static_cast<py::ssize_t>(count), static_cast<py::ssize_t>(transformations.back()->output_dim())};
             py::array_t<float> out(shape);
-            if (is_database)
-                deglib::transformation::apply_database(transformations, f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
-            else
-                deglib::transformation::apply_query(transformations, f_ptr, reinterpret_cast<std::byte*>(out.request().ptr), count);
+            run_transform(reinterpret_cast<std::byte*>(out.request().ptr));
             return out;
         }
     };
@@ -2091,8 +2102,12 @@ PYBIND11_MODULE(deglib_cpp, m) {
 
     transformation_module.def(
         "make_quantizer_pipeline",
-        [](py::array_t<float, py::array::c_style> vectors, py::object quant, float quantile, bool use_rerank, size_t num_threads, uint64_t seed) {
-            py::buffer_info buf = vectors.request();
+        [](py::array vectors, py::object quant, float quantile, bool use_rerank, size_t num_threads, uint64_t seed) {
+            auto c_vecs = py::array::ensure(vectors, py::array::c_style);
+            if (!c_vecs) {
+                throw std::invalid_argument("vectors must be convertible to a C-contiguous array");
+            }
+            py::buffer_info buf = c_vecs.request();
             auto [count, dim] = get_2d_shape(buf);
             deglib::distances::MetricDataType data_type;
             if (py::isinstance<deglib::distances::Metric>(quant)) {
@@ -2113,6 +2128,25 @@ PYBIND11_MODULE(deglib_cpp, m) {
                 throw std::invalid_argument("quant must be a Metric or data type string (uint4, int4, uint7, uint8, int8, fp16)");
             }
 
+            const bool is_fp16 = (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e"));
+            const bool is_fp32 = (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float"));
+            if (!is_fp16 && !is_fp32) {
+                py::array_t<float, py::array::c_style> f_arr(c_vecs);
+                auto f_buf = f_arr.request();
+                py::gil_scoped_release release;
+                return deglib::transformation::make_quantizer_pipeline(
+                    std::span<const float>(static_cast<const float*>(f_buf.ptr), count * dim),
+                    static_cast<uint32_t>(dim), data_type, quantile, use_rerank, num_threads, seed
+                );
+            }
+
+            py::gil_scoped_release release;
+            if (is_fp16) {
+                return deglib::transformation::make_quantizer_pipeline(
+                    std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim),
+                    static_cast<uint32_t>(dim), data_type, quantile, use_rerank, num_threads, seed
+                );
+            }
             return deglib::transformation::make_quantizer_pipeline(
                 std::span<const float>(static_cast<const float*>(buf.ptr), count * dim),
                 static_cast<uint32_t>(dim), data_type, quantile, use_rerank, num_threads, seed
@@ -2211,10 +2245,10 @@ PYBIND11_MODULE(deglib_cpp, m) {
 
     transformation_module.def(
         "apply_database",
-        [apply_transformations_array](const std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>& transformations, py::array in_arr) {
-            return apply_transformations_array(transformations, in_arr, true);
-        },
-        py::arg("transformations"), py::arg("vectors")
+        [apply_transformations_array](
+            const std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>& transformations, py::array in_arr, size_t num_threads
+        ) { return apply_transformations_array(transformations, in_arr, true, num_threads); },
+        py::arg("transformations"), py::arg("vectors"), py::arg("num_threads") = 0
     );
 
     transformation_module.def(
