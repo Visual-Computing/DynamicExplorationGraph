@@ -222,54 +222,44 @@ class InternalGraph {
             idx = rng % n_vertices;
         }
 
-        const std::vector<int32_t> try_pos = {4, 8, 12, 16};
-        const std::vector<int32_t> try_nls = {2, 3, 4};
-        // Prefetch depth pl: cache lines per feature vector. Cap at code_size/64 (the full vector),
-        // so wide features (e.g. 1024D Int8 = 16 lines, 1024D FP32 = 64 lines) can be fully prefetched.
-        const size_t feature_bytes = getFeatureSpace().get_data_size();
-        const int32_t pl_max = static_cast<int32_t>(
-            (feature_bytes + deglib::memory::L1_CACHE_LINE_SIZE - 1) / deglib::memory::L1_CACHE_LINE_SIZE
-        );
-        std::vector<int32_t> try_pls;
-        for (const int32_t c : {2, 3, 4, 8, 16, 32, 64}) {
-            if (c <= pl_max) {
-                try_pls.push_back(c);
-            }
-        }
-        if (try_pls.empty() && pl_max > 0) {
-            try_pls.push_back(pl_max);
-        }
+        // Neighbor list size is fixed per graph, so nl_fixed covers all neighbor ID cache lines directly.
+        auto cache_lines_for = [](size_t bytes) noexcept -> int32_t {
+            return std::max<int32_t>(1, static_cast<int32_t>((bytes + deglib::memory::L1_CACHE_LINE_SIZE - 1) / deglib::memory::L1_CACHE_LINE_SIZE));
+        };
+        const int32_t nl_fixed = cache_lines_for(static_cast<size_t>(getEdgesPerVertex()) * sizeof(uint32_t));
+        const int32_t max_po = std::min<int32_t>(20, static_cast<int32_t>(getEdgesPerVertex()));
+        const int32_t max_pl = std::min<int32_t>(20, cache_lines_for(getFeatureSpace().get_data_size()));
 
         const std::vector<uint32_t>& entries = getEntryVertexIndices();
-        int32_t best_po = po_;
-        int32_t best_pl = pl_;
-        int32_t best_nl = nl_;
+        auto timeit = [&] {
+            const auto t_start = std::chrono::high_resolution_clock::now();
+            for (size_t i = 0; i < n_queries; ++i) {
+                search_ef_intern(entries, getFeatureVector(sample_idx[i]), k, ef);
+            }
+            return std::chrono::duration<double, std::micro>(std::chrono::high_resolution_clock::now() - t_start).count();
+        };
+
+        setPrefetch(1, 1, nl_fixed);
+        timeit();
+        timeit();
+        timeit();
+
+        int32_t best_po = 1;
+        int32_t best_pl = 1;
         double best_time = std::numeric_limits<double>::max();
 
-        for (int32_t po : try_pos) {
-            for (int32_t pl : try_pls) {
-                for (int32_t nl : try_nls) {
-                    setPrefetch(po, pl, nl);
-
-                    for (size_t i = 0; i < std::min<size_t>(3, n_queries); ++i) {
-                        search_ef_intern(entries, getFeatureVector(sample_idx[i]), k, ef);
-                    }
-                    const auto t_start = std::chrono::high_resolution_clock::now();
-                    for (size_t i = 0; i < n_queries; ++i) {
-                        search_ef_intern(entries, getFeatureVector(sample_idx[i]), k, ef);
-                    }
-                    const double dur = std::chrono::duration<double, std::micro>(std::chrono::high_resolution_clock::now() - t_start).count();
-
-                    if (dur < best_time) {
-                        best_time = dur;
-                        best_po = po;
-                        best_pl = pl;
-                        best_nl = nl;
-                    }
+        for (int32_t po = 1; po <= max_po; ++po) {
+            for (int32_t pl = 1; pl <= max_pl; ++pl) {
+                setPrefetch(po, pl, nl_fixed);
+                const double dur = timeit();
+                if (dur < best_time) {
+                    best_time = dur;
+                    best_po = po;
+                    best_pl = pl;
                 }
             }
         }
-        setPrefetch(best_po, best_pl, best_nl);
+        setPrefetch(best_po, best_pl, nl_fixed);
     }
     /**
      * @brief Traverses the graph from the given entry vertices towards to_vertex and backtracks the path.
