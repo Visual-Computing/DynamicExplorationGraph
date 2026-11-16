@@ -8,8 +8,8 @@
 
 using namespace deglib::transformation;
 
-TEST(TransformTest, QueryWorkspaceGrowth) {
-    QueryWorkspace ws;
+TEST(TransformTest, TransformationWorkspaceGrowth) {
+    TransformationWorkspace ws;
 
     auto* buf1 = ws.get_buffer_a(128);
     EXPECT_NE(buf1, nullptr);

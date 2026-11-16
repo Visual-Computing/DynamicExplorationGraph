@@ -212,8 +212,8 @@ class DynamicExplorationGraph {
                 if (query.size() != getInputDim()) {
                     throw std::invalid_argument(std::format("Dimension mismatch: Transformations expect {} dims, query has {}", getInputDim(), query.size()));
                 }
-                thread_local deglib::transformation::QueryWorkspace workspace;
-                const size_t out_bytes = std::max(deglib::transformation::get_output_bytes(transformations_), internal_graph_->getFeatureSpace().get_data_size());
+                thread_local deglib::transformation::TransformationWorkspace workspace;
+                const size_t out_bytes = std::max(deglib::transformation::get_output_byte_size(transformations_), internal_graph_->getFeatureSpace().get_data_size());
                 std::byte* q_buf = workspace.get_buffer_a(out_bytes);
 
                 if constexpr (std::is_same_v<T, float>) {
@@ -271,8 +271,8 @@ class DynamicExplorationGraph {
                 if (query.size() != getInputDim()) {
                     throw std::invalid_argument(std::format("Dimension mismatch: Transformations expect {} dims, query has {}", getInputDim(), query.size()));
                 }
-                thread_local deglib::transformation::QueryWorkspace workspace;
-                const size_t out_bytes = std::max(deglib::transformation::get_output_bytes(transformations_), internal_graph_->getFeatureSpace().get_data_size());
+                thread_local deglib::transformation::TransformationWorkspace workspace;
+                const size_t out_bytes = std::max(deglib::transformation::get_output_byte_size(transformations_), internal_graph_->getFeatureSpace().get_data_size());
                 std::byte* q_buf = workspace.get_buffer_a(out_bytes);
 
                 if constexpr (std::is_same_v<T, float>) {
@@ -340,13 +340,13 @@ class DynamicExplorationGraph {
 
         if constexpr (std::is_same_v<T, float> || std::is_same_v<T, uint16_t>) {
             if (hasTransformations()) {
-                const size_t out_stride = std::max(deglib::transformation::get_output_bytes(transformations_), internal_graph_->getFeatureSpace().get_data_size());
+                const size_t out_stride = std::max(deglib::transformation::get_output_byte_size(transformations_), internal_graph_->getFeatureSpace().get_data_size());
 
                 deglib::concurrent::parallel_for(0, count, threads, [&](size_t i, size_t) {
                     alignas(64) std::byte stack_buf[512];
                     std::byte* q_buf = stack_buf;
                     if (out_stride > sizeof(stack_buf)) {
-                        thread_local deglib::transformation::QueryWorkspace ws;
+                        thread_local deglib::transformation::TransformationWorkspace ws;
                         q_buf = ws.get_buffer_a(out_stride);
                     }
 
@@ -356,7 +356,7 @@ class DynamicExplorationGraph {
                         alignas(64) float stack_f16_buf[256];
                         float* f16_buf = stack_f16_buf;
                         if (in_stride > sizeof(stack_f16_buf) / sizeof(float)) {
-                            thread_local deglib::transformation::QueryWorkspace ws;
+                            thread_local deglib::transformation::TransformationWorkspace ws;
                             f16_buf = ws.get_float_buffer(in_stride);
                         }
                         deglib::distances::fp16::fp16_to_floats(queries.data() + i * in_stride, f16_buf, in_stride);
@@ -476,13 +476,13 @@ class DynamicExplorationGraph {
 
         if constexpr (std::is_same_v<T, float> || std::is_same_v<T, uint16_t>) {
             if (hasTransformations()) {
-                const size_t out_stride = std::max(deglib::transformation::get_output_bytes(transformations_), internal_graph_->getFeatureSpace().get_data_size());
+                const size_t out_stride = std::max(deglib::transformation::get_output_byte_size(transformations_), internal_graph_->getFeatureSpace().get_data_size());
 
                 deglib::concurrent::parallel_for(0, count, threads, [&](size_t q, size_t) {
                     alignas(64) std::byte stack_buf[512];
                     std::byte* q_buf = stack_buf;
                     if (out_stride > sizeof(stack_buf)) {
-                        thread_local deglib::transformation::QueryWorkspace ws;
+                        thread_local deglib::transformation::TransformationWorkspace ws;
                         q_buf = ws.get_buffer_a(out_stride);
                     }
 
@@ -492,7 +492,7 @@ class DynamicExplorationGraph {
                         alignas(64) float stack_f16_buf[256];
                         float* f16_buf = stack_f16_buf;
                         if (in_stride > sizeof(stack_f16_buf) / sizeof(float)) {
-                            thread_local deglib::transformation::QueryWorkspace ws;
+                            thread_local deglib::transformation::TransformationWorkspace ws;
                             f16_buf = ws.get_float_buffer(in_stride);
                         }
                         deglib::distances::fp16::fp16_to_floats(queries.data() + q * in_stride, f16_buf, in_stride);
@@ -590,13 +590,13 @@ class DynamicExplorationGraph {
 
         if constexpr (std::is_same_v<T, float> || std::is_same_v<T, uint16_t>) {
             if (hasTransformations()) {
-                const size_t out_stride = std::max(deglib::transformation::get_output_bytes(transformations_), internal_graph_->getFeatureSpace().get_data_size());
+                const size_t out_stride = std::max(deglib::transformation::get_output_byte_size(transformations_), internal_graph_->getFeatureSpace().get_data_size());
 
                 deglib::concurrent::parallel_for(0, count, threads, [&](size_t q, size_t) {
                     alignas(64) std::byte stack_buf[512];
                     std::byte* q_buf = stack_buf;
                     if (out_stride > sizeof(stack_buf)) {
-                        thread_local deglib::transformation::QueryWorkspace ws;
+                        thread_local deglib::transformation::TransformationWorkspace ws;
                         q_buf = ws.get_buffer_a(out_stride);
                     }
 
@@ -606,7 +606,7 @@ class DynamicExplorationGraph {
                         alignas(64) float stack_f16_buf[256];
                         float* f16_buf = stack_f16_buf;
                         if (in_stride > sizeof(stack_f16_buf) / sizeof(float)) {
-                            thread_local deglib::transformation::QueryWorkspace ws;
+                            thread_local deglib::transformation::TransformationWorkspace ws;
                             f16_buf = ws.get_float_buffer(in_stride);
                         }
                         deglib::distances::fp16::fp16_to_floats(queries.data() + q * in_stride, f16_buf, in_stride);
@@ -668,13 +668,13 @@ class DynamicExplorationGraph {
 
         if constexpr (std::is_same_v<T, float> || std::is_same_v<T, uint16_t>) {
             if (hasTransformations()) {
-                const size_t out_stride = std::max(deglib::transformation::get_output_bytes(transformations_), internal_graph_->getFeatureSpace().get_data_size());
+                const size_t out_stride = std::max(deglib::transformation::get_output_byte_size(transformations_), internal_graph_->getFeatureSpace().get_data_size());
 
                 deglib::concurrent::parallel_for(0, count, threads, [&](size_t i, size_t) {
                     alignas(64) std::byte stack_buf[512];
                     std::byte* q_buf = stack_buf;
                     if (out_stride > sizeof(stack_buf)) {
-                        thread_local deglib::transformation::QueryWorkspace ws;
+                        thread_local deglib::transformation::TransformationWorkspace ws;
                         q_buf = ws.get_buffer_a(out_stride);
                     }
 
@@ -684,7 +684,7 @@ class DynamicExplorationGraph {
                         alignas(64) float stack_f16_buf[256];
                         float* f16_buf = stack_f16_buf;
                         if (in_stride > sizeof(stack_f16_buf) / sizeof(float)) {
-                            thread_local deglib::transformation::QueryWorkspace ws;
+                            thread_local deglib::transformation::TransformationWorkspace ws;
                             f16_buf = ws.get_float_buffer(in_stride);
                         }
                         deglib::distances::fp16::fp16_to_floats(queries.data() + i * in_stride, f16_buf, in_stride);

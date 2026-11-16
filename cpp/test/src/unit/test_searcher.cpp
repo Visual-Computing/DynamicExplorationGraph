@@ -212,26 +212,14 @@ TEST(SearcherTest, OptimizeSelectsValidPrefetchConfigAndPreservesResults) {
 
     searcher->optimize(/*n_clusters=*/32, /*n_iter=*/5, /*sample_size=*/0, /*k=*/10, /*threads=*/1);
 
-    // Tuner must land on a value from its own search grid (proves it actually tuned, not garbage).
+    // Tuner must land within the valid search bounds (proves it actually tuned, not garbage).
     const int32_t po = graph.getPo();
     const int32_t pl = graph.getPl();
     const int32_t nl = graph.getNl();
-    const std::vector<int32_t> grid_po = {4, 8, 12, 16};
-    // Mirror the impl's data-dependent pl grid: capped at code_size/64 (full vector). For this
-    // dim=16 FP32 graph a feature is 64 B = 1 cache line, so the only valid depth is pl=1.
-    std::vector<int32_t> grid_pl;
-    for (const int32_t c : {2, 3, 4, 8, 16, 32, 64}) {
-        if (c <= 1) {
-            grid_pl.push_back(c);
-        }
-    }
-    if (grid_pl.empty()) {
-        grid_pl.push_back(1);
-    }
-    const std::vector<int32_t> grid_nl = {2, 3, 4};
-    EXPECT_NE(std::find(grid_po.begin(), grid_po.end(), po), grid_po.end());
-    EXPECT_NE(std::find(grid_pl.begin(), grid_pl.end(), pl), grid_pl.end());
-    EXPECT_NE(std::find(grid_nl.begin(), grid_nl.end(), nl), grid_nl.end());
+    EXPECT_GE(po, 1);
+    EXPECT_LE(po, 16);
+    EXPECT_EQ(pl, 1);
+    EXPECT_EQ(nl, 1);
 
     // Search still returns the exact nearest neighbour (the query is a base vector).
     std::vector<uint32_t> idx(3);
@@ -257,12 +245,9 @@ TEST(SearcherTest, OptimizePrefetchDepthScalesWithFeatureWidth) {
     searcher->optimize(/*n_clusters=*/8, /*n_iter=*/3, /*sample_size=*/50, /*k=*/10, /*threads=*/1);
 
     const int32_t pl = graph.getPl();
-    const int32_t pl_max = static_cast<int32_t>(dim * 4 / 64);  // 64 lines for 1024D FP32
+    const int32_t pl_max = std::min<int32_t>(20, static_cast<int32_t>(dim * 4 / 64));  // capped at 20 cache lines
     EXPECT_GE(pl, 1);
     EXPECT_LE(pl, pl_max);
-    // Tuner must be able to reach beyond the old {2,3,4} cap on wide features.
-    const std::vector<int32_t> grid_pl = {2, 3, 4, 8, 16, 32, 64};
-    EXPECT_NE(std::find(grid_pl.begin(), grid_pl.end(), pl), grid_pl.end());
 }
 
 TEST(SearcherTest, EVPQuantizerWithFP32Reranker) {

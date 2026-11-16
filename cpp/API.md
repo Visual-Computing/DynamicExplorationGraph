@@ -1065,6 +1065,21 @@ public:
     static std::unique_ptr<L2NormalizeTransform> deserialize(std::istream& is);
 };
 
+/// Fast Walsh-Hadamard orthogonal rotation (optional auto-enable via excess kurtosis)
+class FastHadamardRotation : public FeatureTransformation {
+public:
+    FastHadamardRotation(uint32_t dim, uint64_t seed = 42, bool enabled = true);
+    bool is_enabled() const noexcept;
+    float excess_kurtosis() const noexcept;
+    void fit_with_kurtosis(std::span<const float> data, float threshold = 0.8f);
+    void fit(std::span<const float> data) override;
+    void transform_database(std::span<const float> in, std::span<std::byte> out, size_t num_threads) const;
+    void transform_database(std::span<const float> in, std::span<std::byte> out) const override;
+    void transform_query(std::span<const float> in, std::span<std::byte> out) const override;
+    void serialize(std::ostream& os) const override;
+    static std::unique_ptr<FastHadamardRotation> deserialize(std::istream& is);
+};
+
 // --- Equi-Voronoi Polytopes Quantization (EVP) ---
 
 class EvpQuantizer : public FeatureTransformation {
@@ -1097,8 +1112,8 @@ void mips_l2_transform_query(std::span<const float> input, size_t count, size_t 
 
 // --- Workspace & Pipeline Execution Functions ---
 
-/// Workspace buffer for query transformation without heap allocations on search path
-class QueryWorkspace {
+/// Workspace buffer for transformation pipelines without heap allocations on search path
+class TransformationWorkspace {
 public:
     std::byte* get_buffer_a(size_t bytes);
     std::byte* get_buffer_b(size_t bytes);
@@ -1109,6 +1124,17 @@ public:
 size_t get_output_byte_size(std::span<const std::shared_ptr<FeatureTransformation>> transformations) noexcept;
 uint32_t get_input_dim(std::span<const std::shared_ptr<FeatureTransformation>> transformations) noexcept;
 uint32_t get_output_dim(std::span<const std::shared_ptr<FeatureTransformation>> transformations) noexcept;
+deglib::distances::Metric get_target_metric(std::span<const std::shared_ptr<FeatureTransformation>> transformations, deglib::distances::Metric input_metric);
+
+/// Build a quantizer pipeline with automatic FastHadamardRotation based on excess kurtosis
+std::vector<std::shared_ptr<FeatureTransformation>> make_quantizer_pipeline(
+    std::span<const float> data, uint32_t dim, deglib::distances::MetricDataType data_type,
+    float quantile = -1.0f, bool use_rerank = false, size_t num_threads = 0, uint64_t rotation_seed = 42
+);
+std::vector<std::shared_ptr<FeatureTransformation>> make_quantizer_pipeline(
+    std::span<const float> data, uint32_t dim, deglib::distances::Metric metric,
+    float quantile = -1.0f, bool use_rerank = false, size_t num_threads = 0, uint64_t rotation_seed = 42
+);
 
 /// Apply sequential transformations to database vectors
 void apply_database(std::span<const std::shared_ptr<FeatureTransformation>> transformations, const float* data, std::byte* out, size_t count);

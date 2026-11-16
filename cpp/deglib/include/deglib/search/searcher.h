@@ -27,16 +27,6 @@
 
 namespace deglib::search {
 
-// Thread-local scratch workspace for query transformations and conversions
-struct QueryWorkspace {
-    std::vector<float> norm_buf;
-    std::vector<float> f32_buf;
-    std::vector<uint16_t> f16_buf;
-    std::vector<std::byte> quant_buf1;
-    std::vector<std::byte> quant_buf2;
-    std::vector<uint32_t> entry_buf;  // reusable entry-point buffer (avoids per-query allocation)
-};
-
 /**
  * Concrete, high-performance stateless search pipeline coordinator.
  *
@@ -49,6 +39,16 @@ struct QueryWorkspace {
  */
 class Searcher {
   private:
+    // Thread-local scratch workspace for query transformations and conversions
+    struct QueryWorkspace {
+        std::vector<float> norm_buf;
+        std::vector<float> f32_buf;
+        std::vector<uint16_t> f16_buf;
+        std::vector<std::byte> quant_buf1;
+        std::vector<std::byte> quant_buf2;
+        std::vector<uint32_t> entry_buf;  // reusable entry-point buffer (avoids per-query allocation)
+    };
+
     const deglib::graph::InternalGraph* graph_ = nullptr;
     std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations_;
     KMeansEntrySelector entry_selector_;

@@ -23,6 +23,9 @@ Feature Transformations
 .. autoclass:: deglib.transformation.L2NormalizeTransform
    :members:
 
+.. autoclass:: deglib.transformation.FastHadamardRotation
+   :members:
+
 .. autofunction:: deglib.transformation.mips_l2_transform
 
 .. autofunction:: deglib.transformation.mips_l2_transform_query
@@ -81,6 +84,10 @@ Quantizer & Transform Factories
 -------------------------------
 
 .. autofunction:: deglib.transformation.make_l2_normalize_transform
+
+.. autofunction:: deglib.transformation.make_fast_hadamard_rotation
+
+.. autofunction:: deglib.transformation.make_quantizer_pipeline
 
 .. autofunction:: deglib.transformation.make_evp_quantizer
 
