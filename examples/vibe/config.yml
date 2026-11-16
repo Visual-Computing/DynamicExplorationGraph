@@ -29,12 +29,16 @@ float:
           k: [16, 24, 32, 48]
           opt_target: ['LowLID', 'StreamingData']
           quant_modes:
-            - quant: uint4-uint4
+            - quant: Uint4
               query_metric: ['L2']
-            - quant: uint7-uint7
+            - quant: Uint7
               query_metric: ['L2']
-            - quant: int8-int8
+            - quant: Uint8
               query_metric: ['L2']
+            - quant: int8
+              query_metric: ['L2']
+            - quant: int8
+              query_metric: ['IP']
         query_args:
           rerank_size_factor: [1.0, 1.25, 1.5, 2.0]
           eps_or_ef: [8, 16, 32, 64, 96, 128, 150, 200, 250, 320, 400, 500, 0.0, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.1, 0.12, 0.15, 0.2, 0.25, 0.3]

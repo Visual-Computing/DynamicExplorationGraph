@@ -4,20 +4,18 @@ import os
 import sys
 import time
 from pathlib import Path
-import numpy as np
 
 import deglib
-
+import numpy as np
 from dataset import (
     VIBE_DATASETS,
-    build_graph_filename,
     ensure_dataset,
     get_default_cache_dir,
     load_vibe_dataset,
     resolve_dataset_key,
 )
-from module import DEG, QG, EVP
-from presets import get_config_grid_presets, get_default_config_preset, load_vibe_config
+from module import DEG, EVP, QG
+from presets import get_config_grid_presets
 
 
 class TeeLogger:
@@ -105,6 +103,8 @@ _VIBE_METRICS = {
     "ip": _ip_distance,
     "normalized": _normalized_cosine_distance,
 }
+
+
 def compute_linear_search_baseline(
     base_vecs: np.ndarray, float_space: deglib.distances.FloatSpace, sample_size: int = 10
 ) -> float:
@@ -124,8 +124,7 @@ def compute_linear_search_baseline(
     for idx in sample_indices:
         dists = float_space.compute_distances(base_vecs[idx], base_vecs)
         d_min = float(np.min(dists))
-        if d_min < min_dist:
-            min_dist = d_min
+        min_dist = min(min_dist, d_min)
 
     elapsed_time = time.perf_counter() - start_time
     time_per_query_sec = elapsed_time / query_count
@@ -245,7 +244,7 @@ def main():
         float_space = deglib.distances.FloatSpace.create(dims, metric_enum)
         instruction_set = float_space.get_instruction().name
 
-        print(f"\n--- System & Distance Config ---")
+        print("\n--- System & Distance Config ---")
         print(f"Metric: {metric_str} ({metric_enum.name}), Dimensions: {dims}")
         print(f"Vector Space Type: FloatSpace ({instruction_set})")
         int8_metric_enum = deglib.Metric.Int8_L2 if is_l2 else deglib.Metric.Int8_InnerProduct
@@ -253,7 +252,9 @@ def main():
         int8_instruction_set = int8_space.get_instruction().name
         print(f"Int8 Feature Space: {int8_space.get_data_size()} bytes ({int8_instruction_set})")
         print(f"Query Dtype: {args.query_dtype.upper() if args.query_dtype else 'FROM CONFIG.YML'}")
-        print(f"Hardware AVX: {deglib.cpu.has_avx2()}, AVX-512: {deglib.cpu.has_avx512()}, AVX2-VNNI: {deglib.cpu.has_avx2_vnni()}, AVX-512-VNNI: {deglib.cpu.has_avx512_vnni()}")
+        print(
+            f"Hardware AVX: {deglib.cpu.has_avx2()}, AVX-512: {deglib.cpu.has_avx512()}, AVX2-VNNI: {deglib.cpu.has_avx2_vnni()}, AVX-512-VNNI: {deglib.cpu.has_avx512_vnni()}"
+        )
 
         # Linear scan baseline
         linear_baseline_us = compute_linear_search_baseline(base_vecs, float_space)
@@ -269,13 +270,12 @@ def main():
 
         configs_to_run = get_config_grid_presets(dataset_key, algorithm_name=alg_filter, config_path=args.config)
 
-
         actual_k = min(cfg_k_target := 100, gt_vecs.shape[1])
         results_series = []
 
-        print(f"\n=======================================================")
+        print("\n=======================================================")
         print(f"Running VIBE ANNS Benchmark on {dataset_key} ({len(configs_to_run)} graph config(s))")
-        print(f"=======================================================")
+        print("=======================================================")
 
         for cfg_idx, cfg in enumerate(configs_to_run):
             k = cfg["k"]
@@ -298,7 +298,7 @@ def main():
                     quant=quant_type,
                     query_metric=query_metric,
                 )
-                query_metric = adapter.query_metric.upper()
+                query_metric = adapter.quant_metric.name.split("_", 1)[1]
                 query_dtype = quant_type
             elif constructor_name == "EVP":
                 adapter = EVP(
@@ -317,7 +317,9 @@ def main():
                 )
                 query_dtype = "float32"
 
-            print(f"\n--- [{cfg_idx + 1}/{len(configs_to_run)}] Processing Algorithm '{alg_name}' ({constructor_name}) ---")
+            print(
+                f"\n--- [{cfg_idx + 1}/{len(configs_to_run)}] Processing Algorithm '{alg_name}' ({constructor_name}) ---"
+            )
             adapter.fit(base_vecs, cache_dir=cache_dir)
 
             feature_instruction = ""
@@ -330,8 +332,8 @@ def main():
                 f"QueryType={query_dtype}{feature_instruction}"
             )
 
-            if adapter.graph is not None:
-                deglib.analysis.analyze_graph(adapter.graph)
+            # if adapter.graph is not None:
+            #     deglib.analysis.analyze_graph(adapter.graph)
 
             # Determine query evaluation parameter grid
             factors_to_eval = cfg.get("rerank_size_factors", [1.0])
@@ -397,7 +399,7 @@ def main():
                         recall = hits / max(total_returned, 1)
                         anns_recalls.append(recall)
                         anns_qps.append(qps)
-                        is_ef = (param_type == "ef")
+                        is_ef = param_type == "ef"
                         param_tag = f"ef={int(round(val))}" if is_ef else f"eps={val:g}"
                         anns_params.append(param_tag)
 
@@ -413,7 +415,9 @@ def main():
                             break
 
                         if recall > 0.999:
-                            print(f"  Reached recall > 0.999 for {param_type.upper()}, stopping further {param_type.upper()} iterations.")
+                            print(
+                                f"  Reached recall > 0.999 for {param_type.upper()}, stopping further {param_type.upper()} iterations."
+                            )
                             break
 
                 results_series.append(

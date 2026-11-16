@@ -111,9 +111,12 @@ def export_interactive_html(
         )
         prune_txt = "MRNG Pruned" if is_pruned else "Unpruned"
         query_dt = str(entry.get("query_dtype", "")).upper()
+        query_metric = str(entry.get("query_metric", "")).strip()
         rerank_txt = f"{r_factor:g}x (FP16)" if r_factor > 1.0 else "None (1.0x)"
 
         query_info = f"Query Dtype: {query_dt}<br>" if query_dt else ""
+        if query_metric:
+            query_info += f"Query Metric: {query_metric}<br>"
         search_params = entry.get("search_params", [])
         hover_texts = []
         for idx, (x, y) in enumerate(zip(recalls, qps)):
@@ -128,7 +131,8 @@ def export_interactive_html(
                 f"<b>QPS:</b> {y:,.1f}"
             )
 
-        trace_dtype_str = f", {query_dt}" if query_dt else ""
+        trace_parts = [p for p in (query_dt, query_metric) if p]
+        trace_dtype_str = f", {' '.join(trace_parts)}" if trace_parts else ""
         trace_name = f"{algo_display} {display_opt} K={k} ({prune_txt}, {rerank_txt}{trace_dtype_str})"
         legend_group = f"{algo_display}_{display_opt}"
 
@@ -604,7 +608,7 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
         re.IGNORECASE,
     )
     re_index_config = re.compile(
-        r"Index Config:\s*K=(\d+),\s*Opt=([a-zA-Z0-9_-]+),(?:\s*QueryMetric=[^,]+,)?(?:\s*Prune=(True|False),)?\s*QueryType=([a-zA-Z0-9_-]+)",
+        r"Index Config:\s*K=(\d+),\s*Opt=([a-zA-Z0-9_-]+),(?:\s*QueryMetric=([^,]+),)?(?:\s*Prune=(True|False),)?\s*QueryType=([a-zA-Z0-9_-]+)",
         re.IGNORECASE,
     )
     re_build_graph = re.compile(
@@ -635,6 +639,7 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
                     "opt_target": current_config["opt_target"],
                     "k": current_config["k"],
                     "query_dtype": current_config.get("query_dtype", file_query_dtype),
+                    "query_metric": current_config.get("query_metric", ""),
                     "prune_non_mrng": current_config["is_pruned"],
                     "rerank_factor": current_rerank_factor,
                     "recalls": list(current_recalls),
@@ -674,14 +679,16 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
                 save_current_series()
                 k = int(m.group(1))
                 opt_target = m.group(2).strip()
-                is_pruned = bool(m.group(3) and m.group(3).lower() == "true")
-                q_dtype = m.group(4).strip().lower()
+                q_metric = m.group(3).strip() if m.group(3) else ""
+                is_pruned = bool(m.group(4) and m.group(4).lower() == "true")
+                q_dtype = m.group(5).strip().lower()
                 current_config = {
                     "algo": current_algo or ("deg-evp" if q_dtype == "evp" else ("deg-qg" if q_dtype == "int8" else "deg")),
                     "k": k,
                     "opt_target": opt_target,
                     "is_pruned": is_pruned,
                     "query_dtype": q_dtype,
+                    "query_metric": q_metric,
                 }
                 current_rerank_factor = 1.0
                 continue

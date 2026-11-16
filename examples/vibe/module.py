@@ -13,59 +13,28 @@ except (ImportError, ValueError):
         pass
 
 
-_METRIC_MAP = {
-    "euclidean": (
-        deglib.Metric.FP32_L2,
-        deglib.Metric.Int8_L2,
-        deglib.Metric.FP16_L2,
-        deglib.Metric.Uint4_L2,
-        deglib.Metric.Int4_L2,
-        deglib.Metric.UInt7_L2,
-    ),
-    "cosine": (
-        deglib.Metric.FP32_InnerProduct,
-        deglib.Metric.Int8_InnerProduct,
-        deglib.Metric.FP16_InnerProduct,
-        deglib.Metric.Uint4_InnerProduct,
-        deglib.Metric.Int4_InnerProduct,
-        deglib.Metric.UInt7_InnerProduct,
-    ),
-    "ip": (
-        deglib.Metric.FP32_InnerProduct,
-        deglib.Metric.Int8_InnerProduct,
-        deglib.Metric.FP16_InnerProduct,
-        deglib.Metric.Uint4_InnerProduct,
-        deglib.Metric.Int4_InnerProduct,
-        deglib.Metric.UInt7_InnerProduct,
-    ),
-    "normalized": (
-        deglib.Metric.FP32_InnerProduct,
-        deglib.Metric.Int8_InnerProduct,
-        deglib.Metric.FP16_InnerProduct,
-        deglib.Metric.Uint4_InnerProduct,
-        deglib.Metric.Int4_InnerProduct,
-        deglib.Metric.UInt7_InnerProduct,
-    ),
+_VIBE_METRIC_KIND = {
+    "euclidean": "L2",
+    "cosine": "InnerProduct",
+    "ip": "InnerProduct",
+    "normalized": "InnerProduct",
+}
+
+_QUANT_PREFIXES = {
+    "int8": "Int8",
+    "uint8": "Uint8",
+    "uint7": "UInt7",
+    "uint4": "Uint4",
+    "int4": "Int4",
+    "fp16": "FP16",
 }
 
 
-_FP16_METRICS = {
-    "l2": deglib.Metric.FP16_L2,
-    "ip": deglib.Metric.FP16_InnerProduct,
-}
-
-_QUANT_METRICS = {
-    "l2": {
-        "int8-int8": deglib.Metric.Int8_L2,
-        "uint7-uint7": deglib.Metric.UInt7_L2,
-        "uint4-uint4": deglib.Metric.Uint4_L2,
-    },
-    "ip": {
-        "int8-int8": deglib.Metric.Int8_InnerProduct,
-        "uint7-uint7": deglib.Metric.UInt7_InnerProduct,
-        "uint4-uint4": deglib.Metric.Uint4_InnerProduct,
-    },
-}
+def _get_metric(data_type: str, metric_kind: str) -> deglib.Metric:
+    try:
+        return deglib.Metric[f"{data_type}_{metric_kind}"]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported deglib metric '{data_type}_{metric_kind}'") from exc
 
 
 def _resolve_presort_cache_path(
@@ -178,14 +147,14 @@ class DEG(BaseANN):
         threads: int = 1,
     ):
         self.metric = metric.lower().strip()
-        if self.metric not in _METRIC_MAP:
-            raise ValueError(f"Unsupported metric '{self.metric}'. Choose from: {list(_METRIC_MAP.keys())}")
+        if self.metric not in _VIBE_METRIC_KIND:
+            raise ValueError(f"Unsupported metric '{self.metric}'. Choose from: {list(_VIBE_METRIC_KIND.keys())}")
 
         self.k = int(k)
         self.opt_target = opt_target
         self.threads = int(threads)
         self.eps_or_ef = 0.1
-        self.metric_enum = _METRIC_MAP[self.metric][0]
+        self.build_metric = _get_metric("FP32", _VIBE_METRIC_KIND[self.metric])
         self.opt_enum = deglib.builder.OptimizationTarget[self.opt_target]
         self.graph = None
         self.searcher = None
@@ -225,7 +194,7 @@ class DEG(BaseANN):
                 print(f"Running FLAS 1D Pre-sorting (threads={self.threads})...", flush=True)
                 sorted_indices = deglib.optimization.presort(
                     X,
-                    metric=self.metric_enum,
+                    metric=self.build_metric,
                     threads=self.threads,
                     show_progress=True,
                 )
@@ -238,7 +207,7 @@ class DEG(BaseANN):
                 data=X[sorted_indices],
                 labels=sorted_indices,
                 edges_per_vertex=self.k,
-                metric=self.metric_enum,
+                metric=self.build_metric,
                 seed=7,
                 optimization_target=self.opt_enum,
                 thread_count=self.threads,
@@ -290,43 +259,44 @@ class QG(BaseANN):
         metric: str,
         k: int = 30,
         opt_target: str = "LowLID",
-        threads: int = 1,
-        quant: str = "int8-int8",
+        threads: int = 8,
+        quant: str = "Int8",
         query_metric: str = "auto",
     ):
         self.metric = metric.lower().strip()
-        if self.metric not in _METRIC_MAP:
-            raise ValueError(f"Unsupported metric '{self.metric}'. Choose from: {list(_METRIC_MAP.keys())}")
+        if self.metric not in _VIBE_METRIC_KIND:
+            raise ValueError(f"Unsupported metric '{self.metric}'. Choose from: {list(_VIBE_METRIC_KIND.keys())}")
 
         self.k = int(k)
         self.opt_target = opt_target
         self.threads = int(threads)
-        self.quant = (quant or "int8-int8").lower().strip()
-        qmetric = (query_metric or "auto").lower().strip()
-        if qmetric == "auto":
-            self.query_metric = "l2" if self.metric == "euclidean" else "ip"
-        elif qmetric == "l2":
-            self.query_metric = "l2"
-        elif qmetric == "innerproduct":
-            self.query_metric = "ip"
+        quant_key = (quant or "Int8").lower().strip()
+        if quant_key not in _QUANT_PREFIXES:
+            raise ValueError(f"Unsupported quant '{quant}'. Choose from: {list(_QUANT_PREFIXES.values())}")
+        self.quant = _QUANT_PREFIXES[quant_key]
+
+        metric_kind = _VIBE_METRIC_KIND[self.metric]
+        qmetric = (query_metric or "auto").strip()
+        if qmetric.lower() == "auto":
+            quant_metric_kind = metric_kind
+        elif qmetric.lower() == "ip":
+            quant_metric_kind = "InnerProduct"
+        elif qmetric.lower() == "l2":
+            quant_metric_kind = "L2"
         else:
-            raise ValueError(f"Unsupported query_metric '{query_metric}'. Choose from: ['L2', 'InnerProduct']")
+            quant_metric_kind = qmetric
+
         self.rerank_size_factor = 1.0
-        self.search_eps = 0.0
-        self.ef = 0
         self.eps_or_ef = 0.0
 
-        self.base_metric, self.int8_metric, self.fp16_metric, self.uint4_metric, self.int4_metric, self.int7_metric = (
-            _METRIC_MAP[self.metric]
-        )
-        self.search_fp16_metric = _FP16_METRICS[self.query_metric]
-        self.target_metric = _QUANT_METRICS[self.query_metric][self.quant]
-        self.normalize_queries = self.query_metric == "ip" or self.metric == "cosine"
+        self.build_metric = _get_metric("FP32", metric_kind)
+        self.rerank_metric = _get_metric("FP16", metric_kind)
+        self.quant_metric = _get_metric(self.quant, quant_metric_kind)
         self.opt_enum = deglib.builder.OptimizationTarget[self.opt_target]
 
         self.graph = None
         self.searcher = None
-        self.quantizer = None
+        self.transformations = []
         self.rerank_space_fp16 = None
 
     def fit(self, X: np.ndarray, cache_dir: Path | None = None):
@@ -336,7 +306,7 @@ class QG(BaseANN):
         X = np.ascontiguousarray(X, dtype=np.float32)
         n_vectors, dims = X.shape
 
-        self.rerank_space_fp16 = deglib.FloatSpace.create(dim=dims, metric=self.search_fp16_metric)
+        self.rerank_space_fp16 = deglib.FloatSpace.create(dim=dims, metric=self.rerank_metric)
 
         cache_file = _resolve_graph_cache_path(
             metric=self.metric,
@@ -368,7 +338,7 @@ class QG(BaseANN):
                 print(f"Running FLAS 1D Pre-sorting (threads={self.threads})...", flush=True)
                 sorted_indices = deglib.optimization.presort(
                     X,
-                    metric=self.base_metric,
+                    metric=self.build_metric,
                     threads=self.threads,
                     show_progress=True,
                 )
@@ -379,18 +349,15 @@ class QG(BaseANN):
             X_graph_order = X[sorted_indices]
 
             # 2. Build graph in FP32
-            graph_data = X_graph_order
-            graph_metric = self.base_metric
-
             print(
                 f"Building DEG graph (K={self.k}, Opt={self.opt_target}, threads={self.threads})...",
                 flush=True,
             )
             graph = deglib.builder.build_from_data(
-                data=graph_data,
+                data=X_graph_order,
                 labels=sorted_indices,
                 edges_per_vertex=self.k,
-                metric=graph_metric,
+                metric=self.build_metric,
                 seed=7,
                 optimization_target=self.opt_enum,
                 thread_count=self.threads,
@@ -401,23 +368,18 @@ class QG(BaseANN):
             graph.save_graph(str(cache_file))
             loaded_graph = graph
 
-        # 3. Finalize ReadOnlyGraph with quantized features using calibrated ScalarQuantizer
+        # 3. Finalize ReadOnlyGraph with calibrated quantizer pipeline (optional FastHadamardRotation + ScalarQuantizer)
         # Both features and rerank_data are derived directly from X_graph_order (row i = vertex i).
-        target_space = deglib.FloatSpace.create(dim=dims, metric=self.target_metric)
-        if self.quant == "uint4-uint4":
-            self.quantizer = deglib.transformation.make_scalar_quantizer_uint4(X)
-            quant_features = self.quantizer.quantize(X_graph_order, num_threads=self.threads)
-        elif self.quant == "uint7-uint7":
-            self.quantizer = deglib.transformation.make_scalar_quantizer_uint7(X)
-            quant_features = self.quantizer.quantize(X_graph_order, num_threads=self.threads)
-        elif self.quant == "int8-int8":
-            self.quantizer = deglib.transformation.make_scalar_quantizer_int8(X)
-            quant_features = self.quantizer.quantize(X_graph_order, num_threads=self.threads)
-        else:
-            raise ValueError(f"Unsupported quant '{self.quant}'")
+        target_space = deglib.FloatSpace.create(dim=dims, metric=self.quant_metric)
+        self.transformations = deglib.make_quantizer_pipeline(
+            X,
+            self.quant_metric,
+            num_threads=self.threads,
+        )
+        quant_features = deglib.transformation.apply_database(self.transformations, X_graph_order)
 
-        # Convert the FP32 graph into a readonly graph that uses the quantized features and quantizer for the graph-based search
-        self.graph = loaded_graph.to_readonly(target_space, quant_features, transformations=[self.quantizer])
+        # Convert the FP32 graph into a readonly graph that uses the quantized features and pipeline for the graph-based search
+        self.graph = loaded_graph.to_readonly(target_space, quant_features, transformations=self.transformations)
 
         # 5. Initialize a Searcher with FP16 Reranker & ScalarQuantizerFP16
         self.rerank_quantizer = deglib.transformation.make_scalar_quantizer_fp16(X)
@@ -428,7 +390,7 @@ class QG(BaseANN):
             rerank_space=self.rerank_space_fp16,
             rerank_data=rerank_features,
             rerank_transformations=[self.rerank_quantizer],
-            normalize_query=self.normalize_queries,
+            normalize_query=(self.metric == "cosine"),
         )
 
         # 6. Full searcher optimization
@@ -454,14 +416,13 @@ class QG(BaseANN):
         )
 
     def __str__(self) -> str:
-        qname = self.quant.upper()
         if self.eps_or_ef >= 1.0:
             return (
-                f"DEG-QG[{qname}](k={self.k}, opt={self.opt_target}, query_metric={self.query_metric.upper()}, "
+                f"DEG-QG[{self.quant_metric.name}](k={self.k}, opt={self.opt_target}, "
                 f"rerank_factor={self.rerank_size_factor}, ef={int(round(self.eps_or_ef))})"
             )
         return (
-            f"DEG-QG[{qname}](k={self.k}, opt={self.opt_target}, query_metric={self.query_metric.upper()}, "
+            f"DEG-QG[{self.quant_metric.name}](k={self.k}, opt={self.opt_target}, "
             f"rerank_factor={self.rerank_size_factor}, eps={self.eps_or_ef})"
         )
 
@@ -479,23 +440,24 @@ class EVP(BaseANN):
         threads: int = 1,
     ):
         self.metric = metric.lower().strip()
-        if self.metric not in _METRIC_MAP:
-            raise ValueError(f"Unsupported metric '{self.metric}'. Choose from: {list(_METRIC_MAP.keys())}")
+        if self.metric not in _VIBE_METRIC_KIND:
+            raise ValueError(f"Unsupported metric '{self.metric}'. Choose from: {list(_VIBE_METRIC_KIND.keys())}")
 
         self.k = int(k)
         self.opt_target = opt_target
         self.threads = int(threads)
         self.rerank_size_factor = 1.0
-        self.search_eps = 0.0
-        self.ef = 0
         self.eps_or_ef = 0.0
 
-        self.base_metric, _, self.fp16_metric = _METRIC_MAP[self.metric]
+        metric_kind = _VIBE_METRIC_KIND[self.metric]
+        self.build_metric = _get_metric("FP32", metric_kind)
+        self.rerank_metric = _get_metric("FP16", metric_kind)
+        self.quant_metric = deglib.Metric.EVP_InnerProduct
         self.opt_enum = deglib.builder.OptimizationTarget[self.opt_target]
 
         self.graph = None
         self.searcher = None
-        self.quantizer = None
+        self.transformations = []
         self.rerank_space_fp16 = None
 
     def fit(self, X: np.ndarray, cache_dir: Path | None = None):
@@ -505,7 +467,7 @@ class EVP(BaseANN):
         X = np.ascontiguousarray(X, dtype=np.float32)
         n_vectors, dims = X.shape
 
-        self.rerank_space_fp16 = deglib.FloatSpace.create(dim=dims, metric=self.fp16_metric)
+        self.rerank_space_fp16 = deglib.FloatSpace.create(dim=dims, metric=self.rerank_metric)
 
         cache_file = _resolve_graph_cache_path(
             metric=self.metric,
@@ -536,7 +498,7 @@ class EVP(BaseANN):
                 print(f"Running FLAS 1D Pre-sorting (threads={self.threads})...", flush=True)
                 sorted_indices = deglib.optimization.presort(
                     X,
-                    metric=self.base_metric,
+                    metric=self.build_metric,
                     threads=self.threads,
                     show_progress=True,
                 )
@@ -551,7 +513,7 @@ class EVP(BaseANN):
                 data=X_graph_order,
                 labels=sorted_indices,
                 edges_per_vertex=self.k,
-                metric=self.base_metric,
+                metric=self.build_metric,
                 seed=7,
                 optimization_target=self.opt_enum,
                 thread_count=self.threads,
@@ -570,7 +532,7 @@ class EVP(BaseANN):
             flush=True,
         )
         evp_features = self.quantizer.quantize(X_graph_order, num_threads=self.threads)
-        target_space = deglib.FloatSpace.create(dim=dims, metric=deglib.Metric.EVP_InnerProduct)
+        target_space = deglib.FloatSpace.create(dim=dims, metric=self.quant_metric)
         # self.graph = loaded_graph.to_readonly(target_space, evp_features, transformations=[self.quantizer])
         self.graph = loaded_graph.to_readonly(target_space, evp_features, transformations=[self.quantizer])
 
