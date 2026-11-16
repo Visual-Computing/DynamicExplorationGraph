@@ -6,6 +6,7 @@
 #include "deglib/distance/fp16_ip.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
@@ -31,15 +32,17 @@ inline void compute_column_mean(std::span<const float> src, uint32_t dim, std::s
     const size_t count = src.size() / dim;
     if (out_mean.size() < dim) throw std::invalid_argument("compute_column_mean: out_mean span too small");
 
+    const size_t step = (count > 65536) ? (count / 65536) : 1;
+    const size_t sample_count = (count + step - 1) / step;
     const size_t actual_threads = (numThreads == 0) ? std::clamp(static_cast<size_t>(std::thread::hardware_concurrency()), size_t{1}, size_t{64}) : numThreads;
     std::vector<double> thread_sums(actual_threads * dim, 0.0);
 
-    deglib::concurrent::parallel_batch_for(static_cast<size_t>(0), count, actual_threads, [&](size_t begin, size_t end, size_t thread_id) {
+    deglib::concurrent::parallel_batch_for(static_cast<size_t>(0), sample_count, actual_threads, [&](size_t begin, size_t end, size_t thread_id) {
         double* my_sum = thread_sums.data() + thread_id * dim;
 #if defined(DEGLIB_X86)
         if (deglib::cpu::has_avx2()) {
-            for (size_t i = begin; i < end; ++i) {
-                const float* vec = src.data() + i * dim;
+            for (size_t s = begin; s < end; ++s) {
+                const float* vec = src.data() + (s * step) * dim;
                 uint32_t d = 0;
                 for (; d + 8 <= dim; d += 8) {
                     __m128 vf1 = _mm_loadu_ps(vec + d);
@@ -58,15 +61,15 @@ inline void compute_column_mean(std::span<const float> src, uint32_t dim, std::s
             return;
         }
 #endif
-        for (size_t i = begin; i < end; ++i) {
-            const float* vec = src.data() + i * dim;
+        for (size_t s = begin; s < end; ++s) {
+            const float* vec = src.data() + (s * step) * dim;
             for (uint32_t d = 0; d < dim; ++d) {
                 my_sum[d] += static_cast<double>(vec[d]);
             }
         }
     }, 16);
 
-    const double inv_count = 1.0 / static_cast<double>(count);
+    const double inv_count = 1.0 / static_cast<double>(sample_count);
     for (uint32_t d = 0; d < dim; ++d) {
         double total = 0.0;
         for (size_t t = 0; t < actual_threads; ++t) {
@@ -82,15 +85,17 @@ inline void compute_column_mean(std::span<const uint16_t> src_fp16, uint32_t dim
     const size_t count = src_fp16.size() / dim;
     if (out_mean.size() < dim) throw std::invalid_argument("compute_column_mean: out_mean span too small");
 
+    const size_t step = (count > 65536) ? (count / 65536) : 1;
+    const size_t sample_count = (count + step - 1) / step;
     const size_t actual_threads = (numThreads == 0) ? std::clamp(static_cast<size_t>(std::thread::hardware_concurrency()), size_t{1}, size_t{64}) : numThreads;
     std::vector<double> thread_sums(actual_threads * dim, 0.0);
 
-    deglib::concurrent::parallel_batch_for(static_cast<size_t>(0), count, actual_threads, [&](size_t begin, size_t end, size_t thread_id) {
+    deglib::concurrent::parallel_batch_for(static_cast<size_t>(0), sample_count, actual_threads, [&](size_t begin, size_t end, size_t thread_id) {
         double* my_sum = thread_sums.data() + thread_id * dim;
 #if defined(DEGLIB_X86)
         if (deglib::cpu::has_avx2()) {
-            for (size_t i = begin; i < end; ++i) {
-                const uint16_t* vec = src_fp16.data() + i * dim;
+            for (size_t s = begin; s < end; ++s) {
+                const uint16_t* vec = src_fp16.data() + (s * step) * dim;
                 uint32_t d = 0;
                 for (; d + 8 <= dim; d += 8) {
                     __m128i vhp = _mm_loadu_si128(reinterpret_cast<const __m128i*>(vec + d));
@@ -111,15 +116,15 @@ inline void compute_column_mean(std::span<const uint16_t> src_fp16, uint32_t dim
             return;
         }
 #endif
-        for (size_t i = begin; i < end; ++i) {
-            const uint16_t* vec = src_fp16.data() + i * dim;
+        for (size_t s = begin; s < end; ++s) {
+            const uint16_t* vec = src_fp16.data() + (s * step) * dim;
             for (uint32_t d = 0; d < dim; ++d) {
                 my_sum[d] += static_cast<double>(deglib::distances::fp16::fp16_to_float(vec[d]));
             }
         }
     }, 16);
 
-    const double inv_count = 1.0 / static_cast<double>(count);
+    const double inv_count = 1.0 / static_cast<double>(sample_count);
     for (uint32_t d = 0; d < dim; ++d) {
         double total = 0.0;
         for (size_t t = 0; t < actual_threads; ++t) {
@@ -292,6 +297,38 @@ quantize_single_into(std::span<const uint16_t> embedding_fp16, uint32_t non_zero
     }
 }
 
+#if defined(DEGLIB_X86)
+DEGLIB_TARGET_AVX2 inline void sub_and_abs_fp16_packed_avx2(
+    const uint16_t* src_fp16,
+    const uint16_t* mean_fp16,
+    uint32_t dim,
+    uint16_t* out_diff_fp16,
+    uint32_t* out_packed_abs
+) {
+    uint32_t d = 0;
+    const __m128i abs_mask = _mm_set1_epi16(0x7fff);
+    const __m256i step_vec = _mm256_set1_epi32(8);
+    __m256i idx_vec = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+    for (; d + 8 <= dim; d += 8) {
+        const __m128i a_h = _mm_loadu_si128(reinterpret_cast<const __m128i*>(src_fp16 + d));
+        const __m128i b_h = _mm_loadu_si128(reinterpret_cast<const __m128i*>(mean_fp16 + d));
+        const __m256 diff_f = _mm256_sub_ps(_mm256_cvtph_ps(a_h), _mm256_cvtph_ps(b_h));
+        const __m128i diff_h = _mm256_cvtps_ph(diff_f, 0);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(out_diff_fp16 + d), diff_h);
+        const __m128i abs_h = _mm_and_si128(diff_h, abs_mask);
+        const __m256i packed = _mm256_or_si256(_mm256_slli_epi32(_mm256_cvtepu16_epi32(abs_h), 16), idx_vec);
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(out_packed_abs + d), packed);
+        idx_vec = _mm256_add_epi32(idx_vec, step_vec);
+    }
+    for (; d < dim; ++d) {
+        const float diff = deglib::distances::fp16::fp16_to_float(src_fp16[d]) - deglib::distances::fp16::fp16_to_float(mean_fp16[d]);
+        const uint16_t h = deglib::distances::fp16::float_to_fp16(diff);
+        out_diff_fp16[d] = h;
+        out_packed_abs[d] = (static_cast<uint32_t>(h & 0x7FFFu) << 16) | d;
+    }
+}
+#endif
+
 inline void quantize_batch_into(
     std::span<const uint16_t> data_fp16,
     uint32_t dim,
@@ -324,40 +361,83 @@ inline void quantize_batch_into(
     deglib::concurrent::parallel_batch_for(
         static_cast<size_t>(0), count, numThreads,
         [data_ptr, dim, non_zeros, mask_bytes, bytes_per_evp, mean_ptr, out_ptr](size_t start, size_t end, size_t) {
-            std::vector<uint16_t> diff(dim);
-            std::vector<std::pair<uint16_t, uint32_t>> abs_vals(dim);
+            std::vector<uint16_t> diff(mean_ptr != nullptr ? dim : 0);
+            if (dim <= 65535) {
+                std::vector<uint32_t> packed_abs(dim);
+#if defined(DEGLIB_X86)
+                const bool use_avx2 = deglib::cpu::has_avx2();
+#endif
+                for (size_t i = start; i < end; ++i) {
+                    const uint16_t* emb = &data_ptr[i * dim];
+                    std::byte* dst = &out_ptr[i * bytes_per_evp];
+                    std::byte* ones_dst = dst;
+                    std::byte* negs_dst = dst + mask_bytes;
+                    std::memset(dst, 0, bytes_per_evp);
 
-            for (size_t i = start; i < end; ++i) {
-                const uint16_t* emb = &data_ptr[i * dim];
-                std::byte* dst = &out_ptr[i * bytes_per_evp];
-                std::byte* ones_dst = dst;
-                std::byte* negs_dst = dst + mask_bytes;
-                std::memset(dst, 0, bytes_per_evp);
+                    if (mean_ptr != nullptr) {
+#if defined(DEGLIB_X86)
+                        if (use_avx2) {
+                            sub_and_abs_fp16_packed_avx2(emb, mean_ptr, dim, diff.data(), packed_abs.data());
+                        } else
+#endif
+                        {
+                            for (uint32_t k = 0; k < dim; ++k) {
+                                const float d = deglib::distances::fp16::fp16_to_float(emb[k]) - deglib::distances::fp16::fp16_to_float(mean_ptr[k]);
+                                const uint16_t h = deglib::distances::fp16::float_to_fp16(d);
+                                diff[k] = h;
+                                packed_abs[k] = (static_cast<uint32_t>(h & 0x7FFFu) << 16) | k;
+                            }
+                        }
+                    } else {
+                        for (uint32_t k = 0; k < dim; ++k) {
+                            packed_abs[k] = (static_cast<uint32_t>(emb[k] & 0x7FFFu) << 16) | k;
+                        }
+                    }
 
-                if (mean_ptr != nullptr) {
-                    deglib::distances::fp16::sub_and_abs_fp16(emb, mean_ptr, dim, diff.data(), abs_vals.data());
-                } else {
-                    for (uint32_t k = 0; k < dim; ++k) {
-                        uint16_t val = emb[k];
-                        diff[k] = val;
-                        abs_vals[k] = {static_cast<uint16_t>(val & 0x7FFFu), k};
+                    std::nth_element(packed_abs.begin(), packed_abs.begin() + (dim - non_zeros), packed_abs.end());
+
+                    for (uint32_t j = dim - non_zeros; j < dim; ++j) {
+                        const uint32_t bit_idx = packed_abs[j] & 0xFFFFu;
+                        const uint16_t val = (mean_ptr != nullptr) ? diff[bit_idx] : emb[bit_idx];
+                        if ((val & 0x7FFFu) != 0) {
+                            if ((val & 0x8000u) == 0) {
+                                ones_dst[bit_idx >> 3] |= static_cast<std::byte>(1 << (bit_idx & 7));
+                            } else {
+                                negs_dst[bit_idx >> 3] |= static_cast<std::byte>(1 << (bit_idx & 7));
+                            }
+                        }
                     }
                 }
+            } else {
+                std::vector<std::pair<uint16_t, uint32_t>> abs_vals(dim);
+                for (size_t i = start; i < end; ++i) {
+                    const uint16_t* emb = &data_ptr[i * dim];
+                    std::byte* dst = &out_ptr[i * bytes_per_evp];
+                    std::byte* ones_dst = dst;
+                    std::byte* negs_dst = dst + mask_bytes;
+                    std::memset(dst, 0, bytes_per_evp);
 
-                std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(), [](const auto& a, const auto& b) {
-                    return a.first != b.first ? a.first < b.first : a.second < b.second;
-                });
+                    if (mean_ptr != nullptr) {
+                        deglib::distances::fp16::sub_and_abs_fp16(emb, mean_ptr, dim, diff.data(), abs_vals.data());
+                    } else {
+                        for (uint32_t k = 0; k < dim; ++k) {
+                            abs_vals[k] = {static_cast<uint16_t>(emb[k] & 0x7FFFu), k};
+                        }
+                    }
 
-                for (uint32_t j = dim - non_zeros; j < dim; ++j) {
-                    const uint32_t bit_idx = abs_vals[j].second;
-                    const uint16_t val = diff[bit_idx];
-                    const bool is_zero = (val & 0x7FFFu) == 0;
-                    if (!is_zero) {
-                        const bool is_neg = (val & 0x8000u) != 0;
-                        if (!is_neg) {
-                            ones_dst[bit_idx >> 3] |= static_cast<std::byte>(1 << (bit_idx & 7));
-                        } else {
-                            negs_dst[bit_idx >> 3] |= static_cast<std::byte>(1 << (bit_idx & 7));
+                    std::nth_element(abs_vals.begin(), abs_vals.begin() + (dim - non_zeros), abs_vals.end(), [](const auto& a, const auto& b) {
+                        return a.first != b.first ? a.first < b.first : a.second < b.second;
+                    });
+
+                    for (uint32_t j = dim - non_zeros; j < dim; ++j) {
+                        const uint32_t bit_idx = abs_vals[j].second;
+                        const uint16_t val = (mean_ptr != nullptr) ? diff[bit_idx] : emb[bit_idx];
+                        if ((val & 0x7FFFu) != 0) {
+                            if ((val & 0x8000u) == 0) {
+                                ones_dst[bit_idx >> 3] |= static_cast<std::byte>(1 << (bit_idx & 7));
+                            } else {
+                                negs_dst[bit_idx >> 3] |= static_cast<std::byte>(1 << (bit_idx & 7));
+                            }
                         }
                     }
                 }
@@ -365,6 +445,105 @@ inline void quantize_batch_into(
         },
         8
     );
+}
+
+inline std::set<uint32_t> build_evp_nz_candidates(uint32_t dim) {
+    const std::vector<uint32_t> raw_candidates = {
+        8, 16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512, 640, 768, 1024, 1352,
+        static_cast<uint32_t>(dim * 0.01f), static_cast<uint32_t>(dim * 0.02f), static_cast<uint32_t>(dim * 0.05f),
+        static_cast<uint32_t>(dim * 0.10f), static_cast<uint32_t>(dim * 0.25f), static_cast<uint32_t>(dim * 0.50f),
+        static_cast<uint32_t>(dim * 0.66f)
+    };
+    std::set<uint32_t> sorted_unique;
+    for (uint32_t c : raw_candidates) {
+        if (c >= 4 && c < dim) sorted_unique.insert(c);
+    }
+    if (sorted_unique.empty()) {
+        sorted_unique.insert(std::max(uint32_t{1}, std::min(dim - 1, uint32_t{16})));
+    }
+    return sorted_unique;
+}
+
+template <typename VecT>
+inline uint32_t select_best_evp_non_zeros(
+    std::span<const VecT> calib_base,
+    std::span<const VecT> calib_queries,
+    uint32_t dim,
+    std::span<const VecT> mean,
+    const std::set<uint32_t>& sorted_unique,
+    const std::vector<std::vector<uint32_t>>& gt_top_indices,
+    size_t top_k,
+    size_t numThreads
+) {
+    const size_t calib_base_count = calib_base.size() / dim;
+    const size_t calib_query_count = calib_queries.size() / dim;
+    const size_t evp_stride = 2 * ((dim + 7) / 8);
+    std::vector<std::byte> base_evp(calib_base_count * evp_stride);
+    std::vector<std::byte> query_evp(calib_query_count * evp_stride);
+
+    const auto evp_dist = deglib::distances::evp_ip::select_dist(dim);
+    uint32_t best_nz = *sorted_unique.begin();
+    float best_overlap = -1.0f;
+
+    std::visit(
+        [&](const auto& dist_obj) {
+            for (uint32_t nz : sorted_unique) {
+                quantize_batch_into(calib_base, dim, nz, base_evp, numThreads, mean);
+                if (calib_queries.data() == calib_base.data()) {
+                    std::memcpy(query_evp.data(), base_evp.data(), calib_query_count * evp_stride);
+                } else {
+                    quantize_batch_into(calib_queries, dim, nz, query_evp, numThreads, mean);
+                }
+
+                std::atomic<size_t> total_overlap{0};
+                deglib::concurrent::parallel_batch_for(
+                    static_cast<size_t>(0), calib_query_count, numThreads,
+                    [&](size_t q_begin, size_t q_end, size_t) {
+                        std::vector<std::pair<float, uint32_t>> evp_row(calib_base_count);
+                        std::vector<uint32_t> evp_top(top_k);
+                        size_t local_overlap = 0;
+
+                        for (size_t q = q_begin; q < q_end; ++q) {
+                            const std::byte* q_ptr = query_evp.data() + q * evp_stride;
+                            for (size_t b = 0; b < calib_base_count; ++b) {
+                                const std::byte* b_ptr = base_evp.data() + b * evp_stride;
+                                evp_row[b] = {dist_obj.compare(q_ptr, b_ptr, &dim), static_cast<uint32_t>(b)};
+                            }
+                            std::nth_element(evp_row.begin(), evp_row.begin() + top_k, evp_row.end(), [](const auto& a, const auto& b) {
+                                return a.first < b.first;
+                            });
+                            for (size_t k = 0; k < top_k; ++k) evp_top[k] = evp_row[k].second;
+                            std::sort(evp_top.begin(), evp_top.end());
+
+                            size_t i = 0, j = 0;
+                            const auto& gt_row = gt_top_indices[q];
+                            while (i < top_k && j < top_k) {
+                                if (evp_top[i] == gt_row[j]) {
+                                    ++local_overlap;
+                                    ++i;
+                                    ++j;
+                                } else if (evp_top[i] < gt_row[j]) {
+                                    ++i;
+                                } else {
+                                    ++j;
+                                }
+                            }
+                        }
+                        total_overlap.fetch_add(local_overlap, std::memory_order_relaxed);
+                    }
+                );
+
+                const float avg_overlap = static_cast<float>(total_overlap.load(std::memory_order_relaxed)) / static_cast<float>(calib_query_count * top_k);
+                if (avg_overlap > best_overlap) {
+                    best_overlap = avg_overlap;
+                    best_nz = nz;
+                }
+            }
+        },
+        evp_dist
+    );
+
+    return best_nz;
 }
 
 /**
@@ -382,42 +561,7 @@ inline uint32_t calibrate_best_non_zeros(std::span<const float> src, uint32_t di
     std::span<const float> calib_queries =
         (available_q >= 50) ? src.subspan(calib_base_count * dim, calib_query_count * dim) : calib_base.subspan(0, calib_query_count * dim);
 
-    // Build candidate list of non_zeros values to evaluate
-    std::vector<uint32_t> raw_candidates = {
-        8,
-        16,
-        24,
-        32,
-        48,
-        64,
-        96,
-        128,
-        192,
-        256,
-        384,
-        512,
-        640,
-        768,
-        1024,
-        1352,
-        static_cast<uint32_t>(dim * 0.01f),
-        static_cast<uint32_t>(dim * 0.02f),
-        static_cast<uint32_t>(dim * 0.05f),
-        static_cast<uint32_t>(dim * 0.10f),
-        static_cast<uint32_t>(dim * 0.25f),
-        static_cast<uint32_t>(dim * 0.50f),
-        static_cast<uint32_t>(dim * 0.66f)
-    };
-    std::set<uint32_t> sorted_unique;
-    for (uint32_t c : raw_candidates) {
-        if (c >= 4 && c < dim) {
-            sorted_unique.insert(c);
-        }
-    }
-    if (sorted_unique.empty()) {
-        sorted_unique.insert(std::max(uint32_t{1}, std::min(dim - 1, uint32_t{16})));
-    }
-
+    const auto sorted_unique = build_evp_nz_candidates(dim);
     const size_t top_k = std::min(calib_base_count, size_t{100});
 
     // 1. Compute exact FP32 inner product matrix: calib_queries (Q) x calib_base (N)
@@ -429,76 +573,18 @@ inline uint32_t calibrate_best_non_zeros(std::span<const float> src, uint32_t di
             for (size_t b = 0; b < calib_base_count; ++b) {
                 const float* b_vec = calib_base.data() + b * dim;
                 float dot = 0.0f;
-                for (uint32_t d = 0; d < dim; ++d) {
-                    dot += q_vec[d] * b_vec[d];
-                }
+                for (uint32_t d = 0; d < dim; ++d) dot += q_vec[d] * b_vec[d];
                 sim_row[b] = {dot, static_cast<uint32_t>(b)};
             }
             std::nth_element(sim_row.begin(), sim_row.begin() + top_k, sim_row.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
             gt_top_indices[q].resize(top_k);
-            for (size_t k = 0; k < top_k; ++k) {
-                gt_top_indices[q][k] = sim_row[k].second;
-            }
+            for (size_t k = 0; k < top_k; ++k) gt_top_indices[q][k] = sim_row[k].second;
             std::sort(gt_top_indices[q].begin(), gt_top_indices[q].end());
         }
     }
 
-    // 2. Evaluate each nz candidate using bitwise popcount inner product
-    const size_t evp_stride = 2 * ((dim + 7) / 8);
-    std::vector<std::byte> base_evp(calib_base_count * evp_stride);
-    std::vector<std::byte> query_evp(calib_query_count * evp_stride);
-
-    uint32_t best_nz = *sorted_unique.begin();
-    float best_overlap = -1.0f;
-
-    std::vector<std::pair<float, uint32_t>> evp_row(calib_base_count);
-    std::vector<uint32_t> evp_top(top_k);
-
-    for (uint32_t nz : sorted_unique) {
-        quantize_batch_into(calib_base, dim, nz, base_evp, numThreads, mean);
-        if (calib_queries.data() == calib_base.data()) {
-            std::memcpy(query_evp.data(), base_evp.data(), calib_query_count * evp_stride);
-        } else {
-            quantize_batch_into(calib_queries, dim, nz, query_evp, numThreads, mean);
-        }
-
-        size_t total_overlap = 0;
-        for (size_t q = 0; q < calib_query_count; ++q) {
-            const std::byte* q_ptr = query_evp.data() + q * evp_stride;
-            for (size_t b = 0; b < calib_base_count; ++b) {
-                const std::byte* b_ptr = base_evp.data() + b * evp_stride;
-                const float dist = deglib::distances::evp_ip::EvpInnerProduct::compare(q_ptr, b_ptr, &dim);
-                evp_row[b] = {dist, static_cast<uint32_t>(b)};
-            }
-            std::nth_element(evp_row.begin(), evp_row.begin() + top_k, evp_row.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-            for (size_t k = 0; k < top_k; ++k) {
-                evp_top[k] = evp_row[k].second;
-            }
-            std::sort(evp_top.begin(), evp_top.end());
-
-            size_t i = 0, j = 0;
-            const auto& gt_row = gt_top_indices[q];
-            while (i < top_k && j < top_k) {
-                if (evp_top[i] == gt_row[j]) {
-                    ++total_overlap;
-                    ++i;
-                    ++j;
-                } else if (evp_top[i] < gt_row[j]) {
-                    ++i;
-                } else {
-                    ++j;
-                }
-            }
-        }
-
-        const float avg_overlap = static_cast<float>(total_overlap) / static_cast<float>(calib_query_count * top_k);
-        if (avg_overlap > best_overlap) {
-            best_overlap = avg_overlap;
-            best_nz = nz;
-        }
-    }
-
-    return best_nz;
+    // 2. Evaluate each nz candidate using SIMD bitwise popcount inner product
+    return select_best_evp_non_zeros(calib_base, calib_queries, dim, mean, sorted_unique, gt_top_indices, top_k, numThreads);
 }
 
 /**
@@ -516,42 +602,7 @@ inline uint32_t calibrate_best_non_zeros(std::span<const uint16_t> src_fp16, uin
     std::span<const uint16_t> calib_queries =
         (available_q >= 50) ? src_fp16.subspan(calib_base_count * dim, calib_query_count * dim) : calib_base.subspan(0, calib_query_count * dim);
 
-    // Build candidate list of non_zeros values to evaluate
-    std::vector<uint32_t> raw_candidates = {
-        8,
-        16,
-        24,
-        32,
-        48,
-        64,
-        96,
-        128,
-        192,
-        256,
-        384,
-        512,
-        640,
-        768,
-        1024,
-        1352,
-        static_cast<uint32_t>(dim * 0.01f),
-        static_cast<uint32_t>(dim * 0.02f),
-        static_cast<uint32_t>(dim * 0.05f),
-        static_cast<uint32_t>(dim * 0.10f),
-        static_cast<uint32_t>(dim * 0.25f),
-        static_cast<uint32_t>(dim * 0.50f),
-        static_cast<uint32_t>(dim * 0.66f)
-    };
-    std::set<uint32_t> sorted_unique;
-    for (uint32_t c : raw_candidates) {
-        if (c >= 4 && c < dim) {
-            sorted_unique.insert(c);
-        }
-    }
-    if (sorted_unique.empty()) {
-        sorted_unique.insert(std::max(uint32_t{1}, std::min(dim - 1, uint32_t{16})));
-    }
-
+    const auto sorted_unique = build_evp_nz_candidates(dim);
     const size_t top_k = std::min(calib_base_count, size_t{100});
     auto dist_func = deglib::distances::fp16_ip::select_dist(dim);
     const size_t dim_size_t = dim;
@@ -569,69 +620,13 @@ inline uint32_t calibrate_best_non_zeros(std::span<const uint16_t> src_fp16, uin
             }
             std::nth_element(sim_row.begin(), sim_row.begin() + top_k, sim_row.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
             gt_top_indices[q].resize(top_k);
-            for (size_t k = 0; k < top_k; ++k) {
-                gt_top_indices[q][k] = sim_row[k].second;
-            }
+            for (size_t k = 0; k < top_k; ++k) gt_top_indices[q][k] = sim_row[k].second;
             std::sort(gt_top_indices[q].begin(), gt_top_indices[q].end());
         }
     }
 
-    // 2. Evaluate each nz candidate using bitwise popcount inner product
-    const size_t evp_stride = 2 * ((dim + 7) / 8);
-    std::vector<std::byte> base_evp(calib_base_count * evp_stride);
-    std::vector<std::byte> query_evp(calib_query_count * evp_stride);
-
-    uint32_t best_nz = *sorted_unique.begin();
-    float best_overlap = -1.0f;
-
-    std::vector<std::pair<float, uint32_t>> evp_row(calib_base_count);
-    std::vector<uint32_t> evp_top(top_k);
-
-    for (uint32_t nz : sorted_unique) {
-        quantize_batch_into(calib_base, dim, nz, base_evp, numThreads, mean_fp16);
-        if (calib_queries.data() == calib_base.data()) {
-            std::memcpy(query_evp.data(), base_evp.data(), calib_query_count * evp_stride);
-        } else {
-            quantize_batch_into(calib_queries, dim, nz, query_evp, numThreads, mean_fp16);
-        }
-
-        size_t total_overlap = 0;
-        for (size_t q = 0; q < calib_query_count; ++q) {
-            const std::byte* q_ptr = query_evp.data() + q * evp_stride;
-            for (size_t b = 0; b < calib_base_count; ++b) {
-                const std::byte* b_ptr = base_evp.data() + b * evp_stride;
-                const float dist = deglib::distances::evp_ip::EvpInnerProduct::compare(q_ptr, b_ptr, &dim);
-                evp_row[b] = {dist, static_cast<uint32_t>(b)};
-            }
-            std::nth_element(evp_row.begin(), evp_row.begin() + top_k, evp_row.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-            for (size_t k = 0; k < top_k; ++k) {
-                evp_top[k] = evp_row[k].second;
-            }
-            std::sort(evp_top.begin(), evp_top.end());
-
-            size_t i = 0, j = 0;
-            const auto& gt_row = gt_top_indices[q];
-            while (i < top_k && j < top_k) {
-                if (evp_top[i] == gt_row[j]) {
-                    ++total_overlap;
-                    ++i;
-                    ++j;
-                } else if (evp_top[i] < gt_row[j]) {
-                    ++i;
-                } else {
-                    ++j;
-                }
-            }
-        }
-
-        const float avg_overlap = static_cast<float>(total_overlap) / static_cast<float>(calib_query_count * top_k);
-        if (avg_overlap > best_overlap) {
-            best_overlap = avg_overlap;
-            best_nz = nz;
-        }
-    }
-
-    return best_nz;
+    // 2. Evaluate each nz candidate using SIMD bitwise popcount inner product
+    return select_best_evp_non_zeros(calib_base, calib_queries, dim, mean_fp16, sorted_unique, gt_top_indices, top_k, numThreads);
 }
 
 }  // namespace detail
