@@ -56,14 +56,21 @@ class Searcher {
     bool normalize_query_ = false;
 
     /**
-     * Drains a ResultSet into destination buffers.
+     * Drains a ResultSet into destination buffers, mapping internal IDs to external labels in a single pass.
      */
-    static inline uint32_t
-    drain_heap_into(deglib::graph::ResultSet& heap, uint32_t k, uint32_t* out_indices, float* out_distances, bool return_distances, bool unsorted) {
+    static inline uint32_t drain_heap_into(
+        const deglib::graph::InternalGraph& graph,
+        deglib::graph::ResultSet& heap,
+        uint32_t k,
+        uint32_t* out_indices,
+        float* out_distances,
+        bool return_distances,
+        bool unsorted
+    ) {
         const size_t top_n = std::min<size_t>(k, heap.size());
         if (unsorted) {
             for (size_t i = 0; i < top_n; ++i) {
-                out_indices[i] = heap[i].getIdentifier();
+                out_indices[i] = graph.getExternalLabel(heap[i].getIdentifier());
             }
             if (return_distances && out_distances) {
                 for (size_t i = 0; i < top_n; ++i) {
@@ -74,13 +81,13 @@ class Searcher {
             if (return_distances && out_distances) {
                 for (size_t i = top_n; i > 0; --i) {
                     const auto next = heap.top();
-                    out_indices[i - 1] = next.getIdentifier();
+                    out_indices[i - 1] = graph.getExternalLabel(next.getIdentifier());
                     out_distances[i - 1] = next.getDistance();
                     heap.pop();
                 }
             } else {
                 for (size_t i = top_n; i > 0; --i) {
-                    out_indices[i - 1] = heap.top().getIdentifier();
+                    out_indices[i - 1] = graph.getExternalLabel(heap.top().getIdentifier());
                     heap.pop();
                 }
             }
@@ -92,12 +99,17 @@ class Searcher {
      * Prepares a float32 query for graph traversal by running any attached transformations
      * or converting to graph-native format.
      */
-    inline const std::byte* prepare_query(const float* query, uint32_t dim, QueryWorkspace& ws) const {
+    inline const std::byte* prepare_query(const float* query, uint32_t dim, QueryWorkspace& ws, std::span<std::byte> stack_buf = {}) const {
         if (transformations_.empty()) {
             const auto& space = graph_->getFeatureSpace();
             if (space.metric().get_data_type() == deglib::distances::MetricDataType::FP32) {
                 return reinterpret_cast<const std::byte*>(query);
             } else if (space.metric().get_data_type() == deglib::distances::MetricDataType::FP16) {
+                const size_t need_bytes = static_cast<size_t>(dim) * sizeof(uint16_t);
+                if (need_bytes <= stack_buf.size()) {
+                    deglib::distances::fp16::floats_to_fp16(query, reinterpret_cast<uint16_t*>(stack_buf.data()), dim);
+                    return stack_buf.data();
+                }
                 ws.f16_buf.resize(dim);
                 deglib::distances::fp16::floats_to_fp16(query, ws.f16_buf.data(), dim);
                 return reinterpret_cast<const std::byte*>(ws.f16_buf.data());
@@ -113,9 +125,15 @@ class Searcher {
             const size_t cur_dim = trans->input_dim();
             std::span<const float> in_span(current_f32, cur_dim);
             if (is_last) {
-                ws.quant_buf1.resize(out_bytes);
-                trans->transform_query(in_span, std::span<std::byte>(ws.quant_buf1.data(), out_bytes));
-                return ws.quant_buf1.data();
+                std::byte* dst = nullptr;
+                if (out_bytes <= stack_buf.size()) {
+                    dst = stack_buf.data();
+                } else {
+                    ws.quant_buf1.resize(out_bytes);
+                    dst = ws.quant_buf1.data();
+                }
+                trans->transform_query(in_span, std::span<std::byte>(dst, out_bytes));
+                return dst;
             } else {
                 ws.quant_buf2.resize(out_bytes);
                 trans->transform_query(in_span, std::span<std::byte>(ws.quant_buf2.data(), out_bytes));
@@ -129,7 +147,7 @@ class Searcher {
     /**
      * Prepares a float16 query for graph traversal.
      */
-    inline const std::byte* prepare_query(const uint16_t* query, uint32_t dim, QueryWorkspace& ws) const {
+    inline const std::byte* prepare_query(const uint16_t* query, uint32_t dim, QueryWorkspace& ws, std::span<std::byte> stack_buf = {}) const {
         if (transformations_.empty()) {
             const auto& space = graph_->getFeatureSpace();
             if (space.metric().get_data_type() == deglib::distances::MetricDataType::FP16) {
@@ -143,7 +161,7 @@ class Searcher {
 
         ws.f32_buf.resize(dim);
         deglib::distances::fp16::fp16_to_floats(query, ws.f32_buf.data(), dim);
-        return prepare_query(ws.f32_buf.data(), dim, ws);
+        return prepare_query(ws.f32_buf.data(), dim, ws, stack_buf);
     }
 
     /**
@@ -178,7 +196,8 @@ class Searcher {
             }
         }
 
-        const std::byte* graph_query_ptr = prepare_query(effective_query, dim, ws);
+        alignas(64) std::byte stack_qbuf[512];
+        const std::byte* graph_query_ptr = prepare_query(effective_query, dim, ws, stack_qbuf);
         const auto query_span = std::span<const std::byte>(graph_query_ptr, graph_->getFeatureSpace().get_data_size());
 
         // Rerank: flat top-k against full-precision features (zero per-query allocation).
@@ -189,13 +208,12 @@ class Searcher {
             );
         };
 
-        // Select entry point: query routing medoid or static graph anchor (reuse ws buffer, no per-query alloc).
-        auto& entry_vertices = ws.entry_buf;
-        if (entry_selector_.has_entries()) {
-            entry_selector_.top_entries(query_span, 2, entry_vertices);
-        } else {
-            entry_vertices = graph_->getEntryVertexIndices();
-        }
+        // Select entry point: query routing medoid or direct reference to static graph anchor (zero copy).
+        const auto& entry_vertices = entry_selector_.has_entries() ? [&]() -> const std::vector<uint32_t>& {
+            entry_selector_.top_entries(query_span, 2, ws.entry_buf);
+            return ws.entry_buf;
+        }()
+                                                                   : graph_->getEntryVertexIndices();
 
         const uint32_t num_candidates = reranker_.has_value() ? static_cast<uint32_t>(std::ceil(static_cast<float>(k) * std::max(1.0f, rerank_factor))) : k;
         const bool should_rerank = reranker_.has_value() && (num_candidates > k);
@@ -255,11 +273,7 @@ class Searcher {
                 }
                 return found;
             } else {
-                uint32_t found = drain_heap_into(heap_res, k, out_indices, out_distances, return_distances, unsorted);
-                for (size_t i = 0; i < found; ++i) {
-                    out_indices[i] = graph_->getExternalLabel(out_indices[i]);
-                }
-                return found;
+                return drain_heap_into(*graph_, heap_res, k, out_indices, out_distances, return_distances, unsorted);
             }
         }
     }
