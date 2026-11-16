@@ -379,15 +379,19 @@ class Searcher {
         if (!graph_ || n_queries == 0 || k == 0 || queries == nullptr || out_indices == nullptr) return;
         const uint32_t dim = graph_->getFeatureSpace().dim();
 
-        deglib::concurrent::parallel_batch_for(0, n_queries, threads, [&](size_t begin, size_t end, size_t) {
-            thread_local QueryWorkspace ws;
-            for (size_t q = begin; q < end; ++q) {
-                const float* q_ptr = queries + q * dim;
-                uint32_t* idx_ptr = out_indices + q * k;
-                float* dist_ptr = out_distances ? (out_distances + q * k) : nullptr;
-                execute_search_single(q_ptr, k, eps, 0, false, rerank_factor, idx_ptr, dist_ptr, out_distances != nullptr, unsorted, ws);
-            }
-        });
+        deglib::concurrent::parallel_batch_for(
+            0, n_queries, threads,
+            [&](size_t begin, size_t end, size_t) {
+                thread_local QueryWorkspace ws;
+                for (size_t q = begin; q < end; ++q) {
+                    const float* q_ptr = queries + q * dim;
+                    uint32_t* idx_ptr = out_indices + q * k;
+                    float* dist_ptr = out_distances ? (out_distances + q * k) : nullptr;
+                    execute_search_single(q_ptr, k, eps, 0, false, rerank_factor, idx_ptr, dist_ptr, out_distances != nullptr, unsorted, ws);
+                }
+            },
+            16
+        );
     }
 
     void search_batch_f16(
@@ -404,15 +408,19 @@ class Searcher {
         if (!graph_ || n_queries == 0 || k == 0 || queries == nullptr || out_indices == nullptr) return;
         const uint32_t dim = graph_->getFeatureSpace().dim();
 
-        deglib::concurrent::parallel_batch_for(0, n_queries, threads, [&](size_t begin, size_t end, size_t) {
-            thread_local QueryWorkspace ws;
-            for (size_t q = begin; q < end; ++q) {
-                const uint16_t* q_ptr = queries + q * dim;
-                uint32_t* idx_ptr = out_indices + q * k;
-                float* dist_ptr = out_distances ? (out_distances + q * k) : nullptr;
-                execute_search_single(q_ptr, k, eps, 0, false, rerank_factor, idx_ptr, dist_ptr, out_distances != nullptr, unsorted, ws);
-            }
-        });
+        deglib::concurrent::parallel_batch_for(
+            0, n_queries, threads,
+            [&](size_t begin, size_t end, size_t) {
+                thread_local QueryWorkspace ws;
+                for (size_t q = begin; q < end; ++q) {
+                    const uint16_t* q_ptr = queries + q * dim;
+                    uint32_t* idx_ptr = out_indices + q * k;
+                    float* dist_ptr = out_distances ? (out_distances + q * k) : nullptr;
+                    execute_search_single(q_ptr, k, eps, 0, false, rerank_factor, idx_ptr, dist_ptr, out_distances != nullptr, unsorted, ws);
+                }
+            },
+            16
+        );
     }
 
     void search_batch_ef_f32(
@@ -429,15 +437,19 @@ class Searcher {
         if (!graph_ || n_queries == 0 || k == 0 || queries == nullptr || out_indices == nullptr) return;
         const uint32_t dim = graph_->getFeatureSpace().dim();
 
-        deglib::concurrent::parallel_batch_for(0, n_queries, threads, [&](size_t begin, size_t end, size_t) {
-            thread_local QueryWorkspace ws;
-            for (size_t q = begin; q < end; ++q) {
-                const float* q_ptr = queries + q * dim;
-                uint32_t* idx_ptr = out_indices + q * k;
-                float* dist_ptr = out_distances ? (out_distances + q * k) : nullptr;
-                execute_search_single(q_ptr, k, 0.0f, ef, true, rerank_factor, idx_ptr, dist_ptr, out_distances != nullptr, unsorted, ws);
-            }
-        });
+        deglib::concurrent::parallel_batch_for(
+            0, n_queries, threads,
+            [&](size_t begin, size_t end, size_t) {
+                thread_local QueryWorkspace ws;
+                for (size_t q = begin; q < end; ++q) {
+                    const float* q_ptr = queries + q * dim;
+                    uint32_t* idx_ptr = out_indices + q * k;
+                    float* dist_ptr = out_distances ? (out_distances + q * k) : nullptr;
+                    execute_search_single(q_ptr, k, 0.0f, ef, true, rerank_factor, idx_ptr, dist_ptr, out_distances != nullptr, unsorted, ws);
+                }
+            },
+            16
+        );
     }
 
     void search_batch_ef_f16(
@@ -454,15 +466,19 @@ class Searcher {
         if (!graph_ || n_queries == 0 || k == 0 || queries == nullptr || out_indices == nullptr) return;
         const uint32_t dim = graph_->getFeatureSpace().dim();
 
-        deglib::concurrent::parallel_batch_for(0, n_queries, threads, [&](size_t begin, size_t end, size_t) {
-            thread_local QueryWorkspace ws;
-            for (size_t q = begin; q < end; ++q) {
-                const uint16_t* q_ptr = queries + q * dim;
-                uint32_t* idx_ptr = out_indices + q * k;
-                float* dist_ptr = out_distances ? (out_distances + q * k) : nullptr;
-                execute_search_single(q_ptr, k, 0.0f, ef, true, rerank_factor, idx_ptr, dist_ptr, out_distances != nullptr, unsorted, ws);
-            }
-        });
+        deglib::concurrent::parallel_batch_for(
+            0, n_queries, threads,
+            [&](size_t begin, size_t end, size_t) {
+                thread_local QueryWorkspace ws;
+                for (size_t q = begin; q < end; ++q) {
+                    const uint16_t* q_ptr = queries + q * dim;
+                    uint32_t* idx_ptr = out_indices + q * k;
+                    float* dist_ptr = out_distances ? (out_distances + q * k) : nullptr;
+                    execute_search_single(q_ptr, k, 0.0f, ef, true, rerank_factor, idx_ptr, dist_ptr, out_distances != nullptr, unsorted, ws);
+                }
+            },
+            16
+        );
     }
 
     // --- Modern C++20 API with eps_or_ef ---
@@ -647,9 +663,15 @@ class Searcher {
                     }
                 };
 
-                deglib::concurrent::parallel_for(0, actual_sample, threads, [&](size_t i, size_t) {
-                    decode_row(get_raw_ptr(candidate_ids[i]), decoded.data() + i * dim);
-                });
+                deglib::concurrent::parallel_batch_for(
+                    0, actual_sample, threads,
+                    [&](size_t begin, size_t end, size_t) {
+                        for (size_t i = begin; i < end; ++i) {
+                            decode_row(get_raw_ptr(candidate_ids[i]), decoded.data() + i * dim);
+                        }
+                    },
+                    16
+                );
 
                 for (size_t i = 0; i < actual_sample; ++i) {
                     rows[i] = decoded.data() + i * dim;

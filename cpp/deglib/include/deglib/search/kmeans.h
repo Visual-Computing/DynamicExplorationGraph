@@ -86,19 +86,25 @@ kmeans_medoids(std::span<const float* const> rows, uint32_t dim, DistFn&& distan
     std::vector<uint32_t> counts(n_clusters);
     for (uint32_t iter = 0; iter < n_iter; ++iter) {
         // Assignment: parallel over rows.
-        deglib::concurrent::parallel_for(0, rows.size(), threads, [&](size_t i, size_t) {
-            const float* vec = rows[i];
-            float best_dist = std::numeric_limits<float>::max();
-            uint32_t best_c = 0;
-            for (uint32_t c = 0; c < n_clusters; ++c) {
-                const float dist = distance(vec, centroids.data() + static_cast<size_t>(c) * dim);
-                if (dist < best_dist) {
-                    best_dist = dist;
-                    best_c = c;
+        deglib::concurrent::parallel_batch_for(
+            0, rows.size(), threads,
+            [&](size_t begin, size_t end, size_t) {
+                for (size_t i = begin; i < end; ++i) {
+                    const float* vec = rows[i];
+                    float best_dist = std::numeric_limits<float>::max();
+                    uint32_t best_c = 0;
+                    for (uint32_t c = 0; c < n_clusters; ++c) {
+                        const float dist = distance(vec, centroids.data() + static_cast<size_t>(c) * dim);
+                        if (dist < best_dist) {
+                            best_dist = dist;
+                            best_c = c;
+                        }
+                    }
+                    labels[i] = best_c;
                 }
-            }
-            labels[i] = best_c;
-        });
+            },
+            4
+        );
 
         // Update: single bandwidth-bound pass.
         std::fill(sums.begin(), sums.end(), 0.0f);

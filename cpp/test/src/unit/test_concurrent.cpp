@@ -173,3 +173,24 @@ TEST(ParallelBatchFor, BatchIsNotSlowerThanElementWise) {
     EXPECT_LE(batched, elementwise * 1.5) << "elementwise=" << elementwise << " batched=" << batched;
     EXPECT_GT(sink, 0u);
 }
+
+TEST(ParallelBatchFor, MultiChunkPerThreadPreservesThreadIdsAndCoversRange) {
+    for (size_t count : {size_t{5}, size_t{50}, size_t{1000}}) {
+        for (size_t chunks_per_thread : {size_t{4}, size_t{8}, size_t{16}}) {
+            const size_t threads = 8;
+            const size_t actual_threads = std::min(threads, count);
+            RangeCollector rc;
+            deglib::concurrent::parallel_batch_for(
+                0, count, threads,
+                [&](size_t begin, size_t end, size_t tid) {
+                    EXPECT_LT(begin, end);
+                    EXPECT_LT(tid, actual_threads);
+                    rc.add(begin, end, tid);
+                },
+                chunks_per_thread
+            );
+            EXPECT_TRUE(rc.covers(count)) << "count=" << count << " mult=" << chunks_per_thread;
+            EXPECT_EQ(rc.ranges.size(), std::min(count, actual_threads * chunks_per_thread));
+        }
+    }
+}

@@ -70,19 +70,19 @@ inline void parallel_for(size_t start, size_t end, size_t numThreads, Function f
 // ---------------------------------------------------------------------------
 // parallel_batch_for: parallel loop over contiguous batches.
 //
-// Splits [start, end) into min(numThreads, end-start) contiguous chunks and
-// invokes
+// Splits [start, end) into min(end - start, actualThreads * chunksPerThread)
+// contiguous chunks and invokes
 //     fn(begin, end, threadId)
-// exactly once per non-empty chunk, with the half-open range [begin, end).
+// once per non-empty chunk, with the half-open range [begin, end) and
+// threadId in [0, actualThreads).
 //
 // Unlike parallel_for (which calls fn once per element and increments a
 // shared atomic counter per element), the counter is only touched once per
 // CHUNK. On fine-grained work (short fn bodies) that removes the cache-line
 // ping-pong between workers, which is what makes element-wise loops with a
-// shared counter scale poorly. Chunks are still claimed dynamically by the
-// workers, so load stays balanced even when the work per element varies.
-// Contiguous chunks also give better cache locality than interleaved
-// element-wise claiming.
+// shared counter scale poorly. When chunksPerThread > 1, chunks are claimed
+// dynamically by the workers, balancing variable-cost workloads and OS
+// preemption while keeping atomic contention low.
 //
 // The caller thread participates as worker 0 (like parallel_for). The range
 // [begin, end) is passed so callers can write `for (size_t i = begin; i < end;
@@ -90,7 +90,7 @@ inline void parallel_for(size_t start, size_t end, size_t numThreads, Function f
 // Exceptions thrown by fn are captured and re-thrown on the caller thread.
 // ---------------------------------------------------------------------------
 template <class Function>
-inline void parallel_batch_for(size_t start, size_t end, size_t numThreads, Function fn) {
+inline void parallel_batch_for(size_t start, size_t end, size_t numThreads, Function fn, size_t chunksPerThread = 1) {
     if (numThreads <= 0) {
         numThreads = std::thread::hardware_concurrency();
     }
@@ -100,11 +100,14 @@ inline void parallel_batch_for(size_t start, size_t end, size_t numThreads, Func
         return;
     }
 
-    const size_t numChunks = std::min(numThreads, count);
-    if (numChunks == 1) {
+    const size_t actualThreads = std::min(numThreads, count);
+    if (actualThreads == 1) {
         fn(start, end, 0);
         return;
     }
+
+    const size_t mult = std::max<size_t>(1, chunksPerThread);
+    const size_t numChunks = std::min(count, actualThreads * mult);
 
     // Static partition of [0, count) into numChunks contiguous chunks:
     //   base = count / numChunks, rem = count % numChunks
@@ -139,8 +142,8 @@ inline void parallel_batch_for(size_t start, size_t end, size_t numThreads, Func
         }
     };
 
-    threads.reserve(numChunks - 1);
-    for (size_t threadId = 1; threadId < numChunks; ++threadId) {
+    threads.reserve(actualThreads - 1);
+    for (size_t threadId = 1; threadId < actualThreads; ++threadId) {
         threads.emplace_back(worker, threadId);
     }
     worker(0);  // caller participates

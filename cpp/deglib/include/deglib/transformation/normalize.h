@@ -113,9 +113,15 @@ class L2NormalizeTransform : public FeatureTransformation {
                 detail::normalize_vector_l2(src + i * dim_, dst + i * dim_, dim_);
             }
         } else {
-            deglib::concurrent::parallel_for(size_t{0}, count, numThreads, [&](size_t i, size_t /*thread_id*/) {
-                detail::normalize_vector_l2(src + i * dim_, dst + i * dim_, dim_);
-            });
+            deglib::concurrent::parallel_batch_for(
+                size_t{0}, count, numThreads,
+                [&](size_t begin, size_t end, size_t /*thread_id*/) {
+                    for (size_t i = begin; i < end; ++i) {
+                        detail::normalize_vector_l2(src + i * dim_, dst + i * dim_, dim_);
+                    }
+                },
+                16
+            );
         }
     }
 

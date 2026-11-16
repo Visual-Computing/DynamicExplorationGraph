@@ -418,7 +418,7 @@ inline void compute_column_mean(const uint16_t* src_fp16, size_t count, uint32_t
                 my_sum[d] += fp16_to_float(vec[d]);
             }
         }
-    });
+    }, 16);
 
     const double inv_count = 1.0 / static_cast<double>(count);
     for (uint32_t d = 0; d < dim; ++d) {

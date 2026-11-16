@@ -384,10 +384,16 @@ class FastHadamardRotation : public FeatureTransformation {
                 transform_one(src + i * dim_, dst + i * dim_, scratch);
             }
         } else {
-            deglib::concurrent::parallel_for(size_t{0}, count, numThreads, [&](size_t i, size_t /*thread_id*/) {
-                thread_local std::vector<float> scratch;
-                transform_one(src + i * dim_, dst + i * dim_, scratch);
-            });
+            deglib::concurrent::parallel_batch_for(
+                size_t{0}, count, numThreads,
+                [&](size_t begin, size_t end, size_t /*thread_id*/) {
+                    thread_local std::vector<float> scratch;
+                    for (size_t i = begin; i < end; ++i) {
+                        transform_one(src + i * dim_, dst + i * dim_, scratch);
+                    }
+                },
+                4
+            );
         }
     }
 

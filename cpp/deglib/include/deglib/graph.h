@@ -342,48 +342,60 @@ class DynamicExplorationGraph {
             if (hasTransformations()) {
                 const size_t out_stride = std::max(deglib::transformation::get_output_byte_size(transformations_), internal_graph_->getFeatureSpace().get_data_size());
 
-                deglib::concurrent::parallel_for(0, count, threads, [&](size_t i, size_t) {
-                    alignas(64) std::byte stack_buf[512];
-                    std::byte* q_buf = stack_buf;
-                    if (out_stride > sizeof(stack_buf)) {
-                        thread_local deglib::transformation::TransformationWorkspace ws;
-                        q_buf = ws.get_buffer_a(out_stride);
-                    }
-
-                    if constexpr (std::is_same_v<T, float>) {
-                        deglib::transformation::apply_query(transformations_, queries.data() + i * in_stride, q_buf, 1);
-                    } else {
-                        alignas(64) float stack_f16_buf[256];
-                        float* f16_buf = stack_f16_buf;
-                        if (in_stride > sizeof(stack_f16_buf) / sizeof(float)) {
+                deglib::concurrent::parallel_batch_for(
+                    0, count, threads,
+                    [&](size_t begin, size_t end, size_t) {
+                        alignas(64) std::byte stack_buf[512];
+                        std::byte* q_buf = stack_buf;
+                        if (out_stride > sizeof(stack_buf)) {
                             thread_local deglib::transformation::TransformationWorkspace ws;
-                            f16_buf = ws.get_float_buffer(in_stride);
+                            q_buf = ws.get_buffer_a(out_stride);
                         }
-                        deglib::distances::fp16::fp16_to_floats(queries.data() + i * in_stride, f16_buf, in_stride);
-                        deglib::transformation::apply_query(transformations_, f16_buf, q_buf, 1);
-                    }
 
-                    std::span<const std::byte> single_q(q_buf, out_stride);
+                        for (size_t i = begin; i < end; ++i) {
+                            if constexpr (std::is_same_v<T, float>) {
+                                deglib::transformation::apply_query(transformations_, queries.data() + i * in_stride, q_buf, 1);
+                            } else {
+                                alignas(64) float stack_f16_buf[256];
+                                float* f16_buf = stack_f16_buf;
+                                if (in_stride > sizeof(stack_f16_buf) / sizeof(float)) {
+                                    thread_local deglib::transformation::TransformationWorkspace ws;
+                                    f16_buf = ws.get_float_buffer(in_stride);
+                                }
+                                deglib::distances::fp16::fp16_to_floats(queries.data() + i * in_stride, f16_buf, in_stride);
+                                deglib::transformation::apply_query(transformations_, f16_buf, q_buf, 1);
+                            }
+
+                            std::span<const std::byte> single_q(q_buf, out_stride);
+                            auto res = internal_graph_->search(single_q, k, eps, filter, max_distance_computation_count);
+                            for (auto& od : res) {
+                                uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
+                                od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
+                            }
+                            results[i] = std::move(res);
+                        }
+                    },
+                    16
+                );
+                return results;
+            }
+        }
+
+        deglib::concurrent::parallel_batch_for(
+            0, count, threads,
+            [&](size_t begin, size_t end, size_t) {
+                for (size_t i = begin; i < end; ++i) {
+                    std::span<const T> single_q(queries.data() + i * in_stride, in_stride);
                     auto res = internal_graph_->search(single_q, k, eps, filter, max_distance_computation_count);
                     for (auto& od : res) {
                         uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
                         od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
                     }
                     results[i] = std::move(res);
-                });
-                return results;
-            }
-        }
-
-        deglib::concurrent::parallel_for(0, count, threads, [&](size_t i, size_t) {
-            std::span<const T> single_q(queries.data() + i * in_stride, in_stride);
-            auto res = internal_graph_->search(single_q, k, eps, filter, max_distance_computation_count);
-            for (auto& od : res) {
-                uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
-                od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
-            }
-            results[i] = std::move(res);
-        });
+                }
+            },
+            16
+        );
         return results;
     }
 
@@ -478,40 +490,52 @@ class DynamicExplorationGraph {
             if (hasTransformations()) {
                 const size_t out_stride = std::max(deglib::transformation::get_output_byte_size(transformations_), internal_graph_->getFeatureSpace().get_data_size());
 
-                deglib::concurrent::parallel_for(0, count, threads, [&](size_t q, size_t) {
-                    alignas(64) std::byte stack_buf[512];
-                    std::byte* q_buf = stack_buf;
-                    if (out_stride > sizeof(stack_buf)) {
-                        thread_local deglib::transformation::TransformationWorkspace ws;
-                        q_buf = ws.get_buffer_a(out_stride);
-                    }
-
-                    if constexpr (std::is_same_v<T, float>) {
-                        deglib::transformation::apply_query(transformations_, queries.data() + q * in_stride, q_buf, 1);
-                    } else {
-                        alignas(64) float stack_f16_buf[256];
-                        float* f16_buf = stack_f16_buf;
-                        if (in_stride > sizeof(stack_f16_buf) / sizeof(float)) {
+                deglib::concurrent::parallel_batch_for(
+                    0, count, threads,
+                    [&](size_t begin, size_t end, size_t) {
+                        alignas(64) std::byte stack_buf[512];
+                        std::byte* q_buf = stack_buf;
+                        if (out_stride > sizeof(stack_buf)) {
                             thread_local deglib::transformation::TransformationWorkspace ws;
-                            f16_buf = ws.get_float_buffer(in_stride);
+                            q_buf = ws.get_buffer_a(out_stride);
                         }
-                        deglib::distances::fp16::fp16_to_floats(queries.data() + q * in_stride, f16_buf, in_stride);
-                        deglib::transformation::apply_query(transformations_, f16_buf, q_buf, 1);
-                    }
 
-                    std::span<const std::byte> single_q(q_buf, out_stride);
-                    auto res = internal_graph_->search(single_q, k, eps, filter, max_distance_computation_count);
-                    process_results(q, res);
-                });
+                        for (size_t q = begin; q < end; ++q) {
+                            if constexpr (std::is_same_v<T, float>) {
+                                deglib::transformation::apply_query(transformations_, queries.data() + q * in_stride, q_buf, 1);
+                            } else {
+                                alignas(64) float stack_f16_buf[256];
+                                float* f16_buf = stack_f16_buf;
+                                if (in_stride > sizeof(stack_f16_buf) / sizeof(float)) {
+                                    thread_local deglib::transformation::TransformationWorkspace ws;
+                                    f16_buf = ws.get_float_buffer(in_stride);
+                                }
+                                deglib::distances::fp16::fp16_to_floats(queries.data() + q * in_stride, f16_buf, in_stride);
+                                deglib::transformation::apply_query(transformations_, f16_buf, q_buf, 1);
+                            }
+
+                            std::span<const std::byte> single_q(q_buf, out_stride);
+                            auto res = internal_graph_->search(single_q, k, eps, filter, max_distance_computation_count);
+                            process_results(q, res);
+                        }
+                    },
+                    16
+                );
                 return;
             }
         }
 
-        deglib::concurrent::parallel_for(0, count, threads, [&](size_t q, size_t) {
-            std::span<const T> single_q(queries.data() + q * in_stride, in_stride);
-            auto res = internal_graph_->search(single_q, k, eps, filter, max_distance_computation_count);
-            process_results(q, res);
-        });
+        deglib::concurrent::parallel_batch_for(
+            0, count, threads,
+            [&](size_t begin, size_t end, size_t) {
+                for (size_t q = begin; q < end; ++q) {
+                    std::span<const T> single_q(queries.data() + q * in_stride, in_stride);
+                    auto res = internal_graph_->search(single_q, k, eps, filter, max_distance_computation_count);
+                    process_results(q, res);
+                }
+            },
+            16
+        );
     }
 
     /**
@@ -592,40 +616,52 @@ class DynamicExplorationGraph {
             if (hasTransformations()) {
                 const size_t out_stride = std::max(deglib::transformation::get_output_byte_size(transformations_), internal_graph_->getFeatureSpace().get_data_size());
 
-                deglib::concurrent::parallel_for(0, count, threads, [&](size_t q, size_t) {
-                    alignas(64) std::byte stack_buf[512];
-                    std::byte* q_buf = stack_buf;
-                    if (out_stride > sizeof(stack_buf)) {
-                        thread_local deglib::transformation::TransformationWorkspace ws;
-                        q_buf = ws.get_buffer_a(out_stride);
-                    }
-
-                    if constexpr (std::is_same_v<T, float>) {
-                        deglib::transformation::apply_query(transformations_, queries.data() + q * in_stride, q_buf, 1);
-                    } else {
-                        alignas(64) float stack_f16_buf[256];
-                        float* f16_buf = stack_f16_buf;
-                        if (in_stride > sizeof(stack_f16_buf) / sizeof(float)) {
+                deglib::concurrent::parallel_batch_for(
+                    0, count, threads,
+                    [&](size_t begin, size_t end, size_t) {
+                        alignas(64) std::byte stack_buf[512];
+                        std::byte* q_buf = stack_buf;
+                        if (out_stride > sizeof(stack_buf)) {
                             thread_local deglib::transformation::TransformationWorkspace ws;
-                            f16_buf = ws.get_float_buffer(in_stride);
+                            q_buf = ws.get_buffer_a(out_stride);
                         }
-                        deglib::distances::fp16::fp16_to_floats(queries.data() + q * in_stride, f16_buf, in_stride);
-                        deglib::transformation::apply_query(transformations_, f16_buf, q_buf, 1);
-                    }
 
-                    std::span<const std::byte> single_q(q_buf, out_stride);
-                    auto res = internal_graph_->search_ef(single_q, k, ef, include_entry, filter, max_distance_computation_count);
-                    process_results(q, res);
-                });
+                        for (size_t q = begin; q < end; ++q) {
+                            if constexpr (std::is_same_v<T, float>) {
+                                deglib::transformation::apply_query(transformations_, queries.data() + q * in_stride, q_buf, 1);
+                            } else {
+                                alignas(64) float stack_f16_buf[256];
+                                float* f16_buf = stack_f16_buf;
+                                if (in_stride > sizeof(stack_f16_buf) / sizeof(float)) {
+                                    thread_local deglib::transformation::TransformationWorkspace ws;
+                                    f16_buf = ws.get_float_buffer(in_stride);
+                                }
+                                deglib::distances::fp16::fp16_to_floats(queries.data() + q * in_stride, f16_buf, in_stride);
+                                deglib::transformation::apply_query(transformations_, f16_buf, q_buf, 1);
+                            }
+
+                            std::span<const std::byte> single_q(q_buf, out_stride);
+                            auto res = internal_graph_->search_ef(single_q, k, ef, include_entry, filter, max_distance_computation_count);
+                            process_results(q, res);
+                        }
+                    },
+                    16
+                );
                 return;
             }
         }
 
-        deglib::concurrent::parallel_for(0, count, threads, [&](size_t q, size_t) {
-            std::span<const T> single_q(queries.data() + q * in_stride, in_stride);
-            auto res = internal_graph_->search_ef(single_q, k, ef, include_entry, filter, max_distance_computation_count);
-            process_results(q, res);
-        });
+        deglib::concurrent::parallel_batch_for(
+            0, count, threads,
+            [&](size_t begin, size_t end, size_t) {
+                for (size_t q = begin; q < end; ++q) {
+                    std::span<const T> single_q(queries.data() + q * in_stride, in_stride);
+                    auto res = internal_graph_->search_ef(single_q, k, ef, include_entry, filter, max_distance_computation_count);
+                    process_results(q, res);
+                }
+            },
+            16
+        );
     }
 
     /**
@@ -670,48 +706,60 @@ class DynamicExplorationGraph {
             if (hasTransformations()) {
                 const size_t out_stride = std::max(deglib::transformation::get_output_byte_size(transformations_), internal_graph_->getFeatureSpace().get_data_size());
 
-                deglib::concurrent::parallel_for(0, count, threads, [&](size_t i, size_t) {
-                    alignas(64) std::byte stack_buf[512];
-                    std::byte* q_buf = stack_buf;
-                    if (out_stride > sizeof(stack_buf)) {
-                        thread_local deglib::transformation::TransformationWorkspace ws;
-                        q_buf = ws.get_buffer_a(out_stride);
-                    }
-
-                    if constexpr (std::is_same_v<T, float>) {
-                        deglib::transformation::apply_query(transformations_, queries.data() + i * in_stride, q_buf, 1);
-                    } else {
-                        alignas(64) float stack_f16_buf[256];
-                        float* f16_buf = stack_f16_buf;
-                        if (in_stride > sizeof(stack_f16_buf) / sizeof(float)) {
+                deglib::concurrent::parallel_batch_for(
+                    0, count, threads,
+                    [&](size_t begin, size_t end, size_t) {
+                        alignas(64) std::byte stack_buf[512];
+                        std::byte* q_buf = stack_buf;
+                        if (out_stride > sizeof(stack_buf)) {
                             thread_local deglib::transformation::TransformationWorkspace ws;
-                            f16_buf = ws.get_float_buffer(in_stride);
+                            q_buf = ws.get_buffer_a(out_stride);
                         }
-                        deglib::distances::fp16::fp16_to_floats(queries.data() + i * in_stride, f16_buf, in_stride);
-                        deglib::transformation::apply_query(transformations_, f16_buf, q_buf, 1);
-                    }
 
-                    std::span<const std::byte> single_q(q_buf, out_stride);
+                        for (size_t i = begin; i < end; ++i) {
+                            if constexpr (std::is_same_v<T, float>) {
+                                deglib::transformation::apply_query(transformations_, queries.data() + i * in_stride, q_buf, 1);
+                            } else {
+                                alignas(64) float stack_f16_buf[256];
+                                float* f16_buf = stack_f16_buf;
+                                if (in_stride > sizeof(stack_f16_buf) / sizeof(float)) {
+                                    thread_local deglib::transformation::TransformationWorkspace ws;
+                                    f16_buf = ws.get_float_buffer(in_stride);
+                                }
+                                deglib::distances::fp16::fp16_to_floats(queries.data() + i * in_stride, f16_buf, in_stride);
+                                deglib::transformation::apply_query(transformations_, f16_buf, q_buf, 1);
+                            }
+
+                            std::span<const std::byte> single_q(q_buf, out_stride);
+                            auto res = internal_graph_->search_ef(single_q, k, ef, include_entry, filter, max_distance_computation_count);
+                            for (auto& od : res) {
+                                uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
+                                od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
+                            }
+                            results[i] = std::move(res);
+                        }
+                    },
+                    16
+                );
+                return results;
+            }
+        }
+
+        deglib::concurrent::parallel_batch_for(
+            0, count, threads,
+            [&](size_t begin, size_t end, size_t) {
+                for (size_t i = begin; i < end; ++i) {
+                    std::span<const T> single_q(queries.data() + i * in_stride, in_stride);
                     auto res = internal_graph_->search_ef(single_q, k, ef, include_entry, filter, max_distance_computation_count);
                     for (auto& od : res) {
                         uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
                         od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
                     }
                     results[i] = std::move(res);
-                });
-                return results;
-            }
-        }
-
-        deglib::concurrent::parallel_for(0, count, threads, [&](size_t i, size_t) {
-            std::span<const T> single_q(queries.data() + i * in_stride, in_stride);
-            auto res = internal_graph_->search_ef(single_q, k, ef, include_entry, filter, max_distance_computation_count);
-            for (auto& od : res) {
-                uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
-                od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
-            }
-            results[i] = std::move(res);
-        });
+                }
+            },
+            16
+        );
         return results;
     }
 
@@ -829,38 +877,44 @@ class DynamicExplorationGraph {
             );
         }
 
-        deglib::concurrent::parallel_for(0, count, threads, [&](size_t q, size_t) {
-            uint32_t entry_label = entry_external_labels[q];
-            auto res = explore(entry_label, k, max_distance_computation_count, eps, include_entry, filter);
-            while (res.size() > k) {
-                res.pop();
-            }
-            const size_t count_res = res.size();
-            const size_t base_offset = q * k;
-            if (unsorted) {
-                for (size_t idx = 0; idx < count_res; ++idx) {
-                    out_indices[base_offset + idx] = res[idx].getIdentifier();
-                    if (return_distances) {
-                        out_distances[base_offset + idx] = res[idx].getDistance();
+        deglib::concurrent::parallel_batch_for(
+            0, count, threads,
+            [&](size_t begin, size_t end, size_t) {
+                for (size_t q = begin; q < end; ++q) {
+                    uint32_t entry_label = entry_external_labels[q];
+                    auto res = explore(entry_label, k, max_distance_computation_count, eps, include_entry, filter);
+                    while (res.size() > k) {
+                        res.pop();
+                    }
+                    const size_t count_res = res.size();
+                    const size_t base_offset = q * k;
+                    if (unsorted) {
+                        for (size_t idx = 0; idx < count_res; ++idx) {
+                            out_indices[base_offset + idx] = res[idx].getIdentifier();
+                            if (return_distances) {
+                                out_distances[base_offset + idx] = res[idx].getDistance();
+                            }
+                        }
+                    } else {
+                        for (size_t i = count_res; i > 0; --i) {
+                            auto next_result = res.top();
+                            out_indices[base_offset + i - 1] = next_result.getIdentifier();
+                            if (return_distances) {
+                                out_distances[base_offset + i - 1] = next_result.getDistance();
+                            }
+                            res.pop();
+                        }
+                    }
+                    for (size_t idx = count_res; idx < k; ++idx) {
+                        out_indices[base_offset + idx] = std::numeric_limits<uint32_t>::max();
+                        if (return_distances) {
+                            out_distances[base_offset + idx] = std::numeric_limits<float>::quiet_NaN();
+                        }
                     }
                 }
-            } else {
-                for (size_t i = count_res; i > 0; --i) {
-                    auto next_result = res.top();
-                    out_indices[base_offset + i - 1] = next_result.getIdentifier();
-                    if (return_distances) {
-                        out_distances[base_offset + i - 1] = next_result.getDistance();
-                    }
-                    res.pop();
-                }
-            }
-            for (size_t idx = count_res; idx < k; ++idx) {
-                out_indices[base_offset + idx] = std::numeric_limits<uint32_t>::max();
-                if (return_distances) {
-                    out_distances[base_offset + idx] = std::numeric_limits<float>::quiet_NaN();
-                }
-            }
-        });
+            },
+            16
+        );
     }
 
     /**
@@ -953,24 +1007,30 @@ class DynamicExplorationGraph {
             );
         }
 
-        deglib::concurrent::parallel_for(0, count, threads, [&](size_t q, size_t) {
-            uint32_t entry_label = entry_external_labels[q];
-            auto res = explore_ef(entry_label, k, ef, max_distance_computation_count, include_entry, filter);
-            const size_t count_res = std::min(static_cast<size_t>(k), res.size());
-            const size_t base_offset = q * k;
-            for (size_t idx = 0; idx < count_res; ++idx) {
-                out_indices[base_offset + idx] = res[idx].getIdentifier();
-                if (return_distances) {
-                    out_distances[base_offset + idx] = res[idx].getDistance();
+        deglib::concurrent::parallel_batch_for(
+            0, count, threads,
+            [&](size_t begin, size_t end, size_t) {
+                for (size_t q = begin; q < end; ++q) {
+                    uint32_t entry_label = entry_external_labels[q];
+                    auto res = explore_ef(entry_label, k, ef, max_distance_computation_count, include_entry, filter);
+                    const size_t count_res = std::min(static_cast<size_t>(k), res.size());
+                    const size_t base_offset = q * k;
+                    for (size_t idx = 0; idx < count_res; ++idx) {
+                        out_indices[base_offset + idx] = res[idx].getIdentifier();
+                        if (return_distances) {
+                            out_distances[base_offset + idx] = res[idx].getDistance();
+                        }
+                    }
+                    for (size_t idx = count_res; idx < k; ++idx) {
+                        out_indices[base_offset + idx] = std::numeric_limits<uint32_t>::max();
+                        if (return_distances) {
+                            out_distances[base_offset + idx] = std::numeric_limits<float>::quiet_NaN();
+                        }
+                    }
                 }
-            }
-            for (size_t idx = count_res; idx < k; ++idx) {
-                out_indices[base_offset + idx] = std::numeric_limits<uint32_t>::max();
-                if (return_distances) {
-                    out_distances[base_offset + idx] = std::numeric_limits<float>::quiet_NaN();
-                }
-            }
-        });
+            },
+            16
+        );
     }
 
     /**

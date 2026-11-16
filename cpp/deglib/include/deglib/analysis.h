@@ -533,7 +533,7 @@ static float calc_graph_quality(
             thread_hits[thread_id] += hits;
             thread_edges[thread_id] += edges;
         }
-    });
+    }, 8);
 
     uint64_t total_hits = 0;
     uint64_t total_edges = 0;

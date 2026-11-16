@@ -467,25 +467,27 @@ class Reranker {
         const auto param = space_.get_dist_func_param();
 
         space_.compute([&](const auto& dist) {
-            deglib::concurrent::parallel_for(0, num_queries, num_threads, [&](size_t i, size_t) {
-                const auto q = queries.subspan(i * stride, stride);
-                const auto c = candidates.subspan(i * candidates_per_query, candidates_per_query);
-                auto& result = results[i];
-                if (c.empty() || k_top == 0) return;
-
+            deglib::concurrent::parallel_batch_for(0, num_queries, num_threads, [&](size_t begin, size_t end, size_t) {
                 auto& scratch = flat_scratch_;
-                const size_t valid = score_all(scratch, dist, param, base(), stride, num_base_vectors_, q, c, po_, pl_);
-                const size_t top = std::min<size_t>(k_top, valid);
-                if (top > 0) {
-                    auto begin = scratch.begin();
-                    auto end = begin + static_cast<std::ptrdiff_t>(valid);
-                    if (top < valid) {
-                        std::partial_sort(begin, begin + static_cast<std::ptrdiff_t>(top), end);
-                    } else {
-                        std::sort(begin, end);
+                for (size_t i = begin; i < end; ++i) {
+                    const auto q = queries.subspan(i * stride, stride);
+                    const auto c = candidates.subspan(i * candidates_per_query, candidates_per_query);
+                    auto& result = results[i];
+                    if (c.empty() || k_top == 0) continue;
+
+                    const size_t valid = score_all(scratch, dist, param, base(), stride, num_base_vectors_, q, c, po_, pl_);
+                    const size_t top = std::min<size_t>(k_top, valid);
+                    if (top > 0) {
+                        auto it_begin = scratch.begin();
+                        auto it_end = it_begin + static_cast<std::ptrdiff_t>(valid);
+                        if (top < valid) {
+                            std::partial_sort(it_begin, it_begin + static_cast<std::ptrdiff_t>(top), it_end);
+                        } else {
+                            std::sort(it_begin, it_end);
+                        }
+                        result.reserve(top);
+                        for (size_t j = 0; j < top; ++j) result.emplace(scratch[j].getIdentifier(), scratch[j].getDistance());
                     }
-                    result.reserve(top);
-                    for (size_t j = 0; j < top; ++j) result.emplace(scratch[j].getIdentifier(), scratch[j].getDistance());
                 }
             });
         });

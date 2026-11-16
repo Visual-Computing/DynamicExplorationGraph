@@ -64,7 +64,7 @@ inline void compute_column_mean(std::span<const float> src, uint32_t dim, std::s
                 my_sum[d] += static_cast<double>(vec[d]);
             }
         }
-    });
+    }, 16);
 
     const double inv_count = 1.0 / static_cast<double>(count);
     for (uint32_t d = 0; d < dim; ++d) {
@@ -117,7 +117,7 @@ inline void compute_column_mean(std::span<const uint16_t> src_fp16, uint32_t dim
                 my_sum[d] += static_cast<double>(deglib::distances::fp16::fp16_to_float(vec[d]));
             }
         }
-    });
+    }, 16);
 
     const double inv_count = 1.0 / static_cast<double>(count);
     for (uint32_t d = 0; d < dim; ++d) {
@@ -201,14 +201,9 @@ inline void quantize_batch_into(
     std::byte* out_ptr = out_bytes.data();
     const float* mean_ptr = mean.empty() ? nullptr : mean.data();
 
-    const size_t chunk_size = 8192;
-    const size_t num_chunks = (count + chunk_size - 1) / chunk_size;
-
-    deglib::concurrent::parallel_for(
-        static_cast<size_t>(0), num_chunks, numThreads,
-        [data_ptr, count, dim, non_zeros, mask_bytes, bytes_per_evp, chunk_size, mean_ptr, out_ptr](size_t chunk_id, size_t) {
-            const size_t start = chunk_id * chunk_size;
-            const size_t end = std::min(start + chunk_size, count);
+    deglib::concurrent::parallel_batch_for(
+        static_cast<size_t>(0), count, numThreads,
+        [data_ptr, dim, non_zeros, mask_bytes, bytes_per_evp, mean_ptr, out_ptr](size_t start, size_t end, size_t) {
             std::vector<std::pair<float, uint32_t>> abs_vals(dim);
 
             for (size_t i = start; i < end; ++i) {
@@ -242,7 +237,8 @@ inline void quantize_batch_into(
                     }
                 }
             }
-        }
+        },
+        8
     );
 }
 
@@ -325,14 +321,9 @@ inline void quantize_batch_into(
     std::byte* out_ptr = out_bytes.data();
     const uint16_t* mean_ptr = mean_fp16.empty() ? nullptr : mean_fp16.data();
 
-    const size_t chunk_size = 8192;
-    const size_t num_chunks = (count + chunk_size - 1) / chunk_size;
-
-    deglib::concurrent::parallel_for(
-        static_cast<size_t>(0), num_chunks, numThreads,
-        [data_ptr, count, dim, non_zeros, mask_bytes, bytes_per_evp, chunk_size, mean_ptr, out_ptr](size_t chunk_id, size_t) {
-            const size_t start = chunk_id * chunk_size;
-            const size_t end = std::min(start + chunk_size, count);
+    deglib::concurrent::parallel_batch_for(
+        static_cast<size_t>(0), count, numThreads,
+        [data_ptr, dim, non_zeros, mask_bytes, bytes_per_evp, mean_ptr, out_ptr](size_t start, size_t end, size_t) {
             std::vector<uint16_t> diff(dim);
             std::vector<std::pair<uint16_t, uint32_t>> abs_vals(dim);
 
@@ -371,7 +362,8 @@ inline void quantize_batch_into(
                     }
                 }
             }
-        }
+        },
+        8
     );
 }
 
