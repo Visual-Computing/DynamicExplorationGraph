@@ -11,8 +11,6 @@ ScalarQuantizerUint8 = deglib_cpp.transformation.ScalarQuantizerUint8
 ScalarQuantizerUint4 = deglib_cpp.transformation.ScalarQuantizerUint4
 ScalarQuantizerInt4 = deglib_cpp.transformation.ScalarQuantizerInt4
 ScalarQuantizerUInt7 = deglib_cpp.transformation.ScalarQuantizerUInt7
-ScalarQuantizerInt8PerDim = deglib_cpp.transformation.ScalarQuantizerInt8PerDim
-ScalarQuantizerUint8PerDim = deglib_cpp.transformation.ScalarQuantizerUint8PerDim
 ScalarQuantizerFP16 = deglib_cpp.transformation.ScalarQuantizerFP16
 
 # Factory Functions
@@ -23,12 +21,10 @@ make_evp_quantizer = deglib_cpp.transformation.make_evp_quantizer
 
 
 make_scalar_quantizer_int8 = deglib_cpp.transformation.make_scalar_quantizer_int8
-make_scalar_quantizer_int8_perdim = deglib_cpp.transformation.make_scalar_quantizer_int8_perdim
 make_scalar_quantizer_uint8 = deglib_cpp.transformation.make_scalar_quantizer_uint8
 make_scalar_quantizer_uint4 = deglib_cpp.transformation.make_scalar_quantizer_uint4
 make_scalar_quantizer_int4 = deglib_cpp.transformation.make_scalar_quantizer_int4
 make_scalar_quantizer_uint7 = deglib_cpp.transformation.make_scalar_quantizer_uint7
-make_scalar_quantizer_uint8_perdim = deglib_cpp.transformation.make_scalar_quantizer_uint8_perdim
 make_scalar_quantizer_fp16 = deglib_cpp.transformation.make_scalar_quantizer_fp16
 
 # Transformation Serialization & Application
@@ -83,8 +79,6 @@ __all__ = [
     "EvpQuantizer",
     "ScalarQuantizerInt8",
     "ScalarQuantizerUint8",
-    "ScalarQuantizerInt8PerDim",
-    "ScalarQuantizerUint8PerDim",
     "ScalarQuantizerFP16",
     "ScalarQuantizerUint4",
     "ScalarQuantizerInt4",
@@ -95,9 +89,7 @@ __all__ = [
     "make_l2_normalize_transform",
     "make_evp_quantizer",
     "make_scalar_quantizer_int8",
-    "make_scalar_quantizer_int8_perdim",
     "make_scalar_quantizer_uint8",
-    "make_scalar_quantizer_uint8_perdim",
     "make_scalar_quantizer_fp16",
     "serialize_transformations",
     "deserialize_transformations",

@@ -658,8 +658,6 @@ inline uint32_t calibrate_best_non_zeros(std::span<const uint16_t> src_fp16, uin
  */
 class EvpQuantizer : public FeatureTransformation {
   public:
-    using output_type = std::byte;
-
     /**
      * @brief Constructs an EvpQuantizer.
      *

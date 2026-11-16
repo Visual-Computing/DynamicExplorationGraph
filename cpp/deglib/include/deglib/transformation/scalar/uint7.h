@@ -21,22 +21,7 @@ namespace deglib::transformation {
 // Affine uniform quantizer restricted to the signed range [0, 127].
 class ScalarQuantizerUInt7 : public FeatureTransformation {
   public:
-    using output_type = int8_t;
-
-    ScalarQuantizerUInt7() = default;
-
-    ScalarQuantizerUInt7(uint32_t dim, float min_val, float max_val) : dim_(dim) { set_min_max(min_val, max_val); }
-
-    void set_min_max(float min_val, float max_val) {
-        min_ = min_val;
-        max_ = max_val;
-        const float range = std::max(1e-12f, max_ - min_);
-        scale_ = 127.0f / range;
-        inv_scale_ = range / 127.0f;
-        is_fitted_ = true;
-    }
-
-    void set_dim(uint32_t d) noexcept { dim_ = d; }
+    explicit ScalarQuantizerUInt7(uint32_t dim) : dim_(dim) {}
 
     uint32_t tag() const noexcept override { return TAG_SQU7; }
     std::string_view name() const noexcept override { return "ScalarQuantizerUInt7"; }
@@ -57,20 +42,21 @@ class ScalarQuantizerUInt7 : public FeatureTransformation {
     float inv_scale() const noexcept { return inv_scale_; }
     bool is_fitted() const noexcept override { return is_fitted_; }
 
-    void fit(std::span<const float> data) override { fit(data, 1.0f); }
+    void fit(std::span<const float> data) override { fit(data, -1.0f); }
 
-    void fit(std::span<const float> data, float quantile = 1.0f) {
+    void fit(std::span<const float> data, float quantile) {
         if (data.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUInt7: dim must be > 0 prior to fit()");
         if (data.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUInt7: data size must be multiple of dim");
+        if (quantile <= 0.0f) quantile = 1.0f;
         const size_t train_size = std::max<size_t>(dim_, data.size() / 10);
         const auto [mn, mx] = detail::find_minmax(data.data(), std::min(data.size(), train_size), quantile);
         set_min_max(mn, mx);
     }
 
-    void fit(std::span<const uint16_t> data_fp16) override { fit(data_fp16, 1.0f); }
+    void fit(std::span<const uint16_t> data_fp16) override { fit(data_fp16, -1.0f); }
 
-    void fit(std::span<const uint16_t> data_fp16, float quantile = 1.0f) {
+    void fit(std::span<const uint16_t> data_fp16, float quantile) {
         if (data_fp16.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUInt7: dim must be > 0 prior to fit()");
         if (data_fp16.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUInt7: data size must be multiple of dim");
@@ -125,7 +111,9 @@ class ScalarQuantizerUInt7 : public FeatureTransformation {
         is.read(reinterpret_cast<char*>(&max_val), sizeof(max_val));
         is.read(reinterpret_cast<char*>(&scale), sizeof(scale));
         is.read(reinterpret_cast<char*>(&inv_scale), sizeof(inv_scale));
-        auto quant = std::make_unique<ScalarQuantizerUInt7>(dim, min_val, max_val);
+        auto quant = std::make_unique<ScalarQuantizerUInt7>(dim);
+        quant->min_ = min_val;
+        quant->max_ = max_val;
         quant->scale_ = scale;
         quant->inv_scale_ = inv_scale;
         quant->is_fitted_ = true;
@@ -133,6 +121,14 @@ class ScalarQuantizerUInt7 : public FeatureTransformation {
     }
 
   private:
+    void set_min_max(float min_val, float max_val) {
+        min_ = min_val;
+        max_ = max_val;
+        const float range = std::max(1e-12f, max_ - min_);
+        scale_ = 127.0f / range;
+        inv_scale_ = range / 127.0f;
+        is_fitted_ = true;
+    }
     inline int8_t transform(float x) const {
         float value = (x - min_) * scale_;
         value += 0.5f;
@@ -193,8 +189,8 @@ class ScalarQuantizerUInt7 : public FeatureTransformation {
     bool is_fitted_ = false;
 };
 
-inline ScalarQuantizerUInt7 make_scalar_quantizer_uint7(std::span<const float> data, uint32_t dim, float quantile = 1.0f) {
-    ScalarQuantizerUInt7 q(dim, 0.0f, 1.0f);
+inline ScalarQuantizerUInt7 make_scalar_quantizer_uint7(std::span<const float> data, uint32_t dim, float quantile = -1.0f) {
+    ScalarQuantizerUInt7 q(dim);
     q.fit(data, quantile);
     return q;
 }

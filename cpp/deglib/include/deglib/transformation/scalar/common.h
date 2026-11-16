@@ -10,10 +10,10 @@
 
 namespace deglib::transformation::detail {
 
-inline std::pair<float, float> find_minmax(const float* data, size_t total_items, float quantile = 1.0f) {
+inline std::pair<float, float> find_minmax(const float* data, size_t total_items, float quantile = -1.0f) {
     if (total_items == 0) return {0.0f, 0.0f};
 
-    if (quantile >= 1.0f) {
+    if (quantile <= 0.0f || quantile >= 1.0f) {
         float min_val = data[0];
         float max_val = data[0];
         for (size_t i = 1; i < total_items; ++i) {
@@ -206,10 +206,10 @@ inline float optimize_quantile_uint4(const float* data, size_t total_items, uint
     return best_q;
 }
 
-inline float find_absmax(const float* data, size_t total_items, float quantile = 1.0f) {
+inline float find_absmax(const float* data, size_t total_items, float quantile = -1.0f) {
     if (total_items == 0) return 0.0f;
 
-    if (quantile >= 1.0f) {
+    if (quantile <= 0.0f || quantile >= 1.0f) {
         float abs_max = 0.0f;
         for (size_t i = 0; i < total_items; ++i) {
             float v = std::abs(data[i]);
@@ -233,95 +233,6 @@ inline float find_absmax(const float* data, size_t total_items, float quantile =
     }
 
     return min_heap.top();
-}
-
-inline void find_absmax_perdim(std::vector<float>& abs_maxs, const float* data, size_t n, uint32_t dim, float quantile = 1.0f) {
-    abs_maxs.assign(dim, 0.0f);
-    if (n == 0 || dim == 0) return;
-
-    if (quantile >= 1.0f) {
-        for (size_t i = 0; i < n; ++i) {
-            const float* row = data + i * dim;
-            for (uint32_t d = 0; d < dim; ++d) {
-                float v = std::abs(row[d]);
-                if (v > abs_maxs[d]) abs_maxs[d] = v;
-            }
-        }
-        return;
-    }
-
-    const float drop_ratio = std::max(0.0f, 1.0f - quantile);
-    size_t top = static_cast<size_t>(static_cast<double>(n) * drop_ratio) + 1;
-    std::vector<std::priority_queue<float, std::vector<float>, std::greater<float>>> min_heaps(dim);
-
-    for (size_t i = 0; i < n; ++i) {
-        const float* row = data + i * dim;
-        for (uint32_t d = 0; d < dim; ++d) {
-            float x = std::abs(row[d]);
-            auto& mi_h = min_heaps[d];
-            if (mi_h.size() < top) {
-                mi_h.push(x);
-            } else if (x > mi_h.top()) {
-                mi_h.pop();
-                mi_h.push(x);
-            }
-        }
-    }
-
-    for (uint32_t d = 0; d < dim; ++d) {
-        abs_maxs[d] = min_heaps[d].top();
-    }
-}
-
-inline void find_minmax_perdim(std::vector<float>& mins, std::vector<float>& maxs, const float* data, size_t n, uint32_t dim, float quantile = 1.0f) {
-    mins.assign(dim, std::numeric_limits<float>::max());
-    maxs.assign(dim, std::numeric_limits<float>::lowest());
-
-    if (n == 0 || dim == 0) return;
-
-    if (quantile >= 1.0f) {
-        for (size_t i = 0; i < n; ++i) {
-            const float* row = data + i * dim;
-            for (uint32_t d = 0; d < dim; ++d) {
-                float v = row[d];
-                if (v < mins[d]) mins[d] = v;
-                if (v > maxs[d]) maxs[d] = v;
-            }
-        }
-        return;
-    }
-
-    const float drop_ratio = std::max(0.0f, 1.0f - quantile);
-    size_t top = static_cast<size_t>(static_cast<double>(n) * drop_ratio) + 1;
-    std::vector<std::priority_queue<float, std::vector<float>, std::less<float>>> max_heaps(dim);
-    std::vector<std::priority_queue<float, std::vector<float>, std::greater<float>>> min_heaps(dim);
-
-    for (size_t i = 0; i < n; ++i) {
-        const float* row = data + i * dim;
-        for (uint32_t d = 0; d < dim; ++d) {
-            float x = row[d];
-            auto& mi_h = min_heaps[d];
-            if (mi_h.size() < top) {
-                mi_h.push(x);
-            } else if (x > mi_h.top()) {
-                mi_h.pop();
-                mi_h.push(x);
-            }
-
-            auto& ma_h = max_heaps[d];
-            if (ma_h.size() < top) {
-                ma_h.push(x);
-            } else if (x < ma_h.top()) {
-                ma_h.pop();
-                ma_h.push(x);
-            }
-        }
-    }
-
-    for (uint32_t d = 0; d < dim; ++d) {
-        mins[d] = max_heaps[d].top();
-        maxs[d] = min_heaps[d].top();
-    }
 }
 
 }  // namespace deglib::transformation::detail

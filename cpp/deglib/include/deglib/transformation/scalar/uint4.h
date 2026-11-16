@@ -25,24 +25,7 @@ namespace deglib::transformation {
  */
 class ScalarQuantizerUint4 : public FeatureTransformation {
   public:
-    using input_type = float;
-    using output_type = uint8_t;
-
-    ScalarQuantizerUint4() = default;
     explicit ScalarQuantizerUint4(uint32_t dim) : dim_(dim) {}
-    ScalarQuantizerUint4(float min_v, float max_v) { set_range(min_v, max_v); }
-    ScalarQuantizerUint4(uint32_t dim, float min_v, float max_v) : dim_(dim) { set_range(min_v, max_v); }
-
-    void set_range(float min_v, float max_v) {
-        min_val_ = min_v;
-        max_val_ = max_v;
-        dif_ = max_val_ - min_val_;
-        if (dif_ <= 1e-12f) dif_ = 1.0f;
-        scale_ = 15.0f / dif_;
-        is_fitted_ = true;
-    }
-
-    void set_dim(uint32_t d) noexcept { dim_ = d; }
 
     uint32_t tag() const noexcept override { return TAG_SQU4; }
     std::string_view name() const noexcept override { return "ScalarQuantizerUint4"; }
@@ -143,13 +126,22 @@ class ScalarQuantizerUint4 : public FeatureTransformation {
         is.read(reinterpret_cast<char*>(&min_v), sizeof(min_v));
         is.read(reinterpret_cast<char*>(&max_v), sizeof(max_v));
         is.read(reinterpret_cast<char*>(&scale), sizeof(scale));
-        auto quant = std::make_unique<ScalarQuantizerUint4>(dim, min_v, max_v);
+        auto quant = std::make_unique<ScalarQuantizerUint4>(dim);
+        quant->set_range(min_v, max_v);
         quant->scale_ = scale;
         quant->is_fitted_ = true;
         return quant;
     }
 
   private:
+    void set_range(float min_v, float max_v) {
+        min_val_ = min_v;
+        max_val_ = max_v;
+        dif_ = max_val_ - min_val_;
+        if (dif_ <= 1e-12f) dif_ = 1.0f;
+        scale_ = 15.0f / dif_;
+        is_fitted_ = true;
+    }
     inline uint8_t transform(float x) const {
         float scaled = std::round((x - min_val_) * scale_);
         if (scaled < 0.0f) return 0;

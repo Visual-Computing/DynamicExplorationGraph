@@ -30,8 +30,6 @@ inline constexpr uint32_t TAG_SQU4 = make_fourcc('S', 'Q', 'U', '4');
 inline constexpr uint32_t TAG_SQI4 = make_fourcc('S', 'Q', 'I', '4');
 inline constexpr uint32_t TAG_SQU7 = make_fourcc('S', 'Q', 'U', '7');
 inline constexpr uint32_t TAG_SQ16 = make_fourcc('S', 'Q', '1', '6');
-inline constexpr uint32_t TAG_SQ8P = make_fourcc('S', 'Q', '8', 'P');
-inline constexpr uint32_t TAG_SQUP = make_fourcc('S', 'Q', 'U', 'P');
 inline constexpr uint32_t TAG_EVPQ = make_fourcc('E', 'V', 'P', 'Q');
 inline constexpr uint32_t TAG_NORM = make_fourcc('N', 'O', 'R', 'M');
 
@@ -116,10 +114,6 @@ inline std::shared_ptr<FeatureTransformation> deserialize_transformation(std::is
             return ScalarQuantizerUint8::deserialize(ss);
         case TAG_SQ16:
             return ScalarQuantizerFP16::deserialize(ss);
-        case TAG_SQ8P:
-            return ScalarQuantizerInt8PerDim::deserialize(ss);
-        case TAG_SQUP:
-            return ScalarQuantizerUint8PerDim::deserialize(ss);
         case TAG_EVPQ:
             return EvpQuantizer::deserialize(ss);
         case TAG_NORM:

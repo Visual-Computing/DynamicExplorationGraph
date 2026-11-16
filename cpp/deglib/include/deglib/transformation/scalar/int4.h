@@ -25,26 +25,7 @@ namespace deglib::transformation {
  */
 class ScalarQuantizerInt4 : public FeatureTransformation {
   public:
-    using input_type = float;
-    using output_type = uint8_t;
-
-    ScalarQuantizerInt4() = default;
-    explicit ScalarQuantizerInt4(uint32_t dim, float abs_max = 1.0f) : dim_(dim), abs_max_(abs_max) {
-        if (abs_max_ <= 1e-12f) abs_max_ = 1.0f;
-        scale_ = 8.0f / abs_max_;
-        inv_scale_ = abs_max_ / 8.0f;
-        is_fitted_ = true;
-    }
-
-    void set_abs_max(float abs_m) {
-        abs_max_ = abs_m;
-        if (abs_max_ <= 1e-12f) abs_max_ = 1.0f;
-        scale_ = 8.0f / abs_max_;
-        inv_scale_ = abs_max_ / 8.0f;
-        is_fitted_ = true;
-    }
-
-    void set_dim(uint32_t d) noexcept { dim_ = d; }
+    explicit ScalarQuantizerInt4(uint32_t dim) : dim_(dim) {}
 
     uint32_t tag() const noexcept override { return TAG_SQI4; }
     std::string_view name() const noexcept override { return "ScalarQuantizerInt4"; }
@@ -65,18 +46,19 @@ class ScalarQuantizerInt4 : public FeatureTransformation {
     float inv_scale() const noexcept { return inv_scale_; }
     bool is_fitted() const noexcept override { return is_fitted_; }
 
-    void fit(std::span<const float> data) override { fit(data, 1.0f); }
+    void fit(std::span<const float> data) override { fit(data, -1.0f); }
 
     void fit(std::span<const float> data, float quantile) {
         if (data.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerInt4: dim must be > 0 prior to fit()");
         if (data.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerInt4: data size must be multiple of dim");
+        if (quantile <= 0.0f) quantile = 1.0f;
         const size_t count = data.size() / dim_;
         float am = detail::find_absmax(data.data(), count * dim_, quantile);
         set_abs_max(am);
     }
 
-    void fit(std::span<const uint16_t> data_fp16) override { fit(data_fp16, 1.0f); }
+    void fit(std::span<const uint16_t> data_fp16) override { fit(data_fp16, -1.0f); }
 
     void fit(std::span<const uint16_t> data_fp16, float quantile) {
         if (data_fp16.empty()) return;
@@ -136,7 +118,8 @@ class ScalarQuantizerInt4 : public FeatureTransformation {
         is.read(reinterpret_cast<char*>(&abs_m), sizeof(abs_m));
         is.read(reinterpret_cast<char*>(&scale), sizeof(scale));
         is.read(reinterpret_cast<char*>(&inv_scale), sizeof(inv_scale));
-        auto quant = std::make_unique<ScalarQuantizerInt4>(dim, abs_m);
+        auto quant = std::make_unique<ScalarQuantizerInt4>(dim);
+        quant->abs_max_ = abs_m;
         quant->scale_ = scale;
         quant->inv_scale_ = inv_scale;
         quant->is_fitted_ = true;
@@ -144,6 +127,13 @@ class ScalarQuantizerInt4 : public FeatureTransformation {
     }
 
   private:
+    void set_abs_max(float abs_m) {
+        abs_max_ = abs_m;
+        if (abs_max_ <= 1e-12f) abs_max_ = 1.0f;
+        scale_ = 8.0f / abs_max_;
+        inv_scale_ = abs_max_ / 8.0f;
+        is_fitted_ = true;
+    }
     inline uint8_t transform(float x) const {
         float scaled = std::round(x * scale_);
         int32_t v = static_cast<int32_t>(scaled);
@@ -248,7 +238,7 @@ class ScalarQuantizerInt4 : public FeatureTransformation {
     bool is_fitted_ = false;
 };
 
-inline ScalarQuantizerInt4 make_scalar_quantizer_int4(std::span<const float> data, uint32_t dim, float quantile = 1.0f) {
+inline ScalarQuantizerInt4 make_scalar_quantizer_int4(std::span<const float> data, uint32_t dim, float quantile = -1.0f) {
     ScalarQuantizerInt4 q(dim);
     q.fit(data, quantile);
     return q;

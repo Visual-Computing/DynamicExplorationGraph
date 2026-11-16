@@ -23,23 +23,9 @@ namespace deglib::transformation {
  */
 class ScalarQuantizerFP16 : public FeatureTransformation {
   public:
-    using output_type = uint16_t;
-
     static constexpr float kFP16Max = 65504.0f;  // largest finite half-precision value
 
-    ScalarQuantizerFP16() = default;
-    explicit ScalarQuantizerFP16(float abs_max_val) { set_abs_max(abs_max_val); }
-    ScalarQuantizerFP16(uint32_t dim, float abs_max_val, float quantile = 1.0f) : dim_(dim), quantile_(quantile) { set_abs_max(abs_max_val); }
-
-    void set_abs_max(float val) {
-        abs_max_ = (val <= 1e-12f) ? 1.0f : val;
-        compute_scale();
-        is_fitted_ = true;
-    }
-
-    void set_dim(uint32_t d) noexcept { dim_ = d; }
-
-    void set_quantile(float q) noexcept { quantile_ = q; }
+    explicit ScalarQuantizerFP16(uint32_t dim) : dim_(dim) {}
 
     uint32_t tag() const noexcept override { return TAG_SQ16; }
     std::string_view name() const noexcept override { return "ScalarQuantizerFP16"; }
@@ -61,19 +47,20 @@ class ScalarQuantizerFP16 : public FeatureTransformation {
     float inv_scale() const noexcept { return inv_scale_; }
     bool is_fitted() const noexcept override { return is_fitted_; }
 
-    void fit(std::span<const float> data) override { fit(data, quantile_); }
+    void fit(std::span<const float> data) override { fit(data, -1.0f); }
 
     void fit(std::span<const float> data, float quantile) {
         if (data.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerFP16: dim must be > 0 prior to fit()");
         if (data.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerFP16: data size must be multiple of dim");
+        if (quantile <= 0.0f) quantile = 1.0f;
         const size_t count = data.size() / dim_;
         quantile_ = quantile;
         float found_max = detail::find_absmax(data.data(), count * dim_, quantile_);
         set_abs_max(found_max);
     }
 
-    void fit(std::span<const uint16_t> data_fp16) override { fit(data_fp16, 1.0f); }
+    void fit(std::span<const uint16_t> data_fp16) override { fit(data_fp16, -1.0f); }
 
     void fit(std::span<const uint16_t> data_fp16, float) {
         if (data_fp16.empty()) return;
@@ -124,7 +111,8 @@ class ScalarQuantizerFP16 : public FeatureTransformation {
         is.read(reinterpret_cast<char*>(&abs_max), sizeof(abs_max));
         is.read(reinterpret_cast<char*>(&scale), sizeof(scale));
         is.read(reinterpret_cast<char*>(&inv_scale), sizeof(inv_scale));
-        auto quant = std::make_unique<ScalarQuantizerFP16>(dim, abs_max);
+        auto quant = std::make_unique<ScalarQuantizerFP16>(dim);
+        quant->abs_max_ = abs_max;
         quant->scale_ = scale;
         quant->inv_scale_ = inv_scale;
         quant->is_fitted_ = true;
@@ -132,6 +120,11 @@ class ScalarQuantizerFP16 : public FeatureTransformation {
     }
 
   private:
+    void set_abs_max(float val) {
+        abs_max_ = (val <= 1e-12f) ? 1.0f : val;
+        compute_scale();
+        is_fitted_ = true;
+    }
     void compute_scale() {
         if (abs_max_ <= kFP16Max) {
             scale_ = 1.0f;
@@ -201,8 +194,8 @@ class ScalarQuantizerFP16 : public FeatureTransformation {
     bool is_fitted_ = false;
 };
 
-inline ScalarQuantizerFP16 make_scalar_quantizer_fp16(std::span<const float> data, uint32_t dim, float quantile = 1.0f) {
-    ScalarQuantizerFP16 q(dim, 1.0f, quantile);
+inline ScalarQuantizerFP16 make_scalar_quantizer_fp16(std::span<const float> data, uint32_t dim, float quantile = -1.0f) {
+    ScalarQuantizerFP16 q(dim);
     q.fit(data, quantile);
     return q;
 }

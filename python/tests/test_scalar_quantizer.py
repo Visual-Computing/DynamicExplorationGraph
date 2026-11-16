@@ -4,7 +4,6 @@ import pytest
 from deglib.transformation import (
     ScalarQuantizerInt8,
     ScalarQuantizerUint8,
-    ScalarQuantizerUint8PerDim,
     ScalarQuantizerFP16,
     make_scalar_quantizer_fp16,
 )
@@ -17,7 +16,7 @@ def test_int8_quantizer_fit_and_quantize():
     # Query vectors in range [-1.0, 1.0]
     query_vectors = (np.random.uniform(-1.0, 1.0, size=(10, 32))).astype(np.float32)
 
-    quantizer = ScalarQuantizerInt8()
+    quantizer = ScalarQuantizerInt8(32)
     assert not quantizer.is_fitted
 
     quantizer.fit(db_vectors, quantile=1.0)
@@ -45,7 +44,6 @@ def test_make_scalar_quantizer_factory_functions():
     from deglib.transformation import (
         make_scalar_quantizer_int8,
         make_scalar_quantizer_uint8,
-        make_scalar_quantizer_uint8_perdim,
     )
 
     q_int8 = make_scalar_quantizer_int8(vectors)
@@ -58,17 +56,12 @@ def test_make_scalar_quantizer_factory_functions():
     assert q_uint8.is_fitted
     assert q_uint8.quantize(vectors).shape == (50, 16)
 
-    q_perdim = make_scalar_quantizer_uint8_perdim(vectors)
-    assert isinstance(q_perdim, ScalarQuantizerUint8PerDim)
-    assert q_perdim.is_fitted
-    assert q_perdim.quantize(vectors).shape == (50, 16)
 
-
-def test_int8_quantizer_fit_and_quantize():
+def test_int8_quantizer_fit_and_quantize_basic():
     np.random.seed(42)
     vectors = np.random.randn(50, 16).astype(np.float32)
 
-    q1 = ScalarQuantizerInt8()
+    q1 = ScalarQuantizerInt8(16)
     q1.fit(vectors)
     res1 = q1.quantize(vectors)
 
@@ -82,11 +75,11 @@ def test_int8_quantizer_fp16_input():
     vectors_f32 = (np.random.uniform(-2.0, 2.0, size=(20, 16))).astype(np.float32)
     vectors_f16 = vectors_f32.astype(np.float16)
 
-    q_f32 = ScalarQuantizerInt8()
+    q_f32 = ScalarQuantizerInt8(16)
     q_f32.fit(vectors_f32)
     res_f32 = q_f32.quantize(vectors_f32)
 
-    q_f16 = ScalarQuantizerInt8()
+    q_f16 = ScalarQuantizerInt8(16)
     q_f16.fit(vectors_f16)
     res_f16 = q_f16.quantize(vectors_f16)
 
@@ -99,7 +92,7 @@ def test_uint8_quantizer_fit_and_quantize():
     db_vectors = (np.random.uniform(10.0, 50.0, size=(100, 16))).astype(np.float32)
     query_vectors = (np.random.uniform(20.0, 40.0, size=(10, 16))).astype(np.float32)
 
-    quantizer = ScalarQuantizerUint8()
+    quantizer = ScalarQuantizerUint8(16)
     quantizer.fit(db_vectors)
 
     assert quantizer.is_fitted
@@ -115,108 +108,22 @@ def test_uint8_quantizer_fit_and_quantize():
     assert quant_query.dtype == np.uint8
 
 
-def test_uint8_per_dim_quantizer():
-    # Dim 0: [0, 100], Dim 1: [-10, 10]
-    db_vectors = np.array(
-        [
-            [0.0, -10.0],
-            [50.0, 0.0],
-            [100.0, 10.0],
-        ],
-        dtype=np.float32,
-    )
-
-    quantizer = ScalarQuantizerUint8PerDim()
-    quantizer.fit(db_vectors)
-    quant_db = quantizer.quantize(db_vectors)
-
-    assert quantizer.is_fitted
-    assert quantizer.dim == 2
-    assert quantizer.mins[0] == pytest.approx(0.0)
-    assert quantizer.maxs[0] == pytest.approx(100.0)
-    assert quantizer.mins[1] == pytest.approx(-10.0)
-    assert quantizer.maxs[1] == pytest.approx(10.0)
-
-    # 0.0 -> 0, 50.0 -> 128, 100.0 -> 255
-    assert quant_db[0, 0] == 0
-    assert quant_db[1, 0] == 128
-    assert quant_db[2, 0] == 255
-
-    # -10.0 -> 0, 0.0 -> 128, 10.0 -> 255
-    assert quant_db[0, 1] == 0
-    assert quant_db[1, 1] == 128
-    assert quant_db[2, 1] == 255
-
-    # Quantize new query on this per-dim scale
-    query = np.array([[25.0, 5.0]], dtype=np.float32)
-    quant_query = quantizer.quantize(query)
-
-    # 25.0 in [0, 100] -> round(25/100 * 255) = 64
-    assert quant_query[0, 0] == 64
-    # 5.0 in [-10, 10] -> round((5 - (-10))/20 * 255) = round(15/20 * 255) = 191
-    assert quant_query[0, 1] == 191
-
-
-def test_int8_per_dim_quantizer():
-    from deglib.transformation import ScalarQuantizerInt8PerDim, make_scalar_quantizer_int8_perdim
-
-    db_vectors = np.array(
-        [
-            [-100.0, -1.0],
-            [0.0, 0.0],
-            [100.0, 1.0],
-        ],
-        dtype=np.float32,
-    )
-
-    quantizer = make_scalar_quantizer_int8_perdim(db_vectors)
-    assert quantizer.is_fitted
-    assert quantizer.dim == 2
-    assert quantizer.abs_maxs[0] == pytest.approx(100.0)
-    assert quantizer.abs_maxs[1] == pytest.approx(1.0)
-
-    quant_db = quantizer.quantize(db_vectors)
-    assert quant_db[0, 0] == -127
-    assert quant_db[1, 0] == 0
-    assert quant_db[2, 0] == 127
-    assert quant_db[0, 1] == -127
-    assert quant_db[1, 1] == 0
-    assert quant_db[2, 1] == 127
-
-    # FP16 test
-    db_f16 = db_vectors.astype(np.float16)
-    q_f16 = ScalarQuantizerInt8PerDim()
-    q_f16.fit(db_f16)
-    quant_f16 = q_f16.quantize(db_f16)
-    assert np.array_equal(quant_db, quant_f16)
-
-
 def test_uint8_fp16_input():
     np.random.seed(42)
     vectors_f32 = (np.random.uniform(5.0, 50.0, size=(30, 8))).astype(np.float32)
     vectors_f16 = vectors_f32.astype(np.float16)
 
-    from deglib.transformation import ScalarQuantizerUint8, ScalarQuantizerUint8PerDim
+    from deglib.transformation import ScalarQuantizerUint8
 
-    q_u8_f32 = ScalarQuantizerUint8()
+    q_u8_f32 = ScalarQuantizerUint8(8)
     q_u8_f32.fit(vectors_f32)
     res_u8_f32 = q_u8_f32.quantize(vectors_f32)
 
-    q_u8_f16 = ScalarQuantizerUint8()
+    q_u8_f16 = ScalarQuantizerUint8(8)
     q_u8_f16.fit(vectors_f16)
     res_u8_f16 = q_u8_f16.quantize(vectors_f16)
 
     np.testing.assert_allclose(res_u8_f32, res_u8_f16, atol=1)
-
-    q_pdim_f32 = ScalarQuantizerUint8PerDim()
-    q_pdim_f32.fit(vectors_f32)
-    res_pdim_f32 = q_pdim_f32.quantize(vectors_f32)
-
-    q_pdim_f16 = ScalarQuantizerUint8PerDim()
-    q_pdim_f16.fit(vectors_f16)
-    res_pdim_f16 = q_pdim_f16.quantize(vectors_f16)
-
-    np.testing.assert_allclose(res_pdim_f32, res_pdim_f16, atol=1)
 
 
 def test_fp16_quantizer_identity_in_range():
@@ -224,7 +131,7 @@ def test_fp16_quantizer_identity_in_range():
     # Values well within FP16 range -> scale stays 1.0 (bit-exact conversion).
     vectors = np.random.uniform(-2.0, 2.0, size=(40, 16)).astype(np.float32)
 
-    q = ScalarQuantizerFP16()
+    q = ScalarQuantizerFP16(16)
     assert not q.is_fitted
     q.fit(vectors)
     assert q.is_fitted
@@ -243,7 +150,7 @@ def test_fp16_quantizer_scales_large_values():
     # Audio-like dataset with values far above FP16 max (65504).
     vectors = (np.random.uniform(-100000.0, 100000.0, size=(64, 16))).astype(np.float32)
 
-    q = ScalarQuantizerFP16()
+    q = ScalarQuantizerFP16(16)
     q.fit(vectors)
     assert q.abs_max > 65504.0
     assert q.scale < 1.0
@@ -258,7 +165,7 @@ def test_fp16_quantizer_dequantize_roundtrip():
     np.random.seed(42)
     vectors = (np.random.uniform(-100000.0, 100000.0, size=(32, 16))).astype(np.float32)
 
-    q = ScalarQuantizerFP16()
+    q = ScalarQuantizerFP16(16)
     q.fit(vectors)
 
     quant = q.quantize(vectors)
@@ -273,7 +180,7 @@ def test_fp16_quantizer_serialize_roundtrip():
     np.random.seed(42)
     vectors = (np.random.uniform(-90000.0, 90000.0, size=(20, 8))).astype(np.float32)
 
-    q = ScalarQuantizerFP16()
+    q = ScalarQuantizerFP16(8)
     q.fit(vectors)
 
     data = q.serialize()
@@ -299,7 +206,7 @@ def test_fp16_quantizer_factory_and_fp16_input():
 
     # FP16 input path (scale==1) matches float32 path.
     vectors_f16 = vectors_f32.astype(np.float16)
-    q2 = ScalarQuantizerFP16()
+    q2 = ScalarQuantizerFP16(16)
     q2.fit(vectors_f16)
     np.testing.assert_array_equal(q.quantize(vectors_f32), q.quantize(vectors_f16))
 
@@ -311,7 +218,7 @@ def test_int7_quantizer_fit_and_quantize():
 
     from deglib.transformation import ScalarQuantizerUInt7, make_scalar_quantizer_uint7
 
-    q = ScalarQuantizerUInt7()
+    q = ScalarQuantizerUInt7(dim)
     assert not q.is_fitted
     q.fit(db_vectors, quantile=1.0)
     assert q.is_fitted
@@ -348,7 +255,7 @@ def test_uint4_quantizer_fit_and_quantize():
 
     from deglib.transformation import ScalarQuantizerUint4, make_scalar_quantizer_uint4
 
-    q = ScalarQuantizerUint4()
+    q = ScalarQuantizerUint4(dim)
     assert not q.is_fitted
     q.fit(db_vectors, quantile=1.0)
     assert q.is_fitted

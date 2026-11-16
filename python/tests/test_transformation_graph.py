@@ -15,8 +15,6 @@ from deglib import (
     create_searcher,
     ScalarQuantizerInt8,
     ScalarQuantizerUint8,
-    ScalarQuantizerInt8PerDim,
-    ScalarQuantizerUint8PerDim,
     ScalarQuantizerFP16,
     EvpQuantizer,
     MipsTransform,
@@ -32,7 +30,9 @@ from deglib.transformation import (
 def test_scalar_int8_transform_serialization_and_transform():
     dim = 16
     abs_max = 2.0
-    transform = ScalarQuantizerInt8(dim, abs_max=abs_max)
+    data = np.random.uniform(-abs_max, abs_max, size=(10, dim)).astype(np.float32)
+    transform = ScalarQuantizerInt8(dim)
+    transform.fit(data, quantile=1.0)
     transformations = [transform]
 
     assert len(transformations) == 1
@@ -40,8 +40,7 @@ def test_scalar_int8_transform_serialization_and_transform():
     assert transform.output_dim == dim
     assert transform.output_dtype == np.int8
 
-    scale = 127.0 / abs_max
-    data = np.random.uniform(-abs_max, abs_max, size=(10, dim)).astype(np.float32)
+    scale = 127.0 / transform.abs_max
     out = apply_database(transformations, data)
     assert out.dtype == np.int8
     expected = np.clip(np.round(data * scale), -127, 127).astype(np.int8)
@@ -60,7 +59,9 @@ def test_scalar_int8_transform_serialization_and_transform():
 def test_scalar_fp16_transform_serialization_and_transform():
     dim = 16
     # Audio-like large-range data exceeding FP16 max (65504) -> forces power-of-two scaling.
-    transform = ScalarQuantizerFP16(dim, abs_max=100000.0)
+    data = np.random.uniform(-100000.0, 100000.0, size=(10, dim)).astype(np.float32)
+    transform = ScalarQuantizerFP16(dim)
+    transform.fit(data, quantile=1.0)
     transformations = [transform]
 
     assert transform.input_dim == dim
@@ -68,7 +69,6 @@ def test_scalar_fp16_transform_serialization_and_transform():
     assert transform.output_dtype == np.float16
     assert transform.scale < 1.0
 
-    data = np.random.uniform(-100000.0, 100000.0, size=(10, dim)).astype(np.float32)
     out = apply_database(transformations, data)
     assert out.dtype == np.float16
     assert out.shape == (10, dim)
@@ -91,42 +91,22 @@ def test_scalar_uint8_transform_serialization_and_transform():
     dim = 16
     min_val = -3.0
     max_val = 3.0
-    transform = ScalarQuantizerUint8(dim, min_val=min_val, max_val=max_val)
+    data = np.random.uniform(min_val, max_val, size=(10, dim)).astype(np.float32)
+    transform = ScalarQuantizerUint8(dim)
+    transform.fit(data, quantile=1.0)
     transformations = [transform]
 
     assert transform.output_dtype == np.uint8
 
-    scale = 255.0 / (max_val - min_val)
-    data = np.random.uniform(min_val, max_val, size=(10, dim)).astype(np.float32)
+    scale = 255.0 / (transform.max_val - transform.min_val)
     out = apply_database(transformations, data)
     assert out.dtype == np.uint8
-    expected = np.clip(np.round((data - min_val) * scale), 0, 255).astype(np.uint8)
+    expected = np.clip(np.round((data - transform.min_val) * scale), 0, 255).astype(np.uint8)
     np.testing.assert_array_equal(out, expected)
 
     # Roundtrip
     deser = deserialize_transformations(serialize_transformations(transformations))
     np.testing.assert_array_equal(apply_database(deser, data), expected)
-
-
-def test_per_dim_transforms():
-    dim = 4
-    abs_maxs = [1.0, 2.0, 3.0, 4.0]
-    mins = [-1.0, -2.0, -3.0, -4.0]
-    maxs = [1.0, 2.0, 3.0, 4.0]
-
-    # Int8 PerDim
-    t_int8 = [ScalarQuantizerInt8PerDim(dim, abs_maxs=abs_maxs)]
-    assert t_int8[0].output_dtype == np.int8
-    deser_int8 = deserialize_transformations(serialize_transformations(t_int8))
-    assert len(deser_int8) == 1
-    assert deser_int8[0].output_dtype == np.int8
-
-    # Uint8 PerDim
-    t_uint8 = [ScalarQuantizerUint8PerDim(dim, mins=mins, maxs=maxs)]
-    assert t_uint8[0].output_dtype == np.uint8
-    deser_uint8 = deserialize_transformations(serialize_transformations(t_uint8))
-    assert len(deser_uint8) == 1
-    assert deser_uint8[0].output_dtype == np.uint8
 
 
 def test_mips_transform():
@@ -156,8 +136,9 @@ def test_builder_and_graph_search_with_int8_transforms():
     data = np.random.randn(N, dim).astype(np.float32)
 
     # Setup Int8 Quantizer
-    abs_max = float(np.max(np.abs(data)))
-    transformations = [ScalarQuantizerInt8(dim, abs_max=abs_max)]
+    sq = ScalarQuantizerInt8(dim)
+    sq.fit(data, quantile=1.0)
+    transformations = [sq]
 
     # Create empty graph configured with transformations
     space = FloatSpace.create(dim, Metric.Int8_L2)
@@ -195,8 +176,9 @@ def test_builder_and_graph_search_with_int8_inner_product_transform():
     data = np.random.randn(N, dim).astype(np.float32)
     data /= np.linalg.norm(data, axis=1, keepdims=True)
 
-    abs_max = float(np.max(np.abs(data)))
-    transformations = [ScalarQuantizerInt8(dim, abs_max=abs_max)]
+    sq = ScalarQuantizerInt8(dim)
+    sq.fit(data, quantile=1.0)
+    transformations = [sq]
     space = FloatSpace.create(dim, Metric.Int8_InnerProduct)
     graph = create_empty(N, space, edges_per_vertex=16, transformations=transformations)
 
@@ -213,8 +195,9 @@ def test_container_persistence_roundtrip():
     N, dim = 50, 16
     data = np.random.randn(N, dim).astype(np.float32)
 
-    abs_max = float(np.max(np.abs(data)))
-    transformations = [ScalarQuantizerInt8(dim, abs_max=abs_max)]
+    sq = ScalarQuantizerInt8(dim)
+    sq.fit(data, quantile=1.0)
+    transformations = [sq]
 
     space = FloatSpace.create(dim, Metric.Int8_L2)
     graph = create_empty(N, space, edges_per_vertex=16, transformations=transformations)
@@ -337,7 +320,8 @@ def test_transformation_graph_search_fp16():
     np.random.seed(42)
     data_f32 = np.random.randn(N, dim).astype(np.float32)
 
-    transform = ScalarQuantizerInt8(dim, abs_max=float(np.max(np.abs(data_f32))))
+    transform = ScalarQuantizerInt8(dim)
+    transform.fit(data_f32, quantile=1.0)
     space = FloatSpace.create(dim, Metric.Int8_L2)
 
     graph = create_empty(N, space, edges_per_vertex=edges_per_vertex, transformations=[transform])
@@ -377,7 +361,8 @@ def test_uint4_transformation_graph_search():
     np.random.seed(42)
     data_f32 = np.random.uniform(0.0, 10.0, size=(N, dim)).astype(np.float32)
 
-    transform = ScalarQuantizerUint4(dim, min_val=0.0, max_val=10.0)
+    transform = ScalarQuantizerUint4(dim)
+    transform.fit(data_f32, quantile=1.0)
     space = FloatSpace.create(dim, Metric.Uint4_L2)
 
     quantized_data = transform.quantize(data_f32)

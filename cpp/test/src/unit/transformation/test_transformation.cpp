@@ -88,7 +88,7 @@ TEST(TransformTest, ScalarQuantizersRoundtrip) {
     for (size_t i = 0; i < data.size(); ++i) data[i] = static_cast<float>(i) * 0.1f - 5.0f;
 
     // INT8
-    auto sqi8 = std::make_shared<ScalarQuantizerInt8>(dim, 10.0f);
+    auto sqi8 = std::make_shared<ScalarQuantizerInt8>(dim);
     sqi8->fit(std::span<const float>(data));
     std::stringstream ss_i8(std::ios::in | std::ios::out | std::ios::binary);
     sqi8->serialize(ss_i8);
@@ -97,7 +97,7 @@ TEST(TransformTest, ScalarQuantizersRoundtrip) {
     EXPECT_FLOAT_EQ(sqi8_deser->scale(), sqi8->scale());
 
     // UINT8
-    auto squ8 = std::make_shared<ScalarQuantizerUint8>(dim, -5.0f, 15.0f);
+    auto squ8 = std::make_shared<ScalarQuantizerUint8>(dim);
     squ8->fit(std::span<const float>(data));
     std::stringstream ss_u8(std::ios::in | std::ios::out | std::ios::binary);
     squ8->serialize(ss_u8);
@@ -118,7 +118,12 @@ TEST(TransformTest, VectorOfTransformsChainingAndSerialization) {
     mips->fit(std::span<const float>(data));
 
     // Step 2: ScalarQuantizerInt8 (33 -> 33)
-    auto sqi8 = std::make_shared<ScalarQuantizerInt8>(in_dim + 1, 5.0f);
+    auto sqi8 = std::make_shared<ScalarQuantizerInt8>(in_dim + 1);
+    std::vector<float> mips_data(count * (in_dim + 1));
+    std::vector<std::byte> mips_bytes(mips_data.size() * sizeof(float));
+    mips->transform_database(std::span<const float>(data), std::span<std::byte>(mips_bytes));
+    std::memcpy(mips_data.data(), mips_bytes.data(), mips_bytes.size());
+    sqi8->fit(std::span<const float>(mips_data));
 
     std::vector<std::shared_ptr<FeatureTransformation>> transformations = {mips, sqi8};
 

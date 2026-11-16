@@ -24,7 +24,7 @@ TEST(GraphSerializationTest, BuildWithPipelineSaveAndLoadSearch) {
     for (auto& v : data) v = dist(rnd);
 
     // 2. Quantizer trainieren (z. B. Scalar INT8)
-    auto sqi8 = std::make_shared<ScalarQuantizerInt8>(dim, 3.0f);
+    auto sqi8 = std::make_shared<ScalarQuantizerInt8>(dim);
     sqi8->fit(std::span<const float>(data));
 
     std::vector<std::shared_ptr<FeatureTransformation>> transformations = {sqi8};

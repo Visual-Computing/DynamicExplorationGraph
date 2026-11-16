@@ -50,8 +50,6 @@ inline void normalize_vector_l2(const float* src, float* dst, uint32_t dim) noex
  */
 class L2NormalizeTransform : public FeatureTransformation {
   public:
-    using output_type = float;
-
     L2NormalizeTransform() = default;
     explicit L2NormalizeTransform(uint32_t dim) : dim_(dim) {}
 
