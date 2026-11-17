@@ -109,6 +109,30 @@ TEST(SearcherTest, QuantizedInt8WithFP16Reranker) {
     EXPECT_NEAR(res.distances[0], 0.0f, 1e-3f);
 }
 
+TEST(SearcherTest, RerankerFromGraphFP32ToFP16) {
+    const uint32_t dim = 8;
+    const uint32_t count = 32;
+    std::vector<float> data(count * dim);
+    for (size_t i = 0; i < count; ++i) {
+        for (uint32_t d = 0; d < dim; ++d) {
+            data[i * dim + d] = static_cast<float>(i) * 0.5f + static_cast<float>(d) * 0.05f;
+        }
+    }
+    auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
+    auto reranker = deglib::search::Reranker::from_graph(graph.internal(), deglib::distances::Metric::FP16_L2);
+    EXPECT_EQ(reranker.getNumBaseVectors(), count);
+    EXPECT_FALSE(reranker.getTransformations().empty());
+
+    std::vector<uint32_t> cands(count);
+    for (uint32_t i = 0; i < count; ++i) cands[i] = i;
+    std::vector<uint32_t> out_idx(2);
+    std::vector<float> out_dist(2);
+    const uint32_t target = 11;
+    reranker.rerank_f32(std::span<const float>(data.data() + target * dim, dim), cands, 2, out_idx, out_dist, true, false);
+    EXPECT_EQ(out_idx[0], target);
+    EXPECT_NEAR(out_dist[0], 0.0f, 1e-2f);
+}
+
 TEST(SearcherTest, QuantizedUint8WithFP32Reranker) {
     const uint32_t dim = 8;
     const uint32_t count = 50;

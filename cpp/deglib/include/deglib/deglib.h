@@ -121,6 +121,10 @@ inline std::unique_ptr<deglib::search::Searcher> make_searcher(const DynamicExpl
     return std::make_unique<deglib::search::Searcher>(graph.internal(), graph.getTransformations());
 }
 
+inline std::unique_ptr<deglib::search::Searcher> make_searcher(const DynamicExplorationGraph& graph, std::shared_ptr<deglib::search::Reranker> reranker) {
+    return std::make_unique<deglib::search::Searcher>(graph.internal(), graph.getTransformations(), std::move(reranker));
+}
+
 inline std::unique_ptr<deglib::search::Searcher> make_searcher(const DynamicExplorationGraph& graph, deglib::search::Reranker reranker) {
     return std::make_unique<deglib::search::Searcher>(graph.internal(), graph.getTransformations(), std::move(reranker));
 }

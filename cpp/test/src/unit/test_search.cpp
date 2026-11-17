@@ -251,7 +251,11 @@ TEST(Rerank, RerankerClassDirectUsage) {
 
     deglib::search::Reranker reranker(fs, std::as_bytes(std::span(base)), 3);
     EXPECT_EQ(reranker.getNumBaseVectors(), 3u);
-    EXPECT_EQ(reranker.getBaseVectors(), base.data());
+    EXPECT_NE(reranker.getBaseVectors(), nullptr);
+    EXPECT_NE(reranker.getBaseVectors(), base.data());
+    for (size_t i = 0; i < 3; ++i) {
+        EXPECT_EQ(std::memcmp(reranker.getBaseVector(i), base.data() + i * 2, 2 * sizeof(float)), 0);
+    }
 
     std::vector<uint32_t> out_indices(2);
     std::vector<float> out_dists(2);
@@ -448,4 +452,70 @@ TEST(Rerank, RejectsMismatchedOrInsufficientBaseVectorsSpan) {
 
     // Valid: 0 vectors with empty span
     EXPECT_NO_THROW(deglib::search::Reranker(fs, {}, 0));
+}
+
+TEST(Rerank, FromDataFP32ToFP16OwnsStorageAndTransformsQueries) {
+    const uint32_t dim = 8;
+    const size_t count = 32;
+    std::vector<float> data(count * dim);
+    for (size_t i = 0; i < count; ++i) {
+        for (uint32_t d = 0; d < dim; ++d) {
+            data[i * dim + d] = static_cast<float>(i) * 0.25f + static_cast<float>(d) * 0.01f;
+        }
+    }
+
+    auto reranker = deglib::search::Reranker::from_data(deglib::distances::Metric::FP16_L2, data, dim);
+    EXPECT_EQ(reranker.getNumBaseVectors(), count);
+    EXPECT_EQ(reranker.getSpace().metric(), deglib::distances::Metric::FP16_L2);
+    EXPECT_FALSE(reranker.getTransformations().empty());
+
+    std::vector<uint32_t> cands(count);
+    for (uint32_t i = 0; i < count; ++i) cands[i] = i;
+    std::vector<uint32_t> out_idx(3);
+    std::vector<float> out_dist(3);
+
+    const uint32_t target = 17;
+    uint32_t found = reranker.rerank_f32(
+        std::span<const float>(data.data() + target * dim, dim),
+        cands, 3, out_idx, out_dist, true, false
+    );
+    EXPECT_EQ(found, 3u);
+    EXPECT_EQ(out_idx[0], target);
+    EXPECT_NEAR(out_dist[0], 0.0f, 1e-2f);
+}
+
+TEST(Rerank, FromDataRowIndicesGathersDirectly) {
+    const uint32_t dim = 4;
+    std::vector<float> data = {
+        10.0f, 0.0f, 0.0f, 0.0f,  // label 0
+        20.0f, 0.0f, 0.0f, 0.0f,  // label 1
+        0.0f,  0.0f, 0.0f, 0.0f,  // label 2
+    };
+    std::vector<uint32_t> labels = {2, 0};  // internal 0 -> label 2, internal 1 -> label 0
+    auto reranker = deglib::search::Reranker::from_data(deglib::distances::Metric::FP16_L2, data, dim, {}, 0, labels);
+    EXPECT_EQ(reranker.getNumBaseVectors(), 2u);
+
+    std::vector<float> query = {0.1f, 0.0f, 0.0f, 0.0f};
+    std::vector<uint32_t> cands = {0, 1};
+    std::vector<uint32_t> out_idx(2);
+    reranker.rerank_f32(query, cands, 2, out_idx, {}, false, false);
+    EXPECT_EQ(out_idx[0], 0u);  // internal index 0 (label 2 = [0,0,0,0]) is closest to [0.1,0,0,0]
+    EXPECT_EQ(out_idx[1], 1u);
+}
+
+TEST(Rerank, AlignedBasePointerAndDenseRows) {
+    const uint32_t dim = 200;  // FP16 row = 400 bytes, tightly packed (no row-stride padding)
+    const size_t count = 16;
+    std::vector<float> data(count * dim, 0.0f);
+    for (size_t i = 0; i < count; ++i) data[i * dim] = static_cast<float>(i);
+
+    auto reranker = deglib::search::Reranker::from_data(deglib::distances::Metric::FP16_L2, data, dim);
+    EXPECT_EQ(reranker.getBaseVector(1) - reranker.getBaseVector(0), 400);
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(reranker.getBaseVector(0)) % 64u, 0u);
+
+    std::vector<uint32_t> cands(count);
+    for (uint32_t i = 0; i < count; ++i) cands[i] = i;
+    std::vector<uint32_t> out_idx(2);
+    reranker.rerank_f32(std::span<const float>(data.data() + 9 * dim, dim), cands, 2, out_idx, {}, false, false);
+    EXPECT_EQ(out_idx[0], 9u);
 }

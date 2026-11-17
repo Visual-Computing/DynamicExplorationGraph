@@ -76,8 +76,8 @@ def _load_or_build_base_graph(
     opt_enum: deglib.OptimizationTarget,
     threads: int,
     cache_dir: Path | None,
-) -> tuple[deglib.DynamicExplorationGraph, np.ndarray]:
-    """Normalizes cosine vectors, builds (or loads from cache) the FP32 base graph, and returns (graph, X)."""
+) -> deglib.DynamicExplorationGraph:
+    """Normalizes cosine vectors and builds (or loads from cache) the FP32 base graph."""
     if metric == "cosine":
         X = X / np.linalg.norm(X, axis=1, keepdims=True)
     X = np.ascontiguousarray(X, dtype=np.float32)
@@ -87,7 +87,7 @@ def _load_or_build_base_graph(
     cache_file = _resolve_graph_cache_path(deg_dir, dims, metric, k, opt_target)
     if cache_file.exists():
         print(f"Loading cached DEG graph from {cache_file}...", flush=True)
-        return deglib.load_readonly_graph(str(cache_file)), X
+        return deglib.load_readonly_graph(str(cache_file))
 
     presort_metric = "l2" if metric == "euclidean" else "ip"
     presort_file = deg_dir / f"{dims}D_{presort_metric}_presort.npy"
@@ -113,7 +113,7 @@ def _load_or_build_base_graph(
     )
     print(f"Saving graph to cache {cache_file}...", flush=True)
     graph.save_graph(str(cache_file))
-    return graph, X
+    return graph
 
 
 class _BaseDEG(BaseANN):
@@ -141,7 +141,7 @@ class DEG(_BaseDEG):
 
     def fit(self, X: np.ndarray, cache_dir: Path | None = None):
         """Builds or loads the DEG graph in FP32 and prepares the Searcher."""
-        graph, _ = _load_or_build_base_graph(
+        graph = _load_or_build_base_graph(
             X, self.metric, self.k, self.opt_target, self.build_metric, self.opt_enum, self.threads, cache_dir
         )
         t_km = time.time()
@@ -205,12 +205,12 @@ class QG(_BaseDEG):
 
     def fit(self, X: np.ndarray, cache_dir: Path | None = None):
         """Builds DEG graph once, creates one shared FP16 Reranker, and converts into one Searcher per quant."""
-        loaded_graph, X = _load_or_build_base_graph(
+        loaded_graph = _load_or_build_base_graph(
             X, self.metric, self.k, self.opt_target, self.build_metric, self.opt_enum, self.threads, cache_dir
         )
 
         t_rr = time.time()
-        reranker = loaded_graph.to_reranker(self.rerank_metric, data=X, threads=self.threads)
+        reranker = loaded_graph.to_reranker(self.rerank_metric, threads=self.threads)
         print(f"Prepared shared FP16 Reranker in {time.time() - t_rr:.2f}s", flush=True)
 
         self.searchers.clear()

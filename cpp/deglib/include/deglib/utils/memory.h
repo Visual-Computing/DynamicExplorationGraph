@@ -3,10 +3,37 @@
 #include "deglib/config.h"
 
 #include <cstddef>
+#include <limits>
+#include <memory>
 
 namespace deglib::memory {
 
 static const size_t L1_CACHE_LINE_SIZE = 64;
+inline constexpr size_t kCacheLineAlignment = 64;
+inline constexpr size_t kHugePageAlignment = 2u * 1024u * 1024u;
+
+inline constexpr size_t align_up(size_t value, size_t alignment) noexcept { return (value + alignment - 1) / alignment * alignment; }
+
+inline constexpr size_t storage_alignment(size_t bytes) noexcept {
+    return bytes >= kHugePageAlignment ? kHugePageAlignment : kCacheLineAlignment;
+}
+
+template <typename T>
+inline void allocate_aligned(std::unique_ptr<std::byte[]>& storage, T*& out, size_t bytes) {
+    if (bytes == 0) {
+        storage.reset();
+        out = nullptr;
+        return;
+    }
+    const size_t alignment = storage_alignment(bytes);
+    storage = std::make_unique_for_overwrite<std::byte[]>(bytes + alignment);
+
+    void* ptr = storage.get();
+    size_t space = std::numeric_limits<size_t>::max();
+    std::align(alignment, bytes, ptr, space);
+
+    out = static_cast<T*>(ptr);
+}
 
 inline static void prefetch(const char* ptr, const size_t size = 128) {
     size_t pos = 0;

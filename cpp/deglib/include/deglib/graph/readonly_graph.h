@@ -26,26 +26,9 @@ namespace deglib::graph {
 
 namespace detail {
 
-inline constexpr size_t kCacheLineAlignment = 64;
-inline constexpr size_t kHugePageAlignment = 2u * 1024u * 1024u;
-
-inline constexpr size_t align_up(size_t value, size_t alignment) noexcept { return (value + alignment - 1) / alignment * alignment; }
-
-inline constexpr size_t storage_alignment(size_t bytes) noexcept {
-    return bytes >= kHugePageAlignment ? kHugePageAlignment : kCacheLineAlignment;
-}
-
-template <typename T>
-void allocate_aligned(std::unique_ptr<std::byte[]>& storage, T*& out, size_t bytes) {
-    const size_t alignment = storage_alignment(bytes);
-    storage = std::make_unique_for_overwrite<std::byte[]>(bytes + alignment);
-
-    void* ptr = storage.get();
-    size_t space = std::numeric_limits<size_t>::max();
-    std::align(alignment, bytes, ptr, space);
-
-    out = static_cast<T*>(ptr);
-}
+using deglib::memory::align_up;
+using deglib::memory::allocate_aligned;
+using deglib::memory::kCacheLineAlignment;
 
 }  // namespace detail
 

@@ -347,56 +347,49 @@ class DynamicExplorationGraph:
         if order not in ("label", "internal"):
             raise ValueError(f"order must be 'label' or 'internal', got {order!r}")
 
-        from deglib.search import Reranker, _FP16_METRICS
+        from deglib.search import Reranker
 
         resolved_metric = Metric.resolve(metric)
         r_xfrms = _normalize_transforms(transformations)
+        for i, t in enumerate(r_xfrms):
+            if not isinstance(t, FeatureTransformation):
+                raise TypeError(f"transformations[{i}] must be a FeatureTransformation, got {type(t).__name__}")
 
         if data is None:
-            extracted_data, extracted_xfrms = deglib_cpp.extract_rerank_from_graph(
+            reranker_cpp = deglib_cpp.search.Reranker.from_graph(
                 self.dynamic_exploration_graph_cpp,
                 resolved_metric._to_cpp_metric(),
+                r_xfrms,
                 int(threads),
             )
-            if not r_xfrms:
-                if extracted_xfrms:
-                    r_xfrms = extracted_xfrms
-                elif (
-                    Metric(int(resolved_metric)) in _FP16_METRICS
-                    and Metric(int(self.get_metric())) in _FP16_METRICS
-                    and self.has_transformations()
-                ):
-                    r_xfrms = self.get_transformations()
-            aligned = extracted_data
-        else:
-            raw_data = np.asarray(data)
-            if raw_data.ndim != 2:
-                raise ValueError(f"data must be a 2D array, got shape {raw_data.shape}")
-            n_vertices = self.size()
-            if order == "label":
-                if n_vertices == 0:
-                    aligned = np.ascontiguousarray(raw_data[:0])
-                else:
-                    labels = self.get_labels()
-                    if int(labels.max()) >= raw_data.shape[0]:
-                        raise ValueError(
-                            f"Max graph external label ({int(labels.max())}) >= data row count ({raw_data.shape[0]}). "
-                            "Pass data indexed by external labels or set order='internal'."
-                        )
-                    aligned = np.ascontiguousarray(raw_data[labels])
+            return Reranker._from_cpp(resolved_metric, reranker_cpp, optimize=optimize)
+
+        raw_data = np.asarray(data)
+        if raw_data.ndim != 2:
+            raise ValueError(f"data must be a 2D array, got shape {raw_data.shape}")
+        n_vertices = self.size()
+        row_indices = None
+        if order == "label":
+            if n_vertices == 0:
+                raw_data = raw_data[:0]
             else:
-                if raw_data.shape[0] != n_vertices:
+                labels = self.get_labels()
+                if int(labels.max()) >= raw_data.shape[0]:
                     raise ValueError(
-                        f"data row count ({raw_data.shape[0]}) does not match graph.size() ({n_vertices})."
+                        f"Max graph external label ({int(labels.max())}) >= data row count ({raw_data.shape[0]}). "
+                        "Pass data indexed by external labels or set order='internal'."
                     )
-                aligned = np.ascontiguousarray(raw_data)
+                row_indices = labels
+        elif raw_data.shape[0] != n_vertices:
+            raise ValueError(f"data row count ({raw_data.shape[0]}) does not match graph.size() ({n_vertices}).")
 
         return Reranker(
             metric=resolved_metric,
-            base_vectors=aligned,
+            base_vectors=raw_data,
             transformations=r_xfrms,
             optimize=optimize,
             threads=threads,
+            row_indices=row_indices,
         )
 
     def to_searcher(

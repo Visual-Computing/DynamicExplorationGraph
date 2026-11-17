@@ -4,14 +4,10 @@ import numpy as np
 import deglib_cpp
 
 from deglib.distances import Metric, _infer_dim_from_array
-from deglib.graph import DynamicExplorationGraph, _FP16_METRICS, _FP32_METRICS
+from deglib.graph import DynamicExplorationGraph
 from deglib.transformation import (
     FeatureTransformation,
     _normalize_transforms,
-    apply_on_database,
-    apply_on_query,
-    make_quantizer_pipeline,
-    make_scalar_quantizer_fp16,
 )
 from deglib.utils import assure_array, assure_contiguous
 
@@ -44,48 +40,9 @@ class Filter:
         return cls(np.asarray(valid_labels), max_value=max_value)
 
 
-def _prepare_rerank_vectors_and_transforms(
-    metric: Metric,
-    vectors: np.ndarray,
-    transformations: list[FeatureTransformation],
-    threads: int,
-) -> tuple[np.ndarray, int, list[FeatureTransformation]]:
-    arr = np.asarray(vectors)
-    if arr.ndim != 2:
-        raise ValueError(f"base_vectors must be a 2D array, got shape {arr.shape}")
-    arr = np.ascontiguousarray(arr)
-
-    base_metric = Metric(int(metric))
-    xfrms = list(transformations)
-
-    if len(xfrms) == 0 and arr.dtype == np.float32 and base_metric not in _FP32_METRICS:
-        if base_metric in _FP16_METRICS:
-            q = make_scalar_quantizer_fp16(arr)
-            xfrms = [q]
-            arr = apply_on_database(xfrms, arr, threads=threads)
-            dim = int(arr.shape[1])
-        else:
-            dim = int(arr.shape[1])
-            xfrms = make_quantizer_pipeline(arr, metric, use_rerank=True, threads=threads)
-            arr = apply_on_database(xfrms, arr, threads=threads)
-    elif (
-        len(xfrms) > 0
-        and arr.dtype == np.float32
-        and arr.shape[1] == xfrms[0].input_dim
-        and (xfrms[-1].output_dtype != np.float32 or xfrms[-1].output_dim != arr.shape[1])
-    ):
-        arr = apply_on_database(xfrms, arr, threads=threads)
-        dim = int(xfrms[-1].output_dim)
-    else:
-        arr = assure_array(arr, "base_vectors", metric.get_accepted_dtypes())
-        dim = _infer_dim_from_array(metric, arr)
-
-    return arr, dim, xfrms
-
-
 class Reranker:
     """
-    Standalone candidate reranker for exact scoring over candidate indices.
+    Standalone owning C++ candidate reranker for exact scoring over candidate indices.
     """
 
     def __init__(
@@ -95,6 +52,7 @@ class Reranker:
         transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
         optimize: bool = False,
         threads: int = 0,
+        row_indices: np.ndarray | None = None,
     ):
         resolved_metric = Metric.resolve(metric)
         xfrms = _normalize_transforms(transformations)
@@ -102,17 +60,48 @@ class Reranker:
             if not isinstance(t, FeatureTransformation):
                 raise TypeError(f"transformations[{i}] must be a FeatureTransformation, got {type(t).__name__}")
 
-        prepared_vectors, dim, prepared_xfrms = _prepare_rerank_vectors_and_transforms(
-            resolved_metric, base_vectors, xfrms, threads
-        )
-        cpp_space = resolved_metric._to_cpp_space(dim)
+        arr = np.asarray(base_vectors)
+        if arr.ndim != 2:
+            raise ValueError(f"base_vectors must be a 2D array, got shape {arr.shape}")
+        arr = np.ascontiguousarray(arr)
+
+        idx = None if row_indices is None else np.ascontiguousarray(row_indices, dtype=np.uint32)
 
         self.metric = resolved_metric
-        self._dim = dim
-        self._transformations = prepared_xfrms
-        self._reranker_cpp = cpp_search.Reranker(cpp_space, prepared_vectors, prepared_xfrms)
-        if optimize and prepared_vectors.shape[0] > 0:
+        if arr.dtype == np.float32:
+            self._reranker_cpp = cpp_search.Reranker.from_float32(
+                resolved_metric._to_cpp_metric(),
+                arr,
+                xfrms,
+                int(threads),
+                idx,
+            )
+            self._dim = int(self._reranker_cpp.get_dim())
+        else:
+            arr = assure_array(arr, "base_vectors", resolved_metric.get_accepted_dtypes())
+            dim = _infer_dim_from_array(resolved_metric, arr)
+            cpp_space = resolved_metric._to_cpp_space(dim)
+            self._reranker_cpp = cpp_search.Reranker.from_raw(
+                cpp_space,
+                arr,
+                xfrms,
+                int(threads),
+                idx,
+            )
+            self._dim = dim
+
+        if optimize and self.get_num_base_vectors() > 0:
             self.optimize()
+
+    @classmethod
+    def _from_cpp(cls, metric: Metric, reranker_cpp, optimize: bool = False) -> "Reranker":
+        obj = cls.__new__(cls)
+        obj.metric = metric
+        obj._reranker_cpp = reranker_cpp
+        obj._dim = int(reranker_cpp.get_dim())
+        if optimize and obj.get_num_base_vectors() > 0:
+            obj.optimize()
+        return obj
 
     def get_num_base_vectors(self) -> int:
         return int(self._reranker_cpp.get_num_base_vectors())
@@ -141,19 +130,7 @@ class Reranker:
         """
         Score and rank ``candidate_indices`` for ``queries`` against stored base vectors.
         """
-        if not isinstance(queries, np.ndarray):
-            queries = np.ascontiguousarray(queries, dtype=np.float32)
-        elif not queries.flags.c_contiguous:
-            queries = np.ascontiguousarray(queries)
-
-        if self._transformations:
-            expected_bytes = self.metric.get_data_size(self._dim)
-            row_bytes = int(queries.shape[-1]) * queries.dtype.itemsize
-            if queries.dtype == np.float32 or row_bytes != expected_bytes:
-                if queries.dtype != np.float32:
-                    queries = np.ascontiguousarray(queries, dtype=np.float32)
-                queries = apply_on_query(self._transformations, queries)
-
+        queries = np.ascontiguousarray(queries)
         cand = np.ascontiguousarray(candidate_indices, dtype=np.uint32)
         return self._reranker_cpp.rerank(
             queries,
@@ -241,69 +218,24 @@ class Searcher:
                 reranker._reranker_cpp,
                 bool(normalize_query),
             )
-        else:
-            r_xfrms = _normalize_transforms(rerank_transformations)
-            for i, t in enumerate(r_xfrms):
-                if not isinstance(t, FeatureTransformation):
-                    raise TypeError(
-                        f"rerank_transformations[{i}] must be a FeatureTransformation, got {type(t).__name__}"
-                    )
-
-            rerank_space_cpp = None
-            prepared_rerank = None
-
-            if rerank_metric is not None:
-                resolved_rerank = Metric.resolve(rerank_metric)
-                if rerank_data is None:
-                    prepared_rerank, extracted_xfrms = deglib_cpp.extract_rerank_from_graph(
-                        cpp_graph,
-                        resolved_rerank._to_cpp_metric(),
-                        int(threads),
-                    )
-                    if not r_xfrms:
-                        if extracted_xfrms:
-                            r_xfrms = extracted_xfrms
-                        elif (
-                            Metric(int(resolved_rerank)) in _FP16_METRICS
-                            and Metric(int(graph.get_metric())) in _FP16_METRICS
-                            and graph.has_transformations()
-                        ):
-                            r_xfrms = graph.get_transformations()
-                    rerank_dim = graph.get_dim()
-                else:
-                    raw_rerank = np.asarray(rerank_data)
-                    if raw_rerank.ndim != 2:
-                        raise ValueError(f"rerank_data must be a 2D array, got shape {raw_rerank.shape}")
-                    n_vertices = graph.size()
-                    if rerank_order == "label":
-                        if n_vertices == 0:
-                            aligned = np.ascontiguousarray(raw_rerank[:0])
-                        else:
-                            labels = graph.get_labels()
-                            if int(labels.max()) >= raw_rerank.shape[0]:
-                                raise ValueError(
-                                    f"Max graph external label ({int(labels.max())}) >= rerank_data row count ({raw_rerank.shape[0]}). "
-                                    "Pass rerank_data indexed by external labels or set rerank_order='internal'."
-                                )
-                            aligned = np.ascontiguousarray(raw_rerank[labels])
-                    else:
-                        if raw_rerank.shape[0] != n_vertices:
-                            raise ValueError(
-                                f"rerank_data row count ({raw_rerank.shape[0]}) does not match graph.size() ({n_vertices})."
-                            )
-                        aligned = np.ascontiguousarray(raw_rerank)
-
-                    prepared_rerank, rerank_dim, r_xfrms = _prepare_rerank_vectors_and_transforms(
-                        resolved_rerank, aligned, r_xfrms, threads
-                    )
-
-                rerank_space_cpp = resolved_rerank._to_cpp_space(rerank_dim)
-
+        elif rerank_metric is not None:
+            built_reranker = graph.to_reranker(
+                rerank_metric,
+                data=rerank_data,
+                order=rerank_order,
+                transformations=rerank_transformations,
+                optimize=False,
+                threads=threads,
+            )
             self._searcher_cpp = cpp_search.Searcher(
                 cpp_graph,
-                rerank_space_cpp,
-                prepared_rerank,
-                r_xfrms,
+                built_reranker._reranker_cpp,
+                bool(normalize_query),
+            )
+        else:
+            self._searcher_cpp = cpp_search.Searcher(
+                cpp_graph,
+                None,
                 bool(normalize_query),
             )
 
@@ -419,29 +351,16 @@ def create_searcher(
             "specify rerank_metric (e.g. Metric.FP16_InnerProduct) to enable reranking."
         )
 
-    # Extract rerank vectors from source graph BEFORE converting/quantizing `graph`.
-    resolved_rerank_metric = None if rerank_metric is None else Metric.resolve(rerank_metric)
-    resolved_rerank_xfrms = _normalize_transforms(rerank_transformations)
-    extracted_rerank_data = rerank_data
-    effective_rerank_order: Literal["label", "internal"] = rerank_order
-
-    if reranker is None and resolved_rerank_metric is not None and rerank_data is None:
-        cpp_graph = getattr(graph, "dynamic_exploration_graph_cpp", graph)
-        extracted_rerank_data, extracted_xfrms = deglib_cpp.extract_rerank_from_graph(
-            cpp_graph,
-            resolved_rerank_metric._to_cpp_metric(),
-            int(threads),
+    # Build Reranker from source graph BEFORE converting/quantizing `graph`.
+    if reranker is None and rerank_metric is not None:
+        reranker = graph.to_reranker(
+            rerank_metric,
+            data=rerank_data,
+            order=rerank_order,
+            transformations=rerank_transformations,
+            optimize=False,
+            threads=threads,
         )
-        effective_rerank_order = "internal"
-        if not resolved_rerank_xfrms:
-            if extracted_xfrms:
-                resolved_rerank_xfrms = extracted_xfrms
-            elif (
-                Metric(int(resolved_rerank_metric)) in _FP16_METRICS
-                and Metric(int(graph.get_metric())) in _FP16_METRICS
-                and graph.has_transformations()
-            ):
-                resolved_rerank_xfrms = graph.get_transformations()
 
     # Quantize / convert graph only if `metric` was specified and differs in metric or explicit instruction.
     search_graph = graph
@@ -456,7 +375,7 @@ def create_searcher(
         if needs_conversion:
             search_graph = graph.to_readonly(
                 metric=target_metric,
-                use_rerank=(reranker is not None or resolved_rerank_metric is not None),
+                use_rerank=(reranker is not None),
                 optimize=False,
                 threads=threads,
             )
@@ -464,10 +383,6 @@ def create_searcher(
     return Searcher(
         graph=search_graph,
         reranker=reranker,
-        rerank_metric=resolved_rerank_metric,
-        rerank_data=extracted_rerank_data,
-        rerank_order=effective_rerank_order,
-        rerank_transformations=resolved_rerank_xfrms or None,
         normalize_query=normalize_query,
         optimize=optimize,
         use_routing=use_routing,

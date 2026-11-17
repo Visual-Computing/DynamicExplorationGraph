@@ -568,107 +568,187 @@ py::array_t<float> float_space_compute_distances(const deglib::distances::FloatS
 // Standalone Reranker Wrapper
 // ============================================================================
 
-class RerankerPy {
-  public:
-    static std::span<const std::byte> validate_and_get_span(const deglib::distances::FloatSpace& space, const py::array& base_vectors) {
-        auto buf = base_vectors.request();
-        if (buf.ndim != 2) {
-            throw std::invalid_argument("base_vectors must be a 2D array");
+// ============================================================================
+// Reranker Binding Helpers (thin marshaling around C++ owning Reranker)
+// ============================================================================
+
+static std::shared_ptr<deglib::search::Reranker> reranker_from_float32(
+    deglib::distances::MetricType metric,
+    py::array_t<float, py::array::c_style> data,
+    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
+    size_t threads = 0,
+    std::optional<py::array_t<uint32_t, py::array::c_style>> row_indices = std::nullopt
+) {
+    auto buf = data.request();
+    if (buf.ndim != 2) {
+        throw std::invalid_argument("base_vectors must be a 2D array");
+    }
+    const size_t n_rows = static_cast<size_t>(buf.shape[0]);
+    const uint32_t dim = static_cast<uint32_t>(buf.shape[1]);
+    std::span<const float> data_span(static_cast<const float*>(buf.ptr), n_rows * dim);
+
+    std::span<const uint32_t> idx_span;
+    if (row_indices.has_value()) {
+        auto idx_buf = row_indices->request();
+        if (idx_buf.ndim != 1) {
+            throw std::invalid_argument("row_indices must be a 1D array");
         }
-        const size_t req_bytes = space.get_data_size();
-        const size_t stride_bytes = size_t(buf.shape[1]) * buf.itemsize;
-        if (stride_bytes != req_bytes) {
-            throw std::invalid_argument(std::format("Base vector row size ({}) does not match feature space data size ({})", stride_bytes, req_bytes));
-        }
-        const size_t total_bytes = size_t(buf.shape[0]) * stride_bytes;
-        return std::span<const std::byte>(static_cast<const std::byte*>(buf.ptr), total_bytes);
+        idx_span = std::span<const uint32_t>(static_cast<const uint32_t*>(idx_buf.ptr), static_cast<size_t>(idx_buf.shape[0]));
     }
 
-  private:
-    py::array base_vectors_holder_;
-    deglib::search::Reranker reranker_;
+    py::gil_scoped_release release;
+    return std::make_shared<deglib::search::Reranker>(
+        deglib::search::Reranker::from_data(deglib::distances::Metric(metric), data_span, dim, std::move(transformations), threads, idx_span)
+    );
+}
 
-  public:
-    RerankerPy(
-        const deglib::distances::FloatSpace& space,
-        py::array base_vectors,
-        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
-    )
-        : base_vectors_holder_(std::move(base_vectors)),
-          reranker_(space, validate_and_get_span(space, base_vectors_holder_), base_vectors_holder_.request().shape[0], std::move(transformations)) {}
+static std::shared_ptr<deglib::search::Reranker> reranker_from_raw(
+    const deglib::distances::FloatSpace& space,
+    py::array data,
+    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
+    size_t threads = 0,
+    std::optional<py::array_t<uint32_t, py::array::c_style>> row_indices = std::nullopt
+) {
+    auto c_data = py::array::ensure(data, py::array::c_style);
+    if (!c_data) {
+        throw std::invalid_argument("base_vectors must be convertible to a C-contiguous array");
+    }
+    auto buf = c_data.request();
+    if (buf.ndim != 2) {
+        throw std::invalid_argument("base_vectors must be a 2D array");
+    }
+    const size_t req_bytes = space.get_data_size();
+    const size_t stride_bytes = static_cast<size_t>(buf.shape[1]) * static_cast<size_t>(buf.itemsize);
+    if (stride_bytes != req_bytes) {
+        throw std::invalid_argument(std::format("Base vector row size ({}) does not match feature space data size ({})", stride_bytes, req_bytes));
+    }
+    const size_t n_rows = static_cast<size_t>(buf.shape[0]);
+    std::span<const std::byte> data_span(static_cast<const std::byte*>(buf.ptr), n_rows * stride_bytes);
 
-    size_t get_num_base_vectors() const noexcept { return reranker_.getNumBaseVectors(); }
+    std::span<const uint32_t> idx_span;
+    if (row_indices.has_value()) {
+        auto idx_buf = row_indices->request();
+        if (idx_buf.ndim != 1) {
+            throw std::invalid_argument("row_indices must be a 1D array");
+        }
+        idx_span = std::span<const uint32_t>(static_cast<const uint32_t*>(idx_buf.ptr), static_cast<size_t>(idx_buf.shape[0]));
+    }
 
-    const deglib::search::Reranker& get_reranker() const noexcept { return reranker_; }
+    py::gil_scoped_release release;
+    return std::make_shared<deglib::search::Reranker>(
+        deglib::search::Reranker::from_raw(space, data_span, n_rows, std::move(transformations), threads, idx_span)
+    );
+}
 
-    int32_t get_po() const noexcept { return reranker_.getPo(); }
-    int32_t get_pl() const noexcept { return reranker_.getPl(); }
+static std::shared_ptr<deglib::search::Reranker> reranker_from_graph(
+    const deglib::DynamicExplorationGraph& graph,
+    deglib::distances::MetricType metric,
+    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
+    size_t threads = 0
+) {
+    if (transformations.empty()) {
+        const auto target_dt = deglib::distances::Metric(metric).get_data_type();
+        const auto graph_dt = graph.getFeatureSpace().metric().get_data_type();
+        if (target_dt == deglib::distances::MetricDataType::FP16 &&
+            graph_dt == deglib::distances::MetricDataType::FP16 &&
+            graph.hasTransformations()) {
+            transformations = graph.getTransformations();
+        }
+    }
+    py::gil_scoped_release release;
+    return std::make_shared<deglib::search::Reranker>(
+        deglib::search::Reranker::from_graph(graph.internal(), deglib::distances::Metric(metric), std::move(transformations), threads)
+    );
+}
 
-    void optimize(size_t sample_count = 300, size_t num_candidates = 150) {
+static py::object reranker_rerank_py(
+    const deglib::search::Reranker& reranker,
+    py::array queries,
+    py::array_t<uint32_t, py::array::c_style> candidate_indices,
+    size_t k_top = 0,
+    size_t num_threads = 0,
+    bool return_distances = false,
+    bool unsorted = false
+) {
+    auto c_queries = py::array::ensure(queries, py::array::c_style);
+    if (!c_queries) {
+        throw std::invalid_argument("queries must be convertible to a C-contiguous array");
+    }
+    auto q_buf = c_queries.request();
+    if (q_buf.ndim != 2) {
+        throw std::invalid_argument("queries must be a 2D array");
+    }
+    const size_t n_queries = static_cast<size_t>(q_buf.shape[0]);
+
+    auto cand_buf = candidate_indices.request();
+    if (cand_buf.ndim != 2) {
+        throw std::invalid_argument("candidate_indices must be a 2D array");
+    }
+    if (static_cast<size_t>(cand_buf.shape[0]) != n_queries) {
+        throw std::invalid_argument("Number of candidate rows must match number of queries");
+    }
+
+    const size_t evp_k = static_cast<size_t>(cand_buf.shape[1]);
+    if (k_top == 0 || k_top > evp_k) {
+        k_top = evp_k;
+    }
+
+    auto result_indices = py::array_t<uint32_t>({n_queries, k_top});
+    uint32_t* ind_ptr = static_cast<uint32_t*>(result_indices.request().ptr);
+
+    py::array_t<float> result_distances;
+    float* dist_ptr = nullptr;
+    if (return_distances) {
+        result_distances = py::array_t<float>({n_queries, k_top});
+        dist_ptr = static_cast<float*>(result_distances.request().ptr);
+    }
+
+    const bool is_f32_queries = py::isinstance<py::array_t<float>>(c_queries);
+    const size_t query_row_bytes = static_cast<size_t>(q_buf.shape[1]) * static_cast<size_t>(q_buf.itemsize);
+    const size_t req_bytes = reranker.getSpace().get_data_size();
+    const auto* cand_ptr = static_cast<const uint32_t*>(cand_buf.ptr);
+
+    if (is_f32_queries && (!reranker.getTransformations().empty() || reranker.getSpace().metric().get_data_type() == deglib::distances::MetricDataType::FP32)) {
+        const size_t q_dim = static_cast<size_t>(q_buf.shape[1]);
+        const auto* q_ptr = static_cast<const float*>(q_buf.ptr);
         py::gil_scoped_release release;
-        reranker_.optimize(sample_count, num_candidates);
-    }
-
-    py::object rerank(
-        py::array queries,
-        py::array_t<uint32_t> candidate_indices,
-        size_t k_top = 0,
-        size_t num_threads = 0,
-        bool return_distances = false,
-        bool unsorted = false
-    ) const {
-        auto q_buf = queries.request();
-        if (q_buf.ndim != 2) {
-            throw std::invalid_argument("queries must be a 2D array");
-        }
-        const size_t req_bytes = reranker_.getSpace().get_data_size();
-        const size_t query_stride_bytes = size_t(q_buf.shape[1]) * q_buf.itemsize;
-        if (query_stride_bytes != req_bytes) {
+        deglib::concurrent::parallel_batch_for(
+            size_t{0}, n_queries, num_threads,
+            [&](size_t begin, size_t end, size_t) {
+                for (size_t q = begin; q < end; ++q) {
+                    reranker.rerank_f32(
+                        std::span<const float>(q_ptr + q * q_dim, q_dim),
+                        std::span<const uint32_t>(cand_ptr + q * evp_k, evp_k),
+                        static_cast<uint32_t>(k_top),
+                        std::span<uint32_t>(ind_ptr + q * k_top, k_top),
+                        return_distances ? std::span<float>(dist_ptr + q * k_top, k_top) : std::span<float>{},
+                        return_distances,
+                        unsorted
+                    );
+                }
+            },
+            64
+        );
+    } else {
+        if (query_row_bytes != req_bytes) {
             throw std::invalid_argument(
-                std::format("Query row size in bytes ({}) does not match required feature space data size ({})", query_stride_bytes, req_bytes)
+                std::format("Query row size in bytes ({}) does not match required feature space data size ({})", query_row_bytes, req_bytes)
             );
         }
-        const size_t n_queries = q_buf.shape[0];
-
-        auto cand_buf = candidate_indices.request();
-        if (cand_buf.ndim != 2) {
-            throw std::invalid_argument("candidate_indices must be a 2D array");
-        }
-        if (static_cast<size_t>(cand_buf.shape[0]) != n_queries) {
-            throw std::invalid_argument("Number of candidate rows must match number of queries");
-        }
-
-        const size_t evp_k = cand_buf.shape[1];
-        if (k_top == 0 || k_top > evp_k) {
-            k_top = evp_k;
-        }
-
-        auto result_indices = py::array_t<uint32_t>({n_queries, k_top});
-        uint32_t* ind_ptr = static_cast<uint32_t*>(result_indices.request().ptr);
-
-        py::array_t<float> result_distances;
-        float* dist_ptr = nullptr;
-        if (return_distances) {
-            result_distances = py::array_t<float>({n_queries, k_top});
-            dist_ptr = static_cast<float*>(result_distances.request().ptr);
-        }
-
-        {
-            py::gil_scoped_release release;
-            reranker_.rerank(
-                std::span<const std::byte>(static_cast<const std::byte*>(q_buf.ptr), n_queries * reranker_.getSpace().get_data_size()), n_queries,
-                std::span<const uint32_t>(static_cast<const uint32_t*>(cand_buf.ptr), n_queries * evp_k), evp_k, static_cast<uint32_t>(k_top),
-                std::span<uint32_t>(ind_ptr, n_queries * k_top), return_distances ? std::span<float>(dist_ptr, n_queries * k_top) : std::span<float>{},
-                return_distances, unsorted, num_threads
-            );
-        }
-
-        if (return_distances) {
-            return py::make_tuple(result_indices, result_distances);
-        }
-        return result_indices;
+        py::gil_scoped_release release;
+        reranker.rerank(
+            std::span<const std::byte>(static_cast<const std::byte*>(q_buf.ptr), n_queries * req_bytes), n_queries,
+            std::span<const uint32_t>(cand_ptr, n_queries * evp_k), evp_k, static_cast<uint32_t>(k_top),
+            std::span<uint32_t>(ind_ptr, n_queries * k_top), return_distances ? std::span<float>(dist_ptr, n_queries * k_top) : std::span<float>{},
+            return_distances, unsorted, num_threads
+        );
     }
-};
+
+    if (return_distances) {
+        return py::make_tuple(result_indices, result_distances);
+    }
+    return result_indices;
+}
 
 // ============================================================================
 // Fast Searcher Wrapper
@@ -677,35 +757,15 @@ class RerankerPy {
 class SearcherPy {
   private:
     std::unique_ptr<deglib::search::Searcher> searcher_;
-    py::array base_vectors_holder_;
-    std::shared_ptr<RerankerPy> shared_reranker_;
 
   public:
     SearcherPy(
         const deglib::DynamicExplorationGraph& graph,
-        std::optional<deglib::distances::FloatSpace> rerank_space = std::nullopt,
-        std::optional<py::array> base_vectors = std::nullopt,
-        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> rerank_transformations = {},
+        std::shared_ptr<deglib::search::Reranker> shared_reranker = nullptr,
         bool normalize_query = false
     ) {
-        if (rerank_space.has_value() && base_vectors.has_value() && !base_vectors->is_none()) {
-            base_vectors_holder_ = *base_vectors;
-            auto base_span = RerankerPy::validate_and_get_span(*rerank_space, base_vectors_holder_);
-            deglib::search::Reranker reranker(*rerank_space, base_span, base_vectors_holder_.request().shape[0], std::move(rerank_transformations));
-            searcher_ = deglib::make_searcher(graph, std::move(reranker));
-        } else {
-            searcher_ = deglib::make_searcher(graph);
-        }
-        searcher_->set_normalize_query(normalize_query);
-    }
-
-    SearcherPy(
-        const deglib::DynamicExplorationGraph& graph,
-        std::shared_ptr<RerankerPy> shared_reranker,
-        bool normalize_query = false
-    ) : shared_reranker_(std::move(shared_reranker)) {
-        if (shared_reranker_) {
-            searcher_ = deglib::make_searcher(graph, deglib::search::Reranker(shared_reranker_->get_reranker()));
+        if (shared_reranker) {
+            searcher_ = deglib::make_searcher(graph, std::move(shared_reranker));
         } else {
             searcher_ = deglib::make_searcher(graph);
         }
@@ -924,131 +984,6 @@ inline deglib::distances::MetricDataType parse_quant_data_type(const py::object&
         throw std::invalid_argument("Unsupported quantizer data type: " + q_lower);
     }
     throw std::invalid_argument("quant must be a Metric or data type string (uint4, int4, uint7, uint8, int8, fp16, evp)");
-}
-
-py::tuple extract_rerank_from_graph_wrapper(
-    const deglib::DynamicExplorationGraph& graph,
-    deglib::distances::MetricType rerank_metric,
-    size_t threads = 0
-) {
-    const auto& src_space = graph.getFeatureSpace();
-    const auto src_dt = src_space.metric().get_data_type();
-    if (src_dt != deglib::distances::MetricDataType::FP32 && src_dt != deglib::distances::MetricDataType::FP16) {
-        throw std::invalid_argument("Cannot extract rerank vectors from a non-float graph without external rerank_data");
-    }
-
-    const size_t count = graph.size();
-    const uint32_t dim = src_space.dim();
-    const bool src_is_fp16 = (src_dt == deglib::distances::MetricDataType::FP16);
-    const auto target_dt = deglib::distances::Metric(rerank_metric).get_data_type();
-    const auto& internal = graph.internal();
-
-    if (target_dt == deglib::distances::MetricDataType::FP16) {
-        py::array out(py::dtype("float16"), std::vector<py::ssize_t>{static_cast<py::ssize_t>(count), static_cast<py::ssize_t>(dim)});
-        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> xfrms;
-        if (count == 0) {
-            return py::make_tuple(out, xfrms);
-        }
-
-        auto* out_bytes = static_cast<std::byte*>(out.request().ptr);
-        const size_t row_bytes = static_cast<size_t>(dim) * sizeof(uint16_t);
-
-        if (src_is_fp16) {
-            py::gil_scoped_release release;
-            deglib::concurrent::parallel_batch_for(
-                size_t{0}, count, threads,
-                [&](size_t begin, size_t end, size_t) {
-                    for (size_t i = begin; i < end; ++i) {
-                        std::memcpy(out_bytes + i * row_bytes, internal.getFeatureVector(static_cast<uint32_t>(i)), row_bytes);
-                    }
-                },
-                64
-            );
-            return py::make_tuple(out, xfrms);
-        }
-
-        float global_abs_max = 0.0f;
-        {
-            py::gil_scoped_release release;
-            const size_t actual_threads = (threads == 0)
-                ? std::clamp(static_cast<size_t>(std::thread::hardware_concurrency()), size_t{1}, size_t{64})
-                : threads;
-            std::vector<float> thread_max(actual_threads, 0.0f);
-            deglib::concurrent::parallel_batch_for(
-                size_t{0}, count, actual_threads,
-                [&](size_t begin, size_t end, size_t tid) {
-                    float local_max = thread_max[tid];
-                    for (size_t i = begin; i < end; ++i) {
-                        const float* vec = reinterpret_cast<const float*>(internal.getFeatureVector(static_cast<uint32_t>(i)));
-                        for (uint32_t d = 0; d < dim; ++d) {
-                            const float v = std::abs(vec[d]);
-                            if (v > local_max) local_max = v;
-                        }
-                    }
-                    thread_max[tid] = local_max;
-                },
-                64
-            );
-            for (float m : thread_max) {
-                if (m > global_abs_max) global_abs_max = m;
-            }
-        }
-
-        auto q = std::make_shared<deglib::transformation::ScalarQuantizerFP16>(dim);
-        std::vector<float> calib_dummy(dim, 0.0f);
-        calib_dummy[0] = global_abs_max;
-        q->fit(std::span<const float>(calib_dummy), -1.0f);
-        xfrms.push_back(q);
-
-        {
-            py::gil_scoped_release release;
-            deglib::concurrent::parallel_batch_for(
-                size_t{0}, count, threads,
-                [&](size_t begin, size_t end, size_t) {
-                    for (size_t i = begin; i < end; ++i) {
-                        const float* vec = reinterpret_cast<const float*>(internal.getFeatureVector(static_cast<uint32_t>(i)));
-                        q->transform_database(
-                            std::span<const float>(vec, dim),
-                            std::span<std::byte>(out_bytes + i * row_bytes, row_bytes),
-                            1
-                        );
-                    }
-                },
-                64
-            );
-        }
-        return py::make_tuple(out, xfrms);
-    }
-
-    if (target_dt == deglib::distances::MetricDataType::FP32) {
-        py::array_t<float> out({static_cast<py::ssize_t>(count), static_cast<py::ssize_t>(dim)});
-        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> xfrms;
-        if (count == 0) {
-            return py::make_tuple(out, xfrms);
-        }
-        auto* out_f32 = static_cast<float*>(out.request().ptr);
-        {
-            py::gil_scoped_release release;
-            deglib::concurrent::parallel_batch_for(
-                size_t{0}, count, threads,
-                [&](size_t begin, size_t end, size_t) {
-                    for (size_t i = begin; i < end; ++i) {
-                        const std::byte* src = internal.getFeatureVector(static_cast<uint32_t>(i));
-                        float* dst = out_f32 + i * dim;
-                        if (src_is_fp16) {
-                            deglib::distances::fp16::fp16_to_floats(reinterpret_cast<const uint16_t*>(src), dst, dim);
-                        } else {
-                            std::memcpy(dst, src, static_cast<size_t>(dim) * sizeof(float));
-                        }
-                    }
-                },
-                64
-            );
-        }
-        return py::make_tuple(out, xfrms);
-    }
-
-    throw std::invalid_argument("Unsupported rerank_metric data type; expected FP16 or FP32");
 }
 
 py::array_t<uint32_t> presort_wrapper(
@@ -2273,42 +2208,48 @@ PYBIND11_MODULE(deglib_cpp, m) {
         return new deglib::search::Filter(ptr, size, max_value, max_label_count);
     });
 
-    py::class_<RerankerPy, std::shared_ptr<RerankerPy>>(search_module, "Reranker", "Candidate reranker.")
-        .def(
-            py::init<const deglib::distances::FloatSpace&, py::array, std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>>(),
-            py::arg("space"), py::arg("base_vectors"),
-            py::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}, py::keep_alive<1, 3>(),
-            "The reranker is index-agnostic: candidate index c is scored as base_vectors[c]; the caller chooses the index space."
+    py::class_<deglib::search::Reranker, std::shared_ptr<deglib::search::Reranker>>(search_module, "Reranker", "Owning C++ candidate reranker.")
+        .def_static(
+            "from_float32", &reranker_from_float32,
+            py::arg("metric"), py::arg("data"),
+            py::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{},
+            py::arg("threads") = 0, py::arg("row_indices") = std::nullopt
         )
-        .def("get_num_base_vectors", &RerankerPy::get_num_base_vectors)
-        .def("get_po", &RerankerPy::get_po, "Prefetch lookahead offset (0 disables rerank prefetching).")
-        .def("get_pl", &RerankerPy::get_pl, "Cache lines prefetched per feature vector (0 prefetches the whole vector).")
+        .def_static(
+            "from_raw", &reranker_from_raw,
+            py::arg("space"), py::arg("data"),
+            py::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{},
+            py::arg("threads") = 0, py::arg("row_indices") = std::nullopt
+        )
+        .def_static(
+            "from_graph", &reranker_from_graph,
+            py::arg("graph"), py::arg("metric"),
+            py::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{},
+            py::arg("threads") = 0
+        )
+        .def("get_num_base_vectors", &deglib::search::Reranker::getNumBaseVectors)
+        .def("get_dim", [](const deglib::search::Reranker& r) { return r.getSpace().dim(); })
+        .def("get_po", &deglib::search::Reranker::getPo, "Prefetch lookahead offset (0 disables rerank prefetching).")
+        .def("get_pl", &deglib::search::Reranker::getPl, "Cache lines prefetched per feature vector (0 prefetches the whole vector).")
         .def(
-            "optimize", &RerankerPy::optimize, py::arg("sample_count") = 300, py::arg("num_candidates") = 150,
-            "Auto-tune the reranker's prefetch parameters (po, pl) by timing reranking over sampled base vectors.\n\n"
-            "Args:\n"
-            "    sample_count: number of base vectors used as sample queries (capped at the base count).\n"
-            "    num_candidates: candidates scored per query (clamped to the base count)."
+            "optimize",
+            [](deglib::search::Reranker& r, size_t sample_count, size_t num_candidates) {
+                py::gil_scoped_release release;
+                r.optimize(sample_count, num_candidates);
+            },
+            py::arg("sample_count") = 300, py::arg("num_candidates") = 150,
+            "Auto-tune the reranker's prefetch parameters (po, pl) by timing reranking over sampled base vectors."
         )
         .def(
-            "rerank", &RerankerPy::rerank, py::arg("queries"), py::arg("candidate_indices"), py::arg("k_top") = 0, py::arg("threads") = 0,
+            "rerank", &reranker_rerank_py, py::arg("queries"), py::arg("candidate_indices"), py::arg("k_top") = 0, py::arg("threads") = 0,
             py::arg("return_distances") = false, py::arg("unsorted") = false
         );
 
     py::class_<SearcherPy>(search_module, "Searcher", "Search pipeline. Results are the graph's labels.")
         .def(
-            py::init<
-                const deglib::DynamicExplorationGraph&, std::optional<deglib::distances::FloatSpace>, std::optional<py::array>,
-                std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>, bool>(),
-            py::arg("graph"), py::arg("rerank_space") = std::nullopt, py::arg("base_vectors") = std::nullopt,
-            py::arg("rerank_transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{},
-            py::arg("normalize_query") = false, py::keep_alive<1, 2>(),
-            "base_vectors must follow the graph's internal index order (0 .. size()-1, see graph.get_labels()). Valid for static graphs."
-        )
-        .def(
-            py::init<const deglib::DynamicExplorationGraph&, std::shared_ptr<RerankerPy>, bool>(),
-            py::arg("graph"), py::arg("reranker"), py::arg("normalize_query") = false, py::keep_alive<1, 2>(),
-            "Construct a Searcher sharing an existing Reranker instance (zero-copy over the reranker's base vector buffer)."
+            py::init<const deglib::DynamicExplorationGraph&, std::shared_ptr<deglib::search::Reranker>, bool>(),
+            py::arg("graph"), py::arg("reranker") = nullptr, py::arg("normalize_query") = false, py::keep_alive<1, 2>(),
+            "Construct a Searcher with optional shared owning Reranker."
         )
         .def_property("normalize_query", &SearcherPy::get_normalize_query, &SearcherPy::set_normalize_query)
         .def(
@@ -2577,10 +2518,6 @@ PYBIND11_MODULE(deglib_cpp, m) {
     m.def(
         "presort", &presort_wrapper, py::arg("vectors"), py::arg("space"), py::arg("radius_decay") = 0.9f, py::arg("threads") = 0,
         py::arg("callback") = py::none()
-    );
-    m.def(
-        "extract_rerank_from_graph", &extract_rerank_from_graph_wrapper, py::arg("graph"),
-        py::arg("rerank_metric"), py::arg("threads") = 0
     );
 
     m.def(

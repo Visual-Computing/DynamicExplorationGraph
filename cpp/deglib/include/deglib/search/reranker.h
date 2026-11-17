@@ -6,6 +6,7 @@
 #include "deglib/filter.h"
 #include "deglib/graph/internal_graph.h"
 #include "deglib/transformation.h"
+#include "deglib/transformation/scalar/fp16.h"
 #include "deglib/utils/memory.h"
 
 #include <algorithm>
@@ -13,12 +14,14 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <format>
 #include <limits>
 #include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <vector>
 
@@ -46,7 +49,8 @@ namespace deglib::search {
 class Reranker {
   private:
     deglib::distances::FloatSpace space_;
-    const void* base_vectors_ = nullptr;
+    std::unique_ptr<std::byte[]> storage_;
+    std::byte* base_vectors_ = nullptr;
     size_t num_base_vectors_ = 0;
     std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations_;
     int32_t po_ = 8;  // Prefetch lookahead offset for candidate feature vectors (0 disables prefetch).
@@ -60,8 +64,45 @@ class Reranker {
     static inline thread_local std::vector<std::byte> transform_buf2_;
     static inline thread_local std::vector<float> fp16_query_buf_;
 
-    const std::byte* base() const noexcept { return static_cast<const std::byte*>(base_vectors_); }
+    const std::byte* base() const noexcept { return base_vectors_; }
     size_t row_bytes() const noexcept { return space_.get_data_size(); }
+
+    Reranker(
+        deglib::distances::FloatSpace space,
+        std::unique_ptr<std::byte[]> storage,
+        std::byte* base_vectors,
+        size_t num_base_vectors,
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations
+    ) noexcept
+        : space_(std::move(space)),
+          storage_(std::move(storage)),
+          base_vectors_(base_vectors),
+          num_base_vectors_(num_base_vectors),
+          transformations_(std::move(transformations)) {}
+
+    static inline void transform_single_row(
+        std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
+        std::span<const float> src_row,
+        std::span<std::byte> dst_row,
+        std::vector<std::byte>& tmp1,
+        std::vector<std::byte>& tmp2
+    ) {
+        const float* current = src_row.data();
+        for (size_t t = 0; t < transformations.size(); ++t) {
+            const auto& trans = transformations[t];
+            const bool is_last = (t + 1 == transformations.size());
+            const std::span<const float> in(current, trans->input_dim());
+            if (is_last) {
+                trans->transform_query(in, dst_row);
+                return;
+            }
+            const size_t out_bytes = trans->output_byte_size();
+            auto& buf = (t % 2 == 0) ? tmp1 : tmp2;
+            if (buf.size() < out_bytes) buf.resize(out_bytes);
+            trans->transform_query(in, std::span<std::byte>(buf.data(), out_bytes));
+            current = reinterpret_cast<const float*>(buf.data());
+        }
+    }
 
     /**
      * Scores valid candidates against the query into `scratch` (dtype-agnostic).
@@ -164,8 +205,13 @@ class Reranker {
     }
 
   public:
+    Reranker(const Reranker&) = delete;
+    Reranker& operator=(const Reranker&) = delete;
+    Reranker(Reranker&&) noexcept = default;
+    Reranker& operator=(Reranker&&) noexcept = default;
+
     /**
-     * Constructs a candidate reranker.
+     * Constructs an owning candidate reranker by copying `base_vectors` into internal C++ storage.
      *
      * @param space            Distance metric and dimensionality for scoring.
      * @param base_vectors     Contiguous byte span of the row-addressed feature matrix; row c is scored for candidate index c.
@@ -178,7 +224,9 @@ class Reranker {
         size_t num_base_vectors,
         std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
     )
-        : space_(std::move(space)), base_vectors_(base_vectors.data()), num_base_vectors_(num_base_vectors), transformations_(std::move(transformations)) {
+        : space_(std::move(space)),
+          num_base_vectors_(num_base_vectors),
+          transformations_(std::move(transformations)) {
         if (num_base_vectors_ > 0) {
             if (base_vectors.data() == nullptr) {
                 throw std::invalid_argument("Reranker: base_vectors buffer is null");
@@ -189,11 +237,320 @@ class Reranker {
                     std::format("Reranker: base_vectors span ({} bytes) is smaller than required ({} bytes)", base_vectors.size(), required_bytes)
                 );
             }
+            deglib::memory::allocate_aligned(storage_, base_vectors_, required_bytes);
+            std::memcpy(base_vectors_, base_vectors.data(), required_bytes);
         }
     }
 
+    /**
+     * Builds an owning Reranker directly from float32 vectors in C++.
+     * If `target_metric` is non-FP32 (e.g. FP16) and `transformations` is empty, fits the quantizer
+     * and converts directly into internal storage (zero intermediate full-matrix copies).
+     * When `row_indices` is non-empty, gathers rows in `row_indices` order directly into storage.
+     */
+    static Reranker from_data(
+        deglib::distances::Metric target_metric,
+        std::span<const float> data,
+        uint32_t dim,
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
+        size_t threads = 0,
+        std::span<const uint32_t> row_indices = {}
+    ) {
+        if (dim == 0) throw std::invalid_argument("Reranker::from_data: dim must be > 0");
+        if (data.size() % dim != 0) throw std::invalid_argument("Reranker::from_data: data size must be a multiple of dim");
+        const size_t src_rows = data.size() / dim;
+        const size_t num_rows = row_indices.empty() ? src_rows : row_indices.size();
+        for (uint32_t idx : row_indices) {
+            if (idx >= src_rows) {
+                throw std::out_of_range(std::format("Reranker::from_data: row index {} out of bounds (src_rows={})", idx, src_rows));
+            }
+        }
+
+        const auto target_dt = target_metric.get_data_type();
+        if (transformations.empty() && target_dt == deglib::distances::MetricDataType::FP32) {
+            deglib::distances::FloatSpace space(dim, target_metric);
+            const size_t row_bytes = space.get_data_size();
+            std::unique_ptr<std::byte[]> storage;
+            std::byte* dst_base = nullptr;
+            deglib::memory::allocate_aligned(storage, dst_base, num_rows * row_bytes);
+            if (num_rows > 0) {
+                if (row_indices.empty()) {
+                    std::memcpy(dst_base, data.data(), num_rows * row_bytes);
+                } else {
+                    deglib::concurrent::parallel_batch_for(
+                        size_t{0}, num_rows, threads,
+                        [&](size_t begin, size_t end, size_t) {
+                            for (size_t i = begin; i < end; ++i) {
+                                std::memcpy(dst_base + i * row_bytes, data.data() + static_cast<size_t>(row_indices[i]) * dim, row_bytes);
+                            }
+                        },
+                        64
+                    );
+                }
+            }
+            return Reranker(std::move(space), std::move(storage), dst_base, num_rows, {});
+        }
+
+        if (transformations.empty()) {
+            if (target_dt == deglib::distances::MetricDataType::FP16) {
+                float global_abs_max = 0.0f;
+                if (num_rows > 0) {
+                    const size_t actual_threads = (threads == 0)
+                        ? std::clamp(static_cast<size_t>(std::thread::hardware_concurrency()), size_t{1}, size_t{64})
+                        : threads;
+                    std::vector<float> thread_max(actual_threads, 0.0f);
+                    deglib::concurrent::parallel_batch_for(
+                        size_t{0}, num_rows, actual_threads,
+                        [&](size_t begin, size_t end, size_t tid) {
+                            float local_max = thread_max[tid];
+                            for (size_t i = begin; i < end; ++i) {
+                                const size_t src_row = row_indices.empty() ? i : row_indices[i];
+                                const float* vec = data.data() + src_row * dim;
+                                for (uint32_t d = 0; d < dim; ++d) {
+                                    const float v = std::abs(vec[d]);
+                                    if (v > local_max) local_max = v;
+                                }
+                            }
+                            thread_max[tid] = local_max;
+                        },
+                        64
+                    );
+                    for (float m : thread_max) {
+                        if (m > global_abs_max) global_abs_max = m;
+                    }
+                }
+                auto q = std::make_shared<deglib::transformation::ScalarQuantizerFP16>(dim, global_abs_max);
+                transformations.push_back(std::move(q));
+            } else {
+                if (row_indices.empty()) {
+                    transformations = deglib::transformation::make_quantizer_pipeline(data, dim, target_metric, -1.0f, true, threads);
+                } else {
+                    const size_t sample_rows = std::min<size_t>(num_rows, 10000);
+                    std::vector<float> sample(sample_rows * dim);
+                    for (size_t s = 0; s < sample_rows; ++s) {
+                        const size_t r = row_indices[(s * num_rows) / sample_rows];
+                        std::memcpy(sample.data() + s * dim, data.data() + r * dim, dim * sizeof(float));
+                    }
+                    transformations = deglib::transformation::make_quantizer_pipeline(std::span<const float>(sample), dim, target_metric, -1.0f, true, threads);
+                }
+            }
+        }
+
+        const uint32_t out_dim = transformations.back()->output_dim();
+        deglib::distances::FloatSpace space(out_dim, target_metric);
+        const size_t row_bytes = space.get_data_size();
+        std::unique_ptr<std::byte[]> storage;
+        std::byte* dst_base = nullptr;
+        deglib::memory::allocate_aligned(storage, dst_base, num_rows * row_bytes);
+        if (num_rows > 0) {
+            deglib::concurrent::parallel_batch_for(
+                size_t{0}, num_rows, threads,
+                [&](size_t begin, size_t end, size_t) {
+                    std::vector<std::byte> tmp1, tmp2;
+                    for (size_t i = begin; i < end; ++i) {
+                        const size_t src_row = row_indices.empty() ? i : row_indices[i];
+                        transform_single_row(
+                            transformations,
+                            std::span<const float>(data.data() + src_row * dim, dim),
+                            std::span<std::byte>(dst_base + i * row_bytes, row_bytes),
+                            tmp1, tmp2
+                        );
+                    }
+                },
+                64
+            );
+        }
+        return Reranker(std::move(space), std::move(storage), dst_base, num_rows, std::move(transformations));
+    }
+
+    /**
+     * Builds an owning Reranker from already-encoded/quantized byte rows (e.g. FP16 or INT8).
+     * When `row_indices` is non-empty, gathers rows in `row_indices` order directly into storage.
+     */
+    static Reranker from_raw(
+        deglib::distances::FloatSpace space,
+        std::span<const std::byte> data,
+        size_t num_source_rows,
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
+        size_t threads = 0,
+        std::span<const uint32_t> row_indices = {}
+    ) {
+        const size_t row_bytes = space.get_data_size();
+        if (data.size() < num_source_rows * row_bytes) {
+            throw std::invalid_argument("Reranker::from_raw: data span is smaller than num_source_rows * row_bytes");
+        }
+        const size_t num_rows = row_indices.empty() ? num_source_rows : row_indices.size();
+        for (uint32_t idx : row_indices) {
+            if (idx >= num_source_rows) {
+                throw std::out_of_range(std::format("Reranker::from_raw: row index {} out of bounds (num_source_rows={})", idx, num_source_rows));
+            }
+        }
+        std::unique_ptr<std::byte[]> storage;
+        std::byte* dst_base = nullptr;
+        deglib::memory::allocate_aligned(storage, dst_base, num_rows * row_bytes);
+        if (num_rows > 0) {
+            if (row_indices.empty()) {
+                std::memcpy(dst_base, data.data(), num_rows * row_bytes);
+            } else {
+                deglib::concurrent::parallel_batch_for(
+                    size_t{0}, num_rows, threads,
+                    [&](size_t begin, size_t end, size_t) {
+                        for (size_t i = begin; i < end; ++i) {
+                            std::memcpy(dst_base + i * row_bytes, data.data() + static_cast<size_t>(row_indices[i]) * row_bytes, row_bytes);
+                        }
+                    },
+                    64
+                );
+            }
+        }
+        return Reranker(std::move(space), std::move(storage), dst_base, num_rows, std::move(transformations));
+    }
+
+    /**
+     * Builds an owning Reranker directly from an InternalGraph (FP32 or FP16) in internal vertex order,
+     * quantizing on the fly into internal storage without intermediate copies.
+     */
+    static Reranker from_graph(
+        const deglib::graph::InternalGraph& graph,
+        deglib::distances::Metric target_metric,
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
+        size_t threads = 0
+    ) {
+        const auto& src_space = graph.getFeatureSpace();
+        const auto src_dt = src_space.metric().get_data_type();
+        if (src_dt != deglib::distances::MetricDataType::FP32 && src_dt != deglib::distances::MetricDataType::FP16) {
+            throw std::invalid_argument("Cannot build Reranker from a non-float graph without external data");
+        }
+
+        const size_t count = graph.size();
+        const uint32_t dim = src_space.dim();
+        const bool src_is_fp16 = (src_dt == deglib::distances::MetricDataType::FP16);
+        const auto target_dt = target_metric.get_data_type();
+
+        if (count == 0) {
+            const uint32_t out_dim = transformations.empty() ? dim : transformations.back()->output_dim();
+            deglib::distances::FloatSpace space(out_dim, target_metric);
+            return Reranker(std::move(space), std::unique_ptr<std::byte[]>{}, nullptr, 0, std::move(transformations));
+        }
+
+        // Direct copy when source and target are both FP16 (or both FP32 with no transformations)
+        if ((src_is_fp16 && target_dt == deglib::distances::MetricDataType::FP16 && transformations.empty()) ||
+            (!src_is_fp16 && target_dt == deglib::distances::MetricDataType::FP32 && transformations.empty())) {
+            deglib::distances::FloatSpace space(dim, target_metric);
+            const size_t row_bytes = space.get_data_size();
+            std::unique_ptr<std::byte[]> storage;
+            std::byte* dst_base = nullptr;
+            deglib::memory::allocate_aligned(storage, dst_base, count * row_bytes);
+            deglib::concurrent::parallel_batch_for(
+                size_t{0}, count, threads,
+                [&](size_t begin, size_t end, size_t) {
+                    for (size_t i = begin; i < end; ++i) {
+                        std::memcpy(dst_base + i * row_bytes, graph.getFeatureVector(static_cast<uint32_t>(i)), row_bytes);
+                    }
+                },
+                64
+            );
+            return Reranker(std::move(space), std::move(storage), dst_base, count, {});
+        }
+
+        // FP16 graph -> FP32 reranker
+        if (src_is_fp16 && target_dt == deglib::distances::MetricDataType::FP32 && transformations.empty()) {
+            deglib::distances::FloatSpace space(dim, target_metric);
+            const size_t row_bytes = space.get_data_size();
+            std::unique_ptr<std::byte[]> storage;
+            std::byte* dst_base = nullptr;
+            deglib::memory::allocate_aligned(storage, dst_base, count * row_bytes);
+            deglib::concurrent::parallel_batch_for(
+                size_t{0}, count, threads,
+                [&](size_t begin, size_t end, size_t) {
+                    for (size_t i = begin; i < end; ++i) {
+                        const auto* src = reinterpret_cast<const uint16_t*>(graph.getFeatureVector(static_cast<uint32_t>(i)));
+                        auto* dst = reinterpret_cast<float*>(dst_base + i * row_bytes);
+                        deglib::distances::fp16::fp16_to_floats(src, dst, dim);
+                    }
+                },
+                64
+            );
+            return Reranker(std::move(space), std::move(storage), dst_base, count, {});
+        }
+
+        // FP32 graph -> FP16 (auto-fit ScalarQuantizerFP16 if no transformations supplied)
+        if (!src_is_fp16 && target_dt == deglib::distances::MetricDataType::FP16 && transformations.empty()) {
+            const size_t actual_threads = (threads == 0)
+                ? std::clamp(static_cast<size_t>(std::thread::hardware_concurrency()), size_t{1}, size_t{64})
+                : threads;
+            std::vector<float> thread_max(actual_threads, 0.0f);
+            deglib::concurrent::parallel_batch_for(
+                size_t{0}, count, actual_threads,
+                [&](size_t begin, size_t end, size_t tid) {
+                    float local_max = thread_max[tid];
+                    for (size_t i = begin; i < end; ++i) {
+                        const float* vec = reinterpret_cast<const float*>(graph.getFeatureVector(static_cast<uint32_t>(i)));
+                        for (uint32_t d = 0; d < dim; ++d) {
+                            const float v = std::abs(vec[d]);
+                            if (v > local_max) local_max = v;
+                        }
+                    }
+                    thread_max[tid] = local_max;
+                },
+                64
+            );
+            float global_abs_max = 0.0f;
+            for (float m : thread_max) {
+                if (m > global_abs_max) global_abs_max = m;
+            }
+            transformations.push_back(std::make_shared<deglib::transformation::ScalarQuantizerFP16>(dim, global_abs_max));
+        } else if (transformations.empty()) {
+            // Other quantized target metric from float graph: fit pipeline on strided sample
+            const size_t sample_rows = std::min<size_t>(count, 10000);
+            std::vector<float> sample(sample_rows * dim);
+            for (size_t s = 0; s < sample_rows; ++s) {
+                const uint32_t v = static_cast<uint32_t>((s * count) / sample_rows);
+                if (src_is_fp16) {
+                    deglib::distances::fp16::fp16_to_floats(reinterpret_cast<const uint16_t*>(graph.getFeatureVector(v)), sample.data() + s * dim, dim);
+                } else {
+                    std::memcpy(sample.data() + s * dim, graph.getFeatureVector(v), dim * sizeof(float));
+                }
+            }
+            transformations = deglib::transformation::make_quantizer_pipeline(std::span<const float>(sample), dim, target_metric, -1.0f, true, threads);
+        }
+
+        const uint32_t out_dim = transformations.back()->output_dim();
+        deglib::distances::FloatSpace space(out_dim, target_metric);
+        const size_t row_bytes = space.get_data_size();
+        std::unique_ptr<std::byte[]> storage;
+        std::byte* dst_base = nullptr;
+        deglib::memory::allocate_aligned(storage, dst_base, count * row_bytes);
+        deglib::concurrent::parallel_batch_for(
+            size_t{0}, count, threads,
+            [&](size_t begin, size_t end, size_t) {
+                std::vector<std::byte> tmp1, tmp2;
+                std::vector<float> f32_row(src_is_fp16 ? dim : 0);
+                for (size_t i = begin; i < end; ++i) {
+                    const std::byte* raw = graph.getFeatureVector(static_cast<uint32_t>(i));
+                    const float* vec = nullptr;
+                    if (src_is_fp16) {
+                        deglib::distances::fp16::fp16_to_floats(reinterpret_cast<const uint16_t*>(raw), f32_row.data(), dim);
+                        vec = f32_row.data();
+                    } else {
+                        vec = reinterpret_cast<const float*>(raw);
+                    }
+                    transform_single_row(
+                        transformations,
+                        std::span<const float>(vec, dim),
+                        std::span<std::byte>(dst_base + i * row_bytes, row_bytes),
+                        tmp1, tmp2
+                    );
+                }
+            },
+            64
+        );
+        return Reranker(std::move(space), std::move(storage), dst_base, count, std::move(transformations));
+    }
+
     const deglib::distances::FloatSpace& getSpace() const noexcept { return space_; }
-    const void* getBaseVectors() const noexcept { return base_vectors_; }
+    const void* getBaseVectors() const noexcept { return base(); }
+    const std::byte* getBaseVector(size_t index) const noexcept { return base_vectors_ + index * row_bytes(); }
     size_t getNumBaseVectors() const noexcept { return num_base_vectors_; }
     const std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>& getTransformations() const noexcept { return transformations_; }
     int32_t getPo() const noexcept { return po_; }
@@ -219,8 +576,9 @@ class Reranker {
     void optimize(size_t num_sample_queries = 300, size_t num_candidates = 150) {
         if (base_vectors_ == nullptr || num_base_vectors_ == 0 || num_candidates == 0) return;
 
-        const size_t stride = space_.get_data_size();
-        if (stride == 0) return;
+        const size_t data_bytes = space_.get_data_size();
+        const size_t stride = row_bytes();
+        if (data_bytes == 0 || stride == 0) return;
 
         num_candidates = std::min(num_candidates, num_base_vectors_);
         const uint32_t k = std::min<uint32_t>(100, static_cast<uint32_t>(num_candidates));
@@ -237,7 +595,7 @@ class Reranker {
         }
 
         // pl grid (cache lines per candidate row); 0 = full row. Capped at code_size/64.
-        const int32_t pl_max = static_cast<int32_t>((stride + deglib::memory::L1_CACHE_LINE_SIZE - 1) / deglib::memory::L1_CACHE_LINE_SIZE);
+        const int32_t pl_max = static_cast<int32_t>((data_bytes + deglib::memory::L1_CACHE_LINE_SIZE - 1) / deglib::memory::L1_CACHE_LINE_SIZE);
         std::vector<int32_t> try_pls{0};
         for (const int32_t lines : {2, 4, 8, 16, 32, 64}) {
             if (lines <= pl_max) try_pls.push_back(lines);
@@ -257,7 +615,7 @@ class Reranker {
                 auto t0 = std::chrono::high_resolution_clock::now();
                 for (size_t i = 0; i < num_sample_queries; ++i) {
                     rerank(
-                        std::span<const std::byte>(base() + i * stride, stride),
+                        std::span<const std::byte>(base() + i * stride, data_bytes),
                         std::span<const uint32_t>(sample_cands.data() + i * num_candidates, num_candidates), k, std::span<uint32_t>(out.data(), k),
                         std::span<float>{}, false, true
                     );

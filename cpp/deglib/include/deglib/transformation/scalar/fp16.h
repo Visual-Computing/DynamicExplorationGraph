@@ -26,6 +26,7 @@ class ScalarQuantizerFP16 : public FeatureTransformation {
     static constexpr float kFP16Max = 65504.0f;  // largest finite half-precision value
 
     explicit ScalarQuantizerFP16(uint32_t dim) : dim_(dim) {}
+    ScalarQuantizerFP16(uint32_t dim, float abs_max) : dim_(dim) { set_abs_max(abs_max); }
 
     uint32_t tag() const noexcept override { return TAG_SQ16; }
     std::string_view name() const noexcept override { return "ScalarQuantizerFP16"; }

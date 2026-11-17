@@ -52,7 +52,7 @@ class Searcher {
     const deglib::graph::InternalGraph* graph_ = nullptr;
     std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations_;
     KMeansEntrySelector entry_selector_;
-    std::optional<Reranker> reranker_;
+    std::shared_ptr<Reranker> reranker_;
     bool normalize_query_ = false;
 
     /**
@@ -235,8 +235,8 @@ class Searcher {
         }()
             : graph_->getEntryVertexIndices();
 
-        const uint32_t num_candidates = reranker_.has_value() ? static_cast<uint32_t>(std::ceil(static_cast<float>(k) * std::max(1.0f, rerank_factor))) : k;
-        const bool should_rerank = reranker_.has_value() && (num_candidates > k);
+        const uint32_t num_candidates = reranker_ ? static_cast<uint32_t>(std::ceil(static_cast<float>(k) * std::max(1.0f, rerank_factor))) : k;
+        const bool should_rerank = static_cast<bool>(reranker_) && (num_candidates > k);
 
         if (use_ef) {
             auto ef_res = graph_->search_ef(query_span, entry_vertices, num_candidates, ef, true, nullptr, max_distance_computation_count);
@@ -322,7 +322,11 @@ class Searcher {
      * @param reranker Reranker holding full-precision features. Its base_vectors must follow the
      *                 graph's internal index order (0 .. size()-1, see graph.getExternalLabels()).
      */
-    Searcher(const deglib::graph::InternalGraph& graph, Reranker reranker) : graph_(&graph), entry_selector_(graph), reranker_(std::move(reranker)) {}
+    Searcher(const deglib::graph::InternalGraph& graph, std::shared_ptr<Reranker> reranker)
+        : graph_(&graph), entry_selector_(graph), reranker_(std::move(reranker)) {}
+
+    Searcher(const deglib::graph::InternalGraph& graph, Reranker reranker)
+        : graph_(&graph), entry_selector_(graph), reranker_(std::make_shared<Reranker>(std::move(reranker))) {}
 
     /**
      * Constructs a Searcher with query transformations and candidate reranking.
@@ -335,9 +339,19 @@ class Searcher {
     Searcher(
         const deglib::graph::InternalGraph& graph,
         std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
-        Reranker reranker
+        std::shared_ptr<Reranker> reranker
     )
         : graph_(&graph), transformations_(std::move(transformations)), entry_selector_(graph), reranker_(std::move(reranker)) {}
+
+    Searcher(
+        const deglib::graph::InternalGraph& graph,
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
+        Reranker reranker
+    )
+        : graph_(&graph),
+          transformations_(std::move(transformations)),
+          entry_selector_(graph),
+          reranker_(std::make_shared<Reranker>(std::move(reranker))) {}
 
     bool normalize_query() const noexcept { return normalize_query_; }
     void set_normalize_query(bool val) noexcept { normalize_query_ = val; }
@@ -804,17 +818,14 @@ class Searcher {
                 entry_selector_.fit(rows, candidate_ids, dim, is_l2, n_clusters, n_iter, seed, threads);
             };
 
-            const bool use_reranker = reranker_.has_value() && reranker_->getBaseVectors() != nullptr && reranker_->getNumBaseVectors() >= n;
+            const bool use_reranker = reranker_ && reranker_->getBaseVectors() != nullptr && reranker_->getNumBaseVectors() >= n;
             const auto& space = use_reranker ? reranker_->getSpace() : graph_->getFeatureSpace();
             const uint32_t dim = space.dim();
             const bool is_l2 = space.metric().get_distance_kind() == deglib::distances::MetricDistanceKind::L2;
             const auto data_type = space.metric().get_data_type();
 
             auto get_raw_ptr = [&](uint32_t id) -> const void* {
-                if (use_reranker) {
-                    return static_cast<const std::byte*>(reranker_->getBaseVectors()) + static_cast<size_t>(id) * space.get_data_size();
-                }
-                return graph_->getFeatureVector(id);
+                return use_reranker ? static_cast<const void*>(reranker_->getBaseVector(id)) : graph_->getFeatureVector(id);
             };
 
             if (data_type == deglib::distances::MetricDataType::FP32) {
@@ -857,7 +868,7 @@ class Searcher {
         }
 
         // 2. Candidate reranker prefetch auto-tuning (library default: 300 sample queries = noise-stable).
-        if (reranker_.has_value()) {
+        if (reranker_) {
             reranker_->optimize(300, 150);
         }
 
@@ -872,6 +883,10 @@ class Searcher {
 
 inline std::unique_ptr<Searcher> make_searcher(const deglib::graph::InternalGraph& graph) { return std::make_unique<Searcher>(graph); }
 
+inline std::unique_ptr<Searcher> make_searcher(const deglib::graph::InternalGraph& graph, std::shared_ptr<Reranker> reranker) {
+    return std::make_unique<Searcher>(graph, std::move(reranker));
+}
+
 inline std::unique_ptr<Searcher> make_searcher(const deglib::graph::InternalGraph& graph, Reranker reranker) {
     return std::make_unique<Searcher>(graph, std::move(reranker));
 }
@@ -880,7 +895,8 @@ inline std::unique_ptr<Searcher> make_searcher(const deglib::graph::InternalGrap
 template <typename QuantT>
     requires(
         !std::is_same_v<std::decay_t<QuantT>, std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>> &&
-        !std::is_same_v<std::decay_t<QuantT>, Reranker>
+        !std::is_same_v<std::decay_t<QuantT>, Reranker> &&
+        !std::is_same_v<std::decay_t<QuantT>, std::shared_ptr<Reranker>>
     )
 inline std::unique_ptr<Searcher> make_searcher(const deglib::graph::InternalGraph& graph, QuantT&& quantizer) {
     using Q = std::decay_t<QuantT>;
