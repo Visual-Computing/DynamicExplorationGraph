@@ -1870,26 +1870,21 @@ PYBIND11_MODULE(deglib_cpp, m) {
             return deglib::transformation::L2NormalizeTransform::deserialize(ss);
         });
 
-    auto bind_rotation_common = [](auto& cls) {
-        using RotT = typename std::decay_t<decltype(cls)>::type;
-        cls.def_property_readonly("dim", &RotT::dim)
-            .def_property_readonly("seed", &RotT::seed)
-            .def_property_readonly("is_enabled", &RotT::is_enabled)
-            .def_property("enabled", &RotT::is_enabled, &RotT::set_enabled)
-            .def_property_readonly("crest_factor", &RotT::crest_factor)
-            .def_property_readonly("excess_kurtosis", &RotT::excess_kurtosis)
-            .def_static("deserialize", [](py::bytes b) {
-                std::string s = b;
-                std::istringstream ss(s, std::ios::binary);
-                return RotT::deserialize(ss);
-            });
-    };
-
-    auto fwht_cls = py::class_<
-                        deglib::transformation::FastHadamardRotation, deglib::transformation::FeatureTransformation,
-                        std::shared_ptr<deglib::transformation::FastHadamardRotation>>(transformation_module, "FastHadamardRotation")
-                        .def_property_readonly("rounds", &deglib::transformation::FastHadamardRotation::rounds);
-    bind_rotation_common(fwht_cls);
+    py::class_<
+        deglib::transformation::FastHadamardRotation, deglib::transformation::FeatureTransformation,
+        std::shared_ptr<deglib::transformation::FastHadamardRotation>>(transformation_module, "FastHadamardRotation")
+        .def_property_readonly("rounds", &deglib::transformation::FastHadamardRotation::rounds)
+        .def_property_readonly("dim", &deglib::transformation::FastHadamardRotation::dim)
+        .def_property_readonly("seed", &deglib::transformation::FastHadamardRotation::seed)
+        .def_property_readonly("is_enabled", &deglib::transformation::FastHadamardRotation::is_enabled)
+        .def_property("enabled", &deglib::transformation::FastHadamardRotation::is_enabled, &deglib::transformation::FastHadamardRotation::set_enabled)
+        .def_property_readonly("crest_factor", &deglib::transformation::FastHadamardRotation::crest_factor)
+        .def_property_readonly("excess_kurtosis", &deglib::transformation::FastHadamardRotation::excess_kurtosis)
+        .def_static("deserialize", [](py::bytes b) {
+            std::string s = b;
+            std::istringstream ss(s, std::ios::binary);
+            return deglib::transformation::FastHadamardRotation::deserialize(ss);
+        });
 
     auto make_scalar_quantizer_impl = [](auto type_tag, py::array vectors, float quantile) {
         using QuantT = typename decltype(type_tag)::type;
