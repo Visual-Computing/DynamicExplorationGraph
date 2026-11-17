@@ -24,14 +24,6 @@
 
 namespace deglib::graph {
 
-namespace detail {
-
-using deglib::memory::align_up;
-using deglib::memory::allocate_aligned;
-using deglib::memory::kCacheLineAlignment;
-
-}  // namespace detail
-
 /**
  * Read-only graph with a split storage layout:
  *
@@ -61,13 +53,13 @@ class ReadOnlyGraph : public InternalGraph {
         edges_per_vertex_ = edges_per_vertex;
         feature_dim_ = static_cast<int32_t>(space.dim());
         feature_byte_size_ = feature_bytes;
-        feature_stride_ = detail::align_up(feature_bytes, detail::kCacheLineAlignment);
+        feature_stride_ = deglib::memory::align_up(feature_bytes, deglib::memory::kCacheLineAlignment);
 
         const size_t feature_total = size_t(vertex_count_) * feature_stride_;
         const size_t edge_total = size_t(vertex_count_) * size_t(edges_per_vertex_) * sizeof(int32_t);
 
-        detail::allocate_aligned(features_storage_, features_, feature_total);
-        detail::allocate_aligned(edges_storage_, edges_, edge_total);
+        deglib::memory::allocate_aligned(features_storage_, features_, feature_total);
+        deglib::memory::allocate_aligned(edges_storage_, edges_, edge_total);
 
         std::memset(features_, 0, feature_total);
         std::memset(edges_, 0xff, edge_total);

@@ -14,9 +14,6 @@
 #include "deglib/utils/random.h"
 
 namespace deglib {
-using builder::build_from_data;
-using builder::EvenRegularGraphBuilder;
-using builder::OptimizationTarget;
 
 /**
  * Create an EvenRegularGraphBuilder for building and incrementally modifying a DynamicExplorationGraph.
