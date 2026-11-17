@@ -14,7 +14,7 @@ from dataset import (
     load_vibe_dataset,
     resolve_dataset_key,
 )
-from module import DEG, EVP, QG
+from module import DEG, QG
 from presets import get_config_grid_presets
 
 
@@ -38,24 +38,79 @@ class TeeLogger:
         return getattr(self.stream, "isatty", lambda: False)()
 
 
+def get_physical_core_ids() -> list[int]:
+    """Returns the primary logical processor ID for each physical CPU core (excluding SMT/Hyper-Threading siblings)."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class SYSTEM_LOGICAL_PROCESSOR_INFORMATION(ctypes.Structure):
+                _fields_ = [
+                    ("ProcessorMask", ctypes.c_size_t),
+                    ("Relationship", ctypes.c_int),
+                    ("Reserved", ctypes.c_ulonglong * 2),
+                ]
+
+            buf_len = wintypes.DWORD(0)
+            ctypes.windll.kernel32.GetLogicalProcessorInformation(None, ctypes.byref(buf_len))
+            if buf_len.value > 0:
+                count = buf_len.value // ctypes.sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION)
+                buf = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION * count)()
+                if ctypes.windll.kernel32.GetLogicalProcessorInformation(buf, ctypes.byref(buf_len)):
+                    cores = sorted(
+                        (info.ProcessorMask & -info.ProcessorMask).bit_length() - 1
+                        for info in buf
+                        if info.Relationship == 0 and info.ProcessorMask
+                    )
+                    if cores:
+                        return cores
+        except Exception:
+            pass
+    else:
+        try:
+            topo_glob = Path("/sys/devices/system/cpu").glob("cpu[0-9]*/topology/thread_siblings_list")
+            first_siblings: set[int] = set()
+            for p in topo_glob:
+                text = p.read_text().strip()
+                first_id = int(text.split(",")[0].split("-")[0])
+                first_siblings.add(first_id)
+            if first_siblings:
+                return sorted(first_siblings)
+        except Exception:
+            pass
+
+    try:
+        import psutil
+
+        logical = psutil.cpu_count(logical=True) or 1
+        physical = psutil.cpu_count(logical=False) or logical
+        if logical == 2 * physical:
+            return list(range(0, logical, 2))
+        return list(range(physical))
+    except Exception:
+        total = os.cpu_count() or 2
+        return list(range(0, total, 2)) if total > 1 else [0]
+
+
 def set_cpu_affinity(cpu_ids: list[int] | None = None) -> list[int] | None:
-    """Pins the current process to specific CPU core(s) (cross-platform: Windows/Linux)."""
+    """Pins the current process to physical CPU cores by default (or explicit `cpu_ids` if provided)."""
     if cpu_ids is None:
-        return None
+        cpu_ids = get_physical_core_ids()
     try:
         import psutil
 
         p = psutil.Process()
         p.cpu_affinity(cpu_ids)
         current = p.cpu_affinity()
-        print(f"Process CPU affinity pinned to core(s): {current}")
+        print(f"Process CPU affinity pinned to physical core(s) (no HT): {current}")
         return current
     except Exception as e:
         if hasattr(os, "sched_setaffinity"):
             try:
                 os.sched_setaffinity(0, cpu_ids)
                 current = list(os.sched_getaffinity(0))
-                print(f"Process CPU affinity pinned to core(s): {current}")
+                print(f"Process CPU affinity pinned to physical core(s) (no HT): {current}")
                 return current
             except Exception as e2:
                 print(f"Warning: Could not set CPU affinity via os.sched_setaffinity: {e2}", file=sys.stderr)
@@ -154,13 +209,14 @@ def main():
         default=None,
         help="Directory to store datasets and built graphs (default: ~/.cache/deg_datasets, env: DEG_DATA_PATH)",
     )
-    default_build_threads = max(1, (os.cpu_count() or 2) // 2)
+    physical_cores = get_physical_core_ids()
+    default_build_threads = max(1, len(physical_cores))
     parser.add_argument(
         "--build-threads",
         "-t",
         type=int,
         default=default_build_threads,
-        help=f"Number of threads for graph building (default: {default_build_threads} [half of CPU cores])",
+        help=f"Number of threads for graph building (default: {default_build_threads} [physical CPU cores])",
     )
     parser.add_argument(
         "--no-show",
@@ -174,7 +230,7 @@ def main():
         type=int,
         nargs="+",
         default=None,
-        help="Pin benchmark process to specific CPU core ID(s) (e.g. --cpu 0 or --cpu 0 1 2 3).",
+        help=f"Pin benchmark process to specific CPU core ID(s) (default: physical cores without HT {physical_cores}).",
     )
     parser.add_argument(
         "--algorithm",
@@ -231,9 +287,8 @@ def main():
         print(f"Selected VIBE Dataset: {dataset_key}")
         print(f"Cache directory: {cache_dir}")
 
-        # Pin CPU core affinity if requested
-        if args.cpu_affinity is not None:
-            set_cpu_affinity(args.cpu_affinity)
+        # Pin CPU core affinity (defaults to all physical cores without Hyper-Threading)
+        set_cpu_affinity(args.cpu_affinity)
 
         # Load dataset
         base_vecs, query_vecs, gt_vecs, gt_distances, meta = load_vibe_dataset(dataset_key, cache_dir)
@@ -300,14 +355,6 @@ def main():
                 )
                 query_metric = adapter.quant_metric.name.split("_", 1)[1]
                 query_dtype = quant_type
-            elif constructor_name == "EVP":
-                adapter = EVP(
-                    metric=metric_str,
-                    k=k,
-                    opt_target=opt_target,
-                    threads=args.build_threads,
-                )
-                query_dtype = "evp"
             else:
                 adapter = DEG(
                     metric=metric_str,
@@ -362,7 +409,7 @@ def main():
 
                 for param_type, group_vals in param_groups:
                     for val in group_vals:
-                        if constructor_name in ("QG", "EVP"):
+                        if constructor_name == "QG":
                             adapter.set_query_arguments(eps_or_ef=val, rerank_size_factor=r_factor)
                         else:
                             adapter.set_query_arguments(eps_or_ef=val)
