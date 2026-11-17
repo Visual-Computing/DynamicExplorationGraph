@@ -6,7 +6,7 @@ import warnings
 import deglib_cpp
 import numpy as np
 
-from .distances import FloatSpace
+from .distances import FloatSpace, Metric
 from .search import Filter
 from .utils import InvalidShapeException, assure_array
 
@@ -17,6 +17,14 @@ def _normalize_transformations(transformations):
     if isinstance(transformations, (list, tuple)):
         return list(transformations)
     return [transformations]
+
+
+_FLOAT_METRICS = frozenset({
+    Metric.FP32_L2,
+    Metric.FP32_InnerProduct,
+    Metric.FP16_L2,
+    Metric.FP16_InnerProduct,
+})
 
 
 class DynamicExplorationGraph:
@@ -314,6 +322,94 @@ class DynamicExplorationGraph:
         xfrms = _normalize_transformations(transformations)
         self.dynamic_exploration_graph_cpp.set_transformations(xfrms)
 
+    def _prepare_conversion_args(
+        self,
+        feature_space: FloatSpace | None,
+        custom_features: np.ndarray | None,
+        transformations: list | tuple | object | None,
+    ):
+        """Validate and normalize arguments for ``to_readonly``, ``to_mutable``, and ``to_dynamic``."""
+        if feature_space is not None and not isinstance(feature_space, FloatSpace):
+            raise TypeError(f"feature_space must be a FloatSpace or None, got {type(feature_space).__name__}")
+
+        xfrms = _normalize_transformations(transformations)
+        for i, t in enumerate(xfrms):
+            if not isinstance(t, deglib_cpp.transformation.FeatureTransformation):
+                raise TypeError(
+                    f"transformations[{i}] must be a FeatureTransformation, got {type(t).__name__}"
+                )
+            if not t.is_fitted:
+                raise ValueError(f"Transformation '{t.name}' (index {i}) must be fitted before converting a graph.")
+        for i in range(len(xfrms) - 1):
+            if xfrms[i].output_dim != xfrms[i + 1].input_dim:
+                raise ValueError(
+                    f"Transformation chain dimension mismatch: '{xfrms[i].name}' output_dim={xfrms[i].output_dim} "
+                    f"!= '{xfrms[i + 1].name}' input_dim={xfrms[i + 1].input_dim}."
+                )
+
+        if feature_space is not None and xfrms:
+            last = xfrms[-1]
+            if last.output_dim != feature_space.dim():
+                raise ValueError(
+                    f"Last transformation '{last.name}' output_dim ({last.output_dim}) "
+                    f"does not match feature_space.dim() ({feature_space.dim()})."
+                )
+            if last.output_byte_size != feature_space.get_data_size():
+                raise ValueError(
+                    f"Last transformation '{last.name}' output_byte_size ({last.output_byte_size} bytes) "
+                    f"does not match feature_space.get_data_size() ({feature_space.get_data_size()} bytes)."
+                )
+
+        src_space = self.get_feature_space()
+        src_metric = src_space.metric()
+        n_vertices = self.size()
+
+        if custom_features is not None:
+            feat_cpp = np.ascontiguousarray(custom_features)
+            if feat_cpp.ndim != 2:
+                raise ValueError(
+                    f"custom_features must be a 2D array of shape ({n_vertices}, ...), got shape {feat_cpp.shape}."
+                )
+            if feat_cpp.shape[0] != n_vertices:
+                raise ValueError(
+                    f"custom_features row count ({feat_cpp.shape[0]}) does not match graph.size() ({n_vertices})."
+                )
+            if feature_space is not None:
+                expected_bytes = feature_space.get_data_size()
+            elif xfrms:
+                expected_bytes = xfrms[-1].output_byte_size
+            else:
+                expected_bytes = src_space.get_data_size()
+
+            if feat_cpp.nbytes != n_vertices * expected_bytes:
+                raise ValueError(
+                    f"custom_features size ({feat_cpp.nbytes} bytes) does not match expected size "
+                    f"({n_vertices * expected_bytes} bytes for {n_vertices} vertices x {expected_bytes} bytes/vertex)."
+                )
+        else:
+            feat_cpp = None
+            if xfrms:
+                if xfrms[0].input_dim != src_space.dim():
+                    raise ValueError(
+                        f"First transformation '{xfrms[0].name}' input_dim ({xfrms[0].input_dim}) "
+                        f"does not match graph feature_space.dim() ({src_space.dim()})."
+                    )
+                if feature_space is not None and feature_space.metric() != src_metric and src_metric not in _FLOAT_METRICS:
+                    raise ValueError(
+                        f"Cannot self-transform from non-float graph metric '{src_metric.name}' without custom_features. "
+                        f"Provide custom_features or convert from an FP32/FP16 graph."
+                    )
+            elif feature_space is not None:
+                if feature_space.dim() != src_space.dim() or feature_space.get_data_size() != src_space.get_data_size():
+                    raise ValueError(
+                        f"Cannot change feature_space from (dim={src_space.dim()}, bytes={src_space.get_data_size()}) "
+                        f"to (dim={feature_space.dim()}, bytes={feature_space.get_data_size()}) "
+                        f"without providing custom_features or transformations."
+                    )
+
+        fs_cpp = feature_space.float_space_cpp if feature_space is not None else None
+        return fs_cpp, feat_cpp, xfrms
+
     def to_readonly(
         self,
         feature_space: FloatSpace | None = None,
@@ -321,21 +417,35 @@ class DynamicExplorationGraph:
         transformations: list | tuple | object | None = None,
     ) -> "DynamicExplorationGraph":
         """
-        Create a read-only graph from the given graph by only keeping information
-        that is useful for searching.
+        Convert this graph into a memory-compact, search-optimized read-only graph.
 
-        Optionally overrides feature space and replaces feature vectors with a custom features buffer
-        (e.g., swapping FP32 (d+1) features for FP16 d features while preserving graph topology),
-        and attaches query feature transformations.
+        Supports four usage modes depending on which optional arguments are provided:
 
-        :param feature_space: Optional FloatSpace specifying the target feature space.
-        :param custom_features: Optional NumPy array containing replacement feature vectors. In standard static workflows, simply pass the same array used for building (row i = vertex i). Only if labels were permuted/deleted, pass features aligned with ``get_labels()``.
-        :param transformations: Optional sequence of FeatureTransformation objects attached to the graph.
-        :return: A new read-only DynamicExplorationGraph.
+        1. **Simple conversion** (all args omitted):
+           Copies the graph topology and existing feature vectors as-is.
+        2. **In-place self-transformation** (``transformations`` given, ``custom_features=None``):
+           Transforms/quantizes each vertex directly from the graph's stored ``FP32`` or ``FP16``
+           features into the new graph's memory, avoiding an intermediate feature array allocation.
+           ``feature_space`` is optional (derived automatically from ``transformations`` unless
+           overriding the metric, e.g. ``Int8_InnerProduct``) and only triggers self-transformation
+           when the target metric differs from the source metric.
+        3. **Custom feature buffer** (``custom_features`` given, with ``feature_space`` and/or ``transformations``):
+           Replaces the stored features with a pre-transformed 2D NumPy array of shape ``(size(), ...)``
+           aligned to internal vertex order (``get_labels()``). Note: ``custom_features`` is copied
+           directly and is **not** passed through ``transformations``.
+        4. **Attach query transformations only** (``transformations`` keeps the source metric, ``custom_features=None``):
+           Copies stored features as-is and attaches ``transformations`` for query-time preprocessing.
+
+        :param feature_space: Optional target ``FloatSpace``. Required when changing metric/dtype
+                              via ``custom_features`` without ``transformations``, or when overriding
+                              the metric derived from ``transformations``.
+        :param custom_features: Optional contiguous 2D NumPy array of replacement features aligned
+                                with ``get_labels()``.
+        :param transformations: Optional ``FeatureTransformation`` or sequence of fitted
+                                ``FeatureTransformation`` objects to apply/attach.
+        :return: A new read-only ``DynamicExplorationGraph``.
         """
-        fs_cpp = feature_space.float_space_cpp if feature_space is not None else None
-        feat_cpp = np.ascontiguousarray(custom_features) if custom_features is not None else None
-        xfrms = _normalize_transformations(transformations)
+        fs_cpp, feat_cpp, xfrms = self._prepare_conversion_args(feature_space, custom_features, transformations)
         return DynamicExplorationGraph(self.dynamic_exploration_graph_cpp.to_readonly(fs_cpp, feat_cpp, xfrms))
 
     def to_mutable(
@@ -346,21 +456,30 @@ class DynamicExplorationGraph:
         transformations: list | tuple | object | None = None,
     ) -> "DynamicExplorationGraph":
         """
-        Create a mutable SizeBoundedGraph from the given graph (ReadOnly or SizeBounded),
-        optionally overriding the feature space and feature vectors.
-        All edge weights are recalculated using the new feature space.
+        Convert this graph into a fixed-capacity mutable ``SizeBoundedGraph``.
+        All edge weights are recalculated when the feature space or features change.
 
-        :param feature_space: Optional FloatSpace specifying the target feature space.
-                              If None, uses the graph's existing feature space.
-        :param custom_features: Optional NumPy array containing replacement feature vectors in internal index order (0 .. size()-1, see ``get_labels()``).
-        :param capacity: If > 0, sets the capacity to max(capacity, graph.size()).
-                         If 0, capacity equals graph.size().
-        :param transformations: Optional sequence of FeatureTransformation objects attached to the graph.
-        :return: A new mutable DynamicExplorationGraph.
+        Supports the same four feature/transformation modes as :meth:`to_readonly`:
+
+        1. **Simple conversion** (``feature_space=None, custom_features=None, transformations=None``):
+           Copies topology and features as-is.
+        2. **In-place self-transformation** (``transformations`` given, ``custom_features=None``):
+           Transforms/quantizes directly from stored ``FP32``/``FP16`` features into the new graph
+           without allocating an intermediate feature buffer (requires target metric != source metric).
+        3. **Custom feature buffer** (``custom_features`` given):
+           Replaces features with a 2D NumPy array aligned to ``get_labels()`` (not passed through ``transformations``).
+        4. **Attach query transformations only** (``transformations`` keeps the source metric, ``custom_features=None``):
+           Copies features as-is and attaches ``transformations`` for query-time use.
+
+        :param feature_space: Optional target ``FloatSpace`` (defaults to existing space or derived from ``transformations``).
+        :param custom_features: Optional contiguous 2D NumPy array of replacement features aligned with ``get_labels()``.
+        :param capacity: Maximum vertex capacity. If ``0`` or ``< size()``, capacity is set to ``size()``.
+        :param transformations: Optional ``FeatureTransformation`` or sequence of fitted ``FeatureTransformation`` objects.
+        :return: A new mutable ``DynamicExplorationGraph``.
         """
-        fs_cpp = feature_space.float_space_cpp if feature_space is not None else None
-        feat_cpp = np.ascontiguousarray(custom_features) if custom_features is not None else None
-        xfrms = _normalize_transformations(transformations)
+        if capacity < 0:
+            raise ValueError(f"capacity must be >= 0, got {capacity}")
+        fs_cpp, feat_cpp, xfrms = self._prepare_conversion_args(feature_space, custom_features, transformations)
         return DynamicExplorationGraph(
             self.dynamic_exploration_graph_cpp.to_mutable(
                 custom_feature_space=fs_cpp, custom_features=feat_cpp, new_max_size=capacity, transformations=xfrms
@@ -375,22 +494,30 @@ class DynamicExplorationGraph:
         transformations: list | tuple | object | None = None,
     ) -> "DynamicExplorationGraph":
         """
-        Create a mutable DynamicGraph with chunk-based dynamic memory allocation
-        from the given graph (ReadOnly, SizeBounded, or Dynamic),
-        optionally overriding the feature space and feature vectors.
-        All edge weights are recalculated using the new feature space.
+        Convert this graph into a chunk-allocated mutable ``DynamicGraph``.
+        All edge weights are recalculated when the feature space or features change.
 
-        :param feature_space: Optional FloatSpace specifying the target feature space.
-                              If None, uses the graph's existing feature space.
-        :param custom_features: Optional NumPy array containing replacement feature vectors in internal index order (0 .. size()-1, see ``get_labels()``).
-        :param chunk_size: Target number of vertices per memory chunk (default = 1024).
-                           Will be automatically rounded up to the nearest power of 2 (e.g. 600 -> 1024).
-        :param transformations: Optional sequence of FeatureTransformation objects attached to the graph.
-        :return: A new mutable DynamicExplorationGraph.
+        Supports the same four feature/transformation modes as :meth:`to_readonly`:
+
+        1. **Simple conversion** (``feature_space=None, custom_features=None, transformations=None``):
+           Copies topology and features as-is.
+        2. **In-place self-transformation** (``transformations`` given, ``custom_features=None``):
+           Transforms/quantizes directly from stored ``FP32``/``FP16`` features into the new graph
+           without allocating an intermediate feature buffer (requires target metric != source metric).
+        3. **Custom feature buffer** (``custom_features`` given):
+           Replaces features with a 2D NumPy array aligned to ``get_labels()`` (not passed through ``transformations``).
+        4. **Attach query transformations only** (``transformations`` keeps the source metric, ``custom_features=None``):
+           Copies features as-is and attaches ``transformations`` for query-time use.
+
+        :param feature_space: Optional target ``FloatSpace`` (defaults to existing space or derived from ``transformations``).
+        :param custom_features: Optional contiguous 2D NumPy array of replacement features aligned with ``get_labels()``.
+        :param chunk_size: Target vertices per memory chunk (default ``1024``, rounded up to power of 2).
+        :param transformations: Optional ``FeatureTransformation`` or sequence of fitted ``FeatureTransformation`` objects.
+        :return: A new dynamic ``DynamicExplorationGraph``.
         """
-        fs_cpp = feature_space.float_space_cpp if feature_space is not None else None
-        feat_cpp = np.ascontiguousarray(custom_features) if custom_features is not None else None
-        xfrms = _normalize_transformations(transformations)
+        if chunk_size <= 0:
+            raise ValueError(f"chunk_size must be > 0, got {chunk_size}")
+        fs_cpp, feat_cpp, xfrms = self._prepare_conversion_args(feature_space, custom_features, transformations)
         return DynamicExplorationGraph(
             self.dynamic_exploration_graph_cpp.to_dynamic(
                 custom_feature_space=fs_cpp, custom_features=feat_cpp, chunk_size=chunk_size, transformations=xfrms

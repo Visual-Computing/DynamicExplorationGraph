@@ -105,7 +105,7 @@ All benchmark search parameters, graph degrees, optimization targets, pruning op
 ```
 examples/vibe/
 ├── main.py              # VIBE ANNS benchmark runner (main entry point)
-├── module.py            # DEG / QG / EVP algorithm implementations
+├── module.py            # DEG / QG (incl. EVP) algorithm implementations
 ├── dataset.py           # VIBE dataset loading and caching
 ├── presets.py           # Config preset definitions
 ├── plot.py              # Interactive Plotly visualization / log explorer

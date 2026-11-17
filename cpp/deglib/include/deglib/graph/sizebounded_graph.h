@@ -137,18 +137,9 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
         std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
         const uint32_t new_max_size = 0
     ) {
-        auto resolve_space = [&]() -> deglib::distances::FloatSpace {
-            if (target_feature_space.has_value()) {
-                return *target_feature_space;
-            } else if (!transformations.empty()) {
-                const uint32_t target_dim = deglib::transformation::get_output_dim(transformations);
-                const auto target_metric = deglib::transformation::get_target_metric(transformations, input_graph.getFeatureSpace().metric());
-                return deglib::distances::FloatSpace(target_dim, target_metric);
-            }
-            return input_graph.getFeatureSpace();
-        };
-
-        const auto feature_space = resolve_space();
+        const auto feature_space = deglib::transformation::resolve_graph_conversion_space(
+            input_graph.getFeatureSpace(), target_feature_space, custom_features, transformations
+        );
         const uint32_t graph_size = input_graph.size();
         const uint32_t capacity = (new_max_size > 0 ? std::max(new_max_size, graph_size) : graph_size);
         const uint8_t edges_per_vertex = input_graph.getEdgesPerVertex();
@@ -177,7 +168,7 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
             auto vertex_memory = target.vertex_by_index(i);
 
             // Copy feature vector
-            if (!transformations.empty() && (src_metric != target.feature_space_.metric())) {
+            if (custom_features == nullptr && !transformations.empty() && (src_metric != target.feature_space_.metric())) {
                 const auto* src_feat = input_graph.getFeatureVector(i);
                 if (src_metric.get_data_type() == deglib::distances::MetricDataType::FP32) {
                     deglib::transformation::apply_database(transformations, reinterpret_cast<const float*>(src_feat), vertex_memory, 1);

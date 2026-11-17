@@ -1023,3 +1023,56 @@ def test_create_helpers():
     features = np.random.default_rng(42).standard_normal((20, 16)).astype(np.float32)
     g3 = deglib.create_random_graph(features, space, 4)
     assert g3.size() == 20
+
+
+def test_graph_conversion_validation():
+    """Test Python-side validation in to_readonly, to_mutable, and to_dynamic."""
+    rng = np.random.default_rng(7)
+    data = rng.standard_normal((24, 16)).astype(np.float32)
+    g = deglib.builder.build_from_data(data, edges_per_vertex=4, metric=Metric.FP32_L2)
+    q_int8 = deglib.transformation.make_scalar_quantizer_int8(data)
+    fs_int8 = FloatSpace.create(16, Metric.Int8_L2)
+
+    # 1. Invalid feature_space type
+    with pytest.raises(TypeError, match="FloatSpace"):
+        g.to_readonly(feature_space="Int8_L2")
+
+    # 2. Unfitted transformation
+    unfitted = deglib.transformation.ScalarQuantizerInt8(16)
+    with pytest.raises(ValueError, match="fitted"):
+        g.to_readonly(transformations=[unfitted])
+
+    # 3. Transformation input_dim mismatch against graph dim
+    wrong_dim_q = deglib.transformation.make_scalar_quantizer_int8(
+        rng.standard_normal((10, 8)).astype(np.float32)
+    )
+    with pytest.raises(ValueError, match="input_dim"):
+        g.to_mutable(transformations=[wrong_dim_q])
+
+    # 4. Transformation output_byte_size mismatch against feature_space
+    with pytest.raises(ValueError, match="output_byte_size"):
+        g.to_dynamic(feature_space=FloatSpace.create(16, Metric.FP16_L2), transformations=[q_int8])
+
+    # 5. Changing feature_space data size without custom_features or transformations
+    with pytest.raises(ValueError, match="custom_features or transformations"):
+        g.to_readonly(feature_space=fs_int8)
+
+    # 6. custom_features wrong shape / row count / byte size
+    with pytest.raises(ValueError, match="2D array"):
+        g.to_readonly(custom_features=data.ravel())
+    with pytest.raises(ValueError, match="row count"):
+        g.to_mutable(custom_features=data[:10])
+    with pytest.raises(ValueError, match="size"):
+        g.to_dynamic(custom_features=data.astype(np.float16))
+
+    # 7. Self-transform from non-float graph without custom_features
+    ro_int8 = g.to_readonly(fs_int8, transformations=[q_int8])
+    q_uint8 = deglib.transformation.make_scalar_quantizer_uint8(data)
+    with pytest.raises(ValueError, match="non-float"):
+        ro_int8.to_readonly(FloatSpace.create(16, Metric.Uint8_L2), transformations=[q_uint8])
+
+    # 8. Invalid capacity / chunk_size
+    with pytest.raises(ValueError, match="capacity"):
+        g.to_mutable(capacity=-1)
+    with pytest.raises(ValueError, match="chunk_size"):
+        g.to_dynamic(chunk_size=0)

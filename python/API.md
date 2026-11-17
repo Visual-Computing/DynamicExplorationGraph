@@ -129,13 +129,14 @@ class DynamicExplorationGraph:
     optimize(sample_count=300, k=100, ef=200, median_subset=4096)
 
     # --- Conversions & Saving ---
-    # Convert to compact, immutable graph (ReadOnlyGraph) for maximum query throughput
+    # All three conversion methods support:
+    # 1. Simple copy (all args None)
+    # 2. In-place self-transformation (transformations given, custom_features=None, target metric != source metric)
+    #    quantizes directly from stored FP32/FP16 features without allocating an intermediate buffer
+    # 3. Custom feature buffer (custom_features=(N, ...) aligned to get_labels(), not passed through transformations)
+    # 4. Query-only transformation attachment (transformations keeps source metric, custom_features=None)
     to_readonly(feature_space=None, custom_features=None, transformations=None) -> DynamicExplorationGraph
-
-    # Convert to mutable fixed-capacity graph (SizeBoundedGraph) with optional new metric/features
     to_mutable(feature_space=None, custom_features=None, capacity=0, transformations=None) -> DynamicExplorationGraph
-
-    # Convert to mutable chunk-allocated graph (DynamicGraph) that expands dynamically
     to_dynamic(feature_space=None, custom_features=None, chunk_size=1024, transformations=None) -> DynamicExplorationGraph
 
     # Save graph topology, features, transformations, and prefetch parameters to disk

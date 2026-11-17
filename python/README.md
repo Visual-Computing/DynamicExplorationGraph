@@ -223,15 +223,10 @@ graph = deglib.builder.build_from_data(
     show_progress=True,
 )
 
-# 3. Quantize features to Int8 for memory reduction and ultra-fast search
-quantizer = make_scalar_quantizer_int8(sorted_data)
-quant_int8_data = quantizer.quantize(sorted_data)
+# 3. Calibrate Int8 quantizer pipeline and convert directly into ReadOnlyGraph (no extra quantized buffer needed)
+pipeline = deglib.transformation.make_quantizer_pipeline(sorted_data, deglib.Metric.Int8_InnerProduct)
 int8_space = deglib.FloatSpace.create(dims, deglib.Metric.Int8_InnerProduct)
-
-# 4. Convert mutable graph to a compact ReadOnlyGraph equipped with the quantized features
-readonly_graph = graph.to_readonly(
-    feature_space=int8_space, custom_features=quant_int8_data, transformations=[quantizer]
-)
+readonly_graph = graph.to_readonly(feature_space=int8_space, transformations=pipeline)
 
 # 5. Create high-performance Searcher equipped with base vectors for exact candidate reranking
 rerank_space = deglib.FloatSpace.create(dims, deglib.Metric.FP32_InnerProduct)

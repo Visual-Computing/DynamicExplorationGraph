@@ -1178,14 +1178,21 @@ class DynamicExplorationGraph {
      * @return A new read-only DynamicExplorationGraph.
      */
     /**
-     * @brief Converts this graph to a compact read-only graph optimized for search.
-     * Replaces feature representation (e.g. uncompressed float to quantized bytes or FP16).
-     * If custom_features is nullptr and transformations are provided, existing features are
-     * self-transformed directly into the target buffer without caller-side allocations.
+     * @brief Converts this graph to a compact, immutable ReadOnlyGraph optimized for search.
      *
-     * @param custom_feature_space Optional target feature space. If omitted and transformations exist, derived automatically.
-     * @param custom_features Optional pointer to replacement raw feature memory in the graph's internal index order (0 .. size()-1, see getExternalLabels()).
-     * @param transformations Optional sequence of feature transformations/quantizers to attach.
+     * Supports four conversion modes:
+     * 1. Simple copy (all arguments omitted): copies topology and features as-is.
+     * 2. In-place self-transformation (transformations non-empty, custom_features == nullptr):
+     *    transforms/quantizes directly from stored FP32/FP16 features into the new graph
+     *    without allocating an intermediate buffer (requires target metric != source metric).
+     * 3. Custom feature buffer (custom_features != nullptr): copies pre-transformed features
+     *    aligned with getExternalLabels() (custom_features is NOT passed through transformations).
+     * 4. Query-only transformation attachment (transformations keeps source metric, custom_features == nullptr):
+     *    copies features as-is and attaches transformations for query preprocessing.
+     *
+     * @param custom_feature_space Optional target feature space. Derived automatically from transformations if omitted.
+     * @param custom_features Optional pointer to replacement raw feature memory in internal index order (0 .. size()-1).
+     * @param transformations Optional sequence of fitted feature transformations/quantizers to apply/attach.
      * @return A new read-only DynamicExplorationGraph.
      */
     DynamicExplorationGraph to_readonly(
@@ -1212,12 +1219,16 @@ class DynamicExplorationGraph {
     }
 
     /**
-     * @brief Converts this graph to a mutable SizeBoundedGraph with a custom feature space and features buffer.
+     * @brief Converts this graph to a mutable SizeBoundedGraph with optional feature/space conversion.
      *
-     * @param custom_feature_space Optional target feature space.
-     * @param custom_features Pointer to replacement raw feature memory in the graph's internal index order (0 .. size()-1, see getExternalLabels()).
+     * Supports the same four conversion modes as to_readonly() (simple copy, in-place
+     * self-transformation when custom_features == nullptr and target metric != source metric,
+     * custom feature buffer, or query-only transformation attachment). Edge weights are recalculated.
+     *
+     * @param custom_feature_space Optional target feature space (derived from transformations if omitted).
+     * @param custom_features Optional pointer to replacement raw feature memory in internal index order (0 .. size()-1).
      * @param new_max_size Desired vertex capacity. If 0 or less than size(), capacity is set to size().
-     * @param transformations Optional sequence of feature transformations/quantizers to attach.
+     * @param transformations Optional sequence of fitted feature transformations/quantizers to apply/attach.
      * @return A new mutable DynamicExplorationGraph.
      */
     DynamicExplorationGraph to_mutable(
@@ -1245,12 +1256,16 @@ class DynamicExplorationGraph {
     }
 
     /**
-     * @brief Converts this graph to a mutable DynamicGraph with a custom feature space and chunked allocation.
+     * @brief Converts this graph to a mutable DynamicGraph with chunked allocation and optional feature/space conversion.
      *
-     * @param custom_feature_space Optional target feature space.
-     * @param custom_features Pointer to replacement raw feature memory in the graph's internal index order (0 .. size()-1, see getExternalLabels()).
+     * Supports the same four conversion modes as to_readonly() (simple copy, in-place
+     * self-transformation when custom_features == nullptr and target metric != source metric,
+     * custom feature buffer, or query-only transformation attachment). Edge weights are recalculated.
+     *
+     * @param custom_feature_space Optional target feature space (derived from transformations if omitted).
+     * @param custom_features Optional pointer to replacement raw feature memory in internal index order (0 .. size()-1).
      * @param chunk_size Number of vertices allocated per memory chunk (default 1024). Rounded to power of 2.
-     * @param transformations Optional sequence of feature transformations/quantizers to attach.
+     * @param transformations Optional sequence of fitted feature transformations/quantizers to apply/attach.
      * @return A new mutable DynamicExplorationGraph.
      */
     DynamicExplorationGraph to_dynamic(

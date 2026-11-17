@@ -116,17 +116,9 @@ class ReadOnlyGraph : public InternalGraph {
         const void* custom_features = nullptr,
         std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
     ) {
-        const auto resolved_feature_space = [&]() -> deglib::distances::FloatSpace {
-            if (target_feature_space.has_value()) {
-                return *target_feature_space;
-            }
-            if (!transformations.empty()) {
-                const uint32_t target_dim = deglib::transformation::get_output_dim(transformations);
-                const auto target_metric = deglib::transformation::get_target_metric(transformations, input_graph.getFeatureSpace().metric());
-                return deglib::distances::FloatSpace(target_dim, target_metric);
-            }
-            return input_graph.getFeatureSpace();
-        }();
+        const auto resolved_feature_space = deglib::transformation::resolve_graph_conversion_space(
+            input_graph.getFeatureSpace(), target_feature_space, custom_features, transformations
+        );
 
         ReadOnlyGraph graph(input_graph.size(), input_graph.getEdgesPerVertex(), resolved_feature_space);
 

@@ -340,17 +340,33 @@ public:
     // 2. Custom Labels or Dynamic Graphs with Deletions: Vertices are indexed by their current internal slots.
     //    Use getExternalLabels() to look up which label resides at which slot (e.g. data[labels[i]]).
 
-    /// Convert to a compact, read-only graph (ReadOnlyGraph) optimized for search
-    DynamicExplorationGraph to_readonly() const;
-    DynamicExplorationGraph to_readonly(const FloatSpace& new_space, const void* new_features = nullptr) const;
+    /// Convert to a compact, read-only graph (ReadOnlyGraph) optimized for search.
+    /// Supports: (1) simple copy, (2) in-place self-transformation from FP32/FP16 when
+    /// new_features == nullptr and transformations change the metric, (3) pre-transformed
+    /// new_features buffer, or (4) query-only transformation attachment.
+    DynamicExplorationGraph to_readonly(
+        std::optional<FloatSpace> custom_feature_space = std::nullopt,
+        const void* custom_features = nullptr,
+        std::vector<std::shared_ptr<FeatureTransformation>> transformations = {}
+    ) const;
 
-    /// Convert to a mutable SizeBoundedGraph (fixed capacity)
+    /// Convert to a mutable SizeBoundedGraph (fixed capacity) with optional feature/space conversion
     DynamicExplorationGraph to_mutable(uint32_t new_max_size = 0) const;
-    DynamicExplorationGraph to_mutable(const FloatSpace& new_space, const void* new_features = nullptr, uint32_t new_max_size = 0) const;
+    DynamicExplorationGraph to_mutable(
+        std::optional<FloatSpace> custom_feature_space,
+        const void* custom_features = nullptr,
+        uint32_t new_max_size = 0,
+        std::vector<std::shared_ptr<FeatureTransformation>> transformations = {}
+    ) const;
 
-    /// Convert to a mutable DynamicGraph (chunk-allocated dynamic growth)
+    /// Convert to a mutable DynamicGraph (chunk-allocated dynamic growth) with optional feature/space conversion
     DynamicExplorationGraph to_dynamic(uint32_t chunk_size = 1024) const;
-    DynamicExplorationGraph to_dynamic(const FloatSpace& new_space, const void* new_features = nullptr, uint32_t chunk_size = 1024) const;
+    DynamicExplorationGraph to_dynamic(
+        std::optional<FloatSpace> custom_feature_space,
+        const void* custom_features = nullptr,
+        uint32_t chunk_size = 1024,
+        std::vector<std::shared_ptr<FeatureTransformation>> transformations = {}
+    ) const;
 
     /// Save graph topology, features, transformations, and prefetch parameters to binary file
     bool saveGraph(const char* path) const;
@@ -1126,7 +1142,8 @@ uint32_t get_input_dim(std::span<const std::shared_ptr<FeatureTransformation>> t
 uint32_t get_output_dim(std::span<const std::shared_ptr<FeatureTransformation>> transformations) noexcept;
 deglib::distances::Metric get_target_metric(std::span<const std::shared_ptr<FeatureTransformation>> transformations, deglib::distances::Metric input_metric);
 
-/// Build a quantizer pipeline with automatic FastHadamardRotation based on excess kurtosis
+/// Build a quantizer pipeline for any supported quantizer (Uint4, Int4, UInt7, Uint8, Int8, FP16, EVP),
+/// with automatic FastHadamardRotation based on excess kurtosis for scalar quantizers
 std::vector<std::shared_ptr<FeatureTransformation>> make_quantizer_pipeline(
     std::span<const float> data, uint32_t dim, deglib::distances::MetricDataType data_type,
     float quantile = -1.0f, bool use_rerank = false, size_t num_threads = 0, uint64_t rotation_seed = 42
