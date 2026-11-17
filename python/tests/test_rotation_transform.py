@@ -140,3 +140,13 @@ def test_quantizer_pipeline_thresholds_and_search():
     searcher = deglib.search.create_searcher(ro_graph)
     res = searcher.search(sub[0], k=5, eps_or_ef=32.0, threads=1, return_distances=False)
     assert 0 in res.tolist()
+
+    # EVP via make_quantizer_pipeline + self-transforming to_readonly (no custom_features buffer)
+    p_evp = deglib.transformation.make_quantizer_pipeline(sub, "evp", num_threads=2)
+    assert len(p_evp) == 1
+    assert isinstance(p_evp[0], deglib.transformation.EvpQuantizer)
+    assert len(deglib.transformation.make_quantizer_pipeline(sub, deglib.Metric.EVP_InnerProduct, num_threads=2)) == 1
+    ro_evp = graph.to_readonly(transformations=p_evp)
+    searcher_evp = deglib.search.create_searcher(ro_evp)
+    res_evp = searcher_evp.search(sub[0], k=5, eps_or_ef=32.0, threads=1, return_distances=False)
+    assert 0 in res_evp.tolist()

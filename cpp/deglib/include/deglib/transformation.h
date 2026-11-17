@@ -415,6 +415,13 @@ inline std::vector<std::shared_ptr<FeatureTransformation>> make_quantizer_pipeli
             return detail::build_quantizer_pipeline<ScalarQuantizerInt8>(data, dim, quantile, threshold, num_threads, rotation_seed);
         case deglib::distances::MetricDataType::FP16:
             return detail::build_quantizer_pipeline<ScalarQuantizerFP16>(data, dim, quantile, -1.0f, num_threads, rotation_seed);
+        case deglib::distances::MetricDataType::EVP: {
+            if (dim == 0) throw std::invalid_argument("make_quantizer_pipeline: dim must be > 0");
+            if (data.size() % dim != 0) throw std::invalid_argument("make_quantizer_pipeline: data size must be multiple of dim");
+            auto quant = std::make_shared<EvpQuantizer>(dim);
+            quant->fit(data, num_threads);
+            return {std::move(quant)};
+        }
         default:
             throw std::invalid_argument("make_quantizer_pipeline: unsupported MetricDataType");
     }

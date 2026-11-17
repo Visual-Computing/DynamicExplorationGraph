@@ -2136,9 +2136,10 @@ PYBIND11_MODULE(deglib_cpp, m) {
                 else if (q_lower == "uint8") data_type = deglib::distances::MetricDataType::Uint8;
                 else if (q_lower == "int8") data_type = deglib::distances::MetricDataType::Int8;
                 else if (q_lower == "fp16") data_type = deglib::distances::MetricDataType::FP16;
+                else if (q_lower == "evp") data_type = deglib::distances::MetricDataType::EVP;
                 else throw std::invalid_argument("Unsupported quantizer data type: " + q_lower);
             } else {
-                throw std::invalid_argument("quant must be a Metric or data type string (uint4, int4, uint7, uint8, int8, fp16)");
+                throw std::invalid_argument("quant must be a Metric or data type string (uint4, int4, uint7, uint8, int8, fp16, evp)");
             }
 
             const bool is_fp16 = (buf.itemsize == 2 && (buf.format == "H" || buf.format == "h" || buf.format == "e"));

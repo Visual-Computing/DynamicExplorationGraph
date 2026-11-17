@@ -27,6 +27,7 @@ _QUANT_PREFIXES = {
     "uint4": "Uint4",
     "int4": "Int4",
     "fp16": "FP16",
+    "evp": "EVP",
 }
 
 
@@ -251,7 +252,7 @@ class DEG(BaseANN):
 
 class QG(BaseANN):
     """
-    Quantized DEG (DEG-QG): Graph search with INT8 or UINT4 quantized vectors and FP16 reranking.
+    Quantized DEG (DEG-QG): Graph search with quantized vectors (INT8, UINT4, EVP, etc.) and FP16 reranking.
     """
 
     def __init__(
@@ -278,7 +279,7 @@ class QG(BaseANN):
         metric_kind = _VIBE_METRIC_KIND[self.metric]
         qmetric = (query_metric or "auto").strip()
         if qmetric.lower() == "auto":
-            quant_metric_kind = metric_kind
+            quant_metric_kind = "InnerProduct" if self.quant == "EVP" else metric_kind
         elif qmetric.lower() == "ip":
             quant_metric_kind = "InnerProduct"
         elif qmetric.lower() == "l2":
@@ -368,18 +369,16 @@ class QG(BaseANN):
             graph.save_graph(str(cache_file))
             loaded_graph = graph
 
-        # 3. Finalize ReadOnlyGraph with calibrated quantizer pipeline (optional FastHadamardRotation + ScalarQuantizer)
-        # Both features and rerank_data are derived directly from X_graph_order (row i = vertex i).
+        # 3. Finalize ReadOnlyGraph with calibrated quantizer pipeline (self-transforms directly into graph memory)
         target_space = deglib.FloatSpace.create(dim=dims, metric=self.quant_metric)
-        self.transformations = deglib.make_quantizer_pipeline(
+        self.transformations = deglib.transformation.make_quantizer_pipeline(
             X,
             self.quant_metric,
             num_threads=self.threads,
         )
-        quant_features = deglib.transformation.apply_database(self.transformations, X_graph_order)
 
-        # Convert the FP32 graph into a readonly graph that uses the quantized features and pipeline for the graph-based search
-        self.graph = loaded_graph.to_readonly(target_space, quant_features, transformations=self.transformations)
+        # Convert the FP32 graph into a readonly graph, quantizing directly from its stored FP32 features
+        self.graph = loaded_graph.to_readonly(target_space, transformations=self.transformations)
 
         # 5. Initialize a Searcher with FP16 Reranker & ScalarQuantizerFP16
         self.rerank_quantizer = deglib.transformation.make_scalar_quantizer_fp16(X)
@@ -423,161 +422,5 @@ class QG(BaseANN):
             )
         return (
             f"DEG-QG[{self.quant_metric.name}](k={self.k}, opt={self.opt_target}, "
-            f"rerank_factor={self.rerank_size_factor}, eps={self.eps_or_ef})"
-        )
-
-
-class EVP(BaseANN):
-    """
-    Equi-Voronoi Polytopes Quantized DEG (DEG-EVP): Graph search with EVP (1-bit/ternary) vectors and FP16 reranking.
-    """
-
-    def __init__(
-        self,
-        metric: str,
-        k: int = 30,
-        opt_target: str = "LowLID",
-        threads: int = 1,
-    ):
-        self.metric = metric.lower().strip()
-        if self.metric not in _VIBE_METRIC_KIND:
-            raise ValueError(f"Unsupported metric '{self.metric}'. Choose from: {list(_VIBE_METRIC_KIND.keys())}")
-
-        self.k = int(k)
-        self.opt_target = opt_target
-        self.threads = int(threads)
-        self.rerank_size_factor = 1.0
-        self.eps_or_ef = 0.0
-
-        metric_kind = _VIBE_METRIC_KIND[self.metric]
-        self.build_metric = _get_metric("FP32", metric_kind)
-        self.rerank_metric = _get_metric("FP16", metric_kind)
-        self.quant_metric = deglib.Metric.EVP_InnerProduct
-        self.opt_enum = deglib.builder.OptimizationTarget[self.opt_target]
-
-        self.graph = None
-        self.searcher = None
-        self.transformations = []
-        self.rerank_space_fp16 = None
-
-    def fit(self, X: np.ndarray, cache_dir: Path | None = None):
-        """Builds DEG graph, quantizes vectors using EVP Quantizer, and prepares C++ searcher."""
-        if self.metric == "cosine":
-            X = X / np.linalg.norm(X, axis=1)[:, np.newaxis]
-        X = np.ascontiguousarray(X, dtype=np.float32)
-        n_vectors, dims = X.shape
-
-        self.rerank_space_fp16 = deglib.FloatSpace.create(dim=dims, metric=self.rerank_metric)
-
-        cache_file = _resolve_graph_cache_path(
-            metric=self.metric,
-            k=self.k,
-            opt_target=self.opt_target,
-            n_vectors=n_vectors,
-            dims=dims,
-            cache_dir=cache_dir,
-        )
-
-        presort_file = _resolve_presort_cache_path(
-            metric=self.metric,
-            n_vectors=n_vectors,
-            dims=dims,
-            cache_dir=cache_dir,
-        )
-
-        if cache_file.exists():
-            print(f"Loading cached DEG graph from {cache_file}...", flush=True)
-            loaded_graph = deglib.load_readonly_graph(str(cache_file))
-            X_graph_order = X[loaded_graph.get_labels()]
-        else:
-            # 1. FLAS 1D Pre-sorting
-            if presort_file.exists():
-                print(f"Loading cached presort from {presort_file}...", flush=True)
-                sorted_indices = np.load(str(presort_file))
-            else:
-                print(f"Running FLAS 1D Pre-sorting (threads={self.threads})...", flush=True)
-                sorted_indices = deglib.optimization.presort(
-                    X,
-                    metric=self.build_metric,
-                    threads=self.threads,
-                    show_progress=True,
-                )
-                print(f"Saving presort to cache {presort_file}...", flush=True)
-                np.save(str(presort_file), sorted_indices)
-
-            X_graph_order = X[sorted_indices]
-
-            # 2. Build graph in FP32
-            print(f"Building DEG graph (K={self.k}, Opt={self.opt_target}, threads={self.threads})...", flush=True)
-            graph = deglib.builder.build_from_data(
-                data=X_graph_order,
-                labels=sorted_indices,
-                edges_per_vertex=self.k,
-                metric=self.build_metric,
-                seed=7,
-                optimization_target=self.opt_enum,
-                thread_count=self.threads,
-                show_progress=True,
-            )
-
-            print(f"Saving graph to cache {cache_file}...", flush=True)
-            graph.save_graph(str(cache_file))
-            loaded_graph = graph
-
-        # 3. Finalize ReadOnlyGraph with EVP features
-        # EvpQuantizer::fit() in C++ automatically calibrates the optimal nz value across threads.
-        self.quantizer = deglib.transformation.make_evp_quantizer(X, num_threads=self.threads)
-        print(
-            f"Quantizing with EVP (dim={dims}, non_zeros={self.quantizer.non_zeros} [~{self.quantizer.non_zeros / dims * 100:.1f}%])...",
-            flush=True,
-        )
-        evp_features = self.quantizer.quantize(X_graph_order, num_threads=self.threads)
-        target_space = deglib.FloatSpace.create(dim=dims, metric=self.quant_metric)
-        # self.graph = loaded_graph.to_readonly(target_space, evp_features, transformations=[self.quantizer])
-        self.graph = loaded_graph.to_readonly(target_space, evp_features, transformations=[self.quantizer])
-
-        # 5. Initialize C++ Zero-overhead Searcher with FP16 base vectors & ScalarQuantizerFP16
-        self.rerank_quantizer = deglib.transformation.make_scalar_quantizer_fp16(X)
-        rerank_features = self.rerank_quantizer.quantize(X_graph_order, num_threads=self.threads)
-
-        self.searcher = deglib.search.create_searcher(
-            graph=self.graph,
-            rerank_space=self.rerank_space_fp16,
-            rerank_data=rerank_features,
-            rerank_transformations=[self.rerank_quantizer],
-            normalize_query=(self.metric == "cosine"),
-        )
-
-        # 6. Optimize entry vertices and prefetch values
-        t_km = time.time()
-        self.searcher.optimize()
-        print(f"Optimized Searcher for EVP graph in {time.time() - t_km:.2f}s", flush=True)
-
-    def set_query_arguments(self, eps_or_ef: float, rerank_size_factor: float = 1.0):
-        """Sets query-time parameters: values >= 1.0 are treated as ef, < 1.0 as eps."""
-        self.rerank_size_factor = float(rerank_size_factor)
-        self.eps_or_ef = float(eps_or_ef)
-
-    def query(self, v: np.ndarray, n: int) -> np.ndarray:
-        """Single query search on 1 thread with EVP search and FP16 reranking."""
-        return self.searcher.search(
-            v,
-            k=n,
-            eps_or_ef=self.eps_or_ef,
-            rerank_factor=self.rerank_size_factor,
-            threads=1,
-            return_distances=False,
-            unsorted=True,
-        )
-
-    def __str__(self) -> str:
-        nz = self.quantizer.non_zeros if self.quantizer else 0
-        if self.eps_or_ef >= 1.0:
-            return (
-                f"DEG-EVP(k={self.k}, nz={nz}, opt={self.opt_target}, "
-                f"rerank_factor={self.rerank_size_factor}, ef={int(round(self.eps_or_ef))})"
-            )
-        return (
-            f"DEG-EVP(k={self.k}, nz={nz}, opt={self.opt_target}, "
             f"rerank_factor={self.rerank_size_factor}, eps={self.eps_or_ef})"
         )
