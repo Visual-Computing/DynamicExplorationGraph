@@ -219,12 +219,19 @@ class ScalarQuantizerUint4 : public FeatureTransformation {
         if (data.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUint4: dim must be > 0 prior to fit()");
         if (data.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUint4: data size must be multiple of dim");
-        const size_t train_size = std::min({data.size(), std::max<size_t>(dim_, data.size() / 10), static_cast<size_t>(10000) * dim_});
+        const size_t total_rows = data.size() / dim_;
+        const size_t target_rows = std::min({total_rows, std::max<size_t>(1, total_rows / 10), size_t{10000}});
+        std::vector<float> sampled;
+        std::span<const float> train_span = data;
+        if (target_rows < total_rows) {
+            sampled = deglib::transformation::detail::sample_strided_rows<float>(data, dim_, target_rows);
+            train_span = sampled;
+        }
         float actual_q = quantile;
         if (actual_q <= 0.0f) {
-            actual_q = detail::optimize_quantile_uint4(data.data(), train_size, dim_, true);
+            actual_q = detail::optimize_quantile_uint4(train_span.data(), train_span.size(), dim_, true);
         }
-        auto [mi, ma] = detail::find_minmax(data.data(), train_size, actual_q);
+        auto [mi, ma] = detail::find_minmax(train_span.data(), train_span.size(), actual_q);
         set_range(mi, ma);
     }
 
@@ -234,15 +241,23 @@ class ScalarQuantizerUint4 : public FeatureTransformation {
         if (data_fp16.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUint4: dim must be > 0 prior to fit()");
         if (data_fp16.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUint4: data size must be multiple of dim");
-        const size_t train_size = std::min({data_fp16.size(), std::max<size_t>(dim_, data_fp16.size() / 10), static_cast<size_t>(10000) * dim_});
+        const size_t total_rows = data_fp16.size() / dim_;
+        const size_t target_rows = std::min({total_rows, std::max<size_t>(1, total_rows / 10), size_t{10000}});
         if (quantile > 0.0f) {
-            auto [mi, ma] = detail::find_minmax_fp16(data_fp16.first(train_size), quantile);
+            std::vector<uint16_t> sampled_fp16;
+            std::span<const uint16_t> train_fp16 = data_fp16;
+            if (target_rows < total_rows) {
+                sampled_fp16 = deglib::transformation::detail::sample_strided_rows<uint16_t>(data_fp16, dim_, target_rows);
+                train_fp16 = sampled_fp16;
+            }
+            auto [mi, ma] = detail::find_minmax_fp16(train_fp16, quantile);
             set_range(mi, ma);
             return;
         }
-        std::vector<float> converted(train_size);
-        for (size_t i = 0; i < train_size; ++i) {
-            converted[i] = deglib::distances::fp16::fp16_to_float(data_fp16[i]);
+        std::vector<float> converted(target_rows * dim_);
+        for (size_t s = 0; s < target_rows; ++s) {
+            const size_t src_row = (target_rows == total_rows) ? s : (s * total_rows) / target_rows;
+            deglib::distances::fp16::fp16_to_floats(data_fp16.data() + src_row * dim_, converted.data() + s * dim_, dim_);
         }
         fit(std::span<const float>(converted), quantile);
     }

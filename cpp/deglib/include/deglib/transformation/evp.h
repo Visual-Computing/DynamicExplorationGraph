@@ -557,9 +557,28 @@ inline uint32_t calibrate_best_non_zeros(std::span<const float> src, uint32_t di
     const size_t calib_base_count = std::min(count, size_t{2000});
     const size_t available_q = count - calib_base_count;
     const size_t calib_query_count = (available_q >= 50) ? std::min(available_q, size_t{100}) : std::min(calib_base_count, size_t{50});
-    std::span<const float> calib_base = src.subspan(0, calib_base_count * dim);
-    std::span<const float> calib_queries =
-        (available_q >= 50) ? src.subspan(calib_base_count * dim, calib_query_count * dim) : calib_base.subspan(0, calib_query_count * dim);
+
+    std::vector<float> strided_base;
+    std::vector<float> strided_queries;
+    std::span<const float> calib_base = src;
+    std::span<const float> calib_queries = src;
+    if (count <= calib_base_count) {
+        calib_queries = calib_base.subspan(0, calib_query_count * dim);
+    } else {
+        strided_base.resize(calib_base_count * dim);
+        for (size_t s = 0; s < calib_base_count; ++s) {
+            const size_t idx = (s * count) / calib_base_count;
+            std::memcpy(strided_base.data() + s * dim, src.data() + idx * dim, static_cast<size_t>(dim) * sizeof(float));
+        }
+        calib_base = strided_base;
+
+        strided_queries.resize(calib_query_count * dim);
+        for (size_t s = 0; s < calib_query_count; ++s) {
+            const size_t idx = std::min(count - 1, ((s * 2 + 1) * count) / (2 * calib_query_count));
+            std::memcpy(strided_queries.data() + s * dim, src.data() + idx * dim, static_cast<size_t>(dim) * sizeof(float));
+        }
+        calib_queries = strided_queries;
+    }
 
     const auto sorted_unique = build_evp_nz_candidates(dim);
     const size_t top_k = std::min(calib_base_count, size_t{100});
@@ -598,9 +617,28 @@ inline uint32_t calibrate_best_non_zeros(std::span<const uint16_t> src_fp16, uin
     const size_t calib_base_count = std::min(count, size_t{2000});
     const size_t available_q = count - calib_base_count;
     const size_t calib_query_count = (available_q >= 50) ? std::min(available_q, size_t{100}) : std::min(calib_base_count, size_t{50});
-    std::span<const uint16_t> calib_base = src_fp16.subspan(0, calib_base_count * dim);
-    std::span<const uint16_t> calib_queries =
-        (available_q >= 50) ? src_fp16.subspan(calib_base_count * dim, calib_query_count * dim) : calib_base.subspan(0, calib_query_count * dim);
+
+    std::vector<uint16_t> strided_base;
+    std::vector<uint16_t> strided_queries;
+    std::span<const uint16_t> calib_base = src_fp16;
+    std::span<const uint16_t> calib_queries = src_fp16;
+    if (count <= calib_base_count) {
+        calib_queries = calib_base.subspan(0, calib_query_count * dim);
+    } else {
+        strided_base.resize(calib_base_count * dim);
+        for (size_t s = 0; s < calib_base_count; ++s) {
+            const size_t idx = (s * count) / calib_base_count;
+            std::memcpy(strided_base.data() + s * dim, src_fp16.data() + idx * dim, static_cast<size_t>(dim) * sizeof(uint16_t));
+        }
+        calib_base = strided_base;
+
+        strided_queries.resize(calib_query_count * dim);
+        for (size_t s = 0; s < calib_query_count; ++s) {
+            const size_t idx = std::min(count - 1, ((s * 2 + 1) * count) / (2 * calib_query_count));
+            std::memcpy(strided_queries.data() + s * dim, src_fp16.data() + idx * dim, static_cast<size_t>(dim) * sizeof(uint16_t));
+        }
+        calib_queries = strided_queries;
+    }
 
     const auto sorted_unique = build_evp_nz_candidates(dim);
     const size_t top_k = std::min(calib_base_count, size_t{100});

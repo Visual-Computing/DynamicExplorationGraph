@@ -114,8 +114,13 @@ inline std::vector<std::shared_ptr<FeatureTransformation>> build_quantizer_pipel
     if (dim == 0) throw std::invalid_argument("make_quantizer_pipeline: dim must be > 0");
     if (data.size() % dim != 0) throw std::invalid_argument("make_quantizer_pipeline: data size must be multiple of dim");
 
-    const size_t sample_items = std::min(data.size(), static_cast<size_t>(10000) * dim);
-    std::span<const float> sample_data = data.first(sample_items);
+    const size_t total_rows = data.size() / dim;
+    std::vector<float> strided_sample;
+    std::span<const float> sample_data = data;
+    if (total_rows > 10000) {
+        strided_sample = sample_strided_rows<float>(data, dim, 10000);
+        sample_data = strided_sample;
+    }
 
     std::vector<std::shared_ptr<FeatureTransformation>> pipeline;
     std::span<const float> fit_data = sample_data;
@@ -571,9 +576,14 @@ inline std::vector<std::shared_ptr<FeatureTransformation>> make_quantizer_pipeli
 ) {
     if (dim == 0) throw std::invalid_argument("make_quantizer_pipeline: dim must be > 0");
     if (data_fp16.size() % dim != 0) throw std::invalid_argument("make_quantizer_pipeline: data size must be multiple of dim");
-    const size_t sample_items = std::min(data_fp16.size(), static_cast<size_t>(10000) * dim);
-    std::vector<float> sample_f32(sample_items);
-    deglib::distances::fp16::fp16_to_floats(data_fp16.data(), sample_f32.data(), sample_items);
+    const size_t total_rows = data_fp16.size() / dim;
+    const size_t max_rows = (data_type == deglib::distances::MetricDataType::EVP) ? size_t{65536} : size_t{10000};
+    const size_t sample_rows = std::min(total_rows, max_rows);
+    std::vector<float> sample_f32(sample_rows * dim);
+    for (size_t s = 0; s < sample_rows; ++s) {
+        const size_t src_row = (sample_rows == total_rows) ? s : (s * total_rows) / sample_rows;
+        deglib::distances::fp16::fp16_to_floats(data_fp16.data() + src_row * dim, sample_f32.data() + s * dim, dim);
+    }
     return make_quantizer_pipeline(std::span<const float>(sample_f32), dim, data_type, quantile, use_rerank, num_threads, rotation_seed);
 }
 

@@ -493,7 +493,8 @@ static float calc_graph_quality(
         std::vector<uint32_t> nbr_labels;
         nbr_labels.reserve(edges_per_vertex);
 
-        for (size_t v = start_idx; v < end_idx; ++v) {
+        for (size_t s = start_idx; s < end_idx; ++s) {
+            const size_t v = (total_eval < graph_size) ? ((s * graph_size) / total_eval) : s;
             const auto ext_label = graph.getExternalLabel(static_cast<uint32_t>(v));
             if (ext_label >= base_top_rows) {
                 continue;

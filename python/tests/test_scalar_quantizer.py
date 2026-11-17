@@ -197,3 +197,38 @@ def test_uint4_quantizer_fit_quantize_and_distance():
     assert Metric.Uint4_InnerProduct.get_data_size(dim) == (dim + 1) // 2
     dist = Metric.Uint4_L2.compute_distance(quant_db[0], quant_db[1])
     assert dist >= 0.0
+
+
+def test_uint7_quantizer_uses_affine_range():
+    data = np.array([[0.0, 2.5, 5.0, 10.0]], dtype=np.float32)
+    quantizer = make_scalar_quantizer_uint7(data, quantile=1.0)
+    assert quantizer.output_dtype == np.int8
+
+    quantized = quantizer.transform_database(data)
+    assert quantized.dtype == np.int8
+    assert np.all((quantized >= 0) & (quantized <= 127))
+    np.testing.assert_array_equal(quantized[0], [0, 32, 64, 127])
+
+    via_pipe = apply_on_database(quantizer, data)
+    np.testing.assert_array_equal(via_pipe, quantized)
+
+
+def test_strided_calibration_sees_full_dataset():
+    rng = np.random.default_rng(7)
+    data = rng.uniform(-1.0, 1.0, size=(25_000, 16)).astype(np.float32)
+    # Place distinct range in the second half (would be missed by prefix-only [:10000] sampling)
+    data[15_000:] = rng.uniform(-5.0, 5.0, size=(10_000, 16)).astype(np.float32)
+
+    q_u7 = make_scalar_quantizer_uint7(data, quantile=1.0)
+    probe_one = np.full((1, 16), 1.0, dtype=np.float32)
+    q_probe = q_u7.transform_database(probe_one)
+    # If [-5, 5] in the second half was seen, 1.0 maps near the middle (~76) rather than saturating at 127
+    assert int(q_probe[0, 0]) < 90
+
+    q_u4 = make_scalar_quantizer_uint4(data, quantile=1.0)
+    assert q_u4.max_val > 4.0
+    assert q_u4.min_val < -4.0
+
+    pipe = deglib.make_quantizer_pipeline(data, Metric.Uint4_L2, quantile=1.0)
+    assert pipe[-1].max_val > 4.0
+    assert pipe[-1].min_val < -4.0

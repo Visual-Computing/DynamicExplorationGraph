@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <queue>
 #include <span>
@@ -12,6 +13,18 @@
 #include <vector>
 
 namespace deglib::transformation::detail {
+
+template <typename T>
+inline std::vector<T> sample_strided_rows(std::span<const T> data, uint32_t dim, size_t max_rows) {
+    const size_t total_rows = data.size() / dim;
+    const size_t sample_rows = std::min(total_rows, max_rows);
+    std::vector<T> sampled(sample_rows * dim);
+    for (size_t s = 0; s < sample_rows; ++s) {
+        const size_t src_row = (sample_rows == total_rows) ? s : (s * total_rows) / sample_rows;
+        std::memcpy(sampled.data() + s * dim, data.data() + src_row * dim, static_cast<size_t>(dim) * sizeof(T));
+    }
+    return sampled;
+}
 
 inline std::pair<float, float> find_minmax(const float* data, size_t total_items, float quantile = -1.0f) {
     if (total_items == 0) return {0.0f, 0.0f};
