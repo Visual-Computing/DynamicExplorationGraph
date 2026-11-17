@@ -134,10 +134,10 @@ TEST(TransformTest, VectorOfTransformsChainingAndSerialization) {
 
     // Transform vectors
     std::vector<std::byte> out_db(count * get_output_byte_size(transformations));
-    apply_database(transformations, data.data(), out_db.data(), count);
+    apply_on_database(transformations, std::span<const float>(data), std::span<std::byte>(out_db));
 
     std::vector<std::byte> out_q(count * get_output_byte_size(transformations));
-    apply_query(transformations, data.data(), out_q.data(), count);
+    apply_on_query(transformations, std::span<const float>(data), std::span<std::byte>(out_q));
 
     // Serialization & Deserialization
     std::stringstream ss(std::ios::in | std::ios::out | std::ios::binary);
@@ -151,6 +151,6 @@ TEST(TransformTest, VectorOfTransformsChainingAndSerialization) {
 
     // Re-apply with deserialized transformations
     std::vector<std::byte> out_db_deser(count * get_output_byte_size(transformations_deser));
-    apply_database(transformations_deser, data.data(), out_db_deser.data(), count);
+    apply_on_database(transformations_deser, std::span<const float>(data), std::span<std::byte>(out_db_deser));
     EXPECT_EQ(out_db, out_db_deser);
 }

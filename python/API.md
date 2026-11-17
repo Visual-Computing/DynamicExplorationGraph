@@ -135,7 +135,7 @@ class DynamicExplorationGraph:
     #    quantizes directly from stored FP32/FP16 features without allocating an intermediate buffer
     # 3. Custom feature buffer (custom_features=(N, ...) aligned to get_labels(), not passed through transformations)
     # 4. Query-only transformation attachment (transformations keeps source metric, custom_features=None)
-    to_readonly(feature_space=None, custom_features=None, transformations=None) -> DynamicExplorationGraph
+    to_readonly(feature_space=None, custom_features=None, transformations=None, num_threads=0) -> DynamicExplorationGraph
     to_mutable(feature_space=None, custom_features=None, capacity=0, transformations=None) -> DynamicExplorationGraph
     to_dynamic(feature_space=None, custom_features=None, chunk_size=1024, transformations=None) -> DynamicExplorationGraph
 
@@ -539,10 +539,8 @@ from deglib.transformation import (
     make_scalar_quantizer_uint7,
     make_scalar_quantizer_uint8_perdim,
     make_scalar_quantizer_fp16,
-    apply_database,
-    apply_query,
-    serialize_transformations,
-    deserialize_transformations,
+    apply_on_database,
+    apply_on_query,
     mips_l2_transform,
     mips_l2_transform_query,
 )
@@ -563,19 +561,12 @@ quant_fp16_base = fp16_quantizer.quantize(base_vectors)
 
 # 2. Sequential Pipeline Execution
 # Apply a sequence of transformations to database vectors:
-quantized_db = apply_database(transformations, base_vectors)
+quantized_db = apply_on_database(transformations, base_vectors)
 
 # Apply a sequence of transformations to query vectors:
-quantized_query = apply_query(transformations, query_vectors)
+quantized_query = apply_on_query(transformations, query_vectors)
 
-# 3. Pipeline Serialization
-# Serialize transformation stages into binary bytes:
-binary_blob = serialize_transformations(transformations)
-
-# Deserialize transformation stages from binary bytes:
-restored_transformations = deserialize_transformations(binary_blob)
-
-# 4. MIPS to L2 Coordinates
+# 3. MIPS to L2 Coordinates
 transformed_db, max_norm = mips_l2_transform(database)
 transformed_queries = mips_l2_transform_query(queries)
 ```

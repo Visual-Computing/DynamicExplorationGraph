@@ -114,8 +114,7 @@ py::object graph_search_single_wrapper(
     if (query_bytes != query_req_bytes && query_bytes != req_bytes) {
         throw std::invalid_argument(
             std::format(
-                "Query vector size in bytes ({}) does not match query size ({}) or feature space data size ({})",
-                query_bytes, query_req_bytes, req_bytes
+                "Query vector size in bytes ({}) does not match query size ({}) or feature space data size ({})", query_bytes, query_req_bytes, req_bytes
             )
         );
     }
@@ -270,7 +269,10 @@ py::object dynamic_exploration_graph_search_batch_wrapper(
             const size_t query_stride_bytes = size_t(query_info.shape[1]) * query_info.itemsize;
             if (query_stride_bytes != query_req_bytes && query_stride_bytes != req_bytes) {
                 throw std::invalid_argument(
-                    std::format("Query row size in bytes ({}) does not match query size ({}) or feature space data size ({})", query_stride_bytes, query_req_bytes, req_bytes)
+                    std::format(
+                        "Query row size in bytes ({}) does not match query size ({}) or feature space data size ({})", query_stride_bytes, query_req_bytes,
+                        req_bytes
+                    )
                 );
             }
             std::span<const std::byte> queries_span(static_cast<const std::byte*>(query_info.ptr), n_queries * query_stride_bytes);
@@ -652,16 +654,10 @@ class RerankerPy {
         {
             py::gil_scoped_release release;
             reranker_.rerank(
-                std::span<const std::byte>(static_cast<const std::byte*>(q_buf.ptr), n_queries * reranker_.getSpace().get_data_size()),
-                n_queries,
-                std::span<const uint32_t>(static_cast<const uint32_t*>(cand_buf.ptr), n_queries * evp_k),
-                evp_k,
-                static_cast<uint32_t>(k_top),
-                std::span<uint32_t>(ind_ptr, n_queries * k_top),
-                return_distances ? std::span<float>(dist_ptr, n_queries * k_top) : std::span<float>{},
-                return_distances,
-                unsorted,
-                num_threads
+                std::span<const std::byte>(static_cast<const std::byte*>(q_buf.ptr), n_queries * reranker_.getSpace().get_data_size()), n_queries,
+                std::span<const uint32_t>(static_cast<const uint32_t*>(cand_buf.ptr), n_queries * evp_k), evp_k, static_cast<uint32_t>(k_top),
+                std::span<uint32_t>(ind_ptr, n_queries * k_top), return_distances ? std::span<float>(dist_ptr, n_queries * k_top) : std::span<float>{},
+                return_distances, unsorted, num_threads
             );
         }
 
@@ -1333,7 +1329,10 @@ PYBIND11_MODULE(deglib_cpp, m) {
             else
                 t.transform_query(in_span, out_span);
             return out;
-        } else if (tag == deglib::transformation::TAG_SQU8 || tag == deglib::transformation::TAG_EVPQ || tag == deglib::transformation::TAG_SQU4 || tag == deglib::transformation::TAG_SQI4) {
+        } else if (
+            tag == deglib::transformation::TAG_SQU8 || tag == deglib::transformation::TAG_EVPQ || tag == deglib::transformation::TAG_SQU4 ||
+            tag == deglib::transformation::TAG_SQI4
+        ) {
             std::vector<py::ssize_t> shape = is_1d ? std::vector<py::ssize_t>{static_cast<py::ssize_t>(out_stride)}
                                                    : std::vector<py::ssize_t>{static_cast<py::ssize_t>(count), static_cast<py::ssize_t>(out_stride)};
             py::array_t<uint8_t> out(shape);
@@ -1396,20 +1395,20 @@ PYBIND11_MODULE(deglib_cpp, m) {
             f_ptr = static_cast<const float*>(f_arr.request().ptr);
         }
 
+        const size_t out_stride = transformations.back()->output_byte_size();
         auto run_transform = [&](std::byte* out_ptr) {
             py::gil_scoped_release release;
+            std::span<std::byte> out_span(out_ptr, count * out_stride);
             if (is_database) {
                 if (u16_ptr != nullptr) {
-                    deglib::transformation::apply_database(transformations, u16_ptr, out_ptr, count, num_threads);
+                    deglib::transformation::apply_on_database(transformations, std::span<const uint16_t>(u16_ptr, count * dim), out_span, num_threads);
                 } else {
-                    deglib::transformation::apply_database(transformations, f_ptr, out_ptr, count, num_threads);
+                    deglib::transformation::apply_on_database(transformations, std::span<const float>(f_ptr, count * dim), out_span, num_threads);
                 }
             } else {
-                deglib::transformation::apply_query(transformations, f_ptr, out_ptr, count);
+                deglib::transformation::apply_on_query(transformations, std::span<const float>(f_ptr, count * dim), out_span);
             }
         };
-
-        const size_t out_stride = transformations.back()->output_byte_size();
         const uint32_t tag = transformations.back()->tag();
         if (tag == deglib::transformation::TAG_SQI8 || tag == deglib::transformation::TAG_SQU7) {
             std::vector<py::ssize_t> shape = is_1d ? std::vector<py::ssize_t>{static_cast<py::ssize_t>(out_stride)}
@@ -1417,7 +1416,10 @@ PYBIND11_MODULE(deglib_cpp, m) {
             py::array_t<int8_t> out(shape);
             run_transform(reinterpret_cast<std::byte*>(out.request().ptr));
             return out;
-        } else if (tag == deglib::transformation::TAG_SQU8 || tag == deglib::transformation::TAG_EVPQ || tag == deglib::transformation::TAG_SQU4 || tag == deglib::transformation::TAG_SQI4) {
+        } else if (
+            tag == deglib::transformation::TAG_SQU8 || tag == deglib::transformation::TAG_EVPQ || tag == deglib::transformation::TAG_SQU4 ||
+            tag == deglib::transformation::TAG_SQI4
+        ) {
             std::vector<py::ssize_t> shape = is_1d ? std::vector<py::ssize_t>{static_cast<py::ssize_t>(out_stride)}
                                                    : std::vector<py::ssize_t>{static_cast<py::ssize_t>(count), static_cast<py::ssize_t>(out_stride)};
             py::array_t<uint8_t> out(shape);
@@ -1458,7 +1460,8 @@ PYBIND11_MODULE(deglib_cpp, m) {
                 uint32_t tag = t.tag();
                 py::module_ np = py::module_::import("numpy");
                 if (tag == deglib::transformation::TAG_SQI8) return np.attr("int8");
-                if (tag == deglib::transformation::TAG_SQU8 || tag == deglib::transformation::TAG_EVPQ || tag == deglib::transformation::TAG_SQU4 || tag == deglib::transformation::TAG_SQI4)
+                if (tag == deglib::transformation::TAG_SQU8 || tag == deglib::transformation::TAG_EVPQ || tag == deglib::transformation::TAG_SQU4 ||
+                    tag == deglib::transformation::TAG_SQI4)
                     return np.attr("uint8");
                 if (tag == deglib::transformation::TAG_SQ16) return np.attr("float16");
                 return np.attr("float32");
@@ -1773,8 +1776,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
                     );
                 } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
                     q.transform_database(
-                        std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), std::span<std::byte>(dst, count * out_stride),
-                        num_threads
+                        std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), std::span<std::byte>(dst, count * out_stride), num_threads
                     );
                 } else {
                     throw std::invalid_argument("vectors must be float32 or float16");
@@ -1887,8 +1889,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
                     );
                 } else if (buf.itemsize == 4 && (buf.format == "f" || buf.format == "float")) {
                     q.transform_database(
-                        std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), std::span<std::byte>(dst, count * out_stride),
-                        num_threads
+                        std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), std::span<std::byte>(dst, count * out_stride), num_threads
                     );
                 } else {
                     throw std::invalid_argument("vectors must be float32 or float16");
@@ -2050,11 +2051,11 @@ PYBIND11_MODULE(deglib_cpp, m) {
     };
 
     auto fwht_cls = py::class_<
-        deglib::transformation::FastHadamardRotation, deglib::transformation::FeatureTransformation,
-        std::shared_ptr<deglib::transformation::FastHadamardRotation>>(transformation_module, "FastHadamardRotation")
-        .def(py::init<>())
-        .def(py::init<uint32_t, uint64_t, uint32_t>(), py::arg("dim"), py::arg("seed") = 42, py::arg("rounds") = 0)
-        .def_property_readonly("rounds", &deglib::transformation::FastHadamardRotation::rounds);
+                        deglib::transformation::FastHadamardRotation, deglib::transformation::FeatureTransformation,
+                        std::shared_ptr<deglib::transformation::FastHadamardRotation>>(transformation_module, "FastHadamardRotation")
+                        .def(py::init<>())
+                        .def(py::init<uint32_t, uint64_t, uint32_t>(), py::arg("dim"), py::arg("seed") = 42, py::arg("rounds") = 0)
+                        .def_property_readonly("rounds", &deglib::transformation::FastHadamardRotation::rounds);
     bind_rotation_common(fwht_cls);
 
     auto make_scalar_quantizer_impl = [](auto type_tag, py::array vectors, float quantile) {
@@ -2130,14 +2131,22 @@ PYBIND11_MODULE(deglib_cpp, m) {
             } else if (py::isinstance<py::str>(quant)) {
                 std::string q_lower = quant.cast<std::string>();
                 for (char& c : q_lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                if (q_lower == "uint4") data_type = deglib::distances::MetricDataType::Uint4;
-                else if (q_lower == "int4") data_type = deglib::distances::MetricDataType::Int4;
-                else if (q_lower == "uint7") data_type = deglib::distances::MetricDataType::UInt7;
-                else if (q_lower == "uint8") data_type = deglib::distances::MetricDataType::Uint8;
-                else if (q_lower == "int8") data_type = deglib::distances::MetricDataType::Int8;
-                else if (q_lower == "fp16") data_type = deglib::distances::MetricDataType::FP16;
-                else if (q_lower == "evp") data_type = deglib::distances::MetricDataType::EVP;
-                else throw std::invalid_argument("Unsupported quantizer data type: " + q_lower);
+                if (q_lower == "uint4")
+                    data_type = deglib::distances::MetricDataType::Uint4;
+                else if (q_lower == "int4")
+                    data_type = deglib::distances::MetricDataType::Int4;
+                else if (q_lower == "uint7")
+                    data_type = deglib::distances::MetricDataType::UInt7;
+                else if (q_lower == "uint8")
+                    data_type = deglib::distances::MetricDataType::Uint8;
+                else if (q_lower == "int8")
+                    data_type = deglib::distances::MetricDataType::Int8;
+                else if (q_lower == "fp16")
+                    data_type = deglib::distances::MetricDataType::FP16;
+                else if (q_lower == "evp")
+                    data_type = deglib::distances::MetricDataType::EVP;
+                else
+                    throw std::invalid_argument("Unsupported quantizer data type: " + q_lower);
             } else {
                 throw std::invalid_argument("quant must be a Metric or data type string (uint4, int4, uint7, uint8, int8, fp16, evp)");
             }
@@ -2149,25 +2158,24 @@ PYBIND11_MODULE(deglib_cpp, m) {
                 auto f_buf = f_arr.request();
                 py::gil_scoped_release release;
                 return deglib::transformation::make_quantizer_pipeline(
-                    std::span<const float>(static_cast<const float*>(f_buf.ptr), count * dim),
-                    static_cast<uint32_t>(dim), data_type, quantile, use_rerank, num_threads, seed
+                    std::span<const float>(static_cast<const float*>(f_buf.ptr), count * dim), static_cast<uint32_t>(dim), data_type, quantile, use_rerank,
+                    num_threads, seed
                 );
             }
 
             py::gil_scoped_release release;
             if (is_fp16) {
                 return deglib::transformation::make_quantizer_pipeline(
-                    std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim),
-                    static_cast<uint32_t>(dim), data_type, quantile, use_rerank, num_threads, seed
+                    std::span<const uint16_t>(static_cast<const uint16_t*>(buf.ptr), count * dim), static_cast<uint32_t>(dim), data_type, quantile, use_rerank,
+                    num_threads, seed
                 );
             }
             return deglib::transformation::make_quantizer_pipeline(
-                std::span<const float>(static_cast<const float*>(buf.ptr), count * dim),
-                static_cast<uint32_t>(dim), data_type, quantile, use_rerank, num_threads, seed
+                std::span<const float>(static_cast<const float*>(buf.ptr), count * dim), static_cast<uint32_t>(dim), data_type, quantile, use_rerank,
+                num_threads, seed
             );
         },
-        py::arg("vectors"), py::arg("quant"), py::arg("quantile") = -1.0f,
-        py::arg("use_rerank") = false, py::arg("num_threads") = 0, py::arg("seed") = 42,
+        py::arg("vectors"), py::arg("quant"), py::arg("quantile") = -1.0f, py::arg("use_rerank") = false, py::arg("num_threads") = 0, py::arg("seed") = 42,
         "Builds a transformation pipeline [FastHadamardRotation, ScalarQuantizer] or [ScalarQuantizer] based on kurtosis."
     );
 
@@ -2238,27 +2246,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
     transformation_module.def("mips_l2_transform_query", &mips_l2_transform_query_wrapper, py::arg("queries"));
 
     transformation_module.def(
-        "serialize_transformations",
-        [](const std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>& transformations) -> py::bytes {
-            std::ostringstream ss(std::ios::binary);
-            deglib::transformation::serialize_transformations(transformations, ss);
-            return py::bytes(ss.str());
-        },
-        py::arg("transformations")
-    );
-
-    transformation_module.def(
-        "deserialize_transformations",
-        [](py::bytes b) {
-            std::string s = b;
-            std::istringstream ss(s, std::ios::binary);
-            return deglib::transformation::deserialize_transformations(ss);
-        },
-        py::arg("bytes")
-    );
-
-    transformation_module.def(
-        "apply_database",
+        "apply_on_database",
         [apply_transformations_array](
             const std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>& transformations, py::array in_arr, size_t num_threads
         ) { return apply_transformations_array(transformations, in_arr, true, num_threads); },
@@ -2266,7 +2254,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
     );
 
     transformation_module.def(
-        "apply_query",
+        "apply_on_query",
         [apply_transformations_array](const std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>& transformations, py::array in_arr) {
             return apply_transformations_array(transformations, in_arr, false);
         },
@@ -2345,8 +2333,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def_property("normalize_query", &SearcherPy::get_normalize_query, &SearcherPy::set_normalize_query)
         .def(
             "search", &SearcherPy::search, py::arg("query"), py::arg("k"), py::arg("eps_or_ef") = 0.1f, py::arg("rerank_factor") = 1.0f,
-            py::arg("num_threads") = 1, py::arg("return_distances") = false, py::arg("unsorted") = false,
-            py::arg("max_distance_computation_count") = 0,
+            py::arg("num_threads") = 1, py::arg("return_distances") = false, py::arg("unsorted") = false, py::arg("max_distance_computation_count") = 0,
             "Search for nearest neighbors of a single query vector (1D) or batch of query vectors (2D).\n\n"
             "Args:\n"
             "    query: 1D query vector or 2D batch array.\n"
@@ -2361,8 +2348,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
         )
         .def(
             "search_batch", &SearcherPy::search_batch, py::arg("queries"), py::arg("k"), py::arg("eps_or_ef") = 0.1f, py::arg("rerank_factor") = 1.0f,
-            py::arg("num_threads") = 1, py::arg("return_distances") = false, py::arg("unsorted") = false,
-            py::arg("max_distance_computation_count") = 0,
+            py::arg("num_threads") = 1, py::arg("return_distances") = false, py::arg("unsorted") = false, py::arg("max_distance_computation_count") = 0,
             "Search for nearest neighbors for a batch of query vectors.\n\n"
             "Args:\n"
             "    queries: 2D query array (shape N x Dim).\n"
@@ -2376,9 +2362,10 @@ PYBIND11_MODULE(deglib_cpp, m) {
             "    max_distance_computation_count: Optional hard budget of distance computations per query (0 = unlimited)."
         )
         .def(
-            "optimize", &SearcherPy::optimize, py::arg("n_clusters") = 256, py::arg("n_iter") = 20, py::arg("sample_size") = 0,
-            py::arg("num_threads") = 1, py::arg("use_routing") = true,
-            "Select entry vertices via k-means medoids and tune prefetch parameters.\n\nArgs:\n    n_clusters: number of entry vertices to select (maximum 512).\n    n_iter: number of "
+            "optimize", &SearcherPy::optimize, py::arg("n_clusters") = 256, py::arg("n_iter") = 20, py::arg("sample_size") = 0, py::arg("num_threads") = 1,
+            py::arg("use_routing") = true,
+            "Select entry vertices via k-means medoids and tune prefetch parameters.\n\nArgs:\n    n_clusters: number of entry vertices to select (maximum "
+            "512).\n    n_iter: number of "
             "k-means "
             "iterations.\n    sample_size: vertices sampled for clustering, 0 selects 3% of the graph size.\n    num_threads: worker threads, 0 selects "
             "a library default.\n    use_routing: build a k-means routing graph for entry selection (used by the QG/query-graph searcher)."
@@ -2471,7 +2458,8 @@ PYBIND11_MODULE(deglib_cpp, m) {
         .def(
             "to_readonly",
             [](const deglib::DynamicExplorationGraph& g, std::optional<deglib::distances::FloatSpace> custom_feature_space,
-               std::optional<py::array> custom_features, std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations) {
+               std::optional<py::array> custom_features, std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
+               size_t num_threads) {
                 const void* feat_ptr = nullptr;
                 py::buffer_info feat_info;
                 if (custom_features.has_value() && !custom_features->is_none()) {
@@ -2489,10 +2477,12 @@ PYBIND11_MODULE(deglib_cpp, m) {
                         }
                     }
                 }
-                return g.to_readonly(custom_feature_space, feat_ptr, std::move(transformations));
+                py::gil_scoped_release release;
+                return g.to_readonly(custom_feature_space, feat_ptr, std::move(transformations), num_threads);
             },
             py::arg("custom_feature_space") = py::none(), py::arg("custom_features") = py::none(),
-            py::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}
+            py::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{},
+            py::arg("num_threads") = 0
         )
         .def("set_transformations", &deglib::DynamicExplorationGraph::setTransformations, py::arg("transformations"))
         .def(

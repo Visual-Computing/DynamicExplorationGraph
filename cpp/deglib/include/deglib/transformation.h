@@ -9,6 +9,7 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <span>
 #include <sstream>
 #include <stdexcept>
@@ -224,27 +225,44 @@ inline std::vector<std::shared_ptr<FeatureTransformation>> deserialize_transform
     return transformations;
 }
 
-inline void apply_query(std::span<const std::shared_ptr<FeatureTransformation>> transformations, const float* query, std::byte* out, size_t count = 1) {
+inline void apply_on_query(
+    std::span<const std::shared_ptr<FeatureTransformation>> transformations,
+    std::span<const float> query,
+    std::span<std::byte> out
+) {
+    if (query.empty()) return;
     if (transformations.empty()) {
-        std::memcpy(out, query, count * sizeof(float));
+        if (out.size() < query.size_bytes()) {
+            throw std::invalid_argument("apply_on_query: output buffer too small");
+        }
+        std::memcpy(out.data(), query.data(), query.size_bytes());
         return;
     }
+
+    const uint32_t in_dim = transformations.front()->input_dim();
+    if (in_dim == 0 || query.size() % in_dim != 0) {
+        throw std::invalid_argument("apply_on_query: query size must be a multiple of transformation input_dim");
+    }
+    const size_t count = query.size() / in_dim;
+    const size_t final_stride = transformations.back()->query_byte_size();
+    if (out.size() < count * final_stride) {
+        throw std::invalid_argument("apply_on_query: output buffer too small");
+    }
+
     if (transformations.size() == 1) {
-        const auto& t = transformations[0];
-        t->transform_query(std::span<const float>(query, count * t->input_dim()), std::span<std::byte>(out, count * t->query_byte_size()));
+        transformations[0]->transform_query(query, out.first(count * final_stride));
         return;
     }
 
     thread_local TransformationWorkspace workspace;
-    const float* cur_in = query;
     const size_t buf_a_size = transformations[0]->output_byte_size() * count;
     std::byte* cur_buf = workspace.get_buffer_a(buf_a_size);
-    transformations[0]->transform_query(std::span<const float>(cur_in, count * transformations[0]->input_dim()), std::span<std::byte>(cur_buf, buf_a_size));
+    transformations[0]->transform_query(query, std::span<std::byte>(cur_buf, buf_a_size));
 
     for (size_t i = 1; i < transformations.size(); ++i) {
         const bool is_last = (i == transformations.size() - 1);
-        const size_t cur_out_size = transformations[i]->output_byte_size() * count;
-        std::byte* next_buf = is_last ? out : ((i % 2 == 1) ? workspace.get_buffer_b(cur_out_size) : workspace.get_buffer_a(cur_out_size));
+        const size_t cur_out_size = (is_last ? final_stride : transformations[i]->output_byte_size()) * count;
+        std::byte* next_buf = is_last ? out.data() : ((i % 2 == 1) ? workspace.get_buffer_b(cur_out_size) : workspace.get_buffer_a(cur_out_size));
         transformations[i]->transform_query(
             std::span<const float>(reinterpret_cast<const float*>(cur_buf), count * transformations[i]->input_dim()),
             std::span<std::byte>(next_buf, cur_out_size)
@@ -257,30 +275,26 @@ namespace detail {
 
 inline void apply_pipeline_one_float(
     std::span<const std::shared_ptr<FeatureTransformation>> transformations,
-    const float* in_f32,
-    std::byte* out,
+    std::span<const float> in_f32,
+    std::span<std::byte> out,
     std::vector<std::byte>& buf_a,
     std::vector<std::byte>& buf_b
 ) {
     const size_t n_xfrms = transformations.size();
     if (n_xfrms == 1) {
-        const auto& t = transformations[0];
-        t->transform_database(std::span<const float>(in_f32, t->input_dim()), std::span<std::byte>(out, t->output_byte_size()));
+        transformations[0]->transform_database(in_f32, out);
         return;
     }
 
     const size_t s0 = transformations[0]->output_byte_size();
     if (buf_a.size() < s0) buf_a.resize(s0);
-    transformations[0]->transform_database(
-        std::span<const float>(in_f32, transformations[0]->input_dim()),
-        std::span<std::byte>(buf_a.data(), s0)
-    );
+    transformations[0]->transform_database(in_f32, std::span<std::byte>(buf_a.data(), s0));
     std::byte* cur_buf = buf_a.data();
 
     for (size_t i = 1; i < n_xfrms; ++i) {
         const bool is_last = (i == n_xfrms - 1);
         const size_t out_bytes = transformations[i]->output_byte_size();
-        std::byte* next_buf = out;
+        std::byte* next_buf = out.data();
         if (!is_last) {
             auto& target_vec = (i % 2 == 1) ? buf_b : buf_a;
             if (target_vec.size() < out_bytes) target_vec.resize(out_bytes);
@@ -296,31 +310,47 @@ inline void apply_pipeline_one_float(
 
 }  // namespace detail
 
-inline void apply_database(
+inline void apply_on_database(
     std::span<const std::shared_ptr<FeatureTransformation>> transformations,
-    const float* data,
-    std::byte* out,
-    size_t count,
+    std::span<const float> data,
+    std::span<std::byte> out,
     size_t num_threads = 0
 ) {
+    if (data.empty()) return;
     if (transformations.empty()) {
-        std::memcpy(out, data, count * sizeof(float));
-        return;
-    }
-    if (count == 0) return;
-    if (transformations.size() == 1) {
-        const auto& t = transformations[0];
-        t->transform_database(std::span<const float>(data, count * t->input_dim()), std::span<std::byte>(out, count * t->output_byte_size()));
+        if (out.size() < data.size_bytes()) {
+            throw std::invalid_argument("apply_on_database: output buffer too small");
+        }
+        std::memcpy(out.data(), data.data(), data.size_bytes());
         return;
     }
 
     const uint32_t in_dim = transformations.front()->input_dim();
+    if (in_dim == 0 || data.size() % in_dim != 0) {
+        throw std::invalid_argument("apply_on_database: data size must be a multiple of transformation input_dim");
+    }
+    const size_t count = data.size() / in_dim;
     const size_t out_stride = transformations.back()->output_byte_size();
+    if (out.size() < count * out_stride) {
+        throw std::invalid_argument("apply_on_database: output buffer too small");
+    }
+
+    if (transformations.size() == 1) {
+        transformations[0]->transform_database(data, out.first(count * out_stride));
+        return;
+    }
+
     if (num_threads == 1 || count == 1) {
         thread_local std::vector<std::byte> tls_a;
         thread_local std::vector<std::byte> tls_b;
         for (size_t v = 0; v < count; ++v) {
-            detail::apply_pipeline_one_float(transformations, data + v * in_dim, out + v * out_stride, tls_a, tls_b);
+            detail::apply_pipeline_one_float(
+                transformations,
+                data.subspan(v * in_dim, in_dim),
+                out.subspan(v * out_stride, out_stride),
+                tls_a,
+                tls_b
+            );
         }
         return;
     }
@@ -331,23 +361,43 @@ inline void apply_database(
             std::vector<std::byte> buf_a;
             std::vector<std::byte> buf_b;
             for (size_t v = begin; v < end; ++v) {
-                detail::apply_pipeline_one_float(transformations, data + v * in_dim, out + v * out_stride, buf_a, buf_b);
+                detail::apply_pipeline_one_float(
+                    transformations,
+                    data.subspan(v * in_dim, in_dim),
+                    out.subspan(v * out_stride, out_stride),
+                    buf_a,
+                    buf_b
+                );
             }
         },
         4
     );
 }
 
-inline void apply_database(
+inline void apply_on_database(
     std::span<const std::shared_ptr<FeatureTransformation>> transformations,
-    const uint16_t* data_fp16,
-    std::byte* out,
-    size_t count,
+    std::span<const uint16_t> data_fp16,
+    std::span<std::byte> out,
     size_t num_threads = 0
 ) {
-    if (count == 0 || transformations.empty()) return;
+    if (data_fp16.empty()) return;
+    if (transformations.empty()) {
+        if (out.size() < data_fp16.size_bytes()) {
+            throw std::invalid_argument("apply_on_database: output buffer too small");
+        }
+        std::memcpy(out.data(), data_fp16.data(), data_fp16.size_bytes());
+        return;
+    }
+
     const uint32_t in_dim = transformations.front()->input_dim();
+    if (in_dim == 0 || data_fp16.size() % in_dim != 0) {
+        throw std::invalid_argument("apply_on_database: data size must be a multiple of transformation input_dim");
+    }
+    const size_t count = data_fp16.size() / in_dim;
     const size_t out_stride = transformations.back()->output_byte_size();
+    if (out.size() < count * out_stride) {
+        throw std::invalid_argument("apply_on_database: output buffer too small");
+    }
 
     if (num_threads == 1 || count == 1) {
         thread_local std::vector<float> tls_f;
@@ -355,8 +405,14 @@ inline void apply_database(
         thread_local std::vector<std::byte> tls_b;
         if (tls_f.size() < in_dim) tls_f.resize(in_dim);
         for (size_t v = 0; v < count; ++v) {
-            deglib::distances::fp16::fp16_to_floats(data_fp16 + v * in_dim, tls_f.data(), in_dim);
-            detail::apply_pipeline_one_float(transformations, tls_f.data(), out + v * out_stride, tls_a, tls_b);
+            deglib::distances::fp16::fp16_to_floats(data_fp16.data() + v * in_dim, tls_f.data(), in_dim);
+            detail::apply_pipeline_one_float(
+                transformations,
+                std::span<const float>(tls_f.data(), in_dim),
+                out.subspan(v * out_stride, out_stride),
+                tls_a,
+                tls_b
+            );
         }
         return;
     }
@@ -368,8 +424,14 @@ inline void apply_database(
             std::vector<std::byte> buf_a;
             std::vector<std::byte> buf_b;
             for (size_t v = begin; v < end; ++v) {
-                deglib::distances::fp16::fp16_to_floats(data_fp16 + v * in_dim, f_buf.data(), in_dim);
-                detail::apply_pipeline_one_float(transformations, f_buf.data(), out + v * out_stride, buf_a, buf_b);
+                deglib::distances::fp16::fp16_to_floats(data_fp16.data() + v * in_dim, f_buf.data(), in_dim);
+                detail::apply_pipeline_one_float(
+                    transformations,
+                    std::span<const float>(f_buf.data(), in_dim),
+                    out.subspan(v * out_stride, out_stride),
+                    buf_a,
+                    buf_b
+                );
             }
         },
         4

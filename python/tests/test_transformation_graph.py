@@ -18,11 +18,7 @@ from deglib import (
     load_graph,
     load_readonly_graph,
 )
-from deglib.transformation import (
-    apply_database,
-    deserialize_transformations,
-    serialize_transformations,
-)
+from deglib.transformation import apply_on_database
 
 
 def test_scalar_int8_transform_serialization_and_transform():
@@ -39,19 +35,10 @@ def test_scalar_int8_transform_serialization_and_transform():
     assert transform.output_dtype == np.int8
 
     scale = 127.0 / transform.abs_max
-    out = apply_database(transformations, data)
+    out = apply_on_database(transformations, data)
     assert out.dtype == np.int8
     expected = np.clip(np.round(data * scale), -127, 127).astype(np.int8)
     np.testing.assert_array_equal(out, expected)
-
-    # Test serialization roundtrip
-    serialized = serialize_transformations(transformations)
-    deserialized = deserialize_transformations(serialized)
-    assert len(deserialized) == 1
-    assert deserialized[0].output_dtype == np.int8
-
-    out_deser = apply_database(deserialized, data)
-    np.testing.assert_array_equal(out_deser, expected)
 
 
 def test_scalar_fp16_transform_serialization_and_transform():
@@ -67,7 +54,7 @@ def test_scalar_fp16_transform_serialization_and_transform():
     assert transform.output_dtype == np.float16
     assert transform.scale < 1.0
 
-    out = apply_database(transformations, data)
+    out = apply_on_database(transformations, data)
     assert out.dtype == np.float16
     assert out.shape == (10, dim)
     assert not np.any(np.isinf(out))
@@ -76,13 +63,6 @@ def test_scalar_fp16_transform_serialization_and_transform():
     # Roundtrip via dequantize approximates the scaled input within FP16 precision.
     deq = transform.dequantize(out)
     np.testing.assert_allclose(deq, data, rtol=2e-3, atol=1.0)
-
-    # Serialization roundtrip through the generic transformation list.
-    deserialized = deserialize_transformations(serialize_transformations(transformations))
-    assert len(deserialized) == 1
-    assert deserialized[0].output_dtype == np.float16
-    out_deser = apply_database(deserialized, data)
-    np.testing.assert_array_equal(out_deser.view(np.uint16), out.view(np.uint16))
 
 
 def test_scalar_uint8_transform_serialization_and_transform():
@@ -97,14 +77,10 @@ def test_scalar_uint8_transform_serialization_and_transform():
     assert transform.output_dtype == np.uint8
 
     scale = 255.0 / (transform.max_val - transform.min_val)
-    out = apply_database(transformations, data)
+    out = apply_on_database(transformations, data)
     assert out.dtype == np.uint8
     expected = np.clip(np.round((data - transform.min_val) * scale), 0, 255).astype(np.uint8)
     np.testing.assert_array_equal(out, expected)
-
-    # Roundtrip
-    deser = deserialize_transformations(serialize_transformations(transformations))
-    np.testing.assert_array_equal(apply_database(deser, data), expected)
 
 
 def test_mips_transform():
@@ -118,14 +94,10 @@ def test_mips_transform():
     assert transform.output_dtype == np.float32
 
     data = np.random.randn(5, dim).astype(np.float32)
-    out = apply_database(transformations, data)
+    out = apply_on_database(transformations, data)
     assert out.shape == (5, dim + 1)
     assert out.dtype == np.float32
     np.testing.assert_allclose(out[:, :dim], data)
-
-    deser = deserialize_transformations(serialize_transformations(transformations))
-    out_deser = apply_database(deser, data)
-    np.testing.assert_allclose(out_deser, out)
 
 
 def test_builder_and_graph_search_with_int8_transforms():

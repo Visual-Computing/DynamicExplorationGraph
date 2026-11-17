@@ -44,13 +44,17 @@ def assure_array(arr: np.ndarray, name: str, dtype: np.dtype) -> np.ndarray:
 
 
 class StopWatch:
-    def __init__(self):
+    """High-resolution wall-clock timer measuring elapsed microseconds."""
+
+    def __init__(self) -> None:
         self.start_time = time.perf_counter_ns()
 
     def get_elapsed_time_micro(self) -> int:
+        """Return elapsed time since instantiation in microseconds."""
         end_time = time.perf_counter_ns()
         return (end_time - self.start_time) // 1000
 
 
-def get_current_rss_mb():
+def get_current_rss_mb() -> int:
+    """Return the current process resident set size (RSS) in megabytes."""
     return psutil.Process().memory_info().rss // 1000_000

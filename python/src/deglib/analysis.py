@@ -148,34 +148,87 @@ GraphStats.__str__ = _stats_str
 
 
 def calc_avg_edge_weight(graph: Any, scale: int = 1) -> float:
+    """
+    Calculate the average edge weight across all vertices in the graph.
+
+    :param graph: Target ``DynamicExplorationGraph`` instance.
+    :param scale: Optional divisor/scale factor applied to the edge weights.
+    :return: Average edge weight.
+    """
     return _calc_avg_edge_weight_cpp(_unwrap(graph), scale)
 
 
 def calc_edge_weight_histogram(graph: Any, sort: bool, scale: int = 1) -> List[float]:
+    """
+    Compute the histogram/distribution of edge weights in the graph.
+
+    :param graph: Target ``DynamicExplorationGraph`` instance.
+    :param sort: Whether to sort the resulting edge weight values.
+    :param scale: Optional scale factor applied to edge weights.
+    :return: List of edge weight histogram values.
+    """
     return _calc_edge_weight_histogram_cpp(_unwrap(graph), sort, scale)
 
 
 def check_graph_weights(graph: Any) -> bool:
+    """
+    Verify that all stored edge weights match the recomputed distances between connected vertices.
+
+    :param graph: Target ``DynamicExplorationGraph`` instance.
+    :return: ``True`` if all edge weights are valid, ``False`` otherwise.
+    """
     return _check_graph_weights_cpp(_unwrap(graph))
 
 
 def check_graph_regularity(graph: Any, expected_vertices: int, check_back_link: bool = False) -> bool:
+    """
+    Check whether the graph has the expected vertex count and valid neighbor indices (and optionally back-links).
+
+    :param graph: Target ``DynamicExplorationGraph`` instance.
+    :param expected_vertices: Expected number of vertices in the graph.
+    :param check_back_link: If ``True``, also verifies bidirectional neighbor links.
+    :return: ``True`` if the graph passes regularity checks, ``False`` otherwise.
+    """
     return _check_graph_regularity_cpp(_unwrap(graph), expected_vertices, check_back_link)
 
 
 def check_graph_connectivity(graph: Any) -> bool:
+    """
+    Verify that the graph forms a single connected component reachable from the entry vertex.
+
+    :param graph: Target ``DynamicExplorationGraph`` instance.
+    :return: ``True`` if the graph is fully connected, ``False`` otherwise.
+    """
     return _check_graph_connectivity_cpp(_unwrap(graph))
 
 
 def calc_non_mrng_edges(graph: Any) -> int:
+    """
+    Count the number of edges in the graph that violate the Monotonic Relative Neighborhood Graph (MRNG) property.
+
+    :param graph: Target ``DynamicExplorationGraph`` instance.
+    :return: Number of non-MRNG edges.
+    """
     return _calc_non_mrng_edges_cpp(_unwrap(graph))
 
 
 def calc_search_reachability(graph: Any) -> float:
+    """
+    Compute the fraction of vertices reachable via greedy search from the entry vertex.
+
+    :param graph: Target ``DynamicExplorationGraph`` instance.
+    :return: Search reachability ratio in ``[0.0, 1.0]``.
+    """
     g = _unwrap(graph)
     return _calc_search_reachability_cpp(g) / max(g.size(), 1)
 
 
 def calc_exploration_reach(graph: Any) -> float:
+    """
+    Compute the fraction of vertices reachable via graph exploration from the entry vertex.
+
+    :param graph: Target ``DynamicExplorationGraph`` instance.
+    :return: Exploration reachability ratio in ``[0.0, 1.0]``.
+    """
     g = _unwrap(graph)
     return _calc_exploration_reach_cpp(g) / max(g.size(), 1)

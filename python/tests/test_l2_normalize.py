@@ -21,16 +21,6 @@ def test_l2_normalize_basic():
     assert np.allclose(res[2], [0.0, 0.0], atol=1e-6)
 
 
-def test_l2_normalize_serialization():
-    t1 = make_l2_normalize_transform(dim=128)
-    bytes_data = deglib.transformation.serialize_transformations([t1])
-    deserialized = deglib.transformation.deserialize_transformations(bytes_data)
-
-    assert len(deserialized) == 1
-    assert isinstance(deserialized[0], L2NormalizeTransform)
-    assert deserialized[0].dim == 128
-
-
 def test_l2_normalize_in_searcher_pipeline():
     dim = 8
     rng = np.random.default_rng(42)

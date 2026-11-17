@@ -38,20 +38,6 @@ def test_rotation_auto_detect_isotropic_vs_outliers():
     assert rot_out.crest_factor > 9.5 or rot_out.excess_kurtosis > 2.0
 
 
-def test_rotation_serialization_roundtrip():
-    rng = np.random.default_rng(9)
-    X = rng.standard_normal((100, 96), dtype=np.float32)
-    X[:, 0] += 5.0
-
-    rot = deglib.make_fast_hadamard_rotation(X, seed=99, auto_detect=True)
-    blob = deglib.transformation.serialize_transformations([rot])
-    restored = deglib.transformation.deserialize_transformations(blob)
-    assert len(restored) == 1
-    r2 = restored[0]
-    assert r2.is_enabled == rot.is_enabled
-    np.testing.assert_allclose(r2.transform(X[:10]), rot.transform(X[:10]), rtol=1e-6, atol=1e-6)
-
-
 def test_rotation_chained_with_uint4_in_searcher():
     rng = np.random.default_rng(21)
     dim = 128
@@ -134,7 +120,7 @@ def test_quantizer_pipeline_thresholds_and_search():
     )
     pipeline = deglib.make_quantizer_pipeline(sub, "uint4", use_rerank=False, num_threads=2)
     assert len(pipeline) == 2
-    q_feats = deglib.transformation.apply_database(pipeline, sub)
+    q_feats = deglib.transformation.apply_on_database(pipeline, sub)
     target_space = deglib.FloatSpace.create(dim=128, metric=deglib.Metric.Uint4_L2)
     ro_graph = graph.to_readonly(target_space, q_feats, transformations=pipeline)
     searcher = deglib.search.create_searcher(ro_graph)

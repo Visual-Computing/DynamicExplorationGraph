@@ -32,7 +32,7 @@ TEST(GraphSerializationTest, BuildWithPipelineSaveAndLoadSearch) {
     // 3. Float-Daten durch die Ingestion-Pipeline transformieren
     const size_t out_bytes = get_output_byte_size(transformations);
     std::vector<std::byte> quantized_data(count * out_bytes);
-    apply_database(transformations, data.data(), quantized_data.data(), count);
+    apply_on_database(transformations, std::span<const float>(data), std::span<std::byte>(quantized_data));
 
     // 4. Graph deterministisch und wohlgeformt mit create_random_graph erstellen
     const auto feature_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::Int8_L2);
@@ -118,7 +118,7 @@ TEST(GraphSerializationTest, BuildWithEvpPipelineSaveAndLoad) {
 
     const size_t out_bytes = get_output_byte_size(transformations);
     std::vector<std::byte> quantized_data(count * out_bytes);
-    apply_database(transformations, data.data(), quantized_data.data(), count);
+    apply_on_database(transformations, std::span<const float>(data), std::span<std::byte>(quantized_data));
 
     const auto feature_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::EVP_InnerProduct);
     auto deg = deglib::create_random_graph(quantized_data.data(), count, edges_per_vertex, feature_space, 123, transformations);

@@ -217,11 +217,11 @@ class DynamicExplorationGraph {
                 std::byte* q_buf = workspace.get_buffer_a(out_bytes);
 
                 if constexpr (std::is_same_v<T, float>) {
-                    deglib::transformation::apply_query(transformations_, query.data(), q_buf, 1);
+                    deglib::transformation::apply_on_query(transformations_, query, std::span<std::byte>(q_buf, out_bytes));
                 } else {
                     float* f_query = workspace.get_float_buffer(query.size());
                     deglib::distances::fp16::fp16_to_floats(query.data(), f_query, query.size());
-                    deglib::transformation::apply_query(transformations_, f_query, q_buf, 1);
+                    deglib::transformation::apply_on_query(transformations_, std::span<const float>(f_query, query.size()), std::span<std::byte>(q_buf, out_bytes));
                 }
 
                 std::span<const std::byte> single_q(q_buf, out_bytes);
@@ -276,11 +276,11 @@ class DynamicExplorationGraph {
                 std::byte* q_buf = workspace.get_buffer_a(out_bytes);
 
                 if constexpr (std::is_same_v<T, float>) {
-                    deglib::transformation::apply_query(transformations_, query.data(), q_buf, 1);
+                    deglib::transformation::apply_on_query(transformations_, query, std::span<std::byte>(q_buf, out_bytes));
                 } else {
                     float* f_query = workspace.get_float_buffer(query.size());
                     deglib::distances::fp16::fp16_to_floats(query.data(), f_query, query.size());
-                    deglib::transformation::apply_query(transformations_, f_query, q_buf, 1);
+                    deglib::transformation::apply_on_query(transformations_, std::span<const float>(f_query, query.size()), std::span<std::byte>(q_buf, out_bytes));
                 }
 
                 std::span<const std::byte> single_q(q_buf, out_bytes);
@@ -354,7 +354,7 @@ class DynamicExplorationGraph {
 
                         for (size_t i = begin; i < end; ++i) {
                             if constexpr (std::is_same_v<T, float>) {
-                                deglib::transformation::apply_query(transformations_, queries.data() + i * in_stride, q_buf, 1);
+                                deglib::transformation::apply_on_query(transformations_, queries.subspan(i * in_stride, in_stride), std::span<std::byte>(q_buf, out_stride));
                             } else {
                                 alignas(64) float stack_f16_buf[256];
                                 float* f16_buf = stack_f16_buf;
@@ -363,7 +363,7 @@ class DynamicExplorationGraph {
                                     f16_buf = ws.get_float_buffer(in_stride);
                                 }
                                 deglib::distances::fp16::fp16_to_floats(queries.data() + i * in_stride, f16_buf, in_stride);
-                                deglib::transformation::apply_query(transformations_, f16_buf, q_buf, 1);
+                                deglib::transformation::apply_on_query(transformations_, std::span<const float>(f16_buf, in_stride), std::span<std::byte>(q_buf, out_stride));
                             }
 
                             std::span<const std::byte> single_q(q_buf, out_stride);
@@ -502,7 +502,7 @@ class DynamicExplorationGraph {
 
                         for (size_t q = begin; q < end; ++q) {
                             if constexpr (std::is_same_v<T, float>) {
-                                deglib::transformation::apply_query(transformations_, queries.data() + q * in_stride, q_buf, 1);
+                                deglib::transformation::apply_on_query(transformations_, queries.subspan(q * in_stride, in_stride), std::span<std::byte>(q_buf, out_stride));
                             } else {
                                 alignas(64) float stack_f16_buf[256];
                                 float* f16_buf = stack_f16_buf;
@@ -511,7 +511,7 @@ class DynamicExplorationGraph {
                                     f16_buf = ws.get_float_buffer(in_stride);
                                 }
                                 deglib::distances::fp16::fp16_to_floats(queries.data() + q * in_stride, f16_buf, in_stride);
-                                deglib::transformation::apply_query(transformations_, f16_buf, q_buf, 1);
+                                deglib::transformation::apply_on_query(transformations_, std::span<const float>(f16_buf, in_stride), std::span<std::byte>(q_buf, out_stride));
                             }
 
                             std::span<const std::byte> single_q(q_buf, out_stride);
@@ -628,7 +628,7 @@ class DynamicExplorationGraph {
 
                         for (size_t q = begin; q < end; ++q) {
                             if constexpr (std::is_same_v<T, float>) {
-                                deglib::transformation::apply_query(transformations_, queries.data() + q * in_stride, q_buf, 1);
+                                deglib::transformation::apply_on_query(transformations_, queries.subspan(q * in_stride, in_stride), std::span<std::byte>(q_buf, out_stride));
                             } else {
                                 alignas(64) float stack_f16_buf[256];
                                 float* f16_buf = stack_f16_buf;
@@ -637,7 +637,7 @@ class DynamicExplorationGraph {
                                     f16_buf = ws.get_float_buffer(in_stride);
                                 }
                                 deglib::distances::fp16::fp16_to_floats(queries.data() + q * in_stride, f16_buf, in_stride);
-                                deglib::transformation::apply_query(transformations_, f16_buf, q_buf, 1);
+                                deglib::transformation::apply_on_query(transformations_, std::span<const float>(f16_buf, in_stride), std::span<std::byte>(q_buf, out_stride));
                             }
 
                             std::span<const std::byte> single_q(q_buf, out_stride);
@@ -718,7 +718,7 @@ class DynamicExplorationGraph {
 
                         for (size_t i = begin; i < end; ++i) {
                             if constexpr (std::is_same_v<T, float>) {
-                                deglib::transformation::apply_query(transformations_, queries.data() + i * in_stride, q_buf, 1);
+                                deglib::transformation::apply_on_query(transformations_, queries.subspan(i * in_stride, in_stride), std::span<std::byte>(q_buf, out_stride));
                             } else {
                                 alignas(64) float stack_f16_buf[256];
                                 float* f16_buf = stack_f16_buf;
@@ -727,7 +727,7 @@ class DynamicExplorationGraph {
                                     f16_buf = ws.get_float_buffer(in_stride);
                                 }
                                 deglib::distances::fp16::fp16_to_floats(queries.data() + i * in_stride, f16_buf, in_stride);
-                                deglib::transformation::apply_query(transformations_, f16_buf, q_buf, 1);
+                                deglib::transformation::apply_on_query(transformations_, std::span<const float>(f16_buf, in_stride), std::span<std::byte>(q_buf, out_stride));
                             }
 
                             std::span<const std::byte> single_q(q_buf, out_stride);
@@ -1193,16 +1193,18 @@ class DynamicExplorationGraph {
      * @param custom_feature_space Optional target feature space. Derived automatically from transformations if omitted.
      * @param custom_features Optional pointer to replacement raw feature memory in internal index order (0 .. size()-1).
      * @param transformations Optional sequence of fitted feature transformations/quantizers to apply/attach.
+     * @param num_threads Number of worker threads for parallel self-transformation (0 = hardware concurrency).
      * @return A new read-only DynamicExplorationGraph.
      */
     DynamicExplorationGraph to_readonly(
         std::optional<deglib::distances::FloatSpace> custom_feature_space = std::nullopt,
         const void* custom_features = nullptr,
-        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
+        size_t num_threads = 0
     ) const {
         auto xfrms = !transformations.empty() ? std::move(transformations) : transformations_;
         auto graph = std::make_unique<deglib::graph::ReadOnlyGraph>(
-            deglib::graph::ReadOnlyGraph::from_graph(*internal_graph_, custom_feature_space, custom_features, xfrms)
+            deglib::graph::ReadOnlyGraph::from_graph(*internal_graph_, custom_feature_space, custom_features, xfrms, num_threads)
         );
         return DynamicExplorationGraph(std::move(graph), std::move(xfrms));
     }

@@ -176,10 +176,18 @@ class DynamicGraph : public deglib::graph::MutableGraph {
             if (custom_features == nullptr && !transformations.empty() && (src_metric != target.feature_space_.metric())) {
                 const auto* src_feat = input_graph.getFeatureVector(i);
                 if (src_metric.get_data_type() == deglib::distances::MetricDataType::FP32) {
-                    deglib::transformation::apply_database(transformations, reinterpret_cast<const float*>(src_feat), vertex_memory, 1);
+                    deglib::transformation::apply_on_database(
+                        transformations,
+                        std::span<const float>(reinterpret_cast<const float*>(src_feat), in_dim),
+                        std::span<std::byte>(vertex_memory, feature_data_size)
+                    );
                 } else if (src_metric.get_data_type() == deglib::distances::MetricDataType::FP16) {
                     deglib::distances::fp16::fp16_to_floats(reinterpret_cast<const uint16_t*>(src_feat), f_buf.data(), in_dim);
-                    deglib::transformation::apply_database(transformations, f_buf.data(), vertex_memory, 1);
+                    deglib::transformation::apply_on_database(
+                        transformations,
+                        std::span<const float>(f_buf),
+                        std::span<std::byte>(vertex_memory, feature_data_size)
+                    );
                 } else {
                     throw std::invalid_argument("DynamicGraph::from_graph: cannot self-transform from non-float base features");
                 }

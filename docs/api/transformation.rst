@@ -107,16 +107,12 @@ Quantizer & Transform Factories
 
 .. autofunction:: deglib.transformation.make_scalar_quantizer_fp16
 
-Pipeline Serialization & Application
-------------------------------------
+Pipeline Application
+--------------------
 
-.. autofunction:: deglib.transformation.serialize_transformations
+.. autofunction:: deglib.transformation.apply_on_database
 
-.. autofunction:: deglib.transformation.deserialize_transformations
-
-.. autofunction:: deglib.transformation.apply_database
-
-.. autofunction:: deglib.transformation.apply_query
+.. autofunction:: deglib.transformation.apply_on_query
 
 Example Usage
 -------------

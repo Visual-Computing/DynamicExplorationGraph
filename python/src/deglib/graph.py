@@ -415,6 +415,7 @@ class DynamicExplorationGraph:
         feature_space: FloatSpace | None = None,
         custom_features: np.ndarray | None = None,
         transformations: list | tuple | object | None = None,
+        num_threads: int = 0,
     ) -> "DynamicExplorationGraph":
         """
         Convert this graph into a memory-compact, search-optimized read-only graph.
@@ -425,10 +426,11 @@ class DynamicExplorationGraph:
            Copies the graph topology and existing feature vectors as-is.
         2. **In-place self-transformation** (``transformations`` given, ``custom_features=None``):
            Transforms/quantizes each vertex directly from the graph's stored ``FP32`` or ``FP16``
-           features into the new graph's memory, avoiding an intermediate feature array allocation.
-           ``feature_space`` is optional (derived automatically from ``transformations`` unless
-           overriding the metric, e.g. ``Int8_InnerProduct``) and only triggers self-transformation
-           when the target metric differs from the source metric.
+           features into the new graph's memory in parallel across ``num_threads``, avoiding an
+           intermediate feature array allocation. ``feature_space`` is optional (derived
+           automatically from ``transformations`` unless overriding the metric, e.g.
+           ``Int8_InnerProduct``) and only triggers self-transformation when the target metric
+           differs from the source metric.
         3. **Custom feature buffer** (``custom_features`` given, with ``feature_space`` and/or ``transformations``):
            Replaces the stored features with a pre-transformed 2D NumPy array of shape ``(size(), ...)``
            aligned to internal vertex order (``get_labels()``). Note: ``custom_features`` is copied
@@ -443,10 +445,16 @@ class DynamicExplorationGraph:
                                 with ``get_labels()``.
         :param transformations: Optional ``FeatureTransformation`` or sequence of fitted
                                 ``FeatureTransformation`` objects to apply/attach.
+        :param num_threads: Number of worker threads for parallel self-transformation
+                            (``0`` uses hardware concurrency).
         :return: A new read-only ``DynamicExplorationGraph``.
         """
+        if num_threads < 0:
+            raise ValueError(f"num_threads must be >= 0, got {num_threads}")
         fs_cpp, feat_cpp, xfrms = self._prepare_conversion_args(feature_space, custom_features, transformations)
-        return DynamicExplorationGraph(self.dynamic_exploration_graph_cpp.to_readonly(fs_cpp, feat_cpp, xfrms))
+        return DynamicExplorationGraph(
+            self.dynamic_exploration_graph_cpp.to_readonly(fs_cpp, feat_cpp, xfrms, num_threads)
+        )
 
     def to_mutable(
         self,
@@ -531,7 +539,14 @@ class DynamicExplorationGraph:
         )
 
 
-def get_num_useful_threads(requested: int, max_limit: int):
+def get_num_useful_threads(requested: int, max_limit: int) -> int:
+    """
+    Resolve the effective thread count clamped to ``max_limit``.
+
+    :param requested: Requested thread count (``0`` defaults to ``multiprocessing.cpu_count()``).
+    :param max_limit: Upper bound on threads (e.g. number of queries).
+    :return: Effective number of threads to use.
+    """
     if requested == 0:
         requested = multiprocessing.cpu_count()
     return min(requested, max_limit)  # dont use more threads than queries

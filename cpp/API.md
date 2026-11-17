@@ -347,7 +347,8 @@ public:
     DynamicExplorationGraph to_readonly(
         std::optional<FloatSpace> custom_feature_space = std::nullopt,
         const void* custom_features = nullptr,
-        std::vector<std::shared_ptr<FeatureTransformation>> transformations = {}
+        std::vector<std::shared_ptr<FeatureTransformation>> transformations = {},
+        size_t num_threads = 0
     ) const;
 
     /// Convert to a mutable SizeBoundedGraph (fixed capacity) with optional feature/space conversion
@@ -1153,11 +1154,12 @@ std::vector<std::shared_ptr<FeatureTransformation>> make_quantizer_pipeline(
     float quantile = -1.0f, bool use_rerank = false, size_t num_threads = 0, uint64_t rotation_seed = 42
 );
 
-/// Apply sequential transformations to database vectors
-void apply_database(std::span<const std::shared_ptr<FeatureTransformation>> transformations, const float* data, std::byte* out, size_t count);
+/// Apply sequential transformations to database vectors (FP32 or FP16)
+void apply_on_database(std::span<const std::shared_ptr<FeatureTransformation>> transformations, std::span<const float> data, std::span<std::byte> out, size_t num_threads = 0);
+void apply_on_database(std::span<const std::shared_ptr<FeatureTransformation>> transformations, std::span<const uint16_t> data_fp16, std::span<std::byte> out, size_t num_threads = 0);
 
 /// Apply sequential transformations to query vectors
-void apply_query(std::span<const std::shared_ptr<FeatureTransformation>> transformations, const float* query, std::byte* out, size_t count = 1);
+void apply_on_query(std::span<const std::shared_ptr<FeatureTransformation>> transformations, std::span<const float> query, std::span<std::byte> out);
 
 /// Stream serialization of transformation pipelines
 void serialize_transformations(const std::vector<std::shared_ptr<FeatureTransformation>>& transformations, std::ostream& os);

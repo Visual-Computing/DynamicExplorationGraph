@@ -357,11 +357,11 @@ class EvenRegularGraphBuilder {
                 const size_t target_size = graph_.getFeatureSpace().get_data_size();
                 std::vector<std::byte> compact(target_size);
                 if constexpr (std::is_same_v<T, float>) {
-                    deglib::transformation::apply_database(transformations_, feature.data(), compact.data(), 1);
+                    deglib::transformation::apply_on_database(transformations_, feature, std::span<std::byte>(compact));
                 } else {
                     std::vector<float> f_feat(feature.size());
                     deglib::distances::fp16::fp16_to_floats(feature.data(), f_feat.data(), feature.size());
-                    deglib::transformation::apply_database(transformations_, f_feat.data(), compact.data(), 1);
+                    deglib::transformation::apply_on_database(transformations_, std::span<const float>(f_feat), std::span<std::byte>(compact));
                 }
                 addEntry(label, std::move(compact));
                 return;
@@ -389,11 +389,11 @@ class EvenRegularGraphBuilder {
                 std::vector<std::byte> compact_batch(count * target_size);
 
                 if constexpr (std::is_same_v<T, float>) {
-                    deglib::transformation::apply_database(transformations_, features.data(), compact_batch.data(), count);
+                    deglib::transformation::apply_on_database(transformations_, features, std::span<std::byte>(compact_batch));
                 } else {
                     std::vector<float> f_feat(features.size());
                     deglib::distances::fp16::fp16_to_floats(features.data(), f_feat.data(), features.size());
-                    deglib::transformation::apply_database(transformations_, f_feat.data(), compact_batch.data(), count);
+                    deglib::transformation::apply_on_database(transformations_, std::span<const float>(f_feat), std::span<std::byte>(compact_batch));
                 }
 
                 for (size_t i = 0; i < count; ++i) {

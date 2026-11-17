@@ -274,12 +274,12 @@ class QG(BaseANN):
         quant_key = (quant or "Int8").lower().strip()
         if quant_key not in _QUANT_PREFIXES:
             raise ValueError(f"Unsupported quant '{quant}'. Choose from: {list(_QUANT_PREFIXES.values())}")
-        self.quant = _QUANT_PREFIXES[quant_key]
+        quant_prefix = _QUANT_PREFIXES[quant_key]
 
         metric_kind = _VIBE_METRIC_KIND[self.metric]
         qmetric = (query_metric or "auto").strip()
         if qmetric.lower() == "auto":
-            quant_metric_kind = "InnerProduct" if self.quant == "EVP" else metric_kind
+            quant_metric_kind = "InnerProduct" if quant_prefix == "EVP" else metric_kind
         elif qmetric.lower() == "ip":
             quant_metric_kind = "InnerProduct"
         elif qmetric.lower() == "l2":
@@ -292,22 +292,20 @@ class QG(BaseANN):
 
         self.build_metric = _get_metric("FP32", metric_kind)
         self.rerank_metric = _get_metric("FP16", metric_kind)
-        self.quant_metric = _get_metric(self.quant, quant_metric_kind)
+        self.quant_metric = _get_metric(quant_prefix, quant_metric_kind)
         self.opt_enum = deglib.builder.OptimizationTarget[self.opt_target]
 
         self.graph = None
         self.searcher = None
-        self.transformations = []
-        self.rerank_space_fp16 = None
 
     def fit(self, X: np.ndarray, cache_dir: Path | None = None):
-        """Builds DEG graph, quantizes vectors to INT8 using ScalarQuantizer, and prepares C++ searcher."""
+        """Builds DEG graph, quantizes vectors using make_quantizer_pipeline, and prepares C++ searcher."""
         if self.metric == "cosine":
             X = X / np.linalg.norm(X, axis=1)[:, np.newaxis]
         X = np.ascontiguousarray(X, dtype=np.float32)
         n_vectors, dims = X.shape
 
-        self.rerank_space_fp16 = deglib.FloatSpace.create(dim=dims, metric=self.rerank_metric)
+        rerank_space_fp16 = deglib.FloatSpace.create(dim=dims, metric=self.rerank_metric)
 
         cache_file = _resolve_graph_cache_path(
             metric=self.metric,
@@ -371,24 +369,26 @@ class QG(BaseANN):
 
         # 3. Finalize ReadOnlyGraph with calibrated quantizer pipeline (self-transforms directly into graph memory)
         target_space = deglib.FloatSpace.create(dim=dims, metric=self.quant_metric)
-        self.transformations = deglib.transformation.make_quantizer_pipeline(
+        transformations = deglib.transformation.make_quantizer_pipeline(
             X,
             self.quant_metric,
             num_threads=self.threads,
         )
 
         # Convert the FP32 graph into a readonly graph, quantizing directly from its stored FP32 features
-        self.graph = loaded_graph.to_readonly(target_space, transformations=self.transformations)
+        self.graph = loaded_graph.to_readonly(
+            target_space, transformations=transformations, num_threads=self.threads
+        )
 
         # 5. Initialize a Searcher with FP16 Reranker & ScalarQuantizerFP16
-        self.rerank_quantizer = deglib.transformation.make_scalar_quantizer_fp16(X)
-        rerank_features = self.rerank_quantizer.quantize(X_graph_order, num_threads=self.threads)
+        rerank_quantizer = deglib.transformation.make_scalar_quantizer_fp16(X)
+        rerank_features = rerank_quantizer.quantize(X_graph_order, num_threads=self.threads)
 
         self.searcher = deglib.search.create_searcher(
             graph=self.graph,
-            rerank_space=self.rerank_space_fp16,
+            rerank_space=rerank_space_fp16,
             rerank_data=rerank_features,
-            rerank_transformations=[self.rerank_quantizer],
+            rerank_transformations=[rerank_quantizer],
             normalize_query=(self.metric == "cosine"),
         )
 

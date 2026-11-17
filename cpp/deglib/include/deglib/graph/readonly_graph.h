@@ -114,7 +114,8 @@ class ReadOnlyGraph : public InternalGraph {
         const InternalGraph& input_graph,
         std::optional<deglib::distances::FloatSpace> target_feature_space = std::nullopt,
         const void* custom_features = nullptr,
-        std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
+        std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
+        size_t num_threads = 0
     ) {
         const auto resolved_feature_space = deglib::transformation::resolve_graph_conversion_space(
             input_graph.getFeatureSpace(), target_feature_space, custom_features, transformations
@@ -127,10 +128,7 @@ class ReadOnlyGraph : public InternalGraph {
 
         const auto source_metric = input_graph.getFeatureSpace().metric();
         const uint32_t source_dim = input_graph.getFeatureSpace().dim();
-        std::vector<float> float_buffer;
-        if (!transformations.empty() && source_metric.get_data_type() == deglib::distances::MetricDataType::FP16) {
-            float_buffer.resize(source_dim);
-        }
+        const bool self_transform = (custom_features == nullptr) && !transformations.empty() && (source_metric != graph.feature_space_.metric());
 
         graph.label_to_index_.clear();
         graph.label_to_index_.reserve(graph.vertex_count_);
@@ -139,18 +137,8 @@ class ReadOnlyGraph : public InternalGraph {
             graph.labels_[i] = label;
             graph.label_to_index_.emplace(label, i);
 
-            std::byte* target_features = graph.features_ + size_t(i) * graph.feature_stride_;
-            if (custom_features == nullptr && !transformations.empty() && source_metric != graph.feature_space_.metric()) {
-                const auto* input_features = input_graph.getFeatureVector(i);
-                if (source_metric.get_data_type() == deglib::distances::MetricDataType::FP32) {
-                    deglib::transformation::apply_database(transformations, reinterpret_cast<const float*>(input_features), target_features, 1);
-                } else if (source_metric.get_data_type() == deglib::distances::MetricDataType::FP16) {
-                    deglib::distances::fp16::fp16_to_floats(reinterpret_cast<const uint16_t*>(input_features), float_buffer.data(), source_dim);
-                    deglib::transformation::apply_database(transformations, float_buffer.data(), target_features, 1);
-                } else {
-                    throw std::invalid_argument("ReadOnlyGraph::from_graph: cannot self-transform from non-float base features");
-                }
-            } else {
+            if (!self_transform) {
+                std::byte* target_features = graph.features_ + size_t(i) * graph.feature_stride_;
                 const std::byte* source_features =
                     custom_source_features == nullptr ? input_graph.getFeatureVector(i) : custom_source_features + size_t(i) * target_feature_bytes;
                 std::memcpy(target_features, source_features, target_feature_bytes);
@@ -161,6 +149,48 @@ class ReadOnlyGraph : public InternalGraph {
             for (uint32_t j = 0; j < graph.edges_per_vertex_; ++j) {
                 const uint32_t neighbor_index = neighbor_indices[j];
                 edge_row[j] = static_cast<int32_t>(neighbor_index < graph.vertex_count_ ? neighbor_index : i);
+            }
+        }
+
+        if (self_transform && graph.vertex_count_ > 0) {
+            const bool is_fp16 = (source_metric.get_data_type() == deglib::distances::MetricDataType::FP16);
+            auto transform_vertex = [&](uint32_t i, std::vector<float>& float_buffer) {
+                std::byte* target_features = graph.features_ + size_t(i) * graph.feature_stride_;
+                const auto* input_features = input_graph.getFeatureVector(i);
+                if (!is_fp16) {
+                    deglib::transformation::apply_on_database(
+                        transformations,
+                        std::span<const float>(reinterpret_cast<const float*>(input_features), source_dim),
+                        std::span<std::byte>(target_features, target_feature_bytes),
+                        1
+                    );
+                } else {
+                    deglib::distances::fp16::fp16_to_floats(reinterpret_cast<const uint16_t*>(input_features), float_buffer.data(), source_dim);
+                    deglib::transformation::apply_on_database(
+                        transformations,
+                        std::span<const float>(float_buffer),
+                        std::span<std::byte>(target_features, target_feature_bytes),
+                        1
+                    );
+                }
+            };
+
+            if (num_threads == 1 || graph.vertex_count_ == 1) {
+                std::vector<float> float_buffer(is_fp16 ? source_dim : 0);
+                for (uint32_t i = 0; i < graph.vertex_count_; ++i) {
+                    transform_vertex(i, float_buffer);
+                }
+            } else {
+                deglib::concurrent::parallel_batch_for(
+                    uint32_t{0}, graph.vertex_count_, num_threads,
+                    [&](uint32_t begin, uint32_t end, size_t) {
+                        std::vector<float> float_buffer(is_fp16 ? source_dim : 0);
+                        for (uint32_t i = begin; i < end; ++i) {
+                            transform_vertex(i, float_buffer);
+                        }
+                    },
+                    64
+                );
             }
         }
 
