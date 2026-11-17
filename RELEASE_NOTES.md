@@ -1,5 +1,28 @@
 # Release Notes
 
+## deglib v0.3.0
+
+### Overview
+deglib v0.3.0 expands quantized search with **4-bit and 7-bit scalar quantizers**, adds **Fast Walsh-Hadamard Rotation**, redesigns the **Python API** around `Metric`, `deglib.build`, and `to_searcher`, and lets you **share a single `FP16` `Reranker` across multiple quantized searchers** with faster setup and no extra NumPy copies.
+
+### 🚀 What's New & Improved
+* **4-Bit & 7-Bit Scalar Quantization (`Int4`, `Uint4`, `UInt7`):** Added `Int4_L2`, `Int4_InnerProduct`, `Uint4_L2`, `Uint4_InnerProduct`, `UInt7_L2`, and `UInt7_InnerProduct` alongside existing 8-bit and EVP quantization (with AVX2 and AVX-512 support), reducing index size up to 8× vs. FP32.
+* **Fast Walsh-Hadamard Rotation (`FWHT`):** Smooths outlier dimensions before low-bit quantization (auto-gated by kurtosis in `make_quantizer_pipeline`) to improve recall on skewed embeddings.
+* **Unified Python Workflow (`Metric`, `deglib.build`, `to_searcher`, `to_reranker`):** Build a graph once with `deglib.build(...)`, then convert to a quantized searcher with `graph.to_searcher(metric=..., rerank_metric=...)` or share one `FP16` `Reranker` across multiple quantizations via `graph.to_reranker(...)` (used in `examples/vibe`).
+* **Shared Reranker & Faster Setup:** `to_reranker()` and `to_searcher()` no longer create intermediate NumPy copies when extracting or converting vectors from a graph or `FP32` array, cutting `FP16` reranker setup time roughly in half and lowering peak memory.
+* **K-Means Routing & Latency Budgets:** Added K-Means entry routing (`use_routing=True`) for better recall at low `ef`, and `max_distance_computation_count` on `Searcher.search()` to cap distance evaluations per query.
+* **Better Calibration & Speed:** Quantizer calibration and graph evaluation now sample evenly across the full dataset rather than only the first rows; graph conversion, `EVP`/`Uint4`/`FP16` quantization, and multi-threaded batch search are faster.
+
+### ⚠️ Breaking Changes (Python API)
+* **`Metric` replaces `FloatSpace`:** Pass `deglib.Metric` directly (which now also exposes dtypes, byte sizes, and batch distance helpers).
+* **Unified `deglib.build` & `make_*` Factories:** `build_from_data` was replaced by `deglib.build(...)`; unfitted quantizer constructors and `mips_l2_transform*` were replaced by validated `make_*` factory functions.
+* **Consistent Ordering & Parameter Names:** `align_labels` is now `rerank_order` / `custom_features_order` (`"label"` or `"internal"`), and `deglib_cpp.extract_rerank_from_graph` was removed in favor of `graph.to_reranker(...)`.
+
+### 🛠️ Bug Fixes
+* Fixed potential integer overflow when estimating memory usage on large graphs, added runtime CPU checks for AVX-512 instructions to prevent crashes on unsupported CPUs, and fixed calibration bias on non-shuffled datasets.
+
+---
+
 ## deglib v0.2.8
 
 ### Overview
