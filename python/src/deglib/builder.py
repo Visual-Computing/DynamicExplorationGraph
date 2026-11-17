@@ -147,7 +147,7 @@ class GraphBuilder:
     def __init__(
         self,
         graph: DynamicExplorationGraph,
-        seed: int | None = None,
+        seed: int = 7,
         optimization_target: OptimizationTarget | str = OptimizationTarget.LowLID,
         extend_k: int = 0,
         extend_eps: float = 0.1,
@@ -298,7 +298,7 @@ def build(
     improve_eps: float = 0.001,
     max_path_length: int = 5,
     improve_tries: int = 0,
-    seed: int | None = None,
+    seed: int = 7,
     threads: int = 0,
     callback: Callable[[BuilderStatus], None] | None = None,
     show_progress: bool = False,

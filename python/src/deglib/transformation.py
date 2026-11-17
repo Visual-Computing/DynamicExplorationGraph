@@ -66,7 +66,7 @@ def make_mips_transform(vectors: np.ndarray, max_norm: float = 0.0) -> FeatureTr
 
 def make_fast_hadamard_rotation(
     vectors: np.ndarray,
-    seed: int = 42,
+    seed: int = 7,
     rounds: int = 0,
     auto_detect: bool = True,
 ) -> FeatureTransformation:
@@ -87,7 +87,7 @@ def make_quantizer_pipeline(
     quantile: float = -1.0,
     use_rerank: bool = False,
     threads: int = 0,
-    seed: int = 42,
+    seed: int = 7,
 ) -> list[FeatureTransformation]:
     """
     Build a calibrated transformation pipeline (optional Hadamard rotation + quantizer) from ``vectors``.

@@ -331,58 +331,37 @@ def main():
         print("=======================================================")
 
         for cfg_idx, cfg in enumerate(configs_to_run):
-            k = cfg["k"]
-            opt_target = cfg["optimization_target"]
+            cfg_args = cfg["args"]
+            cfg_query_args = cfg["query_args"]
+            k = cfg_args["k"]
+            opt_target = cfg_args["opt_target"]
             constructor_name = cfg.get("constructor", "DEG")
             alg_name = cfg.get("alg_name", "deg")
 
-            query_metric = cfg.get("query_metric", "auto")
-            quant_type = cfg.get("quant", "fp32")
-
             if constructor_name == "QG":
-                quant_type = cfg.get("quant")
-                if not quant_type:
-                    raise ValueError(f"Missing quant for algorithm '{alg_name}'")
+                if not cfg_args.get("quants"):
+                    raise ValueError(f"Missing args.quants for algorithm '{alg_name}'")
                 adapter = QG(
                     metric=metric_str,
-                    k=k,
-                    opt_target=opt_target,
                     threads=args.build_threads,
-                    quant=quant_type,
-                    query_metric=query_metric,
+                    **cfg_args,
                 )
-                query_metric = adapter.quant_metric.name.split("_", 1)[1]
-                query_dtype = quant_type
             else:
                 adapter = DEG(
                     metric=metric_str,
-                    k=k,
-                    opt_target=opt_target,
                     threads=args.build_threads,
+                    **cfg_args,
                 )
-                query_dtype = "float32"
 
             print(
                 f"\n--- [{cfg_idx + 1}/{len(configs_to_run)}] Processing Algorithm '{alg_name}' ({constructor_name}) ---"
             )
             adapter.fit(base_vecs, cache_dir=cache_dir)
 
-            feature_instruction = ""
-            if adapter.graph is not None:
-                inst_set = adapter.graph.get_instruction()
-                feature_instruction = f", Features={inst_set.name}"
-            print(
-                f"Index Config: K={k}, Opt={opt_target}, "
-                f"QueryMetric={query_metric}, "
-                f"QueryType={query_dtype}{feature_instruction}"
-            )
-
-            # if adapter.graph is not None:
-            #     deglib.analysis.analyze_graph(adapter.graph)
-
             # Determine query evaluation parameter grid
-            factors_to_eval = cfg.get("rerank_size_factors", [1.0])
-            raw_param_list = cfg.get("eps_or_ef_list", [])
+            quants_to_eval = (cfg_query_args.get("quants") or list(adapter.quant_metrics.keys())) if constructor_name == "QG" else [None]
+            factors_to_eval = cfg_query_args.get("rerank_size_factor", [1.0])
+            raw_param_list = cfg_query_args.get("eps_or_ef", [])
 
             # Separate and sort ef and eps parameter lists independently
             ef_values = sorted([v for v in raw_param_list if v >= 1.0])
@@ -393,96 +372,115 @@ def main():
             if eps_values:
                 param_groups.append(("eps", eps_values))
 
-            for r_factor in factors_to_eval:
-                rerank_label = f", Rerank={r_factor:.2f}x" if r_factor > 1.0 else ""
-                formatted_params = [str(int(round(v))) for v in ef_values] + [f"{v:g}" for v in eps_values]
-                param_str = ", ".join(formatted_params)
+            for quant_name in quants_to_eval:
+                if constructor_name == "QG":
+                    quant_metric_obj = adapter.quant_metrics[quant_name]
+                    query_dtype, query_metric = quant_metric_obj.name.split("_", 1)
+                    quant_type = query_dtype
+                    active_searcher = adapter.searchers[quant_name]
+                else:
+                    query_metric = metric_str
+                    query_dtype = "float32"
+                    quant_type = "fp32"
+                    active_searcher = adapter.searcher
 
-                print(f"\nEvaluating top-{actual_k} search (rerank_factor={r_factor:.2f}) for eps_or_ef: {param_str}")
-
-                anns_recalls = []
-                anns_qps = []
-                anns_params = []
-                n_queries = len(query_vecs)
-
-                for param_type, group_vals in param_groups:
-                    for val in group_vals:
-                        if constructor_name == "QG":
-                            adapter.set_query_arguments(eps_or_ef=val, rerank_size_factor=r_factor)
-                        else:
-                            adapter.set_query_arguments(eps_or_ef=val)
-
-                        results_indices = []
-                        total_query_sec = 0.0
-                        for q_idx in range(n_queries):
-                            t_start = time.perf_counter()
-                            candidates = adapter.query(query_vecs[q_idx], actual_k)
-                            total_query_sec += time.perf_counter() - t_start
-                            results_indices.append(np.array(candidates, dtype=np.int64, copy=True))
-
-                        elapsed_sec = total_query_sec
-
-                        search_time_us = elapsed_sec * 1e6
-                        time_us_per_query = int(search_time_us / max(n_queries, 1))
-                        qps = n_queries / max(elapsed_sec, 1e-9)
-                        hits = 0
-                        total_returned = n_queries * actual_k
-                        if gt_distances is not None:
-                            # Official VIBE distance-tolerance recall calculation
-                            dist_fn = _VIBE_METRICS.get(metric_str.lower().strip(), _ip_distance)
-                            for i in range(n_queries):
-                                t = gt_distances[i, actual_k - 1] + 1e-3
-                                ret_vecs = base_vecs[results_indices[i]]
-                                pred_dists = dist_fn(query_vecs[i], ret_vecs)
-                                hits += int((pred_dists <= t).sum())
-                        else:
-                            for i in range(n_queries):
-                                gt_set = set(gt_vecs[i, :actual_k])
-                                ret_set = set(results_indices[i])
-                                hits += len(gt_set.intersection(ret_set))
-
-                        recall = hits / max(total_returned, 1)
-                        anns_recalls.append(recall)
-                        anns_qps.append(qps)
-                        is_ef = param_type == "ef"
-                        param_tag = f"ef={int(round(val))}" if is_ef else f"eps={val:g}"
-                        anns_params.append(param_tag)
-
-                        lbl = f"ef  {int(round(val)):4d}" if is_ef else f"eps {val:6.3f}"
-                        print(
-                            f"  {lbl} \trecall@{actual_k}: {recall:.5f} \t{time_us_per_query:6d} us/query \t{qps:9.1f} QPS \tsearch time: {int(search_time_us / 1000):6d}ms"
-                        )
-
-                        if not args.no_stop and linear_baseline_us > 0 and time_us_per_query > linear_baseline_us:
-                            print(
-                                f"  ABORTED {param_type.upper()} ({time_us_per_query}us/query > {int(linear_baseline_us)}us baseline)"
-                            )
-                            break
-
-                        if recall > 0.999:
-                            print(
-                                f"  Reached recall > 0.999 for {param_type.upper()}, stopping further {param_type.upper()} iterations."
-                            )
-                            break
-
-                results_series.append(
-                    {
-                        "label": (
-                            f"{alg_name.upper()} ({opt_target}, K={k}, Quant={quant_type}, "
-                            f"QueryMetric={query_metric}{rerank_label})"
-                        ),
-                        "algo": alg_name,
-                        "opt_target": opt_target,
-                        "k": k,
-                        "quant": quant_type,
-                        "query_metric": query_metric,
-                        "query_dtype": query_dtype,
-                        "rerank_factor": r_factor,
-                        "recalls": anns_recalls,
-                        "qps": anns_qps,
-                        "search_params": anns_params,
-                    }
+                feature_instruction = f", Features={active_searcher.graph.get_instruction().name}"
+                print(
+                    f"Index Config: K={k}, Opt={opt_target}, "
+                    f"QueryMetric={query_metric}, "
+                    f"QueryType={query_dtype}{feature_instruction}"
                 )
+
+                for r_factor in factors_to_eval:
+                    rerank_label = f", Rerank={r_factor:.2f}x" if r_factor > 1.0 else ""
+                    formatted_params = [str(int(round(v))) for v in ef_values] + [f"{v:g}" for v in eps_values]
+                    param_str = ", ".join(formatted_params)
+
+                    print(f"\nEvaluating top-{actual_k} search (rerank_factor={r_factor:.2f}) for eps_or_ef: {param_str}")
+
+                    anns_recalls = []
+                    anns_qps = []
+                    anns_params = []
+                    n_queries = len(query_vecs)
+
+                    for param_type, group_vals in param_groups:
+                        for val in group_vals:
+                            if constructor_name == "QG":
+                                adapter.set_query_arguments(eps_or_ef=val, rerank_size_factor=r_factor, quants=quant_name)
+                            else:
+                                adapter.set_query_arguments(eps_or_ef=val)
+
+                            results_indices = []
+                            total_query_sec = 0.0
+                            for q_idx in range(n_queries):
+                                t_start = time.perf_counter()
+                                candidates = adapter.query(query_vecs[q_idx], actual_k)
+                                total_query_sec += time.perf_counter() - t_start
+                                results_indices.append(np.array(candidates, dtype=np.int64, copy=True))
+
+                            elapsed_sec = total_query_sec
+
+                            search_time_us = elapsed_sec * 1e6
+                            time_us_per_query = int(search_time_us / max(n_queries, 1))
+                            qps = n_queries / max(elapsed_sec, 1e-9)
+                            hits = 0
+                            total_returned = n_queries * actual_k
+                            if gt_distances is not None:
+                                # Official VIBE distance-tolerance recall calculation
+                                dist_fn = _VIBE_METRICS.get(metric_str.lower().strip(), _ip_distance)
+                                for i in range(n_queries):
+                                    t = gt_distances[i, actual_k - 1] + 1e-3
+                                    ret_vecs = base_vecs[results_indices[i]]
+                                    pred_dists = dist_fn(query_vecs[i], ret_vecs)
+                                    hits += int((pred_dists <= t).sum())
+                            else:
+                                for i in range(n_queries):
+                                    gt_set = set(gt_vecs[i, :actual_k])
+                                    ret_set = set(results_indices[i])
+                                    hits += len(gt_set.intersection(ret_set))
+
+                            recall = hits / max(total_returned, 1)
+                            anns_recalls.append(recall)
+                            anns_qps.append(qps)
+                            is_ef = param_type == "ef"
+                            param_tag = f"ef={int(round(val))}" if is_ef else f"eps={val:g}"
+                            anns_params.append(param_tag)
+
+                            lbl = f"ef  {int(round(val)):4d}" if is_ef else f"eps {val:6.3f}"
+                            print(
+                                f"  {lbl} \trecall@{actual_k}: {recall:.5f} \t{time_us_per_query:6d} us/query \t{qps:9.1f} QPS \tsearch time: {int(search_time_us / 1000):6d}ms"
+                            )
+
+                            if not args.no_stop and linear_baseline_us > 0 and time_us_per_query > linear_baseline_us:
+                                print(
+                                    f"  ABORTED {param_type.upper()} ({time_us_per_query}us/query > {int(linear_baseline_us)}us baseline)"
+                                )
+                                break
+
+                            if recall > 0.999:
+                                print(
+                                    f"  Reached recall > 0.999 for {param_type.upper()}, stopping further {param_type.upper()} iterations."
+                                )
+                                break
+
+                    results_series.append(
+                        {
+                            "label": (
+                                f"{alg_name.upper()} ({opt_target}, K={k}, Quant={quant_type}, "
+                                f"QueryMetric={query_metric}{rerank_label})"
+                            ),
+                            "algo": alg_name,
+                            "opt_target": opt_target,
+                            "k": k,
+                            "quant": quant_type,
+                            "query_metric": query_metric,
+                            "query_dtype": query_dtype,
+                            "rerank_factor": r_factor,
+                            "recalls": anns_recalls,
+                            "qps": anns_qps,
+                            "search_params": anns_params,
+                        }
+                    )
 
             # Explicitly free loaded graph and adapter memory between test iterations
             # del adapter

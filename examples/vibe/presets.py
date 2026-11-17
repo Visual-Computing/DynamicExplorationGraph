@@ -24,20 +24,22 @@ def load_vibe_config(config_path: Path | None = None) -> List[Dict[str, Any]]:
         for rg_name, rg_data in run_groups.items():
             args = rg_data.get("args", {})
             query_args = rg_data.get("query_args", {})
-            raw_search_vals = query_args.get("eps_or_ef", [])
 
             algorithms.append(
                 {
                     "name": alg_name,
                     "constructor": constructor,
                     "run_group": rg_name,
-                    "k_list": args.get("k", [30]),
-                    "opt_target_list": args.get("opt_target", ["LowLID"]),
-                    "quant_list": args.get("quant", [None]),
-                    "quant_modes": args.get("quant_modes", []),
-                    "query_metric_list": args.get("query_metric", ["auto"]),
-                    "eps_or_ef_list": [float(v) for v in raw_search_vals],
-                    "rerank_size_factors": query_args.get("rerank_size_factor", [1.0]),
+                    "args": {
+                        "k": args.get("k", [30]),
+                        "opt_target": args.get("opt_target", ["LowLID"]),
+                        "quants": args.get("quants", []),
+                    },
+                    "query_args": {
+                        "quants": query_args.get("quants", []),
+                        "eps_or_ef": [float(v) for v in query_args.get("eps_or_ef", [])],
+                        "rerank_size_factor": query_args.get("rerank_size_factor", [1.0]),
+                    },
                 }
             )
 
@@ -50,8 +52,9 @@ def get_config_grid_presets(
     config_path: Path | None = None,
 ) -> List[Dict[str, Any]]:
     """
-    Returns the list of all index configurations (Cartesian product of build args)
-    defined in config.yml.
+    Returns the list of all index configurations (Cartesian product of build `args`)
+    defined in config.yml, keeping `args` (for `__init__`) and `query_args`
+    (for `set_query_arguments`) cleanly separated.
     """
     algorithms = load_vibe_config(config_path)
     is_l2 = "euclidean" in dataset_key.lower() or "agnews" in dataset_key.lower()
@@ -62,52 +65,37 @@ def get_config_grid_presets(
         if algorithm_name and alg["name"] != algorithm_name:
             continue
 
-        raw_opt_targets = alg.get("opt_target_list", [default_opt])
+        alg_args = alg["args"]
+        raw_opt_targets = alg_args.get("opt_target", [default_opt])
         resolved_opt_targets = []
         for t in raw_opt_targets:
             target_name = default_opt if t == "" else t
             if target_name not in resolved_opt_targets:
                 resolved_opt_targets.append(target_name)
 
-        if alg.get("quant_modes"):
-            for opt_target, k, mode in itertools.product(
-                resolved_opt_targets,
-                alg["k_list"],
-                alg["quant_modes"],
-            ):
-                for query_metric in mode.get("query_metric", ["L2"]):
-                    grid.append(
-                        {
-                            "alg_name": alg["name"],
-                            "constructor": alg["constructor"],
-                            "k": k,
-                            "optimization_target": opt_target,
-                            "quant": mode["quant"],
-                            "query_metric": query_metric,
-                            "anns_k": 100,
-                            "eps_or_ef_list": alg["eps_or_ef_list"],
-                            "rerank_size_factors": alg["rerank_size_factors"],
-                        }
-                    )
-            continue
+        raw_args_quants = alg_args.get("quants") or []
+        if not raw_args_quants:
+            args_quants = [None]
+        elif isinstance(raw_args_quants[0], list):
+            args_quants = raw_args_quants
+        else:
+            args_quants = [raw_args_quants]
 
-        for opt_target, k, quant, query_metric in itertools.product(
-            resolved_opt_targets,
-            alg["k_list"],
-            alg.get("quant_list", [None]),
-            alg.get("query_metric_list", ["auto"]),
-        ):
+        for opt_target, k, quants_arg in itertools.product(resolved_opt_targets, alg_args["k"], args_quants):
+            index_args: Dict[str, Any] = {
+                "k": k,
+                "opt_target": opt_target,
+            }
+            if quants_arg is not None:
+                index_args["quants"] = quants_arg
+
             grid.append(
                 {
                     "alg_name": alg["name"],
                     "constructor": alg["constructor"],
-                    "k": k,
-                    "optimization_target": opt_target,
-                    "quant": quant,
-                    "query_metric": query_metric,
+                    "args": index_args,
+                    "query_args": alg["query_args"],
                     "anns_k": 100,
-                    "eps_or_ef_list": alg["eps_or_ef_list"],
-                    "rerank_size_factors": alg["rerank_size_factors"],
                 }
             )
     return grid
@@ -122,12 +110,17 @@ def get_default_config_preset(dataset_key: str, config_path: Path | None = None)
         else {
             "alg_name": "deg",
             "constructor": "DEG",
-            "k": 30,
-            "optimization_target": "LowLID"
-            if ("euclidean" in dataset_key.lower() or "agnews" in dataset_key.lower())
-            else "HighLID",
+            "args": {
+                "k": 30,
+                "opt_target": "LowLID"
+                if ("euclidean" in dataset_key.lower() or "agnews" in dataset_key.lower())
+                else "HighLID",
+            },
+            "query_args": {
+                "quants": [],
+                "eps_or_ef": [0.0, 0.05, 0.1, 0.2, 0.3],
+                "rerank_size_factor": [1.0],
+            },
             "anns_k": 100,
-            "eps_or_ef_list": [0.0, 0.05, 0.1, 0.2, 0.3],
-            "rerank_size_factors": [1.0],
         }
     )

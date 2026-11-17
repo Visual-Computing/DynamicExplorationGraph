@@ -121,7 +121,7 @@ deglib.build(
     improve_eps: float = 0.001,
     max_path_length: int = 5,
     improve_tries: int = 0,
-    seed: int | None = None,
+    seed: int = 7,
     threads: int = 0,
     callback: Callable[[BuilderStatus], None] | None = None,
     show_progress: bool = False,
@@ -215,9 +215,11 @@ All graphs (fixed-capacity mutable `SizeBoundedGraph`, chunked `DynamicGraph`, a
 - `to_readonly(metric: Metric | str | None = None, custom_features: np.ndarray | None = None, custom_features_order: Literal["label", "internal"] = "label", transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None, use_rerank: bool = False, optimize: bool = True, threads: int = 0) -> DynamicExplorationGraph`
 - `to_mutable(metric: Metric | str | None = None, custom_features: np.ndarray | None = None, custom_features_order: Literal["label", "internal"] = "label", capacity: int = 0, transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None, threads: int = 0) -> DynamicExplorationGraph`
 - `to_dynamic(metric: Metric | str | None = None, custom_features: np.ndarray | None = None, custom_features_order: Literal["label", "internal"] = "label", chunk_size: int = 1024, transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None, threads: int = 0) -> DynamicExplorationGraph`
-- `to_searcher(metric: Metric | str | None = None, rerank_metric: Metric | str | None = None, rerank_data: np.ndarray | None = None, rerank_order: Literal["label", "internal"] = "label", rerank_transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None, normalize_query: bool = False, optimize: bool = True, use_routing: bool = True, n_clusters: int = 256, n_iter: int = 20, sample_size: int = 0, threads: int = 0) -> Searcher`
+- `to_reranker(metric: Metric | str, data: np.ndarray | None = None, order: Literal["label", "internal"] = "label", transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None, optimize: bool = True, threads: int = 0) -> Reranker`
+  - Creates a standalone `Reranker` aligned with this graph's internal vertex order (`data=None` extracts and quantizes vectors directly from an `FP32`/`FP16` graph), allowing one `Reranker` to be shared across multiple quantized `Searcher` instances without duplicating base vector memory.
+- `to_searcher(metric: Metric | str | None = None, reranker: Reranker | None = None, rerank_metric: Metric | str | None = None, rerank_data: np.ndarray | None = None, rerank_order: Literal["label", "internal"] = "label", rerank_transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None, normalize_query: bool = False, optimize: bool = True, use_routing: bool = True, n_clusters: int = 256, n_iter: int = 20, sample_size: int = 0, threads: int = 0) -> Searcher`
   - **Self-quantization**: When changing `metric` on an `FP32`/`FP16` graph without `custom_features` or `transformations`, features are quantized directly from stored floating-point graph data.
-  - **Opt-in reranking**: `rerank_metric=None` (default) disables reranking (passing `rerank_data` without `rerank_metric` raises `ValueError`). When `rerank_metric` is set and `rerank_data=None`, vectors are automatically extracted from an `FP32`/`FP16` source graph before graph quantization.
+  - **Opt-in reranking**: `reranker=None` and `rerank_metric=None` (default) disables reranking (passing `rerank_data` without `rerank_metric` raises `ValueError`). Pass `reranker=...` to share a prebuilt `Reranker` (zero-copy), or `rerank_metric=...` (with `rerank_data=None` to extract automatically from an `FP32`/`FP16` source graph).
   - **Ordering**: `custom_features_order` and `rerank_order` default to `"label"` (rows aligned with original dataset IDs / external labels); pass `"internal"` when rows already follow `graph.get_labels()`.
 
 #### Direct Graph Search & Exploration
@@ -239,7 +241,7 @@ All graphs (fixed-capacity mutable `SizeBoundedGraph`, chunked `DynamicGraph`, a
 ```python
 GraphBuilder(
     graph: DynamicExplorationGraph,
-    seed: int | None = None,
+    seed: int = 7,
     optimization_target: OptimizationTarget | str = OptimizationTarget.LowLID,
     extend_k: int = 0,
     extend_eps: float = 0.1,
@@ -276,6 +278,7 @@ Methods:
 create_searcher(
     graph: DynamicExplorationGraph,
     metric: Metric | str | None = None,
+    reranker: Reranker | None = None,
     rerank_metric: Metric | str | None = None,
     rerank_data: np.ndarray | None = None,
     rerank_order: Literal["label", "internal"] = "label",
@@ -345,8 +348,8 @@ All transformations are created pre-fitted and validated via `make_*` factories 
 
 - `make_mips_transform(vectors: np.ndarray, max_norm: float = 0.0) -> FeatureTransformation` (`MipsTransform` exposing `.transform_database(...)` and `.transform_query(...)`)
 - `make_l2_normalize_transform(vectors_or_dim: np.ndarray | int) -> FeatureTransformation`
-- `make_fast_hadamard_rotation(vectors: np.ndarray, seed: int = 42, rounds: int = 0, auto_detect: bool = True) -> FeatureTransformation`
-- `make_quantizer_pipeline(vectors: np.ndarray, quant: Metric | str, quantile: float = -1.0, use_rerank: bool = False, threads: int = 0, seed: int = 42) -> list[FeatureTransformation]`
+- `make_fast_hadamard_rotation(vectors: np.ndarray, seed: int = 7, rounds: int = 0, auto_detect: bool = True) -> FeatureTransformation`
+- `make_quantizer_pipeline(vectors: np.ndarray, quant: Metric | str, quantile: float = -1.0, use_rerank: bool = False, threads: int = 0, seed: int = 7) -> list[FeatureTransformation]`
 - `make_evp_quantizer(vectors: np.ndarray, non_zeros: int = 0, threads: int = 0) -> FeatureTransformation` (`non_zeros=0` auto-calibrates sparsity)
 - `make_scalar_quantizer_int8(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation`
 - `make_scalar_quantizer_uint8(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation`

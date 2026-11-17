@@ -431,3 +431,47 @@ def test_searcher_unsorted_and_return_distances():
     assert isinstance(batch_only, np.ndarray)
     assert batch_only.shape == (4, 5)
     assert set(batch_only[0].tolist()) == set(sorted_idx.tolist())
+
+
+def test_shared_reranker_across_multiple_quantized_searchers():
+    """Build one graph and one Reranker once, then share that Reranker across multiple quantized Searchers."""
+    rng = np.random.default_rng(7)
+    data = rng.normal(size=(150, 32)).astype(np.float32)
+
+    base_graph = deglib.build(
+        data,
+        edges_per_vertex=16,
+        extend_k=32,
+        metric=Metric.FP32_L2,
+        presort=True,
+        optimize=False,
+    )
+
+    shared_reranker = base_graph.to_reranker(Metric.FP16_L2, data=data, order="label", optimize=True)
+    assert shared_reranker.get_num_base_vectors() == len(data)
+
+    searchers = {
+        "Uint4_L2": base_graph.to_searcher(metric="Uint4_L2", reranker=shared_reranker, optimize=True),
+        "Int8_L2": base_graph.to_searcher(metric="Int8_L2", reranker=shared_reranker, optimize=True),
+        "Uint8_L2": base_graph.to_searcher(metric="Uint8_L2", reranker=shared_reranker, optimize=True),
+    }
+
+    assert searchers["Uint4_L2"].graph.get_metric() == Metric.Uint4_L2
+    assert searchers["Int8_L2"].graph.get_metric() == Metric.Int8_L2
+    assert searchers["Uint8_L2"].graph.get_metric() == Metric.Uint8_L2
+
+    for q_idx in (0, 13, 77):
+        for s in searchers.values():
+            res = s.search(data[q_idx], k=5, eps_or_ef=48, rerank_factor=2.0)
+            assert int(res[0]) == q_idx
+
+    # Self-extraction via to_reranker(metric) with data=None
+    extracted_reranker = base_graph.to_reranker(Metric.FP16_L2)
+    s_extracted = base_graph.to_searcher(metric="Int8_L2", reranker=extracted_reranker, optimize=False)
+    assert int(s_extracted.search(data[5], k=5, eps_or_ef=48, rerank_factor=2.0)[0]) == 5
+
+    # Cannot combine `reranker` with `rerank_metric` or `rerank_data`
+    with pytest.raises(ValueError, match="Cannot pass 'reranker'"):
+        base_graph.to_searcher(reranker=shared_reranker, rerank_metric=Metric.FP16_L2)
+    with pytest.raises(ValueError, match="Cannot pass 'reranker'"):
+        deglib.Searcher(base_graph, reranker=shared_reranker, rerank_data=data)

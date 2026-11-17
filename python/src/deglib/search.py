@@ -200,6 +200,7 @@ class Searcher:
     def __init__(
         self,
         graph: DynamicExplorationGraph,
+        reranker: Reranker | None = None,
         rerank_metric: Metric | str | None = None,
         rerank_data: np.ndarray | None = None,
         rerank_order: Literal["label", "internal"] = "label",
@@ -214,7 +215,18 @@ class Searcher:
     ):
         if rerank_order not in ("label", "internal"):
             raise ValueError(f"rerank_order must be 'label' or 'internal', got {rerank_order!r}")
-        if rerank_data is not None and rerank_metric is None:
+        if reranker is not None:
+            if not isinstance(reranker, Reranker):
+                raise TypeError(f"reranker must be a Reranker instance, got {type(reranker).__name__}")
+            if rerank_metric is not None or rerank_data is not None or bool(rerank_transformations):
+                raise ValueError(
+                    "Cannot pass 'reranker' together with 'rerank_metric', 'rerank_data', or 'rerank_transformations'."
+                )
+            if reranker.get_num_base_vectors() < graph.size():
+                raise ValueError(
+                    f"reranker base vector count ({reranker.get_num_base_vectors()}) is smaller than graph.size() ({graph.size()})."
+                )
+        elif rerank_data is not None and rerank_metric is None:
             raise ValueError(
                 "rerank_data cannot be provided when rerank_metric is None; "
                 "specify rerank_metric (e.g. Metric.FP16_InnerProduct) to enable reranking."
@@ -222,68 +234,78 @@ class Searcher:
 
         self.graph = graph
         cpp_graph = getattr(graph, "dynamic_exploration_graph_cpp", graph)
-        r_xfrms = _normalize_transforms(rerank_transformations)
-        for i, t in enumerate(r_xfrms):
-            if not isinstance(t, FeatureTransformation):
-                raise TypeError(f"rerank_transformations[{i}] must be a FeatureTransformation, got {type(t).__name__}")
 
-        rerank_space_cpp = None
-        prepared_rerank = None
+        if reranker is not None:
+            self._searcher_cpp = cpp_search.Searcher(
+                cpp_graph,
+                reranker._reranker_cpp,
+                bool(normalize_query),
+            )
+        else:
+            r_xfrms = _normalize_transforms(rerank_transformations)
+            for i, t in enumerate(r_xfrms):
+                if not isinstance(t, FeatureTransformation):
+                    raise TypeError(
+                        f"rerank_transformations[{i}] must be a FeatureTransformation, got {type(t).__name__}"
+                    )
 
-        if rerank_metric is not None:
-            resolved_rerank = Metric.resolve(rerank_metric)
-            if rerank_data is None:
-                prepared_rerank, extracted_xfrms = deglib_cpp.extract_rerank_from_graph(
-                    cpp_graph,
-                    resolved_rerank._to_cpp_metric(),
-                    int(threads),
-                )
-                if not r_xfrms:
-                    if extracted_xfrms:
-                        r_xfrms = extracted_xfrms
-                    elif (
-                        Metric(int(resolved_rerank)) in _FP16_METRICS
-                        and Metric(int(graph.get_metric())) in _FP16_METRICS
-                        and graph.has_transformations()
-                    ):
-                        r_xfrms = graph.get_transformations()
-                rerank_dim = graph.get_dim()
-            else:
-                raw_rerank = np.asarray(rerank_data)
-                if raw_rerank.ndim != 2:
-                    raise ValueError(f"rerank_data must be a 2D array, got shape {raw_rerank.shape}")
-                n_vertices = graph.size()
-                if rerank_order == "label":
-                    if n_vertices == 0:
-                        aligned = np.ascontiguousarray(raw_rerank[:0])
-                    else:
-                        labels = graph.get_labels()
-                        if int(labels.max()) >= raw_rerank.shape[0]:
-                            raise ValueError(
-                                f"Max graph external label ({int(labels.max())}) >= rerank_data row count ({raw_rerank.shape[0]}). "
-                                "Pass rerank_data indexed by external labels or set rerank_order='internal'."
-                            )
-                        aligned = np.ascontiguousarray(raw_rerank[labels])
+            rerank_space_cpp = None
+            prepared_rerank = None
+
+            if rerank_metric is not None:
+                resolved_rerank = Metric.resolve(rerank_metric)
+                if rerank_data is None:
+                    prepared_rerank, extracted_xfrms = deglib_cpp.extract_rerank_from_graph(
+                        cpp_graph,
+                        resolved_rerank._to_cpp_metric(),
+                        int(threads),
+                    )
+                    if not r_xfrms:
+                        if extracted_xfrms:
+                            r_xfrms = extracted_xfrms
+                        elif (
+                            Metric(int(resolved_rerank)) in _FP16_METRICS
+                            and Metric(int(graph.get_metric())) in _FP16_METRICS
+                            and graph.has_transformations()
+                        ):
+                            r_xfrms = graph.get_transformations()
+                    rerank_dim = graph.get_dim()
                 else:
-                    if raw_rerank.shape[0] != n_vertices:
-                        raise ValueError(
-                            f"rerank_data row count ({raw_rerank.shape[0]}) does not match graph.size() ({n_vertices})."
-                        )
-                    aligned = np.ascontiguousarray(raw_rerank)
+                    raw_rerank = np.asarray(rerank_data)
+                    if raw_rerank.ndim != 2:
+                        raise ValueError(f"rerank_data must be a 2D array, got shape {raw_rerank.shape}")
+                    n_vertices = graph.size()
+                    if rerank_order == "label":
+                        if n_vertices == 0:
+                            aligned = np.ascontiguousarray(raw_rerank[:0])
+                        else:
+                            labels = graph.get_labels()
+                            if int(labels.max()) >= raw_rerank.shape[0]:
+                                raise ValueError(
+                                    f"Max graph external label ({int(labels.max())}) >= rerank_data row count ({raw_rerank.shape[0]}). "
+                                    "Pass rerank_data indexed by external labels or set rerank_order='internal'."
+                                )
+                            aligned = np.ascontiguousarray(raw_rerank[labels])
+                    else:
+                        if raw_rerank.shape[0] != n_vertices:
+                            raise ValueError(
+                                f"rerank_data row count ({raw_rerank.shape[0]}) does not match graph.size() ({n_vertices})."
+                            )
+                        aligned = np.ascontiguousarray(raw_rerank)
 
-                prepared_rerank, rerank_dim, r_xfrms = _prepare_rerank_vectors_and_transforms(
-                    resolved_rerank, aligned, r_xfrms, threads
-                )
+                    prepared_rerank, rerank_dim, r_xfrms = _prepare_rerank_vectors_and_transforms(
+                        resolved_rerank, aligned, r_xfrms, threads
+                    )
 
-            rerank_space_cpp = resolved_rerank._to_cpp_space(rerank_dim)
+                rerank_space_cpp = resolved_rerank._to_cpp_space(rerank_dim)
 
-        self._searcher_cpp = cpp_search.Searcher(
-            cpp_graph,
-            rerank_space_cpp,
-            prepared_rerank,
-            r_xfrms,
-            bool(normalize_query),
-        )
+            self._searcher_cpp = cpp_search.Searcher(
+                cpp_graph,
+                rerank_space_cpp,
+                prepared_rerank,
+                r_xfrms,
+                bool(normalize_query),
+            )
 
         if optimize and graph.size() > 0:
             self.optimize(
@@ -355,6 +377,7 @@ class Searcher:
 def create_searcher(
     graph: DynamicExplorationGraph,
     metric: Metric | str | None = None,
+    reranker: Reranker | None = None,
     rerank_metric: Metric | str | None = None,
     rerank_data: np.ndarray | None = None,
     rerank_order: Literal["label", "internal"] = "label",
@@ -370,15 +393,27 @@ def create_searcher(
     """
     Create a native C++ ``Searcher`` pipeline from ``graph``.
 
-    Reranking is opt-in via ``rerank_metric``:
-    - ``rerank_metric=None`` (default): NO reranking is performed.
+    Reranking is opt-in via either a shared ``reranker`` instance or ``rerank_metric``:
+    - ``reranker=None`` and ``rerank_metric=None`` (default): NO reranking is performed.
+    - ``reranker`` set: reuses the prebuilt ``Reranker`` (zero-copy over its base vectors).
     - ``rerank_metric`` set, ``rerank_data=None``: extracts & quantizes rerank vectors directly
       from the ``FP32``/``FP16`` source ``graph`` prior to quantizing/converting ``graph`` to ``metric``.
     - ``rerank_metric`` set, ``rerank_data`` provided: aligns via ``rerank_order``.
     """
     if rerank_order not in ("label", "internal"):
         raise ValueError(f"rerank_order must be 'label' or 'internal', got {rerank_order!r}")
-    if rerank_data is not None and rerank_metric is None:
+    if reranker is not None:
+        if not isinstance(reranker, Reranker):
+            raise TypeError(f"reranker must be a Reranker instance, got {type(reranker).__name__}")
+        if rerank_metric is not None or rerank_data is not None or bool(rerank_transformations):
+            raise ValueError(
+                "Cannot pass 'reranker' together with 'rerank_metric', 'rerank_data', or 'rerank_transformations'."
+            )
+        if reranker.get_num_base_vectors() < graph.size():
+            raise ValueError(
+                f"reranker base vector count ({reranker.get_num_base_vectors()}) is smaller than graph.size() ({graph.size()})."
+            )
+    elif rerank_data is not None and rerank_metric is None:
         raise ValueError(
             "rerank_data cannot be provided when rerank_metric is None; "
             "specify rerank_metric (e.g. Metric.FP16_InnerProduct) to enable reranking."
@@ -390,7 +425,7 @@ def create_searcher(
     extracted_rerank_data = rerank_data
     effective_rerank_order: Literal["label", "internal"] = rerank_order
 
-    if resolved_rerank_metric is not None and rerank_data is None:
+    if reranker is None and resolved_rerank_metric is not None and rerank_data is None:
         cpp_graph = getattr(graph, "dynamic_exploration_graph_cpp", graph)
         extracted_rerank_data, extracted_xfrms = deglib_cpp.extract_rerank_from_graph(
             cpp_graph,
@@ -421,17 +456,18 @@ def create_searcher(
         if needs_conversion:
             search_graph = graph.to_readonly(
                 metric=target_metric,
-                use_rerank=(resolved_rerank_metric is not None),
+                use_rerank=(reranker is not None or resolved_rerank_metric is not None),
                 optimize=False,
                 threads=threads,
             )
 
     return Searcher(
         graph=search_graph,
+        reranker=reranker,
         rerank_metric=resolved_rerank_metric,
         rerank_data=extracted_rerank_data,
         rerank_order=effective_rerank_order,
-        rerank_transformations=resolved_rerank_xfrms,
+        rerank_transformations=resolved_rerank_xfrms or None,
         normalize_query=normalize_query,
         optimize=optimize,
         use_routing=use_routing,

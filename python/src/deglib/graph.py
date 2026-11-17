@@ -326,9 +326,83 @@ class DynamicExplorationGraph:
             entries, int(to_external_label), float(eps), int(k), return_distances
         )
 
+    def to_reranker(
+        self,
+        metric: Metric | str,
+        data: np.ndarray | None = None,
+        order: Literal["label", "internal"] = "label",
+        transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
+        optimize: bool = True,
+        threads: int = 0,
+    ):
+        """
+        Create a standalone ``Reranker`` aligned with this graph's internal vertex order.
+
+        This allows building a single ``Reranker`` once and sharing it across multiple quantized
+        ``Searcher`` instances created via ``to_searcher(..., reranker=reranker)``.
+
+        - ``data=None`` (default): extracts and quantizes vectors directly from an ``FP32``/``FP16`` graph.
+        - ``data`` provided: aligns rows via ``order`` (``"label"`` or ``"internal"``).
+        """
+        if order not in ("label", "internal"):
+            raise ValueError(f"order must be 'label' or 'internal', got {order!r}")
+
+        from deglib.search import Reranker, _FP16_METRICS
+
+        resolved_metric = Metric.resolve(metric)
+        r_xfrms = _normalize_transforms(transformations)
+
+        if data is None:
+            extracted_data, extracted_xfrms = deglib_cpp.extract_rerank_from_graph(
+                self.dynamic_exploration_graph_cpp,
+                resolved_metric._to_cpp_metric(),
+                int(threads),
+            )
+            if not r_xfrms:
+                if extracted_xfrms:
+                    r_xfrms = extracted_xfrms
+                elif (
+                    Metric(int(resolved_metric)) in _FP16_METRICS
+                    and Metric(int(self.get_metric())) in _FP16_METRICS
+                    and self.has_transformations()
+                ):
+                    r_xfrms = self.get_transformations()
+            aligned = extracted_data
+        else:
+            raw_data = np.asarray(data)
+            if raw_data.ndim != 2:
+                raise ValueError(f"data must be a 2D array, got shape {raw_data.shape}")
+            n_vertices = self.size()
+            if order == "label":
+                if n_vertices == 0:
+                    aligned = np.ascontiguousarray(raw_data[:0])
+                else:
+                    labels = self.get_labels()
+                    if int(labels.max()) >= raw_data.shape[0]:
+                        raise ValueError(
+                            f"Max graph external label ({int(labels.max())}) >= data row count ({raw_data.shape[0]}). "
+                            "Pass data indexed by external labels or set order='internal'."
+                        )
+                    aligned = np.ascontiguousarray(raw_data[labels])
+            else:
+                if raw_data.shape[0] != n_vertices:
+                    raise ValueError(
+                        f"data row count ({raw_data.shape[0]}) does not match graph.size() ({n_vertices})."
+                    )
+                aligned = np.ascontiguousarray(raw_data)
+
+        return Reranker(
+            metric=resolved_metric,
+            base_vectors=aligned,
+            transformations=r_xfrms,
+            optimize=optimize,
+            threads=threads,
+        )
+
     def to_searcher(
         self,
         metric: Metric | str | None = None,
+        reranker: Any | None = None,
         rerank_metric: Metric | str | None = None,
         rerank_data: np.ndarray | None = None,
         rerank_order: Literal["label", "internal"] = "label",
@@ -344,8 +418,9 @@ class DynamicExplorationGraph:
         """
         Create a native C++ ``Searcher`` from this graph.
 
-        Reranking is opt-in via ``rerank_metric``:
-        - ``rerank_metric=None`` (default): NO reranking is performed.
+        Reranking is opt-in via either a shared ``reranker`` instance or ``rerank_metric``:
+        - ``reranker=None`` and ``rerank_metric=None`` (default): NO reranking is performed.
+        - ``reranker`` set: reuses the prebuilt ``Reranker`` (zero-copy over its base vectors).
         - ``rerank_metric`` set, ``rerank_data=None``: extracts and quantizes rerank vectors directly
           from this ``FP32``/``FP16`` graph before converting/quantizing it to ``metric``.
         - ``rerank_metric`` set, ``rerank_data`` given: uses ``rerank_data`` aligned via ``rerank_order``.
@@ -355,6 +430,7 @@ class DynamicExplorationGraph:
         return create_searcher(
             self,
             metric=metric,
+            reranker=reranker,
             rerank_metric=rerank_metric,
             rerank_data=rerank_data,
             rerank_order=rerank_order,
@@ -507,7 +583,7 @@ class DynamicExplorationGraph:
                         -1.0,
                         use_rerank,
                         threads,
-                        42,
+                        7,
                     )
                 else:
                     raise ValueError(

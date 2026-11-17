@@ -599,6 +599,8 @@ class RerankerPy {
 
     size_t get_num_base_vectors() const noexcept { return reranker_.getNumBaseVectors(); }
 
+    const deglib::search::Reranker& get_reranker() const noexcept { return reranker_; }
+
     int32_t get_po() const noexcept { return reranker_.getPo(); }
     int32_t get_pl() const noexcept { return reranker_.getPl(); }
 
@@ -676,6 +678,7 @@ class SearcherPy {
   private:
     std::unique_ptr<deglib::search::Searcher> searcher_;
     py::array base_vectors_holder_;
+    std::shared_ptr<RerankerPy> shared_reranker_;
 
   public:
     SearcherPy(
@@ -690,6 +693,19 @@ class SearcherPy {
             auto base_span = RerankerPy::validate_and_get_span(*rerank_space, base_vectors_holder_);
             deglib::search::Reranker reranker(*rerank_space, base_span, base_vectors_holder_.request().shape[0], std::move(rerank_transformations));
             searcher_ = deglib::make_searcher(graph, std::move(reranker));
+        } else {
+            searcher_ = deglib::make_searcher(graph);
+        }
+        searcher_->set_normalize_query(normalize_query);
+    }
+
+    SearcherPy(
+        const deglib::DynamicExplorationGraph& graph,
+        std::shared_ptr<RerankerPy> shared_reranker,
+        bool normalize_query = false
+    ) : shared_reranker_(std::move(shared_reranker)) {
+        if (shared_reranker_) {
+            searcher_ = deglib::make_searcher(graph, deglib::search::Reranker(shared_reranker_->get_reranker()));
         } else {
             searcher_ = deglib::make_searcher(graph);
         }
@@ -2041,7 +2057,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
                 threads, seed
             );
         },
-        py::arg("vectors"), py::arg("quant"), py::arg("quantile") = -1.0f, py::arg("use_rerank") = false, py::arg("threads") = 0, py::arg("seed") = 42,
+        py::arg("vectors"), py::arg("quant"), py::arg("quantile") = -1.0f, py::arg("use_rerank") = false, py::arg("threads") = 0, py::arg("seed") = 7,
         "Builds a transformation pipeline [FastHadamardRotation, ScalarQuantizer] or [ScalarQuantizer] based on kurtosis."
     );
 
@@ -2090,7 +2106,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
             }
             return pipeline;
         },
-        py::arg("graph"), py::arg("quant"), py::arg("quantile") = -1.0f, py::arg("use_rerank") = false, py::arg("threads") = 0, py::arg("seed") = 42,
+        py::arg("graph"), py::arg("quant"), py::arg("quantile") = -1.0f, py::arg("use_rerank") = false, py::arg("threads") = 0, py::arg("seed") = 7,
         "Calibrate a quantizer pipeline directly from an FP32/FP16 graph's stored vectors."
     );
 
@@ -2209,7 +2225,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
             }
             return t;
         },
-        py::arg("vectors"), py::arg("seed") = 42, py::arg("rounds") = 0, py::arg("auto_detect") = true,
+        py::arg("vectors"), py::arg("seed") = 7, py::arg("rounds") = 0, py::arg("auto_detect") = true,
         "Factory function creating a FastHadamardRotation fitted on vectors."
     );
 
@@ -2257,7 +2273,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
         return new deglib::search::Filter(ptr, size, max_value, max_label_count);
     });
 
-    py::class_<RerankerPy>(search_module, "Reranker", "Candidate reranker.")
+    py::class_<RerankerPy, std::shared_ptr<RerankerPy>>(search_module, "Reranker", "Candidate reranker.")
         .def(
             py::init<const deglib::distances::FloatSpace&, py::array, std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>>(),
             py::arg("space"), py::arg("base_vectors"),
@@ -2288,6 +2304,11 @@ PYBIND11_MODULE(deglib_cpp, m) {
             py::arg("rerank_transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{},
             py::arg("normalize_query") = false, py::keep_alive<1, 2>(),
             "base_vectors must follow the graph's internal index order (0 .. size()-1, see graph.get_labels()). Valid for static graphs."
+        )
+        .def(
+            py::init<const deglib::DynamicExplorationGraph&, std::shared_ptr<RerankerPy>, bool>(),
+            py::arg("graph"), py::arg("reranker"), py::arg("normalize_query") = false, py::keep_alive<1, 2>(),
+            "Construct a Searcher sharing an existing Reranker instance (zero-copy over the reranker's base vector buffer)."
         )
         .def_property("normalize_query", &SearcherPy::get_normalize_query, &SearcherPy::set_normalize_query)
         .def(
@@ -2589,7 +2610,7 @@ PYBIND11_MODULE(deglib_cpp, m) {
                 if (!graph.isMutable()) {
                     throw std::runtime_error("Graph must be mutable to use GraphBuilder");
                 }
-                uint32_t seed_val = seed.value_or(5489);
+                uint32_t seed_val = seed.value_or(7);
                 auto* rng = new std::mt19937(seed_val);
                 return new deglib::builder::EvenRegularGraphBuilder(
                     graph, *rng, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, improve_tries
