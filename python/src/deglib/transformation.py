@@ -1,35 +1,67 @@
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
-
-import deglib_cpp
 import numpy as np
+import deglib_cpp
 
-if TYPE_CHECKING:
-    from .distances import Metric
+from deglib.distances import Metric
 
-# Core FeatureTransformation and Quantizer Classes
-FeatureTransformation = deglib_cpp.transformation.FeatureTransformation
-MipsTransform = deglib_cpp.transformation.MipsTransform
-L2NormalizeTransform = deglib_cpp.transformation.L2NormalizeTransform
-FastHadamardRotation = deglib_cpp.transformation.FastHadamardRotation
-EvpQuantizer = deglib_cpp.transformation.EvpQuantizer
-ScalarQuantizerInt8 = deglib_cpp.transformation.ScalarQuantizerInt8
-ScalarQuantizerUint8 = deglib_cpp.transformation.ScalarQuantizerUint8
-ScalarQuantizerUint4 = deglib_cpp.transformation.ScalarQuantizerUint4
-ScalarQuantizerInt4 = deglib_cpp.transformation.ScalarQuantizerInt4
-ScalarQuantizerUInt7 = deglib_cpp.transformation.ScalarQuantizerUInt7
-ScalarQuantizerFP16 = deglib_cpp.transformation.ScalarQuantizerFP16
+cpp_transformation = deglib_cpp.transformation
+
+FeatureTransformation = cpp_transformation.FeatureTransformation
 
 
-# Factory Functions
-def make_l2_normalize_transform(dim: int = 0) -> L2NormalizeTransform:
+def _normalize_transforms(
+    transformations: FeatureTransformation | Sequence[FeatureTransformation] | None,
+) -> list[FeatureTransformation]:
+    if transformations is None:
+        return []
+    if isinstance(transformations, FeatureTransformation):
+        return [transformations]
+    return list(transformations)
+
+
+def _resolve_quant_arg(quant: Metric | str | int) -> int | str:
+    if isinstance(quant, str):
+        if "_" in quant:
+            return int(Metric.resolve(quant))
+        return quant
+    return int(Metric.resolve(quant)) if isinstance(quant, Metric) else int(quant)
+
+
+def make_l2_normalize_transform(vectors_or_dim: np.ndarray | int) -> FeatureTransformation:
     """
-    Create an ``L2NormalizeTransform`` that normalizes vectors to unit L2 length.
+    Create a validated L2 unit-normalization transformation (``x -> x / ||x||_2``).
 
-    :param dim: Expected vector dimensionality (``0`` infers dimension from input).
-    :return: Configured ``L2NormalizeTransform`` instance.
+    Args:
+        vectors_or_dim: Sample feature matrix (2D ``[N, D]`` or 1D ``[D]``) or positive integer ``dim``.
     """
-    return deglib_cpp.transformation.make_l2_normalize_transform(dim=dim)
+    if isinstance(vectors_or_dim, np.ndarray):
+        if vectors_or_dim.ndim == 2:
+            if vectors_or_dim.shape[0] == 0 or vectors_or_dim.shape[1] == 0:
+                raise ValueError("make_l2_normalize_transform: vectors must be non-empty with dim > 0")
+            dim = int(vectors_or_dim.shape[1])
+        elif vectors_or_dim.ndim == 1:
+            if vectors_or_dim.shape[0] == 0:
+                raise ValueError("make_l2_normalize_transform: vectors must be non-empty")
+            dim = int(vectors_or_dim.shape[0])
+        else:
+            raise ValueError(f"make_l2_normalize_transform: expected 1D or 2D array, got {vectors_or_dim.ndim}D")
+    elif isinstance(vectors_or_dim, (int, np.integer)) and not isinstance(vectors_or_dim, bool):
+        dim = int(vectors_or_dim)
+        if dim <= 0:
+            raise ValueError(f"make_l2_normalize_transform: dim must be > 0, got {dim}")
+    else:
+        raise TypeError(f"vectors_or_dim must be a NumPy array or positive int, got {type(vectors_or_dim).__name__}")
+    return cpp_transformation.make_l2_normalize_transform(dim=dim)
+
+
+def make_mips_transform(vectors: np.ndarray, max_norm: float = 0.0) -> FeatureTransformation:
+    """
+    Create and fit a spherical MIPS-to-L2 transformation (``d -> d + 1``).
+
+    On database vectors, appends ``sqrt(M^2 - ||x||^2)`` (with ``M`` calibrated as max norm when
+    ``max_norm <= 0``); on query vectors, appends ``0.0``.
+    """
+    return cpp_transformation.make_mips_transform(vectors=vectors, max_norm=float(max_norm))
 
 
 def make_fast_hadamard_rotation(
@@ -37,229 +69,152 @@ def make_fast_hadamard_rotation(
     seed: int = 42,
     rounds: int = 0,
     auto_detect: bool = True,
-) -> FastHadamardRotation:
+) -> FeatureTransformation:
     """
-    Create and fit a ``FastHadamardRotation`` on training vectors.
-
-    :param vectors: 2D ``float32`` NumPy array of shape ``(N, dim)``.
-    :param seed: PRNG seed for diagonal Rademacher sign flips.
-    :param rounds: Number of Walsh-Hadamard transform rounds (``0`` uses library default).
-    :param auto_detect: If ``True``, enables rotation based on measured excess kurtosis.
-    :return: Fitted ``FastHadamardRotation`` instance.
+    Create and fit a randomized Fast Walsh-Hadamard rotation to spread outlier coordinates before quantization.
     """
-    return deglib_cpp.transformation.make_fast_hadamard_rotation(
-        vectors, seed=seed, rounds=rounds, auto_detect=auto_detect
+    return cpp_transformation.make_fast_hadamard_rotation(
+        vectors=vectors,
+        seed=seed,
+        rounds=rounds,
+        auto_detect=auto_detect,
     )
 
 
 def make_quantizer_pipeline(
     vectors: np.ndarray,
-    quant: "Metric | int | str",
+    quant: Metric | str,
     quantile: float = -1.0,
     use_rerank: bool = False,
-    num_threads: int = 0,
+    threads: int = 0,
     seed: int = 42,
 ) -> list[FeatureTransformation]:
     """
-    Build a calibrated quantization pipeline for any supported target quantizer.
+    Build a calibrated transformation pipeline (optional Hadamard rotation + quantizer) from ``vectors``.
 
-    For scalar quantizers (``uint4``, ``int4``, ``uint7``, ``uint8``, ``int8``),
-    excess kurtosis is measured on a sample of ``vectors`` and a ``FastHadamardRotation``
-    is automatically prepended when outliers exceed the threshold. For ``fp16`` and ``evp``,
-    no rotation is prepended.
-
-    :param vectors: 2D ``float32`` or ``float16`` NumPy array of shape ``(N, dim)``.
-    :param quant: Target quantizer as a :class:`~deglib.distances.Metric` (e.g. ``Metric.Int8_L2``,
-                  ``Metric.EVP_InnerProduct``) or string (``"uint4"``, ``"int4"``, ``"uint7"``,
-                  ``"uint8"``, ``"int8"``, ``"fp16"``, ``"evp"``).
-    :param quantile: Clipping quantile for scalar quantizers. Values ``< 0`` (default) auto-optimize.
-                     Ignored for ``fp16`` and ``evp``.
-    :param use_rerank: Adjusts the kurtosis rotation threshold when a high-precision reranker is used.
-    :param num_threads: Worker threads for calibration/rotation (``0`` uses hardware concurrency).
-    :param seed: PRNG seed for ``FastHadamardRotation``.
-    :return: List of fitted :class:`FeatureTransformation` objects (1 or 2 elements).
+    Args:
+        vectors: 2D ``float32`` or ``float16`` array of shape ``(N, dim)``.
+        quant: Target ``Metric`` (e.g. ``Metric.Uint8_L2``, ``Metric.EVP_InnerProduct``) or quantizer string
+            (``"uint4"``, ``"int4"``, ``"uint7"``, ``"uint8"``, ``"int8"``, ``"fp16"``, ``"evp"``).
+        quantile: Clipping quantile override in ``(0, 1]``; ``< 0`` auto-tunes quantile.
+        use_rerank: Whether quantization will be followed by exact reranking (affects auto-quantile).
+        threads: Worker threads for calibration (``0`` = all CPU cores).
+        seed: Random seed for optional rotation calibration.
     """
-    return deglib_cpp.transformation.make_quantizer_pipeline(
-        vectors, quant, quantile=quantile, use_rerank=use_rerank, num_threads=num_threads, seed=seed
+    return cpp_transformation.make_quantizer_pipeline(
+        vectors=vectors,
+        quant=_resolve_quant_arg(quant),
+        quantile=quantile,
+        use_rerank=use_rerank,
+        threads=threads,
+        seed=seed,
     )
 
 
 def make_evp_quantizer(
     vectors: np.ndarray,
     non_zeros: int = 0,
-    num_threads: int = 0,
-) -> EvpQuantizer:
+    threads: int = 0,
+) -> FeatureTransformation:
     """
-    Create and calibrate an ``EvpQuantizer`` (Equi-Voronoi Polytopes) on training vectors.
-
-    :param vectors: 2D ``float32`` or ``float16`` NumPy array of shape ``(N, dim)``.
-    :param non_zeros: Number of extreme non-zero components retained per vector.
-                      ``0`` (default) auto-calibrates the optimal count during ``fit()``.
-    :param num_threads: Worker threads for calibration (``0`` uses hardware concurrency).
-    :return: Fitted ``EvpQuantizer`` instance.
+    Create and calibrate an ``EvpQuantizer`` from 2D ``float32`` or ``float16`` ``vectors``.
     """
-    return deglib_cpp.transformation.make_evp_quantizer(vectors, non_zeros=non_zeros, num_threads=num_threads)
+    return cpp_transformation.make_evp_quantizer(
+        vectors=vectors,
+        non_zeros=non_zeros,
+        threads=threads,
+    )
 
 
-def make_scalar_quantizer_int8(vectors: np.ndarray, quantile: float = -1.0) -> ScalarQuantizerInt8:
+def make_scalar_quantizer_int8(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation:
     """
-    Create and calibrate a symmetric ``ScalarQuantizerInt8`` (``[-127, 127]``) on ``vectors``.
-
-    :param vectors: 2D ``float32`` or ``float16`` NumPy array of shape ``(N, dim)``.
-    :param quantile: Clipping quantile; values ``< 0`` (default) auto-optimize.
-    :return: Fitted ``ScalarQuantizerInt8`` instance.
+    Create and calibrate a symmetric ``int8`` scalar quantizer.
     """
-    return deglib_cpp.transformation.make_scalar_quantizer_int8(vectors, quantile=quantile)
+    return cpp_transformation.make_scalar_quantizer_int8(vectors=vectors, quantile=quantile)
 
 
-def make_scalar_quantizer_uint8(vectors: np.ndarray, quantile: float = -1.0) -> ScalarQuantizerUint8:
+def make_scalar_quantizer_uint8(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation:
     """
-    Create and calibrate an affine ``ScalarQuantizerUint8`` (``[0, 255]``) on ``vectors``.
-
-    :param vectors: 2D ``float32`` or ``float16`` NumPy array of shape ``(N, dim)``.
-    :param quantile: Clipping quantile; values ``< 0`` (default) auto-optimize.
-    :return: Fitted ``ScalarQuantizerUint8`` instance.
+    Create and calibrate an affine ``uint8`` scalar quantizer.
     """
-    return deglib_cpp.transformation.make_scalar_quantizer_uint8(vectors, quantile=quantile)
+    return cpp_transformation.make_scalar_quantizer_uint8(vectors=vectors, quantile=quantile)
 
 
-def make_scalar_quantizer_uint4(vectors: np.ndarray, quantile: float = -1.0) -> ScalarQuantizerUint4:
+def make_scalar_quantizer_uint7(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation:
     """
-    Create and calibrate a packed 4-bit ``ScalarQuantizerUint4`` (``[0, 15]``) on ``vectors``.
-
-    :param vectors: 2D ``float32`` or ``float16`` NumPy array of shape ``(N, dim)``.
-    :param quantile: Clipping quantile; values ``< 0`` (default) auto-optimize.
-    :return: Fitted ``ScalarQuantizerUint4`` instance.
+    Create and calibrate an affine 7-bit ``uint7`` (stored in ``int8``) scalar quantizer.
     """
-    return deglib_cpp.transformation.make_scalar_quantizer_uint4(vectors, quantile=quantile)
+    return cpp_transformation.make_scalar_quantizer_uint7(vectors=vectors, quantile=quantile)
 
 
-def make_scalar_quantizer_int4(vectors: np.ndarray, quantile: float = -1.0) -> ScalarQuantizerInt4:
+def make_scalar_quantizer_uint4(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation:
     """
-    Create and calibrate a packed symmetric 4-bit ``ScalarQuantizerInt4`` (``[-7, 7]``) on ``vectors``.
-
-    :param vectors: 2D ``float32`` or ``float16`` NumPy array of shape ``(N, dim)``.
-    :param quantile: Clipping quantile; values ``< 0`` (default) auto-optimize.
-    :return: Fitted ``ScalarQuantizerInt4`` instance.
+    Create and calibrate a packed 4-bit unsigned ``uint4`` scalar quantizer.
     """
-    return deglib_cpp.transformation.make_scalar_quantizer_int4(vectors, quantile=quantile)
+    return cpp_transformation.make_scalar_quantizer_uint4(vectors=vectors, quantile=quantile)
 
 
-def make_scalar_quantizer_uint7(vectors: np.ndarray, quantile: float = -1.0) -> ScalarQuantizerUInt7:
+def make_scalar_quantizer_int4(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation:
     """
-    Create and calibrate an affine 7-bit ``ScalarQuantizerUInt7`` (``[0, 127]``) on ``vectors``.
-
-    :param vectors: 2D ``float32`` or ``float16`` NumPy array of shape ``(N, dim)``.
-    :param quantile: Clipping quantile; values ``< 0`` (default) auto-optimize.
-    :return: Fitted ``ScalarQuantizerUInt7`` instance.
+    Create and calibrate a packed 4-bit signed ``int4`` scalar quantizer.
     """
-    return deglib_cpp.transformation.make_scalar_quantizer_uint7(vectors, quantile=quantile)
+    return cpp_transformation.make_scalar_quantizer_int4(vectors=vectors, quantile=quantile)
 
 
-def make_scalar_quantizer_fp16(vectors: np.ndarray, quantile: float = -1.0) -> ScalarQuantizerFP16:
+def make_scalar_quantizer_fp16(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation:
     """
-    Create a ``ScalarQuantizerFP16`` that casts vectors to IEEE 754 float16.
-
-    :param vectors: 2D ``float32`` or ``float16`` NumPy array of shape ``(N, dim)``.
-    :param quantile: Unused clipping parameter kept for uniform factory signature.
-    :return: Fitted ``ScalarQuantizerFP16`` instance.
+    Create and calibrate a power-of-two scaled ``FP16`` scalar quantizer.
     """
-    return deglib_cpp.transformation.make_scalar_quantizer_fp16(vectors, quantile=quantile)
+    return cpp_transformation.make_scalar_quantizer_fp16(vectors=vectors, quantile=quantile)
 
 
-# Transformation Application
 def apply_on_database(
-    transformations: Sequence[FeatureTransformation],
+    transformations: FeatureTransformation | Sequence[FeatureTransformation],
     vectors: np.ndarray,
-    num_threads: int = 0,
+    threads: int = 0,
 ) -> np.ndarray:
     """
-    Apply a transformation pipeline sequentially to database vectors.
-
-    :param transformations: Sequence of fitted ``FeatureTransformation`` instances.
-    :param vectors: 2D NumPy array of shape ``(N, input_dim)``.
-    :param num_threads: Worker threads (``0`` uses hardware concurrency).
-    :return: Transformed 2D NumPy array ready for graph storage.
+    Apply a transformation or sequence of transformations to 1D/2D database vectors.
     """
-    return deglib_cpp.transformation.apply_on_database(list(transformations), vectors, num_threads=num_threads)
+    t_list = _normalize_transforms(transformations)
+    if not t_list:
+        return np.ascontiguousarray(vectors)
+    return cpp_transformation.apply_on_database(
+        transformations=t_list,
+        vectors=vectors,
+        threads=threads,
+    )
 
 
 def apply_on_query(
-    transformations: Sequence[FeatureTransformation],
+    transformations: FeatureTransformation | Sequence[FeatureTransformation],
     queries: np.ndarray,
 ) -> np.ndarray:
     """
-    Apply a transformation pipeline sequentially to query vectors.
-
-    :param transformations: Sequence of fitted ``FeatureTransformation`` instances.
-    :param queries: 1D or 2D NumPy array of query vectors.
-    :return: Transformed query array.
+    Apply a transformation or sequence of transformations to 1D/2D query vectors.
     """
-    return deglib_cpp.transformation.apply_on_query(list(transformations), queries)
-
-
-def mips_l2_transform(database: np.ndarray) -> tuple[np.ndarray, float]:
-    """
-    Transform database vectors from d-dimensional space to (d+1)-dimensional space
-    for Maximum Inner Product Search (MIPS) using L2 distance.
-
-    For each vector :math:`x_i \\in \\mathbb{R}^d`:
-
-    .. math::
-
-        x'_i = [x_i, \\sqrt{M^2 - \\|x_i\\|^2}] \\in \\mathbb{R}^{d+1}
-
-    where :math:`M^2 = \\max_i \\|x_i\\|^2`.
-
-    :param database: 2D float32 NumPy array of shape (N, d).
-    :return: Tuple of (transformed_database array of shape (N, d+1), max_norm float M).
-    """
-    db_f32 = np.ascontiguousarray(database, dtype=np.float32)
-    return deglib_cpp.transformation.mips_l2_transform(db_f32)
-
-
-def mips_l2_transform_query(queries: np.ndarray) -> np.ndarray:
-    """
-    Pad query vectors from d-dimensional space to (d+1)-dimensional space
-    for MIPS queries against an L2-transformed database.
-
-    For each query vector :math:`q_i \\in \\mathbb{R}^d`:
-
-    .. math::
-
-        q'_i = [q_i, 0] \\in \\mathbb{R}^{d+1}
-
-    :param queries: 1D or 2D float32 NumPy array.
-    :return: Transformed queries array of shape (d+1) or (Q, d+1).
-    """
-    queries_f32 = np.ascontiguousarray(queries, dtype=np.float32)
-    return deglib_cpp.transformation.mips_l2_transform_query(queries_f32)
+    t_list = _normalize_transforms(transformations)
+    if not t_list:
+        return np.ascontiguousarray(queries)
+    return cpp_transformation.apply_on_query(
+        transformations=t_list,
+        queries=queries,
+    )
 
 
 __all__ = [
     "FeatureTransformation",
-    "MipsTransform",
-    "L2NormalizeTransform",
-    "FastHadamardRotation",
-    "EvpQuantizer",
-    "ScalarQuantizerInt8",
-    "ScalarQuantizerUint8",
-    "ScalarQuantizerFP16",
-    "ScalarQuantizerUint4",
-    "ScalarQuantizerInt4",
-    "ScalarQuantizerUInt7",
-    "make_scalar_quantizer_uint4",
-    "make_scalar_quantizer_int4",
-    "make_scalar_quantizer_uint7",
     "make_l2_normalize_transform",
+    "make_mips_transform",
     "make_fast_hadamard_rotation",
     "make_quantizer_pipeline",
     "make_evp_quantizer",
     "make_scalar_quantizer_int8",
     "make_scalar_quantizer_uint8",
+    "make_scalar_quantizer_uint7",
+    "make_scalar_quantizer_uint4",
+    "make_scalar_quantizer_int4",
     "make_scalar_quantizer_fp16",
     "apply_on_database",
     "apply_on_query",
-    "mips_l2_transform",
-    "mips_l2_transform_query",
 ]

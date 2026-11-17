@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import deglib
-from deglib.distances import Metric, FloatSpace
+from deglib.distances import Metric
 
 
 def ivecs_read(filename: str | Path, mmap: bool = False) -> np.ndarray:
@@ -263,7 +263,7 @@ def build_graph_filename(
 
 
 def compute_and_save_anns_gt(
-    base_vecs: np.ndarray, query_vecs: np.ndarray, float_space: FloatSpace, k: int, out_path: Path
+    base_vecs: np.ndarray, query_vecs: np.ndarray, metric: Metric, k: int, out_path: Path
 ):
     n_queries = len(query_vecs)
     gt_matrix = np.zeros((n_queries, k), dtype=np.int32)
@@ -271,7 +271,7 @@ def compute_and_save_anns_gt(
     start_t = time.perf_counter()
 
     for q in range(n_queries):
-        dists = float_space.compute_distances(query_vecs[q], base_vecs)
+        dists = metric.compute_distances(query_vecs[q], base_vecs)
         top_k = np.argpartition(dists, k)[:k]
         top_k = top_k[np.argsort(dists[top_k])]
         gt_matrix[q, :] = top_k
@@ -307,7 +307,7 @@ def generate_explore_entry_and_query(
 
 
 def compute_and_save_explore_gt(
-    base_vecs: np.ndarray, explore_query_vecs: np.ndarray, float_space: FloatSpace, k: int, out_path: Path
+    base_vecs: np.ndarray, explore_query_vecs: np.ndarray, metric: Metric, k: int, out_path: Path
 ):
     n_queries = len(explore_query_vecs)
     gt_matrix = np.zeros((n_queries, k), dtype=np.int32)
@@ -315,7 +315,7 @@ def compute_and_save_explore_gt(
     start_t = time.perf_counter()
 
     for q in range(n_queries):
-        dists = float_space.compute_distances(explore_query_vecs[q], base_vecs)
+        dists = metric.compute_distances(explore_query_vecs[q], base_vecs)
         top_k = np.argpartition(dists, k)[:k]
         top_k = top_k[np.argsort(dists[top_k])]
         gt_matrix[q, :] = top_k
@@ -357,13 +357,12 @@ def load_dataset(
 
     dims = base_vecs.shape[1]
     metric = meta["metric"]
-    float_space = FloatSpace.create(dims, metric)
 
     # 1. ANNS Ground Truth
     gt_path = files_dir / f"{meta['gt_stem']}_{metric.name}.ivecs"
     if not gt_path.is_file():
         print(f"ANNS Ground Truth not found at {gt_path} (metric: {metric.name}).")
-        compute_and_save_anns_gt(base_vecs, query_vecs, float_space, 100, gt_path)
+        compute_and_save_anns_gt(base_vecs, query_vecs, metric, 100, gt_path)
 
     print(f"Loading groundtruth indices from {gt_path} (metric: {metric.name})...")
     gt_vecs = ivecs_read(gt_path)
@@ -382,7 +381,7 @@ def load_dataset(
     if not explore_gt_path.is_file():
         print(f"Exploration Ground Truth not found at {explore_gt_path} (metric: {metric.name}).")
         explore_query_vecs = fvecs_read(explore_query_path)
-        compute_and_save_explore_gt(base_vecs, explore_query_vecs, float_space, 1000, explore_gt_path)
+        compute_and_save_explore_gt(base_vecs, explore_query_vecs, metric, 1000, explore_gt_path)
 
     print(f"Loading explore groundtruth from {explore_gt_path} (metric: {metric.name})...")
     explore_gt = ivecs_read(explore_gt_path)
@@ -518,9 +517,9 @@ def generate_base_top_linear(
     total_queries: int,
     base_limit: int = 0,
     chunk_size: int = 1000,
-    num_threads: int = 0,
+    threads: int = 0,
 ):
-    effective_threads = num_threads if num_threads > 0 else (os.cpu_count() or 4)
+    effective_threads = threads if threads > 0 else (os.cpu_count() or 4)
     base_target = base_vecs[:base_limit] if base_limit > 0 else base_vecs
     n_base = len(base_target)
     actual_k = min(k, n_base)
@@ -714,7 +713,7 @@ def generate_base_groundtruth(
                 out_file=out_file,
                 total_queries=n_base,
                 base_limit=0,
-                num_threads=threads,
+                threads=threads,
             )
 
     if include_half:
@@ -739,7 +738,7 @@ def generate_base_groundtruth(
                     out_file=half_out,
                     total_queries=half_base,
                     base_limit=half_base,
-                    num_threads=threads,
+                    threads=threads,
                 )
 
 

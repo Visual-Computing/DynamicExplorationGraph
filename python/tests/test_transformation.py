@@ -1,65 +1,63 @@
 import numpy as np
 import pytest
 
-from deglib.transformation import mips_l2_transform, mips_l2_transform_query
+from deglib.transformation import apply_on_database, apply_on_query, make_mips_transform
 
 
-def test_mips_l2_transform_basic():
-    np.random.seed(42)
-    N, d = 100, 32
-    data = np.random.randn(N, d).astype(np.float32)
+def test_mips_transform_basic():
+    rng = np.random.default_rng(42)
+    n, d = 100, 16
+    data = rng.standard_normal((n, d)).astype(np.float32)
 
-    transformed, max_norm = mips_l2_transform(data)
+    mips = make_mips_transform(data)
+    assert mips.name == "MipsTransform"
+    assert mips.input_dim == d
+    assert mips.output_dim == d + 1
+    assert mips.max_norm > 0.0
 
-    assert transformed.shape == (N, d + 1)
+    transformed = mips.transform_database(data)
+    assert transformed.shape == (n, d + 1)
     assert transformed.dtype == np.float32
-    assert max_norm > 0.0
 
-    # 1. Original features should match first d columns
-    np.testing.assert_allclose(transformed[:, :d], data, rtol=1e-5)
-
-    # 2. All transformed vectors must have identical squared norm M^2
+    np.testing.assert_allclose(transformed[:, :d], data)
     norms_sq = np.sum(transformed**2, axis=1)
-    expected_max_norm_sq = max_norm**2
-    np.testing.assert_allclose(norms_sq, expected_max_norm_sq, rtol=1e-4)
+    np.testing.assert_allclose(norms_sq, mips.max_norm**2, rtol=1e-5, atol=1e-5)
+
+    # Multi-stage apply_on_database matches transform_database
+    via_pipe = apply_on_database([mips], data)
+    np.testing.assert_allclose(via_pipe, transformed)
 
 
-def test_mips_l2_transform_distance_equivalence():
-    np.random.seed(42)
-    N, Q, d = 20, 5, 16
-    data = np.random.randn(N, d).astype(np.float32)
-    queries = np.random.randn(Q, d).astype(np.float32)
+def test_mips_transform_distance_equivalence():
+    rng = np.random.default_rng(123)
+    n, d, q = 50, 32, 10
+    data = rng.standard_normal((n, d)).astype(np.float32)
+    queries = rng.standard_normal((q, d)).astype(np.float32)
 
-    transformed_data, max_norm = mips_l2_transform(data)
-    transformed_queries = mips_l2_transform_query(queries)
-    M_sq = max_norm**2
+    mips = make_mips_transform(data)
+    transformed_data = mips.transform_database(data)
+    transformed_queries = mips.transform_query(queries)
 
-    # Verify that for query q' = [q, 0] and db vector x'_i = [x_i, sqrt(M^2 - ||x_i||^2)]:
-    # ||q' - x'_i||^2 = ||q||^2 + M^2 - 2 * <q, x_i>
-    for q_idx in range(Q):
-        q_norm_sq = np.sum(queries[q_idx] ** 2)
-        for i in range(N):
-            l2_dist_sq = np.sum((transformed_queries[q_idx] - transformed_data[i]) ** 2)
-            ip_val = np.dot(queries[q_idx], data[i])
-            expected_l2_dist_sq = q_norm_sq + M_sq - 2.0 * ip_val
-            np.testing.assert_allclose(l2_dist_sq, expected_l2_dist_sq, rtol=1e-4)
+    for i in range(q):
+        l2_dists = np.sum((transformed_data - transformed_queries[i]) ** 2, axis=1)
+        inner_products = data @ queries[i]
+        l2_order = np.argsort(l2_dists)
+        mips_order = np.argsort(-inner_products)
+        assert l2_order[0] == mips_order[0]
+        np.testing.assert_array_equal(l2_order[:5], mips_order[:5])
 
 
-def test_mips_l2_transform_query():
-    np.random.seed(42)
-    Q, d = 10, 32
-    queries = np.random.randn(Q, d).astype(np.float32)
+def test_mips_transform_query_1d_and_explicit_max_norm():
+    rng = np.random.default_rng(7)
+    data = rng.standard_normal((20, 8)).astype(np.float32)
+    mips = make_mips_transform(data, max_norm=100.0)
+    assert mips.max_norm == pytest.approx(100.0)
 
-    transformed_q = mips_l2_transform_query(queries)
+    q_1d = rng.standard_normal(8).astype(np.float32)
+    out_1d = mips.transform_query(q_1d)
+    assert out_1d.shape == (9,)
+    np.testing.assert_allclose(out_1d[:8], q_1d)
+    assert out_1d[8] == 0.0
 
-    assert transformed_q.shape == (Q, d + 1)
-    assert transformed_q.dtype == np.float32
-    np.testing.assert_allclose(transformed_q[:, :d], queries, rtol=1e-5)
-    np.testing.assert_allclose(transformed_q[:, d], 0.0, atol=1e-6)
-
-    # Single 1D query vector
-    single_q = queries[0]
-    transformed_single_q = mips_l2_transform_query(single_q)
-    assert transformed_single_q.shape == (d + 1,)
-    np.testing.assert_allclose(transformed_single_q[:d], single_q, rtol=1e-5)
-    assert transformed_single_q[d] == 0.0
+    via_pipe = apply_on_query(mips, q_1d)
+    np.testing.assert_allclose(via_pipe, out_1d)

@@ -160,7 +160,7 @@ def _render_combined_anns_plot(
 
 
 def compute_linear_search_baseline(
-    base_vecs: np.ndarray, float_space: deglib.distances.FloatSpace, sample_size: int = 100
+    base_vecs: np.ndarray, metric: deglib.distances.Metric, sample_size: int = 100
 ) -> float:
     n_base = len(base_vecs)
     query_count = min(sample_size, n_base)
@@ -170,14 +170,14 @@ def compute_linear_search_baseline(
     print(f"\n--- Computing Linear Search Baseline ---")
     print(
         f"Computing linear search baseline with {query_count} random queries on {n_base} base vectors "
-        f"using C++ {float_space.metric().name} ({float_space.get_instruction().name})..."
+        f"using C++ {metric.name} ({metric.get_instruction().name})..."
     )
 
     start_time = time.perf_counter()
     min_dist = float("inf")
 
     for idx in sample_indices:
-        dists = float_space.compute_distances(base_vecs[idx], base_vecs)
+        dists = metric.compute_distances(base_vecs[idx], base_vecs)
         d_min = float(np.min(dists))
         if d_min < min_dist:
             min_dist = d_min
@@ -240,8 +240,9 @@ def build_dynamic_graph(
 
     graph_mut = deglib.create_empty(
         capacity=n,
-        feature_space=deglib.distances.FloatSpace.create(dims, metric, instruction_enum),
+        dim=dims,
         edges_per_vertex=k,
+        metric=metric.with_instruction(instruction_enum),
     )
     builder = deglib.GraphBuilder(
         graph_mut,
@@ -256,7 +257,7 @@ def build_dynamic_graph(
     )
     builder.set_batch_size(10, 10)
     if build_threads > 1:
-        builder.set_thread_count(build_threads)
+        builder.set_threads(build_threads)
 
     all_labels = np.arange(n, dtype=np.uint32)
 
@@ -358,11 +359,11 @@ def run_dynamic_benchmark(
         f"Query vectors: {query_vecs.shape[0]} | Full-GT shape: {gt_vecs_full.shape} | Half-GT shape: {gt_vecs_half.shape}"
     )
 
-    feature_space = deglib.distances.FloatSpace.create(dims, metric, instruction_enum)
-    actual_inst = str(feature_space.get_instruction().name)
+    bound_metric = metric.with_instruction(instruction_enum)
+    actual_inst = str(bound_metric.get_instruction().name)
     print(f"Distance Metric: {metric.name} ({actual_inst})")
 
-    linear_baseline_us = compute_linear_search_baseline(base_vecs, feature_space, sample_size=100)
+    linear_baseline_us = compute_linear_search_baseline(base_vecs, bound_metric, sample_size=100)
 
     # Compute search_k once – it does not vary across stream types
     search_k = min(preset["anns_k"], gt_vecs_half.shape[1])

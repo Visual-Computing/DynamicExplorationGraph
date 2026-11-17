@@ -6,17 +6,18 @@ import numpy as np
 
 import deglib
 from deglib import (
-    EvpQuantizer,
-    FloatSpace,
     Metric,
-    MipsTransform,
-    ScalarQuantizerFP16,
-    ScalarQuantizerInt8,
-    ScalarQuantizerUint8,
     create_empty,
     create_searcher,
     load_graph,
+    load_mutable_graph,
     load_readonly_graph,
+    make_evp_quantizer,
+    make_mips_transform,
+    make_scalar_quantizer_fp16,
+    make_scalar_quantizer_int8,
+    make_scalar_quantizer_uint4,
+    make_scalar_quantizer_uint8,
 )
 from deglib.transformation import apply_on_database
 
@@ -25,8 +26,7 @@ def test_scalar_int8_transform_serialization_and_transform():
     dim = 16
     abs_max = 2.0
     data = np.random.uniform(-abs_max, abs_max, size=(10, dim)).astype(np.float32)
-    transform = ScalarQuantizerInt8(dim)
-    transform.fit(data, quantile=1.0)
+    transform = make_scalar_quantizer_int8(data, quantile=1.0)
     transformations = [transform]
 
     assert len(transformations) == 1
@@ -45,8 +45,7 @@ def test_scalar_fp16_transform_serialization_and_transform():
     dim = 16
     # Audio-like large-range data exceeding FP16 max (65504) -> forces power-of-two scaling.
     data = np.random.uniform(-100000.0, 100000.0, size=(10, dim)).astype(np.float32)
-    transform = ScalarQuantizerFP16(dim)
-    transform.fit(data, quantile=1.0)
+    transform = make_scalar_quantizer_fp16(data, quantile=1.0)
     transformations = [transform]
 
     assert transform.input_dim == dim
@@ -70,8 +69,7 @@ def test_scalar_uint8_transform_serialization_and_transform():
     min_val = -3.0
     max_val = 3.0
     data = np.random.uniform(min_val, max_val, size=(10, dim)).astype(np.float32)
-    transform = ScalarQuantizerUint8(dim)
-    transform.fit(data, quantile=1.0)
+    transform = make_scalar_quantizer_uint8(data, quantile=1.0)
     transformations = [transform]
 
     assert transform.output_dtype == np.uint8
@@ -86,14 +84,13 @@ def test_scalar_uint8_transform_serialization_and_transform():
 def test_mips_transform():
     dim = 8
     max_norm = 10.0
-    transform = MipsTransform(dim, max_norm=max_norm)
+    data = np.random.randn(5, dim).astype(np.float32)
+    transform = make_mips_transform(data, max_norm=max_norm)
     transformations = [transform]
 
     assert transform.input_dim == dim
     assert transform.output_dim == dim + 1
     assert transform.output_dtype == np.float32
-
-    data = np.random.randn(5, dim).astype(np.float32)
     out = apply_on_database(transformations, data)
     assert out.shape == (5, dim + 1)
     assert out.dtype == np.float32
@@ -106,13 +103,11 @@ def test_builder_and_graph_search_with_int8_transforms():
     data = np.random.randn(N, dim).astype(np.float32)
 
     # Setup Int8 Quantizer
-    sq = ScalarQuantizerInt8(dim)
-    sq.fit(data, quantile=1.0)
+    sq = make_scalar_quantizer_int8(data, quantile=1.0)
     transformations = [sq]
 
     # Create empty graph configured with transformations
-    space = FloatSpace.create(dim, Metric.Int8_L2)
-    graph = create_empty(N, space, edges_per_vertex=16, transformations=transformations)
+    graph = create_empty(N, dim, edges_per_vertex=16, metric=Metric.Int8_L2, transformations=transformations)
 
     assert graph.has_transformations()
     assert graph.get_transformations()[0].output_dtype == np.int8
@@ -146,11 +141,9 @@ def test_builder_and_graph_search_with_int8_inner_product_transform():
     data = np.random.randn(N, dim).astype(np.float32)
     data /= np.linalg.norm(data, axis=1, keepdims=True)
 
-    sq = ScalarQuantizerInt8(dim)
-    sq.fit(data, quantile=1.0)
+    sq = make_scalar_quantizer_int8(data, quantile=1.0)
     transformations = [sq]
-    space = FloatSpace.create(dim, Metric.Int8_InnerProduct)
-    graph = create_empty(N, space, edges_per_vertex=16, transformations=transformations)
+    graph = create_empty(N, dim, edges_per_vertex=16, metric=Metric.Int8_InnerProduct, transformations=transformations)
 
     builder = deglib.GraphBuilder(graph, extend_k=10, extend_eps=0.2)
     builder.add_entry(range(N), data)
@@ -165,12 +158,10 @@ def test_container_persistence_roundtrip():
     N, dim = 50, 16
     data = np.random.randn(N, dim).astype(np.float32)
 
-    sq = ScalarQuantizerInt8(dim)
-    sq.fit(data, quantile=1.0)
+    sq = make_scalar_quantizer_int8(data, quantile=1.0)
     transformations = [sq]
 
-    space = FloatSpace.create(dim, Metric.Int8_L2)
-    graph = create_empty(N, space, edges_per_vertex=16, transformations=transformations)
+    graph = create_empty(N, dim, edges_per_vertex=16, metric=Metric.Int8_L2, transformations=transformations)
     builder = deglib.GraphBuilder(graph, extend_k=10, extend_eps=0.2)
     builder.add_entry(range(N), data)
     builder.build()
@@ -209,10 +200,9 @@ def test_container_persistence_roundtrip():
         assert ro_indices[0] == 7
 
         # 4. Searcher with loaded graph
-        rerank_space = FloatSpace.create(dim, Metric.FP32_L2)
         searcher = create_searcher(
             graph=ro_g,
-            rerank_space=rerank_space,
+            rerank_metric=Metric.FP32_L2,
             rerank_data=data,
         )
         searcher.optimize(n_clusters=min(N, 16), n_iter=5, sample_size=N)
@@ -228,12 +218,10 @@ def test_evp_transforms_end_to_end():
     norms = np.linalg.norm(raw_data, axis=1, keepdims=True)
     data = (raw_data / norms).astype(np.float32)
 
-    evp = EvpQuantizer(dim, 8)
-    evp.fit(data)
+    evp = make_evp_quantizer(data, non_zeros=8)
     transformations = [evp]
 
-    space = FloatSpace.create(dim, Metric.EVP_InnerProduct)
-    graph = create_empty(N, space, edges_per_vertex=16, transformations=transformations)
+    graph = create_empty(N, dim, edges_per_vertex=16, metric=Metric.EVP_InnerProduct, transformations=transformations)
 
     builder = deglib.GraphBuilder(graph, extend_k=10, extend_eps=0.2)
     builder.add_entry(range(N), data)
@@ -290,11 +278,9 @@ def test_transformation_graph_search_fp16():
     np.random.seed(42)
     data_f32 = np.random.randn(N, dim).astype(np.float32)
 
-    transform = ScalarQuantizerInt8(dim)
-    transform.fit(data_f32, quantile=1.0)
-    space = FloatSpace.create(dim, Metric.Int8_L2)
+    transform = make_scalar_quantizer_int8(data_f32, quantile=1.0)
 
-    graph = create_empty(N, space, edges_per_vertex=edges_per_vertex, transformations=[transform])
+    graph = create_empty(N, dim, edges_per_vertex=edges_per_vertex, metric=Metric.Int8_L2, transformations=[transform])
     builder = deglib.GraphBuilder(graph, extend_k=8, extend_eps=0.1)
     builder.add_entry(np.arange(N, dtype=np.uint32), data_f32)
     builder.build()
@@ -325,27 +311,21 @@ def test_transformation_graph_search_fp16():
 
 
 def test_uint4_transformation_graph_search():
-    from deglib.transformation import ScalarQuantizerUint4
-
     N, dim, edges_per_vertex = 40, 16, 4
     np.random.seed(42)
     data_f32 = np.random.uniform(0.0, 10.0, size=(N, dim)).astype(np.float32)
 
-    transform = ScalarQuantizerUint4(dim)
-    transform.fit(data_f32, quantile=1.0)
-    space = FloatSpace.create(dim, Metric.Uint4_L2)
-
-    quantized_data = transform.quantize(data_f32)
+    transform = make_scalar_quantizer_uint4(data_f32, quantile=1.0)
+    quantized_data = transform.transform_database(data_f32)
     assert quantized_data.shape == (N, (dim + 1) // 2)
 
     # Build FP32 graph first, then convert to readonly with Uint4
-    fp32_space = FloatSpace.create(dim, Metric.FP32_L2)
-    graph = create_empty(N, fp32_space, edges_per_vertex=edges_per_vertex)
+    graph = create_empty(N, dim, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
     builder = deglib.GraphBuilder(graph, extend_k=8, extend_eps=0.1)
     builder.add_entry(np.arange(N, dtype=np.uint32), data_f32)
     builder.build()
 
-    ro_graph = graph.to_readonly(space, quantized_data, transformations=[transform])
+    ro_graph = graph.to_readonly(Metric.Uint4_L2, quantized_data, transformations=[transform])
     searcher = create_searcher(ro_graph)
 
     # Search with original float query

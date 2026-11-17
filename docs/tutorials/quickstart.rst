@@ -9,7 +9,7 @@ Core Workflow
 A typical `deglib` workflow consists of four simple steps:
 
 1. **Prepare Data**: Feature vectors represented as a 2D float32 NumPy array.
-2. **Build Index**: Construct an Exploration Graph using :func:`deglib.builder.build_from_data`.
+2. **Build Index**: Construct an Exploration Graph using :func:`deglib.build`.
 3. **Query the Index**: Find the `k` nearest neighbors with :meth:`~deglib.graph.DynamicExplorationGraph.search`.
 4. **Save & Reload**: Persist the search graph to disk for production reuse.
 
@@ -26,7 +26,7 @@ Complete Example
    data = np.random.randn(num_samples, dim).astype(np.float32)
 
    # 2. Build the Exploration Graph
-   graph = deglib.builder.build_from_data(
+   graph = deglib.build(
        data,
        edges_per_vertex=30,  # target number of edges per vertex
        extend_eps=0.1,       # exploration parameter during construction

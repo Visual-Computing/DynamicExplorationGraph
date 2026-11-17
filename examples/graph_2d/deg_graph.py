@@ -7,9 +7,9 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from deglib import DynamicExplorationGraph
-from deglib.builder import OptimizationTarget, build_from_data
-from deglib.distances import FloatSpace, Metric
-from deglib.transformation import mips_l2_transform_query
+from deglib.builder import OptimizationTarget, build
+from deglib.distances import Metric
+from deglib.transformation import make_mips_transform
 from pysearch import epsilon_search
 from theory import TheoryReport, compare, knng_edges, nsw_edges
 
@@ -125,7 +125,7 @@ class GraphModel:
         """
         if metric is self.metric:
             return self.graph
-        return self.graph.to_readonly(FloatSpace.create(self.points.shape[1], metric))
+        return self.graph.to_readonly(metric, optimize=False)
 
     def best_match(self, query: np.ndarray, metric: Metric | None = None, *, exclude: int | None = None) -> int:
         """
@@ -161,7 +161,7 @@ class GraphModel:
         every query — a vertex's coordinates or a free click — passes through.
         """
         point = np.asarray(plot_xy, dtype=np.float32).reshape(1, -1)
-        return mips_l2_transform_query(point)[0] if self.mips else point[0]
+        return make_mips_transform(point).transform_query(point)[0] if self.mips else point[0]
 
     def farthest_from_centroid(self) -> int:
         """
@@ -282,7 +282,7 @@ def build_model(
         raise ValueError(f"edges_per_vertex must be an even number of at least {MIN_K}, got {k}")
 
     started = time.perf_counter()
-    graph = build_from_data(
+    graph = build(
         points,
         edges_per_vertex=k,
         metric=metric,
@@ -290,7 +290,7 @@ def build_model(
         extend_k=extend_k,
         extend_eps=extend_eps,
         improve_tries=improve_tries,
-        thread_count=threads,
+        threads=threads,
         seed=seed,
     )
     build_seconds = time.perf_counter() - started

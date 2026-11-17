@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 import numpy as np
-from deglib.distances import Metric, FloatSpace
+from deglib.distances import Metric
 
 
 def ivecs_read(filename: str | Path, mmap: bool = False) -> np.ndarray:
@@ -231,7 +231,7 @@ def ensure_dataset(dataset_key: str, cache_dir: Path) -> Path:
 
 
 def compute_and_save_anns_gt(
-    base_vecs: np.ndarray, query_vecs: np.ndarray, float_space: FloatSpace, k: int, out_path: Path
+    base_vecs: np.ndarray, query_vecs: np.ndarray, metric: Metric, k: int, out_path: Path
 ):
     """Computes ANNS ground truth against the full base dataset."""
     n_queries = len(query_vecs)
@@ -240,7 +240,7 @@ def compute_and_save_anns_gt(
     start_t = time.perf_counter()
 
     for q in range(n_queries):
-        dists = float_space.compute_distances(query_vecs[q], base_vecs)
+        dists = metric.compute_distances(query_vecs[q], base_vecs)
         top_k = np.argpartition(dists, k)[:k]
         top_k = top_k[np.argsort(dists[top_k])]
         gt_matrix[q, :] = top_k
@@ -257,7 +257,7 @@ def compute_and_save_anns_gt(
 
 
 def compute_and_save_anns_gt_half(
-    base_vecs: np.ndarray, query_vecs: np.ndarray, float_space: FloatSpace, k: int, out_path: Path
+    base_vecs: np.ndarray, query_vecs: np.ndarray, metric: Metric, k: int, out_path: Path
 ):
     """Computes ANNS ground truth against only the first half of the base dataset.
 
@@ -271,7 +271,7 @@ def compute_and_save_anns_gt_half(
     start_t = time.perf_counter()
 
     for q in range(n_queries):
-        dists = float_space.compute_distances(query_vecs[q], half_base)
+        dists = metric.compute_distances(query_vecs[q], half_base)
         top_k = np.argpartition(dists, k)[:k]
         top_k = top_k[np.argsort(dists[top_k])]
         gt_matrix[q, :] = top_k
@@ -318,13 +318,12 @@ def load_dataset_for_dynamic(
 
     dims = base_vecs.shape[1]
     metric = meta["metric"]
-    float_space = FloatSpace.create(dims, metric)
 
     # Full ANNS Ground Truth
     gt_path = files_dir / f"{meta['gt_stem']}_{metric.name}.ivecs"
     if not gt_path.is_file():
         print(f"ANNS Full Ground Truth not found at {gt_path} (metric: {metric.name}).")
-        compute_and_save_anns_gt(base_vecs, query_vecs, float_space, 100, gt_path)
+        compute_and_save_anns_gt(base_vecs, query_vecs, metric, 100, gt_path)
 
     print(f"Loading full groundtruth indices from {gt_path} (metric: {metric.name})...")
     gt_vecs_full = ivecs_read(gt_path)
@@ -333,7 +332,7 @@ def load_dataset_for_dynamic(
     gt_half_path = files_dir / f"{meta['gt_half_stem']}_{metric.name}.ivecs"
     if not gt_half_path.is_file():
         print(f"ANNS Half Ground Truth not found at {gt_half_path} (metric: {metric.name}).")
-        compute_and_save_anns_gt_half(base_vecs, query_vecs, float_space, 100, gt_half_path)
+        compute_and_save_anns_gt_half(base_vecs, query_vecs, metric, 100, gt_half_path)
 
     print(f"Loading half groundtruth indices from {gt_half_path} (metric: {metric.name})...")
     gt_vecs_half = ivecs_read(gt_half_path)
@@ -394,10 +393,10 @@ def generate_base_half_top_linear(
     k: int,
     out_file: Optional[Path] = None,
     chunk_size: int = 1000,
-    num_threads: int = 0,
+    threads: int = 0,
 ) -> np.ndarray:
     """Computes exact base-to-base top-k ground truth over half_vecs (excluding self)."""
-    effective_threads = num_threads if num_threads > 0 else (os.cpu_count() or 4)
+    effective_threads = threads if threads > 0 else (os.cpu_count() or 4)
     n_half = len(half_vecs)
     actual_k = min(k, max(1, n_half - 1))
 
@@ -464,11 +463,11 @@ def generate_base_half_top_anns(
     k: int,
     out_file: Optional[Path] = None,
     chunk_size: int = 25000,
-    num_threads: int = 0,
+    threads: int = 0,
     target_recall: float = 0.99,
 ) -> np.ndarray:
     """Computes approximated base-to-base top-k ground truth over half_vecs via graph exploration."""
-    effective_threads = num_threads if num_threads > 0 else (os.cpu_count() or 4)
+    effective_threads = threads if threads > 0 else (os.cpu_count() or 4)
     n_half = len(half_vecs)
     actual_k = min(k, max(1, n_half - 1))
 
@@ -599,8 +598,8 @@ def load_base_half_groundtruth(
             return None
         half_vecs = base_vecs[:n_half]
         if mode in ("approximated", "approx", "anns") and graph is not None:
-            return generate_base_half_top_anns(graph, half_vecs, metric, k=1000, out_file=None, num_threads=threads)
-        return generate_base_half_top_linear(half_vecs, metric, k=1000, out_file=None, num_threads=threads)
+            return generate_base_half_top_anns(graph, half_vecs, metric, k=1000, out_file=None, threads=threads)
+        return generate_base_half_top_linear(half_vecs, metric, k=1000, out_file=None, threads=threads)
 
     folder = ensure_dataset(key, cache_dir)
     files_dir = folder / meta["folder"] if (folder / meta["folder"]).is_dir() else folder
@@ -620,7 +619,7 @@ def load_base_half_groundtruth(
     if mode in ("approximated", "approx", "anns"):
         if graph is None:
             raise ValueError("Graph instance is required to generate approximated half-base ground truth.")
-        return generate_base_half_top_anns(graph, half_vecs, metric, k=1000, out_file=base_half_path, num_threads=threads)
+        return generate_base_half_top_anns(graph, half_vecs, metric, k=1000, out_file=base_half_path, threads=threads)
 
-    return generate_base_half_top_linear(half_vecs, metric, k=1000, out_file=base_half_path, num_threads=threads)
+    return generate_base_half_top_linear(half_vecs, metric, k=1000, out_file=base_half_path, threads=threads)
 

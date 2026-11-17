@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 
 import deglib
-from deglib.distances import FloatSpace, Metric
+from deglib.distances import Metric
 
 
 def deglib_prng_next(state: int) -> tuple[int, int]:
@@ -80,7 +80,7 @@ def test_readonly_graph_regression_fp32_l2():
     explore_gt_data = compute_groundtruth_l2(base_data, explore_data, search_k)
 
     # Build DynamicExplorationGraph
-    mutable_graph = deglib.create_empty(base_count, FloatSpace.create(dim, Metric.FP32_L2), edges_per_vertex)
+    mutable_graph = deglib.create_empty(base_count, dim, edges_per_vertex, metric=Metric.FP32_L2)
 
     builder = deglib.GraphBuilder(
         mutable_graph,
@@ -91,7 +91,7 @@ def test_readonly_graph_regression_fp32_l2():
         improve_k=0,
         improve_eps=0.0,
     )
-    builder.set_thread_count(1)
+    builder.set_threads(1)
     builder.add_entry(range(base_count), base_data)
     builder.build()
 
@@ -198,7 +198,7 @@ def test_readonly_graph_regression_fp32_inner_product():
     explore_gt_data = compute_groundtruth_innerproduct(base_data, explore_data, search_k)
 
     # Build DynamicExplorationGraph
-    mutable_graph = deglib.create_empty(base_count, FloatSpace.create(dim, Metric.FP32_InnerProduct), edges_per_vertex)
+    mutable_graph = deglib.create_empty(base_count, dim, edges_per_vertex, metric=Metric.FP32_InnerProduct)
 
     builder = deglib.GraphBuilder(
         mutable_graph,
@@ -209,7 +209,7 @@ def test_readonly_graph_regression_fp32_inner_product():
         improve_k=0,
         improve_eps=0.0,
     )
-    builder.set_thread_count(1)
+    builder.set_threads(1)
     builder.add_entry(range(base_count), base_data)
     builder.build()
 
@@ -318,13 +318,12 @@ def test_readonly_graph_regression_evp_inner_product():
     explore_gt_data = compute_groundtruth_innerproduct(base_data, explore_data, search_k)
 
     # Quantize data to EVP with a shared quantizer for database and queries
-    quantizer = deglib.transformation.EvpQuantizer(dim, non_zeros=non_zeros)
-    quantizer.fit(base_data)
-    base_quant = quantizer.quantize(base_data, num_threads=8)
-    query_quant = quantizer.quantize(query_data, num_threads=8)
+    quantizer = deglib.transformation.make_evp_quantizer(base_data, non_zeros=non_zeros)
+    base_quant = quantizer.transform_database(base_data, threads=8)
+    query_quant = quantizer.transform_database(query_data, threads=8)
 
     # Build DynamicExplorationGraph with EVP_InnerProduct metric
-    mutable_graph = deglib.create_empty(base_count, FloatSpace.create(dim, Metric.EVP_InnerProduct), edges_per_vertex)
+    mutable_graph = deglib.create_empty(base_count, dim, edges_per_vertex, metric=Metric.EVP_InnerProduct)
 
     builder = deglib.GraphBuilder(
         mutable_graph,
@@ -335,7 +334,7 @@ def test_readonly_graph_regression_evp_inner_product():
         improve_k=0,
         improve_eps=0.0,
     )
-    builder.set_thread_count(1)
+    builder.set_threads(1)
     builder.add_entry(range(base_count), base_quant)
     builder.build()
 

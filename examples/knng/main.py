@@ -19,7 +19,7 @@ import deglib
 import matplotlib.pyplot as plt
 import numpy as np
 from dataset import ensure_large_dataset, ensure_small_dataset, load_hdf5_dataset
-from deglib.distances import FloatSpace, Metric
+from deglib.distances import Metric
 from deglib.search import Reranker
 
 DEFAULT_K_TOP = 15
@@ -46,7 +46,7 @@ CONFIG_LARGE = {
 def prune_worst_edges(
     graph: deglib.DynamicExplorationGraph,
     prune_worst: int,
-    num_threads: int = DEFAULT_THREADS,
+    threads: int = DEFAULT_THREADS,
 ) -> None:
     """
     Prunes the worst (highest-weight) `prune_worst` neighbors of each vertex
@@ -54,19 +54,7 @@ def prune_worst_edges(
     """
     if prune_worst <= 0:
         return
-    deglib.optimization.prune_worst_edges(graph, prune_worst, num_threads)
-
-
-def quantize_vectors(vectors: np.ndarray, num_threads: int = DEFAULT_THREADS) -> np.ndarray:
-    """
-    Quantizes floating point vectors to sparse EVP-bit representation using deglib.
-    Automatically calibrates the optimal non_zeros value during fit().
-    """
-    dims = vectors.shape[1]
-    quantizer = deglib.transformation.EvpQuantizer(dims)
-    quantizer.fit(vectors, num_threads=num_threads)
-    print(f"Auto-calibrated non_zeros: {quantizer.non_zeros} (evaluated by fit())")
-    return quantizer.quantize(vectors, num_threads=num_threads)
+    deglib.optimization.prune_worst_edges(graph, prune_worst, threads=threads)
 
 
 def construct_knng(
@@ -97,25 +85,23 @@ def construct_knng(
         f"k-NNG Construction Config: k_top={k_top}, k_graph={k_graph}, max_dist={max_dist}, evp_k={evp_k}, prune_worst={prune_worst}, threads={threads}"
     )
 
-    # 1. Quantization Phase
+    # 1. Quantization & Graph Construction Phase (EVP_InnerProduct metric)
+    t_quant = 0.0
     t0 = time.perf_counter()
-    quant_vectors = quantize_vectors(train_vectors, num_threads=threads)
-    t_quant = time.perf_counter() - t0
-    print(f"Quantization completed in {t_quant:.3f}s")
-
-    # 2. Graph Construction Phase (using EVP_InnerProduct metric for fast quantized search)
-    t0 = time.perf_counter()
-    space = FloatSpace.create(dims, Metric.EVP_InnerProduct)
-    print(f"Graph Construction: {space.metric().name} ({space.get_instruction().name})")
-    graph = deglib.create_empty(n_vecs, space, k_graph)
-    builder = deglib.GraphBuilder(graph, extend_k=k_ext, extend_eps=0.001)
-    builder.set_thread_count(threads)
-
     labels = np.arange(n_vecs, dtype=np.uint32)
-    builder.add_entry(labels, quant_vectors)
-    builder.build()
+    graph = deglib.build(
+        train_vectors,
+        labels=labels,
+        edges_per_vertex=k_graph,
+        metric=Metric.EVP_InnerProduct,
+        extend_k=k_ext,
+        extend_eps=0.001,
+        optimize=False,
+        threads=threads,
+    )
     t_build = time.perf_counter() - t0
-    print(f"Graph construction completed in {t_build:.3f}s")
+    print(f"Graph Construction: {graph.get_metric().name} ({graph.get_instruction().name})")
+    print(f"Quantization + Graph construction completed in {t_build:.3f}s")
 
     t0 = time.perf_counter()
     if prune_worst > 0:
@@ -128,7 +114,7 @@ def construct_knng(
     t_gopt = time.perf_counter() - t_opt0
     print(f"[Optimization] graph.optimize -> (po={graph.get_po()}, pl={graph.get_pl()}, nl={graph.get_nl()}) (took {t_gopt:.3f}s, excluded from total)")
 
-    # 3. Graph Exploration Phase (Self-Join for k-NNG neighbor retrieval)
+    # 2. Graph Exploration Phase (Self-Join for k-NNG neighbor retrieval)
     t0 = time.perf_counter()
     entry_labels = np.ascontiguousarray(labels, dtype=np.uint32)
     indices = graph.explore(
@@ -143,10 +129,10 @@ def construct_knng(
     t_explore = time.perf_counter() - t0
     print(f"Graph candidate search completed in {t_explore:.3f}s")
 
-    # 4. FP16 Candidate Rerank Phase
-    rerank_space = FloatSpace.create(dims, Metric.FP16_InnerProduct)
-    print(f"Rerank Space: {rerank_space.metric().name} ({rerank_space.get_instruction().name})")
-    reranker = Reranker(rerank_space, train_vectors)
+    # 3. FP16 Candidate Rerank Phase
+    rerank_metric = Metric.FP16_InnerProduct
+    print(f"Rerank Metric: {rerank_metric.name} ({rerank_metric.get_instruction().name})")
+    reranker = Reranker(rerank_metric, train_vectors, optimize=False, threads=threads)
     t_ropt0 = time.perf_counter()
     reranker.optimize(num_candidates=evp_k)
     t_ropt = time.perf_counter() - t_ropt0
@@ -157,7 +143,7 @@ def construct_knng(
         queries=train_vectors,
         candidate_indices=indices,
         k_top=k_top,
-        num_threads=threads,
+        threads=threads,
         return_distances=False,
         unsorted=True,
     )

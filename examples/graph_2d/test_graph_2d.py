@@ -2448,7 +2448,7 @@ def test_a_search_metric_reranks_the_same_edges_without_rebuilding(model) -> Non
     other = model.traversal(Metric.FP32_InnerProduct)
 
     assert other is not model.graph
-    assert other.get_feature_space().metric() is Metric.FP32_InnerProduct
+    assert other.get_metric() == Metric.FP32_InnerProduct
     assert [sorted(other.get_neighbors(vertex)) for vertex in range(model.num_points)] == [
         list(neighbors) for neighbors in model.adjacency
     ], "the view must answer with the very edges the model carries"

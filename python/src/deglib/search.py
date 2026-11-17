@@ -1,250 +1,311 @@
-from typing import Optional, Union
+from collections.abc import Sequence
+from typing import Literal
 import numpy as np
+import deglib_cpp
 
-import deglib_cpp.search as cpp_search
+from deglib.distances import Metric, _infer_dim_from_array
+from deglib.graph import DynamicExplorationGraph, _FP16_METRICS, _FP32_METRICS
+from deglib.transformation import (
+    FeatureTransformation,
+    _normalize_transforms,
+    apply_on_database,
+    apply_on_query,
+    make_quantizer_pipeline,
+    make_scalar_quantizer_fp16,
+)
+from deglib.utils import assure_array, assure_contiguous
 
-from deglib.distances import FloatSpace
-from deglib.utils import assure_contiguous
+cpp_search = deglib_cpp.search
 
 
 class Filter:
     """
-    Search filter used to restrict nearest-neighbor search results to a subset of valid labels.
-
-    :param valid_labels: 1D NumPy array of valid int32 labels/IDs that are allowed in the result set.
-    :param max_value: Maximum label value in `valid_labels`. Computed automatically if negative.
-    :param max_label_count: Total size of dataset. Defaults to the search graph size if not provided.
+    Bitset filter restricting graph search and exploration to a subset of external labels.
     """
 
     def __init__(self, valid_labels: np.ndarray, max_value: int = -1, max_label_count: int = -1):
-        self.valid_labels = valid_labels
-        if max_value < 0:
-            max_value = np.max(valid_labels)
-        self.max_value = max_value
-        self.max_label_count = max_label_count
+        self.valid_labels = np.asarray(valid_labels)
+        if self.valid_labels.ndim != 1:
+            raise ValueError(f"valid_labels must be a 1D array, got shape {self.valid_labels.shape}")
+        if self.valid_labels.size == 0:
+            self.max_value = 0 if max_value < 0 else max_value
+            self.max_label_count = 0 if max_label_count < 0 else max_label_count
+            valid_c = np.empty(0, dtype=np.int32)
+        else:
+            valid_c = assure_contiguous(self.valid_labels.astype(np.int32, copy=False), "valid_labels")
+            self.max_value = int(valid_c.max()) if max_value < 0 else int(max_value)
+            self.max_label_count = int(valid_c.size) if max_label_count < 0 else int(max_label_count)
+        self.filter_cpp = cpp_search.create_filter(valid_c, self.max_value, self.max_label_count)
 
-    def create_filter_obj(self, graph_size: int) -> cpp_search.Filter:
-        """
-        Create a backend filter representation for the specified graph size.
-        """
-        valid_labels = assure_contiguous(self.valid_labels.astype(np.int32, copy=False), "filter_labels")
-        filter_obj = None
-        if valid_labels is not None:
-            max_label_count = self.max_label_count
-            if max_label_count <= 0:
-                max_label_count = graph_size
-            filter_obj = cpp_search.create_filter(valid_labels, self.max_value, max_label_count)
+    @classmethod
+    def create_filter(cls, valid_labels: "Filter | np.ndarray | Sequence[int]", max_value: int = -1) -> "Filter":
+        if isinstance(valid_labels, cls):
+            return valid_labels
+        return cls(np.asarray(valid_labels), max_value=max_value)
 
-        return filter_obj
 
-    @staticmethod
-    def create_filter(filter_labels: Union[None, np.ndarray, "Filter"], graph_size: int) -> Optional[cpp_search.Filter]:
-        """
-        Helper method to construct a filter object from an array, Filter instance, or None.
-        """
-        if filter_labels is None:
-            return None
-        if isinstance(filter_labels, np.ndarray):
-            filter_labels = Filter(filter_labels)
-        if not isinstance(filter_labels, Filter):
-            raise TypeError("filter_labels must be a None, numpy array or Filter, got {}".format(type(filter_labels)))
-        return filter_labels.create_filter_obj(graph_size)
+def _prepare_rerank_vectors_and_transforms(
+    metric: Metric,
+    vectors: np.ndarray,
+    transformations: list[FeatureTransformation],
+    threads: int,
+) -> tuple[np.ndarray, int, list[FeatureTransformation]]:
+    arr = np.asarray(vectors)
+    if arr.ndim != 2:
+        raise ValueError(f"base_vectors must be a 2D array, got shape {arr.shape}")
+    arr = np.ascontiguousarray(arr)
+
+    base_metric = Metric(int(metric))
+    xfrms = list(transformations)
+
+    if len(xfrms) == 0 and arr.dtype == np.float32 and base_metric not in _FP32_METRICS:
+        if base_metric in _FP16_METRICS:
+            q = make_scalar_quantizer_fp16(arr)
+            xfrms = [q]
+            arr = apply_on_database(xfrms, arr, threads=threads)
+            dim = int(arr.shape[1])
+        else:
+            dim = int(arr.shape[1])
+            xfrms = make_quantizer_pipeline(arr, metric, use_rerank=True, threads=threads)
+            arr = apply_on_database(xfrms, arr, threads=threads)
+    elif (
+        len(xfrms) > 0
+        and arr.dtype == np.float32
+        and arr.shape[1] == xfrms[0].input_dim
+        and (xfrms[-1].output_dtype != np.float32 or xfrms[-1].output_dim != arr.shape[1])
+    ):
+        arr = apply_on_database(xfrms, arr, threads=threads)
+        dim = int(xfrms[-1].output_dim)
+    else:
+        arr = assure_array(arr, "base_vectors", metric.get_accepted_dtypes())
+        dim = _infer_dim_from_array(metric, arr)
+
+    return arr, dim, xfrms
 
 
 class Reranker:
     """
-    High-performance candidate reranker re-evaluating graph candidates with exact distances.
-
-    Indexing Contract:
-    The Reranker evaluates candidate index `c` directly as row `base_vectors[c]`.
-
-    1. Normal case (Static Dataset with Searcher):
-       Row i corresponds to the i-th vector given to the graph builder. Simply pass the same
-       feature matrix (or its FP16 cast) that was passed to `build_from_data`. No reordering needed!
-    2. Dynamic or Custom Labels case:
-       If external labels do not match builder input rows (e.g. dynamic deletions or arbitrary IDs),
-       row i must contain the vector for label `graph.get_labels()[i]`.
-    3. Standalone usage (without Searcher):
-       `base_vectors` matches whatever candidate ID space you pass to `rerank()`.
-
-    :param space: FloatSpace defining the distance metric and vector dimensionality.
-    :param base_vectors: 2D NumPy array of dataset vectors (shape: N_base x dim).
+    Standalone candidate reranker for exact scoring over candidate indices.
     """
 
     def __init__(
         self,
-        space: FloatSpace,
+        metric: Metric | str,
         base_vectors: np.ndarray,
-        transformations: list | None = None,
+        transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
+        optimize: bool = False,
+        threads: int = 0,
     ):
-        cpp_space = space.float_space_cpp if hasattr(space, "float_space_cpp") else space
-        contiguous_base = np.ascontiguousarray(base_vectors)
-        cpp_transformations = []
-        if transformations:
-            for t in transformations:
-                cpp_transformations.append(t.transformation_cpp if hasattr(t, "transformation_cpp") else t)
-        self.reranker_cpp = cpp_search.Reranker(cpp_space, contiguous_base, cpp_transformations)
-        self.base_vectors = contiguous_base
+        resolved_metric = Metric.resolve(metric)
+        xfrms = _normalize_transforms(transformations)
+        for i, t in enumerate(xfrms):
+            if not isinstance(t, FeatureTransformation):
+                raise TypeError(f"transformations[{i}] must be a FeatureTransformation, got {type(t).__name__}")
+
+        prepared_vectors, dim, prepared_xfrms = _prepare_rerank_vectors_and_transforms(
+            resolved_metric, base_vectors, xfrms, threads
+        )
+        cpp_space = resolved_metric._to_cpp_space(dim)
+
+        self.metric = resolved_metric
+        self._dim = dim
+        self._transformations = prepared_xfrms
+        self._reranker_cpp = cpp_search.Reranker(cpp_space, prepared_vectors, prepared_xfrms)
+        if optimize and prepared_vectors.shape[0] > 0:
+            self.optimize()
 
     def get_num_base_vectors(self) -> int:
-        """Number of base vectors the reranker scores candidates against."""
-        return self.reranker_cpp.get_num_base_vectors()
+        return int(self._reranker_cpp.get_num_base_vectors())
 
     def get_po(self) -> int:
-        """Prefetch lookahead offset for candidate feature vectors (0 disables rerank prefetching)."""
-        return self.reranker_cpp.get_po()
+        return int(self._reranker_cpp.get_po())
 
     def get_pl(self) -> int:
-        """Cache lines prefetched per feature vector (0 prefetches the whole vector)."""
-        return self.reranker_cpp.get_pl()
+        return int(self._reranker_cpp.get_pl())
 
     def optimize(self, sample_count: int = 300, num_candidates: int = 150) -> None:
-        """Auto-tune the reranker's prefetch parameters (po, pl) by timing reranking over sampled base vectors.
-
-        The reranker samples its own base vectors as queries, so no external query buffer is needed.
-        Call once after construction to tune for the expected operating point before reranking.
-
-        :param sample_count: Number of base vectors used as sample queries (capped at the base count).
-        :param num_candidates: Candidates scored per query (clamped to the base count).
         """
-        self.reranker_cpp.optimize(int(sample_count), int(num_candidates))
+        Auto-tune candidate prefetch parameters (``po``, ``pl``).
+        """
+        self._reranker_cpp.optimize(int(sample_count), int(num_candidates))
 
     def rerank(
         self,
         queries: np.ndarray,
         candidate_indices: np.ndarray,
         k_top: int = 0,
-        num_threads: int = 0,
+        threads: int = 0,
         return_distances: bool = False,
         unsorted: bool = False,
     ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         """
-        Re-evaluate and rank candidate vector indices for each query against the base vectors.
-
-        :param queries: 2D NumPy array of query vectors (shape: N_queries x dim).
-        :param candidate_indices: 2D uint32 NumPy array of candidate indices per query (shape: N_queries x K_candidates).
-        :param k_top: Number of top nearest candidates to return per query (0 returns all candidates).
-        :param num_threads: Number of worker threads (0 uses all available CPU cores).
-        :param return_distances: If True, returns a tuple ``(indices, distances)``.
-        :param unsorted: If True, skips sorting candidate results by distance.
-        :return: 2D uint32 NumPy array of candidate IDs, or tuple ``(indices, distances)`` if `return_distances` is True.
+        Score and rank ``candidate_indices`` for ``queries`` against stored base vectors.
         """
-        return self.reranker_cpp.rerank(
-            np.ascontiguousarray(queries),
-            candidate_indices.astype(np.uint32, copy=False),
-            int(k_top),
-            int(num_threads),
-            bool(return_distances),
-            bool(unsorted),
+        if not isinstance(queries, np.ndarray):
+            queries = np.ascontiguousarray(queries, dtype=np.float32)
+        elif not queries.flags.c_contiguous:
+            queries = np.ascontiguousarray(queries)
+
+        if self._transformations:
+            expected_bytes = self.metric.get_data_size(self._dim)
+            row_bytes = int(queries.shape[-1]) * queries.dtype.itemsize
+            if queries.dtype == np.float32 or row_bytes != expected_bytes:
+                if queries.dtype != np.float32:
+                    queries = np.ascontiguousarray(queries, dtype=np.float32)
+                queries = apply_on_query(self._transformations, queries)
+
+        cand = np.ascontiguousarray(candidate_indices, dtype=np.uint32)
+        return self._reranker_cpp.rerank(
+            queries,
+            cand,
+            k_top=int(k_top),
+            threads=int(threads),
+            return_distances=bool(return_distances),
+            unsorted=bool(unsorted),
         )
 
 
 def rerank(
-    space: FloatSpace,
+    metric: Metric | str,
     queries: np.ndarray,
     candidate_indices: np.ndarray,
     base_vectors: np.ndarray | None = None,
     k_top: int = 0,
-    num_threads: int = 0,
+    threads: int = 0,
     return_distances: bool = False,
     unsorted: bool = False,
 ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     """
-    Re-evaluate and rank candidate vector indices for each query.
-
-    Useful in two-stage retrieval pipelines where a fast first-stage search provides
-    a candidate pool that is re-scored with exact distance calculations.
-
-    :param space: FloatSpace instance defining the distance metric and dimensionality.
-    :param queries: 2D NumPy array of query vectors (shape: N_queries x dim).
-    :param candidate_indices: 2D uint32 NumPy array of candidate indices per query (shape: N_queries x K_candidates). Each value ``c`` is a row of ``base_vectors``.
-    :param base_vectors: 2D array of dataset vectors (shape: N_base x dim). If None, defaults to `queries`. Candidate ``c`` is scored as ``base_vectors[c]``.
-    :param k_top: Number of top nearest candidates to return per query (0 returns all candidates sorted).
-    :param num_threads: Number of worker threads (0 uses all available CPU cores).
-    :param return_distances: If True, returns a tuple ``(indices, distances)``.
-    :param unsorted: If True, skips sorting candidate results by distance.
-    :return: 2D uint32 NumPy array of candidate IDs, or tuple ``(indices, distances)`` if `return_distances` is True.
+    Stateless candidate reranking convenience function.
+    Defaults ``base_vectors`` to ``queries`` (self-join) when ``None``.
     """
-    target_vectors = queries if base_vectors is None else base_vectors
-    return Reranker(space, target_vectors).rerank(
-        queries, candidate_indices, k_top, num_threads, return_distances, unsorted
+    target_vecs = queries if base_vectors is None else base_vectors
+    ranker = Reranker(metric=metric, base_vectors=target_vecs, optimize=False, threads=threads)
+    return ranker.rerank(
+        queries=queries,
+        candidate_indices=candidate_indices,
+        k_top=k_top,
+        threads=threads,
+        return_distances=return_distances,
+        unsorted=unsorted,
     )
 
 
 class Searcher:
     """
-    High-performance Stateless Searcher for fast single-query and batch-query execution.
-
-    Performs end-to-end query transformation (quantization), graph search, and exact distance
-    candidate reranking within C++ in a single native invocation, eliminating Python interpreter
-    and bridge overhead in query loops. Any transformations or quantization are derived directly
-    from the attached graph.
-
-    :param graph: DynamicExplorationGraph (Mutable or ReadOnly) instance.
-    :param rerank_space: Optional FloatSpace for exact candidate reranking.
-    :param rerank_data: Optional base feature matrix in the graph's internal index order (0 .. size()-1, see ``graph.get_labels()``). Valid for static graphs.
-    :param rerank_transformations: Optional list of transformations applied to queries before candidate reranking.
-    :param normalize_query: If True, input queries are L2-normalized once before graph search and reranking.
+    Native C++ search pipeline coordinating optional query normalization, feature
+    transformation/quantization, K-Means routing, graph traversal, and optional reranking.
     """
 
     def __init__(
         self,
-        graph,
-        rerank_space: FloatSpace | None = None,
+        graph: DynamicExplorationGraph,
+        rerank_metric: Metric | str | None = None,
         rerank_data: np.ndarray | None = None,
-        rerank_transformations: list | None = None,
+        rerank_order: Literal["label", "internal"] = "label",
+        rerank_transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
         normalize_query: bool = False,
-    ):
-        cpp_graph = graph.dynamic_exploration_graph_cpp if hasattr(graph, "dynamic_exploration_graph_cpp") else graph
-        cpp_rerank_space = (
-            rerank_space.float_space_cpp
-            if (rerank_space is not None and hasattr(rerank_space, "float_space_cpp"))
-            else rerank_space
-        )
-        cpp_rerank_transforms = []
-        if rerank_transformations:
-            for t in rerank_transformations:
-                cpp_rerank_transforms.append(t.transformation_cpp if hasattr(t, "transformation_cpp") else t)
-
-        self.searcher_cpp = cpp_search.Searcher(
-            graph=cpp_graph,
-            rerank_space=cpp_rerank_space,
-            base_vectors=rerank_data,
-            rerank_transformations=cpp_rerank_transforms,
-            normalize_query=normalize_query,
-        )
-
-    @property
-    def normalize_query(self) -> bool:
-        """Whether input queries are L2-normalized prior to search and rerank."""
-        return self.searcher_cpp.normalize_query
-
-    @normalize_query.setter
-    def normalize_query(self, val: bool) -> None:
-        self.searcher_cpp.normalize_query = bool(val)
-
-    def optimize(
-        self,
+        optimize: bool = False,
+        use_routing: bool = True,
         n_clusters: int = 256,
         n_iter: int = 20,
         sample_size: int = 0,
-        num_threads: int = 1,
-        use_routing: bool = True,
-    ) -> None:
-        """Select entry vertices via k-means medoids and tune prefetch parameters.
+        threads: int = 0,
+    ):
+        if rerank_order not in ("label", "internal"):
+            raise ValueError(f"rerank_order must be 'label' or 'internal', got {rerank_order!r}")
+        if rerank_data is not None and rerank_metric is None:
+            raise ValueError(
+                "rerank_data cannot be provided when rerank_metric is None; "
+                "specify rerank_metric (e.g. Metric.FP16_InnerProduct) to enable reranking."
+            )
 
-        :param n_clusters: Number of entry vertices to select (maximum 512).
-        :param n_iter: Number of k-means iterations.
-        :param sample_size: Number of vertices sampled for clustering, 0 selects 3% of the graph size.
-        :param num_threads: Number of worker threads, 0 selects a library default.
-        :param use_routing: Build a k-means routing graph for entry selection (the QG/query-graph searcher needs this).
-        """
-        self.searcher_cpp.optimize(int(n_clusters), int(n_iter), int(sample_size), int(num_threads), bool(use_routing))
+        self.graph = graph
+        cpp_graph = getattr(graph, "dynamic_exploration_graph_cpp", graph)
+        r_xfrms = _normalize_transforms(rerank_transformations)
+        for i, t in enumerate(r_xfrms):
+            if not isinstance(t, FeatureTransformation):
+                raise TypeError(f"rerank_transformations[{i}] must be a FeatureTransformation, got {type(t).__name__}")
+
+        rerank_space_cpp = None
+        prepared_rerank = None
+
+        if rerank_metric is not None:
+            resolved_rerank = Metric.resolve(rerank_metric)
+            if rerank_data is None:
+                prepared_rerank, extracted_xfrms = deglib_cpp.extract_rerank_from_graph(
+                    cpp_graph,
+                    resolved_rerank._to_cpp_metric(),
+                    int(threads),
+                )
+                if not r_xfrms:
+                    if extracted_xfrms:
+                        r_xfrms = extracted_xfrms
+                    elif (
+                        Metric(int(resolved_rerank)) in _FP16_METRICS
+                        and Metric(int(graph.get_metric())) in _FP16_METRICS
+                        and graph.has_transformations()
+                    ):
+                        r_xfrms = graph.get_transformations()
+                rerank_dim = graph.get_dim()
+            else:
+                raw_rerank = np.asarray(rerank_data)
+                if raw_rerank.ndim != 2:
+                    raise ValueError(f"rerank_data must be a 2D array, got shape {raw_rerank.shape}")
+                n_vertices = graph.size()
+                if rerank_order == "label":
+                    if n_vertices == 0:
+                        aligned = np.ascontiguousarray(raw_rerank[:0])
+                    else:
+                        labels = graph.get_labels()
+                        if int(labels.max()) >= raw_rerank.shape[0]:
+                            raise ValueError(
+                                f"Max graph external label ({int(labels.max())}) >= rerank_data row count ({raw_rerank.shape[0]}). "
+                                "Pass rerank_data indexed by external labels or set rerank_order='internal'."
+                            )
+                        aligned = np.ascontiguousarray(raw_rerank[labels])
+                else:
+                    if raw_rerank.shape[0] != n_vertices:
+                        raise ValueError(
+                            f"rerank_data row count ({raw_rerank.shape[0]}) does not match graph.size() ({n_vertices})."
+                        )
+                    aligned = np.ascontiguousarray(raw_rerank)
+
+                prepared_rerank, rerank_dim, r_xfrms = _prepare_rerank_vectors_and_transforms(
+                    resolved_rerank, aligned, r_xfrms, threads
+                )
+
+            rerank_space_cpp = resolved_rerank._to_cpp_space(rerank_dim)
+
+        self._searcher_cpp = cpp_search.Searcher(
+            cpp_graph,
+            rerank_space_cpp,
+            prepared_rerank,
+            r_xfrms,
+            bool(normalize_query),
+        )
+
+        if optimize and graph.size() > 0:
+            self.optimize(
+                n_clusters=n_clusters,
+                n_iter=n_iter,
+                sample_size=sample_size,
+                threads=threads,
+                use_routing=use_routing,
+            )
+
+    @property
+    def normalize_query(self) -> bool:
+        return bool(self._searcher_cpp.normalize_query)
+
+    @normalize_query.setter
+    def normalize_query(self, value: bool) -> None:
+        self._searcher_cpp.normalize_query = bool(value)
 
     def search(
         self,
         query: np.ndarray,
-        k: int,
+        k: int = 10,
         eps_or_ef: float = 0.1,
         rerank_factor: float = 1.0,
         threads: int = 1,
@@ -253,62 +314,131 @@ class Searcher:
         max_distance_computation_count: int = 0,
     ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         """
-        Search for nearest neighbors of a single query vector (1D or 2D with 1 vector) or a batch of query vectors (2D).
-
-        Entry vertices come solely from ``optimize()``.
-
-        :param query: Query array (1D vector or 2D batch).
-        :param k: Number of top nearest neighbors to return per query.
-        :param eps_or_ef: Exploration parameter (controls speed vs. recall trade-off, default: 0.1).
-            Values >= 1.0 are treated as fixed candidate pool size (``ef``, HNSW-style search).
-            Values < 1.0 are treated as relative exploration distance margin (``eps``).
-        :param rerank_factor: Candidate expansion factor for exact reranking (default: 1.0).
-            The initial graph search retrieves ``ceil(k * rerank_factor)`` candidates.
-        :param threads: Number of worker threads for batch search (default: 1).
-        :param return_distances: If True, returns a tuple ``(indices, distances)``.
-        :param unsorted: If True, returns candidates in heap order instead of ascending distance order.
-        :param max_distance_computation_count: Optional hard budget of distance computations per query (0 = unlimited).
-        :return: Nearest neighbor IDs, or tuple ``(indices, distances)`` if `return_distances` is True:
-            - Single query (1D or 1xDim): 1D array of shape `(found,)` where `found <= k`.
-              If fewer than `k` neighbors are found (e.g. when `ef < k`), trimmed to the exact number of found elements.
-            - Batch query (NxDim, N > 1): 2D array of shape `(N, k)`.
-              Unfilled positions when a query finds fewer than `k` candidates are padded with
-              `np.iinfo(np.uint32).max` (for indices) and `np.nan` or `infinity` (for distances).
+        Search for the ``k`` nearest neighbors of a 1D query or 2D query batch.
         """
-        return self.searcher_cpp.search(
+        if not isinstance(query, np.ndarray):
+            query = np.ascontiguousarray(query, dtype=np.float32)
+        elif not query.flags.c_contiguous:
+            query = np.ascontiguousarray(query)
+
+        return self._searcher_cpp.search(
             query,
-            int(k),
-            float(eps_or_ef),
-            float(rerank_factor),
-            int(threads),
-            bool(return_distances),
-            bool(unsorted),
-            int(max_distance_computation_count),
+            k=int(k),
+            eps_or_ef=float(eps_or_ef),
+            rerank_factor=float(rerank_factor),
+            threads=int(threads),
+            return_distances=bool(return_distances),
+            unsorted=bool(unsorted),
+            max_distance_computation_count=int(max_distance_computation_count),
+        )
+
+    def optimize(
+        self,
+        n_clusters: int = 256,
+        n_iter: int = 20,
+        sample_size: int = 0,
+        threads: int = 0,
+        use_routing: bool = True,
+    ) -> None:
+        """
+        Optimize K-Means routing medoids, reranker prefetch, and graph traversal prefetch.
+        """
+        self._searcher_cpp.optimize(
+            n_clusters=int(n_clusters),
+            n_iter=int(n_iter),
+            sample_size=int(sample_size),
+            threads=int(threads),
+            use_routing=bool(use_routing),
         )
 
 
 def create_searcher(
-    graph,
-    rerank_space: FloatSpace | None = None,
+    graph: DynamicExplorationGraph,
+    metric: Metric | str | None = None,
+    rerank_metric: Metric | str | None = None,
     rerank_data: np.ndarray | None = None,
-    rerank_transformations: list | None = None,
+    rerank_order: Literal["label", "internal"] = "label",
+    rerank_transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
     normalize_query: bool = False,
+    optimize: bool = True,
+    use_routing: bool = True,
+    n_clusters: int = 256,
+    n_iter: int = 20,
+    sample_size: int = 0,
+    threads: int = 0,
 ) -> Searcher:
     """
-    Factory function to create a Searcher instance.
+    Create a native C++ ``Searcher`` pipeline from ``graph``.
 
-    :param graph: DynamicExplorationGraph (Mutable or ReadOnly) instance.
-    :param rerank_space: Optional FloatSpace for exact candidate reranking.
-    :param rerank_data: Optional base feature matrix. In standard static workflows, simply pass the same array used for building. If labels were permuted/deleted, pass features aligned with ``graph.get_labels()``.
-    :param rerank_transformations: Optional list of transformations applied to queries before candidate reranking.
-    :param normalize_query: If True, input queries are L2-normalized once before graph search and reranking.
+    Reranking is opt-in via ``rerank_metric``:
+    - ``rerank_metric=None`` (default): NO reranking is performed.
+    - ``rerank_metric`` set, ``rerank_data=None``: extracts & quantizes rerank vectors directly
+      from the ``FP32``/``FP16`` source ``graph`` prior to quantizing/converting ``graph`` to ``metric``.
+    - ``rerank_metric`` set, ``rerank_data`` provided: aligns via ``rerank_order``.
     """
+    if rerank_order not in ("label", "internal"):
+        raise ValueError(f"rerank_order must be 'label' or 'internal', got {rerank_order!r}")
+    if rerank_data is not None and rerank_metric is None:
+        raise ValueError(
+            "rerank_data cannot be provided when rerank_metric is None; "
+            "specify rerank_metric (e.g. Metric.FP16_InnerProduct) to enable reranking."
+        )
+
+    # Extract rerank vectors from source graph BEFORE converting/quantizing `graph`.
+    resolved_rerank_metric = None if rerank_metric is None else Metric.resolve(rerank_metric)
+    resolved_rerank_xfrms = _normalize_transforms(rerank_transformations)
+    extracted_rerank_data = rerank_data
+    effective_rerank_order: Literal["label", "internal"] = rerank_order
+
+    if resolved_rerank_metric is not None and rerank_data is None:
+        cpp_graph = getattr(graph, "dynamic_exploration_graph_cpp", graph)
+        extracted_rerank_data, extracted_xfrms = deglib_cpp.extract_rerank_from_graph(
+            cpp_graph,
+            resolved_rerank_metric._to_cpp_metric(),
+            int(threads),
+        )
+        effective_rerank_order = "internal"
+        if not resolved_rerank_xfrms:
+            if extracted_xfrms:
+                resolved_rerank_xfrms = extracted_xfrms
+            elif (
+                Metric(int(resolved_rerank_metric)) in _FP16_METRICS
+                and Metric(int(graph.get_metric())) in _FP16_METRICS
+                and graph.has_transformations()
+            ):
+                resolved_rerank_xfrms = graph.get_transformations()
+
+    # Quantize / convert graph only if `metric` was specified and differs in metric or explicit instruction.
+    search_graph = graph
+    if metric is not None:
+        target_metric = Metric.resolve(metric)
+        src_metric = graph.get_metric()
+        src_inst = graph.get_instruction()
+        explicit_inst = getattr(target_metric, "_instruction", None)
+        needs_conversion = Metric(int(target_metric)) != Metric(int(src_metric)) or (
+            explicit_inst is not None and explicit_inst != src_inst
+        )
+        if needs_conversion:
+            search_graph = graph.to_readonly(
+                metric=target_metric,
+                use_rerank=(resolved_rerank_metric is not None),
+                optimize=False,
+                threads=threads,
+            )
+
     return Searcher(
-        graph=graph,
-        rerank_space=rerank_space,
-        rerank_data=rerank_data,
-        rerank_transformations=rerank_transformations,
+        graph=search_graph,
+        rerank_metric=resolved_rerank_metric,
+        rerank_data=extracted_rerank_data,
+        rerank_order=effective_rerank_order,
+        rerank_transformations=resolved_rerank_xfrms,
         normalize_query=normalize_query,
+        optimize=optimize,
+        use_routing=use_routing,
+        n_clusters=n_clusters,
+        n_iter=n_iter,
+        sample_size=sample_size,
+        threads=threads,
     )
 
 

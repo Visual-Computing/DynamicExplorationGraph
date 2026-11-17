@@ -119,7 +119,7 @@ The :class:`~deglib.builder.OptimizationTarget` defines how new vertices are con
 Builder Parameters
 ------------------
 
-When creating a :class:`~deglib.builder.GraphBuilder` or calling :func:`~deglib.builder.build_from_data`, construction behavior is configured via **Extension Parameters** (finding entry neighbors for newly inserted vertices) and **Improvement Parameters** (2-hop edge swaps to repair distortion or graph regularity):
+When creating a :class:`~deglib.builder.GraphBuilder` or calling :func:`~deglib.builder.build`, construction behavior is configured via **Extension Parameters** (finding entry neighbors for newly inserted vertices) and **Improvement Parameters** (2-hop edge swaps to repair distortion or graph regularity):
 
 Extension Parameters (Graph Extension)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -189,11 +189,11 @@ To build an index from a 2D NumPy array in a single call:
    data = np.random.randn(10_000, 128).astype(np.float32)
 
    # Build graph using all available CPU threads (LowLID default)
-   graph = deglib.builder.build_from_data(
+   graph = deglib.build(
        data,
        edges_per_vertex=30,      # Number of edges per vertex
        extend_eps=0.1,           # Exploration margin during build
-       thread_count=0,           # 0 = use all available CPU cores
+       threads=0,                # 0 = use all available CPU cores
        show_progress=True,       # Print progress bar to stdout
    )
 
@@ -212,8 +212,7 @@ For streaming or incremental updates where vertices are added or removed over ti
    from deglib.builder import GraphBuilder, OptimizationTarget
 
    dim = 128
-   space = deglib.FloatSpace.create(dim=dim, metric=deglib.Metric.FP32_L2)
-   graph = deglib.graph.create_dynamic_empty(space, edges_per_vertex=30)
+   graph = deglib.graph.create_dynamic_empty(dim=dim, edges_per_vertex=30, metric=deglib.Metric.FP32_L2)
 
    # LowLID enables multi-threaded graph extension
    builder = GraphBuilder(

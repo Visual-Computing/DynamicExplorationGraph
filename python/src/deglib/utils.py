@@ -27,15 +27,22 @@ class InvalidShapeException(Exception):
     pass
 
 
-def assure_dtype(arr: np.ndarray, name: str, dtype: np.dtype):
+def assure_dtype(arr: np.ndarray, name: str, dtype: np.dtype | type | tuple[np.dtype | type, ...]):
     """
     Raise an exception, if the given numpy array has the wrong dtype
     """
-    if arr.dtype != dtype:
+    if isinstance(dtype, tuple):
+        allowed = tuple(np.dtype(d) for d in dtype)
+        if np.dtype(arr.dtype) not in allowed:
+            expected_str = " or ".join(str(d) for d in allowed)
+            raise WrongDtypeException(
+                '{} has wrong dtype "{}", expected was "{}"'.format(name, arr.dtype, expected_str)
+            )
+    elif arr.dtype != dtype:
         raise WrongDtypeException('{} has wrong dtype "{}", expected was "{}"'.format(name, arr.dtype, dtype))
 
 
-def assure_array(arr: np.ndarray, name: str, dtype: np.dtype) -> np.ndarray:
+def assure_array(arr: np.ndarray, name: str, dtype: np.dtype | type | tuple[np.dtype | type, ...]) -> np.ndarray:
     """
     Makes sure, that the given array fulfills the requirements for c++ api.
     """

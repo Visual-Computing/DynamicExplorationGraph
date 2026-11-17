@@ -106,12 +106,12 @@ def run_sliding_window_benchmark(
     print(f"  Total Queries:      {len(query_vectors):,}")
     print("=" * 75)
 
-    # 1. Initialize Space and Preallocated DEG Graph
-    space = deglib.FloatSpace.create(dim=dims, metric=metric)
+    # 1. Initialize Preallocated DEG Graph
     graph = deglib.create_empty(
         capacity=window_size,
-        feature_space=space,
+        dim=dims,
         edges_per_vertex=edges_per_vertex,
+        metric=metric,
     )
 
     # Builder configured with StreamingData target (single-threaded deterministic streaming)
@@ -124,7 +124,7 @@ def run_sliding_window_benchmark(
         improve_eps=0.001,
         improve_tries=0
     )
-    builder.set_thread_count(1)
+    builder.set_threads(1)
 
     # 2. Initial Graph Population (first N vectors)
     print(f"\n[Step 1/2] Building initial graph with {window_size:,} vectors...")
@@ -158,8 +158,8 @@ def run_sliding_window_benchmark(
         t_update_start = time.perf_counter()
 
         # Remove M oldest active vectors
-        for remove_lbl in range(active_start_idx, active_start_idx + batch_size):
-            builder.remove_entry(remove_lbl)
+        remove_labels = np.arange(active_start_idx, active_start_idx + batch_size, dtype=np.uint32)
+        builder.remove_entry(remove_labels)
 
         # Add M new vectors
         new_labels = np.arange(next_insert_idx, next_insert_idx + batch_size, dtype=np.uint32)

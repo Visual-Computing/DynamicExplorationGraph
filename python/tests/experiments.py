@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor, wait
 import numpy as np
 import deglib
 from deglib.builder import GraphBuilder
-from deglib.distances import FloatSpace, Metric
+from deglib.distances import Metric
 
 
 def main():
@@ -13,7 +13,7 @@ def main():
     data = np.random.random((samples, dims)).astype(np.float32)
     # data = data / np.linalg.norm(data, axis=1)[:, None]  # L2 normalize
 
-    graph = deglib.create_empty(data.shape[0], FloatSpace.create(dims, Metric.FP32_L2), 16)
+    graph = deglib.create_empty(data.shape[0], dims, 16, metric=Metric.FP32_L2)
     builder = deglib.GraphBuilder(graph, extend_k=32, extend_eps=0.01, improve_k=0)
 
     for i, vec in enumerate(data):
@@ -41,7 +41,7 @@ def main2():
 
     # build index
     data = np.random.random((samples, dims)).astype(np.float32)
-    index = deglib.builder.build_from_data(data, extend_eps=0.1, show_progress=True)
+    index = deglib.build(data, extend_eps=0.1, show_progress=True)
 
     # search
     query = np.random.random(dims).astype(np.float32)
@@ -78,7 +78,7 @@ def do_build_with_remove(seed, edges_per_vertex):
     data = np.random.random((samples, dims)).astype(np.float32)
 
     # data = deglib.repository.fvecs_read('crash_data.fvecs')
-    graph = deglib.create_empty(data.shape[0], FloatSpace.create(dims, Metric.FP32_L2), edges_per_vertex)
+    graph = deglib.create_empty(data.shape[0], dims, edges_per_vertex, metric=Metric.FP32_L2)
     builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
     for label, vec in enumerate(data):
@@ -107,7 +107,7 @@ def do_all():
 
 def build_graph(jobname, data, dim):
     print("starting", jobname)
-    graph = deglib.create_empty(1_000_000, FloatSpace.create(dim, Metric.FP32_L2), 8)
+    graph = deglib.create_empty(1_000_000, dim, 8, metric=Metric.FP32_L2)
     print(graph)
 
     builder = GraphBuilder(graph, improve_k=0, extend_eps=0, extend_k=8)

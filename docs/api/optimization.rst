@@ -35,12 +35,12 @@ Example Usage
    # Generate sample data
    data = np.random.randn(1000, 64).astype(np.float32)
 
-   # Pre-sort vectors using FLAS for improved locality
-   sorted_indices = deglib.optimization.presort(data)
-   sorted_data = data[sorted_indices]
+   # Build graph directly with FLAS pre-sorting enabled
+   graph = deglib.build(data, metric=deglib.Metric.FP32_L2, presort=True)
 
-   # Build graph from pre-sorted data
-   graph = deglib.builder.build_from_data(sorted_data, metric=deglib.Metric.FP32_L2)
+   # Or pre-sort explicitly first
+   sorted_indices = deglib.optimization.presort(data)
+   graph2 = deglib.build(data, metric=deglib.Metric.FP32_L2, presort=sorted_indices)
 
    # Optimize graph edges using MRNG pruning
    edges_removed = deglib.optimization.prune_non_mrng_edges(graph)

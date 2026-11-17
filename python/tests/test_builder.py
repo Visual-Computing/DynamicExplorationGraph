@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import deglib
-from deglib.distances import FloatSpace, Metric
+from deglib.distances import Metric
 
 
 class CallbackTester:
@@ -29,7 +29,7 @@ class TestGraphs:
     @pytest.mark.parametrize("batch", [True, False])
     def test_add_entry(self, batch):
         graph = deglib.create_empty(
-            self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
         builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
@@ -43,7 +43,7 @@ class TestGraphs:
     @pytest.mark.parametrize("optimization_target", list(deglib.builder.OptimizationTarget))
     def test_build_simple(self, optimization_target):
         graph = deglib.create_empty(
-            self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
         builder = deglib.GraphBuilder(
             graph, extend_k=30, extend_eps=0.2, improve_k=30, optimization_target=optimization_target
@@ -57,7 +57,7 @@ class TestGraphs:
     @pytest.mark.parametrize("optimization_target", list(deglib.builder.OptimizationTarget))
     def test_build_batch(self, optimization_target):
         graph = deglib.create_empty(
-            self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
         builder = deglib.GraphBuilder(
             graph, extend_k=30, extend_eps=0.2, improve_k=30, optimization_target=optimization_target
@@ -68,7 +68,7 @@ class TestGraphs:
 
     def test_build_with_remove(self):
         graph = deglib.create_empty(
-            self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
         builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
@@ -82,9 +82,24 @@ class TestGraphs:
 
         builder.build()
 
+    def test_remove_entry_batch(self):
+        graph = deglib.create_empty(
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
+        )
+        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder.add_entry(range(self.data.shape[0]), self.data)
+        builder.build()
+
+        labels_to_remove = np.arange(0, self.data.shape[0], 5, dtype=np.uint32)
+        builder.remove_entry(labels_to_remove)
+        assert builder.get_num_remove_entries() == len(labels_to_remove)
+        status = builder.build()
+        assert status.deleted == len(labels_to_remove)
+        assert graph.size() == self.data.shape[0] - len(labels_to_remove)
+
     def test_get_num_entries(self):
         graph = deglib.create_empty(
-            self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
         builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
@@ -114,7 +129,7 @@ class TestGraphs:
 
     def test_callback(self):
         graph = deglib.create_empty(
-            self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
         builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
         builder.add_entry(range(self.data.shape[0]), self.data)
@@ -127,12 +142,12 @@ class TestGraphs:
 
     def test_concurrency_settings(self):
         graph = deglib.create_empty(
-            self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
         builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
         # Test thread count
-        builder.set_thread_count(2)
+        builder.set_threads(2)
 
         # Test batch size setting and getting
         builder.set_batch_size(tasks_per_batch=16, task_size=5)
@@ -144,7 +159,7 @@ class TestGraphs:
 
     def test_stop(self):
         graph = deglib.create_empty(
-            self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
         builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
         builder.add_entry(range(self.data.shape[0]), self.data)
@@ -161,7 +176,7 @@ class TestGraphs:
 
     def test_build_returns_status(self):
         graph = deglib.create_empty(
-            self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
         builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
         builder.add_entry(range(self.data.shape[0]), self.data)
@@ -175,7 +190,7 @@ class TestGraphs:
 
     def test_show_progress(self):
         graph = deglib.create_empty(
-            self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
         builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
         builder.add_entry(range(self.data.shape[0]), self.data)
@@ -190,7 +205,7 @@ class TestGraphs:
 
     def test_build_status_callback_step_ids(self):
         graph = deglib.create_empty(
-            self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
         builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
         builder.add_entry(range(self.data.shape[0]), self.data)
@@ -217,7 +232,7 @@ class TestGraphs:
 
     def test_build_mixed_add_delete(self):
         graph = deglib.create_empty(
-            self.data.shape[0], FloatSpace.create(self.data.shape[1], Metric.FP32_L2), self.edges_per_vertex
+            self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
         builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
@@ -246,7 +261,7 @@ class TestGraphs:
         if metric == Metric.FP32_InnerProduct:
             data = data / np.linalg.norm(data, axis=1, keepdims=True)
 
-        graph = deglib.create_empty(samples, FloatSpace.create(dim, metric), edges_per_vertex)
+        graph = deglib.create_empty(samples, dim, edges_per_vertex, metric=metric)
         builder = deglib.GraphBuilder(
             graph,
             extend_k=32,
@@ -277,9 +292,7 @@ class TestGraphs:
         total_vectors = window_size + batch_size * rounds
         all_data = np.random.random((total_vectors, dims)).astype(np.float32)
 
-        graph = deglib.create_empty(
-            window_size + batch_size * 2, FloatSpace.create(dims, Metric.FP32_L2), edges_per_vertex
-        )
+        graph = deglib.create_empty(window_size + batch_size * 2, dims, edges_per_vertex, metric=Metric.FP32_L2)
         builder = deglib.GraphBuilder(
             graph,
             extend_k=16,
@@ -319,3 +332,72 @@ class TestGraphs:
             assert len(indices) == 1
             assert indices[0] == next_insert - 1
             assert np.isclose(dists[0], 0.0, atol=1e-5)
+
+
+class TestBuildFunction:
+    def test_build_mutable_and_readonly(self):
+        rng = np.random.default_rng(7)
+        data = rng.random((80, 16), dtype=np.float32)
+
+        mutable = deglib.build(data, edges_per_vertex=16, extend_k=16, readonly=False, threads=2)
+        assert isinstance(mutable, deglib.DynamicExplorationGraph)
+        assert mutable.is_mutable()
+        assert mutable.size() == 80
+        assert mutable.get_dim() == 16
+        assert mutable.get_metric() == Metric.FP32_L2
+
+        ro = deglib.build(data, edges_per_vertex=16, extend_k=16, readonly=True, threads=2)
+        assert isinstance(ro, deglib.DynamicExplorationGraph)
+        assert not ro.is_mutable()
+        assert ro.size() == 80
+        assert ro.get_dim() == 16
+        assert ro.get_metric() == Metric.FP32_L2
+
+    def test_build_presort_bool_and_indices(self):
+        rng = np.random.default_rng(11)
+        data = rng.random((60, 16), dtype=np.float32)
+
+        g1 = deglib.build(data, edges_per_vertex=12, extend_k=16, presort=True, optimize=False)
+        assert g1.size() == 60
+        for i in range(60):
+            assert g1.has_vertex(i)
+
+        sorted_indices = deglib.presort(data, metric=Metric.FP32_L2, threads=1)
+        g2 = deglib.build(data, edges_per_vertex=12, extend_k=16, presort=sorted_indices, optimize=False)
+        assert g2.size() == 60
+        indices, _ = g2.search(data[5], k=1, eps_or_ef=0.1)
+        assert int(indices[0]) == 5
+
+    def test_build_quantized_metrics(self):
+        rng = np.random.default_rng(23)
+        raw = rng.normal(size=(80, 32)).astype(np.float32)
+        unit = raw / np.linalg.norm(raw, axis=1, keepdims=True)
+
+        g_evp = deglib.build(
+            unit,
+            metric=Metric.EVP_InnerProduct,
+            edges_per_vertex=16,
+            extend_k=16,
+            optimize=True,
+            threads=1,
+        )
+        assert g_evp.size() == 80
+        assert g_evp.get_metric() == Metric.EVP_InnerProduct
+        idx, _ = g_evp.search(unit[0], k=5, eps_or_ef=0.2)
+        assert len(idx) == 5
+
+        g_int8 = deglib.build(
+            raw,
+            metric="Int8_L2",
+            edges_per_vertex=16,
+            extend_k=16,
+            readonly=True,
+            optimize=True,
+            threads=1,
+        )
+        assert isinstance(g_int8, deglib.DynamicExplorationGraph)
+        assert not g_int8.is_mutable()
+        assert g_int8.size() == 80
+        assert g_int8.get_metric() == Metric.Int8_L2
+        idx2, _ = g_int8.search(raw[3], k=5, eps_or_ef=0.2)
+        assert len(idx2) == 5

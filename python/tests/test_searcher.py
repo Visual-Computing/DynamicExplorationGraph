@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 import deglib
-from deglib import Metric, FloatSpace, create_searcher
+from deglib import Metric, create_searcher
 
 
 def test_searcher_direct_f32():
@@ -10,7 +10,7 @@ def test_searcher_direct_f32():
     n = 100
     data = np.random.randn(n, dim).astype(np.float32)
 
-    graph = deglib.builder.build_from_data(data, edges_per_vertex=16, metric=Metric.FP32_L2)
+    graph = deglib.build(data, edges_per_vertex=16, metric=Metric.FP32_L2, optimize=False)
     searcher = create_searcher(graph)
 
     query = data[0]
@@ -63,23 +63,21 @@ def test_searcher_quantized_int8_with_rerank():
     data = np.random.randn(n, dim).astype(np.float32)
 
     # 1. Base graph in FP32
-    graph = deglib.builder.build_from_data(data, edges_per_vertex=16, metric=Metric.FP32_L2)
+    graph = deglib.build(data, edges_per_vertex=16, metric=Metric.FP32_L2, optimize=False)
 
     # 2. INT8 Quantization
     quantizer = deglib.transformation.make_scalar_quantizer_int8(data)
-    int8_data = quantizer.quantize(data)
-    target_space = FloatSpace.create(dim=dim, metric=Metric.Int8_L2)
-    ro_graph = graph.to_readonly(target_space, int8_data, transformations=[quantizer])
+    int8_data = quantizer.transform_database(data)
+    ro_graph = graph.to_readonly(Metric.Int8_L2, int8_data, transformations=[quantizer])
 
     # 3. Refine features in FP16 with calibrated ScalarQuantizerFP16
     fp16_quantizer = deglib.transformation.make_scalar_quantizer_fp16(data)
-    base_fp16 = fp16_quantizer.quantize(data)
-    rerank_space = FloatSpace.create(dim=dim, metric=Metric.FP16_L2)
+    base_fp16 = fp16_quantizer.transform_database(data)
 
     # 4. Create Searcher
     searcher = create_searcher(
         graph=ro_graph,
-        rerank_space=rerank_space,
+        rerank_metric=Metric.FP16_L2,
         rerank_data=base_fp16,
         rerank_transformations=[fp16_quantizer],
     )
@@ -109,11 +107,10 @@ def test_searcher_quantized_int8_optimize_without_reranker():
     n = 200
     data = np.random.randn(n, dim).astype(np.float32)
 
-    graph = deglib.builder.build_from_data(data, edges_per_vertex=16, metric=Metric.FP32_L2)
+    graph = deglib.build(data, edges_per_vertex=16, metric=Metric.FP32_L2, optimize=False)
     quantizer = deglib.transformation.make_scalar_quantizer_int8(data)
-    int8_data = quantizer.quantize(data)
-    target_space = FloatSpace.create(dim=dim, metric=Metric.Int8_L2)
-    ro_graph = graph.to_readonly(target_space, int8_data, transformations=[quantizer])
+    int8_data = quantizer.transform_database(data)
+    ro_graph = graph.to_readonly(Metric.Int8_L2, int8_data, transformations=[quantizer])
 
     searcher = create_searcher(graph=ro_graph)
     searcher.optimize(n_clusters=16, n_iter=3, sample_size=0)
@@ -130,16 +127,15 @@ def test_searcher_quantized_uint8_with_rerank():
     n = 200
     data = np.random.uniform(0.0, 10.0, size=(n, dim)).astype(np.float32)
 
-    graph = deglib.builder.build_from_data(data, edges_per_vertex=16, metric=Metric.FP32_L2)
+    graph = deglib.build(data, edges_per_vertex=16, metric=Metric.FP32_L2, optimize=False)
 
     quantizer = deglib.transformation.make_scalar_quantizer_uint8(data)
-    uint8_data = quantizer.quantize(data)
-    target_space = FloatSpace.create(dim=dim, metric=Metric.Uint8_L2)
-    ro_graph = graph.to_readonly(target_space, uint8_data, transformations=[quantizer])
+    uint8_data = quantizer.transform_database(data)
+    ro_graph = graph.to_readonly(Metric.Uint8_L2, uint8_data, transformations=[quantizer])
 
     searcher = create_searcher(
         graph=ro_graph,
-        rerank_space=FloatSpace.create(dim=dim, metric=Metric.FP32_L2),
+        rerank_metric=Metric.FP32_L2,
         rerank_data=data,
     )
 
@@ -161,18 +157,16 @@ def test_searcher_evp_quantizer():
     # L2 normalize for MIPS / InnerProduct
     data = data / np.linalg.norm(data, axis=1, keepdims=True)
 
-    graph = deglib.builder.build_from_data(data, edges_per_vertex=16, metric=Metric.FP32_InnerProduct)
+    graph = deglib.build(data, edges_per_vertex=16, metric=Metric.FP32_InnerProduct, optimize=False)
 
     # 16 non-zeros for EVP, shared by database and query quantization
-    quantizer = deglib.transformation.EvpQuantizer(dim, non_zeros=16)
-    quantizer.fit(data)
-    evp_data = quantizer.quantize(data)
-    target_space = FloatSpace.create(dim=dim, metric=Metric.EVP_InnerProduct)
-    ro_graph = graph.to_readonly(target_space, evp_data, transformations=[quantizer])
+    quantizer = deglib.transformation.make_evp_quantizer(data, non_zeros=16)
+    evp_data = quantizer.transform_database(data)
+    ro_graph = graph.to_readonly(Metric.EVP_InnerProduct, evp_data, transformations=[quantizer])
 
     searcher = create_searcher(
         graph=ro_graph,
-        rerank_space=FloatSpace.create(dim=dim, metric=Metric.FP32_InnerProduct),
+        rerank_metric=Metric.FP32_InnerProduct,
         rerank_data=data,
     )
 
@@ -195,12 +189,11 @@ def test_searcher_quantized_without_reranker():
     n = 100
     data = np.random.uniform(-1.0, 1.0, size=(n, dim)).astype(np.float32)
 
-    graph = deglib.builder.build_from_data(data, edges_per_vertex=16, metric=Metric.FP32_L2)
+    graph = deglib.build(data, edges_per_vertex=16, metric=Metric.FP32_L2, optimize=False)
 
     quantizer = deglib.transformation.make_scalar_quantizer_int8(data)
-    int8_data = quantizer.quantize(data)
-    target_space = FloatSpace.create(dim=dim, metric=Metric.Int8_L2)
-    ro_graph = graph.to_readonly(target_space, int8_data, transformations=[quantizer])
+    int8_data = quantizer.transform_database(data)
+    ro_graph = graph.to_readonly(Metric.Int8_L2, int8_data, transformations=[quantizer])
 
     searcher = create_searcher(graph=ro_graph)
     query = data[5]
@@ -217,7 +210,7 @@ def test_searcher_optimize_sets_kmeans_entries():
     data = data / np.linalg.norm(data, axis=1, keepdims=True)
     labels = np.random.permutation(n).astype(np.uint32)
 
-    graph = deglib.builder.build_from_data(data, labels=labels, edges_per_vertex=16, metric=Metric.FP32_InnerProduct)
+    graph = deglib.build(data, labels=labels, edges_per_vertex=16, metric=Metric.FP32_InnerProduct, optimize=False)
     searcher = create_searcher(graph)
 
     searcher.optimize(n_clusters=8, n_iter=5, sample_size=100)
@@ -233,7 +226,7 @@ def test_searcher_eps_or_ef_dual_modes():
     n = 100
     data = np.random.randn(n, dim).astype(np.float32)
 
-    graph = deglib.builder.build_from_data(data, edges_per_vertex=16, metric=Metric.FP32_L2)
+    graph = deglib.build(data, edges_per_vertex=16, metric=Metric.FP32_L2, optimize=False)
     searcher = create_searcher(graph)
 
     query = data[0]
@@ -271,25 +264,37 @@ def test_searcher_rerank_insertion_order_with_permuted_labels():
 
     # insertion slot j -> feature data[j], external label perm[j]
     perm = np.random.permutation(n).astype(np.uint32)
-    graph = deglib.builder.build_from_data(
-        data, labels=perm, edges_per_vertex=24, metric=Metric.FP32_InnerProduct, seed=7
+    graph = deglib.build(
+        data, labels=perm, edges_per_vertex=24, metric=Metric.FP32_InnerProduct, seed=7, optimize=False
     )
 
-    # rerank_data in insertion order: row k = the k-th vector given to the builder (= data[k])
+    # 1. Explicit rerank_order="internal" with insertion-ordered vectors
     fp16_quantizer = deglib.transformation.make_scalar_quantizer_fp16(data)
-    rerank_data = np.ascontiguousarray(fp16_quantizer.quantize(data))
+    rerank_data_internal = np.ascontiguousarray(fp16_quantizer.transform_database(data))
 
     searcher = create_searcher(
         graph=graph,
-        rerank_space=FloatSpace.create(dim=dim, metric=Metric.FP16_InnerProduct),
-        rerank_data=rerank_data,
+        rerank_metric=Metric.FP16_InnerProduct,
+        rerank_data=rerank_data_internal,
+        rerank_order="internal",
         rerank_transformations=[fp16_quantizer],
     )
 
     for j in (0, 5, 17, 99):
-        # feature data[j] sits at internal slot j with external label perm[j]
         res = searcher.search(data[j], k=5, eps_or_ef=128, rerank_factor=1.5)
         assert int(perm[j]) in set(int(x) for x in res)
+        assert res[0] == perm[j]
+
+    # 2. Default rerank_order="label" with vectors indexed by external label (rerank_data[perm[j]] = data[j])
+    rerank_data_by_label = np.empty_like(data)
+    rerank_data_by_label[perm] = data
+    searcher_label = graph.to_searcher(
+        metric=Metric.Uint8_L2,
+        rerank_metric=Metric.FP16_InnerProduct,
+        rerank_data=rerank_data_by_label,
+    )
+    for j in (0, 5, 17, 99):
+        res = searcher_label.search(data[j], k=5, eps_or_ef=128, rerank_factor=1.5)
         assert res[0] == perm[j]
 
 
@@ -301,7 +306,7 @@ def test_searcher_normalize_query():
     data = (np.random.randn(n, dim) * 5.0).astype(np.float32)
     # Base graph uses normalized vectors with InnerProduct metric
     norm_data = data / np.linalg.norm(data, axis=1, keepdims=True)
-    graph = deglib.builder.build_from_data(norm_data, edges_per_vertex=16, metric=Metric.FP32_InnerProduct)
+    graph = deglib.build(norm_data, edges_per_vertex=16, metric=Metric.FP32_InnerProduct, optimize=False)
 
     # Searcher with normalize_query=True
     searcher = create_searcher(graph, normalize_query=True)
@@ -332,7 +337,7 @@ def test_searcher_single_query_small_ef_exact_sizing():
     dim = 8
     n = 100
     data = np.random.randn(n, dim).astype(np.float32)
-    graph = deglib.builder.build_from_data(data, edges_per_vertex=8, metric=Metric.FP32_L2)
+    graph = deglib.build(data, edges_per_vertex=8, metric=Metric.FP32_L2, optimize=False)
     searcher = create_searcher(graph)
 
     # Ask for k=50 with small ef=4 (graph explore may expand fewer than 50 elements)
@@ -355,7 +360,7 @@ def test_searcher_max_distance_computation_count():
     dim = 8
     n = 200
     data = np.random.randn(n, dim).astype(np.float32)
-    graph = deglib.builder.build_from_data(data, edges_per_vertex=16, metric=Metric.FP32_L2)
+    graph = deglib.build(data, edges_per_vertex=16, metric=Metric.FP32_L2, optimize=False)
     searcher = create_searcher(graph)
 
     # Unlimited (0) returns full k=10 and exact match 0
@@ -377,3 +382,52 @@ def test_searcher_max_distance_computation_count():
     assert np.array_equal(batch_bounded[0, : len(res_bounded_ef)], res_bounded_ef)
     assert not np.array_equal(batch_bounded[0, :5], batch_full[0, :5])
 
+
+def test_to_searcher_self_extraction_rerank_and_validation():
+    """graph.to_searcher extracts & quantizes rerank data from an FP32 graph when rerank_data=None."""
+    rng = np.random.default_rng(12)
+    data = rng.normal(size=(120, 32)).astype(np.float32)
+    data /= np.linalg.norm(data, axis=1, keepdims=True)
+
+    fp32_graph = deglib.build(data, edges_per_vertex=16, extend_k=32, metric=Metric.FP32_L2, optimize=False)
+
+    # Self-extraction prior to Uint8_L2 graph quantization
+    searcher = fp32_graph.to_searcher(
+        metric=Metric.Uint8_L2,
+        rerank_metric=Metric.FP16_InnerProduct,
+        rerank_data=None,
+        optimize=False,
+    )
+    assert searcher.graph.get_metric() == Metric.Uint8_L2
+    res = searcher.search(data[7], k=5, eps_or_ef=32, rerank_factor=2.0)
+    assert int(res[0]) == 7
+
+    # rerank_metric=None with rerank_data supplied must raise ValueError
+    with pytest.raises(ValueError, match="rerank_metric"):
+        fp32_graph.to_searcher(rerank_data=data, rerank_metric=None)
+
+
+def test_searcher_unsorted_and_return_distances():
+    """Verify return_distances=False/True and unsorted=True on single & batch Searcher calls."""
+    rng = np.random.default_rng(99)
+    data = rng.normal(size=(80, 16)).astype(np.float32)
+    graph = deglib.build(data, edges_per_vertex=16, metric=Metric.FP32_L2, optimize=False)
+    searcher = graph.to_searcher(optimize=False)
+
+    sorted_idx, sorted_dist = searcher.search(data[0], k=5, eps_or_ef=32, return_distances=True, unsorted=False)
+    assert np.all(np.diff(sorted_dist) >= -1e-6)
+
+    unsorted_only = searcher.search(data[0], k=5, eps_or_ef=32, return_distances=False, unsorted=True)
+    assert isinstance(unsorted_only, np.ndarray)
+    assert unsorted_only.shape == (5,)
+    assert set(unsorted_only.tolist()) == set(sorted_idx.tolist())
+
+    unsorted_idx, unsorted_dist = searcher.search(data[0], k=5, eps_or_ef=32, return_distances=True, unsorted=True)
+    assert unsorted_idx.shape == (5,)
+    assert unsorted_dist.shape == (5,)
+    assert set(unsorted_idx.tolist()) == set(sorted_idx.tolist())
+
+    batch_only = searcher.search(data[:4], k=5, eps_or_ef=32, threads=2, return_distances=False, unsorted=True)
+    assert isinstance(batch_only, np.ndarray)
+    assert batch_only.shape == (4, 5)
+    assert set(batch_only[0].tolist()) == set(sorted_idx.tolist())

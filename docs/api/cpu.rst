@@ -48,11 +48,7 @@ Example Usage
    print("AVX-512 supported:", deglib.cpu.has_avx512())
    print("FP16 supported:", deglib.cpu.has_fp16())
 
-   # Create a FloatSpace with automatic CPU instruction set selection
-   space = deglib.FloatSpace.create(
-       dim=128,
-       metric=deglib.Metric.FP32_L2,
-       instruction=deglib.cpu.InstructionSet.Auto,
-   )
-   print("Active instruction set:", space.get_instruction())
+   # Bind a Metric to an instruction set (default Auto picks the best SIMD ISA)
+   metric = deglib.Metric.FP32_L2.with_instruction(deglib.cpu.InstructionSet.Auto)
+   print("Active instruction set:", metric.get_instruction())
 

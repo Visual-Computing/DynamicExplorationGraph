@@ -57,17 +57,12 @@ High-Performance Searcher with Reranking
    query = np.random.randn(dim).astype(np.float32)
 
    # Build base graph
-   graph = deglib.builder.build_from_data(data, metric=deglib.Metric.FP32_L2)
+   graph = deglib.build(data, metric=deglib.Metric.FP32_L2)
 
-   # Quantize to INT8 directly into a compact ReadOnlyGraph (in-place self-transformation)
-   pipeline = deglib.transformation.make_quantizer_pipeline(data, deglib.Metric.Int8_L2)
-   ro_graph = graph.to_readonly(transformations=pipeline)
-
-   # Deploy with Searcher (query is automatically quantized, top candidates reranked on FP32 data)
-   searcher = deglib.create_searcher(
-       graph=ro_graph,
-       rerank_space=deglib.FloatSpace.create(dim, deglib.Metric.FP32_L2),
-       rerank_data=data,
+   # Convert to INT8 ReadOnlyGraph and attach FP32 reranker extracted from the FP32 graph
+   searcher = graph.to_searcher(
+       metric=deglib.Metric.Int8_L2,
+       rerank_metric=deglib.Metric.FP32_L2,
    )
 
    # Single query using relative margin (eps_or_ef < 1.0)
@@ -92,7 +87,7 @@ Filtered Search
 
    # Create sample data and build a graph
    data = np.random.randn(1000, 64).astype(np.float32)
-   graph = deglib.builder.build_from_data(data)
+   graph = deglib.build(data)
 
    # Restrict search results to a specific subset of labels
    valid_labels = np.array([0, 5, 12, 42, 99], dtype=np.int32)
@@ -116,14 +111,13 @@ Two-Stage Re-Ranking
    num_queries = 10
    num_candidates = 50
 
-   space = deglib.FloatSpace.create(dim=dim, metric=deglib.Metric.FP32_L2)
    queries = np.random.randn(num_queries, dim).astype(np.float32)
    candidate_pool = np.random.randint(0, 10000, size=(num_queries, num_candidates), dtype=np.uint32)
    dataset = np.random.randn(10000, dim).astype(np.float32)
 
    # Exact re-ranking of top 10 best candidates per query
    top_indices, top_distances = deglib.search.rerank(
-       space=space,
+       metric=deglib.Metric.FP32_L2,
        queries=queries,
        candidate_indices=candidate_pool,
        base_vectors=dataset,

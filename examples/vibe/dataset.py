@@ -8,7 +8,7 @@ import h5py
 import numpy as np
 from tqdm import tqdm
 
-from deglib.distances import Metric, FloatSpace
+from deglib.distances import Metric
 
 # Base URL for VIBE dataset downloads on Hugging Face
 HF_VIBE_BASE_URL = "https://huggingface.co/datasets/vector-index-bench/vibe/resolve/main"

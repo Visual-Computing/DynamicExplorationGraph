@@ -193,7 +193,7 @@ class DEG(BaseANN):
                 sorted_indices = np.load(str(presort_file))
             else:
                 print(f"Running FLAS 1D Pre-sorting (threads={self.threads})...", flush=True)
-                sorted_indices = deglib.optimization.presort(
+                sorted_indices = deglib.presort(
                     X,
                     metric=self.build_metric,
                     threads=self.threads,
@@ -204,29 +204,29 @@ class DEG(BaseANN):
 
             # 2. Build graph in FP32
             print(f"Building DEG graph (K={self.k}, Opt={self.opt_target}, threads={self.threads})...", flush=True)
-            graph = deglib.builder.build_from_data(
-                data=X[sorted_indices],
-                labels=sorted_indices,
+            graph = deglib.build(
+                X,
+                presort=sorted_indices,
                 edges_per_vertex=self.k,
                 metric=self.build_metric,
                 seed=7,
                 optimization_target=self.opt_enum,
-                thread_count=self.threads,
+                optimize=False,
+                threads=self.threads,
                 show_progress=True,
             )
 
             print(f"Saving graph to cache {cache_file}...", flush=True)
             graph.save_graph(str(cache_file))
 
-        self.graph = graph.to_readonly() if graph.is_mutable() else graph
-        self.searcher = deglib.search.create_searcher(
-            graph=self.graph,
-            normalize_query=(self.metric == "cosine"),
-        )
-
-        # 4s. Optimize entry vertices and prefetch values
+        # 3. Convert to Searcher and optimize entry vertices and prefetch values
         t_km = time.time()
-        self.searcher.optimize()
+        self.searcher = graph.to_searcher(
+            normalize_query=(self.metric == "cosine"),
+            optimize=True,
+            threads=self.threads,
+        )
+        self.graph = self.searcher.graph
         print(f"Optimized Searcher for the provided graph and hardware in {time.time() - t_km:.2f}s", flush=True)
 
     def set_query_arguments(self, eps_or_ef: float):
@@ -299,13 +299,11 @@ class QG(BaseANN):
         self.searcher = None
 
     def fit(self, X: np.ndarray, cache_dir: Path | None = None):
-        """Builds DEG graph, quantizes vectors using make_quantizer_pipeline, and prepares C++ searcher."""
+        """Builds DEG graph, quantizes vectors automatically, and prepares C++ searcher with FP16 reranking."""
         if self.metric == "cosine":
             X = X / np.linalg.norm(X, axis=1)[:, np.newaxis]
         X = np.ascontiguousarray(X, dtype=np.float32)
         n_vectors, dims = X.shape
-
-        rerank_space_fp16 = deglib.FloatSpace.create(dim=dims, metric=self.rerank_metric)
 
         cache_file = _resolve_graph_cache_path(
             metric=self.metric,
@@ -326,8 +324,6 @@ class QG(BaseANN):
         if cache_file.exists():
             print(f"Loading cached DEG graph from {cache_file}...", flush=True)
             loaded_graph = deglib.load_readonly_graph(str(cache_file))
-            # Cache: Reconstruct graph-ordered features from original un-permuted X using saved labels
-            X_graph_order = X[loaded_graph.get_labels()]
         else:
             # 1. FLAS 1D Pre-sorting
             if presort_file.exists():
@@ -335,7 +331,7 @@ class QG(BaseANN):
                 sorted_indices = np.load(str(presort_file))
             else:
                 print(f"Running FLAS 1D Pre-sorting (threads={self.threads})...", flush=True)
-                sorted_indices = deglib.optimization.presort(
+                sorted_indices = deglib.presort(
                     X,
                     metric=self.build_metric,
                     threads=self.threads,
@@ -344,57 +340,40 @@ class QG(BaseANN):
                 print(f"Saving presort to cache {presort_file}...", flush=True)
                 np.save(str(presort_file), sorted_indices)
 
-            # Standard static workflow: sort data once so builder, quantizer, and reranker all share the same array
-            X_graph_order = X[sorted_indices]
-
             # 2. Build graph in FP32
             print(
                 f"Building DEG graph (K={self.k}, Opt={self.opt_target}, threads={self.threads})...",
                 flush=True,
             )
-            graph = deglib.builder.build_from_data(
-                data=X_graph_order,
-                labels=sorted_indices,
+            loaded_graph = deglib.build(
+                X,
+                presort=sorted_indices,
                 edges_per_vertex=self.k,
                 metric=self.build_metric,
                 seed=7,
                 optimization_target=self.opt_enum,
-                thread_count=self.threads,
+                optimize=False,
+                threads=self.threads,
                 show_progress=True,
             )
 
             print(f"Saving graph to cache {cache_file}...", flush=True)
-            graph.save_graph(str(cache_file))
-            loaded_graph = graph
+            loaded_graph.save_graph(str(cache_file))
 
-        # 3. Finalize ReadOnlyGraph with calibrated quantizer pipeline (self-transforms directly into graph memory)
-        target_space = deglib.FloatSpace.create(dim=dims, metric=self.quant_metric)
-        transformations = deglib.transformation.make_quantizer_pipeline(
-            X,
-            self.quant_metric,
-            num_threads=self.threads,
-        )
-
-        # Convert the FP32 graph into a readonly graph, quantizing directly from its stored FP32 features
-        self.graph = loaded_graph.to_readonly(
-            target_space, transformations=transformations, num_threads=self.threads
-        )
-
-        # 5. Initialize a Searcher with FP16 Reranker & ScalarQuantizerFP16
-        rerank_quantizer = deglib.transformation.make_scalar_quantizer_fp16(X)
-        rerank_features = rerank_quantizer.quantize(X_graph_order, num_threads=self.threads)
-
-        self.searcher = deglib.search.create_searcher(
-            graph=self.graph,
-            rerank_space=rerank_space_fp16,
-            rerank_data=rerank_features,
-            rerank_transformations=[rerank_quantizer],
-            normalize_query=(self.metric == "cosine"),
-        )
-
-        # 6. Full searcher optimization
+        # 3. Quantize, attach FP16 reranker, and optimize searcher in one call
         t_km = time.time()
-        self.searcher.optimize(use_routing=True, n_clusters=256, num_threads=self.threads)
+        self.searcher = loaded_graph.to_searcher(
+            metric=self.quant_metric,
+            rerank_metric=self.rerank_metric,
+            rerank_data=X,
+            rerank_order="label",
+            normalize_query=(self.metric == "cosine"),
+            optimize=True,
+            use_routing=True,
+            n_clusters=256,
+            threads=self.threads,
+        )
+        self.graph = self.searcher.graph
         print(f"Optimized Searcher for the provided graph and hardware in {time.time() - t_km:.2f}s", flush=True)
 
     def set_query_arguments(self, eps_or_ef: float, rerank_size_factor: float = 1.0):

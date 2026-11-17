@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 import deglib
-from deglib.distances import FloatSpace, Metric
+from deglib.distances import Metric
 from deglib.search import Filter
 
 IS_MACOS_M1 = platform.system() == "Darwin" and platform.machine() == "arm64"
@@ -25,21 +25,22 @@ def get_ranking(features: np.ndarray, graph: deglib.DynamicExplorationGraph, que
     """
     Returns the ranking for each feature vector in the graph
     """
-    query = query.reshape(1, graph.get_feature_space().dim())
+    query = query.reshape(1, graph.get_dim())
 
     if features.dtype in (np.uint8, np.int8):
         features = features.astype(np.float32)
     if query.dtype in (np.uint8, np.int8):
         query = query.astype(np.float32)
 
-    if graph.get_feature_space().metric() in (Metric.FP32_L2, Metric.Uint8_L2, Metric.Int8_L2):
+    metric = graph.get_metric()
+    if metric in (Metric.FP32_L2, Metric.Uint8_L2, Metric.Int8_L2):
         distances = np.sum(np.square(features - query), axis=1)
-    elif graph.get_feature_space().metric() == Metric.FP32_InnerProduct:
+    elif metric == Metric.FP32_InnerProduct:
         distances = 1.0 - np.dot(features, query.T).flatten()
-    elif graph.get_feature_space().metric() in (Metric.Uint8_InnerProduct, Metric.Int8_InnerProduct):
+    elif metric in (Metric.Uint8_InnerProduct, Metric.Int8_InnerProduct):
         distances = -np.dot(features, query.T).flatten()
     else:
-        raise ValueError(f"unknown metric: {graph.get_feature_space().metric()}")
+        raise ValueError(f"unknown metric: {metric}")
     return np.argsort(distances)
 
 
@@ -89,7 +90,7 @@ class Configuration:
         else:
             raise ValueError(f"Unsupported metric: {metric}")
 
-        size_bounded_graph = deglib.build_from_data(
+        size_bounded_graph = deglib.build(
             data,
             edges_per_vertex=edges_per_vertex,
             metric=metric,
@@ -109,7 +110,7 @@ class Configuration:
         ]
 
     def create_new_size_bounded_graph(self):
-        return deglib.build_from_data(self.data, edges_per_vertex=self.edges_per_vertex, metric=self.metric)
+        return deglib.build(self.data, edges_per_vertex=self.edges_per_vertex, metric=self.metric)
 
     def __repr__(self):
         return f"Conf({type(self.graph).__name__}, metric={self.metric.name})"
@@ -324,7 +325,7 @@ def _build_test_graph_with_distinct_labels(samples=50, dims=16, edges_per_vertex
     """Build a graph with external labels that differ from internal indices."""
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
     labels = np.arange(samples, dtype=np.uint32) * 10
-    graph = deglib.build_from_data(
+    graph = deglib.build(
         data,
         labels=labels,
         edges_per_vertex=edges_per_vertex,
@@ -559,26 +560,24 @@ def test_facade_search_unsorted():
 
 
 def test_to_readonly_custom_features():
-    """to_readonly with custom feature space and FP16 custom feature buffer."""
+    """to_readonly with custom metric and FP16 custom feature buffer."""
     N, d = 20, 16
     data = np.random.randn(N, d).astype(np.float32)
 
     # Build FP32 L2 graph
-    fs_fp32 = FloatSpace.create(d, Metric.FP32_L2)
-    g = deglib.create_empty(N, fs_fp32, edges_per_vertex=4)
+    g = deglib.create_empty(N, d, edges_per_vertex=4, metric=Metric.FP32_L2)
     builder = deglib.GraphBuilder(g, extend_k=10, extend_eps=0.2)
     builder.add_entry(range(N), data)
     builder.build()
 
     # Convert features to FP16
     fp16_data = deglib.distances.floats_to_fp16(data)
-    fs_fp16 = FloatSpace.create(d, Metric.FP16_InnerProduct)
 
     # Swap to FP16 ReadOnlyGraph
-    ro_g = g.to_readonly(feature_space=fs_fp16, custom_features=fp16_data)
+    ro_g = g.to_readonly(metric=Metric.FP16_InnerProduct, custom_features=fp16_data)
     assert ro_g.size() == N
     assert not ro_g.is_mutable()
-    assert ro_g.get_feature_space().metric() == Metric.FP16_InnerProduct
+    assert ro_g.get_metric() == Metric.FP16_InnerProduct
 
     # Search on FP16 ReadOnlyGraph
     query_fp16 = deglib.distances.floats_to_fp16(data[0:2])
@@ -588,27 +587,25 @@ def test_to_readonly_custom_features():
 
 
 def test_to_readonly_swap_fp16_l2():
-    """Test swapping a mutable graph's feature space to FP16 L2 ReadOnlyGraph."""
+    """Test swapping a mutable graph's metric to FP16 L2 ReadOnlyGraph."""
     rng = np.random.default_rng(42)
     N, d = 20, 8
     data = rng.standard_normal((N, d)).astype(np.float32)
 
     # Build FP32 L2 graph
-    fs_fp32 = FloatSpace.create(d, Metric.FP32_L2)
-    g = deglib.create_empty(N, fs_fp32, edges_per_vertex=4)
+    g = deglib.create_empty(N, d, edges_per_vertex=4, metric=Metric.FP32_L2)
     builder = deglib.GraphBuilder(g, extend_k=10, extend_eps=0.2)
     builder.add_entry(range(N), data)
     builder.build()
 
     # Convert features to FP16
     fp16_data = deglib.distances.floats_to_fp16(data)
-    fs_fp16 = FloatSpace.create(d, Metric.FP16_L2)
 
     # Swap to FP16 L2 ReadOnlyGraph
-    ro_g = g.to_readonly(feature_space=fs_fp16, custom_features=fp16_data)
+    ro_g = g.to_readonly(metric=Metric.FP16_L2, custom_features=fp16_data)
     assert ro_g.size() == N
     assert not ro_g.is_mutable()
-    assert ro_g.get_feature_space().metric() == Metric.FP16_L2
+    assert ro_g.get_metric() == Metric.FP16_L2
 
     # Search on FP16 ReadOnlyGraph
     query_fp16 = deglib.distances.floats_to_fp16(data[0:2])
@@ -620,15 +617,14 @@ def test_to_readonly_swap_fp16_l2():
 
 
 def test_create_random_graph_fp32():
-    """Test DynamicExplorationGraph.create_random_graph with FP32 L2 data."""
+    """Test create_random_graph with FP32 L2 data."""
     samples = 100
     dims = 8
     edges_per_vertex = 10
 
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
-    feature_space = FloatSpace.create(dims, Metric.FP32_L2)
 
-    graph = deglib.create_random_graph(data, feature_space, edges_per_vertex=edges_per_vertex, seed=7)
+    graph = deglib.create_random_graph(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2, seed=7)
 
     assert graph.size() == samples
     assert graph.get_edges_per_vertex() == edges_per_vertex
@@ -646,8 +642,7 @@ def test_graph_optimize_preserves_search_results():
     samples = 200
     dims = 8
     data = np.random.default_rng(1).standard_normal((samples, dims)).astype(np.float32)
-    feature_space = FloatSpace.create(dims, Metric.FP32_L2)
-    graph = deglib.create_random_graph(data, feature_space, edges_per_vertex=16, seed=7)
+    graph = deglib.create_random_graph(data, edges_per_vertex=16, metric=Metric.FP32_L2, seed=7)
 
     query = data[0:1]
     before, _ = graph.search(query, eps_or_ef=0.1, k=5)
@@ -664,15 +659,14 @@ def test_graph_optimize_preserves_search_results():
 
 
 def test_create_random_graph_uint8():
-    """Test DynamicExplorationGraph.create_random_graph with Uint8 L2 data."""
+    """Test create_random_graph with Uint8 L2 data."""
     samples = 50
     dims = 16
     edges_per_vertex = 8
 
     data = np.random.default_rng(42).integers(0, 256, size=(samples, dims), dtype=np.uint8)
-    feature_space = FloatSpace.create(dims, Metric.Uint8_L2)
 
-    graph = deglib.create_random_graph(data, feature_space, edges_per_vertex=edges_per_vertex, seed=42)
+    graph = deglib.create_random_graph(data, edges_per_vertex=edges_per_vertex, metric=Metric.Uint8_L2, seed=42)
 
     assert graph.size() == samples
     assert graph.get_edges_per_vertex() == edges_per_vertex
@@ -685,10 +679,9 @@ def test_create_random_graph_deterministic():
     edges_per_vertex = 6
 
     data = np.random.default_rng(99).standard_normal((samples, dims)).astype(np.float32)
-    feature_space = FloatSpace.create(dims, Metric.FP32_L2)
 
-    graph1 = deglib.create_random_graph(data, feature_space, edges_per_vertex=edges_per_vertex, seed=123)
-    graph2 = deglib.create_random_graph(data, feature_space, edges_per_vertex=edges_per_vertex, seed=123)
+    graph1 = deglib.create_random_graph(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2, seed=123)
+    graph2 = deglib.create_random_graph(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2, seed=123)
 
     assert graph1.size() == graph2.size()
     for v in range(samples):
@@ -705,8 +698,7 @@ def test_create_random_graph_inner_product():
     # Normalize for inner product
     data = data / np.linalg.norm(data, axis=1, keepdims=True)
 
-    feature_space = FloatSpace.create(dims, Metric.FP32_InnerProduct)
-    graph = deglib.create_random_graph(data, feature_space, edges_per_vertex=edges_per_vertex, seed=7)
+    graph = deglib.create_random_graph(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_InnerProduct, seed=7)
 
     assert graph.size() == samples
     assert graph.get_edges_per_vertex() == edges_per_vertex
@@ -719,9 +711,8 @@ def test_create_random_graph_explore():
     edges_per_vertex = 10
 
     data = np.random.default_rng(55).standard_normal((samples, dims)).astype(np.float32)
-    feature_space = FloatSpace.create(dims, Metric.FP32_L2)
 
-    graph = deglib.create_random_graph(data, feature_space, edges_per_vertex=edges_per_vertex, seed=7)
+    graph = deglib.create_random_graph(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2, seed=7)
 
     # Explore from vertex 0
     indices, distances = graph.explore(0, k=5, max_distance_computation_count=50)
@@ -740,10 +731,9 @@ def test_sizebounded_graph_from_graph():
     edges_per_vertex = 10
 
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
-    feature_space = FloatSpace.create(dims, Metric.FP32_L2)
 
     # Build a mutable graph, then convert to readonly
-    graph = deglib.build_from_data(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
+    graph = deglib.build(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
     readonly_graph = graph.to_readonly()
     assert not readonly_graph.is_mutable()
 
@@ -767,15 +757,14 @@ def test_sizebounded_graph_from_graph_custom_features():
     edges_per_vertex = 6
 
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
-    feature_space = FloatSpace.create(dims, Metric.FP32_L2)
 
-    graph = deglib.build_from_data(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
+    graph = deglib.build(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
 
     # Create scaled custom features
     custom_features = data * 10.0
 
     # Convert to mutable with custom features
-    mutable_graph = graph.to_mutable(feature_space=feature_space, custom_features=custom_features)
+    mutable_graph = graph.to_mutable(metric=Metric.FP32_L2, custom_features=custom_features)
     assert mutable_graph.is_mutable()
     assert mutable_graph.size() == samples
 
@@ -787,7 +776,7 @@ def test_sizebounded_graph_from_graph_custom_features():
 
 
 def test_graph_get_labels_and_custom_features_with_permuted_labels():
-    """Verify get_labels() returns internal index order and custom_features respects internal order."""
+    """Verify get_labels() returns internal index order and custom_features respects custom_features_order."""
     samples = 30
     dims = 8
     rng = np.random.default_rng(123)
@@ -795,7 +784,7 @@ def test_graph_get_labels_and_custom_features_with_permuted_labels():
     # Non-trivial external labels (large values, permuted)
     external_labels = (rng.permutation(samples) * 100 + 7).astype(np.uint32)
 
-    graph = deglib.build_from_data(data, labels=external_labels, edges_per_vertex=4, metric=Metric.FP32_L2, seed=42)
+    graph = deglib.build(data, labels=external_labels, edges_per_vertex=4, metric=Metric.FP32_L2, seed=42)
 
     labels_in_order = graph.get_labels()
     assert len(labels_in_order) == samples
@@ -806,26 +795,45 @@ def test_graph_get_labels_and_custom_features_with_permuted_labels():
     scaled_data = data * 2.0
     # Provide custom_features in internal order
     readonly_graph = graph.to_readonly(
-        feature_space=FloatSpace.create(dims, Metric.FP32_L2),
+        metric=Metric.FP32_L2,
         custom_features=scaled_data,
+        custom_features_order="internal",
     )
     assert readonly_graph.size() == samples
     np.testing.assert_array_equal(readonly_graph.get_labels(), external_labels)
 
+    # Provide custom_features in label order (dense 0..samples-1 permuted labels)
+    dense_labels = rng.permutation(samples).astype(np.uint32)
+    dense_graph = deglib.build(
+        data[dense_labels],
+        labels=dense_labels,
+        edges_per_vertex=4,
+        metric=Metric.FP32_L2,
+        seed=42,
+    )
+    ro_label_order = dense_graph.to_readonly(
+        metric=Metric.FP32_L2,
+        custom_features=data * 2.0,
+        custom_features_order="label",
+    )
+    q = data[dense_labels[0]] * 2.0
+    idx, dist = ro_label_order.search(q, eps_or_ef=30.0, k=1)
+    assert int(idx[0]) == int(dense_labels[0])
+    assert np.isclose(dist[0], 0.0, atol=1e-5)
+
 
 def test_sizebounded_graph_from_graph_capacity():
-    """Test to_mutable() with new_max_size (capacity) parameter."""
+    """Test to_mutable() with capacity parameter."""
     samples = 20
     dims = 4
     edges_per_vertex = 4
 
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
-    feature_space = FloatSpace.create(dims, Metric.FP32_L2)
 
-    graph = deglib.build_from_data(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
+    graph = deglib.build(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
 
     # Convert to mutable with larger capacity
-    mutable_graph = graph.to_mutable(feature_space=feature_space, capacity=100)
+    mutable_graph = graph.to_mutable(metric=Metric.FP32_L2, capacity=100)
     assert mutable_graph.is_mutable()
     assert mutable_graph.size() == samples
 
@@ -844,9 +852,8 @@ def test_sizebounded_graph_from_graph_search_matches():
     edges_per_vertex = 10
 
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
-    feature_space = FloatSpace.create(dims, Metric.FP32_L2)
 
-    graph = deglib.build_from_data(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
+    graph = deglib.build(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
     readonly_graph = graph.to_readonly()
     mutable_graph = readonly_graph.to_mutable()
 
@@ -867,14 +874,13 @@ def test_sizebounded_graph_from_graph_inner_product():
 
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
     data = data / np.linalg.norm(data, axis=1, keepdims=True)
-    feature_space = FloatSpace.create(dims, Metric.FP32_InnerProduct)
 
-    graph = deglib.build_from_data(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_InnerProduct)
+    graph = deglib.build(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_InnerProduct)
     mutable_graph = graph.to_mutable()
 
     assert mutable_graph.is_mutable()
     assert mutable_graph.size() == samples
-    assert mutable_graph.get_feature_space().metric() == Metric.FP32_InnerProduct
+    assert mutable_graph.get_metric() == Metric.FP32_InnerProduct
 
     # Search should work
     query = data[0:1]
@@ -890,10 +896,9 @@ def test_dynamic_graph_create_empty_and_build():
     chunk_size = 32
 
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
-    feature_space = FloatSpace.create(dims, Metric.FP32_L2)
 
     graph = deglib.create_dynamic_empty(
-        feature_space=feature_space, edges_per_vertex=edges_per_vertex, chunk_size=chunk_size
+        dim=dims, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2, chunk_size=chunk_size
     )
     assert graph.is_mutable()
     assert graph.size() == 0
@@ -923,7 +928,7 @@ def test_to_dynamic_conversion_and_mutation():
     edges_per_vertex = 8
 
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
-    graph = deglib.build_from_data(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
+    graph = deglib.build(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
 
     dyn_graph = graph.to_dynamic(chunk_size=64)
     assert dyn_graph.is_mutable()
@@ -954,7 +959,7 @@ def test_save_and_load_dynamic_graph(tmp_path):
     edges_per_vertex = 6
 
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
-    graph = deglib.build_from_data(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
+    graph = deglib.build(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
 
     file_path = tmp_path / "test_dyn_graph.deg"
     graph.save_graph(file_path)
@@ -978,7 +983,7 @@ def test_save_and_load_mutable_graph(tmp_path):
     edges_per_vertex = 6
 
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
-    graph = deglib.build_from_data(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
+    graph = deglib.build(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
 
     file_path = tmp_path / "test_mutable_graph.deg"
     graph.save_graph(file_path)
@@ -1009,69 +1014,86 @@ def test_save_and_load_mutable_graph(tmp_path):
 
 
 def test_create_helpers():
-    """Test module-level and class-level graph creation helpers."""
-    space = deglib.FloatSpace.create(16, Metric.FP32_L2)
-
-    g1 = deglib.create_empty(100, space, 16)
+    """Test module-level graph creation helpers and graph metadata getters."""
+    g1 = deglib.create_empty(100, 16, 16, metric=Metric.FP32_L2)
     assert g1.is_mutable()
     assert g1.size() == 0
+    assert g1.get_dim() == 16
+    assert g1.get_metric() == Metric.FP32_L2
+    assert g1.get_data_size() == 16 * 4
+    assert isinstance(g1.get_instruction(), deglib.InstructionSet)
 
-    g2 = deglib.create_dynamic_empty(space, 16, 128)
+    g2 = deglib.create_dynamic_empty(16, 16, metric=Metric.FP32_L2, chunk_size=128)
     assert g2.is_mutable()
     assert g2.size() == 0
+    assert g2.get_dim() == 16
 
     features = np.random.default_rng(42).standard_normal((20, 16)).astype(np.float32)
-    g3 = deglib.create_random_graph(features, space, 4)
+    g3 = deglib.create_random_graph(features, edges_per_vertex=4, metric=Metric.FP32_L2)
     assert g3.size() == 20
+
+
+def test_to_readonly_self_quantization():
+    """FP32 graph converts to Int8 / EVP / FP16 automatically when metric changes without explicit transforms."""
+    rng = np.random.default_rng(9)
+    raw = rng.standard_normal((40, 16)).astype(np.float32)
+    unit = raw / np.linalg.norm(raw, axis=1, keepdims=True)
+
+    g_l2 = deglib.build(raw, edges_per_vertex=8, extend_k=16, metric=Metric.FP32_L2)
+    ro_int8 = g_l2.to_readonly(Metric.Int8_L2)
+    assert not ro_int8.is_mutable()
+    assert ro_int8.get_metric() == Metric.Int8_L2
+    idx, _ = ro_int8.search(raw[0], eps_or_ef=0.2, k=5)
+    assert len(idx) == 5
+
+    g_ip = deglib.build(unit, edges_per_vertex=8, extend_k=16, metric=Metric.FP32_InnerProduct)
+    ro_evp = g_ip.to_readonly(Metric.EVP_InnerProduct)
+    assert ro_evp.get_metric() == Metric.EVP_InnerProduct
+    idx_evp, _ = ro_evp.search(unit[0], eps_or_ef=0.2, k=5)
+    assert len(idx_evp) == 5
 
 
 def test_graph_conversion_validation():
     """Test Python-side validation in to_readonly, to_mutable, and to_dynamic."""
     rng = np.random.default_rng(7)
     data = rng.standard_normal((24, 16)).astype(np.float32)
-    g = deglib.builder.build_from_data(data, edges_per_vertex=4, metric=Metric.FP32_L2)
-    q_int8 = deglib.transformation.make_scalar_quantizer_int8(data)
-    fs_int8 = FloatSpace.create(16, Metric.Int8_L2)
+    g = deglib.build(data, edges_per_vertex=4, metric=Metric.FP32_L2)
+    q_int8 = deglib.make_scalar_quantizer_int8(data)
 
-    # 1. Invalid feature_space type
-    with pytest.raises(TypeError, match="FloatSpace"):
-        g.to_readonly(feature_space="Int8_L2")
+    # 1. Invalid metric string / type
+    with pytest.raises(ValueError, match="Unknown metric"):
+        g.to_readonly(metric="Int8_L2_INVALID")
+    with pytest.raises(TypeError, match="Metric"):
+        g.to_readonly(metric=object())
 
-    # 2. Unfitted transformation
-    unfitted = deglib.transformation.ScalarQuantizerInt8(16)
-    with pytest.raises(ValueError, match="fitted"):
-        g.to_readonly(transformations=[unfitted])
+    # 2. Invalid transformation object
+    with pytest.raises((TypeError, AttributeError)):
+        g.to_readonly(transformations=["not_a_transform"])
 
     # 3. Transformation input_dim mismatch against graph dim
-    wrong_dim_q = deglib.transformation.make_scalar_quantizer_int8(
-        rng.standard_normal((10, 8)).astype(np.float32)
-    )
+    wrong_dim_q = deglib.make_scalar_quantizer_int8(rng.standard_normal((10, 8)).astype(np.float32))
     with pytest.raises(ValueError, match="input_dim"):
         g.to_mutable(transformations=[wrong_dim_q])
 
-    # 4. Transformation output_byte_size mismatch against feature_space
+    # 4. Transformation output_byte_size mismatch against target metric
     with pytest.raises(ValueError, match="output_byte_size"):
-        g.to_dynamic(feature_space=FloatSpace.create(16, Metric.FP16_L2), transformations=[q_int8])
+        g.to_dynamic(metric=Metric.FP16_L2, transformations=[q_int8])
 
-    # 5. Changing feature_space data size without custom_features or transformations
-    with pytest.raises(ValueError, match="custom_features or transformations"):
-        g.to_readonly(feature_space=fs_int8)
-
-    # 6. custom_features wrong shape / row count / byte size
+    # 5. custom_features wrong shape / row count / dtype
     with pytest.raises(ValueError, match="2D array"):
         g.to_readonly(custom_features=data.ravel())
     with pytest.raises(ValueError, match="row count"):
         g.to_mutable(custom_features=data[:10])
-    with pytest.raises(ValueError, match="size"):
+    with pytest.raises((ValueError, deglib.utils.WrongDtypeException)):
         g.to_dynamic(custom_features=data.astype(np.float16))
 
-    # 7. Self-transform from non-float graph without custom_features
-    ro_int8 = g.to_readonly(fs_int8, transformations=[q_int8])
-    q_uint8 = deglib.transformation.make_scalar_quantizer_uint8(data)
+    # 6. Self-transform from non-float graph without custom_features
+    ro_int8 = g.to_readonly(Metric.Int8_L2, transformations=[q_int8])
+    q_uint8 = deglib.make_scalar_quantizer_uint8(data)
     with pytest.raises(ValueError, match="non-float"):
-        ro_int8.to_readonly(FloatSpace.create(16, Metric.Uint8_L2), transformations=[q_uint8])
+        ro_int8.to_readonly(Metric.Uint8_L2, transformations=[q_uint8])
 
-    # 8. Invalid capacity / chunk_size
+    # 7. Invalid capacity / chunk_size
     with pytest.raises(ValueError, match="capacity"):
         g.to_mutable(capacity=-1)
     with pytest.raises(ValueError, match="chunk_size"):

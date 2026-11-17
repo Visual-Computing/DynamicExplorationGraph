@@ -25,7 +25,7 @@ import argparse
 from dataset import MAX_POINTS, MIN_POINTS, PRESETS, make_points
 from deg_graph import DEFAULT_K, METRIC_BY_LABEL, METRIC_LABELS, MIN_K, GraphModel, build_model, describe
 from deglib.distances import Metric
-from deglib.transformation import mips_l2_transform
+from deglib.transformation import make_mips_transform
 
 DEFAULT_VERTICES = 200
 
@@ -49,7 +49,7 @@ def build_scene(
     its drawing coordinates so the picture keeps its shape.
     """
     points, groups = make_points(preset, num_points, seed)
-    features = mips_l2_transform(points)[0] if mips else points
+    features = make_mips_transform(points).transform_database(points) if mips else points
     return build_model(features, groups, k=k, seed=seed, threads=threads, metric=metric, plot_points=points, mips=mips)
 
 

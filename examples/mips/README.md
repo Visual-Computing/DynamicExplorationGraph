@@ -12,20 +12,17 @@ Standard graph-based nearest neighbor search algorithms (e.g. DEG, HNSW) are opt
 We use a 5-step pipeline that reduces MIPS to $L_2$ graph search while retaining high query efficiency:
 
 1. **$(d+1)$-Dimensional $L_2$ Transformation**:
-   Each database vector $x_i \in \mathbb{R}^d$ is mapped to $x'_i = [x_i, \sqrt{M^2 - \|x_i\|^2}] \in \mathbb{R}^{d+1}$ where $M^2 = \max_j \|x_j\|^2$. 
+   Using `deglib.make_mips_transform(train_vectors)`, each database vector $x_i \in \mathbb{R}^d$ is mapped to $x'_i = [x_i, \sqrt{M^2 - \|x_i\|^2}] \in \mathbb{R}^{d+1}$ where $M^2 = \max_j \|x_j\|^2$.
    Because all transformed vectors $x'_i$ have equal norm $\|x'_i\| = M$, minimizing $\|q' - x'_i\|^2$ under $L_2$ distance (with $q' = [q, 0]$) is strictly equivalent to maximizing the inner product $\langle q, x_i \rangle$.
 
-2. **1D FLAS Pre-Sorting**:
-   The transformed vectors are pre-sorted using Fast Linear Assignment Sorting (`deglib.optimization.presort`) with `Metric.FP32_L2` to optimize memory layout and cache locality during graph construction.
+2. **1D FLAS Pre-Sorting & Graph Construction in FP32 $L_2$ Space**:
+   The transformed vectors are optionally pre-sorted (`presort=True`) using Fast Linear Assignment Sorting (`deglib.presort`) and built into a `DynamicExplorationGraph` with `deglib.build(..., metric=Metric.FP32_L2.with_instruction(instruction), threads=build_threads)` ($K_{\text{graph}} = 32, K_{\text{ext}} = 64$).
 
-3. **Graph Construction in FP32 $L_2$ Space**:
-   A `DynamicExplorationGraph` is constructed using `GraphBuilder` in $(d+1)$-dimensional `Metric.FP32_L2` space ($K_{\text{graph}} = 32, K_{\text{ext}} = 64$).
+3. **FP16 Feature Swapping & `ReadOnlyGraph`**:
+   Calling `graph.to_readonly(Metric.FP16_InnerProduct.with_instruction(instruction), custom_features=train_vectors, threads=build_threads)` automatically calibrates `make_scalar_quantizer_fp16`, quantizes the original $d$-dimensional FP32 vectors to FP16, and builds a compact `ReadOnlyGraph` with the FP16 quantizer attached.
 
-4. **FP16 Feature Swapping & `ReadOnlyGraph`**:
-   The original $d$-dimensional FP32 database vectors are quantized to 16-bit half-precision floats using `ScalarQuantizerFP16` (`deglib.transformation.make_scalar_quantizer_fp16`). The graph topology built in step 3 is converted to a `ReadOnlyGraph` with `Metric.FP16_InnerProduct` space by passing the FP16 feature buffer and quantizer (`graph.to_readonly(feature_space=..., custom_features=..., transformations=[quantizer])`).
-
-5. **SIMD FP16 Inner Product Search**:
-   Query vectors are converted to FP16 using the calibrated quantizer and searched on the `ReadOnlyGraph` using fast SIMD FP16 inner product distance routines ($\varepsilon_{\text{search}} = 0.18$, max distance evaluation budget sweep: `6000, 6500, 7000, 7500, 8000, 9000`).
+4. **SIMD FP16 Inner Product Search**:
+   The `ReadOnlyGraph` accepts FP32 queries directly (quantizing them automatically via its attached transform) and searches using fast SIMD FP16 inner product distance routines ($\varepsilon_{\text{search}} = 0.18$, max distance evaluation budget sweep: `6000, 6500, 7000, 7500, 8000, 9000`).
 
 ---
 

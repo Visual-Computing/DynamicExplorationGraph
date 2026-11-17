@@ -160,13 +160,12 @@ In two-stage retrieval pipelines, a fast preliminary search provides a pool of c
 
    import deglib
 
-   space = deglib.FloatSpace.create(dim=dim, metric=deglib.Metric.FP32_L2)
    candidate_pool = np.random.randint(0, graph.size(), size=(10, 50), dtype=np.uint32)
    dataset = np.random.randn(graph.size(), dim).astype(np.float32)
 
    # Re-rank top 10 from the 50 candidates per query
    top_indices, top_distances = deglib.search.rerank(
-       space=space,
+       metric=deglib.Metric.FP32_L2,
        queries=queries[:10],
        candidate_indices=candidate_pool,
        base_vectors=dataset,

@@ -1,34 +1,131 @@
 import enum
-from abc import ABC, abstractmethod
-
 import numpy as np
+import deglib_cpp
 
-import deglib_cpp.distances as cpp_distances
-import deglib_cpp.cpu as cpp_cpu
 from deglib.cpu import InstructionSet
 
-__all__ = ["Metric", "FloatSpace", "InstructionSet", "floats_to_fp16", "fp16_to_floats"]
+cpp_distances = deglib_cpp.distances
+cpp_cpu = deglib_cpp.cpu
+
+__all__ = ["Metric", "InstructionSet", "floats_to_fp16", "fp16_to_floats"]
 
 
-class Metric(enum.IntEnum):
+class _MetricMeta(enum.EnumMeta):
+    def __instancecheck__(cls, instance):
+        return super().__instancecheck__(instance) or isinstance(instance, _BoundMetric)
+
+
+def _metric_data_size(metric: "Metric", dim: int) -> int:
+    if dim < 0:
+        raise ValueError(f"dim must be non-negative, got {dim}")
+    m = Metric(int(metric))
+    if m in (Metric.FP32_L2, Metric.FP32_InnerProduct):
+        return dim * 4
+    if m in (Metric.FP16_L2, Metric.FP16_InnerProduct):
+        return dim * 2
+    if m in (
+        Metric.Uint8_L2,
+        Metric.Uint8_InnerProduct,
+        Metric.Int8_L2,
+        Metric.Int8_InnerProduct,
+        Metric.UInt7_L2,
+        Metric.UInt7_InnerProduct,
+    ):
+        return dim
+    if m in (
+        Metric.Uint4_L2,
+        Metric.Uint4_InnerProduct,
+        Metric.Int4_L2,
+        Metric.Int4_InnerProduct,
+    ):
+        return (dim + 1) // 2
+    if m == Metric.EVP_InnerProduct:
+        return 2 * ((dim + 7) // 8)
+    raise ValueError(f"Unsupported metric: {metric}")
+
+
+def _metric_dtype(metric: "Metric") -> np.dtype:
+    m = Metric(int(metric))
+    if m in (Metric.FP32_L2, Metric.FP32_InnerProduct):
+        return np.dtype(np.float32)
+    if m in (Metric.FP16_L2, Metric.FP16_InnerProduct):
+        return np.dtype(np.uint16)
+    if m in (
+        Metric.Int8_L2,
+        Metric.Int8_InnerProduct,
+        Metric.UInt7_L2,
+        Metric.UInt7_InnerProduct,
+    ):
+        return np.dtype(np.int8)
+    if m in (
+        Metric.Uint8_L2,
+        Metric.Uint8_InnerProduct,
+        Metric.Uint4_L2,
+        Metric.Uint4_InnerProduct,
+        Metric.Int4_L2,
+        Metric.Int4_InnerProduct,
+        Metric.EVP_InnerProduct,
+    ):
+        return np.dtype(np.uint8)
+    raise ValueError(f"Unsupported metric: {metric}")
+
+
+def _metric_accepted_dtypes(metric: "Metric") -> tuple[np.dtype, ...]:
+    m = Metric(int(metric))
+    if m in (Metric.FP16_L2, Metric.FP16_InnerProduct):
+        return (np.dtype(np.uint16), np.dtype(np.float16))
+    return (_metric_dtype(m),)
+
+
+def _infer_dim_from_array(metric: "Metric", arr: np.ndarray) -> int:
+    if arr.ndim == 0:
+        raise ValueError("Input array must be at least 1D to infer feature dimensionality")
+    width = int(arr.shape[-1])
+    m = Metric(int(metric))
+    if m in (
+        Metric.Uint4_L2,
+        Metric.Uint4_InnerProduct,
+        Metric.Int4_L2,
+        Metric.Int4_InnerProduct,
+    ):
+        return width * 2
+    if m == Metric.EVP_InnerProduct:
+        if width % 2 != 0:
+            raise ValueError(f"EVP_InnerProduct packed width must be even, got {width}")
+        return width * 4
+    return width
+
+
+def _prepare_distance_array(metric: "Metric", arr: np.ndarray, name: str) -> np.ndarray:
+    accepted = _metric_accepted_dtypes(metric)
+    if not isinstance(arr, np.ndarray):
+        arr = np.ascontiguousarray(arr, dtype=accepted[0])
+    else:
+        if arr.dtype not in accepted:
+            expected_names = " or ".join(d.name for d in accepted)
+            raise TypeError(f"{name} has dtype {arr.dtype}, expected {expected_names} for metric {metric.name}")
+        if not arr.flags.c_contiguous:
+            arr = np.ascontiguousarray(arr)
+    return arr
+
+
+def _make_cpp_space(metric: "Metric", dim: int, instruction: InstructionSet | None = None) -> cpp_distances.FloatSpace:
+    if instruction is not None:
+        inst = instruction
+    elif isinstance(metric, _BoundMetric):
+        inst = metric._instruction
+    else:
+        inst = InstructionSet.Auto
+    return cpp_distances.FloatSpace(
+        int(dim),
+        cpp_distances.Metric(int(metric)),
+        cpp_cpu.InstructionSet(int(inst)),
+    )
+
+
+class Metric(enum.IntEnum, metaclass=_MetricMeta):
     """
-    Distance metric used to calculate similarity or distance between feature vectors.
-
-    - ``FP32_L2``: Euclidean (L2) distance for 32-bit floating point vectors.
-    - ``FP32_InnerProduct``: Inner product (dot product) distance for 32-bit floating point vectors.
-    - ``Uint8_L2``: Euclidean (L2) distance for 8-bit unsigned integer vectors.
-    - ``Uint8_InnerProduct``: Inner product distance for 8-bit unsigned integer vectors.
-    - ``FP16_L2``: Euclidean (L2) distance for 16-bit half-precision floating point vectors.
-    - ``FP16_InnerProduct``: Inner product distance for 16-bit half-precision floating point vectors.
-    - ``EVP_InnerProduct``: Inner product distance for quantized byte-packed (EVP) vectors.
-    - ``Int8_InnerProduct``: Inner product distance for 8-bit signed integer vectors.
-    - ``Int8_L2``: Euclidean (L2) distance for 8-bit signed integer vectors.
-    - ``Uint4_L2``: Euclidean (L2) distance for 4-bit unsigned integer vectors (packed 2 per uint8).
-    - ``Uint4_InnerProduct``: Inner product distance for 4-bit unsigned integer vectors (packed 2 per uint8).
-    - ``Int4_L2``: Euclidean (L2) distance for 4-bit signed integer vectors (packed 2 per uint8).
-    - ``Int4_InnerProduct``: Inner product distance for 4-bit signed integer vectors (packed 2 per uint8).
-    - ``UInt7_InnerProduct``: Inner product distance for UInt7 codes in [0, 127].
-    - ``UInt7_L2``: Euclidean (L2) distance for UInt7 codes in [0, 127].
+    Distance metric and storage format used by deglib graphs, searchers, and distance computations.
     """
 
     FP32_L2 = cpp_distances.Metric.FP32_L2
@@ -40,126 +137,273 @@ class Metric(enum.IntEnum):
     EVP_InnerProduct = cpp_distances.Metric.EVP_InnerProduct
     Int8_InnerProduct = cpp_distances.Metric.Int8_InnerProduct
     Int8_L2 = cpp_distances.Metric.Int8_L2
-    Uint4_L2 = cpp_distances.Metric.Uint4_L2
     Uint4_InnerProduct = cpp_distances.Metric.Uint4_InnerProduct
-    Int4_L2 = cpp_distances.Metric.Int4_L2
+    Uint4_L2 = cpp_distances.Metric.Uint4_L2
     Int4_InnerProduct = cpp_distances.Metric.Int4_InnerProduct
+    Int4_L2 = cpp_distances.Metric.Int4_L2
     UInt7_L2 = cpp_distances.Metric.UInt7_L2
     UInt7_InnerProduct = cpp_distances.Metric.UInt7_InnerProduct
 
-    def get_dtype(self):
+    def get_dtype(self) -> np.dtype:
         """
-        Return the corresponding NumPy dtype for feature data with this metric.
+        Return the default NumPy storage dtype associated with this metric.
         """
-        if self in (Metric.FP32_L2, Metric.FP32_InnerProduct):
-            return np.float32
-        if self in (Metric.Uint8_L2, Metric.Uint8_InnerProduct, Metric.Uint4_L2, Metric.Uint4_InnerProduct, Metric.Int4_L2, Metric.Int4_InnerProduct):
-            return np.uint8
-        if self in (Metric.Int8_InnerProduct, Metric.Int8_L2, Metric.UInt7_InnerProduct, Metric.UInt7_L2):
-            return np.int8
-        if self in (Metric.FP16_L2, Metric.FP16_InnerProduct):
-            return np.uint16
-        if self == Metric.EVP_InnerProduct:
-            return np.uint8
-        return np.float32
+        return _metric_dtype(self)
 
+    def get_accepted_dtypes(self) -> tuple[np.dtype, ...]:
+        """
+        Return all NumPy dtypes directly accepted for raw storage with this metric.
+        """
+        return _metric_accepted_dtypes(self)
 
-class FloatSpace:
-    """
-    Configuration and computational space for vector distance calculations.
+    def get_data_size(self, dim: int) -> int:
+        """
+        Return the byte size of one stored vector of dimension ``dim`` for this metric.
+        """
+        return _metric_data_size(self, dim)
 
-    Defines the dimensionality, metric, and CPU instruction set used
-    to evaluate distances between vectors.
-    """
+    def get_query_data_size(self, dim: int) -> int:
+        """
+        Return the byte size of one query vector of dimension ``dim`` for this metric.
+        """
+        return _metric_data_size(self, dim)
 
-    def __init__(self, float_space_cpp: cpp_distances.FloatSpace):
-        self.float_space_cpp = float_space_cpp
+    def get_instruction(self, dim: int = 16) -> InstructionSet:
+        """
+        Return the active SIMD ``InstructionSet`` for this metric at dimension ``dim``.
+        """
+        space = _make_cpp_space(self, dim, InstructionSet.Auto)
+        return InstructionSet.resolve(space.get_instruction())
 
-    @classmethod
-    def create(cls, dim: int, metric: Metric, instruction: InstructionSet = InstructionSet.Auto) -> "FloatSpace":
+    def with_instruction(self, instruction: InstructionSet | str) -> "Metric":
         """
-        Create a new FloatSpace instance.
-
-        :param dim: Dimensionality of the vector space.
-        :param metric: Distance metric to use for comparisons.
-        :param instruction: CPU instruction set (defaults to ``InstructionSet.Auto``).
-        :return: Configured FloatSpace instance.
+        Return a ``Metric`` handle bound to a specific SIMD ``InstructionSet``.
         """
-        return FloatSpace(cpp_distances.FloatSpace(dim, cpp_distances.Metric(int(metric)), cpp_cpu.InstructionSet(int(instruction))))
-
-    def dim(self) -> int:
-        """
-        Return the dimensionality of the vector space.
-        """
-        return self.float_space_cpp.dim()
-
-    def metric(self) -> cpp_distances.Metric:
-        """
-        Return the distance metric configured for this space.
-        """
-        return Metric(int(self.float_space_cpp.metric()))
-
-    def get_data_size(self) -> int:
-        """
-        Return the memory size in bytes required per feature vector.
-        """
-        return self.float_space_cpp.get_data_size()
-
-    def get_query_data_size(self) -> int:
-        """
-        Return the memory size in bytes required per query vector.
-        """
-        return self.float_space_cpp.get_query_data_size()
-
-    def get_instruction(self) -> InstructionSet:
-        """
-        Return the active CPU instruction set.
-        """
-        return InstructionSet[self.float_space_cpp.get_instruction()]
+        resolved = InstructionSet.resolve(instruction)
+        return _BoundMetric(Metric(int(self)), resolved)
 
     def compute_distance(self, vec1: np.ndarray, vec2: np.ndarray) -> float:
         """
-        Calculate the distance between two feature vectors.
-
-        :param vec1: First feature vector (1D NumPy array).
-        :param vec2: Second feature vector (1D NumPy array).
-        :return: Computed distance value.
+        Compute distance between two 1D feature vectors (dimension inferred automatically).
         """
-        return float(self.float_space_cpp.compute_distance(vec1, vec2))
+        v1 = _prepare_distance_array(self, vec1, "vec1")
+        v2 = _prepare_distance_array(self, vec2, "vec2")
+        dim = _infer_dim_from_array(self, v1)
+        space = _make_cpp_space(self, dim)
+        return float(space.compute_distance(v1, v2))
 
     def compute_distances(self, query: np.ndarray, targets: np.ndarray, threads: int = 0) -> np.ndarray:
         """
-        Calculate distances between query vector(s) and multiple target vectors.
-
-        :param query: 1D query vector [D] or 2D batch of queries [Q, D] (C-contiguous).
-        :param targets: 2D array of target vectors (shape: N x dim, C-contiguous).
-        :param threads: Worker threads for the query batch (0 = all CPU cores, 1 = serial).
-        :return: 2D NumPy array of distances (shape Q, N); a 1D query yields shape (1, N).
+        Compute distances between query vector(s) [D] or [Q, D] and target vector(s) [N, D].
         """
-        return self.float_space_cpp.compute_distances(query, targets, threads)
+        q = _prepare_distance_array(self, query, "query")
+        t = _prepare_distance_array(self, targets, "targets")
+        dim = _infer_dim_from_array(self, q)
+        space = _make_cpp_space(self, dim)
+        return space.compute_distances(q, t, threads=threads)
 
-    def __repr__(self):
-        return f"FloatSpace(size={self.get_data_size()} dim={self.dim()}, metric={self.metric()})"
+    def _to_cpp_space(self, dim: int) -> cpp_distances.FloatSpace:
+        return _make_cpp_space(self, dim)
+
+    def _to_cpp_metric(self) -> cpp_distances.Metric:
+        return cpp_distances.Metric(int(self))
+
+    @classmethod
+    def resolve(
+        cls,
+        metric: "Metric | str | int",
+        distance_kind: str | None = None,
+        instruction: InstructionSet | str | None = None,
+    ) -> "Metric":
+        """
+        Resolve a ``Metric`` from an enum member or case-insensitive name/parts.
+
+        Examples:
+            Metric.resolve("Uint8_L2")
+            Metric.resolve("int8", "ip")
+            Metric.resolve("fp32", "cosine")
+            Metric.resolve("fp32", "l2", instruction="AVX2")
+            Metric.resolve("evp")
+        """
+        bound_inst: InstructionSet | None = None
+        base_metric: Metric | None = None
+
+        if isinstance(metric, _BoundMetric):
+            base_metric = metric._metric
+            bound_inst = metric._instruction
+        elif isinstance(metric, cls):
+            base_metric = metric
+        elif isinstance(metric, cpp_distances.Metric):
+            base_metric = cls(int(metric))
+        elif isinstance(metric, int) and not isinstance(metric, bool):
+            base_metric = cls(metric)
+        elif isinstance(metric, str):
+            raw = metric.strip()
+            if distance_kind is not None:
+                dtype_part = raw
+                kind_part = distance_kind.strip()
+            elif raw.lower() == "evp":
+                base_metric = cls.EVP_InnerProduct
+                dtype_part = ""
+                kind_part = ""
+            elif "_" in raw:
+                parts = raw.split("_", 1)
+                dtype_part, kind_part = parts[0], parts[1]
+            else:
+                raise ValueError(
+                    f"Cannot resolve metric {metric!r} without distance_kind (e.g. 'FP32_L2' or Metric.resolve('int8', 'ip'))"
+                )
+
+            if base_metric is None:
+                dtype_norm_map = {
+                    "fp32": "FP32",
+                    "float32": "FP32",
+                    "f32": "FP32",
+                    "fp16": "FP16",
+                    "float16": "FP16",
+                    "f16": "FP16",
+                    "uint8": "Uint8",
+                    "u8": "Uint8",
+                    "int8": "Int8",
+                    "i8": "Int8",
+                    "uint7": "UInt7",
+                    "u7": "UInt7",
+                    "uint4": "Uint4",
+                    "u4": "Uint4",
+                    "int4": "Int4",
+                    "i4": "Int4",
+                    "evp": "EVP",
+                }
+                kind_norm_map = {
+                    "l2": "L2",
+                    "euclidean": "L2",
+                    "sqeuclidean": "L2",
+                    "ip": "InnerProduct",
+                    "innerproduct": "InnerProduct",
+                    "inner_product": "InnerProduct",
+                    "dot": "InnerProduct",
+                    "mips": "InnerProduct",
+                    "cosine": "InnerProduct",
+                }
+                d_key = dtype_part.strip().lower().replace("-", "").replace("_", "")
+                k_key = kind_part.strip().lower().replace("-", "_").replace(" ", "_")
+                d_canon = dtype_norm_map.get(d_key)
+                k_canon = kind_norm_map.get(k_key)
+                if d_canon is None or k_canon is None:
+                    raise ValueError(
+                        f"Unknown metric specification: metric={metric!r}, distance_kind={distance_kind!r}"
+                    )
+                full_name = f"{d_canon}_{k_canon}"
+                if not hasattr(cls, full_name):
+                    raise ValueError(f"Unsupported Metric combination: {full_name}")
+                base_metric = getattr(cls, full_name)
+        else:
+            raise TypeError(f"metric must be Metric, str, or int, got {type(metric).__name__}")
+
+        if distance_kind is not None and not isinstance(metric, str):
+            # Re-resolve distance kind on an enum metric if explicitly overridden
+            dtype_prefix = base_metric.name.split("_", 1)[0]
+            base_metric = cls.resolve(dtype_prefix, distance_kind)
+
+        target_inst = (
+            InstructionSet.resolve(instruction)
+            if instruction is not None
+            else (bound_inst if bound_inst is not None else InstructionSet.Auto)
+        )
+        if target_inst == InstructionSet.Auto:
+            return base_metric
+        return _BoundMetric(base_metric, target_inst)
+
+
+class _BoundMetric(int):
+    """
+    A ``Metric`` handle paired with a non-default ``InstructionSet`` override.
+    Behaves seamlessly as an ``int``/``Metric`` across comparisons and bindings.
+    """
+
+    def __new__(cls, metric: Metric, instruction: InstructionSet):
+        obj = super().__new__(cls, int(metric))
+        obj._metric = Metric(int(metric))
+        obj._instruction = instruction
+        return obj
+
+    @property
+    def name(self) -> str:
+        return self._metric.name
+
+    @property
+    def value(self) -> int:
+        return int(self._metric)
+
+    @property
+    def metric(self) -> Metric:
+        return self._metric
+
+    def get_dtype(self) -> np.dtype:
+        return _metric_dtype(self._metric)
+
+    def get_accepted_dtypes(self) -> tuple[np.dtype, ...]:
+        return _metric_accepted_dtypes(self._metric)
+
+    def get_data_size(self, dim: int) -> int:
+        return _metric_data_size(self._metric, dim)
+
+    def get_query_data_size(self, dim: int) -> int:
+        return _metric_data_size(self._metric, dim)
+
+    def get_instruction(self, dim: int = 16) -> InstructionSet:
+        space = _make_cpp_space(self._metric, dim, self._instruction)
+        return InstructionSet.resolve(space.get_instruction())
+
+    def with_instruction(self, instruction: InstructionSet | str) -> "Metric":
+        return self._metric.with_instruction(instruction)
+
+    def compute_distance(self, vec1: np.ndarray, vec2: np.ndarray) -> float:
+        v1 = _prepare_distance_array(self._metric, vec1, "vec1")
+        v2 = _prepare_distance_array(self._metric, vec2, "vec2")
+        dim = _infer_dim_from_array(self._metric, v1)
+        space = _make_cpp_space(self._metric, dim, self._instruction)
+        return float(space.compute_distance(v1, v2))
+
+    def compute_distances(self, query: np.ndarray, targets: np.ndarray, threads: int = 0) -> np.ndarray:
+        q = _prepare_distance_array(self._metric, query, "query")
+        t = _prepare_distance_array(self._metric, targets, "targets")
+        dim = _infer_dim_from_array(self._metric, q)
+        space = _make_cpp_space(self._metric, dim, self._instruction)
+        return space.compute_distances(q, t, threads=threads)
+
+    def _to_cpp_space(self, dim: int) -> cpp_distances.FloatSpace:
+        return _make_cpp_space(self._metric, dim, self._instruction)
+
+    def _to_cpp_metric(self) -> cpp_distances.Metric:
+        return cpp_distances.Metric(int(self._metric))
+
+    def __repr__(self) -> str:
+        return f"<Metric.{self._metric.name}: {int(self._metric)} [{self._instruction.name}]>"
+
+    def __str__(self) -> str:
+        return f"Metric.{self._metric.name}"
 
 
 def floats_to_fp16(floats: np.ndarray) -> np.ndarray:
     """
-    Convert a 32-bit float NumPy array into half-precision (16-bit float stored as uint16).
-
-    :param floats: NumPy array of float32 values.
-    :return: NumPy array of uint16 values with the same shape.
+    Convert a NumPy float32 array to FP16 bit-patterns stored as uint16.
     """
-    arr = np.ascontiguousarray(floats, dtype=np.float32)
-    res = cpp_distances.floats_to_fp16(arr)
-    return res.reshape(arr.shape)
+    if floats.dtype != np.float32:
+        raise ValueError("Input array must have dtype float32")
+    if not floats.flags.c_contiguous:
+        floats = np.ascontiguousarray(floats)
+    res = cpp_distances.floats_to_fp16(floats)
+    return res.reshape(floats.shape)
 
 
 def fp16_to_floats(fp16_vals: np.ndarray) -> np.ndarray:
     """
-    Convert a 16-bit half-precision array (stored as uint16) back into a 32-bit float array.
-
-    :param fp16_vals: NumPy array of uint16 values representing FP16 floats.
-    :return: NumPy array of float32 values with the same shape.
+    Convert a NumPy uint16 array storing FP16 bit-patterns back to float32.
     """
+    if fp16_vals.dtype != np.uint16:
+        raise ValueError("Input array must have dtype uint16")
+    if not fp16_vals.flags.c_contiguous:
+        fp16_vals = np.ascontiguousarray(fp16_vals)
     res = cpp_distances.fp16_to_floats(fp16_vals)
     return res.reshape(fp16_vals.shape)

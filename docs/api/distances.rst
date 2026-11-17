@@ -1,23 +1,12 @@
-Distances & Spaces
-==================
+Distances & Metrics
+===================
 
-Distance metrics, feature space representations, and precision conversion helpers.
+Distance metrics and precision conversion helpers.
 
 Metric
 ------
 
 .. autoclass:: deglib.distances.Metric
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :member-order: bysource
-
-
-
-FloatSpace
-----------
-
-.. autoclass:: deglib.distances.FloatSpace
    :members:
    :undoc-members:
    :show-inheritance:

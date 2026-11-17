@@ -9,13 +9,14 @@ def _build_test_graph(samples=50, dims=16, edges_per_vertex=10):
     """Build a graph with external labels that differ from internal indices."""
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
     labels = np.arange(samples, dtype=np.uint32) * 10
-    graph = deglib.builder.build_from_data(
+    graph = deglib.build(
         data,
         labels=labels,
         edges_per_vertex=edges_per_vertex,
         optimization_target=deglib.builder.OptimizationTarget.LowLID,
         extend_k=10,
         extend_eps=0.001,
+        optimize=False,
     )
     return graph, data
 

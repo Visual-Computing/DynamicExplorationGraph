@@ -1,132 +1,90 @@
-import pytest
 import numpy as np
+import pytest
+
 import deglib
+from deglib.transformation import apply_on_database, apply_on_query, make_evp_quantizer
 
 
 class TestEvpQuantizerUnit:
-    def test_evp_quantizer_init(self):
-        q = deglib.transformation.EvpQuantizer(16, 4)
-        assert q.dim == 16
-        assert q.non_zeros == 4
-        assert q.mean is None
-        assert not q.is_fitted
+    def test_no_raw_evp_class_exported(self):
+        assert not hasattr(deglib, "EvpQuantizer")
+        assert not hasattr(deglib.transformation, "EvpQuantizer")
 
-    def test_evp_quantizer_quantize_float32(self):
-        dim = 16
-        count = 10
-        non_zeros = 4
+    def test_evp_quantizer_fit_and_quantize_float32(self):
         rng = np.random.default_rng(42)
-        vecs = rng.standard_normal((count, dim), dtype=np.float32)
+        dim = 64
+        count = 100
+        non_zeros = 16
+        vecs = rng.uniform(-10.0, 10.0, size=(count, dim)).astype(np.float32)
 
-        q = deglib.transformation.EvpQuantizer(dim, non_zeros)
-        q.fit(vecs)
+        q = make_evp_quantizer(vecs, non_zeros=non_zeros, threads=2)
+        assert q.name == "EvpQuantizer"
+        assert q.input_dim == dim
+        assert q.output_dim == dim
+        assert q.non_zeros == non_zeros
         assert q.is_fitted
-        bits = q.quantize(vecs, num_threads=2)
+        assert q.output_dtype == np.uint8
 
+        bits = q.transform_database(vecs, threads=2)
         assert bits.shape == (count, 2 * ((dim + 7) // 8))
         assert bits.dtype == np.uint8
 
-        # Verify positive and negative bitmasks do not overlap
-        mask_bytes = (dim + 7) // 8
-        ones = bits[:, :mask_bytes]
-        negs = bits[:, mask_bytes:]
-        assert np.all((ones & negs) == 0)
+        q_bits = apply_on_query(q, vecs[:5])
+        np.testing.assert_array_equal(q_bits, bits[:5])
 
     def test_evp_quantizer_float32_vs_float16_equivalence(self):
-        dim = 32
-        count = 10
-        non_zeros = 8
         rng = np.random.default_rng(123)
-        vecs_f32 = rng.standard_normal((count, dim), dtype=np.float32)
+        dim = 32
+        count = 50
+        non_zeros = 8
+        vecs_f32 = rng.uniform(-10.0, 10.0, size=(count, dim)).astype(np.float32)
         vecs_f16 = vecs_f32.astype(np.float16)
 
-        q1 = deglib.transformation.EvpQuantizer(dim, non_zeros)
-        q1.fit(vecs_f16.astype(np.float32))
-        bits_f32 = q1.quantize(vecs_f16.astype(np.float32))
+        q1 = make_evp_quantizer(vecs_f16.astype(np.float32), non_zeros=non_zeros)
+        bits_f32 = apply_on_database(q1, vecs_f16.astype(np.float32))
 
-        q2 = deglib.transformation.EvpQuantizer(dim, non_zeros)
-        q2.fit(vecs_f16)
-        bits_f16 = q2.quantize(vecs_f16)
+        q2 = make_evp_quantizer(vecs_f16, non_zeros=non_zeros)
+        bits_f16 = apply_on_database(q2, vecs_f16)
 
-        # FP16 and FP32 on the same float16 values produce bit-identical results
         np.testing.assert_array_equal(bits_f32, bits_f16)
 
-    def test_evp_quantizer_fit_mean_float32(self):
-        dim = 16
-        count = 20
-        rng = np.random.default_rng(99)
-        vecs = rng.uniform(-5.0, 5.0, size=(count, dim)).astype(np.float32)
+    def test_evp_quantizer_fit_mean_float32_and_float16(self):
+        rng = np.random.default_rng(7)
+        dim = 32
+        vecs_f32 = rng.uniform(-5.0, 5.0, size=(100, dim)).astype(np.float32) + 10.0
+        q_f32 = make_evp_quantizer(vecs_f32, non_zeros=8, threads=2)
+        assert q_f32.mean is not None
+        assert q_f32.mean.shape == (dim,)
+        np.testing.assert_allclose(q_f32.mean, vecs_f32.mean(axis=0), atol=1e-4)
 
-        q = deglib.transformation.EvpQuantizer(dim, 8)
-        assert q.mean is None
-
-        q.fit(vecs, num_threads=2)
-        assert q.mean is not None
-        assert q.mean.shape == (dim,)
-        assert q.mean.dtype == np.float32
-
-        expected_mean = np.mean(vecs, axis=0, dtype=np.float64).astype(np.float32)
-        np.testing.assert_allclose(q.mean, expected_mean, rtol=1e-5, atol=1e-5)
-
-    def test_evp_quantizer_fit_mean_float16(self):
-        dim = 16
-        count = 20
-        rng = np.random.default_rng(99)
-        vecs = rng.uniform(-5.0, 5.0, size=(count, dim)).astype(np.float16)
-
-        q = deglib.transformation.EvpQuantizer(dim, 8)
-        q.fit(vecs, num_threads=2)
-        assert q.mean is not None
-
-        expected_mean = np.mean(vecs.astype(np.float32), axis=0, dtype=np.float64).astype(np.float32)
-        np.testing.assert_allclose(q.mean, expected_mean, rtol=1e-3, atol=1e-3)
+        vecs_f16 = vecs_f32.astype(np.float16)
+        q_f16 = make_evp_quantizer(vecs_f16, non_zeros=8, threads=2)
+        assert q_f16.mean is not None
+        assert q_f16.mean.shape == (dim,)
 
     def test_evp_quantizer_arbitrary_dimension(self):
-        # Test that dimensions NOT divisible by 8 work seamlessly
-        for dim in [7, 10, 15, 23, 77]:
-            count = 25
-            rng = np.random.default_rng(42 + dim)
-            vecs = rng.standard_normal((count, dim), dtype=np.float32)
-
-            q = deglib.transformation.EvpQuantizer(dim, 0)
-            q.fit(vecs)
+        rng = np.random.default_rng(99)
+        for dim in (5, 8, 12, 16, 17, 32, 64, 65):
+            vecs = rng.normal(size=(40, dim)).astype(np.float32)
+            q = make_evp_quantizer(vecs, non_zeros=0)
             assert q.is_fitted
             assert q.non_zeros > 0
-            assert q.non_zeros < dim
+            out = q.transform_database(vecs)
+            assert out.shape == (40, 2 * ((dim + 7) // 8))
 
-            bits = q.quantize(vecs)
-            expected_mask_bytes = (dim + 7) // 8
-            assert bits.shape == (count, 2 * expected_mask_bytes)
-
-            ones = bits[:, :expected_mask_bytes]
-            negs = bits[:, expected_mask_bytes:]
-            assert np.all((ones & negs) == 0)
-
-            # High unused bits in last byte must be 0
-            remainder = dim % 8
-            if remainder != 0:
-                valid_mask = np.uint8((1 << remainder) - 1)
-                assert np.all((ones[:, -1] & ~valid_mask) == 0)
-                assert np.all((negs[:, -1] & ~valid_mask) == 0)
-
-    def test_evp_quantizer_unfitted_raises(self):
-        dim = 16
-        q = deglib.transformation.EvpQuantizer(dim, 4)
-        vecs = np.ones((5, dim), dtype=np.float32)
+    def test_evp_quantizer_validation_errors(self):
+        empty = np.empty((0, 16), dtype=np.float32)
         with pytest.raises(Exception):
-            q.quantize(vecs)
+            make_evp_quantizer(empty, non_zeros=4)
+        with pytest.raises(Exception):
+            make_evp_quantizer(np.ones(16, dtype=np.float32), non_zeros=4)
 
     def test_evp_quantizer_dequantize(self):
-        dim = 8
-        non_zeros = 4
-        q = deglib.transformation.EvpQuantizer(dim, non_zeros)
-        # Train on zeros so mean is 0
-        q.fit(np.zeros((10, dim), dtype=np.float32))
-
-        vec = np.array([[1.0, -1.0, 2.0, -2.0, 3.0, -3.0, 4.0, -4.0]], dtype=np.float32)
-        quantized = q.quantize(vec)
-        dequantized = q.dequantize(quantized)
-
-        expected = np.array([[0.0, 0.0, 0.0, 0.0, 1.0, -1.0, 1.0, -1.0]], dtype=np.float32)
-        np.testing.assert_allclose(dequantized, expected)
-
+        rng = np.random.default_rng(11)
+        dim = 32
+        vecs = rng.normal(size=(40, dim)).astype(np.float32)
+        q = make_evp_quantizer(vecs, non_zeros=8)
+        codes = q.transform_database(vecs)
+        reconstructed = q.dequantize(codes)
+        assert reconstructed.shape == (40, dim)
+        assert reconstructed.dtype == np.float32

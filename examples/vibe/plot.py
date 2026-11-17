@@ -601,7 +601,7 @@ def parse_benchmark_log(log_path: Path) -> tuple[str, str, int, list[dict]]:
     re_algo = re.compile(r"---\s*\[\d+/\d+\]\s*Processing Algorithm\s*['\"]([^'\"]+)['\"]", re.IGNORECASE)
     current_algo = None
     re_dataset = re.compile(r"Selected VIBE Dataset:\s*([^\r\n]+)", re.IGNORECASE)
-    re_space = re.compile(r"Vector Space Type:\s*FloatSpace\s*\(([^)]+)\)", re.IGNORECASE)
+    re_space = re.compile(r"Vector Space Type:\s*(?:FloatSpace|Metric)\s*\(([^)]+)\)", re.IGNORECASE)
     re_dtypes = re.compile(r"Query Dtype:\s*([a-zA-Z0-9_-]+)", re.IGNORECASE)
     re_header_old = re.compile(
         r"---\s*\[\d+/\d+\]\s*Fitting\s*/\s*Loading Index:\s*K=(\d+)(?:,\s*ExtendK=\d+)?(?:,\s*(?:ExtendEps|Eps)=([\d.]+))?(?:,\s*Opt=([a-zA-Z0-9_-]+))?(?:,\s*Threads=\d+)?(?:,\s*(?:Dtype|QueryType)=([a-zA-Z0-9_-]+))?",

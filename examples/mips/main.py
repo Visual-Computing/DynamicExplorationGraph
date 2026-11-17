@@ -21,9 +21,9 @@ import matplotlib.pyplot as plt
 
 import deglib
 import deglib_cpp
-from deglib.distances import FloatSpace, Metric
+from deglib.distances import Metric
 from deglib.cpu import InstructionSet
-from deglib.transformation import mips_l2_transform, make_scalar_quantizer_fp16
+from deglib.transformation import make_mips_transform
 from deglib.optimization import presort
 
 from dataset import (
@@ -180,7 +180,8 @@ def construct_and_search_mips(
 
     # 1. (d+1)-dimensional L2 Transformation Phase
     t0 = time.perf_counter()
-    train_transformed, max_norm = mips_l2_transform(train_vectors)
+    mips_transform = make_mips_transform(train_vectors)
+    train_transformed = mips_transform.transform_database(train_vectors)
     t_transform = time.perf_counter() - t0
     new_dims = train_transformed.shape[1]
     print(
@@ -192,10 +193,10 @@ def construct_and_search_mips(
     sorted_indices = None
 
     if use_flas:
-        flas_space = FloatSpace.create(new_dims, Metric.FP32_L2)
+        flas_metric = Metric.FP32_L2.with_instruction(instruction)
         dist_before = compute_1d_distortion(train_transformed)
         print(
-            f"Running FLAS 1D Pre-sorting: N={n_vecs}, dim={new_dims}, decay={flas_radius_decay}, metric={flas_space.metric().name} ({flas_space.get_instruction().name}), threads={build_threads}..."
+            f"Running FLAS 1D Pre-sorting: N={n_vecs}, dim={new_dims}, decay={flas_radius_decay}, metric={flas_metric.name} ({flas_metric.get_instruction().name}), threads={build_threads}..."
         )
 
         def flas_progress_cb(prog: float) -> bool:
@@ -208,7 +209,7 @@ def construct_and_search_mips(
 
         sorted_indices = presort(
             train_transformed,
-            space=FloatSpace.create(new_dims, Metric.FP32_L2, instruction),
+            metric=flas_metric,
             radius_decay=flas_radius_decay,
             threads=build_threads,
             callback=flas_progress_cb,
@@ -223,56 +224,44 @@ def construct_and_search_mips(
     else:
         t_flas = time.perf_counter() - t0
 
-    # 3. Graph Construction Phase (in FP32_InnerProduct space for d+1 dims)
+    # 3. Graph Construction Phase (in FP32_L2 space for d+1 dims)
     t0 = time.perf_counter()
-    build_space = FloatSpace.create(new_dims, Metric.FP32_L2, instruction)
+    build_metric = Metric.FP32_L2.with_instruction(instruction)
     print(
-        f"Building graph: k_graph={k_graph}, k_ext={k_ext}, eps_ext={eps_ext:.4f}, opt_target={optimization_target.name}, metric={build_space.metric().name} ({build_space.get_instruction().name}), build_threads={build_threads}..."
+        f"Building graph: k_graph={k_graph}, k_ext={k_ext}, eps_ext={eps_ext:.4f}, opt_target={optimization_target.name}, metric={build_metric.name} ({build_metric.get_instruction().name}), build_threads={build_threads}..."
     )
-    graph = deglib.create_empty(n_vecs, build_space, k_graph)
-    builder = deglib.GraphBuilder(
-        graph,
+    graph = deglib.build(
+        train_transformed,
+        edges_per_vertex=k_graph,
+        metric=build_metric,
+        optimization_target=optimization_target,
+        presort=sorted_indices if use_flas else False,
+        optimize=False,
         extend_k=k_ext,
         extend_eps=eps_ext,
         improve_k=0,
         improve_eps=0.0,
         max_path_length=5,
-        optimization_target=optimization_target,
+        threads=build_threads,
+        show_progress=True,
     )
-    builder.set_thread_count(build_threads)
-    builder.set_batch_size(100, 100)
-
-    if use_flas and sorted_indices is not None:
-        builder.add_entry(sorted_indices, train_transformed[sorted_indices])
-    else:
-        indices = np.arange(n_vecs, dtype=np.uint32)
-        builder.add_entry(indices, train_transformed)
-
-    build_callback = _make_build_callback(graph, n_vecs, time.perf_counter())
-    builder.build(callback=build_callback)
 
     t_build = time.perf_counter() - t0
     print(f"Graph construction completed in {t_build:.3f}s")
 
     # 5. FP16 Feature Quantization & Swap Phase
     t0 = time.perf_counter()
-    quantizer = make_scalar_quantizer_fp16(train_vectors)
-    database_fp16 = quantizer.quantize(train_vectors, num_threads=build_threads)
-    fp16_space = FloatSpace.create(dims, Metric.FP16_InnerProduct, instruction)
+    fp16_metric = Metric.FP16_InnerProduct.with_instruction(instruction)
     fp16_graph = graph.to_readonly(
-        feature_space=fp16_space,
-        custom_features=database_fp16,
-        transformations=[quantizer],
+        fp16_metric,
+        custom_features=train_vectors,
+        threads=build_threads,
     )
     t_swap = time.perf_counter() - t0
-    print(
-        f"FP16 quantization & ReadOnlyGraph swap completed in {t_swap * 1000:.2f}ms (scale: {quantizer.scale:.6g})"
-    )
+    print(f"FP16 quantization & ReadOnlyGraph swap completed in {t_swap * 1000:.2f}ms")
 
-    # Convert queries to FP16 using calibrated quantizer
-    t0 = time.perf_counter()
-    queries_fp16 = quantizer.quantize(query_vectors)
-    t_qconvert = time.perf_counter() - t0
+    # Queries are quantized automatically by fp16_graph during search
+    t_qconvert = 0.0
 
     # 6. FP16 Inner Product Search Phase (Sweep over max_dist_list with num_runs averaging)
     print(
@@ -292,7 +281,7 @@ def construct_and_search_mips(
         for run in range(num_runs):
             t0 = time.perf_counter()
             indices = fp16_graph.search(
-                queries_fp16,
+                query_vectors,
                 eps_or_ef=eps_search,
                 k=k_top,
                 max_distance_computation_count=max_dist,

@@ -44,8 +44,8 @@ class TestFilterIntegration:
         self.dims = 16
         self.edges_per_vertex = 10
         self.data = np.random.random((self.samples, self.dims)).astype(np.float32)
-        self.graph = deglib.builder.build_from_data(
-            self.data, edges_per_vertex=self.edges_per_vertex, metric=Metric.FP32_L2
+        self.graph = deglib.build(
+            self.data, edges_per_vertex=self.edges_per_vertex, metric=Metric.FP32_L2, optimize=False
         )
         self.query = np.random.random((self.dims,)).astype(np.float32)
 

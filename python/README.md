@@ -62,8 +62,8 @@ num_samples, dims = 10_000, 128
 data = np.random.random((num_samples, dims)).astype(np.float32)
 query = np.random.random(dims).astype(np.float32)
 
-# 2. Build index directly from data (multithreaded by default)
-graph = deglib.builder.build_from_data(data, edges_per_vertex=32, show_progress=True)
+# 2. Build index directly from data (multithreaded & optimized by default)
+graph = deglib.build(data, edges_per_vertex=32, show_progress=True)
 
 # 3. Query top-k nearest neighbors
 indices, distances = graph.search(query, k=10, eps_or_ef=0.1)
@@ -80,13 +80,12 @@ All search graphs are represented by `DynamicExplorationGraph`, backed by one of
 
 1. **Fixed-Capacity Mutable (`SizeBoundedGraph`)**: Memory is preallocated for a fixed maximum capacity. Fast and memory-efficient for static/batch datasets.
    ```python
-   space = deglib.FloatSpace.create(dim=128, metric=deglib.Metric.FP32_L2)
-   graph = deglib.create_empty(capacity=10_000, feature_space=space, edges_per_vertex=32)
+   graph = deglib.create_empty(capacity=10_000, dim=128, edges_per_vertex=32, metric=deglib.Metric.FP32_L2)
    ```
 
 2. **Chunk-Allocated Mutable (`DynamicGraph`)**: Dynamically allocates memory in chunks (e.g. 1024 vertices per chunk). Ideal for streaming datasets where total capacity is unknown.
    ```python
-   graph = deglib.create_dynamic_empty(feature_space=space, edges_per_vertex=32, chunk_size=1024)
+   graph = deglib.create_dynamic_empty(dim=128, edges_per_vertex=32, metric=deglib.Metric.FP32_L2, chunk_size=1024)
    ```
 
 3. **Read-Only Deployment (`ReadOnlyGraph`)**: Stripped of mutation structures for minimal memory footprint and maximum query throughput.
@@ -122,15 +121,14 @@ For continuous additions and removals, use `GraphBuilder`:
 import numpy as np
 import deglib
 from deglib.builder import GraphBuilder, OptimizationTarget
-from deglib.distances import FloatSpace, Metric
+from deglib.distances import Metric
 
 dims = 128
 max_capacity = 10_000
 edges_per_vertex = 32
 
-# 1. Create feature space and empty mutable graph
-space = FloatSpace.create(dims, metric=Metric.FP32_L2)
-graph = deglib.create_empty(max_capacity, space, edges_per_vertex)
+# 1. Create empty mutable graph
+graph = deglib.create_empty(max_capacity, dims, edges_per_vertex, metric=Metric.FP32_L2)
 
 # 2. Initialize builder
 builder = GraphBuilder(graph, optimization_target=OptimizationTarget.StreamingData, seed=42)
@@ -166,7 +164,7 @@ candidates = np.random.randint(0, 1000, size=(10, 50), dtype=np.uint32)
 base_vectors = np.random.random((1000, dims)).astype(np.float32)
 
 top_indices, top_distances = rerank(
-    space=graph.get_feature_space(),
+    metric=graph.get_metric(),
     queries=queries,
     candidate_indices=candidates,
     base_vectors=base_vectors,
@@ -198,45 +196,33 @@ batch_neighbors = graph.get_neighbors_batch(batch_entries, threads=4)  # shape: 
 
 ### Graph Optimization, Quantization & Reranking Pipeline
 
-A complete end-to-end pipeline demonstrating **FLAS pre-sorting**, **multithreaded graph building**, **Int8 quantization**, **ReadOnlyGraph conversion**, and deployment with **`Searcher`** for automatic query quantization and high-precision reranking:
+A complete end-to-end pipeline demonstrating **FLAS pre-sorting**, **multithreaded graph building**, **Int8 self-quantization**, **ReadOnlyGraph conversion**, and deployment with **`Searcher`** for automatic query quantization and high-precision reranking:
 
 ```python
 import numpy as np
 import deglib
-from deglib.optimization import presort
-from deglib.transformation import make_scalar_quantizer_int8
-from deglib.search import create_searcher
 
 num_vectors, dims = 10_000, 128
 data = np.random.randn(num_vectors, dims).astype(np.float32)
 query = np.random.randn(dims).astype(np.float32)
 
-# 1. Pre-sort vectors using FLAS for improved memory locality and index construction speed
-perm = presort(data, metric=deglib.Metric.FP32_InnerProduct, show_progress=True)
-sorted_data = data[perm]
-
-# 2. Build exploration graph on unquantized/original data
-graph = deglib.builder.build_from_data(
-    sorted_data,
+# 1. Pre-sort with FLAS and build exploration graph in FP32
+graph = deglib.build(
+    data,
     metric=deglib.Metric.FP32_InnerProduct,
     edges_per_vertex=32,
+    presort=True,
+    optimize=False,
     show_progress=True,
 )
 
-# 3. Calibrate Int8 quantizer pipeline and convert directly into ReadOnlyGraph (no extra quantized buffer needed)
-pipeline = deglib.transformation.make_quantizer_pipeline(sorted_data, deglib.Metric.Int8_InnerProduct)
-int8_space = deglib.FloatSpace.create(dims, deglib.Metric.Int8_InnerProduct)
-readonly_graph = graph.to_readonly(feature_space=int8_space, transformations=pipeline)
-
-# 5. Create high-performance Searcher equipped with base vectors for exact candidate reranking
-rerank_space = deglib.FloatSpace.create(dims, deglib.Metric.FP32_InnerProduct)
-searcher = create_searcher(
-    graph=readonly_graph,
-    rerank_space=rerank_space,
-    rerank_data=sorted_data,
+# 2. Convert into Int8 ReadOnlyGraph and attach FP16 reranker extracted from FP32 graph
+searcher = graph.to_searcher(
+    metric=deglib.Metric.Int8_InnerProduct,
+    rerank_metric=deglib.Metric.FP16_InnerProduct,
 )
 
-# 6. Query search (query is automatically quantized and top candidates are reranked)
+# 3. Query search (query is automatically quantized and top candidates are reranked)
 indices, distances = searcher.search(query, k=10, eps_or_ef=0.1, rerank_factor=1.5, return_distances=True)
 print("Top-10 nearest neighbor indices:", indices)
 print("Top-10 exact distances:", distances)
@@ -262,13 +248,13 @@ Controls the topology optimization strategy:
 
 ```python
 # Mode 1: Relative distance margin (default: eps_or_ef=0.1)
-indices, distances = searcher.search(query, k=10, eps_or_ef=0.1)
+indices, distances = searcher.search(query, k=10, eps_or_ef=0.1, return_distances=True)
 
 # Mode 2: Fixed candidate pool (HNSW-style)
-indices, distances = searcher.search(query, k=10, eps_or_ef=128)
+indices, distances = searcher.search(query, k=10, eps_or_ef=128, return_distances=True)
 
 # Optional: hard per-query budget of graph distance computations (0 = unlimited)
-indices, distances = searcher.search(query, k=10, eps_or_ef=128, max_distance_computation_count=700)
+indices = searcher.search(query, k=10, eps_or_ef=128, max_distance_computation_count=700)
 ```
 
 ### Supported Metrics & Data Types
@@ -276,8 +262,8 @@ indices, distances = searcher.search(query, k=10, eps_or_ef=128, max_distance_co
 - `Metric.FP32_InnerProduct`: Inner product / cosine distance (`np.float32`)
 - `Metric.Uint8_L2`: 8-bit unsigned integer Euclidean distance (`np.uint8`)
 - `Metric.Uint8_InnerProduct`: 8-bit unsigned integer inner product (`np.uint8`)
-- `Metric.FP16_L2`: 16-bit half-precision Euclidean distance (`np.uint16`)
-- `Metric.FP16_InnerProduct`: 16-bit half-precision inner product (`np.uint16`)
+- `Metric.FP16_L2`: 16-bit half-precision Euclidean distance (`np.float16` / `np.uint16`)
+- `Metric.FP16_InnerProduct`: 16-bit half-precision inner product (`np.float16` / `np.uint16`)
 - `Metric.EVP_InnerProduct`: Quantized Equi-Voronoi Polytopes (EVP) bit-packed vectors (`np.uint8`)
 - `Metric.Int8_InnerProduct`: 8-bit signed integer inner product (`np.int8`)
 - `Metric.Int8_L2`: 8-bit signed integer Euclidean distance (`np.int8`)

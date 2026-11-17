@@ -21,12 +21,12 @@ OptimizationTarget
    :show-inheritance:
    :member-order: bysource
 
-.. _build_from_data:
+.. _build:
 
-build_from_data
----------------
+build
+-----
 
-.. autofunction:: deglib.builder.build_from_data
+.. autofunction:: deglib.builder.build
 
 ProgressCallback
 ----------------

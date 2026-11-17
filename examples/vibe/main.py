@@ -161,7 +161,7 @@ _VIBE_METRICS = {
 
 
 def compute_linear_search_baseline(
-    base_vecs: np.ndarray, float_space: deglib.distances.FloatSpace, sample_size: int = 10
+    base_vecs: np.ndarray, metric: deglib.distances.Metric, sample_size: int = 10
 ) -> float:
     n_base = len(base_vecs)
     query_count = min(sample_size, n_base)
@@ -170,14 +170,14 @@ def compute_linear_search_baseline(
 
     print("\n--- Computing Linear Search Baseline ---")
     print(
-        f"Computing linear search baseline with {query_count} random queries on {n_base:,} base vectors using C++ {float_space.metric().name} ({float_space.get_instruction().name})..."
+        f"Computing linear search baseline with {query_count} random queries on {n_base:,} base vectors using C++ {metric.name} ({metric.get_instruction().name})..."
     )
 
     start_time = time.perf_counter()
     min_dist = float("inf")
 
     for idx in sample_indices:
-        dists = float_space.compute_distances(base_vecs[idx], base_vecs)
+        dists = metric.compute_distances(base_vecs[idx], base_vecs)
         d_min = float(np.min(dists))
         min_dist = min(min_dist, d_min)
 
@@ -296,23 +296,21 @@ def main():
         metric_str = meta["metric"]
         is_l2 = metric_str.lower().strip() in ("euclidean", "l2", "fp32_l2")
         metric_enum = deglib.Metric.FP32_L2 if is_l2 else deglib.Metric.FP32_InnerProduct
-        float_space = deglib.distances.FloatSpace.create(dims, metric_enum)
-        instruction_set = float_space.get_instruction().name
+        instruction_set = metric_enum.get_instruction().name
 
         print("\n--- System & Distance Config ---")
         print(f"Metric: {metric_str} ({metric_enum.name}), Dimensions: {dims}")
-        print(f"Vector Space Type: FloatSpace ({instruction_set})")
+        print(f"Vector Space Type: Metric ({instruction_set})")
         int8_metric_enum = deglib.Metric.Int8_L2 if is_l2 else deglib.Metric.Int8_InnerProduct
-        int8_space = deglib.distances.FloatSpace.create(dims, int8_metric_enum)
-        int8_instruction_set = int8_space.get_instruction().name
-        print(f"Int8 Feature Space: {int8_space.get_data_size()} bytes ({int8_instruction_set})")
+        int8_instruction_set = int8_metric_enum.get_instruction().name
+        print(f"Int8 Feature Space: {int8_metric_enum.get_data_size(dims)} bytes ({int8_instruction_set})")
         print(f"Query Dtype: {args.query_dtype.upper() if args.query_dtype else 'FROM CONFIG.YML'}")
         print(
             f"Hardware AVX: {deglib.cpu.has_avx2()}, AVX-512: {deglib.cpu.has_avx512()}, AVX2-VNNI: {deglib.cpu.has_avx2_vnni()}, AVX-512-VNNI: {deglib.cpu.has_avx512_vnni()}"
         )
 
         # Linear scan baseline
-        linear_baseline_us = compute_linear_search_baseline(base_vecs, float_space)
+        linear_baseline_us = compute_linear_search_baseline(base_vecs, metric_enum)
 
         # Filter algorithm if requested (e.g. --algorithm deg or --algorithm deg-qg)
         alg_filter = args.algorithm
@@ -371,8 +369,8 @@ def main():
 
             feature_instruction = ""
             if adapter.graph is not None:
-                feat_space = adapter.graph.get_feature_space()
-                feature_instruction = f", Features={feat_space.get_instruction().name}"
+                inst_set = adapter.graph.get_instruction()
+                feature_instruction = f", Features={inst_set.name}"
             print(
                 f"Index Config: K={k}, Opt={opt_target}, "
                 f"QueryMetric={query_metric}, "

@@ -6,9 +6,25 @@ from . import graph
 from . import optimization
 from . import search
 from . import transformation
-from .search import Reranker, Searcher, create_searcher
 
-from .builder import GraphBuilder, BuilderStatus, build_from_data
+from .analysis import analyze_graph, GraphStats, calc_graph_quality
+from .builder import (
+    build,
+    GraphBuilder,
+    OptimizationTarget,
+    BuilderStatus,
+    ProgressCallback,
+)
+from .cpu import (
+    InstructionSet,
+    has_avx2,
+    has_avx2_vnni,
+    has_avx512,
+    has_avx512_vnni,
+    has_avx512_fp16,
+    has_fp16,
+)
+from .distances import Metric, floats_to_fp16, fp16_to_floats
 from .graph import (
     DynamicExplorationGraph,
     create_empty,
@@ -19,34 +35,56 @@ from .graph import (
     load_dynamic_graph,
     load_mutable_graph,
 )
-from .distances import FloatSpace, Metric
+from .optimization import presort, prune_non_mrng_edges, prune_worst_edges
+from .search import Searcher, create_searcher, Reranker, rerank, Filter
 from .transformation import (
     FeatureTransformation,
-    MipsTransform,
-    L2NormalizeTransform,
-    FastHadamardRotation,
-    EvpQuantizer,
-    ScalarQuantizerInt8,
-    ScalarQuantizerUint8,
-    ScalarQuantizerUint4,
-    ScalarQuantizerInt4,
-    ScalarQuantizerUInt7,
-    ScalarQuantizerFP16,
+    make_quantizer_pipeline,
+    make_mips_transform,
     make_l2_normalize_transform,
     make_fast_hadamard_rotation,
-    make_quantizer_pipeline,
     make_evp_quantizer,
     make_scalar_quantizer_int8,
     make_scalar_quantizer_uint8,
+    make_scalar_quantizer_uint7,
     make_scalar_quantizer_uint4,
     make_scalar_quantizer_int4,
-    make_scalar_quantizer_uint7,
     make_scalar_quantizer_fp16,
+    apply_on_database,
+    apply_on_query,
 )
 
 __version__ = "0.2.8"
 
 __all__ = [
+    "__version__",
+    # Submodules
+    "analysis",
+    "builder",
+    "cpu",
+    "distances",
+    "graph",
+    "optimization",
+    "search",
+    "transformation",
+    # Builder & top-level build
+    "build",
+    "GraphBuilder",
+    "OptimizationTarget",
+    "BuilderStatus",
+    "ProgressCallback",
+    # Distances & CPU
+    "Metric",
+    "InstructionSet",
+    "floats_to_fp16",
+    "fp16_to_floats",
+    "has_avx2",
+    "has_avx2_vnni",
+    "has_avx512",
+    "has_avx512_vnni",
+    "has_avx512_fp16",
+    "has_fp16",
+    # Graph & I/O
     "DynamicExplorationGraph",
     "create_empty",
     "create_dynamic_empty",
@@ -55,39 +93,33 @@ __all__ = [
     "load_readonly_graph",
     "load_dynamic_graph",
     "load_mutable_graph",
-    "GraphBuilder",
-    "BuilderStatus",
-    "build_from_data",
-    "FloatSpace",
-    "Metric",
+    # Search & Rerank
+    "Searcher",
+    "create_searcher",
     "Reranker",
-    "optimization",
-    "transformation",
+    "rerank",
+    "Filter",
+    # Optimization
+    "presort",
+    "prune_non_mrng_edges",
+    "prune_worst_edges",
+    # Analysis
+    "analyze_graph",
+    "GraphStats",
+    "calc_graph_quality",
+    # Transformations & Quantizers
     "FeatureTransformation",
-    "MipsTransform",
-    "L2NormalizeTransform",
-    "FastHadamardRotation",
-    "EvpQuantizer",
-    "ScalarQuantizerInt8",
-    "ScalarQuantizerUint8",
-    "ScalarQuantizerUint4",
-    "ScalarQuantizerInt4",
-    "ScalarQuantizerUInt7",
-    "ScalarQuantizerFP16",
+    "make_quantizer_pipeline",
+    "make_mips_transform",
     "make_l2_normalize_transform",
     "make_fast_hadamard_rotation",
-    "make_quantizer_pipeline",
     "make_evp_quantizer",
     "make_scalar_quantizer_int8",
     "make_scalar_quantizer_uint8",
+    "make_scalar_quantizer_uint7",
     "make_scalar_quantizer_uint4",
     "make_scalar_quantizer_int4",
-    "make_scalar_quantizer_uint7",
     "make_scalar_quantizer_fp16",
-    "analysis",
-    "distances",
-    "search",
-    "Searcher",
-    "create_searcher",
-    "cpu",
+    "apply_on_database",
+    "apply_on_query",
 ]
