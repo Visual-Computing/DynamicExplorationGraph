@@ -8,8 +8,8 @@ if(DEFINED PYTHON_EXECUTABLE)
 endif()
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 
-# Add pybind11
-find_package(pybind11 CONFIG REQUIRED)
+# Add nanobind
+find_package(nanobind CONFIG REQUIRED)
 
 # disable benchmark and test building
 set(ENABLE_BENCHMARKS OFF CACHE BOOL "Disable benchmarks" FORCE)
@@ -26,7 +26,7 @@ endif()
 
 # Add cpp-deglib
 add_subdirectory(${DEGLIB_CPP_DIR} deglib_cpp_build)
-pybind11_add_module(deglib_cpp src/deg_cpp/deglib_cpp.cpp)
+nanobind_add_module(deglib_cpp NOMINSIZE src/deg_cpp/deglib_cpp.cpp)
 
 # Specify the include directories
 include_directories(${DEGLIB_CPP_DIR}/deglib/include)

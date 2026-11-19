@@ -34,7 +34,7 @@ jobs:
         cache: 'pip'
 
     - name: Add requirements
-      run: python -m pip install setuptools==83.0.0 pybind11==3.0.4 cibuildwheel
+      run: python -m pip install setuptools==83.0.0 nanobind==3.1.0 cibuildwheel
 
     - name: Copy Build Files
       run: python setup.py copy_build_files
@@ -68,7 +68,7 @@ jobs:
         python-version: "3.12"
 
     - name: Add requirements
-      run: python -m pip install setuptools==83.0.0 pybind11==3.0.4
+      run: python -m pip install setuptools==83.0.0 nanobind==3.1.0
 
     - name: Copy Build Files
       run: python setup.py copy_build_files

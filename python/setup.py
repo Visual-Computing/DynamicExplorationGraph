@@ -1,5 +1,5 @@
 """
-We copy the pybind11 include dir and the deglib include dir to ./include to make it available for this package.
+Setup script for building the deglib Python extension module via CMake and nanobind.
 """
 
 import os
@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pybind11
+import nanobind
 
 from setuptools import Extension, setup, Command, find_packages
 from setuptools.command.sdist import sdist as sdist_class
@@ -110,7 +110,7 @@ class CMakeBuild(build_ext):
         # Can be set with Conda-Build, for example.
         cmake_generator = os.environ.get("CMAKE_GENERATOR", "")
 
-        # Set Python_EXECUTABLE instead if you use PYBIND11_FINDPYTHON
+        # Set Python_EXECUTABLE for CMake FindPython
         # EXAMPLE_VERSION_INFO shows you how to pass a value into the C++ code
         # from Python.
         cmake_args = [
@@ -193,7 +193,7 @@ class CMakeBuild(build_ext):
         print("python interpreter in setup.py:", sys.executable, sys.version)
         print("calling cmake")
         call_cmake_checked(
-            ["cmake", ext.sourcedir, "-Dpybind11_DIR={}".format(pybind11.get_cmake_dir()), *cmake_args], cwd=build_temp
+            ["cmake", ext.sourcedir, "-Dnanobind_DIR={}".format(nanobind.cmake_dir()), *cmake_args], cwd=build_temp
         )
         print("calling cmake --build")
         call_cmake_checked(["cmake", "--build", ".", *build_args], cwd=build_temp)

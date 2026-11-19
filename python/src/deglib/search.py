@@ -270,20 +270,18 @@ class Searcher:
         """
         Search for the ``k`` nearest neighbors of a 1D query or 2D query batch.
         """
-        if not isinstance(query, np.ndarray):
+        if type(query) is not np.ndarray:
             query = np.ascontiguousarray(query, dtype=np.float32)
-        elif not query.flags.c_contiguous:
-            query = np.ascontiguousarray(query)
 
         return self._searcher_cpp.search(
             query,
-            k=int(k),
-            eps_or_ef=float(eps_or_ef),
-            rerank_factor=float(rerank_factor),
-            threads=int(threads),
-            return_distances=bool(return_distances),
-            unsorted=bool(unsorted),
-            max_distance_computation_count=int(max_distance_computation_count),
+            k,
+            eps_or_ef,
+            rerank_factor,
+            threads,
+            return_distances,
+            unsorted,
+            max_distance_computation_count,
         )
 
     def optimize(

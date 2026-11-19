@@ -41,7 +41,7 @@ To build and install the package directly from the repository:
 ```bash
 cd python/
 uv venv
-uv pip install setuptools==83.0.0 pybind11==3.0.4 build==1.5.0 wheel==0.48.0
+uv pip install setuptools==83.0.0 nanobind==3.1.0 build==1.5.0 wheel==0.48.0
 uv run python setup.py copy_build_files
 uv pip install . --no-build-isolation
 ```
@@ -304,7 +304,7 @@ If you want to contribute, modify C++ bindings, run tests, or build release pack
 # 1. Setup virtual environment and dependencies (using uv)
 cd python/
 uv venv
-uv pip install setuptools==83.0.0 pybind11==3.0.4 build==1.5.0 wheel==0.48.0
+uv pip install setuptools==83.0.0 nanobind==3.1.0 build==1.5.0 wheel==0.48.0
 uv run python setup.py copy_build_files
 
 # 2. Install in editable mode
