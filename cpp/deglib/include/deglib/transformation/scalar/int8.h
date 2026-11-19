@@ -1,6 +1,7 @@
 #pragma once
 
 #include "deglib/concurrent.h"
+#include "deglib/config.h"
 #include "deglib/distance/fp16.h"
 #include "deglib/transformation.h"
 #include "deglib/transformation/scalar/common.h"
@@ -132,10 +133,72 @@ class ScalarQuantizerInt8 : public FeatureTransformation {
         return static_cast<int8_t>(scaled);
     }
 
-    inline void transform_row(const float* src, int8_t* dst, uint32_t d) const {
+    using TransformRowFn = void (*)(const float*, int8_t*, uint32_t, float) noexcept;
+
+    static void transform_row_scalar(const float* src, int8_t* dst, uint32_t d, float scale) noexcept {
         for (uint32_t j = 0; j < d; ++j) {
-            dst[j] = transform(src[j]);
+            float scaled = std::round(src[j] * scale);
+            if (scaled < -127.0f) {
+                dst[j] = -127;
+            } else if (scaled > 127.0f) {
+                dst[j] = 127;
+            } else {
+                dst[j] = static_cast<int8_t>(scaled);
+            }
         }
+    }
+
+#if defined(DEGLIB_X86)
+    DEGLIB_TARGET_AVX2 static void transform_row_avx2(const float* src, int8_t* dst, uint32_t d, float scale) noexcept {
+        const __m256 v_scale = _mm256_set1_ps(scale);
+        const __m256 v_min = _mm256_set1_ps(-127.0f);
+        const __m256 v_max = _mm256_set1_ps(127.0f);
+
+        uint32_t j = 0;
+        for (; j + 8 <= d; j += 8) {
+            __m256 scaled = _mm256_mul_ps(_mm256_loadu_ps(src + j), v_scale);
+            scaled = _mm256_min_ps(_mm256_max_ps(scaled, v_min), v_max);
+            __m256i i32 = _mm256_cvtps_epi32(scaled);
+            __m128i lo = _mm256_castsi256_si128(i32);
+            __m128i hi = _mm256_extracti128_si256(i32, 1);
+            __m128i i16 = _mm_packs_epi32(lo, hi);
+            __m128i i8 = _mm_packs_epi16(i16, i16);
+            _mm_storel_epi64(reinterpret_cast<__m128i*>(dst + j), i8);
+        }
+        if (j < d) {
+            transform_row_scalar(src + j, dst + j, d - j, scale);
+        }
+    }
+
+    DEGLIB_TARGET_AVX512 static void transform_row_avx512(const float* src, int8_t* dst, uint32_t d, float scale) noexcept {
+        const __m512 v_scale = _mm512_set1_ps(scale);
+        const __m512 v_min = _mm512_set1_ps(-127.0f);
+        const __m512 v_max = _mm512_set1_ps(127.0f);
+
+        uint32_t j = 0;
+        for (; j + 16 <= d; j += 16) {
+            __m512 scaled = _mm512_mul_ps(_mm512_loadu_ps(src + j), v_scale);
+            scaled = _mm512_min_ps(_mm512_max_ps(scaled, v_min), v_max);
+            __m512i i32 = _mm512_cvtps_epi32(scaled);
+            __m128i i8 = _mm512_cvtsepi32_epi8(i32);
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + j), i8);
+        }
+        if (j < d) {
+            transform_row_scalar(src + j, dst + j, d - j, scale);
+        }
+    }
+#endif
+
+    static TransformRowFn select_transform_row_fn() noexcept {
+#if defined(DEGLIB_X86)
+        if (deglib::cpu::has_avx512()) return &transform_row_avx512;
+        if (deglib::cpu::has_avx2()) return &transform_row_avx2;
+#endif
+        return &transform_row_scalar;
+    }
+
+    inline void transform_row(const float* src, int8_t* dst, uint32_t d) const {
+        transform_row_fn_(src, dst, d, scale_);
     }
 
     inline void transform_row(const uint16_t* src_fp16, int8_t* dst, uint32_t d) const {
@@ -209,6 +272,7 @@ class ScalarQuantizerInt8 : public FeatureTransformation {
     float abs_max_ = 1.0f;
     float scale_ = 127.0f;
     bool is_fitted_ = false;
+    TransformRowFn transform_row_fn_ = select_transform_row_fn();
 };
 
 inline ScalarQuantizerInt8 make_scalar_quantizer_int8(std::span<const float> data, uint32_t dim, float quantile = -1.0f) {
