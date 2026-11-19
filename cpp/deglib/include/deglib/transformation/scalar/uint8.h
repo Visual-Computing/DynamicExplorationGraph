@@ -51,6 +51,10 @@ class ScalarQuantizerUint8 : public FeatureTransformation {
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUint8: dim must be > 0 prior to fit()");
         if (data.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUint8: data size must be multiple of dim");
         if (quantile <= 0.0f) quantile = 1.0f;
+        if (quantile >= 1.0f && detail::is_exact_integer_range(data.data(), data.size(), 0.0f, 255.0f)) {
+            set_range(0.0f, 255.0f);
+            return;
+        }
         auto [mi, ma] = detail::find_minmax(data.data(), data.size(), quantile);
         set_range(mi, ma);
     }
@@ -61,6 +65,10 @@ class ScalarQuantizerUint8 : public FeatureTransformation {
         if (data_fp16.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUint8: dim must be > 0 prior to fit()");
         if (data_fp16.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUint8: data size must be multiple of dim");
+        if ((quantile <= 0.0f || quantile >= 1.0f) && detail::is_exact_integer_range_fp16(data_fp16, 0.0f, 255.0f)) {
+            set_range(0.0f, 255.0f);
+            return;
+        }
         auto [mi, ma] = detail::find_minmax_fp16(data_fp16, quantile);
         set_range(mi, ma);
     }

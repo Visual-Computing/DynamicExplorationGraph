@@ -49,6 +49,10 @@ class ScalarQuantizerUInt7 : public FeatureTransformation {
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUInt7: dim must be > 0 prior to fit()");
         if (data.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUInt7: data size must be multiple of dim");
         if (quantile <= 0.0f) quantile = 1.0f;
+        if (quantile >= 1.0f && detail::is_exact_integer_range(data.data(), data.size(), 0.0f, 127.0f)) {
+            set_min_max(0.0f, 127.0f);
+            return;
+        }
         const size_t total_rows = data.size() / dim_;
         const size_t target_rows = std::min(total_rows, std::max<size_t>(1, total_rows / 10));
         std::vector<float> sampled;
@@ -67,6 +71,10 @@ class ScalarQuantizerUInt7 : public FeatureTransformation {
         if (data_fp16.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUInt7: dim must be > 0 prior to fit()");
         if (data_fp16.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUInt7: data size must be multiple of dim");
+        if ((quantile <= 0.0f || quantile >= 1.0f) && detail::is_exact_integer_range_fp16(data_fp16, 0.0f, 127.0f)) {
+            set_min_max(0.0f, 127.0f);
+            return;
+        }
         const size_t total_rows = data_fp16.size() / dim_;
         const size_t target_rows = std::min(total_rows, std::max<size_t>(1, total_rows / 10));
         std::vector<uint16_t> sampled;

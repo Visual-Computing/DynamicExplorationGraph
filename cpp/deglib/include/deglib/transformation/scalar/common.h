@@ -14,6 +14,30 @@
 
 namespace deglib::transformation::detail {
 
+/// Checks whether every value in `data` is an exact integer within `[lo, hi]`.
+/// Early-exits on the very first non-integer or out-of-range value (~1 ns on float embeddings).
+inline bool is_exact_integer_range(const float* data, size_t total_items, float lo, float hi) noexcept {
+    if (total_items == 0) return false;
+    for (size_t i = 0; i < total_items; ++i) {
+        const float v = data[i];
+        if (!(v >= lo && v <= hi && v == std::trunc(v))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+inline bool is_exact_integer_range_fp16(std::span<const uint16_t> data_fp16, float lo, float hi) noexcept {
+    if (data_fp16.empty()) return false;
+    for (uint16_t h : data_fp16) {
+        const float v = deglib::distances::fp16::fp16_to_float(h);
+        if (!(v >= lo && v <= hi && v == std::trunc(v))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 template <typename T>
 inline std::vector<T> sample_strided_rows(std::span<const T> data, uint32_t dim, size_t max_rows) {
     const size_t total_rows = data.size() / dim;

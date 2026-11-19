@@ -49,6 +49,10 @@ class ScalarQuantizerInt8 : public FeatureTransformation {
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerInt8: dim must be > 0 prior to fit()");
         if (data.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerInt8: data size must be multiple of dim");
         if (quantile <= 0.0f) quantile = 1.0f;
+        if (quantile >= 1.0f && detail::is_exact_integer_range(data.data(), data.size(), -127.0f, 127.0f)) {
+            set_abs_max(127.0f);
+            return;
+        }
         float found_max = detail::find_absmax(data.data(), data.size(), quantile);
         set_abs_max(found_max);
     }
@@ -59,6 +63,10 @@ class ScalarQuantizerInt8 : public FeatureTransformation {
         if (data_fp16.empty()) return;
         if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerInt8: dim must be > 0 prior to fit()");
         if (data_fp16.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerInt8: data size must be multiple of dim");
+        if ((quantile <= 0.0f || quantile >= 1.0f) && detail::is_exact_integer_range_fp16(data_fp16, -127.0f, 127.0f)) {
+            set_abs_max(127.0f);
+            return;
+        }
         set_abs_max(detail::find_absmax_fp16(data_fp16, quantile));
     }
 
