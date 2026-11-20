@@ -106,15 +106,15 @@ class Reranker {
 
     /**
      * Scores valid candidates against the query into `scratch` (dtype-agnostic).
-     * Prefetches the `po`-th next row, `pl` cache lines per row, with `po > 0` hoisted out of the loop.
+     * Batches valid candidates into fixed-size stack chunks and dispatches through
+     * FloatSpace::get_batch_dist_func() so the distance kernel stays fully inlined
+     * with lookahead prefetching without instantiating Reranker per distance type.
      * Out-of-range base indices are skipped directly (no sentinel + isfinite scan needed).
      * Returns the number of valid entries written to `scratch`.
      */
-    template <typename DistT, typename ParamT>
     static inline size_t score_all(
         std::vector<deglib::graph::ObjectDistance>& scratch,
-        const DistT& dist,
-        ParamT param,
+        const deglib::distances::FloatSpace& space,
         const std::byte* base,
         size_t row_bytes,
         size_t num_base,
@@ -123,42 +123,39 @@ class Reranker {
         int32_t po,
         int32_t pl
     ) {
-        const auto* q = reinterpret_cast<const uint8_t*>(query.data());
+        const auto* q = query.data();
         const auto* base_bytes = reinterpret_cast<const uint8_t*>(base);
         const size_t n = candidates.size();
         if (scratch.size() < n) scratch.resize(n);
         auto* dst = scratch.data();
+        const auto batch_dist_func = space.get_batch_dist_func();
+        const auto param = space.get_dist_func_param();
+        const size_t prefetch_bytes = (pl > 0) ? static_cast<size_t>(pl) * deglib::memory::L1_CACHE_LINE_SIZE : row_bytes;
+
+        constexpr size_t kBatchSize = 64;
+        const void* ptrs[kBatchSize];
+        uint32_t ids[kBatchSize];
+        float dists[kBatchSize];
+
         size_t valid = 0;
-
-        if (po > 0) {
-            const size_t prefetch_bytes = (pl > 0) ? static_cast<size_t>(pl) * deglib::memory::L1_CACHE_LINE_SIZE : row_bytes;
-            const auto prefetch_row = [prefetch_bytes, base_bytes, row_bytes, num_base](uint32_t row) {
-                if (row < num_base) {
-                    deglib::memory::prefetch(reinterpret_cast<const char*>(base_bytes + static_cast<size_t>(row) * row_bytes), prefetch_bytes);
+        size_t batch = 0;
+        for (size_t j = 0; j < n; ++j) {
+            const uint32_t cand = candidates[j];
+            if (cand >= num_base) continue;
+            ids[batch] = cand;
+            ptrs[batch] = base_bytes + static_cast<size_t>(cand) * row_bytes;
+            if (++batch == kBatchSize) {
+                batch_dist_func(q, ptrs, kBatchSize, param, dists, po, prefetch_bytes);
+                for (size_t i = 0; i < kBatchSize; ++i) {
+                    dst[valid++] = deglib::graph::ObjectDistance(ids[i], dists[i]);
                 }
-            };
-
-            const size_t lookahead = static_cast<size_t>(po);
-            const size_t warmup = std::min(lookahead, n);
-            for (size_t i = 0; i < warmup; ++i) {
-                prefetch_row(candidates[i]);
+                batch = 0;
             }
-
-            for (size_t j = 0; j < n; ++j) {
-                if (j + lookahead < n) {
-                    prefetch_row(candidates[j + lookahead]);
-                }
-                const uint32_t cand = candidates[j];
-                if (cand >= num_base) continue;
-                const float d = dist.compare(q, base_bytes + static_cast<size_t>(cand) * row_bytes, param);
-                dst[valid++] = deglib::graph::ObjectDistance(cand, d);
-            }
-        } else {
-            for (size_t j = 0; j < n; ++j) {
-                const uint32_t cand = candidates[j];
-                if (cand >= num_base) continue;
-                const float d = dist.compare(q, base_bytes + static_cast<size_t>(cand) * row_bytes, param);
-                dst[valid++] = deglib::graph::ObjectDistance(cand, d);
+        }
+        if (batch > 0) {
+            batch_dist_func(q, ptrs, batch, param, dists, po, prefetch_bytes);
+            for (size_t i = 0; i < batch; ++i) {
+                dst[valid++] = deglib::graph::ObjectDistance(ids[i], dists[i]);
             }
         }
         return valid;
@@ -653,22 +650,19 @@ class Reranker {
             return result;
         }
         auto& scratch = flat_scratch_;
-        const auto param = space_.get_dist_func_param();
-        space_.compute([&](const auto& dist) {
-            const size_t valid = score_all(scratch, dist, param, base(), row_bytes(), num_base_vectors_, query, candidates, po_, pl_);
-            const size_t top = std::min<size_t>(k, valid);
-            if (top > 0) {
-                auto begin = scratch.begin();
-                auto end = begin + static_cast<std::ptrdiff_t>(valid);
-                if (top < valid) {
-                    std::partial_sort(begin, begin + static_cast<std::ptrdiff_t>(top), end);
-                } else {
-                    std::sort(begin, end);
-                }
-                result.reserve(top);
-                for (size_t i = 0; i < top; ++i) result.emplace(scratch[i].getIdentifier(), scratch[i].getDistance());
+        const size_t valid = score_all(scratch, space_, base(), row_bytes(), num_base_vectors_, query, candidates, po_, pl_);
+        const size_t top = std::min<size_t>(k, valid);
+        if (top > 0) {
+            auto begin = scratch.begin();
+            auto end = begin + static_cast<std::ptrdiff_t>(valid);
+            if (top < valid) {
+                std::partial_sort(begin, begin + static_cast<std::ptrdiff_t>(top), end);
+            } else {
+                std::sort(begin, end);
             }
-        });
+            result.reserve(top);
+            for (size_t i = 0; i < top; ++i) result.emplace(scratch[i].getIdentifier(), scratch[i].getDistance());
+        }
         return result;
     }
 
@@ -696,9 +690,7 @@ class Reranker {
             return 0;
         }
         auto& scratch = flat_scratch_;
-        const auto param = space_.get_dist_func_param();
-        size_t valid = 0;
-        space_.compute([&](const auto& dist) { valid = score_all(scratch, dist, param, base(), row_bytes(), num_base_vectors_, query, candidates, po_, pl_); });
+        const size_t valid = score_all(scratch, space_, base(), row_bytes(), num_base_vectors_, query, candidates, po_, pl_);
         return select_top_k(scratch, valid, k, out_indices, out_distances, return_distances, unsorted);
     }
 
@@ -821,32 +813,29 @@ class Reranker {
 
         const size_t stride = row_bytes();
         std::vector<deglib::graph::ResultSet> results(num_queries);
-        const auto param = space_.get_dist_func_param();
 
-        space_.compute([&](const auto& dist) {
-            deglib::concurrent::parallel_batch_for(0, num_queries, num_threads, [&](size_t begin, size_t end, size_t) {
-                auto& scratch = flat_scratch_;
-                for (size_t i = begin; i < end; ++i) {
-                    const auto q = queries.subspan(i * stride, stride);
-                    const auto c = candidates.subspan(i * candidates_per_query, candidates_per_query);
-                    auto& result = results[i];
-                    if (c.empty() || k_top == 0) continue;
+        deglib::concurrent::parallel_batch_for(0, num_queries, num_threads, [&](size_t begin, size_t end, size_t) {
+            auto& scratch = flat_scratch_;
+            for (size_t i = begin; i < end; ++i) {
+                const auto q = queries.subspan(i * stride, stride);
+                const auto c = candidates.subspan(i * candidates_per_query, candidates_per_query);
+                auto& result = results[i];
+                if (c.empty() || k_top == 0) continue;
 
-                    const size_t valid = score_all(scratch, dist, param, base(), stride, num_base_vectors_, q, c, po_, pl_);
-                    const size_t top = std::min<size_t>(k_top, valid);
-                    if (top > 0) {
-                        auto it_begin = scratch.begin();
-                        auto it_end = it_begin + static_cast<std::ptrdiff_t>(valid);
-                        if (top < valid) {
-                            std::partial_sort(it_begin, it_begin + static_cast<std::ptrdiff_t>(top), it_end);
-                        } else {
-                            std::sort(it_begin, it_end);
-                        }
-                        result.reserve(top);
-                        for (size_t j = 0; j < top; ++j) result.emplace(scratch[j].getIdentifier(), scratch[j].getDistance());
+                const size_t valid = score_all(scratch, space_, base(), stride, num_base_vectors_, q, c, po_, pl_);
+                const size_t top = std::min<size_t>(k_top, valid);
+                if (top > 0) {
+                    auto it_begin = scratch.begin();
+                    auto it_end = it_begin + static_cast<std::ptrdiff_t>(valid);
+                    if (top < valid) {
+                        std::partial_sort(it_begin, it_begin + static_cast<std::ptrdiff_t>(top), it_end);
+                    } else {
+                        std::sort(it_begin, it_end);
                     }
+                    result.reserve(top);
+                    for (size_t j = 0; j < top; ++j) result.emplace(scratch[j].getIdentifier(), scratch[j].getDistance());
                 }
-            });
+            }
         });
 
         return results;
@@ -878,24 +867,21 @@ class Reranker {
         }
 
         const size_t stride = row_bytes();
-        const auto param = space_.get_dist_func_param();
 
-        space_.compute([&](const auto& dist) {
-            deglib::concurrent::parallel_batch_for(0, num_queries, num_threads, [&](size_t begin, size_t end, size_t) {
-                std::vector<deglib::graph::ObjectDistance> scratch;
-                scratch.reserve(candidates_per_query);
+        deglib::concurrent::parallel_batch_for(0, num_queries, num_threads, [&](size_t begin, size_t end, size_t) {
+            std::vector<deglib::graph::ObjectDistance> scratch;
+            scratch.reserve(candidates_per_query);
 
-                for (size_t i = begin; i < end; ++i) {
-                    const auto q = queries.subspan(i * stride, stride);
-                    const auto c = candidates.subspan(i * candidates_per_query, candidates_per_query);
+            for (size_t i = begin; i < end; ++i) {
+                const auto q = queries.subspan(i * stride, stride);
+                const auto c = candidates.subspan(i * candidates_per_query, candidates_per_query);
 
-                    const size_t valid = score_all(scratch, dist, param, base(), stride, num_base_vectors_, q, c, po_, pl_);
-                    select_top_k(
-                        scratch, valid, k_top, out_indices.subspan(i * k_top, k_top),
-                        return_distances ? out_distances.subspan(i * k_top, k_top) : std::span<float>{}, return_distances, unsorted
-                    );
-                }
-            });
+                const size_t valid = score_all(scratch, space_, base(), stride, num_base_vectors_, q, c, po_, pl_);
+                select_top_k(
+                    scratch, valid, k_top, out_indices.subspan(i * k_top, k_top),
+                    return_distances ? out_distances.subspan(i * k_top, k_top) : std::span<float>{}, return_distances, unsorted
+                );
+            }
         });
     }
 };

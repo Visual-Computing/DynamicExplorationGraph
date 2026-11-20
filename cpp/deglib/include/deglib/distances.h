@@ -1,7 +1,9 @@
 #pragma once
 
 #include "deglib/config.h"
+#include "deglib/utils/memory.h"
 
+#include <algorithm>
 #include <concepts>
 #include <cstddef>
 #include <stdexcept>
@@ -121,137 +123,183 @@ struct Metric {
 /**
  * Function pointer signature for distance comparison functions.
  */
-template <typename MTYPE>
-using DISTFUNC = MTYPE (*)(const void*, const void*, const void*);
+using DISTFUNC = float (*)(const void*, const void*, const void*);
+
+/**
+ * Function pointer signature for batch distance computations over an array of target pointers.
+ */
+using BATCH_DISTFUNC = void (*)(
+    const void* query,
+    const void* const* targets,
+    size_t count,
+    const void* param,
+    float* out_distances,
+    int32_t prefetch_offset,
+    size_t prefetch_bytes
+);
+
+/**
+ * Function pointer signature for batch distance computations over a contiguous strided target array.
+ */
+using STRIDED_DISTFUNC = void (*)(
+    const void* query,
+    const void* targets,
+    size_t stride,
+    size_t count,
+    const void* param,
+    float* out_distances,
+    int32_t prefetch_offset,
+    size_t prefetch_bytes
+);
 
 /**
  * Concept for distance function implementations that provide a static compare method
- * compatible with DISTFUNC<float>.
+ * compatible with DISTFUNC.
  */
 template <typename T>
 concept DistanceFunction = requires(const void* a, const void* b, const void* param) {
     { T::compare(a, b, param) } -> std::same_as<float>;
-} && std::is_convertible_v<decltype(&T::compare), DISTFUNC<float>>;
+    { T::get_instruction() } -> std::convertible_to<const char*>;
+} && std::is_convertible_v<decltype(&T::compare), DISTFUNC>;
+
+namespace detail {
+
+template <DistanceFunction Dist>
+inline void batch_compare_impl(
+    const void* query,
+    const void* const* targets,
+    const size_t count,
+    const void* param,
+    float* out_distances,
+    const int32_t prefetch_offset,
+    const size_t prefetch_bytes
+) {
+    if (prefetch_offset > 0 && prefetch_bytes > 0) {
+        const size_t po = static_cast<size_t>(prefetch_offset);
+        const size_t warmup = std::min(po, count);
+        for (size_t i = 0; i < warmup; ++i) {
+            deglib::memory::prefetch(static_cast<const char*>(targets[i]), prefetch_bytes);
+        }
+        for (size_t i = 0; i < count; ++i) {
+            if (i + po < count) {
+                deglib::memory::prefetch(static_cast<const char*>(targets[i + po]), prefetch_bytes);
+            }
+            out_distances[i] = Dist::compare(query, targets[i], param);
+        }
+    } else {
+        for (size_t i = 0; i < count; ++i) {
+            out_distances[i] = Dist::compare(query, targets[i], param);
+        }
+    }
+}
+
+template <DistanceFunction Dist>
+inline void strided_compare_impl(
+    const void* query,
+    const void* targets,
+    const size_t stride,
+    const size_t count,
+    const void* param,
+    float* out_distances,
+    const int32_t prefetch_offset,
+    const size_t prefetch_bytes
+) {
+    const auto* base = static_cast<const std::byte*>(targets);
+    if (prefetch_offset > 0 && prefetch_bytes > 0) {
+        const size_t po = static_cast<size_t>(prefetch_offset);
+        const size_t warmup = std::min(po, count);
+        for (size_t i = 0; i < warmup; ++i) {
+            deglib::memory::prefetch(reinterpret_cast<const char*>(base + i * stride), prefetch_bytes);
+        }
+        for (size_t i = 0; i < count; ++i) {
+            if (i + po < count) {
+                deglib::memory::prefetch(reinterpret_cast<const char*>(base + (i + po) * stride), prefetch_bytes);
+            }
+            out_distances[i] = Dist::compare(query, base + i * stride, param);
+        }
+    } else {
+        for (size_t i = 0; i < count; ++i) {
+            out_distances[i] = Dist::compare(query, base + i * stride, param);
+        }
+    }
+}
+
+}  // namespace detail
 
 /**
- * Metaprogrammierung: Fügt mehere std::variants zu EINEM flachen std::variant zusammen.
- * Das Ergebnis ist ein flacher Variant -> 0 Laufzeit-Overhead, einstufiger std::visit.
+ * Resolved function-pointer table for a concrete DistanceFunction implementation.
+ * Constructed once per FloatSpace so callers avoid template fan-out over all distance types
+ * while keeping Dist::compare fully inlined inside the batch loops.
  */
-template <typename... Variants>
-struct variant_concat;
-template <typename... Ts1, typename... Ts2, typename... Rest>
-struct variant_concat<std::variant<Ts1...>, std::variant<Ts2...>, Rest...> : variant_concat<std::variant<Ts1..., Ts2...>, Rest...> {};
-template <typename... Ts>
-struct variant_concat<std::variant<Ts...>> {
-    using type = std::variant<Ts...>;
+struct DistanceKernel {
+    DISTFUNC compare = nullptr;
+    BATCH_DISTFUNC compare_batch = nullptr;
+    STRIDED_DISTFUNC compare_strided = nullptr;
+    const char* instruction = "Unknown";
+
+    template <DistanceFunction Dist>
+    static consteval DistanceKernel make() noexcept {
+        return DistanceKernel{
+            &Dist::compare,
+            &detail::batch_compare_impl<Dist>,
+            &detail::strided_compare_impl<Dist>,
+            Dist::get_instruction(),
+        };
+    }
 };
-template <typename... Variants>
-using variant_concat_t = typename variant_concat<Variants...>::type;
 
-/**
- * Variant containing all supported concrete distance function implementations.
- * Automatically flattened from sub-namespace variants at compile time.
- */
-using DistanceVariant = variant_concat_t<
-    deglib::distances::fp32_l2::DistanceVariant,
-    deglib::distances::fp32_ip::DistanceVariant,
-    deglib::distances::fp16_l2::DistanceVariant,
-    deglib::distances::fp16_ip::DistanceVariant,
-    deglib::distances::uint8_l2::DistanceVariant,
-    deglib::distances::uint8_ip::DistanceVariant,
-    deglib::distances::evp_ip::DistanceVariant,
-    deglib::distances::int8_l2::DistanceVariant,
-    deglib::distances::int8_ip::DistanceVariant,
-    deglib::distances::uint4_l2::DistanceVariant,
-    deglib::distances::uint4_ip::DistanceVariant,
-    deglib::distances::int4_l2::DistanceVariant,
-    deglib::distances::int4_ip::DistanceVariant,
-    deglib::distances::uint7_l2::DistanceVariant,
-    deglib::distances::uint7_ip::DistanceVariant>;
+namespace detail {
 
-// Compile-time verification that every type in DistanceVariant fulfills the DistanceFunction concept
-static_assert(
-    []<typename... Ts>(std::variant<Ts...>*) { return (deglib::distances::DistanceFunction<Ts> && ...); }(static_cast<DistanceVariant*>(nullptr)),
-    "All types in DistanceVariant must satisfy DistanceFunction concept"
-);
-
-/**
- * Extracts the DISTFUNC<float> function pointer from a DistanceVariant object.
- */
-inline DISTFUNC<float> to_dist_func(const DistanceVariant& variant) {
-    return std::visit(
-        [](auto&& dist) -> DISTFUNC<float> {
-            using DistType = std::decay_t<decltype(dist)>;
-            static_assert(deglib::distances::DistanceFunction<DistType>, "Selected distance variant must satisfy DistanceFunction concept");
-            return &DistType::compare;
-        },
-        variant
-    );
-}
-
-/**
- * Extracts the instruction set string name from a DistanceVariant object.
- */
-inline const char* to_instruction(const DistanceVariant& variant) {
-    return std::visit(
-        [](auto&& dist) -> const char* {
-            using DistType = std::decay_t<decltype(dist)>;
-            return DistType::get_instruction();
-        },
-        variant
-    );
-}
-
-/**
- * Converts a sub-namespace DistanceVariant into the flat DistanceVariant.
- * Uses std::visit to extract the concrete distance type and return it
- * as the flattened variant — zero runtime overhead, single-level visit.
- */
 template <typename SubVariant>
-inline DistanceVariant to_flat_variant(SubVariant&& sub_variant) {
-    return std::visit([](const auto& concrete_dist) -> DistanceVariant { return DistanceVariant{concrete_dist}; }, sub_variant);
+inline DistanceKernel to_kernel(SubVariant&& sub_variant) {
+    return std::visit(
+        []<DistanceFunction Dist>(const Dist&) -> DistanceKernel { return DistanceKernel::make<Dist>(); },
+        sub_variant
+    );
 }
+
+}  // namespace detail
 
 /**
  * Represents a metric feature space for vector distance computations.
  * Manages dimension, metric type, byte size, and distance evaluation logic.
  */
 class FloatSpace {
-    static DistanceVariant
-    select_dist_variant(const size_t dim, const Metric metric, const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) {
+    static DistanceKernel
+    select_kernel(const size_t dim, const Metric metric, const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto) {
         switch (metric) {
             case Metric::FP32_L2:
-                return to_flat_variant(deglib::distances::fp32_l2::select_dist(dim, instruction));
+                return detail::to_kernel(deglib::distances::fp32_l2::select_dist(dim, instruction));
             case Metric::FP32_InnerProduct:
-                return to_flat_variant(deglib::distances::fp32_ip::select_dist(dim, instruction));
+                return detail::to_kernel(deglib::distances::fp32_ip::select_dist(dim, instruction));
             case Metric::FP16_L2:
-                return to_flat_variant(deglib::distances::fp16_l2::select_dist(dim, instruction));
+                return detail::to_kernel(deglib::distances::fp16_l2::select_dist(dim, instruction));
             case Metric::FP16_InnerProduct:
-                return to_flat_variant(deglib::distances::fp16_ip::select_dist(dim, instruction));
+                return detail::to_kernel(deglib::distances::fp16_ip::select_dist(dim, instruction));
             case Metric::Uint8_L2:
-                return to_flat_variant(deglib::distances::uint8_l2::select_dist(dim, instruction));
+                return detail::to_kernel(deglib::distances::uint8_l2::select_dist(dim, instruction));
             case Metric::Uint8_InnerProduct:
-                return to_flat_variant(deglib::distances::uint8_ip::select_dist(dim, instruction));
+                return detail::to_kernel(deglib::distances::uint8_ip::select_dist(dim, instruction));
             case Metric::EVP_InnerProduct:
-                return to_flat_variant(deglib::distances::evp_ip::select_dist(dim, instruction));
+                return detail::to_kernel(deglib::distances::evp_ip::select_dist(dim, instruction));
             case Metric::Int8_InnerProduct:
-                return to_flat_variant(deglib::distances::int8_ip::select_dist(dim, instruction));
+                return detail::to_kernel(deglib::distances::int8_ip::select_dist(dim, instruction));
             case Metric::Int8_L2:
-                return to_flat_variant(deglib::distances::int8_l2::select_dist(dim, instruction));
+                return detail::to_kernel(deglib::distances::int8_l2::select_dist(dim, instruction));
             case Metric::Uint4_InnerProduct:
-                return to_flat_variant(deglib::distances::uint4_ip::select_dist(dim, instruction));
+                return detail::to_kernel(deglib::distances::uint4_ip::select_dist(dim, instruction));
             case Metric::Uint4_L2:
-                return to_flat_variant(deglib::distances::uint4_l2::select_dist(dim, instruction));
+                return detail::to_kernel(deglib::distances::uint4_l2::select_dist(dim, instruction));
             case Metric::Int4_InnerProduct:
-                return to_flat_variant(deglib::distances::int4_ip::select_dist(dim, instruction));
+                return detail::to_kernel(deglib::distances::int4_ip::select_dist(dim, instruction));
             case Metric::Int4_L2:
-                return to_flat_variant(deglib::distances::int4_l2::select_dist(dim, instruction));
+                return detail::to_kernel(deglib::distances::int4_l2::select_dist(dim, instruction));
             case Metric::UInt7_L2:
-                return to_flat_variant(deglib::distances::uint7_l2::select_dist(dim, instruction));
+                return detail::to_kernel(deglib::distances::uint7_l2::select_dist(dim, instruction));
             case Metric::UInt7_InnerProduct:
-                return to_flat_variant(deglib::distances::uint7_ip::select_dist(dim, instruction));
+                return detail::to_kernel(deglib::distances::uint7_ip::select_dist(dim, instruction));
             default:
-                throw std::invalid_argument("Unsupported metric type in select_dist_variant");
+                throw std::invalid_argument("Unsupported metric type in select_kernel");
         }
     }
 
@@ -281,7 +329,7 @@ class FloatSpace {
         return calculate_data_size(dim, metric);
     }
 
-    DistanceVariant dist_variant_;
+    DistanceKernel kernel_;
     size_t data_size_ = 0;
     size_t query_data_size_ = 0;
     size_t dim_ = 0;
@@ -291,14 +339,14 @@ class FloatSpace {
     FloatSpace() : FloatSpace(0, Metric{}) {}
 
     FloatSpace(const size_t dim, const Metric metric, const deglib::cpu::InstructionSet instruction = deglib::cpu::InstructionSet::Auto)
-        : dist_variant_(select_dist_variant(dim, metric, instruction)),
+        : kernel_(select_kernel(dim, metric, instruction)),
           data_size_(calculate_data_size(dim, metric)),
           query_data_size_(calculate_query_data_size(dim, metric)),
           dim_(dim),
           metric_(metric) {}
 
-    FloatSpace(const size_t dim, const Metric metric, DistanceVariant dist_variant)
-        : dist_variant_(std::move(dist_variant)),
+    FloatSpace(const size_t dim, const Metric metric, DistanceKernel kernel)
+        : kernel_(kernel),
           data_size_(calculate_data_size(dim, metric)),
           query_data_size_(calculate_query_data_size(dim, metric)),
           dim_(dim),
@@ -327,26 +375,27 @@ class FloatSpace {
     /**
      * Returns a function pointer to the selected distance comparison function.
      */
-    const DISTFUNC<float> get_dist_func() const { return to_dist_func(dist_variant_); }
+    DISTFUNC get_dist_func() const noexcept { return kernel_.compare; }
+
+    /**
+     * Returns a function pointer for batch distance computation over target pointers.
+     */
+    BATCH_DISTFUNC get_batch_dist_func() const noexcept { return kernel_.compare_batch; }
+
+    /**
+     * Returns a function pointer for batch distance computation over contiguous strided targets.
+     */
+    STRIDED_DISTFUNC get_strided_dist_func() const noexcept { return kernel_.compare_strided; }
 
     /**
      * Returns the instruction set name (e.g. "AVX512", "AVX2", "Scalar") used by the distance function.
      */
-    const char* get_instruction() const { return to_instruction(dist_variant_); }
+    const char* get_instruction() const noexcept { return kernel_.instruction; }
 
     /**
      * Returns the parameter required by the distance function (pointer to vector dimension).
      */
-    const void* get_dist_func_param() const { return &dim_; }
-
-    /**
-     * Executes a visitor function with the concrete compile-time DistanceFunction type
-     * selected for this feature space (static dispatch).
-     */
-    template <typename Visitor>
-    decltype(auto) compute(Visitor&& visitor) const {
-        return std::visit(std::forward<Visitor>(visitor), dist_variant_);
-    }
+    const void* get_dist_func_param() const noexcept { return &dim_; }
 
     ~FloatSpace() {}
 };
@@ -374,20 +423,12 @@ compute_distances(const FloatSpace& space, const void* queries, size_t num_queri
 
     const size_t byte_stride = space.get_data_size();
     const uint8_t* q_ptr = static_cast<const uint8_t*>(queries);
-    const uint8_t* t_ptr = static_cast<const uint8_t*>(targets);
-
+    const auto strided_dist_func = space.get_strided_dist_func();
     const auto param = space.get_dist_func_param();
-    space.compute([&](const auto& dist_func_obj) {
-        using DistType = std::decay_t<decltype(dist_func_obj)>;
-        for (size_t q = 0; q < num_queries; ++q) {
-            const uint8_t* current_query = q_ptr + q * byte_stride;
-            float* out_row = result_distances + q * num_targets;
 
-            for (size_t t = 0; t < num_targets; ++t) {
-                out_row[t] = DistType::compare(current_query, t_ptr + t * byte_stride, param);
-            }
-        }
-    });
+    for (size_t q = 0; q < num_queries; ++q) {
+        strided_dist_func(q_ptr + q * byte_stride, targets, byte_stride, num_targets, param, result_distances + q * num_targets, 0, 0);
+    }
 }
 
 /**
@@ -395,7 +436,7 @@ compute_distances(const FloatSpace& space, const void* queries, size_t num_queri
  */
 inline std::vector<float> compute_distances(const FloatSpace& space, const void* queries, size_t num_queries, const void* targets, size_t num_targets) {
     std::vector<float> result_distances(num_queries * num_targets);
-    return result_distances;
     compute_distances(space, queries, num_queries, targets, num_targets, result_distances.data());
+    return result_distances;
 }
 }  // namespace deglib::distances

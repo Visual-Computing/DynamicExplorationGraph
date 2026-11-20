@@ -575,3 +575,50 @@ TEST(DeglibDistanceSelection, VNNIFallbackAcrossAllMetrics) {
     }
 #endif
 }
+
+TEST(DeglibDistances, ComputeDistancesVectorOverload) {
+    deglib::distances::FloatSpace space(3, deglib::distances::Metric::FP32_L2);
+    const std::vector<float> queries = {1.0f, 2.0f, 3.0f, 0.0f, 0.0f, 0.0f};
+    const std::vector<float> targets = {1.0f, 2.0f, 3.0f, 4.0f, 6.0f, 3.0f};
+
+    const auto dists = deglib::distances::compute_distances(space, queries.data(), 2, targets.data(), 2);
+    ASSERT_EQ(dists.size(), 4u);
+    EXPECT_FLOAT_EQ(dists[0], 0.0f);
+    EXPECT_FLOAT_EQ(dists[1], 25.0f);
+    EXPECT_FLOAT_EQ(dists[2], 14.0f);
+    EXPECT_FLOAT_EQ(dists[3], 61.0f);
+}
+
+TEST(DeglibDistances, BatchAndStridedKernelMatchSingleCompare) {
+    deglib::distances::FloatSpace space(4, deglib::distances::Metric::FP32_L2);
+    const float query[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+    const float targets[3][4] = {
+        {1.0f, 2.0f, 3.0f, 4.0f},
+        {2.0f, 4.0f, 6.0f, 8.0f},
+        {0.0f, 0.0f, 0.0f, 0.0f},
+    };
+    const void* ptrs[3] = {targets[0], targets[1], targets[2]};
+
+    const auto single = space.get_dist_func();
+    const auto batch = space.get_batch_dist_func();
+    const auto strided = space.get_strided_dist_func();
+    const auto param = space.get_dist_func_param();
+
+    float batch_no_pf[3] = {};
+    float batch_pf[3] = {};
+    float strided_no_pf[3] = {};
+    float strided_pf[3] = {};
+
+    batch(query, ptrs, 3, param, batch_no_pf, 0, 0);
+    batch(query, ptrs, 3, param, batch_pf, 2, space.get_data_size());
+    strided(query, targets, space.get_data_size(), 3, param, strided_no_pf, 0, 0);
+    strided(query, targets, space.get_data_size(), 3, param, strided_pf, 2, space.get_data_size());
+
+    for (size_t i = 0; i < 3; ++i) {
+        const float expected = single(query, targets[i], param);
+        EXPECT_FLOAT_EQ(batch_no_pf[i], expected);
+        EXPECT_FLOAT_EQ(batch_pf[i], expected);
+        EXPECT_FLOAT_EQ(strided_no_pf[i], expected);
+        EXPECT_FLOAT_EQ(strided_pf[i], expected);
+    }
+}

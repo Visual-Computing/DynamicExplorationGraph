@@ -215,13 +215,13 @@ class KMeansEntrySelector {
         }
 
         const deglib::distances::FloatSpace float_space(dim, is_l2 ? deglib::distances::Metric::FP32_L2 : deglib::distances::Metric::FP32_InnerProduct);
-        const auto positions = float_space.compute([&](const auto& kernel) {
-            return cluster::kmeans_medoids(
-                candidate_features, dim,
-                [&](const float* a, const float* b) -> float { return std::decay_t<decltype(kernel)>::compare(a, b, float_space.get_dist_func_param()); },
-                n_clusters, n_iter, seed, threads
-            );
-        });
+        const auto dist_func = float_space.get_dist_func();
+        const auto dist_param = float_space.get_dist_func_param();
+        const auto positions = cluster::kmeans_medoids(
+            candidate_features, dim,
+            [dist_func, dist_param](const float* a, const float* b) -> float { return dist_func(a, b, dist_param); },
+            n_clusters, n_iter, seed, threads
+        );
 
         entries_.clear();
         entries_.reserve(positions.size());
@@ -261,87 +261,59 @@ class KMeansEntrySelector {
 
         const auto& feature_space = graph_->getFeatureSpace();
         const auto dist_param = feature_space.get_dist_func_param();
-        const auto* q = reinterpret_cast<const uint8_t*>(query.data());
-        const auto* medoids = reinterpret_cast<const uint8_t*>(aligned_medoids_);
         const size_t stride = medoid_stride_;
+        const size_t pf_bytes = (pl_ > 0) ? static_cast<size_t>(pl_) * deglib::memory::L1_CACHE_LINE_SIZE : stride;
 
-        const auto scan = [&](size_t start, auto&& emit) {
-            const uint8_t* ptr = medoids + start * stride;
-            if (po_ > 0) {
-                const size_t lookahead = static_cast<size_t>(po_);
-                const size_t pf_bytes = (pl_ > 0) ? static_cast<size_t>(pl_) * deglib::memory::L1_CACHE_LINE_SIZE : stride;
-                const size_t warmup = std::min(start + lookahead, num_entries);
-                for (size_t i = start; i < warmup; ++i) {
-                    deglib::memory::prefetch(reinterpret_cast<const char*>(medoids + i * stride), pf_bytes);
-                }
-                for (size_t i = start; i < num_entries; ++i, ptr += stride) {
-                    if (i + lookahead < num_entries) {
-                        deglib::memory::prefetch(reinterpret_cast<const char*>(ptr + lookahead * stride), pf_bytes);
-                    }
-                    emit(i, ptr);
-                }
-            } else {
-                for (size_t i = start; i < num_entries; ++i, ptr += stride) {
-                    emit(i, ptr);
+        float dists[kMaxMedoids];
+        feature_space.get_strided_dist_func()(query.data(), aligned_medoids_, stride, num_entries, dist_param, dists, po_, pf_bytes);
+
+        if (count == 1) {
+            uint32_t best_ep = entries_[0];
+            float min_dist = dists[0];
+            for (size_t i = 1; i < num_entries; ++i) {
+                if (dists[i] < min_dist) {
+                    min_dist = dists[i];
+                    best_ep = entries_[i];
                 }
             }
-        };
+            out.push_back(best_ep);
+            return;
+        }
 
-        feature_space.compute([&](const auto& dist) {
-            if (count == 1) {
-                uint32_t best_ep = entries_[0];
-                float min_dist = dist.compare(q, medoids, dist_param);
-                scan(1, [&](size_t i, const uint8_t* ptr) {
-                    const float d = dist.compare(q, ptr, dist_param);
-                    if (d < min_dist) {
-                        min_dist = d;
-                        best_ep = entries_[i];
-                    }
-                });
-                out.push_back(best_ep);
-                return;
+        if (count == 2) {
+            uint32_t ep1 = entries_[0], ep2 = entries_[1];
+            float dist1 = dists[0], dist2 = dists[1];
+            if (dist2 < dist1) {
+                std::swap(dist1, dist2);
+                std::swap(ep1, ep2);
             }
-
-            if (count == 2) {
-                uint32_t ep1 = entries_[0], ep2 = entries_[1];
-                float dist1 = dist.compare(q, medoids, dist_param);
-                float dist2 = dist.compare(q, medoids + stride, dist_param);
-                if (dist2 < dist1) {
-                    std::swap(dist1, dist2);
-                    std::swap(ep1, ep2);
+            for (size_t i = 2; i < num_entries; ++i) {
+                if (dists[i] < dist1) {
+                    dist2 = dist1;
+                    ep2 = ep1;
+                    dist1 = dists[i];
+                    ep1 = entries_[i];
+                } else if (dists[i] < dist2) {
+                    dist2 = dists[i];
+                    ep2 = entries_[i];
                 }
-                scan(2, [&](size_t i, const uint8_t* ptr) {
-                    const float d = dist.compare(q, ptr, dist_param);
-                    if (d < dist1) {
-                        dist2 = dist1;
-                        ep2 = ep1;
-                        dist1 = d;
-                        ep1 = entries_[i];
-                    } else if (d < dist2) {
-                        dist2 = d;
-                        ep2 = entries_[i];
-                    }
-                });
-                out.push_back(ep1);
-                if (ep1 != ep2) out.push_back(ep2);
-                return;
             }
+            out.push_back(ep1);
+            if (ep1 != ep2) out.push_back(ep2);
+            return;
+        }
 
-            float dists[kMaxMedoids];
-            scan(0, [&](size_t i, const uint8_t* ptr) { dists[i] = dist.compare(q, ptr, dist_param); });
+        std::vector<std::pair<float, uint32_t>> scored;
+        scored.reserve(num_entries);
+        for (size_t i = 0; i < num_entries; ++i) {
+            scored.emplace_back(dists[i], entries_[i]);
+        }
+        std::nth_element(scored.begin(), scored.begin() + count, scored.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        scored.resize(count);
+        std::sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
 
-            std::vector<std::pair<float, uint32_t>> scored;
-            scored.reserve(num_entries);
-            for (size_t i = 0; i < num_entries; ++i) {
-                scored.emplace_back(dists[i], entries_[i]);
-            }
-            std::nth_element(scored.begin(), scored.begin() + count, scored.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-            scored.resize(count);
-            std::sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-
-            out.reserve(count);
-            for (const auto& s : scored) out.push_back(s.second);
-        });
+        out.reserve(count);
+        for (const auto& s : scored) out.push_back(s.second);
     }
 
     /**
