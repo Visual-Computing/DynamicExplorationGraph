@@ -855,6 +855,7 @@ TEST(DEGBatchFunctions, ExploreEfSingle) {
     ASSERT_GE(res.size(), 1u);
     EXPECT_EQ(res.indices[0], 1005u);
     EXPECT_NEAR(res.distances[0], 0.0f, 1e-5f);
+    EXPECT_GT(res.graph_distance_count, 0u);
     EXPECT_GT(res.graph_hop_count, 0u);
     EXPECT_EQ(res.rerank_distance_count, 0u);
 }
@@ -866,7 +867,7 @@ TEST(DEGBatchFunctions, ExploreBatchFlatAndContainer) {
     std::vector<uint32_t> entry_labels = {1005u, 9999u};
     const uint32_t k = 3;
 
-    // 1. eps exploration with explore_batch (on 5-vertex complete graph, all neighbors use stored edge weights)
+    // 1. eps exploration with explore_batch
     auto res_eps = deg.explore_batch(
         std::span<const uint32_t>(entry_labels), k,
         /*max_distance_computation_count=*/50, /*eps=*/0.0f,
@@ -874,6 +875,7 @@ TEST(DEGBatchFunctions, ExploreBatchFlatAndContainer) {
     );
     ASSERT_EQ(res_eps.indices.size(), entry_labels.size() * k);
     EXPECT_TRUE(res_eps.has_distances());
+    EXPECT_GT(res_eps.graph_distance_count, 0u);
     EXPECT_GT(res_eps.graph_hop_count, 0u);
     EXPECT_EQ(res_eps.rerank_distance_count, 0u);
     EXPECT_EQ(res_eps.get_indices(0)[0], 1005u);
@@ -887,6 +889,7 @@ TEST(DEGBatchFunctions, ExploreBatchFlatAndContainer) {
     );
     EXPECT_FALSE(res_nodist.has_distances());
     EXPECT_TRUE(res_nodist.distances.empty());
+    EXPECT_GT(res_nodist.graph_distance_count, 0u);
     EXPECT_GT(res_nodist.graph_hop_count, 0u);
 
     // 3. Multi-hop exploration on a larger graph exercises actual distance computations and hops
@@ -941,4 +944,137 @@ TEST(DEGBatchFunctions, GetNeighborsBatchFlatAndContainer) {
     deg.getNeighbors_batch(std::span<const uint32_t>(labels), std::span<uint32_t>(flat_out), /*threads=*/2);
     std::unordered_set<uint32_t> actual_flat(flat_out.begin(), flat_out.begin() + edges);
     EXPECT_EQ(actual_flat, expected);
+}
+
+// ===========================================================================
+//  SearchWorkspace / InternalGraph: initial radius & negative-distance sign handling
+// ===========================================================================
+
+namespace {
+
+struct TestNode1D {
+    float x;
+    std::array<uint32_t, 2> neighbors;
+    std::array<float, 2> weights;
+};
+
+deglib::graph::SizeBoundedGraph build_1d_test_graph(deglib::distances::Metric metric, std::initializer_list<TestNode1D> nodes) {
+    deglib::distances::FloatSpace space(4, metric);
+    deglib::graph::SizeBoundedGraph graph(static_cast<uint32_t>(nodes.size()), 2, space);
+
+    uint32_t idx = 0;
+    for (const auto& node : nodes) {
+        graph.addVertex(idx++, make_float_bytes(make_vec_4d(node.x, 0.0f, 0.0f, 0.0f)).get());
+    }
+    idx = 0;
+    for (const auto& node : nodes) {
+        graph.changeEdges(idx++, node.neighbors.data(), node.weights.data());
+    }
+    return graph;
+}
+
+}  // namespace
+
+TEST(SearchRadiusAndSignHandling, SearchManyEntryVerticesSmallKInitializesRadius) {
+    auto graph = build_1d_test_graph(
+        deglib::distances::Metric::FP32_L2, {
+                                                {1.0f, {0, 3}, {0.0f, 1.0f}},
+                                                {5.0f, {1, 4}, {0.0f, 25.0f}},
+                                                {6.0f, {2, 2}, {0.0f, 0.0f}},
+                                                {2.0f, {3, 4}, {0.0f, 4.0f}},
+                                                {0.0f, {4, 4}, {0.0f, 0.0f}},
+                                            }
+    );
+
+    const std::vector<float> query = {0.0f, 0.0f, 0.0f, 0.0f};
+    const std::vector<uint32_t> entries = {2, 1, 0};
+
+    deglib::graph::SearchWorkspace ws;
+    graph.search(ws, std::span<const float>(query), std::span<const uint32_t>(entries), /*k=*/1, /*eps=*/0.0f);
+
+    // Entry seeding caps results to k=1 (keeping vertex 0 with dist=1.0), so neighbor 3 (dist=4.0) is rejected on hop 1
+    // and entry vertex 1 (dist=25.0) is never expanded.
+    ASSERT_EQ(ws.results.size(), 1u);
+    EXPECT_EQ(ws.results.top().getIdentifier(), 0u);
+    EXPECT_NEAR(ws.results.top().getDistance(), 1.0f, 1e-5f);
+    EXPECT_EQ(ws.graph_hop_count, 1u);
+    EXPECT_EQ(ws.graph_distance_count, 4u);
+}
+
+TEST(SearchRadiusAndSignHandling, SearchNegativeDistancesWithManyEntriesAndSmallK) {
+    // Unnormalized vectors with FP32_InnerProduct produce negative distances (1 - dot(q, x)).
+    auto graph = build_1d_test_graph(
+        deglib::distances::Metric::FP32_InnerProduct, {
+                                                          {3.0f, {0, 3}, {0.0f, 1.0f}},
+                                                          {2.5f, {1, 1}, {0.0f, 0.0f}},
+                                                          {1.0f, {2, 2}, {0.0f, 0.0f}},
+                                                          {2.8f, {3, 4}, {0.0f, 1.0f}},
+                                                          {5.0f, {4, 4}, {0.0f, 0.0f}},
+                                                      }
+    );
+
+    // For query (2,0,0,0): entry 0=-5.0, entry 1=-4.0, entry 2=-1.0, bridge 3=-4.6, target 4=-9.0.
+    const std::vector<float> query = {2.0f, 0.0f, 0.0f, 0.0f};
+    const std::vector<uint32_t> entries = {2, 1, 0};
+
+    // With eps=0.2 and initial radius=-5.0, exploration_radius must be -5.0 * (1 - 0.2) = -4.0 (allowing bridge -4.6 -> target -9.0).
+    deglib::graph::SearchWorkspace ws;
+    graph.search(ws, std::span<const float>(query), std::span<const uint32_t>(entries), /*k=*/1, /*eps=*/0.2f);
+    ASSERT_EQ(ws.results.size(), 1u);
+    EXPECT_EQ(ws.results.top().getIdentifier(), 4u);
+    EXPECT_NEAR(ws.results.top().getDistance(), -9.0f, 1e-5f);
+    EXPECT_GE(ws.graph_hop_count, 2u);
+
+    // With eps=0.0, exploration_radius is -5.0 so bridge (-4.6 > -5.0) is rejected and search stops at entry 0.
+    deglib::graph::SearchWorkspace ws_strict;
+    graph.search(ws_strict, std::span<const float>(query), std::span<const uint32_t>(entries), /*k=*/1, /*eps=*/0.0f);
+    ASSERT_EQ(ws_strict.results.size(), 1u);
+    EXPECT_EQ(ws_strict.results.top().getIdentifier(), 0u);
+    EXPECT_NEAR(ws_strict.results.top().getDistance(), -5.0f, 1e-5f);
+    EXPECT_EQ(ws_strict.graph_hop_count, 1u);
+}
+
+TEST(SearchRadiusAndSignHandling, HasPathManyEntryVerticesSmallKCapsResultsAndRadius) {
+    auto graph = build_1d_test_graph(
+        deglib::distances::Metric::FP32_L2, {
+                                                {1.0f, {0, 0}, {0.0f, 0.0f}},
+                                                {10.0f, {1, 2}, {0.0f, 25.0f}},
+                                                {5.0f, {2, 3}, {0.0f, 25.0f}},
+                                                {0.0f, {3, 3}, {0.0f, 0.0f}},
+                                            }
+    );
+
+    // For k=1 and eps=0.0, entry 0 (dist=1.0) evicts entry 1 (dist=100.0) so initial radius=1.0 stops before expanding entry 1.
+    auto no_path = graph.hasPath({0, 1}, /*to_vertex=*/3, /*eps=*/0.0f, /*k=*/1);
+    EXPECT_TRUE(no_path.empty());
+
+    // For k=2 and eps=0.0, both entries stay in results (radius=100.0), so entry 1 expands through 2 to reach 3.
+    auto path = graph.hasPath({0, 1}, /*to_vertex=*/3, /*eps=*/0.0f, /*k=*/2);
+    ASSERT_EQ(path.size(), 3u);
+    EXPECT_EQ(path[0].getIdentifier(), 3u);
+    EXPECT_EQ(path[1].getIdentifier(), 2u);
+    EXPECT_EQ(path[2].getIdentifier(), 1u);
+}
+
+TEST(SearchRadiusAndSignHandling, HasPathNegativeDistancesSignHandling) {
+    auto graph = build_1d_test_graph(
+        deglib::distances::Metric::FP32_InnerProduct, {
+                                                          {3.0f, {0, 2}, {0.0f, 1.0f}},
+                                                          {1.0f, {1, 1}, {0.0f, 0.0f}},
+                                                          {2.8f, {2, 3}, {0.0f, 1.0f}},
+                                                          {2.0f, {3, 3}, {0.0f, 0.0f}},
+                                                      }
+    );
+
+    // Target 3 is (2,0,0,0): entry 0=-5.0, entry 1=-1.0, bridge 2=-4.6.
+    // With k=1 and eps=0.2, radius=-5.0 < 0 sets exploration_radius=-5.0 * (1 - 0.2) = -4.0, allowing bridge 2 (-4.6).
+    auto path = graph.hasPath({0, 1}, /*to_vertex=*/3, /*eps=*/0.2f, /*k=*/1);
+    ASSERT_EQ(path.size(), 3u);
+    EXPECT_EQ(path[0].getIdentifier(), 3u);
+    EXPECT_EQ(path[1].getIdentifier(), 2u);
+    EXPECT_EQ(path[2].getIdentifier(), 0u);
+
+    // With k=1 and eps=0.0, exploration_radius=-5.0 rejects bridge 2 (-4.6 > -5.0).
+    auto strict_path = graph.hasPath({0, 1}, /*to_vertex=*/3, /*eps=*/0.0f, /*k=*/1);
+    EXPECT_TRUE(strict_path.empty());
 }

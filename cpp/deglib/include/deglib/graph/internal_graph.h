@@ -106,14 +106,14 @@ using UncheckedSet = PQV<std::greater<ObjectDistance>, ObjectDistance>;
  * (e.g. in Searcher, batch loops, or graph builder), and records exact graph distance evaluations
  * and vertex expansions (hops).
  */
-struct SearchWorkspace {
-    ResultSet results;                ///< Max-heap result container populated by eps search.
-    UncheckedSet next_vertices;       ///< Min-heap exploration frontier used by eps and efQueue search.
-    deglib::search::ResultList pool;  ///< Sorted beam buffer populated by ef and efQueue search.
-
+struct alignas(64) SearchWorkspace {
+    deglib::search::ResultList pool;    ///< Sorted beam buffer populated by ef and efQueue search (offset 0, 40 bytes).
     uint32_t graph_distance_count = 0;  ///< Number of graph distance evaluations performed.
     uint32_t graph_hop_count = 0;       ///< Number of vertex expansions (hops) performed.
     bool used_pool = false;             ///< True when results live in `pool` (ef), false when in `results` (eps).
+
+    ResultSet results;           ///< Max-heap result container populated by eps search.
+    UncheckedSet next_vertices;  ///< Min-heap exploration frontier used by eps and efQueue search.
 
     /// Resets buffers and telemetry counters for an eps search.
     void reset_for_eps(size_t k, size_t edges_per_vertex) noexcept {
@@ -604,8 +604,9 @@ class InternalGraph {
         const bool include_entry = true,
         const deglib::search::Filter* filter = nullptr
     ) const {
+        const auto query_ptr = getFeatureVector(entry_vertex_index);
         const uint32_t entries[1] = {entry_vertex_index};
-        search_intern(ws, entries, nullptr, k, eps, include_entry, filter, max_distance_computation_count);
+        search_intern(ws, entries, query_ptr, k, eps, include_entry, filter, max_distance_computation_count);
     }
 
     /**
@@ -636,8 +637,9 @@ class InternalGraph {
         const bool include_entry = true,
         const deglib::search::Filter* filter = nullptr
     ) const {
+        const auto query_ptr = getFeatureVector(entry_vertex_index);
         const uint32_t entries[1] = {entry_vertex_index};
-        search_ef_intern(ws, entries, nullptr, k, ef, include_entry, filter, max_distance_computation_count);
+        search_ef_intern(ws, entries, query_ptr, k, ef, include_entry, filter, max_distance_computation_count);
     }
 
     /**
@@ -735,7 +737,7 @@ class InternalGraph {
      * Statically dispatched exploration and k-NN search implementation.
      * Inlines graph member accesses (features, neighbors, labels) via GraphType to avoid vtable calls.
      */
-    template <typename GraphType, bool use_filter>
+    template <typename GraphType, bool use_max_distance_count, bool use_filter>
     static void searchImpl(
         SearchWorkspace& ws,
         const GraphType& self,
@@ -752,7 +754,6 @@ class InternalGraph {
         ws.reset_for_eps(k, self.edges_per_vertex_);
         if (k == 0) return;
 
-        const uint32_t max_dist_count = (max_distance_computation_count == 0) ? std::numeric_limits<uint32_t>::max() : max_distance_computation_count;
         const auto dist_func = self.feature_space_.get_dist_func();
         const auto batch_dist_func = self.feature_space_.get_batch_dist_func();
         const auto dist_func_param = self.feature_space_.get_dist_func_param();
@@ -768,12 +769,13 @@ class InternalGraph {
         // if the filter only contains few valid ids brute force them all
         if constexpr (use_filter) {
             if (vertex_count < 1'000 || (filter->get_inclusion_rate() * vertex_count) < 10'000 || filter->get_inclusion_rate() < 0.10f) {
+                uint32_t bf_dist_count = 0;
                 auto radius = std::numeric_limits<float>::max();
                 filter->for_each_valid_label([&](uint32_t valid_label) {
                     auto valid_index = self.getInternalIndex(valid_label);
                     const auto feature = self.feature_by_index(valid_index);
                     const auto distance = dist_func(query, feature, dist_func_param);
-                    ++ws.graph_distance_count;
+                    ++bf_dist_count;
 
                     // remember the vertex, if its better than the worst in the result list
                     if (distance < radius) {
@@ -786,68 +788,39 @@ class InternalGraph {
                         }
                     }
                 });
+                ws.graph_distance_count = bf_dist_count;
                 return;
             }
         }
 
-        // copy the initial entry vertices and their distances to the query into the three containers
-        if (query == nullptr) {
-            if (entry_vertex_indices.empty()) return;
-            const uint32_t self_idx = entry_vertex_indices[0];
-            if (self_idx < vertex_count) {
-                query = self.feature_by_index(self_idx);
-                checked_ids[self_idx] = checked_ids_tag;
-                if (include_entry) {
-                    const float self_dist = dist_func(query, query, dist_func_param);
-                    if constexpr (use_filter) {
-                        if (filter->is_valid(self.label_by_index(self_idx))) results.emplace(self_idx, self_dist);
-                    } else {
-                        results.emplace(self_idx, self_dist);
-                    }
-                }
-                // if we have weights we can use them instead of calculating the distances
-                if constexpr (requires { self.weights_by_index(uint32_t{0}); }) {
-                    ++ws.graph_hop_count;
-                    const auto neighbor_indices = self.neighbors_by_index(self_idx);
-                    const auto neighbor_weights = self.weights_by_index(self_idx);
-                    for (size_t i = 0; i < self.edges_per_vertex_; ++i) {
-                        const uint32_t nb = neighbor_indices[i];
-                        if (checked_ids[nb] == checked_ids_tag) continue;
-                        checked_ids[nb] = checked_ids_tag;
-                        const float dist = neighbor_weights[i];
-                        next_vertices.emplace(nb, dist);
-                        if constexpr (use_filter) {
-                            if (filter->is_valid(self.label_by_index(nb))) results.emplace(nb, dist);
-                        } else {
-                            results.emplace(nb, dist);
-                        }
-                        if (results.size() > k) results.pop();
-                    }
-                } else {
-                    next_vertices.emplace(self_idx, -std::numeric_limits<float>::max());
-                }
-            }
-        } else {
-            for (const uint32_t index : entry_vertex_indices) {
-                if (index >= vertex_count || checked_ids[index] == checked_ids_tag) continue;
-                checked_ids[index] = checked_ids_tag;
+        uint32_t dist_count = 0;
+        uint32_t hop_count = 0;
 
-                const auto feature = self.feature_by_index(index);
-                const auto distance = dist_func(query, feature, dist_func_param);
-                next_vertices.emplace(index, distance);
-                if (include_entry) {
-                    if constexpr (use_filter) {
-                        if (filter->is_valid(self.label_by_index(index))) {
-                            results.emplace(index, distance);
-                        }
-                    } else {
+        // copy the initial entry vertices and their distances to the query into the three containers
+        for (const uint32_t index : entry_vertex_indices) {
+            if (index >= vertex_count || checked_ids[index] == checked_ids_tag) continue;
+            checked_ids[index] = checked_ids_tag;
+
+            const auto feature = self.feature_by_index(index);
+            const auto distance = dist_func(query, feature, dist_func_param);
+            next_vertices.emplace(index, distance);
+            if (include_entry) {
+                if constexpr (use_filter) {
+                    if (filter->is_valid(self.label_by_index(index))) {
                         results.emplace(index, distance);
                     }
-                    if (results.size() > k) results.pop();
+                } else {
+                    results.emplace(index, distance);
                 }
+                if (results.size() > k) results.pop();
+            }
 
-                // early stop after reaching distance budget
-                if (++ws.graph_distance_count >= max_dist_count) {
+            // early stop after reaching distance budget
+            ++dist_count;
+            if constexpr (use_max_distance_count) {
+                if (dist_count >= max_distance_computation_count) {
+                    ws.graph_distance_count = dist_count;
+                    ws.graph_hop_count = hop_count;
                     return;
                 }
             }
@@ -855,7 +828,7 @@ class InternalGraph {
 
         // search radius
         auto radius = (results.size() < k) ? std::numeric_limits<float>::max() : results.top().getDistance();
-        auto exploration_radius = (radius == std::numeric_limits<float>::max()) ? radius : radius * (1.0f + eps);
+        auto exploration_radius = (radius == std::numeric_limits<float>::max()) ? radius : radius * ((radius < 0) ? (1 - eps) : (1 + eps));
 
         const int32_t po = self.getPo();
         const size_t prefetch_bytes = static_cast<size_t>(self.getPl()) * deglib::memory::L1_CACHE_LINE_SIZE;
@@ -873,7 +846,7 @@ class InternalGraph {
             // max distance reached
             if (next_vertex.getDistance() > exploration_radius) break;
 
-            ++ws.graph_hop_count;
+            ++hop_count;
 
             const auto neighbor_indices = self.neighbors_by_index(next_vertex.getIdentifier());
             int32_t good_neighbor_count = 0;
@@ -889,11 +862,13 @@ class InternalGraph {
             if (good_neighbor_count == 0) continue;
 
             // Cap the neighbor count based on the remaining distance budget
-            const uint32_t remaining = max_dist_count - ws.graph_distance_count;
-            if (static_cast<uint32_t>(good_neighbor_count) > remaining) {
-                good_neighbor_count = static_cast<int32_t>(remaining);
+            if constexpr (use_max_distance_count) {
+                const uint32_t remaining = max_distance_computation_count - dist_count;
+                if (static_cast<uint32_t>(good_neighbor_count) > remaining) {
+                    good_neighbor_count = static_cast<int32_t>(remaining);
+                }
+                if (good_neighbor_count <= 0) break;
             }
-            if (good_neighbor_count <= 0) break;
 
             batch_dist_func(query, good_features, static_cast<size_t>(good_neighbor_count), dist_func_param, good_distances, po, prefetch_bytes);
 
@@ -928,15 +903,20 @@ class InternalGraph {
                 }
             }
 
-            ws.graph_distance_count += static_cast<uint32_t>(good_neighbor_count);
-            if (ws.graph_distance_count >= max_dist_count) {
-                return;
+            dist_count += static_cast<uint32_t>(good_neighbor_count);
+            if constexpr (use_max_distance_count) {
+                if (dist_count >= max_distance_computation_count) {
+                    break;
+                }
             }
         }
+
+        ws.graph_distance_count = dist_count;
+        ws.graph_hop_count = hop_count;
     }
 
     /**
-     * Dispatches runtime filter settings to compile-time specialized searchImpl instantiations.
+     * Dispatches runtime filter and distance budget settings to compile-time specialized searchImpl instantiations.
      */
     template <typename GraphType>
     static void searchInternImpl(
@@ -951,9 +931,17 @@ class InternalGraph {
         const uint32_t max_distance_computation_count = 0
     ) {
         if (filter) {
-            searchImpl<GraphType, true>(ws, self, entry_vertex_indices, query, k, eps, include_entry, filter, max_distance_computation_count);
+            if (max_distance_computation_count == 0) {
+                searchImpl<GraphType, false, true>(ws, self, entry_vertex_indices, query, k, eps, include_entry, filter, 0);
+            } else {
+                searchImpl<GraphType, true, true>(ws, self, entry_vertex_indices, query, k, eps, include_entry, filter, max_distance_computation_count);
+            }
         } else {
-            searchImpl<GraphType, false>(ws, self, entry_vertex_indices, query, k, eps, include_entry, nullptr, max_distance_computation_count);
+            if (max_distance_computation_count == 0) {
+                searchImpl<GraphType, false, false>(ws, self, entry_vertex_indices, query, k, eps, include_entry, nullptr, 0);
+            } else {
+                searchImpl<GraphType, true, false>(ws, self, entry_vertex_indices, query, k, eps, include_entry, nullptr, max_distance_computation_count);
+            }
         }
     }
 
@@ -966,7 +954,7 @@ class InternalGraph {
      * The frontier holds every candidate within the current ef-th best valid distance, so stopping
      * at the first candidate beyond it is exact for the ef best valid results.
      */
-    template <typename GraphType, bool use_filter>
+    template <typename GraphType, bool use_max_distance_count, bool use_filter>
     static void searchEfQueueImpl(
         SearchWorkspace& ws,
         const GraphType& self,
@@ -982,7 +970,6 @@ class InternalGraph {
         ws.reset_for_ef(k, ef, self.edges_per_vertex_, /*need_queue=*/true);
         if (vertex_count == 0 || k == 0) return;
 
-        const uint32_t max_dist_count = (max_distance_computation_count == 0) ? std::numeric_limits<uint32_t>::max() : max_distance_computation_count;
         const auto dist_func = self.feature_space_.get_dist_func();
         const auto batch_dist_func = self.feature_space_.get_batch_dist_func();
         const auto dist_func_param = self.feature_space_.get_dist_func_param();
@@ -996,59 +983,31 @@ class InternalGraph {
         auto& next_vertices = ws.next_vertices;
         auto& valid_results = ws.pool;
 
+        uint32_t dist_count = 0;
+        uint32_t hop_count = 0;
+
         // seed the traversal with every entry vertex
-        if (query == nullptr) {
-            if (entry_vertex_indices.empty()) return;
-            const uint32_t self_idx = entry_vertex_indices[0];
-            if (self_idx < vertex_count) {
-                query = self.feature_by_index(self_idx);
-                checked_ids[self_idx] = checked_ids_tag;
-                if (include_entry) {
-                    const float self_dist = dist_func(query, query, dist_func_param);
-                    if constexpr (use_filter) {
-                        if (filter->is_valid(self.label_by_index(self_idx))) valid_results.insert(self_idx, self_dist);
-                    } else {
-                        valid_results.insert(self_idx, self_dist);
-                    }
-                }
-                if constexpr (requires { self.weights_by_index(uint32_t{0}); }) {
-                    ++ws.graph_hop_count;
-                    const auto neighbor_indices = self.neighbors_by_index(self_idx);
-                    const auto neighbor_weights = self.weights_by_index(self_idx);
-                    for (size_t i = 0; i < self.edges_per_vertex_; ++i) {
-                        const uint32_t nb = neighbor_indices[i];
-                        if (checked_ids[nb] == checked_ids_tag) continue;
-                        checked_ids[nb] = checked_ids_tag;
-                        const float dist = neighbor_weights[i];
-                        next_vertices.emplace(nb, dist);
-                        if constexpr (use_filter) {
-                            if (filter->is_valid(self.label_by_index(nb))) valid_results.insert(nb, dist);
-                        } else {
-                            valid_results.insert(nb, dist);
-                        }
-                    }
+        for (const uint32_t ep : entry_vertex_indices) {
+            if (ep >= vertex_count || checked_ids[ep] == checked_ids_tag) continue;
+            checked_ids[ep] = checked_ids_tag;
+
+            const auto feature = self.feature_by_index(ep);
+            const float dist = dist_func(query, feature, dist_func_param);
+            next_vertices.emplace(ep, dist);
+            if (include_entry) {
+                if constexpr (use_filter) {
+                    if (filter->is_valid(self.label_by_index(ep))) valid_results.insert(ep, dist);
                 } else {
-                    next_vertices.emplace(self_idx, -std::numeric_limits<float>::max());
+                    valid_results.insert(ep, dist);
                 }
             }
-        } else {
-            for (const uint32_t ep : entry_vertex_indices) {
-                if (ep >= vertex_count || checked_ids[ep] == checked_ids_tag) continue;
-                checked_ids[ep] = checked_ids_tag;
 
-                const auto feature = self.feature_by_index(ep);
-                const float dist = dist_func(query, feature, dist_func_param);
-                next_vertices.emplace(ep, dist);
-                if (include_entry) {
-                    if constexpr (use_filter) {
-                        if (filter->is_valid(self.label_by_index(ep))) valid_results.insert(ep, dist);
-                    } else {
-                        valid_results.insert(ep, dist);
-                    }
-                }
-
-                // early stop after reaching distance budget
-                if (++ws.graph_distance_count >= max_dist_count) {
+            // early stop after reaching distance budget
+            ++dist_count;
+            if constexpr (use_max_distance_count) {
+                if (dist_count >= max_distance_computation_count) {
+                    ws.graph_distance_count = dist_count;
+                    ws.graph_hop_count = hop_count;
                     valid_results.truncate(k);
                     return;
                 }
@@ -1074,7 +1033,7 @@ class InternalGraph {
             // no remaining candidate can improve the ef best valid results
             if (next_vertex.getDistance() > radius) break;
 
-            ++ws.graph_hop_count;
+            ++hop_count;
 
             const auto neighbor_indices = self.neighbors_by_index(next_vertex.getIdentifier());
             int32_t good_neighbor_count = 0;
@@ -1090,11 +1049,13 @@ class InternalGraph {
             if (good_neighbor_count == 0) continue;
 
             // Cap the neighbor count based on the remaining distance budget
-            const uint32_t remaining = max_dist_count - ws.graph_distance_count;
-            if (static_cast<uint32_t>(good_neighbor_count) > remaining) {
-                good_neighbor_count = static_cast<int32_t>(remaining);
+            if constexpr (use_max_distance_count) {
+                const uint32_t remaining = max_distance_computation_count - dist_count;
+                if (static_cast<uint32_t>(good_neighbor_count) > remaining) {
+                    good_neighbor_count = static_cast<int32_t>(remaining);
+                }
+                if (good_neighbor_count <= 0) break;
             }
-            if (good_neighbor_count <= 0) break;
 
             batch_dist_func(query, good_features, static_cast<size_t>(good_neighbor_count), dist_func_param, good_distances, po, prefetch_bytes);
 
@@ -1117,13 +1078,16 @@ class InternalGraph {
                 }
             }
 
-            ws.graph_distance_count += static_cast<uint32_t>(good_neighbor_count);
-            if (ws.graph_distance_count >= max_dist_count) {
-                valid_results.truncate(k);
-                return;
+            dist_count += static_cast<uint32_t>(good_neighbor_count);
+            if constexpr (use_max_distance_count) {
+                if (dist_count >= max_distance_computation_count) {
+                    break;
+                }
             }
         }
 
+        ws.graph_distance_count = dist_count;
+        ws.graph_hop_count = hop_count;
         valid_results.truncate(k);
     }
 
@@ -1134,7 +1098,7 @@ class InternalGraph {
      * ResultList serves as frontier and result set at once. Every other combination needs both
      * separated, see searchEfQueueImpl.
      */
-    template <typename GraphType, bool use_filter>
+    template <typename GraphType, bool use_max_distance_count, bool use_filter>
     static void searchEfImpl(
         SearchWorkspace& ws,
         const GraphType& self,
@@ -1147,10 +1111,14 @@ class InternalGraph {
         const uint32_t max_distance_computation_count
     ) {
         if constexpr (use_filter) {
-            searchEfQueueImpl<GraphType, true>(ws, self, entry_vertex_indices, query, k, ef, include_entry, filter, max_distance_computation_count);
+            searchEfQueueImpl<GraphType, use_max_distance_count, true>(
+                ws, self, entry_vertex_indices, query, k, ef, include_entry, filter, max_distance_computation_count
+            );
         } else {
             if (!include_entry) {
-                searchEfQueueImpl<GraphType, false>(ws, self, entry_vertex_indices, query, k, ef, false, nullptr, max_distance_computation_count);
+                searchEfQueueImpl<GraphType, use_max_distance_count, false>(
+                    ws, self, entry_vertex_indices, query, k, ef, false, nullptr, max_distance_computation_count
+                );
                 return;
             }
 
@@ -1158,7 +1126,6 @@ class InternalGraph {
             ws.reset_for_ef(k, ef, self.edges_per_vertex_, /*need_queue=*/false);
             if (vertex_count == 0 || k == 0) return;
 
-            const uint32_t max_dist_count = (max_distance_computation_count == 0) ? std::numeric_limits<uint32_t>::max() : max_distance_computation_count;
             const auto dist_func = self.feature_space_.get_dist_func();
             const auto batch_dist_func = self.feature_space_.get_batch_dist_func();
             const auto dist_func_param = self.feature_space_.get_dist_func_param();
@@ -1169,37 +1136,24 @@ class InternalGraph {
             const auto checked_ids_tag = vl->get_tag();
 
             auto& pool = ws.pool;
+            uint32_t dist_count = 0;
+            uint32_t hop_count = 0;
 
             // every entry vertex seeds the beam and is part of the result set
-            if (query == nullptr) {
-                if (entry_vertex_indices.empty()) return;
-                const uint32_t self_idx = entry_vertex_indices[0];
-                if (self_idx < vertex_count) {
-                    query = self.feature_by_index(self_idx);
-                    checked_ids[self_idx] = checked_ids_tag;
-                    pool.insert(self_idx, dist_func(query, query, dist_func_param));
-                    if constexpr (requires { self.weights_by_index(uint32_t{0}); }) {
-                        const auto neighbor_indices = self.neighbors_by_index(self_idx);
-                        const auto neighbor_weights = self.weights_by_index(self_idx);
-                        for (size_t i = 0; i < self.edges_per_vertex_; ++i) {
-                            const uint32_t nb = neighbor_indices[i];
-                            if (checked_ids[nb] == checked_ids_tag) continue;
-                            checked_ids[nb] = checked_ids_tag;
-                            pool.insert(nb, neighbor_weights[i]);
-                        }
-                    }
-                }
-            } else {
-                for (const uint32_t ep : entry_vertex_indices) {
-                    if (ep >= vertex_count || checked_ids[ep] == checked_ids_tag) continue;
-                    checked_ids[ep] = checked_ids_tag;
+            for (const uint32_t ep : entry_vertex_indices) {
+                if (ep >= vertex_count || checked_ids[ep] == checked_ids_tag) continue;
+                checked_ids[ep] = checked_ids_tag;
 
-                    const auto feature = self.feature_by_index(ep);
-                    const float dist = dist_func(query, feature, dist_func_param);
-                    pool.insert(ep, dist);
+                const auto feature = self.feature_by_index(ep);
+                const float dist = dist_func(query, feature, dist_func_param);
+                pool.insert(ep, dist);
 
-                    // early stop after reaching distance budget
-                    if (++ws.graph_distance_count >= max_dist_count) {
+                // early stop after reaching distance budget
+                ++dist_count;
+                if constexpr (use_max_distance_count) {
+                    if (dist_count >= max_distance_computation_count) {
+                        ws.graph_distance_count = dist_count;
+                        ws.graph_hop_count = hop_count;
                         pool.truncate(k);
                         return;
                     }
@@ -1216,7 +1170,7 @@ class InternalGraph {
 
             while (pool.has_next()) {
                 const uint32_t u = pool.pop();
-                ++ws.graph_hop_count;
+                ++hop_count;
 
                 const auto neighbor_indices = self.neighbors_by_index(u);
                 int32_t good_neighbor_count = 0;
@@ -1234,11 +1188,13 @@ class InternalGraph {
                 if (good_neighbor_count == 0) continue;
 
                 // Cap the neighbor count based on the remaining distance budget
-                const uint32_t remaining = max_dist_count - ws.graph_distance_count;
-                if (static_cast<uint32_t>(good_neighbor_count) > remaining) {
-                    good_neighbor_count = static_cast<int32_t>(remaining);
+                if constexpr (use_max_distance_count) {
+                    const uint32_t remaining = max_distance_computation_count - dist_count;
+                    if (static_cast<uint32_t>(good_neighbor_count) > remaining) {
+                        good_neighbor_count = static_cast<int32_t>(remaining);
+                    }
+                    if (good_neighbor_count <= 0) break;
                 }
-                if (good_neighbor_count <= 0) break;
 
                 batch_dist_func(query, good_features, static_cast<size_t>(good_neighbor_count), dist_func_param, good_distances, po, prefetch_bytes);
 
@@ -1251,19 +1207,22 @@ class InternalGraph {
                     }
                 }
 
-                ws.graph_distance_count += static_cast<uint32_t>(good_neighbor_count);
-                if (ws.graph_distance_count >= max_dist_count) {
-                    pool.truncate(k);
-                    return;
+                dist_count += static_cast<uint32_t>(good_neighbor_count);
+                if constexpr (use_max_distance_count) {
+                    if (dist_count >= max_distance_computation_count) {
+                        break;
+                    }
                 }
             }
 
+            ws.graph_distance_count = dist_count;
+            ws.graph_hop_count = hop_count;
             pool.truncate(k);
         }
     }
 
     /**
-     * Dispatches runtime filter settings to compile-time specialized searchEfImpl instantiations.
+     * Dispatches runtime filter and distance budget settings to compile-time specialized searchEfImpl instantiations.
      */
     template <typename GraphType>
     static void searchEfInternImpl(
@@ -1278,9 +1237,17 @@ class InternalGraph {
         const uint32_t max_distance_computation_count = 0
     ) {
         if (filter) {
-            searchEfImpl<GraphType, true>(ws, self, entry_vertex_indices, query, k, ef, include_entry, filter, max_distance_computation_count);
+            if (max_distance_computation_count == 0) {
+                searchEfImpl<GraphType, false, true>(ws, self, entry_vertex_indices, query, k, ef, include_entry, filter, 0);
+            } else {
+                searchEfImpl<GraphType, true, true>(ws, self, entry_vertex_indices, query, k, ef, include_entry, filter, max_distance_computation_count);
+            }
         } else {
-            searchEfImpl<GraphType, false>(ws, self, entry_vertex_indices, query, k, ef, include_entry, nullptr, max_distance_computation_count);
+            if (max_distance_computation_count == 0) {
+                searchEfImpl<GraphType, false, false>(ws, self, entry_vertex_indices, query, k, ef, include_entry, nullptr, 0);
+            } else {
+                searchEfImpl<GraphType, true, false>(ws, self, entry_vertex_indices, query, k, ef, include_entry, nullptr, max_distance_computation_count);
+            }
         }
     }
 
@@ -1318,14 +1285,15 @@ class InternalGraph {
                 const auto feature = self.feature_by_index(index);
                 const auto distance = dist_func(query, feature, dist_func_param);
                 results.emplace(index, distance);
+                if (results.size() > k) results.pop();
                 next_vertices.emplace(index, distance);
                 trackback.emplace(index, deglib::graph::ObjectDistance(index, distance));
             }
         }
 
         // search radius
-        auto radius = std::numeric_limits<float>::max();
-        auto exploration_radius = radius;
+        auto radius = (results.size() < k) ? std::numeric_limits<float>::max() : results.top().getDistance();
+        auto exploration_radius = (radius == std::numeric_limits<float>::max()) ? radius : radius * ((radius < 0) ? (1 - eps) : (1 + eps));
 
         // iterate as long as good elements are in the next_vertices queue
         auto good_neighbors = std::array<uint32_t, 256>();
