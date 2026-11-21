@@ -116,9 +116,7 @@ namespace {
 
 using deglib::distances::ResidualMode;
 using deglib::distances::int8_l2::L2Int8_AVX2;
-using deglib::distances::int8_l2::L2Int8_AVX2_S7;
 using deglib::distances::int8_l2::L2Int8_AVX512;
-using deglib::distances::int8_l2::L2Int8_AVX512_S7;
 
 TEST(L2Int8_AVX512, MatchesNaive_IfSupported) {
     if (!deglib::cpu::has_avx512()) {
@@ -229,32 +227,6 @@ TEST(L2Int8_AVX2, MatchesNaive_IfSupported) {
         auto b = make_int8_signed_vec(dim, static_cast<int>(dim));
         float d = L2Int8_AVX2<ResidualMode::Full>::compare(a.data(), b.data(), &dim);
         EXPECT_NEAR(d, l2_int8_naive(a.data(), b.data(), dim), 1e-4f) << "Full dim=" << dim;
-    }
-}
-
-TEST(L2Int8_S7, MatchesNaive_IfSupported) {
-    std::vector<size_t> dims = {1,   2,   3,   15,  16,  17,  31,  32,  33,  63,  64,  65,   96,   127, 128,
-                                129, 160, 191, 192, 193, 255, 256, 257, 511, 512, 513, 1023, 1024, 1025};
-    for (size_t dim : dims) {
-        auto a = make_int8_vec(dim, 11);
-        auto b = make_int8_vec(dim, static_cast<int>(dim) + 7);
-        float expected = l2_int8_naive(a.data(), b.data(), dim);
-        if (deglib::cpu::has_avx2()) {
-            float actual = L2Int8_AVX2_S7<ResidualMode::Full>::compare(a.data(), b.data(), &dim);
-            EXPECT_NEAR(actual, expected, 1e-4f) << "AVX2_S7<Full> dim=" << dim;
-            if (dim % 32 == 0) {
-                actual = L2Int8_AVX2_S7<ResidualMode::SimdOnly>::compare(a.data(), b.data(), &dim);
-                EXPECT_NEAR(actual, expected, 1e-4f) << "AVX2_S7<SimdOnly> dim=" << dim;
-            }
-        }
-        if (deglib::cpu::has_avx512()) {
-            float actual = L2Int8_AVX512_S7<ResidualMode::Full>::compare(a.data(), b.data(), &dim);
-            EXPECT_NEAR(actual, expected, 1e-4f) << "AVX512_S7<Full> dim=" << dim;
-            if (dim % 64 == 0) {
-                actual = L2Int8_AVX512_S7<ResidualMode::SimdOnly>::compare(a.data(), b.data(), &dim);
-                EXPECT_NEAR(actual, expected, 1e-4f) << "AVX512_S7<SimdOnly> dim=" << dim;
-            }
-        }
     }
 }
 

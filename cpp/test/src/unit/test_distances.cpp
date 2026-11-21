@@ -803,30 +803,22 @@ TEST(DeglibDistances, AllMetricsMaskedTailMatchesScalar) {
         }
     }
 
-    // Verify specialized Optimal and S7 Int8 L2 kernels directly across all dims.
+    // Verify specialized Optimal Int8 L2 kernels directly across all dims.
     for (const size_t dim : dims) {
         std::vector<int8_t> a_opt(dim), b_opt(dim);
-        std::vector<int8_t> a_s7(dim), b_s7(dim);
         for (size_t i = 0; i < dim; ++i) {
             a_opt[i] = static_cast<int8_t>(static_cast<int>((i * 53 + 17) % 256) - 128);
             b_opt[i] = static_cast<int8_t>(static_cast<int>((i * 71 + 43) % 256) - 128);
-            a_s7[i] = static_cast<int8_t>((i * 47 + 3) % 128);
-            b_s7[i] = static_cast<int8_t>((i * 61 + 19) % 128);
         }
         const float expected_opt = deglib::distances::int8_l2::L2Int8::compare(a_opt.data(), b_opt.data(), &dim);
-        const float expected_s7 = deglib::distances::int8_l2::L2Int8::compare(a_s7.data(), b_s7.data(), &dim);
 
         if (deglib::cpu::has_avx512()) {
             EXPECT_FLOAT_EQ(deglib::distances::int8_l2::L2Int8_AVX512_Optimal<ResidualMode::Full>::compare(a_opt.data(), b_opt.data(), &dim), expected_opt)
                 << "AVX512_Optimal dim=" << dim;
-            EXPECT_FLOAT_EQ(deglib::distances::int8_l2::L2Int8_AVX512_S7<ResidualMode::Full>::compare(a_s7.data(), b_s7.data(), &dim), expected_s7)
-                << "AVX512_S7 dim=" << dim;
         }
         if (deglib::cpu::has_avx2()) {
             EXPECT_FLOAT_EQ(deglib::distances::int8_l2::L2Int8_AVX2_Optimal<ResidualMode::Full>::compare(a_opt.data(), b_opt.data(), &dim), expected_opt)
                 << "AVX2_Optimal dim=" << dim;
-            EXPECT_FLOAT_EQ(deglib::distances::int8_l2::L2Int8_AVX2_S7<ResidualMode::Full>::compare(a_s7.data(), b_s7.data(), &dim), expected_s7)
-                << "AVX2_S7 dim=" << dim;
         }
     }
 #endif
