@@ -254,28 +254,53 @@ class InternalGraph {
         }
         if (try_pos.empty() || try_pos.back() != max_po) try_pos.push_back(max_po);
 
+        const int32_t min_pl = std::max<int32_t>(1, max_pl / 2);
         std::vector<int32_t> try_pls;
         for (const int32_t l : {1, 2, 3, 4, 6, 8, 12, 16, 20}) {
-            if (l <= max_pl) try_pls.push_back(l);
+            if (l >= min_pl && l <= max_pl) try_pls.push_back(l);
         }
         if (try_pls.empty() || try_pls.back() != max_pl) try_pls.push_back(max_pl);
 
-        int32_t best_po = 1;
-        int32_t best_pl = 1;
+        auto timeit_median3 = [&] {
+            double t0 = timeit();
+            double t1 = timeit();
+            double t2 = timeit();
+            if (t0 > t1) std::swap(t0, t1);
+            if (t1 > t2) std::swap(t1, t2);
+            if (t0 > t1) std::swap(t0, t1);
+            return t1;
+        };
+
+        // Two-stage coordinate search with median-of-3 timing:
+        // Stage 1: sweep po at full feature-vector prefetch (max_pl)
+        const size_t init_pl_idx = try_pls.size() - 1;
+        size_t best_po_idx = 0;
+        size_t best_pl_idx = init_pl_idx;
         double best_time = std::numeric_limits<double>::max();
 
-        for (const int32_t po : try_pos) {
-            for (const int32_t pl : try_pls) {
-                setPrefetch(po, pl, nl_fixed);
-                const double dur = timeit();
+        for (size_t pi = 0; pi < try_pos.size(); ++pi) {
+            setPrefetch(try_pos[pi], try_pls[init_pl_idx], nl_fixed);
+            const double dur = timeit_median3();
+            if (dur < best_time) {
+                best_time = dur;
+                best_po_idx = pi;
+            }
+        }
+
+        // Stage 2: sweep pl (>= max_pl / 2) at best_po
+        if (try_pls.size() > 1) {
+            for (size_t li = 0; li < try_pls.size(); ++li) {
+                if (li == init_pl_idx) continue;
+                setPrefetch(try_pos[best_po_idx], try_pls[li], nl_fixed);
+                const double dur = timeit_median3();
                 if (dur < best_time) {
                     best_time = dur;
-                    best_po = po;
-                    best_pl = pl;
+                    best_pl_idx = li;
                 }
             }
         }
-        setPrefetch(best_po, best_pl, nl_fixed);
+
+        setPrefetch(try_pos[best_po_idx], try_pls[best_pl_idx], nl_fixed);
     }
     /**
      * @brief Traverses the graph from the given entry vertices towards to_vertex and backtracks the path.
@@ -757,17 +782,13 @@ class InternalGraph {
             if (max_distance_computation_count == 0) {
                 return searchImpl<GraphType, false, true>(self, entry_vertex_indices, query, k, eps, include_entry, filter, 0);
             } else {
-                return searchImpl<GraphType, true, true>(
-                    self, entry_vertex_indices, query, k, eps, include_entry, filter, max_distance_computation_count
-                );
+                return searchImpl<GraphType, true, true>(self, entry_vertex_indices, query, k, eps, include_entry, filter, max_distance_computation_count);
             }
         } else {
             if (max_distance_computation_count == 0) {
                 return searchImpl<GraphType, false, false>(self, entry_vertex_indices, query, k, eps, include_entry, nullptr, 0);
             } else {
-                return searchImpl<GraphType, true, false>(
-                    self, entry_vertex_indices, query, k, eps, include_entry, nullptr, max_distance_computation_count
-                );
+                return searchImpl<GraphType, true, false>(self, entry_vertex_indices, query, k, eps, include_entry, nullptr, max_distance_computation_count);
             }
         }
     }
@@ -1099,17 +1120,13 @@ class InternalGraph {
             if (max_distance_computation_count == 0) {
                 return searchEfImpl<GraphType, false, true>(self, entry_vertex_indices, query, k, ef, include_entry, filter, 0);
             } else {
-                return searchEfImpl<GraphType, true, true>(
-                    self, entry_vertex_indices, query, k, ef, include_entry, filter, max_distance_computation_count
-                );
+                return searchEfImpl<GraphType, true, true>(self, entry_vertex_indices, query, k, ef, include_entry, filter, max_distance_computation_count);
             }
         } else {
             if (max_distance_computation_count == 0) {
                 return searchEfImpl<GraphType, false, false>(self, entry_vertex_indices, query, k, ef, include_entry, nullptr, 0);
             } else {
-                return searchEfImpl<GraphType, true, false>(
-                    self, entry_vertex_indices, query, k, ef, include_entry, nullptr, max_distance_computation_count
-                );
+                return searchEfImpl<GraphType, true, false>(self, entry_vertex_indices, query, k, ef, include_entry, nullptr, max_distance_computation_count);
             }
         }
     }
