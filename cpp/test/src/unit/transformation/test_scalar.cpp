@@ -80,7 +80,7 @@ TEST(ScalarQuantize, Int8FitThenQuantizeDistributionConsistency) {
     // Database has vectors with values in [-2.0, 2.0]
     // Query has smaller vectors in [-0.5, 0.5]
     // Quantizing query with the database-fitted quantizer must preserve the database's scale (abs_max = 2.0).
-    std::vector<float> db_vec = {-2.0f, -1.0f, 0.0f, 1.0f, 2.0f};
+    std::vector<float> db_vec = {-2.0f, -1.5f, 0.0f, 1.5f, 2.0f};
     std::vector<float> query_vec = {-0.5f, 0.0f, 0.5f, -0.25f, 0.25f};
     const uint32_t dim = 5;
 
