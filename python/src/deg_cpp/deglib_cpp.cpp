@@ -707,7 +707,7 @@ nb::ndarray<nb::numpy, float, nb::ndim<2>, nb::c_contig> float_space_compute_dis
 // ============================================================================
 
 static std::shared_ptr<deglib::search::Reranker> reranker_from_float32(
-    deglib::distances::MetricType metric,
+    const deglib::distances::FloatSpace& space,
     const InFloatArray& data,
     std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
     size_t threads = 0,
@@ -715,6 +715,13 @@ static std::shared_ptr<deglib::search::Reranker> reranker_from_float32(
 ) {
     if (data.ndim() != 2) {
         throw std::invalid_argument("base_vectors must be a 2D array");
+    }
+    const uint32_t expected_input_dim =
+        (!transformations.empty() && transformations.front()) ? transformations.front()->input_dim() : static_cast<uint32_t>(space.dim());
+    if (data.shape(1) != expected_input_dim) {
+        throw std::invalid_argument(
+            std::format("base_vectors column count ({}) does not match expected input dimension ({})", data.shape(1), expected_input_dim)
+        );
     }
     const size_t n_rows = data.shape(0);
     const uint32_t dim = static_cast<uint32_t>(data.shape(1));
@@ -730,7 +737,7 @@ static std::shared_ptr<deglib::search::Reranker> reranker_from_float32(
 
     nb::gil_scoped_release release;
     return std::make_shared<deglib::search::Reranker>(
-        deglib::search::Reranker::from_data(deglib::distances::Metric(metric), data_span, dim, std::move(transformations), threads, idx_span)
+        deglib::search::Reranker::from_data(space, data_span, std::move(transformations), threads, idx_span)
     );
 }
 
@@ -768,12 +775,12 @@ static std::shared_ptr<deglib::search::Reranker> reranker_from_raw(
 
 static std::shared_ptr<deglib::search::Reranker> reranker_from_graph(
     const deglib::DynamicExplorationGraph& graph,
-    deglib::distances::MetricType metric,
+    const deglib::distances::FloatSpace& space,
     std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
     size_t threads = 0
 ) {
     if (transformations.empty()) {
-        const auto target_dt = deglib::distances::Metric(metric).get_data_type();
+        const auto target_dt = space.metric().get_data_type();
         const auto graph_dt = graph.getFeatureSpace().metric().get_data_type();
         if (target_dt == deglib::distances::MetricDataType::FP16 &&
             graph_dt == deglib::distances::MetricDataType::FP16 &&
@@ -783,7 +790,7 @@ static std::shared_ptr<deglib::search::Reranker> reranker_from_graph(
     }
     nb::gil_scoped_release release;
     return std::make_shared<deglib::search::Reranker>(
-        deglib::search::Reranker::from_graph(graph.internal(), deglib::distances::Metric(metric), std::move(transformations), threads)
+        deglib::search::Reranker::from_graph(graph.internal(), space, std::move(transformations), threads)
     );
 }
 
@@ -2193,7 +2200,7 @@ NB_MODULE(deglib_cpp, m) {
     nb::class_<deglib::search::Reranker>(search_module, "Reranker", "Owning C++ candidate reranker.")
         .def_static(
             "from_float32", &reranker_from_float32,
-            nb::arg("metric"), nb::arg("data"),
+            nb::arg("space"), nb::arg("data"),
             nb::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{},
             nb::arg("threads") = 0, nb::arg("row_indices") = nb::none()
         )
@@ -2205,12 +2212,13 @@ NB_MODULE(deglib_cpp, m) {
         )
         .def_static(
             "from_graph", &reranker_from_graph,
-            nb::arg("graph"), nb::arg("metric"),
+            nb::arg("graph"), nb::arg("space"),
             nb::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{},
             nb::arg("threads") = 0
         )
         .def("get_num_base_vectors", &deglib::search::Reranker::getNumBaseVectors)
         .def("get_dim", [](const deglib::search::Reranker& r) { return r.getSpace().dim(); })
+        .def("get_instruction", [](const deglib::search::Reranker& r) { return r.getSpace().get_instruction(); })
         .def("get_po", &deglib::search::Reranker::getPo, "Prefetch lookahead offset (0 disables rerank prefetching).")
         .def("get_pl", &deglib::search::Reranker::getPl, "Cache lines prefetched per feature vector (0 prefetches the whole vector).")
         .def(

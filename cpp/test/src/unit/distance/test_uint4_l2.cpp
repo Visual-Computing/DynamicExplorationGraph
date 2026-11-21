@@ -91,17 +91,26 @@ TEST(L2Uint4_AVX2, MatchesNaive) {
 }
 
 TEST(L2Uint4_SelectDist, FloatSpaceDispatch) {
-    std::vector<size_t> dims = {1, 3, 16, 64, 128, 256, 384, 512};
-    for (size_t dim : dims) {
-        deglib::distances::FloatSpace space(dim, deglib::distances::Metric::Uint4_L2);
-        EXPECT_EQ(space.get_data_size(), (dim + 1) / 2);
+    std::vector<size_t> dims = {1, 2, 3, 7, 15, 16, 31, 32, 63, 64, 127, 128, 129, 253, 255, 256, 384, 512};
+    std::vector<deglib::cpu::InstructionSet> isas = {deglib::cpu::InstructionSet::Auto};
+    if (deglib::cpu::has_avx2()) isas.push_back(deglib::cpu::InstructionSet::AVX2);
+    if (deglib::cpu::has_avx512()) isas.push_back(deglib::cpu::InstructionSet::AVX512);
 
+    for (const size_t dim : dims) {
         auto a = make_packed_uint4_vec(dim, 12);
         auto b = make_packed_uint4_vec(dim, 45);
+        const float naive = l2_uint4_naive(a.data(), b.data(), dim);
+        const float scalar = L2Uint4::compare(a.data(), b.data(), &dim);
+        EXPECT_NEAR(scalar, naive, 1e-4f) << "scalar dim=" << dim;
 
-        float dist = deglib::distances::compute_distance(space, a.data(), b.data());
-        float naive = l2_uint4_naive(a.data(), b.data(), dim);
-        EXPECT_NEAR(dist, naive, 1e-4f) << "dim=" << dim;
+        for (const auto isa : isas) {
+            deglib::distances::FloatSpace space(dim, deglib::distances::Metric::Uint4_L2, isa);
+            EXPECT_EQ(space.get_data_size(), (dim + 1) / 2);
+
+            const float dist = deglib::distances::compute_distance(space, a.data(), b.data());
+            EXPECT_NEAR(dist, naive, 1e-4f) << "dim=" << dim << " isa=" << static_cast<int>(isa);
+            EXPECT_FLOAT_EQ(dist, scalar) << "dim=" << dim << " isa=" << static_cast<int>(isa);
+        }
     }
 }
 

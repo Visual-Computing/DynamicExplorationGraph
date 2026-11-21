@@ -119,7 +119,14 @@ TEST(SearcherTest, RerankerFromGraphFP32ToFP16) {
         }
     }
     auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
-    auto reranker = deglib::search::Reranker::from_graph(graph.internal(), deglib::distances::Metric::FP16_L2);
+    auto reranker = deglib::search::Reranker::from_graph(
+        graph.internal(), deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP16_L2)
+    );
+    auto reranker_scalar = deglib::search::Reranker::from_graph(
+        graph.internal(),
+        deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP16_L2, deglib::cpu::InstructionSet::Scalar)
+    );
+    EXPECT_STREQ(reranker_scalar.getSpace().get_instruction(), "Scalar");
     EXPECT_EQ(reranker.getNumBaseVectors(), count);
     EXPECT_FALSE(reranker.getTransformations().empty());
 

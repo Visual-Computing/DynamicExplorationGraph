@@ -464,7 +464,7 @@ TEST(Rerank, FromDataFP32ToFP16OwnsStorageAndTransformsQueries) {
         }
     }
 
-    auto reranker = deglib::search::Reranker::from_data(deglib::distances::Metric::FP16_L2, data, dim);
+    auto reranker = deglib::search::Reranker::from_data(deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP16_L2), data);
     EXPECT_EQ(reranker.getNumBaseVectors(), count);
     EXPECT_EQ(reranker.getSpace().metric(), deglib::distances::Metric::FP16_L2);
     EXPECT_FALSE(reranker.getTransformations().empty());
@@ -492,7 +492,9 @@ TEST(Rerank, FromDataRowIndicesGathersDirectly) {
         0.0f,  0.0f, 0.0f, 0.0f,  // label 2
     };
     std::vector<uint32_t> labels = {2, 0};  // internal 0 -> label 2, internal 1 -> label 0
-    auto reranker = deglib::search::Reranker::from_data(deglib::distances::Metric::FP16_L2, data, dim, {}, 0, labels);
+    auto reranker = deglib::search::Reranker::from_data(
+        deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP16_L2), data, {}, 0, labels
+    );
     EXPECT_EQ(reranker.getNumBaseVectors(), 2u);
 
     std::vector<float> query = {0.1f, 0.0f, 0.0f, 0.0f};
@@ -509,7 +511,7 @@ TEST(Rerank, AlignedBasePointerAndDenseRows) {
     std::vector<float> data(count * dim, 0.0f);
     for (size_t i = 0; i < count; ++i) data[i * dim] = static_cast<float>(i);
 
-    auto reranker = deglib::search::Reranker::from_data(deglib::distances::Metric::FP16_L2, data, dim);
+    auto reranker = deglib::search::Reranker::from_data(deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP16_L2), data);
     EXPECT_EQ(reranker.getBaseVector(1) - reranker.getBaseVector(0), 400);
     EXPECT_EQ(reinterpret_cast<uintptr_t>(reranker.getBaseVector(0)) % 64u, 0u);
 
@@ -518,4 +520,24 @@ TEST(Rerank, AlignedBasePointerAndDenseRows) {
     std::vector<uint32_t> out_idx(2);
     reranker.rerank_f32(std::span<const float>(data.data() + 9 * dim, dim), cands, 2, out_idx, {}, false, false);
     EXPECT_EQ(out_idx[0], 9u);
+}
+
+TEST(Rerank, FromDataPreservesInstructionSet) {
+    const uint32_t dim = 65;
+    const size_t count = 16;
+    std::vector<float> data(count * dim, 0.0f);
+    for (size_t i = 0; i < count; ++i) data[i * dim] = static_cast<float>(i);
+
+    std::vector<std::pair<deglib::cpu::InstructionSet, const char*>> isas = {
+        {deglib::cpu::InstructionSet::Scalar, "Scalar"},
+    };
+    if (deglib::cpu::has_avx2()) isas.emplace_back(deglib::cpu::InstructionSet::AVX2, "AVX2");
+    if (deglib::cpu::has_avx512()) isas.emplace_back(deglib::cpu::InstructionSet::AVX512, "AVX512");
+
+    for (const auto& [isa, expected_name] : isas) {
+        auto reranker = deglib::search::Reranker::from_data(
+            deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP16_L2, isa), data
+        );
+        EXPECT_STREQ(reranker.getSpace().get_instruction(), expected_name);
+    }
 }

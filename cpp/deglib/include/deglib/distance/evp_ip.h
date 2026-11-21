@@ -2,6 +2,7 @@
 
 #include "deglib/config.h"
 #include "deglib/distance/residual_mode.h"
+#include "deglib/distance/tail_mask.h"
 
 #include <bit>
 #include <concepts>
@@ -175,24 +176,49 @@ class EvpInnerProduct_AVX512 {
             }
         }
 
-        // Horizontal reduce of SIMD accumulators
-        alignas(64) int64_t arr[8];
-        _mm512_storeu_si512(reinterpret_cast<__m512i*>(arr), acc_same);
-        uint64_t same_count = arr[0] + arr[1] + arr[2] + arr[3] + arr[4] + arr[5] + arr[6] + arr[7];
-        _mm512_storeu_si512(reinterpret_cast<__m512i*>(arr), acc_diff);
-        uint64_t diff_count = arr[0] + arr[1] + arr[2] + arr[3] + arr[4] + arr[5] + arr[6] + arr[7];
-
-        // Scalar residual for the unaligned tail — eliminated at compile-time if HasTail == false
         if constexpr (HasTail) {
-            for (; i < mask_bytes; ++i) {
-                const unsigned int o1 = static_cast<uint8_t>(ones_a[i]);
-                const unsigned int o2 = static_cast<uint8_t>(ones_b[i]);
-                const unsigned int n1 = static_cast<uint8_t>(negs_a[i]);
-                const unsigned int n2 = static_cast<uint8_t>(negs_b[i]);
-                same_count += std::popcount((o1 & o2) | (n1 & n2));
-                diff_count += std::popcount((o1 & n2) | (o2 & n1));
+            const size_t rem = mask_bytes - i;
+            if (rem > 0) {
+                // Unlike the other AVX-512 kernels (where a 256-bit small-tail branch was neutral),
+                // EVP issues 4 masked loads, 2x vpopcntq, and 2x 64-bit horizontal reductions;
+                // narrowing to 256-bit AVX-512VL+VPOPCNTDQ for rem <= 32 bytes (<= 256 dims)
+                // yielded +12% to +15.5% end-to-end QPS on AGNews-mxbai (dim 129..256) vs. the 512-bit tail.
+                if (rem <= 32) {
+                    const __mmask32 m = tail_mask::mask32(rem);
+                    const __m256i o1 = _mm256_maskz_loadu_epi8(m, &ones_a[i]);
+                    const __m256i o2 = _mm256_maskz_loadu_epi8(m, &ones_b[i]);
+                    const __m256i n1 = _mm256_maskz_loadu_epi8(m, &negs_a[i]);
+                    const __m256i n2 = _mm256_maskz_loadu_epi8(m, &negs_b[i]);
+
+                    const __m256i same = _mm256_or_si256(_mm256_and_si256(o1, o2), _mm256_and_si256(n1, n2));
+                    const __m256i diff = _mm256_or_si256(_mm256_and_si256(o1, n2), _mm256_and_si256(o2, n1));
+
+                    const __m256i same256 =
+                        _mm256_add_epi64(_mm256_add_epi64(_mm512_castsi512_si256(acc_same), _mm512_extracti64x4_epi64(acc_same, 1)), _mm256_popcnt_epi64(same));
+                    const __m256i diff256 =
+                        _mm256_add_epi64(_mm256_add_epi64(_mm512_castsi512_si256(acc_diff), _mm512_extracti64x4_epi64(acc_diff, 1)), _mm256_popcnt_epi64(diff));
+                    const uint64_t same_count = evp_hsum256(same256);
+                    const uint64_t diff_count = evp_hsum256(diff256);
+                    const float sim = static_cast<float>(same_count + dim) - static_cast<float>(diff_count);
+                    return 1.f - sim / (2.f * static_cast<float>(dim));
+                }
+                const __mmask64 m = tail_mask::mask64(rem);
+                const __m512i o1 = _mm512_maskz_loadu_epi8(m, &ones_a[i]);
+                const __m512i o2 = _mm512_maskz_loadu_epi8(m, &ones_b[i]);
+                const __m512i n1 = _mm512_maskz_loadu_epi8(m, &negs_a[i]);
+                const __m512i n2 = _mm512_maskz_loadu_epi8(m, &negs_b[i]);
+
+                const __m512i same = _mm512_or_si512(_mm512_and_si512(o1, o2), _mm512_and_si512(n1, n2));
+                const __m512i diff = _mm512_or_si512(_mm512_and_si512(o1, n2), _mm512_and_si512(o2, n1));
+
+                acc_same = _mm512_add_epi64(acc_same, _mm512_popcnt_epi64(same));
+                acc_diff = _mm512_add_epi64(acc_diff, _mm512_popcnt_epi64(diff));
             }
         }
+
+        // Horizontal reduce of SIMD accumulators
+        const uint64_t same_count = static_cast<uint64_t>(_mm512_reduce_add_epi64(acc_same));
+        const uint64_t diff_count = static_cast<uint64_t>(_mm512_reduce_add_epi64(acc_diff));
 
         const float sim = static_cast<float>(same_count + dim) - static_cast<float>(diff_count);
         return 1.f - sim / (2.f * static_cast<float>(dim));
@@ -275,24 +301,28 @@ class EvpInnerProduct_AVX2 {
             }
         }
 
+        if constexpr (HasTail) {
+            const size_t rem = mask_bytes - i;
+            if (rem > 0) {
+                const __m256i o1 = tail_mask::load_tail_bytes_32(&ones_a[i], rem, mask_bytes);
+                const __m256i o2 = tail_mask::load_tail_bytes_32(&ones_b[i], rem, mask_bytes);
+                const __m256i n1 = tail_mask::load_tail_bytes_32(&negs_a[i], rem, mask_bytes);
+                const __m256i n2 = tail_mask::load_tail_bytes_32(&negs_b[i], rem, mask_bytes);
+
+                const __m256i same = _mm256_or_si256(_mm256_and_si256(o1, o2), _mm256_and_si256(n1, n2));
+                const __m256i diff = _mm256_or_si256(_mm256_and_si256(o1, n2), _mm256_and_si256(o2, n1));
+
+                acc_same = _mm256_add_epi64(acc_same, _mm256_sad_epu8(vector_popcnt(same), zero));
+                acc_diff = _mm256_add_epi64(acc_diff, _mm256_sad_epu8(vector_popcnt(diff), zero));
+            }
+        }
+
         // Horizontal reduce of SIMD accumulators
         alignas(32) int64_t arr[4];
         _mm256_storeu_si256(reinterpret_cast<__m256i*>(arr), acc_same);
-        uint64_t same_count = arr[0] + arr[1] + arr[2] + arr[3];
+        const uint64_t same_count = static_cast<uint64_t>(arr[0] + arr[1] + arr[2] + arr[3]);
         _mm256_storeu_si256(reinterpret_cast<__m256i*>(arr), acc_diff);
-        uint64_t diff_count = arr[0] + arr[1] + arr[2] + arr[3];
-
-        // Scalar residual for the unaligned tail — eliminated at compile-time if HasTail == false
-        if constexpr (HasTail) {
-            for (; i < mask_bytes; ++i) {
-                const unsigned int o1 = static_cast<uint8_t>(ones_a[i]);
-                const unsigned int o2 = static_cast<uint8_t>(ones_b[i]);
-                const unsigned int n1 = static_cast<uint8_t>(negs_a[i]);
-                const unsigned int n2 = static_cast<uint8_t>(negs_b[i]);
-                same_count += std::popcount((o1 & o2) | (n1 & n2));
-                diff_count += std::popcount((o1 & n2) | (o2 & n1));
-            }
-        }
+        const uint64_t diff_count = static_cast<uint64_t>(arr[0] + arr[1] + arr[2] + arr[3]);
 
         const float sim = static_cast<float>(same_count + dim) - static_cast<float>(diff_count);
         return 1.f - sim / (2.f * static_cast<float>(dim));
@@ -344,10 +374,8 @@ inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::Instruct
             else
                 return EvpInnerProduct_AVX512<ResidualMode::Full>{};
         }
-    } else if (
-        target == deglib::cpu::InstructionSet::AVX512 || target == deglib::cpu::InstructionSet::AVX512_VNNI || target == deglib::cpu::InstructionSet::AVX2 ||
-        target == deglib::cpu::InstructionSet::AVX2_VNNI
-    ) {
+    } else if (target == deglib::cpu::InstructionSet::AVX512 || target == deglib::cpu::InstructionSet::AVX512_VNNI ||
+               target == deglib::cpu::InstructionSet::AVX2 || target == deglib::cpu::InstructionSet::AVX2_VNNI) {
         // Fall back to AVX2 when AVX512_VPOPCNTDQ is not supported by the CPU (e.g. Cascade Lake).
         if (dim < 256) {
             return EvpInnerProduct_AVX2<ResidualMode::TailOnly>{};

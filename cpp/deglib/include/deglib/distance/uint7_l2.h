@@ -2,6 +2,7 @@
 
 #include "deglib/config.h"
 #include "deglib/distance/residual_mode.h"
+#include "deglib/distance/tail_mask.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -104,32 +105,19 @@ class L2UInt7_AVX512 {
             i += 64;
         }
 
-        int64_t result = uint7_hsum512(_mm512_add_epi32(sum0, sum1));
-
         if constexpr (HasTail) {
-            int32_t rem = dim - i;
-            if (rem >= 32) {
-                __m256i tail256 = _mm256_setzero_si256();
-                l2_uint7_acc256(tail256, a + i, b + i, _mm256_set1_epi16(1));
-                result += uint7_hsum256(tail256);
-                i += 32;
-                rem -= 32;
-            }
-            if (rem >= 16) {
-                result += l2_uint7_acc128(a + i, b + i);
-                i += 16;
-                rem -= 16;
-            }
-            if (rem >= 8) {
-                result += l2_uint7_acc64(a + i, b + i);
-                i += 8;
-                rem -= 8;
-            }
-            for (; i < dim; ++i) {
-                const int32_t diff = static_cast<int32_t>(a[i]) - static_cast<int32_t>(b[i]);
-                result += static_cast<int64_t>(diff) * diff;
+            const int32_t rem = dim - i;
+            if (rem > 0) {
+                const __mmask64 tail_mask = tail_mask::mask64(static_cast<size_t>(rem));
+                const __m512i xx = _mm512_maskz_loadu_epi8(tail_mask, a + i);
+                const __m512i yy = _mm512_maskz_loadu_epi8(tail_mask, b + i);
+                const __m512i d = _mm512_abs_epi8(_mm512_sub_epi8(xx, yy));
+                const __m512i prod = _mm512_maddubs_epi16(d, d);
+                sum0 = _mm512_add_epi32(sum0, _mm512_madd_epi16(prod, ones));
             }
         }
+
+        int64_t result = uint7_hsum512(_mm512_add_epi32(sum0, sum1));
 
         return static_cast<float>(result);
     }
@@ -161,25 +149,18 @@ class L2UInt7_AVX2 {
             i += 32;
         }
 
-        int64_t result = uint7_hsum256(_mm256_add_epi32(sum0, sum1));
-
         if constexpr (HasTail) {
-            int32_t rem = dim - i;
-            if (rem >= 16) {
-                result += l2_uint7_acc128(a + i, b + i);
-                i += 16;
-                rem -= 16;
-            }
-            if (rem >= 8) {
-                result += l2_uint7_acc64(a + i, b + i);
-                i += 8;
-                rem -= 8;
-            }
-            for (; i < dim; ++i) {
-                const int32_t diff = static_cast<int32_t>(a[i]) - static_cast<int32_t>(b[i]);
-                result += static_cast<int64_t>(diff) * diff;
+            const int32_t rem = dim - i;
+            if (rem > 0) {
+                const __m256i xx = tail_mask::load_tail_bytes_32(a + i, static_cast<size_t>(rem), static_cast<size_t>(dim));
+                const __m256i yy = tail_mask::load_tail_bytes_32(b + i, static_cast<size_t>(rem), static_cast<size_t>(dim));
+                const __m256i d = _mm256_abs_epi8(_mm256_sub_epi8(xx, yy));
+                const __m256i prod = _mm256_maddubs_epi16(d, d);
+                sum0 = _mm256_add_epi32(sum0, _mm256_madd_epi16(prod, ones));
             }
         }
+
+        int64_t result = uint7_hsum256(_mm256_add_epi32(sum0, sum1));
 
         return static_cast<float>(result);
     }

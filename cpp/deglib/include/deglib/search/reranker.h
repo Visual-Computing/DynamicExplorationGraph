@@ -201,6 +201,32 @@ class Reranker {
         return static_cast<uint32_t>(top);
     }
 
+    static void validate_transformations_for_space(
+        std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
+        const deglib::distances::FloatSpace& target_space,
+        const char* caller
+    ) {
+        for (const auto& t : transformations) {
+            if (!t) {
+                throw std::invalid_argument(std::format("{}: transformation pipeline contains null entry", caller));
+            }
+            if (!t->is_fitted()) {
+                throw std::invalid_argument(std::format("{}: transformation '{}' is not fitted", caller, t->name()));
+            }
+        }
+        for (size_t i = 0; i + 1 < transformations.size(); ++i) {
+            if (transformations[i]->output_dim() != transformations[i + 1]->input_dim()) {
+                throw std::invalid_argument(std::format("{}: transformation chain output_dim does not match next input_dim", caller));
+            }
+        }
+        if (!transformations.empty()) {
+            const auto& last = transformations.back();
+            if (last->output_dim() != target_space.dim() || last->output_byte_size() != target_space.get_data_size()) {
+                throw std::invalid_argument(std::format("{}: last transformation output does not match target FloatSpace", caller));
+            }
+        }
+    }
+
   public:
     Reranker(const Reranker&) = delete;
     Reranker& operator=(const Reranker&) = delete;
@@ -241,18 +267,20 @@ class Reranker {
 
     /**
      * Builds an owning Reranker directly from float32 vectors in C++.
-     * If `target_metric` is non-FP32 (e.g. FP16) and `transformations` is empty, fits the quantizer
-     * and converts directly into internal storage (zero intermediate full-matrix copies).
+     * `space` defines the target distance metric, output dimensionality, and SIMD instruction set.
+     * If `space.metric()` is non-FP32 (e.g. FP16) and `transformations` is empty, fits the quantizer
+     * on `data` (`dim = space.dim()`) and converts directly into internal storage (zero intermediate full-matrix copies).
      * When `row_indices` is non-empty, gathers rows in `row_indices` order directly into storage.
      */
     static Reranker from_data(
-        deglib::distances::Metric target_metric,
+        deglib::distances::FloatSpace space,
         std::span<const float> data,
-        uint32_t dim,
         std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
         size_t threads = 0,
         std::span<const uint32_t> row_indices = {}
     ) {
+        validate_transformations_for_space(transformations, space, "Reranker::from_data");
+        const uint32_t dim = transformations.empty() ? static_cast<uint32_t>(space.dim()) : transformations.front()->input_dim();
         if (dim == 0) throw std::invalid_argument("Reranker::from_data: dim must be > 0");
         if (data.size() % dim != 0) throw std::invalid_argument("Reranker::from_data: data size must be a multiple of dim");
         const size_t src_rows = data.size() / dim;
@@ -263,9 +291,9 @@ class Reranker {
             }
         }
 
+        const auto target_metric = space.metric();
         const auto target_dt = target_metric.get_data_type();
         if (transformations.empty() && target_dt == deglib::distances::MetricDataType::FP32) {
-            deglib::distances::FloatSpace space(dim, target_metric);
             const size_t row_bytes = space.get_data_size();
             std::unique_ptr<std::byte[]> storage;
             std::byte* dst_base = nullptr;
@@ -333,8 +361,6 @@ class Reranker {
             }
         }
 
-        const uint32_t out_dim = transformations.back()->output_dim();
-        deglib::distances::FloatSpace space(out_dim, target_metric);
         const size_t row_bytes = space.get_data_size();
         std::unique_ptr<std::byte[]> storage;
         std::byte* dst_base = nullptr;
@@ -409,7 +435,7 @@ class Reranker {
      */
     static Reranker from_graph(
         const deglib::graph::InternalGraph& graph,
-        deglib::distances::Metric target_metric,
+        deglib::distances::FloatSpace target_space,
         std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
         size_t threads = 0
     ) {
@@ -421,20 +447,34 @@ class Reranker {
 
         const size_t count = graph.size();
         const uint32_t dim = src_space.dim();
+        validate_transformations_for_space(transformations, target_space, "Reranker::from_graph");
+        if (transformations.empty()) {
+            if (target_space.dim() != dim) {
+                throw std::invalid_argument(
+                    std::format("Reranker::from_graph: target FloatSpace dim ({}) does not match graph dim ({})", target_space.dim(), dim)
+                );
+            }
+        } else if (transformations.front()->input_dim() != dim) {
+            throw std::invalid_argument(
+                std::format(
+                    "Reranker::from_graph: first transformation input_dim ({}) does not match graph dim ({})",
+                    transformations.front()->input_dim(), dim
+                )
+            );
+        }
+
         const bool src_is_fp16 = (src_dt == deglib::distances::MetricDataType::FP16);
+        const auto target_metric = target_space.metric();
         const auto target_dt = target_metric.get_data_type();
 
         if (count == 0) {
-            const uint32_t out_dim = transformations.empty() ? dim : transformations.back()->output_dim();
-            deglib::distances::FloatSpace space(out_dim, target_metric);
-            return Reranker(std::move(space), std::unique_ptr<std::byte[]>{}, nullptr, 0, std::move(transformations));
+            return Reranker(std::move(target_space), std::unique_ptr<std::byte[]>{}, nullptr, 0, std::move(transformations));
         }
 
         // Direct copy when source and target are both FP16 (or both FP32 with no transformations)
         if ((src_is_fp16 && target_dt == deglib::distances::MetricDataType::FP16 && transformations.empty()) ||
             (!src_is_fp16 && target_dt == deglib::distances::MetricDataType::FP32 && transformations.empty())) {
-            deglib::distances::FloatSpace space(dim, target_metric);
-            const size_t row_bytes = space.get_data_size();
+            const size_t row_bytes = target_space.get_data_size();
             std::unique_ptr<std::byte[]> storage;
             std::byte* dst_base = nullptr;
             deglib::memory::allocate_aligned(storage, dst_base, count * row_bytes);
@@ -447,13 +487,12 @@ class Reranker {
                 },
                 64
             );
-            return Reranker(std::move(space), std::move(storage), dst_base, count, {});
+            return Reranker(std::move(target_space), std::move(storage), dst_base, count, {});
         }
 
         // FP16 graph -> FP32 reranker
         if (src_is_fp16 && target_dt == deglib::distances::MetricDataType::FP32 && transformations.empty()) {
-            deglib::distances::FloatSpace space(dim, target_metric);
-            const size_t row_bytes = space.get_data_size();
+            const size_t row_bytes = target_space.get_data_size();
             std::unique_ptr<std::byte[]> storage;
             std::byte* dst_base = nullptr;
             deglib::memory::allocate_aligned(storage, dst_base, count * row_bytes);
@@ -468,7 +507,7 @@ class Reranker {
                 },
                 64
             );
-            return Reranker(std::move(space), std::move(storage), dst_base, count, {});
+            return Reranker(std::move(target_space), std::move(storage), dst_base, count, {});
         }
 
         // FP32 graph -> FP16 (auto-fit ScalarQuantizerFP16 if no transformations supplied)
@@ -512,9 +551,7 @@ class Reranker {
             transformations = deglib::transformation::make_quantizer_pipeline(std::span<const float>(sample), dim, target_metric, -1.0f, true, threads);
         }
 
-        const uint32_t out_dim = transformations.back()->output_dim();
-        deglib::distances::FloatSpace space(out_dim, target_metric);
-        const size_t row_bytes = space.get_data_size();
+        const size_t row_bytes = target_space.get_data_size();
         std::unique_ptr<std::byte[]> storage;
         std::byte* dst_base = nullptr;
         deglib::memory::allocate_aligned(storage, dst_base, count * row_bytes);
@@ -542,7 +579,7 @@ class Reranker {
             },
             64
         );
-        return Reranker(std::move(space), std::move(storage), dst_base, count, std::move(transformations));
+        return Reranker(std::move(target_space), std::move(storage), dst_base, count, std::move(transformations));
     }
 
     const deglib::distances::FloatSpace& getSpace() const noexcept { return space_; }

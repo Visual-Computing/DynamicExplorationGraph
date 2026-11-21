@@ -237,3 +237,42 @@ class TestRerankerClass:
         via_class = deglib.Reranker(self.metric, base).rerank(queries, candidates, k_top=3)
         via_function = deglib.rerank(self.metric, queries, candidates, base, k_top=3)
         np.testing.assert_array_equal(via_class, via_function)
+
+    def test_reranker_preserves_instruction_set(self):
+        rng = np.random.default_rng(17)
+        dim = 65
+        n_base = 24
+        base = rng.standard_normal((n_base, dim), dtype=np.float32)
+        queries = rng.standard_normal((4, dim), dtype=np.float32)
+        candidates = np.broadcast_to(np.arange(n_base, dtype=np.uint32), (queries.shape[0], n_base)).copy()
+
+        expected_top = deglib.Reranker(
+            Metric.FP32_L2.with_instruction(deglib.InstructionSet.Scalar),
+            base,
+        ).rerank(queries, candidates, k_top=5)
+
+        graph = deglib.create_empty(n_base, dim, edges_per_vertex=8, metric=Metric.FP32_L2)
+        builder = deglib.GraphBuilder(graph, extend_k=8, extend_eps=0.1)
+        builder.add_entry(np.arange(n_base, dtype=np.uint32), base)
+        builder.build()
+
+        test_isas = [deglib.InstructionSet.Scalar]
+        if deglib.cpu.has_avx2():
+            test_isas.append(deglib.InstructionSet.AVX2)
+        if deglib.cpu.has_avx512():
+            test_isas.append(deglib.InstructionSet.AVX512)
+
+        for isa in test_isas:
+            r_fp32 = deglib.Reranker(Metric.FP32_L2.with_instruction(isa), base)
+            assert r_fp32.get_instruction() == isa
+            np.testing.assert_array_equal(r_fp32.rerank(queries, candidates, k_top=5), expected_top)
+
+            r_fp16 = deglib.Reranker(Metric.FP16_L2.with_instruction(isa), base)
+            assert r_fp16.get_instruction() == isa
+
+            r_graph = graph.to_reranker(Metric.FP32_L2.with_instruction(isa))
+            assert r_graph.get_instruction() == isa
+            np.testing.assert_array_equal(r_graph.rerank(queries, candidates, k_top=5), expected_top)
+
+            r_graph_fp16 = graph.to_reranker(Metric.FP16_L2.with_instruction(isa), data=base)
+            assert r_graph_fp16.get_instruction() == isa

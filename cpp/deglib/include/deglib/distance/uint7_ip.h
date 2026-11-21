@@ -2,6 +2,7 @@
 
 #include "deglib/config.h"
 #include "deglib/distance/residual_mode.h"
+#include "deglib/distance/tail_mask.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -99,31 +100,18 @@ class InnerProductUInt7_AVX512 {
             i += 64;
         }
 
-        int64_t result = uint7_ip_hsum512(_mm512_add_epi32(sum0, sum1));
-
         if constexpr (HasTail) {
-            int32_t rem = dim - i;
-            if (rem >= 32) {
-                __m256i tail256 = _mm256_setzero_si256();
-                ip_uint7_acc256(tail256, a + i, b + i, _mm256_set1_epi16(1));
-                result += uint7_ip_hsum256(tail256);
-                i += 32;
-                rem -= 32;
-            }
-            if (rem >= 16) {
-                result += ip_uint7_acc128(a + i, b + i);
-                i += 16;
-                rem -= 16;
-            }
-            if (rem >= 8) {
-                result += ip_uint7_acc64(a + i, b + i);
-                i += 8;
-                rem -= 8;
-            }
-            for (; i < dim; ++i) {
-                result += static_cast<int64_t>(a[i]) * static_cast<int64_t>(b[i]);
+            const int32_t rem = dim - i;
+            if (rem > 0) {
+                const __mmask64 mask = tail_mask::mask64(static_cast<size_t>(rem));
+                const __m512i xx = _mm512_maskz_loadu_epi8(mask, a + i);
+                const __m512i yy = _mm512_maskz_loadu_epi8(mask, b + i);
+                const __m512i prod = _mm512_maddubs_epi16(xx, yy);
+                sum0 = _mm512_add_epi32(sum0, _mm512_madd_epi16(prod, ones));
             }
         }
+
+        int64_t result = uint7_ip_hsum512(_mm512_add_epi32(sum0, sum1));
 
         return -static_cast<float>(result);
     }
@@ -155,24 +143,17 @@ class InnerProductUInt7_AVX2 {
             i += 32;
         }
 
-        int64_t result = uint7_ip_hsum256(_mm256_add_epi32(sum0, sum1));
-
         if constexpr (HasTail) {
-            int32_t rem = dim - i;
-            if (rem >= 16) {
-                result += ip_uint7_acc128(a + i, b + i);
-                i += 16;
-                rem -= 16;
-            }
-            if (rem >= 8) {
-                result += ip_uint7_acc64(a + i, b + i);
-                i += 8;
-                rem -= 8;
-            }
-            for (; i < dim; ++i) {
-                result += static_cast<int64_t>(a[i]) * static_cast<int64_t>(b[i]);
+            const int32_t rem = dim - i;
+            if (rem > 0) {
+                const __m256i xx = tail_mask::load_tail_bytes_32(a + i, static_cast<size_t>(rem), static_cast<size_t>(dim));
+                const __m256i yy = tail_mask::load_tail_bytes_32(b + i, static_cast<size_t>(rem), static_cast<size_t>(dim));
+                const __m256i prod = _mm256_maddubs_epi16(xx, yy);
+                sum0 = _mm256_add_epi32(sum0, _mm256_madd_epi16(prod, ones));
             }
         }
+
+        int64_t result = uint7_ip_hsum256(_mm256_add_epi32(sum0, sum1));
 
         return -static_cast<float>(result);
     }

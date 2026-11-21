@@ -1,6 +1,7 @@
 #pragma once
 
 #include "deglib/distance/residual_mode.h"
+#include "deglib/distance/tail_mask.h"
 
 #include <cmath>
 #include <stdexcept>
@@ -108,6 +109,14 @@ class InnerProductFloat_AVX512 {
             }
         }
 
+        if constexpr (HasTail) {
+            const ptrdiff_t rem = last - a;
+            if (rem > 0) {
+                const __mmask16 mask = tail_mask::mask16(static_cast<size_t>(rem));
+                sum512_1 = _mm512_fmadd_ps(_mm512_maskz_loadu_ps(mask, a), _mm512_maskz_loadu_ps(mask, b), sum512_1);
+            }
+        }
+
         // Horizontal reduce of SIMD accumulators
         __m512 sum512 = _mm512_add_ps(sum512_1, sum512_2);
         __m256 sum256 = _mm256_add_ps(_mm512_extractf32x8_ps(sum512, 0), _mm512_extractf32x8_ps(sum512, 1));
@@ -115,34 +124,6 @@ class InnerProductFloat_AVX512 {
         alignas(32) float f[4];
         _mm_store_ps(f, sum128);
         float result = f[0] + f[1] + f[2] + f[3];
-
-        // Vectorized residual tail for arbitrary dimensions
-        if constexpr (HasTail) {
-            if ((last - a) >= 8) {
-                __m256 va8 = _mm256_loadu_ps(a);
-                __m256 vb8 = _mm256_loadu_ps(b);
-                __m256 prod8 = _mm256_mul_ps(va8, vb8);
-                __m128 sum128 = _mm_add_ps(_mm256_castps256_ps128(prod8), _mm256_extractf128_ps(prod8, 1));
-                alignas(16) float f[4];
-                _mm_store_ps(f, sum128);
-                result += f[0] + f[1] + f[2] + f[3];
-                a += 8;
-                b += 8;
-            }
-            if ((last - a) >= 4) {
-                __m128 va4 = _mm_loadu_ps(a);
-                __m128 vb4 = _mm_loadu_ps(b);
-                __m128 prod4 = _mm_mul_ps(va4, vb4);
-                prod4 = _mm_add_ps(prod4, _mm_movehl_ps(prod4, prod4));
-                prod4 = _mm_add_ss(prod4, _mm_shuffle_ps(prod4, prod4, 1));
-                result += _mm_cvtss_f32(prod4);
-                a += 4;
-                b += 4;
-            }
-            while (a < last) {
-                result = std::fma(*a++, *b++, result);
-            }
-        }
 
         return 1.f - result;
     }
@@ -190,26 +171,17 @@ class InnerProductFloat_AVX2 {
             }
         }
 
+        if constexpr (HasTail) {
+            const ptrdiff_t rem = last - a;
+            if (rem > 0) {
+                const __m256i mask = tail_mask::load_mask_ps(static_cast<size_t>(rem));
+                sum256_1 = _mm256_fmadd_ps(_mm256_maskload_ps(a, mask), _mm256_maskload_ps(b, mask), sum256_1);
+            }
+        }
+
         // Horizontal reduce of SIMD accumulators
         __m256 sum256 = _mm256_add_ps(sum256_1, sum256_2);
         float result = fp32_hsum256(sum256);
-
-        // Vectorized residual tail for arbitrary dimensions
-        if constexpr (HasTail) {
-            if ((last - a) >= 4) {
-                __m128 va4 = _mm_loadu_ps(a);
-                __m128 vb4 = _mm_loadu_ps(b);
-                __m128 prod4 = _mm_mul_ps(va4, vb4);
-                prod4 = _mm_add_ps(prod4, _mm_movehl_ps(prod4, prod4));
-                prod4 = _mm_add_ss(prod4, _mm_shuffle_ps(prod4, prod4, 1));
-                result += _mm_cvtss_f32(prod4);
-                a += 4;
-                b += 4;
-            }
-            while (a < last) {
-                result = std::fma(*a++, *b++, result);
-            }
-        }
 
         return 1.f - result;
     }

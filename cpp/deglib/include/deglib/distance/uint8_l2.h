@@ -1,6 +1,7 @@
 #pragma once
 
 #include "deglib/distance/residual_mode.h"
+#include "deglib/distance/tail_mask.h"
 #include "deglib/distance/uint8.h"
 
 #include <stdexcept>
@@ -99,24 +100,20 @@ class L2Uint8_AVX512 {
             }
         }
 
-        // Horizontal reduce of SIMD accumulators
-        __m512i sum512 = _mm512_add_epi32(sum512_1, sum512_2);
-        __m256i sum256 = _mm256_add_epi32(_mm512_castsi512_si256(sum512), _mm512_extracti64x4_epi64(sum512, 1));
-        __m128i sum128 = _mm_add_epi32(_mm256_castsi256_si128(sum256), _mm256_extracti128_si256(sum256, 1));
-
-        alignas(16) int sum_array[4];
-        _mm_store_si128(reinterpret_cast<__m128i*>(sum_array), sum128);
-        int64_t result = sum_array[0] + sum_array[1] + sum_array[2] + sum_array[3];
-
-        // Scalar residual for the unaligned tail — eliminated at compile-time if HasTail == false
         if constexpr (HasTail) {
-            while (a < last) {
-                int32_t diff = int32_t(*a++) - int32_t(*b++);
-                result += int64_t(diff) * diff;
+            const ptrdiff_t rem = last - a;
+            if (rem > 0) {
+                const __mmask32 mask = tail_mask::mask32(static_cast<size_t>(rem));
+                const __m256i q_raw = _mm256_maskz_loadu_epi8(mask, a);
+                const __m256i r_raw = _mm256_maskz_loadu_epi8(mask, b);
+                const __m512i diff = _mm512_sub_epi16(_mm512_cvtepu8_epi16(q_raw), _mm512_cvtepu8_epi16(r_raw));
+                sum512_1 = _mm512_add_epi32(sum512_1, _mm512_madd_epi16(diff, diff));
             }
         }
 
-        return static_cast<float>(result);
+        // Horizontal reduce of SIMD accumulators
+        __m512i sum512 = _mm512_add_epi32(sum512_1, sum512_2);
+        return static_cast<float>(uint8_l2_hsum512(sum512));
     }
 };
 
@@ -164,22 +161,19 @@ class L2Uint8_AVX2 {
             }
         }
 
-        // Horizontal reduce of SIMD accumulators
-        __m256i sum256 = _mm256_add_epi32(sum256_1, sum256_2);
-        __m128i sum128 = _mm_add_epi32(_mm256_extracti128_si256(sum256, 0), _mm256_extracti128_si256(sum256, 1));
-
-        alignas(16) int sum_array[4];
-        _mm_store_si128(reinterpret_cast<__m128i*>(sum_array), sum128);
-        int64_t result = sum_array[0] + sum_array[1] + sum_array[2] + sum_array[3];
-        // Scalar residual for the unaligned tail — eliminated at compile-time if HasTail == false
         if constexpr (HasTail) {
-            while (a < last) {
-                int32_t diff = int32_t(*a++) - int32_t(*b++);
-                result += int64_t(diff) * diff;
+            const ptrdiff_t rem = last - a;
+            if (rem > 0) {
+                const __m128i v1 = tail_mask::load_tail_bytes_16(a, static_cast<size_t>(rem), size);
+                const __m128i v2 = tail_mask::load_tail_bytes_16(b, static_cast<size_t>(rem), size);
+                const __m256i diff = _mm256_sub_epi16(_mm256_cvtepu8_epi16(v1), _mm256_cvtepu8_epi16(v2));
+                sum256_1 = _mm256_add_epi32(sum256_1, _mm256_madd_epi16(diff, diff));
             }
         }
 
-        return static_cast<float>(result);
+        // Horizontal reduce of SIMD accumulators
+        __m256i sum256 = _mm256_add_epi32(sum256_1, sum256_2);
+        return static_cast<float>(uint8_l2_hsum256(sum256));
     }
 };
 

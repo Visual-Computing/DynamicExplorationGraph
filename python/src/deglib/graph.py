@@ -356,9 +356,11 @@ class DynamicExplorationGraph:
                 raise TypeError(f"transformations[{i}] must be a FeatureTransformation, got {type(t).__name__}")
 
         if data is None:
+            target_dim = int(r_xfrms[-1].output_dim) if r_xfrms else self.get_dim()
+            cpp_space = resolved_metric._to_cpp_space(target_dim)
             reranker_cpp = deglib_cpp.search.Reranker.from_graph(
                 self.dynamic_exploration_graph_cpp,
-                resolved_metric._to_cpp_metric(),
+                cpp_space,
                 r_xfrms,
                 int(threads),
             )

@@ -1,7 +1,8 @@
 #pragma once
 
-#include "deglib/distance/residual_mode.h"
 #include "deglib/distance/int4.h"
+#include "deglib/distance/residual_mode.h"
+#include "deglib/distance/tail_mask.h"
 
 #include <cstdint>
 #include <cstring>
@@ -17,6 +18,9 @@ inline static int8_t sign_extend_nibble(uint8_t n) {
 }
 
 // Scalar fallback — no SIMD required.
+// Packed int4 contract: for odd dimensions, the last byte stores the final element
+// in its low nibble and 0x0 in its high nibble, so summing all num_bytes = (dim + 1) / 2
+// bytes is exact without an odd-dimension tail branch.
 class InnerProductInt4 {
   public:
     static constexpr const char* get_instruction() { return "Scalar"; }
@@ -27,7 +31,7 @@ class InnerProductInt4 {
         const uint8_t* b = static_cast<const uint8_t*>(pVect2v);
 
         const size_t dim = *((size_t*)qty_ptr);
-        const size_t num_bytes = dim / 2;
+        const size_t num_bytes = (dim + 1) / 2;
 
         for (size_t i = 0; i < num_bytes; ++i) {
             uint8_t byte_a = a[i];
@@ -39,14 +43,6 @@ class InnerProductInt4 {
             int32_t b1 = sign_extend_nibble(byte_b >> 4);
 
             result += a0 * b0 + a1 * b1;
-        }
-
-        if (dim & 1) {
-            uint8_t byte_a = a[num_bytes];
-            uint8_t byte_b = b[num_bytes];
-            int32_t a0 = sign_extend_nibble(byte_a);
-            int32_t b0 = sign_extend_nibble(byte_b);
-            result += a0 * b0;
         }
 
         return -static_cast<float>(result);
@@ -66,7 +62,31 @@ DEGLIB_TARGET_AVX512 inline static int64_t int4_ip_hsum512(__m512i s) {
     return static_cast<int64_t>(_mm512_reduce_add_epi32(s));
 }
 
-// In AVX2/AVX512: unpack nibbles to 16-bit signed integers and multiply with _mm_madd_epi16
+DEGLIB_TARGET_AVX512 inline static void int4_ip_acc32_avx512(
+    __m256i ra, __m256i rb, __m256i mask, __m256i s8, __m512i& sum512_1, __m512i& sum512_2
+) {
+    const __m256i a_lo_s8 = _mm256_sub_epi8(_mm256_xor_si256(_mm256_and_si256(ra, mask), s8), s8);
+    const __m256i b_lo_s8 = _mm256_sub_epi8(_mm256_xor_si256(_mm256_and_si256(rb, mask), s8), s8);
+    const __m256i a_hi_s8 = _mm256_sub_epi8(_mm256_xor_si256(_mm256_and_si256(_mm256_srli_epi16(ra, 4), mask), s8), s8);
+    const __m256i b_hi_s8 = _mm256_sub_epi8(_mm256_xor_si256(_mm256_and_si256(_mm256_srli_epi16(rb, 4), mask), s8), s8);
+
+    sum512_1 = _mm512_add_epi32(sum512_1, _mm512_madd_epi16(_mm512_cvtepi8_epi16(a_lo_s8), _mm512_cvtepi8_epi16(b_lo_s8)));
+    sum512_2 = _mm512_add_epi32(sum512_2, _mm512_madd_epi16(_mm512_cvtepi8_epi16(a_hi_s8), _mm512_cvtepi8_epi16(b_hi_s8)));
+}
+
+DEGLIB_TARGET_AVX2 inline static void int4_ip_acc16_avx2(
+    __m128i ra, __m128i rb, __m128i mask, __m128i s8, __m256i& sum256_1, __m256i& sum256_2
+) {
+    const __m128i a_lo_s8 = _mm_sub_epi8(_mm_xor_si128(_mm_and_si128(ra, mask), s8), s8);
+    const __m128i b_lo_s8 = _mm_sub_epi8(_mm_xor_si128(_mm_and_si128(rb, mask), s8), s8);
+    const __m128i a_hi_s8 = _mm_sub_epi8(_mm_xor_si128(_mm_and_si128(_mm_srli_epi16(ra, 4), mask), s8), s8);
+    const __m128i b_hi_s8 = _mm_sub_epi8(_mm_xor_si128(_mm_and_si128(_mm_srli_epi16(rb, 4), mask), s8), s8);
+
+    sum256_1 = _mm256_add_epi32(sum256_1, _mm256_madd_epi16(_mm256_cvtepi8_epi16(a_lo_s8), _mm256_cvtepi8_epi16(b_lo_s8)));
+    sum256_2 = _mm256_add_epi32(sum256_2, _mm256_madd_epi16(_mm256_cvtepi8_epi16(a_hi_s8), _mm256_cvtepi8_epi16(b_hi_s8)));
+}
+
+// In AVX2/AVX512: unpack nibbles to 16-bit signed integers and multiply with madd_epi16
 template <ResidualMode Mode = ResidualMode::Full>
 class InnerProductInt4_AVX512 {
     static constexpr bool HasDualSimd = has_flag(Mode, ResidualMode::DualSimd);
@@ -81,64 +101,33 @@ class InnerProductInt4_AVX512 {
         const uint8_t* a = static_cast<const uint8_t*>(pVect1v);
         const uint8_t* b = static_cast<const uint8_t*>(pVect2v);
 
-        const size_t num_bytes = dim / 2;
-        const uint8_t* last_full_byte = a + num_bytes;
+        const size_t num_bytes = (dim + 1) / 2;
+        const uint8_t* last_byte = a + num_bytes;
 
-        const __m128i mask = _mm_set1_epi8(0x0F);
-        const __m128i s8 = _mm_set1_epi8(0x08);
-        __m256i sum256_1 = _mm256_setzero_si256();
-        __m256i sum256_2 = _mm256_setzero_si256();
+        const __m256i mask = _mm256_set1_epi8(0x0F);
+        const __m256i s8 = _mm256_set1_epi8(0x08);
+        __m512i sum512_1 = _mm512_setzero_si512();
+        __m512i sum512_2 = _mm512_setzero_si512();
 
-        while (a + 15 < last_full_byte) {
-            __m128i ra = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
-            __m128i rb = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b));
-
-            // Low nibbles:
-            __m128i a_lo = _mm_and_si128(ra, mask);
-            __m128i b_lo = _mm_and_si128(rb, mask);
-            // Sign extend 4-bit to 8-bit: (x ^ 0x08) - 8
-            __m128i a_lo_s8 = _mm_sub_epi8(_mm_xor_si128(a_lo, s8), s8);
-            __m128i b_lo_s8 = _mm_sub_epi8(_mm_xor_si128(b_lo, s8), s8);
-
-            // High nibbles:
-            __m128i a_hi = _mm_and_si128(_mm_srli_epi16(ra, 4), mask);
-            __m128i b_hi = _mm_and_si128(_mm_srli_epi16(rb, 4), mask);
-            __m128i a_hi_s8 = _mm_sub_epi8(_mm_xor_si128(a_hi, s8), s8);
-            __m128i b_hi_s8 = _mm_sub_epi8(_mm_xor_si128(b_hi, s8), s8);
-
-            // Sign extend int8 to int16:
-            __m256i a_lo_16 = _mm256_cvtepi8_epi16(a_lo_s8);
-            __m256i b_lo_16 = _mm256_cvtepi8_epi16(b_lo_s8);
-            __m256i a_hi_16 = _mm256_cvtepi8_epi16(a_hi_s8);
-            __m256i b_hi_16 = _mm256_cvtepi8_epi16(b_hi_s8);
-
-            sum256_1 = _mm256_add_epi32(sum256_1, _mm256_madd_epi16(a_lo_16, b_lo_16));
-            sum256_2 = _mm256_add_epi32(sum256_2, _mm256_madd_epi16(a_hi_16, b_hi_16));
-
-            a += 16;
-            b += 16;
+        while (a + 31 < last_byte) {
+            const __m256i ra = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
+            const __m256i rb = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b));
+            int4_ip_acc32_avx512(ra, rb, mask, s8, sum512_1, sum512_2);
+            a += 32;
+            b += 32;
         }
 
-        __m256i sum256 = _mm256_add_epi32(sum256_1, sum256_2);
-        int64_t result = int4_ip_hsum256(sum256);
-
-        while (a < last_full_byte) {
-            uint8_t byte_a = *a++;
-            uint8_t byte_b = *b++;
-            int32_t a0 = sign_extend_nibble(byte_a);
-            int32_t a1 = sign_extend_nibble(byte_a >> 4);
-            int32_t b0 = sign_extend_nibble(byte_b);
-            int32_t b1 = sign_extend_nibble(byte_b >> 4);
-            result += a0 * b0 + a1 * b1;
-        }
-        if (dim & 1) {
-            uint8_t byte_a = *a;
-            uint8_t byte_b = *b;
-            int32_t a0 = sign_extend_nibble(byte_a);
-            int32_t b0 = sign_extend_nibble(byte_b);
-            result += a0 * b0;
+        if constexpr (HasTail) {
+            const ptrdiff_t rem = last_byte - a;
+            if (rem > 0) {
+                const __mmask32 tm = tail_mask::mask32(static_cast<size_t>(rem));
+                const __m256i ra = _mm256_maskz_loadu_epi8(tm, a);
+                const __m256i rb = _mm256_maskz_loadu_epi8(tm, b);
+                int4_ip_acc32_avx512(ra, rb, mask, s8, sum512_1, sum512_2);
+            }
         }
 
+        const int64_t result = int4_ip_hsum512(_mm512_add_epi32(sum512_1, sum512_2));
         return -static_cast<float>(result);
     }
 };
@@ -153,62 +142,30 @@ class InnerProductInt4_AVX2 {
         const uint8_t* a = static_cast<const uint8_t*>(pVect1v);
         const uint8_t* b = static_cast<const uint8_t*>(pVect2v);
 
-        const size_t num_bytes = dim / 2;
-        const uint8_t* last_full_byte = a + num_bytes;
+        const size_t num_bytes = (dim + 1) / 2;
+        const uint8_t* last_byte = a + num_bytes;
 
         const __m128i mask = _mm_set1_epi8(0x0F);
         const __m128i s8 = _mm_set1_epi8(0x08);
         __m256i sum256_1 = _mm256_setzero_si256();
         __m256i sum256_2 = _mm256_setzero_si256();
 
-        while (a + 15 < last_full_byte) {
-            __m128i ra = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
-            __m128i rb = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b));
-
-            // Low nibbles:
-            __m128i a_lo = _mm_and_si128(ra, mask);
-            __m128i b_lo = _mm_and_si128(rb, mask);
-            __m128i a_lo_s8 = _mm_sub_epi8(_mm_xor_si128(a_lo, s8), s8);
-            __m128i b_lo_s8 = _mm_sub_epi8(_mm_xor_si128(b_lo, s8), s8);
-
-            // High nibbles:
-            __m128i a_hi = _mm_and_si128(_mm_srli_epi16(ra, 4), mask);
-            __m128i b_hi = _mm_and_si128(_mm_srli_epi16(rb, 4), mask);
-            __m128i a_hi_s8 = _mm_sub_epi8(_mm_xor_si128(a_hi, s8), s8);
-            __m128i b_hi_s8 = _mm_sub_epi8(_mm_xor_si128(b_hi, s8), s8);
-
-            __m256i a_lo_16 = _mm256_cvtepi8_epi16(a_lo_s8);
-            __m256i b_lo_16 = _mm256_cvtepi8_epi16(b_lo_s8);
-            __m256i a_hi_16 = _mm256_cvtepi8_epi16(a_hi_s8);
-            __m256i b_hi_16 = _mm256_cvtepi8_epi16(b_hi_s8);
-
-            sum256_1 = _mm256_add_epi32(sum256_1, _mm256_madd_epi16(a_lo_16, b_lo_16));
-            sum256_2 = _mm256_add_epi32(sum256_2, _mm256_madd_epi16(a_hi_16, b_hi_16));
-
+        while (a + 15 < last_byte) {
+            const __m128i ra = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
+            const __m128i rb = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b));
+            int4_ip_acc16_avx2(ra, rb, mask, s8, sum256_1, sum256_2);
             a += 16;
             b += 16;
         }
 
-        __m256i sum256 = _mm256_add_epi32(sum256_1, sum256_2);
-        int64_t result = int4_ip_hsum256(sum256);
-
-        while (a < last_full_byte) {
-            uint8_t byte_a = *a++;
-            uint8_t byte_b = *b++;
-            int32_t a0 = sign_extend_nibble(byte_a);
-            int32_t a1 = sign_extend_nibble(byte_a >> 4);
-            int32_t b0 = sign_extend_nibble(byte_b);
-            int32_t b1 = sign_extend_nibble(byte_b >> 4);
-            result += a0 * b0 + a1 * b1;
-        }
-        if (dim & 1) {
-            uint8_t byte_a = *a;
-            uint8_t byte_b = *b;
-            int32_t a0 = sign_extend_nibble(byte_a);
-            int32_t b0 = sign_extend_nibble(byte_b);
-            result += a0 * b0;
+        const ptrdiff_t rem = last_byte - a;
+        if (rem > 0) {
+            const __m128i ra = tail_mask::load_tail_bytes_16(a, static_cast<size_t>(rem), num_bytes);
+            const __m128i rb = tail_mask::load_tail_bytes_16(b, static_cast<size_t>(rem), num_bytes);
+            int4_ip_acc16_avx2(ra, rb, mask, s8, sum256_1, sum256_2);
         }
 
+        const int64_t result = int4_ip_hsum256(_mm256_add_epi32(sum256_1, sum256_2));
         return -static_cast<float>(result);
     }
 };

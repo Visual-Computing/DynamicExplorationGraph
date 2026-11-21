@@ -3,6 +3,7 @@ from typing import Literal
 import numpy as np
 import deglib_cpp
 
+from deglib.cpu import InstructionSet
 from deglib.distances import Metric, _infer_dim_from_array
 from deglib.graph import DynamicExplorationGraph
 from deglib.transformation import (
@@ -69,8 +70,10 @@ class Reranker:
 
         self.metric = resolved_metric
         if arr.dtype == np.float32:
+            target_dim = int(xfrms[-1].output_dim) if xfrms else int(arr.shape[1])
+            cpp_space = resolved_metric._to_cpp_space(target_dim)
             self._reranker_cpp = cpp_search.Reranker.from_float32(
-                resolved_metric._to_cpp_metric(),
+                cpp_space,
                 arr,
                 xfrms,
                 int(threads),
@@ -105,6 +108,9 @@ class Reranker:
 
     def get_num_base_vectors(self) -> int:
         return int(self._reranker_cpp.get_num_base_vectors())
+
+    def get_instruction(self) -> InstructionSet:
+        return InstructionSet.resolve(self._reranker_cpp.get_instruction())
 
     def get_po(self) -> int:
         return int(self._reranker_cpp.get_po())
