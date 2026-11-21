@@ -161,7 +161,7 @@ void run_static_benchmark(
     }
 
     if (std::filesystem::exists(graph_path)) {
-        const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
+        const auto graph = deglib::DynamicExplorationGraph::load_readonly(graph_path.c_str());
         log("Graph loaded: {} vertices\n", graph.size());
 
         log("\n--- Graph Analysis ---\n");
@@ -170,14 +170,14 @@ void run_static_benchmark(
                 generate_base_groundtruth_files(ds, base_repository, setup_threads, /*use_half_dataset=*/false, quality_mode, graph_path);
             }
             auto base_gt = (quality_mode != GraphQualityMode::None) ? ds.load_base_groundtruth(false) : BaseGroundTruth{};
-            analyze_graph(graph, base_gt);
+            analyze_graph(graph.internal(), base_gt);
         }
 
         log("\n--- ANNS Test (k={}) ---\n", config.anns_k);
         {
             auto ground_truth = ds.load_groundtruth(config.anns_k, false);
             test_graph_anns(
-                graph, query_repository, ground_truth, config.anns_repeat, config.anns_threads, config.anns_k, config.eps_parameter, nullptr, linear_baseline_us
+                graph.internal(), query_repository, ground_truth, config.anns_repeat, config.anns_threads, config.anns_k, config.eps_parameter, nullptr, linear_baseline_us
             );
         }
 
@@ -186,7 +186,7 @@ void run_static_benchmark(
             auto entry_vertices = ds.load_explore_entry_vertices();
             auto explore_gt = ds.load_explore_groundtruth(config.explore_k);
             test_graph_explore(
-                graph, entry_vertices, explore_gt, true, config.explore_repeat, config.explore_k, config.explore_threads, nullptr, ds.info().explore_depth,
+                graph.internal(), entry_vertices, explore_gt, true, config.explore_repeat, config.explore_k, config.explore_threads, nullptr, ds.info().explore_depth,
                 linear_baseline_us
             );
         }

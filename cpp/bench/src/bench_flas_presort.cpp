@@ -261,12 +261,12 @@ void run_flas_benchmark(
     // -----------------------------------------------------------------------
     std::vector<AnnsRow> anns_normal;
     if (std::filesystem::exists(graph_path_normal)) {
-        const auto graph = deglib::graph::load_readonly_graph(graph_path_normal.c_str());
+        const auto graph = deglib::DynamicExplorationGraph::load_readonly(graph_path_normal.c_str());
         log("Graph loaded: {} vertices\n", graph.size());
 
         log("\n--- ANNS Test (natural order, k={}) ---\n", config.anns_k);
         auto ground_truth = ds.load_groundtruth(config.anns_k, false);
-        anns_normal = evaluate_anns(graph, query_repository, ground_truth, config, linear_baseline_us);
+        anns_normal = evaluate_anns(graph.internal(), query_repository, ground_truth, config, linear_baseline_us);
     } else {
         log("ERROR: Graph file not found: {}\n", graph_path_normal);
     }
@@ -335,12 +335,12 @@ void run_flas_benchmark(
     // -----------------------------------------------------------------------
     std::vector<AnnsRow> anns_flas;
     if (std::filesystem::exists(graph_path_flas)) {
-        const auto graph = deglib::graph::load_readonly_graph(graph_path_flas.c_str());
+        const auto graph = deglib::DynamicExplorationGraph::load_readonly(graph_path_flas.c_str());
         log("Graph loaded: {} vertices\n", graph.size());
 
         log("\n--- ANNS Test (FLAS sorted, k={}) ---\n", config.anns_k);
         auto ground_truth = ds.load_groundtruth(config.anns_k, false);
-        anns_flas = evaluate_anns(graph, query_repository, ground_truth, config, linear_baseline_us);
+        anns_flas = evaluate_anns(graph.internal(), query_repository, ground_truth, config, linear_baseline_us);
     } else {
         log("ERROR: Graph file not found: {}\n", graph_path_flas);
     }

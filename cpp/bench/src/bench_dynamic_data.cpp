@@ -159,7 +159,7 @@ void run_dynamic_benchmark(
         }
 
         if (std::filesystem::exists(graph_path)) {
-            const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
+            const auto graph = deglib::DynamicExplorationGraph::load_readonly(graph_path.c_str());
             log("Loaded dynamic graph with {} vertices\n", graph.size());
 
             bool use_half = (ds_type != DataStreamType::AddAll);
@@ -176,10 +176,10 @@ void run_dynamic_benchmark(
                         }
                         base_gt_half_loaded = true;
                     }
-                    analyze_graph(graph, base_gt_half);
+                    analyze_graph(graph.internal(), base_gt_half);
                 } else {
                     auto base_gt = (quality_mode != GraphQualityMode::None) ? ds.load_base_groundtruth(false) : BaseGroundTruth{};
-                    analyze_graph(graph, base_gt);
+                    analyze_graph(graph.internal(), base_gt);
                 }
             }
 
@@ -187,7 +187,7 @@ void run_dynamic_benchmark(
             {
                 auto ground_truth = ds.load_groundtruth(config.anns_k, use_half);
                 test_graph_anns(
-                    graph, query_repository, ground_truth, config.anns_repeat, config.anns_threads, config.anns_k, config.eps_parameter, nullptr,
+                    graph.internal(), query_repository, ground_truth, config.anns_repeat, config.anns_threads, config.anns_k, config.eps_parameter, nullptr,
                     linear_baseline_us
                 );
             }

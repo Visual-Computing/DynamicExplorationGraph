@@ -702,7 +702,7 @@ inline bool generate_base_groundtruth_files(
 
     if (quality_mode == GraphQualityMode::Approximated && !graph_path.empty() && file_exists(graph_path)) {
         fmt::print("Computing base ground truth (ANNS graph exploration) using {} -> {}\n", graph_path, out_file);
-        const auto graph = deglib::graph::load_readonly_graph(graph_path.c_str());
+        const auto graph = deglib::DynamicExplorationGraph::load_readonly(graph_path.c_str());
         const std::string tmp_file = out_file + ".tmp";
         auto out = std::ofstream(tmp_file, std::ios::out | std::ios::binary);
         if (!out.is_open()) {
@@ -722,11 +722,10 @@ inline bool generate_base_groundtruth_files(
                     std::fill(row, row + topk, (std::numeric_limits<uint32_t>::max)());
                     return;
                 }
-                const auto entry_idx = graph.getInternalIndex(ext_label);
-                auto result_queue = graph.explore(entry_idx, topk, 0, 0.1f, /*include_entry=*/false);
+                auto result_queue = graph.explore(ext_label, topk, 0, 0.1f, /*include_entry=*/false);
                 for (int32_t j = static_cast<int32_t>(topk) - 1; j >= 0; --j) {
                     if (!result_queue.empty()) {
-                        row[j] = graph.getExternalLabel(result_queue.top().getIdentifier());
+                        row[j] = result_queue.top().getIdentifier();
                         result_queue.pop();
                     } else {
                         row[j] = (std::numeric_limits<uint32_t>::max)();
