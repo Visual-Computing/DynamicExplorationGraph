@@ -68,7 +68,7 @@ def test_rotation_chained_with_uint4_in_searcher():
     )
     q = X[0]
     res = searcher.search(q, k=10, eps_or_ef=32.0, rerank_factor=1.5, threads=1, return_distances=False)
-    assert 0 in res.tolist()
+    assert 0 in res.indices.tolist()
 
 
 def test_quantizer_pipeline_thresholds_and_search():
@@ -115,7 +115,7 @@ def test_quantizer_pipeline_thresholds_and_search():
     ro_graph = graph.to_readonly(deglib.Metric.Uint4_L2, custom_features=q_feats, transformations=pipeline)
     searcher = ro_graph.to_searcher(optimize=False)
     res = searcher.search(sub[0], k=5, eps_or_ef=32.0, threads=1, return_distances=False)
-    assert 0 in res.tolist()
+    assert 0 in res.indices.tolist()
 
     # EVP via make_quantizer_pipeline + self-transforming to_readonly
     p_evp = deglib.make_quantizer_pipeline(sub, "evp", threads=2)
@@ -125,4 +125,4 @@ def test_quantizer_pipeline_thresholds_and_search():
     ro_evp = graph.to_readonly(transformations=p_evp)
     searcher_evp = ro_evp.to_searcher(optimize=False)
     res_evp = searcher_evp.search(sub[0], k=5, eps_or_ef=32.0, threads=1, return_distances=False)
-    assert 0 in res_evp.tolist()
+    assert 0 in res_evp.indices.tolist()

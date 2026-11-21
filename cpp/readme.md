@@ -62,9 +62,9 @@ int main() {
     auto results = graph.search(std::span<const float>(query), k, eps_or_ef);
 
     std::cout << "Top " << k << " nearest neighbors:" << std::endl;
-    for (const auto& match : results) {
-        std::cout << "  Label ID: " << match.getIdentifier()
-                  << " | Distance: " << match.getDistance() << std::endl;
+    for (size_t i = 0; i < results.size(); ++i) {
+        std::cout << "  Label ID: " << results.indices[i]
+                  << " | Distance: " << results.distances[i] << std::endl;
     }
 
     return 0;
@@ -150,9 +150,9 @@ graph.search_batch_ef(
     /*threads=*/8
 );
 
-// 3. Batch neighbor retrieval and graph exploration
+// 3. Batch neighbor retrieval and graph exploration (returns SearchResults with telemetry)
 std::vector<uint32_t> start_labels = {42, 108, 999};
-auto [explore_ids, explore_dists] = graph.explore_batch(
+auto explore_res = graph.explore_batch(
     std::span<const uint32_t>(start_labels),
     /*k=*/10,
     /*max_distance_computation_count=*/0,

@@ -263,7 +263,10 @@ TEST(SearchRegression, SearcherTraversal_Optimize_Benchmark) {
         for (int it = 0; it < iterations; ++it) {
             const auto t0 = std::chrono::high_resolution_clock::now();
             for (uint32_t q = 0; q < num_queries; ++q) {
-                searcher->search_f32(data.data() + static_cast<size_t>(q) * dim, 10, 0.1f, 1.0f, idx.data(), d.data());
+                searcher->search(
+                    std::span<const float>(data.data() + static_cast<size_t>(q) * dim, dim), 10, std::span<uint32_t>(idx), std::span<float>(d), 0.1f, 1.0f,
+                    /*return_distances=*/true
+                );
             }
             const auto t1 = std::chrono::high_resolution_clock::now();
             best = std::min(best, std::chrono::duration<double, std::micro>(t1 - t0).count());
@@ -275,7 +278,8 @@ TEST(SearchRegression, SearcherTraversal_Optimize_Benchmark) {
     std::cout << "\n=== Searcher Traversal Prefetch Benchmark (FP32_L2, Instruction: " << space.get_instruction() << ") ===\n"
               << "Vertices: " << num_base << ", Dim: " << dim << " (" << (static_cast<double>(num_base) * dim * 4 / 1e6)
               << " MB working set), Queries: " << num_queries << ", Iterations: " << iterations << "\n"
-              << "Tuned prefetch (po=" << tuned_po << ",pl=" << tuned_pl << ",nl=" << tuned_nl << "): " << std::fixed << std::setprecision(1) << tuned_us << " us/sweep\n\n";
+              << "Tuned prefetch (po=" << tuned_po << ",pl=" << tuned_pl << ",nl=" << tuned_nl << "): " << std::fixed << std::setprecision(1) << tuned_us
+              << " us/sweep\n\n";
 
     EXPECT_GT(tuned_po, 0);
     EXPECT_GT(tuned_pl, 0);

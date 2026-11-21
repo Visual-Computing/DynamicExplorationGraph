@@ -262,9 +262,7 @@ def build_graph_filename(
     return deg_dir / filename
 
 
-def compute_and_save_anns_gt(
-    base_vecs: np.ndarray, query_vecs: np.ndarray, metric: Metric, k: int, out_path: Path
-):
+def compute_and_save_anns_gt(base_vecs: np.ndarray, query_vecs: np.ndarray, metric: Metric, k: int, out_path: Path):
     n_queries = len(query_vecs)
     gt_matrix = np.zeros((n_queries, k), dtype=np.int32)
     print(f"Generating ANNS Ground Truth (Full Dataset, top-{k})...")
@@ -435,7 +433,7 @@ def tune_explore_eps(
             include_entry=True,
             threads=threads,
             return_distances=False,
-        )
+        ).indices
 
         hits = 0
         total_returned = 0
@@ -645,7 +643,7 @@ def generate_base_top_anns(
                 include_entry=False,
                 threads=effective_threads,
                 return_distances=False,
-            )
+            ).indices
 
             n_chunk = len(batch_labels)
             d_col = np.full((n_chunk, 1), k_int32, dtype=np.int32)
@@ -767,14 +765,20 @@ def load_base_groundtruth(
 
     existing_path = base_top_path if base_top_path.is_file() else (alt_top_path if alt_top_path.is_file() else None)
     if existing_path is not None:
-        print(f"Loading base ground truth for graph quality from {existing_path} (metric: {meta['metric'].name}, mmap)...")
+        print(
+            f"Loading base ground truth for graph quality from {existing_path} (metric: {meta['metric'].name}, mmap)..."
+        )
         return ivecs_read(existing_path, mmap=True)
 
     if mode == "auto":
-        print(f"Base Top Ground Truth not found at {base_top_path} (metric: {meta['metric'].name}). Skipping graph quality evaluation (mode: auto).")
+        print(
+            f"Base Top Ground Truth not found at {base_top_path} (metric: {meta['metric'].name}). Skipping graph quality evaluation (mode: auto)."
+        )
         return None
 
-    print(f"Base Top Ground Truth not found at {base_top_path} (metric: {meta['metric'].name}). Generating (mode: {mode})...")
+    print(
+        f"Base Top Ground Truth not found at {base_top_path} (metric: {meta['metric'].name}). Generating (mode: {mode})..."
+    )
     generate_base_groundtruth(
         dataset_key=key,
         cache_dir=cache_dir,
@@ -784,8 +788,9 @@ def load_base_groundtruth(
     )
 
     if base_top_path.is_file():
-        print(f"Loading base ground truth for graph quality from {base_top_path} (metric: {meta['metric'].name}, mmap)...")
+        print(
+            f"Loading base ground truth for graph quality from {base_top_path} (metric: {meta['metric'].name}, mmap)..."
+        )
         return ivecs_read(base_top_path, mmap=True)
 
     return None
-

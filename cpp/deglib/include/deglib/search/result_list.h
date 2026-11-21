@@ -210,13 +210,11 @@ class ResultList {
     /// Returns a C++20 std::span viewing all valid ObjectDistance results.
     [[nodiscard]] inline std::span<const ObjectDistance> span() const noexcept { return {data_.data(), static_cast<size_t>(size_)}; }
 
-    /**
-     * Truncates internal results to at most k elements and moves them into a std::vector.
-     */
-    [[nodiscard]] std::vector<ObjectDistance> to_vector(size_t k) && noexcept {
-        const size_t count = std::min<size_t>(k, static_cast<size_t>(size_));
-        data_.resize(count);
-        return std::move(data_);
+    /// Truncates the active result view to at most `k` best elements without reallocating storage.
+    inline void truncate(size_t k) noexcept {
+        if (static_cast<size_t>(size_) > k) {
+            size_ = static_cast<int32_t>(k);
+        }
     }
 
   private:
@@ -245,35 +243,59 @@ class ResultList {
 };
 
 // ============================================================================
-// Search Result Structs for Modern C++20 API
+// Unified Search Result Container for C++20 and Python
 // ============================================================================
 
-struct SearchResult {
-    std::vector<uint32_t> indices;
-    std::vector<float> distances;
+namespace detail {
 
-    size_t size() const noexcept { return indices.size(); }
-    bool empty() const noexcept { return indices.empty(); }
-    bool has_distances() const noexcept { return !distances.empty(); }
+/// Cache-line-aligned per-worker search telemetry slot to avoid false sharing and atomic overhead.
+struct alignas(64) ThreadSearchCounters {
+    uint64_t graph_distance_count = 0;
+    uint64_t rerank_distance_count = 0;
+    uint64_t graph_hop_count = 0;
 };
 
+}  // namespace detail
+
 /**
- * Contiguous, zero-overhead batch search result structure.
- * Avoids N separate vector heap allocations when searching batches.
+ * Unified single-query and batch search result container for C++20 and Python.
+ *
+ * Holds contiguous neighbor external labels (`indices`), optional `distances`,
+ * shape metadata (`n_queries`, `k`, `is_batch`), and aggregated traversal/rerank telemetry.
  */
-struct SearchResultBatch {
+struct SearchResults {
     size_t n_queries = 0;
     uint32_t k = 0;
+    bool is_batch = false;
+    bool with_distances = false;
+
     std::vector<uint32_t> indices;
     std::vector<float> distances;
 
-    size_t size() const noexcept { return n_queries; }
-    bool empty() const noexcept { return n_queries == 0; }
-    bool has_distances() const noexcept { return !distances.empty(); }
+    uint64_t graph_distance_count = 0;
+    uint64_t rerank_distance_count = 0;
+    uint64_t graph_hop_count = 0;
 
-    std::span<const uint32_t> get_indices(size_t q) const noexcept { return {indices.data() + q * k, k}; }
-    std::span<const float> get_distances(size_t q) const noexcept {
-        return distances.empty() ? std::span<const float>{} : std::span<const float>{distances.data() + q * k, k};
+    /// Returns the number of found neighbors for a single query, or the query count for a batch.
+    [[nodiscard]] size_t size() const noexcept { return is_batch ? n_queries : indices.size(); }
+
+    /// Returns whether no results (single query) or zero queries (batch) are stored.
+    [[nodiscard]] bool empty() const noexcept { return is_batch ? (n_queries == 0) : indices.empty(); }
+
+    /// Returns whether distance values were requested/populated alongside indices.
+    [[nodiscard]] bool has_distances() const noexcept { return with_distances || !distances.empty(); }
+
+    /// Returns a span of neighbor external labels for query row `q` (for single-query `q` is ignored).
+    [[nodiscard]] std::span<const uint32_t> get_indices(size_t q = 0) const noexcept {
+        if (!is_batch) return indices;
+        return {indices.data() + q * k, k};
+    }
+
+    /// Returns a span of neighbor distances for query row `q` (empty if distances were not requested).
+    [[nodiscard]] std::span<const float> get_distances(size_t q = 0) const noexcept {
+        if (distances.empty()) return {};
+        if (!is_batch) return distances;
+        return {distances.data() + q * k, k};
     }
 };
 

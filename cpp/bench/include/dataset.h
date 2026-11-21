@@ -179,12 +179,8 @@ struct BaseGroundTruth {
     size_t rows = 0;
     size_t k = 0;
 
-    const uint32_t* data() const noexcept {
-        return reinterpret_cast<const uint32_t*>(buffer.get());
-    }
-    bool empty() const noexcept {
-        return !buffer || rows == 0 || k == 0;
-    }
+    const uint32_t* data() const noexcept { return reinterpret_cast<const uint32_t*>(buffer.get()); }
+    bool empty() const noexcept { return !buffer || rows == 0 || k == 0; }
 };
 
 class Dataset {
@@ -211,7 +207,8 @@ class Dataset {
     std::string base_groundtruth_half_file() const { return (files_dir_ / info_.base_groundtruth_half_file).string(); }
 
     std::string groundtruth_file(size_t nb) const {
-        return (files_dir_ / fmt::format("{}_groundtruth_top{}_nb{}_{}.ivecs", info_.name(), DatasetInfo::GROUNDTRUTH_TOPK, nb, info_.metric.to_string())).string();
+        return (files_dir_ / fmt::format("{}_groundtruth_top{}_nb{}_{}.ivecs", info_.name(), DatasetInfo::GROUNDTRUTH_TOPK, nb, info_.metric.to_string()))
+            .string();
     }
     std::string groundtruth_file_full() const { return groundtruth_file(info_.base_count); }
     std::string groundtruth_file_half() const { return groundtruth_file(info_.base_count / 2); }
@@ -723,10 +720,9 @@ inline bool generate_base_groundtruth_files(
                     return;
                 }
                 auto result_queue = graph.explore(ext_label, topk, 0, 0.1f, /*include_entry=*/false);
-                for (int32_t j = static_cast<int32_t>(topk) - 1; j >= 0; --j) {
-                    if (!result_queue.empty()) {
-                        row[j] = result_queue.top().getIdentifier();
-                        result_queue.pop();
+                for (uint32_t j = 0; j < topk; ++j) {
+                    if (j < result_queue.indices.size()) {
+                        row[j] = result_queue.indices[j];
                     } else {
                         row[j] = (std::numeric_limits<uint32_t>::max)();
                     }
@@ -748,7 +744,10 @@ inline bool generate_base_groundtruth_files(
         return true;
     }
 
-    fmt::print("Computing base ground truth (linear search, metric: {}) -> {} (total: {} queries, base limit: {})...\n", info.metric.to_string(), out_file, total_queries, base_limit);
+    fmt::print(
+        "Computing base ground truth (linear search, metric: {}) -> {} (total: {} queries, base limit: {})...\n", info.metric.to_string(), out_file,
+        total_queries, base_limit
+    );
     const std::string tmp_file = out_file + ".tmp";
     auto out = std::ofstream(tmp_file, std::ios::out | std::ios::binary);
     if (!out.is_open()) {

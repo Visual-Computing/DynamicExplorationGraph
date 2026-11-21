@@ -93,7 +93,8 @@ Scalar INT8 Quantization
    # Quantize query vector at search time
    query = np.random.randn(dim).astype(np.float32)
    q_int8 = quantizer.transform_query(query)
-   indices, distances = graph.search(q_int8, k=10, eps_or_ef=0.1)
+   res = graph.search(q_int8, k=10, eps_or_ef=0.1)
+   indices, distances = res.indices, res.distances
 
 EVP Bit-Packing with Auto-Calibration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

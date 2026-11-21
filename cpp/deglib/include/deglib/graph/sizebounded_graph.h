@@ -70,9 +70,6 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
         label_to_index_.reserve(max_vertex_count);
     }
 
-
-
-
     /**
      * Create an empty SizeBoundedGraph with the given capacity, edges per vertex, and feature space.
      * The graph starts with zero vertices; vertices can be added via addVertex().
@@ -90,7 +87,8 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
         }
 
         SizeBoundedGraph graph(new_max_size, header.edges_per_vertex, *header.feature_space);
-        const uint32_t file_byte_size_per_vertex = compute_aligned_byte_size_per_vertex(header.edges_per_vertex, uint16_t(header.feature_space->get_data_size()), 0);
+        const uint32_t file_byte_size_per_vertex =
+            compute_aligned_byte_size_per_vertex(header.edges_per_vertex, uint16_t(header.feature_space->get_data_size()), 0);
 
         constexpr size_t BATCH_SIZE = 256;
         std::vector<char> batch_buf(BATCH_SIZE * file_byte_size_per_vertex);
@@ -126,7 +124,8 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
      *
      * @param input_graph Source graph to copy topology and labels from.
      * @param target_feature_space Optional target feature space.
-     * @param custom_features Optional raw byte pointer to new feature vectors in the graph's internal index order (0 .. size()-1, see input_graph.getExternalLabels()).
+     * @param custom_features Optional raw byte pointer to new feature vectors in the graph's internal index order (0 .. size()-1, see
+     * input_graph.getExternalLabels()).
      * @param transformations Optional sequence of feature transformations/quantizers to attach.
      * @param new_max_size Desired vertex capacity. If 0 or less than size(), capacity is set to size().
      */
@@ -137,9 +136,8 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
         std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
         const uint32_t new_max_size = 0
     ) {
-        const auto feature_space = deglib::transformation::resolve_graph_conversion_space(
-            input_graph.getFeatureSpace(), target_feature_space, custom_features, transformations
-        );
+        const auto feature_space =
+            deglib::transformation::resolve_graph_conversion_space(input_graph.getFeatureSpace(), target_feature_space, custom_features, transformations);
         const uint32_t graph_size = input_graph.size();
         const uint32_t capacity = (new_max_size > 0 ? std::max(new_max_size, graph_size) : graph_size);
         const uint8_t edges_per_vertex = input_graph.getEdgesPerVertex();
@@ -172,16 +170,13 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
                 const auto* src_feat = input_graph.getFeatureVector(i);
                 if (src_metric.get_data_type() == deglib::distances::MetricDataType::FP32) {
                     deglib::transformation::apply_on_database(
-                        transformations,
-                        std::span<const float>(reinterpret_cast<const float*>(src_feat), in_dim),
+                        transformations, std::span<const float>(reinterpret_cast<const float*>(src_feat), in_dim),
                         std::span<std::byte>(vertex_memory, feature_data_size)
                     );
                 } else if (src_metric.get_data_type() == deglib::distances::MetricDataType::FP16) {
                     deglib::distances::fp16::fp16_to_floats(reinterpret_cast<const uint16_t*>(src_feat), f_buf.data(), in_dim);
                     deglib::transformation::apply_on_database(
-                        transformations,
-                        std::span<const float>(f_buf),
-                        std::span<std::byte>(vertex_memory, feature_data_size)
+                        transformations, std::span<const float>(f_buf), std::span<std::byte>(vertex_memory, feature_data_size)
                     );
                 } else {
                     throw std::invalid_argument("SizeBoundedGraph::from_graph: cannot self-transform from non-float base features");
@@ -311,9 +306,7 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
         return std::binary_search(neighbor_indices, neighbor_indices_end, neighbor_index);
     }
 
-    inline const std::byte* getVertexRecord(const uint32_t internal_idx) const override {
-        return vertex_by_index(internal_idx);
-    }
+    inline const std::byte* getVertexRecord(const uint32_t internal_idx) const override { return vertex_by_index(internal_idx); }
 
     const bool saveGraph(const char* path_to_graph) const override { return deglib::serialization::save_graph(path_to_graph, *this); }
 
@@ -452,8 +445,12 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
     }
 
   protected:
-    std::vector<deglib::graph::ObjectDistance> search_ef_intern(
-        const std::vector<uint32_t>& entry_vertex_indices,
+    using InternalGraph::search_ef_intern;
+    using InternalGraph::search_intern;
+
+    void search_ef_intern(
+        SearchWorkspace& ws,
+        std::span<const uint32_t> entry_vertex_indices,
         const std::byte* query,
         const uint32_t k,
         const uint32_t ef,
@@ -461,11 +458,12 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
         const deglib::search::Filter* filter = nullptr,
         const uint32_t max_distance_computation_count = 0
     ) const override {
-        return searchEfInternImpl(*this, entry_vertex_indices, query, k, ef, include_entry, filter, max_distance_computation_count);
+        searchEfInternImpl(ws, *this, entry_vertex_indices, query, k, ef, include_entry, filter, max_distance_computation_count);
     }
 
-    deglib::graph::ResultSet search_intern(
-        const std::vector<uint32_t>& entry_vertex_indices,
+    void search_intern(
+        SearchWorkspace& ws,
+        std::span<const uint32_t> entry_vertex_indices,
         const std::byte* query,
         const uint32_t k,
         const float eps = 0.0f,
@@ -473,9 +471,8 @@ class SizeBoundedGraph : public deglib::graph::MutableGraph {
         const deglib::search::Filter* filter = nullptr,
         const uint32_t max_distance_computation_count = 0
     ) const override {
-        return searchInternImpl(*this, entry_vertex_indices, query, k, eps, include_entry, filter, max_distance_computation_count);
+        searchInternImpl(ws, *this, entry_vertex_indices, query, k, eps, include_entry, filter, max_distance_computation_count);
     }
-
 
   private:
     static uint32_t compute_aligned_byte_size_per_vertex(const uint8_t edges_per_vertex, const uint16_t feature_byte_size, const uint8_t alignment) {
@@ -542,16 +539,15 @@ inline auto load_sizebounded_graph(const char* path_graph, uint32_t new_max_size
  * Convert the given graph to a SizeBoundedGraph, copying topology, labels,
  * and recalculating all edge weights with the given feature space.
  */
-inline auto convert_to_sizebounded_graph(const deglib::graph::InternalGraph& input_graph) {
-    return deglib::graph::SizeBoundedGraph::from_graph(input_graph);
-}
+inline auto convert_to_sizebounded_graph(const deglib::graph::InternalGraph& input_graph) { return deglib::graph::SizeBoundedGraph::from_graph(input_graph); }
 
 /**
  * Convert the given graph to a SizeBoundedGraph, overriding feature space and feature vectors.
  *
  * @param input_graph Source graph to convert from.
  * @param feature_space Target feature space (dimension and metric).
- * @param custom_features Optional raw byte pointer to new feature vectors in the graph's internal index order (0 .. size()-1, see input_graph.getExternalLabels()).
+ * @param custom_features Optional raw byte pointer to new feature vectors in the graph's internal index order (0 .. size()-1, see
+ * input_graph.getExternalLabels()).
  * @param new_max_size Desired vertex capacity. If 0 or less than size(), capacity is set to size().
  */
 inline auto convert_to_sizebounded_graph(

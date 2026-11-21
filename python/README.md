@@ -65,11 +65,12 @@ query = np.random.random(dims).astype(np.float32)
 # 2. Build index directly from data (multithreaded & optimized by default)
 graph = deglib.build(data, edges_per_vertex=32, show_progress=True)
 
-# 3. Query top-k nearest neighbors
-indices, distances = graph.search(query, k=10, eps_or_ef=0.1)
+# 3. Query top-k nearest neighbors (returns SearchResults with zero-copy .indices/.distances and telemetry)
+res = graph.search(query, k=10, eps_or_ef=0.1)
 
-print("Nearest neighbors:", indices)
-print("Distances:", distances)
+print("Nearest neighbors:", res.indices)
+print("Distances:", res.distances)
+print("Distance evals:", res.graph_distance_count, "| Hops:", res.graph_hop_count)
 ```
 
 ---
@@ -156,7 +157,8 @@ from deglib.search import Filter, rerank
 allowed_ids = np.array([1, 5, 10, 42, 99], dtype=np.int32)
 search_filter = Filter(allowed_ids)
 
-indices, distances = graph.search(query, k=5, eps_or_ef=0.1, filter_labels=search_filter)
+res = graph.search(query, k=5, eps_or_ef=0.1, filter_labels=search_filter)
+indices, distances = res.indices, res.distances
 
 # Exact distance reranking across candidates
 queries = np.random.random((10, dims)).astype(np.float32)
@@ -181,11 +183,13 @@ DEG supports exploratory search directly from existing vertex labels (single or 
 
 ```python
 # Explore graph starting from entry vertex label 105
-explored_labels, distances = graph.explore(entry_external_label=105, k=10, eps_or_ef=0.1, include_entry=False)
+exp_res = graph.explore(entry_external_label=105, k=10, eps_or_ef=0.1, include_entry=False)
+explored_labels, distances = exp_res.indices, exp_res.distances
 
 # Batch exploration from multiple entry vertices in parallel
 batch_entries = np.array([105, 210, 315], dtype=np.uint32)
-batch_labels, batch_distances = graph.explore(batch_entries, k=10, eps_or_ef=0.1, threads=4)
+batch_exp = graph.explore(batch_entries, k=10, eps_or_ef=0.1, threads=4)
+batch_labels, batch_distances = batch_exp.indices, batch_exp.distances
 
 # Retrieve graph neighbors directly
 neighbors = graph.get_neighbors(105)
@@ -223,9 +227,10 @@ searcher = graph.to_searcher(
 )
 
 # 3. Query search (query is automatically quantized and top candidates are reranked)
-indices, distances = searcher.search(query, k=10, eps_or_ef=0.1, rerank_factor=1.5, return_distances=True)
-print("Top-10 nearest neighbor indices:", indices)
-print("Top-10 exact distances:", distances)
+res = searcher.search(query, k=10, eps_or_ef=0.1, rerank_factor=1.5, return_distances=True)
+print("Top-10 nearest neighbor indices:", res.indices)
+print("Top-10 exact distances:", res.distances)
+print("Graph dists:", res.graph_distance_count, "| Rerank dists:", res.rerank_distance_count)
 ```
 
 ---
@@ -248,13 +253,13 @@ Controls the topology optimization strategy:
 
 ```python
 # Mode 1: Relative distance margin (default: eps_or_ef=0.1)
-indices, distances = searcher.search(query, k=10, eps_or_ef=0.1, return_distances=True)
+res = searcher.search(query, k=10, eps_or_ef=0.1, return_distances=True)
 
 # Mode 2: Fixed candidate pool (HNSW-style)
-indices, distances = searcher.search(query, k=10, eps_or_ef=128, return_distances=True)
+res_ef = searcher.search(query, k=10, eps_or_ef=128, return_distances=True)
 
 # Optional: hard per-query budget of graph distance computations (0 = unlimited)
-indices = searcher.search(query, k=10, eps_or_ef=128, max_distance_computation_count=700)
+indices = searcher.search(query, k=10, eps_or_ef=128, max_distance_computation_count=700).indices
 ```
 
 ### Supported Metrics & Data Types

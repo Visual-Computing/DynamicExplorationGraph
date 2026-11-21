@@ -138,7 +138,12 @@ def test_search(conf: Configuration):
         pytest.skip("This test is skipped on macOS with M1 chip, as avx2 is not supported on m1 chip.")
 
     k = 10
-    graph_result, dists = conf.graph.search(conf.query, eps_or_ef=0.2, k=k)
+    res = conf.graph.search(conf.query, eps_or_ef=0.2, k=k)
+    assert isinstance(res, deglib.SearchResults)
+    assert res.graph_distance_count > 0
+    assert res.graph_hop_count > 0
+    assert res.rerank_distance_count == 0
+    graph_result, dists = res.indices, res.distances
     graph_result = graph_result.flatten()
     correct_result = get_ranking(conf.data, conf.graph, conf.query)[:k]
 
@@ -166,13 +171,15 @@ def test_search_eps_or_ef(conf: Configuration):
     correct_result = get_ranking(conf.data, conf.graph, conf.query)[:k]
 
     # 1. eps mode (< 1.0)
-    res_eps, dists_eps = conf.graph.search(conf.query, eps_or_ef=0.2, k=k)
+    r_eps = conf.graph.search(conf.query, eps_or_ef=0.2, k=k)
+    res_eps, dists_eps = r_eps.indices, r_eps.distances
     assert len(res_eps) == k
     assert len(dists_eps) == k
     assert np.all(np.diff(dists_eps) >= -1e-6)
 
     # 2. ef mode (>= 1.0)
-    res_ef, dists_ef = conf.graph.search(conf.query, eps_or_ef=64.0, k=k)
+    r_ef = conf.graph.search(conf.query, eps_or_ef=64.0, k=k)
+    res_ef, dists_ef = r_ef.indices, r_ef.distances
     assert len(res_ef) == k
     assert len(dists_ef) == k
     assert np.all(np.diff(dists_ef) >= -1e-6)
@@ -182,7 +189,9 @@ def test_search_eps_or_ef(conf: Configuration):
 
     # 3. Batch search with ef mode and multiple threads
     queries = np.vstack([conf.query, conf.query])
-    batch_res, batch_dists = conf.graph.search(queries, eps_or_ef=64.0, k=k, threads=2)
+    r_batch = conf.graph.search(queries, eps_or_ef=64.0, k=k, threads=2)
+    batch_res, batch_dists = r_batch.indices, r_batch.distances
+    assert r_batch.graph_distance_count >= r_ef.graph_distance_count
     assert batch_res.shape == (2, k)
     assert batch_dists.shape == (2, k)
     assert np.array_equal(batch_res[0], res_ef)
@@ -197,9 +206,11 @@ def test_prune_non_mrng_edges(conf: Configuration):
 @pytest.mark.parametrize("conf", configurations)
 def test_threaded_search(conf: Configuration):
     k = 10
-    graph_result, dists = conf.graph.search(conf.query, eps_or_ef=0.1, k=k)
+    r = conf.graph.search(conf.query, eps_or_ef=0.1, k=k)
+    graph_result, dists = r.indices, r.distances
     for n_threads in range(2, 8):
-        threaded_graph_result, threaded_dists = conf.graph.search(conf.query, eps_or_ef=0.1, k=k, threads=n_threads)
+        tr = conf.graph.search(conf.query, eps_or_ef=0.1, k=k, threads=n_threads)
+        threaded_graph_result, threaded_dists = tr.indices, tr.distances
         assert np.all(np.equal(threaded_graph_result, graph_result)), (
             f"Threaded and non threaded results differ (n_threads={n_threads})"
         )
@@ -211,9 +222,12 @@ def test_explore(conf: Configuration):
     k = 10
     include_entry = True
     entry_vertex_index = random.randint(0, conf.samples - 1)
-    indices, distances = conf.graph.explore(
+    res_explore = conf.graph.explore(
         entry_vertex_index, k, max_distance_computation_count=k * 10, include_entry=include_entry
     )
+    assert res_explore.graph_distance_count > 0
+    assert res_explore.graph_hop_count > 0
+    indices, distances = res_explore.indices, res_explore.distances
     assert len(indices) == k
     assert len(distances) == k
     # check that valid (non-NaN) distances are sorted (ascending)
@@ -277,7 +291,7 @@ def test_filters(conf: Configuration):
     k = 400
 
     valid_labels = np.random.choice(conf.graph.size(), size=12_000, replace=False)
-    results, _dists = conf.graph.search(conf.query, filter_labels=Filter(valid_labels), eps_or_ef=0.01, k=k)
+    results = conf.graph.search(conf.query, filter_labels=Filter(valid_labels), eps_or_ef=0.01, k=k).indices
 
     if not np.all(np.isin(results, valid_labels)):
         raise ValueError("Found results that should have been filtered out.")
@@ -289,7 +303,8 @@ def test_small_filters(conf: Configuration):
         k = 400
 
         valid_labels = np.random.choice(conf.graph.size(), size=n_valid, replace=False)
-        results, _dists = conf.graph.search(conf.query, filter_labels=Filter(valid_labels), eps_or_ef=0.01, k=k)
+        res = conf.graph.search(conf.query, filter_labels=Filter(valid_labels), eps_or_ef=0.01, k=k)
+        results, _dists = res.indices, res.distances
 
         assert results.shape[-1] == k
 
@@ -308,14 +323,13 @@ def test_filter_edge_cases(conf: Configuration):
     k = 5
     # All valid labels filter
     all_labels = np.arange(conf.graph.size(), dtype=np.int32)
-    results_all, _ = conf.graph.search(conf.query, filter_labels=Filter(all_labels), eps_or_ef=0.1, k=k)
+    results_all = conf.graph.search(conf.query, filter_labels=Filter(all_labels), eps_or_ef=0.1, k=k).indices
     assert results_all.shape[-1] == k
 
     # No valid labels filter with max_value specified
     no_labels = np.array([], dtype=np.int32)
-    results_none, dists_none = conf.graph.search(
-        conf.query, filter_labels=Filter(no_labels, max_value=0), eps_or_ef=0.1, k=k
-    )
+    r_none = conf.graph.search(conf.query, filter_labels=Filter(no_labels, max_value=0), eps_or_ef=0.1, k=k)
+    results_none, dists_none = r_none.indices, r_none.distances
     assert results_none.shape[-1] == k
     assert np.all(results_none == np.iinfo(np.uint32).max)
     assert np.all(np.isnan(dists_none))
@@ -350,7 +364,8 @@ def test_has_vertex_accepts_external_label():
 def test_search_returns_external_labels():
     """DynamicExplorationGraph.search returns external labels."""
     g, data = _build_test_graph_with_distinct_labels()
-    indices, distances = g.search(data[0:1], eps_or_ef=0.1, k=5)
+    r = g.search(data[0:1], eps_or_ef=0.1, k=5)
+    indices, distances = r.indices, r.distances
     assert indices.shape == (1, 5)
     # search_batch returns external labels (multiples of 10)
     for idx in indices.flatten():
@@ -370,7 +385,8 @@ def test_facade_has_vertex_accepts_external_label():
 def test_facade_explore_uses_external_label():
     """DynamicExplorationGraph facade explore should use external labels."""
     g, _ = _build_test_graph_with_distinct_labels()
-    indices, distances = g.explore(0, k=5, max_distance_computation_count=50)
+    r = g.explore(0, k=5, max_distance_computation_count=50)
+    indices, distances = r.indices, r.distances
     assert len(indices) == 5
     assert len(distances) == 5
     for idx in indices:
@@ -391,7 +407,8 @@ def test_facade_get_neighbors_uses_external_label():
 def test_facade_search_returns_external_labels():
     """DynamicExplorationGraph facade search should return external labels."""
     g, data = _build_test_graph_with_distinct_labels()
-    indices, distances = g.search(data[0:1], eps_or_ef=0.1, k=5)
+    r = g.search(data[0:1], eps_or_ef=0.1, k=5)
+    indices, distances = r.indices, r.distances
     assert indices.shape == (1, 5)
     for idx in indices.flatten():
         if idx != 0xFFFFFFFF:
@@ -409,7 +426,9 @@ def test_facade_to_readonly():
 def test_facade_explore_return_distances_false():
     """explore with return_distances=False should return only indices array."""
     g, _ = _build_test_graph_with_distinct_labels()
-    indices = g.explore(0, k=5, max_distance_computation_count=50, return_distances=False)
+    res = g.explore(0, k=5, max_distance_computation_count=50, return_distances=False)
+    assert res.distances is None
+    indices = res.indices
     assert isinstance(indices, np.ndarray)
     assert len(indices) == 5
 
@@ -417,7 +436,8 @@ def test_facade_explore_return_distances_false():
 def test_facade_explore_unsorted():
     """explore with unsorted=True should return indices."""
     g, _ = _build_test_graph_with_distinct_labels()
-    indices, distances = g.explore(0, k=5, max_distance_computation_count=50, unsorted=True)
+    res = g.explore(0, k=5, max_distance_computation_count=50, unsorted=True)
+    indices, distances = res.indices, res.distances
     assert len(indices) == 5
     assert len(distances) == 5
 
@@ -428,17 +448,21 @@ def test_facade_explore_batch():
     labels = np.array([0, 10], dtype=np.uint32)
 
     # Default return_distances=True
-    indices, distances = g.explore(labels, k=5, max_distance_computation_count=50)
+    r_def = g.explore(labels, k=5, max_distance_computation_count=50)
+    indices, distances = r_def.indices, r_def.distances
     assert indices.shape == (2, 5)
     assert distances.shape == (2, 5)
 
     # return_distances=False
-    indices_only = g.explore(labels, k=5, max_distance_computation_count=50, return_distances=False)
+    r_only = g.explore(labels, k=5, max_distance_computation_count=50, return_distances=False)
+    assert r_only.distances is None
+    indices_only = r_only.indices
     assert indices_only.shape == (2, 5)
     assert isinstance(indices_only, np.ndarray)
 
     # unsorted=True
-    indices_unsorted, distances_unsorted = g.explore(labels, k=5, max_distance_computation_count=50, unsorted=True)
+    r_uns = g.explore(labels, k=5, max_distance_computation_count=50, unsorted=True)
+    indices_unsorted, distances_unsorted = r_uns.indices, r_uns.distances
     assert indices_unsorted.shape == (2, 5)
     assert distances_unsorted.shape == (2, 5)
 
@@ -449,13 +473,15 @@ def test_facade_explore_ef():
     labels = np.array([0, 10], dtype=np.uint32)
 
     # Single explore with ef
-    ind_single, dist_single = g.explore(0, k=5, max_distance_computation_count=50, eps_or_ef=10.0)
+    r_single = g.explore(0, k=5, max_distance_computation_count=50, eps_or_ef=10.0)
+    ind_single, dist_single = r_single.indices, r_single.distances
     assert len(ind_single) == 5
     assert len(dist_single) == 5
     assert ind_single[0] == 0
 
     # Batch explore with ef
-    indices, distances = g.explore(labels, k=5, max_distance_computation_count=50, eps_or_ef=10.0)
+    r_batch = g.explore(labels, k=5, max_distance_computation_count=50, eps_or_ef=10.0)
+    indices, distances = r_batch.indices, r_batch.distances
     assert indices.shape == (2, 5)
     assert distances.shape == (2, 5)
     assert indices[0, 0] == 0
@@ -544,9 +570,11 @@ def test_facade_has_path_from_multiple_entries():
 
 
 def test_facade_search_return_distances_false():
-    """search with return_distances=False should return only indices."""
+    """search with return_distances=False should set distances to None."""
     g, data = _build_test_graph_with_distinct_labels()
-    indices = g.search(data[0:1], eps_or_ef=0.1, k=5, return_distances=False)
+    res = g.search(data[0:1], eps_or_ef=0.1, k=5, return_distances=False)
+    assert res.distances is None
+    indices = res.indices
     assert isinstance(indices, np.ndarray)
     assert indices.shape == (1, 5)
 
@@ -554,7 +582,8 @@ def test_facade_search_return_distances_false():
 def test_facade_search_unsorted():
     """search with unsorted=True should return results."""
     g, data = _build_test_graph_with_distinct_labels()
-    indices, distances = g.search(data[0:2], eps_or_ef=0.1, k=5, unsorted=True)
+    res = g.search(data[0:2], eps_or_ef=0.1, k=5, unsorted=True)
+    indices, distances = res.indices, res.distances
     assert indices.shape == (2, 5)
     assert distances.shape == (2, 5)
 
@@ -581,7 +610,8 @@ def test_to_readonly_custom_features():
 
     # Search on FP16 ReadOnlyGraph
     query_fp16 = deglib.distances.floats_to_fp16(data[0:2])
-    res_indices, res_dists = ro_g.search(query_fp16, eps_or_ef=0.1, k=3)
+    r = ro_g.search(query_fp16, eps_or_ef=0.1, k=3)
+    res_indices, res_dists = r.indices, r.distances
     assert res_indices.shape == (2, 3)
     assert res_dists.shape == (2, 3)
 
@@ -609,7 +639,8 @@ def test_to_readonly_swap_fp16_l2():
 
     # Search on FP16 ReadOnlyGraph
     query_fp16 = deglib.distances.floats_to_fp16(data[0:2])
-    res_indices, res_dists = ro_g.search(query_fp16, eps_or_ef=0.1, k=3)
+    r = ro_g.search(query_fp16, eps_or_ef=0.1, k=3)
+    res_indices, res_dists = r.indices, r.distances
     assert res_indices.shape == (2, 3)
     assert res_dists.shape == (2, 3)
     assert res_indices[0, 0] == 0
@@ -632,7 +663,8 @@ def test_create_random_graph_fp32():
 
     # Search should work
     query = data[0:1]
-    indices, distances = graph.search(query, eps_or_ef=0.1, k=5)
+    r = graph.search(query, eps_or_ef=0.1, k=5)
+    indices, distances = r.indices, r.distances
     assert indices.shape == (1, 5)
     assert distances.shape == (1, 5)
 
@@ -645,16 +677,16 @@ def test_graph_optimize_preserves_search_results():
     graph = deglib.create_random_graph(data, edges_per_vertex=16, metric=Metric.FP32_L2, seed=7)
 
     query = data[0:1]
-    before, _ = graph.search(query, eps_or_ef=0.1, k=5)
+    before = graph.search(query, eps_or_ef=0.1, k=5).indices
 
     graph.optimize(sample_count=32, median_subset=0)
 
-    after, _ = graph.search(query, eps_or_ef=0.1, k=5)
+    after = graph.search(query, eps_or_ef=0.1, k=5).indices
     np.testing.assert_array_equal(before, after)
 
     # Default median_subset computes a graph-median entry point and completes cleanly
     graph.optimize(sample_count=32)
-    after_median, _ = graph.search(query, eps_or_ef=0.1, k=5)
+    after_median = graph.search(query, eps_or_ef=0.1, k=5).indices
     assert after_median.shape == (1, 5)
 
 
@@ -715,7 +747,8 @@ def test_create_random_graph_explore():
     graph = deglib.create_random_graph(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2, seed=7)
 
     # Explore from vertex 0
-    indices, distances = graph.explore(0, k=5, max_distance_computation_count=50)
+    r = graph.explore(0, k=5, max_distance_computation_count=50)
+    indices, distances = r.indices, r.distances
     assert len(indices) == 5
     assert len(distances) == 5
 
@@ -745,7 +778,8 @@ def test_sizebounded_graph_from_graph():
 
     # Search should work
     query = data[0:1]
-    indices, distances = mutable_graph.search(query, eps_or_ef=0.1, k=5)
+    r = mutable_graph.search(query, eps_or_ef=0.1, k=5)
+    indices, distances = r.indices, r.distances
     assert indices.shape == (1, 5)
     assert distances.shape == (1, 5)
 
@@ -817,7 +851,8 @@ def test_graph_get_labels_and_custom_features_with_permuted_labels():
         custom_features_order="label",
     )
     q = data[dense_labels[0]] * 2.0
-    idx, dist = ro_label_order.search(q, eps_or_ef=30.0, k=1)
+    r = ro_label_order.search(q, eps_or_ef=30.0, k=1)
+    idx, dist = r.indices, r.distances
     assert int(idx[0]) == int(dense_labels[0])
     assert np.isclose(dist[0], 0.0, atol=1e-5)
 
@@ -859,8 +894,10 @@ def test_sizebounded_graph_from_graph_search_matches():
 
     # Search on both should return the same results
     query = data[0:1]
-    orig_indices, orig_dists = readonly_graph.search(query, eps_or_ef=0.1, k=5)
-    new_indices, new_dists = mutable_graph.search(query, eps_or_ef=0.1, k=5)
+    r_orig = readonly_graph.search(query, eps_or_ef=0.1, k=5)
+    r_new = mutable_graph.search(query, eps_or_ef=0.1, k=5)
+    orig_indices, orig_dists = r_orig.indices, r_orig.distances
+    new_indices, new_dists = r_new.indices, r_new.distances
 
     assert orig_indices.shape == new_indices.shape
     assert np.allclose(orig_dists, new_dists, atol=1e-5)
@@ -884,8 +921,10 @@ def test_sizebounded_graph_from_graph_inner_product():
 
     # Search should work
     query = data[0:1]
-    indices, distances = mutable_graph.search(query, eps_or_ef=0.1, k=5)
+    res = mutable_graph.search(query, eps_or_ef=0.1, k=5)
+    indices, distances = res.indices, res.distances
     assert indices.shape == (1, 5)
+    assert distances.shape == (1, 5)
 
 
 def test_dynamic_graph_create_empty_and_build():
@@ -915,7 +954,8 @@ def test_dynamic_graph_create_empty_and_build():
 
     # Search
     query = data[0:1]
-    indices, distances = graph.search(query, eps_or_ef=0.1, k=5)
+    r = graph.search(query, eps_or_ef=0.1, k=5)
+    indices, distances = r.indices, r.distances
     assert indices.shape == (1, 5)
     assert indices[0, 0] == 0
     assert np.isclose(distances[0, 0], 0.0, atol=1e-5)
@@ -936,8 +976,10 @@ def test_to_dynamic_conversion_and_mutation():
 
     # Search on converted graph
     query = data[0:1]
-    orig_indices, orig_dists = graph.search(query, eps_or_ef=0.1, k=5)
-    dyn_indices, dyn_dists = dyn_graph.search(query, eps_or_ef=0.1, k=5)
+    r_orig = graph.search(query, eps_or_ef=0.1, k=5)
+    r_dyn = dyn_graph.search(query, eps_or_ef=0.1, k=5)
+    orig_indices, orig_dists = r_orig.indices, r_orig.distances
+    dyn_indices, dyn_dists = r_dyn.indices, r_dyn.distances
     assert np.array_equal(orig_indices, dyn_indices)
     assert np.allclose(orig_dists, dyn_dists, atol=1e-5)
 
@@ -970,8 +1012,10 @@ def test_save_and_load_dynamic_graph(tmp_path):
     assert loaded_graph.get_edges_per_vertex() == edges_per_vertex
 
     query = data[0:1]
-    orig_indices, orig_dists = graph.search(query, eps_or_ef=0.1, k=5)
-    loaded_indices, loaded_dists = loaded_graph.search(query, eps_or_ef=0.1, k=5)
+    r_orig = graph.search(query, eps_or_ef=0.1, k=5)
+    r_loaded = loaded_graph.search(query, eps_or_ef=0.1, k=5)
+    orig_indices, orig_dists = r_orig.indices, r_orig.distances
+    loaded_indices, loaded_dists = r_loaded.indices, r_loaded.distances
     assert np.array_equal(orig_indices, loaded_indices)
     assert np.allclose(orig_dists, loaded_dists, atol=1e-5)
 
@@ -995,8 +1039,10 @@ def test_save_and_load_mutable_graph(tmp_path):
     assert loaded_graph.get_edges_per_vertex() == edges_per_vertex
 
     query = data[0:1]
-    orig_indices, orig_dists = graph.search(query, eps_or_ef=0.1, k=5)
-    loaded_indices, loaded_dists = loaded_graph.search(query, eps_or_ef=0.1, k=5)
+    r_orig = graph.search(query, eps_or_ef=0.1, k=5)
+    r_loaded = loaded_graph.search(query, eps_or_ef=0.1, k=5)
+    orig_indices, orig_dists = r_orig.indices, r_orig.distances
+    loaded_indices, loaded_dists = r_loaded.indices, r_loaded.distances
     assert np.array_equal(orig_indices, loaded_indices)
     assert np.allclose(orig_dists, loaded_dists, atol=1e-5)
 
@@ -1043,13 +1089,13 @@ def test_to_readonly_self_quantization():
     ro_int8 = g_l2.to_readonly(Metric.Int8_L2)
     assert not ro_int8.is_mutable()
     assert ro_int8.get_metric() == Metric.Int8_L2
-    idx, _ = ro_int8.search(raw[0], eps_or_ef=0.2, k=5)
+    idx = ro_int8.search(raw[0], eps_or_ef=0.2, k=5).indices
     assert len(idx) == 5
 
     g_ip = deglib.build(unit, edges_per_vertex=8, extend_k=16, metric=Metric.FP32_InnerProduct)
     ro_evp = g_ip.to_readonly(Metric.EVP_InnerProduct)
     assert ro_evp.get_metric() == Metric.EVP_InnerProduct
-    idx_evp, _ = ro_evp.search(unit[0], eps_or_ef=0.2, k=5)
+    idx_evp = ro_evp.search(unit[0], eps_or_ef=0.2, k=5).indices
     assert len(idx_evp) == 5
 
 
@@ -1098,3 +1144,52 @@ def test_graph_conversion_validation():
         g.to_mutable(capacity=-1)
     with pytest.raises(ValueError, match="chunk_size"):
         g.to_dynamic(chunk_size=0)
+
+
+def test_graph_search_results_zero_copy_lifetime_and_bounds():
+    """SearchResults from graph.search and graph.explore keep NumPy views valid after wrapper deletion."""
+    import gc
+
+    rng = np.random.default_rng(11)
+    data = rng.standard_normal((100, 16)).astype(np.float32)
+    g = deglib.build(data, edges_per_vertex=8, extend_k=16, metric=Metric.FP32_L2, optimize=False)
+
+    # Single query SearchResults + lifetime after `del res`
+    res = g.search(data[0], eps_or_ef=0.2, k=5)
+    assert isinstance(res, deglib.SearchResults)
+    assert res.graph_distance_count > 0
+    assert res.graph_hop_count > 0
+    assert res.rerank_distance_count == 0
+    idx = res.indices
+    dist = res.distances
+    assert not idx.flags["OWNDATA"]
+    assert not dist.flags["OWNDATA"]
+    idx_copy = idx.copy()
+    dist_copy = dist.copy()
+    del res
+    gc.collect()
+    np.testing.assert_array_equal(idx, idx_copy)
+    np.testing.assert_allclose(dist, dist_copy)
+
+    # Budget bounds for both eps and ef modes
+    bounded_eps = g.search(data[0], eps_or_ef=0.2, k=10, max_distance_computation_count=4)
+    assert 1 <= bounded_eps.graph_distance_count <= 4
+    bounded_ef = g.search(data[0], eps_or_ef=32.0, k=10, max_distance_computation_count=4)
+    assert 1 <= bounded_ef.graph_distance_count <= 4
+
+    # Batch explore with distances=False and telemetry
+    exp_res = g.explore(
+        np.array([0, 1, 2], dtype=np.uint32), k=6, max_distance_computation_count=30, return_distances=False
+    )
+    assert isinstance(exp_res, deglib.SearchResults)
+    assert exp_res.distances is None
+    assert exp_res.graph_distance_count > 0
+    assert exp_res.graph_hop_count > 0
+    assert exp_res.rerank_distance_count == 0
+    exp_idx = exp_res.indices
+    assert exp_idx.shape == (3, 6)
+    assert not exp_idx.flags["OWNDATA"]
+    exp_copy = exp_idx.copy()
+    del exp_res
+    gc.collect()
+    np.testing.assert_array_equal(exp_idx, exp_copy)

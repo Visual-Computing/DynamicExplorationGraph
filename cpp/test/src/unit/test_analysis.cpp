@@ -57,11 +57,14 @@ class MockInternalGraph : public deglib::graph::InternalGraph {
             if (labels_[i] == label) return true;
         return false;
     }
-    [[nodiscard]] bool hasEdge(uint32_t idx, uint32_t neighbor) const noexcept override { return std::binary_search(neighbors_[idx].begin(), neighbors_[idx].end(), neighbor); }
+    [[nodiscard]] bool hasEdge(uint32_t idx, uint32_t neighbor) const noexcept override {
+        return std::binary_search(neighbors_[idx].begin(), neighbors_[idx].end(), neighbor);
+    }
 
     [[nodiscard]] std::vector<deglib::graph::ObjectDistance> hasPath(const std::vector<uint32_t>&, uint32_t, float, uint32_t) const override { return {}; }
-    deglib::graph::ResultSet search_intern(
-        const std::vector<uint32_t>&,
+    void search_intern(
+        deglib::graph::SearchWorkspace& ws,
+        std::span<const uint32_t>,
         const std::byte*,
         uint32_t,
         float = 0.0f,
@@ -69,10 +72,11 @@ class MockInternalGraph : public deglib::graph::InternalGraph {
         const deglib::search::Filter* = nullptr,
         uint32_t = 0
     ) const override {
-        return deglib::graph::ResultSet();
+        ws.reset_for_eps(0, 0);
     }
-    std::vector<deglib::graph::ObjectDistance> search_ef_intern(
-        const std::vector<uint32_t>&,
+    void search_ef_intern(
+        deglib::graph::SearchWorkspace& ws,
+        std::span<const uint32_t>,
         const std::byte*,
         uint32_t,
         uint32_t,
@@ -80,7 +84,7 @@ class MockInternalGraph : public deglib::graph::InternalGraph {
         const deglib::search::Filter* = nullptr,
         uint32_t = 0
     ) const override {
-        return {};
+        ws.reset_for_ef(0, 0, 0, false);
     }
 
     // helpers for test setup

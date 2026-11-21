@@ -28,10 +28,13 @@ TEST(SearcherTest, DirectFP32Search) {
 
     auto searcher = deglib::search::make_searcher(graph.internal());
 
-    // 1. Raw buffer search
+    // 1. Preallocated span buffer search
     std::vector<uint32_t> out_indices(5);
     std::vector<float> out_distances(5);
-    uint32_t found = searcher->search_f32(data.data(), 5, 0.1f, 1.0f, out_indices.data(), out_distances.data());
+    uint32_t found = searcher->search(
+        std::span<const float>(data.data(), dim), 5, std::span<uint32_t>(out_indices), std::span<float>(out_distances), 0.1f, 1.0f,
+        /*return_distances=*/true
+    );
 
     EXPECT_EQ(found, 5u);
     EXPECT_EQ(out_indices[0], 0u);
@@ -40,11 +43,14 @@ TEST(SearcherTest, DirectFP32Search) {
         EXPECT_GE(out_distances[i], out_distances[i - 1]);
     }
 
-    // 2. Modern C++20 span / SearchResult search
+    // 2. Modern C++20 span / SearchResults search
     auto span_res = searcher->search(std::span<const float>(data.data(), dim), 5, 0.1f, 1.0f, /*return_distances=*/true);
     EXPECT_EQ(span_res.size(), 5u);
     EXPECT_EQ(span_res.indices[0], 0u);
     EXPECT_NEAR(span_res.distances[0], 0.0f, 1e-5f);
+    EXPECT_GT(span_res.graph_distance_count, 0u);
+    EXPECT_GT(span_res.graph_hop_count, 0u);
+    EXPECT_EQ(span_res.rerank_distance_count, 0u);
 }
 
 TEST(SearcherTest, MakeSearcherAcceptsFacade) {
@@ -83,16 +89,16 @@ TEST(SearcherTest, QuantizedInt8WithFP16Reranker) {
     // Quantize to INT8
     auto quantizer = deglib::transformation::make_scalar_quantizer_int8(std::span<const float>(data), dim);
     std::vector<int8_t> int8_data(count * dim);
-    quantizer.transform_database(std::span<const float>(data),
-                                 std::span<std::byte>(reinterpret_cast<std::byte*>(int8_data.data()), count * dim * sizeof(int8_t)));
+    quantizer.transform_database(
+        std::span<const float>(data), std::span<std::byte>(reinterpret_cast<std::byte*>(int8_data.data()), count * dim * sizeof(int8_t))
+    );
 
     auto target_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::Int8_L2);
     auto ro_graph = deglib::graph::ReadOnlyGraph::from_graph(base_graph.internal(), target_space, int8_data.data());
 
     // Reranker with FP16 base features and calibrated ScalarQuantizerFP16
-    auto fp16_quantizer = std::make_shared<deglib::transformation::ScalarQuantizerFP16>(
-        deglib::transformation::make_scalar_quantizer_fp16(std::span<const float>(data), dim)
-    );
+    auto fp16_quantizer =
+        std::make_shared<deglib::transformation::ScalarQuantizerFP16>(deglib::transformation::make_scalar_quantizer_fp16(std::span<const float>(data), dim));
     std::vector<uint16_t> base_fp16(count * dim);
     fp16_quantizer->transform_database(std::span<const float>(data), std::as_writable_bytes(std::span(base_fp16)));
     auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP16_L2);
@@ -119,12 +125,9 @@ TEST(SearcherTest, RerankerFromGraphFP32ToFP16) {
         }
     }
     auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
-    auto reranker = deglib::search::Reranker::from_graph(
-        graph.internal(), deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP16_L2)
-    );
+    auto reranker = deglib::search::Reranker::from_graph(graph.internal(), deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP16_L2));
     auto reranker_scalar = deglib::search::Reranker::from_graph(
-        graph.internal(),
-        deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP16_L2, deglib::cpu::InstructionSet::Scalar)
+        graph.internal(), deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP16_L2, deglib::cpu::InstructionSet::Scalar)
     );
     EXPECT_STREQ(reranker_scalar.getSpace().get_instruction(), "Scalar");
     EXPECT_EQ(reranker.getNumBaseVectors(), count);
@@ -154,8 +157,9 @@ TEST(SearcherTest, QuantizedUint8WithFP32Reranker) {
 
     auto quantizer = deglib::transformation::make_scalar_quantizer_uint8(std::span<const float>(data), dim);
     std::vector<uint8_t> uint8_data(count * dim);
-    quantizer.transform_database(std::span<const float>(data),
-                                 std::span<std::byte>(reinterpret_cast<std::byte*>(uint8_data.data()), count * dim * sizeof(uint8_t)));
+    quantizer.transform_database(
+        std::span<const float>(data), std::span<std::byte>(reinterpret_cast<std::byte*>(uint8_data.data()), count * dim * sizeof(uint8_t))
+    );
 
     auto target_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::Uint8_L2);
     auto ro_graph = deglib::graph::ReadOnlyGraph::from_graph(base_graph.internal(), target_space, uint8_data.data());
@@ -204,18 +208,16 @@ TEST(SearcherTest, OptimizeTunesFp16Reranker) {
     std::vector<float> data(count * dim);
     for (auto& v : data) v = dist(rng);
 
-    auto fp16_quantizer = std::make_shared<deglib::transformation::ScalarQuantizerFP16>(
-        deglib::transformation::make_scalar_quantizer_fp16(std::span<const float>(data), dim)
-    );
+    auto fp16_quantizer =
+        std::make_shared<deglib::transformation::ScalarQuantizerFP16>(deglib::transformation::make_scalar_quantizer_fp16(std::span<const float>(data), dim));
     std::vector<uint16_t> base_fp16(count * dim);
     fp16_quantizer->transform_database(std::span<const float>(data), std::as_writable_bytes(std::span(base_fp16)));
 
     auto graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
 
     auto rerank_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::FP16_L2);
-    auto searcher = deglib::search::make_searcher(
-        graph.internal(), deglib::search::Reranker(rerank_space, std::as_bytes(std::span(base_fp16)), count, {fp16_quantizer})
-    );
+    auto searcher =
+        deglib::search::make_searcher(graph.internal(), deglib::search::Reranker(rerank_space, std::as_bytes(std::span(base_fp16)), count, {fp16_quantizer}));
 
     // Reranker<uint16_t> self-samples its fp16 base vectors; no float reinterpretation.
     searcher->optimize(/*n_clusters=*/8, /*n_iter=*/5);
@@ -257,7 +259,10 @@ TEST(SearcherTest, OptimizeSelectsValidPrefetchConfigAndPreservesResults) {
     std::vector<uint32_t> idx(3);
     std::vector<float> d(3);
     const uint32_t q = 5;
-    searcher->search_f32(data.data() + static_cast<size_t>(q) * dim, 3, 0.1f, 1.0f, idx.data(), d.data());
+    searcher->search(
+        std::span<const float>(data.data() + static_cast<size_t>(q) * dim, dim), 3, std::span<uint32_t>(idx), std::span<float>(d), 0.1f, 1.0f,
+        /*return_distances=*/true
+    );
     EXPECT_EQ(idx[0], q);
     EXPECT_NEAR(d[0], 0.0f, 1e-4f);
 }
@@ -348,7 +353,7 @@ TEST(SearcherTest, FlatBatchAndIntoSearch) {
     const size_t n_queries = 5;
     const uint32_t k = 4;
 
-    // 1. search_batch returning SearchResultBatch (flat buffer)
+    // 1. search_batch returning SearchResults (flat buffer)
     auto flat_res = searcher->search_batch(
         std::span<const float>(data.data(), n_queries * dim), n_queries, k,
         /*eps=*/0.1f, /*rerank_factor=*/1.0f,
@@ -357,6 +362,9 @@ TEST(SearcherTest, FlatBatchAndIntoSearch) {
     EXPECT_EQ(flat_res.size(), n_queries);
     EXPECT_EQ(flat_res.k, k);
     EXPECT_EQ(flat_res.indices.size(), n_queries * k);
+    EXPECT_GT(flat_res.graph_distance_count, 0u);
+    EXPECT_GT(flat_res.graph_hop_count, 0u);
+    EXPECT_EQ(flat_res.rerank_distance_count, 0u);
     EXPECT_EQ(flat_res.distances.size(), n_queries * k);
 
     for (size_t q = 0; q < n_queries; ++q) {
@@ -452,10 +460,12 @@ TEST(SearcherTest, DynamicExplorationGraphWithTransformationMakeSearcher) {
 
     auto base_graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 8, deglib::distances::Metric::FP32_L2);
 
-    auto quantizer = std::make_shared<deglib::transformation::ScalarQuantizerInt8>(deglib::transformation::make_scalar_quantizer_int8(std::span<const float>(data), dim));
+    auto quantizer =
+        std::make_shared<deglib::transformation::ScalarQuantizerInt8>(deglib::transformation::make_scalar_quantizer_int8(std::span<const float>(data), dim));
     std::vector<int8_t> int8_data(count * dim);
-    quantizer->transform_database(std::span<const float>(data),
-                                  std::span<std::byte>(reinterpret_cast<std::byte*>(int8_data.data()), count * dim * sizeof(int8_t)));
+    quantizer->transform_database(
+        std::span<const float>(data), std::span<std::byte>(reinterpret_cast<std::byte*>(int8_data.data()), count * dim * sizeof(int8_t))
+    );
 
     auto target_space = deglib::distances::FloatSpace(dim, deglib::distances::Metric::Int8_L2);
     auto ro_graph =
@@ -483,6 +493,9 @@ TEST(SearcherTest, DynamicExplorationGraphWithTransformationMakeSearcher) {
     EXPECT_GE(res2.size(), 1u);
     EXPECT_EQ(res2.indices[0], 5u);
     EXPECT_NEAR(res2.distances[0], 0.0f, 1e-4f);
+    EXPECT_GT(res2.graph_distance_count, 0u);
+    EXPECT_GT(res2.rerank_distance_count, 0u);
+    EXPECT_GT(res2.graph_hop_count, 0u);
 }
 
 TEST(SearcherTest, KMeansEntrySelectorFitMapsIdsAndTunesPrefetch) {
@@ -523,7 +536,8 @@ TEST(SearcherTest, ScalarQuantizerDequantizeInt8AndUint8) {
     const uint32_t dim = 4;
     std::vector<float> data = {-1.0f, 0.0f, 0.25f, 1.0f};
 
-    auto int8_quant = std::make_shared<deglib::transformation::ScalarQuantizerInt8>(deglib::transformation::make_scalar_quantizer_int8(std::span<const float>(data), dim));
+    auto int8_quant =
+        std::make_shared<deglib::transformation::ScalarQuantizerInt8>(deglib::transformation::make_scalar_quantizer_int8(std::span<const float>(data), dim));
     std::vector<std::byte> int8_bytes(dim * sizeof(int8_t));
     int8_quant->transform_query(std::span<const float>(data), std::span<std::byte>(int8_bytes));
     std::vector<float> int8_out(dim);
@@ -532,7 +546,8 @@ TEST(SearcherTest, ScalarQuantizerDequantizeInt8AndUint8) {
         EXPECT_NEAR(int8_out[d], data[d], 0.01f);
     }
 
-    auto uint8_quant = std::make_shared<deglib::transformation::ScalarQuantizerUint8>(deglib::transformation::make_scalar_quantizer_uint8(std::span<const float>(data), dim));
+    auto uint8_quant =
+        std::make_shared<deglib::transformation::ScalarQuantizerUint8>(deglib::transformation::make_scalar_quantizer_uint8(std::span<const float>(data), dim));
     std::vector<std::byte> uint8_bytes(dim * sizeof(uint8_t));
     uint8_quant->transform_query(std::span<const float>(data), std::span<std::byte>(uint8_bytes));
     std::vector<float> uint8_out(dim);
@@ -578,9 +593,7 @@ TEST(SearcherTest, MaxDistanceComputationCountBoundsSearch) {
     // Batch search with tight budget (max_distance_computation_count = 5).
     // Pre-fill with UINT32_MAX so unwritten slots beyond the returned count stay distinguishable.
     std::vector<uint32_t> batch_out(4 * k, std::numeric_limits<uint32_t>::max());
-    searcher->search_batch<float>(
-        std::span<const float>(data.data(), 4 * dim), 4, k, std::span<uint32_t>(batch_out), {}, 64.0f, 1.0f, 2, false, false, 5
-    );
+    searcher->search_batch<float>(std::span<const float>(data.data(), 4 * dim), 4, k, std::span<uint32_t>(batch_out), {}, 64.0f, 1.0f, 2, false, false, 5);
     for (size_t q = 0; q < 4; ++q) {
         size_t valid = 0;
         for (uint32_t j = 0; j < k; ++j) {

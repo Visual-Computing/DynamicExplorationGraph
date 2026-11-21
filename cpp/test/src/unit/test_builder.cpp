@@ -771,8 +771,8 @@ TEST(EvenRegularGraphBuilder, DynamicExplorationGraphWrapperAndSpanAddEntry) {
     std::span<const float> query(dataset.data() + 5 * dims, dims);
     auto results = deg.search(query, 1, 0.2f);
     EXPECT_EQ(results.size(), 1u);
-    EXPECT_EQ(results.top().getIdentifier(), 105u);  // Closest vector is label 105
-    EXPECT_FLOAT_EQ(results.top().getDistance(), 0.0f);
+    EXPECT_EQ(results.indices[0], 105u);  // Closest vector is label 105
+    EXPECT_FLOAT_EQ(results.distances[0], 0.0f);
 }
 
 TEST(EvenRegularGraphBuilder, DynamicExplorationGraphConstructorAndRejection) {
@@ -815,8 +815,8 @@ TEST(BuilderBuildFromData, FloatL2Basic) {
     std::span<const float> query(dataset.data() + 12 * dims, dims);
     auto results = graph.search(query, 1, 0.2f);
     EXPECT_EQ(results.size(), 1u);
-    EXPECT_EQ(results.top().getIdentifier(), 12u);
-    EXPECT_FLOAT_EQ(results.top().getDistance(), 0.0f);
+    EXPECT_EQ(results.indices[0], 12u);
+    EXPECT_FLOAT_EQ(results.distances[0], 0.0f);
 }
 
 TEST(BuilderBuildFromData, CustomLabelsAndThreads) {
@@ -845,7 +845,7 @@ TEST(BuilderBuildFromData, CustomLabelsAndThreads) {
     // Query for vertex label 1015
     std::span<const float> query(dataset.data() + 15 * dims, dims);
     auto results = graph.search(query, 1);
-    EXPECT_EQ(results.top().getIdentifier(), 1015u);
+    EXPECT_EQ(results.indices[0], 1015u);
 }
 
 TEST(BuilderBuildFromData, InvalidArguments) {
@@ -874,9 +874,7 @@ TEST(BuilderSlidingWindow, ContinuousWindowUpdates) {
     auto deg = deglib::create_empty(window_size + batch_size * 2, edges_per_vertex, feature_space);
 
     std::mt19937 rng(42);
-    auto builder = deglib::create_builder(
-        deg, rng, deglib::builder::OptimizationTarget::StreamingData, /*extend_k=*/edges_per_vertex * 2, /*extend_eps=*/0.2f
-    );
+    auto builder = deglib::create_builder(deg, rng, deglib::builder::OptimizationTarget::StreamingData, /*extend_k=*/edges_per_vertex * 2, /*extend_eps=*/0.2f);
     builder.setThreadCount(1);
 
     std::uniform_real_distribution<float> dist(0.0f, 10.0f);
@@ -918,8 +916,8 @@ TEST(BuilderSlidingWindow, ContinuousWindowUpdates) {
         std::span<const float> query(dataset.data() + (next_insert - 1) * dims, dims);
         auto results = deg.search(query, 1, 0.2f);
         EXPECT_EQ(results.size(), 1u);
-        EXPECT_EQ(results.top().getIdentifier(), next_insert - 1);
-        EXPECT_NEAR(results.top().getDistance(), 0.0f, 1e-4f);
+        EXPECT_EQ(results.indices[0], next_insert - 1);
+        EXPECT_NEAR(results.distances[0], 0.0f, 1e-4f);
     }
 }
 
@@ -948,4 +946,3 @@ TEST(BuilderPopulateRandomGraph, RegularityAndConnectivity) {
     EXPECT_TRUE(deglib::analysis::check_graph_connectivity(sbg));
     EXPECT_TRUE(deglib::analysis::check_graph_weights(sbg));
 }
-

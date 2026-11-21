@@ -36,7 +36,7 @@ from .graph import (
     load_mutable_graph,
 )
 from .optimization import presort, prune_non_mrng_edges, prune_worst_edges
-from .search import Searcher, create_searcher, Reranker, rerank, Filter
+from .search import Searcher, SearchResults, create_searcher, Reranker, rerank, Filter
 from .transformation import (
     FeatureTransformation,
     make_quantizer_pipeline,
@@ -95,6 +95,7 @@ __all__ = [
     "load_mutable_graph",
     # Search & Rerank
     "Searcher",
+    "SearchResults",
     "create_searcher",
     "Reranker",
     "rerank",

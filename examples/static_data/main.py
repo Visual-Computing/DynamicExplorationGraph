@@ -224,7 +224,9 @@ def run_static_benchmark(
     for eps in eps_list:
         start_time = time.perf_counter()
         for _ in range(repeat):
-            indices_batch, _ = graph.search(query_vecs, eps_or_ef=eps, k=search_k, threads=1)
+            indices_batch = graph.search(
+                query_vecs, eps_or_ef=eps, k=search_k, threads=1, return_distances=False
+            ).indices
         elapsed_sec = time.perf_counter() - start_time
 
         search_time_us = elapsed_sec * 1e6
@@ -291,13 +293,14 @@ def run_static_benchmark(
         for max_dist in max_dist_steps:
             start_time = time.perf_counter()
             for _ in range(explore_repeat):
-                indices_batch, _ = graph.explore(
+                indices_batch = graph.explore(
                     entry_labels,
                     k=actual_explore_k,
                     max_distance_computation_count=max_dist,
                     include_entry=True,
                     threads=1,
-                )
+                    return_distances=False,
+                ).indices
             elapsed_sec = time.perf_counter() - start_time
 
             search_time_us = elapsed_sec * 1e6

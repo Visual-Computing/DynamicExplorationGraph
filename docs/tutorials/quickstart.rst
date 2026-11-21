@@ -35,17 +35,17 @@ Complete Example
 
    # 3. Query the index for the 10 nearest neighbors
    query = np.random.randn(dim).astype(np.float32)
-   indices, distances = graph.search(query, k=10, eps_or_ef=0.1)
+   res = graph.search(query, k=10, eps_or_ef=0.1)
 
-   print("Top-10 nearest neighbor IDs:", indices)
-   print("Corresponding distances:", distances)
+   print("Top-10 nearest neighbor IDs:", res.indices)
+   print("Corresponding distances:", res.distances)
 
    # 4. Save and reload the graph (works for all graph types)
    graph.save_graph("my_graph.deg")
 
    # Load read-only graph for fast serving
    loaded_graph = deglib.graph.load_readonly_graph("my_graph.deg")
-   loaded_indices, _ = loaded_graph.search(query, k=10, eps_or_ef=0.1)
+   loaded_indices = loaded_graph.search(query, k=10, eps_or_ef=0.1).indices
 
 Batch Querying
 --------------
@@ -56,10 +56,10 @@ You can search multiple query vectors in parallel by passing a 2D NumPy array:
 
    # Search for 100 queries simultaneously using available CPU threads
    queries = np.random.randn(100, dim).astype(np.float32)
-   indices, distances = graph.search(queries, k=10, eps_or_ef=0.1, threads=0)
+   batch_res = graph.search(queries, k=10, eps_or_ef=0.1, threads=0)
 
    # Result shapes: (100, 10)
-   print("Batch result shape:", indices.shape)
+   print("Batch result shape:", batch_res.indices.shape)
 
 Understanding the `eps_or_ef` Parameter
 ---------------------------------------

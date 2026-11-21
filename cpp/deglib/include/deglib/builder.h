@@ -584,10 +584,10 @@ class EvenRegularGraphBuilder {
         // find good neighbor candidates for the new vertex
         auto distrib = deglib::random::DeterministicUniformIntDistribution<uint32_t>(0, uint32_t(graph.size() - 1));
         const std::vector<uint32_t> entry_vertex_indices = {distrib(this->rnd_)};
-        auto top_list = graph.search_intern(
+        auto ws = graph.search_intern(
             entry_vertex_indices, new_vertex_feature, std::max(uint32_t(this->extend_k_), edges_per_vertex * 2), this->extend_eps_
         );  // need 2x otherwise it might lock during neighbor selection
-        const auto candidates = topListAscending(top_list);
+        const auto candidates = topListAscending(ws.results);
 
         // their should always be enough neighbors (search candidates), otherwise the graph would be broken
         if (candidates.size() < edges_per_vertex) {
@@ -725,9 +725,9 @@ class EvenRegularGraphBuilder {
 
             // find good neighbors for the new vertex
             const auto entry_vertex_indices = graph.getEntryVertexIndices();
-            auto top_list =
-                graph.search_intern(entry_vertex_indices, new_vertex_feature, std::max(uint32_t(this->extend_k_), edges_per_vertex), this->extend_eps_);
-            const auto results = topListAscending(top_list);
+            thread_local deglib::graph::SearchWorkspace ws;
+            graph.search_intern(ws, entry_vertex_indices, new_vertex_feature, std::max(uint32_t(this->extend_k_), edges_per_vertex), this->extend_eps_);
+            const auto results = topListAscending(ws.results);
 
             // their should always be enough neighbors (search results), otherwise the graph would be broken
             if (results.size() < edges_per_vertex) {
@@ -1231,8 +1231,8 @@ class EvenRegularGraphBuilder {
             //    their subgraph and would therefore connect the two potential subgraphs.
             {
                 const auto vertex2_feature = graph.getFeatureVector(vertex2);
-                const std::vector<uint32_t> entry_vertex_indices = {vertex3, vertex4};
-                auto top_list = graph.search_intern(entry_vertex_indices, vertex2_feature, improve_k_, this->improve_eps_);
+                const uint32_t entry_vertex_indices[2] = {vertex3, vertex4};
+                auto ws = graph.search_intern(entry_vertex_indices, vertex2_feature, improve_k_, this->improve_eps_);
 
                 // find a good new vertex3
                 float best_gain = total_gain;
@@ -1241,7 +1241,7 @@ class EvenRegularGraphBuilder {
 
                 // We use the descending order to find the worst swap combination with the best gain
                 // Sometimes the gain between the two best combinations is the same, its better to use one with the bad edges to make later improvements easier
-                for (auto&& result : topListDescending(top_list)) {
+                for (auto&& result : topListDescending(ws.results)) {
                     const uint32_t new_vertex3 = result.getIdentifier();
 
                     // vertex1 and vertex2 got tested in the recursive call before and vertex4 got just disconnected from vertex2
@@ -1302,9 +1302,9 @@ class EvenRegularGraphBuilder {
             //     two vertices are already connected to vertex4.
             if (vertex1 == vertex4) {
                 // find a good (not yet connected) vertex for vertex1/vertex4
-                const std::vector<uint32_t> entry_vertex_indices = {vertex2, vertex3};
+                const uint32_t entry_vertex_indices[2] = {vertex2, vertex3};
                 const auto vertex4_feature = graph.getFeatureVector(vertex4);
-                auto top_list = graph.search_intern(entry_vertex_indices, vertex4_feature, improve_k_, this->improve_eps_);
+                auto ws = graph.search_intern(entry_vertex_indices, vertex4_feature, improve_k_, this->improve_eps_);
 
                 float best_gain = 0;
                 uint32_t best_selected_neighbor = 0;
@@ -1312,7 +1312,7 @@ class EvenRegularGraphBuilder {
                 float best_new_neighbor_dist = 0;
                 uint32_t best_good_vertex = 0;
                 float best_good_vertex_dist = 0;
-                for (auto&& result : topListAscending(top_list)) {
+                for (auto&& result : topListAscending(ws.results)) {
                     const auto good_vertex = result.getIdentifier();
 
                     // the new vertex should not be connected to vertex4 yet

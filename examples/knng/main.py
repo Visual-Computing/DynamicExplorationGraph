@@ -112,7 +112,9 @@ def construct_knng(
     t_opt0 = time.perf_counter()
     graph.optimize()
     t_gopt = time.perf_counter() - t_opt0
-    print(f"[Optimization] graph.optimize -> (po={graph.get_po()}, pl={graph.get_pl()}, nl={graph.get_nl()}) (took {t_gopt:.3f}s, excluded from total)")
+    print(
+        f"[Optimization] graph.optimize -> (po={graph.get_po()}, pl={graph.get_pl()}, nl={graph.get_nl()}) (took {t_gopt:.3f}s, excluded from total)"
+    )
 
     # 2. Graph Exploration Phase (Self-Join for k-NNG neighbor retrieval)
     t0 = time.perf_counter()
@@ -125,7 +127,7 @@ def construct_knng(
         threads=threads,
         return_distances=False,
         unsorted=True,
-    )
+    ).indices
     t_explore = time.perf_counter() - t0
     print(f"Graph candidate search completed in {t_explore:.3f}s")
 
@@ -136,7 +138,9 @@ def construct_knng(
     t_ropt0 = time.perf_counter()
     reranker.optimize(num_candidates=evp_k)
     t_ropt = time.perf_counter() - t_ropt0
-    print(f"[Optimization] reranker.optimize -> (po={reranker.get_po()}, pl={reranker.get_pl()}) (took {t_ropt:.3f}s, excluded from total)")
+    print(
+        f"[Optimization] reranker.optimize -> (po={reranker.get_po()}, pl={reranker.get_pl()}) (took {t_ropt:.3f}s, excluded from total)"
+    )
 
     t0 = time.perf_counter()
     final_knng_edges = reranker.rerank(

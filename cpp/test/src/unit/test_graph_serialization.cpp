@@ -71,28 +71,26 @@ TEST(GraphSerializationTest, BuildWithPipelineSaveAndLoadSearch) {
     auto res_after = deg_loaded.search(q0, 5, 0.1f);
     EXPECT_EQ(res_before.size(), res_after.size());
 
-    // Sortierte Kopien der Ergebnisse vergleichen (Heap -> aufsteigend sortiert)
-    auto sorted_before = res_before;
-    sorted_before.sort();
-    auto sorted_after = res_after;
-    sorted_after.sort();
-    for (size_t i = 0; i < sorted_before.size(); ++i) {
-        EXPECT_EQ(sorted_before[i].getIdentifier(), sorted_after[i].getIdentifier());
-        EXPECT_FLOAT_EQ(sorted_before[i].getDistance(), sorted_after[i].getDistance());
+    // Ergebnisse sind bereits aufsteigend sortiert
+    for (size_t i = 0; i < res_before.size(); ++i) {
+        EXPECT_EQ(res_before.indices[i], res_after.indices[i]);
+        EXPECT_FLOAT_EQ(res_before.distances[i], res_after.distances[i]);
     }
 
     // 9. Batch-Suche nach dem Laden vergleichen
     auto batch_results_after = deg_loaded.search_batch(std::span<const float>(batch_queries), 3, 5, 0.1f);
     EXPECT_EQ(batch_results_after.size(), 3u);
     for (size_t q = 0; q < 3; ++q) {
-        auto q_before = batch_results_before[q];
-        q_before.sort();
-        auto q_after = batch_results_after[q];
-        q_after.sort();
-        EXPECT_EQ(q_before.size(), q_after.size());
-        for (size_t i = 0; i < q_before.size(); ++i) {
-            EXPECT_EQ(q_before[i].getIdentifier(), q_after[i].getIdentifier());
-            EXPECT_FLOAT_EQ(q_before[i].getDistance(), q_after[i].getDistance());
+        auto q_before_idx = batch_results_before.get_indices(q);
+        auto q_after_idx = batch_results_after.get_indices(q);
+        auto q_before_dist = batch_results_before.get_distances(q);
+        auto q_after_dist = batch_results_after.get_distances(q);
+        EXPECT_EQ(q_before_idx.size(), q_after_idx.size());
+        for (size_t i = 0; i < q_before_idx.size(); ++i) {
+            EXPECT_EQ(q_before_idx[i], q_after_idx[i]);
+            if (q_before_idx[i] != UINT32_MAX) {
+                EXPECT_FLOAT_EQ(q_before_dist[i], q_after_dist[i]);
+            }
         }
     }
 
@@ -141,13 +139,9 @@ TEST(GraphSerializationTest, BuildWithEvpPipelineSaveAndLoad) {
     auto res_after = deg_loaded.search(q0, 3, 0.1f);
     EXPECT_EQ(res_before.size(), res_after.size());
 
-    auto sorted_before = res_before;
-    sorted_before.sort();
-    auto sorted_after = res_after;
-    sorted_after.sort();
-    for (size_t i = 0; i < sorted_before.size(); ++i) {
-        EXPECT_EQ(sorted_before[i].getIdentifier(), sorted_after[i].getIdentifier());
-        EXPECT_FLOAT_EQ(sorted_before[i].getDistance(), sorted_after[i].getDistance());
+    for (size_t i = 0; i < res_before.size(); ++i) {
+        EXPECT_EQ(res_before.indices[i], res_after.indices[i]);
+        EXPECT_FLOAT_EQ(res_before.distances[i], res_after.distances[i]);
     }
 
     std::filesystem::remove(test_file);

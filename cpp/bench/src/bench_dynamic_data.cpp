@@ -169,9 +169,7 @@ void run_dynamic_benchmark(
                 if (use_half) {
                     if (!base_gt_half_loaded) {
                         if (quality_mode != GraphQualityMode::None) {
-                            generate_base_groundtruth_files(
-                                ds, base_repository, setup_threads, /*use_half_dataset=*/true, quality_mode, graph_path
-                            );
+                            generate_base_groundtruth_files(ds, base_repository, setup_threads, /*use_half_dataset=*/true, quality_mode, graph_path);
                             base_gt_half = ds.load_base_groundtruth(/*use_half_dataset=*/true);
                         }
                         base_gt_half_loaded = true;

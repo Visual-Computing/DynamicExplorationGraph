@@ -345,28 +345,16 @@ inline static std::vector<std::vector<uint32_t>> compute_groundtruth_uint8_ip(
 
 // Compute exact brute-force InnerProduct groundtruth for int8 vectors.
 // Uses the scalar InnerProductInt8::compare() from deglib.
-inline static std::vector<std::vector<uint32_t>> compute_groundtruth_int8_ip(
-    const std::vector<int8_t>& base,
-    size_t base_count,
-    const std::vector<int8_t>& query,
-    size_t query_count,
-    size_t dim,
-    uint32_t k
-) {
+inline static std::vector<std::vector<uint32_t>>
+compute_groundtruth_int8_ip(const std::vector<int8_t>& base, size_t base_count, const std::vector<int8_t>& query, size_t query_count, size_t dim, uint32_t k) {
     return compute_groundtruth<int8_t>(base, base_count, query, query_count, dim, k, [](const int8_t* q_vec, const int8_t* b_vec, const void* qty_ptr) {
         return deglib::distances::int8_ip::InnerProductInt8::compare(q_vec, b_vec, qty_ptr);
     });
 }
 // Compute exact brute-force L2 groundtruth for int8 vectors.
 // Uses the scalar L2Int8::compare() from deglib.
-inline static std::vector<std::vector<uint32_t>> compute_groundtruth_int8_l2(
-    const std::vector<int8_t>& base,
-    size_t base_count,
-    const std::vector<int8_t>& query,
-    size_t query_count,
-    size_t dim,
-    uint32_t k
-) {
+inline static std::vector<std::vector<uint32_t>>
+compute_groundtruth_int8_l2(const std::vector<int8_t>& base, size_t base_count, const std::vector<int8_t>& query, size_t query_count, size_t dim, uint32_t k) {
     return compute_groundtruth<int8_t>(base, base_count, query, query_count, dim, k, [](const int8_t* q_vec, const int8_t* b_vec, const void* qty_ptr) {
         return deglib::distances::int8_l2::L2Int8::compare(q_vec, b_vec, qty_ptr);
     });
@@ -581,9 +569,9 @@ inline static void run_integration_test(
             }
         }
 
-        while (!result.empty()) {
-            auto top_item = result.top();
-            result.pop();
+        while (!result.results.empty()) {
+            auto top_item = result.results.top();
+            result.results.pop();
             uint32_t ext_label = graph.getExternalLabel(top_item.getIdentifier());
             if (gt_set.count(ext_label)) {
                 total_correct++;
@@ -815,9 +803,9 @@ inline static void run_regression_test(
                 }
             }
 
-            while (!result.empty()) {
-                auto top_item = result.top();
-                result.pop();
+            while (!result.results.empty()) {
+                auto top_item = result.results.top();
+                result.results.pop();
                 uint32_t ext_label = graph.getExternalLabel(top_item.getIdentifier());
                 if (gt_set.count(ext_label)) {
                     total_correct++;
@@ -926,9 +914,9 @@ inline void run_multithreaded_search_benchmark(
                                 }
                             }
 
-                            while (!result.empty()) {
-                                auto top_item = result.top();
-                                result.pop();
+                            while (!result.results.empty()) {
+                                auto top_item = result.results.top();
+                                result.results.pop();
                                 uint32_t ext_label = graph.getExternalLabel(top_item.getIdentifier());
                                 if (gt_set.count(ext_label)) {
                                     local_correct++;

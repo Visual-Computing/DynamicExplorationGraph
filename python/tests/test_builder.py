@@ -277,7 +277,7 @@ class TestGraphs:
 
         # Verify search works and returns valid neighbors
         res = graph.search(data[0], k=10, eps_or_ef=0.1)
-        indices, dists = res
+        indices, dists = res.indices, res.distances
         assert len(indices) == 10
         assert not np.isnan(dists).any()
 
@@ -328,7 +328,8 @@ class TestGraphs:
 
             # Test search on latest added vector
             query = all_data[next_insert - 1]
-            indices, dists = graph.search(query, k=1, eps_or_ef=0.1)
+            res = graph.search(query, k=1, eps_or_ef=0.1)
+            indices, dists = res.indices, res.distances
             assert len(indices) == 1
             assert indices[0] == next_insert - 1
             assert np.isclose(dists[0], 0.0, atol=1e-5)
@@ -365,7 +366,7 @@ class TestBuildFunction:
         sorted_indices = deglib.presort(data, metric=Metric.FP32_L2, threads=1)
         g2 = deglib.build(data, edges_per_vertex=12, extend_k=16, presort=sorted_indices, optimize=False)
         assert g2.size() == 60
-        indices, _ = g2.search(data[5], k=1, eps_or_ef=0.1)
+        indices = g2.search(data[5], k=1, eps_or_ef=0.1).indices
         assert int(indices[0]) == 5
 
     def test_build_quantized_metrics(self):
@@ -383,7 +384,7 @@ class TestBuildFunction:
         )
         assert g_evp.size() == 80
         assert g_evp.get_metric() == Metric.EVP_InnerProduct
-        idx, _ = g_evp.search(unit[0], k=5, eps_or_ef=0.2)
+        idx = g_evp.search(unit[0], k=5, eps_or_ef=0.2).indices
         assert len(idx) == 5
 
         g_int8 = deglib.build(
@@ -399,5 +400,5 @@ class TestBuildFunction:
         assert not g_int8.is_mutable()
         assert g_int8.size() == 80
         assert g_int8.get_metric() == Metric.Int8_L2
-        idx2, _ = g_int8.search(raw[3], k=5, eps_or_ef=0.2)
+        idx2 = g_int8.search(raw[3], k=5, eps_or_ef=0.2).indices
         assert len(idx2) == 5

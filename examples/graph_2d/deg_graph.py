@@ -185,10 +185,10 @@ class GraphModel:
         records the route and runs on reference graphs too. This facade stays only as the parity reference
         the tests hold the Python search against: same answers, same distances, on the same graph.
         """
-        indices, distances = self.traversal(self.metric if metric is None else metric).search(
+        res = self.traversal(self.metric if metric is None else metric).search(
             np.ascontiguousarray(query, dtype=np.float32), eps, k
         )
-        return np.asarray(indices), np.asarray(distances)
+        return np.asarray(res.indices), np.asarray(res.distances)
 
 
 @dataclass(frozen=True)

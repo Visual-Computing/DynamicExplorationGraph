@@ -177,7 +177,8 @@ void run_static_benchmark(
         {
             auto ground_truth = ds.load_groundtruth(config.anns_k, false);
             test_graph_anns(
-                graph.internal(), query_repository, ground_truth, config.anns_repeat, config.anns_threads, config.anns_k, config.eps_parameter, nullptr, linear_baseline_us
+                graph.internal(), query_repository, ground_truth, config.anns_repeat, config.anns_threads, config.anns_k, config.eps_parameter, nullptr,
+                linear_baseline_us
             );
         }
 
@@ -186,8 +187,8 @@ void run_static_benchmark(
             auto entry_vertices = ds.load_explore_entry_vertices();
             auto explore_gt = ds.load_explore_groundtruth(config.explore_k);
             test_graph_explore(
-                graph.internal(), entry_vertices, explore_gt, true, config.explore_repeat, config.explore_k, config.explore_threads, nullptr, ds.info().explore_depth,
-                linear_baseline_us
+                graph.internal(), entry_vertices, explore_gt, true, config.explore_repeat, config.explore_k, config.explore_threads, nullptr,
+                ds.info().explore_depth, linear_baseline_us
             );
         }
     } else {

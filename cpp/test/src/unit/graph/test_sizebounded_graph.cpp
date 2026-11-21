@@ -357,8 +357,9 @@ TEST(SizeBoundedGraph, SearchBasic) {
     auto results = graph.search(std::span<const float>(query, 4), 5, 0.0f);
 
     EXPECT_GT(results.size(), 0u);
+    EXPECT_GT(results.graph_distance_count, 0u);
     if (results.size() > 0) {
-        EXPECT_GE(results.top().getIdentifier(), 0u);
+        EXPECT_GE(results.results.top().getIdentifier(), 0u);
     }
 }
 
@@ -422,10 +423,10 @@ class EfFixture {
     const std::vector<float>& feature(const uint32_t label) const { return features_[label]; }
     uint32_t label_of(const uint32_t internal_index) const { return graph_->getExternalLabel(internal_index); }
 
-    std::vector<uint32_t> labels_of(const std::vector<deglib::graph::ObjectDistance>& results) const {
+    std::vector<uint32_t> labels_of(const deglib::graph::SearchWorkspace& ws) const {
         std::vector<uint32_t> labels;
-        labels.reserve(results.size());
-        for (const auto& result : results) labels.push_back(label_of(result.getIdentifier()));
+        labels.reserve(ws.pool.size());
+        for (const auto& result : ws.pool.span()) labels.push_back(label_of(result.getIdentifier()));
         return labels;
     }
 
@@ -468,9 +469,11 @@ TEST(SizeBoundedGraph, SearchEfReturnsSortedExactTopK) {
     const auto& query = fixture.feature(3);
     const auto results = fixture.graph().search_ef(std::span<const float>(query.data(), EfFixture::dim), 10, 128);
 
-    ASSERT_EQ(results.size(), 10u);
-    for (size_t i = 1; i < results.size(); ++i) {
-        EXPECT_LE(results[i - 1].getDistance(), results[i].getDistance());
+    ASSERT_EQ(results.pool.size(), 10u);
+    EXPECT_GT(results.graph_distance_count, 0u);
+    EXPECT_GT(results.graph_hop_count, 0u);
+    for (size_t i = 1; i < results.pool.size(); ++i) {
+        EXPECT_LE(results.pool[i - 1].getDistance(), results.pool[i].getDistance());
     }
     EXPECT_EQ(fixture.labels_of(results), fixture.brute_force(query, 10));
 }
@@ -510,9 +513,9 @@ TEST(SizeBoundedGraph, SearchEfIncludeEntryReportsEntryVertices) {
 
     const auto results = fixture.graph().search_ef(std::span<const float>(query.data(), EfFixture::dim), entries, 10, 64, true);
 
-    ASSERT_FALSE(results.empty());
-    EXPECT_EQ(fixture.label_of(results[0].getIdentifier()), 0u);
-    EXPECT_FLOAT_EQ(results[0].getDistance(), 0.0f);
+    ASSERT_FALSE(results.pool.empty());
+    EXPECT_EQ(fixture.label_of(results.pool[0].getIdentifier()), 0u);
+    EXPECT_FLOAT_EQ(results.pool[0].getDistance(), 0.0f);
 }
 
 TEST(SizeBoundedGraph, SearchEfExcludeEntryOmitsEntryVertices) {
@@ -549,14 +552,15 @@ TEST(SizeBoundedGraph, SearchEfMaxDistanceComputationCountBoundsWork) {
     // A budget of one is already spent by the entry vertex itself.
     const auto starved = fixture.graph().search_ef(span, 10, 128, true, nullptr, 1);
     EXPECT_LE(starved.size(), 1u);
+    EXPECT_LE(starved.graph_distance_count, 1u);
     EXPECT_LT(starved.size(), unlimited.size());
 
     // Every reported vertex costs one distance computation, so the budget bounds the result count.
     EXPECT_LT(fixture.graph().search_ef(span, 10, 128, true, nullptr, 5).size(), unlimited.size());
 
     // Zero disables the budget, and a budget that cannot be exhausted changes nothing.
-    EXPECT_EQ(fixture.graph().search_ef(span, 10, 128, true, nullptr, 0), unlimited);
-    EXPECT_EQ(fixture.graph().search_ef(span, 10, 128, true, nullptr, EfFixture::vertex_count * 2), unlimited);
+    EXPECT_TRUE(std::ranges::equal(fixture.graph().search_ef(span, 10, 128, true, nullptr, 0).pool.span(), unlimited.pool.span()));
+    EXPECT_TRUE(std::ranges::equal(fixture.graph().search_ef(span, 10, 128, true, nullptr, EfFixture::vertex_count * 2).pool.span(), unlimited.pool.span()));
 }
 
 TEST(SizeBoundedGraph, SearchEfFilterHonoursDistanceBudget) {
@@ -737,11 +741,11 @@ TEST(SizeBoundedGraph, ExploreBasicIncludeEntry) {
 
     EXPECT_GT(results.size(), 0u);
     bool found_entry = false;
-    while (!results.empty()) {
-        if (results.top().getIdentifier() == 0u) {
+    while (!results.results.empty()) {
+        if (results.results.top().getIdentifier() == 0u) {
             found_entry = true;
         }
-        results.pop();
+        results.results.pop();
     }
     EXPECT_TRUE(found_entry);
 }
@@ -863,11 +867,11 @@ TEST(SizeBoundedGraphInternalIndicesInSearch, SearchReturnsInternalIndices) {
     std::unordered_set<uint32_t> internal_indices = {0, 1, 2, 3, 4};
     std::unordered_set<uint32_t> ext_labels(kExtLabels.begin(), kExtLabels.end());
 
-    while (!results.empty()) {
-        uint32_t id = results.top().getIdentifier();
+    while (!results.results.empty()) {
+        uint32_t id = results.results.top().getIdentifier();
         EXPECT_TRUE(internal_indices.contains(id)) << "search() result identifier " << id << " is not a valid internal index (0..N-1)";
         EXPECT_FALSE(ext_labels.contains(id)) << "search() result identifier " << id << " is an external label, not an internal index";
-        results.pop();
+        results.results.pop();
     }
 }
 
@@ -896,11 +900,11 @@ TEST(SizeBoundedGraphInternalIndicesInSearch, ExploreReturnsInternalIndices) {
     std::unordered_set<uint32_t> internal_indices = {0, 1, 2, 3, 4};
     std::unordered_set<uint32_t> ext_labels(kExtLabels.begin(), kExtLabels.end());
 
-    while (!results.empty()) {
-        uint32_t id = results.top().getIdentifier();
+    while (!results.results.empty()) {
+        uint32_t id = results.results.top().getIdentifier();
         EXPECT_TRUE(internal_indices.contains(id)) << "explore() result identifier " << id << " is not a valid internal index";
         EXPECT_FALSE(ext_labels.contains(id)) << "explore() result identifier " << id << " is an external label, not an internal index";
-        results.pop();
+        results.results.pop();
     }
 }
 
@@ -1403,8 +1407,8 @@ TEST(SizeBoundedGraph, FromGraphSearchable) {
     ASSERT_EQ(source_results.size(), copied_results.size());
 
     // Compare results (both should return the same internal indices)
-    auto src_res = source_results;
-    auto copy_res = copied_results;
+    auto src_res = source_results.results;
+    auto copy_res = copied_results.results;
     while (!src_res.empty() && !copy_res.empty()) {
         EXPECT_EQ(src_res.top().getIdentifier(), copy_res.top().getIdentifier());
         EXPECT_NEAR(src_res.top().getDistance(), copy_res.top().getDistance(), 1e-5f);
@@ -1485,11 +1489,11 @@ TEST(SizeBoundedGraph, CreateRandomGraphSearchable) {
 
     // Vertex 0 should be in the results (it's the entry point)
     bool found_vertex_0 = false;
-    while (!results.empty()) {
-        if (results.top().getIdentifier() == 0u) {
+    while (!results.results.empty()) {
+        if (results.results.top().getIdentifier() == 0u) {
             found_vertex_0 = true;
         }
-        results.pop();
+        results.results.pop();
     }
     EXPECT_TRUE(found_vertex_0) << "Vertex 0 should be in explore results";
 }

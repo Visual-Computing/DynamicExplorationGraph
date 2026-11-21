@@ -103,7 +103,7 @@ def test_readonly_graph_regression_fp32_l2():
     t_start_search = time.perf_counter()
 
     for run in range(benchmark_runs):
-        indices, _ = graph.search(query_data, eps_or_ef=search_eps, k=search_k, threads=1)
+        indices = graph.search(query_data, eps_or_ef=search_eps, k=search_k, threads=1).indices
         if run == 0:
             last_search_results = indices
 
@@ -137,9 +137,9 @@ def test_readonly_graph_regression_fp32_l2():
 
     for run in range(benchmark_runs):
         entry_indices = np.array([(run * 13 + i) % base_count for i in range(query_count)], dtype=np.uint32)
-        indices, _ = graph.explore(
+        indices = graph.explore(
             entry_indices, k=search_k, include_entry=True, max_distance_computation_count=explore_max_calcs, threads=1
-        )
+        ).indices
         if run == 0:
             last_explore_results = indices
 
@@ -221,7 +221,7 @@ def test_readonly_graph_regression_fp32_inner_product():
     t_start_search = time.perf_counter()
 
     for run in range(benchmark_runs):
-        indices, _ = graph.search(query_data, eps_or_ef=search_eps, k=search_k, threads=1)
+        indices = graph.search(query_data, eps_or_ef=search_eps, k=search_k, threads=1).indices
         if run == 0:
             last_search_results = indices
 
@@ -255,9 +255,9 @@ def test_readonly_graph_regression_fp32_inner_product():
 
     for run in range(benchmark_runs):
         entry_indices = np.array([(run * 13 + i) % base_count for i in range(query_count)], dtype=np.uint32)
-        indices, _ = graph.explore(
+        indices = graph.explore(
             entry_indices, k=search_k, include_entry=True, max_distance_computation_count=explore_max_calcs, threads=1
-        )
+        ).indices
         if run == 0:
             last_explore_results = indices
 
@@ -346,7 +346,7 @@ def test_readonly_graph_regression_evp_inner_product():
     t_start_search = time.perf_counter()
 
     for run in range(benchmark_runs):
-        indices, _ = graph.search(query_quant, eps_or_ef=search_eps, k=search_k, threads=1)
+        indices = graph.search(query_quant, eps_or_ef=search_eps, k=search_k, threads=1).indices
         if run == 0:
             last_search_results = indices
 
@@ -380,9 +380,9 @@ def test_readonly_graph_regression_evp_inner_product():
 
     for run in range(benchmark_runs):
         entry_indices = np.array([(run * 13 + i) % base_count for i in range(query_count)], dtype=np.uint32)
-        indices, _ = graph.explore(
+        indices = graph.explore(
             entry_indices, k=search_k, include_entry=True, max_distance_computation_count=explore_max_calcs, threads=1
-        )
+        ).indices
         if run == 0:
             last_explore_results = indices
 

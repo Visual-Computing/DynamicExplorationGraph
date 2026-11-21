@@ -414,9 +414,9 @@ TEST(DeglibBuilderRegression, DynamicGraph_vs_SizeBoundedGraph_100k_Benchmark) {
                     for (size_t i = 0; i < eval_k; ++i) gt_set.insert(gt_data[q][i]);
                 }
 
-                while (!result.empty()) {
-                    auto top_item = result.top();
-                    result.pop();
+                while (!result.results.empty()) {
+                    auto top_item = result.results.top();
+                    result.results.pop();
                     uint32_t ext_label = graph.getExternalLabel(top_item.getIdentifier());
                     if (gt_set.count(ext_label)) total_correct++;
                 }

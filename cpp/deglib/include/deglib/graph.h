@@ -197,49 +197,26 @@ class DynamicExplorationGraph {
      * @param eps Relative exploration expansion margin (default 0.0f). Higher values widen the exploration radius.
      * @param filter Optional predicate filter to restrict eligible vertices.
      * @param max_distance_computation_count Maximum number of distance calculations allowed (0 = unlimited).
-     * @return deglib::graph::ResultSet Max-heap of nearest ObjectDistance entries, where identifiers are external labels.
+     * @param return_distances If true (default), includes distances in the returned `SearchResults`.
+     * @param unsorted If true, leaves candidates in heap order instead of sorting ascending by distance.
+     * @return deglib::search::SearchResults Neighbor external labels, optional distances, and traversal telemetry.
      */
     template <typename T>
-    deglib::graph::ResultSet search(
+    deglib::search::SearchResults search(
         std::span<const T> query,
         const uint32_t k,
         const float eps = 0.0f,
         const deglib::search::Filter* filter = nullptr,
-        const uint32_t max_distance_computation_count = 0
+        const uint32_t max_distance_computation_count = 0,
+        const bool return_distances = true,
+        const bool unsorted = false,
+        const bool pad_missing = false
     ) const {
-        if constexpr (std::is_same_v<T, float> || std::is_same_v<T, uint16_t>) {
-            if (hasTransformations()) {
-                if (query.size() != getInputDim()) {
-                    throw std::invalid_argument(std::format("Dimension mismatch: Transformations expect {} dims, query has {}", getInputDim(), query.size()));
-                }
-                thread_local deglib::transformation::TransformationWorkspace workspace;
-                const size_t out_bytes = std::max(deglib::transformation::get_output_byte_size(transformations_), internal_graph_->getFeatureSpace().get_data_size());
-                std::byte* q_buf = workspace.get_buffer_a(out_bytes);
-
-                if constexpr (std::is_same_v<T, float>) {
-                    deglib::transformation::apply_on_query(transformations_, query, std::span<std::byte>(q_buf, out_bytes));
-                } else {
-                    float* f_query = workspace.get_float_buffer(query.size());
-                    deglib::distances::fp16::fp16_to_floats(query.data(), f_query, query.size());
-                    deglib::transformation::apply_on_query(transformations_, std::span<const float>(f_query, query.size()), std::span<std::byte>(q_buf, out_bytes));
-                }
-
-                std::span<const std::byte> single_q(q_buf, out_bytes);
-                auto res = internal_graph_->search(single_q, k, eps, filter, max_distance_computation_count);
-                for (auto& od : res) {
-                    uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
-                    od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
-                }
-                return res;
-            }
-        }
-
-        auto res = internal_graph_->search(query, k, eps, filter, max_distance_computation_count);
-        for (auto& od : res) {
-            uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
-            od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
-        }
-        return res;
+        thread_local deglib::graph::SearchWorkspace search_ws;
+        run_with_prepared_query(query, [&](auto prepared_q) {
+            internal_graph_->search(search_ws, prepared_q, k, eps, filter, max_distance_computation_count);
+        });
+        return drain_to_single_results(search_ws, k, return_distances, unsorted, pad_missing);
     }
 
     /**
@@ -255,54 +232,29 @@ class DynamicExplorationGraph {
      * @param include_entry If true, the entry vertex itself is eligible in the result set (default true).
      * @param filter Optional predicate filter to restrict eligible vertices.
      * @param max_distance_computation_count Maximum number of distance calculations allowed (0 = unlimited).
-     * @return std::vector<deglib::graph::ObjectDistance> Vector of nearest neighbors sorted ascending by distance (external labels).
+     * @param return_distances If true (default), includes distances in the returned `SearchResults`.
+     * @return deglib::search::SearchResults Neighbor external labels, optional distances, and traversal telemetry.
      */
     template <typename T>
-    std::vector<deglib::graph::ObjectDistance> search_ef(
+    deglib::search::SearchResults search_ef(
         std::span<const T> query,
         const uint32_t k,
         const uint32_t ef,
         const bool include_entry = true,
         const deglib::search::Filter* filter = nullptr,
-        const uint32_t max_distance_computation_count = 0
+        const uint32_t max_distance_computation_count = 0,
+        const bool return_distances = true,
+        const bool pad_missing = false
     ) const {
-        if constexpr (std::is_same_v<T, float> || std::is_same_v<T, uint16_t>) {
-            if (hasTransformations()) {
-                if (query.size() != getInputDim()) {
-                    throw std::invalid_argument(std::format("Dimension mismatch: Transformations expect {} dims, query has {}", getInputDim(), query.size()));
-                }
-                thread_local deglib::transformation::TransformationWorkspace workspace;
-                const size_t out_bytes = std::max(deglib::transformation::get_output_byte_size(transformations_), internal_graph_->getFeatureSpace().get_data_size());
-                std::byte* q_buf = workspace.get_buffer_a(out_bytes);
-
-                if constexpr (std::is_same_v<T, float>) {
-                    deglib::transformation::apply_on_query(transformations_, query, std::span<std::byte>(q_buf, out_bytes));
-                } else {
-                    float* f_query = workspace.get_float_buffer(query.size());
-                    deglib::distances::fp16::fp16_to_floats(query.data(), f_query, query.size());
-                    deglib::transformation::apply_on_query(transformations_, std::span<const float>(f_query, query.size()), std::span<std::byte>(q_buf, out_bytes));
-                }
-
-                std::span<const std::byte> single_q(q_buf, out_bytes);
-                auto res = internal_graph_->search_ef(single_q, k, ef, include_entry, filter, max_distance_computation_count);
-                for (auto& od : res) {
-                    uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
-                    od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
-                }
-                return res;
-            }
-        }
-
-        auto res = internal_graph_->search_ef(query, k, ef, include_entry, filter, max_distance_computation_count);
-        for (auto& od : res) {
-            uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
-            od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
-        }
-        return res;
+        thread_local deglib::graph::SearchWorkspace search_ws;
+        run_with_prepared_query(query, [&](auto prepared_q) {
+            internal_graph_->search_ef(search_ws, prepared_q, k, ef, include_entry, filter, max_distance_computation_count);
+        });
+        return drain_to_single_results(search_ws, k, return_distances, /*unsorted=*/false, pad_missing);
     }
 
     /**
-     * @brief Batch nearest neighbor search with dynamic exploration radius (eps), returning a vector of ResultSets.
+     * @brief Batch nearest neighbor search with dynamic exploration radius (eps), returning `SearchResults`.
      *
      * Processes count queries in parallel using worker threads. If feature transformations are configured,
      * queries are transformed in parallel across worker threads with zero per-query heap allocations.
@@ -314,89 +266,38 @@ class DynamicExplorationGraph {
      * @param eps Relative exploration expansion margin (default 0.0f).
      * @param filter Optional predicate filter to restrict eligible vertices.
      * @param max_distance_computation_count Maximum number of distance calculations per query (0 = unlimited).
-     * @param threads Number of worker threads for parallel batch execution (1 = sequential).
-     * @return std::vector<deglib::graph::ResultSet> Vector of size count, each containing a max-heap of nearest ObjectDistance entries (external labels).
+     * @param threads Number of worker threads for parallel batch execution (0 = hardware concurrency, 1 = sequential).
+     * @param return_distances If true (default), includes distances in `SearchResults`.
+     * @param unsorted If true, leaves candidates in heap order instead of sorting ascending.
+     * @return deglib::search::SearchResults Flat batch indices, optional distances, and aggregated telemetry.
      * @throws std::invalid_argument if queries.size() != count * stride.
      */
     template <typename T>
-    std::vector<deglib::graph::ResultSet> search_batch(
+    deglib::search::SearchResults search_batch(
         std::span<const T> queries,
         size_t count,
         const uint32_t k,
         const float eps = 0.0f,
         const deglib::search::Filter* filter = nullptr,
         const uint32_t max_distance_computation_count = 0,
-        size_t threads = 1
+        size_t threads = 1,
+        const bool return_distances = true,
+        const bool unsorted = false
     ) const {
-        if (count == 0) return {};
-        const size_t in_stride = hasTransformations() ? getInputDim() : (internal_graph_->getFeatureSpace().get_data_size() / sizeof(T));
-        if (queries.size() != count * in_stride) {
-            throw std::invalid_argument(
-                std::format("Batch query size mismatch: expected {} * {} = {}, got {}", count, in_stride, count * in_stride, queries.size())
-            );
+        deglib::search::SearchResults res;
+        res.n_queries = count;
+        res.k = k;
+        res.is_batch = true;
+        res.with_distances = return_distances;
+        res.indices.resize(count * k);
+        if (return_distances) {
+            res.distances.resize(count * k);
         }
-
-        std::vector<deglib::graph::ResultSet> results(count);
-
-        if constexpr (std::is_same_v<T, float> || std::is_same_v<T, uint16_t>) {
-            if (hasTransformations()) {
-                const size_t out_stride = std::max(deglib::transformation::get_output_byte_size(transformations_), internal_graph_->getFeatureSpace().get_data_size());
-
-                deglib::concurrent::parallel_batch_for(
-                    0, count, threads,
-                    [&](size_t begin, size_t end, size_t) {
-                        alignas(64) std::byte stack_buf[512];
-                        std::byte* q_buf = stack_buf;
-                        if (out_stride > sizeof(stack_buf)) {
-                            thread_local deglib::transformation::TransformationWorkspace ws;
-                            q_buf = ws.get_buffer_a(out_stride);
-                        }
-
-                        for (size_t i = begin; i < end; ++i) {
-                            if constexpr (std::is_same_v<T, float>) {
-                                deglib::transformation::apply_on_query(transformations_, queries.subspan(i * in_stride, in_stride), std::span<std::byte>(q_buf, out_stride));
-                            } else {
-                                alignas(64) float stack_f16_buf[256];
-                                float* f16_buf = stack_f16_buf;
-                                if (in_stride > sizeof(stack_f16_buf) / sizeof(float)) {
-                                    thread_local deglib::transformation::TransformationWorkspace ws;
-                                    f16_buf = ws.get_float_buffer(in_stride);
-                                }
-                                deglib::distances::fp16::fp16_to_floats(queries.data() + i * in_stride, f16_buf, in_stride);
-                                deglib::transformation::apply_on_query(transformations_, std::span<const float>(f16_buf, in_stride), std::span<std::byte>(q_buf, out_stride));
-                            }
-
-                            std::span<const std::byte> single_q(q_buf, out_stride);
-                            auto res = internal_graph_->search(single_q, k, eps, filter, max_distance_computation_count);
-                            for (auto& od : res) {
-                                uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
-                                od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
-                            }
-                            results[i] = std::move(res);
-                        }
-                    },
-                    16
-                );
-                return results;
-            }
-        }
-
-        deglib::concurrent::parallel_batch_for(
-            0, count, threads,
-            [&](size_t begin, size_t end, size_t) {
-                for (size_t i = begin; i < end; ++i) {
-                    std::span<const T> single_q(queries.data() + i * in_stride, in_stride);
-                    auto res = internal_graph_->search(single_q, k, eps, filter, max_distance_computation_count);
-                    for (auto& od : res) {
-                        uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
-                        od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
-                    }
-                    results[i] = std::move(res);
-                }
-            },
-            16
+        execute_search_batch_impl<T, false>(
+            queries, count, k, eps, 0, std::span<uint32_t>(res.indices), return_distances ? std::span<float>(res.distances) : std::span<float>{}, true, filter,
+            max_distance_computation_count, threads, unsorted, res.graph_distance_count, res.graph_hop_count
         );
-        return results;
+        return res;
     }
 
     /**
@@ -414,14 +315,10 @@ class DynamicExplorationGraph {
      * @param eps Relative exploration expansion margin (default 0.0f).
      * @param filter Optional predicate filter to restrict eligible vertices.
      * @param max_distance_computation_count Maximum number of distance calculations per query (0 = unlimited).
-     * @param threads Number of worker threads for parallel batch execution (1 = sequential).
+     * @param threads Number of worker threads for parallel batch execution (0 = hardware concurrency, 1 = sequential).
      * @param unsorted If false (default), results per query are sorted ascending by distance (nearest first).
      *                 If true, results remain in heap order for maximum throughput.
      * @throws std::invalid_argument if queries, out_indices, or out_distances do not meet size requirements.
-     *
-     * @note If fewer than k results are found for a query, the remaining slots in that query's block
-     *       are padded with std::numeric_limits<uint32_t>::max() in out_indices and
-     *       std::numeric_limits<float>::quiet_NaN() in out_distances.
      */
     template <typename T>
     void search_batch(
@@ -436,6 +333,327 @@ class DynamicExplorationGraph {
         size_t threads = 1,
         bool unsorted = false
     ) const {
+        uint64_t dummy_dists = 0;
+        uint64_t dummy_hops = 0;
+        execute_search_batch_impl<T, false>(
+            queries, count, k, eps, 0, out_indices, out_distances, true, filter, max_distance_computation_count, threads, unsorted, dummy_dists, dummy_hops
+        );
+    }
+
+    /**
+     * @brief High-performance batch search into pre-allocated flat output buffers using fixed beam width (ef).
+     *
+     * @copydetails search_batch(std::span<const T>, size_t, uint32_t, std::span<uint32_t>, std::span<float>, float, const deglib::search::Filter*, uint32_t,
+     * size_t, bool) const
+     */
+    template <typename T>
+    void search_batch_ef(
+        std::span<const T> queries,
+        size_t count,
+        const uint32_t k,
+        const uint32_t ef,
+        std::span<uint32_t> out_indices,
+        std::span<float> out_distances = {},
+        const bool include_entry = true,
+        const deglib::search::Filter* filter = nullptr,
+        const uint32_t max_distance_computation_count = 0,
+        size_t threads = 1,
+        bool unsorted = false
+    ) const {
+        uint64_t dummy_dists = 0;
+        uint64_t dummy_hops = 0;
+        execute_search_batch_impl<T, true>(
+            queries, count, k, 0.0f, ef, out_indices, out_distances, include_entry, filter, max_distance_computation_count, threads, unsorted, dummy_dists,
+            dummy_hops
+        );
+    }
+
+    /**
+     * @brief Batch nearest neighbor search with fixed beam width (ef), returning `SearchResults`.
+     *
+     * @tparam T Element type of the query vectors (e.g., float, uint16_t for FP16, or std::byte).
+     * @param queries Contiguous flat span containing all query vectors concatenated (size = count * stride).
+     * @param count Number of query vectors in the batch.
+     * @param k The number of nearest neighbors to return per query.
+     * @param ef Fixed candidate pool / beam width per query.
+     * @param include_entry Whether entry vertex candidates should be eligible in results (default true).
+     * @param filter Optional predicate filter to restrict eligible vertices.
+     * @param max_distance_computation_count Maximum number of distance calculations per query (0 = unlimited).
+     * @param threads Number of worker threads for parallel batch execution (0 = hardware concurrency, 1 = sequential).
+     * @param return_distances If true (default), includes distances in `SearchResults`.
+     * @param unsorted If false (default), results are sorted ascending by distance.
+     * @return deglib::search::SearchResults Flat batch indices, optional distances, and aggregated telemetry.
+     */
+    template <typename T>
+    deglib::search::SearchResults search_batch_ef(
+        std::span<const T> queries,
+        size_t count,
+        const uint32_t k,
+        const uint32_t ef,
+        const bool include_entry = true,
+        const deglib::search::Filter* filter = nullptr,
+        const uint32_t max_distance_computation_count = 0,
+        size_t threads = 1,
+        const bool return_distances = true,
+        const bool unsorted = false
+    ) const {
+        deglib::search::SearchResults res;
+        res.n_queries = count;
+        res.k = k;
+        res.is_batch = true;
+        res.with_distances = return_distances;
+        res.indices.resize(count * k);
+        if (return_distances) {
+            res.distances.resize(count * k);
+        }
+        execute_search_batch_impl<T, true>(
+            queries, count, k, 0.0f, ef, std::span<uint32_t>(res.indices), return_distances ? std::span<float>(res.distances) : std::span<float>{},
+            include_entry, filter, max_distance_computation_count, threads, unsorted, res.graph_distance_count, res.graph_hop_count
+        );
+        return res;
+    }
+
+    /**
+     * @brief Explores the graph starting at a specific stored vertex using dynamic exploration radius (eps).
+     *
+     * Traverses the graph from the given entry vertex using its stored feature vector as the query.
+     * Maps the entry external label to its internal index and maps all result IDs back to external labels.
+     *
+     * @param entry_external_label The external label of the vertex to start exploration from.
+     * @param k The number of nearest neighbors to return.
+     * @param max_distance_computation_count Maximum number of distance calculations allowed (0 = unlimited).
+     * @param eps Relative exploration expansion margin (default 0.0f).
+     * @param include_entry If true, the entry vertex itself is eligible in the result set (default true).
+     * @param filter Optional predicate filter to restrict eligible vertices.
+     * @param return_distances If true (default), includes distances in `SearchResults`.
+     * @param unsorted If true, leaves candidates in heap order instead of sorting ascending.
+     * @return deglib::search::SearchResults Nearest neighbor external labels, optional distances, and traversal telemetry.
+     */
+    deglib::search::SearchResults explore(
+        const uint32_t entry_external_label,
+        const uint32_t k,
+        const uint32_t max_distance_computation_count = 0,
+        const float eps = 0.0f,
+        const bool include_entry = true,
+        const deglib::search::Filter* filter = nullptr,
+        const bool return_distances = true,
+        const bool unsorted = false
+    ) const {
+        const uint32_t internal_entry = internal_graph_->getInternalIndex(entry_external_label);
+        thread_local deglib::graph::SearchWorkspace search_ws;
+        internal_graph_->explore(search_ws, internal_entry, k, max_distance_computation_count, eps, include_entry, filter);
+        return drain_to_single_results(search_ws, k, return_distances, unsorted);
+    }
+
+    /**
+     * @brief Explores the graph starting at a specific stored vertex using fixed beam width (ef).
+     *
+     * @param entry_external_label The external label of the vertex to start exploration from.
+     * @param k The number of nearest neighbors to return.
+     * @param ef Fixed candidate pool / beam width (clamped to at least k).
+     * @param max_distance_computation_count Maximum number of distance calculations allowed (0 = unlimited).
+     * @param include_entry If true, the entry vertex itself is eligible in the result set (default true).
+     * @param filter Optional predicate filter to restrict eligible vertices.
+     * @param return_distances If true (default), includes distances in `SearchResults`.
+     * @return deglib::search::SearchResults Nearest neighbor external labels, optional distances, and traversal telemetry.
+     */
+    deglib::search::SearchResults explore_ef(
+        const uint32_t entry_external_label,
+        const uint32_t k,
+        const uint32_t ef,
+        const uint32_t max_distance_computation_count = 0,
+        const bool include_entry = true,
+        const deglib::search::Filter* filter = nullptr,
+        const bool return_distances = true
+    ) const {
+        const uint32_t internal_entry = internal_graph_->getInternalIndex(entry_external_label);
+        thread_local deglib::graph::SearchWorkspace search_ws;
+        internal_graph_->explore_ef(search_ws, internal_entry, k, ef, max_distance_computation_count, include_entry, filter);
+        return drain_to_single_results(search_ws, k, return_distances, /*unsorted=*/false);
+    }
+
+    /**
+     * @brief Batch exploration into pre-allocated flat output buffers using dynamic exploration radius (eps).
+     */
+    void explore_batch(
+        std::span<const uint32_t> entry_external_labels,
+        const uint32_t k,
+        std::span<uint32_t> out_indices,
+        std::span<float> out_distances = {},
+        const uint32_t max_distance_computation_count = 0,
+        const float eps = 0.0f,
+        const bool include_entry = true,
+        const deglib::search::Filter* filter = nullptr,
+        size_t threads = 1,
+        bool unsorted = false
+    ) const {
+        uint64_t dummy_dists = 0;
+        uint64_t dummy_hops = 0;
+        execute_explore_batch_impl<false>(
+            entry_external_labels, k, eps, 0, out_indices, out_distances, max_distance_computation_count, include_entry, filter, threads, unsorted, dummy_dists,
+            dummy_hops
+        );
+    }
+
+    /**
+     * @brief Batch exploration returning `SearchResults` with dynamic exploration radius (eps).
+     */
+    deglib::search::SearchResults explore_batch(
+        std::span<const uint32_t> entry_external_labels,
+        const uint32_t k,
+        const uint32_t max_distance_computation_count = 0,
+        const float eps = 0.0f,
+        const bool include_entry = true,
+        const deglib::search::Filter* filter = nullptr,
+        size_t threads = 1,
+        bool return_distances = true,
+        bool unsorted = false
+    ) const {
+        const size_t count = entry_external_labels.size();
+        deglib::search::SearchResults res;
+        res.n_queries = count;
+        res.k = k;
+        res.is_batch = true;
+        res.with_distances = return_distances;
+        res.indices.resize(count * k);
+        if (return_distances) {
+            res.distances.resize(count * k);
+        }
+        execute_explore_batch_impl<false>(
+            entry_external_labels, k, eps, 0, std::span<uint32_t>(res.indices), return_distances ? std::span<float>(res.distances) : std::span<float>{},
+            max_distance_computation_count, include_entry, filter, threads, unsorted, res.graph_distance_count, res.graph_hop_count
+        );
+        return res;
+    }
+
+    /**
+     * @brief Batch exploration into pre-allocated flat output buffers using fixed beam width (ef).
+     */
+    void explore_batch_ef(
+        std::span<const uint32_t> entry_external_labels,
+        const uint32_t k,
+        const uint32_t ef,
+        std::span<uint32_t> out_indices,
+        std::span<float> out_distances = {},
+        const uint32_t max_distance_computation_count = 0,
+        const bool include_entry = true,
+        const deglib::search::Filter* filter = nullptr,
+        size_t threads = 1,
+        bool unsorted = false
+    ) const {
+        uint64_t dummy_dists = 0;
+        uint64_t dummy_hops = 0;
+        execute_explore_batch_impl<true>(
+            entry_external_labels, k, 0.0f, ef, out_indices, out_distances, max_distance_computation_count, include_entry, filter, threads, unsorted,
+            dummy_dists, dummy_hops
+        );
+    }
+
+    /**
+     * @brief Batch exploration returning `SearchResults` with fixed beam width (ef).
+     */
+    deglib::search::SearchResults explore_batch_ef(
+        std::span<const uint32_t> entry_external_labels,
+        const uint32_t k,
+        const uint32_t ef,
+        const uint32_t max_distance_computation_count = 0,
+        const bool include_entry = true,
+        const deglib::search::Filter* filter = nullptr,
+        size_t threads = 1,
+        bool return_distances = true,
+        bool unsorted = false
+    ) const {
+        const size_t count = entry_external_labels.size();
+        deglib::search::SearchResults res;
+        res.n_queries = count;
+        res.k = k;
+        res.is_batch = true;
+        res.with_distances = return_distances;
+        res.indices.resize(count * k);
+        if (return_distances) {
+            res.distances.resize(count * k);
+        }
+        execute_explore_batch_impl<true>(
+            entry_external_labels, k, 0.0f, ef, std::span<uint32_t>(res.indices), return_distances ? std::span<float>(res.distances) : std::span<float>{},
+            max_distance_computation_count, include_entry, filter, threads, unsorted, res.graph_distance_count, res.graph_hop_count
+        );
+        return res;
+    }
+
+  private:
+    template <typename T, typename Fn>
+    void run_with_prepared_query(std::span<const T> query, Fn&& fn) const {
+        if constexpr (std::is_same_v<T, float> || std::is_same_v<T, uint16_t>) {
+            if (hasTransformations()) {
+                if (query.size() != getInputDim()) {
+                    throw std::invalid_argument(std::format("Dimension mismatch: Transformations expect {} dims, query has {}", getInputDim(), query.size()));
+                }
+                thread_local deglib::transformation::TransformationWorkspace workspace;
+                const size_t out_bytes =
+                    std::max(deglib::transformation::get_output_byte_size(transformations_), internal_graph_->getFeatureSpace().get_data_size());
+                std::byte* q_buf = workspace.get_buffer_a(out_bytes);
+
+                if constexpr (std::is_same_v<T, float>) {
+                    deglib::transformation::apply_on_query(transformations_, query, std::span<std::byte>(q_buf, out_bytes));
+                } else {
+                    float* f_query = workspace.get_float_buffer(query.size());
+                    deglib::distances::fp16::fp16_to_floats(query.data(), f_query, query.size());
+                    deglib::transformation::apply_on_query(
+                        transformations_, std::span<const float>(f_query, query.size()), std::span<std::byte>(q_buf, out_bytes)
+                    );
+                }
+
+                fn(std::span<const std::byte>(q_buf, out_bytes));
+                return;
+            }
+        }
+        fn(query);
+    }
+
+    deglib::search::SearchResults
+    drain_to_single_results(deglib::graph::SearchWorkspace& ws, uint32_t k, bool return_distances, bool unsorted, bool pad_missing = false) const {
+        deglib::search::SearchResults res;
+        res.n_queries = 1;
+        res.k = k;
+        res.is_batch = false;
+        res.with_distances = return_distances;
+        res.graph_distance_count = ws.graph_distance_count;
+        res.graph_hop_count = ws.graph_hop_count;
+
+        const uint32_t avail = static_cast<uint32_t>(ws.result_count(k));
+        if (avail == 0 && !pad_missing) return res;
+
+        const uint32_t alloc_count = pad_missing ? k : avail;
+        res.indices.resize(alloc_count);
+        if (return_distances) res.distances.resize(alloc_count);
+        const uint32_t written =
+            ws.drain_into(*internal_graph_, k, res.indices.data(), return_distances ? res.distances.data() : nullptr, unsorted, pad_missing);
+        if (!pad_missing) {
+            res.indices.resize(written);
+            if (return_distances) res.distances.resize(written);
+        }
+        return res;
+    }
+
+    template <typename T, bool UseEf>
+    void execute_search_batch_impl(
+        std::span<const T> queries,
+        size_t count,
+        const uint32_t k,
+        const float eps,
+        const uint32_t ef,
+        std::span<uint32_t> out_indices,
+        std::span<float> out_distances,
+        const bool include_entry,
+        const deglib::search::Filter* filter,
+        const uint32_t max_distance_computation_count,
+        size_t threads,
+        bool unsorted,
+        uint64_t& out_graph_distance_count,
+        uint64_t& out_graph_hop_count
+    ) const {
+        out_graph_distance_count = 0;
+        out_graph_hop_count = 0;
         if (count == 0) return;
         if (out_indices.size() < count * k) {
             throw std::invalid_argument(
@@ -454,415 +672,117 @@ class DynamicExplorationGraph {
                 std::format("Batch query size mismatch: expected {} * {} = {}, got {}", count, in_stride, count * in_stride, queries.size())
             );
         }
+        if (k == 0) return;
 
-        auto process_results = [&](size_t q, deglib::graph::ResultSet& res) {
-            while (res.size() > k) {
-                res.pop();
-            }
-            const size_t count_res = res.size();
-            const size_t base_offset = q * k;
-            if (unsorted) {
-                for (size_t idx = 0; idx < count_res; ++idx) {
-                    out_indices[base_offset + idx] = internal_graph_->getExternalLabel(res[idx].getIdentifier());
-                    if (return_distances) {
-                        out_distances[base_offset + idx] = res[idx].getDistance();
-                    }
+        const size_t resolved_threads = (threads == 0) ? std::max<size_t>(1, std::thread::hardware_concurrency()) : threads;
+        const size_t actual_threads = std::min(resolved_threads, count);
+
+        deglib::search::detail::ThreadSearchCounters single_counter{};
+        std::vector<deglib::search::detail::ThreadSearchCounters> heap_counters;
+        deglib::search::detail::ThreadSearchCounters* counters_ptr = &single_counter;
+        if (actual_threads > 1) {
+            heap_counters.resize(actual_threads);
+            counters_ptr = heap_counters.data();
+        }
+
+        const bool use_xfrms = (std::is_same_v<T, float> || std::is_same_v<T, uint16_t>) && hasTransformations();
+        const size_t out_stride =
+            use_xfrms ? std::max(deglib::transformation::get_output_byte_size(transformations_), internal_graph_->getFeatureSpace().get_data_size()) : 0;
+
+        deglib::concurrent::parallel_batch_for(
+            0, count, actual_threads,
+            [&](size_t begin, size_t end, size_t thread_id) {
+                thread_local deglib::graph::SearchWorkspace search_ws;
+                alignas(64) std::byte stack_buf[512];
+                std::byte* q_buf = stack_buf;
+                if (use_xfrms && out_stride > sizeof(stack_buf)) {
+                    thread_local deglib::transformation::TransformationWorkspace xfrm_ws;
+                    q_buf = xfrm_ws.get_buffer_a(out_stride);
                 }
-            } else {
-                for (size_t i = count_res; i > 0; --i) {
-                    auto next_result = res.top();
-                    out_indices[base_offset + i - 1] = internal_graph_->getExternalLabel(next_result.getIdentifier());
-                    if (return_distances) {
-                        out_distances[base_offset + i - 1] = next_result.getDistance();
-                    }
-                    res.pop();
-                }
-            }
-            for (size_t idx = count_res; idx < k; ++idx) {
-                out_indices[base_offset + idx] = std::numeric_limits<uint32_t>::max();
-                if (return_distances) {
-                    out_distances[base_offset + idx] = std::numeric_limits<float>::quiet_NaN();
-                }
-            }
-        };
 
-        if constexpr (std::is_same_v<T, float> || std::is_same_v<T, uint16_t>) {
-            if (hasTransformations()) {
-                const size_t out_stride = std::max(deglib::transformation::get_output_byte_size(transformations_), internal_graph_->getFeatureSpace().get_data_size());
-
-                deglib::concurrent::parallel_batch_for(
-                    0, count, threads,
-                    [&](size_t begin, size_t end, size_t) {
-                        alignas(64) std::byte stack_buf[512];
-                        std::byte* q_buf = stack_buf;
-                        if (out_stride > sizeof(stack_buf)) {
-                            thread_local deglib::transformation::TransformationWorkspace ws;
-                            q_buf = ws.get_buffer_a(out_stride);
-                        }
-
-                        for (size_t q = begin; q < end; ++q) {
+                uint64_t local_dists = 0;
+                uint64_t local_hops = 0;
+                for (size_t q = begin; q < end; ++q) {
+                    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, uint16_t>) {
+                        if (use_xfrms) {
                             if constexpr (std::is_same_v<T, float>) {
-                                deglib::transformation::apply_on_query(transformations_, queries.subspan(q * in_stride, in_stride), std::span<std::byte>(q_buf, out_stride));
+                                deglib::transformation::apply_on_query(
+                                    transformations_, queries.subspan(q * in_stride, in_stride), std::span<std::byte>(q_buf, out_stride)
+                                );
                             } else {
                                 alignas(64) float stack_f16_buf[256];
                                 float* f16_buf = stack_f16_buf;
                                 if (in_stride > sizeof(stack_f16_buf) / sizeof(float)) {
-                                    thread_local deglib::transformation::TransformationWorkspace ws;
-                                    f16_buf = ws.get_float_buffer(in_stride);
+                                    thread_local deglib::transformation::TransformationWorkspace xfrm_ws;
+                                    f16_buf = xfrm_ws.get_float_buffer(in_stride);
                                 }
                                 deglib::distances::fp16::fp16_to_floats(queries.data() + q * in_stride, f16_buf, in_stride);
-                                deglib::transformation::apply_on_query(transformations_, std::span<const float>(f16_buf, in_stride), std::span<std::byte>(q_buf, out_stride));
+                                deglib::transformation::apply_on_query(
+                                    transformations_, std::span<const float>(f16_buf, in_stride), std::span<std::byte>(q_buf, out_stride)
+                                );
                             }
 
                             std::span<const std::byte> single_q(q_buf, out_stride);
-                            auto res = internal_graph_->search(single_q, k, eps, filter, max_distance_computation_count);
-                            process_results(q, res);
-                        }
-                    },
-                    16
-                );
-                return;
-            }
-        }
-
-        deglib::concurrent::parallel_batch_for(
-            0, count, threads,
-            [&](size_t begin, size_t end, size_t) {
-                for (size_t q = begin; q < end; ++q) {
-                    std::span<const T> single_q(queries.data() + q * in_stride, in_stride);
-                    auto res = internal_graph_->search(single_q, k, eps, filter, max_distance_computation_count);
-                    process_results(q, res);
-                }
-            },
-            16
-        );
-    }
-
-    /**
-     * @brief High-performance batch search into pre-allocated flat output buffers using fixed beam width (ef).
-     *
-     * Avoids dynamic memory allocations per query. Outputs external labels and optionally float distances directly
-     * into caller-provided spans. Results per query are sorted in ascending distance order.
-     *
-     * @tparam T Element type of the query vectors (e.g., float, uint16_t for FP16, or std::byte).
-     * @param queries Contiguous flat span containing all query vectors concatenated (size = count * stride).
-     * @param count Number of query vectors in the batch.
-     * @param k The number of nearest neighbors to return per query.
-     * @param ef Fixed candidate pool / beam width per query.
-     * @param out_indices Pre-allocated destination span of size >= count * k to receive external labels.
-     * @param out_distances Optional destination span of size >= count * k to receive distances. If empty, distances are omitted.
-     * @param include_entry Whether entry vertex candidates should be eligible in results (default true).
-     * @param filter Optional predicate filter to restrict eligible vertices.
-     * @param max_distance_computation_count Maximum number of distance calculations per query (0 = unlimited).
-     * @param threads Number of worker threads for parallel batch execution (1 = sequential).
-     * @param unsorted If false (default), results per query are ordered nearest first.
-     * @throws std::invalid_argument if queries, out_indices, or out_distances do not meet size requirements.
-     *
-     * @note If fewer than k results are found for a query, unfilled slots are padded with
-     *       std::numeric_limits<uint32_t>::max() in out_indices and
-     *       std::numeric_limits<float>::quiet_NaN() in out_distances.
-     */
-    template <typename T>
-    void search_batch_ef(
-        std::span<const T> queries,
-        size_t count,
-        const uint32_t k,
-        const uint32_t ef,
-        std::span<uint32_t> out_indices,
-        std::span<float> out_distances = {},
-        const bool include_entry = true,
-        const deglib::search::Filter* filter = nullptr,
-        const uint32_t max_distance_computation_count = 0,
-        size_t threads = 1,
-        bool unsorted = false
-    ) const {
-        if (count == 0) return;
-        if (out_indices.size() < count * k) {
-            throw std::invalid_argument(
-                std::format("DynamicExplorationGraph::search_batch_ef: out_indices size ({}) is smaller than count * k ({})", out_indices.size(), count * k)
-            );
-        }
-        const bool return_distances = !out_distances.empty();
-        if (return_distances && out_distances.size() < count * k) {
-            throw std::invalid_argument(
-                std::format("DynamicExplorationGraph::search_batch_ef: out_distances size ({}) is smaller than count * k ({})", out_distances.size(), count * k)
-            );
-        }
-        const size_t in_stride = hasTransformations() ? getInputDim() : (internal_graph_->getFeatureSpace().get_data_size() / sizeof(T));
-        if (queries.size() != count * in_stride) {
-            throw std::invalid_argument(
-                std::format("Batch query size mismatch: expected {} * {} = {}, got {}", count, in_stride, count * in_stride, queries.size())
-            );
-        }
-
-        auto process_results = [&](size_t q, const std::vector<deglib::graph::ObjectDistance>& res) {
-            const size_t count_res = std::min(static_cast<size_t>(k), res.size());
-            const size_t base_offset = q * k;
-            for (size_t idx = 0; idx < count_res; ++idx) {
-                out_indices[base_offset + idx] = internal_graph_->getExternalLabel(res[idx].getIdentifier());
-                if (return_distances) {
-                    out_distances[base_offset + idx] = res[idx].getDistance();
-                }
-            }
-            for (size_t idx = count_res; idx < k; ++idx) {
-                out_indices[base_offset + idx] = std::numeric_limits<uint32_t>::max();
-                if (return_distances) {
-                    out_distances[base_offset + idx] = std::numeric_limits<float>::quiet_NaN();
-                }
-            }
-        };
-
-        if constexpr (std::is_same_v<T, float> || std::is_same_v<T, uint16_t>) {
-            if (hasTransformations()) {
-                const size_t out_stride = std::max(deglib::transformation::get_output_byte_size(transformations_), internal_graph_->getFeatureSpace().get_data_size());
-
-                deglib::concurrent::parallel_batch_for(
-                    0, count, threads,
-                    [&](size_t begin, size_t end, size_t) {
-                        alignas(64) std::byte stack_buf[512];
-                        std::byte* q_buf = stack_buf;
-                        if (out_stride > sizeof(stack_buf)) {
-                            thread_local deglib::transformation::TransformationWorkspace ws;
-                            q_buf = ws.get_buffer_a(out_stride);
-                        }
-
-                        for (size_t q = begin; q < end; ++q) {
-                            if constexpr (std::is_same_v<T, float>) {
-                                deglib::transformation::apply_on_query(transformations_, queries.subspan(q * in_stride, in_stride), std::span<std::byte>(q_buf, out_stride));
+                            if constexpr (UseEf) {
+                                internal_graph_->search_ef(search_ws, single_q, k, ef, include_entry, filter, max_distance_computation_count);
                             } else {
-                                alignas(64) float stack_f16_buf[256];
-                                float* f16_buf = stack_f16_buf;
-                                if (in_stride > sizeof(stack_f16_buf) / sizeof(float)) {
-                                    thread_local deglib::transformation::TransformationWorkspace ws;
-                                    f16_buf = ws.get_float_buffer(in_stride);
-                                }
-                                deglib::distances::fp16::fp16_to_floats(queries.data() + q * in_stride, f16_buf, in_stride);
-                                deglib::transformation::apply_on_query(transformations_, std::span<const float>(f16_buf, in_stride), std::span<std::byte>(q_buf, out_stride));
+                                internal_graph_->search(search_ws, single_q, k, eps, filter, max_distance_computation_count);
                             }
-
-                            std::span<const std::byte> single_q(q_buf, out_stride);
-                            auto res = internal_graph_->search_ef(single_q, k, ef, include_entry, filter, max_distance_computation_count);
-                            process_results(q, res);
-                        }
-                    },
-                    16
-                );
-                return;
-            }
-        }
-
-        deglib::concurrent::parallel_batch_for(
-            0, count, threads,
-            [&](size_t begin, size_t end, size_t) {
-                for (size_t q = begin; q < end; ++q) {
-                    std::span<const T> single_q(queries.data() + q * in_stride, in_stride);
-                    auto res = internal_graph_->search_ef(single_q, k, ef, include_entry, filter, max_distance_computation_count);
-                    process_results(q, res);
-                }
-            },
-            16
-        );
-    }
-
-    /**
-     * @brief Batch nearest neighbor search with fixed beam width (ef), returning a vector of result vectors.
-     *
-     * Processes count queries in parallel across worker threads.
-     *
-     * @tparam T Element type of the query vectors (e.g., float, uint16_t for FP16, or std::byte).
-     * @param queries Contiguous flat span containing all query vectors concatenated (size = count * stride).
-     * @param count Number of query vectors in the batch.
-     * @param k The number of nearest neighbors to return per query.
-     * @param ef Fixed candidate pool / beam width per query.
-     * @param include_entry Whether entry vertex candidates should be eligible in results (default true).
-     * @param filter Optional predicate filter to restrict eligible vertices.
-     * @param max_distance_computation_count Maximum number of distance calculations per query (0 = unlimited).
-     * @param threads Number of worker threads for parallel batch execution (1 = sequential).
-     * @return std::vector<std::vector<deglib::graph::ObjectDistance>> A vector of size count, each containing nearest neighbors sorted by distance with
-     * external labels.
-     * @throws std::invalid_argument if queries.size() does not match count * expected_dimension.
-     */
-    template <typename T>
-    std::vector<std::vector<deglib::graph::ObjectDistance>> search_batch_ef(
-        std::span<const T> queries,
-        size_t count,
-        const uint32_t k,
-        const uint32_t ef,
-        const bool include_entry = true,
-        const deglib::search::Filter* filter = nullptr,
-        const uint32_t max_distance_computation_count = 0,
-        size_t threads = 1
-    ) const {
-        if (count == 0) return {};
-        std::vector<std::vector<deglib::graph::ObjectDistance>> results(count);
-        const size_t in_stride = hasTransformations() ? getInputDim() : (internal_graph_->getFeatureSpace().get_data_size() / sizeof(T));
-        if (queries.size() != count * in_stride) {
-            throw std::invalid_argument(
-                std::format("Batch query size mismatch: expected {} * {} = {}, got {}", count, in_stride, count * in_stride, queries.size())
-            );
-        }
-
-        if constexpr (std::is_same_v<T, float> || std::is_same_v<T, uint16_t>) {
-            if (hasTransformations()) {
-                const size_t out_stride = std::max(deglib::transformation::get_output_byte_size(transformations_), internal_graph_->getFeatureSpace().get_data_size());
-
-                deglib::concurrent::parallel_batch_for(
-                    0, count, threads,
-                    [&](size_t begin, size_t end, size_t) {
-                        alignas(64) std::byte stack_buf[512];
-                        std::byte* q_buf = stack_buf;
-                        if (out_stride > sizeof(stack_buf)) {
-                            thread_local deglib::transformation::TransformationWorkspace ws;
-                            q_buf = ws.get_buffer_a(out_stride);
-                        }
-
-                        for (size_t i = begin; i < end; ++i) {
-                            if constexpr (std::is_same_v<T, float>) {
-                                deglib::transformation::apply_on_query(transformations_, queries.subspan(i * in_stride, in_stride), std::span<std::byte>(q_buf, out_stride));
+                        } else {
+                            std::span<const T> single_q(queries.data() + q * in_stride, in_stride);
+                            if constexpr (UseEf) {
+                                internal_graph_->search_ef(search_ws, single_q, k, ef, include_entry, filter, max_distance_computation_count);
                             } else {
-                                alignas(64) float stack_f16_buf[256];
-                                float* f16_buf = stack_f16_buf;
-                                if (in_stride > sizeof(stack_f16_buf) / sizeof(float)) {
-                                    thread_local deglib::transformation::TransformationWorkspace ws;
-                                    f16_buf = ws.get_float_buffer(in_stride);
-                                }
-                                deglib::distances::fp16::fp16_to_floats(queries.data() + i * in_stride, f16_buf, in_stride);
-                                deglib::transformation::apply_on_query(transformations_, std::span<const float>(f16_buf, in_stride), std::span<std::byte>(q_buf, out_stride));
+                                internal_graph_->search(search_ws, single_q, k, eps, filter, max_distance_computation_count);
                             }
-
-                            std::span<const std::byte> single_q(q_buf, out_stride);
-                            auto res = internal_graph_->search_ef(single_q, k, ef, include_entry, filter, max_distance_computation_count);
-                            for (auto& od : res) {
-                                uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
-                                od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
-                            }
-                            results[i] = std::move(res);
                         }
-                    },
-                    16
-                );
-                return results;
-            }
-        }
-
-        deglib::concurrent::parallel_batch_for(
-            0, count, threads,
-            [&](size_t begin, size_t end, size_t) {
-                for (size_t i = begin; i < end; ++i) {
-                    std::span<const T> single_q(queries.data() + i * in_stride, in_stride);
-                    auto res = internal_graph_->search_ef(single_q, k, ef, include_entry, filter, max_distance_computation_count);
-                    for (auto& od : res) {
-                        uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
-                        od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
+                    } else {
+                        std::span<const T> single_q(queries.data() + q * in_stride, in_stride);
+                        if constexpr (UseEf) {
+                            internal_graph_->search_ef(search_ws, single_q, k, ef, include_entry, filter, max_distance_computation_count);
+                        } else {
+                            internal_graph_->search(search_ws, single_q, k, eps, filter, max_distance_computation_count);
+                        }
                     }
-                    results[i] = std::move(res);
+
+                    search_ws.drain_into(
+                        *internal_graph_, k, out_indices.data() + q * k, return_distances ? (out_distances.data() + q * k) : nullptr, unsorted,
+                        /*pad_missing=*/true
+                    );
+                    local_dists += search_ws.graph_distance_count;
+                    local_hops += search_ws.graph_hop_count;
                 }
+
+                counters_ptr[thread_id].graph_distance_count += local_dists;
+                counters_ptr[thread_id].graph_hop_count += local_hops;
             },
             16
         );
-        return results;
-    }
 
-    /**
-     * @brief Explores the graph starting at a specific stored vertex using dynamic exploration radius (eps).
-     *
-     * Traverses the graph from the given entry vertex using its stored feature vector as the query.
-     * Maps the entry external label to its internal index and maps all result IDs back to external labels.
-     *
-     * @param entry_external_label The external label of the vertex to start exploration from.
-     * @param k The number of nearest neighbors to return.
-     * @param max_distance_computation_count Maximum number of distance calculations allowed (0 = unlimited).
-     * @param eps Relative exploration expansion margin (default 0.0f).
-     * @param include_entry If true, the entry vertex itself is eligible in the result set (default true).
-     * @param filter Optional predicate filter to restrict eligible vertices.
-     * @return deglib::graph::ResultSet Max-heap of nearest ObjectDistance entries with external labels.
-     */
-    deglib::graph::ResultSet explore(
-        const uint32_t entry_external_label,
-        const uint32_t k,
-        const uint32_t max_distance_computation_count = 0,
-        const float eps = 0.0f,
-        const bool include_entry = true,
-        const deglib::search::Filter* filter = nullptr
-    ) const {
-        uint32_t internal_entry = internal_graph_->getInternalIndex(entry_external_label);
-        auto res = internal_graph_->explore(internal_entry, k, max_distance_computation_count, eps, include_entry, filter);
-
-        // 1. Modify internal vertex IDs to external labels in-place
-        for (auto& od : res) {
-            uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
-            od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
+        for (size_t t = 0; t < actual_threads; ++t) {
+            out_graph_distance_count += counters_ptr[t].graph_distance_count;
+            out_graph_hop_count += counters_ptr[t].graph_hop_count;
         }
-
-        return res;
     }
 
-    /**
-     * @brief Explores the graph starting at a specific stored vertex using fixed beam width (ef).
-     *
-     * Traverses the graph from the given entry vertex using its stored feature vector as the query.
-     * Maps the entry external label to its internal index and maps all result IDs back to external labels.
-     *
-     * @param entry_external_label The external label of the vertex to start exploration from.
-     * @param k The number of nearest neighbors to return.
-     * @param ef Fixed candidate pool / beam width (clamped to at least k).
-     * @param max_distance_computation_count Maximum number of distance calculations allowed (0 = unlimited).
-     * @param include_entry If true, the entry vertex itself is eligible in the result set (default true).
-     * @param filter Optional predicate filter to restrict eligible vertices.
-     * @return std::vector<deglib::graph::ObjectDistance> Vector of nearest neighbors sorted ascending by distance with external labels.
-     */
-    std::vector<deglib::graph::ObjectDistance> explore_ef(
-        const uint32_t entry_external_label,
-        const uint32_t k,
-        const uint32_t ef,
-        const uint32_t max_distance_computation_count = 0,
-        const bool include_entry = true,
-        const deglib::search::Filter* filter = nullptr
-    ) const {
-        uint32_t internal_entry = internal_graph_->getInternalIndex(entry_external_label);
-        auto res = internal_graph_->explore_ef(internal_entry, k, ef, max_distance_computation_count, include_entry, filter);
-        for (auto& od : res) {
-            uint32_t ext_label = internal_graph_->getExternalLabel(od.getIdentifier());
-            od = deglib::graph::ObjectDistance(ext_label, od.getDistance());
-        }
-        return res;
-    }
-
-    /**
-     * @brief Batch exploration into pre-allocated flat output buffers using dynamic exploration radius (eps).
-     *
-     * Starts independent graph traversals from each external label in entry_external_labels in parallel,
-     * writing external labels and optionally distances directly into pre-allocated contiguous spans.
-     *
-     * @param entry_external_labels Contiguous span of starting vertex external labels.
-     * @param k The number of nearest neighbors to return per starting vertex.
-     * @param out_indices Pre-allocated destination span of size >= entry_external_labels.size() * k.
-     * @param out_distances Optional destination span of size >= entry_external_labels.size() * k. If empty, distances are omitted.
-     * @param max_distance_computation_count Maximum number of distance calculations per query (0 = unlimited).
-     * @param eps Relative exploration expansion margin (default 0.0f).
-     * @param include_entry If true, each entry vertex is eligible in its result set (default true).
-     * @param filter Optional predicate filter to restrict eligible vertices.
-     * @param threads Number of worker threads for parallel batch execution (1 = sequential).
-     * @param unsorted If false (default), results per query are sorted ascending by distance (nearest first).
-     *                 If true, results remain in heap order.
-     * @throws std::invalid_argument if out_indices or out_distances do not meet size requirements.
-     *
-     * @note If fewer than k results are found for an entry, unfilled slots are padded with
-     *       std::numeric_limits<uint32_t>::max() in out_indices and
-     *       std::numeric_limits<float>::quiet_NaN() in out_distances.
-     */
-    void explore_batch(
+    template <bool UseEf>
+    void execute_explore_batch_impl(
         std::span<const uint32_t> entry_external_labels,
         const uint32_t k,
+        const float eps,
+        const uint32_t ef,
         std::span<uint32_t> out_indices,
-        std::span<float> out_distances = {},
-        const uint32_t max_distance_computation_count = 0,
-        const float eps = 0.0f,
-        const bool include_entry = true,
-        const deglib::search::Filter* filter = nullptr,
-        size_t threads = 1,
-        bool unsorted = false
+        std::span<float> out_distances,
+        const uint32_t max_distance_computation_count,
+        const bool include_entry,
+        const deglib::search::Filter* filter,
+        size_t threads,
+        bool unsorted,
+        uint64_t& out_graph_distance_count,
+        uint64_t& out_graph_hop_count
     ) const {
+        out_graph_distance_count = 0;
+        out_graph_hop_count = 0;
         const size_t count = entry_external_labels.size();
         if (count == 0) return;
         if (out_indices.size() < count * k) {
@@ -876,203 +796,52 @@ class DynamicExplorationGraph {
                 std::format("DynamicExplorationGraph::explore_batch: out_distances size ({}) is smaller than count * k ({})", out_distances.size(), count * k)
             );
         }
+        if (k == 0) return;
+
+        const size_t resolved_threads = (threads == 0) ? std::max<size_t>(1, std::thread::hardware_concurrency()) : threads;
+        const size_t actual_threads = std::min(resolved_threads, count);
+
+        deglib::search::detail::ThreadSearchCounters single_counter{};
+        std::vector<deglib::search::detail::ThreadSearchCounters> heap_counters;
+        deglib::search::detail::ThreadSearchCounters* counters_ptr = &single_counter;
+        if (actual_threads > 1) {
+            heap_counters.resize(actual_threads);
+            counters_ptr = heap_counters.data();
+        }
 
         deglib::concurrent::parallel_batch_for(
-            0, count, threads,
-            [&](size_t begin, size_t end, size_t) {
+            0, count, actual_threads,
+            [&](size_t begin, size_t end, size_t thread_id) {
+                thread_local deglib::graph::SearchWorkspace search_ws;
+                uint64_t local_dists = 0;
+                uint64_t local_hops = 0;
                 for (size_t q = begin; q < end; ++q) {
-                    uint32_t entry_label = entry_external_labels[q];
-                    auto res = explore(entry_label, k, max_distance_computation_count, eps, include_entry, filter);
-                    while (res.size() > k) {
-                        res.pop();
-                    }
-                    const size_t count_res = res.size();
-                    const size_t base_offset = q * k;
-                    if (unsorted) {
-                        for (size_t idx = 0; idx < count_res; ++idx) {
-                            out_indices[base_offset + idx] = res[idx].getIdentifier();
-                            if (return_distances) {
-                                out_distances[base_offset + idx] = res[idx].getDistance();
-                            }
-                        }
+                    const uint32_t internal_entry = internal_graph_->getInternalIndex(entry_external_labels[q]);
+                    if constexpr (UseEf) {
+                        internal_graph_->explore_ef(search_ws, internal_entry, k, ef, max_distance_computation_count, include_entry, filter);
                     } else {
-                        for (size_t i = count_res; i > 0; --i) {
-                            auto next_result = res.top();
-                            out_indices[base_offset + i - 1] = next_result.getIdentifier();
-                            if (return_distances) {
-                                out_distances[base_offset + i - 1] = next_result.getDistance();
-                            }
-                            res.pop();
-                        }
+                        internal_graph_->explore(search_ws, internal_entry, k, max_distance_computation_count, eps, include_entry, filter);
                     }
-                    for (size_t idx = count_res; idx < k; ++idx) {
-                        out_indices[base_offset + idx] = std::numeric_limits<uint32_t>::max();
-                        if (return_distances) {
-                            out_distances[base_offset + idx] = std::numeric_limits<float>::quiet_NaN();
-                        }
-                    }
+                    search_ws.drain_into(
+                        *internal_graph_, k, out_indices.data() + q * k, return_distances ? (out_distances.data() + q * k) : nullptr, unsorted,
+                        /*pad_missing=*/true
+                    );
+                    local_dists += search_ws.graph_distance_count;
+                    local_hops += search_ws.graph_hop_count;
                 }
+                counters_ptr[thread_id].graph_distance_count += local_dists;
+                counters_ptr[thread_id].graph_hop_count += local_hops;
             },
             16
         );
+
+        for (size_t t = 0; t < actual_threads; ++t) {
+            out_graph_distance_count += counters_ptr[t].graph_distance_count;
+            out_graph_hop_count += counters_ptr[t].graph_hop_count;
+        }
     }
 
-    /**
-     * @brief Batch exploration returning std::vector buffers of indices and distances with dynamic exploration radius (eps).
-     *
-     * Convenient container-allocating wrapper around flat buffer explore_batch.
-     *
-     * @param entry_external_labels Contiguous span of starting vertex external labels.
-     * @param k The number of nearest neighbors to return per starting vertex.
-     * @param max_distance_computation_count Maximum number of distance calculations per query (0 = unlimited).
-     * @param eps Relative exploration expansion margin (default 0.0f).
-     * @param include_entry If true, each entry vertex is eligible in its result set (default true).
-     * @param filter Optional predicate filter to restrict eligible vertices.
-     * @param threads Number of worker threads for parallel batch execution (1 = sequential).
-     * @param return_distances If true, calculates and returns distances in the second vector; if false, second vector is empty.
-     * @param unsorted If false (default), results per query are sorted ascending by distance.
-     * @return std::pair<std::vector<uint32_t>, std::vector<float>> Pair containing flat indices (size = count * k) and distances.
-     */
-    std::pair<std::vector<uint32_t>, std::vector<float>> explore_batch(
-        std::span<const uint32_t> entry_external_labels,
-        const uint32_t k,
-        const uint32_t max_distance_computation_count = 0,
-        const float eps = 0.0f,
-        const bool include_entry = true,
-        const deglib::search::Filter* filter = nullptr,
-        size_t threads = 1,
-        bool return_distances = true,
-        bool unsorted = false
-    ) const {
-        const size_t count = entry_external_labels.size();
-        std::vector<uint32_t> indices(count * k);
-        std::vector<float> distances;
-        if (return_distances) {
-            distances.resize(count * k);
-        }
-        explore_batch(
-            entry_external_labels, k, std::span<uint32_t>(indices), return_distances ? std::span<float>(distances) : std::span<float>{},
-            max_distance_computation_count, eps, include_entry, filter, threads, unsorted
-        );
-        return {std::move(indices), std::move(distances)};
-    }
-
-    /**
-     * @brief Batch exploration into pre-allocated flat output buffers using fixed beam width (ef).
-     *
-     * Starts independent graph traversals from each external label in entry_external_labels in parallel,
-     * writing external labels and optionally distances directly into pre-allocated contiguous spans.
-     *
-     * @param entry_external_labels Contiguous span of starting vertex external labels.
-     * @param k The number of nearest neighbors to return per starting vertex.
-     * @param ef Fixed candidate pool / beam width (clamped to at least k).
-     * @param out_indices Pre-allocated destination span of size >= entry_external_labels.size() * k.
-     * @param out_distances Optional destination span of size >= entry_external_labels.size() * k. If empty, distances are omitted.
-     * @param max_distance_computation_count Maximum number of distance calculations per query (0 = unlimited).
-     * @param include_entry If true, each entry vertex is eligible in its result set (default true).
-     * @param filter Optional predicate filter to restrict eligible vertices.
-     * @param threads Number of worker threads for parallel batch execution (1 = sequential).
-     * @param unsorted If false (default), results per query are ordered nearest first.
-     * @throws std::invalid_argument if out_indices or out_distances do not meet size requirements.
-     *
-     * @note If fewer than k results are found for an entry, unfilled slots are padded with
-     *       std::numeric_limits<uint32_t>::max() in out_indices and
-     *       std::numeric_limits<float>::quiet_NaN() in out_distances.
-     */
-    void explore_batch_ef(
-        std::span<const uint32_t> entry_external_labels,
-        const uint32_t k,
-        const uint32_t ef,
-        std::span<uint32_t> out_indices,
-        std::span<float> out_distances = {},
-        const uint32_t max_distance_computation_count = 0,
-        const bool include_entry = true,
-        const deglib::search::Filter* filter = nullptr,
-        size_t threads = 1,
-        bool unsorted = false
-    ) const {
-        const size_t count = entry_external_labels.size();
-        if (count == 0) return;
-        if (out_indices.size() < count * k) {
-            throw std::invalid_argument(
-                std::format("DynamicExplorationGraph::explore_batch_ef: out_indices size ({}) is smaller than count * k ({})", out_indices.size(), count * k)
-            );
-        }
-        const bool return_distances = !out_distances.empty();
-        if (return_distances && out_distances.size() < count * k) {
-            throw std::invalid_argument(
-                std::format(
-                    "DynamicExplorationGraph::explore_batch_ef: out_distances size ({}) is smaller than count * k ({})", out_distances.size(), count * k
-                )
-            );
-        }
-
-        deglib::concurrent::parallel_batch_for(
-            0, count, threads,
-            [&](size_t begin, size_t end, size_t) {
-                for (size_t q = begin; q < end; ++q) {
-                    uint32_t entry_label = entry_external_labels[q];
-                    auto res = explore_ef(entry_label, k, ef, max_distance_computation_count, include_entry, filter);
-                    const size_t count_res = std::min(static_cast<size_t>(k), res.size());
-                    const size_t base_offset = q * k;
-                    for (size_t idx = 0; idx < count_res; ++idx) {
-                        out_indices[base_offset + idx] = res[idx].getIdentifier();
-                        if (return_distances) {
-                            out_distances[base_offset + idx] = res[idx].getDistance();
-                        }
-                    }
-                    for (size_t idx = count_res; idx < k; ++idx) {
-                        out_indices[base_offset + idx] = std::numeric_limits<uint32_t>::max();
-                        if (return_distances) {
-                            out_distances[base_offset + idx] = std::numeric_limits<float>::quiet_NaN();
-                        }
-                    }
-                }
-            },
-            16
-        );
-    }
-
-    /**
-     * @brief Batch exploration returning std::vector buffers of indices and distances with fixed beam width (ef).
-     *
-     * Convenient container-allocating wrapper around flat buffer explore_batch_ef.
-     *
-     * @param entry_external_labels Contiguous span of starting vertex external labels.
-     * @param k The number of nearest neighbors to return per starting vertex.
-     * @param ef Fixed candidate pool / beam width (clamped to at least k).
-     * @param max_distance_computation_count Maximum number of distance calculations per query (0 = unlimited).
-     * @param include_entry If true, each entry vertex is eligible in its result set (default true).
-     * @param filter Optional predicate filter to restrict eligible vertices.
-     * @param threads Number of worker threads for parallel batch execution (1 = sequential).
-     * @param return_distances If true, calculates and returns distances in the second vector; if false, second vector is empty.
-     * @param unsorted If false (default), results per query are sorted ascending by distance.
-     * @return std::pair<std::vector<uint32_t>, std::vector<float>> Pair containing flat indices (size = count * k) and distances.
-     */
-    std::pair<std::vector<uint32_t>, std::vector<float>> explore_batch_ef(
-        std::span<const uint32_t> entry_external_labels,
-        const uint32_t k,
-        const uint32_t ef,
-        const uint32_t max_distance_computation_count = 0,
-        const bool include_entry = true,
-        const deglib::search::Filter* filter = nullptr,
-        size_t threads = 1,
-        bool return_distances = true,
-        bool unsorted = false
-    ) const {
-        const size_t count = entry_external_labels.size();
-        std::vector<uint32_t> indices(count * k);
-        std::vector<float> distances;
-        if (return_distances) {
-            distances.resize(count * k);
-        }
-        explore_batch_ef(
-            entry_external_labels, k, ef, std::span<uint32_t>(indices), return_distances ? std::span<float>(distances) : std::span<float>{},
-            max_distance_computation_count, include_entry, filter, threads, unsorted
-        );
-        return {std::move(indices), std::move(distances)};
-    }
-
+  public:
     /**
      * Greedy best-first reachability search towards a stored vertex.
      *

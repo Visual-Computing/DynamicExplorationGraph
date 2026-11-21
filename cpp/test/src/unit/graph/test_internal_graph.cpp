@@ -8,6 +8,7 @@
 #include "gtest/gtest.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -239,11 +240,14 @@ class MockInternalGraph : public deglib::graph::InternalGraph {
             if (labels_[i] == label) return true;
         return false;
     }
-    [[nodiscard]] bool hasEdge(uint32_t idx, uint32_t neighbor) const noexcept override { return std::binary_search(neighbors_[idx].begin(), neighbors_[idx].end(), neighbor); }
+    [[nodiscard]] bool hasEdge(uint32_t idx, uint32_t neighbor) const noexcept override {
+        return std::binary_search(neighbors_[idx].begin(), neighbors_[idx].end(), neighbor);
+    }
 
     [[nodiscard]] std::vector<deglib::graph::ObjectDistance> hasPath(const std::vector<uint32_t>&, uint32_t, float, uint32_t) const override { return {}; }
-    deglib::graph::ResultSet search_intern(
-        const std::vector<uint32_t>&,
+    void search_intern(
+        deglib::graph::SearchWorkspace& ws,
+        std::span<const uint32_t>,
         const std::byte*,
         uint32_t,
         float = 0.0f,
@@ -251,10 +255,11 @@ class MockInternalGraph : public deglib::graph::InternalGraph {
         const deglib::search::Filter* = nullptr,
         uint32_t = 0
     ) const override {
-        return deglib::graph::ResultSet();
+        ws.reset_for_eps(0, 0);
     }
-    std::vector<deglib::graph::ObjectDistance> search_ef_intern(
-        const std::vector<uint32_t>&,
+    void search_ef_intern(
+        deglib::graph::SearchWorkspace& ws,
+        std::span<const uint32_t>,
         const std::byte*,
         uint32_t,
         uint32_t,
@@ -262,7 +267,7 @@ class MockInternalGraph : public deglib::graph::InternalGraph {
         const deglib::search::Filter* = nullptr,
         uint32_t = 0
     ) const override {
-        return {};
+        ws.reset_for_ef(0, 0, 0, false);
     }
 
     // helpers for test setup
@@ -333,4 +338,67 @@ TEST(InternalGraph, GetEntryVertexIndices) {
     auto entries = graph.getEntryVertexIndices();
     EXPECT_EQ(entries.size(), 1u);
     EXPECT_EQ(entries[0], 0u);
+}
+
+TEST(SearchWorkspace, ReuseBetweenEpsAndEfAndDrain) {
+    deglib::distances::FloatSpace fs(4, deglib::distances::Metric::FP32_L2);
+    MockInternalGraph graph(4, 2, std::move(fs));
+    graph.setLabel(0, 100);
+    graph.setLabel(1, 101);
+    graph.setLabel(2, 102);
+    graph.setLabel(3, 103);
+
+    deglib::graph::SearchWorkspace ws;
+
+    // 1. Simulate eps search
+    ws.reset_for_eps(4, 2);
+    EXPECT_FALSE(ws.used_pool);
+    EXPECT_EQ(ws.graph_distance_count, 0u);
+    EXPECT_EQ(ws.graph_hop_count, 0u);
+    ws.results.emplace(2, 5.0f);
+    ws.results.emplace(0, 1.0f);
+    ws.results.emplace(1, 3.0f);
+    ws.graph_distance_count = 7;
+    ws.graph_hop_count = 2;
+
+    EXPECT_EQ(ws.size(), 3u);
+    EXPECT_EQ(ws.result_count(2), 2u);
+    EXPECT_FALSE(ws.empty());
+
+    // Drain sorted with padding for missing slot
+    uint32_t out_idx[4]{};
+    float out_dist[4]{};
+    const uint32_t count = ws.drain_into(graph, 4, out_idx, out_dist, /*unsorted=*/false, /*pad_missing=*/true);
+    EXPECT_EQ(count, 3u);
+    EXPECT_EQ(out_idx[0], 100u);
+    EXPECT_FLOAT_EQ(out_dist[0], 1.0f);
+    EXPECT_EQ(out_idx[1], 101u);
+    EXPECT_FLOAT_EQ(out_dist[1], 3.0f);
+    EXPECT_EQ(out_idx[2], 102u);
+    EXPECT_FLOAT_EQ(out_dist[2], 5.0f);
+    EXPECT_EQ(out_idx[3], UINT32_MAX);
+    EXPECT_TRUE(std::isnan(out_dist[3]));
+    EXPECT_EQ(ws.graph_distance_count, 7u);
+    EXPECT_EQ(ws.graph_hop_count, 2u);
+
+    // 2. Reuse the same workspace for an ef search — stale eps results and counters must reset
+    ws.reset_for_ef(2, 4, 2, false);
+    EXPECT_TRUE(ws.used_pool);
+    EXPECT_EQ(ws.graph_distance_count, 0u);
+    EXPECT_EQ(ws.graph_hop_count, 0u);
+    ws.pool.insert(3, 0.5f);
+    ws.pool.insert(1, 2.5f);
+    ws.pool.truncate(2);
+    ws.graph_distance_count = 11;
+    ws.graph_hop_count = 3;
+
+    EXPECT_EQ(ws.size(), 2u);
+    uint32_t ef_idx[2]{};
+    float ef_dist[2]{};
+    const uint32_t ef_count = ws.drain_into(graph, 2, ef_idx, ef_dist, /*unsorted=*/false, /*pad_missing=*/false);
+    EXPECT_EQ(ef_count, 2u);
+    EXPECT_EQ(ef_idx[0], 103u);
+    EXPECT_FLOAT_EQ(ef_dist[0], 0.5f);
+    EXPECT_EQ(ef_idx[1], 101u);
+    EXPECT_FLOAT_EQ(ef_dist[1], 2.5f);
 }

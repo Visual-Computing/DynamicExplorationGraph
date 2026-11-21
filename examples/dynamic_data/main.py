@@ -485,7 +485,9 @@ def run_dynamic_benchmark(
             for eps in eps_list:
                 start_time = time.perf_counter()
                 for _ in range(repeat):
-                    indices_batch, _ = graph.search(query_vecs, eps_or_ef=eps, k=search_k, threads=1)
+                    indices_batch = graph.search(
+                        query_vecs, eps_or_ef=eps, k=search_k, threads=1, return_distances=False
+                    ).indices
                 elapsed_sec = time.perf_counter() - start_time
 
                 search_time_us = elapsed_sec * 1e6
@@ -509,7 +511,9 @@ def run_dynamic_benchmark(
                 )
 
                 if linear_baseline_us > 0 and time_us_per_query > linear_baseline_us:
-                    print(f"eps {eps:.3f} \t ABORTED ({time_us_per_query}us/query > {int(linear_baseline_us)}us baseline)")
+                    print(
+                        f"eps {eps:.3f} \t ABORTED ({time_us_per_query}us/query > {int(linear_baseline_us)}us baseline)"
+                    )
                     break
 
                 if recall > 0.997:

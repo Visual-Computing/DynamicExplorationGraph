@@ -50,9 +50,7 @@ using InUint32Array = nb::ndarray<const uint32_t, nb::c_contig, nb::device::cpu>
 using InIntArray = nb::ndarray<const int, nb::c_contig, nb::device::cpu>;
 using InStridedUint32Array = nb::ndarray<const uint32_t, nb::device::cpu>;
 
-inline constexpr nb::dlpack::dtype kDtypeFloat16{
-    static_cast<uint8_t>(nb::dlpack::dtype_code::Float), 16, 1
-};
+inline constexpr nb::dlpack::dtype kDtypeFloat16{static_cast<uint8_t>(nb::dlpack::dtype_code::Float), 16, 1};
 
 template <typename T>
 inline nb::ndarray<nb::numpy, T, nb::ndim<1>, nb::c_contig> make_numpy_1d(size_t count, T*& out_ptr) {
@@ -84,21 +82,15 @@ inline nb::ndarray<nb::numpy, nb::c_contig> make_numpy_fp16(size_t ndim, const s
     return nb::ndarray<nb::numpy, nb::c_contig>(data, ndim, shape, owner, nullptr, kDtypeFloat16);
 }
 
-inline bool is_dtype_float16_only(nb::dlpack::dtype dt) noexcept {
-    return dt == kDtypeFloat16;
-}
+inline bool is_dtype_float16_only(nb::dlpack::dtype dt) noexcept { return dt == kDtypeFloat16; }
 
 inline bool is_dtype_fp16_or_u16(nb::dlpack::dtype dt) noexcept {
-    return dt.bits == 16 && dt.lanes == 1 && (
-        dt.code == static_cast<uint8_t>(nb::dlpack::dtype_code::Float) ||
-        dt.code == static_cast<uint8_t>(nb::dlpack::dtype_code::UInt) ||
-        dt.code == static_cast<uint8_t>(nb::dlpack::dtype_code::Int)
-    );
+    return dt.bits == 16 && dt.lanes == 1 &&
+           (dt.code == static_cast<uint8_t>(nb::dlpack::dtype_code::Float) || dt.code == static_cast<uint8_t>(nb::dlpack::dtype_code::UInt) ||
+            dt.code == static_cast<uint8_t>(nb::dlpack::dtype_code::Int));
 }
 
-inline bool is_dtype_float32(nb::dlpack::dtype dt) noexcept {
-    return dt == nb::dtype<float>();
-}
+inline bool is_dtype_float32(nb::dlpack::dtype dt) noexcept { return dt == nb::dtype<float>(); }
 
 inline std::pair<size_t, uint32_t> get_2d_shape(const InArray& arr) {
     if (arr.ndim() != 2) {
@@ -206,9 +198,9 @@ inline const void* extract_custom_features_ptr(
 // Graph Search, Explore & Path Wrappers
 // ============================================================================
 
-template <typename G, typename QuerySpanT>
-nb::object execute_graph_search_single(
-    const G& graph,
+template <typename QuerySpanT>
+deglib::search::SearchResults execute_graph_search_single(
+    const deglib::DynamicExplorationGraph& graph,
     QuerySpanT q_span,
     const float eps_or_ef,
     const uint32_t k,
@@ -217,73 +209,15 @@ nb::object execute_graph_search_single(
     const bool return_distances,
     const bool unsorted
 ) {
-    uint32_t* result_indices_ptr = nullptr;
-    auto result_indices = make_numpy_1d<uint32_t>(k, result_indices_ptr);
-
-    nb::ndarray<nb::numpy, float, nb::ndim<1>, nb::c_contig> result_distances;
-    float* result_distances_ptr = nullptr;
-    if (return_distances) {
-        result_distances = make_numpy_1d<float>(k, result_distances_ptr);
-    }
-
-    size_t count = 0;
     if (eps_or_ef >= 1.0f) {
         const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
-        std::vector<deglib::graph::ObjectDistance> result = graph.search_ef(q_span, k, ef, true, filter, max_distance_computation_count);
-        count = std::min(static_cast<size_t>(k), result.size());
-        for (size_t i = 0; i < count; ++i) {
-            if constexpr (std::is_same_v<G, deglib::DynamicExplorationGraph>) {
-                result_indices_ptr[i] = result[i].getIdentifier();
-            } else {
-                result_indices_ptr[i] = graph.getExternalLabel(result[i].getIdentifier());
-            }
-            if (result_distances_ptr) {
-                result_distances_ptr[i] = result[i].getDistance();
-            }
-        }
-    } else {
-        deglib::graph::ResultSet result = graph.search(q_span, k, eps_or_ef, filter, max_distance_computation_count);
-        while (result.size() > k) result.pop();
-        count = result.size();
-        if (unsorted) {
-            for (size_t i = 0; i < count; ++i) {
-                if constexpr (std::is_same_v<G, deglib::DynamicExplorationGraph>) {
-                    result_indices_ptr[i] = result[i].getIdentifier();
-                } else {
-                    result_indices_ptr[i] = graph.getExternalLabel(result[i].getIdentifier());
-                }
-                if (result_distances_ptr) result_distances_ptr[i] = result[i].getDistance();
-            }
-        } else {
-            for (size_t i = count; i > 0; --i) {
-                deglib::search::ObjectDistance next_result = result.top();
-                if constexpr (std::is_same_v<G, deglib::DynamicExplorationGraph>) {
-                    result_indices_ptr[i - 1] = next_result.getIdentifier();
-                } else {
-                    result_indices_ptr[i - 1] = graph.getExternalLabel(next_result.getIdentifier());
-                }
-                if (result_distances_ptr) result_distances_ptr[i - 1] = next_result.getDistance();
-                result.pop();
-            }
-        }
+        return graph.search_ef(q_span, k, ef, /*include_entry=*/true, filter, max_distance_computation_count, return_distances, /*pad_missing=*/true);
     }
-
-    for (size_t i = count; i < k; ++i) {
-        result_indices_ptr[i] = std::numeric_limits<uint32_t>::max();
-        if (result_distances_ptr) {
-            result_distances_ptr[i] = std::numeric_limits<float>::quiet_NaN();
-        }
-    }
-
-    if (return_distances) {
-        return nb::make_tuple(result_indices, result_distances);
-    }
-    return result_indices.cast();
+    return graph.search(q_span, k, eps_or_ef, filter, max_distance_computation_count, return_distances, unsorted, /*pad_missing=*/true);
 }
 
-template <typename G>
-nb::object graph_search_single_wrapper(
-    const G& graph,
+deglib::search::SearchResults graph_search_single_wrapper(
+    const deglib::DynamicExplorationGraph& graph,
     const InArray& query,
     const float eps_or_ef,
     const uint32_t k,
@@ -292,26 +226,24 @@ nb::object graph_search_single_wrapper(
     const bool return_distances = true,
     const bool unsorted = false
 ) {
-    if constexpr (std::is_same_v<G, deglib::DynamicExplorationGraph>) {
-        if (graph.hasTransformations()) {
-            const size_t in_dim = graph.getInputDim();
-            if (query.size() != in_dim) {
-                throw std::invalid_argument(std::format("Query vector size ({}) does not match transformations input dim ({})", query.size(), in_dim));
-            }
-            const auto dt = query.dtype();
-            if (is_dtype_float16_only(dt)) {
-                return execute_graph_search_single(
-                    graph, std::span<const uint16_t>(static_cast<const uint16_t*>(query.data()), in_dim),
-                    eps_or_ef, k, filter, max_distance_computation_count, return_distances, unsorted
-                );
-            } else if (is_dtype_float32(dt)) {
-                return execute_graph_search_single(
-                    graph, std::span<const float>(static_cast<const float*>(query.data()), in_dim),
-                    eps_or_ef, k, filter, max_distance_computation_count, return_distances, unsorted
-                );
-            } else {
-                throw std::invalid_argument(std::format("Unsupported query dtype (code: {}, bits: {})", dt.code, dt.bits));
-            }
+    if (graph.hasTransformations()) {
+        const size_t in_dim = graph.getInputDim();
+        if (query.size() != in_dim) {
+            throw std::invalid_argument(std::format("Query vector size ({}) does not match transformations input dim ({})", query.size(), in_dim));
+        }
+        const auto dt = query.dtype();
+        if (is_dtype_float16_only(dt)) {
+            return execute_graph_search_single(
+                graph, std::span<const uint16_t>(static_cast<const uint16_t*>(query.data()), in_dim), eps_or_ef, k, filter, max_distance_computation_count,
+                return_distances, unsorted
+            );
+        } else if (is_dtype_float32(dt)) {
+            return execute_graph_search_single(
+                graph, std::span<const float>(static_cast<const float*>(query.data()), in_dim), eps_or_ef, k, filter, max_distance_computation_count,
+                return_distances, unsorted
+            );
+        } else {
+            throw std::invalid_argument(std::format("Unsupported query dtype (code: {}, bits: {})", dt.code, dt.bits));
         }
     }
     const size_t req_bytes = graph.getFeatureSpace().get_data_size();
@@ -329,8 +261,8 @@ nb::object graph_search_single_wrapper(
     return execute_graph_search_single(graph, query_span, eps_or_ef, k, filter, max_distance_computation_count, return_distances, unsorted);
 }
 
-// Batch search wrapper for DynamicExplorationGraph — search() already returns external labels
-nb::object dynamic_exploration_graph_search_batch_wrapper(
+// Batch search wrapper for DynamicExplorationGraph
+deglib::search::SearchResults dynamic_exploration_graph_search_batch_wrapper(
     const deglib::DynamicExplorationGraph& graph,
     const InArray& query,
     const float eps_or_ef,
@@ -370,74 +302,28 @@ nb::object dynamic_exploration_graph_search_batch_wrapper(
         }
     }
 
-    uint32_t* result_indices_ptr = nullptr;
-    auto result_indices = make_numpy_2d<uint32_t>(n_queries, k, result_indices_ptr);
-
-    nb::ndarray<nb::numpy, float, nb::ndim<2>, nb::c_contig> result_distances;
-    float* result_distances_ptr = nullptr;
-    if (return_distances) {
-        result_distances = make_numpy_2d<float>(n_queries, k, result_distances_ptr);
-    }
-
-    std::span<uint32_t> out_indices_span(result_indices_ptr, static_cast<size_t>(n_queries) * k);
-    std::span<float> out_distances_span = return_distances ? std::span<float>(result_distances_ptr, static_cast<size_t>(n_queries) * k) : std::span<float>{};
-
-    {
-        nb::gil_scoped_release release;
-
-        if (graph.hasTransformations()) {
-            const size_t in_dim = graph.getInputDim();
-            const bool is_fp16 = is_dtype_float16_only(q_dt);
-            if (is_fp16) {
-                std::span<const uint16_t> queries_span(static_cast<const uint16_t*>(q_ptr), n_queries * in_dim);
-                if (eps_or_ef >= 1.0f) {
-                    const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
-                    graph.search_batch_ef<uint16_t>(
-                        queries_span, n_queries, k, ef, out_indices_span, out_distances_span, true, filter, max_distance_computation_count, threads, unsorted
-                    );
-                } else {
-                    graph.search_batch<uint16_t>(
-                        queries_span, n_queries, k, out_indices_span, out_distances_span, eps_or_ef, filter, max_distance_computation_count, threads, unsorted
-                    );
-                }
-            } else {
-                std::span<const float> queries_span(static_cast<const float*>(q_ptr), n_queries * in_dim);
-                if (eps_or_ef >= 1.0f) {
-                    const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
-                    graph.search_batch_ef<float>(
-                        queries_span, n_queries, k, ef, out_indices_span, out_distances_span, true, filter, max_distance_computation_count, threads, unsorted
-                    );
-                } else {
-                    graph.search_batch<float>(
-                        queries_span, n_queries, k, out_indices_span, out_distances_span, eps_or_ef, filter, max_distance_computation_count, threads, unsorted
-                    );
-                }
-            }
-        } else {
-            const size_t query_stride_bytes = q_cols * q_itemsize;
-            std::span<const std::byte> queries_span(static_cast<const std::byte*>(q_ptr), n_queries * query_stride_bytes);
-            if (eps_or_ef >= 1.0f) {
-                const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
-                graph.search_batch_ef<std::byte>(
-                    queries_span, n_queries, k, ef, out_indices_span, out_distances_span, true, filter, max_distance_computation_count, threads, unsorted
-                );
-            } else {
-                graph.search_batch<std::byte>(
-                    queries_span, n_queries, k, out_indices_span, out_distances_span, eps_or_ef, filter, max_distance_computation_count, threads, unsorted
-                );
-            }
+    nb::gil_scoped_release release;
+    auto run_batch = [&](auto queries_span) -> deglib::search::SearchResults {
+        if (eps_or_ef >= 1.0f) {
+            const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
+            return graph.search_batch_ef(queries_span, n_queries, k, ef, true, filter, max_distance_computation_count, threads, return_distances, unsorted);
         }
-    }
+        return graph.search_batch(queries_span, n_queries, k, eps_or_ef, filter, max_distance_computation_count, threads, return_distances, unsorted);
+    };
 
-    if (return_distances) {
-        return nb::make_tuple(result_indices, result_distances);
+    if (graph.hasTransformations()) {
+        const size_t in_dim = graph.getInputDim();
+        if (is_dtype_float16_only(q_dt)) {
+            return run_batch(std::span<const uint16_t>(static_cast<const uint16_t*>(q_ptr), static_cast<size_t>(n_queries) * in_dim));
+        }
+        return run_batch(std::span<const float>(static_cast<const float*>(q_ptr), static_cast<size_t>(n_queries) * in_dim));
     }
-    return result_indices.cast();
+    const size_t query_stride_bytes = q_cols * q_itemsize;
+    return run_batch(std::span<const std::byte>(static_cast<const std::byte*>(q_ptr), static_cast<size_t>(n_queries) * query_stride_bytes));
 }
 
-template <typename G>
-nb::object graph_explore_single_wrapper(
-    const G& graph,
+deglib::search::SearchResults graph_explore_single_wrapper(
+    const deglib::DynamicExplorationGraph& graph,
     const uint32_t entry_external_label,
     const uint32_t k,
     const uint32_t max_distance_computation_count = 0,
@@ -449,69 +335,9 @@ nb::object graph_explore_single_wrapper(
 ) {
     if (eps_or_ef >= 1.0f) {
         const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
-        auto result = graph.explore_ef(entry_external_label, k, ef, max_distance_computation_count, include_entry, filter);
-        const size_t count = result.size();
-
-        uint32_t* result_indices_ptr = nullptr;
-        auto result_indices = make_numpy_1d<uint32_t>(count, result_indices_ptr);
-
-        nb::ndarray<nb::numpy, float, nb::ndim<1>, nb::c_contig> result_distances;
-        float* result_distances_ptr = nullptr;
-        if (return_distances) {
-            result_distances = make_numpy_1d<float>(count, result_distances_ptr);
-        }
-
-        for (size_t i = 0; i < count; ++i) {
-            result_indices_ptr[i] = result[i].getIdentifier();
-            if (result_distances_ptr) {
-                result_distances_ptr[i] = result[i].getDistance();
-            }
-        }
-
-        if (return_distances) {
-            return nb::make_tuple(result_indices, result_distances);
-        }
-        return result_indices.cast();
+        return graph.explore_ef(entry_external_label, k, ef, max_distance_computation_count, include_entry, filter, return_distances);
     }
-
-    deglib::graph::ResultSet result = graph.explore(entry_external_label, k, max_distance_computation_count, eps_or_ef, include_entry, filter);
-
-    while (result.size() > k) {
-        result.pop();
-    }
-
-    const size_t count = result.size();
-    uint32_t* result_indices_ptr = nullptr;
-    auto result_indices = make_numpy_1d<uint32_t>(count, result_indices_ptr);
-
-    nb::ndarray<nb::numpy, float, nb::ndim<1>, nb::c_contig> result_distances;
-    float* result_distances_ptr = nullptr;
-    if (return_distances) {
-        result_distances = make_numpy_1d<float>(count, result_distances_ptr);
-    }
-
-    if (unsorted) {
-        for (size_t i = 0; i < count; ++i) {
-            result_indices_ptr[i] = result[i].getIdentifier();
-            if (result_distances_ptr) {
-                result_distances_ptr[i] = result[i].getDistance();
-            }
-        }
-    } else {
-        for (size_t i = count; i > 0; --i) {
-            deglib::search::ObjectDistance next_result = result.top();
-            result_indices_ptr[i - 1] = next_result.getIdentifier();
-            if (result_distances_ptr) {
-                result_distances_ptr[i - 1] = next_result.getDistance();
-            }
-            result.pop();
-        }
-    }
-
-    if (return_distances) {
-        return nb::make_tuple(result_indices, result_distances);
-    }
-    return result_indices.cast();
+    return graph.explore(entry_external_label, k, max_distance_computation_count, eps_or_ef, include_entry, filter, return_distances, unsorted);
 }
 
 template <typename G>
@@ -548,7 +374,7 @@ nb::object graph_has_path_wrapper(
     return path_indices.cast();
 }
 
-nb::object dynamic_exploration_graph_explore_batch_wrapper(
+deglib::search::SearchResults dynamic_exploration_graph_explore_batch_wrapper(
     const deglib::DynamicExplorationGraph& graph,
     const InUint32Array& entry_external_labels,
     const uint32_t k,
@@ -566,38 +392,14 @@ nb::object dynamic_exploration_graph_explore_batch_wrapper(
 
     const uint32_t* entry_ptr = entry_external_labels.data();
     const uint32_t n_queries = static_cast<uint32_t>(entry_external_labels.shape(0));
-
-    uint32_t* result_indices_ptr = nullptr;
-    auto result_indices = make_numpy_2d<uint32_t>(n_queries, k, result_indices_ptr);
-
-    nb::ndarray<nb::numpy, float, nb::ndim<2>, nb::c_contig> result_distances;
-    float* result_distances_ptr = nullptr;
-    if (return_distances) {
-        result_distances = make_numpy_2d<float>(n_queries, k, result_distances_ptr);
-    }
-
     std::span<const uint32_t> entries_span(entry_ptr, n_queries);
-    std::span<uint32_t> out_indices_span(result_indices_ptr, static_cast<size_t>(n_queries) * k);
-    std::span<float> out_distances_span = return_distances ? std::span<float>(result_distances_ptr, static_cast<size_t>(n_queries) * k) : std::span<float>{};
 
-    {
-        nb::gil_scoped_release release;
-        if (eps_or_ef >= 1.0f) {
-            const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
-            graph.explore_batch_ef(
-                entries_span, k, ef, out_indices_span, out_distances_span, max_distance_computation_count, include_entry, filter, threads, unsorted
-            );
-        } else {
-            graph.explore_batch(
-                entries_span, k, out_indices_span, out_distances_span, max_distance_computation_count, eps_or_ef, include_entry, filter, threads, unsorted
-            );
-        }
+    nb::gil_scoped_release release;
+    if (eps_or_ef >= 1.0f) {
+        const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
+        return graph.explore_batch_ef(entries_span, k, ef, max_distance_computation_count, include_entry, filter, threads, return_distances, unsorted);
     }
-
-    if (return_distances) {
-        return nb::make_tuple(result_indices, result_distances);
-    }
-    return result_indices.cast();
+    return graph.explore_batch(entries_span, k, max_distance_computation_count, eps_or_ef, include_entry, filter, threads, return_distances, unsorted);
 }
 
 // ============================================================================
@@ -630,12 +432,8 @@ float float_space_compute_distance(const deglib::distances::FloatSpace& space, c
     return deglib::distances::compute_distance(space, vec1.data(), vec2.data());
 }
 
-nb::ndarray<nb::numpy, float, nb::ndim<2>, nb::c_contig> float_space_compute_distances(
-    const deglib::distances::FloatSpace& space,
-    const InArray& query,
-    const InArray& targets,
-    size_t threads
-) {
+nb::ndarray<nb::numpy, float, nb::ndim<2>, nb::c_contig>
+float_space_compute_distances(const deglib::distances::FloatSpace& space, const InArray& query, const InArray& targets, size_t threads) {
     const size_t req_bytes = space.get_data_size();
     const size_t query_bytes = space.get_query_data_size();
 
@@ -736,9 +534,7 @@ static std::shared_ptr<deglib::search::Reranker> reranker_from_float32(
     }
 
     nb::gil_scoped_release release;
-    return std::make_shared<deglib::search::Reranker>(
-        deglib::search::Reranker::from_data(space, data_span, std::move(transformations), threads, idx_span)
-    );
+    return std::make_shared<deglib::search::Reranker>(deglib::search::Reranker::from_data(space, data_span, std::move(transformations), threads, idx_span));
 }
 
 static std::shared_ptr<deglib::search::Reranker> reranker_from_raw(
@@ -782,16 +578,12 @@ static std::shared_ptr<deglib::search::Reranker> reranker_from_graph(
     if (transformations.empty()) {
         const auto target_dt = space.metric().get_data_type();
         const auto graph_dt = graph.getFeatureSpace().metric().get_data_type();
-        if (target_dt == deglib::distances::MetricDataType::FP16 &&
-            graph_dt == deglib::distances::MetricDataType::FP16 &&
-            graph.hasTransformations()) {
+        if (target_dt == deglib::distances::MetricDataType::FP16 && graph_dt == deglib::distances::MetricDataType::FP16 && graph.hasTransformations()) {
             transformations = graph.getTransformations();
         }
     }
     nb::gil_scoped_release release;
-    return std::make_shared<deglib::search::Reranker>(
-        deglib::search::Reranker::from_graph(graph.internal(), space, std::move(transformations), threads)
-    );
+    return std::make_shared<deglib::search::Reranker>(deglib::search::Reranker::from_graph(graph.internal(), space, std::move(transformations), threads));
 }
 
 static nb::object reranker_rerank_py(
@@ -853,13 +645,9 @@ static nb::object reranker_rerank_py(
             [&](size_t begin, size_t end, size_t) {
                 for (size_t q = begin; q < end; ++q) {
                     reranker.rerank_f32(
-                        std::span<const float>(q_ptr + q * q_dim, q_dim),
-                        std::span<const uint32_t>(cand_ptr + q * evp_k, evp_k),
-                        static_cast<uint32_t>(k_top),
-                        std::span<uint32_t>(ind_ptr + q * k_top, k_top),
-                        return_distances ? std::span<float>(dist_ptr + q * k_top, k_top) : std::span<float>{},
-                        return_distances,
-                        unsorted
+                        std::span<const float>(q_ptr + q * q_dim, q_dim), std::span<const uint32_t>(cand_ptr + q * evp_k, evp_k), static_cast<uint32_t>(k_top),
+                        std::span<uint32_t>(ind_ptr + q * k_top, k_top), return_distances ? std::span<float>(dist_ptr + q * k_top, k_top) : std::span<float>{},
+                        return_distances, unsorted
                     );
                 }
             },
@@ -869,9 +657,8 @@ static nb::object reranker_rerank_py(
         nb::gil_scoped_release release;
         reranker.rerank(
             std::span<const std::byte>(static_cast<const std::byte*>(q_raw_ptr), n_queries * req_bytes), n_queries,
-            std::span<const uint32_t>(cand_ptr, n_queries * evp_k), evp_k, static_cast<uint32_t>(k_top),
-            std::span<uint32_t>(ind_ptr, n_queries * k_top), return_distances ? std::span<float>(dist_ptr, n_queries * k_top) : std::span<float>{},
-            return_distances, unsorted, num_threads
+            std::span<const uint32_t>(cand_ptr, n_queries * evp_k), evp_k, static_cast<uint32_t>(k_top), std::span<uint32_t>(ind_ptr, n_queries * k_top),
+            return_distances ? std::span<float>(dist_ptr, n_queries * k_top) : std::span<float>{}, return_distances, unsorted, num_threads
         );
     }
 
@@ -911,7 +698,7 @@ class SearcherPy {
         searcher_->optimize(n_clusters, n_iter, sample_size, threads, use_routing);
     }
 
-    nb::object search(
+    deglib::search::SearchResults search(
         const InArray& query,
         uint32_t k,
         float eps_or_ef = 0.1f,
@@ -931,102 +718,40 @@ class SearcherPy {
 
         // 1D query or 2D single-row/single-column query -> execute fast single-query search
         if (ndim == 1 || (ndim == 2 && (query.shape(0) == 1 || query.shape(1) == 1))) {
-            const size_t alloc_k = k > 0 ? static_cast<size_t>(k) : 1;
-            uint32_t* raw_idx = new uint32_t[alloc_k];
-            nb::capsule idx_owner(raw_idx, [](void* p) noexcept { delete[] static_cast<uint32_t*>(p); });
-
-            float* raw_dist = nullptr;
-            nb::capsule dist_owner;
-            if (return_distances) {
-                raw_dist = new float[alloc_k];
-                dist_owner = nb::capsule(raw_dist, [](void* p) noexcept { delete[] static_cast<float*>(p); });
+            const size_t q_len = query.size();
+            if (is_f16) {
+                return searcher_->search<uint16_t>(
+                    std::span<const uint16_t>(static_cast<const uint16_t*>(query_ptr), q_len), k, eps_or_ef, rerank_factor, return_distances, unsorted,
+                    max_distance_computation_count
+                );
             }
-
-            uint32_t found = 0;
-            if (eps_or_ef >= 1.0f) {
-                const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
-                if (is_f16) {
-                    found = searcher_->search_ef_f16(
-                        static_cast<const uint16_t*>(query_ptr), k, ef, rerank_factor, raw_idx, raw_dist, unsorted, max_distance_computation_count
-                    );
-                } else {
-                    found = searcher_->search_ef_f32(
-                        static_cast<const float*>(query_ptr), k, ef, rerank_factor, raw_idx, raw_dist, unsorted, max_distance_computation_count
-                    );
-                }
-            } else {
-                if (is_f16) {
-                    found = searcher_->search_f16(
-                        static_cast<const uint16_t*>(query_ptr), k, eps_or_ef, rerank_factor, raw_idx, raw_dist, unsorted, max_distance_computation_count
-                    );
-                } else {
-                    found = searcher_->search_f32(
-                        static_cast<const float*>(query_ptr), k, eps_or_ef, rerank_factor, raw_idx, raw_dist, unsorted, max_distance_computation_count
-                    );
-                }
-            }
-
-            const size_t out_shape[1] = {static_cast<size_t>(found)};
-            nb::ndarray<nb::numpy, uint32_t, nb::ndim<1>, nb::c_contig> result(raw_idx, 1, out_shape, idx_owner);
-            if (return_distances) {
-                nb::ndarray<nb::numpy, float, nb::ndim<1>, nb::c_contig> dist_result(raw_dist, 1, out_shape, dist_owner);
-                return nb::make_tuple(result, dist_result);
-            }
-            return result.cast();
+            return searcher_->search<float>(
+                std::span<const float>(static_cast<const float*>(query_ptr), q_len), k, eps_or_ef, rerank_factor, return_distances, unsorted,
+                max_distance_computation_count
+            );
         }
 
         // 2D batch query
         if (ndim == 2) {
             const size_t n_queries = query.shape(0);
-            uint32_t* out_ptr = nullptr;
-            auto result = make_numpy_2d<uint32_t>(n_queries, static_cast<size_t>(k), out_ptr);
-
-            nb::ndarray<nb::numpy, float, nb::ndim<2>, nb::c_contig> dist_result;
-            float* dist_ptr = nullptr;
-            if (return_distances) {
-                dist_result = make_numpy_2d<float>(n_queries, static_cast<size_t>(k), dist_ptr);
+            const size_t q_cols = query.shape(1);
+            nb::gil_scoped_release release;
+            if (is_f16) {
+                return searcher_->search_batch<uint16_t>(
+                    std::span<const uint16_t>(static_cast<const uint16_t*>(query_ptr), n_queries * q_cols), n_queries, k, eps_or_ef, rerank_factor, num_threads,
+                    return_distances, unsorted, max_distance_computation_count
+                );
             }
-
-            {
-                nb::gil_scoped_release release;
-                if (eps_or_ef >= 1.0f) {
-                    const uint32_t ef = static_cast<uint32_t>(std::lround(eps_or_ef));
-                    if (is_f16) {
-                        searcher_->search_batch_ef_f16(
-                            static_cast<const uint16_t*>(query_ptr), n_queries, k, ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted,
-                            max_distance_computation_count
-                        );
-                    } else {
-                        searcher_->search_batch_ef_f32(
-                            static_cast<const float*>(query_ptr), n_queries, k, ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted,
-                            max_distance_computation_count
-                        );
-                    }
-                } else {
-                    if (is_f16) {
-                        searcher_->search_batch_f16(
-                            static_cast<const uint16_t*>(query_ptr), n_queries, k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted,
-                            max_distance_computation_count
-                        );
-                    } else {
-                        searcher_->search_batch_f32(
-                            static_cast<const float*>(query_ptr), n_queries, k, eps_or_ef, rerank_factor, out_ptr, dist_ptr, num_threads, unsorted,
-                            max_distance_computation_count
-                        );
-                    }
-                }
-            }
-
-            if (return_distances) {
-                return nb::make_tuple(result, dist_result);
-            }
-            return result.cast();
+            return searcher_->search_batch<float>(
+                std::span<const float>(static_cast<const float*>(query_ptr), n_queries * q_cols), n_queries, k, eps_or_ef, rerank_factor, num_threads,
+                return_distances, unsorted, max_distance_computation_count
+            );
         }
 
         throw std::invalid_argument("search query must be 1D vector or 2D batch array");
     }
 
-    nb::object search_batch(
+    deglib::search::SearchResults search_batch(
         const InArray& queries,
         uint32_t k,
         float eps_or_ef = 0.1f,
@@ -1069,7 +794,14 @@ class GraphBuilderPy {
                   }
                   return graph;
               }(),
-              rng_, optimization_target, extend_k, extend_eps, improve_k, improve_eps, max_path_length, improve_tries
+              rng_,
+              optimization_target,
+              extend_k,
+              extend_eps,
+              improve_k,
+              improve_eps,
+              max_path_length,
+              improve_tries
           ) {}
 
     void add_entry(const InUint32Array& label, const InArray& feature) {
@@ -1418,11 +1150,7 @@ float calc_graph_quality_wrapper(
 // ============================================================================
 
 template <typename QuantT, typename OutElemT, bool Packed4Bit = false>
-nb::ndarray<nb::numpy, OutElemT, nb::ndim<2>, nb::c_contig> quantize_scalar_2d(
-    const QuantT& q,
-    const InArray& vectors,
-    size_t threads
-) {
+nb::ndarray<nb::numpy, OutElemT, nb::ndim<2>, nb::c_contig> quantize_scalar_2d(const QuantT& q, const InArray& vectors, size_t threads) {
     auto [count, dim] = get_2d_shape(vectors);
     const size_t out_cols = Packed4Bit ? ((static_cast<size_t>(dim) + 1) / 2) : static_cast<size_t>(dim);
     const auto dt = vectors.dtype();
@@ -1440,15 +1168,11 @@ nb::ndarray<nb::numpy, OutElemT, nb::ndim<2>, nb::c_contig> quantize_scalar_2d(
     nb::gil_scoped_release release;
     if (is_fp16) {
         q.transform_database(
-            std::span<const uint16_t>(static_cast<const uint16_t*>(src), count * dim),
-            std::span<std::byte>(dst, count * out_cols * sizeof(OutElemT)),
-            threads
+            std::span<const uint16_t>(static_cast<const uint16_t*>(src), count * dim), std::span<std::byte>(dst, count * out_cols * sizeof(OutElemT)), threads
         );
     } else {
         q.transform_database(
-            std::span<const float>(static_cast<const float*>(src), count * dim),
-            std::span<std::byte>(dst, count * out_cols * sizeof(OutElemT)),
-            threads
+            std::span<const float>(static_cast<const float*>(src), count * dim), std::span<std::byte>(dst, count * out_cols * sizeof(OutElemT)), threads
         );
     }
     return output;
@@ -1642,10 +1366,8 @@ NB_MODULE(deglib_cpp, m) {
         const uint32_t tag = transformations.back()->tag();
         if (tag == deglib::transformation::TAG_SQI8 || tag == deglib::transformation::TAG_SQU7) {
             return emit_typed(std::type_identity<int8_t>{}, out_stride);
-        } else if (
-            tag == deglib::transformation::TAG_SQU8 || tag == deglib::transformation::TAG_EVPQ ||
-            tag == deglib::transformation::TAG_SQU4 || tag == deglib::transformation::TAG_SQI4
-        ) {
+        } else if (tag == deglib::transformation::TAG_SQU8 || tag == deglib::transformation::TAG_EVPQ || tag == deglib::transformation::TAG_SQU4 ||
+                   tag == deglib::transformation::TAG_SQI4) {
             return emit_typed(std::type_identity<uint8_t>{}, out_stride);
         } else if (tag == deglib::transformation::TAG_SQ16) {
             uint16_t* ptr = nullptr;
@@ -1681,8 +1403,8 @@ NB_MODULE(deglib_cpp, m) {
                 const uint32_t tag = t.tag();
                 nb::module_ np = nb::module_::import_("numpy");
                 if (tag == deglib::transformation::TAG_SQI8 || tag == deglib::transformation::TAG_SQU7) return nb::object(np.attr("int8"));
-                if (tag == deglib::transformation::TAG_SQU8 || tag == deglib::transformation::TAG_EVPQ ||
-                    tag == deglib::transformation::TAG_SQU4 || tag == deglib::transformation::TAG_SQI4)
+                if (tag == deglib::transformation::TAG_SQU8 || tag == deglib::transformation::TAG_EVPQ || tag == deglib::transformation::TAG_SQU4 ||
+                    tag == deglib::transformation::TAG_SQI4)
                     return nb::object(np.attr("uint8"));
                 if (tag == deglib::transformation::TAG_SQ16) return nb::object(np.attr("float16"));
                 return nb::object(np.attr("float32"));
@@ -1748,8 +1470,7 @@ NB_MODULE(deglib_cpp, m) {
                 run_deq(dst);
                 return output.cast();
             },
-            nb::arg("quantized"), nb::arg("threads") = 0,
-            "Dequantizes transformed vectors back to approximate float32 vectors."
+            nb::arg("quantized"), nb::arg("threads") = 0, "Dequantizes transformed vectors back to approximate float32 vectors."
         )
         .def("serialize", [](const deglib::transformation::FeatureTransformation& t) -> nb::bytes {
             std::ostringstream ss(std::ios::binary);
@@ -1807,8 +1528,7 @@ NB_MODULE(deglib_cpp, m) {
                     nb::gil_scoped_release release;
                     if (is_fp16) {
                         q.transform_database(
-                            std::span<const uint16_t>(static_cast<const uint16_t*>(src), count * dim), std::span<std::byte>(dst, count * evp_bytes),
-                            threads
+                            std::span<const uint16_t>(static_cast<const uint16_t*>(src), count * dim), std::span<std::byte>(dst, count * evp_bytes), threads
                         );
                     } else {
                         q.transform_database(
@@ -1822,9 +1542,7 @@ NB_MODULE(deglib_cpp, m) {
         )
         .def_static("deserialize", &deserialize_transform<deglib::transformation::EvpQuantizer>);
 
-    nb::class_<deglib::transformation::ScalarQuantizerInt8, deglib::transformation::FeatureTransformation>(
-        transformation_module, "ScalarQuantizerInt8"
-    )
+    nb::class_<deglib::transformation::ScalarQuantizerInt8, deglib::transformation::FeatureTransformation>(transformation_module, "ScalarQuantizerInt8")
         .def_prop_ro("dim", &deglib::transformation::ScalarQuantizerInt8::dim)
         .def_prop_ro("abs_max", &deglib::transformation::ScalarQuantizerInt8::abs_max)
         .def_prop_ro("scale", &deglib::transformation::ScalarQuantizerInt8::scale)
@@ -1832,9 +1550,7 @@ NB_MODULE(deglib_cpp, m) {
         .def("quantize", &quantize_scalar_2d<deglib::transformation::ScalarQuantizerInt8, int8_t>, nb::arg("vectors"), nb::arg("threads") = 0)
         .def_static("deserialize", &deserialize_transform<deglib::transformation::ScalarQuantizerInt8>);
 
-    nb::class_<deglib::transformation::ScalarQuantizerUint8, deglib::transformation::FeatureTransformation>(
-        transformation_module, "ScalarQuantizerUint8"
-    )
+    nb::class_<deglib::transformation::ScalarQuantizerUint8, deglib::transformation::FeatureTransformation>(transformation_module, "ScalarQuantizerUint8")
         .def_prop_ro("dim", &deglib::transformation::ScalarQuantizerUint8::dim)
         .def_prop_ro("min_val", &deglib::transformation::ScalarQuantizerUint8::min_val)
         .def_prop_ro("max_val", &deglib::transformation::ScalarQuantizerUint8::max_val)
@@ -1844,9 +1560,7 @@ NB_MODULE(deglib_cpp, m) {
         .def("quantize", &quantize_scalar_2d<deglib::transformation::ScalarQuantizerUint8, uint8_t>, nb::arg("vectors"), nb::arg("threads") = 0)
         .def_static("deserialize", &deserialize_transform<deglib::transformation::ScalarQuantizerUint8>);
 
-    nb::class_<deglib::transformation::ScalarQuantizerInt4, deglib::transformation::FeatureTransformation>(
-        transformation_module, "ScalarQuantizerInt4"
-    )
+    nb::class_<deglib::transformation::ScalarQuantizerInt4, deglib::transformation::FeatureTransformation>(transformation_module, "ScalarQuantizerInt4")
         .def_prop_ro("dim", &deglib::transformation::ScalarQuantizerInt4::dim)
         .def_prop_ro("abs_max", &deglib::transformation::ScalarQuantizerInt4::abs_max)
         .def_prop_ro("scale", &deglib::transformation::ScalarQuantizerInt4::scale)
@@ -1854,9 +1568,7 @@ NB_MODULE(deglib_cpp, m) {
         .def("quantize", &quantize_scalar_2d<deglib::transformation::ScalarQuantizerInt4, uint8_t, true>, nb::arg("vectors"), nb::arg("threads") = 0)
         .def_static("deserialize", &deserialize_transform<deglib::transformation::ScalarQuantizerInt4>);
 
-    nb::class_<deglib::transformation::ScalarQuantizerUInt7, deglib::transformation::FeatureTransformation>(
-        transformation_module, "ScalarQuantizerUInt7"
-    )
+    nb::class_<deglib::transformation::ScalarQuantizerUInt7, deglib::transformation::FeatureTransformation>(transformation_module, "ScalarQuantizerUInt7")
         .def_prop_ro("dim", &deglib::transformation::ScalarQuantizerUInt7::dim)
         .def_prop_ro("min", &deglib::transformation::ScalarQuantizerUInt7::min)
         .def_prop_ro("max", &deglib::transformation::ScalarQuantizerUInt7::max)
@@ -1866,9 +1578,7 @@ NB_MODULE(deglib_cpp, m) {
         .def("quantize", &quantize_scalar_2d<deglib::transformation::ScalarQuantizerUInt7, int8_t>, nb::arg("vectors"), nb::arg("threads") = 0)
         .def_static("deserialize", &deserialize_transform<deglib::transformation::ScalarQuantizerUInt7>);
 
-    nb::class_<deglib::transformation::ScalarQuantizerUint4, deglib::transformation::FeatureTransformation>(
-        transformation_module, "ScalarQuantizerUint4"
-    )
+    nb::class_<deglib::transformation::ScalarQuantizerUint4, deglib::transformation::FeatureTransformation>(transformation_module, "ScalarQuantizerUint4")
         .def_prop_ro("dim", &deglib::transformation::ScalarQuantizerUint4::dim)
         .def_prop_ro("min_val", &deglib::transformation::ScalarQuantizerUint4::min_val)
         .def_prop_ro("max_val", &deglib::transformation::ScalarQuantizerUint4::max_val)
@@ -1878,9 +1588,7 @@ NB_MODULE(deglib_cpp, m) {
         .def("quantize", &quantize_scalar_2d<deglib::transformation::ScalarQuantizerUint4, uint8_t, true>, nb::arg("vectors"), nb::arg("threads") = 0)
         .def_static("deserialize", &deserialize_transform<deglib::transformation::ScalarQuantizerUint4>);
 
-    nb::class_<deglib::transformation::ScalarQuantizerFP16, deglib::transformation::FeatureTransformation>(
-        transformation_module, "ScalarQuantizerFP16"
-    )
+    nb::class_<deglib::transformation::ScalarQuantizerFP16, deglib::transformation::FeatureTransformation>(transformation_module, "ScalarQuantizerFP16")
         .def_prop_ro("dim", &deglib::transformation::ScalarQuantizerFP16::dim)
         .def_prop_ro("abs_max", &deglib::transformation::ScalarQuantizerFP16::abs_max)
         .def_prop_ro("scale", &deglib::transformation::ScalarQuantizerFP16::scale)
@@ -1906,13 +1614,11 @@ NB_MODULE(deglib_cpp, m) {
                     nb::gil_scoped_release release;
                     if (is_fp16) {
                         q.transform_database(
-                            std::span<const uint16_t>(static_cast<const uint16_t*>(src), count * dim),
-                            std::span<std::byte>(dst, count * dim * sizeof(uint16_t))
+                            std::span<const uint16_t>(static_cast<const uint16_t*>(src), count * dim), std::span<std::byte>(dst, count * dim * sizeof(uint16_t))
                         );
                     } else {
                         q.transform_database(
-                            std::span<const float>(static_cast<const float*>(src), count * dim),
-                            std::span<std::byte>(dst, count * dim * sizeof(uint16_t)),
+                            std::span<const float>(static_cast<const float*>(src), count * dim), std::span<std::byte>(dst, count * dim * sizeof(uint16_t)),
                             threads
                         );
                     }
@@ -1923,15 +1629,11 @@ NB_MODULE(deglib_cpp, m) {
         )
         .def_static("deserialize", &deserialize_transform<deglib::transformation::ScalarQuantizerFP16>);
 
-    nb::class_<deglib::transformation::L2NormalizeTransform, deglib::transformation::FeatureTransformation>(
-        transformation_module, "L2NormalizeTransform"
-    )
+    nb::class_<deglib::transformation::L2NormalizeTransform, deglib::transformation::FeatureTransformation>(transformation_module, "L2NormalizeTransform")
         .def_prop_ro("dim", &deglib::transformation::L2NormalizeTransform::dim)
         .def_static("deserialize", &deserialize_transform<deglib::transformation::L2NormalizeTransform>);
 
-    nb::class_<deglib::transformation::FastHadamardRotation, deglib::transformation::FeatureTransformation>(
-        transformation_module, "FastHadamardRotation"
-    )
+    nb::class_<deglib::transformation::FastHadamardRotation, deglib::transformation::FeatureTransformation>(transformation_module, "FastHadamardRotation")
         .def_prop_ro("rounds", &deglib::transformation::FastHadamardRotation::rounds)
         .def_prop_ro("dim", &deglib::transformation::FastHadamardRotation::dim)
         .def_prop_ro("seed", &deglib::transformation::FastHadamardRotation::seed)
@@ -1942,35 +1644,25 @@ NB_MODULE(deglib_cpp, m) {
         .def_static("deserialize", &deserialize_transform<deglib::transformation::FastHadamardRotation>);
 
     transformation_module.def(
-        "make_scalar_quantizer_int8",
-        &make_scalar_quantizer_impl<deglib::transformation::ScalarQuantizerInt8>,
-        nb::arg("vectors"), nb::arg("quantile") = -1.0f
+        "make_scalar_quantizer_int8", &make_scalar_quantizer_impl<deglib::transformation::ScalarQuantizerInt8>, nb::arg("vectors"), nb::arg("quantile") = -1.0f
     );
     transformation_module.def(
-        "make_scalar_quantizer_uint8",
-        &make_scalar_quantizer_impl<deglib::transformation::ScalarQuantizerUint8>,
-        nb::arg("vectors"), nb::arg("quantile") = -1.0f
+        "make_scalar_quantizer_uint8", &make_scalar_quantizer_impl<deglib::transformation::ScalarQuantizerUint8>, nb::arg("vectors"),
+        nb::arg("quantile") = -1.0f
     );
     transformation_module.def(
-        "make_scalar_quantizer_int4",
-        &make_scalar_quantizer_impl<deglib::transformation::ScalarQuantizerInt4>,
-        nb::arg("vectors"), nb::arg("quantile") = -1.0f
+        "make_scalar_quantizer_int4", &make_scalar_quantizer_impl<deglib::transformation::ScalarQuantizerInt4>, nb::arg("vectors"), nb::arg("quantile") = -1.0f
     );
     transformation_module.def(
-        "make_scalar_quantizer_uint7",
-        &make_scalar_quantizer_impl<deglib::transformation::ScalarQuantizerUInt7>,
-        nb::arg("vectors"), nb::arg("quantile") = -1.0f
+        "make_scalar_quantizer_uint7", &make_scalar_quantizer_impl<deglib::transformation::ScalarQuantizerUInt7>, nb::arg("vectors"),
+        nb::arg("quantile") = -1.0f
     );
     transformation_module.def(
-        "make_scalar_quantizer_uint4",
-        &make_scalar_quantizer_impl<deglib::transformation::ScalarQuantizerUint4>,
-        nb::arg("vectors"), nb::arg("quantile") = -1.0f,
-        "Factory function creating a ScalarQuantizerUint4 calibrated on vectors. If quantile < 0 (default), auto-optimizes."
+        "make_scalar_quantizer_uint4", &make_scalar_quantizer_impl<deglib::transformation::ScalarQuantizerUint4>, nb::arg("vectors"),
+        nb::arg("quantile") = -1.0f, "Factory function creating a ScalarQuantizerUint4 calibrated on vectors. If quantile < 0 (default), auto-optimizes."
     );
     transformation_module.def(
-        "make_scalar_quantizer_fp16",
-        &make_scalar_quantizer_impl<deglib::transformation::ScalarQuantizerFP16>,
-        nb::arg("vectors"), nb::arg("quantile") = -1.0f
+        "make_scalar_quantizer_fp16", &make_scalar_quantizer_impl<deglib::transformation::ScalarQuantizerFP16>, nb::arg("vectors"), nb::arg("quantile") = -1.0f
     );
 
     transformation_module.def(
@@ -1988,8 +1680,7 @@ NB_MODULE(deglib_cpp, m) {
                 std::vector<float> f_vec = convert_array_to_float32(vectors);
                 nb::gil_scoped_release release;
                 return deglib::transformation::make_quantizer_pipeline(
-                    std::span<const float>(f_vec.data(), count * dim), static_cast<uint32_t>(dim), data_type, quantile, use_rerank,
-                    threads, seed
+                    std::span<const float>(f_vec.data(), count * dim), static_cast<uint32_t>(dim), data_type, quantile, use_rerank, threads, seed
                 );
             }
 
@@ -2002,8 +1693,7 @@ NB_MODULE(deglib_cpp, m) {
                 );
             }
             return deglib::transformation::make_quantizer_pipeline(
-                std::span<const float>(static_cast<const float*>(src), count * dim), static_cast<uint32_t>(dim), data_type, quantile, use_rerank,
-                threads, seed
+                std::span<const float>(static_cast<const float*>(src), count * dim), static_cast<uint32_t>(dim), data_type, quantile, use_rerank, threads, seed
             );
         },
         nb::arg("vectors"), nb::arg("quant"), nb::arg("quantile") = -1.0f, nb::arg("use_rerank") = false, nb::arg("threads") = 0, nb::arg("seed") = 7,
@@ -2049,9 +1739,8 @@ NB_MODULE(deglib_cpp, m) {
                     },
                     64
                 );
-                pipeline = deglib::transformation::make_quantizer_pipeline(
-                    std::span<const float>(sample_f32), dim, target_dt, quantile, use_rerank, threads, seed
-                );
+                pipeline =
+                    deglib::transformation::make_quantizer_pipeline(std::span<const float>(sample_f32), dim, target_dt, quantile, use_rerank, threads, seed);
             }
             return pipeline;
         },
@@ -2082,8 +1771,7 @@ NB_MODULE(deglib_cpp, m) {
             }
             return q;
         },
-        nb::arg("vectors"), nb::arg("non_zeros") = 0, nb::arg("threads") = 0,
-        "Factory function creating an EvpQuantizer calibrated on vectors."
+        nb::arg("vectors"), nb::arg("non_zeros") = 0, nb::arg("threads") = 0, "Factory function creating an EvpQuantizer calibrated on vectors."
     );
 
     transformation_module.def(
@@ -2116,8 +1804,7 @@ NB_MODULE(deglib_cpp, m) {
             }
             return t;
         },
-        nb::arg("vectors"), nb::arg("max_norm") = 0.0f,
-        "Factory function creating a MipsTransform (d -> d+1 spherical lift) fitted on vectors."
+        nb::arg("vectors"), nb::arg("max_norm") = 0.0f, "Factory function creating a MipsTransform (d -> d+1 spherical lift) fitted on vectors."
     );
 
     transformation_module.def(
@@ -2128,8 +1815,7 @@ NB_MODULE(deglib_cpp, m) {
             }
             return std::make_shared<deglib::transformation::L2NormalizeTransform>(dim);
         },
-        nb::arg("dim"),
-        "Factory function creating an L2NormalizeTransform."
+        nb::arg("dim"), "Factory function creating an L2NormalizeTransform."
     );
 
     transformation_module.def(
@@ -2185,8 +1871,57 @@ NB_MODULE(deglib_cpp, m) {
     m.attr("make_scalar_quantizer_fp16") = transformation_module.attr("make_scalar_quantizer_fp16");
 
     // search submodule
-    nb::module_ search_module = m.def_submodule("search", "Search utilities including Filter");
+    nb::module_ search_module = m.def_submodule("search", "Search utilities including Filter and SearchResults");
     nb::class_<deglib::search::Filter>(search_module, "Filter");
+
+    static uint32_t s_empty_u32 = 0;
+    static float s_empty_f32 = 0.0f;
+    nb::class_<deglib::search::SearchResults>(
+        search_module, "SearchResults", "Unified search results holding zero-copy NumPy arrays (`indices`, optional `distances`) and traversal telemetry."
+    )
+        .def_prop_ro(
+            "indices",
+            [](nb::handle self_h) -> nb::object {
+                auto& self = nb::cast<deglib::search::SearchResults&>(self_h);
+                uint32_t* ptr = self.indices.empty() ? &s_empty_u32 : self.indices.data();
+                if (self.is_batch) {
+                    size_t shape[2] = {self.n_queries, static_cast<size_t>(self.k)};
+                    return nb::ndarray<nb::numpy, uint32_t, nb::ndim<2>, nb::c_contig>(ptr, 2, shape, self_h).cast();
+                }
+                size_t shape[1] = {self.indices.size()};
+                return nb::ndarray<nb::numpy, uint32_t, nb::ndim<1>, nb::c_contig>(ptr, 1, shape, self_h).cast();
+            },
+            "Zero-copy NumPy uint32 ndarray of neighbor external labels (1D for single query, 2D for batch)."
+        )
+        .def_prop_ro(
+            "distances",
+            [](nb::handle self_h) -> nb::object {
+                auto& self = nb::cast<deglib::search::SearchResults&>(self_h);
+                if (!self.has_distances()) return nb::none();
+                float* ptr = self.distances.empty() ? &s_empty_f32 : self.distances.data();
+                if (self.is_batch) {
+                    size_t shape[2] = {self.n_queries, static_cast<size_t>(self.k)};
+                    return nb::ndarray<nb::numpy, float, nb::ndim<2>, nb::c_contig>(ptr, 2, shape, self_h).cast();
+                }
+                size_t shape[1] = {self.distances.size()};
+                return nb::ndarray<nb::numpy, float, nb::ndim<1>, nb::c_contig>(ptr, 1, shape, self_h).cast();
+            },
+            "Zero-copy NumPy float32 ndarray of neighbor distances, or None when return_distances=False."
+        )
+        .def_ro(
+            "graph_distance_count", &deglib::search::SearchResults::graph_distance_count,
+            "Total number of distance computations performed during graph traversal."
+        )
+        .def_ro(
+            "rerank_distance_count", &deglib::search::SearchResults::rerank_distance_count,
+            "Total number of exact distance computations performed during candidate reranking."
+        )
+        .def_ro(
+            "graph_hop_count", &deglib::search::SearchResults::graph_hop_count, "Total number of graph vertex expansions (hops) performed during traversal."
+        )
+        .def("__len__", &deglib::search::SearchResults::size);
+
+    m.attr("SearchResults") = search_module.attr("SearchResults");
 
     search_module.def("create_filter", [](const InIntArray& valid_labels, size_t max_value, size_t max_label_count) {
         if (valid_labels.ndim() != 1) {
@@ -2199,22 +1934,18 @@ NB_MODULE(deglib_cpp, m) {
 
     nb::class_<deglib::search::Reranker>(search_module, "Reranker", "Owning C++ candidate reranker.")
         .def_static(
-            "from_float32", &reranker_from_float32,
-            nb::arg("space"), nb::arg("data"),
-            nb::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{},
-            nb::arg("threads") = 0, nb::arg("row_indices") = nb::none()
+            "from_float32", &reranker_from_float32, nb::arg("space"), nb::arg("data"),
+            nb::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}, nb::arg("threads") = 0,
+            nb::arg("row_indices") = nb::none()
         )
         .def_static(
-            "from_raw", &reranker_from_raw,
-            nb::arg("space"), nb::arg("data"),
-            nb::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{},
-            nb::arg("threads") = 0, nb::arg("row_indices") = nb::none()
+            "from_raw", &reranker_from_raw, nb::arg("space"), nb::arg("data"),
+            nb::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}, nb::arg("threads") = 0,
+            nb::arg("row_indices") = nb::none()
         )
         .def_static(
-            "from_graph", &reranker_from_graph,
-            nb::arg("graph"), nb::arg("space"),
-            nb::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{},
-            nb::arg("threads") = 0
+            "from_graph", &reranker_from_graph, nb::arg("graph"), nb::arg("space"),
+            nb::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}, nb::arg("threads") = 0
         )
         .def("get_num_base_vectors", &deglib::search::Reranker::getNumBaseVectors)
         .def("get_dim", [](const deglib::search::Reranker& r) { return r.getSpace().dim(); })
@@ -2237,8 +1968,8 @@ NB_MODULE(deglib_cpp, m) {
 
     nb::class_<SearcherPy>(search_module, "Searcher", "Search pipeline. Results are the graph's labels.")
         .def(
-            nb::init<const deglib::DynamicExplorationGraph&, std::shared_ptr<deglib::search::Reranker>, bool>(),
-            nb::arg("graph"), nb::arg("reranker") = nullptr, nb::arg("normalize_query") = false, nb::keep_alive<1, 2>(),
+            nb::init<const deglib::DynamicExplorationGraph&, std::shared_ptr<deglib::search::Reranker>, bool>(), nb::arg("graph"),
+            nb::arg("reranker") = nullptr, nb::arg("normalize_query") = false, nb::keep_alive<1, 2>(),
             "Construct a Searcher with optional shared owning Reranker."
         )
         .def_prop_rw("normalize_query", &SearcherPy::get_normalize_query, &SearcherPy::set_normalize_query)
@@ -2253,9 +1984,11 @@ NB_MODULE(deglib_cpp, m) {
             "               values < 1.0 are treated as relative distance margin (eps).\n"
             "    rerank_factor: Expansion factor for exact candidate reranking (default: 1.0).\n"
             "    threads: Number of worker threads for batch search (default: 1).\n"
-            "    return_distances: If True, returns a tuple of (indices, distances).\n"
+            "    return_distances: If True, populates `.distances` on the returned SearchResults.\n"
             "    unsorted: If True, returns candidates in heap order instead of ascending distance.\n"
-            "    max_distance_computation_count: Optional hard budget of distance computations per query (0 = unlimited)."
+            "    max_distance_computation_count: Optional hard budget of distance computations per query (0 = unlimited).\n\n"
+            "Returns:\n"
+            "    SearchResults: Object with zero-copy `.indices`, optional `.distances`, and telemetry counts."
         )
         .def(
             "search_batch", &SearcherPy::search_batch, nb::arg("queries"), nb::arg("k") = 10, nb::arg("eps_or_ef") = 0.1f, nb::arg("rerank_factor") = 1.0f,
@@ -2268,9 +2001,11 @@ NB_MODULE(deglib_cpp, m) {
             "               values < 1.0 are treated as relative distance margin (eps).\n"
             "    rerank_factor: Expansion factor for exact candidate reranking (default: 1.0).\n"
             "    threads: Number of worker threads for parallel search.\n"
-            "    return_distances: If True, returns a tuple of (indices, distances).\n"
+            "    return_distances: If True, populates `.distances` on the returned SearchResults.\n"
             "    unsorted: If True, returns candidates in heap order instead of ascending distance.\n"
-            "    max_distance_computation_count: Optional hard budget of distance computations per query (0 = unlimited)."
+            "    max_distance_computation_count: Optional hard budget of distance computations per query (0 = unlimited).\n\n"
+            "Returns:\n"
+            "    SearchResults: Object with zero-copy `.indices`, optional `.distances`, and telemetry counts."
         )
         .def(
             "optimize", &SearcherPy::optimize, nb::arg("n_clusters") = 256, nb::arg("n_iter") = 20, nb::arg("sample_size") = 0, nb::arg("threads") = 0,
@@ -2376,8 +2111,7 @@ NB_MODULE(deglib_cpp, m) {
                 return g.to_readonly(custom_feature_space, feat_ptr, std::move(transformations), num_threads);
             },
             nb::arg("custom_feature_space") = nb::none(), nb::arg("custom_features") = nb::none(),
-            nb::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{},
-            nb::arg("threads") = 0
+            nb::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}, nb::arg("threads") = 0
         )
         .def("set_transformations", &deglib::DynamicExplorationGraph::setTransformations, nb::arg("transformations"))
         .def(
@@ -2403,17 +2137,17 @@ NB_MODULE(deglib_cpp, m) {
             nb::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}
         )
         .def(
-            "search", &graph_search_single_wrapper<deglib::DynamicExplorationGraph>, nb::arg("query"), nb::arg("eps_or_ef"), nb::arg("k"),
-            nb::arg("filter") = nullptr, nb::arg("max_distance_computation_count") = 0, nb::arg("return_distances") = true, nb::arg("unsorted") = false
+            "search", &graph_search_single_wrapper, nb::arg("query"), nb::arg("eps_or_ef"), nb::arg("k"), nb::arg("filter") = nullptr,
+            nb::arg("max_distance_computation_count") = 0, nb::arg("return_distances") = true, nb::arg("unsorted") = false
         )
         .def(
             "search_batch", &dynamic_exploration_graph_search_batch_wrapper, nb::arg("query"), nb::arg("eps_or_ef"), nb::arg("k"), nb::arg("filter") = nullptr,
             nb::arg("max_distance_computation_count") = 0, nb::arg("threads") = 1, nb::arg("return_distances") = true, nb::arg("unsorted") = false
         )
         .def(
-            "explore", &graph_explore_single_wrapper<deglib::DynamicExplorationGraph>, nb::arg("entry_external_label"), nb::arg("k"),
-            nb::arg("max_distance_computation_count") = 0, nb::arg("eps_or_ef") = 0.0f, nb::arg("include_entry") = true, nb::arg("filter") = nullptr,
-            nb::arg("return_distances") = true, nb::arg("unsorted") = false
+            "explore", &graph_explore_single_wrapper, nb::arg("entry_external_label"), nb::arg("k"), nb::arg("max_distance_computation_count") = 0,
+            nb::arg("eps_or_ef") = 0.0f, nb::arg("include_entry") = true, nb::arg("filter") = nullptr, nb::arg("return_distances") = true,
+            nb::arg("unsorted") = false
         )
         .def(
             "explore_batch", &dynamic_exploration_graph_explore_batch_wrapper, nb::arg("entry_external_labels"), nb::arg("k"),
@@ -2483,12 +2217,12 @@ NB_MODULE(deglib_cpp, m) {
 
     nb::class_<GraphBuilderPy>(m, "GraphBuilder")
         .def(
-            nb::init<deglib::DynamicExplorationGraph&, std::optional<uint32_t>, deglib::builder::OptimizationTarget, uint8_t, float, uint8_t, float, uint8_t, uint32_t>(),
-            nb::arg("graph"), nb::arg("seed") = nb::none(),
-            nb::arg("optimization_target") = deglib::builder::OptimizationTarget::LowLID,
-            nb::arg("extend_k") = 0, nb::arg("extend_eps") = 0.1f, nb::arg("improve_k") = 0, nb::arg("improve_eps") = 0.001f,
-            nb::arg("max_path_length") = 5, nb::arg("improve_tries") = 0,
-            nb::keep_alive<1, 2>()
+            nb::init<
+                deglib::DynamicExplorationGraph&, std::optional<uint32_t>, deglib::builder::OptimizationTarget, uint8_t, float, uint8_t, float, uint8_t,
+                uint32_t>(),
+            nb::arg("graph"), nb::arg("seed") = nb::none(), nb::arg("optimization_target") = deglib::builder::OptimizationTarget::LowLID,
+            nb::arg("extend_k") = 0, nb::arg("extend_eps") = 0.1f, nb::arg("improve_k") = 0, nb::arg("improve_eps") = 0.001f, nb::arg("max_path_length") = 5,
+            nb::arg("improve_tries") = 0, nb::keep_alive<1, 2>()
         )
         .def("add_entry", &GraphBuilderPy::add_entry, nb::arg("label"), nb::arg("feature"))
         .def("remove_entry", &GraphBuilderPy::remove_entry)

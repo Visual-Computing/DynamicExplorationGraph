@@ -32,10 +32,12 @@ TEST(DynamicGraph, RandomGraphAndSearch) {
     std::vector<float> query = {0.1f, 0.2f, 0.3f, 0.4f};
     auto results = graph.search(std::span<const float>(query), 5);
     EXPECT_EQ(results.size(), 5);
+    EXPECT_GT(results.graph_distance_count, 0u);
 
     // Exploration from vertex 0
     auto explore_results = graph.explore(0, 5);
     EXPECT_EQ(explore_results.size(), 5);
+    EXPECT_GT(explore_results.graph_distance_count, 0u);
 
     // Pathfinding
     auto path = graph.hasPath(graph.getEntryVertexIndices(), 10, 0.1f, 10);

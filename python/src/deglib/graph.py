@@ -213,9 +213,13 @@ class DynamicExplorationGraph:
         threads: int = 0,
         return_distances: bool = True,
         unsorted: bool = False,
-    ) -> tuple[np.ndarray, np.ndarray] | np.ndarray:
+    ) -> deglib_cpp.SearchResults:
         """
         Search the graph for the ``k`` approximate nearest neighbors of ``query`` (1D or 2D).
+
+        Returns a ``SearchResults`` object containing zero-copy NumPy ``.indices``,
+        optional ``.distances`` (or ``None`` when ``return_distances=False``),
+        and traversal telemetry (``.graph_distance_count``, ``.graph_hop_count``).
         """
         if not isinstance(query, np.ndarray):
             query = np.ascontiguousarray(query, dtype=np.float32)
@@ -264,18 +268,23 @@ class DynamicExplorationGraph:
         filter_labels: Any = None,
         return_distances: bool = True,
         unsorted: bool = False,
-    ) -> tuple[np.ndarray, np.ndarray] | np.ndarray:
+    ) -> deglib_cpp.SearchResults:
         """
         Explore the neighborhood starting from ``entry_external_label`` (single int or 1D array/sequence).
+
+        Returns a ``SearchResults`` object containing zero-copy NumPy ``.indices``,
+        optional ``.distances`` (or ``None`` when ``return_distances=False``),
+        and traversal telemetry (``.graph_distance_count``, ``.graph_hop_count``).
         """
+        if filter_labels is None:
+            filter_obj = None
+        else:
+            from deglib.search import Filter
+
+            filter_obj = Filter.create_filter(filter_labels, self.size()).filter_cpp
+
         if isinstance(entry_external_label, (np.ndarray, list, tuple)):
             arr = np.ascontiguousarray(entry_external_label, dtype=np.uint32)
-            if filter_labels is None:
-                filter_obj = None
-            else:
-                from deglib.search import Filter
-
-                filter_obj = Filter.create_filter(filter_labels, self.size()).filter_cpp
             eff_threads = get_num_useful_threads(threads, arr.shape[0])
             return self.dynamic_exploration_graph_cpp.explore_batch(
                 arr,
@@ -289,23 +298,16 @@ class DynamicExplorationGraph:
                 unsorted,
             )
 
-        if filter_labels is None:
-            filter_obj = None
-        else:
-            from deglib.search import Filter
-
-            filter_obj = Filter.create_filter(filter_labels, self.size()).filter_cpp.filter_cpp
-        indices, distances = self.dynamic_exploration_graph_cpp.explore(
+        return self.dynamic_exploration_graph_cpp.explore(
             int(entry_external_label),
             k,
             max_distance_computation_count,
             eps_or_ef,
             include_entry,
             filter_obj,
+            return_distances,
+            unsorted,
         )
-        if return_distances:
-            return indices, distances
-        return indices
 
     def has_path(
         self,

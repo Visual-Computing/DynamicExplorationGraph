@@ -3,7 +3,7 @@
 // deglib Search Module Umbrella Header
 //
 // Includes all components for querying Dynamic Exploration Graphs:
-// - result_list.h: SearchResult, SearchResultBatch, ResultList, ObjectDistance
+// - result_list.h: SearchResults, ResultList, ObjectDistance
 // - kmeans.h:      KMeansEntrySelector (query-routing entry selection)
 // - reranker.h:    Reranker (high-precision candidate reranker)
 // - searcher.h:    Searcher (stateless end-to-end query coordinator)

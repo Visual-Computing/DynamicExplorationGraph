@@ -13,6 +13,12 @@ and to run high-throughput, end-to-end query pipelines (via :class:`~deglib.sear
 Searcher
 --------
 
+.. autoclass:: deglib.search.SearchResults
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :member-order: bysource
+
 .. autoclass:: deglib.search.Searcher
    :members:
    :undoc-members:
@@ -66,16 +72,19 @@ High-Performance Searcher with Reranking
    )
 
    # Single query using relative margin (eps_or_ef < 1.0)
-   indices, distances = searcher.search(query, k=10, eps_or_ef=0.1, rerank_factor=1.5, return_distances=True)
+   res = searcher.search(query, k=10, eps_or_ef=0.1, rerank_factor=1.5, return_distances=True)
+   indices, distances = res.indices, res.distances
 
    # Single query using fixed pool exploration (eps_or_ef >= 1.0, HNSW-style)
-   indices_ef, distances_ef = searcher.search(query, k=10, eps_or_ef=128, rerank_factor=1.5, return_distances=True)
+   res_ef = searcher.search(query, k=10, eps_or_ef=128, rerank_factor=1.5, return_distances=True)
+   indices_ef, distances_ef = res_ef.indices, res_ef.distances
 
    # Multithreaded batch query (supports eps_or_ef < 1.0 or >= 1.0)
    batch_queries = np.random.randn(100, dim).astype(np.float32)
-   batch_indices, batch_distances = searcher.search(
+   batch_res = searcher.search(
        batch_queries, k=10, eps_or_ef=128, rerank_factor=1.5, threads=8, return_distances=True
    )
+   batch_indices, batch_distances = batch_res.indices, batch_res.distances
 
 Filtered Search
 ^^^^^^^^^^^^^^^
@@ -95,9 +104,9 @@ Filtered Search
 
    # Perform nearest-neighbor query with filter applied
    query = np.random.randn(64).astype(np.float32)
-   indices, distances = graph.search(query, k=5, eps_or_ef=0.1, filter_labels=search_filter)
-   print("Filtered nearest neighbor indices:", indices)
-   print("Distances:", distances)
+   res = graph.search(query, k=5, eps_or_ef=0.1, filter_labels=search_filter)
+   print("Filtered nearest neighbor indices:", res.indices)
+   print("Distances:", res.distances)
 
 Two-Stage Re-Ranking
 ^^^^^^^^^^^^^^^^^^^^

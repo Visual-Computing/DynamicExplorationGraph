@@ -18,26 +18,27 @@ Querying the graph finds the `k` closest feature vectors to an unindexed query v
    query = np.random.randn(dim).astype(np.float32)
 
    # Single query search using relative margin (eps_or_ef < 1.0)
-   indices, distances = graph.search(query, k=10, eps_or_ef=0.1)
+   res = graph.search(query, k=10, eps_or_ef=0.1)
 
-   print("Top-10 nearest neighbor IDs:", indices)
-   print("Distances:", distances)
+   print("Top-10 nearest neighbor IDs:", res.indices)
+   print("Distances:", res.distances)
+   print("Graph distance evals:", res.graph_distance_count, "| Hops:", res.graph_hop_count)
 
 Batch Search
 ^^^^^^^^^^^^
 
-Pass a 2D NumPy array of shape ``(N_queries, dim)`` to search multiple queries in parallel with OpenMP multi-threading:
+Pass a 2D NumPy array of shape ``(N_queries, dim)`` to search multiple queries in parallel with multi-threading:
 
 .. code-block:: python
 
    queries = np.random.randn(100, dim).astype(np.float32)
 
    # Search 100 queries in parallel using 4 CPU worker threads
-   indices, distances = graph.search(queries, k=10, eps_or_ef=0.1, threads=4)
+   batch_res = graph.search(queries, k=10, eps_or_ef=0.1, threads=4)
 
    # Result shapes: (100, 10)
-   print("Batch result indices shape:", indices.shape)
-   print("Batch result distances shape:", distances.shape)
+   print("Batch result indices shape:", batch_res.indices.shape)
+   print("Batch result distances shape:", batch_res.distances.shape)
 
 ---
 
@@ -60,10 +61,10 @@ The exploration behavior is controlled by the unified parameter ``eps_or_ef``:
 .. code-block:: python
 
    # Relative margin exploration (DEG default)
-   ids_eps, dists_eps = graph.search(query, k=10, eps_or_ef=0.1)
+   res_eps = graph.search(query, k=10, eps_or_ef=0.1)
 
    # Fixed candidate pool exploration (HNSW-style)
-   ids_ef, dists_ef = graph.search(query, k=10, eps_or_ef=64)
+   res_ef = graph.search(query, k=10, eps_or_ef=64)
 
 ---
 
@@ -80,7 +81,8 @@ Search can be constrained to a specific subset of valid vertex IDs using :class:
    allowed_ids = np.array([5, 12, 42, 108, 500], dtype=np.int32)
    search_filter = Filter(allowed_ids)
 
-   indices, distances = graph.search(query, k=5, eps_or_ef=0.1, filter_labels=search_filter)
+   res = graph.search(query, k=5, eps_or_ef=0.1, filter_labels=search_filter)
+   indices, distances = res.indices, res.distances
 
 ---
 
@@ -95,14 +97,14 @@ Single Vertex Exploration
 .. code-block:: python
 
    # Explore the graph starting from vertex ID 42
-   neighbor_ids, distances = graph.explore(
+   exp_res = graph.explore(
        entry_external_label=42,
        k=10,
        eps_or_ef=0.1,
        include_entry=False,  # exclude the start vertex itself
    )
 
-   print("Exploration results from vertex 42:", neighbor_ids)
+   print("Exploration results from vertex 42:", exp_res.indices)
 
 Batch Exploration
 ^^^^^^^^^^^^^^^^^
@@ -113,13 +115,14 @@ Pass a 1D array or list of entry labels to explore multiple neighborhoods concur
 
    entry_ids = np.array([42, 100, 250, 777], dtype=np.uint32)
 
-   # Returns 2D arrays of shape (4, 10)
-   batch_neighbors, batch_dists = graph.explore(
+   # Returns SearchResults with 2D arrays of shape (4, 10)
+   batch_exp = graph.explore(
        entry_ids,
        k=10,
        eps_or_ef=0.1,
        threads=4,
    )
+   batch_neighbors, batch_dists = batch_exp.indices, batch_exp.distances
 
 ---
 

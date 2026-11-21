@@ -13,6 +13,7 @@ from deglib.transformation import (
 from deglib.utils import assure_array, assure_contiguous
 
 cpp_search = deglib_cpp.search
+SearchResults = cpp_search.SearchResults
 
 
 class Filter:
@@ -272,9 +273,14 @@ class Searcher:
         return_distances: bool = False,
         unsorted: bool = False,
         max_distance_computation_count: int = 0,
-    ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+    ) -> SearchResults:
         """
         Search for the ``k`` nearest neighbors of a 1D query or 2D query batch.
+
+        Returns a ``SearchResults`` object with zero-copy NumPy ``.indices``,
+        optional ``.distances`` (or ``None`` when ``return_distances=False``),
+        and traversal telemetry (``.graph_distance_count``, ``.rerank_distance_count``,
+        ``.graph_hop_count``).
         """
         if type(query) is not np.ndarray:
             query = np.ascontiguousarray(query, dtype=np.float32)
@@ -397,4 +403,4 @@ def create_searcher(
     )
 
 
-__all__ = ["Filter", "Reranker", "rerank", "Searcher", "create_searcher"]
+__all__ = ["Filter", "Reranker", "rerank", "Searcher", "SearchResults", "create_searcher"]

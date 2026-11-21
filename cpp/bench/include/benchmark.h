@@ -34,10 +34,7 @@ namespace deglib::benchmark {
  * @param base_gt Optional contiguous BaseGroundTruth buffer
  * @return GraphStats with all computed statistics
  */
-inline deglib::analysis::GraphStats analyze_graph(
-    const deglib::graph::InternalGraph& graph,
-    const BaseGroundTruth& base_gt = {}
-) {
+inline deglib::analysis::GraphStats analyze_graph(const deglib::graph::InternalGraph& graph, const BaseGroundTruth& base_gt = {}) {
     auto stats = deglib::analysis::analyze_graph(graph, base_gt.data(), base_gt.rows, base_gt.k);
 
     log("Graph Statistics:\n");
@@ -133,11 +130,11 @@ static float test_approx_anns(
 
         uint32_t correct = 0;
         const auto& gt = ground_truth[i];
-        while (result_queue.empty() == false) {
-            const auto& result = result_queue.top();
+        while (result_queue.results.empty() == false) {
+            const auto& result = result_queue.results.top();
             const auto external_id = graph.getExternalLabel(result.getIdentifier());
             if (std::binary_search(gt.begin(), gt.end(), external_id)) correct++;
-            result_queue.pop();
+            result_queue.results.pop();
         }
 
         corrects[thread_id] += correct;
@@ -172,11 +169,11 @@ static float test_approx_explore(
 
         uint32_t correct = 0;
         const auto& gt = ground_truth[i];
-        while (result_queue.empty() == false) {
-            const auto& result = result_queue.top();
+        while (result_queue.results.empty() == false) {
+            const auto& result = result_queue.results.top();
             const auto external_id = graph.getExternalLabel(result.getIdentifier());
             if (std::binary_search(gt.begin(), gt.end(), external_id)) correct++;
-            result_queue.pop();
+            result_queue.results.pop();
         }
 
         corrects[thread_id] += correct;
@@ -212,11 +209,11 @@ static std::vector<float> estimate_recall(
             total += result_queue.size();
 
             size_t local_correct = 0;
-            while (result_queue.empty() == false) {
-                const auto internal_index = result_queue.top().getIdentifier();
+            while (result_queue.results.empty() == false) {
+                const auto internal_index = result_queue.results.top().getIdentifier();
                 const auto external_id = graph.getExternalLabel(internal_index);
                 if (std::binary_search(gt.begin(), gt.end(), external_id)) local_correct++;
-                result_queue.pop();
+                result_queue.results.pop();
             }
             correct += local_correct;
         });

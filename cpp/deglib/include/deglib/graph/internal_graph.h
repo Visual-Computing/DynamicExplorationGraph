@@ -100,6 +100,134 @@ using ResultSet = PQV<std::less<ObjectDistance>, ObjectDistance>;
 using UncheckedSet = PQV<std::greater<ObjectDistance>, ObjectDistance>;
 
 /**
+ * Reusable scratch workspace and result container for all internal graph search and exploration kernels.
+ *
+ * Eliminates per-query heap allocations when passed by reference across repeated searches
+ * (e.g. in Searcher, batch loops, or graph builder), and records exact graph distance evaluations
+ * and vertex expansions (hops).
+ */
+struct SearchWorkspace {
+    ResultSet results;                ///< Max-heap result container populated by eps search.
+    UncheckedSet next_vertices;       ///< Min-heap exploration frontier used by eps and efQueue search.
+    deglib::search::ResultList pool;  ///< Sorted beam buffer populated by ef and efQueue search.
+
+    uint32_t graph_distance_count = 0;  ///< Number of graph distance evaluations performed.
+    uint32_t graph_hop_count = 0;       ///< Number of vertex expansions (hops) performed.
+    bool used_pool = false;             ///< True when results live in `pool` (ef), false when in `results` (eps).
+
+    /// Resets buffers and telemetry counters for an eps search.
+    void reset_for_eps(size_t k, size_t edges_per_vertex) noexcept {
+        results.clear();
+        results.reserve(k + 1);
+        next_vertices.clear();
+        next_vertices.reserve(k * edges_per_vertex);
+        graph_distance_count = 0;
+        graph_hop_count = 0;
+        used_pool = false;
+    }
+
+    /// Resets buffers and telemetry counters for an ef search.
+    void reset_for_ef(uint32_t k, uint32_t ef, size_t edges_per_vertex, bool need_queue) noexcept {
+        const int32_t cap = static_cast<int32_t>(std::max(k, ef));
+        pool.reset(static_cast<int32_t>(ef), cap);
+        if (need_queue) {
+            next_vertices.clear();
+            next_vertices.reserve(static_cast<size_t>(ef) * edges_per_vertex);
+        }
+        graph_distance_count = 0;
+        graph_hop_count = 0;
+        used_pool = true;
+    }
+
+    /// Returns the number of retained results from the most recent search.
+    [[nodiscard]] size_t size() const noexcept { return used_pool ? pool.size() : results.size(); }
+
+    /// Returns the number of retained results capped at `k`.
+    [[nodiscard]] size_t result_count(size_t k) const noexcept { return std::min(k, size()); }
+
+    /// Returns whether the most recent search produced zero results.
+    [[nodiscard]] bool empty() const noexcept { return size() == 0; }
+
+    /// Extracts up to `k` internal vertex IDs without sorting or popping (used for post-graph reranking).
+    uint32_t extract_internal_ids(uint32_t k, uint32_t* out_internal_ids) const noexcept {
+        if (used_pool) {
+            const uint32_t count = static_cast<uint32_t>(std::min<size_t>(k, pool.size()));
+            for (uint32_t i = 0; i < count; ++i) {
+                out_internal_ids[i] = pool[i].getIdentifier();
+            }
+            return count;
+        }
+        const uint32_t count = static_cast<uint32_t>(std::min<size_t>(k, results.size()));
+        for (uint32_t i = 0; i < count; ++i) {
+            out_internal_ids[i] = results[i].getIdentifier();
+        }
+        return count;
+    }
+
+    /**
+     * Drains up to `k` results into flat output buffers, mapping internal indices to external labels via `graph`.
+     *
+     * - For `ef` search (`used_pool == true`), `pool` is already sorted ascending by distance.
+     * - For `eps` search (`used_pool == false`), pops the max-heap in reverse for ascending order when
+     *   `unsorted == false`, or copies the heap buffer linearly in O(k) when `unsorted == true`.
+     * - When `pad_missing == true` and fewer than `k` results exist, unfilled slots up to `k` are padded
+     *   with `UINT32_MAX` in `out_indices` and `quiet_NaN()` in `out_distances`.
+     */
+    template <typename GraphT>
+    uint32_t drain_into(const GraphT& graph, uint32_t k, uint32_t* out_indices, float* out_distances, bool unsorted, bool pad_missing = false) noexcept {
+        uint32_t count = 0;
+        if (used_pool) {
+            count = static_cast<uint32_t>(std::min<size_t>(k, pool.size()));
+            for (uint32_t i = 0; i < count; ++i) {
+                out_indices[i] = graph.getExternalLabel(pool[i].getIdentifier());
+            }
+            if (out_distances) {
+                for (uint32_t i = 0; i < count; ++i) {
+                    out_distances[i] = pool[i].getDistance();
+                }
+            }
+        } else {
+            while (results.size() > k) {
+                results.pop();
+            }
+            count = static_cast<uint32_t>(results.size());
+            if (unsorted) {
+                for (uint32_t i = 0; i < count; ++i) {
+                    out_indices[i] = graph.getExternalLabel(results[i].getIdentifier());
+                }
+                if (out_distances) {
+                    for (uint32_t i = 0; i < count; ++i) {
+                        out_distances[i] = results[i].getDistance();
+                    }
+                }
+            } else if (out_distances) {
+                for (uint32_t i = count; i > 0; --i) {
+                    const auto next = results.top();
+                    out_indices[i - 1] = graph.getExternalLabel(next.getIdentifier());
+                    out_distances[i - 1] = next.getDistance();
+                    results.pop();
+                }
+            } else {
+                for (uint32_t i = count; i > 0; --i) {
+                    out_indices[i - 1] = graph.getExternalLabel(results.top().getIdentifier());
+                    results.pop();
+                }
+            }
+        }
+
+        if (pad_missing) {
+            for (uint32_t i = count; i < k; ++i) {
+                out_indices[i] = std::numeric_limits<uint32_t>::max();
+                if (out_distances) {
+                    out_distances[i] = std::numeric_limits<float>::quiet_NaN();
+                }
+            }
+        }
+        return count;
+    }
+};
+
+/**
  * Abstract base interface for all low-level internal graph representations.
  * All methods operate on internal_index (0..N-1) for maximum memory performance.
  */
@@ -234,11 +362,12 @@ class InternalGraph {
         const int32_t max_po = std::min<int32_t>(20, static_cast<int32_t>(getEdgesPerVertex()));
         const int32_t max_pl = std::min<int32_t>(20, cache_lines_for(getFeatureSpace().get_data_size()));
 
+        SearchWorkspace ws;
         const std::vector<uint32_t>& entries = getEntryVertexIndices();
         auto timeit = [&] {
             const auto t_start = std::chrono::high_resolution_clock::now();
             for (size_t i = 0; i < n_queries; ++i) {
-                search_intern(entries, getFeatureVector(sample_idx[i]), k, eps, true, nullptr, max_dist);
+                search_intern(ws, entries, getFeatureVector(sample_idx[i]), k, eps, true, nullptr, max_dist);
             }
             return std::chrono::duration<double, std::micro>(std::chrono::high_resolution_clock::now() - t_start).count();
         };
@@ -315,84 +444,48 @@ class InternalGraph {
     hasPath(const std::vector<uint32_t>& entry_vertex_indices, const uint32_t to_vertex, const float eps, const uint32_t k) const = 0;
 
     /**
+     * @brief Performs approximate nearest neighbor search using dynamic exploration radius (eps) into `ws`.
+     *
+     * Reuses `ws` buffers across queries without heap reallocations and populates `ws.results`,
+     * `ws.graph_distance_count`, and `ws.graph_hop_count`. Operates on internal indices (0..N-1).
+     */
+    template <typename T>
+    void search(
+        SearchWorkspace& ws,
+        std::span<const T> query,
+        const uint32_t k,
+        const float eps = 0.0f,
+        const deglib::search::Filter* filter = nullptr,
+        const uint32_t max_distance_computation_count = 0
+    ) const {
+        validate_query_bytes(query.size_bytes());
+        search_intern(ws, getEntryVertexIndices(), reinterpret_cast<const std::byte*>(query.data()), k, eps, true, filter, max_distance_computation_count);
+    }
+
+    /**
      * @brief Performs approximate nearest neighbor search using dynamic exploration radius (eps).
      *
-     * Traverses the graph starting from default entry vertices. Operates directly on internal indices (0..N-1).
-     *
-     * @tparam T Query element type (e.g., float, uint16_t, std::byte).
-     * @param query Span of query vector elements.
-     * @param k The number of nearest neighbors to return.
-     * @param eps Relative exploration expansion margin (default 0.0f).
-     * @param filter Optional predicate filter to restrict eligible internal vertices.
-     * @param max_distance_computation_count Maximum number of distance evaluations allowed (0 = unlimited).
-     * @return deglib::graph::ResultSet Max-heap containing nearest ObjectDistance entries with internal vertex indices.
+     * Convenience overload allocating and returning a fresh `SearchWorkspace`.
      */
     template <typename T>
-    deglib::graph::ResultSet search(
+    [[nodiscard]] SearchWorkspace search(
         std::span<const T> query,
         const uint32_t k,
         const float eps = 0.0f,
         const deglib::search::Filter* filter = nullptr,
         const uint32_t max_distance_computation_count = 0
     ) const {
-        if (query.size_bytes() < getFeatureSpace().get_data_size()) {
-            throw std::invalid_argument(
-                "Search query buffer mismatch: expected at least " + std::to_string(getFeatureSpace().get_data_size()) +
-                " bytes (dim=" + std::to_string(getFeatureSpace().dim()) + "), got " + std::to_string(query.size_bytes()) + " bytes"
-            );
-        }
-        return search_intern(getEntryVertexIndices(), reinterpret_cast<const std::byte*>(query.data()), k, eps, true, filter, max_distance_computation_count);
+        SearchWorkspace ws;
+        search(ws, query, k, eps, filter, max_distance_computation_count);
+        return ws;
     }
 
     /**
-     * @brief Performs approximate nearest neighbor search starting from custom entry vertices using dynamic exploration radius (eps).
-     *
-     * @tparam T Query element type (e.g., float, uint16_t, std::byte).
-     * @param query Span of query vector elements.
-     * @param entry_vertex_indices List of internal indices to start search from (uses default entries if empty).
-     * @param k The number of nearest neighbors to return.
-     * @param eps Relative exploration expansion margin (default 0.0f).
-     * @param filter Optional predicate filter to restrict eligible internal vertices.
-     * @param max_distance_computation_count Maximum number of distance evaluations allowed (0 = unlimited).
-     * @return deglib::graph::ResultSet Max-heap containing nearest ObjectDistance entries with internal vertex indices.
+     * @brief Performs approximate nearest neighbor search from custom entry vertices using dynamic exploration radius (eps) into `ws`.
      */
     template <typename T>
-    deglib::graph::ResultSet search(
-        std::span<const T> query,
-        const std::vector<uint32_t>& entry_vertex_indices,
-        const uint32_t k,
-        const float eps = 0.0f,
-        const deglib::search::Filter* filter = nullptr,
-        const uint32_t max_distance_computation_count = 0
-    ) const {
-        if (query.size_bytes() < getFeatureSpace().get_data_size()) {
-            throw std::invalid_argument(
-                "Search query buffer mismatch: expected at least " + std::to_string(getFeatureSpace().get_data_size()) +
-                " bytes (dim=" + std::to_string(getFeatureSpace().dim()) + "), got " + std::to_string(query.size_bytes()) + " bytes"
-            );
-        }
-        if (entry_vertex_indices.empty()) {
-            return search_intern(
-                getEntryVertexIndices(), reinterpret_cast<const std::byte*>(query.data()), k, eps, true, filter, max_distance_computation_count
-            );
-        }
-        return search_intern(entry_vertex_indices, reinterpret_cast<const std::byte*>(query.data()), k, eps, true, filter, max_distance_computation_count);
-    }
-
-    /**
-     * @brief Performs approximate nearest neighbor search starting from a span of custom entry vertices using dynamic exploration radius (eps).
-     *
-     * @tparam T Query element type (e.g., float, uint16_t, std::byte).
-     * @param query Span of query vector elements.
-     * @param entry_vertex_indices Span of internal indices to start search from (uses default entries if empty).
-     * @param k The number of nearest neighbors to return.
-     * @param eps Relative exploration expansion margin (default 0.0f).
-     * @param filter Optional predicate filter to restrict eligible internal vertices.
-     * @param max_distance_computation_count Maximum number of distance evaluations allowed (0 = unlimited).
-     * @return deglib::graph::ResultSet Max-heap containing nearest ObjectDistance entries with internal vertex indices.
-     */
-    template <typename T>
-    deglib::graph::ResultSet search(
+    void search(
+        SearchWorkspace& ws,
         std::span<const T> query,
         std::span<const uint32_t> entry_vertex_indices,
         const uint32_t k,
@@ -400,29 +493,56 @@ class InternalGraph {
         const deglib::search::Filter* filter = nullptr,
         const uint32_t max_distance_computation_count = 0
     ) const {
-        if (entry_vertex_indices.empty()) {
-            return search(query, k, eps, filter, max_distance_computation_count);
-        }
-        const std::vector<uint32_t> entries(entry_vertex_indices.begin(), entry_vertex_indices.end());
-        return search(query, entries, k, eps, filter, max_distance_computation_count);
+        validate_query_bytes(query.size_bytes());
+        const std::span<const uint32_t> entries = entry_vertex_indices.empty() ? std::span<const uint32_t>(getEntryVertexIndices()) : entry_vertex_indices;
+        search_intern(ws, entries, reinterpret_cast<const std::byte*>(query.data()), k, eps, true, filter, max_distance_computation_count);
+    }
+
+    /**
+     * @brief Performs approximate nearest neighbor search from custom entry vertices using dynamic exploration radius (eps).
+     */
+    template <typename T>
+    [[nodiscard]] SearchWorkspace search(
+        std::span<const T> query,
+        std::span<const uint32_t> entry_vertex_indices,
+        const uint32_t k,
+        const float eps = 0.0f,
+        const deglib::search::Filter* filter = nullptr,
+        const uint32_t max_distance_computation_count = 0
+    ) const {
+        SearchWorkspace ws;
+        search(ws, query, entry_vertex_indices, k, eps, filter, max_distance_computation_count);
+        return ws;
+    }
+
+    /**
+     * @brief Performs approximate nearest neighbor search using fixed candidate pool size (ef) into `ws`.
+     *
+     * Populates `ws.pool` (sorted ascending by distance), `ws.graph_distance_count`, and `ws.graph_hop_count`.
+     */
+    template <typename T>
+    void search_ef(
+        SearchWorkspace& ws,
+        std::span<const T> query,
+        const uint32_t k,
+        const uint32_t ef,
+        const bool include_entry = true,
+        const deglib::search::Filter* filter = nullptr,
+        const uint32_t max_distance_computation_count = 0
+    ) const {
+        validate_query_bytes(query.size_bytes());
+        search_ef_intern(
+            ws, getEntryVertexIndices(), reinterpret_cast<const std::byte*>(query.data()), k, ef, include_entry, filter, max_distance_computation_count
+        );
     }
 
     /**
      * @brief Performs approximate nearest neighbor search using fixed candidate pool size (ef).
      *
-     * Traverses the graph maintaining a beam of size ef. Operates directly on internal indices (0..N-1).
-     *
-     * @tparam T Query element type (e.g., float, uint16_t, std::byte).
-     * @param query Span of query vector elements.
-     * @param k The number of nearest neighbors to return.
-     * @param ef Fixed candidate pool / beam width (clamped to at least k).
-     * @param include_entry Whether entry vertex candidates should be eligible in results (default true).
-     * @param filter Optional predicate filter to restrict eligible internal vertices.
-     * @param max_distance_computation_count Maximum number of distance evaluations allowed (0 = unlimited).
-     * @return std::vector<deglib::graph::ObjectDistance> Vector of nearest neighbors sorted ascending by distance with internal vertex indices.
+     * Convenience overload allocating and returning a fresh `SearchWorkspace`.
      */
     template <typename T>
-    std::vector<deglib::graph::ObjectDistance> search_ef(
+    [[nodiscard]] SearchWorkspace search_ef(
         std::span<const T> query,
         const uint32_t k,
         const uint32_t ef,
@@ -430,70 +550,53 @@ class InternalGraph {
         const deglib::search::Filter* filter = nullptr,
         const uint32_t max_distance_computation_count = 0
     ) const {
-        if (query.size_bytes() < getFeatureSpace().get_data_size()) {
-            throw std::invalid_argument(
-                "Search query buffer mismatch: expected at least " + std::to_string(getFeatureSpace().get_data_size()) +
-                " bytes (dim=" + std::to_string(getFeatureSpace().dim()) + "), got " + std::to_string(query.size_bytes()) + " bytes"
-            );
-        }
-        return search_ef_intern(
-            getEntryVertexIndices(), reinterpret_cast<const std::byte*>(query.data()), k, ef, include_entry, filter, max_distance_computation_count
-        );
+        SearchWorkspace ws;
+        search_ef(ws, query, k, ef, include_entry, filter, max_distance_computation_count);
+        return ws;
     }
 
     /**
-     * @brief Performs approximate nearest neighbor search starting from custom entry vertices using fixed candidate pool size (ef).
-     *
-     * @tparam T Query element type (e.g., float, uint16_t, std::byte).
-     * @param query Span of query vector elements.
-     * @param entry_vertex_indices List of internal indices to start search from (uses default entries if empty).
-     * @param k The number of nearest neighbors to return.
-     * @param ef Fixed candidate pool / beam width (clamped to at least k).
-     * @param include_entry Whether entry vertex candidates should be eligible in results (default true).
-     * @param filter Optional predicate filter to restrict eligible internal vertices.
-     * @param max_distance_computation_count Maximum number of distance evaluations allowed (0 = unlimited).
-     * @return std::vector<deglib::graph::ObjectDistance> Vector of nearest neighbors sorted ascending by distance with internal vertex indices.
+     * @brief Performs approximate nearest neighbor search from custom entry vertices using fixed candidate pool size (ef) into `ws`.
      */
     template <typename T>
-    std::vector<deglib::graph::ObjectDistance> search_ef(
+    void search_ef(
+        SearchWorkspace& ws,
         std::span<const T> query,
-        const std::vector<uint32_t>& entry_vertex_indices,
+        std::span<const uint32_t> entry_vertex_indices,
         const uint32_t k,
         const uint32_t ef,
         const bool include_entry = true,
         const deglib::search::Filter* filter = nullptr,
         const uint32_t max_distance_computation_count = 0
     ) const {
-        if (query.size_bytes() < getFeatureSpace().get_data_size()) {
-            throw std::invalid_argument(
-                "Search query buffer mismatch: expected at least " + std::to_string(getFeatureSpace().get_data_size()) +
-                " bytes (dim=" + std::to_string(getFeatureSpace().dim()) + "), got " + std::to_string(query.size_bytes()) + " bytes"
-            );
-        }
-        if (entry_vertex_indices.empty()) {
-            return search_ef_intern(
-                getEntryVertexIndices(), reinterpret_cast<const std::byte*>(query.data()), k, ef, include_entry, filter, max_distance_computation_count
-            );
-        }
-        return search_ef_intern(
-            entry_vertex_indices, reinterpret_cast<const std::byte*>(query.data()), k, ef, include_entry, filter, max_distance_computation_count
-        );
+        validate_query_bytes(query.size_bytes());
+        const std::span<const uint32_t> entries = entry_vertex_indices.empty() ? std::span<const uint32_t>(getEntryVertexIndices()) : entry_vertex_indices;
+        search_ef_intern(ws, entries, reinterpret_cast<const std::byte*>(query.data()), k, ef, include_entry, filter, max_distance_computation_count);
     }
 
     /**
-     * @brief Explores the graph starting from an internal vertex index using dynamic exploration radius (eps).
-     *
-     * Uses the vertex's stored feature vector as the query. Operates directly on internal indices (0..N-1).
-     *
-     * @param entry_vertex_index Internal index of starting vertex.
-     * @param k The number of nearest neighbors to return.
-     * @param max_distance_computation_count Maximum number of distance evaluations allowed (0 = unlimited).
-     * @param eps Relative exploration expansion margin (default 0.0f).
-     * @param include_entry If true, starting vertex itself is eligible in results (default true).
-     * @param filter Optional predicate filter to restrict eligible internal vertices.
-     * @return deglib::graph::ResultSet Max-heap of nearest ObjectDistance entries with internal vertex indices.
+     * @brief Performs approximate nearest neighbor search from custom entry vertices using fixed candidate pool size (ef).
      */
-    deglib::graph::ResultSet explore(
+    template <typename T>
+    [[nodiscard]] SearchWorkspace search_ef(
+        std::span<const T> query,
+        std::span<const uint32_t> entry_vertex_indices,
+        const uint32_t k,
+        const uint32_t ef,
+        const bool include_entry = true,
+        const deglib::search::Filter* filter = nullptr,
+        const uint32_t max_distance_computation_count = 0
+    ) const {
+        SearchWorkspace ws;
+        search_ef(ws, query, entry_vertex_indices, k, ef, include_entry, filter, max_distance_computation_count);
+        return ws;
+    }
+
+    /**
+     * @brief Explores the graph starting from an internal vertex index using dynamic exploration radius (eps) into `ws`.
+     */
+    void explore(
+        SearchWorkspace& ws,
         const uint32_t entry_vertex_index,
         const uint32_t k,
         const uint32_t max_distance_computation_count = 0,
@@ -501,23 +604,31 @@ class InternalGraph {
         const bool include_entry = true,
         const deglib::search::Filter* filter = nullptr
     ) const {
-        return search_intern({entry_vertex_index}, nullptr, k, eps, include_entry, filter, max_distance_computation_count);
+        const uint32_t entries[1] = {entry_vertex_index};
+        search_intern(ws, entries, nullptr, k, eps, include_entry, filter, max_distance_computation_count);
     }
 
     /**
-     * @brief Explores the graph starting from an internal vertex index using fixed beam width (ef).
-     *
-     * Uses the vertex's stored feature vector as the query. Operates directly on internal indices (0..N-1).
-     *
-     * @param entry_vertex_index Internal index of starting vertex.
-     * @param k The number of nearest neighbors to return.
-     * @param ef Fixed candidate pool / beam width (clamped to at least k).
-     * @param max_distance_computation_count Maximum number of distance evaluations allowed (0 = unlimited).
-     * @param include_entry If true, starting vertex itself is eligible in results (default true).
-     * @param filter Optional predicate filter to restrict eligible internal vertices.
-     * @return std::vector<deglib::graph::ObjectDistance> Vector of nearest neighbors sorted ascending by distance with internal vertex indices.
+     * @brief Explores the graph starting from an internal vertex index using dynamic exploration radius (eps).
      */
-    std::vector<deglib::graph::ObjectDistance> explore_ef(
+    [[nodiscard]] SearchWorkspace explore(
+        const uint32_t entry_vertex_index,
+        const uint32_t k,
+        const uint32_t max_distance_computation_count = 0,
+        const float eps = 0.0f,
+        const bool include_entry = true,
+        const deglib::search::Filter* filter = nullptr
+    ) const {
+        SearchWorkspace ws;
+        explore(ws, entry_vertex_index, k, max_distance_computation_count, eps, include_entry, filter);
+        return ws;
+    }
+
+    /**
+     * @brief Explores the graph starting from an internal vertex index using fixed beam width (ef) into `ws`.
+     */
+    void explore_ef(
+        SearchWorkspace& ws,
         const uint32_t entry_vertex_index,
         const uint32_t k,
         const uint32_t ef,
@@ -525,7 +636,34 @@ class InternalGraph {
         const bool include_entry = true,
         const deglib::search::Filter* filter = nullptr
     ) const {
-        return search_ef_intern({entry_vertex_index}, nullptr, k, ef, include_entry, filter, max_distance_computation_count);
+        const uint32_t entries[1] = {entry_vertex_index};
+        search_ef_intern(ws, entries, nullptr, k, ef, include_entry, filter, max_distance_computation_count);
+    }
+
+    /**
+     * @brief Explores the graph starting from an internal vertex index using fixed beam width (ef).
+     */
+    [[nodiscard]] SearchWorkspace explore_ef(
+        const uint32_t entry_vertex_index,
+        const uint32_t k,
+        const uint32_t ef,
+        const uint32_t max_distance_computation_count = 0,
+        const bool include_entry = true,
+        const deglib::search::Filter* filter = nullptr
+    ) const {
+        SearchWorkspace ws;
+        explore_ef(ws, entry_vertex_index, k, ef, max_distance_computation_count, include_entry, filter);
+        return ws;
+    }
+
+  private:
+    void validate_query_bytes(size_t query_bytes) const {
+        if (query_bytes < getFeatureSpace().get_data_size()) {
+            throw std::invalid_argument(
+                "Search query buffer mismatch: expected at least " + std::to_string(getFeatureSpace().get_data_size()) +
+                " bytes (dim=" + std::to_string(getFeatureSpace().dim()) + "), got " + std::to_string(query_bytes) + " bytes"
+            );
+        }
     }
 
   protected:
@@ -537,10 +675,12 @@ class InternalGraph {
     mutable int32_t nl_ = 3;
 
     /**
-     * Virtual internal search entry point implemented by derived graph classes.
+     * Virtual internal search entry points implemented by derived graph classes, writing results and
+     * telemetry directly into `ws`.
      */
-    virtual deglib::graph::ResultSet search_intern(
-        const std::vector<uint32_t>& entry_vertex_indices,
+    virtual void search_intern(
+        SearchWorkspace& ws,
+        std::span<const uint32_t> entry_vertex_indices,
         const std::byte* query,
         const uint32_t k,
         const float eps = 0.0f,
@@ -549,8 +689,9 @@ class InternalGraph {
         const uint32_t max_distance_computation_count = 0
     ) const = 0;
 
-    virtual std::vector<deglib::graph::ObjectDistance> search_ef_intern(
-        const std::vector<uint32_t>& entry_vertex_indices,
+    virtual void search_ef_intern(
+        SearchWorkspace& ws,
+        std::span<const uint32_t> entry_vertex_indices,
         const std::byte* query,
         const uint32_t k,
         const uint32_t ef,
@@ -560,13 +701,45 @@ class InternalGraph {
     ) const = 0;
 
     /**
+     * Convenience wrapper allocating and returning a fresh `SearchWorkspace` for internal callers.
+     */
+    [[nodiscard]] SearchWorkspace search_intern(
+        std::span<const uint32_t> entry_vertex_indices,
+        const std::byte* query,
+        const uint32_t k,
+        const float eps = 0.0f,
+        const bool include_entry = true,
+        const deglib::search::Filter* filter = nullptr,
+        const uint32_t max_distance_computation_count = 0
+    ) const {
+        SearchWorkspace ws;
+        search_intern(ws, entry_vertex_indices, query, k, eps, include_entry, filter, max_distance_computation_count);
+        return ws;
+    }
+
+    [[nodiscard]] SearchWorkspace search_ef_intern(
+        std::span<const uint32_t> entry_vertex_indices,
+        const std::byte* query,
+        const uint32_t k,
+        const uint32_t ef,
+        const bool include_entry = true,
+        const deglib::search::Filter* filter = nullptr,
+        const uint32_t max_distance_computation_count = 0
+    ) const {
+        SearchWorkspace ws;
+        search_ef_intern(ws, entry_vertex_indices, query, k, ef, include_entry, filter, max_distance_computation_count);
+        return ws;
+    }
+
+    /**
      * Statically dispatched exploration and k-NN search implementation.
      * Inlines graph member accesses (features, neighbors, labels) via GraphType to avoid vtable calls.
      */
-    template <typename GraphType, bool use_max_distance_count, bool use_filter>
-    static deglib::graph::ResultSet searchImpl(
+    template <typename GraphType, bool use_filter>
+    static void searchImpl(
+        SearchWorkspace& ws,
         const GraphType& self,
-        const std::vector<uint32_t>& entry_vertex_indices,
+        std::span<const uint32_t> entry_vertex_indices,
         const std::byte* query,
         const uint32_t initial_k,
         const float eps,
@@ -574,25 +747,23 @@ class InternalGraph {
         const deglib::search::Filter* filter,
         const uint32_t max_distance_computation_count
     ) {
-        uint32_t distance_computation_count = 0;
+        const size_t vertex_count = self.size();
+        const size_t k = std::min(vertex_count, static_cast<size_t>(initial_k));
+        ws.reset_for_eps(k, self.edges_per_vertex_);
+        if (k == 0) return;
+
+        const uint32_t max_dist_count = (max_distance_computation_count == 0) ? std::numeric_limits<uint32_t>::max() : max_distance_computation_count;
         const auto dist_func = self.feature_space_.get_dist_func();
         const auto batch_dist_func = self.feature_space_.get_batch_dist_func();
         const auto dist_func_param = self.feature_space_.get_dist_func_param();
-        const size_t vertex_count = self.size();
-        size_t k = std::min(vertex_count, static_cast<size_t>(initial_k));
 
         // set of checked vertex ids
         const auto vl = self.visited_list_pool_->getFreeVisitedList();
         auto* checked_ids = vl->get_visited();
         const auto checked_ids_tag = vl->get_tag();
 
-        // items to traverse next
-        auto next_vertices = deglib::graph::UncheckedSet();
-        next_vertices.reserve(k * self.edges_per_vertex_);
-
-        // result set
-        auto results = deglib::graph::ResultSet();
-        results.reserve(k + 1);
+        auto& next_vertices = ws.next_vertices;
+        auto& results = ws.results;
 
         // if the filter only contains few valid ids brute force them all
         if constexpr (use_filter) {
@@ -600,8 +771,9 @@ class InternalGraph {
                 auto radius = std::numeric_limits<float>::max();
                 filter->for_each_valid_label([&](uint32_t valid_label) {
                     auto valid_index = self.getInternalIndex(valid_label);
-                    const auto feature = reinterpret_cast<const float*>(self.feature_by_index(valid_index));
+                    const auto feature = self.feature_by_index(valid_index);
                     const auto distance = dist_func(query, feature, dist_func_param);
+                    ++ws.graph_distance_count;
 
                     // remember the vertex, if its better than the worst in the result list
                     if (distance < radius) {
@@ -614,13 +786,13 @@ class InternalGraph {
                         }
                     }
                 });
-                return results;
+                return;
             }
         }
 
         // copy the initial entry vertices and their distances to the query into the three containers
         if (query == nullptr) {
-            if (entry_vertex_indices.empty()) return results;
+            if (entry_vertex_indices.empty()) return;
             const uint32_t self_idx = entry_vertex_indices[0];
             if (self_idx < vertex_count) {
                 query = self.feature_by_index(self_idx);
@@ -633,7 +805,9 @@ class InternalGraph {
                         results.emplace(self_idx, self_dist);
                     }
                 }
+                // if we have weights we can use them instead of calculating the distances
                 if constexpr (requires { self.weights_by_index(uint32_t{0}); }) {
+                    ++ws.graph_hop_count;
                     const auto neighbor_indices = self.neighbors_by_index(self_idx);
                     const auto neighbor_weights = self.weights_by_index(self_idx);
                     for (size_t i = 0; i < self.edges_per_vertex_; ++i) {
@@ -654,29 +828,27 @@ class InternalGraph {
                 }
             }
         } else {
-            for (auto&& index : entry_vertex_indices) {
-                if (checked_ids[index] != checked_ids_tag) {
-                    checked_ids[index] = checked_ids_tag;
+            for (const uint32_t index : entry_vertex_indices) {
+                if (index >= vertex_count || checked_ids[index] == checked_ids_tag) continue;
+                checked_ids[index] = checked_ids_tag;
 
-                    const auto feature = self.feature_by_index(index);
-                    const auto distance = dist_func(query, feature, dist_func_param);
-                    next_vertices.emplace(index, distance);
-                    if (include_entry) {
-                        if constexpr (use_filter) {
-                            if (filter->is_valid(self.label_by_index(index))) {
-                                results.emplace(index, distance);
-                            }
-                        } else {
+                const auto feature = self.feature_by_index(index);
+                const auto distance = dist_func(query, feature, dist_func_param);
+                next_vertices.emplace(index, distance);
+                if (include_entry) {
+                    if constexpr (use_filter) {
+                        if (filter->is_valid(self.label_by_index(index))) {
                             results.emplace(index, distance);
                         }
+                    } else {
+                        results.emplace(index, distance);
                     }
+                    if (results.size() > k) results.pop();
+                }
 
-                    // early stop after to many computations
-                    if constexpr (use_max_distance_count) {
-                        if (++distance_computation_count >= max_distance_computation_count) {
-                            return results;
-                        }
-                    }
+                // early stop after reaching distance budget
+                if (++ws.graph_distance_count >= max_dist_count) {
+                    return;
                 }
             }
         }
@@ -701,6 +873,8 @@ class InternalGraph {
             // max distance reached
             if (next_vertex.getDistance() > exploration_radius) break;
 
+            ++ws.graph_hop_count;
+
             const auto neighbor_indices = self.neighbors_by_index(next_vertex.getIdentifier());
             int32_t good_neighbor_count = 0;
             for (size_t i = 0; i < edges_per_vertex; ++i) {
@@ -715,10 +889,11 @@ class InternalGraph {
             if (good_neighbor_count == 0) continue;
 
             // Cap the neighbor count based on the remaining distance budget
-            if constexpr (use_max_distance_count) {
-                const uint32_t remaining = max_distance_computation_count - distance_computation_count;
-                if (static_cast<uint32_t>(good_neighbor_count) > remaining) good_neighbor_count = static_cast<int32_t>(remaining);
+            const uint32_t remaining = max_dist_count - ws.graph_distance_count;
+            if (static_cast<uint32_t>(good_neighbor_count) > remaining) {
+                good_neighbor_count = static_cast<int32_t>(remaining);
             }
+            if (good_neighbor_count <= 0) break;
 
             batch_dist_func(query, good_features, static_cast<size_t>(good_neighbor_count), dist_func_param, good_distances, po, prefetch_bytes);
 
@@ -753,24 +928,21 @@ class InternalGraph {
                 }
             }
 
-            if constexpr (use_max_distance_count) {
-                distance_computation_count += static_cast<uint32_t>(good_neighbor_count);
-                if (distance_computation_count >= max_distance_computation_count) {
-                    return results;
-                }
+            ws.graph_distance_count += static_cast<uint32_t>(good_neighbor_count);
+            if (ws.graph_distance_count >= max_dist_count) {
+                return;
             }
         }
-
-        return results;
     }
 
     /**
-     * Dispatches runtime filter and distance budget settings to compile-time specialized searchImpl instantiations.
+     * Dispatches runtime filter settings to compile-time specialized searchImpl instantiations.
      */
     template <typename GraphType>
-    static deglib::graph::ResultSet searchInternImpl(
+    static void searchInternImpl(
+        SearchWorkspace& ws,
         const GraphType& self,
-        const std::vector<uint32_t>& entry_vertex_indices,
+        std::span<const uint32_t> entry_vertex_indices,
         const std::byte* query,
         const uint32_t k,
         const float eps = 0.0f,
@@ -779,17 +951,9 @@ class InternalGraph {
         const uint32_t max_distance_computation_count = 0
     ) {
         if (filter) {
-            if (max_distance_computation_count == 0) {
-                return searchImpl<GraphType, false, true>(self, entry_vertex_indices, query, k, eps, include_entry, filter, 0);
-            } else {
-                return searchImpl<GraphType, true, true>(self, entry_vertex_indices, query, k, eps, include_entry, filter, max_distance_computation_count);
-            }
+            searchImpl<GraphType, true>(ws, self, entry_vertex_indices, query, k, eps, include_entry, filter, max_distance_computation_count);
         } else {
-            if (max_distance_computation_count == 0) {
-                return searchImpl<GraphType, false, false>(self, entry_vertex_indices, query, k, eps, include_entry, nullptr, 0);
-            } else {
-                return searchImpl<GraphType, true, false>(self, entry_vertex_indices, query, k, eps, include_entry, nullptr, max_distance_computation_count);
-            }
+            searchImpl<GraphType, false>(ws, self, entry_vertex_indices, query, k, eps, include_entry, nullptr, max_distance_computation_count);
         }
     }
 
@@ -802,10 +966,11 @@ class InternalGraph {
      * The frontier holds every candidate within the current ef-th best valid distance, so stopping
      * at the first candidate beyond it is exact for the ef best valid results.
      */
-    template <typename GraphType, bool use_max_distance_count, bool use_filter>
-    static std::vector<deglib::graph::ObjectDistance> searchEfQueueImpl(
+    template <typename GraphType, bool use_filter>
+    static void searchEfQueueImpl(
+        SearchWorkspace& ws,
         const GraphType& self,
-        const std::vector<uint32_t>& entry_vertex_indices,
+        std::span<const uint32_t> entry_vertex_indices,
         const std::byte* query,
         const uint32_t k,
         const uint32_t ef,
@@ -813,27 +978,27 @@ class InternalGraph {
         const deglib::search::Filter* filter,
         const uint32_t max_distance_computation_count
     ) {
+        const size_t vertex_count = self.size();
+        ws.reset_for_ef(k, ef, self.edges_per_vertex_, /*need_queue=*/true);
+        if (vertex_count == 0 || k == 0) return;
+
+        const uint32_t max_dist_count = (max_distance_computation_count == 0) ? std::numeric_limits<uint32_t>::max() : max_distance_computation_count;
         const auto dist_func = self.feature_space_.get_dist_func();
         const auto batch_dist_func = self.feature_space_.get_batch_dist_func();
         const auto dist_func_param = self.feature_space_.get_dist_func_param();
-        const size_t vertex_count = self.size();
-        const int32_t capacity = static_cast<int32_t>(std::max(k, ef));
 
         // set of checked vertex ids
         const auto vl = self.visited_list_pool_->getFreeVisitedList();
         auto* checked_ids = vl->get_visited();
         const auto checked_ids_tag = vl->get_tag();
 
-        uint32_t distance_computation_count = 0;
-
         // invalid candidates are traversed through next_vertices, but never reach valid_results
-        auto next_vertices = deglib::graph::UncheckedSet();
-        next_vertices.reserve(static_cast<size_t>(ef) * self.edges_per_vertex_);
-        deglib::search::ResultList valid_results(static_cast<int32_t>(ef), capacity);
+        auto& next_vertices = ws.next_vertices;
+        auto& valid_results = ws.pool;
 
         // seed the traversal with every entry vertex
         if (query == nullptr) {
-            if (entry_vertex_indices.empty()) return std::move(valid_results).to_vector(k);
+            if (entry_vertex_indices.empty()) return;
             const uint32_t self_idx = entry_vertex_indices[0];
             if (self_idx < vertex_count) {
                 query = self.feature_by_index(self_idx);
@@ -847,6 +1012,7 @@ class InternalGraph {
                     }
                 }
                 if constexpr (requires { self.weights_by_index(uint32_t{0}); }) {
+                    ++ws.graph_hop_count;
                     const auto neighbor_indices = self.neighbors_by_index(self_idx);
                     const auto neighbor_weights = self.weights_by_index(self_idx);
                     for (size_t i = 0; i < self.edges_per_vertex_; ++i) {
@@ -866,7 +1032,7 @@ class InternalGraph {
                 }
             }
         } else {
-            for (auto ep : entry_vertex_indices) {
+            for (const uint32_t ep : entry_vertex_indices) {
                 if (ep >= vertex_count || checked_ids[ep] == checked_ids_tag) continue;
                 checked_ids[ep] = checked_ids_tag;
 
@@ -881,11 +1047,10 @@ class InternalGraph {
                     }
                 }
 
-                // early stop after to many computations
-                if constexpr (use_max_distance_count) {
-                    if (++distance_computation_count >= max_distance_computation_count) {
-                        return std::move(valid_results).to_vector(k);
-                    }
+                // early stop after reaching distance budget
+                if (++ws.graph_distance_count >= max_dist_count) {
+                    valid_results.truncate(k);
+                    return;
                 }
             }
         }
@@ -909,6 +1074,8 @@ class InternalGraph {
             // no remaining candidate can improve the ef best valid results
             if (next_vertex.getDistance() > radius) break;
 
+            ++ws.graph_hop_count;
+
             const auto neighbor_indices = self.neighbors_by_index(next_vertex.getIdentifier());
             int32_t good_neighbor_count = 0;
             for (size_t i = 0; i < edges_per_vertex; ++i) {
@@ -923,10 +1090,11 @@ class InternalGraph {
             if (good_neighbor_count == 0) continue;
 
             // Cap the neighbor count based on the remaining distance budget
-            if constexpr (use_max_distance_count) {
-                const uint32_t remaining = max_distance_computation_count - distance_computation_count;
-                if (static_cast<uint32_t>(good_neighbor_count) > remaining) good_neighbor_count = static_cast<int32_t>(remaining);
+            const uint32_t remaining = max_dist_count - ws.graph_distance_count;
+            if (static_cast<uint32_t>(good_neighbor_count) > remaining) {
+                good_neighbor_count = static_cast<int32_t>(remaining);
             }
+            if (good_neighbor_count <= 0) break;
 
             batch_dist_func(query, good_features, static_cast<size_t>(good_neighbor_count), dist_func_param, good_distances, po, prefetch_bytes);
 
@@ -949,15 +1117,14 @@ class InternalGraph {
                 }
             }
 
-            if constexpr (use_max_distance_count) {
-                distance_computation_count += static_cast<uint32_t>(good_neighbor_count);
-                if (distance_computation_count >= max_distance_computation_count) {
-                    return std::move(valid_results).to_vector(k);
-                }
+            ws.graph_distance_count += static_cast<uint32_t>(good_neighbor_count);
+            if (ws.graph_distance_count >= max_dist_count) {
+                valid_results.truncate(k);
+                return;
             }
         }
 
-        return std::move(valid_results).to_vector(k);
+        valid_results.truncate(k);
     }
 
     /**
@@ -967,10 +1134,11 @@ class InternalGraph {
      * ResultList serves as frontier and result set at once. Every other combination needs both
      * separated, see searchEfQueueImpl.
      */
-    template <typename GraphType, bool use_max_distance_count, bool use_filter>
-    static std::vector<deglib::graph::ObjectDistance> searchEfImpl(
+    template <typename GraphType, bool use_filter>
+    static void searchEfImpl(
+        SearchWorkspace& ws,
         const GraphType& self,
-        const std::vector<uint32_t>& entry_vertex_indices,
+        std::span<const uint32_t> entry_vertex_indices,
         const std::byte* query,
         const uint32_t k,
         const uint32_t ef,
@@ -979,40 +1147,32 @@ class InternalGraph {
         const uint32_t max_distance_computation_count
     ) {
         if constexpr (use_filter) {
-            return searchEfQueueImpl<GraphType, use_max_distance_count, true>(
-                self, entry_vertex_indices, query, k, ef, include_entry, filter, max_distance_computation_count
-            );
+            searchEfQueueImpl<GraphType, true>(ws, self, entry_vertex_indices, query, k, ef, include_entry, filter, max_distance_computation_count);
         } else {
             if (!include_entry) {
-                return searchEfQueueImpl<GraphType, use_max_distance_count, false>(
-                    self, entry_vertex_indices, query, k, ef, false, nullptr, max_distance_computation_count
-                );
+                searchEfQueueImpl<GraphType, false>(ws, self, entry_vertex_indices, query, k, ef, false, nullptr, max_distance_computation_count);
+                return;
             }
 
+            const size_t vertex_count = self.size();
+            ws.reset_for_ef(k, ef, self.edges_per_vertex_, /*need_queue=*/false);
+            if (vertex_count == 0 || k == 0) return;
+
+            const uint32_t max_dist_count = (max_distance_computation_count == 0) ? std::numeric_limits<uint32_t>::max() : max_distance_computation_count;
             const auto dist_func = self.feature_space_.get_dist_func();
             const auto batch_dist_func = self.feature_space_.get_batch_dist_func();
             const auto dist_func_param = self.feature_space_.get_dist_func_param();
-            const size_t vertex_count = self.size();
-            const int32_t capacity = static_cast<int32_t>(std::max(k, ef));
 
             // set of checked vertex ids
             const auto vl = self.visited_list_pool_->getFreeVisitedList();
             auto* checked_ids = vl->get_visited();
             const auto checked_ids_tag = vl->get_tag();
 
-            uint32_t distance_computation_count = 0;
-
-            thread_local deglib::search::ResultList pool;
-            pool.reset(static_cast<int32_t>(ef), capacity);
-            auto extract_top_k = [k](const deglib::search::ResultList& p) {
-                const auto res = p.span();
-                const size_t count = std::min<size_t>(k, res.size());
-                return std::vector<deglib::graph::ObjectDistance>(res.begin(), res.begin() + count);
-            };
+            auto& pool = ws.pool;
 
             // every entry vertex seeds the beam and is part of the result set
             if (query == nullptr) {
-                if (entry_vertex_indices.empty()) return extract_top_k(pool);
+                if (entry_vertex_indices.empty()) return;
                 const uint32_t self_idx = entry_vertex_indices[0];
                 if (self_idx < vertex_count) {
                     query = self.feature_by_index(self_idx);
@@ -1030,7 +1190,7 @@ class InternalGraph {
                     }
                 }
             } else {
-                for (auto ep : entry_vertex_indices) {
+                for (const uint32_t ep : entry_vertex_indices) {
                     if (ep >= vertex_count || checked_ids[ep] == checked_ids_tag) continue;
                     checked_ids[ep] = checked_ids_tag;
 
@@ -1038,11 +1198,10 @@ class InternalGraph {
                     const float dist = dist_func(query, feature, dist_func_param);
                     pool.insert(ep, dist);
 
-                    // early stop after to many computations
-                    if constexpr (use_max_distance_count) {
-                        if (++distance_computation_count >= max_distance_computation_count) {
-                            return extract_top_k(pool);
-                        }
+                    // early stop after reaching distance budget
+                    if (++ws.graph_distance_count >= max_dist_count) {
+                        pool.truncate(k);
+                        return;
                     }
                 }
             }
@@ -1056,12 +1215,13 @@ class InternalGraph {
             alignas(64) float good_distances[256];
 
             while (pool.has_next()) {
-                uint32_t u = pool.pop();
-                const auto neighbor_indices = self.neighbors_by_index(u);
+                const uint32_t u = pool.pop();
+                ++ws.graph_hop_count;
 
+                const auto neighbor_indices = self.neighbors_by_index(u);
                 int32_t good_neighbor_count = 0;
                 for (size_t i = 0; i < edges_per_vertex; ++i) {
-                    uint32_t neighbor_index = neighbor_indices[i];
+                    const uint32_t neighbor_index = neighbor_indices[i];
                     if (checked_ids[neighbor_index] == checked_ids_tag) {
                         continue;
                     }
@@ -1074,10 +1234,11 @@ class InternalGraph {
                 if (good_neighbor_count == 0) continue;
 
                 // Cap the neighbor count based on the remaining distance budget
-                if constexpr (use_max_distance_count) {
-                    const uint32_t remaining = max_distance_computation_count - distance_computation_count;
-                    if (static_cast<uint32_t>(good_neighbor_count) > remaining) good_neighbor_count = static_cast<int32_t>(remaining);
+                const uint32_t remaining = max_dist_count - ws.graph_distance_count;
+                if (static_cast<uint32_t>(good_neighbor_count) > remaining) {
+                    good_neighbor_count = static_cast<int32_t>(remaining);
                 }
+                if (good_neighbor_count <= 0) break;
 
                 batch_dist_func(query, good_features, static_cast<size_t>(good_neighbor_count), dist_func_param, good_distances, po, prefetch_bytes);
 
@@ -1090,25 +1251,25 @@ class InternalGraph {
                     }
                 }
 
-                if constexpr (use_max_distance_count) {
-                    distance_computation_count += static_cast<uint32_t>(good_neighbor_count);
-                    if (distance_computation_count >= max_distance_computation_count) {
-                        return extract_top_k(pool);
-                    }
+                ws.graph_distance_count += static_cast<uint32_t>(good_neighbor_count);
+                if (ws.graph_distance_count >= max_dist_count) {
+                    pool.truncate(k);
+                    return;
                 }
             }
 
-            return extract_top_k(pool);
+            pool.truncate(k);
         }
     }
 
     /**
-     * Dispatches runtime filter and distance budget settings to compile-time specialized searchEfImpl instantiations.
+     * Dispatches runtime filter settings to compile-time specialized searchEfImpl instantiations.
      */
     template <typename GraphType>
-    static std::vector<deglib::graph::ObjectDistance> searchEfInternImpl(
+    static void searchEfInternImpl(
+        SearchWorkspace& ws,
         const GraphType& self,
-        const std::vector<uint32_t>& entry_vertex_indices,
+        std::span<const uint32_t> entry_vertex_indices,
         const std::byte* query,
         const uint32_t k,
         const uint32_t ef,
@@ -1117,17 +1278,9 @@ class InternalGraph {
         const uint32_t max_distance_computation_count = 0
     ) {
         if (filter) {
-            if (max_distance_computation_count == 0) {
-                return searchEfImpl<GraphType, false, true>(self, entry_vertex_indices, query, k, ef, include_entry, filter, 0);
-            } else {
-                return searchEfImpl<GraphType, true, true>(self, entry_vertex_indices, query, k, ef, include_entry, filter, max_distance_computation_count);
-            }
+            searchEfImpl<GraphType, true>(ws, self, entry_vertex_indices, query, k, ef, include_entry, filter, max_distance_computation_count);
         } else {
-            if (max_distance_computation_count == 0) {
-                return searchEfImpl<GraphType, false, false>(self, entry_vertex_indices, query, k, ef, include_entry, nullptr, 0);
-            } else {
-                return searchEfImpl<GraphType, true, false>(self, entry_vertex_indices, query, k, ef, include_entry, nullptr, max_distance_computation_count);
-            }
+            searchEfImpl<GraphType, false>(ws, self, entry_vertex_indices, query, k, ef, include_entry, nullptr, max_distance_computation_count);
         }
     }
 

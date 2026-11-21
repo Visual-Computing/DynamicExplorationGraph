@@ -6,7 +6,7 @@ DEG Sliding Window Batched Update Benchmark (CleANN Paper Baseline Reproduction)
 Paper Reference:
   "CleANN: Efficient Full Dynamism in Graph-based Approximate Nearest Neighbor Search"
   by Ziyu Zhang, Yuanhao Wei, Joshua Engels, Julian Shun (MIT CSAIL, arXiv:2507.19802v1)
-  
+
 Specific Section & Figures Reproduced:
   - Section 6.1 (Experiment Setup: Sliding Window Batched Update)
   - Section 6.2.3 (Comparison with Sequential Baseline DEG)
@@ -122,7 +122,7 @@ def run_sliding_window_benchmark(
         extend_eps=0.1,
         improve_k=edges_per_vertex,
         improve_eps=0.001,
-        improve_tries=0
+        improve_tries=0,
     )
     builder.set_threads(1)
 
@@ -141,8 +141,8 @@ def run_sliding_window_benchmark(
     # Tracking metrics across rounds
     round_recalls = []
     round_search_qps = []
-    round_search_per_ms = []      # searches / ms (QPS / 1000)
-    round_update_per_ms = []      # updates / ms
+    round_search_per_ms = []  # searches / ms (QPS / 1000)
+    round_update_per_ms = []  # updates / ms
 
     active_start_idx = 0
     next_insert_idx = window_size
@@ -197,13 +197,8 @@ def run_sliding_window_benchmark(
         # ---------------------------------------------------------------------
         t_query_start = time.perf_counter()
         returned_labels = graph.search(
-            query_vectors,
-            k=search_k,
-            eps_or_ef=search_eps,
-            threads=1,
-            return_distances=False,
-            unsorted=True
-        )
+            query_vectors, k=search_k, eps_or_ef=search_eps, threads=1, return_distances=False, unsorted=True
+        ).indices
         t_query_end = time.perf_counter()
 
         query_duration_sec = t_query_end - t_query_start
@@ -224,11 +219,15 @@ def run_sliding_window_benchmark(
         round_search_qps.append(search_qps)
         round_search_per_ms.append(search_per_ms)
 
-        print(f"{r + 1:6d} | {recall * 100:10.2f}% | {search_qps:10,.1f} | {search_per_ms:11.2f} | {update_per_ms:11.2f}")
+        print(
+            f"{r + 1:6d} | {recall * 100:10.2f}% | {search_qps:10,.1f} | {search_per_ms:11.2f} | {update_per_ms:11.2f}"
+        )
 
     print("-" * 60)
     print("\nBenchmark Summary:")
-    print(f"  Average Recall@{search_k}:       {np.mean(round_recalls) * 100:.2f}% (std: {np.std(round_recalls) * 100:.2f}%)")
+    print(
+        f"  Average Recall@{search_k}:       {np.mean(round_recalls) * 100:.2f}% (std: {np.std(round_recalls) * 100:.2f}%)"
+    )
     print(f"  Average QPS:               {np.mean(round_search_qps):,.1f}")
     print(f"  Average Search / ms:       {np.mean(round_search_per_ms):.2f}")
     print(f"  Average Update / ms:       {np.mean(round_update_per_ms):.2f}")
@@ -243,7 +242,9 @@ def run_sliding_window_benchmark(
     ax1.plot(range(1, rounds + 1), round_recalls, color="#1f77b4", linewidth=2, label="DEG (eps=0.03)")
     ax1.set_xlabel("Round (Sliding Window Batch)")
     ax1.set_ylabel(f"Recall@{search_k}")
-    ax1.set_title(f"Figure 20 Reproduction: Recall@{search_k} Over Updates\n(Window Size: {window_size:,}, {update_fraction * 100:.0f}% update/round)")
+    ax1.set_title(
+        f"Figure 20 Reproduction: Recall@{search_k} Over Updates\n(Window Size: {window_size:,}, {update_fraction * 100:.0f}% update/round)"
+    )
     ax1.set_ylim(0.0, 1.05)
     ax1.grid(True, linestyle="--", alpha=0.6)
     ax1.legend()
@@ -256,7 +257,14 @@ def run_sliding_window_benchmark(
     ax2.grid(True, linestyle="--", alpha=0.6)
 
     ax2_twin = ax2.twinx()
-    ax2_twin.plot(range(1, rounds + 1), round_update_per_ms, color="#2ca02c", linestyle=":", linewidth=2, label="Update Throughput (updates/ms)")
+    ax2_twin.plot(
+        range(1, rounds + 1),
+        round_update_per_ms,
+        color="#2ca02c",
+        linestyle=":",
+        linewidth=2,
+        label="Update Throughput (updates/ms)",
+    )
     ax2_twin.set_ylabel("Update Throughput (updates/ms)", color="#2ca02c")
     ax2_twin.tick_params(axis="y", labelcolor="#2ca02c")
 

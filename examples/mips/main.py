@@ -288,7 +288,7 @@ def construct_and_search_mips(
                 threads=search_threads,
                 return_distances=False,
                 unsorted=False,
-            )
+            ).indices
             t_search = time.perf_counter() - t0
             run_times.append(t_search)
 

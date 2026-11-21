@@ -230,9 +230,7 @@ def ensure_dataset(dataset_key: str, cache_dir: Path) -> Path:
     return extracted_folder
 
 
-def compute_and_save_anns_gt(
-    base_vecs: np.ndarray, query_vecs: np.ndarray, metric: Metric, k: int, out_path: Path
-):
+def compute_and_save_anns_gt(base_vecs: np.ndarray, query_vecs: np.ndarray, metric: Metric, k: int, out_path: Path):
     """Computes ANNS ground truth against the full base dataset."""
     n_queries = len(query_vecs)
     gt_matrix = np.zeros((n_queries, k), dtype=np.int32)
@@ -498,7 +496,7 @@ def generate_base_half_top_anns(
             include_entry=False,
             threads=effective_threads,
             return_distances=False,
-        )
+        ).indices
         hits = sum(len(filtered_gt[i].intersection(indices_batch[i])) for i in range(sample_count))
         recall = hits / max(sample_count * tune_k, 1)
         print(f"  eps {eps:6.3f} -> Recall@{tune_k}: {recall:.4f}")
@@ -522,7 +520,7 @@ def generate_base_half_top_anns(
             include_entry=False,
             threads=effective_threads,
             return_distances=False,
-        )
+        ).indices
         return np.asarray(indices, dtype=np.uint32)
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -542,7 +540,7 @@ def generate_base_half_top_anns(
                 include_entry=False,
                 threads=effective_threads,
                 return_distances=False,
-            )
+            ).indices
             d_col = np.full((len(batch_labels), 1), k_int32, dtype=np.int32)
             f_out.write(np.hstack([d_col, indices_chunk.astype(np.int32)]).tobytes())
 
@@ -612,7 +610,9 @@ def load_base_half_groundtruth(
         return ivecs_read(existing_path, mmap=True)
 
     if mode == "auto":
-        print(f"Half-base ground truth not found at {base_half_path} (metric: {metric.name}). Skipping graph quality evaluation (mode: auto).")
+        print(
+            f"Half-base ground truth not found at {base_half_path} (metric: {metric.name}). Skipping graph quality evaluation (mode: auto)."
+        )
         return None
 
     half_vecs = base_vecs[:n_half]
@@ -622,4 +622,3 @@ def load_base_half_groundtruth(
         return generate_base_half_top_anns(graph, half_vecs, metric, k=1000, out_file=base_half_path, threads=threads)
 
     return generate_base_half_top_linear(half_vecs, metric, k=1000, out_file=base_half_path, threads=threads)
-

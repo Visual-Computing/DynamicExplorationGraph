@@ -127,7 +127,8 @@ class DynamicGraph : public deglib::graph::MutableGraph {
      *
      * @param input_graph Source graph to copy topology and labels from.
      * @param target_feature_space Optional target feature space.
-     * @param custom_features Optional raw byte pointer to new feature vectors in the graph's internal index order (0 .. size()-1, see input_graph.getExternalLabels()).
+     * @param custom_features Optional raw byte pointer to new feature vectors in the graph's internal index order (0 .. size()-1, see
+     * input_graph.getExternalLabels()).
      * @param transformations Optional sequence of feature transformations/quantizers to attach.
      * @param chunk_size Target number of vertices per memory chunk (rounded up to nearest power of 2, default = 1024).
      */
@@ -138,9 +139,8 @@ class DynamicGraph : public deglib::graph::MutableGraph {
         std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
         const uint32_t chunk_size = 1024
     ) {
-        const auto feature_space = deglib::transformation::resolve_graph_conversion_space(
-            input_graph.getFeatureSpace(), target_feature_space, custom_features, transformations
-        );
+        const auto feature_space =
+            deglib::transformation::resolve_graph_conversion_space(input_graph.getFeatureSpace(), target_feature_space, custom_features, transformations);
         const uint32_t graph_size = input_graph.size();
         const uint8_t edges_per_vertex = input_graph.getEdgesPerVertex();
         DynamicGraph target(edges_per_vertex, feature_space, chunk_size);
@@ -177,16 +177,13 @@ class DynamicGraph : public deglib::graph::MutableGraph {
                 const auto* src_feat = input_graph.getFeatureVector(i);
                 if (src_metric.get_data_type() == deglib::distances::MetricDataType::FP32) {
                     deglib::transformation::apply_on_database(
-                        transformations,
-                        std::span<const float>(reinterpret_cast<const float*>(src_feat), in_dim),
+                        transformations, std::span<const float>(reinterpret_cast<const float*>(src_feat), in_dim),
                         std::span<std::byte>(vertex_memory, feature_data_size)
                     );
                 } else if (src_metric.get_data_type() == deglib::distances::MetricDataType::FP16) {
                     deglib::distances::fp16::fp16_to_floats(reinterpret_cast<const uint16_t*>(src_feat), f_buf.data(), in_dim);
                     deglib::transformation::apply_on_database(
-                        transformations,
-                        std::span<const float>(f_buf),
-                        std::span<std::byte>(vertex_memory, feature_data_size)
+                        transformations, std::span<const float>(f_buf), std::span<std::byte>(vertex_memory, feature_data_size)
                     );
                 } else {
                     throw std::invalid_argument("DynamicGraph::from_graph: cannot self-transform from non-float base features");
@@ -449,8 +446,12 @@ class DynamicGraph : public deglib::graph::MutableGraph {
     }
 
   protected:
-    std::vector<deglib::graph::ObjectDistance> search_ef_intern(
-        const std::vector<uint32_t>& entry_vertex_indices,
+    using InternalGraph::search_ef_intern;
+    using InternalGraph::search_intern;
+
+    void search_ef_intern(
+        SearchWorkspace& ws,
+        std::span<const uint32_t> entry_vertex_indices,
         const std::byte* query,
         const uint32_t k,
         const uint32_t ef,
@@ -458,11 +459,12 @@ class DynamicGraph : public deglib::graph::MutableGraph {
         const deglib::search::Filter* filter = nullptr,
         const uint32_t max_distance_computation_count = 0
     ) const override {
-        return searchEfInternImpl(*this, entry_vertex_indices, query, k, ef, include_entry, filter, max_distance_computation_count);
+        searchEfInternImpl(ws, *this, entry_vertex_indices, query, k, ef, include_entry, filter, max_distance_computation_count);
     }
 
-    deglib::graph::ResultSet search_intern(
-        const std::vector<uint32_t>& entry_vertex_indices,
+    void search_intern(
+        SearchWorkspace& ws,
+        std::span<const uint32_t> entry_vertex_indices,
         const std::byte* query,
         const uint32_t k,
         const float eps = 0.0f,
@@ -470,7 +472,7 @@ class DynamicGraph : public deglib::graph::MutableGraph {
         const deglib::search::Filter* filter = nullptr,
         const uint32_t max_distance_computation_count = 0
     ) const override {
-        return searchInternImpl(*this, entry_vertex_indices, query, k, eps, include_entry, filter, max_distance_computation_count);
+        searchInternImpl(ws, *this, entry_vertex_indices, query, k, eps, include_entry, filter, max_distance_computation_count);
     }
 
   private:
@@ -578,7 +580,8 @@ inline auto convert_to_dynamic_graph(const deglib::graph::InternalGraph& input_g
  *
  * @param input_graph Source graph to convert from.
  * @param feature_space Target feature space (dimension and metric).
- * @param custom_features Optional raw byte pointer to new feature vectors in the graph's internal index order (0 .. size()-1, see input_graph.getExternalLabels()).
+ * @param custom_features Optional raw byte pointer to new feature vectors in the graph's internal index order (0 .. size()-1, see
+ * input_graph.getExternalLabels()).
  * @param chunk_size Target number of vertices per memory chunk (rounded up to nearest power of 2, default = 1024).
  */
 inline auto convert_to_dynamic_graph(

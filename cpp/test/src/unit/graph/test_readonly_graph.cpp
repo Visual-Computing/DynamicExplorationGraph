@@ -57,8 +57,9 @@ TEST(ReadOnlyGraphTest, BuildsInt8GraphWithNativeL2Metric) {
 
     const auto res = graph.search_ef(std::span<const int8_t>(features.data(), dim), 1, 32);
     ASSERT_FALSE(res.empty());
-    EXPECT_EQ(res.front().getIdentifier(), 0u);
-    EXPECT_FLOAT_EQ(res.front().getDistance(), 0.0f);
+    EXPECT_EQ(res.indices[0], 0u);
+    EXPECT_FLOAT_EQ(res.distances[0], 0.0f);
+    EXPECT_GT(res.graph_distance_count, 0u);
 }
 
 TEST(ReadOnlyGraphTest, BuildsInt8GraphWithNativeInnerProductMetric) {
@@ -81,7 +82,8 @@ TEST(ReadOnlyGraphTest, BuildsInt8GraphWithNativeInnerProductMetric) {
 
     const auto res = graph.search_ef(std::span<const int8_t>(features.data(), dim), 1, 32);
     ASSERT_FALSE(res.empty());
-    EXPECT_EQ(res.front().getIdentifier(), 0u);
+    EXPECT_EQ(res.indices[0], 0u);
+    EXPECT_GT(res.graph_distance_count, 0u);
 }
 
 TEST(ReadOnlyGraphTest, BuildsFP32GraphWithNativeL2Metric) {
@@ -104,8 +106,9 @@ TEST(ReadOnlyGraphTest, BuildsFP32GraphWithNativeL2Metric) {
 
     const auto res = graph.search_ef(std::span<const float>(features.data(), dim), 1, 32);
     ASSERT_FALSE(res.empty());
-    EXPECT_EQ(res.front().getIdentifier(), 0u);
-    EXPECT_FLOAT_EQ(res.front().getDistance(), 0.0f);
+    EXPECT_EQ(res.indices[0], 0u);
+    EXPECT_FLOAT_EQ(res.distances[0], 0.0f);
+    EXPECT_GT(res.graph_distance_count, 0u);
 }
 
 TEST(ReadOnlyGraphTest, BuildsFP32GraphWithNativeInnerProductMetric) {
@@ -128,7 +131,8 @@ TEST(ReadOnlyGraphTest, BuildsFP32GraphWithNativeInnerProductMetric) {
 
     const auto res = graph.search_ef(std::span<const float>(features.data(), dim), 1, 32);
     ASSERT_FALSE(res.empty());
-    EXPECT_EQ(res.front().getIdentifier(), 0u);
+    EXPECT_EQ(res.indices[0], 0u);
+    EXPECT_GT(res.graph_distance_count, 0u);
 }
 
 TEST(ReadOnlyGraphTest, OptimizeTunesPrefetchParameters) {
@@ -162,8 +166,9 @@ TEST(ReadOnlyGraphTest, OptimizeTunesPrefetchParameters) {
     EXPECT_GE(graph.getNl(), 1);
 
     const auto results = graph.search_ef(std::span<const std::byte>(reinterpret_cast<const std::byte*>(features.data()), dim * sizeof(float)), 5, 10);
-    EXPECT_LE(results.size(), 5u);
-    EXPECT_GE(results.size(), 1u);
+    EXPECT_LE(results.pool.size(), 5u);
+    EXPECT_GE(results.pool.size(), 1u);
+    EXPECT_GT(results.graph_distance_count, 0u);
 }
 
 TEST(ReadOnlyGraphTest, HasPathAndFromGraphUseInternalGraphInterfaces) {

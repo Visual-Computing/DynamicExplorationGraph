@@ -22,7 +22,7 @@ Include the umbrella header to access all functionalities:
 | [`deglib::search::`](#4-namespace-deglibsearch) | `<deglib/search.h>`, `<deglib/filter.h>` | Search label filtering (`Filter`) and exact distance candidate reranking (`rerank`). |
 | [`deglib::optimization::`](#5-namespace-degliboptimization) | `<deglib/optimization.h>` | MRNG pruning and FLAS 1D presorting. |
 | [`deglib::analysis::`](#6-namespace-deglibanalysis) | `<deglib/analysis.h>` | Graph health diagnostics, regularity validation, and reachability metrics. |
-| [`deglib::graph::`](#7-namespace-deglibgraph-internal-graphs--results) | `<deglib/graph/*.h>` | Low-level internal graph hierarchy (`0..N-1` indices) and search `ResultSet` (max-heap). |
+| [`deglib::graph::`](#7-namespace-deglibgraph-internal-graphs--results) | `<deglib/graph/*.h>` | Low-level internal graph hierarchy (`0..N-1` indices), reusable `SearchWorkspace`, and `ResultSet`. |
 | [`deglib::transformation::`](#11-namespace-deglibtransformation) | `<deglib/transformation.h>` | Query and database feature transformation and quantization pipeline. |
 | [`deglib::cpu::`](#8-namespace-deglibcpu) | `<deglib/utils/cpu.h>` | Hardware feature detection (AVX2, AVX512) and `InstructionSet` configuration. |
 | [`deglib::memory::`](#9-namespace-deglibmemory) | `<deglib/utils/memory.h>` | CPU cache line prefetching utilities. |
@@ -120,39 +120,46 @@ public:
 
     // --- Search (Single Query) ---
 
-    /// Search k-nearest neighbors using dynamic exploration radius (eps) -> returns max-heap ResultSet
+    /// Search k-nearest neighbors using dynamic exploration radius (eps) -> returns sorted SearchResults (unless unsorted=true)
     template <typename T = float>
-    ResultSet search(
+    deglib::search::SearchResults search(
         std::span<const T> query,
         uint32_t k,
         float eps = 0.0f,
         const Filter* filter = nullptr,
-        uint32_t max_distance_computations = 0
+        uint32_t max_distance_computations = 0,
+        bool return_distances = true,
+        bool unsorted = false,
+        bool pad_missing = false
     ) const;
 
-    /// Search k-nearest neighbors using fixed beam width (ef) -> returns ascending sorted vector
+    /// Search k-nearest neighbors using fixed beam width (ef) -> returns SearchResults
     template <typename T = float>
-    std::vector<ObjectDistance> search_ef(
+    deglib::search::SearchResults search_ef(
         std::span<const T> query,
         uint32_t k,
         uint32_t ef,
         bool include_entry = true,
         const Filter* filter = nullptr,
-        uint32_t max_distance_computations = 0
+        uint32_t max_distance_computations = 0,
+        bool return_distances = true,
+        bool pad_missing = false
     ) const;
 
     // --- Search Batch (Parallel Multithreaded) ---
 
-    /// Batch search with dynamic exploration radius (eps) returning container of ResultSets
+    /// Batch search with dynamic exploration radius (eps) returning flat SearchResults with telemetry
     template <typename T = float>
-    std::vector<ResultSet> search_batch(
+    deglib::search::SearchResults search_batch(
         std::span<const T> queries,
         size_t count,
         uint32_t k,
         float eps = 0.0f,
         const Filter* filter = nullptr,
         uint32_t max_distance_computations = 0,
-        size_t threads = 1
+        size_t threads = 1,
+        bool return_distances = true,
+        bool unsorted = false
     ) const;
 
     /// High-performance zero-allocation batch search into pre-allocated flat spans (eps)
@@ -186,9 +193,9 @@ public:
         bool unsorted = false
     ) const;
 
-    /// Batch search with fixed beam width (ef) returning vector of sorted results
+    /// Batch search with fixed beam width (ef) returning flat SearchResults with telemetry
     template <typename T = float>
-    std::vector<std::vector<ObjectDistance>> search_batch_ef(
+    deglib::search::SearchResults search_batch_ef(
         std::span<const T> queries,
         size_t count,
         uint32_t k,
@@ -196,29 +203,34 @@ public:
         bool include_entry = true,
         const Filter* filter = nullptr,
         uint32_t max_distance_computations = 0,
-        size_t threads = 1
+        size_t threads = 1,
+        bool return_distances = true,
+        bool unsorted = false
     ) const;
 
     // --- Exploration & Path Traversal ---
 
     /// Explore starting from an existing external label using dynamic exploration radius (eps)
-    ResultSet explore(
+    deglib::search::SearchResults explore(
         uint32_t entry_external_label,
         uint32_t k,
         uint32_t max_distance_computations = 0,
         float eps = 0.0f,
         bool include_entry = true,
-        const Filter* filter = nullptr
+        const Filter* filter = nullptr,
+        bool return_distances = true,
+        bool unsorted = false
     ) const;
 
     /// Explore starting from an existing external label using fixed beam width (ef)
-    std::vector<ObjectDistance> explore_ef(
+    deglib::search::SearchResults explore_ef(
         uint32_t entry_external_label,
         uint32_t k,
         uint32_t ef,
         uint32_t max_distance_computations = 0,
         bool include_entry = true,
-        const Filter* filter = nullptr
+        const Filter* filter = nullptr,
+        bool return_distances = true
     ) const;
 
     /// Batch exploration into pre-allocated flat spans (eps)
@@ -235,8 +247,8 @@ public:
         bool unsorted = false
     ) const;
 
-    /// Batch exploration returning flat indices and optional distances (eps)
-    std::pair<std::vector<uint32_t>, std::vector<float>> explore_batch(
+    /// Batch exploration returning SearchResults (eps)
+    deglib::search::SearchResults explore_batch(
         std::span<const uint32_t> entry_external_labels,
         uint32_t k,
         uint32_t max_distance_computations = 0,
@@ -262,8 +274,8 @@ public:
         bool unsorted = false
     ) const;
 
-    /// Batch exploration returning flat indices and optional distances (ef)
-    std::pair<std::vector<uint32_t>, std::vector<float>> explore_batch_ef(
+    /// Batch exploration returning SearchResults (ef)
+    deglib::search::SearchResults explore_batch_ef(
         std::span<const uint32_t> entry_external_labels,
         uint32_t k,
         uint32_t ef,
@@ -606,6 +618,27 @@ public:
     void optimize(size_t num_sample_queries = 300, size_t num_candidates = 150, uint32_t k = 100, size_t num_threads = 1);
 };
 
+/// Unified single-query and batch search result container with traversal telemetry.
+struct SearchResults {
+    size_t n_queries = 0;
+    uint32_t k = 0;
+    bool is_batch = false;
+    bool with_distances = false;
+
+    std::vector<uint32_t> indices;
+    std::vector<float> distances;
+
+    uint64_t graph_distance_count = 0;
+    uint64_t rerank_distance_count = 0;
+    uint64_t graph_hop_count = 0;
+
+    size_t size() const noexcept;
+    bool empty() const noexcept;
+    bool has_distances() const noexcept;
+    std::span<const uint32_t> get_indices(size_t q = 0) const noexcept;
+    std::span<const float> get_distances(size_t q = 0) const noexcept;
+};
+
 /// High-performance Searcher coordinating query transformation, graph exploration, and reranking.
 class Searcher {
 public:
@@ -616,7 +649,6 @@ public:
         uint32_t n_clusters = 128,
         uint32_t n_iter = 15,
         size_t sample_size = 0,
-        uint32_t k = 100,
         size_t threads = 0,
         bool use_routing = true
     );
@@ -625,12 +657,53 @@ public:
     uint32_t search(
         std::span<const T> query,
         uint32_t k,
+        std::span<uint32_t> out_indices,
+        std::span<float> out_distances = {},
         float eps_or_ef = 0.1f,
         float rerank_factor = 1.0f,
-        uint32_t* out_indices = nullptr,
-        float* out_distances = nullptr,
-        bool unsorted = false
-    );
+        bool return_distances = false,
+        bool unsorted = false,
+        uint32_t max_distance_computation_count = 0
+    ) const;
+
+    template <typename T>
+    SearchResults search(
+        std::span<const T> query,
+        uint32_t k,
+        float eps_or_ef = 0.1f,
+        float rerank_factor = 1.0f,
+        bool return_distances = false,
+        bool unsorted = false,
+        uint32_t max_distance_computation_count = 0
+    ) const;
+
+    template <typename T>
+    void search_batch(
+        std::span<const T> queries,
+        size_t n_queries,
+        uint32_t k,
+        std::span<uint32_t> out_indices,
+        std::span<float> out_distances = {},
+        float eps_or_ef = 0.1f,
+        float rerank_factor = 1.0f,
+        size_t threads = 1,
+        bool return_distances = false,
+        bool unsorted = false,
+        uint32_t max_distance_computation_count = 0
+    ) const;
+
+    template <typename T>
+    SearchResults search_batch(
+        std::span<const T> queries,
+        size_t n_queries,
+        uint32_t k,
+        float eps_or_ef = 0.1f,
+        float rerank_factor = 1.0f,
+        size_t threads = 1,
+        bool return_distances = false,
+        bool unsorted = false,
+        uint32_t max_distance_computation_count = 0
+    ) const;
 };
 
 } // namespace deglib::search
@@ -790,6 +863,24 @@ public:
     void sort();                                                ///< Sort elements in ascending distance order
 };
 
+/// Reusable scratch workspace and result container populated by InternalGraph traversals
+struct SearchWorkspace {
+    ResultSet results;                ///< Max-heap populated by eps search (`used_pool == false`)
+    UncheckedSet next_vertices;       ///< Min-heap frontier
+    deglib::search::ResultList pool;  ///< Sorted beam populated by ef search (`used_pool == true`)
+
+    uint32_t graph_distance_count = 0;
+    uint32_t graph_hop_count = 0;
+    bool used_pool = false;
+
+    size_t size() const noexcept;
+    size_t result_count(size_t k) const noexcept;
+    bool empty() const noexcept;
+    uint32_t extract_internal_ids(uint32_t k, uint32_t* out_internal_ids) const noexcept;
+    template <typename GraphT>
+    uint32_t drain_into(const GraphT& graph, uint32_t k, uint32_t* out_indices, float* out_distances, bool unsorted, bool pad_missing = false) noexcept;
+};
+
 // --- Graph Interfaces ---
 
 /// Abstract base interface for 0..N-1 indexed graphs
@@ -805,10 +896,18 @@ public:
     const std::vector<uint32_t>& getEntryVertexIndices() const;
     bool hasEdge(uint32_t from_index, uint32_t to_index);
 
-    ResultSet search(std::span<const float> query, uint32_t k, float eps = 0.0f, const Filter* filter = nullptr, uint32_t max_dc = 0);
-    std::vector<ObjectDistance> search_ef(std::span<const float> query, uint32_t k, uint32_t ef, bool include_entry = true, const Filter* filter = nullptr, uint32_t max_dc = 0);
-    ResultSet explore(uint32_t entry_index, uint32_t k, uint32_t max_dc = 0, float eps = 0.0f, bool include_entry = true, const Filter* filter = nullptr);
-    std::vector<ObjectDistance> explore_ef(uint32_t entry_index, uint32_t k, uint32_t ef, uint32_t max_dc = 0, bool include_entry = true, const Filter* filter = nullptr);
+    template <typename T>
+    void search(SearchWorkspace& ws, std::span<const T> query, uint32_t k, float eps = 0.0f, const Filter* filter = nullptr, uint32_t max_dc = 0) const;
+    template <typename T>
+    SearchWorkspace search(std::span<const T> query, uint32_t k, float eps = 0.0f, const Filter* filter = nullptr, uint32_t max_dc = 0) const;
+    template <typename T>
+    void search_ef(SearchWorkspace& ws, std::span<const T> query, uint32_t k, uint32_t ef, bool include_entry = true, const Filter* filter = nullptr, uint32_t max_dc = 0) const;
+    template <typename T>
+    SearchWorkspace search_ef(std::span<const T> query, uint32_t k, uint32_t ef, bool include_entry = true, const Filter* filter = nullptr, uint32_t max_dc = 0) const;
+    void explore(SearchWorkspace& ws, uint32_t entry_index, uint32_t k, uint32_t max_dc = 0, float eps = 0.0f, bool include_entry = true, const Filter* filter = nullptr) const;
+    SearchWorkspace explore(uint32_t entry_index, uint32_t k, uint32_t max_dc = 0, float eps = 0.0f, bool include_entry = true, const Filter* filter = nullptr) const;
+    void explore_ef(SearchWorkspace& ws, uint32_t entry_index, uint32_t k, uint32_t ef, uint32_t max_dc = 0, bool include_entry = true, const Filter* filter = nullptr) const;
+    SearchWorkspace explore_ef(uint32_t entry_index, uint32_t k, uint32_t ef, uint32_t max_dc = 0, bool include_entry = true, const Filter* filter = nullptr) const;
     virtual std::vector<ObjectDistance> hasPath(const std::vector<uint32_t>& entry_indices, uint32_t to_vertex, float eps, uint32_t k) const = 0;
 
     // --- Traversal Prefetch Tuning ---

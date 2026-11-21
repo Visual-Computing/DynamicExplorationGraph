@@ -121,14 +121,16 @@ def test_builder_and_graph_search_with_int8_transforms():
 
     # Transparent search using float32 query
     query = data[10]
-    indices, dists = graph.search(query, eps_or_ef=0.2, k=5)
+    res = graph.search(query, eps_or_ef=0.2, k=5)
+    indices, dists = res.indices, res.distances
     assert len(indices) == 5
     # The exact vector itself should be nearest
     assert indices[0] == 10
 
     # Batch search with float32 queries
     batch_queries = data[:5]
-    batch_indices, batch_dists = graph.search(batch_queries, eps_or_ef=0.2, k=5)
+    batch_res = graph.search(batch_queries, eps_or_ef=0.2, k=5)
+    batch_indices, batch_dists = batch_res.indices, batch_res.distances
     assert batch_indices.shape == (5, 5)
     for i in range(5):
         assert batch_indices[i, 0] == i
@@ -149,7 +151,7 @@ def test_builder_and_graph_search_with_int8_inner_product_transform():
     builder.add_entry(range(N), data)
     builder.build()
 
-    indices, _ = graph.search(data[:20], eps_or_ef=64, k=1)
+    indices = graph.search(data[:20], eps_or_ef=64, k=1).indices
     np.testing.assert_array_equal(indices[:, 0], np.arange(20))
 
 
@@ -189,14 +191,14 @@ def test_container_persistence_roundtrip():
 
         # Transparent search on loaded graph
         query = data[7]
-        indices, _ = loaded_g.search(query, eps_or_ef=0.2, k=5)
+        indices = loaded_g.search(query, eps_or_ef=0.2, k=5).indices
         assert indices[0] == 7
 
         # 3. Load via load_readonly_graph
         ro_g = load_readonly_graph(save_path)
         assert ro_g.has_transformations()
         assert ro_g.size() == N
-        ro_indices, _ = ro_g.search(query, eps_or_ef=0.2, k=5)
+        ro_indices = ro_g.search(query, eps_or_ef=0.2, k=5).indices
         assert ro_indices[0] == 7
 
         # 4. Searcher with loaded graph
@@ -206,7 +208,7 @@ def test_container_persistence_roundtrip():
             rerank_data=data,
         )
         searcher.optimize(n_clusters=min(N, 16), n_iter=5, sample_size=N)
-        res_searcher = searcher.search(query, k=5, eps_or_ef=0.2, rerank_factor=1.5)
+        res_searcher = searcher.search(query, k=5, eps_or_ef=0.2, rerank_factor=1.5).indices
         assert res_searcher[0] == 7
 
 
@@ -231,7 +233,7 @@ def test_evp_transforms_end_to_end():
 
     # Search with float query
     query = data[15]
-    indices, _ = graph.search(query, eps_or_ef=0.2, k=5)
+    indices = graph.search(query, eps_or_ef=0.2, k=5).indices
     assert indices[0] == 15
 
     # Container save & load
@@ -241,7 +243,7 @@ def test_evp_transforms_end_to_end():
 
         loaded = load_readonly_graph(path)
         assert loaded.has_transformations()
-        loaded_indices, _ = loaded.search(query, eps_or_ef=0.2, k=5)
+        loaded_indices = loaded.search(query, eps_or_ef=0.2, k=5).indices
         assert loaded_indices[0] == 15
 
 
@@ -269,7 +271,7 @@ def test_legacy_v1_compatibility(tmp_path):
     assert not loaded_ro.has_transformations()
     assert loaded_ro.size() == N
     # Search on legacy graph works with float query
-    indices, _ = loaded_ro.search(data[0], eps_or_ef=0.2, k=3)
+    indices = loaded_ro.search(data[0], eps_or_ef=0.2, k=3).indices
     assert len(indices) == 3
 
 
@@ -291,21 +293,25 @@ def test_transformation_graph_search_fp16():
     queries_f16 = data_f32[:5].astype(np.float16)
 
     # 1. Single query FP16
-    idx_single, dist_single = ro_graph.search(queries_f16[0], eps_or_ef=0.1, k=3)
+    res_single = ro_graph.search(queries_f16[0], eps_or_ef=0.1, k=3)
+    idx_single, dist_single = res_single.indices, res_single.distances
     assert idx_single[0] == 0
 
     # 2. Batch query FP16 (eps mode)
-    idx_batch, dist_batch = ro_graph.search(queries_f16, eps_or_ef=0.1, k=3)
+    res_batch = ro_graph.search(queries_f16, eps_or_ef=0.1, k=3)
+    idx_batch, dist_batch = res_batch.indices, res_batch.distances
     assert idx_batch.shape == (5, 3)
     assert dist_batch.shape == (5, 3)
     np.testing.assert_array_equal(idx_batch[0], idx_single)
     np.testing.assert_allclose(dist_batch[0], dist_single, rtol=1e-5)
 
     # 3. Batch query FP16 (ef mode)
-    idx_batch_ef, dist_batch_ef = ro_graph.search(queries_f16, eps_or_ef=16.0, k=3)
+    res_batch_ef = ro_graph.search(queries_f16, eps_or_ef=16.0, k=3)
+    idx_batch_ef, dist_batch_ef = res_batch_ef.indices, res_batch_ef.distances
     assert idx_batch_ef.shape == (5, 3)
     assert dist_batch_ef.shape == (5, 3)
-    idx_single_ef, dist_single_ef = ro_graph.search(queries_f16[0], eps_or_ef=16.0, k=3)
+    res_single_ef = ro_graph.search(queries_f16[0], eps_or_ef=16.0, k=3)
+    idx_single_ef, dist_single_ef = res_single_ef.indices, res_single_ef.distances
     np.testing.assert_array_equal(idx_batch_ef[0], idx_single_ef)
     np.testing.assert_allclose(dist_batch_ef[0], dist_single_ef, rtol=1e-5)
 
@@ -330,6 +336,6 @@ def test_uint4_transformation_graph_search():
 
     # Search with original float query
     query = data_f32[0]
-    indices = searcher.search(query, k=5, eps_or_ef=0.1)
+    indices = searcher.search(query, k=5, eps_or_ef=0.1).indices
     assert len(indices) == 5
     assert indices[0] == 0

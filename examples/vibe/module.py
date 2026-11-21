@@ -165,7 +165,7 @@ class DEG(_BaseDEG):
             threads=1,
             return_distances=False,
             unsorted=True,
-        )
+        ).indices
 
     def __str__(self) -> str:
         if self.eps_or_ef >= 1.0:
@@ -248,7 +248,7 @@ class QG(_BaseDEG):
             threads=1,
             return_distances=False,
             unsorted=True,
-        )
+        ).indices
 
     def __str__(self) -> str:
         q_label = self.active_searcher.graph.get_metric().name if self.active_searcher is not None else "unfitted"

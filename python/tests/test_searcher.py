@@ -15,11 +15,17 @@ def test_searcher_direct_f32():
 
     query = data[0]
     res = searcher.search(query, k=5, eps_or_ef=0.1)
+    assert isinstance(res, deglib.SearchResults)
     assert len(res) == 5
-    assert res[0] == 0
+    assert res.distances is None
+    assert res.graph_distance_count > 0
+    assert res.graph_hop_count > 0
+    assert res.rerank_distance_count == 0
+    assert res.indices[0] == 0
 
     # With return_distances
-    indices, distances = searcher.search(query, k=5, eps_or_ef=0.1, return_distances=True)
+    res_with_dist = searcher.search(query, k=5, eps_or_ef=0.1, return_distances=True)
+    indices, distances = res_with_dist.indices, res_with_dist.distances
     assert len(indices) == 5
     assert len(distances) == 5
     assert indices[0] == 0
@@ -29,27 +35,30 @@ def test_searcher_direct_f32():
         assert distances[i] >= distances[i - 1]
 
     # With unsorted
-    indices_unsorted, distances_unsorted = searcher.search(
-        query, k=5, eps_or_ef=0.1, return_distances=True, unsorted=True
-    )
+    res_unsorted = searcher.search(query, k=5, eps_or_ef=0.1, return_distances=True, unsorted=True)
+    indices_unsorted, distances_unsorted = res_unsorted.indices, res_unsorted.distances
     assert len(indices_unsorted) == 5
     assert set(indices_unsorted) == set(indices)
 
     # Unified search method with 1D, (1, dim), and (dim, 1) queries
-    res_1xDim = searcher.search(query.reshape(1, -1), k=5, eps_or_ef=0.1)
+    res_1xDim = searcher.search(query.reshape(1, -1), k=5, eps_or_ef=0.1).indices
     assert res_1xDim.shape == (5,)
     assert res_1xDim[0] == 0
 
-    res_Dimx1 = searcher.search(query.reshape(-1, 1), k=5, eps_or_ef=0.1)
+    res_Dimx1 = searcher.search(query.reshape(-1, 1), k=5, eps_or_ef=0.1).indices
     assert res_Dimx1.shape == (5,)
     assert res_Dimx1[0] == 0
 
     # Unified search method with 2D batch queries
-    res_batch_unified = searcher.search(data[:10], k=5, eps_or_ef=0.1, threads=2)
+    res_batch_unified = searcher.search(data[:10], k=5, eps_or_ef=0.1, threads=2).indices
     assert res_batch_unified.shape == (10, 5)
     assert res_batch_unified[0, 0] == 0
 
-    indices_batch, dists_batch = searcher.search(data[:10], k=5, eps_or_ef=0.1, threads=2, return_distances=True)
+    batch_res = searcher.search(data[:10], k=5, eps_or_ef=0.1, threads=2, return_distances=True)
+    indices_batch, dists_batch = batch_res.indices, batch_res.distances
+    assert batch_res.graph_distance_count > 0
+    assert batch_res.graph_hop_count > 0
+    assert batch_res.rerank_distance_count == 0
     assert indices_batch.shape == (10, 5)
     assert dists_batch.shape == (10, 5)
     assert indices_batch[0, 0] == 0
@@ -83,19 +92,26 @@ def test_searcher_quantized_int8_with_rerank():
     )
 
     query = data[5]
-    res = searcher.search(query, k=5, eps_or_ef=0.2, rerank_factor=1.5)
+    res_obj = searcher.search(query, k=5, eps_or_ef=0.2, rerank_factor=1.5)
+    assert res_obj.graph_distance_count > 0
+    assert res_obj.rerank_distance_count > 0
+    assert res_obj.graph_hop_count > 0
+    res = res_obj.indices
     assert len(res) == 5
     assert res[0] == 5
 
     # With return_distances
-    indices, distances = searcher.search(query, k=5, eps_or_ef=0.2, rerank_factor=1.5, return_distances=True)
+    res_dist_obj = searcher.search(query, k=5, eps_or_ef=0.2, rerank_factor=1.5, return_distances=True)
+    indices, distances = res_dist_obj.indices, res_dist_obj.distances
     assert indices[0] == 5
     assert distances[0] == pytest.approx(0.0, abs=1e-3)
     for i in range(1, len(distances)):
         assert distances[i] >= distances[i - 1]
 
     # Batch search
-    res_batch = searcher.search(data[:5], k=5, eps_or_ef=32, rerank_factor=1.5, threads=2)
+    res_batch_obj = searcher.search(data[:5], k=5, eps_or_ef=32, rerank_factor=1.5, threads=2)
+    assert res_batch_obj.rerank_distance_count > 0
+    res_batch = res_batch_obj.indices
     assert res_batch.shape == (5, 5)
     for i in range(5):
         assert res_batch[i, 0] == i
@@ -116,7 +132,7 @@ def test_searcher_quantized_int8_optimize_without_reranker():
     searcher.optimize(n_clusters=16, n_iter=3, sample_size=0)
 
     query = data[5]
-    res = searcher.search(query, k=5, eps_or_ef=0.2, rerank_factor=1.0)
+    res = searcher.search(query, k=5, eps_or_ef=0.2, rerank_factor=1.0).indices
     assert len(res) == 5
     assert res[0] == 5
 
@@ -140,11 +156,12 @@ def test_searcher_quantized_uint8_with_rerank():
     )
 
     query = data[12]
-    res = searcher.search(query, k=5, eps_or_ef=0.2, rerank_factor=1.5)
+    res = searcher.search(query, k=5, eps_or_ef=0.2, rerank_factor=1.5).indices
     assert len(res) == 5
     assert res[0] == 12
 
-    indices, distances = searcher.search(query, k=5, eps_or_ef=0.2, rerank_factor=1.5, return_distances=True)
+    res_dist = searcher.search(query, k=5, eps_or_ef=0.2, rerank_factor=1.5, return_distances=True)
+    indices, distances = res_dist.indices, res_dist.distances
     assert indices[0] == 12
     assert distances[0] == pytest.approx(0.0, abs=1e-5)
 
@@ -171,13 +188,14 @@ def test_searcher_evp_quantizer():
     )
 
     query = data[3]
-    res = searcher.search(query, k=3, eps_or_ef=0.3, rerank_factor=2.0)
+    res = searcher.search(query, k=3, eps_or_ef=0.3, rerank_factor=2.0).indices
     assert len(res) == 3
     assert res[0] == 3
 
     # FP16 query
     query_fp16 = deglib.distances.floats_to_fp16(query)
-    res_fp16, dists_fp16 = searcher.search(query_fp16, k=3, eps_or_ef=0.3, rerank_factor=2.0, return_distances=True)
+    r_fp16 = searcher.search(query_fp16, k=3, eps_or_ef=0.3, rerank_factor=2.0, return_distances=True)
+    res_fp16, dists_fp16 = r_fp16.indices, r_fp16.distances
     assert len(res_fp16) == 3
     assert res_fp16[0] == 3
     assert dists_fp16[0] == pytest.approx(0.0, abs=1e-3)
@@ -197,7 +215,7 @@ def test_searcher_quantized_without_reranker():
 
     searcher = create_searcher(graph=ro_graph)
     query = data[5]
-    res = searcher.search(query, k=5, eps_or_ef=0.2)
+    res = searcher.search(query, k=5, eps_or_ef=0.2).indices
     assert len(res) == 5
     assert res[0] == 5
 
@@ -215,7 +233,7 @@ def test_searcher_optimize_sets_kmeans_entries():
 
     searcher.optimize(n_clusters=8, n_iter=5, sample_size=100)
 
-    res = searcher.search(data[0], k=5, eps_or_ef=0.3)
+    res = searcher.search(data[0], k=5, eps_or_ef=0.3).indices
     assert len(res) == 5
     assert res[0] == labels[0]
 
@@ -232,17 +250,17 @@ def test_searcher_eps_or_ef_dual_modes():
     query = data[0]
 
     # Mode 1: eps < 1.0 (relative margin exploration)
-    res_eps = searcher.search(query, k=5, eps_or_ef=0.1)
+    res_eps = searcher.search(query, k=5, eps_or_ef=0.1).indices
     assert len(res_eps) == 5
     assert res_eps[0] == 0
 
     # Mode 2: ef >= 1.0 (fixed pool exploration)
-    res_ef = searcher.search(query, k=5, eps_or_ef=64)
+    res_ef = searcher.search(query, k=5, eps_or_ef=64).indices
     assert len(res_ef) == 5
     assert res_ef[0] == 0
 
     # Mode 2 batch with ef
-    batch_ef = searcher.search(data[:5], k=5, eps_or_ef=64, threads=2)
+    batch_ef = searcher.search(data[:5], k=5, eps_or_ef=64, threads=2).indices
     assert batch_ef.shape == (5, 5)
     for i in range(5):
         assert batch_ef[i, 0] == i
@@ -281,7 +299,7 @@ def test_searcher_rerank_insertion_order_with_permuted_labels():
     )
 
     for j in (0, 5, 17, 99):
-        res = searcher.search(data[j], k=5, eps_or_ef=128, rerank_factor=1.5)
+        res = searcher.search(data[j], k=5, eps_or_ef=128, rerank_factor=1.5).indices
         assert int(perm[j]) in set(int(x) for x in res)
         assert res[0] == perm[j]
 
@@ -294,7 +312,7 @@ def test_searcher_rerank_insertion_order_with_permuted_labels():
         rerank_data=rerank_data_by_label,
     )
     for j in (0, 5, 17, 99):
-        res = searcher_label.search(data[j], k=5, eps_or_ef=128, rerank_factor=1.5)
+        res = searcher_label.search(data[j], k=5, eps_or_ef=128, rerank_factor=1.5).indices
         assert res[0] == perm[j]
 
 
@@ -314,14 +332,16 @@ def test_searcher_normalize_query():
 
     # Search with unnormalized query
     raw_query = data[10] * 3.5
-    res, dist = searcher.search(raw_query, k=5, eps_or_ef=0.2, return_distances=True)
+    r_single = searcher.search(raw_query, k=5, eps_or_ef=0.2, return_distances=True)
+    res, dist = r_single.indices, r_single.distances
     assert res[0] == 10
     # For normalized inner product (1 - <q, v>), identical directions yield distance ~ 0
     assert dist[0] == pytest.approx(0.0, abs=1e-5)
 
     # Batch search with normalize_query=True
     raw_batch = data[:5] * 2.7
-    res_batch, dist_batch = searcher.search(raw_batch, k=5, eps_or_ef=0.2, return_distances=True, threads=2)
+    r_batch = searcher.search(raw_batch, k=5, eps_or_ef=0.2, return_distances=True, threads=2)
+    res_batch, dist_batch = r_batch.indices, r_batch.distances
     for i in range(5):
         assert res_batch[i, 0] == i
         assert dist_batch[i, 0] == pytest.approx(0.0, abs=1e-5)
@@ -341,13 +361,14 @@ def test_searcher_single_query_small_ef_exact_sizing():
     searcher = create_searcher(graph)
 
     # Ask for k=50 with small ef=4 (graph explore may expand fewer than 50 elements)
-    res = searcher.search(data[0], k=50, eps_or_ef=4)
+    res = searcher.search(data[0], k=50, eps_or_ef=4).indices
     # Result must not contain uint32 max padding and shape must equal actual found (found < 50)
     assert len(res) < 50
     assert np.all(res != np.iinfo(np.uint32).max)
 
     # With return_distances=True
-    res_idx, res_dist = searcher.search(data[0], k=50, eps_or_ef=4, return_distances=True)
+    res_with_dist = searcher.search(data[0], k=50, eps_or_ef=4, return_distances=True)
+    res_idx, res_dist = res_with_dist.indices, res_with_dist.distances
     assert len(res_idx) == len(res_dist)
     assert len(res_idx) < 50
     assert np.all(res_idx != np.iinfo(np.uint32).max)
@@ -365,22 +386,25 @@ def test_searcher_max_distance_computation_count():
 
     # Unlimited (0) returns full k=10 and exact match 0
     res_full = searcher.search(data[0], k=10, eps_or_ef=64, max_distance_computation_count=0)
-    assert len(res_full) == 10
-    assert res_full[0] == 0
+    assert len(res_full.indices) == 10
+    assert res_full.indices[0] == 0
 
-    # Tight budget (5) limits returned candidates in both eps and ef modes
+    # Tight budget (5) limits returned candidates and graph_distance_count in both eps and ef modes
     res_bounded_eps = searcher.search(data[0], k=10, eps_or_ef=0.2, max_distance_computation_count=5)
-    assert 1 <= len(res_bounded_eps) <= 5
+    assert 1 <= len(res_bounded_eps.indices) <= 5
+    assert 1 <= res_bounded_eps.graph_distance_count <= 5
 
     res_bounded_ef = searcher.search(data[0], k=10, eps_or_ef=64, max_distance_computation_count=5)
-    assert 1 <= len(res_bounded_ef) <= 5
+    assert 1 <= len(res_bounded_ef.indices) <= 5
+    assert 1 <= res_bounded_ef.graph_distance_count <= 5
 
     # Batch search with tight budget (max_distance_computation_count=5)
     batch_full = searcher.search(data[:4], k=10, eps_or_ef=64, threads=2, max_distance_computation_count=0)
     batch_bounded = searcher.search(data[:4], k=10, eps_or_ef=64, threads=2, max_distance_computation_count=5)
-    assert batch_bounded.shape == (4, 10)
-    assert np.array_equal(batch_bounded[0, : len(res_bounded_ef)], res_bounded_ef)
-    assert not np.array_equal(batch_bounded[0, :5], batch_full[0, :5])
+    assert batch_bounded.indices.shape == (4, 10)
+    assert batch_bounded.graph_distance_count <= 4 * 5
+    assert np.array_equal(batch_bounded.indices[0, : len(res_bounded_ef.indices)], res_bounded_ef.indices)
+    assert not np.array_equal(batch_bounded.indices[0, :5], batch_full.indices[0, :5])
 
 
 def test_to_searcher_self_extraction_rerank_and_validation():
@@ -399,7 +423,7 @@ def test_to_searcher_self_extraction_rerank_and_validation():
         optimize=False,
     )
     assert searcher.graph.get_metric() == Metric.Uint8_L2
-    res = searcher.search(data[7], k=5, eps_or_ef=32, rerank_factor=2.0)
+    res = searcher.search(data[7], k=5, eps_or_ef=32, rerank_factor=2.0).indices
     assert int(res[0]) == 7
 
     # rerank_metric=None with rerank_data supplied must raise ValueError
@@ -414,20 +438,26 @@ def test_searcher_unsorted_and_return_distances():
     graph = deglib.build(data, edges_per_vertex=16, metric=Metric.FP32_L2, optimize=False)
     searcher = graph.to_searcher(optimize=False)
 
-    sorted_idx, sorted_dist = searcher.search(data[0], k=5, eps_or_ef=32, return_distances=True, unsorted=False)
+    r_sorted = searcher.search(data[0], k=5, eps_or_ef=32, return_distances=True, unsorted=False)
+    sorted_idx, sorted_dist = r_sorted.indices, r_sorted.distances
     assert np.all(np.diff(sorted_dist) >= -1e-6)
 
-    unsorted_only = searcher.search(data[0], k=5, eps_or_ef=32, return_distances=False, unsorted=True)
+    res_only = searcher.search(data[0], k=5, eps_or_ef=32, return_distances=False, unsorted=True)
+    assert res_only.distances is None
+    unsorted_only = res_only.indices
     assert isinstance(unsorted_only, np.ndarray)
     assert unsorted_only.shape == (5,)
     assert set(unsorted_only.tolist()) == set(sorted_idx.tolist())
 
-    unsorted_idx, unsorted_dist = searcher.search(data[0], k=5, eps_or_ef=32, return_distances=True, unsorted=True)
+    r_unsorted = searcher.search(data[0], k=5, eps_or_ef=32, return_distances=True, unsorted=True)
+    unsorted_idx, unsorted_dist = r_unsorted.indices, r_unsorted.distances
     assert unsorted_idx.shape == (5,)
     assert unsorted_dist.shape == (5,)
     assert set(unsorted_idx.tolist()) == set(sorted_idx.tolist())
 
-    batch_only = searcher.search(data[:4], k=5, eps_or_ef=32, threads=2, return_distances=False, unsorted=True)
+    batch_only_res = searcher.search(data[:4], k=5, eps_or_ef=32, threads=2, return_distances=False, unsorted=True)
+    assert batch_only_res.distances is None
+    batch_only = batch_only_res.indices
     assert isinstance(batch_only, np.ndarray)
     assert batch_only.shape == (4, 5)
     assert set(batch_only[0].tolist()) == set(sorted_idx.tolist())
@@ -462,16 +492,60 @@ def test_shared_reranker_across_multiple_quantized_searchers():
 
     for q_idx in (0, 13, 77):
         for s in searchers.values():
-            res = s.search(data[q_idx], k=5, eps_or_ef=48, rerank_factor=2.0)
+            res = s.search(data[q_idx], k=5, eps_or_ef=48, rerank_factor=2.0).indices
             assert int(res[0]) == q_idx
 
     # Self-extraction via to_reranker(metric) with data=None
     extracted_reranker = base_graph.to_reranker(Metric.FP16_L2)
     s_extracted = base_graph.to_searcher(metric="Int8_L2", reranker=extracted_reranker, optimize=False)
-    assert int(s_extracted.search(data[5], k=5, eps_or_ef=48, rerank_factor=2.0)[0]) == 5
+    assert int(s_extracted.search(data[5], k=5, eps_or_ef=48, rerank_factor=2.0).indices[0]) == 5
 
     # Cannot combine `reranker` with `rerank_metric` or `rerank_data`
     with pytest.raises(ValueError, match="Cannot pass 'reranker'"):
         base_graph.to_searcher(reranker=shared_reranker, rerank_metric=Metric.FP16_L2)
     with pytest.raises(ValueError, match="Cannot pass 'reranker'"):
         deglib.Searcher(base_graph, reranker=shared_reranker, rerank_data=data)
+
+
+def test_search_results_zero_copy_lifetime_and_telemetry():
+    import gc
+
+    rng = np.random.default_rng(7)
+    data = rng.standard_normal((80, 16)).astype(np.float32)
+    graph = deglib.build(data, edges_per_vertex=8, metric=Metric.FP32_L2, optimize=False)
+    reranker = graph.to_reranker(Metric.FP16_L2)
+    searcher = graph.to_searcher(metric=Metric.Int8_L2, reranker=reranker, optimize=False)
+
+    res = searcher.search(data[3], k=5, eps_or_ef=32.0, rerank_factor=2.0, return_distances=True)
+    assert isinstance(res, deglib.SearchResults)
+    assert res.graph_distance_count > 0
+    assert res.rerank_distance_count > 0
+    assert res.graph_hop_count > 0
+
+    idx = res.indices
+    dist = res.distances
+    assert idx.shape == (5,)
+    assert dist.shape == (5,)
+    # Views point into SearchResults storage via capsule owner, so they do not own data directly
+    assert not idx.flags["OWNDATA"]
+    assert not dist.flags["OWNDATA"]
+    idx_copy = idx.copy()
+    dist_copy = dist.copy()
+
+    # Dropping the SearchResults wrapper must keep arrays valid through the owner capsule
+    del res
+    gc.collect()
+    np.testing.assert_array_equal(idx, idx_copy)
+    np.testing.assert_allclose(dist, dist_copy)
+
+    # Same lifetime contract for batch SearchResults with return_distances=False
+    batch_res = searcher.search(data[:4], k=5, eps_or_ef=32.0, threads=2, return_distances=False)
+    assert batch_res.distances is None
+    assert batch_res.graph_distance_count > 0
+    assert batch_res.graph_hop_count > 0
+    b_idx = batch_res.indices
+    assert not b_idx.flags["OWNDATA"]
+    b_copy = b_idx.copy()
+    del batch_res
+    gc.collect()
+    np.testing.assert_array_equal(b_idx, b_copy)

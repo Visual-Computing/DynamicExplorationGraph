@@ -55,14 +55,14 @@ TEST(DynamicGraphRegression, SearchAndExplore_FP32_L2) {
     auto graph = deglib::graph::convert_to_dynamic_graph(mutable_graph);
 
     // 1. Search Benchmark
-    std::vector<decltype(graph.search(std::span<const float>(), 0, 0.0f))> last_search_results(query_count);
+    std::vector<deglib::graph::ResultSet> last_search_results(query_count);
     auto t_start_search = std::chrono::high_resolution_clock::now();
 
     for (int run = 0; run < benchmark_runs; ++run) {
         for (size_t q = 0; q < query_count; ++q) {
             auto results = graph.search(std::span<const float>(&query_data[q * dim], dim), search_k, search_eps);
             if (run == 0) {
-                last_search_results[q] = std::move(results);
+                last_search_results[q] = std::move(results.results);
             }
         }
     }
@@ -93,7 +93,7 @@ TEST(DynamicGraphRegression, SearchAndExplore_FP32_L2) {
               << (total_search_ms / total_queries) << " ms/q), " << search_qps << " QPS, recall=" << (search_recall * 100.0f) << "%\n";
 
     // 2. Explore Benchmark
-    std::vector<decltype(graph.explore(0, 0, 0))> last_explore_results(query_count);
+    std::vector<deglib::graph::ResultSet> last_explore_results(query_count);
     auto t_start_explore = std::chrono::high_resolution_clock::now();
 
     for (int run = 0; run < benchmark_runs; ++run) {
@@ -101,7 +101,7 @@ TEST(DynamicGraphRegression, SearchAndExplore_FP32_L2) {
             uint32_t entry_node = static_cast<uint32_t>((run * 13 + i) % base_count);
             auto results = graph.explore(entry_node, search_k, explore_max_calcs);
             if (run == 0) {
-                last_explore_results[i] = std::move(results);
+                last_explore_results[i] = std::move(results.results);
             }
         }
     }
@@ -179,13 +179,13 @@ TEST(DynamicGraphRegression, SearchAndExplore_FP32_InnerProduct) {
     auto graph = deglib::graph::convert_to_dynamic_graph(mutable_graph);
 
     // Search Benchmark
-    std::vector<decltype(graph.search(std::span<const float>(), 0, 0.0f))> last_search_results(query_count);
+    std::vector<deglib::graph::ResultSet> last_search_results(query_count);
     auto t_start_search = std::chrono::high_resolution_clock::now();
     for (int run = 0; run < benchmark_runs; ++run) {
         for (size_t q = 0; q < query_count; ++q) {
             auto results = graph.search(std::span<const float>(&query_data[q * dim], dim), search_k, search_eps);
             if (run == 0) {
-                last_search_results[q] = std::move(results);
+                last_search_results[q] = std::move(results.results);
             }
         }
     }
@@ -216,14 +216,14 @@ TEST(DynamicGraphRegression, SearchAndExplore_FP32_InnerProduct) {
               << (total_search_ms / total_queries) << " ms/q), " << search_qps << " QPS, recall=" << (search_recall * 100.0f) << "%\n";
 
     // Explore Benchmark
-    std::vector<decltype(graph.explore(0, 0, 0))> last_explore_results(query_count);
+    std::vector<deglib::graph::ResultSet> last_explore_results(query_count);
     auto t_start_explore = std::chrono::high_resolution_clock::now();
     for (int run = 0; run < benchmark_runs; ++run) {
         for (size_t i = 0; i < query_count; ++i) {
             uint32_t entry_node = static_cast<uint32_t>((run * 13 + i) % base_count);
             auto results = graph.explore(entry_node, search_k, explore_max_calcs);
             if (run == 0) {
-                last_explore_results[i] = std::move(results);
+                last_explore_results[i] = std::move(results.results);
             }
         }
     }
@@ -314,14 +314,14 @@ TEST(DynamicGraphRegression, SearchAndExplore_EVP_InnerProduct) {
     auto graph = deglib::graph::convert_to_dynamic_graph(mutable_graph);
 
     // Search Benchmark
-    std::vector<decltype(graph.search(std::span<const std::byte>(), 0, 0.0f))> last_search_results(query_count);
+    std::vector<deglib::graph::ResultSet> last_search_results(query_count);
     auto t_start_search = std::chrono::high_resolution_clock::now();
     for (int run = 0; run < benchmark_runs; ++run) {
         for (size_t q = 0; q < query_count; ++q) {
             std::span<const std::byte> q_span(reinterpret_cast<const std::byte*>(query_quant.data() + q * vec_bytes), vec_bytes);
             auto results = graph.search(q_span, search_k, search_eps);
             if (run == 0) {
-                last_search_results[q] = std::move(results);
+                last_search_results[q] = std::move(results.results);
             }
         }
     }
@@ -352,14 +352,14 @@ TEST(DynamicGraphRegression, SearchAndExplore_EVP_InnerProduct) {
               << (total_search_ms / total_queries) << " ms/q), " << search_qps << " QPS, recall=" << (search_recall * 100.0f) << "%\n";
 
     // Explore Benchmark
-    std::vector<decltype(graph.explore(0, 0, 0))> last_explore_results(query_count);
+    std::vector<deglib::graph::ResultSet> last_explore_results(query_count);
     auto t_start_explore = std::chrono::high_resolution_clock::now();
     for (int run = 0; run < benchmark_runs; ++run) {
         for (size_t i = 0; i < query_count; ++i) {
             uint32_t entry_node = static_cast<uint32_t>((run * 13 + i) % base_count);
             auto results = graph.explore(entry_node, search_k, explore_max_calcs);
             if (run == 0) {
-                last_explore_results[i] = std::move(results);
+                last_explore_results[i] = std::move(results.results);
             }
         }
     }

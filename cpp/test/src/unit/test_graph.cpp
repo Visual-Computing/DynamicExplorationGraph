@@ -109,13 +109,15 @@ TEST(DEGSearchReturnsExternalLabels, SearchReturnsExternalLabels) {
     std::unordered_set<uint32_t> valid_labels(kExternalLabels.begin(), kExternalLabels.end());
     std::unordered_set<uint32_t> internal_indices(kInternalIndices.begin(), kInternalIndices.end());
 
-    while (!results.empty()) {
-        uint32_t id = results.top().getIdentifier();
+    EXPECT_GT(results.graph_distance_count, 0u);
+    EXPECT_GT(results.graph_hop_count, 0u);
+    EXPECT_EQ(results.rerank_distance_count, 0u);
+
+    for (uint32_t id : results.indices) {
         // Must be a valid external label
         EXPECT_TRUE(valid_labels.contains(id)) << "Result identifier " << id << " is not a valid external label";
         // Must NOT be an internal index (0..4)
         EXPECT_FALSE(internal_indices.contains(id)) << "Result identifier " << id << " is an internal index, not an external label";
-        results.pop();
     }
 }
 
@@ -129,8 +131,9 @@ TEST(DEGSearchReturnsExternalLabels, SearchFindsCorrectExternalLabel) {
 
     ASSERT_GE(results.size(), 1u);
     // The nearest neighbor should be vertex 0 with external label 1005
-    EXPECT_EQ(results.top().getIdentifier(), kExternalLabels[0]);
-    EXPECT_EQ(results.top().getIdentifier(), 1005u);
+    EXPECT_EQ(results.indices[0], kExternalLabels[0]);
+    EXPECT_EQ(results.indices[0], 1005u);
+    EXPECT_FLOAT_EQ(results.distances[0], 0.0f);
 }
 
 // ===========================================================================
@@ -149,11 +152,9 @@ TEST(DEGExploreReturnsExternalLabels, ExploreAcceptsExternalLabelAndReturnsExter
     std::unordered_set<uint32_t> valid_labels(kExternalLabels.begin(), kExternalLabels.end());
     std::unordered_set<uint32_t> internal_indices(kInternalIndices.begin(), kInternalIndices.end());
 
-    while (!results.empty()) {
-        uint32_t id = results.top().getIdentifier();
+    for (uint32_t id : results.indices) {
         EXPECT_TRUE(valid_labels.contains(id)) << "Result identifier " << id << " is not a valid external label";
         EXPECT_FALSE(internal_indices.contains(id)) << "Result identifier " << id << " is an internal index, not an external label";
-        results.pop();
     }
 }
 
@@ -169,11 +170,9 @@ TEST(DEGExploreReturnsExternalLabels, ExploreFromDifferentExternalLabel) {
     std::unordered_set<uint32_t> valid_labels(kExternalLabels.begin(), kExternalLabels.end());
     std::unordered_set<uint32_t> internal_indices(kInternalIndices.begin(), kInternalIndices.end());
 
-    while (!results.empty()) {
-        uint32_t id = results.top().getIdentifier();
+    for (uint32_t id : results.indices) {
         EXPECT_TRUE(valid_labels.contains(id)) << "Result identifier " << id << " is not a valid external label";
         EXPECT_FALSE(internal_indices.contains(id)) << "Result identifier " << id << " is an internal index, not an external label";
-        results.pop();
     }
 }
 
@@ -187,11 +186,10 @@ TEST(DEGExploreReturnsExternalLabels, ExploreIncludeEntryReturnsExternalLabel) {
     ASSERT_GT(results.size(), 0u);
 
     bool found_entry = false;
-    while (!results.empty()) {
-        if (results.top().getIdentifier() == kExternalLabels[2]) {
+    for (uint32_t id : results.indices) {
+        if (id == kExternalLabels[2]) {
             found_entry = true;
         }
-        results.pop();
     }
     EXPECT_TRUE(found_entry) << "Entry vertex external label " << kExternalLabels[2] << " should be in results when include_entry=true";
 }
@@ -357,11 +355,9 @@ TEST(DEGSearchReturnsExternalLabels, SearchWithReadOnlyGraphBackend) {
     std::unordered_set<uint32_t> valid_labels(kExternalLabels.begin(), kExternalLabels.end());
     std::unordered_set<uint32_t> internal_indices(kInternalIndices.begin(), kInternalIndices.end());
 
-    while (!results.empty()) {
-        uint32_t id = results.top().getIdentifier();
+    for (uint32_t id : results.indices) {
         EXPECT_TRUE(valid_labels.contains(id)) << "Result identifier " << id << " is not a valid external label";
         EXPECT_FALSE(internal_indices.contains(id)) << "Result identifier " << id << " is an internal index, not an external label";
-        results.pop();
     }
 }
 
@@ -378,11 +374,9 @@ TEST(DEGExploreReturnsExternalLabels, ExploreWithReadOnlyGraphBackend) {
     std::unordered_set<uint32_t> valid_labels(kExternalLabels.begin(), kExternalLabels.end());
     std::unordered_set<uint32_t> internal_indices(kInternalIndices.begin(), kInternalIndices.end());
 
-    while (!results.empty()) {
-        uint32_t id = results.top().getIdentifier();
+    for (uint32_t id : results.indices) {
         EXPECT_TRUE(valid_labels.contains(id)) << "Result identifier " << id << " is not a valid external label";
         EXPECT_FALSE(internal_indices.contains(id)) << "Result identifier " << id << " is an internal index, not an external label";
-        results.pop();
     }
 }
 
@@ -466,10 +460,8 @@ TEST(DynamicExplorationGraphCreateRandomGraph, SearchReturnsExternalLabels) {
         valid_labels.insert(i);
     }
 
-    while (!results.empty()) {
-        uint32_t id = results.top().getIdentifier();
+    for (uint32_t id : results.indices) {
         EXPECT_TRUE(valid_labels.contains(id)) << "Result identifier " << id << " is not a valid external label";
-        results.pop();
     }
 }
 
@@ -655,13 +647,9 @@ TEST(DynamicExplorationGraphFromGraph, ToMutableSearchWorks) {
     ASSERT_EQ(readonly_results.size(), mutable_results.size());
 
     // Compare results
-    auto rd_res = readonly_results;
-    auto mu_res = mutable_results;
-    while (!rd_res.empty() && !mu_res.empty()) {
-        EXPECT_EQ(rd_res.top().getIdentifier(), mu_res.top().getIdentifier());
-        EXPECT_NEAR(rd_res.top().getDistance(), mu_res.top().getDistance(), 1e-5f);
-        rd_res.pop();
-        mu_res.pop();
+    for (size_t i = 0; i < readonly_results.size(); ++i) {
+        EXPECT_EQ(readonly_results.indices[i], mutable_results.indices[i]);
+        EXPECT_NEAR(readonly_results.distances[i], mutable_results.distances[i], 1e-5f);
     }
 }
 
@@ -841,10 +829,12 @@ TEST(DEGBatchFunctions, SearchBatchEfFlatAndContainer) {
         /*include_entry=*/true, nullptr, 0, /*threads=*/2
     );
     ASSERT_EQ(container_res.size(), count);
-    ASSERT_GE(container_res[0].size(), 1u);
-    ASSERT_GE(container_res[1].size(), 1u);
-    EXPECT_EQ(container_res[0][0].getIdentifier(), 1005u);
-    EXPECT_EQ(container_res[1][0].getIdentifier(), 9999u);
+    EXPECT_TRUE(container_res.has_distances());
+    EXPECT_GT(container_res.graph_distance_count, 0u);
+    EXPECT_GT(container_res.graph_hop_count, 0u);
+    EXPECT_EQ(container_res.rerank_distance_count, 0u);
+    EXPECT_EQ(container_res.get_indices(0)[0], 1005u);
+    EXPECT_EQ(container_res.get_indices(1)[0], 9999u);
 
     // Flat buffer overload
     std::vector<uint32_t> out_indices(count * k, 0);
@@ -863,8 +853,10 @@ TEST(DEGBatchFunctions, ExploreEfSingle) {
 
     auto res = deg.explore_ef(1005u, 3, /*ef=*/10, 0, /*include_entry=*/true);
     ASSERT_GE(res.size(), 1u);
-    EXPECT_EQ(res[0].getIdentifier(), 1005u);
-    EXPECT_NEAR(res[0].getDistance(), 0.0f, 1e-5f);
+    EXPECT_EQ(res.indices[0], 1005u);
+    EXPECT_NEAR(res.distances[0], 0.0f, 1e-5f);
+    EXPECT_GT(res.graph_hop_count, 0u);
+    EXPECT_EQ(res.rerank_distance_count, 0u);
 }
 
 TEST(DEGBatchFunctions, ExploreBatchFlatAndContainer) {
@@ -874,15 +866,48 @@ TEST(DEGBatchFunctions, ExploreBatchFlatAndContainer) {
     std::vector<uint32_t> entry_labels = {1005u, 9999u};
     const uint32_t k = 3;
 
-    // 1. eps exploration with explore_batch
-    auto [indices_eps, dists_eps] = deg.explore_batch(
+    // 1. eps exploration with explore_batch (on 5-vertex complete graph, all neighbors use stored edge weights)
+    auto res_eps = deg.explore_batch(
         std::span<const uint32_t>(entry_labels), k,
         /*max_distance_computation_count=*/50, /*eps=*/0.0f,
         /*include_entry=*/true, nullptr, /*threads=*/2, /*return_distances=*/true
     );
-    ASSERT_EQ(indices_eps.size(), entry_labels.size() * k);
-    EXPECT_EQ(indices_eps[0], 1005u);
-    EXPECT_EQ(indices_eps[k], 9999u);
+    ASSERT_EQ(res_eps.indices.size(), entry_labels.size() * k);
+    EXPECT_TRUE(res_eps.has_distances());
+    EXPECT_GT(res_eps.graph_hop_count, 0u);
+    EXPECT_EQ(res_eps.rerank_distance_count, 0u);
+    EXPECT_EQ(res_eps.get_indices(0)[0], 1005u);
+    EXPECT_EQ(res_eps.get_indices(1)[0], 9999u);
+
+    // 2. return_distances=false omits distances while preserving telemetry
+    auto res_nodist = deg.explore_batch(
+        std::span<const uint32_t>(entry_labels), k,
+        /*max_distance_computation_count=*/50, /*eps=*/0.0f,
+        /*include_entry=*/true, nullptr, /*threads=*/2, /*return_distances=*/false
+    );
+    EXPECT_FALSE(res_nodist.has_distances());
+    EXPECT_TRUE(res_nodist.distances.empty());
+    EXPECT_GT(res_nodist.graph_hop_count, 0u);
+
+    // 3. Multi-hop exploration on a larger graph exercises actual distance computations and hops
+    const uint32_t vertex_count = 30;
+    const uint32_t dim = 4;
+    const uint8_t edges = 4;
+    std::vector<float> feats(vertex_count * dim);
+    for (uint32_t i = 0; i < vertex_count; ++i) {
+        feats[i * dim + 0] = static_cast<float>(i);
+        feats[i * dim + 1] = static_cast<float>(i % 5);
+        feats[i * dim + 2] = static_cast<float>(i % 7);
+        feats[i * dim + 3] = 0.0f;
+    }
+    deglib::distances::FloatSpace fs(dim, deglib::distances::Metric::FP32_L2);
+    auto multi_hop_deg = deglib::create_random_graph(std::as_bytes(std::span(feats)).data(), vertex_count, edges, fs, 13);
+    auto mh_single = multi_hop_deg.explore_ef(0u, 10, /*ef=*/16, /*max_distance_computation_count=*/0, /*include_entry=*/true);
+    EXPECT_GT(mh_single.graph_distance_count, 0u);
+    EXPECT_GT(mh_single.graph_hop_count, 1u);
+    auto mh_batch = multi_hop_deg.explore_batch(std::vector<uint32_t>{0u, 5u}, 10, /*max_distance_computation_count=*/0, /*eps=*/0.2f);
+    EXPECT_GT(mh_batch.graph_distance_count, 0u);
+    EXPECT_GT(mh_batch.graph_hop_count, 2u);
 
     // 2. ef exploration with explore_batch_ef
     std::vector<uint32_t> out_indices_ef(entry_labels.size() * k, 0);

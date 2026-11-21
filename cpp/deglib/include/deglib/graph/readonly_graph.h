@@ -92,9 +92,8 @@ class ReadOnlyGraph : public InternalGraph {
         std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
         size_t num_threads = 0
     ) {
-        const auto resolved_feature_space = deglib::transformation::resolve_graph_conversion_space(
-            input_graph.getFeatureSpace(), target_feature_space, custom_features, transformations
-        );
+        const auto resolved_feature_space =
+            deglib::transformation::resolve_graph_conversion_space(input_graph.getFeatureSpace(), target_feature_space, custom_features, transformations);
 
         ReadOnlyGraph graph(input_graph.size(), input_graph.getEdgesPerVertex(), resolved_feature_space);
 
@@ -134,18 +133,13 @@ class ReadOnlyGraph : public InternalGraph {
                 const auto* input_features = input_graph.getFeatureVector(i);
                 if (!is_fp16) {
                     deglib::transformation::apply_on_database(
-                        transformations,
-                        std::span<const float>(reinterpret_cast<const float*>(input_features), source_dim),
-                        std::span<std::byte>(target_features, target_feature_bytes),
-                        1
+                        transformations, std::span<const float>(reinterpret_cast<const float*>(input_features), source_dim),
+                        std::span<std::byte>(target_features, target_feature_bytes), 1
                     );
                 } else {
                     deglib::distances::fp16::fp16_to_floats(reinterpret_cast<const uint16_t*>(input_features), float_buffer.data(), source_dim);
                     deglib::transformation::apply_on_database(
-                        transformations,
-                        std::span<const float>(float_buffer),
-                        std::span<std::byte>(target_features, target_feature_bytes),
-                        1
+                        transformations, std::span<const float>(float_buffer), std::span<std::byte>(target_features, target_feature_bytes), 1
                     );
                 }
             };
@@ -258,8 +252,12 @@ class ReadOnlyGraph : public InternalGraph {
     }
 
   protected:
-    std::vector<deglib::graph::ObjectDistance> search_ef_intern(
-        const std::vector<uint32_t>& entry_vertex_indices,
+    using InternalGraph::search_ef_intern;
+    using InternalGraph::search_intern;
+
+    void search_ef_intern(
+        SearchWorkspace& ws,
+        std::span<const uint32_t> entry_vertex_indices,
         const std::byte* query,
         uint32_t k,
         uint32_t ef,
@@ -267,11 +265,12 @@ class ReadOnlyGraph : public InternalGraph {
         const deglib::search::Filter* filter = nullptr,
         const uint32_t max_distance_computation_count = 0
     ) const override {
-        return searchEfInternImpl(*this, entry_vertex_indices, query, k, ef, include_entry, filter, max_distance_computation_count);
+        searchEfInternImpl(ws, *this, entry_vertex_indices, query, k, ef, include_entry, filter, max_distance_computation_count);
     }
 
-    deglib::graph::ResultSet search_intern(
-        const std::vector<uint32_t>& entry_vertex_indices,
+    void search_intern(
+        SearchWorkspace& ws,
+        std::span<const uint32_t> entry_vertex_indices,
         const std::byte* query,
         uint32_t k,
         float eps = 0.0f,
@@ -279,7 +278,7 @@ class ReadOnlyGraph : public InternalGraph {
         const deglib::search::Filter* filter = nullptr,
         const uint32_t max_distance_computation_count = 0
     ) const override {
-        return searchInternImpl(*this, entry_vertex_indices, query, k, eps, include_entry, filter, max_distance_computation_count);
+        searchInternImpl(ws, *this, entry_vertex_indices, query, k, eps, include_entry, filter, max_distance_computation_count);
     }
 
   private:

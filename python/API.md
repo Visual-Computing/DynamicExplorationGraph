@@ -34,10 +34,12 @@ graph = deglib.build(data, edges_per_vertex=32, show_progress=True)
 searcher = graph.to_searcher()
 
 # Fast index-only search (return_distances=False by default on Searcher.search)
-indices = searcher.search(query, k=10, eps_or_ef=0.1)
+res = searcher.search(query, k=10, eps_or_ef=0.1)
+indices = res.indices
 
-# Search returning both labels and exact distances
-indices, distances = searcher.search(query, k=10, eps_or_ef=0.1, return_distances=True)
+# Search returning both labels and exact distances plus traversal/rerank telemetry
+res = searcher.search(query, k=10, eps_or_ef=0.1, return_distances=True)
+indices, distances = res.indices, res.distances
 ```
 
 ### Quantized Search with Self-Extracted FP16 Reranking
@@ -66,7 +68,7 @@ searcher = base_graph.to_searcher(
     threads=8,
 )
 
-indices = searcher.search(queries, k=10, eps_or_ef=64, rerank_factor=2.0, unsorted=True)
+indices = searcher.search(queries, k=10, eps_or_ef=64, rerank_factor=2.0, unsorted=True).indices
 ```
 
 ### MIPS via $(d + 1)$-Dimensional $L_2$ Lifting & FP16 Swap
@@ -93,7 +95,8 @@ ro_graph = graph.to_readonly(
     custom_features=train_vectors,
     threads=8,
 )
-indices, distances = ro_graph.search(query, eps_or_ef=0.18, k=10)
+res = ro_graph.search(query, eps_or_ef=0.18, k=10)
+indices, distances = res.indices, res.distances
 ```
 
 ---
@@ -223,8 +226,8 @@ All graphs (fixed-capacity mutable `SizeBoundedGraph`, chunked `DynamicGraph`, a
   - **Ordering**: `custom_features_order` and `rerank_order` default to `"label"` (rows aligned with original dataset IDs / external labels); pass `"internal"` when rows already follow `graph.get_labels()`.
 
 #### Direct Graph Search & Exploration
-- `search(query: np.ndarray, eps_or_ef: float = 0.0, k: int = 10, filter_labels: Any = None, max_distance_computation_count: int = 0, threads: int = 0, return_distances: bool = True, unsorted: bool = False) -> tuple[np.ndarray, np.ndarray] | np.ndarray`
-- `explore(entry_external_label: int | np.ndarray | Sequence[int], k: int, max_distance_computation_count: int = 0, eps_or_ef: float = 0.0, include_entry: bool = True, threads: int = 1, filter_labels: Any = None, return_distances: bool = True, unsorted: bool = False) -> tuple[numpy.ndarray, numpy.ndarray] | numpy.ndarray`
+- `search(query: np.ndarray, eps_or_ef: float = 0.0, k: int = 10, filter_labels: Any = None, max_distance_computation_count: int = 0, threads: int = 0, return_distances: bool = True, unsorted: bool = False) -> SearchResults`
+- `explore(entry_external_label: int | np.ndarray | Sequence[int], k: int, max_distance_computation_count: int = 0, eps_or_ef: float = 0.0, include_entry: bool = True, threads: int = 1, filter_labels: Any = None, return_distances: bool = True, unsorted: bool = False) -> SearchResults`
 
 ---
 
@@ -272,6 +275,17 @@ Methods:
 
 ## 5. High-Throughput Search, Filtering & Reranking (`deglib.search`)
 
+### `SearchResults`
+
+Returned by `DynamicExplorationGraph.search()`, `DynamicExplorationGraph.explore()`, and `Searcher.search()`. Holds C++ result memory exposed to Python as zero-copy NumPy views:
+
+- `indices: np.ndarray` (`uint32`, 1D `(found,)` / `(k,)` or 2D `(N, k)` for batches)
+- `distances: np.ndarray | None` (`float32`, same shape when `return_distances=True`, else `None`)
+- `graph_distance_count: int` — total graph vertex distance evaluations performed
+- `rerank_distance_count: int` — total exact reranker distance evaluations performed (`0` unless `rerank_factor > 1.0` with a reranker)
+- `graph_hop_count: int` — total graph vertex expansions (hops) performed
+- `__len__() -> int` — number of results (single query) or query count (batch)
+
 ### `Searcher` & `create_searcher`
 
 ```python
@@ -297,9 +311,9 @@ create_searcher(
 - `searcher.graph -> DynamicExplorationGraph` (the backing read-only graph)
 - `searcher.normalize_query -> bool` (get/set query L2 normalization)
 - `searcher.optimize(n_clusters: int = 256, n_iter: int = 20, sample_size: int = 0, threads: int = 0, use_routing: bool = True) -> None`
-- `searcher.search(query: np.ndarray, k: int = 10, eps_or_ef: float = 0.1, rerank_factor: float = 1.0, threads: int = 1, return_distances: bool = False, unsorted: bool = False, max_distance_computation_count: int = 0) -> np.ndarray | tuple[np.ndarray, np.ndarray]`
+- `searcher.search(query: np.ndarray, k: int = 10, eps_or_ef: float = 0.1, rerank_factor: float = 1.0, threads: int = 1, return_distances: bool = False, unsorted: bool = False, max_distance_computation_count: int = 0) -> SearchResults`
   - `eps_or_ef < 1.0`: relative distance margin (`eps`); `eps_or_ef >= 1.0`: fixed beam size (`ef`).
-  - Defaults `return_distances=False, unsorted=False` (returns 1D `(k,)` array for 1D query or 2D `(N, k)` array for 2D batch; returns `(indices, distances)` tuple when `return_distances=True`).
+  - Defaults `return_distances=False, unsorted=False` (populates 1D `(found,)` or 2D `(N, k)` `.indices`, `.distances=None` unless `return_distances=True`, plus traversal/rerank telemetry).
 
 ### `Filter`
 

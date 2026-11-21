@@ -54,14 +54,15 @@ query = np.random.randn(128).astype(np.float32)
 graph = deglib.builder.build_from_data(data, metric=deglib.Metric.FP32_L2)
 
 # 2. Search top-10 nearest neighbors (eps_or_ef: < 1.0 = relative eps, >= 1.0 = ef beam width)
-indices, distances = graph.search(query, k=10, eps_or_ef=0.1)
+res = graph.search(query, k=10, eps_or_ef=0.1)
 
 # Or multi-threaded batch search across multiple queries:
 # queries = np.random.randn(100, 128).astype(np.float32)
-# batch_indices, batch_distances = graph.search(queries, k=10, eps_or_ef=0.1, threads=4)
+# batch_res = graph.search(queries, k=10, eps_or_ef=0.1, threads=4)
 
-print("Top-10 neighbor IDs:", indices)
-print("Distances:", distances)
+print("Top-10 neighbor IDs:", res.indices)
+print("Distances:", res.distances)
+print("Graph distance evals:", res.graph_distance_count, "| Hops:", res.graph_hop_count)
 
 # 3. Save graph for serving (works for both mutable and read-only graphs)
 graph.save_graph("index.deg")
@@ -104,11 +105,11 @@ int main() {
     std::vector<float> query(dims);
     for (auto& val : query) val = dist(rng);
 
-    auto results = graph.search(std::span<const float>(query), /*k=*/10, /*eps_or_ef=*/0.1f);
+    auto results = graph.search(std::span<const float>(query), /*k=*/10, /*eps=*/0.1f);
 
-    for (const auto& match : results) {
-        std::cout << "Label: " << match.getIdentifier() 
-                  << " | Distance: " << match.getDistance() << "\n";
+    for (size_t i = 0; i < results.size(); ++i) {
+        std::cout << "Label: " << results.indices[i]
+                  << " | Distance: " << results.distances[i] << "\n";
     }
 }
 ```
