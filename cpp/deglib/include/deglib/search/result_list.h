@@ -100,7 +100,7 @@ class ResultList {
      *
      * @param u    Vertex identifier.
      * @param dist Distance to query vector.
-     * @return     True if candidate was inserted into the retained capacity, false if rejected.
+     * @return     True if candidate was inserted within the exploration beam (lo < ef_), false otherwise.
      */
     inline bool insert(uint32_t u, float dist) noexcept {
         const ObjectDistance cand(u, dist);
@@ -116,7 +116,7 @@ class ResultList {
         if (lo < cur_) {
             cur_ = lo;
         }
-        return true;
+        return lo < ef_;
     }
 
     /**

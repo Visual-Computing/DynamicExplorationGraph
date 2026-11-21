@@ -402,3 +402,37 @@ TEST(SearchWorkspace, ReuseBetweenEpsAndEfAndDrain) {
     EXPECT_EQ(ef_idx[1], 101u);
     EXPECT_FLOAT_EQ(ef_dist[1], 2.5f);
 }
+
+TEST(ResultList, InsertReturnsTrueOnlyWithinEfBeam) {
+    deglib::search::ResultList pool(/*ef=*/2, /*capacity=*/4);
+
+    // Entries within the active beam (indices 0 and 1 < ef=2) return true
+    EXPECT_TRUE(pool.insert(10, 1.0f));
+    EXPECT_TRUE(pool.insert(20, 2.0f));
+
+    // Entries outside the beam (indices 2 and 3 >= ef=2) are retained in capacity=4,
+    // but return false so traversal does not prefetch neighbor lists for non-beam slots
+    EXPECT_FALSE(pool.insert(30, 3.0f));
+    EXPECT_FALSE(pool.insert(40, 4.0f));
+    EXPECT_EQ(pool.size(), 4u);
+
+    // Worse than retained capacity is rejected
+    EXPECT_FALSE(pool.insert(50, 5.0f));
+    EXPECT_EQ(pool.size(), 4u);
+
+    // Better entry inserting at index 0 (< ef=2) returns true and shifts retained slots
+    EXPECT_TRUE(pool.insert(5, 0.5f));
+    EXPECT_EQ(pool.size(), 4u);
+    EXPECT_EQ(pool.id(0), 5u);
+    EXPECT_EQ(pool.id(1), 10u);
+    EXPECT_EQ(pool.id(2), 20u);
+    EXPECT_EQ(pool.id(3), 30u);
+
+    // Replacing index 2 (ef=2 <= lo < capacity=4) retains the entry but returns false
+    EXPECT_FALSE(pool.insert(15, 1.5f));
+    EXPECT_EQ(pool.size(), 4u);
+    EXPECT_EQ(pool.id(0), 5u);
+    EXPECT_EQ(pool.id(1), 10u);
+    EXPECT_EQ(pool.id(2), 15u);
+    EXPECT_EQ(pool.id(3), 20u);
+}
