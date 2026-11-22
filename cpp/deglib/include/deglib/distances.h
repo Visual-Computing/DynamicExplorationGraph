@@ -174,20 +174,36 @@ inline void batch_compare_impl(
     const int32_t prefetch_offset,
     const size_t prefetch_bytes
 ) {
+    constexpr bool has_batch4 = requires { Dist::compare_batch4(query, query, query, query, query, param, out_distances); };
     if (prefetch_offset > 0 && prefetch_bytes > 0) {
         const size_t po = static_cast<size_t>(prefetch_offset);
         const size_t warmup = std::min(po, count);
         for (size_t i = 0; i < warmup; ++i) {
             deglib::memory::prefetch(static_cast<const char*>(targets[i]), prefetch_bytes);
         }
-        for (size_t i = 0; i < count; ++i) {
+        size_t i = 0;
+        if constexpr (has_batch4) {
+            for (; i + 3 < count; i += 4) {
+                for (size_t p = 0; p < 4 && (i + po + p) < count; ++p) {
+                    deglib::memory::prefetch(static_cast<const char*>(targets[i + po + p]), prefetch_bytes);
+                }
+                Dist::compare_batch4(query, targets[i], targets[i + 1], targets[i + 2], targets[i + 3], param, out_distances + i);
+            }
+        }
+        for (; i < count; ++i) {
             if (i + po < count) {
                 deglib::memory::prefetch(static_cast<const char*>(targets[i + po]), prefetch_bytes);
             }
             out_distances[i] = Dist::compare(query, targets[i], param);
         }
     } else {
-        for (size_t i = 0; i < count; ++i) {
+        size_t i = 0;
+        if constexpr (has_batch4) {
+            for (; i + 3 < count; i += 4) {
+                Dist::compare_batch4(query, targets[i], targets[i + 1], targets[i + 2], targets[i + 3], param, out_distances + i);
+            }
+        }
+        for (; i < count; ++i) {
             out_distances[i] = Dist::compare(query, targets[i], param);
         }
     }
@@ -204,6 +220,7 @@ inline void strided_compare_impl(
     const int32_t prefetch_offset,
     const size_t prefetch_bytes
 ) {
+    constexpr bool has_batch4 = requires { Dist::compare_batch4(query, query, query, query, query, param, out_distances); };
     const auto* base = static_cast<const std::byte*>(targets);
     if (prefetch_offset > 0 && prefetch_bytes > 0) {
         const size_t po = static_cast<size_t>(prefetch_offset);
@@ -211,14 +228,45 @@ inline void strided_compare_impl(
         for (size_t i = 0; i < warmup; ++i) {
             deglib::memory::prefetch(reinterpret_cast<const char*>(base + i * stride), prefetch_bytes);
         }
-        for (size_t i = 0; i < count; ++i) {
+        size_t i = 0;
+        if constexpr (has_batch4) {
+            for (; i + 3 < count; i += 4) {
+                for (size_t p = 0; p < 4 && (i + po + p) < count; ++p) {
+                    deglib::memory::prefetch(reinterpret_cast<const char*>(base + (i + po + p) * stride), prefetch_bytes);
+                }
+                Dist::compare_batch4(
+                    query,
+                    base + i * stride,
+                    base + (i + 1) * stride,
+                    base + (i + 2) * stride,
+                    base + (i + 3) * stride,
+                    param,
+                    out_distances + i
+                );
+            }
+        }
+        for (; i < count; ++i) {
             if (i + po < count) {
                 deglib::memory::prefetch(reinterpret_cast<const char*>(base + (i + po) * stride), prefetch_bytes);
             }
             out_distances[i] = Dist::compare(query, base + i * stride, param);
         }
     } else {
-        for (size_t i = 0; i < count; ++i) {
+        size_t i = 0;
+        if constexpr (has_batch4) {
+            for (; i + 3 < count; i += 4) {
+                Dist::compare_batch4(
+                    query,
+                    base + i * stride,
+                    base + (i + 1) * stride,
+                    base + (i + 2) * stride,
+                    base + (i + 3) * stride,
+                    param,
+                    out_distances + i
+                );
+            }
+        }
+        for (; i < count; ++i) {
             out_distances[i] = Dist::compare(query, base + i * stride, param);
         }
     }

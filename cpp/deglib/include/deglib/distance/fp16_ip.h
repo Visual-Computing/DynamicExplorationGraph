@@ -120,6 +120,77 @@ class InnerProductFP16_AVX512 {
 
         return 1.f - result;
     }
+
+    DEGLIB_TARGET_AVX512 inline static void compare_batch4(
+        const void* qv, const void* b0v, const void* b1v, const void* b2v, const void* b3v, const void* qty_ptr, float* out
+    ) {
+        const size_t size = *static_cast<const size_t*>(qty_ptr);
+        const uint16_t* q = static_cast<const uint16_t*>(qv);
+        const uint16_t* b0 = static_cast<const uint16_t*>(b0v);
+        const uint16_t* b1 = static_cast<const uint16_t*>(b1v);
+        const uint16_t* b2 = static_cast<const uint16_t*>(b2v);
+        const uint16_t* b3 = static_cast<const uint16_t*>(b3v);
+        const uint16_t* last = q + size;
+
+        __m512 sum0 = _mm512_setzero_ps();
+        __m512 sum1 = _mm512_setzero_ps();
+        __m512 sum2 = _mm512_setzero_ps();
+        __m512 sum3 = _mm512_setzero_ps();
+
+        if constexpr (HasDualSimd) {
+            while (q + 31 < last) {
+                const __m512 vq0 = _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(q)));
+                sum0 = _mm512_fmadd_ps(vq0, _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b0))), sum0);
+                sum1 = _mm512_fmadd_ps(vq0, _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b1))), sum1);
+                sum2 = _mm512_fmadd_ps(vq0, _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b2))), sum2);
+                sum3 = _mm512_fmadd_ps(vq0, _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b3))), sum3);
+
+                const __m512 vq1 = _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(q + 16)));
+                sum0 = _mm512_fmadd_ps(vq1, _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b0 + 16))), sum0);
+                sum1 = _mm512_fmadd_ps(vq1, _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b1 + 16))), sum1);
+                sum2 = _mm512_fmadd_ps(vq1, _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b2 + 16))), sum2);
+                sum3 = _mm512_fmadd_ps(vq1, _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b3 + 16))), sum3);
+
+                q += 32;
+                b0 += 32;
+                b1 += 32;
+                b2 += 32;
+                b3 += 32;
+            }
+        }
+
+        if constexpr (HasSimd) {
+            while (q + 15 < last) {
+                const __m512 vq = _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(q)));
+                sum0 = _mm512_fmadd_ps(vq, _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b0))), sum0);
+                sum1 = _mm512_fmadd_ps(vq, _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b1))), sum1);
+                sum2 = _mm512_fmadd_ps(vq, _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b2))), sum2);
+                sum3 = _mm512_fmadd_ps(vq, _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b3))), sum3);
+                q += 16;
+                b0 += 16;
+                b1 += 16;
+                b2 += 16;
+                b3 += 16;
+            }
+        }
+
+        if constexpr (HasTail) {
+            const ptrdiff_t rem = last - q;
+            if (rem > 0) {
+                const __mmask16 mask = tail_mask::mask16(static_cast<size_t>(rem));
+                const __m512 vq = _mm512_cvtph_ps(_mm256_maskz_loadu_epi16(mask, q));
+                sum0 = _mm512_fmadd_ps(vq, _mm512_cvtph_ps(_mm256_maskz_loadu_epi16(mask, b0)), sum0);
+                sum1 = _mm512_fmadd_ps(vq, _mm512_cvtph_ps(_mm256_maskz_loadu_epi16(mask, b1)), sum1);
+                sum2 = _mm512_fmadd_ps(vq, _mm512_cvtph_ps(_mm256_maskz_loadu_epi16(mask, b2)), sum2);
+                sum3 = _mm512_fmadd_ps(vq, _mm512_cvtph_ps(_mm256_maskz_loadu_epi16(mask, b3)), sum3);
+            }
+        }
+
+        out[0] = 1.f - fp16_hsum512(sum0);
+        out[1] = 1.f - fp16_hsum512(sum1);
+        out[2] = 1.f - fp16_hsum512(sum2);
+        out[3] = 1.f - fp16_hsum512(sum3);
+    }
 };
 
 template <ResidualMode Mode = ResidualMode::Full>
@@ -178,6 +249,56 @@ class InnerProductFP16_AVX2 {
         float result = fp16_hsum256(sum256);
 
         return 1.f - result;
+    }
+
+    DEGLIB_TARGET_AVX2 inline static void compare_batch4(
+        const void* qv, const void* b0v, const void* b1v, const void* b2v, const void* b3v, const void* qty_ptr, float* out
+    ) {
+        const size_t size = *static_cast<const size_t*>(qty_ptr);
+        const uint16_t* q = static_cast<const uint16_t*>(qv);
+        const uint16_t* b0 = static_cast<const uint16_t*>(b0v);
+        const uint16_t* b1 = static_cast<const uint16_t*>(b1v);
+        const uint16_t* b2 = static_cast<const uint16_t*>(b2v);
+        const uint16_t* b3 = static_cast<const uint16_t*>(b3v);
+        const uint16_t* last = q + size;
+
+        __m256 sum0 = _mm256_setzero_ps();
+        __m256 sum1 = _mm256_setzero_ps();
+        __m256 sum2 = _mm256_setzero_ps();
+        __m256 sum3 = _mm256_setzero_ps();
+
+        if constexpr (HasDualSimd || HasSimd) {
+            while (q + 7 < last) {
+                const __m256 vq = _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(q)));
+                sum0 = _mm256_fmadd_ps(vq, _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(b0))), sum0);
+                sum1 = _mm256_fmadd_ps(vq, _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(b1))), sum1);
+                sum2 = _mm256_fmadd_ps(vq, _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(b2))), sum2);
+                sum3 = _mm256_fmadd_ps(vq, _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(b3))), sum3);
+                q += 8;
+                b0 += 8;
+                b1 += 8;
+                b2 += 8;
+                b3 += 8;
+            }
+        }
+
+        if constexpr (HasTail) {
+            const ptrdiff_t rem = last - q;
+            if (rem > 0) {
+                const size_t rem_bytes = static_cast<size_t>(rem) * 2;
+                const size_t total_bytes = size * 2;
+                const __m256 vq = _mm256_cvtph_ps(tail_mask::load_tail_bytes_16(q, rem_bytes, total_bytes));
+                sum0 = _mm256_fmadd_ps(vq, _mm256_cvtph_ps(tail_mask::load_tail_bytes_16(b0, rem_bytes, total_bytes)), sum0);
+                sum1 = _mm256_fmadd_ps(vq, _mm256_cvtph_ps(tail_mask::load_tail_bytes_16(b1, rem_bytes, total_bytes)), sum1);
+                sum2 = _mm256_fmadd_ps(vq, _mm256_cvtph_ps(tail_mask::load_tail_bytes_16(b2, rem_bytes, total_bytes)), sum2);
+                sum3 = _mm256_fmadd_ps(vq, _mm256_cvtph_ps(tail_mask::load_tail_bytes_16(b3, rem_bytes, total_bytes)), sum3);
+            }
+        }
+
+        out[0] = 1.f - fp16_hsum256(sum0);
+        out[1] = 1.f - fp16_hsum256(sum1);
+        out[2] = 1.f - fp16_hsum256(sum2);
+        out[3] = 1.f - fp16_hsum256(sum3);
     }
 };
 #endif

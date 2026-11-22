@@ -327,6 +327,91 @@ class EvpInnerProduct_AVX2 {
         const float sim = static_cast<float>(same_count + dim) - static_cast<float>(diff_count);
         return 1.f - sim / (2.f * static_cast<float>(dim));
     }
+
+    DEGLIB_TARGET_AVX2 inline static void compare_batch4(
+        const void* qv, const void* b0v, const void* b1v, const void* b2v, const void* b3v, const void* qty_ptr, float* out
+    ) {
+        const std::byte* q = static_cast<const std::byte*>(qv);
+        const std::byte* b0 = static_cast<const std::byte*>(b0v);
+        const std::byte* b1 = static_cast<const std::byte*>(b1v);
+        const std::byte* b2 = static_cast<const std::byte*>(b2v);
+        const std::byte* b3 = static_cast<const std::byte*>(b3v);
+        const uint32_t dim = *static_cast<const uint32_t*>(qty_ptr);
+        const size_t mask_bytes = (dim + 7) / 8;
+
+        const std::byte* oq_ptr = q;
+        const std::byte* nq_ptr = q + mask_bytes;
+        const std::byte* o0_ptr = b0;
+        const std::byte* n0_ptr = b0 + mask_bytes;
+        const std::byte* o1_ptr = b1;
+        const std::byte* n1_ptr = b1 + mask_bytes;
+        const std::byte* o2_ptr = b2;
+        const std::byte* n2_ptr = b2 + mask_bytes;
+        const std::byte* o3_ptr = b3;
+        const std::byte* n3_ptr = b3 + mask_bytes;
+
+        __m256i same0 = _mm256_setzero_si256();
+        __m256i diff0 = _mm256_setzero_si256();
+        __m256i same1 = _mm256_setzero_si256();
+        __m256i diff1 = _mm256_setzero_si256();
+        __m256i same2 = _mm256_setzero_si256();
+        __m256i diff2 = _mm256_setzero_si256();
+        __m256i same3 = _mm256_setzero_si256();
+        __m256i diff3 = _mm256_setzero_si256();
+
+        const __m256i lookup = _mm256_setr_epi8(0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4, 0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4);
+        const __m256i low_mask = _mm256_set1_epi8(0x0F);
+        const __m256i zero = _mm256_setzero_si256();
+
+        auto vector_popcnt = [&](__m256i vec) {
+            const __m256i lo = _mm256_and_si256(vec, low_mask);
+            const __m256i hi = _mm256_and_si256(_mm256_srli_epi16(vec, 4), low_mask);
+            return _mm256_add_epi8(_mm256_shuffle_epi8(lookup, lo), _mm256_shuffle_epi8(lookup, hi));
+        };
+
+        auto acc_one = [&](__m256i& s_acc, __m256i& d_acc, const __m256i oq, const __m256i nq, const __m256i ob, const __m256i nb) {
+            const __m256i s = _mm256_or_si256(_mm256_and_si256(oq, ob), _mm256_and_si256(nq, nb));
+            const __m256i d = _mm256_or_si256(_mm256_and_si256(oq, nb), _mm256_and_si256(ob, nq));
+            s_acc = _mm256_add_epi64(s_acc, _mm256_sad_epu8(vector_popcnt(s), zero));
+            d_acc = _mm256_add_epi64(d_acc, _mm256_sad_epu8(vector_popcnt(d), zero));
+        };
+
+        const size_t block = 32;
+        size_t i = 0;
+        if constexpr (HasDualSimd || HasSimd) {
+            for (; i + block <= mask_bytes; i += block) {
+                const __m256i oq = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&oq_ptr[i]));
+                const __m256i nq = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&nq_ptr[i]));
+                acc_one(same0, diff0, oq, nq, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&o0_ptr[i])), _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&n0_ptr[i])));
+                acc_one(same1, diff1, oq, nq, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&o1_ptr[i])), _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&n1_ptr[i])));
+                acc_one(same2, diff2, oq, nq, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&o2_ptr[i])), _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&n2_ptr[i])));
+                acc_one(same3, diff3, oq, nq, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&o3_ptr[i])), _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&n3_ptr[i])));
+            }
+        }
+
+        if constexpr (HasTail) {
+            const size_t rem = mask_bytes - i;
+            if (rem > 0) {
+                const __m256i oq = tail_mask::load_tail_bytes_32(&oq_ptr[i], rem, mask_bytes);
+                const __m256i nq = tail_mask::load_tail_bytes_32(&nq_ptr[i], rem, mask_bytes);
+                acc_one(same0, diff0, oq, nq, tail_mask::load_tail_bytes_32(&o0_ptr[i], rem, mask_bytes), tail_mask::load_tail_bytes_32(&n0_ptr[i], rem, mask_bytes));
+                acc_one(same1, diff1, oq, nq, tail_mask::load_tail_bytes_32(&o1_ptr[i], rem, mask_bytes), tail_mask::load_tail_bytes_32(&n1_ptr[i], rem, mask_bytes));
+                acc_one(same2, diff2, oq, nq, tail_mask::load_tail_bytes_32(&o2_ptr[i], rem, mask_bytes), tail_mask::load_tail_bytes_32(&n2_ptr[i], rem, mask_bytes));
+                acc_one(same3, diff3, oq, nq, tail_mask::load_tail_bytes_32(&o3_ptr[i], rem, mask_bytes), tail_mask::load_tail_bytes_32(&n3_ptr[i], rem, mask_bytes));
+            }
+        }
+
+        auto finish = [&](__m256i sa, __m256i da) -> float {
+            const uint64_t sc = evp_hsum256(sa);
+            const uint64_t dc = evp_hsum256(da);
+            const float sim = static_cast<float>(sc + dim) - static_cast<float>(dc);
+            return 1.f - sim / (2.f * static_cast<float>(dim));
+        };
+        out[0] = finish(same0, diff0);
+        out[1] = finish(same1, diff1);
+        out[2] = finish(same2, diff2);
+        out[3] = finish(same3, diff3);
+    }
 };
 #endif
 
