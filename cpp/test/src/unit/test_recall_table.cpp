@@ -135,6 +135,7 @@ void verify_table_invariants(const RecallTable& table) {
     EXPECT_EQ(table.empty(), table.entries().empty());
     EXPECT_EQ(table.size(), table.entries().size());
     EXPECT_TRUE(table.mode() == RecallTable::Mode::Ef || table.mode() == RecallTable::Mode::Eps);
+    EXPECT_FLOAT_EQ(table.rerank_factor(), 1.0f);
 
     if (table.empty()) {
         return;
@@ -183,7 +184,7 @@ TEST(RecallTableTest, FP32L2GraphTypesAndDefaults) {
     EXPECT_EQ(RecallTable::kMinEf, 10u);
     EXPECT_EQ(RecallTable::kMaxEf, 500u);
     EXPECT_EQ(RecallTable::kEfResolution, 1u);
-    EXPECT_FLOAT_EQ(RecallTable::kMinEps, 0.005f);
+    EXPECT_FLOAT_EQ(RecallTable::kMinEps, 0.001f);
     EXPECT_FLOAT_EQ(RecallTable::kMaxEps, 0.20f);
     EXPECT_FLOAT_EQ(RecallTable::kEpsResolution, 0.0001f);
     EXPECT_FLOAT_EQ(RecallTable::kDefaultMinRecall, 0.80f);
@@ -501,7 +502,7 @@ TEST(RecallTableTest, ExactResolutionAndUpperBoundSelection) {
     using EvalResult = RecallTableTestAccess::EvalResult;
 
     static constexpr int32_t kEfLadder[] = {10, 20, 40, 80, 160, 320, 500};
-    static constexpr int32_t kEpsLadder[] = {50, 100, 200, 400, 800, 1500, 2000};
+    static constexpr int32_t kEpsLadder[] = {10, 50, 100, 200, 400, 800, 1500, 2000};
     const std::vector<float> targets = {0.90f};
 
     // Case 1: Adjacent ef bracket (50 -> 0.89, 51 -> 0.91): must pick ef=51 (>= 0.90) after probing 50 and 51
@@ -574,6 +575,21 @@ TEST(RecallTableTest, ExactResolutionAndUpperBoundSelection) {
         EXPECT_FLOAT_EQ(std::get<2>(res.entries[0]), 0.9002f);
         EXPECT_NE(std::find(probed.begin(), probed.end(), 437), probed.end());
         EXPECT_NE(std::find(probed.begin(), probed.end(), 438), probed.end());
+    }
+
+    // Case 6: Sub-0.005 eps bisection down to kMinEps=0.001 (scaled 23 -> 0.895, 24 -> 0.902)
+    {
+        std::vector<int32_t> probed;
+        const auto res = RecallTableTestAccess::calibrate_axis(kEpsLadder, targets, 1e9, 1e9, [&](int32_t eps_scaled, double) {
+            probed.push_back(eps_scaled);
+            const float r = (eps_scaled <= 23) ? 0.895f : 0.902f;
+            return EvalResult{r, 1.0, false};
+        });
+        ASSERT_EQ(res.entries.size(), 1u);
+        EXPECT_EQ(std::get<1>(res.entries[0]), 24);
+        EXPECT_FLOAT_EQ(std::get<2>(res.entries[0]), 0.902f);
+        EXPECT_NE(std::find(probed.begin(), probed.end(), 10), probed.end());
+        EXPECT_NE(std::find(probed.begin(), probed.end(), 24), probed.end());
     }
 }
 

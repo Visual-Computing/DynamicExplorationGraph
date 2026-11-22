@@ -5,10 +5,12 @@
 #include "deglib/distances.h"
 #include "deglib/graph.h"
 #include "deglib/search/pareto_line.h"
+#include "deglib/search/searcher.h"
 #include "deglib/transformation.h"
 #include "gtest/gtest.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -27,9 +29,17 @@ struct ParetoLineTestAccess {
     }
 
     template <typename MeasureSingleFn, typename MeasureGroupFn>
-    static std::vector<ParetoLine::Entry>
-    select_entries(std::span<const RecallTable> recall_tables, MeasureSingleFn&& measure_single, MeasureGroupFn&& measure_group) {
-        return ParetoLine::select_entries(recall_tables, std::forward<MeasureSingleFn>(measure_single), std::forward<MeasureGroupFn>(measure_group));
+    static std::vector<ParetoLine::Entry> select_entries(
+        uint32_t effective_k,
+        bool has_reranker,
+        std::span<const RecallTable> recall_tables,
+        size_t rounds,
+        MeasureSingleFn&& measure_single,
+        MeasureGroupFn&& measure_group
+    ) {
+        return ParetoLine::select_entries(
+            effective_k, has_reranker, recall_tables, rounds, std::forward<MeasureSingleFn>(measure_single), std::forward<MeasureGroupFn>(measure_group)
+        );
     }
 };
 }  // namespace deglib::search
@@ -123,16 +133,19 @@ void verify_pareto_invariants(const ParetoLine& line) {
         }
         EXPECT_GT(e.latency_us, 0.0);
         EXPECT_NEAR(e.qps, 1e6 / e.latency_us, 1e-3 * (std::max)(1.0, e.qps));
+        EXPECT_GE(e.rerank_factor, 1.0f);
         EXPECT_GE(e.avg_distance_count, 0.0);
+        EXPECT_GE(e.avg_rerank_distance_count, 0.0);
         if (i > 0) {
             EXPECT_GT(e.measured_recall, entries[i - 1].measured_recall);
             EXPECT_GT(e.latency_us, entries[i - 1].latency_us);
             EXPECT_LT(e.qps, entries[i - 1].qps);
         }
 
-        const auto found = line.param_for(e.target_recall);
+        const auto found = line.param_for(e.measured_recall);
         ASSERT_TRUE(found.has_value());
-        EXPECT_NEAR(*found, e.eps_or_ef, 1e-6f);
+        EXPECT_NEAR(found->first, e.eps_or_ef, 1e-6f);
+        EXPECT_FLOAT_EQ(found->second, e.rerank_factor);
     }
 
     const auto params = line.eps_or_ef_values();
@@ -141,6 +154,15 @@ void verify_pareto_invariants(const ParetoLine& line) {
     for (size_t i = 0; i < params.size(); ++i) {
         for (size_t j = i + 1; j < params.size(); ++j) {
             EXPECT_GT(std::abs(params[i] - params[j]), 1e-6f);
+        }
+    }
+
+    const auto pairs = line.params();
+    EXPECT_FALSE(pairs.empty());
+    EXPECT_LE(pairs.size(), entries.size());
+    for (size_t i = 0; i < pairs.size(); ++i) {
+        for (size_t j = i + 1; j < pairs.size(); ++j) {
+            EXPECT_TRUE(std::abs(pairs[i].first - pairs[j].first) > 1e-6f || std::abs(pairs[i].second - pairs[j].second) > 1e-6f);
         }
     }
 }
@@ -183,17 +205,19 @@ TEST(ParetoLineTest, SyntheticCrossoverPruningAndParamLookup) {
     auto timing_for = [&](bool use_ef, int32_t param) -> TimingSample {
         if (use_ef) {
             if (dominated_ef > 0 && param == dominated_ef) {
-                return {180.0, 200.0};  // slower than crossover eps (~105 us) -> must be Pareto-pruned
+                return {180.0, 200.0, 0.0};  // slower than crossover eps (~105 us) -> must be Pareto-pruned
             }
             if (param >= crossover_ef) {
-                return {500.0 + static_cast<double>(param), 400.0 + static_cast<double>(param)};
+                return {500.0 + static_cast<double>(param), 400.0 + static_cast<double>(param), 0.0};
             }
-            return {20.0 + static_cast<double>(param) * 0.5, 100.0 + static_cast<double>(param)};
+            return {20.0 + static_cast<double>(param) * 0.5, 100.0 + static_cast<double>(param), 0.0};
         }
-        return {100.0 + static_cast<double>(param) * 0.05, 150.0 + static_cast<double>(param) * 0.1};
+        return {100.0 + static_cast<double>(param) * 0.05, 150.0 + static_cast<double>(param) * 0.1, 0.0};
     };
 
-    auto measure_group = [&](std::span<const CandidateSpec> group) -> std::vector<TimingSample> {
+    auto measure_single = [&](const CandidateSpec& c, size_t) -> TimingSample { return timing_for(c.use_ef, c.param); };
+
+    auto measure_group = [&](std::span<const CandidateSpec> group, size_t) -> std::vector<TimingSample> {
         std::vector<TimingSample> out;
         out.reserve(group.size());
         for (const auto& c : group) {
@@ -202,7 +226,7 @@ TEST(ParetoLineTest, SyntheticCrossoverPruningAndParamLookup) {
         return out;
     };
 
-    const auto selected = ParetoLineTestAccess::select_entries(tables, timing_for, measure_group);
+    const auto selected = ParetoLineTestAccess::select_entries(10, false, tables, 1, measure_single, measure_group);
     const ParetoLine synth_line = ParetoLineTestAccess::make(10, 80, tables, selected);
     verify_pareto_invariants(synth_line);
 
@@ -223,29 +247,29 @@ TEST(ParetoLineTest, SyntheticCrossoverPruningAndParamLookup) {
     EXPECT_TRUE(has_eps);
     EXPECT_FALSE(has_dominated_ef);
 
-    // 2. Same-mode dominance pre-filtering: two Mode::Ef tables at the same target -> smaller ef kept without group timing.
+    // 2. Within-axis dominance pre-filter: smaller param with >= measured_recall dominates larger param in the same (mode, num_candidates) group.
     {
-        auto mid_graph = build_fp32_graph(data, dim, 12, Metric::FP32_L2);
-        const std::vector<float> target_vec = {0.95f};
-        const RecallTable tight_mid = mid_graph.to_recall_table(10, RecallTable::Mode::Ef, std::span<const float>(target_vec), 80, 1);
-        const RecallTable tight_sparse = graph.to_recall_table(10, RecallTable::Mode::Ef, std::span<const float>(target_vec), 80, 1);
-        ASSERT_EQ(tight_mid.size(), 1u);
+        auto dense_graph = build_fp32_graph(data, dim, 16, Metric::FP32_L2);
+        const std::vector<float> dense_target = {0.96f};
+        const std::vector<float> sparse_target = {0.90f};
+        const RecallTable tight_dense = dense_graph.to_recall_table(10, RecallTable::Mode::Ef, std::span<const float>(dense_target), 80, 1);
+        const RecallTable tight_sparse = graph.to_recall_table(10, RecallTable::Mode::Ef, std::span<const float>(sparse_target), 80, 1);
+        ASSERT_EQ(tight_dense.size(), 1u);
         ASSERT_EQ(tight_sparse.size(), 1u);
-        ASSERT_FLOAT_EQ(tight_mid.entries()[0].target_recall, 0.95f);
-        ASSERT_FLOAT_EQ(tight_sparse.entries()[0].target_recall, 0.95f);
-        ASSERT_LT(tight_mid.entries()[0].eps_or_ef, tight_sparse.entries()[0].eps_or_ef);
+        ASSERT_LT(tight_dense.entries()[0].eps_or_ef, tight_sparse.entries()[0].eps_or_ef);
+        ASSERT_GE(tight_dense.entries()[0].measured_recall, tight_sparse.entries()[0].measured_recall);
 
-        const float expected_min_ef = tight_mid.entries()[0].eps_or_ef;
+        const float expected_min_ef = tight_dense.entries()[0].eps_or_ef;
         size_t group_calls = 0;
         size_t single_calls = 0;
-        const std::vector<RecallTable> pair_ef = {tight_sparse, tight_mid};
+        const std::vector<RecallTable> pair_ef = {tight_sparse, tight_dense};
         const auto filtered_entries = ParetoLineTestAccess::select_entries(
-            pair_ef,
-            [&](bool use_ef, int32_t param) -> TimingSample {
+            10, false, pair_ef, 3,
+            [&](const CandidateSpec& c, size_t) -> TimingSample {
                 ++single_calls;
-                return {50.0 + static_cast<double>(param), static_cast<double>(use_ef ? 100 : 200)};
+                return {50.0 + static_cast<double>(c.param), static_cast<double>(c.use_ef ? 100 : 200), 0.0};
             },
-            [&](std::span<const CandidateSpec>) -> std::vector<TimingSample> {
+            [&](std::span<const CandidateSpec>, size_t) -> std::vector<TimingSample> {
                 ++group_calls;
                 return {};
             }
@@ -256,15 +280,25 @@ TEST(ParetoLineTest, SyntheticCrossoverPruningAndParamLookup) {
         EXPECT_FLOAT_EQ(filtered_entries[0].eps_or_ef, expected_min_ef);
     }
 
-    // 3. Verify 1% latency tie-breaker chooses lower avg_distance_count.
+    // 3. Verify 1% latency tie-breaker chooses lower total distance count at equal measured_recall.
     {
-        const auto tie_tables = graph.to_recall_tables(10, std::vector<float>{eps_table.entries().front().target_recall}, 80, 1);
+        const auto easy_data = make_clustered_data(150, dim, 10, 7);
+        auto easy_graph = build_fp32_graph(easy_data, dim, 16, Metric::FP32_L2);
+        const std::vector<float> max_target = {1.0f};
+        const auto tie_tables = easy_graph.to_recall_tables(10, std::span<const float>(max_target), 30, 1);
+        ASSERT_EQ(tie_tables.size(), 2u);
+        ASSERT_EQ(tie_tables[0].size(), 1u);
+        ASSERT_EQ(tie_tables[1].size(), 1u);
+        ASSERT_NEAR(tie_tables[0].entries()[0].measured_recall, 1.0f, 1e-6f);
+        ASSERT_NEAR(tie_tables[1].entries()[0].measured_recall, 1.0f, 1e-6f);
+
         const auto tie_entries = ParetoLineTestAccess::select_entries(
-            tie_tables, [&](bool use_ef, int32_t) -> TimingSample { return use_ef ? TimingSample{100.0, 500.0} : TimingSample{100.5, 250.0}; },
-            [&](std::span<const CandidateSpec> group) -> std::vector<TimingSample> {
+            10, false, tie_tables, 3,
+            [&](const CandidateSpec& c, size_t) -> TimingSample { return c.use_ef ? TimingSample{100.0, 500.0, 0.0} : TimingSample{100.5, 250.0, 0.0}; },
+            [&](std::span<const CandidateSpec> group, size_t) -> std::vector<TimingSample> {
                 std::vector<TimingSample> out;
                 for (const auto& c : group) {
-                    out.push_back(c.use_ef ? TimingSample{100.0, 500.0} : TimingSample{100.5, 250.0});
+                    out.push_back(c.use_ef ? TimingSample{100.0, 500.0, 0.0} : TimingSample{100.5, 250.0, 0.0});
                 }
                 return out;
             }
@@ -273,30 +307,76 @@ TEST(ParetoLineTest, SyntheticCrossoverPruningAndParamLookup) {
         EXPECT_TRUE(tie_entries[0].is_eps());
     }
 
-    // 4. Explicit param_for tests: exact match, same-regime interpolation, regime boundary (no mixed interpolation), clamping.
+    // 4. Explicit param_for tests: nearest measured_recall lookup (no interpolation, ignores target_recall, upper tie-break), clamping, params().
     {
         const std::vector<Entry> explicit_entries = {
-            {0.80f, 30.0f, 0.80f, 50.0, 20000.0, 100.0},
-            {0.85f, 50.0f, 0.85f, 80.0, 12500.0, 180.0},
-            {0.90f, 0.0200f, 0.90f, 100.0, 10000.0, 220.0},
-            {0.95f, 0.0600f, 0.95f, 140.0, 7142.8, 300.0},
+            {0.75f, 30.0f, 1.0f, 0.80f, 50.0, 20000.0, 100.0, 0.0},    {0.80f, 50.0f, 1.0f, 0.85f, 80.0, 12500.0, 180.0, 0.0},
+            {0.85f, 40.0f, 1.5f, 0.88f, 90.0, 11111.1, 150.0, 15.0},   {0.88f, 0.0200f, 1.5f, 0.90f, 100.0, 10000.0, 220.0, 15.0},
+            {0.92f, 0.0600f, 1.5f, 0.95f, 140.0, 7142.8, 300.0, 15.0},
         };
         const ParetoLine explicit_line = ParetoLineTestAccess::make(10, 80, tables, explicit_entries);
-        EXPECT_FLOAT_EQ(*explicit_line.param_for(0.80f), 30.0f);
-        EXPECT_FLOAT_EQ(*explicit_line.param_for(0.825f), 40.0f);    // ef-ef ceiling interpolation
-        EXPECT_FLOAT_EQ(*explicit_line.param_for(0.875f), 0.0200f);  // regime boundary ef -> eps picks upper eps
-        EXPECT_FLOAT_EQ(*explicit_line.param_for(0.925f), 0.0400f);  // eps-eps ceiling interpolation
 
-        EXPECT_FALSE(explicit_line.param_for(0.70f, /*clamp=*/false).has_value());
-        EXPECT_FLOAT_EQ(*explicit_line.param_for(0.70f, /*clamp=*/true), 30.0f);
+        // Exact measured_recall match ignores target_recall (at 0.80, entries[0] has measured_recall=0.80 whereas entries[1] has target_recall=0.80).
+        const auto p80 = explicit_line.param_for(0.80f);
+        ASSERT_TRUE(p80.has_value());
+        EXPECT_FLOAT_EQ(p80->first, 30.0f);
+        EXPECT_FLOAT_EQ(p80->second, 1.0f);
+
+        // Closer-lower vs closer-upper nearest measured_recall (no interpolation).
+        const auto p81 = explicit_line.param_for(0.81f);
+        ASSERT_TRUE(p81.has_value());
+        EXPECT_FLOAT_EQ(p81->first, 30.0f);
+        EXPECT_FLOAT_EQ(p81->second, 1.0f);
+
+        const auto p84 = explicit_line.param_for(0.84f);
+        ASSERT_TRUE(p84.has_value());
+        EXPECT_FLOAT_EQ(p84->first, 50.0f);
+        EXPECT_FLOAT_EQ(p84->second, 1.0f);
+
+        // Exact midpoint tie breaks toward the higher-recall entry.
+        const auto p825 = explicit_line.param_for(0.825f);
+        ASSERT_TRUE(p825.has_value());
+        EXPECT_FLOAT_EQ(p825->first, 50.0f);
+        EXPECT_FLOAT_EQ(p825->second, 1.0f);
+
+        const auto p89 = explicit_line.param_for(0.89f);
+        ASSERT_TRUE(p89.has_value());
+        EXPECT_FLOAT_EQ(p89->first, 0.0200f);
+        EXPECT_FLOAT_EQ(p89->second, 1.5f);
+
+        const auto p92 = explicit_line.param_for(0.92f);
+        ASSERT_TRUE(p92.has_value());
+        EXPECT_FLOAT_EQ(p92->first, 0.0200f);
+        EXPECT_FLOAT_EQ(p92->second, 1.5f);
+
+        const auto p93 = explicit_line.param_for(0.93f);
+        ASSERT_TRUE(p93.has_value());
+        EXPECT_FLOAT_EQ(p93->first, 0.0600f);
+        EXPECT_FLOAT_EQ(p93->second, 1.5f);
+
+        // Bounds checked strictly against measured_recall (0.75/0.78 < measured_recall_min=0.80 even though entries[0].target_recall == 0.75).
+        EXPECT_FALSE(explicit_line.param_for(0.75f, /*clamp=*/false).has_value());
+        EXPECT_FALSE(explicit_line.param_for(0.78f, /*clamp=*/false).has_value());
+        const auto clamp_lo = explicit_line.param_for(0.78f, /*clamp=*/true);
+        ASSERT_TRUE(clamp_lo.has_value());
+        EXPECT_FLOAT_EQ(clamp_lo->first, 30.0f);
+        EXPECT_FLOAT_EQ(clamp_lo->second, 1.0f);
+
         EXPECT_FALSE(explicit_line.param_for(0.99f, /*clamp=*/false).has_value());
-        EXPECT_FLOAT_EQ(*explicit_line.param_for(0.99f, /*clamp=*/true), 0.0600f);
+        const auto clamp_hi = explicit_line.param_for(0.99f, /*clamp=*/true);
+        ASSERT_TRUE(clamp_hi.has_value());
+        EXPECT_FLOAT_EQ(clamp_hi->first, 0.0600f);
+        EXPECT_FLOAT_EQ(clamp_hi->second, 1.5f);
 
-        const std::vector<float> expected_order = {30.0f, 50.0f, 0.0200f, 0.0600f};
-        const auto got = explicit_line.eps_or_ef_values();
-        ASSERT_EQ(got.size(), expected_order.size());
-        for (size_t i = 0; i < expected_order.size(); ++i) {
-            EXPECT_FLOAT_EQ(got[i], expected_order[i]);
+        EXPECT_FALSE(explicit_line.param_for(std::numeric_limits<float>::quiet_NaN(), /*clamp=*/true).has_value());
+        EXPECT_FALSE(explicit_line.param_for(std::numeric_limits<float>::infinity(), /*clamp=*/true).has_value());
+
+        const std::vector<std::pair<float, float>> expected_pairs = {{30.0f, 1.0f}, {50.0f, 1.0f}, {40.0f, 1.5f}, {0.0200f, 1.5f}, {0.0600f, 1.5f}};
+        const auto got_pairs = explicit_line.params();
+        ASSERT_EQ(got_pairs.size(), expected_pairs.size());
+        for (size_t i = 0; i < expected_pairs.size(); ++i) {
+            EXPECT_FLOAT_EQ(got_pairs[i].first, expected_pairs[i].first);
+            EXPECT_FLOAT_EQ(got_pairs[i].second, expected_pairs[i].second);
         }
     }
 }
@@ -412,6 +492,168 @@ TEST(ParetoLineTest, EmptyGraphAndValidationErrors) {
     EXPECT_THROW((void)tiny_graph.to_pareto_line(5, 10, {0.80f, 0.95f}, 0.05f, 1, 0), std::invalid_argument);
     const std::vector<float> targets = {0.90f};
     EXPECT_THROW((void)tiny_graph.to_pareto_line(5, std::span<const float>(targets), 10, 1, 0), std::invalid_argument);
+}
+
+TEST(ParetoLineTest, MultiRerankDominanceTwoStageAndNoInterpolation) {
+    using deglib::search::ParetoLineTestAccess;
+    using CandidateSpec = ParetoLineTestAccess::CandidateSpec;
+    using TimingSample = ParetoLineTestAccess::TimingSample;
+
+    const uint32_t dim = 32;
+    const uint32_t count = 600;
+    const auto rand_data = make_random_data(count, dim, 23);
+    auto graph_mid = build_fp32_graph(rand_data, dim, 10, Metric::FP32_L2);
+    auto ro_mid = graph_mid.to_readonly();
+    auto reranker = std::make_shared<deglib::search::Reranker>(
+        deglib::search::Reranker::from_graph(ro_mid.internal(), deglib::distances::FloatSpace(dim, Metric::FP32_L2))
+    );
+    auto searcher = deglib::search::make_searcher(ro_mid.internal(), reranker);
+
+    // 1. Per-(use_ef, num_candidates) dominance pre-filter and 2-stage global Pareto screening.
+    const std::vector<float> high_target = {0.94f};
+    const std::vector<float> low_target = {0.85f};
+    const RecallTable t_ef_1 = searcher->to_recall_table(10, RecallTable::Mode::Ef, std::span<const float>(high_target), 1.0f, 50, 1);
+    const RecallTable t_eps_1 = searcher->to_recall_table(10, RecallTable::Mode::Eps, std::span<const float>(high_target), 1.0f, 50, 1);
+    const RecallTable t_ef_15 = searcher->to_recall_table(10, RecallTable::Mode::Ef, std::span<const float>(low_target), 1.5f, 50, 1);
+    const RecallTable t_eps_20 = searcher->to_recall_table(10, RecallTable::Mode::Eps, std::span<const float>(low_target), 2.0f, 50, 1);
+    ASSERT_EQ(t_ef_1.size(), 1u);
+    ASSERT_EQ(t_eps_1.size(), 1u);
+    ASSERT_EQ(t_ef_15.size(), 1u);
+    ASSERT_EQ(t_eps_20.size(), 1u);
+    const float min_hi_meas = (std::min)(t_ef_1.entries()[0].measured_recall, t_eps_1.entries()[0].measured_recall);
+    const float max_lo_meas = (std::max)(t_ef_15.entries()[0].measured_recall, t_eps_20.entries()[0].measured_recall);
+    ASSERT_GT(min_hi_meas, max_lo_meas + 1e-4f);
+
+    {
+        auto sparse_graph = build_fp32_graph(rand_data, dim, 6, Metric::FP32_L2);
+        auto sparse_searcher = deglib::search::make_searcher(sparse_graph.internal(), reranker);
+        const std::vector<float> sparse_target = {0.82f};
+        const RecallTable t_ef_1_slow = sparse_searcher->to_recall_table(10, RecallTable::Mode::Ef, std::span<const float>(sparse_target), 1.0f, 50, 1);
+        ASSERT_EQ(t_ef_1_slow.size(), 1u);
+        ASSERT_LT(t_ef_1.entries()[0].eps_or_ef, t_ef_1_slow.entries()[0].eps_or_ef);
+        ASSERT_GE(t_ef_1.entries()[0].measured_recall, t_ef_1_slow.entries()[0].measured_recall);
+
+        const std::vector<RecallTable> mix = {t_ef_1_slow, t_ef_1, t_eps_1, t_ef_15, t_eps_20};
+        std::vector<std::pair<size_t, size_t>> group_calls;  // (group_size, group_rounds)
+        size_t single_calls = 0;
+
+        auto latency_for = [](const CandidateSpec& c) -> double {
+            if (c.use_ef && c.num_candidates == 10) return 50.0;
+            if (!c.use_ef && c.num_candidates == 10) return 55.0;
+            return 100.0 + static_cast<double>(c.num_candidates);  // 115.0 / 120.0 -> pruned in Stage 1 against higher-recall rf=1.0
+        };
+
+        const auto selected = ParetoLineTestAccess::select_entries(
+            10, true, mix, 3,
+            [&](const CandidateSpec& c, size_t r) -> TimingSample {
+                ++single_calls;
+                EXPECT_EQ(r, 3u);
+                return {latency_for(c), 100.0, c.num_candidates > 10 ? static_cast<double>(c.num_candidates) : 0.0};
+            },
+            [&](std::span<const CandidateSpec> group, size_t r) -> std::vector<TimingSample> {
+                group_calls.emplace_back(group.size(), r);
+                std::vector<TimingSample> out;
+                out.reserve(group.size());
+                for (const auto& c : group) {
+                    out.push_back({latency_for(c), 100.0, c.num_candidates > 10 ? static_cast<double>(c.num_candidates) : 0.0});
+                }
+                return out;
+            }
+        );
+
+        ASSERT_EQ(group_calls.size(), 2u);
+        EXPECT_EQ(group_calls[0], (std::pair<size_t, size_t>{4u, 1u}));  // Stage 1: all 4 uncached, 1 round
+        EXPECT_EQ(group_calls[1], (std::pair<size_t, size_t>{2u, 3u}));  // Stage 2: only 2 rf=1.0 finalists, full 3 rounds
+        EXPECT_EQ(single_calls, 0u);
+        ASSERT_GE(selected.size(), 1u);
+        EXPECT_TRUE(selected[0].is_ef());
+        EXPECT_FLOAT_EQ(selected[0].rerank_factor, 1.0f);
+    }
+
+    // 2. No synthetic interpolation: only exact RecallTable entries (2 + 1 = 3 candidates) are evaluated.
+    {
+        const std::vector<float> a_targets = {0.70f, 0.92f};
+        const std::vector<float> b_targets = {0.82f};
+        const RecallTable t_a = searcher->to_recall_table(10, RecallTable::Mode::Ef, std::span<const float>(a_targets), 1.0f, 50, 1);
+        const RecallTable t_b = searcher->to_recall_table(10, RecallTable::Mode::Eps, std::span<const float>(b_targets), 1.5f, 50, 1);
+        ASSERT_EQ(t_a.size(), 2u);
+        ASSERT_EQ(t_b.size(), 1u);
+
+        const std::vector<RecallTable> pair_tables = {t_a, t_b};
+        size_t evaluated_candidates = 0;
+        const auto selected = ParetoLineTestAccess::select_entries(
+            10, true, pair_tables, 1,
+            [&](const CandidateSpec&, size_t) -> TimingSample {
+                ADD_FAILURE() << "Unexpected measure_single call";
+                return {100.0, 100.0, 0.0};
+            },
+            [&](std::span<const CandidateSpec> group, size_t) -> std::vector<TimingSample> {
+                evaluated_candidates = group.size();
+                std::vector<TimingSample> out;
+                out.reserve(group.size());
+                for (size_t i = 0; i < group.size(); ++i) {
+                    out.push_back({40.0 + static_cast<double>(i) * 15.0, 100.0, group[i].num_candidates > 10 ? 15.0 : 0.0});
+                }
+                return out;
+            }
+        );
+        EXPECT_EQ(evaluated_candidates, 3u);
+        EXPECT_EQ(selected.size(), 3u);
+    }
+
+    // 3. Same-target preservation & 2D Pareto dominance over measured_recall.
+    {
+        std::optional<RecallTable> same_tgt_a;
+        std::optional<RecallTable> same_tgt_b;
+        for (const float t : {0.80f, 0.85f, 0.88f, 0.90f}) {
+            const std::vector<float> single_t = {t};
+            const RecallTable ta = searcher->to_recall_table(10, RecallTable::Mode::Ef, std::span<const float>(single_t), 1.0f, 50, 1);
+            const RecallTable tb = searcher->to_recall_table(10, RecallTable::Mode::Eps, std::span<const float>(single_t), 2.0f, 50, 1);
+            if (ta.size() == 1u && tb.size() == 1u && std::abs(ta.entries()[0].measured_recall - tb.entries()[0].measured_recall) > 1e-4f) {
+                same_tgt_a = ta;
+                same_tgt_b = tb;
+                break;
+            }
+        }
+        ASSERT_TRUE(same_tgt_a.has_value());
+        ASSERT_TRUE(same_tgt_b.has_value());
+
+        const std::vector<RecallTable> same_tgt_tables = {*same_tgt_a, *same_tgt_b};
+        const float r_a = same_tgt_a->entries()[0].measured_recall;
+        const float r_b = same_tgt_b->entries()[0].measured_recall;
+        const bool a_is_higher = (r_a > r_b);
+
+        // Case 3a: Higher measured_recall is faster (100 vs 120) -> dominates and prunes lower measured_recall.
+        const auto pruned = ParetoLineTestAccess::select_entries(
+            10, true, same_tgt_tables, 1, [&](const CandidateSpec&, size_t) -> TimingSample { return {100.0, 100.0, 0.0}; },
+            [&](std::span<const CandidateSpec> group, size_t) -> std::vector<TimingSample> {
+                std::vector<TimingSample> out;
+                for (const auto& c : group) {
+                    const bool is_high = a_is_higher ? c.use_ef : !c.use_ef;
+                    out.push_back({is_high ? 100.0 : 120.0, 100.0, c.num_candidates > 10 ? 20.0 : 0.0});
+                }
+                return out;
+            }
+        );
+        ASSERT_EQ(pruned.size(), 1u);
+        EXPECT_FLOAT_EQ(pruned[0].measured_recall, (std::max)(r_a, r_b));
+
+        // Case 3b: Higher measured_recall is slower (130 vs 100) -> both survive (not collapsed per target).
+        const auto kept_both = ParetoLineTestAccess::select_entries(
+            10, true, same_tgt_tables, 1, [&](const CandidateSpec&, size_t) -> TimingSample { return {100.0, 100.0, 0.0}; },
+            [&](std::span<const CandidateSpec> group, size_t) -> std::vector<TimingSample> {
+                std::vector<TimingSample> out;
+                for (const auto& c : group) {
+                    const bool is_high = a_is_higher ? c.use_ef : !c.use_ef;
+                    out.push_back({is_high ? 130.0 : 100.0, 100.0, c.num_candidates > 10 ? 20.0 : 0.0});
+                }
+                return out;
+            }
+        );
+        ASSERT_EQ(kept_both.size(), 2u);
+        EXPECT_FLOAT_EQ(kept_both[0].measured_recall, (std::min)(r_a, r_b));
+        EXPECT_FLOAT_EQ(kept_both[1].measured_recall, (std::max)(r_a, r_b));
+    }
 }
 
 }  // namespace

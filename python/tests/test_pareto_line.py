@@ -28,38 +28,59 @@ def _verify_pareto_invariants(line: ParetoLine) -> None:
     if not entries:
         assert line.recall_bounds is None
         assert line.eps_or_ef_values() == []
+        assert line.params() == []
         return
 
     assert line.recall_bounds is not None
-    assert line.recall_bounds[0] == pytest.approx(entries[0][2])
-    assert line.recall_bounds[1] == pytest.approx(entries[-1][2])
+    assert line.recall_bounds[0] == pytest.approx(entries[0][3])
+    assert line.recall_bounds[1] == pytest.approx(entries[-1][3])
 
     for i, entry in enumerate(entries):
-        assert len(entry) == 5
-        tgt, param, meas, lat_us, qps = entry
+        assert len(entry) == 6
+        tgt, param, rf, meas, lat_us, qps = entry
         assert isinstance(tgt, float)
         assert isinstance(param, float)
+        assert isinstance(rf, float)
         assert isinstance(meas, float)
         assert isinstance(lat_us, float)
         assert isinstance(qps, float)
-        assert (10.0 <= param <= 500.0) or (0.005 - 1e-6 <= param <= 0.20 + 1e-6)
+        assert (10.0 <= param <= 500.0) or (0.001 - 1e-6 <= param <= 0.20 + 1e-6)
+        assert rf >= 1.0 - 1e-6
         assert 0.0 <= meas <= 1.0
         assert lat_us > 0.0
         assert qps == pytest.approx(1e6 / lat_us, rel=1e-4)
 
         if i > 0:
-            assert meas > entries[i - 1][2]
-            assert lat_us > entries[i - 1][3]
-            assert qps < entries[i - 1][4]
+            assert meas > entries[i - 1][3]
+            assert lat_us > entries[i - 1][4]
+            assert qps < entries[i - 1][5]
 
-        looked_up = line.param_for(tgt)
-        assert looked_up == pytest.approx(param, abs=1e-6)
+        looked_up = line.param_for(meas)
+        assert looked_up is not None
+        assert looked_up[0] == pytest.approx(param, abs=1e-6)
+        assert looked_up[1] == pytest.approx(rf, abs=1e-6)
+
+    for i in range(len(entries) - 1):
+        r_a = entries[i][3]
+        r_b = entries[i + 1][3]
+        lo_q = r_a + 0.25 * (r_b - r_a)
+        mid_q = 0.5 * (r_a + r_b)
+        hi_q = r_a + 0.75 * (r_b - r_a)
+        assert line.param_for(lo_q) == pytest.approx((entries[i][1], entries[i][2]), abs=1e-6)
+        assert line.param_for(mid_q) == pytest.approx((entries[i + 1][1], entries[i + 1][2]), abs=1e-6)
+        assert line.param_for(hi_q) == pytest.approx((entries[i + 1][1], entries[i + 1][2]), abs=1e-6)
 
     params = line.eps_or_ef_values()
     assert len(params) <= len(entries)
     for i in range(len(params)):
         for j in range(i + 1, len(params)):
             assert abs(params[i] - params[j]) > 1e-6
+
+    pairs = line.params()
+    assert len(pairs) <= len(entries)
+    for i in range(len(pairs)):
+        for j in range(i + 1, len(pairs)):
+            assert abs(pairs[i][0] - pairs[j][0]) > 1e-6 or abs(pairs[i][1] - pairs[j][1]) > 1e-6
 
 
 def test_exports_and_wrapper_type():
@@ -93,7 +114,7 @@ def test_to_pareto_line_with_and_without_recall_tables():
     _verify_pareto_invariants(line_ef_only)
     assert len(line_ef_only.recall_tables) == 1
     assert line_ef_only.recall_tables[0].is_ef
-    assert all(param >= 1.0 for _, param, _, _, _ in line_ef_only.entries)
+    assert all(param >= 1.0 and rf == pytest.approx(1.0) for _, param, rf, _, _, _ in line_ef_only.entries)
 
     # 1b. Two precomputed RecallTables via graph.to_pareto_line
     tables = graph.to_recall_tables(k=10, sample_count=60, recall_range=(0.80, 0.99), recall_step=0.05, threads=1)
@@ -121,10 +142,16 @@ def test_to_pareto_line_with_and_without_recall_tables():
     r_min, r_max = line_direct.recall_bounds
     if r_min > 0.10:
         assert line_direct.param_for(0.05, clamp=False) is None
-        assert line_direct.param_for(0.05, clamp=True) == pytest.approx(line_direct.entries[0][1])
+        clamped_lo = line_direct.param_for(0.05, clamp=True)
+        assert clamped_lo is not None
+        assert clamped_lo[0] == pytest.approx(line_direct.entries[0][1])
+        assert clamped_lo[1] == pytest.approx(line_direct.entries[0][2])
     if r_max < 0.995:
         assert line_direct.param_for(0.999, clamp=False) is None
-        assert line_direct.param_for(0.999, clamp=True) == pytest.approx(line_direct.entries[-1][1])
+        clamped_hi = line_direct.param_for(0.999, clamp=True)
+        assert clamped_hi is not None
+        assert clamped_hi[0] == pytest.approx(line_direct.entries[-1][1])
+        assert clamped_hi[1] == pytest.approx(line_direct.entries[-1][2])
 
 
 def test_pareto_line_quantized_graphs():

@@ -673,6 +673,16 @@ static nb::object reranker_rerank_py(
 // Fast Searcher Wrapper
 // ============================================================================
 
+inline deglib::search::RecallTable::Mode parse_recall_mode_py(const std::string& mode) {
+    if (mode == "ef") {
+        return deglib::search::RecallTable::Mode::Ef;
+    }
+    if (mode == "eps") {
+        return deglib::search::RecallTable::Mode::Eps;
+    }
+    throw std::invalid_argument(std::format("RecallTable mode must be 'ef' or 'eps', got '{}'", mode));
+}
+
 class SearcherPy {
   private:
     std::unique_ptr<deglib::search::Searcher> searcher_;
@@ -763,6 +773,53 @@ class SearcherPy {
         uint32_t max_distance_computation_count = 0
     ) {
         return search(queries, k, eps_or_ef, rerank_factor, num_threads, return_distances, unsorted, max_distance_computation_count);
+    }
+
+    deglib::search::RecallTable to_recall_table(
+        uint32_t k,
+        const std::string& mode,
+        float rerank_factor = 1.0f,
+        size_t sample_count = deglib::search::RecallTable::kDefaultSampleCount,
+        std::pair<float, float> recall_range = {deglib::search::RecallTable::kDefaultMinRecall, deglib::search::RecallTable::kDefaultMaxRecall},
+        float recall_step = deglib::search::RecallTable::kDefaultRecallStep,
+        std::optional<std::vector<float>> target_recalls = std::nullopt,
+        size_t threads = 0
+    ) const {
+        const auto parsed_mode = parse_recall_mode_py(mode);
+        nb::gil_scoped_release release;
+        if (target_recalls.has_value()) {
+            return searcher_->to_recall_table(k, parsed_mode, std::span<const float>(*target_recalls), rerank_factor, sample_count, threads);
+        }
+        return searcher_->to_recall_table(k, parsed_mode, rerank_factor, sample_count, recall_range, recall_step, threads);
+    }
+
+    std::vector<deglib::search::RecallTable> to_recall_tables(
+        uint32_t k,
+        size_t sample_count = deglib::search::RecallTable::kDefaultSampleCount,
+        std::pair<float, float> recall_range = {deglib::search::RecallTable::kDefaultMinRecall, deglib::search::RecallTable::kDefaultMaxRecall},
+        float recall_step = deglib::search::RecallTable::kDefaultRecallStep,
+        std::optional<std::vector<float>> target_recalls = std::nullopt,
+        std::optional<std::vector<float>> rerank_factors = std::nullopt,
+        size_t threads = 0
+    ) const {
+        if (rerank_factors.has_value() && rerank_factors->empty()) {
+            throw std::invalid_argument("rerank_factors must not be empty");
+        }
+        const std::span<const float> rf_span = rerank_factors.has_value() ? std::span<const float>(*rerank_factors) : std::span<const float>{};
+        nb::gil_scoped_release release;
+        if (target_recalls.has_value()) {
+            return searcher_->to_recall_tables(k, std::span<const float>(*target_recalls), sample_count, rf_span, threads);
+        }
+        return searcher_->to_recall_tables(k, sample_count, recall_range, recall_step, rf_span, threads);
+    }
+
+    deglib::search::ParetoLine to_pareto_line(
+        const std::vector<deglib::search::RecallTable>& recall_tables,
+        size_t sample_count = 0,
+        size_t rounds = deglib::search::ParetoLine::kDefaultRounds
+    ) const {
+        nb::gil_scoped_release release;
+        return searcher_->to_pareto_line(std::span<const deglib::search::RecallTable>(recall_tables), sample_count, rounds);
     }
 };
 
@@ -1929,6 +1986,7 @@ NB_MODULE(deglib_cpp, m) {
         .def_prop_ro("sample_count", &deglib::search::RecallTable::sample_count)
         .def_prop_ro("is_ef", [](const deglib::search::RecallTable& t) { return t.mode() == deglib::search::RecallTable::Mode::Ef; })
         .def_prop_ro("is_eps", [](const deglib::search::RecallTable& t) { return t.mode() == deglib::search::RecallTable::Mode::Eps; })
+        .def_prop_ro("rerank_factor", &deglib::search::RecallTable::rerank_factor)
         .def_prop_ro("recall_bounds", &deglib::search::RecallTable::recall_bounds)
         .def_prop_ro(
             "entries",
@@ -1959,19 +2017,22 @@ NB_MODULE(deglib_cpp, m) {
         .def_prop_ro(
             "entries",
             [](const deglib::search::ParetoLine& line) {
-                std::vector<std::tuple<float, float, float, double, double>> out;
+                std::vector<std::tuple<float, float, float, float, double, double>> out;
                 const auto& entries = line.entries();
                 out.reserve(entries.size());
                 for (const auto& e : entries) {
-                    out.emplace_back(e.target_recall, e.eps_or_ef, e.measured_recall, e.latency_us, e.qps);
+                    out.emplace_back(e.target_recall, e.eps_or_ef, e.rerank_factor, e.measured_recall, e.latency_us, e.qps);
                 }
                 return out;
             }
         )
         .def("eps_or_ef_values", &deglib::search::ParetoLine::eps_or_ef_values, "Returns deduplicated eps_or_ef parameters along the Pareto frontier.")
+        .def("params", &deglib::search::ParetoLine::params, "Returns deduplicated (eps_or_ef, rerank_factor) parameter pairs along the Pareto frontier.")
         .def(
             "param_for", &deglib::search::ParetoLine::param_for, nb::arg("target_recall"), nb::arg("clamp") = false,
-            "Looks up or same-regime interpolates an eps_or_ef value for target_recall (returns None if out of bounds unless clamp=True)."
+            "Returns the (eps_or_ef, rerank_factor) pair of the frontier entry whose measured_recall is nearest to target_recall (returns None if out of "
+            "bounds "
+            "unless clamp=True)."
         )
         .def("__len__", &deglib::search::ParetoLine::size)
         .def("__str__", &deglib::search::ParetoLine::to_string)
@@ -2069,6 +2130,25 @@ NB_MODULE(deglib_cpp, m) {
             "k-means "
             "iterations.\n    sample_size: vertices sampled for clustering, 0 selects 3% of the graph size.\n    threads: worker threads, 0 selects "
             "a library default.\n    use_routing: build a k-means routing graph for entry selection (used by the QG/query-graph searcher)."
+        )
+        .def(
+            "to_recall_table", &SearcherPy::to_recall_table, nb::arg("k"), nb::arg("mode"), nb::arg("rerank_factor") = 1.0f,
+            nb::arg("sample_count") = deglib::search::RecallTable::kDefaultSampleCount,
+            nb::arg("recall_range") = std::pair<float, float>{deglib::search::RecallTable::kDefaultMinRecall, deglib::search::RecallTable::kDefaultMaxRecall},
+            nb::arg("recall_step") = deglib::search::RecallTable::kDefaultRecallStep, nb::arg("target_recalls") = nb::none(), nb::arg("threads") = 0,
+            "Calibrate a single-mode RecallTable ('ef' or 'eps') for this Searcher pipeline."
+        )
+        .def(
+            "to_recall_tables", &SearcherPy::to_recall_tables, nb::arg("k"), nb::arg("sample_count") = deglib::search::RecallTable::kDefaultSampleCount,
+            nb::arg("recall_range") = std::pair<float, float>{deglib::search::RecallTable::kDefaultMinRecall, deglib::search::RecallTable::kDefaultMaxRecall},
+            nb::arg("recall_step") = deglib::search::RecallTable::kDefaultRecallStep, nb::arg("target_recalls") = nb::none(),
+            nb::arg("rerank_factors") = nb::none(), nb::arg("threads") = 0,
+            "Calibrate ('ef', 'eps') RecallTables across rerank_factors in a shared single-pass evaluation."
+        )
+        .def(
+            "to_pareto_line", &SearcherPy::to_pareto_line, nb::arg("recall_tables"), nb::arg("sample_count") = 0,
+            nb::arg("rounds") = deglib::search::ParetoLine::kDefaultRounds,
+            "Build an end-to-end ParetoLine unifying measured operating points across RecallTables by (measured_recall, latency_us) dominance."
         );
 
     // graphs
@@ -2230,14 +2310,7 @@ NB_MODULE(deglib_cpp, m) {
             "to_recall_table",
             [](const deglib::DynamicExplorationGraph& g, uint32_t k, const std::string& mode, size_t sample_count, std::pair<float, float> recall_range,
                float recall_step, std::optional<std::vector<float>> target_recalls, size_t threads) {
-                deglib::search::RecallTable::Mode parsed_mode;
-                if (mode == "ef") {
-                    parsed_mode = deglib::search::RecallTable::Mode::Ef;
-                } else if (mode == "eps") {
-                    parsed_mode = deglib::search::RecallTable::Mode::Eps;
-                } else {
-                    throw std::invalid_argument(std::format("RecallTable mode must be 'ef' or 'eps', got '{}'", mode));
-                }
+                const auto parsed_mode = parse_recall_mode_py(mode);
                 nb::gil_scoped_release release;
                 if (target_recalls.has_value()) {
                     return g.to_recall_table(k, parsed_mode, std::span<const float>(*target_recalls), sample_count, threads);
@@ -2271,7 +2344,7 @@ NB_MODULE(deglib_cpp, m) {
                 return g.to_pareto_line(std::span<const deglib::search::RecallTable>(recall_tables), sample_count, rounds);
             },
             nb::arg("recall_tables"), nb::arg("sample_count") = 0, nb::arg("rounds") = deglib::search::ParetoLine::kDefaultRounds,
-            "Build a ParetoLine selecting the fastest parameter per target recall across one or more RecallTables."
+            "Build a ParetoLine unifying measured operating points across one or more RecallTables by (measured_recall, latency_us) dominance."
         );
 
     m.def("load_readonly_graph", &load_readonly_graph_wrapper);

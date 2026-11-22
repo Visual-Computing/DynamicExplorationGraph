@@ -290,7 +290,7 @@ class DynamicExplorationGraph:
         rounds: int = 3,
     ) -> "ParetoLine":
         """
-        Build a unified ``ParetoLine`` selecting the fastest parameter per target recall across ``recall_tables``.
+        Build a unified ``ParetoLine`` from measured operating points across ``recall_tables`` in ``(measured_recall, latency_us)`` space.
 
         If ``recall_tables`` is omitted, calibrates both ``"ef"`` and ``"eps"`` tables via :meth:`to_recall_tables`.
         Pareto-dominated points are pruned so the resulting frontier is strictly monotonic in recall and latency.

@@ -345,7 +345,7 @@ public:
     /// Auto-tune traversal prefetch parameters (po, pl, nl) by timing traversal over sampled vertices
     void optimize(size_t sample_count = 300, uint32_t k = 100, uint32_t ef = 200, size_t median_subset = 4096) const;
 
-    /// Calibrate a single-mode RecallTable mapping target recall@k values to ef (in [10, 500], step 1) or eps (in [0.005, 0.20], resolution 0.0001)
+    /// Calibrate a single-mode RecallTable mapping target recall@k values to ef (in [10, 500], step 1) or eps (in [0.001, 0.20], resolution 0.0001)
     deglib::search::RecallTable to_recall_table(
         uint32_t k,
         deglib::search::RecallTable::Mode mode,
@@ -377,7 +377,7 @@ public:
         size_t threads = 0
     ) const;
 
-    /// Build a unified ParetoLine selecting the fastest parameter per target recall across one or more RecallTables and pruning dominated points
+    /// Build a unified ParetoLine over real measured RecallTable operating points in (measured_recall, latency_us) space
     deglib::search::ParetoLine to_pareto_line(
         std::span<const deglib::search::RecallTable> recall_tables,
         size_t sample_count = 0,
@@ -698,7 +698,7 @@ struct SearchResults {
     std::span<const float> get_distances(size_t q = 0) const noexcept;
 };
 
-/// Single-mode parameter calibration table mapping target recall@k levels along Mode::Ef (in [10, 500], step 1) or Mode::Eps (in [0.005, 0.20], resolution 0.0001), picking the smallest parameter achieving measured_recall >= target_recall.
+/// Single-mode parameter calibration table mapping target recall@k levels along Mode::Ef (in [10, 500], step 1) or Mode::Eps (in [0.001, 0.20], resolution 0.0001), picking the smallest parameter achieving measured_recall >= target_recall.
 class RecallTable {
 public:
     enum class Mode : uint8_t { Ef, Eps };
@@ -712,7 +712,7 @@ public:
     static constexpr uint32_t kMinEf = 10;
     static constexpr uint32_t kMaxEf = 500;
     static constexpr uint32_t kEfResolution = 1;
-    static constexpr float kMinEps = 0.005f;
+    static constexpr float kMinEps = 0.001f;
     static constexpr float kMaxEps = 0.20f;
     static constexpr float kEpsResolution = 0.0001f;
 
@@ -752,6 +752,7 @@ public:
     uint32_t k() const noexcept;
     size_t sample_count() const noexcept;
     Mode mode() const noexcept;
+    float rerank_factor() const noexcept;
     bool empty() const noexcept;
     size_t size() const noexcept;
     std::optional<std::pair<float, float>> recall_bounds() const noexcept;
@@ -767,10 +768,12 @@ public:
     struct Entry {
         float target_recall = 0.0f;
         float eps_or_ef = 0.0f;  // >= 1.0f -> ef, < 1.0f -> eps
+        float rerank_factor = 1.0f;
         float measured_recall = 0.0f;
         double latency_us = 0.0;
         double qps = 0.0;
         double avg_distance_count = 0.0;
+        double avg_rerank_distance_count = 0.0;
 
         bool is_ef() const noexcept;
         bool is_eps() const noexcept;
@@ -816,13 +819,16 @@ public:
     const std::vector<Entry>& entries() const noexcept;
     const std::vector<RecallTable>& recall_tables() const noexcept;
     std::vector<float> eps_or_ef_values() const;
-    std::optional<float> param_for(float target_recall, bool clamp = false) const;
+    std::vector<std::pair<float, float>> params() const;
+    std::optional<std::pair<float, float>> param_for(float target_recall, bool clamp = false) const;
     std::string to_string() const;
 };
 
 /// High-performance Searcher coordinating query transformation, graph exploration, and reranking.
 class Searcher {
 public:
+    static constexpr std::array<float, 4> kDefaultRerankFactors = {1.0f, 1.25f, 1.5f, 2.0f};
+
     bool normalize_query() const noexcept;
     void set_normalize_query(bool val) noexcept;
 
@@ -833,6 +839,71 @@ public:
         size_t threads = 0,
         bool use_routing = true
     );
+
+    /// Calibrate a single-mode RecallTable for this Searcher pipeline
+    RecallTable to_recall_table(
+        uint32_t k,
+        RecallTable::Mode mode,
+        float rerank_factor = 1.0f,
+        size_t sample_count = 300,
+        std::pair<float, float> recall_range = {0.80f, 0.999f},
+        float recall_step = 0.005f,
+        size_t threads = 0
+    ) const;
+    RecallTable to_recall_table(
+        uint32_t k,
+        RecallTable::Mode mode,
+        std::span<const float> target_recalls,
+        float rerank_factor = 1.0f,
+        size_t sample_count = 300,
+        size_t threads = 0
+    ) const;
+
+    /// Calibrate Ef and Eps RecallTables across rerank_factors (defaults to {1.0, 1.25, 1.5, 2.0} when reranking) in a shared single pass
+    std::vector<RecallTable> to_recall_tables(
+        uint32_t k,
+        size_t sample_count = 300,
+        std::pair<float, float> recall_range = {0.80f, 0.999f},
+        float recall_step = 0.005f,
+        std::span<const float> rerank_factors = {},
+        size_t threads = 0
+    ) const;
+    std::vector<RecallTable> to_recall_tables(
+        uint32_t k,
+        std::span<const float> target_recalls,
+        size_t sample_count = 300,
+        std::span<const float> rerank_factors = {},
+        size_t threads = 0
+    ) const;
+
+    /// Build an end-to-end recall-latency ParetoLine across (ef, eps) x rerank_factors
+    ParetoLine to_pareto_line(
+        std::span<const RecallTable> recall_tables,
+        size_t sample_count = 0,
+        size_t rounds = ParetoLine::kDefaultRounds
+    ) const;
+    ParetoLine to_pareto_line(
+        const RecallTable& recall_table,
+        size_t sample_count = 0,
+        size_t rounds = ParetoLine::kDefaultRounds
+    ) const;
+    ParetoLine to_pareto_line(
+        uint32_t k,
+        size_t sample_count = 300,
+        std::pair<float, float> recall_range = {0.80f, 0.999f},
+        float recall_step = 0.005f,
+        std::span<const float> rerank_factors = {},
+        size_t threads = 0,
+        size_t rounds = ParetoLine::kDefaultRounds
+    ) const;
+    ParetoLine to_pareto_line(
+        uint32_t k,
+        std::span<const float> target_recalls,
+        size_t sample_count = 300,
+        std::span<const float> rerank_factors = {},
+        size_t threads = 0,
+        size_t rounds = ParetoLine::kDefaultRounds
+    ) const;
 
     template <typename T>
     uint32_t search(

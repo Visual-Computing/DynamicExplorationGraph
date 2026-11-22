@@ -549,3 +549,160 @@ def test_search_results_zero_copy_lifetime_and_telemetry():
     del batch_res
     gc.collect()
     np.testing.assert_array_equal(b_idx, b_copy)
+
+
+def _make_clustered_searcher_data(n: int, dim: int, clusters: int = 16, seed: int = 17) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    centers = rng.normal(0.0, 3.0, size=(clusters, dim)).astype(np.float32)
+    idx = np.arange(n) % clusters
+    noise = rng.normal(0.0, 0.35, size=(n, dim)).astype(np.float32)
+    return np.ascontiguousarray(centers[idx] + noise, dtype=np.float32)
+
+
+def _verify_searcher_pareto_line(line: deglib.ParetoLine) -> None:
+    entries = line.entries
+    assert len(line) == len(entries)
+    if not entries:
+        assert line.recall_bounds is None
+        assert line.params() == []
+        return
+    assert line.recall_bounds is not None
+    assert line.recall_bounds[0] == pytest.approx(entries[0][3])
+    assert line.recall_bounds[1] == pytest.approx(entries[-1][3])
+    for i, entry in enumerate(entries):
+        tgt, param, rf, meas, lat_us, qps = entry
+        assert (10.0 <= param <= 500.0) or (0.001 - 1e-6 <= param <= 0.20 + 1e-6)
+        assert rf >= 1.0 - 1e-6
+        assert 0.0 <= meas <= 1.0
+        assert lat_us > 0.0
+        assert qps == pytest.approx(1e6 / lat_us, rel=1e-4)
+        if i > 0:
+            assert meas > entries[i - 1][3]
+            assert lat_us > entries[i - 1][4]
+        looked_up = line.param_for(meas)
+        assert looked_up is not None
+        assert looked_up[0] == pytest.approx(param, abs=1e-6)
+        assert looked_up[1] == pytest.approx(rf, abs=1e-6)
+    assert len(line.params()) <= len(entries)
+
+
+def test_searcher_recall_tables_and_pareto_with_reranker():
+    data = _make_clustered_searcher_data(300, 32, clusters=16, seed=17)
+    base = deglib.build(data, edges_per_vertex=16, metric=Metric.FP32_L2, extend_k=32, optimize=False, threads=2)
+    searcher = base.to_searcher(
+        metric=Metric.Uint4_L2, rerank_metric=Metric.FP16_L2, optimize=True, n_clusters=16, threads=1
+    )
+
+    # Default rerank_factors when reranker is present -> 4 factors x 2 modes = 8 tables
+    default_tables = searcher.to_recall_tables(
+        k=10, sample_count=50, recall_range=(0.70, 0.96), recall_step=0.08, threads=1
+    )
+    assert len(default_tables) == 8
+    assert [t.rerank_factor for t in default_tables] == pytest.approx([1.0, 1.0, 1.25, 1.25, 1.5, 1.5, 2.0, 2.0])
+    for i in range(0, 8, 2):
+        assert default_tables[i].is_ef and default_tables[i + 1].is_eps
+
+    # Explicit rerank_factors: shared single-pass matches single-factor to_recall_table
+    rfs = [1.0, 1.5, 2.0]
+    tables = searcher.to_recall_tables(
+        k=10, sample_count=60, recall_range=(0.65, 0.96), recall_step=0.05, rerank_factors=rfs, threads=1
+    )
+    assert len(tables) == 6
+    for idx, rf in enumerate(rfs):
+        tbl_ef = tables[2 * idx]
+        tbl_eps = tables[2 * idx + 1]
+        assert tbl_ef.rerank_factor == pytest.approx(rf)
+        assert tbl_eps.rerank_factor == pytest.approx(rf)
+
+        single_ef = searcher.to_recall_table(
+            k=10, mode="ef", rerank_factor=rf, sample_count=60, recall_range=(0.65, 0.96), recall_step=0.05, threads=1
+        )
+        assert tbl_ef.entries == pytest.approx(single_ef.entries)
+
+        single_eps = searcher.to_recall_table(
+            k=10, mode="eps", rerank_factor=rf, sample_count=60, recall_range=(0.65, 0.96), recall_step=0.05, threads=1
+        )
+        assert tbl_eps.entries == pytest.approx(single_eps.entries)
+
+    # ParetoLine from tables, single table, range, and explicit targets
+    line_from_tables = searcher.to_pareto_line(recall_tables=tables, sample_count=60, rounds=3)
+    assert line_from_tables.k == 10
+    assert line_from_tables.sample_count == 60
+    assert len(line_from_tables.recall_tables) == 6
+    _verify_searcher_pareto_line(line_from_tables)
+    assert "rf" in str(line_from_tables) or len(line_from_tables) == 0
+
+    line_single = searcher.to_pareto_line(recall_tables=tables[2], sample_count=60, rounds=2)
+    _verify_searcher_pareto_line(line_single)
+    assert all(rf == pytest.approx(1.5) and p >= 1.0 for _, p, rf, _, _, _ in line_single.entries)
+
+    line_auto = searcher.to_pareto_line(
+        k=10, sample_count=60, recall_range=(0.75, 0.95), recall_step=0.05, rerank_factors=rfs, threads=1, rounds=2
+    )
+    _verify_searcher_pareto_line(line_auto)
+
+    line_explicit = searcher.to_pareto_line(
+        k=10, sample_count=60, target_recalls=[0.75, 0.85, 0.92], rerank_factors=[1.0, 2.0], threads=1, rounds=2
+    )
+    _verify_searcher_pareto_line(line_explicit)
+
+    r_min, r_max = line_auto.recall_bounds
+    if r_min > 0.10:
+        assert line_auto.param_for(0.05, clamp=False) is None
+        clamped_lo = line_auto.param_for(0.05, clamp=True)
+        assert clamped_lo == pytest.approx((line_auto.entries[0][1], line_auto.entries[0][2]))
+    if r_max < 0.995:
+        assert line_auto.param_for(0.999, clamp=False) is None
+        clamped_hi = line_auto.param_for(0.999, clamp=True)
+        assert clamped_hi == pytest.approx((line_auto.entries[-1][1], line_auto.entries[-1][2]))
+
+
+def test_searcher_recall_tables_no_reranker_and_kmeans():
+    data = _make_clustered_searcher_data(250, 16, clusters=12, seed=29)
+    graph = deglib.build(data, edges_per_vertex=16, metric=Metric.FP32_L2, extend_k=32, optimize=False, threads=2)
+    searcher = graph.to_searcher(optimize=True, n_clusters=16, threads=1)
+
+    tables = searcher.to_recall_tables(k=10, sample_count=50, recall_range=(0.75, 0.98), recall_step=0.08, threads=1)
+    assert len(tables) == 2
+    assert tables[0].is_ef and tables[0].rerank_factor == pytest.approx(1.0)
+    assert tables[1].is_eps and tables[1].rerank_factor == pytest.approx(1.0)
+
+    line = searcher.to_pareto_line(recall_tables=tables, sample_count=50, rounds=2)
+    _verify_searcher_pareto_line(line)
+    assert all(rf == pytest.approx(1.0) for _, _, rf, _, _, _ in line.entries)
+
+
+def test_searcher_recall_pareto_validation_and_empty():
+    empty = deglib.create_empty(16, 8, edges_per_vertex=4, metric=Metric.FP32_L2)
+    empty_searcher = create_searcher(empty)
+    empty_tables = empty_searcher.to_recall_tables(k=10)
+    assert len(empty_tables) == 2
+    assert all(len(t) == 0 and t.rerank_factor == pytest.approx(1.0) for t in empty_tables)
+    empty_line = empty_searcher.to_pareto_line(recall_tables=empty_tables)
+    assert len(empty_line) == 0
+    assert empty_line.k == 10
+
+    data = _make_clustered_searcher_data(80, 16, clusters=8, seed=41)
+    graph = deglib.build(data, edges_per_vertex=8, metric=Metric.FP32_L2, optimize=False, threads=1)
+    searcher = create_searcher(graph)
+
+    with pytest.raises(ValueError):
+        searcher.to_recall_table(k=10, mode="invalid")
+    with pytest.raises(ValueError):
+        searcher.to_recall_table(k=10, mode="ef", rerank_factor=0.5)
+    with pytest.raises(ValueError):
+        searcher.to_recall_tables(k=10, rerank_factors=[])
+    with pytest.raises(ValueError):
+        searcher.to_recall_tables(k=10, rerank_factors=[0.9])
+    with pytest.raises(ValueError):
+        searcher.to_pareto_line(k=10, rounds=0)
+    with pytest.raises(ValueError):
+        searcher.to_pareto_line()
+
+    t1 = searcher.to_recall_table(k=10, mode="ef", sample_count=20, threads=1)
+    with pytest.raises(ValueError):
+        searcher.to_pareto_line(recall_tables=t1, rerank_factors=[1.5])
+    with pytest.raises(ValueError):
+        searcher.to_pareto_line(recall_tables=t1, k=10)
+    with pytest.raises(TypeError):
+        searcher.to_pareto_line(recall_tables="invalid")

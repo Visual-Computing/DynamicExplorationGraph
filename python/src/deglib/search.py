@@ -46,7 +46,8 @@ class RecallTable:
     """
     Single-mode calibration table mapping target recall@k levels to ``ef`` or ``eps`` parameters.
 
-    Created by :meth:`DynamicExplorationGraph.to_recall_table` or :meth:`DynamicExplorationGraph.to_recall_tables`.
+    Created by :meth:`DynamicExplorationGraph.to_recall_table`, :meth:`DynamicExplorationGraph.to_recall_tables`,
+    :meth:`Searcher.to_recall_table`, or :meth:`Searcher.to_recall_tables`.
     """
 
     def __init__(self, recall_table_cpp: cpp_search.RecallTable):
@@ -71,6 +72,10 @@ class RecallTable:
     @property
     def is_eps(self) -> bool:
         return bool(self._recall_table_cpp.is_eps)
+
+    @property
+    def rerank_factor(self) -> float:
+        return float(self._recall_table_cpp.rerank_factor)
 
     @property
     def recall_bounds(self) -> tuple[float, float] | None:
@@ -105,7 +110,7 @@ class ParetoLine:
     """
     Unified recall-latency Pareto frontier combining one or more calibrated :class:`RecallTable` curves.
 
-    Created by :meth:`DynamicExplorationGraph.to_pareto_line`.
+    Created by :meth:`DynamicExplorationGraph.to_pareto_line` or :meth:`Searcher.to_pareto_line`.
     """
 
     def __init__(self, pareto_line_cpp: cpp_search.ParetoLine):
@@ -134,21 +139,25 @@ class ParetoLine:
         return [RecallTable(t) for t in self._pareto_line_cpp.recall_tables]
 
     @property
-    def entries(self) -> list[tuple[float, float, float, float, float]]:
-        """Non-dominated frontier rows as ``(target_recall, eps_or_ef, measured_recall, latency_us, qps)`` tuples."""
+    def entries(self) -> list[tuple[float, float, float, float, float, float]]:
+        """Non-dominated frontier rows as ``(target_recall, eps_or_ef, rerank_factor, measured_recall, latency_us, qps)`` tuples."""
         return [
-            (float(tgt), float(param), float(meas), float(lat), float(qps))
-            for tgt, param, meas, lat, qps in self._pareto_line_cpp.entries
+            (float(tgt), float(param), float(rf), float(meas), float(lat), float(qps))
+            for tgt, param, rf, meas, lat, qps in self._pareto_line_cpp.entries
         ]
 
     def eps_or_ef_values(self) -> list[float]:
         """Return deduplicated ``eps_or_ef`` parameters along the frontier in ascending recall order."""
         return [float(v) for v in self._pareto_line_cpp.eps_or_ef_values()]
 
-    def param_for(self, target_recall: float, clamp: bool = False) -> float | None:
-        """Look up or same-regime interpolate ``eps_or_ef`` for ``target_recall``."""
+    def params(self) -> list[tuple[float, float]]:
+        """Return deduplicated ``(eps_or_ef, rerank_factor)`` parameter pairs along the frontier in ascending recall order."""
+        return [(float(param), float(rf)) for param, rf in self._pareto_line_cpp.params()]
+
+    def param_for(self, target_recall: float, clamp: bool = False) -> tuple[float, float] | None:
+        """Return ``(eps_or_ef, rerank_factor)`` of the frontier entry whose ``measured_recall`` is nearest to ``target_recall``."""
         val = self._pareto_line_cpp.param_for(float(target_recall), bool(clamp))
-        return None if val is None else float(val)
+        return None if val is None else (float(val[0]), float(val[1]))
 
     def __len__(self) -> int:
         return len(self._pareto_line_cpp)
@@ -432,6 +441,156 @@ class Searcher:
             threads=int(threads),
             use_routing=bool(use_routing),
         )
+
+    def to_recall_table(
+        self,
+        k: int,
+        mode: Literal["ef", "eps"],
+        rerank_factor: float = 1.0,
+        sample_count: int = 300,
+        recall_range: tuple[float, float] | None = None,
+        recall_step: float | None = None,
+        target_recalls: Sequence[float] | np.ndarray | None = None,
+        threads: int = 0,
+    ) -> RecallTable:
+        """
+        Calibrate a single-mode ``RecallTable`` (``"ef"`` or ``"eps"``) for this ``Searcher`` pipeline.
+        """
+        from deglib.graph import _resolve_recall_args
+
+        if mode not in ("ef", "eps"):
+            raise ValueError(f"mode must be 'ef' or 'eps', got {mode!r}")
+
+        r_range, r_step, targets_list = _resolve_recall_args(recall_range, recall_step, target_recalls)
+        return RecallTable(
+            self._searcher_cpp.to_recall_table(
+                int(k),
+                mode,
+                float(rerank_factor),
+                int(sample_count),
+                r_range,
+                r_step,
+                targets_list,
+                int(threads),
+            )
+        )
+
+    def to_recall_tables(
+        self,
+        k: int,
+        sample_count: int = 300,
+        recall_range: tuple[float, float] | None = None,
+        recall_step: float | None = None,
+        target_recalls: Sequence[float] | np.ndarray | None = None,
+        rerank_factors: Sequence[float] | np.ndarray | None = None,
+        threads: int = 0,
+    ) -> list[RecallTable]:
+        """
+        Calibrate ``"ef"`` and ``"eps"`` ``RecallTable`` curves across ``rerank_factors`` in a shared single pass.
+        """
+        from deglib.graph import _resolve_recall_args
+
+        r_range, r_step, targets_list = _resolve_recall_args(recall_range, recall_step, target_recalls)
+        factors_list = _resolve_rerank_factors(rerank_factors)
+        cpp_tables = self._searcher_cpp.to_recall_tables(
+            int(k),
+            int(sample_count),
+            r_range,
+            r_step,
+            targets_list,
+            factors_list,
+            int(threads),
+        )
+        return [RecallTable(t) for t in cpp_tables]
+
+    def to_pareto_line(
+        self,
+        k: int | None = None,
+        recall_tables: RecallTable | Sequence[RecallTable] | None = None,
+        sample_count: int | None = None,
+        recall_range: tuple[float, float] | None = None,
+        recall_step: float | None = None,
+        target_recalls: Sequence[float] | np.ndarray | None = None,
+        rerank_factors: Sequence[float] | np.ndarray | None = None,
+        threads: int = 0,
+        rounds: int = 3,
+    ) -> ParetoLine:
+        """
+        Build an end-to-end ``ParetoLine`` unifying measured operating points across ``recall_tables`` in ``(measured_recall, latency_us)`` space.
+
+        If ``recall_tables`` is omitted, calibrates ``("ef", "eps") x rerank_factors`` via :meth:`to_recall_tables`.
+        """
+        if int(rounds) < 1:
+            raise ValueError(f"rounds must be >= 1, got {rounds}")
+
+        if recall_tables is not None:
+            if (
+                k is not None
+                or recall_range is not None
+                or recall_step is not None
+                or target_recalls is not None
+                or rerank_factors is not None
+            ):
+                raise ValueError(
+                    "Cannot specify 'recall_tables' together with 'k', 'recall_range', 'recall_step', 'target_recalls', or 'rerank_factors'."
+                )
+            tables = _coerce_recall_tables(recall_tables)
+            if sample_count is not None and int(sample_count) < 0:
+                raise ValueError(f"sample_count must be >= 0, got {sample_count}")
+            eff_samples = 0 if sample_count is None else int(sample_count)
+            cpp_line = self._searcher_cpp.to_pareto_line(
+                [t._recall_table_cpp for t in tables],
+                eff_samples,
+                int(rounds),
+            )
+            return ParetoLine(cpp_line)
+
+        if k is None:
+            raise ValueError("Must specify either 'k' or 'recall_tables'.")
+
+        eff_samples = 300 if sample_count is None else int(sample_count)
+        if eff_samples < 0:
+            raise ValueError(f"sample_count must be >= 0, got {sample_count}")
+        tables = self.to_recall_tables(
+            k=int(k),
+            sample_count=eff_samples,
+            recall_range=recall_range,
+            recall_step=recall_step,
+            target_recalls=target_recalls,
+            rerank_factors=rerank_factors,
+            threads=threads,
+        )
+        cpp_line = self._searcher_cpp.to_pareto_line(
+            [t._recall_table_cpp for t in tables],
+            0,
+            int(rounds),
+        )
+        return ParetoLine(cpp_line)
+
+
+def _resolve_rerank_factors(rerank_factors: Sequence[float] | np.ndarray | None) -> list[float] | None:
+    if rerank_factors is None:
+        return None
+    if isinstance(rerank_factors, (str, bytes)):
+        raise TypeError(f"rerank_factors must be a sequence of floats >= 1.0, got {type(rerank_factors).__name__}")
+    factors = [float(rf) for rf in rerank_factors]
+    if not factors:
+        raise ValueError("rerank_factors must not be empty")
+    return factors
+
+
+def _coerce_recall_tables(recall_tables: RecallTable | Sequence[RecallTable]) -> list[RecallTable]:
+    if isinstance(recall_tables, RecallTable):
+        return [recall_tables]
+    if isinstance(recall_tables, Sequence) and not isinstance(recall_tables, (str, bytes)):
+        tables = list(recall_tables)
+        for i, t in enumerate(tables):
+            if not isinstance(t, RecallTable):
+                raise TypeError(f"recall_tables[{i}] must be a RecallTable instance, got {type(t).__name__}")
+        return tables
+    raise TypeError(
+        f"recall_tables must be a RecallTable or sequence of RecallTable, got {type(recall_tables).__name__}"
+    )
 
 
 def create_searcher(

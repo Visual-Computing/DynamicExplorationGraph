@@ -26,9 +26,9 @@ namespace deglib::search {
 /**
  * Unified recall-latency Pareto frontier across one or more `RecallTable`s.
  *
- * Produced by `DynamicExplorationGraph::to_pareto_line()` / `ParetoLine::build()`.
- * For each target recall across the underlying `RecallTable`s, selects the fastest parameter/regime
- * using single-threaded median latency, removes Pareto-dominated points, and keeps the underlying
+ * Produced by `DynamicExplorationGraph::to_pareto_line()` / `Searcher::to_pareto_line()` / `ParetoLine::build()`.
+ * Gathers real measured operating points across the underlying `RecallTable`s in `(measured_recall, latency_us)`
+ * space using single-threaded median latency, removes Pareto-dominated points, and keeps the underlying
  * `RecallTable`s accessible via `recall_tables()`.
  */
 class ParetoLine {
@@ -43,10 +43,12 @@ class ParetoLine {
     struct Entry {
         float target_recall = 0.0f;
         float eps_or_ef = 0.0f;
+        float rerank_factor = 1.0f;
         float measured_recall = 0.0f;
         double latency_us = 0.0;
         double qps = 0.0;
         double avg_distance_count = 0.0;
+        double avg_rerank_distance_count = 0.0;
 
         [[nodiscard]] bool is_ef() const noexcept { return eps_or_ef >= 1.0f; }
         [[nodiscard]] bool is_eps() const noexcept { return eps_or_ef < 1.0f; }
@@ -141,64 +143,66 @@ class ParetoLine {
     }
 
     /**
-     * Looks up or interpolates an `eps_or_ef` parameter for `target_recall`.
-     *
-     * Interpolates only within the same parameter regime (`ef`-`ef` or `eps`-`eps`) using
-     * upper-rounding to step `1` / `0.0001`. Across a regime crossover (`ef` -> `eps`), returns
-     * the upper frontier parameter without mixing incompatible scales.
+     * Returns deduplicated `(eps_or_ef, rerank_factor)` parameter pairs along the Pareto frontier in ascending recall order.
      */
-    [[nodiscard]] std::optional<float> param_for(float target_recall, bool clamp = false) const {
+    [[nodiscard]] std::vector<std::pair<float, float>> params() const {
+        std::vector<std::pair<float, float>> vals;
+        vals.reserve(entries_.size());
+        for (const auto& entry : entries_) {
+            const float p = entry.eps_or_ef;
+            const float rf = entry.rerank_factor;
+            const bool seen = std::any_of(vals.begin(), vals.end(), [p, rf](const std::pair<float, float>& existing) {
+                return std::abs(existing.first - p) <= 1e-6f && std::abs(existing.second - rf) <= 1e-6f;
+            });
+            if (!seen) {
+                vals.emplace_back(p, rf);
+            }
+        }
+        return vals;
+    }
+
+    /**
+     * Returns `(eps_or_ef, rerank_factor)` of the frontier entry whose `measured_recall` is closest
+     * to `target_recall` (breaking ties within `1e-6` toward the higher-recall entry).
+     *
+     * Returns `std::nullopt` if empty, non-finite, or outside `recall_bounds()` unless `clamp == true`.
+     */
+    [[nodiscard]] std::optional<std::pair<float, float>> param_for(float target_recall, bool clamp = false) const {
         if (entries_.empty() || !std::isfinite(target_recall)) {
             return std::nullopt;
         }
 
-        const float lo_bound = (std::min)(entries_.front().target_recall, entries_.front().measured_recall);
-        const float hi_bound = (std::max)(entries_.back().target_recall, entries_.back().measured_recall);
+        const float r_min = entries_.front().measured_recall;
+        const float r_max = entries_.back().measured_recall;
 
-        if (target_recall < lo_bound - 1e-6f) {
-            return clamp ? std::optional<float>(entries_.front().eps_or_ef) : std::nullopt;
+        if (target_recall < r_min - 1e-6f) {
+            return clamp ? std::optional<std::pair<float, float>>({entries_.front().eps_or_ef, entries_.front().rerank_factor}) : std::nullopt;
         }
-        if (target_recall > hi_bound + 1e-6f) {
-            return clamp ? std::optional<float>(entries_.back().eps_or_ef) : std::nullopt;
-        }
-
-        for (const auto& entry : entries_) {
-            if (std::abs(entry.target_recall - target_recall) <= 1e-6f) {
-                return entry.eps_or_ef;
-            }
+        if (target_recall > r_max + 1e-6f) {
+            return clamp ? std::optional<std::pair<float, float>>({entries_.back().eps_or_ef, entries_.back().rerank_factor}) : std::nullopt;
         }
 
-        if (target_recall <= entries_.front().measured_recall + 1e-6f) {
-            return entries_.front().eps_or_ef;
+        if (entries_.size() == 1 || target_recall <= r_min) {
+            return std::pair<float, float>{entries_.front().eps_or_ef, entries_.front().rerank_factor};
         }
-        if (target_recall >= entries_.back().measured_recall - 1e-6f) {
-            return entries_.back().eps_or_ef;
+        if (target_recall >= r_max) {
+            return std::pair<float, float>{entries_.back().eps_or_ef, entries_.back().rerank_factor};
         }
 
-        for (size_t i = 1; i < entries_.size(); ++i) {
-            if (entries_[i].measured_recall >= target_recall - 1e-6f) {
-                const auto& a = entries_[i - 1];
-                const auto& b = entries_[i];
-                if (a.is_ef() && b.is_ef() && b.measured_recall > a.measured_recall + 1e-7f && b.eps_or_ef >= a.eps_or_ef) {
-                    const double alpha = std::clamp(
-                        static_cast<double>(target_recall - a.measured_recall) / static_cast<double>(b.measured_recall - a.measured_recall), 0.0, 1.0
-                    );
-                    const double raw = static_cast<double>(a.eps_or_ef) + alpha * static_cast<double>(b.eps_or_ef - a.eps_or_ef);
-                    const long long rounded = static_cast<long long>(std::ceil(raw - 1e-3));
-                    return std::clamp(static_cast<float>(rounded), a.eps_or_ef, b.eps_or_ef);
-                }
-                if (a.is_eps() && b.is_eps() && b.measured_recall > a.measured_recall + 1e-7f && b.eps_or_ef >= a.eps_or_ef) {
-                    const double alpha = std::clamp(
-                        static_cast<double>(target_recall - a.measured_recall) / static_cast<double>(b.measured_recall - a.measured_recall), 0.0, 1.0
-                    );
-                    const double raw = static_cast<double>(a.eps_or_ef) + alpha * static_cast<double>(b.eps_or_ef - a.eps_or_ef);
-                    const double rounded = std::ceil(raw * 10000.0 - 1e-3) / 10000.0;
-                    return std::clamp(static_cast<float>(rounded), a.eps_or_ef, b.eps_or_ef);
-                }
-                return b.eps_or_ef;
-            }
+        const auto it = std::lower_bound(entries_.begin(), entries_.end(), target_recall, [](const Entry& e, float val) { return e.measured_recall < val; });
+        if (it == entries_.begin()) {
+            return std::pair<float, float>{entries_.front().eps_or_ef, entries_.front().rerank_factor};
         }
-        return entries_.back().eps_or_ef;
+        if (it == entries_.end()) {
+            return std::pair<float, float>{entries_.back().eps_or_ef, entries_.back().rerank_factor};
+        }
+
+        const auto& a = *(it - 1);
+        const auto& b = *it;
+        const double dist_a = static_cast<double>(target_recall) - static_cast<double>(a.measured_recall);
+        const double dist_b = static_cast<double>(b.measured_recall) - static_cast<double>(target_recall);
+        const Entry& best = (dist_a < dist_b - 1e-6) ? a : b;
+        return std::pair<float, float>{best.eps_or_ef, best.rerank_factor};
     }
 
     /**
@@ -218,8 +222,16 @@ class ParetoLine {
             return oss.str();
         }
 
-        oss << "  target_recall | mode |  param | measured_recall | latency_us |       qps | avg_dists\n";
-        oss << "  --------------+------+--------+-----------------+------------+-----------+----------\n";
+        const bool has_rerank =
+            std::any_of(entries_.begin(), entries_.end(), [](const Entry& e) { return e.rerank_factor > 1.0f + 1e-6f || e.avg_rerank_distance_count > 0.0; });
+
+        if (has_rerank) {
+            oss << "  target_recall | mode |  param |    rf | measured_recall | latency_us |       qps | graph_dists | rerank_dists\n";
+            oss << "  --------------+------+--------+-------+-----------------+------------+-----------+-------------+-------------\n";
+        } else {
+            oss << "  target_recall | mode |  param | measured_recall | latency_us |       qps | avg_dists\n";
+            oss << "  --------------+------+--------+-----------------+------------+-----------+----------\n";
+        }
         for (const auto& e : entries_) {
             oss << "  " << std::setw(13) << std::setprecision(4) << e.target_recall << " | " << std::setw(4) << (e.is_ef() ? "ef" : "eps") << " | ";
             if (e.is_ef()) {
@@ -227,8 +239,17 @@ class ParetoLine {
             } else {
                 oss << std::setw(6) << std::setprecision(4) << e.eps_or_ef;
             }
+            if (has_rerank) {
+                oss << " | " << std::setw(5) << std::setprecision(2) << e.rerank_factor;
+            }
             oss << " | " << std::setw(15) << std::setprecision(4) << e.measured_recall << " | " << std::setw(10) << std::setprecision(1) << e.latency_us
-                << " | " << std::setw(9) << std::setprecision(1) << e.qps << " | " << std::setw(9) << std::setprecision(1) << e.avg_distance_count << "\n";
+                << " | " << std::setw(9) << std::setprecision(1) << e.qps;
+            if (has_rerank) {
+                oss << " | " << std::setw(11) << std::setprecision(1) << e.avg_distance_count << " | " << std::setw(12) << std::setprecision(1)
+                    << e.avg_rerank_distance_count << "\n";
+            } else {
+                oss << " | " << std::setw(9) << std::setprecision(1) << e.avg_distance_count << "\n";
+            }
         }
 
         std::string out = oss.str();
@@ -242,12 +263,33 @@ class ParetoLine {
     struct TimingSample {
         double latency_us = 0.0;
         double avg_distance_count = 0.0;
+        double avg_rerank_distance_count = 0.0;
     };
 
     struct CandidateSpec {
         bool use_ef = true;
         int32_t param = 0;  // raw ef for ef, 10000*eps for eps
+        float rerank_factor = 1.0f;
+        uint32_t num_candidates = 0;  // k for Graph / rf <= 1.0, ceil(k * rf) for Searcher with reranker
         float measured_recall = 0.0f;
+        float target_recall = 0.0f;
+    };
+
+    struct TimingKey {
+        bool use_ef = true;
+        int32_t param = 0;
+        uint32_t num_candidates = 0;
+
+        bool operator==(const TimingKey&) const noexcept = default;
+    };
+
+    struct TimingKeyHash {
+        size_t operator()(const TimingKey& key) const noexcept {
+            size_t h = std::hash<bool>{}(key.use_ef);
+            h ^= std::hash<int32_t>{}(key.param) + 0x9e3779b9u + (h << 6) + (h >> 2);
+            h ^= std::hash<uint32_t>{}(key.num_candidates) + 0x9e3779b9u + (h << 6) + (h >> 2);
+            return h;
+        }
     };
 
     static ParetoLine make(uint32_t k, size_t sample_count, std::vector<RecallTable> recall_tables, std::vector<Entry> entries) {
@@ -263,177 +305,234 @@ class ParetoLine {
         return use_ef ? static_cast<int32_t>(std::llround(eps_or_ef)) : static_cast<int32_t>(std::lround(static_cast<double>(eps_or_ef) * 10000.0));
     }
 
+    static uint32_t compute_num_candidates(uint32_t effective_k, float rerank_factor, bool has_reranker) noexcept {
+        if (!has_reranker) {
+            return effective_k;
+        }
+        return static_cast<uint32_t>(std::ceil(static_cast<double>(effective_k) * static_cast<double>((std::max)(1.0f, rerank_factor))));
+    }
+
     template <typename MeasureSingleFn, typename MeasureGroupFn>
-    static std::vector<Entry> select_entries(std::span<const RecallTable> recall_tables, MeasureSingleFn&& measure_single, MeasureGroupFn&& measure_group) {
-        std::vector<float> all_targets;
+    static std::vector<Entry> select_entries(
+        uint32_t effective_k,
+        bool has_reranker,
+        std::span<const RecallTable> recall_tables,
+        size_t rounds,
+        MeasureSingleFn&& measure_single,
+        MeasureGroupFn&& measure_group
+    ) {
         size_t total_entries = 0;
         for (const auto& t : recall_tables) {
             total_entries += t.entries().size();
         }
-        all_targets.reserve(total_entries);
-        for (const auto& t : recall_tables) {
-            for (const auto& e : t.entries()) {
-                all_targets.push_back(e.target_recall);
-            }
-        }
-        if (all_targets.empty()) {
+        if (total_entries == 0) {
             return {};
         }
 
-        std::sort(all_targets.begin(), all_targets.end());
-        std::vector<float> unique_targets;
-        unique_targets.reserve(all_targets.size());
-        for (const float t : all_targets) {
-            if (unique_targets.empty() || (t - unique_targets.back()) > 1e-6f) {
-                unique_targets.push_back(t);
-            }
-        }
-
-        auto find_table_candidate = [](const RecallTable& table, float target) -> std::optional<CandidateSpec> {
+        // Step A: Gather real measured operating points only (no synthetic interpolation) and deduplicate identical execution configs.
+        std::unordered_map<TimingKey, CandidateSpec, TimingKeyHash> unique_by_key;
+        unique_by_key.reserve(total_entries);
+        for (const auto& table : recall_tables) {
             const bool use_ef = (table.mode() == RecallTable::Mode::Ef);
+            const float rf = table.rerank_factor();
+            const uint32_t num_cands = compute_num_candidates(effective_k, rf, has_reranker);
             for (const auto& e : table.entries()) {
-                if (std::abs(e.target_recall - target) <= 1e-6f) {
-                    return CandidateSpec{use_ef, encode_param(use_ef, e.eps_or_ef), e.measured_recall};
-                }
-            }
-            const auto param_opt = table.param_for(target, /*clamp=*/false);
-            if (!param_opt.has_value()) {
-                return std::nullopt;
-            }
-            return CandidateSpec{use_ef, encode_param(use_ef, *param_opt), target};
-        };
-
-        std::unordered_map<int32_t, TimingSample> ef_cache;
-        std::unordered_map<int32_t, TimingSample> eps_cache;
-
-        auto make_entry = [](float target, const CandidateSpec& cand, const TimingSample& timing) {
-            const float eps_or_ef = cand.use_ef ? static_cast<float>(cand.param) : (static_cast<float>(cand.param) / 10000.0f);
-            const double safe_latency = (std::max)(timing.latency_us, 1e-6);
-            return Entry{target, eps_or_ef, cand.measured_recall, safe_latency, 1e6 / safe_latency, timing.avg_distance_count};
-        };
-
-        std::vector<Entry> chosen;
-        chosen.reserve(unique_targets.size());
-
-        for (const float target : unique_targets) {
-            std::vector<CandidateSpec> raw_candidates;
-            raw_candidates.reserve(recall_tables.size());
-            for (const auto& table : recall_tables) {
-                if (const auto cand = find_table_candidate(table, target); cand.has_value()) {
-                    raw_candidates.push_back(*cand);
-                }
-            }
-            if (raw_candidates.empty()) {
-                continue;
-            }
-
-            // Deduplicate identical (mode, param), preserving the highest measured recall.
-            std::vector<CandidateSpec> dedup;
-            dedup.reserve(raw_candidates.size());
-            for (const auto& c : raw_candidates) {
-                auto it = std::find_if(dedup.begin(), dedup.end(), [&](const CandidateSpec& existing) {
-                    return existing.use_ef == c.use_ef && existing.param == c.param;
-                });
-                if (it != dedup.end()) {
-                    it->measured_recall = (std::max)(it->measured_recall, c.measured_recall);
-                } else {
-                    dedup.push_back(c);
-                }
-            }
-
-            // Same-mode dominance pre-filter: smaller param does strictly less traversal work.
-            std::vector<CandidateSpec> candidates;
-            candidates.reserve(dedup.size());
-            for (const auto& c : dedup) {
-                auto it = std::find_if(candidates.begin(), candidates.end(), [&](const CandidateSpec& existing) { return existing.use_ef == c.use_ef; });
-                if (it == candidates.end()) {
-                    candidates.push_back(c);
-                } else if (c.param < it->param) {
-                    *it = c;
-                }
-            }
-
-            std::vector<CandidateSpec> uncached;
-            uncached.reserve(candidates.size());
-            for (const auto& c : candidates) {
-                const auto& cache = c.use_ef ? ef_cache : eps_cache;
-                if (cache.find(c.param) == cache.end()) {
-                    uncached.push_back(c);
-                }
-            }
-
-            if (uncached.size() >= 2) {
-                const std::vector<TimingSample> samples = measure_group(std::span<const CandidateSpec>(uncached));
-                for (size_t i = 0; i < uncached.size(); ++i) {
-                    auto& cache = uncached[i].use_ef ? ef_cache : eps_cache;
-                    cache.emplace(uncached[i].param, samples[i]);
-                }
-            } else if (uncached.size() == 1) {
-                const CandidateSpec& c = uncached.front();
-                auto& cache = c.use_ef ? ef_cache : eps_cache;
-                cache.emplace(c.param, measure_single(c.use_ef, c.param));
-            }
-
-            auto get_cached = [&](const CandidateSpec& c) -> TimingSample {
-                const auto& cache = c.use_ef ? ef_cache : eps_cache;
-                return cache.at(c.param);
-            };
-
-            size_t best_idx = 0;
-            TimingSample best_timing = get_cached(candidates[0]);
-            for (size_t i = 1; i < candidates.size(); ++i) {
-                const TimingSample cur_timing = get_cached(candidates[i]);
-                const double max_lat = (std::max)(cur_timing.latency_us, best_timing.latency_us);
-                bool cur_better = false;
-                if (std::abs(cur_timing.latency_us - best_timing.latency_us) <= 0.01 * max_lat) {
-                    if (std::abs(cur_timing.avg_distance_count - best_timing.avg_distance_count) > 1e-9) {
-                        cur_better = (cur_timing.avg_distance_count < best_timing.avg_distance_count);
-                    } else if (candidates[i].use_ef != candidates[best_idx].use_ef) {
-                        cur_better = candidates[i].use_ef;  // prefer ef on exact tie
-                    } else {
-                        cur_better = (candidates[i].param < candidates[best_idx].param);
+                const int32_t param = encode_param(use_ef, e.eps_or_ef);
+                const TimingKey key{use_ef, param, num_cands};
+                const CandidateSpec cand{use_ef, param, rf, num_cands, e.measured_recall, e.target_recall};
+                auto [it, inserted] = unique_by_key.emplace(key, cand);
+                if (!inserted) {
+                    CandidateSpec& ex = it->second;
+                    if (cand.measured_recall > ex.measured_recall + 1e-6f) {
+                        ex.measured_recall = cand.measured_recall;
+                        ex.target_recall = cand.target_recall;
+                    } else if (std::abs(cand.measured_recall - ex.measured_recall) <= 1e-6f) {
+                        ex.measured_recall = (std::max)(ex.measured_recall, cand.measured_recall);
+                        ex.target_recall = (std::max)(ex.target_recall, cand.target_recall);
                     }
-                } else {
-                    cur_better = (cur_timing.latency_us < best_timing.latency_us);
-                }
-                if (cur_better) {
-                    best_idx = i;
-                    best_timing = cur_timing;
+                    ex.rerank_factor = (std::min)(ex.rerank_factor, cand.rerank_factor);
                 }
             }
-            chosen.push_back(make_entry(target, candidates[best_idx], best_timing));
         }
 
-        if (chosen.empty()) {
-            return {};
+        // Step B: Deterministic sort & exact within-axis dominance pre-filter per (use_ef, num_candidates).
+        std::vector<CandidateSpec> raw_candidates;
+        raw_candidates.reserve(unique_by_key.size());
+        for (const auto& kv : unique_by_key) {
+            raw_candidates.push_back(kv.second);
         }
-
-        // Sort by (measured_recall ASC, latency_us DESC, target_recall ASC) so that scanning backward keeps
-        // strictly increasing (measured_recall, latency_us) and drops slower or lower-target ties at equal recall.
-        std::sort(chosen.begin(), chosen.end(), [](const Entry& a, const Entry& b) {
-            if (std::abs(a.measured_recall - b.measured_recall) > 1e-6f) {
-                return a.measured_recall < b.measured_recall;
+        std::sort(raw_candidates.begin(), raw_candidates.end(), [](const CandidateSpec& a, const CandidateSpec& b) {
+            if (a.use_ef != b.use_ef) {
+                return a.use_ef;
             }
-            if (std::abs(a.latency_us - b.latency_us) > 1e-9) {
-                return a.latency_us > b.latency_us;
+            if (a.num_candidates != b.num_candidates) {
+                return a.num_candidates < b.num_candidates;
             }
-            return a.target_recall < b.target_recall;
+            if (a.param != b.param) {
+                return a.param < b.param;
+            }
+            return a.measured_recall > b.measured_recall;
         });
 
+        std::vector<CandidateSpec> candidates;
+        candidates.reserve(raw_candidates.size());
+        size_t grp_start = 0;
+        while (grp_start < raw_candidates.size()) {
+            const bool grp_ef = raw_candidates[grp_start].use_ef;
+            const uint32_t grp_cands = raw_candidates[grp_start].num_candidates;
+            float best_recall = -1.0f;
+            size_t idx = grp_start;
+            while (idx < raw_candidates.size() && raw_candidates[idx].use_ef == grp_ef && raw_candidates[idx].num_candidates == grp_cands) {
+                if (raw_candidates[idx].measured_recall > best_recall + 1e-6f) {
+                    candidates.push_back(raw_candidates[idx]);
+                    best_recall = raw_candidates[idx].measured_recall;
+                }
+                ++idx;
+            }
+            grp_start = idx;
+        }
+        if (candidates.empty()) {
+            return {};
+        }
+
+        std::sort(candidates.begin(), candidates.end(), [](const CandidateSpec& a, const CandidateSpec& b) {
+            if (a.measured_recall != b.measured_recall) {
+                return a.measured_recall < b.measured_recall;
+            }
+            if (a.use_ef != b.use_ef) {
+                return a.use_ef;
+            }
+            if (a.num_candidates != b.num_candidates) {
+                return a.num_candidates < b.num_candidates;
+            }
+            return a.param < b.param;
+        });
+
+        // Step C: Measure latencies using 2-stage global Pareto screening when worthwhile.
+        std::vector<CandidateSpec> final_candidates;
+        std::vector<TimingSample> final_timings;
+        if (candidates.size() == 1) {
+            final_candidates = std::move(candidates);
+            final_timings.push_back(measure_single(final_candidates.front(), rounds));
+        } else if (rounds >= 3 && candidates.size() > 2) {
+            const std::vector<TimingSample> screen_samples = measure_group(std::span<const CandidateSpec>(candidates), size_t{1});
+            const size_t m = candidates.size();
+            std::vector<double> min_lat_at_or_above(m, std::numeric_limits<double>::infinity());
+            double suffix_min = std::numeric_limits<double>::infinity();
+            size_t grp_end = m;
+            while (grp_end > 0) {
+                const float grp_max_r = candidates[grp_end - 1].measured_recall;
+                size_t grp_begin = grp_end - 1;
+                while (grp_begin > 0 && (grp_max_r - candidates[grp_begin - 1].measured_recall) <= 1e-6f) {
+                    --grp_begin;
+                }
+                for (size_t j = grp_begin; j < grp_end; ++j) {
+                    suffix_min = (std::min)(suffix_min, screen_samples[j].latency_us);
+                }
+                for (size_t j = grp_begin; j < grp_end; ++j) {
+                    min_lat_at_or_above[j] = suffix_min;
+                }
+                grp_end = grp_begin;
+            }
+
+            final_candidates.reserve(m);
+            for (size_t i = 0; i < m; ++i) {
+                if (screen_samples[i].latency_us <= min_lat_at_or_above[i] * 1.20) {
+                    final_candidates.push_back(candidates[i]);
+                }
+            }
+
+            if (final_candidates.size() >= 2) {
+                final_timings = measure_group(std::span<const CandidateSpec>(final_candidates), rounds);
+            } else if (final_candidates.size() == 1) {
+                final_timings.push_back(measure_single(final_candidates.front(), rounds));
+            }
+        } else {
+            final_candidates = std::move(candidates);
+            final_timings = measure_group(std::span<const CandidateSpec>(final_candidates), rounds);
+        }
+
+        // Step D: Reduce equal measured_recall runs with 1% latency tolerance + distance tie-breaker, then strictly Pareto prune in 2D.
+        std::vector<Entry> scored;
+        scored.reserve(final_candidates.size());
+        for (size_t i = 0; i < final_candidates.size(); ++i) {
+            const CandidateSpec& cand = final_candidates[i];
+            const TimingSample& timing = final_timings[i];
+            const float eps_or_ef = cand.use_ef ? static_cast<float>(cand.param) : (static_cast<float>(cand.param) / 10000.0f);
+            const double safe_latency = (std::max)(timing.latency_us, 1e-6);
+            scored.push_back(
+                Entry{
+                    cand.target_recall, eps_or_ef, cand.rerank_factor, cand.measured_recall, safe_latency, 1e6 / safe_latency, timing.avg_distance_count,
+                    timing.avg_rerank_distance_count
+                }
+            );
+        }
+
+        std::vector<Entry> reduced;
+        reduced.reserve(scored.size());
+        size_t i = 0;
+        while (i < scored.size()) {
+            size_t j = i + 1;
+            while (j < scored.size() && (scored[j].measured_recall - scored[i].measured_recall) <= 1e-6f) {
+                ++j;
+            }
+            if (j - i == 1) {
+                reduced.push_back(scored[i]);
+            } else {
+                double min_lat = scored[i].latency_us;
+                for (size_t k = i + 1; k < j; ++k) {
+                    min_lat = (std::min)(min_lat, scored[k].latency_us);
+                }
+                const double tie_cutoff = min_lat * 1.01;
+                std::optional<size_t> best_idx;
+                for (size_t k = i; k < j; ++k) {
+                    if (scored[k].latency_us > tie_cutoff) {
+                        continue;
+                    }
+                    if (!best_idx.has_value()) {
+                        best_idx = k;
+                        continue;
+                    }
+                    const Entry& cur = scored[k];
+                    const Entry& best = scored[*best_idx];
+                    const double cur_dists = cur.avg_distance_count + cur.avg_rerank_distance_count;
+                    const double best_dists = best.avg_distance_count + best.avg_rerank_distance_count;
+                    bool cur_better = false;
+                    if (std::abs(cur_dists - best_dists) > 1e-9) {
+                        cur_better = (cur_dists < best_dists);
+                    } else if (cur.is_ef() != best.is_ef()) {
+                        cur_better = cur.is_ef();
+                    } else if (std::abs(cur.rerank_factor - best.rerank_factor) > 1e-6f) {
+                        cur_better = (cur.rerank_factor < best.rerank_factor);
+                    } else if (std::abs(cur.eps_or_ef - best.eps_or_ef) > 1e-6f) {
+                        cur_better = (cur.eps_or_ef < best.eps_or_ef);
+                    } else {
+                        cur_better = (cur.target_recall > best.target_recall);
+                    }
+                    if (cur_better) {
+                        best_idx = k;
+                    }
+                }
+                reduced.push_back(scored[*best_idx]);
+            }
+            i = j;
+        }
+
         std::vector<Entry> frontier;
-        frontier.reserve(chosen.size());
+        frontier.reserve(reduced.size());
         double best_latency = std::numeric_limits<double>::infinity();
-        for (size_t idx = chosen.size(); idx-- > 0;) {
-            if (chosen[idx].latency_us < best_latency - 1e-9) {
-                frontier.push_back(chosen[idx]);
-                best_latency = chosen[idx].latency_us;
+        for (size_t idx = reduced.size(); idx-- > 0;) {
+            if (reduced[idx].latency_us < best_latency - 1e-9) {
+                frontier.push_back(reduced[idx]);
+                best_latency = reduced[idx].latency_us;
             }
         }
         std::reverse(frontier.begin(), frontier.end());
         return frontier;
     }
 
-    static ParetoLine build_impl(const deglib::graph::InternalGraph& graph, std::span<const RecallTable> recall_tables, size_t sample_count, size_t rounds) {
+    static std::pair<ParetoLine, size_t>
+    validate_and_init(size_t collection_size, std::span<const RecallTable> recall_tables, size_t sample_count, size_t rounds) {
         if (rounds == 0) {
             throw std::invalid_argument("to_pareto_line: rounds must be >= 1");
         }
@@ -452,17 +551,10 @@ class ParetoLine {
         line.k_ = k;
         line.recall_tables_.assign(recall_tables.begin(), recall_tables.end());
 
-        const uint32_t n = graph.size();
-        const RecallTable* first_non_empty = nullptr;
-        for (const auto& t : recall_tables) {
-            if (!t.empty()) {
-                first_non_empty = &t;
-                break;
-            }
-        }
-        if (n == 0 || k == 0 || first_non_empty == nullptr) {
+        const bool has_non_empty = std::any_of(recall_tables.begin(), recall_tables.end(), [](const RecallTable& t) { return !t.empty(); });
+        if (collection_size == 0 || k == 0 || !has_non_empty) {
             line.sample_count_ = 0;
-            return line;
+            return {std::move(line), 0};
         }
 
         size_t table_samples = 0;
@@ -473,24 +565,106 @@ class ParetoLine {
             }
         }
         const size_t base_samples = (sample_count == 0) ? (table_samples > 0 ? table_samples : RecallTable::kDefaultSampleCount) : sample_count;
-        const size_t q_count = (std::min)(base_samples, static_cast<size_t>(n));
-        const uint32_t effective_k = (std::min)(k, n);
+        const size_t q_count = (std::min)(base_samples, collection_size);
         line.sample_count_ = q_count;
+        return {std::move(line), q_count};
+    }
 
+    template <typename RunPassFn>
+    static ParetoLine run_pareto_selection(ParetoLine line, size_t collection_size, size_t rounds, bool has_reranker, RunPassFn&& run_single_pass) {
+        const size_t q_count = line.sample_count_;
+        const uint32_t effective_k = static_cast<uint32_t>((std::min)(static_cast<size_t>(line.k_), collection_size));
+        const RecallTable* first_non_empty = nullptr;
+        for (const auto& t : line.recall_tables_) {
+            if (!t.empty()) {
+                first_non_empty = &t;
+                break;
+            }
+        }
+
+        // Short warmup using the first non-empty table's first entry to stabilize caches and frequency.
+        const size_t warmup_count = (std::min)(q_count, size_t{64});
+        const bool warmup_is_ef = (first_non_empty->mode() == RecallTable::Mode::Ef);
+        const float warmup_rf = first_non_empty->rerank_factor();
+        const CandidateSpec warmup_cand{
+            warmup_is_ef,
+            encode_param(warmup_is_ef, first_non_empty->entries().front().eps_or_ef),
+            warmup_rf,
+            compute_num_candidates(effective_k, warmup_rf, has_reranker),
+            first_non_empty->entries().front().measured_recall,
+            first_non_empty->entries().front().target_recall
+        };
+        (void)run_single_pass(warmup_cand, warmup_count);
+
+        auto measure_single = [&](const CandidateSpec& cand, size_t single_rounds) -> TimingSample {
+            std::vector<double> lats;
+            lats.reserve(single_rounds);
+            double dist_sum = 0.0;
+            double rerank_sum = 0.0;
+            for (size_t r = 0; r < single_rounds; ++r) {
+                const TimingSample s = run_single_pass(cand, q_count);
+                lats.push_back(s.latency_us);
+                dist_sum += s.avg_distance_count;
+                rerank_sum += s.avg_rerank_distance_count;
+            }
+            std::sort(lats.begin(), lats.end());
+            const double denom = static_cast<double>(single_rounds);
+            return {lats[single_rounds / 2], dist_sum / denom, rerank_sum / denom};
+        };
+
+        auto measure_group = [&](std::span<const CandidateSpec> group, size_t group_rounds) -> std::vector<TimingSample> {
+            const size_t m = group.size();
+            std::vector<std::vector<double>> lats(m);
+            std::vector<double> dist_sums(m, 0.0);
+            std::vector<double> rerank_sums(m, 0.0);
+            for (auto& v : lats) {
+                v.reserve(group_rounds);
+            }
+            for (size_t r = 0; r < group_rounds; ++r) {
+                const bool reverse = ((r & size_t{1}) != 0);
+                for (size_t step = 0; step < m; ++step) {
+                    const size_t idx = reverse ? (m - 1 - step) : step;
+                    const TimingSample s = run_single_pass(group[idx], q_count);
+                    lats[idx].push_back(s.latency_us);
+                    dist_sums[idx] += s.avg_distance_count;
+                    rerank_sums[idx] += s.avg_rerank_distance_count;
+                }
+            }
+            std::vector<TimingSample> out(m);
+            const double r_d = static_cast<double>(group_rounds);
+            for (size_t idx = 0; idx < m; ++idx) {
+                std::sort(lats[idx].begin(), lats[idx].end());
+                out[idx] = TimingSample{lats[idx][group_rounds / 2], dist_sums[idx] / r_d, rerank_sums[idx] / r_d};
+            }
+            return out;
+        };
+
+        line.entries_ = select_entries(effective_k, has_reranker, line.recall_tables_, rounds, measure_single, measure_group);
+        return line;
+    }
+
+    static ParetoLine build_impl(const deglib::graph::InternalGraph& graph, std::span<const RecallTable> recall_tables, size_t sample_count, size_t rounds) {
+        const uint32_t n = graph.size();
+        auto [line, q_count] = validate_and_init(n, recall_tables, sample_count, rounds);
+        if (q_count == 0) {
+            return line;
+        }
+
+        const uint32_t effective_k = (std::min)(line.k_, n);
         const std::vector<uint32_t> sample_indices = RecallTable::sample_distinct_query_indices(graph, q_count, n);
         const size_t feature_bytes = graph.getFeatureSpace().get_data_size();
         deglib::graph::SearchWorkspace ws;
 
-        auto run_single_pass = [&](bool use_ef, int32_t param, size_t count) -> TimingSample {
+        auto run_single_pass = [&](const CandidateSpec& cand, size_t count) -> TimingSample {
             uint64_t total_dists = 0;
             size_t anti_dce = 0;
             const auto t_start = std::chrono::steady_clock::now();
             for (size_t q = 0; q < count; ++q) {
                 const std::span<const std::byte> q_span(graph.getFeatureVector(sample_indices[q]), feature_bytes);
-                if (use_ef) {
-                    graph.search_ef(ws, q_span, effective_k, static_cast<uint32_t>(param));
+                if (cand.use_ef) {
+                    graph.search_ef(ws, q_span, effective_k, static_cast<uint32_t>(cand.param));
                 } else {
-                    graph.search(ws, q_span, effective_k, static_cast<float>(param) / 10000.0f);
+                    graph.search(ws, q_span, effective_k, static_cast<float>(cand.param) / 10000.0f);
                 }
                 total_dists += ws.graph_distance_count;
                 anti_dce += ws.size();
@@ -498,55 +672,10 @@ class ParetoLine {
             const double total_us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t_start).count();
             (void)anti_dce;
             const double denom = static_cast<double>((std::max)(count, size_t{1}));
-            return {(std::max)(total_us / denom, 1e-6), static_cast<double>(total_dists) / denom};
+            return {(std::max)(total_us / denom, 1e-6), static_cast<double>(total_dists) / denom, 0.0};
         };
 
-        // Short warmup using the first non-empty table's first entry to stabilize caches and frequency.
-        const size_t warmup_count = (std::min)(q_count, size_t{64});
-        const bool warmup_is_ef = (first_non_empty->mode() == RecallTable::Mode::Ef);
-        const int32_t warmup_param = encode_param(warmup_is_ef, first_non_empty->entries().front().eps_or_ef);
-        (void)run_single_pass(warmup_is_ef, warmup_param, warmup_count);
-
-        auto measure_single = [&](bool use_ef, int32_t param) -> TimingSample {
-            std::vector<double> lats;
-            lats.reserve(rounds);
-            double dist_sum = 0.0;
-            for (size_t r = 0; r < rounds; ++r) {
-                const TimingSample s = run_single_pass(use_ef, param, q_count);
-                lats.push_back(s.latency_us);
-                dist_sum += s.avg_distance_count;
-            }
-            std::sort(lats.begin(), lats.end());
-            return {lats[rounds / 2], dist_sum / static_cast<double>(rounds)};
-        };
-
-        auto measure_group = [&](std::span<const CandidateSpec> group) -> std::vector<TimingSample> {
-            const size_t m = group.size();
-            std::vector<std::vector<double>> lats(m);
-            std::vector<double> dist_sums(m, 0.0);
-            for (auto& v : lats) {
-                v.reserve(rounds);
-            }
-            for (size_t r = 0; r < rounds; ++r) {
-                const bool reverse = ((r & size_t{1}) != 0);
-                for (size_t step = 0; step < m; ++step) {
-                    const size_t idx = reverse ? (m - 1 - step) : step;
-                    const TimingSample s = run_single_pass(group[idx].use_ef, group[idx].param, q_count);
-                    lats[idx].push_back(s.latency_us);
-                    dist_sums[idx] += s.avg_distance_count;
-                }
-            }
-            std::vector<TimingSample> out(m);
-            const double r_d = static_cast<double>(rounds);
-            for (size_t idx = 0; idx < m; ++idx) {
-                std::sort(lats[idx].begin(), lats[idx].end());
-                out[idx] = TimingSample{lats[idx][rounds / 2], dist_sums[idx] / r_d};
-            }
-            return out;
-        };
-
-        line.entries_ = select_entries(recall_tables, measure_single, measure_group);
-        return line;
+        return run_pareto_selection(std::move(line), n, rounds, /*has_reranker=*/false, run_single_pass);
     }
 
     uint32_t k_ = 0;
@@ -554,6 +683,7 @@ class ParetoLine {
     std::vector<RecallTable> recall_tables_;
     std::vector<Entry> entries_;
 
+    friend class Searcher;
     friend struct ParetoLineTestAccess;
 };
 

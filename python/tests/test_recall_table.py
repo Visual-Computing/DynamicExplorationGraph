@@ -22,6 +22,7 @@ def _verify_table_invariants(table: RecallTable) -> None:
     assert isinstance(table, RecallTable)
     assert table.is_ef != table.is_eps
     assert len(table) == len(table.entries)
+    assert table.rerank_factor == pytest.approx(1.0)
 
     if len(table) == 0:
         return
@@ -39,7 +40,7 @@ def _verify_table_invariants(table: RecallTable) -> None:
             assert 10.0 <= param <= 500.0
             assert abs(param - round(param)) <= 1e-6
         else:
-            assert 0.005 - 1e-6 <= param <= 0.20 + 1e-6
+            assert 0.001 - 1e-6 <= param <= 0.20 + 1e-6
         assert 0.0 <= measured <= 1.0
         assert measured >= target - 1e-5
         if i > 0:

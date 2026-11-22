@@ -55,7 +55,7 @@ class RecallTable {
     static constexpr uint32_t kMinEf = 10;
     static constexpr uint32_t kMaxEf = 500;
     static constexpr uint32_t kEfResolution = 1;
-    static constexpr float kMinEps = 0.005f;
+    static constexpr float kMinEps = 0.001f;
     static constexpr float kMaxEps = 0.20f;
     static constexpr float kEpsResolution = 0.0001f;
 
@@ -137,6 +137,7 @@ class RecallTable {
     [[nodiscard]] uint32_t k() const noexcept { return k_; }
     [[nodiscard]] size_t sample_count() const noexcept { return sample_count_; }
     [[nodiscard]] Mode mode() const noexcept { return mode_; }
+    [[nodiscard]] float rerank_factor() const noexcept { return rerank_factor_; }
     [[nodiscard]] bool empty() const noexcept { return entries_.empty(); }
     [[nodiscard]] size_t size() const noexcept { return entries_.size(); }
 
@@ -235,7 +236,11 @@ class RecallTable {
     [[nodiscard]] std::string to_string() const {
         std::ostringstream oss;
         oss << std::fixed;
-        oss << "RecallTable(mode=" << (mode_ == Mode::Ef ? "ef" : "eps") << ", k=" << k_ << ", sample_count=" << sample_count_ << ")\n";
+        oss << "RecallTable(mode=" << (mode_ == Mode::Ef ? "ef" : "eps") << ", k=" << k_ << ", sample_count=" << sample_count_;
+        if (rerank_factor_ > 1.0f + 1e-6f) {
+            oss << ", rerank_factor=" << std::setprecision(2) << rerank_factor_;
+        }
+        oss << ")\n";
 
         if (!recall_bounds_.has_value() && entries_.empty()) {
             oss << "  <empty>";
@@ -288,7 +293,7 @@ class RecallTable {
     };
 
     static constexpr int32_t kEfLadder[] = {10, 20, 40, 80, 160, 320, 500};
-    static constexpr int32_t kEpsLadder[] = {50, 100, 200, 400, 800, 1500, 2000};
+    static constexpr int32_t kEpsLadder[] = {10, 50, 100, 200, 400, 800, 1500, 2000};
 
     static void validate_common_args(uint32_t k, size_t sample_count) {
         if (k == 0) {
@@ -352,11 +357,12 @@ class RecallTable {
 
     /**
      * Deterministically samples `q_count` unique internal vertex indices in `[0, n)`,
-     * preferring vertices that are not entry points so searches do not start on the query itself.
+     * preferring vertices outside `excluded_entries` so searches do not start on the query itself.
      */
-    static std::vector<uint32_t> sample_distinct_query_indices(const deglib::graph::InternalGraph& graph, size_t q_count, uint32_t n) {
+    static std::vector<uint32_t> sample_distinct_query_indices(uint32_t n, size_t q_count, std::span<const uint32_t> excluded_entries) {
         std::unordered_set<uint32_t> entry_set;
-        for (const uint32_t ep : graph.getEntryVertexIndices()) {
+        entry_set.reserve(excluded_entries.size() * 2 + 1);
+        for (const uint32_t ep : excluded_entries) {
             if (ep < n) {
                 entry_set.insert(ep);
             }
@@ -412,20 +418,29 @@ class RecallTable {
         return selected;
     }
 
+    static std::vector<uint32_t> sample_distinct_query_indices(const deglib::graph::InternalGraph& graph, size_t q_count, uint32_t n) {
+        return sample_distinct_query_indices(n, q_count, graph.getEntryVertexIndices());
+    }
+
     /**
      * Computes exact k-th nearest neighbor distance thresholds for all sampled queries
-     * via a single cache-blocked parallel pass over the graph's stored feature vectors.
+     * via a single cache-blocked parallel pass over base feature vectors.
      */
+    template <typename GetBaseVecFn>
     static std::vector<float> compute_exact_gt_thresholds(
-        const deglib::graph::InternalGraph& graph,
+        uint32_t n,
+        const deglib::distances::FloatSpace& space,
+        GetBaseVecFn&& get_base_vec,
         std::span<const void* const> query_ptrs,
         uint32_t effective_k,
         size_t actual_threads
     ) {
-        const uint32_t n = graph.size();
         const size_t q_count = query_ptrs.size();
+        if (n == 0 || q_count == 0 || effective_k == 0) {
+            return {};
+        }
+
         const size_t gt_threads = (std::min)(actual_threads, static_cast<size_t>(n));
-        const auto& space = graph.getFeatureSpace();
         const auto batch_dist_func = space.get_batch_dist_func();
         const void* dist_param = space.get_dist_func_param();
 
@@ -443,7 +458,7 @@ class RecallTable {
                 float* local_radii = thread_radii.data() + thread_id * q_count;
 
                 for (size_t v = begin; v < end; ++v) {
-                    const void* v_feat = graph.getFeatureVector(static_cast<uint32_t>(v));
+                    const void* v_feat = get_base_vec(static_cast<uint32_t>(v));
                     batch_dist_func(v_feat, query_ptrs.data(), q_count, dist_param, dists.data(), 0, 0);
 
                     for (size_t q = 0; q < q_count; ++q) {
@@ -495,15 +510,38 @@ class RecallTable {
         return thresholds;
     }
 
+    static std::vector<float> compute_exact_gt_thresholds(
+        const deglib::graph::InternalGraph& graph,
+        std::span<const void* const> query_ptrs,
+        uint32_t effective_k,
+        size_t actual_threads
+    ) {
+        return compute_exact_gt_thresholds(
+            graph.size(), graph.getFeatureSpace(), [&graph](uint32_t v) -> const void* { return graph.getFeatureVector(v); }, query_ptrs, effective_k,
+            actual_threads
+        );
+    }
+
     /**
      * Estimates the wall-clock time (in microseconds) of evaluating all `q_count` queries
      * via parallel brute-force scan across `eval_threads`.
      */
-    static double estimate_brute_force_batch_us(const deglib::graph::InternalGraph& graph, std::span<const void* const> query_ptrs, size_t eval_threads) {
-        const size_t n = graph.size();
+    template <typename GetBaseVecFn>
+    static double estimate_brute_force_batch_us(
+        size_t n,
+        const deglib::distances::FloatSpace& space,
+        GetBaseVecFn&& get_base_vec,
+        int32_t po,
+        size_t prefetch_bytes,
+        std::span<const void* const> query_ptrs,
+        size_t eval_threads
+    ) {
         const size_t q_count = query_ptrs.size();
-        const size_t bf_q = eval_threads;
-        const auto& space = graph.getFeatureSpace();
+        if (n == 0 || q_count == 0) {
+            return 10000.0;
+        }
+
+        const size_t bf_q = (std::min)(eval_threads, q_count);
         const size_t feature_bytes = (std::max)(size_t{1}, space.get_data_size());
 
         size_t m_t = n;
@@ -515,8 +553,6 @@ class RecallTable {
 
         const auto batch_dist_func = space.get_batch_dist_func();
         const void* dist_param = space.get_dist_func_param();
-        const int32_t po = graph.getPo();
-        const size_t prefetch_bytes = static_cast<size_t>(graph.getPl()) * deglib::memory::L1_CACHE_LINE_SIZE;
 
         std::vector<float> thread_sinks(bf_q, std::numeric_limits<float>::max());
         const bool disjoint_slices = (n >= bf_q * 1024);
@@ -538,7 +574,7 @@ class RecallTable {
                     for (size_t pos = slice_start; pos < slice_end; pos += kChunk) {
                         const size_t chunk = (std::min)(kChunk, slice_end - pos);
                         for (size_t i = 0; i < chunk; ++i) {
-                            ptrs[i] = graph.getFeatureVector(static_cast<uint32_t>(pos + i));
+                            ptrs[i] = get_base_vec(static_cast<uint32_t>(pos + i));
                         }
                         batch_dist_func(q_ptr, ptrs, chunk, dist_param, dists, po, prefetch_bytes);
                         for (size_t i = 0; i < chunk; ++i) {
@@ -562,6 +598,13 @@ class RecallTable {
 
         const double bf_batch_us = sample_us * (static_cast<double>(q_count) / static_cast<double>(bf_q)) * (static_cast<double>(n) / static_cast<double>(m_t));
         return (std::max)(bf_batch_us, 10000.0);
+    }
+
+    static double estimate_brute_force_batch_us(const deglib::graph::InternalGraph& graph, std::span<const void* const> query_ptrs, size_t eval_threads) {
+        return estimate_brute_force_batch_us(
+            graph.size(), graph.getFeatureSpace(), [&graph](uint32_t v) -> const void* { return graph.getFeatureVector(v); }, graph.getPo(),
+            static_cast<size_t>(graph.getPl()) * deglib::memory::L1_CACHE_LINE_SIZE, query_ptrs, eval_threads
+        );
     }
 
     template <bool UseEf>
@@ -647,8 +690,14 @@ class RecallTable {
     }
 
     template <typename EvalParamFn>
-    static CalibratedAxisResult
-    calibrate_axis(std::span<const int32_t> ladder, std::span<const float> targets, double soft_budget_us, double hard_abort_us, EvalParamFn&& eval_param) {
+    static CalibratedAxisResult calibrate_axis(
+        std::span<const int32_t> ladder,
+        std::span<const float> targets,
+        double soft_budget_us,
+        double hard_abort_us,
+        EvalParamFn&& eval_param,
+        int32_t plateau_min_param = (std::numeric_limits<int32_t>::max)()
+    ) {
         CalibratedAxisResult out;
         if (ladder.empty() || targets.empty()) {
             return out;
@@ -675,8 +724,10 @@ class RecallTable {
             }
         };
 
-        // 1. Exponential upward ladder guarded by brute-force time budgets.
+        // 1. Exponential upward ladder guarded by brute-force time budgets and optional plateau early-stop.
         const float max_target = targets.back();
+        int stagnant_steps = 0;
+        float prev_recall = -1.0f;
         for (const int32_t p : ladder) {
             const double limit_us = (p == param_min) ? (2.0 * hard_abort_us) : hard_abort_us;
             const EvalResult res = eval_param(p, limit_us);
@@ -684,6 +735,17 @@ class RecallTable {
                 break;
             }
             insert_probe(p, res.recall);
+            if (p > param_min) {
+                if (p >= plateau_min_param && res.recall <= prev_recall + 0.0005f) {
+                    ++stagnant_steps;
+                    if (stagnant_steps >= 2) {
+                        break;
+                    }
+                } else {
+                    stagnant_steps = 0;
+                }
+            }
+            prev_recall = res.recall;
             if (res.elapsed_us >= soft_budget_us) {
                 break;
             }
@@ -804,6 +866,26 @@ class RecallTable {
         return out;
     }
 
+    static RecallTable make_from_axis(uint32_t k, size_t sample_count, Mode mode, float rerank_factor, const CalibratedAxisResult& res) {
+        RecallTable table;
+        table.k_ = k;
+        table.sample_count_ = sample_count;
+        table.mode_ = mode;
+        table.rerank_factor_ = rerank_factor;
+        table.recall_bounds_ = res.bounds;
+        table.entries_.reserve(res.entries.size());
+        for (const auto& [target_r, raw_param, meas_r] : res.entries) {
+            const float p = (mode == Mode::Ef) ? static_cast<float>(raw_param) : (static_cast<float>(raw_param) / 10000.0f);
+            table.entries_.push_back(Entry{target_r, p, meas_r});
+        }
+        table.curve_.reserve(res.probes.size());
+        for (const auto& pr : res.probes) {
+            const float p = (mode == Mode::Ef) ? static_cast<float>(pr.param) : (static_cast<float>(pr.param) / 10000.0f);
+            table.curve_.emplace_back(p, pr.recall);
+        }
+        return table;
+    }
+
     static std::vector<RecallTable> build_modes_impl(
         const deglib::graph::InternalGraph& graph,
         uint32_t k,
@@ -825,6 +907,7 @@ class RecallTable {
                 t.k_ = k;
                 t.sample_count_ = 0;
                 t.mode_ = mode;
+                t.rerank_factor_ = 1.0f;
                 tables.push_back(std::move(t));
             }
             return tables;
@@ -850,43 +933,20 @@ class RecallTable {
         const double hard_abort_us = 1.0 * effective_bf_budget_us;
 
         for (const Mode mode : modes) {
-            RecallTable table;
-            table.k_ = k;
-            table.sample_count_ = q_count;
-            table.mode_ = mode;
-
             if (mode == Mode::Ef) {
                 auto ef_res = calibrate_axis(kEfLadder, resolved_targets, soft_budget_us, hard_abort_us, [&](int32_t ef, double limit_us) {
                     return evaluate_recall_batch<true>(
                         graph, sample_indices, gt_thresholds, effective_k, static_cast<uint32_t>(ef), 0.0f, eval_threads, limit_us
                     );
                 });
-                table.recall_bounds_ = ef_res.bounds;
-                table.entries_.reserve(ef_res.entries.size());
-                for (const auto& [target_r, ef_val, meas_r] : ef_res.entries) {
-                    table.entries_.push_back(Entry{target_r, static_cast<float>(ef_val), meas_r});
-                }
-                table.curve_.reserve(ef_res.probes.size());
-                for (const auto& pr : ef_res.probes) {
-                    table.curve_.emplace_back(static_cast<float>(pr.param), pr.recall);
-                }
+                tables.push_back(make_from_axis(k, q_count, Mode::Ef, 1.0f, ef_res));
             } else {
                 auto eps_res = calibrate_axis(kEpsLadder, resolved_targets, soft_budget_us, hard_abort_us, [&](int32_t eps_scaled, double limit_us) {
                     const float eps = static_cast<float>(eps_scaled) / 10000.0f;
                     return evaluate_recall_batch<false>(graph, sample_indices, gt_thresholds, effective_k, 0, eps, eval_threads, limit_us);
                 });
-                table.recall_bounds_ = eps_res.bounds;
-                table.entries_.reserve(eps_res.entries.size());
-                for (const auto& [target_r, eps_scaled, meas_r] : eps_res.entries) {
-                    table.entries_.push_back(Entry{target_r, static_cast<float>(eps_scaled) / 10000.0f, meas_r});
-                }
-                table.curve_.reserve(eps_res.probes.size());
-                for (const auto& pr : eps_res.probes) {
-                    table.curve_.emplace_back(static_cast<float>(pr.param) / 10000.0f, pr.recall);
-                }
+                tables.push_back(make_from_axis(k, q_count, Mode::Eps, 1.0f, eps_res));
             }
-
-            tables.push_back(std::move(table));
         }
 
         return tables;
@@ -895,11 +955,13 @@ class RecallTable {
     uint32_t k_ = 0;
     size_t sample_count_ = 0;
     Mode mode_ = Mode::Ef;
+    float rerank_factor_ = 1.0f;
     std::optional<std::pair<float, float>> recall_bounds_;
     std::vector<Entry> entries_;
     std::vector<std::pair<float, float>> curve_;
 
     friend class ParetoLine;
+    friend class Searcher;
     friend struct RecallTableTestAccess;
 };
 

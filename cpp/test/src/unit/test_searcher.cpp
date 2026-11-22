@@ -606,3 +606,265 @@ TEST(SearcherTest, MaxDistanceComputationCountBoundsSearch) {
         EXPECT_LE(valid, 5u);
     }
 }
+
+namespace {
+
+std::vector<float> make_searcher_clustered_data(uint32_t count, uint32_t dim, uint32_t num_clusters, uint32_t seed) {
+    std::mt19937 rng(seed);
+    std::normal_distribution<float> center_dist(0.0f, 3.0f);
+    std::normal_distribution<float> noise_dist(0.0f, 0.35f);
+
+    std::vector<float> centers(static_cast<size_t>(num_clusters) * dim);
+    for (float& v : centers) {
+        v = center_dist(rng);
+    }
+
+    std::vector<float> data(static_cast<size_t>(count) * dim);
+    for (uint32_t i = 0; i < count; ++i) {
+        const uint32_t c = i % num_clusters;
+        const float* c_ptr = centers.data() + static_cast<size_t>(c) * dim;
+        float* dst = data.data() + static_cast<size_t>(i) * dim;
+        for (uint32_t d = 0; d < dim; ++d) {
+            dst[d] = c_ptr[d] + noise_dist(rng);
+        }
+    }
+    return data;
+}
+
+void verify_searcher_pareto_invariants(const deglib::search::ParetoLine& line) {
+    using deglib::search::RecallTable;
+    EXPECT_EQ(line.size(), line.entries().size());
+    EXPECT_EQ(line.empty(), line.entries().empty());
+    if (line.empty()) {
+        return;
+    }
+    ASSERT_TRUE(line.recall_bounds().has_value());
+    const auto& entries = line.entries();
+    EXPECT_FLOAT_EQ(line.recall_bounds()->first, entries.front().measured_recall);
+    EXPECT_FLOAT_EQ(line.recall_bounds()->second, entries.back().measured_recall);
+
+    for (size_t i = 0; i < entries.size(); ++i) {
+        const auto& e = entries[i];
+        EXPECT_TRUE(e.is_ef() != e.is_eps());
+        if (e.is_ef()) {
+            EXPECT_GE(e.eps_or_ef, static_cast<float>(RecallTable::kMinEf));
+            EXPECT_LE(e.eps_or_ef, static_cast<float>(RecallTable::kMaxEf));
+        } else {
+            EXPECT_GE(e.eps_or_ef, RecallTable::kMinEps - 1e-6f);
+            EXPECT_LE(e.eps_or_ef, RecallTable::kMaxEps + 1e-6f);
+        }
+        EXPECT_GE(e.rerank_factor, 1.0f);
+        if (e.rerank_factor > 1.0f + 1e-6f) {
+            EXPECT_GT(e.avg_rerank_distance_count, 0.0);
+        } else {
+            EXPECT_DOUBLE_EQ(e.avg_rerank_distance_count, 0.0);
+        }
+        EXPECT_GT(e.latency_us, 0.0);
+        EXPECT_GE(e.avg_distance_count, 0.0);
+        if (i > 0) {
+            EXPECT_GT(e.measured_recall, entries[i - 1].measured_recall);
+            EXPECT_GT(e.latency_us, entries[i - 1].latency_us);
+        }
+        const auto found = line.param_for(e.measured_recall);
+        ASSERT_TRUE(found.has_value());
+        EXPECT_NEAR(found->first, e.eps_or_ef, 1e-6f);
+        EXPECT_FLOAT_EQ(found->second, e.rerank_factor);
+    }
+}
+
+}  // namespace
+
+TEST(SearcherTest, CalibrateTablesMatchSingleFactorAndParetoWithFP32Reranker) {
+    using deglib::distances::Metric;
+    using deglib::search::ParetoLine;
+    using deglib::search::RecallTable;
+
+    const uint32_t dim = 32;
+    const uint32_t count = 300;
+    const auto data = make_searcher_clustered_data(count, dim, 16, 17);
+    auto base_graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 16, Metric::FP32_L2);
+    auto reranker = std::make_shared<deglib::search::Reranker>(
+        deglib::search::Reranker::from_graph(base_graph.internal(), deglib::distances::FloatSpace(dim, Metric::FP32_L2))
+    );
+
+    auto u4_xfrms = deglib::transformation::make_quantizer_pipeline(data, dim, Metric::Uint4_L2);
+    auto u4_space = deglib::distances::FloatSpace(dim, Metric::Uint4_L2);
+    auto u4_graph = base_graph.to_readonly(u4_space, nullptr, u4_xfrms);
+    auto searcher = deglib::make_searcher(u4_graph, reranker);
+    searcher->optimize(16, 5, 150, 1, /*use_routing=*/true);
+
+    const uint32_t k = 10;
+    const size_t sample_count = 60;
+    const std::vector<float> rfs = {1.0f, 1.5f, 2.0f};
+    const auto tables = searcher->to_recall_tables(k, sample_count, {0.65f, 0.96f}, 0.05f, std::span<const float>(rfs), 1);
+    ASSERT_EQ(tables.size(), 6u);
+
+    // Order is [(rf=1.0, Ef), (rf=1.0, Eps), (rf=1.5, Ef), (rf=1.5, Eps), (rf=2.0, Ef), (rf=2.0, Eps)]
+    // Multi-rf single-pass Ef calibration must match standalone per-rf to_recall_table bit-for-bit.
+    for (size_t r = 0; r < rfs.size(); ++r) {
+        const auto& tbl_ef = tables[2 * r];
+        const auto& tbl_eps = tables[2 * r + 1];
+        EXPECT_EQ(tbl_ef.mode(), RecallTable::Mode::Ef);
+        EXPECT_EQ(tbl_eps.mode(), RecallTable::Mode::Eps);
+        EXPECT_FLOAT_EQ(tbl_ef.rerank_factor(), rfs[r]);
+        EXPECT_FLOAT_EQ(tbl_eps.rerank_factor(), rfs[r]);
+
+        const RecallTable single_ef = searcher->to_recall_table(k, RecallTable::Mode::Ef, rfs[r], sample_count, {0.65f, 0.96f}, 0.05f, 1);
+        ASSERT_EQ(tbl_ef.size(), single_ef.size());
+        for (size_t i = 0; i < tbl_ef.size(); ++i) {
+            EXPECT_FLOAT_EQ(tbl_ef.entries()[i].target_recall, single_ef.entries()[i].target_recall);
+            EXPECT_FLOAT_EQ(tbl_ef.entries()[i].eps_or_ef, single_ef.entries()[i].eps_or_ef);
+            EXPECT_FLOAT_EQ(tbl_ef.entries()[i].measured_recall, single_ef.entries()[i].measured_recall);
+        }
+
+        const RecallTable single_eps = searcher->to_recall_table(k, RecallTable::Mode::Eps, rfs[r], sample_count, {0.65f, 0.96f}, 0.05f, 1);
+        ASSERT_EQ(tbl_eps.size(), single_eps.size());
+        for (size_t i = 0; i < tbl_eps.size(); ++i) {
+            EXPECT_FLOAT_EQ(tbl_eps.entries()[i].target_recall, single_eps.entries()[i].target_recall);
+            EXPECT_FLOAT_EQ(tbl_eps.entries()[i].eps_or_ef, single_eps.entries()[i].eps_or_ef);
+            EXPECT_FLOAT_EQ(tbl_eps.entries()[i].measured_recall, single_eps.entries()[i].measured_recall);
+        }
+    }
+
+    // Default rerank_factors on Searcher with reranker produces 4 factors x 2 modes = 8 tables.
+    const auto default_tables = searcher->to_recall_tables(k, sample_count, {0.75f, 0.95f}, 0.05f, {}, 1);
+    ASSERT_EQ(default_tables.size(), 8u);
+    for (size_t r = 0; r < deglib::search::Searcher::kDefaultRerankFactors.size(); ++r) {
+        EXPECT_FLOAT_EQ(default_tables[2 * r].rerank_factor(), deglib::search::Searcher::kDefaultRerankFactors[r]);
+        EXPECT_FLOAT_EQ(default_tables[2 * r + 1].rerank_factor(), deglib::search::Searcher::kDefaultRerankFactors[r]);
+    }
+
+    // ParetoLine overloads (precomputed span, single table, end-to-end range & targets)
+    const ParetoLine line_from_tables = searcher->to_pareto_line(std::span<const RecallTable>(tables), sample_count, 3);
+    EXPECT_EQ(line_from_tables.k(), k);
+    EXPECT_EQ(line_from_tables.sample_count(), sample_count);
+    ASSERT_EQ(line_from_tables.recall_tables().size(), 6u);
+    verify_searcher_pareto_invariants(line_from_tables);
+
+    const ParetoLine line_single = searcher->to_pareto_line(tables[2], sample_count, 2);
+    verify_searcher_pareto_invariants(line_single);
+    for (const auto& e : line_single.entries()) {
+        EXPECT_TRUE(e.is_ef());
+        EXPECT_FLOAT_EQ(e.rerank_factor, 1.5f);
+    }
+
+    const std::vector<float> explicit_targets = {0.75f, 0.85f, 0.92f};
+    const ParetoLine line_explicit = searcher->to_pareto_line(k, std::span<const float>(explicit_targets), sample_count, std::span<const float>(rfs), 1, 2);
+    verify_searcher_pareto_invariants(line_explicit);
+
+    const ParetoLine line_auto = searcher->to_pareto_line(k, sample_count, {0.75f, 0.95f}, 0.05f, std::span<const float>(rfs), 1, 2);
+    verify_searcher_pareto_invariants(line_auto);
+}
+
+TEST(SearcherTest, QueryModesFP16SQ16NativeF16NoRerankerAndRawBytes) {
+    using deglib::distances::Metric;
+    using deglib::search::ParetoLine;
+    using deglib::search::RecallTable;
+
+    const uint32_t dim = 32;
+    const uint32_t count = 250;
+    const auto data = make_searcher_clustered_data(count, dim, 12, 43);
+    auto base_graph = deglib::builder::build_from_data(std::span<const float>(data), dim, {}, 16, Metric::FP32_L2);
+    auto u4_xfrms = deglib::transformation::make_quantizer_pipeline(data, dim, Metric::Uint4_L2);
+    auto u4_space = deglib::distances::FloatSpace(dim, Metric::Uint4_L2);
+    auto u4_graph = base_graph.to_readonly(u4_space, nullptr, u4_xfrms);
+
+    // 1. Uint4 graph + FP16_L2 reranker (auto-fitted ScalarQuantizerFP16 -> F32 CalibQueryMode)
+    {
+        auto rr_fp16_sq = std::make_shared<deglib::search::Reranker>(
+            deglib::search::Reranker::from_graph(base_graph.internal(), deglib::distances::FloatSpace(dim, Metric::FP16_L2))
+        );
+        auto searcher_sq = deglib::make_searcher(u4_graph, rr_fp16_sq);
+        const std::vector<float> rfs = {1.0f, 1.5f};
+        const auto line = searcher_sq->to_pareto_line(10, 50, {0.70f, 0.96f}, 0.08f, std::span<const float>(rfs), 1, 2);
+        EXPECT_FALSE(line.empty());
+        verify_searcher_pareto_invariants(line);
+    }
+
+    // 2. FP16_L2 reranker with NO transformations (CalibQueryMode::F16 via execute_search_single<uint16_t>)
+    {
+        std::vector<uint16_t> f16_data(static_cast<size_t>(count) * dim);
+        deglib::distances::fp16::floats_to_fp16(data.data(), f16_data.data(), f16_data.size());
+        auto rr_space = deglib::distances::FloatSpace(dim, Metric::FP16_L2);
+        auto rr_native_f16 =
+            std::make_shared<deglib::search::Reranker>(rr_space, std::as_bytes(std::span<const uint16_t>(f16_data)), static_cast<size_t>(count));
+        auto searcher_f16 = deglib::make_searcher(u4_graph, rr_native_f16);
+        const std::vector<float> rfs = {1.0f, 1.5f};
+        const auto line = searcher_f16->to_pareto_line(10, 50, {0.70f, 0.96f}, 0.08f, std::span<const float>(rfs), 1, 2);
+        EXPECT_FALSE(line.empty());
+        verify_searcher_pareto_invariants(line);
+    }
+
+    // 3. No reranker + K-Means routing on FP32 graph -> 2 tables, rf == 1.0, avg_rerank_distance_count == 0
+    {
+        auto searcher_no_rr = deglib::search::make_searcher(base_graph.internal());
+        searcher_no_rr->optimize(16, 5, 120, 1, /*use_routing=*/true);
+        const auto tables = searcher_no_rr->to_recall_tables(10, 50, {0.75f, 0.98f}, 0.05f, {}, 1);
+        ASSERT_EQ(tables.size(), 2u);
+        EXPECT_FLOAT_EQ(tables[0].rerank_factor(), 1.0f);
+        EXPECT_FLOAT_EQ(tables[1].rerank_factor(), 1.0f);
+
+        const auto line = searcher_no_rr->to_pareto_line(tables, 50, 2);
+        verify_searcher_pareto_invariants(line);
+        for (const auto& e : line.entries()) {
+            EXPECT_FLOAT_EQ(e.rerank_factor, 1.0f);
+            EXPECT_DOUBLE_EQ(e.avg_rerank_distance_count, 0.0);
+        }
+    }
+
+    // 4. RawBytes fallback: quantized Uint4 graph without any reranker completes without throwing
+    {
+        auto searcher_raw = deglib::search::make_searcher(u4_graph.internal());
+        const auto tables = searcher_raw->to_recall_tables(10, 40, {0.70f, 0.95f}, 0.08f, {}, 1);
+        ASSERT_EQ(tables.size(), 2u);
+        EXPECT_FLOAT_EQ(tables[0].rerank_factor(), 1.0f);
+        const auto line = searcher_raw->to_pareto_line(tables, 40, 2);
+        verify_searcher_pareto_invariants(line);
+    }
+}
+
+TEST(SearcherTest, RecallAndParetoValidationAndEmptyGraph) {
+    using deglib::distances::Metric;
+    using deglib::search::RecallTable;
+
+    const auto space = deglib::distances::FloatSpace(8, Metric::FP32_L2);
+    auto empty_graph = deglib::create_empty(16, 4, space);
+    auto empty_searcher = deglib::search::make_searcher(empty_graph.internal());
+
+    const auto empty_tbl = empty_searcher->to_recall_table(10, RecallTable::Mode::Ef);
+    EXPECT_TRUE(empty_tbl.empty());
+    EXPECT_EQ(empty_tbl.k(), 10u);
+    EXPECT_EQ(empty_tbl.sample_count(), 0u);
+    EXPECT_FLOAT_EQ(empty_tbl.rerank_factor(), 1.0f);
+
+    const auto empty_tables = empty_searcher->to_recall_tables(10);
+    ASSERT_EQ(empty_tables.size(), 2u);
+    const auto empty_line = empty_searcher->to_pareto_line(empty_tables);
+    EXPECT_TRUE(empty_line.empty());
+    EXPECT_EQ(empty_line.k(), 10u);
+
+    // Invalid argument handling even on empty/small searchers
+    const std::vector<float> bad_rf = {0.5f};
+    const std::vector<float> nan_rf = {std::numeric_limits<float>::quiet_NaN()};
+    EXPECT_THROW((void)empty_searcher->to_recall_table(0, RecallTable::Mode::Ef), std::invalid_argument);
+    EXPECT_THROW((void)empty_searcher->to_recall_table(5, RecallTable::Mode::Ef, 1.0f, 0), std::invalid_argument);
+    EXPECT_THROW((void)empty_searcher->to_recall_table(5, RecallTable::Mode::Ef, 0.5f), std::invalid_argument);
+    EXPECT_THROW(
+        (void)empty_searcher->to_recall_tables(5, 10, {RecallTable::kDefaultMinRecall, RecallTable::kDefaultMaxRecall}, 0.05f, bad_rf), std::invalid_argument
+    );
+    EXPECT_THROW(
+        (void)empty_searcher->to_recall_tables(5, 10, {RecallTable::kDefaultMinRecall, RecallTable::kDefaultMaxRecall}, 0.05f, nan_rf), std::invalid_argument
+    );
+    EXPECT_THROW((void)empty_searcher->to_pareto_line(empty_tables, 0, 0), std::invalid_argument);
+    EXPECT_THROW(
+        (void)empty_searcher->to_pareto_line(10, 50, {RecallTable::kDefaultMinRecall, RecallTable::kDefaultMaxRecall}, 0.05f, {}, 1, 0), std::invalid_argument
+    );
+
+    const auto tiny_data = make_searcher_clustered_data(20, 8, 4, 55);
+    auto tiny_graph = deglib::builder::build_from_data(std::span<const float>(tiny_data), 8, {}, 4, Metric::FP32_L2);
+    auto tiny_searcher = deglib::search::make_searcher(tiny_graph.internal());
+    const RecallTable t5 = tiny_searcher->to_recall_table(5, RecallTable::Mode::Ef, 1.0f, 10);
+    const RecallTable t8 = tiny_searcher->to_recall_table(8, RecallTable::Mode::Eps, 1.0f, 10);
+    const std::vector<RecallTable> mismatched = {t5, t8};
+    EXPECT_THROW((void)tiny_searcher->to_pareto_line(std::span<const RecallTable>(mismatched)), std::invalid_argument);
+}
