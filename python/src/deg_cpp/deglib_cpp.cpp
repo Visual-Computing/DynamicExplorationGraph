@@ -13,6 +13,7 @@
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/function.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/pair.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
@@ -1923,6 +1924,51 @@ NB_MODULE(deglib_cpp, m) {
 
     m.attr("SearchResults") = search_module.attr("SearchResults");
 
+    nb::class_<deglib::search::RecallTable>(search_module, "RecallTable", "Calibration table mapping target recall@k values to ef and eps search parameters.")
+        .def_prop_ro("k", &deglib::search::RecallTable::k)
+        .def_prop_ro("sample_count", &deglib::search::RecallTable::sample_count)
+        .def_prop_ro("has_ef", &deglib::search::RecallTable::has_ef)
+        .def_prop_ro("has_eps", &deglib::search::RecallTable::has_eps)
+        .def_prop_ro("ef_recall_bounds", &deglib::search::RecallTable::ef_recall_bounds)
+        .def_prop_ro("eps_recall_bounds", &deglib::search::RecallTable::eps_recall_bounds)
+        .def_prop_ro(
+            "ef_entries",
+            [](const deglib::search::RecallTable& t) {
+                std::vector<std::tuple<float, uint32_t, float>> out;
+                const auto& entries = t.ef_entries();
+                out.reserve(entries.size());
+                for (const auto& e : entries) {
+                    out.emplace_back(e.target_recall, e.ef, e.measured_recall);
+                }
+                return out;
+            }
+        )
+        .def_prop_ro(
+            "eps_entries",
+            [](const deglib::search::RecallTable& t) {
+                std::vector<std::tuple<float, float, float>> out;
+                const auto& entries = t.eps_entries();
+                out.reserve(entries.size());
+                for (const auto& e : entries) {
+                    out.emplace_back(e.target_recall, e.eps, e.measured_recall);
+                }
+                return out;
+            }
+        )
+        .def("ef_values", &deglib::search::RecallTable::ef_values, "Returns deduplicated ascending calibrated ef values.")
+        .def("eps_values", &deglib::search::RecallTable::eps_values, "Returns deduplicated ascending calibrated eps values.")
+        .def("eps_or_ef_values", &deglib::search::RecallTable::eps_or_ef_values, "Returns deduplicated ef values followed by eps values.")
+        .def(
+            "ef_for", &deglib::search::RecallTable::ef_for, nb::arg("target_recall"), nb::arg("clamp") = false,
+            "Looks up or linearly interpolates an ef value for target_recall (returns None if out of bounds unless clamp=True)."
+        )
+        .def(
+            "eps_for", &deglib::search::RecallTable::eps_for, nb::arg("target_recall"), nb::arg("clamp") = false,
+            "Looks up or linearly interpolates an eps value for target_recall (returns None if out of bounds unless clamp=True)."
+        )
+        .def("__str__", &deglib::search::RecallTable::to_string)
+        .def("__repr__", &deglib::search::RecallTable::to_string);
+
     search_module.def("create_filter", [](const InIntArray& valid_labels, size_t max_value, size_t max_label_count) {
         if (valid_labels.ndim() != 1) {
             throw std::invalid_argument(std::format("Expected feature to have only one dimension, got {}", valid_labels.ndim()));
@@ -2171,6 +2217,21 @@ NB_MODULE(deglib_cpp, m) {
             "Args:\n"
             "    sample_count: number of vertices sampled as queries (capped at the graph size).\n"
             "    median_subset: subset size for computing the graph-median entry point (<= 1 keeps native entries)."
+        )
+        .def(
+            "to_recall_table",
+            [](const deglib::DynamicExplorationGraph& g, uint32_t k, size_t sample_count, std::pair<float, float> recall_range, float recall_step,
+               std::optional<std::vector<float>> target_recalls, size_t threads) {
+                nb::gil_scoped_release release;
+                if (target_recalls.has_value()) {
+                    return g.to_recall_table(k, std::span<const float>(*target_recalls), sample_count, threads);
+                }
+                return g.to_recall_table(k, sample_count, recall_range, recall_step, threads);
+            },
+            nb::arg("k"), nb::arg("sample_count") = deglib::search::RecallTable::kDefaultSampleCount,
+            nb::arg("recall_range") = std::pair<float, float>{deglib::search::RecallTable::kDefaultMinRecall, deglib::search::RecallTable::kDefaultMaxRecall},
+            nb::arg("recall_step") = deglib::search::RecallTable::kDefaultRecallStep, nb::arg("target_recalls") = nb::none(), nb::arg("threads") = 0,
+            "Calibrate a RecallTable mapping target recall@k values to ef and eps search parameters."
         );
 
     m.def("load_readonly_graph", &load_readonly_graph_wrapper);

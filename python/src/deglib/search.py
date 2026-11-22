@@ -42,6 +42,85 @@ class Filter:
         return cls(np.asarray(valid_labels), max_value=max_value)
 
 
+class RecallTable:
+    """
+    Calibration table mapping target recall@k levels to ``ef`` and ``eps`` search parameters.
+
+    Created by :meth:`DynamicExplorationGraph.to_recall_table`.
+    """
+
+    def __init__(self, recall_table_cpp: cpp_search.RecallTable):
+        if not isinstance(recall_table_cpp, cpp_search.RecallTable):
+            raise TypeError(
+                f"recall_table_cpp must be a deglib_cpp.search.RecallTable, got {type(recall_table_cpp).__name__}"
+            )
+        self._recall_table_cpp = recall_table_cpp
+
+    @property
+    def k(self) -> int:
+        return int(self._recall_table_cpp.k)
+
+    @property
+    def sample_count(self) -> int:
+        return int(self._recall_table_cpp.sample_count)
+
+    @property
+    def has_ef(self) -> bool:
+        return bool(self._recall_table_cpp.has_ef)
+
+    @property
+    def has_eps(self) -> bool:
+        return bool(self._recall_table_cpp.has_eps)
+
+    @property
+    def ef_recall_bounds(self) -> tuple[float, float] | None:
+        bounds = self._recall_table_cpp.ef_recall_bounds
+        return None if bounds is None else (float(bounds[0]), float(bounds[1]))
+
+    @property
+    def eps_recall_bounds(self) -> tuple[float, float] | None:
+        bounds = self._recall_table_cpp.eps_recall_bounds
+        return None if bounds is None else (float(bounds[0]), float(bounds[1]))
+
+    @property
+    def ef_entries(self) -> list[tuple[float, int, float]]:
+        """Calibrated ``ef`` rows as ``(target_recall, ef, measured_recall)`` tuples."""
+        return [(float(t), int(ef), float(m)) for t, ef, m in self._recall_table_cpp.ef_entries]
+
+    @property
+    def eps_entries(self) -> list[tuple[float, float, float]]:
+        """Calibrated ``eps`` rows as ``(target_recall, eps, measured_recall)`` tuples."""
+        return [(float(t), float(eps), float(m)) for t, eps, m in self._recall_table_cpp.eps_entries]
+
+    def ef_values(self) -> list[int]:
+        """Return deduplicated calibrated ``ef`` values in ascending order."""
+        return [int(v) for v in self._recall_table_cpp.ef_values()]
+
+    def eps_values(self) -> list[float]:
+        """Return deduplicated calibrated ``eps`` values in ascending order."""
+        return [float(v) for v in self._recall_table_cpp.eps_values()]
+
+    def eps_or_ef_values(self) -> list[float]:
+        """Return deduplicated ``ef`` values (as floats) followed by ``eps`` values."""
+        return [float(v) for v in self._recall_table_cpp.eps_or_ef_values()]
+
+    def ef_for(self, target_recall: float, clamp: bool = False) -> int | None:
+        """Look up or linearly interpolate ``ef`` for ``target_recall``."""
+        val = self._recall_table_cpp.ef_for(float(target_recall), bool(clamp))
+        return None if val is None else int(val)
+
+    def eps_for(self, target_recall: float, clamp: bool = False) -> float | None:
+        """Look up or linearly interpolate ``eps`` for ``target_recall``."""
+        val = self._recall_table_cpp.eps_for(float(target_recall), bool(clamp))
+        return None if val is None else float(val)
+
+    def __str__(self) -> str:
+        return str(self._recall_table_cpp)
+
+    def __repr__(self) -> str:
+        return repr(self._recall_table_cpp)
+
+
 class Reranker:
     """
     Standalone owning C++ candidate reranker for exact scoring over candidate indices.
@@ -403,4 +482,12 @@ def create_searcher(
     )
 
 
-__all__ = ["Filter", "Reranker", "rerank", "Searcher", "SearchResults", "create_searcher"]
+__all__ = [
+    "Filter",
+    "Reranker",
+    "rerank",
+    "Searcher",
+    "SearchResults",
+    "RecallTable",
+    "create_searcher",
+]

@@ -12,6 +12,7 @@
 #include "deglib/graph/readonly_graph.h"
 #include "deglib/graph/sizebounded_graph.h"
 
+#include "deglib/search/recall_table.h"
 #include "deglib/serialization.h"
 #include "deglib/transformation.h"
 
@@ -1090,6 +1091,35 @@ class DynamicExplorationGraph {
      * @param median_subset Subset size for median entry point selection (`<= 1` keeps native entries).
      */
     void optimize(size_t sample_count = 300, size_t median_subset = 4096) const { internal_graph_->optimize(sample_count, median_subset); }
+
+    /**
+     * @brief Calibrates a `RecallTable` mapping target recall@k values to `ef` and `eps` search parameters.
+     *
+     * Self-samples up to `sample_count` stored vertices as queries, computes exact ground truth in the
+     * graph's native feature space, and solves for each target recall in `recall_range` (step `recall_step`)
+     * guarded by an estimated brute-force time budget.
+     */
+    [[nodiscard]] deglib::search::RecallTable to_recall_table(
+        uint32_t k,
+        size_t sample_count = deglib::search::RecallTable::kDefaultSampleCount,
+        std::pair<float, float> recall_range = {deglib::search::RecallTable::kDefaultMinRecall, deglib::search::RecallTable::kDefaultMaxRecall},
+        float recall_step = deglib::search::RecallTable::kDefaultRecallStep,
+        size_t threads = 0
+    ) const {
+        return deglib::search::build_recall_table(*internal_graph_, k, sample_count, recall_range, recall_step, threads);
+    }
+
+    /**
+     * @brief Calibrates a `RecallTable` for an explicit sequence of target recall@k values.
+     */
+    [[nodiscard]] deglib::search::RecallTable to_recall_table(
+        uint32_t k,
+        std::span<const float> target_recalls,
+        size_t sample_count = deglib::search::RecallTable::kDefaultSampleCount,
+        size_t threads = 0
+    ) const {
+        return deglib::search::build_recall_table(*internal_graph_, k, target_recalls, sample_count, threads);
+    }
 
     /**
      * @brief Saves the graph and any attached transformations to a binary file.

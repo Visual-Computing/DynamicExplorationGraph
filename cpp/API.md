@@ -345,6 +345,21 @@ public:
     /// Auto-tune traversal prefetch parameters (po, pl, nl) by timing traversal over sampled vertices
     void optimize(size_t sample_count = 300, uint32_t k = 100, uint32_t ef = 200, size_t median_subset = 4096) const;
 
+    /// Calibrate a RecallTable mapping target recall@k values to ef (in [10, 300], step 1) and eps (in [0.01, 0.20], resolution 0.0001), picking the smallest parameter achieving measured_recall >= target_recall
+    deglib::search::RecallTable to_recall_table(
+        uint32_t k,
+        size_t sample_count = 300,
+        std::pair<float, float> recall_range = {0.80f, 0.999f},
+        float recall_step = 0.005f,
+        size_t threads = 0
+    ) const;
+    deglib::search::RecallTable to_recall_table(
+        uint32_t k,
+        std::span<const float> target_recalls,
+        size_t sample_count = 300,
+        size_t threads = 0
+    ) const;
+
     // --- Conversions & Persistence ---
     // Feature Memory Ordering:
     // Any replacement feature buffer (custom_features / new_features) must match the graph's internal index layout (row i = vertex i):
@@ -637,6 +652,43 @@ struct SearchResults {
     bool has_distances() const noexcept;
     std::span<const uint32_t> get_indices(size_t q = 0) const noexcept;
     std::span<const float> get_distances(size_t q = 0) const noexcept;
+};
+
+struct EfRecallEntry {
+    float target_recall = 0.0f;
+    uint32_t ef = 0;
+    float measured_recall = 0.0f;
+};
+
+struct EpsRecallEntry {
+    float target_recall = 0.0f;
+    float eps = 0.0f;
+    float measured_recall = 0.0f;
+};
+
+/// Parameter calibration table mapping target recall@k levels to the smallest ef (step 1) and eps (0.0001 resolution) achieving measured_recall >= target_recall.
+class RecallTable {
+public:
+    static constexpr uint32_t kMinEf = 10;
+    static constexpr uint32_t kMaxEf = 300;
+    static constexpr float kMinEps = 0.01f;
+    static constexpr float kMaxEps = 0.20f;
+    static constexpr float kEpsResolution = 0.0001f;
+
+    uint32_t k() const noexcept;
+    size_t sample_count() const noexcept;
+    bool has_ef() const noexcept;
+    bool has_eps() const noexcept;
+    std::optional<std::pair<float, float>> ef_recall_bounds() const noexcept;
+    std::optional<std::pair<float, float>> eps_recall_bounds() const noexcept;
+    const std::vector<EfRecallEntry>& ef_entries() const noexcept;
+    const std::vector<EpsRecallEntry>& eps_entries() const noexcept;
+    std::vector<uint32_t> ef_values() const;
+    std::vector<float> eps_values() const;
+    std::vector<float> eps_or_ef_values() const;
+    std::optional<uint32_t> ef_for(float target_recall, bool clamp = false) const;
+    std::optional<float> eps_for(float target_recall, bool clamp = false) const;
+    std::string to_string() const;
 };
 
 /// High-performance Searcher coordinating query transformation, graph exploration, and reranking.

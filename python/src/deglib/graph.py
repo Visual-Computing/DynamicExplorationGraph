@@ -1,9 +1,12 @@
 from collections.abc import Sequence
 import os
 import pathlib
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 import deglib_cpp
+
+if TYPE_CHECKING:
+    from deglib.search import RecallTable
 
 from deglib.cpu import InstructionSet
 from deglib.distances import Metric, _infer_dim_from_array
@@ -193,6 +196,61 @@ class DynamicExplorationGraph:
         Auto-tune traversal prefetch parameters (``po``, ``pl``, ``nl``) and graph-median entry point.
         """
         self.dynamic_exploration_graph_cpp.optimize(int(sample_count), int(median_subset))
+
+    def to_recall_table(
+        self,
+        k: int,
+        sample_count: int = 300,
+        recall_range: tuple[float, float] | None = None,
+        recall_step: float | None = None,
+        target_recalls: Sequence[float] | np.ndarray | None = None,
+        threads: int = 0,
+    ) -> "RecallTable":
+        """
+        Calibrate a ``RecallTable`` mapping target recall@k levels to ``ef`` and ``eps`` search parameters.
+
+        Self-samples up to ``sample_count`` stored vertices as queries, computes exact ground truth in the
+        graph's native feature space, and solves for each target recall using adaptive binary search guarded
+        by an approximated brute-force time budget.
+        """
+        from deglib.search import RecallTable
+
+        if target_recalls is not None:
+            if recall_range is not None or recall_step is not None:
+                raise ValueError("Cannot specify 'target_recalls' together with 'recall_range' or 'recall_step'.")
+            arr = np.asarray(target_recalls, dtype=np.float64)
+            if arr.ndim != 1:
+                raise ValueError(f"target_recalls must be 1D, got shape {arr.shape}")
+            targets_list = [float(x) for x in arr]
+            return RecallTable(
+                self.dynamic_exploration_graph_cpp.to_recall_table(
+                    int(k),
+                    int(sample_count),
+                    (0.80, 0.999),
+                    0.005,
+                    targets_list,
+                    int(threads),
+                )
+            )
+
+        if recall_range is None:
+            r_range = (0.80, 0.999)
+        else:
+            if len(recall_range) != 2:
+                raise ValueError(f"recall_range must be a (min, max) 2-tuple, got length {len(recall_range)}")
+            r_range = (float(recall_range[0]), float(recall_range[1]))
+
+        r_step = 0.005 if recall_step is None else float(recall_step)
+        return RecallTable(
+            self.dynamic_exploration_graph_cpp.to_recall_table(
+                int(k),
+                int(sample_count),
+                r_range,
+                r_step,
+                None,
+                int(threads),
+            )
+        )
 
     def save_graph(self, path: pathlib.Path | str) -> None:
         """
