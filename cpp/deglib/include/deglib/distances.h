@@ -49,8 +49,8 @@ enum class MetricType : uint8_t {
     Uint4_InnerProduct = static_cast<uint8_t>(MetricDataType::Uint4) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),  // 0x52
     Int4_L2 = static_cast<uint8_t>(MetricDataType::Int4) | static_cast<uint8_t>(MetricDistanceKind::L2),                        // 0x61
     Int4_InnerProduct = static_cast<uint8_t>(MetricDataType::Int4) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),    // 0x62
-    Uint7_L2 = static_cast<uint8_t>(MetricDataType::Uint7) | static_cast<uint8_t>(MetricDistanceKind::L2),                        // 0x71
-    Uint7_InnerProduct = static_cast<uint8_t>(MetricDataType::Uint7) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct)    // 0x72
+    Uint7_L2 = static_cast<uint8_t>(MetricDataType::Uint7) | static_cast<uint8_t>(MetricDistanceKind::L2),                      // 0x71
+    Uint7_InnerProduct = static_cast<uint8_t>(MetricDataType::Uint7) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct)   // 0x72
 };
 
 /**
@@ -220,7 +220,6 @@ inline void strided_compare_impl(
     const int32_t prefetch_offset,
     const size_t prefetch_bytes
 ) {
-    constexpr bool has_batch4 = requires { Dist::compare_batch4(query, query, query, query, query, param, out_distances); };
     const auto* base = static_cast<const std::byte*>(targets);
     if (prefetch_offset > 0 && prefetch_bytes > 0) {
         const size_t po = static_cast<size_t>(prefetch_offset);
@@ -228,45 +227,14 @@ inline void strided_compare_impl(
         for (size_t i = 0; i < warmup; ++i) {
             deglib::memory::prefetch(reinterpret_cast<const char*>(base + i * stride), prefetch_bytes);
         }
-        size_t i = 0;
-        if constexpr (has_batch4) {
-            for (; i + 3 < count; i += 4) {
-                for (size_t p = 0; p < 4 && (i + po + p) < count; ++p) {
-                    deglib::memory::prefetch(reinterpret_cast<const char*>(base + (i + po + p) * stride), prefetch_bytes);
-                }
-                Dist::compare_batch4(
-                    query,
-                    base + i * stride,
-                    base + (i + 1) * stride,
-                    base + (i + 2) * stride,
-                    base + (i + 3) * stride,
-                    param,
-                    out_distances + i
-                );
-            }
-        }
-        for (; i < count; ++i) {
+        for (size_t i = 0; i < count; ++i) {
             if (i + po < count) {
                 deglib::memory::prefetch(reinterpret_cast<const char*>(base + (i + po) * stride), prefetch_bytes);
             }
             out_distances[i] = Dist::compare(query, base + i * stride, param);
         }
     } else {
-        size_t i = 0;
-        if constexpr (has_batch4) {
-            for (; i + 3 < count; i += 4) {
-                Dist::compare_batch4(
-                    query,
-                    base + i * stride,
-                    base + (i + 1) * stride,
-                    base + (i + 2) * stride,
-                    base + (i + 3) * stride,
-                    param,
-                    out_distances + i
-                );
-            }
-        }
-        for (; i < count; ++i) {
+        for (size_t i = 0; i < count; ++i) {
             out_distances[i] = Dist::compare(query, base + i * stride, param);
         }
     }
@@ -300,10 +268,7 @@ namespace detail {
 
 template <typename SubVariant>
 inline DistanceKernel to_kernel(SubVariant&& sub_variant) {
-    return std::visit(
-        []<DistanceFunction Dist>(const Dist&) -> DistanceKernel { return DistanceKernel::make<Dist>(); },
-        sub_variant
-    );
+    return std::visit([]<DistanceFunction Dist>(const Dist&) -> DistanceKernel { return DistanceKernel::make<Dist>(); }, sub_variant);
 }
 
 }  // namespace detail
@@ -373,9 +338,7 @@ class FloatSpace {
         }
     }
 
-    static size_t calculate_query_data_size(const size_t dim, const Metric metric) {
-        return calculate_data_size(dim, metric);
-    }
+    static size_t calculate_query_data_size(const size_t dim, const Metric metric) { return calculate_data_size(dim, metric); }
 
     DistanceKernel kernel_;
     size_t data_size_ = 0;
@@ -394,11 +357,7 @@ class FloatSpace {
           metric_(metric) {}
 
     FloatSpace(const size_t dim, const Metric metric, DistanceKernel kernel)
-        : kernel_(kernel),
-          data_size_(calculate_data_size(dim, metric)),
-          query_data_size_(calculate_query_data_size(dim, metric)),
-          dim_(dim),
-          metric_(metric) {}
+        : kernel_(kernel), data_size_(calculate_data_size(dim, metric)), query_data_size_(calculate_query_data_size(dim, metric)), dim_(dim), metric_(metric) {}
 
     /**
      * Returns the dimension of feature vectors in this space.
