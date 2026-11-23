@@ -181,6 +181,33 @@ TEST(FlasSettingsTest, DefaultSettings) {
     EXPECT_FLOAT_EQ(settings.sample_factor, 1.0f);
 }
 
+TEST(FlasSort, Fp16ValidPermutation) {
+    const int N = 20;
+    const int D = 4;
+    // Store N*D fp16 bit patterns as uint16_t.
+    std::vector<uint16_t> features(static_cast<size_t>(N) * static_cast<size_t>(D));
+    for (int i = 0; i < N; ++i) {
+        for (int d = 0; d < D; ++d) {
+            float val = static_cast<float>(i * 10 + d);
+            features[static_cast<size_t>(i) * D + d] = deglib::distances::fp16::float_to_fp16(val);
+        }
+    }
+
+    auto mf = flas::make_map_fields<uint16_t>(features.data(), N, D);
+    deglib::distances::FloatSpace space(D, deglib::distances::Metric::FP16_InnerProduct);
+    flas::FlasSettings s = local_default_flas_settings();
+    flas::RandomEngine r(42);
+    flas::do_sorting_1d<uint16_t>(mf, space, s, r, [](float) { return false; });
+
+    std::vector<bool> seen(N, false);
+    for (int i = 0; i < N; ++i) {
+        ASSERT_GE(mf[i].id, 0);
+        ASSERT_LT(mf[i].id, N);
+        EXPECT_FALSE(seen[mf[i].id]);
+        seen[mf[i].id] = true;
+    }
+}
+
 TEST(FlasSettingsTest, NonFP32MetricThrows) {
     const int N = 10;
     const int D = 4;
@@ -197,7 +224,7 @@ TEST(FlasSettingsTest, NonFP32MetricThrows) {
     EXPECT_THROW(flas::do_sorting_1d(map_fields, uint8_ip_space, settings, flas_rng, [](float) { return false; }), std::invalid_argument);
 
     deglib::distances::FloatSpace fp16_space(D, deglib::distances::Metric::FP16_InnerProduct);
-    EXPECT_THROW(flas::do_sorting_1d(map_fields, fp16_space, settings, flas_rng, [](float) { return false; }), std::invalid_argument);
+    EXPECT_NO_THROW(flas::do_sorting_1d<float>(map_fields, fp16_space, settings, flas_rng, [](float) { return false; }));
 
     deglib::distances::FloatSpace evp_space(D, deglib::distances::Metric::EVP_InnerProduct);
     EXPECT_THROW(flas::do_sorting_1d(map_fields, evp_space, settings, flas_rng, [](float) { return false; }), std::invalid_argument);
@@ -330,7 +357,7 @@ TEST(Flas1DTest, SortShuffled0To100) {
     flas::do_sorting_1d(mf, space, s, r, [](float) { return false; });
 
     std::vector<float> res(N);
-    for (int i = 0; i < N; ++i) res[i] = *mf[i].feature;
+    for (int i = 0; i < N; ++i) res[i] = *static_cast<const float*>(mf[i].feature);
     float avg_dist = calc_avg_neighbor_dist(res);
 
     float avg_dist_raw = calc_avg_neighbor_dist(features);

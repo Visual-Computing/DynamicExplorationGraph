@@ -2,6 +2,7 @@
 #define FLAS_FAST_LINEAR_ASSIGNMENT_SORTER_H
 
 #include "deglib/distances.h"
+#include "deglib/distance/fp16.h"
 #include "deglib/optimization/flas/junker_volgenant_solver.h"
 #include "deglib/utils/random.h"
 
@@ -16,33 +17,57 @@
 
 namespace flas {
 
+// Storage-type codec: abstracts fp32 (float) and fp16 (uint16_t bit patterns) for FLAS buffers.
+// The FLAS distance kernel is dtype-agnostic (const void*), so feature vectors and the SOM grid
+// must share the same storage type. fp16 prototypes are converted on the fly.
+template <class T>
+struct FlasPixel {
+    static float load(T v) noexcept { return static_cast<float>(v); }
+    static T store(float f) noexcept { return static_cast<T>(f); }
+};
+
+template <>
+struct FlasPixel<uint16_t> {
+    static float load(uint16_t v) noexcept { return deglib::distances::fp16::fp16_to_float(v); }
+    static uint16_t store(float f) noexcept { return deglib::distances::fp16::float_to_fp16(f); }
+};
+
 // Stores element ID and a pointer to its feature vector for tracking during sorting.
+// Feature pointer is dtype-agnostic (fp32 or fp16); it is passed unchanged to the space's dist_func.
 struct MapField {
     int id;
-    const float* feature;
+    const void* feature;
 };
 
 // Initializes a single MapField with element ID and feature vector pointer.
-inline void init_map_field(MapField& map_field, const int id, const float* const feature) {
+inline void init_map_field(MapField& map_field, const int id, const void* const feature) {
     map_field.id = id;
     map_field.feature = feature;
 }
 
 // Fills a span of MapFields with sequential IDs (0..N-1) and pointers to contiguous features.
-inline void init_map_fields(std::span<MapField> map_fields, const float* features, int dim) {
+template <class T>
+inline void init_map_fields(std::span<MapField> map_fields, const void* features, int dim) {
+    const T* f = static_cast<const T*>(features);
     const size_t dim_sz = static_cast<size_t>(dim);
     const size_t count = map_fields.size();
     for (size_t i = 0; i < count; ++i) {
         map_fields[i].id = static_cast<int>(i);
-        map_fields[i].feature = features + i * dim_sz;
+        map_fields[i].feature = f + i * dim_sz;
     }
 }
 
 // Helper: Creates a std::vector<MapField> pre-initialized with IDs (0..N-1) and feature pointers.
-inline std::vector<MapField> make_map_fields(const float* features, int count, int dim) {
+template <class T>
+inline std::vector<MapField> make_map_fields(const void* features, int count, int dim) {
     std::vector<MapField> map_fields(static_cast<size_t>(count));
-    init_map_fields(map_fields, features, dim);
+    init_map_fields<T>(map_fields, features, dim);
     return map_fields;
+}
+
+// FP32 convenience overload (keeps raw float* call sites working without template args).
+inline std::vector<MapField> make_map_fields(const float* features, int count, int dim) {
+    return make_map_fields<float>(features, count, dim);
 }
 
 using RandomEngine = std::mt19937;
@@ -64,8 +89,8 @@ class SwapBuffers {
     std::vector<int> swap_positions;
     std::vector<int> swap_indices;
     std::vector<MapField> swapped_elements;
-    std::vector<const float*> fvs;
-    std::vector<const float*> som_fvs;
+    std::vector<const void*> fvs;
+    std::vector<const void*> som_fvs;
     std::vector<int> dist_lut;
     std::vector<float> dist_lut_f;
     JVScratch jv_scratch;
@@ -102,8 +127,9 @@ struct FlasContext {
 
     FlasContext(std::span<MapField> map_fields_, int count_, const deglib::distances::FloatSpace& space_, RandomEngine& rng_)
         : map_fields(map_fields_), count(count_), space(space_), rng(rng_) {
-        if (space.metric().get_data_type() != deglib::distances::MetricDataType::FP32) {
-            throw std::invalid_argument(std::format("FLAS only supports FP32 metric data types, got: {}", space.metric().get_data_type_name()));
+        const auto dt = space.metric().get_data_type();
+        if (dt != deglib::distances::MetricDataType::FP32 && dt != deglib::distances::MetricDataType::FP16) {
+            throw std::invalid_argument(std::format("FLAS only supports FP32/FP16 metric data types, got: {}", space.metric().get_data_type_name()));
         }
     }
 
@@ -117,13 +143,15 @@ struct FlasContext {
 };
 
 // Manages SOM buffer and moving-average filter scratch memory (Move-safe, Rule of Zero).
+// Storage element type T is float (fp32) or uint16_t (fp16 bit patterns) so the SOM prototypes
+template <class T>
 class SomGrid {
   public:
-    std::vector<float> som_buf;
+    std::vector<T> som_buf;
     size_t som_offset = 0;
 
-    std::vector<float> filtered_som_buf;  // Buffer holding filtered SOM values (count * dim)
-    std::vector<float> window_sum;        // Accumulator for sliding window filter (dim)
+    std::vector<T> filtered_som_buf;  // Buffer holding filtered SOM values (count * dim)
+    std::vector<float> window_sum;     // Accumulator for sliding window filter (dim, computed in float)
 
     explicit SomGrid(int count, int dim) {
         size_t max_ext = static_cast<size_t>(count / 2);
@@ -133,18 +161,18 @@ class SomGrid {
         window_sum.resize(static_cast<size_t>(dim));
     }
 
-    inline float* som() noexcept { return som_buf.data() + som_offset; }
-    inline const float* som() const noexcept { return som_buf.data() + som_offset; }
+    inline T* som() noexcept { return som_buf.data() + som_offset; }
+    inline const T* som() const noexcept { return som_buf.data() + som_offset; }
 
-    inline float* row(int i, int dim) noexcept { return som() + i * dim; }
-    inline const float* row(int i, int dim) const noexcept { return som() + i * dim; }
+    inline T* row(int i, int dim) noexcept { return som() + i * dim; }
+    inline const T* row(int i, int dim) const noexcept { return som() + i * dim; }
 
     // Mirrors boundary cells for circular/clamped window filtering.
     inline void apply_mirror_padding(int ext, int count, int dim) noexcept {
-        float* s = som();
+        T* s = som();
         for (int i = 0; i < ext; i++) {
-            std::memcpy(&s[(-1 - i) * dim], &s[(i + 1) * dim], dim * sizeof(float));
-            std::memcpy(&s[(count + i) * dim], &s[(count - 2 - i) * dim], dim * sizeof(float));
+            std::memcpy(&s[(-1 - i) * dim], &s[(i + 1) * dim], dim * sizeof(T));
+            std::memcpy(&s[(count + i) * dim], &s[(count - 2 - i) * dim], dim * sizeof(T));
         }
     }
 };
@@ -153,16 +181,19 @@ class SomGrid {
 inline void shuffle_array(std::span<int> data, RandomEngine& rng) { std::shuffle(data.begin(), data.end(), rng); }
 
 // Phase "copy": Copies current MapField feature vectors into the SOM grid buffer.
-inline void copy_feature_vectors_to_som(const FlasContext& ctx, SomGrid& grid) {
+template <class T>
+inline void copy_feature_vectors_to_som(const FlasContext& ctx, SomGrid<T>& grid) {
     const int dim = ctx.dim();
     for (int i = 0; i < ctx.count; i++) {
         const MapField& map_field = ctx.map_fields[i];
-        std::copy_n(map_field.feature, dim, grid.row(i, dim));
+        std::copy_n(static_cast<const T*>(map_field.feature), static_cast<size_t>(dim), grid.row(i, dim));
     }
 }
 
 // Phase "filter": Applies a 1D sliding-window moving-average filter over a 2*radius+1 window.
-inline void filter_weighted_som_1d(int radius, const FlasContext& ctx, SomGrid& grid) {
+// Accumulated in float; results written back in storage type T (fp16 quantization on store).
+template <class T>
+inline void filter_weighted_som_1d(int radius, const FlasContext& ctx, SomGrid<T>& grid) {
     if (ctx.count <= 1 || radius <= 0) return;
 
     int filter_size = 2 * radius + 1;
@@ -177,24 +208,24 @@ inline void filter_weighted_som_1d(int radius, const FlasContext& ctx, SomGrid& 
     grid.apply_mirror_padding(ext, size, dims);
 
     // Initialize sliding window sum for the first window [-ext, ext]
-    const float* base_ptr = grid.row(-ext, dims);
+    const T* base_ptr = grid.row(-ext, dims);
     std::fill_n(window_sum, dims, 0.0f);
     for (int i = 0; i < filter_size; i++) {
-        const float* cell = base_ptr + i * dims;
-        for (int d = 0; d < dims; d++) window_sum[d] += cell[d];
+        const T* cell = base_ptr + i * dims;
+        for (int d = 0; d < dims; d++) window_sum[d] += FlasPixel<T>::load(cell[d]);
     }
 
     // Store normalized average for index 0
-    for (int d = 0; d < dims; d++) grid.filtered_som_buf[d] = window_sum[d] * inv_filter_size;
+    for (int d = 0; d < dims; d++) grid.filtered_som_buf[d] = FlasPixel<T>::store(window_sum[d] * inv_filter_size);
 
     // Slide window across remaining array elements (subtract outgoing cell, add incoming cell)
     for (int i = 1; i < size; i++) {
-        const float* left_cell = base_ptr + (i - 1) * dims;
-        const float* right_cell = base_ptr + (i - 1 + filter_size) * dims;
+        const T* left_cell = base_ptr + (i - 1) * dims;
+        const T* right_cell = base_ptr + (i - 1 + filter_size) * dims;
 
         for (int d = 0; d < dims; d++) {
-            window_sum[d] += right_cell[d] - left_cell[d];
-            grid.filtered_som_buf[i * dims + d] = window_sum[d] * inv_filter_size;
+            window_sum[d] += FlasPixel<T>::load(right_cell[d]) - FlasPixel<T>::load(left_cell[d]);
+            grid.filtered_som_buf[i * dims + d] = FlasPixel<T>::store(window_sum[d] * inv_filter_size);
         }
     }
 
@@ -228,7 +259,8 @@ inline void calc_dist_lut_int(const FlasContext& ctx, SwapBuffers& swaps, int nu
 }
 
 // Solves linear assignment for chosen swap positions using JV solver and updates element order.
-inline void do_swaps(const FlasContext& ctx, SomGrid& grid, SwapBuffers& swaps, int num_swaps) {
+template <class T>
+inline void do_swaps(const FlasContext& ctx, SomGrid<T>& grid, SwapBuffers& swaps, int num_swaps) {
     if (num_swaps == 0) return;
 
     const int dim = ctx.dim();
@@ -279,7 +311,8 @@ inline int find_swap_positions_1d(const FlasContext& ctx, SwapBuffers& swaps, st
 }
 
 // Runs one iteration of localized random swap probes for the given radius.
-inline void check_random_swaps_1d(const FlasContext& ctx, SomGrid& grid, SwapBuffers& swaps, int radius, float sample_factor) {
+template <class T>
+inline void check_random_swaps_1d(const FlasContext& ctx, SomGrid<T>& grid, SwapBuffers& swaps, int radius, float sample_factor) {
     int max_sp = swaps.num_swap_positions();
     if (max_sp == 0) return;
 
@@ -309,6 +342,7 @@ inline void check_random_swaps_1d(const FlasContext& ctx, SomGrid& grid, SwapBuf
 }
 
 // Main 1D FLAS sorter: repeatedly copies to SOM, applies moving-average filter, and performs random swaps.
+template <class T>
 inline void do_sorting_1d(
     std::span<MapField> map_fields,
     const deglib::distances::FloatSpace& space,
@@ -326,7 +360,7 @@ inline void do_sorting_1d(
     if (progress_callback && progress_callback(0.f)) return;
 
     FlasContext ctx(map_fields, count, space, rng);
-    SomGrid grid(count, dim);
+    SomGrid<T> grid(count, dim);
     SwapBuffers swaps(std::min(count, settings.max_swap_positions), count);
 
     do {
@@ -348,6 +382,17 @@ inline void do_sorting_1d(
         float progress = static_cast<float>(iteration_counter) / static_cast<float>(num_iterations);
         if (progress_callback && progress_callback(progress)) break;
     } while (rad > settings.radius_end);
+}
+
+// FP32 convenience overload (single-threaded) so raw float* call sites compile without template args.
+inline void do_sorting_1d(
+    std::span<MapField> map_fields,
+    const deglib::distances::FloatSpace& space,
+    const FlasSettings& settings,
+    RandomEngine& rng,
+    const std::function<bool(float)>& progress_callback
+) {
+    do_sorting_1d<float>(map_fields, space, settings, rng, progress_callback);
 }
 
 }  // namespace flas

@@ -26,7 +26,7 @@ namespace deglib::optimization {
  * @return std::vector<uint32_t> Permutation array of original vector indices [0..count-1] in sorted order.
  */
 inline std::vector<uint32_t> presort(
-    const float* data,
+    const void* data,
     size_t count,
     const deglib::distances::FloatSpace& space,
     float radius_decay = 0.9f,
@@ -36,22 +36,33 @@ inline std::vector<uint32_t> presort(
     if (count == 0) return {};
 
     const int dim = static_cast<int>(space.dim());
-    std::vector<flas::MapField> map_fields = flas::make_map_fields(data, static_cast<int>(count), dim);
     flas::FlasSettings settings;
     settings.radius_decay = radius_decay;
 
     std::mt19937 rng(42);
     auto cb = callback ? callback : [](float) { return false; };
+    const bool mt = (numThreads != 1);
 
-    if (numThreads != 1) {
-        flas::do_sorting_1d(map_fields, space, settings, rng, cb, static_cast<int>(numThreads));
-    } else {
-        flas::do_sorting_1d(map_fields, space, settings, rng, cb);
-    }
-
+    const auto dt = space.metric().get_data_type();
     std::vector<uint32_t> result(count);
-    for (size_t i = 0; i < count; ++i) {
-        result[i] = static_cast<uint32_t>(map_fields[i].id);
+
+    auto run = [&](auto type_tag) {
+        using T = decltype(type_tag);
+        std::vector<flas::MapField> map_fields = flas::make_map_fields<T>(data, static_cast<int>(count), dim);
+        if (mt) {
+            flas::do_sorting_1d<T>(map_fields, space, settings, rng, cb, static_cast<int>(numThreads));
+        } else {
+            flas::do_sorting_1d<T>(map_fields, space, settings, rng, cb);
+        }
+        for (size_t i = 0; i < count; ++i) {
+            result[i] = static_cast<uint32_t>(map_fields[i].id);
+        }
+    };
+
+    if (dt == deglib::distances::MetricDataType::FP16) {
+        run(uint16_t{});
+    } else {
+        run(float{});
     }
     return result;
 }

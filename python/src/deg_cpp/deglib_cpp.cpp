@@ -983,14 +983,18 @@ inline deglib::distances::MetricDataType parse_quant_data_type(const nb::object&
 }
 
 nb::ndarray<nb::numpy, uint32_t, nb::ndim<1>, nb::c_contig> presort_wrapper(
-    const InFloatArray& vectors,
+    const InArray& vectors,
     const deglib::distances::FloatSpace& space,
     float radius_decay = 0.9f,
     size_t threads = 0,
     nb::object callback = nb::none()
 ) {
     if (vectors.ndim() != 2) {
-        throw std::invalid_argument("vectors must be a 2D float32 array");
+        throw std::invalid_argument("vectors must be a 2D float32/float16 array");
+    }
+    const auto vec_dt = vectors.dtype();
+    if (!is_dtype_float32(vec_dt) && !is_dtype_float16_only(vec_dt)) {
+        throw std::invalid_argument(std::format("presort expects a float32 or float16 array, got dtype code {} bits {}", vec_dt.code, vec_dt.bits));
     }
     const size_t count = vectors.shape(0);
     const size_t dim = vectors.shape(1);
@@ -1015,7 +1019,7 @@ nb::ndarray<nb::numpy, uint32_t, nb::ndim<1>, nb::c_contig> presort_wrapper(
         };
     }
 
-    const float* vec_ptr = vectors.data();
+    const void* vec_ptr = vectors.data();
     std::vector<uint32_t> sorted_indices;
     {
         nb::gil_scoped_release release;

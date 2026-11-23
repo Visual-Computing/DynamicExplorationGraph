@@ -197,7 +197,8 @@ inline int find_swap_positions_1d(const FlasContext& ctx, SwapBuffers& swaps, st
 //  3. Executes `flas::do_swaps` from the base header.
 //  4. Releases all locked target positions.
 // ---------------------------------------------------------------------------
-inline bool try_lock_and_swap(const FlasContext& ctx, SomGrid& grid, ThreadWorker& worker, int num_swaps, PositionLocks& locks) {
+template <class T>
+inline bool try_lock_and_swap(const FlasContext& ctx, SomGrid<T>& grid, ThreadWorker& worker, int num_swaps, PositionLocks& locks) {
     if (num_swaps == 0) return false;
 
     std::array<int, 32> lock_pos;
@@ -232,6 +233,7 @@ inline bool try_lock_and_swap(const FlasContext& ctx, SomGrid& grid, ThreadWorke
 //   4. Parallel candidate swap probes with non-blocking try-locking
 //   5. Progress callback and termination evaluation
 // ---------------------------------------------------------------------------
+template <class T>
 inline void do_sorting_1d(
     std::span<MapField> map_fields,
     const deglib::distances::FloatSpace& space,
@@ -244,7 +246,7 @@ inline void do_sorting_1d(
     if (count <= 0) return;
 
     if (num_threads <= 1) {
-        do_sorting_1d(map_fields, space, settings, rng, callback);
+        do_sorting_1d<T>(map_fields, space, settings, rng, callback);
         return;
     }
 
@@ -255,7 +257,7 @@ inline void do_sorting_1d(
     if (callback && callback(0.f)) return;
 
     FlasContext ctx(map_fields, count, space, rng);
-    SomGrid grid(count, dim);
+    SomGrid<T> grid(count, dim);
 
     SwapThreadPool pool(num_threads);
     PositionLocks position_locks(ctx.count);
@@ -276,7 +278,7 @@ inline void do_sorting_1d(
     do {
         // 1. Parallel copy of current feature vectors to SOM grid
         pool.parallel_for(static_cast<size_t>(count), [&](size_t i, size_t /*tid*/) {
-            std::copy_n(ctx.map_fields[static_cast<int>(i)].feature, static_cast<size_t>(dim), grid.row(static_cast<int>(i), dim));
+            std::copy_n(static_cast<const T*>(ctx.map_fields[static_cast<int>(i)].feature), static_cast<size_t>(dim), grid.row(static_cast<int>(i), dim));
         });
 
         int radius = std::max(1, static_cast<int>(std::round(rad)));
@@ -320,6 +322,18 @@ inline void do_sorting_1d(
         float progress = static_cast<float>(iteration_counter) / static_cast<float>(num_iterations);
         if (callback && callback(progress)) break;
     } while (rad > settings.radius_end);
+}
+
+// FP32 convenience overload (multi-threaded) so raw float* call sites compile without template args.
+inline void do_sorting_1d(
+    std::span<MapField> map_fields,
+    const deglib::distances::FloatSpace& space,
+    const FlasSettings& settings,
+    RandomEngine& rng,
+    const std::function<bool(float)>& callback,
+    int num_threads
+) {
+    do_sorting_1d<float>(map_fields, space, settings, rng, callback, num_threads);
 }
 
 }  // namespace flas

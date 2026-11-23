@@ -61,12 +61,18 @@ def presort(
     """
     resolved_metric = Metric.resolve(metric)
     base_metric = Metric(int(resolved_metric))
-    if base_metric not in (Metric.FP32_L2, Metric.FP32_InnerProduct):
-        raise ValueError(f"presort only supports FP32_L2 and FP32_InnerProduct, got {resolved_metric.name}")
+    if base_metric not in (
+        Metric.FP32_L2,
+        Metric.FP32_InnerProduct,
+        Metric.FP16_L2,
+        Metric.FP16_InnerProduct,
+    ):
+        raise ValueError(f"presort only supports FP32/FP16 L2 and InnerProduct metrics, got {resolved_metric.name}")
 
-    vectors = assure_array(vectors, "vectors", np.dtype(np.float32))
+    expected_dtype = np.dtype(np.float16) if "FP16" in base_metric.name else np.dtype(np.float32)
+    vectors = assure_array(vectors, "vectors", expected_dtype)
     if vectors.ndim != 2:
-        raise ValueError(f"vectors must be a 2D float32 array, got shape {vectors.shape}")
+        raise ValueError(f"vectors must be a 2D {expected_dtype} array, got shape {vectors.shape}")
     if vectors.shape[0] == 0:
         return np.empty(0, dtype=np.uint32)
 
