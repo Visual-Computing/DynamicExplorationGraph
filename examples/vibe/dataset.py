@@ -31,6 +31,15 @@ VIBE_DATASETS: Dict[str, Dict[str, Any]] = {
         "dim": 768,
         "size": 1344643,
     },
+    "hotpotqa-harrier": {
+        "name": "HotpotQA-harrier",
+        "file": "hotpotqa-harrier-640-normalized.hdf5",
+        "metric": "normalized",
+        "type": "in-distribution",
+        "dim": 640,
+        "size": 5233329,
+        "dtype": "float16",
+    },
     "landmark-dino": {
         "name": "Landmark-dino",
         "file": "landmark-dino-768-cosine.hdf5",
@@ -46,6 +55,7 @@ VIBE_DATASETS: Dict[str, Dict[str, Any]] = {
         "type": "in-distribution",
         "dim": 1024,
         "size": 8840823,
+        "dtype": "float16",
     },
     "gooaq-distilroberta": {
         "name": "GooAQ-distilroberta",
@@ -119,6 +129,78 @@ VIBE_DATASETS: Dict[str, Dict[str, Any]] = {
         "dim": 5120,
         "size": 457149,
     },
+    "ccnews-nomic": {
+        "name": "CCNews-nomic",
+        "file": "ccnews-nomic-768-normalized.hdf5",
+        "metric": "normalized",
+        "type": "in-distribution",
+        "dim": 768,
+        "size": 495328,
+    },
+    "celeba-resnet": {
+        "name": "CelebA-resnet",
+        "file": "celeba-resnet-2048-cosine.hdf5",
+        "metric": "cosine",
+        "type": "out-of-distribution",
+        "dim": 2048,
+        "size": 201599,
+    },
+    "codesearchnet-jina": {
+        "name": "CodeSearchNet-jina",
+        "file": "codesearchnet-jina-768-cosine.hdf5",
+        "metric": "cosine",
+        "type": "in-distribution",
+        "dim": 768,
+        "size": 1374067,
+    },
+    "glove": {
+        "name": "Glove-200",
+        "file": "glove-200-cosine.hdf5",
+        "metric": "cosine",
+        "type": "out-of-distribution",
+        "dim": 200,
+        "size": 1192514,
+    },
+    "landmark-nomic": {
+        "name": "Landmark-nomic",
+        "file": "landmark-nomic-768-normalized.hdf5",
+        "metric": "normalized",
+        "type": "in-distribution",
+        "dim": 768,
+        "size": 760757,
+    },
+    "simplewiki-openai": {
+        "name": "SimpleWiki-openai",
+        "file": "simplewiki-openai-3072-normalized.hdf5",
+        "metric": "normalized",
+        "type": "in-distribution",
+        "dim": 3072,
+        "size": 260372,
+    },
+    "coco-nomic": {
+        "name": "COCO-nomic",
+        "file": "coco-nomic-768-normalized.hdf5",
+        "metric": "normalized",
+        "type": "out-of-distribution",
+        "dim": 768,
+        "size": 282360,
+    },
+    "llama": {
+        "name": "LLaMA-128",
+        "file": "llama-128-ip.hdf5",
+        "metric": "ip",
+        "type": "in-distribution",
+        "dim": 128,
+        "size": 256921,
+    },
+    "yi": {
+        "name": "Yi-128",
+        "file": "yi-128-ip.hdf5",
+        "metric": "ip",
+        "type": "in-distribution",
+        "dim": 128,
+        "size": 187843,
+    },
 }
 
 ALIAS_MAP: Dict[str, str] = {
@@ -126,8 +208,32 @@ ALIAS_MAP: Dict[str, str] = {
     "agnews-mxbai": "agnews-mxbai",
     "arxiv": "arxiv-nomic",
     "arxiv-nomic": "arxiv-nomic",
+    "hotpotqa": "hotpotqa-harrier",
+    "hotpotqa-harrier": "hotpotqa-harrier",
     "landmark": "landmark-dino",
     "landmark-dino": "landmark-dino",
+    "landmark-nomic": "landmark-nomic",
+    "landmark-nomic-768": "landmark-nomic",
+    "landmark-nomic-768-normalized": "landmark-nomic",
+    "ccnews": "ccnews-nomic",
+    "ccnews-nomic": "ccnews-nomic",
+    "celeba": "celeba-resnet",
+    "celeba-resnet": "celeba-resnet",
+    "codesearchnet": "codesearchnet-jina",
+    "codesearchnet-jina": "codesearchnet-jina",
+    "glove": "glove",
+    "glove-200": "glove",
+    "glove-200-cosine": "glove",
+    "simplewiki": "simplewiki-openai",
+    "simplewiki-openai": "simplewiki-openai",
+    "coco": "coco-nomic",
+    "coco-nomic": "coco-nomic",
+    "llama": "llama",
+    "llama-128": "llama",
+    "llama-128-ip": "llama",
+    "yi": "yi",
+    "yi-128": "yi",
+    "yi-128-ip": "yi",
     "msmarco": "msmarco-qwen",
     "msmarco-qwen": "msmarco-qwen",
     "gooaq": "gooaq-distilroberta",
@@ -253,6 +359,7 @@ def load_vibe_dataset(
     dataset_dir, hdf5_path, meta = ensure_dataset(key, cache_dir)
 
     print(f"Opening HDF5 dataset file: {hdf5_path}...")
+    vec_dtype = np.dtype(meta.get("dtype", "float32"))
     with h5py.File(hdf5_path, "r") as f:
         # Check datasets inside HDF5
         print(f"  Available keys in HDF5: {list(f.keys())}")
@@ -260,12 +367,12 @@ def load_vibe_dataset(
         # Load train (corpus) vectors as float32 C-contiguous
         train_ds = f["train"]
         print(f"  Reading train embeddings ({train_ds.shape}, dtype={train_ds.dtype})...")
-        base_vecs = np.ascontiguousarray(train_ds[:], dtype=np.float32)
+        base_vecs = np.ascontiguousarray(train_ds[:], dtype=vec_dtype)
 
         # Load test (query) vectors
         test_ds = f["test"]
         print(f"  Reading test query embeddings ({test_ds.shape}, dtype={test_ds.dtype})...")
-        query_vecs = np.ascontiguousarray(test_ds[:], dtype=np.float32)
+        query_vecs = np.ascontiguousarray(test_ds[:], dtype=vec_dtype)
 
         # Load top-100 ground truth neighbors
         neighbors_ds = f["neighbors"]

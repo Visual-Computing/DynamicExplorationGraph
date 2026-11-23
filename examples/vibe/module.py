@@ -50,9 +50,10 @@ def _resolve_graph_cache_path(
     opt_target: str,
     extend_k: int | None = None,
     extend_eps: float = 0.1,
+    build_metric: str = deglib.Metric.FP32_InnerProduct.name,
 ) -> Path:
-    """Resolves cached FP32 graph path."""
-    build_metric_str = deglib.Metric.FP32_L2.name if metric == "euclidean" else deglib.Metric.FP32_InnerProduct.name
+    """Resolves cached graph path (fp32 or fp16 build metric)."""
+    build_metric_str = deglib.Metric.FP32_L2.name if metric == "euclidean" else build_metric
     ext_k = extend_k if extend_k is not None else k * 2
 
     preferred = deg_dir / f"{dims}D_{build_metric_str}_K{k}_AddK{ext_k}Eps{extend_eps:.1f}_{opt_target}_FLAS.deg"
@@ -80,11 +81,12 @@ def _load_or_build_base_graph(
     """Normalizes cosine vectors and builds (or loads from cache) the FP32 base graph."""
     if metric == "cosine":
         X = X / np.linalg.norm(X, axis=1, keepdims=True)
-    X = np.ascontiguousarray(X, dtype=np.float32)
+    target_dtype = np.float16 if "FP16" in build_metric.name else np.float32
+    X = np.ascontiguousarray(X, dtype=target_dtype)
     n_vectors, dims = X.shape
 
     deg_dir = _resolve_deg_cache_dir(n_vectors, dims, cache_dir)
-    cache_file = _resolve_graph_cache_path(deg_dir, dims, metric, k, opt_target)
+    cache_file = _resolve_graph_cache_path(deg_dir, dims, metric, k, opt_target, build_metric=build_metric.name)
     if cache_file.exists():
         print(f"Loading cached DEG graph from {cache_file}...", flush=True)
         return deglib.load_readonly_graph(str(cache_file))
@@ -140,7 +142,9 @@ class DEG(_BaseDEG):
         self.searcher = None
 
     def fit(self, X: np.ndarray, cache_dir: Path | None = None):
-        """Builds or loads the DEG graph in FP32 and prepares the Searcher."""
+        """Builds or loads the DEG graph and prepares the Searcher (fp16 in, fp16 build)."""
+        if X.dtype == np.float16:
+            self.build_metric = deglib.Metric[f"FP16_{self._metric_kind}"]
         graph = _load_or_build_base_graph(
             X, self.metric, self.k, self.opt_target, self.build_metric, self.opt_enum, self.threads, cache_dir
         )
@@ -205,6 +209,8 @@ class QG(_BaseDEG):
 
     def fit(self, X: np.ndarray, cache_dir: Path | None = None):
         """Builds DEG graph once, creates one shared FP16 Reranker, and converts into one Searcher per quant."""
+        if X.dtype == np.float16:
+            self.build_metric = deglib.Metric[f"FP16_{self._metric_kind}"]
         loaded_graph = _load_or_build_base_graph(
             X, self.metric, self.k, self.opt_target, self.build_metric, self.opt_enum, self.threads, cache_dir
         )

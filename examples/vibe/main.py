@@ -295,7 +295,11 @@ def main():
         dims = base_vecs.shape[1]
         metric_str = meta["metric"]
         is_l2 = metric_str.lower().strip() in ("euclidean", "l2", "fp32_l2")
-        metric_enum = deglib.Metric.FP32_L2 if is_l2 else deglib.Metric.FP32_InnerProduct
+        metric_enum = (
+            (deglib.Metric.FP16_L2 if is_l2 else deglib.Metric.FP16_InnerProduct)
+            if base_vecs.dtype == np.float16
+            else (deglib.Metric.FP32_L2 if is_l2 else deglib.Metric.FP32_InnerProduct)
+        )
         instruction_set = metric_enum.get_instruction().name
 
         print("\n--- System & Distance Config ---")
