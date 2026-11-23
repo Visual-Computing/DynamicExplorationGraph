@@ -345,9 +345,10 @@ public:
     /// Auto-tune traversal prefetch parameters (po, pl, nl) by timing traversal over sampled vertices
     void optimize(size_t sample_count = 300, uint32_t k = 100, uint32_t ef = 200, size_t median_subset = 4096) const;
 
-    /// Calibrate a RecallTable mapping target recall@k values to ef (in [10, 300], step 1) and eps (in [0.01, 0.20], resolution 0.0001), picking the smallest parameter achieving measured_recall >= target_recall
+    /// Calibrate a single-mode RecallTable mapping target recall@k values to ef (in [10, 500], step 1) or eps (in [0.005, 0.20], resolution 0.0001)
     deglib::search::RecallTable to_recall_table(
         uint32_t k,
+        deglib::search::RecallTable::Mode mode,
         size_t sample_count = 300,
         std::pair<float, float> recall_range = {0.80f, 0.999f},
         float recall_step = 0.005f,
@@ -355,9 +356,52 @@ public:
     ) const;
     deglib::search::RecallTable to_recall_table(
         uint32_t k,
+        deglib::search::RecallTable::Mode mode,
         std::span<const float> target_recalls,
         size_t sample_count = 300,
         size_t threads = 0
+    ) const;
+
+    /// Calibrate both Ef and Eps RecallTables in one pass sharing exact ground truth
+    std::vector<deglib::search::RecallTable> to_recall_tables(
+        uint32_t k,
+        size_t sample_count = 300,
+        std::pair<float, float> recall_range = {0.80f, 0.999f},
+        float recall_step = 0.005f,
+        size_t threads = 0
+    ) const;
+    std::vector<deglib::search::RecallTable> to_recall_tables(
+        uint32_t k,
+        std::span<const float> target_recalls,
+        size_t sample_count = 300,
+        size_t threads = 0
+    ) const;
+
+    /// Build a unified ParetoLine selecting the fastest parameter per target recall across one or more RecallTables and pruning dominated points
+    deglib::search::ParetoLine to_pareto_line(
+        std::span<const deglib::search::RecallTable> recall_tables,
+        size_t sample_count = 0,
+        size_t rounds = 3
+    ) const;
+    deglib::search::ParetoLine to_pareto_line(
+        const deglib::search::RecallTable& recall_table,
+        size_t sample_count = 0,
+        size_t rounds = 3
+    ) const;
+    deglib::search::ParetoLine to_pareto_line(
+        uint32_t k,
+        size_t sample_count = 300,
+        std::pair<float, float> recall_range = {0.80f, 0.999f},
+        float recall_step = 0.005f,
+        size_t threads = 0,
+        size_t rounds = 3
+    ) const;
+    deglib::search::ParetoLine to_pareto_line(
+        uint32_t k,
+        std::span<const float> target_recalls,
+        size_t sample_count = 300,
+        size_t threads = 0,
+        size_t rounds = 3
     ) const;
 
     // --- Conversions & Persistence ---
@@ -654,40 +698,125 @@ struct SearchResults {
     std::span<const float> get_distances(size_t q = 0) const noexcept;
 };
 
-struct EfRecallEntry {
-    float target_recall = 0.0f;
-    uint32_t ef = 0;
-    float measured_recall = 0.0f;
-};
-
-struct EpsRecallEntry {
-    float target_recall = 0.0f;
-    float eps = 0.0f;
-    float measured_recall = 0.0f;
-};
-
-/// Parameter calibration table mapping target recall@k levels to the smallest ef (step 1) and eps (0.0001 resolution) achieving measured_recall >= target_recall.
+/// Single-mode parameter calibration table mapping target recall@k levels along Mode::Ef (in [10, 500], step 1) or Mode::Eps (in [0.005, 0.20], resolution 0.0001), picking the smallest parameter achieving measured_recall >= target_recall.
 class RecallTable {
 public:
+    enum class Mode : uint8_t { Ef, Eps };
+
+    struct Entry {
+        float target_recall = 0.0f;
+        float eps_or_ef = 0.0f;
+        float measured_recall = 0.0f;
+    };
+
     static constexpr uint32_t kMinEf = 10;
-    static constexpr uint32_t kMaxEf = 300;
-    static constexpr float kMinEps = 0.01f;
+    static constexpr uint32_t kMaxEf = 500;
+    static constexpr uint32_t kEfResolution = 1;
+    static constexpr float kMinEps = 0.005f;
     static constexpr float kMaxEps = 0.20f;
     static constexpr float kEpsResolution = 0.0001f;
 
+    static RecallTable build(
+        const deglib::graph::InternalGraph& graph,
+        uint32_t k,
+        Mode mode,
+        size_t sample_count = 300,
+        std::pair<float, float> recall_range = {0.80f, 0.999f},
+        float recall_step = 0.005f,
+        size_t threads = 0
+    );
+    static RecallTable build(
+        const deglib::graph::InternalGraph& graph,
+        uint32_t k,
+        Mode mode,
+        std::span<const float> target_recalls,
+        size_t sample_count = 300,
+        size_t threads = 0
+    );
+    static std::vector<RecallTable> build_all(
+        const deglib::graph::InternalGraph& graph,
+        uint32_t k,
+        size_t sample_count = 300,
+        std::pair<float, float> recall_range = {0.80f, 0.999f},
+        float recall_step = 0.005f,
+        size_t threads = 0
+    );
+    static std::vector<RecallTable> build_all(
+        const deglib::graph::InternalGraph& graph,
+        uint32_t k,
+        std::span<const float> target_recalls,
+        size_t sample_count = 300,
+        size_t threads = 0
+    );
+
     uint32_t k() const noexcept;
     size_t sample_count() const noexcept;
-    bool has_ef() const noexcept;
-    bool has_eps() const noexcept;
-    std::optional<std::pair<float, float>> ef_recall_bounds() const noexcept;
-    std::optional<std::pair<float, float>> eps_recall_bounds() const noexcept;
-    const std::vector<EfRecallEntry>& ef_entries() const noexcept;
-    const std::vector<EpsRecallEntry>& eps_entries() const noexcept;
-    std::vector<uint32_t> ef_values() const;
-    std::vector<float> eps_values() const;
+    Mode mode() const noexcept;
+    bool empty() const noexcept;
+    size_t size() const noexcept;
+    std::optional<std::pair<float, float>> recall_bounds() const noexcept;
+    const std::vector<Entry>& entries() const noexcept;
     std::vector<float> eps_or_ef_values() const;
-    std::optional<uint32_t> ef_for(float target_recall, bool clamp = false) const;
-    std::optional<float> eps_for(float target_recall, bool clamp = false) const;
+    std::optional<float> param_for(float target_recall, bool clamp = false) const;
+    std::string to_string() const;
+};
+
+/// Unified recall-latency Pareto frontier combining one or more RecallTables.
+class ParetoLine {
+public:
+    struct Entry {
+        float target_recall = 0.0f;
+        float eps_or_ef = 0.0f;  // >= 1.0f -> ef, < 1.0f -> eps
+        float measured_recall = 0.0f;
+        double latency_us = 0.0;
+        double qps = 0.0;
+        double avg_distance_count = 0.0;
+
+        bool is_ef() const noexcept;
+        bool is_eps() const noexcept;
+    };
+
+    static constexpr size_t kDefaultRounds = 3;
+
+    static ParetoLine build(
+        const deglib::graph::InternalGraph& graph,
+        std::span<const RecallTable> recall_tables,
+        size_t sample_count = 0,
+        size_t rounds = kDefaultRounds
+    );
+    static ParetoLine build(
+        const deglib::graph::InternalGraph& graph,
+        const RecallTable& recall_table,
+        size_t sample_count = 0,
+        size_t rounds = kDefaultRounds
+    );
+    static ParetoLine build(
+        const deglib::graph::InternalGraph& graph,
+        uint32_t k,
+        size_t sample_count = 300,
+        std::pair<float, float> recall_range = {0.80f, 0.999f},
+        float recall_step = 0.005f,
+        size_t threads = 0,
+        size_t rounds = kDefaultRounds
+    );
+    static ParetoLine build(
+        const deglib::graph::InternalGraph& graph,
+        uint32_t k,
+        std::span<const float> target_recalls,
+        size_t sample_count = 300,
+        size_t threads = 0,
+        size_t rounds = kDefaultRounds
+    );
+
+    uint32_t k() const noexcept;
+    size_t sample_count() const noexcept;
+    bool empty() const noexcept;
+    size_t size() const noexcept;
+    std::optional<std::pair<float, float>> recall_bounds() const noexcept;
+    const std::vector<Entry>& entries() const noexcept;
+    const std::vector<RecallTable>& recall_tables() const noexcept;
+    std::vector<float> eps_or_ef_values() const;
+    std::optional<float> param_for(float target_recall, bool clamp = false) const;
     std::string to_string() const;
 };
 

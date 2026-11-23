@@ -12,6 +12,7 @@
 #include "deglib/graph/readonly_graph.h"
 #include "deglib/graph/sizebounded_graph.h"
 
+#include "deglib/search/pareto_line.h"
 #include "deglib/search/recall_table.h"
 #include "deglib/serialization.h"
 #include "deglib/transformation.h"
@@ -1093,32 +1094,103 @@ class DynamicExplorationGraph {
     void optimize(size_t sample_count = 300, size_t median_subset = 4096) const { internal_graph_->optimize(sample_count, median_subset); }
 
     /**
-     * @brief Calibrates a `RecallTable` mapping target recall@k values to `ef` and `eps` search parameters.
-     *
-     * Self-samples up to `sample_count` stored vertices as queries, computes exact ground truth in the
-     * graph's native feature space, and solves for each target recall in `recall_range` (step `recall_step`)
-     * guarded by an estimated brute-force time budget.
+     * @brief Calibrates a single-mode `RecallTable` (`Mode::Ef` or `Mode::Eps`) mapping target recall@k values
+     *        to graph search parameters.
      */
     [[nodiscard]] deglib::search::RecallTable to_recall_table(
+        uint32_t k,
+        deglib::search::RecallTable::Mode mode,
+        size_t sample_count = deglib::search::RecallTable::kDefaultSampleCount,
+        std::pair<float, float> recall_range = {deglib::search::RecallTable::kDefaultMinRecall, deglib::search::RecallTable::kDefaultMaxRecall},
+        float recall_step = deglib::search::RecallTable::kDefaultRecallStep,
+        size_t threads = 0
+    ) const {
+        return deglib::search::RecallTable::build(*internal_graph_, k, mode, sample_count, recall_range, recall_step, threads);
+    }
+
+    /**
+     * @brief Calibrates a single-mode `RecallTable` (`Mode::Ef` or `Mode::Eps`) for explicit target recall@k values.
+     */
+    [[nodiscard]] deglib::search::RecallTable to_recall_table(
+        uint32_t k,
+        deglib::search::RecallTable::Mode mode,
+        std::span<const float> target_recalls,
+        size_t sample_count = deglib::search::RecallTable::kDefaultSampleCount,
+        size_t threads = 0
+    ) const {
+        return deglib::search::RecallTable::build(*internal_graph_, k, mode, target_recalls, sample_count, threads);
+    }
+
+    /**
+     * @brief Calibrates both `Mode::Ef` and `Mode::Eps` `RecallTable`s in one pass sharing exact ground truth.
+     */
+    [[nodiscard]] std::vector<deglib::search::RecallTable> to_recall_tables(
         uint32_t k,
         size_t sample_count = deglib::search::RecallTable::kDefaultSampleCount,
         std::pair<float, float> recall_range = {deglib::search::RecallTable::kDefaultMinRecall, deglib::search::RecallTable::kDefaultMaxRecall},
         float recall_step = deglib::search::RecallTable::kDefaultRecallStep,
         size_t threads = 0
     ) const {
-        return deglib::search::build_recall_table(*internal_graph_, k, sample_count, recall_range, recall_step, threads);
+        return deglib::search::RecallTable::build_all(*internal_graph_, k, sample_count, recall_range, recall_step, threads);
     }
 
     /**
-     * @brief Calibrates a `RecallTable` for an explicit sequence of target recall@k values.
+     * @brief Calibrates both `Mode::Ef` and `Mode::Eps` `RecallTable`s for explicit target recall@k values.
      */
-    [[nodiscard]] deglib::search::RecallTable to_recall_table(
+    [[nodiscard]] std::vector<deglib::search::RecallTable> to_recall_tables(
         uint32_t k,
         std::span<const float> target_recalls,
         size_t sample_count = deglib::search::RecallTable::kDefaultSampleCount,
         size_t threads = 0
     ) const {
-        return deglib::search::build_recall_table(*internal_graph_, k, target_recalls, sample_count, threads);
+        return deglib::search::RecallTable::build_all(*internal_graph_, k, target_recalls, sample_count, threads);
+    }
+
+    /**
+     * @brief Builds a unified `ParetoLine` from precomputed `RecallTable`s by comparing
+     *        single-threaded median latency and removing Pareto-dominated points.
+     */
+    [[nodiscard]] deglib::search::ParetoLine to_pareto_line(
+        std::span<const deglib::search::RecallTable> recall_tables,
+        size_t sample_count = 0,
+        size_t rounds = deglib::search::ParetoLine::kDefaultRounds
+    ) const {
+        return deglib::search::ParetoLine::build(*internal_graph_, recall_tables, sample_count, rounds);
+    }
+
+    /**
+     * @brief Builds a unified `ParetoLine` from a single precomputed `RecallTable`.
+     */
+    [[nodiscard]] deglib::search::ParetoLine
+    to_pareto_line(const deglib::search::RecallTable& recall_table, size_t sample_count = 0, size_t rounds = deglib::search::ParetoLine::kDefaultRounds) const {
+        return deglib::search::ParetoLine::build(*internal_graph_, recall_table, sample_count, rounds);
+    }
+
+    /**
+     * @brief Calibrates `Ef` and `Eps` `RecallTable`s over `recall_range` and reduces them to a `ParetoLine`.
+     */
+    [[nodiscard]] deglib::search::ParetoLine to_pareto_line(
+        uint32_t k,
+        size_t sample_count = deglib::search::RecallTable::kDefaultSampleCount,
+        std::pair<float, float> recall_range = {deglib::search::RecallTable::kDefaultMinRecall, deglib::search::RecallTable::kDefaultMaxRecall},
+        float recall_step = deglib::search::RecallTable::kDefaultRecallStep,
+        size_t threads = 0,
+        size_t rounds = deglib::search::ParetoLine::kDefaultRounds
+    ) const {
+        return deglib::search::ParetoLine::build(*internal_graph_, k, sample_count, recall_range, recall_step, threads, rounds);
+    }
+
+    /**
+     * @brief Calibrates `Ef` and `Eps` `RecallTable`s for explicit target recalls and reduces them to a `ParetoLine`.
+     */
+    [[nodiscard]] deglib::search::ParetoLine to_pareto_line(
+        uint32_t k,
+        std::span<const float> target_recalls,
+        size_t sample_count = deglib::search::RecallTable::kDefaultSampleCount,
+        size_t threads = 0,
+        size_t rounds = deglib::search::ParetoLine::kDefaultRounds
+    ) const {
+        return deglib::search::ParetoLine::build(*internal_graph_, k, target_recalls, sample_count, threads, rounds);
     }
 
     /**

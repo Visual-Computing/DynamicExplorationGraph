@@ -213,7 +213,9 @@ All graphs (fixed-capacity mutable `SizeBoundedGraph`, chunked `DynamicGraph`, a
 - `has_path(from_external_labels: Sequence[int], to_external_label: int, eps_or_ef: float = 0.0, max_distance_computation_count: int = 0) -> list[ObjectDistance]`
 - `save_graph(path: Path | str) -> bool` (requires mutable graph)
 - `optimize(sample_count: int = 300, median_subset: int = 4096) -> None`
-- `to_recall_table(k: int, sample_count: int = 300, recall_range: tuple[float, float] | None = None, recall_step: float | None = None, target_recalls: Sequence[float] | np.ndarray | None = None, threads: int = 0) -> RecallTable`: Calibrates `ef ∈ [10, 300]` (step `1`) and `eps ∈ [0.01, 0.20]` (resolution `0.0001`) parameter mappings, picking the smallest parameter achieving `measured_recall >= target_recall` using self-sampled queries, exact ground truth, and an approximated brute-force time guard (defaults `recall_range=(0.80, 0.999)`, `recall_step=0.005`).
+- `to_recall_table(k: int, mode: Literal["ef", "eps"], sample_count: int = 300, recall_range: tuple[float, float] | None = None, recall_step: float | None = None, target_recalls: Sequence[float] | np.ndarray | None = None, threads: int = 0) -> RecallTable`: Calibrates a single-mode recall@k parameter curve (`ef ∈ [10, 500]` step `1`, or `eps ∈ [0.005, 0.20]` resolution `0.0001`), picking the smallest parameter achieving `measured_recall >= target_recall` using self-sampled queries, exact ground truth, and an approximated brute-force time guard (defaults `recall_range=(0.80, 0.999)`, `recall_step=0.005`).
+- `to_recall_tables(k: int, sample_count: int = 300, recall_range: tuple[float, float] | None = None, recall_step: float | None = None, target_recalls: Sequence[float] | np.ndarray | None = None, threads: int = 0) -> list[RecallTable]`: Calibrates both `"ef"` and `"eps"` `RecallTable` curves in one pass sharing exact ground truth.
+- `to_pareto_line(k: int | None = None, recall_tables: RecallTable | Sequence[RecallTable] | None = None, sample_count: int | None = None, recall_range: tuple[float, float] | None = None, recall_step: float | None = None, target_recalls: Sequence[float] | np.ndarray | None = None, threads: int = 0, rounds: int = 3) -> ParetoLine`: Selects the fastest parameter per target recall across `recall_tables` (defaulting to `to_recall_tables(k, ...)`) by median single-threaded latency, prunes Pareto-dominated points, and exposes `.recall_tables`.
 
 #### Graph Conversion & Searcher Construction
 - `to_readonly(metric: Metric | str | None = None, custom_features: np.ndarray | None = None, custom_features_order: Literal["label", "internal"] = "label", transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None, use_rerank: bool = False, optimize: bool = True, threads: int = 0) -> DynamicExplorationGraph`
@@ -324,9 +326,15 @@ Filter(valid_labels: np.ndarray, max_value: int = -1, max_label_count: int = -1)
 
 ### `RecallTable`
 
-- `RecallTable` (returned by `graph.to_recall_table(...)`):
-  - Properties: `.k -> int`, `.sample_count -> int`, `.has_ef -> bool`, `.has_eps -> bool`, `.ef_recall_bounds -> tuple[float, float] | None`, `.eps_recall_bounds -> tuple[float, float] | None`, `.ef_entries -> list[tuple[float, int, float]]` (`(target_recall, ef, measured_recall)`), `.eps_entries -> list[tuple[float, float, float]]` (`(target_recall, eps, measured_recall)`)
-  - Methods: `.ef_values() -> list[int]`, `.eps_values() -> list[float]`, `.eps_or_ef_values() -> list[float]`, `.ef_for(target_recall: float, clamp: bool = False) -> int | None`, `.eps_for(target_recall: float, clamp: bool = False) -> float | None`, `str(table)`
+- `RecallTable` (returned by `graph.to_recall_table(...)` and `graph.to_recall_tables(...)`):
+  - Properties: `.k -> int`, `.sample_count -> int`, `.is_ef -> bool`, `.is_eps -> bool`, `.recall_bounds -> tuple[float, float] | None`, `.entries -> list[tuple[float, float, float]]` (`(target_recall, eps_or_ef, measured_recall)`)
+  - Methods: `.eps_or_ef_values() -> list[float]`, `.param_for(target_recall: float, clamp: bool = False) -> float | None`, `len(table)`, `str(table)`
+
+### `ParetoLine`
+
+- `ParetoLine` (returned by `graph.to_pareto_line(...)`):
+  - Properties: `.k -> int`, `.sample_count -> int`, `.recall_bounds -> tuple[float, float] | None`, `.recall_tables -> list[RecallTable]`, `.entries -> list[tuple[float, float, float, float, float]]` (`(target_recall, eps_or_ef, measured_recall, latency_us, qps)`)
+  - Methods: `.eps_or_ef_values() -> list[float]`, `.param_for(target_recall: float, clamp: bool = False) -> float | None`, `len(line)`, `str(line)`
 
 ### `Reranker` & `rerank`
 

@@ -6,10 +6,12 @@
 // - result_list.h: SearchResults, ResultList, ObjectDistance
 // - kmeans.h:       KMeansEntrySelector (query-routing entry selection)
 // - recall_table.h: RecallTable (parameter recall calibration)
+// - pareto_line.h:  ParetoLine (unified ef/eps recall-latency Pareto frontier)
 // - reranker.h:     Reranker (high-precision candidate reranker)
 // - searcher.h:     Searcher (stateless end-to-end query coordinator)
 
 #include "deglib/search/kmeans.h"
+#include "deglib/search/pareto_line.h"
 #include "deglib/search/recall_table.h"
 #include "deglib/search/reranker.h"
 #include "deglib/search/result_list.h"

@@ -44,9 +44,9 @@ class Filter:
 
 class RecallTable:
     """
-    Calibration table mapping target recall@k levels to ``ef`` and ``eps`` search parameters.
+    Single-mode calibration table mapping target recall@k levels to ``ef`` or ``eps`` parameters.
 
-    Created by :meth:`DynamicExplorationGraph.to_recall_table`.
+    Created by :meth:`DynamicExplorationGraph.to_recall_table` or :meth:`DynamicExplorationGraph.to_recall_tables`.
     """
 
     def __init__(self, recall_table_cpp: cpp_search.RecallTable):
@@ -65,60 +65,99 @@ class RecallTable:
         return int(self._recall_table_cpp.sample_count)
 
     @property
-    def has_ef(self) -> bool:
-        return bool(self._recall_table_cpp.has_ef)
+    def is_ef(self) -> bool:
+        return bool(self._recall_table_cpp.is_ef)
 
     @property
-    def has_eps(self) -> bool:
-        return bool(self._recall_table_cpp.has_eps)
+    def is_eps(self) -> bool:
+        return bool(self._recall_table_cpp.is_eps)
 
     @property
-    def ef_recall_bounds(self) -> tuple[float, float] | None:
-        bounds = self._recall_table_cpp.ef_recall_bounds
+    def recall_bounds(self) -> tuple[float, float] | None:
+        bounds = self._recall_table_cpp.recall_bounds
         return None if bounds is None else (float(bounds[0]), float(bounds[1]))
 
     @property
-    def eps_recall_bounds(self) -> tuple[float, float] | None:
-        bounds = self._recall_table_cpp.eps_recall_bounds
-        return None if bounds is None else (float(bounds[0]), float(bounds[1]))
-
-    @property
-    def ef_entries(self) -> list[tuple[float, int, float]]:
-        """Calibrated ``ef`` rows as ``(target_recall, ef, measured_recall)`` tuples."""
-        return [(float(t), int(ef), float(m)) for t, ef, m in self._recall_table_cpp.ef_entries]
-
-    @property
-    def eps_entries(self) -> list[tuple[float, float, float]]:
-        """Calibrated ``eps`` rows as ``(target_recall, eps, measured_recall)`` tuples."""
-        return [(float(t), float(eps), float(m)) for t, eps, m in self._recall_table_cpp.eps_entries]
-
-    def ef_values(self) -> list[int]:
-        """Return deduplicated calibrated ``ef`` values in ascending order."""
-        return [int(v) for v in self._recall_table_cpp.ef_values()]
-
-    def eps_values(self) -> list[float]:
-        """Return deduplicated calibrated ``eps`` values in ascending order."""
-        return [float(v) for v in self._recall_table_cpp.eps_values()]
+    def entries(self) -> list[tuple[float, float, float]]:
+        """Calibrated rows as ``(target_recall, eps_or_ef, measured_recall)`` tuples."""
+        return [(float(t), float(param), float(m)) for t, param, m in self._recall_table_cpp.entries]
 
     def eps_or_ef_values(self) -> list[float]:
-        """Return deduplicated ``ef`` values (as floats) followed by ``eps`` values."""
+        """Return deduplicated calibrated ``eps_or_ef`` values in ascending order."""
         return [float(v) for v in self._recall_table_cpp.eps_or_ef_values()]
 
-    def ef_for(self, target_recall: float, clamp: bool = False) -> int | None:
-        """Look up or linearly interpolate ``ef`` for ``target_recall``."""
-        val = self._recall_table_cpp.ef_for(float(target_recall), bool(clamp))
-        return None if val is None else int(val)
-
-    def eps_for(self, target_recall: float, clamp: bool = False) -> float | None:
-        """Look up or linearly interpolate ``eps`` for ``target_recall``."""
-        val = self._recall_table_cpp.eps_for(float(target_recall), bool(clamp))
+    def param_for(self, target_recall: float, clamp: bool = False) -> float | None:
+        """Look up or linearly interpolate ``eps_or_ef`` for ``target_recall``."""
+        val = self._recall_table_cpp.param_for(float(target_recall), bool(clamp))
         return None if val is None else float(val)
+
+    def __len__(self) -> int:
+        return len(self._recall_table_cpp)
 
     def __str__(self) -> str:
         return str(self._recall_table_cpp)
 
     def __repr__(self) -> str:
         return repr(self._recall_table_cpp)
+
+
+class ParetoLine:
+    """
+    Unified recall-latency Pareto frontier combining one or more calibrated :class:`RecallTable` curves.
+
+    Created by :meth:`DynamicExplorationGraph.to_pareto_line`.
+    """
+
+    def __init__(self, pareto_line_cpp: cpp_search.ParetoLine):
+        if not isinstance(pareto_line_cpp, cpp_search.ParetoLine):
+            raise TypeError(
+                f"pareto_line_cpp must be a deglib_cpp.search.ParetoLine, got {type(pareto_line_cpp).__name__}"
+            )
+        self._pareto_line_cpp = pareto_line_cpp
+
+    @property
+    def k(self) -> int:
+        return int(self._pareto_line_cpp.k)
+
+    @property
+    def sample_count(self) -> int:
+        return int(self._pareto_line_cpp.sample_count)
+
+    @property
+    def recall_bounds(self) -> tuple[float, float] | None:
+        bounds = self._pareto_line_cpp.recall_bounds
+        return None if bounds is None else (float(bounds[0]), float(bounds[1]))
+
+    @property
+    def recall_tables(self) -> list[RecallTable]:
+        """Return the underlying :class:`RecallTable` curves used to construct this frontier."""
+        return [RecallTable(t) for t in self._pareto_line_cpp.recall_tables]
+
+    @property
+    def entries(self) -> list[tuple[float, float, float, float, float]]:
+        """Non-dominated frontier rows as ``(target_recall, eps_or_ef, measured_recall, latency_us, qps)`` tuples."""
+        return [
+            (float(tgt), float(param), float(meas), float(lat), float(qps))
+            for tgt, param, meas, lat, qps in self._pareto_line_cpp.entries
+        ]
+
+    def eps_or_ef_values(self) -> list[float]:
+        """Return deduplicated ``eps_or_ef`` parameters along the frontier in ascending recall order."""
+        return [float(v) for v in self._pareto_line_cpp.eps_or_ef_values()]
+
+    def param_for(self, target_recall: float, clamp: bool = False) -> float | None:
+        """Look up or same-regime interpolate ``eps_or_ef`` for ``target_recall``."""
+        val = self._pareto_line_cpp.param_for(float(target_recall), bool(clamp))
+        return None if val is None else float(val)
+
+    def __len__(self) -> int:
+        return len(self._pareto_line_cpp)
+
+    def __str__(self) -> str:
+        return str(self._pareto_line_cpp)
+
+    def __repr__(self) -> str:
+        return repr(self._pareto_line_cpp)
 
 
 class Reranker:
@@ -489,5 +528,6 @@ __all__ = [
     "Searcher",
     "SearchResults",
     "RecallTable",
+    "ParetoLine",
     "create_searcher",
 ]

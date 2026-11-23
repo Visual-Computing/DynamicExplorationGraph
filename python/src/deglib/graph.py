@@ -6,7 +6,7 @@ import numpy as np
 import deglib_cpp
 
 if TYPE_CHECKING:
-    from deglib.search import RecallTable
+    from deglib.search import ParetoLine, RecallTable
 
 from deglib.cpu import InstructionSet
 from deglib.distances import Metric, _infer_dim_from_array
@@ -47,6 +47,30 @@ def get_num_useful_threads(requested: int, max_limit: int) -> int:
         hw = os.cpu_count() or 1
         return min(hw, max_limit)
     return min(requested, max_limit)
+
+
+def _resolve_recall_args(
+    recall_range: tuple[float, float] | None,
+    recall_step: float | None,
+    target_recalls: Sequence[float] | np.ndarray | None,
+) -> tuple[tuple[float, float], float, list[float] | None]:
+    if target_recalls is not None:
+        if recall_range is not None or recall_step is not None:
+            raise ValueError("Cannot specify 'target_recalls' together with 'recall_range' or 'recall_step'.")
+        arr = np.asarray(target_recalls, dtype=np.float64)
+        if arr.ndim != 1:
+            raise ValueError(f"target_recalls must be 1D, got shape {arr.shape}")
+        return (0.80, 0.999), 0.005, [float(x) for x in arr]
+
+    if recall_range is None:
+        r_range = (0.80, 0.999)
+    else:
+        if len(recall_range) != 2:
+            raise ValueError(f"recall_range must be a (min, max) 2-tuple, got length {len(recall_range)}")
+        r_range = (float(recall_range[0]), float(recall_range[1]))
+
+    r_step = 0.005 if recall_step is None else float(recall_step)
+    return r_range, r_step, None
 
 
 class DynamicExplorationGraph:
@@ -200,6 +224,7 @@ class DynamicExplorationGraph:
     def to_recall_table(
         self,
         k: int,
+        mode: Literal["ef", "eps"],
         sample_count: int = 300,
         recall_range: tuple[float, float] | None = None,
         recall_step: float | None = None,
@@ -207,50 +232,118 @@ class DynamicExplorationGraph:
         threads: int = 0,
     ) -> "RecallTable":
         """
-        Calibrate a ``RecallTable`` mapping target recall@k levels to ``ef`` and ``eps`` search parameters.
-
-        Self-samples up to ``sample_count`` stored vertices as queries, computes exact ground truth in the
-        graph's native feature space, and solves for each target recall using adaptive binary search guarded
-        by an approximated brute-force time budget.
+        Calibrate a single-mode ``RecallTable`` (``"ef"`` or ``"eps"``) mapping target recall@k levels
+        to graph search parameters.
         """
         from deglib.search import RecallTable
 
-        if target_recalls is not None:
-            if recall_range is not None or recall_step is not None:
-                raise ValueError("Cannot specify 'target_recalls' together with 'recall_range' or 'recall_step'.")
-            arr = np.asarray(target_recalls, dtype=np.float64)
-            if arr.ndim != 1:
-                raise ValueError(f"target_recalls must be 1D, got shape {arr.shape}")
-            targets_list = [float(x) for x in arr]
-            return RecallTable(
-                self.dynamic_exploration_graph_cpp.to_recall_table(
-                    int(k),
-                    int(sample_count),
-                    (0.80, 0.999),
-                    0.005,
-                    targets_list,
-                    int(threads),
-                )
-            )
+        if mode not in ("ef", "eps"):
+            raise ValueError(f"mode must be 'ef' or 'eps', got {mode!r}")
 
-        if recall_range is None:
-            r_range = (0.80, 0.999)
-        else:
-            if len(recall_range) != 2:
-                raise ValueError(f"recall_range must be a (min, max) 2-tuple, got length {len(recall_range)}")
-            r_range = (float(recall_range[0]), float(recall_range[1]))
-
-        r_step = 0.005 if recall_step is None else float(recall_step)
+        r_range, r_step, targets_list = _resolve_recall_args(recall_range, recall_step, target_recalls)
         return RecallTable(
             self.dynamic_exploration_graph_cpp.to_recall_table(
                 int(k),
+                mode,
                 int(sample_count),
                 r_range,
                 r_step,
-                None,
+                targets_list,
                 int(threads),
             )
         )
+
+    def to_recall_tables(
+        self,
+        k: int,
+        sample_count: int = 300,
+        recall_range: tuple[float, float] | None = None,
+        recall_step: float | None = None,
+        target_recalls: Sequence[float] | np.ndarray | None = None,
+        threads: int = 0,
+    ) -> list["RecallTable"]:
+        """
+        Calibrate both ``"ef"`` and ``"eps"`` ``RecallTable`` curves in one pass sharing exact ground truth.
+        """
+        from deglib.search import RecallTable
+
+        r_range, r_step, targets_list = _resolve_recall_args(recall_range, recall_step, target_recalls)
+        cpp_tables = self.dynamic_exploration_graph_cpp.to_recall_tables(
+            int(k),
+            int(sample_count),
+            r_range,
+            r_step,
+            targets_list,
+            int(threads),
+        )
+        return [RecallTable(t) for t in cpp_tables]
+
+    def to_pareto_line(
+        self,
+        k: int | None = None,
+        recall_tables: "RecallTable | Sequence[RecallTable] | None" = None,
+        sample_count: int | None = None,
+        recall_range: tuple[float, float] | None = None,
+        recall_step: float | None = None,
+        target_recalls: Sequence[float] | np.ndarray | None = None,
+        threads: int = 0,
+        rounds: int = 3,
+    ) -> "ParetoLine":
+        """
+        Build a unified ``ParetoLine`` selecting the fastest parameter per target recall across ``recall_tables``.
+
+        If ``recall_tables`` is omitted, calibrates both ``"ef"`` and ``"eps"`` tables via :meth:`to_recall_tables`.
+        Pareto-dominated points are pruned so the resulting frontier is strictly monotonic in recall and latency.
+        """
+        from deglib.search import ParetoLine, RecallTable
+
+        if int(rounds) < 1:
+            raise ValueError(f"rounds must be >= 1, got {rounds}")
+
+        if recall_tables is not None:
+            if k is not None or recall_range is not None or recall_step is not None or target_recalls is not None:
+                raise ValueError(
+                    "Cannot specify 'recall_tables' together with 'k', 'recall_range', 'recall_step', or 'target_recalls'."
+                )
+            if isinstance(recall_tables, RecallTable):
+                tables = [recall_tables]
+            elif isinstance(recall_tables, Sequence) and not isinstance(recall_tables, (str, bytes)):
+                tables = list(recall_tables)
+                for i, t in enumerate(tables):
+                    if not isinstance(t, RecallTable):
+                        raise TypeError(f"recall_tables[{i}] must be a RecallTable instance, got {type(t).__name__}")
+            else:
+                raise TypeError(
+                    f"recall_tables must be a RecallTable or sequence of RecallTable, got {type(recall_tables).__name__}"
+                )
+            if sample_count is not None and int(sample_count) < 0:
+                raise ValueError(f"sample_count must be >= 0, got {sample_count}")
+            eff_samples = 0 if sample_count is None else int(sample_count)
+            cpp_line = self.dynamic_exploration_graph_cpp.to_pareto_line(
+                [t._recall_table_cpp for t in tables],
+                eff_samples,
+                int(rounds),
+            )
+            return ParetoLine(cpp_line)
+
+        if k is None:
+            raise ValueError("Must specify either 'k' or 'recall_tables'.")
+
+        eff_samples = 300 if sample_count is None else int(sample_count)
+        tables = self.to_recall_tables(
+            k=int(k),
+            sample_count=eff_samples,
+            recall_range=recall_range,
+            recall_step=recall_step,
+            target_recalls=target_recalls,
+            threads=threads,
+        )
+        cpp_line = self.dynamic_exploration_graph_cpp.to_pareto_line(
+            [t._recall_table_cpp for t in tables],
+            0,
+            int(rounds),
+        )
+        return ParetoLine(cpp_line)
 
     def save_graph(self, path: pathlib.Path | str) -> None:
         """
