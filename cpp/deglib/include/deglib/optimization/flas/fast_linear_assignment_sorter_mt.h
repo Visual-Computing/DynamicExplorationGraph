@@ -101,6 +101,8 @@ class SwapThreadPool {
     SwapThreadPool(const SwapThreadPool&) = delete;
     SwapThreadPool& operator=(const SwapThreadPool&) = delete;
 
+    int num_threads() const noexcept { return n_; }
+
     // Executes `fn(index, thread_id)` in parallel across the index range [0, end).
     template <class Fn>
     void parallel_for(size_t end, const Fn& fn) {
@@ -225,10 +227,65 @@ inline bool try_lock_and_swap(const FlasContext& ctx, SomGrid<T>& grid, ThreadWo
 }
 
 // ---------------------------------------------------------------------------
+// Parallel 1D sliding-window moving-average filter:
+// Parallelizes mirror padding, dimension-sliced window filtering, and copy-back.
+// Splitting along dimensions keeps per-dimension summation order bit-exact.
+// ---------------------------------------------------------------------------
+template <class T>
+inline void filter_weighted_som_1d(int radius, const FlasContext& ctx, SomGrid<T>& grid, SwapThreadPool& pool) {
+    if (ctx.count <= 1 || radius <= 0) return;
+
+    const int filter_size = 2 * radius + 1;
+    const int ext = filter_size / 2;
+    const int size = ctx.count;
+    const int dims = ctx.dim();
+    const float inv_filter_size = 1.0f / static_cast<float>(filter_size);
+    const size_t row_bytes = static_cast<size_t>(dims) * sizeof(T);
+
+    // 1. Parallel boundary mirror padding
+    T* s = grid.som();
+    pool.parallel_for(static_cast<size_t>(ext), [&](size_t i, size_t) {
+        const int64_t idx = static_cast<int64_t>(i);
+        std::memcpy(&s[(-1 - idx) * dims], &s[(idx + 1) * dims], row_bytes);
+        std::memcpy(&s[(static_cast<int64_t>(size) + idx) * dims], &s[(static_cast<int64_t>(size) - 2 - idx) * dims], row_bytes);
+    });
+
+    // 2. Parallel sliding-window filter over cache-line-aligned dimension slices
+    constexpr int kMinDimsPerThread = 16;
+    const int max_chunks = std::max(1, dims / kMinDimsPerThread);
+    const int num_chunks = std::min(pool.num_threads(), max_chunks);
+    const T* base_ptr = grid.row(-ext, dims);
+    float* window_sum = grid.window_sum.data();
+    T* filtered_buf = grid.filtered_som_buf.data();
+
+    if (num_chunks <= 1) {
+        filter_weighted_som_1d_dim_range(size, dims, filter_size, inv_filter_size, base_ptr, 0, dims, window_sum, filtered_buf);
+    } else {
+        // Align chunk boundaries to 16 elements (64B for fp32) to prevent false sharing
+        const int total_blocks = (dims + kMinDimsPerThread - 1) / kMinDimsPerThread;
+        pool.parallel_for(static_cast<size_t>(num_chunks), [&](size_t chunk_id, size_t) {
+            const int b_start = static_cast<int>(chunk_id) * total_blocks / num_chunks;
+            const int b_end = static_cast<int>(chunk_id + 1) * total_blocks / num_chunks;
+            const int d_start = std::min(dims, b_start * kMinDimsPerThread);
+            const int d_end = std::min(dims, b_end * kMinDimsPerThread);
+            if (d_start < d_end) {
+                filter_weighted_som_1d_dim_range(size, dims, filter_size, inv_filter_size, base_ptr, d_start, d_end, window_sum, filtered_buf);
+            }
+        });
+    }
+
+    // 3. Parallel copy of filtered SOM back into main SOM buffer
+    const size_t dims_sz = static_cast<size_t>(dims);
+    pool.parallel_for(static_cast<size_t>(size), [&](size_t i, size_t) {
+        std::copy_n(filtered_buf + i * dims_sz, dims_sz, s + i * dims_sz);
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Main Entry Point: Multi-Threaded 1D FLAS Sorting
 // Executes 5 steps per neighborhood radius iteration:
 //   1. Parallel copy of feature vectors to `SomGrid`
-//   2. Serial 1D sliding-window moving-average filter (`filter_weighted_som_1d`)
+//   2. Parallel 1D sliding-window moving-average filter (`filter_weighted_som_1d`)
 //   3. Shuffle active index window per worker
 //   4. Parallel candidate swap probes with non-blocking try-locking
 //   5. Progress callback and termination evaluation
@@ -285,8 +342,8 @@ inline void do_sorting_1d(
         int radius_1d = std::max(1, std::min(count / 2, radius));
         rad *= settings.radius_decay;
 
-        // 2. Serial 1D sliding-window moving-average filter
-        for (int i = 0; i < settings.num_filters; i++) filter_weighted_som_1d(radius_1d, ctx, grid);
+        // 2. Parallel 1D sliding-window moving-average filter
+        for (int i = 0; i < settings.num_filters; i++) filter_weighted_som_1d(radius_1d, ctx, grid, pool);
 
         // 3. Parallel prepare and shuffle active index window per worker
         int num_swap_indices = std::min(2 * radius + 1, ctx.count);

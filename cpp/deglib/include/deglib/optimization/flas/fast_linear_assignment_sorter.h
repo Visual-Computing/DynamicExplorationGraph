@@ -164,15 +164,15 @@ class SomGrid {
     inline T* som() noexcept { return som_buf.data() + som_offset; }
     inline const T* som() const noexcept { return som_buf.data() + som_offset; }
 
-    inline T* row(int i, int dim) noexcept { return som() + i * dim; }
-    inline const T* row(int i, int dim) const noexcept { return som() + i * dim; }
+    inline T* row(int i, int dim) noexcept { return som() + static_cast<int64_t>(i) * static_cast<int64_t>(dim); }
+    inline const T* row(int i, int dim) const noexcept { return som() + static_cast<int64_t>(i) * static_cast<int64_t>(dim); }
 
     // Mirrors boundary cells for circular/clamped window filtering.
     inline void apply_mirror_padding(int ext, int count, int dim) noexcept {
         T* s = som();
         for (int i = 0; i < ext; i++) {
-            std::memcpy(&s[(-1 - i) * dim], &s[(i + 1) * dim], dim * sizeof(T));
-            std::memcpy(&s[(count + i) * dim], &s[(count - 2 - i) * dim], dim * sizeof(T));
+            std::memcpy(&s[static_cast<int64_t>(-1 - i) * dim], &s[static_cast<int64_t>(i + 1) * dim], dim * sizeof(T));
+            std::memcpy(&s[static_cast<int64_t>(count + i) * dim], &s[static_cast<int64_t>(count - 2 - i) * dim], dim * sizeof(T));
         }
     }
 };
@@ -190,6 +190,50 @@ inline void copy_feature_vectors_to_som(const FlasContext& ctx, SomGrid<T>& grid
     }
 }
 
+// Processes a contiguous slice of dimensions [d_start, d_end) for the 1D sliding-window filter.
+// Each dimension is independent, so disjoint [d_start, d_end) slices can run in parallel
+// while preserving bit-exact summation order along i.
+template <class T>
+inline void filter_weighted_som_1d_dim_range(
+    int size,
+    int dims,
+    int filter_size,
+    float inv_filter_size,
+    const T* base_ptr,
+    int d_start,
+    int d_end,
+    float* window_sum,
+    T* filtered_som_buf
+) noexcept {
+    const size_t dims_sz = static_cast<size_t>(dims);
+
+    // Initialize sliding window sum for the first window [-ext, ext]
+    std::fill(window_sum + d_start, window_sum + d_end, 0.0f);
+    for (int i = 0; i < filter_size; i++) {
+        const T* cell = base_ptr + static_cast<size_t>(i) * dims_sz;
+        for (int d = d_start; d < d_end; d++) {
+            window_sum[d] += FlasPixel<T>::load(cell[d]);
+        }
+    }
+
+    // Store normalized average for index 0
+    for (int d = d_start; d < d_end; d++) {
+        filtered_som_buf[static_cast<size_t>(d)] = FlasPixel<T>::store(window_sum[d] * inv_filter_size);
+    }
+
+    // Slide window across remaining array elements (subtract outgoing cell, add incoming cell)
+    for (int i = 1; i < size; i++) {
+        const T* left_cell = base_ptr + static_cast<size_t>(i - 1) * dims_sz;
+        const T* right_cell = base_ptr + static_cast<size_t>(i - 1 + filter_size) * dims_sz;
+        T* out_row = filtered_som_buf + static_cast<size_t>(i) * dims_sz;
+
+        for (int d = d_start; d < d_end; d++) {
+            window_sum[d] += FlasPixel<T>::load(right_cell[d]) - FlasPixel<T>::load(left_cell[d]);
+            out_row[d] = FlasPixel<T>::store(window_sum[d] * inv_filter_size);
+        }
+    }
+}
+
 // Phase "filter": Applies a 1D sliding-window moving-average filter over a 2*radius+1 window.
 // Accumulated in float; results written back in storage type T (fp16 quantization on store).
 template <class T>
@@ -202,35 +246,15 @@ inline void filter_weighted_som_1d(int radius, const FlasContext& ctx, SomGrid<T
     int dims = ctx.dim();
     const float inv_filter_size = 1.0f / static_cast<float>(filter_size);
 
-    float* window_sum = grid.window_sum.data();
-
     // Apply boundary mirror padding to handle edge elements
     grid.apply_mirror_padding(ext, size, dims);
 
-    // Initialize sliding window sum for the first window [-ext, ext]
-    const T* base_ptr = grid.row(-ext, dims);
-    std::fill_n(window_sum, dims, 0.0f);
-    for (int i = 0; i < filter_size; i++) {
-        const T* cell = base_ptr + i * dims;
-        for (int d = 0; d < dims; d++) window_sum[d] += FlasPixel<T>::load(cell[d]);
-    }
-
-    // Store normalized average for index 0
-    for (int d = 0; d < dims; d++) grid.filtered_som_buf[d] = FlasPixel<T>::store(window_sum[d] * inv_filter_size);
-
-    // Slide window across remaining array elements (subtract outgoing cell, add incoming cell)
-    for (int i = 1; i < size; i++) {
-        const T* left_cell = base_ptr + (i - 1) * dims;
-        const T* right_cell = base_ptr + (i - 1 + filter_size) * dims;
-
-        for (int d = 0; d < dims; d++) {
-            window_sum[d] += FlasPixel<T>::load(right_cell[d]) - FlasPixel<T>::load(left_cell[d]);
-            grid.filtered_som_buf[i * dims + d] = FlasPixel<T>::store(window_sum[d] * inv_filter_size);
-        }
-    }
+    filter_weighted_som_1d_dim_range(
+        size, dims, filter_size, inv_filter_size, grid.row(-ext, dims), 0, dims, grid.window_sum.data(), grid.filtered_som_buf.data()
+    );
 
     // Copy filtered SOM back into main SOM buffer
-    std::copy_n(grid.filtered_som_buf.data(), ctx.count * dims, grid.som());
+    std::copy_n(grid.filtered_som_buf.data(), static_cast<size_t>(size) * static_cast<size_t>(dims), grid.som());
 }
 
 // Calculates pairwise distance matrix between swap candidates and quantizes to [0, QUANT].

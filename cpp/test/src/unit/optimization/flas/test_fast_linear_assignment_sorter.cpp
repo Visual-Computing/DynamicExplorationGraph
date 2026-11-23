@@ -1,5 +1,6 @@
 #include "common/test_helpers.h"
 #include "deglib/optimization/flas/fast_linear_assignment_sorter.h"
+#include "deglib/optimization/flas/fast_linear_assignment_sorter_mt.h"
 
 #include <gtest/gtest.h>
 
@@ -373,4 +374,92 @@ TEST(Flas1DTest, SortShuffled0To100) {
     for (float v : res) std::cout << v << " ";
     std::cout << "\n   -> Avg Neighbor Distance: " << avg_dist << "\n";
     std::cout << "========================================================\n\n";
+}
+
+TEST(FlasFilterMt, ParallelMatchesSerialBitExactFP32AndFP16) {
+    const int N = 127;
+    const int D = 131;  // non-multiple of 16 to exercise uneven dimension slices
+    const int radius = 40;
+
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    std::vector<float> features_fp32(static_cast<size_t>(N) * D);
+    std::vector<uint16_t> features_fp16(static_cast<size_t>(N) * D);
+    for (size_t i = 0; i < features_fp32.size(); ++i) {
+        features_fp32[i] = dist(rng);
+        features_fp16[i] = deglib::distances::fp16::float_to_fp16(features_fp32[i]);
+    }
+
+    // FP32 comparison
+    {
+        auto mf_ser = flas::make_map_fields<float>(features_fp32.data(), N, D);
+        auto mf_par = flas::make_map_fields<float>(features_fp32.data(), N, D);
+        deglib::distances::FloatSpace space(D, deglib::distances::Metric::FP32_L2);
+        flas::RandomEngine r1(1), r2(1);
+        flas::FlasContext ctx_ser(mf_ser, N, space, r1);
+        flas::FlasContext ctx_par(mf_par, N, space, r2);
+        flas::SomGrid<float> grid_ser(N, D), grid_par(N, D);
+        flas::copy_feature_vectors_to_som(ctx_ser, grid_ser);
+        flas::copy_feature_vectors_to_som(ctx_par, grid_par);
+
+        flas::SwapThreadPool pool(4);
+        flas::filter_weighted_som_1d(radius, ctx_ser, grid_ser);
+        flas::filter_weighted_som_1d(radius, ctx_par, grid_par, pool);
+
+        for (int i = 0; i < N; ++i) {
+            const float* a = grid_ser.row(i, D);
+            const float* b = grid_par.row(i, D);
+            for (int d = 0; d < D; ++d) {
+                ASSERT_EQ(a[d], b[d]) << "Mismatch at row " << i << " dim " << d;
+            }
+        }
+    }
+
+    // FP16 comparison
+    {
+        auto mf_ser = flas::make_map_fields<uint16_t>(features_fp16.data(), N, D);
+        auto mf_par = flas::make_map_fields<uint16_t>(features_fp16.data(), N, D);
+        deglib::distances::FloatSpace space(D, deglib::distances::Metric::FP16_L2);
+        flas::RandomEngine r1(1), r2(1);
+        flas::FlasContext ctx_ser(mf_ser, N, space, r1);
+        flas::FlasContext ctx_par(mf_par, N, space, r2);
+        flas::SomGrid<uint16_t> grid_ser(N, D), grid_par(N, D);
+        flas::copy_feature_vectors_to_som(ctx_ser, grid_ser);
+        flas::copy_feature_vectors_to_som(ctx_par, grid_par);
+
+        flas::SwapThreadPool pool(4);
+        flas::filter_weighted_som_1d(radius, ctx_ser, grid_ser);
+        flas::filter_weighted_som_1d(radius, ctx_par, grid_par, pool);
+
+        for (int i = 0; i < N; ++i) {
+            const uint16_t* a = grid_ser.row(i, D);
+            const uint16_t* b = grid_par.row(i, D);
+            for (int d = 0; d < D; ++d) {
+                ASSERT_EQ(a[d], b[d]) << "FP16 mismatch at row " << i << " dim " << d;
+            }
+        }
+    }
+}
+
+TEST(FlasSortMt, ValidPermutation1D_MultiThreaded) {
+    const int N = 500;
+    const int D = 128;
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    std::vector<float> features(static_cast<size_t>(N) * D);
+    for (auto& v : features) v = dist(rng);
+
+    auto mf = flas::make_map_fields(features.data(), N, D);
+    deglib::distances::FloatSpace space(D, deglib::distances::Metric::FP32_L2);
+    flas::FlasSettings s;
+    flas::RandomEngine r(42);
+    flas::do_sorting_1d(mf, space, s, r, [](float) { return false; }, 4);
+
+    std::vector<bool> seen(N, false);
+    for (int i = 0; i < N; ++i) {
+        ASSERT_GE(mf[i].id, 0);
+        ASSERT_LT(mf[i].id, N);
+        EXPECT_FALSE(seen[mf[i].id]);
+        seen[mf[i].id] = true;
+    }
 }
