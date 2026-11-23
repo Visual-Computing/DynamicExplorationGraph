@@ -24,6 +24,7 @@ Include the umbrella header to access all functionalities:
 | [`deglib::analysis::`](#6-namespace-deglibanalysis) | `<deglib/analysis.h>` | Graph health diagnostics, regularity validation, and reachability metrics. |
 | [`deglib::graph::`](#7-namespace-deglibgraph-internal-graphs--results) | `<deglib/graph/*.h>` | Low-level internal graph hierarchy (`0..N-1` indices), reusable `SearchWorkspace`, and `ResultSet`. |
 | [`deglib::transformation::`](#11-namespace-deglibtransformation) | `<deglib/transformation.h>` | Query and database feature transformation and quantization pipeline. |
+| [`deglib::tuning::`](#12-namespace-deglibtuning) | `<deglib/tuning.h>` | Pre-build dataset profiling, `OptimizationTarget` prediction, and quantizer metric prediction. |
 | [`deglib::cpu::`](#8-namespace-deglibcpu) | `<deglib/utils/cpu.h>` | Hardware feature detection (AVX2, AVX512) and `InstructionSet` configuration. |
 | [`deglib::memory::`](#9-namespace-deglibmemory) | `<deglib/utils/memory.h>` | CPU cache line prefetching utilities. |
 | [`deglib::concurrent::`](#10-namespace-deglibconcurrent) | `<deglib/concurrent.h>` | Parallel execution loops (`parallel_for`, `parallel_batch_for`). |
@@ -1517,5 +1518,146 @@ void serialize_transformations(const std::vector<std::shared_ptr<FeatureTransfor
 std::vector<std::shared_ptr<FeatureTransformation>> deserialize_transformations(std::istream& is);
 
 } // namespace deglib::transformation
+```
+
+---
+
+## 12. Namespace: `deglib::tuning::`
+
+Header: `<deglib/tuning.h>` (included via `<deglib/deglib.h>`)
+
+Pre-build geometric profiling and hyperparameter prediction from raw base vectors (no queries or ground truth required).
+
+```cpp
+namespace deglib::tuning {
+
+inline constexpr size_t kDefaultSampleCount = 16000;
+inline constexpr size_t kDefaultQueryCount  = 0;
+inline constexpr size_t kDefaultRandomPairs = 65536;
+inline constexpr uint32_t kDefaultSeed      = 7;
+
+/// Base-only geometric profile of a vector dataset
+struct DatasetProfile {
+    uint32_t sample_count = 0;
+    uint32_t dim = 0;
+    float participation_ratio = 0.0f;  // (tr(S))^2 / (dim * ||S||_F^2)
+    float rel_contrast_1 = 0.0f;       // median(d_rand) / Q1(d_1)
+    float pp_iqr = 0.0f;               // IQR of duplicate-free Two-NN local ID 1 / log(d_2 / d_1)
+    float q_mode_u7 = 0.0f;            // mean modal bin fraction under 7-bit min-max quantization (128 levels)
+    float q_mode_u4 = 0.0f;            // mean modal bin fraction under 4-bit min-max quantization (16 levels)
+    deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2;
+};
+
+/// Predicted optimization target and expected QPS advantage of LowLID over StreamingData
+struct TargetPrediction {
+    deglib::builder::OptimizationTarget target = deglib::builder::OptimizationTarget::StreamingData;
+    float lowlid_advantage_pct = 0.0f;
+    DatasetProfile profile{};
+};
+
+/// Predicted quantizer metric (Uint7_L2 vs Int8_InnerProduct) and expected QPS advantage
+struct QuantizationPrediction {
+    deglib::distances::Metric metric = deglib::distances::Metric::Uint7_L2;
+    float uint7_advantage_pct = 0.0f;
+    DatasetProfile profile{};
+};
+
+/// Linear z-score calibration constants predicting log2(QPS_LowLID / QPS_StreamingData)
+struct TargetModelCalibration {
+    double mu_pp_iqr, mu_q_mode_u7, mu_q_mode_u4;
+    double sd_pp_iqr, sd_q_mode_u7, sd_q_mode_u4;
+    double w_intercept, w_pp_iqr, w_q_mode_u7, w_q_mode_u4;
+};
+
+inline constexpr TargetModelCalibration kDefaultTargetCalibration{};
+
+/// Linear z-score calibration constants predicting log2(QPS_Uint7_L2 / QPS_Int8_InnerProduct) on InnerProduct datasets
+struct QuantizationModelCalibration {
+    double mu_dim_over_participation, mu_rel_contrast;
+    double sd_dim_over_participation, sd_rel_contrast;
+    double w_intercept, w_dim_over_participation, w_rel_contrast;
+};
+
+inline constexpr QuantizationModelCalibration kDefaultQuantizationCalibration{};
+
+/// Measure DatasetProfile from contiguous FP32 or FP16 (uint16_t) base vectors
+DatasetProfile measure_dataset_profile(
+    std::span<const float> data,
+    uint32_t dim,
+    deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2,
+    size_t sample_count = kDefaultSampleCount,
+    size_t query_count = kDefaultQueryCount,
+    uint32_t seed = kDefaultSeed,
+    size_t num_threads = 0
+);
+
+DatasetProfile measure_dataset_profile(
+    std::span<const uint16_t> data_fp16,
+    uint32_t dim,
+    deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2,
+    size_t sample_count = kDefaultSampleCount,
+    size_t query_count = kDefaultQueryCount,
+    uint32_t seed = kDefaultSeed,
+    size_t num_threads = 0
+);
+
+/// Predict OptimizationTarget::LowLID vs StreamingData from a DatasetProfile or directly from base vectors
+TargetPrediction predict_optimization_target(
+    const DatasetProfile& profile,
+    const TargetModelCalibration& cal = kDefaultTargetCalibration
+) noexcept;
+
+TargetPrediction predict_optimization_target(
+    std::span<const float> data,
+    uint32_t dim,
+    deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2,
+    size_t sample_count = kDefaultSampleCount,
+    size_t query_count = kDefaultQueryCount,
+    uint32_t seed = kDefaultSeed,
+    size_t num_threads = 0,
+    const TargetModelCalibration& cal = kDefaultTargetCalibration
+);
+
+TargetPrediction predict_optimization_target(
+    std::span<const uint16_t> data_fp16,
+    uint32_t dim,
+    deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2,
+    size_t sample_count = kDefaultSampleCount,
+    size_t query_count = kDefaultQueryCount,
+    uint32_t seed = kDefaultSeed,
+    size_t num_threads = 0,
+    const TargetModelCalibration& cal = kDefaultTargetCalibration
+);
+
+/// Predict Metric::Uint7_L2 vs Metric::Int8_InnerProduct from a DatasetProfile or directly from base vectors
+/// (Non-InnerProduct / L2 datasets unconditionally select Metric::Uint7_L2)
+QuantizationPrediction predict_quantization(
+    const DatasetProfile& profile,
+    const QuantizationModelCalibration& cal = kDefaultQuantizationCalibration
+) noexcept;
+
+QuantizationPrediction predict_quantization(
+    std::span<const float> data,
+    uint32_t dim,
+    deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2,
+    size_t sample_count = kDefaultSampleCount,
+    size_t query_count = kDefaultQueryCount,
+    uint32_t seed = kDefaultSeed,
+    size_t num_threads = 0,
+    const QuantizationModelCalibration& cal = kDefaultQuantizationCalibration
+);
+
+QuantizationPrediction predict_quantization(
+    std::span<const uint16_t> data_fp16,
+    uint32_t dim,
+    deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2,
+    size_t sample_count = kDefaultSampleCount,
+    size_t query_count = kDefaultQueryCount,
+    uint32_t seed = kDefaultSeed,
+    size_t num_threads = 0,
+    const QuantizationModelCalibration& cal = kDefaultQuantizationCalibration
+);
+
+} // namespace deglib::tuning
 ```
 

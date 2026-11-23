@@ -1,6 +1,6 @@
 # `deglib` Python API Reference
 
-Complete reference for the `deglib` Python package. Everything documented below is exported from top-level `deglib` as well as its submodules (`deglib.cpu`, `deglib.distances`, `deglib.graph`, `deglib.builder`, `deglib.search`, `deglib.transformation`, `deglib.optimization`, `deglib.analysis`).
+Complete reference for the `deglib` Python package. Everything documented below is exported from top-level `deglib` as well as its submodules (`deglib.cpu`, `deglib.distances`, `deglib.graph`, `deglib.builder`, `deglib.search`, `deglib.transformation`, `deglib.optimization`, `deglib.analysis`, `deglib.tuning`).
 
 ---
 
@@ -15,6 +15,7 @@ Complete reference for the `deglib` Python package. Everything documented below 
 - [6. Feature Transformations & Quantization (`deglib.transformation`)](#6-feature-transformations--quantization-deglibtransformation)
 - [7. Optimization & Pruning (`deglib.optimization`)](#7-optimization--pruning-degliboptimization)
 - [8. Graph Analysis (`deglib.analysis`)](#8-graph-analysis-deglibanalysis)
+- [9. Pre-Build Tuning & Prediction (`deglib.tuning`)](#9-pre-build-tuning--prediction-deglibtuning)
 
 ---
 
@@ -407,3 +408,16 @@ All transformations are created pre-fitted and validated via `make_*` factories 
 - `analyze_graph(graph: Any, base_top: Any | None = None, sample_size: int = 0, threads: int = 0, print_stats: bool = True) -> GraphStats`
 - `calc_graph_quality(graph: Any, base_top: Any, sample_size: int = 0, threads: int = 0) -> float`
 - `GraphStats`: summary metrics returned by `analyze_graph`.
+
+---
+
+## 9. Pre-Build Tuning & Prediction (`deglib.tuning`)
+
+Base-only geometric profiling and hyperparameter prediction from `float32`/`float16` feature vectors (no queries or ground truth required). Also re-exported at top level (`deglib.*`).
+
+- `DatasetProfile(sample_count=0, dim=0, participation_ratio=0.0, d1_cv=0.0, rel_contrast_1=0.0, metric=Metric.FP32_L2)`: frozen dataclass storing measured dataset geometry.
+- `TargetPrediction(target: OptimizationTarget, lowlid_advantage_pct: float, profile: DatasetProfile)`: predicted graph construction optimization target (`LowLID` vs `StreamingData`).
+- `QuantizationPrediction(metric: Metric, uint7_advantage_pct: float, profile: DatasetProfile)`: predicted quantizer metric (`Metric.Uint7_L2` vs `Metric.Int8_InnerProduct`).
+- `measure_dataset_profile(data: np.ndarray, metric: Metric | str | int = Metric.FP32_L2, sample_count: int = 16000, query_count: int = 0, seed: int = 7, threads: int = 0) -> DatasetProfile`
+- `predict_optimization_target(data_or_profile: np.ndarray | DatasetProfile, metric: Metric | str | int = Metric.FP32_L2, sample_count: int = 16000, query_count: int = 0, seed: int = 7, threads: int = 0) -> TargetPrediction`
+- `predict_quantization(data_or_profile: np.ndarray | DatasetProfile, metric: Metric | str | int = Metric.FP32_L2, sample_count: int = 16000, query_count: int = 0, seed: int = 7, threads: int = 0) -> QuantizationPrediction`: predicts whether `Metric.Uint7_L2` or `Metric.Int8_InnerProduct` achieves higher QPS (L2/Euclidean datasets unconditionally select `Metric.Uint7_L2`).

@@ -6,6 +6,7 @@ from . import graph
 from . import optimization
 from . import search
 from . import transformation
+from . import tuning
 
 from .analysis import analyze_graph, GraphStats, calc_graph_quality
 from .builder import (
@@ -62,6 +63,14 @@ from .transformation import (
     apply_on_database,
     apply_on_query,
 )
+from .tuning import (
+    DatasetProfile,
+    TargetPrediction,
+    QuantizationPrediction,
+    measure_dataset_profile,
+    predict_optimization_target,
+    predict_quantization,
+)
 
 __version__ = "0.3.0"
 
@@ -76,6 +85,7 @@ __all__ = [
     "optimization",
     "search",
     "transformation",
+    "tuning",
     # Builder & top-level build
     "build",
     "GraphBuilder",
@@ -134,4 +144,11 @@ __all__ = [
     "make_scalar_quantizer_fp16",
     "apply_on_database",
     "apply_on_query",
+    # Tuning
+    "DatasetProfile",
+    "TargetPrediction",
+    "QuantizationPrediction",
+    "measure_dataset_profile",
+    "predict_optimization_target",
+    "predict_quantization",
 ]

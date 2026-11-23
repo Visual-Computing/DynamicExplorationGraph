@@ -10,6 +10,7 @@
 #include "deglib/search.h"
 #include "deglib/search/searcher.h"
 #include "deglib/transformation.h"
+#include "deglib/tuning.h"
 #include "deglib/utils/memory.h"
 #include "deglib/utils/random.h"
 

@@ -89,6 +89,7 @@ add_deglib_test(test_readonly_graph src/unit/graph/test_readonly_graph.cpp)
 add_deglib_test(test_graph src/unit/test_graph.cpp)
 add_deglib_test(test_pruning src/unit/optimization/test_pruning.cpp)
 add_deglib_test(test_analysis src/unit/test_analysis.cpp)
+add_deglib_test(test_tuning src/unit/test_tuning.cpp)
 add_deglib_test(test_evp_inner_product src/unit/distance/test_evp_inner_product.cpp)
 
 # Integration tests (fast, recall-only, registered with CTest for CI)
