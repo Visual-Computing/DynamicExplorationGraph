@@ -95,7 +95,7 @@ constexpr float default_rotation_kurtosis_threshold(deglib::distances::MetricDat
         case deglib::distances::MetricDataType::Uint4:
         case deglib::distances::MetricDataType::Int4:
             return 0.8f;
-        case deglib::distances::MetricDataType::UInt7:
+        case deglib::distances::MetricDataType::Uint7:
             return use_rerank ? 5.0f : 0.8f;
         case deglib::distances::MetricDataType::Uint8:
             return use_rerank ? 5.0f : 1.85f;
@@ -205,7 +205,7 @@ inline std::vector<std::shared_ptr<FeatureTransformation>> deserialize_transform
                 t = ScalarQuantizerInt8::deserialize(ss);
                 break;
             case TAG_SQU7:
-                t = ScalarQuantizerUInt7::deserialize(ss);
+                t = ScalarQuantizerUint7::deserialize(ss);
                 break;
             case TAG_SQU8:
                 t = ScalarQuantizerUint8::deserialize(ss);
@@ -543,8 +543,8 @@ inline std::vector<std::shared_ptr<FeatureTransformation>> make_quantizer_pipeli
             return detail::build_quantizer_pipeline<ScalarQuantizerUint4>(data, dim, quantile, threshold, num_threads, rotation_seed);
         case deglib::distances::MetricDataType::Int4:
             return detail::build_quantizer_pipeline<ScalarQuantizerInt4>(data, dim, quantile, threshold, num_threads, rotation_seed);
-        case deglib::distances::MetricDataType::UInt7:
-            return detail::build_quantizer_pipeline<ScalarQuantizerUInt7>(data, dim, quantile, threshold, num_threads, rotation_seed);
+        case deglib::distances::MetricDataType::Uint7:
+            return detail::build_quantizer_pipeline<ScalarQuantizerUint7>(data, dim, quantile, threshold, num_threads, rotation_seed);
         case deglib::distances::MetricDataType::Uint8:
             return detail::build_quantizer_pipeline<ScalarQuantizerUint8>(data, dim, quantile, threshold, num_threads, rotation_seed);
         case deglib::distances::MetricDataType::Int8:

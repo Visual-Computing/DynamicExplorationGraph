@@ -20,20 +20,20 @@
 namespace deglib::transformation {
 
 // Affine uniform quantizer restricted to the signed range [0, 127].
-class ScalarQuantizerUInt7 : public FeatureTransformation {
+class ScalarQuantizerUint7 : public FeatureTransformation {
   public:
-    explicit ScalarQuantizerUInt7(uint32_t dim) : dim_(dim) {}
+    explicit ScalarQuantizerUint7(uint32_t dim) : dim_(dim) {}
 
     uint32_t tag() const noexcept override { return TAG_SQU7; }
-    std::string_view name() const noexcept override { return "ScalarQuantizerUInt7"; }
+    std::string_view name() const noexcept override { return "ScalarQuantizerUint7"; }
     uint32_t input_dim() const noexcept override { return dim_; }
     uint32_t output_dim() const noexcept override { return dim_; }
     size_t input_byte_size() const noexcept override { return dim_ * sizeof(float); }
     size_t output_byte_size() const noexcept override { return dim_ * sizeof(int8_t); }
 
     deglib::distances::Metric get_target_metric(deglib::distances::Metric input_metric) const override {
-        return input_metric.get_distance_kind() == deglib::distances::MetricDistanceKind::InnerProduct ? deglib::distances::Metric::UInt7_InnerProduct
-                                                                                                       : deglib::distances::Metric::UInt7_L2;
+        return input_metric.get_distance_kind() == deglib::distances::MetricDistanceKind::InnerProduct ? deglib::distances::Metric::Uint7_InnerProduct
+                                                                                                       : deglib::distances::Metric::Uint7_L2;
     }
 
     uint32_t dim() const noexcept { return dim_; }
@@ -47,8 +47,8 @@ class ScalarQuantizerUInt7 : public FeatureTransformation {
 
     void fit(std::span<const float> data, float quantile) {
         if (data.empty()) return;
-        if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUInt7: dim must be > 0 prior to fit()");
-        if (data.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUInt7: data size must be multiple of dim");
+        if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUint7: dim must be > 0 prior to fit()");
+        if (data.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUint7: data size must be multiple of dim");
         if (quantile <= 0.0f) quantile = 1.0f;
         if (quantile >= 1.0f && detail::is_exact_integer_range(data.data(), data.size(), 0.0f, 127.0f)) {
             set_min_max(0.0f, 127.0f);
@@ -70,8 +70,8 @@ class ScalarQuantizerUInt7 : public FeatureTransformation {
 
     void fit(std::span<const uint16_t> data_fp16, float quantile) {
         if (data_fp16.empty()) return;
-        if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUInt7: dim must be > 0 prior to fit()");
-        if (data_fp16.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUInt7: data size must be multiple of dim");
+        if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUint7: dim must be > 0 prior to fit()");
+        if (data_fp16.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUint7: data size must be multiple of dim");
         if ((quantile <= 0.0f || quantile >= 1.0f) && detail::is_exact_integer_range_fp16(data_fp16, 0.0f, 127.0f)) {
             set_min_max(0.0f, 127.0f);
             return;
@@ -103,9 +103,9 @@ class ScalarQuantizerUInt7 : public FeatureTransformation {
     }
 
     void dequantize(std::span<const std::byte> in, std::span<float> out) const override {
-        if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUInt7: dim must be > 0");
-        if (in.size() < output_byte_size()) throw std::invalid_argument("ScalarQuantizerUInt7: dequantize input too small");
-        if (out.size() < dim_) throw std::invalid_argument("ScalarQuantizerUInt7: dequantize output too small");
+        if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUint7: dim must be > 0");
+        if (in.size() < output_byte_size()) throw std::invalid_argument("ScalarQuantizerUint7: dequantize input too small");
+        if (out.size() < dim_) throw std::invalid_argument("ScalarQuantizerUint7: dequantize output too small");
         const int8_t* src = reinterpret_cast<const int8_t*>(in.data());
         for (uint32_t d = 0; d < dim_; ++d) {
             out[d] = static_cast<float>(src[d]) * inv_scale_ + min_;
@@ -120,7 +120,7 @@ class ScalarQuantizerUInt7 : public FeatureTransformation {
         os.write(reinterpret_cast<const char*>(&inv_scale_), sizeof(inv_scale_));
     }
 
-    static std::unique_ptr<ScalarQuantizerUInt7> deserialize(std::istream& is) {
+    static std::unique_ptr<ScalarQuantizerUint7> deserialize(std::istream& is) {
         uint32_t dim = 0;
         float min_val = 0.0f;
         float max_val = 1.0f;
@@ -131,7 +131,7 @@ class ScalarQuantizerUInt7 : public FeatureTransformation {
         is.read(reinterpret_cast<char*>(&max_val), sizeof(max_val));
         is.read(reinterpret_cast<char*>(&scale), sizeof(scale));
         is.read(reinterpret_cast<char*>(&inv_scale), sizeof(inv_scale));
-        auto quant = std::make_unique<ScalarQuantizerUInt7>(dim);
+        auto quant = std::make_unique<ScalarQuantizerUint7>(dim);
         quant->min_ = min_val;
         quant->max_ = max_val;
         quant->scale_ = scale;
@@ -257,13 +257,13 @@ class ScalarQuantizerUInt7 : public FeatureTransformation {
     template <typename T>
     void transform_vectors(std::span<const T> in, std::span<std::byte> out, size_t num_threads) const {
         if (in.empty()) return;
-        if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUInt7: dim must be > 0");
-        if (in.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUInt7: input size must be multiple of dim");
-        if (!is_fitted_) throw std::logic_error("ScalarQuantizerUInt7: transform called before fit()");
+        if (dim_ == 0) throw std::invalid_argument("ScalarQuantizerUint7: dim must be > 0");
+        if (in.size() % dim_ != 0) throw std::invalid_argument("ScalarQuantizerUint7: input size must be multiple of dim");
+        if (!is_fitted_) throw std::logic_error("ScalarQuantizerUint7: transform called before fit()");
 
         const size_t count = in.size() / dim_;
         const size_t required_bytes = count * output_byte_size();
-        if (out.size() < required_bytes) throw std::invalid_argument("ScalarQuantizerUInt7: output buffer too small");
+        if (out.size() < required_bytes) throw std::invalid_argument("ScalarQuantizerUint7: output buffer too small");
         transform_internal(in.data(), reinterpret_cast<int8_t*>(out.data()), count, dim_, num_threads);
     }
 
@@ -276,8 +276,8 @@ class ScalarQuantizerUInt7 : public FeatureTransformation {
     TransformRowFn transform_row_fn_ = select_transform_row_fn();
 };
 
-inline ScalarQuantizerUInt7 make_scalar_quantizer_uint7(std::span<const float> data, uint32_t dim, float quantile = -1.0f) {
-    ScalarQuantizerUInt7 q(dim);
+inline ScalarQuantizerUint7 make_scalar_quantizer_uint7(std::span<const float> data, uint32_t dim, float quantile = -1.0f) {
+    ScalarQuantizerUint7 q(dim);
     q.fit(data, quantile);
     return q;
 }

@@ -11,7 +11,7 @@
 namespace deglib::distances::uint7_ip {
 
 // Scalar fallback for INT7 codes in [0, 127].
-class InnerProductUInt7 {
+class InnerProductUint7 {
   public:
     static constexpr const char* get_instruction() { return "Scalar"; }
 
@@ -75,7 +75,7 @@ DEGLIB_TARGET_AVX2 inline static int64_t ip_uint7_acc64(const int8_t* a, const i
 }
 
 template <ResidualMode Mode = ResidualMode::Full>
-class InnerProductUInt7_AVX512 {
+class InnerProductUint7_AVX512 {
     static constexpr bool HasTail = has_flag(Mode, ResidualMode::Tail);
 
   public:
@@ -118,7 +118,7 @@ class InnerProductUInt7_AVX512 {
 };
 
 template <ResidualMode Mode = ResidualMode::Full>
-class InnerProductUInt7_AVX2 {
+class InnerProductUint7_AVX2 {
     static constexpr bool HasTail = has_flag(Mode, ResidualMode::Tail);
 
   public:
@@ -162,13 +162,13 @@ class InnerProductUInt7_AVX2 {
 #endif
 
 using DistanceVariant = std::variant<
-    InnerProductUInt7
+    InnerProductUint7
 #if defined(DEGLIB_X86)
     ,
-    InnerProductUInt7_AVX512<ResidualMode::Full>,
-    InnerProductUInt7_AVX512<ResidualMode::SimdOnly>,
-    InnerProductUInt7_AVX2<ResidualMode::Full>,
-    InnerProductUInt7_AVX2<ResidualMode::SimdOnly>
+    InnerProductUint7_AVX512<ResidualMode::Full>,
+    InnerProductUint7_AVX512<ResidualMode::SimdOnly>,
+    InnerProductUint7_AVX2<ResidualMode::Full>,
+    InnerProductUint7_AVX2<ResidualMode::SimdOnly>
 #endif
     >;
 
@@ -178,26 +178,26 @@ inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::Instruct
 #if defined(DEGLIB_X86)
     if (target == deglib::cpu::InstructionSet::AVX512 || target == deglib::cpu::InstructionSet::AVX512_VNNI) {
         if (dim < 32) {
-            return InnerProductUInt7{};
+            return InnerProductUint7{};
         }
         const size_t rem = dim % 64;
         if (rem == 0) {
-            return InnerProductUInt7_AVX512<ResidualMode::SimdOnly>{};
+            return InnerProductUint7_AVX512<ResidualMode::SimdOnly>{};
         }
-        return InnerProductUInt7_AVX512<ResidualMode::Full>{};
+        return InnerProductUint7_AVX512<ResidualMode::Full>{};
     } else if (target == deglib::cpu::InstructionSet::AVX2 || target == deglib::cpu::InstructionSet::AVX2_VNNI) {
         if (dim < 16) {
-            return InnerProductUInt7{};
+            return InnerProductUint7{};
         }
         const size_t rem = dim % 32;
         if (rem == 0) {
-            return InnerProductUInt7_AVX2<ResidualMode::SimdOnly>{};
+            return InnerProductUint7_AVX2<ResidualMode::SimdOnly>{};
         }
-        return InnerProductUInt7_AVX2<ResidualMode::Full>{};
+        return InnerProductUint7_AVX2<ResidualMode::Full>{};
     }
 #endif
 
-    return InnerProductUInt7{};
+    return InnerProductUint7{};
 }
 
 }  // namespace deglib::distances::uint7_ip

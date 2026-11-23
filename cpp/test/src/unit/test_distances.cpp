@@ -630,7 +630,7 @@ TEST(DeglibDistances, BatchAndStridedKernelMatchSingleCompare) {
     }
 }
 
-TEST(DeglibDistances, UInt7L2MaskedTailMatchesScalar) {
+TEST(DeglibDistances, Uint7L2MaskedTailMatchesScalar) {
 #if defined(DEGLIB_X86)
     if (!deglib::cpu::has_avx512()) GTEST_SKIP() << "AVX-512 not supported";
     for (const size_t dim : {33u, 63u, 64u, 72u, 127u, 200u}) {
@@ -639,8 +639,8 @@ TEST(DeglibDistances, UInt7L2MaskedTailMatchesScalar) {
             a[i] = static_cast<int8_t>((i * 17 + 3) % 128);
             b[i] = static_cast<int8_t>((i * 31 + 11) % 128);
         }
-        const deglib::distances::FloatSpace scalar_space(dim, deglib::distances::Metric::UInt7_L2, deglib::cpu::InstructionSet::Scalar);
-        const deglib::distances::FloatSpace avx512_space(dim, deglib::distances::Metric::UInt7_L2, deglib::cpu::InstructionSet::AVX512);
+        const deglib::distances::FloatSpace scalar_space(dim, deglib::distances::Metric::Uint7_L2, deglib::cpu::InstructionSet::Scalar);
+        const deglib::distances::FloatSpace avx512_space(dim, deglib::distances::Metric::Uint7_L2, deglib::cpu::InstructionSet::AVX512);
         const float expected = deglib::distances::compute_distance(scalar_space, a.data(), b.data());
         const float actual = deglib::distances::compute_distance(avx512_space, a.data(), b.data());
         EXPECT_FLOAT_EQ(actual, expected) << "dim=" << dim;
@@ -696,8 +696,8 @@ inline void fill_metric_test_buffer(const deglib::distances::Metric metric, cons
             }
             break;
         }
-        case Metric::UInt7_L2:
-        case Metric::UInt7_InnerProduct: {
+        case Metric::Uint7_L2:
+        case Metric::Uint7_InnerProduct: {
             for (size_t i = 0; i < dim; ++i) {
                 buf[i] = static_cast<uint8_t>((i * 47 + seed * 31 + 11) % 128);
             }
@@ -764,7 +764,7 @@ TEST(DeglibDistances, AllMetricsMaskedTailMatchesScalar) {
 
     constexpr std::array<Metric, 15> metrics = {
         Metric::FP32_L2,  Metric::FP32_InnerProduct,  Metric::FP16_L2,          Metric::FP16_InnerProduct,  Metric::Int8_L2,  Metric::Int8_InnerProduct,
-        Metric::Uint8_L2, Metric::Uint8_InnerProduct, Metric::UInt7_L2,         Metric::UInt7_InnerProduct, Metric::Uint4_L2, Metric::Uint4_InnerProduct,
+        Metric::Uint8_L2, Metric::Uint8_InnerProduct, Metric::Uint7_L2,         Metric::Uint7_InnerProduct, Metric::Uint4_L2, Metric::Uint4_InnerProduct,
         Metric::Int4_L2,  Metric::Int4_InnerProduct,  Metric::EVP_InnerProduct,
     };
 

@@ -971,7 +971,7 @@ inline deglib::distances::MetricDataType parse_quant_data_type(const nb::object&
         for (char& c : q_lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (q_lower == "uint4") return deglib::distances::MetricDataType::Uint4;
         if (q_lower == "int4") return deglib::distances::MetricDataType::Int4;
-        if (q_lower == "uint7") return deglib::distances::MetricDataType::UInt7;
+        if (q_lower == "uint7") return deglib::distances::MetricDataType::Uint7;
         if (q_lower == "uint8") return deglib::distances::MetricDataType::Uint8;
         if (q_lower == "int8") return deglib::distances::MetricDataType::Int8;
         if (q_lower == "fp16") return deglib::distances::MetricDataType::FP16;
@@ -1306,8 +1306,8 @@ NB_MODULE(deglib_cpp, m) {
         .value("Uint4_L2", deglib::distances::MetricType::Uint4_L2)
         .value("Int4_InnerProduct", deglib::distances::MetricType::Int4_InnerProduct)
         .value("Int4_L2", deglib::distances::MetricType::Int4_L2)
-        .value("UInt7_InnerProduct", deglib::distances::MetricType::UInt7_InnerProduct)
-        .value("UInt7_L2", deglib::distances::MetricType::UInt7_L2);
+        .value("Uint7_InnerProduct", deglib::distances::MetricType::Uint7_InnerProduct)
+        .value("Uint7_L2", deglib::distances::MetricType::Uint7_L2);
 
     nb::class_<deglib::distances::FloatSpace>(distances_module, "FloatSpace")
         .def(
@@ -1626,15 +1626,15 @@ NB_MODULE(deglib_cpp, m) {
         .def("quantize", &quantize_scalar_2d<deglib::transformation::ScalarQuantizerInt4, uint8_t, true>, nb::arg("vectors"), nb::arg("threads") = 0)
         .def_static("deserialize", &deserialize_transform<deglib::transformation::ScalarQuantizerInt4>);
 
-    nb::class_<deglib::transformation::ScalarQuantizerUInt7, deglib::transformation::FeatureTransformation>(transformation_module, "ScalarQuantizerUInt7")
-        .def_prop_ro("dim", &deglib::transformation::ScalarQuantizerUInt7::dim)
-        .def_prop_ro("min", &deglib::transformation::ScalarQuantizerUInt7::min)
-        .def_prop_ro("max", &deglib::transformation::ScalarQuantizerUInt7::max)
-        .def_prop_ro("scale", &deglib::transformation::ScalarQuantizerUInt7::scale)
-        .def_prop_ro("inv_scale", &deglib::transformation::ScalarQuantizerUInt7::inv_scale)
-        .def_prop_ro("is_fitted", &deglib::transformation::ScalarQuantizerUInt7::is_fitted)
-        .def("quantize", &quantize_scalar_2d<deglib::transformation::ScalarQuantizerUInt7, int8_t>, nb::arg("vectors"), nb::arg("threads") = 0)
-        .def_static("deserialize", &deserialize_transform<deglib::transformation::ScalarQuantizerUInt7>);
+    nb::class_<deglib::transformation::ScalarQuantizerUint7, deglib::transformation::FeatureTransformation>(transformation_module, "ScalarQuantizerUint7")
+        .def_prop_ro("dim", &deglib::transformation::ScalarQuantizerUint7::dim)
+        .def_prop_ro("min", &deglib::transformation::ScalarQuantizerUint7::min)
+        .def_prop_ro("max", &deglib::transformation::ScalarQuantizerUint7::max)
+        .def_prop_ro("scale", &deglib::transformation::ScalarQuantizerUint7::scale)
+        .def_prop_ro("inv_scale", &deglib::transformation::ScalarQuantizerUint7::inv_scale)
+        .def_prop_ro("is_fitted", &deglib::transformation::ScalarQuantizerUint7::is_fitted)
+        .def("quantize", &quantize_scalar_2d<deglib::transformation::ScalarQuantizerUint7, int8_t>, nb::arg("vectors"), nb::arg("threads") = 0)
+        .def_static("deserialize", &deserialize_transform<deglib::transformation::ScalarQuantizerUint7>);
 
     nb::class_<deglib::transformation::ScalarQuantizerUint4, deglib::transformation::FeatureTransformation>(transformation_module, "ScalarQuantizerUint4")
         .def_prop_ro("dim", &deglib::transformation::ScalarQuantizerUint4::dim)
@@ -1712,7 +1712,7 @@ NB_MODULE(deglib_cpp, m) {
         "make_scalar_quantizer_int4", &make_scalar_quantizer_impl<deglib::transformation::ScalarQuantizerInt4>, nb::arg("vectors"), nb::arg("quantile") = -1.0f
     );
     transformation_module.def(
-        "make_scalar_quantizer_uint7", &make_scalar_quantizer_impl<deglib::transformation::ScalarQuantizerUInt7>, nb::arg("vectors"),
+        "make_scalar_quantizer_uint7", &make_scalar_quantizer_impl<deglib::transformation::ScalarQuantizerUint7>, nb::arg("vectors"),
         nb::arg("quantile") = -1.0f
     );
     transformation_module.def(

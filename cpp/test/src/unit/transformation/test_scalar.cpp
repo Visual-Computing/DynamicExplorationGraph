@@ -366,17 +366,17 @@ TEST(ScalarQuantize, FP16FactoryAndFP16InputEquivalence) {
     for (size_t i = 0; i < from_f32.size(); ++i) EXPECT_EQ(from_f32[i], from_fp16[i]);
 }
 
-TEST(ScalarQuantize, UInt7Basic) {
+TEST(ScalarQuantize, Uint7Basic) {
     std::vector<float> vec = {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f};
     const uint32_t dim = 5;
 
-    deglib::transformation::ScalarQuantizerUInt7 quantizer(dim);
+    deglib::transformation::ScalarQuantizerUint7 quantizer(dim);
     quantizer.fit(std::span<const float>(vec), 1.0f);
     EXPECT_NEAR(quantizer.min(), -1.0f, 1e-5f);
     EXPECT_NEAR(quantizer.max(), 1.0f, 1e-5f);
     EXPECT_NEAR(quantizer.scale(), 127.0f / 2.0f, 1e-5f);
 
-    auto result = transform_db_helper<deglib::transformation::ScalarQuantizerUInt7, float, int8_t>(quantizer, std::span<const float>(vec), 1);
+    auto result = transform_db_helper<deglib::transformation::ScalarQuantizerUint7, float, int8_t>(quantizer, std::span<const float>(vec), 1);
     ASSERT_EQ(result.size(), 5u);
     EXPECT_EQ(result[0], 0);
     EXPECT_EQ(result[1], 32);
@@ -385,8 +385,8 @@ TEST(ScalarQuantize, UInt7Basic) {
     EXPECT_EQ(result[4], 127);
     EXPECT_EQ(quantizer.output_byte_size(), dim * sizeof(int8_t));
     EXPECT_EQ(quantizer.tag(), deglib::transformation::TAG_SQU7);
-    EXPECT_EQ(quantizer.get_target_metric(deglib::distances::Metric::FP32_L2), deglib::distances::Metric::UInt7_L2);
-    EXPECT_EQ(quantizer.get_target_metric(deglib::distances::Metric::FP32_InnerProduct), deglib::distances::Metric::UInt7_InnerProduct);
+    EXPECT_EQ(quantizer.get_target_metric(deglib::distances::Metric::FP32_L2), deglib::distances::Metric::Uint7_L2);
+    EXPECT_EQ(quantizer.get_target_metric(deglib::distances::Metric::FP32_InnerProduct), deglib::distances::Metric::Uint7_InnerProduct);
 }
 
 TEST(ScalarQuantize, FP16MustBeFittedBeforeTransform) {
@@ -558,18 +558,18 @@ TEST(ScalarQuantize, Int4FitAndSerialize) {
     EXPECT_TRUE(q_deser->is_fitted());
 }
 
-TEST(ScalarQuantize, UInt7SerializeRoundtrip) {
+TEST(ScalarQuantize, Uint7SerializeRoundtrip) {
     const uint32_t dim = 16;
     auto data = generate_random_floats(25, dim, 101);
 
-    deglib::transformation::ScalarQuantizerUInt7 q(dim);
+    deglib::transformation::ScalarQuantizerUint7 q(dim);
     q.fit(std::span<const float>(data), 1.0f);
     EXPECT_TRUE(q.is_fitted());
 
     std::stringstream ss;
     q.serialize(ss);
 
-    auto q_deser = deglib::transformation::ScalarQuantizerUInt7::deserialize(ss);
+    auto q_deser = deglib::transformation::ScalarQuantizerUint7::deserialize(ss);
     EXPECT_EQ(q_deser->dim(), dim);
     EXPECT_FLOAT_EQ(q_deser->min(), q.min());
     EXPECT_FLOAT_EQ(q_deser->max(), q.max());

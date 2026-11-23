@@ -31,7 +31,7 @@
 
 namespace deglib::distances {
 
-enum class MetricDataType : uint8_t { FP32 = 0x00, Uint8 = 0x10, FP16 = 0x20, EVP = 0x30, Int8 = 0x40, Uint4 = 0x50, Int4 = 0x60, UInt7 = 0x70 };
+enum class MetricDataType : uint8_t { FP32 = 0x00, Uint8 = 0x10, FP16 = 0x20, EVP = 0x30, Int8 = 0x40, Uint4 = 0x50, Int4 = 0x60, Uint7 = 0x70 };
 
 enum class MetricDistanceKind : uint8_t { L2 = 0x01, InnerProduct = 0x02 };
 
@@ -49,8 +49,8 @@ enum class MetricType : uint8_t {
     Uint4_InnerProduct = static_cast<uint8_t>(MetricDataType::Uint4) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),  // 0x52
     Int4_L2 = static_cast<uint8_t>(MetricDataType::Int4) | static_cast<uint8_t>(MetricDistanceKind::L2),                        // 0x61
     Int4_InnerProduct = static_cast<uint8_t>(MetricDataType::Int4) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct),    // 0x62
-    UInt7_L2 = static_cast<uint8_t>(MetricDataType::UInt7) | static_cast<uint8_t>(MetricDistanceKind::L2),                        // 0x71
-    UInt7_InnerProduct = static_cast<uint8_t>(MetricDataType::UInt7) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct)    // 0x72
+    Uint7_L2 = static_cast<uint8_t>(MetricDataType::Uint7) | static_cast<uint8_t>(MetricDistanceKind::L2),                        // 0x71
+    Uint7_InnerProduct = static_cast<uint8_t>(MetricDataType::Uint7) | static_cast<uint8_t>(MetricDistanceKind::InnerProduct)    // 0x72
 };
 
 /**
@@ -78,8 +78,8 @@ struct Metric {
     static constexpr MetricType Uint4_InnerProduct = MetricType::Uint4_InnerProduct;
     static constexpr MetricType Int4_L2 = MetricType::Int4_L2;
     static constexpr MetricType Int4_InnerProduct = MetricType::Int4_InnerProduct;
-    static constexpr MetricType UInt7_L2 = MetricType::UInt7_L2;
-    static constexpr MetricType UInt7_InnerProduct = MetricType::UInt7_InnerProduct;
+    static constexpr MetricType Uint7_L2 = MetricType::Uint7_L2;
+    static constexpr MetricType Uint7_InnerProduct = MetricType::Uint7_InnerProduct;
 
     constexpr MetricDataType get_data_type() const { return static_cast<MetricDataType>(static_cast<uint8_t>(value) & 0xF0); }
 
@@ -101,8 +101,8 @@ struct Metric {
                 return "Uint4";
             case MetricDataType::Int4:
                 return "Int4";
-            case MetricDataType::UInt7:
-                return "UInt7";
+            case MetricDataType::Uint7:
+                return "Uint7";
         }
         return "Unknown";
     }
@@ -342,9 +342,9 @@ class FloatSpace {
                 return detail::to_kernel(deglib::distances::int4_ip::select_dist(dim, instruction));
             case Metric::Int4_L2:
                 return detail::to_kernel(deglib::distances::int4_l2::select_dist(dim, instruction));
-            case Metric::UInt7_L2:
+            case Metric::Uint7_L2:
                 return detail::to_kernel(deglib::distances::uint7_l2::select_dist(dim, instruction));
-            case Metric::UInt7_InnerProduct:
+            case Metric::Uint7_InnerProduct:
                 return detail::to_kernel(deglib::distances::uint7_ip::select_dist(dim, instruction));
             default:
                 throw std::invalid_argument("Unsupported metric type in select_kernel");
@@ -363,7 +363,7 @@ class FloatSpace {
                 return 2 * ((dim + 7) / 8);  // EVP: [ones ((dim+7)/8 bytes)][negs ((dim+7)/8 bytes)]
             case MetricDataType::Int8:
                 return dim * sizeof(int8_t);
-            case MetricDataType::UInt7:
+            case MetricDataType::Uint7:
                 return dim * sizeof(int8_t);
             case MetricDataType::Uint4:
             case MetricDataType::Int4:

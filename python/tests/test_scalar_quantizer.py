@@ -19,7 +19,7 @@ def test_no_raw_scalar_quantizer_classes_exported():
     for name in (
         "ScalarQuantizerInt8",
         "ScalarQuantizerUint8",
-        "ScalarQuantizerUInt7",
+        "ScalarQuantizerUint7",
         "ScalarQuantizerUint4",
         "ScalarQuantizerInt4",
         "ScalarQuantizerFP16",
@@ -177,7 +177,7 @@ def test_uint7_quantizer_fit_quantize_and_distance():
     assert quant_db.min() >= 0
     assert quant_db.max() <= 127
 
-    dist = Metric.UInt7_L2.compute_distance(quant_db[0], quant_db[1])
+    dist = Metric.Uint7_L2.compute_distance(quant_db[0], quant_db[1])
     expected = float(np.sum((quant_db[0].astype(np.int64) - quant_db[1].astype(np.int64)) ** 2))
     assert dist == pytest.approx(expected)
 

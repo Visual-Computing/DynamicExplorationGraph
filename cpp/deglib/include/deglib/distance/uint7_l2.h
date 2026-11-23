@@ -11,7 +11,7 @@
 namespace deglib::distances::uint7_l2 {
 
 // Scalar fallback for INT7 codes in [0, 127].
-class L2UInt7 {
+class L2Uint7 {
   public:
     static constexpr const char* get_instruction() { return "Scalar"; }
 
@@ -80,7 +80,7 @@ DEGLIB_TARGET_AVX2 inline static int64_t l2_uint7_acc64(const int8_t* a, const i
 }
 
 template <ResidualMode Mode = ResidualMode::Full>
-class L2UInt7_AVX512 {
+class L2Uint7_AVX512 {
     static constexpr bool HasTail = has_flag(Mode, ResidualMode::Tail);
 
   public:
@@ -124,7 +124,7 @@ class L2UInt7_AVX512 {
 };
 
 template <ResidualMode Mode = ResidualMode::Full>
-class L2UInt7_AVX2 {
+class L2Uint7_AVX2 {
     static constexpr bool HasTail = has_flag(Mode, ResidualMode::Tail);
 
   public:
@@ -169,13 +169,13 @@ class L2UInt7_AVX2 {
 #endif
 
 using DistanceVariant = std::variant<
-    L2UInt7
+    L2Uint7
 #if defined(DEGLIB_X86)
     ,
-    L2UInt7_AVX512<ResidualMode::Full>,
-    L2UInt7_AVX512<ResidualMode::SimdOnly>,
-    L2UInt7_AVX2<ResidualMode::Full>,
-    L2UInt7_AVX2<ResidualMode::SimdOnly>
+    L2Uint7_AVX512<ResidualMode::Full>,
+    L2Uint7_AVX512<ResidualMode::SimdOnly>,
+    L2Uint7_AVX2<ResidualMode::Full>,
+    L2Uint7_AVX2<ResidualMode::SimdOnly>
 #endif
     >;
 
@@ -185,26 +185,26 @@ inline DistanceVariant select_dist(const size_t dim, const deglib::cpu::Instruct
 #if defined(DEGLIB_X86)
     if (target == deglib::cpu::InstructionSet::AVX512 || target == deglib::cpu::InstructionSet::AVX512_VNNI) {
         if (dim < 32) {
-            return L2UInt7{};
+            return L2Uint7{};
         }
         const size_t rem = dim % 64;
         if (rem == 0) {
-            return L2UInt7_AVX512<ResidualMode::SimdOnly>{};
+            return L2Uint7_AVX512<ResidualMode::SimdOnly>{};
         }
-        return L2UInt7_AVX512<ResidualMode::Full>{};
+        return L2Uint7_AVX512<ResidualMode::Full>{};
     } else if (target == deglib::cpu::InstructionSet::AVX2 || target == deglib::cpu::InstructionSet::AVX2_VNNI) {
         if (dim < 16) {
-            return L2UInt7{};
+            return L2Uint7{};
         }
         const size_t rem = dim % 32;
         if (rem == 0) {
-            return L2UInt7_AVX2<ResidualMode::SimdOnly>{};
+            return L2Uint7_AVX2<ResidualMode::SimdOnly>{};
         }
-        return L2UInt7_AVX2<ResidualMode::Full>{};
+        return L2Uint7_AVX2<ResidualMode::Full>{};
     }
 #endif
 
-    return L2UInt7{};
+    return L2Uint7{};
 }
 
 }  // namespace deglib::distances::uint7_l2

@@ -274,7 +274,7 @@ TEST(L2Int8_Optimal, MatchesNaive_IfSupported) {
     }
 }
 
-TEST(L2UInt7, MatchesNaive) {
+TEST(L2Uint7, MatchesNaive) {
     auto int7_vec = [](size_t dim, int seed) {
         std::mt19937 rng(seed);
         std::uniform_int_distribution<int> dist(0, 127);
@@ -293,22 +293,22 @@ TEST(L2UInt7, MatchesNaive) {
         return static_cast<float>(sum);
     };
 
-    using deglib::distances::uint7_l2::L2UInt7;
+    using deglib::distances::uint7_l2::L2Uint7;
 
     for (size_t dim : {1, 4, 15, 16, 31, 32, 33, 63, 64, 65, 127, 128, 129, 256, 768}) {
         int32_t dim32 = static_cast<int32_t>(dim);
         auto a = int7_vec(dim, 13);
         auto b = int7_vec(dim, 99);
-        float d = L2UInt7::compare(a.data(), b.data(), &dim32);
+        float d = L2Uint7::compare(a.data(), b.data(), &dim32);
         EXPECT_NEAR(d, naive(a.data(), b.data(), dim), 1e-4f) << "dim=" << dim;
 
-        deglib::distances::FloatSpace space(dim, deglib::distances::Metric::UInt7_L2);
+        deglib::distances::FloatSpace space(dim, deglib::distances::Metric::Uint7_L2);
         float fd = space.get_dist_func()(a.data(), b.data(), space.get_dist_func_param());
         EXPECT_NEAR(fd, naive(a.data(), b.data(), dim), 1e-4f) << "FloatSpace dim=" << dim;
     }
 }
 
-TEST(UInt7InnerProduct, MatchesNaive) {
+TEST(Uint7InnerProduct, MatchesNaive) {
     auto int7_vec = [](size_t dim, int seed) {
         std::mt19937 rng(seed);
         std::uniform_int_distribution<int> dist(0, 127);
@@ -330,9 +330,9 @@ TEST(UInt7InnerProduct, MatchesNaive) {
         int32_t dim32 = static_cast<int32_t>(dim);
         auto a = int7_vec(dim, 13);
         auto b = int7_vec(dim, 99);
-        EXPECT_NEAR(deglib::distances::uint7_ip::InnerProductUInt7::compare(a.data(), b.data(), &dim32), naive(a.data(), b.data(), dim), 1e-3f)
+        EXPECT_NEAR(deglib::distances::uint7_ip::InnerProductUint7::compare(a.data(), b.data(), &dim32), naive(a.data(), b.data(), dim), 1e-3f)
             << "scalar dim=" << dim;
-        deglib::distances::FloatSpace space(dim, deglib::distances::Metric::UInt7_InnerProduct);
+        deglib::distances::FloatSpace space(dim, deglib::distances::Metric::Uint7_InnerProduct);
         float fd = space.get_dist_func()(a.data(), b.data(), space.get_dist_func_param());
         EXPECT_NEAR(fd, naive(a.data(), b.data(), dim), 1e-3f) << "FloatSpace dim=" << dim;
     }

@@ -28,8 +28,8 @@ def _metric_data_size(metric: "Metric", dim: int) -> int:
         Metric.Uint8_InnerProduct,
         Metric.Int8_L2,
         Metric.Int8_InnerProduct,
-        Metric.UInt7_L2,
-        Metric.UInt7_InnerProduct,
+        Metric.Uint7_L2,
+        Metric.Uint7_InnerProduct,
     ):
         return dim
     if m in (
@@ -53,8 +53,8 @@ def _metric_dtype(metric: "Metric") -> np.dtype:
     if m in (
         Metric.Int8_L2,
         Metric.Int8_InnerProduct,
-        Metric.UInt7_L2,
-        Metric.UInt7_InnerProduct,
+        Metric.Uint7_L2,
+        Metric.Uint7_InnerProduct,
     ):
         return np.dtype(np.int8)
     if m in (
@@ -141,8 +141,8 @@ class Metric(enum.IntEnum, metaclass=_MetricMeta):
     Uint4_L2 = cpp_distances.Metric.Uint4_L2
     Int4_InnerProduct = cpp_distances.Metric.Int4_InnerProduct
     Int4_L2 = cpp_distances.Metric.Int4_L2
-    UInt7_L2 = cpp_distances.Metric.UInt7_L2
-    UInt7_InnerProduct = cpp_distances.Metric.UInt7_InnerProduct
+    Uint7_L2 = cpp_distances.Metric.Uint7_L2
+    Uint7_InnerProduct = cpp_distances.Metric.Uint7_InnerProduct
 
     def get_dtype(self) -> np.dtype:
         """
@@ -266,8 +266,8 @@ class Metric(enum.IntEnum, metaclass=_MetricMeta):
                     "u8": "Uint8",
                     "int8": "Int8",
                     "i8": "Int8",
-                    "uint7": "UInt7",
-                    "u7": "UInt7",
+                    "uint7": "Uint7",
+                    "u7": "Uint7",
                     "uint4": "Uint4",
                     "u4": "Uint4",
                     "int4": "Int4",
