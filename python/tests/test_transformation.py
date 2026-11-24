@@ -19,9 +19,9 @@ def test_mips_transform_basic():
     assert transformed.shape == (n, d + 1)
     assert transformed.dtype == np.float32
 
-    np.testing.assert_allclose(transformed[:, :d], data)
+    np.testing.assert_allclose(transformed[:, :d], data / mips.max_norm, rtol=1e-5, atol=1e-5)
     norms_sq = np.sum(transformed**2, axis=1)
-    np.testing.assert_allclose(norms_sq, mips.max_norm**2, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(norms_sq, 1.0, rtol=1e-5, atol=1e-5)
 
     # Multi-stage apply_on_database matches transform_database
     via_pipe = apply_on_database([mips], data)
@@ -56,7 +56,7 @@ def test_mips_transform_query_1d_and_explicit_max_norm():
     q_1d = rng.standard_normal(8).astype(np.float32)
     out_1d = mips.transform_query(q_1d)
     assert out_1d.shape == (9,)
-    np.testing.assert_allclose(out_1d[:8], q_1d)
+    np.testing.assert_allclose(out_1d[:8], q_1d / np.linalg.norm(q_1d), rtol=1e-5, atol=1e-5)
     assert out_1d[8] == 0.0
 
     via_pipe = apply_on_query(mips, q_1d)

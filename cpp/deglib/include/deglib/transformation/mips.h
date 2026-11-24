@@ -35,17 +35,21 @@ inline float mips_l2_transform_raw(const float* input, size_t count, size_t dim,
         if (sum > max_norm_sq) max_norm_sq = sum;
     }
 
+    const double max_norm = std::sqrt(max_norm_sq);
+    const double inv_max_norm = (max_norm > 0.0) ? (1.0 / max_norm) : 0.0;
     const size_t new_dim = dim + 1;
     for (size_t i = 0; i < count; ++i) {
         const float* in_vec = input + i * dim;
         float* out_vec = output + i * new_dim;
-        std::memcpy(out_vec, in_vec, dim * sizeof(float));
-        double diff = max_norm_sq - norms_sq[i];
-        float extra = (diff > 0.0) ? static_cast<float>(std::sqrt(diff)) : 0.0f;
-        out_vec[dim] = extra;
+        for (size_t j = 0; j < dim; ++j) {
+            out_vec[j] = static_cast<float>(static_cast<double>(in_vec[j]) * inv_max_norm);
+        }
+        const double scaled_norm_sq = norms_sq[i] * inv_max_norm * inv_max_norm;
+        const double diff = 1.0 - scaled_norm_sq;
+        out_vec[dim] = (diff > 0.0) ? static_cast<float>(std::sqrt(diff)) : 0.0f;
     }
 
-    return static_cast<float>(std::sqrt(max_norm_sq));
+    return static_cast<float>(max_norm);
 }
 
 inline void mips_l2_transform_query_raw(const float* input, size_t count, size_t dim, float* output) {
@@ -58,7 +62,15 @@ inline void mips_l2_transform_query_raw(const float* input, size_t count, size_t
     for (size_t i = 0; i < count; ++i) {
         const float* in_vec = input + i * dim;
         float* out_vec = output + i * new_dim;
-        std::memcpy(out_vec, in_vec, dim * sizeof(float));
+        double norm_sq = 0.0;
+        for (size_t j = 0; j < dim; ++j) {
+            const double val = static_cast<double>(in_vec[j]);
+            norm_sq += val * val;
+        }
+        const double inv_norm = (norm_sq > 0.0) ? (1.0 / std::sqrt(norm_sq)) : 0.0;
+        for (size_t j = 0; j < dim; ++j) {
+            out_vec[j] = static_cast<float>(static_cast<double>(in_vec[j]) * inv_norm);
+        }
         out_vec[dim] = 0.0f;
     }
 }
@@ -159,19 +171,19 @@ class MipsTransform : public FeatureTransformation {
         if (out.size() < count * new_dim * sizeof(float)) throw std::invalid_argument("MipsTransform: output buffer too small");
 
         float* f_out = reinterpret_cast<float*>(out.data());
-        const double max_norm_sq = double(max_norm_) * double(max_norm_);
+        const double inv_max_norm = (max_norm_ > 0.0f) ? (1.0 / static_cast<double>(max_norm_)) : 0.0;
         for (size_t i = 0; i < count; ++i) {
             const float* in_vec = in.data() + i * dim_;
             float* out_vec = f_out + i * new_dim;
-            std::memcpy(out_vec, in_vec, dim_ * sizeof(float));
             double sum = 0.0;
             for (size_t j = 0; j < dim_; ++j) {
-                double val = static_cast<double>(in_vec[j]);
+                const double val = static_cast<double>(in_vec[j]);
                 sum += val * val;
+                out_vec[j] = static_cast<float>(val * inv_max_norm);
             }
-            double diff = max_norm_sq - sum;
-            float extra = (diff > 0.0) ? static_cast<float>(std::sqrt(diff)) : 0.0f;
-            out_vec[dim_] = extra;
+            const double scaled_norm_sq = sum * inv_max_norm * inv_max_norm;
+            const double diff = 1.0 - scaled_norm_sq;
+            out_vec[dim_] = (diff > 0.0) ? static_cast<float>(std::sqrt(diff)) : 0.0f;
         }
     }
 

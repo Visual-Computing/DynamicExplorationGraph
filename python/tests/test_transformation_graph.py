@@ -94,7 +94,8 @@ def test_mips_transform():
     out = apply_on_database(transformations, data)
     assert out.shape == (5, dim + 1)
     assert out.dtype == np.float32
-    np.testing.assert_allclose(out[:, :dim], data)
+    np.testing.assert_allclose(out[:, :dim], data / max_norm, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(np.sum(out**2, axis=1), 1.0, rtol=1e-5, atol=1e-5)
 
 
 def test_builder_and_graph_search_with_int8_transforms():

@@ -37,14 +37,14 @@ TEST(TransformTest, MipsTransformRoundtrip) {
     mips->transform_database(std::span<const float>(data), std::span<std::byte>(out_db));
 
     const float* out_db_f = reinterpret_cast<const float*>(out_db.data());
-    // All transformed vectors must have norm max_norm
+    // All transformed vectors must have unit norm
     for (size_t i = 0; i < count; ++i) {
         double sum_sq = 0.0;
         for (uint32_t d = 0; d < dim + 1; ++d) {
             float v = out_db_f[i * (dim + 1) + d];
             sum_sq += v * v;
         }
-        EXPECT_NEAR(std::sqrt(sum_sq), mips->max_norm(), 1e-4);
+        EXPECT_NEAR(std::sqrt(sum_sq), 1.0, 1e-4);
     }
 
     // Serialization & Deserialization

@@ -21,29 +21,29 @@ TEST(MipsTransformTest, MipsL2TransformBasic) {
 
     const size_t new_dim = dim + 1;
 
-    // First vector: extra dim = sqrt(25 - 25) = 0
-    EXPECT_FLOAT_EQ(output[0 * new_dim + 0], 3.0f);
-    EXPECT_FLOAT_EQ(output[0 * new_dim + 1], 4.0f);
+    // First vector: [3/5, 4/5, 0]
+    EXPECT_NEAR(output[0 * new_dim + 0], 0.6f, 1e-5f);
+    EXPECT_NEAR(output[0 * new_dim + 1], 0.8f, 1e-5f);
     EXPECT_NEAR(output[0 * new_dim + 2], 0.0f, 1e-5f);
 
-    // Second vector: extra dim = sqrt(25 - 0) = 5
+    // Second vector: [0, 0, 1]
     EXPECT_FLOAT_EQ(output[1 * new_dim + 0], 0.0f);
     EXPECT_FLOAT_EQ(output[1 * new_dim + 1], 0.0f);
-    EXPECT_NEAR(output[1 * new_dim + 2], 5.0f, 1e-5f);
+    EXPECT_NEAR(output[1 * new_dim + 2], 1.0f, 1e-5f);
 
-    // Third vector: extra dim = sqrt(25 - 5) = sqrt(20) ~ 4.472136
-    EXPECT_FLOAT_EQ(output[2 * new_dim + 0], 1.0f);
-    EXPECT_FLOAT_EQ(output[2 * new_dim + 1], 2.0f);
-    EXPECT_NEAR(output[2 * new_dim + 2], std::sqrt(20.0f), 1e-5f);
+    // Third vector: [1/5, 2/5, sqrt(1 - 5/25)]
+    EXPECT_NEAR(output[2 * new_dim + 0], 0.2f, 1e-5f);
+    EXPECT_NEAR(output[2 * new_dim + 1], 0.4f, 1e-5f);
+    EXPECT_NEAR(output[2 * new_dim + 2], std::sqrt(0.8f), 1e-5f);
 
-    // All transformed vectors must have norm^2 == 25
+    // All transformed vectors must have unit norm
     for (size_t i = 0; i < count; ++i) {
         float norm_sq = 0.0f;
         for (size_t j = 0; j < new_dim; ++j) {
             float val = output[i * new_dim + j];
             norm_sq += val * val;
         }
-        EXPECT_NEAR(norm_sq, 25.0f, 1e-4f);
+        EXPECT_NEAR(norm_sq, 1.0f, 1e-5f);
     }
 }
 
@@ -56,14 +56,16 @@ TEST(MipsTransformTest, MipsL2TransformQueryPadsZero) {
     deglib::transformation::mips_l2_transform_query(input, count, dim, output);
 
     const size_t new_dim = dim + 1;
-    EXPECT_FLOAT_EQ(output[0 * new_dim + 0], 1.0f);
-    EXPECT_FLOAT_EQ(output[0 * new_dim + 1], 2.0f);
-    EXPECT_FLOAT_EQ(output[0 * new_dim + 2], 3.0f);
+    const float norm0 = std::sqrt(1.0f + 4.0f + 9.0f);
+    EXPECT_NEAR(output[0 * new_dim + 0], 1.0f / norm0, 1e-5f);
+    EXPECT_NEAR(output[0 * new_dim + 1], 2.0f / norm0, 1e-5f);
+    EXPECT_NEAR(output[0 * new_dim + 2], 3.0f / norm0, 1e-5f);
     EXPECT_FLOAT_EQ(output[0 * new_dim + 3], 0.0f);
 
-    EXPECT_FLOAT_EQ(output[1 * new_dim + 0], 4.0f);
-    EXPECT_FLOAT_EQ(output[1 * new_dim + 1], 5.0f);
-    EXPECT_FLOAT_EQ(output[1 * new_dim + 2], 6.0f);
+    const float norm1 = std::sqrt(16.0f + 25.0f + 36.0f);
+    EXPECT_NEAR(output[1 * new_dim + 0], 4.0f / norm1, 1e-5f);
+    EXPECT_NEAR(output[1 * new_dim + 1], 5.0f / norm1, 1e-5f);
+    EXPECT_NEAR(output[1 * new_dim + 2], 6.0f / norm1, 1e-5f);
     EXPECT_FLOAT_EQ(output[1 * new_dim + 3], 0.0f);
 }
 
@@ -80,16 +82,16 @@ TEST(MipsTransformTest, MipsL2TransformDistanceEquivalence) {
     float max_norm = deglib::transformation::mips_l2_transform(db_input, db_count, dim, db_output);
     deglib::transformation::mips_l2_transform_query(query_input, query_count, dim, query_output);
 
-    float M_sq = max_norm * max_norm;
     const size_t new_dim = dim + 1;
 
-    // Verify L2 distance relationship: ||q' - x'_i||^2 == ||q||^2 + M^2 - 2 * <q, x_i>
+    // Verify L2 distance relationship: ||q' - x'_i||^2 == 2 - 2 * <q, x_i> / (||q|| * M)
     for (size_t q = 0; q < query_count; ++q) {
         float q_norm_sq = 0.0f;
         for (size_t d = 0; d < dim; ++d) {
             float q_val = query_input[q * dim + d];
             q_norm_sq += q_val * q_val;
         }
+        float q_norm = std::sqrt(q_norm_sq);
 
         for (size_t i = 0; i < db_count; ++i) {
             float l2_dist_sq = 0.0f;
@@ -103,7 +105,7 @@ TEST(MipsTransformTest, MipsL2TransformDistanceEquivalence) {
                 ip_val += query_input[q * dim + d] * db_input[i * dim + d];
             }
 
-            float expected_l2_dist_sq = q_norm_sq + M_sq - 2.0f * ip_val;
+            float expected_l2_dist_sq = 2.0f - 2.0f * ip_val / (q_norm * max_norm);
             EXPECT_NEAR(l2_dist_sq, expected_l2_dist_sq, 1e-4f);
         }
     }
@@ -137,8 +139,8 @@ TEST(MipsTransformTest, MipsTransformClassApi) {
     // Transform database
     mips.transform_database(input, db_out);
     const float* f_out = reinterpret_cast<const float*>(db_out.data());
-    EXPECT_FLOAT_EQ(f_out[0], 3.0f);
-    EXPECT_FLOAT_EQ(f_out[1], 4.0f);
+    EXPECT_NEAR(f_out[0], 0.6f, 1e-5f);
+    EXPECT_NEAR(f_out[1], 0.8f, 1e-5f);
     EXPECT_NEAR(f_out[2], 0.0f, 1e-5f);
 
     // Transform query
@@ -146,7 +148,8 @@ TEST(MipsTransformTest, MipsTransformClassApi) {
     std::vector<std::byte> q_out(1 * 3 * sizeof(float));
     mips.transform_query(query, q_out);
     const float* q_f_out = reinterpret_cast<const float*>(q_out.data());
-    EXPECT_FLOAT_EQ(q_f_out[0], 1.0f);
-    EXPECT_FLOAT_EQ(q_f_out[1], 2.0f);
+    const float q_norm = std::sqrt(5.0f);
+    EXPECT_NEAR(q_f_out[0], 1.0f / q_norm, 1e-5f);
+    EXPECT_NEAR(q_f_out[1], 2.0f / q_norm, 1e-5f);
     EXPECT_FLOAT_EQ(q_f_out[2], 0.0f);
 }
