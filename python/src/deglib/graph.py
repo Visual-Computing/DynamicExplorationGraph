@@ -595,6 +595,14 @@ class DynamicExplorationGraph:
         pass (without recomputing mutable edge weights or allocating intermediate graph
         copies) while preserving any attached prefix transformations (e.g. ``MipsTransform``).
 
+        Memory & Ownership
+        ------------------
+        If ``self`` is already a ``ReadOnlyGraph`` and ``metric=None`` (or matches),
+        ``searcher.graph`` shares ``self`` zero-copy (``searcher.graph is self``).
+        If ``self`` is mutable or ``metric`` triggers a conversion, a new ``ReadOnlyGraph``
+        is created for ``searcher.graph``; drop your reference to ``self`` if you no longer
+        need the original graph in RAM.
+
         Parameters
         ----------
         metric : Metric or str, optional
@@ -950,8 +958,9 @@ class DynamicExplorationGraph:
         )
 
     def __repr__(self) -> str:
+        backend = "MutableGraph" if self.is_mutable() else "ReadOnlyGraph"
         return (
-            f"DynamicExplorationGraph(size={self.size()} "
+            f"DynamicExplorationGraph(backend={backend} size={self.size()} "
             f"edges_per_vertex={self.get_edges_per_vertex()} "
             f"dim={self.get_dim()} metric={self.get_metric().name})"
         )

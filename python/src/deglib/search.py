@@ -376,6 +376,7 @@ class Searcher:
                 )
 
         self.graph = graph
+        self.reranker = reranker
         cpp_graph = getattr(graph, "dynamic_exploration_graph_cpp", graph)
 
         self._searcher_cpp = cpp_search.Searcher(
@@ -386,6 +387,15 @@ class Searcher:
 
         if optimize and graph.size() > 0:
             self.optimize(threads=threads)
+
+    def __repr__(self) -> str:
+        backend = "MutableGraph" if self.graph.is_mutable() else "ReadOnlyGraph"
+        rr_str = self.reranker.metric.name if self.reranker is not None else "None"
+        return (
+            f"Searcher(graph={backend}[{self.graph.get_metric().name}, "
+            f"size={self.graph.size()}, dim={self.graph.get_dim()}], "
+            f"reranker={rr_str})"
+        )
 
     @property
     def normalize_query(self) -> bool:
@@ -805,6 +815,13 @@ def searcher(
 ) -> Searcher:
     """
     Create an optimized ``Searcher`` for ``graph``, optionally compressing the search graph first.
+
+    Memory & Ownership
+    ------------------
+    If ``graph`` is already a ``ReadOnlyGraph`` and ``compress=None``, ``searcher.graph``
+    shares ``graph`` zero-copy (``searcher.graph is graph``). If ``graph`` is mutable or
+    ``compress`` is set, a new ``ReadOnlyGraph`` is created for ``searcher.graph``; release
+    your reference to ``graph`` (e.g. ``del graph``) if it is no longer needed in RAM.
 
     Parameters
     ----------

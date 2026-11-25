@@ -146,7 +146,8 @@ Builds a graph from a 2D NumPy array:
 - `deglib.compress(graph, target, threads=0) -> DynamicExplorationGraph`: Compresses a float graph (`"32bit"`, `"16bit"`, `"8bit"`, `"4bit"`, `"2bit"`, `"auto"`, or `Metric`), preserving the input graph's backend type.
 - `deglib.reranker(graph, compress="16bit", optimize=True, threads=0) -> Reranker`: Extracts a `Reranker` from a float graph's stored vectors.
 - `deglib.reranker_with_data(graph, data, metric="16bit", optimize=True, threads=0) -> Reranker`: Builds a `Reranker` from external feature vectors aligned with `graph` labels.
-- `deglib.searcher(graph, compress=None, reranker=None, optimize=True, threads=0) -> Searcher`: Wraps `graph` (optionally compressing first) in an optimized `Searcher`.
+- `deglib.searcher(graph, compress=None, reranker=None, optimize=True, threads=0) -> Searcher`: Wraps `graph` (optionally compressing first) in an optimized `ReadOnlyGraph`-backed `Searcher`.
+  - **Memory & Ownership:** When `graph` is already a `ReadOnlyGraph` and `compress=None`, `searcher.graph` shares `graph` zero-copy (`searcher.graph is graph`). When `graph` is mutable or `compress` is set, a new `ReadOnlyGraph` is allocated for `searcher.graph` (drop `graph` if you no longer need the mutable/uncompressed copy in RAM).
 
 ---
 
