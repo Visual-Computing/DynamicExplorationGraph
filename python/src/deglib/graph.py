@@ -638,6 +638,9 @@ class DynamicExplorationGraph:
                     self.dynamic_exploration_graph_cpp._transform_readonly(xfrms, target_space, int(threads))
                 )
 
+        if search_graph.is_mutable() and search_graph.size() > 0:
+            search_graph = search_graph.to_readonly()
+
         return Searcher(
             graph=search_graph,
             reranker=reranker,

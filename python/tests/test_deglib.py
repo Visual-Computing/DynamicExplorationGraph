@@ -575,6 +575,7 @@ class TestCompressRerankerSearcher:
         g = deglib.build(x, metric="cosine", edges_per_vertex=12, extend_k=12, threads=1)
         rr = deglib.reranker(g, compress="16bit", threads=1) if rerank_factor > 1.0 else None
         s = deglib.searcher(g, compress=search_compress, reranker=rr, optimize=optimize, threads=1)
+        assert not s.graph.is_mutable()
 
         r1 = s.search(x[0], k=5, eps_or_ef=eps_or_ef, rerank_factor=rerank_factor, return_distances=return_distances, unsorted=unsorted)
         assert r1.indices.shape == (5,)

@@ -847,7 +847,8 @@ def searcher(
     if compress is not None:
         from deglib.graph import compress as compress_graph
 
-        search_graph = compress_graph(graph, compress, threads=threads)
+        base_graph = graph.to_readonly() if (graph.is_mutable() and graph.size() > 0) else graph
+        search_graph = compress_graph(base_graph, compress, threads=threads)
     else:
         search_graph = graph
     return search_graph.to_searcher(reranker=reranker, optimize=optimize, threads=threads)
