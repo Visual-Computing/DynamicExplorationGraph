@@ -119,8 +119,12 @@ def test_to_pareto_line_with_and_without_recall_tables():
     assert line_from_tables.k == 10
     assert line_from_tables.sample_count == 60
     assert len(line_from_tables.recall_tables) == 2
-    assert line_from_tables.recall_tables[0].entries == pytest.approx(tables[0].entries)
-    assert line_from_tables.recall_tables[1].entries == pytest.approx(tables[1].entries)
+    assert len(line_from_tables.recall_tables[0].entries) == len(tables[0].entries)
+    for a, b in zip(line_from_tables.recall_tables[0].entries, tables[0].entries):
+        assert a == pytest.approx(b)
+    assert len(line_from_tables.recall_tables[1].entries) == len(tables[1].entries)
+    for a, b in zip(line_from_tables.recall_tables[1].entries, tables[1].entries):
+        assert a == pytest.approx(b)
 
     # 2. Direct calculation (recall_tables omitted) via range and explicit target_recalls
     line_direct = graph.to_pareto_line(k=10, sample_count=60, recall_range=(0.80, 0.99), recall_step=0.05, threads=1)

@@ -94,8 +94,12 @@ def test_to_recall_table_defaults_and_step():
     assert tables[0].is_ef and tables[1].is_eps
     _verify_table_invariants(tables[0])
     _verify_table_invariants(tables[1])
-    assert tables[0].entries == pytest.approx(ef_table.entries)
-    assert tables[1].entries == pytest.approx(eps_table.entries)
+    assert len(tables[0].entries) == len(ef_table.entries)
+    for a, b in zip(tables[0].entries, ef_table.entries):
+        assert a == pytest.approx(b)
+    assert len(tables[1].entries) == len(eps_table.entries)
+    for a, b in zip(tables[1].entries, eps_table.entries):
+        assert a == pytest.approx(b)
 
     # Verify default 0.5% recall_step granularity over achievable span
     half_pct_tables = graph.to_recall_tables(k=10, sample_count=60, recall_range=(0.80, 0.95), threads=1)

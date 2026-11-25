@@ -604,12 +604,16 @@ def test_searcher_recall_tables_and_pareto_with_reranker():
         single_ef = searcher.to_recall_table(
             k=10, mode="ef", rerank_factor=rf, sample_count=60, recall_range=(0.65, 0.96), recall_step=0.05, threads=1
         )
-        assert tbl_ef.entries == pytest.approx(single_ef.entries)
+        assert len(tbl_ef.entries) == len(single_ef.entries)
+        for a, b in zip(tbl_ef.entries, single_ef.entries):
+            assert a == pytest.approx(b)
 
         single_eps = searcher.to_recall_table(
             k=10, mode="eps", rerank_factor=rf, sample_count=60, recall_range=(0.65, 0.96), recall_step=0.05, threads=1
         )
-        assert tbl_eps.entries == pytest.approx(single_eps.entries)
+        assert len(tbl_eps.entries) == len(single_eps.entries)
+        for a, b in zip(tbl_eps.entries, single_eps.entries):
+            assert a == pytest.approx(b)
 
     # ParetoLine from tables, single table, range, and explicit targets
     line_from_tables = searcher.to_pareto_line(recall_tables=tables, sample_count=60, rounds=3)
