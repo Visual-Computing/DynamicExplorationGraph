@@ -13,12 +13,7 @@ except (ImportError, ValueError):
         pass
 
 
-_VIBE_METRIC_KIND = {
-    "euclidean": "L2",
-    "cosine": "InnerProduct",
-    "ip": "InnerProduct",
-    "normalized": "InnerProduct",
-}
+_SUPPORTED_METRICS = ("euclidean", "cosine", "ip", "normalized")
 
 
 def _resolve_deg_cache_dir(n_vectors: int, dims: int, cache_dir: Path | None = None) -> Path:
@@ -50,10 +45,11 @@ def _resolve_graph_cache_path(
     opt_target: str,
     extend_k: int | None = None,
     extend_eps: float = 0.1,
-    build_metric: str = deglib.Metric.FP32_InnerProduct.name,
+    is_fp16: bool = False,
 ) -> Path:
     """Resolves cached graph path (fp32 or fp16 build metric)."""
-    build_metric_str = deglib.Metric.FP32_L2.name if metric == "euclidean" else build_metric
+    prefix = "FP16" if is_fp16 else "FP32"
+    build_metric_str = f"{prefix}_L2" if metric == "euclidean" else f"{prefix}_InnerProduct"
     ext_k = extend_k if extend_k is not None else k * 2
 
     preferred = deg_dir / f"{dims}D_{build_metric_str}_K{k}_AddK{ext_k}Eps{extend_eps:.1f}_{opt_target}_FLAS.deg"
@@ -73,42 +69,39 @@ def _load_or_build_base_graph(
     metric: str,
     k: int,
     opt_target: str,
-    build_metric: deglib.Metric,
-    opt_enum: deglib.OptimizationTarget,
     threads: int,
     cache_dir: Path | None,
 ) -> deglib.DynamicExplorationGraph:
-    """Normalizes cosine vectors and builds (or loads from cache) the FP32 base graph."""
-    if metric == "cosine":
-        X = X / np.linalg.norm(X, axis=1, keepdims=True)
-    target_dtype = np.float16 if "FP16" in build_metric.name else np.float32
-    X = np.ascontiguousarray(X, dtype=target_dtype)
-    n_vectors, dims = X.shape
+    """Prepares vectors and builds or loads the cached base graph."""
+    orig_n, orig_dims = X.shape
+    deg_dir = _resolve_deg_cache_dir(orig_n, orig_dims, cache_dir)
+    graph_dims = orig_dims
 
-    deg_dir = _resolve_deg_cache_dir(n_vectors, dims, cache_dir)
-    cache_file = _resolve_graph_cache_path(deg_dir, dims, metric, k, opt_target, build_metric=build_metric.name)
+    cache_file = _resolve_graph_cache_path(
+        deg_dir, graph_dims, metric, k, opt_target, is_fp16=(X.dtype == np.float16)
+    )
     if cache_file.exists():
         print(f"Loading cached DEG graph from {cache_file}...", flush=True)
         return deglib.load_readonly_graph(str(cache_file))
 
-    presort_metric = "l2" if metric == "euclidean" else "ip"
-    presort_file = deg_dir / f"{dims}D_{presort_metric}_presort.npy"
+    presort_file = deg_dir / f"{orig_dims}D_l2_presort.npy"
     if presort_file.exists():
         print(f"Loading cached presort from {presort_file}...", flush=True)
         sorted_indices = np.load(str(presort_file))
     else:
-        print(f"Running FLAS 1D Pre-sorting (threads={threads})...", flush=True)
-        sorted_indices = deglib.presort(X, metric=build_metric, threads=threads, show_progress=True)
+        print(f"Running FLAS 1D Pre-sorting{f' (threads={threads})' if threads > 0 else ''}...", flush=True)
+        sorted_indices = deglib.presort(X, metric=metric, threads=threads, show_progress=True)
         print(f"Saving presort to cache {presort_file}...", flush=True)
         np.save(str(presort_file), sorted_indices)
 
-    print(f"Building DEG graph (K={k}, Opt={opt_target}, threads={threads})...", flush=True)
+    threads_str = f", threads={threads}" if threads > 0 else ""
+    print(f"Building DEG graph (K={k}, Opt={opt_target}{threads_str})...", flush=True)
     graph = deglib.build(
         X,
         presort=sorted_indices,
         edges_per_vertex=k,
-        metric=build_metric,
-        optimization_target=opt_enum,
+        metric=metric,
+        optimization_target=opt_target,
         optimize=False,
         threads=threads,
         show_progress=True,
@@ -121,32 +114,31 @@ def _load_or_build_base_graph(
 class _BaseDEG(BaseANN):
     """Shared configuration for DEG and QG VIBE adapters."""
 
-    def __init__(self, metric: str, k: int = 30, opt_target: str = "LowLID", threads: int = 8):
+    def __init__(self, metric: str, k: int = 30, opt_target: str = "LowLID", threads: int = 0):
         self.metric = metric.lower().strip()
-        if self.metric not in _VIBE_METRIC_KIND:
-            raise ValueError(f"Unsupported metric '{self.metric}'. Choose from: {list(_VIBE_METRIC_KIND.keys())}")
+        if self.metric not in _SUPPORTED_METRICS:
+            raise ValueError(f"Unsupported metric '{self.metric}'. Choose from: {list(_SUPPORTED_METRICS)}")
         self.k = int(k)
         self.opt_target = opt_target
         self.threads = int(threads)
         self.eps_or_ef = 0.1
-        self._metric_kind = _VIBE_METRIC_KIND[self.metric]
-        self.build_metric = deglib.Metric[f"FP32_{self._metric_kind}"]
-        self.opt_enum = deglib.OptimizationTarget.resolve(self.opt_target)
+
+    @property
+    def _search_param_str(self) -> str:
+        return f"ef={int(round(self.eps_or_ef))}" if self.eps_or_ef >= 1.0 else f"eps={self.eps_or_ef}"
 
 
 class DEG(_BaseDEG):
     """Dynamic Exploration Graph (DEG) using Float32 throughout."""
 
-    def __init__(self, metric: str, k: int = 30, opt_target: str = "LowLID", threads: int = 1):
+    def __init__(self, metric: str, k: int = 30, opt_target: str = "LowLID", threads: int = 0):
         super().__init__(metric=metric, k=k, opt_target=opt_target, threads=threads)
         self.searcher = None
 
     def fit(self, X: np.ndarray, cache_dir: Path | None = None):
         """Builds or loads the DEG graph and prepares the Searcher (fp16 in, fp16 build)."""
-        if X.dtype == np.float16:
-            self.build_metric = deglib.Metric[f"FP16_{self._metric_kind}"]
         graph = _load_or_build_base_graph(
-            X, self.metric, self.k, self.opt_target, self.build_metric, self.opt_enum, self.threads, cache_dir
+            X, self.metric, self.k, self.opt_target, self.threads, cache_dir
         )
         t_km = time.time()
         self.searcher = graph.to_searcher(
@@ -172,9 +164,7 @@ class DEG(_BaseDEG):
         ).indices
 
     def __str__(self) -> str:
-        if self.eps_or_ef >= 1.0:
-            return f"DEG(k={self.k}, opt={self.opt_target}, ef={int(round(self.eps_or_ef))})"
-        return f"DEG(k={self.k}, opt={self.opt_target}, eps={self.eps_or_ef})"
+        return f"DEG(k={self.k}, opt={self.opt_target}, {self._search_param_str})"
 
 
 class QG(_BaseDEG):
@@ -193,7 +183,8 @@ class QG(_BaseDEG):
     ):
         super().__init__(metric=metric, k=k, opt_target=opt_target, threads=threads)
         if quants is None:
-            quant_list = [f"Int8_{self._metric_kind}"]
+            default_kind = "L2" if self.metric == "euclidean" else "InnerProduct"
+            quant_list = [f"Int8_{default_kind}"]
         elif isinstance(quants, str):
             quant_list = [quants]
         else:
@@ -203,20 +194,17 @@ class QG(_BaseDEG):
 
         self.quant_metrics = {q: deglib.Metric.resolve(q) for q in quant_list}
         self.rerank_size_factor = 1.0
-        self.rerank_metric = deglib.Metric[f"FP16_{self._metric_kind}"]
         self.searchers: dict[str, deglib.Searcher] = {}
         self.active_searcher: deglib.Searcher | None = None
 
     def fit(self, X: np.ndarray, cache_dir: Path | None = None):
         """Builds DEG graph once, creates one shared FP16 Reranker, and converts into one Searcher per quant."""
-        if X.dtype == np.float16:
-            self.build_metric = deglib.Metric[f"FP16_{self._metric_kind}"]
         loaded_graph = _load_or_build_base_graph(
-            X, self.metric, self.k, self.opt_target, self.build_metric, self.opt_enum, self.threads, cache_dir
+            X, self.metric, self.k, self.opt_target, self.threads, cache_dir
         )
 
         t_rr = time.time()
-        reranker = loaded_graph.to_reranker(self.rerank_metric, threads=self.threads)
+        reranker = deglib.reranker(loaded_graph, compress="16bit", threads=self.threads)
         print(f"Prepared shared FP16 Reranker in {time.time() - t_rr:.2f}s", flush=True)
 
         self.searchers.clear()
@@ -258,12 +246,7 @@ class QG(_BaseDEG):
 
     def __str__(self) -> str:
         q_label = self.active_searcher.graph.get_metric().name if self.active_searcher is not None else "unfitted"
-        if self.eps_or_ef >= 1.0:
-            return (
-                f"DEG-QG[{q_label}](k={self.k}, opt={self.opt_target}, "
-                f"rerank_factor={self.rerank_size_factor}, ef={int(round(self.eps_or_ef))})"
-            )
         return (
             f"DEG-QG[{q_label}](k={self.k}, opt={self.opt_target}, "
-            f"rerank_factor={self.rerank_size_factor}, eps={self.eps_or_ef})"
+            f"rerank_factor={self.rerank_size_factor}, {self._search_param_str})"
         )

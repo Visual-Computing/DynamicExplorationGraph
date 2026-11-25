@@ -11,7 +11,6 @@ VIBE provides realistic embedding datasets covering in-distribution and out-of-d
 | `agnews-mxbai` | AGNews-mxbai | In-Distribution | 769,382 | 1,024 | L2 (Euclidean) |
 | `arxiv-nomic` | ArXiv-nomic | In-Distribution | 1,344,643 | 768 | Inner Product |
 | `landmark-dino` | Landmark-dino | In-Distribution | 760,757 | 768 | Cosine |
-| `msmarco-qwen` | MSMARCO-qwen | In-Distribution | 8,840,823 | 1,024 | Inner Product |
 | `gooaq-distilroberta`| GooAQ-distilroberta | In-Distribution | 1,475,024 | 768 | Inner Product |
 | `laion-clip` | LAION-clip | Out-of-Distribution | 1,000,448 | 512 | Inner Product |
 | `imagenet-align` | ImageNet-align | Out-of-Distribution | 1,281,167 | 640 | Inner Product |
@@ -84,7 +83,6 @@ All benchmark search parameters, graph degrees, optimization targets, pruning op
 - `--algorithm`, `-a`: Benchmark a specific algorithm (`deg`, `deg-qg` / `qg`, `deg-evp` / `evp`, or `all`). Default: run all enabled in `config.yml`.
 - `--config`: Path to YAML config file (default: `config.yml`).
 - `--cache-dir`, `-c`: Custom directory for datasets and graphs (default: `~/.cache/deg_datasets` or `DEG_DATA_PATH`).
-- `--build-threads`, `-t`: Number of CPU threads for graph building (default: `cpu_count // 2`).
 - `--query-dtype`: Override query and feature storage precision (`float32`, `int8`).
 - `--cpu`, `--cpu-affinity`: Pin the benchmark process to specific CPU core ID(s).
 - `--no-show`: Do not open browser window after benchmark completes.

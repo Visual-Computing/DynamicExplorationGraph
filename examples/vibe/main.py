@@ -210,14 +210,6 @@ def main():
         help="Directory to store datasets and built graphs (default: ~/.cache/deg_datasets, env: DEG_DATA_PATH)",
     )
     physical_cores = get_physical_core_ids()
-    default_build_threads = max(1, len(physical_cores))
-    parser.add_argument(
-        "--build-threads",
-        "-t",
-        type=int,
-        default=default_build_threads,
-        help=f"Number of threads for graph building (default: {default_build_threads} [physical CPU cores])",
-    )
     parser.add_argument(
         "--no-show",
         action="store_true",
@@ -347,13 +339,11 @@ def main():
                     raise ValueError(f"Missing args.quants for algorithm '{alg_name}'")
                 adapter = QG(
                     metric=metric_str,
-                    threads=args.build_threads,
                     **cfg_args,
                 )
             else:
                 adapter = DEG(
                     metric=metric_str,
-                    threads=args.build_threads,
                     **cfg_args,
                 )
 
@@ -455,9 +445,9 @@ def main():
                                 f"  {lbl} \trecall@{actual_k}: {recall:.5f} \t{time_us_per_query:6d} us/query \t{qps:9.1f} QPS \tsearch time: {int(search_time_us / 1000):6d}ms"
                             )
 
-                            if not args.no_stop and linear_baseline_us > 0 and time_us_per_query > linear_baseline_us:
+                            if not args.no_stop and linear_baseline_us > 0 and time_us_per_query > linear_baseline_us and qps <= 1000:
                                 print(
-                                    f"  ABORTED {param_type.upper()} ({time_us_per_query}us/query > {int(linear_baseline_us)}us baseline)"
+                                    f"  ABORTED {param_type.upper()} ({time_us_per_query}us/query > {int(linear_baseline_us)}us baseline, {qps:.1f} QPS <= 1000)"
                                 )
                                 break
 
