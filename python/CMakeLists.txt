@@ -26,7 +26,16 @@ endif()
 
 # Add cpp-deglib
 add_subdirectory(${DEGLIB_CPP_DIR} deglib_cpp_build)
-nanobind_add_module(deglib_cpp NOMINSIZE src/deg_cpp/deglib_cpp.cpp)
+nanobind_add_module(
+    deglib_cpp NOMINSIZE
+    src/deg_cpp/deglib_cpp.cpp
+    src/deg_cpp/bindings_distances.cpp
+    src/deg_cpp/bindings_optimization.cpp
+    src/deg_cpp/bindings_transformation.cpp
+    src/deg_cpp/bindings_search.cpp
+    src/deg_cpp/bindings_graph.cpp
+    src/deg_cpp/bindings_tuning.cpp
+)
 
 # Specify the include directories
 include_directories(${DEGLIB_CPP_DIR}/deglib/include)
