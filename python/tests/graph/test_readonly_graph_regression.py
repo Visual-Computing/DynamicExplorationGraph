@@ -80,9 +80,9 @@ def test_readonly_graph_regression_fp32_l2():
     explore_gt_data = compute_groundtruth_l2(base_data, explore_data, search_k)
 
     # Build DynamicExplorationGraph
-    mutable_graph = deglib.create_empty(base_count, dim, edges_per_vertex, metric=Metric.FP32_L2)
+    mutable_graph = deglib.graph.create_empty(base_count, dim, edges_per_vertex, metric=Metric.FP32_L2)
 
-    builder = deglib.GraphBuilder(
+    builder = deglib.builder.GraphBuilder(
         mutable_graph,
         seed=42,
         optimization_target=deglib.builder.OptimizationTarget.LowLID,
@@ -198,9 +198,9 @@ def test_readonly_graph_regression_fp32_inner_product():
     explore_gt_data = compute_groundtruth_innerproduct(base_data, explore_data, search_k)
 
     # Build DynamicExplorationGraph
-    mutable_graph = deglib.create_empty(base_count, dim, edges_per_vertex, metric=Metric.FP32_InnerProduct)
+    mutable_graph = deglib.graph.create_empty(base_count, dim, edges_per_vertex, metric=Metric.FP32_InnerProduct)
 
-    builder = deglib.GraphBuilder(
+    builder = deglib.builder.GraphBuilder(
         mutable_graph,
         seed=42,
         optimization_target=deglib.builder.OptimizationTarget.LowLID,
@@ -323,9 +323,9 @@ def test_readonly_graph_regression_evp_inner_product():
     query_quant = quantizer.transform_database(query_data, threads=8)
 
     # Build DynamicExplorationGraph with EVP_InnerProduct metric
-    mutable_graph = deglib.create_empty(base_count, dim, edges_per_vertex, metric=Metric.EVP_InnerProduct)
+    mutable_graph = deglib.graph.create_empty(base_count, dim, edges_per_vertex, metric=Metric.EVP_InnerProduct)
 
-    builder = deglib.GraphBuilder(
+    builder = deglib.builder.GraphBuilder(
         mutable_graph,
         seed=42,
         optimization_target=deglib.builder.OptimizationTarget.LowLID,

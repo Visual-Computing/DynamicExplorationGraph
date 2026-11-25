@@ -238,13 +238,13 @@ def build_dynamic_graph(
     else:
         print("Output: (in RAM, no file)")
 
-    graph_mut = deglib.create_empty(
+    graph_mut = deglib.graph.create_empty(
         capacity=n,
         dim=dims,
         edges_per_vertex=k,
         metric=metric.with_instruction(instruction_enum),
     )
-    builder = deglib.GraphBuilder(
+    builder = deglib.builder.GraphBuilder(
         graph_mut,
         seed=7,
         optimization_target=deglib.builder.OptimizationTarget.StreamingData,
@@ -306,7 +306,7 @@ def build_dynamic_graph(
         graph_path.parent.mkdir(parents=True, exist_ok=True)
         graph_mut.save_graph(str(graph_path))
         print(f"Graph saved to: {graph_path}")
-        return deglib.load_readonly_graph(str(graph_path))
+        return deglib.load_graph(str(graph_path))
     else:
         return graph_mut.to_readonly()
 
@@ -431,7 +431,7 @@ def run_dynamic_benchmark(
             # Load from file if it exists and force_rebuild is not set
             if graph_path and graph_path.exists() and not force_rebuild:
                 print(f"Loading existing graph: {graph_path}")
-                graph = deglib.load_readonly_graph(str(graph_path))
+                graph = deglib.load_graph(str(graph_path))
                 print(f"Loaded dynamic graph with {graph.size()} vertices")
             else:
                 if graph_path and force_rebuild:

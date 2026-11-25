@@ -56,12 +56,12 @@ def test_tuning_f32_and_profile_reuse():
     assert "L2" in str(qpred_from_profile)
 
     # Top-level deglib re-exports match deglib.tuning
-    assert deglib.measure_dataset_profile is measure_dataset_profile
-    assert deglib.predict_optimization_target is predict_optimization_target
-    assert deglib.predict_quantization is predict_quantization
-    assert deglib.DatasetProfile is DatasetProfile
-    assert deglib.TargetPrediction is TargetPrediction
-    assert deglib.QuantizationPrediction is QuantizationPrediction
+    assert deglib.tuning.measure_dataset_profile is measure_dataset_profile
+    assert deglib.tuning.predict_optimization_target is predict_optimization_target
+    assert deglib.tuning.predict_quantization is predict_quantization
+    assert deglib.tuning.DatasetProfile is DatasetProfile
+    assert deglib.tuning.TargetPrediction is TargetPrediction
+    assert deglib.tuning.QuantizationPrediction is QuantizationPrediction
 
 
 def test_tuning_fp16_matches_fp32():

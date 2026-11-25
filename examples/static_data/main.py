@@ -162,7 +162,7 @@ def run_static_benchmark(
     # Load from file if --graph-path was explicitly provided and file exists
     if graph_path and graph_path.exists():
         print(f"\n=== Loading Graph from File: {graph_path} ===")
-        graph = deglib.load_readonly_graph(str(graph_path))
+        graph = deglib.load_graph(str(graph_path))
         print(f"Graph loaded: {graph.size()} vertices")
     else:
         if graph_path:
@@ -171,28 +171,20 @@ def run_static_benchmark(
             print(f"\n=== Building Graph with {build_threads} threads (in RAM, no file path specified) ===")
 
         build_start = time.perf_counter()
-        graph_mut = deglib.create_empty(
-            capacity=base_vecs.shape[0],
-            dim=dims,
-            edges_per_vertex=preset["k"],
+        graph_mut = deglib.build(
+            base_vecs,
             metric=bound_metric,
-        )
-        builder = deglib.GraphBuilder(
-            graph_mut,
-            seed=7,
+            edges_per_vertex=preset["k"],
             optimization_target=optimization_target,
             extend_k=preset.get("extend_k", preset["k"]),
             extend_eps=preset["extend_eps"],
             improve_k=preset.get("improve_k", 0),
             improve_eps=preset.get("improve_eps", 0.0),
+            seed=7,
+            optimize=False,
+            threads=build_threads,
+            show_progress=True,
         )
-        builder.set_batch_size(10, 10)
-        if build_threads > 0:
-            builder.set_threads(build_threads)
-
-        labels = np.arange(base_vecs.shape[0], dtype=np.uint32)
-        builder.add_entry(labels, base_vecs)
-        builder.build(show_progress=True)
 
         build_time = time.perf_counter() - build_start
         print(f"Graph built in {build_time:.2f} seconds ({graph_mut.size()} vertices).")
@@ -201,9 +193,7 @@ def run_static_benchmark(
             graph_path.parent.mkdir(parents=True, exist_ok=True)
             graph_mut.save_graph(str(graph_path))
             print(f"Graph saved to file: {graph_path}")
-            graph = deglib.load_readonly_graph(str(graph_path))
-        else:
-            graph = graph_mut.to_readonly()
+        graph = graph_mut.to_readonly()
 
     # Graph Analysis
     base_gt = load_base_groundtruth(resolved_key, cache_dir, graph_quality=graph_quality, graph_path=graph_path)

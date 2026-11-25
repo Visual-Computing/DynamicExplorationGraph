@@ -10,8 +10,8 @@ class CallbackTester:
         self.num_callbacks = 0
         self.last_status = None
 
-    def __call__(self, status: deglib.BuilderStatus):
-        assert isinstance(status, deglib.BuilderStatus), (
+    def __call__(self, status: deglib.builder.BuilderStatus):
+        assert isinstance(status, deglib.builder.BuilderStatus), (
             'Got instance of type "{}" for builder_status in callback'.format(type(status))
         )
         self.last_status = status
@@ -28,10 +28,10 @@ class TestGraphs:
 
     @pytest.mark.parametrize("batch", [True, False])
     def test_add_entry(self, batch):
-        graph = deglib.create_empty(
+        graph = deglib.graph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
-        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder = deglib.builder.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
         if batch:
             builder.add_entry(range(self.data.shape[0]), self.data)
@@ -42,10 +42,10 @@ class TestGraphs:
 
     @pytest.mark.parametrize("optimization_target", list(deglib.builder.OptimizationTarget))
     def test_build_simple(self, optimization_target):
-        graph = deglib.create_empty(
+        graph = deglib.graph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
-        builder = deglib.GraphBuilder(
+        builder = deglib.builder.GraphBuilder(
             graph, extend_k=30, extend_eps=0.2, improve_k=30, optimization_target=optimization_target
         )
         for i, vec in enumerate(self.data):
@@ -56,10 +56,10 @@ class TestGraphs:
 
     @pytest.mark.parametrize("optimization_target", list(deglib.builder.OptimizationTarget))
     def test_build_batch(self, optimization_target):
-        graph = deglib.create_empty(
+        graph = deglib.graph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
-        builder = deglib.GraphBuilder(
+        builder = deglib.builder.GraphBuilder(
             graph, extend_k=30, extend_eps=0.2, improve_k=30, optimization_target=optimization_target
         )
         builder.add_entry(range(self.data.shape[0]), self.data)
@@ -67,10 +67,10 @@ class TestGraphs:
         builder.build()
 
     def test_build_with_remove(self):
-        graph = deglib.create_empty(
+        graph = deglib.graph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
-        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder = deglib.builder.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
         for label, vec in enumerate(self.data):
             vec: np.ndarray
@@ -83,10 +83,10 @@ class TestGraphs:
         builder.build()
 
     def test_remove_entry_batch(self):
-        graph = deglib.create_empty(
+        graph = deglib.graph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
-        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder = deglib.builder.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
         builder.add_entry(range(self.data.shape[0]), self.data)
         builder.build()
 
@@ -98,10 +98,10 @@ class TestGraphs:
         assert graph.size() == self.data.shape[0] - len(labels_to_remove)
 
     def test_get_num_entries(self):
-        graph = deglib.create_empty(
+        graph = deglib.graph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
-        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder = deglib.builder.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
         def _check_entries(expected: int, action: str):
             assert action in ("new", "remove")
@@ -128,10 +128,10 @@ class TestGraphs:
         _check_entries(self.data.shape[0] // 2, "remove")
 
     def test_callback(self):
-        graph = deglib.create_empty(
+        graph = deglib.graph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
-        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder = deglib.builder.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
         builder.add_entry(range(self.data.shape[0]), self.data)
 
         tester = CallbackTester()
@@ -141,10 +141,10 @@ class TestGraphs:
         assert tester.last_status.step > 0
 
     def test_concurrency_settings(self):
-        graph = deglib.create_empty(
+        graph = deglib.graph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
-        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder = deglib.builder.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
         # Test thread count
         builder.set_threads(2)
@@ -158,15 +158,15 @@ class TestGraphs:
         builder.build()
 
     def test_stop(self):
-        graph = deglib.create_empty(
+        graph = deglib.graph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
-        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder = deglib.builder.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
         builder.add_entry(range(self.data.shape[0]), self.data)
 
         stopped_in_callback = False
 
-        def _stopping_callback(status: deglib.BuilderStatus):
+        def _stopping_callback(status: deglib.builder.BuilderStatus):
             nonlocal stopped_in_callback
             stopped_in_callback = True
             builder.stop()
@@ -175,44 +175,44 @@ class TestGraphs:
         assert stopped_in_callback
 
     def test_build_returns_status(self):
-        graph = deglib.create_empty(
+        graph = deglib.graph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
-        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder = deglib.builder.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
         builder.add_entry(range(self.data.shape[0]), self.data)
 
         status = builder.build()
-        assert isinstance(status, deglib.BuilderStatus), "Expected BuilderStatus, got {}".format(type(status))
+        assert isinstance(status, deglib.builder.BuilderStatus), "Expected BuilderStatus, got {}".format(type(status))
         assert status.added == self.data.shape[0]
         assert status.deleted == 0
         assert len(status.total_added_ids) == self.data.shape[0]
         assert len(status.total_deleted_ids) == 0
 
     def test_show_progress(self):
-        graph = deglib.create_empty(
+        graph = deglib.graph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
-        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder = deglib.builder.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
         builder.add_entry(range(self.data.shape[0]), self.data)
 
         status = builder.build(show_progress=True)
-        assert isinstance(status, deglib.BuilderStatus)
+        assert isinstance(status, deglib.builder.BuilderStatus)
         assert status.added == self.data.shape[0]
 
     def test_builder_status_facade_exposed(self):
-        assert hasattr(deglib, "BuilderStatus")
+        assert not hasattr(deglib, "BuilderStatus")
         assert hasattr(deglib.builder, "BuilderStatus")
 
     def test_build_status_callback_step_ids(self):
-        graph = deglib.create_empty(
+        graph = deglib.graph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
-        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder = deglib.builder.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
         builder.add_entry(range(self.data.shape[0]), self.data)
 
         callback_statuses = []
 
-        def _collect_callback(status: deglib.BuilderStatus):
+        def _collect_callback(status: deglib.builder.BuilderStatus):
             callback_statuses.append(status)
 
         result = builder.build(callback=_collect_callback)
@@ -231,10 +231,10 @@ class TestGraphs:
         assert last_cb.total_deleted_ids == result.total_deleted_ids
 
     def test_build_mixed_add_delete(self):
-        graph = deglib.create_empty(
+        graph = deglib.graph.create_empty(
             self.data.shape[0], self.data.shape[1], self.edges_per_vertex, metric=Metric.FP32_L2
         )
-        builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+        builder = deglib.builder.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
         for label, vec in enumerate(self.data):
             vec: np.ndarray
@@ -245,7 +245,7 @@ class TestGraphs:
             builder.remove_entry(label)
 
         status = builder.build()
-        assert isinstance(status, deglib.BuilderStatus)
+        assert isinstance(status, deglib.builder.BuilderStatus)
         assert status.added == self.data.shape[0]
         assert status.deleted > 0
         assert len(status.total_added_ids) == self.data.shape[0]
@@ -261,8 +261,8 @@ class TestGraphs:
         if metric == Metric.FP32_InnerProduct:
             data = data / np.linalg.norm(data, axis=1, keepdims=True)
 
-        graph = deglib.create_empty(samples, dim, edges_per_vertex, metric=metric)
-        builder = deglib.GraphBuilder(
+        graph = deglib.graph.create_empty(samples, dim, edges_per_vertex, metric=metric)
+        builder = deglib.builder.GraphBuilder(
             graph,
             extend_k=32,
             extend_eps=0.1,
@@ -292,8 +292,8 @@ class TestGraphs:
         total_vectors = window_size + batch_size * rounds
         all_data = np.random.random((total_vectors, dims)).astype(np.float32)
 
-        graph = deglib.create_empty(window_size + batch_size * 2, dims, edges_per_vertex, metric=Metric.FP32_L2)
-        builder = deglib.GraphBuilder(
+        graph = deglib.graph.create_empty(window_size + batch_size * 2, dims, edges_per_vertex, metric=Metric.FP32_L2)
+        builder = deglib.builder.GraphBuilder(
             graph,
             extend_k=16,
             extend_eps=0.1,
@@ -367,7 +367,7 @@ class TestBuildFunction:
         for i in range(60):
             assert g1.has_vertex(i)
 
-        sorted_indices = deglib.presort(data, metric=Metric.FP32_L2, threads=1)
+        sorted_indices = deglib.optimization.presort(data, metric=Metric.FP32_L2, threads=1)
         g2 = deglib.build(data, edges_per_vertex=12, extend_k=16, presort=sorted_indices, optimize=False)
         assert g2.size() == 60
         indices = g2.search(data[5], k=1, eps_or_ef=0.1).indices

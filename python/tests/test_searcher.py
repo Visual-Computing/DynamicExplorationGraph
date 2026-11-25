@@ -546,7 +546,7 @@ def _make_clustered_searcher_data(n: int, dim: int, clusters: int = 16, seed: in
     return np.ascontiguousarray(centers[idx] + noise, dtype=np.float32)
 
 
-def _verify_searcher_pareto_line(line: deglib.ParetoLine) -> None:
+def _verify_searcher_pareto_line(line: deglib.search.ParetoLine) -> None:
     entries = line.entries
     assert len(line) == len(entries)
     if not entries:
@@ -661,7 +661,7 @@ def test_searcher_recall_tables_no_reranker_and_kmeans():
 
 
 def test_searcher_recall_pareto_validation_and_empty():
-    empty = deglib.create_empty(16, 8, edges_per_vertex=4, metric=Metric.FP32_L2)
+    empty = deglib.graph.create_empty(16, 8, edges_per_vertex=4, metric=Metric.FP32_L2)
     empty_searcher = empty.to_searcher()
     empty_tables = empty_searcher.to_recall_tables(k=10)
     assert len(empty_tables) == 2

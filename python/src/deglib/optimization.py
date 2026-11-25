@@ -63,6 +63,11 @@ def presort(
 
     Returns:
         1D ``uint32`` array of sorted dataset indices of length ``N``.
+
+    See Also:
+        :func:`deglib.build`: High-level graph build with ``presort=True``.
+        :func:`deglib.optimization.prune_non_mrng_edges`: Low-level MRNG edge pruning.
+        :func:`deglib.optimization.prune_worst_edges`: Low-level worst-edge pruning.
     """
     if is_high_level_metric_name(metric):
         if not isinstance(vectors, np.ndarray) or vectors.ndim != 2:

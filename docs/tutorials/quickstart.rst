@@ -44,8 +44,9 @@ Complete Example
    graph.save_graph("my_graph.deg")
 
    # Load read-only graph for fast serving
-   loaded_graph = deglib.graph.load_readonly_graph("my_graph.deg")
-   loaded_indices = loaded_graph.search(query, k=10, eps_or_ef=0.1).indices
+   loaded_graph = deglib.load_graph("my_graph.deg")
+   searcher = deglib.searcher(loaded_graph)
+   loaded_indices = searcher.search(query, k=10, eps_or_ef=0.1).indices
 
 Batch Querying
 --------------

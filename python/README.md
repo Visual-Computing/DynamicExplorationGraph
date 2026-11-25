@@ -48,6 +48,18 @@ uv pip install . --no-build-isolation
 
 ---
 
+See [python/API.md](API.md) for the full API reference and [docs/python_metric_quantization_matrix.md](../docs/python_metric_quantization_matrix.md) for the complete metric/quantization behavior matrix.
+
+## API Layers: High-Level vs. Low-Level
+
+Top-level `deglib` intentionally exports only the **High-Level API** and core result/config types:
+- `deglib.build`, `deglib.presort`, `deglib.compress`, `deglib.reranker`, `deglib.reranker_with_data`, `deglib.searcher`, `deglib.load_graph`
+- `deglib.DynamicExplorationGraph`, `deglib.Searcher`, `deglib.Reranker`, `deglib.SearchResults`, `deglib.Metric`, `deglib.OptimizationTarget`
+
+All **Low-Level / Expert APIs** live in submodules (`deglib.graph.create_empty`, `deglib.builder.GraphBuilder`, `deglib.optimization.prune_non_mrng_edges`, `deglib.transformation.make_*`, `deglib.search.RecallTable`, `deglib.cpu.InstructionSet`, `deglib.analysis.analyze_graph`, `deglib.tuning.predict_*`).
+
+---
+
 ## Quickstart & Examples
 
 ### Basic Usage
@@ -81,12 +93,12 @@ All search graphs are represented by `DynamicExplorationGraph`, backed by one of
 
 1. **Fixed-Capacity Mutable (`SizeBoundedGraph`)**: Memory is preallocated for a fixed maximum capacity. Fast and memory-efficient for static/batch datasets.
    ```python
-   graph = deglib.create_empty(capacity=10_000, dim=128, edges_per_vertex=32, metric=deglib.Metric.FP32_L2)
+   graph = deglib.graph.create_empty(capacity=10_000, dim=128, edges_per_vertex=32, metric=deglib.Metric.FP32_L2)
    ```
 
 2. **Chunk-Allocated Mutable (`DynamicGraph`)**: Dynamically allocates memory in chunks (e.g. 1024 vertices per chunk). Ideal for streaming datasets where total capacity is unknown.
    ```python
-   graph = deglib.create_dynamic_empty(dim=128, edges_per_vertex=32, metric=deglib.Metric.FP32_L2, chunk_size=1024)
+   graph = deglib.graph.create_dynamic_empty(dim=128, edges_per_vertex=32, metric=deglib.Metric.FP32_L2, chunk_size=1024)
    ```
 
 3. **Read-Only Deployment (`ReadOnlyGraph`)**: Stripped of mutation structures for minimal memory footprint and maximum query throughput.
@@ -103,13 +115,13 @@ All search graphs are represented by `DynamicExplorationGraph`, backed by one of
 graph.save_graph("index.deg")
 
 # Load as compact, optimized read-only graph for production search
-readonly_graph = deglib.load_readonly_graph("index.deg")
+readonly_graph = deglib.load_graph("index.deg")
 
 # Load as dynamic graph supporting further insertions and deletions
-dynamic_graph = deglib.load_dynamic_graph("index.deg")
+dynamic_graph = deglib.graph.load_dynamic_graph("index.deg")
 
 # Load as fixed-capacity mutable graph
-mutable_graph = deglib.load_mutable_graph("index.deg")
+mutable_graph = deglib.graph.load_mutable_graph("index.deg")
 ```
 
 ---
@@ -129,7 +141,7 @@ max_capacity = 10_000
 edges_per_vertex = 32
 
 # 1. Create empty mutable graph
-graph = deglib.create_empty(max_capacity, dims, edges_per_vertex, metric=Metric.FP32_L2)
+graph = deglib.graph.create_empty(max_capacity, dims, edges_per_vertex, metric=Metric.FP32_L2)
 
 # 2. Initialize builder
 builder = GraphBuilder(graph, optimization_target=OptimizationTarget.StreamingData, seed=42)
@@ -213,17 +225,18 @@ query = np.random.randn(dims).astype(np.float32)
 # 1. Pre-sort with FLAS and build exploration graph in FP32
 graph = deglib.build(
     data,
-    metric=deglib.Metric.FP32_InnerProduct,
+    metric="cosine",
     edges_per_vertex=32,
     presort=True,
     optimize=False,
     show_progress=True,
 )
 
-# 2. Extract FP16 reranker from FP32 graph and convert into Int8 ReadOnlyGraph Searcher
-reranker = graph.to_reranker(deglib.Metric.FP16_InnerProduct)
-searcher = graph.to_searcher(
-    metric=deglib.Metric.Int8_InnerProduct,
+# 2. Extract FP16 reranker from FP32 graph and create compressed 8-bit Searcher
+reranker = deglib.reranker(graph, compress="16bit")
+searcher = deglib.searcher(
+    graph,
+    compress="8bit",
     reranker=reranker,
 )
 

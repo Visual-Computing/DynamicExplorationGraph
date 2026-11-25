@@ -1,13 +1,28 @@
 # `deglib` Python API Reference
 
-Complete reference for the `deglib` Python package. Everything documented below is exported from top-level `deglib` as well as its submodules (`deglib.cpu`, `deglib.distances`, `deglib.graph`, `deglib.builder`, `deglib.search`, `deglib.transformation`, `deglib.optimization`, `deglib.analysis`, `deglib.tuning`).
+The `deglib` package separates its **High-Level API** (re-exported directly at top-level `deglib`) from **Low-Level / Expert APIs** (organized under submodules `deglib.cpu`, `deglib.distances`, `deglib.graph`, `deglib.builder`, `deglib.search`, `deglib.transformation`, `deglib.optimization`, `deglib.analysis`, `deglib.tuning`).
+
+- **See also:** [Python Metric, Quantization & Pipeline Matrix](../docs/python_metric_quantization_matrix.md) for the full behavior table across `metric`, `compress`, `presort`, `reranker`, and `searcher`.
+
+## API Layers: High-Level vs. Low-Level
+
+| Layer | Namespace | Entry Points |
+| :--- | :--- | :--- |
+| **High-Level API** | `deglib.*` | `build`, `presort`, `compress`, `reranker`, `reranker_with_data`, `searcher`, `load_graph`, `DynamicExplorationGraph`, `Searcher`, `Reranker`, `SearchResults`, `Metric`, `OptimizationTarget` |
+| **Low-Level Graph & I/O** | `deglib.graph.*` | `create_empty`, `create_dynamic_empty`, `create_random_graph`, `load_readonly_graph`, `load_dynamic_graph`, `load_mutable_graph` |
+| **Low-Level Incremental Build** | `deglib.builder.*` | `GraphBuilder`, `BuilderStatus`, `ProgressCallback` |
+| **Low-Level Search & Calibration** | `deglib.search.*` | `Filter`, `RecallTable`, `ParetoLine`, `rerank` |
+| **Transformations & Quantizers** | `deglib.transformation.*` | `FeatureTransformation`, `make_quantizer_pipeline`, `make_mips_transform`, `make_l2_normalize_transform`, `make_fast_hadamard_rotation`, `make_evp_quantizer`, `make_scalar_quantizer_*`, `apply_on_database`, `apply_on_query` |
+| **Optimization & Pruning** | `deglib.optimization.*` | `prune_non_mrng_edges`, `prune_worst_edges` |
+| **Distances & CPU ISA** | `deglib.distances.*`, `deglib.cpu.*` | `floats_to_fp16`, `fp16_to_floats`, `InstructionSet`, `has_avx2`, `has_avx2_vnni`, `has_avx512`, `has_avx512_vnni`, `has_avx512_fp16`, `has_fp16` |
+| **Analysis & Tuning** | `deglib.analysis.*`, `deglib.tuning.*` | `analyze_graph`, `GraphStats`, `calc_graph_quality`, `DatasetProfile`, `measure_dataset_profile`, `predict_optimization_target`, `predict_quantization` |
 
 ---
 
 ## Table of Contents
 
 - [Quickstart & End-to-End Workflows](#quickstart--end-to-end-workflows)
-- [1. Top-Level Build & Search (`deglib.build`, `graph.to_searcher`)](#1-top-level-build--search-deglibbuild-graphto_searcher)
+- [1. High-Level Build, Compress & Search (`deglib.build`, `deglib.compress`, `deglib.reranker`, `deglib.searcher`)](#1-high-level-build-compress--search-deglibbuild-deglibcompress-deglibreranker-deglibsearcher)
 - [2. Metrics & CPU Instruction Sets (`deglib.distances`, `deglib.cpu`)](#2-metrics--cpu-instruction-sets-deglibdistances-deglibcpu)
 - [3. Graphs (`deglib.graph`)](#3-graphs-deglibgraph)
 - [4. Incremental Graph Building (`deglib.builder`)](#4-incremental-graph-building-deglibbuilder)
@@ -32,7 +47,7 @@ query = np.random.randn(128).astype(np.float32)
 
 # Build optimized graph (optimize=True by default)
 graph = deglib.build(data, edges_per_vertex=32, show_progress=True)
-searcher = graph.to_searcher()
+searcher = deglib.searcher(graph)
 
 # Fast index-only search (return_distances=False by default on Searcher.search)
 res = searcher.search(query, k=10, eps_or_ef=0.1)
@@ -48,22 +63,22 @@ indices, distances = res.indices, res.distances
 ```python
 import deglib
 
-# 1. Pre-sort with FLAS and build FP32 graph
+# 1. Pre-sort with FLAS and build FP32 cosine graph
 base_graph = deglib.build(
     data,
-    metric=deglib.Metric.FP32_InnerProduct,
+    metric="cosine",
     edges_per_vertex=30,
     presort=True,
     optimize=False,
     threads=8,
 )
 
-# 2. Extract FP16 reranker from FP32 graph, convert to Int8 ReadOnlyGraph, and optimize routing
-reranker = base_graph.to_reranker(deglib.Metric.FP16_InnerProduct, threads=8)
-searcher = base_graph.to_searcher(
-    metric=deglib.Metric.Int8_InnerProduct,
+# 2. Extract FP16 reranker from FP32 graph, compress to 8-bit Searcher, and optimize routing
+reranker = deglib.reranker(base_graph, compress="16bit", threads=8)
+searcher = deglib.searcher(
+    base_graph,
+    compress="8bit",
     reranker=reranker,
-    normalize_query=True,
     optimize=True,
     threads=8,
 )
@@ -71,28 +86,19 @@ searcher = base_graph.to_searcher(
 indices = searcher.search(queries, k=10, eps_or_ef=64, rerank_factor=2.0, unsorted=True).indices
 ```
 
-### MIPS via $(d + 1)$-Dimensional $L_2$ Lifting & FP16 Swap
+### MIPS (`metric="ip"`) with Compression
 
 ```python
 import deglib
 
-mips = deglib.make_mips_transform(train_vectors)
-lifted = mips.transform_database(train_vectors)
-
-graph = deglib.build(
-    lifted,
+# Automatically lifts into MIPS(d+1) for presort/build and swaps back to d-dim InnerProduct (or 16bit/8bit/4bit)
+ro_graph = deglib.build(
+    train_vectors,
+    metric="ip",
+    compress="16bit",
     edges_per_vertex=32,
     extend_k=64,
-    metric=deglib.Metric.FP32_L2.with_instruction("AVX512"),
     presort=True,
-    optimize=False,
-    threads=8,
-).to_readonly()
-
-# Swap features back to original d-dim FP16 InnerProduct while preserving graph labels, edges & ReadOnly backend
-ro_graph = graph.with_features(
-    train_vectors,
-    metric=deglib.Metric.FP16_InnerProduct.with_instruction("AVX512"),
     threads=8,
 )
 res = ro_graph.search(query, eps_or_ef=0.18, k=10)
@@ -101,7 +107,7 @@ indices, distances = res.indices, res.distances
 
 ---
 
-## 1. Top-Level Build & Search (`deglib.build`, `graph.to_searcher`)
+## 1. High-Level Build, Compress & Search (`deglib.build`, `deglib.compress`, `deglib.reranker`, `deglib.searcher`)
 
 ### `deglib.build`
 
@@ -109,14 +115,10 @@ indices, distances = res.indices, res.distances
 deglib.build(
     data: np.ndarray,
     labels: Iterable[int] | np.ndarray | None = None,
+    metric: Literal["l2", "euclidean", "cosine", "normalized", "ip"] | Metric | str = "l2",
+    compress: Literal["32bit", "16bit", "8bit", "4bit", "2bit", "auto"] | Metric | str | None = None,
     edges_per_vertex: int = 32,
-    metric: Metric | str = Metric.FP32_L2,
-    optimization_target: OptimizationTarget | str = OptimizationTarget.LowLID,
-    presort: bool | np.ndarray = False,
-    presort_decay: float = 0.9,
-    optimize: bool = True,
-    transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
-    capacity: int = -1,
+    optimization_target: OptimizationTarget | str = OptimizationTarget.Auto,
     extend_k: int = 0,
     extend_eps: float = 0.1,
     improve_k: int = 0,
@@ -124,17 +126,27 @@ deglib.build(
     max_path_length: int = 5,
     improve_tries: int = 0,
     seed: int = 7,
+    presort: bool | np.ndarray = False,
+    optimize: bool = True,
     threads: int = 0,
-    callback: Callable[[BuilderStatus], None] | None = None,
-    show_progress: bool = False,
+    show_progress: bool | None = None,
 ) -> DynamicExplorationGraph
 ```
 
 Builds a graph from a 2D NumPy array:
-- When `data` is `float32`/`float16` and `metric` is quantized (`Int8_*`, `Uint8_*`, `Int4_*`, `Uint4_*`, `UInt7_*`, `EVP_InnerProduct`, or `FP16_*` from `float32`), `build` automatically constructs a calibrated transformation pipeline (`make_quantizer_pipeline`) unless explicit `transformations` are provided.
+- **`metric`**: High-level spatial modes (`"l2"` / `"euclidean"`, `"cosine"` / `"normalized"`, `"ip"`) or an explicit `Metric`. `"cosine"` attaches `L2NormalizeTransform` if vectors are not unit-norm; `"ip"` builds in `MipsTransform (d+1)` space and swaps stored features back to unnormalized `d`-dim `InnerProduct` (or `compress` target).
+- **`compress`**: Optional post-build quantization (`"32bit"`, `"16bit"`, `"8bit"`, `"4bit"`, `"2bit"`, `"auto"`, or an explicit `Metric`). Preserves mutability via `deglib.compress` for `"l2"` / `"cosine"`, while `"ip"` `"16bit"`/`"8bit"`/`"4bit"` swaps to a compact `ReadOnlyGraph`.
 - **`presort`**: `True` runs 1D FLAS pre-sorting via `deglib.presort` and reorders data + labels together; an `np.ndarray` uses precomputed sorted indices; `False` keeps insertion order.
 - **`optimize`**: Runs `graph.optimize()` after building when `True` (default).
 - **`threads`**: Worker thread count (`0` uses all CPU cores).
+
+### `deglib.presort`, `deglib.compress`, `deglib.reranker`, `deglib.reranker_with_data`, `deglib.searcher`
+
+- `deglib.presort(vectors, metric="l2", radius_decay=0.9, threads=0, callback=None, show_progress=False) -> np.ndarray`: Runs 1D FLAS pre-sorting (handles `"ip"` MIPS lifting automatically).
+- `deglib.compress(graph, target, threads=0) -> DynamicExplorationGraph`: Compresses a float graph (`"32bit"`, `"16bit"`, `"8bit"`, `"4bit"`, `"2bit"`, `"auto"`, or `Metric`), preserving the input graph's backend type.
+- `deglib.reranker(graph, compress="16bit", optimize=True, threads=0) -> Reranker`: Extracts a `Reranker` from a float graph's stored vectors.
+- `deglib.reranker_with_data(graph, data, metric="16bit", optimize=True, threads=0) -> Reranker`: Builds a `Reranker` from external feature vectors aligned with `graph` labels.
+- `deglib.searcher(graph, compress=None, reranker=None, optimize=True, threads=0) -> Searcher`: Wraps `graph` (optionally compressing first) in an optimized `Searcher`.
 
 ---
 
@@ -188,7 +200,7 @@ All graphs (fixed-capacity mutable `SizeBoundedGraph`, chunked `DynamicGraph`, a
 - `create_empty(capacity: int, dim: int, edges_per_vertex: int = 32, metric: Metric | str = Metric.FP32_L2, transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None) -> DynamicExplorationGraph`
 - `create_dynamic_empty(dim: int, edges_per_vertex: int = 32, metric: Metric | str = Metric.FP32_L2, chunk_size: int = 1024, transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None) -> DynamicExplorationGraph`
 - `create_random_graph(features: np.ndarray, edges_per_vertex: int = 32, metric: Metric | str = Metric.FP32_L2, seed: int = 7, optimize: bool = True, transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None) -> DynamicExplorationGraph`
-- `load_graph(path: Path | str) -> DynamicExplorationGraph`: Auto-detects format (loads as read-only).
+- `load_graph(path: Path | str) -> DynamicExplorationGraph`: High-level loader (loads as read-only).
 - `load_readonly_graph(path: Path | str) -> DynamicExplorationGraph`
 - `load_mutable_graph(path: Path | str, capacity: int = 0) -> DynamicExplorationGraph`
 - `load_dynamic_graph(path: Path | str, chunk_size: int = 1024) -> DynamicExplorationGraph`

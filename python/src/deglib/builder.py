@@ -375,6 +375,14 @@ def build(
     DynamicExplorationGraph
         Mutable ``SizeBoundedGraph`` when ``compress=None`` (or ``"32bit"``), or
         compressed ``ReadOnlyGraph`` when ``compress`` is specified.
+
+    See Also
+    --------
+    deglib.builder.GraphBuilder : Low-level incremental/streaming graph builder.
+    deglib.graph.create_empty : Create an empty fixed-capacity mutable graph.
+    deglib.graph.create_dynamic_empty : Create an empty chunked mutable graph.
+    deglib.presort : Standalone FLAS 1D pre-sorting.
+    deglib.compress : Post-build graph quantization.
     """
     if not isinstance(data, np.ndarray) or data.ndim != 2:
         raise InvalidShapeException(f"data must be a 2D numpy array, got {getattr(data, 'shape', type(data))}")
@@ -389,6 +397,12 @@ def build(
                 "pass a precomputed sorted_indices array instead."
             )
 
+    # High-level build pipeline (see docs/python_metric_quantization_matrix.md):
+    #   1. Resolve spatial metric/prefix (L2NormalizeTransform / MipsTransform) on float inputs.
+    #   2. Predict OptimizationTarget.Auto on the post-prefix vectors if requested.
+    #   3. Run optional 1D FLAS presort on the post-prefix vectors.
+    #   4. Quantize (if explicit quantized Metric) and build mutable SizeBoundedGraph.
+    #   5. Finalize: swap MIPS(d+1) back to d-dim IP (for metric="ip") and apply `compress`.
     n_samples = int(data.shape[0])
     effective_show_progress = sys.stdout.isatty() if show_progress is None else bool(show_progress)
 

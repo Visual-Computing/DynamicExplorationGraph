@@ -597,7 +597,7 @@ def generate_base_top_anns(
 
     print(f"Using Graph: {graph_path}")
     t_load = time.perf_counter()
-    graph = deglib.load_readonly_graph(str(graph_path))
+    graph = deglib.load_graph(str(graph_path))
     print(f"Graph loaded in {time.perf_counter() - t_load:.2f}s | Vertices: {graph.size()}")
 
     if eps_override is not None:

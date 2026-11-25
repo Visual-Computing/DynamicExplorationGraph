@@ -576,7 +576,6 @@ class Searcher:
 def _resolve_rerank_metric(
     distance_kind: str,
     compress: Literal["16bit", "8bit"] | Metric | str | None,
-    instruction,
 ) -> Metric:
     """Resolve target Metric for a Reranker from distance kind and compress level."""
     if compress is None:
@@ -602,10 +601,6 @@ def _resolve_rerank_metric(
     else:
         target = Metric.resolve(compress)
 
-    from deglib.cpu import InstructionSet
-
-    if instruction != InstructionSet.Auto and getattr(target, "_instruction", None) is None:
-        target = target.with_instruction(instruction)
     return target
 
 
@@ -640,6 +635,12 @@ def reranker(
     -------
     Reranker
         Standalone reranker aligned with ``graph.get_labels()``.
+
+    See Also
+    --------
+    deglib.Reranker : Low-level reranker class.
+    deglib.DynamicExplorationGraph.to_reranker : Low-level graph-to-reranker conversion.
+    deglib.search.rerank : Stateless candidate reranking helper.
     """
     base_metric = Metric(int(graph.get_metric()))
     if base_metric not in (
@@ -653,7 +654,7 @@ def reranker(
             "Use deglib.reranker_with_data(graph, data, ...) with the original float vectors instead."
         )
     distance_kind = "InnerProduct" if base_metric.name.endswith("InnerProduct") else "L2"
-    target_metric = _resolve_rerank_metric(distance_kind, compress, graph.get_instruction())
+    target_metric = _resolve_rerank_metric(distance_kind, compress)
     return graph.to_reranker(target_metric, optimize=optimize, threads=threads)
 
 
@@ -695,6 +696,12 @@ def reranker_with_data(
     -------
     Reranker
         Standalone reranker aligned with ``graph.get_labels()``.
+
+    See Also
+    --------
+    deglib.Reranker : Low-level reranker class.
+    deglib.DynamicExplorationGraph.to_reranker : Low-level graph-to-reranker conversion.
+    deglib.search.rerank : Stateless candidate reranking helper.
     """
     arr = np.asarray(data)
     if arr.ndim != 2:
@@ -726,7 +733,7 @@ def reranker_with_data(
     else:
         distance_kind = "InnerProduct" if Metric(int(graph.get_metric())).name.endswith("InnerProduct") else "L2"
 
-    target_metric = _resolve_rerank_metric(distance_kind, compress, graph.get_instruction())
+    target_metric = _resolve_rerank_metric(distance_kind, compress)
 
     graph_labels = graph.get_labels()
     if labels is None:
@@ -735,7 +742,12 @@ def reranker_with_data(
         labels_arr = np.asarray(list(labels) if not isinstance(labels, np.ndarray) else labels, dtype=np.uint32)
         if labels_arr.ndim != 1 or labels_arr.shape[0] != arr.shape[0]:
             raise ValueError(f"labels must be 1D of length {arr.shape[0]}, got shape {labels_arr.shape}")
-        if labels_arr.shape[0] > 0 and labels_arr[0] == 0 and np.all(np.diff(labels_arr) == 1):
+        if (
+            labels_arr.shape[0] > 0
+            and labels_arr[0] == 0
+            and np.all(np.diff(labels_arr) == 1)
+            and np.all(graph_labels < labels_arr.shape[0])
+        ):
             row_indices = graph_labels
         elif labels_arr.shape[0] > 0 and np.all(labels_arr[:-1] <= labels_arr[1:]):
             pos = np.searchsorted(labels_arr, graph_labels)
@@ -823,6 +835,14 @@ def searcher(
     -------
     Searcher
         Native C++ search pipeline ready for ``searcher.search(...)``.
+
+    See Also
+    --------
+    deglib.Searcher : Low-level searcher class.
+    deglib.DynamicExplorationGraph.to_searcher : Low-level graph-to-searcher conversion.
+    deglib.search.RecallTable : Calibration table mapping target recall to ``ef``/``eps``.
+    deglib.search.ParetoLine : Unified recall-latency Pareto frontier.
+    deglib.search.Filter : External-label filter for constrained search.
     """
     if compress is not None:
         from deglib.graph import compress as compress_graph

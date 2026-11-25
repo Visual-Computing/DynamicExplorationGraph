@@ -51,7 +51,7 @@ data = np.random.randn(10_000, 128).astype(np.float32)
 query = np.random.randn(128).astype(np.float32)
 
 # 1. Build search index directly from data
-graph = deglib.builder.build_from_data(data, metric=deglib.Metric.FP32_L2)
+graph = deglib.build(data, metric="l2")
 
 # 2. Search top-10 nearest neighbors (eps_or_ef: < 1.0 = relative eps, >= 1.0 = ef beam width)
 res = graph.search(query, k=10, eps_or_ef=0.1)

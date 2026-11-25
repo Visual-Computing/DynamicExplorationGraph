@@ -15,7 +15,7 @@ class TestRerank:
         base = np.ones((3, self.dims), dtype=np.float32)
         candidates = np.array([[0]], dtype=np.uint32)
 
-        result = deglib.rerank(self.metric, queries, candidates, base, k_top=1)
+        result = deglib.search.rerank(self.metric, queries, candidates, base, k_top=1)
         assert result.shape == (1, 1)
         assert result[0, 0] == 0
 
@@ -27,7 +27,7 @@ class TestRerank:
         base[2, 0] = 0.5  # L2^2 = 0.25
         candidates = np.array([[0, 1, 2]], dtype=np.uint32)
 
-        result = deglib.rerank(self.metric, queries, candidates, base, k_top=2)
+        result = deglib.search.rerank(self.metric, queries, candidates, base, k_top=2)
         assert result.shape == (1, 2)
         assert result[0, 0] == 2
         assert result[0, 1] == 0
@@ -40,7 +40,7 @@ class TestRerank:
         base[2, 0] = 0.5
         candidates = np.array([[0, 1, 2]], dtype=np.uint32)
 
-        indices, distances = deglib.rerank(self.metric, queries, candidates, base, k_top=2, return_distances=True)
+        indices, distances = deglib.search.rerank(self.metric, queries, candidates, base, k_top=2, return_distances=True)
         assert indices.shape == (1, 2)
         assert distances.shape == (1, 2)
         assert indices[0, 0] == 2
@@ -55,7 +55,7 @@ class TestRerank:
         base[2, 0] = 2.0
         candidates = np.array([[2, 0, 1]], dtype=np.uint32)
 
-        result = deglib.rerank(self.metric, queries, candidates, base, k_top=0)
+        result = deglib.search.rerank(self.metric, queries, candidates, base, k_top=0)
         assert result.shape == (1, 3)
         assert result[0, 0] == 0
         assert result[0, 1] == 1
@@ -66,7 +66,7 @@ class TestRerank:
         base = np.ones((2, self.dims), dtype=np.float32)
         candidates = np.array([[0]], dtype=np.uint32)
 
-        result = deglib.rerank(self.metric, queries, candidates, base, k_top=5)
+        result = deglib.search.rerank(self.metric, queries, candidates, base, k_top=5)
         assert result.shape == (1, 1)
         assert result[0, 0] == 0
 
@@ -75,7 +75,7 @@ class TestRerank:
         queries[1, 0] = 1.0
         candidates = np.array([[0, 1], [1, 0]], dtype=np.uint32)
 
-        result = deglib.rerank(self.metric, queries, candidates, k_top=2)
+        result = deglib.search.rerank(self.metric, queries, candidates, k_top=2)
         assert result.shape == (2, 2)
         assert result[0, 0] == 0
         assert result[0, 1] == 1
@@ -87,7 +87,7 @@ class TestRerank:
         base = np.ones((2, self.dims), dtype=np.float32)
         candidates = np.array([[np.iinfo(np.uint32).max, 0]], dtype=np.uint32)
 
-        result = deglib.rerank(self.metric, queries, candidates, base, k_top=2)
+        result = deglib.search.rerank(self.metric, queries, candidates, base, k_top=2)
         assert result.shape == (1, 2)
         assert result[0, 0] == 0
         assert result[0, 1] == np.iinfo(np.uint32).max
@@ -101,7 +101,7 @@ class TestRerank:
         base[2, 0] = 3.1
         candidates = np.array([[2, 1, 0], [0, 1, 2]], dtype=np.uint32)
 
-        result = deglib.rerank(self.metric, queries, candidates, base, k_top=2)
+        result = deglib.search.rerank(self.metric, queries, candidates, base, k_top=2)
         assert result.shape == (2, 2)
         assert result[0, 0] == 0
         assert result[0, 1] == 1
@@ -117,7 +117,7 @@ class TestRerank:
         base[2, 0] = 0.5
         candidates = np.array([[0, 1, 2]], dtype=np.uint32)
 
-        result = deglib.rerank(Metric.FP32_InnerProduct, query, candidates, base, k_top=2)
+        result = deglib.search.rerank(Metric.FP32_InnerProduct, query, candidates, base, k_top=2)
         assert result.shape == (1, 2)
         assert result[0, 0] == 1
         assert result[0, 1] == 0
@@ -130,7 +130,7 @@ class TestRerank:
         base[2, 0] = 0.5
         candidates = np.array([[0, 1, 2]], dtype=np.uint32)
 
-        indices, distances = deglib.rerank(self.metric, queries, candidates, base, k_top=3, return_distances=True)
+        indices, distances = deglib.search.rerank(self.metric, queries, candidates, base, k_top=3, return_distances=True)
         assert indices.shape == (1, 3)
         assert distances.shape == (1, 3)
         np.testing.assert_allclose(distances[0], [0.25, 1.0, 4.0], rtol=1e-5)
@@ -143,7 +143,7 @@ class TestRerank:
         base[2, 0] = 3.1
         candidates = np.array([[2, 1, 0], [0, 1, 2]], dtype=np.uint32)
 
-        result = deglib.rerank(self.metric, queries, candidates, base, k_top=2, threads=4)
+        result = deglib.search.rerank(self.metric, queries, candidates, base, k_top=2, threads=4)
         assert result.shape == (2, 2)
         assert result[0, 0] == 0
         assert result[0, 1] == 1
@@ -158,11 +158,11 @@ class TestRerank:
         base[2, 0] = 0.5
         candidates = np.array([[0, 1, 2]], dtype=np.uint32)
 
-        sorted_res = deglib.rerank(self.metric, queries, candidates, base, k_top=2, unsorted=False)
+        sorted_res = deglib.search.rerank(self.metric, queries, candidates, base, k_top=2, unsorted=False)
         assert sorted_res[0, 0] == 2
         assert sorted_res[0, 1] == 0
 
-        unsorted_res = deglib.rerank(self.metric, queries, candidates, base, k_top=2, unsorted=True)
+        unsorted_res = deglib.search.rerank(self.metric, queries, candidates, base, k_top=2, unsorted=True)
         assert unsorted_res.shape == (1, 2)
         assert set(unsorted_res[0]) == {0, 2}
 
@@ -235,7 +235,7 @@ class TestRerankerClass:
         candidates = np.array([[0, 1, 2, 3], [3, 2, 1, 0]], dtype=np.uint32)
 
         via_class = deglib.Reranker(self.metric, base).rerank(queries, candidates, k_top=3)
-        via_function = deglib.rerank(self.metric, queries, candidates, base, k_top=3)
+        via_function = deglib.search.rerank(self.metric, queries, candidates, base, k_top=3)
         np.testing.assert_array_equal(via_class, via_function)
 
     def test_reranker_preserves_instruction_set(self):
@@ -247,20 +247,20 @@ class TestRerankerClass:
         candidates = np.broadcast_to(np.arange(n_base, dtype=np.uint32), (queries.shape[0], n_base)).copy()
 
         expected_top = deglib.Reranker(
-            Metric.FP32_L2.with_instruction(deglib.InstructionSet.Scalar),
+            Metric.FP32_L2.with_instruction(deglib.cpu.InstructionSet.Scalar),
             base,
         ).rerank(queries, candidates, k_top=5)
 
-        graph = deglib.create_empty(n_base, dim, edges_per_vertex=8, metric=Metric.FP32_L2)
-        builder = deglib.GraphBuilder(graph, extend_k=8, extend_eps=0.1)
+        graph = deglib.graph.create_empty(n_base, dim, edges_per_vertex=8, metric=Metric.FP32_L2)
+        builder = deglib.builder.GraphBuilder(graph, extend_k=8, extend_eps=0.1)
         builder.add_entry(np.arange(n_base, dtype=np.uint32), base)
         builder.build()
 
-        test_isas = [deglib.InstructionSet.Scalar]
+        test_isas = [deglib.cpu.InstructionSet.Scalar]
         if deglib.cpu.has_avx2():
-            test_isas.append(deglib.InstructionSet.AVX2)
+            test_isas.append(deglib.cpu.InstructionSet.AVX2)
         if deglib.cpu.has_avx512():
-            test_isas.append(deglib.InstructionSet.AVX512)
+            test_isas.append(deglib.cpu.InstructionSet.AVX512)
 
         for isa in test_isas:
             r_fp32 = deglib.Reranker(Metric.FP32_L2.with_instruction(isa), base)

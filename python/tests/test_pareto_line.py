@@ -3,12 +3,8 @@ import pytest
 
 import deglib
 import deglib_cpp
-from deglib import (
-    Metric,
-    OptimizationTarget,
-    ParetoLine,
-    RecallTable,
-)
+from deglib import Metric, OptimizationTarget
+from deglib.search import ParetoLine, RecallTable
 
 
 def _make_clustered_data(n: int, dim: int, clusters: int = 20, seed: int = 7) -> np.ndarray:
@@ -84,7 +80,7 @@ def _verify_pareto_invariants(line: ParetoLine) -> None:
 
 
 def test_exports_and_wrapper_type():
-    assert deglib.ParetoLine is ParetoLine
+    assert deglib.search.ParetoLine is ParetoLine
     assert deglib.search.ParetoLine is ParetoLine
     assert ParetoLine.__module__ == "deglib.search"
     assert not hasattr(ParetoLine, "_from_cpp")
@@ -180,7 +176,7 @@ def test_pareto_line_quantized_graphs():
 
 
 def test_empty_graph_and_validation_errors():
-    empty = deglib.create_empty(16, 8, edges_per_vertex=4, metric=Metric.FP32_L2)
+    empty = deglib.graph.create_empty(16, 8, edges_per_vertex=4, metric=Metric.FP32_L2)
     empty_line = empty.to_pareto_line(k=10)
     assert len(empty_line) == 0
     assert empty_line.k == 10

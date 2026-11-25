@@ -5,12 +5,10 @@ import tempfile
 import numpy as np
 
 import deglib
-from deglib import (
-    Metric,
-    create_empty,
-    load_graph,
-    load_mutable_graph,
-    load_readonly_graph,
+from deglib import Metric, load_graph
+from deglib.graph import create_empty, load_mutable_graph, load_graph
+from deglib.transformation import (
+    apply_on_database,
     make_evp_quantizer,
     make_mips_transform,
     make_scalar_quantizer_fp16,
@@ -18,7 +16,6 @@ from deglib import (
     make_scalar_quantizer_uint4,
     make_scalar_quantizer_uint8,
 )
-from deglib.transformation import apply_on_database
 
 
 def test_scalar_int8_transform_serialization_and_transform():
@@ -113,7 +110,7 @@ def test_builder_and_graph_search_with_int8_transforms():
     assert graph.get_transformations()[0].output_dtype == np.int8
 
     # Ingestion via GraphBuilder: pass raw float32 data!
-    builder = deglib.GraphBuilder(graph, extend_k=10, extend_eps=0.2)
+    builder = deglib.builder.GraphBuilder(graph, extend_k=10, extend_eps=0.2)
     builder.add_entry(range(N), data)
     builder.build()
 
@@ -147,7 +144,7 @@ def test_builder_and_graph_search_with_int8_inner_product_transform():
     transformations = [sq]
     graph = create_empty(N, dim, edges_per_vertex=16, metric=Metric.Int8_InnerProduct, transformations=transformations)
 
-    builder = deglib.GraphBuilder(graph, extend_k=10, extend_eps=0.2)
+    builder = deglib.builder.GraphBuilder(graph, extend_k=10, extend_eps=0.2)
     builder.add_entry(range(N), data)
     builder.build()
 
@@ -164,7 +161,7 @@ def test_container_persistence_roundtrip():
     transformations = [sq]
 
     graph = create_empty(N, dim, edges_per_vertex=16, metric=Metric.Int8_L2, transformations=transformations)
-    builder = deglib.GraphBuilder(graph, extend_k=10, extend_eps=0.2)
+    builder = deglib.builder.GraphBuilder(graph, extend_k=10, extend_eps=0.2)
     builder.add_entry(range(N), data)
     builder.build()
 
@@ -194,8 +191,8 @@ def test_container_persistence_roundtrip():
         indices = loaded_g.search(query, eps_or_ef=0.2, k=5).indices
         assert indices[0] == 7
 
-        # 3. Load via load_readonly_graph
-        ro_g = load_readonly_graph(save_path)
+        # 3. Load via load_graph
+        ro_g = load_graph(save_path)
         assert ro_g.has_transformations()
         assert ro_g.size() == N
         ro_indices = ro_g.search(query, eps_or_ef=0.2, k=5).indices
@@ -222,7 +219,7 @@ def test_evp_transforms_end_to_end():
 
     graph = create_empty(N, dim, edges_per_vertex=16, metric=Metric.EVP_InnerProduct, transformations=transformations)
 
-    builder = deglib.GraphBuilder(graph, extend_k=10, extend_eps=0.2)
+    builder = deglib.builder.GraphBuilder(graph, extend_k=10, extend_eps=0.2)
     builder.add_entry(range(N), data)
     builder.build()
 
@@ -238,7 +235,7 @@ def test_evp_transforms_end_to_end():
         path = os.path.join(tmpdir, "evp_graph.deg")
         graph.save_graph(path)
 
-        loaded = load_readonly_graph(path)
+        loaded = load_graph(path)
         assert loaded.has_transformations()
         loaded_indices = loaded.search(query, eps_or_ef=0.2, k=5).indices
         assert loaded_indices[0] == 15
@@ -264,7 +261,7 @@ def test_legacy_v1_compatibility(tmp_path):
     legacy_path.write_bytes(bytes(v1_bytes))
 
     # Load legacy graph
-    loaded_ro = load_readonly_graph(str(legacy_path))
+    loaded_ro = load_graph(str(legacy_path))
     assert not loaded_ro.has_transformations()
     assert loaded_ro.size() == N
     # Search on legacy graph works with float query
@@ -280,7 +277,7 @@ def test_transformation_graph_search_fp16():
     transform = make_scalar_quantizer_int8(data_f32, quantile=1.0)
 
     graph = create_empty(N, dim, edges_per_vertex=edges_per_vertex, metric=Metric.Int8_L2, transformations=[transform])
-    builder = deglib.GraphBuilder(graph, extend_k=8, extend_eps=0.1)
+    builder = deglib.builder.GraphBuilder(graph, extend_k=8, extend_eps=0.1)
     builder.add_entry(np.arange(N, dtype=np.uint32), data_f32)
     builder.build()
 
@@ -324,7 +321,7 @@ def test_uint4_transformation_graph_search():
 
     # Build FP32 graph first, then convert to readonly with Uint4
     graph = create_empty(N, dim, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
-    builder = deglib.GraphBuilder(graph, extend_k=8, extend_eps=0.1)
+    builder = deglib.builder.GraphBuilder(graph, extend_k=8, extend_eps=0.1)
     builder.add_entry(np.arange(N, dtype=np.uint32), data_f32)
     builder.build()
 
@@ -344,10 +341,10 @@ def test_mips_transform_chains_through_reranker_and_quantized_searcher():
     data = rng.standard_normal((n, d)).astype(np.float32) * 5.0
     queries = rng.standard_normal((4, d)).astype(np.float32) * 3.0
 
-    mips = deglib.make_mips_transform(data)
-    data_mips = deglib.apply_on_database(mips, data, threads=2)
-    mut = deglib.create_empty(n, d + 1, edges_per_vertex=16, metric=Metric.FP32_L2)
-    b = deglib.GraphBuilder(mut, threads=2)
+    mips = deglib.transformation.make_mips_transform(data)
+    data_mips = deglib.transformation.apply_on_database(mips, data, threads=2)
+    mut = deglib.graph.create_empty(n, d + 1, edges_per_vertex=16, metric=Metric.FP32_L2)
+    b = deglib.builder.GraphBuilder(mut, threads=2)
     b.add_entry(np.arange(n, dtype=np.uint32), data_mips)
     b.build()
     mut.set_transformations([mips])

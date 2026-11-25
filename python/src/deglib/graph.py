@@ -1017,7 +1017,13 @@ def create_random_graph(
 
 def load_graph(path: pathlib.Path | str) -> DynamicExplorationGraph:
     """
-    Load a saved ``ReadOnlyGraph`` from disk (``.deg`` container format).
+    Load a saved ``.deg`` graph from disk as an immutable ``ReadOnlyGraph``.
+
+    See Also
+    --------
+    deglib.graph.load_readonly_graph : Explicit read-only loader.
+    deglib.graph.load_dynamic_graph : Load as a chunked mutable ``DynamicGraph``.
+    deglib.graph.load_mutable_graph : Load as a fixed-capacity mutable ``SizeBoundedGraph``.
     """
     return load_readonly_graph(path)
 
@@ -1058,7 +1064,7 @@ def compress(
     threads: int = 0,
 ) -> DynamicExplorationGraph:
     """
-    Compress ``graph`` to the specified bit-width or ``Metric``, returning a ``ReadOnlyGraph``.
+    Compress ``graph`` to the specified bit-width or ``Metric``, preserving the input graph's backend type.
 
     Parameters
     ----------
@@ -1082,8 +1088,15 @@ def compress(
     Returns
     -------
     DynamicExplorationGraph
-        Compressed ``ReadOnlyGraph`` preserving the graph topology and external labels.
+        Compressed graph preserving the input graph's backend type, topology, and external labels.
+
+    See Also
+    --------
+    deglib.graph.DynamicExplorationGraph.with_metric : Low-level metric conversion.
+    deglib.graph.DynamicExplorationGraph.with_transformations : Explicit transformation pipeline.
+    deglib.transformation.make_quantizer_pipeline : Calibrate a custom quantizer pipeline.
     """
+    # See docs/python_metric_quantization_matrix.md (Section 3) for target resolution rules.
     src_metric = graph.get_metric()
     src_is_ip = Metric(int(src_metric)).name.endswith("InnerProduct")
 

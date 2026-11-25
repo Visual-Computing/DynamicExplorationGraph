@@ -82,7 +82,7 @@ def _load_or_build_base_graph(
     )
     if cache_file.exists():
         print(f"Loading cached DEG graph from {cache_file}...", flush=True)
-        return deglib.load_readonly_graph(str(cache_file))
+        return deglib.load_graph(str(cache_file))
 
     presort_file = deg_dir / f"{orig_dims}D_l2_presort.npy"
     if presort_file.exists():

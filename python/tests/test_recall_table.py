@@ -3,11 +3,8 @@ import pytest
 
 import deglib
 import deglib_cpp
-from deglib import (
-    Metric,
-    OptimizationTarget,
-    RecallTable,
-)
+from deglib import Metric, OptimizationTarget
+from deglib.search import RecallTable
 
 
 def _make_clustered_data(n: int, dim: int, clusters: int = 20, seed: int = 7) -> np.ndarray:
@@ -53,7 +50,7 @@ def _verify_table_invariants(table: RecallTable) -> None:
 
 
 def test_top_level_exports():
-    assert deglib.RecallTable is RecallTable
+    assert deglib.search.RecallTable is RecallTable
     assert deglib.search.RecallTable is RecallTable
     assert RecallTable.__module__ == "deglib.search"
     for mod in (deglib, deglib.search, deglib_cpp, deglib_cpp.search):
@@ -179,7 +176,7 @@ def test_quantized_graphs_uint4_and_int8_ip():
 def test_unreachable_targets_bounds_and_lookup_clamping():
     rng = np.random.default_rng(37)
     data = rng.normal(0.0, 1.0, size=(2500, 64)).astype(np.float32)
-    raw = deglib.create_random_graph(data, edges_per_vertex=6, metric=Metric.FP32_L2, seed=37, optimize=False)
+    raw = deglib.graph.create_random_graph(data, edges_per_vertex=6, metric=Metric.FP32_L2, seed=37, optimize=False)
 
     table = raw.to_recall_table(
         k=30,
@@ -205,7 +202,7 @@ def test_unreachable_targets_bounds_and_lookup_clamping():
 
 
 def test_empty_graph_and_validation_errors():
-    empty = deglib.create_empty(16, 8, edges_per_vertex=4, metric=Metric.FP32_L2)
+    empty = deglib.graph.create_empty(16, 8, edges_per_vertex=4, metric=Metric.FP32_L2)
     empty_ef = empty.to_recall_table(k=10, mode="ef")
     assert empty_ef.k == 10
     assert empty_ef.sample_count == 0

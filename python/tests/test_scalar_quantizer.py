@@ -229,6 +229,6 @@ def test_strided_calibration_sees_full_dataset():
     assert q_u4.max_val > 4.0
     assert q_u4.min_val < -4.0
 
-    pipe = deglib.make_quantizer_pipeline(data, Metric.Uint4_L2, quantile=1.0)
+    pipe = deglib.transformation.make_quantizer_pipeline(data, Metric.Uint4_L2, quantile=1.0)
     assert pipe[-1].max_val > 4.0
     assert pipe[-1].min_val < -4.0

@@ -46,7 +46,7 @@ Example Usage
    import deglib
 
    # Load an existing graph
-   graph = deglib.graph.load_readonly_graph("my_graph.deg")
+   graph = deglib.load_graph("my_graph.deg")
 
    # Obtain full structural diagnostics
    stats = deglib.analysis.analyze_graph(graph)

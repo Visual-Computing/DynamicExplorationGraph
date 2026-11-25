@@ -107,7 +107,7 @@ def run_sliding_window_benchmark(
     print("=" * 75)
 
     # 1. Initialize Preallocated DEG Graph
-    graph = deglib.create_empty(
+    graph = deglib.graph.create_empty(
         capacity=window_size,
         dim=dims,
         edges_per_vertex=edges_per_vertex,

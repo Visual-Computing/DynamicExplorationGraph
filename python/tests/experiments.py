@@ -13,8 +13,8 @@ def main():
     data = np.random.random((samples, dims)).astype(np.float32)
     # data = data / np.linalg.norm(data, axis=1)[:, None]  # L2 normalize
 
-    graph = deglib.create_empty(data.shape[0], dims, 16, metric=Metric.FP32_L2)
-    builder = deglib.GraphBuilder(graph, extend_k=32, extend_eps=0.01, improve_k=0)
+    graph = deglib.graph.create_empty(data.shape[0], dims, 16, metric=Metric.FP32_L2)
+    builder = deglib.builder.GraphBuilder(graph, extend_k=32, extend_eps=0.01, improve_k=0)
 
     for i, vec in enumerate(data):
         vec: np.ndarray
@@ -80,8 +80,8 @@ def do_build_with_remove(seed, edges_per_vertex):
     data = np.random.random((samples, dims)).astype(np.float32)
 
     # data = deglib.repository.fvecs_read('crash_data.fvecs')
-    graph = deglib.create_empty(data.shape[0], dims, edges_per_vertex, metric=Metric.FP32_L2)
-    builder = deglib.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
+    graph = deglib.graph.create_empty(data.shape[0], dims, edges_per_vertex, metric=Metric.FP32_L2)
+    builder = deglib.builder.GraphBuilder(graph, extend_k=30, extend_eps=0.2, improve_k=30)
 
     for label, vec in enumerate(data):
         vec: np.ndarray
@@ -109,7 +109,7 @@ def do_all():
 
 def build_graph(jobname, data, dim):
     print("starting", jobname)
-    graph = deglib.create_empty(1_000_000, dim, 8, metric=Metric.FP32_L2)
+    graph = deglib.graph.create_empty(1_000_000, dim, 8, metric=Metric.FP32_L2)
     print(graph)
 
     builder = GraphBuilder(graph, improve_k=0, extend_eps=0, extend_k=8)

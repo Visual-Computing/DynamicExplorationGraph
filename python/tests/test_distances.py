@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 
 import deglib
-from deglib import InstructionSet, Metric
+from deglib import Metric
+from deglib.cpu import InstructionSet
 from deglib.transformation import apply_on_database, make_scalar_quantizer_int8
 
 

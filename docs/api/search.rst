@@ -61,12 +61,13 @@ High-Performance Searcher with Reranking
    query = np.random.randn(dim).astype(np.float32)
 
    # Build base graph
-   graph = deglib.build(data, metric=deglib.Metric.FP32_L2)
+   graph = deglib.build(data, metric="l2")
 
-   # Extract FP32 reranker from the FP32 graph and convert to INT8 ReadOnlyGraph Searcher
-   reranker = graph.to_reranker(deglib.Metric.FP32_L2)
-   searcher = graph.to_searcher(
-       metric=deglib.Metric.Int8_L2,
+   # Extract FP16 reranker from the FP32 graph and create compressed 8-bit Searcher
+   reranker = deglib.reranker(graph, compress="16bit")
+   searcher = deglib.searcher(
+       graph,
+       compress="8bit",
        reranker=reranker,
    )
 

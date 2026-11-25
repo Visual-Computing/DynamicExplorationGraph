@@ -12,7 +12,7 @@ Standard graph-based nearest neighbor search algorithms (e.g. DEG, HNSW) are opt
 We use a 5-step pipeline that reduces MIPS to $L_2$ graph search while retaining high query efficiency:
 
 1. **$(d+1)$-Dimensional $L_2$ Transformation**:
-   Using `deglib.make_mips_transform(train_vectors)`, each database vector $x_i \in \mathbb{R}^d$ is mapped to $x'_i = [x_i, \sqrt{M^2 - \|x_i\|^2}] \in \mathbb{R}^{d+1}$ where $M^2 = \max_j \|x_j\|^2$.
+   Using `deglib.transformation.make_mips_transform(train_vectors)`, each database vector $x_i \in \mathbb{R}^d$ is mapped to $x'_i = [x_i, \sqrt{M^2 - \|x_i\|^2}] \in \mathbb{R}^{d+1}$ where $M^2 = \max_j \|x_j\|^2$.
    Because all transformed vectors $x'_i$ have equal norm $\|x'_i\| = M$, minimizing $\|q' - x'_i\|^2$ under $L_2$ distance (with $q' = [q, 0]$) is strictly equivalent to maximizing the inner product $\langle q, x_i \rangle$.
 
 2. **1D FLAS Pre-Sorting & Graph Construction in FP32 $L_2$ Space**:
