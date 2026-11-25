@@ -113,13 +113,10 @@ class TestHighLevelBuild:
         assert [t.name for t in g8.get_transformations()] == ["FastHadamardRotation", "ScalarQuantizerInt8"]
 
         g4 = deglib.build(x, metric="ip", compress="4bit", edges_per_vertex=16, extend_k=16, threads=1)
-        assert not g4.is_mutable()
-        assert g4.get_metric() == Metric.Int4_InnerProduct
-        assert [t.name for t in g4.get_transformations()] == [
-            "L2NormalizeTransform",
-            "FastHadamardRotation",
-            "ScalarQuantizerInt4",
-        ]
+        assert g4.is_mutable()
+        assert g4.get_metric() == Metric.Uint4_L2
+        assert g4.get_dim() == 17
+        assert g4.get_transformations()[0].name == "MipsTransform"
 
     def test_build_fp16_presort_and_compress(self):
         rng = np.random.default_rng(4)
@@ -137,9 +134,9 @@ class TestHighLevelBuild:
             ("l2", "8bit", Metric.Uint7_L2),
             ("l2", "4bit", Metric.Uint4_L2),
             ("l2", "2bit", Metric.EVP_InnerProduct),
-            ("cosine", "4bit", Metric.Int4_InnerProduct),
+            ("cosine", "4bit", Metric.Uint4_L2),
             ("cosine", "2bit", Metric.EVP_InnerProduct),
-            ("ip", "4bit", Metric.Int4_InnerProduct),
+            ("ip", "4bit", Metric.Uint4_L2),
             ("ip", "2bit", Metric.EVP_InnerProduct),
         ],
     )
@@ -237,8 +234,8 @@ class TestCompressRerankerSearcher:
         rr16 = deglib.reranker(g, compress="16bit", threads=1)
         s8 = deglib.searcher(g, compress="8bit", reranker=rr16, threads=1)
         g4 = deglib.compress(g, "4bit", threads=1)
-        assert g4.get_metric() == Metric.Int4_InnerProduct
-        assert g4.get_transformations()[0].name == "L2NormalizeTransform"
+        assert g4.get_metric() == Metric.Uint4_L2
+        assert g4.get_transformations()[0].name == "MipsTransform"
 
         s_u7_l2 = g.to_searcher(metric=Metric.Uint7_L2, threads=1)
         assert s_u7_l2.graph.get_metric() == Metric.Uint7_L2
@@ -268,8 +265,8 @@ class TestCompressRerankerSearcher:
             assert top1_mips in s.search(q, k=5, eps_or_ef=0.2, rerank_factor=rf).indices
 
         s4 = deglib.searcher(loaded, compress="4bit", reranker=rr16, threads=1)
-        assert s4.graph.get_metric() == Metric.Int4_InnerProduct
-        assert s4.graph.get_transformations()[0].name == "L2NormalizeTransform"
+        assert s4.graph.get_metric() == Metric.Uint4_L2
+        assert s4.graph.get_transformations()[0].name == "MipsTransform"
         assert s4.search(q, k=5, eps_or_ef=0.2, rerank_factor=2.0).indices.shape == (5,)
 
         g8 = deglib.build(x, metric="ip", compress="8bit", edges_per_vertex=16, extend_k=16, presort=True, threads=1)
@@ -282,15 +279,12 @@ class TestCompressRerankerSearcher:
         assert top1_mips in s8_loaded.search(q, k=5, eps_or_ef=0.2).indices
 
         g4 = deglib.build(x, metric="ip", compress="4bit", edges_per_vertex=16, extend_k=16, threads=1)
-        p_int4 = tmp_path / "ip_int4.deg"
-        g4.to_mutable().save_graph(p_int4)
-        loaded4 = deglib.load_graph(p_int4)
-        assert loaded4.get_metric() == Metric.Int4_InnerProduct
-        assert [t.name for t in loaded4.get_transformations()] == [
-            "L2NormalizeTransform",
-            "FastHadamardRotation",
-            "ScalarQuantizerInt4",
-        ]
+        p_uint4 = tmp_path / "ip_uint4.deg"
+        g4.to_mutable().save_graph(p_uint4)
+        loaded4 = deglib.load_graph(p_uint4)
+        assert loaded4.get_metric() == Metric.Uint4_L2
+        assert loaded4.get_dim() == 33
+        assert loaded4.get_transformations()[0].name == "MipsTransform"
         s4_loaded = deglib.searcher(loaded4, threads=1)
         assert s4_loaded.search(q, k=5, eps_or_ef=0.2).indices.shape == (5,)
 

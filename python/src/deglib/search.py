@@ -835,7 +835,8 @@ def searcher(
         - ``"32bit"`` (also ``"fp32"``, ``"float32"``): ``FP32_L2`` or ``FP32_InnerProduct``.
         - ``"16bit"`` (also ``"fp16"``, ``"float16"``): ``FP16_L2`` or ``FP16_InnerProduct``.
         - ``"8bit"`` / ``"auto"``: ``Uint7_L2`` (L2) or ``Int8_InnerProduct`` (InnerProduct).
-        - ``"4bit"``: ``Uint4_L2`` (for L2) or ``L2NormalizeTransform + Int4_InnerProduct`` (for InnerProduct).
+        - ``"4bit"``: Always ``Uint4_L2`` (auto-prepending ``MipsTransform`` on unnormalized
+          ``InnerProduct`` graphs).
         - ``"2bit"`` (also ``"evp"``): ``EVP_InnerProduct``.
         - Explicit ``Metric`` or metric string (e.g. ``Metric.Int8_L2``, ``"Uint8_L2"``).
     reranker : Reranker, optional

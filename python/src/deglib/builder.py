@@ -338,7 +338,7 @@ def build(
         - ``"16bit"`` (also ``"fp16"``, ``"float16"``): ``FP16_L2`` or ``FP16_InnerProduct``.
         - ``"8bit"`` / ``"auto"``: ``Uint7_L2`` (L2), auto-selected IP quantizer (cosine),
           or ``FastHadamardRotation + Int8_InnerProduct`` (``metric="ip"``).
-        - ``"4bit"``: ``Uint4_L2`` (for L2) or ``L2NormalizeTransform + FastHadamardRotation + Int4_InnerProduct`` (for InnerProduct).
+        - ``"4bit"``: Always ``Uint4_L2`` (with ``MipsTransform`` for ``metric="ip"``).
         - ``"2bit"`` (also ``"evp"``): ``EVP_InnerProduct``.
         - Any explicit ``Metric`` or metric name string.
     edges_per_vertex : int, default=32
@@ -583,28 +583,7 @@ def build(
                 threads=threads,
             )
         elif comp_key == "4bit":
-            from deglib.transformation import (
-                make_fast_hadamard_rotation,
-                make_l2_normalize_transform,
-                make_scalar_quantizer_int4,
-            )
-
-            l2n = make_l2_normalize_transform(work_data)
-            l2n_data = apply_on_database(l2n, work_data, threads=threads)
-            rot = make_fast_hadamard_rotation(l2n_data)
-            rot_data = apply_on_database(rot, l2n_data, threads=threads)
-            quant = make_scalar_quantizer_int4(rot_data)
-            target_ip4 = Metric.Int4_InnerProduct
-            bound_inst = getattr(resolved_metric, "_instruction", None)
-            if bound_inst is not None:
-                target_ip4 = target_ip4.with_instruction(bound_inst)
-            graph = graph.to_readonly().with_features(
-                work_data,
-                metric=target_ip4,
-                transformations=[l2n, rot, quant],
-                order="internal",
-                threads=threads,
-            )
+            graph = compress_graph(graph, Metric.Uint4_L2, threads=threads)
         else:
             graph = compress_graph(graph, compress, threads=threads)
     elif compress is not None:

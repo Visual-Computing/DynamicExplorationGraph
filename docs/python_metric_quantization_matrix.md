@@ -15,7 +15,7 @@ This reference documents the exact internal behavior of the high-level Python AP
 
 ## 1. `deglib.presort` & `deglib.build` by High-Level Metric
 
-> **Mutability rule:** `deglib.compress(graph, target)` always preserves the backend type of `graph` (mutable stays mutable, `ReadOnlyGraph` stays `ReadOnlyGraph`). `deglib.build(...)` returns a mutable `SizeBoundedGraph` for `"l2"` / `"cosine"` and for `"ip"` with `compress=None`/`"32bit"`/`"2bit"`/explicit `L2`, and returns a `ReadOnlyGraph` for `"ip"` with `compress="16bit"`/`"8bit"`/`"4bit"`. For dynamically growing streaming graphs, use `deglib.builder.GraphBuilder` with `deglib.graph.create_dynamic_empty`.
+> **Mutability rule:** `deglib.compress(graph, target)` always preserves the backend type of `graph` (mutable stays mutable, `ReadOnlyGraph` stays `ReadOnlyGraph`). `deglib.build(...)` returns a mutable `SizeBoundedGraph` for `"l2"` / `"cosine"` and for `"ip"` with `compress=None`/`"32bit"`/`"4bit"`/`"2bit"`/explicit `L2`, and returns a `ReadOnlyGraph` for `"ip"` with `compress="16bit"`/`"8bit"`. For dynamically growing streaming graphs, use `deglib.builder.GraphBuilder` with `deglib.graph.create_dynamic_empty`.
 
 | `metric` (aliases) | `deglib.presort(data, metric=...)` | `deglib.build` (Graph Construction) | `deglib.build` Post-Build Finalization (`compress=None`) | Rationale |
 |---|---|---|---|---|
@@ -42,12 +42,12 @@ This reference documents the exact internal behavior of the high-level Python AP
 | `"cosine"` | `None` / `"32bit"` | `FP32_InnerProduct` (`FP16_InnerProduct` for `float16`) | `[L2NormalizeTransform]` *(if input unnormalized)* | `d` | `SizeBoundedGraph` |
 | `"cosine"` | `"16bit"` | `FP16_InnerProduct` | `[L2Norm?, ScalarQuantizerFP16]` | `d` | `SizeBoundedGraph` |
 | `"cosine"` | `"8bit"` / `"auto"` | `predict_quantization(...)` (`Int8_InnerProduct` vs. `Uint7_L2`) | `[L2Norm?, (FWHT), ScalarQuantizer*]` | `d` | `SizeBoundedGraph` |
-| `"cosine"` | `"4bit"` | `Int4_InnerProduct` | `[L2NormalizeTransform?, (FWHT), ScalarQuantizerInt4]` | `d` | `SizeBoundedGraph` |
+| `"cosine"` | `"4bit"` | `Uint4_L2` | `[L2NormalizeTransform?, (FWHT), ScalarQuantizerUint4]` | `d` | `SizeBoundedGraph` |
 | `"cosine"` | `"2bit"` / `"evp"` | `EVP_InnerProduct` | `[L2Norm?, EvpQuantizer]` | `d` | `SizeBoundedGraph` |
 | **`"ip"`** | `None` / `"32bit"` | `FP32_InnerProduct` (`FP16_InnerProduct` for `float16`) | `[]` *(unnormalized)* | `d` | `SizeBoundedGraph` |
 | **`"ip"`** | `"16bit"` | `FP16_InnerProduct` | `[]` *(unnormalized)* | `d` | `ReadOnlyGraph` |
 | **`"ip"`** | `"8bit"` / `"auto"` | `Int8_InnerProduct` (`AVX512_VNNI`) | `[FastHadamardRotation, ScalarQuantizerInt8]` *(unnormalized)* | `d` | `ReadOnlyGraph` |
-| **`"ip"`** | `"4bit"` | `Int4_InnerProduct` | `[L2NormalizeTransform, FastHadamardRotation, ScalarQuantizerInt4]` | `d` | `ReadOnlyGraph` |
+| **`"ip"`** | `"4bit"` | `Uint4_L2` | `[MipsTransform, (FWHT), ScalarQuantizerUint4]` | `d + 1` | `SizeBoundedGraph` |
 | **`"ip"`** | `"2bit"` / `"evp"` | `EVP_InnerProduct` | `[MipsTransform, EvpQuantizer]` | `d + 1` | `SizeBoundedGraph` |
 | **`"ip"`** | Explicit `L2` metric (e.g. `Metric.Uint7_L2`, `Metric.Int8_L2`) | Target `L2` metric | `[MipsTransform, (FWHT), ScalarQuantizer*]` | `d + 1` | `SizeBoundedGraph` |
 
@@ -80,7 +80,7 @@ When `compress` is provided, `deglib.searcher(graph, compress=...)` calls `degli
 | `None` / `"32bit"` | `FP32_InnerProduct` | existing | Returns `graph` unchanged if already `FP32_InnerProduct` (raises `ValueError` if `graph` is `FP16_InnerProduct`) |
 | `"16bit"` | `FP16_InnerProduct` | `[ScalarQuantizerFP16]` | Native MIPS without reranker |
 | `"8bit"` / `"auto"` | `Uint7_L2` or `Int8_InnerProduct` | `[(FWHT), ScalarQuantizer*]` | Uses `predict_quantization` (`Uint7_L2` vs. `Int8_InnerProduct`) on unit-sphere `cosine`/`normalized` graphs, and `Int8_InnerProduct` on unnormalized `InnerProduct` (`ip`) graphs |
-| `"4bit"` | `Int4_InnerProduct` | `[L2NormalizeTransform, (FWHT), ScalarQuantizerInt4]` *(if no `L2Norm` prefix exists yet)* | Calibrated via `normalize=True` on L2-normalized vectors; lossy on true MIPS with wide norm spread |
+| `"4bit"` | `Uint4_L2` | `[MipsTransform?, (FWHT), ScalarQuantizerUint4]` *(auto-prepends `MipsTransform` only when stored graph vectors are not unit-norm and have no prefix)* | Always uses `Uint4_L2` across `L2`, `cosine`/`normalized`, and `ip` |
 | `"2bit"` / `"evp"` | `EVP_InnerProduct` | `[EvpQuantizer]` | High-compression 2-bit filtering + reranking |
 | Explicit `L2` `Metric` (`Metric.Uint7_L2`, `Metric.Int8_L2`, `Metric.Uint4_L2`, `Metric.Uint8_L2`) | Target `L2` metric | `[MipsTransform?, (FWHT), ScalarQuantizer*]` *(auto-prepends `MipsTransform` via `mips=True` only when stored graph vectors are not unit-norm and have no prefix)* | Enables `L2` quantizers directly on `InnerProduct` graphs without adding `d+1` overhead on unit-norm `cosine`/`normalized` graphs |
 
@@ -112,7 +112,7 @@ In `cpp/deglib/include/deglib/transformation.h` (`make_quantizer_pipeline` / `de
 | `Int8` | `1.85` | `25.0` |
 | `FP16`, `EVP` | disabled (`-1.0`) | disabled (`-1.0`) |
 
-*(Note: `deglib.build(..., metric="ip", compress="8bit"|"4bit")` always applies `make_fast_hadamard_rotation` explicitly.)*
+*(Note: `deglib.build(..., metric="ip", compress="8bit")` always applies `make_fast_hadamard_rotation` explicitly.)*
 
 ---
 

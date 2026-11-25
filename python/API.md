@@ -135,7 +135,7 @@ deglib.build(
 
 Builds a graph from a 2D NumPy array:
 - **`metric`**: High-level spatial modes (`"l2"` / `"euclidean"`, `"cosine"` / `"normalized"`, `"ip"`) or an explicit `Metric`. `"cosine"` attaches `L2NormalizeTransform` if vectors are not unit-norm; `"ip"` builds in `MipsTransform (d+1)` space and swaps stored features back to unnormalized `d`-dim `InnerProduct` (or `compress` target).
-- **`compress`**: Optional post-build quantization (`"32bit"`, `"16bit"`, `"8bit"`, `"4bit"`, `"2bit"`, `"auto"`, or an explicit `Metric`). Preserves mutability via `deglib.compress` for `"l2"` / `"cosine"`, while `"ip"` `"16bit"`/`"8bit"`/`"4bit"` swaps to a compact `ReadOnlyGraph`.
+- **`compress`**: Optional post-build quantization (`"32bit"`, `"16bit"`, `"8bit"`, `"4bit"`, `"2bit"`, `"auto"`, or an explicit `Metric`). Preserves mutability via `deglib.compress` for `"l2"` / `"cosine"`, while `"ip"` `"16bit"`/`"8bit"` swaps to a compact `ReadOnlyGraph`.
 - **`presort`**: `True` runs 1D FLAS pre-sorting via `deglib.presort` and reorders data + labels together; an `np.ndarray` uses precomputed sorted indices; `False` keeps insertion order.
 - **`optimize`**: Runs `graph.optimize()` after building when `True` (default).
 - **`threads`**: Worker thread count (`0` uses all CPU cores).
@@ -143,7 +143,7 @@ Builds a graph from a 2D NumPy array:
 ### `deglib.presort`, `deglib.compress`, `deglib.reranker`, `deglib.reranker_with_data`, `deglib.searcher`
 
 - `deglib.presort(vectors, metric="l2", radius_decay=0.9, threads=0, callback=None, show_progress=False) -> np.ndarray`: Runs 1D FLAS pre-sorting (handles `"ip"` MIPS lifting automatically).
-- `deglib.compress(graph, target, threads=0) -> DynamicExplorationGraph`: Compresses a float graph (`"32bit"`, `"16bit"`, `"8bit"`, `"4bit"`, `"2bit"`, `"auto"`, or `Metric`), preserving the input graph's backend type. For `"8bit"` / `"auto"`, selects `Uint7_L2` on L2 graphs, `deglib.tuning.predict_quantization` (`Uint7_L2` vs. `Int8_InnerProduct`) on unit-sphere `cosine`/`normalized` graphs, and `Int8_InnerProduct` on unnormalized `InnerProduct` graphs.
+- `deglib.compress(graph, target, threads=0) -> DynamicExplorationGraph`: Compresses a float graph (`"32bit"`, `"16bit"`, `"8bit"`, `"4bit"`, `"2bit"`, `"auto"`, or `Metric`), preserving the input graph's backend type. For `"8bit"` / `"auto"`, selects `Uint7_L2` on L2 graphs, `deglib.tuning.predict_quantization` (`Uint7_L2` vs. `Int8_InnerProduct`) on unit-sphere `cosine`/`normalized` graphs, and `Int8_InnerProduct` on unnormalized `InnerProduct` graphs. For `"4bit"`, always selects `Uint4_L2` (auto-prepending `MipsTransform` on unnormalized `InnerProduct` graphs).
 - `deglib.reranker(graph, compress="16bit", optimize=True, threads=0) -> Reranker`: Extracts a `Reranker` from a float graph's stored vectors.
 - `deglib.reranker_with_data(graph, data, metric="16bit", optimize=True, threads=0) -> Reranker`: Builds a `Reranker` from external feature vectors aligned with `graph` labels.
 - `deglib.searcher(graph, compress=None, reranker=None, optimize=True, threads=0) -> Searcher`: Wraps `graph` (optionally compressing first) in an optimized `ReadOnlyGraph`-backed `Searcher`.
