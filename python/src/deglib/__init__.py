@@ -14,7 +14,7 @@ from .graph import DynamicExplorationGraph, compress, load_graph
 from .optimization import presort
 from .search import Reranker, SearchResults, Searcher, reranker, reranker_with_data, searcher
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 __all__ = [
     "__version__",

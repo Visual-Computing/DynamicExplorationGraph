@@ -1,5 +1,40 @@
 # Release Notes
 
+## deglib v0.3.1
+
+### Overview
+deglib v0.3.1 introduces a streamlined **high-level Python API** (`deglib.build`, `deglib.compress`, `deglib.searcher`, `deglib.reranker`), switches the C++ extension to **`nanobind`** for smaller packages and faster builds, adds **automatic recall calibration** (`RecallTable` / `ParetoLine`) and **data-driven auto-tuning** (`deglib.tuning`), and brings major C++ speedups to **quantization, FLAS presorting, and search**.
+
+### 🚀 What's New & Improved
+* **Streamlined High-Level Python API:**
+  * Top-level `deglib` now focuses on the core workflow (`build`, `presort`, `compress`, `reranker`, `reranker_with_data`, `searcher`, `load_graph`, `DynamicExplorationGraph`, `Searcher`, `Reranker`, `SearchResults`, `Metric`, `OptimizationTarget`), while advanced/low-level APIs live cleanly in submodules (`deglib.graph`, `deglib.builder`, `deglib.transformation`, `deglib.tuning`, etc.).
+  * `deglib.compress(..., "8bit" / "auto")` automatically picks the best quantization (`Uint7_L2` vs. `Int8_InnerProduct`) on normalized `cosine` graphs, and `compress="4bit"` now consistently uses `Uint4_L2` across `L2`, `cosine`, and `ip`.
+  * Added clearer `repr()` output showing the underlying graph backend.
+* **Faster Python Bindings & 6.4× Faster Builds (`nanobind`):**
+  * Migrated the C++ Python extension from `pybind11` to `nanobind` and streamlined internal C++ kernel dispatch, cutting build times dramatically, reducing binary size, and lowering Python-to-C++ call overhead.
+* **Recall Calibration & Auto-Tuning (`RecallTable`, `ParetoLine`, `deglib.tuning`):**
+  * Added `RecallTable` and `ParetoLine` on `Searcher` so you can calibrate a search index once and query by target recall or speed instead of tuning `ef` / `eps` and `rerank_factor` manually.
+  * Added `deglib.tuning` (`predict_optimization_target`, `predict_quantization`) to recommend `LowLID` vs. `StreamingData` and the best 8-bit quantization directly from your dataset before building the graph.
+* **Faster Search & Better Quantized Recall:**
+  * Under-the-hood C++ traversal, cache layout, and SIMD distance improvements (including AVX2/AVX-512 masked tails and 4-way batch comparisons) make both quantized and float searches faster.
+  * `Searcher.optimize()` now finds optimal CPU prefetch settings much faster.
+  * `MipsTransform` now normalizes database and query vectors onto the unit sphere, improving recall and latency for quantized inner-product (`"ip"`) search.
+* **Faster Quantization & Native `FP16` FLAS Presort:**
+  * Scalar quantization is `1.8×–3.6×` faster thanks to AVX2/AVX-512 SIMD acceleration and an exact-range fast path.
+  * `deglib.presort` now supports `float16` (`FP16`) arrays natively and runs faster across multiple threads.
+  * Updated `examples/vibe` for the new high-level API, added `FP16` loading for large datasets, and added a short cooldown between index building and query benchmarking.
+
+### ⚠️ Breaking Changes
+* **Top-Level `deglib` Exports:** Low-level/expert functions and classes are no longer exposed directly on `deglib` — import them from their submodules (e.g., `deglib.graph`, `deglib.transformation`, `deglib.tuning`).
+* **Unified `SearchResults` Return Type (`Searcher.search` & `Graph.search`):** `search()` now returns a `SearchResults` object (`.indices`, `.distances`, plus search statistics) instead of returning `indices` directly or an `(indices, distances)` tuple. Update callers from `indices = searcher.search(...)` to `searcher.search(...).indices` (or `res.indices, res.distances`).
+* **Metric Naming Consistency:** Renamed `Metric.UInt7_L2` and `Metric.UInt7_InnerProduct` to `Metric.Uint7_L2` and `Metric.Uint7_InnerProduct` (matching `Uint8_*` and `Uint4_*`).
+
+### 🛠️ Bug Fixes
+* Ensured `Searcher` always uses the read-optimized `ReadOnlyGraph` backend rather than `SizeBoundedGraph`.
+* Updated C++ benchmarks and cleaned up obsolete test cases.
+
+---
+
 ## deglib v0.3.0
 
 ### Overview
