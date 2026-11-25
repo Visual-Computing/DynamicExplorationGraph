@@ -104,19 +104,22 @@ inline constexpr TargetModelCalibration kDefaultTargetCalibration{};
  * Linear z-score calibration constants predicting log2(QPS_Uint7_L2 / QPS_Int8_InnerProduct)
  * for InnerProduct/Cosine datasets. L2/Euclidean datasets unconditionally use Uint7_L2.
  *
- * Provisional constants fitted on 10-seed profile means against 2-run full-grid benchmark means
- * across the 8 InnerProduct VIBE datasets on the predicted base graph (sample_count=16000, query_count=0).
+ * Fitted via Ridge regression (lambda=0.1) on 16k-sample profile features against
+ * recall-weighted (>=0.95 prioritized) Pareto QPS advantage across the 13 InnerProduct/Cosine VIBE datasets.
  */
 struct QuantizationModelCalibration {
-    double mu_dim_over_participation = 10764.6221714828;
-    double mu_rel_contrast = 1.8255678750;
+    double mu_dim_over_participation = 26311.8692307692;
+    double mu_hadamard_kurt = -0.0053076923;
+    double mu_log_dim_over_part = 8.5775828244;
 
-    double sd_dim_over_participation = 18963.7671425831;
-    double sd_rel_contrast = 0.1962623486;
+    double sd_dim_over_participation = 52291.5997452802;
+    double sd_hadamard_kurt = 0.0712270310;
+    double sd_log_dim_over_part = 1.8612986356;
 
-    double w_intercept = 0.0129124715;
-    double w_dim_over_participation = 0.0767434325;
-    double w_rel_contrast = -0.0327738153;
+    double w_intercept = 0.0582410964;
+    double w_dim_over_participation = 0.1174640890;
+    double w_hadamard_kurt = -0.0233602272;
+    double w_log_dim_over_part = -0.0866130095;
 };
 
 inline constexpr QuantizationModelCalibration kDefaultQuantizationCalibration{};
@@ -1160,16 +1163,20 @@ predict_quantization(const DatasetProfile& profile, const QuantizationModelCalib
     if (profile.metric.get_distance_kind() != deglib::distances::MetricDistanceKind::InnerProduct) {
         return QuantizationPrediction{deglib::distances::Metric::Uint7_L2, 0.0f, profile};
     }
-    if (profile.sample_count < 2 || profile.dim == 0 || profile.participation_ratio <= 0.0f || profile.rel_contrast_1 <= 0.0f ||
-        !std::isfinite(profile.participation_ratio) || !std::isfinite(profile.rel_contrast_1)) {
+    if (profile.sample_count < 2 || profile.dim == 0 || profile.participation_ratio <= 0.0f ||
+        !std::isfinite(profile.participation_ratio) || !std::isfinite(profile.hadamard_kurt)) {
         return QuantizationPrediction{deglib::distances::Metric::Uint7_L2, 0.0f, profile};
     }
 
     const double dim_over_part = static_cast<double>(profile.dim) / static_cast<double>(profile.participation_ratio);
     const double z_dim_part = (dim_over_part - cal.mu_dim_over_participation) / cal.sd_dim_over_participation;
-    const double z_rc = (static_cast<double>(profile.rel_contrast_1) - cal.mu_rel_contrast) / cal.sd_rel_contrast;
+    const double z_hkurt = (static_cast<double>(profile.hadamard_kurt) - cal.mu_hadamard_kurt) / cal.sd_hadamard_kurt;
+    const double z_log_dim_part = (std::log(dim_over_part) - cal.mu_log_dim_over_part) / cal.sd_log_dim_over_part;
 
-    const double log2_score = std::clamp(cal.w_intercept + cal.w_dim_over_participation * z_dim_part + cal.w_rel_contrast * z_rc, -10.0, 10.0);
+    const double log2_score = std::clamp(
+        cal.w_intercept + cal.w_dim_over_participation * z_dim_part + cal.w_hadamard_kurt * z_hkurt + cal.w_log_dim_over_part * z_log_dim_part,
+        -10.0, 10.0
+    );
     const float adv_pct = static_cast<float>((std::exp2(log2_score) - 1.0) * 100.0);
     const auto metric = (adv_pct >= 0.0f) ? deglib::distances::Metric::Uint7_L2 : deglib::distances::Metric::Int8_InnerProduct;
     return QuantizationPrediction{metric, adv_pct, profile};

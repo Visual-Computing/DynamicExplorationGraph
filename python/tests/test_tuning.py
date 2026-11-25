@@ -187,69 +187,69 @@ def test_predict_quantization_vibe_reference_profiles():
     refs = [
         (
             "laion-clip",
-            DatasetProfile(16000, 512, 0.174291, 1.907535, 68.472295, metric=Metric.FP32_InnerProduct),
+            DatasetProfile(16000, 512, 0.174291, 1.907535, 68.472295, hadamard_kurt=0.1052, metric=Metric.FP32_InnerProduct),
             Metric.Int8_InnerProduct,
-            -2.22,
+            -0.20,
         ),
         (
             "yandex",
-            DatasetProfile(16000, 200, 0.551745, 1.963387, 49.415739, metric=Metric.FP32_InnerProduct),
-            Metric.Int8_InnerProduct,
-            -3.55,
+            DatasetProfile(16000, 200, 0.551745, 1.963387, 49.415739, hadamard_kurt=-0.0233, metric=Metric.FP32_InnerProduct),
+            Metric.Uint7_L2,
+            9.49,
         ),
         (
             "imagenet-align",
-            DatasetProfile(16000, 640, 0.214643, 2.047639, 54.426652, metric=Metric.FP32_InnerProduct),
-            Metric.Int8_InnerProduct,
-            -3.79,
+            DatasetProfile(16000, 640, 0.214643, 2.047639, 54.426652, hadamard_kurt=0.0378, metric=Metric.FP32_InnerProduct),
+            Metric.Uint7_L2,
+            1.29,
         ),
         (
             "gooaq-distilroberta",
-            DatasetProfile(16000, 768, 0.287027, 1.592527, 55.598128, metric=Metric.FP32_InnerProduct),
+            DatasetProfile(16000, 768, 0.287027, 1.592527, 55.598128, hadamard_kurt=-0.0272, metric=Metric.FP32_InnerProduct),
             Metric.Uint7_L2,
-            1.33,
+            3.11,
         ),
         (
             "yahoo-minilm",
-            DatasetProfile(16000, 384, 0.390076, 1.578273, 67.708323, metric=Metric.FP32_InnerProduct),
+            DatasetProfile(16000, 384, 0.390076, 1.578273, 67.708323, hadamard_kurt=-0.0395, metric=Metric.FP32_InnerProduct),
             Metric.Uint7_L2,
-            1.02,
+            6.51,
         ),
         (
             "agnews-mxbai",
-            DatasetProfile(16000, 1024, 0.121258, 1.614592, 67.004191, metric=Metric.FP32_L2),
+            DatasetProfile(16000, 1024, 0.121258, 1.614592, 67.004191, hadamard_kurt=-0.0025, metric=Metric.FP32_L2),
             Metric.Uint7_L2,
             0.0,
         ),
         (
             "ccnews-nomic",
-            DatasetProfile(16000, 768, 0.149226, 1.730994, 75.723209, metric=Metric.FP32_InnerProduct),
+            DatasetProfile(16000, 768, 0.149226, 1.730994, 75.723209, hadamard_kurt=-0.0178, metric=Metric.FP32_InnerProduct),
             Metric.Uint7_L2,
-            0.38,
+            1.13,
         ),
         (
             "landmark-dino",
-            DatasetProfile(16000, 768, 0.120246, 1.728638, 86.464614, metric=Metric.FP32_InnerProduct),
+            DatasetProfile(16000, 768, 0.120246, 1.728638, 86.464614, hadamard_kurt=-0.0266, metric=Metric.FP32_InnerProduct),
             Metric.Uint7_L2,
-            0.79,
+            0.83,
         ),
         (
             "arxiv-nomic",
-            DatasetProfile(16000, 768, 0.081903, 1.670677, 71.741581, metric=Metric.FP32_InnerProduct),
-            Metric.Uint7_L2,
-            2.33,
+            DatasetProfile(16000, 768, 0.081903, 1.670677, 71.741581, hadamard_kurt=-0.0239, metric=Metric.FP32_InnerProduct),
+            Metric.Int8_InnerProduct,
+            -0.01,
         ),
         (
             "inaturalist-resnet",
-            DatasetProfile(16000, 2048, 0.033901, 2.115867, 65.657329, metric=Metric.FP32_InnerProduct),
+            DatasetProfile(16000, 2048, 0.033901, 2.115867, 65.657329, hadamard_kurt=-0.1809, metric=Metric.FP32_InnerProduct),
             Metric.Uint7_L2,
-            12.14,
+            5.65,
         ),
         (
             "celeba-resnet",
-            DatasetProfile(16000, 2048, 0.010431, 2.179041, 81.038963, metric=Metric.FP32_InnerProduct),
+            DatasetProfile(16000, 2048, 0.010431, 2.179041, 81.038963, hadamard_kurt=0.0753, metric=Metric.FP32_InnerProduct),
             Metric.Uint7_L2,
-            63.02,
+            18.57,
         ),
     ]
 
@@ -261,8 +261,8 @@ def test_predict_quantization_vibe_reference_profiles():
         assert pred.metric.name in str(pred)
         advs.append(pred.uint7_advantage_pct)
 
-    # celeba > inaturalist > arxiv > gooaq > yahoo > landmark > ccnews > 0 > laion > yandex > imagenet
-    assert advs[10] > advs[9] > advs[8] > advs[3] > advs[4] > advs[7] > advs[6] > 0.0 > advs[0] > advs[1] > advs[2]
+    # celeba > yandex > yahoo > inaturalist > gooaq > imagenet > ccnews > landmark > 0 > arxiv > laion
+    assert advs[10] > advs[1] > advs[4] > advs[9] > advs[3] > advs[2] > advs[6] > advs[7] > 0.0 > advs[8] > advs[0]
 
     # L2 rule overrides high-CV geometry unconditionally
     l2_override = predict_quantization(

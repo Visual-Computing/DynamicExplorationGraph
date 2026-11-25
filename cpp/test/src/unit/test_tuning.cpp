@@ -333,31 +333,31 @@ TEST(TuningTest, VibeReferenceCalibration) {
          deglib::builder::OptimizationTarget::LowLID,
          6.70f,
          deglib::distances::Metric::Int8_InnerProduct,
-         -2.22f},
+         -0.20f},
         {"yandex",
          {16000, 200, 0.551745f, 1.963387f, 49.41f, -1.655f, 1.013f, -0.0233f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::LowLID,
          9.00f,
-         deglib::distances::Metric::Int8_InnerProduct,
-         -3.55f},
+         deglib::distances::Metric::Uint7_L2,
+         9.49f},
         {"imagenet-align",
          {16000, 640, 0.214643f, 2.047639f, 54.86f, -0.128f, 1.018f, 0.0378f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::LowLID,
          4.92f,
-         deglib::distances::Metric::Int8_InnerProduct,
-         -3.79f},
+         deglib::distances::Metric::Uint7_L2,
+         1.29f},
         {"gooaq-distilroberta",
          {16000, 768, 0.287027f, 1.592527f, 56.24f, -0.845f, 1.000f, -0.0272f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::LowLID,
          2.02f,
          deglib::distances::Metric::Uint7_L2,
-         1.33f},
+         3.11f},
         {"yahoo-minilm",
          {16000, 384, 0.390076f, 1.578273f, 67.51f, -0.758f, 1.000f, -0.0395f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::StreamingData,
          -3.97f,
          deglib::distances::Metric::Uint7_L2,
-         1.02f},
+         6.51f},
         {"agnews-mxbai",
          {16000, 1024, 0.121258f, 1.614592f, 65.92f, -0.184f, 1.002f, -0.0025f, deglib::distances::Metric::FP32_L2},
          deglib::builder::OptimizationTarget::StreamingData,
@@ -369,31 +369,31 @@ TEST(TuningTest, VibeReferenceCalibration) {
          deglib::builder::OptimizationTarget::StreamingData,
          -3.05f,
          deglib::distances::Metric::Uint7_L2,
-         0.38f},
+         1.13f},
         {"landmark-dino",
          {16000, 768, 0.120246f, 1.728638f, 88.61f, -0.451f, 1.001f, -0.0266f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::StreamingData,
          -8.92f,
          deglib::distances::Metric::Uint7_L2,
-         0.79f},
+         0.83f},
         {"arxiv-nomic",
          {16000, 768, 0.081903f, 1.670677f, 72.52f, -0.057f, 1.164f, -0.0239f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::StreamingData,
          -7.53f,
-         deglib::distances::Metric::Uint7_L2,
-         2.33f},
+         deglib::distances::Metric::Int8_InnerProduct,
+         -0.01f},
         {"inaturalist-resnet",
          {16000, 2048, 0.033901f, 2.115867f, 64.16f, 0.063f, 10.651f, -0.1809f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::StreamingData,
          -11.07f,
          deglib::distances::Metric::Uint7_L2,
-         12.14f},
+         5.65f},
         {"celeba-resnet",
          {16000, 2048, 0.010431f, 2.179041f, 82.63f, 0.594f, 22.169f, 0.0753f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::StreamingData,
          -9.89f,
          deglib::distances::Metric::Uint7_L2,
-         63.02f},
+         18.57f},
     };
 
     std::vector<float> preds;
@@ -418,16 +418,17 @@ TEST(TuningTest, VibeReferenceCalibration) {
     EXPECT_GT(preds[5], preds[10]);  // agnews-mxbai > celeba-resnet
 
     // Quantization advantage ordering across InnerProduct datasets:
-    // celeba > inaturalist > arxiv > gooaq > yahoo > landmark > ccnews > 0 > laion > yandex > imagenet
-    EXPECT_GT(qpreds[10], qpreds[9]);
-    EXPECT_GT(qpreds[9], qpreds[8]);
-    EXPECT_GT(qpreds[8], qpreds[3]);
-    EXPECT_GT(qpreds[3], qpreds[4]);
-    EXPECT_GT(qpreds[4], qpreds[7]);
-    EXPECT_GT(qpreds[7], qpreds[6]);
-    EXPECT_GT(qpreds[6], 0.0f);
-    EXPECT_GT(0.0f, qpreds[0]);
-    EXPECT_GT(qpreds[0], qpreds[1]);
+    // celeba > yandex > yahoo > inaturalist > gooaq > imagenet > ccnews > landmark > 0 > arxiv > laion
+    EXPECT_GT(qpreds[10], qpreds[1]);
+    EXPECT_GT(qpreds[1], qpreds[4]);
+    EXPECT_GT(qpreds[4], qpreds[9]);
+    EXPECT_GT(qpreds[9], qpreds[3]);
+    EXPECT_GT(qpreds[3], qpreds[2]);
+    EXPECT_GT(qpreds[2], qpreds[6]);
+    EXPECT_GT(qpreds[6], qpreds[7]);
+    EXPECT_GT(qpreds[7], 0.0f);
+    EXPECT_GT(0.0f, qpreds[8]);
+    EXPECT_GT(qpreds[8], qpreds[0]);
     EXPECT_GT(qpreds[1], qpreds[2]);
 }
 
@@ -530,17 +531,18 @@ TEST(TuningTest, QuantizationEdgeCasesAndCustomCalibration) {
     const float nan_val = std::numeric_limits<float>::quiet_NaN();
     const float inf_val = std::numeric_limits<float>::infinity();
     const deglib::tuning::DatasetProfile nan_pr{16000, 512, nan_val, 1.9f, 68.0f, 0.0f, 1.0f, 0.0f, deglib::distances::Metric::FP32_InnerProduct};
-    const deglib::tuning::DatasetProfile inf_rc{16000, 512, 0.2f, inf_val, 68.0f, 0.0f, 1.0f, 0.0f, deglib::distances::Metric::FP32_InnerProduct};
+    const deglib::tuning::DatasetProfile inf_hkurt{16000, 512, 0.2f, 1.9f, 68.0f, 0.0f, 1.0f, inf_val, deglib::distances::Metric::FP32_InnerProduct};
     EXPECT_EQ(deglib::tuning::predict_quantization(nan_pr).metric, deglib::distances::Metric::Uint7_L2);
     EXPECT_FLOAT_EQ(deglib::tuning::predict_quantization(nan_pr).uint7_advantage_pct, 0.0f);
-    EXPECT_EQ(deglib::tuning::predict_quantization(inf_rc).metric, deglib::distances::Metric::Uint7_L2);
-    EXPECT_FLOAT_EQ(deglib::tuning::predict_quantization(inf_rc).uint7_advantage_pct, 0.0f);
+    EXPECT_EQ(deglib::tuning::predict_quantization(inf_hkurt).metric, deglib::distances::Metric::Uint7_L2);
+    EXPECT_FLOAT_EQ(deglib::tuning::predict_quantization(inf_hkurt).uint7_advantage_pct, 0.0f);
 
     // Custom calibration override
     deglib::tuning::QuantizationModelCalibration custom_cal{};
     custom_cal.w_intercept = -0.5;
     custom_cal.w_dim_over_participation = 0.0;
-    custom_cal.w_rel_contrast = 0.0;
+    custom_cal.w_hadamard_kurt = 0.0;
+    custom_cal.w_log_dim_over_part = 0.0;
     const deglib::tuning::DatasetProfile valid_ip{16000, 768, 0.1f, 1.7f, 70.0f, 0.0f, 1.0f, 0.0f, deglib::distances::Metric::FP32_InnerProduct};
     const auto q_custom = deglib::tuning::predict_quantization(valid_ip, custom_cal);
     EXPECT_EQ(q_custom.metric, deglib::distances::Metric::Int8_InnerProduct);
