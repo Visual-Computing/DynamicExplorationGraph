@@ -17,8 +17,9 @@ class DatasetProfile:
     participation_ratio: float = 0.0
     rel_contrast_1: float = 0.0
     pp_iqr: float = 0.0
-    q_mode_u7: float = 0.0
-    q_mode_u4: float = 0.0
+    d16_skew: float = 0.0
+    ball_cnt_p90_p10_r15: float = 0.0
+    hadamard_kurt: float = 0.0
     metric: Metric = Metric.FP32_L2
 
     def __post_init__(self) -> None:
@@ -58,8 +59,9 @@ def _from_cpp_profile(raw: cpp_tuning.DatasetProfile) -> DatasetProfile:
         participation_ratio=float(raw.participation_ratio),
         rel_contrast_1=float(raw.rel_contrast_1),
         pp_iqr=float(raw.pp_iqr),
-        q_mode_u7=float(raw.q_mode_u7),
-        q_mode_u4=float(raw.q_mode_u4),
+        d16_skew=float(raw.d16_skew),
+        ball_cnt_p90_p10_r15=float(raw.ball_cnt_p90_p10_r15),
+        hadamard_kurt=float(raw.hadamard_kurt),
         metric=Metric(int(raw.metric)),
     )
 
@@ -73,8 +75,9 @@ def _to_cpp_profile(profile: DatasetProfile | cpp_tuning.DatasetProfile) -> cpp_
         participation_ratio=float(profile.participation_ratio),
         rel_contrast_1=float(profile.rel_contrast_1),
         pp_iqr=float(profile.pp_iqr),
-        q_mode_u7=float(profile.q_mode_u7),
-        q_mode_u4=float(profile.q_mode_u4),
+        d16_skew=float(profile.d16_skew),
+        ball_cnt_p90_p10_r15=float(profile.ball_cnt_p90_p10_r15),
+        hadamard_kurt=float(profile.hadamard_kurt),
         metric=Metric.resolve(profile.metric)._to_cpp_metric(),
     )
 
@@ -146,7 +149,7 @@ def measure_dataset_profile(
 
     Returns:
         :class:`DatasetProfile` containing ``participation_ratio``, ``rel_contrast_1``,
-        ``pp_iqr`` (Two-NN local ID IQR), ``q_mode_u7``, ``q_mode_u4``, and the resolved ``metric``.
+        ``pp_iqr`` (Two-NN local ID IQR), ``d16_skew``, ``ball_cnt_p90_p10_r15``, ``hadamard_kurt``, and the resolved ``metric``.
     """
     _validate_counts(sample_count, query_count, seed, threads)
     arr = _prepare_vectors(data)

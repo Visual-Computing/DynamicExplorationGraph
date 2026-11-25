@@ -29,8 +29,9 @@ def test_tuning_f32_and_profile_reuse():
     assert 0.0 < profile.participation_ratio <= 1.0
     assert profile.rel_contrast_1 > 0.0
     assert profile.pp_iqr > 0.0
-    assert 0.0 < profile.q_mode_u7 <= 1.0
-    assert 0.0 < profile.q_mode_u4 <= 1.0
+    assert np.isfinite(profile.d16_skew)
+    assert profile.ball_cnt_p90_p10_r15 >= 1.0
+    assert np.isfinite(profile.hadamard_kurt)
 
     pred_from_profile = predict_optimization_target(profile)
     pred_direct = predict_optimization_target(
@@ -75,8 +76,9 @@ def test_tuning_fp16_matches_fp32():
     assert p16.profile.participation_ratio == pytest.approx(p32.profile.participation_ratio, abs=0.01)
     assert p16.profile.rel_contrast_1 == pytest.approx(p32.profile.rel_contrast_1, abs=0.01)
     assert p16.profile.pp_iqr == pytest.approx(p32.profile.pp_iqr, abs=0.25)
-    assert p16.profile.q_mode_u7 == pytest.approx(p32.profile.q_mode_u7, abs=0.005)
-    assert p16.profile.q_mode_u4 == pytest.approx(p32.profile.q_mode_u4, abs=0.01)
+    assert p16.profile.d16_skew == pytest.approx(p32.profile.d16_skew, abs=0.05)
+    assert p16.profile.ball_cnt_p90_p10_r15 == pytest.approx(p32.profile.ball_cnt_p90_p10_r15, abs=0.1)
+    assert p16.profile.hadamard_kurt == pytest.approx(p32.profile.hadamard_kurt, abs=0.02)
     assert p16.lowlid_advantage_pct == pytest.approx(p32.lowlid_advantage_pct, abs=0.5)
 
 
@@ -92,8 +94,9 @@ def test_tuning_string_metrics_and_inner_product_invariance():
     assert p_str.participation_ratio == pytest.approx(p_enum.participation_ratio, abs=1e-5)
     assert p_str.rel_contrast_1 == pytest.approx(p_enum.rel_contrast_1, abs=1e-5)
     assert p_str.pp_iqr == pytest.approx(p_enum.pp_iqr, abs=1e-2)
-    assert p_str.q_mode_u7 == pytest.approx(p_enum.q_mode_u7, abs=1e-5)
-    assert p_str.q_mode_u4 == pytest.approx(p_enum.q_mode_u4, abs=1e-5)
+    assert p_str.d16_skew == pytest.approx(p_enum.d16_skew, abs=1e-4)
+    assert p_str.ball_cnt_p90_p10_r15 == pytest.approx(p_enum.ball_cnt_p90_p10_r15, abs=1e-4)
+    assert p_str.hadamard_kurt == pytest.approx(p_enum.hadamard_kurt, abs=1e-4)
     assert p_enum.metric == Metric.FP32_InnerProduct
     assert p_str.metric == Metric.FP32_InnerProduct
     assert p_l2_str.metric == Metric.FP32_L2
@@ -123,8 +126,9 @@ def test_tuning_determinism_threads_and_non_contiguous():
     assert p1.profile.participation_ratio == pytest.approx(p4.profile.participation_ratio, abs=1e-5)
     assert p1.profile.rel_contrast_1 == pytest.approx(p4.profile.rel_contrast_1, abs=1e-5)
     assert p1.profile.pp_iqr == pytest.approx(p4.profile.pp_iqr, abs=1e-2)
-    assert p1.profile.q_mode_u7 == pytest.approx(p4.profile.q_mode_u7, abs=1e-5)
-    assert p1.profile.q_mode_u4 == pytest.approx(p4.profile.q_mode_u4, abs=1e-5)
+    assert p1.profile.d16_skew == pytest.approx(p4.profile.d16_skew, abs=1e-4)
+    assert p1.profile.ball_cnt_p90_p10_r15 == pytest.approx(p4.profile.ball_cnt_p90_p10_r15, abs=1e-4)
+    assert p1.profile.hadamard_kurt == pytest.approx(p4.profile.hadamard_kurt, abs=1e-4)
 
     p_slice = predict_optimization_target(
         non_contig, metric=Metric.FP32_L2, sample_count=0, query_count=0, seed=7, threads=2
@@ -141,8 +145,9 @@ def test_tuning_duplicates_and_edge_cases():
     p_clean = measure_dataset_profile(clean, metric=Metric.FP32_L2, sample_count=0, query_count=0, threads=2)
     p_dups = measure_dataset_profile(with_dups, metric=Metric.FP32_L2, sample_count=0, query_count=0, threads=2)
     assert p_dups.pp_iqr == pytest.approx(p_clean.pp_iqr, abs=10.0)
-    assert p_dups.q_mode_u7 == pytest.approx(p_clean.q_mode_u7, abs=0.02)
-    assert p_dups.q_mode_u4 == pytest.approx(p_clean.q_mode_u4, abs=0.02)
+    assert p_dups.d16_skew == pytest.approx(p_clean.d16_skew, abs=0.5)
+    assert p_dups.ball_cnt_p90_p10_r15 == pytest.approx(p_clean.ball_cnt_p90_p10_r15, abs=1.0)
+    assert p_dups.hadamard_kurt == pytest.approx(p_clean.hadamard_kurt, abs=0.05)
     assert p_dups.rel_contrast_1 == pytest.approx(p_clean.rel_contrast_1, abs=0.05)
 
     empty = np.empty((0, 8), dtype=np.float32)
@@ -182,67 +187,67 @@ def test_predict_quantization_vibe_reference_profiles():
     refs = [
         (
             "laion-clip",
-            DatasetProfile(16000, 512, 0.174291, 1.907535, 68.472295, 0.028788, 0.223782, Metric.FP32_InnerProduct),
+            DatasetProfile(16000, 512, 0.174291, 1.907535, 68.472295, metric=Metric.FP32_InnerProduct),
             Metric.Int8_InnerProduct,
             -2.22,
         ),
         (
             "yandex",
-            DatasetProfile(16000, 200, 0.551745, 1.963387, 49.415739, 0.025665, 0.199440, Metric.FP32_InnerProduct),
+            DatasetProfile(16000, 200, 0.551745, 1.963387, 49.415739, metric=Metric.FP32_InnerProduct),
             Metric.Int8_InnerProduct,
             -3.55,
         ),
         (
             "imagenet-align",
-            DatasetProfile(16000, 640, 0.214643, 2.047639, 54.426652, 0.026883, 0.208970, Metric.FP32_InnerProduct),
+            DatasetProfile(16000, 640, 0.214643, 2.047639, 54.426652, metric=Metric.FP32_InnerProduct),
             Metric.Int8_InnerProduct,
             -3.79,
         ),
         (
             "gooaq-distilroberta",
-            DatasetProfile(16000, 768, 0.287027, 1.592527, 55.598128, 0.027625, 0.205864, Metric.FP32_InnerProduct),
+            DatasetProfile(16000, 768, 0.287027, 1.592527, 55.598128, metric=Metric.FP32_InnerProduct),
             Metric.Uint7_L2,
             1.33,
         ),
         (
             "yahoo-minilm",
-            DatasetProfile(16000, 384, 0.390076, 1.578273, 67.708323, 0.031112, 0.206428, Metric.FP32_InnerProduct),
+            DatasetProfile(16000, 384, 0.390076, 1.578273, 67.708323, metric=Metric.FP32_InnerProduct),
             Metric.Uint7_L2,
             1.02,
         ),
         (
             "agnews-mxbai",
-            DatasetProfile(16000, 1024, 0.121258, 1.614592, 67.004191, 0.026256, 0.204236, Metric.FP32_L2),
+            DatasetProfile(16000, 1024, 0.121258, 1.614592, 67.004191, metric=Metric.FP32_L2),
             Metric.Uint7_L2,
             0.0,
         ),
         (
             "ccnews-nomic",
-            DatasetProfile(16000, 768, 0.149226, 1.730994, 75.723209, 0.026181, 0.203433, Metric.FP32_InnerProduct),
+            DatasetProfile(16000, 768, 0.149226, 1.730994, 75.723209, metric=Metric.FP32_InnerProduct),
             Metric.Uint7_L2,
             0.38,
         ),
         (
             "landmark-dino",
-            DatasetProfile(16000, 768, 0.120246, 1.728638, 86.464614, 0.026126, 0.203020, Metric.FP32_InnerProduct),
+            DatasetProfile(16000, 768, 0.120246, 1.728638, 86.464614, metric=Metric.FP32_InnerProduct),
             Metric.Uint7_L2,
             0.79,
         ),
         (
             "arxiv-nomic",
-            DatasetProfile(16000, 768, 0.081903, 1.670677, 71.741581, 0.025987, 0.201974, Metric.FP32_InnerProduct),
+            DatasetProfile(16000, 768, 0.081903, 1.670677, 71.741581, metric=Metric.FP32_InnerProduct),
             Metric.Uint7_L2,
             2.33,
         ),
         (
             "inaturalist-resnet",
-            DatasetProfile(16000, 2048, 0.033901, 2.115867, 65.657329, 0.713799, 0.892152, Metric.FP32_InnerProduct),
+            DatasetProfile(16000, 2048, 0.033901, 2.115867, 65.657329, metric=Metric.FP32_InnerProduct),
             Metric.Uint7_L2,
             12.14,
         ),
         (
             "celeba-resnet",
-            DatasetProfile(16000, 2048, 0.010431, 2.179041, 81.038963, 0.666204, 0.839986, Metric.FP32_InnerProduct),
+            DatasetProfile(16000, 2048, 0.010431, 2.179041, 81.038963, metric=Metric.FP32_InnerProduct),
             Metric.Uint7_L2,
             63.02,
         ),
@@ -261,7 +266,7 @@ def test_predict_quantization_vibe_reference_profiles():
 
     # L2 rule overrides high-CV geometry unconditionally
     l2_override = predict_quantization(
-        DatasetProfile(16000, 640, 0.214643, 2.047639, 54.426652, 0.026883, 0.208970, "fp32_l2")
+        DatasetProfile(16000, 640, 0.214643, 2.047639, 54.426652, metric="fp32_l2")
     )
     assert l2_override.metric == Metric.Uint7_L2
     assert l2_override.uint7_advantage_pct == 0.0

@@ -157,15 +157,17 @@ TEST(TuningTest, ScaleInvarianceL2) {
     EXPECT_NEAR(p_tiny.profile.participation_ratio, p_base.profile.participation_ratio, 1e-4f);
     EXPECT_NEAR(p_tiny.profile.rel_contrast_1, p_base.profile.rel_contrast_1, 1e-4f);
     EXPECT_NEAR(p_tiny.profile.pp_iqr, p_base.profile.pp_iqr, 1e-2f);
-    EXPECT_NEAR(p_tiny.profile.q_mode_u7, p_base.profile.q_mode_u7, 1e-5f);
-    EXPECT_NEAR(p_tiny.profile.q_mode_u4, p_base.profile.q_mode_u4, 1e-5f);
+    EXPECT_NEAR(p_tiny.profile.d16_skew, p_base.profile.d16_skew, 1e-4f);
+    EXPECT_NEAR(p_tiny.profile.ball_cnt_p90_p10_r15, p_base.profile.ball_cnt_p90_p10_r15, 1e-4f);
+    EXPECT_NEAR(p_tiny.profile.hadamard_kurt, p_base.profile.hadamard_kurt, 1e-4f);
     EXPECT_NEAR(p_tiny.lowlid_advantage_pct, p_base.lowlid_advantage_pct, 1e-3f);
 
     EXPECT_NEAR(p_huge.profile.participation_ratio, p_base.profile.participation_ratio, 1e-4f);
     EXPECT_NEAR(p_huge.profile.rel_contrast_1, p_base.profile.rel_contrast_1, 1e-4f);
     EXPECT_NEAR(p_huge.profile.pp_iqr, p_base.profile.pp_iqr, 1e-2f);
-    EXPECT_NEAR(p_huge.profile.q_mode_u7, p_base.profile.q_mode_u7, 1e-5f);
-    EXPECT_NEAR(p_huge.profile.q_mode_u4, p_base.profile.q_mode_u4, 1e-5f);
+    EXPECT_NEAR(p_huge.profile.d16_skew, p_base.profile.d16_skew, 1e-4f);
+    EXPECT_NEAR(p_huge.profile.ball_cnt_p90_p10_r15, p_base.profile.ball_cnt_p90_p10_r15, 1e-4f);
+    EXPECT_NEAR(p_huge.profile.hadamard_kurt, p_base.profile.hadamard_kurt, 1e-4f);
     EXPECT_NEAR(p_huge.lowlid_advantage_pct, p_base.lowlid_advantage_pct, 1e-3f);
 }
 
@@ -189,8 +191,9 @@ TEST(TuningTest, InnerProductNormalization) {
     EXPECT_NEAR(ip_scaled.participation_ratio, ip_base.participation_ratio, 1e-5f);
     EXPECT_NEAR(ip_scaled.rel_contrast_1, ip_base.rel_contrast_1, 1e-5f);
     EXPECT_NEAR(ip_scaled.pp_iqr, ip_base.pp_iqr, 1e-2f);
-    EXPECT_NEAR(ip_scaled.q_mode_u7, ip_base.q_mode_u7, 1e-5f);
-    EXPECT_NEAR(ip_scaled.q_mode_u4, ip_base.q_mode_u4, 1e-5f);
+    EXPECT_NEAR(ip_scaled.d16_skew, ip_base.d16_skew, 1e-4f);
+    EXPECT_NEAR(ip_scaled.ball_cnt_p90_p10_r15, ip_base.ball_cnt_p90_p10_r15, 1e-4f);
+    EXPECT_NEAR(ip_scaled.hadamard_kurt, ip_base.hadamard_kurt, 1e-4f);
 
     const auto l2_base = deglib::tuning::measure_dataset_profile(base, dim, deglib::distances::Metric::FP32_L2, 0, 0, 7, 2);
     const auto l2_scaled = deglib::tuning::measure_dataset_profile(scaled, dim, deglib::distances::Metric::FP32_L2, 0, 0, 7, 2);
@@ -213,8 +216,9 @@ TEST(TuningTest, DuplicateResilience) {
     EXPECT_TRUE(std::isfinite(p_dups.pp_iqr));
     EXPECT_TRUE(std::isfinite(p_dups.rel_contrast_1));
     EXPECT_NEAR(p_dups.pp_iqr, p_clean.pp_iqr, 10.0f);
-    EXPECT_NEAR(p_dups.q_mode_u7, p_clean.q_mode_u7, 0.02f);
-    EXPECT_NEAR(p_dups.q_mode_u4, p_clean.q_mode_u4, 0.02f);
+    EXPECT_NEAR(p_dups.d16_skew, p_clean.d16_skew, 0.5f);
+    EXPECT_NEAR(p_dups.ball_cnt_p90_p10_r15, p_clean.ball_cnt_p90_p10_r15, 1.0f);
+    EXPECT_NEAR(p_dups.hadamard_kurt, p_clean.hadamard_kurt, 0.05f);
     EXPECT_NEAR(p_dups.rel_contrast_1, p_clean.rel_contrast_1, 0.05f);
 }
 
@@ -233,8 +237,9 @@ TEST(TuningTest, FP16MatchesFP32) {
     EXPECT_NEAR(p16.profile.participation_ratio, p32.profile.participation_ratio, 0.01f);
     EXPECT_NEAR(p16.profile.rel_contrast_1, p32.profile.rel_contrast_1, 0.01f);
     EXPECT_NEAR(p16.profile.pp_iqr, p32.profile.pp_iqr, 0.25f);
-    EXPECT_NEAR(p16.profile.q_mode_u7, p32.profile.q_mode_u7, 0.005f);
-    EXPECT_NEAR(p16.profile.q_mode_u4, p32.profile.q_mode_u4, 0.01f);
+    EXPECT_NEAR(p16.profile.d16_skew, p32.profile.d16_skew, 0.05f);
+    EXPECT_NEAR(p16.profile.ball_cnt_p90_p10_r15, p32.profile.ball_cnt_p90_p10_r15, 0.1f);
+    EXPECT_NEAR(p16.profile.hadamard_kurt, p32.profile.hadamard_kurt, 0.02f);
     EXPECT_NEAR(p16.lowlid_advantage_pct, p32.lowlid_advantage_pct, 0.5f);
 }
 
@@ -250,8 +255,9 @@ TEST(TuningTest, ThreadInvarianceAndDeterminism) {
     EXPECT_NEAR(r1.profile.participation_ratio, r4.profile.participation_ratio, 1e-5f);
     EXPECT_NEAR(r1.profile.rel_contrast_1, r4.profile.rel_contrast_1, 1e-5f);
     EXPECT_NEAR(r1.profile.pp_iqr, r4.profile.pp_iqr, 1e-2f);
-    EXPECT_NEAR(r1.profile.q_mode_u7, r4.profile.q_mode_u7, 1e-5f);
-    EXPECT_NEAR(r1.profile.q_mode_u4, r4.profile.q_mode_u4, 1e-5f);
+    EXPECT_NEAR(r1.profile.d16_skew, r4.profile.d16_skew, 1e-4f);
+    EXPECT_NEAR(r1.profile.ball_cnt_p90_p10_r15, r4.profile.ball_cnt_p90_p10_r15, 1e-4f);
+    EXPECT_NEAR(r1.profile.hadamard_kurt, r4.profile.hadamard_kurt, 1e-4f);
     EXPECT_NEAR(r1.lowlid_advantage_pct, r4.lowlid_advantage_pct, 1e-4f);
 }
 
@@ -285,8 +291,9 @@ TEST(TuningTest, EdgeCasesAndValidation) {
     EXPECT_TRUE(std::isfinite(p_ident.profile.participation_ratio));
     EXPECT_TRUE(std::isfinite(p_ident.profile.pp_iqr));
     EXPECT_TRUE(std::isfinite(p_ident.profile.rel_contrast_1));
-    EXPECT_TRUE(std::isfinite(p_ident.profile.q_mode_u7));
-    EXPECT_TRUE(std::isfinite(p_ident.profile.q_mode_u4));
+    EXPECT_TRUE(std::isfinite(p_ident.profile.d16_skew));
+    EXPECT_TRUE(std::isfinite(p_ident.profile.ball_cnt_p90_p10_r15));
+    EXPECT_TRUE(std::isfinite(p_ident.profile.hadamard_kurt));
 }
 
 TEST(TuningTest, TiledMatchesBruteForceNonAligned) {
@@ -304,8 +311,9 @@ TEST(TuningTest, TiledMatchesBruteForceNonAligned) {
     const auto sub_4 = deglib::tuning::measure_dataset_profile(data, dim, deglib::distances::Metric::FP32_L2, 0, 50, 7, 4);
     EXPECT_NEAR(sub_1.participation_ratio, sub_4.participation_ratio, 1e-5f);
     EXPECT_NEAR(sub_1.pp_iqr, sub_4.pp_iqr, 1e-2f);
-    EXPECT_NEAR(sub_1.q_mode_u7, sub_4.q_mode_u7, 1e-5f);
-    EXPECT_NEAR(sub_1.q_mode_u4, sub_4.q_mode_u4, 1e-5f);
+    EXPECT_NEAR(sub_1.d16_skew, sub_4.d16_skew, 1e-4f);
+    EXPECT_NEAR(sub_1.ball_cnt_p90_p10_r15, sub_4.ball_cnt_p90_p10_r15, 1e-4f);
+    EXPECT_NEAR(sub_1.hadamard_kurt, sub_4.hadamard_kurt, 1e-4f);
     EXPECT_NEAR(sub_1.rel_contrast_1, sub_4.rel_contrast_1, 1e-5f);
 }
 
@@ -321,69 +329,69 @@ TEST(TuningTest, VibeReferenceCalibration) {
 
     const VibeRef refs[] = {
         {"laion-clip",
-         {16000, 512, 0.174291f, 1.907535f, 68.472295f, 0.028788f, 0.223782f, deglib::distances::Metric::FP32_InnerProduct},
+         {16000, 512, 0.174291f, 1.907535f, 68.90f, -0.062f, 1.708f, 0.1052f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::LowLID,
-         5.60f,
+         6.70f,
          deglib::distances::Metric::Int8_InnerProduct,
          -2.22f},
         {"yandex",
-         {16000, 200, 0.551745f, 1.963387f, 49.415739f, 0.025665f, 0.199440f, deglib::distances::Metric::FP32_InnerProduct},
+         {16000, 200, 0.551745f, 1.963387f, 49.41f, -1.655f, 1.013f, -0.0233f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::LowLID,
-         1.61f,
+         9.00f,
          deglib::distances::Metric::Int8_InnerProduct,
          -3.55f},
         {"imagenet-align",
-         {16000, 640, 0.214643f, 2.047639f, 54.426652f, 0.026883f, 0.208970f, deglib::distances::Metric::FP32_InnerProduct},
+         {16000, 640, 0.214643f, 2.047639f, 54.86f, -0.128f, 1.018f, 0.0378f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::LowLID,
-         4.09f,
+         4.92f,
          deglib::distances::Metric::Int8_InnerProduct,
          -3.79f},
         {"gooaq-distilroberta",
-         {16000, 768, 0.287027f, 1.592527f, 55.598128f, 0.027625f, 0.205864f, deglib::distances::Metric::FP32_InnerProduct},
+         {16000, 768, 0.287027f, 1.592527f, 56.24f, -0.845f, 1.000f, -0.0272f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::LowLID,
-         1.61f,
+         2.02f,
          deglib::distances::Metric::Uint7_L2,
          1.33f},
         {"yahoo-minilm",
-         {16000, 384, 0.390076f, 1.578273f, 67.708323f, 0.031112f, 0.206428f, deglib::distances::Metric::FP32_InnerProduct},
+         {16000, 384, 0.390076f, 1.578273f, 67.51f, -0.758f, 1.000f, -0.0395f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::StreamingData,
-         -4.30f,
+         -3.97f,
          deglib::distances::Metric::Uint7_L2,
          1.02f},
         {"agnews-mxbai",
-         {16000, 1024, 0.121258f, 1.614592f, 67.004191f, 0.026256f, 0.204236f, deglib::distances::Metric::FP32_L2},
+         {16000, 1024, 0.121258f, 1.614592f, 65.92f, -0.184f, 1.002f, -0.0025f, deglib::distances::Metric::FP32_L2},
          deglib::builder::OptimizationTarget::StreamingData,
-         -2.67f,
+         -3.25f,
          deglib::distances::Metric::Uint7_L2,
          0.0f},
         {"ccnews-nomic",
-         {16000, 768, 0.149226f, 1.730994f, 75.723209f, 0.026181f, 0.203433f, deglib::distances::Metric::FP32_InnerProduct},
+         {16000, 768, 0.149226f, 1.730994f, 75.12f, -0.924f, 1.002f, -0.0178f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::StreamingData,
-         -6.09f,
+         -3.05f,
          deglib::distances::Metric::Uint7_L2,
          0.38f},
         {"landmark-dino",
-         {16000, 768, 0.120246f, 1.728638f, 86.464614f, 0.026126f, 0.203020f, deglib::distances::Metric::FP32_InnerProduct},
+         {16000, 768, 0.120246f, 1.728638f, 88.61f, -0.451f, 1.001f, -0.0266f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::StreamingData,
-         -9.89f,
+         -8.92f,
          deglib::distances::Metric::Uint7_L2,
          0.79f},
         {"arxiv-nomic",
-         {16000, 768, 0.081903f, 1.670677f, 71.741581f, 0.025987f, 0.201974f, deglib::distances::Metric::FP32_InnerProduct},
+         {16000, 768, 0.081903f, 1.670677f, 72.52f, -0.057f, 1.164f, -0.0239f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::StreamingData,
-         -5.32f,
+         -7.53f,
          deglib::distances::Metric::Uint7_L2,
          2.33f},
         {"inaturalist-resnet",
-         {16000, 2048, 0.033901f, 2.115867f, 65.657329f, 0.713799f, 0.892152f, deglib::distances::Metric::FP32_InnerProduct},
+         {16000, 2048, 0.033901f, 2.115867f, 64.16f, 0.063f, 10.651f, -0.1809f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::StreamingData,
-         -9.99f,
+         -11.07f,
          deglib::distances::Metric::Uint7_L2,
          12.14f},
         {"celeba-resnet",
-         {16000, 2048, 0.010431f, 2.179041f, 81.038963f, 0.666204f, 0.839986f, deglib::distances::Metric::FP32_InnerProduct},
+         {16000, 2048, 0.010431f, 2.179041f, 82.63f, 0.594f, 22.169f, 0.0753f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::StreamingData,
-         -16.42f,
+         -9.89f,
          deglib::distances::Metric::Uint7_L2,
          63.02f},
     };
@@ -402,11 +410,12 @@ TEST(TuningTest, VibeReferenceCalibration) {
         qpreds.push_back(qpred.uint7_advantage_pct);
     }
 
+    EXPECT_GT(preds[1], preds[0]);   // yandex > laion-clip
     EXPECT_GT(preds[0], preds[2]);   // laion-clip > imagenet-align
-    EXPECT_GT(preds[2], preds[1]);   // imagenet-align > yandex
+    EXPECT_GT(preds[2], preds[3]);   // imagenet-align > gooaq
     EXPECT_GT(preds[3], 0.0f);       // gooaq > 0
     EXPECT_GT(preds[5], preds[9]);   // agnews-mxbai > inaturalist-resnet
-    EXPECT_GT(preds[9], preds[10]);  // inaturalist-resnet > celeba-resnet
+    EXPECT_GT(preds[5], preds[10]);  // agnews-mxbai > celeba-resnet
 
     // Quantization advantage ordering across InnerProduct datasets:
     // celeba > inaturalist > arxiv > gooaq > yahoo > landmark > ccnews > 0 > laion > yandex > imagenet
@@ -424,14 +433,14 @@ TEST(TuningTest, VibeReferenceCalibration) {
 
 TEST(TuningTest, QuantizationL2RuleAndInnerProductInvariance) {
     // Even an imagenet-align-shaped geometry falls back to Uint7_L2 when metric is L2.
-    const deglib::tuning::DatasetProfile l2_fp32_profile{16000,      640,       0.214643f, 2.047639f,
-                                                         54.426652f, 0.026883f, 0.208970f, deglib::distances::Metric::FP32_L2};
+    const deglib::tuning::DatasetProfile l2_fp32_profile{16000,  640,    0.214643f, 2.047639f,
+                                                         54.86f, -0.128f, 1.018f,   0.0378f, deglib::distances::Metric::FP32_L2};
     const auto q_l2_fp32 = deglib::tuning::predict_quantization(l2_fp32_profile);
     EXPECT_EQ(q_l2_fp32.metric, deglib::distances::Metric::Uint7_L2);
     EXPECT_FLOAT_EQ(q_l2_fp32.uint7_advantage_pct, 0.0f);
 
-    const deglib::tuning::DatasetProfile l2_fp16_profile{16000,      640,       0.214643f, 2.047639f,
-                                                         54.426652f, 0.026883f, 0.208970f, deglib::distances::Metric::FP16_L2};
+    const deglib::tuning::DatasetProfile l2_fp16_profile{16000,  640,    0.214643f, 2.047639f,
+                                                         54.86f, -0.128f, 1.018f,   0.0378f, deglib::distances::Metric::FP16_L2};
     const auto q_l2_fp16 = deglib::tuning::predict_quantization(l2_fp16_profile);
     EXPECT_EQ(q_l2_fp16.metric, deglib::distances::Metric::Uint7_L2);
     EXPECT_FLOAT_EQ(q_l2_fp16.uint7_advantage_pct, 0.0f);
@@ -511,7 +520,7 @@ TEST(TuningTest, QuantizationEdgeCasesAndCustomCalibration) {
     EXPECT_FLOAT_EQ(q_ident.uint7_advantage_pct, 0.0f);
 
     // Extreme tiny participation_ratio -> clamped finite score, Uint7_L2
-    const deglib::tuning::DatasetProfile tiny_pr{16000, 2048, 1e-12f, 1.5f, 60.0f, 0.03f, 0.2f, deglib::distances::Metric::FP32_InnerProduct};
+    const deglib::tuning::DatasetProfile tiny_pr{16000, 2048, 1e-12f, 1.5f, 60.0f, 0.0f, 1.0f, 0.0f, deglib::distances::Metric::FP32_InnerProduct};
     const auto q_tiny = deglib::tuning::predict_quantization(tiny_pr);
     EXPECT_EQ(q_tiny.metric, deglib::distances::Metric::Uint7_L2);
     EXPECT_TRUE(std::isfinite(q_tiny.uint7_advantage_pct));
@@ -520,8 +529,8 @@ TEST(TuningTest, QuantizationEdgeCasesAndCustomCalibration) {
     // NaN / Inf fallback
     const float nan_val = std::numeric_limits<float>::quiet_NaN();
     const float inf_val = std::numeric_limits<float>::infinity();
-    const deglib::tuning::DatasetProfile nan_pr{16000, 512, nan_val, 1.9f, 68.0f, 0.03f, 0.2f, deglib::distances::Metric::FP32_InnerProduct};
-    const deglib::tuning::DatasetProfile inf_rc{16000, 512, 0.2f, inf_val, 68.0f, 0.03f, 0.2f, deglib::distances::Metric::FP32_InnerProduct};
+    const deglib::tuning::DatasetProfile nan_pr{16000, 512, nan_val, 1.9f, 68.0f, 0.0f, 1.0f, 0.0f, deglib::distances::Metric::FP32_InnerProduct};
+    const deglib::tuning::DatasetProfile inf_rc{16000, 512, 0.2f, inf_val, 68.0f, 0.0f, 1.0f, 0.0f, deglib::distances::Metric::FP32_InnerProduct};
     EXPECT_EQ(deglib::tuning::predict_quantization(nan_pr).metric, deglib::distances::Metric::Uint7_L2);
     EXPECT_FLOAT_EQ(deglib::tuning::predict_quantization(nan_pr).uint7_advantage_pct, 0.0f);
     EXPECT_EQ(deglib::tuning::predict_quantization(inf_rc).metric, deglib::distances::Metric::Uint7_L2);
@@ -532,7 +541,7 @@ TEST(TuningTest, QuantizationEdgeCasesAndCustomCalibration) {
     custom_cal.w_intercept = -0.5;
     custom_cal.w_dim_over_participation = 0.0;
     custom_cal.w_rel_contrast = 0.0;
-    const deglib::tuning::DatasetProfile valid_ip{16000, 768, 0.1f, 1.7f, 70.0f, 0.03f, 0.2f, deglib::distances::Metric::FP32_InnerProduct};
+    const deglib::tuning::DatasetProfile valid_ip{16000, 768, 0.1f, 1.7f, 70.0f, 0.0f, 1.0f, 0.0f, deglib::distances::Metric::FP32_InnerProduct};
     const auto q_custom = deglib::tuning::predict_quantization(valid_ip, custom_cal);
     EXPECT_EQ(q_custom.metric, deglib::distances::Metric::Int8_InnerProduct);
     EXPECT_LT(q_custom.uint7_advantage_pct, -25.0f);

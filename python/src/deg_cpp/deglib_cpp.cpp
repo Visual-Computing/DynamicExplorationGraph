@@ -2468,26 +2468,29 @@ NB_MODULE(deglib_cpp, m) {
         .def(
             "__init__",
             [](deglib::tuning::DatasetProfile* self, uint32_t sample_count, uint32_t dim, float participation_ratio, float rel_contrast_1, float pp_iqr,
-               float q_mode_u7, float q_mode_u4, deglib::distances::MetricType metric) {
-                new (self) deglib::tuning::DatasetProfile{sample_count, dim,       participation_ratio, rel_contrast_1,
-                                                          pp_iqr,       q_mode_u7, q_mode_u4,           deglib::distances::Metric(metric)};
+               float d16_skew, float ball_cnt_p90_p10_r15, float hadamard_kurt, deglib::distances::MetricType metric) {
+                new (self) deglib::tuning::DatasetProfile{sample_count,        dim,          participation_ratio, rel_contrast_1, pp_iqr,
+                                                          d16_skew, ball_cnt_p90_p10_r15, hadamard_kurt,      deglib::distances::Metric(metric)};
             },
             nb::arg("sample_count") = 0, nb::arg("dim") = 0, nb::arg("participation_ratio") = 0.0f, nb::arg("rel_contrast_1") = 0.0f, nb::arg("pp_iqr") = 0.0f,
-            nb::arg("q_mode_u7") = 0.0f, nb::arg("q_mode_u4") = 0.0f, nb::arg("metric") = deglib::distances::MetricType::FP32_L2
+            nb::arg("d16_skew") = 0.0f, nb::arg("ball_cnt_p90_p10_r15") = 0.0f, nb::arg("hadamard_kurt") = 0.0f,
+            nb::arg("metric") = deglib::distances::MetricType::FP32_L2
         )
         .def_ro("sample_count", &deglib::tuning::DatasetProfile::sample_count)
         .def_ro("dim", &deglib::tuning::DatasetProfile::dim)
         .def_ro("participation_ratio", &deglib::tuning::DatasetProfile::participation_ratio)
         .def_ro("rel_contrast_1", &deglib::tuning::DatasetProfile::rel_contrast_1)
         .def_ro("pp_iqr", &deglib::tuning::DatasetProfile::pp_iqr)
-        .def_ro("q_mode_u7", &deglib::tuning::DatasetProfile::q_mode_u7)
-        .def_ro("q_mode_u4", &deglib::tuning::DatasetProfile::q_mode_u4)
+        .def_ro("d16_skew", &deglib::tuning::DatasetProfile::d16_skew)
+        .def_ro("ball_cnt_p90_p10_r15", &deglib::tuning::DatasetProfile::ball_cnt_p90_p10_r15)
+        .def_ro("hadamard_kurt", &deglib::tuning::DatasetProfile::hadamard_kurt)
         .def_prop_ro("metric", [](const deglib::tuning::DatasetProfile& p) -> deglib::distances::MetricType { return p.metric.value; })
         .def("__repr__", [](const deglib::tuning::DatasetProfile& p) {
             return std::format(
-                "DatasetProfile(sample_count={}, dim={}, participation_ratio={:.6f}, rel_contrast_1={:.6f}, pp_iqr={:.6f}, q_mode_u7={:.6f}, "
-                "q_mode_u4={:.6f}, metric={})",
-                p.sample_count, p.dim, p.participation_ratio, p.rel_contrast_1, p.pp_iqr, p.q_mode_u7, p.q_mode_u4, p.metric.to_string()
+                "DatasetProfile(sample_count={}, dim={}, participation_ratio={:.6f}, rel_contrast_1={:.6f}, pp_iqr={:.6f}, d16_skew={:.6f}, "
+                "ball_cnt_p90_p10_r15={:.6f}, hadamard_kurt={:.6f}, metric={})",
+                p.sample_count, p.dim, p.participation_ratio, p.rel_contrast_1, p.pp_iqr, p.d16_skew, p.ball_cnt_p90_p10_r15, p.hadamard_kurt,
+                p.metric.to_string()
             );
         });
 
