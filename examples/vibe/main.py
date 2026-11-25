@@ -93,8 +93,77 @@ def get_physical_core_ids() -> list[int]:
         return list(range(0, total, 2)) if total > 1 else [0]
 
 
-def set_cpu_affinity(cpu_ids: list[int] | None = None) -> list[int] | None:
-    """Pins the current process to physical CPU cores by default (or explicit `cpu_ids` if provided)."""
+def get_performance_core_ids() -> list[int]:
+    """Returns physical core IDs with the highest efficiency/performance class (e.g. P-cores / Zen 5 cores)."""
+    physical_cores = get_physical_core_ids()
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class GROUP_AFFINITY(ctypes.Structure):
+                _fields_ = [
+                    ("Mask", ctypes.c_size_t),
+                    ("Group", wintypes.WORD),
+                    ("Reserved", wintypes.WORD * 3),
+                ]
+
+            class PROCESSOR_RELATIONSHIP(ctypes.Structure):
+                _fields_ = [
+                    ("Flags", ctypes.c_byte),
+                    ("EfficiencyClass", ctypes.c_byte),
+                    ("Reserved", ctypes.c_byte * 20),
+                    ("GroupCount", wintypes.WORD),
+                    ("GroupMask", GROUP_AFFINITY * 1),
+                ]
+
+            kernel32 = ctypes.windll.kernel32
+            buf_len = wintypes.DWORD(0)
+            kernel32.GetLogicalProcessorInformationEx(0, None, ctypes.byref(buf_len))
+            if buf_len.value > 0:
+                buf = (ctypes.c_byte * buf_len.value)()
+                if kernel32.GetLogicalProcessorInformationEx(0, buf, ctypes.byref(buf_len)):
+                    cores: list[tuple[int, int]] = []
+                    off = 0
+                    while off < buf_len.value:
+                        rel = ctypes.c_int.from_buffer(buf, off).value
+                        size = ctypes.c_uint32.from_buffer(buf, off + 4).value
+                        if rel == 0:
+                            pr = PROCESSOR_RELATIONSHIP.from_buffer(buf, off + 8)
+                            mask = pr.GroupMask[0].Mask
+                            if mask:
+                                first_cpu = (mask & -mask).bit_length() - 1
+                                cores.append((first_cpu, int(pr.EfficiencyClass)))
+                        off += size
+                    if cores:
+                        max_ec = max(ec for _, ec in cores)
+                        perf = sorted(cpu for cpu, ec in cores if ec == max_ec)
+                        if perf:
+                            return perf
+        except Exception:
+            pass
+    else:
+        try:
+            caps: list[tuple[int, int]] = []
+            for cpu_id in physical_cores:
+                cap_path = Path(f"/sys/devices/system/cpu/cpu{cpu_id}/cpu_capacity")
+                if cap_path.exists():
+                    caps.append((cpu_id, int(cap_path.read_text().strip())))
+            if len(caps) == len(physical_cores):
+                max_cap = max(cap for _, cap in caps)
+                perf = sorted(cpu for cpu, cap in caps if cap == max_cap)
+                if perf:
+                    return perf
+        except Exception:
+            pass
+    return physical_cores
+
+
+def set_cpu_affinity(
+    cpu_ids: list[int] | None = None,
+    label: str = "physical core(s) (no HT)",
+) -> list[int] | None:
+    """Pins the current process to `cpu_ids` (defaults to physical CPU cores)."""
     if cpu_ids is None:
         cpu_ids = get_physical_core_ids()
     try:
@@ -103,14 +172,14 @@ def set_cpu_affinity(cpu_ids: list[int] | None = None) -> list[int] | None:
         p = psutil.Process()
         p.cpu_affinity(cpu_ids)
         current = p.cpu_affinity()
-        print(f"Process CPU affinity pinned to physical core(s) (no HT): {current}")
+        print(f"Process CPU affinity pinned to {label}: {current}")
         return current
     except Exception as e:
         if hasattr(os, "sched_setaffinity"):
             try:
                 os.sched_setaffinity(0, cpu_ids)
                 current = list(os.sched_getaffinity(0))
-                print(f"Process CPU affinity pinned to physical core(s) (no HT): {current}")
+                print(f"Process CPU affinity pinned to {label}: {current}")
                 return current
             except Exception as e2:
                 print(f"Warning: Could not set CPU affinity via os.sched_setaffinity: {e2}", file=sys.stderr)
@@ -280,7 +349,9 @@ def main():
         print(f"Cache directory: {cache_dir}")
 
         # Pin CPU core affinity (defaults to all physical cores without Hyper-Threading)
-        set_cpu_affinity(args.cpu_affinity)
+        physical_cores = get_physical_core_ids()
+        perf_cores = get_performance_core_ids()
+        set_cpu_affinity(args.cpu_affinity if args.cpu_affinity is not None else physical_cores)
 
         # Load dataset
         base_vecs, query_vecs, gt_vecs, gt_distances, meta = load_vibe_dataset(dataset_key, cache_dir)
@@ -350,7 +421,13 @@ def main():
             print(
                 f"\n--- [{cfg_idx + 1}/{len(configs_to_run)}] Processing Algorithm '{alg_name}' ({constructor_name}) ---"
             )
+            if args.cpu_affinity is None and cfg_idx > 0 and perf_cores != physical_cores:
+                set_cpu_affinity(physical_cores, "physical core(s) (no HT)")
             adapter.fit(base_vecs, cache_dir=cache_dir)
+            if args.cpu_affinity is None and perf_cores != physical_cores:
+                set_cpu_affinity(perf_cores, "performance core(s) (max EfficiencyClass)")
+            # Allow CPU thermals and worker threads to settle after graph build/optimization before query timing.
+            time.sleep(3.0)
 
             # Determine query evaluation parameter grid
             quants_to_eval = (cfg_query_args.get("quants") or list(adapter.quant_metrics.keys())) if constructor_name == "QG" else [None]
@@ -384,6 +461,19 @@ def main():
                     f"QueryMetric={query_metric}, "
                     f"QueryType={query_dtype}{feature_instruction}"
                 )
+
+                # Warm up thread-local workspace, CPU boost, and caches before timing queries.
+                if param_groups and len(query_vecs) > 0:
+                    warmup_param = param_groups[0][1][0]
+                    warmup_factor = factors_to_eval[0] if factors_to_eval else 1.0
+                    if constructor_name == "QG":
+                        adapter.set_query_arguments(
+                            eps_or_ef=warmup_param, rerank_size_factor=warmup_factor, quants=quant_name
+                        )
+                    else:
+                        adapter.set_query_arguments(eps_or_ef=warmup_param)
+                    for q_idx in range(min(200, len(query_vecs))):
+                        adapter.query(query_vecs[q_idx], actual_k)
 
                 for r_factor in factors_to_eval:
                     rerank_label = f", Rerank={r_factor:.2f}x" if r_factor > 1.0 else ""
