@@ -79,7 +79,7 @@ When `compress` is provided, `deglib.searcher(graph, compress=...)` calls `degli
 |---|---|---|---|
 | `None` / `"32bit"` | `FP32_InnerProduct` | existing | Returns `graph` unchanged if already `FP32_InnerProduct` (raises `ValueError` if `graph` is `FP16_InnerProduct`) |
 | `"16bit"` | `FP16_InnerProduct` | `[ScalarQuantizerFP16]` | Native MIPS without reranker |
-| `"8bit"` / `"auto"` | `Int8_InnerProduct` | `[(FWHT), ScalarQuantizerInt8]` | `AVX512_VNNI`; for `≥ 80%` Recall@30 on MIPS pair with `FP16_IP` reranker (`rf ≈ 2.0`) + `optimize(n_clusters=256, use_routing=True)` |
+| `"8bit"` / `"auto"` | `Uint7_L2` or `Int8_InnerProduct` | `[(FWHT), ScalarQuantizer*]` | Uses `predict_quantization` (`Uint7_L2` vs. `Int8_InnerProduct`) on unit-sphere `cosine`/`normalized` graphs, and `Int8_InnerProduct` on unnormalized `InnerProduct` (`ip`) graphs |
 | `"4bit"` | `Int4_InnerProduct` | `[L2NormalizeTransform, (FWHT), ScalarQuantizerInt4]` *(if no `L2Norm` prefix exists yet)* | Calibrated via `normalize=True` on L2-normalized vectors; lossy on true MIPS with wide norm spread |
 | `"2bit"` / `"evp"` | `EVP_InnerProduct` | `[EvpQuantizer]` | High-compression 2-bit filtering + reranking |
 | Explicit `L2` `Metric` (`Metric.Uint7_L2`, `Metric.Int8_L2`, `Metric.Uint4_L2`, `Metric.Uint8_L2`) | Target `L2` metric | `[MipsTransform?, (FWHT), ScalarQuantizer*]` *(auto-prepends `MipsTransform` via `mips=True` only when stored graph vectors are not unit-norm and have no prefix)* | Enables `L2` quantizers directly on `InnerProduct` graphs without adding `d+1` overhead on unit-norm `cosine`/`normalized` graphs |

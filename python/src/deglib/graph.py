@@ -1090,7 +1090,10 @@ def compress(
           matching the graph's distance kind (returns ``graph`` if already ``FP32``).
         - ``"16bit"`` (also ``"fp16"``, ``"float16"``): ``FP16_L2`` or ``FP16_InnerProduct``
           matching the graph's distance kind.
-        - ``"8bit"`` / ``"auto"``: ``Uint7_L2`` (for L2) or ``Int8_InnerProduct`` (for InnerProduct).
+        - ``"8bit"`` / ``"auto"``: ``Uint7_L2`` (for L2), ``Int8_InnerProduct`` (for
+          unnormalized ``InnerProduct``), or ``deglib.tuning.predict_quantization``
+          (``Uint7_L2`` vs. ``Int8_InnerProduct``) for unit-sphere ``cosine``/``normalized``
+          graphs.
         - ``"4bit"``: ``Uint4_L2`` (for L2) or ``L2NormalizeTransform + Int4_InnerProduct`` (for InnerProduct).
         - ``"2bit"`` (also ``"evp"``): ``EVP_InnerProduct`` (always InnerProduct).
         - Explicit ``Metric`` or metric string (e.g. ``"Int8_L2"``, ``Metric.Uint8_L2``).
@@ -1123,7 +1126,12 @@ def compress(
         elif key in ("16bit", "fp16", "float16"):
             target_metric = Metric.FP16_InnerProduct if src_is_ip else Metric.FP16_L2
         elif key in ("8bit", "auto"):
-            target_metric = Metric.Int8_InnerProduct if src_is_ip else Metric.Uint7_L2
+            if src_is_ip:
+                target_metric = Metric(
+                    int(deglib_cpp.tuning.predict_quantization(graph.dynamic_exploration_graph_cpp, 16000, 7, threads).metric)
+                )
+            else:
+                target_metric = Metric.Uint7_L2
         elif key == "4bit":
             target_metric = Metric.Int4_InnerProduct if src_is_ip else Metric.Uint4_L2
             if src_is_ip:

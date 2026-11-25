@@ -531,6 +531,28 @@ class TestCompressRerankerSearcher:
             assert all(t.name != "MipsTransform" for t in c_mut.get_transformations())
             assert c_mut.get_dim() == 32
 
+    @pytest.mark.parametrize("dtype", [np.float32, np.float16])
+    def test_compress_8bit_dispatches_by_metric_and_unit_norm(self, dtype):
+        rng = np.random.default_rng(21)
+        raw = rng.normal(size=(64, 32)).astype(np.float32)
+
+        # 1. L2 -> always Uint7_L2
+        g_l2 = deglib.build(raw.astype(dtype), metric="l2", edges_per_vertex=12, extend_k=12, threads=1)
+        assert deglib.compress(g_l2, "8bit", threads=1).get_metric() == Metric.Uint7_L2
+
+        # 2. Unnormalized IP -> Int8_InnerProduct
+        raw_ip = (raw * np.linspace(1.0, 5.0, 64, dtype=np.float32)[:, None]).astype(dtype)
+        g_ip = deglib.build(raw_ip, metric="ip", edges_per_vertex=12, extend_k=12, threads=1)
+        assert deglib.compress(g_ip, "8bit", threads=1).get_metric() == Metric.Int8_InnerProduct
+
+        # 3. Cosine / normalized (unit sphere) -> matches predict_quantization
+        unit = (raw / np.linalg.norm(raw, axis=1, keepdims=True)).astype(dtype)
+        g_cos = deglib.build(unit, metric="normalized", edges_per_vertex=12, extend_k=12, threads=1)
+        expected_metric = deglib.tuning.predict_quantization(g_cos, threads=1).metric
+        assert expected_metric in (Metric.Uint7_L2, Metric.Int8_InnerProduct)
+        assert deglib.compress(g_cos, "8bit", threads=1).get_metric() == expected_metric
+        assert deglib.compress(g_cos, "auto", threads=1).get_metric() == expected_metric
+
     @pytest.mark.parametrize("base_metric", ["l2", "ip"])
     @pytest.mark.parametrize("dtype", [np.float32, np.float16])
     @pytest.mark.parametrize("rr_compress", [None, "32bit", "16bit", "8bit", "int8", "uint7", "uint8"])

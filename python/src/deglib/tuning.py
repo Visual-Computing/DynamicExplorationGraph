@@ -195,7 +195,7 @@ def predict_optimization_target(
 
 
 def predict_quantization(
-    data_or_profile: np.ndarray | DatasetProfile,
+    data_or_profile: np.ndarray | DatasetProfile | object,
     metric: Metric | str | int = Metric.FP32_L2,
     sample_count: int = 16000,
     query_count: int = 0,
@@ -206,17 +206,27 @@ def predict_quantization(
     Predict whether ``Metric.Uint7_L2`` outperforms ``Metric.Int8_InnerProduct``.
 
     Non-InnerProduct (L2) datasets unconditionally select ``Metric.Uint7_L2``.
-    Accepts either a 2D ``float32``/``float16`` feature matrix or a precomputed :class:`DatasetProfile`.
+    Accepts a 2D ``float32``/``float16`` feature matrix, a ``DynamicExplorationGraph``,
+    or a precomputed :class:`DatasetProfile`.
     """
-    raw = _predict_from_data_or_profile(
-        cpp_tuning.predict_quantization,
-        data_or_profile,
-        metric,
-        sample_count,
-        query_count,
-        seed,
-        threads,
-    )
+    if hasattr(data_or_profile, "dynamic_exploration_graph_cpp"):
+        _validate_counts(sample_count, query_count, seed, threads)
+        raw = cpp_tuning.predict_quantization(
+            data_or_profile.dynamic_exploration_graph_cpp,
+            int(sample_count),
+            int(seed),
+            int(threads),
+        )
+    else:
+        raw = _predict_from_data_or_profile(
+            cpp_tuning.predict_quantization,
+            data_or_profile,
+            metric,
+            sample_count,
+            query_count,
+            seed,
+            threads,
+        )
     return QuantizationPrediction(
         metric=Metric(int(raw.metric)),
         uint7_advantage_pct=float(raw.uint7_advantage_pct),

@@ -119,6 +119,78 @@ void bind_tuning(nb::module_& m) {
         nb::arg("query_count") = deglib::tuning::kDefaultQueryCount, nb::arg("seed") = deglib::tuning::kDefaultSeed, nb::arg("threads") = 0,
         "Measure a DatasetProfile and predict quantizer Metric (Uint7_L2 vs Int8_InnerProduct) from a 2D float32 or float16 array."
     );
+    tuning_module.def(
+        "predict_quantization",
+        [](const deglib::DynamicExplorationGraph& graph, size_t sample_count, uint32_t seed, size_t threads) {
+            const auto src_metric = graph.getFeatureSpace().metric();
+            if (src_metric.get_distance_kind() != deglib::distances::MetricDistanceKind::InnerProduct) {
+                deglib::tuning::DatasetProfile p{};
+                p.dim = static_cast<uint32_t>(graph.getFeatureSpace().dim());
+                p.metric = src_metric;
+                return deglib::tuning::QuantizationPrediction{deglib::distances::Metric::Uint7_L2, 0.0f, p};
+            }
+            const size_t n = graph.size();
+            const uint32_t dim = static_cast<uint32_t>(graph.getFeatureSpace().dim());
+            const auto dt = src_metric.get_data_type();
+            if (n < 2 || dim == 0 || (dt != deglib::distances::MetricDataType::FP32 && dt != deglib::distances::MetricDataType::FP16)) {
+                deglib::tuning::DatasetProfile p{};
+                p.dim = dim;
+                p.metric = src_metric;
+                return deglib::tuning::QuantizationPrediction{deglib::distances::Metric::Int8_InnerProduct, 0.0f, p};
+            }
+
+            bool has_l2n = false;
+            for (const auto& t : graph.getTransformations()) {
+                if (t && t->name() == "L2NormalizeTransform") {
+                    has_l2n = true;
+                    break;
+                }
+            }
+
+            nb::gil_scoped_release release;
+            const auto& internal = graph.internal();
+            const auto indices = deglib::tuning::detail::sample_distinct_indices(n, sample_count, seed);
+            const size_t actual_n = indices.size();
+            std::vector<float> sample_buf(actual_n * static_cast<size_t>(dim));
+            const bool is_fp16 = (dt == deglib::distances::MetricDataType::FP16);
+
+            const size_t norm_check_n = has_l2n ? 0 : std::min<size_t>(actual_n, 1024);
+            bool unit_ok = true;
+            for (size_t i = 0; i < actual_n; ++i) {
+                const std::byte* src = internal.getFeatureVector(static_cast<uint32_t>(indices[i]));
+                float* dst = sample_buf.data() + i * static_cast<size_t>(dim);
+                if (is_fp16) {
+                    deglib::distances::fp16::fp16_to_floats(reinterpret_cast<const uint16_t*>(src), dst, dim);
+                } else {
+                    std::memcpy(dst, src, static_cast<size_t>(dim) * sizeof(float));
+                }
+                if (i < norm_check_n && unit_ok) {
+                    float norm_sq = 0.0f;
+                    for (uint32_t d = 0; d < dim; ++d) {
+                        norm_sq += dst[d] * dst[d];
+                    }
+                    if (!std::isfinite(norm_sq) || std::abs(norm_sq - 1.0f) > 0.02f) {
+                        unit_ok = false;
+                    }
+                }
+            }
+
+            if (!(has_l2n || unit_ok)) {
+                deglib::tuning::DatasetProfile p{};
+                p.sample_count = static_cast<uint32_t>(actual_n);
+                p.dim = dim;
+                p.metric = src_metric;
+                return deglib::tuning::QuantizationPrediction{deglib::distances::Metric::Int8_InnerProduct, 0.0f, p};
+            }
+
+            return deglib::tuning::predict_quantization(
+                std::span<const float>(sample_buf), dim, src_metric, 0, 0, seed, threads
+            );
+        },
+        nb::arg("graph"), nb::arg("sample_count") = deglib::tuning::kDefaultSampleCount, nb::arg("seed") = deglib::tuning::kDefaultSeed,
+        nb::arg("threads") = 0,
+        "Predict quantizer Metric (Uint7_L2 vs Int8_InnerProduct) directly from a float32/float16 DynamicExplorationGraph."
+    );
 
 }
 }  // namespace deglib_py

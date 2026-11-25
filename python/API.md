@@ -143,7 +143,7 @@ Builds a graph from a 2D NumPy array:
 ### `deglib.presort`, `deglib.compress`, `deglib.reranker`, `deglib.reranker_with_data`, `deglib.searcher`
 
 - `deglib.presort(vectors, metric="l2", radius_decay=0.9, threads=0, callback=None, show_progress=False) -> np.ndarray`: Runs 1D FLAS pre-sorting (handles `"ip"` MIPS lifting automatically).
-- `deglib.compress(graph, target, threads=0) -> DynamicExplorationGraph`: Compresses a float graph (`"32bit"`, `"16bit"`, `"8bit"`, `"4bit"`, `"2bit"`, `"auto"`, or `Metric`), preserving the input graph's backend type.
+- `deglib.compress(graph, target, threads=0) -> DynamicExplorationGraph`: Compresses a float graph (`"32bit"`, `"16bit"`, `"8bit"`, `"4bit"`, `"2bit"`, `"auto"`, or `Metric`), preserving the input graph's backend type. For `"8bit"` / `"auto"`, selects `Uint7_L2` on L2 graphs, `deglib.tuning.predict_quantization` (`Uint7_L2` vs. `Int8_InnerProduct`) on unit-sphere `cosine`/`normalized` graphs, and `Int8_InnerProduct` on unnormalized `InnerProduct` graphs.
 - `deglib.reranker(graph, compress="16bit", optimize=True, threads=0) -> Reranker`: Extracts a `Reranker` from a float graph's stored vectors.
 - `deglib.reranker_with_data(graph, data, metric="16bit", optimize=True, threads=0) -> Reranker`: Builds a `Reranker` from external feature vectors aligned with `graph` labels.
 - `deglib.searcher(graph, compress=None, reranker=None, optimize=True, threads=0) -> Searcher`: Wraps `graph` (optionally compressing first) in an optimized `ReadOnlyGraph`-backed `Searcher`.
