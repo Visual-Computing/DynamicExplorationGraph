@@ -577,7 +577,7 @@ TEST(DynamicExplorationGraphFromGraph, ToReadOnlyCustomFeatures) {
     std::vector<uint16_t> fp16_data(size_t(vertex_count) * dim);
     deglib::distances::fp16::floats_to_fp16(feature_floats, fp16_data.data(), vertex_count * dim);
 
-    auto readonly_f16 = source_graph.to_readonly(space_f16, fp16_data.data());
+    auto readonly_f16 = source_graph.to_readonly().with_features(space_f16, fp16_data.data());
     EXPECT_FALSE(readonly_f16.isMutable());
     EXPECT_EQ(readonly_f16.size(), vertex_count);
     EXPECT_EQ(readonly_f16.getEdgesPerVertex(), edges_per_vertex);
@@ -679,8 +679,8 @@ TEST(DynamicExplorationGraphFromGraph, ToMutableWithCustomFeatures) {
         }
     }
 
-    // Convert to mutable with custom features
-    auto mutable_graph = source_graph.to_mutable(space, custom_feature_bytes.get());
+    // Replace features on mutable graph (preserves mutable backend)
+    auto mutable_graph = source_graph.with_features(space, custom_feature_bytes.get());
 
     EXPECT_TRUE(mutable_graph.isMutable());
     EXPECT_EQ(mutable_graph.size(), vertex_count);
@@ -932,7 +932,7 @@ TEST(DEGBatchFunctions, GetNeighborsBatchFlatAndContainer) {
     const uint8_t edges = deg.getEdgesPerVertex();
 
     // Container overload
-    auto all_neighbors = deg.getNeighbors_batch(std::span<const uint32_t>(labels), /*threads=*/2);
+    auto all_neighbors = deg.getNeighbors(std::span<const uint32_t>(labels), /*threads=*/2);
     ASSERT_EQ(all_neighbors.size(), labels.size() * edges);
 
     std::unordered_set<uint32_t> expected = {1005, 9999, 42, 707};
@@ -941,7 +941,7 @@ TEST(DEGBatchFunctions, GetNeighborsBatchFlatAndContainer) {
 
     // Flat buffer overload
     std::vector<uint32_t> flat_out(labels.size() * edges, 0);
-    deg.getNeighbors_batch(std::span<const uint32_t>(labels), std::span<uint32_t>(flat_out), /*threads=*/2);
+    deg.getNeighbors(std::span<const uint32_t>(labels), std::span<uint32_t>(flat_out), /*threads=*/2);
     std::unordered_set<uint32_t> actual_flat(flat_out.begin(), flat_out.begin() + edges);
     EXPECT_EQ(actual_flat, expected);
 }
@@ -1077,4 +1077,37 @@ TEST(SearchRadiusAndSignHandling, HasPathNegativeDistancesSignHandling) {
     // With k=1 and eps=0.0, exploration_radius=-5.0 rejects bridge 2 (-4.6 > -5.0).
     auto strict_path = graph.hasPath({0, 1}, /*to_vertex=*/3, /*eps=*/0.0f, /*k=*/1);
     EXPECT_TRUE(strict_path.empty());
+}
+
+TEST(DynamicExplorationGraphTransformTest, SameDataTypeMetricRetagPreservesFeaturesAndUpdatesSpace) {
+    auto sbg = deglib::graph::SizeBoundedGraph::create_empty(4, 2, deglib::distances::FloatSpace(2, deglib::distances::Metric::FP32_L2));
+    const float v0[2] = {1.0f, 0.0f};
+    const float v1[2] = {2.0f, 0.0f};
+    const float v2[2] = {0.0f, 1.0f};
+    const float v3[2] = {0.5f, 0.5f};
+    sbg.addVertex(0, reinterpret_cast<const std::byte*>(v0));
+    sbg.addVertex(1, reinterpret_cast<const std::byte*>(v1));
+    sbg.addVertex(2, reinterpret_cast<const std::byte*>(v2));
+    sbg.addVertex(3, reinterpret_cast<const std::byte*>(v3));
+    sbg.changeEdge(0, 0, 1, 1.0f);
+    sbg.changeEdge(0, 1, 2, 2.0f);
+    sbg.changeEdge(1, 0, 0, 1.0f);
+    sbg.changeEdge(1, 1, 3, 2.5f);
+    sbg.changeEdge(2, 0, 0, 2.0f);
+    sbg.changeEdge(2, 1, 3, 0.5f);
+    sbg.changeEdge(3, 0, 1, 2.5f);
+    sbg.changeEdge(3, 1, 2, 0.5f);
+
+    deglib::DynamicExplorationGraph base(std::make_unique<deglib::graph::SizeBoundedGraph>(std::move(sbg)));
+    const deglib::distances::FloatSpace ip_space(2, deglib::distances::Metric::FP32_InnerProduct);
+
+    auto ro_ip = base.to_readonly().with_metric(ip_space);
+    EXPECT_FALSE(ro_ip.isMutable());
+    EXPECT_EQ(ro_ip.getFeatureSpace().metric(), deglib::distances::Metric::FP32_InnerProduct);
+    EXPECT_EQ(std::memcmp(ro_ip.internal().getFeatureVector(1), v1, sizeof(v1)), 0);
+
+    auto mut_ip = base.with_metric(ip_space, /*num_threads=*/2);
+    EXPECT_TRUE(mut_ip.isMutable());
+    EXPECT_EQ(mut_ip.getFeatureSpace().metric(), deglib::distances::Metric::FP32_InnerProduct);
+    EXPECT_EQ(std::memcmp(mut_ip.internal().getFeatureVector(1), v1, sizeof(v1)), 0);
 }

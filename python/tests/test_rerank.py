@@ -274,5 +274,5 @@ class TestRerankerClass:
             assert r_graph.get_instruction() == isa
             np.testing.assert_array_equal(r_graph.rerank(queries, candidates, k_top=5), expected_top)
 
-            r_graph_fp16 = graph.to_reranker(Metric.FP16_L2.with_instruction(isa), data=base)
+            r_graph_fp16 = graph.to_reranker(Metric.FP16_L2.with_instruction(isa))
             assert r_graph_fp16.get_instruction() == isa

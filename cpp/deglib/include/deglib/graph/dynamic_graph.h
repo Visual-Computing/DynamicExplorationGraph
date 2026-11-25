@@ -1,5 +1,6 @@
 #pragma once
 
+#include "deglib/concurrent.h"
 #include "deglib/graph/mutable_graph.h"
 #include "deglib/graph/visited_list_pool.h"
 #include "deglib/search.h"
@@ -132,126 +133,189 @@ class DynamicGraph : public deglib::graph::MutableGraph {
      * @param transformations Optional sequence of feature transformations/quantizers to attach.
      * @param chunk_size Target number of vertices per memory chunk (rounded up to nearest power of 2, default = 1024).
      */
-    static DynamicGraph from_graph(
-        const deglib::graph::InternalGraph& input_graph,
-        std::optional<deglib::distances::FloatSpace> target_feature_space = std::nullopt,
-        const void* custom_features = nullptr,
-        std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
-        const uint32_t chunk_size = 1024
-    ) {
-        const auto feature_space =
-            deglib::transformation::resolve_graph_conversion_space(input_graph.getFeatureSpace(), target_feature_space, custom_features, transformations);
-        const uint32_t graph_size = input_graph.size();
-        const uint8_t edges_per_vertex = input_graph.getEdgesPerVertex();
-        DynamicGraph target(edges_per_vertex, feature_space, chunk_size);
-        target.label_to_index_.reserve(graph_size);
-
-        const auto custom_feature_bytes = reinterpret_cast<const std::byte*>(custom_features);
-        const auto dist_func = target.feature_space_.get_dist_func();
-        const auto dist_func_param = target.feature_space_.get_dist_func_param();
-        const auto feature_data_size = target.feature_space_.get_data_size();
-
-        const auto* src_mutable = dynamic_cast<const deglib::graph::MutableGraph*>(&input_graph);
-        const bool can_direct_copy_weights = (src_mutable != nullptr) && (custom_features == nullptr) && transformations.empty() &&
-                                             (target.feature_space_.metric() == input_graph.getFeatureSpace().metric()) &&
-                                             (target.feature_space_.dim() == input_graph.getFeatureSpace().dim());
-
-        const auto src_metric = input_graph.getFeatureSpace().metric();
-        const uint32_t in_dim = input_graph.getFeatureSpace().dim();
-        std::vector<float> f_buf;
-        if (!transformations.empty() && src_metric.get_data_type() == deglib::distances::MetricDataType::FP16) {
-            f_buf.resize(in_dim);
+  private:
+    static void copy_topology_and_labels(const deglib::graph::InternalGraph& input_graph, DynamicGraph& target) {
+        const uint32_t n = input_graph.size();
+        const uint8_t k = input_graph.getEdgesPerVertex();
+        target.label_to_index_.reserve(n);
+        while (target.capacity() < n) {
+            target.allocate_chunk();
         }
-
-        // Pass 1: Copy topology, copy/transform features, register labels
-        for (uint32_t i = 0; i < graph_size; i++) {
-            if (i >= target.capacity()) {
-                target.allocate_chunk();
-            }
-
-            const auto label = input_graph.getExternalLabel(i);
-            auto vertex_memory = target.vertex_by_index(i);
-
-            // Copy feature vector
-            if (custom_features == nullptr && !transformations.empty() && (src_metric != target.feature_space_.metric())) {
-                const auto* src_feat = input_graph.getFeatureVector(i);
-                if (src_metric.get_data_type() == deglib::distances::MetricDataType::FP32) {
-                    deglib::transformation::apply_on_database(
-                        transformations, std::span<const float>(reinterpret_cast<const float*>(src_feat), in_dim),
-                        std::span<std::byte>(vertex_memory, feature_data_size)
-                    );
-                } else if (src_metric.get_data_type() == deglib::distances::MetricDataType::FP16) {
-                    deglib::distances::fp16::fp16_to_floats(reinterpret_cast<const uint16_t*>(src_feat), f_buf.data(), in_dim);
-                    deglib::transformation::apply_on_database(
-                        transformations, std::span<const float>(f_buf), std::span<std::byte>(vertex_memory, feature_data_size)
-                    );
-                } else {
-                    throw std::invalid_argument("DynamicGraph::from_graph: cannot self-transform from non-float base features");
-                }
-            } else if (custom_features != nullptr) {
-                const auto feature = custom_feature_bytes + size_t(i) * feature_data_size;
-                std::memcpy(vertex_memory, feature, feature_data_size);
-            } else {
-                const auto feature = input_graph.getFeatureVector(i);
-                std::memcpy(vertex_memory, feature, feature_data_size);
-            }
-
-            // Copy neighbor indices
-            const auto input_neighbor_indices = input_graph.getNeighborIndices(i);
-            auto neighbor_indices = reinterpret_cast<uint32_t*>(vertex_memory + target.neighbor_indices_offset_);
-            std::memcpy(neighbor_indices, input_neighbor_indices, sizeof(uint32_t) * edges_per_vertex);
-
-            // Copy direct weights if possible
-            if (can_direct_copy_weights) {
-                auto neighbor_weights = reinterpret_cast<float*>(vertex_memory + target.neighbor_weights_offset_);
-                std::memcpy(neighbor_weights, src_mutable->getNeighborWeights(i), sizeof(float) * edges_per_vertex);
-            }
-
-            // Copy external label
-            std::memcpy(vertex_memory + target.external_label_offset_, &label, sizeof(uint32_t));
+        for (uint32_t i = 0; i < n; ++i) {
+            auto* v = target.vertex_by_index(i);
+            std::memcpy(v + target.neighbor_indices_offset_, input_graph.getNeighborIndices(i), sizeof(uint32_t) * k);
+            const uint32_t label = input_graph.getExternalLabel(i);
+            std::memcpy(v + target.external_label_offset_, &label, sizeof(uint32_t));
             target.label_to_index_.emplace(label, i);
         }
-
-        // Pass 2: If weights cannot be copied directly, compute them from the newly stored target features
-        if (!can_direct_copy_weights) {
-            for (uint32_t i = 0; i < graph_size; i++) {
-                auto vertex_memory = target.vertex_by_index(i);
-                auto neighbor_indices = reinterpret_cast<const uint32_t*>(vertex_memory + target.neighbor_indices_offset_);
-                auto neighbor_weights = reinterpret_cast<float*>(vertex_memory + target.neighbor_weights_offset_);
-                for (uint8_t e = 0; e < edges_per_vertex; e++) {
-                    const auto neighbor_internal_index = neighbor_indices[e];
-                    const auto neighbor_feature = target.getFeatureVector(neighbor_internal_index);
-                    neighbor_weights[e] = dist_func(vertex_memory, neighbor_feature, dist_func_param);
-                }
-            }
-        }
-
         target.setPrefetch(input_graph.getPo(), input_graph.getPl(), input_graph.getNl());
         target.setEntryVertexIndices(input_graph.getEntryVertexIndices());
+    }
+
+    void recompute_edge_weights(const size_t num_threads = 0) {
+        const uint32_t n = size();
+        if (n == 0) return;
+        const auto dist_func = feature_space_.get_dist_func();
+        const auto dist_func_param = feature_space_.get_dist_func_param();
+
+        auto compute_vertex = [&](uint32_t i) {
+            auto* v = vertex_by_index(i);
+            const auto* neighbors = reinterpret_cast<const uint32_t*>(v + neighbor_indices_offset_);
+            auto* weights = reinterpret_cast<float*>(v + neighbor_weights_offset_);
+            for (uint8_t e = 0; e < edges_per_vertex_; ++e) {
+                weights[e] = dist_func(v, getFeatureVector(neighbors[e]), dist_func_param);
+            }
+        };
+
+        if (num_threads == 1 || n == 1) {
+            for (uint32_t i = 0; i < n; ++i) {
+                compute_vertex(i);
+            }
+        } else {
+            deglib::concurrent::parallel_batch_for(
+                uint32_t{0}, n, num_threads,
+                [&](uint32_t begin, uint32_t end, size_t) {
+                    for (uint32_t i = begin; i < end; ++i) {
+                        compute_vertex(i);
+                    }
+                },
+                64
+            );
+        }
+    }
+
+  public:
+    /**
+     * @brief Copy topology, labels, and stored features 1:1 from an existing InternalGraph.
+     *
+     * Copies stored edge weights directly when `input_graph` is a MutableGraph; otherwise
+     * recomputes edge weights in parallel using `num_threads`.
+     *
+     * @param input_graph Source graph to copy from.
+     * @param chunk_size Target number of vertices per memory chunk (rounded up to the next power of two, default = 1024).
+     * @param num_threads Number of worker threads for edge-weight recomputation if `input_graph` is not mutable (`0` = hardware concurrency).
+     * @return Dynamically growing mutable DynamicGraph.
+     */
+    static DynamicGraph from_graph(
+        const deglib::graph::InternalGraph& input_graph,
+        const uint32_t chunk_size = 1024,
+        const size_t num_threads = 0
+    ) {
+        const uint32_t n = input_graph.size();
+        DynamicGraph target(input_graph.getEdgesPerVertex(), input_graph.getFeatureSpace(), chunk_size);
+        copy_topology_and_labels(input_graph, target);
+
+        const size_t feat_bytes = target.feature_space_.get_data_size();
+        for (uint32_t i = 0; i < n; ++i) {
+            std::memcpy(target.vertex_by_index(i), input_graph.getFeatureVector(i), feat_bytes);
+        }
+
+        if (const auto* src_mutable = dynamic_cast<const deglib::graph::MutableGraph*>(&input_graph)) {
+            const size_t w_bytes = sizeof(float) * target.edges_per_vertex_;
+            for (uint32_t i = 0; i < n; ++i) {
+                std::memcpy(target.vertex_by_index(i) + target.neighbor_weights_offset_, src_mutable->getNeighborWeights(i), w_bytes);
+            }
+        } else {
+            target.recompute_edge_weights(num_threads);
+        }
         return target;
     }
 
     /**
-     * Create a DynamicGraph by copying topology, labels, and features from an existing InternalGraph.
+     * @brief Feature-swap: copy topology and labels while replacing features with external `custom_features` and recomputing edge weights.
      *
-     * @param input_graph Source graph to copy from.
-     * @param chunk_size Target number of vertices per memory chunk (rounded up to nearest power of 2, default = 1024).
-     */
-    static DynamicGraph from_graph(const deglib::graph::InternalGraph& input_graph, const uint32_t chunk_size) {
-        return from_graph(input_graph, std::nullopt, nullptr, {}, chunk_size);
-    }
-
-    /**
-     * Create a DynamicGraph by copying topology and labels from an existing InternalGraph,
-     * overriding feature space and feature vectors, and recalculating edge weights.
+     * @param input_graph Source graph whose topology and external labels are preserved.
+     * @param target_space FloatSpace describing the dimensionality and metric of `custom_features`.
+     * @param custom_features Non-null raw byte buffer ordered by internal vertex index (`0 .. size()-1`, see `input_graph.getExternalLabels()`).
+     * @param chunk_size Target number of vertices per memory chunk (rounded up to the next power of two, default = 1024).
+     * @param num_threads Number of worker threads for parallel edge-weight recomputation (`0` = hardware concurrency).
+     * @return Dynamically growing mutable DynamicGraph storing `custom_features`.
      */
     static DynamicGraph from_graph(
         const deglib::graph::InternalGraph& input_graph,
-        const deglib::distances::FloatSpace feature_space,
-        const void* custom_features = nullptr,
-        const uint32_t chunk_size = 1024
+        deglib::distances::FloatSpace target_space,
+        const void* custom_features,
+        const uint32_t chunk_size = 1024,
+        const size_t num_threads = 0
     ) {
-        return from_graph(input_graph, feature_space, custom_features, {}, chunk_size);
+        if (custom_features == nullptr) {
+            throw std::invalid_argument("DynamicGraph::from_graph: custom_features must not be null");
+        }
+        const uint32_t n = input_graph.size();
+        DynamicGraph target(input_graph.getEdgesPerVertex(), std::move(target_space), chunk_size);
+        copy_topology_and_labels(input_graph, target);
+
+        const auto* src_bytes = static_cast<const std::byte*>(custom_features);
+        const size_t feat_bytes = target.feature_space_.get_data_size();
+        for (uint32_t i = 0; i < n; ++i) {
+            std::memcpy(target.vertex_by_index(i), src_bytes + size_t(i) * feat_bytes, feat_bytes);
+        }
+        target.recompute_edge_weights(num_threads);
+        return target;
+    }
+
+    /**
+     * @brief Self-transform: copy topology and labels while transforming `input_graph`'s stored FP32/FP16 features directly into target memory and recomputing edge weights.
+     *
+     * @param input_graph Source graph storing FP32 or FP16 features.
+     * @param target_feature_space Optional target FloatSpace. Derived automatically from `transformations` if `std::nullopt`.
+     * @param transformations Non-empty sequence of fitted transformations applied sequentially per vertex.
+     * @param chunk_size Target number of vertices per memory chunk (rounded up to the next power of two, default = 1024).
+     * @param num_threads Number of worker threads for parallel feature transformation and edge-weight recomputation (`0` = hardware concurrency).
+     * @return Dynamically growing mutable DynamicGraph holding the transformed features.
+     */
+    static DynamicGraph from_graph(
+        const deglib::graph::InternalGraph& input_graph,
+        std::optional<deglib::distances::FloatSpace> target_feature_space,
+        std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
+        const uint32_t chunk_size = 1024,
+        const size_t num_threads = 0
+    ) {
+        auto resolved_space =
+            deglib::transformation::resolve_transform_space(input_graph.getFeatureSpace(), target_feature_space, transformations);
+        const uint32_t n = input_graph.size();
+        DynamicGraph target(input_graph.getEdgesPerVertex(), std::move(resolved_space), chunk_size);
+        copy_topology_and_labels(input_graph, target);
+
+        if (n > 0) {
+            const size_t dst_bytes = target.feature_space_.get_data_size();
+            if (transformations.empty()) {
+                for (uint32_t i = 0; i < n; ++i) {
+                    std::memcpy(target.vertex_by_index(i), input_graph.getFeatureVector(i), dst_bytes);
+                }
+            } else {
+                const auto src_dt = input_graph.getFeatureSpace().metric().get_data_type();
+                const size_t src_bytes = input_graph.getFeatureSpace().get_data_size();
+
+                auto transform_vertex = [&](uint32_t i) {
+                    deglib::transformation::apply_on_database(
+                        transformations,
+                        std::span<const std::byte>(input_graph.getFeatureVector(i), src_bytes),
+                        src_dt,
+                        std::span<std::byte>(target.vertex_by_index(i), dst_bytes),
+                        /*num_threads=*/1
+                    );
+                };
+
+                if (num_threads == 1 || n == 1) {
+                    for (uint32_t i = 0; i < n; ++i) {
+                        transform_vertex(i);
+                    }
+                } else {
+                    deglib::concurrent::parallel_batch_for(
+                        uint32_t{0}, n, num_threads,
+                        [&](uint32_t begin, uint32_t end, size_t) {
+                            for (uint32_t i = begin; i < end; ++i) {
+                                transform_vertex(i);
+                            }
+                        },
+                        64
+                    );
+                }
+            }
+            target.recompute_edge_weights(num_threads);
+        }
+        return target;
     }
 
     /**
@@ -565,32 +629,52 @@ class DynamicGraph : public deglib::graph::MutableGraph {
 inline auto load_dynamic_graph(const char* path_graph, uint32_t chunk_size = 1024) { return DynamicGraph::loadGraph(path_graph, chunk_size); }
 
 /**
- * Convert the given graph to a DynamicGraph, copying topology, labels,
- * and recalculating all edge weights with the given feature space.
+ * @brief Convert the given graph to a mutable DynamicGraph (pure backend copy).
+ *
+ * Copies topology, labels, and stored features 1:1. Existing edge weights are copied
+ * directly when `input_graph` is a MutableGraph; when converting from a ReadOnlyGraph,
+ * edge weights are recomputed in parallel using `num_threads`.
  *
  * @param input_graph Source graph to convert from.
  * @param chunk_size Target number of vertices per memory chunk (rounded up to nearest power of 2, default = 1024).
+ * @param num_threads Number of worker threads for edge-weight recomputation if `input_graph` is not mutable (`0` = hardware concurrency).
+ * @return Dynamically growing mutable DynamicGraph.
  */
-inline auto convert_to_dynamic_graph(const deglib::graph::InternalGraph& input_graph, const uint32_t chunk_size = 1024) {
-    return deglib::graph::DynamicGraph::from_graph(input_graph, std::nullopt, nullptr, {}, chunk_size);
+inline auto convert_to_dynamic_graph(
+    const deglib::graph::InternalGraph& input_graph,
+    const uint32_t chunk_size = 1024,
+    const size_t num_threads = 0
+) {
+    return deglib::graph::DynamicGraph::from_graph(input_graph, chunk_size, num_threads);
 }
 
 /**
- * Convert the given graph to a DynamicGraph, overriding feature space and feature vectors.
+ * @brief Convert the given graph to a DynamicGraph, overriding feature space and feature vectors.
+ *
+ * Replaces stored features with `custom_features` and recomputes all edge weights in `feature_space`.
  *
  * @param input_graph Source graph to convert from.
  * @param feature_space Target feature space (dimension and metric).
- * @param custom_features Optional raw byte pointer to new feature vectors in the graph's internal index order (0 .. size()-1, see
- * input_graph.getExternalLabels()).
+ * @param custom_features Optional raw byte pointer to replacement feature vectors ordered by internal index (`0 .. size()-1`, see
+ * `input_graph.getExternalLabels()`). Must not be null when changing `feature_space`.
  * @param chunk_size Target number of vertices per memory chunk (rounded up to nearest power of 2, default = 1024).
+ * @param num_threads Number of worker threads for parallel edge-weight recomputation (`0` = hardware concurrency).
+ * @return Dynamically growing mutable DynamicGraph.
  */
 inline auto convert_to_dynamic_graph(
     const deglib::graph::InternalGraph& input_graph,
     const deglib::distances::FloatSpace feature_space,
     const void* custom_features = nullptr,
-    const uint32_t chunk_size = 1024
+    const uint32_t chunk_size = 1024,
+    const size_t num_threads = 0
 ) {
-    return deglib::graph::DynamicGraph::from_graph(input_graph, feature_space, custom_features, {}, chunk_size);
+    if (custom_features == nullptr) {
+        if (feature_space.dim() != input_graph.getFeatureSpace().dim() || feature_space.metric() != input_graph.getFeatureSpace().metric()) {
+            throw std::invalid_argument("convert_to_dynamic_graph: custom_features must not be null when changing feature_space");
+        }
+        return deglib::graph::DynamicGraph::from_graph(input_graph, chunk_size, num_threads);
+    }
+    return deglib::graph::DynamicGraph::from_graph(input_graph, feature_space, custom_features, chunk_size, num_threads);
 }
 
 }  // namespace deglib::graph

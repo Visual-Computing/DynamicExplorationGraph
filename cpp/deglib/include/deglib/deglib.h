@@ -110,21 +110,4 @@ inline DynamicExplorationGraph load_mutable_graph(const char* path_graph, const 
     return DynamicExplorationGraph::load_mutable(path_graph, new_max_size);
 }
 
-/**
- * Create a high-performance Searcher over a DynamicExplorationGraph facade.
- * Convenience overloads that forward to deglib::search::make_searcher using the graph's internal representation,
- * so end users can pass the public graph type directly.
- */
-inline std::unique_ptr<deglib::search::Searcher> make_searcher(const DynamicExplorationGraph& graph) {
-    return std::make_unique<deglib::search::Searcher>(graph.internal(), graph.getTransformations());
-}
-
-inline std::unique_ptr<deglib::search::Searcher> make_searcher(const DynamicExplorationGraph& graph, std::shared_ptr<deglib::search::Reranker> reranker) {
-    return std::make_unique<deglib::search::Searcher>(graph.internal(), graph.getTransformations(), std::move(reranker));
-}
-
-inline std::unique_ptr<deglib::search::Searcher> make_searcher(const DynamicExplorationGraph& graph, deglib::search::Reranker reranker) {
-    return std::make_unique<deglib::search::Searcher>(graph.internal(), graph.getTransformations(), std::move(reranker));
-}
-
 }  // namespace deglib

@@ -185,7 +185,7 @@ def construct_and_search_mips(
     t_transform = time.perf_counter() - t0
     new_dims = train_transformed.shape[1]
     print(
-        f"L2 Transformation completed in {t_transform * 1000:.2f}ms (Max norm M = {max_norm:.6f}, new_dims = {new_dims})"
+        f"L2 Transformation completed in {t_transform * 1000:.2f}ms (Max norm M = {mips_transform.max_norm:.6f}, new_dims = {new_dims})"
     )
 
     # 2. 1D FLAS Pre-Sorting Phase
@@ -252,9 +252,9 @@ def construct_and_search_mips(
     # 5. FP16 Feature Quantization & Swap Phase
     t0 = time.perf_counter()
     fp16_metric = Metric.FP16_InnerProduct.with_instruction(instruction)
-    fp16_graph = graph.to_readonly(
-        fp16_metric,
-        custom_features=train_vectors,
+    fp16_graph = graph.with_features(
+        train_vectors,
+        metric=fp16_metric,
         threads=build_threads,
     )
     t_swap = time.perf_counter() - t0

@@ -25,8 +25,6 @@ Searcher
    :show-inheritance:
    :member-order: bysource
 
-.. autofunction:: deglib.search.create_searcher
-
 Filter
 ------
 
@@ -65,10 +63,11 @@ High-Performance Searcher with Reranking
    # Build base graph
    graph = deglib.build(data, metric=deglib.Metric.FP32_L2)
 
-   # Convert to INT8 ReadOnlyGraph and attach FP32 reranker extracted from the FP32 graph
+   # Extract FP32 reranker from the FP32 graph and convert to INT8 ReadOnlyGraph Searcher
+   reranker = graph.to_reranker(deglib.Metric.FP32_L2)
    searcher = graph.to_searcher(
        metric=deglib.Metric.Int8_L2,
-       rerank_metric=deglib.Metric.FP32_L2,
+       reranker=reranker,
    )
 
    # Single query using relative margin (eps_or_ef < 1.0)

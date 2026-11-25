@@ -257,10 +257,10 @@ TEST(RecallTableTest, FP32InnerProductAndQuantizedGraphs) {
     ASSERT_TRUE(ip_tables[0].recall_bounds().has_value());
     EXPECT_GT(ip_tables[0].recall_bounds()->second, 0.5f);
 
-    // 2. Quantized Int8_InnerProduct via make_quantizer_pipeline + to_readonly
+    // 2. Quantized Int8_InnerProduct via make_quantizer_pipeline + with_transformations
     auto int8_xfrms = deglib::transformation::make_quantizer_pipeline(ip_data, dim, Metric::Int8_InnerProduct);
     auto int8_space = deglib::distances::FloatSpace(dim, Metric::Int8_InnerProduct);
-    auto int8_graph = ip_graph.to_readonly(int8_space, nullptr, int8_xfrms);
+    auto int8_graph = ip_graph.with_transformations(int8_xfrms, int8_space);
     const auto int8_tables = int8_graph.to_recall_tables(10, 50, {0.70f, 0.99f}, 0.10f);
     ASSERT_EQ(int8_tables.size(), 2u);
     verify_table_invariants(int8_tables[0]);
@@ -271,7 +271,7 @@ TEST(RecallTableTest, FP32InnerProductAndQuantizedGraphs) {
     auto l2_graph = build_fp32_graph(l2_data, dim, 16, Metric::FP32_L2);
     auto u4_xfrms = deglib::transformation::make_quantizer_pipeline(l2_data, dim, Metric::Uint4_L2);
     auto u4_space = deglib::distances::FloatSpace(dim, Metric::Uint4_L2);
-    auto u4_graph = l2_graph.to_readonly(u4_space, nullptr, u4_xfrms);
+    auto u4_graph = l2_graph.with_transformations(u4_xfrms, u4_space);
     const auto u4_tables = u4_graph.to_recall_tables(10, 50, {0.70f, 0.99f}, 0.10f);
     ASSERT_EQ(u4_tables.size(), 2u);
     verify_table_invariants(u4_tables[0]);

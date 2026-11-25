@@ -28,6 +28,7 @@ from .cpu import (
 from .distances import Metric, floats_to_fp16, fp16_to_floats
 from .graph import (
     DynamicExplorationGraph,
+    compress,
     create_empty,
     create_dynamic_empty,
     create_random_graph,
@@ -42,9 +43,11 @@ from .search import (
     SearchResults,
     RecallTable,
     ParetoLine,
-    create_searcher,
     Reranker,
     rerank,
+    reranker,
+    reranker_with_data,
+    searcher,
     Filter,
 )
 from .transformation import (
@@ -88,6 +91,7 @@ __all__ = [
     "tuning",
     # Builder & top-level build
     "build",
+    "compress",
     "GraphBuilder",
     "OptimizationTarget",
     "BuilderStatus",
@@ -114,12 +118,14 @@ __all__ = [
     "load_mutable_graph",
     # Search & Rerank
     "Searcher",
+    "searcher",
     "SearchResults",
     "RecallTable",
     "ParetoLine",
-    "create_searcher",
     "Reranker",
     "rerank",
+    "reranker",
+    "reranker_with_data",
     "Filter",
     # Optimization
     "presort",

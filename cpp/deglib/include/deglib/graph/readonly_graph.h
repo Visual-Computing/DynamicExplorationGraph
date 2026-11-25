@@ -1,5 +1,6 @@
 #pragma once
 
+#include "deglib/concurrent.h"
 #include "deglib/distances.h"
 #include "deglib/graph/internal_graph.h"
 #include "deglib/graph/visited_list_pool.h"
@@ -85,38 +86,14 @@ class ReadOnlyGraph : public InternalGraph {
     ReadOnlyGraph(ReadOnlyGraph&& other) noexcept = default;
     ReadOnlyGraph& operator=(ReadOnlyGraph&& other) noexcept = default;
 
-    [[nodiscard]] static ReadOnlyGraph from_graph(
-        const InternalGraph& input_graph,
-        std::optional<deglib::distances::FloatSpace> target_feature_space = std::nullopt,
-        const void* custom_features = nullptr,
-        std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
-        size_t num_threads = 0
-    ) {
-        const auto resolved_feature_space =
-            deglib::transformation::resolve_graph_conversion_space(input_graph.getFeatureSpace(), target_feature_space, custom_features, transformations);
-
-        ReadOnlyGraph graph(input_graph.size(), input_graph.getEdgesPerVertex(), resolved_feature_space);
-
-        const size_t target_feature_bytes = graph.feature_space_.get_data_size();
-        const std::byte* custom_source_features = custom_features == nullptr ? nullptr : static_cast<const std::byte*>(custom_features);
-
-        const auto source_metric = input_graph.getFeatureSpace().metric();
-        const uint32_t source_dim = input_graph.getFeatureSpace().dim();
-        const bool self_transform = (custom_features == nullptr) && !transformations.empty() && (source_metric != graph.feature_space_.metric());
-
+  private:
+    static void copy_topology_and_labels(const InternalGraph& input_graph, ReadOnlyGraph& graph) {
         graph.label_to_index_.clear();
         graph.label_to_index_.reserve(graph.vertex_count_);
         for (uint32_t i = 0; i < graph.vertex_count_; ++i) {
             const auto label = input_graph.getExternalLabel(i);
             graph.labels_[i] = label;
             graph.label_to_index_.emplace(label, i);
-
-            if (!self_transform) {
-                std::byte* target_features = graph.features_ + size_t(i) * graph.feature_stride_;
-                const std::byte* source_features =
-                    custom_source_features == nullptr ? input_graph.getFeatureVector(i) : custom_source_features + size_t(i) * target_feature_bytes;
-                std::memcpy(target_features, source_features, target_feature_bytes);
-            }
 
             const uint32_t* neighbor_indices = input_graph.getNeighborIndices(i);
             int32_t* edge_row = graph.edges_ + size_t(i) * graph.edges_per_vertex_;
@@ -125,46 +102,116 @@ class ReadOnlyGraph : public InternalGraph {
                 edge_row[j] = static_cast<int32_t>(neighbor_index < graph.vertex_count_ ? neighbor_index : i);
             }
         }
-
-        if (self_transform && graph.vertex_count_ > 0) {
-            const bool is_fp16 = (source_metric.get_data_type() == deglib::distances::MetricDataType::FP16);
-            auto transform_vertex = [&](uint32_t i, std::vector<float>& float_buffer) {
-                std::byte* target_features = graph.features_ + size_t(i) * graph.feature_stride_;
-                const auto* input_features = input_graph.getFeatureVector(i);
-                if (!is_fp16) {
-                    deglib::transformation::apply_on_database(
-                        transformations, std::span<const float>(reinterpret_cast<const float*>(input_features), source_dim),
-                        std::span<std::byte>(target_features, target_feature_bytes), 1
-                    );
-                } else {
-                    deglib::distances::fp16::fp16_to_floats(reinterpret_cast<const uint16_t*>(input_features), float_buffer.data(), source_dim);
-                    deglib::transformation::apply_on_database(
-                        transformations, std::span<const float>(float_buffer), std::span<std::byte>(target_features, target_feature_bytes), 1
-                    );
-                }
-            };
-
-            if (num_threads == 1 || graph.vertex_count_ == 1) {
-                std::vector<float> float_buffer(is_fp16 ? source_dim : 0);
-                for (uint32_t i = 0; i < graph.vertex_count_; ++i) {
-                    transform_vertex(i, float_buffer);
-                }
-            } else {
-                deglib::concurrent::parallel_batch_for(
-                    uint32_t{0}, graph.vertex_count_, num_threads,
-                    [&](uint32_t begin, uint32_t end, size_t) {
-                        std::vector<float> float_buffer(is_fp16 ? source_dim : 0);
-                        for (uint32_t i = begin; i < end; ++i) {
-                            transform_vertex(i, float_buffer);
-                        }
-                    },
-                    64
-                );
-            }
-        }
-
         graph.setEntryVertexIndices(input_graph.getEntryVertexIndices());
         graph.setPrefetch(input_graph.getPo(), input_graph.getPl(), input_graph.getNl());
+    }
+
+  public:
+    /**
+     * @brief Copy topology, labels, and stored features 1:1 from an existing InternalGraph.
+     *
+     * @param input_graph Source graph to copy from.
+     * @return Compact immutable ReadOnlyGraph sharing the same FloatSpace as `input_graph`.
+     */
+    [[nodiscard]] static ReadOnlyGraph from_graph(const InternalGraph& input_graph) {
+        ReadOnlyGraph graph(input_graph.size(), input_graph.getEdgesPerVertex(), input_graph.getFeatureSpace());
+        copy_topology_and_labels(input_graph, graph);
+
+        const size_t feature_bytes = graph.feature_space_.get_data_size();
+        for (uint32_t i = 0; i < graph.vertex_count_; ++i) {
+            if (const std::byte* src = input_graph.getFeatureVector(i); src != nullptr) {
+                std::memcpy(graph.features_ + size_t(i) * graph.feature_stride_, src, feature_bytes);
+            }
+        }
+        return graph;
+    }
+
+    /**
+     * @brief Feature-swap: copy topology and labels while replacing features with external `custom_features` in `target_space`.
+     *
+     * @param input_graph Source graph whose topology and external labels are preserved.
+     * @param target_space FloatSpace describing the dimensionality and metric of `custom_features`.
+     * @param custom_features Non-null raw byte buffer ordered by internal vertex index (`0 .. size()-1`, see `input_graph.getExternalLabels()`).
+     * @return New ReadOnlyGraph storing `custom_features`.
+     */
+    [[nodiscard]] static ReadOnlyGraph from_graph(
+        const InternalGraph& input_graph,
+        deglib::distances::FloatSpace target_space,
+        const void* custom_features
+    ) {
+        if (custom_features == nullptr) {
+            throw std::invalid_argument("ReadOnlyGraph::from_graph: custom_features must not be null");
+        }
+        ReadOnlyGraph graph(input_graph.size(), input_graph.getEdgesPerVertex(), std::move(target_space));
+        copy_topology_and_labels(input_graph, graph);
+
+        const auto* src_bytes = static_cast<const std::byte*>(custom_features);
+        const size_t feature_bytes = graph.feature_space_.get_data_size();
+        for (uint32_t i = 0; i < graph.vertex_count_; ++i) {
+            std::memcpy(graph.features_ + size_t(i) * graph.feature_stride_, src_bytes + size_t(i) * feature_bytes, feature_bytes);
+        }
+        return graph;
+    }
+
+    /**
+     * @brief Self-transform: copy topology and labels while transforming `input_graph`'s stored FP32/FP16 features directly into target memory.
+     *
+     * @param input_graph Source graph storing FP32 or FP16 features.
+     * @param target_feature_space Optional target FloatSpace. Derived automatically from `transformations` if `std::nullopt`.
+     * @param transformations Non-empty sequence of fitted transformations applied sequentially per vertex.
+     * @param num_threads Number of worker threads for parallel per-vertex transformation (`0` = hardware concurrency, `1` = sequential).
+     * @return New ReadOnlyGraph holding the transformed features.
+     */
+    [[nodiscard]] static ReadOnlyGraph from_graph(
+        const InternalGraph& input_graph,
+        std::optional<deglib::distances::FloatSpace> target_feature_space,
+        std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
+        size_t num_threads = 0
+    ) {
+        auto resolved_space =
+            deglib::transformation::resolve_transform_space(input_graph.getFeatureSpace(), target_feature_space, transformations);
+        ReadOnlyGraph graph(input_graph.size(), input_graph.getEdgesPerVertex(), std::move(resolved_space));
+        copy_topology_and_labels(input_graph, graph);
+
+        if (graph.vertex_count_ > 0) {
+            const size_t dst_bytes = graph.feature_space_.get_data_size();
+            if (transformations.empty()) {
+                for (uint32_t i = 0; i < graph.vertex_count_; ++i) {
+                    if (const std::byte* src = input_graph.getFeatureVector(i); src != nullptr) {
+                        std::memcpy(graph.features_ + size_t(i) * graph.feature_stride_, src, dst_bytes);
+                    }
+                }
+            } else {
+                const auto src_dt = input_graph.getFeatureSpace().metric().get_data_type();
+                const size_t src_bytes = input_graph.getFeatureSpace().get_data_size();
+
+                auto transform_vertex = [&](uint32_t i) {
+                    deglib::transformation::apply_on_database(
+                        transformations,
+                        std::span<const std::byte>(input_graph.getFeatureVector(i), src_bytes),
+                        src_dt,
+                        std::span<std::byte>(graph.features_ + size_t(i) * graph.feature_stride_, dst_bytes),
+                        /*num_threads=*/1
+                    );
+                };
+
+                if (num_threads == 1 || graph.vertex_count_ == 1) {
+                    for (uint32_t i = 0; i < graph.vertex_count_; ++i) {
+                        transform_vertex(i);
+                    }
+                } else {
+                    deglib::concurrent::parallel_batch_for(
+                        uint32_t{0}, graph.vertex_count_, num_threads,
+                        [&](uint32_t begin, uint32_t end, size_t) {
+                            for (uint32_t i = begin; i < end; ++i) {
+                                transform_vertex(i);
+                            }
+                        },
+                        64
+                    );
+                }
+            }
+        }
         return graph;
     }
 

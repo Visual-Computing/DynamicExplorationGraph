@@ -125,7 +125,7 @@ class GraphModel:
         """
         if metric is self.metric:
             return self.graph
-        return self.graph.to_readonly(metric, optimize=False)
+        return self.graph.with_metric(metric)
 
     def best_match(self, query: np.ndarray, metric: Metric | None = None, *, exclude: int | None = None) -> int:
         """

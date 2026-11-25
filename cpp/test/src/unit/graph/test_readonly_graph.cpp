@@ -156,8 +156,7 @@ TEST(ReadOnlyGraphTest, OptimizeTunesPrefetchParameters) {
     auto source = make_size_bounded_graph(n, dim, k, features, edges);
     source.setEntryVertexIndices({0, 1});
 
-    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
-    auto graph = deglib::graph::ReadOnlyGraph::from_graph(source, space);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(source);
 
     graph.optimize(8);
 
@@ -189,14 +188,13 @@ TEST(ReadOnlyGraphTest, HasPathAndFromGraphUseInternalGraphInterfaces) {
     auto source = make_size_bounded_graph(n, dim, k, features, edges);
     source.setEntryVertexIndices({0});
 
-    deglib::distances::FloatSpace space(dim, deglib::distances::Metric::FP32_L2);
-    auto graph = deglib::graph::ReadOnlyGraph::from_graph(source, space);
+    auto graph = deglib::graph::ReadOnlyGraph::from_graph(source);
 
     const auto path = graph.hasPath({0}, 10, 0.0f, 5);
     ASSERT_FALSE(path.empty());
     EXPECT_EQ(path.front().getIdentifier(), 10u);
 
-    const auto copy = deglib::graph::ReadOnlyGraph::from_graph(graph, space);
+    const auto copy = deglib::graph::ReadOnlyGraph::from_graph(graph);
     EXPECT_EQ(copy.size(), graph.size());
     EXPECT_EQ(copy.getEdgesPerVertex(), graph.getEdgesPerVertex());
     EXPECT_TRUE(copy.hasVertex(7));

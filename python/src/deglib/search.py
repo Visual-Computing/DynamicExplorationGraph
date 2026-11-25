@@ -183,6 +183,30 @@ class Reranker:
         threads: int = 0,
         row_indices: np.ndarray | None = None,
     ):
+        """
+        Initialize a standalone candidate ``Reranker``.
+
+        Parameters
+        ----------
+        metric : Metric or str
+            Distance metric used to score candidates (e.g. ``Metric.FP16_L2`` or
+            ``Metric.FP32_InnerProduct``).
+        base_vectors : np.ndarray
+            2D array of base vectors. If ``float32``, vectors are automatically converted
+            or quantized to ``metric`` using ``transformations`` (or an auto-calibrated
+            quantizer). Otherwise, ``base_vectors`` must match the metric's accepted dtype.
+        transformations : FeatureTransformation or sequence of FeatureTransformation, optional
+            Fitted transformations applied to queries (and to ``float32`` ``base_vectors``
+            if needed).
+        optimize : bool, default=False
+            If ``True``, tunes memory prefetching immediately after construction.
+        threads : int, default=0
+            Number of worker threads for quantization (``0`` = all cores).
+        row_indices : np.ndarray, optional
+            Optional 1D ``uint32`` index mapping (e.g. ``graph.get_labels()``) when
+            ``base_vectors`` is indexed by external labels while the graph's internal
+            vertex order differs.
+        """
         resolved_metric = Metric.resolve(metric)
         xfrms = _normalize_transforms(transformations)
         for i, t in enumerate(xfrms):
@@ -201,6 +225,17 @@ class Reranker:
             target_dim = int(xfrms[-1].output_dim) if xfrms else int(arr.shape[1])
             cpp_space = resolved_metric._to_cpp_space(target_dim)
             self._reranker_cpp = cpp_search.Reranker.from_float32(
+                cpp_space,
+                arr,
+                xfrms,
+                int(threads),
+                idx,
+            )
+            self._dim = int(self._reranker_cpp.get_dim())
+        elif arr.dtype == np.float16:
+            target_dim = int(xfrms[-1].output_dim) if xfrms else int(arr.shape[1])
+            cpp_space = resolved_metric._to_cpp_space(target_dim)
+            self._reranker_cpp = cpp_search.Reranker.from_fp16(
                 cpp_space,
                 arr,
                 xfrms,
@@ -312,75 +347,45 @@ class Searcher:
         self,
         graph: DynamicExplorationGraph,
         reranker: Reranker | None = None,
-        rerank_metric: Metric | str | None = None,
-        rerank_data: np.ndarray | None = None,
-        rerank_order: Literal["label", "internal"] = "label",
-        rerank_transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
         normalize_query: bool = False,
         optimize: bool = False,
-        use_routing: bool = True,
-        n_clusters: int = 256,
-        n_iter: int = 20,
-        sample_size: int = 0,
         threads: int = 0,
     ):
-        if rerank_order not in ("label", "internal"):
-            raise ValueError(f"rerank_order must be 'label' or 'internal', got {rerank_order!r}")
+        """
+        Create a ``Searcher`` wrapping a ``ReadOnlyGraph`` and an optional ``Reranker``.
+
+        Parameters
+        ----------
+        graph : DynamicExplorationGraph
+            Backing exploration graph (typically a ``ReadOnlyGraph``).
+        reranker : Reranker, optional
+            Optional standalone ``Reranker`` for two-stage candidate re-scoring.
+        normalize_query : bool, default=False
+            If ``True``, L2-normalizes float32 queries before graph traversal.
+        optimize : bool, default=False
+            If ``True``, calls ``self.optimize(threads=threads)`` after construction.
+        threads : int, default=0
+            Number of worker threads used when ``optimize=True``.
+        """
         if reranker is not None:
             if not isinstance(reranker, Reranker):
                 raise TypeError(f"reranker must be a Reranker instance, got {type(reranker).__name__}")
-            if rerank_metric is not None or rerank_data is not None or bool(rerank_transformations):
-                raise ValueError(
-                    "Cannot pass 'reranker' together with 'rerank_metric', 'rerank_data', or 'rerank_transformations'."
-                )
             if reranker.get_num_base_vectors() < graph.size():
                 raise ValueError(
                     f"reranker base vector count ({reranker.get_num_base_vectors()}) is smaller than graph.size() ({graph.size()})."
                 )
-        elif rerank_data is not None and rerank_metric is None:
-            raise ValueError(
-                "rerank_data cannot be provided when rerank_metric is None; "
-                "specify rerank_metric (e.g. Metric.FP16_InnerProduct) to enable reranking."
-            )
 
         self.graph = graph
         cpp_graph = getattr(graph, "dynamic_exploration_graph_cpp", graph)
 
-        if reranker is not None:
-            self._searcher_cpp = cpp_search.Searcher(
-                cpp_graph,
-                reranker._reranker_cpp,
-                bool(normalize_query),
-            )
-        elif rerank_metric is not None:
-            built_reranker = graph.to_reranker(
-                rerank_metric,
-                data=rerank_data,
-                order=rerank_order,
-                transformations=rerank_transformations,
-                optimize=False,
-                threads=threads,
-            )
-            self._searcher_cpp = cpp_search.Searcher(
-                cpp_graph,
-                built_reranker._reranker_cpp,
-                bool(normalize_query),
-            )
-        else:
-            self._searcher_cpp = cpp_search.Searcher(
-                cpp_graph,
-                None,
-                bool(normalize_query),
-            )
+        self._searcher_cpp = cpp_search.Searcher(
+            cpp_graph,
+            reranker._reranker_cpp if reranker is not None else None,
+            bool(normalize_query),
+        )
 
         if optimize and graph.size() > 0:
-            self.optimize(
-                n_clusters=n_clusters,
-                n_iter=n_iter,
-                sample_size=sample_size,
-                threads=threads,
-                use_routing=use_routing,
-            )
+            self.optimize(threads=threads)
 
     @property
     def normalize_query(self) -> bool:
@@ -568,6 +573,266 @@ class Searcher:
         return ParetoLine(cpp_line)
 
 
+def _resolve_rerank_metric(
+    distance_kind: str,
+    compress: Literal["16bit", "8bit"] | Metric | str | None,
+    instruction,
+) -> Metric:
+    """Resolve target Metric for a Reranker from distance kind and compress level."""
+    if compress is None:
+        target = Metric.FP32_InnerProduct if distance_kind == "InnerProduct" else Metric.FP32_L2
+    elif isinstance(compress, Metric):
+        target = compress
+    elif isinstance(compress, str):
+        key = compress.strip().lower().replace("-", "").replace("_", "")
+        if key in ("16bit", "fp16", "float16"):
+            target = Metric.FP16_InnerProduct if distance_kind == "InnerProduct" else Metric.FP16_L2
+        elif key in ("8bit", "int8"):
+            target = Metric.Int8_InnerProduct if distance_kind == "InnerProduct" else Metric.Int8_L2
+        elif key == "uint7":
+            target = Metric.Uint7_InnerProduct if distance_kind == "InnerProduct" else Metric.Uint7_L2
+        elif key == "uint8":
+            target = Metric.Uint8_InnerProduct if distance_kind == "InnerProduct" else Metric.Uint8_L2
+        elif key in ("32bit", "fp32", "float32"):
+            target = Metric.FP32_InnerProduct if distance_kind == "InnerProduct" else Metric.FP32_L2
+        elif "_" in compress:
+            target = Metric.resolve(compress)
+        else:
+            target = Metric.resolve(compress, "ip" if distance_kind == "InnerProduct" else "l2")
+    else:
+        target = Metric.resolve(compress)
+
+    from deglib.cpu import InstructionSet
+
+    if instruction != InstructionSet.Auto and getattr(target, "_instruction", None) is None:
+        target = target.with_instruction(instruction)
+    return target
+
+
+def reranker(
+    graph: DynamicExplorationGraph,
+    compress: Literal["16bit", "8bit"] | Metric | str | None = "16bit",
+    optimize: bool = True,
+    threads: int = 0,
+) -> Reranker:
+    """
+    Create a ``Reranker`` directly from an uncompressed (``FP32`` or ``FP16``) ``graph``.
+
+    Raises ``ValueError`` if ``graph`` is already quantized (use :func:`reranker_with_data` instead).
+
+    Parameters
+    ----------
+    graph : DynamicExplorationGraph
+        Backing uncompressed graph whose stored vectors and labels are used for reranking.
+    compress : {"16bit", "8bit"} or Metric or str, optional, default="16bit"
+        Target reranker precision:
+
+        - ``None`` / ``"32bit"`` / ``"fp32"`` / ``"float32"``: ``FP32_L2`` or ``FP32_InnerProduct``.
+        - ``"16bit"`` / ``"fp16"`` / ``"float16"``: ``FP16_L2`` or ``FP16_InnerProduct``.
+        - ``"8bit"`` / ``"int8"``: ``Int8_L2`` or ``Int8_InnerProduct``.
+        - ``"uint8"`` / ``"uint7"`` or any explicit ``Metric`` / metric string.
+    optimize : bool, default=True
+        If ``True``, runs ``reranker.optimize()`` to tune memory prefetching.
+    threads : int, default=0
+        Number of worker threads used during quantization/optimization (``0`` = all CPU cores).
+
+    Returns
+    -------
+    Reranker
+        Standalone reranker aligned with ``graph.get_labels()``.
+    """
+    base_metric = Metric(int(graph.get_metric()))
+    if base_metric not in (
+        Metric.FP32_L2,
+        Metric.FP32_InnerProduct,
+        Metric.FP16_L2,
+        Metric.FP16_InnerProduct,
+    ):
+        raise ValueError(
+            f"Cannot extract reranker from quantized graph ({base_metric.name}). "
+            "Use deglib.reranker_with_data(graph, data, ...) with the original float vectors instead."
+        )
+    distance_kind = "InnerProduct" if base_metric.name.endswith("InnerProduct") else "L2"
+    target_metric = _resolve_rerank_metric(distance_kind, compress, graph.get_instruction())
+    return graph.to_reranker(target_metric, optimize=optimize, threads=threads)
+
+
+def reranker_with_data(
+    graph: DynamicExplorationGraph,
+    data: np.ndarray,
+    labels: Sequence[int] | np.ndarray | None = None,
+    compress: Literal["16bit", "8bit"] | Metric | str | None = "16bit",
+    metric: Literal["l2", "cosine", "ip"] | Metric | str | None = None,
+    optimize: bool = True,
+    threads: int = 0,
+) -> Reranker:
+    """
+    Create a ``Reranker`` from external ``data`` aligned to ``graph`` (supports quantized/presorted graphs).
+
+    Preserves any spatial prefix transformations (``MipsTransform``, ``L2NormalizeTransform``)
+    attached to ``graph`` and maps ``graph.get_labels()`` to rows in ``data`` without copying ``data``.
+
+    Parameters
+    ----------
+    graph : DynamicExplorationGraph
+        Target graph whose internal vertex order (``graph.get_labels()``) the reranker aligns to.
+    data : np.ndarray
+        2D array of original ``float32`` or ``float16`` feature vectors.
+    labels : sequence of int or np.ndarray, optional
+        External labels corresponding to rows of ``data``. Defaults to ``0..len(data)-1``.
+    compress : {"16bit", "8bit"} or Metric or str, optional, default="16bit"
+        Target reranker precision (``"16bit"``, ``"8bit"``, ``"32bit"``, ``None``, or explicit
+        ``Metric`` / metric string; see :func:`reranker`).
+    metric : {"l2", "cosine", "ip"} or Metric or str, optional
+        Optional distance kind override (``"l2"`` / ``"euclidean"``, ``"cosine"``, ``"ip"`` /
+        ``"innerproduct"`` / ``"mips"``, or explicit ``Metric``). Defaults to ``graph.get_metric()``.
+    optimize : bool, default=True
+        If ``True``, runs ``reranker.optimize()`` to tune memory prefetching.
+    threads : int, default=0
+        Number of worker threads used during quantization/optimization (``0`` = all CPU cores).
+
+    Returns
+    -------
+    Reranker
+        Standalone reranker aligned with ``graph.get_labels()``.
+    """
+    arr = np.asarray(data)
+    if arr.ndim != 2:
+        raise ValueError(f"data must be a 2D array, got shape {arr.shape}")
+
+    spatial_prefix: list[FeatureTransformation] = []
+    for t in graph.get_transformations():
+        if t.name in ("L2NormalizeTransform", "MipsTransform"):
+            spatial_prefix.append(t)
+        else:
+            break
+
+    has_mips = any(t.name == "MipsTransform" for t in spatial_prefix)
+    if has_mips:
+        distance_kind = "L2"
+    elif metric is not None:
+        if isinstance(metric, str) and metric.strip().lower() in ("l2", "euclidean"):
+            distance_kind = "L2"
+        elif isinstance(metric, str) and metric.strip().lower() in (
+            "ip",
+            "innerproduct",
+            "inner_product",
+            "mips",
+            "cosine",
+        ):
+            distance_kind = "InnerProduct"
+        else:
+            distance_kind = "InnerProduct" if Metric(int(Metric.resolve(metric))).name.endswith("InnerProduct") else "L2"
+    else:
+        distance_kind = "InnerProduct" if Metric(int(graph.get_metric())).name.endswith("InnerProduct") else "L2"
+
+    target_metric = _resolve_rerank_metric(distance_kind, compress, graph.get_instruction())
+
+    graph_labels = graph.get_labels()
+    if labels is None:
+        row_indices = graph_labels
+    else:
+        labels_arr = np.asarray(list(labels) if not isinstance(labels, np.ndarray) else labels, dtype=np.uint32)
+        if labels_arr.ndim != 1 or labels_arr.shape[0] != arr.shape[0]:
+            raise ValueError(f"labels must be 1D of length {arr.shape[0]}, got shape {labels_arr.shape}")
+        if labels_arr.shape[0] > 0 and labels_arr[0] == 0 and np.all(np.diff(labels_arr) == 1):
+            row_indices = graph_labels
+        elif labels_arr.shape[0] > 0 and np.all(labels_arr[:-1] <= labels_arr[1:]):
+            pos = np.searchsorted(labels_arr, graph_labels)
+            if np.any(pos >= labels_arr.shape[0]) or not np.all(labels_arr[pos] == graph_labels):
+                raise KeyError("Some graph labels were not found in the provided labels array")
+            row_indices = pos.astype(np.uint32, copy=False)
+        else:
+            lookup = {int(lbl): idx for idx, lbl in enumerate(labels_arr)}
+            try:
+                row_indices = np.array([lookup[int(g_lbl)] for g_lbl in graph_labels], dtype=np.uint32)
+            except KeyError as exc:
+                raise KeyError(f"Graph label {exc} was not found in the provided labels array") from exc
+
+    xfrms: list[FeatureTransformation] | None = None
+    if spatial_prefix:
+        target_base = Metric(int(target_metric))
+        if target_base in (Metric.FP32_L2, Metric.FP32_InnerProduct):
+            xfrms = spatial_prefix
+        else:
+            from deglib.transformation import apply_on_database, make_quantizer_pipeline
+
+            n_rows = int(row_indices.shape[0])
+            if n_rows > 0:
+                sample_count = min(n_rows, 10000)
+                step = max(1, n_rows // sample_count)
+                sample_idx = row_indices[::step][:sample_count]
+                sample = np.ascontiguousarray(arr[sample_idx], dtype=np.float32)
+                transformed_sample = apply_on_database(spatial_prefix, sample, threads=threads)
+                quant_xfrms = make_quantizer_pipeline(
+                    transformed_sample,
+                    target_metric,
+                    use_rerank=True,
+                    threads=threads,
+                )
+                xfrms = spatial_prefix + quant_xfrms
+            else:
+                xfrms = spatial_prefix
+
+    return Reranker(
+        metric=target_metric,
+        base_vectors=arr,
+        transformations=xfrms,
+        optimize=optimize,
+        threads=threads,
+        row_indices=row_indices,
+    )
+
+
+def searcher(
+    graph: DynamicExplorationGraph,
+    compress: Literal["32bit", "16bit", "8bit", "4bit", "2bit", "auto"] | Metric | str | None = None,
+    reranker: Reranker | None = None,
+    optimize: bool = True,
+    threads: int = 0,
+) -> Searcher:
+    """
+    Create an optimized ``Searcher`` for ``graph``, optionally compressing the search graph first.
+
+    Parameters
+    ----------
+    graph : DynamicExplorationGraph
+        Backing exploration graph (usually a ``ReadOnlyGraph`` returned by :func:`deglib.build`).
+    compress : {"32bit", "16bit", "8bit", "4bit", "2bit", "auto"} or Metric or str, optional
+        Optional compression target applied via :func:`deglib.compress` before wrapping in a
+        ``Searcher``:
+
+        - ``None``: Use ``graph`` as-is without re-quantizing.
+        - ``"32bit"`` (also ``"fp32"``, ``"float32"``): ``FP32_L2`` or ``FP32_InnerProduct``.
+        - ``"16bit"`` (also ``"fp16"``, ``"float16"``): ``FP16_L2`` or ``FP16_InnerProduct``.
+        - ``"8bit"`` / ``"auto"``: ``Uint7_L2`` (L2) or ``Int8_InnerProduct`` (InnerProduct).
+        - ``"4bit"``: ``Uint4_L2`` (for L2) or ``L2NormalizeTransform + Int4_InnerProduct`` (for InnerProduct).
+        - ``"2bit"`` (also ``"evp"``): ``EVP_InnerProduct``.
+        - Explicit ``Metric`` or metric string (e.g. ``Metric.Int8_L2``, ``"Uint8_L2"``).
+    reranker : Reranker, optional
+        Optional prebuilt ``Reranker`` (from :func:`deglib.reranker` or
+        :func:`deglib.reranker_with_data`) for two-stage candidate re-scoring.
+    optimize : bool, default=True
+        If ``True``, runs ``searcher.optimize(threads=threads)`` (K-Means routing entry points
+        and prefetch tuning). Pass ``optimize=False`` to call ``searcher.optimize(...)`` with
+        custom ``n_clusters`` / ``use_routing`` settings manually.
+    threads : int, default=0
+        Number of worker threads for compression and optimization (``0`` = all CPU cores).
+
+    Returns
+    -------
+    Searcher
+        Native C++ search pipeline ready for ``searcher.search(...)``.
+    """
+    if compress is not None:
+        from deglib.graph import compress as compress_graph
+
+        search_graph = compress_graph(graph, compress, threads=threads)
+    else:
+        search_graph = graph
+    return search_graph.to_searcher(reranker=reranker, optimize=optimize, threads=threads)
+
+
 def _resolve_rerank_factors(rerank_factors: Sequence[float] | np.ndarray | None) -> list[float] | None:
     if rerank_factors is None:
         return None
@@ -593,93 +858,6 @@ def _coerce_recall_tables(recall_tables: RecallTable | Sequence[RecallTable]) ->
     )
 
 
-def create_searcher(
-    graph: DynamicExplorationGraph,
-    metric: Metric | str | None = None,
-    reranker: Reranker | None = None,
-    rerank_metric: Metric | str | None = None,
-    rerank_data: np.ndarray | None = None,
-    rerank_order: Literal["label", "internal"] = "label",
-    rerank_transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
-    normalize_query: bool = False,
-    optimize: bool = True,
-    use_routing: bool = True,
-    n_clusters: int = 256,
-    n_iter: int = 20,
-    sample_size: int = 0,
-    threads: int = 0,
-) -> Searcher:
-    """
-    Create a native C++ ``Searcher`` pipeline from ``graph``.
-
-    Reranking is opt-in via either a shared ``reranker`` instance or ``rerank_metric``:
-    - ``reranker=None`` and ``rerank_metric=None`` (default): NO reranking is performed.
-    - ``reranker`` set: reuses the prebuilt ``Reranker`` (zero-copy over its base vectors).
-    - ``rerank_metric`` set, ``rerank_data=None``: extracts & quantizes rerank vectors directly
-      from the ``FP32``/``FP16`` source ``graph`` prior to quantizing/converting ``graph`` to ``metric``.
-    - ``rerank_metric`` set, ``rerank_data`` provided: aligns via ``rerank_order``.
-    """
-    if rerank_order not in ("label", "internal"):
-        raise ValueError(f"rerank_order must be 'label' or 'internal', got {rerank_order!r}")
-    if reranker is not None:
-        if not isinstance(reranker, Reranker):
-            raise TypeError(f"reranker must be a Reranker instance, got {type(reranker).__name__}")
-        if rerank_metric is not None or rerank_data is not None or bool(rerank_transformations):
-            raise ValueError(
-                "Cannot pass 'reranker' together with 'rerank_metric', 'rerank_data', or 'rerank_transformations'."
-            )
-        if reranker.get_num_base_vectors() < graph.size():
-            raise ValueError(
-                f"reranker base vector count ({reranker.get_num_base_vectors()}) is smaller than graph.size() ({graph.size()})."
-            )
-    elif rerank_data is not None and rerank_metric is None:
-        raise ValueError(
-            "rerank_data cannot be provided when rerank_metric is None; "
-            "specify rerank_metric (e.g. Metric.FP16_InnerProduct) to enable reranking."
-        )
-
-    # Build Reranker from source graph BEFORE converting/quantizing `graph`.
-    if reranker is None and rerank_metric is not None:
-        reranker = graph.to_reranker(
-            rerank_metric,
-            data=rerank_data,
-            order=rerank_order,
-            transformations=rerank_transformations,
-            optimize=False,
-            threads=threads,
-        )
-
-    # Quantize / convert graph only if `metric` was specified and differs in metric or explicit instruction.
-    search_graph = graph
-    if metric is not None:
-        target_metric = Metric.resolve(metric)
-        src_metric = graph.get_metric()
-        src_inst = graph.get_instruction()
-        explicit_inst = getattr(target_metric, "_instruction", None)
-        needs_conversion = Metric(int(target_metric)) != Metric(int(src_metric)) or (
-            explicit_inst is not None and explicit_inst != src_inst
-        )
-        if needs_conversion:
-            search_graph = graph.to_readonly(
-                metric=target_metric,
-                use_rerank=(reranker is not None),
-                optimize=False,
-                threads=threads,
-            )
-
-    return Searcher(
-        graph=search_graph,
-        reranker=reranker,
-        normalize_query=normalize_query,
-        optimize=optimize,
-        use_routing=use_routing,
-        n_clusters=n_clusters,
-        n_iter=n_iter,
-        sample_size=sample_size,
-        threads=threads,
-    )
-
-
 __all__ = [
     "Filter",
     "Reranker",
@@ -688,5 +866,4 @@ __all__ = [
     "SearchResults",
     "RecallTable",
     "ParetoLine",
-    "create_searcher",
 ]

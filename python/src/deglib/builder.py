@@ -3,23 +3,25 @@ import enum
 import os
 import sys
 import time
-from typing import Callable
+from typing import Callable, Literal
 import numpy as np
 import deglib_cpp
 
-from deglib.distances import Metric, _BoundMetric, _infer_dim_from_array
+from deglib.distances import Metric, _infer_dim_from_array
 from deglib.graph import (
     DynamicExplorationGraph,
     _FP16_METRICS,
     _FP32_METRICS,
+    compress as compress_graph,
     create_empty,
 )
 from deglib.optimization import presort as run_presort
 from deglib.transformation import (
     FeatureTransformation,
-    _normalize_transforms,
     apply_on_database,
+    is_high_level_metric_name,
     make_quantizer_pipeline,
+    resolve_spatial_metric,
 )
 from deglib.utils import InvalidShapeException, assure_array
 
@@ -28,6 +30,7 @@ class OptimizationTarget(enum.IntEnum):
     """
     Graph construction optimization strategy.
 
+    - ``Auto``: Automatically predicts ``LowLID`` vs ``StreamingData`` from dataset geometry.
     - ``StreamingData``: Sequential single-threaded insertion/deletion for shifting data streams.
     - ``HighLID``: Parallel batch extension replacing worst neighbor edge (for LID > 15).
     - ``LowLID``: Default parallel batch extension minimizing metric distortion (for LID <= 15).
@@ -36,6 +39,7 @@ class OptimizationTarget(enum.IntEnum):
     StreamingData = deglib_cpp.OptimizationTarget.StreamingData
     HighLID = deglib_cpp.OptimizationTarget.HighLID
     LowLID = deglib_cpp.OptimizationTarget.LowLID
+    Auto = -1
 
     @classmethod
     def resolve(cls, target: "OptimizationTarget | str | int") -> "OptimizationTarget":
@@ -48,6 +52,7 @@ class OptimizationTarget(enum.IntEnum):
         if isinstance(target, str):
             key = target.strip().lower().replace("-", "").replace("_", "")
             mapping = {
+                "auto": cls.Auto,
                 "lowlid": cls.LowLID,
                 "highlid": cls.HighLID,
                 "streamingdata": cls.StreamingData,
@@ -158,6 +163,8 @@ class GraphBuilder:
         threads: int = 0,
     ):
         opt_target = OptimizationTarget.resolve(optimization_target)
+        if opt_target == OptimizationTarget.Auto:
+            opt_target = OptimizationTarget.LowLID
         edges = graph.get_edges_per_vertex()
         if extend_k <= edges:
             extend_k = edges * 2
@@ -283,15 +290,10 @@ class GraphBuilder:
 def build(
     data: np.ndarray,
     labels: Iterable[int] | np.ndarray | None = None,
+    metric: Literal["l2", "euclidean", "cosine", "normalized", "ip"] | Metric | str = "l2",
+    compress: Literal["32bit", "16bit", "8bit", "4bit", "2bit", "auto"] | Metric | str | None = None,
     edges_per_vertex: int = 32,
-    metric: Metric | str = Metric.FP32_L2,
-    optimization_target: OptimizationTarget | str = OptimizationTarget.LowLID,
-    presort: bool | np.ndarray = False,
-    presort_decay: float = 0.9,
-    optimize: bool = True,
-    readonly: bool = False,
-    transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
-    capacity: int = -1,
+    optimization_target: OptimizationTarget | str = OptimizationTarget.Auto,
     extend_k: int = 0,
     extend_eps: float = 0.1,
     improve_k: int = 0,
@@ -299,26 +301,107 @@ def build(
     max_path_length: int = 5,
     improve_tries: int = 0,
     seed: int = 7,
+    presort: bool | np.ndarray = False,
+    optimize: bool = True,
     threads: int = 0,
-    callback: Callable[[BuilderStatus], None] | None = None,
-    show_progress: bool = False,
+    show_progress: bool | None = None,
 ) -> DynamicExplorationGraph:
     """
     Build and optimize a ``DynamicExplorationGraph`` from a 2D NumPy feature matrix.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        2D feature matrix of shape ``(N, dim)``. Supports ``float32`` and ``float16`` for
+        high-level metrics and ``compress``, or pre-quantized dtypes (e.g. ``int8``, ``uint8``)
+        when an explicit quantized ``Metric`` is passed.
+    labels : iterable of int or np.ndarray, optional
+        1D sequence of external ``uint32`` vertex IDs of length ``N``. Defaults to ``0..N-1``.
+    metric : {"l2", "euclidean", "cosine", "normalized", "ip"} or Metric or str, default="l2"
+        Distance metric or high-level spatial mode:
+
+        - ``"l2"`` / ``"euclidean"``: Euclidean L2 distance (``FP32_L2`` or ``FP16_L2``).
+        - ``"cosine"`` / ``"normalized"``: Cosine similarity via ``FP32_InnerProduct`` /
+          ``FP16_InnerProduct``; automatically attaches ``L2NormalizeTransform`` if input
+          vectors are not already unit-norm.
+        - ``"ip"`` (also ``"innerproduct"``, ``"inner_product"``, ``"mips"``): Maximum Inner
+          Product Search. Builds the graph topology in ``MipsTransform (d+1) + L2`` space
+          and swaps stored features back to unnormalized ``InnerProduct`` (or ``compress``
+          target) on the returned ``ReadOnlyGraph``.
+        - Explicit ``Metric`` or metric string (e.g. ``Metric.Int8_L2``, ``"Uint7_L2"``).
+    compress : {"32bit", "16bit", "8bit", "4bit", "2bit", "auto"} or Metric or str, optional
+        Optional post-build compression target:
+
+        - ``None``: Keep native build precision (unnormalized ``FP32_InnerProduct`` /
+          ``FP16_InnerProduct`` for ``metric="ip"``).
+        - ``"32bit"`` (also ``"fp32"``, ``"float32"``): Keep/target 32-bit float precision.
+        - ``"16bit"`` (also ``"fp16"``, ``"float16"``): ``FP16_L2`` or ``FP16_InnerProduct``.
+        - ``"8bit"`` / ``"auto"``: ``Uint7_L2`` (L2), auto-selected IP quantizer (cosine),
+          or ``FastHadamardRotation + Int8_InnerProduct`` (``metric="ip"``).
+        - ``"4bit"``: ``Uint4_L2`` (for L2) or ``L2NormalizeTransform + FastHadamardRotation + Int4_InnerProduct`` (for InnerProduct).
+        - ``"2bit"`` (also ``"evp"``): ``EVP_InnerProduct``.
+        - Any explicit ``Metric`` or metric name string.
+    edges_per_vertex : int, default=32
+        Number of outgoing neighbors per vertex (``k_graph``).
+    optimization_target : OptimizationTarget or str, default=OptimizationTarget.Auto
+        Graph construction strategy: ``"auto"`` (predicts ``LowLID`` vs ``StreamingData``),
+        ``"lowlid"``, ``"highlid"``, or ``"streaming"`` / ``"streamingdata"``.
+    extend_k : int, default=0
+        Candidate pool size during neighbor extension (``0`` uses builder default).
+    extend_eps : float, default=0.1
+        Exploration tolerance ``eps`` during neighbor extension.
+    improve_k : int, default=0
+        Candidate pool size during edge improvement (``0`` disables).
+    improve_eps : float, default=0.001
+        Exploration tolerance ``eps`` during edge improvement.
+    max_path_length : int, default=5
+        Maximum path length considered during RNG edge pruning/improvement.
+    improve_tries : int, default=0
+        Number of improvement passes per step.
+    seed : int, default=7
+        Random seed used during graph construction.
+    presort : bool or np.ndarray, default=False
+        If ``True``, runs FLAS 1D pre-sorting before construction (reordering data and labels
+        together). Alternatively, pass a precomputed 1D ``uint32`` permutation array.
+    optimize : bool, default=True
+        If ``True``, runs ``graph.optimize()`` (prefetch & entry-point tuning) after build.
+    threads : int, default=0
+        Number of worker threads (``0`` = all CPU cores).
+    show_progress : bool, optional
+        Show a live progress bar on stdout (defaults to ``sys.stdout.isatty()``).
+
+    Returns
+    -------
+    DynamicExplorationGraph
+        Mutable ``SizeBoundedGraph`` when ``compress=None`` (or ``"32bit"``), or
+        compressed ``ReadOnlyGraph`` when ``compress`` is specified.
     """
     if not isinstance(data, np.ndarray) or data.ndim != 2:
         raise InvalidShapeException(f"data must be a 2D numpy array, got {getattr(data, 'shape', type(data))}")
 
-    resolved_metric = Metric.resolve(metric)
-    base_metric = Metric(int(resolved_metric))
-    opt_target = OptimizationTarget.resolve(optimization_target)
-    xfrms = _normalize_transforms(transformations)
-    for i, t in enumerate(xfrms):
-        if not isinstance(t, FeatureTransformation):
-            raise TypeError(f"transformations[{i}] must be a FeatureTransformation, got {type(t).__name__}")
+    is_float_input = data.dtype in (np.dtype(np.float32), np.dtype(np.float16))
+    if not is_float_input:
+        if compress is not None:
+            raise ValueError(f"compress requires float32 or float16 input data, got dtype {data.dtype}")
+        if isinstance(presort, (bool, np.bool_)) and presort:
+            raise ValueError(
+                "presort=True requires float32 or float16 input vectors; "
+                "pass a precomputed sorted_indices array instead."
+            )
 
     n_samples = int(data.shape[0])
-    target_capacity = max(n_samples, int(capacity)) if capacity >= 0 else n_samples
+    effective_show_progress = sys.stdout.isatty() if show_progress is None else bool(show_progress)
+
+    xfrms: list[FeatureTransformation] = []
+    is_high_level_ip = False
+    if is_high_level_metric_name(metric):
+        resolved_metric, xfrms = resolve_spatial_metric(data, metric)
+        is_high_level_ip = metric.strip().lower() in ("ip", "innerproduct", "inner_product", "mips")
+    else:
+        resolved_metric = Metric.resolve(metric)
+
+    base_metric = Metric(int(resolved_metric))
+    opt_target = OptimizationTarget.resolve(optimization_target)
 
     if labels is None:
         labels_arr = np.arange(n_samples, dtype=np.uint32)
@@ -331,44 +414,72 @@ def build(
             raise ValueError(f"labels must be 1D of length {n_samples}, got shape {labels_arr.shape}")
 
     if n_samples == 0:
+        if is_high_level_ip:
+            empty_metric = (
+                Metric.FP16_InnerProduct if data.dtype == np.dtype(np.float16) else Metric.FP32_InnerProduct
+            )
+            return create_empty(
+                capacity=0,
+                dim=int(data.shape[1]),
+                edges_per_vertex=edges_per_vertex,
+                metric=empty_metric,
+                transformations=None,
+            )
         inferred_dim = int(xfrms[-1].output_dim) if xfrms else _infer_dim_from_array(resolved_metric, data)
-        g = create_empty(
-            capacity=target_capacity,
+        return create_empty(
+            capacity=0,
             dim=inferred_dim,
             edges_per_vertex=edges_per_vertex,
             metric=resolved_metric,
             transformations=xfrms,
         )
-        return g.to_readonly(optimize=False, threads=threads) if readonly else g
 
     work_data = np.ascontiguousarray(data)
 
-    # 1. Optional FLAS 1D pre-sorting (reorders both data and labels together)
+    # Apply spatial prefix transforms (MipsTransform / L2NormalizeTransform) once if present,
+    # so Auto target prediction, presort, and graph build all operate in the true build space.
+    spatial_data = apply_on_database(xfrms, work_data, threads=threads) if xfrms else None
+    if spatial_data is not None and spatial_data.dtype == np.float32 and base_metric in _FP16_METRICS:
+        fp32_base = Metric.FP32_InnerProduct if base_metric.name.endswith("InnerProduct") else Metric.FP32_L2
+        bound_inst = getattr(resolved_metric, "_instruction", None)
+        resolved_metric = fp32_base.with_instruction(bound_inst) if bound_inst is not None else fp32_base
+        base_metric = Metric(int(resolved_metric))
+    effective_float_data = spatial_data if spatial_data is not None else work_data
+
+    # 1. Resolve OptimizationTarget.Auto using tuning.py defaults
+    if opt_target == OptimizationTarget.Auto:
+        if is_float_input and base_metric in (_FP32_METRICS | _FP16_METRICS):
+            from deglib.tuning import predict_optimization_target
+
+            opt_target = predict_optimization_target(
+                effective_float_data,
+                metric=resolved_metric,
+                threads=threads,
+            ).target
+        else:
+            opt_target = OptimizationTarget.LowLID
+
+    # 2. Optional FLAS 1D pre-sorting (reorders both data and labels together)
     if isinstance(presort, (bool, np.bool_)):
         if presort:
-            if work_data.dtype == np.float32:
-                presort_vecs = work_data
-            elif work_data.dtype == np.float16:
-                presort_vecs = np.ascontiguousarray(work_data, dtype=np.float32)
-            else:
+            if not is_float_input:
                 raise ValueError(
                     "presort=True requires float32 or float16 input vectors; "
                     "pass a precomputed sorted_indices array instead."
                 )
-            flas_base = Metric.FP32_InnerProduct if base_metric.name.endswith("InnerProduct") else Metric.FP32_L2
-            flas_metric = (
-                flas_base.with_instruction(resolved_metric._instruction)
-                if isinstance(resolved_metric, _BoundMetric)
-                else flas_base
-            )
+            presort_vecs = spatial_data if spatial_data is not None else work_data
+            flas_base = Metric.FP16_L2 if presort_vecs.dtype == np.float16 else Metric.FP32_L2
+            bound_inst = getattr(resolved_metric, "_instruction", None)
+            flas_metric = flas_base.with_instruction(bound_inst) if bound_inst is not None else flas_base
             sorted_idx = run_presort(
                 presort_vecs,
                 metric=flas_metric,
-                radius_decay=presort_decay,
                 threads=threads,
-                show_progress=show_progress,
+                show_progress=effective_show_progress,
             )
             work_data = np.ascontiguousarray(work_data[sorted_idx])
+            if spatial_data is not None:
+                spatial_data = np.ascontiguousarray(spatial_data[sorted_idx])
             labels_arr = np.ascontiguousarray(labels_arr[sorted_idx])
     elif presort is not None:
         sorted_idx = np.ascontiguousarray(presort, dtype=np.uint32)
@@ -377,40 +488,14 @@ def build(
                 f"presort sorted_indices must be a 1D array of length {n_samples}, got shape {sorted_idx.shape}"
             )
         work_data = np.ascontiguousarray(work_data[sorted_idx])
+        if spatial_data is not None:
+            spatial_data = np.ascontiguousarray(spatial_data[sorted_idx])
         labels_arr = np.ascontiguousarray(labels_arr[sorted_idx])
 
-    # 2. Transformations / auto-quantization (run in parallel BEFORE GraphBuilder so add_entry stays fast)
-    if len(xfrms) > 0:
-        last_t = xfrms[-1]
-        if last_t.output_dtype != np.float32:
-            needs_apply = work_data.dtype == np.float32 or (
-                work_data.dtype == np.float16 and base_metric not in _FP16_METRICS
-            )
-            if needs_apply and work_data.shape[1] == xfrms[0].input_dim:
-                build_data = apply_on_database(xfrms, work_data, threads=threads)
-                graph_dim = int(last_t.output_dim)
-            else:
-                build_data = assure_array(work_data, "data", resolved_metric.get_accepted_dtypes())
-                graph_dim = _infer_dim_from_array(resolved_metric, build_data)
-        else:
-            if last_t.output_dim != xfrms[0].input_dim:
-                if work_data.shape[1] == xfrms[0].input_dim:
-                    build_data = apply_on_database(xfrms, work_data, threads=threads)
-                    graph_dim = int(last_t.output_dim)
-                elif work_data.shape[1] == last_t.output_dim:
-                    build_data = assure_array(work_data, "data", np.dtype(np.float32))
-                    graph_dim = int(build_data.shape[1])
-                else:
-                    raise InvalidShapeException(
-                        f"data width {work_data.shape[1]} matches neither transformation input_dim "
-                        f"({xfrms[0].input_dim}) nor output_dim ({last_t.output_dim})"
-                    )
-            elif any(t.name == "L2NormalizeTransform" for t in xfrms):
-                build_data = apply_on_database(xfrms, work_data, threads=threads)
-                graph_dim = int(build_data.shape[1])
-            else:
-                build_data = assure_array(work_data, "data", resolved_metric.get_accepted_dtypes())
-                graph_dim = _infer_dim_from_array(resolved_metric, build_data)
+    # 3. Transformations / auto-quantization (run in parallel BEFORE GraphBuilder so add_entry stays fast)
+    if spatial_data is not None:
+        build_data = assure_array(spatial_data, "data", resolved_metric.get_accepted_dtypes())
+        graph_dim = int(build_data.shape[1])
     else:
         is_float_src = work_data.dtype == np.float32 or (
             work_data.dtype == np.float16 and base_metric not in _FP16_METRICS
@@ -428,9 +513,9 @@ def build(
             build_data = assure_array(work_data, "data", resolved_metric.get_accepted_dtypes())
             graph_dim = _infer_dim_from_array(resolved_metric, build_data)
 
-    # 3. Construct graph without transformations during add_entry, then attach afterwards.
+    # 4. Construct graph without transformations during add_entry, then attach afterwards.
     graph = create_empty(
-        capacity=target_capacity,
+        capacity=n_samples,
         dim=graph_dim,
         edges_per_vertex=edges_per_vertex,
         metric=resolved_metric,
@@ -449,13 +534,81 @@ def build(
         threads=threads,
     )
     builder.add_entry(labels_arr, build_data)
-    builder.build(callback=callback, show_progress=show_progress)
+    builder.build(show_progress=effective_show_progress)
 
     if xfrms:
         graph.set_transformations(xfrms)
 
-    if readonly:
-        return graph.to_readonly(optimize=optimize, threads=threads)
+    # 5. Finalize graph (for high-level IP, swap MIPS build features back to unnormalized IP)
+    if is_high_level_ip:
+        comp_key = (
+            compress.strip().lower().replace("-", "").replace("_", "")
+            if isinstance(compress, str)
+            else None
+        )
+        if compress is None or comp_key in ("32bit", "fp32", "float32"):
+            target_ip = (
+                Metric.FP16_InnerProduct if data.dtype == np.dtype(np.float16) else Metric.FP32_InnerProduct
+            )
+            graph = graph.with_features(work_data, metric=target_ip, order="internal", threads=threads)
+        elif comp_key in ("16bit", "fp16", "float16"):
+            graph = graph.to_readonly().with_features(
+                work_data, metric=Metric.FP16_InnerProduct, order="internal", threads=threads
+            )
+        elif comp_key in ("8bit", "auto"):
+            from deglib.transformation import make_fast_hadamard_rotation, make_scalar_quantizer_int8
+
+            rot = make_fast_hadamard_rotation(work_data)
+            rot_data = apply_on_database(rot, work_data, threads=threads)
+            quant = make_scalar_quantizer_int8(rot_data)
+            graph = graph.to_readonly().with_features(
+                work_data,
+                metric=Metric.Int8_InnerProduct,
+                transformations=[rot, quant],
+                order="internal",
+                threads=threads,
+            )
+        elif comp_key == "4bit":
+            from deglib.transformation import (
+                make_fast_hadamard_rotation,
+                make_l2_normalize_transform,
+                make_scalar_quantizer_int4,
+            )
+
+            l2n = make_l2_normalize_transform(work_data)
+            l2n_data = apply_on_database(l2n, work_data, threads=threads)
+            rot = make_fast_hadamard_rotation(l2n_data)
+            rot_data = apply_on_database(rot, l2n_data, threads=threads)
+            quant = make_scalar_quantizer_int4(rot_data)
+            target_ip4 = Metric.Int4_InnerProduct
+            bound_inst = getattr(resolved_metric, "_instruction", None)
+            if bound_inst is not None:
+                target_ip4 = target_ip4.with_instruction(bound_inst)
+            graph = graph.to_readonly().with_features(
+                work_data,
+                metric=target_ip4,
+                transformations=[l2n, rot, quant],
+                order="internal",
+                threads=threads,
+            )
+        else:
+            graph = compress_graph(graph, compress, threads=threads)
+    elif compress is not None:
+        comp_target: Metric | str = compress
+        if (
+            isinstance(compress, str)
+            and compress.strip().lower() in ("8bit", "auto")
+            and base_metric.name.endswith("InnerProduct")
+        ):
+            from deglib.tuning import predict_quantization
+
+            comp_target = predict_quantization(
+                effective_float_data,
+                metric=resolved_metric,
+                threads=threads,
+            ).metric
+        graph = compress_graph(graph, comp_target, threads=threads)
+
     if optimize and graph.size() > 0:
         graph.optimize()
     return graph

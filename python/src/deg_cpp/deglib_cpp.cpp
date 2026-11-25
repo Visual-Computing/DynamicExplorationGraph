@@ -10,6 +10,8 @@
 #include <deglib/transformation.h>
 #include <deglib/tuning.h>
 
+#include "quantizer_pipeline.h"
+
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/function.h>
@@ -539,6 +541,42 @@ static std::shared_ptr<deglib::search::Reranker> reranker_from_float32(
     return std::make_shared<deglib::search::Reranker>(deglib::search::Reranker::from_data(space, data_span, std::move(transformations), threads, idx_span));
 }
 
+static std::shared_ptr<deglib::search::Reranker> reranker_from_fp16(
+    const deglib::distances::FloatSpace& space,
+    const InArray& data,
+    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
+    size_t threads = 0,
+    std::optional<InUint32Array> row_indices = std::nullopt
+) {
+    if (data.ndim() != 2) {
+        throw std::invalid_argument("base_vectors must be a 2D array");
+    }
+    if (!is_dtype_fp16_or_u16(data.dtype())) {
+        throw std::invalid_argument("reranker_from_fp16: expected float16 or uint16 array");
+    }
+    const uint32_t expected_input_dim =
+        (!transformations.empty() && transformations.front()) ? transformations.front()->input_dim() : static_cast<uint32_t>(space.dim());
+    if (data.shape(1) != expected_input_dim) {
+        throw std::invalid_argument(
+            std::format("base_vectors column count ({}) does not match expected input dimension ({})", data.shape(1), expected_input_dim)
+        );
+    }
+    const size_t n_rows = data.shape(0);
+    const uint32_t dim = static_cast<uint32_t>(data.shape(1));
+    std::span<const uint16_t> data_span(static_cast<const uint16_t*>(data.data()), n_rows * dim);
+
+    std::span<const uint32_t> idx_span;
+    if (row_indices.has_value() && row_indices->is_valid()) {
+        if (row_indices->ndim() != 1) {
+            throw std::invalid_argument("row_indices must be a 1D array");
+        }
+        idx_span = std::span<const uint32_t>(row_indices->data(), row_indices->shape(0));
+    }
+
+    nb::gil_scoped_release release;
+    return std::make_shared<deglib::search::Reranker>(deglib::search::Reranker::from_data(space, data_span, std::move(transformations), threads, idx_span));
+}
+
 static std::shared_ptr<deglib::search::Reranker> reranker_from_raw(
     const deglib::distances::FloatSpace& space,
     const InArray& data,
@@ -577,15 +615,8 @@ static std::shared_ptr<deglib::search::Reranker> reranker_from_graph(
     std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
     size_t threads = 0
 ) {
-    if (transformations.empty()) {
-        const auto target_dt = space.metric().get_data_type();
-        const auto graph_dt = graph.getFeatureSpace().metric().get_data_type();
-        if (target_dt == deglib::distances::MetricDataType::FP16 && graph_dt == deglib::distances::MetricDataType::FP16 && graph.hasTransformations()) {
-            transformations = graph.getTransformations();
-        }
-    }
     nb::gil_scoped_release release;
-    return std::make_shared<deglib::search::Reranker>(deglib::search::Reranker::from_graph(graph.internal(), space, std::move(transformations), threads));
+    return std::make_shared<deglib::search::Reranker>(graph.to_reranker(space, std::move(transformations), threads));
 }
 
 static nb::object reranker_rerank_py(
@@ -693,14 +724,8 @@ class SearcherPy {
         const deglib::DynamicExplorationGraph& graph,
         std::shared_ptr<deglib::search::Reranker> shared_reranker = nullptr,
         bool normalize_query = false
-    ) {
-        if (shared_reranker) {
-            searcher_ = deglib::make_searcher(graph, std::move(shared_reranker));
-        } else {
-            searcher_ = deglib::make_searcher(graph);
-        }
-        searcher_->set_normalize_query(normalize_query);
-    }
+    )
+        : searcher_(std::make_unique<deglib::search::Searcher>(graph.to_searcher(std::move(shared_reranker), normalize_query))) {}
 
     bool get_normalize_query() const noexcept { return searcher_->normalize_query(); }
     void set_normalize_query(bool val) noexcept { searcher_->set_normalize_query(val); }
@@ -1034,40 +1059,8 @@ nb::ndarray<nb::numpy, uint32_t, nb::ndim<1>, nb::c_contig> presort_wrapper(
     return output;
 }
 
-deglib::DynamicExplorationGraph read_only_graph_from_graph_wrapper(
-    const deglib::DynamicExplorationGraph& graph,
-    std::optional<deglib::distances::FloatSpace> custom_feature_space = std::nullopt,
-    std::optional<InArray> custom_features = std::nullopt,
-    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> custom_transformations = {}
-) {
-    const void* feat_ptr = extract_custom_features_ptr(graph, custom_feature_space, custom_features);
-    return graph.to_readonly(custom_feature_space, feat_ptr, std::move(custom_transformations));
-}
-
-deglib::DynamicExplorationGraph dynamic_graph_from_graph_wrapper(
-    const deglib::DynamicExplorationGraph& graph,
-    std::optional<deglib::distances::FloatSpace> custom_feature_space = std::nullopt,
-    std::optional<InArray> custom_features = std::nullopt,
-    const uint32_t chunk_size = 1024,
-    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> custom_transformations = {}
-) {
-    const void* feat_ptr = extract_custom_features_ptr(graph, custom_feature_space, custom_features);
-    return graph.to_dynamic(custom_feature_space, feat_ptr, chunk_size, std::move(custom_transformations));
-}
-
 deglib::DynamicExplorationGraph load_dynamic_graph_wrapper(const char* path, const uint32_t chunk_size = 1024) {
     return deglib::load_dynamic_graph(path, chunk_size);
-}
-
-deglib::DynamicExplorationGraph size_bounded_graph_from_graph_wrapper(
-    const deglib::DynamicExplorationGraph& graph,
-    std::optional<deglib::distances::FloatSpace> custom_feature_space = std::nullopt,
-    std::optional<InArray> custom_features = std::nullopt,
-    const uint32_t new_max_size = 0,
-    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> custom_transformations = {}
-) {
-    const void* feat_ptr = extract_custom_features_ptr(graph, custom_feature_space, custom_features);
-    return graph.to_mutable(custom_feature_space, feat_ptr, new_max_size, std::move(custom_transformations));
 }
 
 deglib::DynamicExplorationGraph create_size_bounded_graph(
@@ -1765,49 +1758,14 @@ NB_MODULE(deglib_cpp, m) {
 
     transformation_module.def(
         "make_quantizer_pipeline_from_graph",
-        [](const deglib::DynamicExplorationGraph& graph, nb::object quant, float quantile, bool use_rerank, size_t threads, uint64_t seed) {
-            if (graph.size() == 0) {
-                throw std::invalid_argument("Cannot calibrate quantizer pipeline from an empty graph");
-            }
-            const auto& src_space = graph.getFeatureSpace();
-            const auto src_dt = src_space.metric().get_data_type();
-            if (src_dt != deglib::distances::MetricDataType::FP32 && src_dt != deglib::distances::MetricDataType::FP16) {
-                throw std::invalid_argument("Cannot calibrate quantizer pipeline from a non-float graph without external features");
-            }
+        [](const deglib::DynamicExplorationGraph& graph, nb::object quant, float quantile, bool use_rerank, size_t threads, uint64_t seed, bool normalize, bool mips) {
             const auto target_dt = parse_quant_data_type(quant);
-            const size_t n = graph.size();
-            const uint32_t dim = static_cast<uint32_t>(src_space.dim());
-            const size_t max_sample = (target_dt == deglib::distances::MetricDataType::EVP) ? 65536 : 10000;
-            const size_t sample_count = std::min(n, max_sample);
-            std::vector<float> sample_f32(sample_count * dim);
-            const bool src_fp16 = (src_dt == deglib::distances::MetricDataType::FP16);
-            const auto& internal = graph.internal();
-
-            std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> pipeline;
-            {
-                nb::gil_scoped_release release;
-                deglib::concurrent::parallel_batch_for(
-                    size_t{0}, sample_count, threads,
-                    [&](size_t begin, size_t end, size_t) {
-                        for (size_t s = begin; s < end; ++s) {
-                            const uint32_t v_idx = static_cast<uint32_t>((sample_count == n) ? s : (s * n) / sample_count);
-                            const std::byte* src = internal.getFeatureVector(v_idx);
-                            float* dst = sample_f32.data() + s * dim;
-                            if (src_fp16) {
-                                deglib::distances::fp16::fp16_to_floats(reinterpret_cast<const uint16_t*>(src), dst, dim);
-                            } else {
-                                std::memcpy(dst, src, static_cast<size_t>(dim) * sizeof(float));
-                            }
-                        }
-                    },
-                    64
-                );
-                pipeline =
-                    deglib::transformation::make_quantizer_pipeline(std::span<const float>(sample_f32), dim, target_dt, quantile, use_rerank, threads, seed);
-            }
-            return pipeline;
+            nb::gil_scoped_release release;
+            return deglib_py::make_quantizer_pipeline_from_graph(
+                graph.internal(), target_dt, quantile, use_rerank, threads, seed, normalize, mips
+            );
         },
-        nb::arg("graph"), nb::arg("quant"), nb::arg("quantile") = -1.0f, nb::arg("use_rerank") = false, nb::arg("threads") = 0, nb::arg("seed") = 7,
+        nb::arg("graph"), nb::arg("quant"), nb::arg("quantile") = -1.0f, nb::arg("use_rerank") = false, nb::arg("threads") = 0, nb::arg("seed") = 7, nb::arg("normalize") = false, nb::arg("mips") = false,
         "Calibrate a quantizer pipeline directly from an FP32/FP16 graph's stored vectors."
     );
 
@@ -2059,6 +2017,11 @@ NB_MODULE(deglib_cpp, m) {
             nb::arg("row_indices") = nb::none()
         )
         .def_static(
+            "from_fp16", &reranker_from_fp16, nb::arg("space"), nb::arg("data"),
+            nb::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}, nb::arg("threads") = 0,
+            nb::arg("row_indices") = nb::none()
+        )
+        .def_static(
             "from_raw", &reranker_from_raw, nb::arg("space"), nb::arg("data"),
             nb::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}, nb::arg("threads") = 0,
             nb::arg("row_indices") = nb::none()
@@ -2218,9 +2181,13 @@ NB_MODULE(deglib_cpp, m) {
             },
             "Returns a 1D numpy array of all external labels ordered by their internal graph index (0 .. size()-1)."
         )
-        .def("get_neighbors", &deglib::DynamicExplorationGraph::getNeighbors)
         .def(
-            "get_neighbors_batch",
+            "get_neighbors",
+            [](const deglib::DynamicExplorationGraph& g, uint32_t external_label) { return g.getNeighbors(external_label); },
+            nb::arg("external_label")
+        )
+        .def(
+            "get_neighbors",
             [](const deglib::DynamicExplorationGraph& g, const InUint32Array& labels, size_t threads) {
                 if (labels.ndim() != 1) {
                     throw std::invalid_argument(std::format("Expected labels to have 1 dimension, got {}", labels.ndim()));
@@ -2233,7 +2200,7 @@ NB_MODULE(deglib_cpp, m) {
                 std::span<uint32_t> out_span(out_ptr, static_cast<size_t>(n_labels) * edges);
                 {
                     nb::gil_scoped_release release;
-                    g.getNeighbors_batch(labels_span, out_span, threads);
+                    g.getNeighbors(labels_span, out_span, threads);
                 }
                 return result;
             },
@@ -2242,39 +2209,71 @@ NB_MODULE(deglib_cpp, m) {
         .def("is_mutable", &deglib::DynamicExplorationGraph::isMutable)
         .def(
             "to_readonly",
-            [](const deglib::DynamicExplorationGraph& g, std::optional<deglib::distances::FloatSpace> custom_feature_space,
-               std::optional<InArray> custom_features, std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
-               size_t num_threads) {
-                const void* feat_ptr = extract_custom_features_ptr(g, custom_feature_space, custom_features);
+            [](const deglib::DynamicExplorationGraph& g) {
                 nb::gil_scoped_release release;
-                return g.to_readonly(custom_feature_space, feat_ptr, std::move(transformations), num_threads);
-            },
-            nb::arg("custom_feature_space") = nb::none(), nb::arg("custom_features") = nb::none(),
-            nb::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}, nb::arg("threads") = 0
+                return g.to_readonly();
+            }
         )
-        .def("set_transformations", &deglib::DynamicExplorationGraph::setTransformations, nb::arg("transformations"))
         .def(
             "to_mutable",
-            [](const deglib::DynamicExplorationGraph& g, std::optional<deglib::distances::FloatSpace> custom_feature_space,
-               std::optional<InArray> custom_features, uint32_t new_max_size,
-               std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations) {
-                const void* feat_ptr = extract_custom_features_ptr(g, custom_feature_space, custom_features);
-                return g.to_mutable(custom_feature_space, feat_ptr, new_max_size, std::move(transformations));
+            [](const deglib::DynamicExplorationGraph& g, uint32_t new_max_size, size_t num_threads) {
+                nb::gil_scoped_release release;
+                return g.to_mutable(new_max_size, num_threads);
             },
-            nb::arg("custom_feature_space") = nb::none(), nb::arg("custom_features") = nb::none(), nb::arg("new_max_size") = 0,
-            nb::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}
+            nb::arg("max_size") = 0, nb::arg("threads") = 0
         )
         .def(
             "to_dynamic",
-            [](const deglib::DynamicExplorationGraph& g, std::optional<deglib::distances::FloatSpace> custom_feature_space,
-               std::optional<InArray> custom_features, uint32_t chunk_size,
-               std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations) {
-                const void* feat_ptr = extract_custom_features_ptr(g, custom_feature_space, custom_features);
-                return g.to_dynamic(custom_feature_space, feat_ptr, chunk_size, std::move(transformations));
+            [](const deglib::DynamicExplorationGraph& g, uint32_t chunk_size, size_t num_threads) {
+                nb::gil_scoped_release release;
+                return g.to_dynamic(chunk_size, num_threads);
             },
-            nb::arg("custom_feature_space") = nb::none(), nb::arg("custom_features") = nb::none(), nb::arg("chunk_size") = 1024,
-            nb::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}
+            nb::arg("chunk_size") = 1024, nb::arg("threads") = 0
         )
+        .def(
+            "with_metric",
+            [](const deglib::DynamicExplorationGraph& g, const deglib::distances::FloatSpace& target_space, size_t num_threads) {
+                nb::gil_scoped_release release;
+                return g.with_metric(target_space, num_threads);
+            },
+            nb::arg("target_space"), nb::arg("threads") = 0
+        )
+        .def(
+            "with_transformations",
+            [](const deglib::DynamicExplorationGraph& g, std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
+               std::optional<deglib::distances::FloatSpace> target_space, size_t num_threads) {
+                nb::gil_scoped_release release;
+                return g.with_transformations(std::move(transformations), target_space, num_threads);
+            },
+            nb::arg("transformations"), nb::arg("target_space") = nb::none(), nb::arg("threads") = 0
+        )
+        .def(
+            "with_features",
+            [](const deglib::DynamicExplorationGraph& g, const deglib::distances::FloatSpace& target_space, InArray features,
+               std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations, size_t num_threads) {
+                const void* feat_ptr = extract_custom_features_ptr(g, target_space, features);
+                nb::gil_scoped_release release;
+                return g.with_features(target_space, feat_ptr, std::move(transformations), num_threads);
+            },
+            nb::arg("target_space"), nb::arg("features"),
+            nb::arg("transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{},
+            nb::arg("threads") = 0
+        )
+        .def(
+            "_transform_readonly",
+            [](const deglib::DynamicExplorationGraph& g, std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
+               std::optional<deglib::distances::FloatSpace> target_space, size_t num_threads) {
+                nb::gil_scoped_release release;
+                auto combined = g.getTransformations();
+                combined.insert(combined.end(), transformations.begin(), transformations.end());
+                auto ro = std::make_unique<deglib::graph::ReadOnlyGraph>(
+                    deglib::graph::ReadOnlyGraph::from_graph(g.internal(), target_space, transformations, num_threads)
+                );
+                return deglib::DynamicExplorationGraph(std::move(ro), std::move(combined));
+            },
+            nb::arg("transformations"), nb::arg("target_space") = nb::none(), nb::arg("threads") = 0
+        )
+        .def("set_transformations", &deglib::DynamicExplorationGraph::setTransformations, nb::arg("transformations"))
         .def(
             "search", &graph_search_single_wrapper, nb::arg("query"), nb::arg("eps_or_ef"), nb::arg("k"), nb::arg("filter") = nullptr,
             nb::arg("max_distance_computation_count") = 0, nb::arg("return_distances") = true, nb::arg("unsorted") = false
@@ -2355,21 +2354,6 @@ NB_MODULE(deglib_cpp, m) {
     m.def("load_readonly_graph", &load_readonly_graph_wrapper);
     m.def("load_dynamic_graph", &load_dynamic_graph_wrapper, nb::arg("path"), nb::arg("chunk_size") = 1024);
     m.def("load_sizebounded_graph", &load_sizebounded_graph_wrapper, nb::arg("path"), nb::arg("capacity") = 0);
-    m.def(
-        "read_only_graph_from_graph", &read_only_graph_from_graph_wrapper, nb::arg("graph"), nb::arg("custom_feature_space") = nb::none(),
-        nb::arg("custom_features") = nb::none(),
-        nb::arg("custom_transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}
-    );
-    m.def(
-        "dynamic_graph_from_graph", &dynamic_graph_from_graph_wrapper, nb::arg("graph"), nb::arg("custom_feature_space") = nb::none(),
-        nb::arg("custom_features") = nb::none(), nb::arg("chunk_size") = 1024,
-        nb::arg("custom_transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}
-    );
-    m.def(
-        "size_bounded_graph_from_graph", &size_bounded_graph_from_graph_wrapper, nb::arg("graph"), nb::arg("custom_feature_space") = nb::none(),
-        nb::arg("custom_features") = nb::none(), nb::arg("new_max_size") = 0,
-        nb::arg("custom_transformations") = std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>>{}
-    );
     m.def(
         "presort", &presort_wrapper, nb::arg("vectors"), nb::arg("space"), nb::arg("radius_decay") = 0.9f, nb::arg("threads") = 0,
         nb::arg("callback") = nb::none()

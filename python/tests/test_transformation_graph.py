@@ -8,7 +8,6 @@ import deglib
 from deglib import (
     Metric,
     create_empty,
-    create_searcher,
     load_graph,
     load_mutable_graph,
     load_readonly_graph,
@@ -203,11 +202,8 @@ def test_container_persistence_roundtrip():
         assert ro_indices[0] == 7
 
         # 4. Searcher with loaded graph
-        searcher = create_searcher(
-            graph=ro_g,
-            rerank_metric=Metric.FP32_L2,
-            rerank_data=data,
-        )
+        reranker = deglib.Reranker(Metric.FP32_L2, data)
+        searcher = ro_g.to_searcher(reranker=reranker, optimize=False)
         searcher.optimize(n_clusters=min(N, 16), n_iter=5, sample_size=N)
         res_searcher = searcher.search(query, k=5, eps_or_ef=0.2, rerank_factor=1.5).indices
         assert res_searcher[0] == 7
@@ -332,11 +328,39 @@ def test_uint4_transformation_graph_search():
     builder.add_entry(np.arange(N, dtype=np.uint32), data_f32)
     builder.build()
 
-    ro_graph = graph.to_readonly(Metric.Uint4_L2, quantized_data, transformations=[transform])
-    searcher = create_searcher(ro_graph)
+    ro_graph = graph.with_features(quantized_data, metric=Metric.Uint4_L2, transformations=[transform])
+    searcher = ro_graph.to_searcher()
 
     # Search with original float query
     query = data_f32[0]
     indices = searcher.search(query, k=5, eps_or_ef=0.1).indices
     assert len(indices) == 5
     assert indices[0] == 0
+
+
+def test_mips_transform_chains_through_reranker_and_quantized_searcher():
+    rng = np.random.default_rng(7)
+    n, d = 64, 16
+    data = rng.standard_normal((n, d)).astype(np.float32) * 5.0
+    queries = rng.standard_normal((4, d)).astype(np.float32) * 3.0
+
+    mips = deglib.make_mips_transform(data)
+    data_mips = deglib.apply_on_database(mips, data, threads=2)
+    mut = deglib.create_empty(n, d + 1, edges_per_vertex=16, metric=Metric.FP32_L2)
+    b = deglib.GraphBuilder(mut, threads=2)
+    b.add_entry(np.arange(n, dtype=np.uint32), data_mips)
+    b.build()
+    mut.set_transformations([mips])
+    graph = mut.to_readonly()
+
+    reranker = graph.to_reranker(Metric.FP16_L2, threads=2)
+    searcher = graph.to_searcher(metric=Metric.Int8_L2, reranker=reranker, optimize=False, threads=2)
+
+    assert [t.name for t in searcher.graph.get_transformations()] == ["MipsTransform", "ScalarQuantizerInt8"]
+
+    # Query directly with raw d-dimensional float32 vectors (single C++ call)
+    for q in queries:
+        res = searcher.search(q, k=5, eps_or_ef=32, rerank_factor=2.0)
+        assert res.indices.shape == (5,)
+        exact_top1 = int(np.argmax(data @ q))
+        assert exact_top1 in res.indices

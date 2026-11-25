@@ -44,6 +44,25 @@ def get_ranking(features: np.ndarray, graph: deglib.DynamicExplorationGraph, que
     return np.argsort(distances)
 
 
+def _build_mutable(
+    data: np.ndarray,
+    edges_per_vertex: int = 16,
+    metric: Metric = Metric.FP32_L2,
+    optimization_target=deglib.builder.OptimizationTarget.LowLID,
+    seed: int = 7,
+):
+    g = deglib.create_empty(
+        capacity=data.shape[0],
+        dim=deglib.distances._infer_dim_from_array(metric, data),
+        edges_per_vertex=edges_per_vertex,
+        metric=metric,
+    )
+    b = deglib.GraphBuilder(g, seed=seed, optimization_target=optimization_target)
+    b.add_entry(np.arange(data.shape[0], dtype=np.uint32), data)
+    b.build()
+    return g
+
+
 class Configuration:
     def __init__(
         self,
@@ -90,7 +109,7 @@ class Configuration:
         else:
             raise ValueError(f"Unsupported metric: {metric}")
 
-        size_bounded_graph = deglib.build(
+        size_bounded_graph = _build_mutable(
             data,
             edges_per_vertex=edges_per_vertex,
             metric=metric,
@@ -110,7 +129,7 @@ class Configuration:
         ]
 
     def create_new_size_bounded_graph(self):
-        return deglib.build(self.data, edges_per_vertex=self.edges_per_vertex, metric=self.metric)
+        return _build_mutable(self.data, edges_per_vertex=self.edges_per_vertex, metric=self.metric)
 
     def __repr__(self):
         return f"Conf({type(self.graph).__name__}, metric={self.metric.name})"
@@ -489,21 +508,15 @@ def test_facade_explore_ef():
 
 
 def test_facade_get_neighbors_batch():
-    """get_neighbors with batch array and get_neighbors_batch method."""
+    """get_neighbors handles a batch array via its unified overloaded interface."""
     g, _ = _build_test_graph_with_distinct_labels()
     labels = np.array([0, 10], dtype=np.uint32)
     edges = g.get_edges_per_vertex()
 
-    # Via get_neighbors(array)
-    batch_neighbors = g.get_neighbors(labels)
+    batch_neighbors = g.get_neighbors(labels, threads=2)
     assert batch_neighbors.shape == (2, edges)
     assert set(batch_neighbors[0]) == set(g.get_neighbors(0))
     assert set(batch_neighbors[1]) == set(g.get_neighbors(10))
-
-    # Via get_neighbors_batch(array)
-    direct_batch = g.get_neighbors_batch(labels)
-    assert direct_batch.shape == (2, edges)
-    np.testing.assert_array_equal(batch_neighbors, direct_batch)
 
 
 def test_facade_has_path_reaches_adjacent_target():
@@ -603,7 +616,7 @@ def test_to_readonly_custom_features():
     fp16_data = deglib.distances.floats_to_fp16(data)
 
     # Swap to FP16 ReadOnlyGraph
-    ro_g = g.to_readonly(metric=Metric.FP16_InnerProduct, custom_features=fp16_data)
+    ro_g = g.to_readonly().with_features(fp16_data, metric=Metric.FP16_InnerProduct)
     assert ro_g.size() == N
     assert not ro_g.is_mutable()
     assert ro_g.get_metric() == Metric.FP16_InnerProduct
@@ -632,7 +645,7 @@ def test_to_readonly_swap_fp16_l2():
     fp16_data = deglib.distances.floats_to_fp16(data)
 
     # Swap to FP16 L2 ReadOnlyGraph
-    ro_g = g.to_readonly(metric=Metric.FP16_L2, custom_features=fp16_data)
+    ro_g = g.to_readonly().with_features(fp16_data, metric=Metric.FP16_L2)
     assert ro_g.size() == N
     assert not ro_g.is_mutable()
     assert ro_g.get_metric() == Metric.FP16_L2
@@ -792,13 +805,13 @@ def test_sizebounded_graph_from_graph_custom_features():
 
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
 
-    graph = deglib.build(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
+    graph = _build_mutable(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
 
     # Create scaled custom features
     custom_features = data * 10.0
 
-    # Convert to mutable with custom features
-    mutable_graph = graph.to_mutable(metric=Metric.FP32_L2, custom_features=custom_features)
+    # Replace features on mutable graph (preserves mutable backend)
+    mutable_graph = graph.with_features(custom_features, metric=Metric.FP32_L2)
     assert mutable_graph.is_mutable()
     assert mutable_graph.size() == samples
 
@@ -828,12 +841,13 @@ def test_graph_get_labels_and_custom_features_with_permuted_labels():
     # Prepare custom features aligned to internal order
     scaled_data = data * 2.0
     # Provide custom_features in internal order
-    readonly_graph = graph.to_readonly(
+    readonly_graph = graph.to_readonly().with_features(
+        scaled_data,
         metric=Metric.FP32_L2,
-        custom_features=scaled_data,
-        custom_features_order="internal",
+        order="internal",
     )
     assert readonly_graph.size() == samples
+    assert not readonly_graph.is_mutable()
     np.testing.assert_array_equal(readonly_graph.get_labels(), external_labels)
 
     # Provide custom_features in label order (dense 0..samples-1 permuted labels)
@@ -845,10 +859,10 @@ def test_graph_get_labels_and_custom_features_with_permuted_labels():
         metric=Metric.FP32_L2,
         seed=42,
     )
-    ro_label_order = dense_graph.to_readonly(
+    ro_label_order = dense_graph.to_readonly().with_features(
+        data * 2.0,
         metric=Metric.FP32_L2,
-        custom_features=data * 2.0,
-        custom_features_order="label",
+        order="label",
     )
     q = data[dense_labels[0]] * 2.0
     r = ro_label_order.search(q, eps_or_ef=30.0, k=1)
@@ -867,8 +881,8 @@ def test_sizebounded_graph_from_graph_capacity():
 
     graph = deglib.build(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
 
-    # Convert to mutable with larger capacity
-    mutable_graph = graph.to_mutable(metric=Metric.FP32_L2, capacity=100)
+    # Convert to mutable with larger max_size
+    mutable_graph = graph.to_mutable(max_size=100)
     assert mutable_graph.is_mutable()
     assert mutable_graph.size() == samples
 
@@ -1001,7 +1015,7 @@ def test_save_and_load_dynamic_graph(tmp_path):
     edges_per_vertex = 6
 
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
-    graph = deglib.build(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
+    graph = _build_mutable(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
 
     file_path = tmp_path / "test_dyn_graph.deg"
     graph.save_graph(file_path)
@@ -1027,7 +1041,7 @@ def test_save_and_load_mutable_graph(tmp_path):
     edges_per_vertex = 6
 
     data = np.random.default_rng(42).standard_normal((samples, dims)).astype(np.float32)
-    graph = deglib.build(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
+    graph = _build_mutable(data, edges_per_vertex=edges_per_vertex, metric=Metric.FP32_L2)
 
     file_path = tmp_path / "test_mutable_graph.deg"
     graph.save_graph(file_path)
@@ -1080,27 +1094,32 @@ def test_create_helpers():
 
 
 def test_to_readonly_self_quantization():
-    """FP32 graph converts to Int8 / EVP / FP16 automatically when metric changes without explicit transforms."""
+    """FP32 graph converts to Int8 / EVP automatically when metric changes without explicit transforms."""
     rng = np.random.default_rng(9)
     raw = rng.standard_normal((40, 16)).astype(np.float32)
     unit = raw / np.linalg.norm(raw, axis=1, keepdims=True)
 
-    g_l2 = deglib.build(raw, edges_per_vertex=8, extend_k=16, metric=Metric.FP32_L2)
-    ro_int8 = g_l2.to_readonly(Metric.Int8_L2)
+    g_l2 = _build_mutable(raw, edges_per_vertex=8, metric=Metric.FP32_L2)
+    ro_int8 = g_l2.to_readonly().with_metric(Metric.Int8_L2)
     assert not ro_int8.is_mutable()
     assert ro_int8.get_metric() == Metric.Int8_L2
     idx = ro_int8.search(raw[0], eps_or_ef=0.2, k=5).indices
     assert len(idx) == 5
 
+    mut_int8 = g_l2.with_metric(Metric.Int8_L2)
+    assert mut_int8.is_mutable()
+    assert mut_int8.get_metric() == Metric.Int8_L2
+
     g_ip = deglib.build(unit, edges_per_vertex=8, extend_k=16, metric=Metric.FP32_InnerProduct)
-    ro_evp = g_ip.to_readonly(Metric.EVP_InnerProduct)
+    ro_evp = g_ip.to_readonly().with_metric(Metric.EVP_InnerProduct)
+    assert not ro_evp.is_mutable()
     assert ro_evp.get_metric() == Metric.EVP_InnerProduct
     idx_evp = ro_evp.search(unit[0], eps_or_ef=0.2, k=5).indices
     assert len(idx_evp) == 5
 
 
 def test_graph_conversion_validation():
-    """Test Python-side validation in to_readonly, to_mutable, and to_dynamic."""
+    """Test Python-side validation in with_metric, with_transformations, with_features, to_mutable, and to_dynamic."""
     rng = np.random.default_rng(7)
     data = rng.standard_normal((24, 16)).astype(np.float32)
     g = deglib.build(data, edges_per_vertex=4, metric=Metric.FP32_L2)
@@ -1108,42 +1127,69 @@ def test_graph_conversion_validation():
 
     # 1. Invalid metric string / type
     with pytest.raises(ValueError, match="Unknown metric"):
-        g.to_readonly(metric="Int8_L2_INVALID")
+        g.with_metric("Int8_L2_INVALID")
     with pytest.raises(TypeError, match="Metric"):
-        g.to_readonly(metric=object())
+        g.with_metric(object())
 
-    # 2. Invalid transformation object
+    # 2. Invalid or empty transformations
+    with pytest.raises(ValueError, match="at least one"):
+        g.with_transformations([])
     with pytest.raises((TypeError, AttributeError)):
-        g.to_readonly(transformations=["not_a_transform"])
+        g.with_transformations(["not_a_transform"])
 
     # 3. Transformation input_dim mismatch against graph dim
     wrong_dim_q = deglib.make_scalar_quantizer_int8(rng.standard_normal((10, 8)).astype(np.float32))
     with pytest.raises(ValueError, match="input_dim"):
-        g.to_mutable(transformations=[wrong_dim_q])
+        g.with_transformations([wrong_dim_q])
 
     # 4. Transformation output_byte_size mismatch against target metric
     with pytest.raises(ValueError, match="output_byte_size"):
-        g.to_dynamic(metric=Metric.FP16_L2, transformations=[q_int8])
+        g.to_dynamic().with_transformations([q_int8], metric=Metric.FP16_L2)
 
-    # 5. custom_features wrong shape / row count / dtype
+    # 5. with_features wrong shape / row count / dtype
     with pytest.raises(ValueError, match="2D array"):
-        g.to_readonly(custom_features=data.ravel())
+        g.with_features(data.ravel())
     with pytest.raises(ValueError, match="row count"):
-        g.to_mutable(custom_features=data[:10])
+        g.with_features(data[:10])
     with pytest.raises((ValueError, deglib.utils.WrongDtypeException)):
-        g.to_dynamic(custom_features=data.astype(np.float16))
+        g.to_dynamic().with_features(data.astype(np.float16))
 
-    # 6. Self-transform from non-float graph without custom_features
-    ro_int8 = g.to_readonly(Metric.Int8_L2, transformations=[q_int8])
+    # 6. Self-transform from non-float graph
+    ro_int8 = g.to_readonly().with_transformations([q_int8], metric=Metric.Int8_L2)
+    assert not ro_int8.is_mutable()
     q_uint8 = deglib.make_scalar_quantizer_uint8(data)
     with pytest.raises(ValueError, match="non-float"):
-        ro_int8.to_readonly(Metric.Uint8_L2, transformations=[q_uint8])
+        ro_int8.with_metric(Metric.Uint8_L2)
+    with pytest.raises((ValueError, RuntimeError)):
+        ro_int8.with_transformations([q_uint8], metric=Metric.Uint8_L2)
 
-    # 7. Invalid capacity / chunk_size
-    with pytest.raises(ValueError, match="capacity"):
-        g.to_mutable(capacity=-1)
+    # 7. Invalid max_size / chunk_size
+    with pytest.raises(ValueError, match="max_size"):
+        g.to_mutable(max_size=-1)
     with pytest.raises(ValueError, match="chunk_size"):
         g.to_dynamic(chunk_size=0)
+
+
+def test_graph_with_metric_same_dtype_retag_preserves_backend():
+    """with_metric(metric) with same data type preserves features and current backend."""
+    rng = np.random.default_rng(13)
+    data = rng.standard_normal((24, 8)).astype(np.float32)
+    g_l2 = _build_mutable(data, edges_per_vertex=4, metric=Metric.FP32_L2)
+
+    ro_ip = g_l2.to_readonly().with_metric(Metric.FP32_InnerProduct)
+    assert not ro_ip.is_mutable()
+    assert ro_ip.get_metric() == Metric.FP32_InnerProduct
+    assert ro_ip.get_neighbors(0) == g_l2.get_neighbors(0)
+
+    mut_ip = g_l2.with_metric(Metric.FP32_InnerProduct, threads=2)
+    assert mut_ip.is_mutable()
+    assert mut_ip.get_metric() == Metric.FP32_InnerProduct
+    assert mut_ip.get_neighbors(0) == g_l2.get_neighbors(0)
+
+    dyn_ip = g_l2.to_dynamic(chunk_size=32).with_metric(Metric.FP32_InnerProduct, threads=2)
+    assert dyn_ip.is_mutable()
+    assert dyn_ip.get_metric() == Metric.FP32_InnerProduct
+    assert dyn_ip.get_neighbors(0) == g_l2.get_neighbors(0)
 
 
 def test_graph_search_results_zero_copy_lifetime_and_bounds():

@@ -193,7 +193,7 @@ batch_labels, batch_distances = batch_exp.indices, batch_exp.distances
 
 # Retrieve graph neighbors directly
 neighbors = graph.get_neighbors(105)
-batch_neighbors = graph.get_neighbors_batch(batch_entries, threads=4)  # shape: (3, edges_per_vertex)
+batch_neighbors = graph.get_neighbors(batch_entries, threads=4)  # shape: (3, edges_per_vertex)
 ```
 
 ---
@@ -220,10 +220,11 @@ graph = deglib.build(
     show_progress=True,
 )
 
-# 2. Convert into Int8 ReadOnlyGraph and attach FP16 reranker extracted from FP32 graph
+# 2. Extract FP16 reranker from FP32 graph and convert into Int8 ReadOnlyGraph Searcher
+reranker = graph.to_reranker(deglib.Metric.FP16_InnerProduct)
 searcher = graph.to_searcher(
     metric=deglib.Metric.Int8_InnerProduct,
-    rerank_metric=deglib.Metric.FP16_InnerProduct,
+    reranker=reranker,
 )
 
 # 3. Query search (query is automatically quantized and top candidates are reranked)

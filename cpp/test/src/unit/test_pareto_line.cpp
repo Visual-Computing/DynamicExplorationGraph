@@ -436,7 +436,7 @@ TEST(ParetoLineTest, EndToEndGraphOverloadsAndMetrics) {
 
     auto int8_xfrms = deglib::transformation::make_quantizer_pipeline(ip_data, qdim, Metric::Int8_InnerProduct);
     auto int8_space = deglib::distances::FloatSpace(qdim, Metric::Int8_InnerProduct);
-    auto int8_graph = ip_graph.to_readonly(int8_space, nullptr, int8_xfrms);
+    auto int8_graph = ip_graph.with_transformations(int8_xfrms, int8_space);
     const ParetoLine int8_line = int8_graph.to_pareto_line(10, 50, {0.70f, 0.99f}, 0.10f, 1);
     verify_pareto_invariants(int8_line);
 
@@ -444,7 +444,7 @@ TEST(ParetoLineTest, EndToEndGraphOverloadsAndMetrics) {
     auto l2_graph = build_fp32_graph(l2_data, qdim, 16, Metric::FP32_L2);
     auto u4_xfrms = deglib::transformation::make_quantizer_pipeline(l2_data, qdim, Metric::Uint4_L2);
     auto u4_space = deglib::distances::FloatSpace(qdim, Metric::Uint4_L2);
-    auto u4_graph = l2_graph.to_readonly(u4_space, nullptr, u4_xfrms);
+    auto u4_graph = l2_graph.with_transformations(u4_xfrms, u4_space);
     const ParetoLine u4_line = u4_graph.to_pareto_line(10, 50, {0.70f, 0.99f}, 0.10f, 1);
     verify_pareto_invariants(u4_line);
 }

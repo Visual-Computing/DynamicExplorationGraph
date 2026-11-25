@@ -5,6 +5,7 @@ import deglib_cpp
 
 from deglib.distances import Metric
 from deglib.graph import DynamicExplorationGraph
+from deglib.transformation import is_high_level_metric_name
 from deglib.utils import assure_array
 
 cpp_opt = deglib_cpp.optimization
@@ -48,9 +49,13 @@ def presort(
     Perform 1D pre-sorting of dataset feature vectors using FLAS (Fast Linear Alignment Scheme).
 
     Args:
-        vectors: 2D ``float32`` NumPy array of shape ``(N, dim)``.
-        metric: ``Metric.FP32_L2`` or ``Metric.FP32_InnerProduct`` (string or ``Metric``;
-            optionally bound via ``.with_instruction(...)``).
+        vectors: 2D ``float32`` or ``float16`` NumPy array of shape ``(N, dim)``.
+        metric: Metric used for FLAS distance comparisons. Accepts:
+            - High-level metric strings: ``"l2"``, ``"euclidean"``, ``"cosine"``,
+              ``"normalized"``, ``"ip"``, ``"innerproduct"``, ``"inner_product"``, ``"mips"``.
+            - Explicit ``Metric`` or metric string: ``Metric.FP32_L2``, ``Metric.FP16_L2``,
+              ``Metric.FP32_InnerProduct``, ``Metric.FP16_InnerProduct`` (optionally bound via
+              ``.with_instruction(...)``).
         radius_decay: Decay rate for FLAS neighborhood radius per iteration in ``(0, 1)``.
         threads: Number of worker threads (``0`` = all CPU cores).
         callback: Optional callback receiving progress in ``[0.0, 1.0]``; returning ``False`` cancels.
@@ -59,22 +64,40 @@ def presort(
     Returns:
         1D ``uint32`` array of sorted dataset indices of length ``N``.
     """
-    resolved_metric = Metric.resolve(metric)
-    base_metric = Metric(int(resolved_metric))
-    if base_metric not in (
-        Metric.FP32_L2,
-        Metric.FP32_InnerProduct,
-        Metric.FP16_L2,
-        Metric.FP16_InnerProduct,
-    ):
-        raise ValueError(f"presort only supports FP32/FP16 L2 and InnerProduct metrics, got {resolved_metric.name}")
+    if is_high_level_metric_name(metric):
+        if not isinstance(vectors, np.ndarray) or vectors.ndim != 2:
+            raise ValueError(f"vectors must be a 2D array, got shape {getattr(vectors, 'shape', type(vectors))}")
+        if vectors.dtype not in (np.dtype(np.float32), np.dtype(np.float16)):
+            raise ValueError(f"presort requires float32 or float16 vectors, got dtype {vectors.dtype}")
+        vectors = np.ascontiguousarray(vectors)
+        if vectors.shape[0] == 0:
+            return np.empty(0, dtype=np.uint32)
+        if metric.strip().lower() in ("ip", "innerproduct", "inner_product", "mips"):
+            from deglib.transformation import apply_on_database, make_mips_transform
 
-    expected_dtype = np.dtype(np.float16) if "FP16" in base_metric.name else np.dtype(np.float32)
-    vectors = assure_array(vectors, "vectors", expected_dtype)
-    if vectors.ndim != 2:
-        raise ValueError(f"vectors must be a 2D {expected_dtype} array, got shape {vectors.shape}")
-    if vectors.shape[0] == 0:
-        return np.empty(0, dtype=np.uint32)
+            mips = make_mips_transform(vectors)
+            vectors = apply_on_database(mips, vectors, threads=threads)
+            resolved_metric = Metric.FP32_L2
+        else:
+            resolved_metric = Metric.FP16_L2 if vectors.dtype == np.float16 else Metric.FP32_L2
+        base_metric = resolved_metric
+    else:
+        resolved_metric = Metric.resolve(metric)
+        base_metric = Metric(int(resolved_metric))
+        if base_metric not in (
+            Metric.FP32_L2,
+            Metric.FP32_InnerProduct,
+            Metric.FP16_L2,
+            Metric.FP16_InnerProduct,
+        ):
+            raise ValueError(f"presort only supports FP32/FP16 L2 and InnerProduct metrics, got {resolved_metric.name}")
+
+        expected_dtype = np.dtype(np.float16) if "FP16" in base_metric.name else np.dtype(np.float32)
+        vectors = assure_array(vectors, "vectors", expected_dtype)
+        if vectors.ndim != 2:
+            raise ValueError(f"vectors must be a 2D {expected_dtype} array, got shape {vectors.shape}")
+        if vectors.shape[0] == 0:
+            return np.empty(0, dtype=np.uint32)
 
     cpp_space = resolved_metric._to_cpp_space(vectors.shape[1])
 

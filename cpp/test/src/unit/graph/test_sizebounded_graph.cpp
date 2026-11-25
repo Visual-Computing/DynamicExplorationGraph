@@ -1118,7 +1118,7 @@ TEST(SizeBoundedGraph, FromGraphSameFeatures) {
     deglib::builder::populate_random_graph(source_graph, feature_bytes.get(), vertex_count, 7);
 
     // Copy using from_graph with the same feature space
-    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph, space);
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph);
 
     EXPECT_EQ(copied_graph.size(), vertex_count);
     EXPECT_EQ(copied_graph.getEdgesPerVertex(), edges_per_vertex);
@@ -1216,10 +1216,10 @@ TEST(SizeBoundedGraph, FromGraphFromReadOnly) {
     deglib::builder::populate_random_graph(source_sbg, feature_bytes.get(), vertex_count, 7);
 
     // Convert to ReadOnlyGraph
-    auto readonly = deglib::graph::ReadOnlyGraph::from_graph(source_sbg, space);
+    auto readonly = deglib::graph::ReadOnlyGraph::from_graph(source_sbg);
 
     // Copy from ReadOnlyGraph using from_graph
-    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(readonly, space);
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(readonly);
 
     EXPECT_EQ(copied_graph.size(), vertex_count);
     EXPECT_EQ(copied_graph.getEdgesPerVertex(), edges_per_vertex);
@@ -1327,7 +1327,7 @@ TEST(SizeBoundedGraph, FromGraphNewMaxSize) {
 
     // Copy with a larger capacity
     const uint32_t new_capacity = 100;
-    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph, space, nullptr, new_capacity);
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph, new_capacity);
 
     EXPECT_EQ(copied_graph.size(), vertex_count);
     EXPECT_EQ(copied_graph.capacity(), new_capacity);
@@ -1359,7 +1359,7 @@ TEST(SizeBoundedGraph, FromGraphInnerProduct) {
     deglib::builder::populate_random_graph(source_graph, feature_bytes.get(), vertex_count, 7);
 
     // Copy with same feature space (InnerProduct)
-    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph, space);
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph);
 
     EXPECT_EQ(copied_graph.size(), vertex_count);
     EXPECT_EQ(copied_graph.getFeatureSpace().metric(), deglib::distances::Metric::FP32_InnerProduct);
@@ -1397,7 +1397,7 @@ TEST(SizeBoundedGraph, FromGraphSearchable) {
     deglib::builder::populate_random_graph(source_graph, feature_bytes.get(), vertex_count, 7);
 
     // Copy using from_graph
-    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph, space);
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph);
 
     // Search should work and return the same results
     std::vector<float> query = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -1437,7 +1437,7 @@ TEST(SizeBoundedGraph, FromGraphDifferentFeatureSpace) {
     deglib::builder::populate_random_graph(source_graph, feature_bytes.get(), vertex_count, 7);
 
     // Copy with a different feature space (InnerProduct)
-    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph, space_ip);
+    auto copied_graph = deglib::graph::SizeBoundedGraph::from_graph(source_graph, space_ip, feature_bytes.get());
 
     EXPECT_EQ(copied_graph.size(), vertex_count);
     EXPECT_EQ(copied_graph.getFeatureSpace().metric(), deglib::distances::Metric::FP32_InnerProduct);

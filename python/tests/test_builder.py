@@ -336,23 +336,27 @@ class TestGraphs:
 
 
 class TestBuildFunction:
-    def test_build_mutable_and_readonly(self):
+    def test_build_mutable_and_to_readonly(self):
         rng = np.random.default_rng(7)
         data = rng.random((80, 16), dtype=np.float32)
 
-        mutable = deglib.build(data, edges_per_vertex=16, extend_k=16, readonly=False, threads=2)
+        mutable = deglib.build(data, edges_per_vertex=16, extend_k=16, threads=2)
         assert isinstance(mutable, deglib.DynamicExplorationGraph)
         assert mutable.is_mutable()
         assert mutable.size() == 80
         assert mutable.get_dim() == 16
         assert mutable.get_metric() == Metric.FP32_L2
 
-        ro = deglib.build(data, edges_per_vertex=16, extend_k=16, readonly=True, threads=2)
+        ro = mutable.to_readonly()
         assert isinstance(ro, deglib.DynamicExplorationGraph)
         assert not ro.is_mutable()
         assert ro.size() == 80
         assert ro.get_dim() == 16
         assert ro.get_metric() == Metric.FP32_L2
+
+        empty = deglib.build(np.empty((0, 16), dtype=np.float32), edges_per_vertex=16)
+        assert empty.size() == 0
+        assert empty.is_mutable()
 
     def test_build_presort_bool_and_indices(self):
         rng = np.random.default_rng(11)
@@ -392,10 +396,9 @@ class TestBuildFunction:
             metric="Int8_L2",
             edges_per_vertex=16,
             extend_k=16,
-            readonly=True,
             optimize=True,
             threads=1,
-        )
+        ).to_readonly()
         assert isinstance(g_int8, deglib.DynamicExplorationGraph)
         assert not g_int8.is_mutable()
         assert g_int8.size() == 80

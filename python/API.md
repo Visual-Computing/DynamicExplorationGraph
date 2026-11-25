@@ -58,14 +58,13 @@ base_graph = deglib.build(
     threads=8,
 )
 
-# 2. Convert into Int8 ReadOnlyGraph and auto-extract/quantize FP16 rerank data
+# 2. Extract FP16 reranker from FP32 graph, convert to Int8 ReadOnlyGraph, and optimize routing
+reranker = base_graph.to_reranker(deglib.Metric.FP16_InnerProduct, threads=8)
 searcher = base_graph.to_searcher(
     metric=deglib.Metric.Int8_InnerProduct,
-    rerank_metric=deglib.Metric.FP16_InnerProduct,  # opt-in reranking; None disables reranking
+    reranker=reranker,
     normalize_query=True,
     optimize=True,
-    use_routing=True,
-    n_clusters=256,
     threads=8,
 )
 
@@ -88,12 +87,12 @@ graph = deglib.build(
     presort=True,
     optimize=False,
     threads=8,
-)
+).to_readonly()
 
-# Swap features back to original d-dim FP16 InnerProduct while preserving graph labels & edges
-ro_graph = graph.to_readonly(
-    deglib.Metric.FP16_InnerProduct.with_instruction("AVX512"),
-    custom_features=train_vectors,
+# Swap features back to original d-dim FP16 InnerProduct while preserving graph labels, edges & ReadOnly backend
+ro_graph = graph.with_features(
+    train_vectors,
+    metric=deglib.Metric.FP16_InnerProduct.with_instruction("AVX512"),
     threads=8,
 )
 res = ro_graph.search(query, eps_or_ef=0.18, k=10)
@@ -116,7 +115,6 @@ deglib.build(
     presort: bool | np.ndarray = False,
     presort_decay: float = 0.9,
     optimize: bool = True,
-    readonly: bool = False,
     transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
     capacity: int = -1,
     extend_k: int = 0,
@@ -136,7 +134,6 @@ Builds a graph from a 2D NumPy array:
 - When `data` is `float32`/`float16` and `metric` is quantized (`Int8_*`, `Uint8_*`, `Int4_*`, `Uint4_*`, `UInt7_*`, `EVP_InnerProduct`, or `FP16_*` from `float32`), `build` automatically constructs a calibrated transformation pipeline (`make_quantizer_pipeline`) unless explicit `transformations` are provided.
 - **`presort`**: `True` runs 1D FLAS pre-sorting via `deglib.presort` and reorders data + labels together; an `np.ndarray` uses precomputed sorted indices; `False` keeps insertion order.
 - **`optimize`**: Runs `graph.optimize()` after building when `True` (default).
-- **`readonly`**: Returns a compact `ReadOnlyGraph` when `True`, or a mutable `SizeBoundedGraph` when `False` (default).
 - **`threads`**: Worker thread count (`0` uses all CPU cores).
 
 ---
@@ -208,8 +205,7 @@ All graphs (fixed-capacity mutable `SizeBoundedGraph`, chunked `DynamicGraph`, a
 - `is_mutable() -> bool`
 - `has_vertex(external_label: int) -> bool`
 - `get_labels() -> np.ndarray`: External labels ordered by internal graph slot (`0 .. size()-1`).
-- `get_neighbors(external_label: int) -> list[int]`
-- `get_neighbors_batch(external_labels: np.ndarray | Sequence[int], threads: int = 1) -> np.ndarray`
+- `get_neighbors(external_label: int | np.ndarray | Sequence[int], threads: int = 1) -> list[int] | np.ndarray`
 - `get_po() -> int`, `get_pl() -> int`, `get_nl() -> int`
 - `has_path(from_external_labels: Sequence[int], to_external_label: int, eps_or_ef: float = 0.0, max_distance_computation_count: int = 0) -> list[ObjectDistance]`
 - `save_graph(path: Path | str) -> bool` (requires mutable graph)
@@ -219,15 +215,16 @@ All graphs (fixed-capacity mutable `SizeBoundedGraph`, chunked `DynamicGraph`, a
 - `to_pareto_line(k: int | None = None, recall_tables: RecallTable | Sequence[RecallTable] | None = None, sample_count: int | None = None, recall_range: tuple[float, float] | None = None, recall_step: float | None = None, target_recalls: Sequence[float] | np.ndarray | None = None, threads: int = 0, rounds: int = 3) -> ParetoLine`: Unifies measured operating points across `recall_tables` (defaulting to `to_recall_tables(k, ...)`) by single-threaded median latency in `(measured_recall, latency_us)` space, prunes Pareto-dominated points, and exposes `.recall_tables`.
 
 #### Graph Conversion & Searcher Construction
-- `to_readonly(metric: Metric | str | None = None, custom_features: np.ndarray | None = None, custom_features_order: Literal["label", "internal"] = "label", transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None, use_rerank: bool = False, optimize: bool = True, threads: int = 0) -> DynamicExplorationGraph`
-- `to_mutable(metric: Metric | str | None = None, custom_features: np.ndarray | None = None, custom_features_order: Literal["label", "internal"] = "label", capacity: int = 0, transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None, threads: int = 0) -> DynamicExplorationGraph`
-- `to_dynamic(metric: Metric | str | None = None, custom_features: np.ndarray | None = None, custom_features_order: Literal["label", "internal"] = "label", chunk_size: int = 1024, transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None, threads: int = 0) -> DynamicExplorationGraph`
-- `to_reranker(metric: Metric | str, data: np.ndarray | None = None, order: Literal["label", "internal"] = "label", transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None, optimize: bool = True, threads: int = 0) -> Reranker`
-  - Creates a standalone `Reranker` aligned with this graph's internal vertex order (`data=None` extracts and quantizes vectors directly from an `FP32`/`FP16` graph), allowing one `Reranker` to be shared across multiple quantized `Searcher` instances without duplicating base vector memory.
-- `to_searcher(metric: Metric | str | None = None, reranker: Reranker | None = None, rerank_metric: Metric | str | None = None, rerank_data: np.ndarray | None = None, rerank_order: Literal["label", "internal"] = "label", rerank_transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None, normalize_query: bool = False, optimize: bool = True, use_routing: bool = True, n_clusters: int = 256, n_iter: int = 20, sample_size: int = 0, threads: int = 0) -> Searcher`
-  - **Self-quantization**: When changing `metric` on an `FP32`/`FP16` graph without `custom_features` or `transformations`, features are quantized directly from stored floating-point graph data.
-  - **Opt-in reranking**: `reranker=None` and `rerank_metric=None` (default) disables reranking (passing `rerank_data` without `rerank_metric` raises `ValueError`). Pass `reranker=...` to share a prebuilt `Reranker` (zero-copy), or `rerank_metric=...` (with `rerank_data=None` to extract automatically from an `FP32`/`FP16` source graph).
-  - **Ordering**: `custom_features_order` and `rerank_order` default to `"label"` (rows aligned with original dataset IDs / external labels); pass `"internal"` when rows already follow `graph.get_labels()`.
+- `to_readonly() -> DynamicExplorationGraph`: Pure backend copy to `ReadOnlyGraph` (preserves features, metric, and `transformations_`).
+- `to_mutable(max_size: int = 0, threads: int = 0) -> DynamicExplorationGraph`: Pure backend copy to `SizeBoundedGraph` (preserves features, metric, and `transformations_`; uses `threads` for edge-weight recomputation when converting from a `ReadOnlyGraph`).
+- `to_dynamic(chunk_size: int = 1024, threads: int = 0) -> DynamicExplorationGraph`: Pure backend copy to `DynamicGraph` (preserves features, metric, and `transformations_`; uses `threads` for edge-weight recomputation when converting from a `ReadOnlyGraph`).
+- `with_metric(metric: Metric | str, threads: int = 0) -> DynamicExplorationGraph`: Re-tags or auto-quantizes stored floating-point features to `metric`, preserving the current backend (`ReadOnlyGraph`, `SizeBoundedGraph`, or `DynamicGraph`). When moving from float to a quantized metric, appends the calibrated pipeline to `transformations_`; when changing between same-dtype metrics (e.g. `FP32_L2` -> `FP32_InnerProduct`), keeps features unchanged and recomputes edge weights if mutable.
+- `with_transformations(transformations: FeatureTransformation | Sequence[FeatureTransformation], metric: Metric | str | None = None, threads: int = 0) -> DynamicExplorationGraph`: Self-transforms stored floating-point features (`FP32`/`FP16`) using explicit fitted `transformations` and appends them to `transformations_`, preserving the current backend.
+- `with_features(features: np.ndarray, metric: Metric | str | None = None, order: Literal["label", "internal"] = "label", transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None, threads: int = 0) -> DynamicExplorationGraph`: Replaces graph features with an external array (auto-calibrating/quantizing FP32/FP16 arrays when needed and `transformations=None`), resets `transformations_` to the new pipeline, and preserves the current backend. `order` defaults to `"label"` (rows aligned with external labels); pass `"internal"` when rows already follow `graph.get_labels()`.
+- `to_reranker(metric: Metric | str, transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None, optimize: bool = True, threads: int = 0) -> Reranker`
+  - Extracts and quantizes base vectors directly from an `FP32`/`FP16` graph, chaining `graph.transformations_ + transformations`. For external datasets, construct `deglib.Reranker(metric, base_vectors, transformations=..., row_indices=..., optimize=..., threads=...)` directly.
+- `to_searcher(metric: Metric | str | None = None, reranker: Reranker | None = None, normalize_query: bool = False, optimize: bool = True, threads: int = 0) -> Searcher`
+  - Converts the graph to a `ReadOnlyGraph` in a single pass (applying/quantizing `metric` directly when `metric` differs from the current metric) and wraps it in a `Searcher`. For custom clustering parameters, pass `optimize=False` and call `searcher.optimize(...)`.
 
 #### Direct Graph Search & Exploration
 - `search(query: np.ndarray, eps_or_ef: float = 0.0, k: int = 10, filter_labels: Any = None, max_distance_computation_count: int = 0, threads: int = 0, return_distances: bool = True, unsorted: bool = False) -> SearchResults`
@@ -290,25 +287,16 @@ Returned by `DynamicExplorationGraph.search()`, `DynamicExplorationGraph.explore
 - `graph_hop_count: int` — total graph vertex expansions (hops) performed
 - `__len__() -> int` — number of results (single query) or query count (batch)
 
-### `Searcher` & `create_searcher`
+### `Searcher`
 
 ```python
-create_searcher(
+Searcher(
     graph: DynamicExplorationGraph,
-    metric: Metric | str | None = None,
     reranker: Reranker | None = None,
-    rerank_metric: Metric | str | None = None,
-    rerank_data: np.ndarray | None = None,
-    rerank_order: Literal["label", "internal"] = "label",
-    rerank_transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
     normalize_query: bool = False,
     optimize: bool = True,
-    use_routing: bool = True,
-    n_clusters: int = 256,
-    n_iter: int = 20,
-    sample_size: int = 0,
     threads: int = 0,
-) -> Searcher
+)
 ```
 
 `Searcher` attributes & methods:

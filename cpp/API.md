@@ -302,14 +302,14 @@ public:
     std::vector<uint32_t> getNeighbors(uint32_t external_label) const;
 
     /// Batch retrieve neighbor external labels into caller-supplied flat span
-    void getNeighbors_batch(
+    void getNeighbors(
         std::span<const uint32_t> external_labels,
         std::span<uint32_t> out_neighbors,
         size_t threads = 1
     ) const;
 
     /// Batch retrieve neighbor external labels returning flat vector
-    std::vector<uint32_t> getNeighbors_batch(
+    std::vector<uint32_t> getNeighbors(
         std::span<const uint32_t> external_labels,
         size_t threads = 1
     ) const;
@@ -407,38 +407,48 @@ public:
 
     // --- Conversions & Persistence ---
     // Feature Memory Ordering:
-    // Any replacement feature buffer (custom_features / new_features) must match the graph's internal index layout (row i = vertex i):
+    // Any replacement feature buffer (custom_features) must match the graph's internal index layout (row i = vertex i):
     // 1. Standard / Static Graphs (Default): Vertex i is simply the i-th vector given to the builder. Pass the same feature array directly!
     // 2. Custom Labels or Dynamic Graphs with Deletions: Vertices are indexed by their current internal slots.
     //    Use getExternalLabels() to look up which label resides at which slot (e.g. data[labels[i]]).
 
-    /// Convert to a compact, read-only graph (ReadOnlyGraph) optimized for search.
-    /// Supports: (1) simple copy, (2) in-place self-transformation from FP32/FP16 when
-    /// new_features == nullptr and transformations change the metric, (3) pre-transformed
-    /// new_features buffer, or (4) query-only transformation attachment.
-    DynamicExplorationGraph to_readonly(
-        std::optional<FloatSpace> custom_feature_space = std::nullopt,
-        const void* custom_features = nullptr,
-        std::vector<std::shared_ptr<FeatureTransformation>> transformations = {},
+    /// Pure backend copies (preserve topology, labels, features, and query transformations)
+    DynamicExplorationGraph to_readonly() const;
+    DynamicExplorationGraph to_mutable(uint32_t new_max_size = 0, size_t num_threads = 0) const;
+    DynamicExplorationGraph to_dynamic(uint32_t chunk_size = 1024, size_t num_threads = 0) const;
+
+    /// Backend-preserving content operations (keep ReadOnlyGraph, SizeBoundedGraph capacity, or DynamicGraph chunk_size)
+    DynamicExplorationGraph with_metric(
+        deglib::distances::FloatSpace target_space,
+        size_t num_threads = 0
+    ) const;
+    DynamicExplorationGraph with_transformations(
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> additional_transformations,
+        std::optional<deglib::distances::FloatSpace> target_space = std::nullopt,
+        size_t num_threads = 0
+    ) const;
+    DynamicExplorationGraph with_features(
+        deglib::distances::FloatSpace target_space,
+        const void* custom_features,
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> new_transformations = {},
         size_t num_threads = 0
     ) const;
 
-    /// Convert to a mutable SizeBoundedGraph (fixed capacity) with optional feature/space conversion
-    DynamicExplorationGraph to_mutable(uint32_t new_max_size = 0) const;
-    DynamicExplorationGraph to_mutable(
-        std::optional<FloatSpace> custom_feature_space,
-        const void* custom_features = nullptr,
-        uint32_t new_max_size = 0,
-        std::vector<std::shared_ptr<FeatureTransformation>> transformations = {}
+    /// Extract stored float features directly into an owning Reranker, prepending any attached graph transformations
+    deglib::search::Reranker to_reranker(
+        deglib::distances::FloatSpace target_space,
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
+        size_t num_threads = 0
     ) const;
 
-    /// Convert to a mutable DynamicGraph (chunk-allocated dynamic growth) with optional feature/space conversion
-    DynamicExplorationGraph to_dynamic(uint32_t chunk_size = 1024) const;
-    DynamicExplorationGraph to_dynamic(
-        std::optional<FloatSpace> custom_feature_space,
-        const void* custom_features = nullptr,
-        uint32_t chunk_size = 1024,
-        std::vector<std::shared_ptr<FeatureTransformation>> transformations = {}
+    /// Create a Searcher over this graph using its attached query transformations (graph must outlive Searcher)
+    deglib::search::Searcher to_searcher(
+        std::shared_ptr<deglib::search::Reranker> reranker = nullptr,
+        bool normalize_query = false
+    ) const;
+    deglib::search::Searcher to_searcher(
+        deglib::search::Reranker reranker,
+        bool normalize_query = false
     ) const;
 
     /// Save graph topology, features, transformations, and prefetch parameters to binary file
@@ -1192,8 +1202,15 @@ public:
     SizeBoundedGraph(uint32_t max_vertex_count, uint8_t edges_per_vertex, FloatSpace feature_space);
 
     static SizeBoundedGraph create_empty(uint32_t max_vertex_count, uint8_t edges_per_vertex, FloatSpace feature_space);
-    static SizeBoundedGraph from_graph(InternalGraph& graph, uint32_t new_max_size = 0);
-    static SizeBoundedGraph from_graph(InternalGraph& graph, FloatSpace custom_space, void* custom_features = nullptr, uint32_t new_max_size = 0);
+    static SizeBoundedGraph from_graph(const InternalGraph& graph, uint32_t new_max_size = 0, size_t num_threads = 0);
+    static SizeBoundedGraph from_graph(const InternalGraph& graph, FloatSpace target_space, const void* custom_features, uint32_t new_max_size = 0, size_t num_threads = 0);
+    static SizeBoundedGraph from_graph(
+        const InternalGraph& graph,
+        std::optional<FloatSpace> target_feature_space,
+        std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
+        uint32_t new_max_size = 0,
+        size_t num_threads = 0
+    );
     // Loading is done via the free function deglib::graph::load_sizebounded_graph(const char* file_path, uint32_t new_max_size = 0)
 };
 
@@ -1202,8 +1219,15 @@ class DynamicGraph : public MutableGraph {
 public:
     DynamicGraph(uint8_t edges_per_vertex, FloatSpace feature_space, uint32_t chunk_size = 1024);
 
-    static DynamicGraph from_graph(InternalGraph& graph, uint32_t chunk_size = 1024);
-    static DynamicGraph from_graph(InternalGraph& graph, FloatSpace custom_space, void* custom_features = nullptr, uint32_t chunk_size = 1024);
+    static DynamicGraph from_graph(const InternalGraph& graph, uint32_t chunk_size = 1024, size_t num_threads = 0);
+    static DynamicGraph from_graph(const InternalGraph& graph, FloatSpace target_space, const void* custom_features, uint32_t chunk_size = 1024, size_t num_threads = 0);
+    static DynamicGraph from_graph(
+        const InternalGraph& graph,
+        std::optional<FloatSpace> target_feature_space,
+        std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
+        uint32_t chunk_size = 1024,
+        size_t num_threads = 0
+    );
     // Loading is done via the free function deglib::graph::load_dynamic_graph(const char* file_path, uint32_t chunk_size = 1024)
 };
 
@@ -1212,11 +1236,13 @@ class ReadOnlyGraph : public InternalGraph {
 public:
     ReadOnlyGraph(uint32_t count, uint8_t edges_per_vertex, const FloatSpace& space);
 
+    static ReadOnlyGraph from_graph(const InternalGraph& input_graph);
+    static ReadOnlyGraph from_graph(const InternalGraph& input_graph, FloatSpace target_space, const void* custom_features);
     static ReadOnlyGraph from_graph(
         const InternalGraph& input_graph,
-        std::optional<FloatSpace> target_feature_space = std::nullopt,
-        const void* custom_features = nullptr,
-        std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
+        std::optional<FloatSpace> target_feature_space,
+        std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
+        size_t num_threads = 0
     );
     static ReadOnlyGraph loadGraph(const char* path_graph);
 };

@@ -204,6 +204,12 @@ inline std::vector<std::shared_ptr<FeatureTransformation>> deserialize_transform
             case TAG_SQI8:
                 t = ScalarQuantizerInt8::deserialize(ss);
                 break;
+            case TAG_SQU4:
+                t = ScalarQuantizerUint4::deserialize(ss);
+                break;
+            case TAG_SQI4:
+                t = ScalarQuantizerInt4::deserialize(ss);
+                break;
             case TAG_SQU7:
                 t = ScalarQuantizerUint7::deserialize(ss);
                 break;
@@ -443,6 +449,32 @@ inline void apply_on_database(
     );
 }
 
+inline void apply_on_database(
+    std::span<const std::shared_ptr<FeatureTransformation>> transformations,
+    std::span<const std::byte> data,
+    deglib::distances::MetricDataType data_type,
+    std::span<std::byte> out,
+    size_t num_threads = 0
+) {
+    if (data_type == deglib::distances::MetricDataType::FP32) {
+        apply_on_database(
+            transformations,
+            std::span<const float>(reinterpret_cast<const float*>(data.data()), data.size() / sizeof(float)),
+            out,
+            num_threads
+        );
+    } else if (data_type == deglib::distances::MetricDataType::FP16) {
+        apply_on_database(
+            transformations,
+            std::span<const uint16_t>(reinterpret_cast<const uint16_t*>(data.data()), data.size() / sizeof(uint16_t)),
+            out,
+            num_threads
+        );
+    } else {
+        throw std::invalid_argument("apply_on_database: unsupported input MetricDataType for transformation pipeline");
+    }
+}
+
 inline uint32_t get_input_dim(std::span<const std::shared_ptr<FeatureTransformation>> transformations) noexcept {
     return transformations.empty() ? 0 : transformations.front()->input_dim();
 }
@@ -465,17 +497,22 @@ get_target_metric(std::span<const std::shared_ptr<FeatureTransformation>> transf
 }
 
 /**
- * @brief Validates graph conversion arguments and resolves the target FloatSpace.
- *
- * Enforces fitted transformations, chain dimension compatibility, target space consistency,
- * and self-transformation preconditions when custom_features is nullptr.
+ * Validates and resolves the target FloatSpace for self-transforming a graph's stored
+ * features through a sequence of fitted transformations.
  */
-inline deglib::distances::FloatSpace resolve_graph_conversion_space(
+inline deglib::distances::FloatSpace resolve_transform_space(
     const deglib::distances::FloatSpace& source_space,
     std::optional<deglib::distances::FloatSpace> target_feature_space,
-    const void* custom_features,
     std::span<const std::shared_ptr<FeatureTransformation>> transformations
 ) {
+    if (transformations.empty()) {
+        if (target_feature_space.has_value() &&
+            target_feature_space->dim() == source_space.dim() &&
+            target_feature_space->metric().get_data_type() == source_space.metric().get_data_type()) {
+            return *target_feature_space;
+        }
+        throw std::invalid_argument("from_graph: empty transformations requires target_feature_space with matching dim and data type");
+    }
     for (const auto& t : transformations) {
         if (!t) {
             throw std::invalid_argument("from_graph: transformation pipeline contains null entry");
@@ -489,48 +526,26 @@ inline deglib::distances::FloatSpace resolve_graph_conversion_space(
             throw std::invalid_argument("from_graph: transformation chain output_dim does not match next input_dim");
         }
     }
-
-    deglib::distances::FloatSpace resolved = [&]() {
-        if (target_feature_space.has_value()) {
-            if (!transformations.empty()) {
-                const auto& last = transformations.back();
-                if (last->output_dim() != target_feature_space->dim() ||
-                    last->output_byte_size() != target_feature_space->get_data_size()) {
-                    throw std::invalid_argument("from_graph: last transformation output does not match target_feature_space");
-                }
-            }
-            return *target_feature_space;
-        }
-        if (!transformations.empty()) {
-            return deglib::distances::FloatSpace(
-                get_output_dim(transformations),
-                get_target_metric(transformations, source_space.metric())
-            );
-        }
-        return source_space;
-    }();
-
-    if (custom_features == nullptr) {
-        if (transformations.empty()) {
-            if (resolved.dim() != source_space.dim() || resolved.get_data_size() != source_space.get_data_size()) {
-                throw std::invalid_argument(
-                    "from_graph: cannot change feature_space dim or data size without custom_features or transformations"
-                );
-            }
-        } else {
-            if (transformations.front()->input_dim() != source_space.dim()) {
-                throw std::invalid_argument("from_graph: first transformation input_dim does not match source graph dim");
-            }
-            if (resolved.metric() != source_space.metric()) {
-                const auto src_dt = source_space.metric().get_data_type();
-                if (src_dt != deglib::distances::MetricDataType::FP32 && src_dt != deglib::distances::MetricDataType::FP16) {
-                    throw std::invalid_argument("from_graph: cannot self-transform from non-float base features");
-                }
-            }
-        }
+    if (transformations.front()->input_dim() != source_space.dim()) {
+        throw std::invalid_argument("from_graph: first transformation input_dim does not match source graph dim");
+    }
+    const auto src_dt = source_space.metric().get_data_type();
+    if (src_dt != deglib::distances::MetricDataType::FP32 && src_dt != deglib::distances::MetricDataType::FP16) {
+        throw std::invalid_argument("from_graph: cannot self-transform from non-float base features");
     }
 
-    return resolved;
+    if (target_feature_space.has_value()) {
+        const auto& last = transformations.back();
+        if (last->output_dim() != target_feature_space->dim() ||
+            last->output_byte_size() != target_feature_space->get_data_size()) {
+            throw std::invalid_argument("from_graph: last transformation output does not match target_feature_space");
+        }
+        return *target_feature_space;
+    }
+    return deglib::distances::FloatSpace(
+        get_output_dim(transformations),
+        get_target_metric(transformations, source_space.metric())
+    );
 }
 
 inline std::vector<std::shared_ptr<FeatureTransformation>> make_quantizer_pipeline(

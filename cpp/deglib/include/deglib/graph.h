@@ -14,6 +14,8 @@
 
 #include "deglib/search/pareto_line.h"
 #include "deglib/search/recall_table.h"
+#include "deglib/search/reranker.h"
+#include "deglib/search/searcher.h"
 #include "deglib/serialization.h"
 #include "deglib/transformation.h"
 
@@ -38,6 +40,30 @@ class DynamicExplorationGraph {
     std::unique_ptr<deglib::graph::InternalGraph> owned_graph_;
     deglib::graph::InternalGraph* internal_graph_;
     std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations_;
+
+    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> append_transformations(
+        std::span<const std::shared_ptr<deglib::transformation::FeatureTransformation>> additional
+    ) const {
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> combined = transformations_;
+        combined.insert(combined.end(), additional.begin(), additional.end());
+        return combined;
+    }
+
+    template <typename Fn>
+    DynamicExplorationGraph build_preserving_backend(
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> out_xfrms, Fn&& make_graph
+    ) const {
+        if (const auto* sb = dynamic_cast<const deglib::graph::SizeBoundedGraph*>(internal_graph_)) {
+            auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(make_graph(sb));
+            return DynamicExplorationGraph(std::move(graph), std::move(out_xfrms));
+        }
+        if (const auto* dyn = dynamic_cast<const deglib::graph::DynamicGraph*>(internal_graph_)) {
+            auto graph = std::make_unique<deglib::graph::DynamicGraph>(make_graph(dyn));
+            return DynamicExplorationGraph(std::move(graph), std::move(out_xfrms));
+        }
+        auto graph = std::make_unique<deglib::graph::ReadOnlyGraph>(make_graph(static_cast<const deglib::graph::ReadOnlyGraph*>(nullptr)));
+        return DynamicExplorationGraph(std::move(graph), std::move(out_xfrms));
+    }
 
   public:
     /**
@@ -904,14 +930,14 @@ class DynamicExplorationGraph {
      * @param threads Number of worker threads for parallel processing (1 = sequential).
      * @throws std::invalid_argument if out_neighbors.size() < external_labels.size() * getEdgesPerVertex().
      */
-    void getNeighbors_batch(std::span<const uint32_t> external_labels, std::span<uint32_t> out_neighbors, size_t threads = 1) const {
+    void getNeighbors(std::span<const uint32_t> external_labels, std::span<uint32_t> out_neighbors, size_t threads = 1) const {
         const size_t count = external_labels.size();
         if (count == 0) return;
         const uint8_t edges_count = internal_graph_->getEdgesPerVertex();
         if (out_neighbors.size() < count * edges_count) {
             throw std::invalid_argument(
                 std::format(
-                    "DynamicExplorationGraph::getNeighbors_batch: out_neighbors size ({}) is smaller than count * edges ({})", out_neighbors.size(),
+                    "DynamicExplorationGraph::getNeighbors: out_neighbors size ({}) is smaller than count * edges ({})", out_neighbors.size(),
                     count * edges_count
                 )
             );
@@ -936,122 +962,196 @@ class DynamicExplorationGraph {
      * @param threads Number of worker threads for parallel processing (1 = sequential).
      * @return std::vector<uint32_t> Flat vector of size external_labels.size() * getEdgesPerVertex() with neighbor external labels.
      */
-    std::vector<uint32_t> getNeighbors_batch(std::span<const uint32_t> external_labels, size_t threads = 1) const {
+    std::vector<uint32_t> getNeighbors(std::span<const uint32_t> external_labels, size_t threads = 1) const {
         const uint8_t edges_count = internal_graph_->getEdgesPerVertex();
         std::vector<uint32_t> result(external_labels.size() * edges_count);
-        getNeighbors_batch(external_labels, std::span<uint32_t>(result), threads);
+        getNeighbors(external_labels, std::span<uint32_t>(result), threads);
         return result;
     }
 
     /**
-     * @brief Converts this graph to a compact read-only graph optimized for search.
+     * @brief Converts this graph to a compact, immutable ReadOnlyGraph (pure backend copy).
+     *
+     * Copies topology, external labels, stored features, and query transformations 1:1
+     * without recomputing edge weights or modifying features.
      *
      * @return A new read-only DynamicExplorationGraph.
      */
+    DynamicExplorationGraph to_readonly() const {
+        auto graph = std::make_unique<deglib::graph::ReadOnlyGraph>(deglib::graph::ReadOnlyGraph::from_graph(*internal_graph_));
+        return DynamicExplorationGraph(std::move(graph), transformations_);
+    }
+
     /**
-     * @brief Converts this graph to a compact, immutable ReadOnlyGraph optimized for search.
+     * @brief Converts this graph to a mutable fixed-capacity SizeBoundedGraph (pure backend copy).
      *
-     * Supports four conversion modes:
-     * 1. Simple copy (all arguments omitted): copies topology and features as-is.
-     * 2. In-place self-transformation (transformations non-empty, custom_features == nullptr):
-     *    transforms/quantizes directly from stored FP32/FP16 features into the new graph
-     *    without allocating an intermediate buffer (requires target metric != source metric).
-     * 3. Custom feature buffer (custom_features != nullptr): copies pre-transformed features
-     *    aligned with getExternalLabels() (custom_features is NOT passed through transformations).
-     * 4. Query-only transformation attachment (transformations keeps source metric, custom_features == nullptr):
-     *    copies features as-is and attaches transformations for query preprocessing.
+     * Copies topology, external labels, stored features, and query transformations 1:1.
+     * If the source graph is a MutableGraph, existing edge weights are copied directly;
+     * if converting from a ReadOnlyGraph (which does not store weights), edge weights are
+     * recomputed in parallel using `num_threads`.
      *
-     * @param custom_feature_space Optional target feature space. Derived automatically from transformations if omitted.
-     * @param custom_features Optional pointer to replacement raw feature memory in internal index order (0 .. size()-1).
-     * @param transformations Optional sequence of fitted feature transformations/quantizers to apply/attach.
-     * @param num_threads Number of worker threads for parallel self-transformation (0 = hardware concurrency).
-     * @return A new read-only DynamicExplorationGraph.
+     * @param new_max_size Maximum vertex capacity of the target graph (`0` or values `< size()` use `size()`).
+     * @param num_threads Number of worker threads for edge-weight recomputation when converting from a ReadOnlyGraph (`0` = hardware concurrency).
+     * @return A new fixed-capacity mutable DynamicExplorationGraph.
      */
-    DynamicExplorationGraph to_readonly(
-        std::optional<deglib::distances::FloatSpace> custom_feature_space = std::nullopt,
-        const void* custom_features = nullptr,
+    DynamicExplorationGraph to_mutable(const uint32_t new_max_size = 0, const size_t num_threads = 0) const {
+        auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(deglib::graph::SizeBoundedGraph::from_graph(*internal_graph_, new_max_size, num_threads));
+        return DynamicExplorationGraph(std::move(graph), transformations_);
+    }
+
+    /**
+     * @brief Converts this graph to a chunk-allocated mutable DynamicGraph (pure backend copy).
+     *
+     * Copies topology, external labels, stored features, and query transformations 1:1.
+     * If the source graph is a MutableGraph, existing edge weights are copied directly;
+     * if converting from a ReadOnlyGraph (which does not store weights), edge weights are
+     * recomputed in parallel using `num_threads`.
+     *
+     * @param chunk_size Target number of vertices per memory chunk (rounded up to the next power of two, default = 1024).
+     * @param num_threads Number of worker threads for edge-weight recomputation when converting from a ReadOnlyGraph (`0` = hardware concurrency).
+     * @return A new dynamically growing mutable DynamicExplorationGraph.
+     */
+    DynamicExplorationGraph to_dynamic(const uint32_t chunk_size = 1024, const size_t num_threads = 0) const {
+        auto graph = std::make_unique<deglib::graph::DynamicGraph>(deglib::graph::DynamicGraph::from_graph(*internal_graph_, chunk_size, num_threads));
+        return DynamicExplorationGraph(std::move(graph), transformations_);
+    }
+
+    /**
+     * @brief Returns a copy of this graph re-tagged with a different feature space/metric, preserving backend.
+     *
+     * Keeps the current backend (`ReadOnlyGraph`, `SizeBoundedGraph` with its capacity, or
+     * `DynamicGraph` with its chunk size), topology, external labels, stored features, and query
+     * transformations. For mutable graphs, edge weights are recomputed in `target_space`.
+     *
+     * @param target_space Target FloatSpace (must match stored dimensionality and byte layout).
+     * @param num_threads Number of worker threads for edge-weight recomputation on mutable graphs (`0` = hardware concurrency).
+     * @return A new DynamicExplorationGraph using the same backend in `target_space`.
+     */
+    DynamicExplorationGraph with_metric(deglib::distances::FloatSpace target_space, const size_t num_threads = 0) const {
+        return with_transformations({}, std::move(target_space), num_threads);
+    }
+
+    /**
+     * @brief Self-transforms stored FP32/FP16 features into a target space, preserving the current backend.
+     *
+     * Keeps `ReadOnlyGraph`, `SizeBoundedGraph` (with its current capacity), or `DynamicGraph`
+     * (with its current chunk size). Transforms each vertex's stored float feature vector directly
+     * into the target graph without allocating an intermediate dataset buffer, recomputes edge weights
+     * if mutable, and appends `additional_transformations` to the query-transformation pipeline.
+     *
+     * @param additional_transformations Fitted transformations/quantizers to apply to stored features and append to queries.
+     * @param target_space Optional target FloatSpace. Derived automatically from `additional_transformations` if omitted.
+     * @param num_threads Number of worker threads for parallel feature transformation and edge-weight recomputation (`0` = hardware concurrency).
+     * @return A new DynamicExplorationGraph using the same backend in the target space.
+     */
+    DynamicExplorationGraph with_transformations(
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> additional_transformations,
+        std::optional<deglib::distances::FloatSpace> target_space = std::nullopt,
+        const size_t num_threads = 0
+    ) const {
+        auto out_xfrms = append_transformations(additional_transformations);
+        return build_preserving_backend(std::move(out_xfrms), [&](auto* tag) {
+            using BackendT = std::decay_t<decltype(*tag)>;
+            if constexpr (std::is_same_v<BackendT, deglib::graph::SizeBoundedGraph>) {
+                return deglib::graph::SizeBoundedGraph::from_graph(*internal_graph_, target_space, additional_transformations, tag->capacity(), num_threads);
+            } else if constexpr (std::is_same_v<BackendT, deglib::graph::DynamicGraph>) {
+                return deglib::graph::DynamicGraph::from_graph(*internal_graph_, target_space, additional_transformations, tag->chunk_capacity(), num_threads);
+            } else {
+                return deglib::graph::ReadOnlyGraph::from_graph(*internal_graph_, target_space, additional_transformations, num_threads);
+            }
+        });
+    }
+
+    /**
+     * @brief Replaces stored features while preserving topology, external labels, and current backend.
+     *
+     * Keeps `ReadOnlyGraph`, `SizeBoundedGraph` (with its current capacity), or `DynamicGraph`
+     * (with its current chunk size), copies `custom_features` into `target_space`, recomputes edge
+     * weights if mutable, and resets the query-transformation pipeline to `new_transformations`.
+     *
+     * @param target_space Target FloatSpace describing the dimensionality and metric of `custom_features`.
+     * @param custom_features Contiguous raw feature buffer ordered by internal vertex index (`0 .. size()-1`, see `getExternalLabels()`).
+     * @param new_transformations New query-transformation pipeline attached to the resulting graph.
+     * @param num_threads Number of worker threads for parallel edge-weight recomputation on mutable graphs (`0` = hardware concurrency).
+     * @return A new DynamicExplorationGraph using the same backend holding the replacement features.
+     */
+    DynamicExplorationGraph with_features(
+        deglib::distances::FloatSpace target_space,
+        const void* custom_features,
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> new_transformations = {},
+        const size_t num_threads = 0
+    ) const {
+        return build_preserving_backend(std::move(new_transformations), [&](auto* tag) {
+            using BackendT = std::decay_t<decltype(*tag)>;
+            if constexpr (std::is_same_v<BackendT, deglib::graph::SizeBoundedGraph>) {
+                return deglib::graph::SizeBoundedGraph::from_graph(*internal_graph_, std::move(target_space), custom_features, tag->capacity(), num_threads);
+            } else if constexpr (std::is_same_v<BackendT, deglib::graph::DynamicGraph>) {
+                return deglib::graph::DynamicGraph::from_graph(*internal_graph_, std::move(target_space), custom_features, tag->chunk_capacity(), num_threads);
+            } else {
+                return deglib::graph::ReadOnlyGraph::from_graph(*internal_graph_, std::move(target_space), custom_features);
+            }
+        });
+    }
+
+    /**
+     * @brief Builds an owning `Reranker` directly from this graph's stored features.
+     *
+     * Quantizes/copies stored FP32/FP16 features in internal vertex order via `Reranker::from_graph`
+     * without intermediate allocations, and prepends this graph's attached transformations (e.g.
+     * `MipsTransform`) before any additional quantizers in the returned `Reranker`'s query pipeline.
+     *
+     * @param target_space Target `FloatSpace` for the reranker.
+     * @param transformations Optional additional transformations applied to stored graph features and appended to queries.
+     * @param num_threads Number of worker threads for quantization (`0` = hardware concurrency).
+     * @return Owning `deglib::search::Reranker` aligned with `getExternalLabels()`.
+     */
+    [[nodiscard]] deglib::search::Reranker to_reranker(
+        deglib::distances::FloatSpace target_space,
         std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {},
-        size_t num_threads = 0
+        const size_t num_threads = 0
     ) const {
-        auto xfrms = !transformations.empty() ? std::move(transformations) : transformations_;
-        auto graph = std::make_unique<deglib::graph::ReadOnlyGraph>(
-            deglib::graph::ReadOnlyGraph::from_graph(*internal_graph_, custom_feature_space, custom_features, xfrms, num_threads)
-        );
-        return DynamicExplorationGraph(std::move(graph), std::move(xfrms));
+        auto reranker = deglib::search::Reranker::from_graph(*internal_graph_, std::move(target_space), std::move(transformations), num_threads);
+        if (!transformations_.empty()) {
+            reranker.setTransformations(append_transformations(reranker.getTransformations()));
+        }
+        return reranker;
     }
 
     /**
-     * @brief Converts this graph to a mutable SizeBoundedGraph with a fixed capacity.
+     * @brief Creates a `Searcher` over this graph using its attached query transformations.
      *
-     * @param new_max_size Desired vertex capacity. If 0 or less than size(), capacity is set to size().
-     * @return A new mutable DynamicExplorationGraph.
+     * The returned `Searcher` holds a non-owning reference to this graph's internal representation,
+     * so this `DynamicExplorationGraph` must outlive the returned `Searcher`.
+     *
+     * @param reranker Optional shared `Reranker` for two-stage candidate reranking.
+     * @param normalize_query If true, L2-normalizes float32 query vectors prior to traversal.
+     * @return Owning `deglib::search::Searcher` configured for this graph.
      */
-    DynamicExplorationGraph to_mutable(const uint32_t new_max_size = 0) const {
-        auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(deglib::graph::SizeBoundedGraph::from_graph(*internal_graph_, new_max_size));
-        return DynamicExplorationGraph(std::move(graph), transformations_);
-    }
-
-    /**
-     * @brief Converts this graph to a mutable SizeBoundedGraph with optional feature/space conversion.
-     *
-     * Supports the same four conversion modes as to_readonly() (simple copy, in-place
-     * self-transformation when custom_features == nullptr and target metric != source metric,
-     * custom feature buffer, or query-only transformation attachment). Edge weights are recalculated.
-     *
-     * @param custom_feature_space Optional target feature space (derived from transformations if omitted).
-     * @param custom_features Optional pointer to replacement raw feature memory in internal index order (0 .. size()-1).
-     * @param new_max_size Desired vertex capacity. If 0 or less than size(), capacity is set to size().
-     * @param transformations Optional sequence of fitted feature transformations/quantizers to apply/attach.
-     * @return A new mutable DynamicExplorationGraph.
-     */
-    DynamicExplorationGraph to_mutable(
-        std::optional<deglib::distances::FloatSpace> custom_feature_space,
-        const void* custom_features = nullptr,
-        const uint32_t new_max_size = 0,
-        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
+    [[nodiscard]] deglib::search::Searcher to_searcher(
+        std::shared_ptr<deglib::search::Reranker> reranker = nullptr,
+        const bool normalize_query = false
     ) const {
-        auto xfrms = !transformations.empty() ? std::move(transformations) : transformations_;
-        auto graph = std::make_unique<deglib::graph::SizeBoundedGraph>(
-            deglib::graph::SizeBoundedGraph::from_graph(*internal_graph_, custom_feature_space, custom_features, xfrms, new_max_size)
-        );
-        return DynamicExplorationGraph(std::move(graph), std::move(xfrms));
+        deglib::search::Searcher searcher = reranker
+            ? deglib::search::Searcher(*internal_graph_, transformations_, std::move(reranker))
+            : deglib::search::Searcher(*internal_graph_, transformations_);
+        if (normalize_query) {
+            searcher.set_normalize_query(true);
+        }
+        return searcher;
     }
 
     /**
-     * @brief Converts this graph to a mutable DynamicGraph with chunked dynamic memory allocation.
+     * @brief Creates a `Searcher` over this graph with an owned `Reranker` (convenience overload).
      *
-     * @param chunk_size Number of vertices allocated per memory chunk (default 1024). Rounded to power of 2.
-     * @return A new mutable DynamicExplorationGraph.
+     * @param reranker Value `Reranker` wrapped into a shared pointer for candidate reranking.
+     * @param normalize_query If true, L2-normalizes float32 query vectors prior to traversal.
+     * @return Owning `deglib::search::Searcher` configured for this graph.
      */
-    DynamicExplorationGraph to_dynamic(const uint32_t chunk_size = 1024) const {
-        auto graph = std::make_unique<deglib::graph::DynamicGraph>(deglib::graph::DynamicGraph::from_graph(*internal_graph_, chunk_size));
-        return DynamicExplorationGraph(std::move(graph), transformations_);
-    }
-
-    /**
-     * @brief Converts this graph to a mutable DynamicGraph with chunked allocation and optional feature/space conversion.
-     *
-     * Supports the same four conversion modes as to_readonly() (simple copy, in-place
-     * self-transformation when custom_features == nullptr and target metric != source metric,
-     * custom feature buffer, or query-only transformation attachment). Edge weights are recalculated.
-     *
-     * @param custom_feature_space Optional target feature space (derived from transformations if omitted).
-     * @param custom_features Optional pointer to replacement raw feature memory in internal index order (0 .. size()-1).
-     * @param chunk_size Number of vertices allocated per memory chunk (default 1024). Rounded to power of 2.
-     * @param transformations Optional sequence of fitted feature transformations/quantizers to apply/attach.
-     * @return A new mutable DynamicExplorationGraph.
-     */
-    DynamicExplorationGraph to_dynamic(
-        std::optional<deglib::distances::FloatSpace> custom_feature_space,
-        const void* custom_features = nullptr,
-        const uint32_t chunk_size = 1024,
-        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations = {}
+    [[nodiscard]] deglib::search::Searcher to_searcher(
+        deglib::search::Reranker reranker,
+        const bool normalize_query = false
     ) const {
-        auto xfrms = !transformations.empty() ? std::move(transformations) : transformations_;
-        auto graph = std::make_unique<deglib::graph::DynamicGraph>(
-            deglib::graph::DynamicGraph::from_graph(*internal_graph_, custom_feature_space, custom_features, xfrms, chunk_size)
-        );
-        return DynamicExplorationGraph(std::move(graph), std::move(xfrms));
+        return to_searcher(std::make_shared<deglib::search::Reranker>(std::move(reranker)), normalize_query);
     }
 
     /**

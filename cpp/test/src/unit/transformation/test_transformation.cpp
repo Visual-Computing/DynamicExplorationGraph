@@ -1,3 +1,4 @@
+#include <deglib/deglib.h>
 #include <deglib/transformation.h>
 #include <gtest/gtest.h>
 
@@ -153,4 +154,51 @@ TEST(TransformTest, VectorOfTransformsChainingAndSerialization) {
     std::vector<std::byte> out_db_deser(count * get_output_byte_size(transformations_deser));
     apply_on_database(transformations_deser, std::span<const float>(data), std::span<std::byte>(out_db_deser));
     EXPECT_EQ(out_db, out_db_deser);
+}
+
+TEST(TransformTest, GraphAndRerankerChainPrefixTransformations) {
+    const uint32_t in_dim = 8;
+    const uint32_t count = 16;
+    std::vector<float> raw_data(count * in_dim);
+    for (size_t i = 0; i < raw_data.size(); ++i) raw_data[i] = static_cast<float>(i % 11) - 5.0f;
+
+    auto mips = std::make_shared<MipsTransform>(in_dim, 0.0f);
+    mips->fit(std::span<const float>(raw_data));
+
+    std::vector<float> lifted(count * mips->output_dim());
+    std::vector<std::byte> lifted_bytes(lifted.size() * sizeof(float));
+    mips->transform_database(std::span<const float>(raw_data), std::span<std::byte>(lifted_bytes));
+    std::memcpy(lifted.data(), lifted_bytes.data(), lifted_bytes.size());
+
+    deglib::distances::FloatSpace l2_space(mips->output_dim(), deglib::distances::Metric::FP32_L2);
+    auto graph = deglib::create_random_graph(lifted_bytes.data(), count, 4, l2_space, 7, {mips});
+
+    auto sqi8 = std::make_shared<ScalarQuantizerInt8>(mips->output_dim());
+    sqi8->fit(std::span<const float>(lifted));
+
+    // Path A: with_transformations preserves each backend and chains [MipsTransform, ScalarQuantizerInt8]
+    auto ro = graph.to_readonly().with_transformations({sqi8}, std::nullopt, 1);
+    EXPECT_FALSE(ro.isMutable());
+    ASSERT_EQ(ro.getTransformations().size(), 2u);
+    EXPECT_EQ(ro.getTransformations()[0]->name(), "MipsTransform");
+    EXPECT_EQ(ro.getTransformations()[1]->name(), "ScalarQuantizerInt8");
+
+    auto mut = graph.with_transformations({sqi8});
+    EXPECT_TRUE(mut.isMutable());
+    EXPECT_NE(dynamic_cast<const deglib::graph::SizeBoundedGraph*>(&mut.internal()), nullptr);
+    ASSERT_EQ(mut.getTransformations().size(), 2u);
+    EXPECT_EQ(mut.getTransformations()[1]->name(), "ScalarQuantizerInt8");
+
+    auto dyn = graph.to_dynamic(64).with_transformations({sqi8});
+    EXPECT_TRUE(dyn.isMutable());
+    const auto* dyn_internal = dynamic_cast<const deglib::graph::DynamicGraph*>(&dyn.internal());
+    ASSERT_NE(dyn_internal, nullptr);
+    EXPECT_EQ(dyn_internal->chunk_capacity(), 64u);
+    ASSERT_EQ(dyn.getTransformations().size(), 2u);
+    EXPECT_EQ(dyn.getTransformations()[1]->name(), "ScalarQuantizerInt8");
+
+    // Path B: with_features resets prefix transformations and preserves backend
+    auto ro_reset = graph.to_readonly().with_features(l2_space, lifted.data());
+    EXPECT_FALSE(ro_reset.isMutable());
+    EXPECT_TRUE(ro_reset.getTransformations().empty());
 }

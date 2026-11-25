@@ -1,6 +1,6 @@
 # Dynamic Exploration Graph (deglib) Documentation
 
-This directory contains the Sphinx documentation source files for `deglib`.
+This directory contains the Sphinx documentation source files for `deglib`, as well as the Python API metric/quantization reference in [python_metric_quantization_matrix.md](python_metric_quantization_matrix.md).
 
 ## Prerequisites & Setup
 

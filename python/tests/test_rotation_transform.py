@@ -51,19 +51,18 @@ def test_rotation_chained_with_uint4_in_searcher():
 
     q4 = deglib.make_scalar_quantizer_uint4(X_rot)
     q_feats = q4.transform_database(X_rot, threads=2)
-    ro_graph = graph.to_readonly(
-        deglib.Metric.Uint4_L2,
-        custom_features=q_feats,
+    ro_graph = graph.with_features(
+        q_feats,
+        metric=deglib.Metric.Uint4_L2,
         transformations=[rot, q4],
         threads=2,
     )
 
     rq = deglib.make_scalar_quantizer_fp16(X)
     rf = rq.transform_database(X, threads=2)
+    reranker = deglib.Reranker(deglib.Metric.FP16_InnerProduct, rf, transformations=[rq], threads=2)
     searcher = ro_graph.to_searcher(
-        rerank_metric=deglib.Metric.FP16_InnerProduct,
-        rerank_data=rf,
-        rerank_transformations=[rq],
+        reranker=reranker,
         optimize=False,
     )
     q = X[0]
@@ -112,17 +111,17 @@ def test_quantizer_pipeline_thresholds_and_search():
     pipeline = deglib.make_quantizer_pipeline(sub, "uint4", use_rerank=False, threads=2)
     assert len(pipeline) == 2
     q_feats = deglib.apply_on_database(pipeline, sub)
-    ro_graph = graph.to_readonly(deglib.Metric.Uint4_L2, custom_features=q_feats, transformations=pipeline)
+    ro_graph = graph.with_features(q_feats, metric=deglib.Metric.Uint4_L2, transformations=pipeline)
     searcher = ro_graph.to_searcher(optimize=False)
     res = searcher.search(sub[0], k=5, eps_or_ef=32.0, threads=1, return_distances=False)
     assert 0 in res.indices.tolist()
 
-    # EVP via make_quantizer_pipeline + self-transforming to_readonly
+    # EVP via make_quantizer_pipeline + self-transforming with_transformations()
     p_evp = deglib.make_quantizer_pipeline(sub, "evp", threads=2)
     assert len(p_evp) == 1
     assert p_evp[0].name == "EvpQuantizer"
     assert len(deglib.make_quantizer_pipeline(sub, deglib.Metric.EVP_InnerProduct, threads=2)) == 1
-    ro_evp = graph.to_readonly(transformations=p_evp)
+    ro_evp = graph.with_transformations(p_evp)
     searcher_evp = ro_evp.to_searcher(optimize=False)
     res_evp = searcher_evp.search(sub[0], k=5, eps_or_ef=32.0, threads=1, return_distances=False)
     assert 0 in res_evp.indices.tolist()

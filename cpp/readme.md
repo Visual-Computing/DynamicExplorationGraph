@@ -173,15 +173,15 @@ graph.optimize(/*sample_count=*/50, /*k=*/100, /*ef=*/200);
 ```cpp
 #include <deglib/deglib.h>
 
-// 1. Create searcher on top of a graph (optionally with quantizer & reranker)
-auto searcher = deglib::make_searcher(readonly_graph);
-searcher->optimize(/*n_clusters=*/128); // entry vertex medoids via k-means
+// 1. Create searcher on top of a graph (optionally with reranker)
+auto searcher = readonly_graph.to_searcher();
+searcher.optimize(/*n_clusters=*/128); // entry vertex medoids via k-means
 
 // 2. Query with relative distance margin (eps_or_ef < 1.0)
-auto eps_results = searcher->search(std::span<const float>(query), /*k=*/10, /*eps_or_ef=*/0.1f);
+auto eps_results = searcher.search(std::span<const float>(query), /*k=*/10, /*eps_or_ef=*/0.1f);
 
 // 3. Query with fixed candidate pool size (eps_or_ef >= 1.0, HNSW-style)
-auto ef_results = searcher->search(std::span<const float>(query), /*k=*/10, /*eps_or_ef=*/128.0f);
+auto ef_results = searcher.search(std::span<const float>(query), /*k=*/10, /*eps_or_ef=*/128.0f);
 ```
 
 ---

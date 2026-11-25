@@ -9,6 +9,54 @@ cpp_transformation = deglib_cpp.transformation
 FeatureTransformation = cpp_transformation.FeatureTransformation
 
 
+_HIGH_LEVEL_METRICS = frozenset(
+    {"l2", "euclidean", "cosine", "normalized", "ip", "innerproduct", "inner_product", "mips"}
+)
+
+
+def is_high_level_metric_name(metric: object) -> bool:
+    return isinstance(metric, str) and metric.strip().lower() in _HIGH_LEVEL_METRICS
+
+
+def is_l2_normalized(data: np.ndarray, sample_size: int = 4096) -> bool:
+    """Return True if a strided sample of rows has unit L2 norm within dtype tolerance."""
+    n = int(data.shape[0])
+    if n == 0:
+        return True
+    step = max(1, n // sample_size)
+    sample = data[::step][:sample_size].astype(np.float32, copy=False)
+    norms_sq = np.einsum("ij,ij->i", sample, sample)
+    tol = 1e-2 if data.dtype == np.float16 else 1e-3
+    return bool(np.all(np.abs(norms_sq - 1.0) <= tol))
+
+
+def resolve_spatial_metric(data: np.ndarray, metric: str) -> tuple[Metric, list[FeatureTransformation]]:
+    """
+    Resolve a high-level metric name (``l2``, ``euclidean``, ``cosine``, ``normalized``, ``ip``)
+    into ``(base_metric, spatial_prefix_transforms)``.
+    """
+    if data.dtype not in (np.dtype(np.float32), np.dtype(np.float16)):
+        raise ValueError(
+            f"High-level metric {metric!r} requires float32 or float16 input data; "
+            f"pass an explicit deglib.Metric (e.g. Metric.Uint8_L2) for dtype {data.dtype}."
+        )
+    m_key = metric.strip().lower()
+    is_fp16_in = data.dtype == np.dtype(np.float16)
+    n_samples = int(data.shape[0])
+    xfrms: list[FeatureTransformation] = []
+    if m_key in ("l2", "euclidean"):
+        resolved_metric = Metric.FP16_L2 if is_fp16_in else Metric.FP32_L2
+    elif m_key in ("cosine", "normalized"):
+        resolved_metric = Metric.FP16_InnerProduct if is_fp16_in else Metric.FP32_InnerProduct
+        if n_samples > 0 and not is_l2_normalized(data):
+            xfrms = [make_l2_normalize_transform(data)]
+    else:
+        resolved_metric = Metric.FP16_L2 if is_fp16_in else Metric.FP32_L2
+        if n_samples > 0:
+            xfrms = [make_mips_transform(data)]
+    return resolved_metric, xfrms
+
+
 def _normalize_transforms(
     transformations: FeatureTransformation | Sequence[FeatureTransformation] | None,
 ) -> list[FeatureTransformation]:

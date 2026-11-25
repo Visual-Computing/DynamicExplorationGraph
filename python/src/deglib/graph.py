@@ -158,19 +158,25 @@ class DynamicExplorationGraph:
         self, external_label: int | np.ndarray | Sequence[int], threads: int = 1
     ) -> list[int] | np.ndarray:
         """
-        Get neighbor external labels for a single label or a batch of labels.
+        Retrieve neighbor external labels for a single vertex or a batch of vertices.
+
+        Parameters
+        ----------
+        external_label : int, np.ndarray, or sequence of int
+            Single external vertex label (returns ``list[int]``) or 1D batch of external
+            labels (returns 2D ``uint32`` array of shape ``(len(external_label), edges_per_vertex)``).
+        threads : int, default=1
+            Number of worker threads for batch retrieval (ignored for a single label).
+
+        Returns
+        -------
+        list[int] or np.ndarray
+            Neighbor external labels for the requested vertex or vertices.
         """
         if isinstance(external_label, (np.ndarray, list, tuple)):
             arr = np.ascontiguousarray(external_label, dtype=np.uint32)
-            return self.dynamic_exploration_graph_cpp.get_neighbors_batch(arr, threads)
+            return self.dynamic_exploration_graph_cpp.get_neighbors(arr, threads)
         return self.dynamic_exploration_graph_cpp.get_neighbors(int(external_label))
-
-    def get_neighbors_batch(self, external_labels: np.ndarray | Sequence[int], threads: int = 1) -> np.ndarray:
-        """
-        Get neighbor external labels for a batch of external labels as a 2D ``uint32`` array.
-        """
-        arr = np.ascontiguousarray(external_labels, dtype=np.uint32)
-        return self.dynamic_exploration_graph_cpp.get_neighbors_batch(arr, threads)
 
     def get_labels(self) -> np.ndarray:
         """
@@ -352,7 +358,8 @@ class DynamicExplorationGraph:
         p = pathlib.Path(path)
         if p.parent and not p.parent.exists():
             p.parent.mkdir(parents=True, exist_ok=True)
-        self.dynamic_exploration_graph_cpp.save_graph(str(p))
+        target = self if self.is_mutable() else self.to_mutable()
+        target.dynamic_exploration_graph_cpp.save_graph(str(p))
 
     def search(
         self,
@@ -482,8 +489,6 @@ class DynamicExplorationGraph:
     def to_reranker(
         self,
         metric: Metric | str,
-        data: np.ndarray | None = None,
-        order: Literal["label", "internal"] = "label",
         transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
         optimize: bool = True,
         threads: int = 0,
@@ -491,15 +496,31 @@ class DynamicExplorationGraph:
         """
         Create a standalone ``Reranker`` aligned with this graph's internal vertex order.
 
-        This allows building a single ``Reranker`` once and sharing it across multiple quantized
-        ``Searcher`` instances created via ``to_searcher(..., reranker=reranker)``.
+        Extracts and quantizes stored vectors directly from an ``FP32`` or ``FP16`` graph
+        and inherits any prefix transformations already attached to the graph (such as
+        ``MipsTransform``), appending ``transformations`` if provided.
 
-        - ``data=None`` (default): extracts and quantizes vectors directly from an ``FP32``/``FP16`` graph.
-        - ``data`` provided: aligns rows via ``order`` (``"label"`` or ``"internal"``).
+        For external datasets not stored in the graph, construct ``deglib.Reranker(...)``
+        directly instead.
+
+        Parameters
+        ----------
+        metric : Metric or str
+            Target distance metric for the reranker (e.g. ``Metric.FP16_L2`` or
+            ``Metric.FP32_InnerProduct``).
+        transformations : FeatureTransformation or sequence of FeatureTransformation, optional
+            Additional fitted transformations applied after the graph's own prefix
+            transformations.
+        optimize : bool, default=True
+            If ``True``, immediately runs ``reranker.optimize()`` to tune memory prefetching.
+        threads : int, default=0
+            Number of worker threads used during quantization (``0`` selects all cores).
+
+        Returns
+        -------
+        Reranker
+            Standalone reranker aligned with ``self.get_labels()``.
         """
-        if order not in ("label", "internal"):
-            raise ValueError(f"order must be 'label' or 'internal', got {order!r}")
-
         from deglib.search import Reranker
 
         resolved_metric = Metric.resolve(metric)
@@ -508,331 +529,421 @@ class DynamicExplorationGraph:
             if not isinstance(t, FeatureTransformation):
                 raise TypeError(f"transformations[{i}] must be a FeatureTransformation, got {type(t).__name__}")
 
-        if data is None:
-            target_dim = int(r_xfrms[-1].output_dim) if r_xfrms else self.get_dim()
-            cpp_space = resolved_metric._to_cpp_space(target_dim)
-            reranker_cpp = deglib_cpp.search.Reranker.from_graph(
-                self.dynamic_exploration_graph_cpp,
-                cpp_space,
-                r_xfrms,
-                int(threads),
-            )
-            return Reranker._from_cpp(resolved_metric, reranker_cpp, optimize=optimize)
-
-        raw_data = np.asarray(data)
-        if raw_data.ndim != 2:
-            raise ValueError(f"data must be a 2D array, got shape {raw_data.shape}")
-        n_vertices = self.size()
-        row_indices = None
-        if order == "label":
-            if n_vertices == 0:
-                raw_data = raw_data[:0]
-            else:
-                labels = self.get_labels()
-                if int(labels.max()) >= raw_data.shape[0]:
-                    raise ValueError(
-                        f"Max graph external label ({int(labels.max())}) >= data row count ({raw_data.shape[0]}). "
-                        "Pass data indexed by external labels or set order='internal'."
-                    )
-                row_indices = labels
-        elif raw_data.shape[0] != n_vertices:
-            raise ValueError(f"data row count ({raw_data.shape[0]}) does not match graph.size() ({n_vertices}).")
-
-        return Reranker(
-            metric=resolved_metric,
-            base_vectors=raw_data,
-            transformations=r_xfrms,
-            optimize=optimize,
-            threads=threads,
-            row_indices=row_indices,
+        target_dim = int(r_xfrms[-1].output_dim) if r_xfrms else self.get_dim()
+        cpp_space = resolved_metric._to_cpp_space(target_dim)
+        reranker_cpp = deglib_cpp.search.Reranker.from_graph(
+            self.dynamic_exploration_graph_cpp,
+            cpp_space,
+            r_xfrms,
+            int(threads),
         )
+        return Reranker._from_cpp(resolved_metric, reranker_cpp, optimize=optimize)
+
+    def _prepare_metric_transform(
+        self,
+        resolved_metric: Metric,
+        use_rerank: bool,
+        threads: int,
+    ) -> tuple[list[FeatureTransformation], Any]:
+        """Resolve C++ transformations and target FloatSpace for a target metric."""
+        src_metric = self.get_metric()
+        src_dim = self.get_dim()
+        same_data_type = (int(resolved_metric) & 0xF0) == (int(src_metric) & 0xF0)
+        if same_data_type:
+            return [], resolved_metric._to_cpp_space(src_dim)
+
+        if Metric(int(src_metric)) not in _FLOAT_METRICS:
+            raise ValueError(
+                f"Cannot change metric from non-float metric '{src_metric.name}' to '{resolved_metric.name}'."
+            )
+        if Metric(int(resolved_metric)) in _FP32_METRICS:
+            raise ValueError(
+                f"Cannot switch from '{src_metric.name}' to '{resolved_metric.name}' without explicit transformations; "
+                "use with_transformations() instead."
+            )
+        src_is_ip = Metric(int(src_metric)).name.endswith("InnerProduct")
+        dst_is_l2 = not Metric(int(resolved_metric)).name.endswith("InnerProduct")
+        has_spatial_prefix = any(
+            t.name in ("L2NormalizeTransform", "MipsTransform") for t in self.get_transformations()
+        )
+        need_mips = src_is_ip and dst_is_l2 and not has_spatial_prefix
+        xfrms = cpp_transformation.make_quantizer_pipeline_from_graph(
+            self.dynamic_exploration_graph_cpp,
+            int(resolved_metric),
+            -1.0,
+            use_rerank,
+            threads,
+            7,
+            False,
+            need_mips,
+        )
+        return xfrms, resolved_metric._to_cpp_space(int(xfrms[-1].output_dim))
 
     def to_searcher(
         self,
         metric: Metric | str | None = None,
         reranker: Any | None = None,
-        rerank_metric: Metric | str | None = None,
-        rerank_data: np.ndarray | None = None,
-        rerank_order: Literal["label", "internal"] = "label",
-        rerank_transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
         normalize_query: bool = False,
         optimize: bool = True,
-        use_routing: bool = True,
-        n_clusters: int = 256,
-        n_iter: int = 20,
-        sample_size: int = 0,
         threads: int = 0,
     ):
         """
         Create a native C++ ``Searcher`` from this graph.
 
-        Reranking is opt-in via either a shared ``reranker`` instance or ``rerank_metric``:
-        - ``reranker=None`` and ``rerank_metric=None`` (default): NO reranking is performed.
-        - ``reranker`` set: reuses the prebuilt ``Reranker`` (zero-copy over its base vectors).
-        - ``rerank_metric`` set, ``rerank_data=None``: extracts and quantizes rerank vectors directly
-          from this ``FP32``/``FP16`` graph before converting/quantizing it to ``metric``.
-        - ``rerank_metric`` set, ``rerank_data`` given: uses ``rerank_data`` aligned via ``rerank_order``.
-        """
-        from deglib.search import create_searcher
+        If ``metric`` differs from the graph's current metric (or requests an explicit
+        SIMD instruction), a quantized/re-tagged ``ReadOnlyGraph`` is built in a single
+        pass (without recomputing mutable edge weights or allocating intermediate graph
+        copies) while preserving any attached prefix transformations (e.g. ``MipsTransform``).
 
-        return create_searcher(
-            self,
-            metric=metric,
+        Parameters
+        ----------
+        metric : Metric or str, optional
+            Optional target metric for the backing search graph. When ``None`` or equal
+            to the graph's current metric/instruction, no feature transformation is run.
+        reranker : Reranker, optional
+            Optional prebuilt ``Reranker`` (e.g. from ``graph.to_reranker(...)`` or
+            ``deglib.Reranker(...)``) for two-stage candidate reranking.
+        normalize_query : bool, default=False
+            If ``True``, L2-normalizes incoming float32 queries before graph traversal.
+        optimize : bool, default=True
+            If ``True``, calls ``searcher.optimize(threads=threads)`` to compute K-Means
+            routing entry points and tune prefetching. For custom clustering parameters,
+            pass ``optimize=False`` and call ``searcher.optimize(...)`` manually.
+        threads : int, default=0
+            Number of worker threads for quantization and optimization (``0`` = all cores).
+
+        Returns
+        -------
+        Searcher
+            High-throughput C++ searcher backed by a ``ReadOnlyGraph``.
+        """
+        from deglib.search import Searcher
+
+        search_graph = self
+        if metric is not None:
+            target_metric = Metric.resolve(metric)
+            src_metric = self.get_metric()
+            src_inst = self.get_instruction()
+            explicit_inst = getattr(target_metric, "_instruction", None)
+            needs_conversion = Metric(int(target_metric)) != Metric(int(src_metric)) or (
+                explicit_inst is not None and explicit_inst != src_inst
+            )
+            if needs_conversion:
+                xfrms, target_space = self._prepare_metric_transform(
+                    target_metric,
+                    use_rerank=(reranker is not None),
+                    threads=threads,
+                )
+                search_graph = DynamicExplorationGraph(
+                    self.dynamic_exploration_graph_cpp._transform_readonly(xfrms, target_space, int(threads))
+                )
+
+        return Searcher(
+            graph=search_graph,
             reranker=reranker,
-            rerank_metric=rerank_metric,
-            rerank_data=rerank_data,
-            rerank_order=rerank_order,
-            rerank_transformations=rerank_transformations,
             normalize_query=normalize_query,
             optimize=optimize,
-            use_routing=use_routing,
-            n_clusters=n_clusters,
-            n_iter=n_iter,
-            sample_size=sample_size,
             threads=threads,
         )
 
-    def _prepare_conversion_args(
+    def to_readonly(self) -> "DynamicExplorationGraph":
+        """
+        Convert this graph into a compact, immutable ``ReadOnlyGraph``.
+
+        This is a pure backend copy that preserves topology, external labels, stored
+        features, metric, and attached query transformations.
+
+        Returns
+        -------
+        DynamicExplorationGraph
+            A new read-only graph sharing no mutable state with ``self``.
+        """
+        return DynamicExplorationGraph(self.dynamic_exploration_graph_cpp.to_readonly())
+
+    def to_mutable(self, max_size: int = 0, threads: int = 0) -> "DynamicExplorationGraph":
+        """
+        Convert this graph into a fixed-capacity mutable ``SizeBoundedGraph``.
+
+        This is a pure backend copy that preserves topology, external labels, stored
+        features, metric, and attached query transformations. Existing edge weights
+        are copied directly from mutable graphs, or recomputed in parallel when
+        converting from a ``ReadOnlyGraph``.
+
+        Parameters
+        ----------
+        max_size : int, default=0
+            Maximum vertex capacity of the new mutable graph. ``0`` preserves the
+            current graph's vertex count (or capacity if larger).
+        threads : int, default=0
+            Number of worker threads used to recompute edge weights when converting
+            from a ``ReadOnlyGraph`` (``0`` = all available cores).
+
+        Returns
+        -------
+        DynamicExplorationGraph
+            A new fixed-capacity mutable graph.
+
+        Raises
+        ------
+        ValueError
+            If ``max_size < 0``.
+        """
+        if max_size < 0:
+            raise ValueError(f"max_size must be >= 0, got {max_size}")
+        return DynamicExplorationGraph(
+            self.dynamic_exploration_graph_cpp.to_mutable(max_size=int(max_size), threads=int(threads))
+        )
+
+    def to_dynamic(self, chunk_size: int = 1024, threads: int = 0) -> "DynamicExplorationGraph":
+        """
+        Convert this graph into a chunk-allocated mutable ``DynamicGraph``.
+
+        This is a pure backend copy that preserves topology, external labels, stored
+        features, metric, and attached query transformations. Existing edge weights
+        are copied directly from mutable graphs, or recomputed in parallel when
+        converting from a ``ReadOnlyGraph``.
+
+        Parameters
+        ----------
+        chunk_size : int, default=1024
+            Number of vertices allocated per memory chunk.
+        threads : int, default=0
+            Number of worker threads used to recompute edge weights when converting
+            from a ``ReadOnlyGraph`` (``0`` = all available cores).
+
+        Returns
+        -------
+        DynamicExplorationGraph
+            A new dynamically growing mutable graph.
+
+        Raises
+        ------
+        ValueError
+            If ``chunk_size <= 0``.
+        """
+        if chunk_size <= 0:
+            raise ValueError(f"chunk_size must be > 0, got {chunk_size}")
+        return DynamicExplorationGraph(
+            self.dynamic_exploration_graph_cpp.to_dynamic(chunk_size=int(chunk_size), threads=int(threads))
+        )
+
+    def with_metric(
         self,
-        metric: Metric | str | None,
-        custom_features: np.ndarray | None,
-        custom_features_order: Literal["label", "internal"],
-        transformations: FeatureTransformation | Sequence[FeatureTransformation] | None,
-        use_rerank: bool = False,
+        metric: Metric | str,
         threads: int = 0,
-    ):
-        if custom_features_order not in ("label", "internal"):
-            raise ValueError(f"custom_features_order must be 'label' or 'internal', got {custom_features_order!r}")
+    ) -> "DynamicExplorationGraph":
+        """
+        Return a copy of this graph in ``metric``, preserving the current backend.
+
+        When the target data type matches the graph's stored data type (e.g. ``FP32_L2``
+        to ``FP32_InnerProduct``), stored features are preserved without transformation
+        (edge weights are recomputed if mutable). When moving from floating-point features
+        to a quantized or FP16 metric, an auto-calibrated quantizer pipeline is applied
+        and appended to ``transformations_``.
+
+        Parameters
+        ----------
+        metric : Metric or str
+            Target distance metric (e.g. ``Metric.FP32_InnerProduct``, ``Metric.Int8_L2``).
+        threads : int, default=0
+            Number of worker threads for calibration, feature transformation, and
+            edge-weight recomputation on mutable graphs (``0`` = all available cores).
+
+        Returns
+        -------
+        DynamicExplorationGraph
+            New graph in the requested ``metric`` using the same backend as ``self``.
+        """
+        resolved_metric = Metric.resolve(metric)
+        xfrms, target_space = self._prepare_metric_transform(
+            resolved_metric,
+            use_rerank=False,
+            threads=threads,
+        )
+        return DynamicExplorationGraph(
+            self.dynamic_exploration_graph_cpp.with_transformations(xfrms, target_space, int(threads))
+        )
+
+    def with_transformations(
+        self,
+        transformations: FeatureTransformation | Sequence[FeatureTransformation],
+        metric: Metric | str | None = None,
+        threads: int = 0,
+    ) -> "DynamicExplorationGraph":
+        """
+        Self-transform stored floating-point features, preserving the current backend.
+
+        Transforms the graph's stored ``FP32``/``FP16`` vectors using the fitted
+        ``transformations`` and appends them to the graph's existing query pipeline.
+        If ``self`` is mutable, edge weights are recomputed in the target space while
+        keeping existing capacity or chunk size.
+
+        Parameters
+        ----------
+        transformations : FeatureTransformation or sequence of FeatureTransformation
+            Fitted transformations to apply to stored features and append to queries.
+        metric : Metric or str, optional
+            Optional target metric. Inferred automatically from ``transformations`` when omitted.
+        threads : int, default=0
+            Number of worker threads for feature transformation and edge-weight
+            recomputation on mutable graphs (``0`` = all available cores).
+
+        Returns
+        -------
+        DynamicExplorationGraph
+            New graph using the same backend as ``self`` with transformed features and
+            chained query transformations.
+        """
+        xfrms = _normalize_transforms(transformations)
+        if len(xfrms) == 0:
+            raise ValueError("with_transformations() requires at least one FeatureTransformation.")
+        for i, t in enumerate(xfrms):
+            if not isinstance(t, FeatureTransformation):
+                raise TypeError(f"transformations[{i}] must be a FeatureTransformation, got {type(t).__name__}")
+            if not t.is_fitted:
+                raise ValueError(f"transformations[{i}] must be fitted before with_transformations()")
+
+        src_dim = self.get_dim()
+        if xfrms[0].input_dim != src_dim:
+            raise ValueError(
+                f"transformations[0].input_dim ({xfrms[0].input_dim}) does not match graph dim ({src_dim})."
+            )
+
+        target_space = None
+        if metric is not None:
+            resolved_metric = Metric.resolve(metric)
+            expected_bytes = resolved_metric.get_data_size(int(xfrms[-1].output_dim))
+            if xfrms[-1].output_byte_size != expected_bytes:
+                raise ValueError(
+                    f"transformations[-1].output_byte_size ({xfrms[-1].output_byte_size}) does not match "
+                    f"target metric data size ({expected_bytes})."
+                )
+            target_space = resolved_metric._to_cpp_space(int(xfrms[-1].output_dim))
+
+        return DynamicExplorationGraph(
+            self.dynamic_exploration_graph_cpp.with_transformations(xfrms, target_space, int(threads))
+        )
+
+    def with_features(
+        self,
+        features: np.ndarray,
+        metric: Metric | str | None = None,
+        order: Literal["label", "internal"] = "label",
+        transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
+        threads: int = 0,
+    ) -> "DynamicExplorationGraph":
+        """
+        Replace stored features with external ``features``, preserving topology, labels, and backend.
+
+        Resets the graph's query-transformation pipeline to ``transformations`` (or an
+        auto-calibrated quantizer pipeline when ``features`` is floating-point, ``metric``
+        is quantized/FP16, and ``transformations`` is ``None``). Keeps the same backend
+        (``ReadOnlyGraph``, ``SizeBoundedGraph`` capacity, or ``DynamicGraph`` chunk size).
+
+        Parameters
+        ----------
+        features : np.ndarray
+            2D array of replacement features.
+        metric : Metric or str, optional
+            Target metric for the new graph. Defaults to the current graph's metric.
+        order : {"label", "internal"}, default="label"
+            Row ordering of ``features``. ``"label"`` indexes rows by external vertex
+            labels (``features[graph.get_labels()]``); ``"internal"`` expects rows to
+            already match the graph's internal vertex order.
+        transformations : FeatureTransformation or sequence of FeatureTransformation, optional
+            Fitted transformations defining the new query pipeline (and applied to
+            ``features`` if ``features`` is float32 in the input space).
+        threads : int, default=0
+            Number of worker threads for calibration/quantization and (for mutable
+            backends) edge-weight recomputation.
+
+        Returns
+        -------
+        DynamicExplorationGraph
+            New graph using the same backend as ``self`` with replacement features and a
+            reset query-transformation pipeline.
+        """
+        if order not in ("label", "internal"):
+            raise ValueError(f"order must be 'label' or 'internal', got {order!r}")
+
+        feat_arr = np.asarray(features)
+        if feat_arr.ndim != 2:
+            raise ValueError(f"features must be a 2D array, got shape {feat_arr.shape}.")
+
+        n_vertices = self.size()
+        if order == "label":
+            if n_vertices == 0:
+                aligned = np.ascontiguousarray(feat_arr[:0])
+            else:
+                labels = self.get_labels()
+                if int(labels.max()) >= feat_arr.shape[0]:
+                    raise ValueError(
+                        f"Max graph external label ({int(labels.max())}) >= features row count ({feat_arr.shape[0]}). "
+                        "Pass an array indexed by external labels or set order='internal'."
+                    )
+                aligned = np.ascontiguousarray(feat_arr[labels])
+        else:
+            if feat_arr.shape[0] != n_vertices:
+                raise ValueError(
+                    f"features row count ({feat_arr.shape[0]}) does not match graph.size() ({n_vertices})."
+                )
+            aligned = np.ascontiguousarray(feat_arr)
 
         xfrms = _normalize_transforms(transformations)
         for i, t in enumerate(xfrms):
             if not isinstance(t, FeatureTransformation):
                 raise TypeError(f"transformations[{i}] must be a FeatureTransformation, got {type(t).__name__}")
             if not t.is_fitted:
-                raise ValueError(f"transformations[{i}] must be fitted before conversion")
+                raise ValueError(f"transformations[{i}] must be fitted before with_features()")
 
-        resolved_metric = None if metric is None else Metric.resolve(metric)
-        n_vertices = self.size()
-
-        if custom_features is not None:
-            feat_arr = np.asarray(custom_features)
-            if feat_arr.ndim != 2:
-                raise ValueError(f"custom_features must be a 2D array, got shape {feat_arr.shape}.")
-
-            if custom_features_order == "label":
-                if n_vertices == 0:
-                    aligned = np.ascontiguousarray(feat_arr[:0])
-                else:
-                    labels = self.get_labels()
-                    if int(labels.max()) >= feat_arr.shape[0]:
-                        raise ValueError(
-                            f"Max graph external label ({int(labels.max())}) >= custom_features row count ({feat_arr.shape[0]}). "
-                            "Pass an array indexed by external labels or use custom_features_order='internal'."
-                        )
-                    aligned = np.ascontiguousarray(feat_arr[labels])
-            else:
-                if feat_arr.shape[0] != n_vertices:
-                    raise ValueError(
-                        f"custom_features row count ({feat_arr.shape[0]}) does not match graph.size() ({n_vertices})."
-                    )
-                aligned = np.ascontiguousarray(feat_arr)
-
-            if resolved_metric is not None:
-                target_base = Metric(int(resolved_metric))
-                is_float_input = aligned.dtype == np.float32 or (
-                    aligned.dtype == np.float16 and target_base not in _FP16_METRICS
-                )
-                if len(xfrms) == 0 and target_base not in _FP32_METRICS and is_float_input:
-                    target_dim = int(aligned.shape[1])
-                    xfrms = make_quantizer_pipeline(
-                        aligned,
-                        resolved_metric,
-                        use_rerank=use_rerank,
-                        threads=threads,
-                    )
-                    aligned = apply_on_database(xfrms, aligned, threads=threads)
-                elif (
-                    len(xfrms) > 0
-                    and aligned.dtype == np.float32
-                    and aligned.shape[1] == xfrms[0].input_dim
-                    and (xfrms[-1].output_dtype != np.float32 or xfrms[-1].output_dim != aligned.shape[1])
-                ):
-                    target_dim = int(xfrms[-1].output_dim)
-                    aligned = apply_on_database(xfrms, aligned, threads=threads)
-                else:
-                    aligned = assure_array(aligned, "custom_features", resolved_metric.get_accepted_dtypes())
-                    width = int(aligned.shape[1])
-                    src_dim = self.get_dim()
-                    if target_base in (
-                        Metric.Uint4_L2,
-                        Metric.Uint4_InnerProduct,
-                        Metric.Int4_L2,
-                        Metric.Int4_InnerProduct,
-                    ):
-                        target_dim = src_dim if (src_dim + 1) // 2 == width else width * 2
-                    elif target_base == Metric.EVP_InnerProduct:
-                        target_dim = src_dim if 2 * ((src_dim + 7) // 8) == width else width * 4
-                    else:
-                        target_dim = width
-
-                expected_bytes = resolved_metric.get_data_size(target_dim)
-                if xfrms and xfrms[-1].output_byte_size != expected_bytes:
-                    raise ValueError(
-                        f"transformations[-1].output_byte_size ({xfrms[-1].output_byte_size}) does not match "
-                        f"target metric data size ({expected_bytes})."
-                    )
-                if aligned.nbytes != n_vertices * expected_bytes:
-                    raise ValueError(
-                        f"custom_features size ({aligned.nbytes} bytes) does not match expected size "
-                        f"({n_vertices * expected_bytes} bytes for {n_vertices} vertices x {expected_bytes} bytes/vertex)."
-                    )
-                fs_cpp = resolved_metric._to_cpp_space(target_dim)
-            else:
-                src_metric = self.get_metric()
-                aligned = assure_array(aligned, "custom_features", src_metric.get_accepted_dtypes())
-                expected_bytes = self.get_data_size()
-                if aligned.nbytes != n_vertices * expected_bytes:
-                    raise ValueError(
-                        f"custom_features size ({aligned.nbytes} bytes) does not match expected size "
-                        f"({n_vertices * expected_bytes} bytes for {n_vertices} vertices x {expected_bytes} bytes/vertex)."
-                    )
-                fs_cpp = None
-
-            return fs_cpp, aligned, xfrms
-
-        # custom_features is None
-        src_metric = self.get_metric()
-        src_dim = self.get_dim()
-        if xfrms and xfrms[0].input_dim != src_dim:
-            raise ValueError(
-                f"transformations[0].input_dim ({xfrms[0].input_dim}) does not match graph dim ({src_dim})."
-            )
-
-        if resolved_metric is not None:
-            fs_cpp = resolved_metric._to_cpp_space(src_dim)
-            src_tag = _metric_data_tag(src_metric)
-            dst_tag = _metric_data_tag(resolved_metric)
-            expected_bytes = resolved_metric.get_data_size(src_dim)
-            if xfrms and xfrms[-1].output_byte_size != expected_bytes:
-                raise ValueError(
-                    f"transformations[-1].output_byte_size ({xfrms[-1].output_byte_size}) does not match "
-                    f"target metric data size ({expected_bytes})."
-                )
-            if Metric(int(src_metric)) not in _FLOAT_METRICS and (src_tag != dst_tag or len(xfrms) > 0):
-                raise ValueError(
-                    f"Cannot self-transform from non-float metric '{src_metric.name}' to '{resolved_metric.name}' "
-                    "without custom_features. Provide custom_features or convert from an FP32/FP16 graph."
-                )
-            if src_tag != dst_tag and len(xfrms) == 0:
-                if Metric(int(src_metric)) in _FLOAT_METRICS and Metric(int(resolved_metric)) not in _FP32_METRICS:
-                    xfrms = cpp_transformation.make_quantizer_pipeline_from_graph(
-                        self.dynamic_exploration_graph_cpp,
-                        int(resolved_metric),
-                        -1.0,
-                        use_rerank,
-                        threads,
-                        7,
-                    )
-                else:
-                    raise ValueError(
-                        f"Cannot self-transform from non-float metric '{src_metric.name}' to '{resolved_metric.name}' "
-                        "without custom_features. Provide custom_features or convert from an FP32/FP16 graph."
-                    )
+        resolved_metric = self.get_metric() if metric is None else Metric.resolve(metric)
+        target_base = Metric(int(resolved_metric))
+        is_float_input = aligned.dtype == np.float32 or (
+            aligned.dtype == np.float16 and target_base not in _FP16_METRICS
+        )
+        if len(xfrms) == 0 and target_base not in _FP32_METRICS and is_float_input:
+            target_dim = int(aligned.shape[1])
+            xfrms = make_quantizer_pipeline(aligned, resolved_metric, use_rerank=False, threads=threads)
+            aligned = apply_on_database(xfrms, aligned, threads=threads)
+        elif (
+            len(xfrms) > 0
+            and aligned.dtype == np.float32
+            and aligned.shape[1] == xfrms[0].input_dim
+            and (xfrms[-1].output_dtype != np.float32 or xfrms[-1].output_dim != aligned.shape[1])
+        ):
+            target_dim = int(xfrms[-1].output_dim)
+            aligned = apply_on_database(xfrms, aligned, threads=threads)
         else:
-            fs_cpp = None
-            if len(xfrms) > 0 and Metric(int(src_metric)) not in _FLOAT_METRICS:
-                raise ValueError(
-                    f"Cannot self-transform from non-float metric '{src_metric.name}' without custom_features."
-                )
+            aligned = assure_array(aligned, "features", resolved_metric.get_accepted_dtypes())
+            width = int(aligned.shape[1])
+            src_dim = self.get_dim()
+            if target_base in (
+                Metric.Uint4_L2,
+                Metric.Uint4_InnerProduct,
+                Metric.Int4_L2,
+                Metric.Int4_InnerProduct,
+            ):
+                target_dim = src_dim if (src_dim + 1) // 2 == width else width * 2
+            elif target_base == Metric.EVP_InnerProduct:
+                target_dim = src_dim if 2 * ((src_dim + 7) // 8) == width else width * 4
+            else:
+                target_dim = width
 
-        return fs_cpp, None, xfrms
-
-    def to_readonly(
-        self,
-        metric: Metric | str | None = None,
-        custom_features: np.ndarray | None = None,
-        custom_features_order: Literal["label", "internal"] = "label",
-        transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
-        use_rerank: bool = False,
-        optimize: bool = True,
-        threads: int = 0,
-    ) -> "DynamicExplorationGraph":
-        """
-        Convert this graph into a compact, search-optimized ``ReadOnlyGraph``.
-        """
-        fs_cpp, feat_cpp, xfrms = self._prepare_conversion_args(
-            metric,
-            custom_features,
-            custom_features_order,
-            transformations,
-            use_rerank=use_rerank,
-            threads=threads,
-        )
-        res = DynamicExplorationGraph(self.dynamic_exploration_graph_cpp.to_readonly(fs_cpp, feat_cpp, xfrms, threads))
-        if optimize and res.size() > 0:
-            res.optimize()
-        return res
-
-    def to_mutable(
-        self,
-        metric: Metric | str | None = None,
-        custom_features: np.ndarray | None = None,
-        custom_features_order: Literal["label", "internal"] = "label",
-        capacity: int = 0,
-        transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
-        threads: int = 0,
-    ) -> "DynamicExplorationGraph":
-        """
-        Convert this graph into a fixed-capacity mutable ``SizeBoundedGraph``.
-        """
-        if capacity < 0:
-            raise ValueError(f"capacity must be >= 0, got {capacity}")
-        fs_cpp, feat_cpp, xfrms = self._prepare_conversion_args(
-            metric,
-            custom_features,
-            custom_features_order,
-            transformations,
-            use_rerank=False,
-            threads=threads,
-        )
-        return DynamicExplorationGraph(
-            self.dynamic_exploration_graph_cpp.to_mutable(
-                custom_feature_space=fs_cpp,
-                custom_features=feat_cpp,
-                new_max_size=capacity,
-                transformations=xfrms,
+        expected_bytes = resolved_metric.get_data_size(target_dim)
+        if xfrms and xfrms[-1].output_byte_size != expected_bytes:
+            raise ValueError(
+                f"transformations[-1].output_byte_size ({xfrms[-1].output_byte_size}) does not match "
+                f"target metric data size ({expected_bytes})."
             )
-        )
-
-    def to_dynamic(
-        self,
-        metric: Metric | str | None = None,
-        custom_features: np.ndarray | None = None,
-        custom_features_order: Literal["label", "internal"] = "label",
-        chunk_size: int = 1024,
-        transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
-        threads: int = 0,
-    ) -> "DynamicExplorationGraph":
-        """
-        Convert this graph into a chunk-allocated mutable ``DynamicGraph``.
-        """
-        if chunk_size <= 0:
-            raise ValueError(f"chunk_size must be > 0, got {chunk_size}")
-        fs_cpp, feat_cpp, xfrms = self._prepare_conversion_args(
-            metric,
-            custom_features,
-            custom_features_order,
-            transformations,
-            use_rerank=False,
-            threads=threads,
-        )
-        return DynamicExplorationGraph(
-            self.dynamic_exploration_graph_cpp.to_dynamic(
-                custom_feature_space=fs_cpp,
-                custom_features=feat_cpp,
-                chunk_size=chunk_size,
-                transformations=xfrms,
+        if aligned.nbytes != n_vertices * expected_bytes:
+            raise ValueError(
+                f"features size ({aligned.nbytes} bytes) does not match expected size "
+                f"({n_vertices * expected_bytes} bytes for {n_vertices} vertices x {expected_bytes} bytes/vertex)."
             )
+
+        target_space = resolved_metric._to_cpp_space(target_dim)
+        return DynamicExplorationGraph(
+            self.dynamic_exploration_graph_cpp.with_features(target_space, aligned, xfrms, int(threads))
         )
 
     def __repr__(self) -> str:
@@ -941,9 +1052,84 @@ def load_mutable_graph(path: pathlib.Path | str, capacity: int = 0) -> DynamicEx
     return DynamicExplorationGraph(deglib_cpp.load_sizebounded_graph(str(p), capacity))
 
 
+def compress(
+    graph: DynamicExplorationGraph,
+    target: Literal["32bit", "16bit", "8bit", "4bit", "2bit", "auto"] | Metric | str,
+    threads: int = 0,
+) -> DynamicExplorationGraph:
+    """
+    Compress ``graph`` to the specified bit-width or ``Metric``, returning a ``ReadOnlyGraph``.
+
+    Parameters
+    ----------
+    graph : DynamicExplorationGraph
+        Source graph (must use an uncompressed ``FP32`` or ``FP16`` metric unless
+        ``target="32bit"`` on an existing ``FP32`` graph).
+    target : {"32bit", "16bit", "8bit", "4bit", "2bit", "auto"} or Metric or str
+        Target precision or metric:
+
+        - ``"32bit"`` (also ``"fp32"``, ``"float32"``): ``FP32_L2`` or ``FP32_InnerProduct``
+          matching the graph's distance kind (returns ``graph`` if already ``FP32``).
+        - ``"16bit"`` (also ``"fp16"``, ``"float16"``): ``FP16_L2`` or ``FP16_InnerProduct``
+          matching the graph's distance kind.
+        - ``"8bit"`` / ``"auto"``: ``Uint7_L2`` (for L2) or ``Int8_InnerProduct`` (for InnerProduct).
+        - ``"4bit"``: ``Uint4_L2`` (for L2) or ``L2NormalizeTransform + Int4_InnerProduct`` (for InnerProduct).
+        - ``"2bit"`` (also ``"evp"``): ``EVP_InnerProduct`` (always InnerProduct).
+        - Explicit ``Metric`` or metric string (e.g. ``"Int8_L2"``, ``Metric.Uint8_L2``).
+    threads : int, default=0
+        Number of worker threads used during quantization (``0`` = all CPU cores).
+
+    Returns
+    -------
+    DynamicExplorationGraph
+        Compressed ``ReadOnlyGraph`` preserving the graph topology and external labels.
+    """
+    src_metric = graph.get_metric()
+    src_is_ip = Metric(int(src_metric)).name.endswith("InnerProduct")
+
+    if isinstance(target, Metric):
+        target_metric = target
+    elif isinstance(target, str):
+        key = target.strip().lower().replace("-", "").replace("_", "")
+        if key in ("32bit", "fp32", "float32"):
+            target_metric = Metric.FP32_InnerProduct if src_is_ip else Metric.FP32_L2
+            if Metric(int(src_metric)) == Metric(int(target_metric)):
+                return graph
+        elif key in ("16bit", "fp16", "float16"):
+            target_metric = Metric.FP16_InnerProduct if src_is_ip else Metric.FP16_L2
+        elif key in ("8bit", "auto"):
+            target_metric = Metric.Int8_InnerProduct if src_is_ip else Metric.Uint7_L2
+        elif key == "4bit":
+            target_metric = Metric.Int4_InnerProduct if src_is_ip else Metric.Uint4_L2
+            if src_is_ip:
+                has_l2n = any(t.name == "L2NormalizeTransform" for t in graph.get_transformations())
+                if not has_l2n:
+                    xfrms = cpp_transformation.make_quantizer_pipeline_from_graph(
+                        graph.dynamic_exploration_graph_cpp,
+                        int(target_metric),
+                        -1.0,
+                        False,
+                        threads,
+                        7,
+                        True,
+                    )
+                    return graph.with_transformations(xfrms, metric=target_metric, threads=threads)
+        elif key in ("2bit", "evp"):
+            target_metric = Metric.EVP_InnerProduct
+        elif "_" in target:
+            target_metric = Metric.resolve(target)
+        else:
+            target_metric = Metric.resolve(target, "ip" if src_is_ip else "l2")
+    else:
+        target_metric = Metric.resolve(target)
+
+    return graph.with_metric(target_metric, threads=threads)
+
+
 __all__ = [
     "DynamicExplorationGraph",
     "get_num_useful_threads",
+    "compress",
     "create_empty",
     "create_dynamic_empty",
     "create_random_graph",

@@ -43,20 +43,6 @@ CONFIG_LARGE = {
 }
 
 
-def prune_worst_edges(
-    graph: deglib.DynamicExplorationGraph,
-    prune_worst: int,
-    threads: int = DEFAULT_THREADS,
-) -> None:
-    """
-    Prunes the worst (highest-weight) `prune_worst` neighbors of each vertex
-    by replacing them with self-loops, using the C++ implementation in deglib::optimization::pruning.
-    """
-    if prune_worst <= 0:
-        return
-    deglib.optimization.prune_worst_edges(graph, prune_worst, threads=threads)
-
-
 def construct_knng(
     train_vectors: np.ndarray,
     ground_truth: np.ndarray | None = None,
@@ -65,7 +51,6 @@ def construct_knng(
     k_ext: int | None = None,
     max_dist: int | None = None,
     evp_k: int | None = None,
-    prune_worst: int | None = None,
     threads: int = DEFAULT_THREADS,
 ) -> dict[str, float]:
     """
@@ -79,10 +64,9 @@ def construct_knng(
     k_ext = k_ext if k_ext is not None else default_cfg["k_ext"]
     max_dist = max_dist if max_dist is not None else default_cfg["max_dist"]
     evp_k = evp_k if evp_k is not None else default_cfg["evp_k"]
-    prune_worst = prune_worst if prune_worst is not None else default_cfg["prune_worst"]
     print(f"Dataset shape: {n_vecs} vectors, {dims} dimensions (dtype: {train_vectors.dtype})")
     print(
-        f"k-NNG Construction Config: k_top={k_top}, k_graph={k_graph}, max_dist={max_dist}, evp_k={evp_k}, prune_worst={prune_worst}, threads={threads}"
+        f"k-NNG Construction Config: k_top={k_top}, k_graph={k_graph}, max_dist={max_dist}, evp_k={evp_k}, threads={threads}"
     )
 
     # 1. Quantization & Graph Construction Phase (EVP_InnerProduct metric)
@@ -102,12 +86,6 @@ def construct_knng(
     t_build = time.perf_counter() - t0
     print(f"Graph Construction: {graph.get_metric().name} ({graph.get_instruction().name})")
     print(f"Quantization + Graph construction completed in {t_build:.3f}s")
-
-    t0 = time.perf_counter()
-    if prune_worst > 0:
-        prune_worst_edges(graph, prune_worst, threads)
-    t_prune = time.perf_counter() - t0
-    print(f"Edge pruning completed in {t_prune:.3f}s")
 
     t_opt0 = time.perf_counter()
     graph.optimize()
@@ -154,7 +132,7 @@ def construct_knng(
     t_rerank = time.perf_counter() - t0
     print(f"FP16 Reranking completed in {t_rerank:.3f}s")
 
-    t_total = t_quant + t_build + t_prune + t_explore + t_rerank
+    t_total = t_quant + t_build + t_explore + t_rerank
 
     # 5. Fast Vectorized Recall@15 Evaluation against Ground Truth
     recall = 0.0
@@ -180,7 +158,6 @@ def construct_knng(
     print("\n--- Timing Summary ---")
     print(f"Quantization Time: {t_quant:.3f}s")
     print(f"Graph Build Time:  {t_build:.3f}s")
-    print(f"Prune Time:        {t_prune:.3f}s")
     print(f"Search Time:       {t_explore:.3f}s")
     print(f"Rerank Time:       {t_rerank:.3f}s")
     print(f"Total Time:        {t_total:.3f}s")
@@ -188,7 +165,6 @@ def construct_knng(
     return {
         "quant_time": t_quant,
         "build_time": t_build,
-        "prune_time": t_prune,
         "explore_time": t_explore,
         "rerank_time": t_rerank,
         "total_time": t_total,
@@ -210,12 +186,6 @@ def main():
     )
     parser.add_argument(
         "--evpK", type=int, default=None, help="Candidate list size before FP16 reranking (default: 50)"
-    )
-    parser.add_argument(
-        "--prune-worst",
-        type=int,
-        default=None,
-        help="Number of worst neighbors to replace with self-loops (default: 6 small, 9 large)",
     )
     parser.add_argument("--threads", type=int, default=DEFAULT_THREADS, help="Number of parallel threads")
     parser.add_argument("--output-plot", type=str, default=None, help="Path to save timing chart PNG")
@@ -241,7 +211,6 @@ def main():
         k_ext=args.k_ext,
         max_dist=args.max_dist,
         evp_k=args.evpK,
-        prune_worst=args.prune_worst,
         threads=args.threads,
     )
 

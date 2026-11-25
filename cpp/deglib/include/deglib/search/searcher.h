@@ -50,6 +50,7 @@ class Searcher {
     // Thread-local scratch workspace for query transformations, graph traversal, and candidate reranking
     struct QueryWorkspace : deglib::graph::SearchWorkspace {
         std::vector<float> norm_buf;
+        std::vector<float> prefix_buf;
         std::vector<float> f32_buf;
         std::vector<uint16_t> f16_buf;
         std::vector<std::byte> quant_buf1;
@@ -60,10 +61,40 @@ class Searcher {
     };
 
     const deglib::graph::InternalGraph* graph_ = nullptr;
+    std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> shared_prefix_transformations_;
     std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations_;
     KMeansEntrySelector entry_selector_;
     std::shared_ptr<Reranker> reranker_;
+    size_t reranker_transform_offset_ = 0;
     bool normalize_query_ = false;
+
+    static inline bool is_spatial_prefix_transform(const deglib::transformation::FeatureTransformation& t) noexcept {
+        const auto n = t.name();
+        return n == "L2NormalizeTransform" || n == "MipsTransform";
+    }
+
+    void split_shared_prefix_transforms() {
+        if (!reranker_ || transformations_.empty()) return;
+        const auto& rr_xfrms = reranker_->getTransformations();
+        if (rr_xfrms.empty()) return;
+
+        size_t prefix_len = 0;
+        const size_t max_len = std::min(transformations_.size(), rr_xfrms.size());
+        while (prefix_len < max_len) {
+            const auto& gt = transformations_[prefix_len];
+            const auto& rt = rr_xfrms[prefix_len];
+            if (!gt || !rt || !is_spatial_prefix_transform(*gt)) break;
+            const bool same_ptr = (gt.get() == rt.get());
+            const bool same_sig = (gt->name() == rt->name() && gt->input_dim() == rt->input_dim() && gt->output_dim() == rt->output_dim());
+            if (!same_ptr && !same_sig) break;
+            ++prefix_len;
+        }
+        if (prefix_len == 0) return;
+
+        shared_prefix_transformations_.assign(transformations_.begin(), transformations_.begin() + static_cast<std::ptrdiff_t>(prefix_len));
+        transformations_.erase(transformations_.begin(), transformations_.begin() + static_cast<std::ptrdiff_t>(prefix_len));
+        reranker_transform_offset_ = prefix_len;
+    }
 
     /**
      * Prepares a float32 query for graph traversal by running any attached transformations
@@ -189,7 +220,7 @@ class Searcher {
             return 0;
         }
 
-        const uint32_t dim = transformations_.empty() ? graph_->getFeatureSpace().dim() : transformations_.front()->input_dim();
+        const uint32_t dim = input_dim();
         const QueryT* effective_query = query;
 
         if constexpr (std::is_same_v<QueryT, float>) {
@@ -200,8 +231,40 @@ class Searcher {
             }
         }
 
+        const float* post_prefix_f32 = nullptr;
+        uint32_t post_prefix_dim = dim;
+        if (!shared_prefix_transformations_.empty()) {
+            const float* cur_f32 = nullptr;
+            if constexpr (std::is_same_v<QueryT, uint16_t>) {
+                ws.f32_buf.resize(dim);
+                deglib::distances::fp16::fp16_to_floats(effective_query, ws.f32_buf.data(), dim);
+                cur_f32 = ws.f32_buf.data();
+            } else {
+                cur_f32 = effective_query;
+            }
+            for (size_t t = 0; t < shared_prefix_transformations_.size(); ++t) {
+                const auto& trans = shared_prefix_transformations_[t];
+                const bool is_last = (t + 1 == shared_prefix_transformations_.size());
+                const size_t out_floats = trans->output_dim();
+                const size_t out_bytes = out_floats * sizeof(float);
+                std::span<const float> in_span(cur_f32, trans->input_dim());
+                if (is_last) {
+                    if (ws.prefix_buf.size() < out_floats) ws.prefix_buf.resize(out_floats);
+                    trans->transform_query(in_span, std::as_writable_bytes(std::span<float>(ws.prefix_buf.data(), out_floats)));
+                    post_prefix_f32 = ws.prefix_buf.data();
+                    post_prefix_dim = static_cast<uint32_t>(out_floats);
+                } else {
+                    if (ws.quant_buf2.size() < out_bytes) ws.quant_buf2.resize(out_bytes);
+                    trans->transform_query(in_span, std::span<std::byte>(ws.quant_buf2.data(), out_bytes));
+                    cur_f32 = reinterpret_cast<const float*>(ws.quant_buf2.data());
+                }
+            }
+        }
+
         alignas(64) std::byte stack_qbuf[512];
-        const std::byte* graph_query_ptr = prepare_query(effective_query, dim, ws, stack_qbuf);
+        const std::byte* graph_query_ptr = post_prefix_f32
+            ? prepare_query(post_prefix_f32, post_prefix_dim, ws, stack_qbuf)
+            : prepare_query(effective_query, dim, ws, stack_qbuf);
         const auto query_span = std::span<const std::byte>(graph_query_ptr, graph_->getFeatureSpace().get_data_size());
 
         // Select entry point: query routing medoid or direct reference to static graph anchor (zero copy).
@@ -246,10 +309,18 @@ class Searcher {
             ws.extract_internal_ids(found_cands, cand_indices);
             ws.rerank_distance_count = found_cands;
 
-            const uint32_t found = reranker_->rerank(
-                std::span<const QueryT>(effective_query, dim), std::span<const uint32_t>(cand_indices, found_cands), k, std::span<uint32_t>(out_indices, k),
-                return_distances ? std::span<float>(out_distances, k) : std::span<float>{}, return_distances, unsorted
-            );
+            const uint32_t found = post_prefix_f32
+                ? reranker_->rerank_f32(
+                      std::span<const float>(post_prefix_f32, post_prefix_dim),
+                      std::span<const uint32_t>(cand_indices, found_cands), k, std::span<uint32_t>(out_indices, k),
+                      return_distances ? std::span<float>(out_distances, k) : std::span<float>{}, return_distances, unsorted,
+                      reranker_transform_offset_
+                  )
+                : reranker_->rerank(
+                      std::span<const QueryT>(effective_query, dim), std::span<const uint32_t>(cand_indices, found_cands), k,
+                      std::span<uint32_t>(out_indices, k), return_distances ? std::span<float>(out_distances, k) : std::span<float>{},
+                      return_distances, unsorted
+                  );
             for (size_t i = 0; i < found; ++i) {
                 out_indices[i] = graph_->getExternalLabel(out_indices[i]);
             }
@@ -310,14 +381,18 @@ class Searcher {
         std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
         std::shared_ptr<Reranker> reranker
     )
-        : graph_(&graph), transformations_(std::move(transformations)), entry_selector_(graph), reranker_(std::move(reranker)) {}
+        : graph_(&graph), transformations_(std::move(transformations)), entry_selector_(graph), reranker_(std::move(reranker)) {
+        split_shared_prefix_transforms();
+    }
 
     Searcher(
         const deglib::graph::InternalGraph& graph,
         std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> transformations,
         Reranker reranker
     )
-        : graph_(&graph), transformations_(std::move(transformations)), entry_selector_(graph), reranker_(std::make_shared<Reranker>(std::move(reranker))) {}
+        : graph_(&graph), transformations_(std::move(transformations)), entry_selector_(graph), reranker_(std::make_shared<Reranker>(std::move(reranker))) {
+        split_shared_prefix_transforms();
+    }
 
     bool normalize_query() const noexcept { return normalize_query_; }
     void set_normalize_query(bool val) noexcept { normalize_query_ = val; }
@@ -351,7 +426,7 @@ class Searcher {
         out_graph_hop_count = 0;
         if (!graph_ || n_queries == 0 || k == 0 || queries == nullptr || out_indices == nullptr) return;
 
-        const uint32_t dim = transformations_.empty() ? graph_->getFeatureSpace().dim() : transformations_.front()->input_dim();
+        const uint32_t dim = input_dim();
         const bool use_ef = (eps_or_ef >= 1.0f);
         const uint32_t ef = use_ef ? static_cast<uint32_t>(std::lround(eps_or_ef)) : 0;
         const float eps = use_ef ? 0.0f : eps_or_ef;
@@ -924,13 +999,15 @@ class Searcher {
     }
 
     [[nodiscard]] uint32_t input_dim() const noexcept {
-        return transformations_.empty() ? graph_->getFeatureSpace().dim() : transformations_.front()->input_dim();
+        if (!shared_prefix_transformations_.empty()) return shared_prefix_transformations_.front()->input_dim();
+        if (!transformations_.empty()) return transformations_.front()->input_dim();
+        return graph_->getFeatureSpace().dim();
     }
 
     [[nodiscard]] CalibQueryMode determine_query_mode(bool use_reranker, uint32_t dim) const {
         const auto g_dt = graph_->getFeatureSpace().metric().get_data_type();
-        const bool graph_accepts_float =
-            !transformations_.empty() || g_dt == deglib::distances::MetricDataType::FP32 || g_dt == deglib::distances::MetricDataType::FP16;
+        const bool graph_accepts_float = !shared_prefix_transformations_.empty() || !transformations_.empty() ||
+            g_dt == deglib::distances::MetricDataType::FP32 || g_dt == deglib::distances::MetricDataType::FP16;
         if (use_reranker) {
             if (!graph_accepts_float) {
                 return CalibQueryMode::RawBytes;
@@ -948,7 +1025,8 @@ class Searcher {
             }
             return CalibQueryMode::RawBytes;
         }
-        if (transformations_.empty() && (g_dt == deglib::distances::MetricDataType::FP32 || g_dt == deglib::distances::MetricDataType::FP16)) {
+        if (shared_prefix_transformations_.empty() && transformations_.empty() &&
+            (g_dt == deglib::distances::MetricDataType::FP32 || g_dt == deglib::distances::MetricDataType::FP16)) {
             return CalibQueryMode::F32;
         }
         return CalibQueryMode::RawBytes;

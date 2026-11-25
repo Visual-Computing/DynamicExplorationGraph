@@ -139,7 +139,7 @@ Directly access the raw outgoing edges of any indexed vertex:
 
    # Batch lookup: returns a 2D NumPy array of shape (N, edges_per_vertex)
    query_labels = np.array([10, 20, 30], dtype=np.uint32)
-   batch_edges = graph.get_neighbors_batch(query_labels, threads=2)
+   batch_edges = graph.get_neighbors(query_labels, threads=2)
    print("Batch neighbor table shape:", batch_edges.shape)
 
 Path Reachability

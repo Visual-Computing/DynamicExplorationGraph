@@ -26,7 +26,7 @@ DynamicExplorationGraph/
 ├── python/       # Python Bindings, Tests, setup.py
 ├── examples/     # Example projects (knng, dynamic_data, static_data)
 ├── java/         # Java implementation
-├── docs/         # Documentation
+├── docs/         # Documentation (see docs/python_metric_quantization_matrix.md for Python metric/quant rules)
 └── readme.md     # Main README
 ```
 

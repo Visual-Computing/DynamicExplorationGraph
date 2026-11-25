@@ -58,15 +58,13 @@ def test_presort_callback():
     [
         Metric.Uint8_L2,
         Metric.Uint8_InnerProduct,
-        Metric.FP16_L2,
-        Metric.FP16_InnerProduct,
         Metric.EVP_InnerProduct,
     ],
 )
 def test_presort_invalid_metric_raises(invalid_metric):
     rng = np.random.default_rng(42)
     data = rng.standard_normal((20, 16)).astype(np.float32)
-    with pytest.raises(ValueError, match="FP32_L2 and FP32_InnerProduct"):
+    with pytest.raises(ValueError, match="FP32/FP16 L2 and InnerProduct"):
         presort(data, metric=invalid_metric)
 
 

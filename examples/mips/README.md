@@ -16,10 +16,10 @@ We use a 5-step pipeline that reduces MIPS to $L_2$ graph search while retaining
    Because all transformed vectors $x'_i$ have equal norm $\|x'_i\| = M$, minimizing $\|q' - x'_i\|^2$ under $L_2$ distance (with $q' = [q, 0]$) is strictly equivalent to maximizing the inner product $\langle q, x_i \rangle$.
 
 2. **1D FLAS Pre-Sorting & Graph Construction in FP32 $L_2$ Space**:
-   The transformed vectors are optionally pre-sorted (`presort=True`) using Fast Linear Assignment Sorting (`deglib.presort`) and built into a `DynamicExplorationGraph` with `deglib.build(..., metric=Metric.FP32_L2.with_instruction(instruction), threads=build_threads)` ($K_{\text{graph}} = 32, K_{\text{ext}} = 64$).
+   The transformed vectors are optionally pre-sorted (`presort=True`) using Fast Linear Assignment Sorting (`deglib.presort`) and built into a compact read-only `DynamicExplorationGraph` with `deglib.build(..., metric=Metric.FP32_L2.with_instruction(instruction), threads=build_threads).to_readonly()` ($K_{\text{graph}} = 32, K_{\text{ext}} = 64$).
 
-3. **FP16 Feature Swapping & `ReadOnlyGraph`**:
-   Calling `graph.to_readonly(Metric.FP16_InnerProduct.with_instruction(instruction), custom_features=train_vectors, threads=build_threads)` automatically calibrates `make_scalar_quantizer_fp16`, quantizes the original $d$-dimensional FP32 vectors to FP16, and builds a compact `ReadOnlyGraph` with the FP16 quantizer attached.
+3. **FP16 Feature Swapping**:
+   Calling `graph.with_features(train_vectors, metric=Metric.FP16_InnerProduct.with_instruction(instruction), threads=build_threads)` automatically calibrates `make_scalar_quantizer_fp16`, quantizes the original $d$-dimensional FP32 vectors to FP16, and keeps the compact `ReadOnlyGraph` backend with the FP16 quantizer attached.
 
 4. **SIMD FP16 Inner Product Search**:
    The `ReadOnlyGraph` accepts FP32 queries directly (quantizing them automatically via its attached transform) and searches using fast SIMD FP16 inner product distance routines ($\varepsilon_{\text{search}} = 0.18$, max distance evaluation budget sweep: `6000, 6500, 7000, 7500, 8000, 9000`).

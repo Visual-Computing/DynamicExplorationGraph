@@ -159,7 +159,7 @@ def test_pareto_line_quantized_graphs():
 
     l2_data = _make_clustered_data(350, 32, clusters=16, seed=29)
     l2_graph = deglib.build(l2_data, edges_per_vertex=16, metric=Metric.FP32_L2, extend_k=32, optimize=False, threads=2)
-    u4_graph = l2_graph.to_readonly(metric=Metric.Uint4_L2, optimize=False)
+    u4_graph = l2_graph.with_metric(Metric.Uint4_L2)
     u4_line = u4_graph.to_pareto_line(k=10, sample_count=50, recall_range=(0.70, 0.99), recall_step=0.10, threads=1)
     _verify_pareto_invariants(u4_line)
 
@@ -174,7 +174,7 @@ def test_pareto_line_quantized_graphs():
         optimize=False,
         threads=2,
     )
-    i8_graph = ip_graph.to_readonly(metric=Metric.Int8_InnerProduct, optimize=False)
+    i8_graph = ip_graph.with_metric(Metric.Int8_InnerProduct)
     i8_line = i8_graph.to_pareto_line(k=10, sample_count=50, recall_range=(0.70, 0.99), recall_step=0.10, threads=1)
     _verify_pareto_invariants(i8_line)
 
