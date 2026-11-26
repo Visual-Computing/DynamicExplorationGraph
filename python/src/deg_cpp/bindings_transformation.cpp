@@ -295,8 +295,14 @@ void bind_transformation(nb::module_& m) {
         }
     };
 
+    nb::enum_<deglib::transformation::TransformationType>(transformation_module, "TransformationType")
+        .value("Spatial", deglib::transformation::TransformationType::Spatial)
+        .value("Rotation", deglib::transformation::TransformationType::Rotation)
+        .value("Quantizer", deglib::transformation::TransformationType::Quantizer);
+
     nb::class_<deglib::transformation::FeatureTransformation>(transformation_module, "FeatureTransformation")
         .def_prop_ro("name", [](const deglib::transformation::FeatureTransformation& t) { return std::string(t.name()); })
+        .def_prop_ro("type", &deglib::transformation::FeatureTransformation::type)
         .def_prop_ro("tag", &deglib::transformation::FeatureTransformation::tag)
         .def_prop_ro("input_dim", &deglib::transformation::FeatureTransformation::input_dim)
         .def_prop_ro("output_dim", &deglib::transformation::FeatureTransformation::output_dim)

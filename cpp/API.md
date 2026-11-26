@@ -1345,12 +1345,16 @@ Vector transformation pipeline for preprocessing and quantizing query and databa
 ```cpp
 namespace deglib::transformation {
 
+/// Semantic category of a FeatureTransformation stage
+enum class TransformationType : uint8_t { Spatial, Rotation, Quantizer };
+
 /// Base interface for vector feature transformations and quantization stages
 class FeatureTransformation {
 public:
     virtual ~FeatureTransformation() = default;
 
     virtual uint32_t tag() const noexcept = 0;
+    virtual TransformationType type() const noexcept = 0;
     virtual std::string_view name() const noexcept = 0;
     virtual uint32_t input_dim() const noexcept = 0;
     virtual uint32_t output_dim() const noexcept = 0;

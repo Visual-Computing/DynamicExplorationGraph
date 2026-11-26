@@ -12,6 +12,7 @@ from deglib.cpu import InstructionSet
 from deglib.distances import Metric, _infer_dim_from_array
 from deglib.transformation import (
     FeatureTransformation,
+    TransformationType,
     _normalize_transforms,
     apply_on_database,
     make_quantizer_pipeline,
@@ -563,9 +564,7 @@ class DynamicExplorationGraph:
             )
         src_is_ip = Metric(int(src_metric)).name.endswith("InnerProduct")
         dst_is_l2 = not Metric(int(resolved_metric)).name.endswith("InnerProduct")
-        has_spatial_prefix = any(
-            t.name in ("L2NormalizeTransform", "MipsTransform") for t in self.get_transformations()
-        )
+        has_spatial_prefix = any(t.type == TransformationType.Spatial for t in self.get_transformations())
         need_mips = src_is_ip and dst_is_l2 and not has_spatial_prefix
         xfrms = cpp_transformation.make_quantizer_pipeline_from_graph(
             self.dynamic_exploration_graph_cpp,

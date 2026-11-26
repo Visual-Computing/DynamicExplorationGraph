@@ -693,6 +693,7 @@ class EvpQuantizer : public FeatureTransformation {
     explicit EvpQuantizer(uint32_t dim, uint32_t non_zeros = 0) : dim_(dim), non_zeros_(non_zeros) {}
 
     uint32_t tag() const noexcept override { return 0x51505645; }  // 'EVPQ'
+    TransformationType type() const noexcept override { return TransformationType::Quantizer; }
     std::string_view name() const noexcept override { return "EvpQuantizer"; }
     uint32_t input_dim() const noexcept override { return dim_; }
     uint32_t output_dim() const noexcept override { return dim_; }

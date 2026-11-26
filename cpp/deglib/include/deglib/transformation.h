@@ -32,6 +32,15 @@ inline constexpr uint32_t TAG_NORM = uint32_t('N') | (uint32_t('O') << 8) | (uin
 inline constexpr uint32_t TAG_FWHT = uint32_t('F') | (uint32_t('W') << 8) | (uint32_t('H') << 16) | (uint32_t('T') << 24);
 
 /**
+ * @brief Semantic category of a FeatureTransformation stage.
+ */
+enum class TransformationType : uint8_t {
+    Spatial,    ///< Space-preserving or space-lifting prefix transforms (e.g. L2NormalizeTransform, MipsTransform)
+    Rotation,   ///< Orthogonal pre-quantization transforms (e.g. FastHadamardRotation)
+    Quantizer,  ///< Precision-reducing quantizers (e.g. ScalarQuantizer*, EvpQuantizer)
+};
+
+/**
  * @brief Abstract base class for all feature and vector transformations.
  */
 class FeatureTransformation {
@@ -39,6 +48,7 @@ class FeatureTransformation {
     virtual ~FeatureTransformation() = default;
 
     virtual uint32_t tag() const noexcept = 0;
+    virtual TransformationType type() const noexcept = 0;
     virtual std::string_view name() const noexcept = 0;
     virtual uint32_t input_dim() const noexcept = 0;
     virtual uint32_t output_dim() const noexcept = 0;

@@ -26,6 +26,7 @@ class ScalarQuantizerInt8 : public FeatureTransformation {
     explicit ScalarQuantizerInt8(uint32_t dim) : dim_(dim) {}
 
     uint32_t tag() const noexcept override { return TAG_SQI8; }
+    TransformationType type() const noexcept override { return TransformationType::Quantizer; }
     std::string_view name() const noexcept override { return "ScalarQuantizerInt8"; }
     uint32_t input_dim() const noexcept override { return dim_; }
     uint32_t output_dim() const noexcept override { return dim_; }

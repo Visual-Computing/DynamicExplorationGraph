@@ -57,6 +57,7 @@ class L2NormalizeTransform : public FeatureTransformation {
     void set_dim(uint32_t d) noexcept { dim_ = d; }
 
     uint32_t tag() const noexcept override { return TAG_NORM; }
+    TransformationType type() const noexcept override { return TransformationType::Spatial; }
     std::string_view name() const noexcept override { return "L2NormalizeTransform"; }
     uint32_t input_dim() const noexcept override { return dim_; }
     uint32_t output_dim() const noexcept override { return dim_; }

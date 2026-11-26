@@ -12,7 +12,7 @@ The `deglib` package separates its **High-Level API** (re-exported directly at t
 | **Low-Level Graph & I/O** | `deglib.graph.*` | `create_empty`, `create_dynamic_empty`, `create_random_graph`, `load_readonly_graph`, `load_dynamic_graph`, `load_mutable_graph` |
 | **Low-Level Incremental Build** | `deglib.builder.*` | `GraphBuilder`, `BuilderStatus`, `ProgressCallback` |
 | **Low-Level Search & Calibration** | `deglib.search.*` | `Filter`, `RecallTable`, `ParetoLine`, `rerank` |
-| **Transformations & Quantizers** | `deglib.transformation.*` | `FeatureTransformation`, `make_quantizer_pipeline`, `make_mips_transform`, `make_l2_normalize_transform`, `make_fast_hadamard_rotation`, `make_evp_quantizer`, `make_scalar_quantizer_*`, `apply_on_database`, `apply_on_query` |
+| **Transformations & Quantizers** | `deglib.transformation.*` | `FeatureTransformation`, `TransformationType`, `make_quantizer_pipeline`, `make_mips_transform`, `make_l2_normalize_transform`, `make_fast_hadamard_rotation`, `make_evp_quantizer`, `make_scalar_quantizer_*`, `apply_on_database`, `apply_on_query` |
 | **Optimization & Pruning** | `deglib.optimization.*` | `prune_non_mrng_edges`, `prune_worst_edges` |
 | **Distances & CPU ISA** | `deglib.distances.*`, `deglib.cpu.*` | `floats_to_fp16`, `fp16_to_floats`, `InstructionSet`, `has_avx2`, `has_avx2_vnni`, `has_avx512`, `has_avx512_vnni`, `has_avx512_fp16`, `has_fp16` |
 | **Analysis & Tuning** | `deglib.analysis.*`, `deglib.tuning.*` | `analyze_graph`, `GraphStats`, `calc_graph_quality`, `DatasetProfile`, `measure_dataset_profile`, `predict_optimization_target`, `predict_quantization` |
@@ -378,7 +378,7 @@ rerank(
 
 ## 6. Feature Transformations & Quantization (`deglib.transformation`)
 
-All transformations are created pre-fitted and validated via `make_*` factories and share the `FeatureTransformation` interface (`input_dim`, `output_dim`, `output_dtype`, `output_byte_size`, `is_fitted`, `transform_database(vectors, threads=0)`, `transform_query(queries)`, `serialize()`). Raw unfitted quantizer constructors and `mips_l2_transform(_query)` are not part of the API.
+All transformations are created pre-fitted and validated via `make_*` factories and share the `FeatureTransformation` interface (`name`, `type` (`TransformationType`: `Spatial`, `Rotation`, `Quantizer`), `input_dim`, `output_dim`, `output_dtype`, `output_byte_size`, `is_fitted`, `transform_database(vectors, threads=0)`, `transform_query(queries)`, `serialize()`). Raw unfitted quantizer constructors and `mips_l2_transform(_query)` are not part of the API.
 
 - `make_mips_transform(vectors: np.ndarray, max_norm: float = 0.0) -> FeatureTransformation` (`MipsTransform` exposing `.transform_database(...)` and `.transform_query(...)`)
 - `make_l2_normalize_transform(vectors_or_dim: np.ndarray | int) -> FeatureTransformation`

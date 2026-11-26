@@ -7,6 +7,7 @@ from deglib.distances import Metric
 cpp_transformation = deglib_cpp.transformation
 
 FeatureTransformation = cpp_transformation.FeatureTransformation
+TransformationType = cpp_transformation.TransformationType
 
 
 _HIGH_LEVEL_METRICS = frozenset(
@@ -252,6 +253,7 @@ def apply_on_query(
 
 __all__ = [
     "FeatureTransformation",
+    "TransformationType",
     "make_l2_normalize_transform",
     "make_mips_transform",
     "make_fast_hadamard_rotation",

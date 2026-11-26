@@ -8,6 +8,7 @@ from deglib.distances import Metric, _infer_dim_from_array
 from deglib.graph import DynamicExplorationGraph
 from deglib.transformation import (
     FeatureTransformation,
+    TransformationType,
     _normalize_transforms,
 )
 from deglib.utils import assure_array, assure_contiguous
@@ -634,7 +635,9 @@ def reranker(
 
         - ``None`` / ``"32bit"`` / ``"fp32"`` / ``"float32"``: ``FP32_L2`` or ``FP32_InnerProduct``.
         - ``"16bit"`` / ``"fp16"`` / ``"float16"``: ``FP16_L2`` or ``FP16_InnerProduct``.
-        - ``"8bit"`` / ``"int8"``: ``Int8_L2`` or ``Int8_InnerProduct``.
+        - ``"8bit"`` / ``"auto"``: ``Uint7_L2`` (for L2), ``Int8_InnerProduct`` (for unnormalized ``InnerProduct``),
+          or ``deglib.tuning.predict_quantization(graph, ...)`` (**A1+A2**) for unit-sphere ``cosine``/``normalized`` graphs.
+        - ``"int8"``: ``Int8_L2`` or ``Int8_InnerProduct``.
         - ``"uint8"`` / ``"uint7"`` or any explicit ``Metric`` / metric string.
     optimize : bool, default=True
         If ``True``, runs ``reranker.optimize()`` to tune memory prefetching.
@@ -664,7 +667,15 @@ def reranker(
             "Use deglib.reranker_with_data(graph, data, ...) with the original float vectors instead."
         )
     distance_kind = "InnerProduct" if base_metric.name.endswith("InnerProduct") else "L2"
-    target_metric = _resolve_rerank_metric(distance_kind, compress)
+    if isinstance(compress, str) and compress.strip().lower().replace("-", "").replace("_", "") in ("8bit", "auto"):
+        if distance_kind == "L2":
+            target_metric = Metric.Uint7_L2
+        else:
+            from deglib.tuning import predict_quantization
+
+            target_metric = predict_quantization(graph, threads=threads).metric
+    else:
+        target_metric = _resolve_rerank_metric(distance_kind, compress)
     return graph.to_reranker(target_metric, optimize=optimize, threads=threads)
 
 
@@ -719,7 +730,7 @@ def reranker_with_data(
 
     spatial_prefix: list[FeatureTransformation] = []
     for t in graph.get_transformations():
-        if t.name in ("L2NormalizeTransform", "MipsTransform"):
+        if t.type == TransformationType.Spatial:
             spatial_prefix.append(t)
         else:
             break
@@ -743,7 +754,38 @@ def reranker_with_data(
     else:
         distance_kind = "InnerProduct" if Metric(int(graph.get_metric())).name.endswith("InnerProduct") else "L2"
 
-    target_metric = _resolve_rerank_metric(distance_kind, compress)
+    if isinstance(compress, str) and compress.strip().lower().replace("-", "").replace("_", "") in ("8bit", "auto"):
+        if distance_kind == "L2":
+            target_metric = Metric.Uint7_L2
+        else:
+            from deglib.transformation import is_l2_normalized
+            from deglib.tuning import predict_quantization
+
+            has_l2n = any(t.name == "L2NormalizeTransform" for t in spatial_prefix)
+            is_explicit_ip = isinstance(metric, str) and metric.strip().lower() in (
+                "ip",
+                "innerproduct",
+                "inner_product",
+                "mips",
+            )
+            if is_explicit_ip and not has_l2n:
+                target_metric = Metric.Int8_InnerProduct
+            else:
+                n_arr = arr.shape[0]
+                if has_l2n or (isinstance(metric, str) and metric.strip().lower() in ("cosine", "normalized")):
+                    target_metric = predict_quantization(
+                        arr, metric=Metric.FP32_InnerProduct, threads=threads
+                    ).metric
+                else:
+                    sample_n = min(n_arr, 1024)
+                    if sample_n >= 2 and is_l2_normalized(arr[:sample_n]):
+                        target_metric = predict_quantization(
+                            arr, metric=Metric.FP32_InnerProduct, threads=threads
+                        ).metric
+                    else:
+                        target_metric = Metric.Int8_InnerProduct
+    else:
+        target_metric = _resolve_rerank_metric(distance_kind, compress)
 
     graph_labels = graph.get_labels()
     if labels is None:

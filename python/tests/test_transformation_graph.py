@@ -354,6 +354,10 @@ def test_mips_transform_chains_through_reranker_and_quantized_searcher():
     searcher = graph.to_searcher(metric=Metric.Int8_L2, reranker=reranker, optimize=False, threads=2)
 
     assert [t.name for t in searcher.graph.get_transformations()] == ["MipsTransform", "ScalarQuantizerInt8"]
+    assert [t.type for t in searcher.graph.get_transformations()] == [
+        deglib.transformation.TransformationType.Spatial,
+        deglib.transformation.TransformationType.Quantizer,
+    ]
 
     # Query directly with raw d-dimensional float32 vectors (single C++ call)
     for q in queries:
@@ -361,3 +365,20 @@ def test_mips_transform_chains_through_reranker_and_quantized_searcher():
         assert res.indices.shape == (5,)
         exact_top1 = int(np.argmax(data @ q))
         assert exact_top1 in res.indices
+
+
+def test_transformation_type_classification():
+    rng = np.random.default_rng(11)
+    data = rng.standard_normal((32, 16)).astype(np.float32)
+    T = deglib.transformation.TransformationType
+
+    assert deglib.transformation.make_l2_normalize_transform(data).type == T.Spatial
+    assert deglib.transformation.make_mips_transform(data).type == T.Spatial
+    assert deglib.transformation.make_fast_hadamard_rotation(data, auto_detect=False).type == T.Rotation
+    assert deglib.transformation.make_scalar_quantizer_int8(data).type == T.Quantizer
+    assert deglib.transformation.make_scalar_quantizer_uint8(data).type == T.Quantizer
+    assert deglib.transformation.make_scalar_quantizer_uint7(data).type == T.Quantizer
+    assert deglib.transformation.make_scalar_quantizer_uint4(data).type == T.Quantizer
+    assert deglib.transformation.make_scalar_quantizer_int4(data).type == T.Quantizer
+    assert deglib.transformation.make_scalar_quantizer_fp16(data).type == T.Quantizer
+    assert deglib.transformation.make_evp_quantizer(data).type == T.Quantizer

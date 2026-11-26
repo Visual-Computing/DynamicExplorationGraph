@@ -130,6 +130,7 @@ class MipsTransform : public FeatureTransformation {
     MipsTransform(uint32_t dim, float max_norm = 0.0f) : dim_(dim), max_norm_(max_norm) {}
 
     uint32_t tag() const noexcept override { return 0x5350494D; }  // 'MIPS'
+    TransformationType type() const noexcept override { return TransformationType::Spatial; }
     std::string_view name() const noexcept override { return "MipsTransform"; }
     uint32_t input_dim() const noexcept override { return dim_; }
     uint32_t output_dim() const noexcept override { return dim_ + 1; }

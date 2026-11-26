@@ -69,8 +69,7 @@ class Searcher {
     bool normalize_query_ = false;
 
     static inline bool is_spatial_prefix_transform(const deglib::transformation::FeatureTransformation& t) noexcept {
-        const auto n = t.name();
-        return n == "L2NormalizeTransform" || n == "MipsTransform";
+        return t.type() == deglib::transformation::TransformationType::Spatial;
     }
 
     void split_shared_prefix_transforms() {

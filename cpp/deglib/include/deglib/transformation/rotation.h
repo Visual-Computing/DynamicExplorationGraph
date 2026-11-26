@@ -212,6 +212,7 @@ class FastHadamardRotation : public FeatureTransformation {
     }
 
     uint32_t tag() const noexcept override { return TAG_FWHT; }
+    TransformationType type() const noexcept override { return TransformationType::Rotation; }
     std::string_view name() const noexcept override { return "FastHadamardRotation"; }
     uint32_t input_dim() const noexcept override { return dim_; }
     uint32_t output_dim() const noexcept override { return dim_; }
