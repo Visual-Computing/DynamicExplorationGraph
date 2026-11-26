@@ -615,6 +615,50 @@ void bind_transformation(nb::module_& m) {
     );
 
     transformation_module.def(
+        "is_l2_normalized_graph",
+        [](const deglib::DynamicExplorationGraph& graph, size_t sample_size) {
+            const size_t n = graph.size();
+            if (n == 0) {
+                return true;
+            }
+            const auto& fs = graph.getFeatureSpace();
+            const uint32_t dim = static_cast<uint32_t>(fs.dim());
+            const auto dt = fs.metric().get_data_type();
+            if (dim == 0 || (dt != deglib::distances::MetricDataType::FP32 && dt != deglib::distances::MetricDataType::FP16)) {
+                return false;
+            }
+            const bool is_fp16 = (dt == deglib::distances::MetricDataType::FP16);
+            const float tol = is_fp16 ? 1e-2f : 1e-3f;
+            const size_t count = sample_size == 0 ? n : std::min(n, sample_size);
+            const size_t step = std::max<size_t>(1, n / count);
+
+            nb::gil_scoped_release release;
+            const auto& internal = graph.internal();
+            std::vector<float> buf(is_fp16 ? dim : 0);
+            for (size_t i = 0, checked = 0; i < n && checked < count; i += step, ++checked) {
+                const std::byte* src = internal.getFeatureVector(static_cast<uint32_t>(i));
+                const float* vec = nullptr;
+                if (is_fp16) {
+                    deglib::distances::fp16::fp16_to_floats(reinterpret_cast<const uint16_t*>(src), buf.data(), dim);
+                    vec = buf.data();
+                } else {
+                    vec = reinterpret_cast<const float*>(src);
+                }
+                float norm_sq = 0.0f;
+                for (uint32_t d = 0; d < dim; ++d) {
+                    norm_sq += vec[d] * vec[d];
+                }
+                if (!std::isfinite(norm_sq) || std::abs(norm_sq - 1.0f) > tol) {
+                    return false;
+                }
+            }
+            return true;
+        },
+        nb::arg("graph"), nb::arg("sample_size") = 1024,
+        "Return True if a strided sample of stored FP32/FP16 vectors in the graph has unit L2 norm."
+    );
+
+    transformation_module.def(
         "make_quantizer_pipeline_from_graph",
         [](const deglib::DynamicExplorationGraph& graph, nb::object quant, float quantile, bool use_rerank, size_t threads, uint64_t seed, bool normalize, bool mips) {
             const auto target_dt = parse_quant_data_type(quant);

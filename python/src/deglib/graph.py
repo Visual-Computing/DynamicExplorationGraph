@@ -917,9 +917,9 @@ class DynamicExplorationGraph:
             aligned = apply_on_database(xfrms, aligned, threads=threads)
         elif (
             len(xfrms) > 0
-            and aligned.dtype == np.float32
+            and aligned.dtype in (np.float32, np.float16)
             and aligned.shape[1] == xfrms[0].input_dim
-            and (xfrms[-1].output_dtype != np.float32 or xfrms[-1].output_dim != aligned.shape[1])
+            and (xfrms[-1].output_dtype != aligned.dtype or xfrms[-1].output_dim != aligned.shape[1])
         ):
             target_dim = int(xfrms[-1].output_dim)
             aligned = apply_on_database(xfrms, aligned, threads=threads)
@@ -1119,8 +1119,14 @@ def compress(
             else:
                 target_metric = Metric.Uint7_L2
         elif key == "4bit":
-            if src_is_ip and not any(t.name == "L2NormalizeTransform" for t in graph.get_transformations()):
-                target_metric = Metric.Int4_InnerProduct
+            if src_is_ip:
+                has_l2n = any(t.name == "L2NormalizeTransform" for t in graph.get_transformations())
+                is_unit_norm = has_l2n or (
+                    graph.size() > 0
+                    and Metric(int(src_metric)) in _FLOAT_METRICS
+                    and cpp_transformation.is_l2_normalized_graph(graph.dynamic_exploration_graph_cpp, 1024)
+                )
+                target_metric = Metric.Uint4_L2 if is_unit_norm else Metric.Int4_InnerProduct
             else:
                 target_metric = Metric.Uint4_L2
         elif key in ("2bit", "evp"):

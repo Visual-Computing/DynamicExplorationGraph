@@ -748,6 +748,7 @@ def reranker_with_data(
             "inner_product",
             "mips",
             "cosine",
+            "normalized",
         ):
             distance_kind = "InnerProduct"
         else:
