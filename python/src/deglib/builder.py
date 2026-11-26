@@ -301,7 +301,7 @@ def build(
     max_path_length: int = 5,
     improve_tries: int = 0,
     seed: int = 7,
-    presort: bool | np.ndarray = False,
+    presort: bool | np.ndarray | None = None,
     optimize: bool = True,
     threads: int = 0,
     show_progress: bool | None = None,
@@ -360,9 +360,12 @@ def build(
         Number of improvement passes per step.
     seed : int, default=7
         Random seed used during graph construction.
-    presort : bool or np.ndarray, default=False
-        If ``True``, runs FLAS 1D pre-sorting before construction (reordering data and labels
-        together). Alternatively, pass a precomputed 1D ``uint32`` permutation array.
+    presort : bool, np.ndarray, or None, default=None
+        Controls FLAS 1D pre-sorting before construction (reordering data and labels together):
+        ``None`` (default) enables FLAS pre-sorting automatically for ``float32`` / ``float16``
+        inputs and skips it for pre-quantized inputs; ``True`` forces pre-sorting (requires
+        ``float32`` / ``float16``); ``False`` disables it; a 1D ``uint32`` array applies a
+        precomputed permutation.
     optimize : bool, default=True
         If ``True``, runs ``graph.optimize()`` (prefetch & entry-point tuning) after build.
     threads : int, default=0
@@ -387,6 +390,9 @@ def build(
         raise InvalidShapeException(f"data must be a 2D numpy array, got {getattr(data, 'shape', type(data))}")
 
     is_float_input = data.dtype in (np.dtype(np.float32), np.dtype(np.float16))
+    if presort is None:
+        presort = is_float_input
+
     if not is_float_input:
         if compress is not None:
             raise ValueError(f"compress requires float32 or float16 input data, got dtype {data.dtype}")

@@ -831,7 +831,7 @@ def test_graph_get_labels_and_custom_features_with_permuted_labels():
     # Non-trivial external labels (large values, permuted)
     external_labels = (rng.permutation(samples) * 100 + 7).astype(np.uint32)
 
-    graph = deglib.build(data, labels=external_labels, edges_per_vertex=4, metric=Metric.FP32_L2, seed=42)
+    graph = deglib.build(data, labels=external_labels, edges_per_vertex=4, metric=Metric.FP32_L2, presort=False, seed=42)
 
     labels_in_order = graph.get_labels()
     assert len(labels_in_order) == samples

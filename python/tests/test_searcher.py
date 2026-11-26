@@ -72,7 +72,7 @@ def test_searcher_quantized_int8_with_rerank():
     data = np.random.randn(n, dim).astype(np.float32)
 
     # 1. Base graph in FP32
-    graph = deglib.build(data, edges_per_vertex=16, metric=Metric.FP32_L2, optimize=False)
+    graph = deglib.build(data, edges_per_vertex=16, metric=Metric.FP32_L2, presort=False, optimize=False)
 
     # 2. INT8 Quantization
     quantizer = deglib.transformation.make_scalar_quantizer_int8(data)
@@ -139,7 +139,7 @@ def test_searcher_quantized_uint8_with_rerank():
     n = 200
     data = np.random.uniform(0.0, 10.0, size=(n, dim)).astype(np.float32)
 
-    graph = deglib.build(data, edges_per_vertex=16, metric=Metric.FP32_L2, optimize=False)
+    graph = deglib.build(data, edges_per_vertex=16, metric=Metric.FP32_L2, presort=False, optimize=False)
 
     quantizer = deglib.transformation.make_scalar_quantizer_uint8(data)
     uint8_data = quantizer.transform_database(data)
@@ -167,7 +167,7 @@ def test_searcher_evp_quantizer():
     # L2 normalize for MIPS / InnerProduct
     data = data / np.linalg.norm(data, axis=1, keepdims=True)
 
-    graph = deglib.build(data, edges_per_vertex=16, metric=Metric.FP32_InnerProduct, optimize=False)
+    graph = deglib.build(data, edges_per_vertex=16, metric=Metric.FP32_InnerProduct, presort=False, optimize=False)
 
     # 16 non-zeros for EVP, shared by database and query quantization
     quantizer = deglib.transformation.make_evp_quantizer(data, non_zeros=16)
@@ -273,7 +273,7 @@ def test_searcher_rerank_insertion_order_with_permuted_labels():
     # insertion slot j -> feature data[j], external label perm[j]
     perm = np.random.permutation(n).astype(np.uint32)
     graph = deglib.build(
-        data, labels=perm, edges_per_vertex=24, metric=Metric.FP32_InnerProduct, seed=7, optimize=False
+        data, labels=perm, edges_per_vertex=24, metric=Metric.FP32_InnerProduct, seed=7, presort=False, optimize=False
     )
 
     # 1. Explicit insertion-ordered vectors (default row_indices=None)
@@ -698,3 +698,31 @@ def test_searcher_recall_pareto_validation_and_empty():
         searcher.to_pareto_line(recall_tables=t1, k=10)
     with pytest.raises(TypeError):
         searcher.to_pareto_line(recall_tables="invalid")
+
+
+def test_searcher_helper_reranker_shorthands():
+    data = _make_clustered_searcher_data(120, 32, clusters=8, seed=77)
+    graph = deglib.build(data, metric="l2", edges_per_vertex=12, threads=1)
+
+    s_bool = deglib.searcher(graph, compress="4bit", reranker=True, optimize=False, threads=1)
+    assert s_bool.graph.get_metric() == Metric.Uint4_L2
+    assert s_bool.reranker is not None
+    assert s_bool.reranker.metric == Metric.FP16_L2
+    res = s_bool.search(data[0], k=5, eps_or_ef=32, rerank_factor=2.0)
+    assert res.indices.shape == (5,)
+
+    s_str = deglib.searcher(graph, compress="2bit", reranker="8bit", optimize=False, threads=1)
+    assert s_str.graph.get_metric() == Metric.EVP_InnerProduct
+    assert s_str.reranker is not None
+    assert s_str.reranker.metric == Metric.Uint7_L2
+    res_evp = s_str.search(data[0], k=5, eps_or_ef=32, rerank_factor=2.0)
+    assert res_evp.indices.shape == (5,)
+
+    s_false = deglib.searcher(graph, compress="4bit", reranker=False, optimize=False, threads=1)
+    assert s_false.reranker is None
+
+    with pytest.raises(ValueError, match="quantized graph"):
+        deglib.searcher(s_bool.graph, reranker=True, optimize=False, threads=1)
+
+    with pytest.raises(TypeError):
+        deglib.searcher(graph, reranker=123, optimize=False, threads=1)

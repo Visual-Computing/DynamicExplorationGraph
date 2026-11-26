@@ -53,7 +53,7 @@ This reference documents the exact internal behavior of the high-level Python AP
 
 ### Empty & Pre-Quantized Edge Cases in `deglib.build`
 - **`n_samples == 0`**: returns an empty `SizeBoundedGraph` (`dim = d`, `metric = FP32_*` or `FP16_*` for `float16`); `compress` is skipped (calling `deglib.compress` directly on an empty graph raises `ValueError`).
-- **Pre-quantized input** (e.g. `int8`, `uint8`): `compress` must be `None`, `presort=True` raises `ValueError` (precomputed `sorted_indices` array is still allowed).
+- **Pre-quantized input** (e.g. `int8`, `uint8`): `compress` must be `None`, `presort=None` (default) skips FLAS pre-sorting, `presort=True` raises `ValueError` (precomputed `sorted_indices` array is still allowed).
 
 ---
 

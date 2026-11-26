@@ -45,17 +45,17 @@ import deglib
 data = np.random.randn(10_000, 128).astype(np.float32)
 query = np.random.randn(128).astype(np.float32)
 
-# Build optimized graph (optimize=True by default)
-graph = deglib.build(data, edges_per_vertex=32, show_progress=True)
-searcher = deglib.searcher(graph)
+# Build graph (metric="l2" by default)
+graph = deglib.build(data)
 
-# Fast index-only search (return_distances=False by default on Searcher.search)
-res = searcher.search(query, k=10, eps_or_ef=0.1)
+# Option A: Search directly on the graph
+res = graph.search(query, k=10, eps_or_ef=0.1)
 indices = res.indices
 
-# Search returning both labels and exact distances plus traversal/rerank telemetry
-res = searcher.search(query, k=10, eps_or_ef=0.1, return_distances=True)
-indices, distances = res.indices, res.distances
+# Option B: Wrap in a Searcher for extra search optimizations (see `deglib.searcher` below)
+searcher = deglib.searcher(graph)
+res = searcher.search(query, k=10, eps_or_ef=0.1)
+indices = res.indices
 ```
 
 ### Quantized Search with Self-Extracted FP16 Reranking
@@ -63,27 +63,14 @@ indices, distances = res.indices, res.distances
 ```python
 import deglib
 
-# 1. Pre-sort with FLAS and build FP32 cosine graph
-base_graph = deglib.build(
-    data,
-    metric="cosine",
-    edges_per_vertex=30,
-    presort=True,
-    optimize=False,
-    threads=8,
-)
+# 1. Build FP32 cosine graph
+base_graph = deglib.build(data, metric="cosine")
 
-# 2. Extract FP16 reranker from FP32 graph, compress to 8-bit Searcher, and optimize routing
-reranker = deglib.reranker(base_graph, compress="16bit", threads=8)
-searcher = deglib.searcher(
-    base_graph,
-    compress="8bit",
-    reranker=reranker,
-    optimize=True,
-    threads=8,
-)
+# 2. Compress to 8-bit and auto-extract an FP16 reranker
+searcher = deglib.searcher(base_graph, compress="8bit", reranker=True)
 
-indices = searcher.search(queries, k=10, eps_or_ef=64, rerank_factor=2.0, unsorted=True).indices
+# 3. Fetch 2 * k candidates from graph and re-score with reranker
+indices = searcher.search(queries, k=10, eps_or_ef=64, rerank_factor=2.0).indices
 ```
 
 ### MIPS (`metric="ip"`) with Compression
@@ -91,17 +78,9 @@ indices = searcher.search(queries, k=10, eps_or_ef=64, rerank_factor=2.0, unsort
 ```python
 import deglib
 
-# Automatically lifts into MIPS(d+1) for presort/build and swaps back to d-dim InnerProduct (for compress=None/32bit/16bit/8bit/4bit/2bit)
-ip_graph = deglib.build(
-    train_vectors,
-    metric="ip",
-    compress="16bit",
-    edges_per_vertex=32,
-    extend_k=64,
-    presort=True,
-    threads=8,
-)
-res = ip_graph.search(query, eps_or_ef=0.18, k=10)
+# Lifts into MIPS(d+1) for build, then compresses back to d-dim FP16 IP
+ip_graph = deglib.build(train_vectors, metric="ip", compress="16bit")
+res = ip_graph.search(query, k=10, eps_or_ef=0.18)
 indices, distances = res.indices, res.distances
 ```
 
@@ -126,7 +105,7 @@ deglib.build(
     max_path_length: int = 5,
     improve_tries: int = 0,
     seed: int = 7,
-    presort: bool | np.ndarray = False,
+    presort: bool | np.ndarray | None = None,
     optimize: bool = True,
     threads: int = 0,
     show_progress: bool | None = None,
@@ -151,7 +130,7 @@ Builds and optionally optimizes/compresses a `DynamicExplorationGraph` from a 2D
 - **`max_path_length`**: Maximum path length considered during RNG edge pruning/improvement.
 - **`improve_tries`**: Number of improvement passes per step.
 - **`seed`**: Random seed used during graph construction.
-- **`presort`**: `True` runs 1D FLAS pre-sorting via `deglib.presort` and reorders `data` and `labels` together; a 1D `uint32` `np.ndarray` applies precomputed sorted indices; `False` keeps insertion order.
+- **`presort`**: `None` (default) enables 1D FLAS pre-sorting automatically for `float32`/`float16` inputs (and skips it for pre-quantized inputs); `True` forces pre-sorting (reordering `data` and `labels` together); a 1D `uint32` `np.ndarray` applies precomputed sorted indices; `False` keeps insertion order.
 - **`optimize`**: Runs `graph.optimize()` (prefetch & entry-point tuning) after building when `True`.
 - **`threads`**: Worker thread count (`0` uses all available CPU cores).
 - **`show_progress`**: Whether to print a live progress bar on stdout (`None` defaults to `sys.stdout.isatty()`).
@@ -272,20 +251,24 @@ Creates a `Reranker` from external `data` aligned with `graph` (supports quantiz
 deglib.searcher(
     graph: DynamicExplorationGraph,
     compress: Literal["32bit", "16bit", "8bit", "4bit", "2bit", "auto"] | Metric | str | None = None,
-    reranker: Reranker | None = None,
+    reranker: Reranker | bool | Metric | str | None = None,
     optimize: bool = True,
     threads: int = 0,
 ) -> Searcher
 ```
 
-Wraps `graph` (optionally compressing first via `deglib.compress`) in an optimized `ReadOnlyGraph`-backed `Searcher`.
+Wraps `graph` (optionally compressing first via `deglib.compress`) in an optimized `ReadOnlyGraph`-backed `Searcher`. Compared to `graph.search(...)`, `Searcher` adds a compact `ReadOnlyGraph` layout and, when `optimize=True`, tunes K-Means entry-point routing and memory prefetching for both graph traversal and reranking.
 
 > **Memory & Ownership:** When `graph` is already a `ReadOnlyGraph` and `compress=None`, `searcher.graph` shares `graph` zero-copy (`searcher.graph is graph`). When `graph` is mutable or `compress` is set, a new `ReadOnlyGraph` is allocated for `searcher.graph` (drop `graph` if you no longer need the mutable/uncompressed copy in RAM).
 
 **Parameters:**
 - **`graph`**: Backing `DynamicExplorationGraph`.
 - **`compress`**: Optional compression target (`"32bit"`, `"16bit"`, `"8bit"`, `"4bit"`, `"2bit"`, `"auto"`, `Metric`, or `None` to use `graph` as-is).
-- **`reranker`**: Optional prebuilt `Reranker` for two-stage candidate re-scoring.
+- **`reranker`**: Optional reranker for two-stage candidate re-scoring:
+  - `None` / `False`: No reranking.
+  - `Reranker`: Prebuilt `Reranker` (from `deglib.reranker` or `deglib.reranker_with_data`).
+  - `True`: Automatically extracts a `"16bit"` reranker from `graph` before compression (requires an uncompressed `FP32` or `FP16` `graph`).
+  - `str` or `Metric` (e.g. `"8bit"`, `"16bit"`, `"32bit"`, `Metric.Int8_L2`): Automatically builds a reranker with that precision from `graph` via `deglib.reranker` before compression.
 - **`optimize`**: If `True`, runs `searcher.optimize(threads=threads)` (K-Means routing entry points and prefetch tuning).
 - **`threads`**: Worker thread count for compression and optimization (`0` uses all CPU cores).
 

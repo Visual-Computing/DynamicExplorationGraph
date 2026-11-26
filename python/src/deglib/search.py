@@ -851,7 +851,7 @@ def reranker_with_data(
 def searcher(
     graph: DynamicExplorationGraph,
     compress: Literal["32bit", "16bit", "8bit", "4bit", "2bit", "auto"] | Metric | str | None = None,
-    reranker: Reranker | None = None,
+    reranker: Reranker | bool | Metric | str | None = None,
     optimize: bool = True,
     threads: int = 0,
 ) -> Searcher:
@@ -878,13 +878,21 @@ def searcher(
         - ``"16bit"`` (also ``"fp16"``, ``"float16"``): ``FP16_L2`` or ``FP16_InnerProduct``.
         - ``"8bit"`` / ``"auto"``: ``Uint7_L2`` (L2), ``Int8_InnerProduct`` (unnormalized ``InnerProduct``),
           or auto-selected ``Uint7_L2`` vs. ``Int8_InnerProduct`` on unit-sphere ``cosine``/``normalized`` graphs.
-        - ``"4bit"``: Always ``Uint4_L2`` (auto-prepending ``MipsTransform`` on unnormalized
-          ``InnerProduct`` graphs).
+        - ``"4bit"``: ``Uint4_L2`` (on L2 and ``cosine``/``normalized`` graphs) or ``Int4_InnerProduct``
+          (on unnormalized ``InnerProduct`` graphs, avoiding ``d+1`` ``MipsTransform`` overhead).
         - ``"2bit"`` (also ``"evp"``): ``EVP_InnerProduct``.
         - Explicit ``Metric`` or metric string (e.g. ``Metric.Int8_L2``, ``"Uint8_L2"``).
-    reranker : Reranker, optional
-        Optional prebuilt ``Reranker`` (from :func:`deglib.reranker` or
-        :func:`deglib.reranker_with_data`) for two-stage candidate re-scoring.
+    reranker : Reranker or bool or Metric or str, optional
+        Optional reranker for two-stage candidate re-scoring:
+
+        - ``None`` / ``False``: No reranking.
+        - ``Reranker``: Prebuilt reranker (from :func:`deglib.reranker` or
+          :func:`deglib.reranker_with_data`).
+        - ``True``: Automatically extracts a ``"16bit"`` reranker from ``graph`` before
+          compression (requires ``graph`` to use an uncompressed ``FP32`` or ``FP16`` metric).
+        - ``str`` or ``Metric`` (e.g. ``"8bit"``, ``"16bit"``, ``"32bit"``, ``Metric.Int8_L2``):
+          Automatically builds a reranker with that precision from ``graph`` via
+          :func:`deglib.reranker` before compression.
     optimize : bool, default=True
         If ``True``, runs ``searcher.optimize(threads=threads)`` (K-Means routing entry points
         and prefetch tuning). Pass ``optimize=False`` to call ``searcher.optimize(...)`` with
@@ -905,14 +913,28 @@ def searcher(
     deglib.search.ParetoLine : Unified recall-latency Pareto frontier.
     deglib.search.Filter : External-label filter for constrained search.
     """
+    base_graph = graph.to_readonly() if (compress is not None and graph.is_mutable() and graph.size() > 0) else graph
+
+    if reranker is None or reranker is False:
+        resolved_reranker = None
+    elif isinstance(reranker, Reranker):
+        resolved_reranker = reranker
+    elif reranker is True:
+        resolved_reranker = globals()["reranker"](base_graph, compress="16bit", optimize=False, threads=threads)
+    elif isinstance(reranker, (str, Metric)):
+        resolved_reranker = globals()["reranker"](base_graph, compress=reranker, optimize=False, threads=threads)
+    else:
+        raise TypeError(
+            f"reranker must be a Reranker, bool, str, Metric, or None, got {type(reranker).__name__}"
+        )
+
     if compress is not None:
         from deglib.graph import compress as compress_graph
 
-        base_graph = graph.to_readonly() if (graph.is_mutable() and graph.size() > 0) else graph
         search_graph = compress_graph(base_graph, compress, threads=threads)
     else:
-        search_graph = graph
-    return search_graph.to_searcher(reranker=reranker, optimize=optimize, threads=threads)
+        search_graph = base_graph
+    return search_graph.to_searcher(reranker=resolved_reranker, optimize=optimize, threads=threads)
 
 
 def _resolve_rerank_factors(rerank_factors: Sequence[float] | np.ndarray | None) -> list[float] | None:

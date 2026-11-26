@@ -74,14 +74,17 @@ num_samples, dims = 10_000, 128
 data = np.random.random((num_samples, dims)).astype(np.float32)
 query = np.random.random(dims).astype(np.float32)
 
-# 2. Build index directly from data (multithreaded & optimized by default)
-graph = deglib.build(data, edges_per_vertex=32, show_progress=True)
+# 2. Build index directly from data (metric="l2" by default)
+graph = deglib.build(data)
 
-# 3. Query top-k nearest neighbors (returns SearchResults with zero-copy .indices/.distances and telemetry)
+# 3a. Query directly on the graph
 res = graph.search(query, k=10, eps_or_ef=0.1)
 
+# 3b. Or wrap in a Searcher for extra search optimizations (see python/API.md#deglibsearcher)
+searcher = deglib.searcher(graph)
+res = searcher.search(query, k=10, eps_or_ef=0.1)
+
 print("Nearest neighbors:", res.indices)
-print("Distances:", res.distances)
 print("Distance evals:", res.graph_distance_count, "| Hops:", res.graph_hop_count)
 ```
 
@@ -222,25 +225,13 @@ num_vectors, dims = 10_000, 128
 data = np.random.randn(num_vectors, dims).astype(np.float32)
 query = np.random.randn(dims).astype(np.float32)
 
-# 1. Pre-sort with FLAS and build exploration graph in FP32
-graph = deglib.build(
-    data,
-    metric="cosine",
-    edges_per_vertex=32,
-    presort=True,
-    optimize=False,
-    show_progress=True,
-)
+# 1. Build exploration graph in FP32
+graph = deglib.build(data, metric="cosine")
 
-# 2. Extract FP16 reranker from FP32 graph and create compressed 8-bit Searcher
-reranker = deglib.reranker(graph, compress="16bit")
-searcher = deglib.searcher(
-    graph,
-    compress="8bit",
-    reranker=reranker,
-)
+# 2. Compress to 8-bit and auto-extract an FP16 reranker
+searcher = deglib.searcher(graph, compress="8bit", reranker=True)
 
-# 3. Query search (query is automatically quantized and top candidates are reranked)
+# 3. Fetch 1.5 * k candidates from graph and re-score with reranker
 res = searcher.search(query, k=10, eps_or_ef=0.1, rerank_factor=1.5, return_distances=True)
 print("Top-10 nearest neighbor indices:", res.indices)
 print("Top-10 exact distances:", res.distances)
