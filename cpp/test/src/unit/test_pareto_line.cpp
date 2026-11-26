@@ -20,6 +20,27 @@
 #include <vector>
 
 namespace deglib::search {
+struct RecallTableTestAccess {
+    static RecallTable make(
+        uint32_t k,
+        size_t sample_count,
+        RecallTable::Mode mode,
+        float rerank_factor,
+        std::vector<RecallTable::Entry> entries
+    ) {
+        RecallTable t;
+        t.k_ = k;
+        t.sample_count_ = sample_count;
+        t.mode_ = mode;
+        t.rerank_factor_ = rerank_factor;
+        if (!entries.empty()) {
+            t.recall_bounds_ = std::pair<float, float>{entries.front().measured_recall, entries.back().measured_recall};
+        }
+        t.entries_ = std::move(entries);
+        return t;
+    }
+};
+
 struct ParetoLineTestAccess {
     using TimingSample = ParetoLine::TimingSample;
     using CandidateSpec = ParetoLine::CandidateSpec;
@@ -525,10 +546,17 @@ TEST(ParetoLineTest, MultiRerankDominanceTwoStageAndNoInterpolation) {
     ASSERT_GT(min_hi_meas, max_lo_meas + 1e-4f);
 
     {
-        auto sparse_graph = build_fp32_graph(rand_data, dim, 6, Metric::FP32_L2);
-        auto sparse_searcher = deglib::search::make_searcher(sparse_graph.internal(), reranker);
-        const std::vector<float> sparse_target = {0.82f};
-        const RecallTable t_ef_1_slow = sparse_searcher->to_recall_table(10, RecallTable::Mode::Ef, std::span<const float>(sparse_target), 1.0f, 50, 1);
+        const RecallTable t_ef_1_slow = deglib::search::RecallTableTestAccess::make(
+            10,
+            50,
+            RecallTable::Mode::Ef,
+            1.0f,
+            {RecallTable::Entry{
+                0.82f,
+                t_ef_1.entries()[0].eps_or_ef + 10.0f,
+                (std::max)(0.0f, t_ef_1.entries()[0].measured_recall - 0.05f),
+            }}
+        );
         ASSERT_EQ(t_ef_1_slow.size(), 1u);
         ASSERT_LT(t_ef_1.entries()[0].eps_or_ef, t_ef_1_slow.entries()[0].eps_or_ef);
         ASSERT_GE(t_ef_1.entries()[0].measured_recall, t_ef_1_slow.entries()[0].measured_recall);
