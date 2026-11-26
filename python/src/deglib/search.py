@@ -629,7 +629,7 @@ def reranker(
     Parameters
     ----------
     graph : DynamicExplorationGraph
-        Backing uncompressed graph whose stored vectors and labels are used for reranking.
+        Uncompressed (``FP32`` or ``FP16``) graph whose stored vectors and labels are extracted for reranking.
     compress : {"16bit", "8bit"} or Metric or str, optional, default="16bit"
         Target reranker precision:
 

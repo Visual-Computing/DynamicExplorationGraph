@@ -685,7 +685,7 @@ def build(
     builder.build(show_progress=effective_show_progress)
 
     if xfrms:
-        graph.set_transformations(xfrms)
+        graph._set_transformations(xfrms)
 
     # 5. Finalize graph (for high-level IP with IP target, swap MIPS build features back to d-dim IP)
     if is_high_level_ip and ip_finalize_metric is not None:

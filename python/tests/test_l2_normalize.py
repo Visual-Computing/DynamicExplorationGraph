@@ -40,13 +40,19 @@ def test_l2_normalize_with_graph_search():
     data = rng.normal(size=(n, dim)).astype(np.float32) * 4.0
     data_norm = data / np.linalg.norm(data, axis=1, keepdims=True)
 
-    graph = deglib.build(data_norm, metric=deglib.Metric.FP32_InnerProduct, edges_per_vertex=8, optimize=False)
+    graph = deglib.build(
+        data_norm, metric=deglib.Metric.FP32_InnerProduct, edges_per_vertex=8, presort=False, optimize=False
+    )
 
     searcher = graph.to_searcher(normalize_query=True, optimize=True)
     raw_query = data[0] * 10.0
     res = searcher.search(raw_query, k=5, eps_or_ef=0.2)
     assert res.indices[0] == 0
 
-    graph.set_transformations([make_l2_normalize_transform(data)])
+    graph = graph.with_features(
+        data_norm,
+        metric=deglib.Metric.FP32_InnerProduct,
+        transformations=[make_l2_normalize_transform(data)],
+    )
     res_g = graph.search(raw_query, eps_or_ef=0.2, k=5)
     assert res_g.indices[0] == 0

@@ -178,12 +178,12 @@ deglib.compress(
 ) -> DynamicExplorationGraph
 ```
 
-Compresses an uncompressed (`FP32` or `FP16`) graph to the requested bit-width or `Metric`, preserving the input graph's backend type, topology, and external labels.
+Compresses an uncompressed (`FP32` or `FP16`) graph to the requested bit-width or `Metric`, preserving topology and external labels.
 
 **Parameters:**
-- **`graph`**: Source `DynamicExplorationGraph` (`FP32` or `FP16`, unless `target="32bit"` on an existing `FP32` graph).
+- **`graph`**: Source uncompressed `FP32` or `FP16` `DynamicExplorationGraph`.
 - **`target`**: Target precision or metric:
-  - `"32bit"` / `"fp32"` / `"float32"`: `FP32_L2` or `FP32_InnerProduct` matching the graph's distance kind.
+  - `"32bit"` / `"fp32"` / `"float32"`: `FP32_L2` or `FP32_InnerProduct` (`FP32` graphs only; no-op).
   - `"16bit"` / `"fp16"` / `"float16"`: `FP16_L2` or `FP16_InnerProduct`.
   - `"8bit"` / `"auto"`: `Uint7_L2` on L2 graphs, `deglib.tuning.predict_quantization` (`Uint7_L2` vs. `Int8_InnerProduct`) on unit-sphere `cosine`/`normalized` graphs, and `Int8_InnerProduct` on unnormalized `InnerProduct` graphs.
   - `"4bit"`: `Uint4_L2` on L2 and `cosine`/`normalized` graphs; `Int4_InnerProduct` on unnormalized `InnerProduct` graphs (no `d+1` `MipsTransform` overhead).
@@ -191,7 +191,7 @@ Compresses an uncompressed (`FP32` or `FP16`) graph to the requested bit-width o
   - Any explicit `Metric` or metric name string (e.g. `Metric.Int8_L2`, `"Uint8_L2"`).
 - **`threads`**: Worker thread count (`0` uses all CPU cores).
 
-**Returns:** Compressed `DynamicExplorationGraph` with the same backend type as `graph`.
+**Returns:** Compressed `DynamicExplorationGraph`.
 
 ---
 
@@ -209,7 +209,7 @@ deglib.reranker(
 Extracts a standalone `Reranker` directly from an uncompressed (`FP32` or `FP16`) `graph`'s stored vectors (raises `ValueError` if `graph` is already quantized; use `deglib.reranker_with_data` instead).
 
 **Parameters:**
-- **`graph`**: Backing uncompressed `DynamicExplorationGraph`.
+- **`graph`**: Uncompressed (`FP32` or `FP16`) `DynamicExplorationGraph` whose stored vectors and labels are extracted.
 - **`compress`**: Target reranker precision (`"16bit"`, `"8bit"` / `"auto"`, `"32bit"` / `None`, `"int8"`, `"uint8"`, `"uint7"`, or an explicit `Metric`).
 - **`optimize`**: If `True`, runs `reranker.optimize()` to tune candidate prefetching.
 - **`threads`**: Worker thread count (`0` uses all CPU cores).
@@ -264,7 +264,7 @@ Wraps `graph` (optionally compressing first via `deglib.compress`) in an optimiz
 > **Memory & Ownership:** When `graph` is already a `ReadOnlyGraph` and `compress=None`, `searcher.graph` shares `graph` zero-copy (`searcher.graph is graph`). When `graph` is mutable or `compress` is set, a new `ReadOnlyGraph` is allocated for `searcher.graph` (drop `graph` if you no longer need the mutable/uncompressed copy in RAM).
 
 **Parameters:**
-- **`graph`**: Backing `DynamicExplorationGraph`.
+- **`graph`**: `DynamicExplorationGraph` to search.
 - **`compress`**: Optional compression target (`"32bit"`, `"16bit"`, `"8bit"`, `"4bit"`, `"2bit"`, `"auto"`, `Metric`, or `None` to use `graph` as-is).
 - **`reranker`**: Optional reranker for two-stage candidate re-scoring:
   - `None` / `False`: No reranking.
@@ -434,7 +434,6 @@ graph.get_pl() -> int
 graph.get_nl() -> int
 graph.has_transformations() -> bool
 graph.get_transformations() -> list[FeatureTransformation]
-graph.set_transformations(transformations: FeatureTransformation | Sequence[FeatureTransformation] | None) -> None
 graph.get_entry_vertex_indices() -> list[int]
 graph.set_entry_vertex_indices(indices: Sequence[int] | np.ndarray) -> None
 graph.save_graph(path: Path | str) -> None
@@ -538,9 +537,9 @@ graph.to_searcher(
 ```
 
 - **`to_readonly` / `to_mutable` / `to_dynamic`**: Pure backend copies preserving features, metric, and attached transformations (`threads` is used for parallel edge-weight recomputation when converting from `ReadOnlyGraph`).
-- **`with_metric`**: Re-tags or auto-quantizes stored floating-point features to `metric`, preserving the current backend (`ReadOnlyGraph`, `SizeBoundedGraph`, or `DynamicGraph`).
-- **`with_transformations`**: Self-transforms stored `FP32`/`FP16` features using explicit fitted `transformations` and appends them to the graph's query pipeline, preserving the current backend.
-- **`with_features`**: Replaces graph features with an external array (auto-calibrating/quantizing `FP32`/`FP16` arrays when `transformations=None`), resets the query pipeline, and preserves the current backend. `order="label"` indexes rows by external labels; `order="internal"` expects rows aligned with `graph.get_labels()`.
+- **`with_metric`**: Re-tags or auto-quantizes stored floating-point features to `metric`.
+- **`with_transformations`**: Self-transforms stored `FP32`/`FP16` features using explicit fitted `transformations` and appends them to the graph's query pipeline.
+- **`with_features`**: Replaces graph features with an external array (auto-calibrating/quantizing `FP32`/`FP16` arrays when `transformations=None`) and resets the query pipeline. `order="label"` indexes rows by external labels; `order="internal"` expects rows aligned with `graph.get_labels()`.
 - **`to_reranker`**: Extracts and quantizes base vectors directly from an `FP32`/`FP16` graph, chaining the graph's prefix transformations with `transformations`.
 - **`to_searcher`**: Converts the graph to a `ReadOnlyGraph` in a single pass (applying/quantizing `metric` directly when `metric` differs) and wraps it in a `Searcher`.
 
@@ -763,14 +762,39 @@ Bitset filter restricting graph search and exploration to a subset of external l
 ### `RecallTable`
 
 Returned by `graph.to_recall_table(...)` / `to_recall_tables(...)` and `searcher.to_recall_table(...)` / `to_recall_tables(...)`:
-- **Properties**: `.k -> int`, `.sample_count -> int`, `.is_ef -> bool`, `.is_eps -> bool`, `.rerank_factor -> float`, `.recall_bounds -> tuple[float, float] | None`, `.entries -> list[tuple[float, float, float]]` (`(target_recall, eps_or_ef, measured_recall)`)
-- **Methods**: `.eps_or_ef_values() -> list[float]`, `.param_for(target_recall: float, clamp: bool = False) -> float | None`, `len(table)`, `str(table)`
+
+```python
+table.k -> int
+table.sample_count -> int
+table.is_ef -> bool
+table.is_eps -> bool
+table.rerank_factor -> float
+table.recall_bounds -> tuple[float, float] | None
+table.entries -> list[tuple[float, float, float]]  # (target_recall, eps_or_ef, measured_recall)
+
+table.eps_or_ef_values() -> list[float]
+table.param_for(target_recall: float, clamp: bool = False) -> float | None
+len(table) -> int
+str(table) -> str
+```
 
 ### `ParetoLine`
 
 Returned by `graph.to_pareto_line(...)` and `searcher.to_pareto_line(...)`:
-- **Properties**: `.k -> int`, `.sample_count -> int`, `.recall_bounds -> tuple[float, float] | None`, `.recall_tables -> list[RecallTable]`, `.entries -> list[tuple[float, float, float, float, float, float]]` (`(target_recall, eps_or_ef, rerank_factor, measured_recall, latency_us, qps)`)
-- **Methods**: `.eps_or_ef_values() -> list[float]`, `.params() -> list[tuple[float, float]]`, `.param_for(target_recall: float, clamp: bool = False) -> tuple[float, float] | None` (nearest frontier entry by `measured_recall`, no interpolation), `len(line)`, `str(line)`
+
+```python
+line.k -> int
+line.sample_count -> int
+line.recall_bounds -> tuple[float, float] | None
+line.recall_tables -> list[RecallTable]
+line.entries -> list[tuple[float, float, float, float, float, float]]  # (target_recall, eps_or_ef, rerank_factor, measured_recall, latency_us, qps)
+
+line.eps_or_ef_values() -> list[float]
+line.params() -> list[tuple[float, float]]
+line.param_for(target_recall: float, clamp: bool = False) -> tuple[float, float] | None  # nearest frontier entry by measured_recall, no interpolation
+len(line) -> int
+str(line) -> str
+```
 
 ### `Reranker` & `rerank`
 

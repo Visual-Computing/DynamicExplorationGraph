@@ -6,7 +6,7 @@ This reference documents the exact internal behavior of the high-level Python AP
 - Spatial metric resolution & prefix transforms (`is_l2_normalized`, `resolve_spatial_metric`): `python/src/deglib/transformation.py`
 - 1D FLAS pre-sorting (`presort`): `python/src/deglib/optimization.py`
 - High-level build & post-build finalization (`build`): `python/src/deglib/builder.py`
-- Compression & metric conversion (`compress`, `_prepare_metric_transform`, `load_graph`): `python/src/deglib/graph.py`
+- Compression & metric conversion (`compress`, `_prepare_metric_transform`, `load_readonly_graph`): `python/src/deglib/graph.py`
 - Reranker & searcher wrappers (`reranker`, `reranker_with_data`, `searcher`): `python/src/deglib/search.py`
 - Graph-based quantizer calibration (`make_quantizer_pipeline_from_graph`, `fit_mips_transform_from_graph`): `python/src/deg_cpp/bindings_transformation.cpp`
 - Quantizer pipeline & FWHT kurtosis thresholds (`make_quantizer_pipeline`): `cpp/deglib/include/deglib/transformation.h`

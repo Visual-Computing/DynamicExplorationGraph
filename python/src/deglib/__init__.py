@@ -10,7 +10,7 @@ from . import tuning
 
 from .builder import build, OptimizationTarget
 from .distances import Metric
-from .graph import DynamicExplorationGraph, compress, load_graph
+from .graph import DynamicExplorationGraph, compress, load_readonly_graph as load_graph
 from .optimization import presort
 from .search import Reranker, SearchResults, Searcher, reranker, reranker_with_data, searcher
 

@@ -197,18 +197,18 @@ class DynamicExplorationGraph:
         """
         return self.dynamic_exploration_graph_cpp.get_transformations()
 
-    def set_transformations(
+    def _set_transformations(
         self,
         transformations: FeatureTransformation | Sequence[FeatureTransformation] | None,
     ) -> None:
         """
-        Set or replace query feature transformations attached to this graph.
+        Internal helper to attach pre-fitted query transformations without re-transforming stored features.
         """
         xfrms = _normalize_transforms(transformations)
         for i, t in enumerate(xfrms):
             if not isinstance(t, FeatureTransformation):
                 raise TypeError(f"transformations[{i}] must be a FeatureTransformation, got {type(t).__name__}")
-        self.dynamic_exploration_graph_cpp.set_transformations(xfrms)
+        self.dynamic_exploration_graph_cpp._set_transformations(xfrms)
 
     def get_entry_vertex_indices(self) -> list[int]:
         """
@@ -1026,19 +1026,6 @@ def create_random_graph(
     return graph
 
 
-def load_graph(path: pathlib.Path | str) -> DynamicExplorationGraph:
-    """
-    Load a saved ``.deg`` graph from disk as an immutable ``ReadOnlyGraph``.
-
-    See Also
-    --------
-    deglib.graph.load_readonly_graph : Explicit read-only loader.
-    deglib.graph.load_dynamic_graph : Load as a chunked mutable ``DynamicGraph``.
-    deglib.graph.load_mutable_graph : Load as a fixed-capacity mutable ``SizeBoundedGraph``.
-    """
-    return load_readonly_graph(path)
-
-
 def load_readonly_graph(path: pathlib.Path | str) -> DynamicExplorationGraph:
     """
     Load a saved ``ReadOnlyGraph`` from disk.
@@ -1075,13 +1062,12 @@ def compress(
     threads: int = 0,
 ) -> DynamicExplorationGraph:
     """
-    Compress ``graph`` to the specified bit-width or ``Metric``, preserving the input graph's backend type.
+    Compress ``graph`` to the specified bit-width or ``Metric``.
 
     Parameters
     ----------
     graph : DynamicExplorationGraph
-        Source graph (must use an uncompressed ``FP32`` or ``FP16`` metric unless
-        ``target="32bit"`` on an existing ``FP32`` graph).
+        Source uncompressed ``FP32`` or ``FP16`` graph.
     target : {"32bit", "16bit", "8bit", "4bit", "2bit", "auto"} or Metric or str
         Target precision or metric:
 
@@ -1103,7 +1089,7 @@ def compress(
     Returns
     -------
     DynamicExplorationGraph
-        Compressed graph preserving the input graph's backend type, topology, and external labels.
+        Compressed graph preserving topology and external labels.
 
     See Also
     --------
@@ -1156,7 +1142,6 @@ __all__ = [
     "create_empty",
     "create_dynamic_empty",
     "create_random_graph",
-    "load_graph",
     "load_readonly_graph",
     "load_dynamic_graph",
     "load_mutable_graph",

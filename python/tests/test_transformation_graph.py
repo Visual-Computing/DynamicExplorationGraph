@@ -6,7 +6,7 @@ import numpy as np
 
 import deglib
 from deglib import Metric, load_graph
-from deglib.graph import create_empty, load_mutable_graph, load_graph
+from deglib.graph import create_empty, load_mutable_graph
 from deglib.transformation import (
     apply_on_database,
     make_evp_quantizer,
@@ -347,7 +347,7 @@ def test_mips_transform_chains_through_reranker_and_quantized_searcher():
     b = deglib.builder.GraphBuilder(mut, threads=2)
     b.add_entry(np.arange(n, dtype=np.uint32), data_mips)
     b.build()
-    mut.set_transformations([mips])
+    mut = mut.with_features(data_mips, metric=Metric.FP32_L2, transformations=[mips])
     graph = mut.to_readonly()
 
     reranker = graph.to_reranker(Metric.FP16_L2, threads=2)

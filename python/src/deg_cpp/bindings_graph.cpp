@@ -672,7 +672,7 @@ void bind_graph_and_builder(nb::module_& m) {
             },
             nb::arg("transformations"), nb::arg("target_space") = nb::none(), nb::arg("threads") = 0
         )
-        .def("set_transformations", &deglib::DynamicExplorationGraph::setTransformations, nb::arg("transformations"))
+        .def("_set_transformations", &deglib::DynamicExplorationGraph::setTransformations, nb::arg("transformations"))
         .def(
             "search", &graph_search_single_wrapper, nb::arg("query"), nb::arg("eps_or_ef"), nb::arg("k"), nb::arg("filter") = nullptr,
             nb::arg("max_distance_computation_count") = 0, nb::arg("return_distances") = true, nb::arg("unsorted") = false
