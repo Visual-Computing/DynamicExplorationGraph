@@ -12,7 +12,6 @@ from deglib.graph import (
     DynamicExplorationGraph,
     _FP16_METRICS,
     _FP32_METRICS,
-    compress as compress_graph,
     create_empty,
 )
 from deglib.optimization import presort as run_presort
@@ -330,15 +329,15 @@ def build(
           target).
         - Explicit ``Metric`` or metric string (e.g. ``Metric.Int8_L2``, ``"Uint7_L2"``).
     compress : {"32bit", "16bit", "8bit", "4bit", "2bit", "auto"} or Metric or str, optional
-        Optional post-build compression target:
+        Optional target precision/metric to build the graph in directly (saving build RAM):
 
         - ``None``: Keep native build precision (unnormalized ``FP32_InnerProduct`` /
           ``FP16_InnerProduct`` for ``metric="ip"``).
         - ``"32bit"`` (also ``"fp32"``, ``"float32"``): Keep/target 32-bit float precision.
         - ``"16bit"`` (also ``"fp16"``, ``"float16"``): ``FP16_L2`` or ``FP16_InnerProduct``.
         - ``"8bit"`` / ``"auto"``: ``Uint7_L2`` (L2), ``Int8_InnerProduct`` or ``Uint7_L2`` (cosine/normalized, auto-selected),
-          or ``FastHadamardRotation + Int8_InnerProduct`` (``metric="ip"``).
-        - ``"4bit"``: ``Uint4_L2`` (L2 / cosine) or ``Int4_InnerProduct`` (``metric="ip"``, ``d``-dim).
+          or ``FastHadamardRotation + Int8_InnerProduct`` (``metric="ip"``, built via 8-bit ``Uint7_L2`` in MIPS space).
+        - ``"4bit"``: ``Uint4_L2`` (L2 / cosine) or ``Int4_InnerProduct`` (``metric="ip"``, built via 4-bit ``Uint4_L2`` in MIPS space).
         - ``"2bit"`` (also ``"evp"``): ``EVP_InnerProduct`` (``d``-dim).
         - Any explicit ``Metric`` or metric name string.
     edges_per_vertex : int, default=32
@@ -510,9 +509,139 @@ def build(
         if spatial_data is not None:
             spatial_data = np.ascontiguousarray(spatial_data[sorted_idx])
         labels_arr = np.ascontiguousarray(labels_arr[sorted_idx])
+    effective_float_data = spatial_data if spatial_data is not None else work_data
 
-    # 3. Transformations / auto-quantization (run in parallel BEFORE GraphBuilder so add_entry stays fast)
-    if spatial_data is not None:
+    # 3. Transformations / quantization (run in parallel BEFORE GraphBuilder so the graph builds directly in compressed form)
+    comp_key = (
+        compress.strip().lower().replace("-", "").replace("_", "")
+        if isinstance(compress, str)
+        else None
+    )
+    ip_finalize_metric: Metric | None = None
+    ip_use_8bit_fwht = False
+
+    if is_high_level_ip:
+        # metric="ip" builds topology in MIPS(d+1) L2 at the target bit-width, then swaps back to d-dim IP in step 5
+        assert spatial_data is not None
+        ip_build_metric: Metric | None = None
+        if compress is None or comp_key in ("32bit", "fp32", "float32"):
+            ip_finalize_metric = (
+                Metric.FP16_InnerProduct if data.dtype == np.dtype(np.float16) else Metric.FP32_InnerProduct
+            )
+        elif comp_key in ("16bit", "fp16", "float16"):
+            ip_build_metric = Metric.FP16_L2
+            ip_finalize_metric = Metric.FP16_InnerProduct
+        elif comp_key in ("8bit", "auto"):
+            ip_build_metric = Metric.Uint7_L2
+            ip_finalize_metric = Metric.Int8_InnerProduct
+            ip_use_8bit_fwht = True
+        elif comp_key == "4bit":
+            ip_build_metric = Metric.Uint4_L2
+            ip_finalize_metric = Metric.Int4_InnerProduct
+        elif comp_key in ("2bit", "evp"):
+            ip_build_metric = Metric.Uint4_L2
+            ip_finalize_metric = Metric.EVP_InnerProduct
+        else:
+            resolved_comp = Metric.resolve(compress)
+            if Metric(int(resolved_comp)).name.endswith("InnerProduct"):
+                ip_finalize_metric = resolved_comp
+                dt_bits = (int(resolved_comp) & 0xF0)
+                if dt_bits == (int(Metric.FP16_InnerProduct) & 0xF0):
+                    ip_build_metric = Metric.FP16_L2
+                elif dt_bits in ((int(Metric.Int8_InnerProduct) & 0xF0), (int(Metric.Uint8_InnerProduct) & 0xF0), (int(Metric.Uint7_InnerProduct) & 0xF0)):
+                    ip_build_metric = Metric.Uint7_L2
+                elif dt_bits in ((int(Metric.Int4_InnerProduct) & 0xF0), (int(Metric.Uint4_InnerProduct) & 0xF0), (int(Metric.EVP_InnerProduct) & 0xF0)):
+                    ip_build_metric = Metric.Uint4_L2
+            else:
+                # Explicit L2 metric (e.g. Metric.Uint7_L2): build directly in target L2(d+1) and keep MipsTransform
+                ip_build_metric = resolved_comp
+                ip_finalize_metric = None
+
+        if ip_build_metric is not None:
+            quant_xfrms = make_quantizer_pipeline(
+                spatial_data,
+                ip_build_metric,
+                use_rerank=False,
+                threads=threads,
+            )
+            build_data = apply_on_database(quant_xfrms, spatial_data, threads=threads)
+            xfrms = xfrms + quant_xfrms
+            resolved_metric = ip_build_metric
+            base_metric = Metric(int(resolved_metric))
+            graph_dim = int(spatial_data.shape[1])
+        else:
+            build_data = assure_array(spatial_data, "data", resolved_metric.get_accepted_dtypes())
+            graph_dim = int(build_data.shape[1])
+    elif compress is not None:
+        src_is_ip = base_metric.name.endswith("InnerProduct")
+        if comp_key in ("32bit", "fp32", "float32"):
+            comp_target = Metric.FP32_InnerProduct if src_is_ip else Metric.FP32_L2
+            if base_metric in _FP16_METRICS:
+                raise ValueError(
+                    f"Cannot switch from '{base_metric.name}' to '{comp_target.name}' without explicit transformations."
+                )
+        elif comp_key in ("16bit", "fp16", "float16"):
+            comp_target = Metric.FP16_InnerProduct if src_is_ip else Metric.FP16_L2
+        elif comp_key in ("8bit", "auto"):
+            if src_is_ip:
+                from deglib.transformation import is_l2_normalized
+                from deglib.tuning import predict_quantization, predict_quantization_normalized
+
+                has_l2n = any(t.name == "L2NormalizeTransform" for t in xfrms)
+                if has_l2n or (work_data.shape[0] >= 2 and not is_l2_normalized(work_data)):
+                    comp_target = predict_quantization(
+                        work_data,
+                        metric=resolved_metric,
+                        threads=threads,
+                    ).metric
+                else:
+                    comp_target = predict_quantization_normalized(
+                        work_data,
+                        is_cosine=False,
+                        metric=resolved_metric,
+                        threads=threads,
+                    ).metric
+            else:
+                comp_target = Metric.Uint7_L2
+        elif comp_key == "4bit":
+            comp_target = Metric.Uint4_L2
+        elif comp_key in ("2bit", "evp"):
+            comp_target = Metric.EVP_InnerProduct
+        elif isinstance(compress, str) and "_" not in compress:
+            comp_target = Metric.resolve(compress, "ip" if src_is_ip else "l2")
+        else:
+            comp_target = Metric.resolve(compress)
+
+        same_data_type = (int(comp_target) & 0xF0) == (int(base_metric) & 0xF0)
+        if same_data_type:
+            resolved_metric = comp_target
+            base_metric = Metric(int(resolved_metric))
+            build_data = assure_array(effective_float_data, "data", resolved_metric.get_accepted_dtypes())
+            graph_dim = _infer_dim_from_array(resolved_metric, build_data)
+        else:
+            if base_metric not in (_FP32_METRICS | _FP16_METRICS):
+                raise ValueError(
+                    f"Cannot change metric from non-float metric '{base_metric.name}' to '{comp_target.name}'."
+                )
+            if Metric(int(comp_target)) in _FP32_METRICS:
+                raise ValueError(
+                    f"Cannot switch from '{base_metric.name}' to '{comp_target.name}' without explicit transformations."
+                )
+            graph_dim = int(effective_float_data.shape[1])
+            if effective_float_data.dtype == np.float16 and Metric(int(comp_target)) in _FP16_METRICS:
+                build_data = effective_float_data
+            else:
+                quant_xfrms = make_quantizer_pipeline(
+                    effective_float_data,
+                    comp_target,
+                    use_rerank=False,
+                    threads=threads,
+                )
+                build_data = apply_on_database(quant_xfrms, effective_float_data, threads=threads)
+                xfrms = xfrms + quant_xfrms
+            resolved_metric = comp_target
+            base_metric = Metric(int(resolved_metric))
+    elif spatial_data is not None:
         build_data = assure_array(spatial_data, "data", resolved_metric.get_accepted_dtypes())
         graph_dim = int(build_data.shape[1])
     else:
@@ -558,23 +687,9 @@ def build(
     if xfrms:
         graph.set_transformations(xfrms)
 
-    # 5. Finalize graph (for high-level IP, swap MIPS build features back to unnormalized IP)
-    if is_high_level_ip:
-        comp_key = (
-            compress.strip().lower().replace("-", "").replace("_", "")
-            if isinstance(compress, str)
-            else None
-        )
-        if compress is None or comp_key in ("32bit", "fp32", "float32"):
-            target_ip = (
-                Metric.FP16_InnerProduct if data.dtype == np.dtype(np.float16) else Metric.FP32_InnerProduct
-            )
-            graph = graph.with_features(work_data, metric=target_ip, order="internal", threads=threads)
-        elif comp_key in ("16bit", "fp16", "float16"):
-            graph = graph.with_features(
-                work_data, metric=Metric.FP16_InnerProduct, order="internal", threads=threads
-            )
-        elif comp_key in ("8bit", "auto"):
+    # 5. Finalize graph (for high-level IP with IP target, swap MIPS build features back to d-dim IP)
+    if is_high_level_ip and ip_finalize_metric is not None:
+        if ip_use_8bit_fwht:
             from deglib.transformation import make_fast_hadamard_rotation, make_scalar_quantizer_int8
 
             rot = make_fast_hadamard_rotation(work_data)
@@ -582,42 +697,15 @@ def build(
             quant = make_scalar_quantizer_int8(rot_data)
             graph = graph.with_features(
                 work_data,
-                metric=Metric.Int8_InnerProduct,
+                metric=ip_finalize_metric,
                 transformations=[rot, quant],
                 order="internal",
                 threads=threads,
             )
-        elif comp_key == "4bit":
-            graph = graph.with_features(
-                work_data, metric=Metric.Int4_InnerProduct, order="internal", threads=threads
-            )
-        elif comp_key in ("2bit", "evp"):
-            graph = graph.with_features(
-                work_data, metric=Metric.EVP_InnerProduct, order="internal", threads=threads
-            )
         else:
-            resolved_comp = Metric.resolve(compress)
-            if Metric(int(resolved_comp)).name.endswith("InnerProduct"):
-                graph = graph.with_features(
-                    work_data, metric=resolved_comp, order="internal", threads=threads
-                )
-            else:
-                graph = compress_graph(graph, resolved_comp, threads=threads)
-    elif compress is not None:
-        comp_target: Metric | str = compress
-        if (
-            isinstance(compress, str)
-            and compress.strip().lower() in ("8bit", "auto")
-            and base_metric.name.endswith("InnerProduct")
-        ):
-            from deglib.tuning import predict_quantization
-
-            comp_target = predict_quantization(
-                effective_float_data,
-                metric=resolved_metric,
-                threads=threads,
-            ).metric
-        graph = compress_graph(graph, comp_target, threads=threads)
+            graph = graph.with_features(
+                work_data, metric=ip_finalize_metric, order="internal", threads=threads
+            )
 
     if optimize and graph.size() > 0:
         graph.optimize()

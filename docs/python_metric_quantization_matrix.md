@@ -19,9 +19,9 @@ This reference documents the exact internal behavior of the high-level Python AP
 
 | `metric` (aliases) | `deglib.presort(data, metric=...)` | `deglib.build` (Graph Construction) | `deglib.build` Post-Build Finalization (`compress=None`) | Rationale |
 |---|---|---|---|---|
-| `"l2"` / `"euclidean"` | `FP32_L2` (`float32`) / `FP16_L2` (`float16`) directly on `data` (`dim = d`) | `FP32_L2` / `FP16_L2` directly on `data` (`dim = d`, no transforms) | Mutable `SizeBoundedGraph` (`dim = d`) | True metric; no spatial transformation needed |
-| `"cosine"` / `"normalized"` | `FP32_L2` / `FP16_L2` directly on `data` (`dim = d`) | `FP32_InnerProduct` / `FP16_InnerProduct`; attaches `L2NormalizeTransform` if `not is_l2_normalized(data)` (`dim = d`). `deglib.build(..., presort=True)` sorts on the **normalized** vectors. | Mutable `SizeBoundedGraph` (`dim = d`, keeps `[L2NormalizeTransform]` if attached) | Automatically normalizes DB and query vectors when input is not unit-norm |
-| `"ip"` / `"innerproduct"` / `"inner_product"` / `"mips"` | `make_mips_transform(data)` → FLAS in `FP32_L2` (`dim = d + 1`) | `make_mips_transform(data)` → build in `FP32_L2` / `FP16_L2` (`dim = d + 1`) | `.with_features(work_data, metric=FP32_InnerProduct / FP16_InnerProduct, order="internal")` (**`dim = d`**, **no** transforms, mutable `SizeBoundedGraph`) | `MIPS(d+1)` yields stronger graph topology; swapping back to unnormalized `d`-dim `InnerProduct` preserves norms, removes `d+1` from search (`128 B` alignment / `AVX512_VNNI`), and lets `searcher(graph)` / `reranker(graph)` run without external `data` |
+| `"l2"` / `"euclidean"` | `FP32_L2` (`float32`) / `FP16_L2` (`float16`) directly on `data` (`dim = d`) | Quantizes `data` before `add_entry` when `compress` is set, and builds directly in the target space (`dim = d`) | Mutable `SizeBoundedGraph` (`dim = d`, keeps `[(FWHT), Quantizer]` if `compress` is set) | True metric; building directly in compressed form saves build RAM |
+| `"cosine"` / `"normalized"` | `FP32_L2` / `FP16_L2` directly on `data` (`dim = d`) | Attaches `L2NormalizeTransform` if `not is_l2_normalized(data)` (`dim = d`); `presort=None`/`True` sorts on normalized vectors; if `compress` is set, quantizes normalized vectors before `add_entry` and builds directly in target space | Mutable `SizeBoundedGraph` (`dim = d`, keeps `[L2NormalizeTransform?, (FWHT), Quantizer]`) | Automatically normalizes DB and query vectors and preserves `L2NormalizeTransform` for `deglib.compress(..., "8bit")` auto-prediction |
+| `"ip"` / `"innerproduct"` / `"inner_product"` / `"mips"` | `make_mips_transform(data)` → FLAS in `FP32_L2` (`dim = d + 1`) | `make_mips_transform(data)` → quantizes to target bit-width `L2` (`FP32_L2`, `FP16_L2`, `Uint7_L2` for `"8bit"`/`"auto"`, `Uint4_L2` for `"4bit"`/`"2bit"`) before `add_entry` and builds in `MIPS(d + 1) + L2` | `.with_features(work_data, metric=..., order="internal")` (**`dim = d`**, mutable `SizeBoundedGraph`; or keeps `L2 (d+1)` if `compress` is an explicit `L2` `Metric`) | `MIPS(d+1)` yields stronger graph topology at the target bit-width; swapping back to unnormalized `d`-dim `InnerProduct` preserves norms and removes `d+1` from search |
 | Explicit `Metric` (e.g. `Metric.Int8_L2`, `Metric.EVP_InnerProduct`) | `FP32`/`FP16` L2 or IP matching `metric` (`presort=True` raises `ValueError` on pre-quantized inputs) | Quantizes `float32`/`float16` input before `add_entry` via `make_quantizer_pipeline(...)`; or ingests pre-quantized arrays directly | Mutable `SizeBoundedGraph` (or `ReadOnlyGraph` if `compress` is set) | Direct control without high-level spatial resolution |
 
 ### Unit-Norm Detection Tolerances
@@ -30,7 +30,9 @@ This reference documents the exact internal behavior of the high-level Python AP
 
 ---
 
-## 2. `deglib.build(..., compress=...)` – Target Quantization
+## 2. `deglib.build(..., compress=...)` – Direct Compressed Build
+
+`deglib.build` quantizes **before** `add_entry` so the graph is constructed directly in the compressed format (for `metric="ip"`, it builds in `MIPS(d + 1) + L2` at the corresponding bit-width before swapping back to `d`-dim `InnerProduct`). For post-build compression of an `FP32`/`FP16` graph, use `deglib.compress(graph, target)` or `deglib.searcher(graph, compress=target)`.
 
 | `metric` | `compress` | Output Metric | Attached Query Transformations | `dim` | Backend |
 |---|---|---|---|---:|---|

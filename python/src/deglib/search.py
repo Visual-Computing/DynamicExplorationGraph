@@ -684,7 +684,7 @@ def reranker_with_data(
     data: np.ndarray,
     labels: Sequence[int] | np.ndarray | None = None,
     compress: Literal["16bit", "8bit"] | Metric | str | None = "16bit",
-    metric: Literal["l2", "cosine", "ip"] | Metric | str | None = None,
+    metric: Literal["l2", "cosine", "normalized", "ip"] | Metric | str | None = None,
     optimize: bool = True,
     threads: int = 0,
 ) -> Reranker:
@@ -705,9 +705,10 @@ def reranker_with_data(
     compress : {"16bit", "8bit"} or Metric or str, optional, default="16bit"
         Target reranker precision (``"16bit"``, ``"8bit"``, ``"32bit"``, ``None``, or explicit
         ``Metric`` / metric string; see :func:`reranker`).
-    metric : {"l2", "cosine", "ip"} or Metric or str, optional
-        Optional distance kind override (``"l2"`` / ``"euclidean"``, ``"cosine"``, ``"ip"`` /
-        ``"innerproduct"`` / ``"mips"``, or explicit ``Metric``). Defaults to ``graph.get_metric()``.
+    metric : {"l2", "cosine", "normalized", "ip"} or Metric or str, optional
+        Optional distance kind override (``"l2"`` / ``"euclidean"``, ``"cosine"``,
+        ``"normalized"``, ``"ip"`` / ``"innerproduct"`` / ``"mips"``, or explicit ``Metric``).
+        Defaults to ``graph.get_metric()``.
     optimize : bool, default=True
         If ``True``, runs ``reranker.optimize()`` to tune memory prefetching.
     threads : int, default=0
@@ -759,7 +760,7 @@ def reranker_with_data(
             target_metric = Metric.Uint7_L2
         else:
             from deglib.transformation import is_l2_normalized
-            from deglib.tuning import predict_quantization
+            from deglib.tuning import predict_quantization, predict_quantization_normalized
 
             has_l2n = any(t.name == "L2NormalizeTransform" for t in spatial_prefix)
             is_explicit_ip = isinstance(metric, str) and metric.strip().lower() in (
@@ -772,18 +773,21 @@ def reranker_with_data(
                 target_metric = Metric.Int8_InnerProduct
             else:
                 n_arr = arr.shape[0]
-                if has_l2n or (isinstance(metric, str) and metric.strip().lower() in ("cosine", "normalized")):
+                is_unit = n_arr >= 2 and is_l2_normalized(arr[: min(n_arr, 1024)])
+                if has_l2n:
+                    target_metric = predict_quantization(
+                        arr, metric=Metric.FP32_InnerProduct, threads=threads
+                    ).metric
+                elif is_unit:
+                    target_metric = predict_quantization_normalized(
+                        arr, is_cosine=False, metric=Metric.FP32_InnerProduct, threads=threads
+                    ).metric
+                elif isinstance(metric, str) and metric.strip().lower() in ("cosine", "normalized"):
                     target_metric = predict_quantization(
                         arr, metric=Metric.FP32_InnerProduct, threads=threads
                     ).metric
                 else:
-                    sample_n = min(n_arr, 1024)
-                    if sample_n >= 2 and is_l2_normalized(arr[:sample_n]):
-                        target_metric = predict_quantization(
-                            arr, metric=Metric.FP32_InnerProduct, threads=threads
-                        ).metric
-                    else:
-                        target_metric = Metric.Int8_InnerProduct
+                    target_metric = Metric.Int8_InnerProduct
     else:
         target_metric = _resolve_rerank_metric(distance_kind, compress)
 

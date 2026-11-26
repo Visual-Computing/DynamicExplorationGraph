@@ -43,7 +43,9 @@ def test_rotation_chained_with_uint4_in_searcher():
     X[:, 0] -= 15.0
     X /= np.linalg.norm(X, axis=1, keepdims=True)
 
-    graph = deglib.build(X, edges_per_vertex=16, metric=deglib.Metric.FP32_InnerProduct, threads=2, optimize=False)
+    graph = deglib.build(
+        X, edges_per_vertex=16, metric=deglib.Metric.FP32_InnerProduct, presort=False, threads=2, optimize=False
+    )
 
     rot = deglib.transformation.make_fast_hadamard_rotation(X, seed=42, auto_detect=True)
     assert rot.is_enabled is True

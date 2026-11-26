@@ -117,10 +117,12 @@ Builds and optionally optimizes/compresses a `DynamicExplorationGraph` from a 2D
 **Parameters:**
 - **`data`**: 2D feature matrix of shape `(N, dim)`. Supports `float32` and `float16` for high-level metrics and `compress`, or pre-quantized dtypes (e.g. `int8`, `uint8`) when an explicit quantized `Metric` is passed.
 - **`labels`**: Optional 1D sequence or `np.ndarray` of external `uint32` vertex IDs of length `N`. Defaults to `0 .. N - 1`.
-- **`metric`**: High-level spatial mode (`"l2"` / `"euclidean"`, `"cosine"` / `"normalized"`, `"ip"` / `"innerproduct"` / `"inner_product"` / `"mips"`) or an explicit `Metric` / metric string (e.g. `Metric.Int8_L2`, `"Uint7_L2"`).
-  - `"cosine"` attaches `L2NormalizeTransform` if vectors are not already unit-norm.
-  - `"ip"` builds in `MipsTransform (d + 1) + L2` space and swaps stored features back to unnormalized `d`-dim `InnerProduct` (or the `compress` target).
-- **`compress`**: Optional post-build quantization target (`"32bit"` / `"fp32"` / `"float32"`, `"16bit"` / `"fp16"` / `"float16"`, `"8bit"`, `"4bit"`, `"2bit"` / `"evp"`, `"auto"`, or an explicit `Metric` / metric string). Preserves mutability (`SizeBoundedGraph`) across all metrics and compression targets.
+- **`metric`**: High-level spatial mode or an explicit `Metric` / metric string (e.g. `Metric.Int8_L2`, `"Uint7_L2"`):
+  - `"l2"` / `"euclidean"`: Euclidean L2 distance (works on both normalized and unnormalized data).
+  - `"cosine"`: Angle/direction similarity on unnormalized vectors; attaches `L2NormalizeTransform` if not already unit-norm so DB/queries are normalized and `8bit`/`auto` prediction (`Uint7_L2` vs. `Int8_InnerProduct`) works accurately.
+  - `"normalized"`: Use when input vectors are **already** L2-normalized (`||x||_2 == 1`); avoids `MIPS(d + 1)` build overhead and enables `8bit`/`auto` prediction (whereas `"ip"` would lift into `MIPS(d + 1)` and force `Int8_InnerProduct`).
+  - `"ip"` / `"innerproduct"` / `"inner_product"` / `"mips"`: Norm-sensitive Maximum Inner Product Search on unnormalized vectors; builds in `MipsTransform (d + 1) + L2` space at the `compress` bit-width and swaps stored features back to unnormalized `d`-dim `InnerProduct`.
+- **`compress`**: Optional target precision/metric (`"32bit"` / `"fp32"` / `"float32"`, `"16bit"` / `"fp16"` / `"float16"`, `"8bit"`, `"4bit"`, `"2bit"` / `"evp"`, `"auto"`, or an explicit `Metric` / metric string). Builds the graph directly in the compressed format (saving build RAM) while preserving mutability (`SizeBoundedGraph`). Use `deglib.compress(graph, ...)` instead when you want to build in `FP32`/`FP16` first and compress afterwards.
 - **`edges_per_vertex`**: Number of outgoing neighbors per vertex (`k_graph`).
 - **`optimization_target`**: Graph construction strategy (`OptimizationTarget.Auto`, `OptimizationTarget.LowLID`, `OptimizationTarget.HighLID`, `OptimizationTarget.StreamingData`, or string equivalents). `Auto` predicts `LowLID` vs. `StreamingData` from dataset geometry.
 - **`extend_k`**: Candidate pool size during neighbor extension (`0` uses the builder default `2 * edges_per_vertex`).
@@ -224,7 +226,7 @@ deglib.reranker_with_data(
     data: np.ndarray,
     labels: Sequence[int] | np.ndarray | None = None,
     compress: Literal["16bit", "8bit"] | Metric | str | None = "16bit",
-    metric: Literal["l2", "cosine", "ip"] | Metric | str | None = None,
+    metric: Literal["l2", "cosine", "normalized", "ip"] | Metric | str | None = None,
     optimize: bool = True,
     threads: int = 0,
 ) -> Reranker
@@ -237,7 +239,7 @@ Creates a `Reranker` from external `data` aligned with `graph` (supports quantiz
 - **`data`**: 2D `float32` or `float16` feature matrix.
 - **`labels`**: Optional external labels corresponding to rows of `data`. Defaults to `0 .. len(data) - 1`.
 - **`compress`**: Target reranker precision (`"16bit"`, `"8bit"` / `"auto"`, `"32bit"`, `None`, or explicit `Metric`).
-- **`metric`**: Optional distance kind override (`"l2"` / `"euclidean"`, `"cosine"`, `"ip"` / `"innerproduct"` / `"mips"`, or explicit `Metric`). Defaults to `graph.get_metric()`.
+- **`metric`**: Optional distance kind override (`"l2"` / `"euclidean"`, `"cosine"`, `"normalized"`, `"ip"` / `"innerproduct"` / `"mips"`, or explicit `Metric`). Defaults to `graph.get_metric()`.
 - **`optimize`**: If `True`, runs `reranker.optimize()` to tune candidate prefetching.
 - **`threads`**: Worker thread count (`0` uses all CPU cores).
 
@@ -277,6 +279,15 @@ Wraps `graph` (optionally compressing first via `deglib.compress`) in an optimiz
 ---
 
 ## 2. Metrics & CPU Instruction Sets (`deglib.distances`, `deglib.cpu`)
+
+### Choosing High-Level Metric Strings (`"l2"`, `"cosine"`, `"normalized"`, `"ip"`)
+
+| Metric String | Input Data | Behavior & When to Choose |
+|---|---|---|
+| `"l2"` / `"euclidean"` | Unnormalized or normalized | Euclidean distance (`FP32_L2` / `FP16_L2`). |
+| `"cosine"` | Unnormalized | Angle/direction similarity. Attaches `L2NormalizeTransform` if vectors are not already unit-norm, ensuring DB/queries are normalized and `8bit`/`auto` prediction (`Uint7_L2` vs. `Int8_InnerProduct`) works accurately. |
+| `"normalized"` | Already unit-norm (`\|\|x\|\|_2 == 1`) | Use instead of `"ip"` when vectors are already L2-normalized: avoids unnecessary `MIPS(d + 1)` build overhead and enables `8bit`/`auto` prediction. |
+| `"ip"` / `"innerproduct"` / `"mips"` | Unnormalized | Norm-sensitive Maximum Inner Product Search. Builds in `MipsTransform (d + 1) + L2` for strong topology, then swaps back to `d`-dim `InnerProduct`. |
 
 `deglib.Metric` encapsulates distance functions, vector dtype/byte-size calculations, distance evaluation helpers, and optional SIMD `InstructionSet` bindings. `FloatSpace` is internal and not exposed in the public API.
 

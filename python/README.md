@@ -242,6 +242,12 @@ print("Graph dists:", res.graph_distance_count, "| Rerank dists:", res.rerank_di
 
 ## Concepts & Parameters
 
+### Choosing `metric` (`"l2"`, `"cosine"`, `"normalized"`, `"ip"`)
+- **`"l2"`** *(default)*: Euclidean distance — works on both unnormalized and normalized vectors.
+- **`"cosine"`** *(unnormalized vectors)*: Direction/angle similarity — automatically normalizes database and query vectors.
+- **`"normalized"`** *(already unit-norm vectors, `||x||_2 == 1`)*: Same similarity as `"cosine"`, without redundant normalization overhead.
+- **`"ip"`** *(unnormalized vectors)*: Norm-sensitive Maximum Inner Product Search (MIPS).
+
 ### `OptimizationTarget`
 Controls the topology optimization strategy:
 - `OptimizationTarget.LowLID`: Default for datasets with low local intrinsic dimensionality (supports multithreaded building).
