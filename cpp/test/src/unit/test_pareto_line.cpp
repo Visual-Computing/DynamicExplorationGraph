@@ -207,33 +207,55 @@ TEST(ParetoLineTest, SyntheticCrossoverPruningAndParamLookup) {
     ASSERT_GE(ef_table.entries().size(), 3u);
     ASSERT_GE(eps_table.entries().size(), 2u);
     const size_t mid_eps_idx = (std::max)(size_t{1}, eps_table.entries().size() / 2);
-    const float crossover_recall = eps_table.entries()[mid_eps_idx].target_recall;
-    const auto crossover_ef_opt = ef_table.param_for(crossover_recall);
-    ASSERT_TRUE(crossover_ef_opt.has_value());
-    const int32_t crossover_ef = static_cast<int32_t>(std::llround(*crossover_ef_opt));
+    const float mid_eps_recall = eps_table.entries()[mid_eps_idx].measured_recall;
+    const float max_eps_recall = eps_table.entries().back().measured_recall;
     const int32_t first_ef = static_cast<int32_t>(std::llround(ef_table.entries().front().eps_or_ef));
-    ASSERT_GT(crossover_ef, first_ef);
 
     int32_t dominated_ef = -1;
+    float dominated_ef_recall = -1.0f;
     for (const auto& e : ef_table.entries()) {
         const int32_t ef_val = static_cast<int32_t>(std::llround(e.eps_or_ef));
-        if (ef_val < crossover_ef && ef_val > first_ef) {
+        if (ef_val > first_ef && e.measured_recall <= mid_eps_recall) {
             dominated_ef = ef_val;
+            dominated_ef_recall = e.measured_recall;
+        }
+    }
+    if (dominated_ef < 0) {
+        for (const auto& e : ef_table.entries()) {
+            const int32_t ef_val = static_cast<int32_t>(std::llround(e.eps_or_ef));
+            if (ef_val > first_ef && e.measured_recall <= max_eps_recall) {
+                dominated_ef = ef_val;
+                dominated_ef_recall = e.measured_recall;
+                break;
+            }
         }
     }
     ASSERT_GT(dominated_ef, 0);
 
+    auto eps_latency = [](int32_t param) -> double { return 100.0 + static_cast<double>(param) * 0.05; };
+    double dominating_eps_lat = std::numeric_limits<double>::infinity();
+    double max_eps_lat = 0.0;
+    for (const auto& e : eps_table.entries()) {
+        const int32_t eps_param = static_cast<int32_t>(std::llround(e.eps_or_ef * 10000.0f));
+        const double lat = eps_latency(eps_param);
+        max_eps_lat = (std::max)(max_eps_lat, lat);
+        if (e.measured_recall >= dominated_ef_recall) {
+            dominating_eps_lat = (std::min)(dominating_eps_lat, lat);
+        }
+    }
+    ASSERT_TRUE(std::isfinite(dominating_eps_lat));
+
     auto timing_for = [&](bool use_ef, int32_t param) -> TimingSample {
         if (use_ef) {
-            if (dominated_ef > 0 && param == dominated_ef) {
-                return {180.0, 200.0, 0.0};  // slower than crossover eps (~105 us) -> must be Pareto-pruned
+            if (param == dominated_ef) {
+                return {dominating_eps_lat + 80.0, 200.0, 0.0};  // slower than dominating eps -> must be Pareto-pruned
             }
-            if (param >= crossover_ef) {
-                return {500.0 + static_cast<double>(param), 400.0 + static_cast<double>(param), 0.0};
+            if (param > dominated_ef) {
+                return {max_eps_lat + 200.0 + static_cast<double>(param), 400.0 + static_cast<double>(param), 0.0};
             }
-            return {20.0 + static_cast<double>(param) * 0.5, 100.0 + static_cast<double>(param), 0.0};
+            return {10.0 + static_cast<double>(param) * 0.01, 100.0 + static_cast<double>(param), 0.0};
         }
-        return {100.0 + static_cast<double>(param) * 0.05, 150.0 + static_cast<double>(param) * 0.1, 0.0};
+        return {eps_latency(param), 150.0 + static_cast<double>(param) * 0.1, 0.0};
     };
 
     auto measure_single = [&](const CandidateSpec& c, size_t) -> TimingSample { return timing_for(c.use_ef, c.param); };
