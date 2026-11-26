@@ -120,8 +120,8 @@ Builds and optionally optimizes/compresses a `DynamicExplorationGraph` from a 2D
 - **`metric`**: High-level spatial mode or an explicit `Metric` / metric string (e.g. `Metric.Int8_L2`, `"Uint7_L2"`):
   - `"l2"` / `"euclidean"`: Euclidean L2 distance (works on both normalized and unnormalized data).
   - `"cosine"`: Angle/direction similarity on unnormalized vectors; attaches `L2NormalizeTransform` if not already unit-norm so DB/queries are normalized and `8bit`/`auto` prediction (`Uint7_L2` vs. `Int8_InnerProduct`) works accurately.
-  - `"normalized"`: Use when input vectors are **already** L2-normalized (`||x||_2 == 1`); avoids `MIPS(d + 1)` build overhead and enables `8bit`/`auto` prediction (whereas `"ip"` would lift into `MIPS(d + 1)` and force `Int8_InnerProduct`).
-  - `"ip"` / `"innerproduct"` / `"inner_product"` / `"mips"`: Norm-sensitive Maximum Inner Product Search on unnormalized vectors; builds in `MipsTransform (d + 1) + L2` space at the `compress` bit-width and swaps stored features back to unnormalized `d`-dim `InnerProduct`.
+  - `"normalized"`: Use when input vectors are **already** L2-normalized (`||x||_2 == 1`); avoids `MIPS(d + 1)` build overhead and enables `8bit`/`auto` prediction.
+  - `"ip"` / `"innerproduct"` / `"inner_product"` / `"mips"`: Norm-sensitive Maximum Inner Product Search. If all input vectors are already L2-normalized (`is_l2_normalized(data)`), automatically switches to `"normalized"` (`InnerProduct` without `MipsTransform`); otherwise builds in `MipsTransform (d + 1) + L2` space at the `compress` bit-width and swaps stored features back to unnormalized `d`-dim `InnerProduct`.
 - **`compress`**: Optional target precision/metric (`"32bit"` / `"fp32"` / `"float32"`, `"16bit"` / `"fp16"` / `"float16"`, `"8bit"`, `"4bit"`, `"2bit"` / `"evp"`, `"auto"`, or an explicit `Metric` / metric string). Builds the graph directly in the compressed format (saving build RAM) while preserving mutability (`SizeBoundedGraph`). Use `deglib.compress(graph, ...)` instead when you want to build in `FP32`/`FP16` first and compress afterwards.
 - **`edges_per_vertex`**: Number of outgoing neighbors per vertex (`k_graph`).
 - **`optimization_target`**: Graph construction strategy (`OptimizationTarget.Auto`, `OptimizationTarget.LowLID`, `OptimizationTarget.HighLID`, `OptimizationTarget.StreamingData`, or string equivalents). `Auto` predicts `LowLID` vs. `StreamingData` from dataset geometry.
@@ -286,8 +286,8 @@ Wraps `graph` (optionally compressing first via `deglib.compress`) in an optimiz
 |---|---|---|
 | `"l2"` / `"euclidean"` | Unnormalized or normalized | Euclidean distance (`FP32_L2` / `FP16_L2`). |
 | `"cosine"` | Unnormalized | Angle/direction similarity. Attaches `L2NormalizeTransform` if vectors are not already unit-norm, ensuring DB/queries are normalized and `8bit`/`auto` prediction (`Uint7_L2` vs. `Int8_InnerProduct`) works accurately. |
-| `"normalized"` | Already unit-norm (`\|\|x\|\|_2 == 1`) | Use instead of `"ip"` when vectors are already L2-normalized: avoids unnecessary `MIPS(d + 1)` build overhead and enables `8bit`/`auto` prediction. |
-| `"ip"` / `"innerproduct"` / `"mips"` | Unnormalized | Norm-sensitive Maximum Inner Product Search. Builds in `MipsTransform (d + 1) + L2` for strong topology, then swaps back to `d`-dim `InnerProduct`. |
+| `"normalized"` | Already unit-norm (`\|\|x\|\|_2 == 1`) | Avoids unnecessary `MIPS(d + 1)` build overhead and enables `8bit`/`auto` prediction. |
+| `"ip"` / `"innerproduct"` / `"mips"` | Unnormalized (or unit-norm) | Norm-sensitive Maximum Inner Product Search. Automatically switches to `"normalized"` if inputs are already unit-norm; otherwise builds in `MipsTransform (d + 1) + L2` and swaps back to `d`-dim `InnerProduct`. |
 
 `deglib.Metric` encapsulates distance functions, vector dtype/byte-size calculations, distance evaluation helpers, and optional SIMD `InstructionSet` bindings. `FloatSpace` is internal and not exposed in the public API.
 

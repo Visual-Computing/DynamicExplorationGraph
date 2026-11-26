@@ -324,8 +324,10 @@ def build(
           ``FP16_InnerProduct``; automatically attaches ``L2NormalizeTransform`` if input
           vectors are not already unit-norm.
         - ``"ip"`` (also ``"innerproduct"``, ``"inner_product"``, ``"mips"``): Maximum Inner
-          Product Search. Builds the graph topology in ``MipsTransform (d+1) + L2`` space
-          and swaps stored features back to unnormalized ``InnerProduct`` (or ``compress``
+          Product Search. Automatically switches to ``"normalized"`` (``InnerProduct``
+          without ``MipsTransform``) if all input vectors are already L2-normalized;
+          otherwise builds the graph topology in ``MipsTransform (d+1) + L2`` space and
+          swaps stored features back to unnormalized ``InnerProduct`` (or ``compress``
           target).
         - Explicit ``Metric`` or metric string (e.g. ``Metric.Int8_L2``, ``"Uint7_L2"``).
     compress : {"32bit", "16bit", "8bit", "4bit", "2bit", "auto"} or Metric or str, optional
@@ -414,7 +416,10 @@ def build(
     is_high_level_ip = False
     if is_high_level_metric_name(metric):
         resolved_metric, xfrms = resolve_spatial_metric(data, metric)
-        is_high_level_ip = metric.strip().lower() in ("ip", "innerproduct", "inner_product", "mips")
+        is_high_level_ip = (
+            metric.strip().lower() in ("ip", "innerproduct", "inner_product", "mips")
+            and any(t.name == "MipsTransform" for t in xfrms)
+        )
     else:
         resolved_metric = Metric.resolve(metric)
 

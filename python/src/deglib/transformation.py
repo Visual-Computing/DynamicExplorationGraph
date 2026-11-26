@@ -52,8 +52,10 @@ def resolve_spatial_metric(data: np.ndarray, metric: str) -> tuple[Metric, list[
         if n_samples > 0 and not is_l2_normalized(data):
             xfrms = [make_l2_normalize_transform(data)]
     else:
-        resolved_metric = Metric.FP16_L2 if is_fp16_in else Metric.FP32_L2
-        if n_samples > 0:
+        if n_samples == 0 or is_l2_normalized(data):
+            resolved_metric = Metric.FP16_InnerProduct if is_fp16_in else Metric.FP32_InnerProduct
+        else:
+            resolved_metric = Metric.FP16_L2 if is_fp16_in else Metric.FP32_L2
             xfrms = [make_mips_transform(data)]
     return resolved_metric, xfrms
 

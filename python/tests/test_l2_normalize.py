@@ -56,3 +56,25 @@ def test_l2_normalize_with_graph_search():
     )
     res_g = graph.search(raw_query, eps_or_ef=0.2, k=5)
     assert res_g.indices[0] == 0
+
+
+def test_build_ip_auto_switches_to_normalized_on_unit_vectors():
+    rng = np.random.default_rng(7)
+    raw = rng.standard_normal((120, 16), dtype=np.float32)
+    unit = raw / np.linalg.norm(raw, axis=1, keepdims=True)
+    unit = np.ascontiguousarray(unit, dtype=np.float32)
+
+    m_unit, x_unit = deglib.transformation.resolve_spatial_metric(unit, "ip")
+    assert m_unit == deglib.Metric.FP32_InnerProduct
+    assert x_unit == []
+
+    g_unit = deglib.build(unit, metric="ip", edges_per_vertex=8, optimization_target="LowLID")
+    assert g_unit.get_metric() == deglib.Metric.FP32_InnerProduct
+    assert g_unit.get_dim() == 16
+    assert g_unit.get_transformations() == []
+
+    # Unnormalized IP still uses MipsTransform during build
+    unnorm = raw * rng.uniform(0.5, 3.0, size=(120, 1)).astype(np.float32)
+    m_unnorm, x_unnorm = deglib.transformation.resolve_spatial_metric(unnorm, "ip")
+    assert m_unnorm == deglib.Metric.FP32_L2
+    assert len(x_unnorm) == 1 and x_unnorm[0].name == "MipsTransform"
